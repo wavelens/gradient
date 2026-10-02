@@ -28,7 +28,7 @@ use gradient_wire::session::frame::{Frame, Inbound};
 
 use super::auth::{expand_base_authorized, lookup_base_worker_challenge, lookup_registered_peers};
 use super::cache::handle_cache_query;
-use super::dialed::refresh_dialed_peers;
+use super::dialed::{DialedSession, refresh_dialed_peers};
 use super::eval_cache::handle_eval_cache_pull;
 use super::job_events::{JobEvent, JobEvents};
 use super::log_lane::LogLane;
@@ -139,7 +139,7 @@ pub(super) struct InboundContext<'a> {
     pub active: &'a ActiveJobs,
     pub job_events: &'a JobEvents,
     pub logs: &'a LogLane,
-    pub dialed_url: Option<&'a str>,
+    pub dialed: Option<&'a DialedSession>,
 }
 
 impl<'a> InboundContext<'a> {
@@ -477,13 +477,13 @@ impl<'a> InboundContext<'a> {
 
     async fn on_reauth_request(&mut self) -> bool {
         debug!(peer_id = %self.peer_id, "ReauthRequest");
-        if let Some(url) = self.dialed_url {
+        if let Some(dialed) = self.dialed {
             return refresh_dialed_peers(
                 self.writer,
                 self.state,
                 self.scheduler,
                 self.peer_id,
-                url,
+                dialed,
             )
             .await;
         }
@@ -1083,7 +1083,7 @@ pub(in crate::handler) mod fixture {
                     active: &self.active,
                     job_events: &self.job_events,
                     logs: &self.logs,
-                    dialed_url: None,
+                    dialed: None,
                 },
                 &mut self.uploads,
             )
@@ -1171,7 +1171,7 @@ mod assignment_response_tests {
             active: &active,
             job_events: &job_events,
             logs: &LogLane::spawn(&state.shutdown, |_, _| async {}),
-            dialed_url: None,
+            dialed: None,
         };
         ctx.on_assign_job_response("j1".into(), false, Some("at capacity".into()))
             .await;
@@ -1231,7 +1231,7 @@ mod assignment_response_tests {
             active: &active,
             job_events: &job_events,
             logs: &LogLane::spawn(&state.shutdown, |_, _| async {}),
-            dialed_url: None,
+            dialed: None,
         };
         ctx.on_assign_job_response("j1".into(), true, None).await;
 
@@ -1273,7 +1273,7 @@ mod assignment_response_tests {
             active: &active,
             job_events: &job_events,
             logs: &LogLane::spawn(&state.shutdown, |_, _| async {}),
-            dialed_url: None,
+            dialed: None,
         };
         ctx.on_build_progress(&shared_build.to_string(), progress);
         ctx.on_build_progress("not-a-uuid", progress);
@@ -1326,7 +1326,7 @@ mod assignment_response_tests {
             active: &active,
             job_events: &job_events,
             logs: &LogLane::spawn(&state.shutdown, |_, _| async {}),
-            dialed_url: None,
+            dialed: None,
         };
         assert!(
             ctx.rpc()
