@@ -17,12 +17,12 @@ use chrono::Utc;
 use gradient_ci::IntegrationKind;
 use gradient_ci::actions::encrypt_action_secret;
 use gradient_core::ServerState;
-use gradient_types::actions::{ActionConfig, ActionType};
+use gradient_types::actions::{ActionConfig, ActionType, is_matrix_room_id};
 use gradient_types::events::EventOwner;
 use gradient_types::events::audit::Action;
 use gradient_types::input::load_secret_bytes;
 use gradient_types::*;
-use gradient_util::http_validation::validate_webhook_url;
+use gradient_util::http_validation::{WebhookUrlError, validate_webhook_url};
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, Order, QueryFilter, QueryOrder,
@@ -88,13 +88,48 @@ fn default_true() -> bool {
     true
 }
 
+fn encrypt_secret(state: &ServerState, plain: &str) -> WebResult<String> {
+    let key = load_secret_bytes(&state.config.secrets.crypt_file)
+        .map_err(|e| WebError::internal(e.to_string()))?;
+    encrypt_action_secret(plain, key.expose()).map_err(|e| WebError::internal(e.to_string()))
+}
+
+fn validate_destination(cfg: &ActionConfig) -> WebResult<()> {
+    let url_error = |e: WebhookUrlError| WebError::unprocessable_entity(e.to_string());
+    match cfg {
+        ActionConfig::SendWebRequest { url, .. } => {
+            validate_webhook_url(url).map_err(url_error)?;
+        }
+        ActionConfig::SendMatrixMessage {
+            homeserver,
+            room_id,
+            ..
+        } => {
+            validate_webhook_url(homeserver).map_err(url_error)?;
+            if !is_matrix_room_id(room_id) {
+                return Err(WebError::unprocessable_entity(
+                    "room_id must be a Matrix room ID like !abc:example.org",
+                ));
+            }
+        }
+        ActionConfig::SendSlackMessage {
+            webhook_url: Some(url),
+        } => {
+            validate_webhook_url(url).map_err(url_error)?;
+        }
+        _ => {}
+    }
+
+    Ok(())
+}
+
 fn to_response(m: MTaskAction) -> ActionResponse {
     let at = m.action_type;
     let mut config = m.config;
-    if at == ActionType::SendWebRequest
+    if let Some(field) = at.secret_field()
         && let Some(obj) = config.as_object_mut()
     {
-        obj.remove("token");
+        obj.remove(field);
     }
     let events = m
         .events
@@ -165,28 +200,33 @@ pub async fn create_action(
     .await?;
 
     match &body.config {
-        ActionConfig::SendMail { .. } => {
-            if !state.email.is_enabled() {
-                return Err(WebError::unprocessable_entity(
-                    "SMTP is not configured on this server",
-                ));
-            }
+        ActionConfig::SendMail { .. } if !state.email.is_enabled() => {
+            return Err(WebError::unprocessable_entity(
+                "SMTP is not configured on this server",
+            ));
         }
-        ActionConfig::GitHostStatusReport { .. } => {
-            if !body.events.is_empty() {
-                return Err(WebError::unprocessable_entity(
-                    "git_host_status_report actions cannot carry custom events",
-                ));
-            }
+        ActionConfig::GitHostStatusReport { .. } if !body.events.is_empty() => {
+            return Err(WebError::unprocessable_entity(
+                "git_host_status_report actions cannot carry custom events",
+            ));
         }
-        ActionConfig::SendWebRequest { url, .. } => {
-            if let Err(e) = validate_webhook_url(url) {
-                return Err(WebError::unprocessable_entity(e.to_string()));
-            }
-        }
-        ActionConfig::OpenPr { .. }
-        | ActionConfig::SendMatrixMessage { .. }
-        | ActionConfig::SendSlackMessage { .. } => {}
+        _ => {}
+    }
+
+    validate_destination(&body.config)?;
+    if matches!(
+        body.config,
+        ActionConfig::SendMatrixMessage {
+            access_token: None,
+            ..
+        } | ActionConfig::SendSlackMessage { webhook_url: None }
+    ) {
+        let at = body.config.action_type();
+        return Err(WebError::unprocessable_entity(format!(
+            "{} requires {}",
+            at.as_str(),
+            at.secret_field().unwrap_or_default(),
+        )));
     }
 
     if let ActionConfig::SendMail { recipients, .. } = &body.config
@@ -235,25 +275,16 @@ pub async fn create_action(
         ));
     }
 
-    let (stored_config, plaintext_token) = match body.config.clone() {
-        ActionConfig::SendWebRequest {
-            url,
-            token: Some(plaintext),
-        } => {
-            let key = load_secret_bytes(&state.config.secrets.crypt_file)
-                .map_err(|e| WebError::internal(e.to_string()))?;
-            let encrypted = encrypt_action_secret(&plaintext, key.expose())
-                .map_err(|e| WebError::internal(e.to_string()))?;
-            (
-                ActionConfig::SendWebRequest {
-                    url,
-                    token: Some(encrypted),
-                },
-                Some(plaintext),
-            )
-        }
-        other => (other, None),
+    let plaintext_token = match &body.config {
+        ActionConfig::SendWebRequest { token, .. } => token.clone(),
+        _ => None,
     };
+    let mut stored_config = body.config.clone();
+    if let Some(slot) = stored_config.secret_mut()
+        && let Some(plain) = slot.take()
+    {
+        *slot = Some(encrypt_secret(&state, &plain)?);
+    }
 
     let now = Utc::now().naive_utc();
     let am = MTaskAction {
@@ -364,16 +395,13 @@ pub async fn update_action(
                 "action_type cannot be changed",
             ));
         }
+
+        validate_destination(new_cfg)?;
         match new_cfg {
             ActionConfig::SendMail { recipients, .. } if recipients.is_empty() => {
                 return Err(WebError::unprocessable_entity(
                     "send_mail requires at least one recipient",
                 ));
-            }
-            ActionConfig::SendWebRequest { url, .. } => {
-                if let Err(e) = validate_webhook_url(url) {
-                    return Err(WebError::unprocessable_entity(e.to_string()));
-                }
             }
             ActionConfig::GitHostStatusReport { integration_id }
             | ActionConfig::OpenPr { integration_id, .. } => {
@@ -415,38 +443,17 @@ pub async fn update_action(
     let mut active: ATaskAction = row.into();
 
     if let Some(new_cfg) = body.config {
-        // `token: None` is preserving the existing encrypted token for `send_web_request`.
-        let stored_cfg = match new_cfg {
-            ActionConfig::SendWebRequest { url, token: None } => {
-                let existing_config: ActionConfig =
-                    serde_json::from_value(active.config.as_ref().clone())
-                        .map_err(|e| WebError::internal(e.to_string()))?;
-                let existing_token =
-                    if let ActionConfig::SendWebRequest { token, .. } = existing_config {
-                        token
-                    } else {
-                        None
-                    };
-                ActionConfig::SendWebRequest {
-                    url,
-                    token: existing_token,
-                }
-            }
-            ActionConfig::SendWebRequest {
-                url,
-                token: Some(plaintext),
-            } => {
-                let key = load_secret_bytes(&state.config.secrets.crypt_file)
-                    .map_err(|e| WebError::internal(e.to_string()))?;
-                let encrypted = encrypt_action_secret(&plaintext, key.expose())
-                    .map_err(|e| WebError::internal(e.to_string()))?;
-                ActionConfig::SendWebRequest {
-                    url,
-                    token: Some(encrypted),
-                }
-            }
-            other => other,
-        };
+        let stored: ActionConfig = serde_json::from_value(active.config.as_ref().clone())
+            .map_err(|e| WebError::internal(e.to_string()))?;
+        let mut stored_cfg = new_cfg;
+        if let Some(slot) = stored_cfg.secret_mut()
+            && let Some(plain) = slot.take()
+        {
+            *slot = Some(encrypt_secret(&state, &plain)?);
+        } else {
+            stored_cfg.keep_secret_from(stored);
+        }
+
         active.config =
             Set(serde_json::to_value(&stored_cfg).map_err(|e| WebError::internal(e.to_string()))?);
     }
@@ -666,10 +673,7 @@ pub async fn regenerate_token(
     rand::rng().fill(&mut raw);
     let plaintext_token = format!("gat_{}", URL_SAFE_NO_PAD.encode(raw));
 
-    let key = load_secret_bytes(&state.config.secrets.crypt_file)
-        .map_err(|e| WebError::internal(e.to_string()))?;
-    let encrypted = encrypt_action_secret(&plaintext_token, key.expose())
-        .map_err(|e| WebError::internal(e.to_string()))?;
+    let encrypted = encrypt_secret(&state, &plaintext_token)?;
 
     let mut cfg: ActionConfig = serde_json::from_value(existing.config.clone())
         .map_err(|e| WebError::internal(e.to_string()))?;

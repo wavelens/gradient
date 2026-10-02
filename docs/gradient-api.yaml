@@ -10699,7 +10699,7 @@ components:
 
     ActionType:
       type: string
-      enum: [send_mail, send_web_request, git_host_status_report, open_pr]
+      enum: [send_mail, send_web_request, git_host_status_report, open_pr, send_matrix_message, send_slack_message]
 
     ActionConfigSendMail:
       type: object
@@ -10762,12 +10762,39 @@ components:
           default: true
           description: Update an already-open PR in place instead of opening a duplicate
 
+    ActionConfigSendMatrixMessage:
+      type: object
+      required: [type, homeserver, room_id]
+      properties:
+        type: { type: string, enum: [send_matrix_message] }
+        homeserver: { type: string, format: uri }
+        room_id:
+          type: string
+          description: "Room ID like `!abc:example.org`; aliases are not accepted"
+        access_token:
+          type: string
+          nullable: true
+          description: "Write-only; required on create, omitted on update to keep the stored one"
+
+    ActionConfigSendSlackMessage:
+      type: object
+      required: [type]
+      properties:
+        type: { type: string, enum: [send_slack_message] }
+        webhook_url:
+          type: string
+          format: uri
+          nullable: true
+          description: "Incoming webhook URL. Write-only; required on create, omitted on update to keep the stored one"
+
     ActionConfig:
       oneOf:
         - { $ref: '#/components/schemas/ActionConfigSendMail' }
         - { $ref: '#/components/schemas/ActionConfigSendWebRequest' }
         - { $ref: '#/components/schemas/ActionConfigGitHostStatusReport' }
         - { $ref: '#/components/schemas/ActionConfigOpenPr' }
+        - { $ref: '#/components/schemas/ActionConfigSendMatrixMessage' }
+        - { $ref: '#/components/schemas/ActionConfigSendSlackMessage' }
       discriminator:
         propertyName: type
 
