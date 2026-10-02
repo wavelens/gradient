@@ -4,16 +4,14 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use super::evaluation_rows::{EvaluationRows, load_evaluation_rows};
 use super::matchers::requested_actions_for;
 use crate::context::CiContext;
 use crate::{parse_owner_repo, reporting};
 use anyhow::{Context, Result, anyhow};
 use gradient_git_host::reporter::{CiReport, CiStatus};
 use gradient_types::input::vec_to_hex;
-use gradient_types::{
-    BuildJobId, CEntryPoint, EBuildJob, ECommit, EEntryPoint, EEvaluation, EProject, ETask,
-    EvaluationId,
-};
+use gradient_types::{BuildJobId, CEntryPoint, EBuildJob, EEntryPoint, EEvaluation, EvaluationId};
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use serde_json::Value as JsonValue;
 use tracing::warn;
@@ -117,21 +115,11 @@ pub(super) async fn build_ci_report_from_payload(
         );
     };
 
-    let task_id = evaluation
-        .task
-        .ok_or_else(|| anyhow!("evaluation has no task (direct build)"))?;
-
-    let task = ETask::find_by_id(task_id)
-        .one(&ctx.db.worker_db)
-        .await
-        .context("loading task")?
-        .ok_or_else(|| anyhow!("task {} not found", task_id))?;
-
-    let commit = ECommit::find_by_id(evaluation.commit)
-        .one(&ctx.db.worker_db)
-        .await
-        .context("loading commit")?
-        .ok_or_else(|| anyhow!("commit {} not found", evaluation.commit))?;
+    let EvaluationRows {
+        task,
+        project_name,
+        commit,
+    } = load_evaluation_rows(ctx, &evaluation).await?;
 
     // Reports must target the task's base repository, not `evaluation.repository`. Fork PR
     // evaluations are pointing at the fork, where the GitHub App is missing and `/check-runs` is
@@ -150,13 +138,6 @@ pub(super) async fn build_ci_report_from_payload(
     };
 
     let entry_point_eval = entry_points.first().map(|ep| ep.eval.clone());
-
-    let project_name = EProject::find_by_id(task.project)
-        .one(&ctx.db.worker_db)
-        .await
-        .ok()
-        .flatten()
-        .map(|o| o.name);
 
     let context = match reporting::check_context_kind_for_event(event) {
         Some(reporting::CheckContextKind::Approval) => {

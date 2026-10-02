@@ -5,10 +5,11 @@
  */
 
 mod fixtures;
+mod summary;
 
 use super::matchers::{git_host_status_for_event, matches_event};
 use super::matching_actions;
-use super::payload::{git_host_status_payload, render_default_body, render_subject};
+use super::payload::git_host_status_payload;
 use super::report::build_ci_report_from_payload;
 use super::truncate;
 use fixtures::{action_with, make_ctx, run};
@@ -120,33 +121,6 @@ fn matches_event_git_host_status_ignores_stored_events() {
     assert!(matches_event(&a, "evaluation.action_required"));
     assert!(matches_event(&a, "evaluation.approval_granted"));
     assert!(!matches_event(&a, "evaluation.waiting"));
-}
-
-#[test]
-fn render_subject_with_default_template() {
-    let payload = json!({ "task": "demo", "id": "abc" });
-    let s = render_subject(None, "build.failed", &payload);
-    assert!(s.contains("build.failed"));
-    assert!(s.contains("demo"));
-}
-
-#[test]
-fn render_subject_with_custom_template() {
-    let payload = json!({ "task": "demo", "status": "fail" });
-    let s = render_subject(Some("X {task} {status}"), "build.failed", &payload);
-    assert_eq!(s, "X demo fail");
-}
-
-#[test]
-fn render_default_body_includes_fields() {
-    let payload = json!({
-        "project": "o", "task": "p", "id": "i",
-        "status": "s", "time": "t", "link": "l",
-    });
-    let b = render_default_body("build.completed", &payload);
-    assert!(b.contains("build.completed"));
-    assert!(b.contains("o/p"));
-    assert!(b.contains("Link: l"));
 }
 
 #[test]

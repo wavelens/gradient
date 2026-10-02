@@ -47,7 +47,7 @@ pub async fn execute_action(
             execute_send_mail(
                 ctx,
                 event,
-                &content,
+                &envelope,
                 &recipients,
                 subject_template.as_deref(),
             )

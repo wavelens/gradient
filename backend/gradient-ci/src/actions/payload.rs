@@ -32,33 +32,3 @@ pub fn git_host_status_payload(
     }
     v
 }
-
-pub(super) fn render_subject(template: Option<&str>, event: &str, payload: &JsonValue) -> String {
-    let raw = template.unwrap_or("[Gradient] {event}: {task}");
-    let get = |k: &str| {
-        payload
-            .get(k)
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string()
-    };
-    raw.replace("{event}", event)
-        .replace("{task}", &get("task"))
-        .replace("{project}", &get("project"))
-        .replace("{id}", &get("id"))
-        .replace("{status}", &get("status"))
-}
-
-pub(super) fn render_default_body(event: &str, payload: &JsonValue) -> String {
-    let get = |k: &str| payload.get(k).and_then(|v| v.as_str()).unwrap_or("");
-    format!(
-        "Event: {}\nTask: {}/{}\nEntity: {}\nStatus: {}\nTime: {}\nLink: {}\n",
-        event,
-        get("project"),
-        get("task"),
-        get("id"),
-        get("status"),
-        get("time"),
-        get("link"),
-    )
-}
