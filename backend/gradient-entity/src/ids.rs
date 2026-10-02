@@ -125,6 +125,7 @@ id_newtype!(TaskActionDeliveryId);
 id_newtype!(TaskTriggerId);
 id_newtype!(RoleId);
 id_newtype!(UserId);
+id_newtype!(UserSshKeyId);
 id_newtype!(SessionId);
 id_newtype!(UploadSessionId);
 id_newtype!(AuditLogId);

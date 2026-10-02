@@ -102,6 +102,7 @@ mod m20261001_000002_retention_indexes;
 mod m20261001_000003_cache_upstream_http1_only;
 mod m20261001_000004_cache_upstream_active;
 mod m20261001_000005_dispatched_job_worker_elapsed;
+mod m20261002_000001_user_ssh_key;
 
 pub struct Migrator;
 
@@ -200,6 +201,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261001_000003_cache_upstream_http1_only::Migration),
             Box::new(m20261001_000004_cache_upstream_active::Migration),
             Box::new(m20261001_000005_dispatched_job_worker_elapsed::Migration),
+            Box::new(m20261002_000001_user_ssh_key::Migration),
         ]
     }
 }
