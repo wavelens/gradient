@@ -21,6 +21,7 @@ import {
   WorkerRegistration,
   gradientCiEntry,
   gradientCiKeysUrl,
+  listedWorkers,
 } from '@core/models';
 import {
   BadgeComponent,
@@ -143,7 +144,7 @@ export class WorkersComponent implements OnInit {
   peerIdCopied = signal(false);
 
   gradientCi = computed(() => gradientCiEntry(this.config.gradientCiEnabled, this.workers()));
-  otherWorkers = computed(() => this.workers().filter((w) => !w.gradient_ci));
+  otherWorkers = computed(() => listedWorkers(this.workers(), this.gradientCi()));
   showGradientCiConnect = signal(false);
   showGradientCiDisconnect = signal(false);
 

@@ -6,13 +6,15 @@
 
 import { ChangeDetectionStrategy, Component, DestroyRef, inject, input, model, output, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { Observable, Subscription, interval, switchMap } from 'rxjs';
+import { Observable, Subscription, catchError, interval, of, switchMap } from 'rxjs';
 import { ButtonComponent, DialogComponent, FormFieldComponent, InputDirective, MessageBannerComponent } from '@gradient/ui/ui';
 import { ConnectionStatus, GradientCiScope, connectWaitState, gradientCiConnectUrl } from '@core/models';
 import { ConfigService } from '@core/services/config.service';
 import { WorkersService } from '@core/services/workers.service';
 
 const POLL_MS = 3000;
+const BASE_CONNECTED =
+  'Connected. Gradient.CI Servers is dialed once a project enables the base server on its Workers page.';
 
 @Component({
   selector: 'app-gradient-ci-connect',
@@ -36,6 +38,7 @@ export class GradientCiConnectComponent {
   submitting = signal(false);
   waiting = signal(false);
   errorMessage = signal<string | null>(null);
+  notice = signal<string | null>(null);
   private poll: Subscription | null = null;
 
   constructor() {
@@ -52,12 +55,18 @@ export class GradientCiConnectComponent {
 
   submit(): void {
     const token = this.token.trim();
-    if (!token || this.submitting() || this.waiting()) return;
+    if (!token || this.submitting() || this.waiting() || this.notice()) return;
     this.submitting.set(true);
     this.errorMessage.set(null);
     this.workersService.connectGradientCi({ scope: this.scope(), project: this.project(), token }).subscribe({
       next: (res) => {
         this.submitting.set(false);
+        if (this.scope() === 'base') {
+          this.token = '';
+          this.notice.set(BASE_CONNECTED);
+          this.changed.emit();
+          return;
+        }
         this.waitFor(res.worker_id);
       },
       error: (err) => {
@@ -67,10 +76,16 @@ export class GradientCiConnectComponent {
     });
   }
 
+  onVisibleChange(visible: boolean): void {
+    if (visible) this.visible.set(true);
+    else this.close();
+  }
+
   close(): void {
     this.stopWaiting();
     this.token = '';
     this.errorMessage.set(null);
+    this.notice.set(null);
     this.visible.set(false);
   }
 
@@ -79,7 +94,7 @@ export class GradientCiConnectComponent {
     this.changed.emit();
     const started = Date.now();
     this.poll = interval(POLL_MS)
-      .pipe(switchMap(() => this.statusOf()(workerId)))
+      .pipe(switchMap(() => this.statusOf()(workerId).pipe(catchError(() => of(undefined)))))
       .subscribe((status) => this.onStatus(status, Date.now() - started));
   }
 
