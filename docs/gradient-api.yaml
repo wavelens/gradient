@@ -5406,6 +5406,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          description: '`url` is set and `worker_id` belongs to a base worker or a Gradient.CI connection.'
 
   /projects/{project}/workers/{worker_id}:
     parameters:
@@ -5556,7 +5558,8 @@ paths:
         Stores a connection token pasted from servers.gradient.ci. `scope = project` creates a
         worker registration for the project (same permission as registering a worker);
         `scope = base` creates a base worker every project can enable (superusers). The server
-        dials `wss://<gradientCi.url host>/proto` within 15 s. Turned off by `gradientCi.enable = false`.
+        dials `wss://<gradientCi.url host>/proto` within 15 s, a base server only once a project
+        enables it. Turned off by `gradientCi.enable = false`.
       operationId: connectGradientCi
       security:
         - bearerAuth: []
@@ -5587,7 +5590,9 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: Already connected
+          description: |
+            The project or the instance is already connected, or the token's worker ID is
+            registered elsewhere on this instance.
 
   /admin/workers:
     get:
@@ -10401,7 +10406,9 @@ components:
           type: boolean
           description: Whether the worker holds a session with this server, for any project.
         last_error:
-          $ref: '#/components/schemas/ConnectionFailure'
+          allOf:
+            - $ref: '#/components/schemas/ConnectionFailure'
+          description: Present only for callers with the `manageWorkers` permission.
         live:
           allOf:
             - $ref: '#/components/schemas/WorkerLiveInfo'

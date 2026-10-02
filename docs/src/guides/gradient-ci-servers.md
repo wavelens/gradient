@@ -24,6 +24,8 @@ A superuser is connecting one [base worker](../concepts/workers.md#base-workers)
 1. Open **Job Board -> System Health -> Base Workers**.
 2. Select **Connect base server** and paste the token as in step 1.
 
+The dialog is confirming the connection with a notice. Gradient is dialing the base server only after a project enables the base server.
+
 ## 3. Enable the Base Server
 
 The base server is building for a project only after **Enable** on the project's **Settings -> Workers** page.
@@ -42,7 +44,8 @@ An offline entry is showing its last failure to members who manage workers.
 | `dial failed: ...` or `dial timed out after 10 s` | Allow outbound HTTPS from the Gradient server to servers.gradient.ci. |
 | `401 unknown worker id or wrong token` | A deleted key or a mistyped token. **Disconnect** and connect with a new key. |
 | `400 protocol version mismatch: ...` | Gradient and servers.gradient.ci are on different protocol versions. Update Gradient. |
-| `403 base worker not enabled by any project` | **Enable** the base server in a project. |
+| `base worker not enabled by any project` | **Enable** the base server in a project. |
+| `no connection token stored; register the worker again` | A worker with a `url` registered before Gradient.CI Servers. Delete and register the worker again. |
 | `495 project has no cache subscribed` | Subscribe the project to a cache. |
 | `stored connection token cannot be decrypted with the current crypt key` | `secrets.cryptFile` changed. **Disconnect** and connect with a new key. |
 
