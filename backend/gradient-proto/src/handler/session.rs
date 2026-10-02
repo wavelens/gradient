@@ -18,6 +18,7 @@ use async_trait::async_trait;
 use gradient_scheduler::Scheduler;
 use gradient_wire::messages::{GradientCapabilities, ServerMessage};
 use gradient_wire::session::handshake as handshake_fsm;
+use gradient_wire::session::handshake::HandshakeResult;
 use gradient_wire::traits::{AuthOutcome, PeerAuthority};
 
 use super::auth::{
@@ -25,10 +26,17 @@ use super::auth::{
     filter_project_peers_without_cache, has_any_registrations, lookup_base_worker_challenge,
     lookup_registered_peers, negotiate_capabilities,
 };
+use super::dialed::DialedWorkerAuthority;
 use super::session_actor::SessionArgs;
 use super::sessions::SessionsHandle;
 use super::socket::{HANDSHAKE_TIMEOUT, ProtoSocket, ProtoWriter, send_server_msg};
+use crate::outbound::DialTarget;
 use gradient_wire::auth::validate_tokens;
+
+pub(crate) enum SessionOrigin {
+    WorkerDialed,
+    ServerDialed(DialTarget),
+}
 
 pub(super) struct Opening;
 
@@ -57,25 +65,20 @@ impl ProtoSession<Opening> {
 
     pub async fn handshake(
         mut self,
-        server_initiated: bool,
+        origin: &SessionOrigin,
     ) -> Option<ProtoSession<Authenticated>> {
-        if !server_initiated && !self.state.config.proto.discoverable {
-            self.socket
-                .send_reject(403, "server is not accepting connections".into())
-                .await;
-            return None;
-        }
-        let authority = ServerAuthority {
-            state: Arc::clone(&self.state),
-            server_initiated,
+        let outcome = match origin {
+            SessionOrigin::WorkerDialed => self.accept_worker().await,
+            SessionOrigin::ServerDialed(target) => self.dial_worker(target).await,
         };
-        let result = match handshake_fsm::as_authority(&mut self.socket, &authority).await {
-            Ok(r) => r,
+        let result = match outcome {
+            Ok(result) => result,
             Err(e) => {
-                debug!(error = %e, server_initiated, "handshake failed");
+                debug!(error = %e, "handshake failed");
                 return None;
             }
         };
+
         info!(peer_id = %result.peer_id, authorized = result.authorized_peers.len(), "handshake complete");
         Some(ProtoSession {
             socket: self.socket,
@@ -88,11 +91,32 @@ impl ProtoSession<Opening> {
             },
         })
     }
+
+    async fn accept_worker(&mut self) -> Result<HandshakeResult> {
+        if !self.state.config.proto.discoverable {
+            self.socket
+                .send_reject(403, "server is not accepting connections".into())
+                .await;
+            anyhow::bail!("server is not accepting connections");
+        }
+
+        let authority = ServerAuthority {
+            state: Arc::clone(&self.state),
+        };
+        handshake_fsm::as_authority(&mut self.socket, &authority).await
+    }
+
+    async fn dial_worker(&mut self, target: &DialTarget) -> Result<HandshakeResult> {
+        let authority = DialedWorkerAuthority {
+            state: Arc::clone(&self.state),
+            url: target.url.clone(),
+        };
+        handshake_fsm::as_dialer(&mut self.socket, &target.credentials, &authority).await
+    }
 }
 
 struct ServerAuthority {
     state: Arc<ServerState>,
-    server_initiated: bool,
 }
 
 struct ServerChallenge {
@@ -144,25 +168,16 @@ impl PeerAuthority for ServerAuthority {
         let has_any =
             registered_peers.is_empty() && has_any_registrations(&self.state, claimed).await;
         match decide_auth(
-            self.server_initiated,
             registered_peers.is_empty(),
             has_any,
             authorized_peers.is_empty(),
             emptied_by_missing_cache,
             is_base,
         ) {
-            AuthDecision::Accept => {
-                if registered_peers.is_empty() {
-                    debug!(
-                        peer_id = %claimed,
-                        "server-initiated, no registered peers - open connection accepted"
-                    );
-                }
-                Ok(AuthOutcome::Accept {
-                    authorized_peers,
-                    failed_peers,
-                })
-            }
+            AuthDecision::Accept => Ok(AuthOutcome::Accept {
+                authorized_peers,
+                failed_peers,
+            }),
             AuthDecision::Reject { code, reason } => Ok(AuthOutcome::Reject {
                 code,
                 reason: reason.into(),
@@ -265,22 +280,22 @@ pub(crate) async fn handle_socket(
     state: Arc<ServerState>,
     scheduler: Arc<Scheduler>,
     sessions: Arc<SessionsHandle>,
-    server_initiated: bool,
+    origin: SessionOrigin,
 ) {
-    info!(server_initiated, "WebSocket connection opened");
+    let dialed_by_server = matches!(origin, SessionOrigin::ServerDialed(_));
+    info!(dialed_by_server, "WebSocket connection opened");
     let session = ProtoSession::new(socket, state, scheduler);
-    let session =
-        match tokio::time::timeout(HANDSHAKE_TIMEOUT, session.handshake(server_initiated)).await {
-            Ok(Some(s)) => s,
-            Ok(None) => return,
-            Err(_) => {
-                warn!(
-                    timeout_secs = HANDSHAKE_TIMEOUT.as_secs(),
-                    server_initiated, "WebSocket handshake timed out; dropping connection"
-                );
-                return;
-            }
-        };
+    let session = match tokio::time::timeout(HANDSHAKE_TIMEOUT, session.handshake(&origin)).await {
+        Ok(Some(s)) => s,
+        Ok(None) => return,
+        Err(_) => {
+            warn!(
+                timeout_secs = HANDSHAKE_TIMEOUT.as_secs(),
+                dialed_by_server, "WebSocket handshake timed out; dropping connection"
+            );
+            return;
+        }
+    };
     if let Some(join) = session.attach(&sessions).await {
         let _ = join.await;
     }
@@ -293,7 +308,6 @@ enum AuthDecision {
 }
 
 fn decide_auth(
-    server_initiated: bool,
     registered_peers_empty: bool,
     has_any_registrations: bool,
     authorized_peers_empty: bool,
@@ -317,20 +331,20 @@ fn decide_auth(
     }
 
     if registered_peers_empty {
-        if has_any_registrations {
-            return AuthDecision::Reject {
+        return if has_any_registrations {
+            AuthDecision::Reject {
                 code: 403,
                 reason: "worker is deactivated",
-            };
-        }
-        if !server_initiated {
-            return AuthDecision::Reject {
+            }
+        } else {
+            AuthDecision::Reject {
                 code: 403,
                 reason: "unknown worker",
-            };
-        }
-        AuthDecision::Accept
-    } else if authorized_peers_empty {
+            }
+        };
+    }
+
+    if authorized_peers_empty {
         if emptied_by_missing_cache {
             AuthDecision::Reject {
                 code: 495,
@@ -353,7 +367,7 @@ mod auth_decision_tests {
 
     #[test]
     fn inbound_unknown_worker_rejected() {
-        let d = decide_auth(false, true, false, true, false, false);
+        let d = decide_auth(true, false, true, false, false);
         assert_eq!(
             d,
             AuthDecision::Reject {
@@ -364,28 +378,9 @@ mod auth_decision_tests {
     }
 
     #[test]
-    fn outbound_unknown_worker_accepted() {
-        assert_eq!(
-            decide_auth(true, true, false, true, false, false),
-            AuthDecision::Accept
-        );
-    }
-
-    #[test]
     fn deactivated_worker_rejected_inbound() {
         assert_eq!(
-            decide_auth(false, true, true, true, false, false),
-            AuthDecision::Reject {
-                code: 403,
-                reason: "worker is deactivated",
-            }
-        );
-    }
-
-    #[test]
-    fn deactivated_worker_rejected_outbound() {
-        assert_eq!(
-            decide_auth(true, true, true, true, false, false),
+            decide_auth(true, true, true, false, false),
             AuthDecision::Reject {
                 code: 403,
                 reason: "worker is deactivated",
@@ -396,7 +391,7 @@ mod auth_decision_tests {
     #[test]
     fn registered_but_no_valid_token() {
         assert_eq!(
-            decide_auth(false, false, false, true, false, false),
+            decide_auth(false, false, true, false, false),
             AuthDecision::Reject {
                 code: 401,
                 reason: "no valid peer tokens provided",
@@ -407,7 +402,7 @@ mod auth_decision_tests {
     #[test]
     fn registered_emptied_by_missing_cache() {
         assert_eq!(
-            decide_auth(false, false, false, true, true, false),
+            decide_auth(false, false, true, true, false),
             AuthDecision::Reject {
                 code: 495,
                 reason: "project has no cache subscribed",
@@ -418,7 +413,7 @@ mod auth_decision_tests {
     #[test]
     fn base_worker_emptied_by_missing_cache() {
         assert_eq!(
-            decide_auth(false, false, false, true, true, true),
+            decide_auth(false, false, true, true, true),
             AuthDecision::Reject {
                 code: 495,
                 reason: "project has no cache subscribed",
@@ -429,7 +424,7 @@ mod auth_decision_tests {
     #[test]
     fn registered_with_valid_token_accepted() {
         assert_eq!(
-            decide_auth(false, false, false, false, false, false),
+            decide_auth(false, false, false, false, false),
             AuthDecision::Accept
         );
     }
@@ -437,7 +432,7 @@ mod auth_decision_tests {
     #[test]
     fn base_worker_empty_authorized_rejected() {
         assert_eq!(
-            decide_auth(true, false, false, true, false, true),
+            decide_auth(false, false, true, false, true),
             AuthDecision::Reject {
                 code: 403,
                 reason: "base worker not enabled by any project",
@@ -448,7 +443,7 @@ mod auth_decision_tests {
     #[test]
     fn base_worker_with_authorized_accepted() {
         assert_eq!(
-            decide_auth(true, false, false, false, false, true),
+            decide_auth(false, false, false, false, true),
             AuthDecision::Accept
         );
     }

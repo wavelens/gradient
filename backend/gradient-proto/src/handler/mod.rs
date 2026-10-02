@@ -8,6 +8,7 @@ mod auth;
 mod cache;
 mod cache_consumer;
 mod cache_session;
+mod dialed;
 mod eval_cache;
 mod inbound;
 mod job_events;
@@ -35,7 +36,7 @@ use gradient_wire::ProtoLimiter;
 use gradient_wire::session::frame::{BULK_CHUNK_SIZE, MAX_PROTO_MESSAGE_SIZE};
 
 pub use cache_session::handle_cache_socket;
-pub(crate) use session::handle_socket;
+pub(crate) use session::{SessionOrigin, handle_socket};
 pub use sessions::SessionsHandle;
 
 const RETRY_AFTER: HeaderValue = HeaderValue::from_static("10");
@@ -78,7 +79,7 @@ async fn ws_upgrade(
                         state,
                         scheduler,
                         sessions,
-                        false,
+                        session::SessionOrigin::WorkerDialed,
                     )
                     .await;
                 })
