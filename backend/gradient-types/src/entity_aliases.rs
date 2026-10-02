@@ -80,6 +80,7 @@ pub type ESession = session::Entity;
 pub type EStorageMigration = storage_migration::Entity;
 pub type EUploadSession = upload_session::Entity;
 pub type EUser = user::Entity;
+pub type EUserSshKey = user_ssh_key::Entity;
 pub type EWorkerRegistration = worker_registration::Entity;
 
 pub type MAdminTask = admin_task::Model;
@@ -139,6 +140,7 @@ pub type MSession = session::Model;
 pub type MStorageMigration = storage_migration::Model;
 pub type MUploadSession = upload_session::Model;
 pub type MUser = user::Model;
+pub type MUserSshKey = user_ssh_key::Model;
 pub type MWorkerRegistration = worker_registration::Model;
 
 pub type AAdminTask = admin_task::ActiveModel;
@@ -197,6 +199,7 @@ pub type ASession = session::ActiveModel;
 pub type AStorageMigration = storage_migration::ActiveModel;
 pub type AUploadSession = upload_session::ActiveModel;
 pub type AUser = user::ActiveModel;
+pub type AUserSshKey = user_ssh_key::ActiveModel;
 pub type AWorkerRegistration = worker_registration::ActiveModel;
 
 pub type CAdminTask = admin_task::Column;
@@ -253,6 +256,7 @@ pub type CSession = session::Column;
 pub type CStorageMigration = storage_migration::Column;
 pub type CUploadSession = upload_session::Column;
 pub type CUser = user::Column;
+pub type CUserSshKey = user_ssh_key::Column;
 pub type CWorkerRegistration = worker_registration::Column;
 
 pub use admin_task::{AdminTaskKind, AdminTaskStatus};
