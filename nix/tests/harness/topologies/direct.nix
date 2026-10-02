@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-# Every worker dials the server itself, so the server sees each one as its own worker.
+# Every worker is dialing the server itself. The server is seeing each one as its own worker.
 { lib, workers, token, ... }:
 {
   nodes = lib.mapAttrs (_: worker: {

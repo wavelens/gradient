@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-# The server node of the mock-daemon suites (scheduler, cluster): one project, a task per spec whose only
-# trigger never fires (every phase starts its own evaluation through the API), the spec upstream cache.
+# Every task is holding one trigger that is never firing.
+# Each phase is starting its own evaluation through the API.
 { lib, pkgs, storeSpec, upstream, specNames, workerToken, upstreamPeers }:
 { ... }:
 {

@@ -45,7 +45,6 @@
       start_all()
       machine.wait_for_unit("multi-user.target")
 
-      # ── Stage the fixture as a clean, locked, committed git flake ──────────
       banner("Stage fixture flake")
       machine.succeed("install -Dm644 ${./fixture.nix} /root/fixture/flake.nix")
       machine.succeed("${git} -C /root/fixture init -q")
@@ -55,12 +54,9 @@
       machine.succeed("${nix} flake lock /root/fixture")
       machine.succeed("${git} -C /root/fixture add -A && ${git} -C /root/fixture commit -qm lock --allow-empty")
 
-      # ── Drive the eval-worker over the production rkyv transport ───────────
-      # The wire is binary frames, so the hidden `--eval-driver` harness reads
-      # these requests as JSON lines, passes them through the real parent-side
-      # transport (spawn, version handshake, frames, streamed resolve) against
-      # a real subprocess, and prints one JSON response line per request.
-      # Shutdown produces no response, so we expect one line per other request.
+      # The hidden `--eval-driver` harness is reading JSON-line requests.
+      # It is passing them through the real binary transport to a real subprocess.
+      # Shutdown is producing no response line.
       banner("Run eval-worker via --eval-driver")
       requests = [
           {"op": "list", "repository": REPO, "wildcards": ["packages.x86_64-linux.*"]},
@@ -99,7 +95,6 @@
 
       responses, cold_ms = drive("cold")
 
-      # ── Wildcard parity ────────────────────────────────────────────────────
       banner("Assert wildcard parity")
       hello = "packages.x86_64-linux.hello"
       cowsay = "packages.x86_64-linux.cowsay"
@@ -118,35 +113,24 @@
       assert excluded == {hello}, f"exclusion mismatch: {excluded}"
       assert responses[2]["deferred"] == nested, f"nested set not deferred: {responses[2]}"
 
-      # ── Resolve + per-attribute isolation (#139) ───────────────────────────
       banner("Assert resolve + per-attr isolation")
       assert responses[3]["kind"] == "resolve_ok", responses[3]
       items = {it["attr"]: it for it in responses[3]["items"]}
 
-      # ResolvedItem omits None fields (serde skip_serializing_if), so a clean
-      # resolve has no `error` key and a failed one has no `drv_path` key.
       h = items[hello]
       assert h.get("error") is None and h.get("drv_path", "").endswith(".drv"), h
 
       b = items["packages.x86_64-linux.boom"]
       assert b.get("drv_path") is None and b.get("error"), f"boom must isolate as a per-item error: {b}"
 
-      # ── Fingerprint ↔ on-disk eval-cache path agreement (#386 L3) ──────────
-      # The lock-only `fingerprint` op must yield the same key Nix names the
-      # on-disk cache after, so the worker can stage/pull `<fp>.sqlite`. The
-      # driver spawns the subprocess like the production pool, exporting the
-      # configured eval-cache dir as NIX_CACHE_HOME.
       banner("Assert fingerprint matches the eval-cache filename")
       assert responses[4]["kind"] == "fingerprint_ok", responses[4]
       fp = responses[4].get("fingerprint")
       assert fp, f"expected a fingerprint for the committed flake, got {fp}"
       machine.succeed(f"test -f /root/eval-cache/eval-cache-v6/{fp}.sqlite")
 
-      # ── The second eval of an unchanged flake is served from that blob (#657) ─
-      # The fixture costs seconds of evaluation to derive hello's drvPath, so a
-      # re-eval that pays it again is a re-eval that read nothing back. The
-      # fingerprint has to match too: a different key is a different blob, which
-      # would be cold for a reason the timing alone cannot tell apart.
+      # A re-eval paying the fixture's seconds of evaluation again has read nothing back (#657).
+      # The fingerprint must match too. A different key would be a cold blob the timing cannot reveal.
       banner("Assert the second eval starts warm off the eval cache")
       warm, warm_ms = drive("warm")
       assert warm[4].get("fingerprint") == fp, f"fingerprint moved: {fp} -> {warm[4].get('fingerprint')}"

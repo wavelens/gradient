@@ -16,13 +16,11 @@
     };
     nix.settings.substituters = lib.mkForce [ ];
 
-    # The test framework pins the label to `test`, which is not a version the
-    # deploy module's `nixos-system-<host>-<version>` match accepts. Outrank it
-    # so both system closures are named the way a real one would be.
+    # The test framework is pinning the label to `test`.
+    # The deploy module's `nixos-system-<host>-<version>` match is rejecting that version.
+    # The override is naming both system closures like a real one.
     system.nixos.label = lib.mkOverride 10 "25.05.20260907.abcdef1";
 
-    # The deployment target: same host, one extra file, so switching to it is
-    # observable without restarting anything the test depends on.
     specialisation.deployed.configuration = {
       environment.etc."gradient-deployed".text = "deployed";
     };
@@ -54,8 +52,8 @@ in {
     nodes = {
       machine = target;
 
-      # Same target with the live socket turned off, to cover the fallback for
-      # networks that cannot carry a WebSocket upgrade.
+      # The same target with the live socket off is covering the fallback for networks without
+      # WebSocket upgrades.
       poller = { ... }: {
         imports = [ target ];
         system.gradient-deploy = {

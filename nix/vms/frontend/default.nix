@@ -5,7 +5,7 @@
  */
 
 { pkgs, lib, ... }: let
-  # Same fixture secrets the integration tests use; admin password is "admin_password".
+  # These are the fixture secrets of the integration tests. The admin password is "admin_password".
   adminPwHash = pkgs.writeText "admin-pw-hash" "$argon2id$v=19$m=4096,t=3,p=1$c29tZXNhbHQxMjM0NQ$hIKBEy9SOWlnAlcwUv2PLPBdsMkKhVlCyjTxaWIK+v4";
   projectSshKey = pkgs.writeText "project-ssh-key" ''
     -----BEGIN OPENSSH PRIVATE KEY-----
@@ -88,8 +88,6 @@ in {
       max-jobs = lib.mkForce 4;
     };
 
-    # Pre-seed a deterministic worker UUID so the server state config
-    # can register it before the worker boots.
     systemd.tmpfiles.rules = [
       "d /var/lib/git 0755 git git"
       "L+ /var/lib/git/flake.nix 0755 git git - ${./flake_repository.nix}"
@@ -183,11 +181,7 @@ in {
         package = pkgs.postgresql_18;
         enableTCPIP = true;
         authentication = ''
-          #...
-          #type database DBuser origin-address auth-method
-          # ipv4
           host  all      all     0.0.0.0/0      trust
-          # ipv6
           host all       all     ::0/0        trust
         '';
 
@@ -215,7 +209,7 @@ in {
       };
     };
 
-    # Allow git-daemon (executes as nobody) to access repos owned by other users.
+    # git-daemon is running as nobody and must read repos owned by other users.
     environment.etc."gitconfig".text = ''
       [safe]
         directory = *

@@ -42,7 +42,8 @@ in
       (range n));
   };
 
-  # Each cell depends on its own column and the next one (wrapping), so levels form a mesh.
+  # Each cell is depending on its own column and the next one, wrapping around.
+  # The levels are forming a mesh.
   wide = depth: width: {
     name = "wide-${toString depth}x${toString width}";
     derivations = builtins.listToAttrs (builtins.concatMap

@@ -5,7 +5,6 @@
  */
 
 { pkgs, ... }: let
-  # argon2id PHC hash of "admin_password", same fixture the api test uses.
   statePwHash = pkgs.writeText "state-pw-hash" "$argon2id$v=19$m=4096,t=3,p=1$c29tZXNhbHQxMjM0NQ$hIKBEy9SOWlnAlcwUv2PLPBdsMkKhVlCyjTxaWIK+v4";
 in {
   value = pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
@@ -36,8 +35,8 @@ in {
           };
         };
 
-        # The whole point of the test: enabling the worker is the entire
-        # configuration. No worker id, no token, no peers file, no UI step.
+        # Enabling the worker is the entire configuration under test.
+        # No worker id, token, peers file or UI step is needed.
         services.gradient.worker.enable = true;
       };
     };

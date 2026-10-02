@@ -3,11 +3,10 @@
 { lib, python3Packages }:
 
 let
-  # The inspector refuses every report version but the one it pins, and it is released
-  # separately from the server that writes them - so a bump that reaches only the
-  # exporter turns it into a tool that refuses every real report. That was released:
-  # it sat on 10 while the exporter wrote 11. This is the only place both
-  # constants are visible, so the check belongs here, at evaluation.
+  # The inspector is refusing every report version except the pinned one.
+  # It is released separately from the exporter in the server.
+  # A bump reaching only the exporter was already released once (10 vs 11).
+  # Both constants are visible only here, making evaluation the place to check them.
   constantAfter =
     prefix: path:
     let
@@ -37,14 +36,11 @@ python3Packages.buildPythonApplication {
 
   build-system = [ python3Packages.setuptools ];
 
-  # Stdlib only, so there is nothing to propagate: the inspector has to run on
-  # whatever machine a maintainer opens the report on.
   dependencies = [ ];
 
-  # setuptools' console script only appends its own site-packages, so an ambient
-  # PYTHONPATH naming another build of this package wins the import and answers
-  # for a schema this one does not read. The devShell exports exactly that, so a
-  # shell entered before a bump hijacks every later build, `nix run` included.
+  # The setuptools console script is only appending its own site-packages.
+  # An ambient PYTHONPATH naming another build is winning the import with the wrong schema.
+  # The devShell is exporting exactly that, hijacking every later build including `nix run`.
   makeWrapperArgs = [ "--unset PYTHONPATH" ];
 
   nativeCheckInputs = [ python3Packages.pytestCheckHook ];

@@ -4,8 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-# `m1` and `m2` wait on `gate`, which hangs until the test releases it: the cluster is seeded meanwhile.
-# `gate` builds on zone-b's worker3, the cheapest seat for `m2`, so only `same_zone` keeps `m2` in zone a.
+# `m1` and `m2` are waiting on `gate`, which is hanging until its release by the test.
+# The cluster is seeded meanwhile.
+# `gate` is building on zone-b's worker3, the cheapest seat for `m2`.
+# Only `same_zone` is keeping `m2` in zone a.
 {
   name = "zone-pair";
   derivations = {

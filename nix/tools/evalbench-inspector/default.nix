@@ -10,7 +10,7 @@ python3Packages.buildPythonApplication {
 
   build-system = [ python3Packages.setuptools ];
 
-  # Stdlib only: the report has to render wherever a bundle is downloaded to.
+  # The report must render wherever a bundle is downloaded to. Only stdlib is allowed.
   dependencies = [ ];
 
   makeWrapperArgs = [ "--unset PYTHONPATH" ];

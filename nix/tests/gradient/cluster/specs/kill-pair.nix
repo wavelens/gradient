@@ -4,7 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-# Both members hang once started, so one can be lost mid-attempt; the test overrides the retry to succeed.
+# Both members are hanging once started. One member can be lost mid-attempt.
+# The test is overriding the retry to succeed.
 {
   name = "kill-pair";
   derivations = {

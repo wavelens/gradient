@@ -33,18 +33,16 @@ in with pkgs; runCommand "store-${testPkgs.pname}" { __structuredAttrs = true; }
   mkdir -p $out/store
 
   ${if skipDirectories then ''
-    # Default mode (e.g. for the Rust fixture loader): only flat files -
-    # `.drv` files and source blobs. Directory outputs of derivations
-    # (`coreutils-9.0/`, `glibc-2.42-linux/`, …) are intentionally dropped.
+    # The Rust fixture loader is getting only flat files (`.drv` files and source blobs).
+    # Directory outputs of derivations are dropped on purpose.
     while read -r path; do
       if [ -f "$path" ]; then
         echo "$path"
       fi
     done < "${closureInfo}/store-paths" | xargs -P 8 -I {} cp {} $out/store
   '' else ''
-    # Full-closure mode (for the integration test): copy every path,
-    # including directory outputs, so the worker VM has the full build
-    # closure already substituted in its local store.
+    # The integration test is getting every path, including directory outputs.
+    # The worker VM must find the full build closure already in its local store.
     xargs -a "${closureInfo}/store-paths" -P 8 -I {} cp -a --reflink=auto {} $out/store/
   ''}
 

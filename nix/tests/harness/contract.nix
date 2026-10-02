@@ -4,7 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-# What mkSchedulerTest and mkE2eTest rely on; a topology from another repo is checked against it too.
+# mkSchedulerTest and mkE2eTest are relying on this contract.
+# A topology from another repo is checked against it too.
 { lib, topology, workers }:
 let
   clause = ok: what: lib.assertMsg ok "topology contract: ${what}";

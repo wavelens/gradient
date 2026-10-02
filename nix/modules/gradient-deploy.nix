@@ -51,10 +51,11 @@ in {
           Whether to wait for an in-flight evaluation to produce a deployable build instead of
           giving up while the newest commit is still in CI.
 
-          Waiting ends once the deployment is built, the evaluation or build fails, or the target
-          is already running the evaluated system; none of these fail the unit.
-          {option}`system.gradient-deploy.websockets` controls how progress is observed. Waiting is
-          unbounded: a run that outlives its timer makes systemd skip the next trigger.
+          Waiting is ending once the deployment is built, the evaluation or build is failing, or the
+          target is already running the evaluated system. None of these outcomes is failing the
+          unit. {option}`system.gradient-deploy.websockets` is controlling how progress is
+          observed. Waiting is unbounded, and systemd is skipping the next trigger while a run is
+          still going.
         '';
       };
 
@@ -62,9 +63,9 @@ in {
         type = lib.types.bool;
         default = true;
         description = ''
-          Whether to follow the task's WebSocket while waiting instead of polling. Disable when the
-          connection to the server cannot carry a WebSocket upgrade; the service then polls every
-          {option}`system.gradient-deploy.pollIntervalSec`. Only used with
+          Whether to follow the task's WebSocket while waiting instead of polling. Disable it when
+          the connection to the server cannot carry a WebSocket upgrade. The service is then polling
+          every {option}`system.gradient-deploy.pollIntervalSec`. It is only used with
           {option}`system.gradient-deploy.waitForBuild`.
         '';
       };
@@ -78,13 +79,6 @@ in {
           disabled.
         '';
       };
-
-      # TODO:
-      # signedCommit = lib.mkOption {
-      #   type = lib.types.bool;
-      #   description = "Whether to require signed commits for deployments";
-      #   default = false;
-      # };
 
       dates = lib.mkOption {
         type = lib.types.str;
@@ -164,9 +158,6 @@ in {
             curl --silent --fail --max-time 10 --header "Authorization: Bearer $API_KEY" "$@"
           }
 
-          # Verdict for the task's newest evaluation: `deploy <path>` once the
-          # system is built, `done <reason>` when nothing more can come of it, or
-          # `wait` while the evaluation can still produce one.
           resolve() {
             local evaluation entry_points evaluation_id evaluation_status path status current
 
@@ -181,9 +172,8 @@ in {
 
             entry_points=$(api "${apiUrl}/tasks/${cfg.task}/entry-points?evaluation_id=$evaluation_id&limit=500") || { echo "wait"; return; }
 
-            # Output paths are written at evaluation time from the resolved .drv,
-            # so the deployment is identifiable before, and independently of, its
-            # build. Entry points are absent entirely until derivations resolve.
+            # Output paths are written at evaluation time from the resolved .drv. The deployment is
+            # identifiable before its build. Entry points are absent until derivations are resolved.
             path=$(echo "$entry_points" | jq -r --arg re '${systemPathRegex}' \
               'first(.message.entry_points[] | select((.outputs.out // "") | test($re))) | .outputs.out // empty')
             status=$(echo "$entry_points" | jq -r --arg re '${systemPathRegex}' \
@@ -261,8 +251,8 @@ in {
               -H="Authorization: Bearer $API_KEY" "${liveUrl}" </dev/null)
             stream=$!
 
-            # Re-settle on every connect: the socket reports transitions from here
-            # on, and a reconnect gap replays nothing.
+            # The socket is only reporting transitions after the connect. A reconnect gap is replaying
+            # nothing, and every connect must settle again.
             if settle; then
               exit 0
             fi

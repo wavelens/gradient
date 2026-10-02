@@ -4,9 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-# `lib1` and `lib2` are twins: one derivation over two fixed-output sources that
-# differ only in their `.drv`, so both produce the same output paths. Only `lib1`
-# is exported upstream, which serves `lib2`'s shared paths as well.
+# `lib1` and `lib2` are twins over two fixed-output sources differing only in their `.drv`.
+# Both are producing the same output paths.
+# Only `lib1` is exported upstream, and that export is serving `lib2`'s shared paths too.
 {
   name = "twins";
   derivations = {

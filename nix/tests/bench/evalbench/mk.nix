@@ -31,7 +31,6 @@
     nix.settings = {
       trusted-users = [ "root" "@wheel" ];
       max-jobs = lib.mkForce 4;
-      # No route out: every substituter lookup would cost seconds of DNS retries.
       substituters = lib.mkForce [ ];
     };
 
@@ -129,7 +128,6 @@ pkgs.testers.runNixOSTest ({ lib, ... }: {
           reverseProxy.nginx.enable = true;
           postgres.enable = true;
           postgres.sharedBuffers = "128MB";
-          # TCP rather than the socket, so the pg capture sees every statement.
           database.url = "postgresql://gradient@127.0.0.1/gradient";
           domain = "gradient.local";
           proto.public = true;
@@ -190,10 +188,9 @@ pkgs.testers.runNixOSTest ({ lib, ... }: {
             "pg_stat_statements.max" = 10000;
             "auto_explain.log_min_duration" = -1;
             "auto_explain.log_nested_statements" = true;
-            # acpi_pm makes every per-node clock read trap; rows and loops are enough.
+            # The acpi_pm clock is trapping on every per-node clock read. Rows and loops are enough.
             "auto_explain.log_timing" = false;
-            # A plan on the serial console costs a millisecond a line, inside the
-            # transaction that logged it; a file costs nothing.
+            # Plans on the serial console are costing a millisecond per line inside the logging transaction.
             logging_collector = true;
             log_filename = "postgresql.log";
             log_rotation_age = 0;

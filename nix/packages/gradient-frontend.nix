@@ -32,7 +32,8 @@
     pnpmConfigHook
   ];
 
-  # The prebuilt `sass-embedded` Dart binary cannot run in the sandbox; use the pure-JS compiler.
+  # The prebuilt `sass-embedded` Dart binary cannot run in the sandbox.
+  # The pure-JS compiler is replacing it.
   env.NG_BUILD_SASS_EMBEDDED = "0";
 
   buildPhase = ''

@@ -17,15 +17,10 @@
 , cargoFeatures ? [ ]
 }:
 let
-  # The `eval` feature path-depends on backend/gradient-eval (the shared Nix
-  # evaluator) and thus on libnix; only then do we pull the Nix dev toolchain.
   withEval = builtins.elem "eval" cargoFeatures;
 
   repoRoot = ../..;
 
-  # The CLI is its own cargo workspace, but `gradient-eval` lives under backend/,
-  # so the source tree must carry both crates. cargo builds from the cli subdir
-  # (sourceRoot below) and resolves the `../backend/gradient-eval` path dep.
   mdFiles = dir: lib.fileset.fileFilter (f: f.hasExt "md") dir;
   cliSrc = repoRoot + "/cli";
   evalSrc = repoRoot + "/backend/gradient-eval";
@@ -39,8 +34,8 @@ let
     ];
   };
 
-  # harmonia/nix-bindings (git deps) come with crates whose Cargo.toml points at a
-  # README.md outside the crate dir; strip the readme key so vendoring works.
+  # Crates of the harmonia and nix-bindings git deps are pointing `readme` outside the crate dir.
+  # Vendoring is failing until that key is stripped.
   cargoVendorDir = craneLib.vendorCargoDeps {
     inherit src;
     cargoLock = cliSrc + "/Cargo.lock";
@@ -52,14 +47,11 @@ let
       });
   };
 
-  # Crane has no easy way to set Cargo features, this sets them manually via cargoExtraArgs.
-  # It has `--locked` hard coded since that is the default of Crane.
   cargoExtraArgs = lib.concatStringsSep " " (
     [ "--locked" ]
     ++ lib.optional (cargoFeatures != [ ]) "--features ${lib.concatStringsSep "," cargoFeatures}"
   );
 
-  # crane's default dummy trips the workspace lints; this one compiles under them.
   dummyrs = writeText "dummy.rs" ''
     #![allow(clippy::all)]
     #![allow(dead_code)]
@@ -94,10 +86,8 @@ let
     ];
   };
 
-  # The cli workspace sits in a subdirectory because the `eval` feature pulls
-  # gradient-eval from backend/. `mkDummySrc` keeps the source's store name, so
-  # `sourceRoot` resolves in the dummy tree too, but it only carries over a
-  # Cargo.lock sitting at the source root: this one has to be put back by hand.
+  # `mkDummySrc` is carrying over only a Cargo.lock at the source root.
+  # The cli lock is living in a subdirectory and must be copied back by hand.
   cargoArtifacts = craneLib.buildDepsOnly (commonArgs // {
     inherit dummyrs;
     extraDummyScript = ''
@@ -111,11 +101,8 @@ craneLib.buildPackage (commonArgs // rec {
   version = "1.4.1";
   separateDebugInfo = true;
 
-  # Same split as the server: the binary keeps the debug output, the suite builds
-  # as its own check instead of inside the package.
   doCheck = false;
 
-  # Reuses cargoArtifacts so clippy only recompiles the workspace crates.
   passthru.clippy = craneLib.cargoClippy (commonArgs // {
     inherit cargoArtifacts;
     cargoClippyExtraArgs = "--workspace --all-targets -- -D warnings";

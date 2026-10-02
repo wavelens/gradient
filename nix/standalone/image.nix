@@ -10,8 +10,8 @@ in pkgs.dockerTools.buildLayeredImage {
   name = "gradient-standalone";
   tag = "latest";
 
-  # The worker's nix-daemon must see the image's store paths as valid, or it
-  # deletes them as garbage before substituting.
+  # The worker's nix-daemon must see the image's store paths as valid.
+  # Invalid paths are deleted as garbage before substituting.
   extraCommands = ''
     mkdir -p nix/var/nix/gcroots tmp var/lib
     chmod 1777 tmp

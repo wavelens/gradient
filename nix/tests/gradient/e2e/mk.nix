@@ -5,12 +5,6 @@
  */
 
 { self, pkgs, topology }: let
-  # Bundles `pkgs.hello`'s full closure (`.drv` files, source tarballs, AND
-  # directory outputs of every transitive build dep) at their canonical
-  # /nix/store paths.  Used so the worker's BFS finds every derivation as
-  # already substituted and never dispatches a source-fetch or compile job.
-  # `skipDirectories = false` overrides the default flat-files-only mode
-  # used by the Rust fixture loader.
   testStore = import ../../../scripts/store.nix {
     inherit pkgs;
     skipDirectories = false;
@@ -25,11 +19,6 @@
   builderModule = { config, pkgs, lib, ... }: {
     imports = [ ../../../modules/gradient-worker.nix ];
 
-    # Copy hello's full build closure (`.drv` files, sources, and every
-    # transitive output directory) into the worker VM's nix store, so
-    # every derivation the worker walks is already substituted.  Without
-    # this the worker would try to fetch tarballs from the internet -
-    # which the test VM cannot reach - and every build would fail.
     virtualisation.additionalPaths = [ testStore ];
 
     nix.settings = {
@@ -38,10 +27,9 @@
         "@wheel"
       ];
 
-      # One job per core, here and in the worker's build.maxConcurrent. At 8 jobs,
-      # or at the worker's default 32 builds with its nix-daemon pool of 304
-      # connections, the builder kernel-panicked on OOM (`compulsory panic_on_oom`)
-      # with 2048 MB and four cores.
+      # One job per core, here and in the worker's build.maxConcurrent.
+      # The builder kernel-panicked on OOM (`compulsory panic_on_oom`) with 2048 MB and four cores.
+      # 8 jobs did that, and so did the worker's default of 32 builds over 304 nix-daemon connections.
       max-jobs = lib.mkForce 4;
     };
 
@@ -68,10 +56,6 @@ in
 assert import ../../harness/contract.nix { inherit (pkgs) lib; topology = topo; workers = workerIds; };
 pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
   name = "gradient-e2e";
-  # Phases 10e to 10h add five more evaluations of the repository, a two-session
-  # lock handshake and four retire-and-recover cycles to what was already a full
-  # build-and-cache run, and 10g only began passing outputs through for real once it stopped
-  # failing in its first seconds.
   globalTimeout = 5400;
 
   defaults = {
@@ -79,9 +63,6 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
     virtualisation = {
       cores = 4;
       memorySize = 2048;
-      # Default 1024 MB diskSize is too small once the full hello build
-      # closure (built outputs of stdenv/gcc/glibc/coreutils/…) is staged
-      # into the VM via `additionalPaths` on the builder node.
       diskSize = 8192;
       writableStore = true;
     };
@@ -97,10 +78,6 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
 
       nix.settings.substituters = lib.mkForce [ ];
 
-      # Phase 10g serves busybox's closure from this host as a file binary
-      # cache. A shared build is cache_available only when EVERY output is on an
-      # upstream, so the `debug` output has to be in the store to be copied
-      # there; `systemPackages` brings only `out`.
       virtualisation.additionalPaths = [ pkgs.busybox.debug ];
 
       environment = {
@@ -143,10 +120,6 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
             text = "22yRW7p/hxuPRWJh9pcfGH0oXPk2MFUuG0wIA1rfq1BvDbvMqzMZS+er/BE8ucbxNSG5KZ8B0ELO4TJal8mZlw==";
           };
 
-          # Signs the file binary cache phase 10g substitutes from. Fixed
-          # rather than generated in the test: the cache is state-managed, so
-          # its upstream is declared below and the public half has to be known
-          # at evaluation time.
           "gradient/secrets/upstream_key" = {
             mode = "0600";
             text = "file-upstream-1:eZPukjHYgRpJ+hLlnUgG+qpi/k4QMTr3bd4ftngZJwkIXutyHrlDclZGwczy+IKCAt82HkKrDtM16u9HR9uzkQ==";
@@ -162,9 +135,9 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
       };
 
       networking.hosts = {
-        # `hook.local` is phase 14's webhook target. A name, not `127.0.0.1`:
-        # `validate_webhook_url` rejects every loopback and private literal, and
-        # every address in a NixOS VM network is one of those.
+        # `hook.local` is phase 14's webhook target, a name and not `127.0.0.1`.
+        # `validate_webhook_url` is rejecting every loopback and private literal.
+        # Every address in a NixOS VM network is one of those.
         "127.0.0.1" = [ "gradient.local" "hook.local" ];
       };
 
@@ -173,17 +146,12 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
           enable = true;
           reverseProxy.nginx.enable = true;
           postgres.enable = true;
-          # Pinned so the module's production-sized default does not size a
-          # 2 GB guest that also hosts the server, nginx and a git daemon.
           postgres.sharedBuffers = "128MB";
           domain = "gradient.local";
           proto.public = true;
           secrets.jwtFile = toString (pkgs.writeText "jwtSecret" "b68a8eaa8ebcff23ebaba1bd74ecb8a2eb7ba959570ff8842f148207524c7b8d731d7a1998584105e951599221f9dcd20e41223be17275ca70ab6f7e6ecafa8d4f8905623866edb2b344bd15de52ccece395b3546e2f00644eb2679cf7bdaa156fd75cc5f47c34448cba19d903e68015b1ad3c8e9d04862de0a2c525b6676779012919fa9551c4746f9323ab207aedae86c28ada67c901cae821eef97b69ca4ebe1260de31add34d8265f17d9c547e3bbabe284d9cadcc22063ee625b104592403368090642a41967f8ada5791cb09703d0762a3175d0fe06ec37822e9e41d0a623a6349901749673735fdb94f2c268ac08a24216efb058feced6e785f34185a");
           secrets.cryptFile = toString (pkgs.writeText "cryptSecret" "aW52YWxpZC1pbnZhbGlkLWludmFsaWQK");
           log.level.default = "debug";
-          # Phase 10i waits out a cache-maintenance pass, and the hourly
-          # default would outlast the test. Every step of that pass is a
-          # no-op at this scale except the one the phase drives.
           gc = {
             intervalSecs = 20;
             narTtlHours = 1;
@@ -215,11 +183,6 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
                     config = { interval_secs = 10; };
                   }
                 ];
-                # Phase 14's probe. It lives in state because provisioning executes
-                # on every boot and deletes actions state does not declare, so
-                # an API-created one would not survive that phase's restart; it
-                # subscribes to an event this VM never raises, so the only thing
-                # that ever reaches the hook is the row the phase writes.
                 actions = [
                   {
                     name = "restart-probe";
@@ -252,9 +215,6 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
                 upstream_caches = [{
                   type = "external";
                   display_name = "file-upstream";
-                  # `server`, not `gradient.local`: the PASSTHROUGH executes on a builder,
-                  # and only the server node maps the gradient.local name. An
-                  # upstream a worker cannot resolve is not an upstream.
                   url = "http://server/upstream";
                   public_key = "file-upstream-1:CF7rch65Q3JWRsHM8viCggLfNh5Cqw7TNervR0fbs5E=";
                 }];
@@ -273,8 +233,6 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
         nginx.virtualHosts."gradient.local" = {
           enableACME = lib.mkForce false;
           forceSSL = lib.mkForce false;
-          # Phase 10g's upstream binary cache, served off disk from this same
-          # host so the VM needs no network.
           locations."/upstream/" = {
             alias = "/srv/upstream/";
             extraConfig = "autoindex off;";
@@ -285,20 +243,13 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
           package = pkgs.postgresql_18;
           enableTCPIP = true;
           authentication = ''
-            #...
-            #type database DBuser origin-address auth-method
-            # ipv4
             host  all      all     0.0.0.0/0      trust
-            # ipv6
             host all       all     ::0/0        trust
           '';
 
           settings = {
             logging_collector = true;
             log_destination = lib.mkForce "syslog";
-            # Phase 10d bills the server's statements; the extension only
-            # exposes the view, the accounting needs this preload, and its
-            # deltas need every entry to survive both samples.
             shared_preload_libraries = "pg_stat_statements";
             "pg_stat_statements.max" = 10000;
           };
@@ -312,7 +263,6 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
         };
       };
 
-      # Allow git-daemon (executes as nobody) to access repos owned by other users.
       environment.etc."gitconfig".text = ''
         [safe]
           directory = *
@@ -328,7 +278,6 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
       ];
     };
 
-
     client = { config, pkgs, lib, ... }: {
       environment.variables.TEST_PKGS = [ self.inputs.nixpkgs ];
       nix.settings = {
@@ -342,7 +291,6 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
 
   testScript = { nodes, ... }:
     ''
-    # ── Helpers ───────────────────────────────────────────────────────────
     import json
     import time
 
@@ -480,12 +428,6 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
             raise Exception(f"Gradient server crashed:\n{j[-2000:]}")
         return j
 
-    # Phase 10f's two-session handshake. Parameterless on purpose: it reads
-    # LR_DRV and LR_OUT from the environment so the body needs no substitution
-    # and stays a plain string. Each `wait_state` is bounded and dumps both
-    # session logs plus pg_stat_activity before failing, so the phase can never
-    # hang CI, and `cleanup` executes on every exit path - a leaked backend would
-    # hold row locks into phase 11.
     LOCK_RACE_SH = """
     set -u
     D=/tmp/lockrace
@@ -530,9 +472,6 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
     send_a() { printf '%s\\n' "$1" >&3; }
     send_b() { printf '%s\\n' "$1" >&4; }
 
-    # The arm is only a race once the retire owns a row. A fixture deleted out from
-    # under it leaves both sessions unblocked and the next wait times out blaming
-    # the recount, so name the real cause here.
     retired() {
       if [ "$(grep -c '^DELETE 1$' $D/a.out)" != "$1" ]; then
         echo "LOCKRACE: the retire deleted no row, its fixture was gone before the arm ran"
@@ -556,10 +495,6 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
       printf '%s\\n' "UPDATE derivation_build db SET fetchable = x.f FROM (SELECT p.derivation, p.fetchable AS old, (p.cache_available OR (p.status IN (3, 7) AND p.missing_runtime_deps = 0 AND EXISTS (SELECT 1 FROM derivation_output o2 WHERE o2.derivation = p.derivation) AND NOT EXISTS (SELECT 1 FROM derivation_output o LEFT JOIN cached_path cp ON cp.hash = o.hash WHERE o.derivation = p.derivation AND cp.file_hash IS NULL))) AS f FROM derivation_build p WHERE p.derivation = ANY(ARRAY['$1']::uuid[])) x WHERE db.derivation = x.derivation AND db.fetchable = x.old AND x.old <> x.f;"
     }
 
-    # The retire's shape: its opening hash-ordered lock pass, the delete, then the
-    # shared build lock its can-start half takes. The `fetchable` mark is deliberately
-    # absent - the shared build is already stored not-fetchable, which is the drift the
-    # recount is meant to correct and the reason a stale one writes true.
     send_a "SET application_name = 'lockrace_a';"
     send_a "BEGIN;"
     send_a "SELECT 1 FROM cached_path WHERE hash = ANY(ARRAY['$LR_OUT']) ORDER BY hash FOR UPDATE;"
@@ -588,10 +523,6 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
       exit 1
     fi
 
-    # The recount MUST have run and written nothing: under the lock its snapshot
-    # sees the deleted output, so the recounted value equals the stored false and
-    # the compare-and-swap has nothing to write. A missing tag here would let the
-    # phase pass on a recount that never executed.
     if ! grep -q "UPDATE 0" $D/b.out; then
       echo "LOCKRACE: the recount did not run, or wrote a value the retire made stale"
       cat $D/b.out
@@ -599,14 +530,6 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
     fi
     echo "lockrace: both sessions committed and the recount was a no-op"
 
-    # The same interleaving with the lock removed, on its own row. Without a
-    # preceding FOR UPDATE the recount's own statement takes the snapshot and THEN
-    # waits, so it reads the output as complete, blocks, and EvalPlanQual re-checks
-    # only the target row's own column before the stale `true` lands on a shared build
-    # whose output is gone. Measured both ways on Postgres 18 before it was written
-    # here: locked writes nothing, unlocked writes true. The CONTRAST is the
-    # assertion. If the two arms ever agree, the lock stopped being what makes the
-    # recount correct and a human needs to know that.
     send_a "BEGIN;"
     send_a "SELECT 1 FROM cached_path WHERE hash = ANY(ARRAY['$LR_OUT2']) ORDER BY hash FOR UPDATE;"
     send_a "DELETE FROM cached_path WHERE hash = ANY(ARRAY['$LR_OUT2']);"
@@ -631,11 +554,6 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
     echo "lockrace: the unlocked arm committed; the driver checks what it wrote"
     """
 
-    # Phase 10i's two-session interleaving, on the phase 10f scaffolding. It reads
-    # CR_EVAL, CR_BUILD and CR_HOLD from the environment, parks the evaluation in
-    # its build phase behind CR_HOLD, races a naming of CR_BUILD against its
-    # transition, then releases CR_HOLD. Nothing locks, so the naming counts the
-    # shared build it cannot see move: the server's exact reads have to repair that.
     COUNTER_RACE_SH = """
     set -u
     D=/tmp/counterrace
@@ -720,10 +638,6 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
     echo "counterrace: raced and released"
     """
 
-    # Phase 10j's two-session claim race. It reads CL_BUILD, CL_EVAL and
-    # CL_PROJECT from the environment and executes the claim of
-    # `gradient_db::scheduling::assignment_record::claim_assignment` for one job key in two sessions at once: the
-    # second must block on the unique open-row index and insert nothing.
     CLAIM_RACE_SH = """
     set -u
     D=/tmp/claimrace
@@ -803,12 +717,6 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
     echo "claimrace_b $(grep INSERT $D/b.out)"
     """
 
-    # Phase 10k's two-session interleaving of a seed with a flip (#643). It executes the
-    # registry's own statements, printed by `gradient-sql-gate --print`, on rows it
-    # owns in a scratch schema whose tables copy the real ones without foreign keys,
-    # and after each arm the table-wide recount must find nothing to correct. The
-    # unguarded arm is the contrast: the same interleaving under the flip's lock
-    # alone must drift, or the shared keys are no longer what keeps the count right.
     LOCK_GUARD_SH = r"""
     set -u
     D=/tmp/lockguard
@@ -855,8 +763,6 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
 
     stmt() { $LG_GATE --print "$1"; }
 
-    # The registry's text with its placeholders bound to literals: the phase executes the
-    # statements the server executes, not a copy of them.
     bind() {
       s="$1"
       s="''${s//\$1/$2}"
@@ -878,8 +784,6 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
     idle() { wait_state "application_name = 'lockguard_$1' AND state = 'idle'" "$2"; }
     blocked() { wait_state "application_name = 'lockguard_$1' AND wait_event_type = 'Lock'" "$2"; }
 
-    # P, D and Q each have one output. P's and Q's are in the cache; D's is when
-    # `$1` says so. No edges: each arm adds the ones it races on.
     reset() {
       q "TRUNCATE derivation_build, derivation_dependency, derivation_output, cached_path;
          INSERT INTO derivation_build (id, derivation, created_at, updated_at)
@@ -922,8 +826,6 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
     send_a "SET application_name = 'lockguard_a'; SET search_path = lockguard, public;"
     send_b "SET application_name = 'lockguard_b'; SET search_path = lockguard, public;"
 
-    # 1. The flip holds D first. The seed of P waits on D's key, so it counts D after
-    # the flip committed and the ripple, which could not see P's edge, owes P nothing.
     send_b "BEGIN;"
     send_b "$(bind "$LOCK_SHARED_BUILDS" "'{$DEP}'")"
     send_b "INSERT INTO cached_path (id, hash, package, file_hash, created_at) VALUES (uuidv7(), 'lgd', 'd', 'sha256:d', now());"
@@ -942,9 +844,6 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
     idle a "flip-first: the seed never committed"
     recount flip-first
 
-    # The same interleaving under the flip's own lock, which names no dependency: the
-    # seed does not wait, counts D as a missing dependency, and nothing ever counts it down. The
-    # contrast is the assertion that the shared keys are what makes arm 1 right.
     reset absent
     send_b "BEGIN;"
     send_b "$(bind "$LOCK_SHARED_BUILDS" "'{$DEP}'")"
@@ -963,8 +862,6 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
     idle a "unguarded: the seed never committed"
     recount unguarded
 
-    # 2. The seed holds D's key first. The flip waits for it, then its ripple sees P's
-    # committed edge and counts P down.
     reset absent
     send_a "BEGIN;"
     send_a "INSERT INTO derivation_dependency (derivation, dependency, kind) VALUES ('$P', '$DEP', 1);"
@@ -985,8 +882,6 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
     grep -q "^$P$" $D/b.out || fail "seed-first: the ripple did not see P's edge"
     recount seed-first
 
-    # 3. A retire of D against a seed of a second parent Q: the retire's opening lock
-    # waits for Q's seed on D's key, and its count-up then reaches both parents.
     reset present
     q "INSERT INTO derivation_dependency (derivation, dependency, kind) VALUES ('$P', '$DEP', 1);" >/dev/null
     send_a "BEGIN;"
@@ -1008,9 +903,6 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
     grep -q "^$Q$" $D/b.out || fail "incomplete: the ripple did not see Q's edge"
     recount incomplete
 
-    # 3b. A retire that waited on a flip reads the flipped row. The flip counts D down
-    # to complete under D's key; the retire's opening lock waits on that key, so the
-    # statement that reads whether D was complete starts after the flip committed.
     reset present
     q "UPDATE derivation_build SET missing_runtime_deps = 1 WHERE derivation = '$DEP';
        INSERT INTO derivation_dependency (derivation, dependency, kind) VALUES ('$DEP', '$Q', 1);" >/dev/null
@@ -1029,7 +921,6 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
     grep -q "^$DEP$" $D/b.out || fail "retire-reads: the retire read D as it was before the flip it waited for"
     recount retire-reads
 
-    # 4. Two seeds sharing D hold its key shared, and neither waits for the other.
     reset present
     send_a "BEGIN;"
     send_a "INSERT INTO derivation_dependency (derivation, dependency, kind) VALUES ('$P', '$DEP', 1);"
@@ -1052,17 +943,13 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
 
     start_all()
 
-    # ── Phase 1: services come up and the worker authenticates ────────────
     banner("Phase 1: bring services up")
     server.wait_for_unit("gradient-server.service")
     server.sleep(5)
 
-    # Wait for every worker to be ready instead of asserting after a fixed sleep:
-    # on a fresh DB the server migrates before binding :3000.
     wait_workers_ready()
     banner("Every worker authenticated via state-managed registration")
 
-    # ── Phase 2: seed the test git repository ─────────────────────────────
     banner("Phase 2: prepare test repository")
     server.succeed(f"{GIT} config --global --add safe.directory '*'")
     server.succeed(f"{GIT} config --global init.defaultBranch main")
@@ -1073,25 +960,17 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
     server.succeed("cp /var/lib/git/{,test/}flake.nix")
     server.succeed("cp /var/lib/git/{,test/}flake.lock")
 
-    # The seed flake.{nix,lock} both pin nixpkgs to a `[nixpkgs]` placeholder;
-    # rewrite them in-place so they point at the host nixpkgs path the test
-    # was launched with (no internet in the VM).
     server.succeed("sed -i 's#\\[nixpkgs\\]#${self.inputs.nixpkgs}#g' /var/lib/git/test/flake.nix")
     server.succeed("sed -i 's#\\[nixpkgs\\]#${self.inputs.nixpkgs}#g' /var/lib/git/test/flake.lock")
-    # The lock's narHash is the input's own, substituted rather than recalculated:
-    # `nix hash path` reads all of nixpkgs, and that I/O storm starved Postgres
-    # for a minute, long enough for every pool in the server to time out.
     server.succeed("sed -i 's#\\[hash\\]#${self.inputs.nixpkgs.narHash}#g' /var/lib/git/test/flake.lock")
 
     server.succeed(f"{GIT} -C /var/lib/git/test add flake.nix flake.lock")
     server.succeed(f"{GIT} -C /var/lib/git/test commit -m 'Initial commit'")
     server.succeed("chown git:git -R /var/lib/git/test")
 
-    # Smoke-test that git-daemon serves the repo to anonymous clients.
     server.succeed(f"{GIT} clone git://localhost/test test")
     print(server.succeed(f"{GIT} ls-remote git://server/test"))
 
-    # ── Phase 3: log in and configure the CLI ─────────────────────────────
     banner("Phase 3: authenticate and select task")
     login_body = '{"loginname": "admin", "password": "admin_password"}'
     token = server.succeed(
@@ -1105,17 +984,10 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
     server.succeed(f"{CLI} project select project")
     server.succeed(f"{CLI} task select task")
 
-    # First `task show` is best-effort: the task may already have a
-    # Queued evaluation, which the CLI exits 1 on. Use `execute` so a
-    # transient non-zero exit doesn't abort the whole test.
     server.sleep(10)
     _, output = server.execute(f"{CLI} task show")
     print(output)
 
-    # ── Phase 4: wait for the server to notice the new commit ─────────────
-    # Task poll cycle is configured to 10 s in the state above; we poll
-    # in 15 s slices so a panic shows up instantly instead of after the
-    # full timeout.
     banner("Phase 4: wait for repository detection")
     detected = False
     for attempt in range(1, 7):
@@ -1130,9 +1002,6 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
     if not detected:
         raise Exception(f"Server did not detect repository change after 90 s:\n{j[-2000:]}")
 
-    # ── Phase 5: wait for the evaluation + builds to complete ─────────────
-    # We hit the REST API directly (instead of the CLI) so a 404/empty body
-    # while the eval is still being created doesn't crash us.
     banner("Phase 5: wait for evaluation to complete (up to 900 s)")
     eval_id = ""
     completed = False
@@ -1182,8 +1051,6 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
                 f'{API}/evals/{eval_id}/builds | '
                 f'{JQ} -c ".message | {{total, by_status: ([.builds[].status] | group_by(.) | map({{key: .[0], value: length}}) | from_entries)}}"'
             ).strip()
-            # A stalled run reads the same on the eval and the builds whether the
-            # graph is wedged or the fleet has left, and those want opposite fixes.
             fleet = server.succeed(
                 f'{CURL} -sf -H "Authorization: Bearer {token}" '
                 f'{API}/board/health | '
@@ -1196,11 +1063,6 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
             )
 
     if not completed:
-        # A stall is a shared build that never went terminal, so the shared build states are the
-        # diagnosis and the journal is the supporting evidence. The histogram gives
-        # the shape; the gate buckets name which of `gates_predicate`'s terms is
-        # false for the shared builds the evaluation is still waiting on, which is the one
-        # thing the shape cannot tell apart.
         eval_state = sql(
             f"SELECT status::text || ' since ' || updated_at::text"
             f" FROM evaluation WHERE id = '{eval_id}';"
@@ -1215,12 +1077,6 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
             f" GROUP BY db.status, db.fetchable, db.wanted, db.blocking_deps ORDER BY 1;"
         )
         gates = blocking_shared_builds(eval_id)
-        # The journal tail was 80 lines of which 60 were `check_task_updates`,
-        # whose task Model prints 1.5 KB per line, so the polling and GC chatter
-        # goes. A stall is usually a worker that left or an evaluation whose
-        # worker did, and both are minutes old by the time the deadline fires -
-        # hence the session events over the whole window, and both workers' own
-        # journals, which the server's says nothing about.
         noise = (
             "gradient_web: (request started|response generated"
             "|sending chunk|stream closed)"
@@ -1255,12 +1111,6 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
             f"server log, polling and GC noise removed:\n{j}"
         )
 
-    # ── Phase 5b: the worker committed a non-empty eval cache to disk ─────
-    # Regression guard (#386): nix commits the eval-cache AttrDb only on
-    # EvalState teardown / WAL checkpoint, but the worker reads & pushes the
-    # `<fp>.sqlite` while still alive, so the file never grew past the 4096-
-    # byte SQLite header and every flake re-evaluated cold. A committed cache
-    # is >=12 KB (schema) and larger once attributes are memoised.
     banner("Phase 5b: worker eval-cache is committed (non-empty)")
     eval_cache_dir = "/var/lib/gradient-worker/eval-cache/eval-cache-v6"
     listings = [
@@ -1276,15 +1126,6 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
         f"(4096 = empty SQLite header).\n{sizes}"
     )
 
-
-    # ── Phase 5c: two workers merged one graph, and nothing raced ─────────
-    # `task2` polls the same repository, so its evaluation of the same commit
-    # ran on the second worker while the first was still streaming batches.
-    # Every write went through the graph writer: one derivation row per hash,
-    # identical build closures, no shared build left without its edges, and no pool
-    # exhaustion or dropped call in the server log. A walk prunes whatever the
-    # other worker's batch recorded first and names only the pruned root, so
-    # the two `build_job` sets agree on the closure they reach, not on their size.
     banner("Phase 5c: a concurrent evaluation of the same commit merged cleanly")
     eval2_id = ""
     for attempt in range(1, 61):
@@ -1353,9 +1194,6 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
         "WHERE NOT d.walked;"
     ))
     assert unwalked_deps == 0, f"{unwalked_deps} of {edges} dependency edges point at a stub"
-    # The value, not just the count: a NEGATIVE counter is a ripple that moved a
-    # row no seed had counted, and it never reads `= 0` again, so the prune stops
-    # for good. A positive one is a seed that missed a count-down.
     incomplete = sql(
         "SELECT d.name || ' unwalked_inputs=' || d.unwalked_inputs::text"
         " FROM derivation d WHERE d.walked AND d.unwalked_inputs <> 0"
@@ -1366,13 +1204,6 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
     )
     assert_no_server_error(server.succeed("journalctl -u gradient-server --no-pager"))
 
-    # ── Phase 5b: the graph walks stay fenced and agree with the old shape ─
-    # The recursive walks are generated in `graph/walks.rs` as a LATERAL probe
-    # behind an `OFFSET 0` fence. Without the fence Postgres believes the
-    # working table is ten times the seed and merge-joins the whole edge
-    # table once per iteration, which cost 5.3 s on a 44k-node production
-    # closure against 1.0 s fenced. Nothing in the Rust type system notices
-    # if the fence is dropped, so assert the plan here.
     banner("Phase 5b: graph walk shape, plans and closure counters")
 
     have_reverse_index = int(sql(
@@ -1396,8 +1227,6 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
     ))
     assert retired_index == 0, "the path-level reference index outlived its migration"
 
-    # The fenced walk and the plain join must select the same node set. This is
-    # the only place the rewrite is checked against a real graph.
     for direction, fenced_step, plain_step in [
         ("dependencies",
          "SELECT e.dependency AS next FROM derivation_dependency e WHERE e.derivation = c.derivation",
@@ -1418,22 +1247,12 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
         ))
         assert disagree == 0, f"the fenced {direction} walk disagrees on {disagree} nodes"
 
-        # The plan shape of this walk (a nested loop, never a merge join) is
-        # asserted for every registered walk by the SQL plan gate in phase 13.
-
-    # The table is gone; the task page fills the histogram cache for the
-    # page it reads and stamps every entry point with the graph version.
     gone = int(sql(
         "SELECT count(*) FROM information_schema.tables "
         "WHERE table_name = 'derivation_closure';"
     ))
     assert gone == 0, "derivation_closure is still there"
 
-    # Give the evaluation one entry point with no build_job, so the predicate
-    # below has something to exclude: without it this row is unstamped forever
-    # and the assertion fires, and if the endpoint counted it, total would
-    # exceed the page. Nothing in a real evaluation produces such a row, which
-    # is why it has to be made here.
     sql(
         f"WITH d AS ("
         f"  INSERT INTO derivation (id, hash, name, architecture, created_at) "
@@ -1450,16 +1269,11 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
     ))
     assert planted == 1, "the unreportable entry point was not planted"
 
-    # An entry point with no build_job in this evaluation is not reportable, so
-    # the page never covers it and nothing ever stamps it.
     reportable = (
         f"ep.evaluation = '{eval_id}' AND EXISTS ("
         f"  SELECT 1 FROM build_job bj WHERE bj.evaluation = '{eval_id}'"
         f"  AND bj.derivation = ep.derivation)"
     )
-    # Read the version BEFORE the page. The stamp is monotone and is at least the
-    # version the reader saw, so asserting against that floor is race-free, while
-    # comparing with the version afterwards loses to any concurrent shared build move.
     version_before = int(sql(
         f"SELECT graph_version FROM evaluation WHERE id = '{eval_id}';"
     ))
@@ -1474,7 +1288,6 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
     ))
     assert unstamped == 0, f"{unstamped} entry points were not stamped by the read"
 
-    # What the read stored must be what the root-attributed fenced walk says.
     drift = int(sql(
         f"WITH RECURSIVE stored AS ("
         f"  SELECT ep.id, coalesce(sum(c.count), 0) AS total FROM entry_point ep "
@@ -1504,9 +1317,6 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
         ep_id, total = row.split(":")
         assert by_id[ep_id]["deps_total"] == int(total), f"{ep_id}: api {by_id[ep_id]['deps_total']} stored {total}"
 
-    # The planted row has served its purpose, and `GET /evals/{id}` lists entry
-    # points unfiltered, so leaving it would report `zz.unreportable` as Queued
-    # for every later phase.
     sql(
         f"DELETE FROM entry_point WHERE evaluation = '{eval_id}' "
         f"AND eval = 'zz.unreportable';"
@@ -1518,12 +1328,6 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
     ))
     assert left == 0, "the unreportable entry point outlived its assertions"
 
-    # ── Phase 6: extract hello's `.drv` from the eval's build list ────────
-    # We hit `/evals/{id}/builds` directly with the eval_id already pinned
-    # by Phase 5; screen-scraping `gradient task show` is too brittle
-    # (polling can rotate `last_evaluations[0]` to a fresh Queued eval
-    # between phases, and the CLI then errors on the eval-detail fetch
-    # before reaching the Building section).
     banner("Phase 6: extract hello's derivation path from /evals/{id}/builds")
     store_path_drv = server.succeed(
         f'{CURL} -sf -H "Authorization: Bearer {token}" '
@@ -1534,9 +1338,6 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
     if not store_path_drv.startswith("/nix/store/"):
         store_path_drv = f"/nix/store/{store_path_drv}"
 
-    # The `.drv` file is on the builder VM (its full closure was preseeded
-    # via `additionalPaths`), not on the server, so resolve the output
-    # path there.
     store_path = builder.succeed(
         f"{NIX} path-info {store_path_drv}^out --extra-experimental-features nix-command"
     ).strip()
@@ -1544,11 +1345,6 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
     print(f"Built derivation: {store_path_drv}")
     print(f"Output path:      {store_path}")
 
-    # Every edge a batch declares lands in the batch's own transaction, so the
-    # graph must record exactly the input drvs the `.drv` itself declares. Only
-    # the BUILD edges: since #671 the same relation carries the runtime graph,
-    # whose edges are learned from the NAR and reach producers that are not
-    # direct inputs at all (hello references glibc, which stdenv brings in).
     drv_hash = store_path_drv.split("/")[-1].split("-")[0]
     declared = int(builder.succeed(
         f"{NIX} derivation show {store_path_drv} --extra-experimental-features nix-command "
@@ -1561,15 +1357,9 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
     assert declared > 0, f"{store_path_drv} declares no input drv; the check would pass on nothing"
     assert declared == recorded, f"hello declares {declared} input drvs, the graph records {recorded}"
 
-    # ── Phase 7: verify the cache serves the narinfo ──────────────────────
-    # `nix-cache-info` is unauthenticated and always available - a quick
-    # smoke test that `/cache/main/*` is wired up.
     banner("Phase 7: cache serves nix-cache-info and the narinfo")
     print(client.succeed(f"{CURL} {CACHE}/nix-cache-info -i --fail"))
 
-    # A freshly cached path is signed in place on upload, but the commit takes place
-    # on a detached task, so the signature may lag the build's completion by a
-    # moment (or fall back to the periodic sweep). Poll up to 120 s for it.
     for sig_attempt in range(1, 25):
         rc, _ignored = client.execute(f"{CURL} -sf {CACHE}/{store_hash}.narinfo -o /dev/null")
         if rc == 0:
@@ -1578,23 +1368,12 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
         client.sleep(5)
     print(client.succeed(f"{CURL} {CACHE}/{store_hash}.narinfo -i --fail"))
 
-    # ── Phase 8: client substitutes hello straight from the cache ─────────
-    # Drop the existing copy from the client store, then realize via
-    # gradient cache only (the client's `substituters` is locked to
-    # `http://server/cache/main`).
     banner("Phase 8: client realizes hello from gradient cache")
     client.succeed(f"nix-store --delete {store_path} || true")
     client.fail(f"ls {store_path}")
     print(client.succeed(f"nix-store -vvv --realize {store_path}"))
     print(client.succeed(f"ls {store_path}"))
 
-    # ── Phase 9: `gradient cache upload` compresses + signs (regression #509) ─
-    # Add a unique leaf path to the server store and upload it with the CLI:
-    # the default uploads the runtime closure, zstd-compressed, and the server
-    # signs it in place. The client (substituters locked to the gradient cache)
-    # then realizes it. A raw/uncompressed NAR fails the client's zstd import
-    # ("Unknown frame descriptor"); an unsigned narinfo fails its signature
-    # check. Both fixes must hold for realize to succeed.
     banner("Phase 9: gradient cache upload compresses + signs (#509)")
     server.succeed("echo gradient-upload-regression-509 > /tmp/upload-probe.txt")
     upload_path = server.succeed("nix-store --add /tmp/upload-probe.txt").strip()
@@ -1611,12 +1390,6 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
     print(client.succeed(f"nix-store -vvv --realize {upload_path}"))
     print(client.succeed(f"ls {upload_path}"))
 
-    # ── Phase 10: debuginfo index + 404 on unknown keys (#563) ────────────
-    # A `separateDebugInfo` output carries `lib/debug/.build-id/<xx>/<yy>.debug`.
-    # Uploading one must make `debuginfo/<build-id>` resolve to that NAR member,
-    # in the same JSON shape nix writes under `index-debug-info=true`, and every
-    # key we do not serve must be a 404: nixseparatedebuginfod aborts the whole
-    # lookup on any other status.
     banner("Phase 10: debuginfo index and 404 on unknown keys (#563)")
     build_id = "7dbeaca53fbc9a489b633871093c37dae3857a37"
     member = f"lib/debug/.build-id/{build_id[:2]}/{build_id[2:]}.debug"
@@ -1631,7 +1404,6 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
         f"{CURL} -sf {CACHE}/{debug_hash}.narinfo -o /dev/null", timeout=60
     )
 
-    # The build-id walk proceeds detached from the upload commit, so poll for it.
     client.wait_until_succeeds(
         f"{CURL} -sf {CACHE}/debuginfo/{build_id} -o /dev/null", timeout=60
     )
@@ -1642,12 +1414,8 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
     assert parsed["archive"].startswith("../nar/"), redirect
     assert parsed["archive"].endswith(".nar.zst"), redirect
 
-    # `nix copy` writes the key with the `.debug` suffix still attached; both
-    # spellings must resolve to the same document.
     assert client.succeed(f"{CURL} -sf {CACHE}/debuginfo/{build_id}.debug") == redirect
 
-    # The archive link is relative to the `debuginfo/` key, so it resolves
-    # against the cache root - and must actually be fetchable.
     archive = parsed["archive"].replace("../", "", 1)
     client.succeed(f"{CURL} -sf {CACHE}/{archive} -o /dev/null")
 
@@ -1657,19 +1425,8 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
     assert status(f"{CACHE}/debuginfo/{'0' * 40}") == "404"
     assert status(f"{CACHE}/debuginfo/{'0' * 40}.debug") == "404"
     assert status(f"{CACHE}/debuginfo/not-a-build-id") == "404"
-    # The exact request from #563: a debuginfo probe against a cache root that
-    # has no such cache. Used to be a 400, which crashed the client.
     assert status(f"http://server/cache/debuginfo/{build_id}.debug") == "404"
 
-    # ── Phase 10b: the worker reported a phase timeline for the build ────
-    # Regression guard (#589): the timeline rides inside JobCompleted, so a
-    # protocol or handler mistake shows up as a job with zero phases rather
-    # than as an error anywhere. A build is dispatched once per shared build and its
-    # record names whichever evaluation first named the derivation, so find it
-    # through the evaluation's own build jobs, not through that attribution.
-    # The builder holds hello's whole closure, so its jobs are mostly adopted
-    # from disk (Substituted): those still compress and push, but only a
-    # Completed one ran the builder and has a build span.
     banner("Phase 10b: the completed build job has worker phase spans")
     job_id, build_status = sql(
         f"SELECT dj.id, db.status FROM dispatched_job dj "
@@ -1691,19 +1448,12 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
     nested = [p for p in job["phases"] if p["parent_seq"] is not None]
     assert nested, "the timeline recorded no nesting at all"
 
-    # The eval's phase columns are summed from its own timeline, so a zero
-    # here means the eval job's spans never reached evaluation_metric.
     eval_ms = sql(
         f"SELECT fetch_ms + eval_flake_ms + eval_drv_ms FROM evaluation_metric "
         f"WHERE evaluation = '{eval_id}' LIMIT 1;"
     )
     assert eval_ms and int(eval_ms) > 0, f"eval phase columns not derived from the timeline: {eval_ms!r}"
 
-    # ── Phase 10c: the reference counter moves with the cache (#592) ──────
-    # Retire one of hello's runtime references: the zombie purge deletes the
-    # row and ripples the loss up to every shared build that trusted it, a re-upload
-    # seeds it complete again and ripples that back. `missing_runtime_deps` is
-    # moved, never re-derived, so the recount has to agree at every step.
     banner("Phase 10c: missing_runtime_deps moves on retire and re-upload")
 
     retired_columns = int(sql(
@@ -1713,22 +1463,12 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
     ))
     assert retired_columns == 0, "cached_path still carries a retired complete-closure column"
 
-    # Phase 10d bills this cycle, so open the accounting before it starts. The
-    # library counts from server start; the extension only exposes the view.
     sql("CREATE EXTENSION IF NOT EXISTS pg_stat_statements;")
     COUNTER_WRITES = "s.query ILIKE '%update derivation_build%missing_runtime_deps%'"
     counter_rows_before = int(sql(
         f"SELECT coalesce(sum(s.rows), 0) FROM pg_stat_statements s WHERE {COUNTER_WRITES};"
     ))
 
-    # The shared build side of the same idea (#591): both can-start columns are moved
-    # by the event that changes them, so a recount has to agree with every row.
-    # The `derivation_output` guard is not a tautology - `NOT EXISTS` is vacuous
-    # for a shared build with no output rows, and without it every output-less
-    # terminal-success shared build reads as fetchable, which is the unbacked-output
-    # dead zone. The dependency count LEFT JOINs for the same reason the gate
-    # does: a dependency with no shared build row at all counts as blocking. Since #593
-    # an upstream copy is NOT fetchable: a parent waits for the passthrough.
     def shared_build_drift():
         return int(sql(
             "SELECT count(*) FROM derivation_build db WHERE db.blocking_deps <> ("
@@ -1744,10 +1484,6 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
             "  WHERE o.derivation = db.derivation AND cp.file_hash IS NULL));"
         ))
 
-    # The second can-start counter, one per edge kind (#671). The complete closure moved from
-    # the path to the shared build: a shared build is complete when every output is present and
-    # no runtime dependency leads to something that is not, so the recount is a walk up
-    # from what is not present and has to agree with every stored count.
     def runtime_drift():
         return int(sql(
             "WITH RECURSIVE incomplete(derivation) AS ("
@@ -1772,14 +1508,6 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
             f"WHERE d.hash = '{drv}';"
         ).split()
 
-    # The third counter (#666). Wanted is reachability from the open entry points
-    # through open shared builds, so the recount is a walk and not a per-row subquery:
-    # a builder steps over every edge, anything else over its runtime dependencies, and
-    # a shared build is reached while it is open (not fetchable, not the requeue's). A
-    # passthrough is reached and never stepped through on a build edge, which is the
-    # whole reason a passed-through subtree stops being built; a `Completed` shared build with
-    # a missing dependency in its closure is open, which is how that dependency is reached. Open
-    # shared builds only: a settled one keeps whatever it carried and nothing reads it.
     def wanted_drift():
         def is_open(a):
             return f"NOT {a}.fetchable AND {a}.status NOT IN (4, 6, 9)"
@@ -1800,9 +1528,6 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
             "AND db.wanted <> (db.derivation IN (SELECT derivation FROM wanted));"
         ))
 
-    # The sweep counts this and repairs nothing: a terminal-success producer whose
-    # output no artifact backs is never fetchable, so every dependent of it waits
-    # for an event that cannot come. Two of these wedged an evaluation for 900 s.
     def unbacked():
         return int(sql(
             "SELECT count(DISTINCT o.hash) FROM derivation_output o "
@@ -1824,7 +1549,6 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
     assert unbacked() == 0, "a producer this build settled has an output nothing backs"
     assert shared_build_complete(drv_hash)[0] == "0", "hello's shared build is not complete to start with"
 
-    # glibc first, since hello links against it.
     refs = sql(
         f"SELECT cp.hash || '-' || cp.package FROM cached_path cp "
         f"WHERE cp.hash IN (SELECT split_part(t.tok, '-', 1) FROM cached_path r, "
@@ -1834,14 +1558,10 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
         f"ORDER BY (cp.package LIKE 'glibc-%') DESC, cp.package;"
     ).splitlines()
 
-    # `NarStore` shards its objects by the store hash, under the module's baseDir.
     def nar_object(name):
         h = name.split("-")[0]
         return f"/var/lib/gradient/nars/{h[:2]}/{h[2:]}.nar.zst"
 
-    # The path has to be in the server's own store: the re-upload below invokes the CLI
-    # there. hello's only runtime reference is glibc, so there is no second candidate
-    # to fall back on and the precondition has to be made rather than looked for.
     dep_name = next(
         (n for n in (name.strip() for name in refs)
          if n and server.execute(f"test -e /nix/store/{n}")[0] == 0),
@@ -1852,19 +1572,11 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
     dep_hash = dep_name.split("-")[0]
     dep_object = nar_object(dep_name)
 
-    # A complete `cached_path` row does not imply a local object: the row can be recorded
-    # from an upstream narinfo, or outlive its object until the zombie purge catches
-    # up. Retiring needs something to delete, so push it first when it is not there.
     if server.execute(f"test -f {dep_object}")[0] != 0:
         print(f"{dep_path} is complete in the index with no local object; pushing it first")
         server.succeed(f"{CLI} cache upload main {dep_path}")
     server.succeed(f"test -f {dep_object}")
 
-    # The purge below takes every row whose object is gone, not just the one this
-    # phase deletes, and phase 10e's settle from cache needs EVERY output of the
-    # victim's producer to still have a row. A sibling output that is already a
-    # zombie would be swept up with the victim and is not restored by the single
-    # re-upload, so back them all on disk while there is still something to push.
     siblings = sql(
         f"SELECT cp.hash || '-' || cp.package FROM derivation_output o "
         f"JOIN cached_path cp ON cp.hash = o.hash "
@@ -1885,8 +1597,6 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
     indexed_before = set(sql("SELECT hash FROM cached_path;").split())
     server.succeed(f"rm {dep_object}")
 
-    # The zombie purge is the retiring caller here. The deep GC performs that same
-    # pass now instead of waiting out cacheMaintenanceIntervalSecs.
     server.succeed(
         f"{CURL} -sf -X POST -H 'Authorization: Bearer {token}' "
         f"{API}/admin/maintenance/deep-gc"
@@ -1900,13 +1610,6 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
         print(f"the purge also took {len(bystanders)} rows that were already zombies: {bystanders}")
 
     assert runtime_drift() == 0, "complete-closure counter disagrees with its recount after the retire"
-    # The retire moves the shared build side in its own transaction: the producer of a
-    # path it deleted stops being fetchable, and a terminal-success producer with
-    # nothing left to serve is reset to a fresh build intent. Only the terminal
-    # status and the flag are asserted, not `Created` exactly: the consistency
-    # sweep may already have promoted the reset row, and re-queuing it is not the
-    # bug this guards - a producer that stays trusted against a path that is gone
-    # is.
     producer = sql(
         f"SELECT db.status::text || ' ' || db.fetchable::int::text FROM derivation_build db "
         f"JOIN derivation_output o ON o.derivation = db.derivation "
@@ -1924,20 +1627,12 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
     ))
     assert hello_blocking >= 1, f"hello must count its unfetchable dependencies as blocking: {hello_blocking}"
 
-    # The same fact on the shared build. hello references the retired path, so the
-    # runtime dependency on its producer is missing and hello stops being complete; the
-    # counter is moved by the retire's ripple, never re-derived.
     hello_missing, hello_fetchable = shared_build_complete(drv_hash)
     assert int(hello_missing) >= 1, (
         f"hello's shared build must count the retired reference as a missing runtime dep, "
         f"has {hello_missing}")
     assert hello_fetchable == "0", "a shared build that is not complete must not be fetchable"
 
-    # The other half of the reset's scope, and the one that costs a fleet when it
-    # is wrong. hello only REFERENCES the retired path; its own output is still on
-    # disk, so it loses fetchability and keeps its terminal status. Resetting the
-    # parent closure instead re-queued 107 derivations and dispatched 139 builds
-    # in 30 s from this one deleted NAR, and rebuilt nothing that was missing.
     hello_build = sql(
         f"SELECT db.status::text || ' ' || db.fetchable::int::text FROM derivation_build db "
         f"JOIN derivation d ON d.id = db.derivation WHERE d.hash = '{drv_hash}';"
@@ -1956,14 +1651,6 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
          f"JOIN derivation d ON d.id = db.derivation WHERE d.hash = '{drv_hash}';", "0",
          "the re-upload did not ripple hello's shared build back to complete")
 
-    # A re-upload restores the complete closure, not trust. `fetchable` also needs a
-    # terminal-success status, which only an evaluation's record step or a finished
-    # build writes, so a NAR arriving back in the cache must never re-trust the
-    # producer the retire demoted. Asserted on that producer directly: hello's
-    # own `blocking_deps` looks like the same thing but is not, because it counts
-    # one hop of `derivation_dependency` and the retired path is a runtime
-    # reference, whose producer need not be an edge of hello at all. That form
-    # read 0 as soon as the complete closure rippled back and failed for the wrong reason.
     settled = sql(
         f"SELECT db.status::text || ' ' || db.fetchable::int::text FROM derivation_build db "
         f"JOIN derivation_output o ON o.derivation = db.derivation "
@@ -1974,28 +1661,18 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
         f"the re-uploaded output's producer is fetchable again with no terminal-success "
         f"status, so the NAR alone re-trusted it; (status fetchable) = ({settled})")
 
-    # The retire demoted the producer too, so the graph may rebuild and re-push
-    # the path; phase 12b measures the drain of an *idle* worker, so wait that
-    # self-heal out and re-check the counters it moved.
     poll("SELECT count(*) FROM dispatched_job WHERE finished_at IS NULL "
          "AND dispatched_at > (now() AT TIME ZONE 'UTC') - interval '10 minutes';",
          "0", "a re-dispatched build is still running", timeout=300)
     assert runtime_drift() == 0, "complete-closure counter disagrees with its recount after the self-heal"
     assert shared_build_drift() == 0, "shared build counters disagree with their recount after the self-heal"
 
-    # ── Phase 10d: the database-time bill (#592, #629) ────────────────────
-    # The retired fixpoint was 67% of production database time, and nothing in
-    # the type system notices a counter that is re-derived instead of moved: it
-    # simply climbs this list. So print what the whole run cost, per statement,
-    # and hold the counter's own writes to the parents they touched.
     banner("Phase 10d: pg_stat_statements bills the run")
 
     def psql_table(query):
         server.succeed(f"cat > /tmp/q.sql <<'EOF'\n{query}\nEOF")
         return server.succeed("su postgres -c 'psql -v ON_ERROR_STOP=1 -d gradient -f /tmp/q.sql'")
 
-    # The test's own psql connects as postgres; only the server's statements are
-    # Gradient's bill, and excluding ours also keeps these polls out of the shares.
     server_statements = (
         "FROM pg_stat_statements s JOIN pg_roles r ON r.oid = s.userid "
         "WHERE r.rolname <> 'postgres' "
@@ -2018,9 +1695,6 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
         f"{build_rows}-build graph; a moved counter touches parents, a derived one the table"
     )
 
-    # Loose on purpose: these are pathology detectors on a slow shared VM, not
-    # benchmarks. A per-tick fixpoint over the cache breaks both by an order of
-    # magnitude, and the printout above is what a human reads.
     total_ms = float(sql(
         f"SELECT round(coalesce(sum(s.total_exec_time), 0)::numeric, 2) {server_statements};"
     ))
@@ -2032,22 +1706,8 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
     assert total_ms < 300000, f"the run burned {total_ms} ms of database time"
     assert counter_share < 50, f"maintaining the counter is {counter_share}% of database time"
 
-    # ── Phase 10e: a re-evaluation settles the producer a retire reset ─────
-    # The retire reset the producer of the path it DELETED back to Created, and a
-    # re-upload does not settle it: `fetchable` reads the shared build's own status, so
-    # only an evaluation (the record step marks a derivation complete in our cache
-    # Substituted) or a rebuild puts it back. Parents were never reset, so they
-    # need nothing here. This phase drives the
-    # evaluation and asserts the graph converges: the producer is fetchable again,
-    # hello's counter is back to zero, and neither counter disagrees with its
-    # recount. The polling trigger is configured at 10 s on `task`, so an empty
-    # commit is picked up like phase 4's initial commit.
     banner("Phase 10e: the next evaluation finds every output complete and settles the graph")
 
-    # The consistency check is the other claimant for those same Created shared builds:
-    # it promotes them on its own 300 s cadence and the fleet re-pushes them, so
-    # wait that cascade out before sampling, or its dispatches are billed to the
-    # re-evaluation below.
     poll("SELECT count(*) FROM dispatched_job WHERE finished_at IS NULL "
          "AND dispatched_at > (now() AT TIME ZONE 'UTC') - interval '10 minutes';",
          "0", "a re-dispatched build is still running", timeout=300)
@@ -2078,10 +1738,6 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
             print(f"  [{attempt:>2}/90] re-eval candidate={candidate or 'none'} "
                   f"status={status3 or '-'}")
     if not eval3_id:
-        # An ACTIVE `last_evaluation` blocks every later trigger for good -
-        # `update_check` skips while it is - so a re-evaluation that never starts
-        # and one that never finishes read the same from here. The evaluations and
-        # the trigger's own decisions are what tell them apart.
         evals = sql(
             "SELECT e.id::text || ' status=' || e.status::text"
             " || ' created=' || e.created_at::text"
@@ -2102,11 +1758,6 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
             f"what the trigger decided:\n{decided}"
         )
 
-    # Polled, not sampled. The producer has no `build_job` of its own in an
-    # evaluation that records nothing again, so it is reached only through the eval
-    # closure: the cache repair settles it where every output still has a row,
-    # and otherwise the promotion queues a rebuild whose completion outlives the
-    # evaluation. The evaluation reporting Completed says nothing about either.
     producer_state = (
         f"SELECT db.status::text || ' ' || db.fetchable::int::text FROM derivation_build db "
         f"JOIN derivation_output o ON o.derivation = db.derivation "
@@ -2129,11 +1780,6 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
             f"in 600 s, has (status fetchable) = ({producer}) with {unbacked} of its "
             f"outputs missing a cached_path row"
         )
-    # The ripple decrements the parents inside the same transaction that
-    # flips the producer, so this is settled the moment the poll above sees it.
-    # The short window is for a SECOND dependency still being re-pushed, and is
-    # deliberately far inside the 300 s sweep: a ripple this missed must fail
-    # here rather than be repaired into a pass.
     hello_blocking = (
         f"SELECT db.blocking_deps FROM derivation_build db "
         f"JOIN derivation d ON d.id = db.derivation WHERE d.hash = '{drv_hash}';"
@@ -2165,19 +1811,9 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
     assert runtime_drift() == 0, "complete-closure counter disagrees with its recount after the re-evaluation"
     assert shared_build_drift() == 0, "shared build counters disagree with their recount after the re-evaluation"
 
-    # Printed, not asserted: a complete cache needs no build, but the sweep above can
-    # promote the same shared builds inside this window and its dispatches are
-    # indistinguishable from the evaluation's, so a zero here would be a coin flip.
     builds_after = int(sql("SELECT count(*) FROM dispatched_job WHERE kind = 1;"))
     print(f"builds dispatched around the re-evaluation: {builds_after - builds_before}")
 
-    # A build-once shared build is built once (#654). Two successful builds of one
-    # derivation is the most this run can legitimately want - its first, and the
-    # one phase 10c's retire demoted it into - so a third means something re-armed
-    # a build the graph had already got, which is how the unbacked-output loop
-    # showed up: one dispatch per repair pass, rebuilding an output that never
-    # came back. Outcomes 1 and 2 are `Built`/`Substituted`; a passthrough builds
-    # nothing and is excluded.
     churn = sql(
         "SELECT string_agg(d.name || ' built ' || x.builds::text || ' times', ', ') "
         "FROM (SELECT ba.derivation_build, count(*) AS builds FROM build_attempt ba "
@@ -2188,25 +1824,6 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
     )
     assert churn == "", f"a build-once shared build was rebuilt past the one granted retry: {churn}"
 
-    # ── Phase 10f: the ordered lock is what makes a recount correct ───────
-    # Four defect classes on the counter stack were a counter written outside an
-    # ordered lock, and none of them had a test that would fail. This pins ONE
-    # interleaving, the one the can-start repair's lock exists for: a retire holds
-    # its `cached_path` lock and the shared build lock its can-start half takes, while a
-    # `fetchable` recount waits behind that shared build lock. An UNLOCKED recount reads
-    # its new value from a snapshot taken before the retire commits and its
-    # compare-and-swap from the fresh row, so it stores `true` for a shared build whose
-    # only output the retire just deleted - and `fetchable = true` is exactly what
-    # stops it counting toward its parents' `blocking_deps`. Under the lock the
-    # recount's statement opens after that commit and stores the true value.
-    #
-    # Both `psql_*` helpers run a fresh process per call, so no transaction can
-    # survive between driver steps; dblink cannot block on a row lock and then
-    # proceed. So one script on the VM owns both sessions: two psql processes fed
-    # from FIFOs, and a third connection polling `pg_stat_activity` to know that
-    # session B is genuinely blocked before session A commits. Every wait is
-    # bounded, every exit path closes both sessions, and every row it touches is
-    # one it created.
     banner("Phase 10f: a retire holds its locks while a can-start recount waits")
     LR_DRV = "aaaaaaaa-0000-4000-8000-00000000fe01"
     LR_DRV2 = "aaaaaaaa-0000-4000-8000-00000000fe02"
@@ -2228,9 +1845,6 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
             f"INSERT INTO derivation_output (id, derivation, name, hash, package, is_cached, "
             f"created_at) VALUES (uuidv7(), '{drv}', 'out', '{out_hash}', '{name}-out', "
             f"true, now() AT TIME ZONE 'UTC');\n"
-            # Unconfirmed on purpose: no NAR backs these rows, and the cache cleanup
-            # purges a CONFIRMED row whose object is gone, which took the second
-            # fixture out from under the phase 20 seconds after it was written.
             f"INSERT INTO cached_path (id, hash, package, file_hash, file_size, nar_size, nar_hash, "
             f"confirmed, created_at) VALUES (uuidv7(), '{out_hash}', '{name}-out', "
             f"'sha256:lockrace', 1, 1, 'sha256:lockrace', false, now() AT TIME ZONE 'UTC');"
@@ -2249,10 +1863,6 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
             f"DELETE FROM derivation WHERE id = '{drv}';"
         )
 
-    # A terminal-success shared build with one complete output and `fetchable` stored false:
-    # drifted by construction, which is what the repair exists to correct and what
-    # makes a stale recount write the wrong value instead of nothing. Two of them,
-    # one per arm, so the arms cannot interfere.
     lockrace_fixture(LR_DRV, lr_drv_hash, lr_out_hash, "lockrace-probe")
     lockrace_fixture(LR_DRV2, lr_drv2_hash, lr_out2_hash, "lockrace-unlocked")
 
@@ -2267,8 +1877,6 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
     rows_left = int(sql(
         f"SELECT count(*) FROM cached_path WHERE hash IN ('{lr_out_hash}', '{lr_out2_hash}');"
     ))
-    # The unlocked arm leaves a deliberately wrong `fetchable`, so both fixtures come
-    # out before the drift checks, which would otherwise count the defect we asked for.
     lockrace_cleanup(LR_DRV, lr_out_hash)
     lockrace_cleanup(LR_DRV2, lr_out2_hash)
     race_drift = runtime_drift()
@@ -2290,26 +1898,8 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
         f"(complete closure {race_drift}, can-start {race_shared_build_drift})"
     )
 
-    # ── Phase 10g: a passthrough happens when, and only when, something wants it ─
-    # Half of all worker jobs used to be passthroughs of outputs nothing had asked
-    # for, and each one passed the output through ALONE: the members of its runtime
-    # closure below a pruned node have no shared build of their own, so nothing ever
-    # fetched them and every dependent's build fell back to the upstream. #593
-    # is both halves - a cache_available shared build is queued only while an entry
-    # point or a pending builder one hop above it wants it, and the passthrough
-    # mirrors the whole closure so the output lands complete in our cache.
-    #
-    # busybox is the probe: served only by a file binary cache on this host,
-    # wanted only by busywrap, which is built here. Every assertion is on the
-    # database, because "was it passed through" is a `build_attempt` row and "did the
-    # closure come with it" is the shared build's `missing_runtime_deps`.
     banner("Phase 10g: need-driven substitution (#593)")
 
-    # A narinfo whose Sig does not verify against the upstream's configured
-    # public key is dropped, so the file cache is signed on the way out with
-    # the key the cache declares. The upstream is declared rather than PUT:
-    # `main` is state-managed, and every mutating cache endpoint refuses a
-    # managed cache, so provisioning is the only way it can have one.
     server.succeed(
         f"{NIX} --extra-experimental-features 'nix-command flakes' copy "
         f"--to 'file:///srv/upstream?secret-key=/etc/gradient/secrets/upstream_key' --no-check-sigs "
@@ -2317,9 +1907,6 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
     )
     server.succeed("chown -R nginx:nginx /srv/upstream && systemctl reload nginx")
     server.succeed(f"{CURL} -sf http://gradient.local/upstream/nix-cache-info > /dev/null")
-    # The passthrough downloads the upstream NAR from the BUILDER, so the upstream has
-    # to answer there too. Asserted here because the alternative symptom is the
-    # phase timing out 900 s later on an evaluation that never finishes.
     builder.succeed(f"{CURL} -sf http://server/upstream/nix-cache-info > /dev/null")
 
     assert "file-upstream" in api_get(token, "caches/main/upstream-caches"), "the declared upstream was not provisioned"
@@ -2389,17 +1976,12 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
             f"terminal failures in the same evaluation:\n{failed}"
         )
 
-    # busywrap links a binary out of busybox, so it needs busybox's output in
-    # our cache before it can be built.
     server.succeed("cp /var/lib/git/flake-busywrap.nix /var/lib/git/test/flake.nix")
     server.succeed("sed -i 's#\\[nixpkgs\\]#${self.inputs.nixpkgs}#g' /var/lib/git/test/flake.nix")
     server.succeed(f"{GIT} -C /var/lib/git/test commit -am 'busywrap'")
     server.succeed("chown git:git -R /var/lib/git/test")
     eval4_id = wait_for_new_eval({eval_id, eval2_id, eval3_id})
 
-    # Both probes name their derivation exactly: `LIKE 'busybox%'` also matches
-    # the source tarball, a stub row written after the walked ones and so always
-    # the newest, which is the one thing here that must never be fetched.
     busybox = sql("SELECT id FROM derivation WHERE name = '${pkgs.busybox.name}';")
     busywrap = sql("SELECT id FROM derivation WHERE name = 'busywrap';")
     assert busybox, "the evaluation walked no derivation named ${pkgs.busybox.name}"
@@ -2408,23 +1990,12 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
     assert shared_build_of(busywrap).startswith("3 0"), (
         f"busywrap must be built here, not passed through: {shared_build_of(busywrap)}"
     )
-    # `7`, not `3`: a passthrough ran no build, so the worker reports it substituted
-    # and the shared build settles `Substituted`. Built here reads `3`, which is what
-    # busywrap is asserted on one line above - the pair is the whole point.
     assert shared_build_of(busybox) == "7 1 1", (
         f"busybox must be passed through exactly once off the upstream: {shared_build_of(busybox)}"
     )
-    # The whole of decision 3: the worker fetches an output and nothing below
-    # it, so the server wants the producers of what the NAR references and
-    # each is passed through on its own. That is what makes the output complete and its
-    # parents buildable entirely out of our cache.
     assert output_missing(busybox) == "0", (
         f"busybox's passed-through output is missing closure members: {output_missing(busybox)}"
     )
-    # The point of #666: a passthrough needs none of its inputs, so none of them may be
-    # built. busybox's source FODs reach the network, which the VM does not have,
-    # so before the fix they were dispatched, failed permanently, and cascaded onto
-    # the shared build the moment a retire made it non-terminal again.
     passthrough_inputs_built = sql(
         "SELECT count(*) FROM build_attempt a "
         "JOIN derivation_build db ON db.id = a.derivation_build "
@@ -2435,13 +2006,6 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
     assert passthrough_inputs_built == "0", (
         f"a passthrough's inputs were built anyway: {passthrough_inputs_built} attempts"
     )
-    # The source is the input the passthrough exists to avoid BUILDING. Dispatched is
-    # not the invariant: `separateDebugInfo` puts the source inside busybox's
-    # runtime closure, so the walk wants it over a `Both` edge and it is
-    # passed through off the same upstream - which is the only way busybox ever reads
-    # complete. Never BUILT is the invariant, and a passthrough is not a build: it
-    # settles `Substituted` off bytes we already have a URL for, while a build
-    # of this FOD would reach a network the VM does not have.
     sources, built, statuses = sql(
         f"SELECT count(*)::text || ' ' || count(*) FILTER ("
         f"  WHERE db.status = 3 OR (NOT (db.cache_available OR db.substituted) AND EXISTS ("
@@ -2459,18 +2023,12 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
     assert shared_build_drift() == 0, "shared build counters disagree with their recount after the passthrough"
     assert wanted_drift() == 0, "wanted flag disagrees with its recount after the passthrough"
 
-    # A re-evaluation wants the same shared build, which is already complete, so the
-    # gate holds and nothing is passed through again. 14k shared builds on production were
-    # passed through again exactly here.
     server.succeed(f"{GIT} -C /var/lib/git/test commit --allow-empty -m 'busywrap again'")
     server.succeed("chown git:git -R /var/lib/git/test")
     eval5_id = wait_for_new_eval({eval_id, eval2_id, eval3_id, eval4_id})
     assert shared_build_of(busybox) == "7 1 1", (
         f"the second evaluation passed a complete shared build through again: {shared_build_of(busybox)}"
     )
-    # task2 evaluates the same commit on its own poll, and its batch names
-    # busywrap: landing after the retire below, that entry point is not complete
-    # and rightly wants busybox again. Settle it before retiring anything.
     poll(
         f"SELECT (count(*) > 0)::text FROM evaluation e JOIN task t ON t.id = e.task "
         f"JOIN commit c ON c.id = e.commit "
@@ -2481,11 +2039,6 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
         timeout=600,
     )
 
-    # Retire busybox's NAR. Its shared build loses fetchability and is reset to a
-    # fresh build intent, but busywrap is terminal and no entry point names
-    # busybox, so nothing wants it: it stays `Created` and is never
-    # dispatched. This is the assertion the old unwanted-passthrough behaviour
-    # cannot pass.
     bb_hash = output_hash(busybox)
     assert bb_hash, "busybox has no cached output row to retire"
     server.succeed(f"rm -f {nar_object(bb_hash)}")
@@ -2498,17 +2051,11 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
     poll(shared_build_column(busybox, "db.status::text"), "0",
          "the retire left busybox terminal-success with nothing to serve")
 
-    # Three dispatch ticks and a maintenance pass: the consistency check is the
-    # other claimant for a `Created` shared build and its promote embeds the same
-    # gate, so if wanted were not part of that gate it would queue busybox here.
     server.sleep(45)
     assert shared_build_of(busybox) == "0 1 1", (
         f"an unwanted passthrough was dispatched again: {shared_build_of(busybox)}"
     )
 
-    # Retire busywrap's own output. Its producer is reset, which makes it a
-    # builder again, which wants busybox: the passthrough happens a second time and
-    # both shared builds come back.
     bw_hash = output_hash(busywrap)
     assert bw_hash, "busywrap has no cached output row to retire"
     server.succeed(f"rm -f {nar_object(bw_hash)}")
@@ -2521,8 +2068,6 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
     poll(passthrough_attempts(busybox), "2",
          "a wanted passthrough was not re-dispatched after its NAR was retired",
          timeout=600)
-    # The worker still holds busywrap's output, so it may push that back
-    # (Substituted) instead of rebuilding: either way the cache serves it again.
     poll(shared_build_column(busywrap, "(db.status IN (3, 7))::text"), "true",
          "busywrap did not come back once its input was passed through again", timeout=600)
     poll(f"SELECT count(*) FROM cached_path WHERE hash = '{bw_hash}' AND file_hash IS NOT NULL;", "1",
@@ -2534,20 +2079,6 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
     assert shared_build_drift() == 0, "shared build counters disagree with their recount after the second passthrough"
     assert wanted_drift() == 0, "wanted flag disagrees with its recount after the second passthrough"
 
-    # ── Phase 10h: a pruned interior outlives the evaluation that walked it ─
-    # A batch names what it walked plus the direct inputs of that, and a walk
-    # prunes on `walked` alone, so the interior of a subtree another evaluation
-    # walked first is named by that evaluation and by nobody else. Delete it
-    # while this one still builds against the subtree and every gate in the
-    # interior shuts at once: promotion, the dispatch select, the dispatcher's
-    # driving evaluation and eval-done all read `build_job` (#663). The fix
-    # hands the names over: a live evaluation adopts the pending shared builds it
-    # reaches through its own builders, from the GC's own pass, the graph-stuck
-    # heal and the consistency check. This phase makes the state by hand - the
-    # interior's names are dropped, its outputs are retired for real so the
-    # chain is pending, task2's current evaluation is put back into Building over
-    # it - and asserts the outcome end to end: adopted, queued, attributed to
-    # that evaluation, rebuilt, and it completes with everything complete.
     banner("Phase 10h: a pruned interior is adopted, attributed and rebuilt (#663)")
 
     hello_drv = sql(f"SELECT id FROM derivation WHERE hash = '{drv_hash}';")
@@ -2584,13 +2115,9 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
     outputs = sql(f"SELECT o.hash FROM derivation_output o WHERE o.derivation IN ({chain});").split()
     assert len(outputs) >= 3, f"the chain has only {len(outputs)} outputs"
 
-    # What keep_evaluations leaves behind for a pruned interior once its walker
-    # is gone: no evaluation names it. hello keeps its names.
     sql(f"DELETE FROM build_job WHERE derivation IN ('{d1}', '{d2}');")
     assert sql(f"SELECT count(*) FROM build_job WHERE derivation IN ('{d1}', '{d2}');") == "0"
 
-    # Retire the chain's outputs for real, so the producers are reset and the
-    # counters move by the retire's own ripple rather than by hand.
     for h in outputs:
         server.succeed(f"rm -f {nar_object(h)}")
     server.succeed(
@@ -2605,19 +2132,11 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
     assert runtime_drift() == 0, "complete-closure counter disagrees with its recount after the retire"
     assert shared_build_drift() == 0, "shared build counters disagree with their recount after the retire"
 
-    # The dead zone, stated: nothing queues an unnamed shared build, however startable.
     server.sleep(20)
     assert sql(f"SELECT status::text FROM derivation_build WHERE derivation = '{d2}';") == "0", (
         "an interior with no name was queued before anything adopted it"
     )
 
-    # task2's CURRENT evaluation is the one still building against the subtree.
-    # Not `eval2_id`: every push in the phases above re-evaluates both tasks and
-    # `keep_evaluations` is 1, so task2's first evaluation and its names are long
-    # deleted by here - which is the very state this phase is about. Nothing above
-    # waits on task2's side of a push, and phase 10g made two commits its own 10 s
-    # poll picks up, so its newest evaluation is still walking as often as not:
-    # wait for the batch that names the builder before reading the id.
     newest_task2 = (
         "SELECT e.id FROM evaluation e JOIN task t ON t.id = e.task "
         "WHERE t.name = 'task2' ORDER BY e.created_at DESC LIMIT 1"
@@ -2673,10 +2192,6 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
     assert shared_build_drift() == 0, "shared build counters disagree with their recount after the adopted rebuild"
     print(server.succeed("journalctl -u gradient-server --no-pager | grep -i 'adopt' | tail -n 5"))
 
-    # ── Phase 10l: an aborted evaluation stops evaluating on the worker ───
-    # The spin flake keeps nix busy for hours, so only the abort ends its
-    # evaluations. It executes before 10i deletes the polling triggers, and the poller
-    # compares commits, not statuses: nothing after it evaluates the commit again.
     banner("Phase 10l: an aborted evaluation stops evaluating on the worker")
 
     def eval_cpu_ticks(node):
@@ -2700,8 +2215,6 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
     server.succeed(f"{GIT} -C /var/lib/git/test commit -am 'spin'")
     server.succeed("chown git:git -R /var/lib/git/test")
 
-    # Both tasks poll the repository; an evaluation created after the abort
-    # would spin through every later phase.
     poll(f"SELECT count(*) {spin_evals};", "2", "both tasks did not pick up the spin commit")
     poll(f"SELECT (count(*) > 0)::text {spin_evals} AND status = 2;",
          "true", "no spin evaluation reached its derivation phase", timeout=300)
@@ -2736,13 +2249,6 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
         "| grep -q 'worker never confirmed the abort'"
     )
 
-    # ── Phase 10i: retention follows the live closure (#594) ──────────────
-    # One keep-set decides what stays in the cache: the NAR reference closure
-    # of the outputs and `.drv` files of every derivation a retained
-    # evaluation reaches. Phase 9's probe is a store path no derivation
-    # produced and no evaluation names, so it has been outside that set since
-    # the moment it was uploaded and only its fetch recency keeps it; hello is
-    # inside it until nothing names hello any more.
     banner("Phase 10i: live-closure retention (#594)")
 
     probe_object = nar_object(f"{upload_hash}-probe")
@@ -2758,9 +2264,6 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
         sql(f"UPDATE cached_path_signature SET last_fetched_at = last_fetched_at - interval '{hours} hours' "
             f"WHERE cached_path IN (SELECT id FROM cached_path WHERE hash IN ('{listed}'));")
 
-    # 26 hours, not 2: the bound is the fetch TTL floored at the upload grace
-    # (`gc.narTtlHours = 1`, `gc.narUploadGraceHours = 24`), so a closure member is
-    # never reclaimed between its own commit and its parent's.
     age([upload_hash], 26)
     poll(f"SELECT count(*) FROM cached_path WHERE hash = '{upload_hash}';", "0",
          "the eviction kept a path no retained evaluation reaches", timeout=240)
@@ -2770,10 +2273,6 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
     ) == "2", "the eviction took a path the live closure still reaches"
     assert runtime_drift() == 0, "complete-closure counter disagrees with its recount after the eviction"
 
-    # `build_job` and `entry_point` are what seed the reachable walk, so hello
-    # leaves the live set when its names go; the pollers would write them back,
-    # so the triggers go first. Its derivation row then ages past the orphan
-    # grace, and the eviction pass owns the NARs the derivation GC used to.
     sql("DELETE FROM task_trigger;")
     hello_drv = sql(f"SELECT id FROM derivation WHERE hash = '{drv_hash}';")
     assert hello_drv, "hello's derivation row is gone before this phase deleted anything"
@@ -2797,15 +2296,6 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
         "a path its own name still reaches left the cache with hello"
     assert runtime_drift() == 0, "complete-closure counter disagrees with its recount after the GC and the eviction"
 
-    # ── Phase 10i: a naming racing a transition settles anyway ────────────
-    # The counter triggers take no lock: a naming held FOR SHARE until the
-    # record flush commits deadlocks that flush against a ripple. So a naming
-    # and a transition in flight together miss each other, and the evaluation
-    # counts a shared build that already finished. The exact reads are the arbiter:
-    # the tick's shared build read finds nothing blocking, recounts, and settles. This
-    # parks a finished evaluation back in `Building` behind a held shared build, plays
-    # that race on a second shared build, releases the first, and waits for the server
-    # to settle it with counters that match their recount.
     banner("Phase 10i: a naming racing a transition still settles (#640)")
     CR_DRV = "1950ecc8-8530-4e1c-bc1c-de4bd759fe57"
     CR_HOLD_DRV = "5f923367-19cc-4823-9b73-5c4b9fe4d0ca"
@@ -2856,13 +2346,6 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
     )
     assert agree == "t", "the evaluation settled but its counters still disagree with their recount"
 
-    # ── Phase 10j: two instances claiming one job, one wins ──────────────
-    # Scores come from the workers, so each instance's tracker proposes a
-    # winner on its own; the claim decides it in Postgres. Two sessions stand
-    # in for two instances claiming the same shared build: the unique index on the
-    # open job key makes the second wait for the first and insert nothing, so
-    # the job is out exactly once. The shared build has no build_job, so the running
-    # server never dispatches it.
     banner("Phase 10j: two instances claiming one job, one wins (#641)")
     CL_DRV = "8ef77385-09cc-40f8-833e-732d330a2685"
     cl_owner = sql("SELECT evaluation_id || ' ' || project FROM dispatched_job LIMIT 1;")
@@ -2898,9 +2381,6 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
     assert "claimrace_b INSERT 0 0" in out, f"the second claim inserted a duplicate: {out}"
     assert open_rows == "1", f"{open_rows} open rows for one job key"
 
-    # ── Phase 10k: a seed and a flip see each other (#643) ────────────────
-    # A seed counts its dependencies under shared advisory keys, a flip holds its
-    # shared build's key exclusively, so whichever comes second reads the other's rows.
     banner("Phase 10k: a seed and a flip see each other through the shared build keys (#643)")
     server.succeed(f"cat > /tmp/lockguard.sh <<'LOCKGUARD'\n{LOCK_GUARD_SH}\nLOCKGUARD")
     out = server.succeed(
@@ -2914,7 +2394,6 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
         f"the unguarded arm did not drift, so the keys are not what the others prove:\n{out}"
     )
 
-    # ── Phase 11: the supervision tree is healthy and shutdown drains ─────
     banner("Phase 11: every supervised loop is running; SIGTERM drains")
     health = json.loads(api_get(token, "board/health"))["message"]
     names = sorted(l["name"] for l in health["supervised"])
@@ -2935,10 +2414,6 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
     server.succeed("journalctl -u gradient-server --no-pager | grep -q 'background tasks drained cleanly'")
     builder.succeed("journalctl -u gradient-worker --no-pager | grep -q 'server is draining'")
 
-    # ── Phase 12: a drained server does not decommission the worker (#626) ─
-    # The worker used to exit(0) on `Draining`, and because the unit restarts
-    # `on-failure` that left the fleet dead after every deploy until someone
-    # restarted each worker by hand.
     banner("Phase 12: the worker survives the drain and reconnects")
     builder.succeed("systemctl is-active gradient-worker.service")
     own_session = requires("Phase 12's drained-session checks", "distinct-upstream-workers")
@@ -2952,8 +2427,6 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
             "journalctl -u gradient-worker --no-pager | grep -q 'reconnected successfully'", timeout=180
         )
 
-    # A local signal is the only thing that stops a worker: it drains first,
-    # then exits cleanly (the unit is idle here, so this is immediate).
     banner("Phase 12b: SIGTERM drains the worker, then stops it")
     t0 = time.time()
     builder.succeed("systemctl stop gradient-worker.service")
@@ -2967,10 +2440,6 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
         "systemctl show -p Result --value gradient-worker.service"
     ).strip() == "success"
 
-    # ── Phase 14: a pending delivery written before a restart is delivered after it ─
-    # The point of pending deliveries: an effect owed to the outside world is a row, so
-    # it survives the process that owed it. The row is inserted while the server
-    # is down, which no in-process spawn could have carried across.
     banner("Phase 14: pending deliveries survive a restart (#597)")
     action_id = sql("SELECT id FROM task_action WHERE name = 'restart-probe';")
     assert len(action_id) == 36, f"the state-declared probe action is missing: {action_id}"
@@ -3000,14 +2469,7 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
     assert sql("SELECT delivered_at IS NOT NULL FROM pending_delivery WHERE key = 'restart-probe';") == "t", \
         "the row must settle, not be redelivered on every tick"
 
-    # ── Phase 13: every registered statement plans sanely (#651) ──────────
-    # The gate amplifies this database to production scale, so it executes last and
-    # the fleet is stopped first: nothing else should ever see those rows, and a
-    # worker left running only reconnects at a server that is gone. It explains
-    # each statement in a transaction it rolls back, which is what makes a
-    # registered INSERT, UPDATE, DELETE or FOR UPDATE safe to ANALYZE.
     banner("Phase 13: the SQL plan gate")
-    # A statement over an empty table is unmeasured, and nothing earlier stars.
     for star in ("projects/project", "tasks/project/task", "caches/main"):
         server.succeed(
             f"{CURL} -sf -X PUT -H 'Authorization: Bearer {token}' "

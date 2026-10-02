@@ -71,11 +71,7 @@
         package = pkgs.postgresql_18;
         enableTCPIP = true;
         authentication = ''
-          #...
-          #type database DBuser origin-address auth-method
-          # ipv4
           host  all      all     0.0.0.0/0      trust
-          # ipv6
           host all       all     ::0/0        trust
         '';
 
