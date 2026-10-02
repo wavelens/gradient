@@ -19,6 +19,7 @@ pub struct SshArgs {
     #[arg(long = "ssh-listen-address", env = "GRADIENT_SSH_LISTEN_ADDRESS")]
     pub listen_address: Option<String>,
     #[arg(
+        id = "ssh-port",
         long = "ssh-port",
         env = "GRADIENT_SSH_PORT",
         value_parser = port_in_range,
