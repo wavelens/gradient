@@ -11,5 +11,6 @@ publish     = false
 workspace = true
 
 [dependencies]
-anyhow     = { workspace = true }
-serde_json = { workspace = true }
+anyhow        = { workspace = true }
+gradient-wire = { workspace = true }
+serde_json    = { workspace = true }

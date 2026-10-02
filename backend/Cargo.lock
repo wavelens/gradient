@@ -2391,6 +2391,7 @@ name = "gradient-derivation"
 version = "1.4.1"
 dependencies = [
  "anyhow",
+ "gradient-wire",
  "serde_json",
 ]
 
