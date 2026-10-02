@@ -4,22 +4,11 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Trait abstraction over the Nix derivation evaluator.
-//!
-//! Production impl lives in the `gradient-worker` crate (`WorkerPoolResolver`)
-//! and drives a pool of long-lived eval-worker subprocesses, each hosting one
-//! persistent embedded Nix C API evaluator. Tests in any crate can substitute
-//! the in-memory `FakeDerivationResolver` from `test-support`.
-
 use anyhow::Result;
 use async_trait::async_trait;
 use gradient_derivation::Derivation;
-/// Result of resolving one flake attribute path: `(attr_path, Result<(drv_path, references)>)`.
 pub type ResolvedDerivation = (String, Result<(String, Vec<String>)>);
 
-/// Outcome of discovering a flake's derivation attr paths: the matched paths,
-/// nix warnings surfaced during the walk, and errors for attributes that threw
-/// (recorded, not fatal - the walk continues; the server fails the eval).
 #[derive(Debug, Default, Clone)]
 pub struct FlakeDiscovery {
     pub attrs: Vec<String>,
@@ -27,15 +16,10 @@ pub struct FlakeDiscovery {
     pub errors: Vec<String>,
 }
 
-/// Evaluates flake-based Nix derivations. All methods are async; production
-/// impls run their work inside `tokio::task::spawn_blocking` to keep the
-/// embedded Nix C API off Tokio worker threads (Boehm GC vs. signal-blocked
-/// workers - see `gradient_worker::nix::eval_worker::run_eval_worker`).
+/// Production impls must run inside `tokio::task::spawn_blocking`. The embedded Nix C API with
+/// Boehm GC cannot run on signal-blocked Tokio workers.
 #[async_trait]
 pub trait DerivationResolver: Send + Sync + std::fmt::Debug + 'static {
-    /// Discover all attribute paths matching `wildcards` in the given flake.
-    /// `overrides` are `(input_name, flake_ref)` pairs applied at lock time so
-    /// discovery reflects the override set.
     async fn list_flake_derivations(
         &self,
         repository: String,
@@ -43,10 +27,6 @@ pub trait DerivationResolver: Send + Sync + std::fmt::Debug + 'static {
         overrides: &[(String, String)],
     ) -> Result<FlakeDiscovery>;
 
-    /// Resolve a batch of attribute paths into `(drv_path, references)` tuples.
-    /// The result preserves the input order of `attrs`. `overrides` are applied
-    /// at lock time so resolved drvPaths reflect them.
-    /// Returns `(resolved, warnings)`.
     async fn resolve_derivation_paths(
         &self,
         repository: String,
@@ -54,16 +34,9 @@ pub trait DerivationResolver: Send + Sync + std::fmt::Debug + 'static {
         overrides: &[(String, String)],
     ) -> Result<(Vec<ResolvedDerivation>, Vec<String>)>;
 
-    /// Free the evaluators kept warm between calls. Called once an evaluation
-    /// needs no more Nix evaluation, so their heaps do not sit idle through the
-    /// closure walk; the next call starts a fresh evaluator.
     async fn release_evaluators(&self);
 
-    /// Read and parse a `.drv` file at `drv_path`.
     async fn get_derivation(&self, drv_path: String) -> Result<Derivation>;
 
-    /// Returns `(system_string, required_features)` for the derivation at `drv_path`.
-    /// `system_string` is a Nix system, e.g. `"x86_64-linux"`.
-    /// For non-`.drv` paths returns `("builtin", [])`.
     async fn get_features(&self, drv_path: String) -> Result<(String, Vec<String>)>;
 }

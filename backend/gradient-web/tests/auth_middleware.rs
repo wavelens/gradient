@@ -4,12 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Wire-format regression tests for `authorization::authorize` middleware.
-//!
-//! Locks in the `BaseResponse<String>` envelope and HTTP status codes so the
-//! refactor that routes middleware errors through `WebError::IntoResponse`
-//! stays observably equivalent to the prior hand-built responses.
-
 use axum_test::TestServer;
 use gradient_core::ServerState;
 use gradient_db::{WebDb, WorkerDb};
@@ -25,10 +19,8 @@ use serde_json::Value;
 use std::sync::Arc;
 use uuid::Uuid;
 
-/// Build a `ServerState` whose `jwt_secret_file` points at a real on-disk
-/// file - required because `load_secret` calls `process::exit(1)` if the
-/// file is missing, which would tear down the test process before assertions
-/// run.
+/// `load_secret` is calling `process::exit(1)` on a missing file. The JWT secret must exist on
+/// disk, or the test process would die before any assertion.
 fn server() -> TestServer {
     let jwt_path = std::env::temp_dir().join(format!("gradient-test-jwt-{}", Uuid::now_v7()));
     std::fs::write(&jwt_path, "test-jwt-secret").expect("write jwt secret file");

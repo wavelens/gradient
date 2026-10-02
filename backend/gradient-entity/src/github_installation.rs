@@ -10,7 +10,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::ids::{GithubInstallationId, ProjectId, UserId};
 
-/// A GitHub App installation bound to a project.
 #[derive(Clone, Debug, Default, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
 #[sea_orm(table_name = "github_installation")]
 pub struct Model {

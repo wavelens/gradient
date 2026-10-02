@@ -4,12 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! The proof that anonymisation holds.
-//!
-//! The claim is a property of the produced *file*, so these build a real report
-//! from rows they control and read the result back. No database, and nothing
-//! that breaks when extraction order changes.
-
 #[cfg(test)]
 mod tests {
     use crate::extract::{create_table, redact_row, write_rows};
@@ -43,8 +37,6 @@ mod tests {
         row
     }
 
-    /// Build a report carrying the seeded strings in every column the policy
-    /// claims to cover, plus a log that embeds them in free text.
     fn write_seeded_report(conn: &rusqlite::Connection, redactor: &Redactor) {
         let seeds: [(&str, Vec<(&str, &str)>); 4] = [
             (
@@ -92,9 +84,8 @@ mod tests {
         .expect("log");
     }
 
-    /// Walk every column of every table and count hits. `SELECT *` is correct
-    /// here and only here: the test must read whatever the file happens to
-    /// contain, which is the opposite of the extractor's rule.
+    /// `SELECT *` is correct only here. The test must read whatever the file contains, the opposite
+    /// of the extractor's rule.
     fn count_occurrences(conn: &rusqlite::Connection, needle: &str) -> usize {
         let tables: Vec<String> = conn
             .prepare("SELECT name FROM sqlite_master WHERE type = 'table'")
@@ -131,7 +122,6 @@ mod tests {
         }
     }
 
-    /// A redaction feature without this test is a promise, not a guarantee.
     #[test]
     fn an_anonymized_report_contains_no_original_identifier() {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -157,8 +147,8 @@ mod tests {
         }
     }
 
-    /// The hash half is one-way and is what makes an upstream cache check
-    /// possible, so full anonymisation must not take it with the name.
+    /// The hash half is one-way. It is enabling an upstream cache check, and full anonymisation
+    /// must keep it.
     #[test]
     fn store_path_hashes_survive_full_anonymization() {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -174,8 +164,6 @@ mod tests {
         );
     }
 
-    /// The complement, so the test above is proving redaction rather than
-    /// proving data loss.
     #[test]
     fn an_unanonymized_report_keeps_every_identifier() {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -190,8 +178,6 @@ mod tests {
         assert!(count_occurrences(&conn, EMAIL) > 0);
     }
 
-    /// The toggles are independent, so a report may name packages while hiding
-    /// who owns them. That combination is the default as released.
     #[test]
     fn packages_can_be_kept_while_identities_are_hidden() {
         let dir = tempfile::tempdir().expect("tempdir");

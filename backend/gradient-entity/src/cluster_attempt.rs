@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! One try of a cluster job; at most one is open per cluster. `started_at` stays
-//! `None` until every member accepted its assignment.
+//! At most one attempt is open per cluster. `started_at` is staying `None` until every member
+//! accepted its assignment.
 
 use chrono::NaiveDateTime;
 use num_enum::{IntoPrimitive, TryFromPrimitive};

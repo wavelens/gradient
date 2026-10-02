@@ -8,7 +8,7 @@ use clap::Args;
 
 #[derive(Args, Debug, Clone)]
 pub struct S3Args {
-    /// S3 bucket name. When set, NARs are stored in S3 instead of local disk.
+    /// S3 bucket name. NARs are stored in S3 instead of local disk with a bucket set.
     #[arg(long = "s3-bucket", env = "GRADIENT_S3_BUCKET")]
     pub bucket: Option<String>,
     /// AWS region for the S3 bucket.
@@ -21,7 +21,7 @@ pub struct S3Args {
     /// Custom S3-compatible endpoint URL (MinIO, Cloudflare R2, …).
     #[arg(long = "s3-endpoint", env = "GRADIENT_S3_ENDPOINT")]
     pub endpoint: Option<String>,
-    /// AWS access key ID. Falls back to instance credentials when absent.
+    /// AWS access key ID. An absent ID is falling back to instance credentials.
     #[arg(long = "s3-access-key-id", env = "GRADIENT_S3_ACCESS_KEY_ID")]
     pub access_key_id: Option<String>,
     /// File containing the AWS secret access key.
@@ -33,25 +33,23 @@ pub struct S3Args {
     /// Key prefix within the S3 bucket (e.g. "gradient/").
     #[arg(long = "s3-prefix", env = "GRADIENT_S3_PREFIX", default_value = "")]
     pub prefix: String,
-    /// Use virtual-hosted-style requests (`https://<bucket>.<endpoint>/key`)
-    /// when a custom endpoint is set. Defaults to `false` so the URL is
-    /// path-style (`https://<endpoint>/<bucket>/key`) - required by MinIO,
-    /// Garage, and most self-hosted S3-compatible backends. Set to `true`
-    /// for providers that need virtual-hosted addressing (Cloudflare R2
-    /// with a custom domain, some Backblaze B2 setups). Has no effect on
-    /// AWS direct (no endpoint set).
+    /// Use virtual-hosted-style requests (`https://<bucket>.<endpoint>/key`) with a custom
+    /// endpoint. The `false` default is keeping URLs path-style
+    /// (`https://<endpoint>/<bucket>/key`). MinIO, Garage and most self-hosted S3-compatible
+    /// backends are requiring path style. Set it to `true` for providers needing virtual-hosted
+    /// addressing, like Cloudflare R2 with a custom domain or some Backblaze B2 setups. AWS direct
+    /// without an endpoint is ignoring this flag.
     #[arg(
         long = "s3-virtual-hosted-style",
         env = "GRADIENT_S3_VIRTUAL_HOSTED_STYLE",
         default_value_t = false
     )]
     pub virtual_hosted_style: bool,
-    /// Seconds a single S3 response may stall before the request is failed.
-    /// This is an inactivity timer, reset by every successful read - not a cap
-    /// on the transfer, so a multi-GB NAR streams for as long as it keeps making
-    /// progress. Replaces the object-store default of a flat 30s *total* request
-    /// timeout, which cancelled any download slower than that and then burned
-    /// the whole retry budget re-running a request doomed to be cancelled again.
+    /// Seconds a single S3 response may stall before the request is failed. This inactivity timer
+    /// is resetting on every successful read and is not capping the transfer. A multi-GB NAR is
+    /// streaming for as long as it keeps making progress. It is replacing the object-store default
+    /// of a flat 30s total request timeout. That default was cancelling any slower download and
+    /// burning the whole retry budget on doomed re-runs.
     #[arg(
         long = "s3-read-timeout-secs",
         env = "GRADIENT_S3_READ_TIMEOUT_SECS",
@@ -65,12 +63,11 @@ pub struct S3Args {
         default_value_t = 3
     )]
     pub max_retries: usize,
-    /// Total seconds from the first attempt after which no further S3 retry is
-    /// started. Keep it above `(max_retries + 1) * read_timeout_secs` or
-    /// requests that die on the read timeout are never retried - the budget is
-    /// already spent by the time the first attempt fails. Only consulted on the
-    /// error path, so it never interrupts a download that is still progressing.
-    /// Stay under 5 minutes: retries reuse the original credentials and payload.
+    /// Total seconds from the first attempt after which no further S3 retry is started. Keep it
+    /// above `(max_retries + 1) * read_timeout_secs`. Requests dying on the read timeout are
+    /// otherwise never retried because the budget is already spent. Only the error path is
+    /// consulting it. It is never interrupting a progressing download. Stay under 5 minutes because
+    /// retries are reusing the original credentials and payload.
     #[arg(
         long = "s3-retry-timeout-secs",
         env = "GRADIENT_S3_RETRY_TIMEOUT_SECS",

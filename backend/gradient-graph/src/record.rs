@@ -4,11 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Writing one worker batch of discovered derivations into the graph: a stub
-//! row for every dependency it names, the walked records, the outputs and edges
-//! of every derivation it reports, the shared builds and this evaluation's jobs, all
-//! inside the graph writer's transaction.
-
 use gradient_types::events::evaluation;
 use std::collections::{HashMap, HashSet};
 
@@ -34,11 +29,6 @@ use crate::messages::{RecordBatch, RecordReport, UpstreamHit};
 const BATCH_SIZE: usize = 1000;
 
 gradient_db::sql! {
-    /// Insert or complete the record of every derivation the worker walked. The
-    /// conflict update executes only for a row that is not yet walked, so RETURNING
-    /// yields exactly the derivations this batch flipped. The record lands with
-    /// its distinct input count as `unwalked_inputs`, so a non-leaf never reads
-    /// complete between this write and the seed below it.
     WALKED_UPSERT = r#"
 INSERT INTO derivation
     (id, hash, name, architecture, pname, prefer_local_build, is_fixed_output, allow_substitutes, walked, unwalked_inputs, created_at)
@@ -63,8 +53,6 @@ RETURNING hash
             Now,
         ];
 
-    /// A row for every dependency the batch names, so its edge can land now. A
-    /// stub carries only what the path itself says; the walk fills the rest.
     STUB_INSERT = r#"
 INSERT INTO derivation (id, hash, name, architecture, walked, created_at)
 SELECT d.id, d.hash, d.name, '', false, $4
@@ -76,8 +64,6 @@ ON CONFLICT (hash, name) DO NOTHING
     RESOLVE_IDS = "SELECT id, hash FROM derivation WHERE hash = ANY($1::text[])",
         params = [DerivationHashes(64)];
 
-    /// `RETURNING` names exactly the parents whose edge set GREW, so the can-start state
-    /// seed is running for those and not for every derivation the batch mentions.
     EDGE_INSERT = r#"
 INSERT INTO derivation_dependency (derivation, dependency)
 SELECT e.derivation, e.dependency FROM unnest($1::uuid[], $2::uuid[]) AS e(derivation, dependency)
@@ -86,8 +72,6 @@ RETURNING derivation
 "#,
         params = [DerivationIds(64), DerivationIds(64)];
 
-    /// A stub's shared build exists before the record that carries the derivation's
-    /// limits, so they land here; `0` stands in for an unset limit in the arrays.
     SHARED_BUILD_LIMITS_UPDATE = r#"
 UPDATE derivation_build AS db
 SET timeout_secs = NULLIF(l.timeout_secs, 0), max_silent_secs = NULLIF(l.max_silent_secs, 0)
@@ -98,8 +82,6 @@ WHERE db.derivation = l.derivation
 "#,
         params = [DerivationIds(64), Ints(3600, 64), Ints(600, 64)];
 
-    /// The upstream probe has answered for these shared builds. `RETURNING` names the
-    /// ones it changed, which is what the need update has to run for.
     MARK_PROBED = r#"
 UPDATE derivation_build SET probed = true, updated_at = (now() AT TIME ZONE 'UTC')
 WHERE derivation = ANY($1::uuid[]) AND NOT probed
@@ -109,8 +91,6 @@ RETURNING derivation
 }
 
 gradient_db::sql_fn! {
-    /// The exemplar behind [`flip_cache_available`]'s dynamic `NOT IN` fence: the
-    /// gate plans against the same generated fragment the call site executes.
     FLIP_CACHE_AVAILABLE = flip_cache_available_sql,
         params = [DerivationIds(64)];
 }
@@ -126,17 +106,11 @@ fn flip_cache_available_sql() -> String {
     )
 }
 
-/// Every drv path the batch names, resolved twice: by path for the writes that
-/// key on what the worker reported, by hash for the can-start seed, whose input
-/// is the walked-upsert's `RETURNING hash`.
 struct Resolved {
     by_path: HashMap<String, DerivationId>,
     by_hash: HashMap<String, DerivationId>,
 }
 
-/// Writes a single batch of discovered derivations, inside the graph writer's
-/// transaction. Holds what every step shares: the scoped context and the
-/// evaluation the batch belongs to.
 struct BatchWriter<'a> {
     ctx: &'a DbContext,
     evaluation_id: EvaluationId,
@@ -147,16 +121,12 @@ impl BatchWriter<'_> {
         &self.ctx.worker_db
     }
 
-    /// The graph writer's transaction, which every step of a batch writes inside. A
-    /// savepoint per step was two round trips for a rollback nothing used: a
-    /// failed step fails the batch, and the batch's own savepoint takes it back.
     fn txn(&self) -> Result<&sea_orm::DatabaseTransaction> {
         self.db()
             .as_transaction()
             .context("a batch is written inside the graph writer's transaction")
     }
 
-    /// The derivations this batch flipped to walked, by hash.
     #[tracing::instrument(level = "debug", skip_all)]
     async fn upsert_walked(&self, derivations: &[DiscoveredDerivation]) -> Result<HashSet<String>> {
         let mut seen = HashSet::new();
@@ -218,10 +188,6 @@ impl BatchWriter<'_> {
             .collect())
     }
 
-    /// A stub for every dependency the batch names and does not itself carry.
-    /// An unparseable dependency path fails the batch: the source would
-    /// otherwise commit `walked = true` with an edge missing, and only a lost
-    /// record clears `walked`, so no later walk would repair it.
     #[tracing::instrument(level = "debug", skip_all)]
     async fn insert_stubs(&self, derivations: &[DiscoveredDerivation]) -> Result<()> {
         let walked: HashSet<&str> = derivations.iter().map(|d| d.drv_path.as_str()).collect();
@@ -268,8 +234,6 @@ impl BatchWriter<'_> {
         Ok(())
     }
 
-    /// Every drv path the batch names, walked or stub, to the row's id. Read
-    /// back from the table after the inserts, never from a local guess.
     #[tracing::instrument(level = "debug", skip_all)]
     async fn resolve_ids(&self, derivations: &[DiscoveredDerivation]) -> Result<Resolved> {
         let paths: HashSet<&str> = derivations
@@ -313,10 +277,8 @@ impl BatchWriter<'_> {
         Ok(Resolved { by_path, by_hash })
     }
 
-    /// Outputs and edges of every derivation the batch reports, not only the
-    /// ones it flipped to walked. Both inserts are conflict-guarded no-ops on a
-    /// record already written, and re-asserting the full declared set on every
-    /// walk is the only repair a graph that lost an edge ever gets.
+    /// Re-asserting the full declared set on every walk is the only repair for a lost edge.
+    /// Both inserts are conflict-guarded no-ops on a record already written.
     #[tracing::instrument(level = "debug", skip_all)]
     async fn insert_records(
         &self,
@@ -332,9 +294,6 @@ impl BatchWriter<'_> {
                 continue;
             };
             for output in &d.outputs {
-                // Unlike an unparseable dependency path, this one may stay a fallback: an
-                // unknown hash matches no `cached_path` and no upstream, so the derivation
-                // is never pruned nor counted cached, and simply gets built.
                 let (hash, package) = output_hash_name(&output.path).unwrap_or_else(|| {
                     (
                         gradient_entity::derivation_output::UNKNOWN_OUTPUT_HASH.to_owned(),
@@ -392,8 +351,6 @@ impl BatchWriter<'_> {
             .await
             .context("insert dependency edges")?;
 
-        // One row per landed edge, so a derivation with fifty new inputs is named
-        // fifty times; every consumer wants the set.
         let mut grown: Vec<DerivationId> = grew
             .iter()
             .filter_map(|r| r.try_get::<uuid::Uuid>("", "derivation").ok())
@@ -405,13 +362,6 @@ impl BatchWriter<'_> {
         Ok(grown)
     }
 
-    /// The subtree bit the walk prunes on, settled on `derivation` rows before any
-    /// shared build is locked: the class order is derivation first.
-    ///
-    /// The rows this batch flipped to walked are named as such: they were incomplete
-    /// before it whatever they read now, since the upsert above wrote `walked` one
-    /// statement ago, and a freshly walked leaf that reads complete on both sides of
-    /// the seed still owes its parents a count-down.
     #[tracing::instrument(level = "debug", skip_all)]
     async fn record_walk_completeness(
         &self,
@@ -465,11 +415,6 @@ impl BatchWriter<'_> {
         Ok(())
     }
 
-    /// Build-once shared builds for every named derivation, `ON CONFLICT DO NOTHING`
-    /// so a shared build from a prior evaluation is untouched, then this
-    /// evaluation's `build_job` rows. A derivation complete in our cache is
-    /// `Substituted`; `cache_available` is the upstream probe's to set, never a
-    /// batch's.
     #[tracing::instrument(level = "debug", skip_all)]
     async fn resolve_shared_builds(
         &self,
@@ -519,15 +464,9 @@ impl BatchWriter<'_> {
                     id: DerivationBuildId::now_v7(),
                     derivation: drv_id,
                     status,
-                    // A batch claims nothing about upstream caches any more: the probe
-                    // executes once the shared build is wanted and flips both of these
-                    // itself, and need stops here until it has.
                     cache_available: false,
                     probed: false,
                     substituted: status == BuildStatus::Substituted,
-                    // `..Default::default()` sends every column, so the database
-                    // default never reaches a new row: this batch's update is
-                    // what turns need on for the shared builds something reaches.
                     wanted: false,
                     timeout_secs,
                     max_silent_secs,
@@ -618,53 +557,11 @@ impl BatchWriter<'_> {
         Ok(())
     }
 
-    /// Move the can-start counters this batch changed, in one transaction under one
-    /// ordered lock: the shared builds whose substitution it established become
-    /// fetchable and their parents' counters drop, `blocking_deps` is recounted
-    /// from ground truth over the walked, grown and adopting shared builds, and whatever
-    /// now passes the gates is queued.
-    ///
-    /// ONE lock over the union of the two sets, never one per set: two ordered
-    /// acquisitions in the same transaction are not monotone across each other, and
-    /// that is how an ABBA cycle with a concurrent retire is built. The lock also
-    /// widens the seed from the walked-and-grew set to the union, which is sound
-    /// because the seed is an absolute recount over ground truth: for a shared build
-    /// whose edges did not move it either agrees with the maintained value or the
-    /// maintained value was wrong.
-    ///
-    /// The mark executes BEFORE the seed, and that order is load-bearing. The seed
-    /// EVALUATES the fetchability predicate on each dependency instead of reading
-    /// the column, so a dependency this batch is about to flip already counts as
-    /// fetchable to it; letting the flip's ripple decrement afterwards would take the
-    /// parent one BELOW its true count, and a negative counter never satisfies
-    /// `= 0` again. Seeding last makes the absolute write the final word for every
-    /// row this batch names, and leaves the ripple exact for every row outside it.
-    ///
-    /// Promotion is offered the whole locked set rather than the seeded part: a
-    /// shared build this batch just made available in a cache passes the gates on its own
-    /// account, and no parent's flip would ever queue it. Nothing here retracts
-    /// a substitution fact, because a batch only ever adds them, so that symmetric
-    /// loss belongs to the demote and the retire.
-    ///
-    /// The un-promote after the seed is the OTHER symmetric loss, and it is not
-    /// optional. The mark's ripple is a RELATIVE move over a base the seed has not
-    /// corrected yet, so for a row whose edges grew this batch the base is
-    /// stale-low: a shared build at `blocking_deps = 1` that gains an edge to something
-    /// unfetchable is taken to 0 by the ripple, reported startable, and queued, and only
-    /// then does the seed put it back to 1. Measured on Postgres 18: the row commits
-    /// `Queued` with `blocking_deps = 1` and dispatches against an input that is not
-    /// in the cache. `promote` after the seed covers the row the seed brings DOWN to
-    /// zero; nothing but this covers the row it raises.
-    ///
-    /// The transitions are collapsed for the same reason: such a row accumulates
-    /// `Created` to `Queued` and `Queued` to `Created` in one transaction, and only
-    /// the net move committed, so only the net move may fan out.
-    ///
-    /// The need this batch created and removed is settled afterwards, on the
-    /// pooled handle: it writes rows no ordered lock names (the direct inputs of
-    /// every new builder), and both statements re-check the gate, so it is a
-    /// re-gate rather than a counter move and does not belong inside the counters'
-    /// transaction.
+    /// One lock is covering the union of both sets to avoid an ABBA cycle with a retire.
+    /// The mark must run before the seed because the seed is evaluating fetchability itself.
+    /// A later ripple would take a parent below its true count, and zero is then unreachable.
+    /// The un-promote is covering a row the stale-low ripple queued and the seed raised again.
+    /// Only the net transition committed, and only the net transition may fan out.
     #[tracing::instrument(level = "debug", skip_all)]
     async fn advance_can_start(
         &self,
@@ -720,14 +617,6 @@ impl BatchWriter<'_> {
         self.move_batch_need(&to_seed, entry_points).await
     }
 
-    /// A path committed or probed while a dependency was still a stub named outputs
-    /// that had no rows, so its runtime dependencies into them were never written and its
-    /// shared build read complete over a missing dependency. The walk that gives those outputs rows adopts
-    /// the references, and the parents move exactly as a NAR commit's producers do:
-    /// need first, then the complete closure they lost ripples up and takes fetchability
-    /// with it, so nothing downstream dispatches against an input nobody produced.
-    /// The parents are returned for the can-start pass to recount `blocking_deps`,
-    /// after it marks the producers fetchable.
     #[tracing::instrument(level = "debug", skip_all)]
     async fn adopt_references(
         &self,
@@ -770,11 +659,6 @@ impl BatchWriter<'_> {
         Ok(wanted_by)
     }
 
-    /// Settle the need a batch moves without moving any shared build's status, so the
-    /// transition emitter cannot see it: a newly walked or newly grown builder wants
-    /// its inputs, an entry point wants its own derivation, and a shared build an upstream
-    /// just claimed stops wanting anything below it. All three are the same event, a
-    /// shared build whose need changed, so all three are one update.
     async fn move_batch_need(
         &self,
         builders: &[DerivationId],
@@ -800,12 +684,6 @@ impl BatchWriter<'_> {
         Ok(gained_need)
     }
 
-    /// Persist each derivation's `inputSrcs`: build-time source paths (e.g.
-    /// `builtins.toFile` configs) that have no producing derivation. Idempotent
-    /// on `(derivation, hash)` so a re-seen derivation backfills its sources
-    /// without duplicating. The GC keeps every source of a reachable derivation
-    /// live; the dispatch gate reads only the `.drv` NAR, whose references the
-    /// sources are.
     #[tracing::instrument(level = "debug", skip_all)]
     async fn persist_input_sources(
         &self,
@@ -862,7 +740,6 @@ impl BatchWriter<'_> {
         }
     }
 
-    /// Record per-derivation system-feature requirements in the DB.
     #[tracing::instrument(level = "debug", skip_all)]
     async fn add_system_features(
         &self,
@@ -891,7 +768,6 @@ impl BatchWriter<'_> {
         }
     }
 
-    /// Persist Nix evaluation warnings and errors as evaluation messages.
     #[tracing::instrument(level = "debug", skip_all)]
     async fn record_eval_messages(&self, warnings: &[String], errors: &[String]) {
         for warning in warnings {
@@ -917,8 +793,6 @@ impl BatchWriter<'_> {
         }
     }
 
-    /// Insert this batch's task entry points, returning their derivation ids so
-    /// the caller can announce their current shared build status to the Git host.
     #[tracing::instrument(level = "debug", skip_all)]
     async fn process_entry_points(
         &self,
@@ -967,8 +841,6 @@ impl BatchWriter<'_> {
     }
 }
 
-/// A re-run evaluation walks the same attributes again, so an entry point it
-/// already has is kept rather than listed twice.
 fn insert_entry_points(rows: Vec<AEntryPoint>) -> sea_orm::InsertMany<AEntryPoint> {
     EEntryPoint::insert_many(rows).on_conflict(
         sea_orm::sea_query::OnConflict::columns([CEntryPoint::Evaluation, CEntryPoint::Eval])
@@ -977,9 +849,6 @@ fn insert_entry_points(rows: Vec<AEntryPoint>) -> sea_orm::InsertMany<AEntryPoin
     )
 }
 
-/// Only a streaming evaluation takes batches. Anything else is a stale
-/// dispatch (a worker that died mid-walk, or a re-queued evaluation's old
-/// worker) and is dropped, never merged into the live walk's graph.
 fn accepts_batches(status: EvaluationStatus) -> bool {
     matches!(
         status,
@@ -1031,7 +900,6 @@ pub(crate) async fn apply_batch(ctx: &DbContext, batch: &RecordBatch) -> Result<
             .await?;
         writer.add_system_features(&batch.derivations, ids).await;
         let adopted = writer.adopt_references(&resolved, &newly_walked).await?;
-        // Entry points are wanted, so their rows exist before the gates are read.
         report.entry_points = match batch.task {
             Some(task) => {
                 writer
@@ -1060,8 +928,6 @@ pub(crate) async fn apply_batch(ctx: &DbContext, batch: &RecordBatch) -> Result<
             .await
             .context("bump the graph version for the batch")?;
 
-        // Edges are global: a derivation an older evaluation kept as a stub gains
-        // a closure here, so that evaluation's histogram is stale too.
         if !grew.is_empty() {
             gradient_db::task_board::dep_counts::bump_graph_version_for_derivations(
                 writer.db(),
@@ -1081,13 +947,6 @@ pub(crate) async fn apply_batch(ctx: &DbContext, batch: &RecordBatch) -> Result<
     Ok(report)
 }
 
-/// Set `cache_available` on the shared builds an upstream now serves, returning the ones
-/// that were not already flagged. Those stop being builders, so whatever they
-/// listed as an input has just lost a parent that wanted it, and nothing about that is a status
-/// transition the emitter could notice.
-///
-/// A terminal-success shared build is left alone: its outputs are already ours, and
-/// flipping it would send it back through a passthrough for bytes we hold.
 async fn flip_cache_available<C: ConnectionTrait>(
     db: &C,
     upstream: &[DerivationId],
@@ -1109,14 +968,6 @@ async fn flip_cache_available<C: ConnectionTrait>(
         .collect())
 }
 
-/// Apply what the upstream probe found: the narinfo onto every `derivation_output`
-/// sharing the hash, the runtime dependencies its references name, `cache_available` on the
-/// shared builds whose every output is served, the complete closure those new edges change, and
-/// the need all of that moves.
-///
-/// This is the round: the need this update turns on is handed back to the
-/// probe by the transition emitter, so the next level of the closure is asked for
-/// next. Nothing here reaches the network - the probe already ran.
 pub(crate) async fn apply_upstream_hits(
     ctx: &DbContext,
     hits: &HashMap<String, UpstreamHit>,
@@ -1149,9 +1000,6 @@ pub(crate) async fn apply_upstream_hits(
 
     persist_narinfo(db, &hit_rows, hits).await?;
 
-    // A hit is only a passthrough when EVERY output of the shared build is served: an output
-    // whose bytes nobody has would otherwise fail the substitution and escalate
-    // into a build whose inputs were never produced.
     let outputs = gradient_db::fetch_in_chunks(&touched, |chunk| async move {
         EDerivationOutput::find()
             .filter(CDerivationOutput::Derivation.is_in(chunk))
@@ -1206,15 +1054,6 @@ pub(crate) async fn apply_upstream_hits(
     Ok(gained_need)
 }
 
-/// Record that the upstream probe has answered for `shared_builds`, hit or miss, and move
-/// the need the answer opens: a miss makes the shared build a builder, and only a
-/// builder needs its build inputs.
-///
-/// Starts after the round's hits, so a shared build an upstream serves is already a passthrough
-/// when its answer lands and nothing below it is ever asked for. What the update
-/// needs is RETURNED, not sent: it is handed to the probe once this transaction
-/// commits, and the transition emitter would not report it at all, because a miss
-/// moves no status and its own update keys on one.
 pub(crate) async fn mark_probed(
     ctx: &DbContext,
     shared_builds: &[DerivationId],
@@ -1246,8 +1085,6 @@ pub(crate) async fn mark_probed(
             .context("settle what an answered shared build needs built")?;
         changes.extend(settled.changes);
         gained_need.extend_from_slice(&settled.moved.gained);
-        // `probed` is a gate of its own: a shared build wanted before its answer
-        // gained no need here, and nothing else would queue it before a sweep.
         changes.extend(
             gradient_db::graph::can_start::promote(db, chunk)
                 .await
@@ -1259,9 +1096,6 @@ pub(crate) async fn mark_probed(
     Ok(gained_need)
 }
 
-/// Persist each hit onto the outputs sharing its hash and write the runtime dependencies
-/// its `References:` line names. An output already cached anywhere is left alone:
-/// what we hold beats what an upstream offers.
 async fn persist_narinfo(
     db: &WorkerDb,
     rows: &[MDerivationOutput],
@@ -1300,8 +1134,6 @@ async fn persist_narinfo(
         }
     }
 
-    // A narinfo is the other place runtime references are learned, so the edges
-    // they name are written from the hit that carried them.
     for (derivation, tokens) in &learned {
         let producers =
             gradient_db::graph::runtime_dependencies::producers_of_tokens(db, tokens).await?;
@@ -1316,8 +1148,6 @@ async fn persist_narinfo(
     Ok(())
 }
 
-/// What a landed batch triggers outside its transaction: Git host checks for the
-/// entry points, the per-task evaluation GC, and the live-channel ping.
 #[tracing::instrument(level = "debug", skip_all)]
 pub(crate) async fn after_commit(
     ctx: &DbContext,
@@ -1399,8 +1229,6 @@ mod tests {
     };
     use std::collections::BTreeMap;
 
-    /// A batch is written inside a transaction, the graph writer's in production, so the
-    /// tests open one around the call the way `writer::in_savepoint` does.
     async fn apply(ctx: &DbContext, batch: &RecordBatch) -> Result<RecordReport> {
         let tx = std::sync::Arc::new(ctx.worker_db.begin().await.expect("begin"));
         let scoped = ctx.in_transaction(std::sync::Arc::clone(&tx));
@@ -1434,12 +1262,6 @@ mod tests {
         );
     }
 
-    /// A fresh evaluation's need is established by the record walk, not by a
-    /// status transition, so `emit_transition_effects` sees nothing left to gain
-    /// and reports an empty set. The batch's own gained set is the only one the
-    /// probe can learn from, and it is handed over after the commit: the probe
-    /// reads the rows on its own connection, and a shared build it plans nothing for
-    /// is still remembered as asked.
     #[tokio::test]
     async fn what_the_batch_needs_reaches_the_upstream_probe() {
         let gained = DerivationId::now_v7();
@@ -1576,10 +1398,6 @@ mod tests {
         }
     }
 
-    /// The rows behind the query script `apply_batch` replays for one walked
-    /// derivation `a` that names `b`: the evaluation, the walked upsert's
-    /// RETURNING, the id resolve, the shared build re-select. Every `insert_many`
-    /// reads its primary key back, so those take an empty result set.
     fn scripted(evaluation: EvaluationId) -> (MEvaluation, MDerivation, MDerivation) {
         let eval = MEvaluation {
             id: evaluation,
@@ -1589,7 +1407,6 @@ mod tests {
         (eval, derivation_row(A, true), derivation_row(B, false))
     }
 
-    /// The query script `apply_batch` replays for `a` walked, naming `b`.
     fn walk_of_a(eval: MEvaluation, a: &MDerivation, b: &MDerivation) -> DatabaseConnection {
         MockDatabase::new(DatabaseBackend::Postgres)
             .append_query_results([vec![eval]])
@@ -1610,9 +1427,6 @@ mod tests {
             .into_connection()
     }
 
-    /// A walked record is what the probe asks about, and the walk is the only one
-    /// that knows when it lands: a shared build wanted while it was a stub gains no
-    /// need here, so nothing else would ever ask about it again.
     #[tokio::test]
     async fn a_walked_shared_build_reaches_the_upstream_probe() {
         let evaluation = EvaluationId::now_v7();
@@ -1634,10 +1448,6 @@ mod tests {
         assert!(!report.to_probe.contains(&b.id), "{report:?}");
     }
 
-    /// A dependency the batch only names gets a stub row before the edge that
-    /// points at it, never a walked one, and the batch reports one walked
-    /// derivation: the one whose record it carried. The can-start pass closes the
-    /// batch: it seeds from edges that exist, so it can only run once they do.
     #[tokio::test]
     async fn a_named_dependency_gets_a_stub_before_its_edge() {
         let evaluation = EvaluationId::now_v7();
@@ -1718,11 +1528,6 @@ mod tests {
         );
     }
 
-    /// A narinfo names the references of a path we do not have yet, so the hit is
-    /// the second place a runtime dependency is learned: every reference with a producer
-    /// becomes one from the output's own derivation, the shared build whose every output
-    /// is served becomes a passthrough, and the need all of that moves is updated
-    /// before the reply. The probe's next round starts from what that turns on.
     #[tokio::test]
     async fn an_upstream_hit_writes_the_runtime_dependencies_its_narinfo_names() {
         let derivation = DerivationId::now_v7();
@@ -1780,11 +1585,6 @@ mod tests {
         }
     }
 
-    /// A miss changes no status, so nothing else would ever update what the
-    /// answer opened: the shared build is a builder from this statement on, and its build
-    /// inputs are wanted by the update that follows it. The gained set is
-    /// returned rather than sent from here, so the probe asks for it once the
-    /// transaction that wanted it has landed.
     #[tokio::test]
     async fn answering_a_shared_build_needs_what_it_will_be_built_from() {
         let shared_build = DerivationId::now_v7();
@@ -1825,9 +1625,6 @@ mod tests {
         }
     }
 
-    /// The probe reports the same shared build from several directions and re-asks one
-    /// every five minutes. An answer that changed nothing must cost the one write
-    /// and stop: the update below it is a graph walk.
     #[tokio::test]
     async fn a_shared_build_already_answered_costs_one_statement() {
         let db = MockDatabase::new(DatabaseBackend::Postgres)
@@ -1847,9 +1644,6 @@ mod tests {
         assert_eq!(log.len(), 1, "one write and nothing else: {log:?}");
     }
 
-    /// Recording claims nothing about upstream caches any more. A batch that flipped one on
-    /// its own would pass through a shared build nothing needs, which is the traffic lazy
-    /// probing exists to stop.
     #[tokio::test]
     async fn a_batch_marks_nothing_cache_available_on_its_own() {
         let evaluation = EvaluationId::now_v7();
@@ -1892,10 +1686,6 @@ mod tests {
         );
     }
 
-    /// The subtree bit is settled on `derivation` rows, right after the edges land
-    /// and before any shared build is locked: an abandoned walk then leaves its parents
-    /// incomplete, and a concurrent walk that asks `prunable` in between never
-    /// prunes at a parent whose inputs are still stubs.
     #[tokio::test]
     async fn a_walk_settles_the_subtree_bit_before_it_touches_a_shared_build() {
         let evaluation = EvaluationId::now_v7();
@@ -1971,12 +1761,6 @@ mod tests {
         );
     }
 
-    /// Edges are global, so a batch that grew one must bump every evaluation that
-    /// already holds the derivation. The edge insert returns one row per landed
-    /// edge, so a derivation with many new inputs is named many times; binding
-    /// that raw would hand `= ANY($1)` tens of thousands of duplicate uuids on a
-    /// first-delivery batch, which is what flips the planner off the `build_job`
-    /// index. The set is what the bump wants.
     #[tokio::test]
     async fn the_cross_evaluation_bump_names_each_derivation_once() {
         let evaluation = EvaluationId::now_v7();
@@ -1985,7 +1769,6 @@ mod tests {
             .append_query_results([vec![eval]])
             .append_query_results([vec![hash_row(&a.hash)]])
             .append_query_results([vec![a.clone(), b.clone()]])
-            // the edge insert names the same derivation once per landed edge
             .append_query_results([vec![drv_row(a.id), drv_row(a.id)]])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([vec![completeness_row(a.id, false, false)]])
@@ -1997,8 +1780,6 @@ mod tests {
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
-            // stubs, lock, seed, the batch's own bump, the cross-evaluation bump,
-            // then the need update's raise and lock
             .append_exec_results(vec![ok(1); 7])
             .into_connection();
         let (ctx, pool) = ctx(db).await;
@@ -2049,18 +1830,6 @@ mod tests {
         );
     }
 
-    /// The can-start pass has one legal order and the order IS the correctness
-    /// argument, so it is asserted literally: mark, ripple, promote, seed, promote,
-    /// un-promote.
-    ///
-    /// Mark before seed because the seed evaluates the fetchability predicate and
-    /// would otherwise let the ripple decrement a dependency it already counted as
-    /// fetchable. Un-promote after the seed because the ripple's promote fires on a
-    /// count the seed has not corrected yet: a shared build whose edge set grew this
-    /// batch is taken to zero by a relative move over a stale-low base, queued, and
-    /// only then raised again. Emitting the two halves of that bounce would announce
-    /// a `Queued` that never committed, so the transitions are collapsed to the net
-    /// move, which for this fixture is nothing.
     #[tokio::test]
     async fn the_start_pass_marks_ripples_promotes_seeds_then_settles_the_queue() {
         let evaluation = EvaluationId::now_v7();
@@ -2132,9 +1901,6 @@ mod tests {
         );
     }
 
-    /// A parent that adopted an edge into a newly walked producer is recounted by
-    /// the can-start pass, after the producer's mark: seeded before it, the seed
-    /// already counts the producer ready and the mark's ripple takes it down again.
     #[tokio::test]
     async fn an_adopting_parent_is_seeded_once_after_the_mark() {
         let evaluation = EvaluationId::now_v7();
@@ -2197,12 +1963,6 @@ mod tests {
         );
     }
 
-    /// A newly walked builder wants its whole pending closure in our cache, and
-    /// nothing about that is a status transition the effects emitter could notice:
-    /// the shared builds already exist, at the status they already had. So the batch
-    /// updates need below its own roots after its counters have committed, and
-    /// promotes what gained it with the ordinary gated statement (the candidate list
-    /// is a bound, never a claim).
     #[tokio::test]
     async fn a_batch_promotes_what_its_new_builders_need() {
         let evaluation = EvaluationId::now_v7();
@@ -2221,8 +1981,6 @@ mod tests {
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
-            // what the update walk found and then wrote, the thaw that finds
-            // nothing frozen, then the passthrough it queues
             .append_query_results([vec![need_row(b.id, true)], vec![need_row(b.id, true)]])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([vec![drv_row(b.id)]])
@@ -2279,11 +2037,6 @@ mod tests {
         );
     }
 
-    /// A batch delivered a second time flips nothing: the walked upsert's
-    /// `WHERE NOT derivation.walked` predicate returns no row, so `RETURNING`
-    /// still means "this batch flipped it" and the report counts none. The
-    /// batch does re-assert its records, which is the repair path for a lost
-    /// edge, so every write it repeats has to be conflict-guarded.
     #[tokio::test]
     async fn a_redelivered_batch_flips_nothing_and_only_repeats_guarded_writes() {
         let evaluation = EvaluationId::now_v7();
@@ -2337,9 +2090,6 @@ mod tests {
         );
     }
 
-    /// A dependency path that is not a derivation path fails the batch instead
-    /// of dropping the edge: the source would otherwise commit `walked = true`
-    /// dependency-blind, and only a lost record clears `walked`.
     #[tokio::test]
     async fn an_unparseable_dependency_fails_the_batch() {
         let evaluation = EvaluationId::now_v7();
@@ -2368,8 +2118,6 @@ mod tests {
         );
     }
 
-    /// A batch with no derivations writes nothing to the graph: the only
-    /// statement is the evaluation lookup.
     #[tokio::test]
     async fn an_empty_batch_touches_only_the_evaluation() {
         let evaluation = EvaluationId::now_v7();
@@ -2394,9 +2142,6 @@ mod tests {
         assert_eq!(pool.into_transaction_log().len(), 1);
     }
 
-    /// A shared build inserted for a name arrives before the record that carries
-    /// the derivation's limits, and the shared build insert lands on no row once it
-    /// exists, so a walked record writes its limits by their own statement.
     #[tokio::test]
     async fn a_walked_record_writes_its_limits_onto_an_existing_shared_build() {
         let evaluation = EvaluationId::now_v7();

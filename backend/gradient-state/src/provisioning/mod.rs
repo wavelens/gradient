@@ -4,11 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Applies a validated [`StateConfiguration`] to the database. The entry point
-//! [`apply_state_to_database`] drives the per-entity appliers ([`entities`]) via
-//! the shared [`StateApplicator`], then reconciles drift ([`reconciliation`]).
-//! Credential reading lives in [`credentials`], name lookups in [`lookups`].
-
 mod credentials;
 mod entities;
 mod lookups;
@@ -30,9 +25,6 @@ pub(crate) use lookups::{inbound_integrations_by_name, lookup_id, outbound_integ
 
 pub(crate) type DynError = Box<dyn std::error::Error>;
 
-/// Project membership declared in state for a user who did not exist at apply
-/// time. Drained per-username when the user is later registered or signs
-/// in via OIDC for the first time.
 #[derive(Debug, Clone)]
 pub struct PendingProjectMembership {
     pub project: ProjectId,
@@ -41,8 +33,6 @@ pub struct PendingProjectMembership {
 
 pub type PendingProjectMemberships = HashMap<String, Vec<PendingProjectMembership>>;
 
-/// Outcome of applying declarative state: memberships deferred until their user
-/// exists, and the OIDC/SCIM group -> role grants resolved from `StateRole`.
 pub struct StateApplyResult {
     pub pending: PendingProjectMemberships,
     pub oidc_group_roles: crate::OidcGroupRoles,
@@ -71,9 +61,8 @@ pub(super) async fn apply_state_to_database(
     let role_ids = app.apply_roles(&config.roles).await?;
     app.apply_project_members(&config.projects, &mut pending)
         .await?;
-    // Integrations must land before tasks: task triggers
-    // (reporter_push/reporter_pull_request) and `git_host_status_report` actions
-    // resolve integrations by name from the DB at apply time (#332).
+    // Integrations must land before tasks. Task triggers and `git_host_status_report` actions are
+    // resolving integrations by name at apply time (#332).
     app.apply_integrations(&config.integrations).await?;
     app.apply_tasks(&config.tasks).await?;
     app.apply_caches(&config.caches).await?;
@@ -92,24 +81,12 @@ pub(super) async fn apply_state_to_database(
     })
 }
 
-/// Applies a [`StateConfiguration`] to the database.
-///
-/// Captures the database connection and crypt secret so each `apply_*` method
-/// does not repeat those parameters.
 struct StateApplicator<'a> {
     db: &'a DatabaseConnection,
     crypt_secret_file: &'a str,
     email_enabled: bool,
 }
 
-/// Apply any pending state-managed project memberships for `username` against
-/// `user_id`. Idempotent: existing rows are updated to the declared role,
-/// missing rows are inserted. Returns the number of memberships applied
-/// (`Ok(0)` when the username has no pending entries).
-///
-/// Called from the user-creation paths (`POST /user` and OIDC first-login)
-/// so a member declared in state for a not-yet-registered user becomes
-/// effective the instant that user joins.
 pub async fn apply_pending_project_memberships<C: ConnectionTrait>(
     db: &C,
     pending: &PendingProjectMemberships,

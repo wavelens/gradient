@@ -10,9 +10,6 @@ use gradient_wire::traits::WorkerStore;
 use std::collections::HashSet;
 use std::sync::Mutex;
 
-/// In-memory fake store suitable for unit tests.
-///
-/// Tracks which store paths are "present" (built/available). Defaults to empty.
 #[derive(Debug, Default)]
 pub struct FakeNixStoreProvider {
     present: Mutex<HashSet<String>>,
@@ -42,12 +39,10 @@ impl FakeNixStoreProvider {
         self
     }
 
-    /// Snapshot of all paths currently present in the store.
     pub fn present_paths(&self) -> HashSet<String> {
         self.present.lock().unwrap().clone()
     }
 
-    /// Remove a path from the store (inverse of `with_present_path`).
     pub fn remove_present_path(&self, path: &str) {
         self.present.lock().unwrap().remove(path);
     }

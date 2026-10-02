@@ -4,10 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! A Download spec: nix's `builtin:fetchurl`, done by the worker itself. The `.drv`
-//! comes from our cache (the evaluation pushed it), the URL is fetched, the fixed
-//! output hash is checked, and the result is packed as a NAR for the same push every
-//! other kind ends in. No nix store is touched.
+//! The worker is doing nix's `builtin:fetchurl` itself without touching a nix store.
+//! The `.drv` is coming from our cache because the evaluation pushed it.
 
 use std::fmt;
 
@@ -79,7 +77,6 @@ pub(crate) fn single_file_nar(contents: &[u8], executable: bool) -> Vec<u8> {
     out
 }
 
-/// `outputHash` in any of nix's spellings: SRI, base16, nix32 or base64.
 fn parse_sha256(text: &str) -> Result<Vec<u8>> {
     use base64::Engine as _;
     let body = text
@@ -217,7 +214,6 @@ impl DownloadIo for JobUpdaterIo<'_> {
             .1
             .map(|(bytes, _)| bytes)
         } else {
-            // One NAR over the stream, read the way `prefetch::fetch_by_request` reads it.
             match self
                 .0
                 .request_nars(vec![drv_path.to_owned()])
@@ -337,8 +333,6 @@ mod tests {
         enc.finish().unwrap()
     }
 
-    /// The NAR of one regular file, as `nix-store --dump` writes it: every token
-    /// length-prefixed and padded to eight bytes, and the parser reads it back.
     #[tokio::test]
     async fn a_flat_download_is_packed_as_one_regular_file() {
         let nar = single_file_nar(b"hi\n", false);
@@ -429,8 +423,6 @@ mod tests {
         assert!(err.downcast_ref::<FixedOutputMismatch>().is_some(), "{err}");
     }
 
-    /// `unpack = 1`: the download IS the output's NAR (possibly compressed) and the
-    /// hash is recursive, over the NAR.
     #[tokio::test]
     async fn an_unpacked_download_is_the_nar_itself() {
         let nar = single_file_nar(b"hi\n", false);

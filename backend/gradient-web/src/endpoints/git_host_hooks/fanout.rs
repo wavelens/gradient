@@ -4,8 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Generic webhook fan-out: match active triggers, gate on approval, apply.
-
 use super::approval::{PullRequestApprovalContext, sender_is_trusted};
 use super::installation::event_repo_matches_task;
 use super::response::{QueuedEvaluation, SkippedTask, WebhookTriggerOutcome};
@@ -198,13 +196,9 @@ pub(super) async fn trigger_release_for_integration(
 }
 
 enum FilterResult {
-    /// Proceed to fire `apply_trigger` (push / release / time / polling).
     Fire,
-    /// PR trigger matched; the approval gate may still engage on a fork PR.
     FirePr { require_approval: bool },
-    /// Config filter did not match - add to skipped with reason "filter".
     SkipFilter,
-    /// This trigger type / config shape doesn't apply at all - silently ignore.
     Skip,
 }
 
@@ -240,8 +234,6 @@ where
             }
         };
 
-    // Persist PR number/author on the evaluation for every PR trigger (#391);
-    // a comment-triggered run already carries a richer source_comment.
     let source_comment = source_comment.or_else(|| {
         approval_ctx.as_ref().and_then(|c| {
             c.pr_number
@@ -340,8 +332,6 @@ async fn load_trigger_task(state: &Arc<ServerState>, trig: &ept::Model) -> Optio
     }
 }
 
-/// Apply one matched trigger and fold the outcome into `outcome`. Stamps
-/// `last_fired_at` for any result so webhook-only triggers don't read "never".
 async fn apply_and_record(
     state: &Arc<ServerState>,
     scheduler: &Arc<Scheduler>,
@@ -396,8 +386,6 @@ async fn apply_and_record(
     }
 }
 
-/// Abort the shared builds a hard-aborted evaluation alone still needed; the graph
-/// actor owns that write, and the caller cancels the in-memory jobs.
 async fn abort_eval_shared_builds(
     state: &Arc<ServerState>,
     evaluation: EvaluationId,
@@ -429,9 +417,8 @@ fn push_skipped(
     });
 }
 
-/// Resolve whether a PR fire should gate on maintainer approval. Fail-closed:
-/// gates a (possibly) fork PR unless it is same-repo or the actor is a trusted
-/// repo writer (a maintainer force-push / command is running without re-parking).
+/// The gate is failing closed. A possibly-fork PR is gated unless it is same-repo or the actor is a
+/// trusted repo writer.
 async fn decide_pr_gate(
     state: &Arc<ServerState>,
     task: &MTask,
@@ -494,9 +481,9 @@ async fn load_active_triggers_for_integration(
     integration_id: IntegrationId,
     trigger_type: TriggerType,
 ) -> Result<Vec<ept::Model>, sea_orm::DbErr> {
-    // Match by project (each project has one inbound integration per git_host_type), not by
-    // config integration_id: the GitHub App seed migration rewrites integration
-    // rows, so a pre-migration trigger's stale UUID would stop matching.
+    // Triggers are matched by project, not by config `integration_id`. The GitHub App seed
+    // migration rewrote integration rows, and a pre-migration trigger's stale UUID would stop
+    // matching.
     let stmt = ACTIVE_TRIGGERS_FOR_INTEGRATION.bind_built(
         active_triggers_sql(trigger_type),
         [Value::Uuid(Some(integration_id.into_inner()))],
@@ -507,8 +494,6 @@ async fn load_active_triggers_for_integration(
         .await
 }
 
-/// Simple glob match: `*` matches any sequence of characters (including none).
-/// An empty `globs` list means "match everything".
 fn glob_matches(globs: &[String], name: &str) -> bool {
     if globs.is_empty() {
         return true;

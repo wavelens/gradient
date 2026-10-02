@@ -4,10 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Typed wrappers around the `task_trigger` table's enum/jsonb columns.
-//!
-//! The `cron` crate (v0.16) expects **six-field** expressions:
-//! `sec min hour dom mon dow` - not the five-field POSIX form.
+//! The `cron` crate (v0.16) is expecting six-field expressions `sec min hour dom mon dow`.
+//! The five-field POSIX form is invalid here.
 
 use crate::ids::IntegrationId;
 use serde::{Deserialize, Serialize};
@@ -21,8 +19,6 @@ pub use gradient_entity::task_trigger::TriggerType;
 pub enum TriggerConfig {
     Polling {
         interval_secs: u32,
-        /// Branch to poll (`refs/heads/<branch>`). `None` polls the remote HEAD
-        /// (the repo's default branch).
         #[serde(default)]
         branch: Option<String>,
     },
@@ -41,11 +37,6 @@ pub enum TriggerConfig {
         branches: Vec<String>,
         #[serde(default = "default_pr_actions")]
         actions: Vec<String>,
-        /// When true (default, secure-by-default), PRs from contributors who
-        /// are not repo writers on the Git host are parked in
-        /// `WaitingReason::Approval` until a maintainer either clicks the
-        /// "Approve and Run" check-run action (GitHub) or comments
-        /// `/gradient approve` (or `/gradient run`) on the PR.
         #[serde(default = "default_require_approval")]
         require_approval: bool,
     },
@@ -82,7 +73,6 @@ impl TriggerConfig {
         }
     }
 
-    /// Parse a row's `(trigger_type, config_json)` pair into a typed config.
     pub fn parse_row(
         trigger_type: TriggerType,
         config: &serde_json::Value,
@@ -110,7 +100,6 @@ impl TriggerConfig {
         }
     }
 
-    /// Serialise to the JSON shape stored in the DB (without the `"type"` tag).
     pub fn to_db_json(&self) -> serde_json::Value {
         let mut v = serde_json::to_value(self)
             .expect("a TriggerConfig is a derived enum of strings and numbers");
@@ -177,7 +166,6 @@ mod tests {
 
     #[test]
     fn cron_valid_accepted() {
-        // The `cron` crate uses six-field expressions: sec min hour dom mon dow.
         let cfg = TriggerConfig::Time {
             cron: "0 0 2 * * *".into(),
         };
@@ -186,7 +174,6 @@ mod tests {
 
     #[test]
     fn type_mismatch_rejected() {
-        // Polling-shaped config passed for trigger_type=time (cron field missing).
         let bad = serde_json::json!({"interval_secs": 60});
         let res = TriggerConfig::parse_row(TriggerType::Time, &bad);
         assert!(res.is_err(), "expected error, got {res:?}");
@@ -194,9 +181,8 @@ mod tests {
 
     #[test]
     fn reporter_pull_request_require_approval_defaults_true_for_legacy_rows() {
-        // Pre-#247 rows lack `require_approval` in the stored JSON. The serde
-        // default must produce `true` on read so secure-by-default applies
-        // without a backfill migration on existing trigger rows.
+        // Pre-#247 rows are lacking `require_approval` in the stored JSON. The serde default must
+        // read as `true` to keep them secure by default without a backfill migration.
         let legacy_db = serde_json::json!({
             "integration_id": IntegrationId::nil(),
             "branches": [],

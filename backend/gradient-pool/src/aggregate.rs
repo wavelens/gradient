@@ -10,7 +10,6 @@ use gradient_wire::types::GradientCapabilities;
 
 use crate::WorkerShared;
 
-/// The pool seen from upstream as one worker.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Aggregate {
     pub capabilities: GradientCapabilities,

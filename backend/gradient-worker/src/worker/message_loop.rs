@@ -4,12 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Worker dispatch loop: drives `tokio::select!` over the server connection,
-//! job completion, and heartbeats.
-//!
-//! [`run_message_loop`] is the main entry point. It owns one [`MessageLoopState`]
-//! per connection; every inbound [`ServerMessage`] is routed to a method on it.
-
 use gradient_util::sync::Mutex;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -38,14 +32,9 @@ use gradient_worker_client::correlation::{AssignmentHandle, CacheWaiters, KnownD
 use super::cluster::{ClusterChannels, ClusterHolds, HeldJob};
 use super::scoring::spawn_scoring_task;
 
-// ── Dispatch loop ─────────────────────────────────────────────────────────────
-
-/// How the dispatch loop ended, for the caller's reconnect decision.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct LoopEnd {
-    /// The server sent `Draining` before closing.
     pub(super) draining: bool,
-    /// The server refused the session (post-handshake `Reject`).
     pub(super) refused: bool,
 }
 
@@ -75,9 +64,6 @@ pub(super) async fn run_message_loop(
                 break;
             }
 
-            // A local signal drains this worker: take nothing new, finish and
-            // report what is running, then exit. A server-side `Draining` is
-            // the other direction entirely and never ends the process (#626).
             _ = shutdown.drain_requested(), if !local_drain => {
                 local_drain = true;
                 state.begin_drain().await?;
@@ -123,26 +109,19 @@ pub(super) async fn run_message_loop(
         }
     }
 
-    // The connection is gone; any job still running is detached from this loop
-    // and can never report its result over the dead writer. Abort them so they
-    // stop instead of double-executing after we reconnect - the server
-    // re-queues the orphaned jobs on its side.
+    // Running jobs are detached from this loop and can never report over the dead writer.
+    // Aborting them is preventing a double execution after the reconnect.
+    // The server is re-queuing the orphaned jobs on its side.
     for (_job_id, job) in state.jobs.running.drain() {
         let _ = job.abort.send(true);
     }
 
     Ok(LoopEnd {
-        // A local drain sets the same "take no more work" flag, but it is this
-        // worker stopping, not the server going away - never a reconnect.
         draining: state.draining && !local_drain,
         refused: state.refused,
     })
 }
 
-// ── Per-job bookkeeping ───────────────────────────────────────────────────────
-
-/// One in-flight job: its kind for capacity accounting, the dispatch id every
-/// report echoes, its abort channel and the timeline the terminal report carries.
 struct ActiveJob {
     kind: JobKind,
     assignment_id: AssignmentHandle,
@@ -151,7 +130,6 @@ struct ActiveJob {
     cluster: Option<String>,
 }
 
-/// Registry of in-flight jobs and the completion channel each task reports on.
 struct JobRegistry {
     running: HashMap<String, ActiveJob>,
     done_tx: mpsc::UnboundedSender<(String, Result<()>)>,
@@ -193,9 +171,6 @@ impl JobRegistry {
         (assignment_id, abort_rx, timeline)
     }
 
-    /// A job the server hands out again while it is still running here keeps its
-    /// task and reports under the new dispatch id; a second task would build
-    /// the same job twice. False for a job this session does not run.
     fn readopt(&self, job_id: &str, assignment_id: &str) -> bool {
         match self.running.get(job_id) {
             Some(job) => {
@@ -226,11 +201,6 @@ impl JobRegistry {
     }
 }
 
-// ── Per-connection state ──────────────────────────────────────────────────────
-
-/// Owned per-connection dispatch state. Everything the message handlers need
-/// lives here; `credentials` is a cheap handle onto the store the
-/// [`super::Worker`] keeps across reconnects.
 pub(super) struct MessageLoopState {
     writer: ProtoWriter,
     cache_waiters: CacheWaiters,
@@ -298,8 +268,6 @@ impl MessageLoopState {
         }
     }
 
-    /// Local drain: tell the server to stop offering work so nothing new is
-    /// assigned while the in-flight jobs finish.
     async fn begin_drain(&mut self) -> Result<()> {
         self.draining = true;
         let held = self.holds.release_all();
@@ -318,7 +286,6 @@ impl MessageLoopState {
         }
     }
 
-    /// Route `msg` to the appropriate handler method.
     async fn route(&mut self, msg: ServerMessage) -> Result<()> {
         match msg {
             ServerMessage::JobListChunk {
@@ -367,11 +334,6 @@ impl MessageLoopState {
             ServerMessage::Error { code, message } => {
                 error!(code, %message, "protocol error from server");
             }
-            // A post-handshake `Reject` is the server refusing this session -
-            // typically 496 while a zombie session still holds this worker's
-            // slot. The server closes right after, so end the loop and mark
-            // the session refused: the reconnect path must back off rather
-            // than retry at its floor delay.
             ServerMessage::Reject { code, reason } => {
                 warn!(code, %reason, "server refused the session");
                 self.refused = true;
@@ -403,7 +365,6 @@ impl MessageLoopState {
             ServerMessage::EvalCachePullResult { job_id, outcome } => {
                 self.eval_cache_recv.deliver_pull_result(&job_id, outcome);
             }
-            // Unreachable: the NAR receiver and the bulk lane own these.
             ServerMessage::NarPush { .. }
             | ServerMessage::EvalCacheChunk { .. }
             | ServerMessage::NarStreamHeader { .. }
@@ -415,8 +376,6 @@ impl MessageLoopState {
         Ok(())
     }
 
-    /// Handle a payload-bearing frame without deserialising it: the chunk is
-    /// written straight from the buffer the socket delivered.
     async fn route_bulk(&mut self, frame: Frame<ServerMessage>) -> Result<()> {
         match frame.archived() {
             ArchivedServerMessage::EvalCacheChunk {
@@ -437,11 +396,6 @@ impl MessageLoopState {
         Ok(())
     }
 
-    // ── Job completion / heartbeat ────────────────────────────────────────────
-
-    /// Handle job completion from the `done_rx` channel: clean up per-job
-    /// state, report the result to the server, and request a new job if the
-    /// worker still has capacity.
     async fn on_job_done(&mut self, job_id: String, result: Result<()>) -> Result<()> {
         let job = self
             .jobs
@@ -511,15 +465,10 @@ impl MessageLoopState {
         Ok(())
     }
 
-    /// Heartbeat tick: send live host metrics and request more jobs if the
-    /// worker has capacity.
-    ///
-    /// A failed send here ends the session. The control lane only stays full
-    /// past its timeout when the peer has stopped reading, and a peer that
-    /// stalled without closing never ends the read half, so warning and
-    /// carrying on left the worker building jobs it could no longer report and
-    /// blocked this loop for the timeout on every tick. Every other send site
-    /// already treats a send failure as a dead connection.
+    /// A failed send is ending the session.
+    /// The control lane is only staying full past its timeout when the peer has stopped reading.
+    /// A peer that stalled without closing is never ending the read half.
+    /// Warning and carrying on left the worker building jobs it could no longer report.
     async fn on_heartbeat(&mut self) -> Result<()> {
         send_live_metrics(&self.writer);
         let expired = self.holds.expired(std::time::Instant::now());
@@ -561,8 +510,6 @@ impl MessageLoopState {
         Ok(())
     }
 
-    // ── Job list / scoring ────────────────────────────────────────────────────
-
     fn on_job_list_chunk(&mut self, cands: Vec<JobCandidate>, is_final: bool) {
         debug!(count = cands.len(), is_final, "received job list chunk");
         if self.draining {
@@ -601,8 +548,6 @@ impl MessageLoopState {
             request_after,
         );
     }
-
-    // ── Job lifecycle ─────────────────────────────────────────────────────────
 
     async fn on_assign_job(
         &mut self,
@@ -828,14 +773,10 @@ impl MessageLoopState {
         Ok(())
     }
 
-    // ── Credentials ───────────────────────────────────────────────────────────
-
     fn on_credential(&mut self, kind: gradient_wire::messages::CredentialKind, data: Vec<u8>) {
         debug!(?kind, "received credential");
         self.credentials.store(kind, data);
     }
-
-    // ── NAR transfer ──────────────────────────────────────────────────────────
 
     fn on_cache_status(&mut self, query_id: String, cached: Vec<CachedPath>) {
         let count = cached.len();
@@ -869,8 +810,6 @@ impl MessageLoopState {
         }
     }
 
-    // ── Auth ──────────────────────────────────────────────────────────────────
-
     async fn on_auth_challenge(&mut self, peers: Vec<String>) -> Result<()> {
         debug!(
             ?peers,
@@ -903,12 +842,6 @@ impl MessageLoopState {
     }
 }
 
-/// Sample live host load off the dispatch thread (the CPU sample blocks for
-/// [`sysinfo::MINIMUM_CPU_UPDATE_INTERVAL`]) and send it to the scheduler.
-/// `disk_speed_mbps` / `network_speed_mbps` come from passive EWMA
-/// accumulators and stay `None` until the first build / NAR transfer. Detached
-/// (not awaited by the heartbeat tick): the blocking sample is running on
-/// `spawn_blocking`, then the async send executes on the runtime once it finishes.
 fn send_live_metrics(writer: &ProtoWriter) {
     let writer = writer.clone();
     #[expect(
@@ -937,8 +870,6 @@ fn send_live_metrics(writer: &ProtoWriter) {
     });
 }
 
-// ── Job runner ────────────────────────────────────────────────────────────────
-
 async fn run_job(
     executor: JobExecutor,
     job: Job,
@@ -959,9 +890,6 @@ async fn run_job(
     }
 }
 
-/// Run `job` until it ends or the server aborts it. Dropping a flake job is
-/// safe at any await: its eval subprocesses are `kill_on_drop` and the pool
-/// discards a worker whose request is still in flight.
 async fn until_aborted(
     job: impl std::future::Future<Output = Result<()>>,
     mut abort: watch::Receiver<bool>,
@@ -994,10 +922,6 @@ mod tests {
         )
     }
 
-    /// A job the server assigns again while it is still running here (its session
-    /// was unregistered and the job re-offered) keeps the one task and reports
-    /// under the new dispatch id; a second task would build it twice and the
-    /// first would be left with no abort channel.
     #[test]
     fn a_reassigned_running_job_keeps_its_task_and_takes_the_new_assignment_id() {
         let (mut jobs, _done_rx) = registry();
@@ -1050,7 +974,6 @@ mod tests {
         assert!(!*single.borrow(), "a single job keeps running");
     }
 
-    /// The terminal report carries whatever id the job is running under at the end.
     #[test]
     fn finishing_a_job_hands_back_its_current_assignment_id() {
         let (mut jobs, _done_rx) = registry();
@@ -1069,10 +992,6 @@ mod tests {
         assert!(jobs.finish("job-1").is_none());
     }
 
-    /// An evaluation spends nearly all its time inside one nix call, not at a
-    /// checkpoint between steps, so the abort has to stop the job itself: a
-    /// job that only notices at its next checkpoint keeps its slot, its open
-    /// dispatch row and its eval subprocesses for as long as that call is running.
     #[tokio::test]
     async fn an_aborted_job_stops_without_reaching_a_checkpoint() {
         let (abort, abort_rx) = watch::channel(false);
@@ -1100,8 +1019,6 @@ mod tests {
         );
     }
 
-    /// The sender lives in the registry and goes when the job is finished or
-    /// the session ends; a closed channel is not a request to stop.
     #[tokio::test]
     async fn a_closed_abort_channel_does_not_stop_the_job() {
         let (abort, abort_rx) = watch::channel(false);

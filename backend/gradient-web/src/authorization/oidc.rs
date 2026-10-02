@@ -26,16 +26,11 @@ use std::sync::Arc;
 use subtle::ConstantTimeEq;
 use url::Url;
 
-/// State + nonce returned to the caller of [`oidc_login_create`].
-///
-/// The caller is expected to set `cookie_value` as `oidc_csrf` cookie
-/// (HttpOnly, SameSite=Lax, ~10 min) and redirect the user to `auth_url`.
 pub struct OidcAuthRequest {
     pub auth_url: Url,
     pub cookie_value: String,
 }
 
-/// Claims for the short-lived `oidc_csrf` cookie.
 #[derive(Serialize, Deserialize)]
 struct CsrfClaims {
     exp: i64,
@@ -45,7 +40,6 @@ struct CsrfClaims {
     pkce_verifier: String,
 }
 
-/// Subset of ID-token claims we trust as identity.
 #[derive(Deserialize)]
 struct IdTokenClaims {
     iss: String,
@@ -62,13 +56,12 @@ struct IdTokenClaims {
     groups: Vec<String>,
 }
 
-/// A provisioned/managed placeholder is claimable by the first matching OIDC
-/// login: no local password set and not yet bound to an OIDC identity.
+/// A provisioned placeholder is claimable by the first matching OIDC login. It must have no local
+/// password and no bound OIDC identity yet.
 fn is_claimable(password: &Option<String>, oidc_subject: &Option<String>) -> bool {
     password.is_none() && oidc_subject.is_none()
 }
 
-/// Distinct `(project, role)` grants for the groups a user presents on login.
 fn grants_for_groups(
     map: &gradient_state::OidcGroupRoles,
     groups: &[String],
@@ -84,8 +77,7 @@ fn grants_for_groups(
     out
 }
 
-/// Apply OIDC group -> role grants additively: insert the membership when
-/// missing, upgrade the role when it differs. Never removes a membership.
+/// Grants are additive. A membership is never removed here.
 async fn apply_oidc_group_grants<C: sea_orm::ConnectionTrait>(
     tx: &C,
     map: &gradient_state::OidcGroupRoles,

@@ -4,10 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! On-disk declarative state DTOs: [`StateConfiguration`] and the per-entity
-//! `State*` types it deserializes from the state JSON file. Validation lives in
-//! [`super::validation`]; provisioning in [`super::provisioning`].
-
 use gradient_entity::project_cache::CacheSubscriptionMode;
 use gradient_types::triggers::{ConcurrencyPolicy, TriggerType};
 use serde::{Deserialize, Serialize};
@@ -19,9 +15,6 @@ pub struct StateUser {
     pub username: String,
     pub name: String,
     pub email: String,
-    /// Path to a credential file containing the user's plaintext password.
-    /// `None` provisions an OIDC-only account (no stored password) so the
-    /// OIDC login flow can claim it by email.
     #[serde(default)]
     pub password_file: Option<String>,
     #[serde(default)]
@@ -34,11 +27,6 @@ pub struct StateUser {
 pub struct StateProject {
     pub name: String,
     pub display_name: String,
-    /// Explicit project UUID. When set, a freshly created project is given
-    /// this id instead of a server-generated one, so a declarative deployment
-    /// can pin the value a worker references in its `peerFile`
-    /// (`<project_id>:<token>`). Applied on create only; the primary key is
-    /// immutable, so a value that conflicts with an existing project is rejected.
     #[serde(default)]
     pub id: Option<String>,
     #[serde(default)]
@@ -48,12 +36,9 @@ pub struct StateProject {
     #[serde(default)]
     pub hide_build_requests: bool,
     pub created_by: String,
-    /// Declarative project membership. Empty preserves the legacy behavior of
-    /// auto-adding `created_by` as Admin. Non-empty makes the list
-    /// authoritative: unmatched memberships are revoked, the implicit
-    /// creator-Admin assignment is skipped, and members referencing users
-    /// that do not yet exist are recorded as pending and applied at
-    /// registration / OIDC first-login.
+    /// An empty list is keeping the legacy auto-add of `created_by` as Admin. A non-empty list is
+    /// authoritative and revoking unmatched memberships. Members referencing unknown users are
+    /// recorded as pending until registration or first OIDC login.
     #[serde(default)]
     pub members: Vec<StateProjectMemberEntry>,
 }
@@ -77,43 +62,24 @@ pub struct StateTask {
     #[serde(default = "default_true")]
     pub active: bool,
     pub created_by: String,
-    /// How many evaluations to retain per task. Must be at least 1; the
-    /// runtime `GRADIENT_EVAL_MAX_KEEP` cap further reduces it if exceeded.
     #[serde(default = "default_keep_evaluations")]
     pub keep_evaluations: i32,
-    /// Declarative trigger list. `None` leaves existing triggers untouched
-    /// (back-compat). `Some([])` is an error - a task must have at least one.
+    /// `None` is leaving existing triggers untouched. `Some([])` is an error because a task needs
+    /// at least one trigger.
     #[serde(default)]
     pub triggers: Option<Vec<StateTrigger>>,
-    /// Concurrency policy for this task. Defaults to `soft_abort` when omitted.
     #[serde(default = "default_soft_abort")]
     pub concurrency: ConcurrencyPolicy,
-    /// When `false`, build outputs from this task are pushed to the cache
-    /// but their narinfo signatures are left empty, so external Nix clients
-    /// won't trust them. Defaults to `true`.
     #[serde(default = "default_true")]
     pub sign_cache: bool,
-    /// When `true`, an evaluation whose builds need an architecture or system
-    /// features no connected worker provides waits for one. Defaults to
-    /// `false`, which aborts it.
     #[serde(default)]
     pub wait_for_workers: bool,
-    /// Declarative flake input overrides. An absent or empty map deletes all
-    /// existing override rows for this task.
     #[serde(default)]
     pub flake_input_overrides: HashMap<String, StateFlakeInputOverride>,
-    /// Declarative action list. Re-applying state with fewer actions removes
-    /// the missing ones (matched by `name` within the task).
     #[serde(default)]
     pub actions: Vec<StateAction>,
 }
 
-/// Declarative task action. `config` is type-specific and validated
-/// against `action_type` at apply time:
-///   - `send_mail`           `{ recipients: [..], subject_template?: str }`
-///   - `send_web_request`    `{ url: str, token_file?: str }`
-///   - `git_host_status_report` `{ integration: <outbound integration name> }`
-///   - `open_pr`             `{ integration: <name>, generator?, granularity?, verify_gate?, branch_pattern?, ... }`
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct StateAction {
@@ -143,15 +109,8 @@ fn default_soft_abort() -> ConcurrencyPolicy {
 pub struct StateTrigger {
     #[serde(rename = "type")]
     pub trigger_type: TriggerType,
-    /// Name of an inbound integration in the same project. Required for
-    /// `reporter_push` and `reporter_pull_request` triggers.
     #[serde(default)]
     pub integration: Option<String>,
-    /// Type-specific config shape:
-    /// - polling: `{ interval_secs }`
-    /// - reporter_push: `{ branches, tags, releases_only }`
-    /// - reporter_pull_request: `{ branches, actions }`
-    /// - time: `{ cron }`
     #[serde(default)]
     pub config: serde_json::Value,
     #[serde(default = "default_active")]
@@ -165,13 +124,10 @@ fn default_active() -> bool {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StateIntegration {
     pub name: String,
-    /// Defaults to `name` when unset.
     #[serde(default)]
     pub display_name: Option<String>,
     pub project: String,
-    /// `"inbound"` or `"outbound"`.
     pub kind: String,
-    /// `"gitea"`, `"forgejo"`, `"gitlab"`, or `"github"`.
     pub git_host_type: String,
     #[serde(default)]
     pub secret_file: Option<String>,
@@ -179,12 +135,8 @@ pub struct StateIntegration {
     pub endpoint_url: Option<String>,
     #[serde(default)]
     pub access_token_file: Option<String>,
-    /// GitHub App installation id. Required when `git_host_type = "github"`,
-    /// ignored otherwise; provisions/links a `github_installation` row in place
-    /// of the secret/token credentials other Git hosts use.
     #[serde(default)]
     pub installation_id: Option<i64>,
-    /// Optional GitHub account login for the installation, used only for naming.
     #[serde(default)]
     pub account_login: Option<String>,
     pub created_by: String,
@@ -258,10 +210,7 @@ pub struct StateApiKey {
     pub name: String,
     pub key_file: String,
     pub owned_by: String,
-    /// Capability identifiers (matching `Permission::as_wire_name`) the key
-    /// should grant. Required - there is no safe default.
     pub permissions: Vec<String>,
-    /// Optional project name to pin the key to. `None` = unscoped.
     #[serde(default)]
     pub project: Option<String>,
 }
@@ -269,20 +218,10 @@ pub struct StateApiKey {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StateRole {
     pub name: String,
-    /// Project the role belongs to. State-managed roles are always
-    /// project-scoped - there is no way to define a global state-managed role.
     pub project: String,
-    /// Capability identifiers (matching `Permission::as_wire_name`) the role
-    /// grants. Required - there is no safe default.
     pub permissions: Vec<String>,
-    /// OIDC group claims that grant this role on login. Resolved at startup
-    /// into [`OidcGroupRoles`](super::OidcGroupRoles) and applied additively
-    /// per OIDC login.
     #[serde(default)]
     pub oidc_group: Vec<String>,
-    /// SCIM group names that grant this role. Resolved at startup into
-    /// [`ScimGroupRoles`](super::ScimGroupRoles); membership is applied/removed
-    /// when the IdP adds/removes the user from the SCIM group.
     #[serde(default)]
     pub scim_group: Vec<String>,
 }
@@ -292,41 +231,23 @@ pub struct StateWorker {
     pub worker_id: String,
     #[serde(default)]
     pub url: Option<String>,
-    /// Projects the worker is registered under. One
-    /// `worker_registration` row is provisioned per (worker_id, project)
-    /// pair so the same physical worker can serve builds for multiple
-    /// projects without duplicating the declarative entry.
     pub projects: Vec<String>,
     pub token_file: String,
-    /// Human-readable display name shown in the workers list.
     pub display_name: String,
-    /// Username recorded as the creator. Optional: a worker the module
-    /// provisions for its own host has no declared user to attribute it to.
     #[serde(default)]
     pub created_by: Option<String>,
-    /// Per-registration server-side gate for `fetch`. Defaults to true.
     #[serde(default = "default_true")]
     pub enable_fetch: bool,
-    /// Per-registration server-side gate for `eval`. Defaults to true.
     #[serde(default = "default_true")]
     pub enable_eval: bool,
-    /// Per-registration server-side gate for `build`. Defaults to true.
     #[serde(default = "default_true")]
     pub enable_build: bool,
-    /// When true this entry is a base worker (server-level, not per-project).
-    /// `projects` then lists projects to pre-enable.
     #[serde(default)]
     pub base_worker: bool,
-    /// Optional fixed auth identity (UUID) for a base worker; replaces the
-    /// per-project challenge. Ignored for non-base workers.
     #[serde(default)]
     pub authorize_against: Option<String>,
-    /// Enables a base worker globally, or every registration of a
-    /// non-base worker. Restored on every startup.
     #[serde(default = "default_true")]
     pub enabled: bool,
-    /// When true, every project enables this base worker at creation time
-    /// rather than opting in by hand. Ignored for non-base workers.
     #[serde(default)]
     pub auto_enable: bool,
 }

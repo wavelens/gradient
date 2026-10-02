@@ -10,8 +10,8 @@ use tokio::sync::broadcast::{self, error::RecvError, error::TryRecvError};
 
 pub const EVENT_BUS_CAPACITY: usize = 4096;
 
-/// Two lanes: proto traffic rides its own, so a NAR push storm cannot lag the
-/// live UI sockets; only the firehose listens to both.
+/// Proto traffic is riding its own lane. A NAR push storm cannot lag the live UI sockets.
+/// Only the firehose is listening to both lanes.
 #[derive(Clone, Debug)]
 pub struct EventBus {
     events: broadcast::Sender<Arc<Envelope>>,
@@ -43,7 +43,7 @@ impl EventBus {
         let _ = lane.send(envelope);
     }
 
-    /// Whether anyone listens to proto traffic; the tap skips building events otherwise.
+    /// The tap is skipping event construction while nobody is listening to proto traffic.
     pub fn wire_active(&self) -> bool {
         self.wire.receiver_count() > 0
     }

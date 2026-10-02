@@ -4,10 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! The units a deep GC round walks, each idempotent and small enough to finish
-//! between two checkpoints: one key shard of the NAR or log store, or a whole
-//! pass where the store has no shards worth splitting on.
-
 use super::DeepGcReport;
 use anyhow::{Context, Result};
 use gradient_core::ServerState;
@@ -49,8 +45,6 @@ impl Pass {
     }
 }
 
-/// Every unit of a round as its checkpoint key, `<pass>` or `<pass>/<shard>`,
-/// in ascending order.
 pub(super) fn units() -> Vec<String> {
     Pass::ALL
         .into_iter()
@@ -160,8 +154,6 @@ async fn pass_logs(state: Arc<ServerState>, shard: &str, report: &mut DeepGcRepo
         return Ok(());
     }
 
-    // A log key is the owning attempt's own id; it is orphan when no
-    // `build_attempt` row carries that id.
     let referenced: HashSet<BuildAttemptId> = gradient_db::fetch_in_chunks(&on_disk, |chunk| {
         EBuildAttempt::find()
             .select_only()
@@ -187,8 +179,8 @@ async fn pass_logs(state: Arc<ServerState>, shard: &str, report: &mut DeepGcRepo
     Ok(())
 }
 
-/// The only sweep of upload partials: a walk per session, request or
-/// maintenance tick stalls whoever waits on it behind the filesystem.
+/// This is the only sweep of upload partials. A walk per session, request or maintenance tick would
+/// stall every waiter behind the filesystem.
 async fn pass_partials(state: &ServerState, report: &mut DeepGcReport) -> Result<()> {
     let ttl = std::time::Duration::from_secs(state.config.nar.partial_ttl_secs);
     let server = &state.config.server;

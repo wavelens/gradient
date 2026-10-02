@@ -4,15 +4,11 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Self-heal for `BuildFailureKind::InputsUnavailable`: purge stale cache
-//! artifacts for reported-missing inputs and re-queue their producers.
-
 use anyhow::Result;
 use gradient_db::DbContext;
 use gradient_types::*;
 use tracing::{info, warn};
 
-/// Extract the 32-char hash from a `/nix/store/<hash>-<name>` store path.
 fn store_path_hash(store_path: &str) -> Option<&str> {
     store_path
         .strip_prefix("/nix/store/")
@@ -20,10 +16,6 @@ fn store_path_hash(store_path: &str) -> Option<&str> {
         .filter(|h| !h.is_empty())
 }
 
-/// Whether any of `derivations` is reachable (has a `build_job`, so promotion can
-/// schedule it). A producer with none is an orphan: pruned out of the build graph
-/// because a parent was cached without its closure, it can never be queued and
-/// must instead be revived by re-walking its cached parents.
 async fn any_reachable<C: sea_orm::ConnectionTrait>(db: &C, derivations: &[DerivationId]) -> bool {
     for d in derivations {
         if gradient_db::graph::reachability::derivation_is_reachable(db, *d)
@@ -37,21 +29,10 @@ async fn any_reachable<C: sea_orm::ConnectionTrait>(db: &C, derivations: &[Deriv
     false
 }
 
-/// Self-heal for `BuildFailureKind::InputsUnavailable`. A build attempt
-/// proved these input paths are unfetchable from the cache, so purge each
-/// one's stale cache artifact (delete the `cached_path` row + the NAR object,
-/// clear the output's `is_cached` / `cached_path`) and reset its producer to
-/// `Created`, leaving the derivation graph intact. The producer then rebuilds
-/// in-eval and the failed build - marked `FailedTransient`, not permanent - is
-/// retried by `requeue::transient_retries` once its backoff elapses, and that
-/// requeue's own settle is what holds it out of the queue until the input is back:
-/// the dispatch gate reads the status, so it re-checks nothing.
-///
-/// A missing input with no producing derivation (a `.drv` file or a source
-/// path) is only purged when its NAR is genuinely gone: `demote_cached_output`
-/// preserves a still-present producerless artifact, because nothing rebuilds it
-/// and deleting the only copy dead-ends every parent on `InputsUnavailable`
-/// forever (a present one means a transient fetch miss, so the build just retries).
+/// The failed build is `FailedTransient` and is retried by `requeue::transient_retries`.
+/// That requeue's settle is holding it out of the queue until the input is back.
+/// `demote_cached_output` is keeping a still-present input that has no producer.
+/// Nothing can rebuild it, and deleting the only copy would fail every parent forever.
 pub(crate) async fn repair_missing_inputs(
     ctx: &DbContext,
     failed_derivation: DerivationId,
@@ -62,17 +43,12 @@ pub(crate) async fn repair_missing_inputs(
     let mut wanted_by_demoted = 0usize;
     let mut sources_purged: Vec<&str> = Vec::new();
     let mut demoted_producers: Vec<DerivationId> = Vec::new();
-    // Set when a missing input cannot be reached upward: an absent orphan pruned
-    // out of the graph, recovered after the loop by demoting the failed build's
-    // cached deps and dropping their record so the next eval re-walks them.
     let mut needs_dep_rewalk = false;
     for path in missing_paths {
         let Some(hash) = store_path_hash(path) else {
             continue;
         };
 
-        // Diagnostic: why the worker found this input unfetchable even though
-        // dispatch treated its producer as done.
         match gradient_db::caches::demotion::diagnose_missing_input(
             db,
             EvaluationId::now_v7(),
@@ -96,10 +72,6 @@ pub(crate) async fn repair_missing_inputs(
         match gradient_db::caches::demotion::demote_cached_output(ctx, hash).await {
             Ok(drvs) if !drvs.is_empty() => {
                 purged += 1;
-                // An orphan producer (no `build_job`) can never be queued, so the
-                // flag clear is not enough: demote the parents and drop their
-                // record, so the next eval walks them again, re-records the edge
-                // and schedules it.
                 let orphan = !any_reachable(db, &drvs).await;
                 demoted_producers.extend(drvs);
                 if orphan {
@@ -129,9 +101,6 @@ pub(crate) async fn repair_missing_inputs(
             }
             Ok(_) => {
                 sources_purged.push(path);
-                // No producing derivation (a source / `.drv`): it only returns to
-                // the cache as part of a parent's closure, so demote the
-                // rebuildable output parents - their rebuild re-pushes it.
                 match gradient_db::caches::demotion::demote_parents_of(ctx, hash).await {
                     Ok(drvs) if !drvs.is_empty() => {
                         wanted_by_demoted += drvs.len();
@@ -145,8 +114,6 @@ pub(crate) async fn repair_missing_inputs(
         }
     }
 
-    // Absent orphan: unreachable upward, so reach it downward from the failing
-    // build and demote its output-only-cached direct deps.
     if needs_dep_rewalk {
         match gradient_db::caches::demotion::demote_output_only_cached_deps(ctx, failed_derivation)
             .await
@@ -166,8 +133,8 @@ pub(crate) async fn repair_missing_inputs(
         }
     }
 
-    // A wanted output whose producer is terminal-failed must retry once wanted:
-    // waiting for an eval to requeue it dead-ends whenever evals are aborted.
+    // A wanted output with a terminal-failed producer must retry right away.
+    // Waiting for an eval to requeue it can dead-end whenever evals are aborted.
     let requeued = if demoted_producers.is_empty() {
         0
     } else {

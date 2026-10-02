@@ -15,22 +15,13 @@ use gradient_wire::transport::{
 use sea_orm::{ColumnTrait, ConnectionTrait, DbErr, EntityTrait, QueryFilter};
 use tracing::warn;
 
-/// Look up the locally-cached `(file_size, nar_size)` for `hashes`.
-///
-/// A DB error is propagated, never swallowed into an empty map: a failed lookup
-/// means cache state is *unknown*, and treating "unknown" as "absent" would make
-/// a `CacheQuery` report a fully-cached input as missing - which the worker takes
-/// as a terminal `InputsUnavailable` and fails the eval. The caller turns the
-/// error into a `CacheError` so the worker retries transiently instead.
+/// A DB error must propagate as unknown cache state, never as absent. The worker would take a fully
+/// cached input as a terminal `InputsUnavailable` and fail the eval.
 async fn build_local_cache_map(
     state: &ServerState,
     hashes: &[&str],
     cached_paths: &[gradient_entity::cached_path::Model],
 ) -> Result<HashMap<String, (Option<i64>, Option<i64>)>, DbErr> {
-    // Source the (file_size, nar_size) pair straight from `cached_path` -
-    // the worker writes both columns there during NarUploaded, so it's the
-    // single authoritative copy.  We still scope the result to outputs the
-    // server marks `is_cached`, so an in-flight upload doesn't leak.
     let derivation_outputs = EDerivationOutput::find()
         .filter(
             sea_orm::Condition::all()
@@ -40,10 +31,6 @@ async fn build_local_cache_map(
         .all(&state.cache_db)
         .await?;
 
-    // Only paths whose NAR upload actually completed count as cached.
-    // `is_fully_cached()` requires `file_hash IS NOT NULL`; rows without
-    // it are placeholders for an in-flight or failed upload and would
-    // cause the worker to issue a `NarRequest` the server can't satisfy.
     let sizes: HashMap<&str, (Option<i64>, Option<i64>)> = cached_paths
         .iter()
         .filter(|cp| cp.is_fully_cached())
@@ -81,9 +68,6 @@ gradient_db::sql! {
         ];
 }
 
-/// For Push mode: ensure a `cached_path_signature` row exists for each
-/// (cached_path, project cache) pair so that the signing job is triggered for
-/// paths that were already cached before this worker connected.
 async fn ensure_push_signatures(
     state: &ServerState,
     project_id: ProjectId,
@@ -111,11 +95,6 @@ async fn ensure_push_signatures(
         .map(|cp| cp.id.into_inner())
         .collect();
 
-    // Insert via `SELECT FROM cached_path` (cross-joined with the project caches) so a
-    // path concurrently purged between the lookup and here is simply skipped,
-    // instead of failing the whole batch on the cached_path FK. Array params keep
-    // each statement to two binds regardless of row count; chunk the path list so
-    // a worker reconnecting with a large store does not insert millions at once.
     const SIGNATURE_PATH_BATCH: usize = 8000;
 
     for chunk in path_ids.chunks(SIGNATURE_PATH_BATCH) {
@@ -136,13 +115,8 @@ async fn ensure_push_signatures(
     }
 }
 
-/// Every `Pull` answer's metadata, loaded in a fixed number of queries rather
-/// than per path.
-///
-/// A reply carries up to `CACHE_QUERY_MAX_PATHS` paths, so anything done per path
-/// here is done up to a thousand times before the reply is written. Fetching the
-/// row, its references and its signatures individually put ~4000 sequential round
-/// trips in front of a 75 s deadline, which is what made large queries time out.
+/// A reply is carrying up to `CACHE_QUERY_MAX_PATHS` paths. Per-path lookups were putting about
+/// 4000 sequential round trips in front of the 75 s deadline.
 #[derive(Default)]
 struct PullMetadata {
     references: HashMap<String, Vec<String>>,
@@ -219,22 +193,16 @@ impl PullMetadata {
     }
 }
 
-/// The narinfo fields a `Pull` answer carries alongside the presigned URL.
 #[derive(Default)]
 struct PullFields {
     nar_hash: Option<String>,
     file_hash: Option<String>,
-    /// Full `/nix/store/...` paths.
     references: Option<Vec<String>>,
-    /// Narinfo wire format.
     signatures: Option<Vec<String>>,
     deriver: Option<String>,
     ca: Option<String>,
 }
 
-/// Resolve the import metadata a worker needs to construct a `ValidPathInfo`
-/// and call `add_to_store_nar` on its local nix-daemon, from rows already in
-/// hand. Default when the path has no `cached_path` row.
 fn pull_fields(
     row: Option<&gradient_entity::cached_path::Model>,
     meta: &PullMetadata,
@@ -270,7 +238,6 @@ async fn build_cached_entry(
 ) -> gradient_wire::types::CachedPath {
     use gradient_wire::types::{CachedPath, QueryMode};
 
-    // Push mode carries only `path` + `cached`. No URL, no metadata.
     if matches!(mode, QueryMode::Push) {
         return CachedPath {
             path: path.to_string(),
@@ -329,8 +296,6 @@ async fn build_cached_entry(
     }
 }
 
-/// Push-mode response for an uncached path: only that the server lacks it. How
-/// the bytes travel is decided per path when the worker asks for an upload.
 fn uncached_push_entry(path: &str) -> gradient_wire::types::CachedPath {
     gradient_wire::types::CachedPath {
         path: path.to_string(),
@@ -347,10 +312,6 @@ fn uncached_push_entry(path: &str) -> gradient_wire::types::CachedPath {
     }
 }
 
-/// Serve upstream availability resolved once at eval time and persisted onto
-/// `derivation_output` (`external_url` + narinfo metadata). Extends `result`
-/// with a `CachedPath` pointing at the persisted upstream URL and returns the
-/// set of hashes served, so the live narinfo lookup is skipped for them.
 async fn extend_with_persisted_upstream(
     state: &ServerState,
     uncached_pairs: &[(String, String)],
@@ -375,7 +336,6 @@ async fn extend_with_persisted_upstream(
         }
     };
 
-    // Content-addressed, so any row sharing a hash carries an equivalent entry.
     let by_hash: HashMap<String, gradient_entity::derivation_output::Model> =
         rows.into_iter().map(|r| (r.hash.clone(), r)).collect();
 
@@ -405,9 +365,6 @@ async fn extend_with_persisted_upstream(
     served
 }
 
-/// Probe project-configured upstream caches for any `uncached_pairs` not found
-/// locally, extending `result` with any hits. Outbound probes are bounded by
-/// the shared upstream-query semaphore. No-ops if the project has no upstream URLs.
 async fn extend_with_upstream_results(
     state: &ServerState,
     project_id: ProjectId,
@@ -446,7 +403,6 @@ async fn extend_with_upstream_results(
         result.push(cp);
     }
 
-    // Same URL under different upstream ids folds into one metric series (#417).
     let mut by_url: HashMap<String, gradient_db::caches::upstream::UpstreamAccum> = HashMap::new();
     for (id, accum) in &stats {
         if let Some(url) = id_to_url.get(id) {
@@ -469,8 +425,6 @@ async fn extend_with_upstream_results(
     }
 }
 
-/// Pull availability for any still-uncached paths from the project's configured
-/// gradient_proto upstream caches, extending `result` with hits.
 async fn extend_with_gradient_proto_results(
     state: &ServerState,
     project_id: ProjectId,
@@ -519,16 +473,6 @@ async fn extend_with_gradient_proto_results(
     }
 }
 
-/// Check which store paths are available - in the local Gradient cache or upstream.
-///
-/// Behaviour depends on `mode`:
-/// - `Normal` - return only locally-cached paths; probe upstream for misses.
-/// - `Pull`   - same as Normal but cached paths include a presigned S3 GET URL.
-/// - `Push`   - return **all** queried paths with `cached` set; skip upstream.
-///   Uncached paths include a presigned S3 PUT URL when S3-backed.
-///
-/// `external` is what lets the answer leave our cache at all; see
-/// [`may_consult_upstream_caches`].
 async fn query(
     state: &ServerState,
     project_id: Option<ProjectId>,
@@ -572,13 +516,9 @@ async fn query(
 
     let hashes: Vec<&str> = hash_path_pairs.iter().map(|(h, _)| *h).collect();
 
-    // One read of `cached_path` feeds both the size map and the Pull metadata;
-    // it used to be queried three times over, once here, once for the sizes, and
-    // then once more per path inside the entry builder.
     let cached_path_rows = load_cached_path_rows(state, &hashes).await?;
     let mut cached_map = build_local_cache_map(state, &hashes, &cached_path_rows).await?;
 
-    // Merge source-path cache hits into the map (per hash string).
     for cp in &cached_path_rows {
         if cp.is_fully_cached() {
             cached_map
@@ -626,8 +566,6 @@ async fn query(
         }
     }
 
-    // Everything below leaves our cache, and the answer is complete without it: the
-    // caller reads any path this reply does not serve as one we do not have.
     if !may_consult_upstream_caches(mode, external) {
         return Ok(result);
     }
@@ -640,9 +578,6 @@ async fn query(
         .map(|(h, p)| (h.to_string(), p.to_string()))
         .collect();
 
-    // Serve upstream availability resolved once at eval time
-    // (`derivation_output.external_url` + narinfo metadata): the worker downloads
-    // directly from the persisted URL, so the narinfo lookup is not re-run here.
     let resolved = extend_with_persisted_upstream(state, &uncached_pairs, &mut result).await;
     let uncached_pairs: Vec<(String, String)> = uncached_pairs
         .into_iter()
@@ -659,9 +594,6 @@ async fn query(
     Ok(result)
 }
 
-/// Return the subset of `hashes` that have a `cached_path_signature` row for
-/// `cache_id`. Fails closed: any DB error yields an empty set so a public
-/// cache never leaks paths it cannot prove belong to it.
 async fn hashes_in_cache(
     state: &ServerState,
     cache_id: CacheId,
@@ -714,9 +646,6 @@ async fn hashes_in_cache(
         .collect()
 }
 
-/// Read-only query scoped to a single cache. Only paths with a
-/// `cached_path_signature` row for `cache_id` are returned. `Push` is never
-/// honored - it would mint upload URLs and is meaningless for a public cache.
 pub(super) async fn query_for_cache(
     state: &ServerState,
     cache_id: CacheId,
@@ -752,9 +681,6 @@ pub(super) async fn query_for_cache(
     let cached_path_rows = load_cached_path_rows(state, &hashes)
         .await
         .unwrap_or_default();
-    // Cache-serve endpoint: a DB error degrades to a miss (the consumer falls
-    // back to its other sources), matching `hashes_in_cache`'s fail-closed
-    // behaviour. Only the build-prefetch `query` path propagates the error.
     let cached_map = build_local_cache_map(state, &hashes, &cached_path_rows)
         .await
         .unwrap_or_else(|e| {
@@ -801,8 +727,6 @@ pub(super) async fn query_for_cache(
     result
 }
 
-/// Authorize a single store path against `cache_id`: true only when the path
-/// has a `cached_path_signature` row for this cache.
 pub(super) async fn path_in_cache(
     state: &ServerState,
     cache_id: CacheId,
@@ -850,17 +774,12 @@ mod tests {
     use std::sync::Arc;
 
     fn make_state() -> ServerState {
-        // Seed empty (not errored) result sets: an unseeded MockDatabase errors
-        // with "query_results buffer is empty" once a query executes, which `query`
-        // now correctly propagates as a CacheError instead of swallowing it into
-        // an empty cache map. Eight covers the deepest uncached path's lookups.
         let db = sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres)
             .append_query_results(vec![
                 Vec::<gradient_entity::derivation_output::Model>::new();
                 8
             ])
             .into_connection();
-        // The CacheQuery handler reads `cache_db`, so drive lookups from there.
         Arc::try_unwrap(gradient_test_support::prelude::test_state_cache(db)).unwrap()
     }
 
@@ -892,8 +811,6 @@ mod tests {
         state
     }
 
-    /// A push query only says which paths are missing: no grant rides it, even
-    /// on a store that could presign one.
     #[tokio::test]
     async fn push_answers_uncached_paths_without_any_grant() {
         let state = make_s3_state();
@@ -911,10 +828,6 @@ mod tests {
 
     #[tokio::test]
     async fn cache_query_propagates_db_error_as_err() {
-        // A DB error (e.g. pool exhaustion) must surface as Err so the handler
-        // replies CacheError and the worker retries transiently - never be
-        // swallowed into an empty/uncached list, which the worker would take as a
-        // terminal InputsUnavailable on a fully-cached input.
         use sea_orm::{DbErr, RuntimeErr};
         let db = sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres)
             .append_query_errors(vec![DbErr::Conn(RuntimeErr::Internal(
@@ -931,9 +844,6 @@ mod tests {
         );
     }
 
-    /// The handler, not only the predicate: two external paths are refused before
-    /// any row is read, so a `CacheError` reaches the worker and it retries as
-    /// transient instead of reading the paths as absent.
     #[tokio::test]
     async fn the_handler_refuses_a_two_path_external_query() {
         let state = make_state();
@@ -1015,9 +925,6 @@ mod tests {
         );
     }
 
-    /// A Pull answers from our rows alone and returns only what it can serve. The
-    /// caller reads every path it asked about and did not get back as one we do not
-    /// have, so an entry that carries nothing has nothing to say.
     #[tokio::test]
     async fn cache_query_pull_returns_only_what_it_can_serve() {
         let state = make_state();
@@ -1049,10 +956,7 @@ mod tests {
         assert_eq!(result.len(), 2, "Push should return all queried paths");
         for cp in &result {
             assert!(!cp.cached, "all should be uncached (empty DB): {}", cp.path);
-            // Local NAR storage returns None for presigned PUT (no S3); Push
-            // with S3 would populate `url` - that's the only field Push may set
-            // beyond `path` + `cached`.
-            assert!(cp.url.is_none(), "local store → no presigned URL");
+            assert!(cp.url.is_none(), "local store -> no presigned URL");
             assert!(cp.file_size.is_none(), "Push carries no file_size");
             assert!(cp.nar_size.is_none(), "Push carries no nar_size");
             assert!(cp.nar_hash.is_none(), "Push carries no nar_hash");
@@ -1068,9 +972,6 @@ mod tests {
 
     #[tokio::test]
     async fn cache_query_rejects_overlong_hash() {
-        // Hash component of 33 chars must be rejected - nix-base32 hashes are
-        // exactly 32 chars. Guards against an `== 32` -> `>= 32` length-check
-        // relaxation.
         let state = make_state();
         let paths = vec!["/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-foo".to_string()];
         for mode in [QueryMode::Normal, QueryMode::Pull, QueryMode::Push] {
@@ -1109,8 +1010,6 @@ mod tests {
         );
     }
 
-    // ── expand_references ────────────────────────────────────────────────────
-
     #[test]
     fn expand_references_none_passthrough() {
         assert_eq!(expand_references(None), None);
@@ -1135,7 +1034,6 @@ mod tests {
 
     #[test]
     fn expand_references_collapses_multiple_whitespace() {
-        // split_whitespace collapses sequences of spaces/tabs.
         let out = expand_references(Some("aaaa-a   \t bbbb-b")).unwrap();
         assert_eq!(out.len(), 2);
     }

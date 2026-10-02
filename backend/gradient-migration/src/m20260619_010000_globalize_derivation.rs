@@ -4,10 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Make `derivation` a global, content-addressed graph: drop `organization`,
-//! merge duplicate rows by `(hash, name)` onto the surviving (min-id) row, and
-//! re-point every foreign key. Irreversible.
-
 use sea_orm_migration::prelude::*;
 use sea_orm_migration::sea_orm::{ConnectionTrait, Statement};
 
@@ -62,8 +58,8 @@ impl MigrationTrait for Migration {
         let b = db.get_database_backend();
         let exec = |sql: String| Statement::from_string(b, sql);
 
-        // Postgres has ordering operators for uuid but no min() aggregate, so
-        // first_value over an ordered window yields the surviving (lowest) id.
+        // Postgres can order uuids but is lacking a min() aggregate for them. The ordered
+        // `first_value` window is picking the lowest id as the survivor.
         db.execute_raw(exec(
             "CREATE TEMP TABLE derivation_dedup AS \
              SELECT id AS old_id, \
@@ -73,13 +69,11 @@ impl MigrationTrait for Migration {
         ))
         .await?;
 
-        // Drop the unique indexes that re-pointing would transiently violate.
         for (idx, ..) in UNIQUE_PAIRS {
             db.execute_raw(exec(format!("DROP INDEX IF EXISTS \"{idx}\"")))
                 .await?;
         }
 
-        // Re-point every FK to the surviving derivation row.
         for (table, col) in REPOINTS {
             db.execute_raw(exec(format!(
                 "UPDATE {table} t SET {col} = d.keep_id \
@@ -89,8 +83,6 @@ impl MigrationTrait for Migration {
             .await?;
         }
 
-        // Collapse duplicate pairs created by re-pointing, then restore the
-        // unique indexes.
         for (idx, table, cols) in UNIQUE_PAIRS {
             let join: String = cols
                 .split(',')
@@ -107,7 +99,6 @@ impl MigrationTrait for Migration {
             .await?;
         }
 
-        // Drop the now-unreferenced duplicate derivation rows.
         db.execute_raw(exec(
             "DELETE FROM derivation WHERE id IN \
              (SELECT old_id FROM derivation_dedup WHERE old_id <> keep_id)"
@@ -115,7 +106,6 @@ impl MigrationTrait for Migration {
         ))
         .await?;
 
-        // Swap the unique index to the global (hash, name) and drop org.
         db.execute_raw(exec(
             "DROP INDEX IF EXISTS \"idx-derivation-org-hash-name\"".into(),
         ))

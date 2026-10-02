@@ -4,15 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Evaluation tasks - Nix flake attribute discovery and derivation closure walk.
-//!
-//! The worker uses an in-process `EvalWorkerPool` (subprocess pool running the
-//! Nix C API isolated from Tokio) to do the actual evaluation.  The results are
-//! transmitted back to the server as [`DiscoveredDerivation`] structs.
-//!
-//! No database access occurs here - all DB writes are done server-side when the
-//! server receives the `EvalResult` [`JobUpdateKind`].
-
 use std::collections::{HashSet, VecDeque};
 use std::sync::Arc;
 use std::time::Instant;
@@ -29,21 +20,14 @@ use gradient_wire::messages::{
 use tokio::sync::{mpsc, watch};
 use tracing::{debug, info, warn};
 
-/// Abort error returned from the eval pipeline when the dispatch loop fires
-/// the watch signal in response to a server-side `AbortJob`. Bubbles up as a
-/// regular `Err`, which the worker reports as `BuildFailureKind::Aborted` so the
-/// server holds the evaluation at `Aborted` instead of failing it.
 fn abort_err() -> anyhow::Error {
     crate::executor::failure::JobAborted("evaluation aborted by server".to_owned()).into()
 }
 
-/// Returns true if the dispatch loop has flipped the abort watch to `true`.
 fn is_aborted(abort: &mut watch::Receiver<bool>) -> bool {
     *abort.borrow_and_update()
 }
 
-/// Run `work` until the abort watch fires. Dropping an in-flight eval request
-/// kills its subprocess, so an abort stops Nix mid-evaluation.
 async fn unless_aborted<T>(
     abort: &mut watch::Receiver<bool>,
     work: impl Future<Output = Result<T>>,
@@ -55,11 +39,6 @@ async fn unless_aborted<T>(
     }
 }
 
-/// A pulled shared eval-cache blob was corrupt, so evaluation could not read it.
-/// Typed (like [`crate::proto::prefetch::CorruptCachedNar`]) so the failure
-/// classifier maps it to `BuildFailureKind::CorruptEvalCache` and the server
-/// purges the poisoned blob + re-queues, while the worker drops its own local
-/// copy first. Carries the corrupt blob's fingerprint (its `<fp>.sqlite` name).
 #[derive(Debug)]
 pub struct CorruptEvalCache {
     pub fingerprint: String,
@@ -72,14 +51,6 @@ impl std::fmt::Display for CorruptEvalCache {
 }
 impl std::error::Error for CorruptEvalCache {}
 
-/// Whether `msg` is the SQLite signature of a poisoned eval-cache blob.
-///
-/// Corruption has two shapes. A damaged file reports "malformed" or "not a
-/// database"; a file that was truncated or never finished being written is a
-/// perfectly valid, *empty* database whose tables simply do not exist, and
-/// reports a missing table instead. Both are unreadable and both must be
-/// discarded - the caller additionally requires the message to name our own
-/// blob, so nothing else's SQLite is ever swept up.
 fn is_corrupt_eval_cache_error(msg: &str) -> bool {
     let m = msg.to_ascii_lowercase();
     m.contains("database disk image is malformed")
@@ -87,9 +58,6 @@ fn is_corrupt_eval_cache_error(msg: &str) -> bool {
         || m.contains("no such table")
 }
 
-/// The eval-cache blob fingerprint embedded in a corruption error, extracted
-/// from the `eval-cache-v6/<fingerprint>.sqlite` path Nix reports. `<fingerprint>`
-/// is a contiguous hex run (no ANSI colouring inside the path segment).
 fn eval_cache_fingerprint_from_error(msg: &str) -> Option<String> {
     const MARKER: &str = "eval-cache-v6/";
     let rest = &msg[msg.find(MARKER)? + MARKER.len()..];
@@ -97,9 +65,6 @@ fn eval_cache_fingerprint_from_error(msg: &str) -> Option<String> {
     (!fp.is_empty() && fp.bytes().all(|b| b.is_ascii_hexdigit())).then(|| fp.to_string())
 }
 
-/// A [`CorruptEvalCache`] when `msg` is a corruption error naming our eval-cache
-/// blob; `None` otherwise (a corruption phrase with no eval-cache path is left
-/// as a normal error - we only self-heal our own cache).
 fn corrupt_eval_cache(msg: &str) -> Option<CorruptEvalCache> {
     if !is_corrupt_eval_cache_error(msg) {
         return None;
@@ -107,16 +72,6 @@ fn corrupt_eval_cache(msg: &str) -> Option<CorruptEvalCache> {
     eval_cache_fingerprint_from_error(msg).map(|fingerprint| CorruptEvalCache { fingerprint })
 }
 
-/// Whether an eval-cache blob is worth sharing: a real SQLite database that
-/// actually declares a table.
-///
-/// A cache no evaluation ever wrote into is a valid SQLite file consisting of
-/// nothing but its 4096-byte header page - readable, but with no schema, so
-/// every consumer fails on `no such table: Attributes`. Publishing one under a
-/// flake's fingerprint poisons that flake for every worker, which is exactly
-/// how 92% of the blobs in production ended up empty. The schema page lists
-/// each table's `CREATE TABLE` text, so its presence is the cheap, direct
-/// check for "this database has content".
 fn is_shareable_eval_cache(bytes: &[u8]) -> bool {
     const SQLITE_MAGIC: &[u8] = b"SQLite format 3\0";
 
@@ -141,8 +96,6 @@ fn is_shareable_eval_cache(bytes: &[u8]) -> bool {
     has_schema
 }
 
-/// Delete a corrupt eval-cache SQLite blob and its WAL/SHM sidecars so the next
-/// evaluation opens a fresh cache. A missing file is already-healed, not an error.
 async fn delete_eval_cache_blob(sqlite_path: &str) {
     for suffix in ["", "-wal", "-shm"] {
         let p = format!("{sqlite_path}{suffix}");
@@ -154,10 +107,6 @@ async fn delete_eval_cache_blob(sqlite_path: &str) {
     }
 }
 
-/// The set of attr paths the user requested explicitly: patterns with no
-/// `*`/`#` wildcard segment (and not an exclusion). A drvPath-resolution
-/// failure on one of these is a genuine error; failures on wildcard-expanded
-/// attrs are skipped, since a wildcard spans attrs that aren't derivations.
 fn explicit_attr_set(wildcards: &[String]) -> HashSet<String> {
     wildcards
         .iter()
@@ -168,10 +117,6 @@ fn explicit_attr_set(wildcards: &[String]) -> HashSet<String> {
         .collect()
 }
 
-/// Errors for explicitly requested attrs that discovery matched to nothing.
-/// Empty when every pattern was a wildcard (a wildcard legitimately spans attrs
-/// that aren't buildable), so only a pinpointed target fails the eval instead of
-/// silently completing with no outputs.
 fn unmatched_target_errors(wildcards: &[String]) -> Vec<String> {
     let mut errors: Vec<String> = explicit_attr_set(wildcards)
         .into_iter()
@@ -181,21 +126,12 @@ fn unmatched_target_errors(wildcards: &[String]) -> Vec<String> {
     errors
 }
 
-/// How many `.drv` files one BFS wave reads and parses at once. Every wave asks
-/// the server which of its inputs are known, one round trip on the walk's
-/// critical path, so a wide wave is what keeps a high-latency link from pacing
-/// the walk; the reads are small files, so the cap only bounds open fds.
 const DRV_READ_CONCURRENCY: usize = 256;
 
-/// Fraction of host RAM the eval pool may occupy (`pool_size * max_eval_rss`),
-/// leaving headroom for the OS, the parent worker, and a concurrent build.
 const EVAL_RAM_SHARE: f64 = 0.75;
 
-/// Assumed host RAM when `sysinfo` cannot read it (containers without
-/// /proc/meminfo): small enough to keep the pool conservative.
 const TOTAL_RAM_FALLBACK_BYTES: u64 = 4 * 1024 * 1024 * 1024;
 
-/// Total physical RAM in bytes, or [`TOTAL_RAM_FALLBACK_BYTES`] if unreadable.
 fn total_memory_bytes() -> u64 {
     use sysinfo::{MemoryRefreshKind, RefreshKind, System};
     let sys = System::new_with_specifics(
@@ -212,21 +148,12 @@ fn total_memory_bytes() -> u64 {
 use crate::proto::job::JobUpdater;
 use crate::traits::{DrvReader, FsDrvReader, JobReporter};
 
-/// Drives Nix evaluation inside the worker.
-///
-/// Uses a pool of eval subprocess workers (one `NixEvaluator` per subprocess)
-/// to isolate the Nix C API from the async runtime.
 pub struct WorkerEvaluator {
     resolver: Arc<WorkerPoolResolver>,
-    /// When set, the worker pulls/pushes the flake's shared eval-cache blob
-    /// around evaluation (issue #386 L3).
     eval_cache_share: bool,
 }
 
 impl WorkerEvaluator {
-    /// Create a new evaluator. `fork_workers` (env `GRADIENT_WORKER_EVAL_FORK_WORKERS`)
-    /// is the pool size and thus the eval concurrency.
-    /// `eval_cache_dir` is exported to every eval worker as `NIX_CACHE_HOME`.
     pub fn new(
         fork_workers: usize,
         max_eval_rss: u64,
@@ -234,11 +161,6 @@ impl WorkerEvaluator {
         eval_cache_dir: String,
         eval_cache_share: bool,
     ) -> Self {
-        // Size the pool so `pool_size * max_eval_rss` stays within a fraction of
-        // host RAM: a flake with many systems then evaluates in parallel without
-        // OOM, falling back to fewer shards (down to one) on a small host. Shards
-        // share one eval-cache safely because per-shard commits only append to
-        // the WAL (no checkpoint); the single end-of-eval checkpoint folds it in.
         let total_ram = total_memory_bytes();
         let ram_budget = (total_ram as f64 * EVAL_RAM_SHARE) as u64;
         let pool_size = budgeted_pool_size(fork_workers, max_eval_rss, ram_budget);
@@ -252,9 +174,6 @@ impl WorkerEvaluator {
             );
         }
 
-        // `max_eval_rss` only recycles between calls; the reaper is the peak
-        // guard that kills a runaway eval before the host OOMs (issue: OOM
-        // kills not registered by the server).
         let min_free_bytes = crate::worker_pool::memory_guard_bytes(min_free_ram_mb, total_ram);
         let resolver = Arc::new(WorkerPoolResolver::new(
             pool_size,
@@ -269,7 +188,6 @@ impl WorkerEvaluator {
         }
     }
 
-    /// Gracefully shut every idle eval-worker subprocess down.
     pub async fn shutdown(&self) {
         self.resolver.shutdown().await;
     }
@@ -284,21 +202,12 @@ impl Clone for WorkerEvaluator {
     }
 }
 
-/// Advance status to `EvaluatingFlake`.
-///
-/// Attr discovery is done inside [`evaluate_derivations`] since the server
-/// only cares about the final [`DiscoveredDerivation`] list.
 #[tracing::instrument(level = "debug", skip_all)]
 pub async fn evaluate_flake(_job: &FlakeJob, updater: &mut JobUpdater) -> Result<()> {
-    // Rebind as &JobUpdater so the inherent &self method wins over the &mut self
-    // trait method that async_trait generates.
     let updater: &JobUpdater = updater;
     updater.report_evaluating_flake().await
 }
 
-/// For a `Cached` source, the store path that must be present locally before
-/// evaluation (substituted from the gradient cache if absent). A `Repository`
-/// source is fetched/cloned by the worker itself, so nothing to ensure.
 pub fn required_local_source(source: &FlakeSource) -> Option<&str> {
     match source {
         FlakeSource::Cached { store_path } => Some(store_path.as_str()),
@@ -306,20 +215,8 @@ pub fn required_local_source(source: &FlakeSource) -> Option<&str> {
     }
 }
 
-/// Number of derivations to accumulate before flushing a mid-walk `EvalResult`.
 const EVAL_BATCH_SIZE: usize = 50;
 
-/// Walk the full derivation closure and report [`DiscoveredDerivation`]s to
-/// the server incrementally.
-///
-/// This is the main evaluation step:
-/// 1. Discover attr paths (via eval worker pool)
-/// 2. Resolve attrs to .drv paths (via eval worker pool)
-/// 3. BFS from root .drv paths through `inputDrvs` references
-/// 4. For each .drv: read file, extract outputs/arch/features
-/// 5. Every `EVAL_BATCH_SIZE` derivations: send `EvalResult` so the server can
-///    start queuing builds while the walk continues
-/// 6. Final flush with any remainder + accumulated warnings/errors
 #[tracing::instrument(level = "debug", skip_all)]
 pub async fn evaluate_derivations(
     evaluator: &WorkerEvaluator,
@@ -332,10 +229,6 @@ pub async fn evaluate_derivations(
     let start = Instant::now();
     let eval_overrides = eval_input_overrides(job, local_flake_path);
 
-    // Best-effort fingerprint + pull of the flake's shared eval-cache blob so
-    // the eval starts warm. A fingerprint/pull failure never fails the eval. The
-    // fingerprint is computed WITH the overrides so distinct override sets never
-    // share (and pollute) one eval-cache blob.
     let fingerprint = if evaluator.eval_cache_share {
         match evaluator
             .resolver
@@ -360,7 +253,6 @@ pub async fn evaluate_derivations(
     });
 
     if let (Some(fp), Some(path)) = (fingerprint.as_ref(), cache_path.as_ref()) {
-        // TODO(#386): report cache_status (hit/miss) once an eval-update field exists
         match updater.pull_eval_cache(fp).await {
             Ok(Some(bytes)) => {
                 if let Err(e) = write_eval_cache_blob(path, &bytes).await {
@@ -387,10 +279,6 @@ pub async fn evaluate_derivations(
     {
         Ok(outcome) => outcome,
         Err(e) => {
-            // Corrupt eval-cache: drop our local copy and recycle the eval
-            // subprocesses (a pooled worker keeps the cache open across
-            // requests) before re-raising, so the server-side purge + re-queue
-            // re-evaluates against a clean cache. Other errors just propagate.
             if let Some(corrupt) = e.downcast_ref::<CorruptEvalCache>() {
                 let path = format!(
                     "{}/eval-cache-v6/{}.sqlite",
@@ -405,8 +293,6 @@ pub async fn evaluate_derivations(
         }
     };
 
-    // Drain the per-eval stats and send one report; skip if nothing was
-    // observed (metrics gated off or an empty eval).
     let totals = evaluator.resolver.take_eval_stats();
     if totals.total_thunks > 0 || !totals.per_entry_point.is_empty() {
         let report =
@@ -416,17 +302,13 @@ pub async fn evaluate_derivations(
         }
     }
 
-    // An eval that discovered nothing has an empty cache; sharing it would
-    // poison every later eval of the same flake with a schemaless blob.
+    // An eval that discovered nothing is leaving an empty cache. Sharing it would poison
+    // every later eval of the same flake with a schemaless blob.
     if !cacheable {
         debug!("evaluation produced no derivations; keeping its eval-cache local");
         return Ok(());
     }
 
-    // Fold the shared eval-cache WAL into the main `.sqlite` so the pushed blob
-    // carries this eval's writes (per-shard commits only append to the WAL). The
-    // checkpoint is PASSIVE: it never blocks, so it is safe even when another
-    // evaluation of the same flake is concurrently reading the cache. Best-effort.
     if cache_path.is_some()
         && let Err(e) = evaluator
             .resolver
@@ -447,12 +329,10 @@ pub async fn evaluate_derivations(
     Ok(())
 }
 
-/// Write a pulled eval-cache blob to `path`, creating its parent directory.
-///
-/// A previous evaluation of the same flake leaves `-wal`/`-shm` sidecars next to
-/// the blob, and SQLite reads them as belonging to whatever main file it finds:
-/// staging over them hands the evaluation a database half from the server and
-/// half from the last local eval, so they go before the bytes land.
+/// A previous evaluation of the same flake is leaving `-wal`/`-shm` sidecars next to the blob.
+/// SQLite is reading them as part of whatever main file it finds. Staging over them would mix
+/// server pages with pages from the last local eval. The sidecars are removed before the bytes
+/// land.
 async fn write_eval_cache_blob(path: &str, bytes: &[u8]) -> Result<()> {
     if let Some(parent) = std::path::Path::new(path).parent() {
         tokio::fs::create_dir_all(parent).await?;
@@ -471,11 +351,6 @@ async fn write_eval_cache_blob(path: &str, bytes: &[u8]) -> Result<()> {
     Ok(())
 }
 
-// ── Pipeline helpers ─────────────────────────────────────────────────────────
-
-/// Build the flake reference string from a job and the source `FetchFlake` put
-/// in the store: `/nix/store/<hash>-source`, content-addressed and immutable,
-/// valid in pure eval mode.
 fn build_flake_url(job: &FlakeJob, local_flake_path: Option<&str>) -> String {
     if let Some(path) = local_flake_path {
         return format!("path:{}", path);
@@ -484,15 +359,10 @@ fn build_flake_url(job: &FlakeJob, local_flake_path: Option<&str>) -> String {
         FlakeSource::Repository { url, commit } => gradient_types::NixFlakeUrl::new(url, commit)
             .map(|u| u.to_string())
             .unwrap_or_else(|_| url.clone()),
-        // Eval-only: Nix accepts `/nix/store/...` directly as a flake URI.
         FlakeSource::Cached { store_path } => format!("path:{}", store_path),
     }
 }
 
-/// `(input_name, flake_ref)` overrides applied at eval lock time. `url = None`
-/// (force update) has no concrete ref and is dropped here (the updater handles
-/// it). Glob names expand against the local flake.lock; a remote/dirty flake
-/// with no readable lock yields no expansion.
 fn eval_input_overrides(job: &FlakeJob, local_flake_path: Option<&str>) -> Vec<(String, String)> {
     let declared: std::collections::BTreeSet<String> = local_flake_path
         .and_then(|p| std::fs::read(std::path::Path::new(p).join("flake.lock")).ok())
@@ -508,8 +378,6 @@ fn eval_input_overrides(job: &FlakeJob, local_flake_path: Option<&str>) -> Vec<(
         .unwrap_or_default();
 
     if declared.is_empty() {
-        // No readable lock: globs cannot expand; pass literal concrete-url
-        // overrides through as before (nix validates names at lock time).
         return job
             .input_overrides
             .iter()
@@ -530,18 +398,11 @@ fn eval_input_overrides(job: &FlakeJob, local_flake_path: Option<&str>) -> Vec<(
         .collect()
 }
 
-/// Read and parse every `.drv` in `wave` concurrently, preserving BFS order.
-///
-/// A read or parse failure is a hard error - silently dropping a derivation
-/// drops its entire dep subtree, causing the dispatcher to release the parent
-/// prematurely and the nix-daemon to die with "1 dependency failed".
 #[tracing::instrument(level = "debug", skip_all, fields(size = wave.len()))]
-/// Each `.drv` of the wave parsed, with its NAR size, in wave order.
 async fn parse_drv_wave(
     drv_reader: &dyn DrvReader,
     wave: &[(Option<String>, String)],
 ) -> Result<Vec<(gradient_derivation::Derivation, u64)>> {
-    // Index-tagged futures so results can be sorted back into BFS order.
     let mut futs: FuturesUnordered<_> = wave
         .iter()
         .enumerate()
@@ -578,7 +439,6 @@ async fn parse_drv_wave(
         .collect())
 }
 
-/// Build a [`DiscoveredDerivation`] from a parsed `.drv` file.
 fn build_discovered_derivation(
     attr: Option<String>,
     drv_path: String,
@@ -627,12 +487,8 @@ fn build_discovered_derivation(
     }
 }
 
-/// Batches the walk may run ahead of the publisher before it waits.
 const PUBLISH_BACKLOG: usize = 64;
 
-/// One batch the walk hands to [`publish`]: the derivations it reports and the
-/// paths that must be cached before that report, its `.drv` files with their NAR
-/// sizes and their input sources.
 struct Flush {
     paths: Vec<(String, Option<u64>)>,
     derivations: Vec<DiscoveredDerivation>,
@@ -640,11 +496,6 @@ struct Flush {
     errors: Vec<String>,
 }
 
-/// Pushes each batch's paths and reports it once they are cached, in walk order,
-/// beside the walk so a slow link never stalls it. Every push starts as its batch
-/// arrives: a push waits for the server to commit its paths behind whatever the
-/// graph writer is flushing, so pushes that took turns each cost a flush of the
-/// batch before. A path an earlier batch pushed is not pushed again.
 async fn publish(reporter: &dyn JobReporter, mut flushes: mpsc::Receiver<Flush>) -> Result<()> {
     let mut pushed = HashSet::new();
     let mut pushes = FuturesOrdered::new();
@@ -684,20 +535,10 @@ async fn report(reporter: &dyn JobReporter, flush: Flush) -> Result<()> {
         .await
 }
 
-/// The NAR size of a `.drv`: a regular, non-executable file's archive is its
-/// contents padded to 8 bytes inside a fixed 112-byte frame.
 fn drv_nar_size(len: usize) -> u64 {
     (112 + len.div_ceil(8) * 8) as u64
 }
 
-/// BFS closure walker.
-///
-/// Holds the walk state (frontier queue, visited set, accumulation batch)
-/// and drives the traversal in concurrent waves of up to
-/// [`DRV_READ_CONCURRENCY`] `.drv` paths.
-///
-/// Every [`EVAL_BATCH_SIZE`] derivations the batch goes to [`publish`] so
-/// builds can start queuing while the walk continues.
 struct ClosureWalker<'a> {
     drv_reader: &'a dyn DrvReader,
     batch: Vec<DiscoveredDerivation>,
@@ -705,13 +546,11 @@ struct ClosureWalker<'a> {
     queue: VecDeque<(Option<String>, String)>,
     walked: usize,
     start: Instant,
-    /// The `.drv` files walked since the last flush and their input sources.
     paths: Vec<(String, Option<u64>)>,
     flushes: mpsc::Sender<Flush>,
 }
 
 impl<'a> ClosureWalker<'a> {
-    /// Initialise the walker with `root_drvs` as the BFS frontier.
     fn new(
         drv_reader: &'a dyn DrvReader,
         root_drvs: &[(String, String)],
@@ -737,8 +576,6 @@ impl<'a> ClosureWalker<'a> {
         }
     }
 
-    /// Drive the full BFS, then flush the remainder with the evaluation's
-    /// `warnings` and `errors`. Dropping the walker ends [`publish`].
     async fn walk(
         mut self,
         reporter: &dyn JobReporter,
@@ -747,7 +584,6 @@ impl<'a> ClosureWalker<'a> {
         errors: Vec<String>,
     ) -> Result<()> {
         while !self.queue.is_empty() {
-            // Honour AbortJob at every wave boundary.
             if is_aborted(abort) {
                 return Err(abort_err());
             }
@@ -781,7 +617,6 @@ impl<'a> ClosureWalker<'a> {
             .map_err(|_| anyhow::anyhow!("the eval publisher stopped before the walk"))
     }
 
-    /// Drain one concurrent wave from the front of the queue and process it.
     #[tracing::instrument(name = "wave", level = "debug", skip_all, fields(queued = self.queue.len()))]
     async fn process_wave(&mut self, reporter: &dyn JobReporter) -> Result<()> {
         let wave_size = self.queue.len().min(DRV_READ_CONCURRENCY);
@@ -791,8 +626,6 @@ impl<'a> ClosureWalker<'a> {
 
         let parsed_drvs = parse_drv_wave(self.drv_reader, &wave).await?;
 
-        // Collect all new input-derivation paths from this wave so we can
-        // batch-query the server once rather than once per derivation.
         let mut new_deps: Vec<String> = Vec::new();
         for (drv, _) in &parsed_drvs {
             for (input_drv, _) in &drv.input_derivations {
@@ -804,7 +637,6 @@ impl<'a> ClosureWalker<'a> {
         new_deps.sort_unstable();
         new_deps.dedup();
 
-        // Pre-mark ALL new deps as visited so nothing adds them twice.
         for dep in &new_deps {
             self.visited.insert(dep.clone());
         }
@@ -827,8 +659,6 @@ impl<'a> ClosureWalker<'a> {
             debug!(pruned = known_set.len(), "BFS: pruning known subtrees");
         }
 
-        // A known dependency stays named in its parent's record; the server
-        // has its subtree and derives this evaluation's job for it from the name.
         for dep in new_deps {
             if !known_set.contains(&dep) {
                 self.queue.push_back((None, dep));
@@ -843,7 +673,6 @@ impl<'a> ClosureWalker<'a> {
                 .push(build_discovered_derivation(attr, drv_path, &drv));
             self.walked += 1;
 
-            // Heartbeat log so operators can distinguish "slow eval" from "stuck".
             if self.walked.is_multiple_of(500) {
                 info!(
                     walked = self.walked,
@@ -862,26 +691,12 @@ impl<'a> ClosureWalker<'a> {
     }
 }
 
-// ── Orchestrator ──────────────────────────────────────────────────────────────
-
-/// Result of one closure-walk eval: the walked flake-output graph for eval
-/// metrics. Each batch's `.drv` runtime closure is pushed to the cache during
-/// the walk (before its `report_eval_result`), not by the caller afterwards.
 #[derive(Debug)]
 pub struct EvalOutcome {
     pub flake_nodes: Vec<FlakeOutputNode>,
-    /// Whether this eval got far enough for its cache to be worth sharing.
-    ///
-    /// An eval that discovered nothing - the flake failed to evaluate, or every
-    /// attr resolution failed - leaves a cache with no schema at all. Pushing
-    /// that publishes an empty SQLite blob under the flake's fingerprint, and
-    /// every later eval of the same flake pulls it and dies on it. Failures
-    /// keep their cache local.
     pub cacheable: bool,
 }
 
-/// Classify a flake-output attr path into a coarse node kind from its top-level
-/// segment, matching the metric tables' `kind` column.
 fn flake_kind(attr: &str) -> &'static str {
     match attr.split('.').next().unwrap_or("") {
         "packages" | "legacyPackages" => "package",
@@ -893,9 +708,6 @@ fn flake_kind(attr: &str) -> &'static str {
     }
 }
 
-/// Build flake-output nodes from the resolved entry-point attrs. Each resolved
-/// root is a derivation leaf; its `parent` is the dotted path minus the last
-/// segment. No extra evaluation: only attrs the discovery walk already produced.
 fn flake_nodes_from_roots(root_drvs: &[(String, String)]) -> Vec<FlakeOutputNode> {
     root_drvs
         .iter()
@@ -917,9 +729,6 @@ fn flake_nodes_from_roots(root_drvs: &[(String, String)]) -> Vec<FlakeOutputNode
         .collect()
 }
 
-/// Convert the resolver's accumulated totals into the wire report. Per-entry
-/// `eval_ms` is not tracked by the aggregator, so it stays 0; `worker_id` is
-/// filled by the caller. Phase timings come from the job timeline, not here.
 fn build_eval_stats_report(
     totals: crate::worker_pool::eval_stats::EvalStatsTotals,
     flake_nodes: Vec<FlakeOutputNode>,
@@ -951,16 +760,6 @@ fn build_eval_stats_report(
     }
 }
 
-/// Testable version of [`evaluate_derivations`] that accepts trait objects.
-///
-/// All concrete dependencies are replaced with trait objects so this function
-/// can be exercised in unit tests with fakes (no real nix-daemon, no real
-/// filesystem, no real WebSocket connection).
-///
-/// When `local_flake_path` is `Some`, the evaluator uses `path:<local_path>`
-/// as the flake reference instead of building a remote URL from
-/// `job.repository` + `job.commit`. This is the case when `FetchFlake` already
-/// cloned the repo in the same `FlakeJob`.
 pub async fn evaluate_derivations_with(
     resolver: &dyn DerivationResolver,
     drv_reader: &dyn DrvReader,
@@ -977,7 +776,6 @@ pub async fn evaluate_derivations_with(
     let repo = build_flake_url(job, local_flake_path);
     let eval_overrides = eval_input_overrides(job, local_flake_path);
 
-    // ── Step 1: discover attr paths ──────────────────────────────────────────
     debug!(repo = %repo, "listing flake derivations");
     let FlakeDiscovery {
         attrs,
@@ -992,8 +790,6 @@ pub async fn evaluate_derivations_with(
         Err(e) if e.is::<crate::executor::failure::JobAborted>() => return Err(e),
         Ok(v) => v,
         Err(e) => {
-            // Surface the Nix error as an EvalResult so it appears in the UI,
-            // not just as an opaque JobFailed summary.
             let err_msg = format!("list_flake_derivations failed: {:#}", e);
             warn!(error = %err_msg, "reporting eval error to server");
             let _ = updater
@@ -1003,10 +799,6 @@ pub async fn evaluate_derivations_with(
         }
     };
 
-    // A corrupt shared eval-cache blob makes every attr throw an SQLite error;
-    // that's not a flake failure, so fail with a typed signal for the self-heal
-    // (worker drops its local copy, server purges + re-queues) instead of
-    // reporting the SQLite noise as the evaluation's result.
     if let Some(corrupt) = errors.iter().find_map(|e| corrupt_eval_cache(e)) {
         warn!(fingerprint = %corrupt.fingerprint, "eval-cache corrupt during discovery; failing for self-heal");
         return Err(anyhow::Error::new(corrupt));
@@ -1024,7 +816,6 @@ pub async fn evaluate_derivations_with(
         });
     }
 
-    // ── Step 2: resolve attr paths -> drv paths ──────────────────────────────
     let (resolved, resolve_warnings) = match unless_aborted(
         abort,
         resolver.resolve_derivation_paths(repo.clone(), attrs, &eval_overrides),
@@ -1034,7 +825,6 @@ pub async fn evaluate_derivations_with(
         Err(e) if e.is::<crate::executor::failure::JobAborted>() => return Err(e),
         Ok(v) => v,
         Err(e) => {
-            // Forward warnings accumulated so far so they aren't lost.
             let err_msg = format!("resolve_derivation_paths failed: {:#}", e);
             warn!(error = %err_msg, "reporting eval error to server");
             let _ = updater
@@ -1053,7 +843,6 @@ pub async fn evaluate_derivations_with(
         }
     }
 
-    // Corruption can also surface while resolving attrs to `.drv` paths.
     if let Some(corrupt) = errors.iter().find_map(|e| corrupt_eval_cache(e)) {
         warn!(fingerprint = %corrupt.fingerprint, "eval-cache corrupt during resolve; failing for self-heal");
         return Err(anyhow::Error::new(corrupt));
@@ -1073,7 +862,6 @@ pub async fn evaluate_derivations_with(
     let flake_nodes = flake_nodes_from_roots(&root_drvs);
     resolver.release_evaluators().await;
 
-    // ── Step 3+4+5: BFS closure walk with incremental flushes ────────────────
     warnings.sort_unstable();
     warnings.dedup();
     errors.sort_unstable();
@@ -1106,9 +894,6 @@ mod tests {
             .join("test-store")
     }
 
-    /// A real corrupt-blob error (with ANSI colouring around the path) is
-    /// recognised and its fingerprint extracted from the `eval-cache-v6/<fp>.sqlite`
-    /// segment; unrelated errors and non-eval-cache SQLite paths are left alone.
     #[test]
     fn corrupt_eval_cache_detects_and_extracts_fingerprint() {
         let fp = "ad2ae6ba345f9dce45b15a42b43f4dcb706dec975e7ea558779f3861f9f0b586";
@@ -1123,19 +908,12 @@ mod tests {
         assert!(!is_corrupt_eval_cache_error(
             "failed to evaluate 'x': attribute missing"
         ));
-        // Corruption phrase, but not our eval-cache blob: not our heal.
         assert!(
             corrupt_eval_cache("database disk image is malformed (in '/tmp/other.sqlite')")
                 .is_none()
         );
     }
 
-    /// A blob that is structurally empty - a valid SQLite file that never got
-    /// its schema, from a truncated write or an interrupted pull - fails with
-    /// a missing-table error rather than a corruption phrase. It is just as
-    /// poisonous: every evaluation sharing the blob dies on it, and until it
-    /// is classified as corrupt nothing purges it, so re-evaluating (including
-    /// `.drv` recovery) hits the identical wall forever.
     #[test]
     fn corrupt_eval_cache_detects_a_blob_with_no_schema() {
         let fp = "fcafabf48d74fdfcd38e0c9d903fe9caa423e4ba9404fe07f5a1a8a5d2ab0253";
@@ -1150,9 +928,6 @@ mod tests {
         assert_eq!(corrupt_eval_cache(&msg).unwrap().fingerprint, fp);
     }
 
-    /// The blob production kept publishing: a valid SQLite file that is just
-    /// its header page, with no schema. Sharing one poisons the flake for
-    /// every worker, so it must never be pushed.
     #[test]
     fn a_schemaless_blob_is_not_shareable() {
         let mut header_only = b"SQLite format 3\0".to_vec();
@@ -1163,7 +938,6 @@ mod tests {
         assert!(!is_shareable_eval_cache(b"not a database at all"));
     }
 
-    /// A cache that actually holds the eval-cache schema is shared as before.
     #[test]
     fn a_blob_with_a_schema_is_shareable() {
         let mut blob = b"SQLite format 3\0".to_vec();
@@ -1176,8 +950,6 @@ mod tests {
         assert!(is_shareable_eval_cache(&blob));
     }
 
-    /// The same missing-table error against any other SQLite file is somebody
-    /// else's problem - the path is what makes it ours to heal.
     #[test]
     fn a_missing_table_outside_the_eval_cache_is_not_healed() {
         assert!(
@@ -1251,11 +1023,6 @@ mod tests {
         }
     }
 
-    /// Set up resolver and drv_reader from a StoreFixture.
-    /// Tests don't fire abort: hand back a receiver from a sender we drop on
-    /// the floor. `is_aborted` reads `*borrow_and_update()` which stays
-    /// `false` (the initial value) - the sender being dropped doesn't flip
-    /// it, so abort never triggers in tests.
     fn never_abort() -> watch::Receiver<bool> {
         let (_tx, rx) = watch::channel(false);
         rx
@@ -1361,19 +1128,15 @@ mod tests {
         .await
         .unwrap();
 
-        // Should have at least EvaluatingDerivations + one EvalResult.
         assert!(reporter.len() >= 2);
 
         let all = reporter.all_eval_derivations();
-        // All derivations from the fixture should be discovered across all batches.
         assert_eq!(all.len(), fixture.derivations.len());
-        // Entry point should have the attr set.
         let entry = all
             .iter()
             .find(|d| d.drv_path == fixture.entry_point)
             .unwrap();
         assert_eq!(entry.attr, "hello");
-        // Warnings should be empty for a valid fixture (check final batch).
         if let ReportedEvent::EvalResult { warnings, .. } = reporter.last_eval_result().unwrap() {
             assert!(warnings.is_empty(), "unexpected warnings: {:?}", warnings);
         }
@@ -1401,11 +1164,6 @@ mod tests {
         assert_eq!(resolver.releases(), 1);
     }
 
-    /// Regression (#392): every parsed derivation's `.drv` runtime closure must
-    /// be pushed to the cache BEFORE the batch that reports it. Reporting a
-    /// derivation is what lets the server promote+dispatch its build mid-eval,
-    /// so a build worker would otherwise prefetch input_sources that aren't in
-    /// the cache yet ("required input path missing").
     #[tokio::test]
     async fn pushes_batch_closure_before_reporting_it() {
         let fixture = load_store(&fixture_dir());
@@ -1455,8 +1213,6 @@ mod tests {
         assert!(!pushed.is_empty(), "expected at least one push");
     }
 
-    /// Every batch is pushed, then reported, in walk order; a source two batches
-    /// share is pushed with the first.
     #[tokio::test]
     async fn each_batch_is_pushed_before_its_report_and_a_shared_source_once() {
         let reporter = RecordingJobReporter::new();
@@ -1497,9 +1253,6 @@ mod tests {
         assert_eq!([w1, w2].map(|w| w[0].as_str()), ["first", "second"]);
     }
 
-    /// The closed form against the NAR framing: every string is its 8-byte length
-    /// and its bytes padded to 8, and a regular file is seven of them around its
-    /// contents.
     #[test]
     fn a_drv_nar_size_is_its_framed_contents() {
         fn framed(len: usize) -> usize {
@@ -1516,10 +1269,6 @@ mod tests {
         }
     }
 
-    /// A dependency the server already knows is neither walked nor reported:
-    /// the server records its stub, edge and build job from the parent's
-    /// dependency list. Here every derivation but the entry point is known,
-    /// so exactly one record is reported and it still names its dependencies.
     #[tokio::test]
     async fn a_known_dependency_is_neither_reported_nor_walked() {
         let fixture = load_store(&fixture_dir());
@@ -1592,14 +1341,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_eval_missing_drv_fails_loudly() {
-        // Resolver resolves an attr to a drv path that doesn't exist in the reader.
-        // Silently skipping would drop dependency edges and let the dispatcher
-        // release the parent build prematurely, so we MUST surface this as a
-        // hard eval failure instead of a warning.
         let resolver = FakeDerivationResolver::new()
             .with_flake_attrs("repo", vec!["pkg".into()])
             .with_drv_path("repo", "pkg", "/nix/store/nonexistent.drv");
-        let drv_reader = FakeDrvReader::new(); // No drvs loaded
+        let drv_reader = FakeDrvReader::new();
         let job = make_flake_job("repo");
         let mut reporter = RecordingJobReporter::new();
 
@@ -1624,11 +1369,6 @@ mod tests {
         );
     }
 
-    /// When the abort watch is flipped before eval starts, the function
-    /// returns immediately without doing any work. Regression guard for
-    /// "aborting jobs does not work when in EvaluatingDerivation state" -
-    /// previously `evaluate_derivations_with` ignored the abort signal
-    /// entirely.
     #[tokio::test]
     async fn test_eval_aborts_when_signal_set_before_start() {
         let fixture = load_store(&fixture_dir());
@@ -1655,12 +1395,9 @@ mod tests {
             format!("{err:#}").contains("aborted by server"),
             "error should mention abort: {err:#}"
         );
-        // We should have bailed before sending an EvaluatingDerivations
-        // status update, so the reporter records nothing.
         assert!(reporter.is_empty(), "reporter should not see any events");
     }
 
-    /// Nix evaluation that never returns, so only the abort can end it.
     #[derive(Debug)]
     struct StalledResolver;
 
@@ -1732,11 +1469,9 @@ mod tests {
     #[tokio::test]
     async fn wildcard_resolve_failure_is_reported() {
         let repo = "https://example.com/repo";
-        // Attr is discovered but has no drv path - fake resolve returns Err.
-        // The job is a pure wildcard, so this is NOT an explicit target.
         let resolver = FakeDerivationResolver::new().with_flake_attrs(repo, vec!["broken".into()]);
         let drv_reader = FakeDrvReader::new();
-        let job = make_flake_job(repo); // wildcards: ["*"]
+        let job = make_flake_job(repo);
         let mut reporter = RecordingJobReporter::new();
 
         evaluate_derivations_with(
@@ -1762,11 +1497,10 @@ mod tests {
     #[tokio::test]
     async fn discovery_errors_reach_eval_result() {
         let repo = "https://example.com/repo";
-        // No attrs discovered, but discovery recorded a thrown-attr diagnostic.
         let resolver = FakeDerivationResolver::new()
             .with_flake_errors(repo, vec!["failed to evaluate 'x': boom".into()]);
         let drv_reader = FakeDrvReader::new();
-        let job = make_flake_job(repo); // wildcard job, no unmatched-target noise
+        let job = make_flake_job(repo);
         let mut reporter = RecordingJobReporter::new();
 
         evaluate_derivations_with(
@@ -1810,7 +1544,6 @@ mod tests {
 
         let all = reporter.all_eval_derivations();
         {
-            // Build a dependency map from all eval result batches.
             let eval_deps: std::collections::HashMap<&str, Vec<&str>> = all
                 .iter()
                 .map(|d| {
@@ -1821,7 +1554,6 @@ mod tests {
                 })
                 .collect();
 
-            // Compare against fixture tree.
             for drv in &fixture.derivations {
                 let eval_dep_list = eval_deps
                     .get(drv.drv_path.as_str())

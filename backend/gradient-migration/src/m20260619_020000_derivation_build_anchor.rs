@@ -3,10 +3,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Build-once anchor: one `derivation_build` row per derivation (UNIQUE),
-//! seeded in `Created` from the existing global derivations. The real status
-//! is recomputed by the next evaluation.
-
 use sea_orm_migration::prelude::*;
 
 #[derive(DeriveMigrationName)]

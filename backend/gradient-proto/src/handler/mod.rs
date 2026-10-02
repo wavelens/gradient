@@ -38,12 +38,8 @@ pub use cache_session::handle_cache_socket;
 pub(crate) use session::handle_socket;
 pub use sessions::SessionsHandle;
 
-/// `Retry-After` value returned with a 503 when the proto connection cap is
-/// hit - long enough to absorb a brief surge, short enough that a recovered
-/// worker reconnects promptly.
 const RETRY_AFTER: HeaderValue = HeaderValue::from_static("10");
 
-/// Returns the axum [`Router`] that serves the `/proto` WebSocket endpoint.
 pub fn proto_router() -> Router<Arc<ServerState>> {
     Router::new().route("/proto", get(ws_upgrade))
 }

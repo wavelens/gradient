@@ -8,9 +8,6 @@ use std::sync::Arc;
 
 use super::{LogStorage, NarStore};
 
-/// Storage-layer slice: the NAR object store and build-log storage. The
-/// narrowest context; carried by `DbContext` so `db` and `ci` reach storage
-/// without naming the composed `AppState`.
 #[derive(Clone, Debug)]
 pub struct StorageCtx {
     pub nar_storage: NarStore,

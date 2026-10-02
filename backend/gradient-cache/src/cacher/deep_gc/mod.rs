@@ -4,12 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Deep GC: bidirectional verification of every storage surface against the
-//! database, one unit per step. A round is an `admin_task` row whose checkpoint
-//! names the last finished unit, so a restart resumes it. Background rounds
-//! start every `gc.deep_interval_secs` and pace their units; a round requested
-//! by `POST /admin/maintenance/deep-gc` executes its units back to back.
-
 mod passes;
 
 use super::units::{Step, next_unit};
@@ -48,7 +42,6 @@ impl DeepGcReport {
     }
 }
 
-/// The round being worked on, as one run of its `admin_task` row.
 struct Round {
     id: AdminTaskId,
     started_at: NaiveDateTime,
@@ -57,8 +50,6 @@ struct Round {
     requested: bool,
 }
 
-/// Run the next unit of the current round, starting a round first when one
-/// was requested or the background interval has passed.
 pub(super) async fn step(state: &Arc<ServerState>) -> Result<Step> {
     let Some(round) = current_round(state).await? else {
         return Ok(Step::Idle);

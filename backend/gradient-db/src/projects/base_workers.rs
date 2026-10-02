@@ -4,15 +4,11 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Base-worker lookups: identity by worker_id, per-project enablement, and the
-//! enabled-project set used to scope a connecting base worker.
-
 use gradient_types::ids::{BaseWorkerId, ProjectBaseWorkerId, ProjectId, UserId};
 use gradient_types::now;
 use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, IntoActiveModel, QueryFilter};
 use std::collections::HashSet;
 
-/// Returns the enabled `base_worker` row for this worker_id, if any.
 pub async fn enabled_base_worker_by_worker_id<C: ConnectionTrait>(
     db: &C,
     worker_id: &str,
@@ -26,7 +22,6 @@ pub async fn enabled_base_worker_by_worker_id<C: ConnectionTrait>(
         .await
 }
 
-/// True when `worker_id` belongs to a base worker, regardless of its `enabled` flag.
 pub async fn worker_id_is_base<C: ConnectionTrait>(
     db: &C,
     worker_id: &str,
@@ -39,7 +34,6 @@ pub async fn worker_id_is_base<C: ConnectionTrait>(
         .is_some())
 }
 
-/// Project UUIDs that have opted into the given base worker.
 pub async fn projects_enabling_base_worker<C: ConnectionTrait>(
     db: &C,
     base_worker: BaseWorkerId,
@@ -55,7 +49,6 @@ pub async fn projects_enabling_base_worker<C: ConnectionTrait>(
         .collect())
 }
 
-/// True when the project has an enabled base worker with the `eval` gate on.
 pub async fn project_has_eval_capable_base_worker<C: ConnectionTrait>(
     db: &C,
     project: ProjectId,
@@ -84,13 +77,8 @@ pub async fn project_has_eval_capable_base_worker<C: ConnectionTrait>(
     Ok(row.is_some())
 }
 
-/// Links a project to every base worker flagged `auto_enable`, skipping the
-/// ones it is already linked to. Called when a project is created so a
-/// zero-config local worker is usable without a per-project opt-in click.
-///
-/// Returns the `worker_id`s newly linked. A worker that is already connected
-/// only learns about the new project on re-authentication, so the caller must
-/// ask the scheduler for one.
+/// A connected worker is only learning about the new project on re-authentication.
+/// The caller must ask the scheduler for one.
 pub async fn enable_auto_base_workers_for_project<C: ConnectionTrait>(
     db: &C,
     project: ProjectId,
@@ -109,8 +97,6 @@ pub async fn enable_auto_base_workers_for_project<C: ConnectionTrait>(
     link_base_workers(db, project, auto, created_by).await
 }
 
-/// Links every existing project to one base worker, skipping the ones already
-/// linked. Executes once when an `auto_enable` base worker first appears.
 pub async fn enable_base_worker_for_all_projects<C: ConnectionTrait>(
     db: &C,
     base_worker: BaseWorkerId,
@@ -204,8 +190,6 @@ mod tests {
     use gradient_entity::project_base_worker::Model as ProjectBaseWorkerModel;
     use sea_orm::{DatabaseBackend, MockDatabase};
 
-    /// The row a Postgres `INSERT ... RETURNING` hands back. Without one the
-    /// insert reports zero rows and sea-orm raises `RecordNotInserted`.
     fn returned_link(project: ProjectId, base_worker: BaseWorkerId) -> ProjectBaseWorkerModel {
         ProjectBaseWorkerModel {
             id: ProjectBaseWorkerId::now_v7(),

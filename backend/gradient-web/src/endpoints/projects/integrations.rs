@@ -4,16 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! CRUD for per-project named integrations.
-//!
-//! An integration stores credentials + metadata for a Git host (Gitea/Forgejo/
-//! GitLab/GitHub). Each row is either **inbound** (the Git host calls us;
-//! `secret` holds the HMAC secret) or **outbound** (we call the Git host;
-//! `endpoint_url` + `access_token` hold API credentials).
-//!
-//! Secrets and access tokens are stored encrypted with the server's crypt key
-//! and never returned in responses - responses only expose a boolean
-//! "has_secret" / "has_access_token" flag.
+//! Secrets and access tokens are stored encrypted with the server's crypt key. Responses are
+//! exposing only the `has_secret` and `has_access_token` flags.
 
 use crate::access::{Caller, ProjectAccess, load_integration_in_project, load_project};
 use crate::authorization::MaybeApiKey;
@@ -35,8 +27,6 @@ use sea_orm::{
 };
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-
-// ── Request / response shapes ─────────────────────────────────────────────────
 
 #[derive(Serialize, Debug)]
 pub struct IntegrationResponse {
@@ -115,30 +105,18 @@ fn normalize_allowed_ips(raw: Option<Vec<String>>) -> Result<Option<Vec<String>>
 #[derive(Deserialize, Debug)]
 pub struct CreateIntegrationRequest {
     pub name: String,
-    /// Human-readable display name. Defaults to `name` when omitted.
     #[serde(default)]
     pub display_name: Option<String>,
-    /// `"inbound"` or `"outbound"`.
     pub kind: String,
-    /// `"gitea"`, `"forgejo"`, `"gitlab"`, or `"github"`.
     pub git_host_type: String,
-    /// Plaintext HMAC secret for inbound integrations.
     pub secret: Option<String>,
-    /// Base URL (e.g. `https://gitea.example.com`) for outbound integrations.
     pub endpoint_url: Option<String>,
-    /// Plaintext API token for outbound integrations.
     pub access_token: Option<String>,
-    /// CIDR strings; only inbound webhooks from these sources are accepted.
     #[serde(default)]
     pub allowed_ips: Option<Vec<String>>,
-    /// Required for `git_host_type=github`: the App installation id to bind.
     pub installation_id: Option<i64>,
 }
 
-/// Credential-free integration handle. Returned by the summaries endpoint
-/// (`GET /projects/{project}/integrations/summary`) so non-admin project members can
-/// render integration names in the trigger UI without learning whether a
-/// secret/token is stored or what endpoint URL is configured.
 #[derive(Serialize, Debug)]
 pub struct IntegrationSummaryResponse {
     pub id: IntegrationId,
@@ -166,15 +144,10 @@ pub struct PatchIntegrationRequest {
     pub display_name: Option<String>,
     pub git_host_type: Option<String>,
     pub endpoint_url: Option<String>,
-    /// When present, replaces the stored secret. Empty string clears it.
     pub secret: Option<String>,
-    /// When present, replaces the stored access token. Empty string clears it.
     pub access_token: Option<String>,
-    /// Wholesale replacement; `[]` clears the allowlist.
     pub allowed_ips: Option<Vec<String>>,
 }
-
-// ── Helpers ──────────────────────────────────────────────────────────────────
 
 fn parse_kind(s: &str) -> Result<IntegrationKind, WebError> {
     match s {
@@ -203,9 +176,6 @@ fn kind_to_str(k: IntegrationKind) -> &'static str {
     }
 }
 
-// ── Handlers ──────────────────────────────────────────────────────────────────
-
-/// `GET /projects/{project}/integrations` - list integrations for a project.
 pub async fn get_integrations(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
@@ -237,12 +207,6 @@ pub async fn get_integrations(
     Ok(ok_json(out))
 }
 
-/// `GET /projects/{project}/integrations/summary` - list integrations as
-/// credential-free summaries. Available to any project member; the full listing
-/// remains gated on `ManageIntegrations` because it exposes `has_secret`,
-/// `has_access_token`, and `endpoint_url`. Used by the trigger UI to render
-/// integration names and populate the create/edit dropdown for users with
-/// `EditTask` who do not also hold `ManageIntegrations`.
 pub async fn get_integration_summaries(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
@@ -272,7 +236,6 @@ pub async fn get_integration_summaries(
     ))
 }
 
-/// `PUT /projects/{project}/integrations` - create a new integration.
 pub async fn put_integration(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
@@ -353,7 +316,6 @@ pub async fn put_integration(
 
     let kind = parse_kind(&body.kind)?;
 
-    // Name must be unique within (project, kind).
     let existing = EIntegration::find()
         .filter(CIntegration::Project.eq(project.id))
         .filter(CIntegration::Kind.eq(kind))
@@ -418,7 +380,6 @@ pub async fn put_integration(
     ))
 }
 
-/// `GET /projects/{project}/integrations/{id}` - fetch a single integration.
 pub async fn get_integration(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
@@ -442,7 +403,6 @@ pub async fn get_integration(
     ))
 }
 
-/// `PATCH /projects/{project}/integrations/{id}` - update an integration.
 pub async fn patch_integration(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
@@ -549,7 +509,6 @@ pub async fn patch_integration(
     Ok(ok_json(integration_response(&state.web_db, updated).await?))
 }
 
-/// `DELETE /projects/{project}/integrations/{id}` - remove an integration.
 pub async fn delete_integration(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,

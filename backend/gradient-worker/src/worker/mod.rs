@@ -4,22 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Top-level worker runtime.
-//!
-//! [`Worker<Connected>`] connects to the Gradient server, performs the
-//! handshake, registers capabilities, and then drives the job dispatch loop
-//! via [`Worker::run`].
-//!
-//! The connection state is encoded in the type parameter `S`:
-//!
-//! - [`Worker<Connected>`] - holds an active [`ProtoConnection`].  Call
-//!   [`run`](Worker::run) to enter the dispatch loop.  `run` consumes `self`
-//!   and always returns a [`Worker<Disconnected>`] (plus the disconnect
-//!   reason) so the caller can decide whether to reconnect.
-//!
-//! - [`Worker<Disconnected>`] - no active connection.  Call
-//!   [`reconnect`](Worker::reconnect) to obtain a fresh `Worker<Connected>`.
-
 mod cluster;
 mod id;
 mod message_loop;
@@ -44,44 +28,24 @@ use gradient_worker_client::reconnect::RunOutcome;
 
 use id::load_or_generate_id;
 
-/// How long a stopping worker waits for the writer task to put its final
-/// reports on the wire.
 const WRITER_FLUSH_BUDGET: std::time::Duration = std::time::Duration::from_secs(10);
 
-// ── Worker ────────────────────────────────────────────────────────────────────
-
-/// The worker instance, parameterised by its connection state.
-///
-/// Create with [`Worker::connect`] (outbound) or [`Worker::from_accepted`]
-/// (inbound).  After `run()` returns, call `reconnect()` on the resulting
-/// [`Worker<Disconnected>`] to re-establish the connection.
 pub struct Worker<S> {
     config: WorkerConfig,
     executor: JobExecutor,
     scorer: JobScorer,
     credentials: CredentialStore,
-    /// Connection state: [`Connected`] or [`Disconnected`].
     conn_state: S,
     _marker: PhantomData<S>,
 }
 
 impl<S> Worker<S> {
-    /// Cheap clone of the executor so callers can keep a shutdown handle
-    /// alive across `Worker` consumption (e.g. across `run` / `reconnect`
-    /// boundaries) and call [`JobExecutor::shutdown`] to gracefully drain
-    /// the eval pool. The internal `Arc<WorkerEvaluator>` is reference-
-    /// counted, so the underlying pool stays alive as long as any clone
-    /// exists.
     pub fn executor_handle(&self) -> JobExecutor {
         self.executor.clone()
     }
 }
 
-// ── Constructors (-> Worker<Connected>) ───────────────────────────────────────
-
 impl Worker<Connected> {
-    /// Connect to the server at `config.server_url`, complete the handshake,
-    /// and advertise build capabilities.
     pub async fn connect(config: WorkerConfig) -> Result<Self> {
         let mut conn = ProtoConnection::open(&config.server_url).await?;
         Self::setup_connection(&mut conn, &config).await?;
@@ -89,7 +53,6 @@ impl Worker<Connected> {
         Ok(Self::new_connected(config, conn, executor, scorer))
     }
 
-    /// Accept an incoming server-initiated WebSocket connection.
     pub async fn from_accepted(
         ws: tokio_tungstenite::WebSocketStream<
             tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
@@ -119,13 +82,9 @@ impl Worker<Connected> {
     }
 }
 
-// ── Reconnect (Worker<Disconnected> -> Worker<Connected>) ─────────────────────
-
 impl Worker<Disconnected> {
-    /// Re-open the connection to the server, re-running the same handshake,
-    /// capability advertisement and initial request as a fresh connect: the
-    /// server holds no state for this worker after a restart. Borrows `self`
-    /// so a failed attempt keeps the cached executor, scorer and credentials.
+    /// The server is holding no state for this worker after a restart.
+    /// A reconnect must re-run the full handshake, capability advertisement and initial request.
     pub async fn reconnect(&self) -> Result<ProtoConnection> {
         let mut conn = ProtoConnection::open(&self.config.server_url).await?;
         perform_setup(&mut conn, &self.config, "reconnect").await?;
@@ -152,19 +111,7 @@ impl Worker<Disconnected> {
     }
 }
 
-// ── Dispatch loop (Worker<Connected> -> Worker<Disconnected>) ─────────────────
-
 impl Worker<Connected> {
-    /// Main dispatch loop.
-    ///
-    /// Consumes `self` (takes ownership of the connection), drives the loop,
-    /// and always returns a [`Worker<Disconnected>`] plus the [`RunOutcome`].
-    ///
-    /// On an `Err` outcome the disconnected worker is still returned so the
-    /// caller can reconnect without losing the executor / credential caches.
-    ///
-    /// `shutdown` is observed by the inner `select!`: a drain request finishes
-    /// the in-flight jobs and then ends the loop, an abort ends it at once.
     pub async fn run(self, shutdown: Shutdown) -> (Worker<Disconnected>, Result<RunOutcome>) {
         let Worker {
             config,
@@ -185,9 +132,9 @@ impl Worker<Connected> {
         );
         let outcome = message_loop::run_message_loop(state, reader, shutdown.clone()).await;
 
-        // The loop owned the writer, so by now only background tasks can still
-        // hold a clone. A worker on its way out has to see its last reports
-        // leave the queue; a session that ends to be reconnected closes at once.
+        // Only background tasks can still hold a writer clone at this point.
+        // A stopping worker must see its last reports leave the queue.
+        // A session ending for a reconnect is closing at once.
         if shutdown.is_stopping() {
             flush.flush(WRITER_FLUSH_BUDGET).await;
         } else {
@@ -212,8 +159,6 @@ impl Worker<Connected> {
         (disconnected, result)
     }
 }
-
-// ── Private helpers ───────────────────────────────────────────────────────────
 
 impl Worker<Connected> {
     async fn setup_connection(conn: &mut ProtoConnection, config: &WorkerConfig) -> Result<()> {
@@ -270,7 +215,6 @@ impl Worker<Connected> {
     }
 }
 
-/// Shared setup: perform handshake, advertise capabilities, request initial job list.
 async fn perform_setup(
     conn: &mut ProtoConnection,
     config: &WorkerConfig,
@@ -335,19 +279,11 @@ async fn perform_setup(
     Ok(())
 }
 
-/// Parse the value printed by `nix config show system-features` into a feature
-/// list. `nix config show <name>` prints just the space-separated value;
-/// tolerate an older `name = value` line by taking the part after `=`.
 fn parse_system_features(output: &str) -> Vec<String> {
     let value = output.split_once('=').map_or(output, |(_, v)| v);
     value.split_whitespace().map(str::to_owned).collect()
 }
 
-/// The Nix daemon's advertised `system-features`, read from
-/// `nix config show system-features`. This is the daemon's fully-resolved set,
-/// including the CPU-derived `gccarch-*` levels that a static config can't
-/// enumerate. On any failure we advertise nothing and log - matching a worker
-/// with no declared features rather than crashing setup.
 async fn detect_system_features(binpath_nix: &str) -> Vec<String> {
     let output = tokio::process::Command::new(binpath_nix)
         .args([

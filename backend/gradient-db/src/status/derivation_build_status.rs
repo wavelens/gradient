@@ -4,12 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! State-machine-guarded transitions of the global `derivation_build` shared build.
-//! One shared build transition fans out to every evaluation that references the
-//! derivation (its `build_job`s): board events, per-eval pending deliveries, and one
-//! bump of every referencing evaluation's graph version. Graph-driven promotion
-//! executes on terminal-success; dependency-failure cascades on terminal-failure.
-
 use super::effects::{TransitionChange, emit_transition_effects};
 use super::logging::{PhaseSubjectKind, record_phase_event};
 use crate::DbContext;
@@ -72,9 +66,6 @@ pub async fn update_derivation_build_status(
 
     let updated = active.update(&ctx.worker_db).await?;
 
-    // All fan-out (graph version, board events, pending deliveries, cache-changed) goes
-    // through the one effects emitter - the same path the bulk sweeps feed - so
-    // the reactive and proactive models can never drift apart.
     emit_transition_effects(
         ctx,
         &[TransitionChange {
@@ -85,12 +76,6 @@ pub async fn update_derivation_build_status(
     )
     .await?;
 
-    // A build-once success is the moment this shared build can serve its outputs: one
-    // locked flip drops its parents' counters and queues the ones at zero. The
-    // failure half of the per-completion parent sweep this replaces is not lost:
-    // a parent of a terminal-failed dependency is failed by
-    // `cascade_dependency_failed` on that failure's own transition, and by the
-    // eval-scoped `repair_dependency_failed` for the ones it could not reach.
     if matches!(status, BuildStatus::Completed | BuildStatus::Substituted) {
         let changes =
             crate::graph::can_start::advance_fetchable(&ctx.worker_db, &[updated.derivation])
@@ -108,9 +93,8 @@ pub async fn update_derivation_build_status(
         emit_transition_effects(ctx, &changes).await?;
     }
 
-    // Awaited, not spawned: the emitter above already wrote this transition's
-    // pending deliveries in this transaction, and a detached writer racing it was how a
-    // phase timeline went missing for a build the reader had already seen.
+    // The log write is awaited, not spawned.
+    // A detached writer racing the emitter's pending deliveries once lost a phase timeline.
     let worker =
         crate::scheduling::build_attempt::latest_attempt_worker(&ctx.worker_db, updated.id).await?;
     record_phase_event(
@@ -126,11 +110,6 @@ pub async fn update_derivation_build_status(
     Ok(updated)
 }
 
-/// Re-announce the current status of `derivations` through the effects emitter
-/// (board events + per-entry-point Git host checks). For callers that only know
-/// the affected derivation set, not the transitions that produced it - e.g.
-/// state import; paths with the actual changes in hand should call
-/// [`emit_transition_effects`] directly.
 pub async fn notify_build_status_for_derivations(
     ctx: &DbContext,
     derivations: &[DerivationId],
@@ -159,12 +138,6 @@ pub async fn notify_build_status_for_derivations(
     emit_transition_effects(ctx, &changes).await
 }
 
-/// Write the pending-delivery row for each entry point's current shared build status as its
-/// `entry_point` row is recorded, so a Git host check exists the moment the entry
-/// point evaluates: pending for `Created`, immediate green/red for an
-/// already-terminal shared build that never transitions in this eval. Unlike
-/// [`emit_transition_effects`] this reports `Created` too; callers pass one
-/// streamed batch, and every query is scoped to `evaluation`.
 pub async fn announce_entry_point_statuses(
     ctx: &DbContext,
     evaluation: EvaluationId,

@@ -4,10 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Worker telemetry describes the worker, not a project (#587): readers scope it
-//! through `worker_registration` and `project_base_worker`, so a base worker and
-//! a worker shared by several projects are recorded once and seen by each.
-
 use sea_orm_migration::prelude::*;
 use sea_orm_migration::sea_orm::ConnectionTrait;
 

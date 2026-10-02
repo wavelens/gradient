@@ -9,17 +9,8 @@ use tracing::debug;
 
 const ZERO_SHA: &str = "0000000000000000000000000000000000000000";
 
-/// Reads pkt-lines from `reader` and returns the SHA-1 hash for the wanted ref.
-///
-/// `target = None` -> return `HEAD`, falling back to the first non-zero ref
-/// (matches libgit2's `list.first()` behaviour for repos advertising only
-/// `capabilities^{}`).
-/// `target = Some("refs/heads/main")` -> return that exact ref with no fallback;
-/// `GitHashExtraction` if it is not advertised.
-///
-/// Reads incrementally - one pkt-line at a time - so it works correctly even
-/// when the remote keeps the connection open after the ref advertisement
-/// (which is normal git protocol behavior).
+/// Pkt-lines are read one at a time. The remote is normally keeping the connection open after the
+/// ref advertisement.
 pub(super) fn read_ref_from_pktlines(
     reader: &mut dyn std::io::Read,
     target: Option<&str>,
@@ -42,7 +33,7 @@ pub(super) fn read_ref_from_pktlines(
             .ok_or(SourceError::GitOutputParsing)?;
 
         if len == 0 {
-            break; // flush pkt - end of advertisement
+            break;
         }
 
         if len < 4 {
@@ -57,7 +48,6 @@ pub(super) fn read_ref_from_pktlines(
             }
         })?;
 
-        // Ref lines: "<40-hex-sha1> <refname>[NUL capabilities]\n"
         if data.len() >= 41 && data[40] == b' ' {
             let sha = match std::str::from_utf8(&data[..40]) {
                 Ok(s) => s,
@@ -80,8 +70,6 @@ pub(super) fn read_ref_from_pktlines(
                 return hex::decode(sha).map_err(|_| SourceError::GitOutputParsing);
             }
 
-            // Remember the first real ref as HEAD fallback (skip the zero-id
-            // capabilities marker); only relevant when polling HEAD.
             if allow_fallback
                 && first_ref.is_none()
                 && sha != ZERO_SHA
@@ -90,13 +78,10 @@ pub(super) fn read_ref_from_pktlines(
                 first_ref = Some(bytes);
             }
         } else {
-            // Non-ref pkt-line (e.g. version advertisement).
             let preview = std::str::from_utf8(&data).unwrap_or("<binary>").trim_end();
             debug!(preview, "pkt-line non-ref");
         }
     }
 
-    // HEAD path falls back to the first non-zero ref; the exact-branch path
-    // left `first_ref` untouched, so this is `GitHashExtraction` for it.
     first_ref.ok_or(SourceError::GitHashExtraction)
 }

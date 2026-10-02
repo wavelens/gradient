@@ -8,9 +8,8 @@ use clap::Args;
 
 #[derive(Args, Debug, Clone)]
 pub struct MetricsArgs {
-    /// Path to a file containing the bearer token required to scrape
-    /// `/metrics`. When unset, the metrics endpoint is disabled and
-    /// returns 404. The file is read once at startup.
+    /// Path to a file containing the bearer token required to scrape `/metrics`. An unset path is
+    /// disabling the metrics endpoint with 404. The server is reading the file once at startup.
     #[arg(
         id = "metrics-token-file",
         long = "metrics-token-file",
@@ -26,8 +25,8 @@ pub struct MetricsArgs {
     )]
     pub rollup_interval_secs: u64,
 
-    /// Days to keep raw phase and worker samples and the per-minute cache and
-    /// upstream traffic counters. `0` keeps them forever.
+    /// Days to keep raw phase and worker samples and the per-minute cache and upstream traffic
+    /// counters. `0` is keeping them forever.
     #[arg(
         long = "metrics-retention-raw-days",
         env = "GRADIENT_METRICS_RETENTION_RAW_DAYS",
@@ -35,7 +34,8 @@ pub struct MetricsArgs {
     )]
     pub retention_raw_days: i64,
 
-    /// Days to retain minute/hour `metric_rollup` buckets (day/week kept). 0 = keep forever.
+    /// Days to keep minute and hour rollups. Day and week rollups are staying forever. `0` is
+    /// keeping every rollup forever.
     #[arg(
         long = "metrics-retention-rollup-days",
         env = "GRADIENT_METRICS_RETENTION_ROLLUP_DAYS",
@@ -51,9 +51,8 @@ pub struct MetricsArgs {
     )]
     pub label_topn: u32,
 
-    /// Interval in seconds between flushes of the in-memory cache-traffic
-    /// accumulator into `cache_metric`. A flush that fails loses at most this
-    /// much traffic telemetry.
+    /// Interval in seconds between flushes of the in-memory cache-traffic accumulator into
+    /// `cache_metric`. A failing flush is losing at most this much traffic telemetry.
     #[arg(
         long = "metrics-cache-flush-interval-secs",
         env = "GRADIENT_METRICS_CACHE_FLUSH_INTERVAL_SECS",
@@ -77,11 +76,8 @@ pub struct MetricsArgs {
     )]
     pub instance_interval_secs: u64,
 
-    /// Seconds between build graph consistency checks (stale gate flags,
-    /// unpromoted builds that can start, unbacked trusted outputs and wedged
-    /// Building evaluations are logged as warnings). The check also repairs the
-    /// NAR reference counter over the paths pending builds wait on and is that
-    /// counter's only backstop; `0` disables both.
+    /// Seconds between build graph consistency checks. The check is also repairing the NAR
+    /// reference counter. `0` is disabling both.
     #[arg(
         long = "metrics-graph-consistency-interval-secs",
         env = "GRADIENT_METRICS_GRAPH_CONSISTENCY_INTERVAL_SECS",
@@ -89,7 +85,7 @@ pub struct MetricsArgs {
     )]
     pub graph_consistency_interval_secs: u64,
 
-    /// OTLP collector endpoint for metric push export. Unset = OTLP disabled.
+    /// OTLP collector endpoint for metric push export. An unset endpoint is disabling OTLP.
     #[arg(long = "metrics-otlp-endpoint", env = "GRADIENT_METRICS_OTLP_ENDPOINT")]
     pub otlp_endpoint: Option<String>,
 

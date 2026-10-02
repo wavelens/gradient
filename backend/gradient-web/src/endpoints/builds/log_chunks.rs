@@ -38,8 +38,8 @@ fn decode_chunk(raw: &[u8]) -> WebResult<String> {
     Ok(String::from_utf8_lossy(&bytes).into_owned())
 }
 
-/// A chunk's text for a line range. A chunk whose object is gone renders as
-/// placeholder lines, keeping the line numbers of every later chunk in place.
+/// A chunk whose object is gone is rendered as placeholder lines. The line numbers of every later
+/// chunk are kept in place.
 async fn chunk_lines_text(
     logs: &dyn gradient_storage::LogStorage,
     log_key: BuildAttemptId,
@@ -129,8 +129,6 @@ pub struct LineRangeQuery {
     pub range: Option<String>,
 }
 
-/// Parse the requested 1-based inclusive line range from the query. Accepts
-/// either `?start=&end=` or `?range=L120-L130` (the `L` prefixes are optional).
 fn parse_line_range(q: &LineRangeQuery) -> Result<(u64, Option<u64>), WebError> {
     if let Some(range) = &q.range {
         let cleaned = range.replace(['L', 'l'], "");

@@ -4,18 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Applies one query's budget to what its plan actually did. `relation_rows` is
-//! `pg_class.reltuples` per relation, which is what makes a sequential scan of a
-//! six-row lookup table legal and one of half a million rows a failure.
-//!
-//! The rules step aside where they would measure the wrong thing. A sequential
-//! scan that keeps what it read is the planner reading a table it needs in full,
-//! not a missing index. A plan that aggregates reads many rows to return one by
-//! definition, a statement that returned nothing has no denominator, and a batch
-//! is judged against the values it was handed. What such a statement cost is
-//! still bounded, by buffers. An override is judged the same way: a plan that
-//! scanned nothing never reached it, so it cannot be the evidence that it is stale.
-
 use std::collections::HashMap;
 
 use super::{Budget, Measured, Shape, Spill, Violation};
@@ -136,7 +124,6 @@ pub fn check(
     out
 }
 
-/// Whether rows read per row asked for says anything about this plan.
 fn ratio_applies(measured: &Measured) -> bool {
     (measured.rows_out > 0 || measured.inputs > 0) && !measured.collapses
 }
@@ -188,8 +175,6 @@ mod tests {
         assert!(v[0].fatal);
     }
 
-    /// The planner reading a table it needs in full is the right plan, not a
-    /// missing index.
     #[test]
     fn a_seq_scan_that_keeps_what_it_read_is_fine() {
         let m = Measured {
@@ -231,8 +216,6 @@ mod tests {
         assert_eq!(check(&m, &Budget::HOT, &rows(&[]))[0].rule, "amplification");
     }
 
-    /// A batch statement does work per value it was handed, however few rows
-    /// come back.
     #[test]
     fn a_batch_is_measured_against_what_it_was_handed() {
         let m = Measured {
@@ -245,8 +228,6 @@ mod tests {
         assert!(check(&m, &Budget::HOT, &rows(&[])).is_empty());
     }
 
-    /// A sweep that finds no work is the healthy steady state, and it returns
-    /// no rows to divide by.
     #[test]
     fn a_query_returning_nothing_has_no_ratio() {
         let m = Measured {
@@ -282,8 +263,6 @@ mod tests {
         assert!(!check(&m, &Budget::SWEEP, &rows(&[]))[0].fatal);
     }
 
-    /// The `OFFSET 0` fence makes the recursive term a nested loop; losing it is
-    /// the walk collapsing into a join over the whole edge table.
     #[test]
     fn walk_requires_the_fence_in_the_recursive_term() {
         let m = Measured {
@@ -314,8 +293,6 @@ mod tests {
         assert_eq!(check(&m, &budget, &rows(&[]))[0].rule, "shape_forbidden");
     }
 
-    /// The fence the shape rules are about lives in a recursive term, so a plan
-    /// that recurses nowhere has none to lose.
     #[test]
     fn a_plan_without_a_recursion_is_not_shape_checked() {
         let m = Measured {

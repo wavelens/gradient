@@ -4,17 +4,12 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Outbound client that pulls cached paths from a remote gradient_proto
-//! upstream's read-only `/cache/{cache}/proto` endpoint. Used to satisfy
-//! local cache misses from configured gradient_proto upstream caches.
-
 use std::time::Duration;
 
 use gradient_wire::types::{CachedPath, GradientCapabilities, QueryMode};
 
 use gradient_wire::messages::{ClientMessage, PROTO_VERSION, ServerMessage};
 
-/// Build the `wss?://host/cache/{cache}/proto` URL from an upstream base URL.
 pub(super) fn proto_ws_url(base_url: &str, remote_cache: &str) -> String {
     let trimmed = base_url.trim_end_matches('/');
     let ws = if let Some(rest) = trimmed.strip_prefix("https://") {
@@ -38,9 +33,6 @@ fn consumer_capabilities() -> GradientCapabilities {
     }
 }
 
-/// Handshake with a remote gradient_proto cache and pull the subset of `paths`
-/// it already has cached. Returns an empty vec on any transport, handshake, or
-/// protocol error so callers treat upstream failures as a plain cache miss.
 pub(crate) async fn pull_paths(
     base_url: &str,
     remote_cache: &str,
@@ -73,7 +65,6 @@ pub(crate) async fn pull_paths(
         paths: paths.to_vec(),
         mode: QueryMode::Pull,
         nar_sizes: Vec::new(),
-        // The server as a peer's client wants that peer's own cache.
         external: false,
     };
     if socket.send_client_msg(&query).await.is_err() {

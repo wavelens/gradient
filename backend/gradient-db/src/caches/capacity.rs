@@ -4,11 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Storage-accounting helpers for the per-cache / per-instance max-storage
-//! gate. Usage is the logical sum of `cached_path.file_size` (compressed NAR
-//! bytes): per-cache via the `cached_path_signature` join, instance-wide as a
-//! global sum. Backend-agnostic (works for local FS and S3).
-
 use gradient_entity::cache::Model as MCache;
 use gradient_entity::cached_path::{Column as CCachedPath, Entity as ECachedPath};
 use gradient_entity::project_cache::CacheSubscriptionMode;
@@ -18,11 +13,10 @@ use sea_orm::{
     ColumnTrait, ConnectionTrait, EntityTrait, PaginatorTrait, QueryFilter, QuerySelect,
 };
 
-/// Park threshold: a cache with less than this much free headroom is "full".
 pub const STORAGE_HEADROOM_BYTES: i64 = 10 * 1024 * 1024;
 
-/// `SUM(file_size)` cast back to `BIGINT`: Postgres widens `SUM(int8)` to
-/// `NUMERIC`, which would otherwise fail to decode into `Option<i64>`.
+/// Postgres is widening `SUM(int8)` to `NUMERIC`.
+/// A `NUMERIC` sum is failing to decode into `Option<i64>`.
 fn file_size_sum_bigint() -> Expr {
     use gradient_entity::cached_path::Column as CCP;
     use sea_orm::sea_query::ExprTrait;
@@ -39,7 +33,6 @@ fn limit_to_bytes(max_storage_gb: i32) -> Option<i64> {
     }
 }
 
-/// Sum of compressed NAR bytes attributed to a single cache.
 pub async fn cache_used_bytes<C: ConnectionTrait>(
     db: &C,
     cache: CacheId,
@@ -74,7 +67,6 @@ pub async fn cache_used_bytes<C: ConnectionTrait>(
     Ok(total)
 }
 
-/// Sum of compressed NAR bytes stored across the whole instance.
 pub async fn instance_used_bytes<C: ConnectionTrait>(db: &C) -> Result<i64, sea_orm::DbErr> {
     use gradient_entity::cached_path::Entity as ECP;
     let sum: Option<i64> = ECP::find()
@@ -87,7 +79,6 @@ pub async fn instance_used_bytes<C: ConnectionTrait>(db: &C) -> Result<i64, sea_
     Ok(sum.unwrap_or(0))
 }
 
-/// The active, writable (ReadWrite/WriteOnly) caches a project can push to.
 pub async fn project_writable_caches<C: ConnectionTrait>(
     db: &C,
     project: ProjectId,
@@ -118,9 +109,6 @@ pub async fn project_writable_caches<C: ConnectionTrait>(
         .await
 }
 
-/// Free headroom (bytes) for one cache, bounded by both its own limit and the
-/// instance-wide limit. A non-positive limit means unlimited on that axis.
-/// Returns `i64::MAX` when both axes are unlimited.
 fn headroom(
     cache_limit_gb: i32,
     cache_used: i64,
@@ -136,9 +124,6 @@ fn headroom(
     cache_free.min(instance_free)
 }
 
-/// `true` when the project has at least one writable cache AND every writable cache
-/// has less than `STORAGE_HEADROOM_BYTES` free. An empty writable-cache set
-/// returns `false` (that case is owned by the NoCache gate).
 pub async fn project_caches_all_full<C: ConnectionTrait>(
     db: &C,
     project: ProjectId,

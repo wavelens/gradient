@@ -4,13 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Periodic eviction of fleet-shared eval-cache blobs.
-//!
-//! Bounds the `eval_cache_store` table (and its object-storage blobs) by age
-//! and by total size: rows older than `max_age` go first, then - oldest
-//! `updated_at` first - enough additional rows to bring the surviving total
-//! `size_bytes` at or under the configured cap (#386).
-
 use chrono::{Duration, NaiveDateTime};
 use gradient_core::ServerState;
 use gradient_types::*;
@@ -18,9 +11,6 @@ use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QuerySelect};
 use std::sync::Arc;
 use tracing::{error, info, warn};
 
-/// Rows are `(id, size_bytes, updated_at)`. Returns the ids to evict: every row
-/// older than `max_age`, plus - oldest-`updated_at` first - enough additional
-/// rows to bring the surviving total `size_bytes` at or under `max_total_bytes`.
 fn select_evictions(
     rows: &[(EvalCacheStoreId, i64, NaiveDateTime)],
     max_total_bytes: u64,
@@ -57,9 +47,6 @@ fn select_evictions(
     evicted
 }
 
-/// One sweep pass: load every `eval_cache_store` row, evict the ones selected
-/// by [`select_evictions`], deleting the blob (best-effort) then the DB row.
-/// Errors on a single row are logged and never abort the pass.
 pub async fn evict_eval_cache(state: Arc<ServerState>) -> anyhow::Result<()> {
     let cfg = &state.config.eval;
 
@@ -185,8 +172,8 @@ mod tests {
             (id(3), 500, ts(NOW - 20)),
             (id(4), 500, ts(NOW - 10)),
         ];
-        // id(1) age-evicted; survivors id2+id3+id4 = 1500 > 1000, so evicting the
-        // oldest survivor (id2 -> 1000) brings it to the cap. Total: id1 + id2.
+        // Row id1 is age-evicted. Survivors id2, id3 and id4 total 1500, and evicting the oldest
+        // survivor id2 is reaching the cap of 1000.
         let out = select_evictions(&rows, 1000, Duration::days(30), ts(NOW));
 
         assert!(out.contains(&id(1)), "aged row evicted");

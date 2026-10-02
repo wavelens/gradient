@@ -169,8 +169,7 @@ async fn find_invitation(state: &Arc<ServerState>, token: &str) -> WebResult<Inv
         .ok_or_else(|| WebError::not_found("Invitation"))
 }
 
-/// Resolves the token, then enforces that the session belongs to the invitee.
-/// A forwarded mail is therefore useless to anybody else.
+/// The session must belong to the invitee. A forwarded mail is useless to anybody else.
 async fn claim_invitation(
     state: &Arc<ServerState>,
     user: &MUser,

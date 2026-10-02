@@ -4,9 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! A scripted worker on the real client connection, for driving an authority
-//! (the server or a proxy) from a test.
-
 use anyhow::{Context, Result};
 use gradient_wire::messages::{
     BuildFailureKind, CandidateScore, ClientMessage, GradientCapabilities, Job, JobCandidate,
@@ -142,7 +139,6 @@ impl ProtoPeer {
         self.writer.send(msg).await
     }
 
-    /// Skip messages until `pick` accepts one, failing after [`SCRIPT_TIMEOUT`].
     pub async fn recv_until<T>(
         &mut self,
         mut pick: impl FnMut(ServerMessage) -> Option<T>,

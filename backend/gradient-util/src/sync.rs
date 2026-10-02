@@ -4,15 +4,12 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Shared-memory primitives whose failure modes we have designed away.
-
 use std::fmt;
 use std::sync::MutexGuard;
 
-/// A mutex that ignores poisoning. Everything guarded this way is a plain
-/// collection, queue or counter whose invariants survive a panic mid-critical
-/// section, so a poisoned lock hands the value back instead of turning one
-/// panic into a cascade of them at every later `lock()`.
+/// Guarded values are plain collections, queues or counters whose invariants survive a panic. A
+/// poisoned lock is handing the value back instead of cascading one panic into every later
+/// `lock()`.
 pub struct Mutex<T: ?Sized>(std::sync::Mutex<T>);
 
 impl<T> Mutex<T> {
@@ -58,8 +55,6 @@ mod tests {
     use super::Mutex;
     use std::sync::Arc;
 
-    /// A panic while the lock is held must not turn every later `lock()` into
-    /// a second panic: the guarded value is still there to be read.
     #[test]
     fn a_poisoned_lock_still_hands_out_the_value() {
         let m = Arc::new(Mutex::new(vec![1, 2, 3]));
@@ -74,8 +69,6 @@ mod tests {
         assert_eq!(*m.lock(), vec![1, 2, 3]);
     }
 
-    /// `into_inner` is the other half of the same promise: draining an
-    /// accumulator after a worker panicked must still yield what it collected.
     #[test]
     fn into_inner_survives_a_poisoned_lock() {
         let m = Arc::new(Mutex::new(vec![1, 2, 3]));

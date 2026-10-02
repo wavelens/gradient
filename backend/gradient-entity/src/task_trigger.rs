@@ -11,8 +11,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::ids::{TaskId, TaskTriggerId};
 
-/// What fires an evaluation: repo polling, a Git host push/PR webhook, or a cron
-/// schedule. Tags the polymorphic `config` jsonb column.
 #[repr(i16)]
 #[derive(
     Debug,

@@ -42,7 +42,6 @@ async fn main() {
         }
     };
 
-    // ── 1. InitConnection ────────────────────────────────────────────────────
     let init = ClientMessage::InitConnection {
         version: PROTO_VERSION,
         capabilities: GradientCapabilities {
@@ -57,7 +56,6 @@ async fn main() {
     };
     send(&mut ws, &init).await;
 
-    // ── 2. Expect AuthChallenge ──────────────────────────────────────────────
     match recv(&mut ws).await {
         ServerMessage::AuthChallenge { peers } => {
             eprintln!("[probe] AuthChallenge received, peers={peers:?}");
@@ -73,10 +71,8 @@ async fn main() {
         }
     }
 
-    // ── 3. AuthResponse with no tokens ───────────────────────────────────────
     send(&mut ws, &ClientMessage::AuthResponse { tokens: vec![] }).await;
 
-    // ── 4. InitAck or Reject? ────────────────────────────────────────────────
     match recv(&mut ws).await {
         ServerMessage::InitAck {
             version,

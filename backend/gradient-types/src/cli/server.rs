@@ -23,44 +23,42 @@ pub struct ServerArgs {
         default_value = "http://127.0.0.1:8000"
     )]
     pub serve_url: String,
-    /// Public URL of the Gradient frontend, used to build links in CI status
-    /// reports (e.g. `https://gradient.example.com`). Defaults to `serve_url`.
+    /// Public URL of the Gradient frontend, used for links in CI status reports.
     #[arg(
         long = "frontend-url",
         env = "GRADIENT_FRONTEND_URL",
         default_value = "http://127.0.0.1:8000"
     )]
     pub frontend_url: String,
-    /// Whether the server is served over TLS (HTTPS). Controls the `Secure`
-    /// flag on session cookies. Set to `false` for plain HTTP deployments.
+    /// Whether the server is served over TLS (HTTPS). It is controlling the `Secure` flag on
+    /// session cookies. Set it to `false` for plain HTTP deployments.
     #[arg(long = "use-tls", env = "GRADIENT_USE_TLS", default_value = "true")]
     pub use_tls: bool,
-    /// Advertise HTTP/3 (QUIC) support to connecting clients.
-    /// Enabling this does NOT change the backend transport - configure nginx
-    /// with `listen 443 quic` and set the `Alt-Svc` header there.
-    /// This flag is surfaced via `GET /api/v1/config` so clients can choose
-    /// whether to attempt an HTTP/3 upgrade.
+    /// Advertise HTTP/3 (QUIC) support to connecting clients. Enabling this is NOT changing the
+    /// backend transport. Configure nginx with `listen 443 quic` and set the `Alt-Svc` header
+    /// there. `GET /api/v1/config` is surfacing this flag for clients choosing whether to attempt
+    /// an HTTP/3 upgrade.
     #[arg(long = "use-quic", env = "GRADIENT_USE_QUIC", default_value = "false")]
     pub use_quic: bool,
     #[arg(long = "base-dir", env = "GRADIENT_BASE_DIR", default_value = ".")]
     pub base_dir: String,
     #[arg(long = "store-path", env = "GRADIENT_STORE_PATH")]
     pub store_path: Option<String>,
-    /// Expose `GET /api/v1/workers` and worker stats without authentication.
-    /// When `false` (default), only superusers can access those endpoints.
+    /// Expose `GET /api/v1/workers` and worker stats without authentication. Only superusers can
+    /// access those endpoints with `false` (default).
     #[arg(
         long = "public-stats",
         env = "GRADIENT_PUBLIC_STATS",
         default_value = "false"
     )]
     pub public_stats: bool,
-    /// Days to keep job assignment records, completed deliveries, worker
-    /// connection history, webhook and task action deliveries, expired sessions
-    /// and CLI logins, finished admin tasks, the audit log, per-build resource
-    /// samples and finished cluster jobs. Pruned resource samples no longer feed
-    /// build predictions. A finished cluster job whose members are gone goes
-    /// right away. Open worker connections, the newest finished admin task of
-    /// each kind and active cluster jobs are kept. `0` keeps them forever.
+    /// Days to keep job assignment records, finished deliveries, worker connection history, webhook
+    /// and task action deliveries, expired sessions and CLI logins. The same limit is covering
+    /// finished admin tasks, the audit log, per-build resource samples and finished cluster jobs.
+    /// Pruned resource samples are no longer feeding build predictions. A finished cluster job
+    /// without remaining members is going on the next hourly pass. The pruning is sparing the
+    /// newest finished admin task of each kind and active cluster jobs. An open worker connection
+    /// is kept until the same worker is connecting again. `0` is keeping every record forever.
     #[arg(
         long = "retention-days",
         env = "GRADIENT_RETENTION_DAYS",

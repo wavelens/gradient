@@ -4,17 +4,12 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Splits a completed build log into line-bounded chunks for compression and
-//! lazy serving. Each chunk records the SGR state active at its first byte so
-//! it can be rendered standalone (see [`super::sgr::SgrState`]).
-
 use super::sgr::SgrState;
 use crate::log::LogStorage;
 use anyhow::Result;
 use gradient_types::constants::LOG_CHUNK_ZSTD_LEVEL;
 use gradient_types::ids::BuildAttemptId;
 
-/// One uncompressed chunk plus the metadata persisted in `build_log_chunk`.
 pub struct LogChunkDesc {
     pub text: String,
     pub byte_start: u64,
@@ -23,9 +18,6 @@ pub struct LogChunkDesc {
     pub color_prefix: String,
 }
 
-/// Split `log` into chunks on line boundaries, each ≈ `target_bytes` uncompressed.
-/// A single line longer than `target_bytes` stays whole in its own chunk.
-/// Each chunk records the SGR state active at its first byte (`color_prefix`).
 pub fn chunk_log(log: &str, target_bytes: usize) -> Vec<LogChunkDesc> {
     let target = target_bytes.max(1);
     let mut chunks: Vec<LogChunkDesc> = Vec::new();
@@ -69,7 +61,6 @@ pub fn chunk_log(log: &str, target_bytes: usize) -> Vec<LogChunkDesc> {
     chunks
 }
 
-/// A persisted chunk descriptor (mirrors a `build_log_chunk` row).
 pub struct StoredChunkDesc {
     pub text: String,
     pub byte_start: u64,
@@ -80,12 +71,10 @@ pub struct StoredChunkDesc {
     pub color_prefix: String,
 }
 
-/// Stands in for each line of a chunk whose object is gone.
 pub const MISSING_CHUNK_LINE: &str = "[log chunk unavailable]\n";
 
-/// Decompress and concatenate chunks `0..count`. A chunk that no longer exists
-/// reads as one [`MISSING_CHUNK_LINE`]; any other failure is returned, because a
-/// caller rewriting the log must never drop a chunk it merely failed to read.
+/// Only a missing chunk is read as `MISSING_CHUNK_LINE`. A caller rewriting the log must never drop
+/// a chunk it merely failed to read.
 pub async fn read_chunks(
     storage: &dyn LogStorage,
     log_key: BuildAttemptId,
@@ -104,8 +93,6 @@ pub async fn read_chunks(
     Ok(out)
 }
 
-/// Split, zstd-compress, and write each chunk; return descriptors for the DB index.
-/// Existing chunks for `log_key` are removed first so re-finalize is idempotent.
 pub async fn compress_and_store_chunks(
     storage: &dyn LogStorage,
     log_key: BuildAttemptId,

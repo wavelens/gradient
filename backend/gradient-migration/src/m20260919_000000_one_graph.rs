@@ -4,13 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! One graph, two edge kinds. Runtime references were a second graph at the
-//! path level (`cached_path_reference`), so demand could never reach the producer
-//! of a missing reference and wholeness was counted on paths while readiness was
-//! counted on anchors. Runtime edges now sit on `derivation_dependency` next to
-//! the build edges, wholeness is counted on the anchor like `unready_deps`, and the
-//! narinfo's ordered `References:` line lives in one text column. The old index
-//! stays until every reader has moved; a later migration drops it.
+//! The old index is kept until every reader is moved off it. A later migration is dropping it.
 
 use sea_orm_migration::prelude::*;
 use sea_orm_migration::sea_orm::ConnectionTrait;

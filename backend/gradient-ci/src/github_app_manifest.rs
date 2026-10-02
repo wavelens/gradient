@@ -4,14 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! GitHub App manifest flow: build the manifest JSON, construct the manifest
-//! POST URL, and exchange the temporary code GitHub returned for the new
-//! App's credentials. See:
-//! https://docs.github.com/en/apps/sharing-github-apps/registering-a-github-app-from-a-manifest
-
 use serde::{Deserialize, Serialize};
 
-/// Credentials returned by GitHub after a successful manifest exchange.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ManifestResult {
     pub id: i64,
@@ -25,13 +19,8 @@ pub struct ManifestResult {
 
 use serde_json::{Value, json};
 
-/// Default GitHub App name used in the manifest. The operator can edit the
-/// name on the GitHub-side review screen before confirming.
 pub const APP_NAME: &str = "Gradient CI";
 
-/// Builds the manifest JSON payload that gets POSTed to GitHub at
-/// `https://{host}/settings/apps/new`. `serve_url` is the externally
-/// reachable Gradient URL; trailing slashes are stripped.
 pub fn build_manifest(serve_url: &str) -> Value {
     let base = serve_url.trim_end_matches('/');
     json!({
@@ -42,11 +31,8 @@ pub fn build_manifest(serve_url: &str) -> Value {
             "active": true,
         },
         "redirect_url": format!("{base}/api/v1/admin/github-app/callback"),
-        // No `setup_url`: GitHub uses it as the post-install redirect target,
-        // and pointing it at our manifest-creation page (`/admin/github-app`)
-        // sent the operator straight back into the "Create on GitHub" UI as
-        // soon as they tried to install the App on a repository. Omitting it
-        // keeps the user on GitHub's own post-install confirmation page.
+        // `setup_url` is omitted on purpose. GitHub is using it as the post-install redirect.
+        // Pointing it at `/admin/github-app` sent the operator back into the "Create on GitHub" UI.
         "setup_on_update": false,
         "public": false,
         "default_permissions": {
@@ -68,14 +54,10 @@ pub fn build_manifest(serve_url: &str) -> Value {
     })
 }
 
-/// URL the browser POSTs the manifest form to. Same path on github.com and
-/// any GitHub Enterprise host.
 pub fn manifest_post_url(host: &str, state: &str) -> String {
     format!("https://{host}/settings/apps/new?state={state}")
 }
 
-/// API base URL for the manifest-conversion endpoint. github.com uses the
-/// `api.github.com` subdomain; Enterprise hosts use `/api/v3` on the host.
 pub fn api_base_url(host: &str) -> String {
     if host == "github.com" {
         "https://api.github.com".to_string()
@@ -87,11 +69,6 @@ pub fn api_base_url(host: &str) -> String {
 use anyhow::{Context, Result, bail};
 use tracing::debug;
 
-/// Exchanges the temporary code GitHub returned for the new App's credentials.
-///
-/// `host` is the GitHub host (`github.com` for github.com, `ghe.example.com`
-/// for an Enterprise instance); the API base URL is derived via
-/// [`api_base_url`].
 pub async fn exchange_code(
     client: &reqwest::Client,
     host: &str,
@@ -101,8 +78,6 @@ pub async fn exchange_code(
     exchange_code_with_base(client, &base, code).await
 }
 
-/// Lower-level exchange entry point that accepts an explicit API base URL.
-/// Used by tests against `wiremock`.
 pub async fn exchange_code_with_base(
     client: &reqwest::Client,
     api_base_url: &str,

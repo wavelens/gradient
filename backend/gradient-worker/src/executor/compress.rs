@@ -4,10 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! The one push every job kind ends in: the outputs it produced, and only those,
-//! hashed, compressed and uploaded. Nothing below an output is looked at; the gate
-//! that dispatched the job made its build closure complete in our cache first, and a
-//! substitute's runtime references are for the server to request.
+//! Every job kind is ending in this push of only its own outputs.
+//! Nothing below an output is looked at.
+//! The gate that dispatched the job made its build closure complete in our cache first.
+//! The server is requesting a substitute's runtime references itself.
 
 use std::collections::HashMap;
 
@@ -111,9 +111,8 @@ mod tests {
         }
     }
 
-    /// Stand in for the dispatch loop. It routes the upload handshake AND the
-    /// `CacheStatus` a query waits on: [`push_outputs`] asks the cache first,
-    /// and a pump that drops that answer leaves the query to time out.
+    /// The pump must route the `CacheStatus` answer as well as the upload handshake.
+    /// [`push_outputs`] is asking the cache first and is timing out without that answer.
     fn pump(
         mut reader: ProtoReader,
         cache_waiters: CacheWaiters,
@@ -155,8 +154,6 @@ mod tests {
         )
     }
 
-    /// A job is only complete once every upload was acknowledged: upload_all
-    /// must still be pending while one commit is outstanding.
     #[tokio::test]
     async fn the_uploads_settle_before_upload_all_returns() {
         const PATHS: usize = 3;
@@ -238,9 +235,6 @@ mod tests {
         pump.abort();
     }
 
-    /// The push is the outputs handed to it and nothing else: one is already in
-    /// the cache and is skipped, the other is a raw NAR and is compressed here;
-    /// no closure is walked and no third path is ever named to the server.
     #[tokio::test]
     async fn push_outputs_pushes_exactly_what_it_is_given() {
         const JOB: &str = "job-push-outputs";
@@ -352,10 +346,6 @@ mod tests {
 
     #[test]
     fn check_abort_returns_err_after_signal() {
-        // Regression: prior to this fix `execute_build_job` ignored the
-        // abort watch entirely. With it wired in, `compress_and_push_paths`
-        // must surface the abort as an `Err` so the surrounding job
-        // resolves to `JobFailed` instead of `JobCompleted`.
         let (tx, rx) = watch::channel(false);
         tx.send(true).unwrap();
         let err = check_abort(&rx).unwrap_err();

@@ -4,8 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Build status transitions, output recording, and job completion/failure.
-
 use std::sync::Arc;
 
 use anyhow::Result;
@@ -39,9 +37,9 @@ impl Scheduler {
             })
             .await
         {
-            // Backstop for the dispatch/abort race: a shared build dispatched by an
-            // in-flight pass just before its evaluation was aborted reports
-            // started here, so tell the worker to stop rather than build on.
+            // This is the backstop for the dispatch/abort race. A shared build dispatched just
+            // before its evaluation was aborted can still report started here. The worker is told
+            // to stop instead of building on.
             Ok(report) if report.already_aborted => {
                 let job_id = crate::jobs::build_job_key(derivation_build);
                 self.abort_job(worker_id, job_id, "evaluation aborted".to_owned())
@@ -88,8 +86,6 @@ impl Scheduler {
             .map(|_| ())
     }
 
-    // ── Job completion ────────────────────────────────────────────────────────
-
     pub async fn handle_job_completed(&self, worker_id: &str, job_id: &str) -> Result<()> {
         let worker = worker_id.to_owned();
         let released = self
@@ -115,9 +111,9 @@ impl Scheduler {
     pub(crate) async fn settle_completed(&self, job: PendingJob, worker_idle: bool) -> Result<()> {
         match job {
             PendingJob::Eval(j) => {
-                // Split mode: a fetch-only job just archived the source. Enqueue
-                // the cached eval follow-up under the same `eval:{id}` key, which
-                // the Release above freed, instead of finalizing.
+                // A fetch-only job in split mode just archived the source. The cached eval
+                // follow-up is enqueued under the same `eval:{id}` key that the release above
+                // freed.
                 if crate::jobs::is_fetch_only(&j.job) {
                     let store_path = EEvaluation::find_by_id(j.evaluation_id)
                         .one(&self.state.worker_db)
@@ -152,9 +148,6 @@ impl Scheduler {
                     };
                 }
 
-                // The stream is done, so every endpoint derivation now has a
-                // row: the graph writer settles the still-pending dependency edges and
-                // repairs the closure before the eval moves to Building.
                 let r = self
                     .state
                     .graph
@@ -249,8 +242,6 @@ impl Scheduler {
                     })
                     .await
                     .map(|_| ());
-                // A corrupt-eval-cache heal re-queues the eval; kick dispatch so
-                // it repeats promptly instead of waiting for the next tick.
                 self.kick_assigner();
                 r
             }

@@ -4,10 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Integration tests for `gradient_ci::actions`.
-//!
-//! Async assertions use sync `#[test]` + `tokio::runtime::Builder::block_on`.
-
 use gradient_ci::actions::{GIT_HOST_STATUS_EVENTS, git_host_status_payload, matches_event};
 use gradient_types::{ActionType, MTaskAction, TaskActionId, TaskId, UserId};
 use serde_json::json;
@@ -50,10 +46,8 @@ fn matches_event_send_web_request_filters_by_events() {
 
 #[test]
 fn matches_event_git_host_status_report_ignores_stored_events() {
-    // Seed the stored events with something that is NOT in
-    // GIT_HOST_STATUS_EVENTS so we can verify the action still matches every
-    // Git-host-status event (proving the stored list is disregarded) and does
-    // NOT match the unrelated event it was seeded with.
+    // The stored events are seeded with a non-Git-host-status event. The action must still match
+    // every Git-host-status event and must not match the seeded one.
     let action = action_with(
         ActionType::GitHostStatusReport,
         json!(["evaluation.waiting"]),

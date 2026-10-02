@@ -4,13 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Integration tests for `GET /api/v1/admin/state`.
-//!
-//! The export handler is superuser-gated and supports two output formats. These
-//! tests cover the auth gate, format validation, and the empty-database render
-//! for both formats. A full round-trip against real data lives in the nix api
-//! integration test (`nix/tests/gradient/api`).
-
 #![expect(
     clippy::unwrap_used,
     reason = "test scaffolding: a fixture helper that cannot build its value should fail the test loudly"
@@ -37,8 +30,6 @@ fn superuser() -> gradient_entity::user::Model {
     }
 }
 
-/// Append the two session lookups plus the caller's user row consumed by the
-/// auth middleware.
 fn with_user(
     db: MockDatabase,
     session_id: SessionId,
@@ -50,7 +41,6 @@ fn with_user(
         .append_query_results([vec![caller]])
 }
 
-/// Append the nineteen (all-empty) table reads `export_state` issues, in order.
 fn with_empty_export(db: MockDatabase) -> MockDatabase {
     db.append_query_results([Vec::<gradient_entity::user::Model>::new()])
         .append_query_results([Vec::<gradient_entity::project::Model>::new()])

@@ -4,9 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! The one place a cluster member's end is settled: the first report that
-//! decides a verdict resolves the attempt, reports racing it are disposed late.
-
 use anyhow::Result;
 use gradient_pool::session_port::SessionSignal;
 use gradient_types::ids::ClusterAttemptId;
@@ -53,8 +50,8 @@ impl Scheduler {
         }
     }
 
-    /// Settle a decided attempt. A failed database write leaves the verdict in
-    /// the book for the cluster-dispatch pass to retry.
+    /// A failed database write is leaving the verdict in the book. The cluster-dispatch pass is
+    /// retrying it.
     pub(crate) async fn resolve_attempt(
         &self,
         attempt: ClusterAttemptId,
@@ -102,8 +99,6 @@ impl Scheduler {
         Ok(())
     }
 
-    /// Stop every survivor and take its job; a survivor whose own report won the
-    /// release is settled by that report instead (`Recorded::Late`).
     async fn abort_survivors(
         &self,
         attempt: ClusterAttemptId,

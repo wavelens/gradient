@@ -9,12 +9,9 @@
     reason = "schema export builds its statement from a table name the test owns"
 )]
 
-//! Every export query, run against a real Postgres.
-//!
-//! The specs are hand-written SQL naming columns one by one, so nothing else in
-//! the suite can tell whether they still parse against the schema: a mock
-//! connection replays canned rows without ever asking Postgres. Opt in by
-//! pointing `GRADIENT_REPORT_TEST_DB` at a database the migrations have run on:
+//! A mock connection is replaying canned rows without asking Postgres. This test is checking the
+//! hand-written export SQL against a real schema. Point `GRADIENT_REPORT_TEST_DB` at a migrated
+//! database to opt in. The commands below are setting one up.
 //!
 //! ```text
 //! initdb -D "$PGDATA" -U postgres --auth=trust && pg_ctl -D "$PGDATA" start
@@ -29,8 +26,6 @@ use gradient_report::{eval_scope_tables, fetch_rows, instance_tables};
 use sea_orm::prelude::Uuid;
 use sea_orm::{ConnectionTrait, Database, DatabaseBackend, Statement};
 
-/// The two log queries live in `logs.rs` behind a `LogStorage`, which this test
-/// has no business standing up; the SQL is what needs the schema check.
 const LOG_SQL: [(&str, &str); 2] = [
     (
         "failed attempts",
@@ -58,8 +53,8 @@ fn every_export_query_runs_against_the_migrated_schema() {
         .expect("runtime")
         .block_on(async move {
             let db = Database::connect(url).await.expect("connect");
-            // An id that matches nothing still type-checks every predicate,
-            // which is the half that broke: `uuid = text` is not an operator.
+            // An id matching nothing is still type-checking every predicate. That half broke before
+            // because `uuid = text` is not an operator.
             let scope = Uuid::now_v7();
             let mut failures = Vec::new();
 

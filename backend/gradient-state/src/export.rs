@@ -4,16 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Reconstruct a [`StateConfiguration`] from the live database - the inverse of
-//! the provisioner in [`super::provisioning`]. Powers `GET /admin/state`, which
-//! lets operators read the current users / projects / tasks / caches / etc. back
-//! into a declarative `services.gradient.state` block.
-//!
-//! Secrets are never recoverable from the DB (passwords and worker tokens are
-//! hashed, signing keys and integration secrets are encrypted). Every `*_file`
-//! field is therefore redacted to `null` by [`redact`] before serialization, so
-//! the operator fills in the credential paths.
-
 use super::{
     StateApiKey, StateCache, StateCacheMemberEntry, StateCacheRoleEntry, StateConfiguration,
     StateFlakeInputOverride, StateIntegration, StateProject, StateProjectMemberEntry, StateRole,
@@ -30,8 +20,6 @@ use gradient_types::triggers::{TriggerConfig, TriggerType};
 use sea_orm::{ConnectionTrait, DbErr, EntityTrait};
 use std::collections::HashMap;
 
-/// JSON keys that name a credential file. Redacted to `null` everywhere they
-/// appear in the serialized state, regardless of nesting depth.
 const SECRET_KEYS: &[&str] = &[
     "password_file",
     "private_key_file",
@@ -42,14 +30,9 @@ const SECRET_KEYS: &[&str] = &[
     "access_token_file",
 ];
 
-/// Build the full declarative state from every relevant table.
-///
-/// This is a snapshot of the live system, not just state-managed rows: every
-/// user, project, task, cache, custom role, api key, worker and integration is
-/// included so the operator can codify the current system into nix. Rows the
-/// operator cannot hand-author are excluded - the auto-managed `build-request`
-/// task, the server-managed GitHub integration rows, and the built-in
-/// `Admin`/`Write`/`View` roles.
+/// The snapshot is covering the live system, not only state-managed rows. Rows an operator cannot
+/// hand-author are excluded. These are the `build-request` task, server-managed GitHub integration
+/// rows and the built-in `Admin`/`Write`/`View` roles.
 pub async fn export_state<C: ConnectionTrait>(db: &C) -> Result<StateConfiguration, DbErr> {
     let users = gradient_entity::user::Entity::find().all(db).await?;
     let projects = gradient_entity::project::Entity::find().all(db).await?;
@@ -290,8 +273,6 @@ pub async fn export_state<C: ConnectionTrait>(db: &C) -> Result<StateConfigurati
         );
     }
 
-    // One `worker_registration` row exists per (worker_id, project); fold them back
-    // into a single StateWorker carrying the list of projects.
     let mut worker_projects: HashMap<String, Vec<String>> = HashMap::new();
     for reg in &registrations {
         if let Some(project) = project_name.get(&reg.peer_id) {
@@ -326,8 +307,6 @@ pub async fn export_state<C: ConnectionTrait>(db: &C) -> Result<StateConfigurati
         );
     }
 
-    // Server-level base workers live in their own table; emit them with their
-    // pre-enabled projects so `base_worker = true` entries survive a state round-trip.
     for bw in &base_workers {
         config.workers.insert(
             bw.worker_id.clone(),
@@ -365,9 +344,6 @@ pub async fn export_state<C: ConnectionTrait>(db: &C) -> Result<StateConfigurati
     Ok(config)
 }
 
-/// Reconstruct a base-worker [`StateWorker`] from its row plus the per-project
-/// opt-ins. `token_file` is unrecoverable from the stored hash, so it is blank
-/// (redacted to `null`), same as the registered-worker export.
 fn export_base_worker(
     bw: &gradient_entity::base_worker::Model,
     project_links: &[gradient_entity::project_base_worker::Model],
@@ -460,7 +436,6 @@ fn export_trigger(
     })
 }
 
-/// Render a snake_case unit-variant enum to its serde string for the nix config.
 fn enum_str<T: serde::Serialize>(value: &T) -> String {
     serde_json::to_value(value)
         .ok()
@@ -475,8 +450,6 @@ fn export_action(
     let cfg: ActionConfig = serde_json::from_value(a.config.clone()).ok()?;
     let events: Vec<String> = serde_json::from_value(a.events.clone()).unwrap_or_default();
     let (action_type, config) = match cfg {
-        // The stored web-request token is encrypted and unrecoverable, so the
-        // `token_file` path is dropped - re-add it in nix if the hook needs auth.
         ActionConfig::SendMail {
             recipients,
             subject_template,
@@ -583,15 +556,10 @@ fn name_or_blank<K: Eq + std::hash::Hash>(map: &HashMap<K, String>, id: K) -> St
     map.get(&id).cloned().unwrap_or_default()
 }
 
-/// `""` (the DB's not-null default for optional text columns) maps back to a
-/// `null` description in the declarative shape.
 fn opt(s: &str) -> Option<String> {
     (!s.is_empty()).then(|| s.to_string())
 }
 
-/// Serialize the config and null out every credential-file field so secrets
-/// never leak. The resulting [`serde_json::Value`] drives both the JSON and the
-/// Nix response.
 pub fn redact(config: &StateConfiguration) -> serde_json::Value {
     let mut value = serde_json::to_value(config).unwrap_or(serde_json::Value::Null);
     redact_value(&mut value);
@@ -614,8 +582,6 @@ fn redact_value(value: &mut serde_json::Value) {
     }
 }
 
-/// Render a redacted state [`serde_json::Value`] as a Nix expression assignable
-/// to `services.gradient.state`. A header comment flags the redacted secrets.
 pub fn to_nix(value: &serde_json::Value) -> String {
     let mut out = String::from(
         "# Generated by `GET /admin/state`. Secret `*_file` fields are null and\n\
@@ -667,8 +633,6 @@ fn render_nix(value: &serde_json::Value, indent: usize, out: &mut String) {
     }
 }
 
-/// Bare identifier when the key is a simple nix name, quoted otherwise (e.g.
-/// worker_id UUIDs, which start with a digit).
 fn nix_key(key: &str) -> String {
     let simple = !key.is_empty()
         && key.starts_with(|c: char| c.is_ascii_alphabetic() || c == '_')

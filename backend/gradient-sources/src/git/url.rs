@@ -6,8 +6,6 @@
 
 use crate::SourceError;
 
-/// Parses a `git://[host[:port]]/repo/path` URL into its host, port, and repo
-/// path components. Defaults port to 9418 (git-daemon).
 pub(super) fn parse_git_protocol_url(url: &str) -> Result<(&str, u16, &str), SourceError> {
     let rest = url.strip_prefix("git://").ok_or(SourceError::InvalidUrl)?;
     let (host_port, repo_path) = rest.split_once('/').ok_or(SourceError::InvalidUrl)?;
@@ -19,11 +17,8 @@ pub(super) fn parse_git_protocol_url(url: &str) -> Result<(&str, u16, &str), Sou
     Ok((host, port, repo_path))
 }
 
-/// Translates a nix flake URL into a transport URL libgit2 understands by
-/// stripping the `git+` scheme prefix (`git+https://h/r` -> `https://h/r`).
-/// libgit2 registers no `git+https`/`git+http` transport: it misroutes such a
-/// URL to SSH, whose scheme has no default port, and the connect then fails with
-/// "invalid argument port". Bare schemes and SCP-style remotes pass through.
+/// libgit2 has no `git+https` or `git+http` transport. It is misrouting such a URL to SSH, and the
+/// connect is failing with "invalid argument port".
 pub(super) fn git_transport_url(url: &str) -> &str {
     url.strip_prefix("git+").unwrap_or(url)
 }

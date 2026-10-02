@@ -4,11 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! `POST /build-requests/source` - accepts a pre-packed source NAR (multipart
-//! fields `nar`, `target`, `system`), computes the `/nix/store/<hash>-source`
-//! path server-side, and finalises a build-request evaluation. The `nix`-feature
-//! CLI uses this to skip the per-file blob manifest.
-
 use super::dispatch::{DispatchResponse, InputOverrideBody, finalize_build_request};
 use crate::access::{Caller, ProjectAccess, load_project};
 use crate::authorization::MaybeApiKey;
@@ -104,16 +99,13 @@ pub struct SourceFinalize {
     pub input_overrides: Vec<InputOverrideBody>,
 }
 
-/// Disk-staging store for chunked source uploads. Its own root keeps the
-/// per-user upload keys away from the cache NAR partials.
+/// A separate root is keeping per-user upload keys away from the cache NAR partials.
 fn source_partial_store(state: &ServerState) -> WebResult<PartialStore> {
     Ok(PartialStore::new(
         state.config.server.source_upload_partial_dir(),
     )?)
 }
 
-/// Client-chosen upload id used as the staging key; rejected when it could
-/// escape the staging root.
 fn require_safe_upload_id(upload: &str) -> WebResult<()> {
     if upload.is_empty() || upload.contains('/') || upload.contains("..") {
         return Err(WebError::bad_request("invalid upload id"));
@@ -121,11 +113,6 @@ fn require_safe_upload_id(upload: &str) -> WebResult<()> {
     Ok(())
 }
 
-/// `PUT /build-requests/source/{upload}/chunk?offset=N` - append one slice of the
-/// source NAR to the caller's staged `.partial`. `offset` must equal the bytes
-/// already received (`0` starts fresh); a mismatch appends nothing and returns
-/// the authoritative `received` so the client resumes. Keeps each request small
-/// enough to clear the reverse proxy's body limit regardless of source size.
 pub async fn source_chunk(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
@@ -155,9 +142,6 @@ pub async fn source_chunk(
     Ok(ok_json(json!({ "received": received })))
 }
 
-/// `POST /build-requests/source/{upload}/finalize?project=X` - reassemble the
-/// staged NAR, compute its `/nix/store/<hash>-source` path, and finalise the
-/// build-request evaluation, then drop the partial.
 pub async fn source_finalize(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,

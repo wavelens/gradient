@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Open cluster attempts on this instance. `take` is the only way out, so the
-//! first of a timeout, a reject or a member's end owns the attempt's close.
+//! `take` is the only way out of this map. The first of a timeout, a reject or a member's end is
+//! owning the attempt's close.
 
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
@@ -50,7 +50,6 @@ pub struct AttemptState {
     pub roster: Vec<ClusterPeer>,
     pub deadline: Instant,
     pub started: bool,
-    /// Every member accepted: the deadline no longer applies while the start commits.
     pub all_accepted: bool,
     pub verdict: Option<Fate>,
     pub resolving: bool,
@@ -121,8 +120,6 @@ impl AttemptBook {
         }
     }
 
-    /// The start committed. `None` when the attempt failed meanwhile; otherwise
-    /// the verdict that reports held back during the start now decide, if any.
     pub fn mark_started(&mut self, attempt: ClusterAttemptId) -> Option<Option<Fate>> {
         let state = self.attempts.get_mut(&attempt)?;
         state.started = true;
@@ -134,7 +131,6 @@ impl AttemptBook {
         Some(state.verdict)
     }
 
-    /// The attempt `job_id` is a member of, while it has not started yet.
     pub fn preparing(&self, job_id: &str) -> Option<ClusterAttemptId> {
         let attempt = self.attempt_of(job_id)?;
         self.attempts
@@ -269,8 +265,6 @@ impl AttemptBook {
         }
     }
 
-    /// Decided attempts whose resolution is neither done nor underway: a failed
-    /// resolution is retried from here.
     pub fn pending_verdicts(&self) -> Vec<(ClusterAttemptId, Fate)> {
         self.attempts
             .iter()
@@ -295,8 +289,7 @@ impl AttemptBook {
         }
     }
 
-    /// Drop resolved attempts a survivor never reported back to after `max_age`;
-    /// the entry would otherwise hide its members from every dispatch pass.
+    /// An entry kept past `max_age` would hide its members from every dispatch pass.
     pub fn expire_resolved(&mut self, now: Instant, max_age: Duration) {
         let stale: Vec<ClusterAttemptId> = self
             .attempts

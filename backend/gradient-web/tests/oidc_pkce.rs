@@ -10,10 +10,6 @@
 )]
 #![allow(clippy::disallowed_methods, reason = "test harness server")]
 
-//! PKCE regression tests (issue #318): the authorization redirect must carry
-//! `code_challenge` + `code_challenge_method=S256`, and the verifier stored in
-//! the signed `oidc_csrf` cookie must hash to that challenge.
-
 use axum::extract::State;
 use axum::routing::get;
 use axum::{Json, Router};

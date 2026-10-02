@@ -18,13 +18,14 @@ pub struct NarArgs {
     )]
     pub max_upload_size: usize,
 
-    /// A NAR at or under this many bytes is served through the server on download
-    /// instead of a presigned S3 URL and kept in the hot cache. Defaults to 1 MiB.
+    /// Size in bytes up to which the server is serving a NAR download itself instead of a presigned
+    /// S3 URL. NARs up to this size also stay in the in-memory cache. Uploads do not depend on this
+    /// value.
     #[arg(long = "nar-small-bytes", env = "GRADIENT_NAR_SMALL_BYTES", default_value_t = 1024 * 1024)]
     pub small_bytes: u64,
 
-    /// Weighted capacity of the in-memory NAR cache in bytes; 0 disables it.
-    /// Defaults to 512 MiB.
+    /// Weighted capacity of the in-memory NAR cache in bytes. `0` is disabling it. The default is
+    /// 512 MiB.
     #[arg(
         long = "nar-hot-cache-bytes",
         env = "GRADIENT_NAR_HOT_CACHE_BYTES",
@@ -32,11 +33,11 @@ pub struct NarArgs {
     )]
     pub hot_cache_bytes: u64,
 
-    /// When set, the S3 presigned NAR commit path GETs the uploaded object and
-    /// hashes it again before marking it cached, catching same-length
-    /// corruption at the cost of a full object read. Off by default: the presigned
-    /// path still HEAD-checks size, and granted worker and REST uploads always
-    /// content-verify since they already hold the bytes in memory.
+    /// This flag is making the S3 presigned NAR commit path fetch the uploaded object and hash it
+    /// again before marking it cached. It is catching same-length corruption at the cost of a full
+    /// object read. It is off by default because the presigned path is still checking the size with
+    /// HEAD. Granted worker and REST uploads are always verifying content because they already hold
+    /// the bytes in memory.
     #[arg(
         long = "nar-verify-digest",
         env = "GRADIENT_NAR_VERIFY_DIGEST",
@@ -44,10 +45,8 @@ pub struct NarArgs {
     )]
     pub verify_digest: bool,
 
-    /// Maximum time the server will wait to open a NAR object stream
-    /// (e.g. S3 GET) before giving up and emitting `NarUnavailable`. A stalled
-    /// backend used to silently block the dispatch loop until the worker's
-    /// 600 s receive-timeout fired; this caps it.
+    /// Seconds to wait for a NAR object stream from storage (for example an S3 GET) before
+    /// answering the worker with `NarAbort`. The worker is retrying after a `NarAbort`.
     #[arg(
         long = "nar-storage-open-timeout-secs",
         env = "GRADIENT_NAR_STORAGE_OPEN_TIMEOUT_SECS",
@@ -55,10 +54,9 @@ pub struct NarArgs {
     )]
     pub storage_open_timeout_secs: u64,
 
-    /// Maximum time a single outbound `NarPush` chunk may sit in the writer
-    /// queue waiting for the WebSocket sink to make progress. Hitting this
-    /// timeout indicates a stalled peer / TCP back-pressure and aborts the
-    /// transfer with `NarAbort`.
+    /// Maximum time a single outbound `NarPush` chunk may sit in the writer queue waiting for the
+    /// WebSocket sink to make progress. Hitting this timeout is indicating a stalled peer or TCP
+    /// back-pressure. The transfer is then aborted with `NarAbort`.
     #[arg(
         long = "nar-send-chunk-timeout-secs",
         env = "GRADIENT_NAR_SEND_CHUNK_TIMEOUT_SECS",
@@ -66,9 +64,9 @@ pub struct NarArgs {
     )]
     pub send_chunk_timeout_secs: u64,
 
-    /// Maximum number of NAR-serving tasks that may run concurrently per
-    /// worker connection. Bounds memory and storage-backend fan-out when a
-    /// worker requests many paths in a single batch.
+    /// Maximum number of NAR-serving tasks that may run concurrently per worker connection. The
+    /// limit is bounding memory and storage-backend fan-out for a worker requesting many paths in a
+    /// single batch.
     #[arg(
         long = "nar-max-concurrent-serves",
         env = "GRADIENT_NAR_MAX_CONCURRENT_SERVES",
@@ -76,9 +74,8 @@ pub struct NarArgs {
     )]
     pub max_concurrent_serves: usize,
 
-    /// TTL in seconds for unfinished uploads (`*.partial`) staged under
-    /// `<base_dir>`. The deep GC deletes partials whose last write is older
-    /// than this. Default 86400 (24 h). Set to 0 to keep every partial.
+    /// Seconds since the last write of an unfinished upload staged under `<base_dir>`, after which
+    /// the next deep GC is removing the upload. `0` is keeping every unfinished upload.
     #[arg(
         long = "nar-partial-ttl-secs",
         env = "GRADIENT_NAR_PARTIAL_TTL_SECS",

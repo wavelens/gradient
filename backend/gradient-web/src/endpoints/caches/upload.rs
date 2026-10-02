@@ -216,18 +216,12 @@ pub struct ChunkQuery {
     offset: u64,
 }
 
-/// Disk-staging store for chunked uploads. Reuses the `#225` `PartialStore` but
-/// under a dedicated root so per-NAR keys never collide with the proto path's
-/// per-session budget accounting.
 fn upload_partial_store(state: &ServerState) -> WebResult<PartialStore> {
     Ok(PartialStore::new(
         state.config.server.nar_upload_partial_dir(),
     )?)
 }
 
-/// Stream one multipart `nar` field to a staged `.partial` so a single-shot
-/// upload never buffers the whole NAR in memory. Returns the staged byte count;
-/// discards the partial and errors if it would exceed `max`.
 async fn stage_nar_field(
     store: &PartialStore,
     key: &str,
@@ -257,8 +251,6 @@ async fn stage_nar_field(
     Ok(offset)
 }
 
-/// A store path's base name (`<hash>-<name>`) used as the staging key. Rejected
-/// when it could escape the staging root.
 fn require_safe_hash(store_hash: &str) -> WebResult<()> {
     if store_hash.is_empty() || store_hash.contains('/') || store_hash.contains("..") {
         return Err(WebError::BadRequest(
@@ -270,11 +262,6 @@ fn require_safe_hash(store_hash: &str) -> WebResult<()> {
     Ok(())
 }
 
-/// `PUT /caches/{cache}/nars/{store_hash}/chunk?offset=N` - append one NAR slice
-/// to the staged `.partial`. `offset` must equal the bytes already received
-/// (`0` starts fresh); a mismatch returns `409` with the authoritative
-/// `received` so the client can resume. Keeps each request small enough to clear
-/// the reverse proxy's body limit no matter how large the NAR is.
 pub async fn nar_chunk(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
@@ -306,12 +293,11 @@ pub async fn nar_chunk(
 
     let store = upload_partial_store(&state)?;
     let key = format!("{}/{store_hash}", cache.id);
-    // An `offset == 0` append truncates any stale prefix so a re-run restarts
-    // cleanly; abandoned partials are left to the deep GC.
+    // An `offset == 0` append is truncating any stale prefix. Abandoned partials are left to the
+    // deep GC.
 
-    // `received` is authoritative: when the caller's `offset` is contiguous we
-    // append and advance it; otherwise we append nothing and report the current
-    // length so the caller resyncs and resends from there.
+    // `received` is authoritative. A non-contiguous `offset` is appending nothing, and the current
+    // length is reported for the caller to resync.
     let staged = store.received_len(&key, &store_hash).await?;
     let received = if offset == 0 || offset == staged {
         let permit = admit(&state, body.len() as u64).await?;
@@ -325,8 +311,6 @@ pub async fn nar_chunk(
     Ok((StatusCode::OK, ok_json(json!({ "received": received }))))
 }
 
-/// `POST /caches/{cache}/nars/{store_hash}/finalize` - validate the fully staged
-/// NAR against its narinfo and import it, then drop the partial.
 pub async fn nar_finalize(
     state: State<Arc<ServerState>>,
     info: RequestInfo,

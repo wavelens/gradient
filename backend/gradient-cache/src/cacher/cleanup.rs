@@ -18,8 +18,6 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use tracing::{debug, error, info, warn};
 
-/// Per-shard counters returned by `repair_nar_shard`, which the deep GC
-/// threads into its progress report.
 #[derive(Debug, Default, Clone, Copy, Serialize)]
 pub struct CleanupReport {
     pub orphan_nars_scanned: u64,
@@ -27,9 +25,6 @@ pub struct CleanupReport {
     pub zombie_cached_paths_purged: u64,
 }
 
-/// Build-request blob TTL pass: drops `build_request_blob` rows whose
-/// `last_used_at` is older than `nar_ttl_hours` and removes the underlying
-/// payload from `nar_storage`. Disabled when `nar_ttl_hours = 0`.
 pub async fn cleanup_stale_build_request_blobs(state: Arc<ServerState>) -> Result<()> {
     let ttl_hours = state.config.gc.nar_ttl_hours;
     if ttl_hours == 0 {
@@ -79,10 +74,6 @@ pub async fn cleanup_stale_build_request_blobs(state: Arc<ServerState>) -> Resul
     Ok(())
 }
 
-/// Upload-session GC pass: drops `upload_session` rows whose `expires_at` has
-/// passed and that were never dispatched. Dispatched sessions are kept for
-/// audit history (the dispatch endpoint already nulls their `missing` set, so
-/// they are harmless dead-weight rather than blobs).
 pub async fn cleanup_expired_upload_sessions(state: Arc<ServerState>) -> Result<()> {
     let res = EUploadSession::delete_many()
         .filter(CUploadSession::ExpiresAt.lt(now()))
@@ -103,9 +94,6 @@ pub async fn cleanup_expired_upload_sessions(state: Arc<ServerState>) -> Result<
     Ok(())
 }
 
-/// Per-task evaluation retention: the plan is read on the pool, the rows are
-/// deleted by the graph writer, and what the delete leaves outside the graph is
-/// reclaimed once the actor reports what went.
 pub async fn cleanup_old_evaluations(state: Arc<ServerState>) -> Result<()> {
     let tasks = ETask::find()
         .all(&state.worker_db)
@@ -168,11 +156,6 @@ pub async fn cleanup_old_evaluations(state: Arc<ServerState>) -> Result<()> {
 }
 
 gradient_db::sql! {
-    /// The candidates no row keeps, probed one index lookup per clause. Outputs stay
-    /// gated on build status - they are rebuildable and evicted by
-    /// `evict_stale_cached_paths`. The `.drv` and input sources are producerless and
-    /// kept for any shared build regardless of status; only the orphan-derivation pass
-    /// (`run_derivation_gc`) reclaims them.
     UNREFERENCED_HASHES = r#"
     SELECT h.hash AS hash
     FROM unnest($1::text[]) AS h(hash)
@@ -196,22 +179,10 @@ gradient_db::sql! {
         tier = Sweep;
 }
 
-/// The bound the eviction measures against: the fetch TTL, never below the
-/// upload grace, so a closure member is never reclaimed between its own commit
-/// and its parent's.
 fn keep_hours(ttl_hours: u64, grace_hours: i64) -> i64 {
     (ttl_hours as i64).max(grace_hours)
 }
 
-/// Evict every cached path outside the live closure that nobody fetched within
-/// `nar_ttl_hours`. The live set is `gradient_db::graph::walks::live_cached_paths_cte`,
-/// so what goes here is what no retained evaluation can reach and what no client
-/// has asked for since the bound.
-///
-/// The retire moves the shared-build side with the rows it drops, and a terminal-success
-/// producer left with nothing to serve resets to `Created`. Such a producer is
-/// outside the reachable set and has no `build_job`, so nothing promotes it into
-/// a rebuild of what this pass just evicted.
 pub async fn evict_stale_cached_paths(state: Arc<ServerState>) -> Result<u64> {
     let keep = keep_hours(
         state.config.gc.nar_ttl_hours,
@@ -227,9 +198,6 @@ pub async fn evict_stale_cached_paths(state: Arc<ServerState>) -> Result<u64> {
 
     let mut evicted = 0u64;
     for chunk in stale.chunks(gradient_db::IN_CHUNK_SIZE) {
-        // The rows go first and the objects follow what the actor actually
-        // retired: deleting an object for a hash the re-check kept live would
-        // leave a zombie row the next pass has to find and purge.
         let report = state
             .graph
             .gc(GcRequest::Paths {
@@ -261,8 +229,6 @@ pub async fn evict_stale_cached_paths(state: Arc<ServerState>) -> Result<u64> {
     Ok(evicted)
 }
 
-/// Repair one NAR key shard with the database in both directions: objects
-/// no row keeps are deleted, confirmed rows whose object is gone are retired.
 pub async fn repair_nar_shard(state: Arc<ServerState>, shard: &str) -> Result<CleanupReport> {
     let on_disk = state
         .nar_storage
@@ -302,10 +268,6 @@ pub async fn repair_nar_shard(state: Arc<ServerState>, shard: &str) -> Result<Cl
     Ok(report)
 }
 
-/// Rows of `shard` whose object should be in storage: an unconfirmed row's
-/// object is legitimately absent while the uploader owes it. The range keeps the
-/// unique `hash` index usable, which a `LIKE` prefix would not under a non-C
-/// collation; `z` is the last Nix base32 character.
 fn zombie_candidates(shard: &str) -> sea_orm::Select<ECachedPath> {
     let last = format!("{shard}{}", "z".repeat(32usize.saturating_sub(shard.len())));
     ECachedPath::find()
@@ -314,14 +276,9 @@ fn zombie_candidates(shard: &str) -> sea_orm::Select<ECachedPath> {
         .filter(CCachedPath::Confirmed.eq(true))
 }
 
-/// The rows whose object storage says is really gone.
-///
-/// The listing was taken before these rows were read, so a NAR committed in
-/// between is absent from it and present in storage. Dropping such a row leaves
-/// its producer `Completed` with an output nothing backs, which is fetchable for
-/// nobody: one pass did that to two shared builds and wedged 550 builds wanting them
-/// for the rest of the run. The listing is the prefilter; storage decides, and a
-/// probe that errors preserves.
+/// The listing was taken before these rows were read. A NAR committed in between is absent from the
+/// listing yet present in storage. Dropping its row would leave the producer `Completed` with no
+/// backing output. Storage is the judge, and a probe error is preserving the row.
 async fn zombie_hashes(
     state: &Arc<ServerState>,
     shard: &str,
@@ -352,11 +309,6 @@ async fn zombie_hashes(
     Ok(zombies)
 }
 
-/// Drop `cached_path` rows whose `file_hash IS NOT NULL` but whose NAR is no
-/// longer in `nar_storage`. External storage lifecycle policies (S3 expiration,
-/// manual cleanup) can leave the row and its `cached_path_signature` placeholders
-/// behind, which inflates the `total_packages` / `total_bytes` cache stats and the
-/// sign-sweep workload.
 async fn purge_zombie_cached_paths(
     state: &Arc<ServerState>,
     shard: &str,
@@ -367,14 +319,6 @@ async fn purge_zombie_cached_paths(
         return Ok(0);
     }
 
-    // Batch the retires: a full fleet eval leaves hundreds of thousands of
-    // `cached_path` rows, and per-row round-trips made the hourly pass never
-    // finish (and never log). `cached_path_signature` cascades from `cached_path`.
-    // Each batch deletes the rows AND moves the counters and gate flags they
-    // backed in one transaction, so nothing ever trusts a just-purged zombie.
-    //
-    // `scanned_at` is now: no re-check can make a missing object live again, and
-    // a row whose object landed after the probe was already skipped above.
     const ZOMBIE_DELETE_BATCH: usize = 8000;
     let scanned_at = now();
     let mut purged = 0u64;
@@ -406,11 +350,9 @@ async fn purge_zombie_cached_paths(
 
 const UNREFERENCED_PROBE_BATCH: usize = 5000;
 
-/// The listed NARs older than the upload grace. A freshly-uploaded NAR is on disk
-/// before the eval has committed its `derivation`/`cached_path` rows, so no row
-/// references it yet; reclaiming it strands a zombie `cached_path` that the
-/// dispatch gate trusts as the cached `.drv` and fails what wants them
-/// `InputsUnavailable`. `<= 0` disables the grace (tests only).
+/// A fresh NAR is on disk before the evaluation committed its `derivation` and `cached_path` rows.
+/// Reclaiming it would strand a zombie `cached_path` that the dispatch gate is trusting. A grace of
+/// `<= 0` is for tests only.
 fn past_upload_grace(state: &ServerState, on_disk: &[(String, i64)]) -> Vec<String> {
     let grace_secs = state.config.gc.nar_upload_grace_hours.max(0) * 3600;
     let cutoff = if grace_secs > 0 {
@@ -425,11 +367,6 @@ fn past_upload_grace(state: &ServerState, on_disk: &[(String, i64)]) -> Vec<Stri
         .collect()
 }
 
-/// The candidates no row keeps. A hash is kept by an output of a derivation whose
-/// shared build has not failed terminally, by a `cached_path` with `file_hash`, or as the
-/// `.drv` or input source of any derivation with a shared build regardless of status: those
-/// are producerless, so a requeued failed build must still find them. This pass
-/// is a safety net for stray files; `evict_stale_cached_paths` is the eviction.
 async fn unreferenced_hashes(state: &ServerState, candidates: &[String]) -> Result<Vec<String>> {
     let rows = state
         .worker_db
@@ -517,9 +454,6 @@ mod tests {
         assert_eq!(report.orphan_nars_removed, 1);
     }
 
-    /// Only the outputs clause may gate on build status. The `.drv` and
-    /// input-source clauses keep a derivation's build closure for ANY shared build, so a
-    /// requeued terminal-failed build can still fetch its `.drv`.
     #[test]
     fn keep_clauses_protect_drv_and_sources_for_any_shared_build() {
         let sql = UNREFERENCED_HASHES
@@ -544,8 +478,6 @@ mod tests {
         );
     }
 
-    /// The pass never materialises the keep-set: every clause is probed per
-    /// candidate the listing handed it.
     #[test]
     fn the_probe_is_driven_by_the_listed_candidates() {
         let sql = UNREFERENCED_HASHES.text();
@@ -566,8 +498,6 @@ mod tests {
         assert!(nar_file_exists(tmp.path(), drv));
     }
 
-    /// The bound the eviction passes is the larger of the TTL and the upload
-    /// grace, so `cacheTtlHours = 0` still keeps a fresh commit for the grace.
     #[test]
     fn eviction_bound_never_undercuts_the_upload_grace() {
         assert_eq!(keep_hours(0, 24), 24);
@@ -589,8 +519,6 @@ mod tests {
         assert!(!nar_file_exists(tmp.path(), h2));
     }
 
-    /// A NAR younger than the upload grace is never a candidate: it may be a
-    /// just-uploaded `.drv` whose rows have not committed yet.
     #[test]
     fn only_nars_past_the_upload_grace_are_candidates() {
         let tmp = tempfile::tempdir().unwrap();
@@ -630,10 +558,6 @@ mod tests {
         );
     }
 
-    /// The listing the purge compares against is older than the rows it reads, so
-    /// a NAR committed in between is missing from it and present in storage. The
-    /// row must survive: dropping it leaves its producer `Completed` against an
-    /// output nothing backs, and everything wanting it waits on it forever.
     #[tokio::test]
     async fn a_path_committed_after_the_listing_survives() {
         let tmp = tempfile::tempdir().unwrap();
@@ -660,17 +584,12 @@ mod tests {
         assert!(nar_file_exists(tmp.path(), fresh));
     }
 
-    /// `cached_path` rows whose NAR is gone from storage are zombies left behind
-    /// by the derivation GC, and inflate the per-cache stats query
-    /// (`COUNT(cached_path_signature.id)`) and the sign sweep until they go. The
-    /// pass names them; the retire that removes them is the graph writer's.
     #[tokio::test]
     async fn names_cached_paths_whose_nar_is_missing() {
         let tmp = tempfile::tempdir().unwrap();
         let live = "aaaa11111111111111111111111111aaaa";
         let zombie_hash = "bbbb22222222222222222222222222bbbb";
 
-        // Only the live NAR is on disk; the zombie cached_path's hash isn't.
         write_nar_file(tmp.path(), live);
 
         let nar_storage = NarStore::local(tmp.path().to_str().unwrap()).unwrap();
@@ -709,8 +628,6 @@ mod tests {
         })
     }
 
-    /// Stale `build_request_blob` rows (older than `nar_ttl_hours`) are
-    /// deleted and the underlying NAR-storage payload is removed.
     #[tokio::test]
     async fn build_request_blob_sweep_evicts_stale() {
         use gradient_entity::ids::{BuildRequestBlobId, ProjectId};
@@ -757,8 +674,6 @@ mod tests {
         );
     }
 
-    /// `nar_ttl_hours = 0` disables the sweep so the SELECT is never issued
-    /// (an empty mock DB would error otherwise).
     #[tokio::test]
     async fn build_request_blob_sweep_disabled_when_ttl_zero() {
         let tmp = tempfile::tempdir().unwrap();
@@ -771,8 +686,6 @@ mod tests {
         cleanup_stale_build_request_blobs(state).await.unwrap();
     }
 
-    /// Build-request blob rows with malformed hashes are skipped (logged)
-    /// rather than panicking on `copy_from_slice`.
     #[tokio::test]
     async fn build_request_blob_sweep_skips_malformed_hash() {
         use gradient_entity::ids::{BuildRequestBlobId, ProjectId};
@@ -794,8 +707,6 @@ mod tests {
         cleanup_stale_build_request_blobs(state).await.unwrap();
     }
 
-    /// Expired `upload_session` rows without a `dispatched_at` are deleted in
-    /// one shot via `delete_many`.
     #[tokio::test]
     async fn upload_session_sweep_deletes_expired_undispatched() {
         let tmp = tempfile::tempdir().unwrap();

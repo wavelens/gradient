@@ -4,13 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Renames every table, column, index, function, trigger and stored value that
-//! carried an abstract concept name (anchor, demanded, substitutable, readiness,
-//! forge, outbox) to its plain name. Function bodies do not follow a rename, so
-//! the counter and ripple functions are replaced; Postgres 17+ NOT NULL
-//! constraints are renamed by a final sweep over the affected tables. Stored
-//! values are rewritten first, touching only the rows that carry an old value,
-//! so the renames' ACCESS EXCLUSIVE locks are held only for the catalog work.
+//! Function bodies do not follow a rename. The counter and ripple functions are replaced instead.
+//! Stored values are rewritten first to keep the ACCESS EXCLUSIVE locks short.
 
 use sea_orm_migration::prelude::*;
 use sea_orm_migration::sea_orm::ConnectionTrait;
@@ -77,8 +72,6 @@ const UNNAMED_FN: &str = concat!(
      RETURN NULL; END $$"
 );
 
-/// `derivation.unwalked_inputs` over build edges, unchanged but for the name of
-/// the level's parents.
 pub const RIPPLE_UNWALKED_INPUTS_FN: &str = r#"
 CREATE OR REPLACE FUNCTION ripple_unwalked_inputs(frontier uuid[], down boolean)
 RETURNS SETOF uuid LANGUAGE plpgsql AS $$
@@ -108,8 +101,6 @@ BEGIN
 END $$;
 "#;
 
-/// `derivation_build.missing_runtime_deps` over runtime edges, unchanged but for
-/// the name of the level's parents.
 pub const RIPPLE_MISSING_RUNTIME_DEPS_FN: &str = r#"
 CREATE OR REPLACE FUNCTION ripple_missing_runtime_deps(frontier uuid[], down boolean)
 RETURNS SETOF uuid LANGUAGE plpgsql AS $$
@@ -258,8 +249,6 @@ ALTER TABLE pending_delivery RENAME CONSTRAINT pending_delivery_pkey TO outbox_p
 ALTER TABLE pending_delivery RENAME TO outbox;
 "#;
 
-/// Renames every NOT NULL constraint on the affected tables to the name Postgres
-/// would give it today, `<table>_<column>_not_null`.
 const NOT_NULL_SWEEP: &str = r#"
 DO $$
 DECLARE r record;

@@ -9,14 +9,8 @@ use gradient_types::triggers::TriggerType;
 use gradient_types::*;
 use sea_orm::{ConnectionTrait, EntityTrait};
 
-/// Same-commit deduplication. Returns `true` when the trigger should be skipped
-/// because the commit is already being (or was just) evaluated. Skips when:
-///   - an in-flight evaluation is already running on this commit
-///     (covers polling-while-build-is-running, even if `last_evaluation`
-///     is dangling or points elsewhere), OR
-///   - `last_evaluation`'s commit matches (covers terminal-then-poll-again).
-///
-/// Time triggers and manual fires bypass the check entirely (returns `false`).
+/// The in-flight check is catching a poll during a running build, even with a dangling
+/// `last_evaluation`. Time triggers and manual fires are bypassing the check.
 pub(super) async fn skip_for_same_commit<C: ConnectionTrait>(
     db: &C,
     task: &MTask,

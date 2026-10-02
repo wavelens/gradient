@@ -4,9 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! SCIM 2.0 (RFC 7643/7644) provisioning surface. Instance-level, bearer-token
-//! authenticated, mounted at `/scim/v2` only when SCIM is configured.
-
 pub mod discovery;
 mod dto;
 mod error;

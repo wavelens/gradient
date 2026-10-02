@@ -4,9 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! `prioritized` on `evaluation` and `derivation_build` (#530). The flag falls
-//! back to false in the database the moment its row fails for good or is aborted, so every
-//! status writer clears it without knowing it exists.
+//! The database is resetting the flag to false once its row is failed for good or aborted.
+//! Status writers can stay unaware of it.
 
 use sea_orm_migration::prelude::*;
 use sea_orm_migration::sea_orm::ConnectionTrait;

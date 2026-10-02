@@ -4,12 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Deleting a parent row checks its referencing rows through the FK, and without an
-//! index on the referencing column that is a sequential scan per deleted row: the
-//! stale-path eviction deleted 30,000 `cached_path` rows as 30,000 scans of
-//! `derivation_output`, held the graph actor for 14 minutes and never finished.
-//! Indexed here is every such key under a parent the GC deletes in bulk; the rest
-//! hang off rows an admin deletes one at a time.
+//! Deleting a parent without an index on the referencing column is a sequential scan per deleted
+//! row. Only keys under parents the GC is deleting in bulk are indexed here.
 
 use sea_orm_migration::prelude::*;
 use sea_orm_migration::sea_orm::ConnectionTrait;

@@ -4,13 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! In-memory registry of connected proto workers.
-//!
-//! Workers are stored as [`WorkerSlot`] values - either
-//! [`WorkerSlot::Active`] or [`WorkerSlot::Draining`].  Capacity checks are
-//! only ever performed on `Active` workers, so the compiler prevents the class
-//! of bug where a draining worker accidentally receives a new job assignment.
-
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, Ordering};
@@ -22,20 +15,12 @@ use crate::peer_auth::PeerAuth;
 use crate::session_port::{SessionPort, SessionSignal};
 use crate::worker_state::{Active, Draining, TypedWorker};
 
-// ── WorkerSlot ────────────────────────────────────────────────────────────────
-
-/// Lifecycle state of a connected worker as seen by the pool.
-///
-/// Only [`WorkerSlot::Active`] workers can receive new job offers.
 pub enum WorkerSlot {
-    /// Worker is active - eligible for new job assignments.
     Active(TypedWorker<Active>),
-    /// Worker is draining - finishes in-flight jobs but accepts no new ones.
     Draining(TypedWorker<Draining>),
 }
 
 impl WorkerSlot {
-    /// Read-only access to the shared worker data, regardless of state.
     fn shared(&self) -> &crate::worker_state::WorkerShared {
         match self {
             Self::Active(w) => w,
@@ -43,7 +28,6 @@ impl WorkerSlot {
         }
     }
 
-    /// Mutable access to the shared worker data, regardless of state.
     fn shared_mut(&mut self) -> &mut crate::worker_state::WorkerShared {
         match self {
             Self::Active(w) => w,
@@ -51,13 +35,11 @@ impl WorkerSlot {
         }
     }
 
-    /// Returns `true` when the worker is draining.
     pub fn is_draining(&self) -> bool {
         matches!(self, Self::Draining(_))
     }
 }
 
-// Manual Debug impl because TypedWorker<S> impls Debug
 impl std::fmt::Debug for WorkerSlot {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -67,9 +49,6 @@ impl std::fmt::Debug for WorkerSlot {
     }
 }
 
-// ── WorkerPool ────────────────────────────────────────────────────────────────
-
-/// In-memory registry of all currently connected workers.
 #[derive(Debug, Default)]
 pub struct WorkerPool {
     workers: HashMap<String, WorkerSlot>,
@@ -84,11 +63,9 @@ impl WorkerPool {
         self.workers.contains_key(id)
     }
 
-    /// Register a connection, carrying the prior connection's reported sizing
-    /// forward so a reconnect without a fresh `WorkerCapabilities` still builds,
-    /// and its `last_seen` Arc so a reader that kept the old handle still moves
-    /// the value this pool reads. Returns the handle the session stamps on every
-    /// inbound frame.
+    /// The prior connection's sizing is carried forward because a reconnect may arrive without
+    /// fresh `WorkerCapabilities`. The `last_seen` Arc is reused for readers still holding the old
+    /// handle.
     pub fn register(
         &mut self,
         id: String,
@@ -123,8 +100,6 @@ impl WorkerPool {
         }
     }
 
-    /// Push an abort to the worker's session; `false` when it is not connected.
-    /// Push `signal` to one worker's session; `false` when it is not connected.
     pub fn signal(&self, worker_id: &str, signal: SessionSignal) -> bool {
         match self.workers.get(worker_id) {
             Some(slot) => {
@@ -139,7 +114,6 @@ impl WorkerPool {
         self.signal(worker_id, SessionSignal::Abort { job_id, reason })
     }
 
-    /// Push `signal` to every active (not draining) worker's session.
     pub fn signal_active(&self, signal: SessionSignal) {
         for slot in self.workers.values() {
             if let WorkerSlot::Active(w) = slot {
@@ -154,21 +128,16 @@ impl WorkerPool {
         }
     }
 
-    /// Returns the peer-auth mode for a worker, or `None` if not connected.
     pub fn peer_auth_for(&self, id: &str) -> Option<&PeerAuth> {
         self.workers.get(id).map(|slot| &slot.shared().peer_auth)
     }
 
-    /// Returns the negotiated `GradientCapabilities` for a connected worker,
-    /// or `None` if the worker is not connected.
     pub fn gradient_caps_for(&self, id: &str) -> Option<GradientCapabilities> {
         self.workers
             .get(id)
             .map(|slot| slot.shared().capabilities.clone())
     }
 
-    /// One coherent [`WorkerCaps`] snapshot (capabilities, architectures,
-    /// features, live metrics) for a connected worker, or `None` if unknown.
     pub fn worker_caps(&self, id: &str) -> Option<crate::WorkerCaps> {
         self.workers.get(id).map(|slot| {
             let s = slot.shared();
@@ -190,7 +159,6 @@ impl WorkerPool {
         }
     }
 
-    /// Apply a live-metrics heartbeat to a connected worker. No-op if unknown.
     pub fn update_metrics(
         &mut self,
         id: &str,
@@ -208,8 +176,6 @@ impl WorkerPool {
         }
     }
 
-    /// Returns a scoring view of a connected worker's static caps and latest
-    /// live metrics, or `None` if the worker is not connected.
     pub fn metrics_for(&self, id: &str) -> Option<crate::score::WorkerMetricsView> {
         self.workers.get(id).map(|slot| {
             let s = slot.shared();
@@ -225,10 +191,8 @@ impl WorkerPool {
         })
     }
 
-    /// Remove a worker and close its session. Dropping the slot alone would
-    /// leave a live connection the pool no longer tracks: the worker would never
-    /// learn it was evicted, never reconnect, and the pool would stay empty
-    /// while the socket kept talking.
+    /// The session must be closed too. A dropped slot alone would leave an untracked live socket,
+    /// and the evicted worker would never reconnect.
     pub fn unregister(&mut self, id: &str) -> Vec<String> {
         self.workers
             .remove(id)
@@ -242,7 +206,6 @@ impl WorkerPool {
             .unwrap_or_default()
     }
 
-    /// Every active worker folded into the one worker the pool is upstream.
     pub fn aggregate(&self) -> crate::Aggregate {
         crate::aggregate(
             self.workers
@@ -252,11 +215,6 @@ impl WorkerPool {
         )
     }
 
-    /// Transition a worker to the draining state.
-    ///
-    /// Draining workers finish their in-flight jobs but are never offered new
-    /// ones - [`has_capacity`] returns `false` for draining workers at the type
-    /// level.
     pub fn mark_draining(&mut self, id: &str) {
         if let Some(slot) = self.workers.remove(id) {
             let new_slot = match slot {
@@ -267,35 +225,24 @@ impl WorkerPool {
         }
     }
 
-    /// Record the job IDs `worker_id` now holds as offered, replacing the old
-    /// set so jobs that left the pending set drop out of it.
     pub fn set_sent_candidates(&mut self, worker_id: &str, job_ids: HashSet<String>) {
         if let Some(slot) = self.workers.get_mut(worker_id) {
             slot.shared_mut().sent_candidates = job_ids;
         }
     }
 
-    /// Remove a single job ID from all workers' sent-candidate sets.
     pub fn remove_sent_candidate(&mut self, job_id: &str) {
         for slot in self.workers.values_mut() {
             slot.shared_mut().sent_candidates.remove(job_id);
         }
     }
 
-    /// Returns the set of job IDs already sent to `worker_id` as candidates.
     pub fn sent_candidates_for(&self, worker_id: &str) -> Option<&HashSet<String>> {
         self.workers
             .get(worker_id)
             .map(|slot| &slot.shared().sent_candidates)
     }
 
-    /// Returns `true` when the worker can accept a new job of the given kind.
-    ///
-    /// - **Draining workers always return `false`** - this is enforced at the
-    ///   type level by only calling `has_build_capacity` on `TypedWorker<Active>`.
-    /// - Eval jobs are always accepted by active workers (capacity is enforced
-    ///   worker-side).
-    /// - Build jobs are gated by `max_concurrent_builds`.
     pub fn has_capacity(&self, worker_id: &str, kind: &JobKind) -> bool {
         match self.workers.get(worker_id) {
             Some(WorkerSlot::Active(w)) => match kind {
@@ -322,10 +269,6 @@ impl WorkerPool {
         }
     }
 
-    /// Remove a finished job from the worker's in-flight set. Returns `true` if
-    /// the worker now has no assigned jobs (went idle) - the caller kicks the
-    /// dispatch loop only then, since feeding a still-busy worker can wait for
-    /// the next tick.
     pub fn release_job(&mut self, worker_id: &str, job_id: &str) -> bool {
         match self.workers.get_mut(worker_id) {
             Some(slot) => {
@@ -341,8 +284,6 @@ impl WorkerPool {
         self.workers.len()
     }
 
-    /// `(total_workers, idle_workers)` - connected workers and those with no
-    /// assigned jobs, fed into the windowed instance snapshot.
     pub fn worker_counts(&self) -> (u32, u32) {
         let total = self.workers.len() as u32;
         let idle = self
@@ -353,8 +294,6 @@ impl WorkerPool {
         (total, idle)
     }
 
-    /// Mean `cpu_core_score` of the connected workers that reported one: the
-    /// reference a worker's core speed is scored against.
     pub fn mean_cpu_core_score(&self) -> Option<f64> {
         let scores: Vec<f64> = self
             .workers
@@ -392,8 +331,6 @@ impl WorkerPool {
             .collect()
     }
 
-    /// Peers whose last inbound frame is older than `timeout_ms` relative to
-    /// `now_ms` - i.e. silent past the heartbeat deadline, so presumed dead.
     pub fn stale_worker_ids(&self, now_ms: i64, timeout_ms: i64) -> Vec<String> {
         self.workers
             .iter()
@@ -405,9 +342,6 @@ impl WorkerPool {
     }
 }
 
-// ── WorkerInfo ────────────────────────────────────────────────────────────────
-
-/// Serialisable snapshot of a connected worker for API responses.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct WorkerInfo {
     pub id: String,
@@ -417,13 +351,7 @@ pub struct WorkerInfo {
     pub max_concurrent_builds: u32,
     pub assigned_job_count: usize,
     pub draining: bool,
-    /// Peer (project) UUIDs the worker successfully authenticated for. `None`
-    /// means the worker is in open mode (no registrations) and is implicitly
-    /// authorized for all peers; this should not happen in normal operation
-    /// because workers must register with at least one project.
     pub authorized_peers: Option<HashSet<ProjectId>>,
-    /// Internal sampling fields (skipped in API output - surfaced via the
-    /// access-controlled Job Board APIs, not the existing workers endpoint).
     #[serde(skip)]
     pub cpu_usage_pct: Option<f32>,
     #[serde(skip)]
@@ -435,8 +363,6 @@ pub struct WorkerInfo {
     #[serde(skip)]
     pub network_speed_mbps: Option<f32>,
 }
-
-// ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
@@ -557,8 +483,6 @@ mod tests {
             },
         );
 
-        // A reconnect/re-auth re-registers without the worker re-sending caps;
-        // architectures, sizing and locality must survive so the worker stays matchable.
         pool.register("w1".into(), caps(), HashSet::new(), port().0);
 
         let workers = pool.all_workers();
@@ -624,7 +548,6 @@ mod tests {
             },
         );
 
-        // Before any heartbeat the dynamic fields are absent, not zero.
         let view = pool.metrics_for("w1").unwrap();
         assert_eq!(view.cpu_usage_pct, None);
         assert_eq!(view.ram_free_mb, None);
@@ -637,7 +560,6 @@ mod tests {
         assert_eq!(view.ram_free_mb, Some(3000));
         assert_eq!(view.disk_speed_mbps, Some(550.0));
         assert_eq!(view.network_speed_mbps, Some(120.0));
-        // Static caps survive a metrics update.
         assert_eq!(view.cpu_count, 4);
         assert_eq!(view.ram_total_mb, 8192);
 
@@ -693,11 +615,9 @@ mod tests {
             },
         );
 
-        // Active worker has capacity.
         assert!(pool.has_capacity("w1", &JobKind::Build));
         assert!(pool.has_capacity("w1", &JobKind::Flake));
 
-        // After draining, capacity is always false.
         pool.mark_draining("w1");
         assert!(!pool.has_capacity("w1", &JobKind::Build));
         assert!(!pool.has_capacity("w1", &JobKind::Flake));
@@ -752,8 +672,6 @@ mod tests {
 
     #[test]
     fn remove_sent_candidate_allows_reoffer() {
-        // A build re-queued after a failed/rejected dispatch must lose its
-        // sent flag so the next delta push re-offers it (workers re-score it).
         let mut pool = WorkerPool::new();
         pool.register("w1".into(), caps(), HashSet::new(), port().0);
         pool.set_sent_candidates("w1", HashSet::from(["build:a".into(), "build:b".into()]));
@@ -767,8 +685,6 @@ mod tests {
 
     #[test]
     fn build_capacity_strict_at_limit() {
-        // Worker at exactly max_concurrent_builds must reject new builds.
-        // Guards against `<` -> `<=` off-by-one in `has_build_capacity`.
         let mut pool = WorkerPool::new();
         pool.register("w1".into(), caps(), HashSet::new(), port().0);
         pool.update_capabilities(
@@ -803,11 +719,9 @@ mod tests {
         pool.assign_job("w1", "j2");
         assert_eq!(pool.all_workers()[0].assigned_job_count, 2);
 
-        // Releasing one of two jobs leaves the worker busy -> not idle.
         assert!(!pool.release_job("w1", "j1"));
         assert_eq!(pool.all_workers()[0].assigned_job_count, 1);
 
-        // Releasing the last job makes the worker idle -> dispatch may kick.
         assert!(pool.release_job("w1", "j2"));
         assert_eq!(pool.all_workers()[0].assigned_job_count, 0);
     }
@@ -846,9 +760,7 @@ mod tests {
         let project_a = ProjectId::now_v7();
         let project_b = ProjectId::now_v7();
 
-        // Restricted: worker authorized for project_a only.
         pool.register("w1".into(), caps(), HashSet::from([project_a]), port().0);
-        // Open: no registrations.
         pool.register("w2".into(), caps(), HashSet::new(), port().0);
 
         let mut workers = pool.all_workers();
@@ -926,23 +838,18 @@ mod tests {
         let now_ms = 1_000_000_000_000i64;
         let timeout_ms = 30_000i64;
 
-        // Just heard from it: not stale.
         handle.store(now_ms, Ordering::Relaxed);
         assert!(pool.stale_worker_ids(now_ms, timeout_ms).is_empty());
 
-        // Exactly at the deadline: still not stale (strict `>`).
         handle.store(now_ms - timeout_ms, Ordering::Relaxed);
         assert!(pool.stale_worker_ids(now_ms, timeout_ms).is_empty());
 
-        // One millisecond past the deadline: stale.
         handle.store(now_ms - timeout_ms - 1, Ordering::Relaxed);
         assert_eq!(
             pool.stale_worker_ids(now_ms, timeout_ms),
             vec!["w1".to_string()]
         );
 
-        // A freshly registered worker is stamped with `now`, so it is never
-        // immediately stale against the real clock.
         pool.register("w2".into(), caps(), HashSet::new(), port().0);
         let real_now = gradient_types::now().and_utc().timestamp_millis();
         assert!(

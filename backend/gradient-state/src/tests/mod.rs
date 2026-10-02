@@ -405,8 +405,8 @@ fn state_action_validate_rejects_events_on_open_pr() {
 
 #[test]
 fn state_task_silently_ignores_legacy_force_evaluation_field() {
-    // Old state files may still set `force_evaluation` - serde drops
-    // unknown fields by default, so parsing must keep working.
+    // Old state files may still set `force_evaluation`. Serde is dropping unknown fields by
+    // default, and parsing must keep working.
     let json = r#"{
         "tasks": {
             "web": {
@@ -754,8 +754,6 @@ fn resolves_scim_group_to_project_role_grants() {
 
 #[test]
 fn state_worker_accepts_missing_created_by() {
-    // A host that provisions a worker for itself has no declared user to
-    // attribute it to, so `created_by` must be optional and validate clean.
     let json = r#"{
         "workers": {
             "local": {

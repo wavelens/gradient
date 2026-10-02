@@ -4,12 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Integration tests for `POST /api/v1/build-requests/manifest` (issue #234).
-//!
-//! Covers the four validation surfaces (oversized total, bad paths, bad
-//! hashes, duplicates) and the happy-path response shape - `session` is a
-//! UUID and `missing` is the subset of hex hashes the project doesn't have yet.
-
 #![expect(
     clippy::unwrap_used,
     reason = "test scaffolding: a fixture helper that cannot build its value should fail the test loudly"
@@ -88,13 +82,10 @@ fn rejects_oversized_total() {
             MockDatabase::new(DatabaseBackend::Postgres),
             session_id,
         ));
-        // Cap the source upload at 20 MiB so the manifest total trips it; the
-        // cap is `max_source_upload_size`, not the fixed constant it once was.
         let server = make_test_server_configured(db.into_connection(), |cli| {
             cli.http.max_source_upload_size = 20 * 1024 * 1024;
         });
 
-        // 20 MiB + 1 byte triggers the cap.
         let body = json!({
             "project": "test-project",
             "files": [
@@ -248,9 +239,6 @@ fn happy_path_returns_session_and_missing() {
             ..Default::default()
         };
 
-        // After auth+project access, the handler executes:
-        //   SELECT build_request_blob WHERE project=... AND hash IN (...) -> empty
-        //   INSERT upload_session  (RETURNING + rows_affected)
         let db = with_project_access(with_auth(
             MockDatabase::new(DatabaseBackend::Postgres),
             session_id,

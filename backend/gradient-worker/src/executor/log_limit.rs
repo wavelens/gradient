@@ -4,13 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Dual token-bucket limiter for worker->server log forwarding. One bucket
-//! bounds a 1-minute burst, the other a 1-hour sustained rate. A log chunk is
-//! forwarded only if BOTH buckets admit it; once either is exhausted the
-//! limiter trips permanently for that build and forwarding stops. The build
-//! itself keeps running - only the log stream is capped.
-
-/// Per-build byte budgets for the two windows.
 #[derive(Debug, Clone, Copy)]
 pub struct LogRateLimits {
     pub burst_bytes_per_min: u64,
@@ -67,10 +60,9 @@ impl LogRateLimiter {
         Self::new(limits.burst_bytes_per_min, limits.sustained_bytes_per_hour)
     }
 
-    /// Whether `n` bytes may be forwarded at `now` (seconds since stream start).
-    /// On the first denial the limiter trips permanently. When the two buckets
-    /// disagree the admitting bucket has already been debited; harmless since we
-    /// stop forwarding entirely after the trip.
+    /// The limiter is tripping permanently on the first denial.
+    /// The admitting bucket may already be debited when the two buckets disagree.
+    /// This is harmless because forwarding is stopping entirely after the trip.
     pub fn admit(&mut self, n: u64, now: f64) -> bool {
         if self.tripped {
             return false;
@@ -109,7 +101,6 @@ mod tests {
     fn refills_when_not_yet_tripped() {
         let mut l = LogRateLimiter::new(1000, 100_000);
         assert!(l.admit(1000, 0.0));
-        // 30s later the minute bucket has refilled ~500 bytes
         assert!(l.admit(400, 30.0));
     }
 

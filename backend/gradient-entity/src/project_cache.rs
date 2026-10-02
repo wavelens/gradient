@@ -14,14 +14,11 @@ use crate::ids::{CacheId, ProjectCacheId, ProjectId};
 )]
 #[sea_orm(rs_type = "i32", db_type = "Integer")]
 pub enum CacheSubscriptionMode {
-    /// Read from and write to this cache (default).
     #[default]
     #[sea_orm(num_value = 0)]
     ReadWrite,
-    /// Only read (use as binary cache substituter, never push to it).
     #[sea_orm(num_value = 1)]
     ReadOnly,
-    /// Only write (push build outputs, never use as substituter).
     #[sea_orm(num_value = 2)]
     WriteOnly,
 }

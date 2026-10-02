@@ -8,10 +8,6 @@ use super::{accept_cert, find_ref_in_list};
 use crate::SourceError;
 use git2::{Direction, RemoteCallbacks};
 
-/// List the remote HEAD ref via libgit2 with in-memory SSH credentials.
-///
-/// Used exclusively for SSH URLs where the private key must be supplied
-/// in-memory without writing it to disk.
 pub(super) fn ls_remote_head_ssh(
     url: &str,
     private_key: &str,

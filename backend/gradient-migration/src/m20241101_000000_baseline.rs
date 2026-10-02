@@ -4,15 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Squashed baseline replacing the 151 pre-globalization migrations
-//! (m20241107_135027 through m20260619_000001). On a fresh database it emits
-//! the schema exactly as that chain left it (verified by pg_dump diff), so the
-//! post-globalization migrations replay on top unchanged. On an
-//! already-provisioned database it is a no-op: the schema exists, and
-//! `prune_removed_migrations` (gradient-db connection.rs) has already dropped
-//! the deleted files' `seaql_migrations` rows. Databases that stopped mid-way
-//! through the pre-globalization chain must first upgrade through a release
-//! that still ships it (see docs/src/contributors/migrations.md).
+//! This baseline is replacing the 151 pre-globalization migrations and is a no-op on an
+//! already-provisioned database. A database stopped mid-chain must first upgrade through a release
+//! still shipping that chain.
 
 use sea_orm_migration::prelude::*;
 use sea_orm_migration::sea_orm::{ConnectionTrait, Statement};

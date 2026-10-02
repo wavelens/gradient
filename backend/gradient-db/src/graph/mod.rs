@@ -4,9 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! The build graph: derivations, their shared builds and the counters that decide
-//! when a shared build can start.
-
 pub mod can_start;
 pub mod closure;
 pub mod consistency;

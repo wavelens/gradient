@@ -3,8 +3,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Integration tests: `?json` flag on text-format cache endpoints.
-
 use axum::http::StatusCode;
 use axum_test::TestServer;
 use gradient_test_support::cache_fixture::{

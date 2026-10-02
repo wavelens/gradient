@@ -12,13 +12,8 @@ use sea_orm::{
 };
 use tracing::{error, warn};
 
-/// Compress an attempt's inline log into zstd chunks, appended to the chunks an
-/// earlier pass wrote, persist the chunk index, and drop the inline copy.
-///
-/// Fallible on purpose: this executes as a pending delivery, so a storage or index
-/// failure is retried with the inline copy still in place rather than losing the
-/// log. Dropping the inline copy afterwards is the one best-effort step, because
-/// the index it duplicates is already written.
+/// A failure is retried as a pending delivery with the inline copy still in place.
+/// Dropping the inline copy is the one best-effort step, because the index is already written.
 pub async fn finalize_build_log(
     ctx: &DbContext,
     log_id: gradient_entity::ids::BuildAttemptId,
@@ -57,8 +52,6 @@ pub async fn finalize_build_log(
     Ok(())
 }
 
-/// Queue [`finalize_build_log`] for each attempt. The pending deliveries fold a duplicate
-/// of a row still waiting, and an attempt without an inline log is a no-op.
 pub async fn enqueue_log_finalize(
     db: &impl ConnectionTrait,
     attempts: impl IntoIterator<Item = gradient_entity::ids::BuildAttemptId>,
@@ -88,7 +81,6 @@ async fn indexed_chunk_count(
     Ok(count as u32)
 }
 
-/// Replace the `build_log_chunk` rows for `log_id` with `descs` (idempotent).
 async fn replace_log_chunk_index(
     db: &impl ConnectionTrait,
     log_id: gradient_entity::ids::BuildAttemptId,
@@ -126,8 +118,6 @@ async fn replace_log_chunk_index(
 
 pub use gradient_entity::phase_event::PhaseSubjectKind;
 
-/// Append-only record of a build/evaluation phase transition. It shares the
-/// transition's transaction, so a failed insert fails the transition with it.
 pub async fn record_phase_event(
     db: &impl ConnectionTrait,
     subject_kind: PhaseSubjectKind,
@@ -153,9 +143,6 @@ pub async fn record_phase_event(
     Ok(())
 }
 
-/// Batch-record the same phase transition for many subjects, one multi-row
-/// insert per chunk. Used by bulk status writes (e.g. evaluation abort) instead
-/// of one spawned [`record_phase_event`] per subject.
 pub async fn record_phase_events(
     db: &impl ConnectionTrait,
     subject_kind: PhaseSubjectKind,
@@ -163,7 +150,7 @@ pub async fn record_phase_events(
     phase: i16,
     at: chrono::NaiveDateTime,
 ) -> Result<(), sea_orm::DbErr> {
-    // Stay well under Postgres' 65535-bind-parameter cap (6 columns per row).
+    // Postgres is capping binds at 65535, and each row is carrying 6 columns.
     const INSERT_CHUNK: usize = 8192;
     let rows: Vec<_> = subject_ids
         .iter()
@@ -190,7 +177,6 @@ pub async fn record_phase_events(
     Ok(())
 }
 
-/// Inserts a single `evaluation_message` row, propagating any DB error.
 pub async fn insert_evaluation_message<C: ConnectionTrait>(
     db: &C,
     evaluation_id: EvaluationId,
@@ -212,10 +198,6 @@ pub async fn insert_evaluation_message<C: ConnectionTrait>(
     Ok(())
 }
 
-/// Inserts a single `evaluation_message` row without changing the evaluation status.
-///
-/// Use for partial failures (e.g. one attr path failed to evaluate) where the
-/// evaluation as a whole continues.
 pub async fn record_evaluation_message(
     ctx: &DbContext,
     evaluation_id: EvaluationId,

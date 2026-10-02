@@ -20,11 +20,6 @@ fn empty_mock() -> DatabaseConnection {
     MockDatabase::new(DatabaseBackend::Postgres).into_connection()
 }
 
-/// Wrap a `DatabaseConnection` + `test_cli()` into a `ServerState`.
-///
-/// Tests that don't exercise the web layer get an empty mock for `web_db`.
-/// Tests that need a populated web pool should construct `ServerState`
-/// directly so they can supply their own mock query results.
 pub fn test_state(db: DatabaseConnection) -> Arc<ServerState> {
     let cli = test_cli();
     let config = RuntimeConfig::from_cli(&cli).expect("valid test config");
@@ -32,8 +27,6 @@ pub fn test_state(db: DatabaseConnection) -> Arc<ServerState> {
     test_state_with_storage(db, nar_storage)
 }
 
-/// Like `test_state` but with a caller-supplied `NarStore`, for tests that need
-/// staging or the hot cache wired up.
 pub fn test_state_with_storage(db: DatabaseConnection, nar_storage: NarStore) -> Arc<ServerState> {
     let cli = test_cli();
     let config = Arc::new(RuntimeConfig::from_cli(&cli).expect("valid test config"));
@@ -75,9 +68,7 @@ pub fn test_state_with_storage(db: DatabaseConnection, nar_storage: NarStore) ->
     })
 }
 
-/// Like `test_state` but routes `db` into the dedicated cache-query pool
-/// (`cache_db`), which is what the `CacheQuery` handler reads. Use this to drive
-/// cache-lookup tests (including injecting DB errors via `append_query_errors`).
+/// The `CacheQuery` handler is reading the dedicated `cache_db` pool, not `db`.
 pub fn test_state_cache(db: DatabaseConnection) -> Arc<ServerState> {
     let cli = test_cli();
     let config = Arc::new(RuntimeConfig::from_cli(&cli).expect("valid test config"));
@@ -120,7 +111,6 @@ pub fn test_state_cache(db: DatabaseConnection) -> Arc<ServerState> {
     })
 }
 
-/// Like `test_state` but plumbs through a caller-supplied [`LogStorage`].
 pub fn test_state_with_log_storage(
     db: DatabaseConnection,
     log_storage: Arc<dyn LogStorage>,

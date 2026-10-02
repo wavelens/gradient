@@ -11,9 +11,6 @@ use base64::{Engine, engine::general_purpose};
 use ed25519_compact::SecretKey;
 use gradient_types::*;
 
-/// A pre-decrypted signer for a single cache, reusable across many
-/// signatures without re-reading the crypt-secret file or re-decrypting
-/// the cache's private key.
 pub struct CacheSigner {
     secret_key: SecretKey,
     cache_name: String,
@@ -21,9 +18,6 @@ pub struct CacheSigner {
 }
 
 impl CacheSigner {
-    /// Build a signer from the encrypted cache row by reading the crypt
-    /// secret from `secret_file` once. Subsequent `sign_*` calls reuse the
-    /// in-memory `SecretKey`.
     pub fn from_cache(
         secret_file: &str,
         cache: &MCache,
@@ -45,8 +39,6 @@ impl CacheSigner {
         })
     }
 
-    /// Sign a narinfo fingerprint and return the full narinfo signature
-    /// token (`{key_name}:{base64_sig}`).
     pub fn sign_narinfo(
         &self,
         store_path: &str,
@@ -59,9 +51,6 @@ impl CacheSigner {
         format!("{}-{}:{}", self.base_url, self.cache_name, sig_b64)
     }
 
-    /// Sign a narinfo fingerprint and return the raw 64-byte Ed25519
-    /// signature. Used when the caller stores the signature in `bytea` form
-    /// and reconstructs the narinfo wire format on read.
     pub fn sign_narinfo_raw(
         &self,
         store_path: &str,
@@ -80,16 +69,6 @@ impl CacheSigner {
     }
 }
 
-/// Signs a Nix narinfo fingerprint directly with the cache's Ed25519 key.
-///
-/// Fingerprint format: `1;{store_path};{nar_hash};{nar_size};{refs_sorted_comma}`
-/// Returns a full signature token: `{key_name}:{base64_sig}`.
-///
-/// References should be bare store-path names (without `/nix/store/` prefix);
-/// this function adds the prefix before sorting and joining.
-///
-/// One-shot wrapper around [`CacheSigner`] - prefer [`CacheSigner::from_cache`]
-/// when signing many paths for the same cache.
 pub fn sign_narinfo_fingerprint(
     secret_file: &str,
     cache: MCache,

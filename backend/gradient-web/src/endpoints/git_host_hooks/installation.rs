@@ -4,8 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! GitHub App installation binding and repository-to-integration resolution.
-
 use super::payloads::GitHubInstallationPayload;
 use gradient_ci::parse_owner_repo;
 use gradient_core::ServerState;
@@ -58,8 +56,8 @@ async fn store_installation_id(state: &Arc<ServerState>, payload: &GitHubInstall
         return;
     }
 
-    // Bind to every project owning a task whose parsed `owner/repo` matches an
-    // installed repo, so flake shorthand and every clone-URL form match alike.
+    // Every project owning a task whose parsed `owner/repo` is matching an installed repo is bound.
+    // Flake shorthand and every clone-URL form are matching alike.
     let owner_project_ids: HashSet<ProjectId> = ETask::find()
         .filter(CTask::Repository.contains("github"))
         .all(&state.web_db)
@@ -128,8 +126,6 @@ async fn store_installation_id(state: &Arc<ServerState>, payload: &GitHubInstall
     }
 }
 
-/// Lowercased `owner/repo` for a github.com repository, or `None` for a
-/// non-github URL. Recognizes https, SCP-style SSH, and the flake shorthand.
 fn github_full_name(repo_url: &str) -> Option<String> {
     let lower = repo_url.to_ascii_lowercase();
     let is_github = lower.contains("github.com")
@@ -142,8 +138,6 @@ fn github_full_name(repo_url: &str) -> Option<String> {
     parse_owner_repo(repo_url).map(|(owner, repo)| format!("{owner}/{repo}").to_ascii_lowercase())
 }
 
-/// Canonical form for matching `task.repository` against Git-host-reported URLs:
-/// strips `.git`/trailing slash and rewrites `git@host:owner/repo` SSH to https.
 pub(super) fn normalize_repo_url(url: &str) -> String {
     let s = url.trim().trim_end_matches('/');
     let s = s.strip_suffix(".git").unwrap_or(s);
@@ -159,9 +153,8 @@ fn repo_identity(url: &str) -> Option<String> {
     parse_owner_repo(url).map(|(owner, repo)| format!("{owner}/{repo}").to_ascii_lowercase())
 }
 
-/// Whether a webhook event from `event_repo_urls` targets a task tracking
-/// `task_repository`. A project-wide inbound integration (a GitHub App spans the
-/// whole project) would otherwise fan out to sibling tasks. Empty urls match all.
+/// A project-wide inbound integration would otherwise fan out to sibling tasks. Empty urls are
+/// matching all.
 pub(super) fn event_repo_matches_task(event_repo_urls: &[String], task_repository: &str) -> bool {
     let mut keys = event_repo_urls
         .iter()
@@ -177,9 +170,6 @@ pub(super) fn event_repo_matches_task(event_repo_urls: &[String], task_repositor
     }
 }
 
-/// Resolve a GitHub App webhook to the inbound GitHub integrations whose project
-/// owns a task matching one of `repository_urls`. A single installation can
-/// serve multiple projects, so the repo-URL gate selects only the matching ones.
 pub(super) async fn resolve_github_app_targets(
     state: &Arc<ServerState>,
     installation_id: i64,
@@ -207,9 +197,6 @@ pub(super) async fn resolve_github_app_targets(
         .map(|u| normalize_repo_url(u))
         .collect();
 
-    // Tasks and integrations for every candidate installation in one read each;
-    // a webhook resolving its targets should not scale queries with the number
-    // of installations.
     let project_ids: Vec<ProjectId> = installs.iter().map(|i| i.project).collect();
     let install_ids: Vec<GithubInstallationId> = installs.iter().map(|i| i.id).collect();
 

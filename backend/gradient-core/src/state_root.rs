@@ -4,11 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Composition root for the running server. [`AppState`] holds every shared
-//! handle as a flat field (so `gradient-web`/`proto`/`scheduler` keep
-//! `state.<field>` access) and projects the per-layer [`StorageCtx`] /
-//! [`DbContext`] / [`CiContext`] slices that `db` and `ci` functions take.
-//! Nothing below this facade may name `AppState`.
+//! Nothing below this facade may name `AppState`. Lower layers are taking the projected
+//! [`StorageCtx`], [`DbContext`] and [`CiContext`] slices.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -35,90 +32,47 @@ use gradient_util::shutdown::Shutdown;
 
 #[derive(Debug)]
 pub struct AppState {
-    /// Pool used by the proto handler, scheduler, cache GC, and any
-    /// fire-and-forget background task spawned from a web handler that
-    /// should not contend with foreground HTTP requests.
     pub worker_db: WorkerDb,
-    /// Dedicated DB pool used by the axum/web layer so HTTP requests are
-    /// not starved by the busy proto/scheduler pool under heavy NarPush load.
     pub web_db: WebDb,
-    /// Dedicated DB pool for the cache-query read path so a large eval's worker
-    /// prefetch storm cannot exhaust [`Self::worker_db`] and stall the scheduler.
+    /// A dedicated pool is keeping a large evaluation's prefetch storm from exhausting
+    /// [`Self::worker_db`] and stalling the scheduler.
     pub cache_db: CacheDb,
-    /// Resolved runtime configuration, built once at startup from the parsed
-    /// [`gradient_types::Cli`].
     pub config: Arc<RuntimeConfig>,
     pub log_storage: Arc<dyn LogStorage>,
     pub email: Arc<dyn EmailSender>,
     pub nar_storage: NarStore,
-    /// Shared outbound HTTP client - reuse for any outbound request from a
-    /// handler or background task; never construct a fresh `reqwest::Client`.
     pub http: reqwest::Client,
-    /// Global outbound-request pool for upstream narinfo probes, shared by the
-    /// scheduler eval probe and the proto cache-query probe.
     pub upstream_query: Arc<Semaphore>,
-    /// Server-wide upload budget shared by worker sessions and REST uploads.
     pub upload_admission: Arc<gradient_storage::admission::UploadAdmission>,
-    /// Resolved-once registry of Git host providers (reporters, webhook parsing,
-    /// signature verification) shared into every [`CiContext`].
     pub git_host: GitHostRegistry,
-    /// GitHub's install page for the configured App, looked up on first use.
     pub github_app_install_url: Arc<tokio::sync::OnceCell<String>>,
-    /// Issued-but-unconsumed manifest CSRF state tokens with their issuance time.
     pub manifest_state: Arc<ManifestStateStore>,
-    /// Manifest results awaiting one-shot pickup by the superuser's browser.
     pub pending_credentials: Arc<PendingCredentialsStore>,
-    /// Graceful-shutdown coordination for all long-lived background tasks.
     pub shutdown: Shutdown,
-    /// Auth rows stamped `last_used_at` recently, so a burst of requests writes once.
     pub last_used_stamps: Debounce<Uuid>,
-    /// Served NAR bytes and counts per cache and minute, flushed by
-    /// `gradient_db::metrics::cache_traffic` instead of written per request.
     pub cache_traffic: Arc<CacheTraffic>,
-    /// JWT signing/verification secret loaded once at startup.
     pub jwt_secret: SecretString,
-    /// Wall-clock time the process bootstrapped; drives `gradient_uptime_seconds`.
     pub started_at: DateTime<Utc>,
-    /// Project memberships declared in state for users who did not exist at apply
-    /// time, drained per-username on first registration/OIDC login.
     pub pending_project_memberships: Arc<PendingProjectMemberships>,
-    /// OIDC group -> (project, role) grants resolved from state at startup.
     pub oidc_group_roles: Arc<OidcGroupRoles>,
-    /// SCIM group -> (project, role) grants resolved from state at startup.
     pub scim_group_roles: Arc<ScimGroupRoles>,
-    /// Every event this instance produces; live sockets and the firehose subscribe.
     pub events: gradient_types::EventBus,
-    /// What each running Substitute or Download has fetched, held in memory only.
     pub download_progress: Arc<Latest<DerivationBuildId, DownloadProgress>>,
-    /// Nudged after every committed write that owes an effect; the effects
-    /// actor waits on it so a delivery does not sit out the 30 s tick.
     pub delivery_wake: Arc<Notify>,
-    /// Nudged when an evaluation is created, so eval dispatch starts now instead
-    /// of on its next tick.
     pub eval_assign_wake: Arc<Notify>,
-    /// The graph writer's handle: every write to the dependency graph and the
-    /// cache index goes through it.
     pub graph: Arc<Graph>,
-    /// Where a need update reports what it turned on, so the upstream probe
-    /// asks only for what something wants.
     pub probe_requests: ProbeRequests,
-    /// Where a shared build entering or leaving `Queued` is reported, so dispatch
-    /// reads what moved instead of every queued shared build.
     pub startable_set: StartableSet,
 }
 
-/// Kept as an alias so handler signatures and `Arc<ServerState>` call sites in
-/// `gradient-web`/`proto`/`scheduler` stay unchanged. New code uses [`AppState`].
 pub type ServerState = AppState;
 
-/// One `last_used_at` write per API key or session per minute (#629).
 pub const LAST_USED_STAMP_INTERVAL: Duration = Duration::from_secs(60);
 
 pub fn last_used_stamps() -> Debounce<Uuid> {
     Debounce::new(LAST_USED_STAMP_INTERVAL)
 }
 
-/// A download whose worker reported nothing for this long has stopped.
 pub const DOWNLOAD_PROGRESS_TTL: Duration = Duration::from_secs(15);
 
 pub fn download_progress() -> Arc<Latest<DerivationBuildId, DownloadProgress>> {
@@ -126,7 +80,6 @@ pub fn download_progress() -> Arc<Latest<DerivationBuildId, DownloadProgress>> {
 }
 
 impl AppState {
-    /// Storage slice (cheap: clones a handful of `Arc`s / `Clone` handles).
     pub fn storage(&self) -> StorageCtx {
         StorageCtx {
             nar_storage: self.nar_storage.clone(),
@@ -134,7 +87,6 @@ impl AppState {
         }
     }
 
-    /// Db slice passed into `gradient_db::*` functions.
     pub fn db(&self) -> DbContext {
         DbContext {
             worker_db: self.worker_db.clone(),
@@ -149,7 +101,6 @@ impl AppState {
         }
     }
 
-    /// Ci slice passed into `ci::*` functions.
     pub fn ci(&self) -> CiContext {
         CiContext {
             db: self.db(),
@@ -159,7 +110,6 @@ impl AppState {
         }
     }
 
-    /// Record a durable event and wake the pending deliveries; a failed write is logged, never propagated.
     pub async fn record(&self, event: impl Into<gradient_types::Event>) {
         let event = event.into();
         let name = event.name();

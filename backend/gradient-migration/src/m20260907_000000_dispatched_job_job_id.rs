@@ -7,10 +7,6 @@
 use sea_orm_migration::prelude::*;
 use sea_orm_migration::sea_orm::ConnectionTrait;
 
-/// The scheduler's own job key (`build:<anchor>` / `eval:<evaluation>`), which is
-/// unique among in-flight jobs. Closing a dispatch used to guess at
-/// (worker, evaluation, newest open), which attached outcomes to the wrong row
-/// whenever one worker ran several jobs of one evaluation.
 const OPEN_BY_JOB_ID_INDEX: &str = "CREATE INDEX IF NOT EXISTS \"idx-dispatched_job-open-by-job-id\" \
      ON dispatched_job (job_id, dispatched_at DESC) \
      WHERE finished_at IS NULL";

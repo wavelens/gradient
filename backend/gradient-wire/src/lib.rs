@@ -4,19 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! The Gradient wire protocol, shared by gradient-server, gradient-worker and
-//! gradient-proxy.
-//!
-//! - `types`, `messages`, `constants` - wire payloads, rkyv codecs and limits.
-//! - `session::{frame, handshake}` - direction-generic framing and the two
-//!   role-symmetric handshake drivers (`as_peer`, `as_authority`) over an
-//!   established `ProtoSocket`.
-//! - `client::dial` / `server::{accept_axum, accept_tungstenite}` - how a
-//!   `ProtoSocket` comes to exist.
-//! - `traits` - the role traits every peer implements.
-//! - `auth`, `transport`, `limiter` - pure token checks, NAR transport policy
-//!   and connection caps.
-
 pub mod auth;
 pub mod build_output_metadata;
 pub mod cached_path_info;

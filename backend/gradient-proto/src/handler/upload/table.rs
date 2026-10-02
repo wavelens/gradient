@@ -50,7 +50,7 @@ pub(in crate::handler) struct Granted {
     pub permit: UploadPermit,
     pub transfer: Transfer,
     pub lease: Lease,
-    /// Metadata of an `UploadFinished` that overtook the final passed-through chunk.
+    /// An `UploadFinished` can overtake the final passed-through chunk.
     pub finished: Option<UploadMetadata>,
     pub final_seen: bool,
 }
@@ -69,7 +69,6 @@ impl Entry {
     }
 }
 
-/// Every upload this session asked for and has not settled yet.
 #[derive(Default)]
 pub(in crate::handler) struct UploadTable {
     entries: HashMap<u64, Entry>,
@@ -135,8 +134,6 @@ impl UploadTable {
         }
     }
 
-    /// Remove every request of `job_id`; the granted ones come back so their
-    /// transfers can be abandoned.
     pub(in crate::handler) fn forget_job(&mut self, job_id: &str) -> Vec<(u64, Option<Granted>)> {
         let ids: Vec<u64> = self
             .entries

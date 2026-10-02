@@ -15,10 +15,8 @@ use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use std::collections::HashSet;
 use std::sync::Arc;
 
-/// `GET /commits/{commit}` - returns commit metadata when the caller can
-/// reach the commit through an evaluation in a project they belong to,
-/// or the project is public. Anything else maps to `404` so the endpoint never
-/// confirms or denies the existence of a commit the caller can't see.
+/// Anything unreachable is mapped to `404`. The endpoint must never confirm or deny a commit the
+/// caller cannot see.
 pub async fn get_commit(
     state: State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,

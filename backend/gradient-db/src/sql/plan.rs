@@ -4,11 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Reduces one `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)` body to the handful of
-//! numbers a budget is written against. Postgres reports per-node buffer counts
-//! inclusive of children, so the root carries the total; everything else here is
-//! accumulated over the whole plan, subplans and CTEs included.
-
 use serde_json::Value;
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -21,22 +16,12 @@ pub struct Measured {
     pub spilled: bool,
     pub seq_scans: Vec<Scan>,
     pub node_types: Vec<String>,
-    /// The node types of every recursive term, which is where an `OFFSET 0`
-    /// fence has to survive. Empty for a plan that recurses nowhere.
     pub fenced_types: Vec<String>,
-    /// True when the plan's row count is decided by the operator at the top
-    /// rather than by the data - an aggregate, or a scalar computed from
-    /// subplans - which is what makes a ratio against it meaningless.
     pub collapses: bool,
-    /// How many values the widest bound array carried. A statement handed a
-    /// batch does work per value in it, however few rows come back, so this is
-    /// what the amplification ratio divides by when it is the larger number.
     pub inputs: u64,
     pub execution_ms: f64,
 }
 
-/// One sequential scan: what it read and what it threw away again. A scan that
-/// keeps what it read is the planner reading a table it needs in full.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Scan {
     pub relation: String,
@@ -79,10 +64,8 @@ pub fn measure(body: &Value) -> Result<Measured, PlanError> {
     Ok(measured)
 }
 
-/// What the statement produced. A write without `RETURNING` reports no rows at
-/// the root, so the amplification ratio would read every one of them as "scanned
-/// N for 0" and fail on its own shape; what such a statement produced is what it
-/// modified, which is what its child fed into the `ModifyTable`.
+/// A write without `RETURNING` is reporting no rows at the root.
+/// Its modified rows are what its child fed into the `ModifyTable`.
 fn rows_out(root: &Value) -> u64 {
     let rows = number(root, "Actual Rows");
     if rows > 0 || root.get("Node Type").and_then(Value::as_str) != Some("ModifyTable") {
@@ -143,8 +126,6 @@ fn walk(node: &Value, measured: &mut Measured) {
     }
 }
 
-/// The recursive term of every `Recursive Union` is its second child: the first
-/// is the seed, which no fence applies to.
 fn fenced(node: &Value, measured: &mut Measured) {
     let children = node.get("Plans").and_then(Value::as_array);
 
@@ -174,8 +155,7 @@ fn collect_types(node: &Value, out: &mut Vec<String>) {
     }
 }
 
-/// Postgres 18 reports `Actual Rows` as a float, so every count is read as one
-/// and rounded rather than asked for as an integer.
+/// Postgres 18 is reporting `Actual Rows` as a float.
 fn number(node: &Value, key: &str) -> u64 {
     node.get(key)
         .and_then(Value::as_f64)
@@ -250,8 +230,6 @@ mod tests {
         assert!(measure(&body).expect("measurable").collapses);
     }
 
-    /// `SELECT EXISTS (...)` is one row by construction, however much its
-    /// subplan had to read to decide it.
     #[test]
     fn a_scalar_from_a_subplan_collapses_too() {
         let body = serde_json::json!([{
@@ -263,7 +241,6 @@ mod tests {
 
     #[test]
     fn rows_scanned_multiplies_by_loops() {
-        // 1 (aggregate) + 44_000 (CTE scan) + 2 * 44_000 (the fenced nested loop).
         let m = measure(&fixture("nested_loop_walk")).expect("measurable");
         assert_eq!(m.rows_scanned, 132_001);
         assert_eq!(m.max_loops, 44_000);

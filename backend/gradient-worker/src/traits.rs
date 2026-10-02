@@ -4,15 +4,12 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Re-exports trait abstractions from proto and provides production implementations.
-
 pub use gradient_wire::traits::{DrvReader, JobReporter};
 
 use anyhow::Result;
 use async_trait::async_trait;
 use gradient_util::store_path::nix_store_path;
 
-/// Production [`DrvReader`] that reads from the filesystem.
 pub struct FsDrvReader;
 
 #[async_trait]

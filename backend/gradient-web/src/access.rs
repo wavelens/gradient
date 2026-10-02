@@ -4,21 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Unified resource-loading and access-control layer.
-//!
-//! Endpoint handlers declare *what level of access they need* via an enum and
-//! receive a fully-validated row, instead of stitching together ad-hoc
-//! lookup + permission + state-managed checks. Authorization is expressed in
-//! terms of [`Permission`] capabilities (see [`crate::permissions`]) so that
-//! custom roles configured at runtime can be plugged in by changing only the
-//! permission lookup, not the call sites.
-//!
-//! Resource families:
-//! - Projects: [`load_project`] with [`ProjectAccess`].
-//! - Tasks: [`load_task`] with [`TaskAccess`].
-//! - Caches: [`load_cache`] with [`CacheAccess`] (owner-scoped, not project-scoped).
-//! - Project-scoped children: [`load_webhook_in_project`], [`load_integration_in_project`].
-
 use crate::authorization::ApiKeyContext;
 use crate::error::{WebError, WebResult};
 use crate::helpers::OptionExt;
@@ -37,10 +22,6 @@ use gradient_types::{
 use sea_orm::{ColumnTrait, Condition, EntityTrait, QueryFilter};
 use std::sync::Arc;
 
-// ── Caller identity ──────────────────────────────────────────────────────────
-
-/// Who is making the request. Anonymous callers can only access `Readable`
-/// resources that are publicly visible.
 #[derive(Clone, Copy)]
 pub enum Caller<'a> {
     Anon,
@@ -63,61 +44,45 @@ impl<'a> Caller<'a> {
     }
 }
 
-// ── Access policies ──────────────────────────────────────────────────────────
-
-/// Required access level for a project-scoped operation.
 #[derive(Clone, Copy)]
 pub enum ProjectAccess {
-    /// Anonymous callers may see public projects; private projects require membership
-    /// (i.e. `Permission::ViewProject`). `label` controls the not-found wording -
-    /// task endpoints pass `"Task"` so project existence isn't leaked.
-    Readable { label: &'static str },
+    /// Private projects require membership. Task endpoints are passing `"Task"` as `label` so a
+    /// not-found answer cannot leak that the project exists.
+    Readable {
+        label: &'static str,
+    },
 
-    /// Caller must hold `permission`. Set `reject_managed` to true for
-    /// mutating operations that should not apply to state-managed projects.
     Require {
         permission: Permission,
         reject_managed: bool,
     },
 
-    /// Caller must be a member (any role). Reserved for handlers that
-    /// historically don't enforce a specific permission. New code should
-    /// prefer [`ProjectAccess::Require`].
-    Member { reject_managed: bool },
+    Member {
+        reject_managed: bool,
+    },
 }
 
-/// Required access level for a task-scoped operation.
 #[derive(Clone, Copy)]
 pub enum TaskAccess {
-    /// Anonymous callers may see tasks in public projects; private projects
-    /// require membership.
     Readable,
-    /// Caller must hold `permission` on the owning project.
     Require {
         permission: Permission,
         reject_managed: bool,
     },
-    /// Caller must be a member of the owning project (any role).
     Member,
 }
 
 #[derive(Clone, Copy)]
 pub enum CacheAccess {
-    /// Anonymous callers may see public caches; private caches require an
-    /// authenticated member (with `ViewCache`). NAR routes still grant
-    /// anonymous read via `cache.public` separately, before `load_cache`
-    /// is hit.
     Readable,
-    /// Caller must hold `permission` on the cache.
     Require {
         permission: CachePermission,
         reject_managed: bool,
     },
-    /// Caller must be a member (any role). Used for member/role listing.
-    Member { reject_managed: bool },
+    Member {
+        reject_managed: bool,
+    },
 }
-
-// ── Project loader ───────────────────────────────────────────────────────────────
 
 pub async fn load_project(
     state: &Arc<ServerState>,
@@ -177,8 +142,6 @@ pub async fn load_project(
     Ok(project)
 }
 
-// ── Task loader ───────────────────────────────────────────────────────────
-
 pub async fn load_task(
     state: &Arc<ServerState>,
     caller: Caller<'_>,
@@ -233,8 +196,6 @@ pub async fn load_task(
 
     Ok((project, task))
 }
-
-// ── Cache loader ─────────────────────────────────────────────────────────────
 
 pub async fn load_cache(
     state: &Arc<ServerState>,
@@ -297,9 +258,6 @@ pub async fn load_cache(
     Ok(cache)
 }
 
-/// Build the filter selecting every cache the user may list: caches they own
-/// plus caches subscribed by any project they belong to. Shared by
-/// `GET /caches` so listing visibility has a single source of truth.
 pub async fn visible_cache_condition(
     state: &Arc<ServerState>,
     user_id: UserId,
@@ -329,8 +287,6 @@ pub async fn visible_cache_condition(
         .add(CCache::Id.is_in(project_cache_ids)))
 }
 
-// ── Project-scoped child resources ───────────────────────────────────────────────
-
 pub async fn load_integration_in_project(
     state: &Arc<ServerState>,
     project_id: ProjectId,
@@ -343,8 +299,6 @@ pub async fn load_integration_in_project(
         .await?
         .or_not_found("Integration")
 }
-
-// ── Predicates ───────────────────────────────────────────────────────────────
 
 pub async fn is_project_member(
     state: &Arc<ServerState>,
@@ -363,7 +317,6 @@ pub async fn is_project_member(
         .is_some())
 }
 
-/// True when the user holds `permission` in `project_id`.
 pub async fn has_permission(
     state: &Arc<ServerState>,
     user_id: UserId,
@@ -394,16 +347,6 @@ pub async fn load_project_membership(
         .await?)
 }
 
-/// Load the membership row together with the role's permission bitmask.
-///
-/// When `api_key` is supplied, callers pinned to a different project see
-/// `None` (the short-circuit looks identical to "not a member"); otherwise the
-/// returned mask is the role mask intersected with the key's mask.
-///
-/// Two queries are issued (membership lookup, then role lookup by id) rather
-/// than a JOIN; this keeps the mock-DB test fixtures readable and the second
-/// roundtrip is gated on the first returning a row, so the cost is paid only
-/// for authenticated members.
 pub async fn load_membership_with_permissions(
     state: &Arc<ServerState>,
     user_id: UserId,
@@ -419,9 +362,8 @@ pub async fn load_membership_with_permissions(
     let Some(membership) = load_project_membership(state, user_id, project_id).await? else {
         return Ok(None);
     };
-    // The `project_user.role -> role.id` FK is NOT NULL, so a missing
-    // role here means the seed step never ran or the row was hand-deleted -
-    // treat it as "no permissions" rather than panicking.
+    // The `project_user.role -> role.id` FK is NOT NULL. A missing role is pointing at a skipped
+    // seed step or a hand-deleted row, and it is treated as no permissions instead of a panic.
     let mask = ERole::find_by_id(membership.role)
         .one(&state.web_db)
         .await?
@@ -433,8 +375,6 @@ pub async fn load_membership_with_permissions(
     };
     Ok(Some((membership, effective)))
 }
-
-// ── Internal helpers ─────────────────────────────────────────────────────────
 
 async fn require_project_permission(
     state: &Arc<ServerState>,
@@ -480,9 +420,6 @@ async fn is_cache_member(
     Ok(row.is_some())
 }
 
-/// True when `user_id` belongs to a project that subscribes to `cache_id`.
-/// Mirrors `GET /caches` visibility so a cache the user can list is also
-/// readable, even without a direct `cache_user` membership row.
 async fn is_cache_project_subscriber(
     state: &Arc<ServerState>,
     user_id: UserId,
@@ -516,10 +453,6 @@ async fn is_cache_project_subscriber(
     Ok(member.is_some())
 }
 
-/// The caller's effective cache permission mask for minting cache-scoped API
-/// keys: a direct cache member's role mask, or read-only [`cache_view_mask`]
-/// for a member of a subscribed project (mirroring `load_cache(Readable)`).
-/// `None` means the caller cannot see the cache.
 pub async fn effective_cache_mask(
     state: &Arc<ServerState>,
     user_id: UserId,
@@ -553,9 +486,6 @@ async fn cache_role_mask(
     Ok(Some(role.permission))
 }
 
-/// Role mask narrowed by the API key's own mask, then tested for `permission`.
-/// Shared so [`has_cache_permission`] and [`require_cache_permission`] cannot
-/// disagree about what a mask grants.
 fn cache_mask_allows(
     role_mask: i64,
     api_key: Option<&ApiKeyContext>,
@@ -568,8 +498,6 @@ fn cache_mask_allows(
     cache_mask_grants(role_mask & key_mask, permission)
 }
 
-/// Non-erroring form of [`require_cache_permission`]: `false` wherever that
-/// function would answer `NotFound` or `Forbidden`.
 pub async fn has_cache_permission(
     state: &Arc<ServerState>,
     user_id: UserId,
@@ -606,8 +534,6 @@ async fn require_cache_permission(
     Ok(())
 }
 
-/// E-mail addresses of every Admin of `project_id`, for notifications that
-/// target "whoever operates this project" rather than one named user.
 pub async fn project_admin_emails(
     state: &Arc<ServerState>,
     project_id: ProjectId,
@@ -624,7 +550,6 @@ pub async fn project_admin_emails(
     admin_emails(state, admin_ids).await
 }
 
-/// E-mail addresses of every Admin of `cache_id`.
 pub async fn cache_admin_emails(
     state: &Arc<ServerState>,
     cache_id: CacheId,
@@ -1275,8 +1200,6 @@ mod tests {
             assert!(r.is_ok(), "{:?}", r.err());
         });
     }
-
-    // ── load_cache ─────────────────────────────────────────────────────────
 
     fn cache_fixture(managed: bool) -> gradient_entity::cache::Model {
         gradient_entity::cache::Model {

@@ -4,16 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Regression test for `POST /api/v1/tasks/{project}/{task}/evaluate` (#564).
-//!
-//! The endpoint used to answer with the prose `"Evaluation started"` while both
-//! its OpenAPI contract and the CLI (`gradient task evaluate` prints
-//! `{"evaluation_id": <message>}`) expected the new evaluation's UUID, leaving
-//! every API-driven caller unable to follow the run it had just started.
-//!
-//! `restart_failed` is the path exercised here because the normal path resolves
-//! the branch head over git first; both return the same thing.
-
 #![expect(
     clippy::unwrap_used,
     reason = "test scaffolding: a fixture helper that cannot build its value should fail the test loudly"
@@ -96,11 +86,9 @@ fn restart_failed_answers_with_the_new_evaluation_id() {
         let restarted = eval_row(EvaluationId::now_v7(), EvaluationStatus::Completed);
 
         let db = MockDatabase::new(DatabaseBackend::Postgres)
-            // authorize middleware
             .append_query_results([vec![session.clone()]])
             .append_query_results([vec![session]])
             .append_query_results([vec![user()]])
-            // load_task + TriggerEvaluation permission
             .append_query_results([vec![project::Model {
                 id: project_id(),
                 name: "test-project".into(),
@@ -114,16 +102,11 @@ fn restart_failed_answers_with_the_new_evaluation_id() {
             .append_query_results([vec![task_row()]])
             .append_query_results([vec![admin_membership()]])
             .append_query_results([vec![admin_role()]])
-            // no evaluation currently active
             .append_query_results([Vec::<evaluation::Model>::new()])
-            // previous evaluation, and its (absent) entry points
             .append_query_results([vec![previous]])
             .append_query_results([Vec::<entry_point::Model>::new()])
-            // INSERT ... RETURNING the new evaluation
             .append_query_results([vec![restarted.clone()]])
-            // no task-level flake input overrides to snapshot
             .append_query_results([Vec::<gradient_entity::task_flake_input_override::Model>::new()])
-            // task.last_evaluation update
             .append_exec_results([MockExecResult {
                 last_insert_id: 0,
                 rows_affected: 1,
@@ -154,8 +137,6 @@ fn restart_failed_answers_with_the_new_evaluation_id() {
     });
 }
 
-/// Sequence up to the point the pinned-commit validation starts: authorize, then
-/// `load_task` with the TriggerEvaluation permission.
 fn authorized_db(session_id: SessionId) -> MockDatabase {
     let session = live_session(session_id);
     MockDatabase::new(DatabaseBackend::Postgres)
@@ -188,8 +169,6 @@ async fn evaluate(db: MockDatabase, session_id: SessionId, body: Value) -> axum_
         .await
 }
 
-/// A pinned commit must be exact: a prefix would make the evaluation ambiguous,
-/// and both validations run before any git work so a bad request costs nothing.
 #[test]
 fn rejects_a_commit_that_is_not_a_full_hash() {
     run(async {

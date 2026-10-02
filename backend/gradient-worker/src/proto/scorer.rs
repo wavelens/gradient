@@ -4,26 +4,15 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Job scoring - determines how suitable this worker is for each job candidate.
-//!
-//! For each candidate the scheduler sends the set of direct input store
-//! paths in `required_paths`. The worker checks each path against its local
-//! Nix store and reports `(missing_count, missing_nar_size)`. A lower
-//! `missing` count means fewer paths need downloading, so the worker is a
-//! better fit for the job. A worker that already holds every output in
-//! `output_paths` reports `outputs_present`: it would only upload them.
-//!
-//! Source paths (`inputSrcs`) are not included in `required_paths` - they
-//! live only in the `.drv` file and are not stored server-side. They tend
-//! to be roughly equivalent across workers in the same project so their absence
-//! does not skew scoring meaningfully.
+//! Source paths (`inputSrcs`) are not part of `required_paths`.
+//! They are living only in the `.drv` file and are not stored server-side.
+//! They are roughly equal across workers of one project and barely skew scoring.
 
 use anyhow::Result;
 use gradient_wire::messages::{CandidateScore, JobCandidate};
 use gradient_wire::traits::WorkerStore;
 use tracing::debug;
 
-/// Computes scores for job candidates against the local Nix store.
 #[derive(Clone, Copy, Default, Debug)]
 pub struct JobScorer;
 
@@ -32,11 +21,6 @@ impl JobScorer {
         Self
     }
 
-    /// Score a batch of job candidates.
-    ///
-    /// For each candidate, count how many of `required_paths` are absent
-    /// from the worker's local store and sum the uncompressed NAR size of
-    /// the missing entries (zero when `cache_info` is unavailable).
     pub async fn score_candidates<S: WorkerStore + ?Sized>(
         &self,
         store: &S,
@@ -67,7 +51,6 @@ impl JobScorer {
     }
 }
 
-/// Count of `required_paths` absent from the store and their summed NAR size.
 async fn missing_inputs<S: WorkerStore + ?Sized>(store: &S, c: &JobCandidate) -> (u32, u64) {
     let mut missing_count = 0u32;
     let mut missing_nar_size = 0u64;
@@ -80,7 +63,6 @@ async fn missing_inputs<S: WorkerStore + ?Sized>(store: &S, c: &JobCandidate) ->
     (missing_count, missing_nar_size)
 }
 
-/// Whether the store already holds every output, so the job needs no build.
 async fn holds_every_output<S: WorkerStore + ?Sized>(store: &S, c: &JobCandidate) -> bool {
     if c.output_paths.is_empty() {
         return false;

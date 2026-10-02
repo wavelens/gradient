@@ -4,9 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! What a Job Board row works on: the derivation a build job realises, the
-//! repository an eval job evaluates.
-
 use gradient_types::input::vec_to_hex;
 use gradient_types::*;
 use sea_orm::{ColumnTrait, ConnectionTrait, DbErr, EntityTrait, QueryFilter, QuerySelect};
@@ -30,7 +27,6 @@ impl JobSubjects {
         })
     }
 
-    /// A build job names its derivation, an eval job its repository.
     pub fn subject(
         &self,
         shared_build: Option<DerivationBuildId>,
@@ -103,7 +99,6 @@ async fn repositories<C: ConnectionTrait>(
     )
 }
 
-/// The evaluation an eval job ran, for the job page.
 #[derive(Serialize)]
 pub struct JobEvaluationView {
     pub repository: String,

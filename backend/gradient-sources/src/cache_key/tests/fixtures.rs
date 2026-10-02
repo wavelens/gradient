@@ -36,10 +36,6 @@ pub fn make_cache(name: &str, public_key: &str, private_key: &str) -> MCache {
     }
 }
 
-/// Build a narinfo body whose Sig line was produced by
-/// `sign_narinfo_fingerprint`. Returns `(body, public_key_string)` where
-/// `public_key_string` is the `{sig_key_name}:{pub_b64}` form that
-/// `verify_narinfo_signature` consumes.
 pub fn signed_narinfo_fixture() -> (String, String) {
     let (_f, path) = temp_secret_file();
     let (encrypted_priv, pub_b64) = generate_signing_key(&path).expect("generate failed");
@@ -58,8 +54,6 @@ pub fn signed_narinfo_fixture() -> (String, String) {
         &refs,
     )
     .expect("sign failed");
-    // sig is "{base_url}-{cache.name}:{sig_b64}" - the sig-key name is
-    // everything before the last ':'.
     let (sig_key_name, _) = sig.rsplit_once(':').unwrap();
     let body = format!(
         "StorePath: {store_path}\n\

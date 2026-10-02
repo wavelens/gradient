@@ -96,14 +96,9 @@ pub async fn upstream_nar(
         .map_err(|e| WebError::internal(format!("Failed to build response: {}", e)))
 }
 
-/// Which upstream caches to try for a proxied NAR, best first.
-///
-/// The URL names an upstream by row id, but that row is configuration: removing
-/// an upstream would otherwise permanently 404 every narinfo already handed out
-/// that names it, because a client caches narinfo and never refetches it. The
-/// NAR path itself is content-addressed - the filename is a file hash - so any
-/// upstream of this cache that serves that path serves the same bytes. Try the
-/// named one first, then the rest, and only give up when none of them has it.
+/// A client is caching a narinfo and never refetching it. Removing an upstream row must not 404
+/// every narinfo naming it. The NAR file is content-addressed. Any upstream of this cache serving
+/// the path is serving the same bytes.
 fn named_first(sources: Vec<UpstreamSource>, named: Uuid) -> Vec<UpstreamSource> {
     let (mut ordered, rest): (Vec<_>, Vec<_>) = sources
         .into_iter()
@@ -142,11 +137,6 @@ gradient_db::sql! {
         params = [Now, CacheId, CachedPathHash];
 }
 
-/// Fetch recency, stamped after every successful NAR fetch: it is what the
-/// eviction pass measures a path outside the live closure against. Uses
-/// `worker_db` (not `web_db`) on purpose: under heavy NAR traffic this
-/// fire-and-forget UPDATE would otherwise contend with foreground HTTP
-/// requests on the web pool.
 fn spawn_fetch_stamp(state: Arc<ServerState>, cache_id: CacheId, hash: String) {
     let s = Arc::clone(&state);
     state.shutdown.spawn(async move {
@@ -165,11 +155,8 @@ fn spawn_fetch_stamp(state: Arc<ServerState>, cache_id: CacheId, hash: String) {
     });
 }
 
-/// The upstream NAR path with its query. The narinfo we re-served kept the
-/// upstream's own URL query (e.g. hash-routed caches like
-/// `cache.nixos-cuda.org` require `?hash=<storehash>` to resolve the out-hash),
-/// but axum's `{*path}` capture drops the query - so a missing forward made the
-/// upstream 404 a NAR it has.
+/// axum's `{*path}` capture is dropping the query. Hash-routed upstreams like
+/// `cache.nixos-cuda.org` need `?hash=<storehash>` and answer 404 without it.
 fn upstream_nar_path(path: &str, query: Option<&str>) -> String {
     match query {
         Some(q) if !q.is_empty() => format!("{path}?{q}"),
@@ -197,8 +184,6 @@ mod tests {
             .collect()
     }
 
-    /// A write-only upstream is one this cache pushes to; the workers never
-    /// substitute from it, and neither may the NAR proxy.
     #[test]
     fn a_write_only_upstream_is_never_proxied() {
         let rows = vec![
@@ -215,8 +200,6 @@ mod tests {
         );
     }
 
-    /// The named upstream is still the right first guess: it is the one whose
-    /// layout the narinfo was written against.
     #[test]
     fn the_named_upstream_is_tried_first() {
         let rows = vec![
@@ -229,10 +212,6 @@ mod tests {
         assert_eq!(bases, vec!["https://b.example", "https://a.example"]);
     }
 
-    /// The case that broke a real substitution: the upstream row named in an
-    /// already-issued narinfo was deleted. A client caches narinfo and never
-    /// refetches, so 404ing here strands that path forever - the remaining
-    /// upstream caches have to be tried.
     #[test]
     fn a_deleted_upstream_falls_back_to_the_rest() {
         let rows = vec![
@@ -245,9 +224,6 @@ mod tests {
         assert_eq!(bases, vec!["https://a.example", "https://b.example"]);
     }
 
-    /// An upstream that is another Gradient cache rather than an external URL
-    /// has nothing to proxy to; it must be skipped, not turned into an error
-    /// that hides the upstream caches which would have served the path.
     #[test]
     fn upstream_caches_without_a_url_are_skipped() {
         let rows = vec![
@@ -262,8 +238,6 @@ mod tests {
         assert!(upstream_bases(&[upstream_row(1, None)], uuid::Uuid::from_u128(1)).is_empty());
     }
 
-    /// The named upstream also appears in the "rest", so without dedup every
-    /// fallback would re-fetch it.
     #[test]
     fn the_named_upstream_is_not_tried_twice() {
         let rows = vec![
@@ -277,7 +251,6 @@ mod tests {
         );
     }
 
-    // Placeholder file hash (nix32 52-char) as it appears in a narinfo URL.
     const FILE_HASH_NIX32: &str = "0mdqa9w1p6cmli6976v4wi0sw9r4p5prkj7lzfd1877wk11c9c73";
     const STORE_HASH: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
@@ -302,9 +275,6 @@ mod tests {
             .expect("runtime")
     }
 
-    /// `cached_path.file_hash` is the only authoritative source for the URL
-    /// -> store-hash mapping. The resolver returns the cached_path's store
-    /// hash, which is the key the NAR blob was written under.
     #[test]
     fn resolve_returns_store_hash_from_cached_path() {
         let db = MockDatabase::new(DatabaseBackend::Postgres)
@@ -317,8 +287,6 @@ mod tests {
         assert_eq!(effective, STORE_HASH);
     }
 
-    /// When no cached_path matches, the URL hash is returned unchanged
-    /// (legacy/direct-hash URL behaviour preserved).
     #[test]
     fn resolve_falls_back_to_url_hash_when_no_match() {
         let db = MockDatabase::new(DatabaseBackend::Postgres)
@@ -331,9 +299,6 @@ mod tests {
         assert_eq!(effective, FILE_HASH_NIX32);
     }
 
-    /// A hash-routed upstream (e.g. `cache.nixos-cuda.org`) needs the
-    /// `?hash=<storehash>` query the re-served narinfo carried; dropping it 404s a
-    /// NAR the upstream has.
     #[test]
     fn upstream_nar_path_forwards_query_string() {
         assert_eq!(
@@ -344,10 +309,6 @@ mod tests {
         assert_eq!(upstream_nar_path("nar/x.nar", Some("")), "nar/x.nar");
     }
 
-    /// Rows uploaded while issue #132's BLAKE3 default was active carry
-    /// `blake3:`-prefixed file hashes. The URL slug carries the bare nix32
-    /// digest with no algorithm prefix, so the resolver must look up both
-    /// `blake3:` and `sha256:` to bridge the two generations.
     #[test]
     fn resolve_returns_store_hash_for_blake3_file_hash() {
         let mut row = cached_path_row();

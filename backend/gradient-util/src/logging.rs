@@ -4,9 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! One tracing setup for every Gradient binary: a base level, dependency
-//! noise pinned to `warn`, per-target overrides and an optional `RUST_LOG`.
-
 use std::path::Path;
 
 use tracing::Subscriber;
@@ -15,7 +12,6 @@ use tracing_subscriber::{EnvFilter, Layer, fmt, layer::SubscriberExt, util::Subs
 
 use crate::trace_file;
 
-/// Dependency targets pinned to `warn` so a plain `info` log stays readable.
 pub const NOISY_DEPS: &[&str] = &[
     "hyper", "h2", "sqlx", "sea_orm", "tower", "reqwest", "rustls",
 ];

@@ -4,31 +4,19 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Git-host-agnostic push event parsing and triggering.
-
 use serde::Deserialize;
 use tracing::warn;
 
-/// The kind of webhook a Git host delivered, classified from its event header.
-/// [`crate::GitHostProvider::classify_event`] maps each Git host's raw event
-/// string onto this shared enum so the web layer dispatches once, Git-host-agnostically.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WebhookEventKind {
     Push,
     PullRequest,
     Release,
     Comment,
-    /// A pull-request review submission (GitHub `pull_request_review`,
-    /// Gitea/Forgejo `pull_request_review`). Used to release an approval-gated
-    /// run when a maintainer approves the PR natively (#369).
     Review,
     Unknown(String),
 }
 
-// ── GitHub push payload ────────────────────────────────────────────────────
-
-/// Commit fields shared across the Git host push payloads (`head_commit` on
-/// GitHub/Gitea, entries of `commits` on GitLab).
 #[derive(Deserialize)]
 pub struct WebhookCommit {
     #[serde(default)]
@@ -45,14 +33,13 @@ pub struct WebhookCommitAuthor {
     pub name: Option<String>,
 }
 
-/// First, trimmed line of a commit message - the subject shown in the frontend.
 fn commit_subject(commit: &WebhookCommit) -> Option<String> {
     let subject = commit.message.as_deref()?.lines().next()?.trim();
     (!subject.is_empty()).then(|| subject.to_string())
 }
 
-/// The pushed commit. For an annotated tag `after` is the tag object, which no
-/// fetch resolves as a commit, so the Git host's peeled SHA wins.
+/// `after` is the tag object for an annotated tag, and no fetch can resolve it as a commit. The Git
+/// host's peeled SHA is winning.
 fn head_commit_id(head: Option<&WebhookCommit>) -> Option<&str> {
     head.and_then(|c| c.id.as_deref())
 }
@@ -75,8 +62,6 @@ pub struct GitHubRepository {
     pub full_name: Option<String>,
 }
 
-// ── Gitea/Forgejo push payload ─────────────────────────────────────────────
-
 #[derive(Deserialize)]
 pub struct GiteaPushPayload {
     #[serde(rename = "ref")]
@@ -95,8 +80,6 @@ pub struct GiteaRepository {
     pub full_name: Option<String>,
 }
 
-// ── GitLab push payload ────────────────────────────────────────────────────
-
 #[derive(Deserialize)]
 pub struct GitLabPushPayload {
     #[serde(rename = "ref")]
@@ -114,8 +97,6 @@ pub struct GitLabProject {
     pub http_url: String,
     pub ssh_url: Option<String>,
 }
-
-// ── GitHub PR payload ──────────────────────────────────────────────────────
 
 #[derive(Deserialize)]
 pub struct GitHubPullRequestPayload {
@@ -164,8 +145,6 @@ pub struct GitHubUser {
     pub login: Option<String>,
 }
 
-// ── GitHub release payload ─────────────────────────────────────────────────
-
 #[derive(Deserialize)]
 pub struct GitHubReleasePayload {
     pub release: GitHubRelease,
@@ -177,8 +156,6 @@ pub struct GitHubRelease {
     pub tag_name: String,
     pub target_commitish: String,
 }
-
-// ── Gitea/Forgejo PR payload ───────────────────────────────────────────────
 
 #[derive(Deserialize)]
 pub struct GiteaPullRequestPayload {
@@ -230,8 +207,6 @@ pub struct GiteaUser {
     pub login: Option<String>,
 }
 
-// ── Gitea/Forgejo release payload ─────────────────────────────────────────
-
 #[derive(Deserialize)]
 pub struct GiteaReleasePayload {
     pub release: GiteaRelease,
@@ -244,8 +219,6 @@ pub struct GiteaRelease {
     pub target_commitish: Option<String>,
     pub sha: Option<String>,
 }
-
-// ── GitLab merge_request payload ───────────────────────────────────────────
 
 #[derive(Deserialize)]
 pub struct GitLabMergeRequestPayload {
@@ -291,16 +264,12 @@ pub struct GitLabCommit {
     pub id: String,
 }
 
-// ── GitLab release payload ─────────────────────────────────────────────────
-
 #[derive(Deserialize)]
 pub struct GitLabReleasePayload {
     pub project: GitLabProject,
     pub commit: Option<GitLabCommit>,
     pub tag: Option<String>,
 }
-
-// ── GitHub PR review payload ───────────────────────────────────────────────
 
 #[derive(Deserialize)]
 pub struct GitHubReviewPayload {
@@ -326,8 +295,6 @@ pub struct GitHubReviewPr {
     pub number: Option<u64>,
 }
 
-// ── Gitea/Forgejo PR review payload ────────────────────────────────────────
-
 #[derive(Deserialize)]
 pub struct GiteaReviewPayload {
     pub action: String,
@@ -350,101 +317,53 @@ pub struct GiteaReviewPr {
     pub number: Option<u64>,
 }
 
-// ── Normalised push event ──────────────────────────────────────────────────
-
-/// Git-host-agnostic push event extracted from any of the supported webhook
-/// payload shapes.
 pub struct ParsedPushEvent {
     pub commit_hash: Vec<u8>,
     pub repository_urls: Vec<String>,
     pub commit_message: Option<String>,
     pub author_name: Option<String>,
-    /// Branch name extracted from `refs/heads/<branch>`, or tag name from
-    /// `refs/tags/<tag>`. Always present for valid pushes.
     pub ref_name: String,
-    /// Whether the ref is a tag (`refs/tags/…`). False for branch pushes.
     pub is_tag: bool,
 }
 
-/// Outcome of parsing a push webhook payload. Separates a buildable push from a
-/// well-formed delivery with nothing to build - a branch/tag deletion or a Git host
-/// "test" webhook, both of which carry an all-zero `after` SHA - so the endpoint
-/// answers the latter with a 200 no-op rather than rejecting it as malformed.
 pub enum PushOutcome {
     Build(ParsedPushEvent),
     Ignored,
 }
 
-/// Pull-request event normalised across Git hosts. `commit_hash` is the PR head SHA.
 pub struct ParsedPullRequestEvent {
     pub commit_hash: Vec<u8>,
     pub repository_urls: Vec<String>,
-    /// Git-host-reported action: "opened", "synchronize", "reopened", "closed", "merged", etc.
     pub action: String,
-    /// PR head branch name (without `refs/heads/` prefix), if available.
     pub branch: Option<String>,
-    /// PR / MR number as the Git host knows it (GitHub `pull_request.number`,
-    /// Gitea/Forgejo `pull_request.number`, GitLab `object_attributes.iid`).
-    /// `None` when the payload omits it.
     pub pr_number: Option<u64>,
-    /// Login/username of the PR author.
     pub pr_author: Option<String>,
-    /// Login/username of the actor who triggered this event (the pusher on a
-    /// `synchronize`, the opener on `opened`). Distinct from `pr_author` when a
-    /// maintainer force-pushes onto a contributor's branch. Used to bypass the
-    /// approval gate when the actor is a trusted repo writer.
     pub sender: Option<String>,
-    /// `true` when the head repo is not the base repo (i.e. the PR comes
-    /// from a fork). `false` when same-repo. `None` when the payload lacks
-    /// enough information to decide - callers should treat as untrusted.
+    /// `None` is set when the payload cannot decide. Callers must treat it as untrusted.
     pub is_fork: Option<bool>,
-    /// Clone URL of the PR head repo when the PR is from a fork. Used by
-    /// `apply_trigger` to override the evaluation's `repository` field so
-    /// the worker fetches the commit from the fork (where it actually
-    /// exists) rather than the base repo. `None` for same-repo PRs and
-    /// for payloads that lack a `head.repo.clone_url`.
     pub head_repo_clone_url: Option<String>,
-    /// PR / MR title. PR webhook payloads don't carry the head commit message,
-    /// so this is used as the evaluation's display message for PR triggers.
     pub title: Option<String>,
 }
 
-/// Release/tag event. `commit_hash` is the SHA the tag points at.
 pub struct ParsedReleaseEvent {
     pub commit_hash: Vec<u8>,
     pub repository_urls: Vec<String>,
-    /// Tag name (e.g. "v1.2.3"), if available.
     pub tag: Option<String>,
 }
 
-/// Pull-request review submission, normalised across Git hosts. Drives the native
-/// maintainer-approval unpark (#369): only an `approved` review by a trusted
-/// repo writer releases an approval-gated run.
 pub struct ParsedPullRequestReviewEvent {
-    /// `true` only for a freshly submitted **approving** review. Edited,
-    /// dismissed, change-request, and plain-comment reviews are `false`.
     pub approved: bool,
-    /// Login/username of the reviewer.
     pub reviewer: Option<String>,
-    /// PR / MR number the review targets.
     pub pr_number: Option<u64>,
-    /// `owner/repo` slug from the payload's repository block.
     pub repository_full_name: Option<String>,
 }
 
-// ── Helpers ────────────────────────────────────────────────────────────────
-
-/// Validated push commit info.
 pub struct PushCommit {
     pub hash: Vec<u8>,
     pub ref_name: String,
     pub is_tag: bool,
 }
 
-/// Validates a push event ref/SHA pair and decodes the commit hash.
-///
-/// Returns `None` for branch/tag deletions (all-zero SHA) or unparseable hex.
-/// Handles both `refs/heads/<branch>` and `refs/tags/<tag>`.
 pub fn decode_push_commit(git_ref: &str, after: &str, git_host: &str) -> Option<PushCommit> {
     if after == "0000000000000000000000000000000000000000" {
         return None;
@@ -481,7 +400,6 @@ fn decode_sha_hex(s: &str, git_host: &str, context: &str) -> Option<Vec<u8>> {
     }
 }
 
-/// Normalise GitLab MR action strings to GitHub vocabulary.
 fn normalise_gitlab_mr_action(action: &str) -> String {
     match action {
         "open" => "opened",
@@ -509,8 +427,6 @@ fn gitlab_project_urls(project: &GitLabProject) -> Vec<String> {
     }
     urls
 }
-
-// ── ParsedPushEvent impl ───────────────────────────────────────────────────
 
 impl ParsedPushEvent {
     pub fn from_github(body: &[u8]) -> Option<PushOutcome> {
@@ -602,8 +518,6 @@ impl ParsedPushEvent {
         }))
     }
 }
-
-// ── ParsedPullRequestEvent impl ────────────────────────────────────────────
 
 impl ParsedPullRequestEvent {
     pub fn from_github(body: &[u8]) -> Option<Self> {
@@ -781,8 +695,6 @@ impl ParsedPullRequestEvent {
     }
 }
 
-// ── ParsedReleaseEvent impl ────────────────────────────────────────────────
-
 impl ParsedReleaseEvent {
     pub fn from_github(body: &[u8]) -> Option<Self> {
         let payload: GitHubReleasePayload = match serde_json::from_slice(body) {
@@ -851,8 +763,6 @@ impl ParsedReleaseEvent {
     }
 }
 
-// ── ParsedPullRequestReviewEvent impl ──────────────────────────────────────
-
 impl ParsedPullRequestReviewEvent {
     pub fn from_github(body: &[u8]) -> Option<Self> {
         let payload: GitHubReviewPayload = match serde_json::from_slice(body) {
@@ -889,8 +799,6 @@ impl ParsedPullRequestReviewEvent {
                 return None;
             }
         };
-        // Gitea/Forgejo carry the review verdict in `review.type`
-        // (`pull_request_review_approved` / `_rejected` / `_comment`).
         let approved = payload.action == "reviewed"
             && payload.review.review_type.as_deref() == Some("pull_request_review_approved");
         let reviewer = payload.sender.and_then(|s| s.username.or(s.login));
@@ -917,8 +825,6 @@ mod tests {
             _ => panic!("expected a buildable push"),
         }
     }
-
-    // ── push helpers ──────────────────────────────────────────────────────
 
     #[test]
     fn decode_push_commit_accepts_branch_ref() {
@@ -951,8 +857,6 @@ mod tests {
         assert!(decode_push_commit("", VALID_SHA, "github").is_none());
     }
 
-    // ── GitHub PR ─────────────────────────────────────────────────────────
-
     #[test]
     fn parse_github_pr_opened_event() {
         let body = format!(
@@ -976,8 +880,6 @@ mod tests {
         assert_eq!(ev.branch, Some("feature-x".to_string()));
         assert_eq!(ev.commit_hash, hex::decode(VALID_SHA).unwrap());
         assert_eq!(ev.repository_urls.len(), 2);
-        // PR title becomes the evaluation's display message (PR payloads carry no
-        // head commit message) (#391).
         assert_eq!(ev.title, Some("Add the widget".to_string()));
     }
 
@@ -1148,8 +1050,6 @@ mod tests {
         assert!(ParsedPullRequestEvent::from_github(body.as_bytes()).is_none());
     }
 
-    // ── Gitea PR ──────────────────────────────────────────────────────────
-
     #[test]
     fn parse_gitea_pr_opened_event() {
         let body = format!(
@@ -1194,8 +1094,6 @@ mod tests {
         assert_eq!(ev.branch, Some("fallback-branch".to_string()));
     }
 
-    // ── GitLab MR ─────────────────────────────────────────────────────────
-
     #[test]
     fn parse_gitlab_mr_open_normalised_to_opened() {
         let body = format!(
@@ -1226,8 +1124,6 @@ mod tests {
         assert_eq!(normalise_gitlab_mr_action("close"), "closed");
         assert_eq!(normalise_gitlab_mr_action("unknown"), "unknown");
     }
-
-    // ── GitHub release ────────────────────────────────────────────────────
 
     #[test]
     fn parse_github_release_with_sha_target_commitish() {
@@ -1264,8 +1160,6 @@ mod tests {
         }"#;
         assert!(ParsedReleaseEvent::from_github(body.as_bytes()).is_none());
     }
-
-    // ── Gitea release ─────────────────────────────────────────────────────
 
     #[test]
     fn parse_gitea_release_with_sha_field() {
@@ -1320,8 +1214,6 @@ mod tests {
         assert!(ParsedReleaseEvent::from_gitea(body.as_bytes()).is_none());
     }
 
-    // ── GitLab release ────────────────────────────────────────────────────
-
     #[test]
     fn parse_gitlab_release_event() {
         let body = format!(
@@ -1351,8 +1243,6 @@ mod tests {
         }"#;
         assert!(ParsedReleaseEvent::from_gitlab(body.as_bytes()).is_none());
     }
-
-    // ── PR review (#369) ──────────────────────────────────────────────────
 
     #[test]
     fn github_review_approved_by_maintainer() {
@@ -1421,8 +1311,6 @@ mod tests {
         let ev = ParsedPullRequestReviewEvent::from_gitea(body.as_bytes()).unwrap();
         assert!(!ev.approved);
     }
-
-    // ── Push commit subject ───────────────────────────────────────────────
 
     #[test]
     fn github_push_extracts_commit_subject_and_author() {

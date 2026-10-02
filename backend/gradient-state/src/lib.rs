@@ -4,10 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Declarative state management: the on-disk DTOs ([`config`]), pre-apply
-//! [`validation`], database [`provisioning`], and [`export`]. This root keeps
-//! the load entry point and the OIDC/SCIM group -> role resolution.
-
 mod config;
 pub mod export;
 mod provisioning;
@@ -25,12 +21,8 @@ use gradient_types::{ProjectId, RoleId};
 use sea_orm::DatabaseConnection;
 use std::collections::HashMap;
 
-/// Resolved at startup from [`StateRole::oidc_group`]: OIDC group name -> the
-/// `(project, role)` grants a user presenting that group receives on login.
 pub type OidcGroupRoles = HashMap<String, Vec<(ProjectId, RoleId)>>;
 
-/// Build the OIDC group -> grants map from declared roles. `role_ids` maps
-/// `(project_name, role_name)` to the provisioned `(ProjectId, RoleId)`.
 pub fn resolve_oidc_group_roles(
     config: &StateConfiguration,
     role_ids: &HashMap<(String, String), (ProjectId, RoleId)>,
@@ -56,12 +48,8 @@ pub fn resolve_oidc_group_roles(
     map
 }
 
-/// Resolved at startup from [`StateRole::scim_group`]: SCIM group name -> the
-/// `(project, role)` grants a member of that SCIM group receives.
 pub type ScimGroupRoles = HashMap<String, Vec<(ProjectId, RoleId)>>;
 
-/// Build the SCIM group -> grants map from declared roles. Mirrors
-/// [`resolve_oidc_group_roles`].
 pub fn resolve_scim_group_roles(
     config: &StateConfiguration,
     role_ids: &HashMap<(String, String), (ProjectId, RoleId)>,
@@ -87,10 +75,6 @@ pub fn resolve_scim_group_roles(
     map
 }
 
-/// Load and validate a state file without touching the database. Returns the
-/// human-readable validation errors (empty `Vec` = valid). Backs the
-/// `--state-validate` CLI flag so config mistakes surface at build/CI time
-/// instead of on server start.
 pub fn validate_state_file(path: &str) -> Result<Vec<String>, Box<dyn std::error::Error>> {
     let config = StateConfiguration::from_file(path)?;
     Ok(config

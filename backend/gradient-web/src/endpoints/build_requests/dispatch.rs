@@ -4,12 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! `POST /build-requests/{session}/dispatch` - finalises a build-request
-//! upload session by materialising the staged blobs into a
-//! `/nix/store/<hash>-source` path, persisting `cached_path` metadata,
-//! lazily creating a per-project `build-request` task, and queueing an
-//! evaluation for the scheduler to pick up.
-
 use super::types::ManifestEntry;
 use super::validation::{decode_blake3_hex, validate_manifest_path};
 use crate::access::has_permission;
@@ -73,9 +67,8 @@ const REMOTE_OVERRIDE_SCHEMES: &[&str] = &[
     "flake:",
 ];
 
-/// Defense in depth for `--override-input`: the CLI validates too, but the REST
-/// API is directly callable. gradient evaluates on the server, so only remote
-/// flake refs (and fetchable `/nix/store` paths) are accepted.
+/// The CLI is validating too, but the REST API is directly callable. Only remote flake refs and
+/// fetchable `/nix/store` paths are accepted because evaluation is happening on the server.
 pub(super) fn validate_remote_override(input_name: &str, url: &str) -> WebResult<()> {
     let mut chars = input_name.chars();
     let name_ok = matches!(chars.next(), Some(c) if c.is_ascii_alphabetic() || c == '_')
@@ -186,8 +179,6 @@ pub async fn post_dispatch(
     Ok(ok_json(response))
 }
 
-/// Materialise a source NAR into the cache and queue a build-request evaluation.
-/// Shared by the blob-manifest dispatch and the `nix`-feature source-NAR upload.
 pub(super) async fn finalize_build_request(
     state: &ServerState,
     project: gradient_types::ids::ProjectId,
@@ -247,25 +238,16 @@ pub(super) async fn finalize_build_request(
     Ok(response)
 }
 
-/// What the evaluator should read, and how to label it. `repository` is either a
-/// `/nix/store/<hash>-source` path for an uploaded source or a `git+…?rev=` URL
-/// for a remote one; the evaluator treats both as flake sources.
 pub(super) struct BuildRequestSource {
     pub repository: String,
-    /// Real commit hash for a remote source; the upload path has no commit and
-    /// passes a zero placeholder.
     pub commit_hash: Vec<u8>,
     pub commit_message: String,
     pub target: Option<String>,
     pub input_overrides: Vec<(String, String)>,
 }
 
-/// Queues one evaluation on the project's reserved `build-request` task,
-/// creating that task on first use. Shared by every build-request entry point.
-///
-/// Evaluations are marked `concurrent`: build requests are independent one-shot
-/// jobs, so they must not serialise behind each other on
-/// `uq_evaluation_one_active_per_task`, nor abort one another.
+/// Build-request evaluations are marked `concurrent`. Independent one-shot jobs must not serialise
+/// behind each other on `uq_evaluation_one_active_per_task` or abort one another.
 pub(super) async fn queue_build_request<C: ConnectionTrait>(
     tx: &C,
     state: &ServerState,

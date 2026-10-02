@@ -12,8 +12,6 @@ use super::url::{git_transport_url, parse_git_protocol_url};
 use crate::SourceError;
 use fixtures::{FAKE_SHA, FLUSH, ref_line, ref_line_with_caps};
 
-// ── git_transport_url ────────────────────────────────────────────────────
-
 #[test]
 fn git_transport_url_strips_git_plus_https() {
     assert_eq!(
@@ -37,8 +35,6 @@ fn git_transport_url_passes_through_bare_schemes_and_scp() {
         "git@github.com:u/r.git"
     );
 }
-
-// ── parse_git_protocol_url ───────────────────────────────────────────────
 
 #[test]
 fn parse_git_protocol_url_default_port() {
@@ -81,8 +77,6 @@ fn parse_git_protocol_url_missing_path_rejected() {
         Err(SourceError::InvalidUrl)
     ));
 }
-
-// ── read_ref_from_pktlines (HEAD) ─────────────────────────────────────────
 
 #[test]
 fn read_head_from_pktlines_basic() {
@@ -128,10 +122,8 @@ fn read_head_from_pktlines_empty_repo_returns_error() {
     assert!(matches!(err, SourceError::GitHashExtraction));
 }
 
-/// Reproduces the original bug: git-daemon keeps the connection open after
-/// the ref advertisement. With `read_to_end` this would block until timeout
-/// and then fail with EAGAIN. With incremental pkt-line reading it should
-/// return HEAD immediately after the flush packet, without reading further.
+/// git-daemon is keeping the connection open after the ref advertisement. `read_to_end` was
+/// blocking until timeout here.
 #[test]
 fn read_head_from_pktlines_server_keeps_connection_open() {
     use std::io::Write;
@@ -142,13 +134,11 @@ fn read_head_from_pktlines_server_keeps_connection_open() {
 
     let server = std::thread::spawn(move || {
         let (mut conn, _) = listener.accept().unwrap();
-        // Send ref advertisement then flush - but do NOT close the connection.
         let mut payload = Vec::new();
         payload.extend_from_slice(&ref_line_with_caps(FAKE_SHA, "HEAD", "multi_ack"));
         payload.extend_from_slice(FLUSH);
         conn.write_all(&payload).unwrap();
         conn.flush().unwrap();
-        // Keep connection open - sleep long enough that read_to_end would block.
         std::thread::sleep(std::time::Duration::from_secs(5));
         drop(conn);
     });
@@ -158,7 +148,6 @@ fn read_head_from_pktlines_server_keeps_connection_open() {
         .set_read_timeout(Some(std::time::Duration::from_secs(2)))
         .unwrap();
 
-    // This must return quickly (not block for 2+ seconds waiting for EOF/timeout).
     let start = std::time::Instant::now();
     let result = read_ref_from_pktlines(&mut stream, None).unwrap();
     let elapsed = start.elapsed();
@@ -173,8 +162,6 @@ fn read_head_from_pktlines_server_keeps_connection_open() {
     drop(stream);
     server.join().unwrap();
 }
-
-// ── fetch_head_commit ────────────────────────────────────────────────────
 
 fn commit_on(repo: &git2::Repository, branch: &str, message: &str) -> git2::Oid {
     let sig = git2::Signature::now("Ada", "ada@example.com").unwrap();

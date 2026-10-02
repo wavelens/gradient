@@ -4,14 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Mock WebSocket authority for driving a peer (a worker or a proxy) from a test.
-//!
-//! [`MockProtoServer`] binds `127.0.0.1:0` and accepts one connection per
-//! [`MockProtoServer::accept`]. The resulting [`MockServerConn`] sends and
-//! receives typed frames and scripts the authority side: handshake, job list,
-//! offers, score collection, assignment and NAR passthrough, each wait bounded by
-//! [`SCRIPT_TIMEOUT`].
-
 use crate::constants::BULK_CHUNK_SIZE;
 use crate::messages::{
     CandidateScore, ClientMessage, GradientCapabilities, Job, JobCandidate, JobKind, PROTO_VERSION,
@@ -26,14 +18,12 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{WebSocketStream, accept_async};
 
-/// A mock WebSocket server bound to a random local port.
 pub struct MockProtoServer {
     listener: TcpListener,
     url: String,
 }
 
 impl MockProtoServer {
-    /// Bind to `127.0.0.1:0` and return the server.
     pub async fn bind() -> Self {
         let listener = TcpListener::bind("127.0.0.1:0")
             .await
@@ -43,12 +33,10 @@ impl MockProtoServer {
         Self { listener, url }
     }
 
-    /// The `ws://` URL to pass to `ProtoConnection::open`.
     pub fn url(&self) -> &str {
         &self.url
     }
 
-    /// Accept one incoming WebSocket connection.
     pub async fn accept(&self) -> MockServerConn {
         let (stream, _) = self.listener.accept().await.expect("accept failed");
         let socket = accept_async(stream)
@@ -58,13 +46,11 @@ impl MockProtoServer {
     }
 }
 
-/// Server-side endpoint of a mock WebSocket connection.
 pub struct MockServerConn {
     socket: WebSocketStream<TcpStream>,
 }
 
 impl MockServerConn {
-    /// Send a [`ServerMessage`] to the connected client.
     pub async fn send(&mut self, msg: ServerMessage) -> Result<()> {
         let bytes = msg.encode().context("failed to serialise ServerMessage")?;
         self.socket
@@ -73,8 +59,6 @@ impl MockServerConn {
             .context("mock server WebSocket send failed")
     }
 
-    /// Receive the next [`ClientMessage`] from the connected client.
-    /// Skips ping/pong frames transparently.
     pub async fn recv(&mut self) -> Result<ClientMessage> {
         loop {
             match self.socket.next().await {
@@ -96,7 +80,6 @@ impl MockServerConn {
         }
     }
 
-    /// Close the server side gracefully.
     pub async fn close(&mut self) {
         let _ = self.socket.close(None).await;
     }
@@ -104,8 +87,6 @@ impl MockServerConn {
 
 pub const SCRIPT_TIMEOUT: Duration = Duration::from_secs(10);
 
-/// One upload the mock granted: what was asked, the passed-through chunks (empty for a
-/// presigned grant) and the metadata the peer finished with.
 #[derive(Debug)]
 pub struct ServedUpload {
     pub job_id: String,
@@ -132,7 +113,6 @@ impl ServedUpload {
     }
 }
 
-/// A NAR a peer passed through to the mock, with the metadata its `UploadFinished` carried.
 #[derive(Debug)]
 pub struct PushedNar {
     pub job_id: String,
@@ -249,8 +229,6 @@ impl MockServerConn {
         .await
     }
 
-    /// Grant the next upload request with `target`, collect its passed-through chunks
-    /// and acknowledge its `UploadFinished` with `UploadCommitted{Ok}`.
     pub async fn serve_upload(&mut self, target: GrantTarget) -> Result<ServedUpload> {
         let (job_id, request_id, object, size) = self
             .recv_until(|msg| match msg {
@@ -267,8 +245,8 @@ impl MockServerConn {
         self.send(ServerMessage::UploadGrant { request_id, target })
             .await?;
 
-        // The finish rides the control lane and may overtake the passthrough's final
-        // chunk on the bulk lane, as the real server allows.
+        // The finish is riding the control lane and can overtake the passthrough's final chunk on
+        // the bulk lane. The real server is allowing this too.
         enum Arrival {
             Chunk(Vec<u8>, u64, bool),
             Finished(UploadMetadata),

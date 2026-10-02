@@ -4,35 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! `derivation.walked`: the derivation's full record (outputs, every declared
-//! edge, input sources) is in. Replaces `derivation_build.edges_complete` and
-//! `edges_unresolved`: a stub row now exists for every named dependency, so an
-//! edge is never deferred and never unresolvable.
-//!
-//! There is deliberately no backfill. `walked` seeds false everywhere and the
-//! graph is re-derived, because the only value to seed it from is
-//! `edges_complete`, the flag being retired for being wrong, and `walked` is
-//! monotonic with exactly one writer (`WALKED_UPSERT`, reached only through an
-//! evaluation's batch ingest), so an inherited error is permanent and no sweep
-//! would ever repair it. Seeding false trades a rebuild for a graph that is
-//! true.
-//!
-//! Re-derivation needs an evaluation, so this requeues the active ones. The
-//! four parks left alone are owned elsewhere: `approval` IS the fork-PR
-//! approval gate and requeueing it would bypass it, and `no_cache`,
-//! `cache_storage_full` and `aborting` have their own hooks. A legacy
-//! `waiting_reason` carries no `kind` key and means `workers`, hence the
-//! coalesce. Targets `Queued` rather than `Waiting`: this runs before the
-//! scheduler starts, and a `Building` evaluation parked to `Waiting` would go
-//! straight back to `Building` without ever re-evaluating.
-//!
-//! Cost at first start: one full evaluation per active row plus a full closure
-//! re-walk each, unpruned, in one burst, since the worker-side prune requires
-//! `walked`. Dropping the two columns makes this a stop-migrate-start deploy
-//! rather than a rolling one: an old server process still selecting
-//! `derivation_build.edges_complete` fails the moment the column goes. `DOWN`
-//! seeds `edges_complete` from an all-false `walked`, so a rollback inherits an
-//! ungated graph and needs the same re-evaluation.
+//! Dropping the two columns is making this a stop-migrate-start deploy. An old server still
+//! selecting `derivation_build.edges_complete` is failing once the column is gone. The requeue is
+//! targeting `Queued` rather than `Waiting`. A `Building` evaluation parked to `Waiting` would
+//! return to `Building` without re-evaluating.
 
 use sea_orm_migration::prelude::*;
 use sea_orm_migration::sea_orm::ConnectionTrait;

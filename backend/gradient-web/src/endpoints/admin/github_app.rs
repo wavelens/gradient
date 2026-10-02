@@ -4,9 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! `POST /admin/github-app/manifest`, `GET /admin/github-app/callback`,
-//! `GET /admin/github-app/credentials`.
-
 use crate::error::{WebError, WebResult, require_superuser};
 use crate::helpers::ok_json;
 use axum::extract::{Query, State};
@@ -20,7 +17,6 @@ use tracing::warn;
 
 #[derive(Deserialize, Default, Debug)]
 pub struct ManifestRequest {
-    /// Defaults to `github.com` if omitted.
     pub host: Option<String>,
 }
 
@@ -78,15 +74,9 @@ pub async fn request_manifest(
     }))
 }
 
-/// Unauthenticated callback target for GitHub's manifest redirect.
-///
-/// GitHub redirects the operator's browser here from `https://github.com/...`
-/// after the manifest is confirmed; that cross-site navigation never carries
-/// our `Authorization: Bearer …` header, so the route cannot live behind the
-/// usual auth middleware.
-///
-/// CSRF/identity is recovered from the one-shot `state` token that was issued
-/// (and bound to a superuser) at `/admin/github-app/manifest`.
+/// GitHub's cross-site redirect is carrying no bearer header. The route cannot sit behind the auth
+/// middleware. CSRF and identity are recovered from the one-shot `state` token bound to a superuser
+/// at `/admin/github-app/manifest`.
 pub async fn callback(
     State(state): State<Arc<ServerState>>,
     Query(q): Query<CallbackQuery>,

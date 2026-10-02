@@ -4,17 +4,12 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Fake [`WorkerStore`] for testing worker executor code without a real nix-daemon.
-
 use anyhow::Result;
 use async_trait::async_trait;
 use gradient_wire::traits::WorkerStore;
 use std::collections::HashSet;
 use std::sync::Mutex;
 
-/// In-memory [`WorkerStore`] backed by a set of present paths.
-///
-/// `has_path()` returns `true` if the path was added via `with_present_path`.
 #[derive(Debug, Default)]
 pub struct FakeWorkerStore {
     present: Mutex<HashSet<String>>,
@@ -43,7 +38,6 @@ impl FakeWorkerStore {
         self
     }
 
-    /// Build from a `FakeNixStoreProvider`'s present paths.
     pub fn from_present_paths(paths: HashSet<String>) -> Self {
         Self {
             present: Mutex::new(paths),
@@ -64,8 +58,8 @@ impl WorkerStore for FakeWorkerStore {
     }
 }
 
-/// A path that follows from the bytes, as the daemon's would, without nix's
-/// hashing: the store shape with the NAR's length and a byte sum in the hash slot.
+/// The path is following from the bytes like the daemon's would, without nix hashing. The hash slot
+/// is holding the NAR length and a byte sum.
 pub fn fake_nar_path(name: &str, nar: &[u8]) -> String {
     let sum: u64 = nar.iter().map(|b| u64::from(*b)).sum();
     format!("/nix/store/{:016x}{:016x}-{name}", nar.len(), sum)

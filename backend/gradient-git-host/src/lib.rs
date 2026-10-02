@@ -4,11 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Git host integration layer: per-Git-host reporters, webhook parsing, signature
-//! verification, and GitHub App auth, dispatched through one [`GitHostProvider`]
-//! trait + [`GitHostRegistry`]. Adding a Git host is a single `providers/*` impl plus
-//! one [`GitHostRegistry::with_builtin`] registration.
-
 pub mod git_push;
 pub mod github_app;
 pub mod pr;

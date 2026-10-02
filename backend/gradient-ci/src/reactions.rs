@@ -4,10 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! The thumbs-up/-down Gradient posts back on the `/gradient` PR comment that
-//! triggered an evaluation, once that evaluation settles. Best-effort: the
-//! reaction is decoration on a check that already reported.
-
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_types::*;
 use tracing::warn;
@@ -30,9 +26,8 @@ pub async fn react_to_source_comment_on_terminal(
     let Some(raw) = evaluation.source_comment.as_ref() else {
         return;
     };
-    // PR-triggered evals stamp `source_comment` with just `{pr_number, pr_author}`
-    // (no `comment_id`) so the UI can show "PR #42"; there's no comment to react
-    // to, so skip silently rather than warning about a "malformed" payload.
+    // PR-triggered evaluations are stamping `source_comment` without a `comment_id`. No comment is
+    // there to react to, and the skip must stay silent.
     if raw.get("comment_id").is_none() {
         return;
     }
@@ -73,8 +68,6 @@ fn parse_source_comment(value: &serde_json::Value) -> Option<ReactionTarget> {
 mod tests {
     use super::parse_source_comment;
 
-    /// A PR-triggered eval stamps only `{pr_number, pr_author}`; there is no
-    /// comment behind it, so the target must not parse.
     #[test]
     fn a_stamp_without_a_comment_is_not_a_reaction_target() {
         assert!(

@@ -4,18 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Integration tests for the `GET /api/v1/tasks/{project}/{task}/evaluations`
-//! search filters (#564).
-//!
-//! The `attr` filter matches an evaluation's *wildcard*, set when the row is
-//! created, so it answers while an evaluation is still `Queued` - unlike entry
-//! points, which only exist once derivations have resolved. That is the
-//! behaviour `attr_filter_matches_queued_evaluation` pins.
-//!
-//! Every request (public project, so no membership check) consumes these
-//! mocked reads before the handler's own: session by jti, session update, user,
-//! project by name, task by project and name.
-
 #![expect(
     clippy::unwrap_used,
     reason = "test scaffolding: a fixture helper that cannot build its value should fail the test loudly"
@@ -99,8 +87,6 @@ fn with_task(db: MockDatabase) -> MockDatabase {
         .append_query_results([vec![task_row()]])
 }
 
-/// The two grouped rollups and the eval-job lookup `evaluations_to_summaries`
-/// takes place after loading commits. Empty is a valid result set for all three.
 fn with_summary_rollups(db: MockDatabase) -> MockDatabase {
     db.append_query_results([Vec::<commit::Model>::new()])
         .append_query_results([Vec::<commit::Model>::new()])
@@ -173,8 +159,6 @@ fn rejects_unknown_status() {
     });
 }
 
-/// `attr` names one concrete attribute path; wildcard syntax there would make
-/// "does this evaluation cover my attr" ambiguous in both directions.
 #[test]
 fn rejects_wildcard_syntax_in_attr() {
     run(async {
@@ -199,8 +183,6 @@ fn rejects_wildcard_syntax_in_attr() {
     });
 }
 
-/// A hash nothing was ever evaluated at is an empty result, not a 404 - the
-/// caller is asking whether an evaluation exists.
 #[test]
 fn unknown_commit_returns_empty_list() {
     run(async {
@@ -223,9 +205,6 @@ fn unknown_commit_returns_empty_list() {
     });
 }
 
-/// The core of #564: an evaluation that has not produced a single entry point
-/// yet still answers "yes, this attr is in flight", because the match is on the
-/// wildcard it was created with.
 #[test]
 fn attr_filter_matches_queued_evaluation() {
     run(async {

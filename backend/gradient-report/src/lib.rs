@@ -4,14 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Snapshot one evaluation, the instance context that explains it, and its
-//! failed-build logs into a SQLite file a maintainer can diagnose from without
-//! access to the instance.
-//!
-//! Fetching from Postgres and redacting-and-writing are deliberately separate:
-//! the redaction path takes rows directly, so what the file ends up containing
-//! is testable without a database.
-
 mod config_snapshot;
 mod extract;
 mod guarantee;
@@ -39,22 +31,13 @@ use gradient_types::RuntimeConfig;
 use sea_orm::ConnectionTrait;
 use sea_orm::prelude::Uuid;
 
-/// Everything the generator needs that is not the database or the options.
 pub struct ReportContext<'a> {
     pub logs: &'a dyn LogStorage,
     pub config: &'a RuntimeConfig,
 }
 
-/// Write one evaluation's report to `out`.
-///
-/// Fetching is async and writing executes on a blocking thread: a `rusqlite`
-/// connection is not `Send`, so holding one across an await would make the whole
-/// handler future non-`Send`. Splitting the phases is what the pure `write_rows`
-/// half was for.
-///
-/// `evaluation` and `project` are the only two scopes the specs take, and they
-/// are bound as uuids: Postgres has no `uuid = text` operator, so passing their
-/// text form fails every scoped query rather than matching nothing.
+/// Fetching is async and writing is running on a blocking thread. A `rusqlite` connection is not
+/// `Send`, and holding one across an await would make the handler future non-`Send`.
 pub async fn generate_report<C: ConnectionTrait>(
     db: &C,
     ctx: &ReportContext<'_>,
@@ -115,7 +98,6 @@ pub async fn generate_report<C: ConnectionTrait>(
     .map_err(|e| anyhow::anyhow!("report writer panicked: {e}"))?
 }
 
-/// Pulls this crate into a binary that otherwise references nothing from it, so
-/// the statements it declares with `gradient_db::sql!` reach the plan gate's
-/// registry. A linker drops an rlib nothing mentions, registry entries included.
+/// A linker is dropping an rlib nothing mentions, registry entries included. Calling this is
+/// pulling the `gradient_db::sql!` statements into the plan gate registry.
 pub const fn link() {}

@@ -4,21 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Background loops that poll the DB and enqueue jobs into the in-memory scheduler.
-//!
-//! Every loop is a child of one supervision tree (`gradient_util::supervision`):
-//! a pass that panics or errors is logged and the loop restarts with backoff, a
-//! pass past its budget is cancelled in place, and shutdown stops the tree.
-//!
-//! Split across submodules by concern:
-//! - [`background`] - consistency check, worker liveness, lost-completion watchdog, and metrics passes
-//! - [`eval`] - `assign_queued_evals`: finds `Queued` evaluations and enqueues `FlakeJob`s
-//! - [`build`] - the build dispatch actor: admits the shared builds that entered `Queued` (the startable-set moves) and enqueues `BuildJob`s, resyncing against every `Queued` shared build on a slow period
-//!
-//! `trigger_firing::fire_once` fires polling/time triggers and creates evaluations.
-//!
-//! The tracker is a per-instance cache of candidates and scores. Nothing it holds
-//! decides a hand-out: the claim does, in Postgres (`gradient_db::scheduling::assignment_record::claim_assignment`).
+//! The tracker is a per-instance cache of candidates and scores. Nothing in it is deciding a
+//! hand-out. The claim in Postgres is the arbiter
+//! (`gradient_db::scheduling::assignment_record::claim_assignment`).
 
 use std::future::Future;
 use std::sync::Arc;
@@ -40,21 +28,14 @@ pub(crate) use build::{admit_startable_moves, resync_startable_set};
 pub(crate) use eval::assign_queued_evals;
 pub(crate) use eval::project_id_for_eval;
 
-/// Tick interval shared by the eval and build dispatch loops.
 pub(crate) const ASSIGN_TICK_SECS: u64 = 5;
 pub(super) const ASSIGN_TICK: Duration = Duration::from_secs(ASSIGN_TICK_SECS);
-/// How often the build dispatcher reads the whole startable set instead of what moved.
 pub(super) const STARTABLE_RESYNC: Duration = Duration::from_secs(60);
-/// A dispatch pass past this is cancelled and retried on the next tick.
 pub(super) const ASSIGN_BUDGET: Duration = Duration::from_secs(120);
 const METRICS_BUDGET: Duration = Duration::from_secs(60);
 const CONSISTENCY_BUDGET: Duration = Duration::from_secs(600);
-/// Repair tick for evaluations whose terminal job report was lost. Detection
-/// latency is this plus the watchdog's own grace, so a minute is ample.
 const EVAL_WATCHDOG_TICK: Duration = Duration::from_secs(60);
 
-/// Registers the scheduler node (core actor plus the three dispatch passes) and
-/// the maintenance passes on the process supervision tree.
 pub fn start_assign_loops(scheduler: Arc<Scheduler>) {
     for spec in child_specs(&scheduler) {
         scheduler.state.shutdown.supervise(spec);
@@ -164,7 +145,6 @@ fn child_specs(scheduler: &Arc<Scheduler>) -> Vec<ChildSpec> {
     children
 }
 
-/// Woken by every created evaluation; the tick covers requeues and restarts.
 fn cluster_assign_spec(scheduler: &Arc<Scheduler>) -> ChildSpec {
     let wake = Arc::clone(&scheduler.cluster_wake);
     let scheduler = Arc::clone(scheduler);

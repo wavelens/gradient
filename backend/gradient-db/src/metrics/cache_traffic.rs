@@ -4,16 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Per-instance aggregation of served NAR traffic into the `cache_metric`
-//! minute bucket.
-//!
-//! Every served NAR used to run its own upsert on the `(cache, bucket_time)`
-//! row, so concurrent downloads of one cache serialised on that row lock: 2.6M
-//! calls at 14.6 ms mean, almost all of it lock wait (#644). A serve now adds
-//! into an in-memory map and the flush pass writes each bucket's sums once, so
-//! the row takes one write per cache per interval per instance. A flush that
-//! fails drops that interval's numbers: the accumulator is telemetry and must
-//! never hold a serve up or grow without bound.
+//! Serves are accumulating in memory, and a flush is writing each bucket once (#644).
+//! A per-serve upsert was serialising concurrent downloads of one cache on one row lock.
+//! A failed flush is dropping its interval, because telemetry must never hold a serve up.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -29,7 +22,6 @@ use uuid::Uuid;
 
 use crate::DbContext;
 
-/// Bytes and NAR count accumulated for one `(cache, bucket)` pair.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Traffic {
     pub bytes: i64,
@@ -50,8 +42,6 @@ impl CacheTraffic {
         Arc::new(Self::new())
     }
 
-    /// Add one served NAR of `bytes` to `bucket`. Never fails and never waits
-    /// on the database, so it is safe on the request path.
     pub fn record(&self, cache: CacheId, bucket: NaiveDateTime, bytes: i64) {
         let mut buckets = self.buckets.lock();
         let entry = buckets.entry((cache, bucket)).or_default();
@@ -59,8 +49,6 @@ impl CacheTraffic {
         entry.nars = entry.nars.saturating_add(1);
     }
 
-    /// Take everything accumulated so far. Serves landing after this call go
-    /// into the next interval's map.
     pub fn take(&self) -> Vec<(CacheId, NaiveDateTime, Traffic)> {
         let mut buckets = self.buckets.lock();
         buckets
@@ -70,15 +58,12 @@ impl CacheTraffic {
     }
 }
 
-/// The minute bucket a serve at `at` belongs to.
 pub fn minute_bucket(at: NaiveDateTime) -> NaiveDateTime {
     at.with_second(0)
         .and_then(|t| t.with_nanosecond(0))
         .unwrap_or(at)
 }
 
-/// Write every accumulated bucket. Concurrent flushes from several instances
-/// add into the same row, which the additive upsert makes safe.
 pub async fn flush(ctx: &DbContext, traffic: &CacheTraffic) {
     for (cache, bucket, sample) in traffic.take() {
         if let Err(e) = ctx
@@ -91,7 +76,6 @@ pub async fn flush(ctx: &DbContext, traffic: &CacheTraffic) {
     }
 }
 
-/// The flush pass as a supervised child.
 pub fn child_spec(ctx: DbContext, traffic: Arc<CacheTraffic>) -> ChildSpec {
     let secs = ctx.config.metrics_args.cache_flush_interval_secs.max(1);
 
@@ -111,9 +95,8 @@ pub fn child_spec(ctx: DbContext, traffic: Arc<CacheTraffic>) -> ChildSpec {
     )
 }
 
-/// A supervised pass is cancelled by the shutdown token before it can run, so
-/// the last interval is written by a tracked task that wakes on that token and
-/// is waited for by the drain.
+/// A supervised pass is cancelled by the shutdown token before it can run.
+/// A tracked task is waking on that token to write the last interval before the drain.
 pub fn flush_on_shutdown(ctx: DbContext, traffic: Arc<CacheTraffic>) {
     let shutdown = ctx.shutdown.clone();
 
@@ -132,9 +115,6 @@ crate::sql! {
         params = [NewUuid, CacheId, Now, Int(4096), Int(1)];
 }
 
-/// Add one instance's sums into the `(cache, bucket_time)` row. Additive, so
-/// neither a concurrent instance's flush nor a later interval of this one's
-/// loses what the row already holds.
 fn add_traffic_stmt(cache: CacheId, bucket: NaiveDateTime, traffic: Traffic) -> Statement {
     ADD_TRAFFIC.bind([
         sea_orm::Value::Uuid(Some(Uuid::now_v7())),
@@ -171,8 +151,6 @@ mod tests {
             .collect()
     }
 
-    /// The point of #644: two serves of one cache inside one bucket are one
-    /// statement, carrying both the summed bytes and the count.
     #[tokio::test]
     async fn two_serves_in_one_bucket_flush_as_one_upsert() {
         let db = MockDatabase::new(Backend::Postgres)

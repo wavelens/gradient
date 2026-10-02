@@ -4,13 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Integration tests for the `create_project` / `create_cache` permission gate on
-//! `PUT /api/v1/projects` and `PUT /api/v1/caches` (issue #470).
-//!
-//! Each gate short-circuits before any DB write, so the rejection paths need
-//! only the auth query chain. The allow path is proven by reaching the
-//! name-taken pre-check (409) with the gate satisfied.
-
 #![expect(
     clippy::unwrap_used,
     reason = "test scaffolding: a fixture helper that cannot build its value should fail the test loudly"

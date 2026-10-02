@@ -7,7 +7,6 @@
 use hmac::{Hmac, KeyInit, Mac};
 use sha2::Sha256;
 
-/// `sha256=<hex HMAC-SHA256(secret, body)>`, the `X-Gradient-Signature` value.
 pub fn sign(secret: &[u8], body: &[u8]) -> Option<String> {
     let mut mac = <Hmac<Sha256> as KeyInit>::new_from_slice(secret).ok()?;
     mac.update(body);

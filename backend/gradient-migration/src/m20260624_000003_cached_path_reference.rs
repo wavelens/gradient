@@ -4,14 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Normalize `cached_path.references` (a space-separated `hash-name` text blob)
-//! into its own relation. The self-heal paths found referrers with `references
-//! LIKE '%hash%'`, a full table scan per call; the indexed `reference_hash`
-//! column makes those exact lookups. `position` records each reference's index in
-//! the order the worker sent it (nix `StorePathSet` / store-path order), so the
-//! narinfo `References:` line and the signature fingerprint reconstruct verbatim
-//! via `ORDER BY position` - no dependency on Postgres collation. Backfilled from
-//! the existing column before it is dropped.
+//! `position` is keeping the order the worker sent. The narinfo `References:` line and the
+//! signature fingerprint are rebuilt via `ORDER BY position`, independent of Postgres collation.
 
 use sea_orm_migration::prelude::*;
 use sea_orm_migration::sea_orm::ConnectionTrait;

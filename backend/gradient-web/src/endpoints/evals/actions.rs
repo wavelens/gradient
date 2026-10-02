@@ -29,7 +29,7 @@ pub async fn post_evaluation(
     let ctx =
         EvalAccessContext::load(&state, evaluation_id, &Some(user.clone()), api_key_ref).await?;
 
-    // Mutations require explicit project membership even when the project is public.
+    // Mutations require explicit project membership even on a public project.
     if !is_project_member(&state, user.id, ctx.project_id, api_key_ref).await? {
         return Err(WebError::not_found("Evaluation"));
     }

@@ -4,12 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Git source operations: remote ref polling ([`check_task_updates`]),
-//! commit metadata ([`get_commit_info`]), and HEAD resolution
-//! ([`resolve_head`]). The shared per-cycle state lives in
-//! [`context::TaskGitContext`]; the public entry points below are thin
-//! wrappers around it.
-
 mod commit_info;
 mod context;
 mod pktline;
@@ -51,8 +45,6 @@ pub async fn get_commit_info(
         .await
 }
 
-/// The tip of `branch` (the remote HEAD when `None`) with its commit metadata, in
-/// one shallow fetch. Reads nothing from the database beyond the deploy key.
 #[instrument(skip(ctx), fields(task_id = %task.id, task_name = %task.name))]
 pub async fn head_commit(
     ctx: &DbContext,
@@ -65,9 +57,6 @@ pub async fn head_commit(
         .await
 }
 
-/// Best-effort: resolve the task's current HEAD (or branch) commit, message,
-/// and author name. Used for manual trigger fires where we want a concrete
-/// commit even if the polling source says "no update".
 #[instrument(skip(ctx), fields(task_id = %task.id, task_name = %task.name))]
 pub async fn resolve_head(
     ctx: &DbContext,
@@ -79,10 +68,6 @@ pub async fn resolve_head(
     Ok((commit_hash, commit.message, commit.author_name))
 }
 
-/// Resolve a ref on an arbitrary remote repository to its commit hash, without
-/// a task to hang it off. `branch = None` resolves the remote HEAD (the default
-/// branch). SSH URLs are authenticated with `project`'s deploy key, the same key
-/// the worker later uses to fetch the flake.
 #[instrument(skip(ctx, project), fields(project_id = %project.id, repository = %url))]
 pub async fn resolve_remote_ref(
     ctx: &DbContext,

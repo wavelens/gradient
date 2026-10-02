@@ -4,11 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! `GET /api/v1/caches/{cache}/upstream_caches` is `Readable`: anonymous callers may
-//! list a public cache's upstream caches so the cache page can advertise every
-//! trusted-public-key needed to consume pull-through paths, while a private
-//! cache stays hidden. Regression for #527.
-
 #![expect(
     clippy::unwrap_used,
     reason = "test scaffolding: a fixture helper that cannot build its value should fail the test loudly"

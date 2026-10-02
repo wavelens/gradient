@@ -4,9 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! The evaluation list links each evaluation to its eval job on the Job Board.
-//! Eval jobs (`kind = 0`) are a sliver of `dispatched_job`, so the index covers only them.
-
 use sea_orm_migration::prelude::*;
 use sea_orm_migration::sea_orm::ConnectionTrait;
 

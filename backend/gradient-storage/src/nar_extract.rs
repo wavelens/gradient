@@ -4,17 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Single-path extractor for zstd-compressed NARs in `nar_storage`.
-//!
-//! Buffers the full compressed NAR in memory. When the requested path is a
-//! file inside the NAR, returns the file's bytes. When it is a directory,
-//! collects the subtree into a tar archive and zstd-compresses it at a low
-//! level (cheap CPU; large empty regions still compact well).
-//!
-//! Intended for build artefacts (hydra-build-products, manifests, per-path
-//! downloads) where the producer chose a small entry - not for streaming
-//! arbitrarily large outputs.
-
 use async_compression::tokio::bufread::ZstdDecoder;
 use bytes::Bytes;
 use futures::StreamExt as _;
@@ -35,16 +24,14 @@ pub enum ExtractError {
 
 #[derive(Debug)]
 pub enum Extracted {
-    /// The path resolved to a regular file. `contents` is the decoded body.
     File {
         contents: Vec<u8>,
         executable: bool,
         size: u64,
     },
-    /// The path resolved to a directory. `tar_zst` is a `tar.zst` archive of
-    /// the subtree, with paths rooted at the matched directory's basename
-    /// (so extracting recreates `<basename>/...`).
-    Directory { tar_zst: Vec<u8> },
+    Directory {
+        tar_zst: Vec<u8>,
+    },
 }
 
 pub async fn extract_path_from_nar_bytes(
@@ -56,10 +43,6 @@ pub async fn extract_path_from_nar_bytes(
     extract_path_from_reader(decoder, relative_path).await
 }
 
-/// Wraps a compressed `.nar.zst` byte stream (as returned by
-/// `NarStore::get_stream`) into an `AsyncRead` over the *decompressed* NAR, so a
-/// caller can extract or enumerate a single path without ever buffering the
-/// whole compressed object in memory.
 pub fn nar_reader_from_stream(
     stream: BoxStream<'static, anyhow::Result<Bytes>>,
 ) -> impl tokio::io::AsyncRead + Unpin {
@@ -82,9 +65,6 @@ where
 
     let mut stream = parse_nar(reader);
     let mut stack: Vec<Vec<u8>> = Vec::new();
-    // Tar collector: started when we enter a directory matching the target.
-    // The recorded depth is `stack.len()` *immediately after* pushing the
-    // matched directory; we finish when EndDirectory pops back below it.
     let mut collector: Option<Collector> = None;
 
     while let Some(ev) = stream.next().await {
@@ -96,14 +76,12 @@ where
                     stack.push(name.to_vec());
                 }
                 if let Some(c) = collector.as_mut() {
-                    // Inside a matched subtree: emit a directory entry.
                     let path = c.entry_path(&stack, None);
                     if !path.is_empty() {
                         c.append_dir(&path)?;
                     }
                 } else if path_matches_stack(&stack, &target) {
                     let mut c = Collector::new(basename.clone(), stack.len());
-                    // Emit the root directory itself.
                     c.append_dir(&basename)?;
                     collector = Some(c);
                 }
@@ -158,10 +136,8 @@ where
     }
 
     if let Some(c) = collector {
-        // Reached EOF while still in the collector - happens when the matched
-        // directory is the NAR root and its closing EndDirectory is the final
-        // event before stream end (parser emits None after EndDirectory at
-        // level 0).
+        // The NAR root as matched directory is ending the stream right after its closing
+        // EndDirectory. The collector is then still open at EOF.
         return Ok(Extracted::Directory {
             tar_zst: c.finish()?,
         });
@@ -169,13 +145,8 @@ where
     Err(ExtractError::NotFound)
 }
 
-// ── Internals ────────────────────────────────────────────────────────────────
-
 struct Collector {
     basename: String,
-    /// `stack.len()` at the moment we entered the matched directory. We
-    /// finish when EndDirectory has fired with `stack.len() == depth`
-    /// (i.e. we are about to pop the matched directory itself).
     depth: usize,
     builder: tar::Builder<Vec<u8>>,
 }
@@ -191,10 +162,6 @@ impl Collector {
         }
     }
 
-    /// Build a tar entry path: `<basename>/<components-below-match>[/<name>]`.
-    /// Components below match are `stack[depth..]` (the entries inside the
-    /// matched directory), joined with `/`. `name` is appended for File and
-    /// Symlink events; pass `None` for StartDirectory.
     fn entry_path(&self, stack: &[Vec<u8>], name: Option<&[u8]>) -> String {
         let mut parts: Vec<String> = vec![self.basename.clone()];
         for component in stack.iter().skip(self.depth) {
@@ -245,8 +212,6 @@ impl Collector {
 
     fn finish(self) -> io::Result<Vec<u8>> {
         let tar_bytes = self.builder.into_inner()?;
-        // zstd::encode_all is sync; we're already fully buffered, so this is
-        // a normal in-memory transform - no async wrapper buys us anything.
         zstd::encode_all(std::io::Cursor::new(tar_bytes), TAR_ZSTD_LEVEL)
     }
 }
@@ -263,9 +228,6 @@ fn path_matches_file(stack: &[Vec<u8>], name: &[u8], target: &[&str]) -> bool {
     name == target[target.len() - 1].as_bytes()
 }
 
-/// Stack-vs-target match for the moment a directory is entered: stack has
-/// just been pushed with the directory's name, so its length must equal the
-/// target's length and every component must match.
 fn path_matches_stack(stack: &[Vec<u8>], target: &[&str]) -> bool {
     if stack.len() != target.len() {
         return false;

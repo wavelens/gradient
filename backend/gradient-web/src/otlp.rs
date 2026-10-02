@@ -4,13 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Optional OpenTelemetry (OTLP) metric push export (#212).
-//!
-//! Enabled by `GRADIENT_METRICS_OTLP_ENDPOINT`. A background task refreshes a cached
-//! snapshot of the same values the Prometheus endpoint computes; OTLP observable
-//! gauges (whose callbacks are synchronous and so can't query the DB) read that
-//! cache and are pushed on `GRADIENT_METRICS_OTLP_PUSH_INTERVAL_SECS`.
-
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -109,7 +102,7 @@ pub fn start_otlp(state: Arc<ServerState>, scheduler: Arc<Scheduler>) {
         },
     ));
 
-    // The provider must outlive the process so the periodic reader keeps exporting.
+    // The provider must outlive the process for the periodic reader to keep exporting.
     Box::leak(Box::new(provider));
     info!("OTLP metric push enabled");
 }

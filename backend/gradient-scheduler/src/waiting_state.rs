@@ -4,10 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Refreshes in-flight evaluation status against the currently connected
-//! worker pool (`Queued`/`Building` <-> `Waiting`), and self-heals a
-//! graph-stuck evaluation.
-
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
@@ -22,10 +18,6 @@ use gradient_types::*;
 use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, Value};
 use tracing::{error, info, warn};
 
-/// How long an evaluation must have sat `graph_stuck` before `.drv`-recovery
-/// re-evaluates it, so a still-in-flight `.drv` upload isn't raced into a
-/// needless re-eval. The graph-stuck reason is only rewritten on change, so a
-/// stably-stuck eval's `updated_at` ages past this quickly.
 const DRV_RECOVERY_GRACE_SECS: i64 = 120;
 
 use crate::assessment_memo::AssessmentMemo;
@@ -33,23 +25,6 @@ use crate::buildability::BuildabilityChecker;
 use crate::unbuildable::{Unbuildable, tasks_waiting_for_workers, unbuildable};
 use gradient_db::evaluations::counters::EvalCounters;
 
-/// Sweep every in-flight evaluation and refresh its status against the
-/// current set of connected workers, per the eval's current state:
-///
-/// - **Pre-build** (`Queued`/`Fetching`/`EvaluatingFlake`/
-///   `EvaluatingDerivation`): park to `Waiting` with an `EvalWorkers` reason
-///   when no worker provides the capability the state needs - `fetch` for
-///   `Fetching`, `eval` otherwise - regardless of any builds the eval has
-///   already batched (so a mid-eval stall is caught, not skipped).
-/// - **Build** (`Building`): flip `Building ↔ Waiting` from whether the pool
-///   can satisfy any pending build's `(architecture, required_features)`.
-/// - **Waiting**: recover via the reason it parked under - `EvalWorkers`
-///   back to `Queued` once the capability returns, `Workers` back to
-///   `Building` once buildable. `Approval`/`NoCache`/`CacheStorageFull` parks
-///   are owned by other hooks and left untouched.
-///
-/// Returns the `Workers` parks to abort because their task does not wait for
-/// workers (see [`crate::unbuildable`]).
 pub(crate) async fn refresh_waiting_state(
     state: &Arc<ServerState>,
     memo: &Mutex<AssessmentMemo>,
@@ -78,9 +53,6 @@ pub(crate) async fn refresh_waiting_state(
         return Ok(Vec::new());
     }
 
-    // Draining: park every in-flight evaluation so the server can be stopped
-    // safely. Dispatch is already gated, so parked evals stay put until
-    // draining is disabled (recovered to `Queued` by the branch below).
     if draining {
         for eval in evals {
             let reason = eval
@@ -128,9 +100,6 @@ pub(crate) async fn refresh_waiting_state(
             .as_ref()
             .and_then(WaitingReason::from_json);
 
-        // Approval, no-cache and storage-full parks are owned by webhook +
-        // cache hooks. The repair pass must not unpark any of them just because
-        // workers showed up.
         if eval.status == EvaluationStatus::Waiting
             && reason.as_ref().is_some_and(|r| {
                 matches!(
@@ -152,12 +121,7 @@ pub(crate) async fn refresh_waiting_state(
                     fetch_capable_workers,
                     connected_workers,
                 )),
-                // Draining was disabled: resume from the queue and let the
-                // next pass re-park to the appropriate capacity reason.
                 Some(WaitingReason::Draining) => Some((EvaluationStatus::Queued, None)),
-                // Build-phase park, or a legacy/untagged row: recover from the
-                // pending builds, falling back to eval recovery when the eval
-                // never produced any (a pre-build park predating EvalWorkers).
                 _ => match build_phase_decision(
                     state,
                     memo,
@@ -169,8 +133,6 @@ pub(crate) async fn refresh_waiting_state(
                 .await?
                 {
                     BuildPhase::Pending(a) => Some((a.target, a.reason)),
-                    // Finalized rather than parked: unparking it to a status it
-                    // already left is the one thing left to get wrong.
                     BuildPhase::Settled => continue,
                     BuildPhase::Unnamed => Some(decide_eval_recovery(
                         EvalCapability::Eval,
@@ -242,20 +204,6 @@ pub(crate) async fn refresh_waiting_state(
     Ok(unbuildables)
 }
 
-/// Build-phase refresh for one evaluation: decide `Building` vs
-/// `Waiting` from whether the connected pool can satisfy any of the eval's
-/// pending shared builds. An evaluation whose named work is all settled is finalized
-/// and returned as `Settled`; one that names no shared build yet is `Unnamed`.
-///
-/// A `Waiting` verdict with an empty `unmet` set means the pool *can* build
-/// every pending shared build yet none is dispatchable: typically the set is `Created`
-/// with some term of `graph::predicates::gates_predicate` false (a non-zero
-/// `blocking_deps`, an unwalked derivation, a `.drv` that is not importable, no
-/// `build_job`, or a shared build nothing needs) and no in-flight build to drive a
-/// promotion, though a stalled
-/// substitute or a `FailedTransient` shared build reaches here too. Every gate the
-/// graph maintains moves on an event, and by definition no event is coming, so we
-/// self-heal here: [`attempt_graph_unstick`], gated by [`unstick_due`].
 async fn build_phase_decision(
     state: &Arc<ServerState>,
     memo: &Mutex<AssessmentMemo>,
@@ -267,8 +215,6 @@ async fn build_phase_decision(
     let a =
         match assess_buildability(state, Some(memo), evaluation_id, counters, worker_caps).await? {
             BuildPhase::Pending(a) => a,
-            // Nothing it named is work any more. No park and no recovery says
-            // anything true about a finished evaluation, so settle it here.
             BuildPhase::Settled => {
                 finalize_settled(state, evaluation_id).await;
                 return Ok(BuildPhase::Settled);
@@ -294,45 +240,28 @@ async fn build_phase_decision(
     Ok(BuildPhase::Pending(a))
 }
 
-/// An evaluation the graph finished: everything it named is settled, so the
-/// finalizer decides its terminal status. Idempotent and a no-op on anything
-/// that is not in its build phase.
 async fn finalize_settled(state: &Arc<ServerState>, evaluation_id: EvaluationId) {
     if let Err(e) = gradient_db::status::check_evaluation_done(&state.db(), evaluation_id).await {
         error!(error = %e, %evaluation_id, "failed to finalize a settled evaluation");
     }
 }
 
-/// The graph-stuck heal starts when an evaluation first parks, or when its pending
-/// set changed since. A stably stuck evaluation is left to the counters, which
-/// promote it as soon as its gates open, and to
-/// [`reheal_graph_stuck_evals`], which repeats the heal itself on the
-/// consistency check's cadence for the repairs no counter can do.
 pub(crate) fn unstick_due(current: Option<&WaitingReason>, pending: u32) -> bool {
     !matches!(current, Some(WaitingReason::GraphStuck { pending_shared_builds }) if *pending_shared_builds == pending)
 }
 
-/// One evaluation's build-phase verdict, with the size of the blocking set it
-/// was read from: every caller needs both, and re-reading the set costs a
-/// second query per evaluation per pass.
 struct Assessment {
     target: EvaluationStatus,
     reason: Option<WaitingReason>,
     pending: u32,
 }
 
-/// What an evaluation's own shared builds decide about its build phase.
 enum BuildPhase {
-    /// It named no shared build: its state is the pre-build repair pass's to decide.
     Unnamed,
-    /// It named shared builds and none of them blocks it any more: the graph says it
-    /// is finished, whatever the pool looks like.
     Settled,
     Pending(Assessment),
 }
 
-/// The verdicts the counters decide alone: no shared build named, nothing blocking,
-/// or a build already running. Anything else needs the pending shared builds' systems.
 fn phase_from_counters(c: EvalCounters) -> Option<BuildPhase> {
     if c.named == 0 {
         return Some(BuildPhase::Unnamed);
@@ -354,10 +283,6 @@ fn lock(memo: &Mutex<AssessmentMemo>) -> std::sync::MutexGuard<'_, AssessmentMem
         .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
-/// Decide `Building` vs `Waiting` for an eval's current blocking shared builds. The
-/// shared builds are read only when the counters cannot decide and `memo` holds no
-/// assessment for the same counters and pool; `None` forces the read. A read
-/// that finds nothing blocking overrules counters that drifted high.
 async fn assess_buildability(
     state: &Arc<ServerState>,
     memo: Option<&Mutex<AssessmentMemo>>,
@@ -419,10 +344,6 @@ async fn assess_buildability(
     }))
 }
 
-/// Self-heal a graph-stuck evaluation: run the `Unstick` pipeline over its
-/// closure and re-assess. Recovers to `Building` when the heal frees a
-/// dispatchable shared build; otherwise reports `GraphStuck` with the blocked count so
-/// the stall is legible while later passes retry.
 async fn attempt_graph_unstick(
     state: &Arc<ServerState>,
     evaluation_id: EvaluationId,
@@ -430,9 +351,6 @@ async fn attempt_graph_unstick(
 ) -> Result<BuildPhase> {
     info!(%evaluation_id, "graph stuck: pool can build every pending shared build but none is dispatchable; self-healing");
 
-    // The healing pipeline in Unstick scope: failed-shared build thaw, cached-shared build
-    // settle with its can-start advance, the closure's dependency-failed sweep,
-    // pruned-interior adoption, and promotion (see `gradient_db::graph::repair`).
     if let Err(e) = state
         .graph
         .transition(gradient_graph::Transition::Repair {
@@ -468,18 +386,10 @@ async fn attempt_graph_unstick(
     }))
 }
 
-/// The graph-stuck heal's backstop, on the consistency check's cadence.
-///
-/// [`refresh_waiting_state`] starts the heal on entry and again when the pending
-/// set moves, so a stably stuck evaluation would otherwise never re-run the one
-/// repair no counter can do: `repair_cached_shared_builds_for_eval` writes a
-/// non-terminal shared build whose outputs are all cached to `Completed`, and the
-/// can-start recount cannot stand in for it, because `fetchable` reads the very
-/// status that heal exists to fix. Its sibling `repair_dependency_failed` has
-/// no other driver either. Both run per evaluation, so this iterates the parked
-/// set rather than the graph, unordered and uncapped: a pass cancelled by the
-/// budget re-heals whatever the next pass reaches first, so `stuck` is logged to
-/// make a set large enough for that to matter visible.
+/// [`refresh_waiting_state`] is starting the heal only on entry and on a change of the pending set.
+/// `repair_cached_shared_builds_for_eval` and `repair_dependency_failed` have no other driver for a
+/// stably stuck evaluation. The can-start recount cannot stand in, because `fetchable` is reading
+/// the very status that heal is fixing.
 pub async fn reheal_graph_stuck_evals(state: &Arc<ServerState>) -> Result<()> {
     let waiting = EEvaluation::find()
         .filter(CEvaluation::Status.eq(EvaluationStatus::Waiting))
@@ -520,20 +430,9 @@ pub async fn reheal_graph_stuck_evals(state: &Arc<ServerState>) -> Result<()> {
     Ok(())
 }
 
-/// Re-evaluate evaluations wedged in `graph_stuck` on a `.drv` our cache lost.
-/// A build target's own `.drv` has no producer - only evaluation emits a `.drv`,
-/// and the daemon-free server cannot reproduce one - so a shared build whose `.drv`
-/// NAR is absent (never uploaded, or GC-reclaimed) can never dispatch and no
-/// repair heals it. The sole recovery is a fresh evaluation of the same
-/// commit ([`gradient_ci::trigger_drv_recovery`]), which re-materialises and
-/// re-uploads the `.drv`. Executes after [`refresh_waiting_state`] has persisted
-/// the `graph_stuck` reason; the abort inside the trigger drops the stuck eval
-/// out of `Waiting`, so each is handled once.
-///
-/// One-shot: a run already marked [`EvaluationKind::DrvRecovery`] that stalls
-/// the same way is failed, not retried - a `.drv` a cold re-eval still cannot
-/// persist is a real defect, not a transient upload miss, and re-triggering
-/// would loop.
+/// A build target's own `.drv` is producerless, and the daemon-free server cannot reproduce one. A
+/// fresh evaluation of the same commit is the sole recovery. A `DrvRecovery` run stalling the same
+/// way is failed, not retried, to avoid a loop.
 pub async fn recover_drv_stuck_evals(state: &Arc<ServerState>) -> Result<()> {
     let waiting = EEvaluation::find()
         .filter(CEvaluation::Status.eq(EvaluationStatus::Waiting))
@@ -587,12 +486,6 @@ pub async fn recover_drv_stuck_evals(state: &Arc<ServerState>) -> Result<()> {
     Ok(())
 }
 
-/// True when a pending shared build of `evaluation_id` is dispatch-blocked solely by
-/// its own missing `.drv`: its build dependencies are all satisfied and it is
-/// not available in a cache, yet the `.drv`'s own NAR closure does not hold and its NAR
-/// is absent from our cache entirely. That is the zone-B signature - a `.drv`
-/// our cache never received or lost - distinct from a failed-dependency block,
-/// whose shared builds the dependency-failed cascade has already demoted.
 async fn eval_blocked_on_unproducible_drv(
     state: &Arc<ServerState>,
     evaluation_id: EvaluationId,
@@ -636,9 +529,6 @@ fn unproducible_drv_block_sql() -> String {
     )
 }
 
-/// The shared builds of `evaluation_id` that still block it. A shared build nothing
-/// needs is named but settled: no gate will ever queue it and no event is
-/// coming, so counting it parks the evaluation on work that never happens (#666).
 async fn eval_blocking_shared_builds(
     state: &Arc<ServerState>,
     evaluation_id: EvaluationId,
@@ -662,9 +552,6 @@ async fn eval_blocking_shared_builds(
         .collect())
 }
 
-/// The capability a pre-build evaluation needs to make progress: `Fetching`
-/// wants a fetch-capable worker, every other pre-build state wants an
-/// eval-capable one.
 fn pre_build_capability(status: EvaluationStatus) -> Option<EvalCapability> {
     match status {
         EvaluationStatus::Fetching => Some(EvalCapability::Fetch),
@@ -675,7 +562,6 @@ fn pre_build_capability(status: EvaluationStatus) -> Option<EvalCapability> {
     }
 }
 
-/// Whether the connected pool provides `capability`.
 fn capability_available(
     capability: EvalCapability,
     eval_capable_workers: usize,
@@ -687,12 +573,6 @@ fn capability_available(
     }
 }
 
-/// Decide whether an *active* (non-`Waiting`) pre-build evaluation must stall.
-///
-/// Returns `Some((Waiting, reason))` when no worker provides the capability the
-/// state needs - a `Fetching` eval needs `fetch`, every other pre-build state
-/// needs `eval`. Returns `None` while the eval can progress. `Waiting` evals are
-/// handled by [`decide_eval_recovery`], so this returns `None` for them.
 fn decide_pre_build_target(
     current: EvaluationStatus,
     eval_capable_workers: usize,
@@ -710,8 +590,6 @@ fn decide_pre_build_target(
     ))
 }
 
-/// Recovery for a `Waiting` eval parked in a pre-build phase: unpark to `Queued`
-/// once `capability` is back, otherwise refresh the reason with the live count.
 fn decide_eval_recovery(
     capability: EvalCapability,
     eval_capable_workers: usize,
@@ -728,10 +606,6 @@ fn decide_eval_recovery(
     }
 }
 
-/// Update `evaluation.waiting_reason` only when the value actually changes.
-///
-/// Avoids a row-level UPDATE every refresh cycle when the unmet capabilities
-/// haven't shifted, which keeps `updated_at` from churning on the row.
 pub(crate) async fn persist_waiting_reason(
     state: &Arc<ServerState>,
     evaluation_id: EvaluationId,
@@ -767,13 +641,6 @@ pub(crate) async fn persist_waiting_reason(
 mod tests {
     use super::*;
 
-    /// The zone-B detection must fire only on a shared build blocked *solely* by its
-    /// own unimportable `.drv`: pending, wanted, walked, deps satisfied, not
-    /// available in a cache, and neither `.drv` signal true. A shared build nothing needs
-    /// is not blocked on anything - it is never built - and re-evaluating a whole
-    /// commit over one would be the most expensive way to be wrong. Mis-shaping
-    /// it would either re-eval healthy evals or miss the lost-`.drv` stall (no
-    /// live DB in unit tests, so pin the SQL shape).
     #[test]
     fn unproducible_drv_block_sql_shape() {
         let norm = |s: String| s.split_whitespace().collect::<Vec<_>>().join(" ");
@@ -811,9 +678,6 @@ mod tests {
         }
     }
 
-    /// Regression for issue #268/#381: a Queued evaluation whose connected
-    /// workers lack the `eval` capability stalls to Waiting with an `eval`
-    /// `EvalWorkers` reason, reporting the total connected pool size.
     #[test]
     fn pre_build_target_queued_no_eval_worker_stalls_to_eval_waiting() {
         let (target, reason) = decide_pre_build_target(EvaluationStatus::Queued, 0, 1, 3)
@@ -824,8 +688,6 @@ mod tests {
         assert_eq!(connected, 3);
     }
 
-    /// #381: a `Fetching` eval needs a fetch-capable worker - an eval-only pool
-    /// still strands it, with a `fetch` reason.
     #[test]
     fn pre_build_target_fetching_no_fetch_worker_stalls_to_fetch_waiting() {
         let (target, reason) = decide_pre_build_target(EvaluationStatus::Fetching, 2, 0, 2)
@@ -838,8 +700,6 @@ mod tests {
 
     #[test]
     fn pre_build_target_active_pre_build_with_capability_left_alone() {
-        // Fetching needs fetch; Queued/Evaluating* need eval. With both present
-        // the eval is progressing and must be left alone.
         for status in [
             EvaluationStatus::Fetching,
             EvaluationStatus::EvaluatingFlake,
@@ -855,7 +715,6 @@ mod tests {
 
     #[test]
     fn pre_build_target_ignores_waiting() {
-        // Waiting recovery is decide_eval_recovery's job, not this function's.
         assert!(decide_pre_build_target(EvaluationStatus::Waiting, 0, 0, 0).is_none());
         assert!(decide_pre_build_target(EvaluationStatus::Waiting, 2, 2, 2).is_none());
     }
@@ -880,8 +739,6 @@ mod tests {
         assert_eq!(connected, 5);
     }
 
-    /// The three verdicts the counters decide alone, without reading a shared build:
-    /// the tick is proportional to in-flight evaluations, not to their shared builds.
     #[test]
     fn counters_decide_without_shared_builds() {
         let c = |named, active, building| gradient_db::evaluations::counters::EvalCounters {
@@ -909,8 +766,6 @@ mod tests {
         assert!(phase_from_counters(c(4, 2, 0)).is_none());
     }
 
-    /// The heal is not a tick: it takes place once per stuck state, and again only
-    /// when the pending set moved.
     #[test]
     fn the_graph_stuck_heal_runs_on_entry_and_on_change_only() {
         assert!(unstick_due(None, 3));

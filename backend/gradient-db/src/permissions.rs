@@ -4,70 +4,32 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Permission system for project-scoped operations.
-//!
-//! Endpoint authorization is expressed in terms of [`Permission`] capabilities,
-//! never in terms of role IDs. Each capability owns a stable bit position; a
-//! role's set of granted capabilities is stored on `role.permission` as a
-//! signed 64-bit bitmask, giving us 63 usable bits.
-//!
-//! The mapping between roles and capabilities therefore lives entirely in the
-//! database. The three built-in roles (Admin/Write/View) are seeded with
-//! canonical bitmasks at startup; projects can additionally create their
-//! own custom roles via the role-management API.
-
 use gradient_types::consts::{BASE_ROLE_ADMIN_ID, BASE_ROLE_VIEW_ID, BASE_ROLE_WRITE_ID};
 use gradient_types::ids::RoleId;
 
-/// A capability that a role may grant within a project.
-///
-/// Permissions are intentionally granular so that custom roles can mix and
-/// match (e.g. a "Releaser" role could hold [`Permission::TriggerEvaluation`]
-/// without [`Permission::EditTask`]).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
 pub enum Permission {
-    // ── Project-level ────────────────────────────────────────────────────────────
-    /// View members-only content of a private project.
     ViewProject,
-    /// Modify project settings (display name, description, etc.) and toggle the
-    /// `public` flag.
     ManageProjectSettings,
-    /// Delete the project.
     DeleteProject,
-    /// Add, remove, or change roles for members.
     ManageMembers,
-    /// Create, edit, or delete custom roles in the project.
     ManageRoles,
-    /// CRUD on project integrations (Git host credentials).
     ManageIntegrations,
-    /// CRUD on task actions.
     ManageActions,
-    /// Register/configure project-owned workers.
     ManageWorkers,
-    /// Subscribe / unsubscribe the project from caches.
     ManageSubscriptions,
-    /// Manage the project's SSH key (used for git fetches).
     ManageSshKey,
 
-    // ── Task-level (within a project) ────────────────────────────────────────
-    /// Create a new task in the project.
     CreateTask,
-    /// Modify or delete an existing task (settings, integration, transfer).
     EditTask,
-    /// Trigger an evaluation / build run.
     TriggerEvaluation,
-    /// CRUD on task triggers.
     ManageTriggers,
-    /// CRUD on project webhooks.
     ManageWebhooks,
 }
 
-/// A bitmask over [`Permission`] capabilities. Stored on `role.permission`.
 pub type PermissionMask = i64;
 
 impl Permission {
-    /// All permissions in canonical order. Used by the role-management API
-    /// to emit the full list of capabilities a custom role may carry.
     pub const ALL: &'static [Permission] = &[
         Permission::ViewProject,
         Permission::ManageProjectSettings,
@@ -86,10 +48,8 @@ impl Permission {
         Permission::ManageWebhooks,
     ];
 
-    /// Stable bit position in the `role.permission` bitmask.
-    ///
-    /// **Wire format invariant:** never renumber an existing permission, only
-    /// append new ones. Persisted role bitmasks depend on these positions.
+    /// New permissions must be appended, and an existing one must never be renumbered.
+    /// Persisted role bitmasks are depending on these positions.
     pub const fn bit(self) -> PermissionMask {
         let pos: u32 = match self {
             Permission::ViewProject => 0,
@@ -111,7 +71,6 @@ impl Permission {
         1_i64 << pos
     }
 
-    /// Stable wire identifier (camelCase) used in the role-management API.
     pub const fn as_wire_name(self) -> &'static str {
         match self {
             Permission::ViewProject => "viewProject",
@@ -132,7 +91,6 @@ impl Permission {
         }
     }
 
-    /// Parse a wire identifier back into a [`Permission`].
     pub fn from_wire_name(s: &str) -> Option<Self> {
         Permission::ALL
             .iter()
@@ -141,18 +99,15 @@ impl Permission {
     }
 }
 
-/// True when `mask` grants `permission`.
 #[inline]
 pub const fn mask_grants(mask: PermissionMask, permission: Permission) -> bool {
     mask & permission.bit() != 0
 }
 
-/// Compose a bitmask from a slice of [`Permission`] values.
 pub fn mask_from(perms: &[Permission]) -> PermissionMask {
     perms.iter().fold(0_i64, |acc, p| acc | p.bit())
 }
 
-/// Decompose a bitmask back into a `Vec<Permission>` in canonical order.
 pub fn mask_to_vec(mask: PermissionMask) -> Vec<Permission> {
     Permission::ALL
         .iter()
@@ -161,22 +116,14 @@ pub fn mask_to_vec(mask: PermissionMask) -> Vec<Permission> {
         .collect()
 }
 
-/// True when the permission represents a mutation (i.e. anything other than
-/// pure viewing). Mutating permissions imply a state-managed-resource check.
 pub fn is_mutating(permission: Permission) -> bool {
     !matches!(permission, Permission::ViewProject)
 }
 
-// ── Built-in role bitmasks ───────────────────────────────────────────────────
-
-/// Canonical bitmask for the built-in **Admin** role: every capability.
 pub fn admin_mask() -> PermissionMask {
     mask_from(Permission::ALL)
 }
 
-/// Canonical bitmask for the built-in **Write** role: task, action, and
-/// integration management - but no member/role administration and no destruction
-/// of the project or its settings.
 pub fn write_mask() -> PermissionMask {
     use Permission::*;
     mask_from(&[
@@ -194,12 +141,8 @@ pub fn write_mask() -> PermissionMask {
     ])
 }
 
-/// Canonical bitmask for the built-in **View** role.
-///
-/// Read-only on sensitive surfaces (members, tasks, actions, the project
-/// itself), but currently retains mutation rights on a handful of non-secret
-/// sub-resources (workers, ssh key, cache subscriptions, integrations) to
-/// preserve historical behavior. Tightening these is an explicit follow-up.
+/// The View role is still keeping mutation rights on some non-secret sub-resources.
+/// Those rights are preserving historical behavior until an explicit follow-up.
 pub fn view_mask() -> PermissionMask {
     use Permission::*;
     mask_from(&[
@@ -211,22 +154,14 @@ pub fn view_mask() -> PermissionMask {
     ])
 }
 
-// ── Built-in role identification ─────────────────────────────────────────────
-
-/// True if `role_id` is one of the immutable built-in roles. Built-in roles
-/// cannot be edited or deleted via the role-management API.
 pub fn is_builtin_role(role_id: RoleId) -> bool {
     role_id == BASE_ROLE_ADMIN_ID || role_id == BASE_ROLE_WRITE_ID || role_id == BASE_ROLE_VIEW_ID
 }
-
-// ── CachePermission ──────────────────────────────────────────────────────────
 
 use gradient_types::consts::{
     BASE_CACHE_ROLE_ADMIN_ID, BASE_CACHE_ROLE_VIEW_ID, BASE_CACHE_ROLE_WRITE_ID,
 };
 
-/// A capability granted by a cache-scoped role. Stored in `cache_role.permission`
-/// as a 64-bit bitmask, parallel to (but disjoint from) [`Permission`].
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
 pub enum CachePermission {
     ViewCache,
@@ -413,8 +348,6 @@ mod tests {
         assert!(is_mutating(Permission::ManageMembers));
         assert!(is_mutating(Permission::ManageRoles));
     }
-
-    // ── CachePermission tests ────────────────────────────────────────────────
 
     #[test]
     fn each_cache_permission_has_unique_bit() {

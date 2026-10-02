@@ -19,47 +19,24 @@ use tracing::{debug, info, warn};
 
 use crate::Scheduler;
 
-/// Poll ~3x per heartbeat deadline so worst-case detection latency is timeout + tick.
 const LIVENESS_POLLS_PER_DEADLINE: u64 = 3;
 
-/// How long an evaluation must sit in the evaluating pair after its job closed
-/// before the watchdog calls the terminal report lost. Comfortably above the
-/// graph writer's 600 s RPC timeout, so a transition that is merely slow is
-/// never mistaken for a dropped one.
+/// The grace must stay comfortably above the graph writer's 600 s RPC timeout. A merely slow
+/// transition is then never mistaken for a dropped one.
 const LOST_COMPLETION_GRACE_SECS: i64 = 900;
 
-/// How long a dispatch row may sit open with no job behind it before the reaper
-/// closes it. Well above the heartbeat deadline so a worker that is merely slow
-/// to check in is never reaped out from under a running job.
 const ABANDONED_ASSIGNMENT_GRACE_SECS: i64 = 1800;
 
-/// How many open rows one sweep may consider. Every row the pass reaps leaves
-/// the `finished_at IS NULL` predicate, so a backlog drains over ticks without
-/// an `ORDER BY`, and the rows the pass deliberately keeps are far too few to
-/// crowd a window this size.
 const ABANDONED_ASSIGNMENT_SWEEP_LIMIT: u64 = 10_000;
 
-/// How long a worker has to confirm an `AbortJob` before the scheduler drops the
-/// job itself. An abort lands within seconds; one still unanswered after this is
-/// stuck in a step that never checks, and would otherwise hold its slot and its
-/// open dispatch row until the worker disconnects.
 const ABORT_CONFIRM_GRACE: Duration = Duration::from_secs(300);
 
-/// Liveness poll period, or `None` when the watchdog is disabled by config.
 pub(super) fn liveness_period(scheduler: &Scheduler) -> Option<Duration> {
     let timeout_secs = scheduler.state.config.proto.worker_heartbeat_timeout_secs;
     (timeout_secs != 0)
         .then(|| Duration::from_secs((timeout_secs / LIVENESS_POLLS_PER_DEADLINE).max(5)))
 }
 
-/// Repair of the maintained graph columns plus the read-only alarms: unbacked
-/// trusted outputs and wedged Building evals, so a dead zone becomes a warning long
-/// before a user reports a stuck evaluation. Transient non-zero counts right after
-/// a transition are normal; persistent ones are not - except the drift counts,
-/// which report rows this pass already repaired, so the warning can be a
-/// successful self-repair. `scope` is the size of the can-start repair, logged at
-/// `info` on the clean branch too, because a healthy instance is exactly the case
-/// whose cost is unmeasured.
 pub(super) async fn consistency_check_pass(scheduler: Arc<Scheduler>) -> anyhow::Result<()> {
     let report =
         gradient_db::graph::consistency::graph_consistency_report(&scheduler.state.db()).await?;
@@ -85,24 +62,10 @@ pub(super) async fn consistency_check_pass(scheduler: Arc<Scheduler>) -> anyhow:
     Ok(())
 }
 
-/// Re-run the graph-stuck heal for every parked evaluation. Its own pass, not a
-/// tail of the consistency check: the two are independent backstops, and sharing
-/// the sweep's budget and its `?` would let a slow or erroring repair scan delete
-/// the only driver `repair_cached_shared_builds_for_eval` has left.
 pub(super) async fn graph_stuck_reheal_pass(scheduler: Arc<Scheduler>) -> anyhow::Result<()> {
     crate::waiting_state::reheal_graph_stuck_evals(&scheduler.state).await
 }
 
-/// Unregister workers that have gone silent past the heartbeat deadline.
-///
-/// A worker heartbeats every 10 s; the server otherwise learns of a departure
-/// only when the TCP connection closes. A hard OOM-kill, a frozen host, or a
-/// network partition can leave the socket half-open with no clean close, so the
-/// worker stays "connected" and its in-flight eval/build jobs sit non-terminal
-/// forever. This pass reads each worker's `last_seen` (stamped by the
-/// connection's reader the moment a frame arrives and while its handler is running)
-/// and reuses [`Scheduler::unregister_worker`] - which re-queues the
-/// orphaned jobs and resets their DB rows - the moment a worker exceeds the deadline.
 pub(super) async fn worker_liveness_pass(scheduler: Arc<Scheduler>) -> anyhow::Result<()> {
     let timeout_secs = scheduler.state.config.proto.worker_heartbeat_timeout_secs;
     let timeout_ms = (timeout_secs as i64) * 1000;
@@ -119,8 +82,6 @@ pub(super) async fn worker_liveness_pass(scheduler: Arc<Scheduler>) -> anyhow::R
     Ok(())
 }
 
-/// Update the windowed [`gradient_pool::score::InstanceContext`] snapshot consumed
-/// by resource-aware scoring and publish it lock-free.
 pub(super) async fn instance_metrics_pass(scheduler: Arc<Scheduler>) -> anyhow::Result<()> {
     let c = scheduler.counts().await;
     let counts = crate::instance::InstanceCounts {
@@ -145,8 +106,6 @@ pub(super) async fn instance_metrics_pass(scheduler: Arc<Scheduler>) -> anyhow::
     Ok(())
 }
 
-/// Snapshot every connected worker's live metrics into `worker_sample` for the
-/// Job Board's worker statistics.
 pub(super) async fn worker_sample_pass(scheduler: Arc<Scheduler>) -> anyhow::Result<()> {
     let workers = scheduler.board_workers().await;
     for info in &workers {
@@ -161,12 +120,6 @@ pub(super) async fn worker_sample_pass(scheduler: Arc<Scheduler>) -> anyhow::Res
     Ok(())
 }
 
-/// Which stale rows may be closed: those whose job the tracker no longer holds,
-/// plus rows written before `job_id` existed, which cannot be matched against the
-/// tracker at all and are historical by construction.
-///
-/// A row the scheduler still tracks is never reaped, however old, so a
-/// legitimately long build keeps its open row.
 fn plan_abandoned_reap(
     stale: &[(DispatchedJobId, Option<String>)],
     untracked: &HashSet<String>,
@@ -181,19 +134,6 @@ fn plan_abandoned_reap(
         .collect()
 }
 
-/// Close dispatch rows left open by a job that will never report.
-///
-/// The backstop, not the primary path: `requeue_orphaned_jobs` covers a clean
-/// disconnect and `recover_interrupted_work` the restart. What is left is the
-/// row whose session died between the claim and the insert, which no tracker
-/// ever knew, and rows an older process wrote that startup did not reach - both
-/// shown as running forever by the job board, often on a worker that has since
-/// left the fleet.
-///
-/// The tracker, not the clock, decides what is live: a row whose `job_id` the
-/// scheduler still knows is left alone however old it is, so a legitimately long
-/// build is never reaped. Rows predating the `job_id` column cannot be matched
-/// that way; they are historical by construction and are closed on age alone.
 pub(super) async fn abandoned_assignment_pass(scheduler: Arc<Scheduler>) -> anyhow::Result<()> {
     use gradient_entity::dispatched_job::{Column as CDispatchedJob, Entity as EDispatchedJob};
     use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QuerySelect};
@@ -242,20 +182,15 @@ pub(super) async fn abandoned_assignment_pass(scheduler: Arc<Scheduler>) -> anyh
     Ok(())
 }
 
-/// Which transition a lost terminal report needs re-sent.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum EvalRepair {
     Complete,
     Fail,
 }
 
-/// Keep only the evaluations the scheduler has no job for, and map each
-/// reported outcome onto the transition that was lost.
-///
-/// The tracker, not the database, decides what is still in flight: a job the
-/// scheduler still holds is one it may yet finish on its own, and `untracked`
-/// deliberately claims every id during a core outage so a repair pass does
-/// nothing rather than racing a scheduler that is coming back.
+/// The tracker, not the database, is deciding what is still in flight. `untracked` is claiming
+/// every id during a core outage. A repair pass is then doing nothing instead of racing a returning
+/// scheduler.
 fn plan_eval_repairs(
     lost: &[LostCompletion],
     untracked: &HashSet<String>,
@@ -266,8 +201,6 @@ fn plan_eval_repairs(
             let repair = match l.outcome {
                 DispatchedJobOutcome::Completed => EvalRepair::Complete,
                 DispatchedJobOutcome::Failed => EvalRepair::Fail,
-                // Nothing was reported, so there is no terminal transition to
-                // re-send; the orphan path re-queues the evaluation instead.
                 DispatchedJobOutcome::Abandoned => return None,
             };
             Some((l.evaluation, repair))
@@ -275,12 +208,6 @@ fn plan_eval_repairs(
         .collect()
 }
 
-/// Re-send the terminal transition for evaluations whose worker report was
-/// dropped, so a single lost message stops being permanent.
-///
-/// `EvalStreamCompleted` is idempotent - it settles edges, repairs the
-/// eval's closure, promotes out of the evaluating pair and finalizes - so
-/// re-driving one that did land costs a repair pass and changes nothing.
 pub(super) async fn eval_completion_watchdog_pass(scheduler: Arc<Scheduler>) -> anyhow::Result<()> {
     let lost = gradient_db::evaluations::watchdog::lost_eval_completions(
         &scheduler.state.worker_db,
@@ -337,8 +264,6 @@ pub(super) async fn eval_completion_watchdog_pass(scheduler: Arc<Scheduler>) -> 
     Ok(())
 }
 
-/// Keep only the shared builds whose build job the tracker no longer holds: a job it
-/// still knows is out on a worker, whatever its dispatch row says.
 fn plan_stranded_requeue(
     stranded: &[DerivationBuildId],
     untracked: &HashSet<String>,
@@ -350,9 +275,6 @@ fn plan_stranded_requeue(
         .collect()
 }
 
-/// Re-queue shared builds left `Building` behind a dispatch that will never report,
-/// the build half of the completion watchdog. `OrphanedBuilds` moves only rows
-/// still `Building`, so re-sending a re-queue that did land changes nothing.
 pub(super) async fn stranded_build_pass(scheduler: Arc<Scheduler>) -> anyhow::Result<()> {
     let stranded = gradient_db::scheduling::build_watchdog::stranded_building_shared_builds(
         &scheduler.state.worker_db,
@@ -408,8 +330,6 @@ mod tests {
         (DispatchedJobId::now_v7(), key.map(str::to_owned))
     }
 
-    // The whole point of the sweep: a row the tracker still holds is a running
-    // job, however long it has been running.
     #[test]
     fn a_tracked_job_is_never_reaped() {
         let tracked = row(Some("build:still-going"));
@@ -429,8 +349,6 @@ mod tests {
         );
     }
 
-    // Rows written before the job_id column cannot be matched against the
-    // tracker; they predate the deploy, so age alone settles them.
     #[test]
     fn a_row_without_a_job_id_is_reaped_on_age_alone() {
         let legacy = row(None);
@@ -441,8 +359,6 @@ mod tests {
         );
     }
 
-    // `untracked` returns nothing while the scheduler core is down, which must
-    // read as "everything is still tracked", not "reap the fleet".
     #[test]
     fn a_scheduler_outage_reaps_no_tracked_row() {
         let rows = vec![row(Some("build:a")), row(Some("eval:b"))];
@@ -450,8 +366,6 @@ mod tests {
         assert!(plan_abandoned_reap(&rows, &HashSet::new()).is_empty());
     }
 
-    // An abandoned job never reported, so there is no terminal transition to
-    // re-send; re-driving one would invent an outcome the worker never gave.
     #[test]
     fn an_abandoned_job_is_not_re_driven() {
         let rows = vec![lost(DispatchedJobOutcome::Abandoned)];
@@ -463,8 +377,6 @@ mod tests {
         assert!(plan_eval_repairs(&rows, &untracked).is_empty());
     }
 
-    // A stranded shared build the tracker still holds is a build out on a worker;
-    // re-queuing it would dispatch the same derivation twice.
     #[test]
     fn a_tracked_stranded_shared_build_is_left_alone() {
         let shared_build = DerivationBuildId::now_v7();
@@ -503,8 +415,6 @@ mod tests {
         );
     }
 
-    /// A job the scheduler still tracks may yet report on its own; re-driving
-    /// it would race the handler that is about to run.
     #[test]
     fn an_evaluation_the_scheduler_still_tracks_is_left_alone() {
         let tracked = lost(DispatchedJobOutcome::Completed);
@@ -517,8 +427,6 @@ mod tests {
         );
     }
 
-    /// `untracked` reports every id as tracked while the core is down, which
-    /// must read as "repair nothing", not "repair everything".
     #[test]
     fn a_core_outage_repairs_nothing() {
         let rows = vec![

@@ -4,14 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! CRUD for project-scoped custom roles.
-//!
-//! Each project carries the three immutable built-in roles (Admin/Write/View) for
-//! free; on top of that, users with [`Permission::ManageRoles`] can mint
-//! custom roles whose permission set is freely chosen from
-//! [`Permission::ALL`]. Custom roles live under `role.project = <project_id>`
-//! and are tagged `builtin: false` in API responses.
-
 use crate::access::{Caller, ProjectAccess, load_project};
 use crate::audit::{RequestInfo, record as audit_record};
 use crate::authorization::MaybeApiKey;
@@ -35,21 +27,13 @@ use sea_orm::{
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-// ── Request / response shapes ─────────────────────────────────────────────────
-
 #[derive(Serialize, Debug)]
 pub struct RoleResponse {
     pub id: RoleId,
     pub name: String,
-    /// `null` for built-in roles, the project id for custom roles.
     pub project: Option<ProjectId>,
-    /// True for the three immutable system roles (Admin/Write/View).
     pub builtin: bool,
-    /// True for roles provisioned from `gradient-state.nix`. Managed roles
-    /// are immutable through this API (the same way built-in roles are).
     pub managed: bool,
-    /// Capability identifiers (camelCase) granted by this role; matches the
-    /// strings produced by [`Permission::as_wire_name`].
     pub permissions: Vec<&'static str>,
 }
 
@@ -73,29 +57,21 @@ impl RoleResponse {
 
 #[derive(Serialize, Debug)]
 pub struct RoleListResponse {
-    /// Roles available in this project: the three built-ins plus any custom
-    /// roles owned by the project.
     pub roles: Vec<RoleResponse>,
-    /// All capabilities a custom role may carry, for the role-management UI.
     pub available_permissions: Vec<PermissionEntry>,
 }
 
 #[derive(Deserialize, Debug)]
 pub struct CreateRoleRequest {
     pub name: String,
-    /// Capability identifiers (matching [`Permission::as_wire_name`]) the
-    /// new role should grant. Unknown identifiers are rejected.
     pub permissions: Vec<String>,
 }
 
 #[derive(Deserialize, Debug)]
 pub struct PatchRoleRequest {
     pub name: Option<String>,
-    /// When present, replaces the role's permissions wholesale.
     pub permissions: Option<Vec<String>>,
 }
-
-// ── Helpers ──────────────────────────────────────────────────────────────────
 
 async fn load_project_role(
     state: &Arc<ServerState>,
@@ -110,20 +86,13 @@ async fn load_project_role(
     if let Some(owner) = role.project
         && owner != project_id
     {
-        // Treat cross-project access as not-found to avoid leaking ids.
+        // Cross-project access is treated as not-found to avoid leaking ids.
         return Err(WebError::not_found("Role"));
     }
 
     Ok(role)
 }
 
-// ── Handlers ──────────────────────────────────────────────────────────────────
-
-/// `GET /projects/{project}/roles` - list roles available in the project.
-///
-/// Visible to any member (so the add-member UI can populate its role
-/// dropdown). The `available_permissions` catalogue is included on every
-/// response for the role-management UI.
 pub async fn get_project_roles(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
@@ -156,7 +125,6 @@ pub async fn get_project_roles(
     }))
 }
 
-/// `POST /projects/{project}/roles` - create a custom role.
 pub async fn post_project_role(
     state: State<Arc<ServerState>>,
     info: RequestInfo,
@@ -183,9 +151,8 @@ pub async fn post_project_role(
 
     let mask = parse_permission_list(&body.permissions, "GET /projects/{project}/roles")?;
 
-    // Names must be unique within (project_id, name) and must not collide with a
-    // built-in role's name (Admin/Write/View) - otherwise membership lookup
-    // by name becomes ambiguous.
+    // Names must be unique within the project and must not collide with a built-in role name.
+    // Membership lookup by name would become ambiguous otherwise.
     let clash = ERole::find()
         .filter(CRole::Name.eq(body.name.as_str()))
         .filter(
@@ -231,7 +198,6 @@ pub async fn post_project_role(
     Ok(ok_json(RoleResponse::from_model(role)))
 }
 
-/// `GET /projects/{project}/roles/{role_id}` - fetch a single role.
 pub async fn get_project_role(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
@@ -252,9 +218,6 @@ pub async fn get_project_role(
     Ok(ok_json(RoleResponse::from_model(role)))
 }
 
-/// `PATCH /projects/{project}/roles/{role_id}` - update a custom role.
-///
-/// Built-in roles are immutable: attempting to mutate them returns 403.
 pub async fn patch_project_role(
     state: State<Arc<ServerState>>,
     info: RequestInfo,
@@ -345,10 +308,6 @@ pub async fn patch_project_role(
     Ok(ok_json(RoleResponse::from_model(updated)))
 }
 
-/// `DELETE /projects/{project}/roles/{role_id}` - delete a custom role.
-///
-/// Refuses to delete a role that is still in use; the caller must reassign
-/// affected members first (the UI surfaces the in-use count).
 pub async fn delete_project_role(
     state: State<Arc<ServerState>>,
     info: RequestInfo,

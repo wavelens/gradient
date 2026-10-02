@@ -4,9 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Process-wide minute aggregates of infrastructure health. Recording is sync
-//! and never touches the database, so storage, wire and passthrough hot paths can
-//! call it; `gradient-db` flushes it into `metric_rollup`.
+//! Recording is sync and never touching the database. Storage, wire and passthrough hot paths can
+//! call it. `gradient-db` is flushing it into `metric_rollup`.
 
 use std::collections::HashMap;
 use std::sync::LazyLock;

@@ -4,14 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! A `build_attempt` (and its log) outlives the evaluation that drove it: its
-//! real owner is the global `derivation_build` anchor (build-once), not the
-//! per-eval `build_job`. Under the old `ON DELETE CASCADE` an eval GC deleted
-//! the attempt and its log, so a `Completed` anchor reused by a later eval had
-//! no retrievable log. Switch the FK to `ON DELETE SET NULL`: eval GC now
-//! orphans the attempt from its build_job while it stays attached to the
-//! surviving anchor; the attempt (and log) die only when the derivation GC
-//! reclaims that anchor.
+//! A `build_attempt` and its log are outliving the evaluation that drove them. Their real owner is
+//! the global `derivation_build` shared build, not the per-eval `build_job`.
 
 use sea_orm_migration::prelude::*;
 

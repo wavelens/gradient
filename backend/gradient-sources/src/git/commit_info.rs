@@ -12,7 +12,6 @@ use git2::RemoteCallbacks;
 use gradient_types::input::vec_to_hex;
 use tracing::{debug, instrument};
 
-/// The tip of a ref and the metadata a new evaluation records for it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HeadCommit {
     pub hash: Vec<u8>,
@@ -21,10 +20,7 @@ pub struct HeadCommit {
     pub author_name: String,
 }
 
-/// The commit `refspec` names (a branch, `HEAD` or a commit hash) with its
-/// metadata, in one depth-1 fetch however large the history. The local
-/// transport cannot fetch shallow, and a local repository is cheap to read
-/// whole.
+/// The local transport cannot fetch shallow. A local repository is cheap to read whole.
 pub(crate) fn fetch_commit(
     url: &str,
     ssh_creds: Option<(String, String)>,
@@ -62,7 +58,6 @@ pub(crate) fn fetch_commit(
     })
 }
 
-/// The refspec of the tip of `branch`, the remote HEAD when `None`.
 pub(crate) fn head_refspec(branch: Option<&str>) -> String {
     branch.map_or_else(|| "HEAD".to_owned(), |b| format!("refs/heads/{b}"))
 }
@@ -92,8 +87,6 @@ impl TaskGitContext<'_> {
         self.fetch_commit(head_refspec(branch)).await
     }
 
-    /// The metadata of `commit_hash`. The fetch is also what proves the commit
-    /// is reachable in the repository.
     #[instrument(skip(self), fields(task_id = %self.task.id, task_name = %self.task.name, commit_hash = %vec_to_hex(commit_hash)))]
     pub(super) async fn commit_info(&self, commit_hash: &[u8]) -> Result<HeadCommit, SourceError> {
         debug!("Fetching commit info");

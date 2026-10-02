@@ -4,12 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Integration tests for the per-task `sign_cache` option.
-//!
-//! Mock-DB pattern shared with `triggers.rs`: manual Tokio runtime,
-//! `axum_test::TestServer`, and `MockDatabase` because `#[tokio::test]`
-//! macro expansion clashes with the local `core` crate name.
-
 #![expect(
     clippy::unwrap_used,
     reason = "test scaffolding: a fixture helper that cannot build its value should fail the test loudly"
@@ -176,12 +170,9 @@ fn get_task_includes_sign_cache() {
         let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
             .append_query_results([vec![project()]])
             .append_query_results([vec![task_with(false)]])
-            // is_project_member (Readable access)
             .append_query_results([vec![admin_membership()]])
-            // has_permission(EditTask): membership + role
             .append_query_results([vec![admin_membership()]])
             .append_query_results([vec![admin_role_row()]])
-            // has_permission(TriggerEvaluation): membership + role
             .append_query_results([vec![admin_membership()]])
             .append_query_results([vec![admin_role_row()]]);
 

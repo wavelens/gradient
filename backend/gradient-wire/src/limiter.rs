@@ -4,15 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Concurrency cap for inbound `/proto` WebSocket connections.
-//!
-//! Wraps a [`tokio::sync::Semaphore`] sized from
-//! `config.proto.max_connections`. The proto upgrade handler tries to
-//! acquire one permit per connection and holds it for the lifetime of the
-//! session; when no permits are available the upgrade is rejected with 503
-//! instead of queueing, so a misbehaving worker fan-out cannot exhaust file
-//! descriptors, memory, or scheduler slots.
-
 use std::collections::HashMap;
 use std::net::IpAddr;
 use std::sync::{Arc, Mutex, Weak};
@@ -26,10 +17,8 @@ pub struct ProtoLimiter {
 }
 
 impl ProtoLimiter {
-    /// Build a limiter sized for `capacity` simultaneous connections. A
-    /// configured value of `0` is clamped to `1` so the proto endpoint never
-    /// silently rejects every upgrade - operators who want to disable the
-    /// endpoint should set `discoverable = false` instead.
+    /// A configured `0` is clamped to `1` to keep the endpoint from rejecting every upgrade.
+    /// Operators can disable the endpoint with `discoverable = false` instead.
     pub fn new(capacity: usize) -> Self {
         let capacity = capacity.max(1);
         Self {
@@ -38,10 +27,6 @@ impl ProtoLimiter {
         }
     }
 
-    /// Try to claim a slot. Returns `Some(permit)` if a slot was free and
-    /// `None` if the configured cap has been hit. The caller must keep the
-    /// permit alive for the entire connection - dropping it returns the slot
-    /// to the pool.
     pub fn try_acquire(&self) -> Option<OwnedSemaphorePermit> {
         Arc::clone(&self.semaphore).try_acquire_owned().ok()
     }
@@ -50,16 +35,13 @@ impl ProtoLimiter {
         self.capacity
     }
 
-    /// Number of slots currently held by live connections.
     pub fn in_use(&self) -> usize {
         self.capacity - self.semaphore.available_permits()
     }
 }
 
-/// Per-IP concurrency cap for anonymous `/proto` sessions. Each client IP gets
-/// its own `Semaphore` sized to `max_per_ip`; entries are held via `Weak` so an
-/// IP's slot map drops once all its connections close. Dead entries are pruned
-/// opportunistically on insert to keep the map bounded.
+/// Entries are held via `Weak`, and an IP's slot map is dropped once all its connections close.
+/// Dead entries are pruned on insert to keep the map bounded.
 #[derive(Debug)]
 pub struct PerIpLimiter {
     inner: Mutex<HashMap<IpAddr, Weak<Semaphore>>>,
@@ -74,9 +56,6 @@ impl PerIpLimiter {
         }
     }
 
-    /// Try to claim a slot for `ip`. Returns `None` when that IP already holds
-    /// `max_per_ip` live connections. The caller must keep the permit alive for
-    /// the connection's lifetime.
     pub fn try_acquire(&self, ip: IpAddr) -> Option<OwnedSemaphorePermit> {
         let mut map = self.inner.lock().expect("per-ip limiter mutex poisoned");
         let semaphore = match map.get(&ip).and_then(Weak::upgrade) {

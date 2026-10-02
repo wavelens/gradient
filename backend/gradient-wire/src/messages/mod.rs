@@ -7,8 +7,6 @@
 pub mod client;
 pub mod server;
 
-// Job and scheduling types live in crate::types - re-exported here for
-// backward compatibility so existing `crate::messages::FlakeJob` paths still work.
 pub use crate::types::{
     BuildFailureKind, BuildJob, BuildMetrics, BuildOutput, BuildProduct, BuildSpec, BuildSpecKind,
     BumpedInputWire, CacheInfo, CachedPath, CandidateScore, ClusterAddress, ClusterMembership,
@@ -24,92 +22,34 @@ pub use crate::types::{
 pub use client::{ArchivedClientMessage, ClientMessage};
 pub use server::{ArchivedServerMessage, FailedPeer, ServerMessage};
 
-/// Wire protocol version implemented by this build.
-/// v5: dropped `PresignedUpload`/`PresignedDownload` and `AssignJob.timeout_secs`.
-/// v7: `CacheQuery`/`CacheStatus`/`CacheError` carry a per-query `query_id`;
-///     `NarUploaded` carries the path's content address (`ca`).
-/// v8: `BuildFailureKind::Aborted` distinguishes a server-ordered abort from a
-///     deterministic build failure.
-/// v9: `JobCompleted`/`JobFailed` carry the worker's phase timeline (`spans`);
-///     `EvalStatsReport` drops the three phase-millisecond fields it never set.
-/// v10: `QueryMode::PullClosure` asks the server to answer for a path's whole
-///      reference closure, not just the path.
-/// v11: `AssignJob` carries the `dispatched_job` id; `JobUpdate`, `JobCompleted`
-///      and `JobFailed` echo it and a report from another dispatch is dropped.
-///      `DiscoveredDerivation` drops `substituted`; a pruned dependency is no
-///      longer reported as an entry of its own.
-/// v12: rkyv archives are unaligned and read in place; `QueryKnownDerivations`
-///      carries a `query_id` that `KnownDerivations` echoes; bulk chunks are
-///      512 KiB and a bulk write batch is byte-capped.
-/// v13: `CacheQuery` carries `nar_sizes` in Push mode; the server passes NARs through at
-///      or under `smallNarBytes` and pulls small or unconfirmed ones over the stream.
-/// v14: BuildSpec.kind (BuildSpecKind) replaces external_cached; CacheQuery.external;
-///      QueryMode::PullClosure removed.
-/// v15: CachedPath.multipart grants a presigned multipart upload; NarUploaded.multipart
-///      returns its part ETags.
-/// v16: `CacheQuery.nar_sizes` entries are `Option<u64>`; an unknown size is never
-///      granted a multipart upload.
-/// v17: `BuildProgress` reports the bytes a Substitute or Download has fetched.
-/// v18: `JobCandidate.output_paths`; `CandidateScore.outputs_present`.
-/// v19: per-path upload admission: `UploadRequest`/`UploadGrant`/`UploadChunk`/
-///      `UploadFinished`/`UploadCommitted`/`UploadCancel`; removed `NarUploaded`,
-///      the worker-to-server push handshake (`NarPushResume`, `NarStreamHeader`
-///      on uploads; pulls still open with it), `EvalCachePush*`,
-///      `CachedPath.multipart`.
-/// v20: removed `RevokeJob`, `RequestAllScores` and `RequestAllCandidates`.
-/// v21: cluster jobs: `AssignJob.cluster`, `StartCluster`, `ClusterSignal`
-///      (both directions), `AbortCluster`; `WorkerCapabilities.zone` and `endpoint`.
-/// v22: plain names: `AssignJob.dispatch` and its echoes are `assignment_id`,
-///      the passthrough grant target is `GrantTarget::Passthrough`.
-/// v23: `JobPhase::NarFetch` and `NarImport`, `elapsed_ms` on `JobCompleted`
-///      and `JobFailed`.
 pub const PROTO_VERSION: u16 = 23;
 
-/// How often a worker reports a running download's progress, skipping an
-/// interval in which no bytes arrived.
 pub const BUILD_PROGRESS_INTERVAL: std::time::Duration = std::time::Duration::from_secs(5);
 
 pub use crate::constants::{NAR_ZSTD_LEVEL, PRESIGN_TTL};
 
-/// Ceiling for one bulk transfer (NAR pull, presigned HTTP download, or
-/// eval-cache blob) - all three ride the same channel and share one budget.
 pub const TRANSFER_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(600);
 
-/// An upload of at most this many NAR bytes goes ahead of larger ones, at the
-/// worker's slots and at the server's admission. An evaluation pushes thousands
-/// of `.drv` files, and every batch of its walk is reported behind its own.
 pub const SMALL_UPLOAD_BYTES: u64 = 1024 * 1024;
 
 pub fn is_small_upload(size: u64) -> bool {
     size <= SMALL_UPLOAD_BYTES
 }
 
-/// Small uploads in flight at once beside the large ones, at the worker's slots and
-/// at the server's admission. A small upload costs its two round trips, not its
-/// bytes, so this window over the link's latency is what bounds a closure push.
 pub const SMALL_UPLOADS_IN_FLIGHT: usize = 128;
 
-/// Server-side budget for answering one `CacheQuery`; on expiry the server
-/// replies `CacheError` so the worker retries instead of reading "uncached".
 pub const CACHE_QUERY_BUDGET: std::time::Duration = std::time::Duration::from_secs(45);
 
-/// Worker-side wait for `CacheStatus`/`CacheError` and `KnownDerivations`.
 pub const CACHE_QUERY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(75);
 
-/// Upper bound on the store paths one `CacheQuery` / `QueryKnownDerivations`
-/// may carry. A whole eval's path set (tens of thousands) serialises into a
-/// multi-MB request whose reply is larger still; with both peers holding a
-/// write the socket can't absorb, neither gets back to reading and the
-/// connection deadlocks until a send timeout tears it down. Chunking keeps
-/// every request and its reply inside
+/// A whole evaluation's path set is serialising into a multi-MB request with a larger reply. Both
+/// peers are then holding a write the socket cannot absorb, and the connection is deadlocking until
+/// a send timeout. Chunking is keeping every request and its reply inside
 /// [`crate::session::frame::SAFE_INFLIGHT_MESSAGE_SIZE`].
 pub const CACHE_QUERY_MAX_PATHS: usize = 1_000;
 
-/// How many `CacheQuery` / `QueryKnownDerivations` chunks a worker keeps in
-/// flight. Each stays under [`crate::session::frame::SAFE_INFLIGHT_MESSAGE_SIZE`], so
-/// the worst case in flight is that bound times this constant.
 pub const CACHE_QUERY_WINDOW: usize = 4;
 
-// The server must give up (and reply CacheError) before the worker stops
-// listening, otherwise a slow query reads as a silent miss.
+// The server must give up and reply `CacheError` while the worker is still listening. A slow query
+// would otherwise read as a silent miss.
 const _: () = assert!(CACHE_QUERY_BUDGET.as_secs() < CACHE_QUERY_TIMEOUT.as_secs());

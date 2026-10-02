@@ -4,19 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Integration tests for `PUT /api/v1/caches`.
-//!
-//! Two paths are exercised:
-//!   * the in-handler pre-check that rejects a name already taken (lock-in
-//!     regression around the 409 response shape);
-//!   * the happy-path transactional flow where the pre-check is empty, both
-//!     `cache` and `cache_upstream` insert, and the tx commits.
-//!
-//! `MockDatabase` cannot model unique-violation rollbacks - `begin()` and
-//! `commit()` succeed unconditionally. The race between the pre-check SELECT
-//! and the INSERT is therefore a SeaORM transaction-semantics trust boundary,
-//! not something we can prove with mocks. The two tests here are the
-//! strongest sequencing guarantee mocks can provide.
+//! `MockDatabase` cannot model unique-violation rollbacks. The race between the pre-check SELECT
+//! and the INSERT is not provable with mocks.
 
 use gradient_entity::{cache, cache_upstream, cache_user, ids::*};
 use gradient_test_support::fixtures::{test_date, user, user_id};

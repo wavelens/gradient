@@ -27,12 +27,8 @@ use gradient_types::*;
 use sea_orm::EntityTrait;
 use std::sync::Arc;
 
-/// Resolved access context for an evaluation.
-///
-/// Loaded once per request: fetches the evaluation row, resolves the owning
-/// project through the task, and enforces the access check. Returns
-/// `not_found("Evaluation")` on any failure so callers cannot distinguish
-/// missing from forbidden.
+/// Every failure is answered with `not_found("Evaluation")`. Callers cannot distinguish missing
+/// from forbidden.
 pub(super) struct EvalAccessContext {
     pub evaluation: MEvaluation,
     pub project_id: ProjectId,

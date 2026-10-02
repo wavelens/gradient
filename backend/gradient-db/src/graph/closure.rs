@@ -4,15 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Transitive build-closure walks and output-size summation.
-//!
-//! A `derivation_dependency` row `(derivation, dependency)` means
-//! "`derivation` depends on `dependency`". A *forward* walk from a set of root
-//! derivations therefore yields the full set of derivations that must be built
-//! or substituted to realise the roots. The coalesced output NAR size summed
-//! over that set is the closure size used by the build-closure endpoint and by
-//! the scheduler's scoring context.
-
 use crate::graph::walks::{ClosureDirection, dependency_closure_cte};
 use sea_orm::{
     ColumnTrait, ConnectionTrait, DatabaseTransaction, DbErr, EntityTrait, FromQueryResult,
@@ -33,9 +24,6 @@ struct EdgeRow {
     dependency: uuid::Uuid,
 }
 
-/// The `WITH RECURSIVE closure(derivation)` prelude seeded from a bound
-/// `uuid[]` of roots. One statement replaces a level-at-a-time BFS that cost a
-/// round trip per level (18 to 21 on production graphs).
 fn roots_closure_cte() -> String {
     dependency_closure_cte(
         "closure",
@@ -55,9 +43,9 @@ crate::sql_fn! {
         flags = [Walk];
 }
 
-/// The edge lookup is fenced like the walk above it: joining the closure to the
-/// edge table plainly gives the planner no size for the closure, and it answers
-/// with a hash join over every edge in the database.
+/// The edge lookup is fenced like the walk.
+/// A plain join is giving the planner no closure size.
+/// The planner would then hash-join every edge in the database.
 fn transitive_closure_edges_sql() -> String {
     format!(
         "{} SELECT s.derivation, s.dependency FROM closure c, \
@@ -74,8 +62,6 @@ crate::sql_fn! {
         flags = [Walk];
 }
 
-/// Forward `derivation_dependency` closure of `roots`; returns every reachable
-/// derivation id (roots included). Opens and commits its own sized walk.
 pub async fn transitive_closure_reachable<C>(
     db: &C,
     roots: &[DerivationId],
@@ -94,8 +80,6 @@ where
     Ok(reached)
 }
 
-/// The same walk on a transaction [`crate::graph::walks::begin_walk`] already sized,
-/// for a caller that walks many root sets and wants one raise for all of them.
 pub async fn transitive_closure_reachable_in(
     walk: &DatabaseTransaction,
     roots: &[DerivationId],
@@ -115,8 +99,6 @@ pub async fn transitive_closure_reachable_in(
     Ok(reached)
 }
 
-/// Map each derivation id to its coalesced output NAR size
-/// (`derivation_output.nar_size`, else matching `cached_path.nar_size`).
 pub async fn output_sizes_by_drv<C: ConnectionTrait>(
     db: &C,
     drv_ids: &[DerivationId],
@@ -164,8 +146,6 @@ pub async fn output_sizes_by_drv<C: ConnectionTrait>(
     Ok(by_drv)
 }
 
-/// Total coalesced output NAR size of the full build closure seeded at `roots`.
-/// Returns `0` for an empty closure or one with no known sizes.
 pub async fn transitive_closure_size<C>(db: &C, roots: &[DerivationId]) -> Result<i64, DbErr>
 where
     C: ConnectionTrait + TransactionTrait<Transaction = DatabaseTransaction>,
@@ -176,12 +156,6 @@ where
     Ok(by_drv.values().sum())
 }
 
-/// Closure size for many roots at once. One recursive statement returns every
-/// edge inside the combined closure and a second returns the output sizes, then
-/// each root's closure is summed in memory (diamonds deduped via a per-root
-/// visited set). Two round trips for the whole batch instead of one full DB walk
-/// per root, which matters when a dispatch round backfills many derivations that
-/// share most of their closure.
 pub async fn transitive_closure_sizes<C>(
     db: &C,
     roots: &[DerivationId],
@@ -269,13 +243,10 @@ mod tests {
         }
     }
 
-    // The closure walk projects one `derivation` column; the mock only has to
-    // carry that, so the edge model stands in with both ends set to the node.
     fn node(derivation: DerivationId) -> derivation_dependency::Model {
         dep(derivation, derivation)
     }
 
-    /// Every walk opens with `SET LOCAL work_mem`, which draws an exec result.
     fn raise() -> sea_orm::MockExecResult {
         sea_orm::MockExecResult {
             last_insert_id: 0,
@@ -288,10 +259,8 @@ mod tests {
         let root = DerivationId::now_v7();
         let child = DerivationId::now_v7();
         let db = MockDatabase::new(DatabaseBackend::Postgres)
-            // the whole closure walk is one statement, preceded by the work_mem raise
             .append_exec_results([raise()])
             .append_query_results([vec![node(root), node(child)]])
-            // output_sizes_by_drv: outputs for [root, child]
             .append_query_results([vec![out(root, "r", Some(100)), out(child, "c", Some(40))]])
             .into_connection();
 
@@ -308,14 +277,12 @@ mod tests {
 
     #[tokio::test]
     async fn bulk_sizes_dedup_diamond() {
-        // root -> a, root -> b, a -> c, b -> c. c must be counted once.
         let root = DerivationId::now_v7();
         let a = DerivationId::now_v7();
         let b = DerivationId::now_v7();
         let c = DerivationId::now_v7();
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             .append_exec_results([raise()])
-            // one statement returns every edge inside the closure
             .append_query_results([vec![dep(root, a), dep(root, b), dep(a, c), dep(b, c)]])
             .append_query_results([vec![
                 out(root, "r", Some(10)),
@@ -329,8 +296,6 @@ mod tests {
         assert_eq!(sizes.get(&root).copied(), Some(100));
     }
 
-    /// #650: a loop of walks used to open one sized transaction per call. On a
-    /// walk the caller opened, two root sets consume one raise between them.
     #[tokio::test]
     async fn one_raise_serves_many_root_sets_on_the_same_walk() {
         let a = DerivationId::now_v7();

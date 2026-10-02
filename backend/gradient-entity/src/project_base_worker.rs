@@ -10,7 +10,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::ids::{BaseWorkerId, ProjectBaseWorkerId, ProjectId, UserId};
 
-/// Per-project opt-in for a base worker. Row present means the project enabled it.
 #[derive(Clone, Debug, Default, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
 #[sea_orm(table_name = "project_base_worker")]
 pub struct Model {

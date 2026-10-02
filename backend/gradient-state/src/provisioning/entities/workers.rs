@@ -17,8 +17,6 @@ use sea_orm::{
 use std::collections::HashMap;
 
 impl<'a> StateApplicator<'a> {
-    // ── apply_workers ─────────────────────────────────────────────────────────
-
     pub(crate) async fn apply_workers(
         &self,
         state_workers: &HashMap<String, StateWorker>,
@@ -118,11 +116,8 @@ impl<'a> StateApplicator<'a> {
     }
 }
 
-// ── base workers ──────────────────────────────────────────────────────────
-
-/// Upserts the server-level `base_worker` row, then pre-enables its declared
-/// projects. Pre-enablements are only added: frontend opt-ins are not state-managed
-/// and must survive reconciliation.
+/// Pre-enablements are only added. Frontend opt-ins are not state-managed and must survive
+/// reconciliation.
 async fn apply_base_worker<C: ConnectionTrait>(
     db: &C,
     worker: &StateWorker,
@@ -141,9 +136,8 @@ async fn apply_base_worker<C: ConnectionTrait>(
         .one(db)
         .await?;
 
-    // Sweeping every existing project is a one-shot: on the row's first
-    // provisioning, and when auto_enable is newly switched on. Repeating it on
-    // each restart would undo a project's deliberate opt-out from the UI.
+    // Sweeping every existing project is one-shot, on first provisioning and when `auto_enable` is
+    // newly switched on. Repeating it on each restart would undo a deliberate opt-out from the UI.
     let (base_worker_id, sweep_projects) = if let Some(row) = existing {
         let id = row.id;
         let newly_auto = worker.auto_enable && !row.auto_enable;
@@ -264,7 +258,6 @@ mod base_worker_tests {
         }
     }
 
-    /// With no existing row, `apply_base_worker` must INSERT into `base_worker`.
     #[tokio::test]
     async fn apply_base_worker_inserts_when_absent() {
         let inserted = base_worker::Model {

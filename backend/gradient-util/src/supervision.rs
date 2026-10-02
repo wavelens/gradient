@@ -4,13 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Supervision tree for the server's long-lived loops.
-//!
-//! A `Root` actor owns every loop as a linked child. A child that panics or
-//! exits unexpectedly is respawned after an exponential backoff; a child whose
-//! pass exceeds its budget is cancelled in place and ticks again. Shutdown stops
-//! the whole tree through the shared [`Shutdown`] token.
-
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::pin::Pin;
@@ -37,9 +30,8 @@ const BACKOFF_MAX: Duration = Duration::from_secs(60);
 const HEALTHY_RESET: Duration = Duration::from_secs(300);
 const STOP_TIMEOUT: Duration = Duration::from_secs(25);
 
-/// A pass that starts every `period`, cancelled in place past `budget`. A `wake`
-/// starts the next pass at once instead of at the end of the period; one arriving
-/// during a pass starts another right after it.
+/// A `wake` is starting the next pass at once instead of at the end of the period. A wake arriving
+/// during a pass is starting another one right after it.
 #[derive(Clone)]
 pub struct PeriodicSpec {
     pub name: &'static str,
@@ -49,13 +41,10 @@ pub struct PeriodicSpec {
     pub wake: Option<Arc<Notify>>,
 }
 
-/// What the root supervises: a periodic pass, any actor spawned by a factory,
-/// or a nested supervisor with children of its own.
 #[derive(Clone)]
 pub enum ChildSpec {
     Periodic(PeriodicSpec),
-    /// `stop_last` children are stopped after every sibling, so late callers
-    /// still find them.
+    /// `stop_last` children are stopped after every sibling. Late callers can still find them.
     Custom {
         name: &'static str,
         spawn: SpawnFn,
@@ -82,7 +71,6 @@ impl ChildSpec {
         })
     }
 
-    /// [`Self::periodic`], also run as soon as `wake` is notified.
     pub fn periodic_woken<F, Fut>(
         name: &'static str,
         period: Duration,
@@ -103,8 +91,6 @@ impl ChildSpec {
         })
     }
 
-    /// A nested node holding its own children. Its name is not a health row;
-    /// only its leaves are.
     pub fn supervisor(name: &'static str, children: Vec<ChildSpec>) -> Self {
         Self::Supervisor { name, children }
     }
@@ -118,8 +104,6 @@ impl ChildSpec {
     }
 }
 
-/// Everything a child needs from the tree: its parent cell, the shared health
-/// registry and the shutdown token.
 #[derive(Clone)]
 pub struct ChildCtx {
     pub parent: ActorCell,
@@ -142,7 +126,6 @@ pub struct SupervisorHealth {
 }
 
 impl SupervisorHealth {
-    /// Give `name` a row so the snapshot lists a child before its first pass.
     pub fn register(&self, name: &'static str) {
         self.with(name, |_| {});
     }
@@ -165,8 +148,6 @@ impl SupervisorHealth {
     }
 }
 
-/// Run one pass under the shutdown token and the budget, recording the outcome.
-/// Returns `false` when shutdown was observed, so the caller stops instead of rescheduling.
 pub async fn run_pass(
     name: &'static str,
     budget: Duration,
@@ -200,7 +181,6 @@ pub async fn run_pass(
     true
 }
 
-/// The period, or a wake before it; `false` once shutdown began.
 async fn wait_for_turn(spec: &PeriodicSpec, cancel: &CancellationToken) -> bool {
     let woken = async {
         match &spec.wake {
@@ -467,7 +447,6 @@ async fn stop_wave(cells: Vec<ActorCell>) {
     .await;
 }
 
-/// Handle to a running tree: the root and its health registry.
 #[derive(Clone)]
 pub struct Supervisor {
     root: ActorRef<RootMsg>,
@@ -481,8 +460,6 @@ impl std::fmt::Debug for Supervisor {
 }
 
 impl Supervisor {
-    /// Spawn an empty root that stops when `token` is cancelled. The stop task
-    /// is tracked so a drain waits for the tree.
     pub async fn start(token: CancellationToken, tracker: TaskTracker) -> Result<Self, SpawnErr> {
         let health = Arc::new(SupervisorHealth::default());
         let args = RootArgs {
@@ -507,7 +484,6 @@ impl Supervisor {
         Ok(Self { root, health })
     }
 
-    /// Add a child and wait until its first instance is running.
     pub async fn add(&self, spec: ChildSpec) -> Result<(), String> {
         match ractor::call!(self.root, RootMsg::Add, spec) {
             Ok(result) => result,
@@ -567,8 +543,6 @@ mod tests {
         shutdown.cancel_and_drain(Duration::from_secs(2)).await;
     }
 
-    /// A queued evaluation sat out the rest of a 5 s dispatch tick before
-    /// anything looked at it; a wake starts the pass now.
     #[tokio::test]
     async fn a_wake_runs_the_pass_before_its_period() {
         let shutdown = Shutdown::new();
@@ -745,8 +719,6 @@ mod tests {
         }
     }
 
-    /// The mailbox is unbounded: a burst of casts is accepted instantly and a
-    /// later call waits behind the whole backlog (FIFO, no priority lanes).
     #[tokio::test]
     async fn casts_queue_without_bound_and_a_call_waits_behind_them() {
         let done = Arc::new(AtomicU64::new(0));

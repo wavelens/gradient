@@ -4,12 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Integration tests for the auth-hardening surface added under issue #91:
-//! session-backed JWT revocation, API-key revocation/expiry, and the
-//! re-auth requirement on `DELETE /user`. The tests drive the router via
-//! `axum_test::TestServer` against a `MockDatabase` so they exercise the
-//! same handlers the real server is running, without needing Postgres.
-
 #![expect(
     clippy::unwrap_used,
     reason = "test scaffolding: a fixture helper that cannot build its value should fail the test loudly"
@@ -252,10 +246,6 @@ fn expired_api_key_is_rejected() {
     });
 }
 
-/// Sets up the queue an authenticated request reads through:
-///   1. session lookup (Query)
-///   2. session.last_used_at update (Exec + re-Query)
-///   3. user lookup (Query)
 fn auth_queue(db: MockDatabase, session: session::Model) -> MockDatabase {
     db.append_query_results([vec![session.clone()]])
         .append_exec_results([MockExecResult {
@@ -303,8 +293,6 @@ fn delete_user_with_wrong_password_is_forbidden() {
         res.assert_status_forbidden();
     });
 }
-
-// ── Configurable API-key options ─────────────────────────────────────────────
 
 #[test]
 fn api_key_with_only_view_cannot_trigger_evaluation() {

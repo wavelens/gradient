@@ -7,22 +7,8 @@
 use sea_orm_migration::prelude::*;
 use sea_orm_migration::sea_orm::ConnectionTrait;
 
-/// Covering indexes for the two reverse graph walks, and retirement of the
-/// surrogate primary keys on the three junction tables.
-///
-/// The walks project the far end of an edge, so an index on the probed column
-/// alone forces a heap fetch per row: the dependents walk spent 871k buffers on
-/// 68k nodes, and the `cached_path_reference` walk (57% of all database time)
-/// bitmap-scanned 82,925 heap blocks per pass. Adding the projected column makes
-/// both index-only.
-///
-/// The surrogate `id` keys go because none of the three has ever been read:
-/// `idx_scan = 0` over an eleven-day production window on `derivation_closure`
-/// (909 MB), `cached_path_reference` (372 MB) and `derivation_dependency`
-/// (161 MB). Each one is a third of the index maintenance on the hottest insert
-/// paths in the system. The natural pair already carries a unique index, so
-/// `ADD PRIMARY KEY USING INDEX` adopts it without a rebuild; note that this
-/// renames each `idx-*-pair` index to the table's `_pkey` name.
+/// `ADD PRIMARY KEY USING INDEX` is adopting the natural pair index without a rebuild. It is also
+/// renaming each `idx-*-pair` index to the table's `_pkey` name.
 const STATEMENTS: &[&str] = &[
     "CREATE INDEX IF NOT EXISTS \"idx-derivation_dependency-reverse-pair\" \
      ON derivation_dependency (dependency, derivation)",
@@ -42,8 +28,8 @@ const STATEMENTS: &[&str] = &[
     "ALTER TABLE cached_path_reference DROP COLUMN IF EXISTS id",
 ];
 
-/// Restores the surrogate keys. The backfills rewrite every row, so this is far
-/// more expensive than the forward migration.
+/// The backfills are rewriting every row. This reverse migration is far more expensive than the
+/// forward one.
 const REVERT: &[&str] = &[
     "ALTER TABLE cached_path_reference DROP CONSTRAINT IF EXISTS cached_path_reference_pkey",
     "ALTER TABLE cached_path_reference ADD COLUMN IF NOT EXISTS id uuid",

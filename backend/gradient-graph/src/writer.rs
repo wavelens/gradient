@@ -4,11 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! The one writer of the dependency graph and the cache index. Every message is
-//! one transaction; record batches and NAR commits queued together are one
-//! transaction with a savepoint each, and any other message flushes that queue
-//! first, so it acts on its callers' earlier writes.
-
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -28,25 +23,15 @@ use crate::messages::{
 use crate::record;
 use crate::{demote, gc, nar, requeue, transition};
 
-/// How long a caller waits for the graph writer to exist after a restart.
 pub const CALL_TIMEOUT: Duration = Duration::from_secs(30);
-/// A transaction past this is rolled back and its caller told. This is the only
-/// bound on a reply: a caller waits out the queue ahead of its message, because
-/// the graph writer is still running a message whose caller gave up, and a session behind a
-/// burst must block its reader (TCP backpressure on the worker), not drop the batch.
-/// Postgres enforces it per statement as well: the rollback waits for the running
-/// statement to end, so a budget the database does not know is no bound at all.
+/// This budget is the only bound on a caller waiting out the queue ahead of its message.
+/// A session behind a burst must block its reader through TCP backpressure.
+/// Postgres is enforcing the budget per statement as well.
+/// The rollback is waiting for the running statement and cannot bound it alone.
 pub const GRAPH_TX_BUDGET: Duration = Duration::from_secs(120);
-/// How many times a transaction aborted for a deadlock or serialization failure is attempted.
 pub const GRAPH_TX_ATTEMPTS: u32 = 3;
-/// Queued record batches are flushed early once they carry this many derivations.
 pub const RECORD_ROW_BUDGET: usize = 5000;
-/// Queued NAR commits are flushed early once this many wait.
 pub const NAR_COMMIT_BUDGET: usize = 128;
-/// A flush stops taking NAR commits once it has run this long and leaves the rest
-/// for the next one. It holds the shared build locks of every commit in it until it ends,
-/// so this bounds how long a dispatch claim waits behind it, whatever the commits
-/// cost, while still sharing the WAL flush among the ones that fit.
 pub const NAR_FLUSH_TIME: Duration = Duration::from_millis(100);
 pub const HEALTH_NAME: &str = "graph";
 
@@ -201,16 +186,10 @@ impl Actor for GraphWriter {
     }
 }
 
-/// Hand a committed round's gained need to the upstream probe, and turn the
-/// result into the caller's. Post-commit on purpose: the probe reads the rows on
-/// its own connection, and a shared build asked for before its transaction lands plans
-/// to nothing and is then remembered as asked for five minutes.
 fn ask_probe(st: &GraphState, result: anyhow::Result<Vec<DerivationId>>) -> anyhow::Result<()> {
     result.map(|gained| st.ctx.probe_requests.send(gained))
 }
 
-/// Flush now once the queue is past a budget, otherwise after the messages
-/// already in the mailbox, so a burst of them shares one transaction.
 async fn queue_flush(myself: &ActorRef<GraphMsg>, st: &mut GraphState) {
     if st.queued_rows >= RECORD_ROW_BUDGET || st.nars.len() >= NAR_COMMIT_BUDGET {
         flush(myself, st).await;
@@ -220,11 +199,6 @@ async fn queue_flush(myself: &ActorRef<GraphMsg>, st: &mut GraphState) {
     }
 }
 
-/// Write every queued batch and NAR commit in one transaction, a savepoint
-/// each, then reply to all of them and run the post-commit effects of the ones
-/// that landed. A batch that fails is lost (the wire has no ack the worker could
-/// retry on), so its evaluation is failed rather than left with a missing
-/// dependency in its graph; a failed commit is its uploader's error to report.
 #[tracing::instrument(level = "debug", skip_all, fields(batches = st.queued.len(), rows = st.queued_rows, nars = st.nars.len()))]
 async fn flush(myself: &ActorRef<GraphMsg>, st: &mut GraphState) {
     if st.queued.is_empty() && st.nars.is_empty() {
@@ -293,9 +267,6 @@ async fn flush(myself: &ActorRef<GraphMsg>, st: &mut GraphState) {
     }
 }
 
-/// A batch that failed for its timing fails the whole flush, which `transact` then
-/// retries; one that failed for its content stays that batch's own outcome. Its
-/// savepoint already rolled back, but a deadlock victim is no verdict on the batch.
 fn escalate_retryable<T>(outcome: anyhow::Result<T>) -> anyhow::Result<anyhow::Result<T>> {
     match outcome {
         Err(e) if is_retryable(&e) => Err(e),
@@ -303,7 +274,6 @@ fn escalate_retryable<T>(outcome: anyhow::Result<T>) -> anyhow::Result<anyhow::R
     }
 }
 
-/// One batch under its own savepoint, so a bad batch fails only its caller.
 #[tracing::instrument(level = "debug", skip_all)]
 async fn record_one(scoped: &DbContext, batch: &RecordBatch) -> anyhow::Result<RecordReport> {
     in_savepoint(scoped, |inner| async move {
@@ -312,9 +282,6 @@ async fn record_one(scoped: &DbContext, batch: &RecordBatch) -> anyhow::Result<R
     .await
 }
 
-/// The queued NARs in one set-based savepoint; if that fails, one by one, so a bad
-/// commit fails only its uploader, stopping at [`NAR_FLUSH_TIME`] and leaving the
-/// rest to the next flush. A deadlock fails the whole flush for `transact` to retry.
 #[tracing::instrument(level = "debug", skip_all, fields(nars = commits.len()))]
 async fn commit_nars(
     scoped: &DbContext,
@@ -346,7 +313,6 @@ async fn commit_nars(
     Ok(committed)
 }
 
-/// One NAR commit under its own savepoint, so a bad commit fails only its uploader.
 #[tracing::instrument(level = "debug", skip_all)]
 async fn commit_one(scoped: &DbContext, commit: &NarCommit) -> anyhow::Result<NarCommitted> {
     in_savepoint(
@@ -377,12 +343,10 @@ where
     }
 }
 
-/// `begin`, `work`, `commit`; a failure or a run past `budget` rolls back. A deadlock
-/// or serialization failure rolls back and starts `work` again, up to
-/// [`GRAPH_TX_ATTEMPTS`] times: the advisory shared build keys make two graph writers wait
-/// on each other instead of missing each other's rows, and Postgres breaks the rare
-/// cycle that creates by aborting one of them. Board events and probe requests a
-/// failed attempt already sent are not recalled, so a retry sends them again.
+/// The advisory shared build keys are making two graph writers wait on each other.
+/// Postgres is breaking the rare resulting cycle by aborting one, and `work` is retried.
+/// Board events and probe requests of a failed attempt are not recalled.
+/// A retry is sending them again.
 pub async fn transact<T, F, Fut>(ctx: &DbContext, budget: Duration, work: F) -> anyhow::Result<T>
 where
     F: Fn(DbContext) -> Fut,
@@ -404,9 +368,6 @@ fn statement_timeout(budget: Duration) -> String {
     format!("SET LOCAL statement_timeout = {}", budget.as_millis())
 }
 
-/// SQLSTATE `40P01` (deadlock detected), `40001` (serialization failure) or `25P02`
-/// (an earlier statement failed and was only logged) anywhere in the chain. The
-/// transaction was aborted, and a fresh attempt is able to pass.
 fn is_retryable(err: &anyhow::Error) -> bool {
     err.chain().any(|cause| {
         let Some(
@@ -441,16 +402,12 @@ where
         Arc::try_unwrap(tx).map_err(|_| anyhow!("a transaction handle escaped its message"))?;
     match outcome {
         Ok(Ok(value)) => {
-            // Postgres is answering COMMIT of an aborted transaction with a silent
-            // ROLLBACK. The probe is surfacing that state as `25P02` instead.
             if let Err(e) = tx.execute_unprepared("SELECT 1").await {
                 let _ = tx.rollback().await;
                 return Err(anyhow::Error::new(e).context("transaction aborted before commit"));
             }
 
             tx.commit().await.context("commit")?;
-            // The transaction may have written pending-delivery rows; the effects actor
-            // claims them now rather than on its next tick.
             ctx.delivery_wake.notify_one();
             startable_set.publish();
             Ok(value)
@@ -509,8 +466,6 @@ mod tests {
         let graph = crate::Graph::new();
         let writer = graph.spawn(ctx, None, None).await.unwrap();
 
-        // Both land in the mailbox before the graph writer handles either, so the flush the
-        // first one queues comes after the second.
         let (tx1, rx1) = ractor::concurrency::oneshot();
         let (tx2, rx2) = ractor::concurrency::oneshot();
         writer
@@ -567,8 +522,6 @@ mod tests {
         }
     }
 
-    /// An upload burst is a mailbox of commits; each one committing alone paid a
-    /// round trip and a WAL flush per NAR, and serialised the burst behind them.
     #[tokio::test]
     async fn queued_nar_commits_share_one_transaction() {
         let (h1, h2) = (
@@ -613,7 +566,6 @@ mod tests {
         );
     }
 
-    /// One bad NAR must not fail the uploads it was batched with.
     #[tokio::test]
     async fn a_failed_batch_commits_its_nars_one_by_one() {
         let good = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
@@ -722,9 +674,6 @@ mod tests {
         );
     }
 
-    /// The budget reaches Postgres before any work, so a runaway statement is
-    /// cancelled there: a dropped future leaves it running, and the rollback
-    /// waited 18 minutes for one while every caller queued behind the graph writer.
     #[tokio::test]
     async fn a_transaction_hands_its_budget_to_postgres_first() {
         let (ctx, pool) = ctx(MockDatabase::new(DatabaseBackend::Postgres)

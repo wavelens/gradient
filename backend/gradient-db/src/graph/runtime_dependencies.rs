@@ -4,16 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Runtime dependencies of the derivation graph. They are learned, never declared: from
-//! an upstream narinfo when an output is probed, and from the NAR when it lands.
-//! A reference whose hash has no producing derivation yet is either an `inputSrc`
-//! the evaluation pushed itself or an output of a stub the walk has not reached,
-//! so the walk that gives a stub its outputs adopts the references naming them.
-//!
-//! Two derivations that produce the same output paths (twins: `.drv`s equal modulo
-//! their fixed-output inputs) never get an edge between them. Each one's reference to
-//! the shared path is a reference to its own output; as an edge it made each twin's
-//! complete closure wait on the other's, and neither could ever become fetchable.
+//! Twin derivations producing the same output paths must never get an edge between them.
+//! Each twin's complete closure would wait on the other's.
+//! Neither twin could then become fetchable.
 
 use gradient_types::ids::DerivationId;
 use sea_orm::{ConnectionTrait, DbErr, Value};
@@ -21,9 +14,6 @@ use sea_orm::{ConnectionTrait, DbErr, Value};
 use crate::graph::can_start::ids;
 
 crate::sql! {
-    /// One row per producer, add-only: an edge the walk already wrote as a build
-    /// edge is upgraded to `Both` rather than duplicated, and a path that
-    /// references its own producer's (or a twin's) output is not an edge at all.
     INSERT_RUNTIME_DEPENDENCIES = r#"
 INSERT INTO derivation_dependency (derivation, dependency, kind)
 SELECT $1, d.dependency, 1 FROM unnest($2::uuid[]) AS d(dependency)
@@ -35,13 +25,9 @@ ON CONFLICT (derivation, dependency) DO UPDATE SET kind = 2 WHERE derivation_dep
 "#,
         params = [DerivationId, DerivationIds(64)];
 
-    /// The runtime dependencies into `$1` that references recorded before `$1` had output
-    /// rows could not resolve, from both places a reference is kept. Returns each
-    /// parent whose edge landed or was upgraded, once per edge.
-    ///
-    /// The producer lookup, twin check included, is fenced: a generic plan guesses
-    /// thousands of parents per GIN probe and hash-joins them against a
-    /// sequential scan of every output.
+    /// The producer lookup is fenced.
+    /// A generic plan is guessing thousands of parents per GIN probe.
+    /// It would hash-join them against a sequential scan of every output.
     ADOPT_REFERENCED_OUTPUTS = r#"
 INSERT INTO derivation_dependency (derivation, dependency, kind)
 SELECT DISTINCT r.derivation, o.derivation, 1
@@ -67,16 +53,12 @@ RETURNING derivation
         tier = Bulk;
 }
 
-/// The store-path hash of a narinfo reference token, which the worker sends as
-/// either a bare `hash-name` or a full `/nix/store/hash-name`.
 pub(crate) fn hash_of_token(token: &str) -> Option<String> {
     let base = token.trim_start_matches("/nix/store/");
     let hash = base.split('-').next()?;
     gradient_util::nix_hash::is_nix32_hash(hash).then(|| hash.to_owned())
 }
 
-/// The derivations producing the outputs `tokens` names. A token whose hash has
-/// no `derivation_output` row yields nothing, which is how an `inputSrc` drops out.
 pub async fn producers_of_tokens<C: ConnectionTrait>(
     db: &C,
     tokens: &[String],
@@ -86,8 +68,6 @@ pub async fn producers_of_tokens<C: ConnectionTrait>(
     crate::graph::reachability::producers_of_hashes(db, &hashes).await
 }
 
-/// Write `producers` as runtime dependencies of `parent`, returning the rows
-/// inserted or upgraded to `Both`.
 pub async fn insert_runtime_dependencies<C: ConnectionTrait>(
     db: &C,
     parent: DerivationId,
@@ -105,8 +85,6 @@ pub async fn insert_runtime_dependencies<C: ConnectionTrait>(
         .rows_affected())
 }
 
-/// Write the runtime dependencies earlier references name into the outputs of `walked`,
-/// returning the parents whose runtime dependencies grew.
 pub async fn adopt_referenced_outputs<C: ConnectionTrait>(
     db: &C,
     walked: &[DerivationId],

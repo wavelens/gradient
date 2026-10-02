@@ -4,12 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! `POST /build-requests/manifest` - first step of the build-request upload
-//! flow. The client submits the full `(path, hash, size)` list; the server
-//! validates paths/sizes, looks up which blobs the project already has, persists
-//! an `upload_session` row, and returns the missing-hash set so the client
-//! knows exactly what to upload next.
-
 use super::types::ManifestEntry;
 use super::validation::{decode_blake3_hex, validate_manifest_path};
 use crate::access::{Caller, ProjectAccess, load_project};

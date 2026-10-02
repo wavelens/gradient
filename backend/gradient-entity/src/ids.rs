@@ -4,13 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Typed newtype wrappers around `Uuid` for every entity primary key.
-//!
-//! These exist so the compiler can reject argument swaps such as
-//! `user_is_project_member(state, project_id, user_id)`. Wire format is unchanged via
-//! `#[serde(transparent)]`; SeaORM column type is unchanged via
-//! `#[derive(DeriveValueType)]`.
-
 use sea_orm::{DbErr, DeriveValueType, TryFromU64};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;

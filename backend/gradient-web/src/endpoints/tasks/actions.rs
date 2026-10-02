@@ -4,9 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! CRUD endpoints for `task_action` plus test-fire, token regeneration,
-//! and delivery inspection.
-
 use crate::access::{Caller, TaskAccess, load_task};
 use crate::audit::{RequestInfo, record as audit_record};
 use crate::authorization::MaybeApiKey;
@@ -100,9 +97,6 @@ fn action_type_to_str(t: ActionType) -> &'static str {
     }
 }
 
-/// Render a stored row as a public response, stripping the encrypted token
-/// from `send_web_request` configs so secrets never leak past the create
-/// call where the plaintext is returned exactly once.
 fn to_response(m: MTaskAction) -> ActionResponse {
     let at = m.action_type;
     let mut config = m.config;
@@ -134,7 +128,6 @@ fn to_response(m: MTaskAction) -> ActionResponse {
     }
 }
 
-/// `GET /tasks/{project}/{task}/actions` - list all actions for the task.
 pub async fn list_actions(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
@@ -159,10 +152,6 @@ pub async fn list_actions(
     Ok(ok_json(rows.into_iter().map(to_response).collect()))
 }
 
-/// `POST /tasks/{project}/{task}/actions` - create a new action. For
-/// `send_web_request` configs the supplied plaintext token is returned
-/// exactly once in the response and stored encrypted with the server's
-/// crypt key; all later reads omit it entirely.
 pub async fn create_action(
     state: State<Arc<ServerState>>,
     info: RequestInfo,
@@ -433,7 +422,7 @@ pub async fn update_action(
     let mut active: ATaskAction = row.into();
 
     if let Some(new_cfg) = body.config {
-        // For send_web_request, token: None means preserve the existing encrypted token.
+        // `token: None` is preserving the existing encrypted token for `send_web_request`.
         let stored_cfg = match new_cfg {
             ActionConfig::SendWebRequest { url, token: None } => {
                 let existing_config: ActionConfig =
@@ -596,9 +585,8 @@ pub async fn test_action(
 
     let action_type = action.action_type;
 
-    // Git-host-integration actions can't be test-fired against a synthetic commit
-    // (the Git host rejects the placeholder owner/repo/sha); probe the
-    // integration's connectivity to the task repo instead.
+    // Git-host-integration actions cannot be test-fired against a synthetic commit. The Git host is
+    // rejecting the placeholder owner, repo and sha.
     if matches!(
         action_type,
         ActionType::GitHostStatusReport | ActionType::OpenPr

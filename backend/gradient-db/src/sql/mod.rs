@@ -4,10 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Every hand-written statement in the backend is declared with [`crate::sql!`],
-//! which registers it so the plan gate can explain it against a
-//! production-scale dataset in the e2e VM test. Nothing else may build a raw
-//! `Statement`: `backend/clippy.toml` denies the sea-orm constructors.
+//! Nothing else may build a raw `Statement`.
+//! `backend/clippy.toml` is denying the sea-orm constructors.
 
 pub mod budget;
 pub mod macros;

@@ -11,7 +11,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::ids::WorkerSampleId;
 
-/// Worker lifecycle state at sample time; today a typed draining flag.
 #[repr(i16)]
 #[derive(
     Debug,

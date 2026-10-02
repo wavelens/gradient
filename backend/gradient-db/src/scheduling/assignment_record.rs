@@ -4,10 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! The `dispatched_job` row is the one proof that a job is out. The scheduler's
-//! job key (`eval:<evaluation>` / `build:<shared_build>`) is persisted on `job_id`
-//! and rebuilt in SQL by the dispatch gates, so the prefixes live here next to
-//! the SQL and a copy that drifts cannot silently open the gate.
+//! The job key prefixes are living next to the SQL rebuilding them.
+//! A drifting copy could silently open a dispatch gate.
 
 use gradient_entity::build::BuildStatus;
 use gradient_entity::dispatched_job::{
@@ -27,18 +25,14 @@ use std::collections::HashMap;
 pub const EVAL_KEY_PREFIX: &str = "eval:";
 pub const BUILD_KEY_PREFIX: &str = "build:";
 
-/// The evaluation job key of the uuid column `id_expr`, as SQL text.
 pub fn eval_job_key_sql(id_expr: &str) -> String {
     format!("'{EVAL_KEY_PREFIX}' || {id_expr}::text")
 }
 
-/// The build job key of the shared build uuid column `id_expr`, as SQL text.
 pub fn build_job_key_sql(id_expr: &str) -> String {
     format!("'{BUILD_KEY_PREFIX}' || {id_expr}::text")
 }
 
-/// SQL predicate: no `dispatched_job` row for `job_key_sql` is still open.
-/// Served by `idx-dispatched_job-open-job`.
 pub fn no_open_assignment_predicate(job_key_sql: &str) -> String {
     format!(
         "NOT EXISTS (SELECT 1 FROM dispatched_job dj WHERE dj.job_id = {job_key_sql} \
@@ -46,17 +40,15 @@ pub fn no_open_assignment_predicate(job_key_sql: &str) -> String {
     )
 }
 
-/// What a claim re-reads in the statement that writes its row: a job assembled
-/// from a snapshot goes out only while its subject still wants it.
 #[derive(Debug, Clone, Copy)]
 pub enum ClaimGate {
-    /// The shared build is still `Queued` in the passthrough mode the job was assembled for.
     Build {
         shared_build: DerivationBuildId,
         substitute: bool,
     },
-    /// The evaluation has not finished.
-    Eval { evaluation: EvaluationId },
+    Eval {
+        evaluation: EvaluationId,
+    },
 }
 
 impl ClaimGate {
@@ -88,10 +80,6 @@ impl ClaimGate {
     }
 }
 
-/// Claim a job by writing its open `dispatched_job` row; `false` when the claim
-/// was lost. One statement, arbitrated by the unique open-row index
-/// `idx-dispatched_job-open-job`: of any number of instances claiming one job
-/// key, exactly one inserts, and a gate that no longer holds inserts nothing.
 pub async fn claim_assignment<C: ConnectionTrait>(
     db: &C,
     row: MDispatchedJob,
@@ -131,8 +119,6 @@ pub(crate) fn claim_statement(
     Ok(insert)
 }
 
-/// The newest eval job of each evaluation, its Job Board entry. Served by
-/// `idx-dispatched_job-eval-by-evaluation`.
 pub async fn latest_eval_jobs<C: ConnectionTrait>(
     db: &C,
     evaluations: &[EvaluationId],
@@ -154,8 +140,6 @@ pub async fn latest_eval_jobs<C: ConnectionTrait>(
     Ok(rows.into_iter().collect())
 }
 
-/// How many times `evaluation`'s eval job ran, the one ending now included:
-/// rejected or lost assignments close as `Abandoned` and never ran.
 pub async fn eval_attempts<C: ConnectionTrait>(
     db: &C,
     evaluation: EvaluationId,
@@ -172,10 +156,6 @@ pub async fn eval_attempts<C: ConnectionTrait>(
         .await
 }
 
-/// Close every open row of `worker_id` dispatched before `before` as
-/// `Abandoned`; returns how many closed. The cutoff keeps a reconnecting
-/// worker off the rows its own still-landing terminal reports close: only a
-/// process that is gone leaves a row no live closer owns.
 pub async fn abandon_open_assignments_for_worker<C: ConnectionTrait>(
     db: &C,
     worker_id: &str,
@@ -192,19 +172,11 @@ pub async fn abandon_open_assignments_for_worker<C: ConnectionTrait>(
     .await
 }
 
-/// How many rows one startup-recovery statement closes.
 const RECOVERY_CLOSE_CHUNK: u64 = 10_000;
 
-/// Close every open row as `Abandoned`; returns how many closed. Startup
-/// recovery's closer: nothing a previous process handed out is still out.
-///
-/// The predicate stays unbounded and the statement is chunked instead. A
-/// backlog reaches six figures, every close is a non-HOT update because
-/// `finished_at` is indexed, and this executes before the listener binds: one
-/// statement over the whole set is a single transaction holding hundreds of
-/// megabytes of WAL and row locks with nothing able to interleave, where the
-/// same total work split at [`RECOVERY_CLOSE_CHUNK`] rows lets autovacuum keep
-/// up and bounds every lock to one chunk.
+/// The statement is chunked at [`RECOVERY_CLOSE_CHUNK`] rows.
+/// One statement over a six-figure backlog would hold WAL and row locks before the
+/// listener is bound.
 pub async fn abandon_all_open_assignments<C: ConnectionTrait>(db: &C) -> Result<u64, DbErr> {
     let chunk = format!(
         "\"dispatched_job\".\"id\" IN (SELECT id FROM dispatched_job \
@@ -221,7 +193,6 @@ pub async fn abandon_all_open_assignments<C: ConnectionTrait>(db: &C) -> Result<
     }
 }
 
-/// Close the open rows of the given job keys as `Abandoned`; returns how many closed.
 pub async fn abandon_open_assignments_for_jobs<C: ConnectionTrait>(
     db: &C,
     job_keys: &[String],
@@ -233,7 +204,6 @@ pub async fn abandon_open_assignments_for_jobs<C: ConnectionTrait>(
     abandon_open(db, Some(CDispatchedJob::JobId.is_in(job_keys.to_vec()))).await
 }
 
-/// Close the open row of one dispatch as `Abandoned`; returns how many closed.
 pub async fn abandon_open_assignment<C: ConnectionTrait>(
     db: &C,
     assignment_id: DispatchedJobId,
@@ -241,10 +211,6 @@ pub async fn abandon_open_assignment<C: ConnectionTrait>(
     abandon_open(db, Some(CDispatchedJob::Id.eq(assignment_id))).await
 }
 
-/// Close the open rows of the named dispatches as `Abandoned`; returns how
-/// many closed. The scope is one array bind, not one placeholder per id: the
-/// sweep reaps a whole backlog in one statement and `IN (..)` would blow
-/// Postgres' 65535-bind-parameter cap long before it got there.
 pub async fn abandon_open_assignments<C: ConnectionTrait>(
     db: &C,
     assignments: &[DispatchedJobId],
@@ -302,10 +268,6 @@ mod tests {
         }])
     }
 
-    /// The statement's `sql` carries placeholders only, so nothing but the bound
-    /// value pins the outcome the closers write. Built from the enum so a moved
-    /// discriminant stays in step, and rendered the way sea-query's `Value`
-    /// derives `Debug` for a bound `i16`.
     fn abandoned_bound() -> String {
         format!(
             "SmallInt(Some({}))",
@@ -351,9 +313,6 @@ mod tests {
         }
     }
 
-    /// The unique open-row index is the arbiter: the insert names it through
-    /// its `ON CONFLICT` target, so a rival's open row turns the claim into a
-    /// no-op instead of a second hand-out.
     #[tokio::test]
     async fn a_claim_inserts_its_row_unless_the_job_is_already_open() {
         let (won, statement) = claimed(1, build_gate()).await;
@@ -374,8 +333,6 @@ mod tests {
         assert!(!won);
     }
 
-    /// The shared build is re-read in the claim itself: a job assembled while it was
-    /// `Queued` as a build must not go out once it moved or became a passthrough.
     #[tokio::test]
     async fn a_build_claim_requires_the_shared_build_queued_in_its_passthrough_mode() {
         let (_, statement) = claimed(1, build_gate()).await;
@@ -446,10 +403,6 @@ mod tests {
         );
     }
 
-    /// The cutoff is the whole point of the worker-scoped closer: a row this
-    /// process dispatched has a live closer in the report that is landing for
-    /// it, and rewriting it as `Abandoned` would lose that outcome. Only rows
-    /// an earlier process handed out are the registration's to close.
     #[tokio::test]
     async fn a_workers_open_rows_close_as_abandoned_only_below_the_cutoff() {
         let db = closed_rows(2).into_connection();
@@ -473,10 +426,6 @@ mod tests {
         assert!(values.contains(&format!("{before:?}")), "{values}");
     }
 
-    /// Startup's predicate is unscoped by design: the tracker that knew which
-    /// jobs were out died with the process, so every open row is stale. Only
-    /// the statement is bounded, and a chunk narrower than the backlog is what
-    /// keeps the whole close out of one pre-listener transaction.
     #[tokio::test]
     async fn every_open_row_closes_for_startup_recovery() {
         let db = closed_rows(7).into_connection();
@@ -502,10 +451,6 @@ mod tests {
         )
     }
 
-    /// The loop is the whole of the chunking: a statement that fills its chunk
-    /// means rows may remain, a short one is the end. Exactly two exec results
-    /// are supplied, so a third statement would draw an empty buffer and turn
-    /// the call into an `Err`.
     #[tokio::test]
     async fn startup_recovery_closes_a_backlog_one_chunk_per_statement() {
         let db = MockDatabase::new(DatabaseBackend::Postgres)
@@ -533,9 +478,6 @@ mod tests {
         }
     }
 
-    /// The sweep closes its whole backlog in one statement, so the scope has to
-    /// be a single array bind: one placeholder per id caps the reaper at
-    /// Postgres' 65535 binds and the statement fails outright above that.
     #[tokio::test]
     async fn the_named_assignments_close_under_one_array_bind() {
         let db = closed_rows(2).into_connection();

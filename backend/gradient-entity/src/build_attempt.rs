@@ -82,9 +82,8 @@ pub enum AttemptFailureReason {
 pub struct Model {
     #[sea_orm(primary_key)]
     pub id: BuildAttemptId,
-    /// The eval that drove this attempt's dispatch. `None` once that evaluation
-    /// is GC'd: the attempt (and its log) live on with the `derivation_build`
-    /// shared build, its true owner, until the derivation itself is reclaimed.
+    /// `None` is set once the driving evaluation is garbage-collected. The attempt and its log are
+    /// kept with the `derivation_build` shared build until the derivation is reclaimed.
     pub build_job: Option<BuildJobId>,
     pub derivation_build: DerivationBuildId,
     pub dispatched_job: DispatchedJobId,

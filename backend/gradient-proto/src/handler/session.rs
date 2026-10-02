@@ -4,8 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Protocol handshake: Opening to Authenticated, then attach to a session actor.
-
 use std::collections::HashSet;
 use std::sync::Arc;
 
@@ -32,8 +30,6 @@ use super::sessions::SessionsHandle;
 use super::socket::{HANDSHAKE_TIMEOUT, ProtoSocket, ProtoWriter, send_server_msg};
 use gradient_wire::auth::validate_tokens;
 
-// ── Session state markers ─────────────────────────────────────────────────────
-
 pub(super) struct Opening;
 
 pub(super) struct Authenticated {
@@ -42,16 +38,12 @@ pub(super) struct Authenticated {
     pub authorized_peers: Vec<String>,
 }
 
-// ── Protocol session ──────────────────────────────────────────────────────────
-
 pub(super) struct ProtoSession<S> {
     pub socket: ProtoSocket,
     pub state: Arc<ServerState>,
     pub scheduler: Arc<Scheduler>,
     pub session_state: S,
 }
-
-// ── Opening -> Authenticated ───────────────────────────────────────────────────
 
 impl ProtoSession<Opening> {
     pub fn new(socket: ProtoSocket, state: Arc<ServerState>, scheduler: Arc<Scheduler>) -> Self {
@@ -63,9 +55,6 @@ impl ProtoSession<Opening> {
         }
     }
 
-    /// Discoverable check, then the shared handshake FSM drives
-    /// InitConnection -> AuthChallenge/AuthResponse -> InitAck with
-    /// [`ServerAuthority`] supplying the auth policy.
     pub async fn handshake(
         mut self,
         server_initiated: bool,
@@ -101,11 +90,6 @@ impl ProtoSession<Opening> {
     }
 }
 
-// ── Authority impl over the server's auth store ──────────────────────────────
-
-/// [`PeerAuthority`] over gradient-server's registration tables: the shared
-/// handshake FSM drives the wire while this supplies challenges, token
-/// validation, the pure [`decide_auth`] policy, and capability negotiation.
 struct ServerAuthority {
     state: Arc<ServerState>,
     server_initiated: bool,
@@ -196,11 +180,7 @@ impl PeerAuthority for ServerAuthority {
     }
 }
 
-// ── Authenticated: attach ─────────────────────────────────────────────────────
-
 impl ProtoSession<Authenticated> {
-    /// Hand the connection to the sessions supervisor. The join handle ends
-    /// when the session does, so the upgrade task holds its permit until then.
     pub async fn attach(self, sessions: &SessionsHandle) -> Option<JoinHandle<()>> {
         let ProtoSession {
             mut socket,
@@ -245,8 +225,6 @@ impl ProtoSession<Authenticated> {
     }
 }
 
-// ── Server-initiated reauth ───────────────────────────────────────────────────
-
 pub(super) async fn on_reauth_notify(
     writer: &ProtoWriter,
     state: &ServerState,
@@ -281,8 +259,6 @@ pub(super) async fn on_reauth_notify(
     .is_ok()
 }
 
-// ── Entry point ───────────────────────────────────────────────────────────────
-
 #[instrument(skip_all)]
 pub(crate) async fn handle_socket(
     socket: ProtoSocket,
@@ -310,26 +286,12 @@ pub(crate) async fn handle_socket(
     }
 }
 
-// ── Auth decision (pure) ──────────────────────────────────────────────────────
-
 #[derive(Debug, PartialEq, Eq)]
 enum AuthDecision {
     Accept,
     Reject { code: u16, reason: &'static str },
 }
 
-/// Pure decision function used by `perform_auth` so the authorisation policy
-/// is independently testable.
-///
-/// - `server_initiated`: connection initiated by *us* (we know the worker).
-/// - `registered_peers_empty`: no `peer` row mentions this `worker_id` at all.
-/// - `has_any_registrations`: any cache/project has *ever* registered this worker
-///   (i.e. it once existed but is now deactivated).
-/// - `authorized_peers_empty`: zero of the peers in the challenge produced a
-///   valid token.
-/// - `emptied_by_missing_cache`: tokens validated for at least one peer, but
-///   every such peer was demoted because its project has no subscribed
-///   cache. Distinguishes "incomplete server setup" from a real auth failure.
 fn decide_auth(
     server_initiated: bool,
     registered_peers_empty: bool,
@@ -341,8 +303,8 @@ fn decide_auth(
     if is_base {
         return match (authorized_peers_empty, emptied_by_missing_cache) {
             (false, _) => AuthDecision::Accept,
-            // The projects did enable this worker; they just have no cache.
-            // Reporting "not enabled" here sends the operator to the wrong page.
+            // The projects did enable this worker but have no cache. A "not enabled" message would
+            // send the operator to the wrong page.
             (true, true) => AuthDecision::Reject {
                 code: 495,
                 reason: "project has no cache subscribed",
@@ -389,10 +351,6 @@ fn decide_auth(
 mod auth_decision_tests {
     use super::{AuthDecision, decide_auth};
 
-    /// Inbound connection from a worker nobody has registered must be
-    /// rejected. This is the regression test for the open-mode auth bypass:
-    /// before the fix, `decide_auth` (then inlined) accepted because the
-    /// `server_initiated` branch ran for everyone.
     #[test]
     fn inbound_unknown_worker_rejected() {
         let d = decide_auth(false, true, false, true, false, false);
@@ -405,8 +363,6 @@ mod auth_decision_tests {
         );
     }
 
-    /// Server-initiated outbound connection to an unregistered worker is
-    /// the only legitimate "open mode" path.
     #[test]
     fn outbound_unknown_worker_accepted() {
         assert_eq!(
@@ -415,8 +371,6 @@ mod auth_decision_tests {
         );
     }
 
-    /// Worker had a registration once but it's been removed -> reject as
-    /// deactivated, regardless of inbound vs. outbound.
     #[test]
     fn deactivated_worker_rejected_inbound() {
         assert_eq!(
@@ -439,7 +393,6 @@ mod auth_decision_tests {
         );
     }
 
-    /// Registered peers exist but no token validated -> 401.
     #[test]
     fn registered_but_no_valid_token() {
         assert_eq!(
@@ -451,8 +404,6 @@ mod auth_decision_tests {
         );
     }
 
-    /// Tokens validated but every authorized peer was demoted because its
-    /// project has no cache -> distinct 495, not a misleading 401.
     #[test]
     fn registered_emptied_by_missing_cache() {
         assert_eq!(
@@ -464,9 +415,6 @@ mod auth_decision_tests {
         );
     }
 
-    /// A base worker whose only project was demoted for having no cache gets
-    /// the same 495 as a registered worker. The 403 sends the operator looking
-    /// for a disabled worker when the fix is to subscribe a cache.
     #[test]
     fn base_worker_emptied_by_missing_cache() {
         assert_eq!(
@@ -478,7 +426,6 @@ mod auth_decision_tests {
         );
     }
 
-    /// Registered + at least one valid token -> accept.
     #[test]
     fn registered_with_valid_token_accepted() {
         assert_eq!(
@@ -487,8 +434,6 @@ mod auth_decision_tests {
         );
     }
 
-    /// Base worker whose final authorized set is empty must be rejected,
-    /// otherwise it would reach the pool as an Open peer (all projects).
     #[test]
     fn base_worker_empty_authorized_rejected() {
         assert_eq!(
@@ -500,7 +445,6 @@ mod auth_decision_tests {
         );
     }
 
-    /// Base worker with a non-empty authorized set is accepted.
     #[test]
     fn base_worker_with_authorized_accepted() {
         assert_eq!(

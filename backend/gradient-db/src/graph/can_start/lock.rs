@@ -32,32 +32,15 @@ crate::sql_fn! {
         params = [DerivationIds(64)];
 }
 
-/// Proof that a batch of shared builds is held `FOR NO KEY UPDATE`, `derivation`-ordered, on `txn`.
-/// Only [`lock_shared_builds`] constructs one, and [`seed_blocking_deps`](super::seed_blocking_deps),
-/// [`became_fetchable`], [`lost_fetchability`] and the two recounts accept nothing
-/// else, so none of them can run unlocked, on a pooled handle where the lock is
-/// released at the end of the statement that took it, in another transaction, or over
-/// a row the lock did not name.
-///
-/// It also makes a flip ATOMIC, which is the property the counter actually needs: the
-/// mark and its compensating ripple land or roll back together, so a killed ripple
-/// leaves nothing to retry around. What the proof does NOT cover is the ripple's own
-/// write set, the flipped shared builds' parents, which no ordered lock names; the module
-/// doc says why that is sound and what it costs. The caveat on
-/// The caveat on every lock proof applies here too: it says the write
-/// follows the lock, not that no read preceded it.
+/// Only [`lock_shared_builds`] is constructing this proof.
+/// The flip writers are accepting nothing else, which is making a flip atomic.
+/// Its mark and its ripple are landing or rolling back together.
 #[must_use = "a lock proves nothing unless a write runs on it"]
 pub struct SharedBuildLock<'txn> {
     pub(super) txn: &'txn DatabaseTransaction,
     pub(super) derivations: Vec<DerivationId>,
 }
 
-/// Take `derivations` `FOR NO KEY UPDATE` in one `derivation`-ordered statement, before the
-/// caller decides anything, with each shared build's advisory key held exclusively ahead of
-/// its row (see [`crate::graph::shared_build_guard`]). With acquisition monotone in `derivation` a
-/// wait-for cycle would need some transaction to wait on a lower id than one it
-/// already holds; the ripples acquire in plan order and are outside that, which the
-/// module doc accounts for. An empty batch locks nothing and issues no statement.
 pub async fn lock_shared_builds<'txn>(
     txn: &'txn DatabaseTransaction,
     derivations: &[DerivationId],
@@ -73,9 +56,8 @@ pub async fn lock_shared_builds<'txn>(
     })
 }
 
-/// [`SharedBuildLock`] for a seed: the shared builds' keys exclusively and their dependencies'
-/// keys shared, held to commit, so the count a seed writes cannot miss a flip of what
-/// it counts. The only proof [`seed_blocking_deps`](super::seed_blocking_deps) accepts.
+/// Dependencies' keys are held shared until commit.
+/// A seed count can then never miss a flip of what it is counting.
 #[must_use = "a lock proves nothing unless a write runs on it"]
 pub struct SeedLock<'txn>(SharedBuildLock<'txn>);
 

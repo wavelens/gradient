@@ -4,29 +4,13 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Advisory keys that serialise a dependency count against a flip of what it counts.
-//!
-//! A seed writes an absolute count over a shared build's dependencies, read from its
-//! snapshot; a flip of one of those dependencies ripples over the edges into it, read
-//! from its own. Under READ COMMITTED each misses the other's uncommitted rows: the
-//! seed counts the dependency as missing while the flip's ripple cannot see the edge
-//! the seed just inserted, and the count stays one too high for good. The keys close
-//! that. A flip holds its shared build's key exclusively from its lock until commit, and a
-//! seed holds its dependencies' keys shared, so whichever comes second waits for the
-//! first to commit and then reads its rows: the ripple sees the seed's edge, or the
-//! seed sees the flip.
-//!
-//! Shared holders never conflict with each other and write nothing to the rows, so a
-//! dependency every `.drv` references costs a lock-table entry per seed and not a
-//! queue. The keys are taken in one pass sorted by key, inside the statement that
-//! takes the row locks, as its `One-Time Filter`, so they precede every row lock and
-//! add no statement. A key a shared build and a dependency share is taken exclusively once.
+//! A seed and a concurrent flip are each missing the other's uncommitted rows under READ COMMITTED.
+//! The count would then stay one too high for good.
+//! A flip is holding its shared build's key exclusively until commit.
+//! A seed is holding its dependencies' keys shared, and the second one is waiting for the first.
 
 pub const SHARED_BUILD_LOCK_NAMESPACE: i32 = 643;
 
-/// The `WITH` members (without the keyword) that take the keys of the shared builds bound
-/// at `shared_builds_param`, and of their dependencies when `with_dependencies`, and the
-/// predicate that forces them to run before the statement reads a row.
 pub(crate) fn advisory_filter(
     shared_builds_param: &str,
     with_dependencies: bool,
@@ -46,8 +30,6 @@ pub(crate) fn advisory_filter(
     ))
 }
 
-/// [`advisory_filter`] for the producers of the store paths bound at `hashes_param`,
-/// exclusively: what a retire takes before it reads whether they were complete.
 pub(crate) fn producer_filter(hashes_param: &str) -> (String, String) {
     key_pass(&format!(
         "SELECT hashtext(o.derivation::text) AS k, true AS own \

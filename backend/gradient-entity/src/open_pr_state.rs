@@ -4,10 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! PR lifecycle for the `OpenPr` action. One row per
-//! `(task, action, branch)` tracks the open PR so updates reuse the branch
-//! instead of opening duplicates.
-
 use chrono::NaiveDateTime;
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -24,7 +20,7 @@ pub struct Model {
     pub branch: String,
     pub git_host_pr_number: Option<i64>,
     pub head_commit: Option<String>,
-    /// PR lifecycle: `open` | `merged` | `closed`.
+    /// `open`, `merged` or `closed`.
     pub status: String,
     pub created_at: NaiveDateTime,
     pub updated_at: NaiveDateTime,

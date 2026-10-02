@@ -4,10 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-/// Builds the Nix narinfo fingerprint that caches sign and verifiers check:
-/// `1;{store_path};{nar_hash};{nar_size};{refs}` where `refs` are
-/// `/nix/store/`-prefixed, sorted, and comma-joined. Shared by the signing and
-/// verification paths so both normalize references identically.
 pub(super) fn fingerprint<'a, I, N>(
     store_path: &str,
     nar_hash: &str,

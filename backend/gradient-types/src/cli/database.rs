@@ -32,9 +32,9 @@ pub struct DatabaseArgs {
     )]
     pub min_connections: u32,
 
-    /// Maximum connections the cache-query pool may open. Dedicated so a large
-    /// eval's worker prefetch storm (one `CacheQuery` per in-flight build) cannot
-    /// starve the scheduler/worker pool and stall dispatch.
+    /// Maximum connections the cache-query pool may open. A dedicated pool is keeping a large
+    /// eval's worker prefetch storm from starving the scheduler/worker pool and stalling dispatch.
+    /// The storm is one `CacheQuery` per in-flight build.
     #[arg(
         long = "database-cache-max-connections",
         env = "GRADIENT_DATABASE_CACHE_MAX_CONNECTIONS",

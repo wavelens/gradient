@@ -4,17 +4,12 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! What the gate prints and what it exits with. The table is printed on success
-//! too: the numbers are how a human calibrates the budgets the assertion cannot.
-
 use gradient_db::sql::{Measured, Query, Violation};
 
 pub enum Outcome {
     Pass(Measured),
     Fail(Vec<Violation>),
-    /// A relation the plan touches is empty, or no value of a declared kind
-    /// exists to bind. Measuring it would prove nothing, so it is reported
-    /// rather than asserted on.
+    /// An empty relation or an unbindable kind is proving nothing. It is reported, not asserted on.
     Unmeasured(String),
 }
 
@@ -80,9 +75,8 @@ pub fn render(rows: &[(&'static Query, Outcome)]) -> String {
     out
 }
 
-/// The statement behind anything that is not a pass. A `file:line` names where
-/// it was declared, which is not what the planner was given: a `sql_fn!` builds
-/// its text at runtime and is not in that file at all.
+/// A `file:line` is naming the declaration, not the planner input. A `sql_fn!` is building its text
+/// at runtime.
 fn statement(query: &Query) -> String {
     query
         .text()

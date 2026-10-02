@@ -6,15 +6,9 @@
 
 use crate::messages::FailedPeer;
 
-/// Verifies `token` against a stored `token_hash` in constant time.
-///
-/// Accepts two storage formats:
-/// - PHC strings (e.g. `$argon2id$...`) - verified via `password_auth`,
-///   which is constant-time and salted/KDF-hardened. This is what new
-///   registrations write.
-/// - Lowercase hex SHA-256 - legacy format from older registrations,
-///   compared in constant time via `subtle::ConstantTimeEq`. New rows
-///   are never written in this format.
+/// Two storage formats are verifiable in constant time. PHC strings like `$argon2id$...` are what
+/// new registrations are writing. Lowercase hex SHA-256 is a legacy format that no new row is
+/// using.
 pub fn verify_token(token: &str, token_hash: &str) -> bool {
     if token_hash.starts_with('$') {
         password_auth::verify_password(token, token_hash).is_ok()
@@ -26,10 +20,6 @@ pub fn verify_token(token: &str, token_hash: &str) -> bool {
     }
 }
 
-/// Validates `auth_tokens` (worker-supplied `(peer_id, plaintext_token)`) against
-/// `registered_peers` (`(peer_id, stored_token_hash)`).
-///
-/// Returns `(authorized_peers, failed_peers)`.
 pub fn validate_tokens(
     registered_peers: &[(String, String)],
     auth_tokens: &[(String, String)],
@@ -115,9 +105,8 @@ mod tests {
             ("peer-c".to_string(), sha256_hex("token-c")),
         ];
         let auth = vec![
-            ("peer-a".to_string(), "token-a".to_string()), // correct
-            ("peer-b".to_string(), "wrong".to_string()),   // wrong hash
-                                                           // peer-c missing
+            ("peer-a".to_string(), "token-a".to_string()),
+            ("peer-b".to_string(), "wrong".to_string()),
         ];
         let (authorized, failed) = validate_tokens(&registered, &auth);
         assert_eq!(authorized, vec!["peer-a"]);
@@ -165,13 +154,10 @@ mod tests {
     #[test]
     fn verify_token_branches_on_format() {
         let token = "tok";
-        // PHC string -> argon2 path
         let phc = argon2(token);
         assert!(phc.starts_with('$'), "argon2 hash must start with $");
         assert!(verify_token(token, &phc));
-        // Hex SHA-256 -> legacy path
         assert!(verify_token(token, &sha256_hex(token)));
-        // Wrong inputs both reject
         assert!(!verify_token("bad", &phc));
         assert!(!verify_token("bad", &sha256_hex(token)));
     }

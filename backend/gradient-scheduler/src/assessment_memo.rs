@@ -4,9 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! The build-phase assessment of each evaluation, kept while nothing it read
-//! can have moved: the evaluation's counters and the connected pool. Every
-//! other input (a passthrough flip, a feature edge) is re-read after [`AssessmentMemo::TTL`].
+//! An evaluation's build-phase assessment is reusable while its counters and the connected pool are
+//! unchanged. Every other input, like a passthrough flip or a feature edge, is re-read after
+//! [`AssessmentMemo::TTL`].
 
 use std::collections::hash_map::DefaultHasher;
 use std::collections::{HashMap, HashSet};
@@ -72,7 +72,6 @@ impl AssessmentMemo {
     }
 }
 
-/// The pool as a set: worker order is connection order and decides nothing.
 pub(crate) fn caps_fingerprint(caps: &Caps) -> u64 {
     let mut workers: Vec<(Vec<&str>, Vec<&str>)> = caps
         .iter()

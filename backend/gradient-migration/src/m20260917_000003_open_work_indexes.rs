@@ -4,11 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Finding the open work without reading the finished work. A settled server
-//! holds hundreds of thousands of closed anchors and attempts and a handful of
-//! open ones, so every statement that looked for open work read the whole table
-//! to find it.
-
 use sea_orm_migration::prelude::*;
 use sea_orm_migration::sea_orm::ConnectionTrait;
 

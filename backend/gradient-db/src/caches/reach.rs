@@ -4,15 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Compute the set of projects whose Gradient build outputs a given
-//! project can substitute through its cache subscriptions and the
-//! `cache_upstream` graph.
-//!
-//! Two projects are "cache-connected" when the writer project pushes into
-//! a cache that lies in the upstream closure of one of the reader project's
-//! caches. External (URL-based) upstream caches are excluded - they don't host
-//! Gradient builds.
-
 use std::collections::{HashSet, VecDeque};
 
 use sea_orm::{ColumnTrait, ConnectionTrait, DbErr, EntityTrait, QueryFilter};
@@ -23,16 +14,6 @@ use gradient_entity::project_cache::{
     CacheSubscriptionMode, Column as CProjectCache, Entity as EProjectCache,
 };
 
-/// Returns every project (including `reader_project` itself) whose build
-/// outputs `reader_project` could substitute through its current cache
-/// subscriptions and the `cache_upstream` graph.
-///
-/// Algorithm:
-/// 1. Load reader's `project_cache` rows with mode `ReadWrite`/`ReadOnly`.
-/// 2. BFS forward over `cache_upstream` edges (`cache -> upstream_cache`) to
-///    compute the upstream closure of the reader's caches. Cycles tolerated.
-/// 3. Load every `project_cache` row with mode `ReadWrite`/`WriteOnly`
-///    on any cache in that closure; return the distinct project ids.
 pub async fn writer_projects_reachable_from<C: ConnectionTrait>(
     db: &C,
     reader_project: ProjectId,
@@ -129,7 +110,6 @@ mod tests {
     #[test]
     fn direct_overlap_reader_sees_writer() {
         run(async {
-            // Reader (project B) reads cache X; writer (project A) writes cache X.
             let cache_x = cid(1);
             let reader_rows = vec![project_cache(
                 project(2),
@@ -159,8 +139,6 @@ mod tests {
     #[test]
     fn transitive_internal_chain() {
         run(async {
-            // chain: cache_a -> upstream cache_b -> upstream cache_c
-            // reader on a, writer on c
             let a = cid(1);
             let b = cid(2);
             let c = cid(3);
@@ -222,8 +200,6 @@ mod tests {
     #[test]
     fn cycle_tolerated() {
         run(async {
-            // cache_a.upstream = b; cache_b.upstream = a -> cycle. BFS must
-            // terminate via the visited set.
             let a = cid(1);
             let b = cid(2);
 

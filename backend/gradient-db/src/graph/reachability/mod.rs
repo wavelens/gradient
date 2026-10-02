@@ -4,17 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Evaluation <-> derivation reachability over the global graph. A `build_job`
-//! row is how an evaluation names a derivation it waits on, and every reader of
-//! "does some evaluation still want this" (the promotion gate, the dispatch
-//! select, the dispatcher's driving evaluation, eval-done, the abort's shared
-//! set) reads the row rather than walking the graph. A walk names what it
-//! recorded plus the direct inputs of that, so the interior of a pruned subtree
-//! is named by the evaluation that walked it and by nobody else; adoption is what
-//! keeps the rows true when that evaluation is deleted, or a thaw, a reset or a
-//! retire leaves an open shared build unnamed, while another evaluation still waits on
-//! the subtree.
-
 mod adoption;
 mod build_jobs;
 mod outputs;

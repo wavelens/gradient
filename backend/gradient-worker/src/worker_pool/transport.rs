@@ -4,10 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Parent-side handle to one eval-worker subprocess: spawn, the rkyv frame
-//! transport over its stdin/stdout, and the typed request methods. Pool
-//! lifecycle lives in [`super::pool`], memory accounting in [`super::memory`].
-
 use anyhow::{Context, Result};
 use gradient_util::sync::Mutex;
 use std::collections::HashSet;
@@ -24,29 +20,18 @@ use gradient_eval::ipc::{
 };
 use gradient_eval::stats::StatsDelta;
 
-/// Stack size for the subprocess, matching upstream Nix's `initNix`
-/// `setStackSize(64 MiB)`: libnix's libstdc++ `std::regex` DFS executor (used
-/// by `builtins.match` / `builtins.split`) overflows the default 8 MiB on
-/// deep patterns.
+/// The stack size is matching upstream Nix's `initNix` `setStackSize(64 MiB)`.
+/// The libstdc++ `std::regex` executor behind `builtins.match` is overflowing 8 MiB stacks.
 const EVAL_WORKER_STACK_BYTES: u64 = 64 * 1024 * 1024;
 
-/// `oom_score_adj` for eval subprocesses: the kernel sacrifices them (large
-/// Nix/Boehm-GC heaps) before the parent worker or other services.
 const EVAL_WORKER_OOM_SCORE_ADJ: &str = "600";
 
-/// How long `spawn` waits for the subprocess's version byte. Covers exec +
-/// Rust init only; the slow libnix init happens after the handshake.
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(15);
 
-/// Grace period for a `Shutdown`n worker to run libnix's atexit handlers
-/// (flush eval-cache SQLite, release locks) before it is SIGKILL'd.
 const SHUTDOWN_GRACE: Duration = Duration::from_secs(5);
 
-/// How long the dead-pipe diagnostics wait for the child's exit status before
-/// falling back to `/proc` state sampling.
 const EXIT_PROBE_TIMEOUT: Duration = Duration::from_secs(2);
 
-/// One `List` answer: matched attrs plus the shards left to the parent.
 #[derive(Debug)]
 pub(super) struct Listing {
     pub(super) attrs: Vec<String>,
@@ -56,34 +41,17 @@ pub(super) struct Listing {
     pub(super) stats: Option<StatsDelta>,
 }
 
-/// Handle to a single live eval-worker subprocess.
-///
-/// Owns the child plus its piped stdin/stdout. The wire is `u32` LE length +
-/// rkyv frames ([`gradient_eval::ipc`]); every request is one frame, every
-/// response one frame, except `Resolve` which streams item frames until a
-/// terminating `ResolveEnd`.
 pub(super) struct EvalWorker {
     child: Child,
     stdin: ChildStdin,
     stdout: BufReader<ChildStdout>,
-    /// True from the first request byte written until the exchange's terminal
-    /// response frame is fully read. A worker dropped in this state (caller
-    /// future cancelled mid-call) has a half-written request or an unread
-    /// response on the wire; the pool must discard it, because the next
-    /// request on the same pipe would read the stale frame as its answer.
+    /// A worker dropped mid-exchange is leaving a stale frame on the wire.
+    /// The pool must discard it, or the next request would read that frame as its answer.
     in_flight: bool,
-    /// RAII deregistration of this subprocess's pid from the pool's live
-    /// registry. A field (rather than `impl Drop for EvalWorker`) so `shutdown`
-    /// can still move individual fields out of `self`.
     pid_guard: PidGuard,
 }
 
-/// Removes an eval subprocess pid from the pool's live registry on drop, so the
-/// memory reaper never targets a worker we have already discarded. The child
-/// itself is reaped by `kill_on_drop`.
 pub(super) struct PidGuard {
-    /// Live-pid registry of the owning pool. `None` for test workers built via
-    /// `from_command` (no pool, nothing to deregister from).
     pub(super) live: Option<Arc<Mutex<HashSet<u32>>>>,
     pub(super) pid: Option<u32>,
 }
@@ -97,13 +65,6 @@ impl Drop for PidGuard {
 }
 
 impl EvalWorker {
-    /// Spawn a new worker by re-execing the current binary with `--eval-subprocess`
-    /// and verify its IPC version byte. The subprocess is single-threaded and
-    /// does not fork; pool size is the eval concurrency and RSS is bounded
-    /// parent-side (see [`Self::rss_bytes`]).
-    ///
-    /// `eval_cache_dir` is exported as `NIX_CACHE_HOME` so parent and worker
-    /// agree on where Nix's `eval-cache-v6/<fingerprint>.sqlite` lives.
     pub(super) async fn spawn(
         eval_cache_dir: &str,
         live: Arc<Mutex<HashSet<u32>>>,
@@ -122,9 +83,9 @@ impl EvalWorker {
             command.env(k, v);
         }
 
-        // SAFETY: `pre_exec` executes in the forked child before `exec`, so its body
-        // must be async-signal-safe; it only builds an `rlimit` and calls
-        // `setrlimit`, both of which are signal-safe.
+        // SAFETY: `pre_exec` is running in the forked child before `exec`.
+        // Its body must be async-signal-safe.
+        // It is only building an `rlimit` and calling `setrlimit`, both signal-safe.
         #[cfg(unix)]
         unsafe {
             command.pre_exec(|| {
@@ -141,15 +102,11 @@ impl EvalWorker {
 
         let mut worker = Self::from_command(command)?;
 
-        // Register the pid so the memory reaper can find this subprocess even
-        // while it is checked out of the pool. Deregistered by `PidGuard`.
         if let Some(pid) = worker.pid_guard.pid {
             live.lock().insert(pid);
         }
         worker.pid_guard.live = Some(live);
 
-        // Mark the subprocess as the preferred OOM-kill target. A cheap
-        // sub-page procfs write; not worth a spawn_blocking hop.
         #[cfg(target_os = "linux")]
         if let Some(pid) = worker.child.id() {
             let path = format!("/proc/{pid}/oom_score_adj");
@@ -163,10 +120,6 @@ impl EvalWorker {
         Ok(worker)
     }
 
-    /// Spawn the given pre-configured command and wrap its stdin/stdout into
-    /// an [`EvalWorker`]. Test seam used by pool tests to stand up a
-    /// controllable subprocess (e.g. `cat`) without depending on libnix; no
-    /// version handshake is performed here.
     pub(super) fn from_command(mut command: Command) -> Result<Self> {
         command
             .stdin(Stdio::piped())
@@ -186,9 +139,6 @@ impl EvalWorker {
         })
     }
 
-    /// Read and verify the one-byte version handshake the subprocess writes
-    /// before its first frame, so a binary swapped mid-run fails loudly here
-    /// instead of as undecodable frames later.
     async fn expect_handshake(&mut self) -> Result<()> {
         let mut version = [0u8; 1];
         tokio::time::timeout(HANDSHAKE_TIMEOUT, self.stdout.read_exact(&mut version))
@@ -207,22 +157,14 @@ impl EvalWorker {
         self.child.id()
     }
 
-    /// Whether the subprocess is still running, reaping its exit status if it
-    /// has already exited. The pool calls this on checkout to discard an idle
-    /// worker whose subprocess died while pooled (memory reaper, kernel OOM via
-    /// the elevated `oom_score_adj`, or crash) instead of handing out a corpse
-    /// that fails the next write with a broken pipe.
     pub(super) fn is_alive(&mut self) -> bool {
         matches!(self.child.try_wait(), Ok(None))
     }
 
-    /// Whether a request has been sent whose terminal response frame has not
-    /// been read yet. Checked by `PooledEvalWorker::drop`.
     pub(super) fn in_flight(&self) -> bool {
         self.in_flight
     }
 
-    /// Write one request frame. An error means the worker is no longer usable.
     async fn send(&mut self, req: &EvalRequest) -> Result<()> {
         self.in_flight = true;
         trace!(pid = self.child.id(), ?req, "sending eval worker request");
@@ -241,8 +183,6 @@ impl EvalWorker {
             .context("flushing eval worker stdin")
     }
 
-    /// Read one response frame. An error means the worker is no longer usable
-    /// (the caller marks it dead so it gets discarded instead of pooled).
     async fn recv(&mut self) -> Result<EvalResponse> {
         let mut len_buf = [0u8; 4];
         if let Err(e) = self.stdout.read_exact(&mut len_buf).await {
@@ -269,9 +209,6 @@ impl EvalWorker {
         decode_response(&payload).context("decoding eval worker response")
     }
 
-    /// Best-effort post-mortem for a dead read side: exit status if the child
-    /// is gone, `/proc` state samples if it is somehow still alive. Sub-page
-    /// procfs reads, cheap enough to stay on the async path.
     async fn describe_death(&mut self, read_err: std::io::Error) -> String {
         let pid = self.child.id();
         let status = match tokio::time::timeout(EXIT_PROBE_TIMEOUT, self.child.wait()).await {
@@ -298,9 +235,6 @@ impl EvalWorker {
         format!("pid={pid:?}, read error={read_err}, exit={status}")
     }
 
-    /// One request, one typed response. `extract` returns the unexpected
-    /// response so the single shape-check here can name it; `EvalResponse::Err`
-    /// becomes the worker's own error message.
     async fn call<T>(
         &mut self,
         req: EvalRequest,
@@ -413,10 +347,6 @@ impl EvalWorker {
         .await
     }
 
-    /// Resolve `attrs`, returning every item streamed before the terminal
-    /// result. `Ok` carries the batch's warnings + stats delta; `Err` means
-    /// the subprocess died mid-stream, in which case the streamed prefix is
-    /// still valid and the first unstreamed attr is the crash suspect.
     pub(super) async fn resolve(
         &mut self,
         repository: String,
@@ -461,11 +391,6 @@ impl EvalWorker {
         }
     }
 
-    /// Send a `Shutdown` request and wait briefly for the child to exit.
-    /// Used when the parent is recycling a still-healthy worker so the
-    /// subprocess can run libnix's atexit handlers (flush eval-cache
-    /// SQLite, release locks, drop temp roots) instead of being SIGKILL'd
-    /// by `kill_on_drop`.
     pub(super) async fn shutdown(mut self) {
         let pid = self.child.id();
         trace!(pid, "sending Shutdown to eval worker");
@@ -485,8 +410,6 @@ impl EvalWorker {
         }
     }
 
-    /// Resident set size of the subprocess in bytes. Returns 0 if the pid is
-    /// gone or the read fails so the pool never panics on it.
     pub(super) fn rss_bytes(&self) -> u64 {
         self.child
             .id()

@@ -4,10 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Drops `derivation_build.prefer_local_build`: it was written once at anchor
-//! creation from the same value as `derivation.prefer_local_build` and never
-//! read back; dispatch reads the `derivation` copy.
-
 use sea_orm_migration::prelude::*;
 use sea_orm_migration::sea_orm::ConnectionTrait;
 

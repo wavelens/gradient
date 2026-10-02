@@ -4,11 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Finding the open anchors without reading the settled ones. Every walk reaches
-//! an anchor while it is not fetchable and not the requeue's, and the sweep's
-//! demand recount and both naming probes scan for exactly that, where a status
-//! list used to leave an unwhole `Completed` anchor out of every index.
-
 use sea_orm_migration::prelude::*;
 use sea_orm_migration::sea_orm::ConnectionTrait;
 

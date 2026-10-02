@@ -10,8 +10,6 @@ use anyhow::{Context, Result};
 use harmonia_utils_hash::fmt::Any;
 use harmonia_utils_hash::{Hash, HashView as _};
 
-/// Compression format for a NAR as declared by the cache it came from.
-/// Identified by filename extension on the `URL:` field.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Compression {
     None,
@@ -20,10 +18,6 @@ pub enum Compression {
     Bzip2,
 }
 
-/// Infer a NAR's compression format from the URL extension. Unknown or
-/// missing extension -> `Zstd`, since our own cache always produces zstd;
-/// this keeps the `NarRequest` / S3 path correct while letting upstream
-/// URLs like `.nar.xz` dispatch accordingly.
 pub fn detect_compression(url: &str) -> Compression {
     let path = url.split(['?', '#']).next().unwrap_or(url);
     let lower = path.to_ascii_lowercase();
@@ -40,17 +34,10 @@ pub fn detect_compression(url: &str) -> Compression {
     }
 }
 
-/// Serialised `nix-archive-1` token every uncompressed NAR opens with: an
-/// 8-byte little-endian length followed by the string itself.
 pub const NAR_MAGIC: &[u8] = b"\x0d\x00\x00\x00\x00\x00\x00\x00nix-archive-1";
 
-/// Leading bytes a caller must hand [`sniff_compression`] for it to be able to
-/// identify every container: the uncompressed NAR header is the longest.
 pub const SNIFF_BYTES: usize = NAR_MAGIC.len();
 
-/// Identify a NAR payload's container from its leading magic bytes, or `None`
-/// when nothing matches (a body too short to classify, or a format we don't
-/// handle).
 pub fn sniff_compression(bytes: &[u8]) -> Option<Compression> {
     if bytes.starts_with(&[0x28, 0xB5, 0x2F, 0xFD]) {
         Some(Compression::Zstd)
@@ -65,27 +52,18 @@ pub fn sniff_compression(bytes: &[u8]) -> Option<Compression> {
     }
 }
 
-/// The format to decompress `bytes` as: what the bytes actually are, falling
-/// back to [`detect_compression`]'s URL guess when they carry no known magic.
-///
-/// The bytes win because caches disagree with their own metadata: attic serves
-/// `Compression: zstd` under a `nar/<hash>.nar` URL, so the extension alone
-/// hands a zstd frame to the daemon as a raw NAR and the import fails on a size
-/// mismatch that looks like cache corruption.
+/// The bytes are winning over the URL because caches can disagree with their own metadata. Attic is
+/// serving `Compression: zstd` under a `nar/<hash>.nar` URL, and the daemon would reject the zstd
+/// frame as a raw NAR.
 pub fn resolve_compression(bytes: &[u8], url: Option<&str>) -> Compression {
     sniff_compression(bytes)
         .unwrap_or_else(|| url.map(detect_compression).unwrap_or(Compression::Zstd))
 }
 
-/// Decompress a NAR payload per its compression format. Synchronous; NAR
-/// payloads are bounded by `nar_size` from the path info, so memory
-/// pressure is predictable.
 pub fn decompress(compressed: &[u8], kind: Compression) -> Result<Vec<u8>> {
     decompress_reader(std::io::Cursor::new(compressed), kind)
 }
 
-/// Decompress a NAR payload straight from `reader`, so a NAR staged on disk is
-/// never held in memory in its compressed form as well as its raw one.
 pub fn decompress_reader<R: std::io::Read>(reader: R, kind: Compression) -> Result<Vec<u8>> {
     let mut out = Vec::new();
     match kind {
@@ -109,9 +87,6 @@ pub fn decompress_reader<R: std::io::Read>(reader: R, kind: Compression) -> Resu
     Ok(out)
 }
 
-/// Extract the single regular-file payload from a NAR. `.drv` files are
-/// stored as exactly that, so this is enough to recover the .drv bytes
-/// without writing them to disk first.
 pub async fn extract_single_file_from_nar(nar_bytes: &[u8]) -> Result<Vec<u8>> {
     use futures::StreamExt as _;
     use harmonia_file_nar::{NarEvent, parse_nar};
@@ -136,8 +111,6 @@ pub async fn extract_single_file_from_nar(nar_bytes: &[u8]) -> Result<Vec<u8>> {
     }
 }
 
-/// Parse a `sha256:<...>` (or `sha256-<base64>` SRI) hash into the raw 32-byte
-/// digest expected for byte-wise comparison against `Sha256::digest`.
 pub fn parse_nar_hash_to_bytes(s: &str) -> Result<[u8; 32]> {
     let hash_any = s
         .parse::<Any<Hash>>()
@@ -176,21 +149,16 @@ mod tests {
             detect_compression("https://cache.example/nar/abc.nar"),
             Compression::None
         );
-        // S3 presigned URLs carry a query string - must not confuse the matcher.
         assert_eq!(
             detect_compression("https://s3.example/abc.nar.xz?sig=XYZ&exp=1"),
             Compression::Xz
         );
-        // Unknown / no extension defaults to zstd (our own cache).
         assert_eq!(
             detect_compression("https://example/some/opaque"),
             Compression::Zstd
         );
     }
 
-    /// Regression for the attic upstream that advertises `Compression: zstd`
-    /// behind a `nar/<hash>.nar` URL: the extension says "no compression" while
-    /// the bytes are a zstd frame. Sniffing the magic must win over the guess.
     #[test]
     fn sniff_wins_over_a_lying_url_extension() {
         let payload = b"hello gradient zstd world";
@@ -213,7 +181,6 @@ mod tests {
         let mut nar = NAR_MAGIC.to_vec();
         nar.extend_from_slice(&[0u8; 3]);
         assert_eq!(sniff_compression(&nar), Some(Compression::None));
-        // …even when the URL claims zstd.
         assert_eq!(
             resolve_compression(&nar, Some("https://cache.example/nar/abc.nar.zst")),
             Compression::None
@@ -238,8 +205,6 @@ mod tests {
         );
     }
 
-    /// Unrecognised bytes (and a body too short to carry any magic) must fall
-    /// back to the URL guess rather than assert a format.
     #[test]
     fn sniff_falls_back_to_the_url_when_no_magic_matches() {
         assert_eq!(sniff_compression(b"not a known container"), None);
@@ -248,12 +213,9 @@ mod tests {
             resolve_compression(b"opaque", Some("https://cache.example/nar/abc.nar.xz")),
             Compression::Xz
         );
-        // No URL at all: our own cache only ever produces zstd.
         assert_eq!(resolve_compression(b"opaque", None), Compression::Zstd);
     }
 
-    /// The staged-file import path decompresses through a reader; it must agree
-    /// byte for byte with the in-memory path the presigned download still uses.
     #[test]
     fn decompress_reader_matches_decompress_for_zstd() {
         let payload = b"gradient staged nar payload".repeat(64);
@@ -290,7 +252,6 @@ mod tests {
     #[test]
     fn parse_sha256_nix32_roundtrip() {
         use sha2::{Digest as _, Sha256};
-        // SHA-256 of the empty string in nix32 form.
         let nix32 = "sha256:0mdqa9w1p6cmli6976v4wi0sw9r4p5prkj7lzfd1877wk11c9c73";
         let bytes = parse_nar_hash_to_bytes(nix32).unwrap();
         let expected: [u8; 32] = Sha256::digest(b"").into();

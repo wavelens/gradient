@@ -4,13 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! The one place a durable side effect leaves the process. A state change owes
-//! the outside world a `pending_delivery` row, written in the transaction that made the
-//! change; this crate claims those rows, expands each event into the deliveries
-//! it implies, and executes them on a bounded pool with retries. Nothing here is
-//! reachable from `gradient-db`, which is what keeps the persistence layer from
-//! knowing that Git hosts exist.
-
 pub mod actor;
 pub mod consume;
 pub mod deliver;
@@ -30,11 +23,10 @@ use tracing::warn;
 use actor::{EffectsActor, EffectsArgs, EffectsMsg, HEALTH_NAME};
 use deliver::{DbStore, DeliverJob, Deliverer, EffectsCtx, FactoryHandoff};
 
-/// Concurrent deliveries. The bound the process-wide action semaphore used to
-/// carry, now a worker count: a mass status wave fires one event per shared build and
-/// unbounded execution exhausted the DB pool.
+/// A mass status wave is firing one event per shared build. Unbounded execution exhausted the DB
+/// pool.
 pub const EFFECTS_WORKERS: usize = 8;
-/// The backstop pass. A lost wake costs this much latency and never a delivery.
+/// A lost wake is costing this much latency, never a delivery.
 pub const TICK: Duration = Duration::from_secs(30);
 
 type EffectsFactory = Factory<
@@ -46,8 +38,6 @@ type EffectsFactory = Factory<
     DefaultQueue<gradient_types::ids::PendingDeliveryId, DeliverJob>,
 >;
 
-/// The supervised child: the worker factory, the claiming actor above it, and
-/// the task that turns `DbContext::delivery_wake` into a coalesced `Wake`.
 pub fn child_spec(state: Arc<ServerState>) -> ChildSpec {
     ChildSpec::Custom {
         name: HEALTH_NAME,
@@ -102,8 +92,6 @@ async fn spawn(state: Arc<ServerState>, child: ChildCtx) -> Result<ActorCell, Sp
     )
     .await?;
 
-    // The wake is a `Notify`, so a burst of writers collapses into one
-    // notification here and the actor collapses the rest.
     let waker = effects.clone();
     let shutdown = state.shutdown.clone();
     shutdown.spawn(async move {

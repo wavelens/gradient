@@ -6,29 +6,22 @@
 
 use crate::types::QueryMode;
 
-/// How a NAR crosses between worker and storage: over the proto stream through
-/// the server, or straight to object storage on a presigned URL.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Transport {
     Passthrough,
     Presigned,
 }
 
-/// Whether a query may leave our cache. Only a caller that said `external` ever
-/// does: a build's inputs are here or the build fails, and putting them here is a
-/// Substitute's job, so a Pull without the flag is answered from our rows alone.
+/// Only a caller that said `external` can leave our cache. A build's inputs are in our cache or the
+/// build is failing. Putting them there is a Substitute's job.
 pub fn may_consult_upstream_caches(mode: QueryMode, external: bool) -> bool {
     external && !matches!(mode, QueryMode::Push)
 }
 
-/// An external query names exactly one path: the probe is per path and the caller
-/// is asking about one output.
 pub fn external_arity_ok(external: bool, paths: usize) -> bool {
     !external || paths == 1
 }
 
-/// Download transport for a cached path: passthrough unless the store can presign,
-/// the object is confirmed there, and it is over the threshold.
 pub fn pull_transport(
     confirmed: bool,
     file_size: u64,

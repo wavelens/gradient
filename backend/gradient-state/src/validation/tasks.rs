@@ -74,9 +74,9 @@ pub(super) fn validate(lookup: &EntityLookup, errors: &mut ErrorCollector) {
             }
         }
 
-        // Reporter triggers resolve their `integration` against the project's
-        // inbound integrations at apply time; catch a missing/outbound/typo
-        // reference here so it fails validation instead of mid-apply (#332).
+        // Reporter triggers are resolving `integration` against inbound integrations at apply time.
+        // A missing, outbound or mistyped reference must fail validation here instead of mid-apply
+        // (#332).
         for trigger in task.triggers.iter().flatten() {
             if !matches!(
                 trigger.trigger_type,

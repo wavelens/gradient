@@ -4,8 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! `/gradient` PR-comment command dispatch (Gitea/Forgejo/GitLab + GitHub App).
-
 use super::approval::{
     PullRequestApprovalContext, on_approval_granted, sender_is_trusted, submit_pr_approval_review,
 };
@@ -26,8 +24,6 @@ use serde::Deserialize;
 use std::sync::Arc;
 use tracing::{debug, info, warn};
 
-/// The fields `handle_issue_comment` consumes, normalized across the GitHub /
-/// Gitea comment payload and the GitLab Note Hook payload.
 struct CommentEvent {
     comment_body: String,
     pr_number: Option<u64>,
@@ -60,7 +56,6 @@ fn parse_comment_event(git_host: GitHostType, body: &[u8]) -> Option<CommentEven
             })
         }
         _ => {
-            // GitHub and Gitea both use `action == "created"`.
             if payload.action.as_deref() != Some("created") {
                 return None;
             }
@@ -79,10 +74,6 @@ fn parse_comment_event(git_host: GitHostType, body: &[u8]) -> Option<CommentEven
     }
 }
 
-/// Handle a `/gradient run [wildcard]` or `/gradient approve` comment on a PR.
-/// Both commands are maintainer-only. `integration_id` is `Some` for the
-/// per-integration routes and `None` for the shared GitHub App route (where the
-/// integration is resolved from `installation.id`).
 pub(super) async fn handle_issue_comment(
     state: &Arc<ServerState>,
     scheduler: &Arc<Scheduler>,
@@ -168,8 +159,6 @@ pub(super) async fn handle_issue_comment(
     }
 }
 
-/// Resolve the inbound integrations addressed by this comment: the route's own
-/// integration, or (GitHub App route) those bound to the payload's installation.
 async fn resolve_comment_integrations(
     state: &Arc<ServerState>,
     integration_id: Option<IntegrationId>,
@@ -197,8 +186,6 @@ async fn resolve_comment_integrations(
     Some(targets)
 }
 
-/// Validate a `/gradient run <wildcard>` override. `Err(())` means the wildcard
-/// was rejected and an error comment already posted, so the caller must abort.
 async fn resolve_wildcard_override(
     state: &Arc<ServerState>,
     cmd: &GradientCommand,
@@ -224,7 +211,6 @@ async fn resolve_wildcard_override(
     }
 }
 
-/// Per-integration inputs for a `/gradient` comment dispatch.
 struct CommentRoute<'a> {
     state: &'a Arc<ServerState>,
     scheduler: &'a Arc<Scheduler>,
@@ -238,9 +224,6 @@ struct CommentRoute<'a> {
     reaction_target: &'a Option<gradient_ci::ReactionTarget>,
 }
 
-/// Run the maintainer trust probe once for the integration, then try the
-/// unpark path and fall back to a fresh `/gradient run`. Returns whether any
-/// action fired.
 async fn handle_comment_for_integration(ctx: &CommentRoute<'_>) -> bool {
     let task_ids = match active_task_ids_for_integration(ctx.state, ctx.integration_id).await {
         Ok(rows) => rows,
@@ -287,8 +270,6 @@ async fn handle_comment_for_integration(ctx: &CommentRoute<'_>) -> bool {
     run_fresh_evaluation(ctx, &task_ids).await
 }
 
-/// Unpark any approval-gated evaluation already parked for this PR. Returns
-/// whether at least one eval was released.
 async fn unpark_existing_approvals(ctx: &CommentRoute<'_>, task_ids: &[TaskId]) -> bool {
     let mut unparked_any = false;
     for task_id in task_ids {
@@ -345,9 +326,8 @@ async fn unpark_existing_approvals(ctx: &CommentRoute<'_>, task_ids: &[TaskId]) 
     unparked_any
 }
 
-/// Fetch the PR head and fire a fresh evaluation. The maintainer is already
-/// trust-verified, so `sender` lets `decide_pr_gate` treat the command itself as
-/// the approval, even on a fork PR. Returns whether the fan-out queued anything.
+/// The maintainer is already trust-verified. `sender` is letting `decide_pr_gate` treat the command
+/// as the approval, even on a fork PR.
 async fn run_fresh_evaluation(ctx: &CommentRoute<'_>, task_ids: &[TaskId]) -> bool {
     let Some(snapshot) =
         fetch_pr_snapshot(ctx.state, task_ids, ctx.owner, ctx.repo, ctx.pr_number).await
@@ -418,8 +398,6 @@ async fn run_fresh_evaluation(ctx: &CommentRoute<'_>, task_ids: &[TaskId]) -> bo
     }
 }
 
-/// Post a reaction on a PR/MR comment via the given task's reporter.
-/// Best-effort: failures are logged and swallowed.
 async fn fire_reaction_via_task(
     state: &Arc<ServerState>,
     task_id: TaskId,
@@ -451,8 +429,6 @@ pub(super) async fn first_task_with_reporter(
     None
 }
 
-/// Fetch a [`gradient_ci::PullRequestSnapshot`] using the first task whose
-/// reporter resolves. `None` on no reporter, an error, or a missing PR.
 async fn fetch_pr_snapshot(
     state: &Arc<ServerState>,
     task_ids: &[TaskId],
@@ -476,8 +452,6 @@ async fn fetch_pr_snapshot(
     None
 }
 
-/// Reply to the PR explaining a `/gradient run <wildcard>` parse failure, via
-/// the first task with a usable reporter. Best-effort.
 async fn post_wildcard_error_comment(
     state: &Arc<ServerState>,
     integration_ids: &[IntegrationId],
@@ -523,19 +497,14 @@ async fn post_wildcard_error_comment(
     }
 }
 
-/// Outcome of parsing a `/gradient …` PR comment.
 #[derive(Debug, PartialEq, Eq)]
 pub(super) enum GradientCommand {
-    /// `/gradient run [wildcard]` - unpark an existing approval-gated eval or
-    /// create a fresh one; the optional raw `wildcard` overrides the attr path.
     Run { wildcard: Option<String> },
-    /// `/gradient approve` - clear the approval gate for this PR (no-op if none).
     Approve,
 }
 
-/// Lift a `/gradient <subcommand>` from a PR comment. The command must be on its
-/// own line; blank lines and `> …` quote-reply lines are skipped, any other
-/// prose disqualifies the comment. Subcommands: `run [wildcard]` and `approve`.
+/// The command must be on its own line. Blank lines and `> ...` quote-reply lines are skipped. Any
+/// other prose is disqualifying the comment.
 pub(super) fn parse_gradient_command(body: &str) -> Option<GradientCommand> {
     const PREFIX: &str = "/gradient";
 

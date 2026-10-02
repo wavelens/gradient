@@ -9,14 +9,10 @@
     reason = "the gate wraps a registered statement in EXPLAIN, which no registered statement can express"
 )]
 
-//! Sends one registered query through the planner. `EXPLAIN (GENERIC_PLAN)` comes
-//! first because it plans without values and names the relations: a query whose
-//! relations are empty is unmeasured, and executing it would prove nothing. The
-//! measured pass then executes inside a transaction that is always rolled back,
-//! which is what makes an INSERT, UPDATE, DELETE or FOR UPDATE safe to
-//! EXPLAIN ANALYZE: the statement really does execute. Per-node timing is off:
-//! no budget reads it, and the VM's `acpi_pm` clock traps on every read, which
-//! made a sweep over a million rows outlast the statement timeout.
+//! The measured pass is executing inside an always-rolled-back transaction. INSERT, UPDATE,
+//! DELETE and FOR UPDATE are safe under EXPLAIN ANALYZE that way, since the statement is really
+//! executing. Per-node timing is off because the VM's `acpi_pm` clock is trapping on every read. A
+//! sweep over a million rows outlasted the statement timeout with it on.
 
 use std::collections::HashMap;
 
@@ -125,11 +121,6 @@ async fn measure_in(
         .map_err(Into::into)
 }
 
-/// `unnest($1, $2, ...)` pads the shorter arrays with NULL and a NOT NULL column
-/// then rejects the row, so every array a statement binds is cut to the shortest
-/// one drawn: a table with fewer rows than the declared width decides the width
-/// for all of them, literal arrays included. The width is also what the
-/// statement was asked to do work for.
 fn align_array_widths(values: &mut [Value]) -> usize {
     let Some(width) = values.iter().filter_map(array_len).min() else {
         return 0;
@@ -151,11 +142,9 @@ fn array_len(value: &Value) -> Option<usize> {
     }
 }
 
-/// `GENERIC_PLAN` asks for a plan with the parameters left UNBOUND, which the
-/// extended protocol cannot express: sea-orm prepares every statement, so the
-/// bind that follows supplies none of the `$n` the EXPLAIN declares and
-/// Postgres refuses the message. The simple protocol sends the text as it
-/// stands, and is the only way to ask for this plan at all.
+/// `GENERIC_PLAN` is needing unbound parameters, which the extended protocol cannot express.
+/// sea-orm is preparing every statement, and Postgres is refusing the bind without the declared
+/// `$n`. The simple protocol is the only way to ask for this plan.
 async fn plan(db: &DatabaseConnection, sql: String) -> Result<serde_json::Value> {
     let mut conn = db.get_postgres_connection_pool().acquire().await?;
     let row = raw_sql(AssertSqlSafe(sql)).fetch_one(&mut *conn).await?;
@@ -189,9 +178,6 @@ fn collect(node: &serde_json::Value, out: &mut Vec<String>) {
     }
 }
 
-/// `reltuples` per relation, which is what decides both the sequential-scan rule
-/// and whether a query is measurable at all. `run_all` ANALYZEs first, so the
-/// estimate is fresh.
 async fn relation_rows(db: &DatabaseConnection) -> Result<HashMap<String, u64>> {
     let rows = db
         .query_all_raw(Statement::from_string(

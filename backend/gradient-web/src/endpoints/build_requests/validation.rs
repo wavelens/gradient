@@ -4,9 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Shared input validators for the build-request endpoints: manifest path
-//! safety (no traversal / absolute / null bytes) and BLAKE3 hex parsing.
-
 use crate::error::{WebError, WebResult};
 
 pub fn validate_manifest_path(path: &str) -> WebResult<()> {

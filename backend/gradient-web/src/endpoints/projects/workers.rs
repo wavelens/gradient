@@ -42,21 +42,13 @@ fn default_true() -> bool {
 #[derive(Deserialize)]
 pub struct RegisterWorkerRequest {
     pub worker_id: String,
-    /// WebSocket URL where the worker listens for incoming server connections.
-    /// When set, the server connects outbound to this URL.
     pub url: Option<String>,
-    /// Human-readable display name for this worker.
     pub display_name: String,
-    /// Pre-generated token (output of `openssl rand -base64 48`, exactly 64 base64 chars).
-    /// When provided the server stores its hash and does NOT return the token in the response.
     pub token: Option<String>,
-    /// Per-registration server-side gate for `fetch`. Defaults to true.
     #[serde(default = "default_true")]
     pub enable_fetch: bool,
-    /// Per-registration server-side gate for `eval`. Defaults to true.
     #[serde(default = "default_true")]
     pub enable_eval: bool,
-    /// Per-registration server-side gate for `build`. Defaults to true.
     #[serde(default = "default_true")]
     pub enable_build: bool,
 }
@@ -64,7 +56,6 @@ pub struct RegisterWorkerRequest {
 #[derive(Serialize)]
 pub struct RegisterWorkerResponse {
     pub peer_id: ProjectId,
-    /// Only present when the token was server-generated (i.e. not supplied in the request).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub token: Option<String>,
 }
@@ -72,42 +63,29 @@ pub struct RegisterWorkerResponse {
 #[derive(Serialize)]
 pub struct ProjectWorkerEntry {
     pub worker_id: String,
-    /// Human-readable display name for this worker (empty string if not set).
     pub display_name: String,
     pub registered_at: NaiveDateTime,
     pub active: bool,
-    /// WebSocket URL where the worker accepts incoming server connections.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub url: Option<String>,
-    /// User who registered this worker. NULL for legacy or declarative rows.
     pub created_by: Option<UserId>,
     pub enable_fetch: bool,
     pub enable_eval: bool,
     pub enable_build: bool,
-    /// True for server-level base workers, false for per-project registrations.
     pub is_base: bool,
-    /// Present when the worker is currently connected to this server.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub live: Option<WorkerLiveInfo>,
 }
 
 #[derive(Deserialize)]
 pub struct PatchWorkerRequest {
-    /// When present, update the active flag.
     pub active: Option<bool>,
-    /// When present, update the display name. Empty string clears the name.
     pub display_name: Option<String>,
-    /// When present, update the per-registration `fetch` gate.
     pub enable_fetch: Option<bool>,
-    /// When present, update the per-registration `eval` gate.
     pub enable_eval: Option<bool>,
-    /// When present, update the per-registration `build` gate.
     pub enable_build: Option<bool>,
 }
 
-/// State owns base and managed workers: the only patch a member may apply is
-/// `active`, which state restores on restart. Editing the name or capability
-/// gates is a conflict.
 fn patch_edits_managed_fields(body: &PatchWorkerRequest) -> bool {
     body.display_name.is_some()
         || body.enable_fetch.is_some()
@@ -118,10 +96,7 @@ fn patch_edits_managed_fields(body: &PatchWorkerRequest) -> bool {
 #[derive(Serialize)]
 pub struct WorkerLiveInfo {
     pub capabilities: GradientCapabilities,
-    /// Nix system strings (e.g. "x86_64-linux"). Only populated for workers
-    /// with the `build` capability negotiated.
     pub architectures: Vec<String>,
-    /// Nix system features (e.g. "kvm"). Only populated for build-capable workers.
     pub system_features: Vec<String>,
     pub max_concurrent_builds: u32,
     pub assigned_job_count: usize,
@@ -153,10 +128,8 @@ pub async fn post_project_worker(
         .ok_or_else(|| WebError::bad_request("worker_id must be a valid UUID v4"))?;
     let worker_id_str = worker_uuid.to_string();
 
-    // Resolve token: use caller-supplied one (after validation) or generate a new one.
     let (token, return_token) = if let Some(provided) = body.token {
         let t = provided.trim().to_string();
-        // Must be exactly 64 chars of valid standard base64 (openssl rand -base64 48 output).
         let decoded = base64::engine::general_purpose::STANDARD
             .decode(&t)
             .map_err(|_| WebError::bad_request("token is not valid base64"))?;
@@ -167,8 +140,6 @@ pub async fn post_project_worker(
         }
         (t, false)
     } else {
-        // Generate a cryptographically random 48-byte token, base64-encoded.
-        // Equivalent to `openssl rand -base64 48` (produces 64 base64 characters).
         let mut raw = [0u8; 48];
         rand::rng().fill(&mut raw);
         (base64::engine::general_purpose::STANDARD.encode(raw), true)
@@ -195,12 +166,8 @@ pub async fn post_project_worker(
 
     row.insert(&state.web_db).await?;
 
-    // Trigger re-auth if the worker is already connected, so it picks up
-    // the new peer registration without requiring a reconnect.
     scheduler.request_reauth(&worker_id_str).await;
 
-    // Re-queue any evaluations parked because the project had no eval-capable
-    // worker registration. No-op when the new row isn't eval-capable.
     if let Err(e) = gradient_ci::unpark_no_workers_for_project(&state.web_db, project.id).await {
         tracing::warn!(
             error = %e,
@@ -215,18 +182,14 @@ pub async fn post_project_worker(
     }))
 }
 
-/// A connected worker counts as live for `project` only when it authenticated for
-/// it: open-mode workers (`authorized_peers == None`) match any project, restricted
-/// workers only the projects whose token they presented in the handshake. This
-/// keeps a worker authorized for one project from showing as connected on another.
+/// Open-mode workers (`authorized_peers == None`) are matching any project. Restricted workers are
+/// matching only the projects whose token they presented in the handshake.
 fn worker_live_for_project(info: &WorkerInfo, project: ProjectId) -> bool {
     info.authorized_peers
         .as_ref()
         .is_none_or(|peers| peers.contains(&project))
 }
 
-/// Maps an enabled base-worker row into an `ProjectWorkerEntry`. `active` reflects
-/// whether the requesting project has opted in via `project_base_worker`.
 fn base_worker_entry(
     bw: base_worker::Model,
     active: bool,
@@ -247,9 +210,6 @@ fn base_worker_entry(
     }
 }
 
-/// A normal per-project registration shadows a base worker with the same
-/// `worker_id` (#407): the project manages its own entry, so the redundant base
-/// worker is dropped from that project's list.
 fn unshadowed_base_workers(
     base_workers: Vec<base_worker::Model>,
     registered_worker_ids: &std::collections::HashSet<String>,
@@ -283,7 +243,6 @@ pub async fn get_project_workers(
         .all(&state.web_db)
         .await?;
 
-    // Build a map of worker_id -> live info from the scheduler.
     let live_workers: std::collections::HashMap<String, WorkerInfo> = scheduler
         .workers_info()
         .await
@@ -291,9 +250,6 @@ pub async fn get_project_workers(
         .map(|w| (w.id.clone(), w))
         .collect();
 
-    // Live info is only exposed when the worker has actually authenticated for
-    // THIS project. A worker may be globally connected (authorized for some other
-    // project) without holding a valid token for this project.
     let live_for = |worker_id: &str| {
         live_workers
             .get(worker_id)
@@ -384,16 +340,10 @@ pub struct WorkerMetricsResponse {
     pub jobs_dispatched: u64,
 }
 
-/// A project's own registration shadows a base worker of the same `worker_id`,
-/// exactly as it does in the worker list; `None` means the worker does not
-/// serve the project, so its telemetry is not the project's to read.
 fn worker_display_name(registration: Option<String>, base: Option<String>) -> Option<String> {
     registration.or(base)
 }
 
-/// Full metrics for one worker: the live-metric sample time-series, the
-/// connect/disconnect history, and the total dispatched-job count. Scoped to
-/// members of a project the worker serves.
 pub async fn get_project_worker_metrics(
     state: State<Arc<ServerState>>,
     Path((project, worker_id)): Path<(String, String)>,
@@ -490,8 +440,6 @@ pub struct WorkerTestResponse {
     pub message: String,
 }
 
-/// Pure decision for the Fire Test outcome, kept out of the handler so it can
-/// be unit-tested without a live scheduler.
 fn worker_test_result(connected: bool, authorized_for_project: bool) -> (bool, String) {
     if !connected {
         (false, "worker is not connected".to_string())
@@ -505,8 +453,6 @@ fn worker_test_result(connected: bool, authorized_for_project: bool) -> (bool, S
     }
 }
 
-/// Connectivity probe: reports whether the worker is connected and authorized
-/// for this project. No job is dispatched. Works for base and normal workers.
 pub async fn post_project_worker_test(
     state: State<Arc<ServerState>>,
     Path((project, worker_id)): Path<(String, String)>,
@@ -646,8 +592,6 @@ pub async fn patch_project_worker(
     }
     active_model.update(&state.web_db).await?;
 
-    // When deactivating: abort in-flight jobs from this project on the worker
-    // before triggering reauth, so the worker stops them immediately.
     if let Some(false) = body.active {
         let project_set = std::collections::HashSet::from([project.id]);
         scheduler
@@ -655,17 +599,10 @@ pub async fn patch_project_worker(
             .await;
     }
 
-    // Trigger re-auth so the worker's authorized peer set or negotiated
-    // capabilities are updated (or the worker is kicked if all registrations
-    // are now inactive).
     if body.active.is_some() || caps_changed {
         scheduler.request_reauth(&worker_id).await;
     }
 
-    // Toggling `active` on or enabling the `eval` capability may newly satisfy
-    // the no-workers gate. The unpark is self-guarded against the project still
-    // lacking an eval-capable registration, so calling unconditionally here
-    // is safe.
     if (matches!(body.active, Some(true)) || matches!(body.enable_eval, Some(true)))
         && let Err(e) = gradient_ci::unpark_no_workers_for_project(&state.web_db, project.id).await
     {
@@ -697,9 +634,8 @@ pub async fn delete_project_worker(
     )
     .await?;
 
-    // A normal registration shadows a base worker of the same id (#407), so
-    // delete it first; only fall back to the base-worker guard when the project has
-    // no registration to remove.
+    // A normal registration is shadowing a base worker of the same id (#407). It is deleted first,
+    // and the base-worker guard is only a fallback.
     let result = EWorkerRegistration::delete_many()
         .filter(worker_registration::Column::PeerId.eq(project.id))
         .filter(worker_registration::Column::WorkerId.eq(&worker_id))
@@ -722,13 +658,11 @@ pub async fn delete_project_worker(
         return Err(WebError::not_found("worker registration"));
     }
 
-    // Abort in-flight jobs from this project on the worker before triggering reauth.
     let project_set = std::collections::HashSet::from([project.id]);
     scheduler
         .abort_project_jobs_on_worker(&worker_id, &project_set)
         .await;
 
-    // Trigger re-auth so the worker loses authorization for the removed peer.
     scheduler.request_reauth(&worker_id).await;
 
     Ok(ok_json(format!("worker '{}' unregistered", worker_id)))

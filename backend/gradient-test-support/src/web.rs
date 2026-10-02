@@ -4,17 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Shared helpers for `web` crate integration tests.
-//!
-//! Centralises the boilerplate that every `tests/*.rs` file in `web` needs:
-//! issuing a session JWT, building a `session::Model` row to satisfy the auth
-//! middleware, and assembling a `ServerState` + `axum_test::TestServer` from a
-//! `MockDatabase` connection.
-//!
-//! The shared JWT secret is [`TEST_JWT_SECRET`]; it must match the one baked
-//! into [`crate::state::test_state`] so handler-level state factories stay
-//! interchangeable with this module's [`make_test_server`].
-
 use std::sync::Arc;
 
 use axum_test::TestServer;
@@ -35,9 +24,7 @@ use crate::fakes::email::InMemoryEmailSender;
 use crate::fixtures::user_id;
 use crate::log_storage::NoopLogStorage;
 
-/// Shared HMAC secret used for signing test session tokens. Must equal the
-/// `jwt_secret` that [`crate::state::test_state`] and [`make_test_server`]
-/// install on `ServerState`.
+/// Must equal the `jwt_secret` that `test_state` and `make_test_server` are installing.
 pub const TEST_JWT_SECRET: &str = "test-jwt-secret";
 
 #[derive(Serialize)]
@@ -48,8 +35,6 @@ struct Claims {
     jti: SessionId,
 }
 
-/// Sign a session JWT for the canonical test user (`fixtures::user_id`) with a
-/// one-hour expiry. Pair with [`live_session`] to satisfy the auth middleware.
 pub fn make_token(session_id: SessionId) -> String {
     let now = Utc::now();
     let claims = Claims {
@@ -66,8 +51,6 @@ pub fn make_token(session_id: SessionId) -> String {
     .expect("sign jwt")
 }
 
-/// A non-revoked session row matching [`make_token`]'s claims so the auth
-/// middleware accepts the issued token.
 pub fn live_session(id: SessionId) -> session::Model {
     let now = Utc::now().naive_utc();
     session::Model {
@@ -80,19 +63,10 @@ pub fn live_session(id: SessionId) -> session::Model {
     }
 }
 
-/// Build a fully-wired `axum_test::TestServer` rooted at `gradient_web::create_router`,
-/// using `db` as the web pool and an empty mock for the worker pool.
-///
-/// `crypt_secret_file` defaults to `cli::test_cli`'s placeholder, which works
-/// for handlers that never read the crypt secret. Pass `Some(path)` for
-/// handlers that call into `generate_signing_key`, `decrypt_signing_key`, or
-/// `encrypt_secret_with_file`.
 pub fn make_test_server(db: DatabaseConnection) -> TestServer {
     make_test_server_with(db, None)
 }
 
-/// Variant of [`make_test_server`] that lets callers point the crypt secret
-/// file at a real on-disk path (typically a `tempfile::NamedTempFile`).
 pub fn make_test_server_with(
     db: DatabaseConnection,
     crypt_secret_file: Option<String>,
@@ -104,9 +78,6 @@ pub fn make_test_server_with(
     server_from_cli(db, cli)
 }
 
-/// Variant of [`make_test_server`] that lets callers tweak the parsed `Cli`
-/// (e.g. tighten `create_project` / `create_cache`) before the `RuntimeConfig` is
-/// resolved.
 pub fn make_test_server_configured(
     db: DatabaseConnection,
     configure: impl FnOnce(&mut gradient_types::Cli),
@@ -116,8 +87,6 @@ pub fn make_test_server_configured(
     server_from_cli(db, cli)
 }
 
-/// Variant of [`make_test_server`] whose worker pool is `worker_db`, for
-/// asserting on the durable event rows a handler writes there.
 pub fn make_test_server_with_worker_db(
     db: DatabaseConnection,
     worker_db: DatabaseConnection,

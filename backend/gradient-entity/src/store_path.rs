@@ -9,16 +9,11 @@ use std::str::FromStr;
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-/// The canonical Nix store directory.
 pub const STORE_DIR: &str = "/nix/store";
 
-/// A Nix store path decomposed into its `<hash>-<name>` parts.
-///
-/// Stored, compared, and serialized without the `/nix/store/` prefix - the
-/// prefix is a presentation concern reconstructed via [`StorePath::full`] only
-/// where a real filesystem path is needed (build dispatch, worker store
-/// operations, the binary-cache protocol). `name` retains a trailing `.drv`
-/// for derivations.
+/// A store path is stored and compared without the `/nix/store/` prefix. [`StorePath::full`] is
+/// adding it only where a real filesystem path is needed. `name` is keeping a trailing `.drv` for
+/// derivations.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct StorePath {
     hash: String,
@@ -26,8 +21,6 @@ pub struct StorePath {
 }
 
 impl StorePath {
-    /// Build from already-separated columns (e.g. an entity row). Infallible;
-    /// trusts the caller, who holds parts that originate from Nix or the DB.
     pub fn from_parts(hash: impl Into<String>, name: impl Into<String>) -> Self {
         Self {
             hash: hash.into(),
@@ -35,9 +28,6 @@ impl StorePath {
         }
     }
 
-    /// Parse either a full `/nix/store/<hash>-<name>` path or a bare
-    /// `<hash>-<name>` base. Validates only the structure (a `-` separator with
-    /// non-empty parts); the hash alphabet is guaranteed upstream by Nix.
     pub fn parse(input: &str) -> Result<Self, StorePathError> {
         let base = input
             .strip_prefix(STORE_DIR)
@@ -63,18 +53,14 @@ impl StorePath {
         &self.name
     }
 
-    /// Whether this path is a derivation (`.drv`).
     pub fn is_derivation(&self) -> bool {
         self.name.ends_with(".drv")
     }
 
-    /// Prefix-free `<hash>-<name>` form, used on the API and wire.
     pub fn base(&self) -> String {
         format!("{}-{}", self.hash, self.name)
     }
 
-    /// Full `/nix/store/<hash>-<name>` path, used for dispatch, worker store
-    /// operations, and the binary-cache protocol.
     pub fn full(&self) -> String {
         format!("{}/{}-{}", STORE_DIR, self.hash, self.name)
     }
@@ -230,7 +216,6 @@ mod tests {
         let v = sea_orm::Value::from(p.clone());
         assert_eq!(v, sea_orm::Value::String(Some(p.base())));
         assert_eq!(<StorePath as ValueType>::try_from(v).unwrap(), p);
-        // Full-path values written before the typed column parse identically.
         let legacy = sea_orm::Value::String(Some(p.full()));
         assert_eq!(<StorePath as ValueType>::try_from(legacy).unwrap(), p);
     }

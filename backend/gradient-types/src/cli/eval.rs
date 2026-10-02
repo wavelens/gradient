@@ -6,15 +6,12 @@
 
 use clap::Args;
 
-/// Evaluations a freshly created task keeps, before the instance-wide
-/// maximum is applied. Also the default for that maximum.
 pub const DEFAULT_KEEP_EVALUATIONS: i32 = 30;
 
 #[derive(Args, Debug, Clone)]
 pub struct EvalArgs {
-    /// Instance-wide maximum for a task's `keep_evaluations`. New tasks
-    /// start at the lower of [`DEFAULT_KEEP_EVALUATIONS`] and this. `0` disables
-    /// the cap.
+    /// Instance-wide maximum for a task's `keep_evaluations`. New tasks start at the lower of
+    /// [`DEFAULT_KEEP_EVALUATIONS`] and this. `0` is disabling the cap.
     #[arg(
         long = "eval-max-keep",
         env = "GRADIENT_EVAL_MAX_KEEP",
@@ -22,9 +19,9 @@ pub struct EvalArgs {
     )]
     pub max_keep: usize,
 
-    /// Total byte cap for the fleet-shared eval-cache blobs. The periodic
-    /// eviction sweep drops the oldest-`updated_at` rows until the surviving
-    /// total is at or under this. Defaults to 10 GiB.
+    /// Total byte cap for the fleet-shared eval-cache blobs. The periodic eviction sweep is
+    /// dropping the oldest-`updated_at` rows until the surviving total is at or under this. The
+    /// default is 10 GiB.
     #[arg(
         long = "eval-cache-max-total-bytes",
         env = "GRADIENT_EVAL_CACHE_MAX_TOTAL_BYTES",
@@ -32,8 +29,8 @@ pub struct EvalArgs {
     )]
     pub cache_max_total_bytes: u64,
 
-    /// Max age in days for an eval-cache blob; older blobs are evicted by the
-    /// sweep regardless of the size cap. Defaults to 30.
+    /// Max age in days for an eval-cache blob. The sweep is evicting older blobs regardless of the
+    /// size cap. The default is 30.
     #[arg(
         long = "eval-cache-max-age-days",
         env = "GRADIENT_EVAL_CACHE_MAX_AGE_DAYS",
@@ -41,7 +38,7 @@ pub struct EvalArgs {
     )]
     pub cache_max_age_days: u64,
 
-    /// Interval in seconds between eval-cache eviction sweeps. Defaults to 3600.
+    /// Interval in seconds between eval-cache eviction sweeps. The default is 3600.
     #[arg(
         long = "eval-cache-sweep-interval-secs",
         env = "GRADIENT_EVAL_CACHE_SWEEP_INTERVAL_SECS",
@@ -62,10 +59,8 @@ impl Default for EvalArgs {
 }
 
 impl EvalArgs {
-    /// The ceiling on a task's `keep_evaluations`, or `None` when the cap is
-    /// disabled. Saturates rather than wrapping: a configured value past
-    /// `i32::MAX` would otherwise become a negative ceiling that rejects
-    /// everything.
+    /// The configured value is saturating rather than wrapping. A value past `i32::MAX` would
+    /// otherwise become a negative ceiling rejecting everything.
     pub fn keep_evaluations_max(&self) -> Option<i32> {
         match self.max_keep {
             0 => None,
@@ -73,9 +68,8 @@ impl EvalArgs {
         }
     }
 
-    /// `keep_evaluations` for a freshly created task. Creating a task
-    /// above the ceiling would leave it unsaveable: the frontend sends the whole
-    /// form back and the value it was handed fails validation (#561).
+    /// Creating a task above the ceiling would leave it unsaveable. The frontend is sending the
+    /// whole form back and the handed value would fail validation (#561).
     pub fn default_keep_evaluations(&self) -> i32 {
         match self.keep_evaluations_max() {
             Some(max) => DEFAULT_KEEP_EVALUATIONS.min(max),
@@ -95,16 +89,12 @@ mod tests {
         }
     }
 
-    /// The reported bug: with a maximum below the default, a new task was
-    /// still handed the default and every subsequent save was rejected.
     #[test]
     fn a_new_task_never_starts_above_the_maximum() {
         assert_eq!(args(3).default_keep_evaluations(), 3);
         assert_eq!(args(1).default_keep_evaluations(), 1);
     }
 
-    /// A maximum above the default raises the ceiling, not the starting point -
-    /// the setting is documented as a cap, not a target.
     #[test]
     fn a_higher_maximum_leaves_the_default_alone() {
         assert_eq!(
@@ -120,8 +110,6 @@ mod tests {
         assert_eq!(args(0).default_keep_evaluations(), DEFAULT_KEEP_EVALUATIONS);
     }
 
-    /// A maximum past `i32::MAX` must saturate: `as i32` would wrap negative and
-    /// the cap check would then reject every value.
     #[test]
     fn an_out_of_range_maximum_saturates() {
         assert_eq!(args(usize::MAX).keep_evaluations_max(), Some(i32::MAX));

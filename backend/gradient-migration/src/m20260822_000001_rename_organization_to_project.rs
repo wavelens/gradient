@@ -4,11 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Renames the `organization` entity to `project`. Postgres carries table and
-//! column renames through to dependent objects but leaves index and constraint
-//! names alone, so all 27 of those are renamed explicitly here. Postgres 17+
-//! also catalogues an auto-named constraint per NOT NULL column, so a final
-//! block sweeps those by substitution, scoped to the affected tables.
+//! Postgres is carrying table and column renames to dependent objects but not index or constraint
+//! names. Those are renamed explicitly here. Postgres 17+ is also cataloguing an auto-named NOT
+//! NULL constraint per column. A final block is renaming those, scoped to the affected tables.
 
 use sea_orm_migration::prelude::*;
 use sea_orm_migration::sea_orm::ConnectionTrait;

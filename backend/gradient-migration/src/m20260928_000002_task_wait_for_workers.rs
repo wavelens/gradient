@@ -4,9 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Waiting for a worker that can build an unmet architecture or feature set is
-//! opt-in per task; without it such an evaluation is aborted.
-
 use sea_orm_migration::prelude::*;
 use sea_orm_migration::sea_orm::ConnectionTrait;
 

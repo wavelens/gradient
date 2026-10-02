@@ -4,10 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Index `build_job (derivation)`: the reachability refcount that promotion,
-//! dispatch, and derivation GC all probe (`WHERE bj.derivation = ...`). The
-//! existing `UNIQUE (evaluation, derivation)` cannot serve it (derivation is
-//! not the leading column).
+//! `UNIQUE (evaluation, derivation)` cannot serve a `derivation`-only filter because `derivation`
+//! is not its leading column.
 
 use sea_orm_migration::prelude::*;
 use sea_orm_migration::sea_orm::ConnectionTrait;

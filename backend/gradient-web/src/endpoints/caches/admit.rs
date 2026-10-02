@@ -10,7 +10,7 @@ use gradient_storage::admission::{AdmissionSession, Admitted, ObjectKey, UploadP
 
 use crate::error::{WebError, WebResult};
 
-/// A REST write's permit; the session lives as long as the permit.
+/// The session is living as long as the permit.
 pub(super) struct RestPermit {
     permit: UploadPermit,
     _session: AdmissionSession,

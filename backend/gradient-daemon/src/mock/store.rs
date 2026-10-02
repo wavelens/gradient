@@ -40,7 +40,7 @@ struct Entry {
     origin: Origin,
 }
 
-// The base DB (the VM image's db.sqlite) is only ever queried; its paths are masked, never deleted.
+// The base DB (the VM image's db.sqlite) is only ever queried. Its paths are masked, never deleted.
 pub struct MockStore {
     root: PathBuf,
     store_dir: StoreDir,

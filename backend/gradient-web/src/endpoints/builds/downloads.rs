@@ -24,10 +24,6 @@ use std::sync::Arc;
 use super::BuildAccessContext;
 use crate::endpoints::{archive_headers, build_product_headers};
 
-// ── Hydra build-product helpers ───────────────────────────────────────────────
-
-/// Returns the store-path hash (first component, before the first `-`) for
-/// `/nix/store/<hash>-<name>`. Empty string on malformed input.
 fn store_path_hash(output: &str) -> &str {
     output
         .strip_prefix("/nix/store/")
@@ -37,8 +33,6 @@ fn store_path_hash(output: &str) -> &str {
         .unwrap_or("")
 }
 
-/// Strip `/nix/store/<hash>-<name>/` prefix from a product line path, returning
-/// the path relative to the output's NAR root.
 fn relative_in_output(full: &str, output_root: &str) -> String {
     let prefix = format!("{}/", output_root);
     full.strip_prefix(&prefix)
@@ -46,8 +40,6 @@ fn relative_in_output(full: &str, output_root: &str) -> String {
         .unwrap_or_else(|| full.trim_start_matches('/').to_owned())
 }
 
-/// Query `build_product` rows for a set of derivation output IDs and return them
-/// as the local [`BuildProduct`] type.
 async fn collect_build_products(
     state: &Arc<ServerState>,
     _build_id: BuildJobId,
@@ -79,10 +71,6 @@ async fn collect_build_products(
         .collect()
 }
 
-/// Look up `build_product` rows for the given outputs, find the one whose
-/// `name` matches `filename`, and stream its bytes from `nar_storage`.
-///
-/// Returns `None` when no matching product is found.
 async fn find_and_serve_file(
     state: &Arc<ServerState>,
     build_id: BuildJobId,
@@ -107,7 +95,6 @@ async fn find_and_serve_file(
     };
 
     for product in rows {
-        // Match by exact name or by basename of path.
         let product_name = &product.name;
         let path_basename = std::path::Path::new(&product.path)
             .file_name()
@@ -119,7 +106,6 @@ async fn find_and_serve_file(
 
         tracing::debug!(%build_id, %filename, product_path = %product.path, "Found matching build_product, fetching from NAR");
 
-        // Find the output that owns this product.
         let output = build_outputs
             .iter()
             .find(|o| o.id == product.derivation_output);
@@ -230,7 +216,7 @@ pub async fn get_build_download_token(
     Ok(ok_json(token))
 }
 
-/// A download token stands in for the caller: it was issued to someone
+/// A download token is standing in for the caller. It was issued to someone
 /// [`BuildAccessContext::load`] admitted for a build of the same derivation.
 async fn load_with_download_token(
     state: &Arc<ServerState>,

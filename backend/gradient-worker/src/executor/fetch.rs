@@ -4,16 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Fetch task - clone the repository, add the tree at the pinned commit to the
-//! Nix store as its `source` path ([`super::source`]), fetch the flake inputs
-//! that are not in the store yet, and upload source and inputs to the Gradient
-//! cache.
-//!
-//! Private repositories are accessed using the SSH private key delivered by the
-//! server as a [`gradient_wire::messages::ServerMessage::Credential`] with
-//! [`gradient_wire::messages::CredentialKind::SshKey`].  The key is available via
-//! [`CredentialStore::ssh_key`] before this step executes.
-
 use std::collections::HashSet;
 
 use anyhow::{Context, Result};
@@ -26,19 +16,11 @@ use tracing::{debug, info, trace, warn};
 use super::abort_true;
 use crate::proto::credentials::CredentialStore;
 
-/// Outcome of a successful `fetch_repository` call.
-///
-/// `source_path` is the flake's own `/nix/store/<hash>-source`, what eval tasks
-/// point at and what a later eval-only job names as `FlakeSource::Cached`.
-/// `archived_paths` lists every store path to push: the source plus every input
-/// the archive or the per-input fallback fetched, which may legitimately omit
-/// inputs the project has no credentials for.
 pub struct FetchOutcome {
     pub source_path: String,
     pub archived_paths: Vec<String>,
 }
 
-/// The `nix` and `ssh` binaries a fetch is running, and the store it checks.
 #[derive(Clone, Copy)]
 struct NixTools<'a> {
     nix: &'a str,
@@ -46,14 +28,6 @@ struct NixTools<'a> {
     store: &'a dyn WorkerStore,
 }
 
-/// Clone the repository referenced by `job`, archive it and all flake inputs
-/// into the Nix store, and return metadata about the archive.
-///
-/// The caller is responsible for pushing the NARs (via `nar::push_direct`) and
-/// reporting the result to the server (via `report_fetch_result`).
-///
-/// `abort` is a watch channel receiver; when its value becomes `true` the
-/// function returns an error immediately (or kills any running subprocess).
 #[tracing::instrument(level = "debug", skip_all)]
 pub async fn fetch_repository(
     job: &FlakeJob,
@@ -74,10 +48,6 @@ pub async fn fetch_repository(
         .ssh_key()
         .map(|k| String::from_utf8_lossy(k.expose()).to_string());
 
-    // A Repository source is cloned and its tree added to the store; a Cached
-    // build source is already a `/nix/store/...-source` path (ensured present by
-    // the caller). Either way the inputs are fetched from the source's own lock
-    // into the shared store, with credentials.
     let (source_path, flake_root) = match &job.source {
         FlakeSource::Repository { url, commit } => {
             let (url, commit) = (url.clone(), commit.clone());
@@ -99,10 +69,6 @@ pub async fn fetch_repository(
                 }
             };
 
-            // `input_update` evals bump tracked flake inputs natively, writing the
-            // candidate lock into the checkout so the rest of eval/build is running against
-            // exactly the lock that will be committed. An empty patch is left as a
-            // no-op so no PR is opened. Build requests never carry an input_update.
             if let Some(spec) = &job.input_update {
                 run_input_update(spec, &tmp_path, ssh_key.as_deref(), updater).await?;
             }
@@ -147,8 +113,6 @@ pub async fn fetch_repository(
         );
     }
 
-    // The inputs are fetched by a nix subprocess, so fetching goes through the
-    // nix daemon with proper network and store-write access.
     let tools = NixTools {
         nix: binpath_nix,
         ssh: binpath_ssh,
@@ -171,11 +135,9 @@ pub async fn fetch_repository(
                 archived_paths,
             })
         }
-        // `nix flake archive` is all-or-nothing: one unfetchable input (e.g. a
-        // private `git+ssh` input the project has no key for) fails the whole
-        // command even though eval targets never reference it. Nix evaluation is
-        // lazy, so fall back to prefetching each locked input independently as
-        // best-effort cache population.
+        // `nix flake archive` is all-or-nothing. One unfetchable private input is failing the
+        // whole command, even when no eval target references it. Each locked input is
+        // prefetched on its own instead, as best-effort cache population.
         Err(archive_err) => {
             let archive_msg = archive_err.to_string();
             warn!(error = %archive_msg, "nix flake archive failed; falling back to per-input prefetch");
@@ -222,9 +184,6 @@ pub async fn fetch_repository(
     }
 }
 
-/// Run the native flake.lock generator over the checkout, write the candidate
-/// lock back, and report it (with the bumped set) to the server. An empty patch
-/// returns without reporting so no PR is opened.
 #[tracing::instrument(level = "debug", skip_all)]
 async fn run_input_update(
     spec: &gradient_wire::messages::InputUpdateSpec,
@@ -317,13 +276,6 @@ fn build_archive_argv(flake_ref: &str, overrides: &[(String, String)]) -> Vec<St
     argv
 }
 
-/// Every store path of the flake at `source_path`: the source and all transitive
-/// inputs, verified present.
-///
-/// When every locked input is already in the local store nothing is running: `nix
-/// flake archive` re-hashes each `path:` and `git+file:` input to verify it, which
-/// on a nixpkgs checkout is a walk of every file. Otherwise `nix flake archive
-/// --json` fetches them.
 #[tracing::instrument(level = "debug", skip_all)]
 async fn archive_flake(
     source_path: &str,
@@ -367,10 +319,6 @@ async fn archive_flake(
     Ok(all_paths)
 }
 
-/// Spawn a `nix` subprocess, honoring `abort` (killing the child via
-/// `kill_on_drop` on abort), and return its captured output, failing on a
-/// non-zero exit with the trimmed stderr. Shared by archive, prefetch and
-/// path-info so the spawn/select/status plumbing lives in one place.
 async fn run_nix_subprocess(
     mut cmd: tokio::process::Command,
     label: &str,
@@ -412,10 +360,6 @@ async fn run_nix_subprocess(
     Ok(output)
 }
 
-/// Write `ssh_key` to a mode-0600 temp file and build the matching
-/// `GIT_SSH_COMMAND` value so nix's libfetchers can clone private `git+ssh`
-/// inputs. The returned guard deletes the file on drop and MUST outlive every
-/// subprocess that reads the env.
 async fn ssh_key_env(
     ssh_key: Option<&str>,
     binpath_ssh: &str,
@@ -440,9 +384,6 @@ async fn ssh_key_env(
     Ok(Some((kf, ssh_command)))
 }
 
-/// `nix flake prefetch` resolves every ref through the registries, and loading
-/// the global one downloads it, which fails on a worker without a route out even
-/// though a direct ref never consults it. Only an indirect ref keeps it.
 fn build_prefetch_argv(flake_ref: &str) -> Vec<String> {
     let mut argv = vec!["flake".to_owned(), "prefetch".to_owned()];
     if !is_indirect(flake_ref) {
@@ -460,8 +401,6 @@ fn is_indirect(flake_ref: &str) -> bool {
     flake_ref.starts_with("flake:") || !flake_ref.contains(':')
 }
 
-/// Prefetch a single flake ref via `nix flake prefetch --json` and return its
-/// `storePath`.
 #[tracing::instrument(level = "debug", skip_all)]
 async fn prefetch_one(
     flake_ref: &str,
@@ -483,9 +422,6 @@ async fn prefetch_one(
         .map(str::to_owned)
 }
 
-/// Best-effort fallback for when `nix flake archive` fails: prefetch every locked
-/// input from `flake.lock` independently, collecting the successes and turning
-/// per-input failures into warnings. Returns `(collected_paths, warnings)`.
 #[tracing::instrument(level = "debug", skip_all)]
 async fn prefetch_flake_best_effort(
     source_path: &str,
@@ -500,7 +436,6 @@ async fn prefetch_flake_best_effort(
         ssh: binpath_ssh,
         store,
     } = *tools;
-    // The key-file guard must outlive every prefetch invocation below.
     let key_env = ssh_key_env(ssh_key, binpath_ssh).await?;
     let ssh_command = key_env.as_ref().map(|(_, c)| c.as_str());
 
@@ -542,8 +477,6 @@ async fn prefetch_flake_best_effort(
     Ok((all_paths, warnings))
 }
 
-/// Recursively walk the `inputs` tree from `nix flake archive --json` output
-/// and insert every `path` value into `paths`.
 fn collect_input_paths(node: &serde_json::Value, paths: &mut HashSet<String>) {
     if let Some(inputs) = node["inputs"].as_object() {
         for input in inputs.values() {
@@ -555,11 +488,6 @@ fn collect_input_paths(node: &serde_json::Value, paths: &mut HashSet<String>) {
     }
 }
 
-/// Fail unless every store path is valid in the local store.
-///
-/// Metadata is no longer surfaced here (the server records it from each
-/// `UploadFinished`); this only confirms the archive/prefetch step actually
-/// populated the store before the caller pushes.
 async fn require_present(store: &dyn WorkerStore, paths: &[String]) -> Result<()> {
     let missing = missing_paths(store, paths).await?;
     if !missing.is_empty() {
@@ -568,9 +496,6 @@ async fn require_present(store: &dyn WorkerStore, paths: &[String]) -> Result<()
     Ok(())
 }
 
-/// The paths the daemon does not hold. Asked of the daemon, not `nix path-info`:
-/// that one checks every substituter for an invalid path, which without a route
-/// out costs seconds of DNS retries.
 #[tracing::instrument(level = "debug", skip_all, fields(paths = paths.len()))]
 async fn missing_paths(store: &dyn WorkerStore, paths: &[String]) -> Result<Vec<String>> {
     let valid =
@@ -583,9 +508,6 @@ async fn missing_paths(store: &dyn WorkerStore, paths: &[String]) -> Result<Vec<
         .collect())
 }
 
-/// The store path of every locked input in `flake_root`'s lock, when all of them
-/// are valid in the local store. `None` sends the caller through the archive: a
-/// missing lock, an input the lock pins without a `narHash`, or any path absent.
 async fn present_locked_inputs(flake_root: &str, store: &dyn WorkerStore) -> Option<Vec<String>> {
     let bytes = tokio::fs::read(std::path::Path::new(flake_root).join("flake.lock"))
         .await
@@ -605,8 +527,6 @@ async fn present_locked_inputs(flake_root: &str, store: &dyn WorkerStore) -> Opt
     }
 }
 
-/// Every fetcher stores a locked input as `<hash>-source`, content-addressed by
-/// the NAR hash the lock pins, so the path follows from the lock alone.
 fn locked_input_paths(lock: &serde_json::Value) -> Option<Vec<String>> {
     use harmonia_store_content_address::{ContentAddress, make_store_path_from_ca};
     use harmonia_store_path::{StoreDir, StorePathName};
@@ -648,10 +568,6 @@ fn clone_and_checkout(url: &str, commit: &str, ssh_key: Option<&str>) -> Result<
     let git_commit = match repo.find_commit(oid) {
         Ok(c) => c,
         Err(_) => {
-            // A default clone only brings down commits reachable from the
-            // remote's advertised branch refs; a fork-PR head or a
-            // force-pushed commit can be absent. Fetch it directly by SHA and
-            // retry before giving up.
             repo.find_remote("origin")
                 .context("failed to find origin remote")?
                 .fetch(
@@ -679,19 +595,12 @@ fn clone_and_checkout(url: &str, commit: &str, ssh_key: Option<&str>) -> Result<
     repo.checkout_tree(tree.as_object(), Some(&mut co))
         .context("checkout failed")?;
 
-    // Leave HEAD on the default branch that git set during clone.  The Nix
-    // evaluator uses `git+file://?rev=<commit>` so it reads file content from
-    // the git object database at the pinned revision; HEAD is only used for
-    // metadata.  Detaching HEAD (set_head_detached) causes Nix to warn
-    // "could not read HEAD ref, using 'master'".
-
+    // HEAD is staying on the default branch from the clone. Nix is reading files at the pinned
+    // `?rev=` and is warning "could not read HEAD ref" on a detached HEAD.
     info!(path = %temp_dir.display(), %commit, "repository cloned");
     Ok(temp_dir.to_string_lossy().into_owned())
 }
 
-/// Reconstruct a flake-ref string from a `flake.lock` node's `original`
-/// field. Supports `github`, `gitlab`, `sourcehut`, `git`, `tarball`,
-/// `path`, and `indirect` types - the set Nix emits for typical inputs.
 fn flake_ref_from_lock_original(original: &serde_json::Value) -> anyhow::Result<String> {
     use anyhow::Context;
     let ty = original
@@ -730,8 +639,6 @@ fn flake_ref_from_lock_original(original: &serde_json::Value) -> anyhow::Result<
     })
 }
 
-/// Percent-encode the base64/SRI characters a `narHash` can contain so it
-/// survives inside a flake-ref query string. SRI hashes only use these three.
 fn percent_encode_hash(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for c in s.chars() {
@@ -752,9 +659,6 @@ fn nar_hash_param(locked: &serde_json::Value, sep: char) -> String {
     }
 }
 
-/// Reconstruct a pinned flake-ref from a `flake.lock` node's `locked` field,
-/// used by the per-input prefetch fallback. Appends the percent-encoded
-/// `narHash` so nix prefetches exactly the pinned revision.
 fn flake_ref_from_lock_locked(locked: &serde_json::Value) -> anyhow::Result<String> {
     use anyhow::Context;
     let ty = locked
@@ -803,11 +707,6 @@ fn flake_ref_from_lock_locked(locked: &serde_json::Value) -> anyhow::Result<Stri
     })
 }
 
-/// Walk every non-root node in a `flake.lock` (a flat graph, so this covers
-/// transitive inputs) and build the pinned flake ref to prefetch for each. Root
-/// inputs carrying an override prefetch the override ref instead of the locked
-/// one. Returns `(refs, warnings)` where each unsupported node becomes a warning
-/// rather than aborting the walk. `refs` items are `(display_name, flake_ref)`.
 fn prefetch_refs_from_lock(
     lock: &serde_json::Value,
     overrides: &[(String, String)],
@@ -818,7 +717,6 @@ fn prefetch_refs_from_lock(
         .map(|(n, r)| (n.as_str(), r.as_str()))
         .collect();
 
-    // node key -> root input name, for the override lookup and warning names.
     let root_input_of: std::collections::HashMap<&str, &str> = lock
         .get("nodes")
         .and_then(|n| n.get(root_key))
@@ -861,7 +759,6 @@ fn prefetch_refs_from_lock(
     (refs, warnings)
 }
 
-/// Worker-side mirror of the proto `FlakeInputOverride`.
 #[derive(Debug, Clone)]
 pub struct OverrideInput {
     pub input_name: String,
@@ -879,8 +776,6 @@ impl From<&gradient_wire::types::FlakeInputOverride> for OverrideInput {
 
 type AppliedOverride = (String, String);
 
-/// Expand glob overrides against the declared flake inputs, resolve `url=None`
-/// entries from the lock's `original` field, and return `(applied, warnings)`.
 fn resolve_overrides(
     overrides: &[OverrideInput],
     declared: &std::collections::HashSet<String>,
@@ -904,8 +799,6 @@ fn resolve_overrides(
     Ok((applied, warnings))
 }
 
-/// Rebuild a flake ref for a force-update (`url=None`) input from its `original`
-/// block in the lock, so nix re-locks it to the latest of its declared URL.
 fn reconstruct_original_ref(lock: &serde_json::Value, input_name: &str) -> anyhow::Result<String> {
     let root_key = lock.get("root").and_then(|v| v.as_str()).unwrap_or("root");
     let node_key = lock
@@ -923,8 +816,6 @@ fn reconstruct_original_ref(lock: &serde_json::Value, input_name: &str) -> anyho
     flake_ref_from_lock_original(original)
 }
 
-/// Read the set of input names declared in the root flake from a parsed
-/// `flake.lock` document.
 fn declared_inputs_from_lock(
     lock: &serde_json::Value,
 ) -> anyhow::Result<std::collections::HashSet<String>> {
@@ -971,7 +862,6 @@ mod tests {
         let credentials = crate::proto::credentials::CredentialStore::new();
         let mut reporter = RecordingJobReporter::new();
 
-        // This will fail with a git error (fake URL), but it should report Fetching first.
         let result = fetch_repository(
             &job,
             &mut reporter,
@@ -985,12 +875,9 @@ mod tests {
 
         assert_eq!(reporter.len(), 1);
         assert!(matches!(reporter.events()[0], ReportedEvent::Fetching));
-        // The actual clone fails because the URL is fake - that's expected.
         assert!(result.is_err());
     }
 
-    /// A Cached source must attempt archive (failing only because nix is absent
-    /// in unit context), NOT bail with "requires FlakeSource::Repository".
     #[tokio::test]
     async fn fetch_cached_source_does_not_bail_on_kind() {
         let job = FlakeJob {
@@ -1022,10 +909,6 @@ mod tests {
         );
     }
 
-    /// A clone's tree lands in the store without nix, and a flake with nothing
-    /// locked has nothing left to fetch, so the fetch succeeds where `nix` is not
-    /// even installed: the archive fails, the per-input fallback finds no input,
-    /// and the source alone is what gets pushed.
     #[tokio::test]
     async fn fetch_repository_adds_the_clone_to_the_store_without_nix() {
         use std::process::Command;
@@ -1112,7 +995,6 @@ mod tests {
         assert!(matches!(reporter.events()[0], ReportedEvent::Fetching));
     }
 
-    /// crane as this repository locks it; `nix eval` of its `fetchTree` outPath.
     #[test]
     fn a_locked_input_path_follows_from_its_nar_hash() {
         let lock = serde_json::json!({
@@ -1427,8 +1309,6 @@ mod tests {
         );
     }
 
-    /// The lock walk covers transitive (non-root-input) nodes, skips the root
-    /// node, prefers an override for a root input, and warns on an unknown type.
     #[test]
     fn prefetch_refs_from_lock_walks_all_and_applies_override() {
         let lock = serde_json::json!({

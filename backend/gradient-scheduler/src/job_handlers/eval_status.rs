@@ -4,8 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Eval status transitions, result handling, and message recording.
-
 use anyhow::Result;
 use sea_orm::EntityTrait;
 use tracing::{debug, warn};
@@ -20,8 +18,6 @@ use crate::eval;
 use crate::jobs::PendingJob;
 
 impl Scheduler {
-    // ── Eval status transitions ───────────────────────────────────────────────
-
     pub async fn handle_eval_status_update(
         &self,
         job_id: &str,
@@ -53,8 +49,6 @@ impl Scheduler {
         }
     }
 
-    /// Persist the archived flake store path on the evaluation row so
-    /// follow-up eval-only jobs can dispatch with `FlakeSource::Cached`.
     pub async fn persist_flake_source(&self, job_id: &str, flake_source: Option<String>) {
         use sea_orm::ActiveModelTrait;
         use sea_orm::Set;
@@ -74,8 +68,6 @@ impl Scheduler {
         }
     }
 
-    /// Store the worker-produced candidate lock + bumps on the `input_update`
-    /// sidecar so the `OpenPr` action can read them once the verify gate clears.
     pub async fn persist_input_update_result(
         &self,
         job_id: &str,
@@ -128,8 +120,6 @@ impl Scheduler {
         }
     }
 
-    /// On a discovery `input_update` report, fan the matched inputs out into one
-    /// per-input update eval each via the ci trigger helper.
     pub async fn persist_input_update_expansion(&self, job_id: &str, matched: Vec<String>) {
         use sea_orm::{ColumnTrait, QueryFilter};
 
@@ -201,10 +191,8 @@ impl Scheduler {
             }
         };
 
-        // Canonicalise every store path to its bare `<hash>-<name>` form before
-        // it reaches the graph writer: `derivation.derivation_path` mirrors the
-        // narinfo `References:` convention used by `cached_path`, and the
-        // `/nix/store/` prefix is added back only at the worker / API boundary.
+        // Store paths are canonicalised to the bare `<hash>-<name>` form before reaching the graph
+        // writer. The `/nix/store/` prefix is added back only at the worker and API boundary.
         for d in &mut derivations {
             d.drv_path = strip_nix_store_prefix(&d.drv_path);
             for dep in &mut d.dependencies {
@@ -228,13 +216,6 @@ impl Scheduler {
         Ok(())
     }
 
-    /// Persist a worker-reported message on the evaluation that owns the
-    /// given active `job_id`.
-    ///
-    /// Used for infrastructure-level signals (NAR prefetch failures, transport
-    /// errors, etc.) that should surface on the evaluation page even when the
-    /// root cause was seen in a sub-job. Build compile failures and
-    /// user-initiated aborts deliberately do not flow through here.
     pub async fn record_eval_message(
         &self,
         job_id: &str,

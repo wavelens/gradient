@@ -20,8 +20,6 @@ use std::sync::Arc;
 
 use super::BuildAccessContext;
 
-// ── Dependency graph helpers ──────────────────────────────────────────────────
-
 pub(super) async fn authorize_build_opt(
     state: &Arc<ServerState>,
     build_id: BuildJobId,
@@ -33,15 +31,11 @@ pub(super) async fn authorize_build_opt(
         .map(|_| ())
 }
 
-/// A build_job paired with its shared build's status, for one node in the graph.
 struct JobNode {
     job: MBuildJob,
     status: BuildStatus,
 }
 
-/// Load the eval's build_jobs for `derivations`, each paired with its shared build's
-/// status. Drives the node + edge mapping (a dep derivation resolves to the
-/// build_job the same eval holds for it).
 async fn job_nodes_for_derivations(
     state: &Arc<ServerState>,
     evaluation_id: EvaluationId,
@@ -101,18 +95,12 @@ pub struct BuildGraph {
     pub edges: Vec<DependencyEdge>,
 }
 
-// ── Graph BFS helpers ─────────────────────────────────────────────────────────
-
-/// Result of processing one BFS wave in the dependency graph walk.
 struct GraphWaveResult {
     nodes: Vec<DependencyNode>,
     edges: Vec<DependencyEdge>,
-    /// Build job IDs not yet visited, to be queued for the next wave.
     next_wave: Vec<BuildJobId>,
 }
 
-/// Process one BFS wave: fetch build_jobs + derivations for `batch`, resolve
-/// dependency edges, and collect unvisited parents for the next wave.
 async fn process_graph_wave(
     state: &Arc<ServerState>,
     batch: &[BuildJobId],
@@ -207,7 +195,6 @@ async fn process_graph_wave(
     })
 }
 
-/// GET /builds/{build}/dependencies - direct dependencies of a single build
 pub async fn get_build_dependencies(
     state: State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
@@ -255,7 +242,6 @@ pub async fn get_build_dependencies(
     Ok(ok_json(nodes))
 }
 
-/// GET /builds/{build}/graph - full transitive dependency graph rooted at a build
 pub async fn get_build_graph(
     state: State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,

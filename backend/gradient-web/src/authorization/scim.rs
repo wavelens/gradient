@@ -18,9 +18,7 @@ use gradient_types::input::load_secret;
 
 use crate::scim::ScimError;
 
-/// Validates the SCIM bearer token against the secret in `scim.token_file`.
-/// Rejects with a SCIM-shaped 401 on any mismatch. Only mounted when SCIM is
-/// configured, so `state.config.scim` is `Some` here.
+/// The route is mounted only when SCIM is configured. `state.config.scim` is therefore `Some` here.
 pub async fn authorize_scim(
     State(state): State<Arc<ServerState>>,
     req: Request<Body>,

@@ -4,8 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! `GET /admin/tasks`, `GET /admin/tasks/{task_id}`
-
 use crate::error::{WebError, WebResult, require_superuser};
 use crate::helpers::ok_json;
 use axum::{

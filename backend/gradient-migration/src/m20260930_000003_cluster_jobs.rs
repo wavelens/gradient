@@ -4,8 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Cluster jobs. The unique open-attempt index is the cross-instance arbiter for
-//! a cluster claim, as `idx-dispatched_job-open-job` is for a single job. The
+//! The unique open-attempt index is the cross-instance arbiter for a cluster claim. The
 //! `dispatched_job` foreign key is validated separately, off the exclusive lock.
 
 use sea_orm_migration::prelude::*;

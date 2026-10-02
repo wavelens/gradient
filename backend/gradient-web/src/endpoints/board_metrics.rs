@@ -4,12 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Infrastructure board pages backed by aggregates rather than per-job rows:
-//! Cache (traffic/storage), Network & API (NAR egress, worker speeds, HTTP),
-//! Workers fleet time-series, and superuser System Health. Cache/NAR traffic is
-//! shown as an anonymized infra aggregate; worker rows are project-scoped; HTTP and
-//! process stats are superuser-only.
-
 use crate::authorization::MaybeUser;
 use crate::endpoints::metrics::{
     HttpRouteStat, ProcessStat, collect, http_snapshot, process_snapshot,
@@ -58,7 +52,6 @@ gradient_db::sql_fn! {
         params = [Text("cache.bytes_sent")];
 }
 
-/// Hourly rollup of `metric`, summed across every scope (anonymized infra view).
 async fn infra_series(
     db: &impl ConnectionTrait,
     metric: &str,
@@ -136,8 +129,6 @@ pub async fn get_board_cache(
     }))
 }
 
-/// Host of an upstream URL, used as the merged series' display name
-/// (per-instance custom names cannot survive a by-URL merge).
 fn upstream_host(url: &str) -> String {
     let after_scheme = url.split_once("://").map(|(_, r)| r).unwrap_or(url);
     let host = after_scheme.split('/').next().unwrap_or(after_scheme);
@@ -280,8 +271,6 @@ pub async fn get_board_upstream_caches(
         } else {
             None
         };
-        // Rows are already scoped to URLs the caller's project uses (or all, for
-        // superusers), so the URL is the caller's own - no cross-project mask needed.
         let display_name = upstream_host(&uid);
 
         upstream_caches.push(BoardUpstreamCache {
@@ -312,12 +301,11 @@ pub struct WorkerNet {
 pub struct BoardNetworkStats {
     pub nar_egress: Vec<SeriesPoint>,
     pub workers: Vec<WorkerNet>,
-    /// Per-route HTTP latency/throughput; superuser-only, empty otherwise.
     pub http: Vec<HttpRouteStat>,
 }
 
-/// Worker telemetry carries no project; it belongs to every project the worker
-/// is registered in or that opted into it as a base worker.
+/// Worker telemetry is carrying no project. It is attributed to every project the worker is
+/// registered in, or that opted into it as a base worker.
 fn workers_serving(project_list: &str) -> String {
     format!(
         " AND worker_id IN (\
@@ -520,9 +508,6 @@ gradient_db::sql_fn! {
         tier = Bulk;
 }
 
-/// 2D build-duration distribution (duration band × hour) for the Durations page.
-/// Build times live on the most recent `build_attempt` after the split.
-/// Project-scoped.
 pub async fn get_board_durations_heatmap(
     State(state): State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
@@ -604,8 +589,6 @@ pub struct SupervisedLoop {
     pub last_error: Option<String>,
 }
 
-/// Render the supervision tree's raw health rows for the API, expressing
-/// `last_ok_at` as seconds elapsed rather than an opaque `Instant`.
 fn loops_view(
     rows: Vec<(&'static str, gradient_util::supervision::LoopHealth)>,
     now: std::time::Instant,
@@ -639,9 +622,8 @@ pub struct BoardHealth {
     pub supervised: Vec<SupervisedLoop>,
     pub proto_sessions: usize,
     pub unconfirmed_nars: u64,
-    /// Pending deliveries still owed, and rows that gave up after their last attempt.
-    /// A rising `failed_deliveries` is a Git host or a mail host that is down, not a
-    /// backlog: those rows are dead letters until an operator acts.
+    /// A rising `failed_deliveries` is pointing at a Git host or mail host that is down, not a
+    /// backlog. Those rows are dead letters until an operator acts.
     pub pending_deliveries: i64,
     pub failed_deliveries: i64,
     pub hot_nar_cache: HotNarCacheHealth,
@@ -730,8 +712,6 @@ pub async fn get_board_health(
 mod tests {
     use super::upstream_host;
 
-    /// Worker telemetry carries no project (#587); a scoped read reaches it
-    /// through the workers that serve the caller's projects.
     #[test]
     fn worker_telemetry_is_scoped_through_the_workers_serving_the_projects() {
         for sql in [
@@ -747,9 +727,6 @@ mod tests {
         }
     }
 
-    /// A build named by many evaluations is one build: the heatmap reads each
-    /// shared build's latest attempt once and scopes it through an `EXISTS`, never a
-    /// join that repeats it per naming job.
     #[test]
     fn the_durations_heatmap_counts_each_build_once() {
         let sql = super::board_durations_heatmap_sql(24, Some("'p'"));

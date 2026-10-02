@@ -134,9 +134,6 @@ fn private_cache_serve_requires_auth() {
     });
 }
 
-/// A cached NAR holds whatever a build put there, so `serve` can be pointed at
-/// an `.html` and asked to render it on the origin that carries the session
-/// cookie. The sandbox CSP is what stops that page from acting as the viewer.
 #[test]
 fn serve_sandboxes_build_controlled_content() {
     let rt = tokio::runtime::Builder::new_current_thread()
@@ -171,8 +168,6 @@ fn serve_sandboxes_build_controlled_content() {
     });
 }
 
-/// The blob store is shared by every cache; a path another cache uploaded must
-/// not be readable through this one by its store hash.
 #[test]
 fn serve_refuses_a_nar_this_cache_does_not_serve() {
     let rt = tokio::runtime::Builder::new_current_thread()

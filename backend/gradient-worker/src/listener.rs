@@ -4,13 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! WebSocket listener for incoming server connections.
-//!
-//! When `discoverable = true`, the worker starts a TCP listener and accepts
-//! incoming WebSocket upgrades.  Each accepted connection is running the same
-//! handshake and dispatch loop as an outbound connection - the protocol is
-//! identical regardless of who initiated the transport.
-
 use anyhow::{Context, Result};
 use gradient_wire::session::frame::{BULK_CHUNK_SIZE, MAX_PROTO_MESSAGE_SIZE};
 use tokio::net::TcpListener;
@@ -23,14 +16,6 @@ use crate::config::WorkerConfig;
 use crate::shutdown::Shutdown;
 use crate::worker::Worker;
 
-/// Start listening for incoming server connections on the configured port.
-///
-/// Each accepted connection gets its own executor and dispatch loop, running
-/// concurrently with the worker's outbound connection (if any). `shutdown` is
-/// observed by both the accept loop and each per-connection dispatch loop so
-/// inbound sessions drain their in-flight jobs and eval pools on signal;
-/// `sessions` is how the run loop waits for that drain before the process
-/// exits out from under them.
 pub async fn start_listener(
     config: WorkerConfig,
     shutdown: Shutdown,
@@ -67,8 +52,8 @@ pub async fn start_listener(
     }
 }
 
-/// Accept one inbound connection with Nagle disabled, so the control frames
-/// the server is blocked on are not held back by the kernel.
+/// Nagle is disabled on each inbound connection.
+/// The kernel must not hold back control frames the server is blocked on.
 async fn accept_tuned(
     listener: &TcpListener,
 ) -> std::io::Result<(tokio::net::TcpStream, std::net::SocketAddr)> {
@@ -104,9 +89,6 @@ async fn handle_incoming(
 mod tests {
     use super::*;
 
-    /// Reverts if `accept_tuned` stops calling `disable_nagle`: an inbound
-    /// server connection carries the same latency-critical control frames as
-    /// an outbound one and must be tuned the same way.
     #[tokio::test]
     async fn accept_tuned_disables_nagle_on_the_inbound_stream() {
         let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");

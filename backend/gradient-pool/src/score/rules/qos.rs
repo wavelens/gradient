@@ -7,8 +7,6 @@
 use crate::score::context::InstanceContext;
 use crate::score::rule::{JobContext, ScoreRule, WorkerContext};
 
-/// Quality of service: a job a user prioritized, directly or through the
-/// evaluation or build that depends on it, goes ahead of everything else (#530).
 #[derive(Debug)]
 pub struct QosRule {
     pub prioritized: f64,

@@ -8,15 +8,8 @@ use gradient_entity::build::BuildStatus;
 use gradient_types::DerivationId;
 use sea_orm::{ConnectionTrait, DbErr};
 
-/// The dispatch gate reads the invariant: `Queued` means the gates held when the
-/// shared build was promoted, and a regression un-promotes. Reachability still filters
-/// shared builds left queued after their last referencing evaluation was torn down.
-///
-/// The open-`dispatched_job` arm is a dispatch gate, not a can-start state one, so it
-/// lives here and not in `can_start::promote`: a shared build that is already out is
-/// still perfectly promotable and must stay `Queued` for the report that closes
-/// it. The whole startable set is read only by the dispatcher's startup and periodic
-/// resync; between them it reads what moved, through [`find_startable_shared_builds_among`].
+/// The open-`dispatched_job` arm is a dispatch gate, not a can-start gate.
+/// A shared build already out must stay `Queued` for the report closing it.
 pub async fn find_startable_shared_builds<C: ConnectionTrait>(
     db: &C,
 ) -> Result<Vec<gradient_types::MDerivationBuild>, DbErr> {
@@ -27,8 +20,6 @@ pub async fn find_startable_shared_builds<C: ConnectionTrait>(
         .await
 }
 
-/// The same gate over the shared builds of `derivations` alone: the startable-set moves
-/// one pass admits, so its cost follows what moved, not what is queued.
 pub async fn find_startable_shared_builds_among<C: ConnectionTrait>(
     db: &C,
     derivations: &[DerivationId],
@@ -90,8 +81,6 @@ crate::sql_fn! {
 mod tests {
     use super::*;
 
-    /// Dispatch trusts the queue invariant: no can-start state term is re-evaluated
-    /// per row here, only the status and the reachability check.
     #[test]
     fn assign_reads_the_queued_invariant_only() {
         let sql = find_startable_shared_builds_sql()
@@ -111,9 +100,6 @@ mod tests {
         );
     }
 
-    /// The tracker's `untracked` filter is in memory and empty after a core
-    /// respawn; the row is what survives, so the dispatch select carries the
-    /// open-row gate itself.
     #[test]
     fn assign_refuses_a_shared_build_whose_assignment_row_is_open() {
         let norm = |s: String| s.split_whitespace().collect::<Vec<_>>().join(" ");
@@ -126,8 +112,6 @@ mod tests {
         assert!(norm(find_startable_shared_builds_sql()).contains(&gate));
     }
 
-    /// The delta is the resync's gate narrowed to what moved: a copy that
-    /// drifted would admit a shared build the resync then prunes, or the reverse.
     #[test]
     fn the_delta_is_the_startable_set_narrowed_to_what_moved() {
         let norm = |s: String| s.split_whitespace().collect::<Vec<_>>().join(" ");

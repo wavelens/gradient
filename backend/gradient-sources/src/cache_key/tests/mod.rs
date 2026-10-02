@@ -17,7 +17,6 @@ fn generate_decrypt_roundtrip() {
     let (encrypted_priv, pub_b64) = generate_signing_key(&path).expect("generate failed");
     let cache = make_cache("testcache", &pub_b64, &encrypted_priv);
     let decrypted = decrypt_signing_key(&path, cache).expect("decrypt failed");
-    // Decrypted should be base64-encoded 64-byte keypair
     let bytes = general_purpose::STANDARD
         .decode(decrypted.trim())
         .expect("base64 decode failed");
@@ -31,7 +30,6 @@ fn format_cache_public_key_stored() {
     let cache = make_cache("mycache", &pub_b64, &encrypted_priv);
     let result = format_cache_public_key(&path, cache, "https://cache.example.com".to_string())
         .expect("format failed");
-    // format: {base_url}-{name}:{pubkey}
     assert!(
         result.contains("mycache"),
         "result should contain cache name"
@@ -61,7 +59,6 @@ fn sign_narinfo_fingerprint_format() {
         &[],
     )
     .expect("sign failed");
-    // Format: {base_url}-{name}:{base64_sig}
     assert!(
         result.starts_with("cache.example.com-sigcache:"),
         "unexpected prefix: {result}"
@@ -70,9 +67,6 @@ fn sign_narinfo_fingerprint_format() {
 
 #[test]
 fn cache_signer_matches_one_shot_signer() {
-    // CacheSigner reuses the decrypted key across many signatures.
-    // Each output must byte-match the legacy one-shot fingerprint signer
-    // so the sign-sweep batching change is provably side-effect-free.
     let (_f, path) = temp_secret_file();
     let (encrypted_priv, pub_b64) = generate_signing_key(&path).expect("generate failed");
     let cache = make_cache("sigcache", &pub_b64, &encrypted_priv);
@@ -113,8 +107,6 @@ fn cache_signer_matches_one_shot_signer() {
 
 #[test]
 fn cache_signer_rejects_bad_key_at_build_time() {
-    // Construction surfaces decryption errors up front so the sweep can
-    // skip the cache for the rest of the pass instead of failing each row.
     let (_f, path) = temp_secret_file();
     let cache = make_cache("badcache", "", "!!!not-base64!!!");
     let res = CacheSigner::from_cache(&path, &cache, "https://cache.example.com");
@@ -126,7 +118,6 @@ fn sign_narinfo_sorts_references() {
     let (_f, path) = temp_secret_file();
     let (encrypted_priv, pub_b64) = generate_signing_key(&path).expect("generate failed");
     let cache = make_cache("sigcache", &pub_b64, &encrypted_priv);
-    // Sign once with sorted order, once with reversed order - signatures must match
     let refs_sorted = vec![
         "aaaa-a".to_string(),
         "bbbb-b".to_string(),
@@ -170,9 +161,6 @@ fn decrypt_corrupted_base64_fails() {
 
 #[test]
 fn format_cache_public_key_legacy_matches_stored() {
-    // Deriving the pubkey from the encrypted private key must yield exactly
-    // the same result as reading cache.public_key - guards against the
-    // "last 32 bytes" slice drifting.
     let (_f, path) = temp_secret_file();
     let (encrypted_priv, pub_b64) = generate_signing_key(&path).expect("generate failed");
     let stored = make_cache("c", &pub_b64, &encrypted_priv);
@@ -198,8 +186,6 @@ fn format_cache_public_key_strips_http_and_port() {
 
 #[test]
 fn sign_narinfo_prefixes_bare_refs() {
-    // Signing with bare store-path names should produce the same signature
-    // as signing with fully-qualified `/nix/store/...` refs.
     let (_f, path) = temp_secret_file();
     let (encrypted_priv, pub_b64) = generate_signing_key(&path).expect("generate failed");
     let cache = make_cache("c", &pub_b64, &encrypted_priv);
@@ -284,7 +270,6 @@ fn sign_narinfo_store_path_affects_signature() {
 
 #[test]
 fn sign_narinfo_short_key_fails() {
-    // A decoded key shorter than ed25519 secret size must return KeyPairConversion.
     let (_f, path) = temp_secret_file();
     let secret = gradient_types::input::load_secret_bytes(&path).unwrap();
     let short_b64 = general_purpose::STANDARD.encode(b"too short");
@@ -312,7 +297,6 @@ fn verify_narinfo_signature_accepts_valid() {
 #[test]
 fn verify_narinfo_signature_rejects_wrong_public_key() {
     let (body, _real_key) = signed_narinfo_fixture();
-    // Different keypair, same key name.
     let (_f, path) = temp_secret_file();
     let (_, other_pub_b64) = generate_signing_key(&path).expect("generate failed");
     let name = _real_key.rsplit_once(':').unwrap().0;
@@ -322,7 +306,6 @@ fn verify_narinfo_signature_rejects_wrong_public_key() {
 
 #[test]
 fn verify_narinfo_signature_rejects_name_mismatch() {
-    // Same key bytes but wrong name - no Sig line matches.
     let (body, real_key) = signed_narinfo_fixture();
     let pub_b64 = real_key.rsplit_once(':').unwrap().1;
     let wrong = format!("other-name:{pub_b64}");

@@ -35,10 +35,8 @@ pub enum ServeError {
     Aborted(String),
 }
 
-/// Why a transfer failed. Only [`Failure::NotFound`], storage's own answer that
-/// the object is absent, is [`ServerMessage::NarUnavailable`], which the worker
-/// turns into a demotion that deletes the cached path; every other failure is
-/// [`ServerMessage::NarAbort`], retried without touching the cache.
+/// Only `NotFound` is becoming `NarUnavailable`, and the worker is demoting the cached path on it.
+/// Every other failure is a `NarAbort`, retried without touching the cache.
 enum Failure {
     NotFound,
     StorageTimeout,
@@ -97,22 +95,6 @@ async fn fail_transfer(
     ServeError::Aborted(reason)
 }
 
-/// Stream a single requested NAR from `store` to the peer, resuming at
-/// `resume_from` when the peer's stream token still matches.
-///
-/// Hardening notes:
-/// - The initial storage open is wrapped in `storage_open_timeout`. A stalled
-///   backend (e.g. S3 hung TCP) used to silently consume the dispatch loop's
-///   600 s waiter ceiling; now it surfaces as a `NarAbort` within the open
-///   timeout.
-/// - The chunked send path uses [`ProtoWriter`], which bounds per-chunk send
-///   waits via the queue + `send_chunk_timeout` configured at split time.
-///   A stalled peer is detected as `SendError::Stalled` from `send_server_msg` and
-///   triggers a best-effort `NarAbort`.
-/// - The body is read from `object_store`'s streaming API - no full file is
-///   ever held in memory. Chunks are coalesced/split to `BULK_CHUNK_SIZE`.
-/// - Per-chunk read from the storage stream is also bounded so a backend that
-///   sends the first byte and then hangs cannot pin the task indefinitely.
 pub async fn serve_nar(
     store: &NarStore,
     writer: &ProtoWriter,
@@ -167,10 +149,8 @@ pub async fn serve_nar(
 
     let size = source.size();
 
-    // The stored `.nar.zst` is immutable per hash, so the pull token is just
-    // its size. A worker resuming with a stale token (or claiming more bytes
-    // than exist) restarts from 0; the `NarStreamHeader.total_bytes` lets the
-    // worker truncate its `.partial` accordingly.
+    // The stored `.nar.zst` is immutable per hash, and its size is serving as the pull token. A
+    // worker with a stale token is restarting from 0.
     let server_token = format!("len-{size}");
     let token_mismatch = client_token.is_some_and(|t| t != server_token);
     let mut start = resume_from;

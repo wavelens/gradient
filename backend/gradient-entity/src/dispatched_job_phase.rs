@@ -10,9 +10,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::ids::{DispatchedJobId, DispatchedJobPhaseId};
 
-/// One worker phase span. `seq` is the span's position in the worker's report
-/// and `parent_seq` points at the enclosing span, so the nesting survives
-/// without a recursive type.
 #[derive(Clone, Debug, Default, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
 #[sea_orm(table_name = "dispatched_job_phase")]
 pub struct Model {

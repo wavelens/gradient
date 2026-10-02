@@ -39,32 +39,13 @@ use gradient_types::{BaseResponse, CreatePermission};
 use serde::Serialize;
 use std::sync::Arc;
 
-/// Sandbox applied to every response whose bytes a build controls.
-///
-/// A build writes its own `nix-support/hydra-build-products`, and any path in a
-/// cache can hold an `.html`, so both the filename and the declared subtype are
-/// attacker-controlled: any build can ask to be served as `text/html`, inline,
-/// from the origin that also serves the API and holds the session cookie.
-/// Script in such a page cannot read the `HttpOnly` cookie - but it would not
-/// need to. A same-origin `fetch` carries the cookie automatically, `SameSite`
-/// does not apply to a request the origin makes of itself, and the reply is
-/// readable, so the page could act as the viewer (including minting an API key
-/// that outlives their session).
-///
-/// `sandbox` drops the response into a unique opaque origin, so its script
-/// reaches the API as nobody at all. `allow-scripts` keeps interactive reports
-/// (coverage, benchmarks) working, and `allow-top-navigation-by-user-activation`
-/// lets a multi-page report be clicked through - navigation was never what the
-/// attack needed, and requiring a real click still denies a silent redirect to
-/// somewhere else. `allow-same-origin` must never join them: that pair hands the
-/// origin back and undoes all of this.
-///
-/// A browser that does not know a token ignores it and keeps the rest, so an old
-/// one loses the click-through rather than the isolation.
+/// `sandbox` is dropping a build-controlled response into a unique opaque origin. Its script is
+/// reaching the API as nobody. A same-origin `fetch` would otherwise carry the session cookie and
+/// act as the viewer. `allow-same-origin` must never join `allow-scripts`, as that pair is handing
+/// the origin back.
 pub const UNTRUSTED_CONTENT_CSP: &str =
     "sandbox allow-scripts allow-top-navigation-by-user-activation";
 
-/// [`UNTRUSTED_CONTENT_CSP`] plus `nosniff`, for any build-controlled body.
 pub fn untrusted_content_headers() -> [(axum::http::HeaderName, &'static str); 2] {
     [
         (
@@ -75,9 +56,6 @@ pub fn untrusted_content_headers() -> [(axum::http::HeaderName, &'static str); 2
     ]
 }
 
-/// Full header set for one served build product. `subtype` comes from the
-/// build's own `hydra-build-products`, so `html` renders inline - safely, behind
-/// [`UNTRUSTED_CONTENT_CSP`] - and everything else downloads.
 pub fn build_product_headers(
     filename: &str,
     subtype: &str,
@@ -90,7 +68,6 @@ pub fn build_product_headers(
     hardened(content_type_for_filename(filename), disposition)
 }
 
-/// Header set for a product directory served as a `.tar.zst` archive.
 pub fn archive_headers(archive_name: &str) -> [(axum::http::HeaderName, String); 4] {
     hardened(
         "application/zstd",
@@ -183,9 +160,6 @@ pub async fn get_config(
 mod tests {
     use super::*;
 
-    /// The sandbox is the whole defence: it puts a build-authored page in an
-    /// opaque origin so its script cannot act as the viewer against our API.
-    /// `allow-same-origin` alongside `allow-scripts` would hand the origin back.
     #[test]
     fn untrusted_content_is_sandboxed_without_returning_its_origin() {
         assert!(UNTRUSTED_CONTENT_CSP.starts_with("sandbox"));
@@ -193,9 +167,6 @@ mod tests {
             !UNTRUSTED_CONTENT_CSP.contains("allow-same-origin"),
             "allow-same-origin defeats the sandbox: {UNTRUSTED_CONTENT_CSP}"
         );
-        // Interactive reports (coverage, benchmarks) must keep working, and a
-        // multi-page one must stay clickable - but only on a real activation,
-        // so the page still cannot redirect the viewer on its own.
         assert!(UNTRUSTED_CONTENT_CSP.contains("allow-scripts"));
         assert!(UNTRUSTED_CONTENT_CSP.contains("allow-top-navigation-by-user-activation"));
         assert!(
@@ -213,8 +184,6 @@ mod tests {
         assert!(names.contains(&axum::http::header::X_CONTENT_TYPE_OPTIONS));
     }
 
-    /// An HTML product still renders inline - that is the feature - but never
-    /// without the sandbox that makes rendering it safe.
     #[test]
     fn html_product_renders_inline_but_always_sandboxed() {
         let headers = build_product_headers("report.html", "html");

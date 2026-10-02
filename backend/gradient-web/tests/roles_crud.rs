@@ -4,17 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Integration tests for the project-scoped role-management API
-//! (`/api/v1/projects/{project}/roles`). Covers built-in role discovery, custom role
-//! creation, immutability of built-ins, name uniqueness, and the
-//! reassign-before-delete invariant.
-//!
-//! `MockDatabase` replays canned query results in FIFO order, so each test
-//! script is "auth (3 selects) -> load_project -> load_membership -> load_role ->
-//! …handler-specific…". Where the handler executes `INSERT … RETURNING …` we feed
-//! the inserted row in via `append_query_results` *and* match up an
-//! `append_exec_results` with `rows_affected: 1`, otherwise SeaORM treats the
-//! insert as a no-op and short-circuits.
+//! An `INSERT ... RETURNING` must get the row via `append_query_results` and an
+//! `append_exec_results` with `rows_affected: 1`. SeaORM is otherwise treating the insert as a
+//! no-op.
 
 #![expect(
     clippy::unwrap_used,
@@ -30,8 +22,6 @@ use gradient_types::consts::{BASE_ROLE_ADMIN_ID, BASE_ROLE_VIEW_ID, BASE_ROLE_WR
 use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
 use serde_json::{Value, json};
 use uuid::Uuid;
-
-// ── Fixture helpers ──────────────────────────────────────────────────────────
 
 fn admin_membership() -> project_user::Model {
     project_user::Model {
@@ -103,8 +93,6 @@ fn run<F: std::future::Future>(fut: F) -> F::Output {
         .block_on(fut)
 }
 
-// ── GET /projects/{project}/roles ────────────────────────────────────────────────────
-
 #[test]
 fn list_roles_returns_builtins_plus_custom() {
     run(async {
@@ -112,8 +100,6 @@ fn list_roles_returns_builtins_plus_custom() {
         let token = make_token(session_id);
         let custom_id = RoleId::now_v7();
 
-        // GET requires `Member` access, which is membership-existence only -
-        // no role-row lookup is performed.
         let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
             .append_query_results([vec![project()]])
             .append_query_results([vec![view_membership()]])
@@ -157,8 +143,6 @@ fn list_roles_returns_builtins_plus_custom() {
     });
 }
 
-// ── POST /projects/{project}/roles ───────────────────────────────────────────────────
-
 #[test]
 fn create_role_persists_permission_bitmask() {
     run(async {
@@ -171,14 +155,10 @@ fn create_role_persists_permission_bitmask() {
         );
 
         let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
-            // load_project -> Require(ManageRoles)
             .append_query_results([vec![project()]])
-            // load_membership_with_permissions: membership + role
             .append_query_results([vec![admin_membership()]])
             .append_query_results([vec![admin_role_row()]])
-            // name uniqueness pre-check returns no row
             .append_query_results::<role::Model, _, _>([Vec::<role::Model>::new()])
-            // INSERT ... RETURNING the new row
             .append_query_results([vec![inserted.clone()]])
             .append_exec_results([MockExecResult {
                 last_insert_id: 0,
@@ -270,7 +250,6 @@ fn create_role_rejects_duplicate_name() {
             .append_query_results([vec![project()]])
             .append_query_results([vec![admin_membership()]])
             .append_query_results([vec![admin_role_row()]])
-            // name uniqueness pre-check finds an existing custom role.
             .append_query_results([vec![existing]]);
 
         let server = make_test_server(db.into_connection());
@@ -287,8 +266,6 @@ fn create_role_rejects_duplicate_name() {
     });
 }
 
-// ── PATCH /projects/{project}/roles/{id} ─────────────────────────────────────────────
-
 #[test]
 fn patch_builtin_role_is_forbidden() {
     run(async {
@@ -299,7 +276,6 @@ fn patch_builtin_role_is_forbidden() {
             .append_query_results([vec![project()]])
             .append_query_results([vec![admin_membership()]])
             .append_query_results([vec![admin_role_row()]])
-            // load_project_role returns the built-in
             .append_query_results([vec![admin_role_row()]]);
 
         let server = make_test_server(db.into_connection());
@@ -358,8 +334,6 @@ fn patch_custom_role_updates_mask() {
         assert!(perms.iter().any(|p| p == "triggerEvaluation"));
     });
 }
-
-// ── DELETE /projects/{project}/roles/{id} ────────────────────────────────────────────
 
 #[test]
 fn delete_builtin_role_is_forbidden() {

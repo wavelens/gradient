@@ -4,9 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! User-requested prioritization (#530): the graph writer flags the rows, then
-//! the jobs already tracked are lifted in place.
-
 use gradient_graph::Transition;
 use gradient_types::*;
 

@@ -10,9 +10,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::ids::{BuildRequestBlobId, ProjectId};
 
-/// Content-addressed source-file blob uploaded as part of a build request.
-/// The 32-byte BLAKE3 `hash` identifies the payload on the configured
-/// storage backend; the row is the GC truth source via `last_used_at`.
 #[derive(Clone, Debug, Default, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
 #[sea_orm(table_name = "build_request_blob")]
 pub struct Model {

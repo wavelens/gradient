@@ -4,55 +4,30 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! View type for [`CachedPath`] that makes the cached/uncached distinction
-//! explicit at the type level.
-//!
-//! The wire type [`CachedPath`] carries a `cached: bool` flag and a number of
-//! fields that are only meaningful depending on that flag and the query mode.
-//! [`CachedPathInfo`] is a zero-copy, lifetime-bound projection that lifts
-//! the flag into an enum, making the two cases structurally distinct and
-//! preventing callers from accidentally reading metadata fields on uncached
-//! paths.
-
 use crate::types::CachedPath;
 
-/// A zero-copy view of a [`CachedPath`] with the cached/uncached state
-/// encoded in the enum variant.
-///
-/// Obtain via [`CachedPath::as_info`].
 #[derive(Debug, Clone, PartialEq)]
 pub enum CachedPathInfo<'a> {
-    /// The path is **not** present in the Gradient cache.
-    Uncached { path: &'a str },
+    Uncached {
+        path: &'a str,
+    },
 
-    /// The path **is** present in the Gradient cache.
-    ///
-    /// In [`QueryMode::Pull`] contexts the metadata fields (`nar_hash`,
-    /// `references`, `signatures`, `deriver`, `ca`) are populated so the
-    /// caller can construct a `ValidPathInfo` and import the NAR into the
-    /// local nix-daemon. In other query modes they may be `None`.
+    /// The metadata fields are populated in [`QueryMode::Pull`] only. Other query modes can leave
+    /// them `None`.
     Cached {
         path: &'a str,
-        /// Presigned GET URL (S3 pull) or `None` for WebSocket `NarRequest`/`NarPush`.
         download_url: Option<&'a str>,
         file_size: Option<u64>,
         nar_size: Option<u64>,
-        /// NAR hash in `sha256:<nix32>` format. Populated for Pull mode.
         nar_hash: Option<&'a str>,
-        /// Store-path references. Populated for Pull mode.
         references: Option<&'a Vec<String>>,
-        /// narinfo-format signatures. Populated for Pull mode.
         signatures: Option<&'a Vec<String>>,
-        /// Deriver `.drv` path. Populated for Pull mode when known.
         deriver: Option<&'a str>,
-        /// Content-address field. Populated for Pull mode when the path is CA.
         ca: Option<&'a str>,
     },
 }
 
 impl CachedPath {
-    /// Return a zero-copy view of this [`CachedPath`] with the cached/uncached
-    /// state encoded in the [`CachedPathInfo`] enum variant.
     pub fn as_info(&self) -> CachedPathInfo<'_> {
         if self.cached {
             CachedPathInfo::Cached {
@@ -71,8 +46,6 @@ impl CachedPath {
         }
     }
 }
-
-// ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {

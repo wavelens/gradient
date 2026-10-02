@@ -19,8 +19,7 @@ use std::sync::Arc;
 
 use super::BuildAccessContext;
 
-/// Cap on the number of nodes returned in the closure node/edge lists.
-/// `total_size_bytes` is always computed over the full closure and stays exact.
+/// `total_size_bytes` is always computed over the full closure and is exact.
 const CLOSURE_NODE_CAP: usize = 1000;
 
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
@@ -48,8 +47,6 @@ pub struct ClosureGraph {
     pub edges: Vec<ClosureEdge>,
 }
 
-/// BFS over `derivation_dependency` from `seed_drv_ids`; returns every reachable
-/// derivation id (seeds included). Thin wrapper over the shared core helper.
 pub async fn derivation_closure_reachable<C>(
     db: &C,
     seed_drv_ids: Vec<DerivationId>,
@@ -61,7 +58,6 @@ where
     Ok(gradient_db::graph::closure::transitive_closure_reachable(db, &seed_drv_ids).await?)
 }
 
-/// Sum coalesced output sizes across `drv_ids`. `Some(total)` when > 0 else `None`.
 pub async fn sum_output_sizes<C: sea_orm::ConnectionTrait>(
     db: &C,
     drv_ids: Vec<DerivationId>,
@@ -71,8 +67,6 @@ pub async fn sum_output_sizes<C: sea_orm::ConnectionTrait>(
     Ok(if total > 0 { Some(total) } else { None })
 }
 
-/// Build a closure graph seeded at `roots`: full reachable derivation set, exact
-/// total size, per-node sizes, and dependency edges restricted to the closure.
 pub async fn build_closure_graph<C>(db: &C, roots: Vec<DerivationId>) -> WebResult<ClosureGraph>
 where
     C: sea_orm::ConnectionTrait
@@ -99,7 +93,6 @@ where
             path: d.drv_path(),
         })
         .collect();
-    // Largest first so a downstream cap keeps the biggest contributors.
     nodes.sort_by_key(|n| std::cmp::Reverse(n.nar_size.unwrap_or(0)));
 
     let truncated = nodes.len() > CLOSURE_NODE_CAP;
@@ -132,7 +125,6 @@ where
     })
 }
 
-/// GET /builds/{build}/closure - full closure (with sizes) of one build's derivation.
 pub async fn get_build_closure(
     state: State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
@@ -144,7 +136,6 @@ pub async fn get_build_closure(
     Ok(ok_json(graph))
 }
 
-/// GET /evals/{evaluation}/closure - union closure of all entry-point builds.
 pub async fn get_eval_closure(
     state: State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
@@ -166,9 +157,6 @@ pub async fn get_eval_closure(
     Ok(ok_json(graph))
 }
 
-/// Build a runtime closure graph seeded at the output store-path hashes
-/// `seed_hashes`: the transitive `cached_path.references` set with per-node and
-/// exact total NAR sizes. Reachability is only as complete as the cached outputs.
 pub async fn build_runtime_closure_graph<C>(
     db: &C,
     seed_hashes: Vec<String>,
@@ -229,7 +217,6 @@ where
     })
 }
 
-/// GET /builds/{build}/runtime-closure - runtime reference closure of a build.
 pub async fn get_build_runtime_closure(
     state: State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
@@ -246,7 +233,6 @@ pub async fn get_build_runtime_closure(
     Ok(ok_json(graph))
 }
 
-/// GET /evals/{evaluation}/runtime-closure - union runtime closure of entry points.
 pub async fn get_eval_runtime_closure(
     state: State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
@@ -316,30 +302,22 @@ mod tests {
         }
     }
 
-    // The closure walk projects one `derivation` column; the mock only has to
-    // carry that, so the edge model stands in with both ends set to the node.
     fn node(derivation: DerivationId) -> derivation_dependency::Model {
         dep(derivation, derivation)
     }
 
-    // root depends on child; sizes 100 + 40 => total 140, two nodes, one edge.
     #[tokio::test]
     async fn build_closure_graph_sums_and_links() {
         let root = DerivationId::now_v7();
         let child = DerivationId::now_v7();
         let db = MockDatabase::new(DatabaseBackend::Postgres)
-            // the walk opens with `SET LOCAL work_mem`, which draws an exec result
             .append_exec_results([sea_orm::MockExecResult {
                 last_insert_id: 0,
                 rows_affected: 0,
             }])
-            // derivation_closure_reachable is one statement after that
             .append_query_results([vec![node(root), node(child)]])
-            // output_sizes_by_drv: outputs for [root, child] (drives both total and per-node)
             .append_query_results([vec![out(root, "r", Some(100)), out(child, "c", Some(40))]])
-            // EDerivation::find for nodes
             .append_query_results([vec![drv(root, "root"), drv(child, "child")]])
-            // dep_rows for edges
             .append_query_results([vec![dep(root, child)]])
             .into_connection();
 
@@ -348,7 +326,6 @@ mod tests {
         assert_eq!(g.node_count, 2);
         assert_eq!(g.edge_count, 1);
         assert!(!g.truncated);
-        // Largest first.
         assert_eq!(g.nodes[0].id, root.to_string());
         assert_eq!(g.nodes[0].nar_size, Some(100));
         assert_eq!(
@@ -359,7 +336,4 @@ mod tests {
             }
         );
     }
-
-    // The runtime closure graph walks the graph's runtime dependencies in one recursive
-    // statement; it is covered end to end by the cache integration test.
 }

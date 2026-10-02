@@ -4,9 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Dispatch records: open assignments, build attempts, clusters, priority and the
-//! startable set the dispatcher reads.
-
 pub mod assignment_record;
 pub mod build_attempt;
 pub mod build_watchdog;

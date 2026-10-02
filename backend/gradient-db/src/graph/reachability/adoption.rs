@@ -14,14 +14,12 @@ use gradient_types::*;
 use sea_orm::{ConnectionTrait, DatabaseTransaction, DbErr, TransactionTrait, Value};
 use std::sync::LazyLock;
 
-/// The `build_job` rows an adoption pass inserted, as `(evaluation, derivation)`.
 #[derive(Debug, Default, PartialEq)]
 pub struct Adopted {
     pub pairs: Vec<(EvaluationId, DerivationId)>,
 }
 
 impl Adopted {
-    /// The evaluations that took a name on, deduplicated: their build list moved.
     pub fn evaluations(&self) -> Vec<EvaluationId> {
         let mut out: Vec<EvaluationId> = self.pairs.iter().map(|(e, _)| *e).collect();
         out.sort_unstable();
@@ -30,7 +28,6 @@ impl Adopted {
         out
     }
 
-    /// The shared builds that gained a name, deduplicated: what a promote re-checks.
     pub fn derivations(&self) -> Vec<DerivationId> {
         let mut out: Vec<DerivationId> = self.pairs.iter().map(|(_, d)| *d).collect();
         out.sort_unstable();
@@ -40,8 +37,6 @@ impl Adopted {
     }
 }
 
-/// The walk's seeds: one row per `build_job` on an open shared build, carrying the
-/// builder bit of the row it stands on.
 fn named_open(scope: &str) -> String {
     format!(
         "SELECT bj.evaluation, bj.derivation, ({builder}) FROM build_job bj \
@@ -66,7 +61,6 @@ fn adopt_sql(seed_select: &str) -> String {
     )
 }
 
-/// Every live evaluation names what it reaches: the GC and the sweep run this.
 static ADOPT_LIVE: LazyLock<String> = LazyLock::new(|| {
     adopt_sql(&named_open(&format!(
         "EXISTS (SELECT 1 FROM evaluation ev WHERE ev.id = bj.evaluation AND ev.status IN ({live}))",
@@ -74,8 +68,6 @@ static ADOPT_LIVE: LazyLock<String> = LazyLock::new(|| {
     )))
 });
 
-/// One evaluation names what it reaches: the graph repair pass executes this for the
-/// evaluation it heals, whatever its status.
 static ADOPT_EVAL: LazyLock<String> =
     LazyLock::new(|| adopt_sql(&named_open("bj.evaluation = $1")));
 
@@ -109,10 +101,6 @@ crate::sql_lazy! {
         params = [DerivationIds(64)];
 }
 
-/// The frontier every naming hole has: an open shared build nobody names, one edge the
-/// walk would take below an open shared build a live evaluation names. Asked on every
-/// sweep, and the walk starts only when the answer is yes; a settled server has no
-/// frontier, so the answer costs a pass over the shared builds that are still open.
 static PENDING_ORPHAN_FRONTIER: LazyLock<String> = LazyLock::new(|| {
     pending_orphans_sql(&format!(
         "EXISTS (SELECT 1 FROM derivation_dependency e \
@@ -134,9 +122,6 @@ crate::sql_lazy! {
         tier = Sweep;
 }
 
-/// Whether any of `derivations` is open with no `build_job` left: what the
-/// per-task GC asks about the names it just cascaded away, before it pays for
-/// the walk.
 pub async fn pending_orphans_among<C: ConnectionTrait>(
     db: &C,
     derivations: &[DerivationId],
@@ -152,8 +137,6 @@ pub async fn pending_orphans_among<C: ConnectionTrait>(
         .is_some())
 }
 
-/// Whether some live evaluation reaches an open shared build nobody names: the
-/// consistency check's guard on the walk.
 pub async fn pending_orphan_frontier<C: ConnectionTrait>(db: &C) -> Result<bool, DbErr> {
     Ok(db
         .query_one_raw(PENDING_ORPHAN_FRONTIER_QUERY.stmt())
@@ -161,10 +144,7 @@ pub async fn pending_orphan_frontier<C: ConnectionTrait>(db: &C) -> Result<bool,
         .is_some())
 }
 
-/// Name, for every live evaluation, each open shared build it reaches from the open
-/// shared builds it already names, and return the rows that were missing. One statement
-/// under the walk's own transaction; a concurrent record naming the same pair is
-/// absorbed by the conflict clause.
+/// The conflict clause is absorbing a concurrent record naming the same pair.
 pub async fn adopt_pending_closures<C>(db: &C) -> Result<Adopted, DbErr>
 where
     C: ConnectionTrait + TransactionTrait<Transaction = DatabaseTransaction>,
@@ -172,7 +152,6 @@ where
     adopt(db, &ADOPT_LIVE_QUERY, []).await
 }
 
-/// [`adopt_pending_closures`] for one evaluation, from its own names.
 pub async fn adopt_pending_closure<C>(db: &C, evaluation: EvaluationId) -> Result<Adopted, DbErr>
 where
     C: ConnectionTrait + TransactionTrait<Transaction = DatabaseTransaction>,
@@ -233,11 +212,6 @@ mod tests {
         ])
     }
 
-    /// Adoption is one statement under the walk's own transaction: the open
-    /// closure below every open shared build a live evaluation names, inserted as the
-    /// names it lacks and returned as such. The seed is what a live evaluation
-    /// NAMES and is still open, so a pruned root and an incomplete `Completed` input
-    /// seed the walk like a builder does.
     #[tokio::test]
     async fn adoption_names_every_open_shared_build_a_live_evaluation_reaches() {
         let e = EvaluationId::now_v7();
@@ -286,8 +260,6 @@ mod tests {
         );
     }
 
-    /// The repair pass's variant is the same walk seeded from one evaluation's
-    /// names and without the liveness filter: it executes for the evaluation it heals.
     #[tokio::test]
     async fn one_evaluation_adopts_from_its_own_names() {
         let e = EvaluationId::now_v7();
@@ -316,11 +288,6 @@ mod tests {
         assert!(!sql.contains("FROM evaluation ev"), "{sql}");
     }
 
-    /// The GC's question is bounded to the names it cascaded away and reads one
-    /// row at most; the sweep's is the frontier every naming hole has: an open
-    /// shared build nobody names, one edge the walk would take below an open shared build a
-    /// live evaluation names. The 22 incomplete `Completed` shared builds of the wedge were
-    /// exactly that and matched neither probe while both asked for a status.
     #[tokio::test]
     async fn the_orphan_probes_read_one_row_and_bind_their_scope() {
         let d = DerivationId::now_v7();

@@ -4,19 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Phantom-type states for connected workers.
-//!
-//! A [`TypedWorker<S>`] carries its lifecycle state in the type parameter `S`,
-//! which is either [`Active`] or [`Draining`].  Methods that are invalid for
-//! draining workers (notably capacity checks) are only available on
-//! `TypedWorker<Active>`, so calling them on a draining worker is a
-//! compile-time error rather than a runtime bug.
-//!
-//! Shared mutable data (architectures, assigned jobs, peer auth, …) lives in
-//! [`WorkerShared`].  [`TypedWorker<S>`] implements `Deref<Target = WorkerShared>`
-//! and `DerefMut`, so callers can access shared fields without an extra `.shared`
-//! indirection.
-
 use std::collections::HashSet;
 use std::marker::PhantomData;
 use std::sync::Arc;
@@ -29,35 +16,23 @@ use gradient_wire::types::GradientCapabilities;
 use crate::peer_auth::PeerAuth;
 use crate::session_port::SessionPort;
 
-// ── Sealing trait ─────────────────────────────────────────────────────────────
-
 mod private {
     pub trait Sealed {}
     impl Sealed for super::Active {}
     impl Sealed for super::Draining {}
 }
 
-/// Marker trait implemented by [`Active`] and [`Draining`].
-///
-/// Sealed - cannot be implemented outside this module.
 pub trait WorkerMarker: private::Sealed + std::fmt::Debug + 'static {}
 
-// ── State types ───────────────────────────────────────────────────────────────
-
-/// The worker is active and eligible to receive new job offers.
 #[derive(Debug)]
 pub struct Active;
 
-/// The worker is draining - it finishes in-flight jobs but accepts no new ones.
 #[derive(Debug)]
 pub struct Draining;
 
 impl WorkerMarker for Active {}
 impl WorkerMarker for Draining {}
 
-// ── Shared worker data ────────────────────────────────────────────────────────
-
-/// What a worker advertises about itself in `WorkerCapabilities`.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct WorkerProfile {
     pub architectures: Vec<String>,
@@ -70,38 +45,26 @@ pub struct WorkerProfile {
     pub endpoint: Option<String>,
 }
 
-/// All fields that are relevant regardless of the worker's lifecycle state.
-///
-/// Accessed via [`TypedWorker<S>`]'s `Deref` / `DerefMut` impls.
 pub struct WorkerShared {
     pub capabilities: GradientCapabilities,
     pub architectures: Vec<String>,
     pub system_features: Vec<String>,
     pub max_concurrent_builds: u32,
-    /// Static hardware capabilities reported alongside build capabilities.
     pub cpu_count: u32,
     pub ram_total_mb: u64,
     pub cpu_core_score: u32,
     pub zone: Option<String>,
     pub endpoint: Option<String>,
-    /// Latest live-metrics heartbeat; `None` until the first report so scoring
-    /// can tell "no sample yet" apart from a measured zero.
     pub cpu_usage_pct: Option<f32>,
     pub ram_free_mb: Option<u64>,
     pub disk_speed_mbps: Option<f32>,
     pub network_speed_mbps: Option<f32>,
     pub assigned_jobs: HashSet<String>,
-    /// Whether this worker operates in open (no peer filter) or restricted mode.
     pub peer_auth: PeerAuth,
-    /// Job IDs already sent to this worker as candidates (for delta `JobOffer`).
     pub sent_candidates: HashSet<String>,
-    /// The session this worker is connected through; the scheduler's only way
-    /// to push to it.
     pub session: Arc<dyn SessionPort>,
-    /// Wall-clock epoch-millis of the last message received from this worker.
-    /// Bumped lock-free by the session loop on every inbound frame and read by
-    /// the liveness watchdog to detect a worker that died without a clean TCP
-    /// close. Shared so the session loop holds a handle without the pool lock.
+    /// The session loop is bumping this lock-free on every inbound frame. The liveness watchdog is
+    /// reading it to detect a worker that died without a clean TCP close.
     pub last_seen: Arc<AtomicI64>,
 }
 
@@ -142,12 +105,6 @@ impl std::fmt::Debug for WorkerShared {
     }
 }
 
-// ── TypedWorker<S> ────────────────────────────────────────────────────────────
-
-/// A connected worker whose lifecycle state is encoded in `S`.
-///
-/// Use [`TypedWorker::new_active`] to create an active worker; call
-/// [`TypedWorker::<Active>::into_draining`] to transition it.
 #[derive(Debug)]
 pub struct TypedWorker<S: WorkerMarker> {
     pub(crate) shared: WorkerShared,
@@ -168,7 +125,6 @@ impl<S: WorkerMarker> std::ops::DerefMut for TypedWorker<S> {
 }
 
 impl TypedWorker<Active> {
-    /// Construct a new active worker.
     pub fn new(
         capabilities: GradientCapabilities,
         authorized_peers: HashSet<ProjectId>,
@@ -201,18 +157,10 @@ impl TypedWorker<Active> {
         }
     }
 
-    /// Returns `true` when this worker can accept another build job.
-    ///
-    /// Only defined on `Active` - calling this on a draining worker is a
-    /// compile-time error (draining workers never have build capacity).
     pub fn has_build_capacity(&self) -> bool {
         (self.assigned_jobs.len() as u32) < self.max_concurrent_builds
     }
 
-    /// Consume this active worker and produce a draining one.
-    ///
-    /// The draining worker retains all in-flight assigned jobs but will not
-    /// be offered new ones.
     pub fn into_draining(self) -> TypedWorker<Draining> {
         TypedWorker {
             shared: self.shared,

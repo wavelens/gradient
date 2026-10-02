@@ -88,7 +88,6 @@ fn validate_input_name(name: &str) -> WebResult<()> {
             "input_name may contain letters, digits, _ - and glob chars * ? [ ]",
         ));
     }
-    // A literal (non-glob) name must still be a valid flake input identifier.
     if !gradient_util::glob::is_pattern(name)
         && let Some(first) = name.chars().next()
         && !first.is_ascii_alphabetic()

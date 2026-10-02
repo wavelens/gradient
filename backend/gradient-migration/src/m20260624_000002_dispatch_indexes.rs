@@ -4,12 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Indexes for the scheduler hot paths that previously seq-scanned the global
-//! `derivation_build` (one row per derivation): the dispatcher's `status = Queued
-//! AND edges_complete` gate and promotion's `status = Created AND edges_complete`
-//! gate, plus `derivation_dependency (dependency)` for the dependent-direction
-//! lookups in `promote_dependents` and `cascade_dependency_failed` (the existing
-//! `(derivation, dependency)` pair cannot serve a `dependency`-only filter).
+//! The `(derivation, dependency)` pair index cannot serve a `dependency`-only filter. The
+//! dependent-direction lookups need their own index.
 
 use sea_orm_migration::prelude::*;
 use sea_orm_migration::sea_orm::ConnectionTrait;

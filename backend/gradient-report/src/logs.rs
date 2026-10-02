@@ -4,11 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Build logs for the attempts that failed.
-//!
-//! Stored as plain text rather than a compressed blob: the point of shipping a
-//! real SQLite file is that any client can read it, and a decompression step
-//! would put the most useful column behind tooling.
+//! Logs are stored as plain text rather than a compressed blob. Any SQLite client can then read the
+//! most useful column without extra tooling.
 
 use anyhow::{Context as _, Result};
 use gradient_entity::ids::BuildAttemptId;
@@ -21,10 +18,8 @@ use crate::redact::Redactor;
 use crate::schema::ManifestRow;
 
 gradient_db::sql! {
-    /// Attempts that did not succeed: `AttemptOutcome::Failed` is 3 and `Aborted`
-    /// is 4. An abort is included because its partial log is often the only record
-    /// of what a worker was doing before it went quiet. Running, Built and
-    /// Substituted are the cases deliberately skipped.
+    /// `AttemptOutcome::Failed` is 3 and `Aborted` is 4. An abort's partial log is often the only
+    /// record of what a worker was doing before it went quiet.
     FAILED_ATTEMPT_SQL = "SELECT a.id::text FROM build_attempt a \
      WHERE a.derivation_build IN (SELECT derivation_build FROM build_job WHERE evaluation = $1) \
        AND a.outcome IN (3, 4)",
@@ -47,8 +42,6 @@ pub fn create_log_table(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
-/// A log is free text carrying whatever the builder printed, so redaction is running
-/// here rather than at the call site: no caller can write one unredacted.
 pub fn insert_log(conn: &Connection, redactor: &Redactor, attempt: &str, log: &str) -> Result<()> {
     conn.execute(
         "INSERT OR REPLACE INTO build_log VALUES (?1, ?2)",
@@ -58,9 +51,6 @@ pub fn insert_log(conn: &Connection, redactor: &Redactor, attempt: &str, log: &s
     Ok(())
 }
 
-/// The logs a report will carry, plus how many attempts existed in total so the
-/// manifest can show the failed-only filter. Async half; the write is separate
-/// because a rusqlite connection cannot cross an await.
 pub struct FetchedLogs {
     pub entries: Vec<(String, String)>,
     pub attempts_available: i64,
@@ -151,8 +141,6 @@ mod tests {
         .expect("log")
     }
 
-    /// Logs are plain text so any SQLite client can read one, which is the
-    /// whole reason the report is a real database rather than an archive.
     #[test]
     fn log_table_stores_readable_text() {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -169,8 +157,6 @@ mod tests {
         assert_eq!(stored_log(&conn), "error: builder failed with exit code 1");
     }
 
-    /// Redaction lives inside the insert, so a caller that forgets cannot write
-    /// an unredacted log. The hash half survives, as it does in every column.
     #[test]
     fn a_log_is_redacted_on_the_way_in() {
         let dir = tempfile::tempdir().expect("tempdir");

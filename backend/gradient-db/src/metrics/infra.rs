@@ -4,9 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Flush of the process-wide infrastructure telemetry into `metric_rollup`
-//! minute rows. Additive, so several instances writing one minute stay exact;
-//! the rollup cascade builds the coarser granularities.
+//! The flush is additive, keeping several instances writing one minute exact.
 
 use std::time::Duration;
 

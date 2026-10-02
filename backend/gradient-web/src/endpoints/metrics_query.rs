@@ -4,13 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Discoverable, access-controlled query surface over `metric_rollup`.
-//!
-//! `GET /metrics/catalog` lists the available metrics; `GET /metrics/query`
-//! returns time-series points masked to the caller's scope: superusers see all
-//! projects, members see their projects plus public projects, anonymous callers see public
-//! projects only.
-
 use crate::authorization::MaybeUser;
 use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
@@ -33,8 +26,6 @@ pub struct MetricMeta {
     pub dimensions: &'static [&'static str],
 }
 
-/// The advertised metric surface. Keys present here are accepted by `query`;
-/// keys whose aggregator has not landed yet simply return no points.
 const CATALOG: &[MetricMeta] = &[
     MetricMeta {
         key: "builds.created",
@@ -129,7 +120,7 @@ fn metrics_query_sql(project_filter: Option<&str>, has_from: bool, has_to: bool)
     );
 
     if let Some(list) = project_filter {
-        // DB-sourced UUID strings, safe to inline as a quoted IN list.
+        // DB-sourced UUID strings are safe to inline as a quoted IN list.
         sql.push_str(&format!(" AND (scope->>'project') IN ({list})"));
     }
 
@@ -148,7 +139,6 @@ fn metrics_query_sql(project_filter: Option<&str>, has_from: bool, has_to: bool)
     sql
 }
 
-// Representative instantiation for the plan gate: project filter plus both bounds.
 gradient_db::sql_fn! {
     METRICS_QUERY = || metrics_query_sql(
         Some("'11111111-1111-1111-1111-111111111111'"),
@@ -170,7 +160,6 @@ pub async fn get_metrics_query(
     let gran = RollupGranularity::from_query_param(params.granularity.as_deref());
     let scope = MetricsScope::resolve(&state.web_db, &maybe_user).await?;
 
-    // project filter: an explicit project must be inside the caller's scope.
     let project_filter: Option<Vec<String>> = match (&scope, params.project) {
         (MetricsScope::All, Some(o)) => Some(vec![o.to_string()]),
         (MetricsScope::All, None) => None,

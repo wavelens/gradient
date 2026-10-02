@@ -4,11 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Index `commit.hash` so `GET /tasks/{project}/{task}/evaluations?commit=` can
-//! resolve a hash without a sequential scan. The table carried only its primary
-//! key, and a fresh row is written per evaluation, so it grows with evaluation
-//! history and one hash maps to many ids.
-
 use sea_orm_migration::prelude::*;
 
 #[derive(DeriveMigrationName)]

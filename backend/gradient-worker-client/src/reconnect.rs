@@ -4,48 +4,25 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Reconnect-with-backoff helper.
-//!
-//! Drives `Worker::reconnect` until it succeeds, doubling the delay between
-//! attempts up to `max_backoff`. Lives in its own module so the loop can be
-//! unit-tested without standing up a real `Worker`.
-
 use std::future::Future;
 use std::time::Duration;
 
 use tracing::error;
 
-/// Why the dispatch loop (`Worker::run`) exited. Every variant reconnects; the
-/// worker process only ends on a local shutdown signal.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RunOutcome {
-    /// Server closed the connection cleanly - reconnecting is appropriate.
     CleanDisconnect,
-    /// Server sent `Draining` - it is going away for a deploy or maintenance.
-    /// In-flight work is finished, then the worker reconnects until it returns.
     Drained,
-    /// Server refused the session (post-handshake `Reject`), so nothing was
-    /// served. Reconnecting is appropriate but must back off.
     Refused,
 }
 
-/// How the previous session ended, as far as reconnect pacing cares.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SessionEnd {
-    /// The connection was established and served (jobs, heartbeats, a clean
-    /// close, or an error mid-work).
     Served,
-    /// The server refused the session outright - e.g. `Reject` 496 while a
-    /// zombie session still owns this worker's slot. Nothing was served.
     Refused,
-    /// The server sent `Draining`: it is going away for a deploy or
-    /// maintenance and will serve nothing more on this session.
     Drained,
 }
 
-/// Every way a session can end is a reconnect. Only a local shutdown signal
-/// stops the worker, so this mapping is total by construction - a server-side
-/// ending can never become a process exit.
 impl From<RunOutcome> for SessionEnd {
     fn from(outcome: RunOutcome) -> Self {
         match outcome {
@@ -56,14 +33,8 @@ impl From<RunOutcome> for SessionEnd {
     }
 }
 
-/// Delay before the next reconnect attempt.
-///
-/// Reconnecting is only "successful" in the transport sense: the worker can
-/// complete a handshake and still be refused at registration, or be drained
-/// again by a server that is still shutting down. Treating either as a healthy
-/// connection resets the backoff to its floor, so the worker hammers the server
-/// about once a second until the stale session is reaped or the deploy lands.
-/// A session that served nothing therefore escalates instead.
+/// A handshake can succeed and still be refused or drained again. Resetting the backoff then would
+/// hammer the server about once a second, and a session that served nothing is escalating instead.
 pub fn backoff_after_session(
     previous: Duration,
     end: SessionEnd,
@@ -76,8 +47,6 @@ pub fn backoff_after_session(
     }
 }
 
-/// Retry `attempt` indefinitely with exponential backoff. `sleep` is
-/// parameterised so tests can substitute a no-op timer.
 pub async fn retry_reconnect<T, E, Sleep, SleepFut>(
     mut attempt: impl AsyncFnMut() -> Result<T, E>,
     mut sleep: Sleep,
@@ -111,10 +80,6 @@ mod tests {
     use super::*;
     use std::cell::RefCell;
 
-    /// A session the server refused did no work, so the next attempt must
-    /// wait longer - resetting to the floor turns a server-side zombie
-    /// session (`Reject` 496, "worker already connected") into a ~1/s
-    /// reconnect storm that lasts until the liveness watchdog reaps it.
     #[test]
     fn refused_sessions_escalate_the_backoff() {
         let initial = Duration::from_secs(1);
@@ -127,10 +92,6 @@ mod tests {
         }
     }
 
-    /// A drained server is coming back (deploy, maintenance restart), so the
-    /// worker must keep reconnecting - but a server still mid-shutdown drains
-    /// every fresh session too, so the delay escalates like a refusal instead
-    /// of resetting to the floor.
     #[test]
     fn drained_sessions_escalate_the_backoff() {
         let initial = Duration::from_secs(1);
@@ -143,10 +104,6 @@ mod tests {
         }
     }
 
-    /// Regression for #626: no session outcome ends the worker process. A
-    /// drained session used to return from `main`, and because the unit
-    /// restarts `on-failure` that clean exit left the worker dead until an
-    /// operator restarted it by hand.
     #[test]
     fn every_session_outcome_reconnects() {
         assert_eq!(
@@ -157,8 +114,6 @@ mod tests {
         assert_eq!(SessionEnd::from(RunOutcome::Drained), SessionEnd::Drained);
     }
 
-    /// A session that actually ran restarts from the floor: a genuine network
-    /// blip must not inherit a long delay from an earlier refusal.
     #[test]
     fn served_sessions_reset_the_backoff() {
         let initial = Duration::from_secs(1);
@@ -173,8 +128,6 @@ mod tests {
         );
     }
 
-    /// Regression for #99: the loop must keep retrying after a single failure
-    /// instead of breaking out and shutting the worker down.
     #[tokio::test]
     async fn keeps_retrying_after_failure() {
         let attempts = RefCell::new(0u32);
@@ -197,9 +150,6 @@ mod tests {
         assert_eq!(*attempts.borrow(), 4);
     }
 
-    /// Backoff must double until it hits `max_backoff` and then plateau -
-    /// guards against an off-by-one where an unbounded multiplication could
-    /// overflow `Duration` after enough retries.
     #[tokio::test]
     async fn backoff_caps_at_max() {
         let delays = RefCell::new(Vec::<Duration>::new());

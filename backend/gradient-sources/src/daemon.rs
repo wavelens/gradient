@@ -16,16 +16,12 @@ use gradient_util::store_path::{nix_store_path, strip_store_prefix};
 
 pub use harmonia_store_remote::pool::{ConnectionPool, PoolConfig, PooledConnectionGuard};
 
-/// A Nix daemon client over any transport. Generic over read/write halves.
 pub type GenericDaemonClient<R, W> = harmonia_store_remote::DaemonClient<R, W>;
 
-/// A Nix daemon client over a Unix socket (the local daemon).
 pub type LocalDaemonClient = harmonia_store_remote::DaemonClient<
     tokio::net::unix::OwnedReadHalf,
     tokio::net::unix::OwnedWriteHalf,
 >;
-
-// ── Nix store helper functions ────────────────────────────────────────────────
 
 #[derive(Debug, Clone)]
 pub struct BuildOutputInfo {
@@ -168,14 +164,10 @@ pub async fn get_build_outputs_from_derivation(
     Ok(outputs)
 }
 
-/// Gradient's own `PathInfo` - a thin, string-based representation of the
-/// fields consumers actually need. Avoids leaking harmonia protocol types
-/// throughout the codebase.
 #[derive(Debug, Clone)]
 pub struct PathInfo {
     pub deriver: Option<String>,
     pub references: Vec<String>,
-    /// NAR hash in SRI format, e.g. `sha256-<base64>`.
     pub nar_hash: String,
     pub nar_size: u64,
     pub ultimate: bool,
@@ -183,7 +175,6 @@ pub struct PathInfo {
     pub ca: Option<String>,
 }
 
-/// Convert harmonia's `UnkeyedValidPathInfo` into our local `PathInfo`.
 pub fn convert_valid_path_info(vi: &harmonia_store_remote::UnkeyedValidPathInfo) -> PathInfo {
     PathInfo {
         deriver: vi.deriver.as_ref().map(|d| d.to_string()),

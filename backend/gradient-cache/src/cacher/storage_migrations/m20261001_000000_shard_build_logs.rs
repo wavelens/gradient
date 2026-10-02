@@ -4,10 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Retire the pre-shard flat log layout (`logs/<attempt>.log`, `logs/<attempt>/`):
-//! local entries move into their shard; S3 entries are deleted with the
-//! `build_log_chunk` index of their logs, which would index nothing.
-
 use super::StorageMigration;
 use anyhow::{Context, Result};
 use futures::future::BoxFuture;
@@ -55,7 +51,6 @@ impl StorageMigration for Migration {
     }
 }
 
-/// The attempt owning a flat entry: an inline `<uuid>.log` or a chunk dir `<uuid>`.
 fn attempt_of(entry: &str) -> Option<BuildAttemptId> {
     let stem = entry.strip_suffix(".log").unwrap_or(entry);
     stem.parse::<uuid::Uuid>().ok().map(BuildAttemptId::new)
@@ -82,9 +77,9 @@ async fn relocate_flat_entries(logs: &Path) -> Result<u64> {
     Ok(flat.len() as u64)
 }
 
-/// Move one flat entry into its shard. A live log already written to the
-/// shard keeps its order: the flat file holds the earlier lines. A chunk dir
-/// already in the shard was written later and wins over the flat one.
+/// A live log already in the shard is keeping its order because the flat file is holding the
+/// earlier lines. A chunk dir already in the shard was written later and is winning over the flat
+/// one.
 async fn relocate_flat_entry(logs: &Path, attempt_id: BuildAttemptId, name: &str) -> Result<()> {
     let shard = logs.join(log_shard(attempt_id));
     let from = logs.join(name);
@@ -103,8 +98,6 @@ async fn relocate_flat_entry(logs: &Path, attempt_id: BuildAttemptId, name: &str
     Ok(())
 }
 
-/// Delete every flat object and prefix directly below `root`, leaving the
-/// shards, and return the attempts whose logs went.
 async fn delete_flat_objects(
     store: &dyn ObjectStore,
     root: &ObjectPath,

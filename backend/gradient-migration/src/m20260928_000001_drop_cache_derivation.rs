@@ -4,9 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! `cache_derivation` had no reader: cache wholeness is carried by the anchor
-//! counters (`missing_runtime_deps`, `fetchable`).
-
 use sea_orm_migration::prelude::*;
 use sea_orm_migration::sea_orm::ConnectionTrait;
 

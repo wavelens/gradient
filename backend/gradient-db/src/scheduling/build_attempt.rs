@@ -4,11 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Attempt helpers, per the global `derivation_build` shared build (the actual
-//! build work). Each attempt is attributed to one `build_job` (the eval that
-//! drove the dispatch, `None` after that eval is GC'd) and owns its log under
-//! its own id.
-
 use chrono::NaiveDateTime;
 use gradient_entity::build_attempt::{AttemptFailureReason, AttemptOutcome, Column, Entity, Model};
 use gradient_entity::ids::{
@@ -37,8 +32,6 @@ crate::sql! {
         params = [SharedBuildId];
 }
 
-/// Open a new attempt for a shared build (`derivation_build`), attributed to
-/// `build_job`, under `dispatched_job`.
 pub async fn open_attempt<C: ConnectionTrait>(
     db: &C,
     build_job: BuildJobId,
@@ -63,13 +56,8 @@ pub async fn open_attempt<C: ConnectionTrait>(
     .await
 }
 
-/// Count `SubstituteUnavailable` attempts per `(shared_build, evaluation)`, for the
-/// given shared build ids. The miss budget is scoped to the driving evaluation (via
-/// the attempt's `build_job`) rather than the shared build's whole history, so a new
-/// evaluation retries substitution from zero instead of inheriting a previous
-/// eval's exhausted budget and escalating straight to a build. Pairs with zero
-/// misses are absent from the map. Attempts orphaned by a GC'd eval
-/// (`build_job IS NULL`) drop out of the inner join, as intended.
+/// The miss budget is scoped to the driving evaluation, not the shared build's history.
+/// A new evaluation is retrying substitution from zero instead of escalating to a build.
 pub async fn substitute_miss_counts<C: ConnectionTrait>(
     db: &C,
     shared_builds: &[DerivationBuildId],
@@ -102,9 +90,6 @@ pub async fn substitute_miss_counts<C: ConnectionTrait>(
     Ok(counts)
 }
 
-/// The evaluation that drove `derivation_build`'s newest attempt, if it still has
-/// one. The substitute-miss budget is scoped per evaluation, so this is what says
-/// which of [`substitute_miss_counts`]'s buckets a fresh failure belongs to.
 pub async fn latest_attempt_evaluation<C: ConnectionTrait>(
     db: &C,
     derivation_build: DerivationBuildId,
@@ -117,7 +102,6 @@ pub async fn latest_attempt_evaluation<C: ConnectionTrait>(
         .transpose()
 }
 
-/// Most recent attempt for a shared build (by created_at desc), if any.
 pub async fn latest_attempt<C: ConnectionTrait>(
     db: &C,
     derivation_build: DerivationBuildId,
@@ -146,13 +130,10 @@ crate::sql_fn! {
         params = [];
 }
 
-/// Most recent attempt for each shared build, fetched in one `DISTINCT ON` query per
-/// chunk. Replaces per-shared-build [`latest_attempt`] loops.
 pub async fn latest_attempts<C: ConnectionTrait>(
     db: &C,
     shared_builds: &[DerivationBuildId],
 ) -> Result<std::collections::HashMap<DerivationBuildId, Model>, DbErr> {
-    // Each chunk's ids become the IN list, so the text grows per chunk.
     let rows = crate::fetch_in_chunks(shared_builds, |chunk| async move {
         Entity::find()
             .from_raw_sql(LATEST_ATTEMPTS.bind_built(latest_attempts_sql(&chunk), []))
@@ -173,9 +154,6 @@ crate::sql! {
         tier = Sweep;
 }
 
-/// The log key of each derivation's latest attempt, in one statement. The
-/// transition emitter finalizes by derivation, because that is what a bulk
-/// sweep reports moving; a shared build that never ran is simply absent.
 pub async fn latest_attempts_by_derivation<C: ConnectionTrait>(
     db: &C,
     derivations: &[DerivationId],
@@ -198,8 +176,6 @@ pub async fn latest_attempts_by_derivation<C: ConnectionTrait>(
         .collect())
 }
 
-/// The log key to read/finalize for a shared build: its latest attempt's id. Returns
-/// `None` when the shared build never produced an attempt (never dispatched).
 pub async fn latest_attempt_id<C: ConnectionTrait>(
     db: &C,
     derivation_build: DerivationBuildId,
@@ -207,7 +183,6 @@ pub async fn latest_attempt_id<C: ConnectionTrait>(
     Ok(latest_attempt(db, derivation_build).await?.map(|a| a.id))
 }
 
-/// The worker that ran the shared build's latest attempt (via its dispatched_job).
 pub async fn latest_attempt_worker<C: ConnectionTrait>(
     db: &C,
     derivation_build: DerivationBuildId,
@@ -223,7 +198,6 @@ pub async fn latest_attempt_worker<C: ConnectionTrait>(
     Ok(job.map(|j| j.worker_id))
 }
 
-/// Stamp `build_started_at` on the latest attempt when its shared build enters Building.
 pub async fn stamp_attempt_started<C: ConnectionTrait>(
     db: &C,
     derivation_build: DerivationBuildId,
@@ -240,9 +214,6 @@ pub async fn stamp_attempt_started<C: ConnectionTrait>(
     Ok(())
 }
 
-/// Record a terminal `outcome` on the shared build's latest attempt, stamping
-/// `build_finished_at` if not already set. Every attempt must reach one of these:
-/// a row left at `Running` is swept to `Aborted` by `recover_interrupted_work`.
 pub async fn finish_latest_attempt<C: ConnectionTrait>(
     db: &C,
     derivation_build: DerivationBuildId,
@@ -265,7 +236,6 @@ pub async fn finish_latest_attempt<C: ConnectionTrait>(
     Ok(())
 }
 
-/// Record a terminal failure on the shared build's latest attempt.
 pub async fn fail_latest_attempt<C: ConnectionTrait>(
     db: &C,
     derivation_build: DerivationBuildId,
@@ -276,8 +246,6 @@ pub async fn fail_latest_attempt<C: ConnectionTrait>(
     finish_latest_attempt(db, derivation_build, outcome, reason, failure_message).await
 }
 
-/// Record a terminal success (`Built` / `Substituted`) on the shared build's latest
-/// attempt, clearing any reason left by a superseded failure.
 pub async fn succeed_latest_attempt<C: ConnectionTrait>(
     db: &C,
     derivation_build: DerivationBuildId,
@@ -286,10 +254,6 @@ pub async fn succeed_latest_attempt<C: ConnectionTrait>(
     finish_latest_attempt(db, derivation_build, outcome, None, None).await
 }
 
-/// Count `InputsUnavailable` attempts recorded against a shared build across its whole
-/// history (every driving evaluation). Feeds the self-heal circuit breaker: each
-/// failed eval repairs the cache and the next one retries, so the count is the
-/// number of self-heal loops already spent on this build.
 pub async fn inputs_unavailable_attempt_count<C: ConnectionTrait>(
     db: &C,
     derivation_build: DerivationBuildId,
@@ -302,7 +266,6 @@ pub async fn inputs_unavailable_attempt_count<C: ConnectionTrait>(
         .map(|c| c as i64)
 }
 
-/// Stamp `build_finished_at` on the latest attempt for any terminal status incl. Substituted.
 pub async fn stamp_attempt_finished<C: ConnectionTrait>(
     db: &C,
     derivation_build: DerivationBuildId,

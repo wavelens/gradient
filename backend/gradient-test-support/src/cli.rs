@@ -7,14 +7,10 @@
 use gradient_types::Cli;
 use gradient_types::cli::*;
 
-/// Single source of truth for the `Cli` struct in tests.
-/// Update only here when fields are added/removed from `Cli`.
 pub fn test_cli() -> Cli {
     test_cli_with_crypt("test-secret".into())
 }
 
-/// Like `test_cli()` but with a custom `secrets.crypt_file` path.
-/// Use this in tests that need a real decryptable webhook secret.
 pub fn test_cli_with_crypt(crypt_file: String) -> Cli {
     Cli {
         log: LogArgs {

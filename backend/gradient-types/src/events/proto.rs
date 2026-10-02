@@ -15,7 +15,7 @@ pub enum Direction {
     Server,
 }
 
-/// A proto message header: never its payload, so a NAR chunk costs a few bytes here.
+/// The header is never carrying the payload. A NAR chunk is costing only a few bytes here.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Message {
     pub direction: Direction,

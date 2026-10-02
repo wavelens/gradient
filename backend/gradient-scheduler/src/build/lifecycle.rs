@@ -4,8 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Re-queue of the jobs a worker disconnect orphaned, and the eval dispatch budget.
-
 use std::sync::Arc;
 
 use gradient_core::ServerState;
@@ -19,25 +17,17 @@ use tracing::{info, warn};
 use crate::jobs::PendingJob;
 use crate::waiting_state::persist_waiting_reason;
 
-/// How many times an evaluation may be handed to a worker before the
-/// scheduler stops re-queuing it. A healthy eval spends exactly one; each
-/// dispatch that ends in a disconnect rather than a result costs another.
-/// Without this ceiling an eval whose worker keeps dying mid-evaluation is
-/// re-dispatched forever, taking the fleet's eval capacity with it every
-/// round.
+/// A healthy evaluation is spending exactly one dispatch, and each disconnect is costing another.
+/// An evaluation killing every worker it touches would be re-dispatched forever without this
+/// ceiling.
 pub(crate) const MAX_EVAL_ASSIGN_ATTEMPTS: u64 = 10;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum OrphanedEval {
-    /// Budget remains: park the eval so a worker can pick it up again.
     Requeue,
-    /// Budget spent: fail the eval instead of looping.
     Exhausted,
 }
 
-/// Decide what to do with an evaluation orphaned by a worker disconnect,
-/// given how many times it has already been dispatched (this dispatch
-/// included).
 pub(crate) fn orphaned_eval_outcome(assignments: u64, budget: u64) -> OrphanedEval {
     if assignments >= budget {
         OrphanedEval::Exhausted
@@ -46,9 +36,6 @@ pub(crate) fn orphaned_eval_outcome(assignments: u64, budget: u64) -> OrphanedEv
     }
 }
 
-/// How many times this evaluation has been handed to a worker, from the
-/// dispatch telemetry. A load failure counts as zero so a DB hiccup can never
-/// fail an otherwise healthy evaluation.
 async fn eval_assign_count(state: &Arc<ServerState>, evaluation_id: EvaluationId) -> u64 {
     use gradient_entity::dispatched_job::{
         Column as CDispatchedJob, DispatchedJobKind, Entity as EDispatchedJob,
@@ -66,9 +53,6 @@ async fn eval_assign_count(state: &Arc<ServerState>, evaluation_id: EvaluationId
         })
 }
 
-/// Close the dispatch telemetry for jobs whose worker vanished. Without this the
-/// rows keep `finished_at IS NULL` forever and the job board reports them as
-/// running on a worker that is no longer in the fleet.
 async fn abandon_dispatched_jobs(state: &Arc<ServerState>, orphaned: &[PendingJob]) {
     let keys: Vec<String> = orphaned.iter().map(PendingJob::job_key).collect();
 
@@ -86,11 +70,8 @@ async fn abandon_dispatched_jobs(state: &Arc<ServerState>, orphaned: &[PendingJo
     }
 }
 
-/// Re-queue the in-flight jobs orphaned by a worker disconnect so they
-/// re-dispatch instead of lingering in a non-terminal DB status. Shared builds move
-/// `Building -> Queued`; evaluations (which the state machine only lets reach
-/// `Queued` via `Waiting`) park to `Waiting` so the repair pass running right
-/// after recovers them to `Queued` once an eval-capable worker is free.
+/// The state machine is letting evaluations reach `Queued` only via `Waiting`. Orphaned evaluations
+/// park to `Waiting`, and the repair pass right after is recovering them to `Queued`.
 pub async fn requeue_orphaned_jobs(state: &Arc<ServerState>, orphaned: &[PendingJob]) {
     abandon_dispatched_jobs(state, orphaned).await;
 
@@ -167,10 +148,6 @@ pub(crate) async fn park_orphaned_eval(state: &Arc<ServerState>, eval: MEvaluati
     }
 }
 
-/// Put a retried cluster's members back where the startable feed finds them. The
-/// cluster is `Queued` again before this executes, so each member is folded back into
-/// it rather than dispatched alone; its retry budget bounds the loop, not the
-/// per-evaluation dispatch budget.
 pub(crate) async fn requeue_cluster_members(state: &Arc<ServerState>, jobs: &[PendingJob]) {
     let shared_builds: Vec<DerivationBuildId> = jobs
         .iter()
@@ -218,7 +195,6 @@ pub(crate) async fn requeue_cluster_members(state: &Arc<ServerState>, jobs: &[Pe
 mod orphaned_eval_tests {
     use super::{MAX_EVAL_ASSIGN_ATTEMPTS, OrphanedEval, orphaned_eval_outcome};
 
-    /// The common case: a worker drops once, the eval goes back on the queue.
     #[test]
     fn an_eval_under_budget_is_requeued() {
         for assignments in 1..MAX_EVAL_ASSIGN_ATTEMPTS {
@@ -230,9 +206,6 @@ mod orphaned_eval_tests {
         }
     }
 
-    /// An eval that wedges every worker it touches must terminate: without
-    /// this it is re-dispatched forever, parking to `Waiting` between rounds
-    /// and starving the fleet on every attempt.
     #[test]
     fn an_eval_that_spends_its_budget_stops_being_requeued() {
         assert_eq!(

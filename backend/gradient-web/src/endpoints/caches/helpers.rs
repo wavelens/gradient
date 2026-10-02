@@ -25,9 +25,6 @@ use sea_orm::{ColumnTrait, Condition, ConnectionTrait, EntityTrait, QueryFilter}
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::Arc;
 
-/// Extracts HTTP Basic Auth credentials and resolves them to a user.
-/// The password field is treated as a JWT or API key (the username is ignored).
-/// Returns `Err(forbidden)` when an API-key allowlist rejects `client_ip`.
 async fn try_authenticate_basic(
     state: &Arc<ServerState>,
     headers: &HeaderMap,
@@ -69,9 +66,6 @@ async fn try_authenticate_basic(
         .flatten())
 }
 
-/// Returns true if `user` is allowed to read `cache`.
-/// Access is granted when the user is the cache owner, holds a direct
-/// cache-user role, or belongs to any project that subscribes to the cache.
 async fn user_can_access_cache(state: &Arc<ServerState>, cache: &MCache, user: &MUser) -> bool {
     if cache.created_by == user.id {
         return true;
@@ -109,9 +103,6 @@ async fn user_can_access_cache(state: &Arc<ServerState>, cache: &MCache, user: &
         .is_some()
 }
 
-/// Checks authorization for a private cache request.
-/// Returns `Ok(())` if the cache is public or if valid credentials grant access.
-/// Returns `Err(Unauthorized)` otherwise.
 async fn require_cache_auth(
     state: &Arc<ServerState>,
     headers: &HeaderMap,
@@ -154,17 +145,11 @@ async fn get_nar_by_hash_inner(
         .await
         .map_err(WebError::from)?;
 
-    // If there's no matching derivation_output, the requested hash may
-    // belong to a `.drv` file or other standalone store path cached via
-    // `cached_path`. Fall back to that lookup.
     let build_output = match build_output {
         Some(o) => o,
         None => return get_nar_by_cached_path(state, cache, hash).await,
     };
 
-    // Access gate: the `cached_path_signature` row for this cache proves the
-    // caller-authorised cache also holds the path (derivations are global, so
-    // there is no per-project ownership to check). Same rule as get_nar_by_cached_path.
     let cached_path_row = ECachedPath::find()
         .filter(CCachedPath::Hash.eq(hash.clone()))
         .one(&state.web_db)
@@ -189,8 +174,6 @@ async fn get_nar_by_hash_inner(
 
     let path = get_path_from_derivation_output(build_output.clone()).full();
 
-    // All metadata comes from the cached_path row written by the worker
-    // when it uploaded the NAR.  No daemon probe is needed.
     let nar_hash = cached_path_row
         .nar_hash
         .as_deref()
@@ -213,9 +196,8 @@ async fn get_nar_by_hash_inner(
         &cache.name,
     );
 
-    // file_hash / file_size live on `cached_path` (written when the worker's
-    // upload commits). The legacy mirror on `derivation_output` is
-    // not always populated, so don't rely on it here.
+    // `file_hash` and `file_size` are living on `cached_path`. The legacy mirror on
+    // `derivation_output` is not always populated.
     let file_hash = cached_path_row
         .file_hash
         .as_deref()
@@ -241,11 +223,6 @@ async fn get_nar_by_hash_inner(
     })
 }
 
-/// Narinfo lookup for store paths that aren't build outputs - notably
-/// `.drv` files. Access is gated on the signature row for `cache.id`:
-/// its existence proves the caller-authorised cache also holds the
-/// path.  All metadata comes from `cached_path` because the server
-/// local store may have GC'd the drv already.
 async fn get_nar_by_cached_path(
     state: &Arc<ServerState>,
     cache: MCache,
@@ -320,16 +297,6 @@ async fn get_nar_by_cached_path(
     })
 }
 
-// ---------------------------------------------------------------------------
-// Resolved context for a Nix cache protocol request
-// ---------------------------------------------------------------------------
-
-/// Resolved context for a Nix cache protocol request.
-///
-/// Load with [`CacheContext::load`] which:
-///  1. Looks up the cache by name
-///  2. Rejects inactive caches with `BadRequest`
-///  3. Enforces access control via `require_cache_auth`
 pub(super) struct CacheContext {
     pub cache: MCache,
 }
@@ -368,9 +335,6 @@ pub(super) fn cache_client_ip(
     resolve_client_ip(headers, peer_ip, &state.config.network.trusted_proxies)
 }
 
-/// Query extractor for the `?json` flag used by text-format cache endpoints
-/// (`nix-cache-info`, `gradient-cache-info`, `.narinfo`). Any presence of
-/// `?json` (with or without a value) selects the JSON response variant.
 #[derive(Debug, serde::Deserialize)]
 pub struct JsonFlag {
     pub json: Option<String>,
@@ -401,9 +365,8 @@ gradient_db::sql! {
         params = [DerivationHash, Text("hello"), CacheId];
 }
 
-/// The serving gate every `/cache/{cache}` read shares: the cache holds a
-/// signed claim on a fully uploaded path. Blobs live in one store for every
-/// cache, so this claim is all that keeps one cache's paths out of another's.
+/// Blobs are living in one store for every cache. This signed claim is all that is keeping one
+/// cache's paths out of another's.
 pub(super) async fn cache_serves_path(
     state: &Arc<ServerState>,
     cache: CacheId,
@@ -416,8 +379,6 @@ pub(super) async fn cache_serves_path(
         .is_some())
 }
 
-/// The derivation `hash-name.drv`, when `cache` serves at least one of its
-/// outputs by [`cache_serves_path`].
 pub(super) async fn cache_served_derivation(
     state: &Arc<ServerState>,
     cache: CacheId,
@@ -437,10 +398,6 @@ pub(super) async fn cache_served_derivation(
         .map(DerivationId::new))
 }
 
-/// Resolves the store hash once, refuses a path `cache` does not serve, and
-/// opens a byte stream over the stored `.nar.zst` so the serve paths never pin
-/// a whole NAR in the server heap. Returns `(effective_hash, object_size,
-/// byte_stream)`.
 pub async fn fetch_nar_stream(
     state: &Arc<ServerState>,
     cache: CacheId,
@@ -475,9 +432,6 @@ pub(super) struct DeleteOutcome {
     pub ref_counted_others: bool,
 }
 
-/// Removes a single cache's claim on a NAR. Drops the per-cache signature row
-/// and - if no other cache still holds the path - the shared `cached_path` row
-/// plus the underlying NAR blob.
 pub(super) async fn delete_nar_from_cache(
     state: &Arc<ServerState>,
     cache_id: CacheId,

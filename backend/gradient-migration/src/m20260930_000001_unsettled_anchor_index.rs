@@ -4,10 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! The cached-anchor reconcile settles the anchors of an evaluation's closure that
-//! are not yet `Completed` or `Substituted`. Those are a few percent of the table,
-//! and without an index to name them the planner scanned every anchor to find them.
-
 use sea_orm_migration::prelude::*;
 use sea_orm_migration::sea_orm::ConnectionTrait;
 

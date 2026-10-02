@@ -4,14 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Read-only, single-cache websocket session.
-//!
-//! Authentication happens at the HTTP layer before the upgrade. After a
-//! minimal `InitConnection` handshake this session accepts only `CacheQuery`
-//! (Normal/Pull) and `NarRequest`, both scoped to one `cache_id`. Every write
-//! path - Push, worker registration, job RPCs - is rejected. No scheduler is
-//! involved.
-
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -26,14 +18,8 @@ use gradient_wire::session::handshake as handshake_fsm;
 
 use super::socket::{HANDSHAKE_TIMEOUT, ProtoSocket, recv_client_msg, send_server_msg};
 
-/// Idle cutoff for a read-only cache session: when no NAR transfer is in
-/// flight and no message arrives within this window, the connection is closed
-/// so a silent peer cannot pin a connection slot indefinitely.
 const CACHE_SESSION_IDLE_TIMEOUT_SECS: u64 = 120;
 
-/// Allow-list classifier: `Some(reason)` means the message is rejected on a
-/// read-only cache session, `None` means it is served. Pure so the policy is
-/// unit-testable without a socket or DB.
 fn reject_reason(msg: &ClientMessage) -> Option<&'static str> {
     use gradient_wire::types::QueryMode;
     match msg {
@@ -46,7 +32,6 @@ fn reject_reason(msg: &ClientMessage) -> Option<&'static str> {
     }
 }
 
-/// Read-only capabilities advertised to the peer: cache reads only.
 fn readonly_capabilities() -> GradientCapabilities {
     GradientCapabilities {
         core: false,
@@ -65,8 +50,6 @@ pub async fn handle_cache_socket(
 ) {
     info!(%cache_id, "cache websocket session opened");
 
-    // Version gate through the shared handshake FSM; auth already happened at
-    // the HTTP layer, so this session skips the challenge round-trip.
     match tokio::time::timeout(HANDSHAKE_TIMEOUT, socket.recv_msg()).await {
         Ok(Some(msg)) => {
             match handshake_fsm::on_init_connection(handshake_fsm::Opening, msg, PROTO_VERSION) {
@@ -106,9 +89,8 @@ pub async fn handle_cache_socket(
     let cancel = state.shutdown.token();
 
     loop {
-        // Only enforce the idle timeout while no NAR transfer is in flight, so
-        // a client that batches its NarRequests and then quietly receives a
-        // large download is not disconnected mid-transfer.
+        // The idle timeout is only enforced while no NAR transfer is in flight. A client quietly
+        // receiving a large download must not be disconnected.
         let next = async {
             if nar_serve_semaphore.available_permits() == max_serves {
                 match tokio::time::timeout(idle, recv_client_msg(&mut reader)).await {

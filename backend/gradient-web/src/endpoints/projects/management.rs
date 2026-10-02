@@ -77,9 +77,7 @@ pub struct ProjectResponse {
     pub managed: bool,
     pub created_by: UserId,
     pub created_at: chrono::NaiveDateTime,
-    /// Whether the server has a GitHub App configured at all.
     pub github_app_available: bool,
-    /// GitHub's install page for the App; absent without an App or while GitHub is unreachable.
     pub github_app_install_url: Option<String>,
     pub role: Option<String>,
 }
@@ -100,10 +98,6 @@ pub async fn get_project_name_available(
     Ok(ok_json(!exists))
 }
 
-/// Count in-progress evaluations per project for `project_ids`.
-///
-/// Returns a map of project_id -> count of evaluations in any active status
-/// (Queued, Fetching, EvaluatingFlake, EvaluatingDerivation, Building, Waiting).
 async fn count_running_evaluations(
     state: &Arc<ServerState>,
     project_ids: &[ProjectId],
@@ -291,7 +285,7 @@ pub async fn put(
     )
     .await;
 
-    // A connected worker only learns about the new project when it re-auths.
+    // A connected worker is learning about the new project only when it re-auths.
     for worker_id in &auto_enabled {
         scheduler.request_reauth(worker_id).await;
     }

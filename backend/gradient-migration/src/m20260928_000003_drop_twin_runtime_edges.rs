@@ -4,12 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Twins (derivations producing the same output paths) were linked by runtime
-//! edges, largely by the `m20260927_000002` backfill: each twin's reference to the
-//! shared path, its own output, became an edge to the other twin, and the pair's
-//! wholeness waited on itself forever. The writers no longer record them; this drops
-//! the ones history holds, and the consistency sweep recounts the wholeness they held.
-
 use sea_orm_migration::prelude::*;
 use sea_orm_migration::sea_orm::ConnectionTrait;
 

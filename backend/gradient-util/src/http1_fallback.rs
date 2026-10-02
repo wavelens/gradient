@@ -4,14 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Binary-cache fetches that survive caches whose HTTP/2 breaks.
-//!
-//! The download client offers HTTP/2, which most binary caches multiplex well,
-//! but some negotiate it and then reset streams mid-body. A proxied NAR then ends
-//! after its `200` has gone out, which nix reports as `HTTP error 200 (curl error:
-//! Stream error in the HTTP/2 framing layer)`. The caller learns of the reset
-//! through `on_http2_failure`, to ask that cache over HTTP/1.1 from then on, and
-//! the body that broke resumes there by `Range`.
+//! Some binary caches are negotiating HTTP/2 and then resetting streams mid-body. A proxied NAR
+//! then ends after its `200` went out. The caller is learning of the reset through
+//! `on_http2_failure` and is switching that cache to HTTP/1.1. The broken body is resuming there by
+//! `Range`.
 
 use std::error::Error;
 use std::future::Future;
@@ -66,7 +62,6 @@ pub async fn get(
     }
 }
 
-/// `response`'s body, resumed over HTTP/1.1 where an HTTP/2 reset cuts it short.
 pub fn resumable_body(
     response: Response,
     on_http2_failure: impl FnOnce() + Send + 'static,

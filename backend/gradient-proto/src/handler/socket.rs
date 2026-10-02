@@ -4,14 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! State-coupled helpers built on top of [`gradient_wire::session::frame`].
-//!
-//! Pure framing (the [`ProtoSocket`]/[`ProtoReader`]/[`ProtoWriter`]
-//! abstractions and the underlying constants) moved to
-//! [`gradient_wire::session::frame`]. What remains here are the helpers that need
-//! access to [`ServerState`] / [`Scheduler`]: job-offer pushes and credential
-//! delivery. NAR serving lives in [`super::nar_serve`].
-
 use gradient_core::ServerState;
 use gradient_types::ids::ProjectId;
 use gradient_types::*;
@@ -26,7 +18,6 @@ pub use gradient_wire::session::frame::{
     recv_client_msg, send_error, send_server_msg,
 };
 
-/// Push any pending job candidates to the worker (delta).
 pub(super) async fn push_pending_candidates(
     writer: &ProtoWriter,
     scheduler: &Scheduler,
@@ -47,8 +38,6 @@ pub(super) async fn push_pending_candidates(
         .await;
     }
 }
-
-// ── Credential delivery ───────────────────────────────────────────────────────
 
 pub(super) async fn send_credentials_for_job(
     writer: &ProtoWriter,

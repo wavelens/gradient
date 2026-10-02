@@ -4,8 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! `Scheduler` methods for worker connect / disconnect / capability management.
-
 use gradient_types::events::worker;
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -25,8 +23,6 @@ use crate::actor::{Registered, Registration, SchedulerMsg, WorkerCapabilities, W
 use crate::build;
 use gradient_pool::session_port::SessionPort;
 
-/// Insert a `worker_sample` time-series row for a connected worker. Best-effort;
-/// called from the heartbeat loop.
 pub(crate) async fn record_worker_sample(
     db: &impl sea_orm::ConnectionTrait,
     info: &gradient_pool::WorkerInfo,
@@ -63,7 +59,6 @@ impl Scheduler {
             .unwrap_or(false)
     }
 
-    /// Connected peers silent longer than `timeout_ms` as of `now_ms`.
     pub async fn stale_workers(&self, now_ms: i64, timeout_ms: i64) -> Vec<String> {
         self.call(|reply| SchedulerMsg::StaleWorkers {
             now_ms,
@@ -85,7 +80,6 @@ impl Scheduler {
         .unwrap_or(false)
     }
 
-    /// Register a new connection and open its `worker_connection` row.
     pub async fn register_worker(
         &self,
         worker_id: &str,
@@ -113,17 +107,9 @@ impl Scheduler {
         Ok(registered)
     }
 
-    /// A new connection claims no job, so a row this server never dispatched
-    /// belongs to a process that is gone; closing it now reopens the dispatch
-    /// gate instead of leaving the work parked for the sweep's grace.
-    ///
-    /// The cutoff is what keeps that from stealing another closer's row. A row
-    /// this process handed out still has one: the worker's terminal report
-    /// closes it on a detached task, and a deploy reconnects the worker inside
-    /// that window, so a blanket close by worker id would rewrite a `Completed`
-    /// dispatch as `Abandoned` and drop its eval phase totals. Rows an earlier
-    /// process handed out have no live closer at all, and startup recovery has
-    /// already closed those - this is the backstop for the rows it missed.
+    /// The cutoff is keeping this from stealing another closer's row. A row this process handed out
+    /// is closed by the worker's terminal report on a detached task. A blanket close by worker id
+    /// would rewrite a `Completed` dispatch as `Abandoned` across a deploy.
     async fn close_unclaimed_assignments(&self, worker_id: &str) {
         match gradient_db::scheduling::assignment_record::abandon_open_assignments_for_worker(
             &self.state.worker_db,
@@ -142,8 +128,6 @@ impl Scheduler {
         }
     }
 
-    /// Register without touching the DB: the session is already connected and
-    /// the scheduler's state was rebuilt, so only the in-memory view is missing.
     pub async fn reattach_worker(
         &self,
         worker_id: &str,
@@ -181,7 +165,6 @@ impl Scheduler {
         }
     }
 
-    /// Stamp `disconnected_at` on the worker's latest open `worker_connection`.
     async fn close_worker_connection(&self, worker_id: &str) {
         let conn = gradient_entity::worker_connection::Entity::find()
             .filter(gradient_entity::worker_connection::Column::WorkerId.eq(worker_id))
@@ -214,8 +197,6 @@ impl Scheduler {
         debug!(%worker_id, "authorized peers updated");
     }
 
-    /// Abort the worker's active jobs that belong to `revoked_peers`; they go
-    /// back to pending and every other session is offered them.
     pub async fn abort_project_jobs_on_worker(
         &self,
         worker_id: &str,
@@ -291,7 +272,6 @@ impl Scheduler {
         self.kick_assigner();
     }
 
-    /// Refresh each in-flight evaluation's status against the connected pool.
     pub async fn refresh_waiting_state(&self) -> Result<()> {
         let workers = self.board_workers().await;
         let eval_capable = workers.iter().filter(|w| w.capabilities.eval).count();
@@ -317,7 +297,6 @@ impl Scheduler {
         Ok(())
     }
 
-    /// Every connected worker, including the sampling fields the API masks.
     pub async fn board_workers(&self) -> Vec<gradient_pool::WorkerInfo> {
         self.call(|reply| SchedulerMsg::Workers { reply })
             .await

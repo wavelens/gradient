@@ -4,12 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Re-key upstream metrics on the upstream URL so the same URL registered
-//! under several caches/orgs contributes to one series (#417). Backfills
-//! `upstream_metric.upstream_url` from `cache_upstream.url`, merges colliding
-//! rows, and re-scopes historical `metric_rollup` upstream.* rows from
-//! `{'upstream': id}` to `{'upstream_url': url}`.
-
 use sea_orm_migration::prelude::*;
 
 #[derive(DeriveMigrationName)]
@@ -31,15 +25,13 @@ impl MigrationTrait for Migration {
         )
         .await?;
 
-        // Dropping `upstream` cascades away its FK and the old unique index.
         db.execute_unprepared("ALTER TABLE upstream_metric DROP COLUMN upstream")
             .await?;
         db.execute_unprepared("DELETE FROM upstream_metric WHERE upstream_url IS NULL")
             .await?;
 
-        // Collapse rows that now share (upstream_url, bucket_time). All CTEs read
-        // the pre-delete snapshot, so `merged` sums the originals before `cleared`
-        // removes them.
+        // Every CTE is reading the pre-delete snapshot. `merged` is summing the original rows
+        // before `cleared` is removing them.
         db.execute_unprepared(
             "WITH merged AS ( \
                  SELECT upstream_url, bucket_time, \
@@ -64,8 +56,6 @@ impl MigrationTrait for Migration {
         )
         .await?;
 
-        // Re-scope historical upstream.* rollups by URL and merge. min/max/sum_sq
-        // are 0 for these metrics, so the merge is a plain additive sum.
         db.execute_unprepared(&format!(
             "WITH merged AS ( \
                  SELECT mr.metric, mr.granularity, mr.bucket_start, cu.url AS url, \
@@ -90,7 +80,7 @@ impl MigrationTrait for Migration {
     }
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-        // Lossy: the URL merge cannot be reversed. Restore the column shape only.
+        // The URL merge is lossy and not reversible. Only the column shape is restored.
         let db = manager.get_connection();
         db.execute_unprepared(
             "DROP INDEX IF EXISTS \"idx-upstream_metric-upstream_url-bucket_time\"",

@@ -32,11 +32,8 @@ struct Inner {
     jobs: HashMap<String, Weak<Semaphore>>,
 }
 
-/// Every upload this worker sends: requested, granted, transferred, then
-/// acknowledged by the server. A slot bounds the transfer, not the commit after
-/// it, so the server's graph sees a burst of commits it can batch. Small uploads
-/// have [`SMALL_UPLOADS_IN_FLIGHT`] slots of their own; the large ones share
-/// `max_outstanding`, of which one job holds at most half.
+/// A slot is bounding the transfer, not the commit after it. The server's graph is then seeing a
+/// burst of commits it can batch.
 #[derive(Clone)]
 pub struct UploadClient {
     inner: Arc<Mutex<Inner>>,
@@ -89,8 +86,6 @@ impl UploadClient {
         }
     }
 
-    /// Take one of this worker's upload slots for `object`; drive the returned
-    /// [`Upload`] with [`Upload::next_grant`] and [`Upload::settle`].
     pub async fn start(&self, job_id: &str, object: UploadObject, size: u64) -> Result<Upload<'_>> {
         Ok(Upload {
             client: self,
@@ -199,8 +194,6 @@ struct Slots {
     _worker: OwnedSemaphorePermit,
 }
 
-/// One object's way through the handshake, holding a worker upload slot from
-/// its request until its transfer is finished.
 pub struct Upload<'a> {
     client: &'a UploadClient,
     slots: Option<Slots>,
@@ -213,9 +206,6 @@ pub struct Upload<'a> {
 }
 
 impl Upload<'_> {
-    /// Request the object and wait for the server's grant; `None` means the
-    /// server already has it and nothing is to be sent. The server may answer
-    /// before granting (a rejection, or a retry when it cannot open a target).
     pub async fn next_grant(&mut self) -> Result<Option<(u64, GrantTarget)>> {
         if self.slots.is_none() {
             self.slots = Some(self.client.acquire_slots(&self.job_id, self.size).await?);
@@ -274,9 +264,6 @@ impl Upload<'_> {
         }
     }
 
-    /// Report a finished transfer and wait for the commit: `true` once the
-    /// object is stored, `false` when the server asks for another attempt. A
-    /// failed transfer is cancelled so the server frees its permit at once.
     pub async fn settle(&mut self, transferred: Result<UploadMetadata>) -> Result<bool> {
         let (request_id, outcome) = self.open.take().context("no granted upload to settle")?;
         let finished = match transferred {
@@ -307,8 +294,6 @@ impl Upload<'_> {
         self.stored(outcome?)
     }
 
-    /// `true` once the object is stored, `false` when the server asks for
-    /// another attempt.
     fn stored(&self, outcome: UploadOutcome) -> Result<bool> {
         match outcome {
             UploadOutcome::Ok => Ok(true),
@@ -438,8 +423,6 @@ mod tests {
         upload.await.unwrap().unwrap();
     }
 
-    /// A slot held through the commit capped an evaluation at one commit in
-    /// flight per job slot, so the server's graph never saw a burst to batch.
     #[tokio::test]
     async fn an_upload_waiting_for_its_commit_frees_its_slot() {
         let (client, mut server, _pump) = connected(2).await;

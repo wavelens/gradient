@@ -9,7 +9,6 @@ use async_trait::async_trait;
 use gradient_ci::{CiReport, CiReporter};
 use std::sync::Mutex;
 
-/// A PR/MR comment captured by [`RecordingCiReporter`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RecordedComment {
     pub owner: String,
@@ -18,7 +17,6 @@ pub struct RecordedComment {
     pub body: String,
 }
 
-/// In-memory `CiReporter` for tests. Records every call in order.
 #[derive(Debug, Default)]
 pub struct RecordingCiReporter {
     pub calls: Mutex<Vec<CiReport>>,
@@ -30,12 +28,10 @@ impl RecordingCiReporter {
         Self::default()
     }
 
-    /// Returns a snapshot of all recorded status reports in call order.
     pub fn calls(&self) -> Vec<CiReport> {
         self.calls.lock().unwrap().clone()
     }
 
-    /// Returns a snapshot of all recorded PR/MR comments in call order.
     pub fn comments(&self) -> Vec<RecordedComment> {
         self.comments.lock().unwrap().clone()
     }

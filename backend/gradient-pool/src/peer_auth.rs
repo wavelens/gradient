@@ -4,38 +4,17 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Typed peer-authorization mode for connected workers.
-//!
-//! A worker operates in one of two modes:
-//!
-//! - [`PeerAuth::Open`] - no peers have registered this worker; job candidates
-//!   are not filtered by peer/project.
-//! - [`PeerAuth::Restricted`] - one or more peer UUIDs have registered this
-//!   worker; only jobs belonging to those peers are offered.
-//!
-//! Previously this was represented as `authorized_peers: HashSet<Uuid>` where
-//! an empty set meant "open mode".  The explicit enum makes the intent
-//! unambiguous at the call site and removes the need for `if p.is_empty()`
-//! guards scattered across the scheduler.
-
 use std::collections::HashSet;
 
 use gradient_types::ids::ProjectId;
 
-/// Peer authorization mode for a connected worker.
 #[derive(Debug, Clone)]
 pub enum PeerAuth {
-    /// No peers registered - worker accepts jobs from all peers.
     Open,
-    /// One or more peers registered - worker only sees jobs from these peers.
     Restricted(HashSet<ProjectId>),
 }
 
 impl PeerAuth {
-    /// Build a `PeerAuth` from a raw set of peer UUIDs.
-    ///
-    /// An empty set becomes [`PeerAuth::Open`]; a non-empty set becomes
-    /// [`PeerAuth::Restricted`].
     pub fn from_peers(peers: HashSet<ProjectId>) -> Self {
         if peers.is_empty() {
             Self::Open
@@ -44,13 +23,10 @@ impl PeerAuth {
         }
     }
 
-    /// Returns `true` when the worker is in open mode (no peer filter).
     pub fn is_open(&self) -> bool {
         matches!(self, Self::Open)
     }
 
-    /// Returns `true` when `id` is in the restricted set, or when the worker
-    /// is in open mode (all peers are implicitly authorized).
     pub fn contains(&self, id: &ProjectId) -> bool {
         match self {
             Self::Open => true,
@@ -58,8 +34,6 @@ impl PeerAuth {
         }
     }
 
-    /// Returns the inner peer set for filtering job candidates, or `None` when
-    /// the worker is in open mode (no filtering needed).
     pub fn as_filter(&self) -> Option<&HashSet<ProjectId>> {
         match self {
             Self::Open => None,

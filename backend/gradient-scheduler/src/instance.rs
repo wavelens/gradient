@@ -4,15 +4,12 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Windowed instance-wide metrics snapshot fed into resource-aware scoring.
-
 use std::collections::HashMap;
 
 use gradient_types::ids::TaskId;
 use sea_orm::{ConnectionTrait, FromQueryResult};
 use tracing::error;
 
-/// In-memory scheduler counts the loop already holds; merged into the snapshot.
 pub struct InstanceCounts {
     pub active_builds: u32,
     pub pending_builds: u32,
@@ -21,9 +18,7 @@ pub struct InstanceCounts {
     pub cpu_core_score_mean: Option<f64>,
 }
 
-/// Build a [`gradient_pool::score::Windowed`] from a 5m/1h/24h column triple.
-/// `None` (SQL NULL: no samples in the window) stays `None` - a window with no
-/// data must be distinguishable from a measured zero.
+/// A window with no data must stay distinguishable from a measured zero.
 fn windowed(
     w5m: Option<f64>,
     w1h: Option<f64>,
@@ -116,8 +111,7 @@ gradient_db::sql! {
 }
 
 gradient_db::sql_fn! {
-    /// The exemplar behind the dispatch-window query's `kind` fence: the gate
-    /// plans against the same generated fragment the call site executes.
+    /// The gate must plan against the same generated fragment the call site is executing.
     INSTANCE_DISPATCH_WINDOWS = assignment_windows_sql,
         params = [Now, Now, Now];
 }
@@ -145,8 +139,6 @@ fn assignment_windows_sql() -> String {
     )
 }
 
-/// Compute a fresh windowed snapshot from `derivation_metric` + `dispatched_job`.
-/// Each query degrades independently - errors are logged and that query's windows read absent; counts always survive.
 pub async fn compute_instance_context(
     db: &impl ConnectionTrait,
     counts: InstanceCounts,
@@ -253,8 +245,6 @@ gradient_db::sql! {
         params = [Now];
 }
 
-/// Per-task p95 of evaluation peak RSS over the last 24h, fed into
-/// `ResourceFitRule` so heavy evals route to big-RAM workers.
 pub async fn compute_eval_history(
     db: &impl ConnectionTrait,
     now: chrono::NaiveDateTime,
@@ -292,9 +282,6 @@ mod tests {
     use sea_orm::{DatabaseBackend, MockDatabase, Value};
     use std::collections::BTreeMap;
 
-    /// `MockDatabase` replays raw column maps for the two statements, so the
-    /// test pins the column->field mapping and count wiring. The SQL aggregation
-    /// (FILTER windows, jsonb extraction) is validated in CI against Postgres.
     #[tokio::test]
     async fn maps_columns_and_counts_into_snapshot() {
         let f = |name: &str, v: f64| (name.to_owned(), Value::from(v));
@@ -375,8 +362,6 @@ mod tests {
         assert_eq!(ic.idle_workers, 1);
     }
 
-    /// `MockDatabase` replays one grouped row; pins the task->prediction
-    /// mapping. The percentile aggregation is validated in CI against Postgres.
     #[tokio::test]
     async fn eval_history_maps_row_into_prediction() {
         let pid = TaskId::now_v7();

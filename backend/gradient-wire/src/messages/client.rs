@@ -10,64 +10,37 @@ use crate::types::{
 };
 use rkyv::{Archive, Deserialize, Serialize};
 
-/// Messages sent from the client (worker / federated peer) to the server.
 #[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[rkyv(derive(Debug, PartialEq))]
 pub enum ClientMessage {
-    /// First message on every connection.  The peer declares its protocol
-    /// version, capabilities, and persistent identity.  The server responds
-    /// with [`super::server::ServerMessage::AuthChallenge`].
     InitConnection {
         version: u16,
         capabilities: GradientCapabilities,
-        /// Persistent peer UUID, generated on first start and stored locally.
         id: String,
     },
 
-    /// Response to [`super::server::ServerMessage::AuthChallenge`].
-    /// Contains per-peer tokens for each peer the worker has credentials for.
-    /// Pairs are `(peer_id, token)`.
     AuthResponse {
         tokens: Vec<(String, String)>,
     },
 
-    /// Request a new auth challenge from the server - sent when the worker
-    /// has acquired a new peer token and wants to become authorized for that
-    /// peer without reconnecting.
     ReauthRequest,
 
-    /// Decline the connection after receiving
-    /// [`super::server::ServerMessage::InitAck`].
-    /// The peer closes the WebSocket immediately after sending this.
     Reject {
         code: u16,
         reason: String,
     },
 
-    /// Advertise build capacity.  Sent after a successful handshake by any
-    /// peer with the `build` capability negotiated.
     WorkerCapabilities {
-        /// Supported architectures as Nix system strings, e.g. `"x86_64-linux"`.
         architectures: Vec<String>,
-        /// Nix system features, e.g. `"kvm"`, `"big-parallel"`; the order carries no meaning.
         system_features: Vec<String>,
-        /// Maximum number of concurrent builds this peer accepts.
         max_concurrent_builds: u32,
-        /// Number of logical CPUs available to the worker.
         cpu_count: u32,
-        /// Total physical RAM in MiB.
         ram_total_mb: u64,
-        /// Relative single-core performance score (higher is faster).
         cpu_core_score: u32,
-        /// Locality label; members of a `same_zone` cluster share one. `None`
-        /// is one implicit zone of its own.
         zone: Option<String>,
-        /// Address other members of a cluster reach this worker at, as given.
         endpoint: Option<String>,
     },
 
-    /// Live resource-utilisation heartbeat. Sent periodically while connected so
-    /// the scheduler can score jobs against the worker's current load.
     WorkerMetrics {
         cpu_usage_pct: f32,
         ram_free_mb: u64,
@@ -75,98 +48,63 @@ pub enum ClientMessage {
         network_speed_mbps: Option<f32>,
     },
 
-    /// Request the full current job candidate list as a stream of
-    /// [`super::server::ServerMessage::JobListChunk`] messages.  Sent once
-    /// after the handshake; later candidates arrive as
-    /// [`super::server::ServerMessage::JobOffer`].
     RequestJobList,
 
-    /// Stream pre-computed job scores to the server.  Sent incrementally as
-    /// the worker checks `required_paths` against its local Nix store.
-    /// `is_final: true` marks the last chunk for the current scoring pass.
     RequestJobChunk {
         scores: Vec<CandidateScore>,
         is_final: bool,
     },
 
-    /// Accept or reject a [`super::server::ServerMessage::AssignJob`].
     AssignJobResponse {
         job_id: String,
         accepted: bool,
-        /// Set when `accepted` is `false`.
         reason: Option<String>,
     },
 
-    /// Incremental progress update for an in-flight job.
-    /// The server maps these directly to `EvaluationStatus` / `BuildStatus`.
     JobUpdate {
         job_id: String,
-        /// The `assignment_id` the `AssignJob` carried.
         assignment_id: String,
         update: JobUpdateKind,
     },
 
-    /// All steps in a job completed successfully.
-    /// Results were already sent via [`ClientMessage::JobUpdate`].
-    /// Per-build resource metrics travel inline on each `JobUpdate::BuildOutput`.
     JobCompleted {
         job_id: String,
-        /// The `assignment_id` the `AssignJob` carried.
         assignment_id: String,
-        /// The worker's phase timeline; empty when the job recorded no phase.
         spans: Vec<JobPhaseSpan>,
-        /// The timeline's own clock when the worker took `spans`, in ms.
         elapsed_ms: u64,
     },
 
-    /// A step in the job failed; remaining steps are skipped.
     JobFailed {
         job_id: String,
-        /// The `assignment_id` the `AssignJob` carried.
         assignment_id: String,
         error: String,
         kind: BuildFailureKind,
-        /// For `BuildFailureKind::InputsUnavailable`: the required input store
-        /// paths the cache could not serve. Empty for every other kind.
         missing_paths: Vec<String>,
-        /// The partial phase timeline recorded up to the failure.
         spans: Vec<JobPhaseSpan>,
-        /// The timeline's own clock when the worker took `spans`, in ms.
         elapsed_ms: u64,
     },
 
-    /// Worker is draining - it will finish in-flight jobs then disconnect.
-    /// Server stops assigning new jobs to this peer.
     Draining,
 
-    /// Bytes fetched so far for a Substitute or Download build, sent every
-    /// [`crate::messages::BUILD_PROGRESS_INTERVAL`] in which bytes arrived and once at the end.
-    /// Fire-and-forget; `total` is `None` when the source announced no size.
     BuildProgress {
         job_id: String,
-        /// The `assignment_id` the `AssignJob` carried.
         assignment_id: String,
         build_id: String,
         downloaded: u64,
         total: Option<u64>,
     },
 
-    /// Build log lines from an in-flight task.  Fire-and-forget.
     LogChunk {
         job_id: String,
         task_index: u32,
         data: Vec<u8>,
     },
 
-    /// Request specific store paths from the server (direct NAR mode).
     NarRequest {
         job_id: String,
         paths: Vec<String>,
     },
 
-    /// Pull resume: the worker already holds `received_bytes` compressed bytes
-    /// of this path's `.nar.zst` on disk and asks the server to continue the
-    /// download from that offset instead of re-sending from 0.
     NarRequestResume {
         job_id: String,
         store_path: String,
@@ -174,96 +112,48 @@ pub enum ClientMessage {
         stream_token: String,
     },
 
-    /// Request the eval-cache SQLite blob for `fingerprint`.  The server
-    /// answers with [`super::server::ServerMessage::EvalCachePullResult`].
     EvalCachePull {
         job_id: String,
         fingerprint: String,
     },
 
-    /// Pull-based capacity signal: worker is ready to accept one job of the
-    /// given kind.
-    ///
-    /// Sent after the handshake for each available slot (once per free eval
-    /// slot and once per free build slot).  Re-sent immediately after an
-    /// [`super::server::ServerMessage::AssignJob`] is received if the worker
-    /// still has spare capacity.  Re-sent every 10 s as a heartbeat in case
-    /// the server restarted and lost the pending request.
-    ///
-    /// The server assigns the first matching pending job directly - no scoring
-    /// round-trip needed.
     RequestJob {
         kind: JobKind,
     },
 
-    /// A control message for other members of a started cluster attempt;
-    /// `to: None` reaches every other member.
     ClusterSignal {
         attempt: String,
         to: Option<ClusterAddress>,
         payload: Vec<u8>,
     },
 
-    /// Bulk query against the server cache.
-    ///
-    /// Server responds with [`super::server::ServerMessage::CacheStatus`].
-    /// [`QueryMode`] controls what the server returns beyond the cached flag:
-    /// - `Normal` - only paths already in the cache (no URLs).
-    /// - `Pull`   - cached paths with a presigned S3 GET URL, or `url: None` when
-    ///   the NAR is pulled over the stream.
-    /// - `Push`   - every path with only its cached flag; the worker then uploads
-    ///   the uncached ones through `UploadRequest`.
     CacheQuery {
         job_id: String,
-        /// Unique per-query id the server echoes in its [`super::server::ServerMessage::CacheStatus`]
-        /// / [`super::server::ServerMessage::CacheError`] reply, so concurrent or
-        /// retried queries under one `job_id` never steal each other's answer.
+        /// The server is echoing this id in its `CacheStatus` or `CacheError` reply. Concurrent or
+        /// retried queries under one `job_id` can never steal each other's answer.
         query_id: String,
         paths: Vec<String>,
-        /// Defaults to [`QueryMode::Normal`] when deserialized from an older client.
         mode: QueryMode,
-        /// [`QueryMode::Push`] only: the uncompressed NAR size of `paths[i]`,
-        /// `None` when unknown. Empty in every other mode.
         nar_sizes: Vec<Option<u64>>,
-        /// The server may consult its upstream caches for the one path named. Every other
-        /// query answers from our cache alone: a build's inputs are here or it fails
-        /// `InputsUnavailable`, and putting them here is a Substitute's job.
+        /// Only an external query can consult the upstream caches, and only for the one path named.
+        /// A build's inputs are in our cache or the build is failing with `InputsUnavailable`.
+        /// Putting them there is a Substitute's job.
         external: bool,
     },
 
-    /// Surface an infrastructure-level message tied to the active job's
-    /// evaluation. The server inserts a row into `evaluation_message` so
-    /// operators see transport, prefetch, or NAR-import problems directly on
-    /// the evaluation page without drilling into individual build logs.
-    ///
-    /// This is **not** meant for build compile failures or user-initiated
-    /// aborts - those are already reported via `JobFailed` and deliberately
-    /// stay out of the evaluation log.
     EvalMessage {
         job_id: String,
         level: EvalMessageLevel,
-        /// Short origin tag, e.g. `"build-prefetch"` or `"nar-import"`.
         source: String,
         message: String,
     },
 
-    /// Query which of the given `.drv` paths the server already has recorded,
-    /// with their whole input subtree, in its derivation table. The lookup is
-    /// global, not scoped to the project that owns `job_id`.
-    ///
-    /// Server responds with [`super::server::ServerMessage::KnownDerivations`].
-    /// The worker uses the response to prune BFS subtrees: if a derivation is
-    /// already fully recorded on the server, there is no need to traverse its
-    /// `inputDrvs` again.
     QueryKnownDerivations {
         job_id: String,
-        /// Echoed by [`super::server::ServerMessage::KnownDerivations`]; the
-        /// sole correlator.
         query_id: String,
         drv_paths: Vec<String>,
     },
 
-    /// Ask for an upload slot; nothing is sent for this object before its grant.
     UploadRequest {
         job_id: String,
         request_id: u64,
@@ -305,9 +195,6 @@ impl ClientMessage {
         }
     }
 
-    /// Static name of the variant. Used for log messages where dumping the
-    /// full Debug-formatted message would be unsafe (e.g. `NarPush` carries
-    /// up to 64 KiB of binary chunk data).
     pub fn variant_name(&self) -> &'static str {
         match self {
             ClientMessage::InitConnection { .. } => "InitConnection",

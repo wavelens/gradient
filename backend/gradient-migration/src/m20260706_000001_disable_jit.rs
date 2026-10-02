@@ -4,13 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Disable JIT for gradient's database. The dispatch-tick reconcile fixpoints
-//! and the cached_path consistency sweep run correlated `NOT EXISTS` predicates
-//! over the whole build graph, so their cost estimates trip Postgres's JIT
-//! thresholds - yet they execute sub-second, making per-call JIT compilation
-//! pure overhead (measured 2.9s -> 0.6s on the closure_complete CLEAR). JIT
-//! never pays for this OLTP-shaped workload. Scope via `current_database()` so
-//! it is name-portable across prod/CI/dev; owner role `gradient` may ALTER it.
+//! JIT is disabled because the correlated `NOT EXISTS` sweeps are tripping its cost thresholds
+//! while running sub-second. Disabling it cut the closure_complete CLEAR from 2.9s to 0.6s.
+//! `current_database()` is keeping the statement portable across prod, CI and dev.
 
 use sea_orm_migration::prelude::*;
 use sea_orm_migration::sea_orm::ConnectionTrait;

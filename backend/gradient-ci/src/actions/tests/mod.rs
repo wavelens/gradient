@@ -18,7 +18,6 @@ use serde_json::json;
 
 #[test]
 fn git_host_status_mapping() {
-    // A just-recorded entry point posts a pending check, same as evaluation.queued.
     assert!(matches!(
         git_host_status_for_event("build.created"),
         Some(CiStatus::Pending)
@@ -65,8 +64,6 @@ fn matches_event_send_mail_filters_by_stored_events() {
     assert!(!matches_event(&a, "build.failed"));
 }
 
-/// An `OpenPr` action fires on the events its `verify_gate` names, so its config
-/// is what decides whether it matches; the stored `events` list is ignored.
 fn open_pr(gate: gradient_types::VerifyGate) -> gradient_types::MTaskAction {
     use gradient_types::{ActionConfig, IntegrationId};
 
@@ -90,9 +87,9 @@ fn open_pr(gate: gradient_types::VerifyGate) -> gradient_types::MTaskAction {
 fn matches_event_open_pr_fires_only_on_gate_event() {
     use gradient_types::VerifyGate;
 
-    // The gate keys off the eval's own terminal transition, not a per-build
-    // event: a candidate whose closure is already built/available in a cache fires no
-    // `build.completed`, but the eval still reaches Building/Completed.
+    // The gate is keying off the evaluation's own terminal transition, not a per-build event. A
+    // candidate with an already-built closure is firing no `build.completed`. The evaluation is
+    // still reaching `Building` or `Completed`.
     let build_gate = open_pr(VerifyGate::Build);
     assert!(matches_event(&build_gate, "evaluation.completed"));
     assert!(!matches_event(&build_gate, "evaluation.building"));
@@ -107,10 +104,9 @@ fn matches_event_open_pr_fires_only_on_gate_event() {
 
 #[test]
 fn matches_event_git_host_status_ignores_stored_events() {
-    // The stored `events` list is irrelevant for GitHostStatusReport - the
-    // hardcoded GIT_HOST_STATUS_EVENTS set drives matching. Seed the row
-    // with an event that is NOT in that set so we can verify the action
-    // still fires for every event that IS, regardless of what's stored.
+    // The stored `events` list is irrelevant for `GitHostStatusReport` because
+    // `GIT_HOST_STATUS_EVENTS` is driving matching. The row is seeded with an event outside that
+    // set on purpose.
     let a = action_with(ActionType::GitHostStatusReport, vec!["evaluation.waiting"]);
     assert!(matches_event(&a, "build.created"));
     assert!(matches_event(&a, "build.queued"));
@@ -123,8 +119,6 @@ fn matches_event_git_host_status_ignores_stored_events() {
     assert!(matches_event(&a, "evaluation.completed"));
     assert!(matches_event(&a, "evaluation.action_required"));
     assert!(matches_event(&a, "evaluation.approval_granted"));
-    // Not a Git-host-status event - must not match even though it IS the
-    // event we stored on the row.
     assert!(!matches_event(&a, "evaluation.waiting"));
 }
 
@@ -239,8 +233,6 @@ fn build_ci_report_errors_on_invalid_build_id() {
     });
 }
 
-/// An input-update evaluation is an internal bump: its `OpenPr` acts, and the
-/// Git host report it would post against a still-blank commit does not.
 #[test]
 fn an_input_update_reaches_open_pr_and_never_the_git_host_report() {
     let actions = vec![
@@ -258,8 +250,6 @@ fn an_input_update_reaches_open_pr_and_never_the_git_host_report() {
     );
 }
 
-/// A regular CI run is the mirror image: the Git host check is posted and the
-/// `OpenPr` that would raise a pull request against it is not.
 #[test]
 fn a_normal_run_reaches_the_git_host_report_and_never_open_pr() {
     let actions = vec![
@@ -276,8 +266,6 @@ fn a_normal_run_reaches_the_git_host_report_and_never_open_pr() {
     );
 }
 
-/// An action whose stored events do not name the event never matches, whatever
-/// the payload says.
 #[test]
 fn an_action_that_does_not_subscribe_is_not_matched() {
     let actions = vec![action_with(ActionType::SendMail, vec!["build.failed"])];

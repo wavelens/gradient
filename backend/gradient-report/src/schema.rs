@@ -4,27 +4,14 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! The report file's own tables: what it is, and what it left out.
-
 use std::path::Path;
 
 use anyhow::{Context as _, Result};
 use rusqlite::Connection;
 
-/// Bumped whenever an exported table's shape or scope changes, so an inspector
-/// can refuse a file it does not understand rather than print wrong answers.
-///
-/// The inspector is shipping separately and pins the one version it reads, so a bump
-/// that does not reach it makes it refuse every report this writes - which it
-/// did, sitting on 10 against an exporter writing 11. `report-inspector`'s
-/// derivation reads both constants and fails evaluation when they disagree.
-///
-/// 16 carries derivation_build.probed: without it a bundle cannot say whether
-/// the need stopped at a shared build because the upstream probe had not answered yet.
-/// 17 drops `project` from worker_connection / worker_sample and
-/// `display_name` from worker_connection: telemetry describes the worker.
-/// 18 renames derivation_build's `substitutable`, `unready_deps` and `demanded`
-/// to `cache_available`, `blocking_deps` and `wanted`.
+/// Bump this whenever an exported table's shape or scope changes. `report-inspector` is pinning the
+/// one version it reads and refusing other files. Its derivation is reading both constants and
+/// failing evaluation when they disagree.
 pub const SCHEMA_VERSION: i64 = 18;
 
 #[derive(Clone, Copy, Debug)]
@@ -39,10 +26,9 @@ pub struct ManifestRow {
     pub table: String,
     pub rows_included: i64,
     pub rows_available: i64,
-    /// What the table's `$1` selected. Not always the evaluation: several tables
-    /// hang off shared builds it shares with other evaluations.
+    /// Several tables hang off shared builds that other evaluations share too. The scope is then
+    /// not the evaluation alone.
     pub scope: String,
-    /// What was dropped from that scope, or `none`.
     pub filter: String,
     pub redactions: String,
 }
@@ -146,8 +132,6 @@ mod tests {
         assert_eq!(packages, 0, "the flags stored must be the ones asked for");
     }
 
-    /// A filtered report must never read as an empty one: every exported table
-    /// says how many rows it had and how many it kept.
     #[test]
     fn manifest_distinguishes_filtered_from_empty() {
         let dir = tempfile::tempdir().expect("tempdir");

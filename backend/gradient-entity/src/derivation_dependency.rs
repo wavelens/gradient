@@ -9,18 +9,14 @@ use serde::{Deserialize, Serialize};
 
 use crate::ids::DerivationId;
 
-/// Which of the two dependency relations an edge carries. One row per pair, so an
-/// edge that is both a build input and a runtime reference is `Both`.
 #[derive(
     Clone, Copy, Debug, Default, PartialEq, Eq, EnumIter, DeriveActiveEnum, Deserialize, Serialize,
 )]
 #[sea_orm(rs_type = "i16", db_type = "SmallInteger")]
 pub enum EdgeKind {
-    /// From the `.drv`: an input the builder needs.
     #[default]
     #[sea_orm(num_value = 0)]
     Buildtime = 0,
-    /// Learned from a narinfo or a NAR: the output references it.
     #[sea_orm(num_value = 1)]
     Runtime = 1,
     #[sea_orm(num_value = 2)]

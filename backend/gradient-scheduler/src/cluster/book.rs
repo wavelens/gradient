@@ -67,8 +67,8 @@ impl PendingCluster {
     }
 }
 
-/// Clusters whose members are still arriving or wait for a placement. A member
-/// key here counts as tracked, so the dispatch passes never enqueue it again.
+/// A member key in the book is counting as tracked. The dispatch passes must never enqueue it
+/// again.
 #[derive(Debug, Default)]
 pub struct ClusterBook {
     waiting: HashMap<ClusterJobId, PendingCluster>,
@@ -111,13 +111,12 @@ impl ClusterBook {
         self.waiting.values().filter(|c| c.ready())
     }
 
-    /// A taken cluster's keys stay tracked until it is restored or its members
-    /// are released into active jobs, so no pass enqueues them meanwhile.
+    /// A taken cluster's keys stay tracked until it is restored or its members are released into
+    /// active jobs. No pass can enqueue them meanwhile.
     pub fn take(&mut self, id: ClusterJobId) -> Option<PendingCluster> {
         self.waiting.remove(&id)
     }
 
-    /// Drop a waiting cluster and untrack its members.
     pub fn drop_cluster(&mut self, id: ClusterJobId) -> Option<PendingCluster> {
         let cluster = self.waiting.remove(&id)?;
         for member in &cluster.members {

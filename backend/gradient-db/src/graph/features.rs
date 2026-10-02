@@ -48,11 +48,9 @@ pub async fn add_features(
             }
             .into_active_model();
 
-            // `derivation_feature` has a UNIQUE (derivation, feature) index;
-            // re-discovering an already-known edge during a fresh evaluation
-            // would otherwise blow up with a constraint violation and abort
-            // the whole eval-result handler. `ON CONFLICT DO NOTHING` makes
-            // the insert idempotent.
+            // A fresh evaluation can re-discover a known edge.
+            // The UNIQUE (derivation, feature) index would then abort the whole eval-result
+            // handler.
             EDerivationFeature::insert(aderivation_feature)
                 .on_conflict(
                     sea_orm::sea_query::OnConflict::columns([

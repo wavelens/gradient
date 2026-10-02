@@ -8,14 +8,9 @@ use crate::SourceError;
 use crate::git::pktline::read_ref_from_pktlines;
 use crate::git::url::parse_git_protocol_url;
 
-/// List the remote HEAD ref using the raw git wire protocol (v0) over TCP.
-///
-/// libgit2's `connect_auth` + `list()` can return an empty ref list for
-/// `git://` URLs because it negotiates git protocol v2 with git-daemon, and
-/// the subsequent `ls-refs` exchange may fail silently on some daemon versions.
-/// This implementation sends a plain protocol-v0 pkt-line request (no
-/// `version=2` extra parameter) so the daemon responds with an immediate v0
-/// ref advertisement containing HEAD.
+/// libgit2 is negotiating protocol v2 with git-daemon, and its `ls-refs` exchange can fail
+/// silently. This plain v0 request without `version=2` is getting an immediate ref advertisement
+/// with HEAD.
 pub(super) fn ls_remote_head_git_protocol(
     url: &str,
     branch: Option<&str>,
@@ -37,8 +32,6 @@ pub(super) fn ls_remote_head_git_protocol(
             stderr: e.to_string(),
         })?;
 
-    // Protocol-v0 request: "git-upload-pack /path\0host=host\0"
-    // Deliberately omitting "version=2" so the daemon responds in v0 format.
     let body = format!("git-upload-pack /{}\0host={}\0", repo_path, host);
     let pkt = format!("{:04x}{}", body.len() + 4, body);
     stream

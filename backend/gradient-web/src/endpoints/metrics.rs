@@ -4,13 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Prometheus exposition endpoint (`GET /metrics`) - closes #35.
-//!
-//! Collects metrics when scraped. No background aggregation:
-//! one DB query plus one scheduler snapshot per request. The route is only
-//! mounted when a metrics token is configured (`MetricsConfig::token`);
-//! when absent, callers fall through to the global 404 handler.
-
 use std::sync::{Arc, LazyLock};
 
 use axum::extract::{MatchedPath, State};
@@ -43,8 +36,6 @@ struct CountRow {
     value: i64,
 }
 
-/// Snapshot of values to render. Exposed to the rendering function so unit
-/// tests can drive it directly without spinning up a DB or scheduler.
 #[derive(Debug, Default)]
 pub(crate) struct Observations {
     pub version: String,
@@ -204,8 +195,6 @@ pub(crate) fn render(obs: &Observations) -> String {
     encode_text(&registry)
 }
 
-/// Persistent per-route HTTP metrics, accumulated across requests by
-/// [`track_http_metrics`] and merged into the scrape output (#212).
 struct HttpMetrics {
     registry: Registry,
     duration: HistogramVec,
@@ -263,8 +252,6 @@ pub struct HttpRouteStat {
     pub errors: u64,
 }
 
-/// Per-route HTTP latency/throughput, snapshotted from the persistent histogram
-/// for the System Health / Network board pages (cumulative since process start).
 pub(crate) fn http_snapshot() -> Vec<HttpRouteStat> {
     use std::collections::HashMap;
     let mut dur: HashMap<(String, String), (u64, f64)> = HashMap::new();
@@ -340,8 +327,6 @@ pub struct ProcessStat {
     pub threads: f64,
 }
 
-/// Process/runtime snapshot (RSS, fds, CPU, threads) for the System Health page.
-/// Empty off Linux, where the prometheus process collector is a no-op.
 pub(crate) fn process_snapshot() -> ProcessStat {
     let mut s = ProcessStat::default();
     #[cfg(target_os = "linux")]
@@ -373,8 +358,6 @@ pub(crate) fn process_snapshot() -> ProcessStat {
     s
 }
 
-/// Middleware recording each request's duration and status per the matched
-/// route template (so dynamic segments don't explode label cardinality).
 pub async fn track_http_metrics(request: axum::extract::Request, next: Next) -> Response {
     let method = request.method().as_str().to_owned();
     let route = request
@@ -399,10 +382,8 @@ pub async fn track_http_metrics(request: axum::extract::Request, next: Next) -> 
     response
 }
 
-// Status sets and label names come from the enums (decoded in Rust below), so a
-// new or renumbered variant can never silently vanish from a series. The histogram
-// is one pass per table and the terminal set only picks the series a bucket lands
-// in: a WHERE per series read the same table twice, each time dropping most of it.
+// Status sets and label names are coming from the enums. A new or renumbered variant can never
+// silently vanish from a series.
 fn observations_sql() -> String {
     let build_terminal: Vec<BuildStatus> = BuildStatus::iter()
         .filter(|s| {
@@ -465,11 +446,6 @@ gradient_db::sql_fn! {
         tier = Bulk;
 }
 
-/// Collect metrics by querying the DB and scheduler in-memory state.
-///
-/// Errors propagate as `WebError`; the handler converts those into 500.
-/// We intentionally never serve a partial response - Prometheus would
-/// treat a 200 with missing series as authoritative and corrupt counters.
 fn render_uploads(registry: &Registry, uploads: &gradient_storage::admission::AdmissionStats) {
     let in_flight =
         IntGauge::new("gradient_upload_in_flight", "Uploads holding a permit.").expect("metric");
@@ -525,7 +501,6 @@ pub(crate) async fn collect(
     state: &Arc<ServerState>,
     scheduler: &Scheduler,
 ) -> WebResult<Observations> {
-    // Single CTE-style query returning typed rows for every counter we need.
     let rows: Vec<CountRow> = CountRow::find_by_statement(OBSERVATIONS.stmt())
         .all(&state.web_db)
         .await
@@ -585,9 +560,6 @@ pub(crate) async fn collect(
     Ok(obs)
 }
 
-/// Per-route middleware enforcing the bearer token configured via
-/// `MetricsConfig`. The route is only mounted when `state.config.metrics`
-/// is `Some`, so unwrapping is invariant-safe inside the closure.
 pub async fn metrics_auth(
     State(state): State<Arc<ServerState>>,
     headers: HeaderMap,
@@ -595,8 +567,6 @@ pub async fn metrics_auth(
     next: Next,
 ) -> Response {
     let Some(cfg) = state.config.metrics.as_ref() else {
-        // Defensive: the route shouldn't be reachable without a config,
-        // but a 404 here keeps behavior consistent with the unmounted case.
         return StatusCode::NOT_FOUND.into_response();
     };
 
@@ -611,10 +581,9 @@ pub async fn metrics_auth(
     let presented_bytes = presented.as_bytes();
     let token_bytes = cfg.token.as_bytes();
 
-    // Length check before constant-time compare: ConstantTimeEq's contract
-    // requires equal-length slices for a meaningful result. Token length
-    // is operator-controlled, not user-controlled, so the early return
-    // does not leak secret material.
+    // The length check is preceding the constant-time compare because `ConstantTimeEq` is only
+    // meaningful on equal-length slices. Token length is operator-controlled, and the early return
+    // is leaking no secret.
     if presented_bytes.len() != token_bytes.len()
         || presented_bytes.ct_eq(token_bytes).unwrap_u8() != 1
     {

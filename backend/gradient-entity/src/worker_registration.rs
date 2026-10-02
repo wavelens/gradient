@@ -10,40 +10,23 @@ use serde::{Deserialize, Serialize};
 
 use crate::ids::{ProjectId, UserId, WorkerRegistrationId};
 
-/// Tracks which peers (projects, caches, proxies) have registered a given worker ID
-/// and holds the SHA-256 hash of the peer-issued token for challenge-response auth.
 #[derive(Clone, Debug, Default, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
 #[sea_orm(table_name = "worker_registration")]
 pub struct Model {
     #[sea_orm(primary_key)]
     pub id: WorkerRegistrationId,
-    /// The peer (project, cache, or proxy) that registered this worker.
     pub peer_id: ProjectId,
-    /// The persistent worker identity UUID sent in `InitConnection`.
     pub worker_id: String,
-    /// SHA-256 hex digest of the token issued by the peer to this worker.
     pub token_hash: String,
-    /// True when this row was created by declarative state management.
     pub managed: bool,
-    /// WebSocket URL where the worker accepts incoming connections from the server.
-    /// When set, the server connects outbound to this URL instead of waiting for
-    /// the worker to connect inbound.
+    /// The server is connecting outbound to this URL when set, instead of waiting for an inbound
+    /// connection.
     pub url: Option<String>,
-    /// When false, the server will refuse to authenticate this registration and
-    /// will not dispatch jobs to this worker.
     pub active: bool,
-    /// Per-registration server-side gate for the `fetch` capability. When false,
-    /// this registration will not contribute the `fetch` capability to the
-    /// worker's negotiated capability set at handshake.
     pub enable_fetch: bool,
-    /// Per-registration server-side gate for the `eval` capability.
     pub enable_eval: bool,
-    /// Per-registration server-side gate for the `build` capability.
     pub enable_build: bool,
-    /// Human-readable display name for this worker (empty string if not set).
     pub display_name: String,
-    /// User who created this registration. NULL for legacy rows registered
-    /// before this column was introduced.
     pub created_by: Option<UserId>,
     pub created_at: NaiveDateTime,
 }

@@ -4,12 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Integration tests for task_action CRUD endpoints.
-//!
-//! Same pattern as `triggers.rs`: manual Tokio runtime + `axum_test::TestServer`
-//! + `MockDatabase`. The SMTP-disabled test builds its own `ServerState` so it
-//!   can swap in an `InMemoryEmailSender::disabled()`.
-
 #![expect(
     clippy::unwrap_used,
     reason = "test scaffolding: a fixture helper that cannot build its value should fail the test loudly"
@@ -34,8 +28,6 @@ use sea_orm::{DatabaseBackend, MockDatabase};
 use serde_json::{Value, json};
 use std::sync::Arc;
 use uuid::Uuid;
-
-// ── Fixture helpers ────────────────────────────────────────────────────────────
 
 fn action_id() -> TaskActionId {
     TaskActionId::new(Uuid::parse_str("00000000-0000-0000-0000-0000000000a1").unwrap())
@@ -142,8 +134,6 @@ fn with_task_edit(db: MockDatabase) -> MockDatabase {
         .append_query_results([vec![admin_role_row()]])
 }
 
-/// Builds a `TestServer` with a custom email-sender. Used for the
-/// SMTP-disabled gating test; other tests use `make_test_server_with`.
 fn server_with_email(
     db: sea_orm::DatabaseConnection,
     email: Arc<dyn EmailSender>,
@@ -197,8 +187,6 @@ fn server_with_email(
 }
 
 const BASE_URL: &str = "/api/v1/tasks/test-project/test-task/actions";
-
-// ── Tests ──────────────────────────────────────────────────────────────────────
 
 #[test]
 fn list_actions_empty() {
@@ -447,7 +435,6 @@ fn update_rejects_action_type_change() {
         let session_id = SessionId::now_v7();
         let token = make_token(session_id);
 
-        // Existing row is send_mail (action_type = 0); PATCH with send_web_request config.
         let db = with_task_edit(with_auth(
             MockDatabase::new(DatabaseBackend::Postgres),
             session_id,

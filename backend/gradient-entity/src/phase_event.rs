@@ -12,8 +12,6 @@ use uuid::Uuid;
 
 use crate::ids::PhaseEventId;
 
-/// Discriminant tagging the polymorphic `subject_id`: a `derivation_build.id`
-/// or an `evaluation.id`.
 #[repr(i16)]
 #[derive(
     Debug,

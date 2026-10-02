@@ -4,12 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! GitHub provider. Inbound webhooks arrive on the dedicated GitHub App
-//! endpoint, so this provider opts out of the per-integration webhook route;
-//! App-installation auth is resolved by the CI layer via [`supports_app_auth`].
-//!
-//! [`supports_app_auth`]: GitHostProvider::supports_app_auth
-
 use std::sync::Arc;
 
 use anyhow::anyhow;

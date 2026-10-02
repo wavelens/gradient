@@ -4,8 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-/// The first of `units`, listed in ascending order, past the last finished
-/// one. A checkpoint a newer release no longer lists resumes at its successor.
+/// A checkpoint missing from a newer release's list is resuming at its successor.
 pub(crate) fn next_unit<'a>(units: &'a [String], checkpoint: Option<&str>) -> Option<&'a str> {
     units
         .iter()
@@ -13,14 +12,10 @@ pub(crate) fn next_unit<'a>(units: &'a [String], checkpoint: Option<&str>) -> Op
         .find(|unit| checkpoint.is_none_or(|done| *unit > done))
 }
 
-/// What a tick of the background storage work did.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Step {
-    /// Nothing is due.
     Idle,
-    /// One unit finished; the next waits for the pace.
     Paced,
-    /// One unit of a requested round finished; the next starts at once.
     Requested,
 }
 

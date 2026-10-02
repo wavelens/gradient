@@ -7,14 +7,10 @@
 use sea_orm::DbErr;
 use std::future::Future;
 
-/// Postgres binds at most 65535 parameters per statement. Any `IN (...)` whose
-/// element count scales with workload data must stay below this cap; we keep
-/// generous headroom for the other binds carried by the same query.
+/// Postgres is binding at most 65535 parameters per statement.
+/// The chunk size is leaving headroom for the other binds of the same query.
 pub const IN_CHUNK_SIZE: usize = 30_000;
 
-/// Run `query` over `ids` split into [`IN_CHUNK_SIZE`] chunks and concatenate
-/// the rows. Each id lands in exactly one chunk, so a `WHERE col IN (chunk)`
-/// select returns the same rows as one unchunked query, without duplicates.
 pub async fn fetch_in_chunks<I, T, F, Fut>(ids: &[I], query: F) -> Result<Vec<T>, DbErr>
 where
     I: Clone,
@@ -37,9 +33,6 @@ where
     Ok(out)
 }
 
-/// Run `op` (typically an `update_many`/`delete_many` whose filter binds `ids`)
-/// once per [`IN_CHUNK_SIZE`] chunk, discarding each chunk's result. Use this
-/// for write statements where the affected-row payload is not needed.
 pub async fn for_each_chunk<I, T, F, Fut>(ids: &[I], op: F) -> Result<(), DbErr>
 where
     I: Clone,

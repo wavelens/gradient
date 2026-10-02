@@ -4,12 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Partial indexes for the periodic scanners: the sign sweep's pending-row
-//! scan (`cached_path_signature.signature IS NULL` had no index, a full scan
-//! of the largest table per sweep) and the candidate sets of the four
-//! CLEAR/SET flag fixpoints, which previously walked the whole heap on every
-//! reconcile pass to find rows on one side of a boolean.
-
 use sea_orm_migration::prelude::*;
 use sea_orm_migration::sea_orm::ConnectionTrait;
 

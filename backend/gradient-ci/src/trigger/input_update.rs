@@ -4,11 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Creates `input_update` evaluations when a trigger fires on a task that
-//! has an `OpenPr` action and tracked flake inputs. The cheap server-side
-//! condition gates creation; the worker decides whether there is actually
-//! anything to bump and short-circuits empty passes.
-
 use super::TriggerError;
 use gradient_entity::evaluation::{EvaluationKind, EvaluationStatus};
 use gradient_types::*;
@@ -16,9 +11,6 @@ use sea_orm::{
     ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, IntoActiveModel, QueryFilter,
 };
 
-/// When the condition holds, create one `input_update` evaluation per the
-/// `OpenPr` action's granularity. Best-effort: returns the created evaluation
-/// ids, or an empty vec when the condition is not met.
 pub async fn maybe_trigger_input_update<C: ConnectionTrait>(
     db: &C,
     task: &MTask,
@@ -45,7 +37,6 @@ pub async fn maybe_trigger_input_update<C: ConnectionTrait>(
         .filter(CTaskFlakeInputOverride::Task.eq(task.id))
         .all(db)
         .await?;
-    // Safety gate: a url-pinned override anywhere on the task blocks the run.
     if overrides.iter().any(|o| o.url.is_some()) {
         return Ok(Vec::new());
     }
@@ -75,9 +66,8 @@ pub async fn maybe_trigger_input_update<C: ConnectionTrait>(
         .map(|b| format!("{b:02x}"))
         .collect();
 
-    // Globs can only be expanded worker-side against flake.lock. Under PerInput
-    // they are collected into a single discovery eval whose matches fan out into
-    // one per-input eval each; under PerRun they ride along in the one eval.
+    // Globs are expandable only worker-side against flake.lock. `PerInput` is collecting them into
+    // one discovery eval with a per-input fan-out. `PerRun` is carrying them in the one eval.
     let (globs, literals): (Vec<String>, Vec<String>) = tracked
         .into_iter()
         .partition(|n| gradient_util::glob::is_pattern(n));
@@ -118,9 +108,7 @@ pub async fn maybe_trigger_input_update<C: ConnectionTrait>(
     Ok(created)
 }
 
-/// Create one `input_update` evaluation for `target` with a blank commit (the
-/// PR commit does not exist until the branch is force-pushed) plus its sidecar.
-/// `discover_only` marks a glob-discovery run that opens no PR.
+/// The commit is blank because the PR commit does not exist until the branch is force-pushed.
 pub async fn create_input_update_eval<C: ConnectionTrait>(
     db: &C,
     task: &MTask,
@@ -175,8 +163,6 @@ pub async fn create_input_update_eval<C: ConnectionTrait>(
     Ok(evaluation.id)
 }
 
-/// Fan a discovery eval's matched inputs out into one per-input update eval each,
-/// skipping inputs that already have an active update eval for the task.
 pub async fn fan_out_expansion<C: ConnectionTrait>(
     db: &C,
     task: &MTask,

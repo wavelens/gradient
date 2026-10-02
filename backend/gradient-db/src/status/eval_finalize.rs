@@ -4,11 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Graph-derived evaluation finalization. An evaluation settles the moment its
-//! last referenced shared build leaves the active set, regardless of WHICH mutation
-//! path moved it - the effects emitter calls in here on every terminal
-//! transition, so bulk sweeps and the single-row path finalize identically.
-
 use super::evaluation_status::update_evaluation_status;
 use crate::DbContext;
 use gradient_entity::evaluation::EvaluationStatus;
@@ -16,16 +11,9 @@ use gradient_types::*;
 use sea_orm::{ColumnTrait, DbErr, EntityTrait, QueryFilter};
 use tracing::info;
 
-/// Settle `evaluation_id` once no shared build it names blocks it
-/// ([`crate::graph::predicates::blocks_evaluation`]). `Failed` when any shared build ended
-/// unbuilt or the eval logged error-level messages (nix eval errors mean a
-/// partially-successful walk), else `Completed`. A no-op unless the evaluation
-/// is in its build phase.
-///
-/// The counters answer "not yet" in one read on every terminal transition. They
-/// never answer "done": a naming and a transition in flight together can miss
-/// each other, so zero is confirmed by the exact reads, and a zero they
-/// contradict is recounted rather than settled.
+/// The counters are only answering "not yet".
+/// A naming and a transition in flight together can miss each other.
+/// The exact reads are confirming zero instead.
 pub async fn check_evaluation_done(
     ctx: &DbContext,
     evaluation_id: EvaluationId,
@@ -80,10 +68,6 @@ pub async fn check_evaluation_done(
     Ok(())
 }
 
-/// An evaluation whose builds are what it is waiting on: `Building`, or parked on
-/// a reason the build phase owns. A pre-build park (`Approval`, `NoCache`, the
-/// capacity and drain reasons) has named no shared builds of its own yet, and an
-/// `Aborting` park belongs to the abort, which writes the terminal status itself.
 fn in_build_phase(eval: &MEvaluation) -> bool {
     match eval.status {
         EvaluationStatus::Building => true,
@@ -97,11 +81,6 @@ fn in_build_phase(eval: &MEvaluation) -> bool {
     }
 }
 
-/// Finalize every evaluation referencing any of `derivations`, deduplicated.
-///
-/// The referencing set is resolved for the whole batch in one read rather than one
-/// per derivation: a need loss names as many derivations as the update moved,
-/// and the union is all this wants.
 pub async fn finalize_evals_for_derivations(
     ctx: &DbContext,
     derivations: &[DerivationId],
@@ -122,7 +101,6 @@ mod tests {
     use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult, Value};
     use std::collections::BTreeMap;
 
-    /// The reply to the counters read: the evaluation names two shared builds.
     fn counters(active: i64, failed: i64) -> Vec<BTreeMap<String, Value>> {
         vec![BTreeMap::from([
             ("named".to_owned(), Value::BigInt(Some(2))),
@@ -133,7 +111,6 @@ mod tests {
         ])]
     }
 
-    /// The reply to either exact `EXISTS` read.
     fn flag(column: &str, value: bool) -> Vec<BTreeMap<String, Value>> {
         vec![BTreeMap::from([(
             column.to_owned(),
@@ -156,8 +133,6 @@ mod tests {
         }
     }
 
-    /// Counters at zero are a claim the exact read confirms before anything
-    /// settles: a naming and a transition in flight together can miss each other.
     #[tokio::test]
     async fn an_evaluation_nothing_blocks_settles() {
         let eval = building();
@@ -180,8 +155,8 @@ mod tests {
 
         let (ctx, pool) = crate::test_ctx::ctx(db).await;
         check_evaluation_done(&ctx, eval.id).await.unwrap();
-        // The settle still spawns work that holds a context clone: drop alone
-        // leaves the pool handle shared and the log unreadable.
+        // The settle is still spawning work holding a context clone.
+        // A plain drop would leave the pool handle shared and the log unreadable.
         crate::test_ctx::settle(ctx).await;
 
         let log = crate::pool::statements(pool.into_transaction_log());
@@ -191,9 +166,6 @@ mod tests {
         );
     }
 
-    /// A shared build still blocking stops the pass at the one read. The emitter asks
-    /// this on every terminal transition, so the blocked answer must cost the
-    /// counters row and must not read the shared build set or the evaluation row.
     #[tokio::test]
     async fn a_blocked_evaluation_costs_one_read() {
         let eval = building();
@@ -210,8 +182,6 @@ mod tests {
         assert!(log[0].contains("evaluation_shared_build_delta"), "{log:?}");
     }
 
-    /// The verdict is the exact read's, not the counter's: a `failed` counter
-    /// that missed an abort would otherwise turn a red evaluation green.
     #[tokio::test]
     async fn a_failed_shared_build_fails_the_evaluation() {
         let eval = building();
@@ -249,8 +219,6 @@ mod tests {
         );
     }
 
-    /// Counters that say nothing blocks while the exact read finds a blocking
-    /// shared build drifted low: the evaluation is recounted, not settled.
     #[tokio::test]
     async fn counters_the_exact_read_contradicts_are_recounted() {
         let eval = building();
@@ -276,8 +244,6 @@ mod tests {
         );
     }
 
-    /// An evaluation deleted between being named and being checked has nothing
-    /// to settle, and must not abort the checks of the others in its batch.
     #[tokio::test]
     async fn a_deleted_evaluation_is_nothing_to_settle() {
         let eval = building();

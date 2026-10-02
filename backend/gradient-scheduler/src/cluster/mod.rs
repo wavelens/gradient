@@ -4,9 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Cluster jobs on the scheduler side: members wait in the book until their
-//! cluster is complete, and idle slots are the planner's only capacity view.
-
 pub(crate) mod book;
 mod coordinator;
 mod divert;
@@ -39,14 +36,12 @@ pub struct CommittedSeat {
     pub endpoint: Option<String>,
 }
 
-/// A cluster taken from the book with its seats' members already active.
 #[derive(Debug)]
 pub struct Committing {
     pub cluster: PendingCluster,
     pub seats: Vec<CommittedSeat>,
 }
 
-/// A member's assignment waiting for its session to hand it out.
 pub struct PreparedMember {
     pub assignment: crate::jobs::Assignment,
     pub membership: gradient_wire::types::ClusterMembership,

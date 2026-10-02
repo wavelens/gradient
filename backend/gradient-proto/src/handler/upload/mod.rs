@@ -330,8 +330,6 @@ impl InboundContext<'_> {
     }
 }
 
-/// Abort what a dropped grant leaves behind in storage: an open multipart
-/// upload. A passthrough partial is left to the TTL sweep so a retry can resume it.
 pub(super) async fn abandon_transfer(state: &ServerState, granted: Granted) {
     if let (Transfer::Multipart { upload_id }, Some(ObjectKey::Nar(hash))) =
         (&granted.transfer, object_key(&granted.object))
@@ -478,8 +476,8 @@ mod tests {
         assert_eq!(state.upload_admission.in_flight(), 0);
     }
 
-    /// The worker's writer drains the control lane first, so `UploadFinished`
-    /// can overtake the last passed-through chunks; the commit must wait for them.
+    /// The worker's writer is draining the control lane first, and `UploadFinished` can overtake
+    /// the last chunks. The commit must wait for them.
     #[tokio::test]
     async fn a_finish_that_overtakes_the_final_chunk_waits_for_it() {
         let state = test_state(MockDatabase::new(DatabaseBackend::Postgres).into_connection());
@@ -533,7 +531,6 @@ mod tests {
         );
     }
 
-    /// A failed job's uploads must not keep their permits until a lease expires.
     #[tokio::test]
     async fn a_failed_job_releases_its_granted_and_queued_uploads() {
         let state = test_state(MockDatabase::new(DatabaseBackend::Postgres).into_connection());

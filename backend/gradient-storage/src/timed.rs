@@ -4,9 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Latency and error telemetry for every NAR storage call, file or S3. A call
-//! whose future is dropped before it finishes (the passthrough's open timeout,
-//! `bounded()`) is counted as cancelled, which is how a hung backend shows up.
+//! A call whose future is dropped before it finished is counted as cancelled. A hung backend is
+//! showing up this way.
 
 use std::fmt;
 use std::ops::Range;
@@ -73,7 +72,6 @@ impl OpGuard {
         result
     }
 
-    /// `answered` is false only for a backend failure; a missing object is an answer.
     pub(crate) fn finish_with(mut self, answered: bool) {
         self.done = true;
         if answered {

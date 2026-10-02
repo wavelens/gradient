@@ -4,18 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! The path-level reference graph goes. Runtime references are edges of
-//! `derivation_dependency` now and wholeness is counted on the anchor
-//! (`derivation_build.missing_runtime_deps`), so `cached_path_reference` and the
-//! counter it fed have no readers left: `m20260919_000000` copied the edges onto
-//! the graph and the ordered `References:` line into `cached_path.references`.
-//!
-//! `down` restores the table, its indexes and the column exactly as
-//! `m20260624_000003` and `m20260908_000001` created them, but NOT the rows: the
-//! edges are recoverable from `cached_path.references` and are re-derived here,
-//! while the counter is left at its default for the same reason the forward
-//! migration carries no backfill - a recount is what fills it.
-
 use sea_orm_migration::prelude::*;
 use sea_orm_migration::sea_orm::ConnectionTrait;
 
@@ -76,7 +64,7 @@ impl MigrationTrait for Migration {
 mod tests {
     use super::{DOWN, UP};
 
-    /// The table goes only after its column does, or the reverse migration has
+    /// The table must be dropped after the column. Otherwise the reverse migration would have
     /// nothing to rebuild the edges from.
     #[test]
     fn the_reverse_rebuilds_the_index_from_the_column_that_replaced_it() {

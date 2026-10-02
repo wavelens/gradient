@@ -23,15 +23,10 @@ pub struct Model {
     pub managed: bool,
     pub expires_at: Option<NaiveDateTime>,
     pub revoked_at: Option<NaiveDateTime>,
-    /// Bitmask over `gradient_core::permissions::Permission` capabilities;
-    /// caps the key's effective authority on every authenticated request.
     pub permission: i64,
-    /// Optional project pin. `None` = key works in any project the owning user is a
-    /// member of (legacy behavior). `Some(id)` = key is rejected for any
-    /// other project.
     pub project: Option<ProjectId>,
     pub cache: Option<CacheId>,
-    /// Source CIDRs allowed to present this key. `None`/empty = any source.
+    /// Source CIDRs allowed to present this key. `None` or an empty list is allowing any source.
     #[sea_orm(column_type = "Array(std::sync::Arc::new(ColumnType::Text))", nullable)]
     pub allowed_ips: Option<Vec<String>>,
 }

@@ -22,8 +22,6 @@ use sea_orm::{
     QueryFilter, Value,
 };
 
-/// Abort every `Queued` cluster with a member that can no longer run; it would
-/// wait for that member forever. Returns the clusters it aborted.
 pub async fn abort_dead_queued_clusters<C: ConnectionTrait>(
     db: &C,
 ) -> Result<Vec<ClusterJobId>, DbErr> {
@@ -103,8 +101,6 @@ impl From<MemberRow> for MemberOf {
     }
 }
 
-/// The cluster memberships of the named jobs, one row per member with its
-/// cluster and the cluster's member count.
 pub async fn cluster_membership<C: ConnectionTrait>(
     db: &C,
     evaluations: &[EvaluationId],
@@ -125,8 +121,6 @@ pub async fn cluster_membership<C: ConnectionTrait>(
     Ok(rows.into_iter().map(MemberOf::from).collect())
 }
 
-/// A member of the correlated `cluster_job` whose job can no longer run: a
-/// terminal evaluation, or a shared build that is done or failed for good.
 pub(crate) fn dead_member_of_cluster() -> SelectStatement {
     let dead_evaluation = Query::select()
         .expr(Expr::val(1))

@@ -14,7 +14,6 @@ use sea_orm::sea_query::Expr;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QuerySelect};
 use std::collections::HashSet;
 
-/// Abort every shared build only `evaluation` still needs, returning the ids it moved.
 pub async fn abort_eval_shared_builds(
     ctx: &DbContext,
     evaluation: &MEvaluation,
@@ -73,8 +72,8 @@ pub async fn abort_eval_shared_builds(
     })
     .await?;
 
-    // This bulk transition bypasses `update_derivation_build_status`; feed the
-    // exact changes (pre-status was selected above) through the one emitter.
+    // This bulk transition is bypassing `update_derivation_build_status`.
+    // Its exact changes must go through the one emitter.
     let changes: Vec<super::TransitionChange> = to_abort
         .iter()
         .map(|a| super::TransitionChange {
@@ -117,8 +116,6 @@ pub async fn abort_eval_shared_builds(
     Ok(abort_ids)
 }
 
-/// Of `shared_build_ids`, those a non-terminal evaluation other than `this_eval` still
-/// needs (via its own `build_job`). Those shared builds must keep running.
 async fn ids_shared_with_other_evaluations(
     ctx: &DbContext,
     this_eval: EvaluationId,
@@ -188,8 +185,6 @@ mod tests {
         }
     }
 
-    /// The opening select projects a single column, and a mock row is read by
-    /// position, so only its shape matters here.
     fn shared_build_id_row(id: DerivationBuildId) -> BTreeMap<String, Value> {
         BTreeMap::from([("derivation_build".to_owned(), Value::from(id.into_inner()))])
     }
@@ -208,13 +203,6 @@ mod tests {
         }
     }
 
-    /// The query script `abort_eval_shared_builds` replays, in order: the aborting
-    /// evaluation's shared builds, which of them are still active, the `build_job`
-    /// rows other evaluations hold on those shared builds, and those evaluations.
-    /// Everything past the abort write (the build jobs and entry points the effects
-    /// read, the attempts whose logs the abort owes, the need walk) is answered
-    /// empty: the decision is made by then and each of those paths is a no-op on
-    /// empty input. The phase-event insert reads its row back last.
     fn scripted_db(
         shared_builds: Vec<BTreeMap<String, Value>>,
         active: Vec<MDerivationBuild>,
@@ -238,7 +226,6 @@ mod tests {
             .into_connection()
     }
 
-    /// The `UPDATE derivation_build` the abort wrote, rendered with its bound ids.
     fn abort_update(pool: WorkerDb) -> String {
         pool.into_transaction_log()
             .iter()
@@ -247,10 +234,6 @@ mod tests {
             .expect("the abort writes derivation_build")
     }
 
-    /// Two live evaluations building the same derivation share its shared build, so
-    /// aborting one may only stop the shared builds it alone still wants. The shared
-    /// one stays Building and is never written, which is what keeps the other
-    /// evaluation's build running instead of restarting it later.
     #[tokio::test]
     async fn an_abort_spares_a_shared_build_another_live_evaluation_needs() {
         let aborting = eval_row(EvaluationStatus::Building);
@@ -291,8 +274,6 @@ mod tests {
         );
     }
 
-    /// Same graph, but the other evaluation has already finished: nothing live
-    /// needs the shared build any more, so the abort takes both.
     #[tokio::test]
     async fn an_abort_stops_a_shared_build_once_the_other_evaluation_is_terminal() {
         let aborting = eval_row(EvaluationStatus::Building);

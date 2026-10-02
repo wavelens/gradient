@@ -4,9 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Evaluations parked on an architecture or feature set no connected worker
-//! provides are aborted unless their task opted into waiting for workers.
-
 use std::collections::HashSet;
 use std::sync::Arc;
 
@@ -16,18 +13,15 @@ use gradient_entity::evaluation::EvaluationStatus;
 use gradient_types::*;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QuerySelect};
 
-/// How long an evaluation must have sat parked on the same unmet systems before
-/// it is aborted, so a server restart or a worker redeploy does not abort
-/// everything in flight before the pool reconnects.
+/// The grace is keeping a server restart or worker redeploy from aborting everything in flight
+/// before the pool is back.
 const UNBUILDABLE_GRACE_SECS: i64 = 300;
 
-/// An evaluation to abort and the systems no connected worker provided.
 pub(crate) struct Unbuildable {
     pub evaluation: MEvaluation,
     pub unmet: Vec<UnmetRequirement>,
 }
 
-/// The tasks among `evals` that opted into waiting for workers.
 pub(crate) async fn tasks_waiting_for_workers(
     state: &Arc<ServerState>,
     evals: &[MEvaluation],
@@ -50,9 +44,6 @@ pub(crate) async fn tasks_waiting_for_workers(
     Ok(waiting.into_iter().collect())
 }
 
-/// The unmet systems `eval` is aborted for: it stays parked on the systems it
-/// was parked on at least [`UNBUILDABLE_GRACE_SECS`] ago, and its task does not
-/// wait for workers.
 pub(crate) fn unbuildable(
     eval: &MEvaluation,
     current: Option<&WaitingReason>,
@@ -76,7 +67,6 @@ pub(crate) fn unbuildable(
     }
 }
 
-/// The evaluation warning recorded when it is aborted.
 pub(crate) fn unbuildable_warning(unmet: &[UnmetRequirement]) -> String {
     let systems: Vec<String> = unmet
         .iter()

@@ -133,7 +133,6 @@ fn check_url(url: &str) -> WebResult<()> {
         .map_err(|e| WebError::unprocessable_entity(e.to_string()))
 }
 
-/// A fresh secret: the plaintext for the one response that shows it, the ciphertext for the row.
 fn new_secret(state: &ServerState) -> WebResult<(String, String)> {
     use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
     use rand::RngExt as _;

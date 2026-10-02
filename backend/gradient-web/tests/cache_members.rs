@@ -4,9 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Integration tests for the cache member management API
-//! (`/api/v1/caches/{cache}/members`).
-
 #![expect(
     clippy::unwrap_used,
     reason = "test scaffolding: a fixture helper that cannot build its value should fail the test loudly"
@@ -22,8 +19,6 @@ use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
 use uuid::Uuid;
-
-// ── Fixture helpers ──────────────────────────────────────────────────────────
 
 fn cache_id() -> CacheId {
     CacheId::new(Uuid::parse_str("c0000000-0000-0000-0000-000000000001").unwrap())
@@ -49,8 +44,6 @@ fn cache_row(managed: bool) -> cache::Model {
     }
 }
 
-/// Build a one-row mock result that satisfies sea-orm's `count()` parser
-/// (`SELECT COUNT(*) AS num_items` -> `try_get::<i64>("", "num_items")`).
 fn count_row(num: i64) -> BTreeMap<&'static str, sea_orm::Value> {
     let mut row = BTreeMap::new();
     row.insert("num_items", sea_orm::Value::BigInt(Some(num)));
@@ -143,22 +136,17 @@ fn run<F: std::future::Future>(fut: F) -> F::Output {
         .block_on(fut)
 }
 
-// ── GET /caches/{cache}/members ───────────────────────────────────────────────
-
 #[test]
 fn list_members_requires_view_cache() {
     run(async {
         let session_id = SessionId::now_v7();
         let token = make_token(session_id);
 
-        // Admin caller: cache found -> member lookup (admin) -> role lookup -> member+user join
         let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
             .append_query_results([vec![cache_row(false)]])
             .append_query_results([vec![admin_member()]])
             .append_query_results([vec![admin_role_row()]])
-            // the join for member listing returns the admin member+user pair
             .append_query_results([vec![(admin_member(), Some(user()))]])
-            // role map lookup
             .append_query_results([vec![admin_role_row()]]);
 
         let server = make_test_server(db.into_connection());
@@ -183,7 +171,6 @@ fn list_members_non_member_gets_not_found() {
         let session_id = SessionId::now_v7();
         let token = make_token(session_id);
 
-        // load_cache with ViewCache: cache found -> member lookup returns empty
         let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
             .append_query_results([vec![cache_row(false)]])
             .append_query_results([Vec::<cache_user::Model>::new()]);
@@ -198,15 +185,12 @@ fn list_members_non_member_gets_not_found() {
     });
 }
 
-// ── POST /caches/{cache}/members ──────────────────────────────────────────────
-
 #[test]
 fn add_member_requires_manage_cache_members() {
     run(async {
         let session_id = SessionId::now_v7();
         let token = make_token(session_id);
 
-        // View-role caller: cache -> member (View) -> role lookup -> blocked by ManageCacheMembers
         let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
             .append_query_results([vec![cache_row(false)]])
             .append_query_results([vec![view_member()]])
@@ -230,19 +214,13 @@ fn add_member_admin_creates_a_pending_invitation() {
         let token = make_token(session_id);
 
         let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
-            // load_cache Require(ManageCacheMembers): cache -> member -> role
             .append_query_results([vec![cache_row(false)]])
             .append_query_results([vec![admin_member()]])
             .append_query_results([vec![admin_role_row()]])
-            // find_user_by_username
             .append_query_results([vec![other_user_row()]])
-            // find_cache_membership (check not already a member) -> empty
             .append_query_results([Vec::<cache_user::Model>::new()])
-            // find_cache_invitation (check not already invited) -> empty
             .append_query_results([Vec::<cache_invitation::Model>::new()])
-            // role lookup by name
             .append_query_results([vec![view_role_row()]])
-            // INSERT cache_invitation
             .append_query_results([vec![pending_invitation()]])
             .append_exec_results([MockExecResult {
                 last_insert_id: 0,
@@ -286,7 +264,6 @@ fn add_member_superuser_skips_the_invitation() {
             .append_query_results([Vec::<cache_user::Model>::new()])
             .append_query_results([Vec::<cache_invitation::Model>::new()])
             .append_query_results([vec![view_role_row()]])
-            // INSERT cache_user directly, no invitation
             .append_query_results([vec![new_member]])
             .append_exec_results([MockExecResult {
                 last_insert_id: 0,
@@ -305,8 +282,6 @@ fn add_member_superuser_skips_the_invitation() {
         assert_eq!(body["message"], "User added");
     });
 }
-
-// ── PATCH /caches/{cache}/members ─────────────────────────────────────────────
 
 #[test]
 fn update_member_changes_role() {
@@ -329,13 +304,9 @@ fn update_member_changes_role() {
             .append_query_results([vec![cache_row(false)]])
             .append_query_results([vec![admin_member()]])
             .append_query_results([vec![admin_role_row()]])
-            // find_user_by_username
             .append_query_results([vec![other_user_row()]])
-            // find_cache_membership (target)
             .append_query_results([vec![target_member]])
-            // role lookup by name
             .append_query_results([vec![admin_role_row()]])
-            // UPDATE
             .append_query_results([vec![updated_member]])
             .append_exec_results([MockExecResult {
                 last_insert_id: 0,
@@ -353,24 +324,18 @@ fn update_member_changes_role() {
     });
 }
 
-// ── DELETE /caches/{cache}/members ────────────────────────────────────────────
-
 #[test]
 fn remove_member_blocks_last_admin() {
     run(async {
         let session_id = SessionId::now_v7();
         let token = make_token(session_id);
 
-        // self is the only Admin -> delete should be 409
         let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
             .append_query_results([vec![cache_row(false)]])
             .append_query_results([vec![admin_member()]])
             .append_query_results([vec![admin_role_row()]])
-            // find_user_by_username (removing self)
             .append_query_results([vec![user()]])
-            // find_cache_membership
             .append_query_results([vec![admin_member()]])
-            // COUNT admin members -> 1 (sea-orm count parses `num_items: i64`)
             .append_query_results([vec![count_row(1)]]);
 
         let server = make_test_server(db.into_connection());
@@ -401,11 +366,8 @@ fn remove_member_view_role_succeeds() {
             .append_query_results([vec![cache_row(false)]])
             .append_query_results([vec![admin_member()]])
             .append_query_results([vec![admin_role_row()]])
-            // find_user_by_username
             .append_query_results([vec![other_user_row()]])
-            // find_cache_membership
             .append_query_results([vec![target_member]])
-            // role is View -> no Admin-count check; straight DELETE
             .append_exec_results([MockExecResult {
                 last_insert_id: 0,
                 rows_affected: 1,
@@ -428,7 +390,6 @@ fn managed_cache_blocks_member_mutations() {
         let session_id = SessionId::now_v7();
         let token = make_token(session_id);
 
-        // cache is managed -> reject_managed triggers 403
         let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
             .append_query_results([vec![cache_row(true)]])
             .append_query_results([vec![admin_member()]])

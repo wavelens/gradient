@@ -4,21 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Side-effect helpers that flip parked evaluations back to `Queued` once
-//! the external condition they were waiting on clears.
-//!
-//! `NoCache` parks: triggered when the task's project had no writable
-//! cache subscription. Caller (`projects/settings.rs::subscribe_cache`) invokes
-//! [`unpark_no_cache_for_project`] right after inserting the subscription row;
-//! the caller is also responsible for re-emitting the `Pending` CI status
-//! for each unparked evaluation.
-//!
-//! `Workers { connected_workers: 0 }` parks: triggered when the task's
-//! project had no active `eval`-capable worker registration. Caller
-//! (`projects/workers.rs::{post,patch}_project_worker`) invokes
-//! [`unpark_no_workers_for_project`] when a registration is created or its
-//! `active`/`enable_eval` flags transition to `true`.
-
 use gradient_db::projects::workers::project_has_eval_capable_worker_registration;
 use gradient_types::ids::ProjectId;
 use gradient_types::waiting_reason::WaitingReason;
@@ -28,9 +13,6 @@ use gradient_entity::evaluation::EvaluationStatus;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter};
 
-/// Flip every evaluation parked with `WaitingReason::NoCache` for tasks in
-/// `project` back to `Queued`. Returns the updated rows so the caller
-/// can re-emit pending CI checks.
 pub async fn unpark_no_cache_for_project<C: ConnectionTrait>(
     db: &C,
     project: ProjectId,
@@ -38,10 +20,6 @@ pub async fn unpark_no_cache_for_project<C: ConnectionTrait>(
     unpark_for_project(db, project, |r| matches!(r, WaitingReason::NoCache)).await
 }
 
-/// Flip evaluations parked with `WaitingReason::CacheStorageFull` for tasks
-/// in `project` back to `Queued`, but only when the project actually has
-/// storage headroom again. The guard prevents a churn of re-queue -> re-park
-/// when nothing actionable changed (mirrors `unpark_no_workers_for_project`).
 pub async fn unpark_storage_full_for_project<C: ConnectionTrait>(
     db: &C,
     project: ProjectId,
@@ -58,9 +36,6 @@ pub async fn unpark_storage_full_for_project<C: ConnectionTrait>(
     .await
 }
 
-/// Scan every project with a `CacheStorageFull`-parked evaluation and unpark those
-/// that now have headroom. Used by the background cleanup pass after NARs are
-/// freed, where there is no single triggering project.
 pub async fn unpark_storage_full_all<C: ConnectionTrait>(
     db: &C,
     instance_max_storage_gb: i32,
@@ -100,17 +75,9 @@ pub async fn unpark_storage_full_all<C: ConnectionTrait>(
     Ok(unparked)
 }
 
-/// Flip every evaluation parked with `WaitingReason::Workers { connected_workers: 0 }`
-/// for tasks in `project` back to `Queued`. The zero-workers shape
-/// is what `park_if_no_workers` writes when the project has no active
-/// `eval`-capable worker registration at all; other `Workers { .. }` parks
-/// (capability mismatch, transient runtime stall) are owned by the
-/// build-dispatch repair pass and are left alone.
-///
-/// No-op when the project still has no active `eval`-capable worker
-/// registration - callers in the worker endpoints invoke this unconditionally
-/// after any registration touch, and this guard prevents a churn of
-/// re-queue -> repair pass re-park when nothing actionable changed.
+/// This is unparking only the zero-workers shape that `park_if_no_workers` wrote. Other `Workers`
+/// parks belong to the build-dispatch repair pass. Callers are invoking this after any registration
+/// touch. The guard is preventing a re-queue -> re-park churn when nothing actionable changed.
 pub async fn unpark_no_workers_for_project<C: ConnectionTrait>(
     db: &C,
     project: ProjectId,
@@ -177,10 +144,6 @@ async fn unpark_for_project<C: ConnectionTrait, F: Fn(&WaitingReason) -> bool>(
     Ok(unparked)
 }
 
-/// Transition a single evaluation parked in `Waiting + Approval` back to
-/// `Queued`. Returns `Ok(None)` when the row isn't parked-Approval (already
-/// unparked, never parked, status drifted) so the caller can decide whether
-/// to log or ignore.
 pub async fn unpark_approval(
     db: &impl ConnectionTrait,
     evaluation_id: EvaluationId,
@@ -206,11 +169,6 @@ pub async fn unpark_approval(
     Ok(Some(ae.update(db).await?))
 }
 
-/// Transition a single evaluation parked in `Waiting + Approval` back to
-/// `Queued` while overriding its `wildcard` column. Same guards as
-/// [`unpark_approval`]; on success, the same row update writes both the
-/// status flip and the new wildcard so the dispatcher reads a consistent
-/// row when it next polls.
 pub async fn unpark_approval_with_wildcard(
     db: &impl ConnectionTrait,
     evaluation_id: EvaluationId,
@@ -238,11 +196,8 @@ pub async fn unpark_approval_with_wildcard(
     Ok(Some(ae.update(db).await?))
 }
 
-/// Stamp `evaluation.source_comment` with the JSON payload describing the
-/// PR comment that prompted this run. Used by the `/gradient run` /
-/// `/gradient approve` unpark path so the terminal-status reaction lands on
-/// the maintainer's comment, not on whatever original webhook (if any) the
-/// row was created from.
+/// The terminal-status reaction must land on the maintainer's `/gradient run` or `/gradient
+/// approve` comment. The original webhook of the row is not the target.
 pub async fn set_evaluation_source_comment(
     db: &impl ConnectionTrait,
     evaluation_id: EvaluationId,
@@ -258,9 +213,6 @@ pub async fn set_evaluation_source_comment(
     Ok(())
 }
 
-/// Find the evaluation that is parked in `Waiting + Approval` for the given
-/// task + PR number combination. Used by the comment-based unpark path
-/// where the webhook only carries the PR number, not the eval id.
 pub async fn find_approval_gated_eval(
     db: &impl ConnectionTrait,
     task: TaskId,
@@ -409,9 +361,6 @@ mod tests {
             e.task = Some(task.id);
             e
         };
-        // A Workers park with connected_workers > 0 represents a capability
-        // mismatch the runtime repair pass manages; the registration unpark
-        // path must leave it alone.
         let capability_mismatch = {
             let mut e = waiting_eval(WaitingReason::workers(
                 Vec::new(),
@@ -427,13 +376,9 @@ mod tests {
         requeued.waiting_reason = None;
 
         let db = MockDatabase::new(DatabaseBackend::Postgres)
-            // Gate: project has an eval-capable registration -> continue
             .append_query_results([vec![eval_capable_registration()]])
-            // Fetch project's tasks
             .append_query_results([vec![task.clone()]])
-            // Fetch Waiting evals across those tasks
             .append_query_results([vec![stranded.clone(), capability_mismatch.clone()]])
-            // Update the one matching row -> only `stranded` is touched
             .append_query_results([vec![requeued.clone()]])
             .append_exec_results([MockExecResult {
                 last_insert_id: 0,
@@ -451,8 +396,6 @@ mod tests {
     #[tokio::test]
     async fn unpark_no_workers_is_noop_when_no_eval_capable_registration() {
         let db = MockDatabase::new(DatabaseBackend::Postgres)
-            // Gate: no eval-capable registration, and no base worker enabled for
-            // this project either, so the gate returns false and unpark is a noop.
             .append_query_results([Vec::<gradient_entity::worker_registration::Model>::new()])
             .append_query_results([Vec::<gradient_entity::project_base_worker::Model>::new()])
             .into_connection();
@@ -477,13 +420,9 @@ mod tests {
         requeued.waiting_reason = None;
 
         let db = MockDatabase::new(DatabaseBackend::Postgres)
-            // Guard `project_caches_all_full`: no writable caches -> not full.
             .append_query_results([Vec::<gradient_entity::project_cache::Model>::new()])
-            // unpark_for_project: project's tasks
             .append_query_results([vec![task.clone()]])
-            // unpark_for_project: Waiting evals across those tasks
             .append_query_results([vec![stranded.clone()]])
-            // Update the matching row -> requeued
             .append_query_results([vec![requeued.clone()]])
             .append_exec_results([MockExecResult {
                 last_insert_id: 0,

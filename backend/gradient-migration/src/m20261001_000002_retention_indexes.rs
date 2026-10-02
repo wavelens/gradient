@@ -4,10 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! The hourly retention pass deletes each history in batches by its timestamp.
-//! Without an index on that column every batch is a sequential scan of the
-//! whole table, so each pruned table gets one here.
-
 use sea_orm_migration::prelude::*;
 use sea_orm_migration::sea_orm::ConnectionTrait;
 

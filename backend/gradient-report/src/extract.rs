@@ -4,10 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Fetching rows and writing them are separate on purpose: `redact_row` and
-//! `write_rows` take rows directly, so what a report ends up containing is
-//! testable without a database.
-
 use anyhow::{Context as _, Result};
 use rusqlite::Connection;
 use sea_orm::prelude::Uuid;
@@ -36,8 +32,8 @@ pub fn write_rows(conn: &Connection, spec: &TableSpec, rows: &[Row]) -> Result<(
         .map(|i| format!("?{i}"))
         .collect::<Vec<_>>()
         .join(", ");
-    // Quoted throughout: `commit` is a reserved word in SQLite, and a column
-    // named `position` is one keyword away from the same problem.
+    // Every column is quoted. `commit` is a reserved word in SQLite, and `position` is one keyword
+    // away from the same problem.
     let columns = spec
         .columns
         .iter()
@@ -60,10 +56,6 @@ pub fn write_rows(conn: &Connection, spec: &TableSpec, rows: &[Row]) -> Result<(
     Ok(())
 }
 
-/// Representative instantiation for the plan gate. Every spec binds the same
-/// single uuid, which is what this registers; the SQL each one carries differs,
-/// and only this one is planned. A report is an operator-triggered export that
-/// already takes minutes, so the gate's job here is the binding, not the cost.
 fn report_scope_query_sql() -> String {
     crate::tables::eval_scope_tables()
         .iter()
@@ -78,15 +70,12 @@ gradient_db::sql_fn! {
         params = [EvaluationId];
 }
 
-/// Every spec is scoped by one id. Bound as a uuid rather than its text form:
-/// Postgres has no `uuid = text` operator, so a stringly-typed scope fails the
-/// whole export with `42883` instead of matching nothing.
+/// The scope is bound as a uuid. Postgres has no `uuid = text` operator, and a text scope fails the
+/// whole export with `42883`.
 pub fn scope_statement(spec: &TableSpec, scope: Uuid) -> Statement {
     REPORT_SCOPE_QUERY.bind_built(spec.sql, [sea_orm::Value::Uuid(Some(scope))])
 }
 
-/// Run one spec's query and hand back its rows as text. The only part that
-/// needs a database.
 pub async fn fetch_rows<C: ConnectionTrait>(
     db: &C,
     spec: &TableSpec,
@@ -129,9 +118,6 @@ pub async fn export_tables<C: ConnectionTrait>(
     Ok(manifest)
 }
 
-/// A manifest entry for one exported table. Everything the scope selected is
-/// kept, so `rows_available` matching `rows_included` is the honest reading:
-/// a difference means rows were dropped, and only `build_log` drops any.
 pub fn manifest_row(spec: &TableSpec, redactor: &Redactor, rows: i64) -> ManifestRow {
     ManifestRow {
         table: spec.name.to_owned(),
@@ -143,8 +129,6 @@ pub fn manifest_row(spec: &TableSpec, redactor: &Redactor, rows: i64) -> Manifes
     }
 }
 
-/// Which of a table's columns the current options actually rewrote, so the
-/// manifest says what happened rather than what was requested.
 fn redaction_summary(spec: &TableSpec, redactor: &Redactor) -> String {
     let probe = "gradient-report-probe";
     let changed: Vec<&str> = spec
@@ -206,16 +190,12 @@ mod tests {
         )
         .expect("write");
 
-        // Postgres hands every column over as text; SQLite affinity is what
-        // turns the numeric ones back into numbers.
         let status: i64 = conn
             .query_row("SELECT status FROM evaluation", [], |r| r.get(0))
             .expect("status");
         assert_eq!(status, 7);
     }
 
-    /// `commit` is a reserved word in SQLite: unquoted, the table cannot even be
-    /// created, let alone inserted into.
     #[test]
     fn a_table_named_after_a_reserved_word_round_trips() {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -245,8 +225,6 @@ mod tests {
         assert_eq!(hash, "dead");
     }
 
-    /// The manifest used to claim every table was "scoped to the evaluation",
-    /// including the shared-build-scoped ones that carry other evaluations' rows.
     #[test]
     fn the_manifest_declares_each_table_s_own_scope() {
         let shared_build_scoped = eval_scope_tables()
@@ -277,9 +255,6 @@ mod tests {
         );
     }
 
-    /// Postgres has no `uuid = text` operator, so binding the scope as its text
-    /// form fails every scoped query with `42883` rather than matching nothing.
-    /// The typed parameter is the fix; this pins it at the wire.
     #[test]
     fn the_scope_is_bound_as_a_uuid_not_its_text_form() {
         let id = Uuid::now_v7();
@@ -289,8 +264,6 @@ mod tests {
         assert_eq!(values, vec![sea_orm::Value::Uuid(Some(id))]);
     }
 
-    /// Casting the parameter instead would work too, and did for three of the
-    /// specs, which is exactly how the other sixteen went unnoticed.
     #[test]
     fn no_spec_carries_a_leftover_scope_cast() {
         for spec in eval_scope_tables() {

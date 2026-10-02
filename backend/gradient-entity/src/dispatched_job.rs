@@ -11,7 +11,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::ids::{ClusterAttemptId, DispatchedJobId, EvaluationId, ProjectId, TaskId};
 
-/// Kind of dispatched work this telemetry row records.
 #[repr(i16)]
 #[derive(
     Debug,
@@ -37,9 +36,6 @@ pub enum DispatchedJobKind {
     Build = 1,
 }
 
-/// How a dispatched job ended. `None` means the job is still running; a worker
-/// that vanished without reporting is closed out as `Abandoned` rather than
-/// left open forever.
 #[repr(i16)]
 #[derive(
     Debug,
@@ -63,10 +59,8 @@ pub enum DispatchedJobOutcome {
     Completed = 0,
     #[sea_orm(num_value = 1)]
     Failed = 1,
-    /// The worker never reported a terminal state: it disconnected, or the
-    /// server restarted while the job was in flight. Distinct from `Failed`
-    /// because the build may well have succeeded before contact was lost, so
-    /// this must not count towards failure rates or history-based scoring.
+    /// `Abandoned` must not count towards failure rates or history scoring. The build may have
+    /// succeeded before the worker disconnected or the server restarted.
     #[sea_orm(num_value = 2)]
     Abandoned = 2,
 }
@@ -81,10 +75,6 @@ pub struct Model {
     pub project: ProjectId,
     pub task: Option<TaskId>,
     pub worker_id: String,
-    /// The scheduler's job key (`build:<shared_build>` / `eval:<evaluation>`), unique
-    /// among in-flight jobs. Lets a terminal report close its own row instead of
-    /// guessing at the newest open one for the worker. `None` on rows written
-    /// before the column existed.
     pub job_id: Option<String>,
     pub score: f64,
     pub queued_at: NaiveDateTime,
@@ -98,17 +88,13 @@ pub struct Model {
     pub instance_context: Option<Json>,
     pub candidates: Option<Json>,
     pub created_at: NaiveDateTime,
-    /// The three scores the instance-metrics windows average, lifted out of
-    /// `job_context` so the window index can carry them: averaging them out of
-    /// the jsonb made the pass read every row in the window from the heap.
-    /// `None` on rows written before the column existed, which `AVG` skips
-    /// exactly as it skipped an absent json key.
+    /// These three scores are lifted out of `job_context` for the window index to carry. Averaging
+    /// them from the jsonb was reading every window row from the heap. `AVG` is skipping the `None`
+    /// of older rows like an absent json key.
     pub missing_nar_size: Option<i64>,
     pub missing_count: Option<i32>,
     pub dependency_count: Option<i32>,
     pub cluster_attempt: Option<ClusterAttemptId>,
-    /// The worker's job clock when it sent its terminal report. `None` when the
-    /// server closed the row itself (abandoned, requeued, re-registered).
     pub worker_elapsed_ms: Option<i64>,
 }
 

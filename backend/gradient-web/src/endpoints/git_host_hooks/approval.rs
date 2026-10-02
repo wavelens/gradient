@@ -4,8 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Approval-gate unparking: GitHub check-run buttons and native PR reviews.
-
 use super::commands::{
     active_task_ids_for_integration, first_task_with_reporter,
     github_installation_id_from_comment_body,
@@ -22,9 +20,6 @@ use sea_orm::EntityTrait;
 use std::sync::Arc;
 use tracing::{info, warn};
 
-/// PR metadata extracted from a Git host webhook, used by the approval gate. A
-/// trusted `sender` (maintainer force-push / command) bypasses the gate so the
-/// run is not re-parked.
 #[derive(Debug, Clone, Default)]
 pub(super) struct PullRequestApprovalContext {
     pub pr_number: Option<u64>,
@@ -33,9 +28,6 @@ pub(super) struct PullRequestApprovalContext {
     pub sender: Option<String>,
 }
 
-/// Handle a GitHub App `check_run.requested_action` event. Verifies the sender
-/// is a repo writer, then re-queues the approval-gated evaluation matched by
-/// `check_run.id` and fires a fresh pending check.
 pub(super) async fn handle_github_check_run(
     state: &Arc<ServerState>,
     _scheduler: &Arc<Scheduler>,
@@ -116,8 +108,6 @@ pub(super) async fn handle_github_check_run(
     }
 }
 
-/// Flip the `Awaiting Approval` check to Success once the gate is cleared, and
-/// re-emit the Evaluation check as Pending so the PR shows the run in flight.
 pub(super) async fn on_approval_granted(state: &Arc<ServerState>, eval: &MEvaluation) {
     let Some(task_id) = eval.task else {
         return;
@@ -147,8 +137,8 @@ gradient_db::sql! {
 }
 
 async fn find_eval_by_check_id(state: &Arc<ServerState>, check_id: i64) -> Option<MEvaluation> {
-    // `evaluation.check_run_ids` is a JSON map per check-context name; any
-    // stored id can match the clicked check, so scan the map's values.
+    // `evaluation.check_run_ids` is a JSON map per check-context name. Any stored id can match the
+    // clicked check.
     use sea_orm::FromQueryResult;
 
     #[derive(FromQueryResult)]
@@ -170,8 +160,7 @@ async fn find_eval_by_check_id(state: &Arc<ServerState>, check_id: i64) -> Optio
         .flatten()
 }
 
-/// Trust probe for the approval-unpark flows: asks the task's reporter
-/// whether `sender` can write to `owner/repo`. Fails closed on any error.
+/// The trust probe is failing closed on any error.
 pub(super) async fn sender_is_trusted(
     state: &Arc<ServerState>,
     task_id: TaskId,
@@ -196,8 +185,6 @@ pub(super) async fn sender_is_trusted(
     }
 }
 
-/// Find the approval-gated evaluation for `(task_id, pr_number)`, flip it
-/// back to `Queued`, and re-emit its pending CI checks.
 async fn unpark_pr_approval_eval(
     state: &Arc<ServerState>,
     task_id: TaskId,
@@ -231,8 +218,6 @@ fn approval_pr_number(eval: &MEvaluation) -> Option<u64> {
     }
 }
 
-/// Reflect a Gradient maintainer approval back onto the Git host by submitting an
-/// approving PR review (GitHub only; other Git hosts no-op). Best-effort.
 pub(super) async fn submit_pr_approval_review(
     state: &Arc<ServerState>,
     task_id: TaskId,
@@ -262,8 +247,6 @@ pub(super) async fn submit_pr_approval_review(
     }
 }
 
-/// Handle a `pull_request_review` webhook: a maintainer's native approving
-/// review releases an approval-gated run for the PR (#369). GitLab is a no-op.
 pub(super) async fn handle_pull_request_review(
     state: &Arc<ServerState>,
     git_host: GitHostType,

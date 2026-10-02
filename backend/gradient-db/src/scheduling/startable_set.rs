@@ -4,13 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! The shared builds that entered or left `Queued`, on their way to the scheduler's
-//! startable set. Every status move already fans out through
-//! [`crate::status::emit_transition_effects`], so the dispatcher reads what moved
-//! instead of re-selecting every queued shared build per tick. A move is a hint, never
-//! a claim: the dispatcher re-reads each shared build it is handed, and its periodic
-//! resync covers a hint that was lost or that another instance produced.
-
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex, OnceLock};
 
@@ -21,8 +14,6 @@ use crate::status::TransitionChange;
 
 type Waker = Box<dyn Fn() + Send + Sync>;
 
-/// The net moves since the dispatcher last took them; a derivation sits in at
-/// most one of the two sets, the one its latest move put it in.
 #[derive(Debug, Default, PartialEq)]
 pub struct StartableMoves {
     pub entered: HashSet<DerivationId>,
@@ -59,10 +50,8 @@ impl StartableMoves {
     }
 }
 
-/// A move made inside a transaction is staged until [`Self::publish`] after the
-/// commit: the dispatcher reads on its own connection, and a shared build it looks
-/// up before the promotion lands is not `Queued` yet and would wait out the
-/// resync.
+/// Moves inside a transaction are staged until [`Self::publish`] after the commit.
+/// The dispatcher is reading on its own connection and would see a promotion not yet `Queued`.
 #[derive(Clone, Default)]
 pub struct StartableSet {
     published: Arc<Mutex<StartableMoves>>,
@@ -79,7 +68,6 @@ impl std::fmt::Debug for StartableSet {
 }
 
 impl StartableSet {
-    /// Called on every published move; set once, by the dispatcher.
     pub fn on_move(&self, waker: impl Fn() + Send + Sync + 'static) {
         let _ = self.waker.set(Box::new(waker));
     }
@@ -88,8 +76,6 @@ impl StartableSet {
         self.update(|moves| changes.iter().for_each(|c| moves.record(c)));
     }
 
-    /// Hand shared builds back to the dispatcher to be read again, such as one whose
-    /// claim was lost to a gate that may have moved since it was assembled.
     pub fn enter(&self, derivations: impl IntoIterator<Item = DerivationId>) {
         self.update(|moves| derivations.into_iter().for_each(|d| moves.enter(d)));
     }
@@ -98,7 +84,6 @@ impl StartableSet {
         std::mem::take(&mut *lock(&self.published))
     }
 
-    /// The handle a transaction records into; a nested one shares its stage.
     pub fn staged(&self) -> Self {
         Self {
             staged: Some(self.staged.clone().unwrap_or_default()),
@@ -106,7 +91,6 @@ impl StartableSet {
         }
     }
 
-    /// The handle for work past the transaction, which publishes at once.
     pub fn unstaged(&self) -> Self {
         Self {
             staged: None,
@@ -114,7 +98,6 @@ impl StartableSet {
         }
     }
 
-    /// Hand the committed transaction's moves to the dispatcher.
     pub fn publish(&self) {
         let Some(staged) = &self.staged else {
             return;
@@ -212,10 +195,6 @@ mod tests {
         assert!(moves.left.is_empty());
     }
 
-    /// The dispatcher reads on its own connection, so a promotion it is told
-    /// about before the commit reads as not `Queued` and is lost until the
-    /// resync. Staged moves reach it only once published, and a rolled-back
-    /// transaction publishes nothing.
     #[test]
     fn a_transactions_moves_wait_for_its_commit() {
         let set = StartableSet::default();

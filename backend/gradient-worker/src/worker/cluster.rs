@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Cluster members on this worker: a held member occupies its slot without
-//! running until `StartCluster`, and signals reach it through its route.
+//! A held cluster member is occupying its slot without running until `StartCluster`.
+//! Signals are reaching it through its route.
 #![expect(
     dead_code,
     reason = "ClusterInbox and ClusterChannels::{take, send} are the executor handoff; no executor consumes them yet"
@@ -79,7 +79,6 @@ impl ClusterHolds {
         self.held.remove(attempt).map(|h| h.job)
     }
 
-    /// Drop the hold of `job_id`, whichever attempt it belongs to.
     pub(super) fn drop_job(&mut self, job_id: &str) -> Option<HeldJob> {
         let attempt = self
             .held

@@ -4,12 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! A reference recorded while its producer was still an unwalked stub resolved to
-//! no derivation, so its runtime edge was never written and the referrer read whole
-//! over a path nobody built. The walk now adopts such references through these
-//! indexes; the backfill writes the edges history lost, and the consistency sweep
-//! recounts the wholeness they change.
-
 use sea_orm_migration::prelude::*;
 use sea_orm_migration::sea_orm::ConnectionTrait;
 

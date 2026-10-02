@@ -8,10 +8,6 @@ use crate::trigger::TriggerError;
 use gradient_types::*;
 use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QueryOrder};
 
-/// Loads the most recent evaluation for `task_id` together with its entry
-/// points. Restart no longer pre-creates per-eval build rows; the new eval
-/// re-resolves shared builds when it starts, so we only need the entry-point
-/// derivations to seed it.
 pub(super) async fn previous_evaluation_with_entry_points<C: ConnectionTrait>(
     db: &C,
     task_id: TaskId,

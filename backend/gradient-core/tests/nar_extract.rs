@@ -4,10 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Integration tests for `gradient_storage::nar_extract`.
-//!
-//! Async assertions use sync `#[test]` + `tokio::runtime::Builder::block_on`.
-
 #![expect(
     clippy::unwrap_used,
     reason = "test scaffolding: a fixture helper that cannot build its value should fail the test loudly"
@@ -70,9 +66,6 @@ fn unwrap_dir(out: Extracted) -> Vec<u8> {
 
 type FileMap = BTreeMap<String, (u32, Vec<u8>)>;
 
-/// Decompress a `tar.zst` archive and return a map of path -> (mode-bits, body)
-/// for regular files, plus a sorted list of all entry paths (including dirs
-/// and symlinks) so tests can assert on structure.
 fn read_tar_zst(tar_zst: &[u8]) -> (FileMap, Vec<String>) {
     let tar_bytes = zstd::decode_all(std::io::Cursor::new(tar_zst)).unwrap();
     let mut archive = tar::Archive::new(std::io::Cursor::new(tar_bytes));
@@ -104,9 +97,6 @@ fn extracts_file_at_relative_path() {
     assert!(!executable);
 }
 
-/// The streaming bridge used by the serve/browse endpoints must decode and
-/// extract identically to the buffered path, even when the compressed input is
-/// delivered as many small chunks that split the zstd frame across boundaries.
 #[test]
 fn streaming_reader_extracts_same_file_as_buffered() {
     let nar = dir_with_file("hello.txt", b"streamed hi", false);
@@ -171,8 +161,8 @@ fn extracts_file_in_nested_directory() {
 
 #[test]
 fn drains_non_matching_sibling_before_extracting_target() {
-    // Sibling order: "a.txt" (drop), then "b.txt" (target).
-    // If the non-matching file's reader isn't drained, parse_nar stalls.
+    // Sibling order is `a.txt` (dropped), then `b.txt` (target). `parse_nar` is stalling when the
+    // non-matching file's reader is not drained.
     let drop_body = Bytes::from_static(b"do not read this");
     let target_body = Bytes::from_static(b"this is the one");
     let events: TestNarEvents = vec![
@@ -199,9 +189,6 @@ fn drains_non_matching_sibling_before_extracting_target() {
     assert_eq!(contents, &target_body[..]);
 }
 
-/// Regression for "fails if build output is a folder": when the requested
-/// relative path is a directory rather than a file, return a `tar.zst` of
-/// the subtree instead of erroring.
 #[test]
 fn extracts_directory_as_tar_zst() {
     let bin_body = Bytes::from_static(b"#!/bin/sh\necho hi\n");
@@ -220,15 +207,15 @@ fn extracts_directory_as_tar_zst() {
             size: bin_body.len() as u64,
             reader: std::io::Cursor::new(bin_body.clone()),
         },
-        TestNarEvent::EndDirectory, // bin
+        TestNarEvent::EndDirectory,
         TestNarEvent::File {
             name: Bytes::from_static(b"config"),
             executable: false,
             size: conf_body.len() as u64,
             reader: std::io::Cursor::new(conf_body.clone()),
         },
-        TestNarEvent::EndDirectory, // store
-        TestNarEvent::EndDirectory, // root
+        TestNarEvent::EndDirectory,
+        TestNarEvent::EndDirectory,
     ];
     let nar = write_nar(&events).to_vec();
     let compressed = zstd_compress(&nar);
@@ -237,8 +224,6 @@ fn extracts_directory_as_tar_zst() {
     let tar_zst = unwrap_dir(out);
     let (files, paths) = read_tar_zst(&tar_zst);
 
-    // Tar should contain the matched dir as the root, then nested entries
-    // - every path is rooted at "store/" so extraction recreates that name.
     assert!(
         paths.iter().any(|p| p == "store/"),
         "missing root dir entry: {paths:?}"
@@ -259,7 +244,6 @@ fn extracts_directory_as_tar_zst() {
     assert_eq!(*mode_conf & 0o111, 0, "non-executable bit should be unset");
 }
 
-/// Symlinks inside the matched subtree must be preserved in the tarball.
 #[test]
 fn directory_tarball_preserves_symlinks() {
     let body = Bytes::from_static(b"target");
@@ -268,8 +252,8 @@ fn directory_tarball_preserves_symlinks() {
         TestNarEvent::StartDirectory {
             name: Bytes::from_static(b"out"),
         },
-        // NAR directory entries must be name-sorted (`link` < `real`), matching
-        // Nix's parser, which rejects out-of-order entries.
+        // NAR directory entries must be name-sorted (`link` < `real`). Nix's parser is rejecting
+        // out-of-order entries.
         TestNarEvent::Symlink {
             name: Bytes::from_static(b"link"),
             target: Bytes::from_static(b"real"),

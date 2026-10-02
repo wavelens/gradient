@@ -4,39 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! `derivation_build.missing_runtime_deps`: how many of a shared build's runtime dependencies
-//! lead to something that is not complete. Complete closure is
-//! [`crate::graph::predicates::shared_build_complete_predicate`] - present, with that counter at zero -
-//! and it is the second can-start state counter next to `blocking_deps`, one per edge kind.
-//! Seeded when a NAR lands, rippled as shared builds become or stop being complete, recounted
-//! by the consistency check, which is also the column's backfill.
-//!
-//! # The seed is absolute, the ripples are relative
-//!
-//! A relative move must be driven by a TRANSITION or it drives a counter past zero,
-//! and a negative counter never satisfies `= 0` again, so the seed reports which rows
-//! it flipped and only those ripple. The seed cannot read the transition off the row
-//! it writes: presence is a `cached_path` fact and the commit that made an output
-//! present wrote it one statement earlier, so a shared build that just became present
-//! already reads present when the seed is running while its parents still count it as a
-//! missing dependency. `freshly_present` is the caller's endpoint for exactly that, and it is
-//! narrow on purpose: a re-push of a path that was already backed changed no
-//! presence, and calling it fresh would decrement every parent a second time.
-//!
-//! The seed moves both ways. A commit can also ADD a runtime dependency into something we
-//! do not have, which takes its own shared build out of complete closure, so what the seed
-//! un-wholed ripples up in the same pass. The two frontiers are disjoint at the seed
-//! and both moves are relative, so a parent reached by both composes.
-//!
-//! Every pass locks the rows it will write through [`crate::graph::can_start::lock_shared_builds`]
-//! or its copy inside the ripple function, which is `derivation`-ordered, and touches
-//! `derivation_build` alone: the third class in the lock order, so a caller that
-//! already holds `cached_path` may take it.
-//! The seed takes [`crate::graph::can_start::lock_seed_shared_builds`] instead, which also holds
-//! the dependencies it counts under shared advisory keys, and every frontier a ripple
-//! reads the edges of is held under its exclusive keys by then; that pairing, not a
-//! single writer, is what keeps a seed and a concurrent flip from each missing the
-//! other's rows ([`crate::graph::shared_build_guard`]).
+//! The seed cannot read the transition off the row it is writing.
+//! The commit making an output present wrote `cached_path` one statement earlier.
+//! `freshly_present` is the caller's endpoint for that transition.
+//! A re-push of an already backed path must not count as fresh.
 
 use std::collections::BTreeMap;
 
@@ -73,9 +44,6 @@ fn complete_among_sql() -> String {
     )
 }
 
-/// The sweep's absolute recount and the column's backfill: `incomplete` is everything
-/// not present and, transitively, everything with a runtime dependency into it, so an
-/// shared build's count is its runtime dependencies inside that set.
 fn recount_sql() -> String {
     format!(
         "WITH RECURSIVE incomplete(derivation) AS (\
@@ -95,13 +63,6 @@ fn recount_sql() -> String {
 }
 
 crate::sql_fn! {
-    /// Recount the shared builds the caller names against their runtime dependencies as they
-    /// stand. `fresh` names a shared build whose outputs this transaction made present,
-    /// which was not complete before it whatever the row now says.
-    ///
-    /// `Bulk` for the reason the can-start state seed it mirrors is: a batch that reads
-    /// the edges of every value it was handed costs more than one row lookup per
-    /// value, which is all the hot tier's ceiling allows for.
     SEED_MISSING_RUNTIME_DEPS = seed_sql,
         params = [DerivationIds(64), Bools(false, 64)],
         tier = Bulk;
@@ -127,15 +88,11 @@ fn complete_output_hashes_sql() -> String {
 }
 
 crate::sql_fn! {
-    /// The hashes among `$1` whose path is in our cache and whose producing shared build
-    /// is complete. An output with no shared build row yet counts on presence alone, which
-    /// is what that shared build's first seed concludes anyway.
     COMPLETE_OUTPUT_HASHES = complete_output_hashes_sql,
         params = [CachedPathHashes(64)],
         tier = Bulk;
 }
 
-/// The subset of `hashes` an evaluation already has complete in our own cache.
 pub async fn complete_output_hashes<C: ConnectionTrait>(
     db: &C,
     hashes: &[String],
@@ -152,13 +109,6 @@ pub async fn complete_output_hashes<C: ConnectionTrait>(
         .collect())
 }
 
-/// The hash-ordered `FOR NO KEY UPDATE` pass every retire opens with. It conflicts with
-/// the RI `FOR KEY SHARE` a concurrent `cached_path_signature` insert holds on the
-/// parent row, so that wait is absorbed in its own statement and the DELETE opens
-/// a snapshot that sees the signature it would otherwise cascade away. It also holds
-/// the producers' advisory keys exclusively, ahead of the rows, so the statements
-/// after it read their complete closure from a snapshot that includes any flip they waited
-/// for ([`crate::graph::shared_build_guard`]). It reads nothing and decides nothing.
 fn lock_cached_paths_sql() -> String {
     let (with, filter) = crate::graph::shared_build_guard::producer_filter("$1");
     format!(
@@ -198,18 +148,11 @@ crate::sql! {
     SET_OUTPUTS_UNCACHED = "UPDATE derivation_output SET is_cached = false WHERE is_cached AND hash = ANY($1)",
         params = [CachedPathHashes(64)];
 
-    /// The whole ripple in one call, `RIPPLE_MISSING_RUNTIME_DEPS_FN` in the
-    /// migration that defines it: every level's runtime parents counted, held
-    /// under their keys and rows in `derivation` order and moved by their edge
-    /// count, in place rather than a round trip per level. Returns every shared build
-    /// that flipped.
     RIPPLE_MISSING_RUNTIME_DEPS = "SELECT derivation FROM ripple_missing_runtime_deps($1::uuid[], $2::bool) AS r(derivation)",
         params = [DerivationIds(64), Bool(true)],
         tier = Bulk;
 }
 
-/// What a seed moved: the shared builds that became complete, and the ones that stopped
-/// being complete, each with everything the ripple reached from them.
 #[derive(Debug, Default)]
 pub struct Seeded {
     pub complete: Vec<DerivationId>,
@@ -223,9 +166,6 @@ fn derivation_ids(rows: &[QueryResult]) -> Vec<DerivationId> {
         .collect()
 }
 
-/// Seed the counter of every shared build an event touched and ripple what flipped.
-/// `freshly_present` are the shared builds whose outputs this transaction made present,
-/// `recounted` the ones whose runtime dependencies it merely grew.
 pub async fn seed_runtime_deps(
     txn: &DatabaseTransaction,
     freshly_present: &[DerivationId],
@@ -273,8 +213,6 @@ pub async fn seed_runtime_deps(
     Ok(moved)
 }
 
-/// Count down the runtime parents of shared builds that became complete, level by level,
-/// and report everything that became complete with them.
 pub async fn ripple_shared_builds_complete(
     txn: &DatabaseTransaction,
     frontier: Vec<DerivationId>,
@@ -282,7 +220,6 @@ pub async fn ripple_shared_builds_complete(
     ripple(txn, frontier, true).await
 }
 
-/// The mirror: count up the parents of shared builds that stopped being complete.
 pub async fn ripple_shared_builds_incomplete(
     txn: &DatabaseTransaction,
     frontier: Vec<DerivationId>,
@@ -290,10 +227,6 @@ pub async fn ripple_shared_builds_incomplete(
     ripple(txn, frontier, false).await
 }
 
-/// Move the counters above `frontier` level by level in one call, `down` from
-/// shared builds that became complete, up from shared builds that were, and return every shared build
-/// that flipped. Each level is held under its keys and rows in `derivation` order
-/// before it is written, the module doc's discipline, inside the function.
 async fn ripple(
     txn: &DatabaseTransaction,
     mut frontier: Vec<DerivationId>,
@@ -311,12 +244,8 @@ async fn ripple(
     ))
 }
 
-/// Take `hashes` `FOR NO KEY UPDATE` in one hash-ordered statement, before the caller
-/// decides or writes anything. A transaction that will write `derivation_build`
-/// and only then reach a retire has to take its `cached_path` locks FIRST, or it
-/// inverts the class order every other writer follows; re-acquiring a row this
-/// transaction already holds is free, so the retire's own pass repeats it for
-/// nothing.
+/// A transaction writing `derivation_build` before a retire must take these locks first.
+/// Every other writer is following the class order `cached_path`, then `derivation_build`.
 pub async fn lock_cached_paths(txn: &DatabaseTransaction, hashes: &[String]) -> Result<(), DbErr> {
     if hashes.is_empty() {
         return Ok(());
@@ -328,11 +257,6 @@ pub async fn lock_cached_paths(txn: &DatabaseTransaction, hashes: &[String]) -> 
     Ok(())
 }
 
-/// The shared builds among `derivations` that are complete right now, held `FOR NO KEY UPDATE`.
-/// Read BEFORE the event that takes their presence away, because nothing after it
-/// can recover the endpoint, and only after their advisory keys are held by an
-/// earlier statement: [`retire_outputs`] opens with [`LOCK_CACHED_PATHS`], which
-/// takes them.
 pub async fn complete_among(
     txn: &DatabaseTransaction,
     derivations: &[DerivationId],
@@ -347,8 +271,6 @@ pub async fn complete_among(
     ))
 }
 
-/// What a retire removed and what it moved: the shared builds that stopped being complete,
-/// and the transitions the caller emits once its transaction has committed.
 #[derive(Debug, Default)]
 pub struct Retired {
     pub deleted: Vec<String>,
@@ -356,26 +278,6 @@ pub struct Retired {
     pub transitions: Vec<crate::status::TransitionChange>,
 }
 
-/// Delete `hashes` from `cached_path` and take every shared build that trusted them out
-/// of complete closure: the producers of the deleted paths lose presence, their
-/// parents over runtime dependencies count up, and the can-start state side follows.
-///
-/// The shared builds that WERE complete are read before the delete, under the shared build lock,
-/// because nothing after it can recover that endpoint. The `cached_path` rows are
-/// locked first, in hash order, so the wait for a concurrent
-/// `cached_path_signature` insert is absorbed in its own statement and the DELETE
-/// opens a snapshot that sees it; taking the shared build lock second is the class order
-/// the whole module obeys.
-///
-/// The mark follows the union of what is gone and what the ripple un-wholed, but
-/// the RESET is narrower: only the producers of what is actually gone. A parent
-/// that merely lost complete closure still has its own output, so it needs `fetchable` to
-/// drop and nothing else, and the arrival of the missing path marks it fetchable
-/// again through a terminal status a reset would have taken away. Resetting the
-/// closure instead re-queued 107 derivations from deleting one NAR. The mark itself
-/// re-opens the walk below what it flipped, which is how the missing path is asked
-/// for: dropping the flag and asking for nothing left 47 builders waiting behind 22
-/// incomplete `Completed` shared builds nobody named.
 pub async fn retire_outputs(
     txn: &DatabaseTransaction,
     hashes: &[String],
@@ -413,8 +315,6 @@ pub async fn retire_outputs(
     })
 }
 
-/// The can-start state half of a retire. `gone` are the producers whose artifact is
-/// absent, `incomplete` everything the ripple took out of complete closure with them.
 async fn retire_shared_builds(
     txn: &DatabaseTransaction,
     gone: &[DerivationId],
@@ -449,7 +349,6 @@ async fn retire_shared_builds(
     Ok(transitions)
 }
 
-/// The sweep's recount, and the backfill after the column's migration.
 pub async fn recount_missing_runtime_deps<C>(db: &C) -> Result<u64, DbErr>
 where
     C: TransactionTrait<Transaction = DatabaseTransaction>,
@@ -491,9 +390,6 @@ mod tests {
     const RIPPLE_FN: &str =
         gradient_migration::m20261001_000001_plain_concept_names::RIPPLE_MISSING_RUNTIME_DEPS_FN;
 
-    /// The keys have to be held before the statement that reads complete closure starts:
-    /// a statement that waits for a key inside itself still reads the snapshot it
-    /// took before the wait, and misses the flip it waited for.
     #[test]
     fn the_retire_holds_its_producers_keys_before_it_reads_their_completeness() {
         let lock = LOCK_CACHED_PATHS.text();
@@ -513,10 +409,6 @@ mod tests {
         );
     }
 
-    /// A row that was complete before the seed and after it flipped nothing, so no
-    /// parent ever counted it as a missing dependency and it must not count them down; only a
-    /// row the seed flipped ripples, and the ripple stops at a level that flips
-    /// nothing.
     #[tokio::test]
     async fn only_a_shared_build_the_seed_flipped_ripples() {
         let settled = DerivationId::now_v7();
@@ -573,10 +465,6 @@ mod tests {
         );
     }
 
-    /// The commit that makes an output present writes `cached_path` one statement
-    /// before the seed, so a freshly present shared build reads complete on both sides of it.
-    /// Its parents counted it as a missing dependency and are waiting for the count-down, so
-    /// the caller's "this transaction made it present" is the endpoint, not the row.
     #[tokio::test]
     async fn a_freshly_present_shared_build_ripples_though_the_row_reads_complete_throughout() {
         let landed = DerivationId::now_v7();
@@ -606,9 +494,6 @@ mod tests {
         );
     }
 
-    /// The function decides a flip the way the module does: down, a shared build
-    /// continues the ripple when it reads complete; up, when its counter was at zero
-    /// and its outputs are present, read in one probe and only behind the counter.
     #[test]
     fn the_ripple_flips_on_the_module_predicates() {
         assert!(
@@ -632,8 +517,6 @@ mod tests {
         );
     }
 
-    /// Every write of the counter takes the level's keys, then its rows in
-    /// `derivation` order, so two ripples over overlapping frontiers cannot cycle.
     #[test]
     fn every_level_holds_its_keys_and_ordered_rows_before_it_writes() {
         let keys = RIPPLE_FN
@@ -648,8 +531,6 @@ mod tests {
         assert!(keys < rows && rows < write, "{RIPPLE_FN}");
     }
 
-    /// A retire is the mirror of a commit: the shared builds that WERE complete are read
-    /// before the artifact goes, and incompleteness ripples up from exactly those.
     #[tokio::test]
     async fn a_retire_ripples_incompleteness_up_from_what_was_complete() {
         let gone = DerivationId::now_v7();
@@ -677,8 +558,6 @@ mod tests {
         );
     }
 
-    /// The recount walks UP from what is not present, so a shared build's count is its
-    /// runtime dependencies into that set and the whole chain converges in one pass.
     #[test]
     fn the_recount_walks_up_from_what_is_not_present() {
         let sql = RECOUNT_MISSING_RUNTIME_DEPS.text();

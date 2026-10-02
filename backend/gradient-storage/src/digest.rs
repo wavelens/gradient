@@ -4,23 +4,14 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Content-integrity verification for stored NAR bytes: recalculate the narinfo
-//! `file_hash` (SHA-256 SRI) over the object and compare it against the value a
-//! worker or client reported at upload time.
-
 use gradient_util::nix_hash::normalize_nar_hash;
 use harmonia_utils_hash::{Algorithm, Context, HashFormat as _, Sha256};
 use tokio::io::{AsyncRead, AsyncReadExt as _};
 
-/// SHA-256 of `bytes` as a narinfo `file_hash` SRI string (`sha256-<base64>`),
-/// matching how uploads compute the value they report.
 pub fn file_hash_sri(bytes: &[u8]) -> String {
     Sha256::digest(bytes).as_sri().to_string()
 }
 
-/// Whether a raw SHA-256 digest satisfies a declared narinfo `file_hash`.
-/// Mirrors [`verify_nar_reader`]: a declared non-sha256 hash is not comparable,
-/// so it passes here and is policed by the size check alone.
 pub fn file_hash_matches(expected: &str, actual: &[u8; 32]) -> bool {
     let expected_norm = normalize_nar_hash(expected);
     if !expected_norm.starts_with("sha256:") {
@@ -42,10 +33,8 @@ pub enum VerifyError {
     Store(#[from] anyhow::Error),
 }
 
-/// Verify `bytes` against the reported `file_hash` and `size`. The size check is
-/// unconditional; the content-hash check executes only for SHA-256 expected hashes,
-/// so a legacy non-sha256 (e.g. blake3) upload is size-verified rather than
-/// falsely rejected.
+/// The size check is unconditional. A legacy non-sha256 upload such as blake3 is only size-verified
+/// instead of being falsely rejected.
 pub fn verify_nar_bytes(
     bytes: &[u8],
     expected_file_hash: &str,
@@ -73,11 +62,6 @@ pub fn verify_nar_bytes(
     Ok(())
 }
 
-/// Streaming counterpart to [`verify_nar_bytes`]: reads `reader` to end while
-/// hashing incrementally, so a large NAR is never held whole in memory. The
-/// incremental SHA-256 uses harmonia's `Context`, which is documented to match
-/// the one-shot `Sha256::digest` used by [`file_hash_sri`] exactly, so the
-/// computed `file_hash` SRI is identical to the buffered path.
 pub async fn verify_nar_reader<R: AsyncRead + Unpin>(
     mut reader: R,
     expected_file_hash: &str,
@@ -184,8 +168,6 @@ mod tests {
         assert!(verify_nar_bytes(BYTES, blake3, BYTES.len() as u64).is_ok());
     }
 
-    /// The streaming verifier's incremental SHA-256 must produce the exact
-    /// `file_hash` SRI the one-shot path reports, so a valid NAR passes.
     #[tokio::test]
     async fn reader_verify_matches_one_shot_hash() {
         let expected = file_hash_sri(BYTES);

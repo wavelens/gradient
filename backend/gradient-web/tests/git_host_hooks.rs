@@ -4,17 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Integration tests for inbound Git host webhook endpoints.
-//!
-//! Tests verify `BaseResponse<WebhookResponse>` across these scenarios:
-//! - Generic Git host (Gitea): no matching trigger, push fires trigger, invalid
-//!   signature, integration not found, non-matching branch glob is skipped,
-//!   PR event fires, PR action mismatch is skipped, release event fires.
-//! - GitHub App: push fires, ping, installation, not configured.
-//!
-//! Uses manual Tokio runtimes because `#[tokio::test]` expands to
-//! `::gradient_core::…` which clashes with the local `core` crate name.
-
 #![expect(
     clippy::unwrap_used,
     reason = "test scaffolding: a fixture helper that cannot build its value should fail the test loudly"
@@ -41,8 +30,6 @@ use serde_json::Value;
 use sha2::Sha256;
 use std::sync::Arc;
 use uuid::Uuid;
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
 
 fn temp_secret_file(content: &str) -> String {
     let path = std::env::temp_dir().join(format!("gradient-test-crypt-{}", Uuid::now_v7()));
@@ -118,8 +105,6 @@ fn make_state(
     })
 }
 
-// ── Fixture builders ──────────────────────────────────────────────────────────
-
 fn fixture_date() -> chrono::NaiveDateTime {
     chrono::NaiveDate::from_ymd_opt(2026, 1, 1)
         .unwrap()
@@ -167,8 +152,8 @@ const GITEA_PUSH_BRANCH_BODY: &str = r#"{
     }
 }"#;
 
-// Gitea's "Test Delivery" button (and real branch deletions) send a push with
-// an all-zero `after` SHA; see issue #428.
+// Gitea's "Test Delivery" button and real branch deletions are sending a push with an all-zero
+// `after` SHA (#428).
 const GITEA_TEST_WEBHOOK_BODY: &str = r#"{
     "ref": "refs/heads/master",
     "before": "0000000000000000000000000000000000000000",
@@ -354,7 +339,6 @@ fn worker_registration_row() -> gradient_entity::worker_registration::Model {
     }
 }
 
-/// Build a `task_trigger` row with the given config.
 fn trigger_row(cfg: TriggerConfig) -> gradient_entity::task_trigger::Model {
     gradient_entity::task_trigger::Model {
         id: trigger_id(),
@@ -391,45 +375,35 @@ fn reporter_pr_trigger(actions: Vec<&str>) -> TriggerConfig {
         integration_id: integration_id(),
         branches: vec![],
         actions: actions.into_iter().map(String::from).collect(),
-        // Existing fan-out tests don't depend on the approval gate. Keep
-        // the legacy "run anything that matches" behaviour explicit here.
         require_approval: false,
     }
 }
 
-/// Mock DB chain for a successful `apply_trigger` call with no prior evaluation
-/// (skips same-commit dedup) and no in-flight evaluation. Includes the
-/// `project_has_writable_cache` lookup that follows the eval is created,
-/// the `project_has_eval_capable_worker_registration` lookup that follows it,
-/// the `touch_trigger_last_fired` update on the trigger row, and the pending delivery row
-/// the new evaluation's first Git host report is written as.
 fn apply_trigger_db_chain(db: MockDatabase) -> MockDatabase {
-    db.append_query_results([Vec::<gradient_entity::evaluation::Model>::new()]) // in-flight check
-        .append_query_results([Vec::<gradient_entity::evaluation::Model>::new()]) // trigger_evaluation: in-progress check
-        .append_query_results([vec![commit_row()]]) // INSERT commit
-        .append_query_results([vec![eval_row(EvaluationStatus::Queued)]]) // INSERT eval
-        .append_query_results([Vec::<gradient_entity::task_flake_input_override::Model>::new()]) // snapshot flake input overrides (none)
-        .append_query_results([vec![task_row()]]) // SELECT task for update
+    db.append_query_results([Vec::<gradient_entity::evaluation::Model>::new()])
+        .append_query_results([Vec::<gradient_entity::evaluation::Model>::new()])
+        .append_query_results([vec![commit_row()]])
+        .append_query_results([vec![eval_row(EvaluationStatus::Queued)]])
+        .append_query_results([Vec::<gradient_entity::task_flake_input_override::Model>::new()])
+        .append_query_results([vec![task_row()]])
         .append_exec_results([MockExecResult {
             last_insert_id: 0,
             rows_affected: 1,
-        }]) // UPDATE task
-        .append_query_results([vec![project_cache_row()]]) // project_has_writable_cache: subscription rows
-        .append_query_results([vec![cache_row()]]) // project_has_writable_cache: active cache rows
-        .append_query_results([Vec::<gradient_entity::project_cache::Model>::new()]) // park_if_storage_full: project_writable_caches -> none -> not full
-        .append_query_results([vec![worker_registration_row()]]) // project_has_eval_capable_worker_registration
-        .append_query_results([vec![trigger_row(reporter_push_trigger(vec![]))]]) // touch_trigger_last_fired: SELECT for UPDATE
+        }])
+        .append_query_results([vec![project_cache_row()]])
+        .append_query_results([vec![cache_row()]])
+        .append_query_results([Vec::<gradient_entity::project_cache::Model>::new()])
+        .append_query_results([vec![worker_registration_row()]])
+        .append_query_results([vec![trigger_row(reporter_push_trigger(vec![]))]])
         .append_exec_results([MockExecResult {
             last_insert_id: 0,
             rows_affected: 1,
-        }]) // touch_trigger_last_fired: UPDATE
+        }])
         .append_exec_results([MockExecResult {
             last_insert_id: 0,
             rows_affected: 1,
-        }]) // record_evaluation_created: INSERT INTO pending_delivery
+        }])
 }
-
-// ── Test 1: Generic Git host - no matching trigger (Gitea) ───────────────────────
 
 #[test]
 fn git_host_webhook_no_matching_trigger() {
@@ -442,13 +416,9 @@ fn git_host_webhook_no_matching_trigger() {
 
 async fn git_host_webhook_no_matching_trigger_inner() {
     let plaintext_secret = "test-secret-plaintext";
-    let crypt_path = temp_secret_file("this-is-a-32-byte-crypt-key!!!!"); // 32 bytes
+    let crypt_path = temp_secret_file("this-is-a-32-byte-crypt-key!!!!");
     let ciphertext = encrypt_webhook_secret(&crypt_path, plaintext_secret).expect("encrypt");
 
-    // Mock chain:
-    // 1. SELECT project by name -> project row
-    // 2. SELECT integration -> integration row
-    // 3. load_active_triggers_for_integration -> empty (no trigger rows)
     let db = MockDatabase::new(DatabaseBackend::Postgres)
         .append_query_results([vec![project_row("test-project")]])
         .append_query_results([vec![integration_row(&ciphertext)]])
@@ -479,8 +449,6 @@ async fn git_host_webhook_no_matching_trigger_inner() {
     assert!(msg["skipped"].as_array().unwrap().is_empty());
 }
 
-// ── Test 2: Generic Git host - push fires matching trigger ───────────────────────
-
 #[test]
 fn git_host_webhook_push_fires_trigger() {
     let rt = tokio::runtime::Builder::new_current_thread()
@@ -492,16 +460,9 @@ fn git_host_webhook_push_fires_trigger() {
 
 async fn git_host_webhook_push_fires_trigger_inner() {
     let plaintext_secret = "test-secret-plaintext";
-    let crypt_path = temp_secret_file("this-is-a-32-byte-crypt-key!!!!"); // 32 bytes
+    let crypt_path = temp_secret_file("this-is-a-32-byte-crypt-key!!!!");
     let ciphertext = encrypt_webhook_secret(&crypt_path, plaintext_secret).expect("encrypt");
 
-    // Mock chain:
-    // 1. SELECT project by name -> project row
-    // 2. SELECT integration -> integration row
-    // 3. load_active_triggers -> [reporter_push trigger matching this integration_id]
-    // 4. ETask::find_by_id -> task row
-    // 5. EProject::find_by_id (project_name_for) -> project row
-    // 6–11. apply_trigger chain
     let db = MockDatabase::new(DatabaseBackend::Postgres)
         .append_query_results([vec![project_row("test-project")]])
         .append_query_results([vec![integration_row(&ciphertext)]])
@@ -538,8 +499,6 @@ async fn git_host_webhook_push_fires_trigger_inner() {
     assert!(msg["skipped"].as_array().unwrap().is_empty());
 }
 
-// ── Gitea test webhook / branch deletion (all-zero SHA) -> 200 no-op (#428) ────
-
 #[test]
 fn git_host_webhook_test_ping_zero_sha_is_ok_noop() {
     let rt = tokio::runtime::Builder::new_current_thread()
@@ -551,11 +510,9 @@ fn git_host_webhook_test_ping_zero_sha_is_ok_noop() {
 
 async fn git_host_webhook_test_ping_zero_sha_is_ok_noop_inner() {
     let plaintext_secret = "test-secret-plaintext";
-    let crypt_path = temp_secret_file("this-is-a-32-byte-crypt-key!!!!"); // 32 bytes
+    let crypt_path = temp_secret_file("this-is-a-32-byte-crypt-key!!!!");
     let ciphertext = encrypt_webhook_secret(&crypt_path, plaintext_secret).expect("encrypt");
 
-    // Signature verification needs the project + integration rows; the all-zero push
-    // short-circuits before any trigger/task lookup, so no further rows.
     let db = MockDatabase::new(DatabaseBackend::Postgres)
         .append_query_results([vec![project_row("test-project")]])
         .append_query_results([vec![integration_row(&ciphertext)]])
@@ -584,8 +541,6 @@ async fn git_host_webhook_test_ping_zero_sha_is_ok_noop_inner() {
     assert!(msg["queued"].as_array().unwrap().is_empty());
     assert!(msg["skipped"].as_array().unwrap().is_empty());
 }
-
-// ── Test 3: Generic Git host - invalid signature -> 401 ───────────────────────────
 
 #[test]
 fn git_host_webhook_invalid_signature() {
@@ -625,8 +580,6 @@ async fn git_host_webhook_invalid_signature_inner() {
     assert_eq!(json["message"], "invalid webhook signature");
 }
 
-// ── Test 4: Generic Git host - integration not found -> 404 ───────────────────────
-
 #[test]
 fn git_host_webhook_integration_not_found() {
     let rt = tokio::runtime::Builder::new_current_thread()
@@ -663,8 +616,6 @@ async fn git_host_webhook_integration_not_found_inner() {
     assert_eq!(json["message"], "integration not found");
 }
 
-// ── Test 5: Generic Git host - branch glob non-match -> skipped ──────────────────
-
 #[test]
 fn git_host_webhook_branch_glob_no_match_skipped() {
     let rt = tokio::runtime::Builder::new_current_thread()
@@ -679,12 +630,10 @@ async fn git_host_webhook_branch_glob_no_match_skipped_inner() {
     let crypt_path = temp_secret_file("this-is-a-32-byte-crypt-key!!!!");
     let ciphertext = encrypt_webhook_secret(&crypt_path, plaintext_secret).expect("encrypt");
 
-    // Trigger only allows "release/*" branches; push is to "feature/new-thing"
     let db = MockDatabase::new(DatabaseBackend::Postgres)
         .append_query_results([vec![project_row("test-project")]])
         .append_query_results([vec![integration_row(&ciphertext)]])
         .append_query_results([vec![trigger_row(reporter_push_trigger(vec!["release/*"]))]])
-        // task_identity lookup (for skipped entry)
         .append_query_results([vec![task_row()]])
         .append_query_results([vec![project_row("test-project")]])
         .into_connection();
@@ -715,8 +664,6 @@ async fn git_host_webhook_branch_glob_no_match_skipped_inner() {
     assert_eq!(skipped.len(), 1);
     assert_eq!(skipped[0]["reason"], "filter");
 }
-
-// ── Test 6: Generic Git host - PR event fires trigger ────────────────────────────
 
 #[test]
 fn git_host_webhook_pr_fires_trigger() {
@@ -789,8 +736,6 @@ async fn git_host_webhook_pr_fires_trigger_inner() {
     assert!(msg["skipped"].as_array().unwrap().is_empty());
 }
 
-// ── Test 7: Generic Git host - PR action mismatch -> skipped ──────────────────────
-
 #[test]
 fn git_host_webhook_pr_action_mismatch_skipped() {
     let rt = tokio::runtime::Builder::new_current_thread()
@@ -805,7 +750,6 @@ async fn git_host_webhook_pr_action_mismatch_skipped_inner() {
     let crypt_path = temp_secret_file("this-is-a-32-byte-crypt-key!!!!");
     let ciphertext = encrypt_webhook_secret(&crypt_path, plaintext_secret).expect("encrypt");
 
-    // Trigger only fires on "opened"; we send "closed"
     let pr_body = format!(
         r#"{{
             "action": "closed",
@@ -825,7 +769,6 @@ async fn git_host_webhook_pr_action_mismatch_skipped_inner() {
         .append_query_results([vec![project_row("test-project")]])
         .append_query_results([vec![integration_row(&ciphertext)]])
         .append_query_results([vec![trigger_row(reporter_pr_trigger(vec!["opened"]))]])
-        // task_identity lookup for skipped
         .append_query_results([vec![task_row()]])
         .append_query_results([vec![project_row("test-project")]])
         .into_connection();
@@ -856,8 +799,6 @@ async fn git_host_webhook_pr_action_mismatch_skipped_inner() {
     assert_eq!(skipped.len(), 1);
     assert_eq!(skipped[0]["reason"], "filter");
 }
-
-// ── Test 8: Generic Git host - release event fires releases_only trigger ─────────
 
 #[test]
 fn git_host_webhook_release_fires_releases_only_trigger() {
@@ -923,8 +864,6 @@ async fn git_host_webhook_release_fires_releases_only_trigger_inner() {
     assert!(msg["skipped"].as_array().unwrap().is_empty());
 }
 
-// ── Test 9: Generic Git host - push does NOT fire releases_only trigger ──────────
-
 #[test]
 fn git_host_webhook_push_does_not_fire_releases_only_trigger() {
     let rt = tokio::runtime::Builder::new_current_thread()
@@ -942,7 +881,6 @@ async fn git_host_webhook_push_does_not_fire_releases_only_trigger_inner() {
     let db = MockDatabase::new(DatabaseBackend::Postgres)
         .append_query_results([vec![project_row("test-project")]])
         .append_query_results([vec![integration_row(&ciphertext)]])
-        // releases_only trigger returned; push handler should skip it
         .append_query_results([vec![trigger_row(reporter_push_releases_only_trigger())]])
         .into_connection();
 
@@ -966,11 +904,8 @@ async fn git_host_webhook_push_does_not_fire_releases_only_trigger_inner() {
     let msg = &json["message"];
     assert_eq!(msg["tasks_scanned"], 0);
     assert!(msg["queued"].as_array().unwrap().is_empty());
-    // silently skipped (releases_only triggers are just skipped, not added to skipped list)
     assert!(msg["skipped"].as_array().unwrap().is_empty());
 }
-
-// ── Test 10: GitHub App - push fires trigger ───────────────────────────────────
 
 #[test]
 fn github_app_webhook_push_fires_trigger() {
@@ -985,16 +920,6 @@ async fn github_app_webhook_push_fires_trigger_inner() {
     let gh_secret = "github-webhook-secret";
     let gh_secret_path = temp_secret_file(gh_secret);
 
-    // Mock chain:
-    // resolve_github_app_targets:
-    //   1. SELECT github_installation by installation_id (.all) -> [github_installation row]
-    //   2. SELECT tasks for project (.all) -> [task row matching webhook url]
-    //   3. SELECT inbound GitHub integration (.one) -> integration row
-    // fan_out_triggers:
-    //   4. load_active_triggers -> [reporter_push trigger]
-    //   5. ETask::find_by_id -> task row
-    //   6. project_name_for -> project row
-    //   7+. apply_trigger chain
     let db = MockDatabase::new(DatabaseBackend::Postgres)
         .append_query_results([vec![github_installation_row(project_id(), 9999)]])
         .append_query_results([vec![github_task_row()]])
@@ -1031,8 +956,6 @@ async fn github_app_webhook_push_fires_trigger_inner() {
     assert_eq!(queued[0]["project"], "gh-project");
     assert!(msg["skipped"].as_array().unwrap().is_empty());
 }
-
-// ── Test 11: GitHub App - ping ─────────────────────────────────────────────────
 
 #[test]
 fn github_app_webhook_ping() {
@@ -1073,8 +996,6 @@ async fn github_app_webhook_ping_inner() {
     assert!(msg["skipped"].as_array().unwrap().is_empty());
 }
 
-// ── Test 12: GitHub App - installation (project not found, just warns) ─────────────
-
 #[test]
 fn github_app_webhook_installation() {
     let rt = tokio::runtime::Builder::new_current_thread()
@@ -1088,7 +1009,6 @@ async fn github_app_webhook_installation_inner() {
     let gh_secret = "github-webhook-secret";
     let gh_secret_path = temp_secret_file(gh_secret);
 
-    // No repositories in the payload -> installed set is empty -> early return before any DB query.
     let db = MockDatabase::new(DatabaseBackend::Postgres).into_connection();
 
     let state = make_state(db, None, Some(gh_secret_path));
@@ -1123,8 +1043,6 @@ async fn github_app_webhook_installation_inner() {
     assert!(msg["skipped"].as_array().unwrap().is_empty());
 }
 
-// ── Test 13: GitHub App - not configured -> 503 ────────────────────────────────
-
 #[test]
 fn github_app_webhook_not_configured() {
     let rt = tokio::runtime::Builder::new_current_thread()
@@ -1154,8 +1072,6 @@ async fn github_app_webhook_not_configured_inner() {
     assert_eq!(json["message"], "github app integration not configured");
 }
 
-// ── Test 15: GitHub App - multi-project installation routes by repo URL ─────────
-
 #[test]
 fn github_app_webhook_multi_project_routes_to_matching_project() {
     let rt = tokio::runtime::Builder::new_current_thread()
@@ -1171,9 +1087,6 @@ async fn github_app_webhook_multi_project_routes_to_matching_project_inner() {
     let gh_secret = "github-webhook-secret";
     let gh_secret_path = temp_secret_file(gh_secret);
 
-    // Two projects share installation_id=9999 via separate github_installation rows.
-    // Project A's tasks don't match the webhook repo URL; project B has the matching
-    // task. Only project B's integration should fire.
     let project_a_id =
         ProjectId::new(Uuid::parse_str("a0000000-0000-0000-0000-0000000000aa").unwrap());
     let inst_a_id = gradient_entity::ids::GithubInstallationId::new(
@@ -1197,18 +1110,6 @@ async fn github_app_webhook_multi_project_routes_to_matching_project_inner() {
     );
     let project_b_task = github_task_row();
 
-    // Mock chain:
-    // resolve_github_app_targets:
-    //   1. SELECT github_installation by installation_id -> [inst_a, inst_b]
-    //   2. tasks.all for BOTH projects in one read -> [project_a_task (no URL
-    //      match -> skipped), project_b_task (URL matches)]
-    //   3. integration.all for both installations, per github_installation
-    //      -> github_integration_row (inst_b's)
-    // fan_out_triggers for project B's integration:
-    //   4. load_active_triggers -> [trigger]
-    //   5. ETask::find_by_id -> project_b_task
-    //   6. project_name_for -> project B row
-    //   7+. apply_trigger chain
     let db = MockDatabase::new(DatabaseBackend::Postgres)
         .append_query_results([vec![inst_a, inst_b]])
         .append_query_results([vec![project_a_task, project_b_task.clone()]])
@@ -1241,8 +1142,6 @@ async fn github_app_webhook_multi_project_routes_to_matching_project_inner() {
     assert_eq!(queued[0]["project"], "gh-project");
 }
 
-// ── Test 16: GitHub App - no task matches webhook repo URL ───────────────
-
 #[test]
 fn github_app_webhook_no_matching_repo_returns_zero() {
     let rt = tokio::runtime::Builder::new_current_thread()
@@ -1256,7 +1155,6 @@ async fn github_app_webhook_no_matching_repo_returns_zero_inner() {
     let gh_secret = "github-webhook-secret";
     let gh_secret_path = temp_secret_file(gh_secret);
 
-    // Project has the installation but no task with a matching repo URL.
     let unrelated = task_row_with(
         task_id(),
         project_id(),

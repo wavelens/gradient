@@ -9,13 +9,11 @@
     reason = "the amplifier writes test data and is not a statement the gate measures"
 )]
 
-//! Grows the e2e VM's real rows to production shape. A sequential scan of 951
-//! derivations is the planner's correct choice, so a budget measured at that
-//! size means nothing. Clones copy real rows rather than generating uniform
-//! ones, which keeps the graph's own distribution, and every key is derived
-//! from the original and the copy index: a copy of a row that referenced
-//! another therefore references that row's copy, and the whole database grows
-//! as one consistent graph rather than a pile of orphans.
+//! A budget measured on the VM's 951 derivations is meaningless because a sequential scan is the
+//! planner's correct choice there. Clones are copying real rows to keep the graph's own
+//! distribution. Every key is derived from the original and the copy index. A copy of a referencing
+//! row is then pointing at the referenced row's copy, and the database is growing as one consistent
+//! graph.
 
 use std::collections::HashMap;
 
@@ -23,26 +21,14 @@ use anyhow::{Context, Result};
 use sea_orm::{ConnectionTrait, DatabaseBackend, DatabaseConnection, Statement, Value};
 
 pub enum Rewrite {
-    /// A uuid key or foreign key. The copy's value is a function of the
-    /// original and the copy index, so a reference finds the copy of the row it
-    /// pointed at without a mapping table, and a NULL stays NULL.
     Remap,
-    /// A 32-char store hash, derived the same way.
     Rehash,
-    /// A space-separated list of store paths: each path's hash is rehashed, so
-    /// a copy references the copies of what its original referenced and a path
-    /// keeps the VM's fan-in instead of gaining one parent per copy.
     References,
-    /// A column a unique index covers: the copy index keeps it unique and the
-    /// `amp` prefix says the row is synthetic.
     Mark,
 }
 
 enum Scale {
-    /// Copy until the table holds about this many rows.
     To(u64),
-    /// Take another table's copy count, so a copy never points at one that was
-    /// never made.
     With(&'static str),
 }
 
@@ -52,11 +38,9 @@ struct Target {
     rewrite: &'static [(&'static str, Rewrite)],
 }
 
-/// Ordered by foreign key: a table is cloned only once the tables it points at
-/// have been. `build_job` appears twice on purpose - once per cloned derivation
-/// so the live evaluation carries a full-size job set, then once per cloned
-/// evaluation so the table is many evaluations wide, which is what makes a
-/// lookup by evaluation selective the way it is in production.
+/// Tables are listed after the tables they point at. `build_job` is appearing twice on purpose. The
+/// first pass is giving the live evaluation a full-size job set. The second pass is making the
+/// table many evaluations wide, keeping a lookup by evaluation as selective as in production.
 const TARGETS: &[Target] = &[
     Target {
         table: "project",
@@ -217,18 +201,10 @@ pub async fn run(db: &DatabaseConnection, scale: u32) -> Result<()> {
     Ok(())
 }
 
-/// A column name as an identifier. The list comes from `information_schema` in
-/// the database's own case, so quoting is always safe and is the only thing that
-/// lets a reserved word be a column: `cached_path.references` is one.
 fn quoted(column: &str) -> String {
     format!("\"{}\"", column.replace('"', "\"\""))
 }
 
-/// One clone pass over `table`: every column is copied verbatim unless the
-/// rewrite list gives it a new value. The column list comes from the database,
-/// so a schema change cannot leave a stale one behind, and the pass needs no
-/// guard against reading its own output because an `INSERT ... SELECT` never
-/// sees the rows it is writing.
 pub fn clone_sql(table: &str, columns: &[String], rewrite: &[(&str, Rewrite)]) -> String {
     let exprs: Vec<String> = columns
         .iter()
@@ -265,9 +241,6 @@ pub fn clone_sql(table: &str, columns: &[String], rewrite: &[(&str, Rewrite)]) -
     )
 }
 
-/// Every amplification statement passes through here, so a failure carries the
-/// statement itself: a table or column the schema no longer has is otherwise a
-/// bare `relation "x" does not exist` with nothing to point at.
 async fn execute(db: &DatabaseConnection, sql: &str, copies: i32) -> Result<()> {
     db.execute_raw(Statement::from_sql_and_values(
         DatabaseBackend::Postgres,
@@ -359,8 +332,6 @@ mod tests {
         assert!(sql.ends_with("ON CONFLICT DO NOTHING"), "{sql}");
     }
 
-    /// `cached_path.references` is a reserved word, so the gate could not amplify
-    /// the table at all until every identifier was quoted.
     #[test]
     fn a_reserved_word_is_a_usable_column_name() {
         let sql = clone_sql("cached_path", &["references".to_string()], &[]);
@@ -378,8 +349,6 @@ mod tests {
         assert!(sql.contains("t.\"created_at\""), "{sql}");
     }
 
-    /// A foreign key and the primary key it points at are rewritten by the same
-    /// function, which is what keeps a copied row pointing at copied rows.
     #[test]
     fn a_foreign_key_lands_on_the_copy_of_the_row_it_named() {
         let key = clone_sql("derivation", &["id".to_string()], &[("id", Rewrite::Remap)]);
@@ -399,8 +368,6 @@ mod tests {
         );
     }
 
-    /// A reference and the hash it names are rewritten by the same function, so
-    /// a copied path references the copies of its original's references.
     #[test]
     fn a_reference_lands_on_the_copy_of_the_path_it_named() {
         let hash = clone_sql(

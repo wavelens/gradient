@@ -4,11 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! `cached_path.confirmed`: the object is durably in `nar_storage`. It is false
-//! only between a relayed commit on the S3 backend and the uploader's confirm,
-//! so every row that exists today is confirmed by the default, and the scan the
-//! uploader runs is a partial index that is empty on a quiet server.
-
 use sea_orm_migration::prelude::*;
 use sea_orm_migration::sea_orm::ConnectionTrait;
 

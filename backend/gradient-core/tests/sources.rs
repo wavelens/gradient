@@ -4,17 +4,14 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Tests for `gradient_sources` - path/hash utilities and SSH key generation.
 use base64::Engine;
 use gradient_sources::*;
 use std::io::Write;
 use tempfile::NamedTempFile;
 
-// ── get_hash_from_url ────────────────────────────────────────────────────────
-
-// Valid Nix base32 alphabet: 0-9 + abcdfghijklmnpqrsvwxyz (no e, o, t, u).
-const H32: &str = "abcdfghijklmnpqrsvwxyz0123456789"; // 22+10 = 32
-const H52: &str = "abcdfghijklmnpqrsvwxyz0123456789abcdfghijklmnpqrsvwx"; // 52
+// The valid Nix base32 alphabet is 0-9 plus abcdfghijklmnpqrsvwxyz, without e, o, t and u.
+const H32: &str = "abcdfghijklmnpqrsvwxyz0123456789";
+const H52: &str = "abcdfghijklmnpqrsvwxyz0123456789abcdfghijklmnpqrsvwx";
 
 fn h32() -> String {
     H32.to_string()
@@ -40,7 +37,7 @@ fn hash_from_url_nar_with_compression_ok() {
 
 #[test]
 fn hash_from_url_narinfo_cannot_have_compression_suffix() {
-    // narinfo must be 2 parts exactly - `.narinfo.zst` is 3 parts -> rejected.
+    // A narinfo name must have exactly 2 parts, and `.narinfo.zst` is carrying 3.
     let url = format!("{}.narinfo.zst", h32());
     assert!(get_hash_from_url(url).is_err());
 }
@@ -58,10 +55,8 @@ fn hash_from_url_four_parts_rejected() {
 
 #[test]
 fn hash_from_url_wrong_hash_length_rejected() {
-    // 31 chars
     let url = format!("{}.narinfo", &H32[..31]);
     assert!(get_hash_from_url(url).is_err());
-    // 40 chars (git hash - not a Nix hash length)
     let url = format!("{}.nar", "a".repeat(40));
     assert!(get_hash_from_url(url).is_err());
 }
@@ -74,7 +69,6 @@ fn hash_from_url_wrong_extension_rejected() {
 
 #[test]
 fn hash_from_url_disallowed_base32_chars_rejected() {
-    // 'e', 'o', 't', 'u' are not valid Nix base32.
     for bad in ['e', 'o', 't', 'u'] {
         let mut hash: String = "a".repeat(31);
         hash.push(bad);
@@ -86,8 +80,6 @@ fn hash_from_url_disallowed_base32_chars_rejected() {
     }
 }
 
-// ── get_hash_from_path ───────────────────────────────────────────────────────
-
 #[test]
 fn hash_from_path_extracts_hash_and_package() {
     let (hash, pkg) = get_hash_from_path("/nix/store/abc123-hello-1.0".to_string()).unwrap();
@@ -97,7 +89,6 @@ fn hash_from_path_extracts_hash_and_package() {
 
 #[test]
 fn hash_from_path_package_with_no_dash_rejected() {
-    // Path `abc123` has no dash -> can't split into hash-package.
     assert!(get_hash_from_path("/nix/store/abc123".to_string()).is_err());
 }
 
@@ -106,8 +97,6 @@ fn hash_from_path_too_few_segments_rejected() {
     assert!(get_hash_from_path("abc".to_string()).is_err());
     assert!(get_hash_from_path("/nix/store".to_string()).is_err());
 }
-
-// ── get_cache_nar_location ────────────────────────────────────────────────────
 
 #[test]
 fn nar_location_shards_by_first_two_hex_chars() {
@@ -121,8 +110,6 @@ fn nar_location_shards_by_first_two_hex_chars() {
     assert!(path.contains("/ab/"));
     assert!(path.ends_with(".nar"));
 }
-
-// ── generate_ssh_key ──────────────────────────────────────────────────────────
 
 #[test]
 fn generate_ssh_key_produces_valid_ed25519_keypair() {
@@ -139,7 +126,6 @@ fn generate_ssh_key_produces_valid_ed25519_keypair() {
         "public key should be OpenSSH ed25519 format"
     );
 
-    // private key must be base64-decodable (it is stored encrypted)
     base64::engine::general_purpose::STANDARD
         .decode(&private_key)
         .unwrap();

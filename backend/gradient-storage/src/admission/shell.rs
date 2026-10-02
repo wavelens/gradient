@@ -205,8 +205,8 @@ impl Drop for AdmissionSession {
     }
 }
 
-/// One admitted upload. Dropping it without [`UploadPermit::committed`] counts
-/// as a failed upload, so every exit path returns the budget.
+/// A permit dropped without `committed` is counted as a failed upload. Every exit path is thereby
+/// returning the budget.
 pub struct UploadPermit {
     admission: Arc<UploadAdmission>,
     session: SessionId,

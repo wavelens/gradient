@@ -22,61 +22,31 @@ use super::eval_stats::{EvalStatsAccumulator, EvalStatsTotals, StatsDelta};
 use super::pool::{EvalWorkerPool, PooledEvalWorker};
 use super::transport::Listing;
 
-/// `DerivationResolver` impl that drives an [`EvalWorkerPool`].
-///
-/// `list_flake_derivations` plans shards on one worker and fans them across
-/// the pool, a trailing wildcard's children in batches, queueing every nested
-/// set a worker defers as further batches; `resolve_derivation_paths`
-/// splits attrs into batches the same way. Both fan-outs run through [`pooled_fan_out`] and recover from
-/// subprocess crashes with the same [`MAX_CRASH_ATTEMPTS`] tolerance: a shard
-/// retries whole (its response is atomic), a resolve batch salvages its
-/// streamed prefix and isolates the exact in-flight attr.
-/// `get_derivation` and `get_features` parse `.drv` files directly from disk.
 #[derive(Debug)]
 pub struct WorkerPoolResolver {
     pool: Arc<EvalWorkerPool>,
     eval_cache_dir: String,
-    /// Accumulates per-request deltas + peak RSS across one eval. Drained by
-    /// the executor via [`Self::take_eval_stats`] once the eval finishes.
     stats: Arc<Mutex<EvalStatsAccumulator>>,
-    /// The eval's user entry-point patterns, set by `list_flake_derivations` so
-    /// the later resolve pass can bucket each delta under its owning pattern.
     patterns: Arc<Mutex<Vec<String>>>,
-    /// Warning sink for the resolve pass: batches funnel their `ResolveEnd`
-    /// warnings here, drained once per `resolve_derivation_paths` call.
     resolve_warnings: Arc<Mutex<Vec<String>>>,
 }
 
-/// One resolved attr per index in the original request.
 type IndexedDerivation = (usize, ResolvedDerivation);
 
-/// Crashes tolerated for a single work item (a shard, or one attr) before it
-/// becomes an error. Shared by listing and resolving so both recover from a
-/// subprocess death with the same tolerance.
 const MAX_CRASH_ATTEMPTS: u32 = 2;
 
-/// Upper bound on attrs listed or resolved in a single worker call, so one
-/// batch's eval-heap growth stays small relative to `max_eval_rss` (the worker's
-/// heap persists across batches and is recycled once it crosses the cap).
 const MAX_BATCH: usize = 64;
 
-/// Batch size for `items` spread over `workers`: ~4 batches per worker leaves
-/// enough slack to steal without paying a walker rebuild per item.
 fn batch_size(items: usize, workers: usize) -> usize {
     items.div_ceil(workers.max(1) * 4).clamp(1, MAX_BATCH)
 }
 
-/// One `List` call of a discovery fan-out.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct DiscoveryCall {
     wildcards: Vec<String>,
     only: Option<Vec<String>>,
 }
 
-/// The `List` calls covering `shards`: one per unrestricted shard, and one per
-/// batch of a restricted shard's names, so a flat attrset of heavy children is
-/// listed across the pool with recycles in between. Exact-path exclusions ride
-/// every call; the caller's dedup mops up cross-call overlap.
 fn discovery_calls(
     shards: Vec<DiscoveryShard>,
     excludes: &[String],
@@ -107,9 +77,6 @@ fn discovery_calls(
         .collect()
 }
 
-/// Pick `attr`'s owning entry-point: the longest wildcard `pattern` whose
-/// segments all match `attr`'s leading segments (a `*` segment matches any one
-/// segment). Falls back to `attr`'s top-level segment when nothing matches.
 fn entry_point_of(attr: &str, patterns: &[String]) -> String {
     let attr_segs: Vec<&str> = attr.split('.').collect();
     let matches = |pat: &str| {
@@ -121,7 +88,6 @@ fn entry_point_of(attr: &str, patterns: &[String]) -> String {
                 .all(|(p, a)| *p == "*" || p == a)
     };
 
-    // Rank by segment count, then prefer fewer `*` (the more specific pattern).
     patterns
         .iter()
         .filter(|p| matches(p))
@@ -134,7 +100,6 @@ fn entry_point_of(attr: &str, patterns: &[String]) -> String {
         .unwrap_or_else(|| attr_segs.first().copied().unwrap_or("").to_string())
 }
 
-/// Convert a worker's [`ResolvedItem`] into the trait's `(attr, Result)` shape.
 fn item_to_resolved(item: ResolvedItem) -> ResolvedDerivation {
     let result = match (item.drv_path, item.error) {
         (Some(drv), _) => Ok((drv, item.references)),
@@ -145,8 +110,6 @@ fn item_to_resolved(item: ResolvedItem) -> ResolvedDerivation {
     (item.attr, result)
 }
 
-/// Per-attr error recorded when a subprocess crashes on the same attr
-/// [`MAX_CRASH_ATTEMPTS`] times.
 fn crashed_derivation(attr: String) -> ResolvedDerivation {
     (
         attr,
@@ -156,10 +119,6 @@ fn crashed_derivation(attr: String) -> ResolvedDerivation {
     )
 }
 
-/// Dynamic work queue over the pool: up to `workers` items run at once and the
-/// next starts as soon as one finishes, so one slow item never leaves the rest
-/// of the pool idle. An item may return follow-up items, which join the queue.
-/// The first hard error drains the fan-out and propagates.
 async fn pooled_fan_out<T, Fut>(workers: usize, items: Vec<T>, run: impl Fn(T) -> Fut) -> Result<()>
 where
     Fut: Future<Output = Result<Vec<T>>>,
@@ -180,26 +139,16 @@ where
     }
 }
 
-/// Outcome of resolving one batch on one worker. `Complete` means the
-/// subprocess lived through `ResolveEnd` (per-attr eval errors ride inside
-/// the items); `Crashed` means it died mid-stream, keeping the item frames
-/// that made it out.
 enum BatchCall {
     Complete(Vec<ResolvedItem>),
     Crashed { streamed: Vec<ResolvedItem> },
 }
 
-/// Resolves one batch of attrs on a single pooled worker. Injected so the
-/// crash-isolation policy is testable without real subprocesses.
 type ResolveOnce<'a> = dyn Fn(Vec<String>) -> BoxFuture<'a, Result<BatchCall>> + Sync + 'a;
 
-/// Pure crash-isolation policy over the streamed `Resolve` protocol.
-///
-/// A crash keeps every item streamed before the subprocess died; the first
-/// unstreamed attr is the one that was in flight, so it is retried alone on a
-/// fresh worker (up to [`MAX_CRASH_ATTEMPTS`] attempts total, then a per-attr
-/// error) while the untouched remainder resolves independently. No bisection:
-/// streaming pinpoints the suspect in one step.
+/// A crash is keeping every item streamed before the subprocess died.
+/// The first unstreamed attr was in flight and is retried alone on a fresh worker.
+/// The untouched remainder is resolving independently. No bisection is needed.
 fn resolve_chunk<'a>(
     resolve_once: &'a ResolveOnce<'a>,
     mut chunk: Vec<(usize, String)>,
@@ -250,8 +199,6 @@ fn resolve_chunk<'a>(
 
                 let mut rest = rest.into_iter();
                 let Some((idx, suspect)) = rest.next() else {
-                    // Died between the last item and ResolveEnd: every attr
-                    // resolved; only the batch's warnings/stats are lost.
                     return Ok(done);
                 };
                 let remainder: Vec<_> = rest.collect();
@@ -290,10 +237,6 @@ impl WorkerPoolResolver {
         }
     }
 
-    /// Arm the pool's memory guard and spawn the eval-subprocess reaper. The
-    /// margin is shared between the reaper (which kills the largest eval under
-    /// pressure) and `acquire` back-pressure. No-op when `min_free_bytes` is 0
-    /// or no tokio runtime is available (e.g. in unit tests).
     pub fn start_memory_reaper(&self, min_free_bytes: u64) {
         self.pool.configure_memory_guard(min_free_bytes);
         if min_free_bytes == 0 || tokio::runtime::Handle::try_current().is_err() {
@@ -308,14 +251,10 @@ impl WorkerPoolResolver {
         tokio::spawn(super::memory::memory_reaper_loop(weak, min_free_bytes));
     }
 
-    /// Bucket one worker delta under `entry_point`, folding peak RSS in too.
     fn observe_stats(&self, entry_point: &str, delta: StatsDelta, rss: u64) {
         self.stats.lock().observe(entry_point, delta, rss);
     }
 
-    /// Post-call bookkeeping shared by every successful worker call: record
-    /// the stats delta and discard an over-RSS worker so its eval heap is
-    /// reclaimed before the next call (progress is durable in the eval cache).
     fn finish_call(&self, worker: &mut PooledEvalWorker, bucket: &str, stats: Option<StatsDelta>) {
         let rss = worker.rss_bytes();
         if let Some(delta) = stats {
@@ -326,39 +265,25 @@ impl WorkerPoolResolver {
         }
     }
 
-    /// The entry-point bucket a call's stats delta is attributed to: the batch
-    /// delta is one number, so it goes whole to the first attr's entry-point;
-    /// the dynamic queue keeps batches small and same-prefix, so cross-bucket
-    /// bleed is minor.
     fn bucket_of(&self, first_attr: Option<&String>) -> String {
         first_attr
             .map(|a| entry_point_of(a, &self.patterns.lock()))
             .unwrap_or_default()
     }
 
-    /// Drain the accumulated per-eval stats, resetting the accumulator so the
-    /// next eval starts clean. Called once by the executor at eval completion.
     pub fn take_eval_stats(&self) -> EvalStatsTotals {
         let acc = std::mem::take(&mut *self.stats.lock());
         acc.finish()
     }
 
-    /// On-disk eval-cache directory shared by every worker (set as
-    /// `NIX_CACHE_HOME`). The executor stages/reads `<fingerprint>.sqlite`
-    /// blobs under `<eval_cache_dir>/eval-cache-v6/`.
     pub fn eval_cache_dir(&self) -> &str {
         &self.eval_cache_dir
     }
 
-    /// Gracefully shut every idle eval-worker subprocess down. See
-    /// [`EvalWorkerPool::shutdown`] for the contract.
     pub async fn shutdown(&self) {
         self.pool.shutdown().await;
     }
 
-    /// Return `repository`'s eval-cache fingerprint without evaluating it.
-    /// `None` for mutable/dirty flakes. A dead worker is marked so it gets
-    /// discarded instead of reused.
     pub async fn fingerprint(
         &self,
         repository: String,
@@ -374,10 +299,6 @@ impl WorkerPoolResolver {
         }
     }
 
-    /// Fold the eval-cache WAL into the main `.sqlite` once, after all shards
-    /// have committed, so the fleet-share push is shipping a complete cache. Best-effort
-    /// in spirit (the caller ignores failures), but a crashed worker is marked
-    /// dead so it is not reused.
     pub async fn checkpoint_cache(
         &self,
         repository: String,
@@ -393,11 +314,6 @@ impl WorkerPoolResolver {
         }
     }
 
-    /// Discover one shard, retrying on a fresh worker after a subprocess crash
-    /// up to [`MAX_CRASH_ATTEMPTS`] total attempts (the resolve-side tolerance).
-    /// A shard's response is atomic, so recovery is a whole-shard retry; a
-    /// shard that keeps crashing fails the whole listing, matching the
-    /// single-worker behaviour this replaces.
     async fn list_shard(
         &self,
         repository: &str,
@@ -418,8 +334,6 @@ impl WorkerPoolResolver {
         }
     }
 
-    /// Discover one shard on a single pooled worker; a crash marks the worker
-    /// dead and surfaces as `Err` for [`Self::list_shard`] to retry.
     async fn list_once(
         &self,
         repository: &str,
@@ -448,9 +362,6 @@ impl WorkerPoolResolver {
         }
     }
 
-    /// Resolve one batch on a single pooled worker. A subprocess death becomes
-    /// [`BatchCall::Crashed`] carrying the streamed prefix; only pool failures
-    /// (e.g. shutdown) are `Err`.
     async fn resolve_once(
         &self,
         repository: &str,
@@ -495,17 +406,15 @@ impl DerivationResolver for WorkerPoolResolver {
         wildcards: Vec<String>,
         overrides: &[(String, String)],
     ) -> Result<FlakeDiscovery> {
-        // Record the user entry-points so the resolve pass can bucket by them.
         *self.patterns.lock() = wildcards
             .iter()
             .filter(|w| !w.starts_with('!'))
             .cloned()
             .collect();
 
-        // Plan the split on one worker. Planning forces only the prefix
-        // attrsets: a trailing wildcard comes back as child names, never forced,
-        // so a flat attrset of heavy children (NixOS hosts) is listed in batches
-        // across the pool instead of in one call that blows past the RAM budget.
+        // Planning is forcing only the prefix attrsets.
+        // A trailing wildcard is coming back as unforced child names.
+        // A flat attrset of heavy children is then listed in batches across the pool.
         let (shards, plan_errors) = {
             let mut worker = self.pool.acquire().await?;
             match worker
@@ -576,8 +485,6 @@ impl DerivationResolver for WorkerPoolResolver {
             return Ok((vec![], vec![]));
         }
 
-        // Dynamic work queue: split into many small index-tagged batches and let
-        // each pooled worker pull the next as soon as it is free.
         let n_workers = self.pool.max().min(attrs.len());
         let batch_size = batch_size(attrs.len(), n_workers);
         let batches: Vec<Vec<(usize, String)>> = attrs
@@ -597,8 +504,6 @@ impl DerivationResolver for WorkerPoolResolver {
 
             let (indexed, resolve_batch) = (&indexed, &resolve_batch);
             pooled_fan_out(n_workers, batches, |batch| async move {
-                // A crash became per-attr errors in the pure core; only a
-                // protocol violation or pool failure is a hard error.
                 let resolved = resolve_chunk(resolve_batch, batch, 0).await?;
                 indexed.lock().extend(resolved);
                 Ok(Vec::new())
@@ -684,14 +589,11 @@ mod tests {
             entry_point_of("packages.x86_64-linux.hello", &["packages.*.*".into()]),
             "packages.*.*"
         );
-        // A more specific literal pattern wins over the broad wildcard.
         assert_eq!(
             entry_point_of("packages.x86_64-linux.foo", &pats),
             "packages.*.foo"
         );
-        // No matching pattern falls back to the attr's top-level segment.
         assert_eq!(entry_point_of("checks.x86_64-linux.t", &pats), "checks");
-        // A `*` segment matches any one segment.
         assert_eq!(
             entry_point_of(
                 "devShells.aarch64-linux.default",
@@ -710,9 +612,6 @@ mod tests {
         }
     }
 
-    /// Scripts a `resolve_once` stub: counts calls and decides per batch where
-    /// the worker crashes. `crash_at` returns the index of the attr the worker
-    /// dies on (items before it stream out), or `None` for a complete batch.
     type CrashAt = Box<dyn Fn(&[String], usize) -> Option<usize> + Sync>;
 
     struct Stub {
@@ -733,15 +632,11 @@ mod tests {
         }
     }
 
-    /// Crash while resolving any attr in `crashers`, streaming everything
-    /// before it (mirrors the real subprocess: items flush per attr).
     fn crashes_on(crashers: &'static [&'static str]) -> Stub {
         let set: HashSet<&str> = crashers.iter().copied().collect();
         Stub::new(move |attrs, _call| attrs.iter().position(|a| set.contains(a.as_str())))
     }
 
-    /// Drive the pure core over a chunk built from `attrs` (index = position).
-    /// Returns `(attr, resolved_ok)` in index order plus the stub's call count.
     async fn run(stub: Stub, attrs: &[&str]) -> (Vec<(String, bool)>, usize) {
         let chunk: Vec<(usize, String)> = attrs
             .iter()
@@ -793,14 +688,10 @@ mod tests {
 
     #[tokio::test]
     async fn crash_salvages_streamed_prefix_and_isolates_suspect() {
-        // b always crashes the worker: the streamed prefix (a) survives the
-        // first call, b is retried alone and errors, c+d resolve untouched.
         let (out, calls) = run(crashes_on(&["b"]), &["a", "b", "c", "d"]).await;
         let map: HashMap<_, _> = out.into_iter().collect();
         assert!(!map["b"], "the crasher resolves to an error");
         assert!(map["a"] && map["c"] && map["d"], "the rest still resolve");
-        // 1 initial + 1 lone retry of b + 1 for the remainder [c, d]: streaming
-        // pinpoints the suspect, no bisection rework of the streamed prefix.
         assert_eq!(calls, 3);
     }
 
@@ -814,8 +705,6 @@ mod tests {
 
     #[tokio::test]
     async fn transient_crash_succeeds_on_retry() {
-        // The single-attr chunk crashes on the first call (attempt 0) and
-        // resolves on the one retry (attempt 1) - no per-attr error recorded.
         let (out, calls) = run(Stub::new(|_attrs, call| (call == 0).then_some(0)), &["a"]).await;
         assert_eq!(out, vec![("a".into(), true)]);
         assert_eq!(calls, 2, "one crash + one successful retry");
@@ -823,8 +712,6 @@ mod tests {
 
     #[tokio::test]
     async fn crash_after_last_item_keeps_all_results() {
-        // Worker streams every item, then dies before ResolveEnd: nothing to
-        // retry, all results are kept.
         let (out, calls) = run(
             Stub::new(|attrs, call| (call == 0).then_some(attrs.len())),
             &["a", "b"],

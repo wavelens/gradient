@@ -4,17 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Maintenance deletes applied inside the graph writer. The sweep scans on the pool,
-//! where a full keep-set walk is cheap to pay for once; the graph writer then applies
-//! each bounded chunk in one short transaction, re-checking only what became
-//! live SINCE that scan.
-//!
-//! That re-check is exact because reachability can only grow through new roots:
-//! a derivation gains edges when an evaluation walks it, and that evaluation
-//! writes its own `build_job` rows in the same batch. So the closure of every
-//! `build_job` and `entry_point` created at or after the scan covers everything
-//! the scan could not have seen, and it is one evaluation's closure rather than
-//! the whole graph.
+//! The re-check after the pool scan is exact because reachability can only grow through
+//! new roots. An evaluation walking a derivation is writing its own `build_job` rows in the
+//! same batch. The closure of every root created since the scan is covering all it missed.
 
 use std::collections::HashSet;
 
@@ -35,9 +27,6 @@ use uuid::Uuid;
 use crate::messages::{GcReport, GcRequest};
 use crate::writer::GraphMsg;
 
-/// Everything a root created at or after `$2` can reach. The seed is the two
-/// kinds of root the keep-set walk uses, so a candidate this misses is one no
-/// root created since the scan names.
 fn fresh_cte() -> String {
     dependency_closure_cte_body(
         "fresh",
@@ -89,26 +78,17 @@ gradient_db::sql_fn! {
 }
 
 gradient_db::sql! {
-    /// The `(derivation, attempt)` pairs of the candidates, taken BEFORE the
-    /// delete: the attempt rows cascade away with their derivation, and their
-    /// log files in `log_storage` do not.
     GC_CANDIDATE_ATTEMPTS = "SELECT b.derivation AS derivation, a.id AS attempt \
              FROM build_attempt a JOIN derivation_build b ON b.id = a.derivation_build \
              WHERE b.derivation = ANY($1)",
         params = [DerivationIds(64)],
         tier = Sweep;
 
-    /// The edges INTO the candidates, taken BEFORE the delete for the same
-    /// reason: `derivation_dependency.dependency` is ON DELETE CASCADE, so a
-    /// parent that survives has silently lost part of its record.
     GC_CANDIDATE_PARENTS = "SELECT e.derivation, e.dependency FROM derivation_dependency e \
              WHERE e.dependency = ANY($1)",
         params = [DerivationIds(64)],
         tier = Sweep;
 
-    /// Every shared build whose queue membership deleting these evaluations can close:
-    /// the derivations they name, and the direct inputs of those, which lose a
-    /// parent that wanted them.
     GC_SHARED_BUILDS_LOSING_AN_EVALUATION = "WITH named AS MATERIALIZED ( \
                  SELECT DISTINCT derivation FROM build_job WHERE evaluation = ANY($1::uuid[])) \
              SELECT derivation FROM named \
@@ -119,9 +99,6 @@ gradient_db::sql! {
         tier = Sweep;
 }
 
-/// The per-task evaluation retention a record pass triggers. Executes OFF the graph writer (it
-/// is spawned past the batch's own transaction) and asks the graph writer to apply what
-/// it selected, so the prompt GC a record pass owes is still a single-writer delete.
 pub(crate) async fn gc_task_evaluations(
     ctx: &DbContext,
     writer: ActorRef<GraphMsg>,
@@ -154,7 +131,6 @@ pub(crate) async fn gc_task_evaluations(
     Ok(())
 }
 
-/// One maintenance request, applied and emitted inside the graph writer's transaction.
 pub(crate) async fn apply(ctx: &DbContext, req: GcRequest) -> Result<GcReport> {
     match req {
         GcRequest::Derivations {
@@ -212,10 +188,6 @@ async fn delete_derivations(
         return Ok(GcReport::default());
     }
 
-    // A surviving parent's record lost an edge, so `walked` is no longer true
-    // of it and every gate that reads it must close until a fresh evaluation
-    // re-walks it. The un-promote re-checks the gates rather than the list, so a
-    // parent a concurrent eval already re-walked keeps its place in the queue.
     let survivors: Vec<DerivationId> = orphaned_survivors(&wanted_by, &deleted);
     if !survivors.is_empty() {
         let txn = db.begin().await.context("GC: begin the survivor un-walk")?;
@@ -269,10 +241,10 @@ async fn retire_stale_paths(
         return Ok(GcReport::default());
     }
 
-    // `retire_outputs` takes a transaction because the locks it opens with must
-    // still be held when its DELETE executes. Inside the graph writer that is a savepoint:
-    // Postgres keeps a subtransaction's locks until the outer commit, so the
-    // release below never drops one early.
+    // `retire_outputs` must still hold its opening locks when its DELETE is executing.
+    // Inside the graph writer its transaction is a savepoint.
+    // Postgres is keeping a subtransaction's locks until the outer commit.
+    // The release below can therefore never drop one early.
     let savepoint = db
         .begin()
         .await
@@ -335,8 +307,6 @@ async fn delete_evaluations(ctx: &DbContext, evaluations: &[EvaluationId]) -> Re
     })
 }
 
-/// Break the linked list so the deletes never violate the `previous`/`next` FKs:
-/// NULL the deleted rows' own pointers and any surviving pointer into them.
 async fn unlink<C: ConnectionTrait>(
     db: &C,
     deleted: &[EvaluationId],
@@ -388,10 +358,6 @@ async fn pairs<C: ConnectionTrait>(
         .collect())
 }
 
-/// The derivations that SURVIVED the delete while at least one of their
-/// dependencies was reclaimed, sorted and deduplicated. A parent that was
-/// itself deleted is excluded: its row is gone and updating it would be a no-op
-/// on a cascaded id.
 fn orphaned_survivors(
     wanted_by: &[(DerivationId, Uuid)],
     deleted: &HashSet<DerivationId>,
@@ -409,7 +375,6 @@ fn orphaned_survivors(
     survivors
 }
 
-/// The attempt ids of `snapshot` whose derivation the delete actually reclaimed.
 #[cfg(test)]
 fn attempt_logs_to_reclaim(
     snapshot: &[(DerivationId, Uuid)],
@@ -437,9 +402,6 @@ mod tests {
         Vec::new()
     }
 
-    /// A candidate that a root created since the scan reaches is not deleted:
-    /// the re-check walks from those roots only, which is one evaluation's
-    /// closure rather than the whole keep-set.
     #[tokio::test]
     async fn the_delete_excludes_what_a_root_created_since_the_scan_reaches() {
         let d = DerivationId::now_v7();
@@ -478,8 +440,6 @@ mod tests {
         );
     }
 
-    /// A path a commit since the scan references, or the fresh closure reaches,
-    /// is not retired.
     #[tokio::test]
     async fn the_retire_excludes_fresh_parents_and_the_fresh_closure() {
         let db = MockDatabase::new(DatabaseBackend::Postgres)
@@ -507,7 +467,6 @@ mod tests {
         assert!(!sql.contains("cached_path_reference"), "{sql}");
     }
 
-    /// Nothing is asked of the database for an empty chunk.
     #[tokio::test]
     async fn an_empty_request_costs_no_statement() {
         let db = MockDatabase::new(DatabaseBackend::Postgres).into_connection();
@@ -531,8 +490,6 @@ mod tests {
         assert!(gradient_db::pool::statements(pool.into_transaction_log()).is_empty());
     }
 
-    /// A parent that survived while its dependency went has an incomplete
-    /// record; one that went with it has no row left to re-walk.
     #[test]
     fn only_a_survivor_of_a_reclaimed_dependency_is_re_walked() {
         let survivor = DerivationId::now_v7();
@@ -552,7 +509,6 @@ mod tests {
         );
     }
 
-    /// An attempt keeps its log while its derivation survives the re-check.
     #[test]
     fn only_a_reclaimed_derivations_logs_are_reported() {
         let gone = DerivationId::now_v7();

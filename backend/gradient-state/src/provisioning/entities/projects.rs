@@ -16,12 +16,8 @@ use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, Query
 use std::collections::{HashMap, HashSet};
 
 impl<'a> StateApplicator<'a> {
-    // ── apply_projects_without_members ───────────────────────────────────
-
-    /// Create/update the `project` row. Membership reconciliation happens
-    /// later in `apply_project_members`, after `apply_roles` so custom project
-    /// roles referenced by `members` can be resolved against rows inserted in
-    /// the same apply pass.
+    /// Membership reconciliation is happening later in `apply_project_members`. It must run after
+    /// `apply_roles` to resolve custom project roles inserted in the same pass.
     pub(crate) async fn apply_projects_without_members(
         &self,
         state_projects: &HashMap<String, StateProject>,
@@ -100,8 +96,8 @@ impl<'a> StateApplicator<'a> {
                 .into_active_model();
 
                 project.insert(self.db).await?;
-                // No worker can be connected yet: state is applied before the
-                // proto endpoint serves, so no re-auth request is needed here.
+                // No worker can be connected yet. State is applied before the proto endpoint is
+                // serving, and no re-auth request is needed.
                 gradient_db::projects::base_workers::enable_auto_base_workers_for_project(
                     self.db,
                     project_id,
@@ -116,14 +112,6 @@ impl<'a> StateApplicator<'a> {
         Ok(())
     }
 
-    // ── apply_project_members ────────────────────────────────────────────
-
-    /// Reconcile `project_user` rows for every state-managed project.
-    ///
-    /// When `state_project.members` is empty, the legacy behavior applies:
-    /// `created_by` is added as Admin if no row exists. When `members` is
-    /// non-empty, the declared list is authoritative - see
-    /// [`StateApplicator::apply_members_for_project`] for the per-project logic.
     pub(crate) async fn apply_project_members(
         &self,
         state_projects: &HashMap<String, StateProject>,
@@ -179,16 +167,6 @@ impl<'a> StateApplicator<'a> {
         Ok(())
     }
 
-    /// Reconcile membership for a single state-managed project whose
-    /// `members` list is non-empty.
-    ///
-    /// - Missing users are recorded into `pending` and skipped (issue #94);
-    ///   they'll be applied when the user later registers or signs in via
-    ///   OIDC.
-    /// - Built-in roles (`Admin`/`Write`/`View`) map to constant role IDs;
-    ///   custom project roles resolve against `role` rows scoped to this project.
-    /// - Drift: existing memberships not in the declared user set are
-    ///   deleted. State owns the membership list when explicitly declared.
     pub(crate) async fn apply_members_for_project(
         &self,
         project_id: ProjectId,

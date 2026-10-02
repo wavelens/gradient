@@ -4,19 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Persistent worker-ID management.
-//!
-//! The worker ID is a UUID stored in `<data_dir>/worker-id`.  If the file
-//! does not exist it is created with a freshly generated UUID.  An explicit
-//! override can be supplied via the `GRADIENT_WORKER_ID` environment variable
-//! (already parsed into `config.worker_id`).
-
 use anyhow::{Context, Result};
 use tracing::info;
 
-/// Load the worker ID from `<data_dir>/worker-id`, or generate a new UUID
-/// and persist it.  If `id_override` is `Some`, it is used directly
-/// (must be a valid UUID string).
 pub(super) fn load_or_generate_id(data_dir: &str, id_override: Option<&str>) -> Result<String> {
     use std::fs;
     use std::path::Path;
@@ -51,8 +41,6 @@ pub(super) fn load_or_generate_id(data_dir: &str, id_override: Option<&str>) -> 
     info!(path = %id_path.display(), %id, "generated and persisted new worker ID");
     Ok(id)
 }
-
-// ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {

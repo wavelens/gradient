@@ -4,15 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Regression for #86: every response must carry an `x-request-id` so logs
-//! emitted while the request is in flight (handler, DB, spawned cleanup
-//! tasks) can be correlated with a single grep. When the client supplies
-//! the header - typically a reverse proxy injecting one - the server must
-//! preserve it instead of minting a new id.
-//!
-//! Uses manual Tokio runtimes because `#[tokio::test]` expands to
-//! `::gradient_core::…` which clashes with the local `core` crate name.
-
 use axum_test::TestServer;
 use gradient_core::ServerState;
 use gradient_db::{WebDb, WorkerDb};

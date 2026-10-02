@@ -4,10 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Every PUT this worker sends to object storage, retried with jittered
-//! exponential backoff when the store throttles (503 / 429), errors (5xx) or
-//! drops the connection. How many run at once is the server's upload grant.
-
 use std::time::Duration;
 
 use anyhow::Result;
@@ -39,7 +35,6 @@ const OBJECT_STORE_BACKOFF: Backoff = Backoff {
     max: Duration::from_secs(30),
 };
 
-/// PUT `body` to a presigned `url`; returns the object's ETag when the store sent one.
 pub async fn put_object(
     url: &str,
     body: Bytes,

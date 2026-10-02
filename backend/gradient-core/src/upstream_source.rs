@@ -4,11 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Object fetches (NARs, build logs) from the HTTP binary caches a cache
-//! substitutes from. Selection and health are the ones the worker-side narinfo
-//! probe uses, so a cache never proxies from an upstream the workers would not
-//! substitute from, nor keeps hammering one the breaker took out of rotation.
-
 use std::time::Duration;
 
 use bytes::Bytes;
@@ -25,7 +20,6 @@ const LOG_FETCH_TIMEOUT: Duration = Duration::from_secs(10);
 const PROTOCOL_PROBE_TIMEOUT: Duration = Duration::from_secs(10);
 const LOG_FETCH_MAX_BYTES: usize = 16 * 1024 * 1024;
 
-/// One upstream an object is fetched from.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UpstreamSource {
     pub id: CacheUpstreamId,
@@ -33,15 +27,12 @@ pub struct UpstreamSource {
     pub http1_only: bool,
 }
 
-/// The same filter as `gradient_db::caches::upstream::upstream_endpoints_for_project`: an HTTP
-/// binary cache with a URL that is not write-only.
 pub fn substitutes_from(upstream: &MCacheUpstream) -> bool {
     upstream.kind == CacheUpstreamKind::Http
         && upstream.mode != CacheSubscriptionMode::WriteOnly
         && upstream.url.is_some()
 }
 
-/// The upstream caches of one cache's rows that it substitutes from, in row order.
 pub fn substitution_sources(upstream_caches: &[MCacheUpstream]) -> Vec<UpstreamSource> {
     upstream_caches
         .iter()
@@ -56,16 +47,13 @@ pub fn substitution_sources(upstream_caches: &[MCacheUpstream]) -> Vec<UpstreamS
         .collect()
 }
 
-/// An object body from an upstream, resumed over HTTP/1.1 if HTTP/2 cuts it short.
 pub struct UpstreamObject {
     pub content_length: Option<u64>,
     pub body: BoxStream<'static, reqwest::Result<Bytes>>,
 }
 
-/// The first 2xx answer for `path` (relative to each upstream's base URL), in
-/// order. Redirects are followed: Attic, Cachix and S3 gateways answer object
-/// GETs with a 3xx. Tripped upstream caches are skipped and every answer feeds the
-/// shared breakers.
+/// Redirects are followed because Attic, Cachix and S3 gateways are answering object GETs with a
+/// 3xx.
 pub async fn fetch_from_upstream_caches(
     sources: &[UpstreamSource],
     path: &str,
@@ -106,8 +94,6 @@ pub async fn fetch_from_upstream_caches(
     None
 }
 
-/// `drv`'s build log from the first upstream that has a non-empty one, capped
-/// at 16 MiB. Logs carry no signature, so there is nothing to verify.
 pub async fn fetch_upstream_log(sources: &[UpstreamSource], drv: &str) -> Option<String> {
     let path = format!("log/{drv}");
     for source in sources {
@@ -150,7 +136,6 @@ async fn read_capped(mut stream: BoxStream<'static, reqwest::Result<Bytes>>) -> 
     Some(body)
 }
 
-/// One request to an upstream's `nix-cache-info` over a single HTTP version.
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct ProtocolProbe {
     pub ok: bool,
@@ -316,8 +301,6 @@ mod tests {
         assert_eq!(log.as_deref(), Some("building\n"));
     }
 
-    /// Attic, Cachix and S3 gateways redirect object GETs; an API client that
-    /// refuses redirects reads the 3xx as an empty body and never gets the log.
     #[tokio::test]
     async fn a_redirected_log_is_followed() {
         let target = log_upstream(Some("from storage\n")).await;

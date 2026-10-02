@@ -4,13 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! GitHub App authentication and webhook verification.
-//!
-//! GitHub Apps authenticate as the app itself using a short-lived RS256 JWT,
-//! then exchange it for a per-installation access token scoped to a specific
-//! GitHub organization/account. The access token can then be used as a Bearer token for
-//! the GitHub REST API (e.g. to post commit statuses).
-
 use anyhow::{Context, Result, anyhow, bail};
 use base64::{Engine, engine::general_purpose};
 use hmac::{Hmac, KeyInit, Mac};
@@ -22,24 +15,15 @@ use tracing::debug;
 
 type HmacSha256 = Hmac<Sha256>;
 
-// ── JWT generation ─────────────────────────────────────────────────────────
-
-/// Generates a GitHub App JWT valid for up to 10 minutes.
-///
-/// The JWT is RS256-signed with the App's private key. GitHub requires:
-/// - `iat`: issued-at (seconds since epoch, back-dated 60 s to account for clock skew)
-/// - `exp`: expiry (≤ 10 minutes from now)
-/// - `iss`: the numeric App ID as a string
 pub fn generate_jwt(app_id: u64, private_key_pem: &str) -> Result<String> {
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .context("system time before epoch")?
         .as_secs();
 
-    let iat = now - 60; // back-date 60 s for clock skew
-    let exp = now + 600; // 10-minute window (GitHub max)
+    let iat = now - 60;
+    let exp = now + 600;
 
-    // Encode header and payload as base64url (no padding).
     let header = general_purpose::URL_SAFE_NO_PAD.encode(r#"{"alg":"RS256","typ":"JWT"}"#);
     let payload = general_purpose::URL_SAFE_NO_PAD
         .encode(format!(r#"{{"iat":{iat},"exp":{exp},"iss":"{app_id}"}}"#));
@@ -62,7 +46,6 @@ pub fn generate_jwt(app_id: u64, private_key_pem: &str) -> Result<String> {
     Ok(format!("{signing_input}.{sig_b64}"))
 }
 
-/// Strips PEM headers/footers and decodes the base64 body to DER bytes.
 fn pem_to_der(pem: &str) -> Result<Vec<u8>> {
     let body: String = pem.lines().filter(|l| !l.starts_with("-----")).collect();
     general_purpose::STANDARD
@@ -70,8 +53,7 @@ fn pem_to_der(pem: &str) -> Result<Vec<u8>> {
         .context("base64 decode of PEM body failed")
 }
 
-/// Parses a PEM-encoded RSA private key in either PKCS#8 (`BEGIN PRIVATE KEY`)
-/// or PKCS#1 (`BEGIN RSA PRIVATE KEY`) form. GitHub App manifests return PKCS#1.
+/// GitHub App manifests are returning PKCS#1 keys. PKCS#8 and PKCS#1 are both accepted.
 fn parse_rsa_key(pem: &str) -> Result<RsaKeyPair> {
     let der = pem_to_der(pem).context("failed to decode GitHub App private key PEM")?;
     let is_pkcs1 = pem.contains("BEGIN RSA PRIVATE KEY");
@@ -82,16 +64,11 @@ fn parse_rsa_key(pem: &str) -> Result<RsaKeyPair> {
     }
 }
 
-// ── Installation token exchange ────────────────────────────────────────────
-
 #[derive(Deserialize)]
 struct InstallationTokenResponse {
     token: String,
 }
 
-/// Fetches a short-lived installation access token for the given GitHub App
-/// installation. The token is valid for ~1 hour and can be used as a Bearer
-/// token against the GitHub REST API.
 pub async fn get_installation_token(
     client: &reqwest::Client,
     app_id: u64,
@@ -126,8 +103,6 @@ pub async fn get_installation_token(
     Ok(token_resp.token)
 }
 
-// ── App-authenticated lookups ─────────────────────────────────────────────
-
 #[derive(Deserialize)]
 struct InstallationResponse {
     account: InstallationAccount,
@@ -143,9 +118,6 @@ struct AppResponse {
     html_url: String,
 }
 
-/// Validates that `installation_id` belongs to this App and returns the GitHub
-/// account login it is installed on. Errors (incl. 404) mean the id is not a
-/// valid installation for this App.
 pub async fn get_installation(
     client: &reqwest::Client,
     app_id: u64,
@@ -162,7 +134,6 @@ pub async fn get_installation(
     Ok(installation.account.login)
 }
 
-/// The page where a GitHub account installs this App on its repositories.
 pub async fn get_install_url(
     client: &reqwest::Client,
     app_id: u64,
@@ -203,12 +174,6 @@ async fn app_get<T: serde::de::DeserializeOwned>(
         .with_context(|| format!("failed to parse GitHub GET /{path} response"))
 }
 
-// ── Webhook signature verification ────────────────────────────────────────
-
-/// Verifies a GitHub webhook signature from the `X-Hub-Signature-256` header.
-///
-/// The header value is expected to be `sha256=<hex>`. Returns `true` when the
-/// computed HMAC-SHA256 of `body` with `secret` matches the provided signature.
 pub fn verify_github_signature(secret: &str, signature_header: &str, body: &[u8]) -> bool {
     let expected_hex = match signature_header.strip_prefix("sha256=") {
         Some(h) => h,
@@ -226,9 +191,6 @@ pub fn verify_github_signature(secret: &str, signature_header: &str, body: &[u8]
     mac.verify_slice(&expected_bytes).is_ok()
 }
 
-/// Verifies a Gitea/Forgejo webhook signature from the `X-Gitea-Signature` header.
-///
-/// The header value is a bare hex-encoded HMAC-SHA256 digest (no prefix).
 pub fn verify_gitea_signature(secret: &str, signature_header: &str, body: &[u8]) -> bool {
     let Ok(expected_bytes) = hex::decode(signature_header.trim()) else {
         return false;
@@ -245,8 +207,6 @@ pub fn verify_gitea_signature(secret: &str, signature_header: &str, body: &[u8])
 mod tests {
     use super::*;
 
-    /// PKCS#1 form of `TEST_RSA_PEM` - same key, `BEGIN RSA PRIVATE KEY` header
-    /// (the format GitHub's manifest API returns).
     const TEST_RSA_PEM_PKCS1: &str = "-----BEGIN RSA PRIVATE KEY-----\n\
 MIIEpAIBAAKCAQEAvGqpmY6nUPo1IQU0QWdpgD+9mJ6w0MqGk6ldyOLNlfieQust\n\
 Q7A+ttid4QSZdLM2my7w9+hGIvl0NtZgLh+zu5oebjurJaXBLZJFDv+daTCi5OfG\n\
@@ -275,7 +235,6 @@ oCGBlwuA8ua+p+yGr8GB8VpOc+3clnpn7KDtlej4CBqSQrNrB77MgWne6k7HEcD1\n\
 5VwGx5Cr2GK8iOkwH9vw2kPrxHYhSosPPCuf6BXjBa+7Mgkikz3kAw==\n\
 -----END RSA PRIVATE KEY-----\n";
 
-    /// 2048-bit RSA private key in PKCS#8 PEM format, generated for tests only.
     const TEST_RSA_PEM: &str = "-----BEGIN PRIVATE KEY-----\n\
 MIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQC8aqmZjqdQ+jUh\n\
 BTRBZ2mAP72YnrDQyoaTqV3I4s2V+J5C6y1DsD622J3hBJl0szabLvD36EYi+XQ2\n\
@@ -305,8 +264,6 @@ emfsoO2V6PgIGpJCs2sHvsyBad7qTscRwPXlXAbHkKvYYryI6TAf2/DaQ+vEdiFK\n\
 iw88K5/oFeMFr7syCSKTPeQD\n\
 -----END PRIVATE KEY-----\n";
 
-    // ── generate_jwt ─────────────────────────────────────────────────────────
-
     #[test]
     fn generate_jwt_invalid_pem_err() {
         let result = generate_jwt(1, "not a pem");
@@ -315,9 +272,6 @@ iw88K5/oFeMFr7syCSKTPeQD\n\
 
     #[test]
     fn generate_jwt_accepts_pkcs1_pem() {
-        // GitHub's App manifest conversion returns PKCS#1
-        // (`-----BEGIN RSA PRIVATE KEY-----`); we must accept it without
-        // requiring users to convert with openssl first.
         let jwt = generate_jwt(7, TEST_RSA_PEM_PKCS1).expect("PKCS#1 must be accepted");
         assert_eq!(jwt.split('.').count(), 3);
     }
@@ -333,8 +287,6 @@ iw88K5/oFeMFr7syCSKTPeQD\n\
         mac.update(body);
         hex::encode(mac.finalize().into_bytes())
     }
-
-    // ── verify_github_signature ──────────────────────────────────────────────
 
     #[test]
     fn verify_github_signature_valid() {
@@ -357,7 +309,7 @@ iw88K5/oFeMFr7syCSKTPeQD\n\
 
     #[test]
     fn verify_github_signature_missing_prefix() {
-        let sig = compute_gitea_sig("secret", b"body"); // bare hex, no sha256=
+        let sig = compute_gitea_sig("secret", b"body");
         assert!(!verify_github_signature("secret", &sig, b"body"));
     }
 
@@ -371,8 +323,6 @@ iw88K5/oFeMFr7syCSKTPeQD\n\
         let sig = compute_github_sig("secret", b"");
         assert!(verify_github_signature("secret", &sig, b""));
     }
-
-    // ── verify_gitea_signature ───────────────────────────────────────────────
 
     #[test]
     fn verify_gitea_signature_valid() {
@@ -400,8 +350,6 @@ iw88K5/oFeMFr7syCSKTPeQD\n\
         assert!(!verify_gitea_signature("secret", "ZZZZ", b"body"));
     }
 
-    // ── pem_to_der ───────────────────────────────────────────────────────────
-
     #[test]
     fn pem_to_der_valid() {
         let original = b"\x30\x82\x01\x22";
@@ -419,8 +367,6 @@ iw88K5/oFeMFr7syCSKTPeQD\n\
 
     #[test]
     fn pem_to_der_concatenates_multiple_lines() {
-        // PEMs wrap their base64 body at 64 columns; the decoder must glue
-        // every body line together before base64-decoding.
         let original = vec![0xAB; 96];
         let b64 = general_purpose::STANDARD.encode(&original);
         let (chunk1, rest) = b64.split_at(16);
@@ -432,10 +378,6 @@ iw88K5/oFeMFr7syCSKTPeQD\n\
 
     #[test]
     fn generate_jwt_signature_verifies_with_public_key() {
-        // Round-trip: RS256-sign then verify with the corresponding public key
-        // derived from the same PEM. Catches mutations that corrupt the
-        // signing input (e.g. swapping header/payload or changing the
-        // separator).
         use ring::signature::{RSA_PKCS1_2048_8192_SHA256, UnparsedPublicKey};
 
         let jwt = generate_jwt(42, TEST_RSA_PEM).expect("generate_jwt failed");
@@ -445,7 +387,6 @@ iw88K5/oFeMFr7syCSKTPeQD\n\
 
         let der = pem_to_der(TEST_RSA_PEM).unwrap();
         let key_pair = RsaKeyPair::from_pkcs8(&der).unwrap();
-        // Extract public key components from the RsaKeyPair to build a verifier.
         let pub_key = key_pair.public().as_ref();
         let verifier = UnparsedPublicKey::new(&RSA_PKCS1_2048_8192_SHA256, pub_key);
         verifier
@@ -460,15 +401,12 @@ iw88K5/oFeMFr7syCSKTPeQD\n\
 
     #[test]
     fn verify_gitea_signature_empty_header_rejected() {
-        // Empty hex decodes to empty bytes - mac.verify_slice with empty
-        // expected bytes must not accept any real signature.
         let body = b"body";
         assert!(!verify_gitea_signature("secret", "", body));
     }
 
     #[test]
     fn verify_github_signature_wrong_prefix_rejected() {
-        // sha1= instead of sha256=
         let bare = compute_gitea_sig("secret", b"body");
         let sig = format!("sha1={bare}");
         assert!(!verify_github_signature("secret", &sig, b"body"));

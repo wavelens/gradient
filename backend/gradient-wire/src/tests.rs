@@ -4,11 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-/// Regression for #110: the `/proto` WebSocket cap must:
-/// - exceed the largest legitimate frame (`NarPush` at 512 KiB plus rkyv
-///   overhead, plus headroom for `LogChunk`/`CacheQuery` arrays), and
-/// - stay well below tungstenite's 64 MiB default so a malicious peer can't
-///   ask the server to allocate gigabytes from a single send.
+/// Regression for #110. The `/proto` cap must exceed the largest legitimate frame, a 512 KiB
+/// `NarPush` plus rkyv overhead. It must stay well below tungstenite's 64 MiB default to keep a
+/// malicious peer from forcing huge allocations.
 #[test]
 fn max_proto_message_size_is_sane() {
     use crate::session::frame::{BULK_CHUNK_SIZE, MAX_PROTO_MESSAGE_SIZE};

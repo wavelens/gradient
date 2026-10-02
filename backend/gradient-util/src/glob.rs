@@ -4,9 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Pure glob matching + override expansion for flake input names. `*` matches
-//! any run (including empty), `?` matches one char; everything else is literal.
-
 use std::collections::BTreeSet;
 
 pub fn is_pattern(name: &str) -> bool {
@@ -35,10 +32,8 @@ fn matches_from(p: &[char], c: &[char]) -> bool {
     }
 }
 
-/// Resolve raw overrides against `declared` inputs. Literal entries win over any
-/// glob; among globs the longest literal-prefix wins; an exact-length tie
-/// between different-url globs warns and is skipped for that input. Each
-/// declared input yields at most one `(input, url)`.
+/// Literal entries are winning over any glob. Among globs the longest literal prefix is winning. A
+/// same-length tie between globs with different URLs is warning and skipping that input.
 pub fn expand_overrides(
     raw: &[(String, Option<String>)],
     declared: &BTreeSet<String>,

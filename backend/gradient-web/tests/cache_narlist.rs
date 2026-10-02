@@ -91,8 +91,6 @@ fn private_cache_ls_requires_auth() {
     });
 }
 
-/// The blob store is shared by every cache; a path another cache uploaded must
-/// not be readable through this one by its store hash.
 #[test]
 fn ls_refuses_a_nar_this_cache_does_not_serve() {
     let rt = tokio::runtime::Builder::new_current_thread()

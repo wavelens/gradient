@@ -4,11 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Trait abstractions for worker testability.
-//!
-//! Production code uses concrete implementations backed by the local nix-daemon
-//! and proto WebSocket connection. Tests inject fakes from `test-support`.
-
 use anyhow::Result;
 use async_trait::async_trait;
 
@@ -17,70 +12,29 @@ use crate::messages::{
     QueryMode,
 };
 
-// ── Store access ─────────────────────────────────────────────────────────────
-
-/// Abstraction over the local Nix store for path queries.
-///
-/// Production: `worker::store::LocalNixStore`
-/// Test: `gradient_test_support::fakes::worker_store::FakeWorkerStore`
 #[async_trait]
 pub trait WorkerStore: Send + Sync {
-    /// Check whether a store path is present in the local store.
     async fn has_path(&self, store_path: &str) -> Result<bool>;
 
-    /// Add `nar` as the content-addressed path `<hash>-<name>`, the path nix's own
-    /// fetchers produce for the same tree, and return it. A present path is done.
     async fn add_nar(&self, name: &str, nar: Vec<u8>) -> Result<String>;
 }
 
-// ── Derivation file reader ───────────────────────────────────────────────────
-
-/// Abstraction over reading raw `.drv` file bytes from the store.
-///
-/// Production: `FsDrvReader` reads from `/nix/store/`.
-/// Test: `gradient_test_support::fakes::drv_reader::FakeDrvReader` serves from memory.
 #[async_trait]
 pub trait DrvReader: Send + Sync {
-    /// Read the raw bytes of a `.drv` file given its store path.
-    ///
-    /// `store_path` may be a bare hash-name or a full `/nix/store/...` path.
     async fn read_drv(&self, store_path: &str) -> Result<Vec<u8>>;
 }
 
-// ── Job status reporting ─────────────────────────────────────────────────────
-
-/// Abstraction over reporting job progress back to the server.
-///
-/// Production: `worker::job::JobUpdater`
-/// Test: `gradient_test_support::fakes::job_reporter::RecordingJobReporter`
 #[async_trait]
 pub trait JobReporter: Send + Sync {
-    /// Query the server's cache for path availability and optional transfer URLs.
-    ///
-    /// `mode` controls what is returned:
-    /// - [`QueryMode::Normal`] - only paths already in the cache (`cached: true`, no URLs).
-    /// - [`QueryMode::Pull`]   - cached paths with presigned S3 GET URLs where available.
-    /// - [`QueryMode::Push`]   - all paths; uncached ones include presigned S3 PUT URLs.
     async fn query_cache(&mut self, paths: Vec<String>, mode: QueryMode)
     -> Result<Vec<CachedPath>>;
 
-    /// One path, and the server may ask its upstream caches for it: the only query that
-    /// ever leaves our cache. `None` when nothing serves it.
     async fn query_upstream(&mut self, path: String) -> Result<Option<CachedPath>>;
 
-    /// Query the server for which of the given `.drv` paths are already in its
-    /// derivation table for the owning project.
-    ///
-    /// Returns the subset of `drv_paths` that the server already knows about.
-    /// The BFS closure walker uses this to skip re-traversing subtrees of
-    /// derivations that were fully recorded in a previous evaluation.
     async fn query_known_derivations(&self, drv_paths: Vec<String>) -> Result<Vec<String>>;
     async fn report_fetching(&mut self) -> Result<()>;
     async fn report_fetch_result(&mut self, flake_source: Option<String>) -> Result<()>;
 
-    /// Report the worker-produced candidate `flake.lock` and the inputs it
-    /// bumped during an `input_update` fetch. Default is a no-op for reporters
-    /// that never run input_update jobs.
     async fn report_input_update(
         &mut self,
         candidate_lock: String,
@@ -90,8 +44,6 @@ pub trait JobReporter: Send + Sync {
         Ok(())
     }
 
-    /// Report the concrete inputs a discovery `input_update` glob expanded to.
-    /// Default is a no-op for reporters that never run discovery jobs.
     async fn report_input_expansion(&mut self, matched: Vec<String>) -> Result<()> {
         let _ = matched;
         Ok(())
@@ -105,13 +57,9 @@ pub trait JobReporter: Send + Sync {
         errors: Vec<String>,
     ) -> Result<()>;
 
-    /// Push `paths` into the gradient cache: a batch's `.drv` files and their
-    /// `input_sources`, each with its uncompressed NAR size where the caller
-    /// knows it. Called per batch *before*
-    /// [`report_eval_result`](Self::report_eval_result), so everything a build of
-    /// the batch pulls is cacheable by the time the server can dispatch it. A
-    /// failed upload fails the evaluation rather than leaving a build to discover
-    /// the missing path.
+    /// Every batch must be pushed before [`report_eval_result`](Self::report_eval_result). A build
+    /// of the batch is then able to pull everything once the server can dispatch it. A failed
+    /// upload is failing the evaluation instead of a later build.
     async fn push_paths(&self, paths: &[(String, Option<u64>)]) -> Result<()>;
 
     async fn report_building(&mut self, build_id: String) -> Result<()>;
@@ -132,41 +80,18 @@ pub trait JobReporter: Send + Sync {
     ) -> Result<()>;
 }
 
-// ── Role-neutral peer primitives ─────────────────────────────────────────────
-
-/// Supplies the peer's identity and the plaintext tokens used to authenticate
-/// against the peers the server lists in `AuthChallenge`.
-///
-/// Production impls:
-/// - the worker's static `(peer_id, plaintext_token)` pairs from config.
-/// - the proxy's own peer tokens for its upstream server.
 #[async_trait]
 pub trait PeerIdentity: Send + Sync {
-    /// Stable peer id advertised in `InitConnection.id`.
     fn peer_id(&self) -> String;
 
-    /// Given the list of peers the server is asking us to prove control of,
-    /// return `(peer_id, plaintext_token)` pairs for the subset we hold tokens
-    /// for. Pairs for unknown peers are simply omitted; the server's
-    /// `validate_tokens` will then list them in `failed_peers`.
     async fn tokens_for(&self, peers: &[String]) -> Result<Vec<(String, String)>>;
 }
 
-/// Supplies the `GradientCapabilities` advertised at handshake.
-///
-/// Production impls:
-/// - the worker's capabilities, read once from config.
-/// - the proxy's configured upstream capability set.
 #[async_trait]
 pub trait CapabilitiesProvider: Send + Sync {
-    /// Capabilities to send in `InitConnection.capabilities` / `InitAck.capabilities`.
     async fn capabilities(&self) -> GradientCapabilities;
 }
 
-// ── Inbound-session-driver callbacks ─────────────────────────────────────────
-
-/// Outcome of authorizing a peer's `AuthResponse`. `Reject` carries the wire
-/// code the handshake driver forwards before closing the socket.
 #[derive(Debug, Clone, PartialEq)]
 pub enum AuthOutcome {
     Accept {
@@ -179,23 +104,12 @@ pub enum AuthOutcome {
     },
 }
 
-/// Resolves an incoming peer claim against the implementation's auth store
-/// and decides the session's fate. gradient-server's impl wraps its sea-orm
-/// lookups and the pure `decide_auth` policy.
 #[async_trait]
 pub trait PeerAuthority: Send + Sync {
-    /// Opaque per-handshake state carried from [`challenge`](Self::challenge)
-    /// to [`authorize`](Self::authorize) (e.g. the challenged peers' token
-    /// hashes) so the authority never re-queries its store mid-handshake.
     type Challenge: Send;
 
-    /// Peer ids the authority wants the claimed identity to prove control of.
-    /// An empty list is valid (open/discoverable and base-worker modes);
-    /// acceptance is decided in [`authorize`](Self::authorize).
     async fn challenge(&self, claimed: &str) -> Result<(Self::Challenge, Vec<String>)>;
 
-    /// Validate `(peer_id, plaintext_token)` pairs against the challenge and
-    /// decide accept or reject, including demotions and policy checks.
     async fn authorize(
         &self,
         claimed: &str,
@@ -203,7 +117,6 @@ pub trait PeerAuthority: Send + Sync {
         tokens: &[(String, String)],
     ) -> Result<AuthOutcome>;
 
-    /// Negotiate the session capability set from the peer's advertised one.
     async fn negotiate(
         &self,
         claimed: &str,

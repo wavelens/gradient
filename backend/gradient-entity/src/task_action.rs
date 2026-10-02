@@ -11,8 +11,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::ids::{TaskActionId, TaskId, UserId};
 
-/// What an action does when its trigger events fire. Tags the polymorphic
-/// `config` jsonb column.
 #[repr(i16)]
 #[derive(
     Debug,

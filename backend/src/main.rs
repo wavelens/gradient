@@ -12,8 +12,6 @@ use gradient_util::logging::{LogSetup, LogWriter, NOISY_DEPS, TraceSetup};
 use std::sync::Arc;
 use tracing::info;
 
-/// Per-component overrides of the server's log level, per crate, by the crates
-/// each component lives in.
 fn log_overrides(log: &LogArgs) -> [(&'static str, Option<&str>); 7] {
     [
         ("gradient_web", log.level_web.as_deref()),
@@ -42,8 +40,7 @@ fn init_logging(log: &LogArgs) {
 }
 
 pub fn main() -> std::io::Result<()> {
-    // Install rustls provider before any TLS handshake (postgres TLS, outbound
-    // HTTPS, …) - rustls 0.23 panics otherwise. See issue #232.
+    // rustls 0.23 is panicking on a TLS handshake without an installed provider. See issue #232.
     gradient_util::http::init_crypto_provider();
 
     tokio::runtime::Builder::new_multi_thread()
@@ -111,8 +108,7 @@ async fn run() -> std::io::Result<()> {
     Ok(())
 }
 
-/// One-shot `--state-validate` action: validate the state file with no DB
-/// access and exit non-zero on error so a NixOS build (or CI) fails fast.
+/// A non-zero exit is failing a NixOS build or CI run fast on an invalid state file.
 fn validate_state_and_exit(state_file: Option<&str>) -> std::io::Result<()> {
     let Some(path) = state_file else {
         eprintln!("--state-validate requires --state-file");

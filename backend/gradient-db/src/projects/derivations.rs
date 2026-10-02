@@ -4,16 +4,11 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Derivations a project has built. Replaces the dropped per-project
-//! `derivation.project` scoping now that derivations are a global graph:
-//! ownership is derived through the project's tasks -> evaluations -> build_jobs.
-
 use crate::fetch_in_chunks;
 use gradient_types::*;
 use sea_orm::{ColumnTrait, ConnectionTrait, DbErr, EntityTrait, QueryFilter, QuerySelect};
 use std::collections::HashSet;
 
-/// Distinct derivations referenced by builds in `project_id`'s evaluations.
 pub async fn derivation_ids_for_project<C: ConnectionTrait>(
     db: &C,
     project_id: ProjectId,

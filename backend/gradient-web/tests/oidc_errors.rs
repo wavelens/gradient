@@ -4,12 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Regression tests for OIDC error handling (issue #93).
-//!
-//! Asserts that failures inside `oidc_login_create` / `oidc_login_verify` are
-//! NOT echoed verbatim into the HTTP response body. Operators get the rich
-//! error context via tracing; clients see only a stable, generic message.
-
 use axum_test::TestServer;
 use gradient_core::ServerState;
 use gradient_db::{WebDb, WorkerDb};
@@ -26,8 +20,7 @@ use serde_json::Value;
 use std::sync::Arc;
 use uuid::Uuid;
 
-/// Boots a `TestServer` with OIDC enabled but pointing at an unreachable
-/// discovery URL (`127.0.0.1:1` - reserved, refuses immediately).
+/// `127.0.0.1:1` is reserved and is refusing connections immediately.
 fn server_with_broken_oidc() -> TestServer {
     let tmp = std::env::temp_dir();
     let suffix = Uuid::now_v7();
@@ -92,8 +85,6 @@ fn server_with_broken_oidc() -> TestServer {
     TestServer::new(create_router(state).expect("router"))
 }
 
-/// Substrings that would indicate the underlying IdP/transport error has
-/// leaked into the response body. None of these must appear.
 const LEAK_MARKERS: &[&str] = &[
     "Failed to fetch OIDC metadata",
     "Failed to parse OIDC metadata",
@@ -146,9 +137,6 @@ fn oauth_authorize_get_callback_does_not_leak_idp_error() {
     let rt = tokio::runtime::Runtime::new().unwrap();
     rt.block_on(async {
         let s = server_with_broken_oidc();
-        // Even with code+state present, the missing CSRF cookie short-circuits
-        // before we reach the IdP. That branch is already safe - this test
-        // locks in that the response body shape stays stable and clean.
         let res = s
             .get("/api/v1/auth/oauth/authorize?code=abc&state=xyz")
             .await;

@@ -4,9 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! SCIM integration tests. The `/scim/v2/*` routes are mounted in a later task;
-//! the middleware tests here only exercise the bearer-token guard.
-
 use axum::http::StatusCode;
 use axum_test::TestServer;
 use gradient_core::ServerState;
@@ -34,9 +31,6 @@ fn write_token() -> String {
     path.to_string_lossy().into_owned()
 }
 
-/// Build a `TestServer` with SCIM enabled against the given mock DB. Mirrors the
-/// `ServerState` field set from `tests/auth_middleware.rs`; the only differences
-/// are the SCIM config on the `Cli` and a writable jwt/scim secret file on disk.
 fn scim_server(db: DatabaseConnection) -> TestServer {
     scim_server_with(db, false)
 }
@@ -154,7 +148,6 @@ fn scim_user(username: &str, active: bool) -> user::Model {
     }
 }
 
-/// One-row mock that satisfies sea-orm's `count()` parser (`COUNT(*) AS num_items`).
 fn count_row(num: i64) -> BTreeMap<&'static str, sea_orm::Value> {
     let mut row = BTreeMap::new();
     row.insert("num_items", sea_orm::Value::BigInt(Some(num)));
@@ -167,8 +160,8 @@ fn scim_create_user_returns_201() {
     rt.block_on(async {
         let created = scim_user("alice@example.com", true);
         let db = MockDatabase::new(DatabaseBackend::Postgres)
-            .append_query_results([Vec::<user::Model>::new()]) // username-exists check: none
-            .append_query_results([vec![created.clone()]]) // insert returns row
+            .append_query_results([Vec::<user::Model>::new()])
+            .append_query_results([vec![created.clone()]])
             .into_connection();
         let s = scim_server(db);
         let res = s
@@ -217,8 +210,8 @@ fn scim_list_users_with_username_filter() {
     rt.block_on(async {
         let u = scim_user("carol@example.com", true);
         let db = MockDatabase::new(DatabaseBackend::Postgres)
-            .append_query_results([vec![count_row(1)]]) // COUNT(*)
-            .append_query_results([vec![u.clone()]]) // page rows
+            .append_query_results([vec![count_row(1)]])
+            .append_query_results([vec![u.clone()]])
             .into_connection();
         let s = scim_server(db);
         let res = s
@@ -244,8 +237,8 @@ fn scim_patch_user_active_false() {
             ..u.clone()
         };
         let db = MockDatabase::new(DatabaseBackend::Postgres)
-            .append_query_results([vec![u.clone()]]) // find_user
-            .append_query_results([vec![disabled]]) // UPDATE ... RETURNING
+            .append_query_results([vec![u.clone()]])
+            .append_query_results([vec![disabled]])
             .into_connection();
         let s = scim_server(db);
         let res = s
@@ -268,14 +261,14 @@ fn scim_delete_user_soft_disables() {
     let rt = tokio::runtime::Runtime::new().unwrap();
     rt.block_on(async {
         let u = scim_user("erin@example.com", true);
-        // Soft delete issues an UPDATE (RETURNING) and never a DELETE exec; staging
-        // only a query result means a stray DELETE would fail with no exec staged.
+        // Soft delete is issuing an UPDATE (RETURNING) and never a DELETE exec. Only a query result
+        // is staged, and a stray DELETE would fail with no exec staged.
         let db = MockDatabase::new(DatabaseBackend::Postgres)
-            .append_query_results([vec![u.clone()]]) // find_user
+            .append_query_results([vec![u.clone()]])
             .append_query_results([vec![user::Model {
                 active: false,
                 ..u.clone()
-            }]]) // UPDATE ... RETURNING
+            }]])
             .into_connection();
         let s = scim_server(db);
         let res = s
@@ -293,11 +286,11 @@ fn scim_delete_user_hard_deletes() {
     rt.block_on(async {
         let u = scim_user("frank@example.com", true);
         let db = MockDatabase::new(DatabaseBackend::Postgres)
-            .append_query_results([vec![u.clone()]]) // find_user
+            .append_query_results([vec![u.clone()]])
             .append_exec_results([MockExecResult {
                 last_insert_id: 0,
                 rows_affected: 1,
-            }]) // DELETE
+            }])
             .into_connection();
         let s = scim_server_with(db, true);
         let res = s
@@ -331,7 +324,7 @@ fn scim_unknown_group_returns_404() {
     let rt = tokio::runtime::Runtime::new().unwrap();
     rt.block_on(async {
         let db = MockDatabase::new(DatabaseBackend::Postgres).into_connection();
-        let s = scim_server(db); // empty scim_group_roles
+        let s = scim_server(db);
         let res = s
             .get("/scim/v2/Groups/nope")
             .add_header("Authorization", auth_header())
@@ -348,7 +341,7 @@ fn scim_get_group_lists_members() {
         let (groups, project, role) = group_with_grant("acme-eng");
         let member = UserId::now_v7();
         let db = MockDatabase::new(DatabaseBackend::Postgres)
-            .append_query_results([vec![membership(project, member, role)]]) // members lookup
+            .append_query_results([vec![membership(project, member, role)]])
             .into_connection();
         let s = scim_server_with_groups(db, groups);
         let res = s
@@ -370,9 +363,9 @@ fn scim_patch_group_add_member_inserts_membership() {
         let (groups, project, role) = group_with_grant("acme-eng");
         let member = UserId::now_v7();
         let db = MockDatabase::new(DatabaseBackend::Postgres)
-            .append_query_results([Vec::<project_user::Model>::new()]) // existing? none
-            .append_query_results([vec![membership(project, member, role)]]) // INSERT ... RETURNING
-            .append_query_results([vec![membership(project, member, role)]]) // members lookup
+            .append_query_results([Vec::<project_user::Model>::new()])
+            .append_query_results([vec![membership(project, member, role)]])
+            .append_query_results([vec![membership(project, member, role)]])
             .into_connection();
         let s = scim_server_with_groups(db, groups);
         let res = s
@@ -400,8 +393,8 @@ fn scim_patch_group_remove_member_deletes_membership() {
             .append_exec_results([MockExecResult {
                 last_insert_id: 0,
                 rows_affected: 1,
-            }]) // DELETE
-            .append_query_results([Vec::<project_user::Model>::new()]) // members lookup: empty
+            }])
+            .append_query_results([Vec::<project_user::Model>::new()])
             .into_connection();
         let s = scim_server_with_groups(db, groups);
         let res = s
@@ -437,9 +430,9 @@ fn inactive_user_session_returns_403() {
             remember_me: false,
         };
         let db = MockDatabase::new(DatabaseBackend::Postgres)
-            .append_query_results([vec![session.clone()]]) // decode_jwt session lookup
-            .append_query_results([vec![session.clone()]]) // last_used_at UPDATE ... RETURNING
-            .append_query_results([vec![user.clone()]]) // EUser::find_by_id -> inactive
+            .append_query_results([vec![session.clone()]])
+            .append_query_results([vec![session.clone()]])
+            .append_query_results([vec![user.clone()]])
             .into_connection();
         let s = scim_server(db);
 

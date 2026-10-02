@@ -4,9 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Connected-worker registry, capability aggregation and the scoring rules the
-//! scheduler and the proxy share.
-
 pub mod aggregate;
 pub mod peer_auth;
 pub mod score;

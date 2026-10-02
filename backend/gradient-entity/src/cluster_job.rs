@@ -4,8 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! A group of jobs dispatched together on distinct workers, all or nothing.
-
 use chrono::NaiveDateTime;
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 use sea_orm::entity::prelude::*;

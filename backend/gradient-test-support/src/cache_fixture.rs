@@ -53,10 +53,7 @@ fn test_date() -> chrono::NaiveDateTime {
         .unwrap()
 }
 
-/// Build a `ServerState` pre-populated with all DB rows required for `get_nar_by_hash`
-/// to resolve [`FIXTURE_PATH_HASH`] against [`FIXTURE_CACHE_NAME`].
-///
-/// Query order matches the one inside `get_nar_by_hash`:
+/// The mock results are following the query order inside `get_nar_by_hash`.
 ///   0. ECache::find (by name)
 ///   1. EDerivationOutput::find (by hash)
 ///   2. EDerivation::find_by_id
@@ -120,7 +117,6 @@ pub async fn public_cache_with_narinfo() -> Arc<ServerState> {
         .append_query_results([vec![drv_output_row]])
         .append_query_results([vec![cached_path_row]])
         .append_query_results([vec![cached_path_sig_row]])
-        // references_for_hash (cached_path.references): this fixture has none.
         .append_query_results([Vec::<gradient_entity::cached_path::Model>::new()])
         .into_connection();
 
@@ -168,9 +164,6 @@ pub async fn public_cache_with_narinfo() -> Arc<ServerState> {
     })
 }
 
-/// Build a `ServerState` with a single public, active cache named [`FIXTURE_CACHE_NAME`].
-/// No `cached_path` or `derivation_output` rows are seeded - suitable for endpoint-level
-/// tests that don't exercise store-path resolution (e.g. `nix-cache-info`).
 pub async fn public_cache_state() -> Arc<ServerState> {
     let cache_row = gradient_entity::cache::Model {
         id: cache_id(),
@@ -234,22 +227,10 @@ pub async fn public_cache_state() -> Arc<ServerState> {
     })
 }
 
-/// Build a `ServerState` with a public cache and a synthetic NAR stored under
-/// [`FIXTURE_PATH_HASH`]. The NAR contains `bin/hello = "hi"` (2 bytes).
-///
-/// Public cache serving a synthetic NAR stored under [`FIXTURE_PATH_HASH`].
-///
-/// Mock query order:
-///   0. ECache::find (by name)
-///   1. ECachedPath::find (file_hash lookup - returns empty so hash falls
-///      back to FIXTURE_PATH_HASH directly)
-///   2. the per-cache serving gate
 pub async fn public_cache_with_nar() -> Arc<ServerState> {
     public_cache_storing_nar(true).await
 }
 
-/// The NAR is in the shared blob store, but this cache holds no signed claim
-/// on it (another cache uploaded it).
 pub async fn public_cache_with_foreign_nar() -> Arc<ServerState> {
     public_cache_storing_nar(false).await
 }
@@ -441,8 +422,6 @@ fn make_state(
     })
 }
 
-/// Public cache serving an output of the derivation + completed build +
-/// log storage seeded. Returns `(state, expected_log_body)`.
 pub async fn cache_with_completed_build_in_cache() -> (Arc<ServerState>, String) {
     let log_body = "build output line 1\nbuild output line 2\n".to_string();
 
@@ -461,7 +440,6 @@ pub async fn cache_with_completed_build_in_cache() -> (Arc<ServerState>, String)
     (make_state(db, log_storage), log_body)
 }
 
-/// Public cache serving no output of the derivation - `/log` must 404.
 pub async fn cache_with_completed_build_not_in_cache() -> Arc<ServerState> {
     let db = MockDatabase::new(DatabaseBackend::Postgres)
         .append_query_results([vec![cache_row()]])
@@ -472,8 +450,6 @@ pub async fn cache_with_completed_build_not_in_cache() -> Arc<ServerState> {
     make_state(db, Arc::new(NoopLogStorage))
 }
 
-/// Public cache serving an output of the derivation but no shared build -
-/// `/log` must 404.
 pub async fn cache_with_failed_build_only() -> Arc<ServerState> {
     let db = MockDatabase::new(DatabaseBackend::Postgres)
         .append_query_results([vec![cache_row()]])
@@ -485,9 +461,6 @@ pub async fn cache_with_failed_build_only() -> Arc<ServerState> {
     make_state(db, Arc::new(NoopLogStorage))
 }
 
-/// Private cache with no cached paths - suitable for auth-required tests on
-/// `nix-cache-info` and `gradient-cache-info`. `CacheContext::load` returns
-/// 401 Unauthorized for unauthenticated requests to private caches.
 pub async fn private_cache_state() -> Arc<ServerState> {
     let db = MockDatabase::new(DatabaseBackend::Postgres)
         .append_query_results([vec![cache_row_with_visibility(false)]])
@@ -537,7 +510,6 @@ pub async fn private_cache_state() -> Arc<ServerState> {
     })
 }
 
-/// Public cache where no derivation row matches the requested `.drv` filename.
 pub async fn cache_with_unknown_derivation() -> Arc<ServerState> {
     let db = MockDatabase::new(DatabaseBackend::Postgres)
         .append_query_results([vec![cache_row()]])
@@ -548,9 +520,6 @@ pub async fn cache_with_unknown_derivation() -> Arc<ServerState> {
     make_state(db, Arc::new(NoopLogStorage))
 }
 
-/// Public cache + a completed shared build whose latest attempt's log is seeded; the
-/// endpoint serves that attempt via `latest_attempt_id`. Returns
-/// `(state, expected_log)`.
 pub async fn cache_with_two_completed_builds() -> (Arc<ServerState>, String) {
     let newer_log = "newer build log\n".to_string();
     let log_storage = Arc::new(InMemoryLogStorage::new());
@@ -568,7 +537,6 @@ pub async fn cache_with_two_completed_builds() -> (Arc<ServerState>, String) {
     (make_state(db, log_storage), newer_log)
 }
 
-/// Private cache with a synthetic NAR - for auth-required tests on `/ls` and `/serve`.
 pub async fn private_cache_with_nar() -> Arc<ServerState> {
     let db = MockDatabase::new(DatabaseBackend::Postgres)
         .append_query_results([vec![cache_row_with_visibility(false)]])
@@ -657,12 +625,6 @@ fn cached_path_sig_row_fixture() -> gradient_entity::cached_path_signature::Mode
     }
 }
 
-/// Public cache with no signatures - list/stats/available return empty results.
-///
-/// Query order for `/nars` list endpoint:
-///   0. `ECache::find` (cache resolution)
-///   1. raw COUNT - single row with `total = 0`
-///   2. raw SELECT - empty rows
 pub async fn public_cache_empty_nars() -> Arc<ServerState> {
     use sea_orm::Value;
     use std::collections::BTreeMap;
@@ -678,7 +640,6 @@ pub async fn public_cache_empty_nars() -> Arc<ServerState> {
     make_state(db, Arc::new(NoopLogStorage))
 }
 
-/// Private cache + no NAR rows - list/show/stats/available reject anon callers.
 pub async fn private_cache_for_nars() -> Arc<ServerState> {
     let db = MockDatabase::new(DatabaseBackend::Postgres)
         .append_query_results([vec![cache_row_with_visibility(false)]])
@@ -686,23 +647,16 @@ pub async fn private_cache_for_nars() -> Arc<ServerState> {
     make_state(db, Arc::new(NoopLogStorage))
 }
 
-/// Public cache + one cached_path with a matching signature - show returns full detail.
 pub async fn public_cache_with_one_nar() -> Arc<ServerState> {
     let db = MockDatabase::new(DatabaseBackend::Postgres)
         .append_query_results([vec![cache_row()]])
         .append_query_results([vec![cached_path_row_fixture()]])
         .append_query_results([vec![cached_path_sig_row_fixture()]])
-        // references_for_hash (cached_path.references): this fixture has none.
         .append_query_results([Vec::<gradient_entity::cached_path::Model>::new()])
         .into_connection();
     make_state(db, Arc::new(NoopLogStorage))
 }
 
-/// Public cache + one signed cached_path returned by the list endpoint's raw
-/// JOIN query. Mock query order:
-///   0. `ECache::find` (cache resolution)
-///   1. raw COUNT - single row with `total = 1`
-///   2. raw SELECT - one row with the cached_path + signature columns
 pub async fn public_cache_list_one_signed_nar() -> Arc<ServerState> {
     use sea_orm::Value;
     use std::collections::BTreeMap;
@@ -730,7 +684,6 @@ pub async fn public_cache_list_one_signed_nar() -> Arc<ServerState> {
     make_state(db, Arc::new(NoopLogStorage))
 }
 
-/// Public cache + cached_path exists but no signature row for this cache - show 404s.
 pub async fn public_cache_with_path_no_signature() -> Arc<ServerState> {
     let db = MockDatabase::new(DatabaseBackend::Postgres)
         .append_query_results([vec![cache_row()]])
@@ -740,7 +693,6 @@ pub async fn public_cache_with_path_no_signature() -> Arc<ServerState> {
     make_state(db, Arc::new(NoopLogStorage))
 }
 
-/// Public cache + path + matching signature - `available` returns true.
 pub async fn public_cache_available_true() -> Arc<ServerState> {
     let db = MockDatabase::new(DatabaseBackend::Postgres)
         .append_query_results([vec![cache_row()]])
@@ -750,7 +702,6 @@ pub async fn public_cache_available_true() -> Arc<ServerState> {
     make_state(db, Arc::new(NoopLogStorage))
 }
 
-/// Public cache + no cached_path row at all - `available` returns false.
 pub async fn public_cache_available_false() -> Arc<ServerState> {
     let db = MockDatabase::new(DatabaseBackend::Postgres)
         .append_query_results([vec![cache_row()]])
@@ -759,7 +710,6 @@ pub async fn public_cache_available_false() -> Arc<ServerState> {
     make_state(db, Arc::new(NoopLogStorage))
 }
 
-/// Private cache + completed build in cache - for auth-required tests on `/log`.
 pub async fn private_cache_with_completed_build_in_cache() -> Arc<ServerState> {
     let db = MockDatabase::new(DatabaseBackend::Postgres)
         .append_query_results([vec![cache_row_with_visibility(false)]])

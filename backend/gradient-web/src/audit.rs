@@ -4,12 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Append-only audit log writer for security-relevant events.
-//!
-//! Failures are intentionally swallowed (warn-only): an audit insert error
-//! must never fail the underlying operation it is recording. Operators
-//! monitor the warning log for missing audit rows; user-facing endpoints
-//! never see a 5xx because of an audit write.
+//! Audit insert failures are only warned about. An audit write must never fail the operation it is
+//! recording.
 
 use axum::extract::{ConnectInfo, FromRequestParts};
 use axum::http::HeaderMap;
@@ -23,9 +19,6 @@ use std::convert::Infallible;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::Arc;
 
-/// Caller context derived from the inbound HTTP request - used to enrich
-/// audit log rows and `session` rows with IP and user-agent for the
-/// "logged-in devices" UI.
 #[derive(Debug, Clone, Default)]
 pub struct RequestInfo {
     pub ip: Option<String>,
@@ -48,11 +41,6 @@ impl RequestInfo {
     }
 }
 
-/// Axum extractor: resolves the caller's IP from `ConnectInfo + X-Forwarded-For`
-/// against the configured trusted-proxy CIDR set. Falls back to `0.0.0.0` when
-/// the runtime has no peer socket (e.g. `axum_test::TestServer` without
-/// `into_make_service_with_connect_info`), mirroring the auth middleware so a
-/// missing `ConnectInfo` never turns a 4xx into a 500.
 impl FromRequestParts<Arc<ServerState>> for RequestInfo {
     type Rejection = Infallible;
 
@@ -73,10 +61,6 @@ impl FromRequestParts<Arc<ServerState>> for RequestInfo {
     }
 }
 
-/// Insert an `audit_log` row, emit a structured tracing event and record the
-/// durable `Audited` event. DB errors are warned and dropped; the tracing event
-/// always fires so operators tailing the live log see security-relevant
-/// activity even if the DB insert is failing.
 pub async fn record(
     state: &ServerState,
     user_id: Option<UserId>,
@@ -121,7 +105,6 @@ pub async fn record(
         .await;
 }
 
-/// Audit metadata `{"fields": [...]}` naming the fields a patch request set.
 pub fn changed_fields<const N: usize>(fields: [(&str, bool); N]) -> serde_json::Value {
     let set: Vec<&str> = fields
         .into_iter()

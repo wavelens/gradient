@@ -4,20 +4,16 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Prometheus plumbing shared by every Gradient `/metrics` endpoint.
-
 use prometheus::{Encoder as _, IntCounterVec, IntGaugeVec, Opts, Registry, TextEncoder};
 
 pub const PROMETHEUS_CONTENT_TYPE: &str = "text/plain; version=0.0.4";
 
-/// Render `registry` in the Prometheus text exposition format.
 pub fn encode_text(registry: &Registry) -> String {
     let mut buf = Vec::new();
     let _ = TextEncoder::new().encode(&registry.gather(), &mut buf);
     String::from_utf8(buf).unwrap_or_default()
 }
 
-/// Process RSS, open fds and CPU on Linux; a no-op elsewhere.
 pub fn register_process_collector(registry: &Registry) {
     #[cfg(target_os = "linux")]
     {

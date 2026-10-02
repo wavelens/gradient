@@ -4,8 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Persists worker-reported `EvalStatsReport` into the eval-metric tables.
-
 use sea_orm::{ActiveModelTrait, IntoActiveModel};
 use tracing::{debug, warn};
 
@@ -70,8 +68,7 @@ impl Scheduler {
             alloc_bytes: report.alloc_bytes as i64,
             peak_heap_mb: report.peak_heap_mb as i64,
             peak_rss_mb: report.peak_rss_mb as i64,
-            // Filled from the job timeline's phase spans once the job's
-            // terminal message arrives (see job_handlers::timeline).
+            // The job timeline's phase spans are filling this in once the terminal message is in.
             fetch_ms: 0,
             eval_flake_ms: 0,
             eval_drv_ms: 0,

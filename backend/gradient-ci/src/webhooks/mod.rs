@@ -4,9 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Outbound webhooks: which events reach which webhook, how a body is signed,
-//! and one delivery with its log row.
-
 mod deliver;
 mod routing;
 mod sign;

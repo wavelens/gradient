@@ -11,7 +11,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::ids::{EvaluationId, ProjectId, TaskId, UserId};
 
-/// What happens to a task's in-flight evaluation when a new one triggers.
 #[repr(i16)]
 #[derive(
     Debug,

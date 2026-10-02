@@ -4,8 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! One event per key per interval, decided in memory. Entries are never
-//! evicted: the key spaces using this are bounded by small tables.
+//! Entries are never evicted. The key spaces using this are bounded by small tables.
 
 use std::collections::HashMap;
 use std::hash::Hash;
@@ -27,7 +26,6 @@ impl<K: Eq + Hash> Debounce<K> {
         }
     }
 
-    /// True when `key` has not fired within `interval` before `now`; records `now` when it is.
     pub fn due(&self, key: K, now: Instant) -> bool {
         let mut seen = self.seen.lock();
 

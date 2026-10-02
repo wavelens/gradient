@@ -4,18 +4,12 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! nix-eval-jobs-style streaming driver over the gradient evaluator: discover
-//! the attribute paths matching a set of wildcards, resolve each to its
-//! `.drv`, and report one [`Job`] per attribute. Per-attribute failures are
-//! reported in the `Job` (mirroring nix-eval-jobs) instead of aborting.
-
 use anyhow::Result;
 use serde::Serialize;
 
 use crate::nix_eval::NixEvaluator;
 use crate::nix_store_path;
 
-/// One newline-delimited JSON record, shaped after nix-eval-jobs' output.
 #[derive(Debug, Serialize)]
 pub struct Job {
     pub attr: String,
@@ -30,8 +24,6 @@ pub struct Job {
 }
 
 impl Job {
-    /// A successfully resolved attribute. `drv` is a bare hash-name; the full
-    /// `/nix/store` path is emitted to match nix-eval-jobs.
     pub fn resolved(attr: String, drv: String, references: Vec<String>) -> Self {
         Job {
             attr_path: attr.split('.').map(str::to_string).collect(),
@@ -42,7 +34,6 @@ impl Job {
         }
     }
 
-    /// An attribute whose evaluation failed.
     pub fn failed(attr: String, error: String) -> Self {
         Job {
             attr_path: attr.split('.').map(str::to_string).collect(),
@@ -54,19 +45,9 @@ impl Job {
     }
 }
 
-/// Evaluate `wildcards` against `flake_ref`, invoking `sink` once per resolved
-/// attribute as soon as it is resolved.
-///
-/// Concrete attr paths (no `*`/`#`/`!`) are resolved directly, skipping the
-/// output-tree discovery walk: `gradient eval .#gradient-cli-full` then forces
-/// exactly that attribute, like `nix eval .#gradient-cli-full`, instead of
-/// walking siblings (which, for a flake whose `checks` are NixOS VM tests, costs
-/// orders of magnitude more). A set that contains any `*`/`#` wildcard or `!`
-/// exclusion falls back to the discovery walk over all patterns, since an
-/// exclusion is applied across the whole include set.
-///
-/// Synchronous and Boehm-GC bound: call from a context without a Tokio runtime
-/// (the CLI executes it before the runtime starts, mirroring the eval worker).
+/// Concrete attr paths are skipping the discovery walk. Walking siblings can cost orders of
+/// magnitude more for a flake with NixOS VM test `checks`. The function is Boehm-GC bound and must
+/// run outside a Tokio runtime.
 pub fn eval_jobs(flake_ref: &str, wildcards: &[String], mut sink: impl FnMut(Job)) -> Result<()> {
     let evaluator = NixEvaluator::new()?;
     let walker = evaluator.walker(flake_ref, &[])?;
@@ -88,11 +69,8 @@ pub fn eval_jobs(flake_ref: &str, wildcards: &[String], mut sink: impl FnMut(Job
     Ok(())
 }
 
-/// A wildcard-free include: no `*`/`#` segment and no `!` exclusion. Such a
-/// pattern names exactly one attribute, so
-/// [`FlakeWalker::resolve`](crate::flake_walk::FlakeWalker::resolve) reaches it
-/// directly and the discovery walk can be skipped. An exclusion only prunes
-/// wildcard matches, so its presence keeps the whole set on the discovery path.
+/// An exclusion is pruning across the whole include set. Its presence must keep every pattern on
+/// the discovery path.
 fn is_concrete_attr(pattern: &str) -> bool {
     !pattern.starts_with('!') && pattern.split('.').all(|seg| seg != "*" && seg != "#")
 }

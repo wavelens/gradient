@@ -4,14 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Stream a server-supplied NAR straight into the local nix-daemon.
-//!
-//! Receives the (still zstd-compressed) NAR - staged on disk by the pull, or
-//! in memory when it came from a presigned download - plus the cache metadata
-//! that came back in `CacheStatus`, decompresses it, constructs a
-//! [`ValidPathInfo`], and streams it into the daemon through
-//! [`LocalNixStore::import_nar`]. No `nix copy` subprocess.
-
 use std::io::{Read as _, Seek as _};
 
 use anyhow::{Context, Result};
@@ -29,11 +21,6 @@ use gradient_worker_client::compression::{
 };
 use gradient_worker_client::nar_recv::NarPayload;
 
-// ── NarImporter ───────────────────────────────────────────────────────────────
-
-/// Decompresses a single server-supplied NAR, verifies its integrity, builds
-/// the [`ValidPathInfo`] the daemon expects, and streams it via
-/// `add_to_store_nar`. Created by [`import_received_nar`].
 struct NarImporter<'a> {
     store: &'a LocalNixStore,
     store_path: &'a str,
@@ -63,12 +50,8 @@ impl<'a> NarImporter<'a> {
     }
 
     async fn import(&self, payload: NarPayload) -> Result<()> {
-        // Compression comes from the payload's own magic bytes, falling back to
-        // the `URL:` field the narinfo was rewritten into and finally to zstd -
-        // the only format our own cache produces, and all a `NarRequest` over
-        // the WebSocket carries. Decompress + digest are multi-MB CPU work, so
-        // both run on the blocking pool, and a staged NAR is read straight off
-        // disk so the compressed bytes never sit in memory as well.
+        // Compression is detected from the payload magic bytes, then the narinfo `URL:` field, then
+        // zstd. A `NarRequest` over the WebSocket is only carrying zstd.
         let store_path = self.store_path.to_owned();
         let expected_size = self.meta.nar_size;
         let claimed_hash = self.meta.nar_hash.clone();
@@ -113,9 +96,8 @@ impl<'a> NarImporter<'a> {
     }
 }
 
-/// Check a decompressed NAR against the size and `sha256:` hash its metadata
-/// claims. A mismatch is a typed [`CorruptCachedNar`] so the executor can
-/// route it into the demote-and-refetch self-heal instead of a retry loop.
+/// A mismatch is a typed [`CorruptCachedNar`]. The executor is routing it into demote-and-refetch
+/// instead of a retry loop.
 fn verify_nar(
     store_path: &str,
     decompressed: &[u8],
@@ -155,10 +137,6 @@ fn verify_nar(
     Ok(())
 }
 
-// ── Public import entry point ─────────────────────────────────────────────────
-
-/// Decompress + import a single NAR delivered via `NarPush` (or downloaded
-/// from a presigned URL) into the worker's local nix-daemon.
 pub async fn import_received_nar(
     store: &LocalNixStore,
     store_path: &str,

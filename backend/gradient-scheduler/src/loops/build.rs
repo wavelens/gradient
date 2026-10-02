@@ -31,14 +31,9 @@ use gradient_wire::types::{
 
 use super::{ASSIGN_BUDGET, ASSIGN_TICK, STARTABLE_RESYNC};
 
-/// One dispatch pass. A timer tick also advances the rescore clock; a kick starts
-/// only the dispatch half. Neither repairs: every can-start counter is moved by
-/// the event that changes it, and the two remaining scopes are evaluation-driven.
-/// Every pass admits what moved; only `resync` reads the whole startable set.
 pub(crate) async fn build_assign_pass(scheduler: &Scheduler, timer_tick: bool, resync: bool) {
-    // rescore_count is an anti-starvation timeout measured in dispatch
-    // intervals, so only the timer advances it - reactive kicks (which can
-    // fire many times per interval) just run an extra dispatch pass.
+    // `rescore_count` is an anti-starvation timeout measured in dispatch intervals. Only the timer
+    // may advance it, since kicks can fire many times per interval.
     if timer_tick {
         let _ = scheduler
             .call(|reply| SchedulerMsg::BumpRescore { reply })
@@ -59,25 +54,13 @@ pub(crate) async fn build_assign_pass(scheduler: &Scheduler, timer_tick: bool, r
     if resync && let Err(e) = resync_startable_set(scheduler).await {
         error!(error = %e, "startable-set resync error");
     }
-    // After dispatching, refresh each in-flight evaluation's
-    // Building/Waiting state so the UI reflects "no worker can pick this
-    // up" (or recovers when a worker comes back online). Cheap when
-    // there are no in-flight evals.
     if let Err(e) = scheduler.refresh_waiting_state().await {
         error!(error = %e, "refresh_waiting_state in dispatch loop failed");
     }
-    // A `.drv` our cache lost has no producer; the only recovery is a fresh
-    // evaluation of the same commit. Executes after the waiting-state refresh
-    // has settled `graph_stuck`.
     if let Err(e) = crate::waiting_state::recover_drv_stuck_evals(&scheduler.state).await {
         error!(error = %e, "recover_drv_stuck_evals in dispatch loop failed");
     }
 
-    // Re-offer still-pending jobs to all sessions each pass. A build
-    // re-queued after a failed/rejected dispatch had its sent-flag cleared,
-    // so this re-offers it (workers score it a second time) - including to a
-    // worker that just freed capacity via the kick. Sessions ignore an empty
-    // delta, so this is cheap when nothing changed.
     let _ = scheduler.cast(SchedulerMsg::ReOffer).await;
 }
 
@@ -86,9 +69,6 @@ pub(crate) enum BuildMsg {
     Kick,
 }
 
-/// The build dispatcher as a supervised actor: a timer tick every
-/// `ASSIGN_TICK`, plus edge-triggered kicks coalesced by generation so a
-/// burst of kicks queued during one pass is serviced by a single extra pass.
 pub(crate) struct BuildAssigner;
 
 pub(crate) struct BuildAssignerState {
@@ -159,8 +139,6 @@ impl Actor for BuildAssigner {
     }
 }
 
-/// The build dispatcher as a supervised child. The factory re-publishes the
-/// actor ref on every (re)spawn so `kick_assigner` always reaches the live one.
 pub(super) fn child_spec(scheduler: &Arc<Scheduler>) -> ChildSpec {
     let scheduler = Arc::clone(scheduler);
     ChildSpec::Custom {
@@ -182,48 +160,23 @@ pub(super) fn child_spec(scheduler: &Arc<Scheduler>) -> ChildSpec {
     }
 }
 
-/// All DB data needed to assemble [`PendingBuildJob`]s for a dispatch pass.
-///
-/// Loaded in bulk (one IN-list query per table) by [`BuildAssignMaps::load`],
-/// then queried in-memory by [`BuildAssignMaps::classify_assignment`].
-/// This avoids O(n) serial round-trips when hundreds of builds become startable
-/// at once.
 struct BuildAssignMaps {
     derivations: HashMap<DerivationId, MDerivation>,
     evaluations: HashMap<EvaluationId, MEvaluation>,
-    /// task_id -> project_id
     tasks: HashMap<TaskId, ProjectId>,
     features_by_drv: HashMap<DerivationId, Vec<FeatureId>>,
     feature_names: HashMap<FeatureId, String>,
-    /// derivation_id -> number of direct dependencies
     dep_counts: HashMap<DerivationId, u32>,
-    /// derivation_id -> direct input store paths (outputs of every input
-    /// derivation). Used by workers to score how much they would have to
-    /// download to start this build. `inputSrcs` are not included - they
-    /// live in the `.drv` file and are not stored in the scheduler DB.
     direct_inputs: HashMap<DerivationId, Vec<RequiredPath>>,
-    /// derivation_id -> this derivation's own output `(name, store_path)` pairs,
-    /// sent on every `BuildSpec` so a Substitute fetches the outputs without
-    /// fetching the `.drv`.
     self_outputs: HashMap<DerivationId, Vec<DerivationOutput>>,
-    /// derivation_id -> transitive closure size (bytes), from
-    /// `derivation.closure_size` or computed here when it is NULL.
     closure_sizes: HashMap<DerivationId, Option<i64>>,
-    /// The sizes this pass computed; the graph writer persists them.
     computed_sizes: HashMap<DerivationId, i64>,
-    /// derivation_id -> historical resource prediction by `(history_name,
-    /// architecture)`, default when there is no matching history.
     histories: HashMap<DerivationId, gradient_pool::score::HistoryPrediction>,
-    /// derivation_build -> the evaluation driving this shared build's dispatch (used for
-    /// peer routing and `build_job` attribution on win). Prefers a non-terminal eval.
     driving_eval: HashMap<DerivationBuildId, EvaluationId>,
-    /// Shared builds named by a live prioritized evaluation, on top of the shared builds
-    /// flagged themselves.
     prioritized_by_eval: HashSet<DerivationBuildId>,
     config: AssignConfig,
 }
 
-/// The scalar dispatch knobs, split from the per-pass lookup maps.
 struct AssignConfig {
     default_timeout_secs: Option<u64>,
     default_max_silent_secs: Option<u64>,
@@ -239,22 +192,17 @@ impl AssignConfig {
 }
 
 impl BuildAssignMaps {
-    /// Issue one IN-list query per table and build all lookup maps.
     async fn load(
         state: &Arc<ServerState>,
         shared_builds: &[MDerivationBuild],
         uses_history: bool,
     ) -> anyhow::Result<Self> {
-        // Every load below propagates its error: a failed query must abort the
-        // dispatch pass (retried next tick) instead of masquerading as "no
-        // rows", which dispatched builds against phantom-empty inputs.
+        // Every load below must propagate its error and abort the pass. Reading a failed query as
+        // no rows was dispatching builds against phantom-empty inputs.
         let drv_ids: Vec<DerivationId> = shared_builds.iter().map(|a| a.derivation).collect();
 
         let db = &state.worker_db;
 
-        // Resolve the eval driving each shared build's dispatch: any referencing
-        // build_job, preferring one whose evaluation is not terminal. The driving
-        // eval is the job's peer-routing source and the build_job attributed on win.
         let mut driving_eval: HashMap<DerivationBuildId, EvaluationId> = HashMap::new();
         let jobs_by_drv =
             gradient_db::graph::reachability::build_jobs_for_derivations(db, &drv_ids).await?;
@@ -300,8 +248,6 @@ impl BuildAssignMaps {
             .map(|e| (e.id, e))
             .collect();
 
-        // Pick the driving eval per shared build: prefer one whose evaluation is not
-        // terminal so dispatch attributes the build to a live eval.
         for (shared_build_id, eval_list) in &jobs_by_shared_build {
             let chosen = eval_list
                 .iter()
@@ -318,7 +264,6 @@ impl BuildAssignMaps {
 
         let prioritized_by_eval = prioritized_by_eval(&jobs_by_shared_build, &evaluations);
 
-        // project_id resolution: every evaluation must belong to a task.
         let task_ids: Vec<TaskId> = evaluations
             .values()
             .filter_map(|e| e.task)
@@ -334,7 +279,6 @@ impl BuildAssignMaps {
             .map(|p| (p.id, p.project))
             .collect();
 
-        // Required features: per-derivation list of feature names.
         let feature_edges = gradient_db::fetch_in_chunks(&drv_ids, |chunk| async move {
             EDerivationFeature::find()
                 .filter(CDerivationFeature::Derivation.is_in(chunk))
@@ -366,8 +310,6 @@ impl BuildAssignMaps {
             .collect()
         };
 
-        // Direct dependency edges per derivation. Used both for the scoring
-        // policy's `dep_counts` and to build `direct_inputs` below.
         let dep_edges = gradient_db::fetch_in_chunks(&drv_ids, |chunk| async move {
             EDerivationDependency::find()
                 .filter(CDerivationDependency::Derivation.is_in(chunk))
@@ -388,9 +330,6 @@ impl BuildAssignMaps {
             .map(|(k, v)| (*k, v.len() as u32))
             .collect();
 
-        // Direct input store paths per build derivation: for each input drv,
-        // gather its `derivation_output` rows; for each output, attach
-        // cache info from `cached_path` when available.
         let dep_drv_ids: Vec<DerivationId> = dep_edges
             .iter()
             .map(|e| e.dependency)
@@ -463,8 +402,6 @@ impl BuildAssignMaps {
             direct_inputs.insert(*drv_id, paths);
         }
 
-        // This derivation's own outputs, on every BuildSpec: a Substitute fetches
-        // exactly these and never the `.drv`.
         let mut self_outputs: HashMap<DerivationId, Vec<DerivationOutput>> = HashMap::new();
         for o in gradient_db::fetch_in_chunks(&drv_ids, |chunk| async move {
             EDerivationOutput::find()
@@ -502,13 +439,10 @@ impl BuildAssignMaps {
         })
     }
 
-    /// Resolve the project that owns this evaluation (used as `project_id`
-    /// to route the job only to workers registered by that project).
     fn resolve_project_id(&self, eval: &MEvaluation) -> Option<ProjectId> {
         eval.task.and_then(|pid| self.tasks.get(&pid).copied())
     }
 
-    /// Return the required Nix system features for `derivation_id`.
     fn required_features(&self, derivation_id: DerivationId) -> Vec<String> {
         self.features_by_drv
             .get(&derivation_id)
@@ -520,9 +454,6 @@ impl BuildAssignMaps {
             .unwrap_or_default()
     }
 
-    /// Decide whether `shared_build` dispatches this pass, and how - an explicit
-    /// three-way outcome instead of a `None` that conflated "hard error" with
-    /// "deliberately deferred".
     fn classify_assignment(&self, shared_build: &MDerivationBuild) -> AssignOutcome {
         let Some(derivation) = self.derivations.get(&shared_build.derivation) else {
             return AssignOutcome::Skip("derivation not found for shared build");
@@ -547,7 +478,6 @@ impl BuildAssignMaps {
         AssignOutcome::Assign(job_id, Box::new(pending))
     }
 
-    /// Pure assembly of the pending job once `classify_assignment` decided to go.
     fn assemble_job(
         &self,
         shared_build: &MDerivationBuild,
@@ -558,10 +488,7 @@ impl BuildAssignMaps {
     ) -> (String, PendingBuildJob) {
         let job_id = crate::jobs::build_job_key(shared_build.id);
         let substitute = kind == BuildSpecKind::Substitute;
-        // Neither a Substitute nor a Download needs a nix store, so neither needs a
-        // worker of the derivation's architecture, its features, or its inputs.
         let anywhere = kind != BuildSpecKind::Build;
-        // The worker round-trips this shared build uuid as the opaque BuildSpec.build_id.
         let build_job = BuildJob {
             builds: vec![BuildSpec {
                 build_id: shared_build.id.to_string(),
@@ -592,10 +519,6 @@ impl BuildAssignMaps {
             )
         };
 
-        // A substitute or a download produces its outputs without the local store,
-        // so it neither prefetches build-dependency inputs nor is worth scoring:
-        // leaving required_paths empty stops the worker pulling deps and makes every
-        // worker's score the same assumed zero (#456).
         let required_paths = if anywhere {
             Vec::new()
         } else {
@@ -645,21 +568,11 @@ impl BuildAssignMaps {
     }
 }
 
-/// The dispatch decision for one ready shared build. `Queued` already means the gates
-/// held, so there is no third "deliberately held this pass" outcome: a shared build that
-/// should not run yet is not in the queue.
 enum AssignOutcome {
-    /// Enqueue this job now.
     Assign(String, Box<PendingBuildJob>),
-    /// A required lookup failed; the shared build cannot be assembled.
     Skip(&'static str),
 }
 
-/// Closure sizes and historical predictions, consumed only by policies that
-/// read history (resource-aware); the simple policy skips the walk and uses
-/// whatever is persisted. Derivations missing `closure_size` are sized in one
-/// batched walk, returned as the third element for the graph writer to persist;
-/// history is queried once per distinct `(history_name, architecture)`.
 async fn load_sizes_and_histories(
     state: &Arc<ServerState>,
     derivations: &HashMap<DerivationId, MDerivation>,
@@ -732,7 +645,6 @@ fn prioritized_by_eval(
         .collect()
 }
 
-/// Whether an evaluation has reached a terminal status (won't drive new builds).
 fn eval_is_terminal(status: EvaluationStatus) -> bool {
     matches!(
         status,
@@ -740,9 +652,6 @@ fn eval_is_terminal(status: EvaluationStatus) -> bool {
     )
 }
 
-/// Admit the shared builds that entered `Queued` since the last pass and drop the
-/// pending jobs of those that left it, so a pass costs what moved. An entered
-/// shared build already pending is assembled afresh: its passthrough mode may have changed.
 pub(crate) async fn admit_startable_moves(scheduler: &Scheduler) -> anyhow::Result<()> {
     if scheduler.draining.load(Ordering::Relaxed) {
         return Ok(());
@@ -768,10 +677,6 @@ pub(crate) async fn admit_startable_moves(scheduler: &Scheduler) -> anyhow::Resu
     enqueue_startable_shared_builds(scheduler, shared_builds).await
 }
 
-/// The whole startable set, at startup and every [`STARTABLE_RESYNC`]: it admits what no
-/// move announced (a lost hint, another instance's promotion) and prunes the
-/// pending builds that stopped being dispatchable without a move this instance
-/// saw, such as one another instance claimed.
 pub(crate) async fn resync_startable_set(scheduler: &Scheduler) -> anyhow::Result<()> {
     if scheduler.draining.load(Ordering::Relaxed) {
         return Ok(());
@@ -794,10 +699,6 @@ pub(crate) async fn resync_startable_set(scheduler: &Scheduler) -> anyhow::Resul
     enqueue_startable_shared_builds(scheduler, shared_builds).await
 }
 
-/// Assemble and enqueue the shared builds the tracker does not hold yet. The select
-/// re-derives no can-start term: it trusts `Queued` to mean the gates held,
-/// which holds because of the one rule every writer of that status obeys, stated
-/// at `graph::predicates::promotable_predicate`.
 async fn enqueue_startable_shared_builds(
     scheduler: &Scheduler,
     shared_builds: Vec<MDerivationBuild>,
@@ -847,8 +748,6 @@ async fn enqueue_startable_shared_builds(
         }
     }
 
-    // One write for the pass: the `ready_at` stamp on every shared build it enqueued and
-    // the closure sizes it had to compute.
     if let Err(e) = state
         .graph
         .transition(Transition::Ready {
@@ -873,7 +772,6 @@ fn nonzero(v: u64) -> Option<u64> {
     (v != 0).then_some(v)
 }
 
-/// Per-derivation limit takes precedence over the server default. A stored `0` means "no limit".
 fn resolve_limit(stored: Option<i64>, default: Option<u64>) -> Option<u64> {
     match stored {
         Some(0) => None,

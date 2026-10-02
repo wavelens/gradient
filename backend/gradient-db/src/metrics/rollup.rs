@@ -4,14 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Background aggregator that folds fact tables into `metric_rollup`.
-//!
-//! Each pass updates minute buckets for a trailing window from the fact
-//! tables (idempotent via `ON CONFLICT`), then cascades minute -> hour -> day -> week
-//! over `metric_rollup` itself. Best-effort: SQL failures are logged, never
-//! propagated. Timestamps are compared in UTC to match the naive-UTC values the
-//! recording layer writes via `gradient_types::now()`.
-
 use std::time::Duration;
 
 use gradient_entity::dispatched_job::DispatchedJobKind;
@@ -23,8 +15,6 @@ use tracing::{debug, warn};
 
 use crate::DbContext;
 
-/// A simple count metric over the global `derivation_build` shared build, attributed
-/// to an owning project once per referencing `build_job` (its eval -> task join).
 struct BuildCount {
     name: &'static str,
     time_col: &'static str,
@@ -44,10 +34,8 @@ fn build_counts() -> Vec<BuildCount> {
             time_col: "dispatched_at",
             filter: "TRUE".into(),
         },
-        // The Build/BuildAttempt split moved per-attempt finish times to
-        // `build_attempt`; `build.updated_at` is set on every status transition, so
-        // it is the terminal-state timestamp here and also covers builds with no
-        // attempt row (substituted at eval, dependency-failed).
+        // `build.updated_at` is set on every status transition.
+        // It is serving as the terminal timestamp, also for builds with no attempt row.
         BuildCount {
             name: "builds.completed",
             time_col: "updated_at",
@@ -75,7 +63,6 @@ fn build_counts() -> Vec<BuildCount> {
     ]
 }
 
-/// A duration metric over the `build` table: milliseconds between two columns.
 struct BuildDuration {
     name: &'static str,
     start_col: &'static str,
@@ -83,17 +70,13 @@ struct BuildDuration {
     filter: &'static str,
 }
 
-const BUILD_DURATIONS: &[BuildDuration] = &[
-    // Dependency wait: entered the queue -> all dependencies satisfied.
-    BuildDuration {
-        name: "deps.wait_ms",
-        start_col: "queued_at",
-        end_col: "ready_at",
-        filter: "TRUE",
-    },
-];
+const BUILD_DURATIONS: &[BuildDuration] = &[BuildDuration {
+    name: "deps.wait_ms",
+    start_col: "queued_at",
+    end_col: "ready_at",
+    filter: "TRUE",
+}];
 
-/// A count metric over `evaluation`, attributed to the project via the task join.
 struct EvalCount {
     name: &'static str,
     filter: String,
@@ -119,7 +102,6 @@ fn eval_counts() -> Vec<EvalCount> {
     ]
 }
 
-/// (target granularity, source granularity, trailing window).
 const CASCADES: &[(RollupGranularity, RollupGranularity, &str)] = &[
     (
         RollupGranularity::Hour,
@@ -132,8 +114,6 @@ const CASCADES: &[(RollupGranularity, RollupGranularity, &str)] = &[
 
 const MINUTE_WINDOW: &str = "15 minutes";
 
-/// Cache traffic per minute per cache (scope `{cache}`): `count` = requests,
-/// `sum` = bytes served. Source is the already-minute-bucketed `cache_metric`.
 fn cache_traffic_sql() -> String {
     format!(
         "INSERT INTO metric_rollup \
@@ -152,8 +132,6 @@ fn cache_traffic_sql() -> String {
     )
 }
 
-/// Cache storage added per minute per cache (scope `{cache}`): `count` =
-/// packages added, `sum` = compressed bytes added.
 fn cache_storage_sql() -> String {
     format!(
         "INSERT INTO metric_rollup \
@@ -170,8 +148,6 @@ fn cache_storage_sql() -> String {
     )
 }
 
-/// Upstream narinfo latency per minute per URL (scope `{upstream_url}`):
-/// `count` = completed requests, `sum` = summed latency ms (avg = sum/count).
 fn upstream_latency_sql() -> String {
     format!(
         "INSERT INTO metric_rollup \
@@ -188,7 +164,6 @@ fn upstream_latency_sql() -> String {
     )
 }
 
-/// Upstream narinfo hits per minute per URL (scope `{upstream_url}`).
 fn upstream_hits_sql() -> String {
     format!(
         "INSERT INTO metric_rollup \
@@ -205,7 +180,6 @@ fn upstream_hits_sql() -> String {
     )
 }
 
-/// Upstream narinfo misses per minute per URL (scope `{upstream_url}`).
 fn upstream_misses_sql() -> String {
     format!(
         "INSERT INTO metric_rollup \
@@ -222,7 +196,6 @@ fn upstream_misses_sql() -> String {
     )
 }
 
-/// The rollup aggregation pass as a supervised child.
 pub fn child_spec(ctx: DbContext) -> ChildSpec {
     let secs = ctx.config.metrics_args.rollup_interval_secs.max(1);
     ChildSpec::periodic(
@@ -362,8 +335,6 @@ fn build_duration_sql(m: &BuildDuration) -> String {
     )
 }
 
-/// `builds.duration_ms`: wall-clock time of the newest finished attempt per
-/// build, seeded from the attempts finished inside the window.
 fn build_duration_attempt_sql() -> String {
     let ms = "extract(epoch from (ba.build_finished_at - ba.build_started_at)) * 1000";
     format!(
@@ -395,9 +366,6 @@ fn build_duration_attempt_sql() -> String {
     )
 }
 
-/// `dispatch.wait_ms`: ready -> dispatched per build dispatch. The dispatch row's
-/// `ready_at` is the moment that dispatch entered the pending set, unlike the
-/// first-time stamp on `derivation_build`.
 fn dispatch_wait_sql() -> String {
     let ms = "extract(epoch from (dj.dispatched_at - dj.ready_at)) * 1000";
     format!(
@@ -421,11 +389,6 @@ fn dispatch_wait_sql() -> String {
     )
 }
 
-/// `phase.<kind>.<phase>.ms`: one series per job kind and phase, so the board
-/// can compare where eval and build time actually goes. The phase name array is
-/// indexed by `phase + 1` because Postgres arrays are 1-based, and it is per
-/// `JobPhase::as_i16`, not by the enum's current order: position 10 is the retired
-/// discriminant 9 (`substitute_passthrough`), which historical rows still carry.
 fn phase_duration_sql() -> String {
     let ms = "(p.end_ms - p.start_ms)::double precision";
     let last = JobPhase::ALL.iter().map(|p| p.as_i16()).max().unwrap_or(0);
@@ -480,13 +443,9 @@ fn eval_count_sql(m: &EvalCount) -> String {
     )
 }
 
-/// Fold `source` buckets into `target` buckets. The grouping key is exactly the
-/// unique index `(metric, granularity, bucket_start, scope_hash)`: grouping by
-/// `scope` as well would split one conflict key across two rows whenever the
-/// scope payload is re-shaped mid-window (the organization -> project rename,
-/// #571), and Postgres rejects the whole statement with "ON CONFLICT DO UPDATE
-/// command cannot affect row a second time". `scope_hash` identifies the series,
-/// so the newest source bucket supplies the representative `scope`.
+/// The grouping key must be exactly the unique index
+/// `(metric, granularity, bucket_start, scope_hash)`.
+/// Grouping by `scope` too would make Postgres reject the whole upsert (#571).
 fn cascade_sql(target: RollupGranularity, source: RollupGranularity, window: &str) -> String {
     let unit = target.trunc_unit();
     let target = i16::from(target);
@@ -511,7 +470,6 @@ fn cascade_sql(target: RollupGranularity, source: RollupGranularity, window: &st
 mod tests {
     use super::*;
 
-    /// Every statement the rollup pass executes, in one iterator.
     fn all_rollup_sql() -> Vec<String> {
         build_counts()
             .iter()
@@ -531,8 +489,6 @@ mod tests {
             .collect()
     }
 
-    /// The Build/BuildAttempt split moved `build_started_at`/`build_finished_at`
-    /// to `build_attempt`; rollups over `build b` must not reference them.
     #[test]
     fn build_table_rollups_avoid_moved_columns() {
         let counts = build_counts();
@@ -546,8 +502,6 @@ mod tests {
         }
     }
 
-    /// The window must be the seed, not a filter after a join over every
-    /// Completed shared build: an idle window then reads nothing (#629).
     #[test]
     fn duration_rollup_seeds_from_attempts_finished_in_the_window() {
         let sql = build_duration_attempt_sql();
@@ -567,11 +521,6 @@ mod tests {
         assert!(sql.contains("ba.build_started_at IS NOT NULL"), "{sql}");
     }
 
-    /// Every rollup statement's `GROUP BY` must be exactly the unique index
-    /// `(metric, granularity, bucket_start, scope_hash)`. A coarser grouping key
-    /// (adding `scope`, #571) proposes two rows for one conflict key and
-    /// Postgres aborts the whole statement with "ON CONFLICT DO UPDATE command
-    /// cannot affect row a second time".
     #[test]
     fn upserts_never_group_by_scope() {
         for sql in all_rollup_sql() {
@@ -587,9 +536,6 @@ mod tests {
         }
     }
 
-    /// A row written before a scope re-key keeps the stale shape forever unless
-    /// the upsert refreshes it, which is how the pre-rename `{'org': id}` rows
-    /// survived alongside `{'project': id}` on the same `scope_hash`.
     #[test]
     fn upserts_refresh_scope_on_conflict() {
         for sql in all_rollup_sql() {
@@ -604,16 +550,12 @@ mod tests {
         }
     }
 
-    /// The cascade still has to carry a scope forward, just not as a grouping
-    /// column: the newest source bucket in the group supplies it.
     #[test]
     fn cascade_carries_the_newest_scope() {
         let sql = cascade_sql(RollupGranularity::Day, RollupGranularity::Hour, "2 days");
         assert!(sql.contains("(array_agg(scope ORDER BY bucket_start DESC))[1]"));
     }
 
-    /// Every phase a worker reports lands in its own series: the filter admits
-    /// its discriminant and the name array names it at that position.
     #[test]
     fn every_reported_phase_reaches_its_series() {
         let sql = phase_duration_sql();
@@ -638,8 +580,6 @@ mod tests {
         }
     }
 
-    /// A shared build queued again keeps its first `derivation_build.ready_at`,
-    /// so only the dispatch row knows when this dispatch became ready.
     #[test]
     fn dispatch_wait_measures_each_dispatch_from_its_own_readiness() {
         let sql = dispatch_wait_sql();
@@ -649,8 +589,6 @@ mod tests {
         assert!(!sql.contains("derivation_build"), "{sql}");
     }
 
-    /// Derivations are global; build rollups must attribute project through the
-    /// build's evaluation -> task, never a (now column-less) derivation join.
     #[test]
     fn build_rollups_attribute_project_via_task() {
         let counts = build_counts();

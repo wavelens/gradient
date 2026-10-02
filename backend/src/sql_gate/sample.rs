@@ -9,10 +9,6 @@
     reason = "the samplers draw parameter values and are not statements the gate measures"
 )]
 
-//! Turns a declared [`Param`] into a real value drawn from the database under
-//! test. A kind with no rows behind it yields `None`, which is what makes the
-//! query that declared it unmeasured rather than passed.
-
 use std::collections::HashMap;
 
 use anyhow::Result;
@@ -20,12 +16,9 @@ use gradient_db::sql::Param;
 use sea_orm::{ConnectionTrait, DatabaseBackend, DatabaseConnection, Statement, Value};
 use uuid::Uuid;
 
-/// The SQL that draws one value of `param`, or `None` for the kinds the gate can
-/// spell out on its own. Array kinds take the declared width as `$1`. Every draw
-/// is ordered: heap order moves with each update, and an unordered draw measured a
-/// different evaluation, 100x apart in size, from one run to the next. A single
-/// evaluation is the one naming the most shared builds, the worst case a statement
-/// scoped to one must fit.
+/// Every draw is ordered because heap order is moving with each update. An unordered draw measured
+/// evaluations 100x apart in size between runs. The single evaluation is the one naming the most
+/// shared builds, the worst case a statement scoped to one must fit.
 pub fn draw_sql(param: &Param) -> Option<&'static str> {
     Some(match param {
         Param::DerivationId => "SELECT id AS v FROM derivation ORDER BY id LIMIT 1",
@@ -135,8 +128,6 @@ fn shape(param: &Param) -> Option<Shape> {
     })
 }
 
-/// Draws each kind once per run and reuses it, so 138 queries do not re-draw the
-/// same ids and two queries over the same kind are measured on the same rows.
 #[derive(Default)]
 pub struct Sampler {
     drawn: HashMap<String, Option<Value>>,

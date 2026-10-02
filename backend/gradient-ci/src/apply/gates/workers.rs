@@ -11,17 +11,9 @@ use gradient_types::*;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{ActiveModelTrait, ConnectionTrait};
 
-/// Move a freshly-created `Queued` evaluation into `Waiting` with
-/// `WaitingReason::Workers { connected_workers: 0, .. }` when the task's
-/// project has no active worker registration with the `eval` capability
-/// gate enabled. Returns the evaluation unchanged when at least one such
-/// registration exists.
-///
-/// Without this gate the eval row would sit in `Queued` indefinitely: the
-/// build-dispatch repair pass only stalls Queued evaluations when **zero**
-/// workers are connected, not when connected workers all lack `eval`. The
-/// row is unparked by `unpark_no_workers_for_project` whenever a worker
-/// registration is created or its `enable_eval` / `active` flags flip on.
+/// The build-dispatch repair pass is stalling `Queued` evaluations only when zero workers are
+/// connected. `unpark_no_workers_for_project` is unparking the row once an `eval` registration
+/// is active.
 #[tracing::instrument(level = "debug", skip_all)]
 pub async fn park_if_no_workers<C: ConnectionTrait>(
     db: &C,

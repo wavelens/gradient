@@ -7,7 +7,6 @@
 use gradient_entity::evaluation::EvaluationStatus;
 use std::fmt;
 
-/// Error returned when an [`EvaluationStatus`] transition is invalid.
 #[derive(Debug, Clone, PartialEq)]
 pub struct InvalidEvalTransition {
     pub from: EvaluationStatus,
@@ -18,7 +17,7 @@ impl fmt::Display for InvalidEvalTransition {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "invalid evaluation status transition: {:?} → {:?}",
+            "invalid evaluation status transition: {:?} -> {:?}",
             self.from, self.to
         )
     }
@@ -26,24 +25,9 @@ impl fmt::Display for InvalidEvalTransition {
 
 impl std::error::Error for InvalidEvalTransition {}
 
-/// Validates and enforces [`EvaluationStatus`] state transitions.
-///
-/// The valid transition graph is:
-/// ```text
-/// Queued -> Fetching -> EvaluatingFlake -> EvaluatingDerivation
-///        -> Building <-> Waiting
-///        -> Completed | Failed | Aborted
-/// {Queued,Fetching,EvaluatingFlake,EvaluatingDerivation} -> Waiting
-/// Waiting -> Queued (recovery once a worker becomes available)
-/// * -> Aborted (from any non-terminal state)
-/// * -> Failed  (from any non-terminal state)
-/// ```
-/// Terminal states (`Completed`, `Failed`, `Aborted`) cannot be
-/// transitioned away from.
 pub struct EvalStateMachine;
 
 impl EvalStateMachine {
-    /// Returns `Ok(to)` if the transition is valid, `Err` otherwise.
     pub fn validate(
         from: EvaluationStatus,
         to: EvaluationStatus,
@@ -52,7 +36,6 @@ impl EvalStateMachine {
             return Ok(to);
         }
 
-        // Terminal states - nothing can move away from these.
         let from_is_terminal = matches!(
             from,
             EvaluationStatus::Completed | EvaluationStatus::Failed | EvaluationStatus::Aborted
@@ -62,7 +45,6 @@ impl EvalStateMachine {
         }
 
         match (from, to) {
-            // Normal progression through evaluation phases
             (EvaluationStatus::Queued, EvaluationStatus::Fetching) => Ok(to),
             (EvaluationStatus::Queued, EvaluationStatus::EvaluatingFlake) => Ok(to),
             (EvaluationStatus::Fetching, EvaluationStatus::EvaluatingFlake) => Ok(to),
@@ -70,21 +52,17 @@ impl EvalStateMachine {
             (EvaluationStatus::EvaluatingDerivation, EvaluationStatus::Building) => Ok(to),
             (EvaluationStatus::EvaluatingDerivation, EvaluationStatus::Completed) => Ok(to),
 
-            // Build phase scheduling
             (EvaluationStatus::Building, EvaluationStatus::Waiting) => Ok(to),
             (EvaluationStatus::Waiting, EvaluationStatus::Building) => Ok(to),
             (EvaluationStatus::Building, EvaluationStatus::Completed) => Ok(to),
 
-            // Pre-build phases stall into Waiting when no worker can pick up
-            // the eval job; recovery routes through Queued so the dispatch
-            // loop replays the normal progression.
+            // Recovery from `Waiting` is routing through `Queued` to replay the normal progression.
             (EvaluationStatus::Queued, EvaluationStatus::Waiting) => Ok(to),
             (EvaluationStatus::Fetching, EvaluationStatus::Waiting) => Ok(to),
             (EvaluationStatus::EvaluatingFlake, EvaluationStatus::Waiting) => Ok(to),
             (EvaluationStatus::EvaluatingDerivation, EvaluationStatus::Waiting) => Ok(to),
             (EvaluationStatus::Waiting, EvaluationStatus::Queued) => Ok(to),
 
-            // Terminal transitions from any non-terminal state
             (_, EvaluationStatus::Failed) => Ok(to),
             (_, EvaluationStatus::Aborted) => Ok(to),
             (_, EvaluationStatus::Completed) => Ok(to),
@@ -93,7 +71,6 @@ impl EvalStateMachine {
         }
     }
 
-    /// Returns `true` if `status` is a terminal (no further transitions allowed).
     pub fn is_terminal(status: &EvaluationStatus) -> bool {
         matches!(
             status,
@@ -127,7 +104,7 @@ mod tests {
         for (from, to) in chain {
             assert!(
                 EvalStateMachine::validate(from, to).is_ok(),
-                "{from:?} → {to:?} failed"
+                "{from:?} -> {to:?} failed"
             );
         }
     }
@@ -157,7 +134,7 @@ mod tests {
         for from in nonterminals {
             assert!(
                 EvalStateMachine::validate(from, EvaluationStatus::Failed).is_ok(),
-                "{from:?} → Failed failed"
+                "{from:?} -> Failed failed"
             );
         }
     }
@@ -175,7 +152,7 @@ mod tests {
         for from in nonterminals {
             assert!(
                 EvalStateMachine::validate(from, EvaluationStatus::Aborted).is_ok(),
-                "{from:?} → Aborted failed"
+                "{from:?} -> Aborted failed"
             );
         }
     }
@@ -191,7 +168,7 @@ mod tests {
         for from in pre_build {
             assert!(
                 EvalStateMachine::validate(from, EvaluationStatus::Waiting).is_ok(),
-                "{from:?} → Waiting should be allowed"
+                "{from:?} -> Waiting should be allowed"
             );
         }
     }
@@ -205,8 +182,6 @@ mod tests {
 
     #[test]
     fn eval_sm_waiting_cannot_skip_into_pre_build_phases() {
-        // Recovery from Waiting goes via Queued; jumping straight to a later
-        // pre-build phase would let us bypass the dispatch path.
         for to in [
             EvaluationStatus::Fetching,
             EvaluationStatus::EvaluatingFlake,
@@ -214,7 +189,7 @@ mod tests {
         ] {
             assert!(
                 EvalStateMachine::validate(EvaluationStatus::Waiting, to).is_err(),
-                "Waiting → {to:?} should be rejected"
+                "Waiting -> {to:?} should be rejected"
             );
         }
     }
@@ -233,7 +208,7 @@ mod tests {
             ] {
                 assert!(
                     EvalStateMachine::validate(from, to).is_err(),
-                    "{from:?} → {to:?} should be rejected"
+                    "{from:?} -> {to:?} should be rejected"
                 );
             }
         }
@@ -241,7 +216,6 @@ mod tests {
 
     #[test]
     fn eval_sm_skip_fetching_ok() {
-        // Queued -> EvaluatingFlake is explicitly allowed (line 65)
         assert!(
             EvalStateMachine::validate(EvaluationStatus::Queued, EvaluationStatus::EvaluatingFlake)
                 .is_ok()

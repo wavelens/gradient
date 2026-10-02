@@ -12,7 +12,6 @@ use futures::future::BoxFuture;
 use gradient_storage::{LogStorage, log_shard};
 use gradient_types::ids::BuildAttemptId;
 
-/// Minimal no-op log storage for tests.
 #[derive(Debug, Default)]
 pub struct NoopLogStorage;
 
@@ -53,11 +52,7 @@ impl LogStorage for NoopLogStorage {
     }
 }
 
-/// Recording log storage: keeps every `(build_id, text)` append in memory so
-/// tests can assert what would have been written to the log.
-///
-/// `read` returns the concatenation of every append for that build (matching
-/// the on-disk semantics of [`gradient_storage::FileLogStorage`]).
+/// `read` is returning every append for a build concatenated, matching `FileLogStorage` on disk.
 #[derive(Debug, Default)]
 pub struct RecordingLogStorage {
     entries: Mutex<Vec<(BuildAttemptId, String)>>,
@@ -68,7 +63,6 @@ impl RecordingLogStorage {
         Self::default()
     }
 
-    /// Returns a clone of every recorded `(build_id, text)` append.
     pub fn entries(&self) -> Vec<(BuildAttemptId, String)> {
         self.entries.lock().expect("recording log mutex").clone()
     }
@@ -141,8 +135,6 @@ impl LogStorage for RecordingLogStorage {
     }
 }
 
-/// Pre-seeded in-memory log storage for fixture tests that need `read` to
-/// return deterministic content without going through `append`.
 #[derive(Debug, Default)]
 pub struct InMemoryLogStorage {
     store: Mutex<HashMap<BuildAttemptId, String>>,

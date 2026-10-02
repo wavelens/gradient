@@ -15,19 +15,13 @@ use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, Query
 use std::collections::HashMap;
 
 impl<'a> StateApplicator<'a> {
-    // ── apply_users ───────────────────────────────────────────────────────────
-
     pub(crate) async fn apply_users(
         &self,
         state_users: &HashMap<String, StateUser>,
     ) -> Result<(), DynError> {
         for state_user in state_users.values() {
-            // When password_file is set in the state config, a matching
-            // systemd credential is loaded under GRADIENT_CREDENTIALS_DIR.
-            // When unset (OIDC-only user), we store `None` so the OIDC
-            // login flow in `gradient_web::authorization::oidc` will accept the
-            // account instead of rejecting with "already exists with
-            // password authentication".
+            // An unset `password_file` is storing `None` for an OIDC-only user. The OIDC login flow
+            // is then accepting the account instead of rejecting it as a password account.
             let password_hash = if state_user.password_file.is_some() {
                 let (contents, path) =
                     read_credential("user", &state_user.username, "password", "password file")?;

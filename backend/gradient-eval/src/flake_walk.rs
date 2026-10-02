@@ -4,14 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Cursor-backed flake-output traversal replacing the retired `eval.nix`.
-//!
-//! A [`FlakeWalker`] locks a flake once and opens its eval cache, then serves
-//! every discover/resolve call from the same warm cursor. [`CursorNode`] adapts
-//! an eval-cache [`AttrCursor`] to the pure [`WalkNode`] traversal; a cursor
-//! call that errors surfaces as `Err` so `wildcard_walk::traverse` can record
-//! and tolerate it, mirroring `eval.nix`'s `tryEval`/`safeGet` behaviour.
-
 use std::sync::Arc;
 
 use anyhow::{Context as _, Result, anyhow};
@@ -33,7 +25,6 @@ fn to_wire(shard: wildcard_walk::Shard) -> DiscoveryShard {
     }
 }
 
-/// A locked flake with an open eval cache, walked via a borrowed `EvalState`.
 pub struct FlakeWalker<'a> {
     cache: EvalCache,
     _locked: LockedFlake,
@@ -81,8 +72,6 @@ impl<'a> FlakeWalker<'a> {
         ))
     }
 
-    /// [`Self::discover`] for one pooled shard: nested sets under a trailing
-    /// `*` come back as deferred shards for the parent to fan out.
     #[tracing::instrument(level = "debug", skip_all)]
     pub fn discover_split(
         &self,
@@ -97,9 +86,6 @@ impl<'a> FlakeWalker<'a> {
         Ok((attrs, deferred.into_iter().map(to_wire).collect(), errors))
     }
 
-    /// Split the include patterns into disjoint shards for memory-bounded
-    /// parallel discovery. Exclusions are dropped here; the caller re-attaches
-    /// them to every shard so each worker's `discover` applies them.
     #[tracing::instrument(level = "debug", skip_all)]
     pub fn plan_shards(&self, wildcards: &[String]) -> Result<(Vec<DiscoveryShard>, Vec<String>)> {
         let root = self.root()?;
@@ -126,25 +112,17 @@ impl<'a> FlakeWalker<'a> {
         Ok((strip_nix_store_prefix(&drv), vec![]))
     }
 
-    /// Commit eval-cache entries written during this walk to the WAL (no
-    /// checkpoint), so concurrent shard workers don't deadlock on the WAL
-    /// read-slot locks. The writes are durable; [`Self::checkpoint_cache`]
-    /// folds them into the main `.sqlite` once at end-of-eval.
+    /// Commits are going to the WAL without a checkpoint. Concurrent shard workers would otherwise
+    /// deadlock on the WAL read-slot locks.
     pub fn commit_cache(&self) -> Result<()> {
         self.cache.commit().context("committing eval cache")
     }
 
-    /// Fold the WAL into the main `.sqlite` (PASSIVE checkpoint) so the
-    /// fleet-share push sees the shards' writes. Never blocks: safe to call even
-    /// while another evaluator of the same flake is reading the cache.
     pub fn checkpoint_cache(&self) -> Result<()> {
         self.cache.checkpoint().context("checkpointing eval cache")
     }
 }
 
-/// Parse and lock `flake_ref`, applying each `(input, flake_ref)` override at
-/// lock time so eval-resolved drvPaths reflect it, without opening its eval
-/// cache. Shared by [`FlakeWalker::open`] and [`fingerprint`].
 #[tracing::instrument(level = "debug", skip_all)]
 fn lock_flake(
     ctx: &Arc<Context>,
@@ -171,9 +149,6 @@ fn lock_flake(
         .with_context(|| format!("locking flake '{flake_ref}'"))
 }
 
-/// Lock `flake_ref` (with `overrides` applied) and return its eval-cache
-/// fingerprint without opening (and thus creating) the on-disk eval cache.
-/// `None` for mutable/dirty flakes.
 pub fn fingerprint(
     ctx: &Arc<Context>,
     fetch: &FetchersSettings,
@@ -188,7 +163,6 @@ pub fn fingerprint(
     Ok(locked.fingerprint(store, fetch)?)
 }
 
-/// An eval-cache cursor adapted to the pure [`WalkNode`] traversal.
 struct CursorNode<'a> {
     cursor: AttrCursor,
     state: &'a EvalState,
@@ -221,7 +195,6 @@ impl WalkNode for CursorNode<'_> {
     }
 
     fn is_opaque(&self) -> Result<bool> {
-        // eval.nix isOpaque: a typed attrset that is NOT a derivation.
         if self.is_derivation()? {
             return Ok(false);
         }

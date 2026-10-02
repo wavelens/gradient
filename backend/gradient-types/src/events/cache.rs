@@ -8,7 +8,6 @@ use super::firehose;
 use crate::ids::CacheId;
 use serde::{Deserialize, Serialize};
 
-/// Cache contents or stats changed; subscribers refetch their own scope-filtered view.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Changed {}
 firehose!(Changed, "cache.changed");
@@ -29,7 +28,7 @@ pub struct NarinfoServed {
 }
 firehose!(NarinfoServed, "cache.narinfo.served");
 
-/// A freshly uploaded NAR was signed into `cache`; backfill signing announces nothing.
+/// Only a freshly uploaded NAR is announcing its signing. Backfill signing is announcing nothing.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct NarSigned {
     pub cache: CacheId,

@@ -4,21 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Integration tests for `assign_queued_evals`.
-//!
-//! Tested with a staged `MockDatabase` and a real `Scheduler` so we can assert
-//! on `scheduler.pending_job_count()` after dispatch.
-//!
-//! ## DB call sequence
-//!
-//! `assign_queued_evals`:
-//!   1. `EEvaluation::find().filter(status=Queued).all()` -> Q
-//!   2. `cluster_membership (evaluation ids)` -> Q (skipped when no untracked evals)
-//!   3. Bulk `ECommit IN (commit ids)` -> Q (skipped when no untracked evals)
-//!   4. Bulk sidecar `evaluation_input_update IN (...)` -> Q (InputUpdate evals only)
-//!   5. Bulk `evaluation_flake_input_override IN (eval ids)` -> Q
-//!   6. Bulk `ETask IN (task ids)` -> Q (skipped when no eval has a task)
-
 use std::sync::Arc;
 
 use chrono::NaiveDateTime;
@@ -27,8 +12,6 @@ use gradient_types::*;
 use sea_orm::{DatabaseBackend, MockDatabase};
 
 use crate::{Scheduler, loops, trigger_firing};
-
-// ── Fixture helpers ──────────────────────────────────────────────────────────
 
 fn test_date() -> NaiveDateTime {
     NaiveDateTime::default()
@@ -84,9 +67,6 @@ async fn make_scheduler(db: sea_orm::DatabaseConnection) -> Arc<Scheduler> {
     scheduler
 }
 
-// ── Group F: dispatch_queued_evals ───────────────────────────────────────────
-
-/// A single Queued evaluation with a valid commit and task -> one job enqueued.
 #[tokio::test]
 async fn assign_queued_eval_enqueues_job() {
     let eval_id = EvaluationId::now_v7();
@@ -95,17 +75,12 @@ async fn assign_queued_eval_enqueues_job() {
     let project_id = ProjectId::now_v7();
 
     let db = MockDatabase::new(DatabaseBackend::Postgres)
-        // 1. find Queued evaluations
         .append_query_results([vec![make_eval_queued(eval_id, commit_id, Some(task_id))]])
-        // cluster membership (none)
         .append_query_results([no_membership()])
-        // 2. bulk commits
         .append_query_results([vec![make_commit(commit_id)]])
-        // 3. bulk flake input overrides (none)
         .append_query_results([
             Vec::<gradient_entity::evaluation_flake_input_override::Model>::new(),
         ])
-        // 4. bulk tasks -> returns project_id
         .append_query_results([vec![make_task(task_id, project_id)]])
         .into_connection();
 
@@ -121,8 +96,6 @@ async fn assign_queued_eval_enqueues_job() {
     );
 }
 
-/// Calling dispatch twice for the same Queued eval does not enqueue a second job.
-/// The second call sees `contains_job` = true and skips the commit/project lookup.
 #[tokio::test]
 async fn assign_queued_eval_skips_already_enqueued() {
     let eval_id = EvaluationId::now_v7();
@@ -131,23 +104,14 @@ async fn assign_queued_eval_skips_already_enqueued() {
     let project_id = ProjectId::now_v7();
 
     let db = MockDatabase::new(DatabaseBackend::Postgres)
-        // First dispatch:
-        // 1. find Queued evaluations
         .append_query_results([vec![make_eval_queued(eval_id, commit_id, Some(task_id))]])
-        // cluster membership (none)
         .append_query_results([no_membership()])
-        // 2. bulk commits
         .append_query_results([vec![make_commit(commit_id)]])
-        // 3. bulk flake input overrides (none)
         .append_query_results([
             Vec::<gradient_entity::evaluation_flake_input_override::Model>::new(),
         ])
-        // 4. bulk tasks
         .append_query_results([vec![make_task(task_id, project_id)]])
-        // Second dispatch:
-        // 5. find Queued evaluations (same eval still Queued in DB)
         .append_query_results([vec![make_eval_queued(eval_id, commit_id, Some(task_id))]])
-        // No bulk loads - the tracker snapshot filters out every eval
         .into_connection();
 
     let scheduler = make_scheduler(db).await;
@@ -165,7 +129,6 @@ async fn assign_queued_eval_skips_already_enqueued() {
     );
 }
 
-/// When the commit row is missing, the eval is skipped and no job is enqueued.
 #[tokio::test]
 async fn assign_queued_eval_skips_missing_commit() {
     let eval_id = EvaluationId::now_v7();
@@ -173,17 +136,12 @@ async fn assign_queued_eval_skips_missing_commit() {
     let task_id = TaskId::now_v7();
 
     let db = MockDatabase::new(DatabaseBackend::Postgres)
-        // 1. find Queued evaluations
         .append_query_results([vec![make_eval_queued(eval_id, commit_id, Some(task_id))]])
-        // cluster membership (none)
         .append_query_results([no_membership()])
-        // 2. bulk commits -> none found
         .append_query_results([Vec::<gradient_entity::commit::Model>::new()])
-        // 3. bulk flake input overrides (none)
         .append_query_results([
             Vec::<gradient_entity::evaluation_flake_input_override::Model>::new(),
         ])
-        // 4. bulk tasks (loaded up front; the eval is skipped per-row later)
         .append_query_results([Vec::<gradient_entity::task::Model>::new()])
         .into_connection();
 
@@ -199,25 +157,18 @@ async fn assign_queued_eval_skips_missing_commit() {
     );
 }
 
-/// An eval with no task is skipped (every eval must belong to a task
-/// after the build-request rework removed the legacy direct-build path).
 #[tokio::test]
 async fn assign_queued_eval_without_task_is_skipped() {
     let eval_id = EvaluationId::now_v7();
     let commit_id = CommitId::now_v7();
 
     let db = MockDatabase::new(DatabaseBackend::Postgres)
-        // 1. find Queued evaluations - task: None
         .append_query_results([vec![make_eval_queued(eval_id, commit_id, None)]])
-        // cluster membership (none)
         .append_query_results([no_membership()])
-        // 2. bulk commits
         .append_query_results([vec![make_commit(commit_id)]])
-        // 3. bulk flake input overrides (none)
         .append_query_results([
             Vec::<gradient_entity::evaluation_flake_input_override::Model>::new(),
         ])
-        // No task query - no eval carries a task id
         .into_connection();
 
     let scheduler = make_scheduler(db).await;
@@ -232,9 +183,8 @@ async fn assign_queued_eval_without_task_is_skipped() {
     );
 }
 
-/// The Queued select carries the open-row gate itself: a core whose tracker
-/// was rebuilt empty, or a worker slow to report it started, must not get the
-/// same evaluation handed out a second time.
+/// The Queued select is carrying the open-row gate itself. A core with a rebuilt empty tracker or a
+/// slow worker must not get the same evaluation twice.
 #[tokio::test]
 async fn assign_queued_evals_refuses_an_evaluation_whose_assignment_row_is_open() {
     let db = MockDatabase::new(DatabaseBackend::Postgres)
@@ -259,8 +209,6 @@ async fn assign_queued_evals_refuses_an_evaluation_whose_assignment_row_is_open(
     assert!(select.sql.contains(&gate), "{}", select.sql);
 }
 
-// ── Group J: trigger dispatch_once ───────────────────────────────────────────
-
 fn make_polling_trigger(
     id: TaskTriggerId,
     task_id: TaskId,
@@ -279,39 +227,28 @@ fn make_polling_trigger(
     }
 }
 
-/// A trigger whose `last_fired_at` is recent (within interval) must not cause
-/// an evaluation - the `fire_once` loop skips it as not-due.
-///
-/// We verify this by asserting no task lookup follows the trigger query,
-/// which means no evaluation creation path is entered. If the mock DB were
-/// drained by a task lookup, sea-orm would panic on an empty queue.
 #[tokio::test]
 async fn fire_once_skips_trigger_within_interval() {
     let task_id = TaskId::now_v7();
     let trigger_id = TaskTriggerId::now_v7();
     let project_id = ProjectId::now_v7();
 
-    // last_fired_at = now (0 seconds ago) - interval = 60 s -> not due
     let recent = gradient_types::now();
 
     let db = MockDatabase::new(DatabaseBackend::Postgres)
-        // 1. active polling/time triggers -> one trigger, recently fired
         .append_query_results([vec![make_polling_trigger(
             trigger_id,
             task_id,
             60,
             Some(recent),
         )]])
-        // 2. task lookup (batch)
         .append_query_results([vec![make_task(task_id, project_id)]])
-        // No further queries expected (trigger not due)
         .into_connection();
 
     let scheduler = make_scheduler(db).await;
     trigger_firing::fire_once(&scheduler)
         .await
         .expect("dispatch_once should not fail");
-    // No evaluation rows means no job was enqueued
     assert_eq!(scheduler.pending_job_count().await, 0);
 }
 
@@ -343,9 +280,6 @@ fn membership_of(
     ])
 }
 
-/// Dispatches one queued evaluation that is a member of a cluster in `status`.
-/// With `eval_only_worker`, an idle eval-only worker is connected first, which
-/// makes the pass split fetch from evaluation for single jobs.
 async fn assign_one_member(
     status: gradient_entity::cluster_job::ClusterJobStatus,
     count: i64,
@@ -385,7 +319,6 @@ async fn assign_one_member(
     (scheduler, eval_id)
 }
 
-/// A member of a queued cluster waits in the book: not pending, yet tracked.
 #[tokio::test]
 async fn a_cluster_member_evaluation_waits_for_its_cluster() {
     let (scheduler, eval_id) = assign_one_member(
@@ -400,8 +333,8 @@ async fn a_cluster_member_evaluation_waits_for_its_cluster() {
     assert!(scheduler.untracked(vec![key]).await.is_empty());
 }
 
-/// A split fetch-only job would hand its evaluation to a follow-up outside the
-/// cluster, so a member always evaluates in one job.
+/// A split fetch-only job would hand its evaluation to a follow-up outside the cluster. A cluster
+/// member is therefore always evaluating in one job.
 #[tokio::test]
 async fn a_cluster_member_evaluation_is_never_split() {
     let (scheduler, _) = assign_one_member(
@@ -426,7 +359,6 @@ async fn a_cluster_member_evaluation_is_never_split() {
     );
 }
 
-/// A member of a cluster already running is claimed only through that cluster.
 #[tokio::test]
 async fn a_member_of_a_running_cluster_is_held_back() {
     let (scheduler, eval_id) = assign_one_member(

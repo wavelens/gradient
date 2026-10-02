@@ -7,8 +7,6 @@
 use super::ValidationError;
 use crate::config::StateConfiguration;
 
-/// Accumulates [`ValidationError`]s across the per-entity validators, hiding the
-/// `ValidationError { field, message }` construction at each call site.
 pub(super) struct ErrorCollector {
     errors: Vec<ValidationError>,
 }
@@ -30,9 +28,6 @@ impl ErrorCollector {
     }
 }
 
-/// Read-only view over the configuration shared by every per-entity validator,
-/// providing the cross-entity existence checks (a task's project, a
-/// role's owning user, …) and direct access to the maps for in-entity checks.
 pub(super) struct EntityLookup<'a> {
     pub(super) config: &'a StateConfiguration,
 }

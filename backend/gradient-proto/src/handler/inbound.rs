@@ -4,8 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Per-connection message dispatch context and all `ClientMessage` handlers.
-
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Instant;
@@ -40,10 +38,6 @@ use super::socket::{
 use super::upload::UploadSession;
 use gradient_wire::auth::validate_tokens;
 
-// ── Dispatch context ──────────────────────────────────────────────────────────
-
-/// A job this session is running: the dispatch the worker was handed, and the
-/// tracker's record for re-registration after a core restart.
 #[derive(Clone)]
 pub(crate) struct ActiveJob {
     pub assignment_id: DispatchedJobId,
@@ -51,7 +45,6 @@ pub(crate) struct ActiveJob {
     pub cluster: Option<gradient_types::ids::ClusterAttemptId>,
 }
 
-/// The jobs a session is running, shared with the RPCs it answers off its loop.
 #[derive(Clone, Default)]
 pub(crate) struct ActiveJobs(Arc<gradient_util::sync::Mutex<HashMap<String, ActiveJob>>>);
 
@@ -83,7 +76,6 @@ impl ActiveJobs {
         }
     }
 
-    /// Drop every member of `attempt`; their rows closed with the attempt.
     pub(crate) fn remove_attempt(
         &self,
         attempt: gradient_types::ids::ClusterAttemptId,
@@ -127,19 +119,9 @@ impl From<HashMap<String, ActiveJob>> for ActiveJobs {
     }
 }
 
-/// A report is accepted only when it names the dispatch this session handed
-/// out: `current` is the session's own entry for the job. That covers the
-/// motivating case, a worker declared dead that reconnects, because its fresh
-/// session holds no job at all while the id it buffered names a dispatch the
-/// scheduler has long since re-issued.
-///
-/// It consults no scheduler state, so one hole stays open: a worker the
-/// heartbeat or zombie sweep evicted while its socket is still up keeps its
-/// session map, and a report it sends after the job was re-dispatched to
-/// another worker still matches here. Closing it needs the `DispatchedJobId`
-/// on `JobTracker`'s active entry and the comparison made inside the core
-/// actor that owns the tracker, which belongs with the scheduler work in the
-/// next PR rather than an actor round-trip per report from here.
+/// Only the dispatch this session handed out is matching, which is covering a reconnecting worker
+/// declared dead. One hole is still open. An evicted worker with a live socket can report after a
+/// re-dispatch. Closing it is requiring the `DispatchedJobId` check inside the core actor.
 pub(super) fn assignment_matches(current: Option<DispatchedJobId>, reported: &str) -> bool {
     match (current, reported.parse::<DispatchedJobId>()) {
         (Some(current), Ok(reported)) => current == reported,
@@ -147,26 +129,18 @@ pub(super) fn assignment_matches(current: Option<DispatchedJobId>, reported: &st
     }
 }
 
-/// Holds the per-connection references needed to handle a single client message.
 pub(super) struct InboundContext<'a> {
     pub writer: &'a ProtoWriter,
     pub state: &'a Arc<ServerState>,
     pub scheduler: &'a Arc<Scheduler>,
     pub peer_id: &'a str,
-    /// Bounds the number of NAR-serving tasks running concurrently per
-    /// connection. Cloned into each spawned `serve_nar_request` task.
     pub nar_serve_semaphore: &'a Arc<Semaphore>,
-    /// Jobs this session is currently running, kept so a core restart can re-register
-    /// them without a DB round-trip.
     pub active: &'a ActiveJobs,
     pub job_events: &'a JobEvents,
     pub logs: &'a LogLane,
 }
 
 impl<'a> InboundContext<'a> {
-    /// Route one received frame to the appropriate handler.
-    ///
-    /// Returns `true` to continue the loop, `false` to break.
     pub async fn handle(
         &mut self,
         inbound: Inbound<ClientMessage>,
@@ -182,8 +156,6 @@ impl<'a> InboundContext<'a> {
         }
     }
 
-    /// Handle a payload-bearing frame without deserialising it: the chunk is
-    /// read as a slice of the buffer the socket delivered.
     async fn handle_bulk(&mut self, frame: Frame<ClientMessage>, uploads: &mut UploadSession) {
         trace!(variant = frame.variant_name(), "received bulk frame");
         match frame.archived() {
@@ -214,10 +186,7 @@ impl<'a> InboundContext<'a> {
         }
     }
 
-    /// Route a control-plane `ClientMessage` to the appropriate handler.
     async fn handle_control(&mut self, msg: ClientMessage, uploads: &mut UploadSession) -> bool {
-        // Per-message and per-frame lines stay at trace: at debug a closure push
-        // logs thousands of lines a second and stalls a test VM on its serial console.
         trace!(variant = msg.variant_name(), "received client message");
         match msg {
             ClientMessage::InitConnection { .. } => {
@@ -433,7 +402,6 @@ impl<'a> InboundContext<'a> {
                 self.on_upload_finished(request_id, metadata, uploads).await;
                 true
             }
-            // Unreachable: `decode` routes these to `dispatch_bulk` still archived.
             ClientMessage::UploadChunk { .. } | ClientMessage::LogChunk { .. } => {
                 warn!("bulk variant deserialised into the control lane");
                 true
@@ -441,9 +409,6 @@ impl<'a> InboundContext<'a> {
         }
     }
 
-    /// The dispatch id of `job_id` when this session is running it under `reported`.
-    /// Session-local by construction: [`assignment_matches`] states what that
-    /// guarantees and what it leaves to the scheduler.
     fn owned(&self, job_id: &str, reported: &str) -> Option<DispatchedJobId> {
         let current = self.active.assignment_id(job_id);
         if assignment_matches(current, reported) {
@@ -458,8 +423,6 @@ impl<'a> InboundContext<'a> {
         self.owned(job_id, reported).is_some()
     }
 
-    /// Snapshot the owned handles needed to run an order-independent RPC off the
-    /// dispatch loop, so a slow handler can't head-of-line-block cache lookups.
     fn rpc(&self) -> RpcContext {
         RpcContext {
             state: Arc::clone(self.state),
@@ -469,8 +432,6 @@ impl<'a> InboundContext<'a> {
             active: self.active.clone(),
         }
     }
-
-    // ── Order-independent RPCs (run off the dispatch loop) ────────────────────
 
     fn spawn_worker_metrics(
         &self,
@@ -490,8 +451,6 @@ impl<'a> InboundContext<'a> {
             .await;
         });
     }
-
-    // ── Eval cache ────────────────────────────────────────────────────────────
 
     async fn on_eval_cache_pull(&mut self, job_id: String, fingerprint: String) {
         handle_eval_cache_pull(self.state, self.writer, job_id, fingerprint).await;
@@ -513,8 +472,6 @@ impl<'a> InboundContext<'a> {
             warn!(peer_id = %self.peer_id, %job_id, error = %e, "record_eval_message failed");
         }
     }
-
-    // ── Reauth ────────────────────────────────────────────────────────────────
 
     async fn on_reauth_request(&mut self) -> bool {
         debug!(peer_id = %self.peer_id, "ReauthRequest");
@@ -541,8 +498,6 @@ impl<'a> InboundContext<'a> {
         let (token_authorized, failed_peers) = validate_tokens(&registered_peers, &tokens);
         let authorized_peers = expand_base_authorized(&base, token_authorized);
 
-        // A base worker must never reach PeerAuth::Open (empty == Open). If it has no
-        // authorized projects (toggled off everywhere, or globally disabled), disconnect.
         let is_base = gradient_db::projects::base_workers::worker_id_is_base(
             &self.state.worker_db,
             self.peer_id,
@@ -580,16 +535,12 @@ impl<'a> InboundContext<'a> {
         .is_ok()
     }
 
-    // ── Capability advertisement ──────────────────────────────────────────────
-
     async fn on_worker_capabilities(&mut self, caps: WorkerCapabilities) {
         debug!(peer_id = %self.peer_id, ?caps, "WorkerCapabilities");
         self.scheduler
             .update_worker_capabilities(self.peer_id, caps)
             .await;
     }
-
-    // ── Job list / scoring ────────────────────────────────────────────────────
 
     async fn on_request_job_list(&mut self) -> bool {
         debug!(peer_id = %self.peer_id, "RequestJobList");
@@ -632,8 +583,6 @@ impl<'a> InboundContext<'a> {
         true
     }
 
-    // ── Job request ───────────────────────────────────────────────────────────
-
     #[tracing::instrument(level = "debug", skip_all, fields(?kind, job_id = tracing::field::Empty))]
     async fn on_request_job(&mut self, kind: JobKind) -> bool {
         debug!(peer_id = %self.peer_id, ?kind, "RequestJob");
@@ -643,8 +592,6 @@ impl<'a> InboundContext<'a> {
         }
     }
 
-    /// Record `assignment` as this session's, send its credentials and the
-    /// `AssignJob`; `false` when the write failed.
     pub(super) async fn hand_out(
         &mut self,
         assignment: Assignment,
@@ -685,15 +632,11 @@ impl<'a> InboundContext<'a> {
         .is_ok()
     }
 
-    // ── Scoring ───────────────────────────────────────────────────────────────
-
     #[tracing::instrument(level = "debug", skip_all, fields(scores = scores.len(), is_final))]
     async fn on_request_job_chunk(&mut self, scores: Vec<CandidateScore>, is_final: bool) {
         debug!(peer_id = %self.peer_id, count = scores.len(), is_final, "RequestJobChunk");
         self.scheduler.record_scores(self.peer_id, scores).await;
     }
-
-    // ── Job accept / reject ───────────────────────────────────────────────────
 
     async fn on_assign_job_response(
         &mut self,
@@ -713,9 +656,6 @@ impl<'a> InboundContext<'a> {
         }
     }
 
-    /// A rejected assignment is not out, so its row must not keep gating the
-    /// job: draining and at-capacity are routine, the sweep leaves a row the
-    /// tracker still holds alone, and every re-offer would open another.
     async fn withdraw_assignment(&mut self, job_id: &str) {
         let Some(active) = self.active.remove(job_id) else {
             return;
@@ -731,14 +671,10 @@ impl<'a> InboundContext<'a> {
         }
     }
 
-    // ── Worker draining ───────────────────────────────────────────────────────
-
     async fn on_draining(&mut self) {
         info!(peer_id = %self.peer_id, "worker draining");
         self.scheduler.mark_worker_draining(self.peer_id).await;
     }
-
-    // ── Log streaming ─────────────────────────────────────────────────────────
 
     async fn on_log_chunk(&mut self, job_id: &str, task_index: u32, data: &[u8]) {
         debug!(peer_id = %self.peer_id, %job_id, task_index, bytes = data.len(), "LogChunk");
@@ -764,14 +700,8 @@ impl<'a> InboundContext<'a> {
         });
     }
 
-    // ── NAR transfer ──────────────────────────────────────────────────────────
-
     async fn on_nar_request(&mut self, job_id: String, paths: Vec<String>) {
         debug!(peer_id = %self.peer_id, %job_id, count = paths.len(), "NarRequest");
-        // Spawn one task per path so a slow storage read for path[0] does not
-        // serialise paths[1..]. The shared `nar_serve_semaphore` caps fan-out
-        // per connection, and the cloneable `ProtoWriter` interleaves chunks
-        // safely on the wire (the worker keys NarPush by store_path).
         let shutdown = self.state.shutdown.clone();
         for store_path in paths {
             let state = Arc::clone(self.state);
@@ -793,8 +723,6 @@ impl<'a> InboundContext<'a> {
         }
     }
 
-    /// Resume a previously-interrupted download from `received_bytes`. Mirrors
-    /// [`Self::on_nar_request`]'s per-path spawn, for the single resumed path.
     async fn on_nar_request_resume(
         &mut self,
         job_id: String,
@@ -829,11 +757,6 @@ impl<'a> InboundContext<'a> {
     }
 }
 
-/// Owned handles for the order-independent request/response RPCs, spawned off
-/// the per-connection dispatch loop so a slow upstream probe or NAR transfer
-/// can't head-of-line-block a worker's `CacheQuery` (its 75 s `CacheStatus`
-/// deadline). Replies travel the cloneable writer, so out-of-order completion
-/// is safe.
 #[derive(Clone)]
 pub(super) struct RpcContext {
     state: Arc<ServerState>,
@@ -860,8 +783,6 @@ impl RpcContext {
         }
     }
 
-    /// Answer a frame correlated by its own id on a task of its own; any other
-    /// frame comes back for the session, which handles frames in order.
     pub(super) fn serve(&self, msg: ClientMessage) -> Option<ClientMessage> {
         let rpc = self.clone();
         match msg {
@@ -916,10 +837,8 @@ impl RpcContext {
             handle_cache_query(&self.state, project_id, &paths, &nar_sizes, mode, external).await
         };
 
-        // A DB error or an over-budget handler is *indeterminate*, never
-        // "absent": reply `CacheError` so the worker retries transiently instead
-        // of taking a fully-cached input as a missing one (terminal
-        // `InputsUnavailable`, which fails the whole eval).
+        // A DB error or an over-budget handler is indeterminate, never "absent". `CacheError` is
+        // making the worker retry instead of failing the eval with `InputsUnavailable`.
         let reply = match tokio::time::timeout(CACHE_QUERY_BUDGET, answer).await {
             Ok(Ok(cached)) => {
                 debug!(peer_id = %self.peer_id, %job_id, %query_id, entries = cached.len(), "CacheStatus");
@@ -1170,8 +1089,6 @@ mod assignment_id_tests {
     use super::assignment_matches;
     use gradient_types::ids::DispatchedJobId;
 
-    /// The stale-worker case: a report carrying another dispatch's id, an
-    /// unknown job, or garbage is dropped; only the exact id is accepted.
     #[test]
     fn only_the_current_assignment_is_accepted() {
         let current = DispatchedJobId::now_v7();
@@ -1198,9 +1115,6 @@ mod assignment_response_tests {
         ProtoWriter::spy(Duration::from_secs(1)).0
     }
 
-    /// Draining and at-capacity rejections are routine, and the sweep never
-    /// reaps a row the tracker still holds, so a rejected hand-out that leaves
-    /// its row open parks the job behind its own gate until it completes.
     #[tokio::test]
     async fn a_rejected_assignment_closes_its_assignment_row() {
         let db = MockDatabase::new(DatabaseBackend::Postgres)
@@ -1266,7 +1180,6 @@ mod assignment_response_tests {
         );
     }
 
-    /// An accepted assignment is out, so its row stays open and keeps gating.
     #[tokio::test]
     async fn an_accepted_assignment_keeps_its_row_open() {
         let db = MockDatabase::new(DatabaseBackend::Postgres).into_connection();
@@ -1310,7 +1223,6 @@ mod assignment_response_tests {
         assert!(log_db.into_transaction_log().is_empty());
     }
 
-    /// Progress never touches the database: it is held in memory and broadcast.
     #[tokio::test]
     async fn a_progress_report_is_held_in_memory_and_broadcast() {
         let db = MockDatabase::new(DatabaseBackend::Postgres).into_connection();
@@ -1364,8 +1276,6 @@ mod assignment_response_tests {
         assert!(log_db.into_transaction_log().is_empty());
     }
 
-    /// The session already knows the project of a job it is running, so a cache query
-    /// never waits on the scheduler core for it: here there is no core at all.
     #[tokio::test]
     async fn a_cache_query_for_an_owned_job_is_answered_without_the_scheduler() {
         let state = test_state(MockDatabase::new(DatabaseBackend::Postgres).into_connection());

@@ -4,9 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! The dashboard reads a task's newest evaluations and finds evaluations by commit;
-//! without these both sequentially scan `evaluation` once per task or per search.
-
 use sea_orm_migration::prelude::*;
 use sea_orm_migration::sea_orm::ConnectionTrait;
 

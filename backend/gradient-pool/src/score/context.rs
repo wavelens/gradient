@@ -4,9 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-/// One fleet metric aggregated over three trailing windows. `None` means the
-/// window had no samples - distinct from a measured zero, which is honored
-/// instead of silently swapping in a rule's fallback constant.
+/// `None` is marking a window without samples. A measured zero is honored instead of being replaced
+/// by a rule's fallback constant.
 #[derive(Clone, Copy, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Windowed {
     pub w5m: Option<f64>,
@@ -43,7 +42,6 @@ pub struct InstanceContext {
     pub pending_builds: u32,
     pub total_workers: u32,
     pub idle_workers: u32,
-    /// Mean `cpu_core_score` of the connected workers that reported one.
     pub cpu_core_score_mean: Option<f64>,
 }
 
@@ -57,9 +55,6 @@ pub struct HistoryPrediction {
     pub samples: u32,
 }
 
-/// Static caps plus the latest live heartbeat of one worker. The live fields
-/// (`ram_free_mb`, `cpu_usage_pct`) are `None` until the first heartbeat -
-/// rules skip their clauses rather than scoring a fake zero.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct WorkerMetricsView {
     pub cpu_count: u32,
@@ -131,9 +126,6 @@ pub struct EvalContext {
     pub history: HistoryPrediction,
 }
 
-/// The build-side scoring view of one candidate. Values are owned - the
-/// dispatch path always has closure size and history materialized on the
-/// pending job, so there is nothing to compute lazily.
 pub struct ScoredBuild<'a> {
     pub architecture: &'a str,
     pub prefer_local_build: bool,
@@ -232,8 +224,6 @@ impl<'a> ScoredJob<'a> {
 mod tests {
     use super::*;
 
-    /// A window with no samples falls back; a MEASURED zero is honored - the
-    /// old `0.0 == absent` heuristic silently swapped in the fallback.
     #[test]
     fn windowed_or_falls_back_only_when_absent() {
         assert_eq!(

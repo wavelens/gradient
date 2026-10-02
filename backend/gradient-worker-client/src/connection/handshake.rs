@@ -4,15 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Protocol handshake: `InitConnection` -> `InitAck` / `Reject`.
-//!
-//! The wire sequence is driven by gradient-proto's shared
-//! [`as_peer`](gradient_wire::session::handshake::as_peer) FSM; this module
-//! only supplies the worker's identity (persistent UUID plus the peer tokens
-//! from `GRADIENT_WORKER_PEERS`, wildcards expanded per challenge) and its
-//! advertised capabilities. The negotiated [`GradientCapabilities`] may be a
-//! strict subset of what we advertised.
-
 use anyhow::Result;
 use async_trait::async_trait;
 use gradient_wire::messages::{GradientCapabilities, PROTO_VERSION};
@@ -22,11 +13,6 @@ use tracing::info;
 
 use super::ProtoConnection;
 
-/// Given the list of peer UUIDs the server challenged us about, build the
-/// `(peer_id, token)` pairs to include in `AuthResponse`.
-///
-/// A wildcard entry (`*:token`) expands to a response for every challenged
-/// peer that is not already covered by an explicit entry.
 pub fn resolve_tokens_for_challenge(
     peer_tokens: &[(String, String)],
     challenged: &[String],
@@ -81,11 +67,6 @@ impl CapabilitiesProvider for StaticCapabilities {
     }
 }
 
-/// Perform the full challenge-response handshake.
-///
-/// `peer_id`     - persistent UUID loaded from disk (or freshly generated on first start).
-/// `peer_tokens` - `(peer_id, plaintext_token)` pairs from `GRADIENT_WORKER_PEERS`.
-/// `capabilities`- advertised capabilities.
 pub async fn perform_handshake(
     conn: &mut ProtoConnection,
     peer_id: String,
@@ -149,17 +130,13 @@ mod tests {
         challenge_peers: Vec<String>,
         response: ServerMessage,
     ) {
-        // Receive InitConnection.
         let _ = sc.recv().await.unwrap();
-        // Send AuthChallenge.
         sc.send(ServerMessage::AuthChallenge {
             peers: challenge_peers,
         })
         .await
         .unwrap();
-        // Receive AuthResponse.
         let _ = sc.recv().await.unwrap();
-        // Send final response.
         sc.send(response).await.unwrap();
     }
 
@@ -206,7 +183,7 @@ mod tests {
 
         let server_task = tokio::spawn(async move {
             let mut sc = server.accept().await;
-            let _ = sc.recv().await.unwrap(); // InitConnection
+            let _ = sc.recv().await.unwrap();
             sc.send(ServerMessage::Reject {
                 code: 403,
                 reason: "banned".to_owned(),
@@ -236,11 +213,11 @@ mod tests {
 
         let server_task = tokio::spawn(async move {
             let mut sc = server.accept().await;
-            let _ = sc.recv().await.unwrap(); // InitConnection
+            let _ = sc.recv().await.unwrap();
             sc.send(ServerMessage::AuthChallenge { peers: vec![] })
                 .await
                 .unwrap();
-            let _ = sc.recv().await.unwrap(); // AuthResponse
+            let _ = sc.recv().await.unwrap();
             sc.send(ServerMessage::Reject {
                 code: 401,
                 reason: "bad token".to_owned(),
@@ -270,8 +247,7 @@ mod tests {
 
         let server_task = tokio::spawn(async move {
             let mut sc = server.accept().await;
-            let _ = sc.recv().await.unwrap(); // InitConnection
-            // Send Draining instead of AuthChallenge.
+            let _ = sc.recv().await.unwrap();
             sc.send(ServerMessage::Draining).await.unwrap();
         });
 
@@ -294,10 +270,9 @@ mod tests {
         let server = MockProtoServer::bind().await;
         let url = server.url().to_owned();
 
-        // Server-side: capture the AuthResponse and check it.
         let server_task = tokio::spawn(async move {
             let mut sc = server.accept().await;
-            let _ = sc.recv().await.unwrap(); // InitConnection
+            let _ = sc.recv().await.unwrap();
 
             sc.send(ServerMessage::AuthChallenge {
                 peers: vec!["p1".to_owned(), "p2".to_owned()],

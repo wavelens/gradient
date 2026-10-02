@@ -20,8 +20,6 @@ use sea_orm::{
 use std::collections::{HashMap, HashSet};
 
 impl<'a> StateApplicator<'a> {
-    // ── apply_tasks ────────────────────────────────────────────────────────
-
     pub(crate) async fn apply_tasks(
         &self,
         state_tasks: &HashMap<String, StateTask>,
@@ -139,8 +137,6 @@ impl<'a> StateApplicator<'a> {
         Ok(())
     }
 
-    // ── apply_task_actions ─────────────────────────────────────────────────
-
     pub(crate) async fn apply_task_actions(
         &self,
         task_id: TaskId,
@@ -240,8 +236,6 @@ impl<'a> StateApplicator<'a> {
 
         Ok(())
     }
-
-    // ── apply_flake_input_overrides ───────────────────────────────────────────
 
     pub(crate) async fn apply_flake_input_overrides(
         &self,
@@ -475,10 +469,8 @@ pub(crate) fn trigger_key(cfg: &TriggerConfig) -> String {
     format!("{}|{}", i16::from(cfg.trigger_type()), canonical)
 }
 
-/// Build a stored `ActionConfig` from a declared `StateAction`. Tokens for
-/// `send_web_request` are loaded from the systemd credential file
-/// `gradient_action_${name}_token` and encrypted with the server's crypt key
-/// before storage, matching the REST `create_action` path.
+/// `send_web_request` tokens are loaded from the credential `gradient_action_${name}_token`. They
+/// are encrypted with the server crypt key before storage, matching the REST `create_action` path.
 pub(crate) fn build_action_config(
     a: &StateAction,
     task_name: &str,
@@ -613,8 +605,6 @@ pub(crate) fn build_action_config(
     }
 }
 
-/// Decode a snake_case enum field from an action config, falling back to the
-/// enum's serde `Default` when the key is absent.
 fn parse_action_enum<T>(a: &StateAction, key: &str) -> Result<T, DynError>
 where
     T: Default + serde::de::DeserializeOwned,
@@ -809,8 +799,6 @@ mod trigger_helper_tests {
             "error explains the inbound/outbound kind mismatch: {msg}"
         );
     }
-
-    // TODO: integration test for apply_task_triggers full DB round-trip (T30 smoke)
 }
 
 #[cfg(test)]

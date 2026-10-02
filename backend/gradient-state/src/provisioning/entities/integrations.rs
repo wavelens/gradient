@@ -18,8 +18,6 @@ use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, Query
 use std::collections::HashMap;
 
 impl<'a> StateApplicator<'a> {
-    // ── apply_integrations ────────────────────────────────────────────────────
-
     pub(crate) async fn apply_integrations(
         &self,
         state_integrations: &HashMap<String, StateIntegration>,
@@ -151,9 +149,6 @@ impl<'a> StateApplicator<'a> {
         Ok(())
     }
 
-    /// Read `${creds}/gradient_integration_${name}_${suffix}` and encrypt its
-    /// trimmed contents with the webhook secret. Returns `Ok(None)` when the
-    /// state config did not declare a credential file (`field_set` is `None`).
     pub(crate) fn read_and_encrypt_integration_field(
         &self,
         field_set: Option<&str>,

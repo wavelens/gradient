@@ -4,8 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! `POST /admin/draining` - toggle the instance draining state.
-
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
@@ -29,9 +27,7 @@ pub struct DrainingResponse {
     pub draining: bool,
 }
 
-/// Enable or disable draining. Enabling pauses dispatch and parks every
-/// in-flight evaluation; disabling recovers the parked evaluations to `Queued`.
-/// In-memory only, so draining always clears on the next server startup.
+/// Draining is in-memory only and is cleared on the next server startup.
 pub async fn set_draining(
     State(state): State<Arc<ServerState>>,
     Extension(scheduler): Extension<Arc<Scheduler>>,

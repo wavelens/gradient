@@ -4,11 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! User-requested prioritization (#530). An evaluation carries the flag for its
-//! whole tree, read at dispatch, so derivations it resolves later inherit it; a
-//! build writes it onto every open shared build of its dependency closure. The
-//! database clears either flag once its row fails for good or is aborted.
-
 use crate::{DbContext, graph::closure::transitive_closure_reachable};
 use gradient_entity::build::BuildStatus;
 use gradient_entity::evaluation::EvaluationStatus;
@@ -75,8 +70,6 @@ crate::sql_fn! {
         tier = Bulk;
 }
 
-/// Flag a live evaluation and return its open shared builds, so the scheduler can
-/// lift the ones already queued. A finished evaluation is left alone.
 pub async fn prioritize_evaluation(
     ctx: &DbContext,
     evaluation: EvaluationId,
@@ -99,8 +92,6 @@ pub async fn prioritize_evaluation(
         .collect())
 }
 
-/// Flag every open shared build in the build-time closure of `shared_build`, the shared build
-/// included, and return the ones that changed.
 pub async fn prioritize_build_closure(
     ctx: &DbContext,
     shared_build: &MDerivationBuild,

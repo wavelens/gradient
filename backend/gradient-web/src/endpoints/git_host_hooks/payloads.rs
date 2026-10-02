@@ -4,11 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Deserialized webhook payload shapes shared by the Git-host-hook handlers.
-
 use serde::Deserialize;
-
-// GitHub App installation / installation_repositories events.
 
 #[derive(Deserialize)]
 pub(super) struct GitHubInstallationPayload {
@@ -22,8 +18,6 @@ pub(super) struct GitHubInstallationPayload {
 }
 
 impl GitHubInstallationPayload {
-    /// Installed repos as lowercased `owner/repo`, merging the `installation`
-    /// (`repositories`) and `installation_repositories` (`repositories_added`) shapes.
     pub(super) fn installed_full_names(&self) -> std::collections::HashSet<String> {
         self.repositories
             .iter()
@@ -53,9 +47,6 @@ pub(super) struct GitHubRepoRef {
 pub(super) struct InstallationSender {
     pub(super) login: String,
 }
-
-// GitHub check_run.requested_action events. `CheckRunSender` borrows from the
-// request body, distinct from the owned `InstallationSender` above.
 
 #[derive(Deserialize)]
 pub(super) struct GithubCheckRunRequestedAction<'a> {
@@ -89,8 +80,6 @@ pub(super) struct GithubRepoFull<'a> {
 pub(super) struct CheckRunSender<'a> {
     pub(super) login: &'a str,
 }
-
-// Issue/PR comment events (GitHub & Gitea) plus the GitLab Note Hook variant.
 
 #[derive(Deserialize)]
 pub(super) struct CommentPayload {

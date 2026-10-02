@@ -4,9 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! `/projects/{project}/webhooks`, `/caches/{cache}/webhooks`, `/admin/webhooks`:
-//! one handler set, scoped by [`WebhookOwner`].
-
 mod handlers;
 mod scope;
 

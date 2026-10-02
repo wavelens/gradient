@@ -18,12 +18,8 @@ use gradient_types::*;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use std::sync::Arc;
 
-/// `GET /cache/{cache}/log/{drv}` - the build log `nix log` asks a binary cache
-/// for.
-///
-/// Serves our own log when this cache holds the derivation, and otherwise asks
-/// the upstream caches the cache substitutes from: a pull-through cache substitutes
-/// paths it never built (#547). `X-Cache` reports which of the two happened.
+/// A pull-through cache is substituting paths it never built (#547). The upstream caches are asked
+/// for the log when this cache does not hold it.
 pub async fn log(
     state: State<Arc<ServerState>>,
     OptionalPeer(peer): OptionalPeer,
@@ -44,10 +40,8 @@ pub async fn log(
     }
 }
 
-/// This cache's own log for `drv`, if the cache serves an output of it and an
-/// attempt produced any output. Deliberately not restricted to successful
-/// builds: a rebuild that failed after the first success still has the most
-/// recent log worth reading.
+/// Failed builds are not excluded on purpose. A rebuild that failed after the first success is
+/// still carrying the most recent log.
 async fn local_log(
     state: &Arc<ServerState>,
     ctx: &CacheContext,

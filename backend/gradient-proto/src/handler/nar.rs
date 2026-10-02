@@ -18,20 +18,12 @@ pub(super) struct NarUploadRecord<'a> {
     pub file_size: i64,
     pub nar_size: i64,
     pub nar_hash: &'a str,
-    /// Store-path references in hash-name format (no `/nix/store/` prefix).
     pub references: &'a [String],
-    /// Full deriver `.drv` path, if the worker reported one.
     pub deriver: Option<&'a str>,
-    /// Content address of the path in narinfo form, if content-addressed.
     pub ca: Option<&'a str>,
-    /// The object is durably in `nar_storage`; false while the uploader owes it.
     pub confirmed: bool,
 }
 
-/// Resolves the project's cache and adds the push to its minute bucket in the
-/// accumulator the flush pass writes (#644). `project_id` is resolved on the
-/// session read loop before the commit detaches, so it stays valid even after
-/// the job is evicted from the tracker on completion.
 pub(super) async fn record_nar_push_metric(
     state: &ServerState,
     project_id: Option<ProjectId>,
@@ -98,7 +90,6 @@ pub(super) async fn mark_nar_stored(
     Ok(())
 }
 
-/// The dispatch row binding `job_id` to the project it was dispatched for.
 fn dispatched_job_query(worker_id: &str, job_id: &str) -> Select<EDispatchedJob> {
     EDispatchedJob::find()
         .filter(CDispatchedJob::JobId.eq(job_id))
@@ -106,18 +97,10 @@ fn dispatched_job_query(worker_id: &str, job_id: &str) -> Select<EDispatchedJob>
         .order_by_desc(CDispatchedJob::DispatchedAt)
 }
 
-/// The project a job was dispatched for, read from the durable dispatch row.
-///
-/// `JobCompleted` rides the control writer lane while `NarUploaded` rides bulk,
-/// and `WriterLanes` always drains control first - so a job's completion
-/// overtakes its own trailing NAR confirmations and the scheduler has already
-/// evicted the job by the time a late NAR commits. Without this fallback the
-/// commit takes `SignTargets::None`, writing a `cached_path` row that no cache
-/// claims: the narinfo gate 404s it forever, and the sign sweep cannot repair it
-/// because it only fills rows that already exist.
-///
-/// Per worker as well as per job so a concurrent dispatch of the same
-/// job key elsewhere cannot answer for this connection's upload.
+/// `JobCompleted` is overtaking its own trailing `NarUploaded` because the control lane is drained
+/// first. The scheduler has then evicted the job, and the dispatch row is the only source for the
+/// cache claim. The worker filter is keeping a concurrent dispatch elsewhere from answering for
+/// this upload.
 pub(super) async fn project_for_dispatched_job<C: ConnectionTrait>(
     db: &C,
     worker_id: &str,
@@ -157,8 +140,6 @@ mod tests {
         }
     }
 
-    /// The whole point of the fallback: the scheduler has already evicted the
-    /// job, and the dispatch row is what keeps the NAR's cache claim.
     #[tokio::test]
     async fn a_late_nar_still_resolves_its_project_from_the_assignment_row() {
         let db = MockDatabase::new(DatabaseBackend::Postgres)
@@ -171,8 +152,6 @@ mod tests {
         );
     }
 
-    /// No dispatch row is the one case that legitimately has no project. It must
-    /// return `None` rather than panic, so the caller can log and carry on.
     #[tokio::test]
     async fn no_assignment_row_yields_no_project() {
         let db = MockDatabase::new(DatabaseBackend::Postgres)
@@ -182,10 +161,6 @@ mod tests {
         assert_eq!(project_for_dispatched_job(&db, WORKER, JOB).await, None);
     }
 
-    /// A job key is unique only among in-flight jobs, so the same `build:<shared_build>`
-    /// recurs across evaluations - and those may belong to different projects.
-    /// Without the worker filter and the newest-first order, a late NAR could be
-    /// signed into a stranger's caches.
     #[test]
     fn the_lookup_is_pinned_to_this_worker_and_the_newest_assignment() {
         let sql = dispatched_job_query(WORKER, JOB)

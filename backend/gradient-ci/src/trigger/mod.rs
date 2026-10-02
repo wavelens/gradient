@@ -4,10 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Shared logic for creating a queued evaluation from any trigger source
-//! (API endpoint, incoming Git host webhook, …) and for restarting the failed
-//! builds of a previous evaluation.
-
 mod drv_recovery;
 mod flake_snapshot;
 mod input_update;

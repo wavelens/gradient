@@ -4,11 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! `sql!` declares a statement and registers it with the plan gate. A statement
-//! that is assembled at run time uses `sql_fn!`, which registers the builder so
-//! the gate plans generated SQL rather than a copy of it.
-
-/// Declares a statement, its parameter kinds and its budget, and registers it.
 #[macro_export]
 macro_rules! sql {
     ($(
@@ -36,8 +31,6 @@ macro_rules! sql {
     )+};
 }
 
-/// The `sql!` of a statement built at run time. The closure is the exemplar the
-/// gate plans, so a fence is checked in generated SQL and not in a copy of it.
 #[macro_export]
 macro_rules! sql_fn {
     ($(
@@ -65,8 +58,6 @@ macro_rules! sql_fn {
     )+};
 }
 
-/// The `sql!` of a statement held in a `LazyLock<String>`. The closure borrows
-/// it, so nothing is rebuilt or cloned on the path running it.
 #[macro_export]
 macro_rules! sql_lazy {
     ($(
@@ -121,7 +112,6 @@ mod tests {
     use crate::sql::{Budget, Param, Tier, registry};
 
     crate::sql! {
-        /// Fixture query, registered like any other.
         pub TEST_LOOKUP = "SELECT 1 FROM derivation WHERE id = ANY($1::uuid[])",
             params = [DerivationIds(8)];
     }

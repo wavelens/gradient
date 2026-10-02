@@ -4,13 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! One actor per worker connection. The reader task delivers each inbound
-//! frame with a call and reads the next only after the reply, so the mailbox
-//! never holds more than one frame plus signals and TCP backpressure holds.
-//! Liveness is therefore the reader's to stamp, not the handler's, and it keeps
-//! stamping while a frame is in flight: the heartbeat behind that frame sits
-//! unread in the socket, so a handler waiting on a slow graph would otherwise
-//! read as a silent worker and get a healthy connection unregistered.
+//! The reader is delivering one frame per call and is stamping liveness while a frame is in flight.
+//! A handler waiting on a slow graph would otherwise look like a silent worker and get a healthy
+//! connection unregistered.
 
 use std::collections::{HashSet, VecDeque};
 use std::sync::Arc;
@@ -37,11 +33,8 @@ use super::upload::{UploadSession, UploadTable, abandon_transfer};
 use gradient_wire::messages::{ClientMessage, GradientCapabilities, ServerMessage};
 use gradient_wire::session::frame::{Inbound, ProtoReader};
 
-/// How long a draining session waits for its in-flight jobs before closing.
 pub const SESSION_DRAIN_BUDGET: Duration = Duration::from_secs(20);
 
-/// How often the reader re-stamps liveness while the handler holds a frame;
-/// well inside the worker's 10 s heartbeat.
 const IN_FLIGHT_STAMP: Duration = Duration::from_secs(5);
 
 pub enum SessionMsg {
@@ -385,15 +378,9 @@ async fn offer_jobs(st: &mut SessionState) -> bool {
     true
 }
 
-/// Frames the reader hands the session before the first of them is answered.
-/// Reading ahead keeps a lookup the worker waits on from sitting unread behind
-/// a frame whose handler is slow.
+/// Reading ahead is keeping a lookup awaited by the worker from sitting unread behind a slow frame.
 const READ_AHEAD: usize = 64;
 
-/// Read frames as they arrive, stamping the worker's liveness on receipt and
-/// every `stamp_every` while any is unanswered. `serve` takes the frames
-/// answered off the session and returns the rest, which the session handles in
-/// the order they were read.
 async fn read_loop(
     mut reader: ProtoReader,
     session: ActorRef<SessionMsg>,
@@ -504,8 +491,6 @@ mod tests {
     use tokio_tungstenite::tungstenite::Message;
     use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 
-    /// Stands in for a session whose handler is busy: it answers the frame
-    /// without ever stamping liveness, so only the reader can have done it.
     struct DecliningSession;
 
     impl Actor for DecliningSession {
@@ -535,8 +520,6 @@ mod tests {
         }
     }
 
-    /// Stands in for a session whose handler is stuck on a slow graph: it
-    /// holds the frame's reply until `DrainDeadline` releases it.
     struct HoldingSession;
 
     impl Actor for HoldingSession {
@@ -693,9 +676,6 @@ mod tests {
         assert!(!scheduler.is_worker_connected("w1").await);
     }
 
-    /// The session handles one frame at a time, so a handler waiting on a slow
-    /// actor must not look like silence to the liveness pass: the reader stamps
-    /// `last_seen` on receipt, before the handler is even called.
     #[tokio::test]
     async fn the_reader_stamps_liveness_on_receipt() {
         let (socket, mut client) = connected_pair().await;
@@ -727,8 +707,6 @@ mod tests {
         );
     }
 
-    // Regression: a gluon worker building a VM test was unregistered as dead
-    // while its session waited on a saturated graph writer, heartbeats unread.
     #[tokio::test]
     async fn the_reader_keeps_stamping_while_a_frame_is_in_flight() {
         let (socket, mut client) = connected_pair().await;
@@ -769,9 +747,6 @@ mod tests {
         );
     }
 
-    /// A lookup the worker waits on is read and answered while an earlier frame
-    /// still holds the session: queued behind it, the worker's deadline passed
-    /// before the lookup was even read.
     #[tokio::test]
     async fn a_cache_query_is_served_while_an_earlier_frame_is_held() {
         let (socket, mut client) = connected_pair().await;

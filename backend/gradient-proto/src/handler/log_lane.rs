@@ -4,9 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Build log chunks, written off the session in the order they arrived, so a
-//! slow attempt lookup never holds back the frames behind a chunk.
-
 use std::future::Future;
 use std::sync::Arc;
 
@@ -61,8 +58,7 @@ impl LogLane {
         let _ = self.tx.send(Entry::Chunk { build, data }).await;
     }
 
-    /// Wait until every chunk queued so far is written, so a job's last lines
-    /// land before its completion closes the log.
+    /// A job's last lines must land before its completion is closing the log.
     pub(super) async fn flush(&self) {
         let (done, flushed) = oneshot::channel();
         if self.tx.send(Entry::Flush(done)).await.is_ok() {

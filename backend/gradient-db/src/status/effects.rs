@@ -4,16 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! The one place a build-graph transition's consequences fan out. Both mutation
-//! models feed it: the single-row state-machine path
-//! ([`super::update_derivation_build_status`]) and the bulk SQL sweeps
-//! (promotion, cascades, repairs, abort), which return the
-//! [`TransitionChange`]s they made. Routing every mover through one emitter is
-//! what makes it structurally impossible to move a shared build without its
-//! consequences (the evaluation graph version, board events, CI checks, the
-//! need its direct inputs gain or lose) firing - the root cause of the
-//! historical dead-zone class.
-
 use crate::DbContext;
 use crate::graph::predicates::BUILDER_STATUSES;
 use gradient_entity::build::BuildStatus;
@@ -21,7 +11,6 @@ use gradient_types::*;
 use sea_orm::DbErr;
 use std::collections::{HashMap, HashSet};
 
-/// One shared build status move, as reported by the path that made it.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct TransitionChange {
     pub derivation: DerivationId,
@@ -30,9 +19,6 @@ pub struct TransitionChange {
 }
 
 impl TransitionChange {
-    /// A "re-announce current status" change (`from == to`): fans out board and
-    /// CI state without invalidating the histogram cache. Used when only the
-    /// derivation set is known, not the transition that produced it.
     pub fn unchanged(derivation: DerivationId, status: BuildStatus) -> Self {
         Self {
             derivation,
@@ -42,13 +28,7 @@ impl TransitionChange {
     }
 }
 
-/// One entry per derivation, first `from` to last `to`, in first-seen order, with
-/// the derivations that ended where they started dropped entirely.
-///
-/// For a caller that moves the same shared build twice inside ONE transaction: only the
-/// net move committed, so only the net move may fan out. Emitting the steps instead
-/// would announce a status to the board and the CI reactor that no reader can ever
-/// observe, and would invalidate the histogram cache for a move no reader can see.
+/// Only the net move committed, and only the net move may fan out.
 pub fn collapse_transitions(changes: Vec<TransitionChange>) -> Vec<TransitionChange> {
     let mut order: Vec<DerivationId> = Vec::new();
     let mut net: HashMap<DerivationId, TransitionChange> = HashMap::new();
@@ -69,25 +49,13 @@ pub fn collapse_transitions(changes: Vec<TransitionChange>) -> Vec<TransitionCha
         .collect()
 }
 
-/// Statuses the CI side reports on: `Queued` (pending), `Building` (running),
-/// and every terminal state. `Created`/`FailedTransient` are internal.
 fn ci_reports(status: BuildStatus) -> bool {
     matches!(status, BuildStatus::Queued | BuildStatus::Building)
         || crate::state_machine::BuildStateMachine::is_terminal(&status)
 }
 
-/// Fan out the consequences of `changes`: everything [`announce`] does, then the
-/// need its direct inputs gained or lost, whose own moves are announced in turn,
-/// and the probe request for what gained it.
-///
-/// That second round cannot need a third. It only ever moves rows between
-/// `Created` and `Queued`, both of which are in [`BUILDER_STATUSES`], so no row it
-/// touches crosses the boundary [`need_moves`] keys on.
-///
-/// Losing need settles work without moving a status, and `announce`'s finalize
-/// executes before the update that takes it away, so the evaluations naming what
-/// lost it are asked again here. Nothing else would ask: no shared build of theirs need
-/// have transitioned at all (#666).
+/// The second round cannot need a third.
+/// It is only moving rows between `Created` and `Queued`, both inside [`BUILDER_STATUSES`].
 pub async fn emit_transition_effects(
     ctx: &DbContext,
     changes: &[TransitionChange],
@@ -115,19 +83,10 @@ pub async fn emit_transition_effects(
     Ok(())
 }
 
-/// Whether shared build `{status}` is one an evaluation will still have built, and so
-/// one that still needs its inputs in our cache.
 fn is_builder(status: BuildStatus) -> bool {
     BUILDER_STATUSES.contains(&status)
 }
 
-/// Every shared build whose transition carried it across the builder statuses, in either
-/// direction: into them its inputs are wanted again, out of them they are not, and
-/// its own stored need is stale either way.
-///
-/// A shared build available in a cache is a passthrough rather than a builder and needs nothing, but
-/// the flag is not on a [`TransitionChange`]; the update reads it, so naming one
-/// is a wasted row and never a wrong move.
 fn need_moves(changes: &[TransitionChange]) -> Vec<DerivationId> {
     changes
         .iter()
@@ -136,14 +95,6 @@ fn need_moves(changes: &[TransitionChange]) -> Vec<DerivationId> {
         .collect()
 }
 
-/// Update need below every shared build that just became, or stopped being, something
-/// this fleet will build, and settle the queue against what moved. The two statements
-/// embed [`crate::graph::predicates::gates_predicate`], so the candidate list is a bound and
-/// never a claim.
-///
-/// A shared build already `Building` keeps building: [`crate::graph::can_start::unpromote_ungated`]
-/// moves only `Queued` rows. The bytes a running build produces are cached and useful,
-/// while an abort throws the work away and complicates attempt attribution.
 async fn move_need(ctx: &DbContext, changes: &[TransitionChange]) -> Result<Moved, DbErr> {
     let db = &ctx.worker_db;
     let mut moved_out = Moved::default();
@@ -159,9 +110,6 @@ async fn move_need(ctx: &DbContext, changes: &[TransitionChange]) -> Result<Move
     Ok(moved_out)
 }
 
-/// What a need move owes its caller: the regated shared builds to announce, the ones
-/// that lost need for the evaluation finalize, and the ones that gained it for
-/// the upstream probe.
 #[derive(Debug, Default)]
 struct Moved {
     regated: Vec<TransitionChange>,
@@ -169,15 +117,6 @@ struct Moved {
     gained: Vec<DerivationId>,
 }
 
-/// The graph version that invalidates the per-entry-point histogram cache, board
-/// `BuildStatusChanged` events for every referencing `build_job`, one
-/// `CacheChanged` on any terminal success, and an pending-delivery row per entry point
-/// whose status the Git hosts report. Every one of them is awaited and written
-/// here; what leaves the process is the effects actor's, reading the rows this
-/// wrote in the transaction that moved the shared builds.
-///
-/// A failed statement is aborting that transaction. Every error is returned for the
-/// graph writer to roll back and retry, never committed as a silent rollback.
 async fn announce(ctx: &DbContext, changes: &[TransitionChange]) -> Result<(), DbErr> {
     if changes.is_empty() {
         return Ok(());
@@ -301,8 +240,6 @@ async fn announce(ctx: &DbContext, changes: &[TransitionChange]) -> Result<(), D
 mod tests {
     use super::*;
 
-    /// CI checks track Queued (pending), Building (running), and terminals;
-    /// internal states (Created, FailedTransient) must not post to Git hosts.
     #[test]
     fn ci_reports_matches_the_git_host_check_lifecycle() {
         assert!(ci_reports(BuildStatus::Queued));
@@ -314,12 +251,6 @@ mod tests {
         assert!(!ci_reports(BuildStatus::FailedTransient));
     }
 
-    /// Need follows the builder boundary, not "terminal": a shared build thawed back
-    /// into the queue makes its inputs wanted again, and one that leaves for ANY
-    /// non-builder status (a success and an abort alike) stops wanting them. Which
-    /// way it crossed does not matter here, because the update is absolute over
-    /// the region either way and a thaw needs its own stale value rewritten just as
-    /// much as a finish does.
     #[test]
     fn need_moves_are_every_crossing_of_the_builder_boundary() {
         let thawed = DerivationId::now_v7();
@@ -343,9 +274,6 @@ mod tests {
         );
     }
 
-    /// The second announce round is only safe because nothing it moves can cross
-    /// the boundary again: promotion and un-promotion both stay inside the builder
-    /// statuses, so one round of re-gating is the whole fixpoint.
     #[test]
     fn re_gating_can_never_need_a_third_round() {
         let d = DerivationId::now_v7();
@@ -362,7 +290,6 @@ mod tests {
         }
     }
 
-    /// A re-announce carries no move, so it must re-gate nothing.
     #[test]
     fn an_unchanged_announcement_moves_no_need() {
         assert!(
@@ -374,11 +301,6 @@ mod tests {
         );
     }
 
-    /// A shared build promoted and then pulled back inside one transaction committed
-    /// nothing, so it must fan out nothing: emitting the two steps announces a
-    /// `Queued` no reader can observe and bumps the graph version for it. An
-    /// shared build that genuinely moved keeps its move, and the order of first sight is
-    /// preserved.
     #[test]
     fn a_move_and_its_undo_collapse_away_while_a_real_move_survives() {
         let bounced = DerivationId::now_v7();
@@ -403,8 +325,6 @@ mod tests {
         );
     }
 
-    /// A chain that ends somewhere else collapses to its endpoints, not to its
-    /// last step: the board and the CI reactor see the endpoints, not the steps.
     #[test]
     fn a_chain_collapses_to_its_endpoints() {
         let d = DerivationId::now_v7();
@@ -428,10 +348,6 @@ mod tests {
         );
     }
 
-    /// One report per entry-point `build_job` of a status the Git hosts track, and a
-    /// log finalization asked for once the build is finished. Both are rows in
-    /// this transaction, not calls: what leaves the process is the effects
-    /// actor's, reading what this wrote.
     #[tokio::test]
     async fn a_finished_entry_point_owes_a_report_and_its_log() {
         let d = DerivationId::now_v7();
@@ -487,8 +403,6 @@ mod tests {
         );
     }
 
-    /// A re-announce committed nothing, so it owes no log work: re-chunking an
-    /// index that is already written is pure cost.
     #[tokio::test]
     async fn a_re_announce_never_asks_to_finalize_a_log_again() {
         let d = DerivationId::now_v7();
@@ -514,10 +428,6 @@ mod tests {
         );
     }
 
-    /// A shared build gains need exactly when something starts wanting its outputs in
-    /// our cache, which is also exactly when it is worth asking an upstream for
-    /// them. The probe is running off the graph's path, so the gained set is handed to it
-    /// here; without that nothing probes at all once record stops doing it.
     #[tokio::test]
     async fn what_gains_need_is_handed_to_the_upstream_probe() {
         let crossed = DerivationId::now_v7();
@@ -569,9 +479,6 @@ mod tests {
         );
     }
 
-    /// A shared build crossing the boundary updates its whole pending closure, not one
-    /// hop: the source FODs under a passed through shared build were built because a one-hop
-    /// re-gate never reached them (#666).
     #[tokio::test]
     async fn a_boundary_crossing_updates_the_closure_and_settles_the_queue() {
         let crossed = DerivationId::now_v7();

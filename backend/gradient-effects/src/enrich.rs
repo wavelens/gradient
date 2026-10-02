@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Durable build and evaluation events are emitted with ids only; the fields a
-//! receiver routes and renders on are filled here, once, before fan-out.
+//! Durable build and evaluation events are emitted with ids only. The fields a receiver is routing
+//! and rendering on are filled here once, before fan-out.
 
 use anyhow::{Context, Result};
 use gradient_ci::reporting::eval_kind_str;
@@ -14,7 +14,6 @@ use gradient_types::events::{Event, build, evaluation};
 use gradient_types::*;
 use sea_orm::{ConnectionTrait, EntityTrait};
 
-/// `None` when the event's evaluation or task is gone: nothing is left to report to.
 pub async fn enrich(ctx: &DbContext, event: Event) -> Result<Option<Event>> {
     enrich_with(&ctx.worker_db, event).await
 }

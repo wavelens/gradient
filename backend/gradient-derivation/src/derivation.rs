@@ -4,35 +4,21 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Parser for Nix `.drv` (ATerm derivation) files.
-//!
-//! A derivation file has the form:
-//! ```text
-//! Derive([outputs],[inputDrvs],[inputSrcs],"system","builder",[args],[("KEY","VALUE"),...])
-//! ```
-
 use anyhow::{Result, anyhow};
 use std::collections::HashMap;
 
-/// A single output of a derivation, e.g. `("out", "/nix/store/hash-foo", "", "")`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DerivationOutput {
     pub name: String,
-    /// Store path for this output, or empty for content-addressed derivations.
     pub path: String,
-    /// Hash algorithm (e.g. `"sha256"`), or empty.
     pub hash_algo: String,
-    /// Hash value, or empty.
     pub hash: String,
 }
 
-/// A fully parsed Nix derivation.
 #[derive(Debug, Clone)]
 pub struct Derivation {
     pub outputs: Vec<DerivationOutput>,
-    /// Map of `.drv` path -> set of output names required from it.
     pub input_derivations: Vec<InputDrv>,
-    /// Plain store paths (not derivations) needed at build time.
     pub input_sources: Vec<String>,
     pub system: String,
     pub builder: String,
@@ -40,11 +26,6 @@ pub struct Derivation {
     pub environment: HashMap<String, String>,
 }
 
-/// Build-relevant attributes extracted from a derivation's environment.
-///
-/// Generalizes the old `required_system_features` accessor. `meta.*` Nix
-/// attributes do not survive into the `.drv`; these are read from top-level
-/// derivation attributes that *do* land in `drv.environment`.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct BuildMeta {
     pub timeout_secs: Option<u64>,
@@ -55,18 +36,14 @@ pub struct BuildMeta {
 }
 
 impl Derivation {
-    /// The `__structuredAttrs` JSON blob (`__json` env entry) when the
-    /// derivation was built with structured attributes. Nix stores every
-    /// attribute there instead of as flat env vars, so attribute extraction
-    /// (features, timeouts, flags) must consult it before the flat env.
+    /// Nix is keeping every attribute in the `__json` blob of a `__structuredAttrs` derivation.
+    /// Attribute extraction must read that blob before the flat env.
     fn structured_attrs(&self) -> Option<serde_json::Value> {
         self.environment
             .get("__json")
             .and_then(|s| serde_json::from_str(s).ok())
     }
 
-    /// A string-list attribute, from structured attrs (`["a","b"]`) or the
-    /// flat env (space-separated).
     fn attr_strings(
         attrs: Option<&serde_json::Value>,
         env: Option<&String>,
@@ -95,8 +72,6 @@ impl Derivation {
         }
     }
 
-    /// A boolean attribute, from structured attrs (JSON bool) or the flat env
-    /// (truthy `"1"`/`"true"`). Returns `None` when the key is absent.
     fn attr_bool(
         attrs: Option<&serde_json::Value>,
         env: Option<&String>,
@@ -113,8 +88,6 @@ impl Derivation {
         }
     }
 
-    /// A `u64` attribute, from structured attrs (JSON number or string) or the
-    /// flat env (parsed string).
     fn attr_u64(attrs: Option<&serde_json::Value>, env: Option<&String>, key: &str) -> Option<u64> {
         match attrs {
             Some(a) => a.get(key).and_then(|v| {
@@ -125,8 +98,6 @@ impl Derivation {
         }
     }
 
-    /// Store paths of the outputs a consumer requests by name. Deferred
-    /// (content-addressed) outputs have no path yet and are skipped.
     pub fn requested_output_paths<'d>(
         &'d self,
         requested: &'d [String],
@@ -137,7 +108,6 @@ impl Derivation {
             .map(|o| o.path.as_str())
     }
 
-    /// Returns the `requiredSystemFeatures` as a list.
     pub fn required_system_features(&self) -> Vec<String> {
         let attrs = self.structured_attrs();
         Self::attr_strings(
@@ -147,11 +117,8 @@ impl Derivation {
         )
     }
 
-    /// Whether the derivation permits substitution from a binary cache.
-    /// Nix defaults to `true`; a present attr disables it unless it reads as
-    /// truthy. Nix serializes `allowSubstitutes = false` as `""` in the flat
-    /// env (so empty/`"0"`/`"false"` means disabled) and as a JSON `false`
-    /// under structured attrs.
+    /// Nix is serializing `allowSubstitutes = false` as `""` in the flat env and as JSON `false` in
+    /// structured attrs. An absent attribute is allowing substitution.
     pub fn allow_substitutes(&self) -> bool {
         let attrs = self.structured_attrs();
         Self::attr_bool(
@@ -162,7 +129,6 @@ impl Derivation {
         .unwrap_or(true)
     }
 
-    /// Extract all build-relevant attributes in one pass.
     pub fn build_meta(&self) -> BuildMeta {
         let attrs = self.structured_attrs();
         let env = |key: &str| self.environment.get(key);
@@ -184,8 +150,6 @@ impl Derivation {
     }
 }
 
-/// Resolve a package name. Prefers a non-empty `env_pname`; otherwise strips a
-/// trailing `-<version>` (version starts with a digit) from the derivation name.
 pub fn derive_pname(env_pname: Option<&str>, name: &str) -> Option<String> {
     if let Some(p) = env_pname
         && !p.is_empty()
@@ -203,9 +167,6 @@ pub fn derive_pname(env_pname: Option<&str>, name: &str) -> Option<String> {
     }
 }
 
-// ── Low-level parsers ─────────────────────────────────────────────────────────
-
-/// Parses a double-quoted ATerm string. Returns `(value, remaining_input)`.
 fn parse_string(s: &str) -> Result<(String, &str)> {
     let s = s.trim_start();
     let s = s
@@ -229,7 +190,6 @@ fn parse_string(s: &str) -> Result<(String, &str)> {
     }
 }
 
-/// Advances past optional leading whitespace and one comma. Returns the rest.
 fn comma(s: &str) -> Result<&str> {
     let s = s.trim_start();
     s.strip_prefix(',')
@@ -237,9 +197,6 @@ fn comma(s: &str) -> Result<&str> {
         .map(|r| r.trim_start())
 }
 
-// ── Field parsers ─────────────────────────────────────────────────────────────
-
-/// Parses `[("name","path","algo","hash"),...]`.
 fn parse_outputs(s: &str) -> Result<(Vec<DerivationOutput>, &str)> {
     let s = s.trim_start();
     let mut s = s
@@ -283,7 +240,6 @@ fn parse_outputs(s: &str) -> Result<(Vec<DerivationOutput>, &str)> {
 
 pub type InputDrv = (String, Vec<String>);
 
-/// Parses `[("/nix/store/hash.drv",["out","dev"]),...]`.
 fn parse_input_drvs(s: &str) -> Result<(Vec<InputDrv>, &str)> {
     let s = s.trim_start();
     let mut s = s
@@ -316,7 +272,6 @@ fn parse_input_drvs(s: &str) -> Result<(Vec<InputDrv>, &str)> {
     }
 }
 
-/// Parses `["str1","str2",...]` into a `Vec<String>`.
 fn parse_string_list(s: &str) -> Result<(Vec<String>, &str)> {
     let s = s.trim_start();
     let mut s = s
@@ -340,7 +295,6 @@ fn parse_string_list(s: &str) -> Result<(Vec<String>, &str)> {
     }
 }
 
-/// Parses the environment list `[("KEY","VALUE"),...]` into a `HashMap`.
 fn parse_env(s: &str) -> Result<(HashMap<String, String>, &str)> {
     let s = s.trim_start();
     let mut s = s
@@ -373,9 +327,6 @@ fn parse_env(s: &str) -> Result<(HashMap<String, String>, &str)> {
     }
 }
 
-// ── Public API ────────────────────────────────────────────────────────────────
-
-/// Parses the raw bytes of a `.drv` file into a [`Derivation`].
 pub fn parse_drv(content: &[u8]) -> Result<Derivation> {
     let content = std::str::from_utf8(content)
         .map_err(|e| anyhow!("drv is not valid UTF-8: {}", e))?
@@ -466,7 +417,6 @@ mod tests {
     fn build_meta_detects_fixed_output() {
         let fod = br#"Derive([("out","/nix/store/abc-src","sha256","1q2w3e")],[],[],"x86_64-linux","/nix/store/bash",[],[("name","src")])"#;
         assert!(parse_drv(fod).unwrap().build_meta().is_fixed_output);
-        // EXAMPLE's output has empty hash -> not fixed-output.
         assert!(!parse_drv(EXAMPLE).unwrap().build_meta().is_fixed_output);
     }
 
@@ -497,9 +447,6 @@ mod tests {
         assert_eq!(derive_pname(Some(""), "hello-1.0"), Some("hello".into()));
     }
 
-    // A `__structuredAttrs = true` derivation: every attribute (including
-    // `requiredSystemFeatures`) lives inside the `__json` env blob, not as a
-    // flat env key. The daemon reads them from there, so extraction must too.
     const STRUCTURED_ATTRS_DRV: &[u8] = br#"Derive([("out","/nix/store/cbir-git-minimal-2.54.0","","")],[],["/nix/store/src"],"x86_64-linux","/nix/store/bash",["-e","/nix/store/builder.sh"],[("__json","{\"requiredSystemFeatures\":[\"gccarch-skylake\"],\"preferLocalBuild\":true,\"timeout\":3600,\"allowSubstitutes\":false}"),("__structuredAttrs","1"),("name","git-minimal-2.54.0"),("out","/nix/store/cbir-git-minimal-2.54.0"),("system","x86_64-linux")])"#;
 
     #[test]

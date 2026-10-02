@@ -4,8 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Source-IP allowlist matching for API keys and inbound integrations.
-//! Empty list = allow all (backwards compatible with existing rows).
+//! An empty list is allowing all sources, for compatibility with existing rows.
 
 use ipnet::IpNet;
 use std::net::IpAddr;

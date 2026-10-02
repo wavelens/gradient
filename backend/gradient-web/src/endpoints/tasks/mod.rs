@@ -26,8 +26,6 @@ pub use self::metrics::{EntryPointMetricsQuery, get_entry_point_metrics, get_tas
 
 use gradient_types::ids::*;
 
-// ── Shared types ─────────────────────────────────────────────────────────────
-
 use gradient_entity::build::BuildStatus;
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_types::triggers::ConcurrencyPolicy;
@@ -54,37 +52,23 @@ pub struct TaskResponse {
     pub concurrency: ConcurrencyPolicy,
     pub sign_cache: bool,
     pub wait_for_workers: bool,
-    /// Caller holds `Permission::EditTask` - may edit task configuration.
     pub can_edit: bool,
-    /// Caller holds `Permission::TriggerEvaluation` - may start/restart/abort
-    /// evaluations. Distinct from `can_edit` so users granted only trigger
-    /// rights can act, and so managed tasks (which reject config edits)
-    /// still expose trigger actions when the backend permits them.
     pub can_trigger: bool,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct EntryPointSummary {
     pub id: EntryPointId,
-    /// Per-eval build identity (`build_job` id) for this entry point's derivation.
     pub build_id: BuildJobId,
     pub derivation_path: String,
     pub eval: String,
     pub build_status: gradient_entity::build::BuildStatus,
     pub has_artefacts: bool,
-    /// Output name to full `/nix/store` path, from the resolved `.drv`. Present
-    /// before the build starts; `build_status` is what says whether the path is
-    /// realised. Outputs whose path the evaluator could not resolve are omitted.
     pub outputs: std::collections::BTreeMap<String, String>,
     pub architecture: gradient_entity::server::Architecture,
     pub build_time_ms: Option<i64>,
-    /// When the latest attempt left the queue and started building, so a live
-    /// timer counts build time only.
     pub build_started_at: Option<chrono::NaiveDateTime>,
     pub deps: BuildStatusCounts,
-    /// Size of the entry point's build-time dependency closure within this
-    /// evaluation: the sum of `deps` over every status, substituted and aborted
-    /// included.
     pub deps_total: i64,
     pub prioritized: bool,
     pub created_at: chrono::NaiveDateTime,
@@ -109,24 +93,17 @@ pub struct EvaluationSummary {
     pub commit: String,
     pub commit_message: Option<String>,
     pub status: EvaluationStatus,
-    /// Attribute-path scope this evaluation ran with. Lets a caller tell what an
-    /// evaluation covered without waiting for its entry points to resolve.
     pub wildcard: String,
     pub trigger: Option<EvaluationTriggerSummary>,
     pub triggered_by: Option<String>,
-    /// PR/MR number for pull-request-triggered evaluations, for the "PR #42"
-    /// label and Git host link. `None` for non-PR triggers.
     pub pr_number: Option<u64>,
     pub total_builds: i64,
     pub builds: BuildStatusCounts,
     pub errors: i64,
     pub warnings: i64,
-    /// The evaluation's latest eval job on the Job Board; `None` until an eval
-    /// worker picked it up.
     pub dispatched_job: Option<DispatchedJobId>,
     pub prioritized: bool,
     pub created_at: chrono::NaiveDateTime,
-    /// When it left the queue and started fetching; the duration counts from here.
     pub started_at: Option<chrono::NaiveDateTime>,
     pub finished_at: Option<chrono::NaiveDateTime>,
     pub updated_at: chrono::NaiveDateTime,
@@ -161,8 +138,8 @@ pub enum BarSegment {
     Aborted,
 }
 
-/// `None` for `Skipped`: a build-time dependency nothing needs is neither pending
-/// work nor a result, so drawing it would make a task read as unfinished forever.
+/// `Skipped` is neither pending work nor a result. Drawing it would make a task read as unfinished
+/// forever.
 pub fn bar_segment(status: BuildStatus) -> Option<BarSegment> {
     use BuildStatus::*;
     Some(match status {
@@ -199,7 +176,6 @@ impl BuildStatusCounts {
         }
     }
 
-    /// Sum of the four drawn segments; excludes `substituted` and `aborted`.
     pub fn total(&self) -> i64 {
         self.completed + self.failed + self.building + self.queued
     }

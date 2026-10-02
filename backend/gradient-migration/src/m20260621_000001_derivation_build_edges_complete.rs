@@ -4,17 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! `derivation_build.edges_complete`: true only once an anchor's dependency
-//! edges have been flushed (at eval completion). Anchors are created per-batch
-//! during the stream but `derivation_dependency` edges are deferred to the
-//! flush, so a failed/aborted/interrupted/overlapping eval leaves anchors with
-//! zero edges. Without this gate they look dependency-free and get promoted +
-//! dispatched without their inputs, failing `InputsUnavailable`. Promotion and
-//! dispatch now require `edges_complete`.
-//!
-//! Backfill marks existing rows complete unless they are still `Created`, never
-//! dispatched, and have no edges - the exact shape of an anchor stranded by an
-//! incomplete eval, which must wait for a completing eval to flush its graph.
+//! The backfill is skipping `Created`, never-dispatched shared builds without edges. Those rows
+//! were stranded by an incomplete eval and must wait for a complete eval to flush their graph.
 
 use sea_orm_migration::prelude::*;
 use sea_orm_migration::sea_orm::ConnectionTrait;

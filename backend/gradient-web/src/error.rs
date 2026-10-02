@@ -4,18 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Web-layer error type.
-//!
-//! `WebError` collapses every failure mode the HTTP layer can produce into one
-//! variant per HTTP status, plus a single `Internal` variant for chained
-//! source errors. Each non-internal variant carries a stable [`ErrorCode`]
-//! slug that is emitted in the JSON response body so clients can
-//! programmatically branch on failures without parsing English prose.
-//!
-//! Construct errors through the `bad_request`, `not_found`, … helper
-//! constructors (which set sensible default codes) or pass an explicit
-//! [`ErrorCode`] for finer-grained semantics.
-
 use anyhow::Error as AnyhowError;
 use axum::Json;
 use axum::extract::rejection::JsonRejection;
@@ -26,15 +14,11 @@ use serde::Serialize;
 use std::fmt;
 use thiserror::Error;
 
-/// Stable, machine-readable error slug returned in the JSON body alongside
-/// the HTTP status. Codes are intentionally `&'static str` so they cost
-/// nothing and can be exhaustively listed in API docs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(transparent)]
 pub struct ErrorCode(pub &'static str);
 
 impl ErrorCode {
-    // 400 Bad Request
     pub const BAD_REQUEST: Self = Self("bad_request");
     pub const VALIDATION: Self = Self("validation");
     pub const INPUT_VALIDATION: Self = Self("input_validation");
@@ -48,7 +32,6 @@ impl ErrorCode {
     pub const REGISTRATION_DISABLED: Self = Self("registration_disabled");
     pub const REPOSITORY_UNREACHABLE: Self = Self("repository_unreachable");
 
-    // 401 Unauthorized
     pub const UNAUTHORIZED: Self = Self("unauthorized");
     pub const AUTHENTICATION: Self = Self("authentication");
     pub const INVALID_CREDENTIALS: Self = Self("invalid_credentials");
@@ -57,32 +40,24 @@ impl ErrorCode {
     pub const CLI_AUTH_EXPIRED: Self = Self("cli_auth_expired");
     pub const CLI_AUTH_DENIED: Self = Self("cli_auth_denied");
 
-    // 403 Forbidden
     pub const FORBIDDEN: Self = Self("forbidden");
     pub const SUPERUSER_REQUIRED: Self = Self("superuser_required");
     pub const CREATION_DISABLED: Self = Self("creation_disabled");
     pub const FORBIDDEN_SOURCE_IP: Self = Self("forbidden_source_ip");
 
-    // Validation-specific bad-request codes
     pub const INVALID_ALLOWED_IP: Self = Self("invalid_allowed_ip");
 
-    // 404 Not Found
     pub const NOT_FOUND: Self = Self("not_found");
 
-    // 409 Conflict
     pub const CONFLICT: Self = Self("conflict");
     pub const ALREADY_EXISTS: Self = Self("already_exists");
 
-    // 410 Gone
     pub const GONE: Self = Self("gone");
 
-    // 413 Payload Too Large
     pub const PAYLOAD_TOO_LARGE: Self = Self("payload_too_large");
 
-    // 422 Unprocessable Entity
     pub const UNPROCESSABLE_ENTITY: Self = Self("unprocessable_entity");
 
-    // 500 Internal Server Error
     pub const INTERNAL: Self = Self("internal");
     pub const DATABASE: Self = Self("database");
     pub const DATA_INCONSISTENCY: Self = Self("data_inconsistency");
@@ -90,7 +65,6 @@ impl ErrorCode {
     pub const USER_UPDATE_FAILED: Self = Self("user_update_failed");
     pub const SSH_KEY_GENERATION_FAILED: Self = Self("ssh_key_generation_failed");
 
-    // 503 Service Unavailable
     pub const SERVICE_UNAVAILABLE: Self = Self("service_unavailable");
 
     #[inline]
@@ -127,11 +101,8 @@ pub enum WebError {
     ServiceUnavailable(ErrorCode, String),
     #[error("Upload capacity exhausted; retry after {retry_after:?}")]
     UploadBusy { retry_after: std::time::Duration },
-    /// Referential-integrity mismatch detected at request time (e.g. a build
-    /// row whose derivation row was concurrently deleted). Maps to the same
-    /// HTTP response as [`Internal`] but is logged at warn level - the
-    /// rich-context warn line is emitted at the callsite, so `IntoResponse`
-    /// stays silent.
+    /// The rich-context warn line is emitted at the callsite. `IntoResponse` is silent for this
+    /// variant.
     #[error("Data Inconsistency: {0}")]
     DataInconsistency(String),
     #[error(transparent)]
@@ -140,9 +111,6 @@ pub enum WebError {
 
 pub type WebResult<T> = Result<T, WebError>;
 
-/// JSON response body emitted for every `WebError`. Adds a stable `code`
-/// alongside the existing `error`/`message` fields so clients can branch
-/// without parsing prose.
 #[derive(Serialize)]
 struct ErrorResponseBody<'a> {
     error: bool,
@@ -151,7 +119,6 @@ struct ErrorResponseBody<'a> {
 }
 
 impl WebError {
-    /// HTTP status this error maps to.
     pub fn status(&self) -> StatusCode {
         match self {
             Self::BadRequest(..) => StatusCode::BAD_REQUEST,
@@ -169,7 +136,6 @@ impl WebError {
         }
     }
 
-    /// Stable error slug returned in the JSON body.
     pub fn code(&self) -> ErrorCode {
         match self {
             Self::BadRequest(c, _)
@@ -186,8 +152,6 @@ impl WebError {
         }
     }
 }
-
-// ── Conversions ─────────────────────────────────────────────────────────
 
 impl From<DbErr> for WebError {
     fn from(err: DbErr) -> Self {
@@ -230,11 +194,7 @@ impl IntoResponse for WebError {
                 tracing::error!(error = format!("{err:#}"), "Internal error");
                 "Internal server error".to_string()
             }
-            Self::DataInconsistency(_) => {
-                // Rich-context warn line is emitted at the construction
-                // callsite - don't double-log here.
-                "Internal server error".to_string()
-            }
+            Self::DataInconsistency(_) => "Internal server error".to_string(),
             Self::BadRequest(_, m)
             | Self::Unauthorized(_, m)
             | Self::Forbidden(_, m)
@@ -267,8 +227,6 @@ impl IntoResponse for WebError {
         }
     }
 }
-
-// ── Constructors ────────────────────────────────────────────────────────
 
 impl WebError {
     pub fn bad_request(msg: impl Into<String>) -> Self {
@@ -319,8 +277,6 @@ impl WebError {
         Self::ServiceUnavailable(ErrorCode::SERVICE_UNAVAILABLE, msg.into())
     }
 
-    // ── Domain-specific constructors ────────────────────────────────────
-
     pub fn invalid_name(name: &str) -> Self {
         Self::BadRequest(ErrorCode::INVALID_NAME, format!("Invalid {}", name))
     }
@@ -336,18 +292,10 @@ impl WebError {
         Self::NotFound(ErrorCode::NOT_FOUND, format!("{} not found", resource))
     }
 
-    /// Like [`not_found`] but takes a fully-formed message instead of
-    /// appending " not found".
     pub fn not_found_msg(msg: impl Into<String>) -> Self {
         Self::NotFound(ErrorCode::NOT_FOUND, msg.into())
     }
 
-    /// Internal-server-error for "<resource> data inconsistency" - a
-    /// referential-integrity violation discovered at request time
-    /// (e.g. a build row with no derivation row). Maps to HTTP 500 with the
-    /// generic `internal` code, but is logged at warn level via the
-    /// `DataInconsistency` variant since the cause is most often a transient
-    /// race against concurrent deletion rather than a real server bug.
     pub fn data_inconsistency(resource: &str) -> Self {
         Self::DataInconsistency(format!("{} data inconsistency", resource))
     }
@@ -426,8 +374,6 @@ impl WebError {
         )
     }
 
-    /// Constructor for INSERT/UPDATE sites where a unique index is the
-    /// source of truth for collision detection.
     pub(crate) fn from_db_err(err: DbErr, label: &str) -> Self {
         if is_unique_violation(&err) {
             return Self::already_exists(label);
@@ -436,8 +382,6 @@ impl WebError {
     }
 }
 
-/// Returns `Forbidden` when the user is not a superuser. Use at the top of
-/// admin handlers.
 pub fn require_superuser(user: &gradient_types::MUser) -> Result<(), WebError> {
     if user.superuser {
         Ok(())
@@ -449,7 +393,6 @@ pub fn require_superuser(user: &gradient_types::MUser) -> Result<(), WebError> {
     }
 }
 
-/// Enforces a [`CreatePermission`] gate on project/cache creation.
 pub fn require_create_permission(
     permission: gradient_types::CreatePermission,
     user: &gradient_types::MUser,

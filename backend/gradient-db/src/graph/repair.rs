@@ -4,16 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! The one graph repair pass: the heals for state no event can reach, run at an
-//! evaluation's stream completion (`Eval`) and when a building evaluation is
-//! graph-stuck (`Unstick`). Both scopes run the same steps. No scope is running on a tick
-//! and nothing here is a fixpoint; every counter is moved by the event that changes
-//! it, and [`crate::graph::can_start::repair_can_start`] is the backstop for a move that
-//! was lost.
-//!
-//! Both scopes name an evaluation, so every statement is bounded to that
-//! evaluation's dependency closure. The steps share the graph writer's transaction,
-//! so the first failure ends the pass and fails the transition.
+//! The steps are sharing the graph writer's transaction.
+//! The first failure is ending the pass and failing the transition.
 
 use crate::DbContext;
 use crate::status::{TransitionChange, emit_transition_effects};
@@ -21,18 +13,9 @@ use gradient_types::EvaluationId;
 use sea_orm::DbErr;
 use tracing::debug;
 
-/// What slice of the graph to heal.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum RepairScope {
-    /// A fresh intent: an evaluation just flushed its graph, or a restart took the
-    /// previous evaluation's names over. Thaw every failed shared build in its closure, a
-    /// reproducible builder exit included, settle the shared builds whose outputs are
-    /// already complete, fail the parents of a failure that stays, name the open
-    /// shared builds it reaches, promote the closure.
     Eval(EvaluationId),
-    /// A wedged evaluation healing itself: the same steps, except that the thaw
-    /// leaves a reproducible failure and the subtree it poisons alone, since the
-    /// intent that already failed on it is the one asking again.
     Unstick(EvaluationId),
 }
 
@@ -44,7 +27,6 @@ impl RepairScope {
     }
 }
 
-/// What one repair pass changed. All-zero on a converged graph.
 #[derive(Debug, Default)]
 pub struct RepairReport {
     pub thawed: u64,
@@ -64,10 +46,6 @@ impl RepairReport {
     }
 }
 
-/// Run the healing pipeline for `scope`. Effects (the graph version, board events,
-/// CI checks, eval finalization) fan out through the one emitter for every shared build
-/// a step moved, so a repair can never move a shared build without its
-/// consequences.
 pub async fn repair_build_graph(
     ctx: &DbContext,
     scope: RepairScope,
@@ -80,9 +58,6 @@ pub async fn repair_build_graph(
     report.thawed = thawed.len() as u64;
     emit_transition_effects(ctx, &thawed).await?;
 
-    // Cache presence is the ground truth for "is this built": shared builds whose
-    // outputs all exist re-complete even after a requeue, cascade or demote, and
-    // the shared builds they just made servable advance their parents' counters.
     let cached =
         crate::graph::promotion::repair_cached_shared_builds_for_eval(db, evaluation).await?;
     report.cached_repaired = cached.len();
@@ -91,16 +66,10 @@ pub async fn repair_build_graph(
     let advanced = crate::graph::can_start::advance_fetchable(db, &derivations).await?;
     emit_transition_effects(ctx, &advanced).await?;
 
-    // Failure-side backstop, paired with the thaw above: fail every non-terminal
-    // shared build in the closure reachable from a terminal failure, including the
-    // victims the thaw just re-created.
     report.dependency_failed =
         crate::graph::promotion::repair_dependency_failed(db, evaluation).await?;
     emit_transition_effects(ctx, &report.dependency_failed).await?;
 
-    // A pruned interior in this closure that a thaw or a reset left with no name
-    // fails the gate the promote embeds; this evaluation names it first. Naming is
-    // half of what need means, so an adoption creates it the way a thaw does.
     let adopted = crate::graph::reachability::adopt_pending_closure(db, evaluation).await?;
     report.adopted = adopted.pairs.len();
     for chunk in adopted.derivations().chunks(crate::IN_CHUNK_SIZE) {
@@ -131,9 +100,6 @@ pub async fn repair_build_graph(
 mod tests {
     use super::*;
 
-    /// The heal names what it thawed and reset before it promotes: a pruned
-    /// interior in this closure that no evaluation names any more would otherwise
-    /// fail the gate the promote embeds, and the heal would loop on it forever.
     #[tokio::test]
     async fn the_heal_adopts_the_closure_before_it_promotes_it() {
         use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult, Value};
@@ -147,24 +113,18 @@ mod tests {
             rows_affected,
         };
         let db = MockDatabase::new(DatabaseBackend::Postgres)
-            // the thaw and the cache repair each open a walk and move nothing
             .append_exec_results([exec(0), exec(0)])
             .append_query_results([empty.clone(), empty.clone()])
-            // the dependency-failed sweep opens a walk and moves nothing
             .append_exec_results([exec(0)])
             .append_query_results([empty.clone()])
-            // the adoption opens a walk and takes one name on
             .append_exec_results([exec(0)])
             .append_query_results([vec![BTreeMap::from([
                 ("evaluation".to_owned(), Value::from(eval.into_inner())),
                 ("derivation".to_owned(), Value::from(d.into_inner())),
             ])]])
-            // the adoption updates need below what it named, raised and locked
             .append_exec_results([exec(0), exec(0)])
             .append_query_results([empty.clone()])
-            // the adopting evaluation's graph version
             .append_exec_results([exec(1)])
-            // the closure promote opens a walk and finds nothing startable yet
             .append_exec_results([exec(0)])
             .append_query_results([empty])
             .into_connection();
@@ -210,10 +170,6 @@ mod tests {
         );
     }
 
-    /// Every heal executes in the graph writer's one transaction, which Postgres aborts
-    /// at the first failed statement: a heal that logged and went on would leave
-    /// the graph writer's COMMIT to roll the whole transition back in silence and would
-    /// hide a deadlock from its retry.
     #[tokio::test]
     async fn a_failed_heal_fails_the_repair_and_starts_nothing_after_it() {
         use sea_orm::{DatabaseBackend, DbErr, MockDatabase, MockExecResult};
@@ -238,9 +194,6 @@ mod tests {
         );
     }
 
-    /// An unstick is the same intent asking again, so its thaw keeps a reproducible
-    /// failure and the subtree it poisons out; otherwise a permanent failure inside
-    /// a runtime closure is rebuilt on every sweep.
     #[tokio::test]
     async fn an_unstick_keeps_a_reproducible_failure_out_of_its_thaw() {
         use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult, Value};

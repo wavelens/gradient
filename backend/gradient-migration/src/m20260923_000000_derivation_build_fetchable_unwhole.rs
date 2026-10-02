@@ -4,11 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! A row that is fetchable with a runtime hole counted contradicts the readiness
-//! predicate, and the sweep's readiness repair now names every such row in its
-//! scope. The set is empty on a healthy fleet, so the index that answers the scan
-//! costs nothing to keep and turns a table read per sweep into none.
-
 use sea_orm_migration::prelude::*;
 use sea_orm_migration::sea_orm::ConnectionTrait;
 

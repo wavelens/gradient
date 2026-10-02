@@ -15,10 +15,6 @@ use sea_orm::{
     QueryFilter,
 };
 
-/// Rejects with [`TriggerError::AlreadyInProgress`] when `task` already has a
-/// non-terminal evaluation (Queued / Fetching / EvaluatingFlake /
-/// EvaluatingDerivation / Building / Waiting). Shared by the regular trigger and
-/// the restart path so both honour the same single-in-flight invariant.
 pub(super) async fn ensure_no_active_evaluation<C: ConnectionTrait>(
     db: &C,
     task_id: TaskId,
@@ -44,17 +40,6 @@ pub(super) async fn ensure_no_active_evaluation<C: ConnectionTrait>(
     Ok(())
 }
 
-/// Creates a new `Queued` evaluation for `task` at `commit_hash`.
-///
-/// - When `concurrent` is false, refuses with [`TriggerError::AlreadyInProgress`]
-///   if the task already has a running evaluation (Queued / Fetching /
-///   EvaluatingFlake / EvaluatingDerivation / Building / Waiting).
-/// - When `concurrent` is true (used by the `all` concurrency policy), skips
-///   the in-progress guard and sets `evaluation.concurrent = true` on the new
-///   row so the partial unique index lets it through.
-/// - Inserts a `Commit` row, then an `Evaluation` row with status `Queued`.
-/// - Sets `task.force_evaluation = true` and resets `last_check_at` so the
-///   scheduler picks it up immediately on its next tick.
 #[allow(
     clippy::too_many_arguments,
     reason = "arg-heavy; refactor tracked in #503"
@@ -78,9 +63,8 @@ pub async fn trigger_evaluation<C: ConnectionTrait>(
         ensure_no_active_evaluation(db, task.id).await?;
     }
 
-    // Resolve `task.last_evaluation` against the DB so a dangling pointer
-    // (eval row gone but the task pointer still set) doesn't trip the
-    // `fk-evaluation-previous` foreign key.
+    // A dangling `task.last_evaluation` must resolve to `None` before the insert. The
+    // `fk-evaluation-previous` foreign key would trip otherwise.
     let previous = match task.last_evaluation {
         Some(prev_id) => EEvaluation::find_by_id(prev_id)
             .one(db)

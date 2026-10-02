@@ -4,13 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Export one evaluation as a SQLite file a maintainer can diagnose from.
-//!
-//! Building one reads every failed build's log, so it takes a logged-in caller
-//! even where anonymous browsing is allowed. On top of that, reading the
-//! evaluation costs `ViewProject` and instance context costs `ManageWorkers`,
-//! refused rather than silently dropped, so the report's manifest can never
-//! disagree with what was asked for.
+//! Building a report is reading every failed build's log. It is requiring a logged-in caller even
+//! where anonymous browsing is allowed.
 
 use std::sync::Arc;
 
@@ -38,8 +33,6 @@ pub struct ReportQuery {
 }
 
 impl ReportQuery {
-    /// Defaults hand over a report that names which package broke but not whose
-    /// repository it is.
     fn options(&self) -> ReportOptions {
         ReportOptions {
             anonymize_identities: self.anonymize_identities.unwrap_or(true),
@@ -50,8 +43,8 @@ impl ReportQuery {
     }
 }
 
-/// The fleet and upstream sections describe more than the evaluation that asked
-/// for them, so they cost the permission that already governs worker config.
+/// The fleet and upstream sections are describing more than the evaluation. They require the
+/// permission that is already governing worker config.
 pub(crate) fn report_requires_manage_workers(opts: &ReportOptions) -> bool {
     opts.include_instance
 }

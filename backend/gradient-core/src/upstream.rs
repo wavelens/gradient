@@ -4,12 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Upstream binary-cache narinfo lookup, shared by the cache-query handler
-//! (worker pulls) and the eval-time substitutability probe (scheduler). Given a
-//! set of upstream base URLs and a store-path hash, fetch and parse the
-//! `<hash>.narinfo` into a [`CachedPath`] carrying the absolute NAR URL plus the
-//! metadata needed to import the path.
-
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
@@ -36,12 +30,8 @@ pub struct ProbeSample {
     pub kind: SampleKind,
 }
 
-/// Consecutive transport failures before an upstream is taken out of rotation.
 const TRIP_AFTER: u32 = 3;
 
-/// How long a tripped upstream stays out. Short enough that a cache coming back
-/// is picked up on its own, long enough that a black hole is not re-probed on
-/// every request.
 const BREAKER_COOLDOWN: Duration = Duration::from_secs(60);
 
 #[derive(Debug, Default, Clone, Copy)]
@@ -50,14 +40,9 @@ struct Breaker {
     open_until: Option<Instant>,
 }
 
-/// Per-upstream health, so one unreachable cache cannot cost every request its
-/// probe budget.
-///
-/// A cache that accepts the connection and then never answers is the expensive
-/// case: without this, every narinfo miss pays the full probe timeout waiting on
-/// it. Only transport failures count - a 404 means the upstream answered and is
-/// healthy, it simply does not have the path, which is the common case and must
-/// never take a cache out of rotation.
+/// Only transport failures are counting toward a trip. A 404 is a healthy answer for a missing path
+/// and must never take a cache out of rotation. A cache accepting connections and never answering
+/// is the expensive case.
 #[derive(Debug, Default)]
 pub struct UpstreamBreakers {
     inner: Mutex<HashMap<CacheUpstreamId, Breaker>>,
@@ -76,8 +61,6 @@ impl UpstreamBreakers {
         self.record_at(id, kind, Instant::now());
     }
 
-    /// Whether a probe to `id` may go out at `now`. Once the cooldown elapses
-    /// the upstream is allowed through again; a further failure trips it anew.
     pub fn allows_at(&self, id: CacheUpstreamId, now: Instant) -> bool {
         let mut guard = self.inner.lock();
         match guard.get_mut(&id) {
@@ -111,16 +94,11 @@ impl UpstreamBreakers {
     }
 }
 
-/// Process-wide breakers, shared by the worker cache-query path and the cache's
-/// own narinfo endpoint so one dead upstream is learned about once.
 pub fn breakers() -> &'static UpstreamBreakers {
     static BREAKERS: OnceLock<UpstreamBreakers> = OnceLock::new();
     BREAKERS.get_or_init(UpstreamBreakers::new)
 }
 
-/// Upstreams asked over HTTP/1.1 because their HTTP/2 reset a stream. A pin
-/// takes effect in this process at once and is written to
-/// `cache_upstream.http1_only` by [`persist_http1_pins`], so it outlives a restart.
 #[derive(Debug, Default)]
 pub struct Http1Pins {
     pinned: Mutex<HashSet<CacheUpstreamId>>,
@@ -208,10 +186,6 @@ pub fn fold_samples(samples: &[ProbeSample], into: &mut HashMap<CacheUpstreamId,
 const PROBE_TIMEOUT_SECS: u64 = 2;
 const PROBE_TIMEOUT: Duration = Duration::from_secs(PROBE_TIMEOUT_SECS);
 const BATCH_WINDOW: usize = 256;
-/// Cap on how long a probe waits for a query-pool permit before giving up. Keeps
-/// a saturated pool (a large eval flooding the shared semaphore) from making a
-/// single probe block past the caller's own deadline (the worker's 120s
-/// `CacheStatus` budget); a timed-out acquire is recorded as an error, not a hit.
 const PERMIT_ACQUIRE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
 pub struct ProbeResult {
@@ -265,8 +239,6 @@ async fn probe_one(
     out
 }
 
-/// One upstream as the cache's own narinfo endpoint knows it: the key is needed
-/// to verify what comes back before it is served on to a client.
 #[derive(Debug, Clone)]
 pub struct UpstreamProbe {
     pub id: CacheUpstreamId,
@@ -275,19 +247,12 @@ pub struct UpstreamProbe {
     pub http1_only: bool,
 }
 
-/// A verified narinfo body and the upstream it came from.
 #[derive(Debug, Clone)]
 pub struct UpstreamNarinfo {
     pub upstream: CacheUpstreamId,
     pub body: String,
 }
 
-/// The narinfo for `path_hash` from the first upstream that has it.
-///
-/// Probes concurrently and bounds each probe, so an unreachable upstream costs
-/// one timeout instead of stalling the request behind it, and the breaker then
-/// keeps it out of rotation entirely. Bodies whose `Sig` does not verify against
-/// that upstream's configured key are dropped, never served on.
 pub async fn fetch_narinfo_body(
     upstream_caches: &[UpstreamProbe],
     path_hash: &str,
@@ -347,8 +312,8 @@ pub async fn lookup_upstream_narinfo(
 ) -> ProbeResult {
     let mut samples = Vec::new();
 
-    // A tripped upstream is skipped rather than probed and recorded: folding a
-    // sample we never took would poison the hit-rate its ordering is built on.
+    // A tripped upstream is skipped rather than probed and recorded. Folding a sample never taken
+    // would poison the hit rate that the ordering is built on.
     let endpoints: Arc<Vec<UpstreamEndpoint>> = if endpoints.iter().all(|e| breakers().allows(e.id))
     {
         endpoints
@@ -464,9 +429,6 @@ pub async fn probe_batch(
     (found, stats)
 }
 
-/// `body` as a hit for `store_path`, but only when it names that path and a
-/// `Sig` verifies against the key `ep` is configured with. Anything else is a
-/// miss: an unsigned or foreign answer must never become available in a cache.
 pub fn verified_narinfo(
     ep: &UpstreamEndpoint,
     path_hash: &str,
@@ -500,8 +462,6 @@ fn names_path_hash(body: &str, path_hash: &str) -> bool {
         .is_some_and(|(hash, _)| hash == path_hash)
 }
 
-/// Parse a narinfo `body` into a [`CachedPath`]. The `URL:` field is resolved
-/// against `base_url` into an absolute NAR URL; `None` if the body has no `URL:`.
 pub fn parse_upstream_narinfo(base_url: &str, store_path: &str, body: &str) -> Option<CachedPath> {
     let mut nar_path: Option<&str> = None;
     let mut nar_hash: Option<String> = None;
@@ -595,9 +555,6 @@ mod tests {
         assert!(shutdown.cancel_and_drain(Duration::from_secs(1)).await);
     }
 
-    /// The failure this exists for: a cache that accepts the connection and
-    /// never answers. After a few strikes it must be skipped outright, or every
-    /// narinfo miss keeps paying its probe timeout.
     #[test]
     fn a_black_holed_upstream_is_taken_out_of_rotation() {
         let b = UpstreamBreakers::new();
@@ -612,9 +569,6 @@ mod tests {
         assert!(!b.allows_at(id, t0), "the upstream should be tripped");
     }
 
-    /// A 404 is the common answer from a healthy cache that lacks the path.
-    /// Counting it as a failure would take every upstream out of rotation
-    /// during any large substitution.
     #[test]
     fn a_miss_is_not_a_failure() {
         let b = UpstreamBreakers::new();
@@ -628,8 +582,6 @@ mod tests {
         assert!(b.allows_at(id, t0));
     }
 
-    /// A single success clears the count, so intermittent errors never
-    /// accumulate into a trip over hours.
     #[test]
     fn a_success_resets_the_failure_count() {
         let b = UpstreamBreakers::new();
@@ -644,8 +596,6 @@ mod tests {
         assert!(b.allows_at(id, t0), "two strikes short of the threshold");
     }
 
-    /// The cooldown has to expire on its own: an upstream that comes back must
-    /// be picked up without an operator restarting anything.
     #[test]
     fn a_tripped_upstream_is_retried_after_the_cooldown() {
         let b = UpstreamBreakers::new();
@@ -664,8 +614,6 @@ mod tests {
         );
     }
 
-    /// Half-open, not closed: the probe the cooldown let through failing again
-    /// has to trip it straight back rather than starting a fresh count.
     #[test]
     fn a_still_broken_upstream_trips_again_on_the_next_failure() {
         let b = UpstreamBreakers::new();
@@ -685,11 +633,6 @@ mod tests {
         );
     }
 
-    /// The exact failure that cost every narinfo miss 30s: a port that completes
-    /// the handshake and then never answers. Never accepting is enough - the
-    /// kernel finishes the connection from the backlog, so the client is
-    /// connected and waiting on bytes that never come. Returned by value so the
-    /// listener stays bound for the life of the test.
     async fn black_hole() -> (String, tokio::net::TcpListener) {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
             .await
@@ -698,9 +641,6 @@ mod tests {
         (format!("http://{addr}"), listener)
     }
 
-    /// The probe must give up on its own budget. Before this, the shared client's
-    /// 30s timeout was the only bound and a substituter's own stall detector
-    /// fired first.
     #[tokio::test]
     async fn a_black_hole_is_bounded_by_the_probe_timeout() {
         let (url, _listener) = black_hole().await;
@@ -722,8 +662,6 @@ mod tests {
         );
     }
 
-    /// Once tripped, a dead upstream costs nothing at all - which is what keeps
-    /// a miss fast while the cache is down.
     #[tokio::test]
     async fn a_tripped_upstream_is_not_probed_at_all() {
         let (url, _listener) = black_hole().await;
@@ -839,8 +777,6 @@ mod tests {
     const SIGNED_HASH: &str = "brj5bb4pny8pnngq3qdymkllwql6z29j";
     const SIGNED_PATH: &str = "/nix/store/brj5bb4pny8pnngq3qdymkllwql6z29j-hello-2.12";
 
-    /// A narinfo for `store_path` signed by a fresh `upstream-1` key, and that
-    /// key in the `name:base64` form an upstream is configured with.
     fn signed_narinfo(store_path: &str) -> (String, String) {
         use base64::{Engine as _, engine::general_purpose::STANDARD};
         let keypair = ed25519_compact::KeyPair::generate();

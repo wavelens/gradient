@@ -4,17 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Integration tests for project-level integration endpoints.
-//!
-//! Focus: the credential-free summary endpoint
-//! (`GET /projects/{project}/integrations/summary`) used by the trigger UI. The
-//! contract is:
-//!
-//! - any project member can call it (no `ManageIntegrations` required),
-//! - response excludes `secret`, `endpoint_url`, `access_token`, and the
-//!   `has_secret`/`has_access_token` booleans so non-admin members cannot
-//!   probe credential state.
-
 #![expect(
     clippy::unwrap_used,
     reason = "test scaffolding: a fixture helper that cannot build its value should fail the test loudly"
@@ -29,13 +18,9 @@ use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
 use serde_json::Value;
 use uuid::Uuid;
 
-// ── Fixtures ─────────────────────────────────────────────────────────────────
-
 fn member_only_membership() -> project_user::Model {
-    // BASE_ROLE_VIEW grants ManageIntegrations today (see permissions::view_mask),
-    // but the summary endpoint must work even without that - so we use a
-    // synthetic role id that we never load. `ProjectAccess::Member` does not
-    // dereference the role.
+    // `ProjectAccess::Member` is not dereferencing the role. A synthetic role id that is never
+    // loaded is proving the summary endpoint is working without `ManageIntegrations`.
     project_user::Model {
         id: ProjectUserId::new(Uuid::parse_str("00000000-0000-0000-0000-0000000000bb").unwrap()),
         project: project_id(),
@@ -50,7 +35,6 @@ fn gitea_inbound_row() -> integration::Model {
         project: project_id(),
         name: "my-gitea-hook".into(),
         display_name: "My Gitea".into(),
-        // Sensitive fields populated to verify they're NOT echoed back.
         secret: Some("encrypted-blob".into()),
         created_by: user_id(),
         created_at: test_date(),
@@ -113,7 +97,6 @@ fn with_auth(db: MockDatabase, session_id: SessionId) -> MockDatabase {
         .append_query_results([vec![user()]])
 }
 
-/// `ProjectAccess::Member` sequence: SELECT project, SELECT project_user. No role load.
 fn with_project_member(db: MockDatabase) -> MockDatabase {
     db.append_query_results([vec![project()]])
         .append_query_results([vec![member_only_membership()]])
@@ -137,7 +120,6 @@ fn admin_role() -> role::Model {
     }
 }
 
-/// `ProjectAccess::Require { ManageIntegrations }` sequence: SELECT project, SELECT project_user, SELECT role.
 fn with_project_manage(db: MockDatabase) -> MockDatabase {
     db.append_query_results([vec![project()]])
         .append_query_results([vec![admin_membership()]])
@@ -145,8 +127,6 @@ fn with_project_manage(db: MockDatabase) -> MockDatabase {
 }
 
 const SUMMARY_URL: &str = "/api/v1/projects/test-project/integrations/summary";
-
-// ── Tests ────────────────────────────────────────────────────────────────────
 
 #[test]
 fn summary_endpoint_returns_all_kinds() {
@@ -189,9 +169,6 @@ fn summary_endpoint_returns_all_kinds() {
 
 #[test]
 fn summary_endpoint_excludes_credential_state() {
-    // Critical: the summary payload must not leak `secret`, `endpoint_url`,
-    // `access_token`, `has_secret`, or `has_access_token`. Any of those would
-    // let a non-admin project member fingerprint credentials.
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -234,8 +211,6 @@ fn summary_endpoint_excludes_credential_state() {
 
 #[test]
 fn summary_endpoint_rejects_non_member() {
-    // Non-member: the project_user lookup returns no row -> 404 (Project loader hides
-    // existence rather than returning 403).
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -260,9 +235,6 @@ fn summary_endpoint_rejects_non_member() {
 
 #[test]
 fn delete_github_integration_removes_pair_and_installation() {
-    // Sequence: auth (session x2 + user), project+project_user+role (ManageIntegrations),
-    // SELECT integration (load_integration_in_project), DELETE integrations by fk (exec),
-    // DELETE github_installation by id (exec). MockDatabase commit() is a no-op.
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()

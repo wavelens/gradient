@@ -14,8 +14,6 @@ use uuid::Uuid;
 use crate::DbContext;
 use gradient_types::*;
 
-/// The keep-set is the shared build-graph walk (`graph::walks`), reused verbatim by
-/// the candidate scan and the delete re-check so they can never diverge.
 fn gc_orphan_candidates_sql() -> String {
     format!(
         "{reachable}
@@ -33,8 +31,6 @@ crate::sql_fn! {
         flags = [Walk];
 }
 
-/// The bound is one parameter, and `make_interval` takes an `integer`, so the
-/// cast is in the text rather than in whatever the caller happened to bind.
 fn stale_cached_paths_sql() -> String {
     format!(
         "{live}
@@ -56,10 +52,6 @@ crate::sql_fn! {
         flags = [Walk];
 }
 
-/// Paths no retained evaluation reaches whose last fetch (or commit, if never
-/// fetched) is older than `keep_hours`. The live set is the same `reachable`
-/// walk the derivation GC keeps its rows by, so a path is never live while its
-/// derivation is collectable and never collectable while its derivation lives.
 pub async fn stale_cached_paths<C>(db: &C, keep_hours: i64) -> Result<Vec<String>, sea_orm::DbErr>
 where
     C: ConnectionTrait
@@ -80,12 +72,6 @@ where
         .collect())
 }
 
-/// The evaluations of `task_id` this pass should delete, retaining the most
-/// recent `keep` terminal ones (see [`evaluations_to_gc`]).
-///
-/// Selection only: the rows are deleted by the graph writer, which owns every
-/// write to the graph, and the log files and orphaned commits are reclaimed by
-/// [`after_evaluation_delete`] once the graph writer reports what it removed.
 pub async fn evaluation_gc_plan(
     ctx: &DbContext,
     task_id: TaskId,
@@ -95,7 +81,6 @@ pub async fn evaluation_gc_plan(
         return Ok(Vec::new());
     }
 
-    // Newest first; deletion selection counts only terminal evaluations.
     let all_evals = EEvaluation::find()
         .filter(CEvaluation::Task.eq(task_id))
         .order_by_desc(CEvaluation::CreatedAt)
@@ -119,11 +104,6 @@ pub async fn evaluation_gc_plan(
     .collect())
 }
 
-/// What the evaluation delete leaves behind outside the graph: commits nothing
-/// references any more. The `build_job` rows cascaded with their evaluation, and
-/// the `build_attempt` rows were set-null'd onto the surviving `derivation_build`
-/// shared build - their true, build-once owner - so their logs are the derivation GC's
-/// to reclaim, not this pass's.
 pub async fn after_evaluation_delete(ctx: &DbContext, deleted: &[MEvaluation]) -> Result<()> {
     if deleted.is_empty() {
         return Ok(());
@@ -156,12 +136,6 @@ pub async fn after_evaluation_delete(ctx: &DbContext, deleted: &[MEvaluation]) -
     Ok(())
 }
 
-/// Settle the queue after the deletions. A pruned subtree is named by the
-/// evaluation that walked it and by nobody else, so its pending interior can lose
-/// every name here while another evaluation still builds against it: the live
-/// evaluations that reach it take the names over BEFORE the lost set is re-gated,
-/// so nothing a live evaluation waits on leaves the queue, and what they adopted
-/// is queued where its gates hold. Returns the adopted pair count and the moves.
 pub async fn settle_after_delete(
     ctx: &DbContext,
     lost: &[DerivationId],
@@ -178,8 +152,6 @@ pub async fn settle_after_delete(
         crate::graph::reachability::Adopted::default()
     };
 
-    // Naming is half of what need means, so a deletion can take it away and an
-    // adoption can give it back: update below both before the queue is settled.
     let mut changes = Vec::new();
     for chunk in lost
         .iter()
@@ -219,10 +191,8 @@ pub async fn settle_after_delete(
     Ok((adopted.pairs.len(), changes))
 }
 
-/// When an evaluation last advanced, as opposed to when its row was last
-/// written. A wedged run keeps taking writes, so `updated_at` never goes stale
-/// and the wedged escape hatch never fires for it; the phase stamps move only
-/// when the evaluation enters a new phase, which a stuck one never does.
+/// A wedged run is still taking writes, and `updated_at` is never going stale for it.
+/// The phase stamps are only moving when the evaluation is entering a new phase.
 fn last_progress_at(e: &MEvaluation) -> chrono::NaiveDateTime {
     [
         e.fetch_started_at,
@@ -235,22 +205,6 @@ fn last_progress_at(e: &MEvaluation) -> chrono::NaiveDateTime {
     .fold(e.created_at, std::cmp::max)
 }
 
-/// Selects, by index into a newest-first evaluation list, which evaluations the
-/// per-task GC should delete for a given `keep` count.
-///
-/// Returns nothing while any evaluation is genuinely active (Queued/Fetching/
-/// Evaluating*/Building/Waiting): an in-flight run may reuse NARs from older
-/// evaluations before it records its own build rows, so GC waits until the
-/// task is quiescent. An "active" evaluation whose current phase has lasted
-/// more than `wedged_hours` is presumed wedged and stops blocking - otherwise
-/// one stuck run silently turns a scheduler bug into unbounded storage growth
-/// (`wedged_hours = 0` restores the unconditional block). The age comes from
-/// [`last_progress_at`], not `updated_at`, because a wedged run still takes
-/// writes and so never looks stale. Wedged evaluations
-/// are never deleted themselves; the `keep` most recent terminal evaluations
-/// are retained regardless of outcome - `Failed` and `Aborted` evaluations can still
-/// hold successfully-built NARs, so they are not sacrificed ahead of newer
-/// `Completed` ones.
 fn evaluations_to_gc(
     evals: &[(EvaluationStatus, chrono::NaiveDateTime)],
     keep: usize,
@@ -285,26 +239,8 @@ fn evaluations_to_gc(
     delete
 }
 
-/// Derivation GC candidate scan (the mark half of mark-and-sweep): global
-/// `derivation` rows that lie *outside the dependency closure, over build and
-/// runtime dependencies alike, of every live root* - an `entry_point` or a derivation a
-/// retained eval's `build_job` references - and whose grace period has expired. The
-/// grace lets rapid re-evaluations reuse recent derivations.
-///
-/// Reachability matters because `build_job` rows are pruned with old evals while
-/// `derivation_dependency` edges and shared builds persist: a derivation still needed as
-/// a build input of a retained closure (its own evals long gone) has no `build_job`
-/// yet must be kept. A naive "no `build_job`" test reclaimed those, deleting build
-/// inputs of live shared builds and stranding parents on `InputsUnavailable`.
-///
-/// Read-only, and run on the pool: the whole keep-set walk is too long to hold the
-/// graph writer's single writer lock. The returned timestamp is taken BEFORE the
-/// walk, so the graph writer's delete can re-check exactly what became live since - see
-/// `gradient_graph::gc`. Rows and attempt logs are all this pass reclaims: the
-/// NARs of what it deletes leave the live set with it and are the eviction pass's
-/// (`evict_stale_cached_paths`) to remove once past the fetch TTL. FK cascade
-/// cleans up `derivation_output`, `derivation_build`, dep/closure edges, features
-/// and metrics.
+/// The returned timestamp is taken before the walk.
+/// The graph writer's delete is re-checking exactly what became live since then.
 pub async fn orphan_derivation_candidates<C>(
     db: &C,
     grace_hours: i64,
@@ -343,8 +279,6 @@ mod tests {
         s.split_whitespace().collect::<Vec<_>>().join(" ")
     }
 
-    /// Stale means outside the live set and untouched (fetched or committed)
-    /// for `keep_hours`; the bound is one parameter.
     #[tokio::test]
     async fn stale_cached_paths_selects_outside_the_live_set_past_the_bound() {
         use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult, Value};
@@ -402,8 +336,6 @@ mod tests {
 
     #[test]
     fn skips_gc_while_an_evaluation_is_active() {
-        // An in-flight run may still reuse older NARs, so nothing is deleted -
-        // even completed evaluations far beyond `keep` are retained this pass.
         assert!(gc(&[Building, Completed], 1).is_empty());
         assert!(gc(&[Queued, Building, Waiting, Fetching], 1).is_empty());
         assert!(gc(&[Building, Completed, Aborted, Completed], 1).is_empty());
@@ -411,23 +343,16 @@ mod tests {
 
     #[test]
     fn wedged_active_evaluation_stops_blocking_but_is_never_deleted() {
-        // An eval "active" for longer than the wedged threshold no longer
-        // freezes the task's GC; terminal evals beyond keep are reclaimed,
-        // the wedged eval itself is skipped.
         let evals = at(&[Building, Completed, Failed, Completed], 48);
         assert_eq!(
             evaluations_to_gc(&evals, 1, WEDGED_HOURS, gradient_types::now()),
             vec![2, 3]
         );
-        // wedged_hours = 0 restores the unconditional block.
         assert!(evaluations_to_gc(&evals, 1, 0, gradient_types::now()).is_empty());
     }
 
     #[test]
     fn a_heartbeating_wedged_evaluation_still_goes_stale() {
-        // #609: `updated_at` is refreshed by anything that writes the row, so a
-        // run stuck in Building for days never crossed the threshold and froze
-        // its task's GC forever. Measured on the phase stamp it does cross.
         let now = gradient_types::now();
         let wedged = MEvaluation {
             created_at: now - ChronoDuration::hours(72),
@@ -443,9 +368,6 @@ mod tests {
 
     #[test]
     fn entering_a_phase_is_progress_and_keeps_the_block() {
-        // The converse, so the fix cannot be read as "active evals stop
-        // blocking after a day": a run that reached a new phase an hour ago is
-        // advancing, however old its earlier stamps are.
         let now = gradient_types::now();
         let moving = MEvaluation {
             created_at: now - ChronoDuration::hours(72),
@@ -461,8 +383,6 @@ mod tests {
 
     #[test]
     fn an_evaluation_with_no_phase_stamp_ages_from_its_creation() {
-        // A `Queued` run has entered no phase, so creation is the only honest
-        // mark of when it last moved.
         let now = gradient_types::now();
         let queued = MEvaluation {
             created_at: now - ChronoDuration::hours(48),
@@ -475,8 +395,6 @@ mod tests {
 
     #[test]
     fn retains_keep_most_recent_terminal_regardless_of_outcome() {
-        // A newer Aborted/Failed run is kept ahead of an older Completed one;
-        // its successfully-built NARs are not sacrificed.
         assert_eq!(gc(&[Aborted, Completed], 1), vec![1]);
         assert_eq!(gc(&[Completed, Aborted, Failed], 2), vec![2]);
     }
@@ -504,10 +422,6 @@ mod tests {
         }
     }
 
-    /// The names go over before the queue is settled, so an interior a live
-    /// evaluation still builds against never leaves the queue in between; what
-    /// was adopted is then queued where its gates hold, and the adopting
-    /// evaluations' graph version moves because their build list did.
     #[tokio::test]
     async fn the_live_evaluations_adopt_before_the_lost_names_are_regated() {
         use sea_orm::{DatabaseBackend, MockDatabase, Value};
@@ -569,8 +483,6 @@ mod tests {
         );
     }
 
-    /// Nothing pending lost its last name: no adoption walk is paid for, and the
-    /// lost set is updated and re-gated as before.
     #[tokio::test]
     async fn a_deletion_that_orphans_nothing_pending_walks_nothing() {
         use sea_orm::{DatabaseBackend, MockDatabase, Value};

@@ -4,9 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Where a startable job goes: single dispatch, its waiting cluster, or nowhere
-//! while its cluster is past `Queued`.
-
 use std::collections::HashMap;
 
 use gradient_db::scheduling::cluster::MemberOf;

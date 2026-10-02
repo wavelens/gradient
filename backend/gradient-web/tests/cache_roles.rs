@@ -4,9 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Integration tests for the cache-scoped role management API
-//! (`/api/v1/caches/{cache}/roles`).
-
 #![expect(
     clippy::unwrap_used,
     reason = "test scaffolding: a fixture helper that cannot build its value should fail the test loudly"
@@ -95,8 +92,6 @@ fn run<F: std::future::Future>(fut: F) -> F::Output {
         .block_on(fut)
 }
 
-// ── GET /caches/{cache}/roles ─────────────────────────────────────────────────
-
 #[test]
 fn list_returns_builtins_and_available_permissions() {
     run(async {
@@ -105,10 +100,8 @@ fn list_returns_builtins_and_available_permissions() {
         let custom_id = RoleId::now_v7();
 
         let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
-            // load_cache Member: cache -> cache_user membership
             .append_query_results([vec![cache_row()]])
             .append_query_results([vec![admin_member()]])
-            // role listing (built-ins + custom)
             .append_query_results([vec![
                 admin_role_row(),
                 view_role_row(),
@@ -143,8 +136,6 @@ fn list_returns_builtins_and_available_permissions() {
     });
 }
 
-// ── POST /caches/{cache}/roles ────────────────────────────────────────────────
-
 #[test]
 fn create_role_rejects_duplicate_name() {
     run(async {
@@ -156,7 +147,6 @@ fn create_role_rejects_duplicate_name() {
             .append_query_results([vec![cache_row()]])
             .append_query_results([vec![admin_member()]])
             .append_query_results([vec![admin_role_row()]])
-            // name clash pre-check returns existing row
             .append_query_results([vec![existing]]);
 
         let server = make_test_server(db.into_connection());
@@ -199,8 +189,6 @@ fn create_role_rejects_unknown_permission() {
     });
 }
 
-// ── PATCH /caches/{cache}/roles/{role_id} ─────────────────────────────────────
-
 #[test]
 fn patch_role_rejects_builtin() {
     run(async {
@@ -211,7 +199,6 @@ fn patch_role_rejects_builtin() {
             .append_query_results([vec![cache_row()]])
             .append_query_results([vec![admin_member()]])
             .append_query_results([vec![admin_role_row()]])
-            // load_cache_role returns the Admin built-in
             .append_query_results([vec![admin_role_row()]]);
 
         let server = make_test_server(db.into_connection());
@@ -256,8 +243,6 @@ fn patch_role_rejects_managed() {
     });
 }
 
-// ── DELETE /caches/{cache}/roles/{role_id} ────────────────────────────────────
-
 #[test]
 fn delete_role_rejects_role_in_use() {
     run(async {
@@ -277,9 +262,7 @@ fn delete_role_rejects_role_in_use() {
             .append_query_results([vec![cache_row()]])
             .append_query_results([vec![admin_member()]])
             .append_query_results([vec![admin_role_row()]])
-            // load_cache_role
             .append_query_results([vec![custom]])
-            // in-use check returns a member
             .append_query_results([vec![in_use]]);
 
         let server = make_test_server(db.into_connection());

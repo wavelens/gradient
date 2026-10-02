@@ -40,12 +40,8 @@ use gradient_types::*;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use std::sync::Arc;
 
-/// Resolved access context for a per-eval build (`build_job`).
-///
-/// The public build identity is the `build_job` id; build state lives on the
-/// `derivation_build` shared build. Walks build_job -> evaluation -> task ->
-/// project and enforces the access check. Returns `not_found("Build")` on
-/// any failure so callers cannot distinguish missing from forbidden.
+/// Every failure is answered with `not_found("Build")`. Callers cannot distinguish missing from
+/// forbidden.
 pub(super) struct BuildAccessContext {
     pub build_job: MBuildJob,
     pub shared_build: MDerivationBuild,
@@ -53,9 +49,6 @@ pub(super) struct BuildAccessContext {
 }
 
 impl BuildAccessContext {
-    /// Load build_job + shared build + project without enforcing an access check.
-    ///
-    /// Use this when access is gated by custom logic (e.g. download tokens).
     pub(super) async fn load_unguarded(
         state: &Arc<ServerState>,
         build_job_id: BuildJobId,
@@ -121,11 +114,6 @@ impl BuildAccessContext {
         })
     }
 
-    /// Load build_job + project and enforce public/member access.
-    ///
-    /// Returns `not_found("Build")` when the build does not exist, the
-    /// project is private, and `maybe_user` is neither a direct member nor
-    /// a member of another project whose evaluations also reference the derivation.
     pub(super) async fn load(
         state: &Arc<ServerState>,
         build_job_id: BuildJobId,
@@ -156,9 +144,7 @@ impl BuildAccessContext {
     }
 }
 
-/// True when `user` belongs to any project whose evaluations also reference
-/// `derivation` (a `build_job` exists for it in that project). The derivation is
-/// global and content-addressed, so any project that built it may read its log.
+/// The derivation is global and content-addressed. Any project that built it may read its log.
 async fn reachable_projects_accessible(
     state: &Arc<ServerState>,
     user: &MUser,
@@ -178,8 +164,6 @@ async fn reachable_projects_accessible(
         .all(&state.web_db)
         .await?;
 
-    // One read for every task behind these evaluations: this executes on the
-    // authorization path of each request.
     let task_ids: Vec<TaskId> = evals.iter().filter_map(|ev| ev.task).collect();
     let project_ids: std::collections::HashSet<ProjectId> = ETask::find()
         .filter(CTask::Id.is_in(task_ids))
@@ -197,9 +181,6 @@ async fn reachable_projects_accessible(
     Ok(false)
 }
 
-/// The attempt id whose stored log should be served for a shared build: its latest
-/// attempt. Substituted/cache-completed shared builds may never have produced an
-/// attempt, in which case there is no log to read.
 pub(super) async fn effective_log_id(
     state: &Arc<ServerState>,
     shared_build: &MDerivationBuild,

@@ -4,14 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Integration tests for cache-pinned API keys (Task 17).
-//!
-//! Auth query sequence for GRAD tokens (see auth_hardening.rs for reference):
-//!   1. SELECT api  (key lookup by hash)
-//!   2. EXEC        (UPDATE last_used_at via save)
-//!   3. SELECT api  (re-select after save)
-//!   4. SELECT user
-
 #![expect(
     clippy::unwrap_used,
     reason = "test scaffolding: a fixture helper that cannot build its value should fail the test loudly"
@@ -119,18 +111,14 @@ fn run<F: std::future::Future>(fut: F) -> F::Output {
         .block_on(fut)
 }
 
-// ── Tests ─────────────────────────────────────────────────────────────────────
-
 #[test]
 fn cache_pinned_key_works_on_pinned_cache() {
     run(async {
         let raw = "a".repeat(64);
         let key = pinned_api_key(&raw, cache_id(), cache_admin_mask());
 
-        // Public cache: load_cache(Readable) finds the cache, pin matches, no member lookup.
         let db = api_key_db(MockDatabase::new(DatabaseBackend::Postgres), &key)
             .append_query_results([vec![cache_row()]])
-            // get_cache handler: can_edit member lookup (no row = not editable; not an error)
             .append_query_results([Vec::<gradient_entity::cache_user::Model>::new()]);
 
         let server = make_test_server(db.into_connection());
@@ -149,7 +137,6 @@ fn cache_pinned_key_works_on_pinned_cache() {
 fn cache_pinned_key_rejected_on_other_cache() {
     run(async {
         let raw = "b".repeat(64);
-        // Key is pinned to other_cache_id, but request targets cache_id.
         let key = pinned_api_key(&raw, other_cache_id(), cache_admin_mask());
 
         let db = api_key_db(MockDatabase::new(DatabaseBackend::Postgres), &key)
@@ -186,7 +173,7 @@ fn cache_pinned_key_rejected_on_project_endpoint() {
 
 #[test]
 fn create_key_rejects_both_project_and_cache_pin() {
-    // This uses a session JWT because API keys cannot create API keys.
+    // A session JWT is used because API keys cannot create API keys.
     run(async {
         let session_id = gradient_types::SessionId::now_v7();
         let token = gradient_test_support::web::make_token(session_id);
@@ -222,19 +209,13 @@ fn create_cache_pinned_key_cannot_exceed_member_mask() {
         let token = gradient_test_support::web::make_token(session_id);
         let session = gradient_test_support::web::live_session(session_id);
 
-        // A View-role member (or project member, same View mask) may mint a
-        // read-only key, but not one granting `writeStore` beyond their mask -> 403 (#334).
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             .append_query_results([vec![session.clone()]])
             .append_query_results([vec![session]])
             .append_query_results([vec![user()]])
-            // Name-clash check returns empty (no existing key with that name)
             .append_query_results([Vec::<api::Model>::new()])
-            // load_cache(Readable): cache lookup
             .append_query_results([vec![private_cache_row()]])
-            // load_cache(Readable): membership visibility check
             .append_query_results([vec![view_cache_member()]])
-            // effective_cache_mask: member + role lookup -> View mask
             .append_query_results([vec![view_cache_member()]])
             .append_query_results([vec![view_cache_role()]]);
 

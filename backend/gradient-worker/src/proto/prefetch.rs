@@ -4,20 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Server-to-worker input prefetch: ensure every input a build needs is
-//! present in the local nix store before the build is handed off.
-//!
-//! `prefetch_inputs` drives an [`InputPrefetcher`] pipeline:
-//!
-//! ```text
-//! enumerate_inputs  ->  HashSet<String>        (all input paths)
-//! filter_missing    ->  Vec<String>             (only what's absent from store)
-//! query_and_split   ->  (by_url, by_request)   (split by download method)
-//! fetch_by_request  ->  Vec<(path, nar, meta)>  (request over WS)
-//! download_by_url   ->  Vec<(path, nar, meta)>  (HTTP download from S3)
-//! import_all        ->  usize                   (stream into nix-daemon)
-//! ```
-
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
@@ -38,32 +24,18 @@ use crate::proto::progress::{Progress, ProgressSink, read_body};
 use gradient_worker_client::compression::resolve_compression;
 use gradient_worker_client::nar_recv::NarPayload;
 
-/// How many missing inputs to download + import in parallel before invoking
-/// the build. Conservative - each one streams a NAR into the local daemon
-/// and we don't want to swamp the AddToStoreNar queue.
 const PREFETCH_CONCURRENCY: usize = 8;
 
-/// Attempts for a single presigned S3 download before giving up. The cache's
-/// object store can flake at the transport layer (TLS handshake resets,
-/// connection drops) under concurrent load; retrying a few times turns a
-/// transient edge failure into a successful fetch instead of a failed build.
 const PRESIGNED_DOWNLOAD_MAX_ATTEMPTS: u32 = 4;
 
-/// Base backoff before the first presigned-download retry; doubled each attempt.
 const PRESIGNED_RETRY_BASE: Duration = Duration::from_millis(500);
 
-/// What a prefetch moved into the local store: paths imported, compressed
-/// bytes fetched for them.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct Prefetched {
     pub paths: u32,
     pub bytes: u64,
 }
 
-/// Required input store paths the gradient cache could not serve. Carried as a
-/// typed error so the executor classifies the failure as
-/// `BuildFailureKind::InputsUnavailable` and forwards the paths to the server,
-/// which demotes those outputs and re-queues their producers (#410).
 #[derive(Debug)]
 pub struct MissingInputs(pub Vec<String>);
 
@@ -80,13 +52,6 @@ impl std::fmt::Display for MissingInputs {
 
 impl std::error::Error for MissingInputs {}
 
-/// A cached NAR we fetched fails its own recorded integrity (`nar_hash` /
-/// `nar_size`): the object bytes in our store do not match the metadata the
-/// server signs and serves. This happens when object and `cached_path` metadata
-/// are written by different producers (e.g. a non-reproducible local build vs an
-/// upstream substitute passthrough) and desync. The path is treated as a missing input
-/// so the server demotes the corrupt object and rebuilds it with consistent
-/// metadata, rather than retrying forever against poison.
 #[derive(Debug)]
 pub struct CorruptCachedNar(pub String);
 
@@ -102,11 +67,6 @@ impl std::fmt::Display for CorruptCachedNar {
 
 impl std::error::Error for CorruptCachedNar {}
 
-/// A substitute output is *genuinely* absent from every upstream cache (the
-/// CacheQuery Pull reported it uncached everywhere), as opposed to a transient
-/// timeout/transport failure during the passthrough. Only this case makes escalating
-/// the shared build to a real build sound; transient passthrough failures must retry as a
-/// substitute instead of counting toward the miss-escalation threshold.
 #[derive(Debug)]
 pub struct SubstituteNotOnUpstream(pub String);
 
@@ -122,40 +82,20 @@ impl std::fmt::Display for SubstituteNotOnUpstream {
 
 impl std::error::Error for SubstituteNotOnUpstream {}
 
-/// True when a presigned download's HTTP status means the object is genuinely
-/// absent (treat as a missing input, self-heal) rather than a retryable
-/// transport error: 404 Not Found / 410 Gone.
 fn presigned_status_is_missing(status: u16) -> bool {
     matches!(status, 404 | 410)
 }
 
-/// True when a presigned download's HTTP status is worth retrying: request
-/// timeout, rate limiting, or any 5xx (the object store is briefly unhealthy,
-/// not the object missing). 404/410 are handled as missing; other 4xx are
-/// terminal client errors.
 fn presigned_status_is_retryable(status: u16) -> bool {
     matches!(status, 408 | 429) || status >= 500
 }
 
-/// True when a downloaded body contradicts the `file_size` its metadata
-/// declares. The cache advertised an object it cannot deliver whole, so the
-/// bytes are unusable however the transfer ended - notably a 3xx that outlived
-/// the redirect budget, whose empty body would otherwise read as a successful
-/// zero-byte download. `None` (no declared size) can't contradict anything.
 fn presigned_body_is_short(declared: Option<u64>, received: usize) -> bool {
     declared.is_some_and(|want| want != received as u64)
 }
 
-/// One presigned download's outcome: the store path, and `Some((bytes, meta))`
-/// when fetched or `None` when the cache cannot deliver the object.
 type PresignedFetch = (String, Option<(Vec<u8>, CachedPath)>);
 
-/// Download one presigned NAR with bounded retries. `Ok((path, Some((bytes,
-/// cp))))` fetched it; `Ok((path, None))` means the cache advertises the path
-/// but cannot serve it - a 404/410, or a body that doesn't match the declared
-/// `file_size` - which the `InputsUnavailable` self-heal demotes and rebuilds
-/// (#410). Transport errors and retryable statuses are retried with exponential
-/// backoff before surfacing as a transient `Err`.
 pub(crate) async fn download_one_presigned(
     http: &reqwest::Client,
     cp: CachedPath,
@@ -182,9 +122,6 @@ pub(crate) async fn download_one_presigned(
                 if presigned_status_is_retryable(status) {
                     anyhow::anyhow!("HTTP {status} from {url}")
                 } else if !resp.status().is_success() {
-                    // Not 2xx, not a miss, not retryable: a 3xx that outran the
-                    // client's redirect budget, or a terminal 4xx. `bytes()` on
-                    // one yields an empty body that must never pass for a NAR.
                     return Err(anyhow::anyhow!(
                         "HTTP {status} from {url} (path {path}) is not a usable NAR response"
                     ));
@@ -212,8 +149,6 @@ pub(crate) async fn download_one_presigned(
         };
 
         if attempt < PRESIGNED_DOWNLOAD_MAX_ATTEMPTS {
-            // `{:#}` so the chain reaches the log: the outermost context names the
-            // URL, and the cause underneath is what says why it never answered.
             warn!(
                 %path,
                 attempt,
@@ -232,20 +167,10 @@ pub(crate) async fn download_one_presigned(
     unreachable!("loop returns on the final attempt")
 }
 
-// ── InputPrefetcher ───────────────────────────────────────────────────────────
-
-/// Drives the five-stage pipeline that ensures every input path a build needs
-/// is present in the local nix store before the build is handed off.
-///
-/// Created by [`prefetch_inputs`] from a [`BuildSpec`] + store + updater.
 struct InputPrefetcher<'a> {
     store: &'a LocalNixStore,
-    /// Derivation path of the build task (used for logging and cache queries).
     drv_path: String,
-    /// Build ID (used for logging only).
     build_id: String,
-    /// Live WS connection back to the server (used for `CacheQuery` /
-    /// `NarRequest`). Requires `&mut` because sending advances the framing state.
     updater: &'a mut JobUpdater,
 }
 
@@ -259,9 +184,6 @@ impl<'a> InputPrefetcher<'a> {
         }
     }
 
-    /// Construct a prefetcher not tied to a `BuildSpec` - used by
-    /// [`ensure_path`] to substitute a single store path (and its closure)
-    /// without a build context. `label` only feeds logging.
     fn for_path(store: &'a LocalNixStore, label: String, updater: &'a mut JobUpdater) -> Self {
         Self {
             store,
@@ -271,19 +193,9 @@ impl<'a> InputPrefetcher<'a> {
         }
     }
 
-    /// Stage 0 - ensure the build's own `.drv` file is present locally so
-    /// `enumerate_inputs` can read it.
-    ///
-    /// On a build worker that didn't perform the eval, the target drv is not
-    /// on disk: eval ran on a different worker (or in-process on the server),
-    /// pushed produced drvs to the cache via `push_drvs`, and dispatched a
-    /// `BuildJob` carrying only `drv_path` strings. Without this stage,
-    /// `enumerate_inputs` fails with `read .drv … No such file or directory`.
-    ///
-    /// The fetch must also pull the `.drv`'s reference chain - every
-    /// transitive input_derivation `.drv` plus its input_sources - because
-    /// `add_to_store_nar` rejects the build target's `.drv` if any reference
-    /// declared in its `ValidPathInfo` is absent from the local store.
+    /// The target `.drv` is usually missing here because evaluation ran on another worker.
+    /// The fetch is pulling its whole reference chain too.
+    /// `add_to_store_nar` is rejecting a `.drv` whose declared references are absent locally.
     async fn ensure_self_drv_present(&mut self) -> Result<()> {
         let full_drv_path = nix_store_path(&self.drv_path);
         if tokio::fs::try_exists(&full_drv_path).await.unwrap_or(false) {
@@ -308,10 +220,6 @@ impl<'a> InputPrefetcher<'a> {
         Ok(())
     }
 
-    /// Stage 1 - collect the input store paths this derivation declares: its
-    /// `input_sources` and, of each input derivation, only the outputs it
-    /// requests. Stage 0 left every input `.drv` in the store, since they are
-    /// references of the target's `.drv`.
     async fn enumerate_inputs(&self) -> Result<HashSet<String>> {
         let drv = read_local_drv(&self.drv_path).await?;
         let mut wanted: HashSet<String> = drv.input_sources.iter().cloned().collect();
@@ -323,13 +231,6 @@ impl<'a> InputPrefetcher<'a> {
         Ok(wanted)
     }
 
-    /// Stage 2 - filter `wanted` down to paths absent from the local store.
-    ///
-    /// A `has_path` failure means we can't tell whether the daemon already
-    /// holds a path - proceeding would either skip an actually-missing input
-    /// (build fails late with "dependency does not exist") or re-import one
-    /// the daemon already has (wasted work and confusing logs). Neither is
-    /// acceptable, so we fail the build immediately.
     async fn filter_missing(&self, wanted: HashSet<String>) -> Result<Vec<String>> {
         let mut missing = Vec::new();
         for p in wanted {
@@ -345,19 +246,6 @@ impl<'a> InputPrefetcher<'a> {
         Ok(missing)
     }
 
-    /// Stage 3 - ask the server which missing paths it can serve, then split
-    /// them into two buckets: presigned-URL downloads and `NarRequest` transfers.
-    ///
-    /// Any path the reply does not answer with something serveable is a **hard
-    /// failure**, whether it comes back uncached or not at all: the path is known
-    /// to be absent from the worker's local store (checked in Stage 2) and builds
-    /// run with `use_substitutes = false`, so the daemon will not be able to fetch
-    /// it from any upstream. Continuing would eventually surface as a confusing
-    /// `path '…' is not valid` error deep inside `add_to_store_nar` when a
-    /// parent path is imported. Failing here keeps the blame at the right layer.
-    ///
-    /// This query never leaves our cache (`external: false`). A path an upstream
-    /// has but we do not is a Substitute's job to put here, not a build's to fetch.
     async fn query_and_split(
         &mut self,
         missing: Vec<String>,
@@ -394,7 +282,6 @@ impl<'a> InputPrefetcher<'a> {
         Ok((by_url, by_request))
     }
 
-    /// Stage 4a - fetch NARs from the server via `NarRequest` (local-mode cache).
     async fn fetch_by_request(
         &mut self,
         by_request: Vec<CachedPath>,
@@ -419,11 +306,6 @@ impl<'a> InputPrefetcher<'a> {
         Ok(results)
     }
 
-    /// Stage 4b - download NARs from presigned S3 URLs (S3-backed cache).
-    ///
-    /// A failed download is fatal: silently dropping it would let the build
-    /// proceed with a missing input or output and surface later as an opaque
-    /// "No such file or directory" when we try to NAR-pack the absent path.
     async fn download_by_url(
         &self,
         by_url: Vec<CachedPath>,
@@ -434,9 +316,6 @@ impl<'a> InputPrefetcher<'a> {
 
         let http = gradient_worker_client::http::download_client();
 
-        // Bound concurrency: firing every download at once opens a TLS
-        // connection per path, which is what tips a flaky object store into
-        // `tls handshake eof`. Cap it at the same width as the import pipeline.
         let outcomes: Vec<Result<PresignedFetch>> =
             futures::stream::iter(by_url.into_iter().map(|cp| {
                 let http = http.clone();
@@ -463,20 +342,6 @@ impl<'a> InputPrefetcher<'a> {
         Ok(results)
     }
 
-    /// Stage 5 - import every downloaded NAR into the local nix-daemon in
-    /// topological order: a path's `references` (from its `CachedPath.references`)
-    /// that are also in the download set must finish importing before the
-    /// path itself is imported. References already present in the local store
-    /// impose no ordering constraint.
-    ///
-    /// Independent paths (those with no remaining unresolved deps) are imported
-    /// in parallel up to [`PREFETCH_CONCURRENCY`]. Any import failure aborts
-    /// the whole prefetch: proceeding with a partial closure would let the
-    /// daemon fail later with a confusing "dependency does not exist" error
-    /// instead of the real transport/metadata problem. In-flight imports are
-    /// cancelled by dropping the `FuturesUnordered`.
-    ///
-    /// Returns the total number of imports attempted on success.
     async fn import_all(&self, results: Vec<(String, NarPayload, CachedPath)>) -> Result<usize> {
         let store = self.store;
         let total = results.len();
@@ -489,12 +354,7 @@ impl<'a> InputPrefetcher<'a> {
         let mut payload: HashMap<String, (NarPayload, CachedPath)> =
             results.into_iter().map(|(p, n, m)| (p, (n, m))).collect();
 
-        // For each path, the subset of its references that are also in the
-        // download set - i.e. the deps we must wait for. Refs already in the
-        // local store (and thus not downloaded) aren't tracked here.
         let mut pending_deps: HashMap<String, HashSet<String>> = HashMap::new();
-        // Reverse edges: when X imports successfully, promote each entry in
-        // `wanted_by[X]` one step closer to ready.
         let mut wanted_by: HashMap<String, Vec<String>> = HashMap::new();
 
         for (path, (_, meta)) in &payload {
@@ -556,9 +416,6 @@ impl<'a> InputPrefetcher<'a> {
         }
 
         if !pending_deps.is_empty() {
-            // Should not happen: nix store references are acyclic. If it does,
-            // we've left paths unimported - log so the build failure is
-            // diagnosable.
             warn!(
                 remaining = pending_deps.len(),
                 "topo import left paths unimported (cycle in references?)"
@@ -568,19 +425,6 @@ impl<'a> InputPrefetcher<'a> {
         Ok(completed)
     }
 
-    /// Run the full prefetch pipeline.
-    ///
-    /// The drv's declared inputs (`input_sources` + `input_derivation` outputs)
-    /// are only the first hop. Each of those paths has its own runtime
-    /// `references` - the transitive closure - which must also be in the
-    /// local store before the daemon can accept the import of a parent.
-    /// We therefore run `CacheQuery Pull` in a loop: on each iteration we
-    /// inspect the references of everything we just fetched and queue any
-    /// that are absent locally and haven't been queried yet. The loop ends
-    /// when no new references surface.
-    ///
-    /// A safety cap bounds worst-case iterations so a pathological cycle or
-    /// misbehaving upstream cannot loop forever.
     async fn run(&mut self) -> Result<Prefetched> {
         self.ensure_self_drv_present().await?;
 
@@ -600,8 +444,6 @@ impl<'a> InputPrefetcher<'a> {
         self.fetch_closure(initial_missing).await
     }
 
-    /// Fetch a seed set of paths plus their transitive closure into the local nix
-    /// store. Used by `run` for a build's inputs and by [`ensure_path`].
     async fn fetch_closure(&mut self, initial_missing: Vec<String>) -> Result<Prefetched> {
         const MAX_ITERATIONS: usize = 1024;
 
@@ -613,8 +455,6 @@ impl<'a> InputPrefetcher<'a> {
 
         let mut all_results: Vec<(String, NarPayload, CachedPath)> = Vec::new();
         let mut fetched_bytes = 0u64;
-        // Every path we've already asked the server about (success or not),
-        // so we don't re-query the same one across iterations.
         let mut queried: HashSet<String> = initial_missing.iter().cloned().collect();
         let mut to_query: Vec<String> = initial_missing;
         let mut iterations = 0usize;
@@ -634,8 +474,6 @@ impl<'a> InputPrefetcher<'a> {
             let batch = self.fetch_round(by_url, by_request).await?;
             fetched_bytes += payload_bytes(&batch).await;
 
-            // Collect any references from this batch that we haven't yet
-            // queried and that aren't already in the local store.
             for (path, _, meta) in &batch {
                 tracing::trace!(
                     path = %path,
@@ -649,11 +487,8 @@ impl<'a> InputPrefetcher<'a> {
                 .filter(|r| !queried.contains(r))
                 .collect();
 
-            // For every `.drv` we just fetched, parse it and harvest its
-            // input_derivations and input_sources: the references the daemon
-            // validates when accepting the `.drv` NAR. Relying on
-            // `cached_path.references` alone is unsafe: the eval worker
-            // silently stores `NULL` when its own metadata query fails.
+            // The `.drv` inputs are read from the parsed file, not `cached_path.references`.
+            // The eval worker is storing `NULL` references when its metadata query fails.
             for (path, nar, meta) in &batch {
                 if !path.ends_with(".drv") {
                     continue;
@@ -684,8 +519,6 @@ impl<'a> InputPrefetcher<'a> {
             for r in refs {
                 match self.store.has_path(&r).await {
                     Ok(true) => {
-                        // Already in the local store - nothing to do; still
-                        // record it as queried so we don't revisit.
                         tracing::trace!(path = %r, "closure walk: ref already in local store");
                         queried.insert(r);
                     }
@@ -727,7 +560,6 @@ impl<'a> InputPrefetcher<'a> {
         })
     }
 
-    /// One closure round's transfers, timed as a single `NarFetch` span.
     async fn fetch_round(
         &mut self,
         by_url: Vec<CachedPath>,
@@ -750,24 +582,6 @@ async fn payload_bytes(batch: &[(String, NarPayload, CachedPath)]) -> u64 {
     bytes
 }
 
-// ── Public entry point ────────────────────────────────────────────────────────
-
-/// Ensure every input path the daemon will need to build `task` is present
-/// in the local nix store. Asks the server which missing paths it can serve
-/// via `CacheQuery { mode: Pull }`, then for each cached path either:
-///
-/// - downloads from a presigned URL (S3-backed cache) and imports, or
-/// - sends `NarRequest` and receives chunked `NarPush` frames over the WS
-///   (local-mode cache), then imports.
-///
-/// Imports run concurrently (capped at [`PREFETCH_CONCURRENCY`]) since each
-/// streams an `AddToStoreNar` into the daemon. A failed import aborts the
-/// whole prefetch, so a surviving build always has a complete input closure.
-///
-/// On failure the error is mirrored onto the owning evaluation via
-/// `EvalMessage` so operators see infrastructure problems (unreachable
-/// upstream, bad narinfo metadata, …) on the evaluation page instead of
-/// having to dig into per-build logs.
 pub async fn prefetch_inputs(
     store: &LocalNixStore,
     task: &BuildSpec,
@@ -787,15 +601,6 @@ pub async fn prefetch_inputs(
     result
 }
 
-/// Ensure a single store path (plus its transitive runtime closure) is present
-/// in the local nix store, substituting it from the gradient cache when absent.
-///
-/// Used before evaluating a `FlakeSource::Cached` flake: the fetch ran on a
-/// different worker, so the archived source store path is only in the binary
-/// cache, not this worker's local store. `nix` won't substitute a `path:` flake
-/// ref from a cache, so we pull it in ourselves first. Reuses the same
-/// closure-expanding `CacheQuery Pull -> download -> import` pipeline as
-/// [`prefetch_inputs`].
 pub async fn ensure_path(
     store: &LocalNixStore,
     path: &str,
@@ -810,8 +615,6 @@ pub async fn ensure_path(
     Ok(())
 }
 
-// ── Private helpers ───────────────────────────────────────────────────────────
-
 async fn read_local_drv(drv_path: &str) -> Result<gradient_derivation::Derivation> {
     let full = nix_store_path(drv_path);
     let bytes = tokio::fs::read(&full)
@@ -820,21 +623,13 @@ async fn read_local_drv(drv_path: &str) -> Result<gradient_derivation::Derivatio
     parse_drv(&bytes).with_context(|| format!("parse .drv {full} for prefetch"))
 }
 
-/// Result of splitting a `CacheQuery Pull` response into its three categories.
 #[derive(Debug, Default)]
 struct Classified {
-    /// Cached paths the server will serve via a presigned HTTP URL.
     by_url: Vec<CachedPath>,
-    /// Cached paths the server will serve via `NarRequest` over the WebSocket.
     by_request: Vec<CachedPath>,
-    /// Paths the server reports it does **not** have. These are fatal during
-    /// prefetch (see [`InputPrefetcher::query_and_split`] for why).
     uncached: Vec<String>,
 }
 
-/// Split a `CacheQuery Pull` response into URL-downloadable, WS-requestable,
-/// and uncached buckets. Pure helper, kept out of [`InputPrefetcher`] so the
-/// classification is unit-testable without a live WebSocket.
 fn classify_cached_entries(asked: &[String], entries: Vec<CachedPath>) -> Classified {
     let mut out = Classified::default();
     for cp in entries {
@@ -852,9 +647,6 @@ fn classify_cached_entries(asked: &[String], entries: Vec<CachedPath>) -> Classi
         }
     }
 
-    // The reply is authoritative over what we asked: a path it omits is one our
-    // cache cannot serve, the same answer as one it returns uncached. The server
-    // drops a malformed path before it reads a row, so an omission is real.
     let answered: HashSet<&str> = out
         .by_url
         .iter()
@@ -930,9 +722,6 @@ mod tests {
 
     #[test]
     fn classify_collects_uncached_separately() {
-        // This is the regression the Stage-3 hard-fail guards against: if the
-        // server reports a required input as uncached, we must surface it so
-        // we don't silently hand the build a broken closure.
         let asked = vec![
             "/nix/store/aaaa-ok".to_owned(),
             "/nix/store/xxxx-missing-upstream".to_owned(),
@@ -965,10 +754,6 @@ mod tests {
         assert!(out.uncached.is_empty());
     }
 
-    /// The reply is authoritative: a path it never answers about is one our cache
-    /// cannot serve, exactly like one it returns uncached. Reading only the entries
-    /// that came back let an omission pass as satisfied, and the build then failed
-    /// inside the daemon's importer instead of here.
     #[test]
     fn a_path_the_reply_omits_is_uncached() {
         let asked = vec![
@@ -982,8 +767,6 @@ mod tests {
         assert_eq!(out.uncached, vec!["/nix/store/bbbb-omitted".to_owned()]);
     }
 
-    /// An omitted path is reported once, not twice, when the reply also returns it
-    /// uncached.
     #[test]
     fn an_uncached_entry_is_not_also_counted_as_omitted() {
         let asked = vec!["/nix/store/xxxx-missing".to_owned()];
@@ -995,19 +778,12 @@ mod tests {
 
     #[test]
     fn short_body_contradicts_a_declared_file_size() {
-        // The regression: a non-followed 3xx hands back an empty body, which
-        // without this check reads as a successful zero-byte download.
         assert!(presigned_body_is_short(Some(227840), 0));
         assert!(presigned_body_is_short(Some(227840), 227839));
         assert!(!presigned_body_is_short(Some(227840), 227840));
-        // Nothing declared, nothing to contradict.
         assert!(!presigned_body_is_short(None, 0));
     }
 
-    /// A cache that answers a NAR GET with a redirect to its object storage
-    /// (attic, Cachix, every S3 gateway) must be followed, not reported as a
-    /// zero-byte success. `redirect_swallowed_as_empty_body_is_not_a_download`
-    /// pins the failure mode this guards against.
     #[tokio::test]
     async fn presigned_download_follows_a_redirect_to_object_storage() {
         use wiremock::matchers::{method, path as path_matcher};
@@ -1072,9 +848,6 @@ mod tests {
         );
     }
 
-    /// The exact production failure: with redirects refused, the 3xx body is
-    /// empty and must surface as an error rather than an empty NAR. Uses the
-    /// API client on purpose - that is what the download path used to reach for.
     #[tokio::test]
     async fn redirect_swallowed_as_empty_body_is_not_a_download() {
         use wiremock::matchers::{method, path as path_matcher};
@@ -1105,10 +878,6 @@ mod tests {
         );
     }
 
-    /// A cache that serves fewer bytes than its own metadata declares is a
-    /// cache that cannot deliver the path: report it as a miss so the self-heal
-    /// demotes it, rather than letting the truncated body reach the importer
-    /// and be blamed on our own storage as a corrupt NAR.
     #[tokio::test]
     async fn truncated_body_is_reported_as_a_miss() {
         use wiremock::matchers::{method, path as path_matcher};
@@ -1155,8 +924,6 @@ mod tests {
         for s in [408, 429, 500, 502, 503, 504] {
             assert!(presigned_status_is_retryable(s), "status {s} must retry");
         }
-        // Genuine misses and terminal client errors must NOT retry: 404/410 are
-        // handled as missing inputs, 403/400 are terminal.
         for s in [400, 403, 404, 410] {
             assert!(
                 !presigned_status_is_retryable(s),

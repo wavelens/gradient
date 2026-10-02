@@ -4,22 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Centralized graceful-shutdown primitive.
-//!
-//! `Shutdown` bundles a [`CancellationToken`] (the signal) with a
-//! [`TaskTracker`] (the registry). Long-lived background tasks are spawned
-//! via `spawn` so the process can drain them on SIGTERM/SIGINT instead of
-//! abandoning in-flight cleanups, metric writes, and webhook deliveries.
-//!
-//! # Rules
-//!
-//! - A loop goes through `Shutdown::supervise`; a task that outlives one
-//!   request goes through `Shutdown::spawn`; never bare `tokio::spawn`.
-//! - Loops that sleep (`interval.tick`, `sleep`) must `select!` on
-//!   `cancelled()` so SIGTERM doesn't have to wait a full poll cycle.
-//! - Per-connection / per-job tasks derive a child token via
-//!   [`Shutdown::child_token`] so cancelling the parent cancels them
-//!   transitively.
+//! Loops must go through `Shutdown::supervise`. Tasks outliving one request must go through
+//! `Shutdown::spawn`, never bare `tokio::spawn`. Sleeping loops must `select!` on `cancelled()` to
+//! avoid delaying SIGTERM by a full poll cycle.
 
 use std::future::Future;
 use std::sync::Arc;
@@ -32,8 +19,6 @@ use tracing::{Instrument, error, info, warn};
 
 use crate::supervision::{ChildSpec, Supervisor, SupervisorHealth};
 
-/// Re-exported so callers observing shutdown do not need `tokio-util` as a
-/// direct dependency.
 pub use tokio_util::sync::CancellationToken;
 
 #[derive(Clone, Debug)]
@@ -58,13 +43,10 @@ impl Shutdown {
         }
     }
 
-    /// Cancellation token. `cancelled().await` resolves once shutdown is
-    /// requested. Cheap to clone.
     pub fn token(&self) -> CancellationToken {
         self.token.clone()
     }
 
-    /// Future that resolves when shutdown has been requested.
     pub fn cancelled(&self) -> tokio_util::sync::WaitForCancellationFuture<'_> {
         self.token.cancelled()
     }
@@ -73,21 +55,10 @@ impl Shutdown {
         self.token.is_cancelled()
     }
 
-    /// A child token that is cancelled when the parent token is cancelled,
-    /// or independently. Used for per-connection / per-job scopes that
-    /// should be cancellable on their own without affecting siblings.
     pub fn child_token(&self) -> CancellationToken {
         self.token.child_token()
     }
 
-    /// Register a background task with the tracker. Replaces bare
-    /// `tokio::spawn` for anything outliving a single request.
-    ///
-    /// The future is instrumented with the current `tracing` span, so cleanup
-    /// work spawned from inside an HTTP handler keeps the request span (and
-    /// therefore the request-id) on every log line. Outside of a request
-    /// `Span::current()` is the root no-op span - instrumenting is then
-    /// effectively free.
     pub fn spawn<F>(&self, future: F) -> JoinHandle<F::Output>
     where
         F: Future + Send + 'static,
@@ -96,7 +67,6 @@ impl Shutdown {
         self.tracker.spawn(future.in_current_span())
     }
 
-    /// The process supervision tree, started on first use.
     pub async fn supervisor(&self) -> Result<&Supervisor, String> {
         self.tree
             .get_or_try_init(|| async {
@@ -107,7 +77,6 @@ impl Shutdown {
             .await
     }
 
-    /// The tree, if one has been started.
     pub fn tree(&self) -> Option<&Supervisor> {
         self.tree.get()
     }
@@ -116,13 +85,10 @@ impl Shutdown {
         self.tree.get().map(Supervisor::health)
     }
 
-    /// Add `spec` to the tree and wait until its first instance is running.
     pub async fn supervise_now(&self, spec: ChildSpec) -> Result<(), String> {
         self.supervisor().await?.add(spec).await
     }
 
-    /// Add `spec` from a sync context. A loop that cannot start is logged and
-    /// stays absent from the health registry, which is how it is noticed.
     pub fn supervise(&self, spec: ChildSpec) {
         let this = self.clone();
         let name = spec.name();
@@ -133,13 +99,10 @@ impl Shutdown {
         });
     }
 
-    /// Trigger shutdown. Idempotent.
     pub fn cancel(&self) {
         self.token.cancel();
     }
 
-    /// Cancel and drain all tracked tasks, bounded by `timeout`. Returns
-    /// `true` if all tasks completed before the deadline.
     pub async fn cancel_and_drain(&self, timeout: Duration) -> bool {
         self.cancel();
         self.tracker.close();
@@ -158,7 +121,6 @@ impl Shutdown {
         }
     }
 
-    /// Number of currently-tracked tasks. Useful for tests / introspection.
     pub fn pending(&self) -> usize {
         self.tracker.len()
     }
@@ -210,7 +172,6 @@ mod tests {
     async fn drain_timeout_returns_false() {
         let s = Shutdown::new();
         s.spawn(async {
-            // Ignores the cancel signal - simulates a misbehaving task.
             tokio::time::sleep(Duration::from_secs(10)).await;
         });
         let drained = s.cancel_and_drain(Duration::from_millis(50)).await;

@@ -12,9 +12,6 @@ crate::sql! {
     PRODUCERS_OF_HASHES = "SELECT DISTINCT o.derivation FROM derivation_output o WHERE o.hash = ANY($1)",
         params = [CachedPathHashes(64)];
 
-    /// A restart repeats the previous evaluation's graph without walking it, so it
-    /// takes the previous names over as its own: every reader of "does some
-    /// evaluation still want this", and the thaw's seed, is a `build_job` row.
     INHERIT_NAMES = "INSERT INTO build_job \
          (id, evaluation, derivation, derivation_build, score, score_breakdown, created_at) \
          SELECT uuidv7(), $2, bj.derivation, bj.derivation_build, 0, '{}'::jsonb, \
@@ -28,7 +25,6 @@ crate::sql! {
                       heap and its indexes, and the fixture's largest names ~98k");
 }
 
-/// Name for `to` everything `from` names. Returns how many names it took over.
 pub async fn inherit_names<C: ConnectionTrait>(
     db: &C,
     from: EvaluationId,
@@ -43,8 +39,6 @@ pub async fn inherit_names<C: ConnectionTrait>(
         .rows_affected())
 }
 
-/// The derivations whose outputs carry any of `hashes`: the shared builds a store
-/// path's arrival or removal can make fetchable or unfetchable.
 pub async fn producers_of_hashes<C: ConnectionTrait>(
     db: &C,
     hashes: &[String],
@@ -65,8 +59,8 @@ pub async fn producers_of_hashes<C: ConnectionTrait>(
 }
 
 crate::sql! {
-    /// The reserved `build-request` task is always signable, whatever its
-    /// `sign_cache` flag: the client that submitted it must substitute its outputs.
+    /// The reserved `build-request` task is always signable, whatever its `sign_cache` flag.
+    /// The submitting client must substitute its outputs.
     PRIVATE_OUTPUT_HASHES = "SELECT do_.hash FROM derivation_output do_ \
              JOIN derivation d ON d.id = do_.derivation \
              JOIN build_job b ON b.derivation = d.id \
@@ -77,9 +71,6 @@ crate::sql! {
         params = [CachedPathHashes(64)];
 }
 
-/// The hashes among `hashes` that some task produces and every producing task
-/// keeps out of its caches (`sign_cache = false`): a `.drv`, a source or a direct
-/// upload has no producing task and is signed.
 pub async fn private_output_hashes<C: ConnectionTrait>(
     db: &C,
     hashes: &[String],
@@ -103,8 +94,6 @@ crate::sql! {
         params = [DerivationHashes(64)];
 }
 
-/// The derivations whose own `.drv` hash is any of `hashes`: the shared builds whose
-/// own derivation file just arrived in, or left, the cache.
 pub async fn derivations_with_hashes<C: ConnectionTrait>(
     db: &C,
     hashes: &[String],

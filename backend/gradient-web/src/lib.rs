@@ -51,17 +51,8 @@ use gradient_scheduler::Scheduler;
 use gradient_wire::{PerIpLimiter, ProtoLimiter};
 use std::sync::Arc;
 
-/// Per-request body cap for chunked NAR uploads. Comfortably above the CLI's
-/// 32 MiB chunk and below the reverse proxy's 100 MiB limit, so each chunk
-/// always clears the proxy regardless of total NAR size.
 const NAR_UPLOAD_CHUNK_LIMIT: usize = 64 * 1024 * 1024;
 
-/// Wraps `SmartIpKeyExtractor` with a constant fallback so requests that
-/// carry no client-IP signal at all (no `X-Forwarded-For` / `X-Real-IP`,
-/// no `ConnectInfo`) share a single bucket instead of returning 500. This
-/// matters in tests (axum-test has no peer socket) and as a defensive
-/// fallback if `into_make_service_with_connect_info` is ever skipped - a
-/// global bucket is still better than failing requests outright.
 #[derive(Debug, Clone, Copy)]
 struct SmartIpOrFallback;
 
@@ -76,25 +67,17 @@ impl KeyExtractor for SmartIpOrFallback {
     }
 }
 
-/// Generates an x-request-id header for incoming requests that don't carry
-/// one. Using UUID v7 keeps ids monotonic per source so log scans stay
-/// roughly time-ordered. Trusted upstream proxies that already inject an
-/// `x-request-id` are passed through unchanged by `SetRequestIdLayer`.
 #[derive(Debug, Clone, Copy, Default)]
 struct MakeRequestUuid;
 
 impl MakeRequestId for MakeRequestUuid {
     fn make_request_id<B>(&mut self, _request: &Request<B>) -> Option<RequestId> {
         let id = Uuid::now_v7().to_string();
-        // `Uuid::now_v7().to_string()` produces ASCII hex+hyphens, always a
-        // valid header value - `from_str` cannot realistically fail.
         let value = HeaderValue::from_str(&id).ok()?;
         Some(RequestId::new(value))
     }
 }
 
-/// Per-IP token bucket: one request is refilled every `refill`, up to `burst`.
-/// `SmartIpOrFallback` honours `X-Forwarded-For` / `X-Real-IP` behind a proxy.
 fn rate_limit(
     refill: Duration,
     burst: u32,
@@ -109,10 +92,6 @@ fn rate_limit(
     Ok(Arc::new(config))
 }
 
-/// Build the Axum router with all routes and middleware layered on.
-///
-/// Extracted from `serve_web` so integration tests can drive the router via
-/// `axum_test::TestServer` without binding a real TCP port.
 pub fn create_router(state: Arc<ServerState>) -> Result<Router, InitError> {
     let serve_url: http::HeaderValue =
         state
@@ -144,12 +123,6 @@ pub fn create_router(state: Arc<ServerState>) -> Result<Router, InitError> {
         .allow_headers(vec![AUTHORIZATION, ACCEPT, CONTENT_TYPE])
         .allow_credentials(true);
 
-    // Build one span per request, populated with method, route pattern, and
-    // the request-id assigned by `SetRequestIdLayer`. All `tracing` events
-    // emitted while the request is in flight - handler logs, DB queries,
-    // and any task spawned via `Shutdown::spawn` (which inherits the
-    // current span) - are linked to the same id, so a single grep finds
-    // every line for one request.
     let trace = TraceLayer::new_for_http()
         .make_span_with(|request: &Request<Body>| {
             let request_id = request
@@ -157,9 +130,6 @@ pub fn create_router(state: Arc<ServerState>) -> Result<Router, InitError> {
                 .get("x-request-id")
                 .and_then(|v| v.to_str().ok())
                 .unwrap_or("");
-            // `MatchedPath` carries the route pattern (e.g. `/projects/{project}`)
-            // rather than the concrete path, so spans group by route in dashboards
-            // and don't blow up cardinality with concrete ids.
             let route = request
                 .extensions()
                 .get::<MatchedPath>()
@@ -200,7 +170,6 @@ pub fn create_router(state: Arc<ServerState>) -> Result<Router, InitError> {
             },
         );
 
-    // ── Routes that always require a valid session ────────────────────────────
     let auth_api = Router::new()
         .route("/projects", get(projects::get).put(projects::put))
         .route(
@@ -213,8 +182,6 @@ pub fn create_router(state: Arc<ServerState>) -> Result<Router, InitError> {
             "/board/expensive/top-projects",
             get(board::get_top_projects_by_buildtime),
         )
-        // Superuser-only: needs MUser, so it lives on the authenticated tier
-        // (the optional-auth tier only provides MaybeUser).
         .route("/board/jobs/decisions", get(board::get_assign_decisions))
         .route(
             "/projects/{project}",
@@ -331,8 +298,6 @@ pub fn create_router(state: Arc<ServerState>) -> Result<Router, InitError> {
             "/evals/{evaluation}/builds",
             post(evals::post_evaluation_builds),
         )
-        // Generating a report reads every failed build's log: authenticated
-        // even on a public project, which anonymous browsing may otherwise read.
         .route(
             "/evals/{evaluation}/report",
             get(evals::get_evaluation_report),
@@ -517,7 +482,6 @@ pub fn create_router(state: Arc<ServerState>) -> Result<Router, InitError> {
             authorization::authorize,
         ));
 
-    // ── Routes that accept optional auth (public resources browsable without login) ──
     let optional_api = Router::new()
         .route("/projects/{project}", get(projects::get_project))
         .route(
@@ -671,9 +635,6 @@ pub fn create_router(state: Arc<ServerState>) -> Result<Router, InitError> {
             authorization::authorize_optional,
         ));
 
-    // ── Sensitive auth surface (login/register/verification/oauth) ───────
-    // Tight per-IP rate limit: Argon2 verification and email send are
-    // expensive enough that an unthrottled attacker can DoS the server.
     let auth_sensitive = Router::new()
         .route("/auth/basic/login", post(auth::post_basic_login))
         .route("/auth/basic/register", post(auth::post_basic_register))
@@ -693,7 +654,6 @@ pub fn create_router(state: Arc<ServerState>) -> Result<Router, InitError> {
         .route("/auth/cli/poll", post(auth::post_cli_device_poll))
         .route_layer(GovernorLayer::new(rate_limit(Duration::from_secs(6), 5)?));
 
-    // ── Incoming Git host webhooks (unauthenticated, HMAC-verified) ─────────
     let webhook_routes = Router::new()
         .route("/hooks/github", post(git_host_hooks::github_app_webhook))
         .route(
@@ -707,15 +667,11 @@ pub fn create_router(state: Arc<ServerState>) -> Result<Router, InitError> {
         .merge(optional_api)
         .merge(auth_sensitive)
         .merge(webhook_routes)
-        // ── Fully public (no auth required) ─────────────────────────────────
         .route("/projects/public", get(projects::get_public_projects))
         .route("/caches/public", get(caches::get_public_caches))
         .route("/auth/logout", post(auth::post_logout))
         .route("/health", get(get_health))
         .route("/config", get(get_config))
-        // GitHub App manifest callback - unauthenticated because GitHub's
-        // top-level browser redirect carries no bearer token; CSRF is bound
-        // via the one-shot manifest state token issued on /admin/github-app/manifest.
         .route(
             "/admin/github-app/callback",
             get(admin::github_app::callback),
@@ -758,8 +714,6 @@ pub fn create_router(state: Arc<ServerState>) -> Result<Router, InitError> {
 
     let proto_limiter = Arc::new(ProtoLimiter::new(state.config.proto.max_connections));
 
-    // Default tier covers everything left under /api/v1 (the bulk authenticated
-    // surface) plus the proto WS upgrade.
     let api = api.route_layer(GovernorLayer::new(rate_limit(
         Duration::from_millis(200),
         150,
@@ -777,8 +731,6 @@ pub fn create_router(state: Arc<ServerState>) -> Result<Router, InitError> {
         .layer(axum::Extension(Arc::clone(&proto_limiter)))
         .layer(axum::Extension(Arc::clone(&sessions)));
 
-    // Metrics endpoint - root-mounted, only when an operator-configured
-    // bearer token is present.
     if state.config.metrics.is_some() {
         let metrics_route = Router::new()
             .route("/metrics", get(endpoints::metrics::get_metrics))
@@ -791,9 +743,6 @@ pub fn create_router(state: Arc<ServerState>) -> Result<Router, InitError> {
         app = app.merge(metrics_route);
     }
 
-    // Public NAR cache surface - substituters issue many requests per build,
-    // so the limit is generous: ~50 req/s sustained, burst 3000. The
-    // cache-scoped proto WS upgrade shares this same tier.
     let nar_cache_limit = || rate_limit(Duration::from_millis(20), 3000);
     let cache_routes = Router::new()
         .route("/cache/{cache}", get(caches::cache_root))
@@ -830,10 +779,6 @@ pub fn create_router(state: Arc<ServerState>) -> Result<Router, InitError> {
             900,
         )?));
 
-    // Cache-scoped read-only proto WebSocket. `authorize_optional` populates
-    // MaybeUser/MaybeApiKey/ClientIp so the handler can authorize anon->public
-    // and key->private (respecting cache_pin). Per-IP fan-out is bounded by the
-    // concurrent-connection cap below; the upgrade shares the NAR-download tier.
     let cache_per_ip = Arc::new(PerIpLimiter::new(
         state.config.proto.anonymous_cache_max_connections_per_ip,
     ));
@@ -854,8 +799,6 @@ pub fn create_router(state: Arc<ServerState>) -> Result<Router, InitError> {
         .merge(cache_log)
         .merge(cache_proto_route);
 
-    // SCIM provisioning surface - mounted only when configured so disabled
-    // instances expose nothing. Guarded by the bearer-token middleware.
     if state.config.scim.is_some() {
         let scim_routes = Router::new()
             .route(
@@ -884,11 +827,6 @@ pub fn create_router(state: Arc<ServerState>) -> Result<Router, InitError> {
         app = app.nest("/scim/v2", scim_routes);
     }
 
-    // Layer order (outer -> inner, i.e. last `.layer()` is outermost):
-    //   SetRequestIdLayer    - assigns x-request-id on inbound requests
-    //   TraceLayer           - opens the span (reads the id from headers)
-    //   PropagateRequestIdLayer - copies the id onto the response
-    //   CORS                 - innermost so preflights still get traced
     Ok(app
         .fallback(handle_404)
         .layer(cors)
@@ -898,12 +836,9 @@ pub fn create_router(state: Arc<ServerState>) -> Result<Router, InitError> {
         .with_state(state))
 }
 
-/// Disable Nagle on every accepted connection. The `/proto` upgrade rides this
-/// listener alongside the REST API, and Nagle holds a small control frame back
-/// until the peer's delayed ACK, costing the RPCs a worker blocks on tens of
-/// milliseconds. The return type stays concrete because
-/// `ConnectInfo<SocketAddr>` resolves through an impl for `TapIo<L, F>`,
-/// which an `impl Listener` would hide.
+/// Nagle is disabled on every accepted connection. It would hold a small `/proto` control frame
+/// back until the peer's delayed ACK. The concrete return type is required because
+/// `ConnectInfo<SocketAddr>` is resolving through an impl for `TapIo<L, F>`.
 fn tuned_listener(
     listener: tokio::net::TcpListener,
 ) -> axum::serve::TapIo<tokio::net::TcpListener, fn(&mut tokio::net::TcpStream)> {
@@ -951,8 +886,6 @@ pub async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
         Err(e) => tracing::error!(error = ?e, "failed to recover interrupted work"),
     }
 
-    // Draining is in-memory and auto-clears on startup, so recover any
-    // evaluations a previous process parked under it back to the queue.
     match gradient_db::evaluations::draining::unpark_draining_evals(&state.worker_db).await {
         Ok(n) if n > 0 => {
             tracing::warn!(evaluations = n, "recovered evaluations parked by draining")
@@ -984,9 +917,6 @@ pub async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
     .with_graceful_shutdown(async move { drain_token.cancelled().await })
     .await;
 
-    // Drain background tasks (dispatch loops, outbound, cache GC, action
-    // deliveries, metric writes). Bounded so a misbehaving task can't block
-    // shutdown indefinitely.
     shutdown
         .cancel_and_drain(std::time::Duration::from_secs(30))
         .await;
@@ -994,7 +924,6 @@ pub async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
     serve_result
 }
 
-/// Install a SIGINT/SIGTERM handler that triggers graceful shutdown.
 fn install_signal_handler(shutdown: gradient_util::shutdown::Shutdown) {
     let trigger = shutdown.clone();
     shutdown.spawn(async move {
@@ -1022,9 +951,8 @@ fn install_signal_handler(shutdown: gradient_util::shutdown::Shutdown) {
     });
 }
 
-/// Pulls this crate into a binary that otherwise references nothing from it, so
-/// the statements it declares with `gradient_db::sql!` reach the plan gate's
-/// registry. A linker drops an rlib nothing mentions, registry entries included.
+/// A linker is dropping an rlib nothing mentions, registry entries included. This function is
+/// pulling the crate into binaries for the plan gate's `gradient_db::sql!` registry.
 pub const fn link() {}
 
 #[cfg(test)]
@@ -1033,9 +961,6 @@ mod tests {
     use axum::serve::Listener as _;
     use tokio::net::{TcpListener, TcpStream};
 
-    /// Reverts if `serve_web` stops wrapping its listener: every accepted
-    /// connection - REST, `/cache`, and the `/proto` upgrade alike - must have
-    /// Nagle disabled before it is handed to hyper.
     #[tokio::test]
     async fn accepted_connections_have_nagle_disabled() {
         let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");

@@ -37,7 +37,6 @@ fn commit_range(q: &str) -> Option<CommitRange> {
     })
 }
 
-/// Every lookup a query could mean; the name lookup is never dropped.
 pub fn classify(q: &str) -> Lookups {
     let q = q.trim();
     if q.is_empty() {

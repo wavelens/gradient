@@ -81,8 +81,6 @@ fn validate_max_storage_gb(value: i32) -> WebResult<()> {
     Ok(())
 }
 
-// ── Handlers ──────────────────────────────────────────────────────────────────
-
 pub async fn get_cache_name_available(
     state: State<Arc<ServerState>>,
     Query(params): Query<HashMap<String, String>>,

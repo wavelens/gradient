@@ -4,15 +4,13 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! The flake's source as nix's git fetcher would fetch it: the tree at the
-//! pinned commit serialised as a NAR and added to the store as `<hash>-source`,
-//! with no nix process between the clone and the evaluation.
+//! The tree at the pinned commit is serialised as a NAR exactly like nix's git fetcher.
+//! It is added to the store as `<hash>-source` without a nix process.
 
 use anyhow::{Context, Result};
 use git2::{ObjectType, Oid, Repository, Tree};
 use gradient_wire::traits::WorkerStore;
 
-/// `/nix/store/<hash>-source` for the tree `commit` names in the clone at `repo_path`.
 #[tracing::instrument(level = "debug", skip_all)]
 pub(crate) async fn add_git_tree(
     store: &dyn WorkerStore,
@@ -43,9 +41,9 @@ pub(crate) fn nar_of_commit(repo_path: &str, commit: &str) -> Result<Vec<u8>> {
     Ok(nar)
 }
 
-/// A directory node: the entries in byte order of their names, where git keeps a
-/// subtree as if its name ended in `/`. A submodule is an empty directory, which
-/// is how nix exports one without `submodules=true`.
+/// NAR entries are in byte order of their names. Git is ordering a subtree as if its
+/// name ended in `/`. A submodule is an empty directory, matching nix without
+/// `submodules=true`.
 fn directory(repo: &Repository, tree: &Tree<'_>, nar: &mut Vec<u8>) -> Result<()> {
     let mut entries: Vec<_> = tree.iter().collect();
     entries.sort_by(|a, b| a.name_bytes().cmp(b.name_bytes()));
@@ -101,7 +99,6 @@ fn blob(content: &[u8], mode: i32, nar: &mut Vec<u8>) {
     string(nar, b")");
 }
 
-/// A NAR string: the length as a little-endian u64, then the bytes padded to 8.
 fn string(nar: &mut Vec<u8>, bytes: &[u8]) {
     nar.extend_from_slice(&(bytes.len() as u64).to_le_bytes());
     nar.extend_from_slice(bytes);
@@ -152,9 +149,6 @@ mod tests {
         String::from_utf8(out.stdout).unwrap().trim().to_owned()
     }
 
-    /// A file, an executable, a symlink, a subtree whose name sorts before a file
-    /// git orders after it, and a nested empty file: what `nix flake prefetch` of
-    /// the same commit hashes to, so the export is byte for byte nix's.
     fn fixture() -> tempfile::TempDir {
         let dir = tempfile::tempdir().unwrap();
         let repo = dir.path();

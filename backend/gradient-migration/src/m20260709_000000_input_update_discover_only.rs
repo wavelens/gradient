@@ -4,9 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Adds `evaluation_input_update.discover_only`: a discovery eval expands glob
-//! tracked-inputs against flake.lock and fans out per-input evals, opening no PR.
-
 use sea_orm_migration::prelude::*;
 use sea_orm_migration::sea_orm::ConnectionTrait;
 

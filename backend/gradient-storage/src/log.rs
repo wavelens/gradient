@@ -14,32 +14,20 @@ use std::sync::Arc;
 use tokio::fs::{self, OpenOptions};
 use tokio::io::AsyncWriteExt;
 
-/// Abstraction for build log storage.
-///
-/// Logs are appended to an inline copy while a build is running; once the build is
-/// terminal the log is split into compressed chunks and the inline copy dropped.
 pub trait LogStorage: Send + Sync + std::fmt::Debug {
-    /// Append `text` to the log for `attempt_id`.
     fn append<'a>(&'a self, attempt_id: BuildAttemptId, text: &'a str)
     -> BoxFuture<'a, Result<()>>;
 
-    /// Read the full log for `attempt_id`. Returns an empty string when no log exists yet.
     fn read<'a>(&'a self, attempt_id: BuildAttemptId) -> BoxFuture<'a, Result<String>>;
 
-    /// Read only the inline (not yet chunked) log; empty when there is none.
-    /// Defaults to `read` for backends without a separate chunked copy.
     fn read_inline<'a>(&'a self, attempt_id: BuildAttemptId) -> BoxFuture<'a, Result<String>> {
         self.read(attempt_id)
     }
 
-    /// Permanently delete the log for `attempt_id` from all backing stores.
     fn delete<'a>(&'a self, attempt_id: BuildAttemptId) -> BoxFuture<'a, Result<()>>;
 
-    /// Every `BuildAttemptId` with a log in one of the [`log_shards`], inline or
-    /// chunked. The deep GC walks the shards one by one to find orphan logs.
     fn list_shard<'a>(&'a self, shard: &'a str) -> BoxFuture<'a, Result<Vec<BuildAttemptId>>>;
 
-    /// Write one compressed log chunk object.
     fn write_chunk<'a>(
         &'a self,
         attempt_id: BuildAttemptId,
@@ -47,26 +35,18 @@ pub trait LogStorage: Send + Sync + std::fmt::Debug {
         bytes: &'a [u8],
     ) -> BoxFuture<'a, Result<()>>;
 
-    /// Read one compressed log chunk object's bytes.
     fn read_chunk<'a>(
         &'a self,
         attempt_id: BuildAttemptId,
         index: u32,
     ) -> BoxFuture<'a, Result<Vec<u8>>>;
 
-    /// Delete all chunk objects for `attempt_id`.
     fn delete_chunks<'a>(&'a self, attempt_id: BuildAttemptId) -> BoxFuture<'a, Result<()>>;
 
-    /// Drop only the inline (uncompressed) log, keeping any chunk objects.
-    /// Called once the chunked representation is written, so the compressed
-    /// chunks become the sole at-rest copy. Default is a no-op.
     fn delete_inline_log<'a>(&'a self, _attempt_id: BuildAttemptId) -> BoxFuture<'a, Result<()>> {
         Box::pin(async { Ok(()) })
     }
 
-    /// Concatenate the decompressed chunk objects in order. Used as a fallback
-    /// by `read` once the inline log has been dropped. Stops at the first
-    /// missing chunk index.
     fn reassemble_chunks<'a>(
         &'a self,
         attempt_id: BuildAttemptId,
@@ -84,18 +64,14 @@ pub trait LogStorage: Send + Sync + std::fmt::Debug {
     }
 }
 
-/// Every shard below `logs/`, in ascending key order.
 pub fn log_shards() -> Vec<String> {
     (0..=u8::MAX).map(|b| format!("{b:02x}")).collect()
 }
 
-/// The one of the [`log_shards`] holding `attempt_id`'s log.
 pub fn log_shard(attempt_id: BuildAttemptId) -> String {
     layout::shard(attempt_id)
 }
 
-/// Whether `err` says a log file or object does not exist, as opposed to a
-/// storage failure worth retrying.
 pub fn is_not_found(err: &anyhow::Error) -> bool {
     err.chain().any(|cause| {
         cause
@@ -108,9 +84,6 @@ pub fn is_not_found(err: &anyhow::Error) -> bool {
     })
 }
 
-/// Keys below `logs/`, shared by every backend. The shard is the last UUID
-/// byte (the random tail of a v7 id), fanning logs across 256 subfolders:
-/// `<xx>/<uuid>.log` inline, `<xx>/<uuid>/chunk_<n>.zst` chunked.
 mod layout {
     use gradient_types::ids::BuildAttemptId;
 
@@ -130,7 +103,6 @@ mod layout {
         format!("{}/chunk_{index:08}.zst", chunk_dir_key(attempt_id))
     }
 
-    /// The attempt owning a shard entry: an inline `<uuid>.log` or a chunk dir `<uuid>`.
     pub fn attempt_of(entry: &str) -> Option<BuildAttemptId> {
         let stem = entry.strip_suffix(".log").unwrap_or(entry);
         stem.parse::<uuid::Uuid>().ok().map(BuildAttemptId::new)
@@ -185,9 +157,8 @@ impl LogStorage for FileLogStorage {
                 .open(&path)
                 .await?;
             file.write_all(text.as_bytes()).await?;
-            // tokio buffers writes and submits the syscall to a blocking task;
-            // without flushing, the in-flight write is detached on drop and a
-            // read-after-write races it, observing an empty file.
+            // Tokio is submitting buffered writes to a blocking task. An unflushed write is
+            // detached on drop, and a read-after-write would observe an empty file.
             file.flush().await?;
             Ok(())
         })
@@ -274,10 +245,8 @@ impl LogStorage for FileLogStorage {
     }
 }
 
-/// Log storage that appends the live log to a local file (S3 has no efficient
-/// append) and writes the finalized chunks only to S3-compatible object
-/// storage, so an S3 backend keeps no build logs on local disk at rest. Reads
-/// serve the live local file while a build is running, then the S3 chunks.
+/// The live log is appended to a local file because S3 has no efficient append. Only the finalized
+/// chunks are written to S3, and no build log is kept on local disk at rest.
 pub struct S3LogStorage {
     local: FileLogStorage,
     object_store: Arc<dyn ObjectStore>,

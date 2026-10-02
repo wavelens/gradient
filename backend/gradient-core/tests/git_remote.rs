@@ -4,22 +4,13 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Tests for `check_task_updates` error propagation.
-//!
-//! Issue #280: manual `POST /evaluate` used to swallow git fetch failures
-//! (DNS, connection refused, …) and bubble up a generic 500. The fix
-//! propagates the `SourceError` to the caller so the web layer can return
-//! a 4xx with a useful message.
-
 use gradient_entity::task;
 use gradient_sources::check_task_updates;
 use gradient_test_support::state::test_state;
 use sea_orm::{DatabaseBackend, MockDatabase};
 
-/// `git://` URLs use the pure-Rust pkt-line path, so `TcpStream::connect`
-/// to an unbound loopback port returns "connection refused" without
-/// touching the network beyond loopback. Before the fix, this case was
-/// hidden behind `Ok((false, vec![]))`.
+/// `git://` URLs are using the pure-Rust pkt-line path. Connecting to an unbound loopback port is
+/// then failing with connection refused without leaving loopback.
 #[test]
 fn check_task_updates_propagates_unreachable_remote_error() {
     let rt = tokio::runtime::Builder::new_current_thread()

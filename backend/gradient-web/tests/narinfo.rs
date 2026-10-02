@@ -4,8 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Integration test: `.narinfo` handler serves metadata from DB rows only.
-
 #![expect(
     clippy::unwrap_used,
     reason = "test scaffolding: a fixture helper that cannot build its value should fail the test loudly"
@@ -24,8 +22,6 @@ use gradient_web::create_router;
 use sea_orm::{DatabaseBackend, MockDatabase};
 use std::sync::Arc;
 use uuid::Uuid;
-
-// ── Fixture IDs ───────────────────────────────────────────────────────────────
 
 fn cache_id() -> CacheId {
     CacheId::new(Uuid::parse_str("10000000-0000-0000-0000-000000000001").unwrap())
@@ -52,20 +48,10 @@ fn test_date() -> chrono::NaiveDateTime {
         .unwrap()
 }
 
-/// 32-char nix-base32 hash used for the fixture store path.
 const FIXTURE_HASH: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
-// ── Test ─────────────────────────────────────────────────────────────────────
-
-/// Verify that the narinfo handler returns a well-formed response that includes
-/// `NarHash:`, `NarSize:`, and `Sig:` fields served entirely from the DB rows.
-///
-/// Uses a manual Tokio runtime because `#[tokio::test]` expands to `::gradient_core::…`
-/// references that clash with the local `core` crate name in the workspace.
 #[test]
 fn narinfo_served_from_db_without_daemon_probe() {
-    // Build the runtime first so `create_router` (which spawns scheduler tasks)
-    // executes inside a live Tokio context.
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -74,9 +60,6 @@ fn narinfo_served_from_db_without_daemon_probe() {
 }
 
 async fn narinfo_served_from_db_inner() {
-    // ── Build mock DB rows ────────────────────────────────────────────────
-
-    // A public, active cache - no HTTP auth required.
     let cache_row = gradient_entity::cache::Model {
         id: cache_id(),
         name: "test-cache".into(),
@@ -91,7 +74,6 @@ async fn narinfo_served_from_db_inner() {
         ..Default::default()
     };
 
-    // The derivation output matching FIXTURE_HASH.
     let drv_output_row = gradient_entity::derivation_output::Model {
         id: drv_output_id(),
         derivation: deriv_id(),
@@ -105,7 +87,6 @@ async fn narinfo_served_from_db_inner() {
         ..Default::default()
     };
 
-    // The cached_path row carrying the NAR metadata written by the worker.
     let cached_path_row = gradient_entity::cached_path::Model {
         id: cached_path_id(),
         hash: FIXTURE_HASH.into(),
@@ -115,32 +96,21 @@ async fn narinfo_served_from_db_inner() {
         ),
         file_size: Some(12345),
         nar_size: Some(67890),
-        // Valid nix32 SHA-256 (of the empty string, as a stable test vector).
         nar_hash: Some("sha256:0mdqa9w1p6cmli6976v4wi0sw9r4p5prkj7lzfd1877wk11c9c73".into()),
         deriver: Some(format!("/nix/store/{}-hello.drv", FIXTURE_HASH)),
         created_at: test_date(),
         ..Default::default()
     };
 
-    // Signature row for this cache.
     let cached_path_sig_row = gradient_entity::cached_path_signature::Model {
         id: cached_path_sig_id(),
         cached_path: cached_path_id(),
         cache: cache_id(),
-        // 64 raw bytes - any non-empty Ed25519-shaped buffer works.
         signature: Some(vec![0x42; 64]),
         created_at: test_date(),
         ..Default::default()
     };
 
-    // Query order driven by CacheContext::load + get_nar_by_hash. Derivations
-    // are global, so access is gated on the cached_path_signature row for this
-    // cache, not a derivation->project subscription check:
-    //   0. ECache::find (by name)              -> cache_row
-    //   1. EDerivationOutput::find (by hash)   -> drv_output_row
-    //   2. ECachedPath::find (by hash)         -> cached_path_row
-    //   3. ECachedPathSignature::find          -> cached_path_sig_row
-    //   4. references_for_hash (cached_path.references) -> no references
     let db = MockDatabase::new(DatabaseBackend::Postgres)
         .append_query_results([vec![cache_row]])
         .append_query_results([vec![drv_output_row]])
@@ -195,12 +165,10 @@ async fn narinfo_served_from_db_inner() {
     let router = create_router(state).expect("router");
     let server = TestServer::new(router);
 
-    // ── Issue GET /cache/test-cache/<hash>.narinfo ────────────────────────
     let response = server
         .get(&format!("/cache/test-cache/{}.narinfo", FIXTURE_HASH))
         .await;
 
-    // ── Assertions ────────────────────────────────────────────────────────
     response.assert_status_ok();
     assert_eq!(
         response.header("x-cache").to_str().unwrap(),
@@ -235,10 +203,8 @@ async fn narinfo_served_from_db_inner() {
     );
 }
 
-/// Regression: when the `cached_path_signature` row's `signature` column is
-/// `NULL` (the state the sign sweep leaves rows in for `sign_cache=false`
-/// tasks), the narinfo handler must return 404 - never serve an unsigned
-/// narinfo. The whole `sign_cache=false` privacy guarantee depends on this.
+/// A NULL `signature` must answer 404. The whole `sign_cache=false` privacy guarantee is depending
+/// on never serving an unsigned narinfo.
 #[test]
 fn narinfo_returns_404_when_signature_null() {
     let rt = tokio::runtime::Builder::new_current_thread()

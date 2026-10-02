@@ -4,10 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! `build_attempt.build_job` is a NO ACTION foreign key without an index, so
-//! every cascaded `build_job` delete scanned the whole table (#629), and
-//! `build_finished_at` is the window the duration rollup now seeds from.
-
 use sea_orm_migration::prelude::*;
 use sea_orm_migration::sea_orm::ConnectionTrait;
 

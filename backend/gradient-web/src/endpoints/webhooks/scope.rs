@@ -4,8 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Which webhooks a request may manage: the path decides the scope, the caller's role decides access.
-
 use crate::access::{CacheAccess, Caller, ProjectAccess, load_cache, load_project};
 use crate::authorization::MaybeApiKey;
 use crate::error::{WebError, require_superuser};
@@ -60,7 +58,6 @@ impl WebhookOwner {
         }
     }
 
-    /// Rows this owner may see: its scope and exactly its project or cache.
     pub fn rows(&self) -> Condition {
         Condition::all()
             .add(CWebhook::Scope.eq(self.scope))

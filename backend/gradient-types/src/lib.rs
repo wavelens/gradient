@@ -56,9 +56,6 @@ use chrono::NaiveDateTime;
 use clap::Parser;
 use serde::{Deserialize, Serialize};
 
-/// Current UTC wall-clock as a naive `NaiveDateTime`, the timestamp shape
-/// every persisted column expects. Single source of truth for code that
-/// would otherwise spell `chrono::Utc::now().naive_utc()`.
 #[inline]
 pub fn now() -> NaiveDateTime {
     chrono::Utc::now().naive_utc()
@@ -132,8 +129,6 @@ pub struct Paginated<T> {
 }
 
 impl<T> Paginated<Vec<T>> {
-    /// Map each item to a summary/response type while carrying the page metadata
-    /// through unchanged, so handlers can post-process a paginated result set.
     pub fn map<U, F: FnMut(T) -> U>(self, f: F) -> Paginated<Vec<U>> {
         Paginated {
             items: self.items.into_iter().map(f).collect(),

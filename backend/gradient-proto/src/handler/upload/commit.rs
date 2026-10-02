@@ -23,8 +23,8 @@ pub(super) struct Commit {
     pub state: Arc<ServerState>,
     pub peer_id: String,
     pub request_id: u64,
-    /// Resolved here, off the session's reader loop: the scheduler answers it
-    /// from its mailbox, which a claim in flight holds for the claim's lock waits.
+    /// This is resolved off the session's reader loop. The scheduler is answering from a mailbox
+    /// that a claim in flight can hold for its lock waits.
     pub project: BoxFuture<'static, Option<ProjectId>>,
     pub object: UploadObject,
     pub transfer: Transfer,
@@ -32,8 +32,8 @@ pub(super) struct Commit {
     pub permit: UploadPermit,
 }
 
-/// The permit bounds bytes in flight, so it returns once the object sits in
-/// storage; the graph records it afterwards without holding the next upload.
+/// The permit is bounding bytes in flight and is returned once the object is stored. The graph is
+/// recording it afterwards without holding the next upload.
 pub(super) async fn run(c: Commit) {
     let outcome = match place(&c.state, &c.object, c.transfer, &c.metadata).await {
         Ok(()) => {
@@ -392,8 +392,6 @@ mod tests {
         .expect("the permit is back once the bytes are stored");
     }
 
-    /// A resumed prefix may come from a differently configured encoder; a
-    /// mismatch then starts the upload over instead of failing the job.
     #[tokio::test]
     async fn a_resumed_passthrough_that_fails_its_hash_is_retried_from_scratch() {
         let state = test_state(MockDatabase::new(DatabaseBackend::Postgres).into_connection());

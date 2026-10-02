@@ -4,20 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Re-key `metric_rollup.scope` from `{'org': id}` to `{'project': id}` (#571).
-//!
-//! The organization -> project rename moved tables and columns but not the
-//! jsonb scope payload the rollup writes, and the rollup's `ON CONFLICT DO
-//! UPDATE` clauses never refreshed `scope`, so rows split into two shapes over
-//! one unchanged `scope_hash` (hashed over the bare id). The minute->hour->day
-//! cascade groups by `scope` as well as `scope_hash`, so a bucket spanning the
-//! rename produced two rows per conflict key and Postgres rejected the whole
-//! statement with "ON CONFLICT DO UPDATE command cannot affect row a second
-//! time"; `(scope->>'project')` read-side filters missed every pre-rename row
-//! on top of that.
-//!
-//! `scope` is not part of `idx-metric_rollup-unique` and `scope_hash` is
-//! unchanged, so this rewrites in place with no merge.
+//! The rewrite is in place without a merge. `scope` is not part of `idx-metric_rollup-unique`, and
+//! `scope_hash` is unchanged.
 
 use sea_orm_migration::prelude::*;
 use sea_orm_migration::sea_orm::ConnectionTrait;

@@ -104,8 +104,6 @@ fn open_attempt_statement(claim: &ClusterClaim) -> Result<InsertStatement, DbErr
     Ok(insert)
 }
 
-/// Stamp `started_at` on `attempt` while it is open and unstarted, and only then
-/// set its cluster `Running` and count the attempt; `false` when nothing moved.
 pub async fn start_cluster_attempt<C>(
     db: &C,
     cluster: ClusterJobId,
@@ -145,8 +143,6 @@ where
     Ok(started)
 }
 
-/// Close `attempt` if still open, abandoning its open member rows with it;
-/// `false` when another closer got there first and nothing was touched.
 pub async fn close_cluster_attempt<C>(
     db: &C,
     attempt: ClusterAttemptId,
@@ -162,9 +158,6 @@ where
     Ok(closed)
 }
 
-/// Settle a decided attempt in one transaction: close it, then requeue its
-/// cluster (`retry`, within budget, every member alive) or finish it with
-/// `finished`. `None` when the attempt was already closed; `Some(requeued)` otherwise.
 pub async fn resolve_cluster_attempt<C>(
     db: &C,
     cluster: ClusterJobId,
@@ -190,8 +183,6 @@ where
     Ok(Some(requeued))
 }
 
-/// Close an attempt whose prepare failed. A start that committed first already
-/// set the cluster `Running`; it goes back to `Queued` with the attempt.
 pub async fn fail_prepare_attempt<C>(
     db: &C,
     cluster: ClusterJobId,

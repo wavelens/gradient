@@ -48,7 +48,6 @@ impl StarTarget {
     }
 }
 
-/// The JSON `message` is whether the target is starred afterwards; repeating either op is a no-op.
 async fn apply(
     state: &ServerState,
     user: &MUser,

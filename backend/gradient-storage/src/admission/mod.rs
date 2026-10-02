@@ -4,8 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Server-wide upload admission: nothing is uploaded before it is granted.
-
 mod core;
 mod shell;
 

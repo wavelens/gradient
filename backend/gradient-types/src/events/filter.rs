@@ -32,7 +32,6 @@ impl EventFilter {
     pub const MAX_PATTERNS: usize = 64;
     pub const MAX_PATTERN_LEN: usize = 128;
 
-    /// Patterns a caller may store: event-name characters and single `*` wildcards only.
     pub fn validate(patterns: &[String]) -> Result<(), String> {
         if patterns.len() > Self::MAX_PATTERNS {
             return Err(format!("at most {} event patterns", Self::MAX_PATTERNS));
@@ -48,13 +47,14 @@ impl EventFilter {
         Ok(())
     }
 
-    /// An empty filter matches everything; `*` matches any run of characters, dots included.
+    /// An empty filter is matching everything. A `*` is matching any run of characters,
+    /// dots included.
     pub fn matches(&self, name: &str) -> bool {
         self.0.is_empty() || self.0.iter().any(|p| glob(p.as_bytes(), name.as_bytes()))
     }
 }
 
-/// Greedy wildcard match with one backtrack point: linear in `pattern` times `name`.
+/// One backtrack point is keeping the greedy match linear in `pattern` times `name`.
 fn glob(pattern: &[u8], name: &[u8]) -> bool {
     let (mut p, mut n) = (0, 0);
     let mut backtrack: Option<(usize, usize)> = None;

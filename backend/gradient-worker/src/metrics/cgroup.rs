@@ -4,7 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-/// Per-build resource snapshot read from a cgroup-v2 directory.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct BuildMetricsRaw {
     pub peak_ram_bytes: Option<u64>,
@@ -57,8 +56,6 @@ pub fn parse_oom_kill(s: &str) -> bool {
         .unwrap_or(false)
 }
 
-/// Read cgroup-v2 files under `dir`. Returns `None` if `dir` does not exist;
-/// missing individual files degrade to `None`/`0`/`false`.
 pub fn read_build_cgroup(dir: &std::path::Path) -> Option<BuildMetricsRaw> {
     if !dir.exists() {
         return None;

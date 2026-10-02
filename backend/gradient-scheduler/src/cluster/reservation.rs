@@ -4,9 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Aging: a ready cluster that found no simultaneously idle slots for too long
-//! reserves a placement over busy workers and commits once every seat is idle.
-
 use std::collections::HashSet;
 use std::time::{Duration, Instant};
 
@@ -69,7 +66,6 @@ pub fn aging_step(
     }
 }
 
-/// Seats reserved for one cluster are no idle capacity for any other.
 pub fn hide_reserved(snapshot: &mut ClusterSnapshot) {
     if let Some(held) = snapshot.reservation.clone() {
         snapshot.slots.retain(|s| !held.holds(&s.worker, s.kind));
@@ -150,9 +146,8 @@ fn oldest_aged<'a>(
         .min_by_key(|c| (!c.prioritized(), c.queued_at))
 }
 
-/// The planner prefers cheaper seats: an idle worker keeps its score, a busy
-/// one counts as unscored, so the reservation seats idle workers wherever a full
-/// match allows.
+/// An idle worker is keeping its score and a busy one is counting as unscored. The planner is then
+/// seating idle workers wherever a full match is possible.
 fn idle_first(snapshot: &ClusterSnapshot, cluster: &PendingCluster) -> ScoreLookup {
     let idle: HashSet<&str> = snapshot.slots.iter().map(|s| s.worker.as_str()).collect();
     let mut scores = ScoreLookup::new();

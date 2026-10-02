@@ -4,11 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Best-effort wiring of a freshly created task to the project's Git host
-//! integrations. When the repository URL unambiguously belongs to one inbound
-//! and/or one outbound integration, a push trigger and a status-report action
-//! are attached so the task works with the Git host without extra setup.
-
 use gradient_ci::IntegrationKind;
 use gradient_types::actions::ActionConfig;
 use gradient_types::triggers::{TriggerConfig, TriggerType};
@@ -23,9 +18,6 @@ pub(super) struct AutoAttach {
     pub outbound: Option<MIntegration>,
 }
 
-/// Lowercased host of a git repository or Git host endpoint URL. Handles
-/// `https://`, `http://`, `ssh://`, `git://`, a `git+<scheme>` prefix and the
-/// SCP form `git@host:owner/repo`.
 fn url_host(url: &str) -> Option<String> {
     let s = url.trim();
     let s = s.strip_prefix("git+").unwrap_or(s);
@@ -51,8 +43,6 @@ fn public_git_host_for(host: &str) -> Option<GitHostType> {
     }
 }
 
-/// Git host identity behind `host`: a well-known public host, otherwise the Git host
-/// type of any integration whose endpoint URL points at the same host.
 fn infer_git_host(host: &str, integrations: &[MIntegration]) -> Option<GitHostType> {
     public_git_host_for(host).or_else(|| {
         integrations.iter().find_map(|i| {
@@ -62,8 +52,6 @@ fn infer_git_host(host: &str, integrations: &[MIntegration]) -> Option<GitHostTy
     })
 }
 
-/// An integration with a custom endpoint matches strictly by host; one without
-/// (public Git hosts, inbound rows) matches by the inferred Git host type.
 fn integration_matches(i: &MIntegration, host: &str, inferred: Option<GitHostType>) -> bool {
     if let Some(endpoint) = &i.endpoint_url {
         return url_host(endpoint).as_deref() == Some(host);
@@ -72,8 +60,7 @@ fn integration_matches(i: &MIntegration, host: &str, inferred: Option<GitHostTyp
     inferred.is_some_and(|f| f == i.git_host_type)
 }
 
-/// The single integration of `kind` matching the repo, or `None` when zero or
-/// more than one match (ambiguous wiring is left to the user).
+/// Ambiguous wiring is left to the user.
 fn pick_one(
     integrations: &[MIntegration],
     kind: IntegrationKind,
@@ -99,8 +86,6 @@ pub(super) fn match_integrations_for_repo(repo: &str, integrations: &[MIntegrati
     }
 }
 
-/// Insert the trigger/action wiring for the matched integrations. Best-effort:
-/// callers log and swallow errors so a wiring hiccup never blocks creation.
 pub(super) async fn apply<C: ConnectionTrait>(
     db: &C,
     task: &MTask,

@@ -4,18 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Single-letter prefix aliases for sea-orm entity types.
-//!
-//! Mapping:
-//! - `E*` -> `gradient_entity::*::Entity` - the type carrying `find()`, `insert()`, etc.
-//! - `M*` -> `gradient_entity::*::Model` - a fully-loaded row.
-//! - `A*` -> `gradient_entity::*::ActiveModel` - for inserts/updates.
-//! - `C*` -> `gradient_entity::*::Column` - column references for filters.
-//!
-//! These aliases are pervasive in older code; new code may prefer the
-//! canonical `gradient_entity::api::Entity` form, which is what sea-orm tutorials use
-//! and what ripgrep on `Entity` will surface. Migrating callers is tracked
-//! separately - keeping the aliases here avoids a 1000+ site mass rename.
+//! These aliases are pervasive in older code. Keeping them is avoiding a mass rename of
+//! 1000+ call sites.
 
 use gradient_entity::*;
 use serde::{Deserialize, Serialize};
@@ -265,9 +255,5 @@ pub type CUploadSession = upload_session::Column;
 pub type CUser = user::Column;
 pub type CWorkerRegistration = worker_registration::Column;
 
-// `R*` (Relation) aliases removed - sea-orm relations are referenced via the
-// `Entity::has_many` / `belongs_to` builder API rather than the `Relation`
-// enum directly. The aliases were unused outside this file. If a future
-// caller needs a relation type, prefer `gradient_entity::api::Relation`.
 pub use admin_task::{AdminTaskKind, AdminTaskStatus};
 pub use evaluation_message::MessageLevel;

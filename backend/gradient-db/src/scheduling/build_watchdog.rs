@@ -4,20 +4,12 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Detection for shared builds stranded in `Building` behind a dispatch that will
-//! never report. The orphan re-queue moves them back once, through the graph
-//! writer; a transaction that rolls back, or a `Assigned` transition that lands
-//! after its claim already gave up, leaves the shared build `Building` with nobody
-//! building it and nothing that would ever move it again.
-
 use gradient_entity::build::BuildStatus;
 use gradient_entity::dispatched_job::DispatchedJobOutcome;
 use gradient_types::DerivationBuildId;
 use sea_orm::{ConnectionTrait, DbErr};
 
-/// `Building` shared builds whose newest attempt's dispatch closed as `Abandoned`,
-/// untouched for at least `grace_secs`. The grace keeps an orphan re-queue that
-/// is merely queued behind a slow graph writer from being sent twice.
+/// The grace is keeping an orphan re-queue behind a slow graph writer from being sent twice.
 fn stranded_building_shared_builds_sql(grace_secs: i64) -> String {
     format!(
         "SELECT db.id AS shared_build \

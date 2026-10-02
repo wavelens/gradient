@@ -4,12 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Server-side cache maintenance.
-//!
-//! Workers pack and compress NARs; the server signs them on upload. This
-//! module is running the periodic sweeps: cleanup, signature and debug-index
-//! backfills, eval cache eviction, and the storage migrations and deep GC.
-
 mod cleanup;
 mod debug_index;
 mod deep_gc;
@@ -40,8 +34,6 @@ use std::sync::Arc;
 use std::time::Duration;
 use tracing::{error, info, warn};
 
-/// One periodic pass: a name (logs and health), a tick interval, the budget
-/// past which a pass is cancelled, and the async fn to run.
 struct Sweep {
     name: &'static str,
     interval: Duration,
@@ -64,10 +56,6 @@ impl Sweep {
     }
 }
 
-/// The registered sweeps. "cache-maintenance" bundles the order-sensitive
-/// GC/repair steps; "storage-maintenance" the storage migrations and the
-/// deep GC; "sign-sweep" is the signature backfill, "debug-index" the build-id
-/// backfill, "eval-cache-sweep" the eval-cache eviction.
 fn sweeps(state: &ServerState) -> Vec<Sweep> {
     let config = &state.config;
     let secs = |s: u64| Duration::from_secs(s.max(1));
@@ -105,7 +93,6 @@ fn sweeps(state: &ServerState) -> Vec<Sweep> {
     ]
 }
 
-/// Every registered sweep as a supervised periodic child.
 pub fn child_specs(state: &Arc<ServerState>) -> Vec<ChildSpec> {
     sweeps(state)
         .into_iter()
@@ -120,9 +107,6 @@ pub fn child_specs(state: &Arc<ServerState>) -> Vec<ChildSpec> {
         .collect()
 }
 
-/// The orphan-derivation pass: scan the whole keep-set once on the pool, then
-/// hand the actor bounded chunks to apply. The log files of what it actually
-/// deleted are reclaimed here, because they live outside the database.
 async fn run_derivation_gc(state: &Arc<ServerState>) -> anyhow::Result<usize> {
     let (candidates, scanned_at) = gradient_db::maintenance::gc::orphan_derivation_candidates(
         &state.worker_db,
@@ -158,9 +142,6 @@ async fn run_derivation_gc(state: &Arc<ServerState>) -> anyhow::Result<usize> {
     Ok(deleted)
 }
 
-/// One tick of the background storage work: a pending storage migration
-/// first, then the deep GC. A requested deep GC round executes unit after unit
-/// within the tick; anything else executes one unit and waits for the pace.
 async fn run_storage_maintenance(state: Arc<ServerState>) -> anyhow::Result<()> {
     loop {
         let step = match storage_migrations::step(&state).await? {
@@ -173,10 +154,6 @@ async fn run_storage_maintenance(state: Arc<ServerState>) -> anyhow::Result<()> 
     }
 }
 
-/// The order-sensitive cache-maintenance steps, run sequentially every
-/// `gc.interval_secs`. No per-output work here - the worker uploads+signs; this
-/// is GC and self-heal repair only. Storage objects are repaired by
-/// the deep GC.
 async fn run_cache_maintenance(state: Arc<ServerState>) -> anyhow::Result<()> {
     if let Err(e) = cleanup_old_evaluations(Arc::clone(&state)).await {
         error!(error = ?e, "Evaluation GC failed");

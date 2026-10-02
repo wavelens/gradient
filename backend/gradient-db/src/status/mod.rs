@@ -4,10 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Shared evaluation and build status helpers: state-machine-guarded status
-//! transitions ([`derivation_build_status`], [`evaluation_status`]), evaluation
-//! abort ([`abort`]), and the best-effort phase/message logging ([`logging`]).
-
 mod abort;
 mod derivation_build_status;
 mod effects;

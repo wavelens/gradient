@@ -7,7 +7,6 @@
 use gradient_entity::build::BuildStatus;
 use std::fmt;
 
-/// Error returned when a [`BuildStatus`] transition is invalid.
 #[derive(Debug, Clone, PartialEq)]
 pub struct InvalidBuildTransition {
     pub from: BuildStatus,
@@ -26,28 +25,9 @@ impl fmt::Display for InvalidBuildTransition {
 
 impl std::error::Error for InvalidBuildTransition {}
 
-/// Validates and enforces [`BuildStatus`] state transitions.
-///
-/// ```text
-/// Created          to  Queued | Skipped
-/// Skipped          to  Created
-/// Queued           to  Building | Created
-/// Building         to  Queued
-/// FailedTransient  to  Queued
-/// any non-terminal to  Completed | Substituted | FailedPermanent | FailedTransient
-///                      | FailedTimeout | Aborted | DependencyFailed
-/// any state        to  itself            (checked before the terminal guard)
-/// ```
-/// Terminal states (`Completed`, `FailedPermanent`, `FailedTimeout`, `Aborted`,
-/// `DependencyFailed`, `Substituted`) cannot be transitioned away from.
 pub struct BuildStateMachine;
 
 impl BuildStateMachine {
-    /// Returns `Ok(to)` if the transition is valid, `Err` otherwise.
-    ///
-    /// `Queued` back to `Created` is un-promotion: a gate regressed under a
-    /// promoted shared build, so it returns to the queue's waiting room instead of
-    /// being dispatched with a missing input. No other state may move there.
     pub fn validate(
         from: BuildStatus,
         to: BuildStatus,
@@ -72,20 +52,16 @@ impl BuildStateMachine {
         match (from, to) {
             (BuildStatus::Created, BuildStatus::Queued) => Ok(to),
 
-            // Need settles work without finishing it: a build-time dependency
-            // of a passthrough is not pending, and it is not done either. It thaws the
-            // moment something wants it again, and never queues from here - the
-            // thaw is what re-opens the gate.
+            // A `Skipped` build is never queued from here.
+            // The thaw back to `Created` is re-opening the gate.
             (BuildStatus::Created, BuildStatus::Skipped) => Ok(to),
             (BuildStatus::Skipped, BuildStatus::Created) => Ok(to),
             (BuildStatus::Queued, BuildStatus::Building) => Ok(to),
             (BuildStatus::Queued, BuildStatus::Created) => Ok(to),
 
-            // FailedTransient can be retried (back to Queued) or promoted to permanent.
             (BuildStatus::FailedTransient, BuildStatus::Queued) => Ok(to),
 
-            // Substitute miss: a `Building` substitute attempt is re-queued
-            // penalty-free (no `attempt` bump), to be re-dispatched or escalated.
+            // A substitute miss is re-queueing a `Building` attempt without an `attempt` bump.
             (BuildStatus::Building, BuildStatus::Queued) => Ok(to),
             (_, BuildStatus::FailedPermanent) => Ok(to),
             (_, BuildStatus::FailedTransient) => Ok(to),
@@ -99,7 +75,6 @@ impl BuildStateMachine {
         }
     }
 
-    /// Returns `true` if `status` is a terminal (no further transitions allowed).
     pub fn is_terminal(status: &BuildStatus) -> bool {
         matches!(
             status,
@@ -122,10 +97,6 @@ mod tests {
         assert!(BuildStateMachine::validate(BuildStatus::Created, BuildStatus::Queued).is_ok());
     }
 
-    /// Need settles work without finishing it, and brings it back the same way.
-    /// The thaw goes to `Created`, never straight to the queue: a `Skipped` shared build
-    /// has passed no gate, and letting it queue would dispatch against inputs
-    /// nothing has wanted yet.
     #[test]
     fn build_sm_skipped_is_entered_and_left_through_created_only() {
         assert!(BuildStateMachine::validate(BuildStatus::Created, BuildStatus::Skipped).is_ok());
@@ -140,8 +111,6 @@ mod tests {
         assert!(BuildStateMachine::validate(BuildStatus::Queued, BuildStatus::Building).is_ok());
     }
 
-    /// Un-promotion: a retired input or a demoted dependency pulls a queued
-    /// shared build back to Created; only Queued may move there.
     #[test]
     fn build_sm_queued_to_created_for_unpromotion() {
         assert!(BuildStateMachine::validate(BuildStatus::Queued, BuildStatus::Created).is_ok());
@@ -195,8 +164,6 @@ mod tests {
         assert!(BuildStateMachine::validate(BuildStatus::Created, BuildStatus::Building).is_err());
     }
 
-    /// Terminal transitions (`FailedPermanent`, `Completed`, `Aborted`,
-    /// `DependencyFailed`) are accepted from every non-terminal source.
     #[test]
     fn build_sm_any_nonterminal_to_any_terminal() {
         let from_states = [

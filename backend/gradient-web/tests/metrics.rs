@@ -4,13 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Integration tests for `GET /metrics` (issue #35).
-//!
-//! Each test builds a `ServerState` directly so it can inject a `MockDatabase`
-//! pre-staged with the row set the metrics collector expects. The metrics
-//! handler issues exactly one DB query per request, so we stage exactly one
-//! result set per expected scrape.
-
 use axum_test::TestServer;
 use gradient_core::ServerState;
 use gradient_db::{WebDb, WorkerDb};
@@ -29,11 +22,7 @@ use std::sync::Arc;
 
 const TOKEN: &str = "metrics-token-abcdef";
 
-/// Build a mock row matching the `CountRow { kind, status, value }` shape
-/// that the metrics collector queries for: the status arrives as the enum's
-/// integer discriminant and is decoded to its label in Rust. We construct
-/// rows as `BTreeMap<&str, Value>` because `sea_orm` only implements
-/// `IntoMockRow` for entity models and for that map type.
+/// `sea_orm` is implementing `IntoMockRow` only for entity models and this map type.
 fn count_row(kind: &str, status: Option<i32>, value: i64) -> BTreeMap<&'static str, Value> {
     let mut row = BTreeMap::new();
     row.insert("kind", Value::String(Some(kind.to_string())));
@@ -227,8 +216,8 @@ fn endpoint_rate_limited() {
         .build()
         .unwrap();
     rt.block_on(async {
-        // Each successful request issues one DB read; pre-stage 5 empty
-        // result sets (the 6th is throttled before the handler starts).
+        // Each successful request is issuing one DB read. The 6th request is throttled before the
+        // handler starts.
         let mut mock = MockDatabase::new(DatabaseBackend::Postgres);
         for _ in 0..5 {
             mock = mock.append_query_results([Vec::<BTreeMap<&str, Value>>::new()]);

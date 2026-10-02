@@ -11,8 +11,6 @@ use uuid::Uuid;
 
 use crate::ids::{BaseWorkerId, UserId};
 
-/// Server-level worker available to any project that opts in via
-/// `project_base_worker`. Provisioned only from declarative state.
 #[derive(Clone, Debug, Default, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
 #[sea_orm(table_name = "base_worker")]
 pub struct Model {
@@ -26,12 +24,10 @@ pub struct Model {
     pub enable_fetch: bool,
     pub enable_eval: bool,
     pub enable_build: bool,
-    /// Global gate. When false the base worker is off for every project.
     pub enabled: bool,
-    /// When true, a project enables this worker the moment it is created,
-    /// instead of opting in by hand. A later opt-out from the UI sticks.
+    /// A true value is enabling this worker on every newly created project. A later opt-out from
+    /// the UI is kept.
     pub auto_enable: bool,
-    /// Optional fixed auth identity used instead of per-project challenge.
     pub authorize_against: Option<Uuid>,
     pub created_by: Option<UserId>,
     pub created_at: NaiveDateTime,

@@ -98,17 +98,12 @@ fn project_cache_row(cache: CacheId) -> gradient_entity::project_cache::Model {
     }
 }
 
-/// Append the two queries `project_has_writable_cache` issues for the
-/// "writable cache exists" path.
 pub fn with_writable_cache(db: MockDatabase) -> MockDatabase {
     let cache = cache_row(true);
     db.append_query_results([vec![project_cache_row(cache.id)]])
         .append_query_results([vec![cache]])
 }
 
-/// Append the single query `park_if_storage_full` issues for the "not
-/// full" path: `project_writable_caches` finds no project_cache rows, so
-/// `project_caches_all_full` short-circuits to `false`.
 pub fn with_storage_not_full(db: MockDatabase) -> MockDatabase {
     db.append_query_results([Vec::<gradient_entity::project_cache::Model>::new()])
 }
@@ -130,8 +125,6 @@ fn worker_registration_row(
     }
 }
 
-/// Append the single query `project_has_eval_capable_worker_registration`
-/// issues for the "eval-capable worker exists" path.
 pub fn with_eval_worker(db: MockDatabase) -> MockDatabase {
     db.append_query_results([vec![worker_registration_row(true, true)]])
 }

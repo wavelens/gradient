@@ -4,10 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Deterministic fixture builders. Stable UUIDs make assertions readable:
-//! you can write `assert_eq!(body["name"], "test-project")` instead of chasing
-//! a random `Uuid`.
-
 use gradient_entity::ids::{
     CacheId, CacheUpstreamId, CacheUserId, CommitId, EvaluationId, ProjectCacheId, ProjectId,
     TaskId, UserId,
@@ -164,9 +160,6 @@ pub fn eval_at(id: EvaluationId, offset_secs: i64) -> evaluation::Model {
     }
 }
 
-/// Insert an Admin `cache_user` row for `user_id` on `cache_id`. Call this after
-/// inserting a cache fixture to satisfy the invariant that every cache has at
-/// least one Admin member.
 pub async fn insert_cache_creator_admin(
     db: &DatabaseConnection,
     cache_id: CacheId,

@@ -4,8 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Stable per-report pseudonyms for the strings a report would otherwise leak.
-
 use std::collections::HashMap;
 use std::sync::Mutex;
 
@@ -20,27 +18,19 @@ fn is_store_name_char(c: char) -> bool {
     c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '+' | '?' | '=')
 }
 
-/// Maps identifying strings to tokens. The salt is random per report and never
-/// written to the file, so tokens correlate within one report and not across
-/// two of the same instance.
+/// The salt is random per report and never written to the file. Tokens are correlating within one
+/// report and not across two reports of the same instance.
 pub struct Redactor {
     opts: ReportOptions,
     salt: [u8; 32],
     seen: Mutex<HashMap<String, String>>,
-    /// Free text is rewritten against every pseudonym minted so far. Compiled
-    /// once per pattern set and reused: a scan of the text per pseudonym costs
-    /// the product of both, which is what made a large report take minutes.
     matcher: Mutex<Option<Matcher>>,
     #[cfg(test)]
     compilations: std::sync::atomic::AtomicUsize,
 }
 
-/// The minted pseudonyms, compiled into one pass over the text.
 struct Matcher {
-    /// How many pseudonyms this was built from; a mint invalidates it.
     covers: usize,
-    /// `None` when the pattern set could not be compiled. The fallback then
-    /// scans once per pseudonym rather than letting an original through.
     automaton: Option<AhoCorasick>,
     patterns: Vec<String>,
     tokens: Vec<String>,
@@ -131,8 +121,6 @@ impl Redactor {
         self.token(value, "pkg")
     }
 
-    /// Rewrites only the name half of a store path. The 32-char hash stays: it
-    /// is one-way, and it is what makes an upstream cache check possible.
     pub fn store_path(&self, path: &str) -> String {
         if !self.opts.anonymize_packages || path.is_empty() {
             return path.to_owned();
@@ -148,14 +136,10 @@ impl Redactor {
         }
     }
 
-    /// Free text names the same things the columns do, so a log is redacted
-    /// against every pseudonym this report has already minted, plus any store
-    /// path it happens to name. One pass, longest match first, so a shorter
-    /// original that is a prefix of another cannot clip it and a token cannot
-    /// be rewritten again by a pseudonym minted later.
+    /// Free text is redacted in one pass against every minted pseudonym and any named store path.
+    /// The longest match is going first. A shorter prefix cannot clip a longer original, and a
+    /// later pseudonym cannot rewrite a token.
     pub fn text(&self, text: &str) -> String {
-        // Rewriting store paths mints the package names this text introduces,
-        // so the matcher is resolved after it rather than before.
         let out = self.redact_store_paths(text);
         let minted = self.seen.lock().expect("redactor mutex").len();
 
@@ -170,7 +154,6 @@ impl Redactor {
         matcher.as_ref().map_or(out.clone(), |m| m.apply(&out))
     }
 
-    /// What [`Redactor::text`] will actually do, for the manifest to declare.
     pub fn log_redactions(&self) -> String {
         match (self.opts.anonymize_identities, self.opts.anonymize_packages) {
             (false, false) => "none".to_owned(),
@@ -179,8 +162,6 @@ impl Redactor {
         }
     }
 
-    /// Every original this report has pseudonymised, paired with its token,
-    /// longest first.
     fn minted(&self) -> Vec<(String, String)> {
         let mut pairs: Vec<(String, String)> = {
             let guard = self.seen.lock().expect("redactor mutex");
@@ -196,9 +177,6 @@ impl Redactor {
         pairs
     }
 
-    /// A log names store paths no exported column mentions - a builder, a
-    /// transitive dependency - so those are rewritten structurally rather than
-    /// by lookup, keeping the hash exactly as the column policy does.
     fn redact_store_paths(&self, text: &str) -> String {
         if !self.opts.anonymize_packages {
             return text.to_owned();
@@ -219,8 +197,6 @@ impl Redactor {
         out
     }
 
-    /// Space-separated store paths, as `derivation_output.references_list`
-    /// stores them.
     pub fn store_path_list(&self, list: &str) -> String {
         if !self.opts.anonymize_packages || list.is_empty() {
             return list.to_owned();
@@ -282,8 +258,6 @@ mod tests {
         assert_ne!(r.package("hello-2.12"), "hello-2.12");
     }
 
-    /// The hash half is one-way and is what lets a maintainer check a path
-    /// against a public cache, so it survives even full anonymisation.
     #[test]
     fn store_path_keeps_its_hash_and_renames_only_the_package() {
         let r = Redactor::new(opts(true, true));
@@ -301,8 +275,6 @@ mod tests {
         assert_eq!(Redactor::new(opts(true, false)).store_path(p), p);
     }
 
-    /// Recompiling the pattern set for every log is the other half of the
-    /// quadratic cost, so only a fresh pseudonym may invalidate it.
     #[test]
     fn the_pseudonym_matcher_is_compiled_once_per_pattern_set() {
         use std::sync::atomic::Ordering;
@@ -322,8 +294,6 @@ mod tests {
         );
     }
 
-    /// Free text is rewritten in one pass, so a token minted from a shorter
-    /// original cannot be found again inside one already substituted.
     #[test]
     fn free_text_substitutes_each_position_once() {
         let r = Redactor::new(opts(true, false));
@@ -336,8 +306,6 @@ mod tests {
         );
     }
 
-    /// The longest original wins where two overlap, so a shorter one that is a
-    /// prefix of another cannot clip it.
     #[test]
     fn the_longest_match_wins_where_two_originals_overlap() {
         let r = Redactor::new(opts(true, false));
@@ -349,8 +317,6 @@ mod tests {
         );
     }
 
-    /// A token minted while scanning the same text still has to be applied to
-    /// the bare mentions elsewhere in it.
     #[test]
     fn a_name_minted_from_a_store_path_is_replaced_everywhere_in_the_same_text() {
         let r = Redactor::new(opts(true, true));

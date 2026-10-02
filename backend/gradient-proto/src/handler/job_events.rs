@@ -4,10 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! A worker's job lifecycle reports, applied in arrival order off the session's
-//! read loop. Applying one waits on the graph writer, which under load takes
-//! seconds; inline, that wait stopped the connection from reading anything else,
-//! so the worker's other jobs timed out on `CacheQuery` replies never read.
+//! Reports are applied off the session's read loop. Waiting inline on a loaded graph writer was
+//! stalling reads, and the worker's other jobs timed out on unread `CacheQuery` replies.
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -103,8 +101,6 @@ impl JobEvents {
         }
     }
 
-    /// Apply every report already queued. Unregistering the worker re-queues
-    /// the jobs it still holds, so a queued failure must land before that.
     pub(super) async fn finish(&mut self) {
         self.tx.take();
         if let Some(drained) = self.drained.take() {

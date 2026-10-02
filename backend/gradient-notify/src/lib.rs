@@ -13,8 +13,6 @@ use lettre::{Message, SmtpTransport, Transport};
 use tokio::fs;
 use tracing::info;
 
-/// Outbound email delivery. Production impl is `EmailService` (SMTP via lettre);
-/// tests use an in-memory recorder.
 #[async_trait]
 pub trait EmailSender: Send + Sync + std::fmt::Debug + 'static {
     fn is_enabled(&self) -> bool;
@@ -569,7 +567,6 @@ fn subscription_email_html(mail: &SubscriptionMail<'_>) -> String {
     )
 }
 
-/// 32 random bytes, hex encoded. Used for e-mail verification and invitations.
 pub fn generate_token() -> String {
     let token: [u8; 32] = rand::random();
     hex::encode(token)

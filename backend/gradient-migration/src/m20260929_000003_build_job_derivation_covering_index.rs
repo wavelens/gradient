@@ -4,11 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Every lookup of `build_job` by derivation that wants the naming evaluations
-//! (the graph-version bump after an ingest grew or recovery moved anchors) paid
-//! one heap fetch per job. Carrying the evaluation in the derivation index makes
-//! it an index-only scan; the covering index replaces the plain one.
-
 use sea_orm_migration::prelude::*;
 use sea_orm_migration::sea_orm::ConnectionTrait;
 

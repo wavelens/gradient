@@ -4,14 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Per-request API-key context.
-//!
-//! When the auth middleware authenticates a request via `GRAD<key>` it inserts
-//! `Extension(MaybeApiKey(Some(ctx)))` into the request; session-JWT requests
-//! get `MaybeApiKey(None)`. The access layer reads this extension to
-//! intersect the key's permission mask with the user's role-derived mask, and
-//! to short-circuit on a pinned-project mismatch.
-
 use crate::permissions::PermissionMask;
 use gradient_types::ids::CacheId;
 use gradient_types::{ApiId, ProjectId, UserId};
@@ -20,18 +12,12 @@ use gradient_types::{ApiId, ProjectId, UserId};
 pub struct ApiKeyContext {
     pub api_id: ApiId,
     pub mask: PermissionMask,
-    /// `None` = unscoped; `Some(id)` pins the key to a single project.
     pub project: Option<ProjectId>,
-    /// `None` = unscoped; `Some(id)` pins the key to a single cache.
     pub cache_pin: Option<CacheId>,
-    /// Cache-permission mask. `None` means unrestricted (i64::MAX).
     pub cache_permission_mask: Option<i64>,
-    /// Source-IP allowlist (CIDR strings). Empty = any source allowed.
     pub allowed_ips: Vec<String>,
 }
 
-/// Extension type inserted on every authenticated request.
-/// `Some(ctx)` for API-key requests, `None` for session-JWT requests.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MaybeApiKey(pub Option<ApiKeyContext>);
 
@@ -47,7 +33,6 @@ impl MaybeApiKey {
     }
 }
 
-/// Result of decoding a request token: a session JWT or an API key.
 #[derive(Debug, Clone)]
 pub enum DecodedRequest {
     Session {

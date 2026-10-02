@@ -4,11 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Typed `clap::Args` clusters that compose the top-level [`super::Cli`].
-//!
-//! Each module is one config group: its NixOS option path, flag and env var
-//! share one name (`upload.bytesBudget`, `--upload-bytes-budget`,
-//! `GRADIENT_UPLOAD_BYTES_BUDGET`).
+//! Each module is one config group. Its NixOS option path, flag and env var are sharing one name,
+//! like `upload.bytesBudget`, `--upload-bytes-budget` and `GRADIENT_UPLOAD_BYTES_BUDGET`.
 
 mod build;
 mod cache;
@@ -60,7 +57,6 @@ pub use server::ServerArgs;
 pub use state::StateArgs;
 pub use upload::UploadArgs;
 
-/// The values a group takes with no flag and no environment: its clap defaults.
 fn clap_defaults<T: clap::Args + clap::FromArgMatches>() -> T {
     let command = T::augment_args(clap::Command::new("defaults")).mut_args(|arg| arg.env(None));
     T::from_arg_matches(&command.get_matches_from(["defaults"]))

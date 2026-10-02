@@ -11,12 +11,7 @@ use gradient_types::*;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{ActiveModelTrait, ConnectionTrait};
 
-/// Move a freshly-created `Queued` evaluation into `Waiting` with
-/// `WaitingReason::CacheStorageFull` when every writable cache for the project is
-/// within `STORAGE_HEADROOM_BYTES` of its configured `max_storage_gb` (or the
-/// instance-wide limit). Returns the evaluation unchanged when at least one
-/// writable cache still has headroom, or when the project has no writable cache at
-/// all (that case is owned by [`park_if_no_cache`](super::park_if_no_cache)).
+/// A project without writable caches is left to [`park_if_no_cache`](super::park_if_no_cache).
 #[tracing::instrument(level = "debug", skip_all)]
 pub async fn park_if_storage_full<C: ConnectionTrait>(
     db: &C,

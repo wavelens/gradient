@@ -4,8 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! User / project / integration name lookups.
-
 use super::DynError;
 use super::StateApplicator;
 use gradient_ci::IntegrationKind;
@@ -24,14 +22,9 @@ pub(crate) fn lookup_id<T: Copy>(
         .ok_or_else(|| format!("{} '{}' not found", kind, name).into())
 }
 
-/// Loads the project's inbound integrations per name.
-///
-/// `reporter_push` and `reporter_pull_request` triggers reference an inbound
-/// integration by name. Auto-managed GitHub App rows are seeded once per project as
-/// **two** integrations sharing `name = "github"` (one `Inbound`, one
-/// `Outbound`), so a collect that ignores `kind` collapses them into a single
-/// arbitrary entry - sometimes the outbound id, which makes the webhook
-/// resolver's inbound lookup miss and the trigger never fires.
+/// The GitHub App is seeding two integrations per project sharing `name = "github"`, one inbound
+/// and one outbound. A collect ignoring `kind` is collapsing them into one arbitrary entry. The
+/// webhook resolver then misses the outbound id and the trigger never fires.
 pub(crate) async fn inbound_integrations_by_name<C: ConnectionTrait>(
     db: &C,
     project_id: ProjectId,
@@ -61,8 +54,6 @@ pub(crate) async fn outbound_integrations_by_name<C: ConnectionTrait>(
 }
 
 impl<'a> StateApplicator<'a> {
-    // ── Lookup helpers ────────────────────────────────────────────────────────
-
     pub(crate) async fn user_lookup(&self) -> Result<HashMap<String, UserId>, DynError> {
         let users = user::Entity::find().all(self.db).await?;
         Ok(users.into_iter().map(|u| (u.username, u.id)).collect())
@@ -84,12 +75,6 @@ mod inbound_integration_lookup_tests {
         ProjectId::new(Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap())
     }
 
-    /// Regression: the SELECT behind `inbound_integrations_by_name` must
-    /// restrict to `kind = Inbound`. The auto-managed GitHub App seeds two
-    /// rows per project sharing `name = "github"` (one inbound, one outbound). A
-    /// query that ignores `kind` collapses them in the resulting HashMap and
-    /// silently stores the outbound id on `reporter_push`/`reporter_pull_request`
-    /// triggers, so the webhook resolver's inbound lookup never matches.
     #[tokio::test]
     async fn inbound_integrations_lookup_sql_filters_kind_inbound() {
         let db = MockDatabase::new(DatabaseBackend::Postgres)

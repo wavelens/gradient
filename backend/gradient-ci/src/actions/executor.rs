@@ -116,9 +116,8 @@ pub async fn execute_action(
     }
 
     if success {
-        // Bookkeeping only: a concurrent burst of firings all writes an
-        // equivalent timestamp to this one row, so skip when another writer
-        // holds the lock instead of convoying pool connections behind it.
+        // A burst of firings is writing equivalent timestamps to this one row. Skipping a locked
+        // row is avoiding a convoy of pool connections behind it.
         let stamp = gradient_types::now();
         let update = TOUCH_ACTION_LAST_FIRED.bind([
             stamp.into(),

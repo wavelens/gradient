@@ -9,9 +9,6 @@ use chrono::NaiveDateTime;
 use gradient_types::*;
 use sea_orm::{ActiveModelTrait, ConnectionTrait, IntoActiveModel};
 
-/// Copies the previous evaluation's entry points onto `new_eval_id`, carrying
-/// each one's `derivation` straight across. The new eval re-resolves shared builds
-/// for those derivations when it starts.
 pub(super) async fn copy_entry_points<C: ConnectionTrait>(
     db: &C,
     prev_entry_points: &[MEntryPoint],

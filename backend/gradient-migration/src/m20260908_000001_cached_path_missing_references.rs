@@ -4,37 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! `cached_path.missing_references` replaces `closure_complete`: the number of
-//! a path's references that are absent, unbacked or themselves not whole.
-//!
-//! The seed is one walk, not a fixpoint. "Whole" is a least fixpoint over
-//! `cached_path_reference` - a path is whole when it is backed and every path it
-//! references is whole - so its complement is plain reachability: a path is NOT
-//! whole exactly when it is unbacked, absent, or references one that is. One
-//! recursive walk upward from the unbacked and the absent names that set, and one
-//! grouped `UPDATE` counts each referrer's edges into it. Converging the old flag
-//! first cost a full scan of `cached_path` per hop of the deepest closure, twice,
-//! and that is what made this migration block the first start for minutes.
-//!
-//! Nothing here reads `closure_complete`, which is also what makes it idempotent:
-//! the reset ahead of the seed clears a diverged value, and a run that died
-//! partway leaves nothing a second `up` would trip over.
-//!
-//! The walk is fenced with `LATERAL (... OFFSET 0)` for the reason every other
-//! recursive walk in this codebase is: unfenced, the planner believes the working
-//! table is ten times the seed and merge-joins the whole edge table once per
-//! iteration. `idx-cached_path_reference-reference_hash` serves the probe.
-//!
-//! The seed skips every row with no broken reference, so the transaction that
-//! then takes ACCESS EXCLUSIVE for the `DROP COLUMN` does not first rewrite the
-//! whole table. The partial index over the rows below zero keeps the consistency
-//! sweep's negative-counter count off a full scan; it is empty on a healthy cache.
-
 use sea_orm_migration::prelude::*;
 use sea_orm_migration::sea_orm::ConnectionTrait;
 
-/// Every hash that is not whole: unbacked, absent from `cached_path` entirely,
-/// or a referrer of one that is.
 const BROKEN: &str = r#"
     WITH RECURSIVE broken(hash) AS (
             SELECT cp.hash FROM cached_path cp WHERE cp.file_hash IS NULL
@@ -106,11 +78,6 @@ impl MigrationTrait for Migration {
 mod tests {
     use super::{DOWN, seed, up_statements};
 
-    /// The value is re-derived from ground truth, so no statement may READ the
-    /// flag it replaces. Only the tail that removes it may name it, and a
-    /// `DROP INDEX` names an index rather than a column. `down` restores it and is
-    /// exempt. This is also what makes `up` idempotent: the old converge loop read
-    /// `closure_complete` and so could not survive its own `DROP COLUMN`.
     #[test]
     fn the_backfill_never_reads_the_flag_it_replaces() {
         let drop_column = "ALTER TABLE cached_path DROP COLUMN IF EXISTS closure_complete";
@@ -133,9 +100,8 @@ mod tests {
         );
     }
 
-    /// One walk, not a fixpoint: a `LOOP` over the whole table per hop is what
-    /// this migration was, and the recursive term has to stay fenced or the
-    /// planner merge-joins the edge table once per iteration.
+    /// The recursive term must stay fenced with `LATERAL (... OFFSET 0)`. The planner is
+    /// merge-joining the edge table once per iteration without the fence.
     #[test]
     fn the_seed_is_one_fenced_walk() {
         let sql = seed().split_whitespace().collect::<Vec<_>>().join(" ");
@@ -152,10 +118,6 @@ mod tests {
         );
     }
 
-    /// The two seed arms are the whole definition of "not whole" at the leaves:
-    /// a row with no NAR, and a reference to a hash `cached_path` does not have.
-    /// Dropping the second reads an unknown path as present and the counter seeds
-    /// low, which the first consistency sweep reports as drift.
     #[test]
     fn the_walk_seeds_from_the_unbacked_and_the_absent() {
         let sql = seed().split_whitespace().collect::<Vec<_>>().join(" ");
@@ -172,9 +134,8 @@ mod tests {
         );
     }
 
-    /// The counter counts edges into the broken set, and a self-reference is not
-    /// one of them: `gradient_db`'s live recount excludes `reference_hash = hash`,
-    /// and a seed that counted it would disagree with every recompute.
+    /// A self-reference is not an edge into the broken set. The live recount in `gradient_db` is
+    /// excluding `reference_hash = hash`, and the seed must agree with it.
     #[test]
     fn the_count_excludes_self_references() {
         let sql = seed().split_whitespace().collect::<Vec<_>>().join(" ");
@@ -188,10 +149,6 @@ mod tests {
         );
     }
 
-    /// A row with nothing broken keeps the column default, so the seed touches
-    /// only the rows it has a count for. The reset ahead of it is what clears a
-    /// value a previous run left behind; without it a re-run leaves a stale
-    /// non-zero on a row that has since become whole.
     #[test]
     fn the_seed_is_preceded_by_a_reset() {
         let stmts = up_statements();

@@ -29,7 +29,6 @@ fn promote_sql(scope: &str) -> String {
     )
 }
 
-/// `Created` to `Queued` for an explicit candidate list.
 static PROMOTE: LazyLock<String> =
     LazyLock::new(|| promote_sql("db.derivation = ANY($1::uuid[]) AND "));
 
@@ -38,15 +37,6 @@ crate::sql_lazy! {
         params = [DerivationIds(64)];
 }
 
-/// `Created` to `Queued` table-wide. The leading conjunct is implied by the gate (a
-/// passthrough takes the `cache_available` arm, a build the `blocking_deps = 0` one) and is
-/// written out anyway: it is the predicate of `idx-derivation_build-promotable`, and
-/// spelling it makes the implication syntactic.
-///
-/// It is still the sweep's, not the queue's: the selective term is the gate's
-/// `build_job` EXISTS, so the planner rightly drives from the jobs and reaches the
-/// shared builds through that index rather than scanning it. [`repair_can_start`] is the
-/// only caller and it covers the whole table by design.
 static PROMOTE_ANY: LazyLock<String> =
     LazyLock::new(|| promote_sql("(db.blocking_deps = 0 OR db.cache_available) AND "));
 
@@ -107,12 +97,6 @@ crate::sql_lazy! {
         params = [DerivationHashes(64)];
 }
 
-/// The queue's own backstop: every `Queued` shared build whose gates no longer hold.
-///
-/// Table-wide with no index-friendly bound - it scans the `Queued` rows and evaluates
-/// three `EXISTS` plus the negated gate for each, unlike [`PROMOTE_ANY`], which
-/// matches a partial index. It is the sweep's most expensive statement and its row
-/// count belongs in whatever the sweep reports.
 static UNPROMOTE_UNGATED: LazyLock<String> = LazyLock::new(|| unpromote_ungated_sql(""));
 
 crate::sql_lazy! {
@@ -121,8 +105,6 @@ crate::sql_lazy! {
         tier = Sweep;
 }
 
-/// [`UNPROMOTE_UNGATED`] bounded to a candidate list, for an event that just
-/// invalidated a known set of gates.
 static UNPROMOTE_UNGATED_IN: LazyLock<String> =
     LazyLock::new(|| unpromote_ungated_sql("db.derivation = ANY($1::uuid[]) AND "));
 
@@ -131,9 +113,6 @@ crate::sql_lazy! {
         params = [DerivationIds(64)];
 }
 
-/// Queue every `Created` candidate whose gates hold. The gate is embedded, so a
-/// candidate list is a bound and never a claim: passing a row that cannot start yet
-/// moves nothing.
 pub async fn promote<C: ConnectionTrait>(
     db: &C,
     candidates: &[DerivationId],
@@ -153,10 +132,6 @@ pub async fn promote<C: ConnectionTrait>(
     ))
 }
 
-/// Queue every promotable shared build in an evaluation's dependency closure. What a
-/// finished walk happens once, so shared builds whose dependencies were already fetchable at
-/// resolve time - for which no completion event ever fires - are seeded from the
-/// closure instead of waiting for one.
 pub async fn promote_closure<C>(
     db: &C,
     evaluation: EvaluationId,
@@ -177,11 +152,6 @@ where
     ))
 }
 
-/// Pull back every `Queued` shared build whose own `.drv` is among `drv_hashes`, and whose
-/// gates the loss of that `.drv` closed. The full gate is embedded rather than the
-/// `.drv` term alone, so this is [`unpromote_ungated`] scoped by hash: a `.drv`
-/// re-pushed between the loss and this call keeps its shared build queued, and a passthrough,
-/// whose arm of the gate never reads the `.drv`, is left alone.
 pub async fn unpromote_drv_owners<C: ConnectionTrait>(
     db: &C,
     drv_hashes: &[String],
@@ -196,10 +166,8 @@ pub async fn unpromote_drv_owners<C: ConnectionTrait>(
     ))
 }
 
-/// Pull back every `Queued` candidate whose gates no longer hold. The gate is
-/// embedded, so the candidate list is a bound and never a claim: a shared build a
-/// concurrent evaluation re-walked between the event and this call keeps its place
-/// in the queue.
+/// The gate is embedded, and the candidate list is a bound, never a claim.
+/// A shared build re-walked by a concurrent evaluation is keeping its place in the queue.
 pub async fn unpromote_ungated<C: ConnectionTrait>(
     db: &C,
     candidates: &[DerivationId],
@@ -214,15 +182,8 @@ pub async fn unpromote_ungated<C: ConnectionTrait>(
     ))
 }
 
-/// Drop the record of `derivations` and close the gates that read `walked`, so the
-/// next evaluation walks them again: the un-promoted shared builds come back as transitions
-/// for the caller to fan out with [`crate::status::emit_transition_effects`].
-///
-/// The un-walk goes first, because it locks `derivation` rows before [`lock_shared_builds`]
-/// and [`unpromote_ungated`] reach `derivation_build` - the class order record
-/// (`upsert_walked`, then the shared build locks) and the GC's orphan reclaim both take. The
-/// shared build pass that follows acquires the un-promoted rows in `derivation` order instead
-/// of the one `unpromote_ungated`'s own UPDATE would pick.
+/// The un-walk must go first and lock `derivation` rows before `derivation_build`.
+/// Record and the GC's orphan reclaim are following the same class order.
 pub async fn unwalk_derivations(
     ctx: &crate::DbContext,
     derivations: &[DerivationId],
@@ -248,8 +209,6 @@ mod tests {
     use sea_orm::{DatabaseBackend, MockDatabase, Value};
     use std::collections::BTreeMap;
 
-    /// Promotion embeds the whole gate and moves Created rows only, so a candidate list
-    /// bounds the statement without asserting anything about the rows in it.
     #[test]
     fn promote_embeds_the_promotable_predicate() {
         for sql in [norm(&PROMOTE), norm(&PROMOTE_ANY)] {
@@ -284,9 +243,6 @@ mod tests {
         );
     }
 
-    /// A `.drv` owner leaves the queue only while its gates really are shut, so a
-    /// re-push between the loss and this call keeps its shared build queued - and a passthrough,
-    /// whose arm of the gate never reads the `.drv`, is never pulled back by one.
     #[test]
     fn unpromoting_a_drv_owner_rechecks_the_complete_gate() {
         let sql = norm(&UNPROMOTE_DRV_OWNERS);
@@ -302,8 +258,6 @@ mod tests {
         );
     }
 
-    /// The generic un-promote is what every need loss executes, so it must move
-    /// `Queued` rows only and report the move as the transition the emitter fans out.
     #[tokio::test]
     async fn unpromote_ungated_moves_queued_rows_back_to_created() {
         let d = DerivationId::now_v7();
@@ -334,9 +288,6 @@ mod tests {
         );
     }
 
-    /// A dispatched job keeps its shared build `Queued` until the worker reports, so an
-    /// un-promote that reached it would skip a build already running and reject
-    /// the `Building` that follows.
     #[test]
     fn no_unpromote_takes_a_shared_build_out_from_under_its_job() {
         let gate = norm(
@@ -353,8 +304,6 @@ mod tests {
         }
     }
 
-    /// The un-walk selects what was complete, drops the record, and only then locks
-    /// shared builds: derivation rows first, as every writer of them does.
     #[tokio::test]
     async fn an_unwalk_moves_the_counter_before_it_reaches_the_shared_builds() {
         let gone = DerivationId::now_v7();

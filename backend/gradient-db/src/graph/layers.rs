@@ -4,11 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Graph reads over the `derivation_dependency` table: an evaluation's edges and
-//! the layering that turns them into the display order a build list is read in.
-//! The row `(derivation, dependency)` means "`derivation` depends on
-//! `dependency`".
-
 use sea_orm::{ConnectionTrait, DbErr, FromQueryResult};
 use std::collections::{HashMap, HashSet, VecDeque};
 
@@ -32,13 +27,9 @@ crate::sql! {
                       fixture's largest evaluation names ~98k");
 }
 
-/// Every `derivation_dependency` edge whose parent derivation is one an
-/// `evaluation` holds a `build_job` for. Written as a `LATERAL` probe per
-/// parent behind an `OFFSET 0` fence so the planner keeps the nested loop with
-/// a per-parent index-only lookup instead of hash-joining the whole edge table
-/// (see [`crate::graph::walks`] for why the fence is load-bearing). Measured on
-/// the largest production evaluation - 34,778 jobs, 300,534 edges - 140 ms
-/// warm against 1,438 ms for the hash join the planner picks unfenced.
+/// The `LATERAL` probe behind `OFFSET 0` is keeping a per-parent index lookup.
+/// The planner is hash-joining the whole edge table without the fence.
+/// That plan measured 1,438 ms against 140 ms on the largest production evaluation.
 pub async fn eval_dependency_edges<C: ConnectionTrait>(
     db: &C,
     evaluation: EvaluationId,
@@ -59,15 +50,6 @@ pub async fn eval_dependency_edges<C: ConnectionTrait>(
         .collect())
 }
 
-/// Longest-path dependency layer of every node in `nodes`, over the
-/// `(derivation, dependency)` edges restricted to that set.
-///
-/// Layer 0 is a node nothing in the set depends on - an entry point, or the
-/// root of a closure-scoped view. Every other node sits one layer below its
-/// deepest parent, so a derivation always ranks strictly above every
-/// derivation it needs, and nodes sharing a layer are genuine siblings that a
-/// caller can order however it likes. Edges to or from outside `nodes` are
-/// ignored, so a scoped subgraph layers relative to its own root.
 pub fn dependency_layers(
     nodes: &HashSet<DerivationId>,
     edges: &[(DerivationId, DerivationId)],
@@ -119,8 +101,6 @@ mod tests {
         dependency_layers(&nodes.iter().copied().collect(), edges)
     }
 
-    /// The build nothing else needs is the top of the list, and each dependency
-    /// sits exactly one layer below the build that pulls it in.
     #[test]
     fn root_is_layer_zero_and_dependencies_descend() {
         let (root, mid, leaf) = (
@@ -136,9 +116,6 @@ mod tests {
         assert_eq!(out[&leaf], 2);
     }
 
-    /// A diamond shares its sink between two paths of different length. The
-    /// longest one wins, so the sink never ranks above the parent that needs
-    /// it - the whole point of layering rather than a shortest-path BFS.
     #[test]
     fn diamond_takes_the_longest_path() {
         let (root, short, long_a, sink) = (
@@ -156,7 +133,6 @@ mod tests {
         assert_eq!(out[&sink], 3);
     }
 
-    /// Several entry points in one evaluation each start their own layer 0.
     #[test]
     fn every_undepended_node_starts_at_zero() {
         let (a, b, shared) = (
@@ -170,8 +146,6 @@ mod tests {
         assert_eq!((out[&a], out[&b], out[&shared]), (0, 0, 1));
     }
 
-    /// A closure-scoped view layers relative to its own root: edges reaching
-    /// derivations outside the set carry no weight.
     #[test]
     fn edges_outside_the_node_set_are_ignored() {
         let (outside, root, dep) = (
@@ -188,8 +162,6 @@ mod tests {
         assert_eq!((out.len(), out[&root], out[&dep]), (2, 0, 1));
     }
 
-    /// A derivation with no edges at all still gets a layer, so the sort key is
-    /// total over the evaluation's builds.
     #[test]
     fn isolated_nodes_are_layer_zero() {
         let lonely = DerivationId::now_v7();

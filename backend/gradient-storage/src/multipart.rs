@@ -4,9 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Presigned S3 multipart uploads: the server opens and closes the upload, the
-//! worker PUTs every part straight to object storage.
-
 use anyhow::{Context, Result};
 use gradient_util::telemetry::MinuteStats;
 use gradient_wire::types::{CompletedMultipart, PresignedMultipart};
@@ -139,8 +136,8 @@ pub(crate) async fn complete(
     Ok(())
 }
 
-/// Best effort: an upload left open only costs storage until the bucket's
-/// `AbortIncompleteMultipartUpload` lifecycle rule reaps it.
+/// An upload left open is only costing storage until the bucket's `AbortIncompleteMultipartUpload`
+/// lifecycle rule is reaping it.
 pub(crate) async fn abort(s3: &AmazonS3, path: &Path, upload_id: &str) {
     if let Err(e) = s3.abort_multipart(path, &upload_id.to_owned()).await {
         tracing::warn!(%path, upload_id, error = %e, "failed to abort multipart upload");

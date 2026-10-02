@@ -147,8 +147,8 @@ pub async fn upstream_endpoints_for_project<C: ConnectionTrait>(
     project_id: ProjectId,
     window_minutes: i64,
 ) -> Result<Vec<UpstreamEndpoint>> {
-    // window_minutes is baked into the text rather than bound, so the exemplar
-    // above is what the gate plans.
+    // `window_minutes` is baked into the text instead of bound.
+    // The exemplar above is then the shape the plan gate is checking.
     let rows = db
         .query_all_raw(UPSTREAM_ENDPOINTS_FOR_PROJECT.bind_built(
             upstream_endpoints_sql(window_minutes),
@@ -224,8 +224,6 @@ pub async fn upsert_upstream_metrics<C: ConnectionTrait>(
     Ok(())
 }
 
-/// Distinct upstream URLs reachable by any of `project_ids` (their subscribed
-/// caches' HTTP upstream caches). Scopes the by-URL board metrics to the caller.
 fn upstream_urls_for_projects_sql(project_list: &str) -> String {
     format!(
         "SELECT DISTINCT cu.url AS url FROM cache_upstream cu \

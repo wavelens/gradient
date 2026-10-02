@@ -4,8 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Resolve named Git host integrations for projects.
-
 use gradient_entity::github_installation;
 use gradient_entity::ids::GithubInstallationId;
 use gradient_types::*;
@@ -17,11 +15,8 @@ use tracing::warn;
 
 pub use gradient_entity::integration::IntegrationKind;
 
-/// Stable display name shown in dropdowns for the auto-managed GitHub App rows.
 pub const GITHUB_APP_INTEGRATION_DISPLAY_NAME: &str = "GitHub";
 
-/// Stable, per-installation integration name. Lowercased account login keeps it
-/// URL/index-safe; falls back to the numeric installation id.
 pub fn github_integration_name(account_login: Option<&str>, installation_id: i64) -> String {
     match account_login {
         Some(login) if !login.trim().is_empty() => {
@@ -31,8 +26,6 @@ pub fn github_integration_name(account_login: Option<&str>, installation_id: i64
     }
 }
 
-/// Find-or-create the `github_installation` row for (project, installation_id),
-/// refreshing `account_login` when newly known. Returns its id.
 pub async fn upsert_github_installation<C: ConnectionTrait>(
     db: &C,
     project: ProjectId,
@@ -169,19 +162,12 @@ mod ensure_tests {
 
     #[tokio::test]
     async fn creates_both_rows_when_none_exist() {
-        // Per kind: (1) installation filter -> empty, (2) name clash -> empty, (3) insert result
         let db = MockDatabase::new(DatabaseBackend::Postgres)
-            // Inbound: installation filter -> none
             .append_query_results([Vec::<gradient_entity::integration::Model>::new()])
-            // Inbound: name clash -> none
             .append_query_results([Vec::<gradient_entity::integration::Model>::new()])
-            // Inbound: insert result
             .append_query_results([vec![github_row(IntegrationKind::Inbound)]])
-            // Outbound: installation filter -> none
             .append_query_results([Vec::<gradient_entity::integration::Model>::new()])
-            // Outbound: name clash -> none
             .append_query_results([Vec::<gradient_entity::integration::Model>::new()])
-            // Outbound: insert result
             .append_query_results([vec![github_row(IntegrationKind::Outbound)]])
             .into_connection();
 
@@ -199,11 +185,8 @@ mod ensure_tests {
 
     #[tokio::test]
     async fn skips_kinds_that_already_exist() {
-        // Per kind: (1) installation filter -> found -> skip
         let db = MockDatabase::new(DatabaseBackend::Postgres)
-            // Inbound: installation filter -> found
             .append_query_results([vec![github_row(IntegrationKind::Inbound)]])
-            // Outbound: installation filter -> found
             .append_query_results([vec![github_row(IntegrationKind::Outbound)]])
             .into_connection();
 

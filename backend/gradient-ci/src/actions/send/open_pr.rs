@@ -4,10 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! `OpenPr` executor: reads the worker-produced candidate lock for an
-//! `input_update` evaluation, commits it onto a deterministic branch, and opens
-//! or updates a pull request, recording the lifecycle in `open_pr_state`.
-
 use super::git_host_status::build_reporter_for_integration;
 use crate::actions::ExecutorOk;
 use crate::context::CiContext;
@@ -154,9 +150,6 @@ fn no_op() -> ExecutorOk {
     }
 }
 
-/// The identity to force onto the commit, or `None` to let the Git host attribute
-/// it to the authenticated app/token. Both fields must be set; a half-configured
-/// identity falls back to `None`.
 fn configured_commit_ident(name: &Option<String>, email: &Option<String>) -> Option<CommitIdent> {
     match (name.as_deref(), email.as_deref()) {
         (Some(n), Some(e)) if !n.is_empty() && !e.is_empty() => Some(CommitIdent {
@@ -212,9 +205,6 @@ async fn upsert_open_pr_state(
     Ok(())
 }
 
-/// Repoint the `input_update` evaluation at the flake.lock-update commit pushed
-/// to the PR branch, so the task shows the generated commit instead of the
-/// unrelated base commit it was seeded from.
 async fn point_eval_at_pushed_commit(
     ctx: &CiContext,
     evaluation_id: EvaluationId,

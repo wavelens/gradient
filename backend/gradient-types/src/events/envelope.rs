@@ -34,7 +34,7 @@ impl Envelope {
         })
     }
 
-    /// Key order is fixed (`event`, `at`, `content`) so a line reads the same on every consumer.
+    /// Key order is fixed to `event`, `at`, `content`. Every consumer is reading the same line.
     pub fn to_line(&self) -> String {
         format!(
             "{{\"event\":{},\"at\":{},\"content\":{}}}",

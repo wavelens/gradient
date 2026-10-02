@@ -4,8 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! `POST /admin/maintenance/deep-gc`
-
 use crate::error::{WebError, WebResult, require_superuser};
 use crate::helpers::ok_json;
 use axum::http::StatusCode;
@@ -24,8 +22,8 @@ pub struct StartDeepGcResponse {
     pub status: &'static str,
 }
 
-/// Request a deep GC round. A round already running starts over from its first
-/// unit at full speed, so it covers whatever changed before this request.
+/// A round already running is restarted from its first unit at full speed. It is then covering
+/// whatever changed before this request.
 pub async fn start_deep_gc(
     State(state): State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,

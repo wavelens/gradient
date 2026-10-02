@@ -4,9 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Background scoring tasks: compute `missing_count` per candidate and send
-//! `RequestJobChunk` messages back to the server.
-
 use std::sync::Arc;
 
 use gradient_wire::messages::{CandidateScore, JobCandidate, JobKind};
@@ -16,21 +13,6 @@ use tracing::{Instrument as _, warn};
 use crate::proto::scorer::JobScorer;
 use gradient_worker_client::connection::ProtoWriter;
 
-// ── Spawn helpers ─────────────────────────────────────────────────────────────
-
-/// Spawn a background scoring task.
-///
-/// Scores every candidate in `candidates` and sends the scores as
-/// `RequestJobChunk` messages. The server offers a job again only once it has
-/// dropped the scores it held for it, so nothing offered is ever skipped. With
-/// `is_final` the last chunk carries `is_final = true`; the server uses that to
-/// know the full submission is complete.
-///
-/// After the scores are sent, a `RequestJob` is emitted for each kind in
-/// `request_after` (capacity-gated by the caller). Scoring a fresh offer is what
-/// clears the server's rescore gate, so requesting here - rather than waiting for
-/// the next 10s heartbeat - lets a serial dependency chain advance at round-trip
-/// speed instead of one level per heartbeat.
 pub(super) fn spawn_scoring_task<S: WorkerStore + ?Sized + 'static>(
     scorer: JobScorer,
     store: Arc<S>,
@@ -88,8 +70,8 @@ pub(super) fn spawn_scoring_task<S: WorkerStore + ?Sized + 'static>(
             }
         }
 
-        // Now that the server has the scores, claim work: the freshly-scored
-        // candidates have cleared the rescore gate and may be dispatchable.
+        // Scoring a fresh offer is clearing the server's rescore gate. Requesting here is sparing a
+        // dependency chain the wait for the next heartbeat.
         for kind in request_after {
             if let Err(e) = writer
                 .send(ClientMessage::RequestJob { kind: kind.clone() })
@@ -102,10 +84,8 @@ pub(super) fn spawn_scoring_task<S: WorkerStore + ?Sized + 'static>(
     });
 }
 
-/// Send one or more `RequestJobChunk` messages covering all `scores`.
-///
-/// Always sends at least one message (even when `scores` is empty) so the
-/// server sees the `is_final` sentinel.
+/// At least one message must go out, even with no scores. The server is waiting for the `is_final`
+/// sentinel.
 async fn send_score_chunks(
     writer: &ProtoWriter,
     scores: Vec<CandidateScore>,
@@ -139,8 +119,6 @@ mod tests {
     use gradient_test_support::prelude::{FakeWorkerStore, MockProtoServer};
     use gradient_worker_client::connection::ProtoConnection;
 
-    /// A requeued job is offered again after the server dropped every score it
-    /// held for it; a worker that stays silent on the repeat is vetoed for it.
     #[tokio::test]
     async fn a_candidate_offered_again_is_scored_again() {
         let server = MockProtoServer::bind().await;

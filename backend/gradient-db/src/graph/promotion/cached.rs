@@ -12,10 +12,6 @@ use gradient_entity::build::BuildStatus;
 use gradient_types::DerivationId;
 use sea_orm::{ConnectionTrait, DatabaseTransaction, DbErr, TransactionTrait, Value};
 
-/// Shared builds an evaluation found complete in our cache move from `Created` to
-/// `Substituted`; a new shared build is inserted that way, this catches the ones a
-/// prior evaluation left pending. Returns the transitions for the effects
-/// emitter.
 pub async fn substitute_created_shared_builds<C: ConnectionTrait>(
     db: &C,
     derivations: &[DerivationId],
@@ -47,19 +43,6 @@ crate::sql_fn! {
         params = [DerivationIds(64)];
 }
 
-/// Repair shared build state from cache state across an evaluation's dependency
-/// closure: any shared build whose outputs are **all** present in our cache
-/// (`cached_path.file_hash`) is marked `Completed`, even if a
-/// requeue / dependency-failed cascade / demote previously reset it. The dispatch
-/// gate keys on the build-graph shared build state, which repeatedly desyncs from the
-/// durable cache state - a derivation whose artifacts exist sits `Created` and
-/// blocks its parents with nothing to build. Cache presence is the ground truth
-/// for "is this built", so trust it here; the reactive heals
-/// ([`crate::caches::demotion::demote_parents_of`] / [`crate::caches::demotion::demote_output_only_cached_deps`])
-/// remain the backstop for the rare case where a cached output's runtime closure is
-/// itself incomplete. Returns the changes it made, so the caller can advance the
-/// parents of what it just settled; a shared build already terminal-success is left
-/// alone, since it has nothing left for this statement to write.
 pub async fn repair_cached_shared_builds_for_eval<C>(
     db: &C,
     evaluation: gradient_types::EvaluationId,
@@ -118,10 +101,6 @@ crate::sql_fn! {
 mod tests {
     use super::*;
 
-    /// Cache presence is the ground truth for "built": a pending shared build whose
-    /// outputs are complete in our cache is settled `Substituted` without a
-    /// dispatch. Only `Created` moves, so a `Queued` shared build already in the
-    /// tracker is not pulled out from under the dispatcher.
     #[test]
     fn substitute_created_shared_builds_moves_only_created_rows() {
         let sql = substitute_created_shared_builds_sql()
@@ -141,8 +120,6 @@ mod tests {
         ));
     }
 
-    /// A passthrough out on a worker settles its own shared build `Substituted`; the repair
-    /// finding its outputs first called it built.
     #[test]
     fn the_cached_repair_leaves_a_shared_build_whose_assignment_row_is_open() {
         let norm = |s: String| s.split_whitespace().collect::<Vec<_>>().join(" ");

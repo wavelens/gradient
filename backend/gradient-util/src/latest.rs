@@ -4,9 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! The latest value reported per key, forgotten once its reporter falls silent
-//! for longer than the TTL. Every `set` sweeps the stale entries, so the map
-//! never outgrows the keys reported within one TTL.
+//! Every `set` is sweeping the stale entries. The map never outgrows the keys reported within one
+//! TTL.
 
 use std::collections::HashMap;
 use std::hash::Hash;

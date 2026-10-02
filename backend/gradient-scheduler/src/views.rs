@@ -4,9 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Full structured views of the worker and job scoring context, serialized
-//! onto the dispatched-job record so the frontend can show every collected value.
-
 use gradient_pool::score::{DerivationRef, HistoryPrediction, JobContext, WorkerContext};
 use gradient_wire::types::{FlakeStep, GradientCapabilities};
 use serde::Serialize;
@@ -21,7 +18,6 @@ pub struct WorkerContextView {
     pub cpu_count: u32,
     pub cpu_core_score: u32,
     pub ram_total_mb: u64,
-    /// `None` until the worker's first live-metrics heartbeat.
     pub ram_free_mb: Option<u64>,
     pub cpu_usage_pct: Option<f32>,
     pub disk_speed_mbps: Option<f32>,

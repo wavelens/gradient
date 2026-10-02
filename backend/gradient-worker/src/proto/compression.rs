@@ -4,10 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! NAR compression handling: format detection, decompression, `.drv`
-//! closure-seed extraction, and `ValidPathInfo` construction shared by the
-//! prefetch, substitute-passthrough, and daemon-import paths.
-
 use std::collections::BTreeSet;
 
 use anyhow::Result;
@@ -21,18 +17,9 @@ use harmonia_utils_hash::fmt::Any;
 use harmonia_utils_signature::Signature;
 use tracing::warn;
 
-/// Every nix-store path a `.drv` lets us reach when expanding the prefetch
-/// closure: its input derivations (the `.drv` files this one depends on) and
-/// input sources (plain files the daemon validates when accepting the `.drv`
-/// NAR). Its outputs are not seeds: which of an input's outputs a build needs
-/// is decided by the consumer's requested output names.
-///
-/// We re-derive these from the `.drv` content rather than relying solely on
-/// `cached_path.references` because the eval worker can silently store a
-/// `NULL` references column when its `gather_path_meta` query fails -
-/// without this fallback the daemon then rejects the `.drv` import with
-/// `path '…' is not valid` for a reference parsed straight out of the
-/// `.drv` text.
+/// Seeds are re-derived from the `.drv` text rather than taken from `cached_path.references` alone.
+/// The eval worker can store `NULL` references after a failed `gather_path_meta` query. The daemon
+/// would then reject the `.drv` import with `path '...' is not valid`.
 pub(crate) fn drv_closure_seeds(drv: &gradient_derivation::Derivation) -> Vec<String> {
     drv.input_derivations
         .iter()
@@ -42,10 +29,6 @@ pub(crate) fn drv_closure_seeds(drv: &gradient_derivation::Derivation) -> Vec<St
         .collect()
 }
 
-/// Decompress a `.drv`'s NAR, parse it, and return the closure-walk seeds
-/// (see [`drv_closure_seeds`]). Returns an empty vec on any failure - the
-/// caller proceeds with what it has so a transient parse problem does not
-/// stall the closure walk.
 pub(crate) async fn drv_closure_seeds_from_compressed_nar(
     compressed: &[u8],
     compression: Compression,
@@ -80,9 +63,6 @@ pub(crate) async fn drv_closure_seeds_from_compressed_nar(
     drv_closure_seeds(&drv)
 }
 
-/// Build the `UnkeyedValidPathInfo` for `add_to_store_nar` from the cache
-/// metadata. Falls back to a default `ca = None` / `deriver = None` /
-/// `signatures = {}` when the server didn't supply them.
 pub(crate) fn build_unkeyed_path_info(
     store_path: &str,
     meta: &CachedPath,
@@ -193,7 +173,6 @@ mod tests {
 
     #[test]
     fn build_unkeyed_collects_references_and_signatures() {
-        // Nix store path hashes are exactly 32 chars in nix32 (160 bits).
         let meta = CachedPath {
             path: "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-x".into(),
             cached: true,
@@ -207,8 +186,6 @@ mod tests {
                 "/nix/store/cccccccccccccccccccccccccccccccc-z".into(),
             ]),
             signatures: Some(vec![
-                // Both malformed (Ed25519 sigs are 88 base64 chars); should be
-                // dropped without aborting the path-info construction.
                 "cache.example.com-1:tooShort".into(),
                 "garbage-no-colon".into(),
             ]),
@@ -218,7 +195,6 @@ mod tests {
         let info = build_unkeyed_path_info(&meta.path, &meta, 0).unwrap();
         assert_eq!(info.references.len(), 2);
         assert!(info.deriver.is_some());
-        // Both signatures were malformed and should have been skipped.
         assert_eq!(info.signatures.len(), 0);
     }
 
@@ -240,10 +216,6 @@ mod tests {
         assert!(build_unkeyed_path_info(&meta.path, &meta, 0).is_err());
     }
 
-    /// A `.drv`'s closure seeds are its inputs (input_derivations +
-    /// input_sources), never its outputs. The daemon validates exactly those
-    /// references when importing the `.drv`, and an input's outputs are
-    /// chosen by the consumer's requested output names, not by the walk.
     #[test]
     fn drv_closure_seeds_are_inputs_never_outputs() {
         use gradient_derivation::parse_drv;

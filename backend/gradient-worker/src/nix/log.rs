@@ -4,16 +4,13 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Pure-Rust reader for nix's per-derivation build logs
-//! (`$NIX_LOG_DIR/drvs/<first2>/<rest>.bz2`), used when a derivation is already
-//! built in the local store so the daemon produces no fresh log. Avoids
-//! shelling out to `nix log`.
+//! The daemon is producing no fresh log for a derivation already built in the local
+//! store. This reader is reading nix's stored log instead of shelling out to `nix log`.
 
 use anyhow::Result;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
-/// Compute the bzip2 log path nix uses for a derivation store path.
 pub fn store_log_path(log_dir: &Path, drv_path: &str) -> PathBuf {
     let base = drv_path.rsplit('/').next().unwrap_or(drv_path);
     let split = 2.min(base.len());
@@ -30,9 +27,6 @@ pub fn nix_log_dir() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("/nix/var/log/nix"))
 }
 
-/// Read and decompress the nix-store build log for `drv_path`, if present.
-/// Tries the bzip2 file first, then the uncompressed sibling. Returns `None`
-/// when no log exists.
 pub fn read_store_build_log(log_dir: &Path, drv_path: &str) -> Result<Option<String>> {
     let bz2 = store_log_path(log_dir, drv_path);
     if bz2.exists() {

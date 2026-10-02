@@ -27,8 +27,6 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 
-/// Postgres caps bind parameters per statement; the signature backfill can span
-/// an entire project cache, so it inserts in chunks.
 const SIGNATURE_INSERT_CHUNK: usize = 1_000;
 
 #[derive(Deserialize)]
@@ -50,8 +48,6 @@ pub struct CacheSubscriptionItem {
     pub mode: CacheSubscriptionMode,
     pub status: SubscriptionStatus,
 }
-
-// ── Handlers ──────────────────────────────────────────────────────────────────
 
 pub async fn post_project_public(
     state: State<Arc<ServerState>>,
@@ -128,7 +124,6 @@ pub async fn get_project_subscribe(
         .all(&state.web_db)
         .await?;
 
-    // Both lists resolve their cache names from one read.
     let cache_ids: Vec<CacheId> = project_caches
         .iter()
         .map(|oc| oc.cache)
@@ -271,9 +266,9 @@ pub async fn post_project_subscribe_cache(
     .insert(&state.web_db)
     .await?;
 
-    // Re-queue any evaluations parked with WaitingReason::NoCache for this
-    // project. Only ReadWrite/WriteOnly subscriptions unblock builds; ReadOnly
-    // subscriptions leave the project without anywhere to push outputs.
+    // Evaluations parked with `WaitingReason::NoCache` are re-queued here. Only ReadWrite and
+    // WriteOnly subscriptions are unblocking builds. A ReadOnly subscription is leaving the project
+    // without a push target.
     if unparks_builds
         && let Err(e) = gradient_ci::unpark_no_cache_for_project(&state.web_db, project.id).await
     {
@@ -284,17 +279,11 @@ pub async fn post_project_subscribe_cache(
         );
     }
 
-    // Enqueue signing of every cached path the project already owns for this
-    // new cache. We insert `cached_path_signature` placeholders with
-    // `signature = NULL`; the periodic sign sweep will fill them in.
     enqueue_backfill_signatures(&state, project.id, cache.id).await;
 
     Ok(ok_json("Cache subscribed".to_string()))
 }
 
-/// Best-effort notice to the cache's admins that a project wants in. Silent
-/// when SMTP is not configured: the request row and the cache's requests page
-/// carry the flow on their own.
 async fn notify_cache_admins(
     state: &Arc<ServerState>,
     project: &MProject,
@@ -344,10 +333,6 @@ pub fn mode_label(mode: &CacheSubscriptionMode) -> &'static str {
     }
 }
 
-/// Insert null-signature placeholders for every `cached_path` reachable
-/// from a derivation the project has built, for `cache_id`. Idempotent -
-/// existing rows are skipped. Best-effort: errors are logged, not
-/// propagated.
 async fn enqueue_backfill_signatures(
     state: &ServerState,
     project_id: ProjectId,
@@ -386,9 +371,8 @@ async fn enqueue_backfill_signatures(
     let cp_ids: std::collections::HashSet<CachedPathId> =
         outputs.into_iter().filter_map(|o| o.cached_path).collect();
 
-    // The (cached_path, cache) uniqueness does the de-duplication, so the whole
-    // backfill is a batched insert rather than an existence check and an insert
-    // per path.
+    // The (cached_path, cache) uniqueness is doing the de-duplication. The whole backfill is one
+    // batched insert instead of a check and an insert per path.
     let now = gradient_types::now();
     let rows: Vec<_> = cp_ids
         .into_iter()

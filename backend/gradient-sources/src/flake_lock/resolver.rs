@@ -4,13 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Newest-revision resolution behind the [`RevisionResolver`] seam.
-//!
-//! [`HttpRevisionResolver`] resolves github/gitlab over each Git host's HTTP API
-//! and plain `git` via libgit2, recomputing `narHash` natively (see
-//! [`super::narhash`]). Unsupported fetcher types fail explicitly so a bad input
-//! never produces a half-baked lock.
-
 use anyhow::{Context, Result, bail};
 use async_trait::async_trait;
 use serde::Deserialize;
@@ -22,7 +15,6 @@ const USER_AGENT: &str = "gradient-flake-lock";
 const GITHUB_API: &str = "https://api.github.com";
 const GITLAB_API: &str = "https://gitlab.com";
 
-/// The newest revision of an input plus the metadata a `locked` block needs.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ResolvedRev {
     pub rev: String,
@@ -31,14 +23,11 @@ pub struct ResolvedRev {
     pub last_modified: i64,
 }
 
-/// Resolves the newest revision of a flake input. The seam that lets the
-/// generator's rewrite logic be tested without network or nix.
 #[async_trait]
 pub trait RevisionResolver: Send + Sync {
     async fn resolve(&self, reference: &LockedRef) -> Result<ResolvedRev>;
 }
 
-/// Resolves github/gitlab over HTTP and plain git over libgit2.
 pub struct HttpRevisionResolver {
     client: reqwest::Client,
     github_token: Option<String>,
@@ -209,8 +198,6 @@ impl RevisionResolver for HttpRevisionResolver {
     }
 }
 
-/// Clone `url`, resolve `ref_` (default branch when `None`), and leave a clean
-/// checkout (no `.git`) so its NAR matches nix's git-tree narHash.
 fn git_checkout(
     url: &str,
     ref_: Option<&str>,
@@ -313,9 +300,8 @@ mod tests {
         (tmp, repo)
     }
 
-    // git_checkout is exercised directly (not via HttpRevisionResolver) so the
-    // test needs no reqwest client, which cannot be built in the sandboxed CI
-    // environment (no system CA certificates).
+    // `git_checkout` is called directly because a reqwest client cannot be built in the sandboxed
+    // CI without system CA certificates.
     #[test]
     fn git_checkout_clones_file_url_via_repobuilder() {
         let (_tmp, repo) = make_git_repo();
@@ -326,8 +312,6 @@ mod tests {
 
     #[test]
     fn git_checkout_with_ssh_key_still_clones_file_url() {
-        // An ssh key on the fetch options must not break a keyless (file://)
-        // clone. Real ssh-auth behavior is covered by the shared helper + CI.
         let (_tmp, repo) = make_git_repo();
         let url = format!("file://{}", repo.display());
         let out = git_checkout(&url, None, Some("-----BEGIN OPENSSH PRIVATE KEY-----\n"));

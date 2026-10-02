@@ -4,11 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Job execution orchestrator.
-//!
-//! [`JobUpdater`] wraps the WebSocket sender and provides typed methods for
-//! reporting progress back to the server during job execution.
-
 use std::sync::Arc;
 
 use anyhow::{Context, Result, bail};
@@ -35,37 +30,16 @@ use gradient_worker_client::connection::ProtoWriter;
 use gradient_worker_client::nar_recv::{NarPayload, NarReceiver, NarUnavailable};
 use gradient_worker_client::upload::UploadClient;
 
-/// Typed sender for reporting job progress back to the server.
-///
-/// Uses a cloneable [`ProtoWriter`] (mpsc channel) instead of `&mut ProtoConnection`,
-/// allowing the job to run in a separate task while the dispatch loop continues
-/// to receive messages.
 pub struct JobUpdater {
     pub(crate) job_id: String,
-    /// Echoed on every report so the server can drop a stale worker's messages.
     pub(crate) assignment_id: AssignmentHandle,
     pub(crate) writer: ProtoWriter,
-    /// Shared with the dispatch loop: when a `CacheQuery` is sent, a oneshot
-    /// sender is registered here; the dispatch loop routes the `CacheStatus`
-    /// reply to the waiting job task.
     pub(crate) cache_waiters: CacheWaiters,
-    /// Shared with the dispatch loop: when a `QueryKnownDerivations` is sent,
-    /// a oneshot sender is registered here; the dispatch loop routes the
-    /// `KnownDerivations` reply to the waiting job task.
     pub(crate) known_derivation_waiters: KnownDerivationWaiters,
-    /// Routes incoming `NarPush` chunks back to the job task that requested
-    /// them via `NarRequest`. Cloneable; cheap.
     pub(crate) nar_recv: NarReceiver,
-    /// Routes `EvalCachePullResult` / `EvalCacheChunk` back to the job task
-    /// during the eval-cache pull.
     pub(crate) eval_cache_recv: EvalCacheReceiver,
-    /// Local store, set for jobs that push NARs (eval closure, build outputs).
-    /// `None` in proto round-trip unit tests that never touch the store.
     pub(crate) store: Option<Arc<LocalNixStore>>,
-    /// The job's phase timeline. Shared with the dispatch loop so the terminal
-    /// message can carry it after the job task is gone.
     pub(crate) timeline: Arc<JobTimeline>,
-    /// The connection's upload handshake, shared by every job it is running.
     pub(crate) uploads: UploadClient,
 }
 
@@ -129,13 +103,10 @@ impl JobUpdater {
         }
     }
 
-    /// Open a phase span on this job's timeline; it closes when the guard drops.
     pub fn phase(&self, phase: JobPhase) -> PhaseGuard {
         self.timeline.enter(phase)
     }
 
-    /// Pull `fingerprint`'s shared eval-cache blob, if the server has one.
-    /// Best-effort: returns `Ok(None)` on miss; `Err` only on transport failure.
     pub async fn pull_eval_cache(&self, fingerprint: &str) -> Result<Option<Vec<u8>>> {
         let mut guard = self.phase(JobPhase::EvalCachePull);
         let mut pending = self.eval_cache_recv.register_pull(&self.job_id);
@@ -171,7 +142,6 @@ impl JobUpdater {
         }
     }
 
-    /// Push the local eval-cache blob for `fingerprint`. Best-effort.
     pub async fn push_eval_cache(&self, fingerprint: &str, bytes: Vec<u8>) -> Result<()> {
         let size_bytes = bytes.len() as u64;
         let mut guard = self.phase(JobPhase::EvalCachePush);
@@ -231,7 +201,6 @@ impl JobUpdater {
         .await
     }
 
-    /// One path, and the server may leave our cache for it.
     pub async fn query_upstream(&mut self, path: String) -> Result<Option<CachedPath>> {
         let mut guard = self.phase(JobPhase::CacheQueryWait);
         guard.record(1, 0);
@@ -249,9 +218,6 @@ impl JobUpdater {
         Ok(answers.into_iter().find(|cp| cp.cached && cp.url.is_some()))
     }
 
-    /// `CacheQuery { Push }`: which of `paths` the server already holds, so only
-    /// the rest go through `UploadRequest`. Each path carries its uncompressed
-    /// size; one the caller already knows wins over the store's.
     pub async fn query_push(
         &self,
         paths: Vec<String>,
@@ -286,23 +252,6 @@ impl JobUpdater {
         .await
     }
 
-    /// Send `NarRequest { paths }` and wait for every requested path to
-    /// arrive via chunked `NarPush` frames. Returns the assembled (still
-    /// zstd-compressed) NAR per path in the order requested, staged on disk
-    /// when a partial store is configured. Each path has its own
-    /// [`gradient_wire::messages::TRANSFER_TIMEOUT`].
-    ///
-    /// All waiters are registered **before** the `NarRequest` goes on the
-    /// wire so every server response (`NarPush` / `NarUnavailable` /
-    /// `NarAbort`) finds a live waiter - otherwise the server's late
-    /// responses for paths whose siblings already failed would land in the
-    /// dispatch loop with no destination and surface as
-    /// "received NarUnavailable/NarAbort with no waiter - discarding"
-    /// log spam.
-    ///
-    /// On the first failure all in-flight waiters are dropped (their
-    /// receivers report `RecvError` as the dispatcher discards them) and the
-    /// error is returned.
     pub async fn request_nars(&self, paths: Vec<String>) -> Result<Vec<(String, NarPayload)>> {
         use futures::future::join_all;
 
@@ -310,17 +259,13 @@ impl JobUpdater {
             return Ok(Vec::new());
         }
 
-        // Register all waiters synchronously before the request goes on the
-        // wire so the dispatch loop has somewhere to deliver every server
-        // response, even one that races ahead of the next path's await.
+        // Waiters are registered before the request goes on the wire.
+        // A server response racing ahead of the next path's await must still find its waiter.
         let pendings: Vec<_> = paths
             .iter()
             .map(|p| self.nar_recv.register(&self.job_id, p))
             .collect();
 
-        // Resume any path with a staged `.partial` from a prior interrupted
-        // transfer (issue #225); request the rest fresh in one batch. The
-        // server self-heals a stale/oversized partial by restarting from 0.
         let mut fresh = Vec::new();
         for p in &paths {
             match self.nar_recv.resumable(&self.job_id, p).await {
@@ -372,11 +317,9 @@ impl JobUpdater {
                 }
             }
         }
-        // A path the cache cannot serve is a missing input, not a transport
-        // failure: reported as one, the server demotes it and re-queues its
-        // producer, where a transient error only spends another attempt against
-        // a NAR no retry can produce. The whole batch is reported, so one round
-        // trip heals every missing input it found.
+        // A path the cache cannot serve is a missing input, not a transport failure.
+        // The server is demoting it and re-queuing its producer.
+        // A transient error would only spend another attempt on a NAR no retry can produce.
         if !unavailable.is_empty() {
             return Err(anyhow::Error::new(MissingInputs(unavailable)));
         }
@@ -395,7 +338,6 @@ impl JobUpdater {
         self.send_update(JobUpdateKind::EvaluatingFlake).await
     }
 
-    /// Send the per-eval stats + walked flake-output graph at eval completion.
     pub async fn report_eval_stats(&self, report: EvalStatsReport) -> Result<()> {
         self.send_update(JobUpdateKind::EvalStats(report)).await
     }
@@ -433,9 +375,6 @@ impl JobUpdater {
         self.send_update(JobUpdateKind::Compressing).await
     }
 
-    /// Report an infrastructure-level message that should surface on the
-    /// evaluation page. Use only for transport / prefetch / cache problems -
-    /// not for compile failures (those are implicit in `JobFailed`).
     pub async fn send_eval_message(
         &self,
         level: EvalMessageLevel,
@@ -452,7 +391,6 @@ impl JobUpdater {
             .await
     }
 
-    /// Forward a chunk of build log output to the server.
     pub async fn send_log_chunk(&self, task_index: u32, data: Vec<u8>) -> Result<()> {
         self.writer
             .send(ClientMessage::LogChunk {
@@ -633,8 +571,6 @@ mod tests {
     use gradient_worker_client::correlation::{deliver_cache_reply, deliver_known_derivations};
     use std::collections::HashMap;
 
-    /// Spawn the server accept task FIRST (before client opens connection) to
-    /// avoid deadlocking on the single-thread tokio test runtime.
     macro_rules! server_then_client {
         ($job_id:expr, |$sc:ident| $server_body:expr) => {{
             let server = MockProtoServer::bind().await;
@@ -694,7 +630,6 @@ mod tests {
         }
     }
 
-    /// Stand in for the dispatch loop: route every inbound reply to its waiter.
     fn pump_replies(
         mut reader: gradient_worker_client::connection::ProtoReader,
         cache_waiters: CacheWaiters,
@@ -722,9 +657,6 @@ mod tests {
         })
     }
 
-    /// The mock server holds every query until it has a full window, checks
-    /// that nothing more arrives while the window is outstanding, then answers
-    /// the window in reverse so reassembly order is proven, not assumed.
     #[tokio::test]
     async fn cache_queries_are_pipelined_to_the_window_and_reassembled_in_order() {
         use gradient_wire::messages::{CACHE_QUERY_WINDOW, ServerMessage};
@@ -790,8 +722,6 @@ mod tests {
         pump.abort();
     }
 
-    /// Without a local store no size is known, and an unknown size travels as
-    /// `None`, never as a number the server could size an upload by.
     #[tokio::test]
     async fn a_push_query_without_a_store_marks_every_size_unknown() {
         use gradient_wire::messages::ServerMessage;
@@ -832,9 +762,6 @@ mod tests {
         pump.abort();
     }
 
-    /// A caller that cannot know its sizes yet queries through the unsized
-    /// `query_cache`. A Push the server accepts still carries one size per path:
-    /// unknown, never absent.
     #[tokio::test]
     async fn an_unsized_push_query_still_carries_one_size_per_path() {
         use gradient_wire::messages::ServerMessage;
@@ -875,8 +802,6 @@ mod tests {
         pump.abort();
     }
 
-    /// Same window for the BFS-prune query, and its replies correlate by
-    /// `query_id`: answered in reverse, they still merge in request order.
     #[tokio::test]
     async fn known_derivation_queries_are_pipelined_and_correlate_by_query_id() {
         use gradient_wire::messages::{CACHE_QUERY_WINDOW, ServerMessage};

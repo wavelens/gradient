@@ -4,11 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Task executors - one module per job task type.
-//!
-//! [`JobExecutor`] is the top-level orchestrator that dispatches to the
-//! appropriate sub-executor based on the job type received from the server.
-
 pub mod build;
 mod build_metrics;
 pub mod compress;
@@ -42,11 +37,6 @@ use gradient_worker_client::nar;
 
 pub use eval::WorkerEvaluator;
 
-// ── Fetch helpers ─────────────────────────────────────────────────────────────
-
-/// Ask the server which of `all_paths` it still needs. A failed query fails the
-/// push: every upload needs the server's grant anyway, so there is nothing to
-/// fall back to.
 async fn query_fetched_paths(
     updater: &JobUpdater,
     all_paths: Vec<String>,
@@ -58,11 +48,6 @@ async fn query_fetched_paths(
     updater.query_push(all_paths, sizes).await
 }
 
-/// Push a batch's `.drv` files and their input sources to the gradient cache:
-/// what a build of the batch pulls before it starts, cacheable before the batch
-/// is reported. An input's own `.drv` is pushed by the batch that walks it, or was
-/// pushed by the evaluation that recorded it. A failed upload fails the evaluation,
-/// so no build starts against a path the cache is missing.
 #[instrument(level = "debug", skip_all, fields(paths = paths.len()))]
 pub(crate) async fn push_paths(
     paths: &[(String, Option<u64>)],
@@ -81,8 +66,6 @@ pub(crate) async fn push_paths(
     Ok(())
 }
 
-/// Every entry paired with the local store it is packed from: the shape
-/// [`upload_all`] takes, for the callers that push paths they already hold.
 fn pair_with_store<'a>(
     entries: Vec<CachedPath>,
     store: &'a LocalNixStore,
@@ -93,9 +76,6 @@ fn pair_with_store<'a>(
         .collect()
 }
 
-/// Upload one path's NAR through the server's grant, unless the `CacheQuery`
-/// already found it cached. Errors are returned so the caller decides whether
-/// they are fatal.
 pub(crate) async fn upload_one_nar(
     updater: &JobUpdater,
     cp: &CachedPath,
@@ -108,10 +88,6 @@ pub(crate) async fn upload_one_nar(
     nar::upload_nar(&updater.uploads, &updater.job_id, &cp.path, source).await
 }
 
-/// Upload every uncached entry, failing the whole set on the first error. All
-/// of them start at once: the worker's [`gradient_worker_client::upload::UploadClient`]
-/// bounds how many requests are open, and the server decides which run. `abort`
-/// is re-checked before each path so a server-side `AbortJob` stops the rest.
 pub(crate) async fn upload_all(
     updater: &JobUpdater,
     uploads: Vec<(CachedPath, nar::NarSource<'_>)>,
@@ -124,9 +100,8 @@ pub(crate) async fn upload_all(
         return Ok(nar::UploadedNar::default());
     }
 
-    // One span for the batch: the uploads overlap, and the timeline parents a
-    // span to the innermost open one, so per-path spans would chart as nested
-    // and count their durations twice.
+    // The batch is getting one span because the uploads overlap. The timeline is parenting a
+    // span to the innermost open one. Per-path spans would chart as nested and double count.
     let mut guard = updater.phase(JobPhase::NarPush);
     guard.record(pending as u32, 0);
     let mut uploaded = nar::UploadedNar::default();
@@ -156,14 +131,11 @@ async fn upload_unless_aborted(
     if result.is_err()
         && let Some(abort) = abort
     {
-        // An abort cancels the job's open uploads mid-flight, so re-check before
-        // blaming the path: the failure is the abort, and it must stay typed.
         check_abort(abort)?;
     }
     result
 }
 
-/// The `(name, path)` of every output a spec actually names.
 fn named_outputs(task: &BuildSpec) -> Vec<(String, String)> {
     task.outputs
         .iter()
@@ -172,11 +144,6 @@ fn named_outputs(task: &BuildSpec) -> Vec<(String, String)> {
         .collect()
 }
 
-/// Split what the local store already holds out of what a job
-/// would go and get or build. An output on disk is already realised, so producing it again
-/// costs a round trip to answer a question the store answers for free - and on a
-/// host with no route out, the fetch is not an answer at all. A worker with no
-/// daemon errors on every ask and fetches everything, exactly as before.
 async fn split_already_realised<S: WorkerStore + ?Sized>(
     store: &S,
     wanted: Vec<(String, String)>,
@@ -198,8 +165,6 @@ fn fully_realised(realised: &[(String, String)], missing: &[(String, String)]) -
     missing.is_empty() && !realised.is_empty()
 }
 
-/// The report for outputs nobody had to fetch. Sizes stay `None` for the compress
-/// step to fill in, the way a real build reports what it just wrote.
 async fn realised_outputs(realised: &[(String, String)]) -> Vec<BuildOutput> {
     let mut outputs = Vec::with_capacity(realised.len());
     for (name, store_path) in realised {
@@ -221,13 +186,6 @@ async fn realised_output(name: &str, store_path: &str) -> BuildOutput {
     }
 }
 
-/// Executes jobs dispatched by the server.
-///
-/// Each method corresponds to one `Job` variant from the proto spec.
-/// Results and status updates are sent back through [`JobUpdater`].
-///
-/// Arc-wraps the store and evaluator so the executor can be cheaply cloned
-/// and moved into spawned job tasks.
 #[derive(Clone)]
 pub struct JobExecutor {
     pub(crate) store: Arc<LocalNixStore>,
@@ -273,19 +231,10 @@ impl JobExecutor {
         }
     }
 
-    /// Gracefully shut every idle eval-worker subprocess down so libnix's
-    /// atexit handlers run (flush eval-cache SQLite, drop temp GC roots)
-    /// instead of being SIGKILL'd by `kill_on_drop` when the runtime tears
-    /// down on signal.
     pub async fn shutdown(&self) {
         self.evaluator.shutdown().await;
     }
 
-    /// Execute a `FlakeJob` (fetch -> eval-flake -> eval-derivations).
-    ///
-    /// When `FetchFlake` and eval steps are in the same job, the local clone
-    /// path from the fetch is reused for evaluation - the repo is cloned
-    /// exactly once.
     #[instrument(name = "job", skip_all, fields(job_id = %updater.job_id, steps = ?job.steps))]
     pub async fn execute_flake_job(
         &self,
@@ -294,17 +243,12 @@ impl JobExecutor {
         credentials: &CredentialStore,
         abort: watch::Receiver<bool>,
     ) -> Result<()> {
-        // If FetchFlake is running, it stores the local checkout path here so
-        // subsequent eval steps use it instead of the remote URL.
         let mut local_flake_path: Option<String> = None;
 
         for step in &job.steps {
             match step {
                 FlakeStep::FetchFlake => {
                     let _fetch = updater.phase(JobPhase::Fetch);
-                    // A Cached build source lives only in the gradient cache;
-                    // substitute it locally so `nix flake archive path:<store_path>`
-                    // can read it before archiving its inputs with credentials.
                     if let Some(src) = eval::required_local_source(&job.source) {
                         crate::proto::prefetch::ensure_path(&self.store, src, updater).await?;
                     }
@@ -340,22 +284,12 @@ impl JobExecutor {
                     eval::evaluate_flake(&job, updater).await?
                 }
                 FlakeStep::EvaluateDerivations => {
-                    // A `Cached` source was archived to a *different* worker's
-                    // store and pushed to the cache; substitute it locally
-                    // before eval, since nix won't pull a `path:` flake ref
-                    // from a binary cache.
                     if local_flake_path.is_none()
                         && let Some(src) = eval::required_local_source(&job.source)
                     {
                         crate::proto::prefetch::ensure_path(&self.store, src, updater).await?;
                     }
 
-                    // Each batch's `.drv` runtime closure (input_sources + .drvs,
-                    // for narinfo substitution and downstream-build prefetch) is
-                    // pushed to the cache inside the walk, before that batch's
-                    // `report_eval_result` - so #392's mid-eval build dispatch
-                    // never races the source upload. The server keys cached_path
-                    // by hash, so NAR/row ordering is irrelevant.
                     let _g = updater.phase(JobPhase::EvalDerivations);
                     eval::evaluate_derivations(
                         &self.evaluator,
@@ -371,14 +305,6 @@ impl JobExecutor {
         Ok(())
     }
 
-    /// Execute a `BuildJob` (builds -> compress -> push).
-    ///
-    /// Before each derivation is built, we prefetch any of its input store
-    /// paths that aren't in the local store from the server's cache (via
-    /// `CacheQuery {Pull}` + presigned URL download or `NarRequest`). Without
-    /// this, the daemon would fail with "1 dependency failed" the moment it
-    /// tries to build a derivation whose inputs were produced on a different
-    /// worker.
     async fn adopt_realised<'a>(
         &'a self,
         build_task: &BuildSpec,
@@ -423,13 +349,9 @@ impl JobExecutor {
         let mut gc_handles: Vec<GcRootHandle> = Vec::new();
         for (index, build_task) in job.builds.iter().enumerate() {
             check_abort(&abort)?;
-            // Move the build to `Building` on the server *before* anything
-            // that can fail. The state machine only allows
-            // `Building -> Failed`; if we let prefetch (or anything before
-            // `report_building`) bubble up an error first, the eventual
-            // `JobFailed` would arrive at the server while the build is
-            // still `Queued`, the transition would be rejected, and the UI
-            // would show the build hanging in `Queued` forever.
+            // The build must reach `Building` before anything that can fail. The server is only
+            // accepting `Building -> Failed`. An earlier `JobFailed` would leave the build in
+            // `Queued` forever.
             updater.report_building(build_task.build_id.clone()).await?;
 
             let (realised, missing) =
@@ -448,9 +370,6 @@ impl JobExecutor {
             }
 
             if build_task.kind == BuildSpecKind::Substitute {
-                // What the store already held is pinned before the fetch that is running
-                // beside it; what an upstream serves never lands there, so it needs
-                // no root.
                 for (_, path) in &realised {
                     gc_handles.push(self.gcroots.add(path).await);
                 }
@@ -542,19 +461,8 @@ impl JobExecutor {
                 continue;
             }
 
-            // Pin the .drv as an indirect GC root before prefetching its
-            // inputs. Nix's reachability walks .drv references
-            // (input_drvs + input_sources), so one root covers the entire
-            // build-time closure. A Substitute never fetches the .drv, so this
-            // only applies to real builds.
             gc_handles.push(self.gcroots.add(&build_task.drv_path).await);
 
-            // Import cache-resident inputs the daemon will need. A hard
-            // local-store error (e.g. `store.has_path` failing) aborts the
-            // build - we can't safely proceed without knowing what's already
-            // in the store. Other prefetch errors (CacheQuery transport,
-            // individual NAR downloads) are logged inside `prefetch_inputs`
-            // and don't reach here as `Err`.
             {
                 let mut prefetch = updater.phase(JobPhase::Prefetch);
                 let fetched =
@@ -589,12 +497,6 @@ impl JobExecutor {
             }));
         }
 
-        // Always compress+push every realised output. The worker is the sole
-        // producer of compressed NARs; the server stores them and computes
-        // narinfo signatures from the uploaded metadata. Honours `abort`
-        // between paths so an `AbortJob` from the server (e.g. session NAR
-        // buffer exceeded) terminates the upload loop and surfaces as a
-        // `JobFailed`.
         {
             let mut compress = updater.phase(JobPhase::Compress);
             compress.record(outputs.len() as u32, 0);
@@ -604,20 +506,11 @@ impl JobExecutor {
             compress.record(0, packed.nar_size);
         }
 
-        // Release every indirect GC root for this job; symlinks are removed
-        // and the daemon's next GC walk is free to delete unreachable paths.
         drop(gc_handles);
         Ok(())
     }
 }
 
-/// Future that resolves only when the abort signal becomes `true`.
-///
-/// Uses `changed()` + `borrow()` (not `wait_for`) to avoid holding a
-/// non-`Send` `Ref<'_, bool>` guard across an await point.
-///
-/// If the sender is dropped (e.g. in tests using a receiver without a sender),
-/// the future parks forever instead of treating the drop as an abort.
 pub(crate) async fn abort_true(abort: &mut watch::Receiver<bool>) {
     loop {
         match abort.changed().await {
@@ -626,16 +519,11 @@ pub(crate) async fn abort_true(abort: &mut watch::Receiver<bool>) {
                     return;
                 }
             }
-            // Sender dropped - treat as "no abort", park forever.
             Err(_) => std::future::pending::<()>().await,
         }
     }
 }
 
-/// Propagate a server-side `AbortJob` as an error so the surrounding job
-/// resolves to `JobFailed` instead of `JobCompleted`. Typed so the failure
-/// classifier reports `BuildFailureKind::Aborted` rather than treating it as an
-/// unclassified `Permanent` failure.
 pub(crate) fn check_abort(abort: &watch::Receiver<bool>) -> Result<()> {
     if *abort.borrow() {
         return Err(failure::JobAborted("job aborted by server".to_owned()).into());
@@ -666,8 +554,6 @@ mod tests {
         }
     }
 
-    /// An output with no path is not a path to look for: the spec names it, but
-    /// there is nothing to ask the store about and nothing to pack.
     #[test]
     fn named_outputs_drops_the_ones_with_no_path() {
         let task = spec(
@@ -681,9 +567,6 @@ mod tests {
         );
     }
 
-    /// The reason the check exists: an output already on disk must not be fetched.
-    /// A Download that reaches for its URL anyway fails on a host with no route
-    /// out, which is every hermetic test VM and every offline builder.
     #[tokio::test]
     async fn what_the_store_already_holds_is_not_fetched() {
         let store = FakeWorkerStore::new().with_present_path("/nix/store/a-out");
@@ -717,9 +600,6 @@ mod tests {
         }
     }
 
-    /// A Download is running on workers that have no nix at all, which is the point of
-    /// the kind. The store that cannot answer must not swallow the output: every
-    /// path falls through to the fetch it would have had before this check.
     #[tokio::test]
     async fn a_worker_without_a_daemon_fetches_everything() {
         let wanted = vec![("out".to_owned(), "/nix/store/a-out".to_owned())];
@@ -730,8 +610,6 @@ mod tests {
         assert_eq!(missing, wanted);
     }
 
-    /// A Build whose outputs are all on disk has nothing to build; handing it to the
-    /// daemon anyway costs a round trip, and a partial or pathless one still builds.
     #[test]
     fn only_a_build_with_every_output_on_disk_is_skipped() {
         let out = || ("out".to_owned(), "/nix/store/a-out".to_owned());
@@ -742,7 +620,6 @@ mod tests {
         assert!(!fully_realised(&[], &[]));
     }
 
-    /// An output adopted from disk keeps the hydra products a fresh build would report.
     #[tokio::test]
     async fn a_realised_output_reports_its_hydra_products() {
         let dir = tempfile::tempdir().unwrap();

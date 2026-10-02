@@ -15,8 +15,6 @@ use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, Query
 use std::collections::HashMap;
 
 impl<'a> StateApplicator<'a> {
-    // ── apply_api_keys ────────────────────────────────────────────────────────
-
     pub(crate) async fn apply_api_keys(
         &self,
         state_api_keys: &HashMap<String, StateApiKey>,

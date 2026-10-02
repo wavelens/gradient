@@ -4,12 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Wire types for the chunked build-log API, shared by the web layer and the
-//! CLI connector.
-
 use serde::{Deserialize, Serialize};
 
-/// Metadata for a single log chunk in the index response.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LogChunkMeta {
     pub index: u32,
@@ -19,7 +15,6 @@ pub struct LogChunkMeta {
     pub byte_len: u32,
 }
 
-/// Index of all chunks for a finalized build log.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LogChunkIndex {
     pub total_chunks: u32,
@@ -28,7 +23,6 @@ pub struct LogChunkIndex {
     pub chunks: Vec<LogChunkMeta>,
 }
 
-/// One search hit, streamed as NDJSON from the search endpoint.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LogSearchHit {
     pub line_number: u64,
@@ -37,7 +31,6 @@ pub struct LogSearchHit {
     pub preview: String,
 }
 
-/// Terminal frame of the search stream, carrying the final match count.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LogSearchDone {
     pub done: bool,

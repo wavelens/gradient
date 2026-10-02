@@ -37,14 +37,10 @@ pub fn matches_event(action: &MTaskAction, event: &str) -> bool {
         .is_some_and(|list| list.iter().any(|v| v.as_str() == Some(event)))
 }
 
-/// The verify-gate events an `OpenPr` action fires on. The dispatcher
-/// additionally restricts firing to `input_update` evaluations. The gate keys
-/// off the evaluation's own terminal transition, not a per-build event: an
-/// `input_update` candidate whose closure is already built or available in a cache is running
-/// no fresh build, so no `build.completed` ever fires, yet the eval still reaches
-/// `Building`/`Completed`. `Build` waits for `evaluation.completed` (every build
-/// succeeded, else the eval is `Failed` and emits nothing); `Eval`/`None` open at
-/// `evaluation.building` (the flake evaluated, builds not awaited).
+/// An already-built closure is firing no `build.completed`. The gate is keying off evaluation
+/// transitions instead. `Build` is waiting for `evaluation.completed` because a failed build is
+/// leaving the evaluation `Failed` without an event. `Eval` and `None` are opening at
+/// `evaluation.building`.
 pub fn open_pr_gate_events(action: &MTaskAction) -> Option<&'static [&'static str]> {
     const BUILD_GATE: &[&str] = &["evaluation.completed"];
     const EVAL_GATE: &[&str] = &["evaluation.building"];
@@ -70,16 +66,11 @@ pub fn git_host_status_for_event(event: &str) -> Option<CiStatus> {
         "build.substituted" => Some(CiStatus::Success),
         "evaluation.queued" => Some(CiStatus::Pending),
         "evaluation.started" => Some(CiStatus::Running),
-        // The evaluation phase is done the moment builds start; the Evaluation
-        // check goes green here rather than waiting on every build to finish.
         "evaluation.building" => Some(CiStatus::Success),
         "evaluation.completed" => Some(CiStatus::Success),
         "evaluation.failed" => Some(CiStatus::Failure),
         "evaluation.aborted" => Some(CiStatus::Error),
         "evaluation.action_required" => Some(CiStatus::ActionRequired),
-        // Approval click clears the Awaiting-Approval gate. We post Success
-        // on the same check so the maintainer sees it turn green and the
-        // PR's required-checks count drops the gate.
         "evaluation.approval_granted" => Some(CiStatus::Success),
         _ => None,
     }

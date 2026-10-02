@@ -4,9 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Remote HEAD resolution. [`ls_remote_head`] dispatches by URL/credentials to
-//! the SSH, HTTPS (libgit2), or raw `git://` wire-protocol implementation.
-
 mod git_protocol;
 mod https;
 mod ssh;
@@ -18,10 +15,8 @@ use git2::RemoteCallbacks;
 use https::ls_remote_head_no_creds;
 use ssh::ls_remote_head_ssh;
 
-/// libgit2 has no built-in SSH host-key verifier; `CertificatePassthrough`
-/// gets treated as a rejection ("invalid or unknown remote ssh hostkey").
-/// Accept SSH host keys unconditionally (TOFU-less, like
-/// `StrictHostKeyChecking=no`); leave HTTPS verification to libgit2's TLS.
+/// libgit2 has no SSH host-key verifier and is treating `CertificatePassthrough` as a rejection.
+/// SSH host keys are accepted unconditionally, and HTTPS verification is left to libgit2's TLS.
 pub fn accept_cert(cert: &git2::cert::Cert<'_>) -> git2::CertificateCheckStatus {
     if cert.as_hostkey().is_some() {
         git2::CertificateCheckStatus::CertificateOk
@@ -30,9 +25,6 @@ pub fn accept_cert(cert: &git2::cert::Cert<'_>) -> git2::CertificateCheckStatus 
     }
 }
 
-/// `FetchOptions` accepting the remote host key and, when a key is given,
-/// authenticating with it from memory. Shared by the worker fetch task and the
-/// flake.lock revision resolver so SSH git inputs clone the same way everywhere.
 pub fn fetch_options_with_ssh(ssh_key: Option<&str>) -> git2::FetchOptions<'static> {
     let mut callbacks = RemoteCallbacks::new();
     callbacks.certificate_check(|cert, _valid| Ok(accept_cert(cert)));
@@ -63,11 +55,6 @@ pub(in crate::git) fn ls_remote_head(
     }
 }
 
-/// Resolves the target ref from a libgit2 remote ref list.
-///
-/// `branch = None` -> look for `HEAD`, fall back to first ref.
-/// `branch = Some("main")` -> look for `refs/heads/main` exactly; returns
-/// `SourceError::GitHashExtraction` if not found (no HEAD fallback).
 fn find_ref_in_list(
     list: &[git2::RemoteHead<'_>],
     branch: Option<&str>,

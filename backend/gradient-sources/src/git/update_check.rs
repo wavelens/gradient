@@ -13,14 +13,6 @@ use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, sea_query::Expr};
 use tracing::{debug, info, instrument, warn};
 
 impl TaskGitContext<'_> {
-    /// Check whether there is a new commit on the remote ref.
-    ///
-    /// `branch = None` polls the remote HEAD (default branch).
-    /// `branch = Some("main")` polls `refs/heads/main`.
-    ///
-    /// Returns `(has_update, remote_hash)`. `has_update` is `false` when the
-    /// remote ref matches the last evaluated commit or an evaluation is already
-    /// in progress.
     #[instrument(skip(self), fields(task_id = %self.task.id, task_name = %self.task.name))]
     pub(super) async fn check_for_updates(
         &self,
@@ -49,10 +41,8 @@ impl TaskGitContext<'_> {
         debug!(remote_hash = %remote_hash_str, "Retrieved remote hash");
 
         if self.task.force_evaluation {
-            // Never supersede an in-flight evaluation: the one-shot force is
-            // already satisfied by whatever is running, and re-triggering would
-            // let the concurrency policy abort a build that is still making
-            // progress (perpetual re-eval under a fast poll interval).
+            // An in-flight evaluation must never be superseded. Re-triggering would let the
+            // concurrency policy abort a progressing build on every fast poll.
             if let Some(last_evaluation) = self.task.last_evaluation
                 && let Some(evaluation) = EEvaluation::find_by_id(last_evaluation)
                     .one(&self.ctx.worker_db)
@@ -66,8 +56,6 @@ impl TaskGitContext<'_> {
                 return Ok((false, remote_hash));
             }
             info!("Force evaluation enabled, updating task");
-            // Consume the one-shot flag so subsequent polls fall back to normal
-            // commit-change detection instead of forcing on every cycle.
             if let Err(e) = ETask::update_many()
                 .col_expr(CTask::ForceEvaluation, Expr::value(false))
                 .filter(CTask::Id.eq(self.task.id))
@@ -79,10 +67,8 @@ impl TaskGitContext<'_> {
             return Ok((true, remote_hash));
         }
 
-        // A dangling `last_evaluation` (row deleted but pointer stale) is
-        // treated as "no previous evaluation, update needed" - same path as
-        // a freshly-created task. The pointer self-heals on the next
-        // successful trigger.
+        // A dangling `last_evaluation` is treated like a fresh task with no previous evaluation.
+        // The pointer is healed on the next successful trigger.
         if let Some(last_evaluation) = self.task.last_evaluation {
             let evaluation = EEvaluation::find_by_id(last_evaluation)
                 .one(&self.ctx.worker_db)

@@ -12,8 +12,8 @@ use uuid::uuid;
 
 pub const PORT_RANGE: RangeInclusive<usize> = 1..=65535;
 
-/// Pseudo-architecture of `builtin:*` derivations (`builtin:fetchurl` etc.):
-/// they fetch rather than build, so any worker can run them.
+/// `builtin:*` derivations like `builtin:fetchurl` are fetching rather than building. Any
+/// worker can run them.
 pub const BUILTIN_ARCH: &str = "builtin";
 
 pub static NULL_TIME: LazyLock<NaiveDateTime> = LazyLock::new(|| {
@@ -43,5 +43,4 @@ pub const BASE_CACHE_ROLE_WRITE_ID: RoleId =
 pub const BASE_CACHE_ROLE_VIEW_ID: RoleId =
     RoleId::new(uuid!("00000000-0000-0000-0000-000000000013"));
 
-/// How long a project or cache invitation stays redeemable.
 pub const INVITATION_VALIDITY_DAYS: i64 = 7;

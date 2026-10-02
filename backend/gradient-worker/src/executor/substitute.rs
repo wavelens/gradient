@@ -4,9 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! A Substitute spec: each output's NAR straight from an upstream cache into ours,
-//! repacked on the way. Nothing enters the local store and nothing below an output
-//! is fetched; the server needs the producers of what the NAR references.
+//! Each output's NAR is moving straight from an upstream cache into ours.
+//! Nothing is entering the local store and nothing below an output is fetched.
+//! The server is wanting the producers of what the NAR references.
 
 use std::collections::HashSet;
 
@@ -34,12 +34,9 @@ pub(crate) struct RawNar {
 pub(crate) struct FetchedOutput {
     pub name: String,
     pub store_path: String,
-    /// `None`: our cache already had it, so there is nothing to push.
     pub nar: Option<RawNar>,
 }
 
-/// The three cache operations a fetch needs, behind a trait so the fetch itself is
-/// testable without a server on the other end of the socket.
 pub(crate) trait UpstreamIo {
     async fn have(&mut self, paths: Vec<String>) -> Result<HashSet<String>>;
     async fn locate(&mut self, path: &str) -> Result<Option<CachedPath>>;
@@ -79,9 +76,6 @@ pub(crate) async fn fetch_outputs(
     Ok(fetched)
 }
 
-/// Every output paired with the upstream entry to fetch it from; `None` for an
-/// output our cache already holds. Fails before any byte moves when one is on
-/// no upstream.
 async fn locate_missing(
     io: &mut impl UpstreamIo,
     outputs: &[(String, String)],
@@ -106,7 +100,6 @@ async fn locate_missing(
     Ok(located)
 }
 
-/// The compressed bytes to move, known only when every upstream declared its size.
 fn download_size<'a>(upstream_caches: impl Iterator<Item = &'a CachedPath>) -> Option<u64> {
     upstream_caches.map(|u| u.file_size).sum()
 }
@@ -367,8 +360,6 @@ mod tests {
         assert!(err.downcast_ref::<CorruptCachedNar>().is_some(), "{err}");
     }
 
-    /// References travel as `hash-name` base names, the shape the narinfo
-    /// `References:` line uses; nothing below the output is fetched.
     #[tokio::test]
     async fn references_travel_as_base_names_and_are_not_fetched() {
         let dep = "/nix/store/dddddddddddddddddddddddddddddddd-dep";

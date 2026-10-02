@@ -40,8 +40,8 @@ impl ScoreRule for MissingPathsRule {
             Some(n) => {
                 let base = self.k * instance.missing_paths.w1h_or(self.fallback_avg);
                 if base <= 0.0 {
-                    // Fleet average is a measured zero: any missing path is
-                    // above average, a fully-warm worker gets the full bonus.
+                    // A measured zero fleet average is giving the full bonus only to a fully warm
+                    // worker.
                     return if n == 0 { self.cap } else { 0.0 };
                 }
 
@@ -98,8 +98,6 @@ impl ScoreRule for MissingNarSizeRule {
     }
 }
 
-/// A worker that already holds every output of the job builds nothing: it only
-/// uploads them. That beats any cache-warmth or core-speed advantage elsewhere.
 #[derive(Debug)]
 pub struct RealisedOutputsRule {
     pub bonus: f64,
@@ -162,9 +160,8 @@ impl ScoreRule for BuiltinDeprioritizeRule {
             return 0.0;
         };
 
-        // A builtin yields its slot (0) on a real-build-capable worker, but an
-        // arch-less worker can only run builtins/fetches, so lift it strongly to
-        // keep it from sitting idle. Real compilation jobs earn the default bonus.
+        // An arch-less worker can only run builtins and fetches. A strong lift is keeping it from
+        // sitting idle.
         if b.architecture == gradient_types::BUILTIN_ARCH {
             return if worker.architectures.is_empty() {
                 self.archless_bonus
@@ -215,7 +212,6 @@ impl ScoreRule for DependencyCountRule {
 
         let base = self.k * instance.dependency_cnt.w1h_or(self.fallback_avg);
         if base <= 0.0 {
-            // Fleet average is a measured zero: any job with dependencies is above average.
             return if job.dependency_count > 0 {
                 self.cap
             } else {
@@ -262,8 +258,6 @@ impl ScoreRule for WaitTimeRule {
         let waited = (job.now - job.ready_at).num_seconds().max(0) as f64;
         let avg = instance.wait_secs.w1h_or(self.fallback_avg_secs);
         if avg <= 0.0 {
-            // Fleet average is a measured zero: any wait at all is infinitely
-            // above it, saturating the anti-starvation cap.
             return if waited > 0.0 { self.cap } else { 0.0 };
         }
 
@@ -345,9 +339,6 @@ impl ScoreRule for RescoreWaitRule {
         0.0
     }
 
-    /// A build whose substitution cost has not been measured yet is held via
-    /// the veto sentinel (not a summed penalty a large unrelated bonus could
-    /// out-vote) until it is scored or `max_rounds` rescore ticks pass.
     fn veto(
         &self,
         job: &JobContext<'_>,
@@ -647,7 +638,6 @@ mod tests {
         let archs = vec!["x86_64-linux".to_string()];
         let w = worker(&archs, false);
         let now = gradient_types::now();
-        // w1h=10 -> base=20; dep=1 -> 2.5, dep=15 -> 37.5 (both below saturation)
         let inst = crate::score::context::InstanceContext {
             dependency_cnt: crate::score::context::Windowed {
                 w1h: Some(10.0),

@@ -11,7 +11,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::ids::{CacheId, ProjectId, UserId, WebhookId};
 
-/// Who owns a webhook and so which events reach it.
 #[repr(i16)]
 #[derive(
     Debug,

@@ -4,11 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Build history is predicted per `(pname, architecture)`, newest first, so the
-//! architecture is carried on the metric row next to the already denormalized
-//! `pname` and indexed in lookup order. A derivation without `pname` is recorded
-//! under its `name`.
-
 use sea_orm_migration::prelude::*;
 use sea_orm_migration::sea_orm::ConnectionTrait;
 

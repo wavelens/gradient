@@ -4,18 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Pure retry and terminal-status policy for a shared build.
-
 use gradient_entity::build::BuildStatus;
 use gradient_entity::build_attempt::{AttemptFailureReason, AttemptOutcome};
 use gradient_wire::types::BuildFailureKind;
 
-/// How the shared build was being fulfilled when it failed, and how much of its
-/// substitute-miss budget is already spent. `misses` counts the shared build's prior
-/// `SubstituteUnavailable` attempts within the driving evaluation, so a new
-/// evaluation retries substitution from zero. Every penalty-free re-queue is
-/// recorded under that reason, whatever kind produced it, so one budget bounds
-/// the whole passthrough loop - see [`attempt_reason_for`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Substitution {
     pub cache_available: bool,
@@ -28,21 +20,11 @@ pub(crate) enum FailureOutcome {
     Retry,
     Permanent,
     Timeout,
-    /// Penalty-free re-queue (substitute miss): back to `Queued` without
-    /// bumping `attempt`, to be passed through again once something still needs it.
     Requeue,
-    /// The miss budget is spent: the shared build stops being a passthrough, forgets its
-    /// upstream, and is built through the ordinary gates.
     Exhausted,
-    /// The server ordered the job stopped. Terminal for this evaluation but not
-    /// a verdict on the derivation, so the shared build lands on the requeueable
-    /// `Aborted` rather than `FailedPermanent`.
     Aborted,
 }
 
-/// Decide what to do with a failed build given its classification, how many
-/// attempts it has already had (`attempt` is the count *before* this failure) and
-/// the state of its substitution.
 pub(crate) fn decide_failure_outcome(
     kind: BuildFailureKind,
     attempt: i32,
@@ -55,36 +37,22 @@ pub(crate) fn decide_failure_outcome(
         BuildFailureKind::Permanent => FailureOutcome::Permanent,
         BuildFailureKind::Aborted => FailureOutcome::Aborted,
         BuildFailureKind::SubstituteUnavailable => requeue_or_exhaust(substitution),
-        // A missing input self-heals, so it retries in-eval like a transient
-        // failure; the caller forces `Permanent` when the circuit trips.
         BuildFailureKind::InputsUnavailable | BuildFailureKind::Transient => {
             if (attempt + 1) < max_attempts as i32 {
                 FailureOutcome::Retry
             } else if cache_available {
-                // Nothing ever tried to build this: the passthrough out of an upstream
-                // is what kept failing, so a permanent mark is a verdict on the
-                // wrong thing. It poisons a global build-once shared build for a path
-                // that builds fine and is sitting on an upstream, and cascades
-                // `DependencyFailed` over everything above it. Fall into the
-                // substitute-miss loop instead, which escalates to a real build
-                // once the miss budget is spent.
                 requeue_or_exhaust(substitution)
             } else {
                 FailureOutcome::Permanent
             }
         }
-        // Eval-only kind; a build never produces it, so treat it as terminal.
         BuildFailureKind::CorruptEvalCache => FailureOutcome::Permanent,
     }
 }
 
-/// One penalty-free re-queue per unspent miss, then the shared build is built.
-///
-/// Both arms that can re-queue go through this, because both record the same
-/// reason and are therefore counted by the same budget. Reading it on only one
-/// of them is what let a persistently failing passthrough loop forever: the attempt
-/// counter a re-queue deliberately does not bump was the only other bound, and a
-/// re-queue is exactly the path that does not bump it.
+/// Both re-queuing arms are recording the same reason and must read the same budget here.
+/// A re-queue is deliberately not bumping the attempt counter.
+/// Reading the budget on one arm only let a failing passthrough loop forever.
 const fn requeue_or_exhaust(substitution: Substitution) -> FailureOutcome {
     if substitution.misses + 1 < substitution.threshold {
         FailureOutcome::Requeue
@@ -93,11 +61,6 @@ const fn requeue_or_exhaust(substitution: Substitution) -> FailureOutcome {
     }
 }
 
-/// Whether a failure of `kind` can end in a penalty-free re-queue, and so needs
-/// its budget counted before [`decide_failure_outcome`] is asked. The caller
-/// skips the count otherwise, so this and the match above are one decision split
-/// in two: a kind missing here decides against a budget of zero and never
-/// terminates.
 pub(crate) const fn spends_substitute_budget(kind: BuildFailureKind) -> bool {
     matches!(
         kind,
@@ -107,15 +70,6 @@ pub(crate) const fn spends_substitute_budget(kind: BuildFailureKind) -> bool {
     )
 }
 
-/// Terminal success status for a build whose job completed. `Substituted` when
-/// the daemon found the outputs already valid and ran no build (recorded on
-/// `build.substituted`), else `Completed`. Decided at `JobCompleted`, once the
-/// output NARs the worker pushed are committed to the index, so a build never
-/// reaches a terminal state its parents can start on while its bytes are still absent from
-/// the cache - the #399 regression where a parent dispatched into that window
-/// and failed `InputsUnavailable`. The worker having sent them is not that
-/// guarantee and never was: the completion used to overtake its own frames on the
-/// control lane and the commits ran detached behind it (#654).
 pub(crate) fn terminal_success_status(outputs_already_valid: bool) -> BuildStatus {
     if outputs_already_valid {
         BuildStatus::Substituted
@@ -124,10 +78,6 @@ pub(crate) fn terminal_success_status(outputs_already_valid: bool) -> BuildStatu
     }
 }
 
-/// Terminal `build_attempt.outcome` for a job that completed, mirroring
-/// [`terminal_success_status`]. Without this the success path leaves the attempt
-/// at `Running`, and `recover_interrupted_work` later rewrites every such row to
-/// `Aborted` - so a healthy instance reports roughly half its attempts aborted.
 pub(crate) fn terminal_success_outcome(outputs_already_valid: bool) -> AttemptOutcome {
     if outputs_already_valid {
         AttemptOutcome::Substituted
@@ -136,14 +86,9 @@ pub(crate) fn terminal_success_outcome(outputs_already_valid: bool) -> AttemptOu
     }
 }
 
-/// Best-effort mapping from the worker's failure classification to a stored
-/// `build_attempt.reason`. `Transient` has no single cause, so it stays `None`;
-/// an abort is not a failure of the derivation and carries no reason at all.
-/// Stored `build_attempt.reason` for a decided `outcome`. A `Requeue` and the
-/// `Exhausted` that ends the loop always record `SubstituteUnavailable`, whatever
-/// kind produced them: the miss budget counts exactly those rows and is the only
-/// thing that stops the re-queue. Leaving it `None` (as a bare `Transient` would)
-/// requeues forever.
+/// A `Requeue` and its closing `Exhausted` are always recording `SubstituteUnavailable`.
+/// The miss budget is counting exactly those rows and is the only stop for the re-queue loop.
+/// A `None` reason, as a bare `Transient` would give, is requeuing forever.
 pub(crate) fn attempt_reason_for(
     kind: BuildFailureKind,
     outcome: FailureOutcome,
@@ -170,11 +115,6 @@ pub(crate) fn attempt_reason(kind: BuildFailureKind) -> Option<AttemptFailureRea
     }
 }
 
-/// How the attempt row is closed out. An abort is recorded as `Aborted`, so the
-/// `deterministic_build_failure` predicate (`outcome = Failed AND reason =
-/// BuilderNonzero`) cannot match it: stamping a user abort as a reproducible
-/// builder exit excluded the shared build from `requeue_failed_shared_builds` forever, so no
-/// later evaluation could ever rebuild it (#572).
 pub(crate) fn attempt_outcome(kind: BuildFailureKind) -> AttemptOutcome {
     match kind {
         BuildFailureKind::Aborted => AttemptOutcome::Aborted,
@@ -182,25 +122,14 @@ pub(crate) fn attempt_outcome(kind: BuildFailureKind) -> AttemptOutcome {
     }
 }
 
-/// Circuit breaker for the `InputsUnavailable` self-heal. Each failed eval
-/// repairs the cache (purges the stale input) so the next eval rebuilds it; a
-/// genuinely unrecoverable input turns that into a hot loop that churns the cache
-/// forever. `prior_failures` is how many `InputsUnavailable` attempts this shared build
-/// already has, so the self-heal is active for the first `max_loops` and the circuit
-/// opens after - the build then fails fast without repairing.
 pub(crate) fn inputs_unavailable_circuit_open(prior_failures: i64, max_loops: u32) -> bool {
     prior_failures >= max_loops as i64
 }
 
-/// A failed evaluation re-queues when its worker blamed an outage, until it has
-/// run `max_attempts` times; any other failure is the evaluation's own.
 pub(crate) fn retry_failed_eval(kind: BuildFailureKind, attempts: u64, max_attempts: u32) -> bool {
     kind == BuildFailureKind::Transient && attempts < u64::from(max_attempts)
 }
 
-/// True when a `FailedTransient` build's exponential backoff window has elapsed
-/// and it is due for re-queue. `attempt` is `>= 1` (it failed at least once);
-/// window = `base_secs * 2^(attempt-1)`.
 pub fn retry_backoff_elapsed(
     attempt: i32,
     failed_at: chrono::NaiveDateTime,
@@ -212,9 +141,6 @@ pub fn retry_backoff_elapsed(
     (now - failed_at).num_seconds() >= window as i64
 }
 
-/// Cap a worker failure string before persisting it on `build_attempt`. The full
-/// text already lands in the build log; the stored message is for quick surfacing,
-/// so bound it on a char boundary to keep the row lean.
 pub(crate) fn truncate_failure_message(error: &str) -> String {
     const MAX: usize = 8 * 1024;
     if error.len() <= MAX {
@@ -247,12 +173,6 @@ mod tests {
     use gradient_entity::build_attempt::{AttemptFailureReason, AttemptOutcome};
     use gradient_wire::types::BuildFailureKind;
 
-    /// The user pressed Abort: the worker stopped nix, nothing about the
-    /// derivation failed. Reporting it as `Permanent` landed the shared build on
-    /// `FailedPermanent` with `reason = BuilderNonzero`, which
-    /// `deterministic_build_failure` reads as a reproducible builder exit and
-    /// excludes from every requeue - the derivation could never be built again
-    /// (#572).
     #[test]
     fn abort_is_not_a_deterministic_build_failure() {
         for attempt in [0, 1, 99] {
@@ -269,9 +189,6 @@ mod tests {
         assert_eq!(attempt_reason(BuildFailureKind::Aborted), None);
     }
 
-    /// The exception exists for a real reason: a builder that exited non-zero
-    /// reproduces on rebuild, so thawing it loops the fleet. It must stay
-    /// attached to that one case.
     #[test]
     fn only_a_real_builder_exit_records_builder_nonzero() {
         assert_eq!(
@@ -345,9 +262,6 @@ mod tests {
         }
     }
 
-    /// The budget, not the attempt counter, ends the passthrough loop: a miss re-queues
-    /// below the threshold and exhausts the substitution at it, whatever the
-    /// shared build's attempt count (a passthrough never bumps one).
     #[test]
     fn a_substitute_miss_requeues_below_the_threshold_and_exhausts_at_it() {
         assert_eq!(
@@ -364,13 +278,6 @@ mod tests {
         );
     }
 
-    /// Every penalty-free re-queue spends the same budget, whatever produced it.
-    /// A transient failure of a passthrough used to re-queue unconditionally once the
-    /// attempt budget was spent, on the reasoning that our own cache write
-    /// breaking is not a verdict on the upstream - but nothing then bounded it:
-    /// one shared build took 788 identical `CacheQuery Push (substitute)` failures, one
-    /// every 25 s for five and a half hours, until the co-located worker was
-    /// OOM-killed. A passthrough that cannot be written is one that has to be built.
     #[test]
     fn a_transient_passthrough_requeue_is_bounded_by_the_same_budget() {
         for kind in [
@@ -395,10 +302,6 @@ mod tests {
         }
     }
 
-    /// The budget is only read on the arms that can return a penalty-free
-    /// re-queue, and it has to be read on all of them: the caller skips the
-    /// count for every other kind, so an arm this forgets silently decides
-    /// against zero and never terminates.
     #[test]
     fn exactly_the_kinds_that_can_requeue_spend_the_budget() {
         for kind in [
@@ -460,9 +363,6 @@ mod tests {
         ));
     }
 
-    /// A missing input is self-healed (its producer is re-queued) and the build
-    /// retries in-eval, so it behaves like a transient failure up to the attempt
-    /// budget rather than failing permanently on the first miss.
     #[test]
     fn inputs_unavailable_retries_like_transient_then_permanent() {
         assert_eq!(
@@ -498,11 +398,6 @@ mod tests {
         assert!(std::str::from_utf8(out.as_bytes()).is_ok());
     }
 
-    /// A passthrough out of an upstream that keeps failing is our cache write breaking,
-    /// not a verdict on the derivation. Marking it `FailedPermanent` poisoned a
-    /// global shared build for a path that builds fine: an object-store wobble took out
-    /// mesa, thunderbird and clang at once and cascaded `DependencyFailed` over
-    /// everything above them.
     #[test]
     fn an_exhausted_substitute_requeues_instead_of_failing_the_derivation() {
         assert_eq!(
@@ -515,8 +410,6 @@ mod tests {
         );
     }
 
-    /// Below the budget nothing changes: one blip must not turn a cache-available
-    /// build into a from-scratch one.
     #[test]
     fn a_cache_available_shared_build_still_retries_before_its_budget_is_spent() {
         assert_eq!(
@@ -529,9 +422,6 @@ mod tests {
         );
     }
 
-    /// What terminates the re-queue loop. The substitute miss budget counts
-    /// attempts carrying `SubstituteUnavailable`, so a `Requeue` recorded with no
-    /// reason would re-dispatch, fail, and requeue forever.
     #[test]
     fn every_requeue_records_the_reason_its_miss_budget_counts() {
         for kind in [
@@ -547,7 +437,6 @@ mod tests {
                 );
             }
         }
-        // Any other outcome keeps the kind's own mapping.
         assert_eq!(
             attempt_reason_for(BuildFailureKind::Permanent, FailureOutcome::Permanent),
             attempt_reason(BuildFailureKind::Permanent)
@@ -560,8 +449,6 @@ mod tests {
         assert_eq!(terminal_success_status(false), BuildStatus::Completed);
     }
 
-    /// Success must be recorded on the attempt, never left at `Running`: the
-    /// recovery sweep turns a lingering `Running` row into `Aborted`.
     #[test]
     fn terminal_outcome_records_success_and_never_stays_running() {
         assert_eq!(terminal_success_outcome(true), AttemptOutcome::Substituted);

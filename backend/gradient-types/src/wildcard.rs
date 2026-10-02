@@ -9,91 +9,16 @@ use std::str::FromStr;
 
 use crate::input::InputError;
 
-/// A parsed, validated evaluation wildcard.
-///
-/// A wildcard is a comma-separated list of one or more Nix attribute-path
-/// patterns. Each pattern is a `.`-separated sequence of segments, where
-/// segments may be double-quoted to allow dots or other special characters in
-/// attribute names (e.g. `my."python3.12".*`). Unquoted `*` is a wildcard
-/// that matches any attribute name at that position.
-///
-/// Patterns prefixed with `!` are exclusions - they remove matching paths
-/// from the set built by the preceding include patterns:
-/// `packages.*.*,!packages.x86_64-linux.broken` includes everything in
-/// `packages.*.*` except that one path.
-///
-/// ## Wildcard segments: `*` vs `#`
-///
-/// Both `*` and `#` match any attribute name at their position, but they
-/// differ in how they handle the leaf level:
-///
-/// - `*` is **recursive**: consecutive `*` segments are collapsed before
-///   evaluation (so `packages.*.*` and `packages.*` are equivalent), and when
-///   a `*` is the last segment the evaluator descends one additional level into
-///   nested attrsets to find derivations. This is the common case for patterns
-///   like `packages.*.*` where the intermediate `*` (system) is collapsed away.
-///
-/// - `#` is **non-recursive**: it matches any attribute name at its position
-///   and checks whether that node is a derivation (`type == "derivation"`), but
-///   it does **not** descend further. Use `#` when you want to target exactly
-///   the attributes at a specific depth, e.g. `packages.x86_64-linux.#`
-///   collects only direct children of `packages.x86_64-linux` that are
-///   derivations, without walking into nested attrsets.
-///
-/// `#` is rejected as a bare pattern (the whole string) and inside exclusion
-/// patterns, but is valid as a segment within an include pattern.
-///
-/// # Rules
-///
-/// - No leading/trailing whitespace on the whole string.
-/// - No empty patterns (consecutive commas, or trailing comma).
-/// - No internal whitespace within a pattern.
-/// - A pattern may start with `!` (exclusion prefix) but not `!` alone.
-/// - No pattern (or exclusion body) starting with `.`.
-/// - Bare `#` as the entire pattern is rejected (internal sentinel).
-/// - Bare `*` as the entire pattern is valid and means "evaluate everything".
-/// - Quoted segments (`"…"`) whose content is `*`, `#`, or `!` are rejected.
-/// - Unquoted segments starting with `!` are rejected (`!` is only valid as a
-///   whole-pattern prefix, e.g. `!packages.broken` - not `my.!bad`).
-///
-/// # Example
-///
-/// ```
-/// use gradient_types::wildcard::Wildcard;
-///
-/// let w: Wildcard = r#"packages.*.*,!packages.x86_64-linux.broken,my."wild.card".*"#
-///     .parse().unwrap();
-/// assert_eq!(w.patterns().len(), 3);
-/// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Wildcard {
     patterns: Vec<String>,
 }
 
 impl Wildcard {
-    /// Returns the individual patterns that make up this wildcard.
     pub fn patterns(&self) -> &[String] {
         &self.patterns
     }
 
-    /// Converts the wildcard into a Nix attribute-set string suitable for
-    /// passing to the evaluator.
-    ///
-    /// Include and exclude patterns are separated and each path is represented
-    /// as a Nix list of strings, one element per segment. Quoted segments are
-    /// unwrapped so only their inner content appears.
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// use gradient_types::wildcard::Wildcard;
-    ///
-    /// let w: Wildcard = r#"my."wild.card".*,my.*.test,!my.ignored.pkg"#.parse().unwrap();
-    /// let s = w.get_eval_str();
-    /// assert!(s.contains(r#"[ "my" "wild.card" "*" ]"#));
-    /// assert!(s.contains(r#"[ "my" "*" "test" ]"#));
-    /// assert!(s.contains(r#"[ "my" "ignored" "pkg" ]"#));
-    /// ```
     pub fn get_eval_str(&self) -> String {
         let mut includes: Vec<String> = Vec::new();
         let mut excludes: Vec<String> = Vec::new();
@@ -119,27 +44,6 @@ impl Wildcard {
         )
     }
 
-    /// Whether this wildcard's scope covers the concrete attribute path `attr`.
-    ///
-    /// Mirrors the evaluator's segment rules: a literal segment compares by
-    /// inner content (quotes unwrapped on both sides, so a dotted attribute
-    /// name must be quoted on the attr side too), `#` matches exactly one
-    /// segment, and `*` matches one segment - or one *or two* as the final
-    /// segment, since the walk descends one extra level there. An exclusion
-    /// pattern, always an exact path, removes a path the includes matched.
-    ///
-    /// This answers "was this attr in scope", not "was it built": the attr may
-    /// not exist in the flake at all.
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// use gradient_types::wildcard::Wildcard;
-    ///
-    /// let w: Wildcard = "packages.*.*,!packages.x86_64-linux.broken".parse().unwrap();
-    /// assert!(w.matches("packages.x86_64-linux.hello"));
-    /// assert!(!w.matches("packages.x86_64-linux.broken"));
-    /// ```
     pub fn matches(&self, attr: &str) -> bool {
         if attr.is_empty() {
             return false;
@@ -163,14 +67,12 @@ impl Wildcard {
     }
 }
 
-/// One parsed segment of an include pattern.
 enum Seg {
     Star,
     Hash,
     Lit(String),
 }
 
-/// Splits a concrete attribute path into its segments, unwrapping quotes.
 fn unquote_segments(path: &str) -> Vec<String> {
     split_segments(path)
         .into_iter()
@@ -184,8 +86,6 @@ fn unquote_segments(path: &str) -> Vec<String> {
         .collect()
 }
 
-/// Parses an include pattern into segments, collapsing consecutive `*` the same
-/// way [`path_to_nix_list`] does.
 fn pattern_segments(body: &str) -> Vec<Seg> {
     let mut out: Vec<Seg> = Vec::new();
 
@@ -210,8 +110,8 @@ fn pattern_segments(body: &str) -> Vec<Seg> {
     out
 }
 
-/// Whether a single include pattern covers `path`. Every segment consumes
-/// exactly one path element except a trailing `*`, which consumes one or two.
+/// A trailing `*` is matching one or two path elements. The evaluator is descending one extra
+/// level there. Every other segment is matching exactly one element.
 fn pattern_covers(pattern: &str, path: &[String]) -> bool {
     let segs = pattern_segments(pattern);
     let Some(last) = segs.last() else {
@@ -232,11 +132,6 @@ fn pattern_covers(pattern: &str, path: &[String]) -> bool {
     })
 }
 
-/// Splits a Nix attribute-path pattern on `.`, respecting double-quoted
-/// segments. Returns each segment together with a flag indicating whether it
-/// was enclosed in double quotes.
-///
-/// Example: `my."wild.card".*` -> `[("my", false), ("\"wild.card\"", true), ("*", false)]`
 fn split_segments(pattern: &str) -> Vec<(String, bool)> {
     let mut segments = Vec::new();
     let mut current = String::new();
@@ -263,10 +158,6 @@ fn split_segments(pattern: &str) -> Vec<(String, bool)> {
     segments
 }
 
-/// Converts a path body (no leading `!`) into a Nix list-of-strings literal,
-/// one element per segment. Quoted segments are unwrapped to their inner content.
-///
-/// Example: `my."wild.card".*` -> `[ "my" "wild.card" "*" ]`
 fn path_to_nix_list(path: &str) -> String {
     let raw_elems: Vec<String> = split_segments(path)
         .into_iter()
@@ -280,9 +171,8 @@ fn path_to_nix_list(path: &str) -> String {
         })
         .collect();
 
-    // Collapse consecutive `"*"` segments - `*.*` is semantically identical to `*`
-    // because `*` is recursive. `#` is non-recursive so `#.#` is NOT collapsed:
-    // each `#` targets a distinct depth level.
+    // `*.*` is identical to `*` because `*` is recursive. `#` is not recursive.
+    // Each `#` is targeting its own depth level and must stay uncollapsed.
     let mut elems: Vec<String> = Vec::new();
     for elem in raw_elems {
         if elem == "\"*\"" && elems.last().is_some_and(|l| l == "\"*\"") {
@@ -294,12 +184,6 @@ fn path_to_nix_list(path: &str) -> String {
     format!("[ {} ]", elems.join(" "))
 }
 
-/// Validates each segment of a single path (the pattern body, with any leading
-/// `!` already stripped).
-///
-/// - Quoted segments whose inner content is `*`, `#`, or `!` are rejected.
-/// - Unquoted segments that start with `!` are rejected (`!` is only valid as
-///   a whole-pattern prefix, not inside a path).
 fn validate_segments(path: &str) -> Result<(), InputError> {
     for (seg, is_quoted) in split_segments(path) {
         if is_quoted {
@@ -314,7 +198,6 @@ fn validate_segments(path: &str) -> Result<(), InputError> {
     Ok(())
 }
 
-/// Validates a single comma-separated pattern (after trimming).
 fn validate_pattern(part: &str) -> Result<(), InputError> {
     if part.is_empty() {
         return Err(InputError::EvaluationWildcardEmpty);
@@ -323,13 +206,11 @@ fn validate_pattern(part: &str) -> Result<(), InputError> {
         return Err(InputError::EvaluationWildcardInternalWhitespace);
     }
 
-    // Strip the negation prefix to get the path body.
     let (is_exclusion, body) = match part.strip_prefix('!') {
         Some(b) => (true, b),
         None => (false, part),
     };
 
-    // A bare `!` (nothing after the prefix) is invalid.
     if body.is_empty() {
         return Err(InputError::EvaluationWildcardBareSpecialChar);
     }
@@ -338,13 +219,10 @@ fn validate_pattern(part: &str) -> Result<(), InputError> {
         return Err(InputError::EvaluationWildcardStartsWithPeriod);
     }
 
-    // Bare `#` as the entire body is invalid (internal sentinel character).
-    // Bare `*` is valid - it means "evaluate everything".
     if body == "#" {
         return Err(InputError::EvaluationWildcardBareSpecialChar);
     }
 
-    // Exclusion patterns must be exact paths - wildcards make no sense there.
     if is_exclusion {
         for (seg, is_quoted) in split_segments(body) {
             if !is_quoted && matches!(seg.as_str(), "*" | "#") {
@@ -387,8 +265,6 @@ impl fmt::Display for Wildcard {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    // ── valid patterns ───────────────────────────────────────────────────────
 
     #[test]
     fn multiple_patterns() {
@@ -440,8 +316,6 @@ mod tests {
         assert_eq!(w.to_string(), original);
     }
 
-    // ── get_eval_str ─────────────────────────────────────────────────────────
-
     #[test]
     fn eval_str_include_only() {
         let w: Wildcard = "packages.*.*".parse().unwrap();
@@ -489,8 +363,6 @@ mod tests {
         );
     }
 
-    // ── bare special chars ───────────────────────────────────────────────────
-
     #[test]
     fn bare_hash_rejected() {
         assert!("#".parse::<Wildcard>().is_err());
@@ -503,12 +375,9 @@ mod tests {
 
     #[test]
     fn mid_path_exclamation_rejected() {
-        // `!` is only valid as a whole-pattern prefix, not inside a segment
         assert!("my.!ignored".parse::<Wildcard>().is_err());
         assert!("my.!*".parse::<Wildcard>().is_err());
     }
-
-    // ── quoted special chars ─────────────────────────────────────────────────
 
     #[test]
     fn quoted_star_segment_rejected() {
@@ -529,8 +398,6 @@ mod tests {
     fn quoted_star_in_exclusion_rejected() {
         assert!(r#"packages.*.*,!my."*".foo"#.parse::<Wildcard>().is_err());
     }
-
-    // ── other invalid patterns ───────────────────────────────────────────────
 
     #[test]
     fn empty_rejected() {
@@ -632,8 +499,6 @@ mod matches_tests {
         assert!(!m("packages.x86_64-linux.#", "packages.x86_64-linux"));
     }
 
-    /// A trailing `*` descends one extra level, so it covers both the attr at
-    /// that position and derivations one level below it.
     #[test]
     fn trailing_star_matches_one_or_two_segments() {
         assert!(m("packages.*", "packages.x86_64-linux"));
@@ -642,8 +507,6 @@ mod matches_tests {
         assert!(!m("packages.*", "packages.x86_64-linux.py.hello"));
     }
 
-    /// `packages.*.*` and `packages.*` are the same pattern - consecutive stars
-    /// collapse before evaluation, so they must match the same set here too.
     #[test]
     fn consecutive_stars_collapse() {
         for attr in ["packages.x86_64-linux", "packages.x86_64-linux.hello"] {
@@ -678,9 +541,6 @@ mod matches_tests {
         assert!(w.matches("packages.aarch64-linux.broken"));
     }
 
-    /// Both sides are split on unquoted `.` and compared by inner content, so a
-    /// dotted attribute name must be quoted on the attr side too - `a."b.c".d`
-    /// is three segments and is NOT the same path as the four-segment `a.b.c.d`.
     #[test]
     fn quoted_segments_compare_by_inner_content() {
         assert!(m(
@@ -695,8 +555,6 @@ mod matches_tests {
         assert!(!m(r#"my."wild.card".test"#, "my.wild.card.test"));
     }
 
-    /// The attr side is a concrete path, so a caller may quote segments that
-    /// contain dots exactly as they would in the wildcard.
     #[test]
     fn quoted_attr_segments_are_unwrapped_too() {
         assert!(m("packages.*.*", r#"packages."x86_64-linux".hello"#));

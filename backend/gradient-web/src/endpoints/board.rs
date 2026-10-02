@@ -4,11 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Job Board read endpoints: live dispatched jobs, per-job scoring detail,
-//! connected workers, and the most expensive builds. Out-of-scope projects are
-//! masked: their jobs collapse to an aggregate count and foreign workers lose
-//! their identity and live metrics.
-
 use super::board_subjects::{JobEvaluationView, JobSubjects, job_evaluation};
 use crate::authorization::{MaybeApiKey, MaybeUser};
 use crate::endpoints::evals::EvalAccessContext;
@@ -44,14 +39,12 @@ pub struct DispatchedJobSummary {
     pub dispatched_at: String,
     pub build_id: Option<Uuid>,
     pub evaluation_id: Uuid,
-    /// The derivation's name for a build job, the repository for an eval job.
     pub subject: Option<String>,
 }
 
 #[derive(Serialize)]
 pub struct DispatchedJobsResponse {
     pub jobs: Vec<DispatchedJobSummary>,
-    /// In-flight jobs owned by projects the caller can't see, shown only as a count.
     pub other_running: u64,
 }
 
@@ -69,7 +62,6 @@ pub struct PendingJobSummary {
 #[derive(Serialize)]
 pub struct PendingJobsResponse {
     pub jobs: Vec<PendingJobSummary>,
-    /// Pending jobs owned by projects the caller can't see, shown only as a count.
     pub other_pending: u64,
 }
 
@@ -131,8 +123,8 @@ pub async fn get_dispatched_jobs(
         .partition(|j| scope.allows(&Uuid::from(j.project)));
     let other_running = other_running.len() as u64;
 
-    // Three reads for the whole page instead of three per row: this list is
-    // polled by the board and holds up to 500 open dispatches.
+    // Three reads are made for the whole page instead of three per row. The board is polling this
+    // list, and it can carry up to 500 open dispatches.
     let job_ids: Vec<DispatchedJobId> = visible.iter().map(|j| j.id).collect();
     let attempts: HashMap<DispatchedJobId, build_attempt::Model> = build_attempt::Entity::find()
         .filter(build_attempt::Column::DispatchedJob.is_in(job_ids))
@@ -177,8 +169,6 @@ pub async fn get_dispatched_jobs(
 
 #[derive(Serialize)]
 pub struct DecisionCandidateView {
-    /// Ephemeral id navigable via `GET /board/jobs/{id}` to this candidate's
-    /// score-breakdown detail, served from the in-memory decision ring.
     pub id: Uuid,
     pub job_id: String,
     pub kind: i16,
@@ -199,9 +189,6 @@ pub struct AssignDecisionView {
     pub candidates: Vec<DecisionCandidateView>,
 }
 
-/// Recent dispatch decisions with every scored candidate, including rejected and
-/// negative ones the dispatcher passed over. Superuser-only: candidates span all
-/// projects, and the view exists to tune cross-project scoring rules (#419).
 pub async fn get_assign_decisions(
     State(state): State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
@@ -262,7 +249,6 @@ pub struct AttemptSummary {
 #[derive(Serialize)]
 pub struct JobPhaseView {
     pub seq: i32,
-    /// The enclosing span's `seq`, or `null` for a top-level phase.
     pub parent_seq: Option<i32>,
     pub phase: String,
     pub start_ms: i64,
@@ -271,8 +257,6 @@ pub struct JobPhaseView {
     pub bytes: i64,
 }
 
-/// The worker's phase spans in report order. Empty for a job that predates the
-/// timeline, or whose worker never reported one.
 async fn job_phases<C: ConnectionTrait>(db: &C, job: DispatchedJobId) -> Vec<JobPhaseView> {
     use gradient_entity::dispatched_job_phase::{Column as CPhase, Entity as EPhase};
 
@@ -295,16 +279,10 @@ async fn job_phases<C: ConnectionTrait>(db: &C, job: DispatchedJobId) -> Vec<Job
         .collect()
 }
 
-/// Where a finished job's time went after its last phase. `null` throughout
-/// for a row the server closed without a worker report.
 #[derive(Serialize, Debug, Default, PartialEq, Eq)]
 pub struct ReportGap {
-    /// The worker's job clock when it sent its terminal report.
     pub worker_elapsed_ms: Option<i64>,
-    /// `worker_elapsed_ms` past the last phase end: the worker's own tail.
     pub worker_tail_ms: Option<i64>,
-    /// Dispatch to report receipt, less `worker_elapsed_ms`: assignment and
-    /// report transit plus loop lag on both ends.
     pub transit_ms: Option<i64>,
 }
 
@@ -328,16 +306,12 @@ fn report_gap(
 
 #[derive(Serialize)]
 pub struct JobDerivationView {
-    /// Per-eval build identity: the id `GET /builds/{build}` takes. `None` once
-    /// the evaluation's `build_job` row is gone.
     pub build: Option<Uuid>,
-    /// Scheduler shared build, handed to the worker as `BuildSpec.build_id`.
     pub derivation_build: Uuid,
     pub drv_path: String,
     pub pname: Option<String>,
 }
 
-/// The derivations the scheduler recorded on the job, per shared build.
 fn snapshot_derivations(
     job_context: &serde_json::Value,
 ) -> Vec<(DerivationBuildId, String, Option<String>)> {
@@ -359,9 +333,9 @@ fn snapshot_derivations(
         .unwrap_or_default()
 }
 
-/// The scheduler scores and dispatches shared builds (`derivation_build`), but the API
-/// navigates builds by their per-eval `build_job` id, so every shared build leaving
-/// this endpoint is resolved against the job's evaluation first.
+/// The scheduler is scoring and dispatching shared builds (`derivation_build`). The API is
+/// navigating builds by their per-eval `build_job` id. Every shared build leaving this endpoint is
+/// resolved against the job's evaluation first.
 async fn resolve_build_jobs<C: ConnectionTrait>(
     db: &C,
     evaluation: EvaluationId,
@@ -414,21 +388,14 @@ pub struct DispatchedJobDetail {
     pub dispatched_at: String,
     pub finished_at: Option<String>,
     pub ready_at: Option<String>,
-    /// `completed`, `failed`, or `abandoned` when the worker never reported;
-    /// `null` while the job is still running.
     pub outcome: Option<String>,
-    /// Worker phase spans in report order, nested via `parent_seq`.
     pub phases: Vec<JobPhaseView>,
     #[serde(flatten)]
     pub report_gap: ReportGap,
-    /// Per-eval build identity, usable with `GET /builds/{build}`. `None` for
-    /// eval jobs and for builds whose evaluation has been collected.
     pub build_id: Option<Uuid>,
-    /// The scheduler shared build this job was dispatched for.
     pub derivation_build_id: Option<Uuid>,
     pub derivations: Vec<JobDerivationView>,
     pub evaluation_id: Uuid,
-    /// The evaluation an eval job ran; `None` for build jobs.
     pub evaluation: Option<JobEvaluationView>,
     pub pname: Option<String>,
     pub score_breakdown: serde_json::Value,
@@ -437,8 +404,6 @@ pub struct DispatchedJobDetail {
     pub instance_context: serde_json::Value,
     pub candidates: Option<serde_json::Value>,
     pub previous_attempts: Vec<AttemptSummary>,
-    /// True when this detail is an in-memory candidate the dispatcher scored but
-    /// passed over (never written to `dispatched_job`). The UI labels it as such.
     pub passed_over: bool,
 }
 
@@ -452,8 +417,6 @@ pub async fn get_dispatched_job(
 
     let scope = MetricsScope::resolve(&state.web_db, &maybe_user).await?;
 
-    // In-memory candidates (rejected and winning alike) carry an ephemeral id;
-    // look there first, then fall back to the persisted `dispatched_job` row.
     if let Some(c) = scheduler.candidate_detail(DispatchedJobId::from(id)).await {
         if !scope.allows(&Uuid::from(c.project)) {
             return Err(WebError::not_found("Job"));
@@ -632,9 +595,7 @@ async fn eval_job_evaluation<C: ConnectionTrait>(
 
 #[derive(Serialize)]
 pub struct BoardWorker {
-    /// `None` when the worker serves no project the caller can see.
     pub id: Option<String>,
-    /// The served projects visible to the caller.
     pub projects: Vec<Uuid>,
     pub draining: bool,
     pub assigned_jobs: i64,
@@ -684,9 +645,6 @@ pub async fn get_board_workers(
     Ok(ok_json(out))
 }
 
-/// One axis of a worker-load radar: `in_flight` jobs of this kind against the
-/// `capacity` (summed `max_concurrent_builds`) of the `workers` that can serve
-/// it. Busy % is `in_flight / capacity`, computed by the client.
 #[derive(Serialize, Debug, PartialEq)]
 pub struct LoadBucket {
     pub key: String,
@@ -695,10 +653,6 @@ pub struct LoadBucket {
     pub workers: u32,
 }
 
-/// Real per-capability / per-architecture / per-feature fleet load (#417).
-/// Each breakdown answers "of the capacity that can serve this, how much is
-/// running it" - so an operator can tell whether they are eval-, build-, or
-/// architecture-bound rather than seeing one blended busy %.
 #[derive(Serialize, Debug, PartialEq)]
 pub struct WorkerLoad {
     pub by_capability: Vec<LoadBucket>,
@@ -732,8 +686,6 @@ fn buckets_sorted(acc: LoadAcc) -> Vec<LoadBucket> {
     out
 }
 
-/// Aggregate already scope-filtered workers and in-flight jobs into the three
-/// load breakdowns. Pure so it can be unit-tested without a scheduler or DB.
 fn aggregate_worker_load(
     workers: &[&gradient_pool::WorkerInfo],
     jobs: &[&gradient_scheduler::BoardActiveJob],
@@ -844,8 +796,6 @@ pub struct ExpensiveBuild {
     pub worker_name: Option<String>,
 }
 
-/// A `LEFT JOIN` yielding `wn.display_name` for the worker id in `worker_col`.
-/// Scoped callers only learn names registered by one of their own projects.
 fn worker_name_sql(worker_col: &str, project_filter: Option<&str>) -> String {
     let scope = project_filter
         .map(|list| format!(" AND wr.peer_id IN ({list})"))
@@ -1019,8 +969,6 @@ pub struct RuleDescription {
     pub description: String,
 }
 
-/// Static catalog of every scoring rule and what it rewards or penalizes, so the
-/// board UI can explain rule names in a help popup without duplicating the text.
 pub async fn get_scoring_rules() -> WebResult<Json<BaseResponse<Vec<RuleDescription>>>> {
     let rules = gradient_pool::score::rule_catalog()
         .into_iter()
@@ -1058,9 +1006,6 @@ gradient_db::sql_fn! {
         params = [];
 }
 
-/// Aggregate scoring view over recently dispatched jobs: a score histogram plus
-/// the mean per-rule contribution, so operators can see how the policy scored
-/// real dispatches without opening every job. Scope-masked to the caller's projects.
 pub async fn get_scoring_summary(
     State(state): State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
@@ -1170,9 +1115,6 @@ pub struct TopProjectBuildTime {
     pub build_count: i64,
 }
 
-/// A build shared by several projects counts once toward each of them. The
-/// projects are looked up per completed shared build, so the window's shared builds drive
-/// the plan rather than a scan of every shared build joined to every job naming it.
 fn top_projects_by_buildtime_sql(window_days: i64) -> String {
     format!(
         "WITH {metric}, shared_build AS ( \
@@ -1204,8 +1146,6 @@ gradient_db::sql_fn! {
         tier = Bulk;
 }
 
-/// Top projects by cumulative build time in a window (superuser-only),
-/// for the Expensive Jobs page.
 pub async fn get_top_projects_by_buildtime(
     State(state): State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
@@ -1251,8 +1191,6 @@ pub struct ExpensiveResource {
     pub worker_name: Option<String>,
 }
 
-/// Maps a resource metric key to its SQL value expression + unit, a closed
-/// allow-list so the metric param can never inject SQL.
 fn resource_metric_expr(metric: &str) -> Option<(&'static str, &'static str)> {
     Some(match metric {
         "ram" => ("dm.peak_ram_mb::double precision", "MB"),
@@ -1266,8 +1204,6 @@ fn resource_metric_expr(metric: &str) -> Option<(&'static str, &'static str)> {
     })
 }
 
-/// Derivations are global, so attribute each metric row to one producing project
-/// (an in-scope one when scoped) via the build -> evaluation -> task chain.
 fn expensive_by_resource_sql(
     value_expr: &str,
     window_days: i64,
@@ -1316,8 +1252,6 @@ gradient_db::sql_fn! {
         tier = Bulk;
 }
 
-/// Top derivations by a captured per-build resource (peak RAM, CPU time, total
-/// disk bytes, or host network peak), read from `derivation_metric`. Project-scoped.
 pub async fn get_expensive_by_resource(
     State(state): State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
@@ -1370,7 +1304,6 @@ pub async fn board_live_ws(
         .await
         .unwrap_or(MetricsScope::Projects(vec![]));
 
-    // Subscribe before snapshotting so no event is missed between the two.
     let rx = state.events.subscribe();
     let (workers, pending, active) = scheduler.metrics_snapshot().await;
     let initial = Envelope::now(
@@ -1397,8 +1330,6 @@ async fn board_live_loop(
     initial: Envelope,
     cancel: CancellationToken,
 ) {
-    // Send a queue-depth snapshot immediately so freshly-opened boards show
-    // live counts without waiting for the next periodic broadcast.
     if let Some(text) = mask_event(&initial, &scope)
         && socket.send(Message::Text(text.into())).await.is_err()
     {
@@ -1415,10 +1346,6 @@ async fn board_live_loop(
     .await;
 }
 
-/// Forward only events the caller may see: queue depth to everyone, per-project
-/// events to members of that project (or superusers), worker disconnects to
-/// superusers. Out-of-scope detail is dropped (the REST view supplies the
-/// "other running" aggregate count).
 fn mask_event(env: &Envelope, scope: &MetricsScope) -> Option<String> {
     match &env.event {
         Event::WorkerQueueDepth(_) => Some(env.to_line()),
@@ -1456,8 +1383,6 @@ pub struct ExpensiveEval {
     pub worker: String,
 }
 
-/// Maps a metric key to its SQL value expression + unit. Pure + tested so the
-/// metric param can never inject SQL (closed allow-list).
 fn eval_metric_expr(metric: &str) -> Option<(&'static str, &'static str)> {
     Some(match metric {
         "rss" => ("em.peak_rss_mb::double precision", "MB"),
@@ -1503,9 +1428,6 @@ gradient_db::sql_fn! {
         params = [];
 }
 
-/// Top evaluations by a captured per-eval resource (peak RSS/heap, thunks, fn
-/// calls, allocated bytes, or total eval time) from `evaluation_metric`,
-/// project-scoped through the evaluation's task.
 pub async fn get_expensive_evals_by_resource(
     State(state): State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
@@ -1572,7 +1494,6 @@ fn to_graph_node(n: flake_output_node::Model) -> FlakeGraphNode {
     }
 }
 
-/// GET /evals/{evaluation}/flake-graph - the eval's walked flake output graph.
 pub async fn get_eval_flake_graph(
     State(state): State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
@@ -1629,8 +1550,6 @@ mod tests {
         }
     }
 
-    /// A worker serves every project it is authorized for, and the event must
-    /// not tell one project which others share it (#587).
     #[test]
     fn a_worker_connection_reaches_each_served_project_without_naming_the_others() {
         let mine = uuid::Uuid::now_v7();
@@ -1667,8 +1586,6 @@ mod tests {
         }
     }
 
-    /// The span after the last phase is the worker's own tail; the rest of the
-    /// wall time between dispatch and the report's arrival is transit.
     #[test]
     fn the_report_gap_splits_into_worker_tail_and_transit() {
         let dispatched_at = now();
@@ -1682,7 +1599,6 @@ mod tests {
         assert_eq!(gap.transit_ms, Some(1_000));
     }
 
-    /// A row the server closed itself has no worker clock, so nothing is split.
     #[test]
     fn a_row_without_a_worker_clock_has_no_gap() {
         let dispatched_at = now();
@@ -1722,8 +1638,6 @@ mod tests {
 
     #[test]
     fn worker_load_diverges_per_capability_and_architecture() {
-        // One all-round worker (8 slots) and one build-only worker (4 slots):
-        // heavy on builds, light on eval/fetch - the build-bound case from #417.
         let all_round = worker(true, true, true, &["x86_64-linux"], &["kvm"], 8);
         let build_only = worker(false, false, true, &["aarch64-linux"], &[], 4);
         let workers: Vec<&WorkerInfo> = vec![&all_round, &build_only];
@@ -1812,13 +1726,11 @@ mod tests {
     fn worker_load_ignores_builtin_arch_and_shows_empty_capacity() {
         let w = worker(true, false, true, &["x86_64-linux"], &[], 2);
         let workers: Vec<&WorkerInfo> = vec![&w];
-        // A builtin build must not create a phantom architecture bucket.
         let jobs = [build_job(BUILTIN_ARCH, &[])];
         let job_refs: Vec<&BoardActiveJob> = jobs.iter().collect();
 
         let load = aggregate_worker_load(&workers, &job_refs);
         assert!(load.by_architecture.iter().all(|b| b.key != BUILTIN_ARCH));
-        // fetch axis stays present with zero capacity so the radar keeps 3 axes.
         assert_eq!(
             *bucket(&load.by_capability, "fetch"),
             LoadBucket {

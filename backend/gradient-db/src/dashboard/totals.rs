@@ -154,8 +154,6 @@ mod tests {
     use super::*;
     use sea_orm::{DatabaseBackend, MockDatabase};
 
-    /// The tile is read on every dashboard load, so it sums one recounted row per
-    /// visible cache and never the cached paths behind them.
     #[test]
     fn the_cache_size_tile_reads_the_recounted_usage() {
         let sql = CACHE_SIZE.text();

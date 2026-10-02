@@ -20,11 +20,8 @@ use gradient_entity::build_attempt::{AttemptFailureReason, AttemptOutcome};
 use gradient_types::DerivationId;
 use sea_orm::{ConnectionTrait, DatabaseTransaction, DbErr, TransactionTrait, Value};
 
-/// SQL predicate: the `derivation_build` aliased `alias` has a recorded
-/// deterministic build failure - the builder ran and exited non-zero. Rebuilding
-/// the identical derivation reproduces it, so a fresh evaluation must not thaw it
-/// (else it loops: re-queue -> rebuild -> same non-zero exit -> re-queue). Only a
-/// changed drv (a new shared build) or a output newly available in a cache can recover it.
+/// A reproducible builder exit must not be thawed by a fresh evaluation.
+/// The fleet would otherwise loop through re-queue -> rebuild -> same exit.
 fn deterministic_build_failure(alias: &str) -> String {
     format!(
         "EXISTS (SELECT 1 FROM build_attempt ba WHERE ba.derivation_build = {alias}.id \
@@ -34,22 +31,9 @@ fn deterministic_build_failure(alias: &str) -> String {
     )
 }
 
-/// Re-queue shared builds a previous evaluation left in a terminal-failure state
-/// (`FailedPermanent`/`Aborted`/`DependencyFailed`/`FailedTimeout`) back to
-/// `Created`, for the derivations a new evaluation needs. A new evaluation is a
-/// fresh build intent - the upstream cache, network, or a transient cause may
-/// have changed since the global shared build failed - so it retries rather than
-/// inheriting the stale failure. Shared builds with a [`deterministic_build_failure`]
-/// are excluded: their non-zero builder exit is reproducible, so re-queueing only
-/// loops the fleet. Build-once success states (`Completed`/`Substituted`) are
-/// never touched. Returns the thaws it made, so the caller can feed
-/// [`crate::status::emit_transition_effects`].
-///
-/// Like its neighbours here it is a `Walk`: the plan gate proves it with the
-/// `work_mem` [`crate::graph::walks::begin_walk`] sets, so it has to run inside
-/// one. On a plain connection it plans against the default instead, and a thaw
-/// that then exceeds its budget heals nothing and says nothing - the repair pass logs
-/// the error and goes on to finalize over shared builds it never re-queued.
+/// This statement must run inside [`crate::graph::walks::begin_walk`].
+/// The plan gate is proving it with that `work_mem`.
+/// A plain connection is planning against the default instead.
 pub async fn requeue_failed_shared_builds<C>(
     db: &C,
     derivations: &[DerivationId],
@@ -71,16 +55,6 @@ where
     Ok(changes)
 }
 
-/// `WITH RECURSIVE` prelude binding a requeue candidate `closure` (the downward
-/// build closure of the candidates) and the `deterministic_blocked` subset a
-/// reproducible build failure permanently poisons. `deterministic_blocked` seeds
-/// from every shared build in the closure with a [`deterministic_build_failure`] and
-/// closes upward over `derivation_dependency` (bounded to the closure), so a
-/// `DependencyFailed` parent of such a failure is caught even though it never
-/// ran a build of its own. A thaw must exclude this whole set: its members can
-/// never build, and thawing one back to `Created` only re-enters the demote<->
-/// thaw oscillation with [`repair_dependency_failed`] that hangs the eval in
-/// `graph_stuck` forever.
 fn requeue_ctes(closure_seed: &str) -> String {
     let deterministic = deterministic_build_failure("dbf");
     format!(
@@ -124,23 +98,6 @@ crate::sql_fn! {
         flags = [Walk];
 }
 
-/// Re-queue terminal-failed shared builds across the full dependency **closure** of an
-/// evaluation's names, not just the derivations its walk re-reported: a transitive
-/// dependency a prior evaluation left terminal-failed, which this one pruned or
-/// never re-walked, would otherwise stay failed forever and block its parents
-/// with no dispatch to trigger any reactive heal. Walks `derivation_dependency`
-/// down from the names over every edge kind and resets each `REQUEUEABLE` shared build
-/// to `Created`; the repair pass then names the thawed closure and promotes it so
-/// the failed subtree rebuilds bottom-up.
-///
-/// A failure is valid for the evaluation that recorded it. A fresh evaluation
-/// ([`RepairScope::Eval`]) is a new intent and thaws every failure in its
-/// closure, a reproducible builder exit included: one rebuild per evaluation, and
-/// same-commit polling is deduplicated before an evaluation exists. An evaluation
-/// healing itself ([`RepairScope::Unstick`]) is the same intent again, so there
-/// the [`deterministic_build_failure`] subtree stays out, or the unstick would
-/// rebuild a permanent failure every sweep. Returns the thaws it made, so the
-/// caller can feed [`crate::status::emit_transition_effects`].
 pub async fn requeue_failed_closure<C>(
     db: &C,
     scope: RepairScope,
@@ -206,9 +163,6 @@ crate::sql_fn! {
 mod tests {
     use super::*;
 
-    /// The requeue thaw must skip a reproducible non-zero builder exit, or a
-    /// polling-triggered eval loops it forever (re-queue -> rebuild -> same exit).
-    /// No live DB in unit tests, so pin the predicate SQL shape and its integers.
     #[test]
     fn deterministic_build_failure_predicate_matches_builder_nonzero() {
         let sql = deterministic_build_failure("db")
@@ -226,10 +180,6 @@ mod tests {
         );
     }
 
-    /// A fresh evaluation is a new intent: its thaw takes every requeueable shared build
-    /// in its closure, a reproducible builder exit included, because a failure is
-    /// valid for the evaluation that recorded it and nothing else. Blocked, a
-    /// restarted evaluation re-failed on the spot without a single build.
     #[test]
     fn a_fresh_evaluation_thaws_every_failure_in_its_closure() {
         let norm = |s: String| s.split_whitespace().collect::<Vec<_>>().join(" ");
@@ -251,12 +201,6 @@ mod tests {
         );
     }
 
-    /// The other two thaws are the same intent again, and must exclude not just a
-    /// derivation's own reproducible failure but the whole subtree a deterministic
-    /// failure poisons: a `DependencyFailed` parent never ran a build of its own,
-    /// so keying the exclusion on the shared build's own attempts alone re-thaws it
-    /// forever (the demote<->thaw oscillation that hangs the eval). Pin that both
-    /// build the closure + `deterministic_blocked` walk and exclude that set.
     #[test]
     fn requeue_excludes_the_deterministic_blocked_subtree() {
         let norm = |s: String| s.split_whitespace().collect::<Vec<_>>().join(" ");

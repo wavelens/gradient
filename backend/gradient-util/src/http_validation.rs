@@ -4,21 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! SSRF-style URL validation for user-supplied webhook targets.
-//!
-//! Used by the Actions surface to reject outbound HTTP targets that resolve
-//! to loopback / private / link-local / cloud-metadata addresses.
-
 use std::net::{Ipv4Addr, Ipv6Addr};
 
-/// Validate a user-supplied webhook URL against SSRF-style abuse.
-///
-/// Rejects schemes other than http/https, URLs without a host, IP literals
-/// in loopback / private / link-local / multicast / unspecified / broadcast /
-/// shared (CGNAT) ranges, and IPv6 literals in loopback / unspecified /
-/// multicast / unique-local (fc00::/7) / link-local (fe80::/10) /
-/// IPv4-mapped unsafe ranges. Hostnames are accepted at validation time;
-/// delivery-time DNS resolution is the caller's responsibility.
+/// Hostnames are passing validation unresolved. The caller is responsible for DNS resolution checks
+/// at delivery time.
 #[derive(Debug, thiserror::Error)]
 pub enum WebhookUrlError {
     #[error("Invalid URL: {0}")]

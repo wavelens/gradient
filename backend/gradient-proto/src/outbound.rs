@@ -4,14 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Background loop that connects outbound to workers with registered URLs.
-//!
-//! When a worker registration has a non-null `url`, the server periodically
-//! attempts to connect to that URL via WebSocket.  Once connected the same
-//! [`handle_socket`](crate::handler::handle_socket) function drives the
-//! connection - the protocol is identical regardless of who initiated the
-//! transport.
-
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
@@ -26,8 +18,6 @@ use gradient_entity::worker_registration::{Column, Entity as EWorkerRegistration
 use crate::handler::{SessionsHandle, handle_socket};
 use gradient_scheduler::Scheduler;
 
-/// The outbound connection pass as a supervised child; each connection it
-/// opens is a tracked task of its own.
 pub fn start_outbound_loop(scheduler: Arc<Scheduler>, sessions: Arc<SessionsHandle>) {
     let connecting: Arc<Mutex<HashSet<String>>> = Arc::default();
     let pass_scheduler = Arc::clone(&scheduler);
@@ -54,7 +44,6 @@ async fn connect_to_registered_workers(
 ) {
     let state = &scheduler.state;
 
-    // Find all worker registrations that have a URL set.
     let registrations = match EWorkerRegistration::find()
         .filter(Column::Url.is_not_null())
         .all(&state.worker_db)
@@ -67,7 +56,6 @@ async fn connect_to_registered_workers(
         }
     };
 
-    // Deduplicate by worker_id - multiple projects can register the same worker.
     let mut seen = HashSet::new();
     for reg in registrations {
         let Some(url) = reg.url.as_deref() else {
@@ -77,12 +65,10 @@ async fn connect_to_registered_workers(
             continue;
         }
 
-        // Skip workers already connected (inbound or outbound).
         if scheduler.is_worker_connected(&reg.worker_id).await {
             continue;
         }
 
-        // Skip workers with a connection attempt already in progress.
         {
             let mut guard = connecting.lock().await;
             if guard.contains(&reg.worker_id) {

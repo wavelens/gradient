@@ -8,22 +8,6 @@ use super::narinfo;
 use base64::{Engine, engine::general_purpose};
 use ed25519_compact::{PublicKey, Signature};
 
-/// Verifies that `narinfo_body` carries at least one `Sig:` line signed by the
-/// holder of `public_key`.
-///
-/// `public_key` is the standard Nix narinfo format: `{name}:{base64-32-byte-pubkey}`.
-///
-/// The fingerprint signed by Nix caches is:
-///
-/// ```text
-/// 1;{StorePath};{NarHash};{NarSize};{sorted-/nix/store/-prefixed-refs-comma-joined}
-/// ```
-///
-/// Returns `true` if any `Sig: {name}:{sig}` line with a matching key name
-/// verifies under the given public key. Returns `false` if the body is
-/// malformed, the public key can't be decoded, or no matching signature
-/// verifies - the caller is expected to treat `false` as "upstream lacks
-/// a trusted signature for this path".
 pub fn verify_narinfo_signature(public_key: &str, narinfo_body: &str) -> bool {
     let Some((key_name, pub_b64)) = public_key.split_once(':') else {
         return false;

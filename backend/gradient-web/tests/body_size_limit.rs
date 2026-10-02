@@ -4,17 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Regression for #51: oversized request bodies must be rejected with
-//! 413 Payload Too Large *before* the handler can buffer them, so a 10 GB
-//! webhook payload cannot exhaust server memory. The cap is configurable
-//! via `--http-max-request-size` (default 2 MiB) and applied as a
-//! `DefaultBodyLimit` layer on the API router; the per-route override on
-//! `POST /api/v1/build-requests/{session}/blobs` raises it to
-//! `MAX_BUILD_REQUEST_SIZE` (20 MiB) for blob uploads.
-//!
-//! Uses manual Tokio runtimes because `#[tokio::test]` expands to
-//! `::gradient_core::…` which clashes with the local `core` crate name.
-
 use axum_test::TestServer;
 use gradient_core::ServerState;
 use gradient_db::{WebDb, WorkerDb};
@@ -77,9 +66,6 @@ fn make_state_with_limits(max_request_size: usize) -> Arc<ServerState> {
     })
 }
 
-/// A POST whose body exceeds `max_request_size` is rejected with 413
-/// before the webhook handler ever starts (so signature verification is
-/// never attempted, which is exactly the OOM-prevention property we want).
 #[test]
 fn webhook_body_over_limit_returns_413() {
     let rt = tokio::runtime::Builder::new_current_thread()
@@ -109,9 +95,6 @@ fn webhook_body_over_limit_returns_413() {
     });
 }
 
-/// A body within the limit reaches the handler. The webhook then rejects
-/// with 401 (invalid signature) - we don't care about that, only that the
-/// body limit didn't trip.
 #[test]
 fn webhook_body_within_limit_reaches_handler() {
     let rt = tokio::runtime::Builder::new_current_thread()
@@ -140,11 +123,6 @@ fn webhook_body_within_limit_reaches_handler() {
     });
 }
 
-/// `POST /api/v1/build-requests/{session}/blobs` gets a per-route layer
-/// raising the limit to `MAX_BUILD_REQUEST_SIZE`, so a payload that would
-/// fail the global `max_request_size` is allowed through. We send the
-/// request unauthenticated - it will fail with 401, but the point is that
-/// a 413 response would mean the per-route override isn't in effect.
 #[test]
 fn blob_upload_route_uses_higher_limit() {
     let rt = tokio::runtime::Builder::new_current_thread()
@@ -174,8 +152,6 @@ fn blob_upload_route_uses_higher_limit() {
     });
 }
 
-/// Auth queries the `authorize` middleware executes before any handler on the
-/// authenticated tier: the session (looked up twice) then the user.
 fn with_auth(db: MockDatabase, session_id: SessionId) -> MockDatabase {
     let session = live_session(session_id);
     db.append_query_results([vec![session.clone()]])
@@ -183,15 +159,8 @@ fn with_auth(db: MockDatabase, session_id: SessionId) -> MockDatabase {
         .append_query_results([vec![user()]])
 }
 
-/// `PUT /api/v1/build-requests/source/{upload}/chunk` enforces the configurable
-/// `max_source_upload_size` as the staged total: an authenticated chunk that
-/// would push the total past the limit is rejected with 413. This is the guard
-/// that bounds a chunked source upload (the per-request body cap is the larger
-/// `NAR_UPLOAD_CHUNK_LIMIT`). Regression for #491/#492/#493.
-///
-/// It must be authenticated: `/build-requests/*` is on the authenticated tier,
-/// so the `authorize` middleware 403s an anonymous request before the body
-/// limit is ever evaluated.
+/// The request must be authenticated. The `authorize` middleware is rejecting an anonymous
+/// `/build-requests/*` request before the body limit is evaluated.
 #[test]
 fn source_chunk_over_source_limit_returns_413() {
     let rt = tokio::runtime::Builder::new_current_thread()

@@ -4,14 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Per-evaluation anchor counters. Triggers append signed deltas to an
-//! append-only ledger so no mover ever locks the evaluation row; the dispatch
-//! tick folds the ledger, and the consistency sweep recounts. No trigger locks
-//! an anchor, so a naming and a transition in flight together can miss each
-//! other; the exact reads that settle an evaluation arbitrate. The anchor trigger
-//! is per row behind a `WHEN`: a statement trigger's transition tables capture
-//! every row a readiness ripple writes, which measured 2.4x on a 100k ripple.
-
 use sea_orm_migration::prelude::*;
 use sea_orm_migration::sea_orm::ConnectionTrait;
 
@@ -162,8 +154,8 @@ mod tests {
 
     const LIVE: &str = live!();
 
-    /// The backfill runs after the triggers exist and counts through the same
-    /// function they call, so the two cannot disagree.
+    /// The backfill is running after the triggers exist and is counting through the same function.
+    /// The two cannot disagree.
     #[test]
     fn the_backfill_follows_the_triggers_and_uses_their_function() {
         let position = |needle: &str| UP.iter().position(|s| s.contains(needle)).unwrap();
@@ -174,7 +166,6 @@ mod tests {
         assert!(BACKFILL.contains("evaluation_anchor_counts(db.status, db.demanded)"));
     }
 
-    /// A ripple that writes neither column never reaches the function.
     #[test]
     fn the_anchor_trigger_fires_only_on_a_membership_column_change() {
         let trigger = UP
@@ -193,9 +184,8 @@ mod tests {
         );
     }
 
-    /// No trigger takes a row lock: a naming held `FOR SHARE` until the ingest
-    /// flush commits is a wait edge behind which that flush's own `lock_anchors`
-    /// deadlocks against a ripple. A race is settled by the exact reads instead.
+    /// No trigger may take a row lock. A naming held `FOR SHARE` until the flush commit would
+    /// deadlock the flush's `lock_anchors` against a ripple.
     #[test]
     fn no_trigger_locks_an_anchor() {
         for f in [MOVED_FN, NAMED_FN, UNNAMED_FN] {
@@ -203,9 +193,6 @@ mod tests {
         }
     }
 
-    /// A finished evaluation's counters are read by nothing, so every trigger and
-    /// the backfill write only for live ones: a shared anchor is named by every
-    /// retained evaluation, and a bulk move would otherwise write one row per.
     #[test]
     fn only_live_evaluations_are_counted() {
         for f in [MOVED_FN, NAMED_FN, UNNAMED_FN, BACKFILL] {

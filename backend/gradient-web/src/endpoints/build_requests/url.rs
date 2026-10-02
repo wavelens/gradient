@@ -4,18 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! `POST /build-requests/url` - queue a build request against a remote
-//! repository instead of an uploaded source tree (#564).
-//!
-//! The upload flows exist so `gradient build` can send a dirty working tree. A
-//! deployment tool already has the source published at a URL and only needs
-//! Gradient to evaluate one attribute of it, so there is nothing to upload:
-//! `repository_url_to_nix` turns the URL and revision into exactly the source
-//! string an evaluation carries, and the worker fetches it directly.
-//!
-//! Like the upload flows this executes on the project's reserved `build-request`
-//! task, so a caller never has to create a task per job.
-
 use super::dispatch::{
     BuildRequestSource, DispatchResponse, InputOverrideBody, queue_build_request,
     validate_remote_override,
@@ -35,23 +23,16 @@ use sea_orm::TransactionTrait;
 use serde::Deserialize;
 use std::sync::Arc;
 
-/// A git commit hash is 40 hex characters, so 20 bytes once decoded.
 const COMMIT_HASH_BYTES: usize = 20;
 
 #[derive(Deserialize, Debug)]
 pub struct UrlRequest {
-    /// Project the build is running under; supplies the cache, the workers, and the
-    /// deploy key used to reach a private repository.
     pub project: String,
     pub url: String,
-    /// Branch or tag to resolve. Omit both this and `rev` to take the
-    /// repository's default branch.
     #[serde(default, rename = "ref")]
     pub git_ref: Option<String>,
-    /// Exact commit to build, 40 hex characters. Mutually exclusive with `ref`.
     #[serde(default)]
     pub rev: Option<String>,
-    /// Attribute path or wildcard to evaluate. Defaults to everything.
     #[serde(default)]
     pub target: Option<String>,
     #[serde(default)]
@@ -118,8 +99,6 @@ pub async fn post_url(
         }
     };
 
-    // Rejects local paths, and is the same shape `parse_nix_git_url` reads back
-    // on the worker.
     let repository = repository_url_to_nix(url, &vec_to_hex(&commit_hash))
         .map_err(|e| WebError::bad_request(format!("Invalid repository URL: {}", e)))?;
 

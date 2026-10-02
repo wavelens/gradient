@@ -4,33 +4,18 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! DWARF build-id discovery inside a NAR.
-//!
-//! nixpkgs' `separateDebugInfo` writes debug files to
-//! `lib/debug/.build-id/<xx>/<yyyy>.debug`, where `<xx>` is the first byte of the
-//! ELF build id and `<yyyy>` the remaining 19. Walking those entries is what nix
-//! does when a binary cache is created with `index-debug-info=true`, and it is
-//! what lets a debuginfod client resolve a build id to a NAR member.
-
 use futures::StreamExt as _;
 use harmonia_file_nar::{NarEvent, parse_nar};
 use std::io;
 
-/// Directory that holds the build-id tree inside a `separateDebugInfo` output.
 const BUILD_ID_DIR: [&str; 3] = ["lib", "debug", ".build-id"];
 
-/// One `lib/debug/.build-id` member found in a NAR.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BuildIdEntry {
-    /// 40-char lowercase hex build id, without the `.debug` suffix.
     pub build_id: String,
-    /// NAR-relative path of the debug file.
     pub member: String,
 }
 
-/// Streams the (already decompressed) NAR and returns every well-formed
-/// `lib/debug/.build-id/<xx>/<yyyy>.debug` member. File bodies are drained, not
-/// buffered, so a multi-gigabyte debug output costs bandwidth but not memory.
 pub async fn scan_build_ids<R>(reader: R) -> io::Result<Vec<BuildIdEntry>>
 where
     R: tokio::io::AsyncRead + Unpin,
@@ -69,8 +54,6 @@ fn entry_name(name: &bytes::Bytes) -> io::Result<String> {
         .map_err(|e| io::Error::other(format!("non-UTF-8 NAR entry name: {e}")))
 }
 
-/// Matches `<root>/lib/debug/.build-id/<xx>/<yyyy>.debug` and joins the two hex
-/// halves into the build id; `dirs` starts with the root's empty name.
 fn build_id_entry(dirs: &[String], file_name: &str) -> Option<BuildIdEntry> {
     let (prefix, parents) = dirs.split_first()?;
     if !prefix.is_empty() || parents.len() != BUILD_ID_DIR.len() + 1 {

@@ -4,10 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! The two ends the actor is generic over, wired to what actually exists: the
-//! `pending_delivery` table behind [`DbStore`], and a ractor factory of [`Deliverer`]
-//! workers behind [`FactoryHandoff`]. A worker that panics mid-delivery is the
-//! factory's to replace; its row stays leased until `next_attempt_at`.
+//! A worker panicking mid-delivery is replaced by the factory. Its row is leased until
+//! `next_attempt_at`.
 
 use std::sync::Arc;
 
@@ -22,8 +20,6 @@ use ractor::{ActorProcessingErr, ActorRef};
 use crate::actor::{EffectsMsg, Handoff, PendingDeliveryStore};
 use crate::consume::consume;
 
-/// What a delivery may reach. Held by every worker, so it is a handle bundle
-/// and never a connection.
 pub struct EffectsCtx {
     state: Arc<ServerState>,
 }
@@ -42,7 +38,6 @@ impl EffectsCtx {
     }
 }
 
-/// One row handed to one worker, with the actor to answer.
 pub type DeliverJob = (PendingDelivery, ActorRef<EffectsMsg>);
 
 pub struct DbStore {

@@ -4,10 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Explains every statement `gradient_db::sql!` registered, against the cache
-//! VM's own database amplified to production scale, and fails on a pathological
-//! plan. `docs/src/contributors/tests.md` documents where it is running and why.
-
 mod amplify;
 mod explain;
 mod report;
@@ -18,9 +14,8 @@ use clap::Parser;
 use gradient_db::sql::registry;
 use sea_orm::{ConnectOptions, ConnectionTrait, Database, DatabaseConnection};
 
-/// Every crate that declares statements, with the call that pulls it in. A
-/// linker drops an rlib the binary never mentions, so without these calls that
-/// crate's registry entries are silently absent and the gate measures a subset.
+/// A linker is dropping an rlib the binary never mentions. The crate's registry entries would be
+/// silently absent without these calls, and the gate would measure a subset.
 const LINKED: &[(&str, fn())] = &[
     ("gradient-cache", gradient_cache::link),
     ("gradient-ci", gradient_ci::link),
@@ -40,14 +35,14 @@ struct Cli {
     /// Print the registry and exit, without touching a database.
     #[arg(long)]
     list: bool,
-    /// Print one registered statement's text and exit, for a test that has to run
-    /// the exact SQL the server executes.
+    /// Print one registered statement's text and exit. Tests are using it to run the exact server
+    /// SQL.
     #[arg(long, value_name = "NAME")]
     print: Option<String>,
-    /// Divides the amplification targets; 1 is the full production shape.
+    /// Divisor for the amplification targets. 1 is the full production shape.
     #[arg(long, default_value_t = 1)]
     scale: u32,
-    /// The gate fails when more queries than this cannot be measured.
+    /// Maximum number of unmeasurable queries the gate is accepting.
     #[arg(long, default_value_t = 0)]
     max_unmeasured: usize,
     /// Measure the database as it stands, without amplifying it first.
@@ -90,8 +85,8 @@ async fn main() -> Result<()> {
         amplify::run(&db, cli.scale).await?;
     }
 
-    // Production's autovacuum keeps the visibility map set; a freshly amplified
-    // database has none, and every index-only scan would read the heap anyway.
+    // Production's autovacuum is keeping the visibility map set. A freshly amplified database has
+    // none, and every index-only scan would read the heap.
     db.execute_unprepared("VACUUM (ANALYZE)")
         .await
         .context("VACUUM (ANALYZE) before measuring")?;
@@ -102,8 +97,6 @@ async fn main() -> Result<()> {
     std::process::exit(report::exit_code(&rows, cli.max_unmeasured));
 }
 
-/// Every statement the measuring pass sends, its samplers and generic plans
-/// included, is cut off server-side, so none can hang the gate without a word.
 async fn bounded(url: &str) -> Result<DatabaseConnection> {
     let mut options = ConnectOptions::new(url);
     options.map_sqlx_postgres_opts(|pg| {
@@ -113,11 +106,6 @@ async fn bounded(url: &str) -> Result<DatabaseConnection> {
     Ok(Database::connect(options).await?)
 }
 
-/// Every statement the macro registered, without a database. It is also the
-/// proof that each crate's entries actually linked into this binary: a crate
-/// that goes missing shows up as its statements disappearing from this list.
-/// Crates that linked but registered nothing. Empty is the only healthy answer:
-/// a name here means the gate would pass while measuring none of that crate.
 fn missing_crates() -> Vec<&'static str> {
     let files: Vec<&str> = registry().map(|query| query.file).collect();
 

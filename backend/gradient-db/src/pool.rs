@@ -4,16 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Typed wrappers around the `SeaORM` connection pools.
-//!
-//! Gradient keeps separate pools so HTTP requests served by the axum layer cannot
-//! be starved by the proto/scheduler/cache work. [`WebDb`], [`WorkerDb`] and
-//! [`CacheDb`] are newtypes that forward `ConnectionTrait`, so call sites
-//! (`find().one(&ctx.web_db)`, ...) work unchanged while the newtypes stay
-//! non-available in a cache at any explicitly typed boundary. [`WorkerDb`] can also
-//! stand for one open transaction on its pool, which is how the graph writer is running
-//! every `gradient_db` function inside one transaction.
-
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -24,15 +14,9 @@ use sea_orm::{
     TransactionTrait,
 };
 
-/// The pool dedicated to axum/HTTP request handling. Use this from any
-/// `gradient_web::endpoints::*` handler so HTTP latency is not coupled to the
-/// proto/scheduler workload. `Arc`-wrapped so the context slices that carry it
-/// stay cheaply `Clone` (`DatabaseConnection` itself is not `Clone`).
 #[derive(Debug, Clone)]
 pub struct WebDb(Arc<DatabaseConnection>);
 
-/// The pool used by the proto handler, scheduler, cache GC, and any tracked
-/// background task; or, inside the graph writer, one open transaction on it.
 #[derive(Debug, Clone)]
 pub struct WorkerDb(WorkerConn);
 
@@ -45,11 +29,6 @@ enum WorkerConn {
     },
 }
 
-/// The pool dedicated to the cache-query read path (`CacheQuery` prefetch
-/// lookups). Isolated from [`WorkerDb`] so a large eval's prefetch storm cannot
-/// exhaust the scheduler/dispatch pool - a saturated cache pool then only slows
-/// cache queries (which degrade to a retryable [`crate`] miss) instead of
-/// stalling the whole scheduler.
 #[derive(Debug, Clone)]
 pub struct CacheDb(Arc<DatabaseConnection>);
 
@@ -58,9 +37,6 @@ impl WebDb {
         Self(Arc::new(conn))
     }
 
-    /// Borrow the inner `DatabaseConnection` - needed in the few places
-    /// where a function signature is hard-coded to `&DatabaseConnection`
-    /// instead of `&impl ConnectionTrait`.
     pub fn inner(&self) -> &DatabaseConnection {
         self.0.as_ref()
     }
@@ -71,7 +47,6 @@ impl WorkerDb {
         Self(WorkerConn::Pool(Arc::new(conn)))
     }
 
-    /// A handle whose every statement executes on `tx`; `detached` gives the pool back.
     pub fn in_transaction(&self, tx: Arc<DatabaseTransaction>) -> Self {
         Self(WorkerConn::Transaction {
             tx,
@@ -79,16 +54,12 @@ impl WorkerDb {
         })
     }
 
-    /// The pool, for work that must outlive or sit outside the current transaction.
     pub fn detached(&self) -> Self {
         Self(WorkerConn::Pool(Arc::clone(self.pool())))
     }
 
-    /// The open transaction this handle stands for, if any. A caller whose
-    /// correctness depends on a lock outliving its statement needs this, not the
-    /// forwarding `ConnectionTrait`: on a pooled handle every lock is released at
-    /// the end of the statement that took it, so the wait it was meant to absorb
-    /// happens with nothing held and no compiler or test can tell the difference.
+    /// A pooled handle is releasing every lock at the end of the statement taking it.
+    /// A caller depending on a lock outliving its statement must use this transaction.
     pub fn as_transaction(&self) -> Option<&DatabaseTransaction> {
         match &self.0 {
             WorkerConn::Pool(_) => None,
@@ -102,8 +73,6 @@ impl WorkerDb {
         }
     }
 
-    /// The statements a mock pool recorded. Every other handle on the pool must
-    /// be dropped first, so a test proves nothing outlived the work it asserts on.
     pub fn into_transaction_log(self) -> Vec<sea_orm::Transaction> {
         match self.0 {
             WorkerConn::Pool(pool) => Arc::try_unwrap(pool)
@@ -114,14 +83,9 @@ impl WorkerDb {
     }
 }
 
-/// One string per statement, transaction control removed: a `MockDatabase`
-/// records a whole transaction as ONE log entry whose statement list sea-orm
-/// brackets with a synthetic `BEGIN`/`COMMIT`, so an assertion indexed off the
-/// flattened list must not count them, and a `contains` over a formatted entry
-/// must not straddle two statements. A test that asserts ON transaction control
-/// instead (that a budget overrun rolled back rather than committed, as
-/// `gradient_graph::writer` does) must keep formatting whole entries; this drops
-/// exactly what such a test is looking for.
+/// A `MockDatabase` is recording a whole transaction as one entry.
+/// sea-orm is bracketing that entry with a synthetic `BEGIN` and `COMMIT`.
+/// This list is dropping them, unlike a test asserting on transaction control.
 pub fn statements(log: Vec<sea_orm::Transaction>) -> Vec<String> {
     raw_statements(log)
         .iter()
@@ -129,9 +93,6 @@ pub fn statements(log: Vec<sea_orm::Transaction>) -> Vec<String> {
         .collect()
 }
 
-/// The same list unformatted, for an assertion that reads a quoted identifier or
-/// one bound value: `Debug` on a `Statement` escapes every `"` a sea-orm query
-/// writes, so a `contains` over [`statements`] can never match one.
 pub fn raw_statements(log: Vec<sea_orm::Transaction>) -> Vec<sea_orm::Statement> {
     log.iter()
         .flat_map(|t| t.statements().iter())
@@ -193,10 +154,6 @@ macro_rules! impl_connection_trait {
     };
 }
 
-/// The read pools forward `TransactionTrait` for the same reason [`WorkerDb`]
-/// implements it: a graph walk has to raise `work_mem` with `SET LOCAL`, which
-/// Postgres honours only inside a transaction block (see
-/// [`crate::graph::walks::begin_walk`]).
 macro_rules! impl_transaction_trait {
     ($ty:ty) => {
         #[async_trait::async_trait]

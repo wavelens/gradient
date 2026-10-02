@@ -4,12 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! `derivation_build.probed`: the upstream probe has answered for this anchor.
-//! Demand descends into an anchor's build inputs only once it has, so the walk
-//! can no longer dispatch the build closure of an output an upstream serves in
-//! the window before the probe replies. Defaulting true leaves every anchor that
-//! already exists exactly as the deploy found it; new anchors are written false
-//! by the ingest, which sends every column.
+//! Defaulting to true is leaving every existing shared build as the deploy found it. The ingest is
+//! writing false for new shared builds.
 
 use sea_orm_migration::prelude::*;
 use sea_orm_migration::sea_orm::ConnectionTrait;

@@ -4,10 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! The evaluation list counts each listed evaluation's anchors by status on every
-//! page load. Carrying the anchor in an index keyed by evaluation lets that count
-//! read the index alone instead of every job's heap row.
-
 use sea_orm_migration::prelude::*;
 use sea_orm_migration::sea_orm::ConnectionTrait;
 

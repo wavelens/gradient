@@ -12,7 +12,6 @@ use tokio::net::TcpListener;
 
 use crate::session::frame::{ProtoSocket, accept_tungstenite};
 
-/// An authority-side and a peer-side socket connected over loopback.
 pub async fn loopback() -> (ProtoSocket, ProtoSocket) {
     let listener = TcpListener::bind("127.0.0.1:0")
         .await

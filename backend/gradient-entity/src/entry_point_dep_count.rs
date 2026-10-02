@@ -4,12 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Per-entry-point dependency-closure build-status histogram, maintained
-//! incrementally as builds transition. One row per `(entry_point, status)`
-//! holds the count of the entry point's closure builds currently in that
-//! `BuildStatus`. Powers the task page's per-package segmented bar without
-//! the per-request recursive closure walk.
-
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 

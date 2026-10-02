@@ -12,23 +12,18 @@ use gradient_types::*;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{ActiveModelTrait, ConnectionTrait, IntoActiveModel};
 
-/// Auto-recover an evaluation wedged in `graph_stuck` because a shared build's own
-/// `.drv` NAR is missing from our cache and has no producer: only evaluation
-/// emits a `.drv`, and the daemon-free server cannot reproduce one. Aborts the
-/// stuck run (freeing the single-active-per-task slot) and queues a fresh
-/// full evaluation of the **same commit** - re-instantiating the flake
-/// re-materialises the `.drv` in the worker store, which re-uploads it.
+/// Only evaluation is emitting a `.drv`, and the daemon-free server cannot reproduce one.
+/// Re-evaluating the same commit is re-materialising the `.drv` in the worker store for re-upload.
 ///
-/// The new run is [`EvaluationKind::DrvRecovery`] so the caller can make the
-/// recovery one-shot: a `.drv` a cold re-eval still fails to persist is not a
-/// transient miss, and re-triggering again would loop.
+/// `EvaluationKind::DrvRecovery` is making the recovery one-shot. A `.drv` that a cold re-eval
+/// cannot persist is no transient miss, and re-triggering would loop.
 pub async fn trigger_drv_recovery<C: ConnectionTrait>(
     db: &C,
     task: &MTask,
     stuck: &MEvaluation,
 ) -> Result<MEvaluation, TriggerError> {
-    // Abort before insert: the single-active-per-task unique index rejects a
-    // second active row, so the stuck eval must leave the active set first.
+    // The single-active-per-task unique index is rejecting a second active row. The stuck
+    // evaluation must leave the active set before the insert.
     abort_evaluation(db, stuck.id, AbortKind::Soft).await?;
 
     let now = gradient_types::now();

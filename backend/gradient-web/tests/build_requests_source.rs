@@ -4,10 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Integration tests for `POST /api/v1/build-requests/source` (#422). The
-//! `nix`-feature CLI uploads a pre-packed source NAR; the server computes the
-//! store path and queues a build-request evaluation.
-
 #![expect(
     clippy::unwrap_used,
     reason = "test scaffolding: a fixture helper that cannot build its value should fail the test loudly"
@@ -131,26 +127,22 @@ fn source_upload_creates_queued_eval() {
             MockDatabase::new(DatabaseBackend::Postgres),
             session_id,
         ))
-        // ensure_build_request_task -> SELECT (None) then INSERT
         .append_query_results([Vec::<gradient_entity::task::Model>::new()])
         .append_query_results([vec![task_model.clone()]])
         .append_exec_results([MockExecResult {
             last_insert_id: 0,
             rows_affected: 1,
         }])
-        // INSERT commit
         .append_query_results([vec![commit_model.clone()]])
         .append_exec_results([MockExecResult {
             last_insert_id: 0,
             rows_affected: 1,
         }])
-        // INSERT evaluation
         .append_query_results([vec![eval_model.clone()]])
         .append_exec_results([MockExecResult {
             last_insert_id: 0,
             rows_affected: 1,
         }])
-        // resolve_project_cache_name -> project-cache link lookup (none -> cache=null)
         .append_query_results([Vec::<gradient_entity::project_cache::Model>::new()]);
 
         let server = make_test_server(db.into_connection());

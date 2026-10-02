@@ -55,7 +55,6 @@ impl Phase {
         }
     }
 
-    /// The first report of a freshly inserted evaluation and the description its Git host check shows.
     pub fn of_created(
         status: EvaluationStatus,
         reason: Option<WaitingReason>,

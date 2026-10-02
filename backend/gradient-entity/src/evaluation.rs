@@ -73,8 +73,6 @@ impl EvaluationStatus {
 
     pub const TERMINAL: [Self; 3] = [Self::Completed, Self::Failed, Self::Aborted];
 
-    /// The statuses an eval job owns end to end: the only exit is the worker's
-    /// terminal report, so a lost report strands the evaluation here.
     pub const EVALUATING: [Self; 2] = [Self::EvaluatingFlake, Self::EvaluatingDerivation];
 }
 
@@ -83,8 +81,8 @@ mod status_tests {
     use super::*;
     use sea_orm::Iterable;
 
-    /// Raw SQL composes fragments from these numbers; a renumber must fail CI
-    /// (the m20260407 in-place renumber is exactly the hazard this pins).
+    /// Raw SQL is composing fragments from these numbers. A renumber must fail CI because the
+    /// m20260407 in-place renumber was exactly this hazard.
     #[test]
     fn numbering_is_pinned() {
         for (status, n) in [
@@ -103,9 +101,8 @@ mod status_tests {
         assert_eq!(EvaluationStatus::iter().count(), 9);
     }
 
-    /// `EVALUATING` drives the lost-completion watchdog. `Fetching` must stay
-    /// out: its job completing enqueues the cached eval follow-up rather than
-    /// finishing the stream, so re-driving it would promote a half-done eval.
+    /// `Fetching` must stay out of `EVALUATING`. Its completion is enqueuing the cached eval
+    /// follow-up, and re-driving it would promote a half-done eval.
     #[test]
     fn evaluating_is_the_pair_the_eval_stream_owns() {
         assert_eq!(
@@ -123,8 +120,6 @@ mod status_tests {
         );
     }
 
-    /// `kind` is persisted as a raw integer; a renumber silently reinterprets
-    /// existing rows (an `input_update` run becoming `drv_recovery`, etc.).
     #[test]
     fn kind_numbering_is_pinned() {
         for (kind, n) in [
@@ -161,8 +156,6 @@ mod status_tests {
     }
 }
 
-/// What an evaluation is for: a normal CI run, or an `input_update` run that
-/// bumps tracked flake inputs and feeds the `OpenPr` action.
 #[repr(i32)]
 #[derive(
     Debug,
@@ -185,10 +178,6 @@ pub enum EvaluationKind {
     Normal = 0,
     #[sea_orm(num_value = 1)]
     InputUpdate = 1,
-    /// A re-evaluation the scheduler auto-triggered to regenerate a `.drv` whose
-    /// NAR our cache lost (or never received): the daemon-free server cannot
-    /// reproduce a `.drv`, so it re-evaluates the same commit. A `DrvRecovery`
-    /// run that stalls the same way again is not retried (one-shot).
     #[sea_orm(num_value = 2)]
     DrvRecovery = 2,
 }
@@ -219,8 +208,6 @@ pub enum EvalCacheStatus {
     Hit = 2,
 }
 
-/// How much of the closure an evaluation re-walks. `Full` skips the prune on
-/// recorded subtrees, so a user can recover a graph whose record went wrong.
 #[repr(i32)]
 #[derive(
     Debug,
@@ -276,7 +263,6 @@ pub struct Model {
     pub finished_at: Option<NaiveDateTime>,
     pub graph_version: i64,
     pub walk_mode: WalkMode,
-    /// Every build this evaluation names dispatches ahead of unprioritized work.
     pub prioritized: bool,
 }
 

@@ -4,13 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! `GET /builds/{build}/download/{filename}` admits exactly the callers every
-//! other build read admits (`BuildAccessContext::load`), or a download token for
-//! the build's derivation.
-//!
-//! An admitted request with no build products answers `File not found`; a
-//! refused one answers `Build not found`, so the message tells the two apart.
-
 #![expect(
     clippy::unwrap_used,
     reason = "test scaffolding: a fixture helper that cannot build its value should fail the test loudly"
@@ -84,8 +77,6 @@ fn task(id: TaskId, project: ProjectId) -> gradient_entity::task::Model {
     }
 }
 
-/// The private project owning [`build_job_id`]: build_job, shared build, evaluation,
-/// task, project, in `BuildAccessContext::load_unguarded` order.
 fn with_private_build(db: MockDatabase) -> MockDatabase {
     db.append_query_results([vec![build_job(build_job_id(), eval_id())]])
         .append_query_results([vec![shared_build()]])
@@ -133,8 +124,6 @@ fn run<F: std::future::Future>(fut: F) -> F::Output {
         .block_on(fut)
 }
 
-/// A member of another project that built the same derivation reads its log,
-/// graph and product list; the file itself must not be the one read refused.
 #[test]
 fn a_member_of_a_project_that_built_the_derivation_downloads_without_a_token() {
     run(async {

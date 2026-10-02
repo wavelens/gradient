@@ -4,8 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! What the graph writer is asked to do, and what it answers.
-
 use std::collections::HashSet;
 
 use chrono::NaiveDateTime;
@@ -17,12 +15,8 @@ use gradient_types::ids::{
 };
 use gradient_wire::types::{BuildFailureKind, BuildMetrics, BuildOutput, DiscoveredDerivation};
 
-/// One worker batch of discovered derivations plus the one substitution fact the
-/// scheduler establishes outside the graph writer: which of them our own cache already
-/// holds complete. What an upstream serves is not asked here - the probe is running for the
-/// shared builds a need update turns on, and reports through `UpstreamHits`. Paths
-/// are in bare `<hash>-<name>` form, because ids are only assigned inside the
-/// graph writer's transaction.
+/// Paths are in bare `<hash>-<name>` form.
+/// Ids are only assigned inside the graph writer's transaction.
 #[derive(Debug, Clone, Default)]
 pub struct RecordBatch {
     pub evaluation: EvaluationId,
@@ -33,8 +27,6 @@ pub struct RecordBatch {
     pub truly_substituted: HashSet<String>,
 }
 
-/// A narinfo hit on a project upstream, persisted onto every `derivation_output`
-/// that shares the hash.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct UpstreamHit {
     pub url: Option<String>,
@@ -51,18 +43,12 @@ pub struct UpstreamHit {
 pub struct RecordReport {
     pub evaluation: EvaluationId,
     pub task: Option<TaskId>,
-    /// The evaluation was not streaming when the batch arrived, so it was dropped.
     pub skipped: bool,
-    /// Derivations whose full record this batch put in.
     pub walked: usize,
     pub entry_points: Vec<DerivationId>,
-    /// Shared builds this batch turned need on for or recorded, for the upstream probe.
-    /// Carried to the commit rather than sent from the walk: the probe reads the
-    /// rows on its own connection, and an uncommitted shared build plans to nothing.
     pub to_probe: Vec<DerivationId>,
 }
 
-/// Which caches get a `cached_path_signature` placeholder for a committed path.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SignTargets {
     ProjectCaches(ProjectId),
@@ -70,8 +56,6 @@ pub enum SignTargets {
     None,
 }
 
-/// The metadata of a NAR whose bytes are already in `nar_storage`. `store_path`
-/// is the full or bare path; `references` are in hash-name form.
 #[derive(Debug, Clone)]
 pub struct NarCommit {
     pub store_path: String,
@@ -83,26 +67,19 @@ pub struct NarCommit {
     pub deriver: Option<String>,
     pub ca: Option<String>,
     pub targets: SignTargets,
-    /// The object is already in `nar_storage`.
     pub confirmed: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NarCommitted {
     pub cached_path: CachedPathId,
-    /// The `cached_path` row was created by this commit.
     pub created: bool,
-    /// `derivation_output` rows now backed by the path.
     pub outputs_marked: u64,
-    /// The caches whose `cached_path_signature` row this commit signed.
     pub signed: Vec<CacheId>,
 }
 
-/// A state change on the graph. One transaction each.
 #[derive(Debug, Clone)]
 pub enum Transition {
-    /// The worker sent `JobCompleted` for an evaluation: settle the deferred
-    /// edges, repair the evaluation's closure and move it to `Building`.
     EvalStreamCompleted {
         evaluation: EvaluationId,
     },
@@ -112,8 +89,6 @@ pub enum Transition {
         kind: BuildFailureKind,
         missing_paths: Vec<String>,
     },
-    /// The worker reported `Building`; `already_aborted` in the report means
-    /// the worker must be told to stop instead.
     BuildStarted {
         shared_build: DerivationBuildId,
     },
@@ -129,13 +104,10 @@ pub enum Transition {
     BuildFailed {
         shared_build: DerivationBuildId,
         error: String,
-        /// The worker's reason with nix's repeated log tail already stripped.
         log_banner: String,
         kind: BuildFailureKind,
         missing_paths: Vec<String>,
     },
-    /// A job left the scheduler for a worker: the `build_job`, the open
-    /// `build_attempt` and the shared build's `dispatched_at`.
     Assigned {
         evaluation: EvaluationId,
         shared_build: DerivationBuildId,
@@ -143,11 +115,9 @@ pub enum Transition {
         substitute: bool,
         build_context: serde_json::Value,
     },
-    /// Builds a disconnected worker was running go back to `Queued`.
     OrphanedBuilds {
         shared_builds: Vec<DerivationBuildId>,
     },
-    /// Shared builds a dispatch pass just enqueued, plus closure sizes it computed.
     Ready {
         shared_builds: Vec<DerivationBuildId>,
         closure_sizes: Vec<(DerivationId, i64)>,
@@ -155,17 +125,12 @@ pub enum Transition {
     Repair {
         scope: RepairScope,
     },
-    /// Abort the shared builds only this evaluation needs; the evaluation row is
-    /// already terminal (the trigger path marks it).
     AbortEvaluationSharedBuilds {
         evaluation: EvaluationId,
     },
-    /// Prioritize a live evaluation's whole tree, including shared builds it has not
-    /// resolved yet.
     PrioritizeEvaluation {
         evaluation: EvaluationId,
     },
-    /// Prioritize a shared build and the open shared builds of its build-time closure.
     PrioritizeBuild {
         shared_build: DerivationBuildId,
     },
@@ -179,7 +144,6 @@ pub struct TransitionReport {
     pub substitute_log: Option<SubstituteLog>,
 }
 
-/// A completed shared build available in a cache whose upstream log the scheduler fetches.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SubstituteLog {
     pub shared_build: DerivationBuildId,
@@ -189,17 +153,13 @@ pub struct SubstituteLog {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RequeueScope {
-    /// `FailedTransient` shared builds whose backoff elapsed go back to `Queued`.
     TransientRetries,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Demotion {
-    /// A NAR the index lists is not in storage.
     MissingNar { hash: String },
-    /// Operator invalidation: demote, clear the gates, revoke closure claims.
     Path { hash: String },
-    /// One cache drops its claim; the path is demoted when it was the last.
     CacheClaim { cache: CacheId, hash: String },
 }
 
@@ -210,10 +170,6 @@ pub struct DemoteReport {
     pub others_remain: bool,
 }
 
-/// A bounded maintenance delete, scanned on the pool and applied here. Each
-/// request carries when its scan ran so the graph writer can re-check what became live
-/// since; `Evaluations` needs no such mark, because an evaluation the sweep
-/// picked cannot become live again.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GcRequest {
     Derivations {
@@ -229,9 +185,9 @@ pub enum GcRequest {
     },
 }
 
-/// What the graph writer actually removed. The sweep reclaims the objects and log files
-/// of exactly these, never of what it asked about: a row the re-check kept live
-/// must keep its bytes.
+/// The sweep is reclaiming objects and log files of exactly these rows.
+/// It never reclaims what it only asked about.
+/// A row the re-check kept live must keep its bytes.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct GcReport {
     pub deleted_derivations: Vec<DerivationId>,

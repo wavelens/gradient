@@ -4,19 +4,13 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Authenticated `git push --force` of a single commit. Git hosts whose REST API
-//! cannot force-update a ref (Gitea/Forgejo, GitLab) use this so the PR branch
-//! is always one clean commit on the current base, matching the native
-//! force-push the GitHub git-refs path performs.
+//! Gitea, Forgejo and GitLab cannot force-update a ref over their REST API. This push is keeping
+//! the PR branch at one clean commit on the current base.
 
 use crate::BranchCommit;
 use anyhow::{Context, Result};
 use git2::{FetchOptions, Oid, PushOptions, RemoteCallbacks, Repository, Signature, Tree};
 
-/// Reset `head` to a single commit that applies `commit.files` on top of the
-/// remote's current `base`, force-pushing over whatever was there. Returns the
-/// new commit sha. `cred_user`/`cred_pass` are the HTTPS basic-auth pair the
-/// Git host accepts for the integration token.
 pub async fn force_push_lock_commit(
     git_url: String,
     cred_user: String,
@@ -99,8 +93,6 @@ fn credentials_cb<'a>(user: &'a str, pass: &'a str) -> RemoteCallbacks<'a> {
     cb
 }
 
-/// Insert `blob` at `path` into a copy of `base`, rebuilding intermediate
-/// trees, and return the new root tree oid.
 fn upsert_path(repo: &Repository, base: Option<&Tree>, path: &str, blob: Oid) -> Result<Oid> {
     match path.split_once('/') {
         None => {

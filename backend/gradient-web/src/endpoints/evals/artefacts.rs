@@ -4,13 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! `GET /evals/{evaluation}/artefacts`
-//!
-//! Returns the artefact tree for an evaluation: entry points grouped by
-//! derivation, derivation outputs grouped under each entry point, and
-//! `build_product` rows grouped under each output. Consumed by the CLI's
-//! `gradient download` artefact picker.
-
 use crate::authorization::{MaybeApiKey, MaybeUser};
 use crate::error::WebResult;
 use crate::helpers::ok_json;
@@ -39,7 +32,6 @@ pub struct ArtefactTree {
 pub struct EntryPointArtefacts {
     pub attr: String,
     pub derivation: String,
-    /// Per-eval build identity (`build_job` id) for this entry point's derivation.
     pub build_id: BuildJobId,
     pub outputs: Vec<OutputArtefacts>,
 }
@@ -91,7 +83,6 @@ pub async fn get_artefacts(
         .into_iter()
         .collect();
 
-    // build_job id per derivation, for this eval (the per-eval build identity).
     let mut build_job_by_drv: HashMap<DerivationId, BuildJobId> = HashMap::new();
     for chunk in drv_ids.chunks(IS_IN_CHUNK) {
         for row in EBuildJob::find()

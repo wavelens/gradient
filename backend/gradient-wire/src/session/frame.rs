@@ -4,14 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Frame-level I/O over a generic WebSocket transport.
-//!
-//! After the handshake completes, the connection is split into a single-owner
-//! [`ProtoReader`] (used by the dispatch loop) and a cloneable [`ProtoWriter`]
-//! (mpsc-backed, drained by a spawned writer task). Splitting decouples reads
-//! from writes so a slow outbound NAR transfer cannot block inbound message
-//! handling, and lets concurrent NAR-serving tasks share the wire safely.
-
 use std::marker::PhantomData;
 use std::sync::Arc;
 use std::time::Duration;
@@ -34,7 +26,6 @@ use gradient_util::telemetry::{GAUGES, STATS, fill_permille, metric};
 
 use crate::messages::{ArchivedClientMessage, ArchivedServerMessage, ClientMessage, ServerMessage};
 
-/// Why a frame never reached the peer's socket.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum SendError {
     #[error("message failed to encode")]
@@ -47,94 +38,45 @@ pub enum SendError {
 
 type WriterTask = std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>;
 
-// ── Constants ─────────────────────────────────────────────────────────────────
-
 pub const JOB_OFFER_CHUNK_SIZE: usize = 1_000;
 pub use crate::constants::BULK_CHUNK_SIZE;
 
-/// Hard upper bound on any single inbound or outbound `/proto` WebSocket
-/// frame/message. It bounds the control plane - a full `CacheStatus` is the
-/// largest such message, and bulk chunks sit far below it - while
-/// preventing a peer from pinning gigabytes of memory with a single send.
-/// Applied to both the inbound axum upgrade and the outbound tungstenite
-/// connect.
 pub const MAX_PROTO_MESSAGE_SIZE: usize = 8 * 1024 * 1024;
 
-/// Size a *bidirectional* RPC (a request whose reply travels the other way
-/// while the peer may itself be writing) must stay under.
-///
-/// [`MAX_PROTO_MESSAGE_SIZE`] bounds memory, not liveness: a message far
-/// larger than the socket's send buffer leaves its sender blocked mid-write,
-/// and a peer that is itself blocked mid-write never returns to reading. Both
-/// ends then sit on unflushable writes until a send timeout kills the
-/// connection - and the job retries into the same wall. Bulk transfers
-/// (`NarPush`) are exempt: they flow one way against small acks.
+/// [`MAX_PROTO_MESSAGE_SIZE`] is bounding memory, not liveness. A message far larger than the send
+/// buffer is leaving its sender blocked mid-write. Two peers blocked mid-write never return to
+/// reading, and the connection is dying on a send timeout. One-way bulk transfers like `NarPush`
+/// are exempt.
 pub const SAFE_INFLIGHT_MESSAGE_SIZE: usize = 2 * 1024 * 1024;
 
-/// Maximum time the server will wait for a peer to complete the handshake
-/// (Discoverable check -> InitConnection -> AuthChallenge -> AuthResponse ->
-/// InitAck). A peer that opens the WebSocket and then stalls is dropped after
-/// this deadline so it cannot pin a tokio task and FD indefinitely.
 pub const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(15);
 
-/// Bounded queue depth for the bulk lane of [`ProtoWriter`]: 16 x 512 KiB,
-/// 8 MiB per connection. Producers observe back-pressure as `tx.send().await`
-/// blocking, which is then capped by the per-message send timeout passed to
-/// [`ProtoSocket::split`].
 const WRITER_QUEUE_DEPTH: usize = 16;
 
-/// Bounded queue depth for the control lane. Control-plane messages are small,
-/// so this lane is deep enough that a burst of RPC replies never applies
-/// back-pressure to their handlers.
 const CONTROL_QUEUE_DEPTH: usize = 256;
 
-/// How many queued messages the writer task drains per `feed`+`flush` cycle,
-/// coalescing bursts (e.g. consecutive `NarPush` chunks) into fewer TCP writes.
 const WRITE_BATCH: usize = 32;
 
-/// A bulk batch stops filling once it holds this many bytes, so the writer
-/// flushes and re-checks the control lane at least every BULK_BATCH_BYTES.
 const BULK_BATCH_BYTES: usize = 256 * 1024;
 
-// ── Direction-generic codec ───────────────────────────────────────────────────
-
-/// Wire codec for one direction of the protocol. Implemented by both message
-/// enums so the reader/writer halves are generic over which role owns them:
-/// the authority reads `ClientMessage` and writes `ServerMessage`; a peer
-/// reads `ServerMessage` and writes `ClientMessage`.
 pub trait WireMessage: Sized + std::fmt::Debug + Send + 'static {
-    /// Serialise into the rkyv buffer the writer hands to the socket as is.
     fn encode(&self) -> Option<Bytes>;
 
-    /// Validate one received frame. Payload-bearing variants stay archived so
-    /// their bytes reach the handler as a slice of `bytes`; everything else
-    /// deserialises into the owned enum.
     fn decode(bytes: Bytes) -> Result<Inbound<Self>, RkyvError>;
 
     fn variant_name(&self) -> &'static str;
 
-    /// Whether this message belongs to a bulk transfer stream rather than the
-    /// control plane. Bulk messages are large and strictly ordered within their
-    /// own stream; control-plane messages are small and latency-critical. The
-    /// two travel separate lanes so a multi-megabyte transfer cannot delay the
-    /// RPC replies a peer is blocked on - see [`WriterLanes`].
     fn is_bulk(&self) -> bool;
 
-    /// Direction hooks so [`Inbound`] serves both roles from one generic impl;
-    /// each forwards to the inherent [`Frame`] method.
     fn frame_variant_name(frame: &Frame<Self>) -> &'static str;
     fn frame_into_message(frame: Frame<Self>) -> Result<Self, RkyvError>;
 }
 
-/// One received message: either fully owned, or a payload-bearing frame read
-/// in place.
 pub enum Inbound<M> {
     Control(M),
     Bulk(Frame<M>),
 }
 
-/// A validated payload-bearing frame. Its `data` is read as a slice of
-/// `bytes`, so a chunk is never copied out of the buffer the socket filled.
 pub struct Frame<M> {
     bytes: Bytes,
     _direction: PhantomData<M>,
@@ -151,8 +93,6 @@ impl<M> Frame<M> {
 }
 
 impl<M: WireMessage> Inbound<M> {
-    /// Deserialise a bulk frame into the owned enum. Handlers read bulk frames
-    /// in place instead; this exists for tests and probes.
     pub fn into_message(self) -> Result<M, RkyvError> {
         match self {
             Self::Control(msg) => Ok(msg),
@@ -215,8 +155,8 @@ impl WireMessage for ClientMessage {
 
 impl Frame<ClientMessage> {
     pub fn archived(&self) -> &ArchivedClientMessage {
-        // SAFETY: `ClientMessage::decode` validated these exact bytes, and
-        // `Bytes` is immutable, so the archive cannot change underneath.
+        // SAFETY: `ClientMessage::decode` validated these exact bytes. `Bytes` is immutable and the
+        // archive cannot change underneath.
         unsafe { rkyv::access_unchecked::<ArchivedClientMessage>(&self.bytes) }
     }
 
@@ -282,8 +222,8 @@ impl WireMessage for ServerMessage {
 
 impl Frame<ServerMessage> {
     pub fn archived(&self) -> &ArchivedServerMessage {
-        // SAFETY: `ServerMessage::decode` validated these exact bytes, and
-        // `Bytes` is immutable, so the archive cannot change underneath.
+        // SAFETY: `ServerMessage::decode` validated these exact bytes. `Bytes` is immutable and the
+        // archive cannot change underneath.
         unsafe { rkyv::access_unchecked::<ArchivedServerMessage>(&self.bytes) }
     }
 
@@ -300,18 +240,8 @@ impl Frame<ServerMessage> {
     }
 }
 
-// ── Socket abstraction ────────────────────────────────────────────────────────
-
-/// Wraps both axum and raw tungstenite WebSocket streams so handshake code
-/// can drive connections regardless of who initiated the transport. After the
-/// handshake completes, [`Self::split`] consumes the socket and hands back a
-/// reader + cloneable writer pair for the dispatch phase.
 pub enum ProtoSocket {
-    /// Inbound: worker connected to the server's `/proto` endpoint.
-    /// Boxed alongside `Tungstenite` so neither variant pads the other.
     Axum(Box<WebSocket>),
-    /// Outbound: server connected to a worker's listener.
-    /// Boxed so the TLS state (≈1.4 KB) doesn't pad every other variant.
     Tungstenite(Box<WebSocketStream<MaybeTlsStream<TcpStream>>>),
 }
 
@@ -358,9 +288,6 @@ impl ProtoSocket {
         .map_err(|()| SendError::Closed)
     }
 
-    /// Receive and deserialise the next [`ServerMessage`] (peer-role read).
-    /// Only the handshake reads off the socket, so a bulk frame here is a
-    /// protocol error. Returns `None` on clean close or transport/decode error.
     pub async fn recv_server_msg(&mut self) -> Option<ServerMessage> {
         let bytes = match self.recv_bytes().await? {
             Ok(b) => b,
@@ -386,16 +313,12 @@ impl ProtoSocket {
         }
     }
 
-    /// Serialise and send a [`ClientMessage`] (peer-role write).
     pub async fn send_client_msg(&mut self, msg: &ClientMessage) -> Result<(), SendError> {
         let bytes = msg.encode().ok_or(SendError::Encode)?;
         trace!(?msg, bytes = bytes.len(), "send ClientMessage");
         self.send_bytes(bytes).await
     }
 
-    /// Receive and deserialise the next [`ClientMessage`]. Returns `None` on
-    /// clean close, a bulk frame, decode failure (after replying with an
-    /// error), or transport error.
     pub async fn recv_msg(&mut self) -> Option<ClientMessage> {
         let bytes = match self.recv_bytes().await? {
             Ok(b) => b,
@@ -423,7 +346,6 @@ impl ProtoSocket {
         }
     }
 
-    /// Serialise and send a [`ServerMessage`].
     pub async fn send_msg(&mut self, msg: &ServerMessage) -> Result<(), SendError> {
         let bytes = msg.encode().ok_or(SendError::Encode)?;
         trace!(?msg, bytes = bytes.len(), "send ServerMessage");
@@ -438,11 +360,6 @@ impl ProtoSocket {
         let _ = self.send_msg(&ServerMessage::Reject { code, reason }).await;
     }
 
-    /// Split the socket into the authority-role halves: read `ClientMessage`,
-    /// write `ServerMessage`. The writer is backed by a bounded mpsc drained
-    /// by a spawned task that owns the WebSocket sink. `send_chunk_timeout`
-    /// bounds how long each producer `send` may wait when the queue is full -
-    /// exceeding it indicates the peer's TCP receive side is stalled.
     pub fn split(
         self,
         send_chunk_timeout: Duration,
@@ -453,13 +370,6 @@ impl ProtoSocket {
         })
     }
 
-    /// Peer-role counterpart of [`Self::split`]: read `ServerMessage`, write
-    /// `ClientMessage`. Used by the worker after its handshake, which owns
-    /// its own runtime and has no shutdown tracker to register against.
-    ///
-    /// The returned handle finishes once every queued frame has reached the
-    /// socket, which is when the last [`MsgWriter`] clone has dropped. A peer
-    /// about to exit awaits it so its final reports leave the queue first.
     #[expect(
         clippy::disallowed_methods,
         reason = "no shutdown tracker on the peer side"
@@ -516,8 +426,6 @@ impl ProtoSocket {
     }
 }
 
-// ── Read half ─────────────────────────────────────────────────────────────────
-
 enum ReaderInner {
     Axum(SplitStream<WebSocket>),
     Tungstenite(SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>),
@@ -551,10 +459,6 @@ impl ReaderInner {
     }
 }
 
-/// Single-owner read half of the post-split connection, typed by the
-/// direction's inbound message. A decode failure ends the stream (`None`) -
-/// the read half has no socket handle to reply on, and the dispatch loops
-/// treat it as a peer disconnect.
 pub struct MsgReader<M> {
     inner: ReaderInner,
     _direction: PhantomData<M>,
@@ -579,15 +483,6 @@ impl<M: WireMessage> MsgReader<M> {
     }
 }
 
-// ── Write half ────────────────────────────────────────────────────────────────
-
-/// Cloneable producer side of the post-split connection, typed by the
-/// direction's outbound message. Each send serialises the message and pushes
-/// the bytes into a bounded mpsc; the writer task does the actual WS write.
-/// Producer-observable back-pressure is bounded by `send_chunk_timeout`:
-/// queue full for longer than this is treated as a peer stall and surfaced
-/// as an error.
-/// Sees every message a writer sends, after encoding and before it is queued.
 pub trait MsgObserver<M>: Send + Sync {
     fn sent(&self, msg: &M, len: usize);
 }
@@ -621,8 +516,6 @@ impl<M> MsgWriter<M> {
         self
     }
 
-    /// A writer with no socket behind it: both lanes feed the returned
-    /// receiver, so a test sees every frame in send order.
     #[cfg(any(test, feature = "testing"))]
     pub fn spy(send_chunk_timeout: Duration) -> (Self, mpsc::Receiver<Bytes>) {
         let (tx, rx) = mpsc::channel(64);
@@ -674,14 +567,6 @@ impl<M: WireMessage> MsgWriter<M> {
     }
 }
 
-/// Outbound scheduler for the two writer lanes.
-///
-/// Every message used to share one FIFO, so a small `CacheStatus` reply queued
-/// behind an in-flight NAR transfer could not reach the wire until megabytes of
-/// chunks had flushed - blowing the peer's RPC deadline while the send itself
-/// reported success. Draining the control lane first keeps latency-critical
-/// replies independent of bulk progress. Order within each lane is preserved,
-/// which is all a transfer stream requires.
 pub(crate) struct WriterLanes {
     control: mpsc::Receiver<Bytes>,
     bulk: mpsc::Receiver<Bytes>,
@@ -699,12 +584,8 @@ impl WriterLanes {
         }
     }
 
-    /// Fill `batch` from the control lane when it has anything, else from bulk
-    /// up to [`BULK_BATCH_BYTES`]. A batch never mixes lanes: the writer task
-    /// flushes only once it has fed the whole batch, so a bulk chunk that
-    /// blocks mid-feed would strand a reply sitting in front of it, unflushed -
-    /// the very stall this split exists to prevent. Returns false once both
-    /// lanes are closed and drained.
+    /// A batch is never mixing lanes. The writer task is flushing only after feeding the whole
+    /// batch. A bulk chunk blocked mid-feed would strand a reply queued in front of it.
     pub(crate) async fn next_batch(&mut self, batch: &mut Vec<Bytes>) -> bool {
         loop {
             if !self.control_open && !self.bulk_open {
@@ -716,13 +597,9 @@ impl WriterLanes {
                     return true;
                 }
             }
-            // Draining may have closed the last open lane; re-check before the
-            // select, whose branches would otherwise all be disabled (a panic).
             if !self.control_open && !self.bulk_open {
                 return false;
             }
-            // Both lanes are idle: block until either wakes, then top up from
-            // that same lane.
             let (lane, woke) = tokio::select! {
                 biased;
                 m = self.control.recv(), if self.control_open => (Lane::Control, m),
@@ -739,8 +616,6 @@ impl WriterLanes {
         }
     }
 
-    /// Move already-queued messages from one lane into `batch` without awaiting.
-    /// Closes the lane when all its senders have dropped.
     fn drain_ready(&mut self, lane: Lane, batch: &mut Vec<Bytes>) {
         if !self.is_open(lane) {
             return;
@@ -784,8 +659,6 @@ impl WriterLanes {
     }
 }
 
-/// `next_batch` pushes the woken message before draining, so a message larger
-/// than the cap is always admitted: the cap bounds the batch, not the message.
 fn batch_full(lane: Lane, count: usize, bytes: usize) -> bool {
     match lane {
         Lane::Control => count >= WRITE_BATCH,
@@ -846,8 +719,6 @@ async fn tungstenite_writer_task(
     }
 }
 
-// ── Free helpers ──────────────────────────────────────────────────────────────
-
 pub async fn recv_client_msg(reader: &mut ProtoReader) -> Option<Inbound<ClientMessage>> {
     reader.recv().await
 }
@@ -862,8 +733,6 @@ pub async fn send_error(writer: &ProtoWriter, code: u16, message: String) {
         .await;
 }
 
-/// Peer-role helper: receive the next [`ServerMessage`] from the socket.
-/// Errors on close, deserialisation failure, or transport error.
 pub async fn recv_server_msg(socket: &mut ProtoSocket) -> anyhow::Result<ServerMessage> {
     socket
         .recv_server_msg()
@@ -871,7 +740,6 @@ pub async fn recv_server_msg(socket: &mut ProtoSocket) -> anyhow::Result<ServerM
         .ok_or_else(|| anyhow::anyhow!("connection closed before next ServerMessage"))
 }
 
-/// Peer-role helper: send a [`ClientMessage`] on the socket.
 pub async fn send_client_msg(socket: &mut ProtoSocket, msg: &ClientMessage) -> anyhow::Result<()> {
     socket
         .send_client_msg(msg)
@@ -879,8 +747,6 @@ pub async fn send_client_msg(socket: &mut ProtoSocket, msg: &ClientMessage) -> a
         .map_err(|_| anyhow::anyhow!("failed to send ClientMessage"))
 }
 
-/// Wrap an already-accepted tokio-tungstenite WebSocket into the unified
-/// `ProtoSocket` type. Used by the worker's inbound listener.
 pub fn accept_tungstenite(
     ws: tokio_tungstenite::WebSocketStream<MaybeTlsStream<TcpStream>>,
 ) -> ProtoSocket {
@@ -895,8 +761,6 @@ mod tests {
         Bytes::from(vec![0xbb; bytes])
     }
 
-    /// The window a control reply can wait behind is one bulk chunk, not the
-    /// whole queue: a batch stops taking bulk once it holds BULK_BATCH_BYTES.
     #[tokio::test]
     async fn a_bulk_batch_stops_at_the_byte_cap() {
         let (bulk_tx, bulk_rx) = mpsc::channel::<Bytes>(WRITER_QUEUE_DEPTH);
@@ -929,8 +793,6 @@ mod tests {
         );
     }
 
-    /// A single message larger than the cap still goes out; the cap bounds the
-    /// batch, never the message.
     #[tokio::test]
     async fn an_oversized_bulk_message_is_admitted_alone() {
         let (bulk_tx, bulk_rx) = mpsc::channel::<Bytes>(WRITER_QUEUE_DEPTH);
@@ -998,8 +860,6 @@ mod tests {
         }
     }
 
-    /// Bulk transfers ride their own lane; every control-plane message - above
-    /// all the cache RPC replies a worker blocks on - rides the priority lane.
     #[test]
     fn bulk_transfers_and_control_plane_take_different_lanes() {
         assert!(nar_chunk(0).is_bulk());
@@ -1022,8 +882,6 @@ mod tests {
         );
     }
 
-    /// A completion rides behind its job's own log chunks: on the control lane
-    /// it overtook them and the server dropped the tail of the build log.
     #[test]
     fn a_job_completion_rides_behind_its_log_chunks() {
         assert!(
@@ -1037,10 +895,6 @@ mod tests {
         );
     }
 
-    /// The bug this split fixes: a 1-path `CacheStatus` used to sit behind up
-    /// to `WRITER_QUEUE_DEPTH * BULK_CHUNK_SIZE` of NAR data on one shared
-    /// FIFO and miss the worker's 75 s deadline, failing the build as
-    /// `Transient` while the server logged a clean send.
     #[tokio::test]
     async fn a_cache_reply_overtakes_nar_chunks_already_queued() {
         let (bulk_tx, bulk_rx) = mpsc::channel::<Bytes>(WRITER_QUEUE_DEPTH);
@@ -1071,8 +925,6 @@ mod tests {
         );
     }
 
-    /// Priority must not mean starvation: with the control lane idle the writer
-    /// still drains bulk, and the loop ends only once both lanes are closed.
     #[tokio::test]
     async fn bulk_still_drains_and_the_writer_stops_when_both_lanes_close() {
         let (bulk_tx, bulk_rx) = mpsc::channel::<Bytes>(WRITER_QUEUE_DEPTH);
@@ -1098,9 +950,6 @@ mod tests {
         );
     }
 
-    /// A connection that closes without ever sending must end the writer task,
-    /// not panic: both lanes close during the same drain pass, leaving a
-    /// `select!` whose branches are all disabled.
     #[tokio::test]
     async fn a_writer_that_never_sent_anything_stops_cleanly() {
         let (bulk_tx, bulk_rx) = mpsc::channel::<Bytes>(WRITER_QUEUE_DEPTH);
@@ -1114,12 +963,6 @@ mod tests {
         assert!(batch.is_empty());
     }
 
-    /// The knob that keeps the cache RPC deadlock-free: a full-size
-    /// `CacheQuery` and the worst-case `CacheStatus` it can provoke - every
-    /// path uncached, each carrying a presigned upload URL and path info -
-    /// must both fit inside [`SAFE_INFLIGHT_MESSAGE_SIZE`]. Raising
-    /// `CACHE_QUERY_MAX_PATHS` past that point re-arms the deadlock that
-    /// wedged evals into an endless dispatch loop.
     #[test]
     fn a_full_cache_query_and_its_worst_case_reply_stay_inflight_safe() {
         use crate::messages::{CACHE_QUERY_MAX_PATHS, CachedPath};
@@ -1144,7 +987,6 @@ mod tests {
                 cached: false,
                 file_size: Some(1),
                 nar_size: Some(1),
-                // Presigned PUT URLs are the largest field a reply can carry.
                 url: Some(format!("https://s3.example.com{p}?{}", "x".repeat(512))),
                 nar_hash: Some(format!("sha256:{}", "y".repeat(52))),
                 file_hash: Some(format!("sha256:{}", "z".repeat(52))),
@@ -1186,8 +1028,6 @@ mod codec_tests {
         }
     }
 
-    /// A frame decoded from a buffer starting one byte into an allocation must
-    /// still read in place: the payload slice points inside the source bytes.
     #[test]
     fn a_misaligned_frame_is_read_in_place() {
         let payload: Vec<u8> = (0..=255u8).cycle().take(3000).collect();
@@ -1249,9 +1089,6 @@ mod writer_tests {
     use std::time::Duration;
     use tokio::sync::mpsc;
 
-    /// Construct a writer that's not backed by a draining task, so we can
-    /// observe queue-full back-pressure deterministically. Both lanes get
-    /// `capacity`; the receivers are returned as `(control, bulk)`.
     fn unwired_writer(
         capacity: usize,
         timeout: Duration,
@@ -1300,10 +1137,6 @@ mod writer_tests {
         assert!(GAUGES.bulk_lane_peak.get() >= 500);
     }
 
-    /// A backed-up writer queue must surface as `SendError::Stalled` from `send_msg`
-    /// after the configured timeout - never hang. This is what makes a
-    /// stalled peer detectable on the server side instead of waiting for
-    /// the worker's 600 s receive ceiling.
     #[tokio::test(start_paused = true)]
     async fn send_msg_times_out_when_queue_is_full() {
         let (writer, _control_rx, _bulk_rx) = unwired_writer(1, Duration::from_secs(5));
@@ -1326,9 +1159,6 @@ mod writer_tests {
         assert!(stalls("control") > before);
     }
 
-    /// Fast-path: when the queue has room, send_msg returns Ok immediately
-    /// (the drainer task isn't required for correctness here - the mpsc
-    /// receiver just keeps the channel open).
     #[tokio::test]
     async fn send_msg_succeeds_when_queue_has_room() {
         let (writer, mut control_rx, _bulk_rx) = unwired_writer(2, Duration::from_secs(5));

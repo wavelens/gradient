@@ -4,12 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Resolve the real client IP from `(peer_addr, X-Forwarded-For)` gated by
-//! a CIDR allowlist of trusted proxies.
-//!
-//! XFF is honoured **only** when the peer itself is in `trusted_proxies`;
-//! otherwise the peer IP is returned verbatim so an internet client can't
-//! spoof its own apparent origin by sending the header.
+//! `X-Forwarded-For` is honoured only when the peer itself is in `trusted_proxies`. An internet
+//! client cannot spoof its apparent origin this way.
 
 use axum::extract::connect_info::MockConnectInfo;
 use axum::extract::{ConnectInfo, FromRequestParts};
@@ -19,9 +15,6 @@ use ipnet::IpNet;
 use std::convert::Infallible;
 use std::net::{IpAddr, SocketAddr};
 
-/// Optional peer-address extractor that yields `None` instead of 500 when
-/// neither real nor mock `ConnectInfo` is wired (e.g., `axum_test` without
-/// `MockConnectInfo`, ad-hoc tower stacks).
 pub struct OptionalPeer(pub Option<SocketAddr>);
 
 impl<S: Send + Sync> FromRequestParts<S> for OptionalPeer {
@@ -42,10 +35,6 @@ impl<S: Send + Sync> FromRequestParts<S> for OptionalPeer {
     }
 }
 
-/// Request extension carrying the resolved client IP. Inserted by the
-/// `authorize` and `authorize_optional` middleware so downstream handlers
-/// (cache Basic-auth, badge token URL, evaluation token URL) can re-check
-/// `allowed_ips` without re-deriving from peer + XFF.
 #[derive(Debug, Clone, Copy)]
 pub struct ClientIp(pub IpAddr);
 
@@ -77,8 +66,8 @@ pub fn resolve_client_ip(headers: &HeaderMap, peer: IpAddr, trusted_proxies: &[I
     parsed[0]
 }
 
-/// Collapse IPv4-mapped IPv6 (`::ffff:a.b.c.d`) to plain IPv4 so dual-stack
-/// sockets compare correctly against IPv4 CIDR allowlists.
+/// Dual-stack sockets are delivering IPv4 as `::ffff:a.b.c.d`. The address must be collapsed to
+/// plain IPv4 to match IPv4 CIDR allowlists.
 fn normalize(ip: IpAddr) -> IpAddr {
     match ip {
         IpAddr::V6(v6) => match v6.to_ipv4_mapped() {
@@ -201,8 +190,6 @@ mod tests {
 
     #[test]
     fn ipv4_mapped_ipv6_peer_matches_ipv4_trusted_cidr() {
-        // Dual-stack listener delivers loopback as ::ffff:127.0.0.1; an IPv4
-        // CIDR allowlist must still recognise it as trusted.
         let trusted = nets(&["127.0.0.1/32"]);
         let h = headers_with_xff("10.0.0.5");
         let peer = ip("::ffff:127.0.0.1");

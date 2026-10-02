@@ -4,20 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Local Nix store wrapper for the worker.
-//!
-//! Workers build derivations and read store paths via the local nix-daemon.
-//! This module wraps harmonia's `ConnectionPool` and exposes only the
-//! operations the worker needs: path presence checks, path-info queries,
-//! and triggering builds.
-//!
-//! ## Connection-poisoning policy
-//!
-//! Every daemon op executes inside [`PooledConnectionGuard::execute`], which
-//! discards the connection unless the op returns cleanly - so a cancelled
-//! or errored exchange never recycles a mid-protocol socket (which would
-//! surface downstream as `"serialised integer N is too large for type 'j'"`
-//! or `query_path_info` returning `Ok(None)` for a path that exists).
+//! Every daemon op is executing inside [`PooledConnectionGuard::execute`].
+//! The guard is discarding the connection unless the op returned cleanly.
+//! A recycled mid-protocol socket would surface as `serialised integer N is too large`.
 
 use std::collections::BTreeSet;
 use std::pin::pin;
@@ -39,37 +28,10 @@ use tracing::{debug, warn};
 use gradient_wire::traits::WorkerStore;
 use gradient_worker_client::nar::{PathMeta, PathMetaSource};
 
-/// Maximum time `pool.acquire()` blocks before failing with a timeout.
-///
-/// `add_to_store_nar` legitimately holds a connection for the duration of a
-/// NAR upload + daemon import, which can run into the tens of seconds for
-/// large closures. With concurrent build jobs each issuing parallel
-/// prefetch imports, the pool's acquire queue can grow well past the
-/// harmonia default of 30 s - long enough that downstream acquires time
-/// out spuriously even though the pool is making forward progress.
-///
-/// 10 minutes mirrors the `HTTP_DOWNLOAD_TIMEOUT` for presigned-URL NAR
-/// fetches in `crate::proto::prefetch` - both bound the absolute longest a
-/// single import is allowed to take. Any acquire that legitimately needs
-/// more than that points at a stuck connection and is the right thing
-/// to surface as an error.
 const POOL_ACQUIRE_TIMEOUT: Duration = Duration::from_secs(600);
 
-/// Maximum time the pool waits for a brand-new connection to finish its socket
-/// connect plus daemon handshake before failing.
-///
-/// Harmonia's default is 10 s. On a worker whose local nix-daemon already
-/// carries a high connection count (concurrent build jobs, their own daemon
-/// forks, eval workers), accepting and handshaking a fresh connection under
-/// CPU saturation routinely takes longer than that. The pool then surfaces it
-/// as `acquire daemon connection: timeout: connecting to daemon` and fails an
-/// otherwise-healthy prefetch import. Connection establishment gets the same
-/// generous ceiling as [`POOL_ACQUIRE_TIMEOUT`]: any single daemon interaction
-/// (queueing, connecting, importing) has 10 minutes before the daemon is
-/// treated as genuinely wedged.
 const POOL_CONNECT_TIMEOUT: Duration = Duration::from_secs(600);
 
-/// Build the harmonia [`PoolConfig`] used by [`LocalNixStore::connect_at`].
 pub(crate) fn build_pool_config(pool_size: usize) -> PoolConfig {
     PoolConfig {
         max_size: pool_size,
@@ -80,28 +42,22 @@ pub(crate) fn build_pool_config(pool_size: usize) -> PoolConfig {
 
 const DEFAULT_DAEMON_SOCKET: &str = "/nix/var/nix/daemon-socket/socket";
 
-/// Thin wrapper around a harmonia `ConnectionPool` for the worker's local nix-daemon.
 #[derive(Clone)]
 pub struct LocalNixStore {
     pool: ConnectionPool,
 }
 
 impl LocalNixStore {
-    /// Connect to the local nix-daemon at the default socket path with the given pool size.
     pub fn connect(pool_size: usize) -> Result<Self> {
         Self::connect_at(DEFAULT_DAEMON_SOCKET, pool_size)
     }
 
-    /// Connect to a nix-daemon at a custom socket path with the given pool size.
     pub fn connect_at(socket_path: &str, pool_size: usize) -> Result<Self> {
         Ok(Self {
             pool: ConnectionPool::new(socket_path, build_pool_config(pool_size)),
         })
     }
 
-    /// Acquire a pooled daemon connection, bounding the wait at
-    /// [`POOL_ACQUIRE_TIMEOUT`]. Harmonia's `acquire` blocks indefinitely
-    /// for a free slot, so the deadline is applied here.
     pub async fn acquire(&self) -> Result<PooledConnectionGuard> {
         tokio::time::timeout(POOL_ACQUIRE_TIMEOUT, self.pool.acquire())
             .await
@@ -113,16 +69,9 @@ impl LocalNixStore {
             .map_err(|e| anyhow::anyhow!("acquire daemon connection: {e}"))
     }
 
-    /// Check whether a store path is present in the local store.
-    ///
-    /// Uses `is_valid_path` rather than `query_path_info`. The former is the
-    /// authoritative "the daemon will accept a parent that references
-    /// this path" check; the latter only confirms the store DB has metadata
-    /// for the path, which can disagree with on-disk presence after a GC
-    /// race or an interrupted import. A `query_path_info` false-positive
-    /// causes the prefetch closure walk to skip a path the daemon will then
-    /// reject, surfacing as a confusing `store path '...' does not exist`
-    /// error during import of a parent.
+    /// `is_valid_path` is the authoritative check for a parent the daemon will accept.
+    /// `query_path_info` can still report metadata after a GC race or an interrupted import.
+    /// That false positive would make the prefetch walk skip a path the daemon then rejects.
     pub async fn has_path(&self, store_path: &str) -> Result<bool> {
         let hash_name = strip_store_prefix(store_path);
         let sp = StorePath::from_base_path(hash_name)
@@ -135,8 +84,6 @@ impl LocalNixStore {
             .map_err(|e| anyhow::anyhow!("is_valid_path failed for {store_path}: {e}"))
     }
 
-    /// The uncompressed NAR size of each path, `None` when the daemon cannot
-    /// report one (a build output before it is built, a path to be fetched).
     pub async fn nar_sizes(&self, store_paths: &[String]) -> Vec<Option<u64>> {
         stream::iter(store_paths.iter().cloned())
             .map(|path| async move {
@@ -150,7 +97,6 @@ impl LocalNixStore {
             .await
     }
 
-    /// `store_path`'s uncompressed NAR size.
     async fn nar_size(&self, store_path: &str) -> Result<u64> {
         let base = strip_store_prefix(store_path);
         let sp = StorePath::from_base_path(base)
@@ -168,8 +114,6 @@ impl LocalNixStore {
         Ok(info.nar_size)
     }
 
-    /// Stream `nar` into the daemon as `info` describes it; the transport that
-    /// delivered the bytes is what authenticated them, so no signature is checked.
     pub async fn import_nar(&self, info: &ValidPathInfo, nar: &[u8]) -> Result<()> {
         let mut guard = self.acquire().await?;
         guard
@@ -183,8 +127,6 @@ impl LocalNixStore {
             .map_err(|e| anyhow::anyhow!("daemon add_to_store_nar({}) failed: {e}", info.path))
     }
 
-    /// The content address of `nar` under `name`, the path every nix fetcher of
-    /// the same tree lands on, and the path info that registers it as such.
     fn content_addressed(name: &str, nar: &[u8]) -> Result<ValidPathInfo> {
         let hash = Hash::new(Algorithm::SHA256, &Sha256::digest(nar));
         let store_dir = StoreDir::default();
@@ -212,11 +154,6 @@ impl LocalNixStore {
         })
     }
 
-    /// Register `gcroot_symlink` as an indirect GC root with the daemon.
-    ///
-    /// The caller must have already created the symlink on disk; the daemon
-    /// records the link and treats its target as alive for GC purposes
-    /// until the link is removed.
     pub async fn add_indirect_root(&self, gcroot_symlink: &std::path::Path) -> Result<()> {
         let bytes = bytes::Bytes::copy_from_slice(gcroot_symlink.as_os_str().as_encoded_bytes());
 
@@ -233,7 +170,6 @@ impl LocalNixStore {
     }
 }
 
-/// Daemon lookups in flight at once; the connection pool bounds them as well.
 const DAEMON_LOOKUPS: usize = 32;
 
 #[async_trait]
@@ -254,8 +190,6 @@ impl WorkerStore for LocalNixStore {
     }
 }
 
-/// The daemon's view of a path: what a NAR push from this worker confirms with.
-/// `None` (logged) when the path is invalid, unknown, or the daemon fails.
 #[async_trait]
 impl PathMetaSource for LocalNixStore {
     async fn path_meta(&self, store_path: &str) -> Option<PathMeta> {

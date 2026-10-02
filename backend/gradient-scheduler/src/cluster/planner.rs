@@ -4,9 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Places one ready cluster on idle slots: every member on its own worker, all in
-//! one zone when the cluster asks for it, cheapest locality first.
-
 use std::collections::{BTreeMap, HashMap};
 
 use gradient_types::ids::ClusterJobId;

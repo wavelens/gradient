@@ -3,8 +3,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Integration tests for `GET /api/v1/caches/{cache}/nars/{hash}`.
-
 use axum::http::StatusCode;
 use axum_test::TestServer;
 use gradient_test_support::cache_fixture::{

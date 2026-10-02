@@ -20,7 +20,7 @@ pub async fn start_cache(state: Arc<ServerState>) -> std::io::Result<()> {
     Ok(())
 }
 
-/// Pulls this crate into a binary that otherwise references nothing from it, so
-/// the statements it declares with `gradient_db::sql!` reach the plan gate's
-/// registry. A linker drops an rlib nothing mentions, registry entries included.
+/// This function is pulling the crate into binaries that reference nothing else from it. A linker
+/// is dropping an unmentioned rlib, and with it the `gradient_db::sql!` entries the plan gate is
+/// reading.
 pub const fn link() {}

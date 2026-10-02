@@ -4,55 +4,12 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! `derivation.unwalked_inputs`: how many direct inputs of a walked derivation have a
-//! subtree that is not recorded. The walk prunes on `walked AND unwalked_inputs = 0`,
-//! so the bit it trusts is maintained here the way `missing_runtime_deps` is: seeded
-//! when a record lands, rippled up as inputs complete, rippled back when a record is
-//! dropped, recounted by the sweep. Every pass locks the rows it will write in id
-//! order and touches `derivation` only, which is the first class in the lock order.
+//! `fresh` is overriding both sides of the seed.
+//! A parent and its inputs can share a batch, and the upsert already wrote those inputs complete.
+//! Counting them as read would drive the parent below zero, where `= 0` is never true again.
 //!
-//! # The seed is absolute, the ripples are relative
-//!
-//! [`seed_walk_completeness`] recounts the rows it is given against the inputs as
-//! they stand; the ripples move a counter by the edges into a frontier. A relative
-//! move must be driven by a TRANSITION or it drives a counter past zero, and a
-//! negative counter never satisfies `= 0` again, so the seed reports which rows it
-//! flipped and only those ripple.
-//!
-//! The pre-image cannot supply that transition on its own. The batch that walks a
-//! derivation writes `walked = true` with the record, one statement before the seed,
-//! so by the time the seed reads the row a freshly walked LEAF already reads
-//! complete and would flip nothing, while its parents counted it as a stub when
-//! they were seeded and would wait for a count-down that never comes. The caller
-//! therefore names which rows it just walked: those were incomplete before the batch
-//! by definition, whatever the row says now.
-//!
-//! That definition binds BOTH sides of the seed. A batch carries fifty derivations
-//! and the BFS puts a parent in the same one as its inputs, so the parent's own
-//! count reads those inputs after the upsert has already written them complete.
-//! Counting them as they read drops an input that then flips and ripples a
-//! count-down for it regardless, and the parent lands one below the truth for every
-//! input it shared its batch with - `bash` at -5, and a counter below zero never
-//! reads `= 0` again. So `fresh` overrides the dependency side too.
-//!
-//! The mirror precondition holds for the seed's recount: a seeded row that loses
-//! completeness is not rippled back, so only a caller whose rows cannot lose it may
-//! seed. Record is such a caller, since a derivation's BUILD edges all land in the
-//! batch that walks it; [`unwalk`] is the up-ripple for the one event that does take
-//! completeness away.
-//!
-//! # Build edges only
-//!
-//! Every read here is `kind IN (0, 2)`, because the walk follows `inputDrvs` and a
-//! runtime dependency is not a walk input. This column was written when the edge table
-//! held build edges alone, and the one-graph migration put runtime dependencies beside
-//! them: those land from a narinfo or from a finished build, long after the batch
-//! that walked the parent and with no seed of their own. Counting them broke the
-//! precondition above in the direction the module cannot survive - a complete parent
-//! silently gained an incomplete input, then the down-ripple that input eventually
-//! fired decremented a counter that had never counted it, and a counter driven below
-//! zero never reads `= 0` again, so `known::prunable` stops pruning that subtree for
-//! good.
+//! Every read is `kind IN (0, 2)`, because a runtime dependency is not a walk input.
+//! A runtime edge is landing without a seed of its own and would break the counter the same way.
 
 use std::collections::BTreeMap;
 
@@ -61,10 +18,6 @@ use sea_orm::{ConnectionTrait, DatabaseTransaction, DbErr, QueryResult, Transact
 
 use crate::graph::can_start::ids;
 
-/// The sweep's absolute recount: `incomplete` is every stub and, transitively,
-/// everything above one, so a derivation's count is its direct inputs inside that
-/// set. Only walked rows are rewritten; an unwalked row is incomplete by its own
-/// bit and its counter is meaningless until the walk seeds it.
 pub(crate) const RECOUNT_WALK_COMPLETENESS_SQL: &str = r#"
 WITH RECURSIVE incomplete(id) AS (
     SELECT id FROM derivation WHERE NOT walked
@@ -84,20 +37,6 @@ crate::sql! {
     LOCK_WALK_ROWS = "SELECT id FROM derivation WHERE id = ANY($1::uuid[]) ORDER BY id FOR NO KEY UPDATE",
         params = [DerivationIds(64)];
 
-    /// Recount freshly recorded derivations against their inputs as they stand.
-    /// `fresh` names a row this batch walked, which was incomplete before it
-    /// whatever the pre-image says, so the caller ripples exactly what flipped.
-    ///
-    /// `fresh` is read on BOTH sides, and it has to be. A batch carries fifty
-    /// derivations and the BFS puts parents and their inputs in the same one; the
-    /// upsert writes a leaf's `unwalked_inputs = 0` one statement earlier, so
-    /// without the override on the dependency side a parent's count silently drops
-    /// an input that then flips and ripples a count-down for it anyway, and the
-    /// parent lands one below the truth per input it shared its batch with.
-    ///
-    /// `Bulk` for the reason the can-start state seed it mirrors is: a batch that reads
-    /// the inputs of every value it was handed costs more than one row lookup per
-    /// value, which is all the hot tier's ceiling allows for.
     SEED_UNWALKED_INPUTS = r#"
 UPDATE derivation d SET unwalked_inputs = x.n
 FROM (SELECT s.id,
@@ -117,10 +56,6 @@ RETURNING d.id, x.was_complete, (d.walked AND d.unwalked_inputs = 0) AS complete
         params = [DerivationIds(64), Bools(false, 64)],
         tier = Bulk;
 
-    /// The whole ripple in one call, `RIPPLE_UNWALKED_INPUTS_FN` in the migration
-    /// that defines it: every level's parents counted over build edges, locked
-    /// in id order and moved by their edge count, in place rather than a round
-    /// trip per level. Returns every row that flipped.
     RIPPLE_UNWALKED_INPUTS = "SELECT id FROM ripple_unwalked_inputs($1::uuid[], $2::bool) AS r(id)",
         params = [DerivationIds(64), Bool(true)],
         tier = Bulk;
@@ -144,10 +79,6 @@ fn derivation_ids(rows: &[QueryResult]) -> Vec<DerivationId> {
         .collect()
 }
 
-/// Seed the counter of every derivation this batch recorded and ripple what
-/// completed. `freshly_walked` are the rows the batch flipped to walked, `recounted`
-/// the already-walked rows whose edges it grew; returns every derivation that became
-/// complete, seeded or reached.
 pub async fn seed_walk_completeness(
     txn: &DatabaseTransaction,
     freshly_walked: &[DerivationId],
@@ -181,8 +112,6 @@ pub async fn seed_walk_completeness(
     Ok(reached)
 }
 
-/// Drop the record of `derivations` and take the parents of those that were
-/// complete out of completeness with them.
 pub async fn unwalk(txn: &DatabaseTransaction, derivations: &[DerivationId]) -> Result<(), DbErr> {
     if derivations.is_empty() {
         return Ok(());
@@ -198,10 +127,6 @@ pub async fn unwalk(txn: &DatabaseTransaction, derivations: &[DerivationId]) -> 
     Ok(())
 }
 
-/// Move the counters above `frontier` level by level, `down` from rows that became
-/// complete, up from rows that were, and return every row that flipped. Every
-/// caller holds `frontier` through [`LOCK_WALK_ROWS`], so no edge can land under the
-/// ripple.
 async fn ripple(
     txn: &DatabaseTransaction,
     mut frontier: Vec<DerivationId>,
@@ -219,7 +144,6 @@ async fn ripple(
     ))
 }
 
-/// The sweep's recount, and the backfill after the column's migration.
 pub async fn recount_walk_completeness<C>(db: &C) -> Result<u64, DbErr>
 where
     C: TransactionTrait<Transaction = DatabaseTransaction>,
@@ -239,15 +163,6 @@ mod tests {
     use super::*;
     use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult, Value};
 
-    /// The walk follows `inputDrvs`, so every edge this module counts must be a
-    /// build edge. A runtime dependency lands from a narinfo or a finished build, with no
-    /// seed of its own, and one counted by a ripple but never by a seed drives the
-    /// counter below zero for good. Asserted per statement rather than per module so
-    /// a new read cannot be added without one.
-    /// The seed reads `fresh` on both sides. A parent seeded in the same batch as
-    /// its input reads that input complete, because the upsert wrote it one
-    /// statement earlier; counting it as it reads loses a count the ripple then
-    /// takes anyway, and the counter goes below zero for good.
     #[test]
     fn a_fresh_input_is_counted_as_incomplete_by_its_parent() {
         let sql = SEED_UNWALKED_INPUTS.text();
@@ -286,9 +201,6 @@ mod tests {
     const RIPPLE_FN: &str =
         gradient_migration::m20261001_000001_plain_concept_names::RIPPLE_UNWALKED_INPUTS_FN;
 
-    /// The function is the loop this module ran a level per round trip, under the
-    /// same discipline: the level's parents are locked in id order before the
-    /// write, and a row continues the ripple on the transition the direction names.
     #[test]
     fn the_ripple_locks_each_level_in_id_order_before_it_writes() {
         let lock = RIPPLE_FN
@@ -324,9 +236,6 @@ mod tests {
         Vec::new()
     }
 
-    /// A row that was complete before the seed and after it flipped nothing, so no
-    /// parent ever counted it and it must not count them down; only a row the
-    /// seed flipped ripples, and the one call reports what the ripple reached.
     #[tokio::test]
     async fn only_a_row_the_seed_flipped_ripples() {
         let settled = DerivationId::now_v7();
@@ -367,10 +276,6 @@ mod tests {
         );
     }
 
-    /// The batch writes `walked = true` one statement before the seed, so a freshly
-    /// walked leaf reads complete on both sides of it. Its parents counted it
-    /// while it was a stub and are waiting for the count-down, so the caller's
-    /// "this batch walked it" is the endpoint, not the row.
     #[tokio::test]
     async fn a_freshly_walked_leaf_ripples_though_the_row_reads_complete_throughout() {
         let leaf = DerivationId::now_v7();
@@ -405,9 +310,6 @@ mod tests {
         );
     }
 
-    /// Rows are locked in id order before every update, and the seed is running on
-    /// `derivation` only: no shared build row is touched, which is the class order the
-    /// record and the un-walk both rely on.
     #[tokio::test]
     async fn every_update_follows_an_ordered_lock_on_derivation_rows_only() {
         let a = DerivationId::now_v7();
@@ -442,8 +344,6 @@ mod tests {
         );
     }
 
-    /// An un-walk takes the parents of what WAS complete out of completeness
-    /// with it, and stops at a parent that was not complete to begin with.
     #[tokio::test]
     async fn an_unwalk_ripples_incompleteness_up_from_what_was_complete() {
         let gone = DerivationId::now_v7();
@@ -473,8 +373,6 @@ mod tests {
         );
     }
 
-    /// The recount is the sweep's backfill and repair: the incomplete set is every
-    /// stub and everything above it, and only walked rows are rewritten.
     #[test]
     fn the_recount_walks_up_from_the_stubs() {
         let sql = RECOUNT_WALK_COMPLETENESS.text();
@@ -487,8 +385,8 @@ mod tests {
             sql.contains("JOIN incomplete i ON i.id = e.dependency"),
             "{sql}"
         );
-        // A joined step merge-joins every edge once per level, ~190 s on prod; the
-        // fenced probe reads only the edges into the frontier.
+        // A joined step is merge-joining every edge once per level, ~190 s on prod.
+        // The fenced probe is reading only the edges into the frontier.
         assert!(
             sql.contains("SELECT s.id FROM incomplete i, LATERAL (SELECT e.derivation AS id")
                 && sql.contains("WHERE e.dependency = i.id AND e.kind IN (0, 2) OFFSET 0) s"),

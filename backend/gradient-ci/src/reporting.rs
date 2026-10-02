@@ -4,15 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Pure-logic helpers for naming CI check rows and mapping internal
-//! evaluation/build statuses to the [`CiStatus`] reported via Actions.
-
 use crate::CiStatus;
 use gradient_entity::build::BuildStatus;
 use gradient_entity::evaluation::{EvaluationKind, EvaluationStatus};
 
-/// Snake-case tag of an evaluation kind, surfaced in action payloads so the
-/// effects consumer can restrict `OpenPr` to `input_update` evaluations.
 pub fn eval_kind_str(kind: EvaluationKind) -> &'static str {
     match kind {
         EvaluationKind::Normal => "normal",
@@ -21,10 +16,6 @@ pub fn eval_kind_str(kind: EvaluationKind) -> &'static str {
     }
 }
 
-/// `"{project}/{task}"` when both are known, falling back to `"{task}"` when
-/// the project lookup turned up nothing. Used as the scope segment of
-/// every CI check name so multiple Gradient tasks reporting to the same
-/// repository remain distinguishable.
 pub fn format_check_scope(project_name: Option<&str>, task_name: &str) -> String {
     match project_name {
         Some(project) => format!("{}/{}", project, task_name),
@@ -32,15 +23,10 @@ pub fn format_check_scope(project_name: Option<&str>, task_name: &str) -> String
     }
 }
 
-/// CI check name for the maintainer-approval gate.
 pub fn approval_check_context(task_name: &str) -> String {
     format!("gradient/{}: Approval", task_name)
 }
 
-/// CI check name for the per-evaluation roll-up status. `wildcard_suffix` is
-/// `Some` only when a run targets a wildcard other than the task default
-/// (e.g. `/gradient run <wildcard>`), so that custom-wildcard evaluations report as
-/// their own check line instead of overwriting the default evaluation check.
 pub fn evaluation_check_context(task_name: &str, wildcard_suffix: Option<&str>) -> String {
     match wildcard_suffix {
         Some(w) => format!("gradient/{}: Evaluation: {}", task_name, w),
@@ -48,25 +34,17 @@ pub fn evaluation_check_context(task_name: &str, wildcard_suffix: Option<&str>) 
     }
 }
 
-/// CI check name for a single entry-point build under an evaluation.
 pub fn build_check_context(task_name: &str, entry_point: &str) -> String {
     format!("gradient/{}: Build {}", task_name, entry_point)
 }
 
-/// Map an event name to the check-context family it reports to.
-/// Used by the reporter to pick the right slot in `evaluation.check_run_ids`
-/// so the Approval, Evaluation, and Build checks each get their own check_run_id.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CheckContextKind {
-    /// `Awaiting Approval` gate, cleared when a maintainer approves.
     Approval,
-    /// Per-evaluation roll-up status (Queued -> Running -> terminal).
     Evaluation,
-    /// Per-entry-point build status.
     Build,
 }
 
-/// Classify a dispatch event into the check-context family it should report to.
 pub fn check_context_kind_for_event(event: &str) -> Option<CheckContextKind> {
     match event {
         "evaluation.action_required" => Some(CheckContextKind::Approval),
@@ -83,22 +61,12 @@ pub fn check_context_kind_for_event(event: &str) -> Option<CheckContextKind> {
     }
 }
 
-/// Whether a Git host report for the Evaluation check should be suppressed.
-///
-/// The Evaluation check tracks the evaluation phase, which concludes
-/// successfully the moment the eval reaches `Building`. A later `Failure`/
-/// `Error` is a build-phase failure or a post-build abort - surfaced by the
-/// per-Build checks - so it must not redden an already-green Evaluation check
-/// once `Building` has been reached.
+/// The Evaluation check is concluding successfully once the evaluation is `Building`. A later
+/// `Failure` or `Error` is a per-Build concern and must not redden a green Evaluation check.
 pub fn suppress_evaluation_failure(status: &CiStatus, reached_building: bool) -> bool {
     reached_building && matches!(status, CiStatus::Failure | CiStatus::Error)
 }
 
-/// Maps an [`EvaluationStatus`] to the [`CiStatus`] reported to external Git hosts.
-///
-/// Returns `None` for non-terminal/intermediate states that do not produce a
-/// CI report from this helper (the per-job handlers report `Running` directly
-/// when an evaluation starts).
 pub fn ci_status_for_evaluation(status: &EvaluationStatus) -> Option<CiStatus> {
     match status {
         EvaluationStatus::Completed => Some(CiStatus::Success),
@@ -113,10 +81,6 @@ pub fn ci_status_for_evaluation(status: &EvaluationStatus) -> Option<CiStatus> {
     }
 }
 
-/// Maps a [`BuildStatus`] to the [`CiStatus`] reported per-entry-point.
-///
-/// Returns `None` for non-terminal states; the per-eval-name `Pending` is
-/// reported once at evaluation time.
 pub fn ci_status_for_build(status: &BuildStatus) -> Option<CiStatus> {
     match status {
         BuildStatus::Building => Some(CiStatus::Running),
@@ -125,7 +89,6 @@ pub fn ci_status_for_build(status: &BuildStatus) -> Option<CiStatus> {
         | BuildStatus::FailedTimeout
         | BuildStatus::DependencyFailed => Some(CiStatus::Failure),
         BuildStatus::Aborted => Some(CiStatus::Error),
-        // `Skipped` never reaches a Git host: nothing names it, so no check exists.
         BuildStatus::Created
         | BuildStatus::Queued
         | BuildStatus::FailedTransient
@@ -133,9 +96,8 @@ pub fn ci_status_for_build(status: &BuildStatus) -> Option<CiStatus> {
     }
 }
 
-/// The dispatch event a per-entry-point build transition reports. `Created` posts
-/// `build.created` (a pending check the moment the entry point evaluates, so an
-/// already-cached derivation that never transitions still shows a check).
+/// `Created` is posting `build.created` as a pending check right after the entry point evaluation.
+/// Already-cached derivations never transition and would otherwise show no check.
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -250,8 +212,6 @@ mod tests {
 
     #[test]
     fn build_event_posts_live_progress() {
-        // Queued/Building report before the terminal result so the per-build
-        // check tracks progress, not just completion.
         assert_eq!(Reported::reports(BuildStatus::Queued), Some("build.queued"));
         assert_eq!(
             Reported::reports(BuildStatus::Building),

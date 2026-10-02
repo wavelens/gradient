@@ -326,10 +326,7 @@ fn read_cookie(headers: &axum::http::HeaderMap, name: &str) -> Option<String> {
         .find_map(|p| p.strip_prefix(&format!("{}=", name)).map(str::to_owned))
 }
 
-/// Logs the full anyhow chain at warn level and converts the error into a
-/// generic 401 - the upstream IdP / transport detail stays in the operator's
-/// log instead of being echoed into the response body where the client (or an
-/// attacker probing the endpoint) can read it.
+/// The upstream IdP detail is only logged. A client probing the endpoint is seeing a generic 401.
 fn oidc_failure(stage: &'static str) -> impl FnOnce(anyhow::Error) -> WebError {
     move |e| {
         tracing::warn!(stage, error = format!("{:#}", e), "OIDC flow failed");
@@ -567,7 +564,7 @@ fn jwt_cookie(token: &str, remember_me: bool, use_tls: bool) -> String {
         token, secure
     );
     if remember_me {
-        format!("{}; Max-Age=2592000", base) // 30 days
+        format!("{}; Max-Age=2592000", base)
     } else {
         base
     }
@@ -577,7 +574,6 @@ pub async fn post_check_username(
     state: State<Arc<ServerState>>,
     Json(body): Json<CheckUsernameRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    // First validate the username format
     if let Err(e) = validate_username(&body.username) {
         return Ok(Json(BaseResponse {
             error: true,
@@ -585,7 +581,6 @@ pub async fn post_check_username(
         }));
     }
 
-    // Check if username already exists
     let existing_user = EUser::find()
         .filter(CUser::Username.eq(body.username.clone()))
         .one(&state.web_db)
@@ -598,7 +593,6 @@ pub async fn post_check_username(
         }));
     }
 
-    // Username is available
     Ok(ok_json("Username is available".to_string()))
 }
 
@@ -709,17 +703,11 @@ pub async fn post_resend_verification(
     Ok(ok_json("Verification email sent successfully".to_string()))
 }
 
-// ── CLI device authorization (RFC 8628 style) ────────────────────────────
-
-/// Lifetime of a pending device authorization. Long enough for the user to
-/// log in via the browser if they aren't already, short enough that an
-/// abandoned CLI invocation can't be claimed days later.
 const CLI_DEVICE_LIFETIME_MINUTES: i64 = 10;
 const CLI_DEVICE_POLL_INTERVAL_SECONDS: u64 = 3;
 
-/// Alphabet for the human-typed `user_code` shown on both screens. Omits
-/// visually ambiguous characters (0/O, 1/I/L) so a phone-screen -> terminal
-/// transcription doesn't mis-type.
+/// Visually ambiguous characters (0/O, 1/I/L) are omitted. A code typed from a phone screen into a
+/// terminal is less likely to be mis-typed.
 const CLI_USER_CODE_ALPHABET: &[u8] = b"ABCDEFGHJKMNPQRSTUVWXYZ23456789";
 
 fn generate_device_code() -> String {
@@ -986,8 +974,6 @@ pub async fn post_cli_device_deny(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    // ── jwt_cookie ────────────────────────────────────────────────────────────
 
     #[test]
     fn jwt_cookie_no_tls_no_remember() {

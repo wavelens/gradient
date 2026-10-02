@@ -17,8 +17,8 @@ pub struct SchedulerArgs {
     )]
     pub scoring_policy: String,
 
-    /// Seconds every member of a cluster attempt has to accept its assignment
-    /// before the attempt is aborted and the cluster queued again.
+    /// Seconds for every member of a cluster job attempt to accept its assignment. An attempt not
+    /// accepted by all members in time is aborted, and the cluster job is queued again.
     #[arg(
         long = "scheduler-cluster-prepare-timeout-secs",
         env = "GRADIENT_SCHEDULER_CLUSTER_PREPARE_TIMEOUT_SECS",
@@ -26,8 +26,9 @@ pub struct SchedulerArgs {
     )]
     pub cluster_prepare_timeout_secs: u64,
 
-    /// Seconds a ready cluster waits for simultaneously idle slots before it
-    /// reserves a target placement.
+    /// Seconds a cluster job that can start is waiting for enough simultaneously idle workers
+    /// before reserving a placement. Reserved workers are receiving no new single jobs until the
+    /// cluster job is starting or the reservation is expiring.
     #[arg(
         long = "scheduler-cluster-reserve-after-secs",
         env = "GRADIENT_SCHEDULER_CLUSTER_RESERVE_AFTER_SECS",
@@ -35,7 +36,8 @@ pub struct SchedulerArgs {
     )]
     pub cluster_reserve_after_secs: u64,
 
-    /// Seconds a cluster reservation is held before it is released and planned again.
+    /// Seconds to hold a cluster job reservation before the scheduler is releasing the reservation
+    /// and planning the cluster job again.
     #[arg(
         long = "scheduler-cluster-reserve-timeout-secs",
         env = "GRADIENT_SCHEDULER_CLUSTER_RESERVE_TIMEOUT_SECS",

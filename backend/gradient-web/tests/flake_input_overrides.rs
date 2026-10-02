@@ -18,8 +18,6 @@ use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
 use serde_json::Value;
 use uuid::Uuid;
 
-// ── Fixtures ───────────────────────────────────────────────────────────────────
-
 fn override_id() -> FlakeInputOverrideId {
     FlakeInputOverrideId::new(Uuid::parse_str("00000000-0000-0000-0000-000000000077").unwrap())
 }
@@ -107,8 +105,6 @@ fn with_managed_task_edit(db: MockDatabase) -> MockDatabase {
 }
 
 const BASE_URL: &str = "/api/v1/tasks/test-project/test-task/flake-inputs";
-
-// ── Tests ──────────────────────────────────────────────────────────────────────
 
 #[test]
 fn list_empty_returns_empty() {
@@ -419,7 +415,6 @@ fn patch_omitting_url_does_not_change_it() {
             session_id,
         ))
         .append_query_results([vec![nixpkgs_override_row()]])
-        // dup-check for "renamed" -> empty means no conflict
         .append_query_results([Vec::<task_flake_input_override::Model>::new()])
         .append_query_results([vec![updated]]);
 
@@ -533,8 +528,6 @@ fn list_sorted_by_input_name() {
             ..Default::default()
         };
 
-        // MockDatabase returns rows in insertion order; handler sorts by input_name ASC,
-        // so we insert alpha first as that is the expected sorted order.
         let db = with_task_member(with_auth(
             MockDatabase::new(DatabaseBackend::Postgres),
             session_id,

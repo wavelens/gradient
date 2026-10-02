@@ -4,41 +4,12 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Structured "why is this evaluation waiting?" payload.
-//!
-//! Persisted on `evaluation.waiting_reason` (JSON) by the scheduler and the
-//! trigger pipeline, returned by `GET /evals/{evaluation}`, rendered by the
-//! frontend's waiting panel.
-//!
-//! Reasons:
-//! - `Workers` - no connected worker can satisfy the pending builds' arch /
-//!   required-feature combo (build phase; persisted under JSON `kind=workers`).
-//! - `EvalWorkers` - the evaluation is still in a pre-build phase (`Fetching`
-//!   needs a fetch-capable worker; `Queued`/`EvaluatingFlake`/
-//!   `EvaluatingDerivation` need an eval-capable worker) and no connected
-//!   worker provides that capability.
-//! - `Approval` - pull-request evaluation from a contributor who is not a
-//!   Git host writer on the repo, gated until a maintainer approves.
-//! - `NoCache` - the task's project has no active cache configured,
-//!   so the build outputs would have nowhere to land.
-//! - `CacheStorageFull` - every writable cache for the project is within
-//!   the headroom threshold of its (or the instance-wide) max-storage limit.
-//! - `Draining` - the instance is draining (superuser action): all in-flight
-//!   evaluations are parked so the server can be stopped safely. Cleared on the
-//!   next startup or when draining is disabled.
-//! - `GraphStuck` - workers can satisfy every pending build, yet none is
-//!   dispatchable: nothing in the pending set passes the dispatch gate and no
-//!   in-flight build is left to fire a promotion.
-
 use serde::{Deserialize, Serialize};
 
-/// Pre-build capability a stalled evaluation is waiting for a worker to provide.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum EvalCapability {
-    /// `Fetching` evaluations need a worker advertising the `fetch` capability.
     Fetch,
-    /// `Queued`/`EvaluatingFlake`/`EvaluatingDerivation` need an `eval` worker.
     Eval,
 }
 
@@ -50,9 +21,8 @@ pub enum WaitingReason {
         connected_workers: u32,
         available_architectures: Vec<String>,
     },
-    /// Pre-build stall: no connected worker provides `capability`.
-    /// `connected_workers` is the total connected pool size (may be > 0 when
-    /// only build-only workers are online and an eval/fetch worker is missing).
+    /// `connected_workers` is the whole connected pool. It can be above zero while only
+    /// build-only workers are online and an eval or fetch worker is missing.
     EvalWorkers {
         capability: EvalCapability,
         connected_workers: u32,
@@ -62,20 +32,8 @@ pub enum WaitingReason {
         pr_author: String,
     },
     NoCache,
-    /// Every writable cache for the project is within `STORAGE_HEADROOM_BYTES` of
-    /// its configured `max_storage_gb` (or the instance-wide limit), so build
-    /// outputs would have nowhere to land.
     CacheStorageFull,
-    /// The instance is draining: scheduling is paused and this evaluation is
-    /// parked until draining is disabled or the server restarts.
     Draining,
-    /// The connected pool can build every pending shared build, but none is
-    /// dispatchable - nothing in the pending set passes the dispatch gate and no
-    /// in-flight build is left to drive promotion. What blocks it is not recorded
-    /// here; `pending_shared_builds` is the blocked count. The repair pass
-    /// heals on entry and when that count changes, the graph-stuck re-heal pass
-    /// repeats the heal on the consistency check's cadence, and the counters
-    /// promote the set as soon as its gates open.
     GraphStuck {
         pending_shared_builds: u32,
     },
@@ -93,8 +51,7 @@ impl WaitingReason {
         serde_json::to_value(self).unwrap_or(serde_json::Value::Null)
     }
 
-    /// Tolerant of legacy rows written before the `kind` discriminator existed
-    /// - those decode as `Workers { .. }`.
+    /// Legacy rows from before the `kind` discriminator are decoding as `Workers { .. }`.
     pub fn from_json(value: &serde_json::Value) -> Option<Self> {
         if let Ok(parsed) = serde_json::from_value::<Self>(value.clone()) {
             return Some(parsed);
@@ -146,8 +103,6 @@ impl WaitingReason {
 mod tests {
     use super::*;
 
-    /// Legacy rows persisted before the `kind` tag existed must still
-    /// decode - they all represent the workers-capacity reason.
     #[test]
     fn legacy_untagged_workers_row_decodes() {
         let legacy = serde_json::json!({

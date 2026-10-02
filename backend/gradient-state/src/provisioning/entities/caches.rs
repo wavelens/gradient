@@ -20,8 +20,6 @@ use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, Query
 use std::collections::{HashMap, HashSet};
 
 impl<'a> StateApplicator<'a> {
-    // ── apply_caches ──────────────────────────────────────────────────────────
-
     pub(crate) async fn apply_caches(
         &self,
         state_caches: &HashMap<String, StateCache>,
@@ -159,11 +157,9 @@ impl<'a> StateApplicator<'a> {
                 )
             })?;
 
-            // Always guarantee the `created_by` user has the Admin cache role.
-            // The API path (`PUT /caches`) inserts this row at creation time;
-            // state-managed provisioning was leaving it out, so a config with
-            // an empty `members` list ended up with no admin at all - even
-            // the listed creator could not load the cache.
+            // The `created_by` user must always hold the Admin cache role. `PUT /caches` is
+            // inserting this row at creation. An empty `members` list otherwise left the cache
+            // without any admin.
             self.ensure_cache_creator_admin(cache_id, created_by_id, &state_cache.name)
                 .await
                 .map_err(|e| {
@@ -177,10 +173,6 @@ impl<'a> StateApplicator<'a> {
         Ok(())
     }
 
-    /// Idempotently insert a `cache_user` row pinning `created_by_id` to the
-    /// Admin built-in role. Skips when the user already has any membership in
-    /// this cache (state-declared members win - we don't overwrite their
-    /// role even if they're the creator).
     pub(crate) async fn ensure_cache_creator_admin(
         &self,
         cache_id: CacheId,
@@ -292,8 +284,6 @@ impl<'a> StateApplicator<'a> {
         Ok(())
     }
 
-    // ── apply_cache_roles_and_members ─────────────────────────────────────────
-
     pub(crate) async fn apply_cache_roles_and_members(
         &self,
         cache_id: CacheId,
@@ -301,7 +291,6 @@ impl<'a> StateApplicator<'a> {
         roles: &[StateCacheRoleEntry],
         members: &[StateCacheMemberEntry],
     ) -> Result<(), DynError> {
-        // (a) Custom cache roles
         let mut declared_role_names: HashSet<String> = HashSet::new();
         for entry in roles {
             if matches!(entry.name.as_str(), "Admin" | "Write" | "View") {
@@ -354,7 +343,6 @@ impl<'a> StateApplicator<'a> {
             declared_role_names.insert(entry.name.clone());
         }
 
-        // (b) Members
         let user_map = self.user_lookup().await?;
         let mut declared_members: HashSet<UserId> = HashSet::new();
         for entry in members {
@@ -411,7 +399,6 @@ impl<'a> StateApplicator<'a> {
             declared_members.insert(user_id);
         }
 
-        // (c) Drift reconciliation - remove managed roles not in declared set
         let managed_roles = ECacheRole::find()
             .filter(CCacheRole::Cache.eq(cache_id))
             .filter(CCacheRole::Managed.eq(true))
@@ -426,7 +413,6 @@ impl<'a> StateApplicator<'a> {
         }
 
         if !roles_to_delete.is_empty() {
-            // Delete cache_user rows referencing these roles first (FK Restrict)
             for &role_id in &roles_to_delete {
                 ECacheUser::delete_many()
                     .filter(CCacheUser::Cache.eq(cache_id))
@@ -438,7 +424,6 @@ impl<'a> StateApplicator<'a> {
             }
         }
 
-        // Remove cache_user rows for declared members no longer in config
         let existing_members = ECacheUser::find()
             .filter(CCacheUser::Cache.eq(cache_id))
             .all(self.db)
@@ -446,9 +431,8 @@ impl<'a> StateApplicator<'a> {
 
         for row in existing_members {
             if !declared_members.contains(&row.user) {
-                // Only remove members that were on state-managed roles (custom or builtin used by state).
-                // Since we don't track per-row "managed" on cache_user, we conservatively
-                // remove all members not in the declared list when the cache is managed.
+                // `cache_user` rows are carrying no managed flag. Every member missing from the
+                // declared list is removed while the cache is managed.
                 ECacheUser::delete_by_id(row.id).exec(self.db).await?;
                 tracing::info!(cache = %cache_name, user = %row.user, "Removed cache member no longer in state");
             }

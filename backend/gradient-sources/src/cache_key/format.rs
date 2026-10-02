@@ -13,8 +13,8 @@ pub fn format_cache_public_key(
     cache: MCache,
     url: String,
 ) -> Result<String, SourceError> {
-    // Use the stored public key when available; fall back to deriving it from
-    // the encrypted private key for caches created before the split migration.
+    // Caches created before the split migration have no stored public key. Their key is derived
+    // from the encrypted private key.
     let pubkey_b64 = if cache.public_key.is_empty() {
         let key_b64 = decrypt_signing_key(secret_file, cache.clone())?;
         let key_bytes = general_purpose::STANDARD

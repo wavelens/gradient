@@ -4,10 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Tests for `gradient_types::input` - all pure functions, no DB or I/O needed.
 use gradient_types::input::*;
-
-// ── url_to_addr ───────────────────────────────────────────────────────────────
 
 #[test]
 fn url_to_addr_ipv4() {
@@ -53,8 +50,6 @@ fn url_to_addr_negative_port_is_rejected() {
     );
 }
 
-// ── port_in_range ─────────────────────────────────────────────────────────────
-
 #[test]
 fn port_in_range_valid() {
     assert_eq!(port_in_range("8080").unwrap(), 8080);
@@ -77,8 +72,6 @@ fn port_in_range_too_large_rejected() {
         "Port not in range 1-65535"
     );
 }
-
-// ── greater_than_zero ─────────────────────────────────────────────────────────
 
 #[test]
 fn greater_than_zero_valid() {
@@ -110,8 +103,6 @@ fn greater_than_zero_non_numeric_rejected() {
     );
 }
 
-// ── hex_to_vec / vec_to_hex ───────────────────────────────────────────────────
-
 #[test]
 fn hex_roundtrip() {
     let original = "a1b2c3d4e5f6789012345678901234567890abcd";
@@ -138,8 +129,6 @@ fn hex_to_vec_non_hex_char_rejected() {
         "Invalid hex string"
     );
 }
-
-// ── repository_url_to_nix ────────────────────────────────────────────────────
 
 const REV: &str = "11c2f8505c234697ccabbc96e5b8a76daf0f31d3";
 
@@ -189,7 +178,7 @@ fn repository_url_file_scheme_rejected() {
 
 #[test]
 fn repository_url_bare_file_prefix_rejected() {
-    // `file:/local/repo` doesn't contain `file://` but still starts with `file`.
+    // `file:/local/repo` is lacking `file://` but still starting with `file`.
     assert_eq!(
         repository_url_to_nix("file:/local/repo", REV)
             .unwrap_err()
@@ -197,8 +186,6 @@ fn repository_url_bare_file_prefix_rejected() {
         "URLs pointing to local files are not allowed"
     );
 }
-
-// ── check_repository_url_is_ssh ──────────────────────────────────────────────
 
 #[test]
 fn ssh_url_detection() {
@@ -230,7 +217,7 @@ fn https_is_not_ssh() {
 
 #[test]
 fn https_with_userinfo_and_port_is_not_ssh() {
-    // `user@host:port` inside an `https://` URL must not be mistaken for SCP.
+    // A `user@host:port` inside an `https://` URL must not be mistaken for SCP.
     assert!(!check_repository_url_is_ssh(
         "https://user@github.com:8080/repo.git"
     ));
@@ -238,8 +225,6 @@ fn https_with_userinfo_and_port_is_not_ssh() {
         "http://alice@example.com:443/path"
     ));
 }
-
-// ── check_index_name ─────────────────────────────────────────────────────────
 
 #[test]
 fn index_name_valid() {
@@ -289,8 +274,6 @@ fn index_name_space_rejected() {
     );
 }
 
-// ── check_task_name ───────────────────────────────────────────────────────
-
 #[test]
 fn task_name_rejects_build_request() {
     use gradient_types::input::check_task_name;
@@ -319,13 +302,11 @@ fn task_name_inherits_index_rules() {
     assert_eq!(check_task_name(""), Err(InputError::NameEmpty));
 }
 
-// ── validate_password ────────────────────────────────────────────────────────
-
 #[test]
 fn password_valid() {
     assert!(validate_password("StrongPass123!").is_ok());
     assert!(validate_password("MySecure@2024").is_ok());
-    assert!(validate_password("Abc123!@").is_ok()); // exactly 8 chars
+    assert!(validate_password("Abc123!@").is_ok());
 }
 
 #[test]
@@ -338,7 +319,7 @@ fn password_too_short_rejected() {
 
 #[test]
 fn password_too_long_rejected() {
-    let long = "Ab1!".repeat(33); // 132 chars
+    let long = "Ab1!".repeat(33);
     assert_eq!(
         validate_password(&long).unwrap_err().to_string(),
         "Password cannot exceed 128 characters"
@@ -416,14 +397,12 @@ fn password_non_sequential_alternating_is_valid() {
     assert!(validate_password("Test1a1a!").is_ok());
 }
 
-// ── validate_username ────────────────────────────────────────────────────────
-
 #[test]
 fn username_valid() {
     assert!(validate_username("alice").is_ok());
     assert!(validate_username("alice_bob").is_ok());
     assert!(validate_username("alice-bob").is_ok());
-    assert!(validate_username("a1b").is_ok()); // exactly 3 chars
+    assert!(validate_username("a1b").is_ok());
     assert!(validate_username("Bob42").is_ok());
 }
 
@@ -499,8 +478,6 @@ fn username_reserved_rejected() {
     assert_eq!(validate_username("System").unwrap_err().to_string(), msg);
     assert_eq!(validate_username("undefined").unwrap_err().to_string(), msg);
 }
-
-// ── validate_display_name ────────────────────────────────────────────────────
 
 #[test]
 fn display_name_valid() {

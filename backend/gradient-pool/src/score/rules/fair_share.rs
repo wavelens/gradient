@@ -7,10 +7,6 @@
 use crate::score::context::InstanceContext;
 use crate::score::rule::{JobContext, ScoreRule, WorkerContext};
 
-/// Penalizes a job proportional to its owning project's share of currently-active
-/// builds, so a quiet project's job is picked promptly even when a busy project floods
-/// the queue (#111). Only bites under contention - when every worker is busy -
-/// so a single busy project is never penalized into leaving the cluster idle (#419).
 #[derive(Debug)]
 pub struct FairShareRule {
     pub weight: f64,
@@ -35,9 +31,8 @@ impl ScoreRule for FairShareRule {
         _worker: &WorkerContext<'_>,
         instance: &InstanceContext,
     ) -> f64 {
-        // Spare capacity means no project is starving another: dispatch freely.
-        // Penalizing here would only push a lone busy project's jobs below the
-        // dispatcher's zero floor and leave workers idle.
+        // Penalizing with spare capacity would push a lone busy project's jobs below the zero floor
+        // and leave workers idle (#419).
         if instance.idle_workers > 0 {
             return 0.0;
         }
@@ -160,7 +155,6 @@ mod tests {
         );
     }
 
-    // Among jobs with equal wait, the quieter project's job must score higher.
     #[test]
     fn fair_share_breaks_tie_at_equal_wait() {
         let fair = FairShareRule::default();

@@ -4,21 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! `GET /cache/{cache}/debuginfo/{build_id}` - the debuginfod entry point of a
-//! Nix binary cache.
-//!
-//! Answers exactly what nix writes under `index-debug-info=true`: a small JSON
-//! document naming the NAR that carries the debug file and the member inside it.
-//! `archive` is relative to the requested key, so `../nar/<file>.nar.zst`
-//! resolves against the cache root the same way it does on cache.nixos.org.
-//! Clients probe both `<build-id>` (hydra) and `<build-id>.debug` (file caches
-//! written by `nix copy`); both spellings resolve here.
-//!
-//! A path this cache substituted rather than built has its debug info upstream,
-//! so a miss falls through to the cache's upstream caches and rewrites their `archive`
-//! link through our NAR proxy - the same pull-through behaviour `/log` has. An
-//! unknown build id is a `404`, never another error status: debuginfod clients
-//! abandon the whole lookup on anything else.
+//! An unknown build id must be a `404`, never another error status. debuginfod clients are
+//! abandoning the whole lookup on anything else.
 
 use super::helpers::{CacheContext, cache_client_ip};
 use crate::client_ip::OptionalPeer;
@@ -34,7 +21,6 @@ use gradient_util::nix_hash::{normalize_nar_hash, strip_hash_algo};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-/// Body of a `debuginfo/{build_id}` document, byte-compatible with nix's own.
 #[derive(Debug, Deserialize, Serialize)]
 struct DebugInfoRedirect {
     archive: String,
@@ -99,12 +85,6 @@ async fn upstream_caches_for(state: &Arc<ServerState>, cache: CacheId) -> Vec<Up
         .collect()
 }
 
-/// Ask each upstream in turn for both spellings of the key and return the first
-/// well-formed document, with its `archive` link pointed back at our NAR proxy.
-///
-/// Unlike a narinfo there is nothing to verify - nix signs store paths, not the
-/// debug index - so an upstream that 404s, errors, or answers something we
-/// cannot rewrite is skipped.
 async fn fetch_from_upstream_caches(
     upstream_caches: &[UpstreamSource],
     build_id: &str,
@@ -141,10 +121,8 @@ async fn fetch_from_upstream_caches(
     None
 }
 
-/// Rewrites an upstream's `archive` link to route through
-/// `/cache/{cache}/nar/upstream/{id}/{path}`. The upstream link is relative to
-/// its own `debuginfo/` key, so one leading `..` walks to the upstream root;
-/// anything absolute or reaching past that root is refused rather than proxied.
+/// The upstream link is relative to its own `debuginfo/` key. One leading `..` is walking to the
+/// upstream root. Anything absolute or reaching past that root is refused.
 fn proxied_archive(upstream_id: CacheUpstreamId, archive: &str) -> Option<String> {
     let rest = archive.strip_prefix("../")?;
     if rest.is_empty() || rest.starts_with('/') || rest.split('/').any(|seg| seg == "..") {
@@ -154,7 +132,6 @@ fn proxied_archive(upstream_id: CacheUpstreamId, archive: &str) -> Option<String
     Some(format!("../nar/upstream/{upstream_id}/{rest}"))
 }
 
-/// Accepts `<40 hex>` and `<40 hex>.debug`, the two spellings nix produces.
 fn parse_build_id(raw: &str) -> Option<String> {
     let id = raw.strip_suffix(".debug").unwrap_or(raw);
     let ok = id.len() == 40 && id.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'));

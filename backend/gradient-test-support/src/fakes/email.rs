@@ -46,7 +46,6 @@ pub enum SentEmail {
     },
 }
 
-/// In-memory `EmailSender` for tests. Records every send and reports as enabled.
 #[derive(Debug, Default)]
 pub struct InMemoryEmailSender {
     pub sent: Mutex<Vec<SentEmail>>,

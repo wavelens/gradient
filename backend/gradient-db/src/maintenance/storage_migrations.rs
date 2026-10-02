@@ -4,9 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! The `storage_migration` ledger: which storage migrations are applied, and
-//! the last unit a running one finished.
-
 use anyhow::{Context, Result};
 use sea_orm::sea_query::OnConflict;
 use sea_orm::{ConnectionTrait, EntityTrait, Set};
@@ -20,7 +17,6 @@ pub async fn all<C: ConnectionTrait>(conn: &C) -> Result<Vec<MStorageMigration>>
         .context("list storage_migration")
 }
 
-/// Record that `name` finished `checkpoint`, creating its row on the first unit.
 pub async fn save_checkpoint<C: ConnectionTrait>(
     conn: &C,
     name: &str,

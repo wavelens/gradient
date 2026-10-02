@@ -4,15 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! The DWARF build-id index behind `GET /cache/{cache}/debuginfo/{build_id}`.
-//!
-//! nix builds the same index when a binary cache is created with
-//! `index-debug-info=true`: every `lib/debug/.build-id/<xx>/<yy>.debug` member of
-//! an uploaded NAR becomes a lookup from build id to (NAR, member). We derive it
-//! by walking the stored NAR of `separateDebugInfo` outputs - store paths whose
-//! name ends in `-debug`, the only ones nixpkgs puts a build-id tree in - so the
-//! scan touches a small slice of the cache instead of every upload.
-
 use gradient_entity::cached_path::{Entity as ECachedPath, Model as MCachedPath};
 use gradient_entity::ids::{CacheId, CachedPathId};
 use gradient_storage::NarStore;
@@ -21,12 +12,11 @@ use gradient_storage::nar_extract::nar_reader_from_stream;
 use sea_orm::{ConnectionTrait, DbErr, EntityTrait, Value};
 use tracing::debug;
 
-/// Store-path name suffix of a nixpkgs `separateDebugInfo` output.
 const DEBUG_OUTPUT_SUFFIX: &str = "-debug";
 
 crate::sql! {
-    /// The `cached_path_signature` join is the access gate: its row proves the
-    /// caller-authorised cache holds the path, the same rule the narinfo lookups use.
+    /// The `cached_path_signature` join is the access gate.
+    /// Its row is proving that the caller's authorised cache is holding the path.
     LOOKUP_SQL = "SELECT cp.file_hash AS file_hash, d.member AS member \
      FROM debug_info d \
      JOIN cached_path cp ON cp.id = d.cached_path \
@@ -36,9 +26,8 @@ crate::sql! {
      LIMIT 1",
         params = [CacheId, Text("a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2")];
 
-    /// Written out with the `-debug` pattern as a literal so the planner can match
-    /// it against the partial index covering exactly this predicate. A bound
-    /// parameter would not match, and the sweep would seq-scan `cached_path`.
+    /// The `-debug` pattern is a literal to match the partial index on this predicate.
+    /// A bound parameter would not match, and the sweep would seq-scan `cached_path`.
     PENDING_SQL = "SELECT * FROM cached_path \
      WHERE NOT debug_info_indexed AND package LIKE '%-debug' \
        AND file_hash IS NOT NULL \
@@ -48,16 +37,12 @@ crate::sql! {
         tier = Sweep;
 }
 
-/// A build id resolved inside one cache: which NAR holds it and where.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DebugInfoTarget {
-    /// Compressed-NAR hash of the holding path, in `<algo>:<hash>` form.
     pub file_hash: String,
-    /// NAR-relative path of the debug file.
     pub member: String,
 }
 
-/// Resolves `build_id` to a NAR this cache actually serves.
 pub async fn lookup_for_cache<C: ConnectionTrait>(
     db: &C,
     cache: CacheId,
@@ -77,13 +62,10 @@ pub async fn lookup_for_cache<C: ConnectionTrait>(
     }))
 }
 
-/// True when this store path is worth walking for a build-id tree.
 pub fn carries_debug_info(package: &str) -> bool {
     package.ends_with(DEBUG_OUTPUT_SUFFIX)
 }
 
-/// The next batch of cached debug outputs whose NAR has not been walked yet.
-/// Oldest first, so a backfill drains in record order.
 pub async fn pending_debug_index<C: ConnectionTrait>(
     db: &C,
     limit: u64,
@@ -94,11 +76,6 @@ pub async fn pending_debug_index<C: ConnectionTrait>(
         .await
 }
 
-/// Walks one stored NAR and records its build ids, then marks the path scanned.
-/// The marker is set even when the walk finds nothing - or when the object is
-/// gone - so the same NAR is never read twice; a re-upload under a different
-/// `file_hash` clears it again on record, which is also how a re-index is
-/// forced. Returns the number of build ids recorded.
 pub async fn index_cached_path<C: ConnectionTrait>(
     db: &C,
     nar_storage: &NarStore,
@@ -141,9 +118,6 @@ crate::sql! {
         params = [CachedPathId];
 }
 
-/// Re-read rather than trusted from the caller: a re-push of unchanged bytes
-/// reaches the inline indexer with the marker already set, and decompressing a
-/// whole debug output to rediscover the same members is pure waste.
 async fn needs_index<C: ConnectionTrait>(db: &C, cached_path: CachedPathId) -> Result<bool, DbErr> {
     let row = db
         .query_one_raw(
@@ -192,10 +166,6 @@ mod tests {
         assert!(!carries_debug_info("debug-tool-1.0"));
     }
 
-    /// The sweep predicate must stay textually identical to the partial index in
-    /// `m20260821_000000_debug_info`, pattern literal included - a bound
-    /// parameter or a reordered clause silently turns every tick into a
-    /// `cached_path` seq scan.
     #[test]
     fn the_backfill_predicate_matches_its_partial_index() {
         let sql = PENDING_SQL
@@ -213,9 +183,6 @@ mod tests {
         );
     }
 
-    /// A build id resolves only through a `cached_path_signature` row for the
-    /// requesting cache. Dropping that join would serve one cache's debug info
-    /// from another's URL.
     #[test]
     fn the_lookup_is_gated_on_this_cache_holding_the_path() {
         let sql = LOOKUP_SQL

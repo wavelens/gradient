@@ -44,7 +44,6 @@ async fn group_resource(state: &Arc<ServerState>, group: &str) -> ScimResult<Gro
     let grants = grants(state, group).ok_or_else(|| ScimError::not_found("group not found"))?;
     let db = state.web_db.inner();
     let mut members: Vec<GroupMember> = Vec::new();
-    // A member holds every grant; the first grant is representative.
     if let Some((project, role)) = grants.first() {
         let rows = project_user::Entity::find()
             .filter(project_user::Column::Project.eq(*project))
@@ -166,7 +165,7 @@ fn extract_member_ids(op: &PatchOperation) -> Vec<String> {
 }
 
 fn member_ids_for_remove(op: &PatchOperation, parsed: &[String]) -> Vec<String> {
-    // Okta/Entra remove uses path `members[value eq "<id>"]` or a value array.
+    // Okta and Entra are removing members via path `members[value eq "<id>"]` or a value array.
     if !parsed.is_empty() {
         return parsed.to_vec();
     }
@@ -186,8 +185,6 @@ async fn add_member(
     let user_id = parse_uid(uid)?;
     let db = state.web_db.inner();
 
-    // One read of the user's existing memberships, then one write per distinct
-    // role plus one insert, instead of a lookup and a write per grant.
     let projects: Vec<ProjectId> = grants.iter().map(|(p, _)| *p).collect();
     let existing: HashSet<ProjectId> = project_user::Entity::find()
         .filter(project_user::Column::Project.is_in(projects))

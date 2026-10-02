@@ -4,10 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Build status enum, shared by the global `derivation_build` shared build and the
-//! per-eval `build_job`. The `build` table itself was removed; identity now
-//! lives in `derivation_build` (global, build-once) + `build_job` (per-eval).
-
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -39,35 +35,25 @@ pub enum BuildStatus {
     Building = 2,
     #[sea_orm(num_value = 3)]
     Completed = 3,
-    /// Terminal failure: the build will not be retried. Set when the builder
-    /// exits non-zero, or a transient failure exhausts the retry budget.
     #[sea_orm(num_value = 4)]
     FailedPermanent = 4,
     #[sea_orm(num_value = 5)]
     Aborted = 5,
     #[sea_orm(num_value = 6)]
     DependencyFailed = 6,
-    /// Terminal success without a build: the outputs were already valid in the
-    /// store, or a passthrough fetched them off an upstream cache. Equivalent to `Completed`
-    /// at every gate; the two differ only in what they say happened.
+    /// `Substituted` is equal to `Completed` at every gate. The outputs were already valid or
+    /// fetched by a passthrough from an upstream cache.
     #[sea_orm(num_value = 7)]
     Substituted = 7,
-    /// Non-terminal failure: an infrastructure error (OOM, disk full, network
-    /// timeout, builder crash) that the scheduler will retry until the attempt
-    /// budget is spent. Entry-point queries ignore builds in this state.
     #[sea_orm(num_value = 8)]
     FailedTransient = 8,
-    /// Terminal failure: the build exceeded its wall-clock or silent timeout.
     #[sea_orm(num_value = 9)]
     FailedTimeout = 9,
-    /// A build-time dependency nothing needs: not wanted, named by no entry
-    /// point, never built or substituted. Thaws to `Created` when the need returns.
     #[sea_orm(num_value = 10)]
     Skipped = 10,
 }
 
 impl BuildStatus {
-    /// Maps internal-only states onto their API-facing equivalents.
     pub const fn for_api(self) -> Self {
         match self {
             Self::Created => Self::Queued,
@@ -75,7 +61,6 @@ impl BuildStatus {
         }
     }
 
-    /// Any failure state (terminal or pending-retry).
     pub const fn is_failure(self) -> bool {
         matches!(
             self,
@@ -86,8 +71,6 @@ impl BuildStatus {
         )
     }
 
-    /// A failure that counts as a final, user-visible failure (excludes the
-    /// pending-retry `FailedTransient`).
     pub const fn is_terminal_failure(self) -> bool {
         matches!(
             self,
@@ -95,15 +78,10 @@ impl BuildStatus {
         )
     }
 
-    /// Build-once success states, never re-queued by a new evaluation.
     pub const fn is_terminal_success(self) -> bool {
         matches!(self, Self::Completed | Self::Substituted)
     }
 
-    /// The statuses a can-start or promotion gate can still act on: a shared build is
-    /// weighed while it is `Created` and dispatched while it is `Queued`, and no
-    /// gate reads a `Building` or terminal row. One owner, because three queries
-    /// bound themselves by this pair and a fourth would have made it four.
     pub const PENDING: [Self; 2] = [Self::Created, Self::Queued];
 
     pub const TERMINAL_SUCCESS: [Self; 2] = [Self::Completed, Self::Substituted];
@@ -121,8 +99,6 @@ impl BuildStatus {
         Self::FailedTimeout,
     ];
 
-    /// States a fresh evaluation intent thaws back to `Created`: the terminal
-    /// failures plus `Aborted` (retried, not permanent).
     pub const REQUEUEABLE: [Self; 4] = [
         Self::FailedPermanent,
         Self::Aborted,
@@ -176,8 +152,8 @@ mod tests {
         assert!(!BuildStatus::FailedTransient.is_terminal_failure());
     }
 
-    /// Raw SQL composes fragments from these numbers; a renumber must fail CI
-    /// (the m20260407 evaluation-status renumber corrupted every sweep once).
+    /// Raw SQL is composing fragments from these numbers. A renumber must fail CI because the
+    /// m20260407 evaluation-status renumber once corrupted every sweep.
     #[test]
     fn numbering_is_pinned() {
         for (status, n) in [

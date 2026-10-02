@@ -4,8 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Every closed `gradient*` span as one JSON line in `<dir>/<process>-<pid>.jsonl`,
-//! timed on the wall clock so files of several hosts merge into one timeline.
+//! Spans are timed on the wall clock. Files of several hosts can then merge into one timeline.
 
 use std::fmt::Debug;
 use std::fs::{File, OpenOptions};
@@ -77,7 +76,6 @@ pub fn layer(dir: &Path, process: &str) -> std::io::Result<TraceFileLayer> {
     })
 }
 
-/// The directory this process traces into, for child processes to trace beside it.
 pub fn active_dir() -> Option<&'static Path> {
     ACTIVE_DIR.get().map(PathBuf::as_path)
 }

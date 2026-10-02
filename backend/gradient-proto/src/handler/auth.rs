@@ -12,9 +12,6 @@ use uuid::Uuid;
 
 use gradient_wire::messages::{FailedPeer, GradientCapabilities};
 
-/// Demotes any authorized peer that is a project with zero
-/// `project_cache` rows. Cache and proxy peer UUIDs (anything not present
-/// in the `project` table) are passed through unchanged.
 pub(super) async fn filter_project_peers_without_cache(
     state: &ServerState,
     authorized: Vec<String>,
@@ -87,7 +84,6 @@ pub(super) async fn filter_project_peers_without_cache(
     (authorized_out, demoted)
 }
 
-/// Returns `(peer_id, token_hash)` pairs for all **active** peers that registered this worker.
 pub(super) async fn lookup_registered_peers(
     state: &ServerState,
     worker_id: &str,
@@ -112,19 +108,12 @@ pub(super) async fn lookup_registered_peers(
     }
 }
 
-/// Challenge data for a connecting base worker.
 pub(super) struct BaseWorkerChallenge {
-    /// `(peer_id, token_hash)` pairs to send in the AuthChallenge.
     pub challenge: Vec<(String, String)>,
-    /// When set, a successful auth of this single identity expands to
-    /// `enabled_projects`; otherwise `challenge` already lists the enabled projects.
     pub authorize_against: Option<String>,
-    /// Project UUID strings that opted into this base worker.
     pub enabled_projects: Vec<String>,
 }
 
-/// Returns base-worker challenge data when `worker_id` is an enabled base
-/// worker, else `None`.
 pub(super) async fn lookup_base_worker_challenge(
     state: &ServerState,
     worker_id: &str,
@@ -160,9 +149,6 @@ pub(super) async fn lookup_base_worker_challenge(
     })
 }
 
-/// Applies a base worker's authorize_against expansion: in single-identity mode,
-/// a successful auth of the identity expands to the enabled-project set; otherwise the
-/// token-authorized set is returned unchanged.
 pub(super) fn expand_base_authorized(
     base: &Option<BaseWorkerChallenge>,
     token_authorized: Vec<String>,
@@ -180,10 +166,8 @@ pub(super) fn expand_base_authorized(
     token_authorized
 }
 
-/// Per-registration capability gate aggregated across all **active**
-/// registrations for a worker. A capability is enabled iff every active
-/// registration enables it (AND across peers). Used to clamp the
-/// worker-advertised capability set at handshake.
+/// A capability is enabled only when every active registration is enabling it. The handshake is
+/// clamping the advertised set with it.
 #[derive(Clone, Copy, Debug)]
 pub(super) struct EnabledCapsAggregate {
     pub enable_fetch: bool,
@@ -192,8 +176,6 @@ pub(super) struct EnabledCapsAggregate {
 }
 
 impl EnabledCapsAggregate {
-    /// All-enabled default: used when there are no active registrations
-    /// (so discovery-mode workers are not clamped).
     pub fn all() -> Self {
         Self {
             enable_fetch: true,
@@ -247,9 +229,6 @@ pub(super) async fn aggregate_enabled_caps(
     }
 }
 
-/// Returns `true` if *any* `worker_registration` row exists for this worker,
-/// regardless of the `active` flag.  Used to distinguish "no registrations at
-/// all" (open/discoverable mode) from "all registrations deactivated".
 pub(super) async fn has_any_registrations(state: &ServerState, worker_id: &str) -> bool {
     use gradient_entity::worker_registration::{Column, Entity};
     use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
@@ -304,8 +283,6 @@ mod tests {
         Arc::make_mut(&mut state.config).proto.federate = federate_proto;
         state
     }
-
-    // ── negotiate_capabilities ───────────────────────────────────────────────
 
     #[test]
     fn negotiate_capabilities_core_always_true() {
@@ -381,8 +358,6 @@ mod tests {
         assert!(!result.build);
     }
 
-    // ── base worker challenge ────────────────────────────────────────────────
-
     fn base_challenge(authorize_against: Option<&str>, enabled: &[&str]) -> BaseWorkerChallenge {
         BaseWorkerChallenge {
             challenge: enabled
@@ -422,8 +397,6 @@ mod tests {
         let out = expand_base_authorized(&None, token_authorized.clone());
         assert_eq!(out, token_authorized);
     }
-
-    // ── filter_project_peers_without_cache ───────────────────────────────────────
 
     use gradient_entity::project::Model as ProjectModel;
     use gradient_entity::project_cache::{CacheSubscriptionMode, Model as ProjectCacheModel};

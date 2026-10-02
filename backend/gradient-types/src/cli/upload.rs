@@ -8,8 +8,9 @@ use clap::Args;
 
 #[derive(Args, Debug, Clone)]
 pub struct UploadArgs {
-    /// Uploads (NARs and eval-cache blobs) admitted at once across every worker
-    /// and REST client; further requests wait for a permit.
+    /// Uploads over 1 MiB (NARs and eval cache blobs) admitted at once across all workers and REST
+    /// clients. Smaller uploads have a window of 128 of their own. An upload is holding its permit
+    /// until the object is in storage. Further uploads are waiting for a permit.
     #[arg(
         long = "upload-concurrency",
         env = "GRADIENT_UPLOAD_CONCURRENCY",
@@ -17,13 +18,14 @@ pub struct UploadArgs {
     )]
     pub concurrency: usize,
 
-    /// Total size in bytes of admitted uploads. An upload that does not fit waits;
-    /// one larger than the budget is running alone once nothing else is in flight.
+    /// Total size in bytes of admitted uploads. An upload not fitting the remaining budget is
+    /// waiting. An upload larger than the whole budget is running alone once nothing else is in
+    /// flight.
     #[arg(long = "upload-bytes-budget", env = "GRADIENT_UPLOAD_BYTES_BUDGET", default_value_t = 8 * 1024 * 1024 * 1024)]
     pub bytes_budget: u64,
 
-    /// Seconds a granted worker upload may go without data before its permit is
-    /// reclaimed and the worker is told to retry.
+    /// Seconds a granted worker upload may go without data before the server is reclaiming its
+    /// permit and telling the worker to retry.
     #[arg(
         long = "upload-lease-idle-secs",
         env = "GRADIENT_UPLOAD_LEASE_IDLE_SECS",
@@ -31,8 +33,8 @@ pub struct UploadArgs {
     )]
     pub lease_idle_secs: u64,
 
-    /// Seconds a REST NAR upload waits for a permit before answering 503 with
-    /// `Retry-After`.
+    /// Seconds a NAR upload to the cache upload endpoint is waiting for a permit before the server
+    /// is answering with 503 and `Retry-After`.
     #[arg(
         long = "upload-rest-wait-secs",
         env = "GRADIENT_UPLOAD_REST_WAIT_SECS",

@@ -9,12 +9,6 @@ use gradient_types::*;
 use sea_orm::{ColumnTrait, ConnectionTrait, DbErr, EntityTrait, QueryFilter, QuerySelect, Value};
 use std::sync::LazyLock;
 
-/// Whether an evaluation still names a shared build it is waiting for.
-///
-/// The exact answer behind the evaluation counters: asked only once they say
-/// nothing blocks, so normally once per evaluation, and then it reads every
-/// shared build the evaluation names. That is the working set it was handed, which is
-/// what `Bulk` is for.
 static EVAL_BLOCKED_SQL: LazyLock<String> = LazyLock::new(|| {
     format!(
         "SELECT EXISTS (SELECT 1 FROM build_job bj \
@@ -33,21 +27,9 @@ crate::sql_lazy! {
                       fixture's largest names ~98k");
 }
 
-/// Whether any shared build the evaluation names ended without being built: what
-/// decides `Failed` over `Completed` once [`eval_blocked`] says nothing is left.
-///
-/// The set is [`BuildStatus::REQUEUEABLE`], because the two questions are one
-/// question seen from either end - what a fresh evaluation thaws is exactly what
-/// this evaluation did not get built. `Aborted` is the member that matters and
-/// the one this used to omit: `derivation_build` is global, so a shared build a
-/// previous evaluation hard-aborted is already terminal when the next evaluation
-/// names it, and an abort blocks nothing. An evaluation whose every shared build sat
-/// `Aborted` therefore finalized `Completed` milliseconds after reaching
-/// `Building` - a green check for a commit on which nothing was built. It is
-/// deliberately NOT [`BuildStatus::TERMINAL_FAILURE`], which excludes `Aborted`
-/// so an abort never cascades `DependencyFailed` downward. The one `Aborted`
-/// shared build that is no failure: a companion stopped because its cluster job
-/// completed through the primary member.
+/// The set is [`BuildStatus::REQUEUEABLE`], which is including `Aborted`.
+/// An evaluation with every shared build aborted would otherwise finalize `Completed`.
+/// Nothing would have been built for that green check.
 static EVAL_ANY_SHARED_BUILD_FAILED_SQL: LazyLock<String> = LazyLock::new(|| {
     format!(
         "SELECT EXISTS (SELECT 1 FROM build_job bj \
@@ -67,7 +49,6 @@ crate::sql_lazy! {
         params = [EvaluationId];
 }
 
-/// See [`EVAL_BLOCKED_SQL`]. An evaluation naming no shared build at all is not blocked.
 pub async fn eval_blocked<C: ConnectionTrait>(
     db: &C,
     evaluation: EvaluationId,
@@ -75,7 +56,6 @@ pub async fn eval_blocked<C: ConnectionTrait>(
     flag(db, &EVAL_BLOCKED, evaluation, "blocked").await
 }
 
-/// See [`EVAL_ANY_SHARED_BUILD_FAILED_SQL`].
 pub async fn eval_any_shared_build_failed<C: ConnectionTrait>(
     db: &C,
     evaluation: EvaluationId,
@@ -83,9 +63,8 @@ pub async fn eval_any_shared_build_failed<C: ConnectionTrait>(
     flag(db, &EVAL_ANY_SHARED_BUILD_FAILED, evaluation, "failed").await
 }
 
-/// A one-row, one-column `EXISTS` read. A missing row is an error and not `false`:
-/// an eval-done decision that silently read "nothing blocks" would settle an
-/// evaluation whose builds are still running.
+/// A missing row is an error, not `false`.
+/// A silent "nothing blocks" would settle an evaluation with builds still running.
 async fn flag<C: ConnectionTrait>(
     db: &C,
     query: &crate::sql::Query,
@@ -98,9 +77,6 @@ async fn flag<C: ConnectionTrait>(
         .try_get::<bool>("", column)
 }
 
-/// The shared build's current status, for the dispatcher's last look before a
-/// hand-out: a queued job whose gate regressed since it was enqueued reads
-/// `Created` here and is dropped instead of dispatched with a missing input.
 pub async fn shared_build_status<C: ConnectionTrait>(
     db: &C,
     shared_build: DerivationBuildId,
@@ -111,8 +87,6 @@ pub async fn shared_build_status<C: ConnectionTrait>(
         .map(|a| a.status))
 }
 
-/// Evaluations that reference `derivation` (via a `build_job`). Drives status
-/// fan-out: a single shared build transition updates every referencing eval's view.
 pub async fn evals_referencing_derivation<C: ConnectionTrait>(
     db: &C,
     derivation: DerivationId,
@@ -127,9 +101,6 @@ pub async fn evals_referencing_derivation<C: ConnectionTrait>(
         .await
 }
 
-/// Bulk variant of [`evals_referencing_derivation`]: one chunked `IN` per batch
-/// instead of a round-trip per derivation. The finalize fan-out asks for a whole
-/// batch of derivations at once and only ever wants the union.
 pub async fn evals_referencing_derivations<C: ConnectionTrait>(
     db: &C,
     derivations: &[DerivationId],
@@ -151,7 +122,6 @@ pub async fn evals_referencing_derivations<C: ConnectionTrait>(
     Ok(all)
 }
 
-/// All `build_job` rows for `derivation`, across every evaluation that needs it.
 pub async fn build_jobs_for_derivation<C: ConnectionTrait>(
     db: &C,
     derivation: DerivationId,
@@ -162,8 +132,6 @@ pub async fn build_jobs_for_derivation<C: ConnectionTrait>(
         .await
 }
 
-/// Bulk variant of [`build_jobs_for_derivation`]: one IN-list query for the
-/// whole batch instead of a round-trip per derivation.
 pub async fn build_jobs_for_derivations<C: ConnectionTrait>(
     db: &C,
     derivations: &[DerivationId],
@@ -182,8 +150,6 @@ pub async fn build_jobs_for_derivations<C: ConnectionTrait>(
     }))
 }
 
-/// Whether any surviving evaluation names `derivation` (a `build_job` exists), so
-/// promotion can schedule it.
 pub async fn derivation_is_reachable<C: ConnectionTrait>(
     db: &C,
     derivation: DerivationId,
@@ -200,10 +166,6 @@ pub async fn derivation_is_reachable<C: ConnectionTrait>(
 mod tests {
     use super::*;
 
-    /// `derivation_build` is global, so a shared build a previous evaluation aborted
-    /// is terminal before the next evaluation ever dispatches it - and an abort
-    /// blocks nothing. Omitting `Aborted` here finalized such an evaluation
-    /// `Completed`: 26 of 26 shared builds aborted, nothing built, a green check.
     #[test]
     fn an_aborted_shared_build_fails_the_evaluation_it_was_never_built_for() {
         let sql = EVAL_ANY_SHARED_BUILD_FAILED_SQL.as_str();

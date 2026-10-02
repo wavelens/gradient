@@ -4,22 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Integration tests for task_trigger CRUD endpoints.
-//!
-//! Pattern: manual Tokio runtime + `axum_test::TestServer` + `MockDatabase`.
-//! Uses manual runtimes because `#[tokio::test]` expands to `::gradient_core::…`
-//! which clashes with the local `core` crate name in this workspace.
-//!
-//! Auth sequence per request through `authorize` middleware (in order):
-//!   1. SELECT session (by jti)
-//!   2. UPDATE session (last_used_at)
-//!   3. SELECT user (by id)
-//!
-//! Then per `load_task`:
-//!   4. SELECT project (by name)
-//!   5. SELECT task (by project + name)
-//!   6. SELECT project_user membership (permission check)
-
 #![expect(
     clippy::unwrap_used,
     reason = "test scaffolding: a fixture helper that cannot build its value should fail the test loudly"
@@ -32,8 +16,6 @@ use gradient_types::{ConcurrencyPolicy, GitHostType, SessionId, TriggerType};
 use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
 use serde_json::Value;
 use uuid::Uuid;
-
-// ── Fixture helpers ────────────────────────────────────────────────────────────
 
 fn trigger_id() -> TaskTriggerId {
     TaskTriggerId::new(Uuid::parse_str("00000000-0000-0000-0000-000000000099").unwrap())
@@ -123,10 +105,6 @@ fn reporter_push_trigger_row() -> task_trigger::Model {
     }
 }
 
-/// Append the standard auth mock sequence:
-/// 1. SELECT session (decode_jwt validates session)
-/// 2. SELECT session (UPDATE ... RETURNING - Postgres backend uses RETURNING path)
-/// 3. SELECT user
 fn with_auth(db: MockDatabase, session_id: SessionId) -> MockDatabase {
     let session = live_session(session_id);
     db.append_query_results([vec![session.clone()]])
@@ -134,21 +112,12 @@ fn with_auth(db: MockDatabase, session_id: SessionId) -> MockDatabase {
         .append_query_results([vec![user()]])
 }
 
-/// Append a `load_task` sequence with Member access (no permission row needed):
-/// 1. SELECT project
-/// 2. SELECT task
-/// 3. SELECT project_user (membership check)
 fn with_task_member(db: MockDatabase) -> MockDatabase {
     db.append_query_results([vec![project()]])
         .append_query_results([vec![task_row()]])
         .append_query_results([vec![admin_membership()]])
 }
 
-/// Append a `load_task` sequence with Require(EditTask) access:
-/// 1. SELECT project
-/// 2. SELECT task
-/// 3. SELECT project_user (permission check)
-/// 4. SELECT role (bitmask lookup behind `mask_grants`)
 fn with_task_edit(db: MockDatabase) -> MockDatabase {
     db.append_query_results([vec![project()]])
         .append_query_results([vec![task_row()]])
@@ -157,8 +126,6 @@ fn with_task_edit(db: MockDatabase) -> MockDatabase {
 }
 
 const BASE_URL: &str = "/api/v1/tasks/test-project/test-task/triggers";
-
-// ── Tests ──────────────────────────────────────────────────────────────────────
 
 #[test]
 fn list_triggers_returns_rows() {
@@ -521,8 +488,8 @@ fn fire_now_on_inactive_trigger_returns_400() {
     });
 }
 
-// fire_now is not integration-tested further here because it calls resolve_head
-// which makes actual git network requests - it will be exercised by E2E smoke tests.
+// `fire_now` is not integration-tested here because `resolve_head` is making real git network
+// requests.
 
 #[test]
 fn create_task_seeds_default_polling_trigger() {
@@ -562,17 +529,11 @@ fn create_task_seeds_default_polling_trigger() {
         };
 
         let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
-            // load_project: SELECT project
             .append_query_results([vec![project()]])
-            // load_project: SELECT project_user (require CreateTask permission)
             .append_query_results([vec![admin_membership()]])
-            // load_project: SELECT role (bitmask lookup)
             .append_query_results([vec![admin_role_row()]])
-            // check existing task: returns empty
             .append_query_results([Vec::<task::Model>::new()])
-            // INSERT task RETURNING
             .append_query_results([vec![created_task]])
-            // INSERT trigger RETURNING
             .append_query_results([vec![seeded_trigger]]);
 
         let server = make_test_server(db.into_connection());
@@ -609,7 +570,6 @@ fn patch_task_concurrency_to_skip() {
             MockDatabase::new(DatabaseBackend::Postgres),
             session_id,
         ))
-        // atask.update() - read-back then exec
         .append_query_results([vec![task_row()]])
         .append_exec_results([MockExecResult {
             last_insert_id: 0,
@@ -628,13 +588,6 @@ fn patch_task_concurrency_to_skip() {
         assert_eq!(body["error"], false);
     });
 }
-
-// ── Integration enrichment tests ──────────────────────────────────────────────
-//
-// Regression coverage: reporter triggers must surface the referenced
-// integration's name/display_name/git_host_type alongside the raw `integration_id`,
-// so the trigger UI can render "from GitHub" instead of falling back to a UUID.
-// Polling triggers must keep `integration: null` (no extra DB round-trip).
 
 #[test]
 fn list_reporter_trigger_includes_integration_metadata() {
@@ -675,9 +628,6 @@ fn list_reporter_trigger_includes_integration_metadata() {
 
 #[test]
 fn list_reporter_trigger_with_missing_integration_returns_null() {
-    // Trigger row references an integration ID that no longer exists in the
-    // project (row was deleted). Response keeps the trigger but sets
-    // `integration: null` so the UI can degrade gracefully.
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -708,8 +658,8 @@ fn list_reporter_trigger_with_missing_integration_returns_null() {
 
 #[test]
 fn list_polling_trigger_has_null_integration_and_skips_lookup() {
-    // No reporter triggers in the list - handler must NOT issue an integration
-    // SELECT. MockDatabase panics on unexpected queries, which is the assertion.
+    // No reporter trigger is listed, and the handler must not issue an integration SELECT.
+    // MockDatabase is panicking on unexpected queries, and that is the assertion.
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()

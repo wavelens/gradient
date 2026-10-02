@@ -21,8 +21,6 @@ use tracing::error;
 
 use super::EvalAccessContext;
 
-/// The eval's (shared build, derivation-name) pairs, one per build_job. Shared builds carry
-/// status; the name labels each log line.
 async fn eval_shared_build_jobs(
     state: &Arc<ServerState>,
     evaluation: EvaluationId,
@@ -42,9 +40,6 @@ async fn eval_shared_build_jobs(
         .map(|a| (a.id, a))
         .collect();
 
-    // One read per table: an evaluation has as many build_jobs as it has
-    // derivations, so looking the name up per job put thousands of sequential
-    // round trips behind one log request.
     let drv_ids: Vec<DerivationId> = jobs.iter().map(|j| j.derivation).collect();
     let names: HashMap<DerivationId, String> = EDerivation::find()
         .filter(CDerivation::Id.is_in(drv_ids))
@@ -76,7 +71,6 @@ pub async fn post_evaluation_builds(
     let ctx =
         EvalAccessContext::load(&state, evaluation_id, &Some(user.clone()), api_key_ref).await?;
 
-    // Streaming log access requires project membership (not just public read access).
     if !is_project_member(&state, user.id, ctx.project_id, api_key_ref).await? {
         return Err(WebError::not_found("Evaluation"));
     }
@@ -127,10 +121,8 @@ pub async fn post_evaluation_builds(
                 let any_pending = current
                     .iter()
                     .any(|(a, _)| matches!(a.status, BuildStatus::Building | BuildStatus::Queued));
-                // No builds are running or queued. Only end the stream once the
-                // evaluation itself has finished: at the very start it is still
-                // evaluating and has not created any build_job yet, so breaking
-                // here ended the stream before a single line ever streamed.
+                // The stream must stay open until the evaluation itself has finished. At the start
+                // it is still evaluating and is carrying no build_job yet.
                 if !any_pending {
                     let still_active = EEvaluation::find_by_id(evaluation.id)
                         .one(&state.web_db)

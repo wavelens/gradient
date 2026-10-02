@@ -4,9 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Per-evaluation shared build counters: the evaluation's folded columns plus its
-//! unfolded ledger rows. The `evaluation_shared_build_*` triggers are the only
-//! writers of the ledger; this module folds and recounts.
+//! The `evaluation_shared_build_*` triggers are the only writers of the ledger.
 
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_types::*;
@@ -65,9 +63,9 @@ crate::sql! {
         params = [Int(640)],
         tier = Hot;
 
-    // SKIP LOCKED keeps the fold and the recount from ever waiting on an evaluation
-    // row, and neither is able to close a deadlock with a writer holding one. A
-    // skipped evaluation is staying in the ledger for the next pass.
+    // SKIP LOCKED is keeping the fold and the recount from waiting on an evaluation row.
+    // Neither can close a deadlock with a writer holding one.
+    // A skipped evaluation is staying in the ledger for the next pass.
     FOLD_SHARED_BUILD_DELTAS = "WITH locked AS (SELECT id FROM evaluation \
         WHERE id IN (SELECT evaluation FROM evaluation_shared_build_delta) \
         ORDER BY id FOR NO KEY UPDATE SKIP LOCKED), \
@@ -128,8 +126,6 @@ fn uuids(evaluations: &[EvaluationId]) -> Value {
         .into()
 }
 
-/// One evaluation's counters as of now: its folded columns plus the deltas no
-/// fold has reached yet. `None` when the evaluation is gone.
 pub async fn eval_counters<C: ConnectionTrait>(
     db: &C,
     evaluation: EvaluationId,
@@ -140,7 +136,6 @@ pub async fn eval_counters<C: ConnectionTrait>(
         .transpose()
 }
 
-/// The counters of `evaluations`, folded columns plus unfolded deltas.
 pub async fn in_flight_counters<C: ConnectionTrait>(
     db: &C,
     evaluations: &[EvaluationId],
@@ -159,8 +154,6 @@ pub async fn in_flight_counters<C: ConnectionTrait>(
     Ok(out)
 }
 
-/// Move the ledger into the evaluation columns. False when another instance
-/// holds the fold: its fold covers the same rows.
 pub async fn fold_shared_build_deltas<C>(db: &C) -> Result<bool, DbErr>
 where
     C: TransactionTrait<Transaction = DatabaseTransaction>,
@@ -181,8 +174,6 @@ where
     Ok(true)
 }
 
-/// Recount the counters of every in-flight evaluation. Returns the evaluations
-/// whose stored counters disagreed.
 pub async fn recount_eval_shared_build_counters<C>(db: &C) -> Result<u64, DbErr>
 where
     C: ConnectionTrait + TransactionTrait<Transaction = DatabaseTransaction>,
@@ -197,10 +188,6 @@ where
     recount_evaluations(db, &evaluations).await
 }
 
-/// Recount `evaluations` from their `build_job` rows and clear their ledger in
-/// the same snapshot, under the fold's lock. What an exact read found the
-/// counters wrong about is repaired here; an evaluation another transaction
-/// holds is skipped and repaired by the next read that contradicts it.
 pub async fn recount_evaluations<C>(db: &C, evaluations: &[EvaluationId]) -> Result<u64, DbErr>
 where
     C: TransactionTrait<Transaction = DatabaseTransaction>,
@@ -227,8 +214,6 @@ mod tests {
     use sea_orm::{DatabaseBackend, MockDatabase, Value};
     use std::collections::BTreeMap;
 
-    /// The trigger's membership is the graph's, clause for clause: a change to
-    /// either predicate without a migration replacing the function fails here.
     #[test]
     fn membership_matches_the_graph_predicates() {
         let f = gradient_migration::m20261001_000001_plain_concept_names::SHARED_BUILD_COUNTS_FN;
@@ -259,9 +244,6 @@ mod tests {
         );
     }
 
-    /// The fold deletes what it adds in one statement, so a delta is either
-    /// folded or still in the ledger, never both and never neither. It takes
-    /// only the evaluation rows nobody holds.
     #[test]
     fn the_fold_deletes_what_it_adds_in_one_statement() {
         let sql = FOLD_SHARED_BUILD_DELTAS.text();
@@ -277,8 +259,6 @@ mod tests {
         );
     }
 
-    /// The recount counts and clears the ledger from one snapshot: a delta
-    /// committed after it survives and folds on top of the recounted value.
     #[test]
     fn the_recount_clears_the_ledger_it_counted_past() {
         let sql = RECOUNT_EVAL_COUNTERS.text();
@@ -295,7 +275,6 @@ mod tests {
         assert!(sql.contains("IS DISTINCT FROM"), "{sql}");
     }
 
-    /// One read: the evaluation row joined to its own unfolded deltas.
     #[tokio::test]
     async fn counters_are_one_read() {
         let row = BTreeMap::from([

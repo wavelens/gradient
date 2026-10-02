@@ -9,26 +9,15 @@ use gradient_types::ids::DerivationId;
 use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter};
 use tracing::warn;
 
-/// Why an input the worker reported missing was nonetheless treated as
-/// available. Captured by the scheduler's missing-input self-heal so the cause
-/// (stale `cached_path` whose object was GC'd or never uploaded, vs a producer
-/// trusted `Substituted`/`Completed` while its NAR was never cached) is visible
-/// at `warn` without raising the global log level.
 #[derive(Debug, Default)]
 pub struct MissingInputDiagnosis {
-    /// A `cached_path` row exists for this output hash.
     pub cached_path_present: bool,
-    /// That row claims a fully-uploaded NAR (`file_hash IS NOT NULL`).
     pub fully_cached: bool,
-    /// `derivation_output` rows for this hash, and how many are `is_cached`.
     pub outputs_total: usize,
     pub outputs_cached: usize,
-    /// Statuses of builds in this evaluation that produce the output.
     pub producer_build_statuses: Vec<gradient_entity::build::BuildStatus>,
 }
 
-/// Snapshot the cache/build state of a missing input `hash` within an
-/// evaluation, for diagnostic logging by the missing-input self-heal.
 pub async fn diagnose_missing_input<C: ConnectionTrait>(
     db: &C,
     _evaluation_id: gradient_types::ids::EvaluationId,
@@ -43,8 +32,6 @@ pub async fn diagnose_missing_input<C: ConnectionTrait>(
     let outputs_cached = outputs.iter().filter(|o| o.is_cached).count();
     let producer_drvs: Vec<DerivationId> = outputs.iter().map(|o| o.derivation).collect();
 
-    // Shared builds are global; the producer's build status is the same regardless of
-    // the querying evaluation.
     let producer_build_statuses = if producer_drvs.is_empty() {
         Vec::new()
     } else {
@@ -66,13 +53,6 @@ pub async fn diagnose_missing_input<C: ConnectionTrait>(
     })
 }
 
-/// Reset a `derivation_output` to "present on no cache": clears the our-cache
-/// link (`is_cached`/`cached_path`) **and** the upstream-availability record
-/// (`external_url` + narinfo metadata). Clearing `external_url` is what makes
-/// `is_cached_anywhere()` false, so nothing trusts an upstream offer for a copy
-/// that is gone; leaving it set would record that offer against a node reset to a
-/// real build - an unbuildable `InputsUnavailable` dead-end. Whether the eval walks
-/// the node again is `walked`'s decision alone ([`crate::graph::can_start::unwalk_derivations`]).
 fn demoted_output(
     o: gradient_entity::derivation_output::Model,
 ) -> gradient_entity::derivation_output::ActiveModel {
@@ -90,12 +70,6 @@ fn demoted_output(
     active
 }
 
-/// Whether `demote_cached_output` must PRESERVE a reported-missing artifact
-/// instead of deleting it: a producerless input (source / `.drv`) whose NAR is
-/// still present. Nothing rebuilds such an input, so deleting the only copy
-/// dead-ends every parent on `InputsUnavailable`; a present object means the
-/// failure was transient. An output (`has_producer`, restored by its rebuild) or
-/// a genuinely-absent object is never preserved.
 fn preserve_missing_artifact(has_producer: bool, object_present: bool) -> bool {
     !has_producer && object_present
 }
@@ -106,50 +80,10 @@ crate::sql! {
         params = [DerivationIds(64)];
 }
 
-/// Purge a cached output proven unfetchable, so the next evaluation rebuilds it
-/// from scratch as if it had never been cached. Clears `is_cached` /
-/// `cached_path` on every `derivation_output` with this store-path `hash`,
-/// retires the `cached_path` row itself
-/// ([`crate::graph::runtime_can_start::retire_outputs`]: the row goes, its
-/// `cached_path_signature` rows cascade, the `derivation_output` FK is
-/// `ON DELETE SET NULL`, and every shared build that trusted it loses its complete closure,
-/// `fetchable` and its queue place), and removes the NAR object from storage so the
-/// row and the object stay in step. The derivation
-/// graph is left intact - only the cache artifact is removed. Returns the
-/// producing derivations for logging. A producerless input (`.drv`/source) is
-/// only purged when its NAR is genuinely gone: a still-present one is preserved
-/// (see [`preserve_missing_artifact`]) since nothing else can restore it.
-///
-/// The producer reset lives in the retire, which decides it from the `fetchable`
-/// flag it has just written rather than from this hash: what this does here is drop
-/// the upstream trust the demoted output carried, so the shared build stops being a passthrough
-/// against an artifact nothing serves.
-///
-/// That clear takes place at every status, and it decides which arm of `gates_predicate`
-/// the shared build takes, so a `Queued` passthrough whose need was its only satisfier would
-/// be left queued with its gates false - and dispatch reads the status rather than
-/// the gates, so it would dispatch that shared build against a `.drv` nothing can serve.
-/// The un-promote that follows is what closes that, and it shares the retire's
-/// transaction so a crash cannot separate the two. The promote AFTER the commit is
-/// the other half: a shared build that stops being a passthrough becomes a builder, at an
-/// unchanged status the transition emitter cannot notice, and a builder needs its
-/// direct inputs.
-///
-/// Because the clear has to run inside that transaction AND before the retire reads
-/// `cache_available`, this is the one path that would write `derivation_build` before
-/// touching `cached_path`. It opens with
-/// [`crate::graph::runtime_can_start::lock_cached_paths`] instead, so the class order every
-/// other writer follows (`cached_path`, then `derivation_build`) holds here too and a
-/// concurrent TTL or zombie retire cannot deadlock against it. The retire's own pass then re-acquires a row this
-/// transaction already holds, which is free.
-///
-/// [`crate::graph::can_start::lock_shared_builds`] follows it for the same reason one class down.
-/// The clear names its producers in a single UPDATE, so it acquires them in plan
-/// order, and a hash with several producers can then hold one while
-/// [`crate::graph::can_start::repair_can_start`]'s ordered chunk holds another. Taking the
-/// ordered pass first means every `derivation_build` row this transaction writes is
-/// already held in `derivation` order, and the retire's own shared build pass re-acquires
-/// them for free.
+/// This path is clearing `cache_available` before the retire is reading it.
+/// It must take [`crate::graph::runtime_can_start::lock_cached_paths`] first.
+/// Every writer is following the class order `cached_path`, then `derivation_build`.
+/// A concurrent retire would deadlock against this path otherwise.
 pub async fn demote_cached_output(
     ctx: &crate::DbContext,
     hash: &str,
@@ -166,23 +100,15 @@ pub async fn demote_cached_output(
         demoted_output(o).update(db).await?;
     }
 
-    // A producerless input (a build-time source or a `.drv`) has nothing to
-    // rebuild it, so deleting a still-present NAR destroys the only copy and
-    // dead-ends every parent on `InputsUnavailable` forever (a producer's
-    // output, by contrast, is restored by the rebuild below). Only purge it when
-    // the object is genuinely gone - a zombie the dispatch gate must stop trusting;
-    // a present object means the fetch failure was transient, so keep it and let
-    // the build retry. A probe error preserves (never destroy on uncertainty).
+    // A producerless input has nothing to rebuild it.
+    // Deleting a still-present NAR would destroy the only copy and dead-end every parent.
+    // A probe error is preserving the input, because nothing is destroyed on uncertainty.
     let has_producer = !producers.is_empty();
     let object_present = !has_producer && nar_storage.exists(hash).await.unwrap_or(true);
     if preserve_missing_artifact(has_producer, object_present) {
         return Ok(producers);
     }
 
-    // The artifact is gone, so the upstream offer recorded with it is not evidence
-    // any more: `demoted_output` cleared `external_url`, and this clears the
-    // shared build's `cache_available` so the retire's `fetchable` mark sees the truth. The
-    // next eval re-marks it available in a cache if it is genuinely still on an upstream.
     let txn = db.begin().await?;
     crate::graph::runtime_can_start::lock_cached_paths(&txn, &[hash.to_owned()]).await?;
     let _shared_builds = crate::graph::can_start::lock_shared_builds(&txn, &producers).await?;
@@ -199,8 +125,6 @@ pub async fn demote_cached_output(
         .extend(crate::graph::can_start::unpromote_ungated(&txn, &producers).await?);
     txn.commit().await?;
 
-    // Clearing `cache_available` turns these producers back into builders, so need
-    // reaches their whole pending closure again and not just one hop.
     let settled = crate::graph::can_start::update_and_settle_need(db, &producers).await?;
     retired.transitions.extend(settled.changes);
     crate::status::emit_transition_effects(ctx, &retired.transitions).await?;
@@ -212,17 +136,6 @@ pub async fn demote_cached_output(
     Ok(producers)
 }
 
-/// Demote every cached **output** that directly references `missing_hash`, so its
-/// producer rebuilds and re-pushes the missing path. Only rebuildable output
-/// parents are demoted ([`OUTPUT_PARENTS_SELECT`]): a producerless parent -
-/// a `.drv` or an input source - is left in place. Deleting one re-pushes nothing
-/// (no producer rebuilds) and would strand the `.drv`'s own live parents behind
-/// the `.drv`-importable term of [`crate::graph::predicates::gates_predicate`], a permanent
-/// dead zone, since a genuinely missing input `.drv`/source is re-supplied only by
-/// a full re-eval. The transitive completeness invariant is handled by the reverse
-/// ripple inside [`crate::graph::runtime_can_start::retire_outputs`], which raises the
-/// parents' counters and leaves their healthy NARs in place. Returns the producers reset to
-/// `Created`.
 pub async fn demote_parents_of(
     ctx: &crate::DbContext,
     missing_hash: &str,
@@ -246,16 +159,6 @@ crate::sql! {
         params = [DerivationId];
 }
 
-/// Demote every output-only-cached **direct build dependency** of `derivation`
-/// (output present in our cache, not on a real upstream). Recovers an *absent
-/// orphan*: when a build fails on an input that has no producer row and no
-/// reference-index parent, the orphan was pruned out of the graph under one of
-/// this build's cached deps - and being absent, it cannot be reached upward. So
-/// reach it from the known failing build downward: demoting its output-only-cached
-/// deps forces the next eval to re-walk them (`unwalk_derivations` drops their record
-/// and closes their gates), re-record the dropped edges, and schedule the orphan.
-/// Upstream-fetchable deps (`external_url`) are left intact - their closure is served
-/// complete by the upstream cache. Returns producers reset to `Created`.
 pub async fn demote_output_only_cached_deps(
     ctx: &crate::DbContext,
     derivation: DerivationId,
@@ -281,40 +184,12 @@ pub async fn demote_output_only_cached_deps(
     producers.sort_unstable();
     producers.dedup();
 
-    // The demote alone no longer re-walks anything: the walk prunes on `walked` and
-    // `unwalked_inputs = 0`, and the cache facts it used to read are exactly what a
-    // demote clears.
     let changes = crate::graph::can_start::unwalk_derivations(ctx, &producers).await?;
     crate::status::emit_transition_effects(ctx, &changes).await?;
 
     Ok(producers)
 }
 
-/// The row-vs-object invariant, as a query: **every** output of a terminal-success
-/// producer (`Completed`/`Substituted`) must have a backing artifact, present in our
-/// cache (`cached_path` with a NAR) or on a configured upstream (`external_url`).
-/// A shared build that breaks it is a dead end - its `fetchable` is, correctly, false, so
-/// it counts toward its parents' `blocking_deps` forever, and being
-/// terminal-*success* no requeue path ever reaches it.
-///
-/// This is measured, not repaired. It used to feed a sweep that demoted such a
-/// producer back to `Created` so the next build would rebuild it, which is where
-/// #654 came from: the sweep re-derived the same demote every repair pass, the
-/// fleet rebuilt an output that never came back, and nothing noticed the rebuild had
-/// changed nothing. Every way the invariant was known to break is now closed where
-/// it happens: a NAR whose commit fails fails its build, a completion is not
-/// recorded until that job's commits have settled, an eval marks a shared build
-/// substituted only when EVERY output is already whole here, and every pass that
-/// deletes a `cached_path` row resets the producers it unbacked in the deleting
-/// transaction (`runtime_can_start::retire_outputs`). So a non-zero count is a bug in one of
-/// those, and the consistency report is where it surfaces
-/// ([`crate::graph::consistency::ConsistencyReport::unbacked_trusted_outputs`]) - a repair
-/// that rebuilds on its own would only hide it again, and one that failed the
-/// producer instead would take a real subtree down on a false positive.
-///
-/// Decided per the **ground truth** (a backing `cached_path` NAR), not the derived
-/// `is_cached` flag, which is `false` for a shared build that was marked done with an
-/// output that was never cached at all - exactly the case worth seeing.
 pub(crate) fn unbacked_trusted_outputs_select() -> String {
     format!(
         r#"
@@ -340,14 +215,6 @@ crate::sql! {
         params = [CachedPathHash];
 }
 
-/// Parents of `missing_hash` that are **rebuildable outputs**: a
-/// `derivation_output` exists for the parent's own hash, so demoting it resets a
-/// producer that rebuilds and re-pushes `missing_hash`. Producerless parents - a
-/// `.drv` (whose store-path hash is a derivation hash with no `derivation_output`)
-/// or an input source - are excluded on purpose: demoting one deletes a
-/// `.drv`/source the cache cannot re-supply without a full re-eval, rebuilds
-/// nothing, and strands the deleted `.drv`'s own live parents behind the
-/// `.drv`-importable promotion gate - the exact dead zone this filter prevents.
 async fn output_parents_of_hash<C: ConnectionTrait>(
     db: &C,
     hash: &str,
@@ -382,10 +249,6 @@ mod tests {
         (tmp, file)
     }
 
-    /// A producerless input (`.drv` / source) whose NAR is still present must be
-    /// PRESERVED: nothing rebuilds it, so demote early-returns before touching the
-    /// `cached_path` row or the object. Appending no exec result is the assertion:
-    /// reaching `delete_many` would fail on the missing mock result.
     #[tokio::test]
     async fn demote_preserves_a_present_producerless_object() {
         use sea_orm::{DatabaseBackend, MockDatabase};
@@ -407,9 +270,6 @@ mod tests {
         );
     }
 
-    /// An output (a producer restores it on rebuild) whose NAR is present must have
-    /// the object AND `cached_path` row removed, so a re-eval re-pushes it instead
-    /// of trusting a row whose object is gone.
     #[tokio::test]
     async fn demote_deletes_a_present_output_object() {
         use gradient_types::ids::{DerivationId, DerivationOutputId};
@@ -431,12 +291,6 @@ mod tests {
         let deleted = BTreeMap::from([("hash".to_owned(), Value::from(hash.to_owned()))]);
         let none = Vec::<BTreeMap<String, Value>>::new();
 
-        // Find the output, RETURNING the demoted row, take both lock classes in
-        // order and drop its producer's upstream trust; then the retire resolves the
-        // producers of the hash, reads which of them were complete before it takes the
-        // path away, deletes the row, clears `is_cached`, marks (nothing flips, so
-        // nothing ripples), resets the producer left with nothing to serve and
-        // un-promotes; last the raised, locked update of what it now needs.
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             .append_query_results([vec![output.clone()], vec![output]])
             .append_query_results([
@@ -531,11 +385,6 @@ mod tests {
         );
     }
 
-    /// A hash with NO `cached_path` row is half of what
-    /// [`unbacked_trusted_outputs_select`] matches, and it deletes nothing and
-    /// ripples nothing, so a can-start state pass limited to what moved would leave its
-    /// producer terminal-success and fetchable against an artifact that does not
-    /// exist. `REQUEUEABLE` excludes terminal success, so no other path recovers it.
     #[tokio::test]
     async fn demote_of_a_hash_with_no_row_still_resets_its_producer() {
         use gradient_types::ids::{DerivationId, DerivationOutputId};
@@ -556,9 +405,6 @@ mod tests {
 
         let none = Vec::<BTreeMap<String, Value>>::new();
 
-        // The retire resolves the producers of the hash, finds none of them complete and
-        // nothing to delete, then marks, ripples, re-opens the walk below what the
-        // mark flipped, resets and un-promotes on the producers alone.
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             .append_query_results([vec![output.clone()], vec![output]])
             .append_query_results([
@@ -616,9 +462,6 @@ mod tests {
         );
     }
 
-    /// Demote must clear `external_url` too, not just `is_cached` - otherwise the
-    /// node still records an upstream offer for a copy that is gone, and its
-    /// reset-to-shared-build dead-ends on a `.drv` the eval never re-pushes.
     #[test]
     fn demote_clears_upstream_availability() {
         use sea_orm::ActiveValue::Set;
@@ -646,11 +489,6 @@ mod tests {
         assert_eq!(am.file_size, Set(None));
     }
 
-    /// The consistency report measures the row-vs-object invariant on
-    /// terminal-success shared builds. It must key on the **ground truth** (a missing
-    /// `cached_path` NAR), NOT the derived `is_cached` flag - that flag is `false`
-    /// for exactly the never-cached-output case worth seeing - and must skip
-    /// upstream-fetchable outputs (`external_url`), which are served without us.
     #[test]
     fn unbacked_trusted_select_matches_the_gate() {
         let sql = unbacked_trusted_outputs_select()
@@ -676,11 +514,6 @@ mod tests {
         );
     }
 
-    /// A producerless input (source / `.drv`) whose NAR is still present must be
-    /// PRESERVED by `demote_cached_output`: nothing rebuilds it, so deleting the
-    /// only copy dead-ends every parent on `InputsUnavailable`. An output (has
-    /// a producer, restored by the rebuild) or a genuinely-absent object is never
-    /// preserved.
     #[test]
     fn preserve_only_a_present_producerless_artifact() {
         assert!(
@@ -698,12 +531,6 @@ mod tests {
         assert!(!preserve_missing_artifact(true, false));
     }
 
-    /// `demote_parents_of` may only demote parents that are rebuildable
-    /// outputs. A producerless `.drv`/source parent must be excluded: deleting it
-    /// re-pushes nothing (no producer rebuilds) and strands the `.drv`'s own live
-    /// parents behind the `.drv`-importable promotion gate - a permanent dead
-    /// zone (a completed dep available in a cache whose `.drv` a demote deleted, blocking
-    /// every parent not available in a cache from ever dispatching).
     #[test]
     fn output_parents_exclude_producerless_drv_and_source() {
         let sql = OUTPUT_PARENTS_SELECT

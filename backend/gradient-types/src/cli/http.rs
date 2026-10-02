@@ -4,13 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! HTTP-layer config: request body caps and the trusted-proxy / local-IP CIDR
-//! allowlists.
-//!
-//! `--http-trusted-proxies` gates X-Forwarded-For unwrapping (only peers in
-//! this list may rewrite the client IP). `--http-local-ips` selects which
-//! resolved client IPs are eligible for a cache's `local_priority` override.
-
 use crate::input::greater_than_zero;
 use clap::Args;
 use ipnet::IpNet;
@@ -36,9 +29,8 @@ pub struct HttpArgs {
     )]
     pub max_source_upload_size: usize,
 
-    /// Comma-separated CIDR allowlist of peers permitted to set
-    /// `X-Forwarded-For`. Defaults to loopback (covers reverse-proxies
-    /// running on the same host).
+    /// Comma-separated CIDR allowlist of peers permitted to set `X-Forwarded-For`. The default is
+    /// loopback, covering reverse proxies running on the same host.
     #[arg(
         long = "http-trusted-proxies",
         env = "GRADIENT_HTTP_TRUSTED_PROXIES",
@@ -46,9 +38,8 @@ pub struct HttpArgs {
     )]
     pub trusted_proxies: String,
 
-    /// Comma-separated CIDR allowlist whose resolved client IPs receive a
-    /// cache's `local_priority` (when set and non-zero). Defaults to the
-    /// RFC1918 10/8 block.
+    /// Comma-separated CIDR allowlist whose resolved client IPs receive a cache's `local_priority`
+    /// (when set and non-zero). The default is the RFC1918 10/8 block.
     #[arg(
         long = "http-local-ips",
         env = "GRADIENT_HTTP_LOCAL_IPS",
@@ -68,8 +59,6 @@ impl Default for HttpArgs {
     }
 }
 
-/// Parse failure for a single CIDR entry; carries the offending token so the
-/// operator can spot which one was malformed.
 #[derive(Debug, thiserror::Error)]
 #[error("invalid CIDR `{entry}`: {source}")]
 pub struct CidrParseError {
@@ -78,8 +67,6 @@ pub struct CidrParseError {
     pub source: ipnet::AddrParseError,
 }
 
-/// Parse a comma-separated CIDR list. Empty / whitespace-only entries are
-/// skipped.
 pub fn parse_cidr_list(s: &str) -> Result<Vec<IpNet>, CidrParseError> {
     let mut out = Vec::new();
     for raw in s.split(',') {
@@ -96,7 +83,6 @@ pub fn parse_cidr_list(s: &str) -> Result<Vec<IpNet>, CidrParseError> {
     Ok(out)
 }
 
-/// `true` if `ip` is contained in any of `nets`.
 pub fn in_any(ip: std::net::IpAddr, nets: &[IpNet]) -> bool {
     nets.iter().any(|n| n.contains(&ip))
 }

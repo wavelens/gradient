@@ -9,7 +9,6 @@ use serde::{Deserialize, Serialize};
 
 pub use gradient_entity::task_action::ActionType;
 
-/// Which [`crate::actions`] patch generator an `OpenPr` action executes.
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PatchGeneratorKind {
@@ -17,7 +16,6 @@ pub enum PatchGeneratorKind {
     FlakeLock,
 }
 
-/// How an `OpenPr` action groups bumped inputs into evaluations and PRs.
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PrGranularity {
@@ -26,7 +24,6 @@ pub enum PrGranularity {
     PerInput,
 }
 
-/// The gate an `input_update` evaluation must clear before its PR is opened.
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum VerifyGate {

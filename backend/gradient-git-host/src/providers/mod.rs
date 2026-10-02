@@ -4,9 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! One [`GitHostProvider`](crate::GitHostProvider) impl per Git host. `gitea`
-//! serves both Gitea and Forgejo (identical APIs).
-
 pub mod gitea;
 pub mod github;
 pub mod gitlab;

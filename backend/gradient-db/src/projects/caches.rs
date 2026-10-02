@@ -4,18 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Project ↔ cache subscription helpers consumed by the trigger
-//! pipeline (no-cache gate) and the cache-create reconcile path.
-
 use gradient_entity::project_cache::CacheSubscriptionMode;
 use gradient_types::ids::ProjectId;
 use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter};
 
-/// Returns `true` when the project has at least one active cache
-/// subscription that can receive build outputs (ReadWrite or WriteOnly).
-///
-/// ReadOnly subscriptions are excluded - they let the project pull but not push,
-/// so a build would have nowhere to land.
 pub async fn project_has_writable_cache<C: ConnectionTrait>(
     db: &C,
     project: ProjectId,

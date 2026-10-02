@@ -22,14 +22,8 @@ pub struct BuildItem {
     pub has_artefacts: bool,
     pub updated_at: chrono::NaiveDateTime,
     pub build_time_ms: Option<i64>,
-    /// When the latest attempt left the queue and started building.
     pub build_started_at: Option<chrono::NaiveDateTime>,
-    /// The dispatched job behind the build's latest attempt - its Job Board
-    /// entry. `None` until the build has been dispatched at least once.
     pub dispatched_job: Option<DispatchedJobId>,
-    /// Dependency layer within the evaluation (0 = a build nothing else in the
-    /// list depends on). Secondary sort key after build status, and the key the
-    /// client re-sorts locally added builds by.
     pub depth: u32,
     pub prioritized: bool,
 }
@@ -38,9 +32,6 @@ pub struct BuildItem {
 pub struct PaginatedBuilds {
     pub builds: Vec<BuildItem>,
     pub total: usize,
-    /// Number of builds with status Building, Queued, Failed, Aborted, or DependencyFailed.
-    /// The frontend uses this to know how many pages to pre-fetch so all active builds are
-    /// in memory (required for correct log streaming and status-transition detection).
     pub active_count: usize,
 }
 
@@ -48,10 +39,6 @@ pub struct PaginatedBuilds {
 pub struct BuildsQuery {
     pub limit: Option<usize>,
     pub offset: Option<usize>,
-    /// When set, restrict results to the build-time dependency closure of this
-    /// build's package (the build itself plus its transitive deps), so a failed
-    /// top-level package shows only the failures that caused it, not the whole
-    /// evaluation's failures.
     pub scope: Option<BuildJobId>,
 }
 
@@ -68,38 +55,20 @@ pub struct EvaluationResponse {
     pub previous: Option<EvaluationId>,
     pub next: Option<EvaluationId>,
     pub created_at: chrono::NaiveDateTime,
-    /// When it left the queue and started fetching; the duration counts from here.
     pub started_at: Option<chrono::NaiveDateTime>,
     pub finished_at: Option<chrono::NaiveDateTime>,
     pub updated_at: chrono::NaiveDateTime,
     pub error_count: u64,
     pub warning_count: u64,
-    /// Concatenated text of the evaluation's error-level messages, or `null`
-    /// when there are none. Lets clients surface the failure reason without a
-    /// second round-trip to the messages endpoint.
     pub error: Option<String>,
     pub entry_points: Vec<EntryPointBrief>,
     pub prioritized: bool,
-    /// `null` for manually-triggered evaluations (Web UI / API), populated for
-    /// evaluations that fired from a task trigger (polling, schedule,
-    /// reporter push/PR). Mirrors `EvaluationSummary::trigger` on the task
-    /// list endpoint so the eval-log "Via" badge can render the same labels
-    /// without falling back to "Manual" for trigger-fired evaluations.
     pub trigger: Option<EvaluationTriggerSummary>,
-    /// Display name of the user who manually started this evaluation; `null`
-    /// for trigger-driven and pre-migration evaluations.
     pub triggered_by: Option<String>,
-    /// Populated only when `status == Waiting`. Explains which
-    /// `(architecture, required_features)` combos no connected worker can
-    /// satisfy, alongside the architectures the connected pool *does* offer.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub waiting_reason: Option<WaitingReason>,
 }
 
-/// Trigger that fired an evaluation. Same shape as
-/// `crate::endpoints::tasks::EvaluationTriggerSummary` - duplicated here to
-/// keep the `evals` endpoint module self-contained (the tasks module
-/// re-exports a long chain of unrelated types).
 #[derive(Serialize, Debug)]
 pub struct EvaluationTriggerSummary {
     pub id: TaskTriggerId,
@@ -107,7 +76,6 @@ pub struct EvaluationTriggerSummary {
     pub trigger_type: TriggerType,
 }
 
-/// Compact entry-point representation returned inline on the evaluation.
 #[derive(Serialize, Debug)]
 pub struct EntryPointBrief {
     pub id: EntryPointId,

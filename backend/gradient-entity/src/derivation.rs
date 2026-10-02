@@ -22,36 +22,29 @@ pub struct Model {
     pub prefer_local_build: bool,
     pub is_fixed_output: bool,
     pub allow_substitutes: bool,
-    /// The full record is in: outputs, every declared dependency edge and
-    /// input source. A row a batch only named (a stub) is `false` until walked.
+    /// A stub row only named by a batch is `false` until walked. `true` is set once outputs,
+    /// dependency edges and input sources are recorded.
     pub walked: bool,
-    /// Direct inputs whose subtree is not recorded. The walk prunes on
-    /// `walked AND unwalked_inputs = 0`; see `gradient_db::graph::walk_completeness`.
+    /// The walk is pruning on `walked AND unwalked_inputs = 0`. See
+    /// `gradient_db::graph::walk_completeness`.
     pub unwalked_inputs: i32,
     pub closure_size: Option<i64>,
     pub created_at: NaiveDateTime,
 }
 
 impl Model {
-    /// This derivation as a [`StorePath`](crate::StorePath) (`name` keeps `.drv`).
     pub fn as_store_path(&self) -> crate::StorePath {
         crate::StorePath::from_parts(self.hash.clone(), format!("{}.drv", self.name))
     }
 
-    /// Canonical `<hash>-<name>.drv` base form (no `/nix/store/` prefix),
-    /// matching the wire shape used by workers and the cache narinfo
-    /// `References:` convention.
     pub fn drv_path(&self) -> String {
         self.as_store_path().base()
     }
 
-    /// Identity its build history is recorded and predicted under: `pname`, else
-    /// the `name` for derivations that declare none.
     pub fn history_name(&self) -> &str {
         self.pname.as_deref().unwrap_or(&self.name)
     }
 
-    /// Full `/nix/store/<hash>-<name>.drv` path for dispatch + worker store ops.
     pub fn store_path(&self) -> String {
         self.as_store_path().full()
     }

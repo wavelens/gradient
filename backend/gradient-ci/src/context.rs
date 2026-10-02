@@ -10,11 +10,7 @@ use gradient_db::DbContext;
 use gradient_git_host::GitHostRegistry;
 use gradient_notify::EmailSender;
 
-/// CI-layer slice: the full [`DbContext`], the shared outbound HTTP client used
-/// to deliver task Actions and post Git host status checks, the resolved
-/// [`GitHostRegistry`], and the outbound email sender for `send_mail` actions.
-/// Every `ci` function takes `&CiContext`, so `ci` never names the composed
-/// `AppState`.
+/// `ci` must never name the composed `AppState`, so every `ci` function is taking `&CiContext`.
 #[derive(Clone, Debug)]
 pub struct CiContext {
     pub db: DbContext,

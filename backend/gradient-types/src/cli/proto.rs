@@ -8,8 +8,8 @@ use clap::Args;
 
 #[derive(Args, Debug, Clone)]
 pub struct ProtoArgs {
-    /// Accept incoming connections on `/proto` (workers and federated servers).
-    /// Enabled by default - disable to reject all `/proto` connections.
+    /// Accept incoming connections on `/proto` (workers and federated servers). It is enabled by
+    /// default. Disable it to reject all `/proto` connections.
     #[arg(
         long = "proto-discoverable",
         env = "GRADIENT_PROTO_DISCOVERABLE",
@@ -17,8 +17,8 @@ pub struct ProtoArgs {
     )]
     pub discoverable: bool,
 
-    /// Accept federated connections from other Gradient servers on `/proto`.
-    /// Requires `discoverable` to be enabled.
+    /// Accept federated connections from other Gradient servers on `/proto`. `discoverable` must be
+    /// enabled.
     #[arg(
         long = "proto-federate",
         env = "GRADIENT_PROTO_FEDERATE",
@@ -35,17 +35,14 @@ pub struct ProtoArgs {
     )]
     pub max_connections: usize,
 
-    /// Seconds a connected worker may go silent before the server declares it
-    /// dead and re-queues its in-flight jobs. The worker heartbeats every 10 s,
-    /// so the default 120 s tolerates twelve missed beats: `last_seen` is
-    /// stamped when the connection's reader receives a frame, so it measures
-    /// the connection rather than how long a handler is taking and a server
-    /// briefly stalled on slow DB acquires cannot false-declare a healthy
-    /// worker dead (requeued in-flight builds cost far more). This is
-    /// the only detector for a worker that dies without a clean TCP close (hard
-    /// OOM-kill, frozen host, network partition); a graceful disconnect is
-    /// handled immediately regardless. Set to 0 to disable the liveness
-    /// watchdog.
+    /// Seconds a connected worker may go silent before the server is declaring it dead and
+    /// re-queuing its in-flight jobs. The worker is sending a heartbeat every 10 s. The default of
+    /// 120 s is tolerating twelve missed beats. The connection reader is stamping `last_seen` on
+    /// every received frame. It is measuring the connection rather than handler duration. A server
+    /// briefly stalled on slow DB acquires cannot falsely declare a healthy worker dead. Requeued
+    /// in-flight builds would cost far more. This is the only detector for a worker dying without a
+    /// clean TCP close, like a hard OOM-kill, a frozen host or a network partition. A graceful
+    /// disconnect is handled immediately regardless. Set to 0 to disable the liveness watchdog.
     #[arg(
         long = "proto-worker-heartbeat-timeout-secs",
         env = "GRADIENT_PROTO_WORKER_HEARTBEAT_TIMEOUT_SECS",
@@ -53,9 +50,9 @@ pub struct ProtoArgs {
     )]
     pub worker_heartbeat_timeout_secs: u64,
 
-    /// Allow anonymous (unauthenticated) clients on `GET /cache/{cache}/proto`
-    /// for public caches. When `false`, anonymous handshakes are rejected with
-    /// 403; private caches always require an API key regardless of this flag.
+    /// Allow anonymous (unauthenticated) clients on `GET /cache/{cache}/proto` for public caches. A
+    /// `false` value is rejecting anonymous handshakes with 403. Private caches always require an
+    /// API key regardless of this flag.
     #[arg(
         long = "proto-anonymous-cache-enable",
         env = "GRADIENT_PROTO_ANONYMOUS_CACHE_ENABLE",

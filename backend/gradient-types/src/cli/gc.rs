@@ -8,7 +8,7 @@ use clap::Args;
 
 #[derive(Args, Debug, Clone)]
 pub struct GcArgs {
-    /// Interval in seconds between cache maintenance GC passes. Defaults to 3600.
+    /// Interval in seconds between cache maintenance GC passes. The default is 3600.
     #[arg(
         long = "gc-interval-secs",
         env = "GRADIENT_GC_INTERVAL_SECS",
@@ -16,11 +16,9 @@ pub struct GcArgs {
     )]
     pub interval_secs: u64,
 
-    /// Hours a cached path outside the live closure (the NAR closure of every
-    /// retained evaluation's outputs and `.drv` files) is kept after its last
-    /// fetch, or its commit if never fetched. `0` keeps nothing beyond
-    /// `nar_upload_grace_hours`, which always applies so a closure member is
-    /// never evicted between its own commit and the commit of the path that references it.
+    /// Hours to keep a cached path outside the live closure of retained evaluations after its last
+    /// fetch, or its upload if never fetched. `--gc-nar-upload-grace-hours` is always applying on
+    /// top. `0` is keeping nothing beyond that grace.
     #[arg(
         long = "gc-nar-ttl-hours",
         env = "GRADIENT_GC_NAR_TTL_HOURS",
@@ -28,10 +26,10 @@ pub struct GcArgs {
     )]
     pub nar_ttl_hours: u64,
 
-    /// Grace period in hours before the orphan-files pass reclaims a NAR object
-    /// no database row references. Covers the upload window where a NAR is on
-    /// disk before its `derivation`/`cached_path` rows commit. Set to 0 to
-    /// reclaim immediately (tests only).
+    /// Grace period in hours before the orphan-files pass is reclaiming a NAR object without a
+    /// referencing database row. The grace is covering the upload window where a NAR is on disk
+    /// before its `derivation`/`cached_path` rows commit. Set to 0 to reclaim immediately (tests
+    /// only).
     #[arg(
         long = "gc-nar-upload-grace-hours",
         env = "GRADIENT_GC_NAR_UPLOAD_GRACE_HOURS",
@@ -39,10 +37,9 @@ pub struct GcArgs {
     )]
     pub nar_upload_grace_hours: i64,
 
-    /// Grace period in hours before the GC pass deletes a `derivation` row
-    /// outside the build closure of every retained evaluation. The grace lets
-    /// rapid re-evaluations reuse a freshly-orphaned derivation without
-    /// re-inserting it. Set to 0 to GC immediately.
+    /// Grace period in hours before the GC pass is deleting a `derivation` row outside the build
+    /// closure of every retained evaluation. Rapid re-evaluations can reuse a freshly orphaned
+    /// derivation within the grace without re-inserting it. Set to 0 to GC immediately.
     #[arg(
         long = "gc-orphan-derivation-hours",
         env = "GRADIENT_GC_ORPHAN_DERIVATION_HOURS",
@@ -50,10 +47,9 @@ pub struct GcArgs {
     )]
     pub orphan_derivation_hours: i64,
 
-    /// Hours after which an "active" evaluation that has not been touched is
-    /// presumed wedged and stops blocking the per-task evaluation GC (the
-    /// wedged evaluation itself is never deleted). 0 = a wedged evaluation
-    /// blocks GC forever.
+    /// Hours after which an untouched "active" evaluation is presumed wedged and is no longer
+    /// blocking the per-task evaluation GC. The wedged evaluation itself is never deleted. A value
+    /// of 0 is letting a wedged evaluation block GC forever.
     #[arg(
         long = "gc-wedged-eval-hours",
         env = "GRADIENT_GC_WEDGED_EVAL_HOURS",
@@ -61,8 +57,8 @@ pub struct GcArgs {
     )]
     pub wedged_eval_hours: i64,
 
-    /// Seconds from the end of one background deep garbage collection round to the
-    /// start of the next. With `0`, a round is running only when one is requested.
+    /// Seconds from the end of one background deep garbage collection round to the start of the
+    /// next. `0` is running a round only on request.
     #[arg(
         long = "gc-deep-interval-secs",
         env = "GRADIENT_GC_DEEP_INTERVAL_SECS",

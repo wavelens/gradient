@@ -4,10 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Minimal ANSI SGR (Select Graphic Rendition) state machine. Used while
-//! chunking logs so each chunk can be rendered standalone: we record the SGR
-//! sequence active at the chunk boundary and prepend it when serving the chunk.
-
 #[derive(Clone, Default)]
 pub struct SgrState {
     bold: bool,
@@ -22,7 +18,6 @@ pub struct SgrState {
 }
 
 impl SgrState {
-    /// Feed text, updating state for every complete `ESC [ ... m` sequence.
     pub fn apply_text(&mut self, text: &str) {
         let bytes = text.as_bytes();
         let mut i = 0;
@@ -97,7 +92,6 @@ impl SgrState {
         }
     }
 
-    /// The minimal SGR sequence that reconstructs this state, or "" for default.
     pub fn to_prefix(&self) -> String {
         let mut parts: Vec<String> = Vec::new();
         if self.bold {

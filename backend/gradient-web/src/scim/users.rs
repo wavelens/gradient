@@ -256,7 +256,6 @@ fn apply_user_patch(active: &mut UserActive, op: &PatchOperation) -> ScimResult<
                 active.name = Set(s.to_string());
             }
         }
-        // No-path replace: value is an object of attributes.
         "" => {
             if let Some(obj) = value.as_object() {
                 if let Some(a) = obj.get("active").and_then(|v| v.as_bool()) {

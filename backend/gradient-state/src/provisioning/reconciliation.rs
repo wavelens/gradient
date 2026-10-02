@@ -4,8 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Drift reconciliation: unmanage/delete state-managed rows no longer present in state.
-
 use super::DynError;
 use super::StateApplicator;
 use crate::config::StateConfiguration;
@@ -14,12 +12,9 @@ use gradient_types::*;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
 use std::collections::{HashMap, HashSet};
 
-/// Names of state-managed rows that must remain `managed` after reconciliation.
-///
-/// Each set is built from the value's `name` (or `username`) field - the same
-/// field every `apply_*` writes to the DB row. Using the attrset key here
-/// instead would delete or unmanage rows whose Nix-side `name = "…"` was
-/// overridden away from the attrset key (e.g. `tasks.foo = { name = "main"; }`).
+/// Each set is built from the value's `name` or `username` field, the same field every `apply_*`
+/// writes. The attrset key would unmanage or delete rows whose Nix `name` was overridden away from
+/// it.
 pub(crate) struct ManagedKeepSets<'a> {
     usernames: HashSet<&'a String>,
     project_names: HashSet<&'a String>,
@@ -38,10 +33,6 @@ pub(crate) fn managed_keep_sets(config: &StateConfiguration) -> ManagedKeepSets<
     }
 }
 
-/// For each managed row not present in the state set, either delete it (if
-/// `delete_state`) or flip `managed` to `false`. `name_field` names the column
-/// used to compare against the state set and to log; `label` is the
-/// human-readable noun for log lines.
 macro_rules! unmark_managed {
     ($db:expr, $entity:ident, $state_set:expr, $name_field:ident, $delete_state:expr, $label:literal) => {{
         let managed = $entity::Entity::find()
@@ -67,8 +58,6 @@ macro_rules! unmark_managed {
 }
 
 impl<'a> StateApplicator<'a> {
-    // ── unmark_removed_entities ───────────────────────────────────────────────
-
     pub(crate) async fn unmark_removed_entities(
         &self,
         config: &StateConfiguration,
@@ -102,8 +91,6 @@ impl<'a> StateApplicator<'a> {
         unmark_managed!(db, cache, cache_names, name, delete_state, "cache");
         unmark_managed!(db, api, api_key_names, name, delete_state, "API key");
 
-        // Roles: identified by (project, name) so we can't use the
-        // single-column `unmark_managed!` helper.
         let role_keys: HashSet<(String, String)> = config
             .roles
             .values()
@@ -192,10 +179,6 @@ impl<'a> StateApplicator<'a> {
 mod keep_set_tests {
     use super::*;
 
-    /// Regression: `gradient-state.nix` lets users override an entity's
-    /// `name`/`username` away from the attrset key. The cleanup pass must look
-    /// up DB rows by the same `name` the `apply_*` functions wrote - using the
-    /// attrset key here would unmanage or delete the row we just inserted.
     #[test]
     fn keep_sets_track_inner_name_not_attrset_key() {
         let json = serde_json::json!({

@@ -11,22 +11,18 @@ use gradient_types::*;
 pub fn get_hash_from_url(url: String) -> Result<String, SourceError> {
     let path_split = url.split('.').collect::<Vec<&str>>();
 
-    // Check if we have exactly 2 or 3 parts (hash.extension[.compression])
     if !(path_split.len() == 2 || path_split.len() == 3) {
         return Err(SourceError::InvalidPath);
     }
 
-    // Accept 32-char store-path hashes (160-bit nix32) and 52-char file/nar hashes (256-bit nix32)
     if path_split[0].len() != 32 && path_split[0].len() != 52 {
         return Err(SourceError::InvalidPath);
     }
 
-    // Check extension
     if !((path_split[1] == "narinfo" && path_split.len() == 2) || path_split[1] == "nar") {
         return Err(SourceError::InvalidPath);
     }
 
-    // Check hash characters (base32) - exclude 'e', 'o', 't', 'u'
     if !path_split[0]
         .chars()
         .all(|c| "0123456789abcdfghijklmnpqrsvwxyz".contains(c))
@@ -58,10 +54,6 @@ pub fn get_path_from_derivation_output(output: MDerivationOutput) -> StorePath {
     StorePath::from_parts(output.hash, output.package)
 }
 
-/// Parses a bare `<hash>-<name>.drv` (no `/nix/store/` prefix) into its hash
-/// and name components. `name` includes everything after the first `-` minus
-/// the trailing `.drv` suffix. Returns `InvalidPath` when the input is not in
-/// `<hash>-<name>.drv` form.
 pub fn parse_drv_hash_name(drv_path: &str) -> Result<(String, String), SourceError> {
     let (hash, rest) = drv_path.split_once('-').ok_or(SourceError::InvalidPath)?;
     let name = rest.strip_suffix(".drv").ok_or(SourceError::InvalidPath)?;
@@ -87,8 +79,6 @@ pub fn get_cache_nar_location(base_path: String, hash: String) -> Result<String,
     ))
 }
 
-/// Returns the on-disk path for a compressed (zstd) NAR cache file.
-/// Used for non-entry-point builds that are cached on first serve.
 pub fn get_cache_nar_compressed_location(
     base_path: String,
     hash: String,

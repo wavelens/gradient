@@ -4,9 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! The `aborting` waiting reason is gone: an evaluation left parked under it by
-//! an interrupted abort finishes as `Aborted` instead of being resumed.
-
 use sea_orm_migration::prelude::*;
 use sea_orm_migration::sea_orm::ConnectionTrait;
 

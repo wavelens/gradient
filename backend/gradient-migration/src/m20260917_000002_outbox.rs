@@ -4,10 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! The effects outbox: what a state change owes the outside world, written in
-//! the transaction that made the change, delivered later, retried with backoff
-//! and dead-lettered in place.
-
 use sea_orm_migration::prelude::*;
 use sea_orm_migration::sea_orm::ConnectionTrait;
 
@@ -57,9 +53,8 @@ impl MigrationTrait for Migration {
 mod tests {
     use super::UP;
 
-    /// The claim reads due rows by `next_attempt_at` and the enqueue folds a
-    /// duplicate into the pending row; both need their partial index, and both
-    /// predicates must name the same "still owed" rows.
+    /// The claim and the enqueue each need a partial index over the pending deliveries. Both
+    /// predicates must name the same still-owed rows.
     #[test]
     fn the_pending_indexes_agree_on_what_is_still_owed() {
         let pending: Vec<&str> = UP

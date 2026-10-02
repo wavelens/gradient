@@ -4,9 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Every event Gradient produces. A payload struct per event implements
-//! [`EventKind`]; [`Event`] is the closed set, stored in the pending deliveries by its
-//! Rust variant name and published as an [`Envelope`] by its dotted name.
+//! The pending deliveries are storing each [`Event`] by its Rust variant name. The published
+//! [`Envelope`] is carrying its dotted name.
 
 pub mod audit;
 pub mod build;

@@ -20,17 +20,10 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::io::{AsyncRead, AsyncReadExt as _, AsyncSeekExt as _};
 
-/// Timeout and retry policy for the S3 client, resolved from configuration.
 #[derive(Clone, Copy, Debug)]
 pub struct S3Timeouts {
-    /// Per-response inactivity timeout. Not a cap on transfer duration.
     pub read_timeout: std::time::Duration,
-    /// Retries for a failed request.
     pub max_retries: usize,
-    /// Total retry budget from the first attempt. Must exceed
-    /// `(max_retries + 1) * read_timeout` for a stalled request to be retried
-    /// at all, since a request that dies on the read timeout has already spent
-    /// that long before it fails.
     pub retry_timeout: std::time::Duration,
 }
 
@@ -44,20 +37,8 @@ impl Default for S3Timeouts {
     }
 }
 
-/// How long a multipart part upload may make no progress before the write is
-/// abandoned, and the fixed floor under [`single_write_budget`]. An upload holds
-/// one of the few per-connection NAR-commit permits while it is running, so a wedged
-/// one takes the whole connection's commit path down with it.
 const WRITE_STALL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
 
-/// Hands object_store the workspace's HTTP client instead of letting it build its
-/// own. reqwest's platform verifier refuses to construct a client where the
-/// system CA store is empty - every nix build sandbox, and any host without a CA
-/// bundle - while our roots fold webpki's in; this was the last client in the
-/// workspace not going through `gradient_util::http`. Bypassing object_store's
-/// builder bypasses its own rules too, so they are restated here: no content
-/// encoding, because compression rewrites the `Content-Length` object sizes are
-/// read from.
 #[derive(Debug)]
 pub(crate) struct SharedHttpConnector {
     pub(crate) read_timeout: std::time::Duration,
@@ -82,45 +63,22 @@ impl object_store::client::HttpConnector for SharedHttpConnector {
     }
 }
 
-/// Unified NAR file storage abstraction over local disk or an S3-compatible backend.
-///
-/// All NARs are stored pre-compressed (`.nar.zst`). The key path within the store is
-/// `nars/{hash[..2]}/{hash[2..]}.nar.zst` (same two-level sharding used locally).
 #[derive(Clone)]
 pub struct NarStore {
     inner: Arc<dyn ObjectStore>,
-    /// Non-empty only for S3: prepended to the object key.
     prefix: String,
-    /// Set only for local storage; used by the orphan-file cleanup scan.
     local_base: Option<String>,
-    /// S3 store - held separately to enable presigned URL generation via the
-    /// [`object_store::signer::Signer`] trait.  `None` for local-disk stores.
     s3_signer: Option<Arc<object_store::aws::AmazonS3>>,
-    /// Passed-through NARs awaiting the background upload; `None` on a store built
-    /// without staging, whose passthrough commit writes through synchronously.
     hot: Arc<HotNarCache>,
 }
 
-/// Slowest write we are willing to wait out. Sets how [`single_write_budget`]
-/// scales with payload size; well under any healthy link, since the budget only
-/// has to separate "slow" from "wedged forever".
 pub(crate) const MIN_WRITE_THROUGHPUT_BYTES_PER_SEC: u64 = 256 * 1024;
 
-/// Ceiling for one single-shot object write. A whole payload goes out as one
-/// request with no progress signal to watch, so the bound has to be a duration -
-/// but scaling it with the payload keeps it a floor on *throughput* rather than
-/// a cap on size, and a multi-hundred-MB eval-cache blob is never cut off just
-/// for being large. The multipart path bounds each part instead, so it needs no
-/// size term at all.
 pub(crate) fn single_write_budget(len: usize) -> std::time::Duration {
     WRITE_STALL_TIMEOUT
         + std::time::Duration::from_secs(len as u64 / MIN_WRITE_THROUGHPUT_BYTES_PER_SEC)
 }
 
-/// Await `op`, failing it once `budget` elapses. Every object write goes through
-/// here: the S3 client deliberately has no total request timeout (see
-/// [`NarStore::s3`]) and its read timeout covers only *response* bytes, so a peer
-/// that stops draining a request body would otherwise wedge the write forever.
 pub(crate) async fn bounded<T, E>(
     op: impl std::future::Future<Output = std::result::Result<T, E>>,
     budget: std::time::Duration,
@@ -136,13 +94,10 @@ where
 }
 
 impl NarStore {
-    /// Returns a clone of the underlying object store so callers (e.g. log storage)
-    /// can share the same connection.
     pub fn inner(&self) -> Arc<dyn ObjectStore> {
         Arc::clone(&self.inner)
     }
 
-    /// Returns the prefix used by this store (empty for local).
     pub fn prefix(&self) -> &str {
         &self.prefix
     }
@@ -162,7 +117,6 @@ impl NarStore {
 }
 
 impl NarStore {
-    /// Create a local-disk-backed store rooted at `base_path`.
     pub fn local(base_path: &str) -> Result<Self> {
         std::fs::create_dir_all(base_path)
             .with_context(|| format!("Failed to create NAR storage directory: {}", base_path))?;
@@ -177,10 +131,6 @@ impl NarStore {
         })
     }
 
-    /// Create an S3-backed store.
-    ///
-    /// `access_key_id` and `secret_access_key` are optional; when absent the AWS SDK
-    /// falls back to instance profiles / environment variables.
     #[allow(
         clippy::too_many_arguments,
         reason = "arg-heavy; refactor tracked in #503"
@@ -201,12 +151,9 @@ impl NarStore {
             ..Default::default()
         };
 
-        // No total request timeout: object_store defaults to 30s, which
-        // cancelled every NAR larger than 30s of transfer and then spent the
-        // retry budget re-running a request certain to be cancelled again -
-        // surfacing as a hard failure ~3m30s in. Progress is policed by the
-        // read timeout instead, an inactivity timer that a healthy transfer
-        // resets on every chunk however long it keeps running.
+        // The object_store default total timeout of 30s was cancelling every larger NAR and
+        // retrying it into a hard failure. The read timeout is policing progress instead, reset on
+        // every chunk.
         let mut builder = object_store::aws::AmazonS3Builder::new()
             .with_bucket_name(bucket)
             .with_region(region)
@@ -245,9 +192,6 @@ impl NarStore {
     }
 
     fn object_path(&self, hash: &str) -> Path {
-        // Hash is validated at every callable entry point, but defend the
-        // formatter anyway: a too-short hash would otherwise panic on
-        // `&hash[..2]` / `&hash[2..]`.
         let (shard, stem) = if hash.len() >= 2 {
             (&hash[..2], &hash[2..])
         } else {
@@ -256,8 +200,6 @@ impl NarStore {
         Path::from(format!("{}nars/{}/{}.nar.zst", self.prefix, shard, stem,))
     }
 
-    /// One canonical `HEAD`, mapping `NotFound` to `None`. Backs `exists`,
-    /// `head_size` and the range-stream head probe.
     async fn head_object(&self, path: &Path) -> Result<Option<object_store::ObjectMeta>> {
         match self.inner.head(path).await {
             Ok(meta) => Ok(Some(meta)),
@@ -298,9 +240,6 @@ impl NarStore {
         }
     }
 
-    /// Streaming read. `offset == None` is a plain GET whose size comes from the
-    /// object metadata; `offset == Some(o)` HEADs for the FULL size, returns an
-    /// empty stream when `o` is at or past the end, else range-GETs from `o`.
     async fn get_stream_object(
         &self,
         path: &Path,
@@ -382,9 +321,6 @@ impl NarStore {
         Ok(Some(url.to_string()))
     }
 
-    /// Verify the storage backend is reachable. Returns `Ok(())` when the
-    /// underlying store responds (even with NotFound), or an error when the
-    /// server cannot be reached at all (network error, 502, auth failure, …).
     pub async fn ping(&self) -> Result<()> {
         let probe = Path::from(format!("{}__gradient_ping__", self.prefix));
         match self.inner.head(&probe).await {
@@ -399,18 +335,10 @@ impl NarStore {
         self.put_object(self.object_path(hash), data).await
     }
 
-    /// Whether a NAR object for `hash` is already present (a single `HEAD`).
-    /// Backs the idempotent-write guard so a re-push of identical content does
-    /// not rewrite the object - on a versioning-enabled bucket every rewrite is
-    /// a retained version that no S3-API GC can reclaim.
     pub async fn exists(&self, hash: &str) -> Result<bool> {
         Ok(self.head_object(&self.object_path(hash)).await?.is_some())
     }
 
-    /// Size in bytes of the stored NAR object for `hash`, or `None` when
-    /// absent. Backs the presigned-upload commit check: the worker PUT the
-    /// bytes directly to object storage, so this HEAD is the only server-side
-    /// evidence the object actually landed with the reported size.
     pub async fn head_size(&self, hash: &str) -> Result<Option<u64>> {
         Ok(self
             .head_object(&self.object_path(hash))
@@ -418,10 +346,6 @@ impl NarStore {
             .map(|meta| meta.size))
     }
 
-    /// Verify a stored NAR object against its reported file_hash and size.
-    /// Always HEADs to confirm existence and size; when `rehash` is set it
-    /// additionally GETs the object and recalculates the file hash (authoritative
-    /// but costs a full object read).
     pub async fn verify(
         &self,
         hash: &str,
@@ -450,10 +374,6 @@ impl NarStore {
         Ok(())
     }
 
-    /// Initiate a multipart upload for the NAR identified by `hash`.
-    ///
-    /// Returns a [`WriteMultipart`] configured with `chunk_size`-byte parts.
-    /// The caller writes compressed data into it, then calls `.finish().await`.
     pub async fn put_streaming(&self, hash: &str, chunk_size: usize) -> Result<WriteMultipart> {
         let upload = self
             .inner
@@ -463,9 +383,6 @@ impl NarStore {
         Ok(WriteMultipart::new_with_chunk_size(upload, chunk_size))
     }
 
-    /// Stream `reader` into object storage under `hash` via a multipart upload,
-    /// so a large NAR is never held whole in memory: bytes flow reader -> part
-    /// buffer -> object store with at most `MAX_INFLIGHT_PARTS` uploads pending.
     pub async fn put_reader<R: AsyncRead + Unpin + Send>(
         &self,
         hash: &str,
@@ -506,10 +423,6 @@ impl NarStore {
         self.get_object(&self.object_path(hash)).await
     }
 
-    /// Move an already-staged file into the store under `hash`. On local disk
-    /// this is a rename, so a pushed NAR is written to the server's disk exactly
-    /// once; on S3 (or across devices) it streams the file up and then unlinks
-    /// it. The source is gone either way on success.
     pub async fn adopt_file(&self, hash: &str, path: &std::path::Path) -> Result<()> {
         let object = self.object_path(hash);
         if let Some(base) = &self.local_base {
@@ -535,12 +448,6 @@ impl NarStore {
             .context("remove staged NAR after upload")
     }
 
-    /// Streaming counterpart to [`Self::get`].
-    ///
-    /// Returns the object's `(size, byte_stream)` pair without buffering the
-    /// whole NAR in memory. Used by the WebSocket NAR-serving path so a 200 MB
-    /// `gcc-lib` doesn't pin the entire file in RAM before the first
-    /// `NarPush` chunk goes out.
     pub async fn get_stream(
         &self,
         hash: &str,
@@ -548,11 +455,6 @@ impl NarStore {
         self.get_stream_object(&self.object_path(hash), None).await
     }
 
-    /// Range variant of [`Self::get_stream`]: streams the stored object from
-    /// `offset` to the end. The returned size is the FULL object size (so the
-    /// caller can compare it against a worker's reported `received_bytes`).
-    /// `offset == 0` is equivalent to [`Self::get_stream`]; an `offset` at or
-    /// past the end yields an empty stream with the real size.
     pub async fn get_stream_from(
         &self,
         hash: &str,
@@ -566,12 +468,10 @@ impl NarStore {
         self.delete_object(&self.object_path(hash)).await
     }
 
-    /// Returns the local base path when using local-disk storage; `None` for S3.
     pub fn local_base(&self) -> Option<&str> {
         self.local_base.as_deref()
     }
 
-    /// Whether this store can mint presigned URLs (S3); a local store cannot.
     pub fn presigner_available(&self) -> bool {
         self.s3_signer.is_some()
     }
@@ -585,12 +485,6 @@ impl NarStore {
         &self.hot
     }
 
-    /// Generate a presigned GET URL valid for `expires_in` for the NAR
-    /// identified by `hash`.
-    ///
-    /// Returns `None` for local-disk stores. Returns `Some(url_string)` for
-    /// S3-backed stores so workers can download directly without routing data
-    /// through the Gradient server.
     pub async fn presigned_get_url(
         &self,
         hash: &str,
@@ -600,13 +494,6 @@ impl NarStore {
             .await
     }
 
-    /// Generate a presigned PUT URL valid for `expires_in` for the NAR
-    /// identified by `hash`.
-    ///
-    /// Returns `None` for local-disk stores (no presigning needed - the server
-    /// accepts direct `NarPush` WebSocket frames).  Returns `Some(url_string)`
-    /// for S3-backed stores so workers can upload directly to S3 without
-    /// routing all NAR data through the Gradient server.
     pub async fn presigned_put_url(
         &self,
         hash: &str,
@@ -616,8 +503,6 @@ impl NarStore {
             .await
     }
 
-    /// Open a multipart upload for the NAR `hash` and presign its parts, or
-    /// `None` on a store that cannot presign.
     pub async fn presigned_multipart(
         &self,
         hash: &str,
@@ -649,9 +534,6 @@ impl NarStore {
         }
     }
 
-    /// Object-store path for a fleet-shared eval-cache blob per flake
-    /// fingerprint. Namespaced under `eval-cache/` so it never collides with the
-    /// `nars/` NAR layout (#386).
     fn eval_cache_path(&self, fingerprint: &str) -> Path {
         Path::from(format!("{}eval-cache/{}", self.prefix, fingerprint))
     }
@@ -665,8 +547,6 @@ impl NarStore {
         self.get_object(&self.eval_cache_path(fingerprint)).await
     }
 
-    /// Streaming counterpart to [`Self::get_eval_cache`]; mirrors
-    /// [`Self::get_stream`] so the inline pull path never buffers the whole blob.
     pub async fn get_eval_cache_stream(
         &self,
         fingerprint: &str,
@@ -675,7 +555,6 @@ impl NarStore {
             .await
     }
 
-    /// Presigned GET URL for an eval-cache blob; `None` for local-disk stores.
     pub async fn presigned_eval_cache_get_url(
         &self,
         fingerprint: &str,
@@ -689,7 +568,6 @@ impl NarStore {
         .await
     }
 
-    /// Presigned PUT URL for an eval-cache blob; `None` for local-disk stores.
     pub async fn presigned_eval_cache_put_url(
         &self,
         fingerprint: &str,
@@ -707,8 +585,6 @@ impl NarStore {
         self.delete_object(&self.eval_cache_path(fingerprint)).await
     }
 
-    /// Object-store path for a build-request blob per project + BLAKE3 hash.
-    /// Layout: `<prefix>build-request-blobs/<project-uuid>/<hh>/<full-hex>`.
     fn blob_path(&self, project: uuid::Uuid, hash: &[u8; 32]) -> Path {
         let hex = hex::encode(hash);
         let shard = &hex[..2];
@@ -735,7 +611,6 @@ impl NarStore {
         self.delete_object(&self.blob_path(project, hash)).await
     }
 
-    /// Every two-character key shard below `nars/`, in ascending key order.
     pub fn shards() -> Vec<String> {
         let chars = gradient_util::nix_hash::NIX32_CHARS;
         chars
@@ -748,12 +623,9 @@ impl NarStore {
             .collect()
     }
 
-    /// The NAR hashes stored in one shard, each with its object's last-modified
-    /// time as a unix timestamp (seconds). The orphan-file sweep uses the time to
-    /// spare freshly-written NARs: an upload lands before the eval commits its
-    /// `derivation`/`cached_path` rows, so for a brief window the keep-set does
-    /// not yet reference it - reclaiming it then strands a zombie `cached_path`
-    /// the dispatch gate trusts.
+    /// The orphan sweep is using the last-modified time to spare fresh NARs. An upload is landing
+    /// before the eval is committing its rows, and reclaiming it would strand a zombie
+    /// `cached_path`.
     pub async fn list_shard(&self, shard: &str) -> Result<Vec<(String, i64)>> {
         let prefix = Path::from(format!("{}nars/{shard}", self.prefix));
         let mut stream = self.inner.list(Some(&prefix));
@@ -771,10 +643,6 @@ impl NarStore {
         Ok(hashes)
     }
 
-    /// Lists every build-request blob currently in storage. Returns
-    /// `(project, hash)` pairs reconstructed from the
-    /// `build-request-blobs/<project-uuid>/<shard>/<full-hex>` path layout. Entries
-    /// whose name does not match the layout are skipped.
     pub async fn list_blobs(&self) -> Result<Vec<(uuid::Uuid, [u8; 32])>> {
         let prefix = Path::from(format!("{}build-request-blobs", self.prefix));
         let mut stream = self.inner.list(Some(&prefix));
@@ -808,10 +676,6 @@ impl NarStore {
     }
 }
 
-/// Read a stored object straight off local disk in `BULK_CHUNK_SIZE` reads.
-/// `object_store`'s local backend streams in 8 KiB pieces, which costs one
-/// syscall and one `Bytes` allocation per 8 KiB of a multi-hundred-megabyte NAR
-/// before the serving loop coalesces them back into 512 KiB chunks anyway.
 async fn local_stream(
     path: PathBuf,
     offset: u64,
@@ -849,10 +713,7 @@ impl std::fmt::Debug for NarStore {
     }
 }
 
-/// Where a served NAR's bytes come from: RAM, or a stream over the staged file
-/// or the object store.
 pub enum NarSource {
-    /// The whole object; the caller slices by offset.
     Hot(Bytes),
     Stream {
         size: u64,
@@ -879,8 +740,6 @@ async fn collect(mut stream: BoxStream<'static, Result<Bytes>>, size: u64) -> Re
 }
 
 impl NarStore {
-    /// Resolve `hash` through the tiers: the hot cache, then the object store. A source at offset 0 whose size the cache admits is
-    /// read once through the single-flight loader and answered from RAM.
     pub async fn open(&self, hash: &str, offset: u64) -> Result<Option<NarSource>> {
         if let Some(bytes) = self.hot.get(hash) {
             return Ok(Some(NarSource::Hot(bytes)));
@@ -915,8 +774,6 @@ pub fn upload_lease(target: &StorageTarget, size: u64) -> Option<std::time::Dura
 }
 
 impl NarStore {
-    /// The one transport this backend accepts for `object`: presigned on S3,
-    /// passed through the server on a local store.
     pub async fn upload_target(&self, object: &ObjectKey, size: u64) -> Result<StorageTarget> {
         if !self.presigner_available() {
             return Ok(StorageTarget::Passthrough);
@@ -1125,8 +982,6 @@ mod tests {
     #[tokio::test]
     async fn get_stream_returns_full_payload_in_order() {
         let (_d, store) = local_store();
-        // Use a 9 MiB payload so it crosses the local-FS read boundary and
-        // typically arrives in multiple chunks.
         let mut payload = Vec::with_capacity(9 * 1024 * 1024);
         for i in 0..(9 * 1024 * 1024 / 4) {
             payload.extend_from_slice(&(i as u32).to_le_bytes());
@@ -1150,7 +1005,6 @@ mod tests {
     #[tokio::test]
     async fn put_reader_round_trips_multipart_payload() {
         let (_d, store) = local_store();
-        // Larger than the 8 MiB part size so the multipart path spans >1 part.
         let mut payload = Vec::with_capacity(20 * 1024 * 1024);
         for i in 0..(20 * 1024 * 1024 / 4) {
             payload.extend_from_slice(&(i as u32).to_le_bytes());
@@ -1355,18 +1209,12 @@ mod tests {
         assert!(stream.next().await.is_none());
     }
 
-    /// The single-shot write budget is a throughput floor, not a size cap: it
-    /// must grow with the payload so a large eval-cache blob is never cut off
-    /// for being big, and never drop below the fixed stall budget.
     #[test]
     fn single_write_budget_scales_with_the_payload() {
         assert_eq!(single_write_budget(0), WRITE_STALL_TIMEOUT);
-        // A `.drv` NAR is a couple of KiB - it gets the flat floor, no more.
         assert_eq!(single_write_budget(2 * 1024), WRITE_STALL_TIMEOUT);
-        // A 256 MiB eval-cache blob must be allowed far longer than the floor.
         let big = single_write_budget(256 * 1024 * 1024);
         assert!(big > WRITE_STALL_TIMEOUT * 8, "big blob budget: {big:?}");
-        // Monotonic, so a larger object is never given less time than a smaller.
         assert!(single_write_budget(16 * 1024 * 1024) > single_write_budget(1024));
     }
 
@@ -1385,8 +1233,6 @@ mod tests {
         );
     }
 
-    /// A request that dies on the read timeout has already burned that long, so
-    /// a retry budget below it means the very failures worth retrying never are.
     #[test]
     fn retry_budget_outlasts_every_attempt_it_should_cover() {
         let t = S3Timeouts::default();
@@ -1397,8 +1243,6 @@ mod tests {
             t.retry_timeout,
             t.read_timeout,
         );
-        // object_store reuses the initial credentials and payload across
-        // retries, so the budget has to stay under their 5-minute validity.
         assert!(t.retry_timeout < std::time::Duration::from_secs(300));
     }
 }

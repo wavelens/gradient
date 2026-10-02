@@ -4,8 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! CRUD helpers for the `admin_task` table.
-
 use anyhow::{Context, Result};
 use chrono::{NaiveDateTime, SubsecRound};
 use sea_orm::sea_query::Expr;
@@ -108,8 +106,6 @@ pub async fn get<C: ConnectionTrait>(conn: &C, id: AdminTaskId) -> Result<Option
         .context("get admin_task")
 }
 
-/// Move a pending task to running and return the `started_at` that names this
-/// run in [`save_checkpoint`] and [`complete`]. `None` when it is not pending.
 pub async fn start<C: ConnectionTrait>(conn: &C, id: AdminTaskId) -> Result<Option<NaiveDateTime>> {
     let started_at = now().trunc_subsecs(6);
     let res = EAdminTask::update_many()
@@ -123,8 +119,6 @@ pub async fn start<C: ConnectionTrait>(conn: &C, id: AdminTaskId) -> Result<Opti
     Ok((res.rows_affected == 1).then_some(started_at))
 }
 
-/// Record the last finished unit of the run begun at `started_at`. `false` when
-/// [`restart`] or an end of the task took it away from this run meanwhile.
 pub async fn save_checkpoint<C: ConnectionTrait>(
     conn: &C,
     id: AdminTaskId,
@@ -144,7 +138,6 @@ pub async fn save_checkpoint<C: ConnectionTrait>(
     Ok(res.rows_affected == 1)
 }
 
-/// Complete the run begun at `started_at`, unless it was restarted meanwhile.
 pub async fn complete<C: ConnectionTrait>(
     conn: &C,
     id: AdminTaskId,
@@ -164,8 +157,6 @@ pub async fn complete<C: ConnectionTrait>(
     Ok(res.rows_affected == 1)
 }
 
-/// Send an active task back to pending with no checkpoint, owned by
-/// `created_by`, so the next run starts over from its first unit.
 pub async fn restart<C: ConnectionTrait>(
     conn: &C,
     id: AdminTaskId,
@@ -188,7 +179,6 @@ pub async fn restart<C: ConnectionTrait>(
     Ok(res.rows_affected == 1)
 }
 
-/// When the last task of `kind` finished, if any did.
 pub async fn last_finished_at<C: ConnectionTrait>(
     conn: &C,
     kind: AdminTaskKind,

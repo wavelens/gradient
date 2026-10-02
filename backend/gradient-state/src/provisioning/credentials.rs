@@ -4,8 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Credential-file reading, secret encryption, and SSH key derivation.
-
 use super::DynError;
 use super::StateApplicator;
 use anyhow::{Context, Result};
@@ -19,9 +17,6 @@ pub(crate) fn credentials_dir() -> String {
         .unwrap_or_else(|_| "/run/credentials/gradient-server".to_string())
 }
 
-/// Reads `${GRADIENT_CREDENTIALS_DIR}/gradient_${kind}_${name}_${suffix}` and
-/// returns `(contents, path)`. The path is returned alongside so callers can
-/// embed it in downstream validation errors.
 pub(crate) fn read_credential(
     kind: &str,
     name: &str,
@@ -40,10 +35,7 @@ pub(crate) fn read_credential(
     Ok((contents, path))
 }
 
-/// Validate the contents of a user password credential file. The file must
-/// contain an argon2 PHC hash (e.g. produced by `gradient-server hash` or the
-/// `argon2 -id -e` CLI). The plaintext password is never stored - the server
-/// only accepts the pre-hashed PHC string and passes it through to the DB.
+/// The file must hold an argon2 PHC hash. The plaintext password is never stored.
 pub(crate) fn parse_password_phc(contents: &str, path: &str) -> Result<String, DynError> {
     let phc = contents.trim().to_string();
     if !phc.starts_with("$argon2") {
@@ -90,8 +82,6 @@ pub(crate) fn derive_public_key(private_key: &str) -> Result<String> {
 }
 
 impl<'a> StateApplicator<'a> {
-    /// Encrypt `plain` with the configured crypt secret and return its
-    /// base64-encoded form. `what` describes the secret for error messages.
     pub(crate) fn encrypt_to_b64(&self, plain: &str, what: &str) -> Result<String, DynError> {
         let secret = load_secret_bytes(self.crypt_secret_file)
             .map_err(|e| format!("Failed to load crypt secret: {}", e))?;
@@ -195,11 +185,7 @@ mod helper_tests {
 
     #[test]
     fn read_credential_default_dir_when_env_unset() {
-        // Without GRADIENT_CREDENTIALS_DIR set, credentials_dir() returns the
-        // built-in systemd-credentials path. The read fails (no such file),
-        // so we just verify the error embeds the expected suffix and label.
-        // We don't assert on the env var (other tests run in parallel and
-        // may set it concurrently).
+        // The env var is not asserted on. Parallel tests can set it concurrently.
         let err = read_credential("user", "alice", "password", "password file").unwrap_err();
         let s = err.to_string();
         assert!(s.contains("password file"));

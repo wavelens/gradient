@@ -4,10 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Pre-apply validation of a [`StateConfiguration`]. Each `State*` entity has
-//! its own validator; [`StateConfiguration::validate`] executes them in order over a
-//! shared [`EntityLookup`] / [`ErrorCollector`].
-
 mod api_keys;
 mod caches;
 mod helpers;

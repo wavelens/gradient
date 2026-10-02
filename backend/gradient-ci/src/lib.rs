@@ -35,7 +35,6 @@ pub use self::unpark::{
 pub use gradient_git_host::github_app::*;
 pub use gradient_git_host::reporter::*;
 
-/// Pulls this crate into a binary that otherwise references nothing from it, so
-/// the statements it declares with `gradient_db::sql!` reach the plan gate's
-/// registry. A linker drops an rlib nothing mentions, registry entries included.
+/// A linker is dropping an rlib that nothing mentions, registry entries included. This call is
+/// pulling the crate in for its `gradient_db::sql!` statements to reach the plan gate's registry.
 pub const fn link() {}

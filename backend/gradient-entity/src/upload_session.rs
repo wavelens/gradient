@@ -10,10 +10,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::ids::{ProjectId, UploadSessionId};
 
-/// Build-request upload session. `manifest` is a JSONB array of
-/// `{path, hash, size}` objects describing the full repo snapshot;
-/// `missing` is a JSONB array of BLAKE3 hex strings the client still
-/// owes the server before `dispatch` can proceed.
 #[derive(Clone, Debug, Default, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
 #[sea_orm(table_name = "upload_session")]
 pub struct Model {

@@ -64,7 +64,6 @@ pub async fn get_evaluation(
             .join("\n")
     });
 
-    // Load entry points with their shared build statuses (per derivation).
     let ep_rows = EEntryPoint::find()
         .filter(CEntryPoint::Evaluation.eq(evaluation.id))
         .all(&state.web_db)
@@ -161,15 +160,10 @@ pub async fn get_evaluation(
     Ok(Json(res))
 }
 
-/// Maximum number of values per `IN (...)` parameter list. Postgres' wire
-/// protocol limits any query to 65 535 bind parameters; 10 000 leaves room
-/// for additional filters/joins and avoids overflowing on evaluations with
-/// tens of thousands of builds (issue #237).
+/// Postgres' wire protocol is limiting a query to 65 535 bind parameters. 10 000 is leaving room
+/// for further filters on evaluations with tens of thousands of builds (#237).
 const IS_IN_CHUNK: usize = 10_000;
 
-/// Display rank of a build status, matching the sidebar sections in
-/// `evaluation-log.component.ts::buildGroups`: what is running or broken stays
-/// above what is finished.
 fn status_rank(status: BuildStatus) -> u32 {
     use gradient_entity::build::BuildStatus::*;
     match status {
@@ -178,7 +172,6 @@ fn status_rank(status: BuildStatus) -> u32 {
         Aborted => 2,
         Created | Queued => 3,
         Completed | Substituted => 4,
-        // Settled work with no result: below everything that has one.
         Skipped => 5,
     }
 }
@@ -193,15 +186,11 @@ pub async fn get_evaluation_builds(
     let ctx = EvalAccessContext::load(&state, evaluation_id, &maybe_user, api_key.as_ref()).await?;
     let evaluation = ctx.evaluation;
 
-    // One build_job per (eval, derivation); the shared build carries the status.
     let jobs = EBuildJob::find()
         .filter(CBuildJob::Evaluation.eq(evaluation.id))
         .all(&state.web_db)
         .await?;
 
-    // #489: scope to one package's build-time closure (the build plus its
-    // transitive deps) so a failed top-level package shows only the failures
-    // that caused it, not every failure in the evaluation.
     let jobs = if let Some(scope) = query.scope {
         let root = EBuildJob::find_by_id(scope)
             .filter(CBuildJob::Evaluation.eq(evaluation.id))
@@ -254,11 +243,6 @@ pub async fn get_evaluation_builds(
         }
     }
 
-    // #614: within a status, order by dependency layer and then by derivation
-    // name, so each section reads like the dependency graph page - the entry
-    // point on top, every build above the builds it needs. Layers are taken
-    // over the jobs that survived the scope filter, so a scoped view layers
-    // relative to its own root.
     let layers = gradient_db::graph::layers::dependency_layers(
         &drv_ids.iter().copied().collect(),
         &gradient_db::graph::layers::eval_dependency_edges(&state.web_db, evaluation.id).await?,
@@ -290,8 +274,6 @@ pub async fn get_evaluation_builds(
     let page_slice: Vec<&(u32, u32, &str, &MBuildJob, BuildStatus)> =
         sorted.iter().skip(offset).take(limit).collect();
 
-    // Hydrate `has_artefacts` only for the page. Bounded by `limit`, so the
-    // `IN` clause is safe regardless of evaluation size.
     let page_drv_ids: Vec<DerivationId> = page_slice
         .iter()
         .map(|(_, _, _, j, _)| j.derivation)
@@ -320,8 +302,8 @@ pub async fn get_evaluation_builds(
         }
     }
 
-    // Batch the latest-attempt lookup for the whole page (per shared build); a
-    // per-build query here is an N+1 that made large build lists take ~10s (#391).
+    // The latest attempt is looked up for the whole page at once. A per-build query here was an N+1
+    // that made large build lists take ~10s (#391).
     let page_shared_build_ids: Vec<DerivationBuildId> = page_slice
         .iter()
         .map(|(_, _, _, j, _)| j.derivation_build)
@@ -369,10 +351,6 @@ pub async fn get_evaluation_builds(
     Ok(Json(res))
 }
 
-/// `GET /evals/{evaluation}/messages`
-///
-/// Returns all `evaluation_message` rows for an evaluation, each annotated with
-/// the list of `entry_point` UUIDs the message is attached to (empty = evaluation-scoped).
 pub async fn get_evaluation_messages(
     state: State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
@@ -390,7 +368,6 @@ pub async fn get_evaluation_messages(
 
     let msg_ids: Vec<EvaluationMessageId> = messages.iter().map(|m| m.id).collect();
 
-    // Fetch all entry_point_message join rows for these messages in one query.
     let ep_rows = if msg_ids.is_empty() {
         vec![]
     } else {
@@ -400,7 +377,6 @@ pub async fn get_evaluation_messages(
             .await?
     };
 
-    // Build a map: message_id -> [entry_point_id]
     let mut ep_map: std::collections::HashMap<EvaluationMessageId, Vec<EntryPointId>> =
         std::collections::HashMap::new();
     for row in ep_rows {

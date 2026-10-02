@@ -4,11 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Persist the upstream narinfo `FileHash` (compressed-NAR hash) on
-//! `derivation_output`. Lets the worker relay a substitutable NAR verbatim -
-//! reporting the upstream file hash instead of recomputing it - when the
-//! upstream payload is already zstd-compressed at our window threshold.
-
 use sea_orm_migration::prelude::*;
 use sea_orm_migration::sea_orm::ConnectionTrait;
 

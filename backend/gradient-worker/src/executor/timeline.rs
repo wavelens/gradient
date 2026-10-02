@@ -4,27 +4,19 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Per-job phase timeline: scoped spans measured from the moment the worker
-//! accepted the job.
-
 use std::sync::Arc;
 use std::time::Instant;
 
 use gradient_util::sync::Mutex;
 use gradient_wire::types::{JobPhase, JobPhaseSpan};
 
-/// Ceiling on the spans one job records. A large eval pushes a NAR per closure
-/// member, so an uncapped timeline would put tens of thousands of spans in the
-/// terminal message and a row each in the database. Past the cap the phase
-/// is still running, it just stops being timed individually.
+/// A large eval is pushing one NAR per closure member. An uncapped timeline would put tens of
+/// thousands of spans into the terminal message and the database.
 const MAX_SPANS: usize = 2_000;
 
-/// Records how one job spent its time. Cloned into every phase guard, so all
-/// mutation goes through the interior lock.
 pub struct JobTimeline {
     start: Instant,
     spans: Mutex<Vec<JobPhaseSpan>>,
-    /// Indices of the spans still open, innermost last.
     open: Mutex<Vec<u32>>,
     dropped: Mutex<u64>,
 }
@@ -39,8 +31,6 @@ impl JobTimeline {
         })
     }
 
-    /// Open a span that closes when the returned guard drops. Past `MAX_SPANS`
-    /// the guard is inert and the phase is counted as dropped instead.
     pub fn enter(self: &Arc<Self>, phase: JobPhase) -> PhaseGuard {
         let start_ms = self.elapsed_ms();
         let parent = self.open.lock().last().copied();
@@ -72,13 +62,10 @@ impl JobTimeline {
         }
     }
 
-    /// How many spans the cap discarded, for the log line on job completion.
     pub fn dropped(&self) -> u64 {
         *self.dropped.lock()
     }
 
-    /// Every span recorded so far. Spans still open are reported closed at the
-    /// current offset so a failed job still yields a usable timeline.
     pub fn snapshot(&self) -> TimelineSnapshot {
         let elapsed_ms = self.elapsed_ms();
         let open = self.open.lock().clone();
@@ -97,17 +84,13 @@ impl JobTimeline {
     }
 }
 
-/// The spans plus the job clock they were taken at.
 pub struct TimelineSnapshot {
     pub spans: Vec<JobPhaseSpan>,
     pub elapsed_ms: u64,
 }
 
-/// Closes its span on drop. `record` attaches the path and byte counters the
-/// board shows next to the duration.
 pub struct PhaseGuard {
     timeline: Arc<JobTimeline>,
-    /// `None` once the span cap is reached; the guard then does nothing.
     index: Option<u32>,
     paths: u32,
     bytes: u64,
@@ -133,8 +116,8 @@ impl Drop for PhaseGuard {
             span.bytes = self.bytes;
         }
 
-        // Removed by identity rather than popped: concurrent phases inside one
-        // job would otherwise close each other's spans.
+        // Spans are removed by identity rather than popped. Concurrent phases inside one job would
+        // otherwise close each other's spans.
         self.timeline.open.lock().retain(|i| *i != index);
     }
 }
@@ -143,8 +126,6 @@ impl Drop for PhaseGuard {
 mod tests {
     use super::*;
 
-    /// A span opened inside another records the outer one as its parent, which
-    /// is the whole point: the board draws NAR pushes underneath compress.
     #[test]
     fn an_inner_span_records_its_parent() {
         let t = JobTimeline::new();
@@ -161,7 +142,6 @@ mod tests {
         assert_eq!(spans[1].parent, Some(0));
     }
 
-    /// Siblings share a parent rather than chaining off each other.
     #[test]
     fn siblings_share_the_enclosing_parent() {
         let t = JobTimeline::new();
@@ -174,8 +154,6 @@ mod tests {
         assert_eq!(spans[2].parent, Some(0));
     }
 
-    /// A span left open when the job fails is still reported, closed at the
-    /// moment of the snapshot, so a partial timeline reaches the board.
     #[test]
     fn an_open_span_is_closed_by_the_snapshot() {
         let t = JobTimeline::new();
@@ -186,8 +164,6 @@ mod tests {
         assert!(spans[0].end_ms >= spans[0].start_ms);
     }
 
-    /// Offsets run from job start, not from the enclosing span, and never move
-    /// backwards.
     #[test]
     fn offsets_are_monotonic_from_job_start() {
         let t = JobTimeline::new();
@@ -203,10 +179,6 @@ mod tests {
         assert!(spans[1].start_ms >= spans[0].end_ms);
     }
 
-    /// A job that opens more phases than the cap keeps the first `MAX_SPANS`
-    /// and counts the rest, rather than growing the terminal message without
-    /// bound. A large eval pushes one NAR per closure member, so this is the
-    /// normal case, not a pathological one.
     #[test]
     fn the_span_cap_bounds_the_timeline() {
         let t = JobTimeline::new();
@@ -218,8 +190,6 @@ mod tests {
         assert_eq!(t.dropped(), 10);
     }
 
-    /// The reported clock is the one the open spans were closed at, so the
-    /// server's tail (`elapsed_ms` minus the last span end) is never negative.
     #[test]
     fn the_snapshot_clock_covers_every_span() {
         let t = JobTimeline::new();
@@ -232,7 +202,6 @@ mod tests {
         assert_eq!(snapshot.elapsed_ms, last_end);
     }
 
-    /// An inert guard must not corrupt the nesting of the spans around it.
     #[test]
     fn a_capped_guard_leaves_nesting_intact() {
         let t = JobTimeline::new();

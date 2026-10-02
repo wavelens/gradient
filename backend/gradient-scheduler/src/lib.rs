@@ -4,18 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Job scheduler - tracks connected workers and dispatches eval/build jobs.
-//!
-//! Injected into the axum router as an `Extension<Arc<Scheduler>>`.
-//!
-//! The `Scheduler` impl is split across submodules by concern:
-//! - [`worker_lifecycle`] - connect / disconnect / capability updates
-//! - [`job_handlers`] - queue, assignment, status, completion, log, abort
-//! - [`loops`] - background loops that poll the DB and enqueue jobs
-//! - [`build`] - `BuildOutput`/completion/failure handling and self-heal
-//! - [`waiting_state`] - refreshes evaluation status against the worker pool
-//! - [`buildability`] - whether the connected pool can build a pending shared build
-
 pub mod actor;
 mod assessment_memo;
 pub mod build;
@@ -50,9 +38,9 @@ use actor::{CALL_TIMEOUT, CoreActor, CoreArgs, Counts, SchedulerMsg};
 pub use job_handlers::timeline::ReportedTimeline;
 pub use jobs::{AssignDecision, BoardActiveJob, DecisionCandidate, PendingJobInfo};
 
-/// Pulls this crate into a binary that otherwise references nothing from it, so
-/// the statements it declares with `gradient_db::sql!` reach the plan gate's
-/// registry. A linker drops an rlib nothing mentions, registry entries included.
+/// This function is pulling the crate into binaries that reference nothing else from it. A linker
+/// is dropping an unmentioned rlib, and with it the `gradient_db::sql!` entries the plan gate is
+/// reading.
 pub const fn link() {}
 
 #[cfg(test)]
@@ -60,28 +48,14 @@ mod assign_tests;
 #[cfg(test)]
 mod scheduler_tests;
 
-/// The shared scheduler - clone freely (all fields are `Arc`s).
 #[derive(Clone)]
 pub struct Scheduler {
-    /// Shared application state (DB, CLI config, etc.).
     pub state: Arc<ServerState>,
-    /// The live state actor, republished on every (re)spawn; callers wait on
-    /// the watch so a restart looks like latency, not an error.
     core: Arc<tokio::sync::watch::Sender<Option<ActorRef<SchedulerMsg>>>>,
-    /// The live build-dispatch actor, re-published by its factory on every
-    /// (re)spawn, so `kick_assigner` always reaches the current instance.
     pub(crate) build_assigner: Arc<arc_swap::ArcSwapOption<ractor::ActorRef<loops::BuildMsg>>>,
-    /// Edge-trigger generation for `kick_assigner`: the dispatcher services a
-    /// burst of kicks with one pass by comparing against the generation it saw.
     pub(crate) kick_gen: Arc<AtomicU64>,
-    /// Scoring policy used when selecting which pending job to assign to a
-    /// requesting worker.  Shared via `Arc` so it can be read lock-free.
     pub(crate) policy: Arc<dyn gradient_pool::score::ScoringPolicy>,
-    /// Windowed instance metrics snapshot, updated periodically by
-    /// `instance_metrics_loop` and read lock-free during scoring.
     pub(crate) instance: Arc<arc_swap::ArcSwap<gradient_pool::score::InstanceContext>>,
-    /// Per-task eval-RAM prediction (p95 peak RSS), refreshed by
-    /// `instance_metrics_loop`, consumed by eval scoring.
     pub(crate) eval_history: Arc<
         arc_swap::ArcSwap<
             std::collections::HashMap<
@@ -90,12 +64,7 @@ pub struct Scheduler {
             >,
         >,
     >,
-    /// Instance draining toggle (superuser): when set, dispatch is paused and
-    /// in-flight evaluations are parked so the server can be stopped safely.
-    /// In-memory only, so it auto-clears on the next startup.
     pub draining: Arc<AtomicBool>,
-    /// Each in-flight evaluation's last build-phase assessment, reused while
-    /// its counters and the pool are unchanged.
     pub(crate) assessments: Arc<std::sync::Mutex<assessment_memo::AssessmentMemo>>,
     pub(crate) cluster_wake: Arc<tokio::sync::Notify>,
     pub(crate) prepared:
@@ -132,7 +101,6 @@ impl Scheduler {
         }
     }
 
-    /// Spawn the state actor, linked to `parent` when supervised, and publish it.
     pub async fn spawn_core(
         &self,
         parent: Option<ActorCell>,
@@ -148,7 +116,6 @@ impl Scheduler {
         Ok(actor)
     }
 
-    /// Observe core (re)publications; the sessions supervisor re-registers on each.
     pub fn core_changes(&self) -> tokio::sync::watch::Receiver<Option<ActorRef<SchedulerMsg>>> {
         self.core.subscribe()
     }
@@ -182,8 +149,6 @@ impl Scheduler {
             .map_err(|e| anyhow::anyhow!("scheduler core unreachable: {e}"))
     }
 
-    /// Drop the eval job and its build jobs from the tracker. Workers already
-    /// assigned finish or time out; the DB-side abort is the caller's job.
     pub async fn cancel_evaluation_jobs(
         &self,
         eval_id: EvaluationId,
@@ -203,9 +168,6 @@ impl Scheduler {
         }
     }
 
-    /// Spawn background task polling, eval dispatch, and build dispatch loops.
-    ///
-    /// Call once after creating the scheduler, before serving requests.
     pub fn start(self: &Arc<Self>) {
         let scheduler = Arc::downgrade(self);
         self.state.startable_set.on_move(move || {
@@ -216,7 +178,6 @@ impl Scheduler {
         loops::start_assign_loops(Arc::clone(self));
     }
 
-    /// Per-loop supervision health (restarts, pass errors, timeouts, last ok).
     pub fn loop_health(&self) -> Vec<(&'static str, gradient_util::supervision::LoopHealth)> {
         self.state
             .shutdown
@@ -231,7 +192,6 @@ impl Scheduler {
             .unwrap_or_default()
     }
 
-    /// `(workers_connected, jobs_pending, jobs_active)` for the metrics endpoint.
     pub async fn metrics_snapshot(&self) -> (usize, usize, usize) {
         let c = self.counts().await;
         (c.workers, c.pending, c.active)
@@ -243,7 +203,6 @@ impl Scheduler {
             .unwrap_or_default()
     }
 
-    /// Per-dimension classification of in-flight jobs for the worker-load radar.
     pub async fn board_active_jobs(&self) -> Vec<jobs::BoardActiveJob> {
         self.call(|reply| SchedulerMsg::BoardActiveJobs { reply })
             .await
@@ -282,11 +241,9 @@ impl Scheduler {
             .flatten()
     }
 
-    /// The subset of `job_ids` the tracker knows nothing about (neither pending
-    /// nor active). On a core outage every id counts as tracked, so a dispatch
-    /// pass enqueues nothing rather than duplicating work.
-    /// Keys neither the tracker nor an open cluster attempt holds; a member whose
-    /// report waits for its attempt's verdict is in neither map but still owned.
+    /// A core outage is counting every id as tracked. A dispatch pass is then enqueuing nothing
+    /// instead of duplicating work. A member whose report is waiting for its attempt's verdict is
+    /// in neither map but still owned.
     pub async fn untracked(&self, job_ids: Vec<String>) -> Vec<String> {
         let untracked = self
             .call(|reply| SchedulerMsg::Untracked { job_ids, reply })
@@ -299,7 +256,6 @@ impl Scheduler {
             .collect()
     }
 
-    /// Drop the pending builds `stale` names; a core outage prunes nothing.
     pub(crate) async fn prune_pending_builds(
         &self,
         stale: impl Fn(&jobs::PendingBuildJob) -> bool + Send + 'static,

@@ -11,8 +11,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::ids::PendingDeliveryId;
 
-/// What a row owes. An `Event` expands into the deliveries it implies;
-/// `ActionDelivery` and `WebhookDelivery` are one external call each.
 #[repr(i16)]
 #[derive(
     Debug,

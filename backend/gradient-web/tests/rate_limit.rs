@@ -4,13 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Integration tests for the per-IP HTTP rate limiter.
-//!
-//! Verifies that the sensitive auth tier rejects bursts beyond its capacity
-//! with HTTP 429, while the public NAR cache tier (`/cache/{cache}/...`) is
-//! sized generously enough that substituters issuing many requests per build
-//! aren't throttled at moderate burst.
-
 use axum_test::TestServer;
 use gradient_core::ServerState;
 use gradient_db::{WebDb, WorkerDb};
@@ -68,10 +61,6 @@ fn make_state() -> Arc<ServerState> {
     })
 }
 
-/// Auth tier burst is 5: requests 1-5 from the same client succeed, request
-/// 6 is rejected with 429 before the handler starts. We use
-/// `/api/v1/auth/check-username` with a too-short username so the handler
-/// returns early without touching the DB.
 #[test]
 fn auth_tier_throttles_burst() {
     let rt = tokio::runtime::Builder::new_current_thread()
@@ -108,10 +97,6 @@ fn auth_tier_throttles_burst() {
     });
 }
 
-/// Cache tier burst is 1000: 50 rapid GETs against `/cache/{cache}/...` all
-/// succeed (or fail through to the handler) - no 429s. The handler itself
-/// 404s for the unknown cache, but the request reaching the handler proves
-/// the rate limiter didn't reject it.
 #[test]
 fn cache_tier_does_not_throttle_moderate_burst() {
     let rt = tokio::runtime::Builder::new_current_thread()
@@ -133,10 +118,6 @@ fn cache_tier_does_not_throttle_moderate_burst() {
     });
 }
 
-/// The cache-scoped proto WS upgrade shares the generous NAR-download tier
-/// (burst 3000), so 250 rapid upgrade attempts against `/cache/{cache}/proto`
-/// are never rejected with 429. The handler rejects the non-upgrade GET
-/// downstream, but reaching it proves the per-IP limiter let the request pass.
 #[test]
 fn cache_proto_tier_does_not_throttle_burst() {
     let rt = tokio::runtime::Builder::new_current_thread()

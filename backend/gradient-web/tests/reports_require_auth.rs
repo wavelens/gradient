@@ -4,16 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Generating a diagnostic report is an authenticated action.
-//!
-//! `GET /evals/{evaluation}/report` packs the evaluation and every failed
-//! build's log into a SQLite file. The route used to sit on the optional-auth
-//! router, where `EvalAccessContext::load` waves through any public project, so
-//! an anonymous caller could export one. `include_instance` defaults to `true`
-//! and costs `ManageWorkers`, which hid the hole behind a 403 until a caller
-//! passed `include_instance=false`. The OpenAPI contract has always listed this
-//! path under the global `bearerAuth`; these tests hold the code to it.
-
 #![expect(
     clippy::unwrap_used,
     reason = "test scaffolding: a fixture helper that cannot build its value should fail the test loudly"
@@ -40,8 +30,6 @@ fn report_path(query: &str) -> String {
     format!("/api/v1/evals/{}/report?{query}", EvaluationId::now_v7())
 }
 
-/// The middleware refuses before any row is read, so the mock never needs a
-/// project: reaching the handler at all would surface as a different status.
 fn assert_rejected_by_auth(res: axum_test::TestResponse) {
     res.assert_status_forbidden();
     let body: Value = res.json();
@@ -61,8 +49,7 @@ fn anonymous_cannot_generate_a_report() {
     });
 }
 
-/// The bypass that made this reachable: opting out of the instance section
-/// skipped the only branch that required a logged-in user.
+/// Opting out of the instance section skipped the only branch requiring a logged-in user.
 #[test]
 fn anonymous_cannot_dodge_the_gate_by_dropping_instance_context() {
     run(async {

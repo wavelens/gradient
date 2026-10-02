@@ -4,19 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Project ↔ worker registration helpers consumed by the trigger
-//! pipeline (no-workers gate) and the worker-register reconcile path.
-
 use gradient_types::ids::ProjectId;
 use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter};
 
-/// Returns `true` when the project has at least one active worker
-/// registration with the `eval` capability gate enabled.
-///
-/// A `Queued` evaluation can only progress once an `eval`-capable worker
-/// picks up its `FlakeJob`. Until then the build dispatch repair pass has
-/// nothing to do - there are no builds yet - so a project without any
-/// eval-capable registration would otherwise sit in `Queued` forever.
 pub async fn project_has_eval_capable_worker_registration<C: ConnectionTrait>(
     db: &C,
     project: ProjectId,

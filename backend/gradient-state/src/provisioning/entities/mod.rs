@@ -4,8 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Per-entity `apply_*` provisioning, each an `impl StateApplicator` block.
-
 mod api_keys;
 mod caches;
 mod integrations;

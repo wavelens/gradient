@@ -4,12 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! The [`PatchGenerator`] trait and the native [`FlakeLockGenerator`].
-//!
-//! The generator owns the pure lock-rewrite logic and delegates all I/O
-//! (revision lookup + narHash) to a [`RevisionResolver`], so the rewrite is
-//! unit-tested with a fake resolver and no network or nix.
-
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -19,7 +13,6 @@ use std::path::{Path, PathBuf};
 use super::lock::FlakeLock;
 use super::resolver::RevisionResolver;
 
-/// A tracked flake input name (a key in the root node's `inputs`).
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct InputName(pub String);
 
@@ -41,7 +34,6 @@ impl std::fmt::Display for InputName {
     }
 }
 
-/// One input that the patch bumped, for templating and the sidecar row.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BumpedInput {
     pub name: String,
@@ -49,29 +41,23 @@ pub struct BumpedInput {
     pub new_rev: String,
 }
 
-/// A single file edit produced by a generator.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FileEdit {
     pub path: PathBuf,
     pub contents: Vec<u8>,
 }
 
-/// The output of a generator: file edits plus the set of bumped inputs.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Patch {
     pub edits: Vec<FileEdit>,
     pub bumped: Vec<BumpedInput>,
 }
 
-/// Produces a [`Patch`] from a checkout. v1 has a single impl,
-/// [`FlakeLockGenerator`]; a future `UpdateScriptGenerator` slots in here.
 #[async_trait]
 pub trait PatchGenerator: Send + Sync {
-    /// Produce a patch bumping `tracked` inputs, or `None` when nothing changed.
     async fn produce(&self, checkout: &Path, tracked: &[InputName]) -> Result<Option<Patch>>;
 }
 
-/// Native zero-nix `flake.lock` updater.
 #[derive(Debug)]
 pub struct FlakeLockGenerator<R: RevisionResolver> {
     resolver: R,

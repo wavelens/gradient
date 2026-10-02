@@ -29,48 +29,32 @@ pub struct CacheMetricPoint {
 #[derive(Serialize)]
 pub struct StorageMetricPoint {
     pub time: String,
-    /// Packages added to the cache in this bucket.
     pub packages: i64,
-    /// Compressed bytes added in this bucket.
     pub bytes: i64,
 }
 
 #[derive(Serialize)]
 pub struct CacheStatsResponse {
-    /// Total compressed bytes of all NARs cached by this cache.
     pub total_bytes: i64,
-    /// Total uncompressed NAR bytes of all packages cached by this cache.
     pub total_nar_bytes: i64,
-    /// Total number of packages (signed build outputs) in this cache.
     pub total_packages: i64,
-    /// Packages/bytes added per minute for the last 60 minutes.
     pub storage_minutes: Vec<StorageMetricPoint>,
-    /// Packages/bytes added per hour for the last 24 hours.
     pub storage_hours: Vec<StorageMetricPoint>,
-    /// Packages/bytes added per day for the last 30 days.
     pub storage_days: Vec<StorageMetricPoint>,
-    /// Packages/bytes added per week for the last 12 weeks.
     pub storage_weeks: Vec<StorageMetricPoint>,
-    /// Traffic bucketed by minute for the last 60 minutes.
     pub minutes: Vec<CacheMetricPoint>,
-    /// Traffic bucketed by hour for the last 24 hours.
     pub hours: Vec<CacheMetricPoint>,
-    /// Traffic bucketed by day for the last 30 days.
     pub days: Vec<CacheMetricPoint>,
-    /// Traffic bucketed by week for the last 12 weeks.
     pub weeks: Vec<CacheMetricPoint>,
 }
 
-/// Add bytes served for a NAR request to the current minute bucket of the
-/// per-instance accumulator. `gradient_db::metrics::cache_traffic` writes it; the request
-/// path never touches the `cache_metric` row (#644).
+/// The request path must never touch the `cache_metric` row (#644).
+/// `gradient_db::metrics::cache_traffic` is writing the accumulator.
 pub fn record_nar_traffic(state: &ServerState, cache_id: CacheId, bytes: i64) {
     let bucket = cache_traffic::minute_bucket(gradient_types::now());
     state.cache_traffic.record(cache_id, bucket, bytes);
 }
 
-/// generate_series keeps every bucket present (zero-filled) up to "now"; the
-/// values come from the metric_rollup aggregates rather than ad-hoc scans.
 fn cache_series_sql(unit: &str, back: &str, gran: i16) -> String {
     format!(
         r#"SELECT gs.period,
@@ -96,8 +80,6 @@ gradient_db::sql_fn! {
         params = [Text("cache.bytes_sent"), Text("11111111-1111-1111-1111-111111111111")];
 }
 
-/// Zero-filled time-series of a cache rollup metric. `count` and `sum` carry
-/// the two values the cache-stats UI needs (requests/bytes or packages/bytes).
 async fn cache_series<C: sea_orm::ConnectionTrait>(
     db: &C,
     cache_id: CacheId,
@@ -200,7 +182,6 @@ pub async fn get_cache_stats(
     )
     .await?;
 
-    // Total compressed bytes and package count for this cache.
     let total_row = state
         .web_db
         .query_one_raw(CACHE_TOTALS.bind([sea_orm::Value::Uuid(Some(cache.id.into_inner()))]))
@@ -265,10 +246,6 @@ mod tests {
     use chrono::Timelike;
     use sea_orm::{DatabaseBackend, MockDatabase};
 
-    /// The serving path must only add into the accumulator: it takes no
-    /// connection, so the `cache_metric` row cannot be written per NAR (#644).
-    /// That the accumulated bucket becomes one additive upsert is
-    /// `gradient_db::metrics::cache_traffic`'s test.
     #[tokio::test]
     async fn two_serves_accumulate_instead_of_writing() {
         let db = MockDatabase::new(DatabaseBackend::Postgres).into_connection();

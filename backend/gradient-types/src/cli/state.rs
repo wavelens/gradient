@@ -10,10 +10,10 @@ use clap::Args;
 pub struct StateArgs {
     #[arg(long = "state-file", env = "GRADIENT_STATE_FILE")]
     pub file: Option<String>,
-    /// Validate `--state-file` (schema + cross-references, no database access)
-    /// and exit: zero when valid, non-zero on the first batch of errors.
-    /// Intended for build-time / CI checks; see the NixOS `state.validate`
-    /// option. Deliberately has no env var so it never trips a live server.
+    /// Validate `--state-file` and exit, checking schema and cross-references without database
+    /// access. The exit code is zero when valid and non-zero on the first batch of errors. It is
+    /// intended for build-time and CI checks like the NixOS `state.validate` option. It
+    /// deliberately has no env var to never trip a live server.
     #[arg(long = "state-validate")]
     pub validate: bool,
     #[arg(

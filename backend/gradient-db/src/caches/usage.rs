@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Stored bytes per cache, recounted off the request path. The read is its own
-//! statement so it may run parallel, which an `INSERT ... SELECT` never does.
+//! The read is a separate statement and can run in parallel.
+//! An `INSERT ... SELECT` is never running in parallel.
 
 use gradient_types::ids::CacheId;
 use sea_orm::{ConnectionTrait, DbErr, Value};
@@ -17,8 +17,6 @@ crate::sql! {
         params = [],
         tier = Sweep;
 
-    /// Every cache gets a row, one the totals omit recounts to zero, and an
-    /// unchanged count writes nothing.
     STORE_CACHE_USAGE = "INSERT INTO cache_usage (cache, bytes) \
         SELECT c.id, coalesce(x.bytes, 0) FROM cache c \
         LEFT JOIN unnest($1::uuid[], $2::bigint[]) AS x(cache, bytes) ON x.cache = c.id \
@@ -86,8 +84,6 @@ mod tests {
         assert!(values.contains("BigInt(Some(20))"), "{values}");
     }
 
-    /// A cache whose last path went has no row in the totals, so the write drives
-    /// from `cache` and not from the totals it was handed.
     #[test]
     fn an_emptied_cache_recounts_to_zero() {
         let sql = STORE_CACHE_USAGE.text();

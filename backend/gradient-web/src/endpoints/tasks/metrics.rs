@@ -40,8 +40,6 @@ pub struct TaskMetricsResponse {
     pub points: Vec<TaskMetricPoint>,
 }
 
-// ── Endpoints ─────────────────────────────────────────────────────────────────
-
 pub async fn get_task_metrics(
     state: State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
@@ -72,9 +70,6 @@ pub async fn get_task_metrics(
         .all(&state.web_db)
         .await?;
 
-    // Shared builds, their attempts and the entry points come back for the whole page
-    // at once; only the closure walks below stay per evaluation, since each one
-    // is seeded by that evaluation's own entry points.
     let eval_ids: Vec<EvaluationId> = evaluations.iter().map(|e| e.id).collect();
 
     let mut shared_builds_by_eval: HashMap<EvaluationId, Vec<DerivationBuildId>> = HashMap::new();
@@ -107,15 +102,12 @@ pub async fn get_task_metrics(
             .push(ep.derivation);
     }
 
-    // Each iteration opens and commits its own sized walk. Holding one across the
-    // loop would pin one of the web pool's connections for the whole request,
-    // which at nixpkgs scale is minutes of head-of-line blocking for every other
-    // page; keeping the closures instead would hold every evaluation's at once.
+    // Each iteration is opening and committing its own sized walk. One walk across the loop would
+    // pin a web pool connection for minutes at nixpkgs scale.
     let mut points = Vec::new();
     for evaluation in evaluations {
         let eval_time_ms = (evaluation.updated_at - evaluation.created_at).num_milliseconds();
 
-        // Sum build time over every shared build this eval needs (one per build_job).
         let build_time_total_ms: i64 = shared_builds_by_eval
             .get(&evaluation.id)
             .into_iter()
@@ -153,7 +145,6 @@ pub async fn get_task_metrics(
         });
     }
 
-    // Return in chronological order (oldest first for chart x-axis)
     points.reverse();
 
     Ok(ok_json(TaskMetricsResponse {
@@ -162,16 +153,9 @@ pub async fn get_task_metrics(
     }))
 }
 
-// ── Per-entry-point metrics ──────────────────────────────────────────────────
-
-/// The part of an entry point's metric point fixed by its derivation alone.
-///
-/// Every one of these walks a global table with no evaluation column, which is
-/// what makes `DerivationId` a sound memo key. The same-sounding `deps_total` on
-/// the task page is NOT this number: `task_board::entry_point_dep_counts` joins
-/// `build_job` on the evaluation, so it is scoped. Scope this walk to the
-/// evaluation to match it and the key has to become `(EvaluationId, DerivationId)`
-/// or every point on the chart gets the first evaluation's answer.
+/// These walks are reading global tables with no evaluation column. This is making `DerivationId` a
+/// sound memo key. Scoping the walk to the evaluation would require an `(EvaluationId,
+/// DerivationId)` key.
 #[derive(Clone, Copy)]
 struct DerivationMetrics {
     dependencies_count: i64,
@@ -180,8 +164,6 @@ struct DerivationMetrics {
     runtime_closure_size_bytes: Option<i64>,
 }
 
-/// Size one derivation's build closure. The walk opens and commits its own sized
-/// transaction, so no connection is held across the caller's loop.
 async fn derivation_metrics(
     state: &Arc<ServerState>,
     derivation: DerivationId,
@@ -209,7 +191,6 @@ pub struct EntryPointMetricsQuery {
 #[derive(Serialize, Deserialize, Debug)]
 pub struct EntryPointMetricPoint {
     pub evaluation_id: EvaluationId,
-    /// Per-eval build identity (`build_job` id) for this entry point's derivation.
     pub build_id: BuildJobId,
     pub created_at: chrono::NaiveDateTime,
     pub build_status: gradient_entity::build::BuildStatus,
@@ -227,8 +208,6 @@ pub struct EntryPointMetricsResponse {
     pub points: Vec<EntryPointMetricPoint>,
 }
 
-/// Returns per-evaluation build metrics for a single entry point identified by its
-/// `eval` attribute path (e.g. `packages.x86_64-linux.hello`).
 pub async fn get_entry_point_metrics(
     state: State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
@@ -260,10 +239,6 @@ pub async fn get_entry_point_metrics(
         .all(&state.web_db)
         .await?;
 
-    // Evaluation, shared build, build job and attempt for the whole page in four
-    // queries; the closure walks below stay per distinct derivation, each seeded
-    // by that derivation. The build-job read is narrowed by derivation too, so it
-    // returns the entry points rather than every build of every evaluation.
     let eval_ids: Vec<EvaluationId> = entry_points.iter().map(|ep| ep.evaluation).collect();
     let drv_ids: Vec<DerivationId> = entry_points.iter().map(|ep| ep.derivation).collect();
 
@@ -298,10 +273,6 @@ pub async fn get_entry_point_metrics(
             .await
             .unwrap_or_default();
 
-    // Only `evaluation_id`, `build_id` and `created_at` below are per evaluation;
-    // the rest, `build_status` and `build_time_ms` included, are determined by the
-    // derivation, because `derivation_build` is unique on it. The four that cost a
-    // query are memoised on it, as scalars, never as the closure set.
     let mut by_derivation: HashMap<DerivationId, DerivationMetrics> = HashMap::new();
     let mut points = Vec::new();
     for ep in entry_points {

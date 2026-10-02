@@ -16,12 +16,6 @@ use crate::error::{WebError, WebResult};
 use gradient_core::ServerState;
 use gradient_wire::{PerIpLimiter, ProtoLimiter};
 
-/// `GET /cache/{cache}/proto` - cache-scoped read-only proto WebSocket.
-///
-/// Authorization is enforced here, at the HTTP layer, via [`load_cache`]:
-/// anonymous callers reach public caches only; an API key reaches the private
-/// caches it can read (respecting `cache_pin`). Anonymous access additionally
-/// requires `allow_anonymous_cache`; private caches always require a key.
 #[allow(
     clippy::too_many_arguments,
     reason = "arg-heavy; refactor tracked in #503"
@@ -52,9 +46,6 @@ pub async fn cache_proto(
     .await?;
     let cache_id = cache.id;
 
-    // Every session counts against the global connection cap that protects the
-    // server from fd/memory exhaustion; anonymous sessions are additionally
-    // capped per source IP.
     let global_permit = global.try_acquire().ok_or_else(|| {
         WebError::service_unavailable("Server is at connection capacity; retry later.")
     })?;

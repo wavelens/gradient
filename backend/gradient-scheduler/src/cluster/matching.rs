@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Kuhn's augmenting-path matching: seats every member on a distinct worker, or
-//! reports that no full seating exists. Each member tries its workers in order.
+//! Kuhn's augmenting-path matching is seating every member on a distinct worker, or reporting the
+//! lack of a full seating.
 
 pub fn kuhn(eligible: &[Vec<usize>]) -> Option<Vec<usize>> {
     let right = eligible.iter().flatten().max().map_or(0, |m| m + 1);

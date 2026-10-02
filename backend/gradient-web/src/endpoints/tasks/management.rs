@@ -136,7 +136,6 @@ pub async fn get(
     )
     .await?;
 
-    // Batch-fetch the status of the last evaluation for each task.
     let eval_ids: Vec<EvaluationId> = listing
         .items
         .iter()
@@ -474,8 +473,6 @@ pub async fn patch_task(
     Ok(ok_json("Task updated".to_string()))
 }
 
-/// Holds shared context for the task-patch field validators so that
-/// `state` and `atask` are not threaded through every helper as parameters.
 struct TaskPatcher<'a> {
     state: &'a State<Arc<ServerState>>,
     atask: &'a mut ATask,
@@ -728,8 +725,6 @@ pub async fn post_task_transfer(
     )
     .await?;
 
-    // Only a project member with EditTask permission, or the current owner,
-    // may transfer ownership.
     let is_admin = has_permission(
         &state,
         user.id,

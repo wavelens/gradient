@@ -4,9 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! `GET /metrics/events`: every event on this server instance as JSON lines, for
-//! debugging. Best-effort and lossy by design; durable consumers use webhooks.
-
 use super::live::live_stream;
 use crate::error::{WebResult, require_superuser};
 use crate::helpers::ok_json;
@@ -25,7 +22,7 @@ pub struct FirehoseQuery {
     pub events: Option<String>,
 }
 
-/// The upgrade is checked after the caller, so a non-superuser learns 403 rather than 426.
+/// The upgrade is checked after the caller. A non-superuser is getting 403 rather than 426.
 pub async fn firehose_ws(
     State(state): State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,

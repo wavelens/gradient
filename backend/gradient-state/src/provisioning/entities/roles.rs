@@ -15,8 +15,6 @@ use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, Query
 use std::collections::HashMap;
 
 impl<'a> StateApplicator<'a> {
-    // ── apply_roles ───────────────────────────────────────────────────────────
-
     pub(crate) async fn apply_roles(
         &self,
         state_roles: &HashMap<String, StateRole>,

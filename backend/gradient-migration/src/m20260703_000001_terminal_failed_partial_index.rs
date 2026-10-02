@@ -4,10 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Partial index for the proactive dependency-failed sweep and the requeue
-//! paths, which seed recursive walks from the terminal-failed anchors on every
-//! dispatch tick (`status IN (FailedPermanent=4, DependencyFailed=6,
-//! FailedTimeout=9)`, requeue additionally Aborted=5).
+//! The predicate is matching FailedPermanent (4), Aborted (5), DependencyFailed (6) and
+//! FailedTimeout (9).
 
 use sea_orm_migration::prelude::*;
 use sea_orm_migration::sea_orm::ConnectionTrait;

@@ -4,11 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! The resolved settings that decide how a symptom should be read.
-//!
-//! An explicit key list rather than a serialization of the config: this is the
-//! part most likely to gain a secret field later and least likely to be
-//! re-reviewed, so adding one has to be a deliberate edit here.
+//! The settings are an explicit key list, not a serialization of the config. This part is likely to
+//! gain a secret field later. Adding a key must be a deliberate edit here.
 
 use anyhow::{Context as _, Result};
 use gradient_types::RuntimeConfig;
@@ -68,8 +65,8 @@ pub fn write_config_snapshot(conn: &Connection, config: &RuntimeConfig) -> Resul
         ("nar_verify_digest", config.nar.verify_digest.to_string()),
     ];
 
-    // The resolved S3 policy, not the raw arguments, so the file says what the
-    // server is actually doing; a local-disk instance says so instead.
+    // The resolved S3 policy is written instead of the raw arguments. A local-disk instance is
+    // saying so instead.
     match &config.s3 {
         Some(s3) => {
             entries.push(("storage_backend", "s3".to_owned()));
@@ -127,8 +124,6 @@ mod tests {
         }
     }
 
-    /// The circuit breaker threshold is the number a self-heal loop has to be
-    /// read against, so it must survive into the report.
     #[test]
     fn the_self_heal_threshold_is_present_and_real() {
         let dir = tempfile::tempdir().expect("tempdir");

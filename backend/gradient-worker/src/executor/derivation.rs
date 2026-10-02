@@ -4,8 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Construct a harmonia [`BasicDerivation`] from a parsed `.drv` file.
-
 use anyhow::{Context, Result};
 use bytes::Bytes;
 use gradient_derivation::{DrvOutputSpec, parse_drv};
@@ -17,36 +15,12 @@ use harmonia_utils_hash::{Algorithm, Hash};
 use std::collections::BTreeMap;
 use tracing::warn;
 
-/// Construct a harmonia [`BasicDerivation`] from a parsed drv file.
-///
-/// Output paths are taken directly from the `.drv` file:
-/// - non-empty `path` -> `InputAddressed` (concrete store path)
-/// - empty `path` -> `Deferred` (floating CA derivation)
-///
-/// This avoids calling `query_derivation_output_map`, which fails on some
-/// daemon versions that return full `/nix/store/...` paths where harmonia
-/// expects bare `hash-name` paths.
-///
-/// Structured attributes (`__json`) are moved from the env map to
-/// `structured_attrs` so the daemon handles them correctly.
 pub(super) async fn get_basic_derivation(
     full_drv_path: &str,
     drv: &gradient_derivation::Derivation,
 ) -> Result<BasicDerivation> {
-    // ── Build outputs from .drv data ──────────────────────────────────────────
-    //
-    // Three shapes of `.drv` output to disambiguate:
-    //
-    // 1. Fixed-output derivation (FOD): both `hash_algo` and `hash` are
-    //    populated (e.g. a `fetchurl`). The daemon **must** see this as
-    //    `CAFixed(ContentAddress)` because that's what unlocks network
-    //    access in the build sandbox - passing it as `InputAddressed`
-    //    sandboxes it without DNS, so curl fails with
-    //    `Could not resolve host: …` and the build dies.
-    // 2. Floating CA derivation: `path` is empty AND `hash_algo` is empty.
-    //    Daemon will compute the path from the build output -> `Deferred`.
-    // 3. Plain input-addressed derivation: `path` is set, no `hash_algo`.
-    //    -> `InputAddressed(StorePath)`.
+    // The daemon must see a fixed-output derivation as `CAFixed` to grant the build sandbox network
+    // access. An FOD sent as `InputAddressed` is failing every fetch with `Could not resolve host`.
     let mut outputs: BTreeMap<_, _> = BTreeMap::new();
     for o in &drv.outputs {
         let output_name = o
@@ -75,9 +49,6 @@ pub(super) async fn get_basic_derivation(
         outputs.insert(output_name, drv_output);
     }
 
-    // ── Input paths: input_sources + requested outputs of input_derivations ───
-    // Exactly what prefetch fetched: the daemon rejects any listed input that
-    // is absent, and an input's unrequested outputs are never fetched.
     let mut inputs: harmonia_store_path::StorePathSet = drv
         .input_sources
         .iter()
@@ -125,11 +96,6 @@ pub(super) async fn get_basic_derivation(
         }
     }
 
-    // ── Structured attributes ─────────────────────────────────────────────────
-    // harmonia's NixSerialize for BasicDerivation never writes `structured_attrs`
-    // to the wire - only `env` is sent. The `__json` key in env is what the Nix
-    // daemon reads for structured-attrs derivations, so leave it in place.
-
     let drv_name = derivation_name(full_drv_path);
 
     Ok(DerivationT {
@@ -146,29 +112,18 @@ pub(super) async fn get_basic_derivation(
             .iter()
             .map(|(k, v)| (Bytes::from(k.clone()), Bytes::from(v.clone())))
             .collect(),
+        // harmonia is never writing `structured_attrs` to the wire.
+        // The daemon is reading the `__json` key in `env` instead.
         structured_attrs: None,
     })
 }
 
-/// Nix's `nameFromPath`: a fixed output's path is computed from this name, so a
-/// `.drv` suffix left on it sends a path the daemon rejects.
 fn derivation_name(full_drv_path: &str) -> String {
     let base = strip_nix_store_prefix(full_drv_path);
     let name = base.split_once('-').map_or(base.as_str(), |(_, name)| name);
     name.strip_suffix(".drv").unwrap_or(name).to_owned()
 }
 
-/// Build a `DerivationOutput::CAFixed(...)` from a `.drv`'s `outputHashAlgo`
-/// and `outputHash` fields. Without this the daemon would treat the FOD as
-/// an input-addressed derivation, sandbox it without network access, and
-/// every fetch (curl, git clone, …) would fail with DNS errors.
-///
-/// The `.drv` `hash_algo` field follows Nix's wire format:
-///   `"sha256"`        -> flat sha256
-///   `"r:sha256"`      -> recursive (NAR-hashed) sha256
-///   `"text:sha256"`   -> text-hashed (rare, used by `builtins.toFile`)
-///
-/// The `hash` field is hex-encoded (base16) raw digest bytes.
 fn ca_fixed_output(hash_algo: &str, hash_hex: &str) -> Result<DerivationOutput> {
     let (method, algo_str) = if let Some(rest) = hash_algo.strip_prefix("r:") {
         (ContentAddressMethod::NixArchive, rest)
@@ -211,7 +166,6 @@ mod tests {
 
     #[test]
     fn ca_fixed_flat_sha256() {
-        // sha256("hello") in hex
         let h = "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824";
         let out = ca_fixed_output("sha256", h).unwrap();
         match out {
@@ -254,7 +208,6 @@ mod tests {
 
     #[test]
     fn ca_fixed_rejects_wrong_length_hash() {
-        // sha256 needs 32 bytes (64 hex chars); pass 8 bytes (16 hex chars).
         assert!(ca_fixed_output("sha256", "deadbeefdeadbeef").is_err());
     }
 }

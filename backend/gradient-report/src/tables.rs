@@ -4,36 +4,22 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! The export allowlist: every table the report may contain, every column of
-//! it, and what gets pseudonymised on the way out.
-//!
-//! Columns are named one by one and never with `*`, so a table that later gains
-//! a secret cannot start exporting it behind our back. Booleans are cast to
-//! `int` and everything else to `text`; SQLite's column affinity converts each
-//! back on insert, so the report keeps real types while extraction stays
-//! uniform.
+//! Columns are named one by one and never with `*`. A table gaining a secret column later cannot
+//! start exporting it unnoticed. Booleans are cast to `int` and everything else to `text`. SQLite
+//! column affinity is converting each value back on insert.
 
 use crate::redact::Redactor;
 
-/// One row of an exported table. Every value arrives as text from Postgres and
-/// is converted by SQLite affinity on insert.
 pub type Row = Vec<Option<String>>;
 
 pub struct TableSpec {
     pub name: &'static str,
     pub ddl: &'static str,
-    /// Scoped by `$1`: the evaluation for eval tables, the project for the ones
-    /// that describe more than it.
     pub sql: &'static str,
-    /// What `$1` actually selects, for the manifest to declare. Several tables
-    /// hang off the evaluation's *shared builds*, which are shared between
-    /// evaluations, so their rows are not the evaluation's alone.
     pub scope: &'static str,
     pub columns: &'static [&'static str],
 }
 
-/// The single place redaction policy lives, so it can be audited in one read.
-/// Anything not named here is exported verbatim.
 pub fn redact_value(
     r: &Redactor,
     table: &str,
@@ -45,8 +31,6 @@ pub fn redact_value(
         ("evaluation", "repository") | ("evaluation", "flake_source") => r.identity(&v, "repo"),
         ("evaluation", "started_by") => r.identity(&v, "user"),
         ("commit", "author") | ("commit", "author_name") => r.identity(&v, "user"),
-        // A commit message is free text carrying whatever the author wrote, so
-        // it gets the same treatment as a build log rather than a column rule.
         ("commit", "message") => r.text(&v),
         ("derivation", "name") | ("derivation", "pname") => r.package(&v),
         ("derivation_output", "package") | ("cached_path", "package") => r.package(&v),
@@ -90,30 +74,22 @@ macro_rules! spec {
     };
 }
 
-/// The derivations this evaluation drove: the ones it opened a `build_job` for.
 macro_rules! own_derivations {
     () => {
         "SELECT derivation FROM build_job WHERE evaluation = $1"
     };
 }
 
-/// The shared builds behind those derivations.
 macro_rules! own_shared_builds {
     () => {
         "SELECT derivation_build FROM build_job WHERE evaluation = $1"
     };
 }
 
-/// Those derivations plus every direct dependency of one.
-///
-/// `blocking_deps` is one count per EDGE over exactly this set, and the can-start state it
-/// counts is a property of the dependency's own shared build, outputs and cached paths.
-/// Export the edges without their far end and neither counter can be checked: the
-/// `LEFT JOIN ... IS NULL` rule that makes a missing dependency count as blocking
-/// fires on every dependency the file merely left out, which turned a correct
-/// stored `1` into an updated `24` on a real report. One hop is the whole
-/// requirement - a dependency's own dependencies are already summarised in its
-/// stored `blocking_deps`, which is why this is a boundary and not a closure.
+/// `blocking_deps` is one count per edge over exactly this set. The `LEFT JOIN ... IS NULL` rule is
+/// counting a missing dependency as blocking. Exporting edges without their far end would fire it
+/// on every omitted dependency. One hop is enough because a dependency's own `blocking_deps` is
+/// already summarizing its dependencies.
 macro_rules! derivation_scope {
     () => {
         concat!(
@@ -125,7 +101,6 @@ macro_rules! derivation_scope {
     };
 }
 
-/// Every output hash of every derivation the report carries.
 macro_rules! output_hashes {
     () => {
         concat!(
@@ -136,19 +111,12 @@ macro_rules! output_hashes {
     };
 }
 
-/// The same set: a runtime reference is an edge of the derivation graph now, so
-/// the one-hop dependency boundary `derivation_scope` carries already names the
-/// producer of every path an exported output references, and `output_hashes`
-/// carries its paths. That is what makes an absent row mean the instance never had
-/// the path rather than the export never asking for it, which is the whole
-/// diagnosis on an incomplete closure.
 macro_rules! cached_path_scope {
     () => {
         output_hashes!()
     };
 }
 
-/// Tables owned by, or reachable from, the evaluation itself.
 pub fn eval_scope_tables() -> &'static [TableSpec] {
     const SPECS: &[TableSpec] = &[
         spec!(
@@ -505,9 +473,6 @@ pub fn eval_scope_tables() -> &'static [TableSpec] {
     SPECS
 }
 
-/// Fleet and upstream state, scoped to the evaluation's project. Gated behind
-/// `include_instance` and the `ManageWorkers` permission, since it describes
-/// more than the evaluation that asked for it.
 pub fn instance_tables() -> &'static [TableSpec] {
     const SPECS: &[TableSpec] = &[
         spec!(
@@ -632,8 +597,6 @@ mod tests {
     use super::*;
     use crate::schema::ReportOptions;
 
-    /// The report must never carry a credential, and the guard has to be an
-    /// allowlist: a denylist starts leaking the day a table gains a column.
     #[test]
     fn no_exported_query_touches_a_secret_table_or_column() {
         const FORBIDDEN: &[&str] = &[
@@ -662,12 +625,6 @@ mod tests {
         }
     }
 
-    /// Every table an offline reader re-derives `blocking_deps` from is scoped to
-    /// the evaluation's derivations AND their direct dependencies. Without the
-    /// boundary the `LEFT JOIN ... IS NULL` rule that makes an absent dependency
-    /// count as blocking fires on every dependency the export merely left out, so
-    /// a correct stored counter updates to a wildly larger number and the file
-    /// accuses the instance of a dead zone it does not have.
     #[test]
     fn the_start_tables_carry_the_dependency_boundary() {
         for name in ["derivation", "derivation_build", "derivation_output"] {
@@ -681,9 +638,6 @@ mod tests {
         }
     }
 
-    /// One fragment behind all of them, for the reason `graph/can_start/fetchable.rs` keeps one
-    /// behind its seed and its recount: two spellings of the same scope drift,
-    /// and a reader cannot see that they have.
     #[test]
     fn every_per_derivation_scope_is_the_same_fragment() {
         let shared_build = spec_named("derivation_build").sql;
@@ -701,10 +655,6 @@ mod tests {
         }
     }
 
-    /// An attempt's substitute-miss budget is scoped per `(shared_build, evaluation)`
-    /// through its `build_job`. Export the attempts without those rows and the
-    /// budget cannot be bucketed at all, which is how a loop that ran 788 misses
-    /// against a threshold of 2 read as an ordinary retry history.
     #[test]
     fn the_jobs_behind_the_exported_attempts_are_exported() {
         let sql = spec_named("build_job").sql;
@@ -749,9 +699,6 @@ mod tests {
             .expect("spec exists")
     }
 
-    /// A build's phase events are recorded against its `derivation_build`
-    /// shared build, never the per-eval `build_job` row, so joining on `build_job.id`
-    /// silently exported an evaluation with no build timing at all.
     #[test]
     fn build_phase_events_hang_off_the_shared_build_not_the_build_job() {
         let sql = spec_named("phase_event").sql;
@@ -762,8 +709,6 @@ mod tests {
         assert!(!sql.contains("SELECT id FROM build_job"), "{sql}");
     }
 
-    /// The commit message is free text carrying whatever the author wrote, so
-    /// it takes the log treatment rather than passing through verbatim.
     #[test]
     fn a_commit_message_is_redacted_against_the_minted_pseudonyms() {
         let r = redactor(true, false);
@@ -780,10 +725,6 @@ mod tests {
         assert!(!out.contains("acme/infra"), "{out}");
     }
 
-    /// Worker history used to be scoped by project, and a connection is
-    /// attributed to whichever project registered the worker first, so a shared
-    /// worker's history landed under someone else's project and this report's
-    /// instance section came back empty. It follows the jobs instead.
     #[test]
     fn worker_history_follows_the_workers_that_ran_the_evaluation() {
         for name in ["worker_connection", "worker_sample"] {
@@ -799,9 +740,6 @@ mod tests {
         }
     }
 
-    /// A stuck evaluation is exactly the one worth reporting on, and
-    /// `updated_at` freezes at the moment it wedged: bounding the worker window
-    /// there ends it before the interesting period instead of at "now".
     #[test]
     fn the_worker_window_stays_open_while_the_evaluation_is_unfinished() {
         for name in ["worker_connection", "worker_sample"] {
@@ -817,10 +755,6 @@ mod tests {
         }
     }
 
-    /// A narinfo is only served when a `cached_path_signature` row exists for
-    /// the asking cache *and* carries a signature; without one the cache 404s a
-    /// path whose `cached_path` row says it is right there. That gate is
-    /// invisible in a report that stops at `cached_path`.
     #[test]
     fn the_narinfo_signature_gate_is_exported() {
         let spec = spec_named("cached_path_signature");
@@ -852,8 +786,6 @@ mod tests {
         );
     }
 
-    /// The gate is per cache, so a row that names no cache cannot say whether
-    /// the cache the client asked is the one holding the signature.
     #[test]
     fn a_signature_row_names_its_cache() {
         let spec = spec_named("cached_path_signature");

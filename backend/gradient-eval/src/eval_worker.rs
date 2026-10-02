@@ -4,16 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Long-lived Nix evaluator worker subprocess.
-//!
-//! The parent process spawns one or more copies of the gradient-worker binary
-//! with `--eval-subprocess` to host a persistent [`NixEvaluator`]. Parent and
-//! worker exchange rkyv frames over the worker's stdin/stdout (see
-//! [`crate::ipc`]), so the libnix init cost is paid only once per worker.
-//!
-//! This file is the subprocess entry point [`run_eval_worker`]; the protocol
-//! lives in [`crate::ipc`] and the parent-side pool in the worker crate.
-
 use std::io::Write;
 use tracing::{error, trace};
 
@@ -25,28 +15,15 @@ use crate::ipc::{
 use crate::nix_eval::NixEvaluator;
 use crate::stats::StatsDelta;
 
-/// Subprocess entry point. Reads [`EvalRequest`] frames from stdin, processes
-/// them with one persistent [`NixEvaluator`], writes [`EvalResponse`] frames
-/// to stdout. Returns when stdin reaches EOF or a `Shutdown` request arrives.
-///
-/// Diagnostics go through `tracing` (configured in `worker::main` to write
-/// formatted records to stderr, which the parent inherits) so init failures
-/// and stdin errors stay visible to JSON log aggregators with structured
-/// fields, target metadata, and `RUST_LOG` filtering applied.
 pub fn run_eval_worker() -> std::io::Result<()> {
     let stdin = std::io::stdin();
     let stdout = std::io::stdout();
     let mut reader = stdin.lock();
     let mut writer = stdout.lock();
 
-    // Version handshake before the (slow) evaluator init, so the parent can
-    // reject a mid-run binary swap without waiting on libnix.
     writer.write_all(&[EVAL_IPC_VERSION])?;
     writer.flush()?;
 
-    // Construct the evaluator once. If init fails we still loop so that the
-    // parent gets an error response per request instead of a silent EOF; the
-    // parent will then mark this worker dead and respawn.
     let evaluator = match NixEvaluator::new() {
         Ok(e) => Some(e),
         Err(e) => {
@@ -58,8 +35,6 @@ pub fn run_eval_worker() -> std::io::Result<()> {
         }
     };
 
-    // Per-request delta collection is on by default; disabling it skips every
-    // `ev.stats()` call so the subprocess pays zero overhead.
     let collect_stats = crate::stats::metrics_enabled();
     let mut last = if collect_stats {
         evaluator
@@ -70,8 +45,6 @@ pub fn run_eval_worker() -> std::io::Result<()> {
         nix_bindings::EvalStats::default()
     };
 
-    // Reads the cumulative counters, returns the delta since the prior request,
-    // and advances the baseline. `None` when stats collection is disabled.
     let mut take_delta = |ev: &NixEvaluator| -> Option<StatsDelta> {
         if !collect_stats {
             return None;
@@ -92,10 +65,6 @@ pub fn run_eval_worker() -> std::io::Result<()> {
         })
     };
 
-    // One walker (locked flake + open eval cache) reused across consecutive
-    // requests for the same repository, so a Plan/List/Resolve sequence pays
-    // the lock + cache open once. Writes are committed to the WAL after every
-    // request, so holding it open never withholds progress from shard peers.
     let mut walkers = WalkerCache { entry: None };
 
     loop {
@@ -103,15 +72,12 @@ pub fn run_eval_worker() -> std::io::Result<()> {
             error!(error = %e, "eval worker: stdin read error");
         })?
         else {
-            // EOF: parent closed the pipe.
             return Ok(());
         };
 
         let req = match decode_request(&payload) {
             Ok(r) => r,
             Err(e) => {
-                // The length prefix kept the stream aligned, so an undecodable
-                // payload is per-request recoverable: report and keep serving.
                 send(
                     &mut writer,
                     &EvalResponse::Err {
@@ -133,10 +99,9 @@ pub fn run_eval_worker() -> std::io::Result<()> {
                 wildcards,
                 input_overrides,
             } => with_evaluator(&evaluator, |ev| {
-                // Warnings from priming the prefix attrset resurface when each
-                // shard re-forces it, so they are not captured here; per-attr
-                // eval errors are, because a thrown shard root produces no shard
-                // for any later `List` to re-hit.
+                // Warnings from priming the prefix attrset are resurfacing in every shard.
+                // Per-attr eval errors are captured here, because a thrown shard root
+                // is leaving no shard for a later `List` to re-hit.
                 or_err(
                     walkers
                         .with(ev, &repository, &input_overrides, |walker| {
@@ -189,7 +154,6 @@ pub fn run_eval_worker() -> std::io::Result<()> {
                             &input_overrides,
                             attrs,
                         );
-                        // A failed item-frame write means the parent is gone.
                         io?;
                         EvalResponse::ResolveEnd {
                             warnings,
@@ -228,8 +192,6 @@ pub fn run_eval_worker() -> std::io::Result<()> {
     }
 }
 
-/// Executes `f` against the initialized evaluator, or answers the one canonical
-/// error when libnix failed to come up (the parent then discards this worker).
 fn with_evaluator<'ev>(
     evaluator: &'ev Option<NixEvaluator>,
     f: impl FnOnce(&'ev NixEvaluator) -> EvalResponse,
@@ -242,19 +204,14 @@ fn with_evaluator<'ev>(
     }
 }
 
-/// Collapses an operation's error into the wire's `Err` response.
 fn or_err(result: anyhow::Result<EvalResponse>) -> EvalResponse {
     result.unwrap_or_else(|e| EvalResponse::Err {
         message: format!("{e:#}"),
     })
 }
 
-/// Single-entry walker cache per `(repository, input_overrides)`.
-/// Consecutive requests for the same flake and override set (the common
-/// Plan/List/Resolve sequence) reuse one locked flake + open eval cache; a
-/// different repository or a different override set replaces the entry, so a
-/// pooled worker never serves a stale locked flake for a new override set.
-/// A cached walker plus the `(repository, input_overrides)` key it locked for.
+/// The cache key is including the input overrides.
+/// A pooled worker must never serve a stale locked flake for a new override set.
 type CachedWalker<'ev> = (String, Vec<(String, String)>, FlakeWalker<'ev>);
 
 struct WalkerCache<'ev> {
@@ -262,8 +219,6 @@ struct WalkerCache<'ev> {
 }
 
 impl<'ev> WalkerCache<'ev> {
-    /// The cached walker for `(repository, overrides)`, opening (and caching)
-    /// it if the key differs from the current entry.
     fn open(
         &mut self,
         ev: &'ev NixEvaluator,
@@ -275,7 +230,6 @@ impl<'ev> WalkerCache<'ev> {
             .as_ref()
             .is_none_or(|(repo, ovr, _)| repo != repository || ovr.as_slice() != overrides);
         if stale {
-            // Drop the previous walker before locking the next flake.
             self.entry = None;
             let walker = ev.walker(repository, overrides)?;
             self.entry = Some((repository.to_string(), overrides.to_vec(), walker));
@@ -295,11 +249,6 @@ impl<'ev> WalkerCache<'ev> {
     }
 }
 
-/// Resolve each attr in order, streaming one `ResolveItem` frame per attr the
-/// moment it is resolved. Returns the batch's captured warnings plus the IO
-/// status of the frame writes. A walker that cannot open becomes one per-attr
-/// error item per attr (streamed), never a top-level `Err`, matching the
-/// per-attr isolation contract of `Resolve`.
 fn stream_resolve<'ev, W: Write>(
     writer: &mut W,
     ev: &'ev NixEvaluator,
@@ -386,15 +335,6 @@ fn response_kind(resp: &EvalResponse) -> String {
     }
 }
 
-/// Executes `f` while capturing everything written to stderr (fd 2).
-///
-/// Redirects fd 2 to a pipe for the duration of `f`, then restores it.
-/// Returns the result of `f` alongside any lines from the captured output
-/// that look like Nix warnings.
-///
-/// Safe to use only from the single-threaded eval-worker subprocess
-/// (no Tokio runtime, no other threads). On non-Unix platforms (or if any
-/// fd operation fails) warnings are silently discarded.
 #[cfg(unix)]
 fn capture_warnings_during<F, T>(f: F) -> (T, Vec<String>)
 where
@@ -403,36 +343,30 @@ where
     use std::io::Read;
     use std::os::unix::io::FromRawFd;
 
-    // SAFETY (all libc calls below): this executes on the eval-worker's single
-    // thread; every fd (`2`, `saved`, `pipefd[*]`) is valid by construction and
-    // failures are best-effort - on error we just skip warning capture.
+    // SAFETY (all libc calls below): this code is executing on the eval-worker's single thread.
+    // Every fd (`2`, `saved`, `pipefd[*]`) is valid by construction.
+    // Failures are best-effort and are only skipping the warning capture.
     // `pipefd[0]` is handed to `File::from_raw_fd` exactly once, taking ownership.
 
-    // Duplicate the current stderr so we can restore it later.
     let saved = unsafe { libc::dup(2) };
     if saved < 0 {
         return (f(), vec![]);
     }
 
-    // Create a pipe: pipefd[0] = read end, pipefd[1] = write end.
     let mut pipefd = [-1i32; 2];
     if unsafe { libc::pipe(pipefd.as_mut_ptr()) } < 0 {
         unsafe { libc::close(saved) };
         return (f(), vec![]);
     }
 
-    // Point fd 2 at the write end of the pipe and close the duplicate.
     unsafe { libc::dup2(pipefd[1], 2) };
     unsafe { libc::close(pipefd[1]) };
 
-    // Run the evaluation. Nix writes warnings directly to fd 2.
     let result = f();
 
-    // Restore fd 2. After this, the pipe's write end has no open fds -> EOF.
     unsafe { libc::dup2(saved, 2) };
     unsafe { libc::close(saved) };
 
-    // Read all captured output from the read end (returns at EOF).
     let mut captured = String::new();
     let mut reader = unsafe { std::fs::File::from_raw_fd(pipefd[0]) };
     let _ = reader.read_to_string(&mut captured);
@@ -448,9 +382,6 @@ where
     (f(), vec![])
 }
 
-/// Groups captured Nix stderr into whole warnings: a `warning:` line plus every
-/// following line until the next log entry (`warning:`/`trace:`/`error:`/`note:`),
-/// so multi-line warnings keep all their lines instead of just the first.
 fn parse_warnings(captured: &str) -> Vec<String> {
     fn is_boundary(line: &str) -> bool {
         let t = line.trim_start().to_ascii_lowercase();

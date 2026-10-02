@@ -62,7 +62,7 @@ pub(super) fn validate(lookup: &EntityLookup, errors: &mut ErrorCollector) {
                     ),
                 );
             }
-            // Note: missing user is intentionally not an error (issue #94).
+            // A missing user is intentionally not an error (issue #94).
         }
     }
 }

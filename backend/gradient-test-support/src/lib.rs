@@ -4,21 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Shared test utilities for the gradient backend workspace.
-//!
-//! Dedupes `test_cli`, `test_state`, `NoopLogStorage`, `db_with`, and fixture
-//! builders that were previously copied into every crate's `tests/common.rs`.
-//!
-//! ```ignore
-//! use gradient_test_support::prelude::*;
-//!
-//! #[tokio::test]
-//! async fn example() {
-//!     let state = test_state(db_with(vec![[project()]]));
-//!     // ...
-//! }
-//! ```
-
 #![expect(
     clippy::unwrap_used,
     reason = "test scaffolding: a fixture helper that cannot build its value should fail the test loudly"

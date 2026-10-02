@@ -4,12 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Adds the DWARF build-id index backing `GET /cache/{cache}/debuginfo/{build_id}`.
-//! Each row maps a 40-hex build id to the `cached_path` whose NAR carries the
-//! `lib/debug/.build-id/<xx>/<yy>.debug` member, mirroring what nix writes when a
-//! binary cache is created with `index-debug-info=true`.
-//! `cached_path.debug_info_indexed` marks a NAR as already scanned so the
-//! backfill sweep never re-reads it - including the common case of no build ids.
+//! `cached_path.debug_info_indexed` is marking a NAR as scanned, including NARs without build ids.
+//! The backfill sweep is never re-reading a marked NAR.
 
 use sea_orm_migration::prelude::*;
 use sea_orm_migration::sea_orm::ConnectionTrait;
@@ -58,9 +54,8 @@ impl MigrationTrait for Migration {
         )
         .await?;
 
-        // Partial index over exactly the sweep's predicate: separate-debug-info
-        // outputs are a small slice of the cache, so the backfill never scans the
-        // full cached_path table.
+        // The partial index is matching exactly the sweep predicate. Separate-debug-info outputs
+        // are a small slice of the cache.
         db.execute_unprepared(
             r#"CREATE INDEX IF NOT EXISTS "idx-cached_path-debug_info_pending"
                ON cached_path (created_at)

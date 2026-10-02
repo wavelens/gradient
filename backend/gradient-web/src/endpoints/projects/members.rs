@@ -43,8 +43,6 @@ pub struct RemoveUserRequest {
     pub user: String,
 }
 
-// ── Access helpers ────────────────────────────────────────────────────────────
-
 async fn find_user_by_username(state: &Arc<ServerState>, username: &str) -> WebResult<MUser> {
     EUser::find()
         .filter(CUser::Username.eq(username))
@@ -82,8 +80,6 @@ async fn find_project_invitation(
         .one(&state.web_db)
         .await?)
 }
-
-// ── Handlers ──────────────────────────────────────────────────────────────────
 
 pub async fn get_project_users(
     state: State<Arc<ServerState>>,

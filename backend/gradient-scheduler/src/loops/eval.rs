@@ -30,8 +30,8 @@ pub(crate) async fn assign_queued_evals(scheduler: &Scheduler) -> anyhow::Result
 
     let state = &scheduler.state;
 
-    // The open `dispatched_job` row is the durable proof a job is out; the
-    // tracker below is only the in-memory fast path, empty after a respawn.
+    // The open `dispatched_job` row is the durable proof a job is out. The tracker is only the
+    // in-memory fast path and is empty after a respawn.
     let not_in_flight = gradient_db::scheduling::assignment_record::no_open_assignment_predicate(
         &gradient_db::scheduling::assignment_record::eval_job_key_sql("\"evaluation\".\"id\""),
     );
@@ -71,9 +71,8 @@ pub(crate) async fn assign_queued_evals(scheduler: &Scheduler) -> anyhow::Result
             continue;
         };
 
-        // An `input_update` eval's own commit is blank (the generated flake.lock
-        // commit is unknown until the PR is pushed); fetch from the base recorded
-        // in the sidecar instead.
+        // An `input_update` evaluation's own commit is blank until the PR is pushed. The fetch is
+        // using the base recorded in the sidecar instead.
         let sidecar = maps.sidecars.get(&eval.id);
         let commit_sha = match sidecar {
             Some(s) => s.base_commit.clone(),
@@ -153,8 +152,6 @@ pub(crate) async fn assign_queued_evals(scheduler: &Scheduler) -> anyhow::Result
     Ok(())
 }
 
-/// Every per-eval row a dispatch pass needs, loaded in one IN-list query per
-/// table instead of a round-trip per queued evaluation.
 struct EvalAssignMaps {
     commits: HashMap<CommitId, MCommit>,
     sidecars: HashMap<EvaluationId, gradient_entity::evaluation_input_update::Model>,
@@ -247,11 +244,6 @@ impl EvalAssignMaps {
     }
 }
 
-/// Build the eval `FlakeJob` and its `required_paths` from the evaluation's
-/// recorded source. A `/nix/store/...` repository is an already-materialised
-/// build-request source: dispatch it as `FlakeSource::Cached` (the worker
-/// substitutes the NAR and evaluates via `path:`), but still run `FetchFlake`
-/// so flake inputs are resolved with the project SSH key.
 pub(crate) fn flake_job_for_eval_source(
     repository: &str,
     commit_sha: String,

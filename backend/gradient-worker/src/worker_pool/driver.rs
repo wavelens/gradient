@@ -4,12 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! JSONL harness for the eval-worker IPC, behind the hidden `--eval-driver`
-//! flag. Reads [`EvalRequest`]s as JSON lines, drives one real subprocess over
-//! the production rkyv transport (spawn, handshake, frames, streamed resolve),
-//! and prints one JSON response line per request. Exists for the NixOS VM
-//! integration test, which cannot speak binary frames from Python; going
-//! through [`EvalWorker`] means the test covers both sides of the wire.
+//! The NixOS VM integration test cannot speak binary frames from Python.
+//! This JSONL harness is driving a real subprocess through [`EvalWorker`] to cover both
+//! sides of the wire.
 
 use anyhow::{Context, Result};
 use gradient_util::sync::Mutex;

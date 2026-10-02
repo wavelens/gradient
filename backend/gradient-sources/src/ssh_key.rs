@@ -151,8 +151,6 @@ mod tests {
 
     #[test]
     fn format_public_key_fallback_without_scheme() {
-        // When no scheme is present, the raw URL is used as the hostname
-        // (no path stripping either, since there's nothing to strip).
         let project = make_project("myproject", "ssh-ed25519 AAAA");
         let result = format_public_key(project, "example.com");
         assert_eq!(result, "ssh-ed25519 AAAA example.com-myproject");
@@ -174,8 +172,8 @@ mod tests {
 
     #[test]
     fn decrypt_ssh_key_plaintext_pem_rejected() {
-        // Plaintext PEM stored in the column must NOT be accepted -
-        // doing so would let anyone with DB write access bypass encryption.
+        // A plaintext PEM in the column must be rejected. Accepting it would let anyone with DB
+        // write access bypass encryption.
         let mut f = tempfile::NamedTempFile::new().unwrap();
         std::io::Write::write_all(&mut f, b"test-secret-key-32-bytes-padding!").unwrap();
         let path = f.path().to_string_lossy().to_string();
@@ -188,7 +186,6 @@ mod tests {
 
     #[test]
     fn decrypt_ssh_key_plaintext_non_pem_rejected() {
-        // Valid base64 that decrypts to garbage AND is not a PEM must fail.
         let mut f = tempfile::NamedTempFile::new().unwrap();
         std::io::Write::write_all(&mut f, b"test-secret-key-32-bytes-padding!").unwrap();
         let path = f.path().to_string_lossy().to_string();
@@ -200,8 +197,6 @@ mod tests {
 
     #[test]
     fn generate_ssh_key_decrypts_to_openssh_pem() {
-        // Round-trip: generated keys must decrypt to a PEM the loader accepts,
-        // and the returned tuple must pair correctly.
         let mut f = tempfile::NamedTempFile::new().unwrap();
         std::io::Write::write_all(&mut f, b"test-secret-key-32-bytes-padding!").unwrap();
         let path = f.path().to_string_lossy().to_string();

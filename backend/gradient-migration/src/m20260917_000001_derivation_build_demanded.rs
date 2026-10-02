@@ -4,9 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! `derivation_build.demanded`: something still wants this anchor's outputs in
-//! our cache. Defaulting true keeps every pending anchor promotable across the
-//! deploy; the consistency sweep's absolute recompute is the backfill.
+//! Defaulting to true is keeping every pending shared build promotable across the deploy. The
+//! consistency sweep's absolute recompute is the backfill.
 
 use sea_orm_migration::prelude::*;
 use sea_orm_migration::sea_orm::ConnectionTrait;

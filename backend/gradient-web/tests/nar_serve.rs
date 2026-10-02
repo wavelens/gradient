@@ -4,12 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Integration test: `GET /cache/{cache}/nar/{path}` streams the stored NAR
-//! blob straight from `nar_storage` without buffering the whole object in the
-//! server heap. The response must be byte-identical to the stored blob and
-//! carry an accurate `Content-Length` (the streamed body has no implicit
-//! length, so the handler sets it from the storage object size).
-
 #![expect(
     clippy::unwrap_used,
     reason = "test scaffolding: a fixture helper that cannot build its value should fail the test loudly"
@@ -30,9 +24,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use uuid::Uuid;
 
-/// 32-char nix-base32 store hash the blob is written under.
 const STORE_HASH: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
-/// 52-char nix-base32 file hash carried in the `.nar.zst` URL slug.
 const FILE_HASH_NIX32: &str = "0mdqa9w1p6cmli6976v4wi0sw9r4p5prkj7lzfd1877wk11c9c73";
 
 fn cache_id() -> CacheId {
@@ -82,13 +74,11 @@ fn cached_path_row() -> gradient_entity::cached_path::Model {
     }
 }
 
-/// The row of the per-cache serving gate: this cache holds a signed claim.
 fn served() -> std::collections::BTreeMap<&'static str, sea_orm::Value> {
     std::collections::BTreeMap::from([("served", sea_orm::Value::Int(Some(1)))])
 }
 
-/// A blob large enough to span several storage stream chunks, so the test
-/// exercises reassembly rather than a single-chunk read.
+/// The blob must span several storage stream chunks to exercise reassembly.
 fn blob() -> Vec<u8> {
     (0..256 * 1024).map(|i| (i * 31 + 7) as u8).collect()
 }
@@ -249,9 +239,6 @@ fn nar_serve_answers_from_the_hot_cache_on_the_second_request() {
     });
 }
 
-/// Every stored NAR shares one blob store; a cache must serve only the paths it
-/// holds a signed claim on, or any cache reader could fetch another cache's
-/// private paths by hash.
 #[test]
 fn a_nar_this_cache_holds_no_claim_on_is_not_served() {
     run(async {

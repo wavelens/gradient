@@ -4,8 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Pending and active job tracking.
-
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::time::{Duration, Instant};
 
@@ -28,23 +26,14 @@ use gradient_pool::score::{JobContext, ScoredJob, ScoringPolicy, WorkerContext};
 pub struct PendingEvalJob {
     pub evaluation_id: EvaluationId,
     pub task_id: Option<TaskId>,
-    /// Project (cache/proxy) that owns this job. Workers must be authorized
-    /// for this project to receive the job offer.
     pub project_id: ProjectId,
     pub commit_id: CommitId,
     pub repository: String,
     pub job: FlakeJob,
     pub required_paths: Vec<RequiredPath>,
-    /// `evaluation.updated_at` at the time this job was dispatched.
-    /// Used by the scoring policy to prefer evaluations that have waited longer.
     pub queued_at: chrono::NaiveDateTime,
-    /// When the job became dispatchable. Evals have no dependencies, so this
-    /// equals `queued_at`.
     pub ready_at: chrono::NaiveDateTime,
-    /// Number of dispatch ticks this job has waited while pending. Bumped once
-    /// per dispatch loop and fed into the scoring policy's rescore-wait rule.
     pub rescore_count: u32,
-    /// Per-task predicted peak eval RSS, fed into `ResourceFitRule`.
     pub history: gradient_pool::score::HistoryPrediction,
     pub walk_mode: WalkMode,
     pub prioritized: bool,
@@ -67,51 +56,24 @@ impl PendingEvalJob {
 
 #[derive(Debug, Clone)]
 pub struct PendingBuildJob {
-    /// Global build-once shared build (`derivation_build`) this job builds. Round-trips
-    /// through the worker as the opaque `BuildSpec.build_id` string.
     pub derivation_build: DerivationBuildId,
-    /// The shared build's derivation, the key its startable-set moves arrive under.
     pub derivation: DerivationId,
     pub evaluation_id: EvaluationId,
-    /// Project (cache/proxy) that owns this job.
     pub project_id: ProjectId,
     pub job: BuildJob,
     pub required_paths: Vec<RequiredPath>,
-    /// Nix system string the build's target derivation must run on
-    /// (e.g. `"x86_64-linux"`, `"aarch64-linux"`, `"builtin"`).
     pub architecture: String,
-    /// Nix system features the build needs (e.g. `["kvm", "big-parallel"]`).
     pub required_features: Vec<String>,
-    /// Number of direct derivation dependencies (inputs) this build has.
-    /// Used by the scoring policy to prefer builds that unblock more work.
     pub dependency_count: u32,
-    /// Total transitive output NAR size of the build's closure, when known.
-    /// Fed into the scoring policy's resource-aware rules.
     pub closure_size: Option<i64>,
-    /// `derivation.prefer_local_build`: this build should run on the dispatching
-    /// peer's local workers rather than be offloaded.
     pub prefer_local_build: bool,
-    /// `derivation.is_fixed_output`: a fixed-output derivation fetches from the
-    /// network, so scoring prefers faster-network workers.
     pub is_fixed_output: bool,
-    /// Historical resource-usage prediction for this build's derivation,
-    /// preloaded once per dispatch round and consumed by scoring rules.
     pub history: gradient_pool::score::HistoryPrediction,
-    /// `build.updated_at` at the time this job was dispatched to the tracker.
-    /// Used by the scoring policy to prefer builds that have waited longer.
     pub queued_at: chrono::NaiveDateTime,
-    /// When the build became dispatchable (all dependencies satisfied). A build
-    /// is enqueued only once startable, so this is "now" at enqueue time.
     pub ready_at: chrono::NaiveDateTime,
-    /// Number of dispatch ticks this job has waited while pending. Bumped once
-    /// per dispatch loop and fed into the scoring policy's rescore-wait rule.
     pub rescore_count: u32,
-    /// The shared build, or a live evaluation naming it, was prioritized (#530).
     pub prioritized: bool,
-    /// `derivation.pname`, surfaced for the serialized dispatch view.
     pub pname: Option<String>,
-    /// True when the build's output is already available from cache; the job can
-    /// run on any worker regardless of architecture.
     pub substitute: bool,
 }
 
@@ -121,8 +83,6 @@ pub enum PendingJob {
     Build(PendingBuildJob),
 }
 
-/// The tracker's key for an evaluation job, persisted on `dispatched_job.job_id`
-/// and rebuilt in SQL by the dispatch gates from the same prefix.
 pub fn eval_job_key(evaluation: EvaluationId) -> String {
     format!(
         "{}{evaluation}",
@@ -130,7 +90,6 @@ pub fn eval_job_key(evaluation: EvaluationId) -> String {
     )
 }
 
-/// The tracker's key for a build job, one per build-once shared build.
 pub fn build_job_key(shared_build: DerivationBuildId) -> String {
     format!(
         "{}{shared_build}",
@@ -139,9 +98,6 @@ pub fn build_job_key(shared_build: DerivationBuildId) -> String {
 }
 
 impl PendingJob {
-    /// The scheduler's key for this job, and the value persisted on
-    /// `dispatched_job.job_id`. Derived from durable ids, so it survives a
-    /// scheduler restart and is unique among in-flight jobs.
     pub fn job_key(&self) -> String {
         match self {
             PendingJob::Eval(j) => eval_job_key(j.evaluation_id),
@@ -156,7 +112,6 @@ impl PendingJob {
         }
     }
 
-    /// Whether the job's closure walk may skip a recorded subtree.
     pub fn prunes_walk(&self) -> bool {
         matches!(self, PendingJob::Eval(j) if j.walk_mode == WalkMode::Pruned)
     }
@@ -266,33 +221,23 @@ impl PendingJob {
 
 pub struct Assignment {
     pub job: Job,
-    /// Project UUID that owns this job - used for credential lookup.
     pub project_id: ProjectId,
-    /// The `dispatched_job` row the caller writes before the job leaves; an
-    /// assignment whose record cannot be written is withdrawn. It also carries
-    /// the hand-out's key and id, so neither has a second copy to drift from.
     pub assignment_record: AssignmentRecord,
-    /// The tracker's own record of the job, kept by the session so it can
-    /// re-register the job after a scheduler restart.
     pub pending: PendingJob,
 }
 
 impl Assignment {
-    /// The tracker's key for this job.
     pub fn job_id(&self) -> &str {
         &self.assignment_record.job_id
     }
 
-    /// The `dispatched_job` id of this hand-out; the worker echoes it on every report.
     pub fn assignment_id(&self) -> DispatchedJobId {
         self.assignment_record.assignment_id
     }
 }
 
-/// Owned snapshot of a dispatch decision for the `dispatched_job` table.
 #[derive(Debug, Clone)]
 pub struct AssignmentRecord {
-    /// The tracker's key for this job, persisted on `dispatched_job.job_id`.
     pub job_id: String,
     pub assignment_id: DispatchedJobId,
     pub kind: DispatchedJobKind,
@@ -311,24 +256,15 @@ pub struct AssignmentRecord {
     pub build_context: serde_json::Value,
 }
 
-/// Per-candidate scoring result computed once and reused for both the decision
-/// ring and (for the winner) the persisted `dispatched_job` record.
 struct ScoredCandidate {
     total: f64,
-    /// Some rule vetoed dispatch this round; the job never wins regardless of total.
     vetoed: bool,
     score_breakdown: serde_json::Value,
     job_context: serde_json::Value,
 }
 
-/// Returns true when the worker can execute `job`: a flake job needs `fetch`
-/// for a `FetchFlake` step and `eval` for any evaluation step; a build job
-/// needs matching architecture/features. If `caps` is `None`, capability checks
-/// are skipped (used for tests / open mode).
 fn job_eligible_for_caps(job: &PendingJob, caps: Option<&WorkerCaps>) -> bool {
     match (job, caps) {
-        // No capability info known: don't block (legacy behaviour for callers
-        // that don't supply caps, e.g. unit tests for unrelated logic).
         (_, None) => true,
         (PendingJob::Eval(j), Some(c)) => c.can_eval(&j.job),
         (PendingJob::Build(j), Some(c)) => c.can_build(&j.architecture, &j.required_features),
@@ -344,14 +280,10 @@ pub(crate) fn visible_to(
         && job_eligible_for_caps(job, caps)
 }
 
-/// A vetoed candidate never wins (a rule said "not yet"); below the floor,
-/// dispatching now is worse than idling this round.
 fn wins(sc: &ScoredCandidate) -> bool {
     !sc.vetoed && sc.total >= gradient_pool::score::weights::ASSIGN_FLOOR
 }
 
-/// Scoring view of the worker; a caps-less caller (open mode / tests) scores
-/// against an empty context.
 fn worker_context_of(caps: Option<&WorkerCaps>) -> WorkerContext<'_> {
     match caps {
         Some(c) => WorkerContext {
@@ -369,9 +301,6 @@ fn worker_context_of(caps: Option<&WorkerCaps>) -> WorkerContext<'_> {
     }
 }
 
-/// The winner's persisted `dispatched_job` snapshot, reusing its already-
-/// computed breakdown and job context; only build-specific fields are
-/// derived here.
 fn assignment_record_for(
     job_id: &str,
     job: &PendingJob,
@@ -415,8 +344,6 @@ fn assignment_record_for(
     }
 }
 
-/// In-flight build work per project, weighted by predicted build time; feeds the
-/// fair-share scoring rule.
 struct ProjectWorkShare {
     by_project: HashMap<ProjectId, f64>,
     total: f64,
@@ -429,8 +356,6 @@ impl ProjectWorkShare {
     }
 }
 
-/// True when a flake job's only step is `FetchFlake` - a split-mode fetch-only
-/// job whose completion enqueues a cached eval follow-up rather than finalizing.
 pub fn is_fetch_only(job: &FlakeJob) -> bool {
     job.steps.as_slice() == [FlakeStep::FetchFlake]
 }
@@ -439,14 +364,10 @@ pub(crate) fn is_fetch_only_job(job: &PendingJob) -> bool {
     matches!(job, PendingJob::Eval(j) if is_fetch_only(&j.job))
 }
 
-/// Per-job score submitted by a worker after checking its local store.
 #[derive(Debug, Clone, Default)]
 pub struct WorkerJobScore {
-    /// Number of required store paths not present in the worker's store.
     pub missing_count: u32,
-    /// Total uncompressed NAR size (bytes) of the missing paths.
     pub missing_nar_size: u64,
-    /// The worker already holds every output, so it would only upload them.
     pub outputs_present: bool,
 }
 
@@ -461,10 +382,6 @@ pub struct PendingJobInfo {
     pub pname: Option<String>,
 }
 
-/// One in-flight job reduced to the dimensions the worker-load radar needs:
-/// its owning worker/project and which capability, architecture, and features it
-/// consumes. Build jobs carry an `architecture` + `required_features`; flake
-/// jobs set `fetch_step`/`eval_step` from their `FlakeStep`s.
 #[derive(Debug, Clone)]
 pub struct BoardActiveJob {
     pub worker_id: String,
@@ -476,14 +393,8 @@ pub struct BoardActiveJob {
     pub eval_step: bool,
 }
 
-/// One scored candidate weighed in a dispatch decision. Captured for every
-/// candidate, including those that scored below the dispatch floor, so the Live
-/// Jobs "all scores" view can surface negative scores for rule tuning (#419).
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct DecisionCandidate {
-    /// Ephemeral id used to serve this candidate's detail from the in-memory ring
-    /// via `GET /board/jobs/{id}` - never persisted, so it co-exists with the
-    /// `dispatched_job` UUID namespace without collision.
     pub id: DispatchedJobId,
     pub job_id: String,
     pub kind: i16,
@@ -494,30 +405,21 @@ pub struct DecisionCandidate {
     pub score: f64,
     pub won: bool,
     pub queued_at: chrono::NaiveDateTime,
-    /// Per-rule contributions and the per-candidate job context captured at
-    /// decision time, so the detail page renders a score breakdown even for a
-    /// candidate that was passed over and never reached `dispatched_job`.
     pub score_breakdown: serde_json::Value,
     pub job_context: serde_json::Value,
 }
 
-/// A recorded dispatch decision: the candidates a worker was scored against and
-/// which (if any) won. Kept in a bounded ring on the tracker.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct AssignDecision {
     pub at: chrono::NaiveDateTime,
     pub worker_id: String,
     pub kind: i16,
     pub winner: Option<String>,
-    /// Worker and instance context are identical for every candidate in one
-    /// decision, so they are stored once here rather than per candidate.
     pub worker_context: serde_json::Value,
     pub instance_context: serde_json::Value,
     pub candidates: Vec<DecisionCandidate>,
 }
 
-/// Owned snapshot reconstructing one candidate's job detail from the decision
-/// ring, served by `GET /board/jobs/{id}` when the id is an ephemeral candidate.
 #[derive(Debug, Clone)]
 pub struct CandidateDetail {
     pub id: DispatchedJobId,
@@ -537,14 +439,9 @@ pub struct CandidateDetail {
     pub instance_context: serde_json::Value,
 }
 
-/// How many dispatch decisions to retain, and how many candidates per decision.
-/// Both bounded so a large queue can't grow the ring without limit; candidates
-/// are kept highest-score first, so the dispatch boundary and the lowest-scoring
-/// jobs stay visible.
 const DECISION_RING_CAP: usize = 200;
 const CANDIDATES_PER_DECISION: usize = 64;
 
-/// A job running on a worker; `aborted_at` is when the scheduler first told it to stop.
 #[derive(Debug)]
 struct ActiveJob {
     worker: String,
@@ -564,7 +461,6 @@ impl ActiveJob {
     }
 }
 
-/// A job still running in a session when it registers again, with its cluster attempt.
 #[derive(Debug, Clone)]
 pub struct Reattached {
     pub job_id: String,
@@ -582,7 +478,6 @@ impl Reattached {
     }
 }
 
-/// A cluster member whose worker left while running it.
 #[derive(Debug)]
 pub struct LostMember {
     pub attempt: ClusterAttemptId,
@@ -599,10 +494,8 @@ pub struct Disconnected {
 #[derive(Debug, Default)]
 pub struct JobTracker {
     pending: HashMap<String, PendingJob>,
-    /// Per-worker, per-job scores: `worker_id -> job_id -> score`.
     scores: HashMap<String, HashMap<String, WorkerJobScore>>,
     active: HashMap<String, ActiveJob>,
-    /// Bounded ring of recent dispatch decisions for the Live Jobs view.
     decisions: VecDeque<AssignDecision>,
     clusters: ClusterBook,
 }
@@ -614,9 +507,8 @@ impl JobTracker {
 
     pub fn add_pending(&mut self, job_id: String, job: PendingJob) -> JobCandidate {
         let candidate = job.as_candidate(&job_id);
-        // Idempotent under the tracker write lock: an eval pass and a cached
-        // follow-up can both clear the `contains_job` filter before either
-        // enqueues, so a job already pending or in-flight (active) is kept.
+        // Two dispatch passes can both clear the `contains_job` filter before either one is
+        // enqueuing. A job already pending or active is kept as is under the tracker write lock.
         if self.pending.contains_key(&job_id) || self.active.contains_key(&job_id) {
             return candidate;
         }
@@ -624,11 +516,6 @@ impl JobTracker {
         candidate
     }
 
-    /// Returns all pending job candidates that the worker is authorized to receive
-    /// AND can execute. `caps` filters build jobs to those matching the worker's
-    /// architectures and system features, and fetch flake jobs to fetch-capable
-    /// workers. Pass `None` for `authorized` to disable peer filtering (open mode).
-    /// Pass `None` for `caps` to disable capability filtering.
     pub fn candidates_for_worker(
         &self,
         authorized: Option<&HashSet<ProjectId>>,
@@ -644,8 +531,6 @@ impl JobTracker {
             .collect()
     }
 
-    /// Pending jobs this worker is authorized for and capable of executing -
-    /// the one eligibility filter shared by candidate offers and assignment.
     fn eligible_for_worker<'s>(
         &'s self,
         authorized: Option<&'s HashSet<ProjectId>>,
@@ -656,9 +541,6 @@ impl JobTracker {
             .filter(move |(_, job)| visible_to(job, authorized, caps))
     }
 
-    /// Record scores from a worker without assigning anything. The server only
-    /// assigns jobs in response to an explicit `RequestJob` - scores just
-    /// inform which candidate to pick at that point.
     pub fn record_scores(&mut self, worker_id: &str, scores: Vec<CandidateScore>) {
         let worker_scores = self.scores.entry(worker_id.to_owned()).or_default();
         for score in scores {
@@ -673,7 +555,6 @@ impl JobTracker {
         }
     }
 
-    /// Append a dispatch decision to the bounded ring, evicting the oldest.
     fn push_decision(&mut self, decision: AssignDecision) {
         if self.decisions.len() >= DECISION_RING_CAP {
             self.decisions.pop_front();
@@ -682,13 +563,10 @@ impl JobTracker {
         self.decisions.push_back(decision);
     }
 
-    /// Recent dispatch decisions, most recent first (cloned snapshot for the API).
     pub fn recent_decisions(&self) -> Vec<AssignDecision> {
         self.decisions.iter().rev().cloned().collect()
     }
 
-    /// Reconstruct a candidate's job detail from the ring by its ephemeral id,
-    /// most-recent decision first. `None` once the decision has been evicted.
     pub fn candidate_detail(&self, id: DispatchedJobId) -> Option<CandidateDetail> {
         for d in self.decisions.iter().rev() {
             if let Some(c) = d.candidates.iter().find(|c| c.id == id) {
@@ -715,14 +593,6 @@ impl JobTracker {
         None
     }
 
-    /// Assign the best pending job matching `kind` for `worker_id`.
-    ///
-    /// Each eligible candidate is scored by `policy`. The highest-scoring job
-    /// that no rule vetoed and that reaches the dispatch floor is assigned;
-    /// ties go to the lexicographically smallest `job_id` for determinism.
-    ///
-    /// This is the ONLY assignment path - the server never assigns without
-    /// an explicit `RequestJob` from the worker.
     pub fn take_best_of_kind(
         &mut self,
         worker_id: &str,
@@ -747,8 +617,6 @@ impl JobTracker {
             .find(|(_, sc)| wins(sc))
             .map(|(id, _)| id.clone());
 
-        // Worker and instance context are identical for every candidate, so they
-        // are computed once and shared across the decision and the winner record.
         let worker_context = serde_json::to_value(crate::views::WorkerContextView::new(
             &worker_ctx,
             caps.map(|c| c.capabilities.clone()).unwrap_or_default(),
@@ -782,10 +650,6 @@ impl JobTracker {
         self.assign_pending(worker_id, &job_id, record)
     }
 
-    /// Score every eligible pending job of `kind` for this worker, best first;
-    /// ties break on the smaller job id for determinism. `score_detailed` is
-    /// the same rule loop as `score` plus a small per-rule map, so capturing
-    /// every candidate's breakdown is essentially free.
     #[allow(
         clippy::too_many_arguments,
         reason = "arg-heavy; refactor tracked in #503"
@@ -819,7 +683,6 @@ impl JobTracker {
                 (id.clone(), candidate)
             })
             .collect();
-        // Highest score first; tie-break on the smaller job_id for determinism.
         scored.sort_by(|(id_a, a), (id_b, b)| {
             b.total
                 .partial_cmp(&a.total)
@@ -885,8 +748,6 @@ impl JobTracker {
         }
     }
 
-    /// A cluster member's dispatch record for its seat, scored exactly as a
-    /// single candidate would be; members never sit in `pending`.
     pub fn member_record(
         &self,
         worker_id: &str,
@@ -926,9 +787,6 @@ impl JobTracker {
         )
     }
 
-    /// Per-project share of in-flight build work, weighted by predicted build time.
-    /// O(active builds) per request, so computed only when an enabled rule
-    /// actually consumes the share (none do while FairShareRule is disabled).
     fn project_work_shares(
         &self,
         policy: &dyn ScoringPolicy,
@@ -942,7 +800,6 @@ impl JobTracker {
                     let w = if b.history.build_time_ms > 0 {
                         b.history.build_time_ms as f64
                     } else {
-                        // no per-build history: weight by instance avg, half for prefer-local (cheaper) builds
                         (if b.prefer_local_build { 0.5 } else { 1.0 })
                             * instance.build_time_ms.w1h.unwrap_or(0.0)
                     };
@@ -954,8 +811,6 @@ impl JobTracker {
         ProjectWorkShare { by_project, total }
     }
 
-    /// Snapshot a dispatch decision (incl. rejected/negative candidates) into
-    /// the bounded ring for the Live Jobs "all scores" view (#419).
     fn record_decision(
         &mut self,
         worker_id: &str,
@@ -1025,7 +880,6 @@ impl JobTracker {
         Some(assignment)
     }
 
-    /// Re-attach a job still running in a session after the tracker was rebuilt.
     pub fn restore_active(&mut self, worker_id: &str, reattached: Reattached) {
         let Reattached {
             job_id,
@@ -1078,7 +932,6 @@ impl JobTracker {
         Some(cluster)
     }
 
-    /// Whether the scheduler told the worker running `job_id` to stop it.
     pub fn is_aborting(&self, job_id: &str) -> bool {
         self.active
             .get(job_id)
@@ -1136,9 +989,6 @@ impl JobTracker {
         self.active.remove(job_id).map(|a| a.job)
     }
 
-    /// Drop a job's recorded scores from every worker's map. Called on every
-    /// terminal removal so losing candidates don't accumulate dead entries that
-    /// bloat the per-dispatch score lookup.
     fn forget_job_scores(&mut self, job_id: &str) {
         for ws in self.scores.values_mut() {
             ws.remove(job_id);
@@ -1149,7 +999,6 @@ impl JobTracker {
         self.active.get(job_id).map(|a| &a.job)
     }
 
-    /// The active eval job for `job_id`, if any.
     pub fn active_eval_job(&self, job_id: &str) -> Option<&PendingEvalJob> {
         match self.active_job(job_id) {
             Some(PendingJob::Eval(j)) => Some(j),
@@ -1157,7 +1006,6 @@ impl JobTracker {
         }
     }
 
-    /// The active build job for `job_id`, if any.
     pub fn active_build_job(&self, job_id: &str) -> Option<&PendingBuildJob> {
         match self.active_job(job_id) {
             Some(PendingJob::Build(j)) => Some(j),
@@ -1169,9 +1017,6 @@ impl JobTracker {
         self.pending.get(job_id)
     }
 
-    /// Move all active jobs assigned to `worker_id` that belong to any of
-    /// `revoked_peers` back to the pending queue.  Returns the job IDs so the
-    /// caller can send `AbortJob` messages to the worker.
     pub fn drain_peer_jobs_on_worker(
         &mut self,
         worker_id: &str,
@@ -1193,8 +1038,6 @@ impl JobTracker {
         to_requeue
     }
 
-    /// Move all of `worker_id`'s active jobs back to pending and return the
-    /// requeued jobs so the caller can reset their DB rows for re-dispatch.
     pub fn worker_disconnected(&mut self, worker_id: &str) -> Disconnected {
         self.scores.remove(worker_id);
         let orphaned: Vec<String> = self
@@ -1236,15 +1079,12 @@ impl JobTracker {
         self.clusters.forget(job_id);
     }
 
-    /// Start the abort deadline of an active job; a repeat abort keeps the first.
     pub fn mark_aborting(&mut self, job_id: &str, now: Instant) {
         if let Some(active) = self.active.get_mut(job_id) {
             active.aborted_at.get_or_insert(now);
         }
     }
 
-    /// Drop the active jobs told to stop at least `grace` before `now`,
-    /// returning their `(worker, job_id)`.
     pub fn take_overdue_aborts(&mut self, now: Instant, grace: Duration) -> Vec<(String, String)> {
         let overdue: Vec<String> = self
             .active
@@ -1266,15 +1106,12 @@ impl JobTracker {
             .collect()
     }
 
-    /// Iterate over active jobs: yields `(job_id, worker_id, &PendingJob)`.
     pub fn active_jobs(&self) -> impl Iterator<Item = (&str, &str, &PendingJob)> {
         self.active
             .iter()
             .map(|(job_id, a)| (job_id.as_str(), a.worker.as_str(), &a.job))
     }
 
-    /// Per-capability / per-architecture / per-feature classification of every
-    /// in-flight job, consumed by the Job Board worker-load radar (#417).
     pub fn board_active_jobs(&self) -> Vec<BoardActiveJob> {
         self.active_jobs()
             .map(|(_, worker_id, job)| {
@@ -1307,8 +1144,6 @@ impl JobTracker {
             .collect()
     }
 
-    /// Remove all pending (unassigned) jobs belonging to a given evaluation,
-    /// pruning their recorded scores so they don't linger across workers.
     pub fn remove_pending_for_evaluation(&mut self, evaluation_id: EvaluationId) {
         let removed: Vec<String> = self
             .pending
@@ -1332,9 +1167,6 @@ impl JobTracker {
         }
     }
 
-    /// Lift the tracked jobs a prioritization reached: `evaluation`'s own eval
-    /// job and the builds of `shared_builds`, so they outscore the queue from the
-    /// next assignment on instead of from their next dispatch pass.
     pub fn prioritize(
         &mut self,
         evaluation: Option<EvaluationId>,
@@ -1353,8 +1185,6 @@ impl JobTracker {
         }
     }
 
-    /// Drop the pending builds `stale` names, with their recorded scores;
-    /// returns how many went. Assigned jobs are never touched.
     pub fn prune_pending_builds(&mut self, stale: impl Fn(&PendingBuildJob) -> bool) -> usize {
         let pruned: Vec<String> = self
             .pending
@@ -1413,8 +1243,6 @@ impl JobTracker {
         self.active.len()
     }
 
-    /// `(active_builds, pending_builds)` - build jobs in flight and waiting,
-    /// fed into the windowed instance snapshot.
     pub fn instance_counts(&self) -> (u32, u32) {
         let active = self
             .active
@@ -1429,13 +1257,10 @@ impl JobTracker {
         (active, pending)
     }
 
-    /// Whether any job is waiting to be dispatched.
     pub fn has_pending(&self) -> bool {
         !self.pending.is_empty()
     }
 
-    /// Increment every pending job's `rescore_count`. Called once per build
-    /// dispatch tick so the rescore-wait hold on an unmeasured build lapses.
     pub fn bump_rescore_counts(&mut self) {
         for j in self.pending.values_mut() {
             j.set_rescore_count(j.rescore_count() + 1);
@@ -1645,9 +1470,6 @@ mod tests {
 
     #[test]
     fn can_build_multi_arch_worker_accepts_one_of_many() {
-        // Worker with multiple architectures must accept a build whose target
-        // matches ANY (not ALL) of its listed architectures. Guards against
-        // `.any()` -> `.all()` in the capability check.
         let caps = WorkerCaps {
             fetch: false,
             architectures: vec!["x86_64-linux".into(), "aarch64-linux".into()],
@@ -1661,8 +1483,6 @@ mod tests {
 
     #[test]
     fn can_build_requires_all_features() {
-        // Worker must provide EVERY required feature (not just one). Guards
-        // against `.all()` -> `.any()` in the feature check.
         let caps = WorkerCaps {
             fetch: false,
             architectures: vec!["x86_64-linux".into()],
@@ -1670,7 +1490,6 @@ mod tests {
             ..Default::default()
         };
         assert!(caps.can_build("x86_64-linux", &["kvm".into()]));
-        // kvm is provided but big-parallel is not -> must reject.
         assert!(!caps.can_build("x86_64-linux", &["kvm".into(), "big-parallel".into()],));
     }
 
@@ -1689,7 +1508,6 @@ mod tests {
 
     #[test]
     fn can_eval_requires_eval_for_evaluation_steps() {
-        // A FetchFlake step needs `fetch`; any evaluation step needs `eval`.
         let fetch_only = WorkerCaps {
             fetch: true,
             capabilities: GradientCapabilities {
@@ -1734,11 +1552,6 @@ mod tests {
 
     #[test]
     fn add_pending_does_not_requeue_active_job() {
-        // Regression: two concurrent dispatch passes can both pass the
-        // `contains_job` filter before either enqueues. Once a job is assigned
-        // (active), re-adding the same id must not put it back in pending, or it
-        // gets dispatched to the worker a second time and the duplicate build is
-        // aborted by the daemon - failing the whole evaluation.
         let mut tracker = JobTracker::new();
         let peer = ProjectId::now_v7();
         tracker.add_pending("build:1".into(), build_job(peer, vec![]));
@@ -1769,9 +1582,6 @@ mod tests {
             .expect("the job assigns");
     }
 
-    /// A worker that never answers an abort would otherwise hold the job, and
-    /// with it the open dispatch row and the worker's slot, until it
-    /// disconnects: the tracker gives it the grace and then lets go.
     #[test]
     fn an_abort_the_worker_never_confirms_is_dropped_after_the_grace() {
         let mut tracker = JobTracker::new();
@@ -1798,8 +1608,6 @@ mod tests {
         );
     }
 
-    /// The mark belongs to the dispatch that was told to stop: a job id handed
-    /// out again after that dispatch ended must not inherit its deadline.
     #[test]
     fn a_job_assigned_again_after_an_abort_starts_without_a_deadline() {
         let mut tracker = JobTracker::new();
@@ -1814,7 +1622,6 @@ mod tests {
         assert!(tracker.contains_job("build:1"));
     }
 
-    /// Only the first abort starts the clock; a repeat must not push it back.
     #[test]
     fn a_repeated_abort_keeps_the_first_deadline() {
         let mut tracker = JobTracker::new();
@@ -1860,17 +1667,14 @@ mod tests {
     fn test_candidates_filtered_by_architecture() {
         let mut tracker = JobTracker::new();
         let peer = ProjectId::now_v7();
-        // x86_64 build
         tracker.add_pending(
             "x86".into(),
             build_job_arch(peer, vec![], "x86_64-linux", vec![]),
         );
-        // aarch64 build
         tracker.add_pending(
             "arm".into(),
             build_job_arch(peer, vec![], "aarch64-linux", vec![]),
         );
-        // builtin builds run anywhere
         tracker.add_pending(
             "any".into(),
             build_job_arch(peer, vec![], "builtin", vec![]),
@@ -1890,11 +1694,8 @@ mod tests {
 
     #[test]
     fn fetch_flake_job_requires_fetch_capability() {
-        // Regression guard for #252: a FlakeJob carrying FetchFlake clones a
-        // repository (over SSH) and so must only be offered to fetch-capable
-        // workers - the server only sends SSH credentials to those. A worker
-        // without `fetch` (e.g. eval+build only) previously received the job
-        // and failed with "authentication required but no callback set".
+        // Regression guard for #252. A FetchFlake job is cloning over SSH and must only go to
+        // fetch-capable workers. Only those workers are receiving SSH credentials.
         let mut tracker = JobTracker::new();
         let peer = ProjectId::now_v7();
         tracker.add_pending("j1".into(), fetch_eval_job(peer));
@@ -1936,9 +1737,6 @@ mod tests {
 
     #[test]
     fn cached_eval_job_requires_eval_not_fetch() {
-        // Eval-only follow-up jobs (no FetchFlake step) read an already-cached
-        // source: they need `eval` but not `fetch`. An eval-capable worker
-        // without fetch must still receive them.
         let mut tracker = JobTracker::new();
         let peer = ProjectId::now_v7();
         tracker.add_pending("j1".into(), eval_job(peer));
@@ -1972,9 +1770,6 @@ mod tests {
 
     #[test]
     fn bundled_eval_job_skips_worker_without_eval() {
-        // Regression: a fetch+build worker (no `eval`) must NOT receive a bundled
-        // FetchFlake+Evaluate job - it would run the eval subprocess anyway and
-        // OOM-kill it. Such jobs require both `fetch` and `eval`.
         let mut tracker = JobTracker::new();
         let peer = ProjectId::now_v7();
         tracker.add_pending("j1".into(), fetch_eval_job(peer));
@@ -2015,7 +1810,6 @@ mod tests {
             system_features: vec![],
             ..Default::default()
         };
-        // Worker requesting Build -> arm-only build is filtered out -> no assignment.
         let p = gradient_pool::score::policy_by_name("simple");
         let inst = gradient_pool::score::InstanceContext::default();
         let assignment =
@@ -2044,7 +1838,6 @@ mod tests {
             system_features: vec!["kvm".into()],
             ..Default::default()
         };
-        // Cached score so the build clears the negative-total dispatch gate.
         for w in ["w1", "w2"] {
             tracker.record_scores(
                 w,
@@ -2058,13 +1851,11 @@ mod tests {
         }
         let p = gradient_pool::score::policy_by_name("simple");
         let inst = gradient_pool::score::InstanceContext::default();
-        // Worker without kvm - no assignment.
         assert!(
             tracker
                 .take_best_of_kind("w1", None, Some(&no_kvm), &JobKind::Build, &*p, &inst)
                 .is_none()
         );
-        // Worker with kvm - assigned.
         assert!(
             tracker
                 .take_best_of_kind("w2", None, Some(&with_kvm), &JobKind::Build, &*p, &inst)
@@ -2080,8 +1871,6 @@ mod tests {
         let p = gradient_pool::score::policy_by_name("simple");
         let inst = gradient_pool::score::InstanceContext::default();
 
-        // No cached score: the rescore hold vetoes the build so the worker
-        // idles, but the rejected candidate and its veto are still recorded (#419).
         assert!(
             tracker
                 .take_best_of_kind("w1", None, None, &JobKind::Build, &*p, &inst)
@@ -2102,7 +1891,6 @@ mod tests {
             "the rescore hold must be visible on the rejected candidate"
         );
 
-        // Caching a score lets it dispatch; the newer decision records the winner.
         tracker.record_scores(
             "w1",
             vec![CandidateScore {
@@ -2143,7 +1931,6 @@ mod tests {
             "candidate must carry its per-rule breakdown for the detail page"
         );
 
-        // The ephemeral id resolves to a reconstructed detail served from RAM.
         let detail = tracker
             .candidate_detail(cand.id)
             .expect("ephemeral id resolves to a candidate detail");
@@ -2152,7 +1939,6 @@ mod tests {
         assert!(!detail.won);
         assert!(detail.worker_context.is_object());
 
-        // An unknown id resolves to nothing rather than erroring.
         assert!(
             tracker
                 .candidate_detail(DispatchedJobId::now_v7())
@@ -2167,8 +1953,6 @@ mod tests {
         let p = gradient_pool::score::policy_by_name("simple");
         let inst = gradient_pool::score::InstanceContext::default();
 
-        // Two workers score the same job; only one can ever win it, so the loser's
-        // entry would linger forever without lifecycle pruning (the dispatch leak).
         tracker.add_pending("build:j1".into(), build_job(peer, vec![]));
         for w in ["w1", "w2"] {
             tracker.record_scores(
@@ -2183,7 +1967,6 @@ mod tests {
         }
         tracker.take_best_of_kind("w1", None, None, &JobKind::Build, &*p, &inst);
 
-        // Completing the job must leave no score entry behind on any worker.
         tracker.remove_active("build:j1");
         assert!(
             tracker
@@ -2193,7 +1976,6 @@ mod tests {
             "a completed job must not leak score entries"
         );
 
-        // Same guarantee for an outright abort of a still-pending job.
         tracker.add_pending("build:j2".into(), build_job(peer, vec![]));
         tracker.record_scores(
             "w1",
@@ -2259,8 +2041,6 @@ mod tests {
         let p = gradient_pool::score::policy_by_name("simple");
         let inst = gradient_pool::score::InstanceContext::default();
 
-        // No scores yet: RescoreWaitRule vetoes the build, so the worker idles
-        // and the job stays pending.
         assert!(
             tracker
                 .take_best_of_kind("w1", None, None, &JobKind::Build, &*p, &inst)
@@ -2268,7 +2048,6 @@ mod tests {
         );
         assert_eq!(tracker.pending_count(), 1);
 
-        // Once the worker reports it is fully cached, the build clears the gate.
         tracker.record_scores(
             "w1",
             vec![CandidateScore {
@@ -2344,7 +2123,6 @@ mod tests {
         let peer = ProjectId::now_v7();
         tracker.add_pending("j1".into(), eval_job(peer));
 
-        // Assign it.
         let p = gradient_pool::score::policy_by_name("simple");
         let inst = gradient_pool::score::InstanceContext::default();
         let assignment = tracker.take_best_of_kind("w1", None, None, &JobKind::Flake, &*p, &inst);
@@ -2352,12 +2130,10 @@ mod tests {
         assert_eq!(tracker.pending_count(), 0);
         assert_eq!(tracker.active_count(), 1);
 
-        // Release it back.
         tracker.release_to_pending("j1");
         assert_eq!(tracker.pending_count(), 1);
         assert_eq!(tracker.active_count(), 0);
 
-        // Should reappear in candidates.
         let candidates = tracker.candidates_for_worker(None, None);
         assert_eq!(candidates.len(), 1);
     }
@@ -2398,7 +2174,6 @@ mod tests {
     fn test_take_empty_required() {
         let mut tracker = JobTracker::new();
         let peer = ProjectId::now_v7();
-        // Job with required paths - should NOT be taken.
         tracker.add_pending(
             "j1".into(),
             build_job(
@@ -2409,7 +2184,6 @@ mod tests {
                 }],
             ),
         );
-        // Job with no required paths - should be taken.
         tracker.add_pending("j2".into(), eval_job(peer));
 
         let p = gradient_pool::score::policy_by_name("simple");
@@ -2428,7 +2202,6 @@ mod tests {
         tracker.add_pending("ja2".into(), eval_job(project_a));
         tracker.add_pending("jb1".into(), eval_job(project_b));
 
-        // Assign all three to worker w1.
         tracker.take_best_of_kind(
             "w1",
             None,
@@ -2455,13 +2228,11 @@ mod tests {
         );
         assert_eq!(tracker.active_jobs().count(), 3);
 
-        // Revoke only project_a.
         let revoked = HashSet::from([project_a]);
         let aborted = tracker.drain_peer_jobs_on_worker("w1", &revoked);
         aborted.iter().for_each(|id| assert!(id.starts_with("ja")));
         assert_eq!(aborted.len(), 2);
 
-        // project_b job is still active; project_a jobs are back in pending.
         assert_eq!(tracker.active_jobs().count(), 1);
         assert_eq!(tracker.pending_count(), 2);
     }
@@ -2501,7 +2272,6 @@ mod tests {
             &*gradient_pool::score::policy_by_name("simple"),
             &gradient_pool::score::InstanceContext::default(),
         );
-        // Now in active, not pending - should still be "contained".
         assert!(tracker.contains_job("j1"));
     }
 

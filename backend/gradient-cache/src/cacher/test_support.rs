@@ -4,10 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Shared `ServerState` builder for `cacher` unit tests. Collapses the
-//! hand-built `ServerState { ... }` literals that used to be duplicated
-//! across `cleanup.rs` and `deep_gc.rs` test modules.
-
 use gradient_core::ServerState;
 use gradient_db::{CacheDb, WebDb, WorkerDb};
 use gradient_notify::EmailSender;
@@ -19,11 +15,6 @@ use gradient_types::RuntimeConfig;
 use sea_orm::{DatabaseBackend, DatabaseConnection, MockDatabase};
 use std::sync::Arc;
 
-/// Builds a `ServerState` for a cacher test. `nar`/`db` carry the
-/// test-specific storage and mock DB wiring; `configure` mutates the default
-/// `test_cli()` config (e.g. `nar_ttl_hours`, `nar_upload_grace_hours`)
-/// before it's wrapped in the returned `Arc`. `log_storage` is `NoopLogStorage`;
-/// use [`test_server_state_with_log`] when a test needs a real one.
 pub(crate) fn test_server_state(
     nar: NarStore,
     db: DatabaseConnection,

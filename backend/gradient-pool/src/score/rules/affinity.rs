@@ -7,8 +7,6 @@
 use crate::score::context::InstanceContext;
 use crate::score::rule::{JobContext, ScoreRule, WorkerContext};
 
-/// Fixed-output derivations fetch from the network, so prefer faster-network
-/// workers. Bonus scales linearly to `reference_mbps`, then caps.
 #[derive(Debug)]
 pub struct NetworkAffinityRule {
     pub bonus: f64,
@@ -53,8 +51,6 @@ impl ScoreRule for NetworkAffinityRule {
     }
 }
 
-/// Disk-heavy builds (by history) prefer faster-disk workers. Bonus scales to
-/// `reference_mbps`, then caps. Zero without history or a disk metric.
 #[derive(Debug)]
 pub struct DiskAffinityRule {
     pub bonus: f64,
@@ -105,11 +101,6 @@ impl ScoreRule for DiskAffinityRule {
     }
 }
 
-/// CPU-heavy builds (by history) prefer workers with faster cores than the
-/// fleet mean and avoid slower ones. The swing grows with the build's work in
-/// log2 steps over the heavy threshold, so a long build outweighs the transfer a
-/// cache-warm but slower worker would save. Work is historical CPU time, or wall
-/// time for history captured without CPU accounting.
 #[derive(Debug)]
 pub struct CpuAffinityRule {
     pub weight: f64,

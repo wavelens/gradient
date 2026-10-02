@@ -3,8 +3,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Tooling-facing NAR management surface under `/api/v1/caches/{cache}/nars`.
-
 use super::helpers::delete_nar_from_cache;
 use crate::access::{CacheAccess, Caller, load_cache};
 use crate::audit::{RequestInfo, record as audit_record};
@@ -26,9 +24,8 @@ use sea_orm::{ColumnTrait, EntityTrait, FromQueryResult, QueryFilter};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-// Pagination is a dedicated `Query<PaginationParams>` extractor rather than a
-// `#[serde(flatten)]` field: axum's urlencoded query decoder cannot deserialize
-// integer fields through a flattened struct.
+// axum's urlencoded query decoder cannot deserialize integer fields through a flattened struct.
+// Pagination is a dedicated `Query<PaginationParams>` extractor for this reason.
 #[derive(Debug, Deserialize, Default)]
 pub struct ListQuery {
     pub hash: Option<String>,
@@ -112,9 +109,8 @@ fn nars_select_sql(
     )
 }
 
-// Representative instantiation for the plan gate: every optional filter engaged.
-// The package filter is a substring match, which no index answers, so the scan
-// of the cache is the plan and not a missing index.
+// The package filter is a substring match that no index can answer. The cache scan is the plan, not
+// a missing index.
 gradient_db::sql_fn! {
     NARS_LIST_COUNT = || nars_count_sql("cps.cache = $1 AND cp.hash LIKE $2 AND cp.package LIKE $3"),
         params = [CacheId, Text("abc%"), Text("%hello%")],
@@ -192,9 +188,6 @@ pub async fn list(
     .map(|r| r.total.max(0) as u64)
     .unwrap_or(0);
 
-    // `NULLS LAST` keeps unsigned/never-fetched rows from monopolising the
-    // first page on `DESC` sorts; `cp.id` is the stable tie-breaker so
-    // separate page fetches return disjoint sets.
     let limit_idx = values.len() + 1;
     let offset_idx = values.len() + 2;
     let select_sql = nars_select_sql(&where_sql, sort_col, order_dir, limit_idx, offset_idx);

@@ -4,22 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! The instance metrics pass averages nine things over the last 24 hours of
-//! dispatches, every 30 seconds. Three of them lived only inside `job_context`,
-//! so the pass read every row in the window out of the heap to pull three
-//! scalars out of a jsonb: measured in production at 1.94M buffers and 1.6 s
-//! against 449k rows, of which the scan itself was 183k buffers.
-//!
-//! The scalars become columns and the window gets an index that carries them,
-//! so the aggregate is an index-only scan over the window rather than a
-//! sequential scan of the table. Deliberately no backfill: the columns are
-//! written from the same view that writes the jsonb, `AVG` skips nulls exactly
-//! as it skipped an absent json key, and every window is at most 24 hours long,
-//! so the averages cover the whole window again one day after deploy.
-//!
-//! `build_attempt` gets the index its `DISTINCT ON (derivation_build) ... ORDER
-//! BY derivation_build, created_at DESC` has always wanted; without it every
-//! lookup of "the latest attempt per anchor" sorts what it read.
+//! The new columns are deliberately not backfilled. `AVG` is skipping nulls like it skipped an
+//! absent json key, and every window is at most 24 hours long.
 
 use sea_orm_migration::prelude::*;
 use sea_orm_migration::sea_orm::ConnectionTrait;

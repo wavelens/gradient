@@ -4,14 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Aborting an in-flight evaluation.
-//!
-//! Both kinds mark the evaluation `Aborted` in the trigger's transaction, and
-//! that is all this helper does. After a [`AbortKind::Hard`] the caller asks the
-//! graph writer to abort every shared build no other live evaluation still needs, then
-//! drops the in-memory job entries via `Scheduler::cancel_evaluation_jobs`.
-//! After a [`AbortKind::Soft`] the in-flight builds keep running and their
-//! outputs land in the cache for the next evaluation to reuse.
+//! `abort_evaluation` is only marking the evaluation `Aborted`. The caller must abort unneeded
+//! shared builds through the graph writer and call `Scheduler::cancel_evaluation_jobs` after
+//! `AbortKind::Hard`. The in-flight builds keep running and fill the cache after `AbortKind::Soft`.
 
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_types::*;
@@ -25,7 +20,6 @@ pub enum AbortKind {
     Soft,
 }
 
-/// Marks `eval_id` aborted, reporting whether this call was the one that did it.
 pub async fn abort_evaluation<C: ConnectionTrait>(
     db: &C,
     eval_id: EvaluationId,

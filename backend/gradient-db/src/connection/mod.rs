@@ -39,7 +39,6 @@ fn make_connect_options(
 ) -> Result<ConnectOptions> {
     let mut opt = ConnectOptions::new(db_url(cli)?);
 
-    // Only enable SQL logging at trace level
     if cli.log.level_default == "trace" {
         opt.sqlx_logging(true)
             .sqlx_logging_level(LevelFilter::Trace);
@@ -92,8 +91,9 @@ crate::sql! {
         params = [];
 }
 
-/// Warn, never fail: a small lock table only bites a large enough batch, and the
-/// setting needs a Postgres restart the operator has to schedule.
+/// This check is only warning, never failing.
+/// A small lock table is only hurting a large enough batch.
+/// The fix is a Postgres restart the operator must schedule.
 async fn check_lock_table(db: &DatabaseConnection) {
     let setting = db
         .query_one_raw(MAX_LOCKS_PER_TRANSACTION.stmt())
@@ -141,8 +141,6 @@ pub async fn connect_db(cli: &Cli) -> Result<DatabaseConnection> {
     Ok(db)
 }
 
-/// Run pending migrations, logging the start so a slow migration is not
-/// mistaken for a hung process.
 async fn run_migrations(db: &DatabaseConnection) -> Result<()> {
     let pending = Migrator::get_pending_migrations(db)
         .await
@@ -162,11 +160,6 @@ async fn run_migrations(db: &DatabaseConnection) -> Result<()> {
     Ok(())
 }
 
-/// Purge `seaql_migrations` rows whose `version` is no longer in the
-/// registered migration list. Without this, sea-orm's validator aborts with
-/// "Applied migrations not found in migration list" on installs that ran
-/// migrations later removed from the codebase. The set of registered names is
-/// derived from `Migrator::migrations()` so it cannot drift from reality.
 fn prune_removed_migrations_sql(known: &[Value]) -> String {
     let placeholders: Vec<String> = (1..=known.len()).map(|i| format!("${i}")).collect();
     format!(
@@ -197,9 +190,6 @@ async fn prune_removed_migrations(db: &DatabaseConnection) -> Result<()> {
     if known.is_empty() {
         return Ok(());
     }
-    // The placeholder count tracks the registered migration list, so it grows
-    // with the codebase; PRUNE_REMOVED_MIGRATIONS above is the plan gate's
-    // representative instantiation of the shape.
     let rows = db
         .query_all_raw(
             PRUNE_REMOVED_MIGRATIONS.bind_built(prune_removed_migrations_sql(&known), known),
@@ -215,9 +205,6 @@ async fn prune_removed_migrations(db: &DatabaseConnection) -> Result<()> {
     Ok(())
 }
 
-/// Open a dedicated connection pool for the web/HTTP layer so that axum
-/// handlers do not contend with the busy proto/scheduler pool during heavy
-/// NarPush traffic.
 pub async fn connect_web_db(cli: &Cli) -> Result<DatabaseConnection> {
     Database::connect(make_connect_options(
         cli,
@@ -228,8 +215,6 @@ pub async fn connect_web_db(cli: &Cli) -> Result<DatabaseConnection> {
     .context("Failed to connect web database pool")
 }
 
-/// Open a dedicated connection pool for the cache-query read path so a large
-/// eval's worker prefetch storm cannot exhaust the scheduler/dispatch pool.
 pub async fn connect_cache_db(cli: &Cli) -> Result<DatabaseConnection> {
     Database::connect(make_connect_options(
         cli,
@@ -240,11 +225,9 @@ pub async fn connect_cache_db(cli: &Cli) -> Result<DatabaseConnection> {
     .context("Failed to connect cache database pool")
 }
 
-/// Schema-time setup only. Restart recovery belongs to
-/// [`crate::maintenance::recovery::recover_interrupted_work`], which starts once at server startup: this
-/// ran first and aborted the evaluations out from under it, so its shared build
-/// cleanup found nothing to do and every shared build those evaluations drove was
-/// left `Created`/`Queued` forever.
+/// Restart recovery must not run here.
+/// It once aborted the evaluations before `recover_interrupted_work` started.
+/// Their shared builds then stayed `Created` or `Queued` forever.
 async fn update_db(db: &DatabaseConnection) -> Result<(), DbErr> {
     seed_builtin_role(db, BASE_ROLE_ADMIN_ID, "Admin", admin_mask()).await?;
     seed_builtin_role(db, BASE_ROLE_WRITE_ID, "Write", write_mask()).await?;
@@ -257,13 +240,6 @@ async fn update_db(db: &DatabaseConnection) -> Result<(), DbErr> {
     Ok(())
 }
 
-/// Insert or refresh a built-in role.
-///
-/// Built-in roles are global (`project = NULL`) and their canonical
-/// permission bitmasks are owned by [`crate::permissions`]. Refreshing on every
-/// startup means upgrades that add new capabilities propagate to existing
-/// installations without a manual migration; the role name is also kept in
-/// sync, which avoids drift if an operator renames a built-in role by hand.
 async fn seed_builtin_role(
     db: &DatabaseConnection,
     role_id: RoleId,

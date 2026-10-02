@@ -4,21 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Build task - invoke the local nix-daemon to build a single derivation.
-//!
-//! Dependencies are already in the local store, prefetched from the Gradient
-//! cache before the build starts.
-//!
-//! The build pipeline is encoded as a type-state chain:
-//!
-//! ```text
-//! ParsedDerivation::load(drv_path)   ->  ParsedDerivation
-//!                     .realize(…)    ->  Vec<BuildOutput>
-//! ```
-//!
-//! `build_derivation` is a thin orchestrator that threads these stages
-//! together and reports the result to the server.
-
 use anyhow::{Context, Result};
 use futures::StreamExt as _;
 use gradient_derivation::parse_drv;
@@ -47,13 +32,6 @@ use super::derivation::get_basic_derivation;
 pub use super::failure::BuildError;
 use super::failure::classify_build_error;
 
-// ── Type-state pipeline ───────────────────────────────────────────────────────
-
-/// A `.drv` file read from disk and parsed into all data needed to call
-/// `DaemonStore::build_derivation`.
-///
-/// Obtain via [`ParsedDerivation::load`]; advance to built outputs via
-/// [`ParsedDerivation::realize`].
 pub(super) struct ParsedDerivation {
     drv: gradient_derivation::Derivation,
     harmonia_path: StorePath,
@@ -61,7 +39,6 @@ pub(super) struct ParsedDerivation {
 }
 
 impl ParsedDerivation {
-    /// Read and parse a `.drv` file from the local Nix store.
     pub(super) async fn load(drv_path: &str) -> Result<Self> {
         let path = nix_store_path(drv_path);
         debug!(drv = %path, "building derivation locally");
@@ -84,14 +61,6 @@ impl ParsedDerivation {
         })
     }
 
-    /// Submit this derivation to the local nix-daemon and collect the realised
-    /// outputs.
-    ///
-    /// Streams build log lines to the server via `updater` while the daemon is
-    /// running.  Returns one [`BuildOutput`] per output name (`nar_size` and
-    /// `nar_hash` are `None` at this stage, filled in by the compress step)
-    /// plus a `substituted` flag - true when the daemon reported the outputs as
-    /// already valid (empty `built_outputs`), i.e. no work was performed.
     #[allow(
         clippy::too_many_arguments,
         reason = "arg-heavy; refactor tracked in #503"
@@ -138,10 +107,8 @@ impl ParsedDerivation {
                 ))
             })?;
 
-        // `build_derivation` is a `Stream<Item=LogMessage> + Future<BuildResult>`,
-        // drained inside `execute` so a protocol error discards the connection.
-        // On abort or timeout we `mark_broken` explicitly: closing the socket
-        // makes the nix-daemon kill the in-flight build.
+        // The connection is marked broken on abort or timeout. The nix-daemon is killing the
+        // in-flight build only once its socket closes.
         let silent = max_silent_secs.map(std::time::Duration::from_secs);
         enum Drained {
             Completed(BuildResult),
@@ -195,7 +162,6 @@ impl ParsedDerivation {
             }
         };
 
-        // CPU time the daemon read from the build cgroup before destroying it.
         let cpu_usec = daemon_cpu_usec(result.cpu_user, result.cpu_system);
 
         match result.inner {
@@ -245,10 +211,6 @@ impl ParsedDerivation {
                 let msg = String::from_utf8_lossy(&f.error_msg).to_string();
                 warn!(drv = %drv_path, error = %msg, "build failed");
                 let kind = classify_build_error(&msg);
-                // The daemon repeats the tail of the log we just streamed; drop
-                // it so the failure banner doesn't duplicate those lines. No
-                // "build failed" prefix either - the server's banner already
-                // says so, and the daemon's message opens with "Cannot build".
                 Err(BuildError::new(
                     kind,
                     anyhow::anyhow!("{}", gradient_sources::strip_nix_log_tail(&msg)),
@@ -258,22 +220,10 @@ impl ParsedDerivation {
     }
 }
 
-/// Resolve `(output_name, full_store_path)` pairs for a successful build.
-///
-/// The daemon's `built_outputs` is authoritative when populated - for
-/// content-addressed or deferred-output drvs the realised path is only
-/// knowable post-build.
-///
-/// When `built_outputs` is empty (the daemon reported success but didn't
-/// emit a new realisation, e.g. the path was already valid for a fixed-output
-/// derivation, or the negotiated protocol predates
-/// `realisation-with-path-not-hash` and harmonia's deserializer dropped the
-/// map), we fall back to the parsed `.drv`'s declared output paths.
-/// Input-addressed drvs and FODs already carry the exact path, so the
-/// recovery is correct for them. Empty `path` entries (true CA / deferred
-/// outputs) are skipped - the caller fails the build when no pairs survive,
-/// since a CA build with no daemon-reported realisation cannot be recorded
-/// safely.
+/// The daemon's `built_outputs` is authoritative for CA and deferred outputs. An empty map is
+/// falling back to the `.drv` output paths, which is correct for input-addressed drvs and FODs.
+/// Old protocols and already-valid FOD outputs are both producing an empty map. Empty CA paths
+/// are skipped, and the caller is failing the build when no pairs survive.
 fn output_pairs_from_built_or_drv(
     built_outputs: &BTreeMap<
         harmonia_store_derivation::derived_path::OutputName,
@@ -294,10 +244,6 @@ fn output_pairs_from_built_or_drv(
         .collect()
 }
 
-// ── Hydra product loader ──────────────────────────────────────────────────────
-
-/// Read and parse `nix-support/hydra-build-products` from `store_path`, returning
-/// one [`BuildProduct`] per valid line. Returns an empty vec if the file is absent.
 pub(super) async fn load_products(store_path: &str) -> Vec<BuildProduct> {
     let file_path = format!("{}/nix-support/hydra-build-products", store_path);
     let Ok(content) = tokio::fs::read_to_string(&file_path).await else {
@@ -324,14 +270,6 @@ pub(super) async fn load_products(store_path: &str) -> Vec<BuildProduct> {
     products
 }
 
-// ── Orchestrator ──────────────────────────────────────────────────────────────
-
-/// Build a single derivation on the local nix-daemon.
-///
-/// Reports [`JobUpdateKind::Building`] at start and
-/// [`JobUpdateKind::BuildOutput`] with the realised outputs on success.
-/// Streams build log lines to the server via `LogChunk` messages while the
-/// daemon is running.
 #[allow(
     clippy::too_many_arguments,
     reason = "arg-heavy; refactor tracked in #503"
@@ -348,10 +286,6 @@ pub async fn build_derivation(
     log_fetch_from_store: bool,
     build_cores: u32,
 ) -> Result<Vec<BuildOutput>, BuildError> {
-    // `report_building` is sent by the caller (`execute_build_job`) before the
-    // prefetch step, so a `JobFailed` after a prefetch error finds the build
-    // already in `Building` state on the server.
-
     let parsed = ParsedDerivation::load(&task.drv_path)
         .await
         .map_err(BuildError::transient)?;
@@ -383,9 +317,6 @@ pub async fn build_derivation(
             None => realize.await,
         };
 
-    // Assemble metrics (wall-clock + sampled peak RAM/disk + daemon CPU) and
-    // send them inline with the `BuildOutput`. On failure they are dropped with
-    // the error; the scheduler records metrics only for completed builds.
     let build_time_ms = started.elapsed().as_millis() as u64;
     let peak_network_mbps = match net_sampler {
         Some(s) => s.finish().await,
@@ -411,11 +342,6 @@ pub async fn build_derivation(
     Ok(outputs)
 }
 
-// ── Log helpers ───────────────────────────────────────────────────────────────
-
-/// When a derivation is already built locally the daemon produces no log.
-/// Read nix's stored `.bz2` log and forward it so the UI still shows output.
-/// Best-effort: missing logs and read errors are logged at debug and ignored.
 pub(super) async fn forward_store_build_log(
     updater: &mut JobUpdater,
     task_index: u32,
@@ -439,7 +365,6 @@ pub(super) async fn forward_store_build_log(
     }
 }
 
-/// Counters collected while draining the harmonia build log stream.
 #[derive(Default)]
 struct LogStreamStats {
     total_msgs: u64,
@@ -448,29 +373,17 @@ struct LogStreamStats {
     send_failures: u64,
 }
 
-/// Why the build log drain stopped.
 enum DrainOutcome {
-    /// The daemon finished the build and closed the log stream normally.
     Completed(LogStreamStats),
-    /// The server signalled `AbortJob` mid-build; the caller must drop the
-    /// daemon connection so the build is killed.
     Aborted,
 }
 
-/// One step of the build log stream: the next message, end-of-stream, or a
-/// server abort.
 enum NextLog {
     Message(LogMessage),
     StreamEnd,
     Aborted,
 }
 
-/// Resolve the next event on the build log stream, racing it against the
-/// server abort signal and the `maxSilent` budget.
-///
-/// Returns [`NextLog::Aborted`] the instant `abort` is set so the caller can
-/// tear down the daemon connection and let the daemon kill the running build.
-/// Returns `Err` only when `silent` elapses with no new log line.
 async fn next_log_event<S>(
     mut logs: Pin<&mut S>,
     silent: Option<std::time::Duration>,
@@ -496,7 +409,6 @@ where
     }
 }
 
-/// Sleep for the `maxSilent` budget, or never resolve when no budget is set.
 async fn maybe_silent_timeout(silent: Option<std::time::Duration>) {
     match silent {
         Some(d) => tokio::time::sleep(d).await,
@@ -504,11 +416,6 @@ async fn maybe_silent_timeout(silent: Option<std::time::Duration>) {
     }
 }
 
-/// Drain every [`LogMessage`] from `logs`, forwarding text lines to `updater`.
-///
-/// Stops early with [`DrainOutcome::Aborted`] when the server cancels the job,
-/// or with `Err` when no log line arrives within `silent` (the build's
-/// `maxSilent` budget; `None` disables it).
 async fn drain_build_logs_with_timeout<S>(
     mut logs: Pin<&mut S>,
     updater: &mut JobUpdater,
@@ -549,8 +456,6 @@ where
                 warn!("build log rate limit exceeded; truncating remaining output");
                 continue;
             }
-            // Log streaming is best-effort - never fail the build because the
-            // server connection hiccupped.
             match updater.send_log_chunk(task_index, line.into_bytes()).await {
                 Ok(()) => {
                     stats.forwarded_lines += 1;
@@ -567,7 +472,6 @@ where
     Ok(DrainOutcome::Completed(stats))
 }
 
-/// Emit a tracing summary after [`drain_build_logs_with_timeout`] completes.
 fn log_stream_summary(stats: &LogStreamStats, drv_path: &str) {
     info!(
         drv = %drv_path,
@@ -583,11 +487,6 @@ fn log_stream_summary(stats: &LogStreamStats, drv_path: &str) {
     }
 }
 
-/// Nix build-orchestration activities that are not the builder's own output:
-/// the "building '/nix/store/…drv'" announcement and the "querying info about
-/// missing paths" summary, both emitted on every build. `Unknown` is overloaded
-/// (it also carries useful "copying '…' to the store" lines for in-daemon
-/// builtins), so only its fixed missing-paths summary is dropped.
 fn is_orchestration_activity(activity_type: ActivityType, text: &str) -> bool {
     match activity_type {
         ActivityType::Build | ActivityType::Builds => true,
@@ -596,20 +495,6 @@ fn is_orchestration_activity(activity_type: ActivityType, text: &str) -> bool {
     }
 }
 
-/// Extract a forwardable log line from a harmonia daemon log message.
-///
-/// Captures:
-/// - `Message`: high-level messages (errors, warnings, status notes).
-/// - `StartActivity`: activity descriptions ("copying '/nix/store/…'" etc.),
-///   minus the build orchestration filtered by [`is_orchestration_activity`].
-///   Kept for builtins (fetchurl, path) that run inside the daemon rather than
-///   in a sandbox and therefore never produce `BuildLogLine` results.
-/// - `BuildLogLine`/`PostBuildLogLine` results: the raw stdout/stderr lines
-///   from the build sandbox or post-build hook (the actual build log).
-///
-/// `StopActivity`, `Progress`, `SetExpected`, `SetPhase`, and other
-/// structured result types are skipped - they're progress-bar bookkeeping,
-/// not user-facing log content.
 fn log_message_to_text(msg: &LogMessage) -> Option<String> {
     match msg {
         LogMessage::Message(m) => {
@@ -634,7 +519,6 @@ fn log_message_to_text(msg: &LogMessage) -> Option<String> {
                 ResultType::BuildLogLine | ResultType::PostBuildLogLine
             ) =>
         {
-            // BuildLogLine/PostBuildLogLine results carry the line as the first String field.
             r.fields.iter().find_map(|f| match f {
                 Field::String(b) => {
                     let s = String::from_utf8_lossy(b);
@@ -750,8 +634,6 @@ mod tests {
             "out".parse().unwrap(),
             realisation("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-foo"),
         );
-        // Drv path differs - must be ignored when built_outputs is non-empty
-        // (the daemon's realisation is canonical for CA / FOD outputs).
         let drv = drv_with_outputs(vec![(
             "out",
             "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-foo",
@@ -769,10 +651,6 @@ mod tests {
 
     #[test]
     fn output_pairs_recover_from_drv_when_built_outputs_empty() {
-        // Either an old-protocol daemon (harmonia drained the legacy map) or a
-        // modern daemon that emits success without a fresh realisation
-        // (e.g. FOD output already valid). For input-addressed and FOD drvs
-        // the .drv carries the path; recover it.
         let built = BTreeMap::new();
         let drv = drv_with_outputs(vec![
             ("out", "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-foo"),
@@ -798,11 +676,6 @@ mod tests {
 
     #[test]
     fn output_pairs_skip_drv_outputs_with_empty_path() {
-        // CA / deferred outputs carry an empty `path` until the daemon emits
-        // a realisation. With nothing to fall back on for those, only the
-        // input-addressed siblings survive - and `realize` errors out when
-        // the result is empty so a CA-only build doesn't go silently
-        // undocumented.
         let built = BTreeMap::new();
         let drv = drv_with_outputs(vec![
             ("out", "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-foo"),
@@ -821,9 +694,6 @@ mod tests {
 
     #[test]
     fn output_pairs_returns_empty_for_pure_ca_drv_without_realisation() {
-        // No daemon realisation, .drv has only CA / deferred outputs (empty
-        // path). Recovery cannot produce any pairs; the caller's
-        // is_empty() check turns this into a build failure.
         let built = BTreeMap::new();
         let drv = drv_with_outputs(vec![("out", ""), ("dev", "")]);
 

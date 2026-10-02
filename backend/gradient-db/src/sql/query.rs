@@ -9,10 +9,6 @@
     reason = "Query::bind and bind_built are the constructors the lint points every other call site at"
 )]
 
-//! A declared statement and the registry that collects them. `Query::bind` is
-//! the one constructor of a raw `Statement` in the backend; `backend/clippy.toml`
-//! denies the sea-orm constructors so nothing can reach SQL around the registry.
-
 use sea_orm::{DatabaseBackend, Statement, Value};
 use std::borrow::Cow;
 
@@ -21,20 +17,13 @@ use super::{Budget, Param};
 #[derive(Copy, Clone, Debug)]
 pub enum Sql {
     Static(&'static str),
-    /// A statement assembled once into a `LazyLock<String>`: borrowed, so the
-    /// hot path running it does not rebuild or clone it per call.
     Lazy(fn() -> &'static str),
-    /// A statement assembled per call. The closure is the exemplar the gate
-    /// plans, so a fence is checked in generated SQL and not in a copy of it.
     Built(fn() -> String),
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum Tier {
     Hot,
-    /// A statement whose cost follows a working set rather than a row: a
-    /// dashboard summary, a metrics scrape, a paged listing, a batch update
-    /// over an array of ids, the dispatcher ranking its queue.
     Bulk,
     Walk,
     Sweep,
@@ -51,10 +40,8 @@ impl Tier {
     }
 }
 
-/// Session state a query needs to plan the way production plans it.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum Flag {
-    /// `SET LOCAL work_mem = '64MB'`, as `gradient_db::graph::walks::begin_walk` sets.
     Walk,
 }
 
@@ -78,7 +65,6 @@ impl Query {
         }
     }
 
-    /// `fetchable.rs:348`, the form a failure message can be clicked from.
     pub fn location(&self) -> String {
         let file = self.file.rsplit('/').next().unwrap_or(self.file);
         format!("{file}:{}", self.line)
@@ -100,10 +86,6 @@ impl Query {
         Statement::from_sql_and_values(DatabaseBackend::Postgres, self.text(), values)
     }
 
-    /// Builds a statement whose text this call assembled, anchored to the
-    /// exemplar that stands for its shape. A few statements bake a value into
-    /// their text or grow a placeholder list per call: the exemplar is what the
-    /// gate plans, and this is what executes.
     pub fn bind_built<S, I>(&self, sql: S, values: I) -> Statement
     where
         S: Into<String>,

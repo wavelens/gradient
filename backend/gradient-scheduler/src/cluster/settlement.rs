@@ -4,9 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! What a cluster attempt's member reports decide. The recovery hook applies
-//! these; nothing here touches the database or a worker.
-
 use gradient_entity::cluster_attempt::ClusterAttemptOutcome;
 use gradient_entity::cluster_job::ClusterJobStatus;
 use gradient_types::ids::ClusterAttemptId;
@@ -159,7 +156,7 @@ fn aborted(error: &str) -> Failure {
     }
 }
 
-/// A kind the graph answers with a requeue would dispatch the member alone.
+/// A kind the graph is answering with a requeue would dispatch the member alone.
 fn terminal(failure: Failure) -> Failure {
     match failure.kind {
         BuildFailureKind::Transient

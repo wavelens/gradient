@@ -4,16 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Drops `derivation_closure`, the root-times-closure table (20M rows on
-//! production, 27% of the database, one write per (root, dependency) pair on
-//! every ingest), and the `derivation.dep_closure_count` cache that only it
-//! filled. The per-entry-point histogram is recomputed on demand instead and
-//! cached under `evaluation.graph_version`, which every anchor move bumps; an
-//! entry point carries the version its rows were computed under and the time they
-//! were computed, so a building evaluation (whose version moves constantly) walks
-//! the graph on a damped cadence rather than on every poll of the page. The index
-//! on `(evaluation, eval, id)` serves the paged task-page read in attribute order.
-
 use sea_orm_migration::prelude::*;
 use sea_orm_migration::sea_orm::ConnectionTrait;
 

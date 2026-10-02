@@ -4,11 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Global build-once shared build: one durable build-state row per derivation
-//! (UNIQUE on `derivation`). Per-eval scoring and logs live in `build_job` /
-//! `build_attempt`; this row is the single source of truth for whether a
-//! derivation has been built.
-
 use chrono::NaiveDateTime;
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -26,28 +21,18 @@ pub struct Model {
     pub derivation: DerivationId,
     pub status: BuildStatus,
     pub cache_available: bool,
-    /// The upstream probe has answered for this shared build, hit or miss. Until it
-    /// has, the need stops here: descending into the build inputs of an output an
-    /// upstream serves dispatches a closure the passthrough then makes pointless, and
-    /// a job already handed to a worker cannot be recalled.
+    /// `probed` is set once the upstream probe answered, hit or miss. The need is not descending
+    /// before that. Descending earlier would dispatch build inputs that a passthrough would make
+    /// pointless. A job already handed to a worker cannot be recalled.
     pub probed: bool,
     pub substituted: bool,
-    /// Builds wanting it can get this shared build's outputs: available in a cache, or terminal
-    /// success with every output complete in our cache. Flipped by the event that
-    /// changes it, with the parents' `blocking_deps` moved from that flip.
     pub fetchable: bool,
-    /// Direct dependencies that are not fetchable. Zero is the can-start gate.
     pub blocking_deps: i32,
-    /// Runtime dependencies that are not complete. Zero, with every output
-    /// present, is complete.
     pub missing_runtime_deps: i32,
-    /// Something still wants this shared build's outputs in our cache: an entry point
-    /// names it, or a wanted, named builder depends on it. Updated by
-    /// `can_start::update_need` on the events that change it; every arm of
-    /// the promotion gate reads it.
+    /// `wanted` is true while an entry point or a wanted, named builder is still needing these
+    /// outputs in our cache. `can_start::update_need` is updating it, and every arm of the
+    /// promotion gate is reading it.
     pub wanted: bool,
-    /// Dispatches ahead of unprioritized work. Cleared by the database when the
-    /// shared build fails permanently, dependency-fails, times out, is aborted or is skipped.
     pub prioritized: bool,
     pub attempt: i32,
     pub timeout_secs: Option<i64>,

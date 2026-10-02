@@ -45,8 +45,6 @@ pub async fn post_build_log(
     let ctx = BuildAccessContext::load(&state, build_id, &Some(user), api_key.as_ref()).await?;
     let shared_build_id = ctx.shared_build.id;
 
-    // Capture current log length so the stream only delivers new content,
-    // avoiding duplication of what the client already received via GET.
     let initial_log_key =
         gradient_db::scheduling::build_attempt::latest_attempt_id(&state.web_db, shared_build_id)
             .await?;
@@ -79,17 +77,12 @@ pub async fn post_build_log(
                 break;
             };
 
-            // While the build hasn't started executing yet (`Created` /
-            // `Queued`), there's nothing to stream - but we must not close
-            // the connection either, otherwise a UI that opened the stream
-            // before the worker picked the build up would see an empty
-            // response and never get the live output. Keep polling.
+            // A build that is not executing yet must keep the stream open. A UI that opened the
+            // stream before a worker picked the build up would otherwise see an empty response.
             if matches!(shared_build.status, BuildStatus::Created | BuildStatus::Queued) {
                 continue;
             }
 
-            // Building / terminal: read whatever's in the log buffer so far
-            // and emit only the new tail.
             let log = state.log_storage.read(log_key).await.unwrap_or_default();
             if log.len() > last_offset {
                 let log_new = log[last_offset..].to_string();
@@ -100,10 +93,8 @@ pub async fn post_build_log(
                 }
             }
 
-            // Anything other than `Building` is terminal - flush a final
-            // read (catches the race where lines were appended between our
-            // read above and the daemon-side status transition committing)
-            // and close the stream.
+            // Any status other than `Building` is terminal. A final read is catching lines appended
+            // between the read above and the status transition commit.
             if shared_build.status != BuildStatus::Building {
                 let final_log = state.log_storage.read(log_key).await.unwrap_or_default();
                 if final_log.len() > last_offset {
@@ -114,10 +105,6 @@ pub async fn post_build_log(
                     }
                 }
                 if !sent_any {
-                    // Build completed (or was Substituted / DependencyFailed
-                    // and never produced output) - emit one empty frame so
-                    // the client sees a clean end-of-stream rather than a
-                    // hanging connection.
                     yield String::new();
                 }
                 break;

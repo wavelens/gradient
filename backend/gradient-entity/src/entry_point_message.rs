@@ -8,11 +8,6 @@ use sea_orm::entity::prelude::*;
 
 use crate::ids::{EntryPointId, EntryPointMessageId, EvaluationMessageId};
 
-/// Join table: attaches an `evaluation_message` to one or more `entry_point` rows.
-///
-/// An `evaluation_message` with zero `entry_point_message` rows is evaluation-scoped
-/// (pipeline-level error or global warning). With one or more rows the message is
-/// attributed to those specific entry points (attribute paths).
 #[derive(Clone, Debug, Default, PartialEq, DeriveEntityModel)]
 #[sea_orm(table_name = "entry_point_message")]
 pub struct Model {

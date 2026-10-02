@@ -126,7 +126,6 @@ pub async fn search_nars<C: ConnectionTrait>(
         .collect()
 }
 
-/// PR-triggered evaluations are included: a pasted commit hash should find its PR run too.
 pub async fn search_commits<C: ConnectionTrait>(
     db: &C,
     low: &str,

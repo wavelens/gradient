@@ -4,9 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Serving NARs from `nar_storage` to a worker, and self-healing a row whose
-//! object has vanished.
-
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -62,8 +59,6 @@ impl Drop for ServeSlot {
     }
 }
 
-/// Stream a single requested NAR from `nar_storage` to the worker, purging
-/// the `cached_path` row when the object has vanished from storage.
 pub(super) async fn serve_nar_request(
     state: &Arc<ServerState>,
     writer: &ProtoWriter,
@@ -96,12 +91,6 @@ pub(super) async fn serve_nar_request(
     }
 }
 
-/// Purge a `cached_path` row whose NAR is no longer in `nar_storage`.
-///
-/// Deletes the stale artifact and clears `derivation_output.is_cached` /
-/// `cached_path` so the next `CacheQuery` stops claiming the path is available -
-/// letting the next build either rebuild from source or pick the path up from a
-/// configured upstream. The derivation graph is untouched.
 async fn invalidate_cached_path(state: &Arc<ServerState>, hash: &str, store_path: &str) {
     if awaiting_upload(state, hash).await {
         warn!(%hash, %store_path, "NAR not on this instance yet; the row is a fresh staged upload");
@@ -127,8 +116,7 @@ async fn invalidate_cached_path(state: &Arc<ServerState>, hash: &str, store_path
     }
 }
 
-/// An unconfirmed row younger than the upload grace is a NAR another instance
-/// has staged and not yet uploaded, not a missing one.
+/// An unconfirmed row younger than the upload grace is staged by another instance and not missing.
 async fn awaiting_upload(state: &Arc<ServerState>, hash: &str) -> bool {
     use gradient_entity::cached_path::{Column as CCachedPath, Entity as ECachedPath};
     use sea_orm::{ColumnTrait as _, EntityTrait as _, QueryFilter as _};
@@ -144,8 +132,6 @@ async fn awaiting_upload(state: &Arc<ServerState>, hash: &str) -> bool {
     }
 }
 
-/// Extract and validate the 32-char store-hash from a `/nix/store/<hash>-name`
-/// path. Returns `None` for anything malformed.
 fn store_hash(store_path: &str) -> Option<&str> {
     let hash = store_path
         .strip_prefix("/nix/store/")
@@ -165,9 +151,6 @@ mod serve_nar_tests {
     use sea_orm::{DatabaseBackend, MockDatabase};
     use tokio::sync::mpsc;
 
-    /// Spy writer: records every message the server attempted to send so the
-    /// test can assert exactly which protocol frames were emitted (NarPush,
-    /// NarUnavailable, NarAbort, …).
     fn spy_writer(timeout: Duration) -> (ProtoWriter, mpsc::Receiver<Bytes>) {
         ProtoWriter::spy(timeout)
     }
@@ -179,9 +162,6 @@ mod serve_nar_tests {
             .expect("deserialise ServerMessage")
     }
 
-    /// Streamed payload arrives as one or more `NarPush` frames whose
-    /// concatenated `data` matches the original bytes, with the final frame
-    /// flagged `is_final=true`.
     #[tokio::test]
     async fn serve_streams_full_payload_in_chunks() {
         let db = MockDatabase::new(DatabaseBackend::Postgres).into_connection();
@@ -232,8 +212,6 @@ mod serve_nar_tests {
         );
     }
 
-    /// Missing object -> `NarUnavailable` (not `NarAbort`, no NarPush) and an
-    /// `Err` from `serve_nar_request`.
     #[tokio::test]
     async fn serve_emits_nar_unavailable_when_missing() {
         let db = MockDatabase::new(DatabaseBackend::Postgres).into_connection();
@@ -260,8 +238,6 @@ mod serve_nar_tests {
         );
     }
 
-    /// RAM answers a request the object store could not: the hash is only in
-    /// the hot cache.
     #[tokio::test]
     async fn serve_answers_a_hot_entry_in_bulk_chunks() {
         let db = MockDatabase::new(DatabaseBackend::Postgres).into_connection();

@@ -4,16 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Indirect GC roots for active builds.
-//!
-//! Concurrent `nix-collect-garbage` on the worker would otherwise be free to
-//! delete a derivation's inputs (or its just-built outputs before
-//! compress+push uploads them). `GcRootKeeper` pins the .drv and each
-//! realised output via harmonia's `add_indirect_root` for the duration of
-//! the build job. Symlinks live under `gcroots_dir` (default
-//! `/nix/var/nix/gcroots/gradient`) and are removed on handle drop. The
-//! keeper purges leftovers at worker startup - anything still in the dir
-//! came from a prior worker that crashed before its handles ran.
+//! A concurrent `nix-collect-garbage` would otherwise delete build inputs or outputs before the
+//! push. Leftover symlinks are coming from a crashed prior worker, and the keeper is purging them
+//! at startup.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -25,8 +18,6 @@ use tracing::{debug, warn};
 
 use crate::nix::store::LocalNixStore;
 
-/// Manages the on-disk gcroots directory and hands out RAII handles that
-/// register / release indirect GC roots through the local nix-daemon.
 #[derive(Clone)]
 pub struct GcRootKeeper {
     inner: Arc<KeeperInner>,
@@ -38,7 +29,6 @@ struct KeeperInner {
 }
 
 impl GcRootKeeper {
-    /// Construct a keeper. An empty `gcroots_dir` disables the feature.
     pub fn new(gcroots_dir: &str, store: Arc<LocalNixStore>) -> Self {
         let dir = if gcroots_dir.is_empty() {
             None
@@ -50,8 +40,6 @@ impl GcRootKeeper {
         }
     }
 
-    /// Remove every entry under the gcroots dir and recreate the dir if it
-    /// doesn't exist. Stale leftovers came from a prior crashed worker.
     pub async fn purge_all(&self) -> Result<()> {
         let Some(dir) = self.inner.dir.as_ref() else {
             return Ok(());
@@ -80,13 +68,6 @@ impl GcRootKeeper {
         Ok(())
     }
 
-    /// Add an indirect GC root for `store_path` (e.g.
-    /// `/nix/store/<hash>-<name>` or `/nix/store/<hash>-<name>.drv`).
-    /// The returned handle removes the symlink on drop.
-    ///
-    /// Returns an inert handle when the keeper is disabled. Errors creating
-    /// the symlink or registering with the daemon are logged and the
-    /// inert handle is returned - bookkeeping failures never fail a build.
     pub async fn add(&self, store_path: &str) -> GcRootHandle {
         let Some(dir) = self.inner.dir.as_ref() else {
             return GcRootHandle::inert();
@@ -121,7 +102,6 @@ async fn create_symlink_idempotent(symlink: &Path, target: &str) -> Result<()> {
     }
 }
 
-/// RAII guard for a single indirect GC root. Removes its symlink on drop.
 pub struct GcRootHandle {
     symlink: Option<PathBuf>,
 }

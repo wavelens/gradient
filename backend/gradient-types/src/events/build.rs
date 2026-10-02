@@ -10,7 +10,6 @@ use gradient_entity::build::BuildStatus;
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 
-/// `total` is `None` when the source announced no size up front.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DownloadProgress {
     pub downloaded: u64,
@@ -40,7 +39,7 @@ pub struct Reported {
 }
 
 impl Reported {
-    /// `FailedTransient` names an event no Git host action consumes, so a retrying build's check stays put.
+    /// No Git host action is consuming `FailedTransient`. A retrying build's check is staying put.
     pub fn reports(status: BuildStatus) -> Option<&'static str> {
         Some(match status {
             BuildStatus::Created => "build.created",

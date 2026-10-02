@@ -23,7 +23,6 @@ pub enum CacheUpstreamKind {
     Http,
 }
 
-/// An upstream cache entry attached to a Gradient cache. Discriminated by `kind`.
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
 #[sea_orm(table_name = "cache_upstream")]
 pub struct Model {

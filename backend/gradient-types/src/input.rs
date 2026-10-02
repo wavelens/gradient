@@ -180,17 +180,13 @@ pub fn repository_url_to_nix(url: &str, commit_hash: &str) -> Result<String, Inp
 }
 
 pub fn check_repository_url_is_ssh(url: &str) -> bool {
-    // Check for explicit SSH protocols
     if url.starts_with("git+ssh://") || url.starts_with("ssh://") {
         return true;
     }
 
-    // Check for SCP-like syntax: user@host:path
-    // This is the most common format for GitHub/GitLab (e.g., git@github.com:user/repo.git)
     if let Some(at_pos) = url.find('@')
         && let Some(colon_pos) = url[at_pos..].find(':')
     {
-        // Ensure the colon is not part of a protocol (e.g., not in "https://")
         let colon_abs_pos = at_pos + colon_pos;
         return colon_abs_pos > at_pos && !url[..at_pos].contains("://");
     }
@@ -231,10 +227,9 @@ pub fn check_task_name(s: &str) -> Result<(), InputError> {
     Ok(())
 }
 
-/// Read a secret from `f`, returning an error rather than terminating the
-/// process on failure. Callers in startup paths should propagate the error to
-/// `init_state` (which exits); per-request callers should map it to a 5xx so a
-/// transient filesystem hiccup never tears down the running server.
+/// Startup callers must propagate the error to `init_state` for a clean exit. Per-request
+/// callers must map it to a 5xx. A transient filesystem hiccup must never tear down the
+/// running server.
 pub fn load_secret(f: &str) -> anyhow::Result<super::secret::SecretString> {
     let s = std::fs::read_to_string(f)
         .map_err(|e| anyhow::anyhow!("Failed to read secret file '{}': {}", f, e))?;
@@ -248,10 +243,8 @@ pub fn load_secret(f: &str) -> anyhow::Result<super::secret::SecretString> {
     Ok(super::secret::SecretString::new(cleaned))
 }
 
-/// Loads a secret from a file as bytes.
-/// Supports both plain text passwords and base64-encoded secrets for backwards compatibility.
-/// - First attempts to use the content as-is (plain text password)
-/// - Falls back to base64 decoding if the plain text is too short (< 16 bytes)
+/// Plain text passwords are used as-is. Content shorter than 16 bytes is falling back to
+/// base64 decoding for backwards compatibility.
 pub fn load_secret_bytes(f: &str) -> anyhow::Result<super::secret::SecretBytes> {
     use base64::{Engine, engine::general_purpose};
 
@@ -277,8 +270,6 @@ pub fn load_secret_bytes(f: &str) -> anyhow::Result<super::secret::SecretBytes> 
     }
 }
 
-/// Validates password strength requirements
-/// Validates username format and content requirements
 pub fn validate_username(username: &str) -> Result<(), InputError> {
     if username.is_empty() {
         return Err(InputError::UsernameEmpty);
@@ -292,7 +283,6 @@ pub fn validate_username(username: &str) -> Result<(), InputError> {
         return Err(InputError::UsernameTooLong);
     }
 
-    // Check for valid characters (alphanumeric, underscore, hyphen)
     if !username
         .chars()
         .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
@@ -300,7 +290,6 @@ pub fn validate_username(username: &str) -> Result<(), InputError> {
         return Err(InputError::UsernameInvalidCharacters);
     }
 
-    // Cannot start or end with underscore or hyphen
     if username.starts_with('_')
         || username.starts_with('-')
         || username.ends_with('_')
@@ -309,7 +298,6 @@ pub fn validate_username(username: &str) -> Result<(), InputError> {
         return Err(InputError::UsernameInvalidStartEnd);
     }
 
-    // Cannot contain consecutive underscores or hyphens
     if username.contains("__")
         || username.contains("--")
         || username.contains("_-")
@@ -318,7 +306,6 @@ pub fn validate_username(username: &str) -> Result<(), InputError> {
         return Err(InputError::UsernameConsecutiveSpecialChars);
     }
 
-    // Reserved usernames
     let reserved = [
         "admin",
         "root",
@@ -352,7 +339,6 @@ pub fn validate_display_name(display_name: &str) -> Result<(), InputError> {
         return Err(InputError::DisplayNameTooLong);
     }
 
-    // Check for valid characters (alphanumeric, spaces, apostrophes, dots, dashes, underscores)
     if !display_name
         .chars()
         .all(|c| c.is_alphanumeric() || matches!(c, ' ' | '\'' | '.' | '-' | '_'))
@@ -360,12 +346,10 @@ pub fn validate_display_name(display_name: &str) -> Result<(), InputError> {
         return Err(InputError::DisplayNameInvalidCharacters);
     }
 
-    // Cannot start or end with spaces
     if display_name.starts_with(' ') || display_name.ends_with(' ') {
         return Err(InputError::DisplayNameInvalidStartEnd);
     }
 
-    // Cannot contain consecutive spaces
     if display_name.contains("  ") {
         return Err(InputError::DisplayNameConsecutiveSpaces);
     }
@@ -382,7 +366,6 @@ pub fn validate_password(password: &str) -> Result<(), InputError> {
         return Err(InputError::PasswordTooLong);
     }
 
-    // Check for common patterns first
     if password.to_lowercase().contains("password") {
         return Err(InputError::PasswordContainsPassword);
     }
@@ -410,14 +393,12 @@ pub fn validate_password(password: &str) -> Result<(), InputError> {
         return Err(InputError::PasswordMissingSpecialChar);
     }
 
-    // Check for common weak sequences (4+ characters)
     if password.chars().collect::<Vec<_>>().windows(4).any(|w| {
         w[0] as u8 + 1 == w[1] as u8 && w[1] as u8 + 1 == w[2] as u8 && w[2] as u8 + 1 == w[3] as u8
     }) {
         return Err(InputError::PasswordSequentialChars);
     }
 
-    // Check for repeated characters (3+ in a row)
     if password
         .chars()
         .collect::<Vec<_>>()

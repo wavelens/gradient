@@ -4,29 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Routing layer for incoming NAR transfers (server -> worker) and the
-//! push-resume gate (worker -> server).
-//!
-//! When a job task sends `NarRequest`/`NarRequestResume` it then calls
-//! [`NarReceiver::await_pending`] to await the assembled compressed NAR for
-//! each path. The dispatch loop records the leading
-//! [`gradient_wire::messages::ServerMessage::NarStreamHeader`] via
-//! [`NarReceiver::note_header`] and hands every arriving
-//! `ServerMessage::NarPush` frame to [`NarReceiver::accept_chunk`].
-//!
-//! A transfer is drained by its own staging task: the dispatch loop only moves
-//! the frame onto a bounded channel, so no disk write ever executes on the loop.
-//! When a [`gradient_storage::PartialStore`] is configured the task holds one
-//! open [`gradient_storage::PartialWriter`] for the whole stream (per job
-//! and NAR hash) so an interrupted download can resume (issue #225) and the
-//! compressed NAR is delivered as a file; otherwise it accumulates in memory
-//! (used by tests). On `is_final` the [`NarPayload`] is delivered to the
-//! waiting task via a `oneshot`.
-//!
-//! `NarUnavailable` / `NarAbort` are routed through [`NarReceiver::fail`] so
-//! the waiter resolves with the reason immediately. The on-disk partial is
-//! kept on failure so the next request can resume from where it stopped.
-
 use gradient_util::sync::Mutex;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -41,22 +18,15 @@ use tokio::sync::{mpsc, oneshot, watch};
 use tokio_util::task::TaskTracker;
 use tracing::{debug, warn};
 
-/// Frames a staging task may queue before the dispatch loop has to wait. Deep
-/// enough to absorb a burst, shallow enough that a stalled disk becomes
-/// backpressure on the socket rather than unbounded memory.
 const STAGE_QUEUE_DEPTH: usize = 8;
 
-type Key = (String, String); // (job_id, store_path)
+type Key = (String, String);
 
-/// A received compressed NAR: staged on disk, or in memory when no partial
-/// store is configured.
 pub enum NarPayload {
     File(PathBuf),
     Bytes(Vec<u8>),
 }
 
-/// Never prints the payload itself: a NAR body in a log line is both useless
-/// and unbounded.
 impl std::fmt::Debug for NarPayload {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -67,9 +37,6 @@ impl std::fmt::Debug for NarPayload {
 }
 
 impl NarPayload {
-    /// The compressed bytes, reading the staged file back when the transfer
-    /// went to disk. Only for the small `.drv` payloads the closure walk mines;
-    /// the import path decompresses straight from the file instead.
     pub async fn read_bytes(&self) -> Result<std::borrow::Cow<'_, [u8]>> {
         match self {
             NarPayload::Bytes(bytes) => Ok(std::borrow::Cow::Borrowed(bytes)),
@@ -81,7 +48,6 @@ impl NarPayload {
         }
     }
 
-    /// Compressed bytes the transfer delivered; 0 when a staged file is gone.
     pub async fn byte_len(&self) -> u64 {
         match self {
             NarPayload::Bytes(bytes) => bytes.len() as u64,
@@ -90,12 +56,7 @@ impl NarPayload {
     }
 }
 
-/// Where a staging task puts the bytes of one transfer.
 enum Sink {
-    /// Open writer plus the store and partial key it was opened under, so the
-    /// finished file can be claimed away from anything that might resume it.
-    /// Boxed: the writer dwarfs the in-memory variant and every stream would
-    /// otherwise carry it.
     Disk {
         writer: Box<PartialWriter>,
         store: PartialStore,
@@ -122,10 +83,6 @@ impl Sink {
         }
     }
 
-    /// Close the sink and hand back what the importer should read. A disk sink
-    /// claims its finished partial: the rename drops the resume token with it,
-    /// so a repeat header for the same path cannot truncate the file the
-    /// importer is about to read.
     async fn finish(self) -> Result<NarPayload> {
         match self {
             Sink::Memory(buf) => Ok(NarPayload::Bytes(buf)),
@@ -140,25 +97,12 @@ impl Sink {
     }
 }
 
-/// Why a NAR transfer ended without bytes.
-///
-/// The server distinguishes the two on the wire and the worker must keep them
-/// apart: they differ in whether retrying can ever succeed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TransferFailure {
-    /// `NarUnavailable`: the cache holds no object for this path. Only a rebuild
-    /// changes that, so the attempt is reported as a missing input rather than
-    /// spent - and spent again - on a transport retry that cannot help.
     Unavailable(String),
-    /// `NarAbort`, a staging error or a dropped stream: the same request may
-    /// well succeed on the next attempt.
     Transient(String),
 }
 
-/// The cache cannot serve `store_path`. Carried as a typed error so the prefetch
-/// turns it into [`MissingInputs`](crate::proto::prefetch::MissingInputs) and the
-/// server demotes the path and re-queues its producer, instead of the build
-/// burning its attempt budget on a NAR no retry will produce.
 #[derive(Debug)]
 pub struct NarUnavailable {
     pub store_path: String,
@@ -179,34 +123,22 @@ impl std::error::Error for NarUnavailable {}
 
 #[derive(Default)]
 struct Inner {
-    /// Live transfers: the channel feeding each one's staging task.
     streams: HashMap<Key, mpsc::Sender<Frame<ServerMessage>>>,
-    /// Outstanding pull waiters; resolved on `is_final` or on failure.
     waiters: HashMap<Key, Waiter>,
 }
 
-/// Shared state between the dispatch loop and job tasks for routing inbound
-/// NARs.
 #[derive(Clone, Default)]
 pub struct NarReceiver {
     inner: Arc<Mutex<Inner>>,
-    /// When set, pull chunks are staged to disk (per job and NAR hash) so
-    /// an interrupted download survives a reconnect. `None` keeps everything in
-    /// memory (tests).
     partial: Option<PartialStore>,
-    /// Registry for the per-transfer staging tasks, so they are owned by the
-    /// receiver rather than detached into the runtime.
     stagers: TaskTracker,
 }
 
 struct Waiter {
     tx: oneshot::Sender<Result<NarPayload, TransferFailure>>,
-    /// Bytes staged so far, so the requester times out on a stalled transfer
-    /// rather than on a large one.
     progress: watch::Sender<u64>,
 }
 
-/// Outstanding pull waiter handle returned by [`NarReceiver::register`].
 pub struct PendingNar {
     job_id: String,
     store_path: String,
@@ -220,7 +152,6 @@ impl PendingNar {
     }
 }
 
-/// Extract the 32-char store-hash from a `/nix/store/<hash>-name` path.
 fn store_hash(store_path: &str) -> Option<&str> {
     let hash = store_path
         .strip_prefix("/nix/store/")
@@ -230,46 +161,34 @@ fn store_hash(store_path: &str) -> Option<&str> {
     (hash.len() == 32 && hash.bytes().all(|b| b.is_ascii_alphanumeric())).then_some(hash)
 }
 
-/// Partial-store key for a pull, namespaced by `job_id` so two concurrent jobs
-/// on one worker transferring the *same* store path never share a `.partial`
-/// file. Mirrors the server-push `{peer_id}/{hash}` namespacing; without it the
-/// interleaved appends to a shared per-hash partial fail "non-contiguous" and
-/// corrupt the staged NAR (only on the WS pull path - S3 pulls bypass staging).
+/// The key is namespaced by `job_id` because two jobs can transfer the same store path at once.
+/// Interleaved appends to a shared partial would fail "non-contiguous" and corrupt the staged NAR.
 fn partial_key(job_id: &str, store_path: &str) -> Option<String> {
     store_hash(store_path).map(|hash| format!("{job_id}/{hash}"))
 }
 
-/// Whether a sink continues from the prefix already on disk or truncates it.
 #[derive(Clone, Copy)]
 enum Resume {
     Staged,
     Fresh,
 }
 
-/// One transfer's identity: what a staging task needs to open, and if the
-/// server restarts the stream, reopen, its sink.
 struct StreamSpec {
     key: Key,
-    /// `Some` in disk mode: the partial-store key this transfer stages under.
     disk_key: Option<String>,
     token: String,
     expected: Option<u64>,
     progress: Option<watch::Sender<u64>>,
 }
 
-/// The half of a [`NarReceiver`] a staging task is allowed to hold. The link
-/// back is weak on purpose: a task owning a full clone would keep `Inner` - and
-/// therefore its own sender - alive, so its channel could never close by drop
-/// and a lost connection would leak the task and its open `.partial` forever.
+/// The link back is weak on purpose. A full clone would keep its own sender alive, and a lost
+/// connection would leak the task and its open `.partial`.
 struct Stager {
     inner: Weak<Mutex<Inner>>,
     partial: Option<PartialStore>,
 }
 
 impl Stager {
-    /// Resolve the waiter for `key`. A payload nobody is waiting for is
-    /// unlinked here: nothing else knows the claim's name, so the alternative
-    /// is a file only the 24 h sweep can find.
     async fn deliver(&self, key: &Key, result: Result<NarPayload, TransferFailure>) {
         let undelivered = match self.inner.upgrade() {
             None => Some(result),
@@ -295,10 +214,6 @@ impl Stager {
         }
     }
 
-    /// Fail one transfer for a reason that makes its staged prefix unusable:
-    /// drop the partial so the next attempt starts clean rather than resuming
-    /// garbage. A server-signalled failure goes through [`NarReceiver::fail`]
-    /// instead, which keeps the prefix.
     async fn abandon(&self, spec: &StreamSpec, reason: String) {
         if let (Some(store), Some(disk_key)) = (self.partial.as_ref(), spec.disk_key.as_deref())
             && let Err(e) = store.discard(disk_key).await
@@ -309,9 +224,6 @@ impl Stager {
             .await;
     }
 
-    /// Open the sink a staging task writes into. `Resume::Staged` continues
-    /// from whatever prefix the store already holds under the stream's token,
-    /// which is the offset the requester told the server to continue from.
     async fn open_sink(&self, spec: &StreamSpec, resume: Resume) -> Result<Sink> {
         let (Some(store), Some(disk_key)) = (self.partial.as_ref(), spec.disk_key.as_deref())
         else {
@@ -334,8 +246,6 @@ impl Stager {
     }
 }
 
-/// Drain one transfer: every frame the dispatch loop queued is appended to
-/// `sink`, and the final one resolves the waiter with the assembled payload.
 async fn stage_pull(
     stager: Stager,
     spec: StreamSpec,
@@ -359,10 +269,6 @@ async fn stage_pull(
 
         let (data, offset, is_final) = (data.as_slice(), offset.to_native(), *is_final);
 
-        // The server restarts from 0 when it decides our resume point is
-        // unusable (a prefix longer than the object it holds), keeping the same
-        // token, so drop the resumed prefix rather than fail on contiguity.
-        // Only ever true before the first append.
         if offset == 0 && sink.len() != 0 {
             warn!(job_id = %key.0, store_path = %key.1, "server restarted the NAR transfer from 0");
             sink = match stager.open_sink(&spec, Resume::Fresh).await {
@@ -422,9 +328,6 @@ async fn stage_pull(
         return;
     }
 
-    // Retired without a final chunk (`fail`, `forget_job`, a dropped
-    // connection): close the writer so the staged prefix is on disk and the
-    // next attempt resumes from a length the file really holds.
     if let Sink::Disk { writer, .. } = sink
         && let Err(e) = writer.finish().await
     {
@@ -432,9 +335,6 @@ async fn stage_pull(
     }
 }
 
-/// Resolves once `progress` has stood still for [`TRANSFER_TIMEOUT`]. A closed
-/// channel means the waiter was resolved or dropped, which the caller observes
-/// on its own oneshot.
 async fn stalled(mut progress: watch::Receiver<u64>) {
     while let Ok(Ok(())) = tokio::time::timeout(TRANSFER_TIMEOUT, progress.changed()).await {}
     if progress.has_changed().is_err() {
@@ -447,7 +347,6 @@ impl NarReceiver {
         Self::default()
     }
 
-    /// Receiver that stages pull chunks to `store` for resumable downloads.
     pub fn with_partial_store(store: PartialStore) -> Self {
         Self {
             partial: Some(store),
@@ -455,10 +354,6 @@ impl NarReceiver {
         }
     }
 
-    /// Bytes already staged on disk for `store_path` and the token they were
-    /// received under, if any. Returns `(0, None)` in memory-only mode or when
-    /// nothing is staged - used by the requester to decide between
-    /// `NarRequest` and `NarRequestResume`.
     pub async fn resumable(&self, job_id: &str, store_path: &str) -> (u64, Option<String>) {
         let Some(store) = self.partial.as_ref() else {
             return (0, None);
@@ -469,7 +364,6 @@ impl NarReceiver {
         (store.staged_len(&key).await, store.token(&key).await)
     }
 
-    /// Synchronously install a waiter for `(job_id, store_path)`.
     pub fn register(&self, job_id: &str, store_path: &str) -> PendingNar {
         let key = (job_id.to_owned(), store_path.to_owned());
         let (tx, rx) = oneshot::channel();
@@ -486,8 +380,6 @@ impl NarReceiver {
         }
     }
 
-    /// Await a previously [`Self::register`]ed waiter until it goes
-    /// [`gradient_wire::messages::TRANSFER_TIMEOUT`] without progress.
     pub async fn await_pending(&self, pending: PendingNar) -> Result<NarPayload> {
         let PendingNar {
             job_id,
@@ -530,22 +422,16 @@ impl NarReceiver {
         }
     }
 
-    /// Convenience: register + await in one step.
     #[cfg(test)]
     pub async fn wait_for(&self, job_id: &str, store_path: &str) -> Result<NarPayload> {
         let pending = self.register(job_id, store_path);
         self.await_pending(pending).await
     }
 
-    /// Record the `NarStreamHeader` that precedes a pull's chunks and start the
-    /// transfer's staging task. A repeat header for the same path retires the
-    /// stream it supersedes.
     pub fn note_header(&self, job_id: &str, store_path: &str, total_bytes: u64, token: &str) {
         self.open_stream(self.spec(job_id, store_path, token, Some(total_bytes)));
     }
 
-    /// The staging spec for one transfer. `disk_key` is `None` in memory mode
-    /// and for a path whose store hash cannot be parsed.
     fn spec(
         &self,
         job_id: &str,
@@ -565,10 +451,6 @@ impl NarReceiver {
         }
     }
 
-    /// Queue one `NarPush` frame onto its transfer's staging task, opening a
-    /// stream first when no header announced it (memory mode, tests). The queue
-    /// is fed outside the lock, so a slow disk becomes backpressure on the
-    /// socket instead of a stalled dispatch loop holding a mutex.
     pub async fn accept_chunk(&self, job_id: &str, store_path: &str, frame: Frame<ServerMessage>) {
         let key = (job_id.to_owned(), store_path.to_owned());
         let tx = {
@@ -576,9 +458,6 @@ impl NarReceiver {
             match g.streams.get(&key).cloned() {
                 Some(tx) => Some(tx),
                 None => {
-                    // No header and no stream: open one only when a request is
-                    // actually waiting. A late push for a finished job would
-                    // otherwise stage a `.partial` and a task nothing closes.
                     let requested = g.waiters.contains_key(&key);
                     drop(g);
                     requested.then(|| self.open_stream(self.spec(job_id, store_path, "", None)))
@@ -596,9 +475,6 @@ impl NarReceiver {
         }
     }
 
-    /// Install a stream for `spec.key` and spawn its staging task, returning
-    /// the sender. Any stream already registered under that key is dropped,
-    /// which ends its task.
     fn open_stream(&self, mut spec: StreamSpec) -> mpsc::Sender<Frame<ServerMessage>> {
         let (tx, rx) = mpsc::channel(STAGE_QUEUE_DEPTH);
         {
@@ -629,10 +505,6 @@ impl NarReceiver {
         tx
     }
 
-    /// Resolve the waiter for `(job_id, store_path)` with a failure. Called for
-    /// both `NarUnavailable` and `NarAbort`, which `failure` keeps apart. Any
-    /// on-disk partial is kept so a later request can resume from where it
-    /// stopped.
     pub fn fail(&self, job_id: &str, store_path: &str, failure: TransferFailure) {
         let key = (job_id.to_owned(), store_path.to_owned());
         let reason = match &failure {
@@ -652,17 +524,12 @@ impl NarReceiver {
         }
     }
 
-    /// Drop in-memory state for a job, ending its staging tasks. On-disk
-    /// partials (per job and hash) are left for the GC sweep so a later
-    /// attempt can still resume.
     pub fn forget_job(&self, job_id: &str) {
         let mut g = self.inner.lock();
         g.streams.retain(|(j, _), _| j != job_id);
         g.waiters.retain(|(j, _), _| j != job_id);
     }
 
-    /// Route a frame that belongs to a NAR transfer into this receiver; every
-    /// other frame comes back for the caller's own dispatch.
     pub async fn absorb(&self, inbound: Inbound<ServerMessage>) -> Option<Inbound<ServerMessage>> {
         match inbound {
             Inbound::Bulk(frame) => {
@@ -765,9 +632,6 @@ mod tests {
         }
     }
 
-    /// Let every staging task started so far run to completion. A stager is a
-    /// separate task now, so a delivery is no longer ordered against the
-    /// caller of `accept_chunk`.
     async fn settle(r: &NarReceiver) {
         r.stagers.close();
         r.stagers.wait().await;
@@ -780,7 +644,6 @@ mod tests {
         }
     }
 
-    /// A staged file counts the bytes on disk, the same as an in-memory body.
     #[tokio::test]
     async fn a_payload_measures_its_transferred_bytes() {
         let dir = TempDir::new().unwrap();
@@ -863,8 +726,6 @@ mod tests {
             .await;
     }
 
-    /// With a partial store the transfer never sits in memory: the waiter is
-    /// handed the staged file, holding exactly the bytes that were pushed.
     #[tokio::test]
     async fn disk_mode_delivers_the_staged_file() {
         let dir = TempDir::new().unwrap();
@@ -886,8 +747,6 @@ mod tests {
         let NarPayload::File(delivered) = &payload else {
             panic!("disk mode yields a file");
         };
-        // The delivered file is the claim, not the shared `{job}/{hash}.partial`
-        // a later header could truncate under the importer.
         assert_ne!(
             delivered,
             &store_for_key.path(&format!("j/{}", "a".repeat(32)))
@@ -936,10 +795,6 @@ mod tests {
         assert!(err.contains("not in nar_storage"), "got: {err}");
     }
 
-    /// An unavailable NAR and an aborted transfer used to arrive as the same
-    /// bare string, so a path the cache could not serve was reported
-    /// `Transient`: no `missing_paths` for the server to demote, and a retry
-    /// that fails in milliseconds, spending the whole attempt budget in seconds.
     #[tokio::test]
     async fn an_unavailable_nar_is_typed_apart_from_an_aborted_transfer() {
         let r = NarReceiver::new();
@@ -990,9 +845,6 @@ mod tests {
         assert_eq!(bytes(r.await_pending(p2).await.unwrap()), b"hello");
     }
 
-    /// A `PartialStore`-backed receiver resumes across a simulated reconnect:
-    /// the first attempt stages bytes to disk and fails; a fresh receiver over
-    /// the same root reports the staged prefix and completes the transfer.
     #[tokio::test]
     async fn partial_store_resumes_across_reconnect() {
         let dir = TempDir::new().unwrap();
@@ -1006,7 +858,6 @@ mod tests {
             .await;
         r1.accept_chunk("j", &path, frame("j", &path, 3, b"def", false))
             .await;
-        // Connection drops mid-transfer.
         r1.fail("j", &path, TransferFailure::Transient("NarAbort".into()));
         settle(&r1).await;
 
@@ -1014,7 +865,6 @@ mod tests {
         assert_eq!(staged, 6);
         assert_eq!(token.as_deref(), Some("len-9"));
 
-        // Fresh receiver (reconnect) resumes from offset 6 and completes.
         let r2 = NarReceiver::with_partial_store(store);
         let r2c = r2.clone();
         let pathc = path.clone();
@@ -1026,10 +876,6 @@ mod tests {
         assert_eq!(file_bytes(task.await.unwrap().unwrap()).await, b"abcdefghi");
     }
 
-    /// Two jobs transferring the SAME store path concurrently must not share a
-    /// partial file. With a bare-hash key their interleaved appends corrupted
-    /// the partial and failed "non-contiguous"; per-`{job_id}/{hash}` keys keep
-    /// them isolated so both assemble correctly.
     #[tokio::test]
     async fn concurrent_jobs_same_path_do_not_collide() {
         let dir = TempDir::new().unwrap();
@@ -1043,9 +889,6 @@ mod tests {
         let p1 = r.register("j1", &path);
         let p2 = r.register("j2", &path);
 
-        // Interleave both jobs' chunks for the same hash: under a shared key
-        // j2's offset-0 chunk would truncate j1's bytes and the offset-3 chunks
-        // would then fail the contiguity check.
         r.accept_chunk("j1", &path, frame("j1", &path, 0, b"aaa", false))
             .await;
         r.accept_chunk("j2", &path, frame("j2", &path, 0, b"bbb", false))
@@ -1065,9 +908,6 @@ mod tests {
         );
     }
 
-    /// The server restarts a transfer from 0 (our staged prefix is longer than
-    /// the object it holds) while echoing the same token. The stale prefix must
-    /// be dropped instead of failing the contiguity check.
     #[tokio::test]
     async fn a_restart_from_zero_drops_the_resumed_prefix() {
         let dir = TempDir::new().unwrap();
@@ -1093,10 +933,6 @@ mod tests {
         );
     }
 
-    /// A dropped connection takes the whole `MessageLoopState` with it, and every
-    /// staging task must observe its channel close rather than sit on an open
-    /// `.partial` for the life of the process. The staged prefix itself stays,
-    /// which is what lets the reconnect resume it (#225).
     #[tokio::test]
     async fn dropping_the_receiver_ends_every_stager() {
         let dir = TempDir::new().unwrap();
@@ -1120,9 +956,6 @@ mod tests {
         assert_eq!(store.staged_len(&format!("j/{hash}")).await, 3);
     }
 
-    /// A `NarPush` for a path nothing requested - the late push for a job that
-    /// already finished - must be dropped, not staged: staging it would open a
-    /// `.partial` and a task no waiter, failure or job cleanup can ever close.
     #[tokio::test]
     async fn a_chunk_nothing_requested_is_not_staged() {
         let dir = TempDir::new().unwrap();

@@ -20,8 +20,6 @@ use gradient_types::*;
 use std::sync::Arc;
 use tracing::warn;
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
 fn text_response(content_type: &'static str, body: String) -> WebResult<Response<String>> {
     Response::builder()
         .header(header::CONTENT_TYPE, HeaderValue::from_static(content_type))
@@ -29,9 +27,6 @@ fn text_response(content_type: &'static str, body: String) -> WebResult<Response
         .map_err(|e| WebError::internal(format!("Failed to build response: {}", e)))
 }
 
-/// Attach cache-observability headers to a narinfo response: `X-Cache` reports
-/// whether it was served from our store (`HIT`) or proxied from an upstream
-/// (`MISS`), and CORS is opened for browser-based Nix tooling.
 fn with_narinfo_headers(mut response: Response, cache_status: &'static str) -> Response {
     let headers = response.headers_mut();
     headers.insert("x-cache", HeaderValue::from_static(cache_status));
@@ -41,8 +36,6 @@ fn with_narinfo_headers(mut response: Response, cache_status: &'static str) -> R
     );
     response
 }
-
-// ── Handlers ──────────────────────────────────────────────────────────────────
 
 pub async fn cache_root(Path(cache): Path<String>) -> Response {
     (
@@ -125,10 +118,9 @@ pub async fn path(
     Path((cache, path)): Path<(String, String)>,
     Query(flag): Query<JsonFlag>,
 ) -> WebResult<Response> {
-    // Anything that isn't a narinfo is simply not in this cache. Nix clients and
-    // debuginfod probe the cache root for keys we never serve, and a 4xx other
-    // than 404 reads as a hard error to them - nixseparatedebuginfod aborts the
-    // whole request rather than moving on to the next substituter (#563).
+    // A 4xx other than 404 is read as a hard error by Nix clients and debuginfod.
+    // nixseparatedebuginfod is aborting the whole request instead of trying the next substituter
+    // (#563).
     if !path.ends_with(".narinfo") {
         return Err(WebError::not_found("Path"));
     }
@@ -175,8 +167,6 @@ pub async fn path(
     Err(WebError::not_found("Path"))
 }
 
-/// One `Key: value` line of a narinfo. Matches the whole key, so `StorePath`
-/// never picks up a longer field that starts with it.
 fn narinfo_field<'a>(body: &'a str, key: &str) -> Option<&'a str> {
     body.lines().find_map(|line| {
         line.strip_prefix(key)
@@ -185,19 +175,8 @@ fn narinfo_field<'a>(body: &'a str, key: &str) -> Option<&'a str> {
     })
 }
 
-/// Add this cache's own signature to a narinfo we are proxying.
-///
-/// Everything we serve is then verifiable with the Gradient cache's key alone,
-/// so a client needs to trust one key rather than the key of every cache we
-/// happen to proxy. The upstream's own `Sig` lines are kept: they stay valid
-/// (a signature covers the fingerprint, not the rewritten `URL:`), and anyone
-/// who does trust that upstream can still check it independently.
-///
-/// Only ever called on a body whose upstream signature already verified -
-/// signing an unverified narinfo would launder whatever an upstream said under
-/// our own name. Returns `None` if the fingerprint fields cannot be read, so a
-/// body we do not fully understand is passed through untouched rather than
-/// signed over guessed values.
+/// Only a body whose upstream signature already verified may be re-signed. Signing an unverified
+/// narinfo would launder an upstream's claim under our own name.
 fn resign_narinfo(
     body: &str,
     sign: impl FnOnce(&str, &str, u64, &[String]) -> String,
@@ -224,8 +203,6 @@ fn resign_narinfo(
     Some(out)
 }
 
-/// Point the narinfo's `URL:` at our own proxy endpoint, so a client fetching
-/// the NAR comes back through us rather than straight to the upstream.
 fn rewrite_nar_url(body: &str, upstream: CacheUpstreamId) -> String {
     body.lines()
         .map(|line| {
@@ -240,12 +217,6 @@ fn rewrite_nar_url(body: &str, upstream: CacheUpstreamId) -> String {
         + "\n"
 }
 
-/// The narinfo for a path we do not hold, from whichever upstream has it.
-///
-/// Probing is concurrent and bounded, and an upstream that stops answering is
-/// taken out of rotation: a cache must answer a miss quickly, and serialising
-/// this meant one unreachable upstream cost every miss the full client timeout -
-/// long enough that a substituter's own stall detector fired first.
 async fn fetch_from_upstream(
     state: &Arc<ServerState>,
     cache: &MCache,
@@ -275,8 +246,6 @@ async fn fetch_from_upstream(
 
     let body = rewrite_nar_url(&found.body, found.upstream);
 
-    // Built only once we actually have something to serve, so a miss never pays
-    // for reading and decrypting the cache's key.
     let signer = match CacheSigner::from_cache(
         &state.config.secrets.crypt_file,
         cache,
@@ -308,8 +277,6 @@ NarSize: 85514096\n\
 References: sdd13vm3yf8fwhhasc5r0fm2pkzq9cmx-narwhals-2.23.0 9ipfvwnqp1q8ijnmi5sxvlx9r8w34lw3-bash-5.3p15\n\
 Sig: cache.nixos.org-1:AAAA\n";
 
-    /// The point of re-signing: a client that trusts only this cache's key can
-    /// use a path we proxied, without being handed every upstream's key too.
     #[test]
     fn a_proxied_narinfo_gains_our_own_signature() {
         let out = resign_narinfo(UPSTREAM, |_, _, _, _| "gradient.test-main:OURS".into())
@@ -323,8 +290,6 @@ Sig: cache.nixos.org-1:AAAA\n";
         assert!(out.ends_with('\n'));
     }
 
-    /// The signature covers the fingerprint, so these four inputs are the whole
-    /// correctness of it: a wrong field silently produces a narinfo nix rejects.
     #[test]
     fn the_signature_covers_the_paths_own_fingerprint_fields() {
         let seen = std::cell::RefCell::new(None);
@@ -351,8 +316,6 @@ Sig: cache.nixos.org-1:AAAA\n";
         );
     }
 
-    /// A body we cannot read the fingerprint out of must be passed through
-    /// unsigned rather than signed over guessed values.
     #[test]
     fn an_unparseable_narinfo_is_not_signed() {
         assert!(resign_narinfo("Compression: zstd\n", |_, _, _, _| "k:v".into()).is_none());
@@ -365,8 +328,6 @@ Sig: cache.nixos.org-1:AAAA\n";
         assert_eq!(narinfo_field(UPSTREAM, "CA"), None);
     }
 
-    /// A client must never be handed the upstream's own NAR URL: it would fetch
-    /// straight from there, bypassing this cache entirely.
     #[test]
     fn the_nar_url_is_rewritten_through_our_proxy() {
         let id = CacheUpstreamId::new(uuid::Uuid::from_u128(7));

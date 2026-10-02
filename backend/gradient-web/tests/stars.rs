@@ -4,9 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Every request consumes three auth reads first: session by jti, session
-//! update, user. A public project then costs one more read (no membership).
-
 #![expect(clippy::unwrap_used, reason = "test assertions")]
 
 use gradient_entity::{project, task};

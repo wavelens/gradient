@@ -4,10 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Task Actions dispatch and execution. [`matching_actions`] decides which of a
-//! task's actions an event reaches; the execution and per-config executors live
-//! in [`executor`] and [`send`].
-
 mod crypto;
 mod executor;
 mod matchers;
@@ -31,8 +27,6 @@ pub use send::{reporter_for_task, verify_git_host_action};
 
 pub const MAX_BODY_BYTES: usize = 64 * 1024;
 
-/// Successful action delivery: the executor's HTTP/SMTP status and any response
-/// body, recorded on the `task_action_delivery` row.
 pub(crate) struct ExecutorOk {
     pub(crate) status_code: Option<i32>,
     pub(crate) response_body: Option<String>,
@@ -49,7 +43,6 @@ pub(crate) fn truncate(mut s: String, max: usize) -> String {
     s
 }
 
-/// The active actions of `task_id`, in insertion order.
 pub async fn active_actions_for_task(
     ctx: &CiContext,
     task_id: TaskId,
@@ -61,14 +54,8 @@ pub async fn active_actions_for_task(
         .await
 }
 
-/// The actions that react to `event`, with the two payload rules: `OpenPr` only
-/// on input-update evaluations, Git host reports never on them.
-///
-/// `OpenPr` fires on a normal gate event (build/eval completed) but must only
-/// act on `input_update` evaluations, never regular CI evaluations. A
-/// `git_host_status_report` posts a CI status against a real commit/PR, and an
-/// `input_update` eval is an internal bump whose own commit is blank until its
-/// PR is pushed, so it is skipped there: the PR's own CI run reports normally.
+/// `OpenPr` must act only on `input_update` evaluations. Git host reports must skip them because
+/// their commit is blank until the PR is pushed. The PR's own CI run is reporting normally.
 pub fn matching_actions(
     actions: Vec<gradient_types::MTaskAction>,
     event: &str,

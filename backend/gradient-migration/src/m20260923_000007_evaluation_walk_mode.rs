@@ -4,7 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! `evaluation.walk_mode`: `0` prunes recorded subtrees, `1` re-walks the whole closure.
+//! `evaluation.walk_mode` `0` is pruning recorded subtrees, and `1` is re-walking the whole
+//! closure.
 
 use sea_orm_migration::prelude::*;
 use sea_orm_migration::sea_orm::ConnectionTrait;

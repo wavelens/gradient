@@ -4,16 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Integration tests for `POST /api/v1/build-requests/url` (#564).
-//!
-//! The no-upload build request: the source is already published at a URL, so a
-//! deployment tool posts the URL and a revision instead of uploading a source
-//! tree. Every test here pins an explicit `rev`, which is the branch that does
-//! no network work - resolving a `ref` needs a real remote.
-//!
-//! Query sequence: session, session update, user (authorize), project by name,
-//! membership, role (TriggerEvaluation), then the queueing transaction.
-
 #![expect(
     clippy::unwrap_used,
     reason = "test scaffolding: a fixture helper that cannot build its value should fail the test loudly"
@@ -121,9 +111,7 @@ fn queues_an_evaluation_against_the_remote_url() {
         let evaluation = EvaluationId::now_v7();
 
         let db = base_db(session_id)
-            // reserved build-request task already exists
             .append_query_results([vec![reserved_task()]])
-            // INSERT commit, INSERT evaluation
             .append_query_results([vec![gradient_entity::commit::Model {
                 id: commit,
                 message: format!("Build request {REPO}@{REV}"),
@@ -142,7 +130,6 @@ fn queues_an_evaluation_against_the_remote_url() {
                 updated_at: test_date(),
                 ..Default::default()
             }]])
-            // no cache linked to the project
             .append_query_results([Vec::<gradient_entity::project_cache::Model>::new()])
             .append_exec_results([MockExecResult {
                 last_insert_id: 0,
@@ -227,8 +214,6 @@ fn rejects_an_empty_url() {
     });
 }
 
-/// `repository_url_to_nix` refuses local paths, so a build request cannot make
-/// the server read a flake off its own disk.
 #[test]
 fn rejects_a_local_file_url() {
     run(async {
@@ -250,8 +235,6 @@ fn rejects_a_local_file_url() {
     });
 }
 
-/// Same defence in depth the upload dispatch applies: an override must name a
-/// remote flake ref, never a local path.
 #[test]
 fn rejects_a_local_input_override() {
     run(async {

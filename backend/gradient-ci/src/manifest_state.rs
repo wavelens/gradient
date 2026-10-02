@@ -4,12 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! In-memory short-lived stores for the GitHub App manifest flow:
-//! - CSRF state tokens issued at /admin/github-app/manifest and consumed at
-//!   /admin/github-app/callback.
-//! - Pending credential blobs stored after a successful exchange and consumed
-//!   by the operator's browser session at /admin/github-app/credentials.
-
 use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::Instant;
@@ -18,27 +12,18 @@ use gradient_types::ids::UserId;
 
 use crate::github_app_manifest::ManifestResult;
 
-/// Map of state-token -> (initiating superuser id, issuance time). Tokens older
-/// than 10 minutes are pruned on each `issue_state` call.
-///
-/// The user id is recorded at issuance so the callback - which arrives as an
-/// unauthenticated top-level browser redirect from github.com and therefore
-/// carries no `Authorization` header - can recover which superuser initiated
-/// the manifest flow without trusting query-string input.
+/// The user id is recorded at issuance because the callback is an unauthenticated browser redirect
+/// from github.com. The callback can then recover the initiating superuser without trusting
+/// query-string input.
 pub type ManifestStateStore = Mutex<HashMap<String, (UserId, Instant)>>;
 
-/// Map of superuser id -> (pending credentials, deposit time). Entries older
-/// than 10 minutes are pruned on each `store_credentials` call.
 pub type PendingCredentialsStore = Mutex<HashMap<UserId, (ManifestResult, Instant)>>;
 
 use rand::RngExt as _;
 use std::time::Duration;
 
-/// State tokens older than this are pruned and become invalid.
 pub const STATE_TTL: Duration = Duration::from_secs(10 * 60);
 
-/// Generates and stores a fresh URL-safe random state token. Prunes any
-/// expired entries as a side-effect.
 pub fn issue_state(store: &ManifestStateStore, user_id: UserId) -> String {
     let mut bytes = [0u8; 24];
     rand::rng().fill(&mut bytes);
@@ -52,8 +37,6 @@ pub fn issue_state(store: &ManifestStateStore, user_id: UserId) -> String {
     token
 }
 
-/// Removes the state from the store and returns the initiating user id iff
-/// the token existed and is not expired. One-shot consumption.
 pub fn validate_and_consume(store: &ManifestStateStore, state: &str) -> Option<UserId> {
     let mut guard = store.lock().unwrap_or_else(|p| p.into_inner());
     match guard.remove(state) {
@@ -62,8 +45,6 @@ pub fn validate_and_consume(store: &ManifestStateStore, state: &str) -> Option<U
     }
 }
 
-/// Stores `creds` per `user_id`, overwriting any prior entry. Prunes
-/// expired entries as a side-effect.
 pub fn store_credentials(store: &PendingCredentialsStore, user_id: UserId, creds: ManifestResult) {
     let mut guard = store.lock().unwrap_or_else(|p| p.into_inner());
     let cutoff = Instant::now() - STATE_TTL;
@@ -71,7 +52,6 @@ pub fn store_credentials(store: &PendingCredentialsStore, user_id: UserId, creds
     guard.insert(user_id, (creds, Instant::now()));
 }
 
-/// Removes and returns the entry for `user_id` if present and not expired.
 pub fn take_credentials(
     store: &PendingCredentialsStore,
     user_id: UserId,

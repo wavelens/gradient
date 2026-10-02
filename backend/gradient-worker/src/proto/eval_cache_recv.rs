@@ -4,21 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Routing layer for the fleet eval-cache transfer (issue #386 L3).
-//!
-//! Before evaluating a flake the worker PULLs its `<fingerprint>.sqlite` blob
-//! from the server so the eval starts warm; after, it PUSHes the updated blob
-//! back. Both legs are best-effort - a cache failure never fails the eval.
-//!
-//! [`super::job::JobUpdater::pull_eval_cache`] registers a [`PendingPull`] then
-//! sends `EvalCachePull`; the dispatch loop routes `EvalCachePullResult` via
-//! [`EvalCacheReceiver::deliver_pull_result`] and inline-stream `EvalCacheChunk`
-//! frames via [`EvalCacheReceiver::deliver_pull_chunk`]. Pushes go through the
-//! connection's upload handshake instead.
-//!
-//! Mirrors [`super::nar_recv`] but simpler: the executor is running one eval at a
-//! time so a single in-flight pull per `job_id` is enough.
-
 use gradient_util::sync::Mutex;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -28,17 +13,13 @@ use gradient_wire::messages::{EvalCachePullOutcome, TRANSFER_TIMEOUT};
 use tokio::sync::oneshot;
 use tracing::{debug, warn};
 
-/// Per-job in-flight pull state. The executor is sequential so at most one pull
-/// is live for a given `job_id` at a time.
 enum Pending {
-    /// Awaiting `EvalCachePullResult`. The dispatch loop moves it to
-    /// `PullStream` on `Inline` before the waiter wakes, since the chunks
-    /// follow the result immediately.
+    /// The dispatch loop is moving this to `PullStream` on `Inline` before waking the waiter. The
+    /// chunks are following the result immediately.
     Pull {
         result_tx: oneshot::Sender<EvalCachePullOutcome>,
         bytes_tx: oneshot::Sender<Result<Vec<u8>, String>>,
     },
-    /// Accumulating inline `EvalCacheChunk` frames after an `Inline` outcome.
     PullStream {
         buf: Vec<u8>,
         bytes_tx: oneshot::Sender<Result<Vec<u8>, String>>,
@@ -50,14 +31,11 @@ struct Inner {
     pending: HashMap<String, Pending>,
 }
 
-/// Shared state between the dispatch loop and job tasks for routing eval-cache
-/// transfers. Cloneable; cheap.
 #[derive(Clone, Default)]
 pub struct EvalCacheReceiver {
     inner: Arc<Mutex<Inner>>,
 }
 
-/// Pull handle returned by [`EvalCacheReceiver::register_pull`].
 pub struct PendingPull {
     job_id: String,
     result_rx: oneshot::Receiver<EvalCachePullOutcome>,
@@ -66,7 +44,6 @@ pub struct PendingPull {
 }
 
 impl PendingPull {
-    /// Await the `EvalCachePullResult` outcome, bounded by [`TRANSFER_TIMEOUT`].
     pub async fn await_outcome(&mut self) -> Result<EvalCachePullOutcome> {
         match tokio::time::timeout(TRANSFER_TIMEOUT, &mut self.result_rx).await {
             Ok(Ok(outcome)) => Ok(outcome),
@@ -85,8 +62,6 @@ impl PendingPull {
         }
     }
 
-    /// After an `Inline` outcome, switch this handle into chunk-accumulation
-    /// mode and await the assembled blob delivered on `is_final`.
     pub async fn await_inline(self, total_bytes: u64) -> Result<Vec<u8>> {
         match tokio::time::timeout(TRANSFER_TIMEOUT, self.bytes_rx).await {
             Ok(Ok(Ok(bytes))) => {
@@ -122,7 +97,6 @@ impl EvalCacheReceiver {
         Self::default()
     }
 
-    /// Install a pull waiter for `job_id` before sending `EvalCachePull`.
     pub fn register_pull(&self, job_id: &str) -> PendingPull {
         let (result_tx, result_rx) = oneshot::channel();
         let (bytes_tx, bytes_rx) = oneshot::channel();
@@ -141,7 +115,6 @@ impl EvalCacheReceiver {
         }
     }
 
-    /// Route an `EvalCachePullResult` to its waiter.
     pub fn deliver_pull_result(&self, job_id: &str, outcome: EvalCachePullOutcome) {
         let mut g = self.inner.lock();
         match g.pending.remove(job_id) {
@@ -167,8 +140,6 @@ impl EvalCacheReceiver {
         }
     }
 
-    /// Append an inline `EvalCacheChunk`; on `is_final` deliver the assembled
-    /// blob. A non-contiguous offset fails the waiter, mirroring `nar_recv`.
     pub fn deliver_pull_chunk(&self, job_id: &str, data: &[u8], offset: u64, is_final: bool) {
         let mut g = self.inner.lock();
         let Some(Pending::PullStream { buf, .. }) = g.pending.get_mut(job_id) else {
@@ -201,8 +172,6 @@ impl EvalCacheReceiver {
         }
     }
 
-    /// Drop any pending transfer state for `job_id`. Called from job cleanup
-    /// next to `nar_recv.forget_job`.
     pub fn forget_job(&self, job_id: &str) {
         self.inner.lock().pending.remove(job_id);
     }

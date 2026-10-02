@@ -4,8 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Persists the worker's phase timeline and the job's finish mark.
-
 use std::sync::Arc;
 
 use chrono::NaiveDateTime;
@@ -20,7 +18,6 @@ use gradient_wire::types::{JobPhase, JobPhaseSpan};
 
 use crate::Scheduler;
 
-/// Eval wall-clock per phase, summed across every span of that phase.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct EvalPhaseTotals {
     pub fetch_ms: i64,
@@ -72,8 +69,6 @@ pub(crate) fn phase_rows(
         .collect()
 }
 
-/// A worker's terminal report as it arrived: the spans, the job clock the
-/// worker took them at, and the server's receipt time, which is the finish mark.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ReportedTimeline {
     pub spans: Vec<JobPhaseSpan>,
@@ -91,31 +86,16 @@ impl ReportedTimeline {
     }
 }
 
-/// What a terminal report found when it went to close out its dispatch row.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum TimelineLanding {
-    /// The row was open and now carries this report's finish mark and outcome.
     Closed,
-    /// The row was open but the stamping write failed.
     CloseFailed,
-    /// A deliberate closer got there first, so the recorded outcome stands.
     AlreadyClosed,
-    /// No row at all. The record is written before the job leaves, so its
-    /// absence is a broken invariant rather than a race.
     NoRow,
-    /// The lookup itself failed, so nothing is known about the row.
     LookupFailed,
 }
 
 impl Scheduler {
-    /// Close out a job's telemetry: stamp `finished_at` and the outcome, write
-    /// one row per span, and fill the eval phase columns the worker no longer
-    /// reports directly. Best effort throughout: instrumentation must never
-    /// fail a job.
-    ///
-    /// The writes are detached so telemetry never adds database latency to the
-    /// connection's message loop. Everything it needs comes off the row, so a
-    /// report that arrives after the tracker has dropped the job still lands.
     pub fn record_job_timeline(
         self: &Arc<Self>,
         assignment_id: DispatchedJobId,
@@ -130,9 +110,8 @@ impl Scheduler {
         });
     }
 
-    /// [`Self::record_job_timeline`], awaited, for a caller whose next step
-    /// needs the row closed: a fetch job's cached follow-up reuses its job key,
-    /// and its claim loses to the fetch's own row while that is still open.
+    /// A fetch job's cached follow-up is reusing the job key. Its claim would lose to the fetch's
+    /// own row while that row is still open.
     pub async fn close_job_timeline(
         &self,
         assignment_id: DispatchedJobId,
@@ -144,15 +123,10 @@ impl Scheduler {
             .await;
     }
 
-    /// Reports what the terminal report found. The lookup is by dispatch id
-    /// alone: an already closed row is routine, because registration, the
-    /// orphan requeue, the abandoned sweep and a withdrawn claim all close a
-    /// row a late report can still arrive for. The phase rows are written
-    /// whenever the row exists, closed by this report or not, because they key
-    /// on the dispatch. The evaluation totals do not: they key on the
-    /// evaluation, so a late report for a superseded dispatch would overwrite
-    /// the run that replaced it, and only the report that closes the row
-    /// applies them.
+    /// An already closed row is routine because several closers can beat a late report. The phase
+    /// rows are keyed on the dispatch and always written. The evaluation totals are keyed on the
+    /// evaluation and applied only by the report closing the row. A late report for a superseded
+    /// dispatch would otherwise overwrite the run that replaced it.
     pub(crate) async fn persist_job_timeline(
         &self,
         assignment_id: DispatchedJobId,
@@ -212,9 +186,6 @@ impl Scheduler {
         landing
     }
 
-    /// The eval-metric row is written when `EvalStats` arrives, which is before
-    /// the timeline; the phase columns are filled in afterwards rather than
-    /// held back waiting for it.
     async fn apply_eval_phase_totals(&self, evaluation: EvaluationId, totals: EvalPhaseTotals) {
         use gradient_entity::evaluation_metric::{
             Column as CEvaluationMetric, Entity as EEvaluationMetric,
@@ -247,8 +218,6 @@ mod tests {
         }
     }
 
-    /// The wire's positional parent index becomes an explicit `parent_seq`, so
-    /// a row can be read back without the original vector.
     #[test]
     fn nesting_becomes_parent_seq() {
         let rows = phase_rows(
@@ -266,8 +235,6 @@ mod tests {
         assert_eq!(rows[1].phase, JobPhase::NarPush.as_i16());
     }
 
-    /// A span whose end precedes its start would render as a negative bar; it
-    /// is clamped rather than dropped, so the phase still appears.
     #[test]
     fn a_backwards_span_is_clamped_not_dropped() {
         let rows = phase_rows(
@@ -280,8 +247,6 @@ mod tests {
         assert_eq!(rows[0].end_ms, 50);
     }
 
-    /// The three eval millisecond columns are the sum of their phases, so an
-    /// eval split across several batches still reports one total per phase.
     #[test]
     fn eval_phase_totals_sum_every_matching_span() {
         let spans = [
@@ -298,7 +263,6 @@ mod tests {
         assert_eq!(totals.eval_drv_ms, 210);
     }
 
-    /// A build job contributes no eval totals, so nothing is written.
     #[test]
     fn a_build_only_timeline_has_no_eval_totals() {
         let totals = eval_phase_totals(&[span(JobPhase::Build, 0, 900, None)]);

@@ -4,16 +4,11 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! The two counter ripples as SQL functions. A ripple moves a counter level by
-//! level up the graph, and a level per statement cost the batch that walked the
-//! bootstrap leaves 163 round trips; one call runs the same statements in place.
-
 use sea_orm_migration::prelude::*;
 use sea_orm_migration::sea_orm::ConnectionTrait;
 
-/// `derivation.unwalked_inputs` over build edges. Each level's dependents are
-/// counted, locked in id order and moved by their edge count; `down` continues
-/// through the rows that became complete, up through the rows that were.
+/// Each level is counting its dependents, locking them in id order and moving them by their edge
+/// count.
 pub const RIPPLE_UNWALKED_INPUTS_FN: &str = r#"
 CREATE OR REPLACE FUNCTION ripple_unwalked_inputs(frontier uuid[], down boolean)
 RETURNS SETOF uuid LANGUAGE plpgsql AS $$
@@ -43,10 +38,7 @@ BEGIN
 END $$
 "#;
 
-/// `derivation_build.missing_runtime_deps` over runtime edges, the mirror of the
-/// above on anchors: each level holds its dependents' advisory keys and rows in
-/// `derivation` order, and a row continues the ripple when it became whole, or
-/// when it was whole and its counter left zero.
+/// Each level is holding its dependents' advisory keys and rows in `derivation` order.
 pub const RIPPLE_MISSING_RUNTIME_DEPS_FN: &str = r#"
 CREATE OR REPLACE FUNCTION ripple_missing_runtime_deps(frontier uuid[], down boolean)
 RETURNS SETOF uuid LANGUAGE plpgsql AS $$

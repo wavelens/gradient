@@ -4,11 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Pool lifecycle for eval-worker subprocesses: lazy spawn, test-on-borrow
-//! checkout, RAII return, and graceful shutdown. The subprocess handle and
-//! wire transport live in [`super::transport`], the RAM math and reaper in
-//! [`super::memory`].
-
 use anyhow::{Context, Result};
 use futures::stream::{FuturesUnordered, StreamExt};
 use gradient_util::sync::Mutex;
@@ -22,37 +17,18 @@ use tracing::{debug, trace};
 
 use super::transport::EvalWorker;
 
-/// How long `acquire` sleeps between pressure checks while the host is below
-/// the free-RAM margin.
 const PRESSURE_BACKOFF: Duration = Duration::from_millis(200);
 
-/// Pool of [`EvalWorker`]s.
-///
-/// Workers are created lazily on `acquire`. Idle workers are reused; broken
-/// ones are discarded so the next `acquire` spawns a fresh replacement.
 #[derive(Debug)]
 pub(super) struct EvalWorkerPool {
     idle: Arc<Mutex<Vec<EvalWorker>>>,
     semaphore: Arc<Semaphore>,
     max: usize,
-    /// RSS ceiling (bytes) above which a released worker is discarded so the
-    /// next `acquire` spawns a fresh subprocess (parent-side recycling).
     max_eval_rss: u64,
-    /// Exported as `NIX_CACHE_HOME` for every spawned worker so the on-disk
-    /// eval cache lands where the parent expects it.
     eval_cache_dir: String,
-    /// Set by [`EvalWorkerPool::shutdown`]. Causes `PooledEvalWorker::drop`
-    /// to gracefully shut its worker down instead of returning it to the
-    /// (now-closed) idle vec.
     shutting_down: Arc<AtomicBool>,
-    /// Pids of every live eval subprocess (idle or checked out), so the memory
-    /// reaper can target the largest under host memory pressure.
     live: Arc<Mutex<HashSet<u32>>>,
-    /// Free-RAM margin (bytes) below which the reaper acts and `acquire`
-    /// back-pressures. `0` disables both. Set by [`Self::configure_memory_guard`].
     min_free_bytes: AtomicU64,
-    /// Latched by the reaper each tick when host `MemAvailable` is below the
-    /// margin, read by `acquire` to throttle new evaluations.
     under_pressure: Arc<AtomicBool>,
 }
 
@@ -80,34 +56,24 @@ impl EvalWorkerPool {
         self.max_eval_rss
     }
 
-    /// Arm the memory guard: the back-pressure margin read by `acquire`. The
-    /// reaper loop uses the same value. `0` leaves it disabled.
     pub(super) fn configure_memory_guard(&self, min_free_bytes: u64) {
         self.min_free_bytes.store(min_free_bytes, Ordering::Relaxed);
     }
 
-    /// Snapshot of every live eval-subprocess pid.
     pub(super) fn live_pids(&self) -> Vec<u32> {
         self.live.lock().iter().copied().collect()
     }
 
-    /// Reaper feedback: latches the pressure flag `acquire` throttles on.
     pub(super) fn note_pressure(&self, pressured: bool) {
         self.under_pressure.store(pressured, Ordering::Relaxed);
     }
 
-    /// Acquire a worker, blocking until one is available. Reuses an idle
-    /// worker if any, otherwise spawns a fresh subprocess.
     pub(super) async fn acquire(&self) -> Result<PooledEvalWorker> {
         let permit = Arc::clone(&self.semaphore)
             .acquire_owned()
             .await
             .map_err(|_| anyhow::anyhow!("EvalWorkerPool semaphore closed"))?;
 
-        // Back-pressure: under host memory pressure, don't pile a new eval onto
-        // others - wait for it to clear. We always let a lone eval proceed
-        // (available_permits + 1 == max means this is the only one), so the
-        // pool can never deadlock under sustained pressure; it just serialises.
         while self.min_free_bytes.load(Ordering::Relaxed) > 0
             && self.under_pressure.load(Ordering::Relaxed)
             && self.semaphore.available_permits() + 1 < self.max
@@ -115,10 +81,6 @@ impl EvalWorkerPool {
             tokio::time::sleep(PRESSURE_BACKOFF).await;
         }
 
-        // Test-on-borrow: an idle subprocess can die while pooled (memory
-        // reaper SIGKILL, kernel OOM via the elevated oom_score_adj, or crash).
-        // Skip such corpses so we never hand out a worker whose first stdin
-        // write fails with a broken pipe; spawn fresh once the idle vec drains.
         let worker = loop {
             let candidate = self.idle.lock().pop();
             match candidate {
@@ -147,32 +109,14 @@ impl EvalWorkerPool {
         })
     }
 
-    /// Gracefully shut the pool down.
-    ///
-    /// Closes the semaphore (so future [`acquire`](Self::acquire) calls
-    /// fail), flips the `shutting_down` flag (so any [`PooledEvalWorker`]
-    /// that gets dropped after this point gracefully terminates its
-    /// subprocess instead of being returned to the idle vec), then
-    /// concurrently sends `Shutdown` to every currently-idle worker and
-    /// waits for each within the transport's grace period.
-    ///
-    /// Idempotent.
     pub(super) async fn shutdown(&self) {
-        // Order matters: set the flag BEFORE closing the semaphore. If we
-        // closed first, an in-flight `acquire().await` could resolve with
-        // an Err, bypass `PooledEvalWorker::drop` entirely, and the parent
-        // task could re-enter the pool path before the flag was visible.
+        // The flag must be set before closing the semaphore.
+        // An in-flight `acquire()` could otherwise fail and skip `PooledEvalWorker::drop`.
         self.shutting_down.store(true, Ordering::SeqCst);
         self.semaphore.close();
         self.release_idle().await;
     }
 
-    /// Gracefully shut down every idle worker so the next `acquire` spawns a
-    /// fresh subprocess. A pooled worker keeps its walker, its open eval-cache
-    /// handle and its whole eval heap alive across requests; releasing returns
-    /// that memory once an evaluation needs no more Nix evaluation, and drops a
-    /// handle on a deleted blob. Unlike [`Self::shutdown`] the semaphore stays
-    /// open and the pool stays usable.
     pub(super) async fn release_idle(&self) {
         let drained: Vec<EvalWorker> = {
             let mut idle = self.idle.lock();
@@ -196,25 +140,16 @@ impl EvalWorkerPool {
         self.shutting_down.load(Ordering::SeqCst)
     }
 
-    /// Test seam: push a pre-built worker into the idle vec so subsequent
-    /// `acquire()` calls reuse it instead of spawning a fresh one.
     #[cfg(test)]
     pub(super) fn push_for_test(&self, worker: EvalWorker) {
         self.idle.lock().push(worker);
     }
 }
 
-/// What `PooledEvalWorker::drop` does with its worker, computed once from
-/// the pool state + health so the action code exists exactly once.
 #[derive(Debug, PartialEq, Eq)]
 enum Disposition {
-    /// Pool is shutting down and the worker is healthy: let the subprocess
-    /// run libnix's atexit handlers instead of SIGKILL via `kill_on_drop`.
     GracefulShutdown,
-    /// Healthy worker, pool still open: back into the idle vec for reuse.
     ReturnToIdle,
-    /// Broken (or the pool cannot take it back): drop it, `kill_on_drop`
-    /// ensures the child does not linger.
     Kill,
 }
 
@@ -226,11 +161,6 @@ fn dispose(shutting_down: bool, healthy: bool) -> Disposition {
     }
 }
 
-/// RAII handle returned by [`EvalWorkerPool::acquire`].
-///
-/// Dereferences to `&mut EvalWorker`. On drop, returns the worker to the pool
-/// if [`PooledEvalWorker::healthy`] is `true`, otherwise discards it (the
-/// child is killed by `kill_on_drop`).
 pub(super) struct PooledEvalWorker {
     worker: Option<EvalWorker>,
     idle: Arc<Mutex<Vec<EvalWorker>>>,
@@ -240,7 +170,6 @@ pub(super) struct PooledEvalWorker {
 }
 
 impl PooledEvalWorker {
-    /// Mark this worker as broken so it won't be returned to the pool.
     pub(super) fn mark_dead(&mut self) {
         self.healthy = false;
     }
@@ -269,9 +198,9 @@ impl Drop for PooledEvalWorker {
             return;
         };
 
-        // A cancelled caller leaves its request in flight: the unread response
-        // would answer the worker's next request, so such a worker is never
-        // healthy no matter what the caller observed.
+        // A cancelled caller is leaving its request in flight.
+        // The unread response would answer the next request.
+        // Such a worker is never healthy, whatever the caller observed.
         let healthy = self.healthy && !worker.in_flight();
         match dispose(self.shutting_down.load(Ordering::SeqCst), healthy) {
             Disposition::GracefulShutdown => {
@@ -279,7 +208,6 @@ impl Drop for PooledEvalWorker {
                     trace!("pool shutting down; gracefully terminating eval worker");
                     handle.spawn(worker.shutdown());
                 } else {
-                    // No runtime to drive the graceful path: kill_on_drop it.
                     trace!("pool shutting down; no tokio runtime - killing eval worker via Drop");
                     drop(worker);
                 }
@@ -306,17 +234,10 @@ mod tests {
     use std::time::Duration;
     use tokio::process::Command;
 
-    /// Spawn a `cat` subprocess wrapped as an `EvalWorker`. `cat` echoes
-    /// stdin to stdout and exits cleanly when stdin closes - exactly the
-    /// behaviour `EvalWorker::shutdown` relies on (it writes the Shutdown
-    /// frame then drops stdin).
     fn fake_worker() -> EvalWorker {
         EvalWorker::from_command(Command::new("cat")).expect("spawn cat")
     }
 
-    /// A worker whose subprocess has already been killed and reaped - stands in
-    /// for an idle worker the memory reaper or kernel OOM-killer took out while
-    /// it sat in the pool.
     async fn dead_worker() -> EvalWorker {
         let mut w = fake_worker();
         w.child_mut().start_kill().expect("kill cat");
@@ -334,17 +255,12 @@ mod tests {
         assert_eq!(dispose(false, false), Disposition::Kill);
     }
 
-    /// A child that swallows every request and never replies - stands in for
-    /// a worker whose caller future gets cancelled mid-call (fan-out error
-    /// propagation, `try_join` sibling cancellation).
     fn silent_worker() -> EvalWorker {
         let mut cmd = Command::new("sh");
         cmd.arg("-c").arg("cat >/dev/null");
         EvalWorker::from_command(cmd).expect("spawn sh")
     }
 
-    /// A child that immediately writes the given response as one frame, then
-    /// swallows stdin, so exactly one parent call completes normally.
     fn replying_worker(resp: &gradient_eval::ipc::EvalResponse, tag: &str) -> EvalWorker {
         let payload = gradient_eval::ipc::encode_response(resp).expect("encode response");
         let mut frame = (payload.len() as u32).to_le_bytes().to_vec();
@@ -442,8 +358,6 @@ mod tests {
         let live_pid = live.pid();
         assert!(live_pid.is_some());
 
-        // idle is a stack: push the live worker first so the dead corpse (pushed
-        // last) is popped first and must be skipped.
         pool.push_for_test(live);
         pool.push_for_test(dead_worker().await);
 
@@ -541,11 +455,9 @@ mod tests {
         let pooled = pool.acquire().await.expect("acquire");
         assert_eq!(pool.idle_count(), 0);
 
-        // Drive shutdown concurrently with releasing the in-flight worker.
         let pool2 = Arc::clone(&pool);
         let shutdown = tokio::spawn(async move { pool2.shutdown().await });
 
-        // Give shutdown a chance to flip the flag before we drop the handle.
         tokio::time::sleep(Duration::from_millis(50)).await;
         drop(pooled);
 
@@ -555,8 +467,6 @@ mod tests {
             .expect("shutdown task panicked");
 
         assert!(pool.is_shutting_down());
-        // The dropped in-flight worker must NOT have been pushed back into
-        // idle - it should have taken the graceful-shutdown branch.
         assert_eq!(
             pool.idle_count(),
             0,

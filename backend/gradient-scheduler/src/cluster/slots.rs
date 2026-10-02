@@ -14,7 +14,7 @@ use gradient_wire::types::JobKind;
 use super::PendingCluster;
 use crate::jobs::WorkerJobScore;
 
-/// Two 10 s worker heartbeats plus slack: an idle worker re-asks within it.
+/// Two 10 s worker heartbeats plus slack. An idle worker is re-asking within this window.
 pub const IDLE_SLOT_TTL: Duration = Duration::from_secs(25);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]

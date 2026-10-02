@@ -28,8 +28,6 @@ pub use self::store::*;
 
 use thiserror::Error;
 
-/// Strips the URL scheme and replaces `:` with `-` to form the host portion of
-/// a cache signing key name (`{base_url}-{cache_name}:{sig_or_pubkey}`).
 pub fn cache_key_host(serve_url: &str) -> String {
     serve_url
         .replace("https://", "")
@@ -37,13 +35,6 @@ pub fn cache_key_host(serve_url: &str) -> String {
         .replace(":", "-")
 }
 
-/// Reconstructs the narinfo signature wire format
-/// (`{key_name}:{base64_sig}`) from the raw signature bytes persisted in
-/// `cached_path_signature.signature` (`bytea`).
-///
-/// The `key_name` (`{base_url}-{cache_name}`) is derived from the cache
-/// row plus the deployment's `serve_url` on every read, keeping rows
-/// minimal and avoiding storage of redundant data.
 pub fn full_signature_token(sig_bytes: &[u8], serve_url: &str, cache_name: &str) -> String {
     use base64::{Engine, engine::general_purpose};
     format!(

@@ -4,9 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! GitLab provider. GitLab webhooks authenticate with a shared secret token
-//! (`X-Gitlab-Token`) compared in constant time, not an HMAC signature.
-
 use std::sync::Arc;
 
 use anyhow::anyhow;

@@ -11,11 +11,6 @@ use gradient_sources::{DerivationResolver, FlakeDiscovery, ResolvedDerivation};
 use std::collections::HashMap;
 use std::sync::Mutex;
 
-/// In-memory `DerivationResolver` for unit tests.
-///
-/// Defaults are empty: `list_flake_derivations` returns `[]`, `resolve_derivation_paths`
-/// resolves every attr to a deterministic placeholder drv path, `get_derivation` errors,
-/// and `get_features` returns `(BUILTIN, [])`. Use the `with_*` builders to preload data.
 #[derive(Debug, Default)]
 pub struct FakeDerivationResolver {
     flake_attrs: Mutex<HashMap<String, Vec<String>>>,
@@ -65,7 +60,6 @@ impl FakeDerivationResolver {
         self
     }
 
-    /// How often `release_evaluators` was called.
     pub fn releases(&self) -> usize {
         *self.releases.lock().unwrap()
     }

@@ -7,16 +7,6 @@
 use rkyv::{Archive, Deserialize, Serialize};
 use serde::{Deserialize as SerdeDeserialize, Serialize as SerdeSerialize};
 
-/// Feature flags exchanged during the protocol handshake.
-///
-/// Each field represents one optional capability.  The client sends the flags
-/// it supports in `ClientMessage::InitConnection`; the server responds with
-/// only the flags it is willing to activate for this session in
-/// `ServerMessage::InitAck`.  Unknown flags in a received message are always
-/// treated as `false` - adding new fields is forwards-compatible.
-///
-/// All fields default to `false` so a zeroed struct is a valid
-/// "no features" state.
 #[derive(
     Archive,
     Serialize,
@@ -30,18 +20,11 @@ use serde::{Deserialize as SerdeDeserialize, Serialize as SerdeSerialize};
 )]
 #[rkyv(derive(Debug, PartialEq))]
 pub struct GradientCapabilities {
-    /// Peer is the Gradient server itself (coordinator).
-    /// Always `true` on the server side, always `false` for external workers.
     pub core: bool,
-    /// Client supports federation - forwarding work and NAR traffic between workers and servers.
     pub federate: bool,
-    /// Client supports fetching flake inputs and pre-fetching sources.
     pub fetch: bool,
-    /// Client supports Nix flake evaluation.
     pub eval: bool,
-    /// Client supports executing Nix builds.
     pub build: bool,
-    /// Peer serves as a Nix binary cache. Always advertised by the server.
     pub cache: bool,
 }
 
@@ -56,10 +39,6 @@ impl std::ops::BitOrAssign for GradientCapabilities {
     }
 }
 
-// ── Job types ────────────────────────────────────────────────────────────────
-
-/// A job is an ordered sequence of steps.  If any step fails, the rest are
-/// skipped and the job is reported as failed.
 #[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[rkyv(derive(Debug, PartialEq))]
 pub enum Job {
@@ -67,12 +46,6 @@ pub enum Job {
     Build(BuildJob),
 }
 
-/// Where to obtain the flake source for a [`FlakeJob`].
-///
-/// `Repository` requires the worker to have the `fetch` capability and the
-/// `FetchFlake` step in `steps`. `Cached` is used for eval-only follow-up
-/// jobs dispatched after a fetch-capable worker has already archived the
-/// source into the cache.
 #[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[rkyv(derive(Debug, PartialEq))]
 pub enum FlakeSource {
@@ -80,31 +53,21 @@ pub enum FlakeSource {
     Cached { store_path: String },
 }
 
-/// Per-input override applied during `FetchFlake`.
 #[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[rkyv(derive(Debug, PartialEq))]
 pub struct FlakeInputOverride {
     pub input_name: String,
-    /// `None` keeps the URL from the task's flake but still forces an update.
     pub url: Option<String>,
 }
 
-/// Drives an `input_update` evaluation: which generator to run and which flake
-/// inputs to bump during `FetchFlake`. `None` on a normal evaluation.
 #[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[rkyv(derive(Debug, PartialEq))]
 pub struct InputUpdateSpec {
-    /// `PatchGeneratorKind` snake_case tag, e.g. `flake_lock`.
     pub generator: String,
-    /// Tracked input names to bump. Empty means "all tracked inputs".
     pub inputs: Vec<String>,
-    /// When true the worker only expands glob inputs against flake.lock and
-    /// reports the matches (`InputUpdateExpansion`); it writes no lock and opens
-    /// no PR. The server then fans out one per-input update eval per match.
     pub discover_only: bool,
 }
 
-/// One bumped input, reported back from the worker for the sidecar + PR body.
 #[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[rkyv(derive(Debug, PartialEq))]
 pub struct BumpedInputWire {
@@ -113,7 +76,6 @@ pub struct BumpedInputWire {
     pub new_rev: String,
 }
 
-/// Evaluation job: fetch and/or evaluate a Nix flake.
 #[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[rkyv(derive(Debug, PartialEq))]
 pub struct FlakeJob {
@@ -121,9 +83,7 @@ pub struct FlakeJob {
     pub source: FlakeSource,
     pub wildcards: Vec<String>,
     pub timeout_secs: Option<u64>,
-    /// Per-input overrides applied during `FetchFlake`. Empty means no overrides.
     pub input_overrides: Vec<FlakeInputOverride>,
-    /// Set on an `input_update` evaluation to bump tracked inputs during fetch.
     pub input_update: Option<InputUpdateSpec>,
 }
 
@@ -135,28 +95,18 @@ pub enum FlakeStep {
     EvaluateDerivations,
 }
 
-/// Build job: build derivations. The worker always zstd-compresses
-/// uploaded NARs and reports NAR metadata in `UploadFinished`; the server
-/// computes and stores narinfo signatures from that metadata.
 #[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[rkyv(derive(Debug, PartialEq))]
 pub struct BuildJob {
     pub builds: Vec<BuildSpec>,
 }
 
-/// How a worker produces the bytes of one derivation's outputs. Every kind ends
-/// the same way: the outputs, and only the outputs, are compressed and pushed.
 #[derive(Archive, Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[rkyv(derive(Debug, PartialEq))]
 pub enum BuildSpecKind {
-    /// Run the builder on a worker of the derivation's architecture, inputs prefetched.
     #[default]
     Build,
-    /// Fetch each output's NAR from an upstream cache and repack it. No nix store,
-    /// no dependency, any worker.
     Substitute,
-    /// A `builtin:fetchurl` derivation: fetch the URL, verify the fixed output
-    /// hash, pack the result. No nix store, no dependency, any worker.
     Download,
 }
 
@@ -167,16 +117,11 @@ pub struct BuildSpec {
     pub drv_path: String,
     pub kind: BuildSpecKind,
     pub is_fixed_output: bool,
-    /// `(name, path)` of this derivation's outputs, on every kind.
     pub outputs: Vec<DerivationOutput>,
-    /// Wall-clock limit in seconds for this build; `None` = no limit.
     pub timeout_secs: Option<u64>,
-    /// Silent (no-output) limit in seconds; `None` = no limit.
     pub max_silent_secs: Option<u64>,
 }
 
-/// Severity of a worker-reported evaluation message. Mirrors
-/// `gradient_entity::evaluation_message::MessageLevel` on the wire.
 #[derive(Archive, Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 #[rkyv(derive(Debug, PartialEq))]
 pub enum EvalMessageLevel {
@@ -185,16 +130,10 @@ pub enum EvalMessageLevel {
     Notice,
 }
 
-/// Progress events for job updates.
 #[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[rkyv(derive(Debug, PartialEq))]
 pub enum JobUpdateKind {
     Fetching,
-    /// Reports the archived flake source path after `FetchFlake` completes.
-    /// `Some(path)` - `nix flake archive` succeeded and the source now lives
-    /// in the cache; the server can hand the path to a subsequent eval-only
-    /// job as `FlakeSource::Cached`. `None` - the worker fell back to a
-    /// temporary git checkout; no eval-only follow-up is possible.
     FetchResult {
         flake_source: Option<String>,
     },
@@ -202,11 +141,7 @@ pub enum JobUpdateKind {
     EvaluatingDerivations,
     EvalResult {
         derivations: Vec<DiscoveredDerivation>,
-        /// Nix stderr warnings (deprecations, etc.) - informational.
         warnings: Vec<String>,
-        /// Hard errors that prevented derivation resolution (e.g. per-attr
-        /// `.drvPath` evaluation failures).  A non-empty list should cause
-        /// the evaluation to be marked `Failed` server-side.
         errors: Vec<String>,
     },
     Building {
@@ -215,90 +150,49 @@ pub enum JobUpdateKind {
     BuildOutput {
         build_id: String,
         outputs: Vec<BuildOutput>,
-        /// Per-build resource usage for this build; `None` when capture is
-        /// disabled. A multi-build job yields one `BuildOutput` (and thus one
-        /// metrics record) per build.
         metrics: Option<BuildMetrics>,
-        /// True when the daemon reported the outputs as already valid (no work
-        /// performed) - the build is finalized as `Substituted`, not `Completed`.
         substituted: bool,
     },
     Compressing,
-    /// Per-evaluation stats + walked flake-output graph, sent once at eval
-    /// completion. Informational/metrics only - does not affect job state.
     EvalStats(EvalStatsReport),
-    /// Worker-produced candidate `flake.lock` (utf-8) and the inputs it bumped,
-    /// reported during `FetchFlake` of an `input_update` eval. Empty `bumped`
-    /// means nothing changed and no PR should be opened.
     InputUpdateResult {
         candidate_lock: String,
         bumped: Vec<BumpedInputWire>,
     },
-    /// Reported by a discovery `input_update` eval: the concrete flake inputs a
-    /// glob tracked-input expanded to. The server fans out one per-input eval
-    /// per name. Empty means the glob matched nothing.
     InputUpdateExpansion {
         matched: Vec<String>,
     },
 }
 
-// ── Scheduling types ─────────────────────────────────────────────────────────
-
-/// Cache metadata for a store path.
 #[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[rkyv(derive(Debug, PartialEq))]
 pub struct CacheInfo {
-    /// Compressed NAR size on disk (bytes).
     pub file_size: u64,
-    /// Uncompressed NAR size (bytes).
     pub nar_size: u64,
 }
 
-/// Result of an eval-cache pull request (`EvalCachePull`).
-///
-/// Mirrors the NAR pull modes: the server either has no cached blob for the
-/// fingerprint (`Miss`), serves it via a presigned S3 GET URL (`Presigned` -
-/// the worker does the HTTP transfer itself), or streams the blob inline over
-/// the proto channel as `EvalCacheChunk` frames (`Inline`, local-FS fallback).
 #[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[rkyv(derive(Debug, PartialEq))]
 pub enum EvalCachePullOutcome {
-    /// No cached eval-cache blob for this fingerprint.
     Miss,
-    /// Presigned S3 GET URL; the worker downloads the blob directly.
-    Presigned { url: String },
-    /// The server will stream the blob inline as `EvalCacheChunk` frames.
-    /// `stream_token` guards the chunk stream like the NAR transfer token.
+    Presigned {
+        url: String,
+    },
     Inline {
         total_bytes: u64,
         stream_token: String,
     },
 }
 
-/// Query mode for [`CacheQuery`].
-///
-/// Controls what the server returns in [`CacheStatus`] beyond the basic
-/// cached/uncached flag.
 #[derive(Archive, Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[rkyv(derive(Debug, PartialEq))]
 pub enum QueryMode {
-    /// Return only paths that are already in the cache (`cached: true`).
-    /// No presigned URLs are generated. This is the default.
     #[default]
     Normal,
-    /// Cached paths with transfer URLs and metadata. With `CacheQuery.external`
-    /// the server may also answer from an upstream, for the one path named.
-    /// When `url` is `None`, the worker should download via `NarRequest`.
     Pull,
-    /// Return **all** queried paths with only their `cached` flag and no URL.
-    /// The worker uploads each uncached path through `UploadRequest`, which
-    /// the server answers with an `UploadGrant` naming the transport.
     Push,
 }
 
-/// A presigned S3 multipart upload for one NAR. The worker PUTs part `i + 1`
-/// to `part_urls[i]`, each `part_size` compressed bytes except the last, and
-/// reports every part's `ETag` back in a [`CompletedMultipart`].
 #[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[rkyv(derive(Debug, PartialEq))]
 pub struct PresignedMultipart {
@@ -307,8 +201,6 @@ pub struct PresignedMultipart {
     pub part_urls: Vec<String>,
 }
 
-/// The worker's receipt for a [`PresignedMultipart`]: the server completes the
-/// upload from these `ETag`s, given in part order.
 #[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[rkyv(derive(Debug, PartialEq))]
 pub struct CompletedMultipart {
@@ -316,7 +208,6 @@ pub struct CompletedMultipart {
     pub etags: Vec<String>,
 }
 
-/// What an [`crate::messages::ClientMessage::UploadRequest`] wants to store.
 #[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[rkyv(derive(Debug, PartialEq))]
 pub enum UploadObject {
@@ -324,7 +215,6 @@ pub enum UploadObject {
     EvalCache { fingerprint: String },
 }
 
-/// How a granted upload moves its bytes; decided by the server's storage backend.
 #[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[rkyv(derive(Debug, PartialEq))]
 pub enum GrantTarget {
@@ -362,56 +252,22 @@ pub enum UploadOutcome {
     Rejected { reason: String },
 }
 
-/// A store path entry returned in [`CacheStatus`].
-///
-/// `cached` indicates whether the path is already in the Gradient cache.
-/// `url` provides a presigned S3 URL (GET for [`QueryMode::Pull`], PUT for
-/// [`QueryMode::Push`]); `None` means use the direct WebSocket transfer
-/// (`NarRequest` / `NarPush`) instead.
-///
-/// In [`QueryMode::Pull`] (worker fetching dep NARs into its local store), the
-/// `nar_hash` / `references` / `signatures` / `deriver` / `ca` fields carry the
-/// path info the worker needs to construct a `ValidPathInfo` and call
-/// `add_to_store_nar` on its local nix-daemon. They are `None` for other
-/// modes and for uncached paths.
 #[derive(Archive, Serialize, Deserialize, Debug, Clone, Default, PartialEq)]
 #[rkyv(derive(Debug, PartialEq))]
 pub struct CachedPath {
     pub path: String,
-    /// `true` if the path is present in the Gradient cache (local or upstream).
     pub cached: bool,
-    /// Compressed NAR size on disk (bytes). `None` if not yet recorded.
     pub file_size: Option<u64>,
-    /// Uncompressed NAR size (bytes). `None` if not yet recorded.
     pub nar_size: Option<u64>,
-    /// [`QueryMode::Pull`] only: presigned GET URL to download the NAR from
-    /// S3; `None` means the server streams it over `NarRequest`.
     pub url: Option<String>,
-    /// SHA-256 of the uncompressed NAR in `sha256:<nix32>` format.
-    /// Populated for cached paths in [`QueryMode::Pull`].
     pub nar_hash: Option<String>,
-    /// SHA-256 of the compressed NAR (`FileHash`) in `sha256:<nix32>` format.
-    /// Populated for cached paths in [`QueryMode::Pull`]; lets the worker pass through
-    /// a verbatim upstream NAR without recomputing its file hash.
     pub file_hash: Option<String>,
-    /// Other store paths this path references (full `/nix/store/...` paths).
-    /// Populated for cached paths in [`QueryMode::Pull`].
     pub references: Option<Vec<String>>,
-    /// Cache signatures in narinfo wire format `<key-name>:<base64>`.
-    /// Populated for cached paths in [`QueryMode::Pull`].
     pub signatures: Option<Vec<String>>,
-    /// Optional deriver: the `.drv` path that produced this output (full path).
-    /// Populated for cached paths in [`QueryMode::Pull`] when known.
     pub deriver: Option<String>,
-    /// Content-addressed identifier (e.g. `fixed:r:sha256:<hash>` for FOD).
-    /// Populated for cached paths in [`QueryMode::Pull`] when the path is CA.
     pub ca: Option<String>,
 }
 
-/// A store path required by a job candidate, with optional cache metadata.
-///
-/// `cache_info` is `Some` when the path is known to be in the server's binary
-/// cache, allowing workers to estimate download cost during scoring.
 #[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[rkyv(derive(Debug, PartialEq))]
 pub struct RequiredPath {
@@ -419,38 +275,24 @@ pub struct RequiredPath {
     pub cache_info: Option<CacheInfo>,
 }
 
-/// A job candidate pushed to workers by the server.
 #[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[rkyv(derive(Debug, PartialEq))]
 pub struct JobCandidate {
     pub job_id: String,
     pub required_paths: Vec<RequiredPath>,
-    /// Derivation paths for build candidates; empty for eval jobs.
-    /// Workers use these to read the `.drv` file and determine the
-    /// actual set of inputs needed.
     pub drv_paths: Vec<String>,
-    /// Output store paths of every build in the candidate; empty for eval jobs.
     pub output_paths: Vec<String>,
 }
 
-/// A worker's score for a single job candidate.
 #[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[rkyv(derive(Debug, PartialEq))]
 pub struct CandidateScore {
     pub job_id: String,
-    /// Number of required paths not present in the worker's local Nix store.
     pub missing_count: u32,
-    /// Total uncompressed NAR size of missing paths (bytes).
-    /// Derived from `CacheInfo.nar_size`; zero when cache info is unavailable.
     pub missing_nar_size: u64,
-    /// Every one of the candidate's `output_paths` is already in the worker's
-    /// store, so the job only uploads them. `false` without output paths.
     pub outputs_present: bool,
 }
 
-// ── Derivation discovery ─────────────────────────────────────────────────────
-
-/// A derivation discovered during evaluation.
 #[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[rkyv(derive(Debug, PartialEq))]
 pub struct DiscoveredDerivation {
@@ -458,8 +300,6 @@ pub struct DiscoveredDerivation {
     pub drv_path: String,
     pub outputs: Vec<DerivationOutput>,
     pub dependencies: Vec<String>,
-    /// `.drv` `inputSrcs` (e.g. `builtins.toFile` configs). They have no
-    /// producing derivation and are gated on cache presence before dispatch.
     pub input_sources: Vec<String>,
     pub architecture: String,
     pub required_features: Vec<String>,
@@ -478,24 +318,16 @@ pub struct DerivationOutput {
     pub path: String,
 }
 
-/// One product declared in a build output's `nix-support/hydra-build-products`.
 #[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[rkyv(derive(Debug, PartialEq))]
 pub struct BuildProduct {
-    /// Hydra product type, e.g. "file", "doc", "report".
     pub file_type: String,
-    /// Hydra product subtype (the second token), e.g. "readme", "html", "binary-dist".
     pub subtype: String,
-    /// Basename of `path`.
     pub name: String,
-    /// Absolute store path to the product file (e.g. `/nix/store/abc-pkg/image.iso`).
     pub path: String,
-    /// Product file size in bytes (from `stat`); `None` when the file is missing,
-    /// which the server reports as a missing artefact.
     pub size: Option<u64>,
 }
 
-/// Build output reported after a derivation successfully builds.
 #[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[rkyv(derive(Debug, PartialEq))]
 pub struct BuildOutput {
@@ -507,9 +339,6 @@ pub struct BuildOutput {
     pub products: Vec<BuildProduct>,
 }
 
-/// Per-build resource usage, captured by the worker from the build's cgroup
-/// (best-effort). `build_time_ms` is always present; cgroup-derived fields
-/// degrade to `None` when the cgroup cannot be located or read.
 #[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq, Default)]
 #[rkyv(derive(Debug, PartialEq))]
 pub struct BuildMetrics {
@@ -520,14 +349,9 @@ pub struct BuildMetrics {
     pub disk_write_bytes: Option<u64>,
     pub oom_killed: bool,
     pub build_time_ms: Option<u64>,
-    /// Host network throughput peak (Mbps) observed during the build window.
-    /// Host-level, not cgroup-attributed (cgroup v2 has no per-build network);
-    /// accurate when the build is the host's sole network consumer.
     pub peak_network_mbps: Option<f32>,
 }
 
-/// Per-entry-point evaluation cost, aggregated by the worker across the
-/// requests resolving that entry point's attributes.
 #[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq, Default)]
 #[rkyv(derive(Debug, PartialEq))]
 pub struct EvalAttrCost {
@@ -538,9 +362,6 @@ pub struct EvalAttrCost {
     pub alloc_bytes: u64,
 }
 
-/// One node of the flake-output graph actually walked during discovery
-/// (no extra evaluation). `parent`/`drv_path` are `None` at the root / for
-/// non-derivation nodes.
 #[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq, Default)]
 #[rkyv(derive(Debug, PartialEq))]
 pub struct FlakeOutputNode {
@@ -552,8 +373,6 @@ pub struct FlakeOutputNode {
     pub drv_path: Option<String>,
 }
 
-/// Per-evaluation statistics + walked flake-output graph, sent once at eval
-/// completion. Byte gauges are pre-converted to MB by the worker.
 #[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq, Default)]
 #[rkyv(derive(Debug, PartialEq))]
 pub struct EvalStatsReport {
@@ -570,10 +389,6 @@ pub struct EvalStatsReport {
     pub flake_nodes: Vec<FlakeOutputNode>,
 }
 
-// ── Job timeline ─────────────────────────────────────────────────────────────
-
-/// One phase of a job's life on the worker. The board renders these in order
-/// and the rollup keys `phase.<kind>.<phase>.ms` off the snake_case name.
 #[derive(Archive, Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[rkyv(derive(Debug, PartialEq))]
 pub enum JobPhase {
@@ -618,7 +433,6 @@ impl JobPhase {
         Self::NarImport,
     ];
 
-    /// Stable identifier for the API, the rollup metric key and the DB column.
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Fetch => "fetch",
@@ -641,9 +455,9 @@ impl JobPhase {
         }
     }
 
-    /// Wire/DB discriminant, written out so reordering the enum cannot silently
-    /// re-label historical rows. 9 is retired (`substitute_passthrough`) and must stay
-    /// unused; [`Self::name_of`] still names it for historical spans.
+    /// The discriminant is written out to keep a reordering from re-labelling historical rows.
+    /// Value 9 is retired (`substitute_passthrough`) and must stay unused. [`Self::name_of`] is
+    /// still naming it for historical spans.
     pub const fn as_i16(self) -> i16 {
         match self {
             Self::Fetch => 0,
@@ -689,7 +503,6 @@ impl JobPhase {
         })
     }
 
-    /// Display name of a stored discriminant, including retired ones.
     pub fn name_of(v: i16) -> std::borrow::Cow<'static, str> {
         match (Self::from_i16(v), v) {
             (Some(phase), _) => phase.as_str().into(),
@@ -699,9 +512,6 @@ impl JobPhase {
     }
 }
 
-/// A closed interval on the job's own clock, in milliseconds since the worker
-/// accepted the job. `parent` indexes the enclosing span in the same `Vec`, so
-/// nesting crosses the wire without a tree type.
 #[derive(Archive, Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[rkyv(derive(Debug, PartialEq))]
 pub struct JobPhaseSpan {
@@ -709,35 +519,23 @@ pub struct JobPhaseSpan {
     pub start_ms: u64,
     pub end_ms: u64,
     pub parent: Option<u32>,
-    /// Store paths the phase moved; 0 when the phase is not path-shaped.
     pub paths: u32,
-    /// Bytes the phase moved; 0 when it moves none or does not count them.
     pub bytes: u64,
 }
 
-// ── Credential types ─────────────────────────────────────────────────────────
-
-/// Type of credential delivered via the protocol.
 #[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[rkyv(derive(Debug, PartialEq))]
 pub enum CredentialKind {
     SshKey,
 }
 
-/// Discriminates between the two schedulable job kinds.
-///
-/// Used in [`RequestJob`] to let the worker signal capacity per job type.
 #[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[rkyv(derive(Debug, PartialEq))]
 pub enum JobKind {
-    /// Flake evaluation job (fetch / eval).
     Flake,
-    /// Nix build job.
     Build,
 }
 
-/// One member's seat in a cluster attempt: its role and its index within
-/// that role.
 #[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 #[rkyv(derive(Debug, PartialEq))]
 pub struct ClusterAddress {
@@ -745,9 +543,6 @@ pub struct ClusterAddress {
     pub index: u32,
 }
 
-/// Marks an [`crate::messages::ServerMessage::AssignJob`] as one member of a
-/// cluster attempt. The worker holds the job until `StartCluster` and releases
-/// the slot itself once `hold_secs` pass without it.
 #[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 #[rkyv(derive(Debug, PartialEq))]
 pub struct ClusterMembership {
@@ -757,7 +552,6 @@ pub struct ClusterMembership {
     pub hold_secs: u32,
 }
 
-/// One member of a started cluster attempt, as listed in `StartCluster`.
 #[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 #[rkyv(derive(Debug, PartialEq))]
 pub struct ClusterPeer {
@@ -768,43 +562,19 @@ pub struct ClusterPeer {
     pub endpoint: Option<String>,
 }
 
-/// Why a build failed, as classified by the worker. Drives the scheduler's
-/// retry decision.
 #[derive(Archive, Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[rkyv(derive(Debug, PartialEq))]
 pub enum BuildFailureKind {
-    /// Infrastructure failure (OOM, disk full, network/substitution error,
-    /// builder crash) - eligible for retry. Default so a wire-decode glitch
-    /// retries within the bounded attempt budget instead of permanently
-    /// poisoning the build-once shared build; unclassified worker errors map to
-    /// `Permanent` explicitly in `wire_failure`, never via this default.
+    /// This default is retrying a wire-decode glitch within the bounded attempt budget. A glitch
+    /// must not poison the build-once shared build. Unclassified worker errors map to `Permanent`
+    /// explicitly in `wire_failure`.
     #[default]
     Transient,
-    /// The builder exited non-zero, or the retry budget is exhausted -
-    /// terminal.
     Permanent,
-    /// Wall-clock or silent timeout exceeded - terminal.
     Timeout,
-    /// A substitute attempt could not pull the output from cache. Penalty-free
-    /// re-queue; escalates to a real arch-bound build after repeated misses.
     SubstituteUnavailable,
-    /// Prefetch found required input paths that the gradient cache cannot
-    /// serve: a transitive dependency is marked done/substituted yet its NAR is
-    /// absent. Terminal for this build; the server demotes those outputs and
-    /// re-queues their producers so the next evaluation succeeds. Carries the
-    /// offending paths on `ClientMessage::JobFailed.missing_paths`.
     InputsUnavailable,
-    /// The shared eval-cache SQLite blob the worker pulled is corrupt
-    /// ("database disk image is malformed"). Eval-only: the worker has already
-    /// dropped its local copy; the server purges the shared blob and re-queues
-    /// the evaluation so it re-evaluates cache-less. Carries the corrupt blob's
-    /// fingerprint on `ClientMessage::JobFailed.missing_paths`.
     CorruptEvalCache,
-    /// The server sent `AbortJob` and the worker stopped. Not a failure of the
-    /// derivation: it is recorded as `AttemptOutcome::Aborted` with no reason,
-    /// so a later evaluation can thaw the shared build. Reporting an abort as
-    /// `Permanent` stamped `AttemptFailureReason::BuilderNonzero` on the
-    /// attempt, which permanently blocks every requeue (#572).
     Aborted,
 }
 

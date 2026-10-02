@@ -4,9 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Reversible AES-256-GCM encryption for action secrets (Send Web Request bearer tokens,
-//! and the legacy webhook HMAC secrets while that surface is being removed).
-
 use anyhow::Result;
 use base64::{Engine, engine::general_purpose};
 

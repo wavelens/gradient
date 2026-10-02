@@ -4,10 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Per-resource live-update WebSocket channels. Each connection authorizes the
-//! resource once at upgrade, then forwards only the events belonging to
-//! that resource so the Angular pages can refetch on change instead of polling.
-
 use crate::access::{Caller, TaskAccess, load_task};
 use crate::authorization::{MaybeApiKey, MaybeUser};
 use crate::error::WebResult;
@@ -26,13 +22,8 @@ use std::sync::Arc;
 use super::builds::BuildAccessContext;
 use super::evals::EvalAccessContext;
 
-/// Forward events selected by `select` to the socket until either side closes.
-/// `lagged` answers a receiver that fell behind: live channels skip (the client
-/// refetches on the next frame), the firehose reports the gap.
-///
-/// The inbound half is polled purely to notice the client leaving: a loop that
-/// only writes learns of a closed tab at the next event that fails to send, so
-/// a quiet channel would hold its task and socket open indefinitely.
+/// The inbound half is polled only to notice the client leaving. A write-only loop would hold a
+/// quiet channel's task and socket open indefinitely.
 pub async fn live_stream<F, L>(
     socket: WebSocket,
     mut rx: EventRx,
@@ -76,8 +67,6 @@ fn frame(env: &Envelope) -> Option<String> {
     Some(env.to_line())
 }
 
-/// `GET /tasks/{project}/{task}/live` - evaluation and entry-point
-/// build status changes for one task.
 pub async fn task_live_ws(
     State(state): State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
@@ -96,9 +85,8 @@ pub async fn task_live_ws(
     .await?;
 
     let task_id = task.id;
-    // Seed with the task's recent evaluations so build events fire even while
-    // the evaluation itself stays in `Building`. New evaluations announce
-    // themselves via their own status change and are added on the fly.
+    // The task's recent evaluations are seeded first. Build events must fire while the evaluation
+    // itself is still in `Building`.
     let mut known: HashSet<EvaluationId> = EEvaluation::find()
         .filter(CEvaluation::Task.eq(task.id))
         .order_by_desc(CEvaluation::CreatedAt)
@@ -124,8 +112,6 @@ pub async fn task_live_ws(
     }))
 }
 
-/// Forward a task's own evaluation reports and progress (learning their ids)
-/// and any build status change belonging to an evaluation we've seen for it.
 fn task_frame(
     env: &Envelope,
     task_id: TaskId,
@@ -149,8 +135,6 @@ fn task_frame(
     }
 }
 
-/// `GET /evals/{evaluation}/live` - status changes for one evaluation and its
-/// builds.
 pub async fn evaluation_live_ws(
     State(state): State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
@@ -176,9 +160,6 @@ pub async fn evaluation_live_ws(
     }))
 }
 
-/// `GET /builds/{build}/live` - build status changes for the build's evaluation,
-/// which covers every node in its dependency graph, and the build's own
-/// download progress.
 pub async fn build_live_ws(
     State(state): State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
@@ -226,8 +207,6 @@ fn eval_frame(env: &Envelope, eval_id: EvaluationId) -> Option<String> {
     belongs.then(|| env.to_line())
 }
 
-/// `GET /board/cache/live` - content-free pings when cache contents or stats
-/// change. Subscribers refetch their own scope-filtered cache view.
 pub async fn cache_live_ws(
     State(state): State<Arc<ServerState>>,
     ws: WebSocketUpgrade,

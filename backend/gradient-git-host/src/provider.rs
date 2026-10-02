@@ -4,12 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! The per-Git-host behaviour seam. Every Git-host-specific decision - which reporter
-//! to build, how to verify a webhook signature, which header carries the event,
-//! how to parse each payload - lives behind this trait, so the rest of the
-//! codebase dispatches through [`GitHostRegistry`](crate::GitHostRegistry)
-//! instead of matching on [`GitHostType`].
-
 use std::sync::Arc;
 
 use crate::reporter::CiReporter;
@@ -17,12 +11,8 @@ use crate::webhook::{ParsedPullRequestEvent, ParsedReleaseEvent, PushOutcome, We
 use gradient_types::GitHostType;
 
 pub trait GitHostProvider: Send + Sync + std::fmt::Debug {
-    /// The Git host variant this provider serves.
     fn git_host_type(&self) -> GitHostType;
 
-    /// Build a token/PAT-based status reporter from a configured integration's
-    /// `endpoint_url` and access token. App-style auth (GitHub) is resolved by
-    /// the caller; see [`GitHostProvider::supports_app_auth`].
     fn build_reporter(
         &self,
         http: reqwest::Client,
@@ -30,30 +20,20 @@ pub trait GitHostProvider: Send + Sync + std::fmt::Debug {
         token: Option<&str>,
     ) -> anyhow::Result<Arc<dyn CiReporter>>;
 
-    /// Whether this Git host supports GitHub-App-style installation auth. The CI
-    /// layer probes this before falling back to a token reporter.
     fn supports_app_auth(&self) -> bool {
         false
     }
 
-    /// Whether this Git host is served by the per-integration `/hooks/{git_host}/…`
-    /// endpoint. GitHub goes through its dedicated App webhook instead.
     fn accepts_per_integration_webhook(&self) -> bool {
         true
     }
 
-    /// Header(s) carrying the webhook signature/token, tried in order (first
-    /// present wins), passed to [`verify_signature`](Self::verify_signature).
     fn signature_headers(&self) -> &'static [&'static str];
 
-    /// Verify a webhook signature/token (HMAC for Gitea/GitHub, constant-time
-    /// token equality for GitLab) against the integration secret.
     fn verify_signature(&self, secret: &str, signature: &str, body: &[u8]) -> bool;
 
-    /// Header(s) carrying the event name, tried in order (first present wins).
     fn event_headers(&self) -> &'static [&'static str];
 
-    /// Map a raw Git host event string onto the shared [`WebhookEventKind`].
     fn classify_event(&self, event: &str) -> WebhookEventKind;
 
     fn parse_push_event(&self, body: &[u8]) -> Option<PushOutcome>;

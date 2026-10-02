@@ -4,25 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Wire protocol between the worker parent and its eval-worker subprocesses.
-//!
-//! Frames are `u32` little-endian payload length + rkyv bytes, following the
-//! main gradient protocol's rkyv conventions (rancor errors, unaligned
-//! archives decoded wherever the reader's buffer landed) over a pipe instead
-//! of WebSocket message boundaries. The subprocess announces
-//! [`EVAL_IPC_VERSION`] as a single raw byte before its first frame so a
-//! parent never talks a stale binary's dialect.
-//!
-//! `Resolve` streams: the subprocess answers with one [`EvalResponse::ResolveItem`]
-//! per attr as soon as it is resolved, terminated by [`EvalResponse::ResolveEnd`].
-//! Every other request is strictly one request, one response. Streaming means a
-//! subprocess crash mid-batch only loses the attrs not yet streamed, so the
-//! parent can isolate the crasher precisely instead of bisecting the batch.
-//!
-//! Types keep serde derives alongside rkyv: JSON is never on the subprocess
-//! wire, but the worker's `--eval-driver` test harness and debug logging speak
-//! it, and the serde tags are the protocol's readable documentation.
-
 use rkyv::rancor::Error as RkyvError;
 use rkyv::util::AlignedVec;
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
@@ -31,19 +12,12 @@ use std::io::{Read, Write};
 
 use crate::stats::StatsDelta;
 
-/// Bumped whenever the frame layout or the rkyv shape of the types below
-/// changes. Parent and subprocess are the same re-exec'd binary, so a mismatch
-/// only happens when the binary is replaced mid-run; the handshake turns that
-/// from undecodable frames into one clear error.
+/// The version must be bumped whenever the frame layout or a type's rkyv shape changes.
+/// A mismatch can only happen when the binary is replaced mid-run.
 pub const EVAL_IPC_VERSION: u8 = 6;
 
-/// Upper bound on a single frame's payload. Far above any real message (a
-/// discovery response for a huge flake is a few MiB); its job is to turn a
-/// corrupted length prefix into an immediate error instead of a giant alloc.
 pub const MAX_FRAME_BYTES: u32 = 64 * 1024 * 1024;
 
-/// One disjoint slice of the requested wildcards. `only` limits the pattern's
-/// first wildcard to these child names; the parent may split it further.
 #[derive(
     Debug, Clone, PartialEq, Eq, Archive, RkyvSerialize, RkyvDeserialize, Serialize, Deserialize,
 )]
@@ -54,23 +28,16 @@ pub struct DiscoveryShard {
     pub only: Option<Vec<String>>,
 }
 
-/// Request from parent to worker, one frame each.
 #[derive(Debug, Clone, Archive, RkyvSerialize, RkyvDeserialize, Serialize, Deserialize)]
 #[rkyv(derive(Debug))]
 #[serde(tag = "op", rename_all = "snake_case")]
 pub enum EvalRequest {
-    /// Split `wildcards` into disjoint shards so the parent can fan discovery
-    /// across the pool. A trailing first wildcard is answered with its child
-    /// names only, never forcing a child.
     Plan {
         repository: String,
         wildcards: Vec<String>,
         #[serde(default)]
         input_overrides: Vec<(String, String)>,
     },
-    /// Discover all attribute paths in `repository` matching `wildcards`, the
-    /// first wildcard limited to `only` when set. Nested sets under a trailing
-    /// `*` are answered as `deferred` shards instead of being forced.
     List {
         repository: String,
         wildcards: Vec<String>,
@@ -79,36 +46,25 @@ pub enum EvalRequest {
         #[serde(default)]
         input_overrides: Vec<(String, String)>,
     },
-    /// Resolve a batch of attribute paths to `(drv_path, references)` tuples.
-    /// Answered by a `ResolveItem` stream terminated with `ResolveEnd`;
-    /// per-attr failures ride inside their item, not as a top-level `Err`.
     Resolve {
         repository: String,
         attrs: Vec<String>,
         #[serde(default)]
         input_overrides: Vec<(String, String)>,
     },
-    /// Return `repository`'s eval-cache fingerprint without evaluating it.
-    /// `None` in the response for mutable/dirty flakes. The fingerprint is
-    /// computed from the override-applied locked flake so distinct override
-    /// sets never collide on one eval-cache blob.
     Fingerprint {
         repository: String,
         #[serde(default)]
         input_overrides: Vec<(String, String)>,
     },
-    /// Fold the eval-cache WAL into the main `.sqlite` (truncate checkpoint).
-    /// Run once after all shards finish, before the fleet-share push.
     Checkpoint {
         repository: String,
         #[serde(default)]
         input_overrides: Vec<(String, String)>,
     },
-    /// Ask the worker to exit cleanly. Parent uses this on graceful shutdown.
     Shutdown,
 }
 
-/// Response from worker to parent, one frame each.
 #[derive(Debug, Clone, Archive, RkyvSerialize, RkyvDeserialize, Serialize, Deserialize)]
 #[rkyv(derive(Debug))]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -125,11 +81,9 @@ pub enum EvalResponse {
         errors: Vec<String>,
         stats: Option<StatsDelta>,
     },
-    /// One resolved attr of an in-flight `Resolve`, streamed in request order.
     ResolveItem {
         item: ResolvedItem,
     },
-    /// Terminates a `Resolve` stream, carrying the batch-wide leftovers.
     ResolveEnd {
         warnings: Vec<String>,
         stats: Option<StatsDelta>,
@@ -143,8 +97,6 @@ pub enum EvalResponse {
     },
 }
 
-/// One streamed element of a `Resolve`. Either `drv_path` is set (success)
-/// or `error` is set (failure for that one attr).
 #[derive(Debug, Clone, Archive, RkyvSerialize, RkyvDeserialize, Serialize, Deserialize)]
 #[rkyv(derive(Debug))]
 pub struct ResolvedItem {
@@ -173,8 +125,8 @@ pub fn decode_response(bytes: &[u8]) -> Result<EvalResponse, RkyvError> {
     rkyv::from_bytes::<EvalResponse, RkyvError>(bytes)
 }
 
-/// Write one length-prefixed frame and flush, so a streamed item is visible to
-/// the parent even if the subprocess dies on the very next attr.
+/// The flush is keeping a streamed item visible to the parent.
+/// The subprocess can die on the very next attr.
 pub fn write_frame<W: Write>(w: &mut W, payload: &[u8]) -> std::io::Result<()> {
     let len = u32::try_from(payload.len())
         .ok()
@@ -190,8 +142,6 @@ pub fn write_frame<W: Write>(w: &mut W, payload: &[u8]) -> std::io::Result<()> {
     w.flush()
 }
 
-/// Read one frame. `Ok(None)` on clean EOF at a frame boundary (the peer
-/// closed the pipe between messages); an EOF inside a frame is an error.
 pub fn read_frame<R: Read>(r: &mut R) -> std::io::Result<Option<Vec<u8>>> {
     let mut len_buf = [0u8; 4];
     match r.read_exact(&mut len_buf) {
@@ -249,8 +199,6 @@ mod tests {
 
     #[test]
     fn decode_survives_misaligned_input() {
-        // Simulate an arbitrary-alignment read buffer by shifting the payload
-        // one byte inside a larger allocation.
         let bytes = encode_request(&EvalRequest::Shutdown).unwrap();
         let mut shifted = vec![0u8; bytes.len() + 1];
         shifted[1..].copy_from_slice(&bytes);

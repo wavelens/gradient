@@ -4,8 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Parsing of Nix `.drv` files into the fields Gradient schedules on.
-
 mod derivation;
 mod drv_output_spec;
 

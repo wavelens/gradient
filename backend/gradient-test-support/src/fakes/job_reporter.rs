@@ -4,8 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Recording [`JobReporter`] that captures all calls for test assertions.
-
 use anyhow::Result;
 use async_trait::async_trait;
 use gradient_util::sync::Mutex;
@@ -14,7 +12,6 @@ use gradient_wire::messages::{
 };
 use gradient_wire::traits::JobReporter;
 
-/// A reported event captured by [`RecordingJobReporter`].
 #[derive(Debug, Clone)]
 pub enum ReportedEvent {
     Fetching,
@@ -52,18 +49,11 @@ pub enum ReportedEvent {
     },
 }
 
-/// [`JobReporter`] that records every call as a [`ReportedEvent`].
 #[derive(Debug, Default)]
 pub struct RecordingJobReporter {
     events: Mutex<Vec<ReportedEvent>>,
-    /// Paths to return from `query_cache`. Tests set this to simulate
-    /// paths already present in the server's cache.
     pub cached_paths: Vec<String>,
-    /// Derivation paths to return from `query_known_derivations`. Tests set
-    /// this to simulate derivations already recorded on the server, causing
-    /// the BFS to prune those subtrees.
     pub known_drv_paths: Vec<String>,
-    /// Path to transfer URL for `query_upstream`: what an upstream serves.
     pub upstream: std::collections::HashMap<String, String>,
 }
 
@@ -72,26 +62,21 @@ impl RecordingJobReporter {
         Self::default()
     }
 
-    /// Configure paths that `query_cache` will report as cached.
     pub fn with_cached_paths(mut self, paths: Vec<String>) -> Self {
         self.cached_paths = paths;
         self
     }
 
-    /// Configure `.drv` paths that `query_known_derivations` will report as
-    /// already known, causing the BFS to prune those subtrees.
     pub fn with_known_drv_paths(mut self, paths: Vec<String>) -> Self {
         self.known_drv_paths = paths;
         self
     }
 
-    /// Configure a path an upstream serves, with the URL `query_upstream` hands back.
     pub fn with_upstream(mut self, path: &str, url: &str) -> Self {
         self.upstream.insert(path.to_owned(), url.to_owned());
         self
     }
 
-    /// Every event recorded so far, in call order.
     pub fn events(&self) -> Vec<ReportedEvent> {
         self.events.lock().clone()
     }
@@ -100,7 +85,6 @@ impl RecordingJobReporter {
         self.events.lock().push(event);
     }
 
-    /// Number of events recorded.
     pub fn len(&self) -> usize {
         self.events.lock().len()
     }
@@ -109,7 +93,6 @@ impl RecordingJobReporter {
         self.events.lock().is_empty()
     }
 
-    /// Get the last `EvalResult` event, if any.
     pub fn last_eval_result(&self) -> Option<ReportedEvent> {
         self.events()
             .into_iter()
@@ -117,7 +100,6 @@ impl RecordingJobReporter {
             .find(|e| matches!(e, ReportedEvent::EvalResult { .. }))
     }
 
-    /// Every path pushed via `push_paths`, across all batches.
     pub fn all_pushed_paths(&self) -> Vec<String> {
         self.events()
             .into_iter()
@@ -130,7 +112,6 @@ impl RecordingJobReporter {
             .collect()
     }
 
-    /// Collect all derivations across every `EvalResult` event (incremental batches).
     pub fn all_eval_derivations(&self) -> Vec<DiscoveredDerivation> {
         self.events()
             .into_iter()
@@ -181,8 +162,8 @@ impl JobReporter for RecordingJobReporter {
             .into_iter()
             .filter_map(|path| {
                 let is_cached = cached_set.contains(path.as_str());
-                // Normal/Pull: return only cached paths.
-                // Push: return all paths with cached flag.
+                // Push mode is returning every path with its cached flag. Other modes are returning
+                // only cached paths.
                 if is_cached || matches!(mode, QueryMode::Push) {
                     Some(CachedPath {
                         path,

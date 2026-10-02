@@ -4,13 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Upstream-availability columns on `derivation_output`. Resolved once at eval
-//! via the org's upstream-cache narinfo lookup: `external_url` is the upstream
-//! NAR URL, the rest is the narinfo metadata the worker needs to download and
-//! import the path directly (no second narinfo fetch). When set, the anchor is
-//! dispatched substitutable; `cached_path` stays empty until the worker pulls,
-//! recompresses, and pushes the NAR into the gradient cache.
-
 use sea_orm_migration::prelude::*;
 use sea_orm_migration::sea_orm::ConnectionTrait;
 

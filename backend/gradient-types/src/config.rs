@@ -4,14 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Typed configuration clusters extracted from the flat `Cli` struct.
-//!
-//! Each struct groups the fields of one feature that is either fully enabled
-//! (all fields present) or fully disabled (feature flag is false / bucket not
-//! set).  The accessor methods on [`Cli`] return `Option<T>`: `None` means the
-//! feature is disabled or misconfigured, `Some(config)` means every required
-//! field is present and the feature can be used.
-
 use super::Cli;
 use super::cli::{
     BuildArgs, CacheArgs, DatabaseArgs, EvalArgs, GcArgs, HttpArgs, LogArgs, MetricsArgs, NarArgs,
@@ -20,30 +12,21 @@ use super::cli::{
 };
 use ipnet::IpNet;
 
-/// OIDC configuration - only present when `oidc.enable` is true and all
-/// required fields are configured.
 #[derive(Debug, Clone)]
 pub struct OidcConfig {
     pub client_id: String,
     pub client_secret_file: String,
-    /// Optional space-separated scope list; defaults to `"openid email profile"`.
     pub scopes: Option<String>,
     pub discovery_url: String,
-    /// Whether OIDC is the only allowed login method.
     pub required: bool,
 }
 
-/// SCIM provisioning configuration - only present when `scim.enable` is true
-/// and a token file is configured.
 #[derive(Debug, Clone)]
 pub struct ScimConfig {
     pub token_file: String,
-    /// When true, SCIM `DELETE /Users/{id}` hard-deletes (cascade) instead of soft-disabling.
     pub hard_delete: bool,
 }
 
-/// Email/SMTP configuration - only present when `email.enable` is true and
-/// all required fields are configured.
 #[derive(Debug, Clone)]
 pub struct EmailConfig {
     pub smtp_host: String,
@@ -53,69 +36,44 @@ pub struct EmailConfig {
     pub from_address: String,
     pub from_name: String,
     pub enable_tls: bool,
-    /// Whether new users must verify their email before logging in.
     pub require_verification: bool,
 }
 
-/// GitHub App configuration - only present when all three fields are set.
-///
-/// Required together: the App ID and private key are needed to generate
-/// short-lived JWTs for API authentication, and the webhook secret is needed
-/// to verify incoming payloads. An incomplete configuration is treated as
-/// "GitHub App disabled".
 #[derive(Debug, Clone)]
 pub struct GitHubAppConfig {
-    /// Numeric GitHub App ID.
     pub app_id: u64,
-    /// Path to the RS256 PEM private key file.
     pub private_key_file: String,
-    /// Path to the shared webhook secret file used to verify
-    /// `X-Hub-Signature-256` headers.
     pub webhook_secret_file: String,
 }
 
-/// Metrics endpoint configuration - only present when `metrics_token_file`
-/// is set and the file contains a non-empty token. The token is loaded once
-/// at startup; rotation requires a server restart.
 #[derive(Debug, Clone)]
 pub struct MetricsConfig {
-    /// Bearer token, loaded from `metrics_token_file` at startup.
     pub token: String,
 }
 
-/// Parsed network allowlists derived from `HttpArgs`. Both lists are
-/// validated once at startup; malformed CIDR entries abort the process.
 #[derive(Debug, Clone, Default)]
 pub struct NetworkConfig {
     pub trusted_proxies: Vec<IpNet>,
     pub local_ips: Vec<IpNet>,
 }
 
-/// S3 / object-storage configuration - only present when `s3.bucket` is set.
 #[derive(Debug, Clone)]
 pub struct S3Config {
     pub bucket: String,
     pub region: String,
-    /// Custom endpoint URL for S3-compatible stores (MinIO, Cloudflare R2, …).
     pub endpoint: Option<String>,
     pub access_key_id: Option<String>,
     pub secret_access_key_file: Option<String>,
     pub prefix: String,
-    /// Use virtual-hosted-style addressing when a custom endpoint is set.
-    /// `false` (default) requests path-style URLs - MinIO/Garage/most
-    /// self-hosted backends require this. No effect on AWS direct.
+    /// The `false` default is requesting path-style URLs. MinIO, Garage and most self-hosted
+    /// backends are requiring path-style. AWS direct is ignoring this flag.
     pub virtual_hosted_style: bool,
-    /// Per-response inactivity timeout; see [`super::cli::S3Args`] for why this
-    /// replaces a total request timeout.
     pub read_timeout: std::time::Duration,
-    /// Retries for a failed request.
     pub max_retries: usize,
-    /// Total budget for those retries, counted from the first attempt.
     pub retry_timeout: std::time::Duration,
 }
 
 impl Cli {
-    /// Returns the typed OIDC config when OIDC is enabled and fully configured.
     pub fn oidc_config(&self) -> Option<OidcConfig> {
         if !self.oidc.enable {
             return None;
@@ -129,7 +87,6 @@ impl Cli {
         })
     }
 
-    /// Returns the typed SCIM config when SCIM is enabled and a token file is set.
     pub fn scim_config(&self) -> Option<ScimConfig> {
         if !self.scim.enable {
             return None;
@@ -140,7 +97,6 @@ impl Cli {
         })
     }
 
-    /// Returns the typed email config when email is enabled and fully configured.
     pub fn email_config(&self) -> Option<EmailConfig> {
         if !self.email.enable {
             return None;
@@ -157,8 +113,6 @@ impl Cli {
         })
     }
 
-    /// Returns the typed GitHub App config when all three GitHub App fields
-    /// are configured.
     pub fn github_app_config(&self) -> Option<GitHubAppConfig> {
         Some(GitHubAppConfig {
             app_id: self.github_app.id?,
@@ -167,7 +121,6 @@ impl Cli {
         })
     }
 
-    /// Returns the typed S3 config when an S3 bucket is configured.
     pub fn s3_config(&self) -> Option<S3Config> {
         self.s3.bucket.as_ref().map(|bucket| S3Config {
             bucket: bucket.clone(),
@@ -183,8 +136,6 @@ impl Cli {
         })
     }
 
-    /// Returns the resolved network config, naming the offending env var if
-    /// either CIDR list fails to parse.
     pub fn network_config(&self) -> Result<NetworkConfig, ConfigError> {
         Ok(NetworkConfig {
             trusted_proxies: super::cli::parse_cidr_list(&self.http.trusted_proxies)
@@ -194,8 +145,6 @@ impl Cli {
         })
     }
 
-    /// Returns the typed metrics config when a token file path is configured
-    /// and the file contains a non-empty token after trimming.
     pub fn metrics_config(&self) -> Option<MetricsConfig> {
         let path = self.metrics.token_file.as_ref()?;
         let raw = std::fs::read_to_string(path).ok()?;
@@ -215,15 +164,6 @@ pub enum ConfigError {
     LocalIps(#[source] super::cli::CidrParseError),
 }
 
-/// Resolved runtime configuration carried by `AppState`.
-///
-/// Built once at startup from a parsed [`Cli`]. Handlers depend on the slice
-/// they need (`state.config.<group>.<field>`) instead of the whole
-/// parser DTO.
-///
-/// Optional features (`oidc`, `email`, `s3`, `github_app`) are `None` when
-/// disabled or incompletely configured - the `Some` variant guarantees the
-/// feature is fully usable.
 #[derive(Debug, Clone)]
 pub struct RuntimeConfig {
     pub log: LogArgs,
@@ -250,15 +190,13 @@ pub struct RuntimeConfig {
     pub s3: Option<S3Config>,
     pub github_app: Option<GitHubAppConfig>,
     pub metrics: Option<MetricsConfig>,
-    /// Always-present metrics pipeline settings (rollup interval, retention,
-    /// OTLP, sampling). Distinct from `metrics`, which gates the scrape token.
+    /// These pipeline settings are always present. The `metrics` field is gating only the
+    /// scrape token.
     pub metrics_args: MetricsArgs,
     pub network: NetworkConfig,
 }
 
 impl RuntimeConfig {
-    /// Resolve a parsed [`Cli`] into a runtime configuration. Optional
-    /// features collapse to `None` exactly when their accessor methods do.
     pub fn from_cli(cli: &Cli) -> Result<Self, ConfigError> {
         Ok(Self {
             log: cli.log.clone(),
@@ -337,7 +275,6 @@ mod tests {
     fn oidc_config_enabled_missing_fields_returns_none() {
         let mut cli = base_cli();
         cli.oidc.enable = true;
-        // oidc_client_id, oidc_client_secret_file, oidc_discovery_url all None
         assert!(cli.oidc_config().is_none());
     }
 
@@ -363,7 +300,6 @@ mod tests {
     fn email_config_enabled_missing_host_returns_none() {
         let mut cli = base_cli();
         cli.email.enable = true;
-        // email_smtp_host is None
         assert!(cli.email_config().is_none());
     }
 
@@ -390,7 +326,6 @@ mod tests {
     fn github_app_config_partial_returns_none() {
         let mut cli = base_cli();
         cli.github_app.id = Some(42);
-        // private_key_file and webhook_secret_file still None
         assert!(cli.github_app_config().is_none());
     }
 
@@ -426,8 +361,8 @@ mod tests {
     fn network_config_defaults_parse() {
         let cli = base_cli();
         let cfg = cli.network_config().expect("default CIDR lists parse");
-        assert_eq!(cfg.trusted_proxies.len(), 2); // 127.0.0.1/32 + ::1/128
-        assert_eq!(cfg.local_ips.len(), 1); // 10.0.0.0/8
+        assert_eq!(cfg.trusted_proxies.len(), 2);
+        assert_eq!(cfg.local_ips.len(), 1);
     }
 
     #[test]

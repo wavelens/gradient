@@ -4,11 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Integration tests for `POST /api/v1/build-requests/{session}/blobs`
-//! (issue #234, task 10). Covers the validation surfaces (claimed-hash
-//! mismatch, foreign hash, already-dispatched, expired) and the happy
-//! path where one blob lands in storage and shrinks `session.missing`.
-
 #![expect(
     clippy::unwrap_used,
     reason = "test scaffolding: a fixture helper that cannot build its value should fail the test loudly"

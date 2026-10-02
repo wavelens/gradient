@@ -68,8 +68,8 @@ pub struct PatchUpstreamRequest {
     pub active: Option<bool>,
 }
 
-/// State re-applies a managed cache's upstream caches on startup, so toggling
-/// `active` is the only edit worth allowing there.
+/// State is re-applying a managed cache's upstream caches on startup. Toggling `active` is the only
+/// edit worth allowing there.
 fn patch_edits_managed_fields(body: &PatchUpstreamRequest) -> bool {
     body.display_name.is_some()
         || body.mode.is_some()
@@ -451,9 +451,7 @@ mod tests {
     fn validate_gradient_proto_requires_https_when_api_key_present() {
         assert!(validate_gradient_proto("http://remote.example", "prod", Some("secret")).is_err());
         assert!(validate_gradient_proto("https://remote.example", "prod", Some("secret")).is_ok());
-        // http is fine when no key is transmitted.
         assert!(validate_gradient_proto("http://remote.example", "prod", None).is_ok());
-        // A blank key is treated as no key.
         assert!(validate_gradient_proto("http://remote.example", "prod", Some("   ")).is_ok());
     }
 

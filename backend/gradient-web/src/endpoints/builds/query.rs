@@ -24,27 +24,21 @@ use super::BuildAccessContext;
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct BuildWithOutputs {
-    /// Per-eval build identity (`build_job` id).
     pub id: BuildJobId,
     pub evaluation: EvaluationId,
     pub status: gradient_entity::build::BuildStatus,
     pub derivation_path: String,
     pub architecture: gradient_entity::server::Architecture,
-    /// Worker identity (the `worker_id` string from `InitConnection`) that
-    /// executed this build. `None` if the build never reached a worker.
     pub worker: Option<String>,
-    /// The dispatched job behind the latest attempt - the build's Job Board
-    /// entry. `None` until the build has been dispatched at least once.
     pub dispatched_job: Option<DispatchedJobId>,
     pub output: HashMap<String, String>,
     pub prioritized: bool,
     pub created_at: chrono::NaiveDateTime,
     pub updated_at: chrono::NaiveDateTime,
-    /// Bytes a running Substitute or Download has fetched; `None` otherwise.
     pub download_progress: Option<DownloadProgress>,
 }
 
-/// A finished shared build's last report outlives it by up to the TTL; it is not shown.
+/// A finished shared build's last report is outliving it by up to the TTL. It is not shown.
 fn running_download(
     progress: &Latest<DerivationBuildId, DownloadProgress>,
     shared_build: DerivationBuildId,

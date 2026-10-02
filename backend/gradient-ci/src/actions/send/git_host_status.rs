@@ -30,9 +30,6 @@ pub(crate) async fn execute_git_host_status_report(
         .ok_or_else(|| anyhow!("event '{}' has no Git host status mapping", event))?;
 
     let Some(report) = build_ci_report_from_payload(ctx, event, payload, ci_status).await? else {
-        // Build event for an intermediate dependency (no entry_point row).
-        // Nothing to post - the entry-point check covers the user-visible
-        // status.
         return Ok(ExecutorOk {
             status_code: Some(204),
             response_body: None,
@@ -58,12 +55,8 @@ pub(crate) async fn execute_git_host_status_report(
     })
 }
 
-/// Non-mutating "Test" probe for the Git-host-integration actions
-/// (`GitHostStatusReport`, `OpenPr`): builds the reporter from the action's
-/// integration and confirms it can reach the task's repository. The regular
-/// synthetic test-fire posts a status/PR against placeholder owner/repo/sha,
-/// which every Git host rejects, so connectivity-verify is the only test these
-/// actions can meaningfully pass.
+/// The regular synthetic test-fire is posting against placeholder owner, repo and sha, which Git
+/// hosts reject. A connectivity check is the only test these actions can pass.
 pub async fn verify_git_host_action(
     ctx: &CiContext,
     action: &gradient_types::MTaskAction,
@@ -87,9 +80,6 @@ pub async fn verify_git_host_action(
         .context("Git host connectivity check failed")
 }
 
-/// Find the task's first active `GitHostStatusReport` action and build a
-/// `CiReporter` from its integration. Used by the PR-approval trust probe to
-/// reuse the same Git host credentials Actions already use for status reporting.
 pub async fn reporter_for_task(
     ctx: &CiContext,
     task_id: TaskId,
@@ -152,9 +142,6 @@ pub(crate) async fn build_reporter_for_integration(
     )
 }
 
-/// GitHub-App installation reporter, used when the App is configured and the
-/// integration's project has an installation. Returns `None` to fall back to the
-/// provider's token reporter.
 async fn build_github_app_reporter(
     ctx: &CiContext,
     integration: &gradient_entity::integration::Model,

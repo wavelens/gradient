@@ -21,21 +21,14 @@ use std::sync::Arc;
 use std::time::Instant;
 use tracing::warn;
 
-/// Session-backed JWT claims. `jti` is the `SessionId` of a row in the
-/// `session` table; auth lookups validate the session is non-revoked and
-/// non-expired before trusting the token.
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Cliams {
     pub exp: usize,
     pub iat: usize,
     pub id: UserId,
-    /// Session id - must match a non-revoked, non-expired row in `session`.
     pub jti: SessionId,
 }
 
-/// Claims for short-lived (1 h) per-build download tokens. Scoped to a
-/// `derivation` (outputs are resolved through it) and the originating
-/// `evaluation` for access attribution.
 #[derive(Clone, Serialize, Deserialize)]
 pub struct DownloadClaims {
     pub exp: usize,
@@ -56,7 +49,6 @@ pub(super) fn token_from_cookie(req: &axum::extract::Request) -> Option<String> 
         .find_map(|part| part.strip_prefix("jwt_token=").map(str::to_owned))
 }
 
-/// Extract a bearer token from the Authorization header or the `jwt_token` cookie.
 pub fn extract_bearer_or_cookie(headers: &axum::http::HeaderMap) -> Option<String> {
     if let Some(auth) = headers.get(axum::http::header::AUTHORIZATION) {
         let val = auth.to_str().ok()?;
@@ -72,9 +64,6 @@ pub fn extract_bearer_or_cookie(headers: &axum::http::HeaderMap) -> Option<Strin
         .find_map(|part| part.strip_prefix("jwt_token=").map(str::to_owned))
 }
 
-/// Persist a new `session` row for `user_id` and encode a JWT carrying its id
-/// as the `jti` claim. Logout (or any explicit revoke) invalidates the row,
-/// which the auth middleware checks on every request.
 pub async fn create_session_and_token(
     state: State<Arc<ServerState>>,
     user_id: UserId,
@@ -125,8 +114,6 @@ pub async fn create_session_and_token(
     Ok((session_id, token))
 }
 
-/// Decode a JWT or API-key token. For session JWTs, validates the matching
-/// session row exists, is not revoked, and is not expired.
 pub async fn decode_jwt(
     state: State<Arc<ServerState>>,
     jwt: String,
@@ -263,9 +250,7 @@ pub fn generate_api_key() -> String {
     Alphanumeric.sample_string(&mut rand::rng(), 64)
 }
 
-/// Lowercase hex SHA-256 of the raw token (the part after the `GRAD` prefix).
-/// API keys are stored hashed; this is also what `state.api_keys[*].key_file`
-/// must contain.
+/// API keys are stored hashed. `state.api_keys[*].key_file` must contain this value.
 pub fn hash_api_key(raw: &str) -> String {
     let mut h = Sha256::new();
     h.update(raw.as_bytes());

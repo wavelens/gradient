@@ -4,16 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Server-side handlers for the fleet-shared eval-cache transfer (#386).
-//!
-//! A worker pulls a flake's serialized eval-cache blob by `fingerprint`
-//! (presigned-S3 URL or inline chunked stream); pushes go through the upload
-//! handshake and are size-guarded here so a stale-small blob never clobbers a
-//! larger cached one. Blobs live under `eval-cache/<fingerprint>` in object
-//! storage; an `eval_cache_store` row indexes them. Every handler is
-//! best-effort: on any error it logs and sends the safe negative response
-//! (`Miss`) rather than tearing down the connection.
-
 use gradient_core::ServerState;
 use gradient_entity::eval_cache_store;
 use gradient_types::ids::EvalCacheStoreId;
@@ -26,17 +16,10 @@ use tracing::{debug, warn};
 use super::socket::{BULK_CHUNK_SIZE, ProtoWriter, send_server_msg};
 use gradient_wire::messages::{PRESIGN_TTL, ServerMessage};
 
-/// Storage key for a fingerprint's eval-cache blob. Kept here (not just in
-/// `NarStore`) so the convention is visible at the call site and unit-testable.
 fn storage_key(fingerprint: &str) -> String {
     format!("eval-cache/{fingerprint}")
 }
 
-// ── Pure decisions (unit-tested without a live store/DB) ──────────────────────
-
-/// Whether an incoming push should be stored. Accept when there is no existing
-/// row or the incoming blob is strictly larger; otherwise skip (the size-guard
-/// that prevents a stale-small overwrite).
 fn should_accept_push(existing: Option<i64>, incoming: u64) -> bool {
     match existing {
         Some(existing) => incoming > existing as u64,
@@ -44,8 +27,6 @@ fn should_accept_push(existing: Option<i64>, incoming: u64) -> bool {
     }
 }
 
-/// Pick the pull outcome from `(row, presigned_url)`: `Miss` when no row, a
-/// presigned GET when the store minted one (S3), else an inline stream header.
 fn pull_outcome(
     row: Option<&eval_cache_store::Model>,
     presigned_url: Option<String>,
@@ -63,10 +44,6 @@ fn pull_outcome(
     }
 }
 
-// ── Async handlers ────────────────────────────────────────────────────────────
-
-/// `EvalCachePull`: serve the blob for `fingerprint` (presigned URL, inline
-/// stream, or `Miss`).
 pub(super) async fn handle_eval_cache_pull(
     state: &ServerState,
     writer: &ProtoWriter,
@@ -106,8 +83,6 @@ pub(super) async fn handle_eval_cache_pull(
     }
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
 pub(super) async fn accepts_push(state: &ServerState, fingerprint: &str, size_bytes: u64) -> bool {
     let existing = lookup_row(state, fingerprint).await.map(|r| r.size_bytes);
     should_accept_push(existing, size_bytes)
@@ -127,10 +102,6 @@ async fn lookup_row(state: &ServerState, fingerprint: &str) -> Option<eval_cache
     }
 }
 
-/// Upsert by the unique `fingerprint` index. The size-guard lives in
-/// [`should_accept_push`] (checked before granting the upload), so this always
-/// records the freshly-stored blob; on conflict it refreshes `storage_path`,
-/// `size_bytes`, and `updated_at`.
 pub(super) async fn record_eval_cache(state: &ServerState, fingerprint: &str, size_bytes: u64) {
     upsert_eval_cache_row(state, fingerprint, &storage_key(fingerprint), size_bytes).await;
 }
@@ -170,9 +141,6 @@ async fn upsert_eval_cache_row(
     }
 }
 
-/// Stream a stored eval-cache blob inline as `EvalCacheChunk` frames, coalesced
-/// to `BULK_CHUNK_SIZE` like the NAR pull path. The final frame carries
-/// `is_final = true`.
 async fn stream_blob_inline(
     state: &ServerState,
     writer: &ProtoWriter,
@@ -239,7 +207,6 @@ async fn stream_blob_inline(
     Ok(())
 }
 
-/// Stable per-fingerprint stream token for an inline pull.
 fn stream_token(fingerprint: &str) -> String {
     format!("ec-{fingerprint}")
 }
@@ -259,8 +226,6 @@ mod tests {
         }
     }
 
-    // ── size-guard ────────────────────────────────────────────────────────────
-
     #[test]
     fn accept_when_no_existing_row() {
         assert!(should_accept_push(None, 0));
@@ -277,8 +242,6 @@ mod tests {
         assert!(!should_accept_push(Some(100), 100));
         assert!(!should_accept_push(Some(100), 99));
     }
-
-    // ── pull-outcome selection ──────────────────────────────────────────────────
 
     #[test]
     fn pull_miss_when_no_row() {

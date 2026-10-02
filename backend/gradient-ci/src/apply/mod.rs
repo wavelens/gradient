@@ -4,11 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Orchestrates trigger fire -> evaluation creation. Encapsulates commit-level
-//! deduplication ([`dedup`]), concurrency policy ([`concurrency`]), and the
-//! post-creation parking [`gates`]. Callers: scheduler dispatch loop, Git host
-//! webhooks, manual API endpoints.
-
 mod concurrency;
 mod dedup;
 mod gates;
@@ -30,12 +25,9 @@ pub use gates::{
 pub enum ApplyOutcome {
     Created {
         evaluation: MEvaluation,
-        /// `Some(eval_id)` if a concurrency policy aborted an in-flight eval.
-        /// The caller is responsible for calling `Scheduler::cancel_evaluation_jobs`
-        /// for that eval to purge its in-memory `JobTracker` entries.
+        /// The caller must call `Scheduler::cancel_evaluation_jobs` for this evaluation to purge
+        /// its `JobTracker` entries.
         aborted_evaluation: Option<EvaluationId>,
-        /// `hard_abort` asks the caller to abort the evaluation's shared builds
-        /// through the graph writer before cancelling its jobs.
         hard_abort: bool,
     },
     SkippedSameCommit,
@@ -56,35 +48,14 @@ pub struct ApplyInput {
     pub commit_hash: Vec<u8>,
     pub commit_message: Option<String>,
     pub author_name: Option<String>,
-    /// Set true for manual UI restarts and `/triggers/{id}/test` calls.
-    /// Bypasses the same-commit dedup check.
     pub manual: bool,
-    /// Set by the PR webhook layer when the caller has determined the PR
-    /// requires maintainer approval (untrusted contributor on a require_approval
-    /// trigger). `apply_trigger` parks the resulting evaluation in
-    /// `Waiting + WaitingReason::Approval` instead of `Queued`.
     pub gate_approval: Option<ApprovalInfo>,
-    /// Override the evaluation's `repository` URL. Used by the PR webhook layer
-    /// so commits on a fork are fetched from the fork's clone URL instead of
-    /// `task.repository` (which only has the base repo's history). `None`
-    /// falls back to `task.repository`.
     pub repository_override: Option<String>,
-    /// Override the evaluation's `wildcard` attribute pattern. Used by
-    /// `/gradient run <wildcard>` so a maintainer can re-target a single
-    /// run without editing task config. `None` falls back to
-    /// `task.wildcard`.
     pub wildcard_override: Option<String>,
-    /// Records the PR comment that triggered this evaluation. Persisted
-    /// in `evaluation.source_comment` so the terminal-status reporter can
-    /// react with thumbs-up / thumbs-down once the build resolves.
     pub source_comment: Option<serde_json::Value>,
-    /// Instance-wide `max_storage_gb` limit (`GRADIENT_CACHE_MAX_STORAGE_GB`), used by
-    /// the storage-full gate. `0` disables the instance-wide limit.
     pub instance_max_storage_gb: i32,
 }
 
-/// Identification of the pull request a maintainer must approve before the
-/// evaluation starts. Persisted on `evaluation.waiting_reason`.
 #[derive(Debug, Clone)]
 pub struct ApprovalInfo {
     pub pr_number: u64,
@@ -96,12 +67,10 @@ pub async fn apply_trigger<C: ConnectionTrait>(
     task: &MTask,
     input: ApplyInput,
 ) -> Result<ApplyOutcome, ApplyError> {
-    // Find any in-flight evaluation up-front; we use it for dedup against the
-    // currently-running commit AND for the concurrency policy below. Scoped to
-    // non-concurrent evals: a concurrent run (e.g. an `input_update` flake bump)
-    // is orthogonal to normal CI and must not be aborted by, or dedup-block, a
-    // normal trigger. Mirrors the `uq_evaluation_one_active_per_task` partial
-    // index, which likewise excludes `concurrent` rows.
+    // The in-flight lookup is serving both the commit dedup and the concurrency policy. Concurrent
+    // runs such as `input_update` flake bumps are excluded, mirroring the
+    // `uq_evaluation_one_active_per_task` partial index. A normal trigger must neither abort nor
+    // dedup-block them.
     let active_codes: Vec<i32> = EvaluationStatus::ACTIVE
         .iter()
         .copied()

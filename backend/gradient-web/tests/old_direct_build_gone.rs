@@ -4,14 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Regression for the build-request rework: the legacy direct-build
-//! endpoints (`POST /api/v1/builds` multipart upload, `GET
-//! /api/v1/builds/direct/recent`) were replaced by the
-//! `/api/v1/build-requests/*` flow and must no longer be routable.
-//!
-//! Uses manual Tokio runtimes because `#[tokio::test]` expands to
-//! `::gradient_core::…` which clashes with the local `core` crate name.
-
 use axum_test::TestServer;
 use gradient_core::ServerState;
 use gradient_db::{WebDb, WorkerDb};

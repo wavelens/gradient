@@ -4,43 +4,16 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! View type for [`BuildOutput`] NAR metadata that makes the pending/available
-//! state explicit at the type level.
-//!
-//! [`BuildOutput::nar_size`] and [`BuildOutput::nar_hash`] are only both
-//! `Some` after the worker has compressed the output and recorded the NAR.
-//! [`BuildOutputMetadata`] groups these fields into a single enum so callers
-//! can pattern-match instead of performing two independent `if let Some` checks
-//! that could accidentally diverge.
-
 use crate::types::BuildOutput;
 
-/// Whether NAR metadata is available for a [`BuildOutput`].
-///
-/// Obtain via [`BuildOutput::nar_metadata`].
 #[derive(Debug, Clone, PartialEq)]
 pub enum BuildOutputMetadata<'a> {
-    /// The NAR has not yet been processed - `nar_size` and `nar_hash` are both
-    /// absent. This is the normal state immediately after a build completes,
-    /// before the worker compresses and hashes the output NAR.
     Pending,
 
-    /// Both `nar_size` and `nar_hash` are present - the NAR has been
-    /// compressed, hashed, and (typically) uploaded to the cache.
-    Available {
-        /// Uncompressed NAR size in bytes.
-        nar_size: i64,
-        /// NAR hash in `sha256:<nix32>` format.
-        nar_hash: &'a str,
-    },
+    Available { nar_size: i64, nar_hash: &'a str },
 }
 
 impl BuildOutput {
-    /// Return a view of this output's NAR metadata.
-    ///
-    /// Returns [`BuildOutputMetadata::Available`] only when both `nar_size`
-    /// and `nar_hash` are present; returns [`BuildOutputMetadata::Pending`]
-    /// otherwise.
     pub fn nar_metadata(&self) -> BuildOutputMetadata<'_> {
         match (&self.nar_hash, self.nar_size) {
             (Some(hash), Some(size)) => BuildOutputMetadata::Available {
@@ -51,8 +24,6 @@ impl BuildOutput {
         }
     }
 }
-
-// ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {

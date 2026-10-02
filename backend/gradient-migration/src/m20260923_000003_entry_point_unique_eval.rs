@@ -4,11 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! An evaluation lists each attribute once. A self-heal that re-queued an
-//! evaluation walked it again and inserted every entry point a second time;
-//! the oldest row of each pair survives, and the index makes the insert
-//! idempotent.
-
 use sea_orm_migration::prelude::*;
 use sea_orm_migration::sea_orm::ConnectionTrait;
 

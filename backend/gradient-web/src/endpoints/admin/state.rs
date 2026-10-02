@@ -4,13 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! `GET /admin/state` - export the live system as a declarative
-//! `services.gradient.state` configuration so operators can codify it in nix.
-//!
-//! `?format=nix` (default) returns a ready-to-paste Nix expression as
-//! `text/plain`; `?format=json` returns the `StateConfiguration` JSON wrapped in
-//! the standard response envelope. Secret `*_file` fields are redacted to null.
-
 use crate::error::{WebError, WebResult, require_superuser};
 use crate::helpers::ok_json;
 use axum::extract::{Query, State};

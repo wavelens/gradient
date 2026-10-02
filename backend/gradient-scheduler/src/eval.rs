@@ -4,10 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! What the graph writer cannot establish itself: which derivations our cache
-//! already holds complete (asked once per eval batch), and which an upstream serves
-//! (asked by the probe loop, for the shared builds something needs).
-
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
@@ -20,10 +16,6 @@ use tracing::{error, warn};
 
 const UPSTREAM_WINDOW_MINUTES: i64 = 60;
 
-/// The drv paths of `derivations` whose every output is already complete in our own
-/// cache, so the shared build can be resigned instead of rebuilt. A pure read: the
-/// upstream question is [`probe_outputs`]'s and is asked only once something wants
-/// the shared build.
 #[tracing::instrument(level = "debug", skip_all, fields(derivations = derivations.len()))]
 pub async fn assess_cached(
     state: &Arc<ServerState>,
@@ -55,8 +47,6 @@ pub async fn assess_cached(
 
     let db = &state.worker_db;
 
-    // Complete in our own cache: every output present and its producing shared build complete,
-    // so the shared build can be resigned instead of rebuilt.
     let fully_cached: HashSet<String> =
         gradient_db::fetch_in_chunks(&all_hashes, |chunk| async move {
             gradient_db::graph::runtime_can_start::complete_output_hashes(db, &chunk).await
@@ -77,10 +67,8 @@ pub async fn assess_cached(
     truly_substituted
 }
 
-/// Ask the upstream caches of `evaluation`'s project for `to_probe`, folding the
-/// per-endpoint metrics the round produced. Network: the only function here that
-/// leaves the process, and the reason probing has its own loop rather than on
-/// a graph path.
+/// This is the only function here leaving the process. Probing is running in its own loop for that
+/// reason, never on a graph path.
 pub async fn probe_outputs(
     state: &Arc<ServerState>,
     evaluation: &MEvaluation,
@@ -114,7 +102,7 @@ pub async fn probe_outputs(
     )
     .await;
 
-    // Same URL under different upstream ids folds into one metric series (#417).
+    // The same URL under different upstream ids is folding into one metric series (#417).
     let mut by_url: HashMap<String, gradient_db::caches::upstream::UpstreamAccum> = HashMap::new();
     for (id, accum) in &stats {
         if let Some(url) = id_to_url.get(id) {

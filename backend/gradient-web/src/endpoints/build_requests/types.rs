@@ -4,10 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Shared request/response shapes used by more than one build-request
-//! endpoint. Kept here so `manifest`, `blobs`, and `dispatch` don't have to
-//! cross-import each other.
-
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

@@ -4,12 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! WebSocket connection management: client connections, handshake, and listener.
-//!
-//! Framing rides gradient-proto's shared [`ProtoSocket`]/peer-split types; the
-//! thin wrappers here only pin the peer role (send `ClientMessage`, receive
-//! `ServerMessage`) and remember the server's negotiated protocol version.
-
 pub mod handshake;
 
 use anyhow::{Context, Result};
@@ -22,24 +16,14 @@ use tokio::net::TcpStream;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 use tracing::instrument;
 
-/// Producer-side ceiling for one queued send once the bounded writer queue is
-/// full. Exceeding it means the server's TCP receive side stalled; the send
-/// fails and the job-level error handling takes over instead of the queue
-/// buffering a whole NAR in RAM.
 const SEND_TIMEOUT: Duration = Duration::from_secs(30);
 
-/// A live WebSocket connection to the server.
 pub struct ProtoConnection {
-    /// Protocol version the server reported in `InitAck`. Set to 0 before the
-    /// handshake completes; updated via [`Self::set_server_version`] afterwards.
     pub server_version: u16,
     socket: ProtoSocket,
 }
 
 impl ProtoConnection {
-    /// Open a WebSocket connection to `url` and return the raw stream.
-    /// The caller is responsible for completing the handshake via
-    /// [`crate::connection::handshake::perform_handshake`].
     #[instrument(skip_all, fields(%url))]
     pub async fn open(url: &str) -> Result<Self> {
         let socket = gradient_wire::client::dial(url)
@@ -51,7 +35,6 @@ impl ProtoConnection {
         })
     }
 
-    /// Wrap an already-accepted WebSocket stream (server connected to us).
     pub fn from_accepted(socket: WebSocketStream<MaybeTlsStream<TcpStream>>) -> Self {
         Self {
             server_version: 0,
@@ -59,23 +42,18 @@ impl ProtoConnection {
         }
     }
 
-    /// Record the protocol version the server reported in `InitAck`.
     pub fn set_server_version(&mut self, version: u16) {
         self.server_version = version;
     }
 
-    /// The protocol version the server reported during the handshake.
-    /// Returns 0 if the handshake has not completed yet.
     pub fn server_version(&self) -> u16 {
         self.server_version
     }
 
-    /// Pre-split socket handle for the handshake driver.
     pub fn socket_mut(&mut self) -> &mut ProtoSocket {
         &mut self.socket
     }
 
-    /// Send a typed [`ClientMessage`] to the server.
     pub async fn send(&mut self, msg: ClientMessage) -> Result<()> {
         self.socket
             .send_client_msg(&msg)
@@ -83,9 +61,6 @@ impl ProtoConnection {
             .map_err(|_| anyhow::anyhow!("WebSocket send failed"))
     }
 
-    /// Split into a cloneable [`ProtoWriter`] and a [`ProtoReader`], backed by
-    /// the shared frame layer's bounded, batch-draining writer task, plus the
-    /// [`WriterFlush`] handle on that task.
     pub fn split(self) -> (ProtoWriter, ProtoReader, WriterFlush) {
         let (reader, writer, task) = self.socket.split_peer(SEND_TIMEOUT);
         (
@@ -96,16 +71,11 @@ impl ProtoConnection {
     }
 }
 
-/// Completion handle for a connection's writer task.
 pub struct WriterFlush(tokio::task::JoinHandle<()>);
 
 impl WriterFlush {
-    /// Wait up to `budget` for every queued frame to reach the socket.
-    ///
-    /// A send only enqueues, so a worker that exits right after reporting its
-    /// last job would drop that report on the floor. The task ends once the
-    /// final writer clone drops; the budget bounds the wait when a background
-    /// task (scoring, a NAR transfer) still holds one.
+    /// A send is only enqueuing, and a worker exiting right after its last report would drop it.
+    /// The budget is bounding the wait while a background task is still holding a writer clone.
     pub async fn flush(self, budget: Duration) {
         if tokio::time::timeout(budget, self.0).await.is_err() {
             tracing::warn!(
@@ -115,24 +85,19 @@ impl WriterFlush {
         }
     }
 
-    /// Drop the socket now. Background tasks may still hold writer clones, and
-    /// while they do the session would stay open with nobody reading it, so the
-    /// server keeps the dead session and refuses the reconnect.
+    /// Background tasks may still hold writer clones. The session would stay open with nobody
+    /// reading it, and the server would refuse the reconnect.
     pub fn close(self) {
         self.0.abort();
     }
 }
 
-/// Cloneable write handle over the shared bounded writer queue.
 #[derive(Clone)]
 pub struct ProtoWriter {
     inner: ClientWriter,
 }
 
 impl ProtoWriter {
-    /// Enqueue a message for sending. Fails when the writer task has exited
-    /// (connection closed) or the queue stayed full past [`SEND_TIMEOUT`]
-    /// (server TCP stalled).
     pub async fn send(&self, msg: ClientMessage) -> Result<()> {
         self.inner
             .send_msg(&msg)
@@ -141,8 +106,6 @@ impl ProtoWriter {
     }
 }
 
-/// The connection to the server failed, not the job: typed so the worker
-/// reports the job as transient instead of falling through to permanent.
 #[derive(Debug)]
 pub struct WriterUnavailable;
 
@@ -153,8 +116,6 @@ impl std::fmt::Display for WriterUnavailable {
 }
 impl std::error::Error for WriterUnavailable {}
 
-/// The server or the object store stopped answering in time: an outage, typed
-/// so the job is reported transient rather than failed for good.
 #[derive(Debug)]
 pub struct Unresponsive;
 
@@ -165,13 +126,11 @@ impl std::fmt::Display for Unresponsive {
 }
 impl std::error::Error for Unresponsive {}
 
-/// Read-only half produced by [`ProtoConnection::split`].
 pub struct ProtoReader {
     inner: ServerReader,
 }
 
 impl ProtoReader {
-    /// Next inbound frame; `None` on close or a malformed frame.
     pub async fn recv(&mut self) -> Option<Inbound<ServerMessage>> {
         self.inner.recv().await
     }

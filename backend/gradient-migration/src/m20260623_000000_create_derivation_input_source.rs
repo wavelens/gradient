@@ -3,10 +3,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Per-derivation `inputSrcs` (build-time source paths with no producing
-//! derivation), so the dispatch readiness gate can require every source to be
-//! cached before a real build is dispatched.
-
 use sea_orm_migration::prelude::*;
 
 #[derive(DeriveMigrationName)]

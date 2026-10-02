@@ -64,7 +64,6 @@ fn to_bar(h: HistoryRow) -> HistoryBar {
     }
 }
 
-/// An evaluation without entry points (failed before any build) still has outcomes: all zero.
 async fn outcomes_for<C: ConnectionTrait>(
     db: &C,
     facts: &[TaskFacts],

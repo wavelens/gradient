@@ -6,8 +6,6 @@
 
 use gradient_wire::types::{ClusterAddress, ClusterPeer};
 
-/// What the scheduler pushes to a session. Every variant is idempotent;
-/// `Offers` carries the generation that lets a session coalesce a burst.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SessionSignal {
     Offers(u64),
@@ -17,10 +15,8 @@ pub enum SessionSignal {
         reason: String,
     },
     Drain,
-    /// Tear the session down now. Unlike [`SessionSignal::Drain`] this does not
-    /// wait for in-flight jobs: the scheduler has already re-queued them, so the
-    /// worker must drop the connection and reconnect rather than keep reporting
-    /// into a session the pool no longer knows about.
+    /// The scheduler has already re-queued the in-flight jobs. The worker must reconnect instead of
+    /// reporting into a session the pool no longer knows.
     Close {
         reason: String,
     },

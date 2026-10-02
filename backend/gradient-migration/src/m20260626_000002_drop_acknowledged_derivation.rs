@@ -4,9 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Drops the unused `acknowledged_derivation` feature table (expensive-build
-//! muting), removed from the Job Board.
-
 use sea_orm_migration::prelude::*;
 
 #[derive(DeriveMigrationName)]

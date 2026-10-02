@@ -3,8 +3,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Integration tests for `GET /api/v1/caches/{cache}/nars`.
-
 use axum::http::StatusCode;
 use axum_test::TestServer;
 use gradient_test_support::cache_fixture::{
@@ -56,10 +54,6 @@ fn list_private_cache_anon_returns_not_found() {
     });
 }
 
-/// Regression for "missing build outputs": as long as a `cached_path_signature`
-/// row exists for the cache + the cached_path FK resolves, the LIST endpoint
-/// MUST return that NAR. Verifies the SQL JOIN does not silently drop entries
-/// that narinfo would otherwise serve.
 #[test]
 fn list_returns_signed_nar_for_cache() {
     let rt = tokio::runtime::Builder::new_current_thread()

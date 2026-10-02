@@ -6,15 +6,6 @@
 
 #![allow(clippy::disallowed_methods, reason = "test harness server")]
 
-//! A `/live` channel must let go of a client that walked away.
-//!
-//! The stream only ever wrote to its socket, so a closed browser tab was
-//! noticed only if some later event happened to fail the send. A channel that
-//! stays quiet - a finished task, an idle cache - therefore kept its task
-//! and its file descriptor forever, and the server accumulated CLOSE-WAIT
-//! sockets (258 of them over a few hours in production) until it would have
-//! run out of descriptors.
-
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -27,7 +18,6 @@ use gradient_types::EventBus;
 use gradient_util::shutdown::Shutdown;
 use tokio::net::TcpListener;
 
-/// Signals when the server-side stream task has returned.
 type Done = Arc<tokio::sync::Notify>;
 
 async fn live_route(
@@ -69,8 +59,8 @@ async fn live_stream_ends_when_the_client_disconnects() {
         .await
         .expect("client connects");
 
-    // The client goes away without the channel ever publishing an event -
-    // exactly the case a write-only loop cannot detect.
+    // The client is leaving without the channel ever publishing an event. A write-only loop cannot
+    // detect this case.
     drop(client);
 
     tokio::time::timeout(Duration::from_secs(5), done.notified())
@@ -100,7 +90,6 @@ async fn live_stream_ends_when_the_server_shuts_down() {
         .await
         .expect("client connects");
 
-    // The client stays and the channel stays quiet; only shutdown ends the stream.
     shutdown.cancel();
 
     tokio::time::timeout(Duration::from_secs(5), done.notified())

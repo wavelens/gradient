@@ -73,8 +73,8 @@ async fn trigger_records_the_requested_walk_mode() {
 
 #[tokio::test]
 async fn trigger_drops_dangling_last_evaluation_pointer() {
-    // Task points at an evaluation row that no longer exists. The
-    // resolved `previous` must fall back to None so the FK doesn't fire.
+    // The resolved `previous` must fall back to `None` for a task pointing at a deleted evaluation.
+    // The FK would fire otherwise.
     let stale_eval_id = EvaluationId::now_v7();
     let mut task = make_task();
     task.last_evaluation = Some(stale_eval_id);
@@ -82,21 +82,15 @@ async fn trigger_drops_dangling_last_evaluation_pointer() {
     let new_eval_id = EvaluationId::now_v7();
     let commit_id = CommitId::now_v7();
     let db = MockDatabase::new(DatabaseBackend::Postgres)
-        // in-progress check: none active
         .append_query_results([Vec::<evaluation::Model>::new()])
-        // resolve previous: row missing
         .append_query_results([Vec::<evaluation::Model>::new()])
-        // insert commit
         .append_query_results([vec![gradient_entity::commit::Model {
             id: commit_id,
             hash: vec![0u8; 20],
             ..Default::default()
         }]])
-        // insert evaluation (previous should be None despite stale pointer)
         .append_query_results([vec![make_eval(new_eval_id, EvaluationStatus::Queued)]])
-        // snapshot flake input overrides (none)
         .append_query_results([Vec::<gradient_entity::task_flake_input_override::Model>::new()])
-        // task update read-back + exec
         .append_query_results([vec![task.clone()]])
         .append_exec_results([MockExecResult {
             last_insert_id: 0,
@@ -128,7 +122,6 @@ async fn trigger_already_in_progress() {
     let existing_eval = make_eval(EvaluationId::now_v7(), EvaluationStatus::Queued);
 
     let db = MockDatabase::new(DatabaseBackend::Postgres)
-        // 1st SELECT: returns in-progress evaluation
         .append_query_results([vec![existing_eval]])
         .into_connection();
 
@@ -150,13 +143,9 @@ async fn trigger_already_in_progress() {
     assert!(matches!(result, Err(TriggerError::AlreadyInProgress)));
 }
 
-// ── trigger_restart_builds ───────────────────────────────────────────────
-
-/// Regression for the "evaluations stuck in Building forever" symptom: when
-/// every entry-point shared build is already terminal-success there is nothing to
-/// rebuild, so the new evaluation must start in `Completed` rather than
-/// `Building`, otherwise nothing fires `check_evaluation_done` and the row is
-/// stuck.
+/// Nothing is left to rebuild once every entry-point shared build is terminal-success. The new
+/// evaluation must start `Completed` because nothing would fire `check_evaluation_done` from
+/// `Building`.
 #[tokio::test]
 async fn restart_with_all_cached_inserts_completed_eval() {
     let task = make_task();
@@ -182,24 +171,15 @@ async fn restart_with_all_cached_inserts_completed_eval() {
     };
 
     let db = MockDatabase::new(DatabaseBackend::Postgres)
-        // 1. in-progress check: none
         .append_query_results([Vec::<evaluation::Model>::new()])
-        // 2. find prev_eval
         .append_query_results([vec![prev_eval]])
-        // 3. load prev entry points
         .append_query_results([prev_entry_points])
-        // 4. load shared builds for the entry-point derivations (all terminal-success)
         .append_query_results([shared_builds])
-        // 5. INSERT new evaluation: returns the row with status=Completed
         .append_query_results([vec![inserted_eval]])
-        // 6. snapshot flake input overrides (none)
         .append_query_results([Vec::<gradient_entity::task_flake_input_override::Model>::new()])
-        // 7. copy entry points: two INSERTs
         .append_query_results([vec![make_entry_point(new_eval_id, drv_a)]])
         .append_query_results([vec![make_entry_point(new_eval_id, drv_b)]])
-        // 8. SELECT task for update read-back
         .append_query_results([vec![task.clone()]])
-        // 9. UPDATE task
         .append_exec_results([MockExecResult {
             last_insert_id: 0,
             rows_affected: 1,
@@ -215,9 +195,6 @@ async fn restart_with_all_cached_inserts_completed_eval() {
     );
 }
 
-/// When at least one entry-point shared build is not terminal-success, the new eval
-/// must start in `Building` and named: it takes the previous evaluation's names
-/// over, since it never walks, and the heal's thaw is seeded from them.
 #[tokio::test]
 async fn restart_with_one_failed_inserts_building_eval_and_inherits_the_names() {
     let task = make_task();

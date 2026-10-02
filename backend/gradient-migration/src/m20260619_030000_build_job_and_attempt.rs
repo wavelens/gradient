@@ -3,12 +3,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Build-identity cutover: introduce the per-eval scored `build_job`, re-point
-//! `build_attempt` onto `build_job` + the `derivation_build` anchor, point
-//! `entry_point` at a derivation, and drop the per-eval `build` table. Per-eval
-//! build/attempt rows are reconstructable, so this is a clean cutover; the next
-//! evaluation re-resolves anchors and re-creates jobs.
-
 use sea_orm_migration::prelude::*;
 
 #[derive(DeriveMigrationName)]

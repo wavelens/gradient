@@ -6,14 +6,9 @@
 
 use gradient_wire::types::BuildSpecKind;
 
-/// A substitute or a download can start on any worker, since neither needs a nix store;
-/// a build needs a worker of its own architecture. A `builtin` derivation is nix's
-/// own builder: fixed-output ones are `builtin:fetchurl`, which a worker executes
-/// itself; the rest (`builtin:buildenv`) stay builds the daemon executes.
-///
-/// Whether a shared build is still worth substituting is not decided here. A spent miss
-/// budget clears `cache_available` in the graph writer, on the failure that spends it,
-/// so this reads the flag and nothing else.
+/// A spent miss budget is clearing `cache_available` in the graph writer on the failure that spent
+/// it. This function is reading only that flag. Fixed-output `builtin` derivations are
+/// `builtin:fetchurl`, and the worker is executing them itself.
 pub(crate) fn decide_build_spec_kind(
     cache_available: bool,
     architecture: &str,

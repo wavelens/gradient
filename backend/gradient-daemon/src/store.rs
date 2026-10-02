@@ -9,8 +9,9 @@ use nix::sched::{CloneFlags, unshare};
 use nix::sys::statvfs::{FsFlags, statvfs};
 use std::path::Path;
 
-/// Like nix-daemon: NixOS binds the store read-only, so remount it writable in a private
-/// mount namespace. Must run before any other thread starts, as unshare is per thread.
+/// NixOS is binding the store read-only. The store is remounted writable in a private mount
+/// namespace, as nix-daemon is doing. This must run before any other thread is started because
+/// unshare is per thread.
 pub fn make_writable(store: &Path) -> anyhow::Result<()> {
     if !statvfs(store)?.flags().contains(FsFlags::ST_RDONLY) {
         return Ok(());

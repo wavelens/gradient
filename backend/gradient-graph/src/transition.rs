@@ -4,8 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! One handler per [`Transition`], each run inside the graph writer's transaction.
-
 use anyhow::{Context, Result};
 use gradient_db::{
     DbContext,
@@ -107,8 +105,6 @@ pub(crate) async fn apply(ctx: &DbContext, transition: Transition) -> Result<Tra
             Ok(TransitionReport::default())
         }
         Transition::OrphanedBuilds { shared_builds } => {
-            // One read for every shared build the worker held; the status writes stay
-            // per row because each carries its own transition side effects.
             let rows = match EDerivationBuild::find()
                 .filter(gradient_entity::derivation_build::Column::Id.is_in(shared_builds))
                 .all(&ctx.worker_db)
@@ -131,11 +127,6 @@ pub(crate) async fn apply(ctx: &DbContext, transition: Transition) -> Result<Tra
                 requeued.push(derivation);
             }
 
-            // The move evaluates no gate, and `Building` is outside
-            // `BuildStatus::PENDING`, so nothing recounted `blocking_deps` while the
-            // shared build was building and the value the gate reads can be stale either
-            // way. The dispatcher is live here, unlike at startup, so the settle has
-            // to run before it can pick the row up.
             let settled = unpromote_ungated(&ctx.worker_db, &requeued).await?;
             emit_transition_effects(ctx, &settled).await?;
 
@@ -193,19 +184,12 @@ pub(crate) async fn apply(ctx: &DbContext, transition: Transition) -> Result<Tra
 
 #[tracing::instrument(level = "debug", skip_all, fields(eval_id = %evaluation_id))]
 async fn eval_stream_completed(ctx: &DbContext, evaluation_id: EvaluationId) -> Result<()> {
-    // Every edge landed with its batch, so the graph is complete here: run the
-    // healing pipeline scoped to this eval, which thaws its closure, settles the
-    // shared builds whose outputs are already complete and advances their parents, fails
-    // the closure's dependency-failed victims, and promotes the closure (see
-    // `gradient_db::graph::repair`).
     gradient_db::graph::repair::repair_build_graph(
         ctx,
         gradient_db::graph::repair::RepairScope::Eval(evaluation_id),
     )
     .await?;
 
-    // Promotion is graph-driven (gradient_db::graph::promotion), independent of eval
-    // completion, so finishing the stream just advances the eval to Building.
     if let Some(eval) = EEvaluation::find_by_id(evaluation_id)
         .one(&ctx.worker_db)
         .await?
@@ -218,8 +202,6 @@ async fn eval_stream_completed(ctx: &DbContext, evaluation_id: EvaluationId) -> 
         update_evaluation_status(ctx, eval, EvaluationStatus::Building).await?;
     }
 
-    // If every build was already terminal (e.g. all Substituted), close the
-    // evaluation out via the shared decision function.
     gradient_db::status::check_evaluation_done(ctx, evaluation_id).await?;
     Ok(())
 }
@@ -231,9 +213,6 @@ async fn eval_failed(
     kind: BuildFailureKind,
     missing_paths: &[String],
 ) -> Result<()> {
-    // Corrupt shared eval-cache: the worker already dropped its local copy, so
-    // purge the poisoned shared blob and re-queue the eval to re-evaluate
-    // cache-less. If it heals (blob existed), skip the terminal-Failed path.
     if kind == BuildFailureKind::CorruptEvalCache
         && let Some(fingerprint) = missing_paths.first()
         && heal_corrupt_eval_cache(ctx, evaluation_id, fingerprint).await?
@@ -262,10 +241,6 @@ async fn eval_failed(
             EvaluationStatus::Completed | EvaluationStatus::Failed | EvaluationStatus::Aborted
         )
     {
-        // The API writes `Aborted` before `AbortJob` goes out, so the guard above
-        // normally catches this. If that write was lost, settle the evaluation
-        // where the abort meant to put it rather than reporting a failure the
-        // user did not cause.
         if kind == BuildFailureKind::Aborted {
             update_evaluation_status(ctx, eval, EvaluationStatus::Aborted).await?;
             return Ok(());
@@ -284,12 +259,9 @@ async fn eval_failed(
     Ok(())
 }
 
-/// Purge a corrupt shared eval-cache blob and re-queue the evaluation. Returns
-/// `true` when it re-queued. The blob's own existence is the circuit breaker:
-/// the first corrupt failure finds the row and purges+re-queues it; once purged,
-/// a recurring corruption (the freshly-generated cache is itself unreadable, i.e.
-/// a broken worker/disk) has no shared blob to blame, so this returns `false` and
-/// the caller fails the eval for real instead of looping.
+/// The shared blob's existence is acting as the circuit breaker.
+/// The first corrupt failure is purging the blob and re-queuing the evaluation.
+/// A recurring corruption is finding no blob and failing the evaluation instead of looping.
 async fn heal_corrupt_eval_cache(
     ctx: &DbContext,
     evaluation_id: EvaluationId,
@@ -376,7 +348,6 @@ async fn build_output(
             error!(error = %e, %build_id, output_name = %output.name, "failed to update derivation_output");
         }
 
-        // Prior products are dropped first so a retry stays idempotent.
         if let Err(e) = EBuildProduct::delete_many()
             .filter(CBuildProduct::DerivationOutput.eq(row_id))
             .exec(&ctx.worker_db)
@@ -412,9 +383,6 @@ async fn build_output(
     info!(%build_id, output_count = outputs.len(), "build outputs recorded");
     report_missing_artefacts(ctx, derivation_id, &missing).await?;
 
-    // The daemon found the outputs already valid, but the worker has not pushed
-    // their NARs yet: record the flag and let `build_completed` turn it into the
-    // terminal status, after the push (#399, #303).
     if substituted {
         let mut active = shared_build.into_active_model();
         active.substituted = Set(true);
@@ -427,8 +395,6 @@ async fn build_output(
     Ok(())
 }
 
-/// A declared artefact the build did not produce leaves the build successful but
-/// warns every evaluation still waiting on it.
 async fn report_missing_artefacts(
     ctx: &DbContext,
     derivation: DerivationId,
@@ -487,9 +453,6 @@ async fn build_completed(
     let derivation_id = shared_build.derivation;
     let was_external_cached = shared_build.cache_available;
 
-    // The output NARs are in the index by the time this is running: the worker sends
-    // the completion only after the server acknowledged every upload commit. So
-    // the shared build may now become startable.
     let terminal = policy::terminal_success_status(shared_build.substituted);
     if let Err(e) = succeed_latest_attempt(
         &ctx.worker_db,
@@ -543,8 +506,6 @@ async fn build_failed(
         return Ok(());
     };
 
-    // Without this banner a pre-`nix build` abort renders as a Failed badge over
-    // an empty log.
     if let Some(attempt_id) =
         gradient_db::scheduling::build_attempt::latest_attempt_id(&ctx.worker_db, shared_build.id)
             .await
@@ -566,8 +527,6 @@ async fn build_failed(
     let attempt = shared_build.attempt;
     let max_attempts = ctx.config.build.max_attempts;
 
-    // Counted before this failure is recorded, so the breaker decision excludes
-    // the attempt we are about to mark.
     let prior_inputs_unavailable = if matches!(kind, BuildFailureKind::InputsUnavailable) {
         gradient_db::scheduling::build_attempt::inputs_unavailable_attempt_count(
             &ctx.worker_db,
@@ -597,8 +556,6 @@ async fn build_failed(
         }
     }
 
-    // `InputsUnavailable` retries in-eval (the self-heal re-queues its input),
-    // but once the breaker trips the input is unrecoverable - stop retrying.
     let substitution = policy::Substitution {
         cache_available: shared_build.cache_available,
         misses: substitute_misses(ctx, derivation_build, kind, shared_build.cache_available).await,
@@ -609,8 +566,6 @@ async fn build_failed(
         other => other,
     };
 
-    // Recorded after the outcome is decided: the stored reason depends on it,
-    // and the breaker above deliberately counts only prior attempts.
     if let Err(e) = fail_latest_attempt(
         &ctx.worker_db,
         derivation_build,
@@ -640,12 +595,9 @@ async fn build_failed(
             return Ok(());
         }
         FailureOutcome::Requeue => {
-            // Substitute miss: back to the queue without an `attempt` bump or a
-            // permanent mark, and no dependency cascade - nothing failed. Nothing
-            // failed is not nothing changed: `repair_missing_inputs` above purges
-            // stale cached inputs in this same call, which drops a dependency out of
-            // `fetchable` and raises this shared build's `blocking_deps`, so the settle is
-            // what makes the write legal. There is no backoff on this path.
+            // `repair_missing_inputs` above is purging stale cached inputs in this same call.
+            // A purged input is raising this shared build's `blocking_deps`.
+            // The settle is what makes the `Queued` write legal.
             update_derivation_build_status(ctx, shared_build, BuildStatus::Queued).await?;
             let settled = unpromote_ungated(&ctx.worker_db, &[derivation_id]).await?;
             emit_transition_effects(ctx, &settled).await?;
@@ -675,9 +627,6 @@ async fn build_failed(
     check_referencing_evals_done(ctx, derivation_id).await
 }
 
-/// The shared build's prior `SubstituteUnavailable` attempts within the evaluation that
-/// drove this one. Zero where no re-queue is reachable: a kind that cannot produce
-/// one never reads the budget, and neither does a shared build that is not a passthrough.
 async fn substitute_misses(
     ctx: &DbContext,
     derivation_build: DerivationBuildId,
@@ -719,18 +668,6 @@ gradient_db::sql! {
         params = [DerivationId];
 }
 
-/// The shared build stops being a passthrough: it forgets the upstream its outputs were
-/// recorded on and goes back to `Created`, where the ordinary build gates apply.
-///
-/// Clearing the output columns drops the upstream offer the passthrough was built from,
-/// so nothing passes through or serves from a record the upstream failed to honour.
-/// `probed` stays set: the shared build is a builder now and needs its inputs at once
-/// rather than after another probe round.
-///
-/// Both the shared build and its direct inputs are re-gated here rather than left to the
-/// emitter. `Building` to `Created` stays inside the builder statuses, so the
-/// transition carries no need move, and what changed is that this shared build is now a
-/// builder at all: its own gate swapped arms, and its inputs gained a parent that wants them.
 async fn exhaust_substitution(
     ctx: &DbContext,
     shared_build: &MDerivationBuild,
@@ -754,7 +691,6 @@ async fn exhaust_substitution(
         from: shared_build.status,
         to: BuildStatus::Created,
     }];
-    // The shared build is a builder again, so need reaches its whole pending closure.
     changes.extend(
         gradient_db::graph::can_start::update_and_settle_need(db, &[shared_build.derivation])
             .await?
@@ -790,16 +726,11 @@ async fn exhaust_substitution(
     Ok(())
 }
 
-/// After a shared build reaches a terminal status, sweep every evaluation that
-/// references the derivation and finalize the settled ones. Idempotent
-/// belt-and-braces around the emitter's own finalize (which is skipped when
-/// the state machine rejects a racing transition).
 async fn check_referencing_evals_done(ctx: &DbContext, derivation: DerivationId) -> Result<()> {
     gradient_db::status::finalize_evals_for_derivations(ctx, &[derivation]).await?;
     Ok(())
 }
 
-/// Insert a `derivation_metric` history row from a build's worker metrics.
 async fn record_metrics(
     ctx: &DbContext,
     shared_build: &MDerivationBuild,
@@ -852,9 +783,6 @@ async fn record_metrics(
     }
 }
 
-/// Open the `build_attempt` for a job that just left for a worker and stamp the
-/// shared build's `dispatched_at`. Best-effort: failures are logged so instrumentation
-/// can't break dispatch.
 async fn assigned(
     ctx: &DbContext,
     evaluation: EvaluationId,
@@ -895,8 +823,6 @@ async fn assigned(
     }
 }
 
-/// Only a terminal shared build finalizes its latest attempt, so the attempt a new
-/// one replaces (aborted, lost with its worker, retried) is finalized here.
 async fn finalize_superseded_log(
     ctx: &DbContext,
     superseded: Result<Option<BuildAttemptId>, sea_orm::DbErr>,
@@ -910,9 +836,6 @@ async fn finalize_superseded_log(
     }
 }
 
-/// The `build_job` for `(evaluation, shared_build.derivation)`. Recording normally
-/// pre-creates it, so this upserts then selects to stay correct for any shared build
-/// whose build_job is missing.
 async fn find_or_create_build_job(
     ctx: &DbContext,
     evaluation: EvaluationId,
@@ -987,8 +910,6 @@ gradient_db::sql! {
         params = [DerivationIds(64), Ints(1200, 64)];
 }
 
-/// Stamp `ready_at` the first time a shared build became dispatchable, and persist
-/// the closure sizes the dispatch pass computed on the way.
 async fn ready(
     ctx: &DbContext,
     shared_builds: &[DerivationBuildId],
@@ -1005,8 +926,6 @@ async fn ready(
     })
     .await?;
 
-    // One statement per chunk rather than one per derivation: an evaluation
-    // reports a closure size for every derivation it walked.
     gradient_db::for_each_chunk(closure_sizes, |chunk| async move {
         let (ids, sizes): (Vec<uuid::Uuid>, Vec<i64>) = chunk
             .iter()

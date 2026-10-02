@@ -4,14 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! In-memory tier for small NARs, ranked by hits per byte.
-//!
-//! Greedy-Dual-Size-Frequency: an entry's priority is a global age floor plus
-//! its hits divided by its size, the lowest priority is evicted first, and the
-//! floor rises to each victim's priority. A 1 MiB entry therefore needs a
-//! hundred times the hits of a 10 KiB entry to hold its place and leaves first
-//! when it does not get them, so one burst of big objects cannot flush the
-//! small ones every builder asks for. Loads are single flight per hash.
+//! Entry priority is a global age floor plus hits divided by size (Greedy-Dual-Size-Frequency). An
+//! entry of 1 MiB must collect a hundred times the hits of a 10 KiB entry to stay. One burst of big
+//! objects cannot flush the small ones every builder is asking for.
 
 use std::collections::{BTreeMap, HashMap};
 use std::future::Future;
@@ -127,9 +122,6 @@ impl HotNarCache {
         self.inner.is_some() && size <= self.small_nar_bytes && size <= self.capacity
     }
 
-    /// A lookup that re-ranks the entry but leaves the counters alone, for a
-    /// re-probe behind an already-counted [`Self::get`]: one lookup is one hit or
-    /// one miss however many times the code has to ask.
     fn peek(&self, hash: &str) -> Option<Bytes> {
         let inner = self.inner.as_ref()?;
         let mut inner = inner.lock();
@@ -162,8 +154,6 @@ impl HotNarCache {
         }
     }
 
-    /// Admit `bytes` under `hash`, evicting the lowest-ranked entries until it
-    /// fits. A size the cache does not admit only drops the hash's old entry.
     pub fn insert(&self, hash: &str, bytes: Bytes) {
         let size = bytes.len() as u64;
         if !self.admits(size) {
@@ -206,10 +196,8 @@ impl HotNarCache {
         }
     }
 
-    /// A hit, or one run of `load` shared by every caller that misses on `hash`
-    /// meanwhile; the result is admitted on success and never on failure. The
-    /// load executes on its own task, so a caller that gives up never strands it
-    /// half-read in `loads`.
+    /// The load is running on its own task. A caller giving up can never strand it half-read in
+    /// `loads`.
     pub async fn get_or_load<F>(self: &Arc<Self>, hash: &str, load: F) -> anyhow::Result<Bytes>
     where
         F: Future<Output = anyhow::Result<Bytes>> + Send + 'static,
@@ -319,8 +307,6 @@ mod tests {
         assert_eq!(stats.evictions, 10);
     }
 
-    /// The crowding rule: a fresh 1 MiB entry ranks below a hundred fresh
-    /// 10 KiB entries, so it is the victim when the next small one arrives.
     #[test]
     fn a_big_insert_is_the_next_victim_rather_than_the_small_entries() {
         let c = cache(100 * 10 * KIB + MIB, MIB);
@@ -364,9 +350,6 @@ mod tests {
             c.get("old");
         }
 
-        // The floor rises to the VICTIM's priority, and with three residents the
-        // victim is two generations stale, so it climbs once per two evictions:
-        // ageing out an entry with n hits takes about 2n evictions, not n.
         for i in 0..2500u32 {
             c.insert(&format!("churn{i}"), blob(10 * KIB, 2));
         }

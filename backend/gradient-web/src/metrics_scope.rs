@@ -4,12 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Per-request visibility envelope for the Job Board / metrics surfaces.
-//!
-//! Superusers see every project; members see their projects plus public projects; anonymous
-//! callers see public projects only. Cross-project infrastructure data is shown to
-//! non-superusers only in anonymized aggregate (see the board endpoints).
-
 use crate::error::WebError;
 use gradient_types::MUser;
 use gradient_types::ids::ProjectId;
@@ -61,7 +55,6 @@ impl MetricsScope {
         matches!(self, MetricsScope::All)
     }
 
-    /// True when the caller may see unmasked detail for `project`.
     pub fn allows(&self, project: &Uuid) -> bool {
         match self {
             MetricsScope::All => true,
@@ -69,9 +62,7 @@ impl MetricsScope {
         }
     }
 
-    /// The projects of a connected worker the caller may see, or `None` when the
-    /// worker serves none of them. A worker with no authorization filter (open
-    /// mode) is superuser-only.
+    /// A worker with no authorization filter (open mode) is superuser-only.
     pub fn worker_projects(&self, authorized: Option<&HashSet<ProjectId>>) -> Option<Vec<Uuid>> {
         let Some(peers) = authorized else {
             return self.is_all().then(Vec::new);
@@ -84,8 +75,6 @@ impl MetricsScope {
         (self.is_all() || !visible.is_empty()).then_some(visible)
     }
 
-    /// SQL `IN (...)` fragment of accessible project UUID literals, or `None` for
-    /// the unrestricted (superuser) scope. Values are DB-sourced UUIDs.
     pub fn project_in_list(&self) -> Option<String> {
         match self {
             MetricsScope::All => None,
@@ -104,8 +93,6 @@ impl MetricsScope {
 mod tests {
     use super::*;
 
-    /// A worker shared by several projects, or a base worker, has no single
-    /// owner; a member sees it through whichever project they belong to (#587).
     #[test]
     fn a_worker_is_seen_through_any_project_it_serves_and_names_only_those() {
         let mine = ProjectId::now_v7();

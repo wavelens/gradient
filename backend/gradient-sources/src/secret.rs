@@ -10,16 +10,12 @@ use gradient_util::sync::Mutex;
 use std::collections::HashMap;
 use std::sync::LazyLock;
 
-/// Plaintexts by secret file and ciphertext. The password is stretched with
-/// Argon2 on every decryption, tens of milliseconds each, and the same few keys
-/// are decrypted on every dispatch, signature and update check.
+/// Argon2 is stretching the password on every decryption for tens of milliseconds. The same few
+/// keys are decrypted on every dispatch, signature and update check.
 static PLAINTEXTS: LazyLock<Mutex<HashMap<Ciphertext, Vec<u8>>>> = LazyLock::new(Default::default);
 
-/// A ciphertext and the secret file it was encrypted under.
 type Ciphertext = (String, Vec<u8>);
 
-/// Decrypt `encrypted` with the key in `secret_file`, `None` when it does not
-/// decrypt under that key.
 pub(crate) fn decrypt_bytes(
     secret_file: &str,
     encrypted: Vec<u8>,

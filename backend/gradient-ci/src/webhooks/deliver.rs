@@ -22,8 +22,7 @@ gradient_db::sql! {
         params = [Now, NewUuid];
 }
 
-/// POST the envelope to the webhook and log the attempt; a transport error is
-/// recorded on the delivery row rather than returned.
+/// Transport errors are recorded on the delivery row, not returned.
 pub async fn deliver(
     ctx: &CiContext,
     hook: &MWebhook,
@@ -94,7 +93,6 @@ async fn post(
     Ok((status, resp.text().await.unwrap_or_default()))
 }
 
-/// Bookkeeping only: a burst of deliveries skips the row another writer holds.
 async fn touch_last_fired(ctx: &CiContext, id: WebhookId) {
     let update = TOUCH_WEBHOOK_LAST_FIRED.bind([
         gradient_types::now().into(),

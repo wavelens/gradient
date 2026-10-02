@@ -4,27 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Integration tests for `GET /commits/{commit}` authorization.
-//!
-//! Regression coverage for issue #88 (IDOR): the handler must only return
-//! commit metadata when the caller can reach the commit through an
-//! evaluation in a project they belong to (or the project is public).
-//! Both authenticated non-members and unauthenticated callers must receive
-//! `404` so existence isn't leaked.
-//!
-//! DB query sequence after the move to `authorize_optional`:
-//!   Authenticated callers:
-//!     1. SELECT session  (jwt decode)
-//!     2. UPDATE session  (last_used_at, returning)
-//!     3. SELECT user
-//!   Then for the commit handler (both auth states):
-//!     4. SELECT commit
-//!     5. SELECT evaluations (filtered by commit)
-//!     6. SELECT tasks    (only if any eval has task_id)
-//!     7. SELECT projects (filtered by collected ids)
-//!   Then membership probe (only when no project is public AND caller is authenticated):
-//!     8. SELECT project_user
-
 #![expect(
     clippy::unwrap_used,
     reason = "test scaffolding: a fixture helper that cannot build its value should fail the test loudly"
@@ -57,8 +36,6 @@ const JWT_SECRET: &str = "test-commits-jwt-secret";
 fn commit_url() -> String {
     format!("/api/v1/commits/{}", commit_id())
 }
-
-// ── Auth helpers ──────────────────────────────────────────────────────────────
 
 #[derive(Serialize)]
 struct Claims {
@@ -95,8 +72,6 @@ fn live_session(id: SessionId) -> gradient_entity::session::Model {
         ..Default::default()
     }
 }
-
-// ── Fixtures ──────────────────────────────────────────────────────────────────
 
 fn other_project_id() -> ProjectId {
     ProjectId::new(Uuid::parse_str("00000000-0000-0000-0000-0000000000a0").unwrap())
@@ -150,8 +125,6 @@ fn membership_row() -> gradient_entity::project_user::Model {
         role: gradient_types::consts::BASE_ROLE_VIEW_ID,
     }
 }
-
-// ── Server factory ────────────────────────────────────────────────────────────
 
 fn make_server(db: sea_orm::DatabaseConnection) -> TestServer {
     let cli = test_cli();
@@ -213,9 +186,6 @@ fn run<F: std::future::Future>(fut: F) -> F::Output {
         .block_on(fut)
 }
 
-// ── Tests ─────────────────────────────────────────────────────────────────────
-
-/// Anonymous caller: commit reachable through a public-project task -> 200.
 #[test]
 fn anon_can_read_commit_in_public_project() {
     run(async {
@@ -234,7 +204,6 @@ fn anon_can_read_commit_in_public_project() {
     });
 }
 
-/// Anonymous caller: commit reachable only through a private project -> 404.
 #[test]
 fn anon_cannot_read_commit_in_private_project() {
     run(async {
@@ -242,7 +211,7 @@ fn anon_cannot_read_commit_in_private_project() {
             .append_query_results([vec![commit_row()]])
             .append_query_results([vec![eval_at(eval_id(), 0)]])
             .append_query_results([vec![task_row()]])
-            .append_query_results([vec![project()]]); // private
+            .append_query_results([vec![project()]]);
         let server = make_server(db.into_connection());
 
         let res = server.get(&commit_url()).await;
@@ -252,8 +221,6 @@ fn anon_cannot_read_commit_in_private_project() {
     });
 }
 
-/// Authenticated project member: commit reachable through a private project they
-/// belong to -> 200.
 #[test]
 fn member_can_read_commit_in_private_project() {
     run(async {
@@ -279,16 +246,12 @@ fn member_can_read_commit_in_private_project() {
     });
 }
 
-/// Authenticated user with no membership in any project that owns the commit's
-/// evaluation -> 404 (must not leak existence).
 #[test]
 fn non_member_cannot_read_commit() {
     run(async {
         let session_id = SessionId::now_v7();
         let token = make_token(session_id);
 
-        // Commit reachable through a task in `other_project_id` - caller has no
-        // membership there.
         let foreign_task = gradient_entity::task::Model {
             project: other_project_id(),
             ..task_row()
@@ -316,8 +279,6 @@ fn non_member_cannot_read_commit() {
     });
 }
 
-/// Evaluation referencing the commit has no task (legacy direct-build
-/// row before issue #234) -> 404, since task is required to resolve project.
 #[test]
 fn commit_referenced_only_via_orphan_eval_returns_404() {
     run(async {
@@ -338,7 +299,6 @@ fn commit_referenced_only_via_orphan_eval_returns_404() {
     });
 }
 
-/// Commit row doesn't exist -> 404 with no further DB lookups needed.
 #[test]
 fn nonexistent_commit_returns_404() {
     run(async {
@@ -353,8 +313,6 @@ fn nonexistent_commit_returns_404() {
     });
 }
 
-/// Commit row exists but no evaluation references it (orphan or
-/// race-condition cleanup) -> 404.
 #[test]
 fn commit_without_evaluation_returns_404() {
     run(async {

@@ -4,10 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! The reference indexes serve point lookups from the walk, and a GIN index with
-//! `fastupdate` reads its whole pending list, up to `gin_pending_list_limit`, on
-//! every probe. Inserts now go straight into the tree, and the list history left
-//! behind is merged once here.
+//! A GIN index with `fastupdate` is reading its whole pending list on every probe. The reference
+//! indexes serve point lookups from the walk and turn it off.
 
 use sea_orm_migration::prelude::*;
 use sea_orm_migration::sea_orm::ConnectionTrait;

@@ -4,19 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Task status badge endpoint.
-//!
-//! `GET /api/v1/tasks/{project}/{task}/badge` returns a shields.io-compatible
-//! SVG badge reflecting the task's latest evaluation status. Private
-//! projects require a `?token=GRADxxxx` or JWT (same mechanism as the
-//! entry-point download endpoint).
-//!
-//! Supported query parameters:
-//! - `style`: `flat` (default) or `flat-square`
-//! - `label`: left-hand label text (default `"build"`)
-//! - `eval`: UUID of a specific evaluation to use instead of the task's latest
-//! - `token`: API key or JWT for private projects
-
 use axum::extract::{Path, Query, State};
 use axum::response::{IntoResponse, Response};
 use badgelib::{Badge, Color, Style};
@@ -35,23 +22,13 @@ use gradient_core::ServerState;
 use gradient_db::lookup::get_any_project_by_name;
 use gradient_types::*;
 
-// ── Query parameters ─────────────────────────────────────────────────────────
-
 #[derive(Deserialize, Debug)]
 pub struct BadgeParams {
-    /// Shield style. `flat` (default) gives rounded corners; `flat-square` has none.
     #[serde(default = "default_style")]
     pub style: BadgeStyle,
-    /// Left-side label. Defaults to `"gradient"`.
     #[serde(default = "default_label")]
     pub label: String,
-    /// Nix attribute path of a specific entry point (e.g. `packages."x86_64-linux".hello`).
-    /// When set the badge reflects that entry point's build status from the latest completed
-    /// evaluation instead of the overall task status.
     pub eval: Option<String>,
-    /// API key (`GRADxxxx`) or JWT for accessing a private project badge
-    /// without a session. Embed in the image URL so external services (GitHub
-    /// README, Grafana, …) can fetch it without interactive login.
     pub token: Option<String>,
 }
 
@@ -85,11 +62,8 @@ fn render_badge(label: &str, message: &str, color: &str, style: BadgeStyle) -> S
         .to_svg()
 }
 
-// ── Badge content from evaluation status ──────────────────────────────────────
-
 struct BadgeContent {
     message: &'static str,
-    /// 6-digit hex colour without `#`.
     color: &'static str,
 }
 
@@ -145,13 +119,6 @@ fn badge_for_status(status: Option<EvaluationStatus>, has_failed_builds: bool) -
     }
 }
 
-// ── Badge access helpers ──────────────────────────────────────────────────────
-
-/// Resolve the caller identity: JWT/API-key `token` overrides the session user.
-///
-/// Returns the resolved user plus any API-key context produced by decoding the
-/// token. When `token` is absent we fall back to the session user and the
-/// extension-supplied `MaybeApiKey`.
 async fn resolve_badge_user(
     state: &Arc<ServerState>,
     maybe_user: Option<MUser>,
@@ -181,7 +148,6 @@ async fn resolve_badge_user(
     }
 }
 
-/// For private projects, verify the resolved user is a member.
 async fn check_badge_project_access(
     state: &Arc<ServerState>,
     project: &MProject,
@@ -202,8 +168,6 @@ async fn check_badge_project_access(
     Ok(())
 }
 
-/// Badge status when `?eval=<attr>` is specified: look up the entry point's
-/// build status in the latest completed evaluation.
 async fn badge_status_for_entry_point(
     state: &Arc<ServerState>,
     task_id: TaskId,
@@ -254,8 +218,6 @@ async fn badge_status_for_entry_point(
     Ok((Some(eval_status), has_failed))
 }
 
-/// Badge status for the overall task: use the last evaluation's status and
-/// check whether any entry-point builds failed.
 async fn badge_status_for_latest_eval(
     state: &Arc<ServerState>,
     task: &MTask,
@@ -293,14 +255,6 @@ async fn badge_status_for_latest_eval(
     Ok((eval.map(|e| e.status), has_failed))
 }
 
-// ── Handler ───────────────────────────────────────────────────────────────────
-
-/// Returns a shields.io-compatible SVG status badge for the named task.
-///
-/// For public projects the badge is accessible without credentials.
-/// For private projects supply `?token=GRADxxxx` (an API key) or a JWT
-/// so the URL can be embedded in external tools (GitHub README, Grafana …)
-/// without exposing a session cookie.
 pub async fn get_task_badge(
     state: State<Arc<ServerState>>,
     axum::Extension(MaybeUser(maybe_user)): axum::Extension<MaybeUser>,
@@ -341,16 +295,14 @@ pub async fn get_task_badge(
         [
             (header::CONTENT_TYPE, "image/svg+xml"),
             (header::CACHE_CONTROL, "no-cache, max-age=0"),
-            // Shield aggregators and CDNs respect these; they prevent stale
-            // badges from being served even when the evaluation status changes.
+            // Shield aggregators and CDNs are honouring these headers. They prevent stale badges
+            // after an evaluation status change.
             (header::PRAGMA, "no-cache"),
         ],
         svg,
     )
         .into_response())
 }
-
-// ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {

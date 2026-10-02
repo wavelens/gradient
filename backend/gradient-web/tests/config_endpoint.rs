@@ -4,9 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! `GET /api/v1/config` exposes the `create_project` / `create_cache` permission
-//! knobs so the frontend can hide the create buttons (issue #470).
-
 #![expect(
     clippy::unwrap_used,
     reason = "test scaffolding: a fixture helper that cannot build its value should fail the test loudly"

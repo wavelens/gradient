@@ -4,9 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! What a query is allowed to cost. Every limit is a property of the plan, never
-//! of the clock: the VM the gate is running in is shared and slow, so a millisecond
-//! budget would only measure how busy the runner was.
+//! Every limit is a property of the plan, never of the clock.
+//! The gate's VM is shared and slow, and a millisecond budget would only measure its load.
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum Spill {
@@ -26,8 +25,6 @@ pub struct Budget {
     pub amplification: u64,
     pub rows_removed: u64,
     pub loops: u64,
-    /// Relation size above which a sequential scan is a failure. `None` permits
-    /// any sequential scan, which is what a timer-driven sweep legitimately does.
     pub seq_scan_rows: Option<u64>,
     pub spill: Spill,
     pub shape: &'static [Shape],
@@ -46,9 +43,6 @@ impl Budget {
         reason: None,
     };
 
-    /// A bulk statement reads the working set it was handed or must rank, so a
-    /// sequential scan of one table is its normal plan; what it may not do is
-    /// read the database.
     pub const BULK: Self = Self {
         buffers: 50_000,
         amplification: 10_000,
@@ -123,16 +117,11 @@ impl Budget {
         self
     }
 
-    /// Drops the fence assertion, for a recursion that joins a materialised set
-    /// rather than a fenced `LATERAL`.
     pub const fn unfenced(mut self) -> Self {
         self.shape = &[];
         self
     }
 
-    /// Records why a query is over the tier's ceiling. An override without one is
-    /// an exemption nobody can audit, and the gate warns when the query it
-    /// covers stops needing it.
     pub const fn because(mut self, reason: &'static str) -> Self {
         self.reason = Some(reason);
         self

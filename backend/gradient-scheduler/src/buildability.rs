@@ -4,9 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Pre-loaded derivation/feature data for a set of pending shared builds, used
-//! to decide whether the connected worker pool can build any of them.
-
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
@@ -20,23 +17,13 @@ use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use crate::assign_mode::decide_build_spec_kind;
 use gradient_wire::types::BuildSpecKind;
 
-/// Pre-loaded derivation and feature data for a set of pending shared builds.
-///
-/// Used by [`crate::waiting_state::refresh_waiting_state`] to determine
-/// whether any pending shared build can be satisfied by the current worker pool
-/// without re-querying the DB per evaluation.
 pub(crate) struct BuildabilityChecker {
     drv_by_id: HashMap<DerivationId, MDerivation>,
-    /// Maps derivation ID -> list of required feature IDs.
     features_by_drv: HashMap<DerivationId, Vec<FeatureId>>,
     feature_name: HashMap<FeatureId, String>,
 }
 
 impl BuildabilityChecker {
-    /// Query the DB for all derivations and required features referenced by
-    /// `shared_builds`, returning a checker ready to call [`any_buildable`].
-    ///
-    /// [`any_buildable`]: BuildabilityChecker::any_buildable
     pub(crate) async fn load(
         state: &Arc<ServerState>,
         shared_builds: &[MDerivationBuild],
@@ -90,12 +77,9 @@ impl BuildabilityChecker {
         })
     }
 
-    /// Whether any pending shared build can run on the connected pool. `Queued` means
-    /// the gates held, so a queued or `Building` shared build is dispatchable and a
-    /// `Created` shared build is still behind its can-start counters. A shared build
-    /// available in a cache is a passthrough, running on any worker; once its miss budget
-    /// is spent the graph writer has already cleared the flag, so there is nothing to
-    /// escalate here.
+    /// A `Queued` shared build passed its gates, and a `Created` one is still behind its can-start
+    /// counters. The graph writer already cleared `cache_available` once the miss budget was spent.
+    /// Nothing is left to escalate here.
     pub(crate) fn any_buildable(
         &self,
         shared_builds: &[MDerivationBuild],
@@ -142,10 +126,6 @@ impl BuildabilityChecker {
             .unwrap_or_default()
     }
 
-    /// Group every unsatisfiable `(architecture, required_features)` combo and
-    /// the number of pending shared builds it covers. Used for the API
-    /// `waiting_reason` payload so the UI can explain *why* nothing is
-    /// dispatching.
     pub(crate) fn compute_waiting_reason(
         &self,
         shared_builds: &[MDerivationBuild],
@@ -370,10 +350,6 @@ mod tests {
         }
     }
 
-    /// A passthrough moves bytes between two caches, so it never needs a worker of the
-    /// derivation's own architecture and never counts as an unmet requirement. A
-    /// shared build whose miss budget is spent is no longer available in a cache by the
-    /// time it reaches here, so nothing is parked on a stalled passthrough.
     #[test]
     fn a_passthrough_is_buildable_anywhere_whatever_its_architecture() {
         let eval_id = EvaluationId::now_v7();
@@ -389,8 +365,6 @@ mod tests {
         assert!(unmet.is_empty());
     }
 
-    /// The exhausted shared build: `cache_available` cleared, so it is checked against the
-    /// real pool and surfaces as an unmet requirement the parker can act on.
     #[test]
     fn an_exhausted_passthrough_is_an_ordinary_build_with_an_unmet_architecture() {
         let eval_id = EvaluationId::now_v7();
@@ -410,8 +384,6 @@ mod tests {
 
     #[test]
     fn dependency_blocked_shared_build_is_not_buildable() {
-        // A `Created` shared build still has unsatisfied dependency shared builds, so it is
-        // not dispatchable even when a matching worker is connected.
         let eval_id = EvaluationId::now_v7();
         let d = drv(DerivationId::now_v7(), "x86_64-linux");
         let mut b = build_for(d.id, eval_id);
@@ -421,8 +393,6 @@ mod tests {
         assert!(!checker.any_buildable(&[b], &caps));
     }
 
-    /// `Queued` means the gates held, so a real build is buildable exactly when
-    /// a worker matches its architecture and features.
     #[test]
     fn a_queued_real_build_is_buildable_when_a_worker_matches() {
         let eval_id = EvaluationId::now_v7();

@@ -16,13 +16,6 @@ use gradient_types::DerivationId;
 use sea_orm::{ConnectionTrait, DatabaseTransaction, DbErr, TransactionTrait};
 use std::sync::LazyLock;
 
-/// The pending shared builds and their direct dependencies, every row whose `fetchable` a
-/// gate can read this pass, and every row whose stored flag contradicts a column it
-/// carries, which no pending shared build need be near. [`can_start_scope`] materialises
-/// it, so the lock and the recounts name one frozen list rather than a subquery each
-/// statement re-evaluates against its own snapshot. The two contradiction arms are
-/// partial-index scans: `idx-derivation_build-fetchable-incomplete` and
-/// `idx-derivation_build-open`.
 fn repair_scope() -> String {
     let pending = crate::sql::status::build_in(&BuildStatus::PENDING);
     let terminal_success = crate::sql::status::build_in(&BuildStatus::TERMINAL_SUCCESS);
@@ -78,7 +71,6 @@ crate::sql_lazy! {
         tier = Bulk;
 }
 
-/// What the can-start half of the consistency check repaired.
 #[derive(Debug, Default)]
 pub struct Repaired {
     pub blocking_deps: u64,
@@ -86,11 +78,6 @@ pub struct Repaired {
     pub unpromoted: Vec<TransitionChange>,
 }
 
-/// Materialise [`repair_scope`] once, so every chunk the two repairs lock and
-/// recount comes from one snapshot instead of a subquery each statement re-evaluates
-/// against its own. Its length is the sweep's `repair_scope`: a measurement, not a
-/// violation, since the select is unbounded and each chunk takes `FOR NO KEY UPDATE` on rows
-/// every live graph writer also locks.
 pub async fn can_start_scope<C: ConnectionTrait>(db: &C) -> Result<Vec<DerivationId>, DbErr> {
     db.query_all_raw(REPAIR_SCOPE_QUERY.stmt())
         .await?
@@ -102,12 +89,10 @@ pub async fn can_start_scope<C: ConnectionTrait>(db: &C) -> Result<Vec<Derivatio
         .collect()
 }
 
-/// Recount `fetchable` for the locked chunk and write the rows that disagree.
 async fn recount_fetchable(lock: &SharedBuildLock<'_>) -> Result<u64, DbErr> {
     recount(lock, &RECOUNT_FETCHABLE_QUERY).await
 }
 
-/// Recount `blocking_deps` for the locked chunk and write the rows that disagree.
 async fn recount_blocking_deps(lock: &SharedBuildLock<'_>) -> Result<u64, DbErr> {
     recount(lock, &RECOUNT_BLOCKING_DEPS_QUERY).await
 }
@@ -124,18 +109,8 @@ async fn recount(lock: &SharedBuildLock<'_>, query: &crate::sql::Query) -> Resul
         .rows_affected())
 }
 
-/// Recount `fetchable` over `scope` and write only what differs. One transaction
-/// per chunk, each taking [`lock_shared_builds`] before it recounts, so no recount writes a
-/// row it did not lock and a cancelled sweep loses one chunk rather than every repair.
-///
-/// It finishes the whole scope before [`repair_can_start`] starts, and before the
-/// sweep's need recount: a counter computed from a stale `fetchable = true` is too
-/// low and promotes, and a walk that reads one stops at a settled shared build that is not.
-/// The compare-and-swap on the pre-image (`db.fetchable = x.old AND x.old <> x.f`)
-/// stays. Under the lock it compares the row to itself, but a future caller that loses
-/// the lock degrades to a skipped row rather than to an unconditional overwrite of a
-/// value nothing else re-derives, and `old <> new` is the drift filter behind the
-/// returned count.
+/// Every chunk is recounted before [`repair_can_start`] starts.
+/// A counter computed from a stale `fetchable = true` would be too low and would promote.
 pub async fn repair_fetchable<C>(db: &C, scope: &[DerivationId]) -> Result<u64, DbErr>
 where
     C: ConnectionTrait + TransactionTrait<Transaction = DatabaseTransaction>,
@@ -151,14 +126,9 @@ where
     Ok(fetchable)
 }
 
-/// Recount `blocking_deps` over `scope`, chunked and locked as [`repair_fetchable`]
-/// is, then settle the queue against the gates on the caller's handle. Both settling
-/// statements re-check the target row's own `status` and `blocking_deps`, which
-/// EvalPlanQual does re-evaluate, so they are exactly as safe as the live promotion
-/// path and no safer: the gate's three `EXISTS` subqueries are not re-evaluated, so a
-/// promote can still fire on a `.drv` retired during a lock wait. The un-promote goes
-/// first, and the two cannot both move a row because
-/// [`crate::graph::predicates::gates_predicate`] never reads `status`.
+/// The un-promote is going first.
+/// EvalPlanQual is not re-evaluating the gate's `EXISTS` subqueries.
+/// A promote can still fire on a `.drv` retired during a lock wait.
 pub async fn repair_can_start<C>(db: &C, scope: &[DerivationId]) -> Result<Repaired, DbErr>
 where
     C: ConnectionTrait + TransactionTrait<Transaction = DatabaseTransaction>,
@@ -194,10 +164,6 @@ mod tests {
     use sea_orm::{DatabaseBackend, MockDatabase, Value};
     use std::collections::BTreeMap;
 
-    /// The seed is the first reader of a dependency's can-start state and executes before any
-    /// sweep could have corrected a stale flag, so it must EVALUATE the predicate on
-    /// each dependency rather than read the column. The recount, which takes place right
-    /// after its own repair of that column, reads the column.
     #[test]
     fn the_seed_evaluates_the_predicate_while_the_recount_reads_the_column() {
         let seed = norm(&SEED_BLOCKING_DEPS);
@@ -218,9 +184,6 @@ mod tests {
         );
     }
 
-    /// Both recounts are bounded by the chunk their lock named, never by a subquery a
-    /// second statement would re-evaluate against its own snapshot, and both write as a
-    /// compare-and-swap on the pre-image rather than an unconditional overwrite.
     #[test]
     fn the_recounts_are_compare_and_swaps_over_the_locked_chunk() {
         for sql in [norm(&RECOUNT_FETCHABLE), norm(&RECOUNT_BLOCKING_DEPS)] {
@@ -244,13 +207,6 @@ mod tests {
         );
     }
 
-    /// The scope is the pending shared builds and one edge past them, plus every row whose
-    /// flag contradicts a column it carries, and it is SELECTed once rather than left
-    /// as a subquery: an inline scope is re-evaluated per statement, so a row entering
-    /// it after the lock would be written unlocked, which is the very ABA the lock
-    /// exists to stop. The contradiction arms are what the complete-closure recount leaves
-    /// behind two hops below anything pending, and both are column-only tests so a
-    /// partial index answers each.
     #[test]
     fn the_scope_reaches_one_edge_past_the_pending_shared_builds_and_every_contradicting_flag() {
         let sql = norm(&repair_scope());
@@ -277,8 +233,6 @@ mod tests {
         );
     }
 
-    /// Every recount must be preceded by an ordered lock in its own transaction, so no
-    /// row is written from a snapshot a concurrent flip could have moved under it.
     #[tokio::test]
     async fn the_repair_locks_each_chunk_before_it_recounts_it() {
         let a = DerivationId::now_v7();
@@ -328,11 +282,6 @@ mod tests {
         assert!(log[6].contains("SET status = 1"), "{log:?}");
     }
 
-    /// Every chunk's `fetchable` recount lands before the first counter recount: a
-    /// counter computed from a `fetchable = true` a later chunk was about to correct
-    /// comes out too LOW, and too low promotes and dispatches. The two are separate
-    /// passes over one frozen scope so the sweep can put its need recount between
-    /// them.
     #[tokio::test]
     async fn the_repair_finishes_fetchable_everywhere_before_it_recounts_a_counter() {
         let scope: Vec<BTreeMap<String, Value>> = (0..crate::IN_CHUNK_SIZE + 1)

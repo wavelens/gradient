@@ -4,19 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! `closure_complete` invariant. Dispatch trusted "dep build is Completed /
-//! Substituted" as "dep's whole runtime closure is fetchable", but a dep marked
-//! done whose NAR closure was incomplete (a runtime reference never pushed)
-//! stranded dependents on `InputsUnavailable` forever. We now track, per cached
-//! NAR and rolled up onto each anchor, whether the full runtime closure is in
-//! our cache, and gate dispatch on it.
-//!
-//! Backfill computes `cached_path.closure_complete` to a fixpoint (a path is
-//! complete once every non-self reference is present and complete), rolls it up
-//! onto terminal-success anchors, and resets anchors whose closure is incomplete
-//! to `Created` so they rebuild closure-complete. Going forward the worker push
-//! is closure-complete, so no new violations are created.
-
 use sea_orm_migration::prelude::*;
 use sea_orm_migration::sea_orm::ConnectionTrait;
 
@@ -39,8 +26,8 @@ impl MigrationTrait for Migration {
         )
         .await?;
 
-        // Fixpoint: mark a present NAR complete once every non-self reference is
-        // itself present and complete. Leaves settle first, then their referrers.
+        // A present NAR is marked complete once every non-self reference is present and complete.
+        // Leaves are settling first, then their referrers.
         conn.execute_unprepared(
             r#"
             DO $$
@@ -68,7 +55,6 @@ impl MigrationTrait for Migration {
         )
         .await?;
 
-        // Roll up onto terminal-success anchors whose every output is complete.
         conn.execute_unprepared(
             r#"
             UPDATE derivation_build db SET closure_complete = true
@@ -82,9 +68,6 @@ impl MigrationTrait for Migration {
         )
         .await?;
 
-        // Reset closure-incomplete terminal-success anchors so they rebuild (or
-        // re-substitute, when an upstream URL is known) closure-complete. The
-        // worker push invariant keeps newly-built anchors complete from here on.
         conn.execute_unprepared(
             r#"
             UPDATE derivation_build db SET

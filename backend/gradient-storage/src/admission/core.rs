@@ -23,8 +23,6 @@ pub struct Request {
     pub id: u64,
     pub object: ObjectKey,
     pub size: u64,
-    /// A small upload: its session serves it before larger queued ones, and a
-    /// session with one waiting is served before the others.
     pub priority: bool,
 }
 
@@ -46,9 +44,8 @@ pub enum Outcome {
     Failed,
 }
 
-/// Server-wide upload budget: round-robin across sessions, FIFO within one,
-/// priority requests ahead of the rest and in a window of their own
-/// ([`SMALL_UPLOADS_IN_FLIGHT`]), and no request ever bypasses a blocked head.
+/// Uploads are granted round-robin across sessions and FIFO within one. Priority requests are
+/// getting their own window, and no request is ever bypassing a blocked head.
 pub struct AdmissionCore {
     limits: Limits,
     ring: VecDeque<SessionId>,

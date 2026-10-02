@@ -4,18 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Hourly pruning of every table that grows with time rather than with the
-//! graph, so each stays bounded.
-//!
-//! Raw metric samples follow `MetricsArgs::retention_raw_days`, minute and hour
-//! rollups `MetricsArgs::retention_rollup_days` (day and week rollups are kept),
-//! and the remaining histories `ServerArgs::retention_days`. A `0` day-count
-//! disables its group. Every delete takes at most [`PRUNE_BATCH`] rows and
-//! repeats until a batch comes back short, so a backlog never holds a long lock.
-//! Live rows are never taken: an open worker connection is kept unless a newer
-//! connection of the same worker superseded it, the newest finished admin task
-//! of each kind stays as its schedule's anchor, and a cluster job goes only once
-//! finished.
+//! Every delete is taking at most [`PRUNE_BATCH`] rows, repeating until a short batch.
+//! A backlog is then never holding a long lock.
 
 use std::time::Duration;
 
@@ -171,7 +161,6 @@ static HISTORIES: &[&Query] = &[
 
 static ROLLUPS: &[&Query] = &[&PRUNE_METRIC_ROLLUP];
 
-/// The hourly pruning pass as a supervised child.
 pub fn child_spec(ctx: DbContext) -> ChildSpec {
     ChildSpec::periodic(
         "retention",

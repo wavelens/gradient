@@ -4,14 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Regression tests for `GET /api/v1/board/jobs/decisions`.
-//!
-//! The endpoint is superuser-only and depends on `Extension<MUser>`, so it must
-//! live on the authenticated tier. It was originally mounted on the optional-auth
-//! tier (which only supplies `MaybeUser`), making the extractor fail with `500`
-//! on every request - the Live Jobs "incl. rejected" table then swallowed the
-//! error and stayed empty (#419).
-
 #![expect(
     clippy::unwrap_used,
     reason = "test scaffolding: a fixture helper that cannot build its value should fail the test loudly"

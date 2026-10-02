@@ -56,9 +56,8 @@ pub struct NixPathInfo {
     pub ca: Option<String>,
 }
 
-/// The store-path *name* (`hash-name`) of a value that may be a full
-/// `/nix/store/…` path. Narinfo `References` and `Deriver` are basenames,
-/// never absolute paths; idempotent for values already in name form.
+/// Narinfo `References` and `Deriver` are basenames, never absolute paths. Values already in
+/// name form are passing through unchanged.
 fn store_path_name(path: &str) -> &str {
     path.rsplit('/').next().unwrap_or(path)
 }
@@ -130,9 +129,7 @@ pub enum NarInfoParseError {
     InvalidValue { field: &'static str, value: String },
 }
 
-/// Parse a `text/x-nix-narinfo` body into a `NixPathInfo`.
-/// Tolerates extra unknown keys and arbitrary key ordering.
-/// Multiple `Sig:` lines collapse to the first.
+/// Multiple `Sig:` lines are collapsing to the first.
 pub fn parse_narinfo_body(body: &str) -> Result<NixPathInfo, NarInfoParseError> {
     let mut kv: HashMap<&str, &str> = HashMap::new();
     let mut sig: Option<String> = None;
@@ -299,7 +296,6 @@ mod tests {
 
     #[test]
     fn nix_path_info_deriver_placed_before_sig() {
-        // The deriver field is inserted between References and Sig.
         let mut pi = path_info();
         pi.deriver = Some("/nix/store/drv-path.drv".into());
         let s = pi.to_nix_string();

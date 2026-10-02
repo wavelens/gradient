@@ -4,10 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! A download's running byte count, reported at each [`BUILD_PROGRESS_INTERVAL`]
-//! deadline by which bytes arrived, and once more when it finishes. The count
-//! spans every transfer of one build; a retried transfer restarts from where
-//! the finished ones left off.
+//! The byte count is spanning every transfer of one build.
+//! A retried transfer is restarting from where the finished ones left off.
 
 use gradient_wire::messages::{BUILD_PROGRESS_INTERVAL, ClientMessage};
 use tokio::time::Instant;
@@ -80,7 +78,6 @@ impl<S: ProgressSink> Progress<S> {
         self.total = total;
     }
 
-    /// The running transfer has fetched `bytes` so far.
     pub(crate) fn at(&mut self, bytes: u64) {
         self.current = bytes;
     }
@@ -94,7 +91,6 @@ impl<S: ProgressSink> Progress<S> {
         self.deadline
     }
 
-    /// Reports what arrived since the last report, if anything did.
     pub(crate) async fn tick(&mut self) {
         self.deadline = Instant::now() + BUILD_PROGRESS_INTERVAL;
         let downloaded = self.downloaded();
@@ -117,7 +113,6 @@ impl<S: ProgressSink> Progress<S> {
 /// A size a remote declared is a hint, never a reason to reserve unbounded memory.
 const MAX_PREALLOCATION: u64 = 64 << 20;
 
-/// Read a response body whole, ticking `progress` at each of its deadlines.
 pub(crate) async fn read_body(
     mut response: reqwest::Response,
     size_hint: Option<u64>,

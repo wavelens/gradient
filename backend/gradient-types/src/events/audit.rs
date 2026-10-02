@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! User-triggered actions. Their names are the strings stored in
-//! `audit_log.event`, so existing names never change.
+//! The action names are the strings stored in `audit_log.event`. Existing names must never
+//! change.
 
 use super::{EventKind, EventOwner};
 use crate::ids::UserId;
@@ -102,7 +102,6 @@ actions! {
 }
 
 impl Action {
-    /// Account and credential activity: delivered to instance webhooks only.
     pub const fn personal(self) -> bool {
         use Action::*;
         matches!(

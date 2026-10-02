@@ -11,8 +11,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::ids::{GithubInstallationId, IntegrationId, ProjectId, UserId};
 
-/// Webhook direction of an integration: receives Git host events (inbound) or
-/// reports statuses / opens PRs on the Git host (outbound).
 #[repr(i16)]
 #[derive(
     Debug,
@@ -38,8 +36,6 @@ pub enum IntegrationKind {
     Outbound = 1,
 }
 
-/// The Git host identity shared by `gradient-git-host` providers, `ci` integration
-/// lookups, and state export.
 #[repr(i16)]
 #[derive(
     Debug,
@@ -81,8 +77,6 @@ impl GitHostType {
         }
     }
 
-    /// Inverse of [`from_path_segment`](Self::from_path_segment): the canonical
-    /// path/state segment naming this Git host.
     pub const fn as_path_segment(self) -> &'static str {
         match self {
             Self::Gitea => "gitea",
@@ -100,7 +94,6 @@ pub struct Model {
     pub id: IntegrationId,
     pub project: ProjectId,
     pub name: String,
-    /// Human-readable display name for this integration.
     pub display_name: String,
     pub kind: IntegrationKind,
     pub git_host_type: GitHostType,
@@ -110,7 +103,7 @@ pub struct Model {
     pub endpoint_url: Option<String>,
     #[sea_orm(column_type = "Text", nullable)]
     pub access_token: Option<String>,
-    /// Source CIDRs allowed for inbound webhooks. `None`/empty = any source.
+    /// Source CIDRs allowed for inbound webhooks. `None` or an empty list is allowing any source.
     #[sea_orm(column_type = "Array(std::sync::Arc::new(ColumnType::Text))", nullable)]
     pub allowed_ips: Option<Vec<String>>,
     pub github_installation: Option<GithubInstallationId>,

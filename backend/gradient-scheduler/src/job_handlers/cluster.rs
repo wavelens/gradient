@@ -4,8 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Cluster jobs: placement, prepare, start and signal forwarding.
-
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -15,7 +13,6 @@ use gradient_types::ids::ClusterAttemptId;
 use gradient_wire::types::{ClusterAddress, ClusterMembership, ClusterPeer};
 use tracing::{debug, info, warn};
 
-/// How long a resolved attempt waits for a survivor that never reports back.
 const RESOLVED_ATTEMPT_TTL: Duration = Duration::from_secs(600);
 
 use super::assignment::{assigned_transition, assignment_row, claim_gate};
@@ -65,8 +62,6 @@ impl Scheduler {
         }
     }
 
-    /// The cluster-dispatch pass: expire overdue prepares, then place every
-    /// ready cluster, oldest first, on slots no earlier cluster of this pass took.
     pub async fn plan_clusters(self: &Arc<Self>) -> anyhow::Result<()> {
         let overdue = self.attempts.lock().overdue(Instant::now());
         for attempt in overdue {
@@ -106,8 +101,6 @@ impl Scheduler {
         Ok(())
     }
 
-    /// A cluster that waited too long for simultaneously idle slots reserves
-    /// seats and commits once all of them are idle.
     async fn age(&self, snapshot: &ClusterSnapshot) {
         let config = &self.state.config.scheduler;
         let policy = AgingPolicy {
@@ -138,7 +131,6 @@ impl Scheduler {
         }
     }
 
-    /// `true` when the placement's workers were taken for the attempt.
     pub(crate) async fn commit(&self, placement: Placement) -> bool {
         let attempt = ClusterAttemptId::now_v7();
         let Some(Committing { cluster, seats }) = self.take_placement(placement, attempt).await
@@ -146,8 +138,8 @@ impl Scheduler {
             return false;
         };
         let cluster_id = cluster.id;
-        // Owned by the book from here on: a pass dropped mid-commit still
-        // leaves the attempt to its deadline instead of stranding the cluster.
+        // The book is owning the attempt from here on. A pass dropped mid-commit is leaving the
+        // attempt to its deadline instead of stranding the cluster.
         self.open_attempt(attempt, cluster, &seats);
 
         let now = gradient_types::now();
@@ -226,8 +218,6 @@ impl Scheduler {
         );
     }
 
-    /// A lost claim: another instance holds the cluster or a member's gate no
-    /// longer holds. The members go back to the startable feed, which re-reads them.
     async fn hand_back(&self, attempt: ClusterAttemptId) {
         let Some(state) = self.attempts.lock().take(attempt) else {
             return;
@@ -365,8 +355,6 @@ impl Scheduler {
         }
     }
 
-    /// A member that ends before its attempt started never ran: it fails the
-    /// prepare instead of reaching the graph. `true` when that happened.
     pub async fn cluster_member_released(&self, job_id: &str) -> bool {
         let Some(attempt) = self.attempts.lock().preparing(job_id) else {
             return false;
@@ -379,7 +367,6 @@ impl Scheduler {
         true
     }
 
-    /// `true` when `job_id` was a member of an open attempt, which failed with it.
     pub async fn cluster_member_rejected(&self, job_id: &str) -> bool {
         let Some(attempt) = self.attempts.lock().attempt_of(job_id) else {
             return false;
@@ -400,8 +387,8 @@ impl Scheduler {
         )
         .await
         {
-            // An open attempt blocks every later claim of the cluster: keep it
-            // owned, overdue, so the next pass retries the close.
+            // An open attempt is blocking every later claim of the cluster. Keeping it owned and
+            // overdue is letting the next pass retry the close.
             warn!(error = %e, %attempt, "prepare-failed attempt left open; retrying");
             let mut state = state;
             state.started = false;
@@ -487,8 +474,6 @@ impl Scheduler {
             .flatten()
     }
 
-    /// A `Queued` cluster with a member that can no longer run is aborted; its
-    /// waiting members settle as aborted so their builds and evaluations finish.
     async fn abort_dead_clusters(&self) -> anyhow::Result<()> {
         for cluster in
             gradient_db::scheduling::cluster::abort_dead_queued_clusters(&self.state.worker_db)

@@ -4,11 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Every graph change bumps `evaluation.graph_version` on each evaluation naming
-//! the anchors it moved, and on full pages each bump rewrote all six indexes.
-//! Free space on the page lets the bump stay a heap-only update: 987 buffers
-//! instead of 2346 for 168 evaluations. Pages written before this take the space
-//! as their rows move.
+//! Free space on each page is keeping the `graph_version` bump a heap-only update. Pages written
+//! earlier are gaining that space only as their rows move.
 
 use sea_orm_migration::prelude::*;
 use sea_orm_migration::sea_orm::ConnectionTrait;

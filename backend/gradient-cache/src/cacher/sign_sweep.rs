@@ -4,13 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Periodic backfill that signs `cached_path_signature` placeholder rows.
-//!
-//! A NAR commit signs its rows as it writes them; a new cache subscription
-//! inserts rows with `signature = NULL`, and so does a commit whose cache key was
-//! missing. This periodic pass walks the pending rows, computes narinfo
-//! signatures with the cache's private key, and fills them in.
-
 use gradient_core::ServerState;
 use gradient_sources::CacheSigner;
 use gradient_types::*;
@@ -23,19 +16,12 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use tracing::{debug, warn};
 
-/// Max pending rows processed per sweep pass. Bounds memory + time per
-/// invocation; remaining rows are picked up by the next scheduled pass.
 const SIGN_SWEEP_BATCH: u64 = 1000;
 
 gradient_db::sql! {
-    /// Re-create `cached_path_signature` rows for paths that hold none at all.
-    ///
-    /// A NAR whose owning job could not be resolved at commit time was written to
-    /// `cached_path` with no cache claim, and the signing pass below cannot repair
-    /// that: it only fills rows that already exist. Such a path is cached according
-    /// to every gate flag yet 404s from the narinfo endpoint forever. Bounded the
-    /// same way as the signing pass, and driven off the "no rows at all" anti-join
-    /// so a healthy instance pays one indexed probe.
+    /// A NAR committed without a resolvable owning job got no cache claim. The signing pass is only
+    /// filling existing rows and cannot repair that. Such a path would 404 from the narinfo
+    /// endpoint forever. The anti-join is keeping a healthy instance at one indexed probe.
     REPAIR_ORPHAN_CLAIMS = r#"
 WITH orphan AS (
     SELECT cp.id
@@ -79,11 +65,7 @@ async fn repair_orphan_claims(state: &Arc<ServerState>) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// One pass: sign every pending `cached_path_signature` row. Errors on
-/// individual rows are logged and skipped.
 pub async fn sign_missing_signatures(state: Arc<ServerState>) -> anyhow::Result<()> {
-    // Before signing, give back a claim to any path that lost one, so this same
-    // pass signs it rather than leaving it unservable for another interval.
     if let Err(e) = repair_orphan_claims(&state).await {
         warn!(error = %e, "sign sweep: orphan claim repair failed");
     }
@@ -136,9 +118,6 @@ pub async fn sign_missing_signatures(state: Arc<ServerState>) -> anyhow::Result<
         .map(|cp| cp.id)
         .collect();
 
-    // Build a per-cache signer once (one crypt-secret read + one private-key
-    // decryption per cache, not per row). `None` marks caches whose key
-    // failed to decode - we skip their rows for this pass.
     let mut signers: HashMap<CacheId, Option<CacheSigner>> = HashMap::new();
     for (cache_id, cache) in &caches {
         if cache.private_key.is_empty() {
@@ -219,8 +198,8 @@ pub async fn sign_missing_signatures(state: Arc<ServerState>) -> anyhow::Result<
 mod orphan_claim_tests {
     use super::REPAIR_ORPHAN_CLAIMS;
 
-    /// An unbounded fixpoint over `cached_path` has starved this scheduler
-    /// before, and the pass is running on a timer.
+    /// An unbounded fixpoint over `cached_path` starved this scheduler before. The pass is running
+    /// on a timer.
     #[test]
     fn the_repair_is_bounded_and_respects_the_sign_cache_opt_out() {
         let sql = REPAIR_ORPHAN_CLAIMS.text();

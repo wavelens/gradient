@@ -4,31 +4,16 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Pure wildcard-pattern traversal over a flake's output attr tree.
-//!
-//! Reproduces the segment semantics of the retired `eval.nix` resolver:
-//! `*` (one level; trailing `*` recovers the collapsed second level, but stops
-//! at opaque typed attrsets), `#` (recurses on non-last, derivations at one
-//! depth when trailing), literal (exact), exclusions (exact-path), and
-//! consecutive-`*` collapse. Abstracted over [`WalkNode`] so it unit-tests with
-//! a stub tree.
-
 use anyhow::Result;
 
-/// A node in the flake-output attr tree (a real impl wraps an eval-cache AttrCursor).
 pub trait WalkNode: Sized {
-    /// Child attribute names (sorted).
     fn child_names(&self) -> Result<Vec<String>>;
-    /// Child node by name, or `None` if absent.
     fn child(&self, name: &str) -> Result<Option<Self>>;
-    /// Whether this node is a derivation.
     fn is_derivation(&self) -> Result<bool>;
-    /// Whether this node is an opaque typed attrset (e.g. a NixOS option) that
-    /// is not a derivation - `*` traversal must not descend into it.
+    /// `*` traversal must not descend into an opaque typed attrset like a NixOS option.
     fn is_opaque(&self) -> Result<bool>;
 }
 
-/// Drop a `*` segment immediately following another `*` (`packages.*.*` == `packages.*`).
 pub fn collapse_stars(segs: &[String]) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     for s in segs {
@@ -42,10 +27,6 @@ pub fn collapse_stars(segs: &[String]) -> Vec<String> {
     out
 }
 
-/// Parse one wildcard string into (is_exclude, segments). Mirrors the worker's
-/// pattern format: `.`-separated segments, optional leading `!` = exclude.
-/// Double-quoted spans keep an inner `.` within one segment (the quotes are
-/// stripped), e.g. `pkgs."python3.12".*` -> `["pkgs", "python3.12", "*"]`.
 pub fn parse_pattern(pat: &str) -> (bool, Vec<String>) {
     let (exclude, body) = match pat.strip_prefix('!') {
         Some(rest) => (true, rest),
@@ -70,20 +51,14 @@ pub fn parse_pattern(pat: &str) -> (bool, Vec<String>) {
     (exclude, segs)
 }
 
-/// A disjoint slice of an include pattern. `only` restricts the pattern's
-/// first wildcard to these child names; the planner sets it for a trailing
-/// wildcard, whose children it must not force.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Shard {
     pub segments: Vec<String>,
     pub only: Option<Vec<String>>,
 }
 
-/// Where the shared traversal emits: full dotted attr paths of matched
-/// derivations (discovery), or one disjoint shard per first-wildcard child
-/// (shard planning). Keeping both behind one [`traverse`] makes the
-/// `*` / `#` / opaque / literal semantics structurally identical, so the
-/// split-then-union invariant holds by construction instead of by test.
+/// Discovery and shard planning are sharing one [`traverse`] through this sink.
+/// The split-then-union invariant is holding by construction instead of by test.
 enum Sink<'a> {
     Derivations {
         out: &'a mut Vec<String>,
@@ -93,8 +68,6 @@ enum Sink<'a> {
 }
 
 impl Sink<'_> {
-    /// A fully matched node: discovery emits the dotted path, planning emits
-    /// the concrete segments as a wildcard-free shard.
     fn emit_leaf(&mut self, path: Vec<String>) {
         match self {
             Sink::Derivations { out, .. } => out.push(path.join(".")),
@@ -105,7 +78,6 @@ impl Sink<'_> {
         }
     }
 
-    /// Planning stops at a trailing wildcard: the names are all it reads.
     fn restrict_trailing(&mut self, path: &[String], wildcard: &str, names: Vec<String>) -> bool {
         let Sink::Shards(out) = self else {
             return false;
@@ -123,8 +95,6 @@ impl Sink<'_> {
         true
     }
 
-    /// Split discovery hands a nested set under a trailing `*` back as a `#`
-    /// shard over its children, so their evaluation spreads across workers.
     fn defer_children(&mut self, path: &[String], names: &[String]) -> bool {
         let Sink::Derivations {
             deferred: Some(deferred),
@@ -160,9 +130,6 @@ fn wildcard_children<N: WalkNode>(
     }
 }
 
-/// Consume a `WalkNode` op result: on `Err` record a diagnostic naming the
-/// node's path and yield the tolerant fallback (`false`/`None`/`[]`), so one
-/// thrown attribute is reported without aborting the walk.
 fn tolerate<T: Default>(res: Result<T>, path: &[String], diags: &mut Vec<String>) -> T {
     match res {
         Ok(v) => v,
@@ -283,9 +250,6 @@ fn descend<N: WalkNode>(
     }
 }
 
-/// Discover all derivation attr paths matching `includes`, minus `excludes`
-/// (exact-path matches). Returns `(attr_paths, errors)` where `errors` are the
-/// deduped diagnostics for attributes that threw during the walk.
 pub fn discover<N: WalkNode>(
     root: &N,
     includes: &[Vec<String>],
@@ -294,8 +258,6 @@ pub fn discover<N: WalkNode>(
     discover_within(root, includes, excludes, None)
 }
 
-/// [`discover`] with each include's first wildcard limited to `only`: the
-/// discovery half of a [`Shard`] the planner restricted.
 pub fn discover_within<N: WalkNode>(
     root: &N,
     includes: &[Vec<String>],
@@ -305,9 +267,6 @@ pub fn discover_within<N: WalkNode>(
     collect_derivations(root, includes, excludes, only, None)
 }
 
-/// [`discover_within`] that returns each nested set under a trailing `*` as a
-/// deferred shard instead of forcing its children, so one heavy set (all NixOS
-/// tests of a system) is listable across the pool rather than on one worker.
 pub fn discover_split<N: WalkNode>(
     root: &N,
     includes: &[Vec<String>],
@@ -358,7 +317,6 @@ fn collect_derivations<N: WalkNode>(
     (out, diags)
 }
 
-/// Parse wildcard strings into `(includes, excludes)` segment lists.
 pub fn parse_patterns(wildcards: &[String]) -> (Vec<Vec<String>>, Vec<Vec<String>>) {
     let mut includes = Vec::new();
     let mut excludes = Vec::new();
@@ -394,9 +352,6 @@ pub fn plan_shards<N: WalkNode>(root: &N, includes: &[Vec<String>]) -> (Vec<Shar
     (shards, diags)
 }
 
-/// Render shard segments back to a pattern string for the wire: `*`/`#` stay
-/// bare; a literal segment with a `.` or `"` is double-quoted so [`parse_pattern`]
-/// rebuilds the same segments.
 pub fn segments_to_pattern(segs: &[String]) -> String {
     segs.iter()
         .map(|s| {
@@ -638,8 +593,6 @@ mod tests {
 
     #[test]
     fn discover_star_non_last_stops_at_opaque() {
-        // `*` iterates an opaque child (sysA) and a normal child (sysB); the
-        // opaque one must not be descended, so only sysB's leaf is emitted.
         let root = StubNode::set(vec![(
             "packages",
             StubNode::set(vec![
@@ -705,8 +658,6 @@ mod tests {
         );
     }
 
-    // ── plan_shards ──────────────────────────────────────────────────────────
-
     fn shards(root: &StubNode, pattern: &[&str]) -> Vec<Shard> {
         plan_shards(&root, &[segs(pattern)]).0
     }
@@ -725,9 +676,6 @@ mod tests {
         }
     }
 
-    /// Discovering each shard and unioning must equal discovering the original
-    /// pattern in one pass. One shared traversal makes this structural; a single
-    /// behavioural test guards the emit-vs-descend split points.
     fn assert_split_equivalent(root: &StubNode, pattern: &[&str]) {
         let original = discover(&root, &[segs(pattern)], &[]).0;
 

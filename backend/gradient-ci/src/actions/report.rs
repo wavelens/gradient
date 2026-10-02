@@ -30,12 +30,9 @@ gradient_db::sql! {
         params = [EvaluationId, Text("Evaluation"), Int(123456)];
 }
 
-/// Atomically upsert `check_run_id` into `evaluation.check_run_ids` under
-/// `context`. Uses Postgres `jsonb_set` so concurrent persists for
-/// different context keys (e.g. Approval + Evaluation + per-Build) cannot
-/// race each other into wiping previously-stored ids - a load-modify-write
-/// over a JSON column would let the slower writer's snapshot clobber the
-/// faster writer's entry.
+/// `jsonb_set` is keeping concurrent persists for different context keys from wiping each other. A
+/// load-modify-write over the JSON column would let the slower writer clobber the faster writer's
+/// entry.
 pub(super) async fn persist_evaluation_check_id(
     ctx: &CiContext,
     evaluation_id: EvaluationId,
@@ -58,8 +55,6 @@ pub(super) async fn persist_evaluation_check_id(
     }
 }
 
-/// Read a check_run_id previously stored under `context` in
-/// `evaluation.check_run_ids`.
 fn check_run_id_for_context(eval: &gradient_types::MEvaluation, context: &str) -> Option<i64> {
     eval.check_run_ids
         .as_ref()
@@ -68,9 +63,6 @@ fn check_run_id_for_context(eval: &gradient_types::MEvaluation, context: &str) -
         .and_then(|v| v.as_i64())
 }
 
-/// Returns `Ok(None)` when the event is a per-build status update for a
-/// build that has no `entry_point` row - those are intermediate dependency
-/// builds, not user-visible CI targets, so we skip the Git host POST.
 pub(super) async fn build_ci_report_from_payload(
     ctx: &CiContext,
     event: &str,
@@ -97,13 +89,6 @@ pub(super) async fn build_ci_report_from_payload(
         }));
     }
 
-    // `build_id` takes precedence over `evaluation_id` even when both are
-    // present: the build-status dispatch (CiStatusReactor::on_build_status_changed)
-    // emits a payload carrying BOTH so downstream actions can correlate the
-    // build_job to its eval, but the Git host reporter must load the build_job so
-    // it can pick the per-build check context. Falling back to the
-    // evaluation-only path here would land every build event on the
-    // Evaluation check.
     let (evaluation, build_job) = if let Some(bid) = s("build_id") {
         let build_job_id: BuildJobId = bid.parse().map_err(|_| anyhow!("invalid build_id"))?;
         let build_job = EBuildJob::find_by_id(build_job_id)
@@ -148,11 +133,9 @@ pub(super) async fn build_ci_report_from_payload(
         .context("loading commit")?
         .ok_or_else(|| anyhow!("commit {} not found", evaluation.commit))?;
 
-    // Always post check runs / status updates against the task's base
-    // repository, not `evaluation.repository`. For fork PRs the evaluation
-    // URL points at the fork (so the worker can fetch the commit), but the
-    // GitHub App installation lives on the base repo - calling the fork's
-    // /check-runs endpoint returns 403.
+    // Reports must target the task's base repository, not `evaluation.repository`. Fork PR
+    // evaluations are pointing at the fork, where the GitHub App is missing and `/check-runs` is
+    // returning 403.
     let (owner, repo) = parse_owner_repo(&task.repository)
         .ok_or_else(|| anyhow!("could not parse owner/repo from {}", task.repository))?;
 
@@ -166,10 +149,6 @@ pub(super) async fn build_ci_report_from_payload(
         None => Vec::new(),
     };
 
-    // Only builds linked to a declared entry point get their own Git host check.
-    // Intermediate dependency builds (e.g. `__assert_fail-builder`) share the
-    // entry-point check's status implicitly via the eval roll-up; emitting
-    // one check per derivation would spam the PR with per-dependency noise.
     let entry_point_eval = entry_points.first().map(|ep| ep.eval.clone());
 
     let project_name = EProject::find_by_id(task.project)
@@ -179,10 +158,6 @@ pub(super) async fn build_ci_report_from_payload(
         .flatten()
         .map(|o| o.name);
 
-    // Pick the check-run name based on which phase fired the event so the
-    // Approval, Evaluation, and per-Build checks each show as their own line
-    // on the PR. A Build event for an intermediate dep (no entry_point row)
-    // produces `None` so the caller can skip the report entirely.
     let context = match reporting::check_context_kind_for_event(event) {
         Some(reporting::CheckContextKind::Approval) => {
             reporting::approval_check_context(&task.name)

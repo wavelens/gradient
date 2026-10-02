@@ -4,10 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! The scheduler's state as one actor: `WorkerPool` and `JobTracker` are its
-//! private state, every mutation is a message, and sessions are reached only
-//! through a [`SessionPort`].
-
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::sync::atomic::AtomicI64;
@@ -226,9 +222,8 @@ pub enum SchedulerMsg {
     },
     AbortEvaluation {
         evaluation_id: EvaluationId,
-        /// The shared builds the database abort actually moved. A shared build is
-        /// global, so the ones it spared are still wanted by a live evaluation
-        /// and their workers must keep building.
+        /// A shared build is global. The ones the abort spared are still wanted by a live
+        /// evaluation, and their workers must keep building.
         aborted_shared_builds: Vec<DerivationBuildId>,
         reply: RpcReplyPort<Vec<(String, String)>>,
     },
@@ -298,8 +293,6 @@ pub struct CoreArgs {
     pub policy: Arc<dyn ScoringPolicy>,
 }
 
-/// Whether a worker with `caps` can run a job of `kind` at all; an idle slot of
-/// a kind it cannot run is no capacity.
 fn runs(caps: &WorkerCaps, kind: crate::cluster::SlotKind) -> bool {
     match kind {
         crate::cluster::SlotKind::Eval => caps.capabilities.eval || caps.fetch,
@@ -385,7 +378,6 @@ impl SchedulerCore {
         }
     }
 
-    /// Nothing handed out: the slot is idle capacity for cluster placement.
     fn idle(
         &mut self,
         worker: &str,
@@ -526,7 +518,6 @@ impl SchedulerCore {
         }
     }
 
-    /// One slot per active worker and kind it can run, busy or idle.
     fn connected_slots(&self) -> Vec<crate::cluster::Slot> {
         use crate::cluster::{Slot, SlotKind};
 
@@ -851,9 +842,6 @@ impl Actor for CoreActor {
                 aborted_shared_builds,
                 reply,
             } => {
-                // Stop this evaluation's own eval job unconditionally, but a
-                // build only when the database aborted its shared build: a shared build
-                // shared with another live evaluation keeps building for it.
                 let aborted_shared_builds: HashSet<DerivationBuildId> =
                     aborted_shared_builds.into_iter().collect();
                 let to_abort: Vec<(String, String)> = core

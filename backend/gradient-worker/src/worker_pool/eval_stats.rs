@@ -6,13 +6,11 @@
 
 use std::collections::HashMap;
 
-// The wire-level delta and the metrics toggle live in the shared evaluator crate.
 pub use gradient_eval::stats::{StatsDelta, metrics_enabled};
 
-/// Environment the eval-worker subprocess needs for thunk/function-call counts.
-/// libnixexpr's `Counter`s are no-ops unless `NIX_SHOW_STATS` is set (otherwise
-/// `total_thunks`/`fn_calls` always report 0); the stats dump it would print is
-/// routed to `/dev/null` so it cannot pollute the worker's stderr.
+/// libnixexpr's `Counter`s are no-ops unless `NIX_SHOW_STATS` is set.
+/// Without it `total_thunks` and `fn_calls` are always reporting 0.
+/// The stats dump is routed to `/dev/null` to keep it out of the worker's stderr.
 pub(crate) fn eval_worker_stats_env(
     metrics_enabled: bool,
 ) -> &'static [(&'static str, &'static str)] {
@@ -46,8 +44,6 @@ pub(crate) struct EvalStatsTotals {
     pub per_entry_point: Vec<EntryPointCost>,
 }
 
-/// Accumulates per-request deltas into eval-wide totals, per-entry-point
-/// buckets, and peak gauges.
 #[derive(Debug, Default)]
 pub(crate) struct EvalStatsAccumulator {
     totals: EvalStatsTotals,

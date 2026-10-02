@@ -9,23 +9,8 @@ use std::str::FromStr;
 
 use crate::input::InputError;
 
-/// A validated, normalized repository URL.
-///
-/// Rejects local `file://` references and bare/invalid inputs. Normalizes
-/// `ssh://`, `http://`, and `https://` URLs by prepending `git+` so they are
-/// accepted by `builtins.getFlake`.
-///
-/// Use [`RepositoryUrl::with_rev`] to pin it to a specific commit and produce
-/// a [`NixFlakeUrl`].
-///
-/// # Example
-///
-/// ```
-/// use gradient_types::RepositoryUrl;
-///
-/// let r: RepositoryUrl = "https://github.com/foo/bar.git".parse().unwrap();
-/// assert_eq!(r.to_string(), "git+https://github.com/foo/bar.git");
-/// ```
+/// `builtins.getFlake` is accepting `ssh://`, `http://` and `https://` URLs only with a
+/// `git+` prefix.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RepositoryUrl {
     url: String,
@@ -44,7 +29,6 @@ impl RepositoryUrl {
         }
     }
 
-    /// Combine with a 40-character commit hash to produce a [`NixFlakeUrl`].
     pub fn with_rev(self, commit_hash: &str) -> Result<NixFlakeUrl, InputError> {
         if commit_hash.len() != 40 {
             return Err(InputError::InvalidCommitHashLength);
@@ -68,7 +52,6 @@ impl FromStr for RepositoryUrl {
             return Err(InputError::LocalFileUrlNotAllowed);
         }
 
-        // Require at least one host separator: either `://`, `@`, or `:` (SCP style).
         let looks_like_url = s.contains("://") || s.contains('@') || s.contains(':');
         if !looks_like_url {
             return Err(InputError::InvalidRepositoryUrl);
@@ -86,46 +69,23 @@ impl fmt::Display for RepositoryUrl {
     }
 }
 
-/// A validated, normalized Nix flake URL pinned to a specific commit.
-///
-/// Produced by [`RepositoryUrl::with_rev`] or [`NixFlakeUrl::new`].
-/// `Display` yields the `<url>?rev=<hash>` form consumed by
-/// `builtins.getFlake` and related Nix tooling.
-///
-/// # Example
-///
-/// ```
-/// use gradient_types::NixFlakeUrl;
-///
-/// let u = NixFlakeUrl::new("https://github.com/foo/bar.git",
-///                          "11c2f8505c234697ccabbc96e5b8a76daf0f31d3").unwrap();
-/// assert_eq!(
-///     u.to_string(),
-///     "git+https://github.com/foo/bar.git?rev=11c2f8505c234697ccabbc96e5b8a76daf0f31d3"
-/// );
-/// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NixFlakeUrl {
-    /// Normalized repository URL (`git+` prefix applied where needed).
     url: String,
-    /// 40-character hex commit hash.
     rev: String,
 }
 
 impl NixFlakeUrl {
-    /// Build a `NixFlakeUrl` from a raw repository URL and a 40-character commit hash.
     pub fn new(repository_url: &str, commit_hash: &str) -> Result<Self, InputError> {
         repository_url
             .parse::<RepositoryUrl>()?
             .with_rev(commit_hash)
     }
 
-    /// The normalized repository URL (without the `?rev=…` suffix).
     pub fn url(&self) -> &str {
         &self.url
     }
 
-    /// The pinned commit hash.
     pub fn rev(&self) -> &str {
         &self.rev
     }
@@ -142,8 +102,6 @@ mod tests {
     use super::*;
 
     const REV: &str = "11c2f8505c234697ccabbc96e5b8a76daf0f31d3";
-
-    // ── RepositoryUrl ────────────────────────────────────────────────────────
 
     #[test]
     fn repo_url_https_normalized() {
@@ -187,8 +145,7 @@ mod tests {
 
     #[test]
     fn repo_url_file_single_slash_rejected() {
-        // `file:/local/repo` doesn't match `file://` but is still a local file
-        // reference and must be rejected.
+        // `file:/local/repo` is not matching `file://` but is still a local file reference.
         assert_eq!(
             "file:/local/repo".parse::<RepositoryUrl>().unwrap_err(),
             InputError::LocalFileUrlNotAllowed,
@@ -199,8 +156,6 @@ mod tests {
     fn repo_url_plain_string_rejected() {
         assert!("notaurl".parse::<RepositoryUrl>().is_err());
     }
-
-    // ── NixFlakeUrl ──────────────────────────────────────────────────────────
 
     #[test]
     fn nix_url_ssh_scp_style() {

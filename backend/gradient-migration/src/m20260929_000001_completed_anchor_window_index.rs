@@ -4,9 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! The Job Board's build-time rankings read the anchors that completed (status 3)
-//! inside a window, which without this index is a scan of every anchor.
-
 use sea_orm_migration::prelude::*;
 use sea_orm_migration::sea_orm::ConnectionTrait;
 

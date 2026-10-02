@@ -4,11 +4,5 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Pure protocol primitives shared by gradient-server, gradient-worker, and
-//! gradient-proxy: WebSocket frame I/O and handshake state machine.
-//!
-//! No sea-orm or scheduler dependency: they operate on a `ProtoSocket`
-//! (axum or tungstenite) and the wire message types from `crate::messages`.
-
 pub mod frame;
 pub mod handshake;

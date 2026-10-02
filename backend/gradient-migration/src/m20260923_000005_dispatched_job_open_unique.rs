@@ -4,10 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! A job is out at most once. The claim inserts its `dispatched_job` row with
-//! `ON CONFLICT (job_id) WHERE finished_at IS NULL DO NOTHING`, so two
-//! instances racing for one job cannot both win; the newest open row of each
-//! job survives and older duplicates close as abandoned (outcome 2).
+//! The newest open row of each job is surviving. Older duplicates are closed as abandoned (outcome
+//! 2).
 
 use sea_orm_migration::prelude::*;
 use sea_orm_migration::sea_orm::ConnectionTrait;

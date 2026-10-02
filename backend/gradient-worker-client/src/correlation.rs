@@ -4,9 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Correlates `CacheStatus` / `KnownDerivations` replies with the query that
-//! asked, by `query_id`, so a job may keep several queries in flight.
-
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -21,24 +18,13 @@ use tokio::sync::oneshot;
 
 use crate::connection::ProtoWriter;
 
-/// A pending `CacheQuery`: its reply channel plus the owning `job_id` so a
-/// finished or aborted job can drop any query it left in flight.
 pub struct CacheWaiter {
     job_id: String,
     reply: oneshot::Sender<Result<Vec<CachedPath>, String>>,
 }
 
-/// Shared map from a unique per-query id to its pending `CacheQuery`.
-/// Correlating by the query id (not the `job_id`) lets one job keep several
-/// CacheQueries in flight - and survive retries that reuse the `job_id` -
-/// without their replies colliding: a stale or out-of-order reply reaches the
-/// exact waiter that sent it, or none. `Ok` carries a `CacheStatus`,
-/// `Err(message)` a server-side `CacheError` (indeterminate - retry, never
-/// "inputs absent").
 pub type CacheWaiters = Arc<Mutex<HashMap<String, CacheWaiter>>>;
 
-/// Register a oneshot for `query_id` (scoped to `job_id`) and hand back its
-/// receiver.
 pub fn register_cache_waiter(
     waiters: &CacheWaiters,
     query_id: String,
@@ -51,9 +37,6 @@ pub fn register_cache_waiter(
     rx
 }
 
-/// Deliver a `CacheStatus`/`CacheError` to the waiter that sent `query_id`.
-/// Returns false (dropping the reply) when no waiter is registered - a late
-/// reply for an already-timed-out or superseded query.
 pub fn deliver_cache_reply(
     waiters: &CacheWaiters,
     query_id: &str,
@@ -68,33 +51,21 @@ pub fn deliver_cache_reply(
     }
 }
 
-/// Drop the waiter for a single timed-out query so a late reply is discarded
-/// rather than delivered to a closed channel.
 pub fn forget_cache_waiter(waiters: &CacheWaiters, query_id: &str) {
     waiters.lock().remove(query_id);
 }
 
-/// Drop every waiter belonging to `job_id` so a query a finished or aborted job
-/// left in flight can't leak its slot.
 pub fn forget_cache_waiters_for_job(waiters: &CacheWaiters, job_id: &str) {
     waiters.lock().retain(|_, w| w.job_id != job_id);
 }
 
-/// A pending `QueryKnownDerivations`: its reply channel plus the owning
-/// `job_id` so a finished or aborted job can drop any query it left in flight.
 pub struct KnownDerivationWaiter {
     job_id: String,
     reply: oneshot::Sender<Vec<String>>,
 }
 
-/// Shared map from a unique per-query id to its pending `QueryKnownDerivations`.
-/// Keying by the query id (not the `job_id`) lets one job keep several queries
-/// in flight without their replies colliding; the waiter still carries its
-/// `job_id` so job cleanup can drop the whole set.
 pub type KnownDerivationWaiters = Arc<Mutex<HashMap<String, KnownDerivationWaiter>>>;
 
-/// Register a oneshot for `query_id` (scoped to `job_id`) and hand back its
-/// receiver.
 pub fn register_known_derivation_waiter(
     waiters: &KnownDerivationWaiters,
     query_id: String,
@@ -107,9 +78,6 @@ pub fn register_known_derivation_waiter(
     rx
 }
 
-/// Deliver a `KnownDerivations` to the waiter that sent `query_id`. Returns
-/// false (dropping the reply) when no waiter is registered - a late reply for
-/// an already-timed-out or superseded query.
 pub fn deliver_known_derivations(
     waiters: &KnownDerivationWaiters,
     query_id: &str,
@@ -124,15 +92,10 @@ pub fn deliver_known_derivations(
     }
 }
 
-/// Drop every waiter belonging to `job_id` so a query a finished or aborted job
-/// left in flight can't leak its slot.
 pub fn forget_known_derivation_waiters_for_job(waiters: &KnownDerivationWaiters, job_id: &str) {
     waiters.lock().retain(|_, w| w.job_id != job_id);
 }
 
-/// The dispatch id a job reports under, shared between the job task and the
-/// dispatch loop, which replaces it when the server hands the same job out
-/// again while it is still running here.
 #[derive(Clone, Debug)]
 pub struct AssignmentHandle(Arc<Mutex<String>>);
 
@@ -150,10 +113,6 @@ impl AssignmentHandle {
     }
 }
 
-/// Query the server's known-derivation set in [`CACHE_QUERY_MAX_PATHS`]-sized
-/// batches, [`CACHE_QUERY_WINDOW`] of them in flight, and concatenate the
-/// answers in request order. See [`cache_query_with_timeout`] for why a whole
-/// eval's set must never ride in a single message.
 pub async fn known_derivations_with_timeout(
     job_id: &str,
     writer: &ProtoWriter,
@@ -172,9 +131,6 @@ pub async fn known_derivations_with_timeout(
     Ok(answers.into_iter().flatten().collect())
 }
 
-/// Send one `QueryKnownDerivations` and wait for the `KnownDerivations` that
-/// echoes its `query_id`, with a hard timeout so a stalled dispatch loop can't
-/// hang the eval task.
 pub async fn known_derivations_chunk(
     job_id: &str,
     writer: &ProtoWriter,
@@ -207,18 +163,9 @@ pub async fn known_derivations_chunk(
     }
 }
 
-/// Query cache state for `paths` in [`CACHE_QUERY_MAX_PATHS`]-sized batches,
-/// [`CACHE_QUERY_WINDOW`] of them in flight, and concatenate the answers in
-/// request order.
-///
-/// One chunk is bounded because an eval's full path set (tens of thousands)
-/// would otherwise serialise into a multi-MB request whose `CacheStatus` reply
-/// is larger still: with both peers mid-write the socket buffers fill in both
-/// directions, neither dispatch loop gets back to reading, and the connection
-/// wedges until the worker's send timeout tears it down. Several such chunks
-/// in flight are safe because each is bounded on its own and every reply
-/// carries the `query_id` of the query it answers, so completion order is free
-/// while the concatenation stays in request order.
+/// An eval's full path set would serialise into a multi-MB request with a larger reply. Both peers
+/// would block mid-write with full socket buffers until the send timeout tore the connection down.
+/// Each chunk is bounded, and replies are matched by `query_id`.
 pub async fn cache_query_with_timeout(
     job_id: &str,
     writer: &ProtoWriter,
@@ -228,8 +175,6 @@ pub async fn cache_query_with_timeout(
     mode: QueryMode,
     external: bool,
 ) -> Result<Vec<CachedPath>> {
-    // A Push carries one size per path or the server rejects it. A caller that
-    // cannot know them yet says so per path rather than sending none.
     let nar_sizes = match mode {
         QueryMode::Push if nar_sizes.len() != paths.len() => vec![None; paths.len()],
         _ => nar_sizes,
@@ -258,8 +203,6 @@ pub async fn cache_query_with_timeout(
     Ok(answers.into_iter().flatten().collect())
 }
 
-/// Send one `CacheQuery` and wait for the matching `CacheStatus`, with a hard
-/// timeout so a stalled dispatch loop can't hang the eval task forever.
 pub async fn cache_query_chunk(
     job_id: &str,
     writer: &ProtoWriter,
@@ -283,18 +226,15 @@ pub async fn cache_query_chunk(
         })
         .await?;
     match tokio::time::timeout(CACHE_QUERY_TIMEOUT, rx).await {
-        // Server could determine cache state: authoritative cached/uncached list.
         Ok(Ok(Ok(cached))) => Ok(cached),
-        // Server-side `CacheError`: indeterminate, not "absent", so it is an
-        // outage: prefetch retries it rather than a terminal `InputsUnavailable`.
+        // A server-side `CacheError` is indeterminate, not "absent". Prefetch must retry it as an
+        // outage instead of a terminal `InputsUnavailable`.
         Ok(Ok(Err(message))) => Err(anyhow::Error::new(crate::connection::Unresponsive)
             .context(format!("CacheQuery failed server-side: {message}"))),
         Ok(Err(_)) => Err(anyhow::anyhow!(
             "cache waiter dropped - connection closed or superseded?"
         )),
         Err(_) => {
-            // Drop the waiter so a late reply doesn't deliver to a closed
-            // channel and log a spurious warning later.
             forget_cache_waiter(cache_waiters, &query_id);
             Err(anyhow::Error::new(crate::connection::Unresponsive).context(format!(
                 "CacheQuery for {} paths timed out after {}s waiting for reply (job_id={job_id}, query_id={query_id})",
@@ -309,10 +249,6 @@ pub async fn cache_query_chunk(
 mod tests {
     use super::*;
 
-    /// A `CacheQuery` reply is correlated by its unique query id, never the
-    /// `job_id`: two queries in flight for the same job must not steal each
-    /// other's reply, a stale/unknown reply is dropped, and job cleanup frees a
-    /// query left pending.
     #[test]
     fn cache_replies_correlate_by_query_id_not_job_id() {
         use tokio::sync::oneshot::error::TryRecvError;
@@ -330,8 +266,6 @@ mod tests {
         assert_eq!(rx1.try_recv(), Err(TryRecvError::Closed));
     }
 
-    /// Job cleanup drops every known-derivation query that job left in flight
-    /// and nothing belonging to another job.
     #[test]
     fn job_cleanup_drops_only_that_jobs_known_derivation_waiters() {
         use tokio::sync::oneshot::error::TryRecvError;

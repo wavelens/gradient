@@ -4,16 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! End-to-end check that the proto upgrade route honours
-//! `max_proto_connections` (issue #89).
-//!
-//! Builds the same wiring `gradient_web::create_router` produces for the `/proto`
-//! route - `proto_router` + `Extension<Arc<Scheduler>>` +
-//! `Extension<Arc<ProtoLimiter>>` - so the test can pre-acquire the only
-//! configured permit and observe the rejection shape (`503` + `Retry-After`).
-//! The unit tests in `gradient_wire::limiter` cover the semaphore semantics
-//! themselves; this test verifies the handler is actually consulting them.
-
 use std::sync::Arc;
 
 use axum::extract::Extension;
@@ -42,9 +32,8 @@ fn make_server(limiter: Arc<ProtoLimiter>) -> TestServer {
         .layer(Extension(scheduler))
         .layer(Extension(limiter))
         .layer(Extension(gradient_proto::SessionsHandle::new()));
-    // Real HTTP transport: in-memory transport rejects WS-shaped requests with
-    // 426 inside the `WebSocketUpgrade` extractor before the handler body
-    // executes, which would mask the limiter behaviour we're testing.
+    // The in-memory transport is rejecting WS-shaped requests with 426 before the handler body
+    // is running. That would mask the limiter behaviour under test.
     TestServer::builder().http_transport().build(app)
 }
 
@@ -76,10 +65,6 @@ fn upgrade_proceeds_past_limiter_when_slot_is_free() {
         let server = make_server(Arc::clone(&limiter));
         let res = upgrade_request(&server).await;
 
-        // The in-memory transport doesn't carry the upgrade through to a real
-        // WebSocket, so we don't check for `101` exactly - but we do check
-        // that the limiter let the request *past* the rejection branch (i.e.
-        // the response is not the 503 we'd see when exhausted).
         assert_ne!(
             res.status_code(),
             http::StatusCode::SERVICE_UNAVAILABLE,

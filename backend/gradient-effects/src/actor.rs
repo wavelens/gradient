@@ -4,12 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Claims due pending-delivery rows and hands them to whoever delivers them. Nothing here
-//! talks to the network and nothing here talks to a database: the store and the
-//! deliverer are traits, so the one thing this actor owns - never more than
-//! `capacity` deliveries in flight, and one pass per burst of wakes - is tested
-//! against in-memory fakes.
-
 use std::collections::HashSet;
 use std::marker::PhantomData;
 use std::sync::Arc;
@@ -23,7 +17,6 @@ use tracing::warn;
 
 pub const HEALTH_NAME: &str = "effects";
 
-/// Where due rows come from and where their outcome goes back to.
 pub trait PendingDeliveryStore: Send + Sync + 'static {
     fn claim_due(
         &self,
@@ -36,18 +29,13 @@ pub trait PendingDeliveryStore: Send + Sync + 'static {
     ) -> impl Future<Output = anyhow::Result<()>> + Send;
 }
 
-/// Hands one claimed row to whoever delivers it; the deliverer answers with
-/// [`EffectsMsg::Done`] on `reply`.
 pub trait Handoff: Send + Sync + 'static {
     fn hand_off(&self, row: PendingDelivery, reply: ActorRef<EffectsMsg>);
 }
 
 pub enum EffectsMsg {
-    /// Something committed a row. Coalesced: a burst costs one pass.
     Wake,
-    /// The pass a burst of [`EffectsMsg::Wake`]s asked for.
     Pass,
-    /// The backstop, in case a wake was lost with the writer that sent it.
     Tick,
     Done {
         row: PendingDelivery,
@@ -88,8 +76,6 @@ impl<S: PendingDeliveryStore, D: Handoff> Actor for EffectsActor<S, D> {
         args: Self::Arguments,
     ) -> Result<Self::State, ActorProcessingErr> {
         myself.send_after(args.tick, || EffectsMsg::Tick);
-        // What the last process owed is owed the moment this one starts, so the
-        // first pass is now rather than one tick from now.
         let _ = myself.send_message(EffectsMsg::Pass);
 
         Ok(EffectsState {
@@ -106,9 +92,8 @@ impl<S: PendingDeliveryStore, D: Handoff> Actor for EffectsActor<S, D> {
         st: &mut Self::State,
     ) -> Result<(), ActorProcessingErr> {
         match msg {
-            // The pass goes to the BACK of the mailbox, behind every wake
-            // already queued behind this one, so a burst of writers that all
-            // notify costs exactly one claim rather than one per writer.
+            // The pass is sent to the back of the mailbox, behind every queued wake. A burst of
+            // notifying writers is folded into one claim this way.
             EffectsMsg::Wake => {
                 if !st.pass_scheduled {
                     st.pass_scheduled = true;
@@ -136,8 +121,6 @@ impl<S: PendingDeliveryStore, D: Handoff> Actor for EffectsActor<S, D> {
     }
 }
 
-/// Fill every free slot, then stop. A claim that comes back short means the
-/// queue is drained, so the pass ends rather than asking again for nothing.
 async fn pass<S: PendingDeliveryStore, D: Handoff>(
     myself: &ActorRef<EffectsMsg>,
     st: &mut EffectsState<S, D>,
@@ -220,7 +203,6 @@ mod tests {
         }
     }
 
-    /// Holds every dispatched row until the test releases it.
     #[derive(Default)]
     struct Held(Mutex<Vec<(PendingDelivery, ActorRef<EffectsMsg>)>>);
 
@@ -262,8 +244,6 @@ mod tests {
         actor
     }
 
-    /// The queue is deep and the workers are few: what is out at once is what
-    /// the pool can run, and a slot freed is a slot refilled.
     #[tokio::test]
     async fn in_flight_never_exceeds_the_worker_count() {
         let store = Store::with((0..20).map(row));
@@ -296,8 +276,6 @@ mod tests {
         actor.stop_and_wait(None, None).await.unwrap();
     }
 
-    /// A full pool claims nothing at all: no statement is sent to discover that
-    /// there is no room for its answer.
     #[tokio::test]
     async fn a_full_pool_claims_nothing() {
         let store = Store::with((0..8).map(row));
@@ -319,9 +297,6 @@ mod tests {
         actor.stop_and_wait(None, None).await.unwrap();
     }
 
-    /// Every writer in a burst notifies, and the burst costs ONE pass beyond the
-    /// one every start pays: the scheduled pass sits behind the wakes already
-    /// queued, so they fold into it.
     #[tokio::test]
     async fn a_burst_of_wakes_runs_exactly_one_pass() {
         let store = Store::with([]);
@@ -342,8 +317,6 @@ mod tests {
         actor.stop_and_wait(None, None).await.unwrap();
     }
 
-    /// A failed delivery is marked with its error, not dropped: what reschedules
-    /// it is the row's own backoff, which the store owns.
     #[tokio::test]
     async fn a_failed_delivery_is_marked_and_its_slot_freed() {
         let store = Store::with([row(1)]);

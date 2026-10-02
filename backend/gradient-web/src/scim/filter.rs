@@ -4,8 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-/// Parsed SCIM filter: only `attr eq "value"` is supported (the subset Okta and
-/// Entra emit for sync). Returns `(attribute_lowercased, value)`.
+/// Only `attr eq "value"` is supported, the subset Okta and Entra emit for sync.
 pub fn parse_eq_filter(filter: &str) -> Option<(String, String)> {
     let mut parts = filter.splitn(3, char::is_whitespace);
     let attr = parts.next()?.trim();

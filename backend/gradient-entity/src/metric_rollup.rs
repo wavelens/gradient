@@ -11,8 +11,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::ids::MetricRollupId;
 
-/// Time-bucket width of a rollup row. Minute buckets aggregate from the fact
-/// tables; each coarser level cascades from the one below it.
 #[repr(i16)]
 #[derive(
     Debug,
@@ -43,7 +41,6 @@ pub enum RollupGranularity {
 }
 
 impl RollupGranularity {
-    /// The matching Postgres `date_trunc` unit.
     pub const fn trunc_unit(self) -> &'static str {
         match self {
             Self::Minute => "minute",
@@ -63,7 +60,6 @@ impl RollupGranularity {
         }
     }
 
-    /// Query-parameter decode with the API's historical default of `day`.
     pub fn from_query_param(param: Option<&str>) -> Self {
         param.and_then(Self::from_trunc_unit).unwrap_or(Self::Day)
     }

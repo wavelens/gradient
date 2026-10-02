@@ -4,14 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Pure-Rust materialisation of a `/nix/store/<hash>-source` path from a staging directory.
-//!
-//! Algorithm:
-//!  1. Walk the directory and serialise its contents as a canonical NAR via `NarByteStream`.
-//!  2. SHA-256 the NAR bytes -> `nar_hash`.
-//!  3. Build a `NixArchive` content address and call `make_store_path_from_ca` with name
-//!     "source", producing the same path `nix-store --add` would assign.
-
 use anyhow::{Context, Result};
 use futures::StreamExt as _;
 use harmonia_file_nar::NarByteStream;
@@ -27,9 +19,7 @@ pub struct SourceNar {
     pub nar_size: u64,
     pub nar_hash_sri: String,
     pub nar_hash_nix32: String,
-    /// zstd-compressed NAR as persisted in `NarStore` (which stores `.nar.zst`).
     pub compressed_bytes: Vec<u8>,
-    /// Size and SHA-256 of `compressed_bytes`, i.e. the narinfo `FileSize`/`FileHash`.
     pub file_size: u64,
     pub file_hash_sri: String,
 }
@@ -49,9 +39,6 @@ pub async fn materialise_source_nar(staging_dir: &Path) -> Result<SourceNar> {
     source_nar_from_bytes(nar_bytes_from_dir(staging_dir).await?).await
 }
 
-/// Compute the `/nix/store/<hash>-source` path and metadata from a NAR packed
-/// elsewhere (e.g. the `nix`-feature CLI), keeping the server authoritative on
-/// the store path.
 pub async fn source_nar_from_bytes(nar_bytes: Vec<u8>) -> Result<SourceNar> {
     let nar_size = nar_bytes.len() as u64;
     let raw_hash = Sha256::digest(&nar_bytes);

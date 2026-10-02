@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-/// Visibility of `p` / `c` to user `$1`, mirroring `load_*(Readable)`: no superuser bypass.
+/// Visibility is mirroring `load_*(Readable)`, with no superuser bypass.
 macro_rules! project_readable {
     () => {
         "(p.public OR EXISTS (SELECT 1 FROM project_user pu \

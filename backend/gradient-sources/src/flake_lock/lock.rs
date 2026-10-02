@@ -4,19 +4,11 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Lossless typed model of a `flake.lock` (schema version 7).
-//!
-//! `locked`/`original` blocks are kept as sorted `serde_json::Map`s so unknown
-//! keys survive a round-trip and re-serialization is byte-stable against nix's
-//! nlohmann output (sorted keys, 2-space indent). A [`LockedRef`] *view* is
-//! parsed when needed to drive resolution.
-
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use std::collections::BTreeMap;
 
-/// The whole `flake.lock` document.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FlakeLock {
     pub nodes: BTreeMap<String, Node>,
@@ -24,8 +16,8 @@ pub struct FlakeLock {
     pub version: u64,
 }
 
-/// A single lock node. Fields are declared alphabetically so serde emits them
-/// in the same order nix's sorted-key serializer does.
+/// Fields are declared alphabetically. Serde is then emitting them in the order of nix's sorted-key
+/// serializer.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Node {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -38,7 +30,6 @@ pub struct Node {
     pub original: Option<Map<String, Value>>,
 }
 
-/// An entry in a node's `inputs`: either a direct node name or a `follows` path.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum InputRef {
@@ -46,9 +37,6 @@ pub enum InputRef {
     Follows(Vec<String>),
 }
 
-/// Typed view over a `locked`/`original` block, per `type`. Drives
-/// revision resolution. Unsupported types parse into [`LockedRef::Other`] and
-/// fail explicitly at resolution time.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum LockedRef {
     Github {
@@ -83,7 +71,6 @@ pub enum LockedRef {
 }
 
 impl FlakeLock {
-    /// Parse a `flake.lock` byte buffer.
     pub fn parse(bytes: &[u8]) -> Result<Self> {
         let lock: FlakeLock = serde_json::from_slice(bytes).context("parsing flake.lock")?;
         if lock.version != 7 {
@@ -96,8 +83,6 @@ impl FlakeLock {
         Ok(lock)
     }
 
-    /// Serialize to the canonical nix layout: 2-space indent, sorted keys,
-    /// trailing newline.
     pub fn to_bytes(&self) -> Result<Vec<u8>> {
         let mut out = serde_json::to_vec_pretty(self).context("serializing flake.lock")?;
         out.push(b'\n');
@@ -105,8 +90,6 @@ impl FlakeLock {
         Ok(out)
     }
 
-    /// The node a root input name points at, following one level of indirection
-    /// through the root node's `inputs` map.
     pub fn input_node_name(&self, input: &str) -> Option<&str> {
         match self.nodes.get(&self.root)?.inputs.get(input)? {
             InputRef::Direct(name) => Some(name),
@@ -114,7 +97,6 @@ impl FlakeLock {
         }
     }
 
-    /// The names of every direct input declared in the root node.
     pub fn root_input_names(&self) -> Vec<String> {
         self.nodes
             .get(&self.root)
@@ -124,12 +106,10 @@ impl FlakeLock {
 }
 
 impl Node {
-    /// Current locked revision, if this node has one.
     pub fn locked_rev(&self) -> Option<&str> {
         self.locked.as_ref()?.get("rev")?.as_str()
     }
 
-    /// Parse the `original` block into a typed [`LockedRef`].
     pub fn original_ref(&self) -> Result<LockedRef> {
         let map = self
             .original
@@ -140,14 +120,12 @@ impl Node {
 }
 
 impl LockedRef {
-    /// Whether nix keeps a branch/tag `ref` in this fetcher's `locked` block.
-    /// The github-family schemes pin by `rev` alone and reject a locked node
-    /// carrying both, so only plain `git` keeps its `ref`.
+    /// The github-family schemes are pinning by `rev` alone and are rejecting a locked node
+    /// carrying both. Only plain `git` is keeping its `ref`.
     pub fn locked_keeps_ref(&self) -> bool {
         matches!(self, Self::Git { .. })
     }
 
-    /// Parse a typed reference from a `locked`/`original` block.
     pub fn from_map(map: &Map<String, Value>) -> Result<Self> {
         let ty = map
             .get("type")

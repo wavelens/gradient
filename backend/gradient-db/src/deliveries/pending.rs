@@ -4,49 +4,27 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! The pending deliveries of the effects actor: what a state change owes the outside world, written in
-//! the transaction that made the change and delivered by the effects actor.
-//!
-//! Nothing here talks to the network and nothing here knows what a delivery is:
-//! a row is a kind, a key that folds duplicates, and a payload. The claim leases
-//! rows under `SKIP LOCKED` so two server instances never deliver the same row
-//! at once, and a failure moves the row's next attempt out by [`backoff`] until
-//! [`MAX_ATTEMPTS`], where it dead-letters in place for the retention pass.
-
 use std::time::Duration;
 
 pub use gradient_entity::pending_delivery::PendingDeliveryKind;
 use gradient_types::ids::PendingDeliveryId;
 use sea_orm::{ConnectionTrait, DbErr, Value};
 
-/// Deliveries past this many failures are dead letters, not work.
 pub const MAX_ATTEMPTS: i32 = 6;
-/// How long a claimed row stays invisible to another claimer. Long enough that
-/// a worker killed mid-delivery does not hand the row to a second one while the
-/// first is still talking to a Git host.
 pub const CLAIM_LEASE_SECS: i64 = 600;
 
 crate::sql! {
-    /// A duplicate of a row still waiting is the row already waiting: the
-    /// partial unique index folds it away rather than queueing a second report
-    /// of the same status.
     PENDING_DELIVERY_ENQUEUE = "INSERT INTO pending_delivery (id, kind, key, payload, created_at, next_attempt_at) \
          VALUES ($1, $2::smallint, $3, $4::jsonb, (now() AT TIME ZONE 'UTC'), (now() AT TIME ZONE 'UTC')) \
          ON CONFLICT (kind, key) WHERE delivered_at IS NULL AND failed_at IS NULL DO NOTHING",
         params = [NewUuid, Int(3), Text("pending-delivery-gate-probe"), Text("{}")];
 
-    /// [`PENDING_DELIVERY_ENQUEUE`] for a whole batch. A bulk transition finishes as many
-    /// builds as the sweep moved and owes each one a row; one round trip per row
-    /// put the transition emitter's cost on the number of builds that finished
-    /// together rather than on the work itself.
     PENDING_DELIVERY_ENQUEUE_MANY = "INSERT INTO pending_delivery (id, kind, key, payload, created_at, next_attempt_at) \
          SELECT r.id, $2::smallint, r.key, r.payload::jsonb, (now() AT TIME ZONE 'UTC'), (now() AT TIME ZONE 'UTC') \
          FROM unnest($1::uuid[], $3::text[], $4::text[]) AS r(id, key, payload) \
          ON CONFLICT (kind, key) WHERE delivered_at IS NULL AND failed_at IS NULL DO NOTHING",
         params = [NewUuids(64), Int(3), Texts("pending-delivery-gate-probe", 64), Texts("{}", 64)];
 
-    /// The lease and the selection are one statement, so a row is never read by
-    /// one claimer and leased by another.
     PENDING_DELIVERY_CLAIM_DUE = "UPDATE pending_delivery o SET next_attempt_at = (now() AT TIME ZONE 'UTC') + make_interval(secs => $2::int) \
          WHERE o.id IN ( \
              SELECT id FROM pending_delivery \
@@ -60,9 +38,8 @@ crate::sql! {
     PENDING_DELIVERY_MARK_DELIVERED = "UPDATE pending_delivery SET delivered_at = (now() AT TIME ZONE 'UTC') WHERE id = $1",
         params = [NewUuid];
 
-    /// The attempt count, the dead-letter decision and the next attempt move
-    /// together: reading `attempts` first and writing it back would lose a
-    /// concurrent retry of the same row.
+    /// The attempt count, the dead-letter decision and the next attempt are moving together.
+    /// A read of `attempts` followed by a write would lose a concurrent retry of the same row.
     PENDING_DELIVERY_MARK_RETRY = "UPDATE pending_delivery SET attempts = attempts + 1, last_error = $2, \
          failed_at = CASE WHEN attempts + 1 >= $3 THEN (now() AT TIME ZONE 'UTC') ELSE NULL END, \
          next_attempt_at = (now() AT TIME ZONE 'UTC') + make_interval(secs => $4::int) \
@@ -75,14 +52,11 @@ crate::sql! {
         tier = Sweep;
 }
 
-/// Doubling from 30 s, capped at 15 minutes: a Git host that 502s once is retried
-/// while the check still matters, and one that is down stops costing attempts.
 pub fn backoff(attempts: i32) -> Duration {
     let shift = u32::try_from(attempts.clamp(0, 20)).unwrap_or(0);
     Duration::from_secs(30u64.saturating_mul(1u64 << shift).min(900))
 }
 
-/// A claimed row: what the deliverer needs and nothing the delivery cannot use.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PendingDelivery {
     pub id: PendingDeliveryId,
@@ -115,9 +89,7 @@ pub async fn enqueue<C: ConnectionTrait>(
     Ok(())
 }
 
-/// [`enqueue`] for a batch of one kind, in one statement. Keys are sorted so two
-/// concurrent batches over an overlapping set take the same lock order, the way
-/// every other batched write here does.
+/// Keys are sorted to give overlapping concurrent batches the same lock order.
 pub async fn enqueue_many<C: ConnectionTrait>(
     db: &C,
     kind: PendingDeliveryKind,
@@ -200,7 +172,6 @@ pub async fn mark<C: ConnectionTrait>(
     Ok(())
 }
 
-/// `(pending, dead-lettered)`, for `/board/health`.
 pub async fn pending_counts<C: ConnectionTrait>(db: &C) -> Result<(i64, i64), DbErr> {
     let row = db
         .query_one_raw(PENDING_DELIVERY_PENDING_COUNTS.stmt())
@@ -235,8 +206,6 @@ mod tests {
         assert_eq!(backoff(20), Duration::from_secs(900));
     }
 
-    /// Claiming is one statement: the due rows are leased in the same UPDATE
-    /// that selects them, under SKIP LOCKED, oldest first.
     #[tokio::test]
     async fn claim_due_leases_in_one_skip_locked_statement() {
         let id = PendingDeliveryId::now_v7();
@@ -274,8 +243,6 @@ mod tests {
         );
     }
 
-    /// A row of a kind this build does not know (an older instance's, during a
-    /// rolling deploy) is never claimed, so it cannot fail every claim.
     #[test]
     fn the_claim_names_exactly_the_known_kinds() {
         use sea_orm::Iterable;
@@ -290,8 +257,6 @@ mod tests {
         );
     }
 
-    /// Nothing is claimed for no capacity, and no statement is sent to find
-    /// that out.
     #[tokio::test]
     async fn claim_due_asks_for_nothing_when_there_is_no_room() {
         let db = MockDatabase::new(DatabaseBackend::Postgres).into_connection();
@@ -300,8 +265,6 @@ mod tests {
         assert!(db.into_transaction_log().is_empty());
     }
 
-    /// A failed delivery moves its next attempt out by the backoff and
-    /// dead-letters at the cap, in one statement.
     #[tokio::test]
     async fn mark_retry_schedules_and_dead_letters_at_the_cap() {
         let db = MockDatabase::new(DatabaseBackend::Postgres)
@@ -345,7 +308,6 @@ mod tests {
         );
     }
 
-    /// A duplicate pending event is folded into the one already waiting.
     #[tokio::test]
     async fn enqueue_does_nothing_on_a_pending_duplicate_key() {
         let db = MockDatabase::new(DatabaseBackend::Postgres)

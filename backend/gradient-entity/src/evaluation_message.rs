@@ -10,7 +10,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::ids::{EvaluationId, EvaluationMessageId};
 
-/// Severity level of an evaluation message, matching Nix's verbosity levels.
 #[derive(
     Debug, Clone, Default, PartialEq, Eq, Hash, DeriveActiveEnum, EnumIter, Deserialize, Serialize,
 )]
@@ -25,18 +24,8 @@ pub enum MessageLevel {
     Notice,
 }
 
-/// A single message emitted during an evaluation - error, warning, or notice.
-///
-/// Messages with no `entry_point_message` rows are **evaluation-scoped** (e.g.
-/// flake fetch failures, global warnings). Messages joined via `entry_point_message`
-/// are attributed to specific attribute paths.
-///
-/// `source` carries where the message originated:
-/// - `"flake-prefetch"` - `nix flake prefetch` or SSH fetch failure
-/// - `"nix-eval"` - wildcard listing or path resolution (not attr-specific)
-/// - `"nix-eval:<attr>"` - resolution of a specific attribute path
-/// - `"dep-graph"` - dependency graph walk error
-/// - `"db-insert"` - internal: batch insert failure
+/// Messages without `entry_point_message` rows are evaluation-scoped. `source` is one of
+/// `flake-prefetch`, `nix-eval`, `nix-eval:<attr>`, `dep-graph` or `db-insert`.
 #[derive(Clone, Debug, Default, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
 #[sea_orm(table_name = "evaluation_message")]
 pub struct Model {

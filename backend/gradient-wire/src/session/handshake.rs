@@ -4,15 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Pure handshake state machine.
-//!
-//! Models the four states of an inbound proto handshake:
-//! `Opening -> Greeted -> Authenticated -> Registered`. The FSM has no I/O
-//! dependency - it only sequences which `ClientMessage`/`ServerMessage`
-//! pairs are valid at each step. Drivers (e.g. `crate::server::accept` or
-//! gradient-server's existing session handler) feed it observed messages
-//! and act on its emitted intent.
-
 use anyhow::Context;
 
 use crate::messages::{
@@ -21,7 +12,6 @@ use crate::messages::{
 use crate::session::frame::{ProtoSocket, recv_server_msg, send_client_msg};
 use crate::traits::{AuthOutcome, CapabilitiesProvider, PeerAuthority, PeerIdentity};
 
-/// State markers - zero-sized; the FSM is encoded entirely in the type.
 #[derive(Debug, PartialEq, Eq, Copy, Clone)]
 pub struct Opening;
 
@@ -43,23 +33,13 @@ pub struct Registered {
     pub negotiated: GradientCapabilities,
 }
 
-/// Emitted by the FSM as it advances. Drivers translate these into wire I/O.
 #[derive(Debug, PartialEq, Clone)]
 pub enum Intent {
-    /// Send this message to the peer. Boxed to keep `Intent` small even
-    /// though some `ServerMessage` variants (e.g. `NarPush`) are sizeable.
     Send(Box<ServerMessage>),
-    /// Advance state silently (no message emitted).
     Advance,
-    /// Reject the peer with a wire code and reason; the driver forwards the
-    /// `Reject` and closes the socket.
     Reject { code: u16, reason: String },
 }
 
-/// Pure transition: `Opening` on receipt of `InitConnection`.
-///
-/// Returns either the new `Greeted` state or a `Reject` intent if the
-/// message is malformed (wrong variant, version mismatch, …).
 pub fn on_init_connection(
     _: Opening,
     msg: ClientMessage,
@@ -90,10 +70,8 @@ pub fn on_init_connection(
     })
 }
 
-/// Pure transition: `Greeted` on receipt of `AuthResponse`. The caller is
-/// responsible for having validated the token plaintexts against the peer's
-/// stored argon2 hash before calling this. `negotiated` is the capabilities
-/// set the caller has decided on (intersection of advertised and authorized).
+/// The caller must validate the token plaintexts against the stored argon2 hash before this call.
+/// `negotiated` is the intersection of advertised and authorized capabilities.
 pub fn on_auth_response(
     greeted: Greeted,
     msg: ClientMessage,
@@ -111,8 +89,6 @@ pub fn on_auth_response(
     })
 }
 
-/// Pure transition: `Authenticated -> Registered` after the driver has sent
-/// `InitAck` and recorded the peer in any session registry it maintains.
 pub fn to_registered(auth: Authenticated) -> Registered {
     Registered {
         peer_id: auth.peer_id,
@@ -120,7 +96,6 @@ pub fn to_registered(auth: Authenticated) -> Registered {
     }
 }
 
-/// Result returned by both handshake roles on success.
 #[derive(Debug, Clone)]
 pub struct HandshakeResult {
     pub peer_id: String,
@@ -130,14 +105,6 @@ pub struct HandshakeResult {
     pub server_version: u16,
 }
 
-/// Run the peer side of the handshake on an established socket.
-/// Sends `InitConnection`, receives `AuthChallenge`, sends `AuthResponse`
-/// with tokens for the challenged peers, receives `InitAck`.
-///
-/// Used by:
-/// - gradient-worker dialing gradient-server (worker->server, standard).
-/// - gradient-worker accepting from gradient-server (server->worker, discoverable mode).
-/// - gradient-proxy dialing its upstream gradient-server (proxy -> server).
 pub async fn as_peer<I, C>(
     socket: &mut ProtoSocket,
     identity: &I,
@@ -193,20 +160,6 @@ where
     })
 }
 
-/// Run the authority side of the handshake on an established socket.
-/// Receives `InitConnection`, sends `AuthChallenge` with the peers the
-/// authority wants verified (an empty challenge is valid in open and
-/// base-worker modes), receives `AuthResponse`, lets the authority decide
-/// accept or reject, negotiates capabilities, sends `InitAck`.
-///
-/// Used by:
-/// - gradient-server accepting worker connections (axum-WS path).
-/// - gradient-server dialing discoverable workers.
-///
-/// Registration in a session registry is the caller's post-handshake step -
-/// it typically hands back per-session channels a handshake result cannot
-/// carry. On any failure the peer receives a `ServerMessage::Reject` with the
-/// authority's code and this returns Err.
 pub async fn as_authority<A>(
     socket: &mut ProtoSocket,
     authority: &A,

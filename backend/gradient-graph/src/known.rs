@@ -4,23 +4,14 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Which derivations an evaluation walk may prune, read from the pool beside the
-//! graph writer.
-
 use gradient_db::WorkerDb;
 use gradient_types::*;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 
-/// The prunable-derivations lookup. Any error propagates: the caller prunes nothing.
-///
-/// A derivation is prunable when its subtree is recorded: `walked` says its own
-/// record is in, `unwalked_inputs = 0` says every input's is too, transitively. The
-/// second bit is what makes the first one safe against a walk abandoned between
-/// batches; [`gradient_db::graph::walk_completeness`] keeps it true, and both are cleared
-/// where a record is lost ([`gradient_db::graph::can_start::unwalk_derivations`], the GC's orphan
-/// reclaim). Build and cache state say nothing about whether the graph is recorded,
-/// so keying on them re-walked a complete record for as long as its shared build had not
-/// succeeded.
+/// A derivation is prunable once `walked` and `unwalked_inputs = 0` both hold.
+/// The second flag is keeping pruning safe against a walk abandoned between batches.
+/// Build and cache state are not telling whether the graph is recorded.
+/// Keying on them re-walked complete records until their shared build succeeded.
 pub(crate) async fn prunable(
     db: &WorkerDb,
     drv_hashes: Vec<String>,
@@ -42,9 +33,6 @@ mod tests {
     use gradient_db::WorkerDb;
     use sea_orm::{DatabaseBackend, MockDatabase};
 
-    /// A walked derivation above a stub is not prunable: its record is written,
-    /// its subtree is not, and pruning there is exactly how an abandoned walk
-    /// strands the stubs for every walk after it.
     #[tokio::test]
     async fn only_a_recorded_subtree_is_prunable() {
         let db = MockDatabase::new(DatabaseBackend::Postgres)

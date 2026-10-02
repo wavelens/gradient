@@ -40,14 +40,8 @@ use std::sync::Arc;
 
 #[derive(Deserialize, Default)]
 pub struct EvaluateRequest {
-    /// Optional mode controlling how the evaluation is triggered.
-    /// `"restart_failed"` skips fetch+eval and re-queues failed builds from the
-    /// most recent evaluation. Omit or `null` for a normal evaluation.
     pub mode: Option<String>,
-    /// Exact commit to evaluate, 40 hex characters. Omit to take the branch
-    /// head, which is what a normal CI run does.
     pub commit: Option<String>,
-    /// Attribute path or wildcard to evaluate instead of the task's own.
     pub attr: Option<String>,
     pub walk: Option<WalkMode>,
 }
@@ -63,9 +57,6 @@ impl EvaluateRequest {
     }
 }
 
-/// Builds one [`EvaluationSummary`] per evaluation using grouped DB rollups
-/// (status counts, message counts) plus chunked lookups for triggers, commits,
-/// and the triggering user - a fixed number of round-trips regardless of size.
 pub(super) async fn evaluations_to_summaries(
     state: &Arc<ServerState>,
     evaluations: Vec<MEvaluation>,
@@ -152,8 +143,6 @@ pub(super) async fn evaluations_to_summaries(
             .started_by
             .and_then(|uid| user_names.get(&uid).cloned());
 
-        // PR number lives in `source_comment` for every PR trigger, or in an
-        // approval `waiting_reason` for gated PRs; both expose it as raw JSON.
         let pr_number = evaluation
             .source_comment
             .as_ref()
@@ -190,14 +179,10 @@ pub(super) async fn evaluations_to_summaries(
     Ok(out)
 }
 
-/// `last_check_at` uses `NULL_TIME` as a "re-check immediately" sentinel;
-/// surface that as `None` instead of an epoch timestamp.
 fn checked_at(t: chrono::NaiveDateTime) -> Option<chrono::NaiveDateTime> {
     (t != *gradient_types::NULL_TIME).then_some(t)
 }
 
-/// First non-blank line of `s`, trimmed, truncated to `max` chars; `None` when
-/// `s` has no non-blank line.
 fn first_line_truncated(s: &str, max: usize) -> Option<String> {
     let line = s.lines().find(|l| !l.trim().is_empty())?.trim();
     Some(line.chars().take(max).collect())
@@ -280,10 +265,6 @@ pub async fn post_task_evaluate(
 
     let pinned_run = pinned.is_some();
 
-    // A pinned commit skips the branch-head lookup entirely; the fetch inside
-    // `get_commit_info` is what proves the commit is actually reachable, so an
-    // unknown one is refused here instead of queueing an evaluation that dies
-    // fetching.
     let (commit_hash, commit_message, author_name) = match pinned {
         Some(commit_hash) => {
             let commit = get_commit_info(&state.db(), &task, &commit_hash)
@@ -305,10 +286,6 @@ pub async fn post_task_evaluate(
             })?;
             let commit_hash = head.hash;
 
-            // A manual evaluation also bumps tracked flake inputs (OpenPr
-            // action). Self-gated: no-ops unless the task qualifies. A pinned
-            // run is deliberately excluded - it asks for one exact revision,
-            // not for the newest inputs.
             if let Err(e) = gradient_ci::trigger::maybe_trigger_input_update(
                 &state.web_db,
                 &task,
@@ -324,9 +301,8 @@ pub async fn post_task_evaluate(
         }
     };
 
-    // A pinned run is an out-of-band request, typically from a deployment tool.
-    // Marking it concurrent keeps it from queueing behind - or aborting - the
-    // task's own CI run, which owns the single non-concurrent slot.
+    // A pinned run is an out-of-band request, typically from a deployment tool. Marking it
+    // concurrent is keeping it from queueing behind or aborting the task's own CI run.
     let concurrent = pinned_run;
 
     let eval = gradient_ci::trigger_evaluation(
@@ -366,10 +342,6 @@ pub async fn post_task_evaluate(
     Ok(ok_json(eval.id.to_string()))
 }
 
-/// `GET /tasks/{project}/{task}/evaluations`
-///
-/// Returns the `keep_evaluations` most recent evaluations for the task,
-/// newest first. Identical access rules as other task endpoints.
 pub async fn get_task_evaluations(
     state: State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
@@ -398,8 +370,6 @@ pub async fn get_task_evaluations(
             .filter(|h| h.len() == COMMIT_HASH_BYTES)
             .ok_or_else(|| WebError::bad_request("`commit` must be a 40-character hex hash"))?;
 
-        // A fresh `commit` row is written per evaluation, so one hash maps to
-        // many ids; resolve them first rather than joining on every scan.
         let commit_ids: Vec<CommitId> = ECommit::find()
             .filter(CCommit::Hash.eq(hash))
             .all(&state.web_db)
@@ -421,8 +391,6 @@ pub async fn get_task_evaluations(
 
     let query = query.order_by_desc(CEvaluation::CreatedAt);
 
-    // Wildcard coverage cannot be expressed in SQL, so an `attr` search reads a
-    // bounded window of the SQL-filtered rows and matches them here.
     let evaluations = match attr {
         Some(attr) => query
             .limit(ATTR_SCAN_LIMIT)
@@ -524,27 +492,15 @@ pub async fn get_task_details(
 #[derive(Deserialize, Debug, Default)]
 pub struct EvaluationsQuery {
     pub limit: Option<u64>,
-    /// Full 40-character commit hash, hex.
     pub commit: Option<String>,
-    /// `active`, `terminal`, or one exact status name (`Building`, `Failed`, ...).
     pub status: Option<String>,
-    /// Concrete attribute path. Matches evaluations whose *wildcard* covers it,
-    /// which is set when the row is created and so answers at every status -
-    /// unlike entry points, which only exist once derivations have resolved.
     pub attr: Option<String>,
 }
 
-/// A git commit hash is 40 hex characters, so 20 bytes once decoded.
 const COMMIT_HASH_BYTES: usize = 20;
 
-/// How many rows an `attr` search reads before matching in Rust. Evaluations are
-/// GC-bounded per task by `keep_evaluations`, so this only truncates a task
-/// configured to retain more than this, and only for the oldest of them.
 const ATTR_SCAN_LIMIT: u64 = 1000;
 
-/// Validates the `attr` filter as a concrete attribute path: one of the paths a
-/// wildcard may cover, carrying no pattern syntax of its own. Segments inside
-/// double quotes are left alone so an attribute genuinely named `*` still works.
 fn parse_attr_filter(attr: &str) -> WebResult<&str> {
     let unquoted_has = |c: char| attr.split('"').step_by(2).any(|part| part.contains(c));
 
@@ -557,7 +513,6 @@ fn parse_attr_filter(attr: &str) -> WebResult<&str> {
     Ok(attr)
 }
 
-/// Resolves the `status` filter to the set of statuses it names.
 fn parse_status_filter(raw: &str) -> WebResult<Vec<EvaluationStatus>> {
     match raw {
         "active" => Ok(EvaluationStatus::ACTIVE.to_vec()),
@@ -573,11 +528,8 @@ fn parse_status_filter(raw: &str) -> WebResult<Vec<EvaluationStatus>> {
     }
 }
 
-/// Every entry point on a page is a seed of one dependency-closure walk, and the
-/// walk carries the seed through the recursion, so its cost is the page size
-/// times the evaluation's build graph. A page of 100 over a 74-entry-point
-/// NixOS flake measured 93 s a call and 80% of the database's time; the tail is
-/// paged in when needed and only for pages someone scrolls to.
+/// Every entry point on a page is seeding one dependency-closure walk. A page of 100 over a
+/// 74-entry-point NixOS flake measured 93 s a call and 80% of the database's time.
 const ENTRY_POINTS_PAGE: u64 = 25;
 const ENTRY_POINTS_PAGE_MAX: u64 = 500;
 
@@ -588,8 +540,6 @@ pub struct EntryPointsQuery {
     pub offset: Option<u64>,
 }
 
-/// The page a request asked for, clamped to the server's maximum; an absent or
-/// zero limit is the default page.
 fn page_bounds(limit: Option<u64>, offset: Option<u64>) -> (u64, u64) {
     let limit = match limit {
         Some(0) | None => ENTRY_POINTS_PAGE,
@@ -630,9 +580,6 @@ pub async fn get_task_entry_points(
         return Err(WebError::not_found("Evaluation"));
     }
 
-    // An entry point with no `build_job` in this evaluation has no build to report,
-    // and the summary drops it; the page and the total have to agree on that or
-    // "show more" can never reach the total.
     let has_build_job = SeaQuery::select()
         .column(CBuildJob::Derivation)
         .from(gradient_entity::build_job::Entity)
@@ -665,13 +612,6 @@ pub async fn get_task_entry_points(
     }))
 }
 
-// ── Entry-point bulk data loader ─────────────────────────────────────────────
-
-/// All DB data needed to render a list of [`EntryPointSummary`] records.
-///
-/// Loaded in one pass via `load` to avoid per-entry-point round-trips. One entry per
-/// the entry point's derivation; the `derivation_build` shared build carries
-/// status and the per-eval `build_job` carries the public build id.
 struct EntryPointRelatedData {
     shared_builds: HashMap<DerivationId, MDerivationBuild>,
     build_jobs: HashMap<DerivationId, BuildJobId>,
@@ -683,9 +623,6 @@ struct EntryPointRelatedData {
     deps_total: HashMap<EntryPointId, i64>,
 }
 
-/// Groups output rows into `output name -> full /nix/store path` per derivation.
-/// Rows whose store path the evaluator never resolved carry the
-/// [`UNKNOWN_OUTPUT_HASH`] sentinel and are dropped: there is no path to report.
 fn output_paths_by_derivation(
     rows: &[MDerivationOutput],
 ) -> HashMap<DerivationId, BTreeMap<String, String>> {
@@ -757,12 +694,6 @@ impl EntryPointRelatedData {
             .map(|a| a.derivation)
             .collect();
 
-        // Output rows are written at eval time from the resolved `.drv`, so they
-        // exist regardless of build status; `build_status` is what tells a caller
-        // whether the path is realised. `hash` falls back to the literal
-        // "unknown" when the evaluator could not parse the output path (floating
-        // CA outputs), and nothing ever rewrites it - skip those rather than
-        // hand out a path that cannot exist.
         let output_rows = gradient_db::fetch_in_chunks(&drv_ids, |chunk| async move {
             EDerivationOutput::find()
                 .filter(CDerivationOutput::Derivation.is_in(chunk))
@@ -773,9 +704,6 @@ impl EntryPointRelatedData {
 
         let outputs = output_paths_by_derivation(&output_rows);
 
-        // Determine which derivations have at least one build_product. Only
-        // built derivations can have products, so the product lookup stays
-        // scoped to their outputs.
         let has_products: HashMap<DerivationId, bool> = {
             let built: Vec<&MDerivationOutput> = output_rows
                 .iter()
@@ -792,7 +720,6 @@ impl EntryPointRelatedData {
                 })
                 .await?;
                 for bp in products {
-                    // Map back from output -> derivation.
                     if let Some(output) = built.iter().find(|o| o.id == bp.derivation_output) {
                         m.insert(output.derivation, true);
                     }
@@ -801,8 +728,6 @@ impl EntryPointRelatedData {
             m
         };
 
-        // Latest attempt per shared build, batched into one DISTINCT ON query, then
-        // re-per derivation for the summary lookup.
         let attempts: HashMap<DerivationId, MBuildAttempt> = {
             let shared_build_ids: Vec<DerivationBuildId> =
                 shared_builds.values().map(|a| a.id).collect();
@@ -891,25 +816,13 @@ impl EntryPointRelatedData {
     }
 }
 
-// ── Entry-point download (stable permalink) ──────────────────────────────────
-
 #[derive(Deserialize)]
 pub struct EntryPointDownloadQuery {
-    /// Nix attribute path of the entry point, e.g. `packages."x86_64-linux".hello`.
-    /// URL-encode `"` as `%22` when constructing static links.
     pub eval: String,
-    /// Filename listed in `nix-support/hydra-build-products`.
     pub filename: String,
-    /// API key (`GRADxxxx`) or JWT.  Required when the owning project is private.
-    /// Pass via this parameter for static/permalink URLs; omit if you already have a
-    /// session cookie or `Authorization: Bearer` header.
     pub token: Option<String>,
 }
 
-/// Look up `build_product` rows for the given outputs, find the one whose
-/// `name` matches `filename`, and stream its bytes from `nar_storage`.
-///
-/// Returns `None` when no matching product is found.
 async fn serve_hydra_artifact(
     state: &Arc<ServerState>,
     build_outputs: Vec<MDerivationOutput>,
@@ -1008,14 +921,6 @@ async fn serve_hydra_artifact(
     Ok(None)
 }
 
-/// Downloads the build output for a specific entry point from the task's
-/// newest-commit evaluation (`task.last_evaluation`), finds the entry point
-/// matching `eval`, and serves the named file from `nix-support/hydra-build-products`.
-///
-/// Authentication:
-/// - Public projects: no credentials required.
-/// - Private projects: supply `?token=GRADxxxx` (API key) or a JWT, **or** authenticate
-///   via the `Authorization: Bearer` header / `jwt_token` session cookie.
 pub async fn get_entry_point_download(
     state: State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
@@ -1035,9 +940,6 @@ pub async fn get_entry_point_download(
         .await?
         .or_not_found("Task")?;
 
-    // Resolve caller identity from ?token= (API key / JWT) or existing session.
-    // When a token is supplied it provides its own ApiKeyContext; otherwise the
-    // middleware-supplied extension applies.
     let (resolved_user, resolved_key) = if let Some(token_str) = params.token {
         let decoded = crate::authorization::decode_jwt(State(Arc::clone(&state)), token_str)
             .await
@@ -1069,16 +971,12 @@ pub async fn get_entry_point_download(
         }
     }
 
-    // Newest-commit evaluation - `last_evaluation` over a query avoids a stale
-    // completed run shadowing the latest one (#185).
     let evaluation_id = task.last_evaluation.or_not_found("Evaluation")?;
     let evaluation = EEvaluation::find_by_id(evaluation_id)
         .one(&state.web_db)
         .await?
         .or_not_found("Evaluation")?;
 
-    // Entry point whose `eval` attribute path matches the query param.
-    // Axum URL-decodes the value automatically, so %22 -> " before this comparison.
     let ep = EEntryPoint::find()
         .filter(CEntryPoint::Evaluation.eq(evaluation.id))
         .filter(CEntryPoint::Eval.eq(&params.eval))
@@ -1098,7 +996,6 @@ pub async fn get_entry_point_download(
         return Err(WebError::not_found("File"));
     }
 
-    // Walk derivation outputs, locate the file via hydra-build-products.
     let build_outputs = EDerivationOutput::find()
         .filter(CDerivationOutput::Derivation.eq(ep.derivation))
         .all(&state.web_db)
@@ -1228,9 +1125,6 @@ mod search_tests {
         assert_eq!(grouped.len(), 2);
     }
 
-    /// The evaluator writes the sentinel when an output has no resolvable path
-    /// and nothing ever rewrites it, so reporting one would hand a deployment
-    /// tool `/nix/store/unknown-...`, which cannot exist.
     #[test]
     fn unresolved_output_paths_are_omitted() {
         let drv = DerivationId::now_v7();
@@ -1266,7 +1160,6 @@ mod search_tests {
         }
     }
 
-    /// A `*` inside quotes is an attribute literally named `*`, not a pattern.
     #[test]
     fn attr_filter_allows_a_quoted_star_segment() {
         assert!(parse_attr_filter(r#"packages.x86_64-linux."*""#).is_ok());

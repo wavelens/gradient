@@ -4,25 +4,16 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Failure classification - the one place an error becomes a
-//! [`BuildFailureKind`] on its way to the server.
-
 use gradient_wire::messages::BuildFailureKind;
 use gradient_worker_client::connection::{Unresponsive, WriterUnavailable};
 
 use crate::executor::eval::CorruptEvalCache;
 use crate::proto::prefetch::{CorruptCachedNar, MissingInputs, SubstituteNotOnUpstream};
 
-// ── BuildError ────────────────────────────────────────────────────────────────
-
-/// A build failure carrying its classification, so the dispatch layer can
-/// report the right `BuildFailureKind` to the server.
 #[derive(Debug)]
 pub struct BuildError {
     pub kind: BuildFailureKind,
     pub source: anyhow::Error,
-    /// For `BuildFailureKind::InputsUnavailable`: the required input store paths
-    /// the cache could not serve. Empty for every other kind.
     pub missing_paths: Vec<String>,
 }
 
@@ -50,15 +41,9 @@ impl BuildError {
     pub(crate) fn timeout(e: impl Into<anyhow::Error>) -> Self {
         Self::new(BuildFailureKind::Timeout, e.into())
     }
-    /// A substitute attempt missed: this worker could not pull the output from
-    /// cache. Never falls back to a local build (wrong-arch); the scheduler
-    /// re-dispatches or escalates to a real build.
     pub(crate) fn substitute_unavailable(e: impl Into<anyhow::Error>) -> Self {
         Self::new(BuildFailureKind::SubstituteUnavailable, e.into())
     }
-    /// Prefetch found required inputs the gradient cache cannot serve. Carries
-    /// the offending paths so the server demotes them and re-queues their
-    /// producers; terminal for this build.
     pub(crate) fn inputs_unavailable(
         missing_paths: Vec<String>,
         e: impl Into<anyhow::Error>,
@@ -69,10 +54,9 @@ impl BuildError {
             missing_paths,
         }
     }
-    /// The server sent `AbortJob` while the daemon was building. Reported as
-    /// its own kind, never `Permanent`: a `Permanent` build failure is recorded
-    /// as `BuilderNonzero`, which permanently excludes the shared build from every
-    /// requeue even though `Aborted` is a requeueable status (#572).
+    /// An abort must never be reported as `Permanent`.
+    /// The server is recording a `Permanent` failure as `BuilderNonzero`.
+    /// That status is excluding the shared build from every requeue (#572).
     pub(crate) fn aborted(drv_path: &str) -> Self {
         Self::new(
             BuildFailureKind::Aborted,
@@ -81,12 +65,6 @@ impl BuildError {
     }
 }
 
-// ── JobAborted ────────────────────────────────────────────────────────────────
-
-/// The job stopped because the server ordered it to. Carried as a typed error so
-/// [`wire_failure`] classifies it wherever the abort is noticed - inside the
-/// daemon log drain, at a NAR-push checkpoint, or between eval waves - instead of
-/// falling through to the unclassified-`Permanent` branch.
 #[derive(Debug)]
 pub struct JobAborted(pub String);
 
@@ -97,10 +75,6 @@ impl std::fmt::Display for JobAborted {
 }
 impl std::error::Error for JobAborted {}
 
-// ── Builder-message classification ────────────────────────────────────────────
-
-/// Best-effort OOM signature scan. OOM presents as a generic build failure but
-/// is transient (retry on a less-loaded builder).
 pub(super) fn looks_like_oom(msg: &str) -> bool {
     let l = msg.to_ascii_lowercase();
     l.contains("out of memory")
@@ -109,10 +83,9 @@ pub(super) fn looks_like_oom(msg: &str) -> bool {
         || l.contains("killed")
 }
 
-/// Signatures of a failure in the store or the daemon rather than in the
-/// derivation. These say nothing about whether the build *would* succeed, so
-/// treating them as deterministic strands the build: `Permanent` is never
-/// re-thawed, and everything wanting it cascades to `DependencyFailed`.
+/// These signatures are describing the store or the daemon, not the derivation.
+/// Treating them as `Permanent` would strand the build, because `Permanent` is never re-thawed.
+/// Everything wanting that build would then cascade to `DependencyFailed`.
 const INFRA_FAILURE_SIGNATURES: &[&str] = &[
     "is not valid",
     "does not exist in the store",
@@ -124,15 +97,11 @@ const INFRA_FAILURE_SIGNATURES: &[&str] = &[
     "broken pipe",
 ];
 
-/// Best-effort scan for a store/daemon failure. Matched on the raw message, so
-/// the ANSI escapes nix wraps its errors in cannot hide a signature.
 pub(super) fn looks_like_infra_failure(msg: &str) -> bool {
     let l = msg.to_ascii_lowercase();
     INFRA_FAILURE_SIGNATURES.iter().any(|s| l.contains(s))
 }
 
-/// Classify a builder-reported failure message: OOM or an infrastructure fault
-/// -> Transient, otherwise a real build error -> Permanent.
 pub(super) fn classify_build_error(msg: &str) -> BuildFailureKind {
     if looks_like_oom(msg) || looks_like_infra_failure(msg) {
         BuildFailureKind::Transient
@@ -141,17 +110,6 @@ pub(super) fn classify_build_error(msg: &str) -> BuildFailureKind {
     }
 }
 
-// ── Transfer-error classification ─────────────────────────────────────────────
-
-/// Classify an input-prefetch failure.
-///
-/// A "required inputs not in cache" miss is terminal and self-healing
-/// server-side: forward the paths so the server demotes them and re-queues
-/// their producers. A cached NAR that fails integrity (its bytes don't match
-/// the recorded nar_hash, e.g. a non-reproducible local build desynced from
-/// upstream-substitute metadata) is the same class: report the path so the
-/// server demotes the corrupt object and rebuilds it. Every other prefetch
-/// error is infrastructure-transient.
 pub(super) fn classify_prefetch_error(build_id: &str, e: anyhow::Error) -> BuildError {
     tracing::error!(%build_id, error = %e, "input prefetch failed; aborting build");
     if let Some(mi) = e.downcast_ref::<MissingInputs>() {
@@ -163,15 +121,11 @@ pub(super) fn classify_prefetch_error(build_id: &str, e: anyhow::Error) -> Build
     }
 }
 
-/// Classify a Substitute failure.
 pub(super) fn classify_substitute_failure(build_id: &str, e: anyhow::Error) -> BuildError {
     if e.chain().any(|c| c.is::<SubstituteNotOnUpstream>()) {
         tracing::warn!(%build_id, error = %e, "substitute: output on no upstream; SubstituteUnavailable");
         BuildError::substitute_unavailable(e)
     } else if let Some(mi) = e.chain().find_map(|c| c.downcast_ref::<MissingInputs>()) {
-        // The upstream advertised the path but the object GET 404'd: surface
-        // the paths so the server's demote/repair self-heal clears the
-        // stale record instead of this build retrying against it forever.
         tracing::warn!(%build_id, error = %e, "substitute: advertised NAR object missing; InputsUnavailable");
         BuildError::inputs_unavailable(mi.0.clone(), e)
     } else if let Some(corrupt) = e.chain().find_map(|c| c.downcast_ref::<CorruptCachedNar>()) {
@@ -183,9 +137,6 @@ pub(super) fn classify_substitute_failure(build_id: &str, e: anyhow::Error) -> B
     }
 }
 
-/// `FixedOutputMismatch` and `UnsupportedFetch` are permanent: a retry fetches the
-/// same bytes. A `.drv` our cache lacks is `InputsUnavailable`; everything else is
-/// the network.
 pub(super) fn classify_download_failure(build_id: &str, e: anyhow::Error) -> BuildError {
     use crate::executor::download::{FixedOutputMismatch, UnsupportedFetch};
 
@@ -205,22 +156,13 @@ pub(super) fn classify_download_failure(build_id: &str, e: anyhow::Error) -> Bui
     BuildError::transient(e)
 }
 
-// ── Wire mapping ──────────────────────────────────────────────────────────────
-
-/// Map a finished job's error to the `(kind, missing_paths)` pair reported in
-/// `ClientMessage::JobFailed`. Anything that isn't a [`BuildError`] (eval-job
-/// failures, plumbing errors) is an explicit, logged Permanent fallthrough -
-/// never a silent default.
 pub(crate) fn wire_failure(e: &anyhow::Error) -> (BuildFailureKind, Vec<String>) {
-    // Eval-job corruption: carry the blob fingerprint so the server purges it.
     if let Some(c) = e.chain().find_map(|s| s.downcast_ref::<CorruptEvalCache>()) {
         return (
             BuildFailureKind::CorruptEvalCache,
             vec![c.fingerprint.clone()],
         );
     }
-    // An abort noticed outside the build itself (NAR push checkpoints, eval wave
-    // boundaries) arrives as a bare `JobAborted`, not wrapped in a `BuildError`.
     if e.chain().any(|s| s.is::<JobAborted>()) {
         return (BuildFailureKind::Aborted, Vec::new());
     }
@@ -257,10 +199,6 @@ mod tests {
         assert!(!looks_like_oom("error: undefined reference to `foo'"));
     }
 
-    /// The failure that took down eval `019fcf38`: a single missing input path
-    /// was classified `Permanent`, so it was never retried and cascaded into
-    /// 2,687 `DependencyFailed` parents. A store path the daemon refuses is
-    /// infrastructure, never a deterministic property of the derivation.
     #[test]
     fn a_store_or_daemon_error_is_transient_not_permanent() {
         for msg in [
@@ -280,7 +218,6 @@ mod tests {
         }
     }
 
-    /// The escape codes nix wraps its messages in must not hide a signature.
     #[test]
     fn ansi_coloured_daemon_errors_are_still_recognised() {
         let coloured = "build failed: \u{1b}[31;1merror:\u{1b}[0m path \
@@ -288,8 +225,6 @@ mod tests {
         assert_eq!(classify_build_error(coloured), BuildFailureKind::Transient);
     }
 
-    /// A real compile failure stays terminal: misrouting these to `Transient`
-    /// would retry every broken derivation until its attempt budget ran out.
     #[test]
     fn genuine_build_errors_stay_permanent() {
         for msg in [
@@ -332,11 +267,6 @@ mod tests {
         );
     }
 
-    /// An abort must never reach the server as `Permanent`: that is stored as
-    /// `BuilderNonzero` and permanently blocks the shared build from being requeued
-    /// (#572). Both shapes are covered - the `BuildError` raised inside the
-    /// daemon log drain, and the bare `JobAborted` raised at a NAR-push
-    /// checkpoint or an eval wave boundary.
     #[test]
     fn an_abort_is_reported_as_aborted_not_permanent() {
         let from_build: anyhow::Error = BuildError::aborted("/nix/store/x.drv").into();
@@ -390,9 +320,6 @@ mod tests {
         assert_eq!(be.missing_paths, vec!["/nix/store/a-b".to_owned()]);
     }
 
-    /// A NAR that does not hash to its recorded `nar_hash` is the same bytes on
-    /// every retry: prefetch and Substitute both hand the path to the server's
-    /// demote self-heal instead of retrying it as Transient.
     #[test]
     fn a_corrupt_nar_is_inputs_unavailable_in_prefetch_and_substitute() {
         use crate::proto::prefetch::CorruptCachedNar;
@@ -408,10 +335,6 @@ mod tests {
         }
     }
 
-    /// Only a genuine "not on any upstream" miss escalates; a transient passthrough
-    /// timeout (Pull RPC / NAR download / presigned PUT) retries as a substitute
-    /// instead of counting toward miss-escalation - two transient timeouts must
-    /// not turn a build available in a cache into a from-scratch one.
     #[test]
     fn substitute_wrapped_and_transient_classification() {
         use crate::proto::prefetch::SubstituteNotOnUpstream;

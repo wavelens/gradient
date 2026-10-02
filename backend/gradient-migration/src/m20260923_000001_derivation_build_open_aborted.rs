@@ -4,9 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! An aborted anchor is open: an abort is not a verdict, and a live want thaws
-//! it the way it thaws a skipped one. The open index's predicate follows
-//! `graph_sql::open_predicate`, which now stops only at the terminal failures.
+//! The open index predicate must follow `graph_sql::open_predicate`. An aborted shared build is
+//! open because an abort is not a verdict.
 
 use sea_orm_migration::prelude::*;
 use sea_orm_migration::sea_orm::ConnectionTrait;

@@ -15,29 +15,17 @@ use sea_orm::{ConnectionTrait, DatabaseTransaction, DbErr, QueryResult, Transact
 use std::sync::LazyLock;
 
 crate::sql! {
-    /// A `Created` shared build nothing needs and no entry point names: a build-time
-    /// dependency of something we pass through, which will never be built and is not
-    /// waiting for anything either. `Skipped` is what settles it on the board.
-    ///
-    /// Bounded by the ids the need move reports, so the sweep's table-wide form
-    /// below is the only pass that reads the whole table.
     SKIP_UNWANTED = "UPDATE derivation_build db SET status = 10, updated_at = (now() AT TIME ZONE 'UTC') \
          WHERE db.derivation = ANY($1::uuid[]) AND db.status = 0 AND NOT db.wanted \
            AND NOT EXISTS (SELECT 1 FROM entry_point ep WHERE ep.derivation = db.derivation) \
          RETURNING db.derivation, 0 AS from_status, 10 AS to_status",
         params = [DerivationIds(64)];
 
-    /// The mirror, for `Skipped` and `Aborted` alike: the need came back, so the
-    /// shared build is pending work again. It goes to `Created` and not to `Queued`, the
-    /// promote that follows reads the gates, and an abort's attempts are no verdict.
     THAW_WANTED = "UPDATE derivation_build db SET status = 0, attempt = 0, updated_at = (now() AT TIME ZONE 'UTC') \
          WHERE db.derivation = ANY($1::uuid[]) AND db.status IN (5, 10) AND db.wanted \
          RETURNING db.derivation, old.status AS from_status, 0 AS to_status",
         params = [DerivationIds(64)];
 
-    /// [`SKIP_UNWANTED`] over the whole table: the sweep's backstop for a lost
-    /// move, and the backfill for every shared build that was already settled when the
-    /// status existed.
     SKIP_UNWANTED_ALL = "UPDATE derivation_build db SET status = 10, updated_at = (now() AT TIME ZONE 'UTC') \
          WHERE db.status = 0 AND NOT db.wanted \
            AND NOT EXISTS (SELECT 1 FROM entry_point ep WHERE ep.derivation = db.derivation) \
@@ -52,7 +40,6 @@ crate::sql! {
         tier = Sweep;
 }
 
-/// Settle every `Created` shared build among `candidates` that nothing needs.
 async fn skip_unwanted<C: ConnectionTrait>(
     db: &C,
     candidates: &[DerivationId],
@@ -67,8 +54,6 @@ async fn skip_unwanted<C: ConnectionTrait>(
     ))
 }
 
-/// Wake every `Skipped` or `Aborted` shared build among `candidates` that something
-/// wants again.
 async fn thaw_wanted<C: ConnectionTrait>(
     db: &C,
     candidates: &[DerivationId],
@@ -83,8 +68,6 @@ async fn thaw_wanted<C: ConnectionTrait>(
     ))
 }
 
-/// The sweep's table-wide pair, run after the need recount so both read a
-/// corrected column. Returns every row either moved.
 pub async fn settle_skipped<C: ConnectionTrait>(db: &C) -> Result<Vec<TransitionChange>, DbErr> {
     let mut changes = returned_transitions(db.query_all_raw(THAW_WANTED_ALL.stmt()).await?);
     changes.extend(returned_transitions(
@@ -94,22 +77,6 @@ pub async fn settle_skipped<C: ConnectionTrait>(db: &C) -> Result<Vec<Transition
     Ok(changes)
 }
 
-/// Table-wide, seeded from every entry point: the backstop for a lost update and
-/// the backfill the migration deliberately does not carry.
-///
-/// Absolute rather than incremental for the reason [`seed_blocking_deps`] is: an
-/// adjustment cannot express "this shared build keeps its need through a different
-/// parent", and a shared build that keeps it re-wants everything below it, which the
-/// walk's downward step computes for free. It returns each row it changed WITH its
-/// new value, so one statement serves a gain and a loss and no caller has to know
-/// which it caused.
-///
-/// Every open shared build is rewritten and nothing else. A settled shared build keeps whatever
-/// it carried, nothing reads it there, and the event that opens it again updates
-/// it as a root. A `Completed` shared build whose closure has a missing dependency is open, and its
-/// value is what the bounded update below it reads to seed the missing dependency. The scope is
-/// the whole open table by design, so the scan the planner answers it with is the
-/// right plan and the tier says so.
 pub(crate) static RECOUNT_WANTED_SQL: LazyLock<String> = LazyLock::new(|| {
     format!(
         "WITH RECURSIVE {cte} \
@@ -124,9 +91,6 @@ pub(crate) static RECOUNT_WANTED_SQL: LazyLock<String> = LazyLock::new(|| {
     )
 });
 
-/// The roots of the need flag: every open shared build an entry point of a retained evaluation
-/// names, with its builder bit. A fetchable entry point seeds nothing, since what is
-/// below it is served from our cache.
 fn open_entry_points() -> String {
     format!(
         "SELECT NULL::uuid, db.derivation, ({builder}) FROM entry_point ep \
@@ -144,9 +108,6 @@ crate::sql_lazy! {
         flags = [Walk];
 }
 
-/// Rewrite every shared build whose need flag drifted. Returns how many disagreed, which is
-/// the sweep's `need_drift`: a healthy fleet reports zero, and a number that keeps
-/// coming back names a mover that is not recomputing what it changed.
 pub async fn recount_wanted<C>(db: &C) -> Result<u64, DbErr>
 where
     C: TransactionTrait<Transaction = DatabaseTransaction>,
@@ -158,8 +119,6 @@ where
     Ok(rows.len() as u64)
 }
 
-/// What a bounded update moved: the shared builds that gained need and the ones that
-/// lost it, which [`settle_need`] thaws and promotes, or releases and skips.
 #[derive(Debug, Default)]
 pub struct NeedMoved {
     pub gained: Vec<DerivationId>,
@@ -167,20 +126,11 @@ pub struct NeedMoved {
 }
 
 static UPDATE_NEED_SQL: LazyLock<String> = LazyLock::new(|| {
-    // The roots enter the region as builders so the walk steps out of them once even
-    // where they have just stopped being one; everything below is stepped through
-    // only while it is.
     let region = crate::graph::walks::open_closure_cte_body(
         "region",
         "SELECT NULL::uuid AS evaluation, unnest($1::uuid[]) AS derivation, true AS builder",
         None,
     );
-    // The planner sizes the region from the root count, far past its real size, and
-    // a membership subplan it will not hash scans the whole region per probe. Every
-    // region test below is a join over whole sets instead; the parent lookup stays a
-    // fenced index probe per member. It needs what the walk's own step would: an
-    // open, wanted parent outside the region, over a runtime dependency from anything
-    // and over any edge from a builder.
     let entered = format!(
         "entered(derivation) AS (SELECT pe.dependency FROM region r, \
          LATERAL (SELECT e.derivation AS parent, e.dependency, e.kind \
@@ -221,13 +171,10 @@ crate::sql_lazy! {
 }
 
 crate::sql! {
-    /// Apply what [`UPDATE_NEED`] read, as values rather than as a membership
-    /// test. `WHERE db.derivation IN (SELECT derivation FROM region)` is a predicate
-    /// the planner may answer by reading every shared build and filtering, and it does: a
-    /// recursive CTE carries no row estimate worth believing, so a region of a few
-    /// dozen loses to a sequential scan of the whole table. A bound array estimates
-    /// small, drives a nested loop over the unique index, and takes its row locks in
-    /// the derivation order the walk sorted them into.
+    /// The region is applied as bound arrays, not as a membership test.
+    /// A recursive CTE is carrying no usable row estimate.
+    /// The planner would answer a membership test with a scan of every shared build.
+    /// A bound array is estimating small and is driving a nested loop over the unique index.
     WRITE_NEED = r#"
 UPDATE derivation_build db
 SET wanted = x.wanted, updated_at = (now() AT TIME ZONE 'UTC')
@@ -238,9 +185,6 @@ RETURNING db.derivation, db.wanted
         params = [DerivationIds(64), Bools(false, 64)];
 }
 
-/// Write the region's updated need flag and return the rows that disagreed, which is
-/// what [`update_need`] reports as gained and lost. An empty region writes
-/// nothing rather than binding two empty arrays.
 async fn write_need(
     txn: &DatabaseTransaction,
     region: &[QueryResult],
@@ -267,20 +211,6 @@ async fn write_need(
         .await
 }
 
-/// Update the need flag over `roots` and the pending closure below them, after an event
-/// that changed whether they carry it.
-///
-/// The region includes the roots: a thaw makes a shared build a builder again and its own
-/// stored value is as stale as its subtree's. Starts under [`lock_shared_builds`] on the
-/// roots; two updates over overlapping regions can still interleave, and the
-/// sweep's table-wide recount is the backstop that notices.
-///
-/// Two statements in one transaction: [`UPDATE_NEED`] walks and answers, and
-/// [`WRITE_NEED`] writes the answer it was handed. Naming the region inside the
-/// write instead costs a sequential scan of every shared build, for the reason written on
-/// that statement. The split widens the window between reading the graph and writing
-/// what it implied to a statement boundary; only the roots are locked either way, so
-/// the backstop is the same one, and the write still skips a row that already agrees.
 pub(crate) async fn update_need<C>(db: &C, roots: &[DerivationId]) -> Result<NeedMoved, DbErr>
 where
     C: ConnectionTrait + TransactionTrait<Transaction = DatabaseTransaction>,
@@ -314,14 +244,9 @@ where
     Ok(moved)
 }
 
-/// Settle the queue against what a [`update_need`] moved: thaw and queue what
-/// gained need, release and skip what lost it.
-///
-/// Order is load-bearing on both sides. A thaw has to precede the promote or the
-/// gate reads a `Skipped` row and passes it over; the skip has to follow the
-/// un-promote or it would try to settle a row still `Queued`. One owner, because a
-/// caller that got the order wrong would leave a shared build `Skipped` that something
-/// had started wanting again, and nothing else ever looks at it.
+/// Order is load-bearing on both sides.
+/// A thaw must precede the promote, or the gate would pass over a `Skipped` row.
+/// The skip must follow the un-promote, or it would try to settle a row still `Queued`.
 pub(crate) async fn settle_need<C: ConnectionTrait>(
     db: &C,
     moved: &NeedMoved,
@@ -339,17 +264,12 @@ pub(crate) async fn settle_need<C: ConnectionTrait>(
     Ok(changes)
 }
 
-/// What [`update_and_settle_need`] moved, and the queue transitions it settled
-/// the move with.
 #[derive(Debug, Default)]
 pub struct SettledNeed {
     pub moved: NeedMoved,
     pub changes: Vec<TransitionChange>,
 }
 
-/// Update the need flag below `roots` and settle the queue against what moved. The one
-/// way another crate moves the need flag, so no event can promote what gained it while
-/// leaving a `Skipped` or `Aborted` shared build frozen until the sweep.
 pub async fn update_and_settle_need<C>(db: &C, roots: &[DerivationId]) -> Result<SettledNeed, DbErr>
 where
     C: ConnectionTrait + TransactionTrait<Transaction = DatabaseTransaction>,
@@ -376,10 +296,6 @@ mod tests {
         ])
     }
 
-    /// `Skipped` is the projection of "Created, and nothing wants it". An entry
-    /// point is wanted by definition, so a named root can never be settled by it,
-    /// and the thaw goes back to `Created` rather than to the queue: the promote
-    /// that follows is what reads the gates.
     #[test]
     fn skip_moves_only_a_created_unwanted_shared_build_no_entry_point_names() {
         let sql = SKIP_UNWANTED.text();
@@ -401,10 +317,6 @@ mod tests {
         );
     }
 
-    /// The update is absolute and writes only the rows that disagree, so its
-    /// row count IS the drift and a healthy fleet writes nothing. It returns the
-    /// new value per row, because one statement serves both directions: what it
-    /// turned on is promoted and what it turned off is un-promoted.
     #[test]
     fn the_need_update_writes_only_disagreeing_rows() {
         let sql = norm(RECOUNT_WANTED_SQL.as_str());
@@ -426,11 +338,6 @@ mod tests {
         );
     }
 
-    /// The backstop is the last writer that can un-strand a subtree, so it writes
-    /// every open shared build: a `Skipped` one, which need returning thaws, and a
-    /// `Completed` one with a missing dependency in its closure, whose value seeds the bounded
-    /// update below it. Restricted to a status list it read the walk's correct
-    /// answer and then declined to apply it, twice over.
     #[test]
     fn the_backstop_rewrites_every_open_shared_build() {
         let sql = norm(RECOUNT_WANTED_SQL.as_str());
@@ -450,10 +357,6 @@ mod tests {
         );
     }
 
-    /// Every event that moves need settles the queue against it: a shared build that
-    /// gained need while `Skipped` or `Aborted` is thawed before the promote reads
-    /// its gate, and one that lost it is released and skipped, instead of both
-    /// waiting for the consistency check's table-wide pair.
     #[tokio::test]
     async fn a_need_move_thaws_what_gained_it_and_skips_what_lost_it() {
         let root = DerivationId::now_v7();
@@ -497,12 +400,6 @@ mod tests {
         assert!(thaw < promote, "{log:?}");
     }
 
-    /// Both directions, over a region that INCLUDES the roots. A thawed shared build's own
-    /// need is as stale as anything below it - its value was last written when it
-    /// was terminal - so an update that only walked downward would pass busybox through
-    /// again the moment a retire reset it (#666). The seed comes from outside the
-    /// region, because a member kept by an outside parent re-wants its own
-    /// subtree. The walk answers and the write is handed what it answered.
     #[tokio::test]
     async fn the_bounded_update_covers_its_roots_and_seeds_from_outside() {
         let root = DerivationId::now_v7();
@@ -535,11 +432,6 @@ mod tests {
             ),
             "the seed must come from wanters OUTSIDE the region: {walk}"
         );
-        // The planner sizes the region from the root count, and an estimate past
-        // hash_mem turns every `IN (SELECT .. FROM region)` into a scan of the whole
-        // CTE per probe: 6.9k roots ran 41 min. Every region test is therefore a
-        // join over whole sets, never a subplan, and the wanted step's test sits
-        // outside its fenced probe so it executes once per level, not once per row.
         assert!(
             walk.contains(
                 "OFFSET 0) s OFFSET 0) t WHERE EXISTS (SELECT 1 FROM region x WHERE x.derivation = t.next))"
@@ -555,11 +447,6 @@ mod tests {
             !walk.contains("JOIN derivation_build p ON"),
             "the parent is looked up by its key, not joined: {walk}"
         );
-        // The seed is a second expression of the walk's own step, so it stops
-        // where the walk stops and nowhere else: an open, wanted parent, over a
-        // runtime dependency from anything and over any edge from a builder. A passthrough's
-        // runtime references are wanted here too, and so are the references of
-        // a `Completed` shared build whose closure has a missing dependency.
         assert!(
             walk.contains(
                 "entered(derivation) AS (SELECT pe.dependency FROM region r, \

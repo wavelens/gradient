@@ -4,17 +4,12 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Resource-usage predictions derived from historical `derivation_metric` rows.
-
 use gradient_types::{CDerivationMetric, EDerivationMetric, MDerivationMetric};
 use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect};
 
-/// Most recent rows considered: older builds drift with toolchain and host changes.
+/// Older builds are drifting with toolchain and host changes.
 const HISTORY_WINDOW: u64 = 20;
 
-/// Predict resource usage for a build from the latest metrics of the same
-/// `history_name` on the same architecture. Returns the default (zero samples)
-/// prediction when no history exists.
 pub async fn predict(
     db: &impl ConnectionTrait,
     history_name: &str,
@@ -75,7 +70,6 @@ fn summarize(rows: &[MDerivationMetric]) -> gradient_pool::score::HistoryPredict
     }
 }
 
-/// Integer mean of already-collected non-null values, clamped to 0. Empty -> 0.
 fn mean_nonnull(vals: &[i64]) -> u64 {
     if vals.is_empty() {
         return 0;
@@ -84,8 +78,6 @@ fn mean_nonnull(vals: &[i64]) -> u64 {
     (vals.iter().sum::<i64>() / vals.len() as i64).max(0) as u64
 }
 
-/// p95 of the values, falling back to the max when the sample is too small for
-/// a meaningful percentile. Returns 0 for an empty set.
 fn percentile_or_max(values: &mut [i64], p: f64) -> i64 {
     if values.is_empty() {
         return 0;
@@ -129,11 +121,8 @@ mod tests {
         ];
         let p = summarize(&rows);
         assert_eq!(p.samples, 3);
-        // Few samples -> max of peaks.
         assert_eq!(p.predicted_peak_ram_mb, 300);
-        // Mean of non-null cpu times.
         assert_eq!(p.avg_cpu_time_ms, 2000);
-        // 1 of 3 rows OOM-killed.
         assert!((p.oom_rate - (1.0 / 3.0)).abs() < 1e-6);
     }
 
@@ -144,7 +133,6 @@ mod tests {
             metric(Some(200), Some(2000), false),
         ];
         let p = summarize(&rows);
-        // Mean of (read + write) bytes per row: 10M + 40M = 50M.
         assert_eq!(p.avg_disk_bytes, 50_000_000);
     }
 

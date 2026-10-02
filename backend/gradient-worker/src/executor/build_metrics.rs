@@ -4,9 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Build metrics sampling - peak network throughput and live build cgroup
-//! (`memory.peak` / `io.stat` / `cpu.stat`) collection, folded into the wire [`BuildMetrics`].
-
 use gradient_wire::messages::BuildMetrics;
 use harmonia_protocol::daemon_wire::types2::Microseconds;
 use std::path::{Path, PathBuf};
@@ -15,14 +12,8 @@ use tracing::debug;
 use crate::metrics::cgroup::{BuildMetricsRaw, read_build_cgroup};
 
 const BYTES_PER_MB: u64 = 1_048_576;
-/// Cadence for sampling a live build cgroup's `memory.peak` / `io.stat`.
 const CGROUP_SAMPLE_MS: u64 = 200;
 
-/// Convert a raw cgroup snapshot into the wire `BuildMetrics`.
-///
-/// `build_time_ms` is always reported. Cgroup-derived fields are `None` when
-/// `raw` is absent. `avg_cpu_pct` is `None` when it cannot be computed
-/// (zero build time or zero CPU count) to avoid divide-by-zero.
 fn raw_to_build_metrics(
     raw: Option<BuildMetricsRaw>,
     build_time_ms: u64,
@@ -57,9 +48,6 @@ fn raw_to_build_metrics(
     }
 }
 
-/// The cgroup nix creates for `drv_path`'s build: `nix-build@<drv-hash>-<uid>`
-/// directly under the daemon's cgroup `root`. The build user's uid is not
-/// known up front, so the entry is matched by its `nix-build@<drv-hash>-` prefix.
 fn build_cgroup(root: &Path, drv_path: &str) -> Option<PathBuf> {
     let (hash, _) = Path::new(drv_path).file_name()?.to_str()?.split_once('-')?;
     let prefix = format!("nix-build@{hash}-");
@@ -74,9 +62,6 @@ fn build_cgroup(root: &Path, drv_path: &str) -> Option<PathBuf> {
         })
 }
 
-/// Total CPU microseconds from the daemon's `BuildResult` (cgroup-derived,
-/// captured by nix before it tears the cgroup down). `None` only when the
-/// daemon reported neither user nor system time.
 pub(super) fn daemon_cpu_usec(
     user: Option<Microseconds>,
     system: Option<Microseconds>,
@@ -88,11 +73,6 @@ pub(super) fn daemon_cpu_usec(
     }
 }
 
-/// Assemble per-build metrics from the live-sampled cgroup snapshot (peak RAM /
-/// disk / CPU, captured before teardown) and the daemon-reported CPU time, which
-/// wins when present since it covers the build's last moments. Always
-/// reports `build_time_ms`; cgroup fields stay `None` when no cgroup was
-/// sampled (metrics disabled, or the build cgroup never appeared).
 pub(super) fn assemble_build_metrics(
     sampled: Option<BuildMetricsRaw>,
     cpu_usec: Option<u64>,
@@ -120,10 +100,8 @@ pub(super) fn assemble_build_metrics(
     raw_to_build_metrics(raw, build_time_ms, cpu_count, peak_network_mbps)
 }
 
-/// Tracks the host's peak NAR network throughput (Mbps) over a build window.
-/// Host-level: cgroup v2 carries no per-build network accounting, so this is
-/// the closest honest signal and is exact only when the build is the sole
-/// network consumer.
+/// The peak is host-level because cgroup v2 is carrying no per-build network accounting. It is
+/// exact only when the build is the sole network consumer.
 pub(super) struct NetworkPeakSampler {
     peak: std::sync::Arc<std::sync::atomic::AtomicU64>,
     stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
@@ -175,11 +153,8 @@ impl NetworkPeakSampler {
     }
 }
 
-/// Samples a daemon build's cgroup `memory.peak` / `io.stat` / `cpu.stat` *while
-/// it is running*, because nix destroys the cgroup as soon as the build finishes. It
-/// locates the cgroup via [`build_cgroup`], locks onto it, and keeps the last good
-/// reading - the high-water `memory.peak` and cumulative counters just before
-/// teardown.
+/// Nix is destroying the build cgroup as soon as the build is done. The sampler must read it while
+/// the build is running and keep the last good reading.
 pub(super) struct CgroupSampler {
     stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
     handle: tokio::task::JoinHandle<Option<BuildMetricsRaw>>,
@@ -204,9 +179,6 @@ impl CgroupSampler {
                 let root = root.clone();
                 let drv_path = drv_path.clone();
                 let known = cgroup.clone();
-                // The cgroup lookup + read are blocking fs syscalls; run them
-                // off the async runtime thread so a slow/contended /sys read
-                // never stalls other tasks sharing this worker thread.
                 let sample = tokio::task::spawn_blocking(move || {
                     let cgroup = known.or_else(|| build_cgroup(&root, &drv_path))?;
                     let raw = read_build_cgroup(&cgroup);
@@ -224,7 +196,7 @@ impl CgroupSampler {
                         cgroup = Some(dir);
                         last = Some(merge_cgroup_sample(last, cur));
                     }
-                    Some((_, None)) => break, // cgroup torn down; keep the last good sample
+                    Some((_, None)) => break,
                     None => {}
                 }
                 tokio::time::sleep(std::time::Duration::from_millis(CGROUP_SAMPLE_MS)).await;
@@ -241,9 +213,6 @@ impl CgroupSampler {
     }
 }
 
-/// Fold a fresh cgroup reading into the running snapshot: `memory.peak` is a
-/// kernel high-water mark so take the max; `io.stat` and `cpu.stat` are
-/// cumulative so the latest read is the total; OOM is sticky.
 fn merge_cgroup_sample(prev: Option<BuildMetricsRaw>, cur: BuildMetricsRaw) -> BuildMetricsRaw {
     let prev = prev.unwrap_or_default();
     BuildMetricsRaw {
@@ -296,7 +265,6 @@ mod tests {
             daemon_cpu_usec(Some(Microseconds(700)), Some(Microseconds(300))),
             Some(1000),
         );
-        // Negative (unset/garbage) clamps to zero rather than underflowing.
         assert_eq!(
             daemon_cpu_usec(Some(Microseconds(-1)), Some(Microseconds(5))),
             Some(5)
@@ -322,10 +290,8 @@ mod tests {
             disk_write_bytes: 20,
             oom_killed: false,
         };
-        // build_time_ms = 0 -> avg_cpu_pct None (no divide-by-zero panic).
         let m = raw_to_build_metrics(Some(raw), 0, 4, None);
         assert_eq!(m.avg_cpu_pct, None);
-        // cpu_count = 0 -> avg_cpu_pct None.
         let m = raw_to_build_metrics(Some(raw), 1_000, 0, None);
         assert_eq!(m.avg_cpu_pct, None);
         assert_eq!(m.peak_ram_mb, Some(2));
@@ -338,12 +304,11 @@ mod tests {
     fn raw_to_metrics_computes_avg_cpu_pct() {
         let raw = BuildMetricsRaw {
             peak_ram_bytes: None,
-            cpu_usage_usec: Some(8_000_000), // 8000 ms of CPU
+            cpu_usage_usec: Some(8_000_000),
             disk_read_bytes: 0,
             disk_write_bytes: 0,
             oom_killed: false,
         };
-        // 8000 cpu-ms over 4000 ms wall on 4 cores = 8000/(4000*4)*100 = 50%.
         let m = raw_to_build_metrics(Some(raw), 4_000, 4, Some(125.0));
         assert_eq!(m.cpu_time_ms, Some(8_000));
         assert_eq!(m.avg_cpu_pct, Some(50.0));

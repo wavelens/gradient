@@ -25,9 +25,6 @@ use crate::ip_allowlist::is_allowed as ip_allowed;
 use gradient_types::events::EventOwner;
 use gradient_types::events::audit::Action;
 
-/// Extension type for optional authentication.
-/// Inserted by `authorize_optional` into every request regardless of whether
-/// the caller is logged in.
 #[derive(Clone)]
 pub struct MaybeUser(pub Option<MUser>);
 
@@ -179,10 +176,6 @@ pub async fn authorize(
     Ok(next.run(req).await)
 }
 
-/// Middleware that attempts to authenticate the caller but never rejects the
-/// request.  Handlers receive `Extension(MaybeUser(maybe_user))` where
-/// `maybe_user` is `Some(user)` for authenticated callers and `None` for
-/// unauthenticated ones.
 pub async fn authorize_optional(
     state: State<Arc<ServerState>>,
     mut req: Request,

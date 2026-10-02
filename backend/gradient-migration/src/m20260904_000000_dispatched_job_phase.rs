@@ -7,9 +7,7 @@
 use sea_orm_migration::prelude::*;
 use sea_orm_migration::sea_orm::ConnectionTrait;
 
-/// Partial index over the rows a job completion has to find: the open dispatch
-/// for one worker and evaluation. Written as raw SQL because sea-orm's index
-/// builder has no `WHERE` clause.
+/// The index is raw SQL because the sea-orm index builder is lacking a `WHERE` clause.
 const OPEN_BY_WORKER_INDEX: &str = "CREATE INDEX IF NOT EXISTS \"idx-dispatched_job-open-by-worker\" \
      ON dispatched_job (worker_id, evaluation_id, dispatched_at DESC) \
      WHERE finished_at IS NULL";

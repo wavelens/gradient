@@ -4,13 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! End-to-end tests for the `gradient login` web flow (issue #251).
-//!
-//! Exercises `/auth/cli/start`, `/auth/cli/poll`, `/auth/cli/authorize`, and
-//! `/auth/cli/deny` through the real router with mocked Postgres - enough to
-//! pin down the state machine (pending -> authorized/denied/expired) and the
-//! "device_code is single-use" guarantee.
-
 #![expect(
     clippy::unwrap_used,
     reason = "test scaffolding: a fixture helper that cannot build its value should fail the test loudly"

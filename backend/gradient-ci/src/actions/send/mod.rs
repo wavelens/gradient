@@ -4,9 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! The three action executors plus the Git-host-reporter construction shared by
-//! the Git-host-status executor and the PR-approval trust probe.
-
 mod git_host_status;
 mod mail;
 mod open_pr;

@@ -4,10 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Presigned multipart NAR upload: compressed parts go straight to object
-//! storage while the next part is still being packed, so a NAR past S3's 5 GiB
-//! single-PUT cap is never held whole in memory.
-
 use anyhow::{Context, Result};
 use bytes::Bytes;
 use gradient_wire::types::{CompletedMultipart, PresignedMultipart};
@@ -15,7 +11,6 @@ use tokio::task::JoinSet;
 
 const MAX_INFLIGHT_PARTS: usize = 2;
 
-/// Something that takes a NAR's compressed bytes one part at a time.
 pub(crate) trait PartSink {
     async fn send_part(&mut self, part: Vec<u8>) -> Result<()>;
 }

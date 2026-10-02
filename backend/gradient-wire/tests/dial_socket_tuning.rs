@@ -4,10 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Every proto connection is opened through `client::dial`, so the frame
-//! ceiling and the socket tuning are asserted once, here, rather than at each
-//! call site.
-
 use tokio::net::{TcpListener, TcpStream};
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 
@@ -15,9 +11,8 @@ use gradient_wire::client::dial;
 use gradient_wire::session::frame::MAX_PROTO_MESSAGE_SIZE;
 use gradient_wire::session::frame::ProtoSocket;
 
-/// Dial a listener that upgrades exactly one inbound connection. The upgrade
-/// has to be driven concurrently with the dial or neither handshake completes,
-/// and the server half is returned so the socket outlives the assertions.
+/// The upgrade must be driven concurrently with the dial, otherwise neither handshake is
+/// completing. The server half is returned to keep the socket alive through the assertions.
 async fn dial_one_shot() -> (
     WebSocketStream<MaybeTlsStream<TcpStream>>,
     WebSocketStream<MaybeTlsStream<TcpStream>>,

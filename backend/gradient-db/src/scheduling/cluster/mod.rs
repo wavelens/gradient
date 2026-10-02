@@ -4,8 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Cluster attempts: all members of an attempt are claimed, or none is.
-
 mod claim;
 mod membership;
 mod recovery;

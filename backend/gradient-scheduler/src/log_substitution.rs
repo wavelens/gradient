@@ -4,13 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Best-effort log substitution for substituted / externally-cached builds.
-//!
-//! A build-once shared build has a single attempt, so there is no sibling to dedup a
-//! log from; the only source is the upstream cache's Hydra-style `/log/{drv}`
-//! endpoint, fetched from the upstream caches the project's workers substitute from
-//! and appended to the shared build's latest attempt log. Every failure is non-fatal:
-//! log substitution must never break the build pipeline.
+//! A build-once shared build is holding a single attempt, with no sibling log to dedup from. The
+//! upstream cache's Hydra-style `/log/{drv}` endpoint is the only source. Every failure must be
+//! non-fatal to the build pipeline.
 
 use std::sync::Arc;
 
@@ -24,9 +20,6 @@ use tracing::{debug, warn};
 
 const UPSTREAM_WINDOW_MINUTES: i64 = 60;
 
-/// Append an upstream cache's build log to `derivation_build`'s latest attempt
-/// log when it has none yet. Always returns `Ok` - failures are logged, never
-/// propagated, so the caller's pipeline is unaffected.
 pub async fn substitute_log(
     state: Arc<ServerState>,
     derivation_build: DerivationBuildId,
@@ -104,7 +97,6 @@ pub async fn substitute_log(
     Ok(())
 }
 
-/// Resolve a project that owns the derivation via any referencing eval.
 async fn project_for_derivation(
     state: &Arc<ServerState>,
     derivation: DerivationId,

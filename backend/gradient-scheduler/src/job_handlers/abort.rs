@@ -4,8 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Evaluation abort.
-
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -31,13 +29,9 @@ fn aborted(evaluation_id: EvaluationId, marked: Result<MEvaluation, sea_orm::DbE
 }
 
 impl Scheduler {
-    // ── Abort ─────────────────────────────────────────────────────────────────
-
-    /// Abort an evaluation: mark it `Aborted` and stop its eval job, then
-    /// leave the shared builds to the graph writer in the background. The caller (the
-    /// abort button) must not wait on the graph writer's queue; the shared build write
-    /// reports which shared builds it moved, and only those builds are stopped -
-    /// shared builds another live evaluation still needs keep running for it.
+    /// The abort button must not wait on the graph writer's queue. Only the shared builds the
+    /// database abort moved are stopped. Shared builds still wanted by another live evaluation keep
+    /// running.
     pub async fn abort_evaluation(self: &Arc<Self>, evaluation: MEvaluation) {
         let evaluation_id = evaluation.id;
         let marked =
@@ -61,8 +55,6 @@ impl Scheduler {
         });
     }
 
-    /// Abort an evaluation parked on systems no connected worker provides and
-    /// warn which ones were missing.
     pub(crate) async fn abort_unbuildable_evaluation(&self, unbuildable: Unbuildable) {
         let evaluation_id = unbuildable.evaluation.id;
         let marked = update_evaluation_status(
@@ -88,7 +80,6 @@ impl Scheduler {
         self.log_aborted_jobs(evaluation_id, shared_builds).await;
     }
 
-    /// Abort the shared builds only `evaluation` still needed; the graph writer owns that write.
     pub(crate) async fn abort_evaluation_shared_builds(
         &self,
         evaluation: EvaluationId,
@@ -120,9 +111,7 @@ impl Scheduler {
         }
     }
 
-    /// Drop the jobs whose worker has not confirmed an abort within `grace` and
-    /// close their dispatch rows, returning the job ids. A report the worker
-    /// sends later finds no job and changes nothing.
+    /// A later report from the worker is finding no job and changing nothing.
     pub async fn reap_overdue_aborts(&self, grace: Duration) -> Vec<String> {
         let reaped = self
             .call(|reply| SchedulerMsg::ReapOverdueAborts { grace, reply })
@@ -153,9 +142,6 @@ impl Scheduler {
         reaped
     }
 
-    /// The in-memory half of an abort: `(worker, job)` pairs that were told to
-    /// stop. `aborted_shared_builds` are the shared builds the database abort moved; a build
-    /// on any other shared build is left alone.
     pub async fn abort_evaluation_jobs(
         &self,
         evaluation_id: EvaluationId,
@@ -170,7 +156,6 @@ impl Scheduler {
         .unwrap_or_default()
     }
 
-    /// Tell one worker to stop one job; `false` when it is not connected.
     pub async fn abort_job(&self, worker_id: &str, job_id: String, reason: String) -> bool {
         let worker = worker_id.to_owned();
         self.call(|reply| SchedulerMsg::AbortJob {

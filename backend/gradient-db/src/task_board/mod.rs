@@ -4,10 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Aggregate queries powering the task page: per-evaluation build-status and
-//! message rollups, the live queue summary, and per-entry-point dependency-
-//! closure counts.
-
 pub mod dep_counts;
 
 use crate::fetch_in_chunks;
@@ -36,7 +32,6 @@ crate::sql! {
         tier = Bulk;
 }
 
-/// `(evaluation, build.status) -> count`, one grouped query per chunk of ids.
 pub async fn build_status_counts_by_evaluation<C: ConnectionTrait>(
     db: &C,
     eval_ids: &[EvaluationId],
@@ -76,7 +71,6 @@ crate::sql! {
         params = [EvaluationIds(64)];
 }
 
-/// `(evaluation, message.level) -> count`.
 pub async fn evaluation_message_counts<C: ConnectionTrait>(
     db: &C,
     eval_ids: &[EvaluationId],
@@ -134,8 +128,6 @@ crate::sql_fn! {
         tier = Bulk;
 }
 
-/// Live `building` / `queued` build counts across the task's non-finished
-/// evaluations. Powers the "N building · M queued" header chip.
 pub async fn task_queue_summary<C: ConnectionTrait>(
     db: &C,
     task: TaskId,
@@ -167,23 +159,9 @@ struct DepCountRow {
     cnt: i64,
 }
 
-/// The evaluation's edges are materialised ONCE and the per-entry-point walk
-/// stays within that set, which is the whole performance story. The answer is
-/// inherently one row per (entry point, derivation) pair, and entry points of
-/// one flake share nearly all of their closure: 74 NixOS hosts reached 1,868
-/// derivations each out of a 10,689-derivation union, so a walk that probed
-/// `derivation_dependency` per pair re-read the same 881 MB index 138,000 times.
-/// Hoisting the edges leaves the pairs to a hash join over a set that fits in
-/// the raised `work_mem`. Measured on that evaluation: 97.6 s before, 3.8 s
-/// after, identical output.
-///
-/// `MATERIALIZED` is load-bearing (it stops the planner inlining the edge set
-/// into each reference), and so is the source-side `IN`: the frontier only ever
-/// holds a seed root or a derivation with a build in this evaluation, so that is
-/// exactly the set of rows whose outgoing edges the walk can ask for. The
-/// `LATERAL ... OFFSET 0` fence the other walks need is deliberately absent -
-/// it exists to stop a merge join against the whole edge table, and here the
-/// recursive term joins a small materialised set where the hash join is right.
+/// `MATERIALIZED` is load-bearing and is stopping the planner from inlining the edge set.
+/// The `LATERAL ... OFFSET 0` fence is deliberately absent.
+/// A hash join over this small materialised set is the right plan.
 const DEP_COUNTS_SQL: &str = "WITH RECURSIVE seeds(ep, root_drv) AS (SELECT * FROM unnest($1::uuid[], $2::uuid[])), \
     edges AS MATERIALIZED ( \
        SELECT dd.derivation, dd.dependency FROM derivation_dependency dd \
@@ -218,12 +196,6 @@ crate::sql! {
         flags = [Walk];
 }
 
-/// For each `(entry_point, root derivation)` seed, count this evaluation's
-/// builds whose derivation lies in the entry point's build-time dependency
-/// closure, excluding the entry point's own build. The walk is pruned to
-/// derivations that have a build in this evaluation, so it stays bounded by the
-/// evaluation's build graph rather than the full Nix closure. Returns
-/// `entry_point -> status -> count`.
 pub async fn entry_point_dep_counts<C>(
     db: &C,
     evaluation: EvaluationId,
@@ -271,11 +243,6 @@ mod tests {
         s.split_whitespace().collect::<Vec<_>>().join(" ")
     }
 
-    /// The answer is one row per (entry point, derivation) pair and the entry
-    /// points of one flake share nearly all of their closure, so the recursive
-    /// term must join a set hoisted out of the walk, never probe
-    /// `derivation_dependency` again per pair. Inlining the edge set restores
-    /// the 97.6 s shape this replaced.
     #[test]
     fn the_walk_joins_a_materialised_edge_set_once() {
         let sql = norm(DEP_COUNTS_SQL);
@@ -295,10 +262,6 @@ mod tests {
         );
     }
 
-    /// The frontier only ever holds a seed root or a derivation with a build in
-    /// this evaluation. Widening the source side past those two would materialise
-    /// edges of the whole global graph; narrowing it to build jobs alone would
-    /// drop the outgoing edges of an entry point that has none.
     #[test]
     fn the_edge_set_covers_exactly_what_the_frontier_can_ask_for() {
         let sql = norm(DEP_COUNTS_SQL);

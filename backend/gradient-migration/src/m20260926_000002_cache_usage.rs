@@ -4,9 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Stored bytes per cache, recounted by the rollup pass so a dashboard read sums
-//! one row per visible cache instead of every cached path behind it.
-
 use sea_orm_migration::prelude::*;
 use sea_orm_migration::sea_orm::ConnectionTrait;
 

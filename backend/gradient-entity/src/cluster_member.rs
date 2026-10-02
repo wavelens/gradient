@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! A job's cluster reference: exactly one of `evaluation` or `derivation_build`,
-//! each unique, so a job belongs to at most one cluster.
+//! Exactly one of `evaluation` or `derivation_build` is set. Both are unique, and a job can belong
+//! to at most one cluster.
 
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};

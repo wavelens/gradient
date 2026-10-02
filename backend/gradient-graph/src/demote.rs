@@ -4,9 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Dropping a path's claim on the cache index: one cache's claim, an operator
-//! invalidation, or a NAR the index lists but storage lost.
-
 use anyhow::Result;
 use gradient_db::DbContext;
 use gradient_types::events::cache;
@@ -38,9 +35,6 @@ pub(crate) async fn apply(ctx: &DbContext, demotion: Demotion) -> Result<DemoteR
     }
 }
 
-/// Remove a single cache's claim on a NAR: the per-cache signature row, plus -
-/// when no other cache still holds the path - the shared `cached_path` row, the
-/// NAR blob and the gate flags they backed.
 async fn cache_claim(ctx: &DbContext, cache: CacheId, hash: &str) -> Result<DemoteReport> {
     let db = &ctx.worker_db;
     let Some(cached_path) = ECachedPath::find()
@@ -68,9 +62,8 @@ async fn cache_claim(ctx: &DbContext, cache: CacheId, hash: &str) -> Result<Demo
         .await?;
     let others_remain = remaining > 0;
 
-    // Last cache dropped the path: demote through the shared helper so the
-    // producer shared build, gate flags and parent counters reset symmetrically (a
-    // bare is_cached clear leaves a Completed producer with no backing NAR).
+    // The shared helper is resetting the producer, gate flags and parent counters together.
+    // A bare `is_cached` clear would leave a `Completed` producer with no NAR behind it.
     if !others_remain {
         gradient_db::caches::demotion::demote_cached_output(ctx, hash).await?;
     }
@@ -90,8 +83,6 @@ mod tests {
     use crate::test_ctx::ctx;
     use sea_orm::{DatabaseBackend, MockDatabase};
 
-    /// A cache dropping a claim on a path the index never held is not an error:
-    /// the caller turns the absent row into its own 404.
     #[tokio::test]
     async fn an_unknown_path_reports_no_cached_path() {
         let (ctx, _) = ctx(MockDatabase::new(DatabaseBackend::Postgres)

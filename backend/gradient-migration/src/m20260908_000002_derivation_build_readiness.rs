@@ -4,38 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! `derivation_build.fetchable` and `unready_deps` replace `closure_complete`
-//! and `drv_closure_cached`. Both are backfilled in two set-based statements
-//! from the NAR counter, then `Created`/`Queued` are normalised to the new
-//! invariant: `Queued` means the gates held.
-//!
-//! The normalisation is not a no-op on the first start. `derivation.walked`
-//! is seeded false for every row by `m20260908_000000`, two migrations back, and
-//! `gates()` requires it, so the demote statement moves every `Queued` anchor
-//! back to `Created` and the promote statement promotes nothing.
-//!
-//! That is intended: the same earlier migration requeues every non-terminal
-//! evaluation, and re-walking a graph sets `walked` and re-promotes its anchors
-//! through the ordinary readiness path. Seeding from the flags being retired is
-//! deliberately not an option, so every value here is re-derived from ground
-//! truth: the NAR counter, the anchor's own status, and `build_job`.
-//!
-//! `fetchable` requires an anchor to HAVE outputs, or the `NOT EXISTS` over
-//! `derivation_output` is vacuously true and a terminal-success anchor with no
-//! output rows reads as fetchable, which is the unbacked-output dead zone this
-//! project has already paid for once. The live predicate in `gradient_db`
-//! carries the same guard.
-//!
-//! Neither backfill is idempotent, and the `IF NOT EXISTS` guards do not make it
-//! so: `SET fetchable = true WHERE ...` never clears a stale true, so a second
-//! `up` over a diverged table would leave one. It runs once, and the guards are
-//! for a run that failed partway.
-//!
-//! The `unready_deps` seed `LEFT JOIN`s the dependency's anchor and counts a
-//! missing row as unready, which is what `gradient_db::readiness`'s live count
-//! does. An inner join fails OPEN in a gate whose whole job is to stop a dispatch
-//! against a missing input, and a backfill that disagreed with the counter's own
-//! recompute would report as drift on the first sweep.
+//! Neither backfill is idempotent. `SET fetchable = true WHERE ...` is never clearing a stale true.
+//! The `IF NOT EXISTS` guards are only for a run that failed partway.
 
 use sea_orm_migration::prelude::*;
 use sea_orm_migration::sea_orm::ConnectionTrait;
@@ -126,10 +96,6 @@ impl MigrationTrait for Migration {
 mod tests {
     use super::{DOWN, up_statements};
 
-    /// Every value this migration writes is re-derived from ground truth, so no
-    /// statement may READ the two flags it replaces. Only the tail that removes
-    /// them may name them, and a `DROP INDEX` names an index rather than a column,
-    /// so it cannot be a read either. `down` restores them and is exempt.
     #[test]
     fn the_backfill_never_reads_the_flags_it_replaces() {
         for flag in ["closure_complete", "drv_closure_cached"] {
@@ -155,8 +121,8 @@ mod tests {
         );
     }
 
-    /// The seed and the live recount in `gradient_db::readiness` must agree on the
-    /// one part that fails open: a dependency with no anchor row counts as unready.
+    /// A dependency without a shared build row is counted as unready. The seed and the live recount
+    /// in `gradient_db::readiness` must agree on this fail-open case.
     #[test]
     fn the_unready_seed_counts_a_dependency_with_no_anchor_row() {
         let seed = up_statements()

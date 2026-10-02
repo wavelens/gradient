@@ -4,11 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! `build_log_chunk` carried a bare `build_attempt` UUID with no FK, so its rows
-//! leaked forever once an evaluation (and its attempts) were GC'ed. Purge the
-//! existing orphans, then add the missing cascade to complete the
-//! `evaluation -> build_job -> build_attempt -> build_log_chunk` chain.
-
 use sea_orm_migration::prelude::*;
 
 #[derive(DeriveMigrationName)]

@@ -4,9 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Status reports moved to the typed event row; a report still pending at upgrade
-//! is settled with a reason instead of being read by a consumer that no longer knows its shape.
-
 use sea_orm_migration::prelude::*;
 use sea_orm_migration::sea_orm::ConnectionTrait;
 

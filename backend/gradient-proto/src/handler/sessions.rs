@@ -4,10 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! The sessions supervisor: one linked `SessionActor` per connection, drained
-//! before the tree stops them, and re-registered when the scheduler core is
-//! respawned.
-
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -34,8 +30,6 @@ pub enum SessionsMsg {
     Reattach,
 }
 
-/// The process-wide handle the upgrade paths use to attach a connection; the
-/// factory republishes the supervisor's ref on every (re)spawn.
 pub struct SessionsHandle {
     actor: ArcSwapOption<ActorRef<SessionsMsg>>,
 }
@@ -182,7 +176,6 @@ impl Actor for Sessions {
         Ok(())
     }
 
-    /// Sessions get `Draining` and their budget before the tree stops them.
     async fn post_stop(
         &self,
         _myself: ActorRef<Self::Msg>,

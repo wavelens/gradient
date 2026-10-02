@@ -10,9 +10,6 @@ use gradient_entity::build::BuildStatus;
 use gradient_types::DerivationId;
 use sea_orm::QueryResult;
 
-/// Collect the `derivation` column of a `RETURNING derivation` result set. The
-/// bulk transitions return the shared builds they actually moved so the caller can fan
-/// the CI status reactor out over exactly those (and only those) builds.
 pub(crate) fn returned_derivations(rows: Vec<QueryResult>) -> Vec<DerivationId> {
     rows.into_iter()
         .filter_map(|r| r.try_get::<uuid::Uuid>("", "derivation").ok())
@@ -20,10 +17,8 @@ pub(crate) fn returned_derivations(rows: Vec<QueryResult>) -> Vec<DerivationId> 
         .collect()
 }
 
-/// Collect `RETURNING db.derivation, old.status AS from_status, db.status AS
-/// to_status` rows into the typed changes the effects emitter consumes. `old` is
-/// Postgres 18's pre-update row, which a self-join used to fetch at the price of
-/// a sequential scan once a statement moved many shared builds.
+/// `old` is the Postgres 18 pre-update row.
+/// A self-join used to fetch it, at the price of a sequential scan.
 pub(crate) fn returned_transitions(rows: Vec<QueryResult>) -> Vec<TransitionChange> {
     rows.into_iter()
         .filter_map(|r| {
@@ -39,8 +34,6 @@ pub(crate) fn returned_transitions(rows: Vec<QueryResult>) -> Vec<TransitionChan
         .collect()
 }
 
-/// Changes for rows a statement moved from a statically-known status (e.g. a
-/// `WHERE status = Created` promote): no self-join needed, the predicate is the proof.
 pub(crate) fn transitions_from(
     derivations: Vec<DerivationId>,
     from: BuildStatus,

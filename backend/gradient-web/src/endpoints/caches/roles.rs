@@ -4,8 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! CRUD for cache-scoped custom roles.
-
 use crate::access::{CacheAccess, Caller, load_cache};
 use crate::audit::{RequestInfo, record as audit_record};
 use crate::authorization::MaybeApiKey;
@@ -28,8 +26,6 @@ use sea_orm::{
 };
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-
-// ── Request / response shapes ─────────────────────────────────────────────────
 
 #[derive(Serialize, Debug)]
 pub struct CacheRoleResponse {
@@ -77,8 +73,6 @@ pub struct PatchCacheRoleRequest {
     pub permissions: Option<Vec<String>>,
 }
 
-// ── Helpers ──────────────────────────────────────────────────────────────────
-
 async fn load_cache_role(
     state: &Arc<ServerState>,
     cache_id: CacheId,
@@ -96,9 +90,6 @@ async fn load_cache_role(
     Ok(role)
 }
 
-// ── Handlers ──────────────────────────────────────────────────────────────────
-
-/// `GET /caches/{cache}/roles` - list roles available in the cache.
 pub async fn get_cache_roles(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
@@ -134,7 +125,6 @@ pub async fn get_cache_roles(
     }))
 }
 
-/// `POST /caches/{cache}/roles` - create a custom role.
 pub async fn post_cache_role(
     state: State<Arc<ServerState>>,
     info: RequestInfo,
@@ -206,7 +196,6 @@ pub async fn post_cache_role(
     Ok(ok_json(CacheRoleResponse::from_model(role)))
 }
 
-/// `GET /caches/{cache}/roles/{role_id}` - fetch a single role.
 pub async fn get_cache_role(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
@@ -227,9 +216,6 @@ pub async fn get_cache_role(
     Ok(ok_json(CacheRoleResponse::from_model(role)))
 }
 
-/// `PATCH /caches/{cache}/roles/{role_id}` - update a custom role.
-///
-/// Built-in roles are immutable: attempting to mutate them returns 403.
 pub async fn patch_cache_role(
     state: State<Arc<ServerState>>,
     info: RequestInfo,
@@ -320,10 +306,6 @@ pub async fn patch_cache_role(
     Ok(ok_json(CacheRoleResponse::from_model(updated)))
 }
 
-/// `DELETE /caches/{cache}/roles/{role_id}` - delete a custom role.
-///
-/// Refuses to delete a role that is still in use; the caller must reassign
-/// affected members first.
 pub async fn delete_cache_role(
     state: State<Arc<ServerState>>,
     info: RequestInfo,

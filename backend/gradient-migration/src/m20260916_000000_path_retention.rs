@@ -4,9 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! `cache_derivation.last_fetched_at` has no reader: fetch recency lives on
-//! `cached_path_signature` and the eviction pass reads it there.
-
 use sea_orm_migration::prelude::*;
 use sea_orm_migration::sea_orm::ConnectionTrait;
 

@@ -4,26 +4,18 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Canonical encoding helpers for narinfo hash metadata.
-//!
-//! Gradient uses SHA-256 by default for new NAR/file hashes. BLAKE3 is
-//! still accepted on the read path so rows uploaded while the BLAKE3
-//! default was active (issue #132) keep resolving, and so upstream
-//! caches that advertise either algorithm interoperate cleanly. All
-//! on-disk DB columns hold values in `{algo}:{nix32}` form so the
-//! narinfo URL's hash slug matches the column verbatim, no re-encoding
-//! needed.
+//! BLAKE3 is still accepted on the read path. Rows uploaded under the old BLAKE3 default (issue
+//! #132) must keep resolving. DB columns are holding `{algo}:{nix32}` values. The narinfo URL hash
+//! slug is then matching the column verbatim.
 
 use base64::Engine as _;
 
-/// The Nix base32 alphabet in ascending order (omits `e`, `o`, `t`, `u`).
 pub const NIX32_CHARS: &[u8] = b"0123456789abcdfghijklmnpqrsvwxyz";
 
 pub fn is_nix32_hash(s: &str) -> bool {
     s.len() == 32 && s.bytes().all(|b| NIX32_CHARS.contains(&b))
 }
 
-/// Encode bytes using the Nix base32 alphabet.
 pub fn nix32_encode(bytes: &[u8]) -> String {
     let len = (bytes.len() * 8 - 1) / 5 + 1;
     let mut out = String::with_capacity(len);
@@ -41,13 +33,6 @@ pub fn nix32_encode(bytes: &[u8]) -> String {
 
 const HASH_ALGOS: &[&str] = &["sha256", "blake3"];
 
-/// Converts any 32-byte hash representation (SRI `{algo}-{base64}`, nix32
-/// `{algo}:{nix32}`, prefixed hex `{algo}:{hex}`, or bare hex with implicit
-/// `sha256` for legacy callers) to the canonical `{algo}:{nix32}` form.
-///
-/// Recognised algorithms: `sha256`, `blake3` (both produce 32-byte digests
-/// -> 52-char nix32 / 64-char hex). Inputs that match no recognised form are
-/// returned unchanged to preserve caller intent for sentinel values.
 pub fn normalize_nar_hash(hash: &str) -> String {
     for algo in HASH_ALGOS {
         let sri_prefix = format!("{algo}-");
@@ -83,16 +68,10 @@ pub fn normalize_nar_hash(hash: &str) -> String {
     hash.to_string()
 }
 
-/// Same as [`normalize_nar_hash`] but operates on `Option<String>`,
-/// returning `None` unchanged.
 pub fn normalize_nar_hash_opt(hash: Option<String>) -> Option<String> {
     hash.map(|h| normalize_nar_hash(&h))
 }
 
-/// Strips a recognised algorithm prefix (`sha256:` or `blake3:`) from a
-/// canonical hash, returning the bare nix32-encoded digest used in narinfo
-/// `URL:` slugs. Returns the input unchanged if no recognised prefix is
-/// found.
 pub fn strip_hash_algo(hash: &str) -> &str {
     for algo in HASH_ALGOS {
         let prefix = format!("{algo}:");
@@ -116,7 +95,7 @@ mod tests {
     const EMPTY_SHA256_HEX: &str =
         "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
 
-    // BLAKE3 digest of "abc" - cross-checked against NixOS/nix PR #12379.
+    // BLAKE3 digest of "abc" is cross-checked against NixOS/nix PR #12379.
     const BLAKE3_ABC: [u8; 32] = [
         0x64, 0x37, 0xb3, 0xac, 0x38, 0x46, 0x51, 0x33, 0xff, 0xb6, 0x3b, 0x75, 0x27, 0x3a, 0x8d,
         0xb5, 0x48, 0xc5, 0x58, 0x46, 0x5d, 0x79, 0xdb, 0x03, 0xfd, 0x35, 0x9c, 0x6c, 0xd5, 0xbd,

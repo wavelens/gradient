@@ -9,7 +9,7 @@ use gradient_types::events::{EventFilter, EventOwner};
 use gradient_types::*;
 use sea_orm::{ColumnTrait, Condition, ConnectionTrait, DbErr, EntityTrait, QueryFilter};
 
-/// Personal events (logins, keys, sessions) reach instance webhooks only.
+/// Personal events such as logins, keys and sessions are reaching instance webhooks only.
 pub fn routes_to(hook: &MWebhook, owner: &EventOwner, name: &str, personal: bool) -> bool {
     let patterns = serde_json::from_value::<Vec<String>>(hook.events.clone()).unwrap_or_default();
     if !hook.active || !EventFilter::from_patterns(patterns).matches(name) {

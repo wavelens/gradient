@@ -17,9 +17,8 @@ pub async fn update_evaluation_status(
     evaluation: MEvaluation,
     status: EvaluationStatus,
 ) -> Result<MEvaluation, DbErr> {
-    // The state machine validates the transition locally. The filtered update_many
-    // below also guards atomically in the DB, so concurrent aborts cannot be
-    // clobbered by an in-flight evaluator.
+    // The filtered `update_many` below is guarding atomically in the database.
+    // A concurrent abort cannot be clobbered by an in-flight evaluator.
     match EvalStateMachine::validate(evaluation.status, status) {
         Ok(_) => {}
         Err(e) => {
@@ -70,8 +69,7 @@ pub async fn update_evaluation_status(
         .await?;
 
     if updated.rows_affected == 0 {
-        // Row was concurrently transitioned to a terminal state -
-        // honor it and return the fresh value instead of clobbering.
+        // A concurrent writer moved the row to a terminal state, and its value must win.
         return Ok(EEvaluation::find_by_id(evaluation.id)
             .one(&ctx.worker_db)
             .await?
@@ -115,10 +113,6 @@ pub async fn update_evaluation_status(
     Ok(updated_eval)
 }
 
-/// Records an error-level `evaluation_message` row and transitions the evaluation status.
-///
-/// `source` identifies where the error originated - e.g. `"flake-prefetch"`,
-/// `"nix-eval"`, `"nix-eval:packages.x86_64-linux.hello"`, `"db-insert"`.
 pub async fn update_evaluation_status_with_error(
     ctx: &DbContext,
     evaluation: MEvaluation,
@@ -126,9 +120,6 @@ pub async fn update_evaluation_status_with_error(
     error_message: String,
     source: Option<String>,
 ) -> Result<MEvaluation, DbErr> {
-    // If the evaluation is already in a terminal state (e.g. it was
-    // aborted while we were running), don't record a spurious error or
-    // overwrite the status - just return the current row.
     if matches!(
         evaluation.status,
         EvaluationStatus::Aborted | EvaluationStatus::Failed | EvaluationStatus::Completed

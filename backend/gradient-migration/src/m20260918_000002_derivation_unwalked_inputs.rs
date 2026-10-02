@@ -4,17 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! The walk prunes at a derivation whose subtree is recorded. `walked` only says
-//! the derivation's own record is written, and a walk that dies between batches
-//! leaves it true above inputs it merely named as stubs; every later walk then
-//! prunes there and the stubs stay stubs (11,071 in production on 2026-09-18,
-//! 5,450 of them carrying a build_job nothing can dispatch).
-//!
-//! `unwalked_inputs` counts the direct inputs whose subtree is not recorded, seeded
-//! when the record lands and counted down by the ingest ripple. Deliberately no
-//! backfill: the consistency sweep's recount is the backfill, exactly as it is for
-//! `demanded`, and until it runs every walked row reads complete, which is what the
-//! prune assumed before this column existed.
+//! `unwalked_inputs` is deliberately not backfilled. The consistency sweep's recount is the
+//! backfill, and until then every walked row is reading as complete.
 
 use sea_orm_migration::prelude::*;
 use sea_orm_migration::sea_orm::ConnectionTrait;

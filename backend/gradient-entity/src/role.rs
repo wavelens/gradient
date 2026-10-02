@@ -18,9 +18,6 @@ pub struct Model {
     pub name: String,
     pub project: Option<ProjectId>,
     pub permission: i64,
-    /// True for roles created by `gradient-state.nix`. Managed roles are
-    /// immutable through the role-management API, the same way built-in
-    /// roles are.
     pub managed: bool,
 }
 

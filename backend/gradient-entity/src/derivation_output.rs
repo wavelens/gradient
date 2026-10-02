@@ -4,13 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Narinfo-metadata ownership: `cached_path` is authoritative for anything in
-//! OUR cache (every local serve path reads it, via the `cached_path` FK or by
-//! hash). The narinfo fields here (`nar_hash`/`file_hash`/`file_size`/
-//! `references`/`deriver`) are an UPSTREAM-resolution snapshot only, written
-//! with `external_url` when an output resolves on a project upstream before any
-//! `cached_path` row exists; `nar_size` is additionally written at build
-//! report. A demote clears the whole upstream snapshot together.
+//! `cached_path` is authoritative for anything in our cache. The narinfo fields here are an
+//! upstream snapshot only, written with `external_url` before any `cached_path` row exists. A
+//! demote is clearing the whole upstream snapshot together.
 
 use chrono::NaiveDateTime;
 use sea_orm::entity::prelude::*;
@@ -18,9 +14,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::ids::{CachedPathId, DerivationId, DerivationOutputId};
 
-/// `hash` sentinel written when the evaluator could not parse an output's store
-/// path (floating CA outputs have none until built). Nothing ever rewrites it,
-/// so a row carrying it has no usable store path.
+/// This `hash` sentinel is written for an output store path the evaluator could not parse, e.g. a
+/// floating CA output before its build. Nothing is rewriting it later.
 pub const UNKNOWN_OUTPUT_HASH: &str = "unknown";
 
 #[derive(Clone, Debug, Default, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
@@ -36,16 +31,9 @@ pub struct Model {
     pub nar_size: Option<i64>,
     pub is_cached: bool,
     pub cached_path: Option<CachedPathId>,
-    /// Upstream NAR URL resolved once via the project's upstream-cache narinfo
-    /// lookup. Set (with `is_cached` false) when the output is available upstream
-    /// but not yet pulled into the gradient cache.
     pub external_url: Option<String>,
-    /// NAR hash from the upstream narinfo, needed to import the path.
     pub nar_hash: Option<String>,
-    /// Compressed-NAR hash from the upstream narinfo, in `sha256:<nix32>` form.
-    /// Lets the worker pass a verbatim NAR through without recalculating the file hash.
     pub file_hash: Option<String>,
-    /// Compressed NAR size from the upstream narinfo.
     pub file_size: Option<i64>,
     #[sea_orm(column_name = "references_list")]
     pub references: Option<String>,
@@ -73,25 +61,13 @@ pub enum Relation {
 
 impl ActiveModelBehavior for ActiveModel {}
 
-/// Whether a [`derivation_output`](Model) has been uploaded to a Gradient
-/// cache.
-///
-/// The `is_cached` flag and `cached_path` UUID together encode this state.
-/// [`CacheLink`] makes the pairing explicit and prevents reading
-/// `cached_path` when the output is not yet cached.
-///
-/// Obtain via [`Model::cache_link`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CacheLink {
-    /// The output has not been uploaded to a cache yet.
     NotCached,
-    /// The output is cached; `cached_path` is the ID of the
-    /// `cached_path` row that holds the NAR metadata.
     Cached { cached_path: CachedPathId },
 }
 
 impl Model {
-    /// Return the cache link state for this derivation output.
     pub fn cache_link(&self) -> CacheLink {
         match (self.is_cached, self.cached_path) {
             (true, Some(id)) => CacheLink::Cached { cached_path: id },
@@ -99,9 +75,6 @@ impl Model {
         }
     }
 
-    /// Whether this output is available anywhere: in the gradient cache
-    /// (`is_cached`) or resolved at a project upstream (`external_url`). A
-    /// derivation is only available in a cache when every output is cached somewhere.
     pub fn is_cached_anywhere(&self) -> bool {
         self.is_cached || self.external_url.is_some()
     }

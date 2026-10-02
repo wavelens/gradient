@@ -4,8 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! CRUD endpoints for `task_trigger` plus a manual-fire endpoint.
-
 use crate::access::{Caller, TaskAccess, load_task};
 use crate::authorization::MaybeApiKey;
 use crate::error::{WebError, WebResult};
@@ -37,9 +35,6 @@ pub fn router() -> Router<Arc<ServerState>> {
         .route("/{id}/test", post(fire_now))
 }
 
-/// Slim integration handle inlined into reporter trigger responses so the
-/// trigger list is renderable without a second (admin-gated) call to the
-/// integrations endpoint.
 #[derive(Serialize, Debug)]
 pub struct TriggerIntegrationSummary {
     pub id: IntegrationId,
@@ -70,10 +65,6 @@ pub struct TriggerOut {
     pub last_fired_at: Option<chrono::NaiveDateTime>,
     pub created_at: chrono::NaiveDateTime,
     pub updated_at: chrono::NaiveDateTime,
-    /// Populated for `reporter_push` / `reporter_pull_request` triggers when
-    /// the referenced integration row still exists. `null` for polling/time
-    /// triggers and for orphaned references (integration deleted out from
-    /// under the trigger).
     pub integration: Option<TriggerIntegrationSummary>,
 }
 
@@ -149,7 +140,6 @@ pub struct DeletedResponse {
     pub deleted: bool,
 }
 
-/// `GET /tasks/{project}/{task}/triggers` - list all triggers for the task.
 pub async fn list(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
@@ -180,7 +170,6 @@ pub async fn list(
     ))
 }
 
-/// `POST /tasks/{project}/{task}/triggers` - create a new trigger.
 pub async fn create(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
@@ -228,7 +217,6 @@ pub async fn create(
     Ok(ok_json(TriggerOut::build(row, &integrations)))
 }
 
-/// `GET /tasks/{project}/{task}/triggers/{id}` - fetch one trigger.
 pub async fn read(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
@@ -257,7 +245,6 @@ pub async fn read(
     Ok(ok_json(TriggerOut::build(row, &integrations)))
 }
 
-/// `PATCH /tasks/{project}/{task}/triggers/{id}` - update a trigger.
 pub async fn update(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
@@ -308,7 +295,6 @@ pub async fn update(
     Ok(ok_json(TriggerOut::build(updated, &integrations)))
 }
 
-/// `DELETE /tasks/{project}/{task}/triggers/{id}` - hard delete the trigger.
 pub async fn delete_one(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
@@ -341,7 +327,6 @@ pub async fn delete_one(
     Ok(ok_json(DeletedResponse { deleted: true }))
 }
 
-/// `POST /tasks/{project}/{task}/triggers/{id}/test` - manually fire a trigger.
 pub async fn fire_now(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
@@ -387,8 +372,6 @@ pub async fn fire_now(
             .await
             .map_err(|e| WebError::internal(e.to_string()))?;
 
-    // A manual fire also bumps tracked flake inputs (OpenPr action). Self-gated:
-    // no-ops unless the task qualifies.
     if let Err(e) = gradient_ci::trigger::maybe_trigger_input_update(
         &state.web_db,
         &proj,
@@ -418,8 +401,6 @@ pub async fn fire_now(
         .await
         .map_err(|e| WebError::internal(e.to_string()))?;
 
-    // Stamp last_fired_at so the UI reflects the manual fire alongside the
-    // outcome - mirrors the touch in the webhook fan-out path.
     {
         let now = gradient_types::now();
         let mut active: gradient_entity::task_trigger::ActiveModel = row.clone().into();
@@ -463,8 +444,6 @@ pub async fn fire_now(
     Ok(ok_json(body))
 }
 
-/// Abort the shared builds a hard-aborted evaluation alone still needed; the graph
-/// actor owns that write, and the caller cancels the in-memory jobs.
 async fn abort_eval_shared_builds(
     state: &Arc<ServerState>,
     evaluation: EvaluationId,

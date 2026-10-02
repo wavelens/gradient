@@ -4,9 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Pure invite policy. No database, no HTTP: the rules that decide whether a
-//! token may be redeemed, and how the two invite tables merge into one list.
-
 use chrono::{Duration, NaiveDateTime};
 use gradient_types::consts::INVITATION_VALIDITY_DAYS;
 use gradient_types::ids::UserId;
@@ -26,8 +23,8 @@ pub enum InviteDecision {
     NotInvitee,
 }
 
-/// Ownership is checked before expiry so an expired token never confirms to a
-/// stranger that it was a real invitation.
+/// Ownership is checked before expiry. An expired token must never confirm to a stranger that it
+/// was a real invitation.
 pub fn evaluate_invite(
     invitee: UserId,
     caller: UserId,

@@ -4,14 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! What one pending-delivery row owes. An event expands into the deliveries it implies
-//! and writes them back as rows, so an expansion that half-succeeds costs a
-//! retry of the expansion and never a duplicated external call; a delivery row
-//! is exactly one external call.
-//!
-//! Every consumer is idempotent on its natural key, which is what makes
-//! at-least-once delivery safe: a Git host status is per commit plus check
-//! name, an open-PR by its branch, a log finalize replaces the chunk index.
+//! Every consumer is idempotent on its natural key. At-least-once delivery is safe only because of
+//! this. A Git host status is keyed per commit and check name, and an open PR is keyed by its
+//! branch. A log finalize is replacing the chunk index.
 
 use anyhow::{Context, Result, anyhow};
 use gradient_ci::actions::{active_actions_for_task, execute_action, matching_actions};
@@ -76,7 +71,6 @@ pub(crate) fn action_delivery_payload(action: TaskActionId, envelope: &Envelope)
     })
 }
 
-/// Every delivery row this event owes: one per matching action, one per routed webhook.
 fn plan_deliveries(
     envelope: &Envelope,
     actions: &[MTaskAction],
@@ -105,8 +99,8 @@ fn plan_deliveries(
     to_actions.chain(to_hooks).collect()
 }
 
-/// The whole expansion in one transaction: either every delivery this event
-/// owes is queued or none is, so a retried expansion never repeats a call.
+/// The whole expansion is one transaction. Either every owed delivery is queued or none is. A
+/// retried expansion cannot repeat an external call this way.
 async fn fan_out(ctx: &EffectsCtx, envelope: &Envelope, parent: &str) -> Result<()> {
     let ci = ctx.ci();
     let owner = envelope.event.owner();
@@ -150,7 +144,6 @@ async fn fan_out(ctx: &EffectsCtx, envelope: &Envelope, parent: &str) -> Result<
     Ok(())
 }
 
-/// A webhook deleted or deactivated while the row waited is delivered-by-omission.
 async fn live_webhook<C: ConnectionTrait>(
     db: &C,
     row: &PendingDelivery,
@@ -163,7 +156,6 @@ async fn live_webhook<C: ConnectionTrait>(
     Ok(hook.filter(|h| h.active))
 }
 
-/// A non-2xx answer is logged on the delivery row and retried with backoff.
 async fn deliver_webhook(ctx: &EffectsCtx, row: &PendingDelivery) -> Result<()> {
     let ci = ctx.ci();
     let Some(hook) = live_webhook(&ci.db.worker_db, row).await? else {
@@ -181,8 +173,6 @@ async fn deliver_webhook(ctx: &EffectsCtx, row: &PendingDelivery) -> Result<()> 
     ))
 }
 
-/// A terminal evaluation reacts on the comment that triggered it; a creation
-/// or an approval is not a transition and settles no reaction.
 async fn react_on_terminal(ctx: &EffectsCtx, reported: &evaluation::Reported) {
     if reported.created || reported.phase == evaluation::Phase::ApprovalGranted {
         return;
@@ -205,16 +195,12 @@ async fn react_on_terminal(ctx: &EffectsCtx, reported: &evaluation::Reported) {
     }
 }
 
-/// Compress a finished build's log into chunks. Its own storage failure is a
-/// retry, not a lost log: the inline copy stays until the index is written.
 async fn finalize(ctx: &EffectsCtx, row: &PendingDelivery) -> Result<()> {
     let attempt = BuildAttemptId::new(uuid_field(row, "attempt")?);
 
     gradient_db::status::logging::finalize_build_log(&ctx.db(), attempt).await
 }
 
-/// One external call. An action deleted or deactivated while the row waited is
-/// delivered-by-omission: nothing is owed to a rule that no longer exists.
 async fn deliver_action(ctx: &EffectsCtx, row: &PendingDelivery) -> Result<()> {
     let ci = ctx.ci();
     let action_id = TaskActionId::new(uuid_field(row, "action")?);
@@ -255,8 +241,6 @@ mod tests {
         }
     }
 
-    /// A payload that lost a field fails the row rather than delivering a
-    /// half-built external call; the message names the field.
     #[test]
     fn a_missing_field_names_itself() {
         let r = row(serde_json::json!({"action": "not-a-uuid"}));

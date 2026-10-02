@@ -18,16 +18,8 @@ use sea_orm::{
     ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, IntoActiveModel, QueryFilter,
 };
 
-/// Creates a new evaluation that evaluates the previous evaluation's entry points again.
-///
-/// The global `derivation_build` shared builds carry build state, and a restart never
-/// walks, so the new evaluation takes the previous one's names over as its own:
-/// that is what the graph heal seeds its thaw from and what every reader of "does
-/// some evaluation still want this" reads. The initial status is derived from the
-/// previous entry-point shared builds: if every one is already terminal-success
-/// (`Completed`/`Substituted`) there is nothing to rebuild and the eval starts
-/// `Completed`; otherwise it starts `Building`, named, and the caller starts the
-/// `Eval` heal over it, which thaws the failed closure and promotes it.
+/// A restart never walks. The new evaluation is taking over the previous one's names because the
+/// graph heal is seeding its thaw from them.
 pub async fn trigger_restart_builds<C: ConnectionTrait>(
     db: &C,
     task: &MTask,
@@ -72,9 +64,7 @@ pub async fn trigger_restart_builds<C: ConnectionTrait>(
     Ok(new_eval)
 }
 
-/// `Completed` when every entry-point shared build is already terminal-success,
-/// otherwise `Building`. A shared build missing entirely counts as pending: the new
-/// eval must run to (re)build it.
+/// A missing shared build is pending because the new evaluation must build it.
 async fn restart_initial_status<C: ConnectionTrait>(
     db: &C,
     prev_entry_points: &[MEntryPoint],

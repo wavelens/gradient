@@ -4,11 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Post-creation parking gates. Each gate moves a freshly-created `Queued`
-//! evaluation into `Waiting` for a specific unmet precondition and is a no-op
-//! once the eval has left `Queued`. [`run_gates`] threads the eval through all
-//! four in order.
-
 mod approval;
 mod cache;
 mod storage;
@@ -23,9 +18,8 @@ pub use cache::park_if_no_cache;
 pub use storage::park_if_storage_full;
 pub use workers::park_if_no_workers;
 
-/// Passes the freshly-created evaluation through every parking gate in order:
-/// approval -> cache -> storage -> workers. Each gate is a no-op once the eval has
-/// left `Queued`, so the first gate that parks short-circuits the rest.
+/// The first parking gate is short-circuiting the rest because each gate is a no-op once the
+/// evaluation left `Queued`.
 pub(super) async fn run_gates<C: ConnectionTrait>(
     db: &C,
     eval: MEvaluation,

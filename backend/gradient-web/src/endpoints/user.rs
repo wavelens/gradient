@@ -57,10 +57,8 @@ pub struct CreateApiKeyRequest {
     pub permissions: Vec<String>,
     #[serde(default)]
     pub project: Option<String>,
-    /// Optional cache name to pin the key to. Mutually exclusive with `project`.
     #[serde(default)]
     pub cache: Option<String>,
-    /// CIDR strings the key may be used from. Empty or omitted = any source.
     #[serde(default)]
     pub allowed_ips: Option<Vec<String>>,
 }
@@ -68,14 +66,11 @@ pub struct CreateApiKeyRequest {
 #[derive(Deserialize, Debug)]
 pub struct PatchApiKeyRequest {
     pub name: Option<String>,
-    /// Wholesale replacement of the key's permission set. Omit to leave the
-    /// existing mask alone.
     pub permissions: Option<Vec<String>>,
-    /// Patch semantics for the project pin: omit to leave alone, `Some(name)` to
-    /// pin, `Some(null)` (i.e. JSON null) to unpin.
+    /// An omitted field is leaving the pin alone. A name is pinning the key, and JSON null is
+    /// unpinning it.
     #[serde(default, deserialize_with = "deserialize_optional_field")]
     pub project: Option<Option<String>>,
-    /// Wholesale replacement; `[]` clears the allowlist.
     #[serde(default)]
     pub allowed_ips: Option<Vec<String>>,
 }
@@ -94,13 +89,11 @@ pub struct ApiKeyInfo {
     pub name: String,
     pub managed: bool,
     pub permissions: Vec<&'static str>,
-    /// Project name (resolved from the pinned project id at response time), or `null`.
     pub project: Option<String>,
     pub created_at: String,
     pub last_used_at: Option<String>,
     pub expires_at: Option<String>,
     pub revoked_at: Option<String>,
-    /// CIDR allowlist (canonicalized). Empty list = any source.
     pub allowed_ips: Vec<String>,
 }
 
@@ -113,10 +106,8 @@ pub struct ApiKeyPermissionsResponse {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct DeleteUserRequest {
-    /// Password for password-auth users.
     #[serde(default)]
     pub password: Option<String>,
-    /// Username confirmation for OIDC users (must equal the caller's username).
     #[serde(default)]
     pub confirm_username: Option<String>,
 }
@@ -631,7 +622,6 @@ pub async fn delete_keys(
     Ok(Json(res))
 }
 
-/// Revoke a single API key by id without deleting it (keeps the audit trail).
 pub async fn post_key_revoke(
     state: State<Arc<ServerState>>,
     info: RequestInfo,
@@ -806,14 +796,12 @@ pub async fn patch_settings(
     Extension(user): Extension<MUser>,
     Json(body): Json<PatchUserSettingsRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    // Prevent modification of state-managed users
     if user.managed {
         return Err(WebError::forbidden(
             "Cannot modify state-managed user. This user is managed by configuration and cannot be edited through the API.",
         ));
     }
 
-    // OIDC users cannot edit their profile - identity is managed by the provider
     if user.password.is_none() {
         return Err(WebError::forbidden(
             "Cannot modify profile of an OIDC user. Your profile is managed by your identity provider.",

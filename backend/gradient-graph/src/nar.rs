@@ -4,8 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Recording a stored NAR in the cache index.
-
 use anyhow::Context as _;
 use gradient_db::{DbContext, WorkerDb};
 use gradient_entity::StorePath;
@@ -22,16 +20,9 @@ use tracing::{debug, trace, warn};
 
 use crate::messages::{NarCommit, NarCommitted, SignTargets};
 
-/// Record a stored NAR: the row, the runtime dependencies its references name, the need
-/// those edges carry, the complete closure of the shared build seeded from them and the can-start side
-/// of that flip.
-///
-/// Executes inside the graph writer's transaction, and only there. The pre-commit
-/// presence endpoint is read under a row lock a pooled handle would release with
-/// the statement that took it, which is a race against the maintenance retires with
-/// no compile error and no runtime signal, so the handle is checked here instead.
-/// The shared build locks are taken on that same transaction, always after the
-/// `cached_path` one and never before.
+/// The commit must run inside the graph writer's transaction only.
+/// A pooled handle would release the presence row lock with its statement and race the retires.
+/// The shared build locks are always taken after the `cached_path` lock, never before.
 pub(crate) async fn commit(ctx: &DbContext, c: &NarCommit) -> anyhow::Result<NarCommitted> {
     let db = &ctx.worker_db;
     let sp = StorePath::parse(&c.store_path).map_err(|e| anyhow::anyhow!("{e}"))?;
@@ -52,9 +43,6 @@ pub(crate) async fn commit(ctx: &DbContext, c: &NarCommit) -> anyhow::Result<Nar
     let producers =
         gradient_db::graph::reachability::producers_of_hashes(txn, &[sp.hash().to_owned()]).await?;
 
-    // The NAR is where a built output's runtime references are learned, so the
-    // graph edges they name are written from the same report the index is, and what
-    // need those edges carry is updated from the shared build they hang off.
     let referenced =
         gradient_db::graph::runtime_dependencies::producers_of_tokens(txn, &c.references).await?;
     if !referenced.is_empty() {
@@ -72,10 +60,6 @@ pub(crate) async fn commit(ctx: &DbContext, c: &NarCommit) -> anyhow::Result<Nar
         gradient_db::status::emit_transition_effects(ctx, &settled.changes).await?;
     }
 
-    // Complete closure is counted on the shared build, and the seed needs the endpoint this
-    // commit destroyed: a path that had no NAR before is what makes its producers
-    // present, and the row already says so by the time the seed reads it. A re-push
-    // of a backed path changed no presence, so it is only recounted.
     let (freshly_present, recounted): (&[DerivationId], &[DerivationId]) = if was_backed {
         (&[], &producers)
     } else {
@@ -119,10 +103,6 @@ pub(crate) async fn commit(ctx: &DbContext, c: &NarCommit) -> anyhow::Result<Nar
     })
 }
 
-/// [`commit`] for a batch, one statement per step instead of a dozen per NAR: the
-/// commit's cost is round trips, not the database's work. Any failure fails the
-/// batch; the caller then commits its NARs one by one, so a bad one still fails
-/// only its own uploader. Executes on the graph writer's transaction, like [`commit`].
 pub(crate) async fn commit_batch(
     ctx: &DbContext,
     commits: &[NarCommit],
@@ -200,8 +180,6 @@ pub(crate) async fn commit_batch(
         .collect())
 }
 
-/// Every row of the batch under its `FOR NO KEY UPDATE` lock, taken in hash order, then
-/// the existing ones refreshed and the new ones inserted together.
 async fn upsert_cached_paths(
     db: &WorkerDb,
     commits: &[NarCommit],
@@ -250,9 +228,6 @@ async fn upsert_cached_paths(
     Ok(upserted)
 }
 
-/// The runtime dependencies and need of the NARs a producer backs. A `.drv` or a
-/// source has none, so one lookup settles the common batch; a batch that has any
-/// takes them NAR by NAR, exactly as [`commit`] does.
 async fn commit_runtime_dependencies(
     ctx: &DbContext,
     txn: &sea_orm::DatabaseTransaction,
@@ -302,7 +277,6 @@ async fn commit_runtime_dependencies(
     Ok(())
 }
 
-/// Back every output with its hash's row in one statement, counted per hash.
 async fn mark_outputs_cached(
     db: &WorkerDb,
     hashes: &[String],
@@ -324,13 +298,6 @@ async fn mark_outputs_cached(
     Ok(marked)
 }
 
-/// The shared build side of a forward complete closure flip: the shared builds in `complete` can serve
-/// their outputs, and the `owners` of a `.drv` this commit made present are
-/// importable, so their gates may have opened.
-///
-/// One ordered lock over both sets, on the commit's own transaction: the mark is a
-/// bound and not a claim, so a shared build whose predicate does not hold is passed over,
-/// and `promote` executes under the same lock that produced its candidates.
 async fn advance_shared_builds(
     ctx: &DbContext,
     txn: &sea_orm::DatabaseTransaction,
@@ -346,10 +313,8 @@ async fn advance_shared_builds(
     Ok(())
 }
 
-/// The symmetric loss. A commit that reports a reference we do not have takes
-/// shared builds OUT of complete closure, and one left fetchable against such a shared build
-/// dispatches a build whose input nothing can provide - the forward-only half of
-/// this pair is the dead zone this project has paid for repeatedly.
+/// A commit reporting a reference we lack is taking shared builds out of complete closure.
+/// A shared build left fetchable against one would dispatch a build with an unprovidable input.
 async fn retract_shared_builds(
     ctx: &DbContext,
     txn: &sea_orm::DatabaseTransaction,
@@ -371,7 +336,6 @@ fn union(a: &[DerivationId], b: &[DerivationId]) -> Vec<DerivationId> {
     all
 }
 
-/// The debug-info walk decompresses the whole NAR, so it is running detached.
 pub(crate) fn after_commit(ctx: &DbContext, committed: &NarCommitted, store_path: &str) {
     let Ok(sp) = StorePath::parse(store_path) else {
         return;
@@ -400,21 +364,12 @@ pub(crate) fn after_commit(ctx: &DbContext, committed: &NarCommitted, store_path
     });
 }
 
-/// The row the commit wrote, and what it was before. `was_backed` is the
-/// pre-commit endpoint of the presence flip, which no statement after this write
-/// can recover: it is read under the row lock, so a maintenance retire rippling
-/// the same counters from its own transaction cannot land between the read and the
-/// write.
 struct Upserted {
     cached_path: CachedPathId,
     created: bool,
     was_backed: bool,
 }
 
-/// Insert or refresh the row under its `FOR NO KEY UPDATE` lock. A duplicate-key error
-/// on the insert propagates: the graph writer serialises commits, so there is no race to
-/// recover from, and inside a transaction a re-select after a failed INSERT would
-/// only replace the real error with 25P02.
 async fn upsert_cached_path(
     db: &WorkerDb,
     hash: &str,
@@ -451,11 +406,8 @@ async fn upsert_cached_path(
     }
 }
 
-/// An existing row brought up to the commit's report.
 fn refreshed(row: MCachedPath, c: &NarCommit) -> ACachedPath {
     let file_hash = normalize_nar_hash(&c.file_hash);
-    // Different bytes under the same store path: the recorded build-id
-    // members no longer describe the NAR, so re-open it to the indexer.
     let rescan_debug_info = row.file_hash.as_deref() != Some(file_hash.as_str());
     let was_confirmed = row.confirmed;
     let mut active = row.into_active_model();
@@ -500,10 +452,6 @@ fn new_row(hash: &str, package: &str, c: &NarCommit) -> MCachedPath {
     }
 }
 
-/// The `cached_path_signature` row of every target cache for each committed path,
-/// signed where this server holds the cache's key, in one statement. A path every
-/// producing task keeps private, or a cache whose key is missing, gets an unsigned
-/// row for the sweep to fill. Returns the caches signed into, per commit.
 async fn sign_into_caches(
     ctx: &DbContext,
     committed: &[(&NarCommit, &StorePath, CachedPathId)],
@@ -564,7 +512,6 @@ async fn sign_into_caches(
     Ok(signed)
 }
 
-/// The caches `targets` names, each with a signer when its key decrypts.
 async fn target_signers(
     ctx: &DbContext,
     targets: SignTargets,
@@ -606,8 +553,6 @@ fn signer_for(ctx: &DbContext, cache: &MCache) -> Option<CacheSigner> {
     .ok()
 }
 
-/// A row already there keeps its signature and takes the new one only where it
-/// had none, so a re-push never unsigns a path and a placeholder is filled.
 async fn insert_signatures(db: &WorkerDb, rows: Vec<ACachedPathSignature>) {
     if rows.is_empty() {
         return;
@@ -647,7 +592,6 @@ mod tests {
 
     const SP: &str = "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-hello-2.12";
     const HASH: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
-    /// A parent of [`HASH`], for the ripple level a completing commit drives.
     const DEP_HASH: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 
     fn cache_id() -> CacheId {
@@ -695,12 +639,10 @@ mod tests {
         }
     }
 
-    /// One row of a producer lookup, which projects the derivation alone.
     fn producer_row() -> BTreeMap<String, Value> {
         BTreeMap::from([("derivation".to_owned(), Value::from(Uuid::now_v7()))])
     }
 
-    /// One region row of the bounded need walk: the shared build and what it now reads.
     fn need_row() -> BTreeMap<String, Value> {
         BTreeMap::from([
             ("derivation".to_owned(), Value::from(Uuid::now_v7())),
@@ -719,17 +661,10 @@ mod tests {
         gradient_db::pool::statements(db.into_transaction_log())
     }
 
-    /// The statements as sea-orm built them. The shared helper formats each with
-    /// `{:?}`, which escapes the quotes sea-orm puts around every identifier, so
-    /// an assertion on a generated statement reads the raw `sql` instead.
     fn raw_statements(db: WorkerDb) -> Vec<Statement> {
         gradient_db::pool::raw_statements(db.into_transaction_log())
     }
 
-    /// The value a generated statement binds to `column`, through the placeholder
-    /// the SET clause or the insert's column list gives it. Searching the value
-    /// list for the bare `Bool(Some(false))` would match the `debug_info_indexed`
-    /// these same statements write, and pass while `confirmed` went the other way.
     fn bound(stmt: &Statement, column: &str) -> Value {
         let quoted = format!("\"{column}\"");
         let position = match stmt.sql.split_once(&format!("{quoted} = $")) {
@@ -757,10 +692,6 @@ mod tests {
         stmt.values.as_ref().expect("the statement binds values").0[position - 1].clone()
     }
 
-    /// `commit` executes in the graph writer's transaction and rejects a pooled handle,
-    /// so every test drives one. The mock records the whole transaction as a single
-    /// log entry whose synthetic `BEGIN`/`COMMIT` the shared helper drops, so the
-    /// statement indices stay the ones the code issues.
     async fn commit_in_transaction(ctx: &DbContext, c: &NarCommit) -> anyhow::Result<NarCommitted> {
         let tx = Arc::new(ctx.worker_db.begin().await.expect("begin"));
         let scoped = ctx.in_transaction(Arc::clone(&tx));
@@ -775,8 +706,6 @@ mod tests {
         committed
     }
 
-    /// The scripted commit, its context dropped so the pool handle the log is read
-    /// from is the last one alive.
     async fn commit_and_log(db: DatabaseConnection, c: &NarCommit) -> Vec<String> {
         let (ctx, pool) = ctx(db).await;
         commit_in_transaction(&ctx, c).await.expect("commit");
@@ -785,7 +714,6 @@ mod tests {
         statements(pool)
     }
 
-    /// [`commit_and_log`] over the raw statements.
     async fn commit_and_raw_log(db: DatabaseConnection, c: &NarCommit) -> Vec<Statement> {
         let (ctx, pool) = ctx(db).await;
         commit_in_transaction(&ctx, c).await.expect("commit");
@@ -794,9 +722,6 @@ mod tests {
         raw_statements(pool)
     }
 
-    /// An existing backed row re-pushed with `references`: nothing is freshly
-    /// present, and the producer lookups answer with none, so no edge and no
-    /// counter move follows the write.
     async fn recommit_log(references: Vec<String>) -> Vec<String> {
         let mut mock = MockDatabase::new(DatabaseBackend::Postgres)
             .append_query_results([
@@ -849,7 +774,6 @@ mod tests {
         }
     }
 
-    /// The scripted answers of a commit that resolves its project to one cache.
     fn project_commit_db(cache: MCache) -> DatabaseConnection {
         MockDatabase::new(DatabaseBackend::Postgres)
             .append_query_results([Vec::<MCachedPath>::new()])
@@ -863,11 +787,6 @@ mod tests {
             .into_connection()
     }
 
-    /// A resolved project writes a `cached_path_signature` row for every
-    /// subscribed cache, signed with the cache's key. Regression guard: the
-    /// detached NAR commit must resolve the project on the read loop before the
-    /// job is evicted from the tracker, otherwise `SignTargets` collapses to
-    /// `None`, no row is written, and the narinfo 404s forever.
     #[tokio::test]
     async fn a_project_target_signs_with_the_caches_key() {
         let (_file, secret) = secret_file();
@@ -902,8 +821,6 @@ mod tests {
         );
     }
 
-    /// A cache whose key this server does not hold still gets its row, unsigned,
-    /// for the sweep: "not yet signed" stays distinct from "never signed".
     #[tokio::test]
     async fn a_cache_without_a_key_gets_an_unsigned_row() {
         let (ctx, pool) = ctx(project_commit_db(cache_row(String::new()))).await;
@@ -954,8 +871,6 @@ mod tests {
         );
     }
 
-    /// No resolvable project records the path but enqueues no signature, so the
-    /// endpoint can distinguish "not yet signed" from "will never be signed".
     #[tokio::test]
     async fn none_target_enqueues_no_signature() {
         let db = MockDatabase::new(DatabaseBackend::Postgres)
@@ -974,11 +889,6 @@ mod tests {
         );
     }
 
-    /// The NAR is where a built output's runtime references are learned: every
-    /// reference with a producer becomes a runtime dependency from the path's producer,
-    /// and the need those edges carry is updated over the producer at once.
-    /// Without it the shared builds the new edges reach wait a sweep interval for need
-    /// they already have, which is the whole point of learning them here.
     #[tokio::test]
     async fn a_commit_writes_the_runtime_dependencies_its_references_name() {
         let db = MockDatabase::new(DatabaseBackend::Postgres)
@@ -1018,11 +928,6 @@ mod tests {
         );
     }
 
-    /// A NAR that makes its producer present advances the shared build side in the SAME
-    /// transaction: the producer's counter is seeded, what became complete is offered
-    /// to the fetchable mark, and the derivation whose own `.drv` this is is offered
-    /// to promotion. Without this the counters only move on the next sweep, and a
-    /// parent waits a sweep interval for an input it already has.
     #[tokio::test]
     async fn a_complete_commit_advances_the_shared_builds_behind_the_paths_it_completed() {
         let producer = Uuid::now_v7();
@@ -1068,12 +973,6 @@ mod tests {
         );
     }
 
-    /// The pre-commit presence endpoint must be read under the row lock. A
-    /// maintenance retire deletes the same row from its own transaction, outside
-    /// the graph writer, so an unlocked read lets the delete land between the read
-    /// and the write: the commit would then call its producers freshly present
-    /// against a row that is gone and count every parent down a second time,
-    /// permanently. The row read is the commit's first statement.
     #[tokio::test]
     async fn the_pre_commit_endpoint_is_read_under_the_row_lock() {
         let log = recommit_log(Vec::new()).await;
@@ -1083,9 +982,6 @@ mod tests {
         );
     }
 
-    /// The narinfo `References:` line is one ordered text column on the path now,
-    /// written from the same report the runtime dependencies are, so the line and the
-    /// signature fingerprint over it reconstruct verbatim.
     #[tokio::test]
     async fn a_commit_writes_the_reported_references_onto_the_row() {
         let dep = format!("{DEP_HASH}-dep");
@@ -1118,10 +1014,6 @@ mod tests {
         );
     }
 
-    /// A pooled handle releases every lock at the end of the statement that took
-    /// it, so a commit on one races the maintenance retires with nothing held.
-    /// Neither the compiler nor a `MockDatabase` can tell the two handles apart,
-    /// so the commit refuses the pooled one instead of silently racing.
     #[tokio::test]
     async fn a_pooled_commit_is_rejected_instead_of_racing_the_retires() {
         let (pooled, _pool) =
@@ -1137,11 +1029,6 @@ mod tests {
         );
     }
 
-    /// A commit that names a reference whose producer is not complete takes its OWN
-    /// producer out of complete closure: the new runtime dependency is a missing dependency, the seed reports
-    /// the loss, and every shared build left fetchable against it dispatches a build whose
-    /// input nothing can provide. The forward-only half of this pair is the dead
-    /// zone this project has paid for repeatedly.
     #[tokio::test]
     async fn a_commit_that_loses_completeness_ripples_backward() {
         let producer = Uuid::now_v7();
@@ -1203,8 +1090,6 @@ mod tests {
         assert_eq!(committed.outputs_marked, 2);
     }
 
-    /// A passthrough NAR on S3 is committed before its object exists, so the row
-    /// must say so.
     #[tokio::test]
     async fn a_passed_through_commit_on_s3_inserts_the_row_unconfirmed() {
         let db = MockDatabase::new(DatabaseBackend::Postgres)
@@ -1235,7 +1120,6 @@ mod tests {
         );
     }
 
-    /// New bytes under an old hash on S3 are unconfirmed again until uploaded.
     #[tokio::test]
     async fn a_recommit_with_new_bytes_takes_the_commits_confirmed_flag() {
         let existing = MCachedPath {

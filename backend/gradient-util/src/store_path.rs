@@ -4,7 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-/// Returns the full `/nix/store/` path for a derivation hash-name stored without prefix.
 pub fn nix_store_path(hash_name: &str) -> String {
     if hash_name.starts_with('/') {
         hash_name.to_string()
@@ -13,12 +12,10 @@ pub fn nix_store_path(hash_name: &str) -> String {
     }
 }
 
-/// Strips the `/nix/store/` prefix from a path, returning just the hash-name component.
 pub fn strip_nix_store_prefix(path: &str) -> String {
     path.strip_prefix("/nix/store/").unwrap_or(path).to_string()
 }
 
-/// Strips the `/nix/store/` prefix, returning a `&str` (no allocation).
 pub fn strip_store_prefix(path: &str) -> &str {
     path.strip_prefix("/nix/store/").unwrap_or(path)
 }
@@ -26,8 +23,6 @@ pub fn strip_store_prefix(path: &str) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    // ── nix_store_path ───────────────────────────────────────────────────────────
 
     #[test]
     fn nix_store_path_prepends_prefix_to_bare_hash_name() {
@@ -44,8 +39,7 @@ mod tests {
 
     #[test]
     fn nix_store_path_passes_through_other_absolute_paths() {
-        // Any path starting with `/` is left alone - the function does not
-        // re-check that the prefix is actually `/nix/store/`.
+        // A path starting with `/` is left alone without checking for `/nix/store/`.
         assert_eq!(nix_store_path("/tmp/foo"), "/tmp/foo");
     }
 
@@ -53,8 +47,6 @@ mod tests {
     fn nix_store_path_empty_input_gets_prefix() {
         assert_eq!(nix_store_path(""), "/nix/store/");
     }
-
-    // ── strip_nix_store_prefix ───────────────────────────────────────────────────
 
     #[test]
     fn strip_nix_store_prefix_removes_prefix() {
@@ -75,11 +67,8 @@ mod tests {
         assert_eq!(strip_nix_store_prefix(""), "");
     }
 
-    // ── strip_store_prefix ───────────────────────────────────────────────────────
-
     #[test]
     fn strip_store_prefix_removes_prefix_without_allocating() {
-        // Return type is `&str`, so slicing into the input is confirmed by identity.
         let input = "/nix/store/abc123-foo";
         let out = strip_store_prefix(input);
         assert_eq!(out, "abc123-foo");

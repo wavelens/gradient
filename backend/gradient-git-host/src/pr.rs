@@ -4,11 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Pull-request creation primitives for [`crate::reporter::CiReporter`].
-//!
-//! Each Git host gets a small module that commits a set of file edits onto a
-//! reusable branch and opens or updates a single PR for it. The reporter impls
-//! delegate here so the Git-host-specific HTTP lives in one place.
 #![allow(
     clippy::too_many_arguments,
     reason = "arg-heavy; refactor tracked in #503"
@@ -18,14 +13,12 @@ use anyhow::{Context, Result, bail};
 use base64::Engine as _;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
-/// A file to write in a branch commit.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CommitFile {
     pub path: String,
     pub contents: Vec<u8>,
 }
 
-/// Explicit author/committer for a branch commit.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CommitIdent {
     pub name: String,
@@ -33,10 +26,6 @@ pub struct CommitIdent {
 }
 
 impl CommitIdent {
-    /// Fallback bot identity for the libgit2 force-push path (Gitea/Forgejo,
-    /// GitLab) when no identity is configured and the token owner cannot be
-    /// resolved. GitHub never uses this: it omits the author so the Git host
-    /// credits its App bot and signs the commit verified.
     pub fn gradient_bot(base_url: &str) -> Self {
         Self {
             name: "Gradient".to_owned(),
@@ -45,12 +34,6 @@ impl CommitIdent {
     }
 }
 
-/// A commit to upsert onto a branch: the message, optional identity, and edits.
-///
-/// `author == None` lets each Git host pick attribution: GitHub omits the identity
-/// so its App bot authors the commit (verified); the libgit2 force-push Git hosts
-/// (Gitea/Forgejo, GitLab) resolve the token owner, falling back to
-/// [`CommitIdent::gradient_bot`] when that lookup's scope is missing.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BranchCommit {
     pub message: String,
@@ -58,15 +41,12 @@ pub struct BranchCommit {
     pub files: Vec<CommitFile>,
 }
 
-/// Bare host of a base URL, for a noreply commit email when a Git host hides the
-/// authenticated user's address.
 fn host_of(base_url: &str) -> &str {
     let after_scheme = base_url.split_once("://").map_or(base_url, |(_, r)| r);
     let host = after_scheme.split('/').next().unwrap_or(after_scheme);
     host.split(':').next().unwrap_or(host)
 }
 
-/// A reference to an opened or updated pull/merge request.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PrRef {
     pub number: i64,
@@ -100,8 +80,6 @@ async fn send_ok(req: reqwest::RequestBuilder, ctx: &str) -> Result<reqwest::Sta
 
     Ok(status)
 }
-
-// ── GitHub (shared by PAT and App reporters) ────────────────────────────────
 
 #[cfg(test)]
 mod ident_tests {
@@ -200,8 +178,8 @@ pub(crate) mod github {
         )
         .await?;
 
-        // Omitting author/committer lets GitHub attribute the commit to the App
-        // bot (or token user) and sign it verified; only override when configured.
+        // An omitted author is letting GitHub attribute the commit to the App bot and sign it
+        // verified.
         let ident = commit.author.as_ref().map(|a| Ident {
             name: &a.name,
             email: &a.email,
@@ -412,8 +390,6 @@ pub(crate) mod github {
     }
 }
 
-// ── Gitea / Forgejo (contents + branches API) ───────────────────────────────
-
 pub(crate) mod gitea {
     use super::*;
 
@@ -507,8 +483,6 @@ pub(crate) mod gitea {
         Ok(info.default_branch)
     }
 
-    /// The token owner, used as the commit identity libgit2 requires for the
-    /// force-push path (Gitea has no App-bot attribution to fall back on).
     pub async fn authenticated_user(
         client: &reqwest::Client,
         base_url: &str,
@@ -566,8 +540,6 @@ pub(crate) mod gitea {
         body: &'a str,
     }
 }
-
-// ── GitLab (commits + merge-requests API) ───────────────────────────────────
 
 pub(crate) mod gitlab {
     use super::*;
@@ -658,8 +630,6 @@ pub(crate) mod gitlab {
         Ok(info.default_branch)
     }
 
-    /// The token owner, used as the commit identity libgit2 requires for the
-    /// force-push path (GitLab has no App-bot attribution to fall back on).
     pub async fn authenticated_user(
         client: &reqwest::Client,
         base_url: &str,

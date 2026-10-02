@@ -4,8 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Gitea + Forgejo provider (identical webhook and status-API surface).
-
 use std::sync::Arc;
 
 use anyhow::anyhow;

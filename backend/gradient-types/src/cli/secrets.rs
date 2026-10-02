@@ -6,9 +6,9 @@
 
 use clap::Args;
 
-/// Both files are required to run the server but deliberately default to empty
-/// so `--state-validate` (a DB-free, secret-free build/CI check) can parse
-/// without them; `init_state` rejects an empty value on the live server path.
+/// Both files are required to run the server but deliberately default to empty. `--state-validate`,
+/// a DB-free and secret-free build check, must parse without them. `init_state` is rejecting an
+/// empty value on the live server path.
 #[derive(Args, Debug, Clone, Default)]
 pub struct SecretsArgs {
     #[arg(

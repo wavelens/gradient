@@ -38,8 +38,6 @@ pub trait ScoringPolicy: Send + Sync + std::fmt::Debug {
     fn uses_history(&self) -> bool {
         false
     }
-    /// Whether any enabled rule consumes `JobContext::project_work_share`, so the
-    /// scheduler skips computing the share otherwise.
     fn uses_project_work_share(&self) -> bool {
         false
     }
@@ -115,9 +113,6 @@ impl ScoringPolicy for RulePolicy {
     }
 }
 
-/// One row of the declarative policy table: the rule and whether the policy
-/// comes with it enabled. Disabled rules stay compiled, tested, and visible here so
-/// their status is an explicit decision instead of a commented-out line.
 struct RuleSpec {
     enabled: bool,
     rule: Box<dyn ScoreRule>,
@@ -146,9 +141,8 @@ fn resource_aware_table() -> Vec<RuleSpec> {
     rules.push(spec(true, Box::new(ResourceFitRule::default())));
     rules.push(spec(true, Box::new(ResourceSaturationRule::default())));
     rules.push(spec(true, Box::new(PreferLocalBuildRule::default())));
-    // Disabled: its idle gate counts zero-occupancy rather than spare capacity,
-    // over-penalizing busy-but-fair projects. Re-enabling is a scheduling-policy
-    // decision (#476), made here by flipping the flag.
+    // FairShareRule is disabled because its idle gate is counting zero occupancy, not spare
+    // capacity. Re-enabling it is a scheduling-policy decision (#476).
     rules.push(spec(false, Box::new(FairShareRule::default())));
     rules.push(spec(true, Box::new(NetworkAffinityRule::default())));
     rules.push(spec(true, Box::new(DiskAffinityRule::default())));
@@ -172,8 +166,6 @@ pub fn resource_aware_rules() -> Vec<Box<dyn ScoreRule>> {
     enabled(resource_aware_table())
 }
 
-/// `(name, description)` for every known scoring rule, disabled ones included,
-/// so the board UI can explain any rule a recorded breakdown names.
 pub fn rule_catalog() -> Vec<(&'static str, &'static str)> {
     let mut catalog: Vec<(&'static str, &'static str)> = resource_aware_table()
         .iter()
@@ -265,10 +257,6 @@ mod tests {
         assert_eq!(policy_by_name("nonsense").name(), "resource-aware");
     }
 
-    // Anti-starvation (#112): a build waiting an hour must outscore a fresh
-    // fully-cached candidate the worker can serve without fetching. Guards the
-    // composed simple policy against the WaitTimeRule cap being lowered below
-    // the MissingPathsRule scored bonus.
     #[test]
     fn simple_policy_long_waiting_build_overcomes_fresh_cached() {
         let policy = policy_by_name("simple");
@@ -368,8 +356,6 @@ mod tests {
         );
     }
 
-    // A long CPU-bound build finishes sooner on a faster core than the
-    // transfer a cache-warm but slower worker saves.
     #[test]
     fn resource_aware_sends_heavy_build_to_fast_cold_worker_over_slow_warm_one() {
         use crate::score::context::WorkerMetricsView;
@@ -425,8 +411,6 @@ mod tests {
         );
     }
 
-    // Holding the outputs means nothing is built: the job only uploads, so no
-    // faster core can beat it.
     #[test]
     fn resource_aware_sends_heavy_build_to_the_worker_holding_its_outputs() {
         use crate::score::context::WorkerMetricsView;
@@ -568,9 +552,8 @@ mod tests {
         );
     }
 
-    /// Rule names are persisted in `dispatched_job.score_breakdown` and served
-    /// by the rule-catalog API: they are a recorded contract. Renaming a rule
-    /// struct must not change these strings.
+    /// Rule names are persisted in `dispatched_job.score_breakdown` and served by the rule-catalog
+    /// API. Renaming a rule struct must not change these strings.
     #[test]
     fn rule_names_are_pinned() {
         let expected = [
@@ -596,8 +579,6 @@ mod tests {
         assert_eq!(FairShareRule::default().name(), "FairShareRule");
     }
 
-    /// An unmeasured build is held by an explicit veto, not by a penalty a
-    /// large unrelated bonus could out-vote; the breakdown records who held it.
     #[test]
     fn unmeasured_build_is_vetoed_not_penalized() {
         let policy = policy_by_name("simple");
@@ -624,8 +605,6 @@ mod tests {
         assert_eq!(breakdown.rules["RescoreWaitRule"], 0.0);
     }
 
-    /// Only FairShareRule consumes project_work_share, and it is shipping disabled, so
-    /// the live policies must not ask the scheduler to compute the share.
     #[test]
     fn project_work_share_is_unconsumed_while_fair_share_is_disabled() {
         assert!(!policy_by_name("simple").uses_project_work_share());

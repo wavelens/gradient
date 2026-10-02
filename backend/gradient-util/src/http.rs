@@ -4,22 +4,11 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Shared HTTP client construction.
-//!
-//! `reqwest::Client` is internally `Arc`'d and is designed to be cloned and
-//! reused across the whole process. Constructing one per call leaks
-//! connection pools and produces inconsistent timeout/redirect behaviour, so
-//! all server-side and CLI-side outbound HTTP traffic should go through a
-//! client built here. Two exist, differing only in redirect policy:
-//! [`build_client`] for API calls and [`build_download_client`] for object
-//! fetches.
-
 use std::sync::OnceLock;
 use std::time::Duration;
 
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 
-/// Redirect hops a binary-cache download follows before giving up.
 const DOWNLOAD_MAX_REDIRECTS: usize = 5;
 
 pub fn user_agent() -> String {
@@ -29,14 +18,9 @@ pub fn user_agent() -> String {
     )
 }
 
-/// Install the process-wide rustls `CryptoProvider`.
-///
-/// rustls 0.23 refuses to auto-pick a provider when zero or multiple are
-/// enabled via crate features; any TLS handshake started before a provider is
-/// installed panics. Binaries must call this **before** any code path opens a
-/// TLS connection (e.g. `tokio_tungstenite::connect_async` for `wss://`,
-/// `reqwest` HTTPS, sea-orm postgres TLS). The call is idempotent - the second
-/// install attempt returns `Err`, which we deliberately ignore.
+/// rustls 0.23 is refusing to pick a provider when zero or several are enabled. A TLS handshake
+/// before installation is panicking. Binaries must call this before any code path opens a TLS
+/// connection. A second call is returning `Err`, and ignoring it is deliberate.
 pub fn init_crypto_provider() {
     let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
 }
@@ -51,8 +35,6 @@ fn rustls_root_store() -> rustls::RootCertStore {
     roots
 }
 
-/// reqwest writes ALPN only into a TLS config it builds itself, so a preconfigured
-/// one without it pins every connection, S3 included, to HTTP/1.1.
 fn rustls_config(alpn: &[&[u8]]) -> rustls::ClientConfig {
     init_crypto_provider();
     let mut config = rustls::ClientConfig::builder()
@@ -71,13 +53,6 @@ pub enum HttpVersion {
     Http2,
 }
 
-/// The shared user agent and TLS roots, with no total request timeout: for a
-/// caller whose transfers legitimately outlive one and that polices progress
-/// another way (the S3 and download clients, whose read timeout is an
-/// inactivity timer).
-/// HTTP/2 multiplexes every request to a host over one connection, so its flow
-/// control window adapts to the link instead of capping a NAR stream at 64 KiB
-/// in flight.
 pub fn untimed_client_builder() -> reqwest::ClientBuilder {
     reqwest::Client::builder()
         .user_agent(user_agent())
@@ -89,24 +64,15 @@ fn client_builder() -> reqwest::ClientBuilder {
     untimed_client_builder().timeout(DEFAULT_TIMEOUT)
 }
 
-/// Client for API traffic (Git hosts, webhooks, OIDC).
-/// Redirects are refused: following one on an authenticated call is an SSRF
-/// pivot, so a 3xx must surface as itself.
 pub fn build_client() -> reqwest::Result<reqwest::Client> {
     client_builder()
         .redirect(reqwest::redirect::Policy::none())
         .build()
 }
 
-/// Client for fetching from object stores and third-party binary caches:
-/// NARs, cache blobs, build logs and upstream narinfo probes.
-///
-/// Unlike [`build_client`] this follows redirects. Attic, Cachix and every S3
-/// gateway answer a NAR GET with a 3xx to their object storage, and reqwest
-/// reports a non-followed 3xx as an ordinary response carrying an empty body -
-/// indistinguishable from a successful zero-byte download. Object GETs carry no
-/// credentials worth leaking, so the SSRF argument that keeps redirects off the
-/// API client does not apply here.
+/// Attic, Cachix and S3 gateways are answering a NAR GET with a 3xx to their object storage.
+/// reqwest is reporting an unfollowed 3xx as a successful empty body. Object GETs are carrying no
+/// credentials worth leaking through a redirect.
 pub fn build_download_client() -> reqwest::Result<reqwest::Client> {
     download_client_builder().build()
 }
@@ -115,8 +81,6 @@ pub(crate) fn download_client_builder() -> reqwest::ClientBuilder {
     idle_timed_download_builder(DEFAULT_TIMEOUT)
 }
 
-/// A NAR legitimately streams for longer than any total timeout, so a download
-/// fails only when the connection goes `idle` without delivering a byte.
 fn idle_timed_download_builder(idle: Duration) -> reqwest::ClientBuilder {
     untimed_client_builder()
         .connect_timeout(idle)
@@ -124,8 +88,6 @@ fn idle_timed_download_builder(idle: Duration) -> reqwest::ClientBuilder {
         .redirect(reqwest::redirect::Policy::limited(DOWNLOAD_MAX_REDIRECTS))
 }
 
-/// A download client that speaks only `version`, offering nothing else in ALPN:
-/// a server without it fails the request instead of downgrading.
 pub fn build_version_download_client(version: HttpVersion) -> reqwest::Result<reqwest::Client> {
     let builder = download_client_builder();
     match version {
@@ -139,13 +101,6 @@ pub fn build_version_download_client(version: HttpVersion) -> reqwest::Result<re
     .build()
 }
 
-/// Process-wide [`build_download_client`], built on first use. Every binary-cache
-/// object fetch shares it, so neither the server (which threads its API client
-/// through `ServerState`) nor the worker needs to carry a second client around.
-///
-/// Panics only if the builder cannot construct a client at all, which happens
-/// solely on pathological TLS init failure - the same contract as the API
-/// client's construction at startup.
 pub fn download_client() -> &'static reqwest::Client {
     static DOWNLOAD_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
     DOWNLOAD_CLIENT
@@ -156,10 +111,6 @@ pub fn download_client() -> &'static reqwest::Client {
 mod tests {
     use super::*;
 
-    /// Regression test for issue #232: without an installed `CryptoProvider`,
-    /// rustls panics inside `ClientConfig::builder()` when feature
-    /// auto-detection fails. `init_crypto_provider` must be idempotent and
-    /// must make subsequent rustls config construction succeed.
     #[test]
     fn init_crypto_provider_is_idempotent_and_enables_tls() {
         init_crypto_provider();
@@ -172,10 +123,6 @@ mod tests {
             .with_no_client_auth();
     }
 
-    /// Regression for #287: outbound HTTPS must honour OS-installed CAs so
-    /// self-hosted Gradient instances with a self-signed CA work the same way
-    /// `curl` does. `rustls_root_store` merges native certs with the bundled
-    /// Mozilla baseline and degrades silently when the system store is absent.
     #[test]
     fn root_store_contains_webpki_baseline() {
         let roots = rustls_root_store();

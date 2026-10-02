@@ -14,9 +14,6 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tracing::warn;
 
-/// Commit identity for the libgit2 force-push path: the resolved token owner
-/// when available, else the Gradient bot default. Never fails, so a token
-/// missing the Git host's read-user scope no longer blocks the flake-lock PR.
 fn author_or_bot(resolved: Result<CommitIdent>, base_url: &str) -> CommitIdent {
     resolved.unwrap_or_else(|e| {
         warn!(error = %e, "resolving Git host commit author; using Gradient bot default");
@@ -24,41 +21,20 @@ fn author_or_bot(resolved: Result<CommitIdent>, base_url: &str) -> CommitIdent {
     })
 }
 
-/// Validate a user-supplied base URL for outbound CI API calls.
-///
-/// Reuses the SSRF guard from the webhook module: rejects non-http(s) schemes
-/// and IP literals / hostnames pointing at loopback, link-local (cloud
-/// metadata), private, or otherwise-unsafe ranges.
 fn validate_safe_outbound_url(url: &str) -> Result<(), WebhookUrlError> {
     validate_webhook_url(url).map(|_| ())
 }
 
-/// The lifecycle state of a CI check.
-///
-/// Maps to both the GitHub Checks API (`queued` / `in_progress` / conclusion)
-/// and the Gitea Commit Status API (`pending` / `success` / `failure` / `error`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CiStatus {
-    /// Work is queued but not yet started.
     Pending,
-    /// Work is actively in progress.
     Running,
-    /// Completed successfully.
     Success,
-    /// Completed with a build/test failure.
     Failure,
-    /// Completed with an infrastructure or unexpected error.
     Error,
-    /// Awaiting a maintainer action (PR approval gate). On GitHub Apps this
-    /// surfaces as the native `action_required` conclusion with a
-    /// `requested_actions` button; other Git hosts report it as `Pending` with
-    /// the description spelling out what the maintainer needs to do.
     ActionRequired,
 }
 
-/// A button shown on a GitHub Check Run that the maintainer clicks to fire a
-/// `check_run.requested_action` webhook back to Gradient. Only consumed by
-/// [`GithubAppReporter`]; other reporters ignore the field.
 #[derive(Debug, Clone, Serialize)]
 pub struct RequestedAction {
     pub identifier: String,
@@ -66,15 +42,8 @@ pub struct RequestedAction {
     pub description: String,
 }
 
-/// Identifier we send for the "approve untrusted PR" button - and pattern-match
-/// on when the Git host echoes it back via `check_run.requested_action`.
 pub const APPROVAL_ACTION_ID: &str = "approve-and-run";
 
-/// The reaction Gradient leaves on a `/gradient` PR comment.
-///
-/// `Eyes` fires on receipt (maintainer gate passed); `ThumbsUp` / `ThumbsDown`
-/// fire when the triggered evaluation reaches a terminal status; `Confused`
-/// fires when a non-maintainer issues a command.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReactionKind {
     Eyes,
@@ -84,7 +53,6 @@ pub enum ReactionKind {
 }
 
 impl ReactionKind {
-    /// String accepted by GitHub / Gitea / Forgejo reactions API (`content`).
     pub const fn github_content(self) -> &'static str {
         match self {
             ReactionKind::Eyes => "eyes",
@@ -94,7 +62,6 @@ impl ReactionKind {
         }
     }
 
-    /// Emoji name accepted by GitLab award-emoji API (`name`).
     pub const fn gitlab_name(self) -> &'static str {
         match self {
             ReactionKind::Eyes => "eyes",
@@ -105,10 +72,6 @@ impl ReactionKind {
     }
 }
 
-/// Identifies the comment the reaction should be attached to. GitHub and
-/// Gitea / Forgejo address PR-conversation comments by `(owner, repo,
-/// comment_id)`; GitLab requires the MR number too because notes are nested
-/// under `/projects/:id/merge_requests/:iid/notes/:note_id`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReactionTarget {
     pub owner: String,
@@ -117,97 +80,38 @@ pub struct ReactionTarget {
     pub comment_id: i64,
 }
 
-/// Snapshot of a pull/merge request returned by [`CiReporter::get_pull_request`].
-///
-/// Used by the `/gradient run` comment handler to learn the PR's current head
-/// SHA + ref so it can lay down a fresh evaluation when no parked approval
-/// gate exists. `issue_comment` webhooks do not carry head metadata, hence
-/// the round-trip via the Git host API.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PullRequestSnapshot {
-    /// Full 40-character commit SHA of the PR head.
     pub head_sha: String,
-    /// PR head branch name (without `refs/heads/` prefix).
     pub head_branch: String,
-    /// Clone URL of the PR head repo when the PR is from a fork; `None` for
-    /// same-repo PRs. Mirrors the `head_repo_clone_url` extracted from
-    /// `pull_request` webhook payloads so the existing PR-trigger fanout can
-    /// route fetches to the fork.
     pub head_clone_url: Option<String>,
-    /// `true` when the PR head repo differs from the base repo.
     pub is_fork: bool,
-    /// PR / MR title, the evaluation's display message as on a PR webhook.
     pub title: Option<String>,
 }
 
-/// All parameters needed to report a CI status to an external provider.
 #[derive(Debug, Clone)]
 pub struct CiReport {
-    /// Repository owner (user or organisation name on the Git host).
     pub owner: String,
-    /// Repository name.
     pub repo: String,
-    /// Full 40-character commit SHA.
     pub sha: String,
-    /// Stable identifier for this check (e.g. `"gradient/packages.x86_64-linux.hello"`).
-    ///
-    /// Used as `context` in Gitea and as the check `name` in GitHub.
     pub context: String,
-    /// Current lifecycle state of the check.
     pub status: CiStatus,
-    /// Short human-readable summary shown inline in the PR/commit view.
     pub description: Option<String>,
-    /// URL of the full details page (e.g. the Gradient evaluation page).
     pub details_url: Option<String>,
-    /// GitHub `check_run` id when an existing check run should be updated.
-    /// Only used by [`GithubAppReporter`]; ignored by all other reporters.
     pub existing_check_id: Option<i64>,
-    /// `requested_actions` to attach to a GitHub Check Run. Only emitted by
-    /// [`GithubAppReporter`] when `status == ActionRequired`. Empty for
-    /// every other reporter; other Git hosts express the same intent through
-    /// `description`.
     pub requested_actions: Vec<RequestedAction>,
 }
 
-/// Abstraction over external CI status providers.
-///
-/// Implementations report build/evaluation status back to the Git host where
-/// the commit lives. Each call may create a new status entry or update an
-/// existing one, depending on what the provider supports.
-///
-/// # Implementors
-///
-/// - `NoopCiReporter` - silently discards all reports (used when no integration
-///   is configured).
-/// - `RecordingCiReporter` (test-support) - records every call for assertions.
-/// - `GiteaReporter` - Gitea Commit Status API.
-/// - `GitlabReporter` - GitLab Commit Status API.
-/// - `GithubReporter` - GitHub Commit Status API (also works with GitHub Enterprise Server).
 #[async_trait]
 pub trait CiReporter: Send + Sync + std::fmt::Debug + 'static {
-    /// Report or update a CI status for the given commit.
-    ///
-    /// Returns `Ok(Some(id))` when the call created a new GitHub check run
-    /// whose id the caller should persist for future updates. All other
-    /// reporters (and PATCHes against an existing check run) return `Ok(None)`.
     async fn report(&self, report: &CiReport) -> Result<Option<i64>>;
 
-    /// Returns `true` iff `username` has push (write) or admin permission on
-    /// `owner/repo`. Used by the PR approval gate to skip the maintainer-
-    /// approval requirement for trusted contributors.
-    ///
-    /// Default impl returns `Ok(false)`: implementations that cannot probe
-    /// the Git host for permissions should fail closed so untrusted PRs are
-    /// always parked for approval.
+    /// The default must fail closed. Untrusted PRs are then always parked for approval on Git hosts
+    /// without a permission probe.
     async fn is_repo_writer(&self, _owner: &str, _repo: &str, _username: &str) -> Result<bool> {
         Ok(false)
     }
 
-    /// Post a reply comment to a PR/MR. Used by `/gradient run <wildcard>` to
-    /// surface wildcard parse errors back to the commenter.
-    ///
-    /// Default impl is a no-op so reporters that do not implement
-    /// outbound comments simply swallow the request.
     async fn post_pr_comment(
         &self,
         _owner: &str,
@@ -218,13 +122,6 @@ pub trait CiReporter: Send + Sync + std::fmt::Debug + 'static {
         Ok(())
     }
 
-    /// Fetch the current head metadata of an open pull/merge request.
-    /// Used by the `/gradient run` comment handler so it can create a fresh
-    /// evaluation when no parked approval gate exists for the PR.
-    ///
-    /// Default impl returns `Ok(None)`. Implementations that cannot probe
-    /// the Git host should fall through; the comment handler then logs and
-    /// declines to create a fresh evaluation.
     async fn get_pull_request(
         &self,
         _owner: &str,
@@ -234,22 +131,10 @@ pub trait CiReporter: Send + Sync + std::fmt::Debug + 'static {
         Ok(None)
     }
 
-    /// Attach a reaction to a PR/MR comment so the commenter gets visual
-    /// feedback on the lifecycle of their `/gradient` command (eyes on
-    /// receipt, thumbs-up/down on terminal eval status, confused on
-    /// non-maintainer rejection).
-    ///
-    /// Default impl is a no-op so reporters that cannot publish reactions
-    /// just swallow the call.
     async fn add_reaction(&self, _target: &ReactionTarget, _kind: ReactionKind) -> Result<()> {
         Ok(())
     }
 
-    /// Commit `commit`'s file edits onto `branch` (created from `base` when it
-    /// does not yet exist) and return the new head commit sha.
-    ///
-    /// Default impl fails: reporters that cannot write to the Git host reject PR
-    /// automation rather than silently dropping it.
     async fn upsert_branch(
         &self,
         _owner: &str,
@@ -261,9 +146,6 @@ pub trait CiReporter: Send + Sync + std::fmt::Debug + 'static {
         anyhow::bail!("this reporter does not support opening pull requests")
     }
 
-    /// Open a PR from `head` into `base`, or update the open one in place.
-    ///
-    /// Default impl fails for the same reason as [`CiReporter::upsert_branch`].
     async fn open_or_update_pr(
         &self,
         _owner: &str,
@@ -276,16 +158,10 @@ pub trait CiReporter: Send + Sync + std::fmt::Debug + 'static {
         anyhow::bail!("this reporter does not support opening pull requests")
     }
 
-    /// The repository's default branch, used as the base of an opened PR.
     async fn default_branch(&self, _owner: &str, _repo: &str) -> Result<String> {
         anyhow::bail!("this reporter does not support opening pull requests")
     }
 
-    /// Submit an approving review on a pull request, reflecting Gradient's
-    /// maintainer-approval gate back onto the Git host.
-    ///
-    /// Default impl is a no-op so Git hosts/reporters that don't model PR reviews
-    /// simply swallow the request.
     async fn approve_pull_request(
         &self,
         _owner: &str,
@@ -296,19 +172,11 @@ pub trait CiReporter: Send + Sync + std::fmt::Debug + 'static {
         Ok(())
     }
 
-    /// Non-mutating credential + connectivity probe behind the Actions "Test"
-    /// button. Confirms this reporter's token / App installation can reach
-    /// `owner/repo` without writing any status or check run. The default impl
-    /// reads the repository's default branch - an authenticated GET every real
-    /// reporter implements and that any status/PR token can perform.
     async fn verify(&self, owner: &str, repo: &str) -> Result<()> {
         self.default_branch(owner, repo).await.map(|_| ())
     }
 }
 
-// ── NoopCiReporter ────────────────────────────────────────────────────────────
-
-/// A no-op `CiReporter` used when no CI integration is configured.
 #[derive(Debug)]
 pub struct NoopCiReporter;
 
@@ -319,12 +187,6 @@ impl CiReporter for NoopCiReporter {
     }
 }
 
-// ── GiteaReporter ─────────────────────────────────────────────────────────────
-
-/// CI reporter that posts commit statuses to a Gitea instance.
-///
-/// Uses the Gitea Commit Status API:
-/// `POST {base_url}/api/v1/repos/{owner}/{repo}/statuses/{sha}`
 #[derive(Debug)]
 pub struct GiteaReporter {
     base_url: String,
@@ -361,7 +223,6 @@ impl GiteaReporter {
     }
 }
 
-/// Gitea commit status state strings.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "lowercase")]
 enum GiteaState {
@@ -617,11 +478,8 @@ impl CiReporter for GiteaReporter {
         base: &str,
         commit: &BranchCommit,
     ) -> Result<String> {
-        // Force-push: the Gitea/Forgejo REST API cannot force-update a ref, so
-        // the contents API would stack commits on a never-rebased branch.
-        // libgit2 needs an explicit signature, so resolve the token owner when
-        // no identity was configured, defaulting to the Gradient bot if the
-        // token lacks the read:user scope.
+        // The Gitea contents API would stack commits on a never-rebased branch. libgit2 is needing
+        // an explicit signature, and the Gradient bot is the fallback without the read:user scope.
         let mut commit = commit.clone();
         if commit.author.is_none() {
             let resolved =
@@ -669,17 +527,6 @@ impl CiReporter for GiteaReporter {
     }
 }
 
-// ── GitlabReporter ────────────────────────────────────────────────────────────
-
-/// CI reporter that posts commit statuses to a GitLab instance.
-///
-/// Uses the GitLab Commit Status API:
-/// `POST {base_url}/api/v4/projects/{owner}%2F{repo}/statuses/{sha}`
-///
-/// The project identifier is the URL-encoded `owner/repo` path, which also
-/// supports nested groups (`group/subgroup/repo` -> `group%2Fsubgroup%2Frepo`).
-/// Authenticates via `PRIVATE-TOKEN`, which accepts personal, project, and
-/// group access tokens.
 #[derive(Debug)]
 pub struct GitlabReporter {
     base_url: String,
@@ -704,7 +551,6 @@ impl GitlabReporter {
     }
 }
 
-/// GitLab commit status state strings.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "lowercase")]
 enum GitlabState {
@@ -736,10 +582,6 @@ struct GitlabStatusPayload<'a> {
     target_url: Option<&'a str>,
 }
 
-/// Percent-encodes the path segments of `owner/repo` (including nested groups)
-/// for use as GitLab's `:id` URL component. Only `/` is encoded; everything
-/// else is passed through, since GitLab project paths are restricted to a
-/// safe character set already.
 fn gitlab_project_id(owner: &str, repo: &str) -> String {
     format!("{}/{}", owner, repo).replace('/', "%2F")
 }
@@ -883,8 +725,6 @@ impl CiReporter for GitlabReporter {
             .await
             .context("Failed to send GitLab note award_emoji")?;
         let status = resp.status();
-        // GitLab returns 409 when the emoji already exists on the note; treat
-        // that as success so repeat eval finishes don't trip alarms.
         if status == reqwest::StatusCode::CONFLICT {
             return Ok(());
         }
@@ -946,12 +786,6 @@ impl CiReporter for GitlabReporter {
             (mr.source_project_id, mr.target_project_id),
             (Some(s), Some(t)) if s != t
         );
-        // GitLab's MR JSON does not surface the fork's clone URL directly; the
-        // `synchronize`-style PR webhook does (via `object_attributes.source`),
-        // but the GET endpoint omits it. For the comment-driven path we leave
-        // `head_clone_url` unset for forks - the existing fan-out keeps using
-        // `task.repository` for the worker fetch. Same-project MRs (the
-        // common case) are unaffected.
         Ok(Some(PullRequestSnapshot {
             head_sha: mr.sha,
             head_branch: mr.source_branch,
@@ -969,10 +803,6 @@ impl CiReporter for GitlabReporter {
         base: &str,
         commit: &BranchCommit,
     ) -> Result<String> {
-        // Force-push: the GitLab commits API stacks onto a never-rebased branch,
-        // so push a single clean commit on the current base instead. libgit2 needs
-        // an explicit signature, so resolve the token owner when none was set,
-        // defaulting to the Gradient bot if the token lacks the read_user scope.
         let mut commit = commit.clone();
         if commit.author.is_none() {
             let resolved =
@@ -1020,18 +850,6 @@ impl CiReporter for GitlabReporter {
     }
 }
 
-// ── GithubReporter ────────────────────────────────────────────────────────────
-
-/// CI reporter that posts commit statuses to GitHub (or GitHub Enterprise Server).
-///
-/// Uses the GitHub Commit Status API:
-/// `POST {base_url}/repos/{owner}/{repo}/statuses/{sha}`
-///
-/// Authenticate with a personal access token or a GitHub App installation token
-/// that has `repo:status` (or `statuses:write`) permission.
-///
-/// `base_url` defaults to `https://api.github.com` when empty; override it for
-/// GitHub Enterprise Server (e.g. `https://github.example.com/api/v3`).
 #[derive(Debug)]
 pub struct GithubReporter {
     base_url: String,
@@ -1059,8 +877,6 @@ struct GithubReviewPayload<'a> {
     body: &'a str,
 }
 
-/// POST an `APPROVE` review to the GitHub PR reviews endpoint, sharing the
-/// request shape between the token and GitHub App reporters.
 async fn post_github_approval(
     client: &reqwest::Client,
     base_url: &str,
@@ -1121,7 +937,6 @@ impl GithubReporter {
     }
 }
 
-/// GitHub commit status state strings.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "lowercase")]
 enum GithubState {
@@ -1468,20 +1283,6 @@ fn github_pr_response_to_snapshot(pr: GithubPrResponse) -> PullRequestSnapshot {
     }
 }
 
-// ── GithubAppReporter ────────────────────────────────────────────────────────
-
-/// CI reporter that creates and updates GitHub Check Runs as a GitHub App
-/// installation.
-///
-/// Uses the Check Runs API rather than the Commit Statuses API, so check
-/// lifecycle is `queued -> in_progress -> completed(success|failure|...)`. The
-/// caller stores the returned `check_run` id on the row that owns the check
-/// (entry_point / evaluation) and passes it back via
-/// [`CiReport::existing_check_id`] on the next call so the same check run
-/// gets PATCHed in place.
-///
-/// Mints a fresh installation access token on every report; cheap enough at
-/// CI volume to not warrant caching.
 pub struct GithubAppReporter {
     api_base_url: String,
     app_id: u64,
@@ -1529,7 +1330,6 @@ impl GithubAppReporter {
     }
 }
 
-/// GitHub Check Run `status` field values.
 #[derive(Debug, Serialize, Clone, Copy)]
 #[serde(rename_all = "snake_case")]
 enum CheckRunStatus {
@@ -1538,7 +1338,6 @@ enum CheckRunStatus {
     Completed,
 }
 
-/// GitHub Check Run `conclusion` field values used by Gradient.
 #[derive(Debug, Serialize, Clone, Copy)]
 #[serde(rename_all = "snake_case")]
 enum CheckRunConclusion {
@@ -1934,12 +1733,6 @@ impl CiReporter for GithubAppReporter {
     }
 }
 
-// ── factory ──────────────────────────────────────────────────────────────────
-
-/// Builds a `CiReporter` from a task's CI configuration fields.
-///
-/// Returns `NoopCiReporter` when CI reporting is not configured or the
-/// reporter type is unrecognised.
 pub fn reporter_for_task(
     http: reqwest::Client,
     ci_type: Option<&str>,
@@ -1974,12 +1767,7 @@ pub fn reporter_for_task(
     }
 }
 
-/// Parses `owner` and `repo` out of a repository URL.
-///
-/// Supports HTTPS (`https://host/owner/repo.git`) and SCP-style SSH
-/// (`git@host:owner/repo.git`).  Returns `None` if the URL cannot be parsed.
 pub fn parse_owner_repo(repository_url: &str) -> Option<(String, String)> {
-    // Normalise: strip git+ prefix added by RepositoryUrl
     let url = repository_url
         .strip_prefix("git+")
         .unwrap_or(repository_url);
@@ -1989,10 +1777,8 @@ pub fn parse_owner_repo(repository_url: &str) -> Option<(String, String)> {
         .or_else(|| url.strip_prefix("http://"))
         .or_else(|| url.strip_prefix("git://"))
     {
-        // https://host/owner/repo.git -> "host/owner/repo.git" -> take after first '/'
         rest.split_once('/')?.1
     } else {
-        // git@host:owner/repo.git
         let colon_pos = url.find(':')?;
         &url[colon_pos + 1..]
     };
@@ -2032,8 +1818,6 @@ mod tests {
     fn gitlab_project_id_nested_groups() {
         assert_eq!(gitlab_project_id("group", "sub/repo"), "group%2Fsub%2Frepo");
     }
-
-    // ── Reporter constructors ────────────────────────────────────────────────
 
     #[test]
     fn gitea_reporter_trims_trailing_slash() {
@@ -2075,8 +1859,6 @@ mod tests {
             .unwrap();
         assert_eq!(r.base_url, "https://github.example.com/api/v3");
     }
-
-    // ── SSRF base_url validation ─────────────────────────────────────────────
 
     #[test]
     fn gitea_reporter_rejects_aws_metadata_ip() {
@@ -2138,7 +1920,6 @@ mod tests {
 
     #[test]
     fn reporter_for_task_unsafe_url_falls_back_to_noop() {
-        // Bad base_url should not crash callers - the factory logs and returns Noop.
         let r = reporter_for_task(
             test_client(),
             Some("gitea"),
@@ -2147,8 +1928,6 @@ mod tests {
         );
         assert!(is_noop(&r));
     }
-
-    // ── reporter_for_task factory ─────────────────────────────────────────
 
     fn is_noop(r: &Arc<dyn CiReporter>) -> bool {
         format!("{:?}", r).contains("NoopCiReporter")
@@ -2199,8 +1978,6 @@ mod tests {
         let r = reporter_for_task(test_client(), Some("github"), None, Some("tok"));
         assert!(format!("{:?}", r).contains("GithubReporter"));
     }
-
-    // ── parse_owner_repo ─────────────────────────────────────────────────────
 
     #[test]
     fn parse_owner_repo_https_with_git_suffix() {
@@ -2255,7 +2032,6 @@ mod tests {
 
     #[test]
     fn parse_owner_repo_ssh_with_subpath() {
-        // With deeper path, splitn(2) keeps everything after owner/ as the repo name.
         let got = parse_owner_repo("git@gitea.example.com:group/sub/repo.git");
         assert_eq!(got, Some(("group".into(), "sub/repo".into())));
     }
@@ -2268,8 +2044,6 @@ mod tests {
             "https://gitlab.example.com/api/v4/projects/group%2Fsubgroup%2Fdemo/merge_requests/7/notes"
         );
     }
-
-    // ── verify (Test button) probe ───────────────────────────────────────────
 
     #[derive(Debug, Default)]
     struct ProbeReporter {

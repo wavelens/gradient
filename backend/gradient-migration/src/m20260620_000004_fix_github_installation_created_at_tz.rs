@@ -4,11 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Heal `github_installation.created_at`: the create migration originally typed
-//! it `TIMESTAMPTZ`, but the entity decodes it as `NaiveDateTime` (`TIMESTAMP`),
-//! so reads failed with a `TIMESTAMPTZ` vs `TIMESTAMP` mismatch. Convert in
-//! place on already-migrated installs; a no-op where the column is already
-//! `TIMESTAMP` (fresh installs, now that the create migration is fixed).
+//! The create migration once typed `created_at` as `TIMESTAMPTZ`, while the entity is decoding
+//! `TIMESTAMP`. The conversion is a no-op on installs created after that fix.
 
 use sea_orm_migration::prelude::*;
 use sea_orm_migration::sea_orm::ConnectionTrait;

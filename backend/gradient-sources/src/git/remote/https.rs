@@ -8,7 +8,6 @@ use super::{accept_cert, find_ref_in_list};
 use crate::SourceError;
 use git2::{Direction, RemoteCallbacks};
 
-/// List the remote HEAD ref via libgit2 with no credentials (for https://).
 pub(super) fn ls_remote_head_no_creds(
     url: &str,
     branch: Option<&str>,

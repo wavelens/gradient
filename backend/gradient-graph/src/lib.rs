@@ -4,9 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! The graph module: one graph writer owns every write to the dependency graph and
-//! the cache index. [`Graph`] is the handle the rest of the server calls.
-
 pub mod messages;
 pub mod writer;
 
@@ -34,8 +31,6 @@ pub use messages::*;
 pub use policy::retry_backoff_elapsed;
 use writer::{CALL_TIMEOUT, GraphArgs, GraphMsg, GraphWriter, HEALTH_NAME};
 
-/// The live graph writer, republished on every (re)spawn; a caller waits on the
-/// watch so a restart looks like latency.
 pub struct Graph {
     writer: watch::Sender<Option<ActorRef<GraphMsg>>>,
     events: OnceLock<EventBus>,
@@ -61,8 +56,6 @@ impl Graph {
         })
     }
 
-    /// A handle that answers every call itself, reaching no graph writer and no
-    /// database. For harnesses whose subject is a caller of the graph.
     #[cfg(feature = "stub")]
     pub fn stub() -> Arc<Self> {
         Arc::new(Self {
@@ -73,7 +66,6 @@ impl Graph {
         })
     }
 
-    /// The root child running the graph writer; stopped after every sibling.
     pub fn child_spec(self: &Arc<Self>, ctx: DbContext) -> ChildSpec {
         let graph = Arc::clone(self);
         ChildSpec::Custom {
@@ -154,10 +146,9 @@ impl Graph {
         Ok(report)
     }
 
-    /// Store paths of `drv_hashes` the worker may prune, read from the pool, not
-    /// behind the graph writer: a walk waited out its own previous batch's record on
-    /// every wave. A committed subtree only ever gains its record, so a read that
-    /// misses a queued write prunes less, never wrongly.
+    /// The read is going to the pool, not behind the graph writer.
+    /// A committed subtree can only ever gain its record.
+    /// A read that misses a queued write is pruning less, never wrongly.
     #[tracing::instrument(level = "debug", skip_all, fields(paths = drv_hashes.len()))]
     pub async fn known_derivations(&self, drv_hashes: Vec<String>) -> anyhow::Result<Vec<String>> {
         #[cfg(feature = "stub")]
@@ -171,8 +162,6 @@ impl Graph {
         Ok(known::prunable(db, drv_hashes).await?)
     }
 
-    /// Apply what the upstream probe found for a batch of outputs: the narinfo,
-    /// the runtime dependencies it names, the passthrough flag and the need all of it moves.
     pub async fn upstream_hits(
         &self,
         hits: std::collections::HashMap<String, UpstreamHit>,
@@ -184,10 +173,6 @@ impl Graph {
         self.call(|reply| GraphMsg::UpstreamHits(hits, reply)).await
     }
 
-    /// Record that the probe has answered for these shared builds, hit or miss, and move
-    /// the need the answer opens. Sent once the round's hits are applied: a
-    /// shared build an upstream serves must be a passthrough before it is answered, or the gap
-    /// between the two needs the build closure the passthrough makes pointless.
     pub async fn upstream_probed(&self, shared_builds: Vec<DerivationId>) -> anyhow::Result<()> {
         #[cfg(feature = "stub")]
         if self.stub {
@@ -197,8 +182,6 @@ impl Graph {
             .await
     }
 
-    /// Record a NAR already in storage: the `cached_path` row, its references,
-    /// its signatures and the outputs it backs, in one transaction.
     pub async fn commit_nar(&self, commit: NarCommit) -> anyhow::Result<NarCommitted> {
         #[cfg(feature = "stub")]
         if self.stub {
@@ -235,7 +218,6 @@ impl Graph {
         Ok(report)
     }
 
-    /// Move shared builds back to `Queued`; returns how many moved.
     pub async fn requeue(&self, scope: RequeueScope) -> anyhow::Result<u64> {
         #[cfg(feature = "stub")]
         if self.stub {
@@ -246,7 +228,6 @@ impl Graph {
         Ok(requeued)
     }
 
-    /// Drop a path's claim on the cache index, or a whole sweep of them.
     pub async fn demote(&self, demotion: Demotion) -> anyhow::Result<DemoteReport> {
         #[cfg(feature = "stub")]
         if self.stub {
@@ -260,8 +241,6 @@ impl Graph {
         Ok(report)
     }
 
-    /// Apply one bounded maintenance delete. The sweep scans on the pool and
-    /// reclaims the objects of what comes back, never of what it asked about.
     pub async fn gc(&self, request: GcRequest) -> anyhow::Result<GcReport> {
         #[cfg(feature = "stub")]
         if self.stub {
@@ -277,9 +256,8 @@ impl Graph {
     }
 }
 
-/// Pulls this crate into a binary that otherwise references nothing from it, so
-/// the statements it declares with `gradient_db::sql!` reach the plan gate's
-/// registry. A linker drops an rlib nothing mentions, registry entries included.
+/// The linker is dropping an rlib nothing mentions, including its `gradient_db::sql!` entries.
+/// This call is keeping the crate's statements in the plan gate's registry.
 pub const fn link() {}
 
 #[cfg(test)]
@@ -359,8 +337,6 @@ pub(crate) mod test_ctx {
     use gradient_util::shutdown::Shutdown;
     use sea_orm::{DatabaseBackend, DatabaseConnection, MockDatabase};
 
-    /// [`ctx`] with the probe channel's receiving end, for a test whose subject is
-    /// what recording hands the upstream probe.
     pub(crate) async fn ctx_with_probes(
         db: DatabaseConnection,
     ) -> (
@@ -383,12 +359,10 @@ pub(crate) mod test_ctx {
         )
     }
 
-    /// A context over `db`, plus the pool handle its transaction log is read from.
     pub(crate) async fn ctx(db: DatabaseConnection) -> (DbContext, WorkerDb) {
         ctx_with_crypt_file(db, "test-secret").await
     }
 
-    /// [`ctx`] reading its crypt secret from `crypt_file`, for a test that signs.
     pub(crate) async fn ctx_with_crypt_file(
         db: DatabaseConnection,
         crypt_file: &str,

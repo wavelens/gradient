@@ -31,17 +31,14 @@ use gradient_worker_client::reconnect::{
 use shutdown::Shutdown;
 use worker::Worker;
 
-/// Maximum delay between reconnect attempts.
 const MAX_BACKOFF: Duration = Duration::from_secs(60);
-/// Initial delay after the first disconnect.
 const INITIAL_BACKOFF: Duration = Duration::from_secs(1);
 
 fn main() -> Result<()> {
     let config = WorkerConfig::parse();
 
-    // stderr, not stdout: eval-worker subprocesses use stdout for rkyv frames
-    // to the parent (see worker_pool::transport), so any tracing line on stdout
-    // would corrupt the frame stream and crash the eval.
+    // Logs are going to stderr because eval-worker subprocesses are using stdout for rkyv frames. A
+    // tracing line on stdout would corrupt the frame stream.
     let overrides = log_overrides(&config);
     gradient_util::logging::init(&LogSetup {
         level: &config.log.level_default,
@@ -59,13 +56,10 @@ fn main() -> Result<()> {
         }),
     });
 
-    // Re-exec as eval subprocess when launched with the internal flag.
-    // The Nix C API (Boehm GC) must run single-threaded, isolated from Tokio.
     if config.eval_subprocess {
         return nix::eval_worker::run_eval_worker().map_err(anyhow::Error::from);
     }
 
-    // Internal JSONL harness over the eval-worker transport (VM test seam).
     if let Some(requests_path) = config.eval_driver.clone() {
         let rt = tokio::runtime::Runtime::new()?;
         let code = rt.block_on(worker_pool::driver::run_eval_driver(
@@ -75,9 +69,8 @@ fn main() -> Result<()> {
         std::process::exit(code);
     }
 
-    // Must precede the first TLS handshake - `connect_async` for `wss://` is
-    // the first thing the runtime does and rustls 0.23 panics if no provider
-    // is installed (see issue #232).
+    // The crypto provider must be installed before the first TLS handshake. rustls 0.23 is
+    // panicking without one (#232).
     gradient_util::http::init_crypto_provider();
 
     let rt = tokio::runtime::Runtime::new()?;
@@ -94,11 +87,8 @@ fn main() -> Result<()> {
         let shutdown = Shutdown::new();
         install_signal_handler(shutdown.clone(), drain_budget(&config));
 
-        // Inbound sessions (discoverable mode) drain on the same signal, so the
-        // process has to outlive them instead of exiting from under their jobs.
         let sessions = TaskTracker::new();
 
-        // Periodic sweep of stale resumable-download `*.partial` files (#225).
         if config.nar.partial_ttl_secs > 0 {
             let gc_config = config.clone();
             let gc_shutdown = shutdown.clone();
@@ -129,7 +119,6 @@ fn main() -> Result<()> {
             });
         }
 
-        // Start the listener for incoming server connections if discoverable.
         if config.discoverable {
             let listener_config = config.clone();
             let listener_shutdown = shutdown.clone();
@@ -151,7 +140,6 @@ fn main() -> Result<()> {
         sd_notify::notify(&[sd_notify::NotifyState::Ready])?;
         let mut backoff = INITIAL_BACKOFF;
 
-        // Initial connection - abandon retries if shutdown fires.
         let initial = tokio::select! {
             _ = shutdown.drain_requested() => None,
             w = async {
@@ -178,18 +166,11 @@ fn main() -> Result<()> {
         };
         backoff = INITIAL_BACKOFF;
 
-        // Cache an executor handle so we can gracefully drain the eval pool
-        // even after `worker` is consumed by `run` / `reconnect`. The handle
-        // shares the underlying `Arc<WorkerEvaluator>` so the pool stays
-        // alive until the last clone is dropped.
         let executor_handle = worker.executor_handle();
 
-        // Run -> reconnect loop.
         loop {
             let (disconnected, outcome) = worker.run(shutdown.clone()).await;
 
-            // A local stop was requested: the dispatch loop has already drained
-            // (or abandoned) its jobs, so exit instead of reconnecting.
             if shutdown.is_stopping() {
                 info!("worker drained; tearing down");
                 drop(disconnected);
@@ -198,9 +179,6 @@ fn main() -> Result<()> {
                 return Ok(());
             }
 
-            // A drained server is restarting, not dismissing the worker (#626):
-            // exiting here left the process gone for good, because the unit
-            // restarts `on-failure` and a drain exits cleanly.
             let session_end = match outcome {
                 Ok(outcome) => {
                     match outcome {
@@ -224,9 +202,6 @@ fn main() -> Result<()> {
                 }
             };
 
-            // Reconnect with exponential backoff, but bail out if shutdown
-            // fires while we're waiting. Never give up otherwise - a transient
-            // network blip must not kill the worker.
             let reconnected = tokio::select! {
                 _ = shutdown.drain_requested() => None,
                 conn = retry_reconnect(
@@ -240,9 +215,6 @@ fn main() -> Result<()> {
                 Some(conn) => {
                     info!("reconnected successfully");
                     worker = disconnected.into_connected(conn);
-                    // Reconnecting only proves the transport works. A session
-                    // the server refuses or drains is not a served one, so its
-                    // delay keeps escalating instead of dropping to the floor.
                     backoff =
                         backoff_after_session(backoff, session_end, INITIAL_BACKOFF, MAX_BACKOFF);
                 }
@@ -257,8 +229,6 @@ fn main() -> Result<()> {
     })
 }
 
-/// Install the two-stage SIGINT/SIGTERM handler: the first signal drains, the
-/// second or the expired drain budget aborts.
 fn install_signal_handler(shutdown: Shutdown, budget: Option<Duration>) {
     #[expect(
         clippy::disallowed_methods,
@@ -269,13 +239,10 @@ fn install_signal_handler(shutdown: Shutdown, budget: Option<Duration>) {
     });
 }
 
-/// How long a drain waits for in-flight jobs; `None` waits indefinitely.
 fn drain_budget(config: &WorkerConfig) -> Option<Duration> {
     (config.drain_timeout_secs > 0).then(|| Duration::from_secs(config.drain_timeout_secs))
 }
 
-/// Wait for the inbound sessions to finish draining before the process exits.
-/// They observe the same budget, so the abort stage bounds this wait.
 async fn drain_sessions(sessions: &TaskTracker, shutdown: &Shutdown) {
     sessions.close();
     if sessions.is_empty() {
@@ -294,7 +261,6 @@ async fn drain_sessions(sessions: &TaskTracker, shutdown: &Shutdown) {
     }
 }
 
-/// Resolves on the next SIGINT or SIGTERM (Ctrl-C only off unix).
 async fn next_stop_signal() {
     #[cfg(unix)]
     {
@@ -304,8 +270,6 @@ async fn next_stop_signal() {
                 _ = tokio::signal::ctrl_c() => info!("received SIGINT"),
                 _ = sigterm.recv() => info!("received SIGTERM"),
             },
-            // Losing SIGTERM must not cost us SIGINT as well, or an operator
-            // has nothing left but SIGKILL.
             Err(e) => {
                 error!(error = %e, "failed to install SIGTERM handler; SIGINT only");
                 let _ = tokio::signal::ctrl_c().await;
@@ -320,12 +284,6 @@ async fn next_stop_signal() {
     }
 }
 
-/// Per-area overrides of the worker's log level.
-///
-/// `log_level` is the global default. The optional per-area overrides
-/// (`eval_log_level`, `build_log_level`, `proto_log_level`) are appended as
-/// per-target directives so e.g. `log.level.eval = "trace"` enables
-/// trace logging only for the evaluator-related modules.
 fn log_overrides(config: &WorkerConfig) -> Vec<(&'static str, Option<&str>)> {
     const EVAL_TARGETS: &[&str] = &[
         "gradient_worker::nix",

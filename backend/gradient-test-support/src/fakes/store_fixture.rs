@@ -4,23 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Test fixture loader that reads a directory of `.drv` files and builds a
-//! derivation dependency tree from them.
-//!
-//! ## Directory layout
-//!
-//! ```text
-//! fixture_dir/
-//! ├── output          # single line: /nix/store/<entry-point>.drv
-//! └── store/          # ATerm .drv files
-//!     ├── aaa-foo.drv
-//!     └── bbb-bar.drv
-//! ```
-//!
-//! The `output` file contains a single line - the `/nix/store/…` path of the
-//! entry-point derivation.  All `.drv` files in `store/` are loaded and parsed
-//! using the existing `parse_drv()` ATerm parser.  A BFS from the entry point
-//! through `inputDrvs` builds the full closure.
+//! A fixture directory is holding an `output` file and a `store/` directory of ATerm `.drv` files.
+//! `output` is containing the entry-point `.drv` path on one line. A BFS from the entry point
+//! through `inputDrvs` is building the full closure.
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::Path;
@@ -31,40 +17,23 @@ use gradient_wire::messages::{DerivationOutput, DiscoveredDerivation};
 use super::derivation_resolver::FakeDerivationResolver;
 use super::nix_store::FakeNixStoreProvider;
 
-/// A loaded store fixture with its derivation tree and configured fakes.
 pub struct StoreFixture {
-    /// Entry-point derivation path (the single line from `output`).
     pub entry_point: String,
-    /// All discovered derivations (full closure via BFS from entry point).
     pub derivations: Vec<DiscoveredDerivation>,
-    /// Adjacency list: drv_path -> direct dependency drv_paths.
     pub tree: HashMap<String, Vec<String>>,
-    /// All parsed derivations per store path.
     pub parsed: HashMap<String, Derivation>,
-    /// Raw `.drv` file bytes per store path (for `FakeDrvReader`).
     pub raw_drvs: HashMap<String, Vec<u8>>,
-    /// Configured `FakeDerivationResolver` with all drv data loaded.
     pub resolver: FakeDerivationResolver,
-    /// Configured `FakeNixStoreProvider` (initially empty - nothing "built").
     pub store: FakeNixStoreProvider,
 }
 
-/// Load a fixture directory into a [`StoreFixture`].
-///
-/// 1. Reads `dir/output` - single line with the entry-point `.drv` store path
-/// 2. Reads all `.drv` files from `dir/store/`, keying them by `/nix/store/<filename>`
-/// 3. BFS from the entry point through `inputDrvs` to build the full closure
-/// 4. Populates a `FakeDerivationResolver` with the parsed derivation data
-/// 5. Returns a `StoreFixture` with an empty store (nothing built yet)
 pub fn load_store(dir: &Path) -> StoreFixture {
-    // ── 1. Read entry point ─────────────────────────────────────────────────
     let output_path = dir.join("output");
     let entry_point = std::fs::read_to_string(&output_path)
         .unwrap_or_else(|e| panic!("failed to read {}: {}", output_path.display(), e))
         .trim()
         .to_string();
 
-    // ── 2. Read and parse all .drv files ────────────────────────────────────
     let store_dir = dir.join("store");
     let mut parsed: HashMap<String, Derivation> = HashMap::new();
     let mut raw_drvs: HashMap<String, Vec<u8>> = HashMap::new();
@@ -87,7 +56,6 @@ pub fn load_store(dir: &Path) -> StoreFixture {
         parsed.insert(store_path, drv);
     }
 
-    // ── 3. BFS from entry point ─────────────────────────────────────────────
     let mut derivations: Vec<DiscoveredDerivation> = Vec::new();
     let mut tree: HashMap<String, Vec<String>> = HashMap::new();
     let mut visited: HashSet<String> = HashSet::new();
@@ -106,14 +74,12 @@ pub fn load_store(dir: &Path) -> StoreFixture {
             ),
         };
 
-        // Collect dependency drv paths.
         let dep_paths: Vec<String> = drv
             .input_derivations
             .iter()
             .map(|(p, _)| p.clone())
             .collect();
 
-        // Enqueue unvisited dependencies.
         for dep in &dep_paths {
             if visited.insert(dep.clone()) {
                 queue.push_back(dep.clone());
@@ -122,7 +88,6 @@ pub fn load_store(dir: &Path) -> StoreFixture {
 
         tree.insert(drv_path.clone(), dep_paths.clone());
 
-        // Map outputs.
         let outputs: Vec<DerivationOutput> = drv
             .outputs
             .iter()
@@ -156,7 +121,6 @@ pub fn load_store(dir: &Path) -> StoreFixture {
         });
     }
 
-    // ── 4. Populate fakes ───────────────────────────────────────────────────
     let mut resolver = FakeDerivationResolver::new();
     for (store_path, drv) in &parsed {
         resolver = resolver.with_derivation(store_path.clone(), drv.clone());
@@ -178,7 +142,6 @@ pub fn load_store(dir: &Path) -> StoreFixture {
 }
 
 impl StoreFixture {
-    /// Mark all outputs of a single derivation as present in the store.
     pub fn mark_built(&mut self, drv_path: &str) {
         let drv = self
             .derivations
@@ -190,7 +153,6 @@ impl StoreFixture {
         }
     }
 
-    /// Mark all outputs of a derivation and all its transitive dependencies.
     pub fn mark_subtree_built(&mut self, drv_path: &str) {
         let mut stack = vec![drv_path.to_string()];
         let mut visited = HashSet::new();
@@ -205,7 +167,6 @@ impl StoreFixture {
         }
     }
 
-    /// Mark every derivation in the fixture as built.
     pub fn mark_all_built(&mut self) {
         let paths: Vec<String> = self
             .derivations
@@ -217,10 +178,6 @@ impl StoreFixture {
         }
     }
 
-    /// Unbuild random derivations to simulate a partially-built store.
-    ///
-    /// `fraction` (0.0–1.0) controls roughly how many derivations get unbuilt.
-    /// Uses a simple seeded LCG for reproducibility without pulling in `rand`.
     pub fn remove_random_subtrees(&mut self, fraction: f64, seed: u64) {
         let mut rng_state = seed;
         let drv_paths: Vec<String> = self
@@ -230,7 +187,6 @@ impl StoreFixture {
             .collect();
 
         for drv_path in &drv_paths {
-            // Simple LCG: state = state * 6364136223846793005 + 1442695040888963407
             rng_state = rng_state
                 .wrapping_mul(6364136223846793005)
                 .wrapping_add(1442695040888963407);
@@ -249,7 +205,6 @@ impl StoreFixture {
         }
     }
 
-    /// Derivations whose outputs are NOT all present in the store.
     pub fn unbuilt(&self) -> Vec<&DiscoveredDerivation> {
         self.derivations
             .iter()
@@ -257,7 +212,6 @@ impl StoreFixture {
             .collect()
     }
 
-    /// Derivations whose outputs ARE all present in the store.
     pub fn built(&self) -> Vec<&DiscoveredDerivation> {
         self.derivations
             .iter()
@@ -265,8 +219,6 @@ impl StoreFixture {
             .collect()
     }
 
-    /// Derivations that can start: all dependencies are built, but
-    /// this derivation itself is not.
     pub fn startable(&self) -> Vec<&DiscoveredDerivation> {
         self.derivations
             .iter()
@@ -274,19 +226,17 @@ impl StoreFixture {
                 if self.is_built(d) {
                     return false;
                 }
-                // All dependencies must be built.
                 d.dependencies.iter().all(|dep_path| {
                     self.derivations
                         .iter()
                         .find(|dd| dd.drv_path == *dep_path)
                         .map(|dd| self.is_built(dd))
-                        .unwrap_or(true) // unknown dep assumed satisfied
+                        .unwrap_or(true)
                 })
             })
             .collect()
     }
 
-    /// Check if all outputs of a derivation are present in the store.
     fn is_built(&self, drv: &DiscoveredDerivation) -> bool {
         if drv.outputs.is_empty() {
             return false;
@@ -319,7 +269,6 @@ mod tests {
         assert!(fixture.entry_point.starts_with("/nix/store/"));
         assert!(fixture.entry_point.ends_with(".drv"));
         assert!(!fixture.derivations.is_empty());
-        // The entry point should be in the derivations list.
         assert!(
             fixture
                 .derivations
@@ -360,7 +309,6 @@ mod tests {
     fn leaf_nodes_can_start() {
         let fixture = load_store(&fixture_dir());
         let startable = fixture.startable();
-        // Leaf nodes (no dependencies) can start.
         for drv in &startable {
             assert!(
                 drv.dependencies.is_empty(),
@@ -379,7 +327,6 @@ mod tests {
     fn mark_subtree_built_includes_transitive_deps() {
         let mut fixture = load_store(&fixture_dir());
         fixture.mark_subtree_built(&fixture.entry_point.clone());
-        // Everything reachable from the entry point should be built.
         assert_eq!(fixture.built().len(), fixture.derivations.len());
     }
 
@@ -406,20 +353,17 @@ mod tests {
             if startable.is_empty() {
                 break;
             }
-            // Build everything that can start.
             let paths: Vec<String> = startable.iter().map(|d| d.drv_path.clone()).collect();
             for path in &paths {
                 fixture.mark_built(path);
             }
             waves += 1;
-            // Safety: shouldn't take more waves than derivations.
             assert!(
                 waves <= total,
                 "convergence loop exceeded total derivations"
             );
         }
 
-        // Everything should be built now.
         assert_eq!(fixture.built().len(), total);
         assert!(waves > 1, "should take more than 1 wave for a real fixture");
     }
@@ -452,7 +396,6 @@ mod tests {
         let mut fixture = load_store(&fixture_dir());
         fixture.mark_all_built();
 
-        // Find a leaf node and unbuild it.
         let leaf = fixture
             .derivations
             .iter()
@@ -482,7 +425,6 @@ mod tests {
     #[test]
     fn startable_respects_dependencies() {
         let mut fixture = load_store(&fixture_dir());
-        // Build only leaf nodes.
         let leaves: Vec<String> = fixture
             .derivations
             .iter()
@@ -493,7 +435,6 @@ mod tests {
             fixture.mark_built(leaf);
         }
         let startable = fixture.startable();
-        // Startable nodes must have all deps built but not be built themselves.
         for drv in &startable {
             assert!(!fixture.is_built(drv));
             for dep in &drv.dependencies {

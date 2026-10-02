@@ -4,10 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Cache signing-key lifecycle: generation, encrypted storage format, narinfo
-//! signing, and signature verification. `narinfo` holds the fingerprint
-//! construction shared by the signing and verification paths.
-
 mod format;
 mod generate;
 mod narinfo;

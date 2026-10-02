@@ -16,23 +16,9 @@ use gradient_types::DerivationId;
 use sea_orm::{ConnectionTrait, DatabaseTransaction, DbErr, TransactionTrait};
 use std::sync::LazyLock;
 
-/// The value `blocking_deps` holds for shared build `{alias}`: its direct build dependencies
-/// (`kind IN (0, 2)`) whose shared build row is absent, or present and not startable by
-/// `dep_ready`. A runtime-only edge is not an input of the build; `missing_runtime_deps`
-/// covers it, and counting it here wedged two derivations that share an output.
-///
-/// One fragment, so the seed and the recount cannot drift on the part that must not:
-/// one count per EDGE, and a `LEFT JOIN` so a dependency with NO shared build row counts as
-/// blocking instead of being dropped. An inner join there fails OPEN, in a gate whose
-/// entire job is to stop a dispatch against a missing input.
-///
-/// `dep_ready` is the one thing the two callers differ on, and deliberately: the
-/// recount reads the `fetchable` column it has just repaired, the seed evaluates the
-/// predicate itself. See [`seed_blocking_deps`].
-///
-/// Self-edges are NOT excluded, unlike `nar_closure`'s reference count: a store path
-/// routinely references itself, a derivation cannot be its own input, and excluding
-/// them here would diverge from the frozen backfill for nothing.
+/// A `LEFT JOIN` is counting a dependency with no shared build row as blocking.
+/// An inner join would fail open, in a gate meant to stop a dispatch against a missing input.
+/// Runtime-only edges are not build inputs, and `missing_runtime_deps` is covering them.
 pub(super) fn blocking_dependency_count(alias: &str, dep_ready: &str) -> String {
     format!(
         "(SELECT count(*) FROM derivation_dependency e \
@@ -126,21 +112,11 @@ crate::sql_lazy! {
         tier = Bulk;
 }
 
-/// Recount, for each locked shared build, the direct dependencies that cannot yet serve
-/// their outputs, and write it absolutely. Returns the rows written.
-///
-/// Run it for a derivation whose edges just landed, in the transaction that wrote
-/// them, which is what the lock proof requires: the count is over
-/// `derivation_dependency`, so an edge inserted after the seed is one a later ripple
-/// can cancel without it ever having been counted. It overwrites rather than adjusts
-/// on purpose: the value it replaces was counted over an older edge set, or is the
-/// column default on a row a retire has just reset, and an adjustment would carry
-/// that error forward instead of ending it.
-///
-/// It evaluates [`crate::graph::predicates::fetchable_predicate`] on each dependency rather
-/// than reading the `fetchable` column, because this is the first reader of a
-/// dependency's can-start state and it executes strictly before any sweep could have corrected
-/// a stale flag. The module doc has the full argument and the cost.
+/// The count is written absolutely, never adjusted.
+/// The replaced value was counted over an older edge set.
+/// An adjustment would carry that error forward.
+/// Each dependency is evaluated with the predicate, not with the `fetchable` column.
+/// This seed is the first reader and is running before any sweep could fix a stale flag.
 pub async fn seed_blocking_deps(lock: &SeedLock<'_>) -> Result<u64, DbErr> {
     if lock.derivations.is_empty() {
         return Ok(0);
@@ -171,13 +147,6 @@ async fn mark(lock: &SharedBuildLock<'_>, to: bool) -> Result<Vec<DerivationId>,
     ))
 }
 
-/// Flip the locked shared builds to fetchable where the predicate now holds, decrement their
-/// direct parents' counters, and queue the parents that reached zero.
-///
-/// The returned transitions are `Created` to `Queued`, and the ripple moves only over
-/// the rows the mark actually flipped: a caller that hands over a shared build that was
-/// already fetchable gets no statement past the mark, which is what keeps a parent's
-/// counter from going below zero.
 pub async fn became_fetchable(lock: &SharedBuildLock<'_>) -> Result<Vec<TransitionChange>, DbErr> {
     let flipped = mark(lock, true).await?;
     if flipped.is_empty() {
@@ -201,14 +170,6 @@ pub async fn became_fetchable(lock: &SharedBuildLock<'_>) -> Result<Vec<Transiti
     promote(lock.txn, &startable).await
 }
 
-/// [`became_fetchable`] with the transaction and the lock it needs, for an event
-/// that names its shared builds and does nothing else to them.
-///
-/// `begin` is a real transaction on a pooled handle and a SAVEPOINT on one that
-/// already stands for a transaction, and a savepoint's locks are held to the OUTER
-/// commit, so this one shape is correct inside the graph writer and outside it. The
-/// caller emits the returned transitions after this returns and never between the
-/// lock and the commit, which is why they are returned rather than emitted here.
 pub async fn advance_fetchable<C>(
     db: &C,
     derivations: &[DerivationId],
@@ -228,17 +189,6 @@ where
     Ok(changes)
 }
 
-/// Flip the locked shared builds to not fetchable where the predicate no longer holds,
-/// increment their direct parents' counters, and pull the queued parents back to
-/// `Created`; a parent that was `Created`, `Building` or terminal, or whose job is
-/// already in flight, only counts up.
-///
-/// A shared build that stops being fetchable is open again, so the walk below it is
-/// re-opened here too: the need flag is updated from the flipped shared builds and the queue
-/// settled against it, in the flip's own transaction. A `Completed` shared build whose
-/// closure just lost a path is the only way the missing dependency below it is reached, and a
-/// retire that dropped the flag and asked for nothing left 47 builders waiting
-/// behind 22 such shared builds.
 pub async fn lost_fetchability(lock: &SharedBuildLock<'_>) -> Result<Vec<TransitionChange>, DbErr> {
     let flipped = mark(lock, false).await?;
     if flipped.is_empty() {
@@ -290,9 +240,6 @@ mod tests {
         }
     }
 
-    /// A dependency with no shared build row at all must count as BLOCKING. An inner join
-    /// counted zero and failed open, in a gate whose whole job is to stop a dispatch
-    /// against a missing input.
     #[test]
     fn the_count_treats_a_dependency_with_no_shared_build_as_blocking() {
         let sql = norm(&blocking_dependency_count("db", "dep.fetchable"));
@@ -306,8 +253,6 @@ mod tests {
         );
     }
 
-    /// The seed writes the count absolutely, so it never accumulates onto - or trusts
-    /// - the value it finds, and a leaf gets zero from an empty count.
     #[test]
     fn the_seed_overwrites_and_never_adjusts() {
         let sql = norm(&SEED_BLOCKING_DEPS);
@@ -325,8 +270,6 @@ mod tests {
         );
     }
 
-    /// An empty batch is not a statement, the lock included: every entry point
-    /// short-circuits so a caller can hand over whatever its event produced.
     #[tokio::test]
     async fn an_empty_batch_touches_the_database_not_at_all() {
         let db = MockDatabase::new(DatabaseBackend::Postgres).into_connection();
@@ -344,10 +287,6 @@ mod tests {
         assert!(statements(db.into_transaction_log()).is_empty());
     }
 
-    /// The mark and its compensating ripple must land or roll back together: on a
-    /// pooled handle a killed ripple leaves the flip committed and the counter move
-    /// gone, and the retry marks nothing so it ripples nothing. The lock proof is what
-    /// makes that impossible to write, so it must be the only way in.
     #[tokio::test]
     async fn a_flip_and_its_ripple_share_the_locking_transaction() {
         let x = DerivationId::now_v7();
@@ -380,11 +319,6 @@ mod tests {
         assert!(inside[3].contains("blocking_deps - c.n"), "{inside:?}");
     }
 
-    /// Becoming fetchable decrements every direct parent once per edge and promotes
-    /// only the parents that reached zero and pass the gates. Two shared builds go in and
-    /// one flips, so an implementation that rippled the caller's list instead of the
-    /// mark's `RETURNING` writes the wrong frontier and fails here - which is the
-    /// regression the module doc calls unrecoverable.
     #[tokio::test]
     async fn became_fetchable_ripples_the_marks_returning_and_promotes_only_zeroes() {
         let flipped = DerivationId::now_v7();
@@ -428,9 +362,6 @@ mod tests {
         );
     }
 
-    /// A flip that changed nothing ripples nothing: the mark returns no row, and no
-    /// further statement executes. Rippling a state instead of a transition is what drives
-    /// a parent's counter below zero, where no gate reads it again.
     #[tokio::test]
     async fn a_shared_build_already_fetchable_moves_nobody() {
         let x = DerivationId::now_v7();
@@ -448,10 +379,6 @@ mod tests {
         assert_eq!(statements(db.into_transaction_log()).len(), 2, "lock, mark");
     }
 
-    /// Losing fetchability increments every direct parent and pulls the queued ones
-    /// back to Created; a Created or Building parent only counts up. Then the walk
-    /// below the flipped shared build is re-opened: the need update starts from exactly
-    /// the rows the mark returned, under its own raise, in the flip's transaction.
     #[tokio::test]
     async fn lost_fetchability_unpromotes_queued_parents_and_reopens_the_walk_below() {
         let x = DerivationId::now_v7();
@@ -505,8 +432,6 @@ mod tests {
         );
     }
 
-    /// The ripple still counts the lost dependency on a shared build whose job is in
-    /// flight, but only the un-promotes' reason may move its status.
     #[test]
     fn a_ripple_up_counts_an_in_flight_shared_build_without_unqueueing_it() {
         let gate = norm(

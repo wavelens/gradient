@@ -4,8 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Moving shared builds back onto the queue.
-
 use gradient_db::{
     DbContext,
     graph::can_start::unpromote_ungated,
@@ -24,13 +22,10 @@ pub(crate) async fn apply(ctx: &DbContext, scope: RequeueScope) -> anyhow::Resul
     }
 }
 
-/// `FailedTransient` shared builds whose exponential backoff window has elapsed go back
-/// to `Queued` so the startable-builds pass can dispatch them again. The settle that
-/// follows is what makes the requeue legal, not the backoff: an elapsed window says
-/// the retry is due, never that the shared build's gates still hold. A dependency a demote
-/// or a retire reset to `Created` leaves `blocking_deps` above zero, and the dispatch
-/// gate trusts `Queued` without re-deriving can-start state, so an unsettled requeue
-/// dispatches a build against an input nothing can provide.
+/// The settle after the requeue is making it legal, not the elapsed backoff.
+/// A demoted dependency is keeping `blocking_deps` above zero.
+/// The dispatch gate is trusting `Queued` without re-checking whether the build can start.
+/// An unsettled requeue would dispatch a build against an input nothing can provide.
 async fn transient_retries(ctx: &DbContext) -> anyhow::Result<u64> {
     let base = ctx.config.build.retry_backoff_secs;
     let now = gradient_types::now();

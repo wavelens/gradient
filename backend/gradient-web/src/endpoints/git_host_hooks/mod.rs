@@ -4,15 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Incoming Git host webhook endpoints.
-//!
-//! These routes are **unauthenticated** - they verify callers via HMAC
-//! signatures or token headers instead of JWTs.
-//!
-//! | Endpoint                                              | Git host             | Auth method            |
-//! |-------------------------------------------------------|----------------------|------------------------|
-//! | `POST /hooks/github`                                  | GitHub App           | `X-Hub-Signature-256`  |
-//! | `POST /hooks/{git_host}/{project}/{integration_name}` | Gitea/Forgejo/GitLab | per-integration secret |
+//! These routes are unauthenticated. Callers are verified via HMAC signatures or token headers
+//! instead of JWTs.
 
 mod approval;
 mod commands;
@@ -53,9 +46,6 @@ use fanout::{
 use gradient_git_host::{ParsedPullRequestEvent, ParsedPushEvent, ParsedReleaseEvent, PushOutcome};
 use installation::{handle_github_installation, resolve_github_app_targets};
 
-// ── GitHub App webhook ─────────────────────────────────────────────────────
-
-/// `POST /api/v1/hooks/github` - receives all events from the GitHub App.
 pub async fn github_app_webhook(
     State(state): State<Arc<ServerState>>,
     Extension(scheduler): Extension<Arc<Scheduler>>,
@@ -187,9 +177,6 @@ pub async fn github_app_webhook(
     Ok(ok_json(response))
 }
 
-// ── GitHub App dispatch helpers ────────────────────────────────────────────
-
-/// Extract installation_id from a GitHub App payload (push/pr/release all carry it).
 fn github_installation_id_from_body(body: &[u8]) -> Option<i64> {
     #[derive(serde::Deserialize)]
     struct WithInstallation {
@@ -355,12 +342,6 @@ async fn route_github_app_release(
     combined
 }
 
-// ── Generic Git host webhook ──────────────────────────────────────────────────
-
-/// `POST /api/v1/hooks/{git_host}/{project_name}/{integration_name}` - receives push,
-/// pull-request, and release events from a named inbound integration.
-///
-/// The `git_host` path segment is one of: `gitea`, `forgejo`, `gitlab`.
 pub async fn git_host_webhook(
     State(state): State<Arc<ServerState>>,
     Extension(scheduler): Extension<Arc<Scheduler>>,
@@ -578,7 +559,6 @@ pub async fn git_host_webhook(
     Ok(ok_json(response))
 }
 
-/// First present header among `names`, as a `&str` (empty string if absent).
 fn first_header<'a>(headers: &'a HeaderMap, names: &[&str]) -> &'a str {
     names
         .iter()

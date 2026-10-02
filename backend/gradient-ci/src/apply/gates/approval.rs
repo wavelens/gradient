@@ -11,9 +11,6 @@ use gradient_types::*;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{ActiveModelTrait, ConnectionTrait};
 
-/// Move a freshly-created `Queued` evaluation into `Waiting` with
-/// `WaitingReason::Approval` when the caller has flagged it as gated. No-op
-/// when `info` is `None` or the evaluation is already parked.
 pub async fn park_if_pending_approval<C: ConnectionTrait>(
     db: &C,
     eval: MEvaluation,

@@ -4,19 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Helpers for parsing Hydra build-product metadata.
-//!
-//! `nix-support/hydra-build-products` lines have the format
-//! `<type> <subtype> <path> [<defaultpath>]`. Common shapes:
-//!   nix-build out /nix/store/xxx
-//!   doc readme /nix/store/xxx/README.md
-//!   report coverage /nix/store/xxx/coverage.html
-//!   file binary-dist /nix/store/xxx/foo.tar.gz
-
-/// Parse a single `hydra-build-products` line into `(type, subtype, path)`.
-///
-/// Returns `None` for blank lines or any line with fewer than three
-/// whitespace-separated tokens. The optional `<defaultpath>` fourth field is
+/// Lines have the format `<type> <subtype> <path> [<defaultpath>]`. The optional fourth field is
 /// ignored.
 pub fn parse_hydra_product_line(line: &str) -> Option<(String, String, String)> {
     let mut parts = line.split_whitespace();
