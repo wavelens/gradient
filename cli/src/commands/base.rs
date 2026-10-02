@@ -20,7 +20,7 @@ use std::time::Duration;
 #[command(name = "gradient", display_name = "Gradient", bin_name = "gradient", author = "Wavelens", version, about, long_about = None)]
 #[command(arg_required_else_help = true, subcommand_required = true)]
 struct Cli {
-    /// Emit machine-readable JSON envelopes; disables interactive prompts.
+    /// Emit machine-readable JSON envelopes without interactive prompts.
     #[arg(long, global = true)]
     json: bool,
     #[command(subcommand)]
@@ -53,15 +53,15 @@ enum MainCommands {
     },
     /// Login to the server
     Login {
-        /// Server URL to log in to; sets it as the configured server so a
-        /// separate `gradient config server` is not needed.
+        /// Server URL to log in to. It is stored as the configured server, replacing a separate
+        /// `gradient config server`.
         server: Option<String>,
         /// Use basic username/password instead of the default web flow
         #[arg(short, long)]
         username: Option<String>,
         #[arg(short, long)]
         password: Option<String>,
-        /// Skip opening the browser; print the URL instead
+        /// Skip opening the browser and print the URL instead
         #[arg(long)]
         no_browser: bool,
     },
@@ -106,8 +106,8 @@ enum MainCommands {
         /// Do not produce a `result` symlink/folder after the build
         #[arg(long)]
         no_link: bool,
-        /// Override a flake input, like `nix build`. Repeatable. REF must be a remote
-        /// flake ref (github:, git+ssh://, flake:, ...); local paths are not supported.
+        /// Override a flake input, like `nix build`. Repeatable. REF must be a remote flake ref
+        /// (github:, git+ssh://, flake:, ...). Local paths are not supported.
         #[arg(long = "override-input", num_args = 2, value_names = ["INPUT", "FLAKE"], action = clap::ArgAction::Append)]
         override_input: Vec<String>,
     },
@@ -125,13 +125,13 @@ enum MainCommands {
     Download {
         /// Flake-output attribute spec, e.g. '#packages.x86_64-linux.my-app'. Comma-separated for multiple.
         flake_ref: Option<String>,
-        /// Skip the eval picker; use this evaluation directly
+        /// Skip the eval picker and use this evaluation directly
         #[arg(long)]
         evaluation: Option<String>,
-        /// Restrict latest-eval lookup to a task (accepts `name` or `project/name`)
+        /// Restrict latest-eval lookup to a task (`name` or `project/name`)
         #[arg(long, add = ArgValueCompleter::new(completion::complete_tasks))]
         task: Option<String>,
-        /// Skip the product picker; comma-separated 1-based indices, ranges (`1-3`), or `all`
+        /// Skip the product picker with comma-separated 1-based indices, ranges (`1-3`), or `all`
         #[arg(long, conflicts_with = "flake_ref")]
         products: Option<String>,
         /// Write to this directory (default: current directory)
@@ -162,16 +162,12 @@ enum MainCommands {
     Hash,
 }
 
-/// Intercept dynamic completion requests (`COMPLETE=<shell> gradient …`) and exit.
-/// Must run before the tokio runtime starts: completers build their own runtime.
 pub fn complete_env() {
     CompleteEnv::with_factory(Cli::command).complete();
 }
 
-/// Entry point: parse, then hand off to the command. `eval` executes
-/// synchronously before any runtime starts (the embedded Nix evaluator uses
-/// Boehm GC, which must stay isolated from Tokio's thread pool); every other
-/// command executes on the runtime.
+/// `eval` is running synchronously before any runtime starts. The embedded Nix evaluator is using
+/// Boehm GC, which must stay isolated from Tokio's thread pool.
 pub fn run() -> std::io::Result<()> {
     complete_env();
     let cli = Cli::parse();
@@ -208,9 +204,8 @@ async fn run_cli(cli: Cli) -> std::io::Result<()> {
                 });
             let mut stdout = io::stdout();
             stdout.write_all(&output.stdout).ok();
-            // clap's dynamic zsh script registers the completer only when sourced; installed
-            // as an fpath autoload file it yields nothing on the first TAB. Bridge the autoload
-            // case so the function completes on its first invocation too.
+            // clap's dynamic zsh script is registering the completer only when sourced. An fpath
+            // autoload file is yielding nothing on the first TAB without this bridge.
             if shell == Shell::Zsh {
                 stdout
                     .write_all(

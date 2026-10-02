@@ -20,8 +20,8 @@ use crate::commands::cache_upload::{UploadArgs, upload_bytes};
 use crate::narinfo::Narinfo;
 use crate::output::{ExitKind, Output};
 
-/// zstd level for uploaded NARs; matches the server's source NAR and the
-/// worker's `NarPush`, so every object under `nars/` decompresses identically.
+/// The level is matching the server's source NAR and the worker's `NarPush`. Every object under
+/// `nars/` then decompresses identically.
 const NAR_ZSTD_LEVEL: i32 = 6;
 
 const DEFAULT_SOCKET: &str = "/nix/var/nix/daemon-socket/socket";
@@ -49,8 +49,6 @@ fn top_level_store_path(path: &Path) -> Option<String> {
     Some(store_path_of_base(name.as_os_str().to_str()?))
 }
 
-/// Resolves a command-line argument (a store path, a path inside one, a
-/// symlink such as `./result`, or a bare `<hash>-<name>`) to its store path.
 fn resolve_store_path(arg: &str) -> anyhow::Result<String> {
     let path = Path::new(arg);
     if !arg.contains('/') && !path.exists() {
@@ -141,10 +139,8 @@ async fn runtime_closure(pool: &ConnectionPool, seeds: &[String]) -> HashSet<Str
     visited
 }
 
-/// zstd-compress a raw NAR into the `.nar.zst` bytes the cache stores, returning
-/// the compressed bytes and their `sha256:` SRI file hash (the narinfo
-/// `FileHash`/`FileSize`). Uploading the raw NAR instead makes the worker's zstd
-/// import fail with "Unknown frame descriptor".
+/// Uploading the raw NAR instead would make the worker's zstd import fail with "Unknown frame
+/// descriptor".
 fn compress_nar(nar_bytes: &[u8]) -> anyhow::Result<(Vec<u8>, String)> {
     let compressed = zstd::encode_all(std::io::Cursor::new(nar_bytes), NAR_ZSTD_LEVEL)?;
     let file_hash = Sha256::digest(&compressed).as_sri().to_string();

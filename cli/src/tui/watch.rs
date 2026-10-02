@@ -85,9 +85,8 @@ fn build_style(status: &str) -> Style {
     Style::default().fg(color)
 }
 
-/// Convert a log line carrying nix's ANSI SGR sequences into a styled ratatui
-/// line - ratatui does not interpret escape codes itself. Unknown sequences are
-/// dropped; the colour set mirrors the web log viewer.
+/// ratatui is not interpreting escape codes itself. Unknown sequences are dropped, and the colour
+/// set is mirroring the web log viewer.
 fn ansi_to_line(s: &str) -> ratatui::text::Line<'static> {
     use ratatui::text::{Line, Span};
     let mut spans: Vec<Span<'static>> = Vec::new();
@@ -122,7 +121,6 @@ fn ansi_to_line(s: &str) -> ratatui::text::Line<'static> {
     Line::from(spans)
 }
 
-/// Fold one SGR parameter string (e.g. `1;31`) into `style`. Empty resets.
 fn apply_sgr(mut style: Style, code: &str) -> Style {
     if code.is_empty() {
         return Style::default();

@@ -24,7 +24,7 @@ pub enum Commands {
     Show,
     /// Stream the logs of the selected task's last evaluation
     Log,
-    /// Create a task in the selected project; missing fields open in $EDITOR
+    /// Create a task in the selected project with missing fields opened in $EDITOR
     Create {
         /// Name
         #[arg(short, long)]

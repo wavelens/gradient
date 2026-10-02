@@ -44,7 +44,7 @@ const ENTRY_POINT_PAGE: u64 = 500;
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct ProjectArgs {
-    /// Project name or UUID. Defaults to the selected project.
+    /// Project name or UUID. The selected project is the default.
     project: Option<String>,
 }
 
@@ -52,7 +52,7 @@ pub struct ProjectArgs {
 pub struct TaskArgs {
     /// Task name or UUID.
     task: String,
-    /// Project name or UUID. Defaults to the selected project.
+    /// Project name or UUID. The selected project is the default.
     project: Option<String>,
 }
 
@@ -60,9 +60,9 @@ pub struct TaskArgs {
 pub struct StartArgs {
     /// Task name.
     task: String,
-    /// Project name or UUID. Defaults to the selected project.
+    /// Project name or UUID. The selected project is the default.
     project: Option<String>,
-    /// Exact 40-character commit to evaluate. Defaults to the branch head.
+    /// Exact 40-character commit to evaluate. The branch head is the default.
     commit: Option<String>,
 }
 
@@ -82,9 +82,9 @@ pub struct BuildArgs {
 pub struct BuildLogArgs {
     /// Build UUID.
     build: String,
-    /// First log line to return, 1-based inclusive. Defaults to 1.
+    /// First log line to return, 1-based inclusive. 1 is the default.
     start: Option<u64>,
-    /// Last log line to return, inclusive. Defaults to the end of the log.
+    /// Last log line to return, inclusive. The end of the log is the default.
     end: Option<u64>,
 }
 
@@ -94,21 +94,21 @@ pub struct LogSearchArgs {
     build: String,
     /// Substring to search the log for.
     query: String,
-    /// Match case-sensitively. Defaults to false.
+    /// Match case-sensitively. false is the default.
     case_sensitive: Option<bool>,
-    /// Maximum number of hits to return. Defaults to 100.
+    /// Maximum number of hits to return. 100 is the default.
     limit: Option<usize>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct WatchArgs {
-    /// Task name; entry points are looked up through it.
+    /// Task name. Entry points are looked up through it.
     task: String,
-    /// Project name or UUID. Defaults to the selected project.
+    /// Project name or UUID. The selected project is the default.
     project: Option<String>,
-    /// Evaluation UUID. Defaults to the task's latest evaluation.
+    /// Evaluation UUID. The task's latest evaluation is the default.
     evaluation: Option<String>,
-    /// Seconds to wait for the evaluation to finish. Defaults to 600, at most 3600.
+    /// Seconds to wait for the evaluation to finish. 600 is the default, 3600 the maximum.
     timeout_seconds: Option<u64>,
 }
 
@@ -136,8 +136,8 @@ pub struct GradientMcp {
     tool_router: ToolRouter<Self>,
 }
 
-/// A failed API call is the tool's problem, not the protocol's, so it comes
-/// back as a tool-level error the MCP client renders instead of a JSON-RPC error.
+/// A failed API call is returned as a tool-level error the MCP client is rendering. It is not a
+/// JSON-RPC protocol error.
 fn to_result<T: Serialize>(value: Result<T, ConnectorError>) -> Result<CallToolResult, ErrorData> {
     match value {
         Ok(value) => match serde_json::to_string_pretty(&value) {
@@ -148,8 +148,6 @@ fn to_result<T: Serialize>(value: Result<T, ConnectorError>) -> Result<CallToolR
     }
 }
 
-/// Build output is read as text, not as a JSON-quoted string; a log longer than
-/// `INLINE_LOG_LINES` goes to a temp file so it does not flood the client's context.
 fn to_log_result(value: Result<String, ConnectorError>, start: u64) -> CallToolResult {
     let log = match value {
         Ok(log) => log,
@@ -477,8 +475,8 @@ impl ServerHandler for GradientMcp {
     }
 }
 
-/// Serves MCP over stdio, where stdout carries the JSON-RPC frames: diagnostics
-/// go to stderr unconditionally, so `--json` must not reach `Output` here.
+/// stdout is carrying the JSON-RPC frames. Diagnostics are going to stderr unconditionally, and
+/// `--json` must not reach `Output` here.
 pub async fn run(control: bool) -> std::io::Result<()> {
     let out = Output::new(false);
     let client = client_from_config(out);

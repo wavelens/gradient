@@ -4,8 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-/// Flake-output categories that are already gradient attr-path syntax; a head
-/// under one of these passes through, anything else is treated as a bare package.
 pub const OUTPUT_CATEGORIES: &[&str] = &[
     "packages",
     "legacyPackages",
@@ -20,8 +18,6 @@ pub const OUTPUT_CATEGORIES: &[&str] = &[
     "bundlers",
 ];
 
-/// The host's Nix system double (`x86_64-linux`, `aarch64-darwin`, ...), used to
-/// qualify a bare `.#uxc` as `packages.<system>.uxc` the way `nix` does.
 pub fn default_nix_system() -> String {
     let os = match std::env::consts::OS {
         "macos" => "darwin",
@@ -30,11 +26,8 @@ pub fn default_nix_system() -> String {
     format!("{}-{}", std::env::consts::ARCH, os)
 }
 
-/// Qualify a flake-ref-stripped attr path into gradient's attr-path wildcard
-/// language, mirroring `nix`'s default installable resolution: a head that is
-/// `*`/`#`/a known output category passes through; a bare package name is
-/// prefixed with `packages.<system>.`; an empty attr becomes the whole-package
-/// wildcard `packages.<system>.#`. A leading `!` exclusion is preserved.
+/// Resolution is mirroring `nix` default installables. A bare package name is prefixed with
+/// `packages.<system>.`. An empty attr is becoming the wildcard `packages.<system>.#`.
 pub fn qualify_attr(attr: &str, system: &str) -> String {
     let (excl, body) = attr
         .strip_prefix('!')

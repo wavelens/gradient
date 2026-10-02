@@ -4,10 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! `gradient mcp` speaks JSON-RPC on stdout, so these drive the real binary
-//! over a pipe: anything the command prints outside a frame corrupts the
-//! session for every MCP client.
-
 #![expect(
     clippy::unwrap_used,
     reason = "test scaffolding: a fixture helper that cannot build its value should fail the test loudly"
@@ -56,8 +52,6 @@ fn session(home: &TempDir, requests: &[Value]) -> Vec<Value> {
     session_with(home, &["mcp"], requests)
 }
 
-/// Run a session to completion: stdin is closed after the last frame, which
-/// ends the server, so the responses are whatever landed on stdout.
 fn session_with(home: &TempDir, args: &[&str], requests: &[Value]) -> Vec<Value> {
     let output = Command::cargo_bin("gradient")
         .unwrap()
@@ -179,8 +173,8 @@ fn mcp_advertises_the_read_only_tools() {
     }
 }
 
-// Read-only was a deliberate choice: an MCP client must not be able to spend
-// the build farm or delete a project through this server.
+// Read-only is deliberate. An MCP client must not be able to spend the build farm or delete a
+// project through this server.
 #[test]
 fn mcp_exposes_no_mutating_tools() {
     let home = TempDir::new().unwrap();
@@ -286,8 +280,6 @@ async fn mcp_get_build_log_saves_a_long_log_to_a_temp_file() {
     assert_eq!(fs::read_to_string(saved).unwrap(), log);
 }
 
-// The selected project in config.toml is the default, so an agent does not have
-// to name the project on every call.
 #[tokio::test]
 async fn mcp_list_tasks_defaults_to_the_selected_project() {
     let server = MockServer::start().await;
@@ -333,8 +325,6 @@ async fn mcp_list_tasks_defaults_to_the_selected_project() {
     );
 }
 
-// An unreachable server is the tool's failure, not the protocol's: it must come
-// back as a tool-level error the client can render, not a JSON-RPC error.
 #[test]
 fn mcp_reports_api_failures_as_tool_errors() {
     let home = TempDir::new().unwrap();
@@ -595,7 +585,7 @@ async fn mcp_watch_evaluation_caps_a_huge_timeout() {
     assert_eq!(report["finished"], json!(true), "{report:#}");
 }
 
-// Without failing fast these block for the default 600 s watch timeout.
+// These would block for the default 600 s watch timeout without failing fast.
 #[tokio::test]
 async fn mcp_watch_evaluation_fails_fast_on_an_unknown_evaluation() {
     let server = MockServer::start().await;

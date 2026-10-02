@@ -63,13 +63,10 @@ pub async fn handle(args: UploadArgs, out: Output) {
     crate::commands::cache_upload_nix::upload_paths(&args, out).await;
 }
 
-/// NAR slice size per chunked-upload request. Comfortably below the bundled
-/// reverse proxy's 100 MiB body cap so each request always gets through.
+/// Each request must stay below the bundled reverse proxy's 100 MiB body cap.
 const UPLOAD_CHUNK_SIZE: usize = 32 * 1024 * 1024;
 
-/// The 32-char store hash, used as the server-side staging key. URL-safe by
-/// construction (lowercase base32), unlike full store names which can carry
-/// `+`/`?`/`=`.
+/// The 32-char store hash is URL-safe lowercase base32. Full store names can carry `+`, `?` or `=`.
 fn store_hash_of(store_path: &str) -> &str {
     let base = store_path.rsplit('/').next().unwrap_or(store_path);
     base.split('-').next().unwrap_or(base)
@@ -81,9 +78,6 @@ pub(crate) async fn upload_one_owned(cache: &str, ni: Narinfo, bytes: Vec<u8>, o
     out.human(format!("Uploaded {store_path}"));
 }
 
-/// Chunk-upload `bytes` and finalize against `ni`, emitting the machine-readable
-/// success line but no human summary - the caller owns human progress output so
-/// closure uploads can render one updating line per path.
 pub(crate) async fn upload_bytes(cache: &str, ni: Narinfo, bytes: Vec<u8>, out: Output) {
     let client = client_from_config(out);
     let store_path = ni.store_path.clone();

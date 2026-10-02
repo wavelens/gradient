@@ -137,7 +137,7 @@ impl ClientBuilder {
             .ok_or_else(|| "base_url is required".to_string())?;
         let timeout = self.timeout.unwrap_or(Duration::from_secs(30));
         let http = http_client(reqwest::Client::builder().timeout(timeout))?;
-        // A total timeout would also bound the body, cutting off long-lived log streams.
+        // A total timeout would also bound the body and cut off long-lived log streams.
         let stream_http = http_client(reqwest::Client::builder().connect_timeout(timeout))?;
         Ok(Client {
             inner: Arc::new(ClientInner {
@@ -184,9 +184,6 @@ fn rustls_config() -> rustls::ClientConfig {
 mod tests {
     use super::*;
 
-    // Regression for #287: native certs must be merged into the root store
-    // (alongside webpki-roots) so self-signed CAs installed in the OS trust
-    // store are honoured.
     #[test]
     fn root_store_contains_webpki_baseline() {
         let roots = rustls_root_store();

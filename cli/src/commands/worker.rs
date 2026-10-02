@@ -21,11 +21,11 @@ pub enum Commands {
         /// Human-readable display name shown in the workers list
         #[arg(short = 'n', long = "display-name")]
         display_name: String,
-        /// Optional WebSocket URL where the worker listens for incoming server connections
+        /// Optional WebSocket URL the worker is listening on for incoming server connections
         #[arg(short, long)]
         url: Option<String>,
-        /// Pre-generated token (output of `openssl rand -base64 48`). When omitted the server
-        /// generates one and prints it - store it securely, it cannot be retrieved again.
+        /// Pre-generated token (output of `openssl rand -base64 48`). The server is generating and
+        /// printing one when omitted. Store it securely, it cannot be retrieved again.
         #[arg(short, long)]
         token: Option<String>,
     },

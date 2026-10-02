@@ -23,7 +23,7 @@ pub enum Commands {
         #[arg(add = ArgValueCompleter::new(completion::complete_projects))]
         project: String,
     },
-    /// Create a project; missing fields open in $EDITOR
+    /// Create a project with missing fields opened in $EDITOR
     Create {
         /// Name
         #[arg(short, long)]
@@ -63,7 +63,7 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: SshCommands,
     },
-    /// Manage the caches the selected project pushes to
+    /// Manage the caches the selected project is pushing to
     Cache {
         #[command(subcommand)]
         cmd: CacheCommands,
@@ -420,8 +420,6 @@ pub async fn handle(cmd: Commands, out: Output) {
     }
 }
 
-/// Names of the projects the current user belongs to, exiting with a clear
-/// login hint when no session is configured or the server rejects it.
 async fn membership_names(out: Output) -> Vec<String> {
     if get_value(ConfigKey::AuthToken, true).is_none() {
         out.err(
@@ -440,8 +438,7 @@ async fn membership_names(out: Output) -> Vec<String> {
     }
 }
 
-/// After a successful login, select the user's project when it is
-/// unambiguous, otherwise guide them. Never blocks login on a list failure.
+/// Login is never blocked on a list failure.
 pub async fn post_login_project_setup(client: &Client, out: Output) {
     let projects: Vec<String> = match client.projects().list().await {
         Ok(res) => res.items.into_iter().map(|i| i.name).collect(),
@@ -477,8 +474,6 @@ pub async fn post_login_project_setup(client: &Client, out: Output) {
     }
 }
 
-/// Post-login project handling derived from the user's memberships and any current
-/// selection. Pure so the decision is testable without a server.
 #[derive(Debug, PartialEq, Eq)]
 pub enum ProjectOnboarding {
     Keep(String),

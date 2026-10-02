@@ -2,9 +2,6 @@ use crate::{Client, ConnectorError, http};
 use reqwest::Method;
 use serde::{Deserialize, Serialize};
 
-/// Outcome of `/auth/cli/poll`. Pending/Expired/Denied are normal states of the
-/// device flow, not transport errors, so the CLI matches on them instead of
-/// reading prose out of `ConnectorError::Api`.
 #[derive(Debug, Clone)]
 pub enum CliPollOutcome {
     Pending,

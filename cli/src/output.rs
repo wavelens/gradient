@@ -28,8 +28,6 @@ impl ExitKind {
     }
 }
 
-/// Status colours for human output. Escapes reach the terminal only, so a piped
-/// or `--json` invocation stays plain text.
 #[derive(Clone, Copy)]
 pub enum Color {
     Green,
@@ -95,9 +93,6 @@ impl Output {
         }
     }
 
-    /// Draw a transient status line that a following `step_done` overwrites in
-    /// place. On a non-TTY (piped/CI) the transient line is skipped entirely so
-    /// logs stay one clean line per step.
     pub fn step_start(&self, msg: impl std::fmt::Display) {
         if self.json {
             return;
@@ -109,8 +104,6 @@ impl Output {
         }
     }
 
-    /// Finalize the current step: overwrite the transient line on a TTY, or emit
-    /// a plain line otherwise. Either way the step ends on its own newline.
     pub fn step_done(&self, msg: impl std::fmt::Display) {
         if self.json {
             return;

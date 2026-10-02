@@ -4,10 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! `gradient cache edit` must PATCH the named cache. It used to PUT
-//! `/caches`, which creates, and it prefilled the editor with a hardcoded
-//! max storage of 0 instead of the cache's own, so an unrelated edit made
-//! the cache unlimited.
+//! `gradient cache edit` must PATCH the named cache. It used to PUT `/caches`, which is creating a
+//! cache. Its editor prefill also held a hardcoded max storage of 0, and an unrelated edit made the
+//! cache unlimited.
 
 #![expect(
     clippy::unwrap_used,
@@ -55,8 +54,8 @@ async fn prod_cache(server: &MockServer) {
         .await;
 }
 
-/// `EDITOR=true` leaves the prefilled buffer untouched, so the request body is
-/// exactly what the command put in front of the user.
+/// `EDITOR=true` is leaving the prefilled buffer untouched. The request body is then exactly what
+/// the command showed the user.
 fn edit(home: &TempDir, args: &[&str]) -> assert_cmd::assert::Assert {
     Command::cargo_bin("gradient")
         .unwrap()

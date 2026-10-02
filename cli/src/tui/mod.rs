@@ -16,10 +16,9 @@ use ratatui::crossterm::{execute, terminal};
 use std::io::{self, Stdout};
 use std::time::Duration;
 
-/// A full-screen view: owns its state, renders a frame, reacts to keys.
 pub trait View {
     fn render(&mut self, frame: &mut ratatui::Frame);
-    /// Return `true` to request exit.
+    /// `true` is requesting exit.
     fn on_key(&mut self, key: KeyEvent) -> bool;
     fn on_tick(&mut self) {}
 }

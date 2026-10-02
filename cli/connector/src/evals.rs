@@ -70,9 +70,8 @@ pub struct OutputArtefacts {
 }
 
 impl OutputArtefacts {
-    /// Absolute `/nix/store/...` path for feeding `nix` commands. The API
-    /// returns the prefix-free base form; reconstruct the prefix here, tolerating
-    /// an already-prefixed value during the transition.
+    /// The API is returning the prefix-free base form. An already-prefixed value is tolerated
+    /// during the transition.
     pub fn full_store_path(&self) -> String {
         if self.store_path.starts_with("/nix/store/") {
             self.store_path.clone()
@@ -177,8 +176,6 @@ impl EvalsApi<'_> {
 mod tests {
     use super::EvaluationResponse;
 
-    // Regression for #435: a build-request eval omits `updated_at`/`error`,
-    // which used to make `gradient watch`/`build` report "Unknown evaluation".
     #[test]
     fn deserializes_eval_without_updated_at_or_error() {
         let body = r#"{

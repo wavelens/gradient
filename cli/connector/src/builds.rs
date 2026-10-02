@@ -73,7 +73,6 @@ impl BuildsApi<'_> {
         http::json_lines(req.send().await?).await
     }
 
-    /// Fetch a 1-based inclusive line range of a completed build's log.
     pub async fn log_lines(
         &self,
         id: &str,
@@ -104,8 +103,6 @@ impl BuildsApi<'_> {
         Ok(res.text().await?)
     }
 
-    /// Stream search hits over a completed build's log. Each item is a JSON
-    /// object (a `LogSearchHit`, or a terminal `{ "done": true, ... }` frame).
     pub async fn log_search(
         &self,
         id: &str,

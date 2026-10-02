@@ -60,9 +60,8 @@ pub(crate) async fn json_lines<T: DeserializeOwned + Send + 'static>(
         .map(|r| r.map_err(|e| ConnectorError::Io(std::io::Error::other(e)))))
 }
 
-/// Send an upload, waiting out a busy server: a `503` with `Retry-After`
-/// (the upload budget is full) is sent again after that delay, a bounded
-/// number of times.
+/// A `503` with `Retry-After` means the upload budget is full. The upload is resent after that
+/// delay a bounded number of times.
 pub(crate) async fn send_upload(
     build: impl Fn() -> Result<RequestBuilder, ConnectorError>,
 ) -> Result<Response, ConnectorError> {

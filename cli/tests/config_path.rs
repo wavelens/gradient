@@ -4,10 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! `XDG_CONFIG_HOME` must locate the config file on every platform (#536): the
-//! native macOS strategy resolves to `~/Library/Application Support` and
-//! ignores it, so every test that seeds a config through that variable - and
-//! every user with an XDG-style dotfile setup - read from the wrong place.
+//! `XDG_CONFIG_HOME` must locate the config file on every platform (#536). The native macOS
+//! strategy is resolving to `~/Library/Application Support` and ignoring it.
 
 use assert_cmd::Command;
 use std::fs;

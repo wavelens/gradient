@@ -4,10 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! `nix`-feature fast paths for `gradient build`: pack the source NAR locally
-//! (skipping the per-file blob manifest) and substitute the built output back
-//! into the local store as a `result` symlink (instead of downloading products).
-
 use crate::commands::build::{BuildParams, TrackedFile, select_primary_entry_point};
 use crate::config::{ConfigKey, load_config};
 use crate::input::server_base;
@@ -18,13 +14,10 @@ use connector::evals::ArtefactTree;
 use futures::StreamExt as _;
 use harmonia_file_nar::NarByteStream;
 
-/// Source-NAR slice size per chunked-upload request. Small enough to clear the
-/// server's per-chunk body limit and any reverse proxy, so source size is
-/// unbounded by a single request.
 const SOURCE_UPLOAD_CHUNK_SIZE: usize = 32 * 1024 * 1024;
 
-/// Stage the git-tracked files into a temp dir, NAR-pack them with the same
-/// serialiser the server uses (so the store path matches), and upload the NAR.
+/// The NAR is packed with the same serialiser the server is using. The store path then matches the
+/// server's.
 pub async fn start_via_nar(
     client: &connector::Client,
     project: &str,
@@ -71,8 +64,6 @@ pub async fn start_via_nar(
         ));
     }
 
-    // Content-addressed upload id: a filesystem-safe hex string that also lets
-    // the server resume a half-staged source on a retry of the same tree.
     let upload = blake3::hash(&nar).to_hex().to_string();
     let requests = client.build_requests();
     let total = nar.len() as u64;
@@ -126,10 +117,6 @@ fn human_bytes(n: usize) -> String {
     }
 }
 
-/// Turn a source-NAR upload failure into an actionable message: always name the
-/// size and file count that was attempted, and give status-specific guidance for
-/// the common 413 (too large) and 400 (unparseable body) cases instead of dumping
-/// the raw reverse-proxy error page.
 fn upload_error_message(
     err: &ConnectorError,
     nar_len: usize,
@@ -166,14 +153,6 @@ fn upload_error_message(
     }
 }
 
-/// Materialise the primary output locally and create a GC-rooted `result`
-/// symlink to it. The project's cache is wired into the realise as an extra
-/// substituter - carrying its signing key (so gradient-built paths verify even
-/// when the user has not configured the key) and a temp netrc for a private
-/// cache - so a single realise draws from the gradient cache and the user's own
-/// substituters alike. Paths already local, or reachable only from the user's
-/// substituters, resolve without the cache; only a genuinely unreachable output
-/// errors, with the raw nix diagnostic instead of a bare warning.
 pub async fn link_result(
     client: &connector::Client,
     started: &BuildStartResponse,
@@ -221,12 +200,7 @@ pub async fn link_result(
     }
 }
 
-/// nix `--option` flags that add the project's cache as a substituter for
-/// the realise: its URL, its signing key (so gradient-built paths verify without
-/// the user configuring the key), and - for a private cache - a temp netrc
-/// carrying the CLI token. Returns the flags plus the netrc guard, which must
-/// outlive the nix process. Missing pieces are omitted: no cache, a public cache,
-/// or a failed key fetch simply yields fewer flags.
+/// The returned netrc guard must outlive the nix process.
 async fn cache_substituter_opts(
     client: &connector::Client,
     started: &BuildStartResponse,
@@ -257,10 +231,6 @@ async fn cache_substituter_opts(
     (opts, netrc)
 }
 
-/// A 0600 netrc authorising nix to fetch from a private gradient cache. Public
-/// caches need no credentials, so this returns `None` and keeps the token off
-/// disk. The server ignores the netrc login and treats the password as the
-/// caller's API token.
 async fn private_cache_netrc(
     client: &connector::Client,
     cache: &str,

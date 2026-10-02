@@ -16,9 +16,6 @@ use std::io::{BufReader, Read};
 use std::path::{Path, PathBuf};
 use std::process::exit;
 
-/// What to build and how to resolve its flake inputs: the target attr-path, the
-/// target system, and the per-build `--override-input` pairs. Threaded as one unit
-/// through the build start so the request functions stay under the arg-count limit.
 pub(crate) struct BuildParams {
     pub target: Option<String>,
     pub system: Option<String>,
@@ -33,8 +30,8 @@ pub async fn handle_build(
     no_link: bool,
     out: Output,
 ) {
-    // Surface a missing server / session before the project check so an unconfigured
-    // first invocation points at `gradient login` rather than project selection (#498).
+    // A missing server or session must surface before the project check. An unconfigured first
+    // invocation then points at `gradient login` (#498).
     let client = client_from_config(out);
     if let Err(ConnectorError::Unauthorized) = client.user().get().await {
         out.err(
@@ -56,8 +53,6 @@ pub async fn handle_build(
             exit(1);
         });
 
-    // Accept `nix build`-style installables (`.#uxc`) and translate them into
-    // gradient's attr-path wildcard language before the build start and result linking.
     params.target = params.target.take().map(|raw| {
         let system = params
             .system
@@ -344,8 +339,6 @@ async fn start_via_manifest(
     }
 }
 
-/// Poll the evaluation until it reaches a terminal status, returning it.
-/// `None` means the poll failed (already reported to `out`).
 async fn wait_for_terminal(
     client: &connector::Client,
     eval_id: &str,
@@ -368,12 +361,8 @@ async fn wait_for_terminal(
     }
 }
 
-/// Translate a `nix build`-style installable into gradient's `.`-separated
-/// attr-path wildcard language. `gradient build .#uxc` mirrors `nix build .#uxc`:
-/// the flake ref is always the uploaded repo, so drop a leading local ref
-/// (`.`/empty) before `#` and qualify a bare attr as `packages.<system>.<attr>`.
-/// Fully-qualified paths and `*`/`#` wildcards (`packages.x86_64-linux.#`) and
-/// exclusions pass through untouched.
+/// The flake ref is always the uploaded repo. A leading local ref before `#` is dropped, and a bare
+/// attr is qualified like `nix build`.
 fn normalize_target(raw: &str, system: &str) -> String {
     raw.split(',')
         .map(|pat| normalize_installable(pat.trim(), system))
@@ -403,8 +392,6 @@ const REMOTE_OVERRIDE_SCHEMES: &[&str] = &[
     "flake:",
 ];
 
-/// Parse `--override-input INPUT FLAKE` pairs. gradient evaluates on the server,
-/// so only remote flake refs (and `/nix/store` paths it can fetch) are accepted.
 pub(crate) fn parse_overrides(raw: &[String]) -> Result<Vec<(String, String)>, String> {
     let (pairs, []) = raw.as_chunks::<2>() else {
         return Err("--override-input needs INPUT and FLAKE".into());
@@ -435,7 +422,6 @@ pub(crate) fn parse_overrides(raw: &[String]) -> Result<Vec<(String, String)>, S
     Ok(out)
 }
 
-/// Pick the entry point matching `target` (exact or suffix), else the first.
 pub(crate) fn select_primary_entry_point<'a>(
     tree: &'a ArtefactTree,
     target: Option<&str>,
@@ -585,7 +571,6 @@ mod tests {
             normalize_installable("#uxc", "aarch64-darwin"),
             "packages.aarch64-darwin.uxc"
         );
-        // `.#` alone builds every package, like `nix build .#` picks the default.
         assert_eq!(
             normalize_installable(".#", "x86_64-linux"),
             "packages.x86_64-linux.#"
@@ -594,7 +579,6 @@ mod tests {
 
     #[test]
     fn qualified_and_wildcard_targets_pass_through() {
-        // gradient's own trailing `#` wildcard segment must survive untouched.
         assert_eq!(
             normalize_installable("packages.x86_64-linux.#", "x86_64-linux"),
             "packages.x86_64-linux.#"

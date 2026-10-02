@@ -6,8 +6,8 @@
 
 use assert_cmd::Command;
 
-// Regression for the broken completion bin name: the generated script must
-// register against the real `gradient` binary, never the `Gradient` app name.
+// The generated script must register against the real `gradient` binary, never the `Gradient` app
+// name.
 #[test]
 fn completion_bash_registers_lowercase_binary() {
     let output = Command::cargo_bin("gradient")
@@ -46,9 +46,9 @@ fn completion_zsh_registers_lowercase_binary() {
     assert!(script.contains("gradient"), "zsh script: {script}");
 }
 
-// clap's dynamic zsh script is built to be sourced; the Nix package installs it as an
-// fpath autoload `_gradient` file, where the completer is otherwise registered only on
-// the first TAB (producing nothing). The appended bridge must run it on first invocation.
+// The Nix package is installing clap's dynamic zsh script as an fpath autoload `_gradient` file.
+// The completer is then registered only on the first TAB, producing nothing. The appended bridge
+// must run it on first invocation.
 #[test]
 fn completion_zsh_bridges_autoload_first_tab() {
     let output = Command::cargo_bin("gradient")

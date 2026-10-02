@@ -11,23 +11,16 @@ use std::path::Path;
 
 #[derive(Args, Debug)]
 pub struct EvalArgs {
-    /// Attribute wildcard patterns, e.g. 'checks.*.*' 'packages.x86_64-linux.*'.
-    /// Accepts installable syntax ('.#gradient-cli-full' or
-    /// 'github:NixOS/patchelf#hydraJobs.*'); a bare attr is qualified as
-    /// 'packages.<system>.<attr>' like 'nix eval', the flake part sets the flake
-    /// to evaluate and defaults to the current directory.
+    /// Attribute wildcard patterns, e.g. 'checks.*.*' 'packages.x86_64-linux.*'. Installable syntax
+    /// ('.#gradient-cli-full' or 'github:NixOS/patchelf#hydraJobs.*') is accepted. A bare attr is
+    /// qualified as 'packages.<system>.<attr>' like 'nix eval'. The flake part is selecting the
+    /// flake to evaluate, with the current directory as default.
     #[arg(required = true, value_name = "PATTERN")]
     patterns: Vec<String>,
 }
 
-/// Evaluate a flake's outputs to derivations, like nix-eval-jobs, using the
-/// gradient worker evaluator. Streams one JSON line per attribute to stdout.
-///
-/// Executes synchronously without a Tokio runtime: the Nix C API uses Boehm GC,
-/// which must stay isolated from Tokio's thread pool (see the worker's eval
-/// subprocess). Per-attribute failures are reported in their JSON line and do
-/// not abort the evaluation; only a top-level failure (e.g. locking the flake)
-/// exits non-zero.
+/// This is running without a Tokio runtime. The Nix C API is using Boehm GC, which must stay
+/// isolated from Tokio's thread pool.
 pub fn run(args: EvalArgs) -> std::io::Result<()> {
     let system = attr_spec::default_nix_system();
     let (flake_ref, wildcards) = split_installables(&args.patterns, &system);
@@ -50,11 +43,6 @@ pub fn run(args: EvalArgs) -> std::io::Result<()> {
     Ok(())
 }
 
-/// Pull the flake reference out of installable-form patterns ('<ref>#<attr>')
-/// and qualify each attr like `nix eval`, so `gradient eval .#gradient-cli-full`
-/// resolves `packages.<system>.gradient-cli-full` on the current flake. A
-/// non-empty flake part sets the flake (default '.'); known output categories
-/// and wildcards pass through untouched (see [`attr_spec::qualify_attr`]).
 fn split_installables(patterns: &[String], system: &str) -> (String, Vec<String>) {
     let mut flake_ref = ".".to_string();
     let mut wildcards = Vec::with_capacity(patterns.len());
@@ -77,16 +65,11 @@ fn split_installables(patterns: &[String], system: &str) -> (String, Vec<String>
     (flake_ref, wildcards)
 }
 
-/// Resolve a local flake reference for the Nix C API, which - unlike the CLI -
-/// needs an absolute path and does not read the working directory. A directory
-/// inside a git checkout becomes a `git+file://` flake (with `?dir=` for a
-/// sub-flake), exactly like `nix eval .`, so only tracked files are evaluated. A
-/// bare `path:` flake would instead copy the WHOLE directory into the store
-/// first - gitignored build artefacts and all (`target/`, `node_modules`,
-/// `result`) - which is orders of magnitude slower to evaluate. A directory
-/// outside any git repo falls back to its absolute `path:` form; a scheme ref
-/// (github:, path:, git+…) or registry name has no on-disk target, so
-/// canonicalisation fails and it passes through unchanged.
+/// The Nix C API needs an absolute path and is not reading the working directory. A directory
+/// inside a git checkout is becoming a `git+file://` flake, exactly like `nix eval .`. A bare
+/// `path:` flake would copy the whole directory into the store first, gitignored artefacts
+/// included. A scheme ref or registry name is failing canonicalisation and passing through
+/// unchanged.
 fn resolve_flake_ref(flake: &str) -> String {
     let Ok(abs) = std::fs::canonicalize(flake) else {
         return flake.to_string();
@@ -101,9 +84,6 @@ fn resolve_flake_ref(flake: &str) -> String {
     }
 }
 
-/// The `git+file://` flake URL `nix` uses for a local checkout: the work-tree
-/// root as a `file://` path, plus `?dir=` when the flake lives in a subdirectory
-/// of the repo.
 fn git_flake_url(root: &Path, target: &Path) -> String {
     let root_str = root.to_string_lossy();
     let mut url = format!("git+file://{}", root_str.trim_end_matches('/'));
@@ -169,7 +149,6 @@ mod tests {
             "github:NixOS/nixpkgs"
         );
         assert_eq!(resolve_flake_ref("path:/abs"), "path:/abs");
-        // A non-existent local path can't be canonicalised, so it is left as-is.
         assert_eq!(resolve_flake_ref("./no-such-dir-xyz"), "./no-such-dir-xyz");
     }
 

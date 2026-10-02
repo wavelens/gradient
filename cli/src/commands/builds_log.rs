@@ -8,7 +8,6 @@ use crate::input::client_from_config;
 use crate::output::{ExitKind, Output, to_exit_kind};
 use futures::{StreamExt, pin_mut};
 
-/// Parse a `--lines` argument: `L120-L130`, `120-130`, or `120`.
 fn parse_lines(arg: &str) -> Option<(u64, Option<u64>)> {
     let cleaned = arg.replace(['L', 'l'], "");
     if let Some((lo, hi)) = cleaned.split_once('-') {

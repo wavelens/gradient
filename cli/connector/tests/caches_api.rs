@@ -98,8 +98,6 @@ async fn nar_upload_posts_multipart() {
         .expect("upload");
 }
 
-/// A busy server answers 503 with `Retry-After`; the upload waits and retries
-/// instead of failing the user's command.
 #[tokio::test]
 async fn a_busy_chunk_upload_is_retried_after_the_servers_delay() {
     let server = MockServer::start().await;

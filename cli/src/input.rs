@@ -49,8 +49,6 @@ pub fn server_base(out: Output) -> String {
         })
 }
 
-/// The fields a command asked for, per prompt label. `handle_input` hands
-/// one out only once every declared field carries a value, so lookups cannot miss.
 pub struct Inputs {
     values: HashMap<String, String>,
     out: Output,
@@ -124,8 +122,6 @@ pub fn handle_input(fields: Vec<(String, Option<String>)>, skip: bool, out: Outp
     Inputs { values, out }
 }
 
-/// Read the editor's buffer back. A field the user emptied or deleted is an
-/// error here rather than a missing key the caller would have to handle.
 fn parse_edited(
     fields: &[(String, Option<String>)],
     edited: &str,
@@ -190,7 +186,6 @@ pub fn is_interactive(out: Output) -> bool {
     !out.is_json() && io::stdin().is_terminal() && io::stdout().is_terminal()
 }
 
-/// Numbered pick from `options`; an empty answer skips the choice.
 pub fn ask_for_choice(prompt: &str, options: &[String], out: Output) -> Option<String> {
     for (i, option) in options.iter().enumerate() {
         out.human(format!("  {}) {}", i + 1, option));

@@ -42,9 +42,9 @@ fn config_file_in(base: &Path) -> PathBuf {
     base.join("gradient").join("config.toml")
 }
 
-/// The XDG path wins, except when only a pre-XDG native config exists: macOS
-/// puts the native config under `~/Library/Application Support`, which ignores
-/// `XDG_CONFIG_HOME`, so installs made before #536 stay logged in.
+/// The XDG path is winning, except when only a pre-XDG native config exists. macOS is ignoring
+/// `XDG_CONFIG_HOME` for `~/Library/Application Support`. Installs made before #536 then stay
+/// logged in.
 fn resolve_config_file(xdg: PathBuf, native: PathBuf) -> PathBuf {
     if !xdg.exists() && native.exists() {
         native
@@ -104,8 +104,6 @@ pub fn save_config(config: &HashMap<ConfigKey, Option<String>>) {
         .expect("Failed to write configuration file");
 }
 
-/// The `gradient config <key> [value]` entry point: resolves the key by name,
-/// then either stores `value` or reads the current one back.
 pub fn set_or_get_by_name(
     key: &str,
     value: Option<String>,

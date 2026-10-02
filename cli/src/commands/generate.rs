@@ -32,8 +32,7 @@ fn generate_api_token() -> String {
     format!("GRAD{}", Alphanumeric.sample_string(&mut rand::rng(), 64))
 }
 
-/// Lowercase hex SHA-256 of the token without its `GRAD` prefix, the form the
-/// server stores and `api_keys.<name>.key_file` must contain.
+/// `api_keys.<name>.key_file` must contain this digest, the form the server is storing.
 fn key_file_digest(token: &str) -> String {
     let raw = token.strip_prefix("GRAD").unwrap_or(token);
     Sha256::digest(raw.as_bytes())

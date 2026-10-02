@@ -4,12 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Netrc helpers shared by `cache install-netrc` (a persistent, merged netrc
-//! file) and the build path's private-cache output substitution (an ephemeral
-//! 0600 temp file for a single nix invocation).
-
-/// The netrc `machine` for a server URL: host only, with scheme, port and path
-/// stripped, matching how curl - and therefore nix - keys netrc lookups.
+/// curl and therefore nix are keying netrc lookups by host only, without scheme, port and path.
 pub fn machine_host(server: &str) -> String {
     server
         .trim()
@@ -21,14 +16,11 @@ pub fn machine_host(server: &str) -> String {
         .to_string()
 }
 
-/// A netrc entry authorising `host` with `token`. Gradient ignores the login and
-/// treats the password as the API token.
+/// Gradient is ignoring the login and treating the password as the API token.
 pub fn entry(host: &str, token: &str) -> String {
     format!("machine {host}\nlogin gradient\npassword {token}\n")
 }
 
-/// `contents` with any existing entry for `host` removed, so a re-install
-/// replaces rather than duplicates it.
 pub fn remove_entry(contents: &str, host: &str) -> String {
     if host.is_empty() {
         return contents.to_string();
@@ -47,7 +39,6 @@ pub fn remove_entry(contents: &str, host: &str) -> String {
     result
 }
 
-/// Write a single-entry netrc to a fresh 0600 temp file for one nix invocation.
 #[cfg(feature = "nix")]
 pub fn temp_file(host: &str, token: &str) -> std::io::Result<tempfile::NamedTempFile> {
     use std::io::Write as _;

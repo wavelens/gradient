@@ -463,9 +463,8 @@ impl CachesApi<'_> {
         Ok(())
     }
 
-    /// Append one slice of a NAR to the server's staging file, per
-    /// `(cache, store_hash)`. Returns the authoritative number of bytes staged;
-    /// the caller sets its next offset to it and resends if it did not advance.
+    /// The returned staged byte count is authoritative. The caller must set its next offset to it
+    /// and resend when it did not advance.
     pub async fn nar_upload_chunk(
         &self,
         cache: &str,
@@ -491,8 +490,6 @@ impl CachesApi<'_> {
         Ok(received.received)
     }
 
-    /// Finalize a chunked upload: the server validates the staged NAR against
-    /// `narinfo` and imports it.
     pub async fn nar_upload_finalize(
         &self,
         cache: &str,

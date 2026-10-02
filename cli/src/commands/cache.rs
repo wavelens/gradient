@@ -16,7 +16,7 @@ use std::fs;
 
 #[derive(Subcommand, Debug)]
 pub enum Commands {
-    /// Create a cache; missing fields open in $EDITOR
+    /// Create a cache with missing fields opened in $EDITOR
     Create {
         /// Name
         #[arg(short, long)]
@@ -27,10 +27,10 @@ pub enum Commands {
         /// Description
         #[arg(short = 'c', long)]
         description: Option<String>,
-        /// Priority advertised to Nix; lower is preferred
+        /// Priority advertised to Nix, lower is preferred
         #[arg(short, long)]
         priority: Option<i32>,
-        /// Max cache storage in GB. 0 = unlimited (default); otherwise at least 1.
+        /// Max cache storage in GB. 0 = unlimited (default), otherwise at least 1.
         #[arg(short = 'm', long, default_value_t = 0)]
         max_storage_gb: i32,
     },
@@ -47,10 +47,10 @@ pub enum Commands {
         /// New description
         #[arg(short = 'c', long)]
         description: Option<String>,
-        /// New priority; lower is preferred by Nix
+        /// New priority, lower is preferred by Nix
         #[arg(short, long)]
         priority: Option<i32>,
-        /// Max cache storage in GB. 0 = unlimited; otherwise at least 1.
+        /// Max cache storage in GB. 0 = unlimited, otherwise at least 1.
         #[arg(short = 'm', long)]
         max_storage_gb: Option<i32>,
     },
