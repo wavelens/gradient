@@ -5,11 +5,13 @@
  */
 
 mod crypto;
+mod evaluation_rows;
 mod executor;
 mod matchers;
 mod payload;
 mod report;
 mod send;
+mod summary;
 
 use crate::context::CiContext;
 use gradient_types::{ActionType, CTaskAction, ETaskAction, TaskId};

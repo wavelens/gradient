@@ -33,6 +33,12 @@ pub fn run<F: std::future::Future>(fut: F) -> F::Output {
 }
 
 pub fn make_ctx() -> crate::CiContext {
+    make_ctx_with(sea_orm::MockDatabase::new(
+        sea_orm::DatabaseBackend::Postgres,
+    ))
+}
+
+pub fn make_ctx_with(worker: sea_orm::MockDatabase) -> crate::CiContext {
     use crate::CiContext;
     use futures::future::BoxFuture;
     use gradient_db::{DbContext, WebDb, WorkerDb};
@@ -159,7 +165,7 @@ pub fn make_ctx() -> crate::CiContext {
     let config = std::sync::Arc::new(RuntimeConfig::from_cli(&cli).expect("valid test config"));
     let nar_storage = NarStore::local(&config.server.base_dir).expect("nar store");
     let db = DbContext {
-        worker_db: WorkerDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
+        worker_db: WorkerDb::new(worker.into_connection()),
         web_db: WebDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
         config,
         storage: StorageCtx {
