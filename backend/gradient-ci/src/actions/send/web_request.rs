@@ -4,11 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::actions::crypto::decrypt_action_secret;
+use crate::actions::crypto::decrypt_with_server_key;
 use crate::actions::{ExecutorOk, MAX_BODY_BYTES, truncate};
 use crate::context::CiContext;
 use anyhow::{Context, Result, anyhow};
-use gradient_types::input::load_secret_bytes;
 use serde_json::Value as JsonValue;
 
 pub(crate) async fn execute_send_web_request(
@@ -28,9 +27,7 @@ pub(crate) async fn execute_send_web_request(
         .header("X-Gradient-Event", event)
         .body(body.clone());
     if let Some(tok) = token {
-        let key =
-            load_secret_bytes(&ctx.db.config.secrets.crypt_file).context("loading crypt key")?;
-        let decrypted = decrypt_action_secret(tok, key.expose())?;
+        let decrypted = decrypt_with_server_key(ctx, tok)?;
         if let Some(signature) = crate::webhooks::sign(decrypted.as_bytes(), body.as_bytes()) {
             req = req.header("X-Gradient-Signature", signature);
         }

@@ -88,15 +88,6 @@ fn default_true() -> bool {
     true
 }
 
-fn action_type_to_str(t: ActionType) -> &'static str {
-    match t {
-        ActionType::SendMail => "send_mail",
-        ActionType::SendWebRequest => "send_web_request",
-        ActionType::GitHostStatusReport => "git_host_status_report",
-        ActionType::OpenPr => "open_pr",
-    }
-}
-
 fn to_response(m: MTaskAction) -> ActionResponse {
     let at = m.action_type;
     let mut config = m.config;
@@ -117,7 +108,7 @@ fn to_response(m: MTaskAction) -> ActionResponse {
     ActionResponse {
         id: m.id,
         name: m.name,
-        action_type: action_type_to_str(at).into(),
+        action_type: at.as_str().into(),
         config,
         events,
         active: m.active,
@@ -193,7 +184,9 @@ pub async fn create_action(
                 return Err(WebError::unprocessable_entity(e.to_string()));
             }
         }
-        ActionConfig::OpenPr { .. } => {}
+        ActionConfig::OpenPr { .. }
+        | ActionConfig::SendMatrixMessage { .. }
+        | ActionConfig::SendSlackMessage { .. } => {}
     }
 
     if let ActionConfig::SendMail { recipients, .. } = &body.config

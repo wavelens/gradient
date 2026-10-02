@@ -114,6 +114,33 @@ impl EventSummary {
         line
     }
 
+    pub(crate) fn plain(&self) -> String {
+        let line = self.headline(str::to_owned);
+        match &self.link {
+            Some(link) => format!("{line}\n{link}"),
+            None => line,
+        }
+    }
+
+    pub(crate) fn html(&self) -> String {
+        let line = self.headline(escape_markup);
+        match &self.link {
+            Some(link) => format!(
+                "{line}<br><a href=\"{}\">View evaluation</a>",
+                escape_markup(link)
+            ),
+            None => line,
+        }
+    }
+
+    pub(crate) fn slack(&self) -> String {
+        let line = self.headline(escape_markup);
+        match &self.link {
+            Some(link) => format!("{line} <{}|View evaluation>", escape_markup(link)),
+            None => line,
+        }
+    }
+
     pub(crate) fn mail_body(&self) -> String {
         format!(
             "{}\n\nEvent: {}\nTime: {}\nLink: {}\n",
@@ -140,6 +167,13 @@ fn status_of(event: &str) -> String {
         .rsplit_once('.')
         .map_or(event, |(_, s)| s)
         .replace('_', " ")
+}
+
+fn escape_markup(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
 }
 
 fn derivation_name(path: &str) -> String {
