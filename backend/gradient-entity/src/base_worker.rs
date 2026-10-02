@@ -19,8 +19,11 @@ pub struct Model {
     #[sea_orm(unique)]
     pub worker_id: String,
     pub token_hash: String,
+    #[serde(skip_serializing)]
+    pub token_encrypted: Option<String>,
     pub url: Option<String>,
     pub display_name: String,
+    pub gradient_ci: bool,
     pub enable_fetch: bool,
     pub enable_eval: bool,
     pub enable_build: bool,

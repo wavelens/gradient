@@ -103,6 +103,21 @@ pub struct WorkerLiveInfo {
     pub draining: bool,
 }
 
+pub(crate) fn encrypt_token(crypt_file: &str, token: &str) -> WebResult<String> {
+    gradient_sources::encrypt_secret(crypt_file, token)
+        .map_err(|e| WebError::internal(format!("encrypting the worker token failed: {e}")))
+}
+
+fn encrypt_for_dialing(
+    crypt_file: &str,
+    url: Option<&str>,
+    token: &str,
+) -> WebResult<Option<String>> {
+    url.filter(|u| !u.trim().is_empty())
+        .map(|_| encrypt_token(crypt_file, token))
+        .transpose()
+}
+
 pub async fn post_project_worker(
     state: State<Arc<ServerState>>,
     Path(project): Path<String>,
@@ -144,12 +159,18 @@ pub async fn post_project_worker(
     };
 
     let token_hash = password_auth::generate_hash(&token);
+    let token_encrypted = encrypt_for_dialing(
+        &state.config.secrets.crypt_file,
+        body.url.as_deref(),
+        &token,
+    )?;
 
     let row = MWorkerRegistration {
         id: WorkerRegistrationId::now_v7(),
         peer_id: project.id,
         worker_id: worker_id_str.clone(),
         token_hash,
+        token_encrypted,
         url: body.url,
         display_name: body.display_name.trim().to_string(),
         active: true,
@@ -687,6 +708,22 @@ mod tests {
             disk_speed_mbps: None,
             network_speed_mbps: None,
         }
+    }
+
+    #[test]
+    fn a_dialed_registration_keeps_its_token_readable_for_the_server() {
+        let crypt = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(crypt.path(), "a-32-byte-crypt-key-for-the-test").unwrap();
+        let path = crypt.path().to_string_lossy().into_owned();
+
+        assert_eq!(encrypt_for_dialing(&path, None, "t1").unwrap(), None);
+        let encrypted = encrypt_for_dialing(&path, Some("wss://w.example/proto"), "t1")
+            .unwrap()
+            .expect("encrypted");
+        assert_eq!(
+            gradient_sources::decrypt_secret(&path, &encrypted).unwrap(),
+            "t1"
+        );
     }
 
     #[test]

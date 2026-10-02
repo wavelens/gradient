@@ -158,10 +158,7 @@ impl<'a> StateApplicator<'a> {
             .map(|w| &w.worker_id)
             .collect();
         let base_workers = base_worker::Entity::find().all(db).await?;
-        for bw in base_workers {
-            if base_worker_ids.contains(&bw.worker_id) {
-                continue;
-            }
+        for bw in removable_base_workers(base_workers, &base_worker_ids) {
             project_base_worker::Entity::delete_many()
                 .filter(project_base_worker::Column::BaseWorker.eq(bw.id))
                 .exec(db)
@@ -175,9 +172,45 @@ impl<'a> StateApplicator<'a> {
     }
 }
 
+fn removable_base_workers(
+    rows: Vec<base_worker::Model>,
+    declared: &HashSet<&String>,
+) -> Vec<base_worker::Model> {
+    rows.into_iter()
+        .filter(|bw| !bw.gradient_ci && !declared.contains(&bw.worker_id))
+        .collect()
+}
+
 #[cfg(test)]
 mod keep_set_tests {
     use super::*;
+
+    #[test]
+    fn a_gradient_ci_base_worker_survives_reconciliation() {
+        let declared_id = "declared".to_string();
+        let declared = HashSet::from([&declared_id]);
+        let rows = vec![
+            base_worker::Model {
+                worker_id: "declared".into(),
+                ..Default::default()
+            },
+            base_worker::Model {
+                worker_id: "connected".into(),
+                gradient_ci: true,
+                ..Default::default()
+            },
+            base_worker::Model {
+                worker_id: "removed".into(),
+                ..Default::default()
+            },
+        ];
+
+        let removable: Vec<String> = removable_base_workers(rows, &declared)
+            .into_iter()
+            .map(|bw| bw.worker_id)
+            .collect();
+        assert_eq!(removable, vec!["removed".to_string()]);
+    }
 
     #[test]
     fn keep_sets_track_inner_name_not_attrset_key() {

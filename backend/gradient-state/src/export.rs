@@ -17,7 +17,7 @@ use gradient_entity::cache_upstream::CacheUpstreamKind;
 use gradient_entity::ids::*;
 use gradient_types::actions::{ActionConfig, ActionType};
 use gradient_types::triggers::{TriggerConfig, TriggerType};
-use sea_orm::{ConnectionTrait, DbErr, EntityTrait};
+use sea_orm::{ColumnTrait, ConnectionTrait, DbErr, EntityTrait, QueryFilter};
 use std::collections::HashMap;
 
 const SECRET_KEYS: &[&str] = &[
@@ -33,7 +33,7 @@ const SECRET_KEYS: &[&str] = &[
 
 /// The snapshot is covering the live system, not only state-managed rows. Rows an operator cannot
 /// hand-author are excluded. These are the `build-request` task, server-managed GitHub integration
-/// rows and the built-in `Admin`/`Write`/`View` roles.
+/// rows, Gradient.CI connections and the built-in `Admin`/`Write`/`View` roles.
 pub async fn export_state<C: ConnectionTrait>(db: &C) -> Result<StateConfiguration, DbErr> {
     let users = gradient_entity::user::Entity::find().all(db).await?;
     let projects = gradient_entity::project::Entity::find().all(db).await?;
@@ -43,9 +43,13 @@ pub async fn export_state<C: ConnectionTrait>(db: &C) -> Result<StateConfigurati
     let cache_roles = gradient_entity::cache_role::Entity::find().all(db).await?;
     let api_keys = gradient_entity::api::Entity::find().all(db).await?;
     let registrations = gradient_entity::worker_registration::Entity::find()
+        .filter(gradient_entity::worker_registration::Column::GradientCi.eq(false))
         .all(db)
         .await?;
-    let base_workers = gradient_entity::base_worker::Entity::find().all(db).await?;
+    let base_workers = gradient_entity::base_worker::Entity::find()
+        .filter(gradient_entity::base_worker::Column::GradientCi.eq(false))
+        .all(db)
+        .await?;
     let base_worker_projects = gradient_entity::project_base_worker::Entity::find()
         .all(db)
         .await?;
