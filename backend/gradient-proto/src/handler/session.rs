@@ -16,9 +16,10 @@ use anyhow::Result;
 use async_trait::async_trait;
 
 use gradient_scheduler::Scheduler;
+use gradient_scheduler::connection_failures::ConnectionDirection;
 use gradient_wire::messages::{GradientCapabilities, ServerMessage};
 use gradient_wire::session::handshake as handshake_fsm;
-use gradient_wire::session::handshake::HandshakeResult;
+use gradient_wire::session::handshake::{HandshakeResult, Rejected};
 use gradient_wire::traits::{AuthOutcome, PeerAuthority};
 
 use super::auth::{
@@ -27,6 +28,7 @@ use super::auth::{
     lookup_registered_peers, negotiate_capabilities,
 };
 use super::dialed::DialedWorkerAuthority;
+use super::failures::{record_dialed, record_unproven, rejection_reason};
 use super::session_actor::SessionArgs;
 use super::sessions::SessionsHandle;
 use super::socket::{HANDSHAKE_TIMEOUT, ProtoSocket, ProtoWriter, send_server_msg};
@@ -85,6 +87,7 @@ impl ProtoSession<Opening> {
             Ok(result) => result,
             Err(e) => {
                 debug!(error = %e, "handshake failed");
+                record_rejection(&self.state, &self.scheduler, origin, &e).await;
                 return None;
             }
         };
@@ -123,6 +126,30 @@ impl ProtoSession<Opening> {
             url: target.url.clone(),
         };
         handshake_fsm::as_dialer(&mut self.socket, &target.credentials, &authority).await
+    }
+}
+
+async fn record_rejection(
+    state: &ServerState,
+    scheduler: &Scheduler,
+    origin: &SessionOrigin,
+    error: &anyhow::Error,
+) {
+    let failures = &scheduler.connection_failures;
+    match (origin, error.downcast_ref::<Rejected>()) {
+        (SessionOrigin::WorkerDialed, Some(rejected)) => {
+            record_unproven(state, failures, rejected).await;
+        }
+        (SessionOrigin::WorkerDialed, None) => {}
+        (SessionOrigin::ServerDialed(target), Some(rejected)) => {
+            record_dialed(failures, &target.credentials.worker_id, rejected);
+        }
+        (SessionOrigin::ServerDialed(target), None) => failures.record(
+            &target.credentials.worker_id,
+            ConnectionDirection::Outbound,
+            false,
+            format!("handshake failed: {error:#}"),
+        ),
     }
 }
 
@@ -223,12 +250,23 @@ impl ProtoSession<Authenticated> {
 
         if scheduler.is_worker_connected(&peer_id).await {
             warn!(%peer_id, "duplicate connection rejected (worker already connected)");
+            let direction = match dialed_url {
+                Some(_) => ConnectionDirection::Outbound,
+                None => ConnectionDirection::Inbound,
+            };
+            scheduler.connection_failures.record(
+                &peer_id,
+                direction,
+                false,
+                rejection_reason(496, "worker already connected"),
+            );
             socket
                 .send_reject(496, "worker already connected".into())
                 .await;
             return None;
         }
 
+        let failures = Arc::clone(&scheduler.connection_failures);
         let authorized_peers: HashSet<ProjectId> = authorized_peers
             .iter()
             .filter_map(|s| s.parse().ok())
@@ -244,7 +282,10 @@ impl ProtoSession<Authenticated> {
         };
 
         match sessions.attach(args).await {
-            Ok((_, join)) => Some(join),
+            Ok((_, join)) => {
+                failures.clear(&peer_id);
+                Some(join)
+            }
             Err(error) => {
                 warn!(%peer_id, %error, "session could not be attached");
                 None
@@ -297,7 +338,7 @@ pub(crate) async fn handle_socket(
 ) {
     let dialed_by_server = matches!(origin, SessionOrigin::ServerDialed(_));
     info!(dialed_by_server, "WebSocket connection opened");
-    let session = ProtoSession::new(socket, state, scheduler);
+    let session = ProtoSession::new(socket, state, Arc::clone(&scheduler));
     let session = match tokio::time::timeout(HANDSHAKE_TIMEOUT, session.handshake(&origin)).await {
         Ok(Some(s)) => s,
         Ok(None) => return,
@@ -306,6 +347,17 @@ pub(crate) async fn handle_socket(
                 timeout_secs = HANDSHAKE_TIMEOUT.as_secs(),
                 dialed_by_server, "WebSocket handshake timed out; dropping connection"
             );
+            if let SessionOrigin::ServerDialed(target) = &origin {
+                scheduler.connection_failures.record(
+                    &target.credentials.worker_id,
+                    ConnectionDirection::Outbound,
+                    false,
+                    format!(
+                        "handshake timed out after {} s",
+                        HANDSHAKE_TIMEOUT.as_secs()
+                    ),
+                );
+            }
             return;
         }
     };

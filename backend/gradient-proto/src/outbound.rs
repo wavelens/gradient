@@ -20,6 +20,7 @@ use tracing::{debug, error, info, warn};
 
 use crate::handler::{SessionOrigin, SessionsHandle, handle_socket};
 use gradient_scheduler::Scheduler;
+use gradient_scheduler::connection_failures::ConnectionDirection;
 
 const DIAL_TIMEOUT: Duration = Duration::from_secs(10);
 const NOT_ENABLED_BY_ANY_PROJECT: &str = "base worker not enabled by any project";
@@ -118,6 +119,12 @@ async fn connect_to_registered_workers(
             PlannedDial::Dial(target) => start_dial(scheduler, sessions, connecting, target).await,
             PlannedDial::Skip { worker_id, reason } => {
                 debug!(%worker_id, %reason, "not dialing worker");
+                scheduler.connection_failures.record(
+                    &worker_id,
+                    ConnectionDirection::Outbound,
+                    false,
+                    reason,
+                );
             }
         }
     }
@@ -269,8 +276,24 @@ async fn dial(scheduler: &Arc<Scheduler>, sessions: &Arc<SessionsHandle>, target
             .await;
             info!(%worker_id, "outbound connection closed");
         }
-        Ok(Err(e)) => error!(%worker_id, %url, error = %e, "outbound connection failed"),
-        Err(_) => error!(%worker_id, %url, "outbound connection timed out (10s)"),
+        Ok(Err(e)) => {
+            error!(%worker_id, %url, error = %e, "outbound connection failed");
+            scheduler.connection_failures.record(
+                &worker_id,
+                ConnectionDirection::Outbound,
+                false,
+                format!("dial failed: {e:#}"),
+            );
+        }
+        Err(_) => {
+            error!(%worker_id, %url, "outbound connection timed out (10s)");
+            scheduler.connection_failures.record(
+                &worker_id,
+                ConnectionDirection::Outbound,
+                false,
+                "dial timed out after 10 s",
+            );
+        }
     }
 }
 

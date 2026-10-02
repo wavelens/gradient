@@ -9,6 +9,7 @@ mod assessment_memo;
 pub mod build;
 pub mod buildability;
 pub mod cluster;
+pub mod connection_failures;
 pub mod eval;
 pub mod history;
 pub mod instance;
@@ -70,6 +71,7 @@ pub struct Scheduler {
     pub(crate) prepared:
         Arc<gradient_util::sync::Mutex<std::collections::HashMap<String, cluster::PreparedMember>>>,
     pub(crate) attempts: Arc<gradient_util::sync::Mutex<cluster::AttemptBook>>,
+    pub connection_failures: Arc<connection_failures::ConnectionFailures>,
 }
 
 impl std::fmt::Debug for Scheduler {
@@ -98,6 +100,7 @@ impl Scheduler {
             cluster_wake: Arc::new(tokio::sync::Notify::new()),
             prepared: Arc::default(),
             attempts: Arc::default(),
+            connection_failures: Arc::default(),
         }
     }
 

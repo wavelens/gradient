@@ -10,6 +10,7 @@ mod cache_consumer;
 mod cache_session;
 mod dialed;
 mod eval_cache;
+mod failures;
 mod inbound;
 mod job_events;
 mod log_lane;
