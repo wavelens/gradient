@@ -51,3 +51,26 @@ async fn config_reflects_configured_permissions() {
     assert_eq!(body["message"]["create_project"], "none");
     assert_eq!(body["message"]["create_cache"], "superusers");
 }
+
+#[tokio::test]
+async fn config_reports_the_ssh_port_when_enabled() {
+    let db = MockDatabase::new(DatabaseBackend::Postgres);
+    let server = make_test_server_configured(db.into_connection(), |cli| {
+        cli.ssh.enable = true;
+        cli.ssh.port = 2200;
+    });
+
+    let body: Value = server.get("/api/v1/config").await.json();
+    assert_eq!(body["message"]["ssh_enabled"], true);
+    assert_eq!(body["message"]["ssh_port"], 2200);
+}
+
+#[tokio::test]
+async fn config_hides_the_ssh_port_when_disabled() {
+    let db = MockDatabase::new(DatabaseBackend::Postgres);
+    let server = make_test_server(db.into_connection());
+
+    let body: Value = server.get("/api/v1/config").await.json();
+    assert_eq!(body["message"]["ssh_enabled"], false);
+    assert!(body["message"]["ssh_port"].is_null());
+}

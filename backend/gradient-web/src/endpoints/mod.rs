@@ -126,6 +126,8 @@ pub struct ServerConfig {
     pub create_project: CreatePermission,
     pub create_cache: CreatePermission,
     pub github_app_enabled: bool,
+    pub ssh_enabled: bool,
+    pub ssh_port: Option<u16>,
 }
 
 pub async fn get_config(
@@ -150,6 +152,8 @@ pub async fn get_config(
             create_project: state.config.permissions.create_project,
             create_cache: state.config.permissions.create_cache,
             github_app_enabled: state.config.github_app.is_some(),
+            ssh_enabled: state.config.ssh.enable,
+            ssh_port: state.config.ssh.enable.then_some(state.config.ssh.port),
         },
     };
 

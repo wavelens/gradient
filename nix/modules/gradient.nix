@@ -1101,6 +1101,34 @@ in {
         };
       };
 
+      ssh = {
+        enable = lib.mkEnableOption "the Nix daemon over SSH for `ssh-ng://` substituters, `nix copy` and `nixos-rebuild --build-host`";
+
+        listenAddress = lib.mkOption {
+          type = lib.types.str;
+          default = cfg.listenAddr;
+          defaultText = lib.literalExpression "config.services.gradient.listenAddr";
+          description = "IP address the SSH server is listening on.";
+        };
+
+        port = lib.mkOption {
+          type = lib.types.port;
+          default = 2222;
+          description = "Port the SSH server is listening on.";
+        };
+
+        hostKeyFile = lib.mkOption {
+          type = lib.types.nullOr lib.types.path;
+          default = null;
+          description = ''
+            File containing the OpenSSH private host key.
+            If unset, an ed25519 key is generated in {option}`services.gradient.baseDir` on first start.
+          '';
+        };
+
+        openFirewall = lib.mkEnableOption "the SSH port in the firewall";
+      };
+
       s3 = {
         enable = lib.mkEnableOption "storing NARs in S3";
         bucket = lib.mkOption {
@@ -1191,6 +1219,8 @@ in {
   };
 
   config = lib.mkIf cfg.enable {
+    networking.firewall.allowedTCPPorts = lib.mkIf (cfg.ssh.enable && cfg.ssh.openFirewall) [ cfg.ssh.port ];
+
     services.gradient = lib.mkIf localWorker {
       state.workers.local = {
         display_name = "Local Worker";
@@ -1314,7 +1344,9 @@ in {
         ] ++ lib.optionals cfg.githubApp.enable [
           "gradient_github_app_private_key:${cfg.githubApp.privateKeyFile}"
           "gradient_github_app_webhook_secret:${cfg.githubApp.webhookSecretFile}"
-        ] ++ lib.optional (cfg.metrics.tokenFile != null)
+        ] ++ lib.optional (cfg.ssh.enable && cfg.ssh.hostKeyFile != null)
+          "gradient_ssh_host_key:${cfg.ssh.hostKeyFile}"
+        ++ lib.optional (cfg.metrics.tokenFile != null)
           "gradient_metrics_token:${cfg.metrics.tokenFile}"
         ++ userPasswordFiles ++ projectPrivateKeyFiles ++ cacheSigningKeyFiles ++ apiKeyFiles
           ++ workerTokenFiles ++ integrationSecretFiles ++ integrationTokenFiles
@@ -1466,6 +1498,12 @@ in {
         GRADIENT_GITHUB_APP_ID = toString cfg.githubApp.id;
         GRADIENT_GITHUB_APP_PRIVATE_KEY_FILE = "%d/gradient_github_app_private_key";
         GRADIENT_GITHUB_APP_WEBHOOK_SECRET_FILE = "%d/gradient_github_app_webhook_secret";
+      } // lib.optionalAttrs cfg.ssh.enable {
+        GRADIENT_SSH_ENABLE = "true";
+        GRADIENT_SSH_LISTEN_ADDRESS = cfg.ssh.listenAddress;
+        GRADIENT_SSH_PORT = toString cfg.ssh.port;
+      } // lib.optionalAttrs (cfg.ssh.enable && cfg.ssh.hostKeyFile != null) {
+        GRADIENT_SSH_HOST_KEY_FILE = "%d/gradient_ssh_host_key";
       } // lib.optionalAttrs (cfg.metrics.tokenFile != null) {
         GRADIENT_METRICS_TOKEN_FILE = "%d/gradient_metrics_token";
       } // lib.optionalAttrs (cfg.metrics.otlp.endpoint != null) {

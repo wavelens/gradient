@@ -10398,7 +10398,7 @@ components:
 
     ServerConfig:
       type: object
-      required: [oidc_enabled, registration_enabled, email_verification_enabled, quic, smtp_enabled, create_project, create_cache, github_app_enabled]
+      required: [oidc_enabled, registration_enabled, email_verification_enabled, quic, smtp_enabled, create_project, create_cache, github_app_enabled, ssh_enabled]
       properties:
         oidc_enabled:
           type: boolean
@@ -10429,6 +10429,13 @@ components:
         github_app_enabled:
           type: boolean
           description: Whether a GitHub App is configured (app id, private key and webhook secret)
+        ssh_enabled:
+          type: boolean
+          description: Whether the Nix daemon over SSH (`ssh-ng://`) is enabled
+        ssh_port:
+          type: integer
+          nullable: true
+          description: Port of the SSH server, `null` when SSH is disabled
     # ── Auth ─────────────────────────────────────────────────────────────────
 
     MakeLoginRequest:
