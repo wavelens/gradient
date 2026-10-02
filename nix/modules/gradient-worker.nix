@@ -161,6 +161,20 @@ in {
       '';
     };
 
+    acceptedServerTokensFile = lib.mkOption {
+      type = lib.types.nullOr lib.types.path;
+      default = null;
+      description = ''
+        File of token hashes a server must present when it is dialing this worker, one
+        `peer_id:hash` per line. Lines starting with `#` are ignored. A hash is an argon2 PHC
+        string or the lowercase SHA-256 hex digest of the token, for example from
+        {command}`printf %s "$TOKEN" | sha256sum`. The peer ID `*` is matching any peer. The file
+        is only read with {option}`services.gradient.worker.discoverable`.
+
+        `null` is accepting every server, and the worker is logging a warning at start.
+      '';
+    };
+
     drainTimeoutSecs = lib.mkOption {
       type = lib.types.ints.unsigned;
       default = 60;
@@ -510,6 +524,8 @@ in {
           WorkingDirectory = cfg.baseDir;
           LoadCredential = lib.optionals (cfg.peersFile != null) [
             "gradient_worker_peers:${cfg.peersFile}"
+          ] ++ lib.optionals (cfg.acceptedServerTokensFile != null) [
+            "gradient_worker_accepted_server_tokens:${cfg.acceptedServerTokensFile}"
           ];
         };
 
@@ -548,6 +564,8 @@ in {
           GRADIENT_WORKER_SERVER_URL = cfg.serverUrl;
         } // lib.optionalAttrs (cfg.peersFile != null) {
           GRADIENT_WORKER_PEERS_FILE = "%d/gradient_worker_peers";
+        } // lib.optionalAttrs (cfg.acceptedServerTokensFile != null) {
+          GRADIENT_WORKER_ACCEPTED_SERVER_TOKENS_FILE = "%d/gradient_worker_accepted_server_tokens";
         } // lib.optionalAttrs (cfg.id != null) {
           GRADIENT_WORKER_ID = cfg.id;
         } // lib.optionalAttrs (cfg.zone != null) {

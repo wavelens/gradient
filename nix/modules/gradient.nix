@@ -362,6 +362,21 @@ in {
         enable = lib.mkEnableOption "self-service user registration" // { default = true; };
       };
 
+      gradientCi = {
+        enable = lib.mkEnableOption "the Gradient.CI Servers offer on the workers pages" // { default = true; };
+
+        url = lib.mkOption {
+          type = lib.types.str;
+          default = "https://servers.gradient.ci";
+          example = "http://localhost:3200";
+          description = ''
+            Address of Gradient.CI Servers. "Connect" is opening `<url>/connect`, and a new
+            connection is dialing the host and port of this address at `/proto`, over `wss://`
+            for `https://` and `ws://` for `http://`.
+          '';
+        };
+      };
+
       sentry = {
         enable = lib.mkEnableOption "error reporting to Sentry";
 
@@ -1376,6 +1391,8 @@ in {
         GRADIENT_PERMISSIONS_CREATE_PROJECT = cfg.permissions.createProject;
         GRADIENT_PERMISSIONS_CREATE_CACHE = cfg.permissions.createCache;
         GRADIENT_REGISTRATION_ENABLE = lib.boolToString cfg.registration.enable;
+        GRADIENT_GRADIENT_CI_ENABLE = lib.boolToString cfg.gradientCi.enable;
+        GRADIENT_GRADIENT_CI_URL = cfg.gradientCi.url;
         GRADIENT_SENTRY_ENABLE = lib.boolToString cfg.sentry.enable;
         GRADIENT_DATABASE_URL_FILE = "%d/gradient_database_url";
         GRADIENT_DATABASE_MAX_CONNECTIONS = toString cfg.database.maxConnections;

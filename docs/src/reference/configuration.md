@@ -108,6 +108,13 @@ Declarative entities under `services.gradient.state` are in the [state reference
 | `githubApp.privateKeyFile` | path | - | - | File containing the GitHub App's RS256 private key in PEM format. |
 | `githubApp.webhookSecretFile` | path | - | - | File containing the secret for verifying GitHub App webhook payloads. |
 
+## `gradientCi`
+
+| Option | Type | Default | Env | Description |
+|---|---|---|---|---|
+| `gradientCi.enable` | bool | `true` | `GRADIENT_GRADIENT_CI_ENABLE` | Whether to enable the Gradient.CI Servers offer on the workers pages. Existing connections keep working when the offer is off. See [Connect Gradient.CI Servers](../guides/gradient-ci-servers.md). |
+| `gradientCi.url` | string | `"https://servers.gradient.ci"` | `GRADIENT_GRADIENT_CI_URL` | Address of Gradient.CI Servers. "Connect" is opening `<url>/connect`, and a new connection is dialing the host of this address at `/proto`. |
+
 ## `http`
 
 | Option | Type | Default | Env | Description |
@@ -298,6 +305,7 @@ Declarative entities under `services.gradient.state` are in the [state reference
 
 | Option | Type | Default | Env | Description |
 |---|---|---|---|---|
+| `worker.acceptedServerTokensFile` | null or path | `null` | - | File of token hashes a dialing server must present, one `peer_id:hash` per line. A hash is an argon2 PHC string or the SHA-256 hex digest from `printf %s "$TOKEN" \| sha256sum`. `null` is accepting every server. |
 | `worker.baseDir` | path | `"/var/lib/gradient-worker"` | `GRADIENT_WORKER_BASE_DIR` | Directory holding the worker's state. |
 | `worker.discoverable` | bool | `false` | `GRADIENT_WORKER_DISCOVERABLE` | Whether to enable incoming server connections on `/proto`. |
 | `worker.domain` | string | `""` | - | Domain of the worker's reverse proxy virtual host. |
