@@ -15,6 +15,8 @@ clause (lib.all (name: topology.nodes ? ${name}) (lib.attrNames workers)) "every
 && clause (!(topology.nodes ? server)) "the suite owns the server node"
 && clause (!(topology.nodes ? client)) "the e2e suite owns the client node"
 && clause (lib.isAttrs topology.upstreamPeers && lib.all lib.isString (lib.attrValues topology.upstreamPeers)) "upstreamPeers maps names to worker ids"
+&& clause (lib.all lib.isString (lib.attrValues (topology.upstreamUrls or { }))) "upstreamUrls maps names to URLs the server dials"
+&& clause (lib.all (name: topology.upstreamPeers ? ${name}) (lib.attrNames (topology.upstreamUrls or { }))) "every upstreamUrls name is an upstream peer"
 && clause (lib.isList topology.provides) "provides is a list of tags"
 && clause (lib.hasInfix "def wait_workers_ready(" topology.pythonPrelude) "the prelude defines wait_workers_ready"
 && clause (lib.hasInfix "def fleet_units(" topology.pythonPrelude) "the prelude defines fleet_units"

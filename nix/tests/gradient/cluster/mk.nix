@@ -83,6 +83,7 @@ pkgs.testers.runNixOSTest {
     server = import ../scheduler/server.nix {
       inherit lib pkgs storeSpec upstream specNames workerToken;
       inherit (topo) upstreamPeers;
+      upstreamUrls = topo.upstreamUrls or { };
     };
   } // topo.nodes;
 

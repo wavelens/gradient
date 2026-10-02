@@ -221,11 +221,12 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
               };
             };
 
-            workers = lib.mapAttrs (_: id: {
+            workers = lib.mapAttrs (name: id: {
               worker_id = id;
               projects = [ "project" ];
               token_file = "/etc/gradient/secrets/worker_token";
               created_by = "admin";
+              url = (topo.upstreamUrls or { }).${name} or null;
             }) topo.upstreamPeers;
           };
         };

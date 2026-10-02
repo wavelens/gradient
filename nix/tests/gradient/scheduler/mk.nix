@@ -76,6 +76,7 @@ let
   serverNode = import ./server.nix {
     inherit lib pkgs storeSpec upstream specNames workerToken;
     inherit (topo) upstreamPeers;
+    upstreamUrls = topo.upstreamUrls or { };
   };
 in
 assert import ../../harness/contract.nix { inherit lib; topology = topo; workers = workerIds; };

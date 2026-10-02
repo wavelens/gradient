@@ -143,13 +143,14 @@ Every reference is inside the runtime closure of the requested inputs, as in Nix
 
 The scheduler and e2e suites are `mk.nix { self, pkgs, topology }`. Their `default.nix` is passing `nix/tests/harness/topologies/direct.nix`. The flake is exporting both as `lib.tests.{scheduler,e2e} { system, topology }` for other repositories.
 
-- A topology is `{ pkgs, lib, workers, token, ... }: { nodes, upstreamPeers, workerNodes, provides, pythonPrelude }`.
+- A topology is `{ pkgs, lib, workers, token, ... }: { nodes, upstreamPeers, upstreamUrls?, workerNodes, provides, pythonPrelude }`.
+- The optional `upstreamUrls` is mapping each upstream peer the server is dialing to its URL.
 - The suite is owning the `server` node (e2e also `client`) and each worker's role. The topology is owning how workers reach the server and the IDs registered by the server.
 - `nix/tests/harness/contract.nix` (`lib.tests.contract`) is asserted at evaluation. `check.nix` (the `test-topologies` check) is pinning the direct topology.
 - Scripts use the prelude, never a hardcoded unit or ID: `WORKER_NODES`, `wait_workers_ready()`, `fleet_units()`, `requires(what, *tags)`.
 - Some assertions need the server to see each worker directly. These go under `requires(..., "distinct-upstream-workers")`.
 - The gate is placed on the assertion, not the phase, when later phases need the state.
-- The proxy repository is running both suites over its `proxied` topology as `scheduler-proxied` and `e2e-proxied`.
+- The proxy repository is running both suites over its `proxied` and `server-dials` topologies as `scheduler-proxied`, `e2e-proxied`, `scheduler-server-dials` and `e2e-server-dials`.
 
 ## Conventions
 
