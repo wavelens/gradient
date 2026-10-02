@@ -33,21 +33,65 @@
   @if (loading()) {
     <gr-loading-spinner message="Loading workers..." />
   } @else {
-    @if (workers().length === 0) {
-      <gr-empty-state icon="construction" title="No workers registered">
-        <p>Register a <code>gradient-worker</code> to run builds for this project.</p>
-        <button slot="action"
-          *appWritable="access()"
-          grButton
-          label="Register Worker"
-          icon="add"
-          (click)="openRegisterDialog()"
-          [appManagedDisable]="access()"
-          ></button>
-      </gr-empty-state>
+    @if (gradientCi().state !== 'hidden') {
+      <gr-row-list data-testid="gradient-ci-entry">
+        <gr-row icon="cloud">
+          Gradient.CI Servers
+          <div slot="meta">
+            @if (gradientCi().worker; as w) {
+              <div class="worker-id">{{ w.worker_id }}</div>
+              @if (gradientCi().state === 'connected' && !w.connected && w.last_error && access().canEdit) {
+                <div class="worker-last-error text-secondary">{{ w.last_error.reason }}</div>
+              }
+            } @else {
+              <div class="text-secondary">Build workers from {{ config.gradientCiUrl }}</div>
+            }
+          </div>
+          <div slot="actions">
+            @switch (gradientCi().state) {
+              @case ('connect') {
+                <button *appWritable="access()" grButton label="Connect" icon="link" size="small" (click)="showGradientCiConnect.set(true)"></button>
+              }
+              @case ('enable') {
+                @if (gradientCi().worker; as w) {
+                  <button *appWritable="access()" grButton label="Enable" icon="play_arrow" severity="success" size="small"
+                    [loading]="togglingId() === w.worker_id" (click)="setGradientCiEnabled(w, true)"></button>
+                }
+              }
+              @case ('connected') {
+                @if (gradientCi().worker; as w) {
+                  <gr-badge [severity]="w.connected ? 'success' : 'neutral'">{{ w.connected ? 'Connected' : 'Offline' }}</gr-badge>
+                  @if (w.is_base) {
+                    <button *appWritable="access()" grButton label="Disable" icon="pause" severity="warn" size="small"
+                      [loading]="togglingId() === w.worker_id" (click)="setGradientCiEnabled(w, false)"></button>
+                  } @else {
+                    <button *appWritable="access()" grButton label="Disconnect" icon="link_off" severity="danger" size="small"
+                      (click)="showGradientCiDisconnect.set(true)"></button>
+                  }
+                }
+              }
+            }
+          </div>
+        </gr-row>
+      </gr-row-list>
+    }
+    @if (otherWorkers().length === 0) {
+      @if (gradientCi().state !== 'connected') {
+        <gr-empty-state icon="construction" title="No workers registered">
+          <p>Register a <code>gradient-worker</code> to run builds for this project.</p>
+          <button slot="action"
+            *appWritable="access()"
+            grButton
+            label="Register Worker"
+            icon="add"
+            (click)="openRegisterDialog()"
+            [appManagedDisable]="access()"
+            ></button>
+        </gr-empty-state>
+      }
     } @else {
       <gr-row-list>
-        @for (worker of workers(); track worker.worker_id) {
+        @for (worker of otherWorkers(); track worker.worker_id) {
           <gr-row icon="construction">
             {{ worker.display_name }}
             <div slot="meta">
@@ -61,6 +105,9 @@
                   <span class="gate-pill" [class.gate-on]="worker.enable_eval" [class.gate-off]="!worker.enable_eval">eval</span>
                   <span class="gate-pill" [class.gate-on]="worker.enable_build" [class.gate-off]="!worker.enable_build">build</span>
                 </div>
+                @if (!worker.connected && worker.last_error && access().canEdit) {
+                  <div class="worker-last-error text-secondary">{{ worker.last_error.reason }}</div>
+                }
                 @if (worker.live) {
                   <div class="worker-caps">
                     @for (cap of capLabels; track cap.key) {
@@ -392,5 +439,29 @@
       [loading]="renaming()"
       [disabled]="renaming() || !newName.trim()"
     ></button>
+  </div>
+</gr-dialog>
+
+<!-- Gradient.CI Servers -->
+<app-gradient-ci-connect
+  [(visible)]="showGradientCiConnect"
+  scope="project"
+  [project]="projectName"
+  [label]="gradientCiLabel"
+  [statusOf]="statusOf"
+  (changed)="loadWorkers()"
+/>
+
+<gr-dialog header="Disconnect Gradient.CI Servers" [(visible)]="showGradientCiDisconnect" width="440px">
+  <p>Builds of this project stop running on Gradient.CI Servers.</p>
+  <p class="text-secondary">
+    The key stays on servers.gradient.ci until it is deleted on its
+    <a [href]="gradientCiKeysUrl" target="_blank" rel="noopener">keys page</a>.
+  </p>
+  <div grDialogFooter>
+    <button grButton label="Cancel" severity="secondary" (click)="showGradientCiDisconnect.set(false)"></button>
+    @if (gradientCi().worker; as w) {
+      <button grButton label="Disconnect" icon="link_off" severity="danger" (click)="disconnectGradientCi(w)"></button>
+    }
   </div>
 </gr-dialog>

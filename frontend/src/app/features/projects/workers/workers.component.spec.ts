@@ -14,6 +14,7 @@ import { WorkersComponent } from './workers.component';
 import { WorkersService } from '@core/services/workers.service';
 import { ProjectsService } from '@core/services/projects.service';
 import { ProjectAccessService } from '@core/services/project-access.service';
+import { ConfigService } from '@core/services/config.service';
 import { AccessState } from '@core/models/access.model';
 import { Worker } from '@core/models/worker.model';
 
@@ -70,6 +71,7 @@ function setup(opts: {
   workers: Worker[];
   caches: { id: string; name: string }[];
   testWorker?: ReturnType<typeof vi.fn>;
+  gradientCi?: boolean;
 }) {
   const workersService = {
     getWorkers: vi.fn(() => of(opts.workers)),
@@ -89,6 +91,10 @@ function setup(opts: {
       { provide: ProjectsService, useValue: projects },
       { provide: ProjectAccessService, useValue: { forProject: () => Promise.resolve(opts.access) } },
       { provide: ActivatedRoute, useValue: activatedRouteStub() },
+      {
+        provide: ConfigService,
+        useValue: { gradientCiEnabled: opts.gradientCi ?? true, gradientCiUrl: 'https://servers.gradient.ci' },
+      },
     ],
   });
   return TestBed.createComponent(WorkersComponent);
@@ -258,5 +264,101 @@ describe('WorkersComponent - connection badge', () => {
     });
     await settled(fixture);
     expect(badges(fixture)).toContain('Connected');
+  });
+});
+
+function buttonsLabelled(root: Element, label: string): HTMLButtonElement[] {
+  return (Array.from(root.querySelectorAll('button')) as HTMLButtonElement[]).filter(
+    (b) => b.querySelector('.gr-button__label')?.textContent?.trim() === label,
+  );
+}
+
+function entry(fixture: ComponentFixture<WorkersComponent>): HTMLElement | null {
+  return (fixture.nativeElement as HTMLElement).querySelector('[data-testid="gradient-ci-entry"]');
+}
+
+const gciRegistration: Worker = {
+  worker_id: 'g1',
+  display_name: 'Gradient.CI Servers',
+  managed: false,
+  active: true,
+  is_base: false,
+  gradient_ci: true,
+  connected: false,
+  last_error: {
+    reason: '401 unknown worker id or wrong token',
+    at: '2026-10-02T12:00:00',
+    direction: 'outbound',
+    before_auth: false,
+  },
+  enable_fetch: false,
+  enable_eval: true,
+  enable_build: true,
+};
+
+const gciBase: Worker = { ...gciRegistration, worker_id: 'g2', is_base: true, active: false, last_error: undefined };
+const writable: AccessState = { managed: false, canEdit: true, canTrigger: true };
+const caches = [{ id: 'c', name: 'c' }];
+
+describe('WorkersComponent - Gradient.CI Servers entry', () => {
+  it('offers Connect when nothing is connected', async () => {
+    const fixture = setup({ access: writable, workers: [], caches });
+    await settled(fixture);
+    expect(buttonsLabelled(entry(fixture)!, 'Connect').length).toBe(1);
+  });
+
+  it('offers Enable for an instance base server not enabled here', async () => {
+    const fixture = setup({ access: writable, workers: [gciBase], caches });
+    await settled(fixture);
+    expect(buttonsLabelled(entry(fixture)!, 'Enable').length).toBe(1);
+    expect(buttonsLabelled(entry(fixture)!, 'Connect').length).toBe(0);
+  });
+
+  it('shows a project connection with its offline reason and Disconnect', async () => {
+    const fixture = setup({ access: writable, workers: [gciRegistration], caches });
+    await settled(fixture);
+    expect(entry(fixture)!.textContent).toContain('401 unknown worker id or wrong token');
+    expect(buttonsLabelled(entry(fixture)!, 'Disconnect').length).toBe(1);
+  });
+
+  it('shows an enabled base server with Disable', async () => {
+    const fixture = setup({ access: writable, workers: [{ ...gciBase, active: true }], caches });
+    await settled(fixture);
+    expect(buttonsLabelled(entry(fixture)!, 'Disable').length).toBe(1);
+  });
+
+  it('hides the entry when the option is off and nothing is connected', async () => {
+    const fixture = setup({ access: writable, workers: [gciBase], caches, gradientCi: false });
+    await settled(fixture);
+    expect(entry(fixture)).toBeNull();
+  });
+
+  it('keeps an existing connection listed when the option is off', async () => {
+    const fixture = setup({ access: writable, workers: [gciRegistration], caches, gradientCi: false });
+    await settled(fixture);
+    expect(buttonsLabelled(entry(fixture)!, 'Disconnect').length).toBe(1);
+    expect(buttonsLabelled(entry(fixture)!, 'Connect').length).toBe(0);
+  });
+
+  it('shows the state but no Connect to read-only members', async () => {
+    const fixture = setup({ access: { managed: false, canEdit: false, canTrigger: false }, workers: [], caches });
+    await settled(fixture);
+    expect(entry(fixture)).not.toBeNull();
+    expect(buttonsLabelled(entry(fixture)!, 'Connect').length).toBe(0);
+  });
+
+  it('shows the last failure under an offline registered worker', async () => {
+    const offline: Worker = {
+      ...workerUnmanaged,
+      last_error: {
+        reason: 'dial timed out after 10 s',
+        at: '2026-10-02T12:00:00',
+        direction: 'outbound',
+        before_auth: false,
+      },
+    };
+    const fixture = setup({ access: writable, workers: [offline], caches });
+    await settled(fixture);
+    expect((fixture.nativeElement as HTMLElement).textContent).toContain('dial timed out after 10 s');
   });
 });
