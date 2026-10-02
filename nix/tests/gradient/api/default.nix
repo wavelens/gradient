@@ -37,6 +37,7 @@ in {
           curl
           jq
           gradient-cli
+          openssh
         ];
 
         services = {
@@ -51,6 +52,7 @@ in {
             # The value is below the per-task default.
             # A new task must start at this maximum rather than above it (#561).
             eval.maxKeep = 5;
+            ssh.enable = true;
 
             state = {
               users = {

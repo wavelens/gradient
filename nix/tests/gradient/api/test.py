@@ -616,6 +616,25 @@ api("GET", "projects/stateproject", token=state_key)  # viewProject granted -> a
 api("PATCH", "projects/stateproject", token=state_key, expect_error=True,
     body=json.dumps({"display_name": "hijack"}))  # mask lacks ManageProjectSettings
 
+# ── Phase 8e: ssh-ng ─────────────────────────────────────────────────────────
+banner("Phase 8e: ssh-ng")
+machine.wait_for_open_port(2222)
+pub = machine.succeed(
+    "mkdir -p /root/.ssh && ssh-keygen -q -t ed25519 -N '' -f /root/.ssh/gradient && cat /root/.ssh/gradient.pub"
+).strip()
+api("POST", "user/ssh-keys", token=token, body=json.dumps({"name": "vm", "public_key": pub}))
+api("POST", "user/ssh-keys", token=token, expect_error=True,
+    body=json.dumps({"name": "again", "public_key": pub}))  # one key, one user
+ssh = "ssh -p 2222 -i /root/.ssh/gradient -o StrictHostKeyChecking=no -o BatchMode=yes"
+machine.succeed(
+    f"NIX_SSHOPTS='-p 2222 -i /root/.ssh/gradient -o StrictHostKeyChecking=no' "
+    "nix --extra-experimental-features nix-command store info --store ssh-ng://myproject@localhost"
+)
+refused = machine.fail(f"{ssh} myproject@localhost nix-store --serve --write 2>&1")
+assert "ssh-ng://" in refused, refused
+machine.fail(f"{ssh} unknownproject@localhost nix-daemon --stdio < /dev/null")
+assert api("GET", "user/ssh-keys", token=token)[0]["last_used_at"] is not None
+
 # ── Phase 9: logout ───────────────────────────────────────────────────────────
 banner("Phase 9: logout")
 api("POST", "auth/logout", token=token)
