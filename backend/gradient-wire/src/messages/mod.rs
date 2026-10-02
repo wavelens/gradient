@@ -22,7 +22,7 @@ pub use crate::types::{
 pub use client::{ArchivedClientMessage, ClientMessage};
 pub use server::{ArchivedServerMessage, FailedPeer, ServerMessage};
 
-pub const PROTO_VERSION: u16 = 23;
+pub const PROTO_VERSION: u16 = 24;
 
 pub const BUILD_PROGRESS_INTERVAL: std::time::Duration = std::time::Duration::from_secs(5);
 

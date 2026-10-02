@@ -156,6 +156,11 @@ pub enum ServerMessage {
         request_id: u64,
         outcome: UploadOutcome,
     },
+    Authenticate {
+        version: u16,
+        worker_id: String,
+        tokens: Vec<(String, String)>,
+    },
 }
 
 impl ServerMessage {
@@ -200,6 +205,14 @@ impl ServerMessage {
             ServerMessage::CacheError { .. } => "CacheError",
             ServerMessage::UploadGrant { .. } => "UploadGrant",
             ServerMessage::UploadCommitted { .. } => "UploadCommitted",
+            ServerMessage::Authenticate { .. } => "Authenticate",
         }
+    }
+
+    pub fn carries_secret(&self) -> bool {
+        matches!(
+            self,
+            ServerMessage::Authenticate { .. } | ServerMessage::Credential { .. }
+        )
     }
 }

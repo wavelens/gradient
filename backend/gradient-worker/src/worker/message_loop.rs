@@ -338,7 +338,7 @@ impl MessageLoopState {
                 warn!(code, %reason, "server refused the session");
                 self.refused = true;
             }
-            ServerMessage::InitAck { .. } => {
+            ServerMessage::InitAck { .. } | ServerMessage::Authenticate { .. } => {
                 warn!("unexpected handshake message in dispatch loop - ignoring");
             }
             ServerMessage::AuthChallenge { peers } => {
