@@ -6,6 +6,7 @@
 
 use std::collections::HashSet;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use gradient_core::ServerState;
 use gradient_types::ids::ProjectId;
@@ -27,8 +28,8 @@ use super::auth::{
     filter_project_peers_without_cache, has_any_registrations, lookup_base_worker_challenge,
     lookup_registered_peers, negotiate_capabilities,
 };
-use super::dialed::DialedWorkerAuthority;
-use super::failures::{record_dialed, record_unproven, rejection_reason};
+use super::dialed::{DialedSession, DialedWorkerAuthority};
+use super::failures::{record_dialed, record_inbound};
 use super::session_actor::SessionArgs;
 use super::sessions::SessionsHandle;
 use super::socket::{HANDSHAKE_TIMEOUT, ProtoSocket, ProtoWriter, send_server_msg};
@@ -41,10 +42,13 @@ pub(crate) enum SessionOrigin {
 }
 
 impl SessionOrigin {
-    fn dialed_url(&self) -> Option<String> {
+    fn dialed_session(&self) -> Option<DialedSession> {
         match self {
             SessionOrigin::WorkerDialed => None,
-            SessionOrigin::ServerDialed(target) => Some(target.url.clone()),
+            SessionOrigin::ServerDialed(target) => Some(DialedSession {
+                url: target.url.clone(),
+                token_projects: target.token_projects.clone(),
+            }),
         }
     }
 }
@@ -55,7 +59,7 @@ pub(super) struct Authenticated {
     pub peer_id: String,
     pub negotiated: GradientCapabilities,
     pub authorized_peers: Vec<String>,
-    pub dialed_url: Option<String>,
+    pub dialed: Option<DialedSession>,
 }
 
 pub(super) struct ProtoSession<S> {
@@ -87,7 +91,6 @@ impl ProtoSession<Opening> {
             Ok(result) => result,
             Err(e) => {
                 debug!(error = %e, "handshake failed");
-                record_rejection(&self.state, &self.scheduler, origin, &e).await;
                 return None;
             }
         };
@@ -101,7 +104,7 @@ impl ProtoSession<Opening> {
                 peer_id: result.peer_id,
                 negotiated: result.negotiated,
                 authorized_peers: result.authorized_peers,
-                dialed_url: origin.dialed_url(),
+                dialed: origin.dialed_session(),
             },
         })
     }
@@ -116,45 +119,45 @@ impl ProtoSession<Opening> {
 
         let authority = ServerAuthority {
             state: Arc::clone(&self.state),
+            proven: AtomicBool::new(false),
         };
-        handshake_fsm::as_authority(&mut self.socket, &authority).await
+        let outcome = handshake_fsm::as_authority(&mut self.socket, &authority).await;
+        if let Err(error) = &outcome
+            && let Some(rejected) = error.downcast_ref::<Rejected>()
+        {
+            let before_auth = !authority.proven.load(Ordering::Relaxed);
+            let failures = &self.scheduler.connection_failures;
+            record_inbound(&self.state, failures, rejected, before_auth).await;
+        }
+
+        outcome
     }
 
     async fn dial_worker(&mut self, target: &DialTarget) -> Result<HandshakeResult> {
         let authority = DialedWorkerAuthority {
             state: Arc::clone(&self.state),
-            url: target.url.clone(),
+            session: DialedSession {
+                url: target.url.clone(),
+                token_projects: target.token_projects.clone(),
+            },
         };
-        handshake_fsm::as_dialer(&mut self.socket, &target.credentials, &authority).await
-    }
-}
+        let outcome =
+            handshake_fsm::as_dialer(&mut self.socket, &target.credentials, &authority).await;
+        if let Err(error) = &outcome {
+            record_dialed(
+                &self.scheduler.connection_failures,
+                &target.credentials.worker_id,
+                error,
+            );
+        }
 
-async fn record_rejection(
-    state: &ServerState,
-    scheduler: &Scheduler,
-    origin: &SessionOrigin,
-    error: &anyhow::Error,
-) {
-    let failures = &scheduler.connection_failures;
-    match (origin, error.downcast_ref::<Rejected>()) {
-        (SessionOrigin::WorkerDialed, Some(rejected)) => {
-            record_unproven(state, failures, rejected).await;
-        }
-        (SessionOrigin::WorkerDialed, None) => {}
-        (SessionOrigin::ServerDialed(target), Some(rejected)) => {
-            record_dialed(failures, &target.credentials.worker_id, rejected);
-        }
-        (SessionOrigin::ServerDialed(target), None) => failures.record(
-            &target.credentials.worker_id,
-            ConnectionDirection::Outbound,
-            false,
-            format!("handshake failed: {error:#}"),
-        ),
+        outcome
     }
 }
 
 struct ServerAuthority {
     state: Arc<ServerState>,
+    proven: AtomicBool,
 }
 
 struct ServerChallenge {
@@ -193,6 +196,8 @@ impl PeerAuthority for ServerAuthority {
             registered_peers,
         } = challenge;
         let (token_authorized, mut failed_peers) = validate_tokens(&registered_peers, tokens);
+        self.proven
+            .store(!token_authorized.is_empty(), Ordering::Relaxed);
         let token_authorized = expand_base_authorized(&base, token_authorized);
 
         let had_token_authorized = !token_authorized.is_empty();
@@ -244,22 +249,12 @@ impl ProtoSession<Authenticated> {
                     peer_id,
                     negotiated,
                     authorized_peers,
-                    dialed_url,
+                    dialed,
                 },
         } = self;
 
         if scheduler.is_worker_connected(&peer_id).await {
             warn!(%peer_id, "duplicate connection rejected (worker already connected)");
-            let direction = match dialed_url {
-                Some(_) => ConnectionDirection::Outbound,
-                None => ConnectionDirection::Inbound,
-            };
-            scheduler.connection_failures.record(
-                &peer_id,
-                direction,
-                false,
-                rejection_reason(496, "worker already connected"),
-            );
             socket
                 .send_reject(496, "worker already connected".into())
                 .await;
@@ -278,7 +273,7 @@ impl ProtoSession<Authenticated> {
             socket,
             capabilities: negotiated,
             authorized_peers,
-            dialed_url,
+            dialed,
         };
 
         match sessions.attach(args).await {
@@ -511,5 +506,42 @@ mod auth_decision_tests {
             decide_auth(false, false, false, false, true),
             AuthDecision::Accept
         );
+    }
+}
+
+#[cfg(test)]
+mod authority_tests {
+    use super::*;
+    use gradient_entity::project::Model as ProjectModel;
+    use gradient_entity::project_cache::Model as ProjectCacheModel;
+    use sea_orm::{DatabaseBackend, MockDatabase};
+
+    const SHA256_OF_T1: &str = "628b49d96dcde97a430dd4f597705899e09a968f793491e4b704cae33a40dc02";
+
+    #[tokio::test]
+    async fn a_rejection_after_a_valid_token_counts_as_proven() {
+        let project = ProjectId::now_v7();
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([vec![ProjectModel {
+                id: project,
+                ..Default::default()
+            }]])
+            .append_query_results([Vec::<ProjectCacheModel>::new()]);
+        let authority = ServerAuthority {
+            state: gradient_test_support::prelude::test_state(db.into_connection()),
+            proven: AtomicBool::new(false),
+        };
+        let challenge = ServerChallenge {
+            base: None,
+            registered_peers: vec![(project.to_string(), SHA256_OF_T1.into())],
+        };
+
+        let outcome = authority
+            .authorize("w1", challenge, &[(project.to_string(), "t1".into())])
+            .await
+            .unwrap();
+
+        assert!(matches!(outcome, AuthOutcome::Reject { code: 495, .. }));
+        assert!(authority.proven.load(Ordering::Relaxed));
     }
 }

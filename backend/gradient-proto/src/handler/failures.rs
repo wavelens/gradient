@@ -10,14 +10,15 @@ use gradient_wire::session::handshake::Rejected;
 
 use super::auth::has_any_registrations;
 
-pub(super) fn rejection_reason(code: u16, reason: &str) -> String {
+fn rejection_reason(code: u16, reason: &str) -> String {
     format!("{code} {reason}")
 }
 
-pub(super) async fn record_unproven(
+pub(super) async fn record_inbound(
     state: &ServerState,
     failures: &ConnectionFailures,
     rejected: &Rejected,
+    before_auth: bool,
 ) {
     let Some(claimed) = rejected.claimed.as_deref() else {
         return;
@@ -29,18 +30,17 @@ pub(super) async fn record_unproven(
     failures.record(
         claimed,
         ConnectionDirection::Inbound,
-        true,
+        before_auth,
         rejection_reason(rejected.code, &rejected.reason),
     );
 }
 
-pub(super) fn record_dialed(failures: &ConnectionFailures, worker_id: &str, rejected: &Rejected) {
-    failures.record(
-        worker_id,
-        ConnectionDirection::Outbound,
-        false,
-        rejection_reason(rejected.code, &rejected.reason),
-    );
+pub(super) fn record_dialed(failures: &ConnectionFailures, worker_id: &str, error: &anyhow::Error) {
+    let reason = match error.downcast_ref::<Rejected>() {
+        Some(rejected) => rejection_reason(rejected.code, &rejected.reason),
+        None => format!("handshake failed: {error:#}"),
+    };
+    failures.record(worker_id, ConnectionDirection::Outbound, false, reason);
 }
 
 async fn is_registered(state: &ServerState, worker_id: &str) -> bool {
@@ -64,6 +64,15 @@ mod tests {
         }
     }
 
+    fn registered_worker() -> MockDatabase {
+        MockDatabase::new(DatabaseBackend::Postgres).append_query_results([vec![
+            worker_registration::Model {
+                worker_id: "w1".into(),
+                ..Default::default()
+            },
+        ]])
+    }
+
     #[tokio::test]
     async fn an_unregistered_claim_leaves_no_trace() {
         let db = MockDatabase::new(DatabaseBackend::Postgres)
@@ -73,23 +82,18 @@ mod tests {
         let state = gradient_test_support::prelude::test_state(db);
         let failures = ConnectionFailures::default();
 
-        record_unproven(&state, &failures, &rejected("intruder")).await;
+        record_inbound(&state, &failures, &rejected("intruder"), true).await;
 
         assert_eq!(failures.last("intruder"), None);
     }
 
     #[tokio::test]
     async fn a_registered_claim_records_a_failure_before_auth() {
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
-            .append_query_results([vec![worker_registration::Model {
-                worker_id: "w1".into(),
-                ..Default::default()
-            }]])
-            .into_connection();
-        let state = gradient_test_support::prelude::test_state(db);
+        let state =
+            gradient_test_support::prelude::test_state(registered_worker().into_connection());
         let failures = ConnectionFailures::default();
 
-        record_unproven(&state, &failures, &rejected("w1")).await;
+        record_inbound(&state, &failures, &rejected("w1"), true).await;
 
         let failure = failures.last("w1").expect("recorded");
         assert_eq!(failure.reason, "401 no valid peer tokens provided");
