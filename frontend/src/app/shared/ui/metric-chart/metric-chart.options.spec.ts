@@ -110,6 +110,29 @@ describe('buildMetricChartOption presentation', () => {
     expect((opt.yAxis as any).name).toBe('seconds');
   });
 
+  it('caps the value axis at a fixed maximum when given', () => {
+    const opt = buildMetricChartOption({ type: 'line', series: one, categories: cats, yAxisMax: 100 }, THEME);
+    expect((opt.yAxis as any).max).toBe(100);
+  });
+
+  it('caps only the primary axis of a dual-axis chart', () => {
+    const opt = buildMetricChartOption({
+      type: 'line',
+      series: [{ name: 'fill', data: [1] }, { name: 'stalls', data: [2], axis: 'right' }],
+      categories: ['x'],
+      yAxisMax: 100,
+      secondary: { title: 'stalls' },
+    }, THEME);
+    const [left, right] = opt.yAxis as any[];
+    expect(left.max).toBe(100);
+    expect(right.max).toBeUndefined();
+  });
+
+  it('lets the value axis scale with the data by default', () => {
+    const opt = buildMetricChartOption({ type: 'line', series: one, categories: cats }, THEME);
+    expect((opt.yAxis as any).max).toBeUndefined();
+  });
+
   it('uses the dark surface theme colors', () => {
     const opt = buildMetricChartOption({ type: 'line', series: one, categories: cats }, THEME);
     expect((opt.xAxis as any).axisLabel.color).toBe(THEME.text);

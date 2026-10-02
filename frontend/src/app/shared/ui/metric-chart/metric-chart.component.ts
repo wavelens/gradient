@@ -83,6 +83,7 @@ export class MetricChartComponent implements OnDestroy {
   colors = input<string[]>([]);
   bare = input(false, { transform: booleanAttribute });
   yAxisTitle = input('');
+  yAxisMax = input<number | undefined>(undefined);
   valueFormatter = input<((value: number) => string) | undefined>(undefined);
   secondary = input<MetricChartConfig['secondary']>(undefined);
   inset = input<MetricChartConfig['inset']>(undefined);
@@ -123,6 +124,7 @@ export class MetricChartComponent implements OnDestroy {
       colors: this.colors(),
       horizontal: this.horizontal(),
       yAxisTitle: this.yAxisTitle(),
+      yAxisMax: this.yAxisMax(),
       valueFormatter: this.valueFormatter(),
       secondary: this.secondary(),
       inset: this.inset(),
