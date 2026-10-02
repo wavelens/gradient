@@ -241,6 +241,10 @@ pub fn create_router(state: Arc<ServerState>) -> Result<Router, InitError> {
             post(projects::post_project_worker_test),
         )
         .route(
+            "/gradient-ci/connections",
+            post(gradient_ci_connections::post_connection),
+        )
+        .route(
             "/projects/{project}/integrations",
             get(projects::get_integrations).put(projects::put_integration),
         )
