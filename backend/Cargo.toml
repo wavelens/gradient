@@ -1,6 +1,6 @@
 [workspace]
-members      = [".", "gradient-cache", "gradient-ci", "gradient-core", "gradient-daemon", "gradient-db", "gradient-derivation", "gradient-effects", "gradient-entity", "gradient-eval", "gradient-git-host", "gradient-graph", "gradient-migration", "gradient-notify", "gradient-pool", "gradient-proto", "gradient-report", "gradient-scheduler", "gradient-sources", "gradient-state", "gradient-storage", "gradient-test-support", "gradient-types", "gradient-util", "gradient-web", "gradient-wire", "gradient-worker", "gradient-worker-client"]
-default-members = [".", "gradient-cache", "gradient-ci", "gradient-core", "gradient-daemon", "gradient-db", "gradient-derivation", "gradient-effects", "gradient-entity", "gradient-eval", "gradient-git-host", "gradient-graph", "gradient-migration", "gradient-notify", "gradient-pool", "gradient-proto", "gradient-report", "gradient-scheduler", "gradient-sources", "gradient-state", "gradient-storage", "gradient-test-support", "gradient-types", "gradient-util", "gradient-web", "gradient-wire", "gradient-worker", "gradient-worker-client"]
+members      = [".", "gradient-cache", "gradient-ci", "gradient-core", "gradient-daemon", "gradient-db", "gradient-derivation", "gradient-effects", "gradient-entity", "gradient-eval", "gradient-git-host", "gradient-graph", "gradient-migration", "gradient-notify", "gradient-pool", "gradient-proto", "gradient-report", "gradient-scheduler", "gradient-sources", "gradient-ssh", "gradient-state", "gradient-storage", "gradient-test-support", "gradient-types", "gradient-util", "gradient-web", "gradient-wire", "gradient-worker", "gradient-worker-client"]
+default-members = [".", "gradient-cache", "gradient-ci", "gradient-core", "gradient-daemon", "gradient-db", "gradient-derivation", "gradient-effects", "gradient-entity", "gradient-eval", "gradient-git-host", "gradient-graph", "gradient-migration", "gradient-notify", "gradient-pool", "gradient-proto", "gradient-report", "gradient-scheduler", "gradient-sources", "gradient-ssh", "gradient-state", "gradient-storage", "gradient-test-support", "gradient-types", "gradient-util", "gradient-web", "gradient-wire", "gradient-worker", "gradient-worker-client"]
 resolver     = "2"
 
 [workspace.package]
@@ -41,6 +41,7 @@ gradient-report       = { path = "gradient-report" }
 gradient-scheduler    = { path = "gradient-scheduler" }
 gradient-pool         = { path = "gradient-pool" }
 gradient-sources      = { path = "gradient-sources" }
+gradient-ssh          = { path = "gradient-ssh" }
 gradient-state        = { path = "gradient-state" }
 gradient-storage      = { path = "gradient-storage" }
 gradient-test-support = { path = "gradient-test-support" }
@@ -146,6 +147,9 @@ sd-notify    = { version = "0.5", default-features = false }
 object_store = { version = "0.14", default-features = false, features = ["aws", "fs"] }
 
 # Harmonia (git deps)
+russh       = { version = "0.63", default-features = false, features = ["aws-lc-rs"] }
+shell-words = { version = "1.1", default-features = false, features = ["std"] }
+
 harmonia-daemon                = { git = "https://github.com/nix-community/harmonia.git", default-features = false }
 harmonia-file-nar              = { git = "https://github.com/nix-community/harmonia.git", default-features = false }
 harmonia-protocol              = { git = "https://github.com/nix-community/harmonia.git", default-features = false }
