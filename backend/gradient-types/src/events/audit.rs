@@ -41,6 +41,8 @@ actions! {
     ApiKeyUpdate => "api_key.update",
     ApiKeyRevoke => "api_key.revoke",
     ApiKeyDelete => "api_key.delete",
+    SshKeyCreate => "ssh_key.create",
+    SshKeyDelete => "ssh_key.delete",
     SessionRevoke => "session.revoke",
     AuthDeny => "auth.deny",
     CliDeviceStart => "cli.device.start",
@@ -115,6 +117,8 @@ impl Action {
                 | ApiKeyUpdate
                 | ApiKeyRevoke
                 | ApiKeyDelete
+                | SshKeyCreate
+                | SshKeyDelete
                 | SessionRevoke
                 | AuthDeny
                 | CliDeviceStart

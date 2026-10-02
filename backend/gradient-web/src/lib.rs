@@ -450,6 +450,14 @@ pub fn create_router(state: Arc<ServerState>) -> Result<Router, InitError> {
                 .delete(user::delete_keys),
         )
         .route("/user/keys/permissions", get(user::get_key_permissions))
+        .route(
+            "/user/ssh-keys",
+            get(user_ssh_keys::get_ssh_keys).post(user_ssh_keys::post_ssh_key),
+        )
+        .route(
+            "/user/ssh-keys/{ssh_key_id}",
+            axum::routing::delete(user_ssh_keys::delete_ssh_key),
+        )
         .route("/user/keys/{api_id}", patch(user::patch_key))
         .route("/user/keys/{api_id}/revoke", post(user::post_key_revoke))
         .route("/user/invites", get(endpoints::invites::get_user_invites))
