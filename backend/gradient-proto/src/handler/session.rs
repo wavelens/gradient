@@ -45,10 +45,7 @@ impl SessionOrigin {
     fn dialed_session(&self) -> Option<DialedSession> {
         match self {
             SessionOrigin::WorkerDialed => None,
-            SessionOrigin::ServerDialed(target) => Some(DialedSession {
-                url: target.url.clone(),
-                token_projects: target.token_projects.clone(),
-            }),
+            SessionOrigin::ServerDialed(target) => Some(target.session()),
         }
     }
 }
@@ -136,10 +133,7 @@ impl ProtoSession<Opening> {
     async fn dial_worker(&mut self, target: &DialTarget) -> Result<HandshakeResult> {
         let authority = DialedWorkerAuthority {
             state: Arc::clone(&self.state),
-            session: DialedSession {
-                url: target.url.clone(),
-                token_projects: target.token_projects.clone(),
-            },
+            session: target.session(),
         };
         let outcome =
             handshake_fsm::as_dialer(&mut self.socket, &target.credentials, &authority).await;
