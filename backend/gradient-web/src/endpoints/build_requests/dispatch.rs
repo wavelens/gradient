@@ -17,26 +17,23 @@ use axum::extract::{Path, State};
 use gradient_core::ServerState;
 use gradient_proto::import::{NarCommit, SignTargets};
 use gradient_storage::source_nar::{SourceNar, materialise_source_nar};
-use gradient_types::ConcurrencyPolicy;
 use gradient_types::ids::{
     CommitId, EvaluationFlakeInputOverrideId, EvaluationId, TaskId, UploadSessionId,
 };
 use gradient_types::{
-    AEvaluationFlakeInputOverride, AUploadSession, BaseResponse, CProjectCache, CTask, ECache,
-    EEvaluationFlakeInputOverride, EProjectCache, ETask, EUploadSession, MCommit, MEvaluation,
-    MEvaluationFlakeInputOverride, MTask, MUser, NULL_TIME, now,
+    AEvaluationFlakeInputOverride, AUploadSession, BaseResponse, CProjectCache, ECache,
+    EEvaluationFlakeInputOverride, EProjectCache, EUploadSession, MCommit, MEvaluation,
+    MEvaluationFlakeInputOverride, MUser, now,
 };
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, Condition, ConnectionTrait, DbErr, EntityTrait, IntoActiveModel,
-    QueryFilter, RuntimeErr, TransactionTrait, sqlx,
+    ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, IntoActiveModel, QueryFilter,
+    TransactionTrait,
 };
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tempfile::TempDir;
 use tokio::fs;
-
-const BUILD_REQUEST_TASK_NAME: &str = "build-request";
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct InputOverrideBody {
@@ -255,7 +252,7 @@ pub(super) async fn queue_build_request<C: ConnectionTrait>(
     user: &MUser,
     source: BuildRequestSource,
 ) -> WebResult<DispatchResponse> {
-    let task = ensure_build_request_task(
+    let task = gradient_db::build_request_task::ensure_build_request_task(
         tx,
         project,
         user.id,
@@ -377,72 +374,6 @@ async fn materialise_staging(
             .map_err(|e| WebError::internal(format!("Failed to write {}: {}", entry.path, e)))?;
     }
     Ok(())
-}
-
-async fn ensure_build_request_task<C: ConnectionTrait>(
-    tx: &C,
-    project_id: gradient_types::ids::ProjectId,
-    user_id: gradient_types::ids::UserId,
-    keep_evaluations: i32,
-) -> WebResult<gradient_entity::task::Model> {
-    if let Some(existing) = ETask::find()
-        .filter(
-            Condition::all()
-                .add(CTask::Project.eq(project_id))
-                .add(CTask::Name.eq(BUILD_REQUEST_TASK_NAME)),
-        )
-        .one(tx)
-        .await?
-    {
-        return Ok(existing);
-    }
-
-    let task = MTask {
-        id: TaskId::now_v7(),
-        project: project_id,
-        name: BUILD_REQUEST_TASK_NAME.to_string(),
-        active: true,
-        display_name: "Build Requests".to_string(),
-        description: "Server-managed task for `gradient build` submissions.".to_string(),
-        repository: BUILD_REQUEST_TASK_NAME.to_string(),
-        wildcard: "*".to_string(),
-        last_check_at: *NULL_TIME,
-        created_by: user_id,
-        created_at: now(),
-        managed: true,
-        keep_evaluations,
-        concurrency: ConcurrencyPolicy::All,
-        sign_cache: true,
-        ..Default::default()
-    }
-    .into_active_model();
-
-    match task.insert(tx).await {
-        Ok(row) => Ok(row),
-        Err(err) if is_unique_violation(&err) => ETask::find()
-            .filter(
-                Condition::all()
-                    .add(CTask::Project.eq(project_id))
-                    .add(CTask::Name.eq(BUILD_REQUEST_TASK_NAME)),
-            )
-            .one(tx)
-            .await?
-            .ok_or_else(|| WebError::internal("build-request task missing after race")),
-        Err(err) => Err(err.into()),
-    }
-}
-
-fn is_unique_violation(err: &DbErr) -> bool {
-    let sqlx_err = match err {
-        DbErr::Query(RuntimeErr::SqlxError(e)) | DbErr::Exec(RuntimeErr::SqlxError(e)) => {
-            e.as_ref()
-        }
-        _ => return false,
-    };
-    matches!(
-        sqlx_err,
-        sqlx::Error::Database(db_err) if db_err.is_unique_violation()
-    )
 }
 
 #[cfg(test)]
