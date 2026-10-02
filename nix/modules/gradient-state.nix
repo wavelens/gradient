@@ -402,11 +402,13 @@
           ]
         '';
         description = ''
-          Task actions: email notifications, web requests, Git host status reports and pull request
-          automation. Actions missing on the next state apply are removed, matched by `name`.
+          Task actions: email notifications, web requests, Matrix and Slack messages, Git host status
+          reports and pull request automation. Actions missing on the next state apply are removed,
+          matched by `name`.
 
-          Token files of `send_web_request` actions must live at the systemd credential path
-          `''${GRADIENT_CREDENTIALS_DIR}/gradient_action_''${name}_token`.
+          Secret files of actions (`token_file`, `access_token_file`, `webhook_url_file`) must live
+          at the systemd credential path
+          `''${GRADIENT_CREDENTIALS_DIR}/gradient_action_''${name}_<field>`.
         '';
       };
 
@@ -577,7 +579,14 @@
       };
 
       type = mkOption {
-        type = types.enum [ "send_mail" "send_web_request" "git_host_status_report" "open_pr" ];
+        type = types.enum [
+          "send_mail"
+          "send_web_request"
+          "git_host_status_report"
+          "open_pr"
+          "send_matrix_message"
+          "send_slack_message"
+        ];
         description = "Action kind, determining the expected `config`.";
       };
 
@@ -608,6 +617,12 @@
             `{ recipients = [ "ops@example.com" ]; subject_template = null; }`.
           - `send_web_request` is taking
             `{ url = "https://hooks.example.com/gradient"; token_file = "/etc/gradient/secrets/<name>-token"; }`.
+          - `send_matrix_message` is taking
+            `{ homeserver = "https://matrix.example.org"; room_id = "!abc:example.org"; access_token_file = "/etc/gradient/secrets/<name>-matrix"; }`.
+            The room must be unencrypted and joined by the token's user.
+          - `send_slack_message` is taking
+            `{ webhook_url_file = "/etc/gradient/secrets/<name>-slack"; }`, the file holding the
+            incoming webhook URL.
           - `git_host_status_report` is taking `{ integration = "gitea-prod"; }`, naming an
             outbound integration in the same project.
           - `open_pr` is opening a pull request on the Git host with the result of a generator.
@@ -628,9 +643,10 @@
             - `update_existing` (bool, default `true`) is force-pushing new contents to an open
               pull request of the same branch instead of opening a duplicate.
 
-          A `send_web_request` action without `token_file` is sending unauthenticated requests. A
-          set token is read from the systemd credential file `gradient_action_''${name}_token` and
-          stored encrypted with the server's crypt key.
+          A `send_web_request` action without `token_file` is sending unauthenticated requests.
+          Secret files (`token_file`, `access_token_file`, `webhook_url_file`) are read from the
+          systemd credential `gradient_action_''${name}_<field>` and stored encrypted with the
+          server's crypt key.
         '';
       };
     };
