@@ -19,6 +19,7 @@ pub mod dashboard;
 pub mod evals;
 pub mod events;
 pub mod git_host_hooks;
+pub mod gradient_ci_connections;
 pub mod invites;
 pub mod live;
 pub mod metrics;
