@@ -123,3 +123,19 @@ pub trait PeerAuthority: Send + Sync {
         client: GradientCapabilities,
     ) -> Result<GradientCapabilities>;
 }
+
+#[async_trait]
+pub trait DialerAuthority: Send + Sync {
+    async fn admit(&self, worker_id: &str) -> Result<AuthOutcome>;
+
+    async fn negotiate(
+        &self,
+        worker_id: &str,
+        client: GradientCapabilities,
+    ) -> Result<GradientCapabilities>;
+}
+
+#[async_trait]
+pub trait DialerVerifier: Send + Sync {
+    async fn verify(&self, worker_id: &str, tokens: &[(String, String)]) -> bool;
+}
