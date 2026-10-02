@@ -166,7 +166,6 @@ Declarative entities under `services.gradient.state` are in the [state reference
 | `oidc.clientSecretFile` | path | - | - | File containing the OIDC client secret. |
 | `oidc.discoveryUrl` | string | - | `GRADIENT_OIDC_DISCOVERY_URL` | OIDC discovery URL. |
 | `oidc.enable` | bool | `false` | `GRADIENT_OIDC_ENABLE` | Whether to enable OIDC. |
-| `oidc.iconUrl` | null or string | `null` | - | URL of the OIDC provider's icon shown on the login page. |
 | `oidc.required` | bool | `false` | `GRADIENT_OIDC_REQUIRED` | Whether to enable OIDC as the only login method. |
 | `oidc.scopes` | list of string | `[ "openid" "email" "profile" ]` | `GRADIENT_OIDC_SCOPES` | OIDC scopes to request. |
 

@@ -74,6 +74,7 @@ in {
     (lib.mkRemovedOptionModule [ "services" "gradient" "nar" "commitConcurrency" ] "replaced by services.gradient.upload.concurrency and services.gradient.upload.bytesBudget")
     (lib.mkRemovedOptionModule [ "services" "gradient" "nar" "maxBufferBytes" ] "replaced by services.gradient.upload.concurrency and services.gradient.upload.bytesBudget")
     (lib.mkRemovedOptionModule [ "services" "gradient" "scheduler" "recordCandidates" ] "runner-up candidates were never recorded")
+    (lib.mkRemovedOptionModule [ "services" "gradient" "oidc" "iconUrl" ] "the login page never showed the icon")
     (lib.mkRenamedOptionModule [ "services" "gradient" "scheduler" "dispatchRetentionDays" ] [ "services" "gradient" "retentionDays" ])
   ];
 
@@ -1015,12 +1016,6 @@ in {
         discoveryUrl = lib.mkOption {
           type = lib.types.str;
           description = "OIDC discovery URL.";
-        };
-
-        iconUrl = lib.mkOption {
-          type = lib.types.nullOr lib.types.str;
-          default = null;
-          description = "URL of the OIDC provider's icon shown on the login page.";
         };
       };
 
