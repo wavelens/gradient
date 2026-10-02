@@ -4,21 +4,25 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use anyhow::Result;
 use async_trait::async_trait;
 use gradient_core::ServerState;
 use gradient_entity::worker_registration;
+use gradient_scheduler::Scheduler;
 use gradient_types::EWorkerRegistration;
-use gradient_wire::messages::{FailedPeer, GradientCapabilities};
+use gradient_types::ids::ProjectId;
+use gradient_wire::messages::{FailedPeer, GradientCapabilities, ServerMessage};
 use gradient_wire::traits::{AuthOutcome, DialerAuthority};
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
-use tracing::warn;
+use tracing::{info, warn};
 
 use super::auth::{
     aggregate_enabled_caps, filter_project_peers_without_cache, negotiate_capabilities,
 };
+use super::socket::{ProtoWriter, send_server_msg};
 
 pub(super) struct DialedWorkerAuthority {
     pub state: Arc<ServerState>,
@@ -45,6 +49,41 @@ pub(super) async fn admit_dialed(state: &ServerState, worker_id: &str, url: &str
     let (peers, is_base) = dialed_peers(state, worker_id, url).await;
     let (authorized, demoted) = filter_project_peers_without_cache(state, peers).await;
     dialed_decision(authorized, demoted, is_base)
+}
+
+pub(super) async fn refresh_dialed_peers(
+    writer: &ProtoWriter,
+    state: &ServerState,
+    scheduler: &Scheduler,
+    worker_id: &str,
+    url: &str,
+) -> bool {
+    match admit_dialed(state, worker_id, url).await {
+        AuthOutcome::Accept {
+            authorized_peers,
+            failed_peers,
+        } => {
+            let projects: HashSet<ProjectId> = authorized_peers
+                .iter()
+                .filter_map(|p| p.parse().ok())
+                .collect();
+            scheduler.update_authorized_peers(worker_id, projects).await;
+            send_server_msg(
+                writer,
+                &ServerMessage::AuthUpdate {
+                    authorized_peers,
+                    failed_peers,
+                },
+            )
+            .await
+            .is_ok()
+        }
+        AuthOutcome::Reject { code, reason } => {
+            info!(%worker_id, code, %reason, "dialed session has no project left - disconnecting");
+            let _ = send_server_msg(writer, &ServerMessage::Reject { code, reason }).await;
+            false
+        }
+    }
 }
 
 async fn dialed_peers(state: &ServerState, worker_id: &str, url: &str) -> (Vec<String>, bool) {
@@ -116,8 +155,39 @@ mod tests {
     use super::*;
     use gradient_entity::project::Model as ProjectModel;
     use gradient_entity::project_cache::{CacheSubscriptionMode, Model as ProjectCacheModel};
-    use gradient_types::ids::{CacheId, ProjectCacheId, ProjectId};
+    use gradient_types::ids::{CacheId, ProjectCacheId};
+    use gradient_wire::session::frame::WireMessage;
     use sea_orm::{DatabaseBackend, MockDatabase};
+    use std::time::Duration;
+
+    async fn sent(rx: &mut tokio::sync::mpsc::Receiver<bytes::Bytes>) -> ServerMessage {
+        let bytes = rx.recv().await.expect("a frame");
+        ServerMessage::decode(bytes)
+            .expect("decodes")
+            .into_message()
+            .expect("a control message")
+    }
+
+    fn registration_with_cache(project: ProjectId) -> MockDatabase {
+        MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([vec![worker_registration::Model {
+                peer_id: project,
+                worker_id: "w1".into(),
+                url: Some("wss://w1.example/proto".into()),
+                active: true,
+                ..Default::default()
+            }]])
+            .append_query_results([vec![ProjectModel {
+                id: project,
+                ..Default::default()
+            }]])
+            .append_query_results([vec![ProjectCacheModel {
+                id: ProjectCacheId::now_v7(),
+                project,
+                cache: CacheId::now_v7(),
+                mode: CacheSubscriptionMode::ReadWrite,
+            }]])
+    }
 
     #[test]
     fn a_dialed_worker_without_any_project_left_is_deactivated() {
@@ -156,30 +226,57 @@ mod tests {
     #[tokio::test]
     async fn a_dialed_registration_admits_the_projects_registered_at_that_url() {
         let project = ProjectId::now_v7();
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
-            .append_query_results([vec![worker_registration::Model {
-                peer_id: project,
-                worker_id: "w1".into(),
-                url: Some("wss://w1.example/proto".into()),
-                active: true,
-                ..Default::default()
-            }]])
-            .append_query_results([vec![ProjectModel {
-                id: project,
-                ..Default::default()
-            }]])
-            .append_query_results([vec![ProjectCacheModel {
-                id: ProjectCacheId::now_v7(),
-                project,
-                cache: CacheId::now_v7(),
-                mode: CacheSubscriptionMode::ReadWrite,
-            }]])
-            .into_connection();
+        let db = registration_with_cache(project).into_connection();
         let state = gradient_test_support::prelude::test_state(db);
 
         assert_eq!(
             admit_dialed(&state, "w1", "wss://w1.example/proto").await,
             AuthOutcome::Accept {
+                authorized_peers: vec![project.to_string()],
+                failed_peers: vec![],
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn a_reauth_of_a_dialed_session_with_nothing_left_rejects_it() {
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([Vec::<worker_registration::Model>::new()])
+            .append_query_results([Vec::<gradient_entity::base_worker::Model>::new()])
+            .into_connection();
+        let state = gradient_test_support::prelude::test_state(db);
+        let scheduler = Scheduler::new(Arc::clone(&state));
+        let (writer, mut rx) = ProtoWriter::spy(Duration::from_secs(1));
+
+        let kept =
+            refresh_dialed_peers(&writer, &state, &scheduler, "w1", "wss://w1.example/proto").await;
+
+        assert!(!kept);
+        assert_eq!(
+            sent(&mut rx).await,
+            ServerMessage::Reject {
+                code: 403,
+                reason: "worker is deactivated".into(),
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn a_reauth_of_a_dialed_session_sends_its_current_projects() {
+        let project = ProjectId::now_v7();
+        let db = registration_with_cache(project).into_connection();
+        let state = gradient_test_support::prelude::test_state(db);
+        let scheduler = Scheduler::new(Arc::clone(&state));
+        scheduler.spawn_core(None).await.unwrap();
+        let (writer, mut rx) = ProtoWriter::spy(Duration::from_secs(1));
+
+        let kept =
+            refresh_dialed_peers(&writer, &state, &scheduler, "w1", "wss://w1.example/proto").await;
+
+        assert!(kept);
+        assert_eq!(
+            sent(&mut rx).await,
+            ServerMessage::AuthUpdate {
                 authorized_peers: vec![project.to_string()],
                 failed_peers: vec![],
             }

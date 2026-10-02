@@ -22,6 +22,7 @@ use tokio::sync::{Semaphore, oneshot};
 use tokio::task::JoinHandle;
 use tracing::{debug, info, warn};
 
+use super::dialed::refresh_dialed_peers;
 use super::inbound::{ActiveJobs, InboundContext, RpcContext};
 use super::job_events::{JobEvents, SchedulerJobEvents};
 use super::log_lane::LogLane;
@@ -63,6 +64,7 @@ pub struct SessionArgs {
     pub socket: ProtoSocket,
     pub capabilities: GradientCapabilities,
     pub authorized_peers: HashSet<ProjectId>,
+    pub dialed_url: Option<String>,
 }
 
 pub struct SessionState {
@@ -72,6 +74,7 @@ pub struct SessionState {
     writer: ProtoWriter,
     capabilities: GradientCapabilities,
     authorized_peers: HashSet<ProjectId>,
+    dialed_url: Option<String>,
     uploads: UploadSession,
     nar_serve_semaphore: Arc<Semaphore>,
     offers_seen: u64,
@@ -101,6 +104,7 @@ impl Actor for SessionActor {
             mut socket,
             capabilities,
             authorized_peers,
+            dialed_url,
         } = args;
         let uploads = open_uploads(&state, &peer_id, &myself)
             .map_err(|e| ActorProcessingErr::from(format!("{e:#}")))?;
@@ -166,6 +170,7 @@ impl Actor for SessionActor {
             writer,
             capabilities,
             authorized_peers,
+            dialed_url,
             uploads,
             nar_serve_semaphore: Arc::new(Semaphore::new(max_serves)),
             offers_seen: 0,
@@ -195,6 +200,7 @@ impl Actor for SessionActor {
                         active: &st.active,
                         job_events: &st.job_events,
                         logs: &st.logs,
+                        dialed_url: st.dialed_url.as_deref(),
                     };
 
                     ctx.handle(inbound, &mut st.uploads).await
@@ -221,7 +227,14 @@ impl Actor for SessionActor {
                 }
             }
             SessionMsg::Signal(SessionSignal::Reauth) => {
-                if !on_reauth_notify(&st.writer, &st.state, &st.peer_id).await {
+                let kept = match &st.dialed_url {
+                    Some(url) => {
+                        refresh_dialed_peers(&st.writer, &st.state, &st.scheduler, &st.peer_id, url)
+                            .await
+                    }
+                    None => on_reauth_notify(&st.writer, &st.state, &st.peer_id).await,
+                };
+                if !kept {
                     myself.stop(Some("deactivated".into()));
                 }
             }
@@ -474,6 +487,7 @@ fn split_uploads(st: &mut SessionState) -> (InboundContext<'_>, &mut UploadSessi
             active: &st.active,
             job_events: &st.job_events,
             logs: &st.logs,
+            dialed_url: st.dialed_url.as_deref(),
         },
         &mut st.uploads,
     )
@@ -592,6 +606,7 @@ mod tests {
                 socket,
                 capabilities: GradientCapabilities::default(),
                 authorized_peers: HashSet::new(),
+                dialed_url: None,
             },
         )
         .await
@@ -640,6 +655,7 @@ mod tests {
                 socket,
                 capabilities: GradientCapabilities::default(),
                 authorized_peers: HashSet::new(),
+                dialed_url: None,
             },
         )
         .await
