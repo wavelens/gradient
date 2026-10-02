@@ -1,6 +1,6 @@
 # Connect an AI Assistant
 
-Evaluations, builds and build logs readable by any [Model Context Protocol](https://modelcontextprotocol.io) client (Claude Code, Claude Desktop, Cursor), through `gradient mcp`. An assistant finds the failed build and reads the log line that broke the build.
+Evaluations, builds and build logs readable by any [Model Context Protocol](https://modelcontextprotocol.io) client (Claude Code, Claude Desktop, Cursor), through `gradient mcp`. An assistant can find the failed build and read the log line that broke the build.
 
 **Requirements:**
 
@@ -12,7 +12,7 @@ Evaluations, builds and build logs readable by any [Model Context Protocol](http
 gradient login https://gradient.example.com
 ```
 
-Every tool call is running as this user and sees only the user's projects. `gradient project select <name>` sets the default project for tools that take one.
+Every tool call is running as this user. Tool calls see only the user's projects. `gradient project select <name>` is setting the default project for tools that take one.
 
 ## 2. Add the Server to the Client
 
@@ -37,7 +37,7 @@ Every tool call is running as this user and sees only the user's projects. `grad
 
 ## Verify Deployment
 
-Ask the assistant: "Explain the last failed evaluation of `web-app`." The assistant walks down the tools:
+Ask the assistant: "Explain the last failed evaluation of `web-app`." The assistant is walking down the tools.
 
 ```mermaid
 flowchart LR
@@ -46,32 +46,32 @@ flowchart LR
 
 ## Tools
 
-| Tool | Returns |
+| Tool | Result |
 |---|---|
 | `list_projects`, `list_tasks` | The user's projects and their tasks |
-| `list_evaluations`, `get_evaluation` | A task's evaluations with build counts; one evaluation with commit, status and error |
-| `list_builds`, `get_build` | The builds of an evaluation; one build with derivation, system and outputs |
-| `get_build_log` | A log, whole or by line range; more than 10 lines go to a temp file whose path is returned |
+| `list_evaluations`, `get_evaluation` | A task's evaluations with build counts. One evaluation with commit, status and error |
+| `list_builds`, `get_build` | The builds of an evaluation. One build with derivation, system and outputs |
+| `get_build_log` | A log, whole or by line range. More than 10 lines go to a temp file, and the tool is returning its path |
 | `search_build_log` | Matching log lines with line numbers |
 
 ## Control Tools
 
-`gradient mcp --control` lets the assistant act on the CI, limited by the user's project permissions:
+`gradient mcp --control` is letting the assistant act on the CI, limited by the user's project permissions.
 
-| Tool | Does |
+| Tool | Effect |
 |---|---|
-| `start_evaluation` | Starts an evaluation of a task, optionally at a commit |
-| `abort_evaluation` | Aborts the running and queued builds of an evaluation |
-| `watch_evaluation` | Waits until an evaluation finishes, up to `timeout_seconds` (600 by default, at most 3600) |
+| `start_evaluation` | Starting an evaluation of a task, optionally at a commit |
+| `abort_evaluation` | Aborting the running and queued builds of an evaluation |
+| `watch_evaluation` | Waiting until an evaluation is finished, up to `timeout_seconds` (600 by default, at most 3600) |
 
-Without `--control`, the server is read-only.
+The server is read-only without `--control`.
 
 ## Troubleshooting
 
 | Symptom | Fix |
 |---|---|
 | `Server URL not set` | Run `gradient login` first |
-| Client reports a protocol error in a wrapper script | The server speaks JSON-RPC on stdout; keep stderr out of stdout |
+| Client reporting a protocol error in a wrapper script | The server is speaking JSON-RPC on stdout. Keep stderr out of stdout |
 
 ## Next Steps
 

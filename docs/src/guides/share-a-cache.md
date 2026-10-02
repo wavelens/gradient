@@ -9,7 +9,7 @@ One cache, used by machines, other projects and other people.
 
 ## 1. Use the Cache on a Machine
 
-The cache page shows the substituter URL and the public key:
+The cache page is showing the substituter URL and the public key.
 
 ```nix
 nix.settings = {
@@ -18,9 +18,9 @@ nix.settings = {
 };
 ```
 
-The one key covers every path, even paths pulled through from an [upstream cache](../concepts/caches.md#pull-through): Gradient verifies them against the upstream cache's key and signs them again with the cache's own.
+The one key is covering every path, even paths pulled through from an [upstream cache](../concepts/caches.md#pull-through). Gradient is verifying these paths against the upstream cache's key. Gradient is then signing them again with the cache's own key.
 
-A public cache needs nothing more. A private cache needs an API key from **Settings -> API Keys** in a netrc file for the Nix daemon:
+Public caches need nothing more. Private caches need an API key from **Settings -> API Keys** in a netrc file for the Nix daemon.
 
 === "CLI"
 
@@ -29,7 +29,7 @@ A public cache needs nothing more. A private cache needs an API key from **Setti
       --server https://gradient.example.com --cache main --token <api key>
     ```
 
-    The command writes the entry to `/etc/nix/netrc`.
+    The command is writing the entry to `/etc/nix/netrc`.
 
 === "Declarative"
 
@@ -45,18 +45,18 @@ A public cache needs nothing more. A private cache needs an API key from **Setti
     };
     ```
 
-    1.  The default `nix.settings.netrc-file`; Gradient ignores the login and reads the password as the API key.
+    1.  The default `nix.settings.netrc-file`. Gradient is ignoring the login and reading the password as the API key.
 
 ## 2. Share with Another Project
 
-A subscribed project pushes its outputs to the cache and substitutes from the cache.
+A subscribed project is pushing its outputs to the cache. The project is also substituting from the cache.
 
 === "UI"
 
-    In the other project, **Settings -> Cache Subscriptions -> Subscribe to Cache**.
+    Open **Settings -> Cache Subscriptions -> Subscribe to Cache** in the other project.
 
-    - With the Admin role on both sides, the subscription is active at once.
-    - Otherwise the subscription waits as a request, marked **Pending approval**. A cache admin approves or denies the request under **Subscriptions** on the cache page.
+    - The subscription is active at once with the Admin role on both sides.
+    - Any other subscription is waiting as a request, marked **Pending approval**. A cache admin can approve or deny the request under **Subscriptions** on the cache page.
 
 === "Declarative"
 
@@ -72,10 +72,10 @@ Members get a role on the cache itself, independent of any project.
 
 === "UI"
 
-    On the cache page, **Members & Roles -> Add Member**, with a user name and a role. The invitee accepts under **Settings -> My Invites**; until then the invitee has no access.
+    Open **Members & Roles -> Add Member** on the cache page. Enter a user name and a role. The invitee can accept under **Settings -> My Invites**. Access is granted only after accepting.
 
-    - An invitation expires after 7 days.
-    - With [mail](../reference/configuration.md#email) configured, the invitee also gets a mail with a link.
+    - Invitations expire after 7 days.
+    - The invitee is also receiving a mail with a link once [mail](../reference/configuration.md#email) is configured.
 
 === "Declarative"
 
@@ -94,9 +94,10 @@ Members get a role on the cache itself, independent of any project.
 nix store info --store https://gradient.example.com/cache/main
 ```
 
-- Prints the cache's store info; a private cache answers `401` without a valid netrc entry.
-- The other project lists the cache under **Settings -> Cache Subscriptions** without a pending badge.
-- The member shows under **Members & Roles** on the cache page.
+- The command is printing the cache's store info.
+- A private cache is answering `401` without a valid netrc entry.
+- The other project is listing the cache under **Settings -> Cache Subscriptions** without a pending badge.
+- The member is listed under **Members & Roles** on the cache page.
 
 ## Next Steps
 

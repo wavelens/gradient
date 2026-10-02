@@ -1,6 +1,6 @@
 # Standalone
 
-A complete Gradient on one machine, for trying Gradient on a personal repository: server, web UI, PostgreSQL and a worker in one container or VM.
+A complete Gradient on one machine for trying Gradient on a personal repository. Server, web UI, PostgreSQL and a worker share one container or VM.
 
 **Requirements:**
 
@@ -19,7 +19,7 @@ A complete Gradient on one machine, for trying Gradient on a personal repository
       ghcr.io/wavelens/gradient-standalone
     ```
 
-    The container is running systemd and the Nix build sandbox, which need `--privileged`; `-t` gives systemd a console for `docker logs`. The port is bound to `127.0.0.1` only. The `gradient` volume keeps projects, builds and the cache across restarts.
+    The container is running systemd and the Nix build sandbox. Both are requiring `--privileged`. `-t` is giving systemd a console for `docker logs`. The port is listening on `127.0.0.1` only. The `gradient` volume is keeping projects, builds and the cache across restarts.
 
 === "Nix"
 
@@ -27,13 +27,13 @@ A complete Gradient on one machine, for trying Gradient on a personal repository
     nix run github:wavelens/gradient#standalone
     ```
 
-    A QEMU VM on the terminal, logged in as root. The disk image `gradient.qcow2` in the current directory keeps projects, builds and the cache across restarts. `Ctrl-a x` stops the VM.
+    A QEMU VM on the terminal, logged in as root. The disk image `gradient.qcow2` in the current directory is keeping projects, builds and the cache across restarts. Stop the VM with `Ctrl-a x`.
 
-The first boot takes a minute: PostgreSQL initializes and Gradient generates its secrets.
+The first boot is taking a minute. PostgreSQL is initializing, and Gradient is generating its secrets.
 
 ## 2. Log In
 
-Gradient generates a random admin password on first boot and prints the password on every boot:
+Gradient is generating a random admin password on first boot. Every boot is printing the password in this line.
 
 ```text
 Gradient is running at http://localhost:8080 - log in with admin / <password>
@@ -55,15 +55,15 @@ Open `http://localhost:8080` and log in as `admin`. Self-registration is disable
 
 ## 3. Build a Repository
 
-Follow [First Project](first-project.md) from step 2: a cache, a project and a task for the repository. The worker inside the standalone instance joins every new project on its own.
+Follow [First Project](first-project.md) from step 2 for a cache, a project and a task. The worker inside the standalone instance is joining every new project on its own.
 
 !!! tip "Private Repositories"
     Add the project's public SSH key from **Settings -> SSH Key** as a deploy key on the Git host.
 
 ## Verify Deployment
 
-- `http://localhost:8080` shows the login page.
-- After the first evaluation, the builds show as completed on the evaluation page.
+- `http://localhost:8080` is showing the login page.
+- The builds show as completed on the evaluation page after the first evaluation.
 
 ## Upgrade
 
@@ -74,7 +74,7 @@ Follow [First Project](first-project.md) from step 2: a cache, a project and a t
     docker rm -f gradient
     ```
 
-    Then start the container again with the command from step 1. The `gradient` volume carries the data over.
+    Then start the container again with the command from step 1. The `gradient` volume is carrying the data over.
 
 === "Nix"
 
@@ -83,7 +83,7 @@ Follow [First Project](first-project.md) from step 2: a cache, a project and a t
     ```
 
 !!! warning
-    The standalone instance serves plain HTTP with a single worker and no backups. For a team, deploy with the NixOS module: [Quick Start](quick-start.md).
+    The standalone instance is serving plain HTTP with a single worker and no backups. Deploy with the NixOS module from the [Quick Start](quick-start.md) for a team.
 
 ## Next Steps
 

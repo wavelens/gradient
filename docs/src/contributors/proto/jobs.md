@@ -1,14 +1,14 @@
 # Jobs
 
-The two job kinds, how their progress is reported, and what happens when a job fails, is aborted or loses its worker. Every job arrives as `AssignJob { job_id, assignment_id, job, cluster }`; every report echoes `assignment_id`. `cluster` is set only for a [cluster member](../scheduler/clusters.md).
+The two job kinds, their progress reports, and the handling of jobs that fail, abort or lose their worker. Every job is arriving as `AssignJob { job_id, assignment_id, job, cluster }`. Every report is echoing `assignment_id`. The server is setting `cluster` only for a [cluster member](../scheduler/clusters.md).
 
 ## Flake Jobs
 
-A flake job fetches and evaluates a flake. The server fixes the steps when the job is queued:
+A flake job is fetching and evaluating a flake. The server is fixing the steps at queue time.
 
 | Situation | Steps |
 |---|---|
-| An idle evaluation-only worker exists | `[FetchFlake]`, then a follow-up job `[EvaluateFlake, EvaluateDerivations]` on the fetched source |
+| An idle evaluation-only worker is available | `[FetchFlake]`, then a follow-up job `[EvaluateFlake, EvaluateDerivations]` on the fetched source |
 | Otherwise | All three steps in one job |
 
 | Field | Meaning |
@@ -18,15 +18,15 @@ A flake job fetches and evaluates a flake. The server fixes the steps when the j
 | `wildcards` | Attribute patterns to evaluate |
 | `timeout_secs` | Optional limit |
 | `input_overrides` | Flake input overrides of the task |
-| `input_update` | Set for a [flake update](../../guides/flake-updates.md) run |
+| `input_update` | Set for a [flake update](../../guides/flake-updates.md) |
 
 **Fetch:**
 
-1. Clone the repository, apply overrides (unknown inputs are dropped with a warning).
-2. Serialise the tree at the pinned commit as a NAR and add it to the store as `<narHash>-source`, the path `nix flake prefetch` produces for the same tree, without a nix process. When every locked input's `<narHash>-source` path is already in the store the fetch is done; otherwise `nix flake archive` fetches the inputs, falling back to `nix flake prefetch` per input.
+1. Clone the repository, apply overrides (dropping unknown inputs with a warning).
+2. Serialise the tree at the pinned commit as a NAR, without a nix process. Add the NAR to the store as `<narHash>-source`, the same path `nix flake prefetch` is producing for the tree. The fetch is done when every locked input's `<narHash>-source` path is already in the store. `nix flake archive` is fetching the inputs in every other case, falling back to `nix flake prefetch` per input.
 3. Upload every fetched path with a `Push` cache query, then report `FetchResult { flake_source }`.
 
-**Evaluate:** the worker walks the derivations breadth-first in waves of up to 256.
+**Evaluate:** The worker is walking the derivations breadth-first in waves of up to 256.
 
 ```mermaid
 sequenceDiagram
@@ -44,28 +44,32 @@ sequenceDiagram
     W->>S: JobCompleted
 ```
 
-- `known` lists the derivations already walked completely; the worker skips their subtrees. A **Full rewalk** gets an empty list.
-- Each batch uploads its `.drv` files and their input sources before its `EvalResult`: builds start while the walk goes on. An input's `.drv` goes with the batch that walks it.
-- The walk goes on while a batch uploads, up to 64 batches ahead, and the uploads of consecutive batches overlap: each `EvalResult` follows its own batch's uploads, in walk order.
-- A path an earlier batch of the same evaluation pushed is neither queried nor uploaded again.
-- The server records each batch and promotes builds that can start to `Queued` right away.
-- The evaluation turns `Building` on `JobCompleted`; evaluation errors become error messages that fail the evaluation at the end.
+- `known` is listing the derivations already walked completely. The worker is skipping their subtrees.
+- A **Full rewalk** is getting an empty list.
+- Each batch is uploading its `.drv` files and their input sources before its `EvalResult`. Builds start while the walk is still going on.
+- An input's `.drv` is going with the batch walking that input.
+- The walk is continuing during a batch upload, up to 64 batches ahead.
+- The uploads of consecutive batches overlap. Each `EvalResult` is following its own batch's uploads, in walk order.
+- The worker is neither querying nor uploading a path again once an earlier batch of the same evaluation pushed that path.
+- The server is recording each batch and promoting builds that can start to `Queued` right away.
+- The evaluation is turning `Building` on `JobCompleted`.
+- Evaluation errors become error messages, failing the evaluation at the end.
 
 ## Build Jobs
 
-A build job carries exactly one `BuildSpec`: one shared build (`derivation_build`).
+A build job is carrying exactly one `BuildSpec`: one shared build (`derivation_build`).
 
 | `kind` | When | Action |
 |---|---|---|
-| `Build` | Default | Prefetch inputs, then the Nix daemon builds the derivation |
-| `Substitute` | The outputs exist in an upstream cache | Fetches the outputs without a Nix store |
-| `Download` | A `builtin:fetchurl` fixed-output derivation | Downloads the file without a Nix store |
+| `Build` | Default | Prefetching inputs, then building the derivation with the Nix daemon |
+| `Substitute` | The outputs exist in an upstream cache | Fetching the outputs without a Nix store |
+| `Download` | A `builtin:fetchurl` fixed-output derivation | Downloading the file without a Nix store |
 
-`Substitute` and `Download` jobs run on any worker (system `builtin`). The spec also carries `drv_path`, `outputs`, `is_fixed_output`, `timeout_secs` and `max_silent_secs`.
+`Substitute` and `Download` jobs can start on any worker (system `builtin`). The spec is also carrying `drv_path`, `outputs`, `is_fixed_output`, `timeout_secs` and `max_silent_secs`.
 
 1. Report `Building`, before anything that can fail.
 2. Skip everything when all outputs are already in the local store.
-3. **Prefetch:** read the `.drv`, drop inputs the store holds, pull the rest over [transfer](transfer.md).
+3. **Prefetch:** read the `.drv`, drop inputs already in the store, pull the rest over [transfer](transfer.md).
 4. Build through the daemon, streaming the log as `LogChunk`.
 5. Report `BuildOutput` with outputs, `hydra-build-products` and metrics.
 6. Upload the outputs, then `JobCompleted`.
@@ -75,51 +79,51 @@ A build job carries exactly one `BuildSpec`: one shared build (`derivation_build
 | `JobUpdate` kind | Effect on the server |
 |---|---|
 | `Fetching`, `EvaluatingFlake`, `EvaluatingDerivations` | Evaluation status |
-| `FetchResult { flake_source }` | Stores the fetched source |
-| `EvalResult` | Records a batch of derivations |
+| `FetchResult { flake_source }` | Storing the fetched source |
+| `EvalResult` | Recording a batch of derivations |
 | `EvalStats` | Evaluation metrics |
 | `InputUpdateResult`, `InputUpdateExpansion` | Flake update candidate lock and bumped inputs |
-| `Building { build_id }` | Build turns `Building`; an already aborted build gets `AbortJob` instead |
+| `Building { build_id }` | Build turning `Building`. An already aborted build is getting `AbortJob` instead |
 | `BuildOutput` | Output sizes, build products, metrics, the `substituted` flag |
 | `Compressing` | No change |
 
-`JobCompleted` and `JobFailed` carry the phase timeline shown on the [Job Board](../../ui/job-board.md#job-inspection). Reports from a stale `assignment_id` are dropped.
+`JobCompleted` and `JobFailed` carry the phase timeline shown on the [Job Board](../../ui/job-board.md#job-inspection). The server is dropping reports from a stale `assignment_id`.
 
 ## Failures
 
 | `BuildFailureKind` | Result |
 |---|---|
 | `Transient` | Retried up to `build.maxAttempts` (3), backoff `build.retryBackoffSecs` (30 s) doubling |
-| `Permanent` | Failed; builds that need the failed build turn `DependencyFailed` |
-| `Timeout` | Timed out; builds that need the timed-out build turn `DependencyFailed` |
-| `SubstituteUnavailable` | Re-queued; built normally after `build.substituteMissEscalationThreshold` (2) misses |
+| `Permanent` | Failed. Builds needing the failed build turn `DependencyFailed` |
+| `Timeout` | Timed out. Builds needing the timed-out build turn `DependencyFailed` |
+| `SubstituteUnavailable` | Re-queued. Built normally after `build.substituteMissEscalationThreshold` (2) misses |
 | `InputsUnavailable` | Self-heal, see below |
-| `CorruptEvalCache` | The evaluation cache blob is purged, the evaluation re-queued |
-| `Aborted` | Aborted by the server; no cascade |
+| `CorruptEvalCache` | Purging the evaluation cache blob and re-queuing the evaluation |
+| `Aborted` | Aborted by the server. No cascade |
 
-- **InputsUnavailable:** an input the cache listed is gone (uncached, `404`/`410` on the URL, or `NarUnavailable`). The server deletes the stale cache row and object, resets the producing build, and retries; after `build.inputsUnavailableMaxLoops` (3) loops the build fails permanently.
-- **DependencyFailed** spreads upward over the dependency graph from `Permanent` and `Timeout` failures, across evaluations.
-- **Eval job outage:** an eval job that failed `Transient` (the server connection dropped, an object PUT or a `CacheQuery` stopped answering) re-queues its evaluation, up to `build.maxAttempts` (3) attempts.
-- An evaluation ends `Completed`, or `Failed` when any build failed, was aborted or dependency-failed, or an error message exists.
+- **InputsUnavailable:** An input listed by the cache is missing (uncached, `404`/`410` on the URL, or `NarUnavailable`). The server is deleting the stale cache row and object. The server is also resetting the producing build and retrying. The build is failing permanently after `build.inputsUnavailableMaxLoops` (3) loops.
+- **DependencyFailed** is spreading upward over the dependency graph from `Permanent` and `Timeout` failures, across evaluations.
+- **Eval Job Outage:** An eval job failing `Transient` is re-queuing its evaluation, up to `build.maxAttempts` (3) attempts. Typical causes are a dropped server connection or an object PUT or `CacheQuery` without an answer.
+- An evaluation is ending `Completed`, or `Failed` when any build failed, was aborted or dependency-failed, or an error message is present.
 
 ## Cluster Members
 
-A [cluster member](../scheduler/clusters.md) arrives as `AssignJob` with `cluster = { attempt, role, index, hold_secs }`.
+A [cluster member](../scheduler/clusters.md) is arriving as `AssignJob` with `cluster = { attempt, role, index, hold_secs }`.
 
 | Event | Worker |
 |---|---|
-| `AssignJob` with `cluster` | Holds the slot without running the job and accepts; a second member of the same attempt is rejected |
-| `StartCluster { attempt, roster }` | Running the held member; its signal route opens with the roster |
-| `ClusterSignal` from the server | Delivered to the running member of that attempt; dropped once the member finished |
-| `ClusterSignal` to the server | Sent by the member; `to = None` reaches every other member |
-| `AbortCluster { attempt }` | Drops a held member unreported and aborts a running one (`JobFailed { Aborted }`) |
-| No `StartCluster` within `hold_secs` | Releases the slot and reports `JobFailed { Aborted }` with `cluster start timed out` |
-| Local drain | Releases every held member the same way, with `worker draining` |
+| `AssignJob` with `cluster` | Holding the slot without running the job, then accepting. Rejecting a second member of the same attempt |
+| `StartCluster { attempt, roster }` | Running the held member. The member's signal route is opening with the roster |
+| `ClusterSignal` from the server | Delivered to the running member of that attempt. Dropped once the member finished |
+| `ClusterSignal` to the server | Sent by the member. `to = None` is reaching every other member |
+| `AbortCluster { attempt }` | Dropping a held member unreported and aborting a running one (`JobFailed { Aborted }`) |
+| No `StartCluster` within `hold_secs` | Releasing the slot and reporting `JobFailed { Aborted }` with `cluster start timed out` |
+| Local drain | Releasing every held member the same way, with `worker draining` |
 
-- A held member counts against `eval.maxConcurrent` / `build.maxConcurrent` like a running job.
-- The server sets `hold_secs` to its prepare timeout plus a 10 s margin.
+- A held member is counting against `eval.maxConcurrent` / `build.maxConcurrent` like a running job.
+- The server is setting `hold_secs` to its prepare timeout plus a 10 s margin.
 
 ## Abort and Lost Workers
 
-- **Abort** (API or a newer evaluation): the evaluation turns `Aborted`, `AbortJob` goes to its jobs, pending jobs are removed. The worker stops the daemon build at once and answers `JobFailed { Aborted }`. Aborts unconfirmed after 5 min are reaped.
-- **Lost worker:** open assignments close as abandoned, building builds return to `Queued`, a running evaluation goes to `Waiting` and is re-queued; the evaluation fails after 10 lost assignments.
+- **Abort** (API or a newer evaluation): The evaluation is turning `Aborted`, and `AbortJob` is going to its jobs. The server is removing pending jobs. The worker is stopping the daemon build at once and answering `JobFailed { Aborted }`. The server is reaping aborts unconfirmed after 5 min.
+- **Lost Worker:** Open assignments close as abandoned. Building builds return to `Queued`. A running evaluation is going to `Waiting` and back into the queue. The evaluation is failing after 10 lost assignments.

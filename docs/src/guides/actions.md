@@ -5,20 +5,20 @@ Mails and web requests on evaluation and build events, e.g. a mail to the team o
 **Requirements:**
 
 - A task, see [First Project](../get-started/first-project.md)
-- For mail: [email](../reference/configuration.md#email) configured on the server
+- [Email](../reference/configuration.md#email) configured on the server, for mail actions only
 
 ## 1. Add the Action
 
 === "UI"
 
-    On the task, **Actions -> New Action**, then pick a type:
+    Open **Actions -> New Action** on the task and pick a type.
 
     | Type | Fields |
     |---|---|
-    | Send Mail | **Recipients**, comma-separated; optional **Subject Template** |
-    | Send Web Request | **URL**; optional **Token**, shown once after saving |
+    | Send Mail | **Recipients**, comma-separated. Optional **Subject Template** |
+    | Send Web Request | **URL**. Optional **Token**, shown once after saving |
 
-    **Send Mail** only shows when email is configured on the server.
+    **Send Mail** is available only with email configured on the server.
 
 === "Declarative"
 
@@ -44,14 +44,14 @@ Mails and web requests on evaluation and build events, e.g. a mail to the team o
 
 ## 2. Pick the Events
 
-An action without events never fires. The events most actions need:
+An action without events never fires. The table is listing the events most actions need.
 
-| Event | Fires when |
+| Event | Trigger |
 |---|---|
 | `evaluation.completed` | Every build of the evaluation succeeded |
 | `evaluation.failed` | The evaluation failed |
 | `build.failed` | One build failed |
-| `evaluation.action_required` | A pull request from a fork waits for maintainer approval |
+| `evaluation.action_required` | A pull request from a fork is waiting for maintainer approval |
 
 The full list is in the [events reference](../reference/events.md).
 
@@ -59,11 +59,11 @@ The full list is in the [events reference](../reference/events.md).
 
 - Subject placeholders: `{event}`, `{task}`, `{project}`, `{id}`, `{status}`.
 - Default subject: `[Gradient] {event}: {task}`.
-- The body holds the event, task, status and a link to the evaluation or build.
+- Body: the event, task, status and a link to the evaluation or build.
 
 ## Web Request
 
-A `POST` with a JSON body; receivers read `content`:
+Each delivery is a `POST` with a JSON body. Receivers are reading the `content` field.
 
 ```json
 {
@@ -79,31 +79,33 @@ A `POST` with a JSON body; receivers read `content`:
 | `Authorization` | `Bearer <token>`, with a token only |
 | `X-Gradient-Signature` | `sha256=<HMAC-SHA256 of the body, with the token as key>`, with a token only |
 
-The signature lets the receiver reject requests that did not come from Gradient.
+Receivers can check the signature and reject requests that did not come from Gradient.
 
 ## Git Host Status Report
 
-The **Git Host Status Report** action, set up by the [Git host guides](github.md#4-wire-the-task), posts one check per step on each commit and pull request:
+The **Git Host Status Report** action is posting one check per step on each commit and pull request. The [Git host guides](github.md#4-wire-the-task) are covering its setup.
 
 | Check | State |
 |---|---|
-| `gradient/<task>: Approval` | Only for pull requests from forks, until a maintainer approves |
+| `gradient/<task>: Approval` | Only for pull requests from forks, pending until maintainer approval |
 | `gradient/<task>: Evaluation` | Pending while the evaluation is active, then success or failure |
 | `gradient/<task>: Build <entry point>` | One per entry point: pending, running, then success or failure |
 
-An evaluation started by `/gradient run <wildcard>` reports as `gradient/<task>: Evaluation: <wildcard>` next to the default checks. **Test** checks the integration's access to the repository without posting a status.
+An evaluation started by `/gradient run <wildcard>` is reporting as `gradient/<task>: Evaluation: <wildcard>` next to the default checks.
+
+**Test** is checking the integration's access to the repository without posting a status.
 
 ## Verify Deployment
 
-- **Test** on the action row sends a sample event, marked `"synthetic": true`.
-- **Deliveries** on the action row lists every request with status, duration, request and response body.
+- **Test** on the action row is sending a sample event, marked `"synthetic": true`.
+- **Deliveries** on the action row is listing every request with status, duration, request and response body.
 
 ## Troubleshooting
 
 | Symptom | Fix |
 |---|---|
 | **Send Mail** missing from the type list | Configure [email](../reference/configuration.md#email) on the server |
-| Delivery shows `connection refused` | The URL is unreachable from the server |
+| Delivery showing `connection refused` | The URL is unreachable from the server |
 | No deliveries | The action is inactive, or none of the events fired yet |
 
 ## Next Steps

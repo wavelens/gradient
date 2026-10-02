@@ -13,7 +13,7 @@ Store paths built outside Gradient, pushed into a cache with the `gradient` CLI.
 gradient login https://gradient.example.com
 ```
 
-The CLI opens the browser to confirm the login and stores the server and the token.
+The CLI is opening the browser to confirm the login. The CLI is then storing the server and the token.
 
 ## 2. Upload
 
@@ -21,14 +21,15 @@ The CLI opens the browser to confirm the login and stores the server and the tok
 gradient cache upload main $(readlink -f result)
 ```
 
-- The CLI uploads the path together with the full runtime closure, dependencies first.
-- `--no-closure` uploads only the named paths.
-- Paths are full store paths; `readlink -f` resolves a `result` link.
+- The CLI is uploading the path together with the full runtime closure, dependencies first.
+- `--no-closure` is uploading only the named paths.
+- Paths are full store paths.
+- `readlink -f` is resolving a `result` link.
 
-Large NARs go up in 32 MiB chunks, below the reverse proxy's body limit. The server caps a single NAR at [`services.gradient.nar.maxUploadSize`](../reference/configuration.md#nar), 512 MiB by default.
+Large NARs go up in 32 MiB chunks, below the reverse proxy's body limit. The server is capping a single NAR at [`services.gradient.nar.maxUploadSize`](../reference/configuration.md#nar), 512 MiB by default.
 
 ??? note "Machines Without Nix"
-    A NAR dumped elsewhere uploads together with the matching narinfo, also the only upload mode of the [static binary](../reference/cli.md#install):
+    A NAR dumped elsewhere is uploadable together with the matching narinfo. This mode is also the only upload mode of the [static binary](../reference/cli.md#install).
 
     ```sh
     gradient cache upload main --nar-file hello.nar --narinfo hello.narinfo
@@ -40,18 +41,18 @@ Large NARs go up in 32 MiB chunks, below the reverse proxy's body limit. The ser
 gradient cache nar list main --package hello
 ```
 
-The same list shows in the UI under **NARs** on the cache page, with filters by hash and package.
+The UI is showing the same list under **NARs** on the cache page, with filters by hash and package.
 
 ## Manage NARs
 
 | Command | Effect |
 |---|---|
-| `gradient cache nar list <cache>` | Lists NARs, filter with `--hash`, `--package`, sort with `--sort` |
-| `gradient cache nar show <cache> <hash>` | Shows one NAR: store path, sizes, signature and fetch count |
-| `gradient cache nar stats <cache>` | Shows the NAR count and total size |
-| `gradient cache nar delete <cache> <hash>` | Removes the NAR from the cache |
+| `gradient cache nar list <cache>` | Listing NARs, filtered with `--hash` and `--package`, sorted with `--sort` |
+| `gradient cache nar show <cache> <hash>` | One NAR: store path, sizes, signature and fetch count |
+| `gradient cache nar stats <cache>` | The NAR count and total size |
+| `gradient cache nar delete <cache> <hash>` | Removing the NAR from the cache |
 
-A NAR held by several caches stays stored until the last cache deletes the NAR; deleting from one cache never breaks another.
+NARs held by several caches stay stored until deleted from the last cache. Deleting from one cache is never breaking another.
 
 ## Next Steps
 

@@ -1,6 +1,6 @@
 # Internals
 
-Implementation details outside the scheduler and the protocol: how Git host events enter, how NARs are stored and served, how the graph is queried in SQL, and how requests authenticate. Paths are relative to `backend/`.
+Implementation details outside the scheduler and the protocol. The pages are covering Git host events, NAR storage and serving, SQL graph queries and request authentication. Paths are relative to `backend/`.
 
 ```mermaid
 flowchart LR

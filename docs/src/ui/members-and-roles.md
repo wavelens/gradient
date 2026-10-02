@@ -1,21 +1,21 @@
 # Members and Roles
 
-Who can do what in a project or a cache. Projects and caches each have their own members and roles: **Settings -> Members & Roles** on a project, **Members & Roles** on a cache.
+Who can do what in a project or a cache. Projects and caches each have their own members and roles. **Settings -> Members & Roles** on a project and **Members & Roles** on a cache lead there.
 
 ![Members & Roles](../assets/screenshots/members_and_roles.png)
 
-| Area | Shows | Actions |
+| Area | Content | Actions |
 |---|---|---|
-| Members | Every member with their role | **Add Member** invites a user; change a role; remove a member |
+| Members | Every member with their role | **Add Member** is inviting a user. Change a role. Remove a member |
 | Pending Invitations | Invitations not yet accepted | **Revoke** |
 | Roles | The built-in roles and custom roles | **New Role**: a name and single permissions |
 
 ## Invitations
 
-- **Add Member** sends an invitation; the user has no access until accepting under **Settings -> My Invites**.
-- Invitations expire after 7 days; one user holds at most one open invitation per project or cache.
-- With [email](../reference/configuration.md#email) configured, the invitee also gets a link by mail.
-- A superuser who already holds the permission adds members directly.
+- **Add Member** is sending an invitation. The user is without access until accepting under **Settings -> My Invites**.
+- Invitations expire after 7 days. One user can hold at most one open invitation per project or cache.
+- The invitee is also receiving a link by mail with [email](../reference/configuration.md#email) configured.
+- A superuser already holding the permission is adding members directly.
 - Projects and caches [declared in Nix](../guides/manage-with-nix.md) take their members from the configuration only.
 
 ## Project Roles
@@ -24,9 +24,9 @@ Who can do what in a project or a cache. Projects and caches each have their own
 |---|---|
 | Admin | Everything, including settings, members, roles and deleting the project |
 | Write | Tasks, triggers, actions, evaluations, integrations, workers, webhooks, cache subscriptions, SSH key |
-| View | See the project; also change workers, integrations, cache subscriptions and the SSH key |
+| View | See the project. Also change workers, integrations, cache subscriptions and the SSH key |
 
-| Permission | Allows |
+| Permission | Scope |
 |---|---|
 | `viewProject` | Seeing the project and its evaluations |
 | `manageProjectSettings`, `deleteProject` | Editing or deleting the project |
@@ -45,7 +45,7 @@ Who can do what in a project or a cache. Projects and caches each have their own
 | Write | See the cache, download and upload paths |
 | View | See the cache and download paths |
 
-| Permission | Allows |
+| Permission | Scope |
 |---|---|
 | `viewCache` | Seeing the cache |
 | `readStore`, `writeStore` | Downloading and uploading paths |
@@ -60,7 +60,7 @@ Who can do what in a project or a cache. Projects and caches each have their own
 - Built-in roles cannot be edited or deleted.
 - A custom role still assigned to a member cannot be deleted.
 - The last Admin of a cache cannot be removed.
-- Roles can come from identity provider groups, see [Set Up Single Sign-On](../guides/sso.md#3-map-groups-to-roles).
+- Roles can come from identity provider groups, described in [Set Up Single Sign-On](../guides/sso.md#3-map-groups-to-roles).
 
 ## Related
 

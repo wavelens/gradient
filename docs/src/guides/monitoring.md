@@ -1,6 +1,6 @@
 # Monitor Gradient
 
-Server metrics in Prometheus or any OpenTelemetry collector: workers, queue, builds, evaluations, cache size and HTTP traffic. The [Job Board](../ui/job-board.md) covers the same data inside Gradient; this guide feeds existing dashboards and alerts.
+Server metrics in Prometheus or any OpenTelemetry collector: workers, queue, builds, evaluations, cache size and HTTP traffic. The [Job Board](../ui/job-board.md) is covering the same data inside Gradient. This guide is feeding existing dashboards and alerts.
 
 **Requirements:**
 
@@ -9,7 +9,7 @@ Server metrics in Prometheus or any OpenTelemetry collector: workers, queue, bui
 
 | | Prometheus | OpenTelemetry |
 |---|---|---|
-| Direction | Prometheus scrapes `GET /metrics` | Gradient pushes OTLP over HTTP |
+| Direction | Prometheus scraping `GET /metrics` | Gradient pushing OTLP over HTTP |
 | Metrics | All metrics below | Workers, jobs and cache gauges |
 | Pick when | Prometheus is already active | A collector is already active, or the server is unreachable for a scraper |
 
@@ -25,10 +25,10 @@ services.prometheus.scrapeConfigs = [{
 }];
 ```
 
-1.  Any random string, e.g. `openssl rand -base64 32`; without the file `GET /metrics` returns `404`.
-2.  The bundled reverse proxy does not forward `/metrics`; the scraper talks to `listenAddr` and `port` directly.
+1.  Any random string, e.g. `openssl rand -base64 32`. `GET /metrics` is answering `404` without the file.
+2.  The bundled reverse proxy does not forward `/metrics`. The scraper is talking to `listenAddr` and `port` directly.
 
-The endpoint refills one request per second, with a burst of 5.
+The endpoint is refilling one request per second, with a burst of 5.
 
 ## 2. OpenTelemetry
 
@@ -39,12 +39,12 @@ services.gradient.metrics.otlp = {
 };
 ```
 
-1.  OTLP over HTTP with protobuf, including the `/v1/metrics` path; the service name is `gradient`.
+1.  OTLP over HTTP with protobuf, including the `/v1/metrics` path. The service name is `gradient`.
 
 ## Verify Deployment
 
-- Prometheus: the `gradient` target shows **UP**, and `gradient_workers_connected` returns the number of connected workers.
-- OpenTelemetry: the server log shows `OTLP metric push enabled`, and the collector receives `gradient_jobs_pending`.
+- Prometheus: the `gradient` target is showing **UP**. `gradient_workers_connected` is returning the number of connected workers.
+- OpenTelemetry: the server log is showing `OTLP metric push enabled`. The collector is receiving `gradient_jobs_pending`.
 
 ## Metrics
 

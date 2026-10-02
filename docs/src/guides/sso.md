@@ -5,17 +5,17 @@ Sign-in through the company identity provider (Keycloak, Kanidm, Authentik, Okta
 **Requirements:**
 
 - An identity provider with OpenID Connect
-- For provisioning: SCIM support in the provider (Okta, Entra ID)
+- SCIM support in the provider (Okta, Entra ID), for provisioning only
 
 ## 1. Register Gradient in the Provider
 
-Create an OIDC client with:
+Create an OIDC client with the settings below.
 
 | Setting | Value |
 |---|---|
 | Redirect URL | `https://gradient.example.com/api/v1/auth/oidc/callback` |
 | Scopes | `openid`, `email`, `profile`, plus `groups` for role mapping |
-| PKCE | `S256`; Gradient always sends PKCE |
+| PKCE | `S256`. Gradient is always sending PKCE |
 
 Store the client secret as a file on the server.
 
@@ -32,13 +32,13 @@ services.gradient.oidc = {
 };
 ```
 
-1.  Gradient reads every endpoint from `<discoveryUrl>/.well-known/openid-configuration`.
-2.  `groups` is not in the default scopes; add `groups` for [role mapping](#3-map-groups-to-roles) when the provider knows the scope.
-3.  Hides the username and password login; leave out to offer both.
+1.  Gradient is reading every endpoint from `<discoveryUrl>/.well-known/openid-configuration`.
+2.  `groups` is not in the default scopes. Add `groups` for [role mapping](#3-map-groups-to-roles) where the provider is supporting the scope.
+3.  Hiding the username and password login. Leave out to offer both.
 
 ## 3. Map Groups to Roles
 
-A custom role lists the provider groups that grant the role:
+A custom role is listing the provider groups that grant the role.
 
 ```nix
 services.gradient.state.roles.acme-engineer = {
@@ -48,11 +48,11 @@ services.gradient.state.roles.acme-engineer = {
 };
 ```
 
-On each sign-in, a member of `acme-eng` gets the `acme-engineer` role in `acme`. Groups only add roles; leaving a group removes nothing until SCIM or an admin does.
+A member of `acme-eng` is receiving the `acme-engineer` role in `acme` on each sign-in. Groups only add roles. A member leaving a group keeps every role. Only SCIM or an admin can take a role away.
 
 ## 4. Provision with SCIM
 
-Optional. The provider creates, updates and disables Gradient accounts before anyone signs in, and group changes apply at once.
+Optional. The provider is creating, updating and disabling Gradient accounts before the first sign-in. Group changes apply at once.
 
 ```nix
 services.gradient.scim = {
@@ -63,30 +63,31 @@ services.gradient.scim = {
 services.gradient.state.roles.acme-engineer.scim_group = [ "acme-eng" ];
 ```
 
-1.  Any random string, e.g. `openssl rand -hex 32`; the provider sends the same value as bearer token.
+1.  Any random string, e.g. `openssl rand -hex 32`. The provider is sending the same value as bearer token.
 
-In the provider, set the SCIM base URL `https://gradient.example.com/scim/v2`, the bearer token, and enable pushing users, profile updates and groups.
+Set the SCIM base URL `https://gradient.example.com/scim/v2` and the bearer token in the provider. Enable pushing users, profile updates and groups.
 
 | Provider action | Effect in Gradient |
 |---|---|
-| Add a user | Creates a passwordless account, claimed on the first OIDC sign-in |
-| Add to a group | Grants every role with that `scim_group` |
-| Remove from a group | Revokes those roles |
-| Deactivate or delete | Blocks sign-in and keeps the history; `scim.hardDelete = true` deletes the account |
+| Add a user | A new passwordless account, claimed on the first OIDC sign-in |
+| Add to a group | Every role with that `scim_group` granted |
+| Remove from a group | Those roles revoked |
+| Deactivate or delete | Sign-in blocked, history kept. `scim.hardDelete = true` is deleting the account |
 
 ## Verify Deployment
 
-- The login page shows the provider's button; signing in lands on the dashboard.
-- **Members & Roles** in `acme` lists the user with the `acme-engineer` role.
+- The login page is showing the provider's button.
+- Signing in is landing on the dashboard.
+- **Members & Roles** in `acme` is listing the user with the `acme-engineer` role.
 
 ## Troubleshooting
 
 | Symptom | Fix |
 |---|---|
-| `An account already exists with this username or email` | A password account holds the same name or email; delete or rename the account, or sign in with the password |
-| No roles after sign-in | The `groups` scope is missing, or the group name differs from `oidc_group` |
+| `An account already exists with this username or email` | A password account is holding the same name or email. Delete or rename the account, or sign in with the password |
+| No roles after sign-in | The `groups` scope is missing, or the group name does not match `oidc_group` |
 | `account is deactivated` | SCIM deactivated the account in the provider |
-| SCIM calls return `404` for a group | No role lists the group in `scim_group` |
+| SCIM calls return `404` for a group | No role is listing the group in `scim_group` |
 
 ## Next Steps
 

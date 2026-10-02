@@ -18,7 +18,7 @@ flowchart LR
 
 -   :material-clipboard-list: **[Capabilities and Assignment](capabilities-and-dispatch.md)**
 
-    What a worker advertises, job offers and pull-based assignment.
+    Worker capabilities, job offers and pull-based assignment.
 
 -   :material-hammer-wrench: **[Jobs](jobs.md)**
 
@@ -40,5 +40,5 @@ flowchart LR
 
 ## Related
 
-- [Scheduler](../scheduler/index.md): what decides which job a worker gets
+- [Scheduler](../scheduler/index.md): the logic choosing a worker's next job
 - [Add a Remote Worker](../../guides/remote-worker.md): the setup side

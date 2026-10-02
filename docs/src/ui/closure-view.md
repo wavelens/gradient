@@ -1,30 +1,30 @@
 # Closure View
 
-Where the size of a build output comes from, as a Sankey diagram of the closure. Useful for trimming ISOs, netboot images and container layers. **View Closure** on an entry point's metrics page opens the closure of the newest build.
+The origin of a build output's size, as a Sankey diagram of the closure. Useful for trimming ISOs, netboot images and container layers. **View Closure** on an entry point's metrics page is opening the closure of the newest build.
 
 ![Closure view](../assets/screenshots/closure_view.png)
 
-| Area | Shows | Actions |
+| Area | Content | Actions |
 |---|---|---|
 | Header | Total closure size, closure type, truncation warning | Zoom in, zoom out, fit to screen |
 | Diagram | Packages as bars, flowing from dependencies on the left into the root on the right | Scroll to zoom, drag to pan |
 
-A bar's height is the package's closure size: its own NAR plus everything the package pulls in. The tallest bars are the best candidates to remove.
+A bar's height is the package's closure size. This size is covering the package's own NAR plus everything pulled in by the package. The tallest bars are the best candidates to remove.
 
 ## Runtime and Build Closure
 
 | Closure | Contains | Open with |
 |---|---|---|
-| Runtime | Store paths the outputs reference, what the output needs to run | Default |
+| Runtime | Store paths referenced by the outputs, required at runtime | Default |
 | Build | Every derivation needed to build the output | `?type=build` in the URL |
 
-The runtime closure covers only outputs already in the cache.
+The runtime closure is covering only outputs already in the cache.
 
 ## Large Closures
 
-- The 500 largest packages show one by one; the rest collapse into an **others** bar under the nearest shown package.
-- Each package shows under one parent only, and the bars add up to the total.
-- The total stays exact, even when the header warns about truncation.
+- The 500 largest packages show one by one. The rest collapse into an **others** bar under the nearest shown package.
+- Each package is showing under one parent only. The bars add up to the total.
+- The total is staying exact, even with a truncation warning in the header.
 
 ## Related
 

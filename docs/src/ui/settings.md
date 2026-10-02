@@ -8,14 +8,14 @@ Three settings pages: the user's own, a project's and a cache's. Fields of entit
 
 **Settings** in the header.
 
-| Page | Shows | Actions |
+| Page | Content | Actions |
 |---|---|---|
-| Profile | Username, full name, email | Edit; pick the theme under **Appearance**; **Delete Account** |
+| Profile | Username, full name, email | Edit. Pick the theme under **Appearance**. **Delete Account** |
 | API Keys | Keys with their scope and permissions | **New API Key**, edit, revoke, delete |
 | Sessions | Every device signed in to the account | **Revoke** a session |
 | My Invites | Open invitations to projects and caches | Accept or decline |
 
-The theme (**System**, **Light**, **Dark**) is stored per browser, not per account.
+The browser is storing the theme (**System**, **Light**, **Dark**), not the account.
 
 ![API Keys](../assets/screenshots/api_keys.png)
 
@@ -23,14 +23,14 @@ The theme (**System**, **Light**, **Dark**) is stored per browser, not per accou
 
 **Settings** on the project page.
 
-| Section | Shows | Actions |
+| Section | Content | Actions |
 |---|---|---|
-| General | Name, display name, description, visibility | Edit; **Hide Build Requests task** hides the task holding `gradient build` evaluations from task lists; the evaluations continue |
+| General | Name, display name, description, visibility | Edit. **Hide Build Requests task** is hiding the task holding `gradient build` evaluations from task lists. The evaluations continue |
 | More Settings | Links to Members & Roles, Workers, Cache Subscriptions, Integrations, Webhooks | Open each page |
-| SSH Key | The public key the project clones with | Copy as a deploy key on the Git host |
-| Danger Zone | | **Regenerate Key**, the old key stops working at once; **Delete Project** |
+| SSH Key | The public key for cloning the project's repositories | Copy as a deploy key on the Git host |
+| Danger Zone | | **Regenerate Key**, invalidating the old key at once. **Delete Project** |
 
-A public project shows its evaluations and builds to everyone, signed in or not.
+A public project is showing its evaluations and builds to everyone, signed in or not.
 
 ## Cache Settings
 
@@ -38,12 +38,12 @@ A public project shows its evaluations and builds to everyone, signed in or not.
 
 | Field | Effect |
 |---|---|
-| Priority | Advertised to Nix clients in `nix-cache-info`; lower wins, default `10` |
-| Local Priority | Priority for clients from `services.gradient.http.localIps`; empty keeps **Priority** |
-| Max Storage (GB) | New evaluations wait when every writable cache of the project has less than 10 MiB left; `0` is unlimited |
-| Visibility | A public cache serves paths without credentials |
+| Priority | Advertised to Nix clients in `nix-cache-info`. Lower values win, default `10` |
+| Local Priority | Priority for clients from `services.gradient.http.localIps`. Empty is keeping **Priority** |
+| Max Storage (GB) | New evaluations wait while every writable cache of the project is down to less than 10 MiB. `0` is unlimited |
+| Visibility | A public cache is serving paths without credentials |
 
-The cache page also holds **Upstream Caches**, **NARs**, **Members & Roles**, **Subscriptions** and **Webhooks**.
+The cache page is also holding **Upstream Caches**, **NARs**, **Members & Roles**, **Subscriptions** and **Webhooks**.
 
 ![Cache NARs](../assets/screenshots/cache_nars.png)
 

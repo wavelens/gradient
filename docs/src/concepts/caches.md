@@ -1,6 +1,6 @@
 # Caches
 
-A **cache** is a Nix binary cache built into Gradient. Projects subscribe to caches, every output a project builds lands in its subscribed caches, and `nix` on any machine substitutes from them.
+A **cache** is a Nix binary cache built into Gradient. Projects subscribe to caches. Every build output of a project is landing in its subscribed caches. `nix` on any machine can substitute from those caches.
 
 ```mermaid
 flowchart LR
@@ -11,13 +11,13 @@ flowchart LR
 
 ## Using a Cache
 
-The cache page shows the substituter URL and the public key to add to the Nix configuration. A public cache serves anyone; a private cache needs credentials, see [Authentication](../guides/share-a-cache.md#1-use-the-cache-on-a-machine).
+The cache page is showing the substituter URL and the public key for the Nix configuration. A public cache is serving anyone. A private cache is requiring credentials, described in [Authentication](../guides/share-a-cache.md#1-use-the-cache-on-a-machine).
 
-Each cache announces a priority to `nix` (lower wins, default `10`) and can announce a different one to clients on the local network. Machines next to the server then prefer the Gradient cache over remote ones.
+Each cache is announcing a priority to `nix`, with lower values winning and a default of `10`. A cache can announce a different priority to clients on the local network. Machines next to the server then prefer the Gradient cache over remote ones.
 
 ## Upstream Types
 
-Upstream caches are set under **Settings -> Upstream Caches** on the cache page.
+Upstream caches live under **Settings -> Upstream Caches** on the cache page.
 
 | Type | Upstream Cache | Modes |
 |---|---|---|
@@ -29,30 +29,30 @@ Upstream caches are set under **Settings -> Upstream Caches** on the cache page.
 - **Read Only**: pull through only.
 - **Write Only**: push only.
 
-Declared caches in [`services.gradient.state`](../reference/state.md#cachesname) take Internal and HTTP (`external` in Nix) upstream caches; Gradient Proto upstream caches are set in the UI.
+Declared caches in [`services.gradient.state`](../reference/state.md#cachesname) take Internal and HTTP (`external` in Nix) upstream caches. Gradient Proto upstream caches are configurable in the UI.
 
-**Deactivate** disables an upstream cache without removing the entry, and **Activate** turns it back on. An inactive upstream cache keeps its settings but is never queried. Paths then come from the remaining upstream caches. A declared cache also accepts **Deactivate** and **Activate**, and the next server start restores the declared `active` value.
+**Deactivate** is disabling an upstream cache without removing the entry. **Activate** is turning the upstream cache back on. An inactive upstream cache is keeping its settings. Gradient is never querying an inactive upstream cache. Paths then come from the remaining upstream caches. A declared cache is also accepting **Deactivate** and **Activate**. The next server start is restoring the declared `active` value.
 
-**Test** on an HTTP upstream fetches its `nix-cache-info` over HTTP/1.1 and over HTTP/2 and reports each result. An HTTP upstream that breaks HTTP/2 transfers is switched to HTTP/1.1 for good and shows an **HTTP/1.1** badge.
+**Test** on an HTTP upstream is fetching its `nix-cache-info` over HTTP/1.1 and over HTTP/2. The test is reporting each result. Gradient is switching an HTTP upstream with broken HTTP/2 transfers to HTTP/1.1 for good. Such an upstream is showing an **HTTP/1.1** badge.
 
 ## Pull-Through
 
-A cache serves paths from its upstream caches as if the cache held them. A client asking for a missing path gets the upstream cache's copy through the cache, re-signed with the cache's own key. Clients configure one URL and one key, wherever a path came from.
+A cache is serving paths from its upstream caches as if the cache held them. A client asking for a missing path is receiving the upstream copy through the cache. The cache is re-signing that copy with its own key. Clients configure one URL and one key, wherever a path came from.
 
 ## Substitution
 
-Before building anything, Gradient decides per derivation whether a build is needed at all:
+Gradient is deciding per derivation whether a build is needed at all, before building anything.
 
-1. An output already in any cache on the instance needs no work.
-2. Otherwise Gradient asks the upstream caches of the caches the project subscribes to for each output.
-3. When every output is found, the build is **substituted**: a worker fetches the outputs, and nothing below the derivation is built or fetched.
-4. When an output is missing, the derivation is built, and its inputs go through the same check.
+1. An output already in any cache on the instance is requiring no work.
+2. Gradient is asking the upstream caches of the subscribed caches for each output missing on the instance.
+3. A build with every output found is **substituted**. A worker is fetching the outputs. Gradient is neither building nor fetching anything below the derivation.
+4. A worker is building a derivation with a missing output. Its inputs go through the same check.
 
-Gradient only asks for derivations an evaluation actually needs. An upstream cache that stops answering is paused for a minute instead of slowing every lookup.
+Gradient is only asking for derivations actually needed by an evaluation. Gradient is pausing an unresponsive upstream cache for a minute instead of slowing every lookup.
 
 ## Sharing
 
-A project subscribes to a cache to push outputs there and substitute from there. Subscribing needs rights on both sides; without cache rights, the subscription becomes a request that a cache admin approves under **Subscriptions** on the cache page.
+Projects subscribe to a cache for pushing outputs there and substituting from there. Subscribing is requiring rights on both sides. A subscription without cache rights is turning into a request. A cache admin can approve the request under **Subscriptions** on the cache page.
 
 ## Roles
 
@@ -62,7 +62,7 @@ A project subscribes to a cache to push outputs there and substitute from there.
 | Write | Read and upload paths |
 | View | See the cache and download paths |
 
-Custom roles combine single permissions, see [Members and Roles](../ui/members-and-roles.md#cache-roles).
+Custom roles combine single permissions, described in [Members and Roles](../ui/members-and-roles.md#cache-roles).
 
 ## Related
 

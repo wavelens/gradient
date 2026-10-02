@@ -1,21 +1,21 @@
 # Connect GitLab
 
-Evaluations on every push and merge request, with commit statuses back on GitLab, through two integrations: an **inbound** one that receives webhooks and an **outbound** one that reports status.
+Evaluations on every push and merge request, with commit statuses back on GitLab. Two integrations connect GitLab: an **inbound** one receiving webhooks and an **outbound** one reporting status.
 
 **Requirements:**
 
-- A task whose repository URL points to GitLab (gitlab.com or self-hosted), see [First Project](../get-started/first-project.md)
+- A task with a repository URL pointing to GitLab (gitlab.com or self-hosted), see [First Project](../get-started/first-project.md)
 - A GitLab access token with the `api` scope and at least the Developer role on the repository
 
 ## 1. Create the Integrations
 
 === "UI"
 
-    In the project, **Integrations -> New Integration** twice:
+    Open **Integrations -> New Integration** in the project twice, once per kind.
 
     | Kind | Fields |
     |---|---|
-    | Inbound | Name, **Git Host** GitLab and a **Webhook Secret** (the refresh button generates one; copy the value, the secret is shown once). The created integration shows the **Webhook URL**. |
+    | Inbound | Name, **Git Host** GitLab and a **Webhook Secret**. The refresh button is generating a secret. The secret is shown once and must be copied. The created integration is showing the **Webhook URL**. |
     | Outbound | Name, **Git Host** GitLab, **Endpoint URL** (e.g. `https://gitlab.com`) and the **Access Token** |
 
 === "Declarative"
@@ -40,13 +40,13 @@ Evaluations on every push and merge request, with commit statuses back on GitLab
     };
     ```
 
-    1.  Any random string, e.g. `openssl rand -hex 32`; the GitLab webhook uses the same value.
+    1.  Any random string, e.g. `openssl rand -hex 32`. The GitLab webhook is using the same value.
 
     The webhook URL is `https://gradient.example.com/api/v1/hooks/gitlab/acme/gitlab-in`.
 
 ## 2. Add the Webhook on GitLab
 
-In the GitLab project (or group), **Settings -> Webhooks -> Add new webhook**:
+Open **Settings -> Webhooks -> Add new webhook** in the GitLab project (or group).
 
 | Field | Value |
 |---|---|
@@ -54,39 +54,40 @@ In the GitLab project (or group), **Settings -> Webhooks -> Add new webhook**:
 | Secret token | The secret from step 1 |
 | Trigger | **Push events**, **Tag push events**, **Comments**, **Merge request events**, **Releases events** |
 
-A push-only webhook never delivers merge requests or the `/gradient` comment commands.
+A push-only webhook is never delivering merge requests or the `/gradient` comment commands.
 
 ## 3. Wire the Task
 
-A task created after the integrations, whose repository host matches exactly one inbound and one outbound integration, gets a **Push (reporter)** trigger and a **Git Host Status Report** action automatically. Otherwise, on the task:
+Gradient is adding a **Push (reporter)** trigger and a **Git Host Status Report** action automatically to a new task. The task must be created after the integrations. Its repository host must match exactly one inbound and one outbound integration. Other tasks need both added by hand.
 
 - **Triggers -> New Trigger**: **Push (reporter)** and, for merge requests, **Pull Request (reporter)**, each with the inbound integration.
 - **Actions -> New Action**: **Git Host Status Report** with the outbound integration.
 
 ## Verify Deployment
 
-- A push starts an evaluation within seconds; **Settings -> Webhooks -> Edit -> Recent events** shows a `200` delivery.
-- The commit on GitLab shows Gradient's pipeline status.
+- A push is starting an evaluation within seconds.
+- **Settings -> Webhooks -> Edit -> Recent events** is showing a `200` delivery.
+- The commit on GitLab is showing Gradient's pipeline status.
 
 ## Merge Requests
 
 | Action on GitLab | Effect |
 |---|---|
-| Open or update a merge request | Evaluates the merge request's head commit |
-| Comment `/gradient run` | Starts an evaluation of the merge request |
-| Comment `/gradient approve` | Releases a merge request from a fork waiting for maintainer approval |
+| Open or update a merge request | Evaluation of the merge request's head commit |
+| Comment `/gradient run` | New evaluation of the merge request |
+| Comment `/gradient approve` | Release of a merge request from a fork waiting for maintainer approval |
 
-The approval gate is a setting of the **Pull Request (reporter)** trigger: **Require maintainer approval for PRs from non-writers**. GitLab sends no webhook for review approvals; the comment is the only way to approve.
+The approval gate is a setting of the **Pull Request (reporter)** trigger: **Require maintainer approval for PRs from non-writers**. GitLab is sending no webhook for review approvals. The comment is the only way to approve.
 
 ## Troubleshooting
 
 | Symptom | Fix |
 |---|---|
-| `401` in the webhook's recent events | Secret mismatch; enter the secret again on both sides (**Edit -> Webhook Secret** in Gradient) |
+| `401` in the webhook's recent events | Secret mismatch. Enter the secret again on both sides (**Edit -> Webhook Secret** in Gradient) |
 | `403 forbidden_source_ip` | GitLab's address is missing from the integration's allowed source IPs |
-| `404` | Wrong project or integration name in the webhook URL, or the inbound integration has no secret |
-| `200`, but no evaluation | No task trigger uses this integration, or no task repository URL matches |
-| No status on the commit | The token lacks the `api` scope or the Developer role |
+| `404` | Wrong project or integration name in the webhook URL, or an inbound integration without a secret |
+| `200`, but no evaluation | No task trigger is using this integration, or no task repository URL is matching |
+| No status on the commit | The token is lacking the `api` scope or the Developer role |
 
 ## Next Steps
 

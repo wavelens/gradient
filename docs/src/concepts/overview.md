@@ -1,6 +1,6 @@
 # Overview
 
-Gradient organises CI around **projects**. A project owns **tasks**, each task turns a flake into **evaluations**, and each evaluation fans out into **builds** that run on **workers** and end up in **caches**.
+Gradient is organising CI around **projects**. A project is holding **tasks**. Each task is turning a flake into **evaluations**. Each evaluation is fanning out into **builds**. Builds run on **workers** and end up in **caches**.
 
 ```mermaid
 flowchart LR
@@ -21,16 +21,16 @@ flowchart LR
 |---|---|
 | [Project](projects-and-tasks.md#project) | Unit of access: members, roles, workers and cache subscriptions |
 | [Task](projects-and-tasks.md#task) | One repository plus the flake outputs to build, selected by a wildcard |
-| Trigger | Starts an evaluation of a task: push, pull request, polling or schedule |
-| [Evaluation](evaluations-and-builds.md#evaluation) | One run of a task at one commit, listing every derivation to build |
-| [Build](evaluations-and-builds.md#build) | One derivation, built once and shared by every evaluation that needs the same derivation |
-| [Worker](workers.md) | A machine that evaluates flakes and builds derivations for the projects that enable the worker |
-| [Cache](caches.md) | A Nix binary cache that stores build outputs and serves them to `nix` |
-| Action | Reacts to evaluation and build events: mail, web request, Git host status, pull request |
+| Trigger | Starting an evaluation of a task: push, pull request, polling or schedule |
+| [Evaluation](evaluations-and-builds.md#evaluation) | One pass over a task at one commit, listing every derivation to build |
+| [Build](evaluations-and-builds.md#build) | One derivation, built once and shared by every evaluation needing the same derivation |
+| [Worker](workers.md) | A machine evaluating flakes and building derivations for the projects with the worker enabled |
+| [Cache](caches.md) | A Nix binary cache storing build outputs and serving them to `nix` |
+| Action | Reacting to evaluation and build events: mail, web request, Git host status, pull request |
 
 ## Shared Builds
 
-A derivation is built once across the whole instance. Two projects that depend on the same derivation share one build: the first evaluation to reach the derivation starts the build, the others wait for the same result.
+The whole instance is building a derivation only once. Two projects depending on the same derivation share one build. The first evaluation reaching the derivation is starting the build. The other evaluations wait for the same result.
 
 ## Related
 

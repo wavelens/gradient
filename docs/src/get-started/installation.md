@@ -1,15 +1,15 @@
 # Installation
 
-A production instance: managed secrets, a chosen database, and TLS that fits the network in front of the server. Builds on the [Quick Start](quick-start.md) configuration.
+A production instance with managed secrets, a chosen database, and TLS matching the network in front of the server. This page is extending the [Quick Start](quick-start.md) configuration.
 
 **Requirements:**
 
 - A NixOS host configured through a flake, with the Gradient module added ([Quick Start, step 1](quick-start.md#1-flake-input))
-- PostgreSQL 18 or newer; the server refuses to start against older versions
+- PostgreSQL 18 or newer. The server is refusing to start against older versions.
 
 ## 1. Public Binary Cache
 
-Pre-built Gradient packages for substituting instead of compiling:
+Pre-built Gradient packages are available for substituting instead of compiling.
 
 ```nix
 nix.settings = {
@@ -22,7 +22,10 @@ nix.settings = {
 
 ## 2. Secrets
 
-Two secrets, each 48 random bytes in base64: `jwtFile` signs login sessions, `cryptFile` encrypts secrets stored in the database.
+Gradient is requiring two secrets, each 48 random bytes in base64.
+
+- `jwtFile` is signing login sessions.
+- `cryptFile` is encrypting secrets stored in the database.
 
 === "sops-nix"
 
@@ -63,10 +66,10 @@ Two secrets, each 48 random bytes in base64: `jwtFile` signs login sessions, `cr
     };
     ```
 
-The files can stay owned by root: the server reads them as systemd credentials.
+The files can stay owned by root. The server is reading them as systemd credentials.
 
 !!! warning
-    Losing `cryptFile` makes every secret stored in the database unreadable. Back up `cryptFile` together with the database.
+    Every secret stored in the database is unreadable without `cryptFile`. Back up `cryptFile` together with the database.
 
 ## 3. Database
 
@@ -85,15 +88,15 @@ The files can stay owned by root: the server reads them as systemd credentials.
     services.gradient.database.urlFile = "/run/secrets/gradient-database-url";
     ```
 
-    The file holds a connection URL such as `postgresql://gradient:<password>@db.example.com/gradient`.
+    The file is holding a connection URL such as `postgresql://gradient:<password>@db.example.com/gradient`.
 
 ## 4. Reverse Proxy and TLS
 
-The server serves the API, the worker protocol and the cache; a reverse proxy in front serves the web frontend and TLS.
+The server is serving the API, the worker protocol and the cache. A reverse proxy in front is serving the web frontend and TLS.
 
 === "nginx (default)"
 
-    Enabled by default, with a Let's Encrypt certificate:
+    Enabled by default, with a Let's Encrypt certificate.
 
     ```nix
     services.gradient.domain = "gradient.example.com";
@@ -108,18 +111,18 @@ The server serves the API, the worker protocol and the cache; a reverse proxy in
     };
     ```
 
-    1.  Replaces nginx.
-    2.  An existing certificate from `security.acme.certs`; Caddy requests none for this host.
+    1.  Used instead of nginx.
+    2.  An existing certificate from `security.acme.certs`. Caddy is requesting no certificate for this host.
 
 === "TLS terminated upstream"
 
-    A load balancer or Cloudflare terminates TLS and forwards plain HTTP:
+    A load balancer or Cloudflare is terminating TLS and forwarding plain HTTP.
 
     ```nix
     services.gradient.reverseProxy.nginx.manageTls = false; # (1)!
     ```
 
-    1.  nginx stops requesting a certificate. `useTls` stays `true` and Gradient still emits `https://` links and secure cookies.
+    1.  nginx is no longer requesting a certificate. `useTls` is staying `true`, and Gradient is still emitting `https://` links and secure cookies.
 
 === "Own proxy"
 
@@ -133,23 +136,23 @@ The server serves the API, the worker protocol and the cache; a reverse proxy in
     | everything else | static files from `${pkgs.gradient-frontend}/share/gradient-frontend` |
 
 !!! warning
-    `services.gradient.useTls = false` is only for plain HTTP end to end. Behind any HTTPS proxy, browsers then drop the session cookie and login breaks.
+    `services.gradient.useTls = false` is only for plain HTTP end to end. Browsers then drop the session cookie behind any HTTPS proxy, and login is breaking.
 
 ## 5. Workers
 
-- On the server host: `services.gradient.worker.enable = true`, as in the [Quick Start](quick-start.md#3-enable-gradient).
-- On other machines: see [Add a Remote Worker](../guides/remote-worker.md).
+- Server host: `services.gradient.worker.enable = true`, as in the [Quick Start](quick-start.md#3-enable-gradient).
+- Other machines: [Add a Remote Worker](../guides/remote-worker.md).
 
 ## Verify Deployment
 
-- `https://gradient.example.com` shows the login page with a valid certificate.
-- `journalctl -u gradient-server` shows no database or secret errors.
+- `https://gradient.example.com` is showing the login page with a valid certificate.
+- `journalctl -u gradient-server` is showing no database or secret errors.
 
 ??? note "Crash Reports"
-    `services.gradient.sentry.enable = true` sends crash reports to the Gradient developers; off by default.
+    `services.gradient.sentry.enable = true` is sending crash reports to the Gradient developers. Crash reports are off by default.
 
 ??? note "Network Tuning for Fast or Distant Links"
-    A default deployment needs no tuning. On a high-bandwidth or high-latency link between workers and server, BBR and larger TCP buffers help:
+    A default deployment is fine without tuning. BBR and larger TCP buffers help on a high-bandwidth or high-latency link between workers and server.
 
     ```nix
     boot.kernel.sysctl = {
@@ -159,7 +162,7 @@ The server serves the API, the worker protocol and the cache; a reverse proxy in
     };
     ```
 
-    Jumbo frames save little CPU and hang large transfers when any hop disagrees on the MTU; enable them only where every hop is under control.
+    Jumbo frames save little CPU. Jumbo frames can hang large transfers on an MTU mismatch at any hop. Enable them only where every hop is under control.
 
 ## Next Steps
 

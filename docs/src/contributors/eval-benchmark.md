@@ -1,6 +1,6 @@
 # Eval Benchmark
 
-`gradient-evalbench` measures where an evaluation spends its time between the server and the eval worker. The benchmark is a NixOS VM test that evaluates the e2e hello flake four times and leaves one capture bundle per run, to open in a viewer and drill into.
+`gradient-evalbench` is measuring an evaluation's time split between the server and the eval worker. The benchmark is a NixOS VM test evaluating the e2e hello flake four times. Each pass is leaving one capture bundle, to open in a viewer and drill into.
 
 ```mermaid
 flowchart LR
@@ -16,27 +16,31 @@ nix build .#gradient-evalbench -L
 cat result/summary.txt
 ```
 
-- Not part of `nix flake check`: perf and strace make the benchmark slow and noisy.
-- Built by Gradient, the evaluation page offers four downloads through `nix-support/hydra-build-products`: `evalbench.tar.gz` (the whole bundle), `summary.txt`, `summary.json` and `index.html` (the [report](#report)). The builder needs the `kvm` and `nixos-test` system features.
-- The summarizer has a cheap check of its own: `nix build .#checks.x86_64-linux.evalbench-summarize`.
+- Not part of `nix flake check`. Perf and strace make the benchmark slow and noisy.
+- A Gradient-built benchmark is offering four downloads on the evaluation page through `nix-support/hydra-build-products`.
+- The downloads are `evalbench.tar.gz` (the whole bundle), `summary.txt`, `summary.json` and `index.html` (the [report](#report)).
+- The builder is needing the `kvm` and `nixos-test` system features.
+- The summarizer is coming with a cheap check of its own, `nix build .#checks.x86_64-linux.evalbench-summarize`.
 
 ## Benchmark Passes
 
-| Run | State before | Captures |
+| Pass | State before | Captured data |
 |---|---|---|
 | `cold-clean` | Fresh `gradient` database, empty worker eval cache | Spans, pcaps, Postgres statistics |
 | `warm-clean` | Same commit evaluated again | Spans, pcaps, Postgres statistics |
 | `cold-instrumented` | Reset as for `cold-clean` | Spans, perf, strace, `auto_explain` |
 | `warm-instrumented` | Same commit evaluated again | Spans, perf, strace, `auto_explain` |
 
-- A cold reset drops and recreates the database, which the server re-provisions from `services.gradient.state`. The worker's Nix store keeps fetched sources.
-- Captures run from the manual evaluation until the evaluation leaves `EvaluatingDerivation`; the run then waits for `Completed` before the next one starts.
-- `summary.txt` reports the clean passes only: perf, strace and `auto_explain` distort timings.
-- The test fails only when an evaluation fails or a capture file is missing. There are no timing thresholds.
+- A cold reset is dropping and recreating the database. The server is re-provisioning the database from `services.gradient.state`.
+- The worker's Nix store is keeping fetched sources.
+- Captures are active from the manual evaluation until the evaluation is leaving `EvaluatingDerivation`.
+- The pass is then waiting for `Completed` before the next pass is starting.
+- `summary.txt` is reporting the clean passes only. Perf, strace and `auto_explain` distort timings.
+- The test is failing only on a failed evaluation or a missing capture file. There are no timing thresholds.
 
 ## Report
 
-`gradient-evalbench-inspector` renders a bundle as one self-contained HTML page, and each chart as its own SVG next to the page. The benchmark renders its own bundle into `result/report/`; a downloaded bundle renders the same way:
+`gradient-evalbench-inspector` is rendering a bundle as one self-contained HTML page, and each chart as its own SVG next to the page. The benchmark is rendering its own bundle into `result/report/`. A downloaded bundle is renderable the same way.
 
 ```sh
 nix run .#gradient-evalbench-inspector -- evalbench.tar.gz -o report
@@ -44,14 +48,19 @@ xdg-open report/index.html
 ```
 
 - All passes: mode, evaluated seconds, traced wall time, `evaluation_metric`, and span totals side by side.
-- Per pass: the assignment path (each step from the evaluate request to the worker's `job`, with the wait before each step), job phase totals and a phase Gantt per assigned job, a span timeline per process lane, a span flame graph (spans folded by nesting), span totals, `pg_stat_statements`, the `auto_explain` statements by total plan time and the slowest plans, and the perf flame graphs.
-- Every bar carries its details as a hover title; `<run>/trace.json` is copied beside the page for Perfetto.
+- Per pass, assignment: the assignment path (each step from the evaluate request to the worker's `job`, with the wait before each step).
+- Per pass, jobs: job phase totals and a phase Gantt per assigned job.
+- Per pass, spans: a span timeline per process lane, a span flame graph (spans folded by nesting) and span totals.
+- Per pass, database: `pg_stat_statements`, the `auto_explain` statements by total plan time and the slowest plans.
+- Per pass, CPU: the perf flame graphs.
+- Every bar is carrying its details as a hover title.
+- `<run>/trace.json` is copied beside the page for Perfetto.
 
 ## Bundle
 
-| Path | Open with | Shows |
+| Path | Open with | Contents |
 |---|---|---|
-| `summary.txt`, `summary.json` | Any editor | Per run: wall time, worker clock offset, `evaluation_metric`, spans by total time |
+| `summary.txt`, `summary.json` | Any editor | Per pass: wall time, worker clock offset, `evaluation_metric`, spans by total time |
 | `<run>/trace.json` | [ui.perfetto.dev](https://ui.perfetto.dev) | Server, worker and eval subprocess on one timeline |
 | `<run>/trace/*.jsonl` | `jq` | Raw spans, one file per process |
 | `<run>/proto.pcap` | Wireshark | Worker to server `/proto` traffic: round trips, frame sizes |
@@ -66,7 +75,7 @@ xdg-open report/index.html
 
 ## Spans
 
-The benchmark sets `services.gradient.log.traceDir` and `services.gradient.worker.log.traceDir` ([Configuration](../reference/configuration.md)). Each process writes every closed `gradient*` span at `debug` or above as one JSON line, independent of the console log level.
+The benchmark is setting `services.gradient.log.traceDir` and `services.gradient.worker.log.traceDir` ([Configuration](../reference/configuration.md)). Each process is writing every closed `gradient*` span at `debug` or above as one JSON line. The console log level has no effect on these lines.
 
 ```json
 {"name":"flush","target":"gradient_graph::writer","ts_us":1759140000123456,"dur_us":8123,"pid":812,"process":"server","fields":{"batches":2,"rows":100}}
@@ -78,14 +87,14 @@ The benchmark sets `services.gradient.log.traceDir` and `services.gradient.worke
 | `worker` | `on_job_offer`, `score_candidates`, `send_scores`, `request_job`, `job`, `fetch_repository` (`clone_and_checkout`, `run_input_update`, `archive_flake`, `prefetch_one`, `prefetch_flake_best_effort`, `missing_paths`), `evaluate_flake`, `evaluate_derivations`, `wave`, `parse_drv_wave`, `query_known_derivations`, `report_eval_result` |
 | `eval` | `open`, `lock_flake`, `discover`, `plan_shards`, `resolve` (`attr`) |
 
-- `record` minus its `flush` is the time a batch waited in the graph writer's mailbox.
-- `job_event.queue_wait_us` is the time a report waited behind earlier reports of the same worker.
+- `record` minus its `flush` is the batch's wait in the graph writer's mailbox.
+- `job_event.queue_wait_us` is the report's wait behind earlier reports of the same worker.
 
 ## Clock Alignment
 
-Server and worker run on separate VMs with separate clocks. `summarize.py` moves worker and eval spans onto the server clock:
+Server and worker are running on separate VMs with separate clocks. `summarize.py` is moving worker and eval spans onto the server clock.
 
 - Upstream pairs: the n-th `report_eval_result` of a job against the n-th `job_event` with `kind = eval_result` of the same job (receive time = start minus `queue_wait_us`).
 - Downstream pairs: `assign_job` end against the worker's `job` start.
-- Offset = (minimum upstream delay - minimum downstream delay) / 2, which makes the fastest message in each direction equally slow.
-- A run without pairs in both directions stays unaligned (`offset 0`, marked `unaligned`).
+- Offset = (minimum upstream delay - minimum downstream delay) / 2. This offset is making the fastest message in each direction equally slow.
+- A pass without pairs in both directions is staying unaligned (`offset 0`, marked `unaligned`).

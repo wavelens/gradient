@@ -10,7 +10,7 @@
 
 -   :material-source-branch: **[Git Host Integration](guides/github.md)**
 
-    GitHub, Gitea / Forgejo and GitLab: builds on push and pull request. Sends status checks back.
+    Building on push and pull request from GitHub, Gitea / Forgejo and GitLab. Status checks sent back.
 
 -   :material-console: **[Build Before Pushing](guides/build-before-push.md)**
 
@@ -22,7 +22,7 @@
 
 -   :material-server-network: **[Scales With Workers](concepts/workers.md)**
 
-    Evaluation and builds both run on workers. Each added machine adds capacity.
+    Evaluation and builds both running on workers. Every added machine is adding capacity.
 
 -   :material-robot: **[MCP Server](guides/mcp.md)**
 
@@ -46,13 +46,13 @@
 
 | | [Hydra](https://github.com/NixOS/hydra) | GitHub Actions + [Cachix](https://www.cachix.org) | Gradient |
 |---|---|---|---|
-| Build start | After the whole evaluation finishes | After the job has evaluated the flake | While the evaluation is still running |
-| Evaluation | On the server, limited by one machine | Inside each job, limited by the runner | On workers, scales with them |
-| Nix store | Kept on the server and builders | Empty on every job; each job downloads its closure again | Kept on the workers between builds |
+| Build start | After the end of the whole evaluation | After the job has evaluated the flake | While the evaluation is still running |
+| Evaluation | On the server, limited by one machine | Inside each job, limited by the runner | On workers, scaling with them |
+| Nix store | Kept on the server and builders | Empty on every job. Each job is downloading its closure again | Kept on the workers between builds |
 | Shared work | One build per derivation | Parallel jobs can build the same derivation twice | Every derivation built once, shared across projects |
 | Build outputs | Pass through the server | Pushed from the runner to Cachix | Large outputs go from worker straight to S3 |
-| Server host | Needs a writable Nix store | Hosted by GitHub | Needs no Nix store, fits in a micro-VM |
-| Heavy builds | Static machine list with speed factors | Fixed runner sizes | Scoring system places them by predicted memory, learned from past builds |
+| Server host | Writable Nix store required | Hosted by GitHub | No Nix store required, small enough for a micro-VM |
+| Heavy builds | Static machine list with speed factors | Fixed runner sizes | Scoring system placing them by predicted memory, learned from past builds |
 | Private caches | One store for the whole instance | Free plan: 5 GB, filled quickly by full closures | Per-project caches with access control, on own S3 or disk storage |
 | Sign-in | Local accounts, LDAP, OIDC with roles for the whole instance | GitHub accounts | [OIDC](guides/sso.md) with provider groups mapped to roles per project, SCIM provisioning |
 | Integrations | Minimal JSON API | GitHub only | REST API, webhooks, Git Integrations and MCP server |
@@ -61,7 +61,7 @@
 
 ## Public Binary Cache
 
-Pre-built Gradient packages:
+Pre-built Gradient packages are available from the public cache.
 
 ```text
 URL:        https://public.gradient.ci/cache/main
@@ -78,4 +78,4 @@ Public Key: public.gradient.ci-main:qmxRE+saUvhNa3jqaCMWje+feVU77TjABchZrPGf7A8=
 [Get started](get-started/quick-start.md){ .md-button .md-button--primary }
 [Try the public instance](https://public.gradient.ci){ .md-button }
 
-Gradient is developed by [Wavelens GmbH](https://wavelens.io) and released under the [AGPL-3.0-only](https://github.com/wavelens/gradient/blob/main/LICENSE) license.
+[Wavelens GmbH](https://wavelens.io) is developing Gradient. Gradient is available under the [AGPL-3.0-only](https://github.com/wavelens/gradient/blob/main/LICENSE) license.

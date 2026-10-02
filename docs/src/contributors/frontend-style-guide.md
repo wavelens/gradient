@@ -1,6 +1,6 @@
 # Frontend Style Guide
 
-The frontend is shipping its own design system page at `/styleguide`: every shared primitive, colour role and layout pattern, live. A new feature reuses a primitive before building a new one.
+The frontend is shipping its own design system page at `/styleguide`: every shared primitive, colour role and layout pattern, live. A new feature is reusing a primitive before building a new one.
 
 ```mermaid
 flowchart LR
@@ -11,10 +11,10 @@ flowchart LR
 
 ## The Page
 
-- Lazy-loaded at `/styleguide`, deliberately linked from nowhere, without an auth guard; shows no production data.
+- Lazy-loaded at `/styleguide`, deliberately linked from nowhere, without an auth guard. No production data on the page.
 - Source: `frontend/src/app/features/styleguide/`, one component per section page.
 
-| Section | Shows |
+| Section | Contents |
 |---|---|
 | Overview | The rules below |
 | Foundations | Colour roles, type scale, spacing, border radius |
@@ -25,15 +25,15 @@ flowchart LR
 ## Rules
 
 - Any store path, hash, key, ID or URL is a `gr-copy-field`, never a bare code span.
-- Colour comes from semantic roles: no hex outside the palette, and no component reads a palette token directly.
+- Colour is coming from semantic roles. No hex outside the palette, and no component reading a palette token directly.
 - New shared classes go into the design system, never into a component stylesheet.
 - Content shapes are `gr-row-list` or `gr-card-grid`, never named per entity.
-- Every element stays legible in both themes; nothing hard-codes black or white.
-- Text sits at most one step from body: 16px interactive, 14px secondary, 12px badges only.
+- Every element is staying legible in both themes. Nothing is hard-coding black or white.
+- Text is sitting at most one step from body: 16px interactive, 14px secondary, 12px badges only.
 
 ## Shared UI Package
 
-`@gradient/ui` is a pnpm workspace package at `frontend/packages/ui`. Gradient and the frontend of [`gradient-proxy`](architecture.md) for servers.gradient.ci are both building on it.
+`@gradient/ui` is a pnpm workspace package at `frontend/packages/ui`. Gradient and the frontend of [`gradient-proxy`](architecture.md) for servers.gradient.ci are both building on the package.
 
 | Entry | Content |
 |---|---|
@@ -74,10 +74,10 @@ import { MetricChartComponent } from '@shared/ui';
 | Class | Layout |
 |---|---|
 | `.gr-grid-stats` | Auto-fit grid of stat cards, 220px minimum |
-| `.gr-grid-form` | Two-column form, one column below `$breakpoint-md`; `.gr-grid-form__full` spans both |
+| `.gr-grid-form` | Two-column form, one column below `$breakpoint-md`. `.gr-grid-form__full` is spanning both |
 | `.gr-grid-cards` | Auto-fill grid of cards, 280px minimum |
 | `.gr-grid-rows` | Label, value, actions rows |
-| `.gr-form-actions` | Row of form buttons; `--end` aligns right |
+| `.gr-form-actions` | Row of form buttons. `--end` is aligning right |
 
 ## Related
 

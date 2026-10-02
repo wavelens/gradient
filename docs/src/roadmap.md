@@ -1,6 +1,6 @@
 # Roadmap
 
-Upcoming releases and the features
+Upcoming releases and their features.
 
 <div class="timeline" markdown>
 
@@ -14,15 +14,15 @@ The first release with a stability pledge.
 
 -   :material-shield-check: **Stability Pledge**
 
-    Stable, professional releases become a commitment. Each release includes migrations for the NixOS module options, the PostgreSQL schema, cache storage, the API and the worker protocol.
+    Stable, professional releases become a commitment. Each release is shipping migrations for the NixOS module options, the PostgreSQL schema, cache storage, the API and the worker protocol.
 
 -   :material-office-building: **Organizations**
 
-    A new level above projects. One organization holds the projects, members and workers of a team.
+    A new level above projects. One organization is holding the projects, members and workers of a team.
 
 -   :material-database-sync: **Storage Migrations**
 
-    Changes to the S3 and file layout migrate existing caches in place. An interrupted migration resumes after a restart.
+    Changes to the S3 and file layout migrate existing caches in place. An interrupted migration can resume after a restart.
 
 -   :material-broom: **Continuous Deep GC**
 
@@ -30,7 +30,7 @@ The first release with a stability pledge.
 
 -   :material-server-network: **Cluster Jobs**
 
-    Jobs that run on several workers at once. Gradient allocates all members together, in one [zone](concepts/workers.md#zones) when the job needs a fast interconnect.
+    Jobs that run on several workers at once. Gradient is allocating all members together. Jobs needing a fast interconnect get all members from one [zone](concepts/workers.md#zones).
 
 -   :material-palette: **Corporate Design**
 
@@ -82,11 +82,11 @@ Gradient without a single point of failure.
 
 -   :material-server-plus: **High Availability**
 
-    Several Gradient servers run one instance. Builds, caches and the web interface stay up while a server fails or updates.
+    Several Gradient servers run one instance. Builds, caches and the web interface stay up while a server is failing or updating.
 
 -   :material-earth: **Federation**
 
-    Gradient instances connect to each other. Builds and caches flow between instances; a path built on one is never built again on another.
+    Gradient instances connect to each other. Builds and caches flow between instances. Other instances are never rebuilding a path that one instance already built.
 
 </div>
 

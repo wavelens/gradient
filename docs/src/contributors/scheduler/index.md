@@ -1,6 +1,6 @@
 # Scheduler
 
-How an evaluated derivation becomes a finished, cached build. Every derivation is built once globally (the *shared build*); the pages follow a shared build from creation to assignment.
+The path from an evaluated derivation to a finished, cached build. Every derivation is built once globally, as one *shared build*. The pages are following a shared build from creation to assignment.
 
 ```mermaid
 flowchart LR
@@ -16,11 +16,11 @@ flowchart LR
 
 -   :material-source-branch: **[Shared Builds](shared-builds.md)**
 
-    One `derivation_build` row per derivation, and the graph writer that owns every write.
+    One `derivation_build` row per derivation, and the graph writer owning every write.
 
 -   :material-counter: **[Promotion and Counters](promotion-and-counters.md)**
 
-    How a shared build moves from `Created` to `Queued`, and the counters every start condition reads.
+    A shared build moving from `Created` to `Queued`, and the counters behind every start condition.
 
 -   :material-cloud-download: **[Upstream Substitution](upstream-substitution.md)**
 
@@ -32,7 +32,7 @@ flowchart LR
 
 -   :material-sync: **[Repair Pass](repair-pass.md)**
 
-    Heals for state no event reaches, and the emitter every shared build move fans out through.
+    Heals for state beyond the reach of any event, and the emitter fanning out every shared build move.
 
 -   :material-timer-sand: **[Waiting and Recovery](waiting-and-recovery.md)**
 
@@ -40,7 +40,7 @@ flowchart LR
 
 -   :material-scale-balance: **[Scoring](scoring.md)**
 
-    How the policy ranks pending jobs for the requesting worker.
+    Policy ranking of pending jobs for the requesting worker.
 
 -   :material-server-network: **[Cluster Jobs](clusters.md)**
 

@@ -1,6 +1,6 @@
 # Federation
 
-`gradient-proxy` joins pools of workers to customers' Gradient servers. Each customer (tenant) sees the proxy as one worker. The proxy speaks this protocol on both legs: an authority to its own workers, a worker to every tenant's server.
+`gradient-proxy` is joining pools of workers to customers' Gradient servers. Each customer (tenant) is seeing the proxy as one worker. The proxy is speaking this protocol on both legs. The proxy is an authority to its own workers and a worker to every tenant's server.
 
 ```mermaid
 flowchart RL
@@ -10,14 +10,15 @@ flowchart RL
     P -->|session B| SB[Server B]
 ```
 
-`gradient-proxy` lives in its own repository with its own NixOS module and `GRADIENT_PROXY_*` configuration. A full Gradient server never connects to another server.
+`gradient-proxy` is a separate repository with its own NixOS module and `GRADIENT_PROXY_*` configuration. A full Gradient server is never connecting to another server.
 
 ## Upstream Leg
 
-The proxy opens one normal worker session per tenant: `InitConnection`, `AuthChallenge`, `AuthResponse`, `InitAck`, as on the [connection page](connection.md). The customer registers the proxy's worker ID and token on their server like any worker; the operator stores both as the tenant's upstream link.
+The proxy is opening one normal worker session per tenant. The session is following the [connection page](connection.md): `InitConnection`, `AuthChallenge`, `AuthResponse`, `InitAck`. The customer is registering the proxy's worker ID and token on their server like any worker. The operator is storing both as the tenant's upstream link.
 
 - A session is open while the link is `enabled` and the tenant may run.
-- An auth rejection (401 or 403) marks the link `failing` with the reason. No new session starts until the link is set again.
+- An auth rejection (401 or 403) is marking the link `failing` with the reason.
+- No new session is starting until the link is set again.
 
 | Aspect | Behavior |
 |---|---|
@@ -29,49 +30,51 @@ The proxy opens one normal worker session per tenant: `InitConnection`, `AuthCha
 
 ## Downstream Leg
 
-The proxy authorizes its own workers from its small Postgres database.
+The proxy is authorizing its own workers from its small Postgres database.
 
 - Each authorized worker is a row: ID, name, tenant, argon2 token hash and allowed capabilities.
-- `AuthChallenge` names only the worker's own ID; the negotiated capabilities are the worker's offer AND the allowed set, `federate` always off.
-- Revoking a row closes the worker's live session.
-- Every worker serves every peer its tenant's server authorized.
+- `AuthChallenge` is naming only the worker's own ID.
+- The negotiated capabilities are the worker's offer AND the allowed set, with `federate` always off.
+- Revoking a row is closing the worker's live session.
+- Every worker is serving every peer its tenant's server authorized.
 
 ## Job Forwarding
 
 | Step | Proxy behavior |
 |---|---|
-| Tenants | One hub per tenant; a worker's row names its tenant, and frames never cross tenants |
-| Offers | Mirrors the upstream offer book and fans candidates out to capable workers |
-| Scores | Forwards the best score per candidate, changes only, once per second |
-| `RequestJob` | A worker's poll becomes an upstream poll; the best capable waiting worker gets the `AssignJob`, otherwise the proxy declines |
-| Reports | Routed by `job_id`; queries get a fresh `query_id`; reports for jobs a worker does not own are dropped |
-| Uploads | Each `UploadRequest` gets a fresh `request_id`; grants, chunks and commits are mapped back to the requesting worker |
-| Cluster jobs | `StartCluster`, `ClusterSignal` and `AbortCluster` reach every worker holding a member of the attempt; the roster names the worker behind the proxy, with its zone and endpoint |
-| Worker lost | Disconnect or 120 s heartbeat timeout reports `JobFailed` (transient) upstream |
-| Upstream lost | Sends `AbortJob` to that tenant's workers, answers its open queries with errors, closes its worker sessions after `Draining`; other tenants are untouched |
+| Tenants | One hub per tenant. A worker's row is naming its tenant, and frames never cross tenants |
+| Offers | Mirroring the upstream offer book and fanning candidates out to capable workers |
+| Scores | Forwarding the best score per candidate, changes only, once per second |
+| `RequestJob` | A worker's poll is becoming an upstream poll. The best capable waiting worker is getting the `AssignJob`. The proxy is declining without such a worker |
+| Reports | Routed by `job_id`. Queries get a fresh `query_id`. The proxy is dropping reports for jobs the worker does not own |
+| Uploads | Each `UploadRequest` is getting a fresh `request_id`. The proxy is mapping grants, chunks and commits back to the requesting worker |
+| Cluster jobs | `StartCluster`, `ClusterSignal` and `AbortCluster` reach every worker holding a member of the attempt. The roster is naming the worker behind the proxy, with its zone and endpoint |
+| Worker lost | Reporting `JobFailed` (transient) upstream on a disconnect or a 120 s heartbeat timeout |
+| Upstream lost | Sending `AbortJob` to that tenant's workers and answering the tenant's open queries with errors. Closing the tenant's worker sessions after `Draining`. Other tenants stay untouched |
 
 ## Passthrough
 
-- Every NAR pull, cache query and upload goes to the tenant's own Gradient server, under the remapped `job_id`, `query_id` or `request_id`.
-- Nothing is stored on the proxy; the tenant's server is the cache.
+- Every NAR pull, cache query and upload is going to the tenant's own Gradient server, under the remapped `job_id`, `query_id` or `request_id`.
+- The proxy is storing nothing.
+- The tenant's server is the cache.
 - Transfers over upstream presigned URLs bypass the proxy.
-- The proxy exposes no cache to its upstream servers.
+- The proxy is exposing no cache to its upstream servers.
 
 ## Hetzner Workers
 
-The proxy boots Hetzner Cloud VMs dedicated to one tenant. A reconcile pass every 60 s compares each tenant's pending jobs with its VMs and the servers labelled `gradient-tenant`.
+The proxy is booting Hetzner Cloud VMs dedicated to one tenant. A reconcile pass every 60 s is comparing each tenant's pending jobs with the tenant's VMs and the servers labelled `gradient-tenant`.
 
 | Rule | Behavior |
 |---|---|
-| Scale up | `min(max VMs, ceil(pending / slots))` VMs per system that has a configured server type |
-| Boot | From the uploaded worker snapshot; the user data holds the proxy URL, a worker ID and a one-time token stored as an argon2 hash |
-| Scale down | An idle VM is deleted within the last 5 minutes of its billing unit (default 60 minutes) |
-| Boot deadline | A VM not connected within the boot deadline (default 5 minutes) is deleted; its usage row is marked `failed_boot` and not billed |
-| Failing link or tenant may not run | The tenant stops polling upstream; its VMs drain and are deleted after the drain grace (default 15 minutes) |
-| Leak guard | A labelled server without a VM row is deleted; a row whose server is gone is closed |
-| Rate limit | Hetzner `429` and `5xx` back the tenant off from 1 s to 5 minutes; nothing is billed before the server exists |
+| Scale up | `min(max VMs, ceil(pending / slots))` VMs per system with a configured server type |
+| Boot | From the uploaded worker snapshot. The user data is holding the proxy URL, a worker ID and a one-time token, stored as an argon2 hash |
+| Scale down | The proxy is deleting an idle VM within the last 5 minutes of its billing unit (default 60 minutes) |
+| Boot deadline | The proxy is deleting a VM not connected within the boot deadline (default 5 minutes). The VM's usage row is ending as `failed_boot`, without a bill |
+| Failing link or tenant may not run | The tenant is stopping upstream polls. The tenant's VMs drain, and the proxy is deleting the VMs after the drain grace (default 15 minutes) |
+| Leak guard | The proxy is deleting a labelled server without a VM row. The proxy is closing a row with a missing server |
+| Rate limit | Hetzner `429` and `5xx` back the tenant off from 1 s to 5 minutes. Billing is starting only after server creation |
 
-Deleting a VM revokes its token. Each VM's uptime is metered in `vm_usage`, from creation to deletion.
+Deleting a VM is revoking the VM's token. `vm_usage` is metering each VM's uptime, from creation to deletion.
 
 ## Access Control
 
@@ -80,4 +83,4 @@ Deleting a VM revokes its token. Each VM's uptime is metered in `vm_usage`, from
 | Server -> proxy | Per project: the proxy's `worker_registration` rows, tokens and `enable_fetch` / `enable_eval` / `enable_build` |
 | Proxy -> worker | Per worker: `authorized_peers` rows with tenant, token hash and allowed capabilities |
 
-The `federate` capability, `proto.federate` on the server and `capabilities.federate` on the worker, is negotiated in the handshake, but no code acts on the flag yet.
+The handshake is negotiating the `federate` capability, `proto.federate` on the server and `capabilities.federate` on the worker. No code is acting on the flag yet.

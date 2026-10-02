@@ -1,6 +1,6 @@
 # Evaluations and Builds
 
-An **evaluation** reads a flake at one commit and finds every derivation the task's wildcard selects. Each derivation becomes a **build**. Builds start while the evaluation is still running, and a derivation is built only once across the whole instance.
+An **evaluation** is reading a flake at one commit and finding every derivation selected by the task's wildcard. Each derivation is turning into a **build**. Builds start while the evaluation is still running. The whole instance is building each derivation only once.
 
 ```mermaid
 flowchart LR
@@ -14,33 +14,33 @@ flowchart LR
 
 | Status | Meaning |
 |---|---|
-| Queued | Waiting for a worker that evaluates |
-| Fetching | A worker clones the repository and its flake inputs |
-| Evaluating | A worker walks the flake and reports derivations in batches |
-| Building | All derivations are known; builds are running |
-| Waiting | No connected worker can make progress, e.g. none has the needed system or features; resumes on its own. Builds needing a system or features no connected worker provides abort the evaluation with a warning after 5 minutes, unless the task opts into waiting for workers |
+| Queued | Waiting for an evaluating worker |
+| Fetching | A worker is cloning the repository and its flake inputs |
+| Evaluating | A worker is walking the flake and reporting derivations in batches |
+| Building | All derivations are known. Builds are running |
+| Waiting | No connected worker can make progress, e.g. no worker with the needed system or features. The evaluation is resuming on its own. Builds needing a system or features absent from every connected worker abort the evaluation after 5 minutes with a warning. A task can opt into waiting for workers instead |
 | Completed | Every build succeeded |
 | Failed | The evaluation or at least one build failed |
 | Aborted | Stopped by hand or replaced by a newer evaluation |
 
-An evaluation skips every dependency subtree already recorded by earlier evaluations. **Full rewalk** in the task menu starts an evaluation that walks the whole closure again.
+An evaluation is skipping every dependency subtree already recorded by earlier evaluations. **Full rewalk** in the task menu is starting an evaluation walking the whole closure again.
 
-The evaluation page lists the builds grouped by status, each entry point above its dependencies, with the merged live log and **Abort**. Right-clicking a build opens **Graph**, **Show Job** (the [Job Board](../ui/job-board.md) assignment), **Artefacts** and **Download Log**.
+The evaluation page is listing the builds grouped by status, each entry point above its dependencies. The page is also holding the merged live log and **Abort**. A right-click on a build is opening **Graph**, **Show Job** (the [Job Board](../ui/job-board.md) assignment), **Artefacts** and **Download Log**.
 
 ## Build
 
-A build belongs to the derivation, not to the evaluation. Every evaluation that needs the same derivation, in any project, shares the one build and its log.
+A build is tied to the derivation, not to the evaluation. Every evaluation needing the same derivation is sharing the one build and its log, across all projects.
 
 | Status | Meaning |
 |---|---|
 | Queued | Waiting for the dependencies or for a free worker |
 | Building | Running on a worker |
 | Completed | Built successfully |
-| Substituted | Not built: the outputs already existed in a cache or an upstream cache |
-| Failed | The builder failed or timed out; infrastructure errors (out of memory, disk full, network) are retried first |
+| Substituted | Not built. The outputs already existed in a cache or an upstream cache |
+| Failed | The builder failed or timed out. Gradient is retrying infrastructure errors (out of memory, disk full, network) first |
 | Dependency Failed | Not started, because a dependency failed |
 | Aborted | Cancelled together with the evaluation |
-| Skipped | A build-time dependency nothing needs, since the outputs above are already cached |
+| Skipped | An unneeded build-time dependency, with the outputs above already cached |
 
 ## Related
 

@@ -1,6 +1,6 @@
 # Build Before Pushing
 
-Uncommitted changes built on the CI workers with `gradient build`, with a `result` link at the end like `nix build`. The laptop needs no builders and no Nix evaluation.
+Uncommitted changes built on the CI workers with `gradient build`, with a `result` link at the end like `nix build`. No builders and no Nix evaluation on the laptop.
 
 **Requirements:**
 
@@ -9,25 +9,29 @@ Uncommitted changes built on the CI workers with `gradient build`, with a `resul
 
 ## 1. Build
 
-Inside the Git working tree:
+`gradient build` must start inside the Git working tree.
 
 ```sh
 gradient build .#hello
 ```
 
-- The CLI uploads the tracked files, including uncommitted changes; unchanged files are never sent twice.
-- A worker evaluates the upload under the project's `build-request` task and the workers build the result.
-- Logs stream until every build finishes.
+- The CLI is uploading the tracked files, including uncommitted changes.
+- Unchanged files are never sent twice.
+- A worker is evaluating the upload under the project's `build-request` task.
+- The workers are building the result.
+- Logs are streaming until every build is finished.
 
-| Target | Evaluates |
+| Target | Evaluated |
 |---|---|
 | none | The wildcard of the `build-request` task |
-| `.#hello` | `packages.<system>.hello`; `--system` picks another system |
+| `.#hello` | `packages.<system>.hello`, with `--system` picking another system |
 | `checks.x86_64-linux.#` | Any [wildcard](../reference/wildcards.md) |
 
 ## 2. Use the Result
 
-The primary output lands in a `result` symlink, fetched from the project cache into the local store; `--no-link` skips the link. The [static binary](../reference/cli.md#install) has no Nix support and downloads the build products into a `result/` folder instead.
+The primary output is landing in a `result` symlink, fetched from the project cache into the local store. `--no-link` is skipping the link.
+
+The [static binary](../reference/cli.md#install) is lacking Nix support. This binary is downloading the build products into a `result/` folder instead.
 
 ## Override Inputs
 
@@ -35,7 +39,11 @@ The primary output lands in a `result` symlink, fetched from the project cache i
 gradient build .#hello --override-input nixpkgs github:NixOS/nixpkgs/nixos-unstable
 ```
 
-Applies to this run only and repeats for several inputs. The evaluation is running on a worker: the reference must be remote (`github:`, `git+ssh://`, `https://`, ...), never a local path. For an override on every run, see [Update Flake Inputs](flake-updates.md).
+The override is applying to this run only. The flag is repeatable for several inputs.
+
+The evaluation is running on a worker. The reference must be remote (`github:`, `git+ssh://`, `https://`, ...), never a local path.
+
+[Update Flake Inputs](flake-updates.md) is covering an override on every run.
 
 ## Background Evaluations
 
@@ -44,21 +52,21 @@ eval=$(gradient build -b)
 gradient watch "$eval"
 ```
 
-| Command | Shows |
+| Command | Effect |
 |---|---|
-| `gradient build -b` | Prints the evaluation ID and returns at once |
-| `gradient watch <evaluation>` | A live dashboard: status, builds and a merged log; `f` follows, `q` quits |
+| `gradient build -b` | Printing the evaluation ID and returning at once |
+| `gradient watch <evaluation>` | A live dashboard with status, builds and a merged log. `f` to follow, `q` to quit |
 | `gradient logs <evaluation>` | The full log of every build, live or finished |
 
 ## Verify Deployment
 
-The run ends with every build completed and `result` pointing into `/nix/store`. The UI lists the run under the project's **Build Requests** task.
+The command is ending with every build completed and `result` pointing into `/nix/store`. The UI is listing the run under the project's **Build Requests** task.
 
 ## Limits
 
-- Only files tracked by Git are uploaded; untracked files are skipped.
-- The upload is capped by `http.maxSourceUploadSize`, 512 MiB by default.
-- Private `git+ssh://` inputs are fetched with the project's SSH key.
+- The upload is holding only files tracked by Git. Untracked files are left out.
+- `http.maxSourceUploadSize` is capping the upload, 512 MiB by default.
+- Private `git+ssh://` inputs are using the project's SSH key.
 
 ## Next Steps
 

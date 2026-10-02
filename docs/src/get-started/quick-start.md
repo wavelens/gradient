@@ -1,6 +1,6 @@
 # Quick Start
 
-A running Gradient instance with its own worker, on one NixOS host. For a first try without a NixOS host, see [Standalone](standalone.md).
+A running Gradient instance with its own worker, on one NixOS host. [Standalone](standalone.md) is covering a first try without a NixOS host.
 
 **Requirements:**
 
@@ -26,7 +26,7 @@ A running Gradient instance with its own worker, on one NixOS host. For a first 
 }
 ```
 
-1.  Brings in the `services.gradient` options for the server, the worker and the declarative state.
+1.  Source of the `services.gradient` options for the server, the worker and the declarative state.
 
 ## 2. Create Secrets
 
@@ -36,10 +36,10 @@ openssl rand -base64 48 > /var/lib/gradient-secrets/jwt
 openssl rand -base64 48 > /var/lib/gradient-secrets/crypt
 ```
 
-The first signs login sessions, the second encrypts secrets stored in the database. The worker creates its own token and needs nothing here.
+`jwt` is signing login sessions. `crypt` is encrypting secrets stored in the database. The worker is creating its own token without any file here.
 
 !!! tip
-    For a production host, manage these files with [sops-nix](https://github.com/Mic92/sops-nix) or [agenix](https://github.com/ryantm/agenix).
+    Manage these files with [sops-nix](https://github.com/Mic92/sops-nix) or [agenix](https://github.com/ryantm/agenix) on a production host.
 
 ## 3. Enable Gradient
 
@@ -60,17 +60,17 @@ The first signs login sessions, the second encrypts secrets stored in the databa
 }
 ```
 
-1.  Served by an nginx virtual host, set up by the module.
+1.  An nginx virtual host, set up by the module, is serving this domain.
 2.  A local PostgreSQL database for Gradient.
-3.  A worker on the same host. Self-registers and joins every project.
-4.  Gradient needs PostgreSQL 18 or newer; the NixOS default may be older.
+3.  A worker on the same host, self-registering and joining every project.
+4.  Gradient is requiring PostgreSQL 18 or newer. The NixOS default may be older.
 
 ## Verify Deployment
 
-- The login page loads at `https://gradient.example.com`.
-- `systemctl status gradient-server gradient-worker` shows both services running.
+- The login page is loading at `https://gradient.example.com`.
+- `systemctl status gradient-server gradient-worker` is showing both services running.
 
-The worker stays in a reconnect loop until the first project with a cache exists. That is expected; the next page creates both.
+The worker is staying in a reconnect loop until the first project with a cache is in place. This loop is expected. The next page is creating both.
 
 ## Next Steps
 

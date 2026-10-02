@@ -1,6 +1,6 @@
 # Messages
 
-Every message on `/proto`, from `backend/gradient-wire/src/messages`. IDs (`job_id`, `assignment_id`, peer IDs) are strings on the wire. **Bulk** messages carry payload chunks and travel on the bulk lane, everything else on the control lane.
+Every message on `/proto`, from `backend/gradient-wire/src/messages`. IDs (`job_id`, `assignment_id`, peer IDs) are strings on the wire. **Bulk** messages carry payload chunks and travel on the bulk lane. Everything else is travelling on the control lane.
 
 ## Server -> Worker
 
@@ -9,26 +9,26 @@ Every message on `/proto`, from `backend/gradient-wire/src/messages`. IDs (`job_
 | `AuthChallenge` | Peers that registered this worker | `peers` |
 | `InitAck` | Handshake accepted | `version`, `capabilities`, `authorized_peers`, `failed_peers` |
 | `AuthUpdate` | Result of a reauth | `authorized_peers`, `failed_peers` |
-| `Reject` | Declines the session, then closes | `code`, `reason` |
+| `Reject` | Declining the session, then closing | `code`, `reason` |
 | `Error` | Protocol error | `code`, `message` |
-| `Draining` | Server shutting down; request no more jobs | - |
+| `Draining` | Server shutting down. Request no more jobs | - |
 | `JobListChunk` | Full candidate list, answer to `RequestJobList` | `candidates`, `is_final` |
 | `JobOffer` | New candidates, up to 1 000 per message | `candidates` |
-| `AssignJob` | Assigns a job; `cluster` marks one member of a cluster attempt, held until `StartCluster` | `job_id`, `assignment_id`, `job`, `cluster` |
-| `AbortJob` | Cancels a job | `job_id`, `reason` |
-| `StartCluster` | Every member accepted; run the held jobs | `attempt`, `roster` |
+| `AssignJob` | Assigning a job. `cluster` is marking one member of a cluster attempt, held until `StartCluster` | `job_id`, `assignment_id`, `job`, `cluster` |
+| `AbortJob` | Cancelling a job | `job_id`, `reason` |
+| `StartCluster` | Every member accepted. Run the held jobs | `attempt`, `roster` |
 | `ClusterSignal` | Control message from another member of the attempt | `attempt`, `from`, `payload` |
-| `AbortCluster` | Drops or aborts every job of the attempt | `attempt`, `reason` |
+| `AbortCluster` | Dropping or aborting every job of the attempt | `attempt`, `reason` |
 | `Credential` | Short-lived credential, e.g. an SSH key | `kind`, `data` |
-| `NarStreamHeader` | Opens a NAR pull stream | `job_id`, `store_path`, `total_bytes`, `stream_token` |
+| `NarStreamHeader` | Opening a NAR pull stream | `job_id`, `store_path`, `total_bytes`, `stream_token` |
 | `NarPush` (bulk) | NAR pull chunk, 512 KiB zstd | `job_id`, `store_path`, `data`, `offset`, `is_final` |
-| `NarUnavailable` | Storage holds no object for the path; no chunks follow | `job_id`, `store_path`, `reason` |
-| `NarAbort` | Pull failed on a storage error or timeout, before or during the stream; retryable | `job_id`, `store_path`, `reason` |
+| `NarUnavailable` | No object in storage for the path. No chunks follow | `job_id`, `store_path`, `reason` |
+| `NarAbort` | Pull failed on a storage error or timeout, before or during the stream. Retryable | `job_id`, `store_path`, `reason` |
 | `EvalCachePullResult` | Answer to `EvalCachePull`: miss, presigned URL or inline stream | `job_id`, `outcome` |
 | `EvalCacheChunk` (bulk) | Inline evaluation cache chunk | `job_id`, `data`, `offset`, `is_final` |
 | `CacheStatus` | Answer to `CacheQuery` | `query_id`, `cached` |
 | `KnownDerivations` | Answer to `QueryKnownDerivations` | `query_id`, `known` |
-| `CacheError` | Cache state unknown; the worker retries | `query_id`, `message` |
+| `CacheError` | Cache state unknown. The worker is retrying | `query_id`, `message` |
 | `UploadGrant` | Upload admission: skip, passthrough (with resume offset), presigned PUT or multipart | `request_id`, `target` |
 | `UploadCommitted` | Upload outcome: ok, retry or rejected | `request_id`, `outcome` |
 
@@ -38,14 +38,14 @@ Every message on `/proto`, from `backend/gradient-wire/src/messages`. IDs (`job_
 |---|---|---|
 | `InitConnection` | First message | `version`, `capabilities`, `id` |
 | `AuthResponse` | One token per challenged peer | `tokens` |
-| `ReauthRequest` | Asks for a new `AuthChallenge` | - |
-| `Reject` | Declines after `InitAck`; defined, not sent by the reference worker | `code`, `reason` |
+| `ReauthRequest` | Asking for a new `AuthChallenge` | - |
+| `Reject` | Declining after `InitAck`. Defined, not sent by the reference worker | `code`, `reason` |
 | `WorkerCapabilities` | Systems, features, slots, CPU, RAM, core score, zone, endpoint | `architectures`, `system_features`, `max_concurrent_builds`, `zone`, `endpoint`, ... |
 | `WorkerMetrics` | Load heartbeat | `cpu_usage_pct`, `ram_free_mb`, `disk_speed_mbps`, `network_speed_mbps` |
-| `RequestJobList` | Asks for the full candidate list | - |
+| `RequestJobList` | Asking for the full candidate list | - |
 | `RequestJobChunk` | Score deltas | `scores`, `is_final` |
-| `RequestJob` | One free slot of a kind; repeated every 10 s while idle | `kind` (`Flake` or `Build`) |
-| `AssignJobResponse` | Accepts or declines an `AssignJob` | `job_id`, `accepted`, `reason` |
+| `RequestJob` | One free slot of a kind. Repeated every 10 s while idle | `kind` (`Flake` or `Build`) |
+| `AssignJobResponse` | Accepting or declining an `AssignJob` | `job_id`, `accepted`, `reason` |
 | `ClusterSignal` | Control message to one member (`to`) or every other member (`to` unset) of a started attempt | `attempt`, `to`, `payload` |
 | `JobUpdate` | Progress of a job | `job_id`, `assignment_id`, `update` |
 | `JobCompleted` | Job done, with the phase timeline | `job_id`, `assignment_id`, `spans` |
@@ -56,26 +56,27 @@ Every message on `/proto`, from `backend/gradient-wire/src/messages`. IDs (`job_
 | `EvalMessage` | Warning or error on the evaluation | `job_id`, `level`, `source`, `message` |
 | `NarRequest` | Pull these paths | `job_id`, `paths` |
 | `NarRequestResume` | Resume a pull from an offset | `job_id`, `store_path`, `received_bytes`, `stream_token` |
-| `EvalCachePull` | Asks for the evaluation cache | `job_id`, `fingerprint` |
+| `EvalCachePull` | Asking for the evaluation cache | `job_id`, `fingerprint` |
 | `CacheQuery` | Bulk cache lookup | `job_id`, `query_id`, `paths`, `mode`, `nar_sizes`, `external` |
-| `QueryKnownDerivations` | Which `.drv` files the server knows, to prune the walk | `job_id`, `query_id`, `drv_paths` |
-| `UploadRequest` | Asks for an upload slot for a NAR or the evaluation cache | `job_id`, `request_id`, `object`, `size` |
+| `QueryKnownDerivations` | The `.drv` files known to the server, for pruning the walk | `job_id`, `query_id`, `drv_paths` |
+| `UploadRequest` | Asking for an upload slot for a NAR or the evaluation cache | `job_id`, `request_id`, `object`, `size` |
 | `UploadChunk` (bulk) | Passthrough upload bytes | `request_id`, `data`, `offset`, `is_final` |
 | `UploadFinished` | Upload done, with NAR metadata | `request_id`, `metadata` |
-| `UploadCancel` | Cancels an upload | `request_id` |
+| `UploadCancel` | Cancelling an upload | `request_id` |
 
 ## Cache Query Modes
 
-| `mode` | Asks |
+| `mode` | Request |
 |---|---|
-| `Normal` | Which paths the caches hold; no URLs |
-| `Pull` | Held paths with transfer URLs; without a URL the worker streams with `NarRequest`. With `external`, one named path may come from an upstream cache |
-| `Push` | Which paths still need an upload |
+| `Normal` | The paths held by the caches. No URLs |
+| `Pull` | Held paths with transfer URLs. The worker is streaming a path without a URL through `NarRequest`. One named path may come from an upstream cache with `external` |
+| `Push` | The paths still needing an upload |
 
 ## Evaluation Messages
 
-`EvalMessage` attaches a message to the evaluation of the job, shown on the evaluation page.
+`EvalMessage` is attaching a message to the evaluation of the job, shown on the evaluation page.
 
-- The server stores the message only while the job is active; later messages are dropped.
-- An `Error` message fails the evaluation when the evaluation finishes.
+- The server is storing the message only while the job is active.
+- The server is dropping later messages.
+- An `Error` message is failing the evaluation once the evaluation is finished.
 - Sources in the reference worker: `fetch` (warnings while fetching inputs) and `build-prefetch`.
