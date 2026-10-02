@@ -6,6 +6,7 @@
 
 pub mod access;
 pub mod build_request_task;
+pub mod cache_paths;
 pub mod caches;
 pub mod chunked;
 pub mod connection;

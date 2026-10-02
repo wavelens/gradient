@@ -5,4 +5,7 @@
  */
 
 pub mod commands;
+pub mod nar;
 pub mod roots;
+pub mod session;
+pub mod store;

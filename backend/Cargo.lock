@@ -2684,10 +2684,31 @@ dependencies = [
 name = "gradient-ssh"
 version = "1.4.1"
 dependencies = [
+ "anyhow",
+ "bytes",
+ "futures",
+ "gradient-core",
+ "gradient-daemon",
+ "gradient-db",
+ "gradient-sources",
+ "gradient-storage",
+ "gradient-test-support",
  "gradient-types",
+ "gradient-util",
+ "harmonia-protocol",
+ "harmonia-store-content-address",
+ "harmonia-store-path",
+ "harmonia-store-path-info",
+ "harmonia-store-remote",
+ "harmonia-utils-hash",
+ "harmonia-utils-signature",
  "rand 0.10.3",
+ "sea-orm",
+ "serde_json",
  "shell-words",
  "thiserror 2.0.21",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]
