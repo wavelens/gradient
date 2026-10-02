@@ -143,4 +143,49 @@ describe('ActionFormComponent', () => {
     expect(emitted!.events).toEqual(['build.completed']);
     expect(emitted!.active).toBe(true);
   });
+
+  it('emits a Matrix config with the access token', () => {
+    const fixture = createFixture(true);
+    fixture.detectChanges();
+    const c = fixture.componentInstance;
+    c.name.set('Matrix');
+    c.onTypeChange('send_matrix_message');
+    c.homeserver.set(' https://matrix.example.org ');
+    c.roomId.set('!ops:example.org');
+    c.secretValue.set('syt_abc');
+    c.events.set(['build.failed']);
+    let emitted: CreateActionRequest | undefined;
+    c.saved.subscribe((r) => (emitted = r as CreateActionRequest));
+    c.onSubmit();
+    expect(emitted!.config).toEqual({
+      type: 'send_matrix_message',
+      homeserver: 'https://matrix.example.org',
+      room_id: '!ops:example.org',
+      access_token: 'syt_abc',
+    });
+  });
+
+  it('omits a blank Slack webhook URL when editing', () => {
+    const fixture = createFixture(true);
+    fixture.componentRef.setInput('mode', 'edit');
+    fixture.componentRef.setInput('existing', {
+      ...existing,
+      action_type: 'send_slack_message',
+      config: { type: 'send_slack_message' },
+    });
+    fixture.detectChanges();
+    const c = fixture.componentInstance;
+    let emitted: any;
+    c.saved.subscribe((r) => (emitted = r));
+    c.onSubmit();
+    expect(emitted.config).toEqual({ type: 'send_slack_message' });
+  });
+
+  it('offers Matrix and Slack without SMTP', () => {
+    const fixture = createFixture(false);
+    fixture.detectChanges();
+    const opts = fixture.componentInstance.typeOptions().map((o) => o.value);
+    expect(opts).toContain('send_matrix_message');
+    expect(opts).toContain('send_slack_message');
+  });
 });

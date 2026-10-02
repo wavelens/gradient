@@ -87,6 +87,52 @@
     </gr-form-field>
   }
 
+  @if (type() === 'send_matrix_message') {
+    <gr-form-field label="Homeserver" for="action-homeserver">
+      <input
+        grInput
+        id="action-homeserver"
+        [ngModel]="homeserver()"
+        (ngModelChange)="homeserver.set($event)"
+        placeholder="https://matrix.example.org"
+      />
+    </gr-form-field>
+    <gr-form-field label="Room ID" for="action-room">
+      <input
+        grInput
+        id="action-room"
+        [ngModel]="roomId()"
+        (ngModelChange)="roomId.set($event)"
+        placeholder="!abc:example.org"
+      />
+    </gr-form-field>
+    <gr-form-field label="Access Token" for="action-matrix-token">
+      <input
+        grInput
+        id="action-matrix-token"
+        type="password"
+        autocomplete="off"
+        [ngModel]="secretValue()"
+        (ngModelChange)="secretValue.set($event)"
+        [placeholder]="mode() === 'edit' ? 'Leave blank to keep the stored token' : ''"
+      />
+    </gr-form-field>
+  }
+
+  @if (type() === 'send_slack_message') {
+    <gr-form-field label="Webhook URL" for="action-slack-url">
+      <input
+        grInput
+        id="action-slack-url"
+        type="password"
+        autocomplete="off"
+        [ngModel]="secretValue()"
+        (ngModelChange)="secretValue.set($event)"
+        [placeholder]="mode() === 'edit' ? 'Leave blank to keep the stored URL' : 'https://hooks.slack.com/services/...'"
+      />
+    </gr-form-field>
+  }
+
   @if (type() === 'git_host_status_report') {
     <gr-form-field label="Outbound Integration" for="action-integration">
       <gr-select

@@ -83,6 +83,9 @@ export class ActionFormComponent implements OnChanges {
   subjectTemplate = signal('');
   url = signal('');
   tokenValue = signal('');
+  homeserver = signal('');
+  roomId = signal('');
+  secretValue = signal('');
   integrationId = signal('');
   prGenerator = signal<PrGenerator>('flake_lock');
   prGranularity = signal<PrGranularity>('per_run');
@@ -113,6 +116,8 @@ export class ActionFormComponent implements OnChanges {
     const opts: { label: string; value: ActionType }[] = [];
     if (this.smtpEnabled()) opts.push({ label: 'Send Mail', value: 'send_mail' });
     opts.push({ label: 'Send Web Request', value: 'send_web_request' });
+    opts.push({ label: 'Send Matrix Message', value: 'send_matrix_message' });
+    opts.push({ label: 'Send Slack Message', value: 'send_slack_message' });
     opts.push({ label: 'Git Host Status Report', value: 'git_host_status_report' });
     opts.push({ label: 'Open PR', value: 'open_pr' });
     return opts;
@@ -149,18 +154,26 @@ export class ActionFormComponent implements OnChanges {
       this.events.set([...cur.events]);
       this.applyConfigToForm(cur.config);
       this.tokenValue.set('');
+      this.secretValue.set('');
     } else {
       this.name.set('');
       this.active.set(true);
       this.type.set(this.smtpEnabled() ? 'send_mail' : 'send_web_request');
       this.events.set([]);
-      this.recipientsRaw.set('');
-      this.subjectTemplate.set('');
-      this.url.set('');
-      this.tokenValue.set('');
-      this.integrationId.set('');
-      this.resetPrFields();
+      this.resetConfigFields();
     }
+  }
+
+  private resetConfigFields(): void {
+    this.recipientsRaw.set('');
+    this.subjectTemplate.set('');
+    this.url.set('');
+    this.tokenValue.set('');
+    this.homeserver.set('');
+    this.roomId.set('');
+    this.secretValue.set('');
+    this.integrationId.set('');
+    this.resetPrFields();
   }
 
   private resetPrFields(): void {
@@ -195,17 +208,18 @@ export class ActionFormComponent implements OnChanges {
         this.prBodyTemplate.set(cfg.body_template ?? '');
         this.prUpdateExisting.set(cfg.update_existing);
         break;
+      case 'send_matrix_message':
+        this.homeserver.set(cfg.homeserver);
+        this.roomId.set(cfg.room_id);
+        break;
+      case 'send_slack_message':
+        break;
     }
   }
 
   onTypeChange(newType: ActionType): void {
     this.type.set(newType);
-    this.recipientsRaw.set('');
-    this.subjectTemplate.set('');
-    this.url.set('');
-    this.tokenValue.set('');
-    this.integrationId.set('');
-    this.resetPrFields();
+    this.resetConfigFields();
     if (newType === 'git_host_status_report') this.events.set([...GIT_HOST_STATUS_EVENTS]);
   }
 
@@ -256,6 +270,22 @@ export class ActionFormComponent implements OnChanges {
         const body = this.prBodyTemplate().trim();
         if (title) cfg.title_template = title;
         if (body) cfg.body_template = body;
+        return cfg;
+      }
+      case 'send_matrix_message': {
+        const cfg: Extract<ActionConfig, { type: 'send_matrix_message' }> = {
+          type: 'send_matrix_message',
+          homeserver: this.homeserver().trim(),
+          room_id: this.roomId().trim(),
+        };
+        const secret = this.secretValue().trim();
+        if (secret) cfg.access_token = secret;
+        return cfg;
+      }
+      case 'send_slack_message': {
+        const cfg: Extract<ActionConfig, { type: 'send_slack_message' }> = { type: 'send_slack_message' };
+        const secret = this.secretValue().trim();
+        if (secret) cfg.webhook_url = secret;
         return cfg;
       }
     }
