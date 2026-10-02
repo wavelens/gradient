@@ -74,6 +74,12 @@
           API Keys
           <span slot="meta">Manage API keys for programmatic access</span>
         </gr-row>
+        @if (config.sshEnabled) {
+          <gr-row icon="terminal" linkLabel="SSH keys" [link]="['/settings', 'ssh-keys']">
+            SSH Keys
+            <span slot="meta">Keys for ssh-ng:// substituters, nix copy and build hosts</span>
+          </gr-row>
+        }
         <gr-row icon="desktop_windows" linkLabel="Active sessions" [link]="['/settings', 'sessions']">
           Active Sessions
           <span slot="meta">View and revoke devices currently signed in to your account</span>

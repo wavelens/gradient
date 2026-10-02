@@ -13,6 +13,7 @@ import {
   Invite,
   PaginatedResponse,
   Session,
+  SshKey,
   UserSettings,
 } from '@core/models';
 import { PermissionDescriptor } from '@core/models/permission.model';
@@ -31,6 +32,18 @@ export class UserService {
 
   deleteUser(confirmation: { password?: string; confirm_username?: string }): Observable<string> {
     return this.api.delete<string>('user', confirmation);
+  }
+
+  getSshKeys(): Observable<SshKey[]> {
+    return this.api.get<SshKey[]>('user/ssh-keys');
+  }
+
+  addSshKey(name: string, publicKey: string): Observable<SshKey> {
+    return this.api.post<SshKey>('user/ssh-keys', { name, public_key: publicKey });
+  }
+
+  deleteSshKey(id: string): Observable<string> {
+    return this.api.delete<string>(`user/ssh-keys/${id}`);
   }
 
   getApiKeys(): Observable<ApiKey[]> {

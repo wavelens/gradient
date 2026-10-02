@@ -37,6 +37,14 @@ export interface ApiKey {
   allowed_ips: string[];
 }
 
+export interface SshKey {
+  id: string;
+  name: string;
+  fingerprint: string;
+  created_at: string;
+  last_used_at: string | null;
+}
+
 export interface Session {
   id: string;
   user_agent: string | null;

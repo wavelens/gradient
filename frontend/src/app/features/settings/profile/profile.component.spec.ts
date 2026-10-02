@@ -12,6 +12,7 @@ import { of } from 'rxjs';
 import { ProfileComponent } from './profile.component';
 import { UserService } from '@core/services/user.service';
 import { AuthService } from '@core/services/auth.service';
+import { ConfigService } from '@core/services/config.service';
 import { ThemeService } from '@core/services/theme.service';
 
 let profileWrites: unknown[] = [];
@@ -26,7 +27,7 @@ function settings(opts: { managed: boolean; oidc: boolean }) {
   };
 }
 
-function setup(opts: { managed: boolean; oidc: boolean }): ComponentFixture<ProfileComponent> {
+function setup(opts: { managed: boolean; oidc: boolean; ssh?: boolean }): ComponentFixture<ProfileComponent> {
   profileWrites = [];
   localStorage.clear();
   document.documentElement.removeAttribute('data-theme');
@@ -47,6 +48,7 @@ function setup(opts: { managed: boolean; oidc: boolean }): ComponentFixture<Prof
         },
       },
       { provide: AuthService, useValue: { reloadUser: () => undefined } },
+      { provide: ConfigService, useValue: { sshEnabled: opts.ssh ?? false } },
     ],
   });
   const fixture = TestBed.createComponent(ProfileComponent);
@@ -152,5 +154,17 @@ describe('ProfileComponent - appearance', () => {
     themeButton(fixture, 'System').click();
     fixture.detectChanges();
     expect(document.documentElement.hasAttribute('data-theme')).toBe(false);
+  });
+});
+
+describe('ProfileComponent - SSH keys row', () => {
+  it('is hidden while SSH is disabled', () => {
+    const fixture = setup({ managed: false, oidc: false });
+    expect(fixture.nativeElement.textContent).not.toContain('SSH Keys');
+  });
+
+  it('is shown when SSH is enabled', () => {
+    const fixture = setup({ managed: false, oidc: false, ssh: true });
+    expect(fixture.nativeElement.textContent).toContain('SSH Keys');
   });
 });

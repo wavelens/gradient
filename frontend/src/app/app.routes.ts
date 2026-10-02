@@ -475,6 +475,14 @@ export const routes: Routes = [
           ),
       },
       {
+        path: 'settings/ssh-keys',
+        title: 'SSH Keys',
+        loadComponent: () =>
+          import('./features/settings/ssh-keys/ssh-keys.component').then(
+            (m) => m.SshKeysComponent
+          ),
+      },
+      {
         path: 'settings/sessions',
         title: 'Sessions',
         loadComponent: () =>

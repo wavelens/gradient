@@ -1,0 +1,83 @@
+<!--
+  SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+
+  SPDX-License-Identifier: AGPL-3.0-only
+-->
+
+<gr-page-layout [breadcrumb]="[{ label: 'Settings', link: ['/settings', 'profile'] }, { label: 'SSH Keys' }]" title="SSH Keys" subtitle="Keys for ssh-ng:// substituters, nix copy and build hosts">
+  <button slot="actions" grButton label="Add SSH Key" icon="add" (click)="openDialog()"></button>
+
+  <gr-form-field label="Store address">
+    <gr-copy-field [value]="storeUrl" />
+  </gr-form-field>
+  <gr-form-field label="Build host">
+    <gr-copy-field [value]="buildHostCommand" />
+  </gr-form-field>
+
+  @if (loading()) {
+    <gr-loading-spinner message="Loading SSH keys..." />
+  } @else {
+    @if (keys().length === 0) {
+      <gr-empty-state icon="terminal" title="No SSH keys" message="Add a public key to connect over ssh-ng://.">
+        <button slot="action" grButton label="Add SSH Key" icon="add" (click)="openDialog()"></button>
+      </gr-empty-state>
+    } @else {
+      <gr-row-list>
+        @for (key of keys(); track key.id) {
+          <gr-row icon="terminal">
+            {{ key.name }}
+            <div slot="meta">
+              <span>{{ key.fingerprint }}</span>
+              <span>
+                · Last used: {{ key.last_used_at ? (key.last_used_at | date: 'medium') : 'never' }}
+              </span>
+            </div>
+            <div slot="actions">
+              <button
+                grButton
+                label="Delete"
+                icon="delete"
+                severity="danger"
+                (click)="deleteKey(key)"
+                [loading]="deletingId() === key.id"
+                [disabled]="deletingId() !== null"
+              ></button>
+            </div>
+          </gr-row>
+        }
+      </gr-row-list>
+    }
+  }
+</gr-page-layout>
+
+<gr-dialog [(visible)]="showDialog" width="520px" header="Add SSH Key">
+  @if (errorMessage()) {
+    <gr-message-banner type="error">{{ errorMessage() }}</gr-message-banner>
+  }
+
+  <gr-form-field label="Name" for="ssh-key-name">
+    <input grInput id="ssh-key-name" [(ngModel)]="formName" placeholder="e.g. Laptop" />
+  </gr-form-field>
+
+  <gr-form-field label="Public key" for="ssh-key-public">
+    <textarea
+      grInput
+      id="ssh-key-public"
+      rows="4"
+      [(ngModel)]="formPublicKey"
+      placeholder="ssh-ed25519 AAAA... user@host"
+    ></textarea>
+  </gr-form-field>
+
+  <div grDialogFooter>
+    <button grButton label="Cancel" severity="secondary" (click)="showDialog.set(false)" [disabled]="saving()"></button>
+    <button
+      grButton
+      label="Add"
+      icon="add"
+      (click)="addKey()"
+      [loading]="saving()"
+      [disabled]="saving() || !formName.trim() || !formPublicKey.trim()"
+    ></button>
+  </div>
+</gr-dialog>

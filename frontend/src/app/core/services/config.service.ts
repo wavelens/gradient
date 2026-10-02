@@ -21,6 +21,8 @@ interface ServerConfig {
   create_project: CreatePermission;
   create_cache: CreatePermission;
   github_app_enabled: boolean;
+  ssh_enabled: boolean;
+  ssh_port: number | null;
 }
 
 @Injectable({ providedIn: 'root' })
@@ -37,6 +39,8 @@ export class ConfigService {
   createProject: CreatePermission = 'everyone';
   createCache: CreatePermission = 'everyone';
   githubAppEnabled = false;
+  sshEnabled = false;
+  sshPort: number | null = null;
 
   canCreate(permission: CreatePermission, isSuperuser: boolean): boolean {
     switch (permission) {
@@ -66,6 +70,8 @@ export class ConfigService {
           this.createProject = res.message.create_project ?? 'everyone';
           this.createCache = res.message.create_cache ?? 'everyone';
           this.githubAppEnabled = res.message.github_app_enabled ?? false;
+          this.sshEnabled = res.message.ssh_enabled ?? false;
+          this.sshPort = res.message.ssh_port ?? null;
         }
       })
       .catch(() => {
