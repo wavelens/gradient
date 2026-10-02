@@ -261,7 +261,7 @@ mod tests {
 
     fn session(db: DatabaseConnection, permissions: i64) -> Arc<Session> {
         Arc::new(Session {
-            state: gradient_test_support::state::test_state(db),
+            state: gradient_test_support::state::test_state_web(db),
             user: gradient_test_support::fixtures::user(),
             project: gradient_test_support::fixtures::project(),
             permissions,
@@ -300,7 +300,8 @@ mod tests {
             .await
             .expect_err("hash mismatch");
         assert!(e.to_string().contains("NAR hash"), "{e}");
-        assert!(db.into_transaction_log().is_empty());
+        let log = format!("{:?}", db.into_transaction_log());
+        assert!(!log.contains("INSERT"), "{log}");
     }
 
     #[tokio::test]

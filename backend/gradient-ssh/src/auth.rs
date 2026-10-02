@@ -104,7 +104,7 @@ mod tests {
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             .append_query_results([Vec::<MUserSshKey>::new()])
             .into_connection();
-        let state = gradient_test_support::state::test_state(db);
+        let state = gradient_test_support::state::test_state_web(db);
 
         let rejected = authorize(&state, "project", "SHA256:unknown").await;
         assert!(rejected.is_err());
@@ -122,7 +122,7 @@ mod tests {
             .append_query_results([vec![user]])
             .append_query_results([Vec::<MProject>::new()])
             .into_connection();
-        let state = gradient_test_support::state::test_state(db);
+        let state = gradient_test_support::state::test_state_web(db);
 
         let rejected = authorize(&state, "someone-elses", "SHA256:known").await;
         assert_eq!(
@@ -145,7 +145,7 @@ mod tests {
             .append_query_results([vec![key]])
             .append_query_results([vec![user]])
             .into_connection();
-        let state = gradient_test_support::state::test_state(db.clone());
+        let state = gradient_test_support::state::test_state_web(db.clone());
 
         assert!(authorize(&state, "project", "SHA256:known").await.is_err());
         let log = format!("{:?}", db.into_transaction_log());
