@@ -28,9 +28,10 @@ mod nix_cache;
 pub use self::actions::{ActionConfig, ActionType, PatchGeneratorKind, PrGranularity, VerifyGate};
 pub use self::cli::{
     BuildArgs, CacheArgs, CidrParseError, CreatePermission, DatabaseArgs, EmailArgs, EvalArgs,
-    GcArgs, GitHubAppArgs, HttpArgs, LogArgs, MetricsArgs, NarArgs, OidcArgs, PermissionsArgs,
-    ProtoArgs, PullRequestsArgs, RegistrationArgs, S3Args, SchedulerArgs, ScimArgs, SecretsArgs,
-    SentryArgs, ServerArgs, SshArgs, StateArgs, UploadArgs, in_any, parse_cidr_list,
+    GcArgs, GitHubAppArgs, GradientCiArgs, HttpArgs, LogArgs, MetricsArgs, NarArgs, OidcArgs,
+    PermissionsArgs, ProtoArgs, PullRequestsArgs, RegistrationArgs, S3Args, SchedulerArgs,
+    ScimArgs, SecretsArgs, SentryArgs, ServerArgs, SshArgs, StateArgs, UploadArgs, in_any,
+    parse_cidr_list,
 };
 pub use self::config::{
     ConfigError, EmailConfig, GitHubAppConfig, MetricsConfig, NetworkConfig, OidcConfig,
@@ -74,6 +75,8 @@ pub struct Cli {
     pub permissions: PermissionsArgs,
     #[command(flatten)]
     pub registration: RegistrationArgs,
+    #[command(flatten)]
+    pub gradient_ci: GradientCiArgs,
     #[command(flatten)]
     pub sentry: SentryArgs,
     #[command(flatten)]

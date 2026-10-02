@@ -74,3 +74,27 @@ async fn config_hides_the_ssh_port_when_disabled() {
     assert_eq!(body["message"]["ssh_enabled"], false);
     assert!(body["message"]["ssh_port"].is_null());
 }
+
+#[tokio::test]
+async fn config_offers_gradient_ci_by_default() {
+    let db = MockDatabase::new(DatabaseBackend::Postgres);
+    let server = make_test_server(db.into_connection());
+
+    let body: Value = server.get("/api/v1/config").await.json();
+    assert_eq!(body["message"]["gradient_ci_enabled"], true);
+    assert_eq!(
+        body["message"]["gradient_ci_url"],
+        "https://servers.gradient.ci"
+    );
+}
+
+#[tokio::test]
+async fn config_reports_gradient_ci_turned_off() {
+    let db = MockDatabase::new(DatabaseBackend::Postgres);
+    let server = make_test_server_configured(db.into_connection(), |cli| {
+        cli.gradient_ci.enable = false;
+    });
+
+    let body: Value = server.get("/api/v1/config").await.json();
+    assert_eq!(body["message"]["gradient_ci_enabled"], false);
+}

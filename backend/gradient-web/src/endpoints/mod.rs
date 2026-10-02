@@ -129,6 +129,8 @@ pub struct ServerConfig {
     pub github_app_enabled: bool,
     pub ssh_enabled: bool,
     pub ssh_port: Option<u16>,
+    pub gradient_ci_enabled: bool,
+    pub gradient_ci_url: String,
 }
 
 pub async fn get_config(
@@ -155,6 +157,8 @@ pub async fn get_config(
             github_app_enabled: state.config.github_app.is_some(),
             ssh_enabled: state.config.ssh.enable,
             ssh_port: state.config.ssh.enable.then_some(state.config.ssh.port),
+            gradient_ci_enabled: state.config.gradient_ci.enable,
+            gradient_ci_url: state.config.gradient_ci.url.clone(),
         },
     };
 
