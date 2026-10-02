@@ -5,21 +5,23 @@
  */
 
 use crate::session::Session;
+use futures::{Stream, StreamExt as _};
 use gradient_daemon::backend::{Backend, ConnInfo};
 use gradient_daemon::journal::Journal;
 use gradient_db::cache_paths::{ServedPath, served_hashes, served_path};
 use gradient_util::nix_hash::normalize_nar_hash;
 use harmonia_protocol::daemon::{
-    DaemonError, DaemonResult, DaemonStore, FutureResultExt as _, HandshakeDaemonStore, ResultLog,
-    TrustLevel,
+    AddToStoreItem, DaemonError, DaemonResult, DaemonStore, FutureResultExt as _,
+    HandshakeDaemonStore, ResultLog, ResultLogExt as _, TrustLevel,
 };
-use harmonia_protocol::valid_path_info::UnkeyedValidPathInfo;
+use harmonia_protocol::valid_path_info::{UnkeyedValidPathInfo, ValidPathInfo};
 use harmonia_store_path::{StoreDir, StorePath, StorePathHash, StorePathSet};
 use harmonia_store_path_info::NarHash;
 use harmonia_utils_hash::fmt::Any;
 use harmonia_utils_signature::Signature;
 use std::fmt::Display;
 use std::future::{Future, ready};
+use std::pin::Pin;
 use std::sync::Arc;
 use tokio::io::AsyncBufRead;
 
@@ -81,6 +83,21 @@ impl CacheStore {
         )
         .await
         .map_err(err)
+    }
+
+    async fn copy_in(
+        &self,
+        info: &ValidPathInfo,
+        reader: impl AsyncBufRead + Send + Unpin,
+    ) -> DaemonResult<()> {
+        if self.served(&info.path).await?.is_some() {
+            tokio::io::copy(&mut std::pin::pin!(reader), &mut tokio::io::sink()).await?;
+            return Ok(());
+        }
+
+        crate::ingest::import(&self.session, info, reader)
+            .await
+            .map_err(err)
     }
 
     async fn path_info(&self, row: ServedPath) -> anyhow::Result<UnkeyedValidPathInfo> {
@@ -211,6 +228,61 @@ impl DaemonStore for CacheStore {
                 .await
                 .map_err(err)?
                 .ok_or_else(|| err(format!("{path} has no stored NAR")))
+        }
+        .empty_logs()
+    }
+
+    fn add_to_store_nar<'s, 'r, 'i, R>(
+        &'s mut self,
+        info: &'i ValidPathInfo,
+        source: R,
+        _repair: bool,
+        _dont_check_sigs: bool,
+    ) -> Pin<Box<dyn ResultLog<Output = DaemonResult<()>> + Send + 'r>>
+    where
+        R: AsyncBufRead + Send + Unpin + 'r,
+        's: 'r,
+        'i: 'r,
+    {
+        async move { self.copy_in(info, source).await }
+            .empty_logs()
+            .boxed_result()
+    }
+
+    fn add_multiple_to_store<'s, 'i, 'r, S, R>(
+        &'s mut self,
+        _repair: bool,
+        _dont_check_sigs: bool,
+        stream: S,
+    ) -> Pin<Box<dyn ResultLog<Output = DaemonResult<()>> + Send + 'r>>
+    where
+        S: Stream<Item = Result<AddToStoreItem<R>, DaemonError>> + Send + 'i,
+        R: AsyncBufRead + Send + Unpin + 'i,
+        's: 'r,
+        'i: 'r,
+    {
+        async move {
+            let mut stream = std::pin::pin!(stream);
+            while let Some(item) = stream.next().await {
+                let AddToStoreItem { info, reader } = item?;
+                self.copy_in(&info, reader).await?;
+            }
+
+            Ok(())
+        }
+        .empty_logs()
+        .boxed_result()
+    }
+
+    fn ensure_path<'a>(
+        &'a mut self,
+        path: &'a StorePath,
+    ) -> impl ResultLog<Output = DaemonResult<()>> + Send + 'a {
+        async move {
+            match self.served(path).await? {
+                Some(_) => Ok(()),
+                None => Err(err(format!("{path} is not in the project caches"))),
+            }
         }
         .empty_logs()
     }
@@ -348,5 +420,40 @@ mod tests {
 
         let err = client.find_roots().await.expect_err("refused");
         assert!(err.to_string().contains("unimplemented"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn copying_in_a_served_path_imports_nothing() {
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([vec![served_row()]])
+            .into_connection();
+        let (_server, mut client) = connect(session_over(db)).await;
+        let nar = b"already there".to_vec();
+        let info = ValidPathInfo {
+            path: hello(),
+            info: UnkeyedValidPathInfo {
+                deriver: None,
+                nar_hash: NarHash::digest(&nar),
+                references: Default::default(),
+                registration_time: None,
+                nar_size: nar.len() as u64,
+                ultimate: false,
+                signatures: Default::default(),
+                ca: None,
+                store_dir: StoreDir::default(),
+            },
+        };
+
+        client
+            .add_multiple_to_store(
+                false,
+                true,
+                futures::stream::iter([Ok(AddToStoreItem {
+                    info,
+                    reader: std::io::Cursor::new(nar),
+                })]),
+            )
+            .await
+            .expect("skipped without TriggerEvaluation");
     }
 }

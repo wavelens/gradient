@@ -1,0 +1,213 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
+use crate::session::Session;
+use async_compression::Level;
+use async_compression::tokio::write::ZstdEncoder;
+use gradient_db::permissions::Permission;
+use gradient_proto::import::{ImportInput, SignTargets, import_nar_reader};
+use gradient_types::events::cache::NarSigned;
+use harmonia_protocol::valid_path_info::ValidPathInfo;
+use harmonia_store_path_info::NarHash;
+use harmonia_utils_hash::{Algorithm, Context, HashFormat as _, Sha256};
+use std::path::Path;
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
+
+struct Staged {
+    nar_hash: NarHash,
+    nar_size: u64,
+    file_hash: String,
+    file_size: u64,
+}
+
+pub async fn import(
+    session: &Session,
+    info: &ValidPathInfo,
+    reader: impl AsyncRead + Unpin + Send,
+) -> anyhow::Result<()> {
+    anyhow::ensure!(
+        session.may(Permission::TriggerEvaluation),
+        "copying into {} needs TriggerEvaluation",
+        session.project.name
+    );
+
+    let state = &session.state;
+    let dir = state.config.server.nar_upload_partial_dir();
+    tokio::fs::create_dir_all(&dir).await?;
+    let file = tempfile::NamedTempFile::new_in(&dir)?;
+    let staged = compress_into(reader, file.path()).await?;
+    anyhow::ensure!(
+        staged.nar_hash == info.info.nar_hash,
+        "NAR hash of {} does not match",
+        info.path
+    );
+    anyhow::ensure!(
+        staged.nar_size == info.info.nar_size,
+        "NAR size of {} does not match",
+        info.path
+    );
+
+    let store_path = format!("/nix/store/{}", info.path);
+    let references: Vec<String> = info.info.references.iter().map(|r| r.to_string()).collect();
+    let deriver = info
+        .info
+        .deriver
+        .as_ref()
+        .map(|d| format!("/nix/store/{d}"));
+    let ca = info.info.ca.as_ref().map(|c| c.to_string());
+    let nar_hash = staged.nar_hash.as_sri().to_string();
+    let committed = import_nar_reader(
+        &state.web_db,
+        &state.nar_storage,
+        &state.graph,
+        tokio::fs::File::open(file.path()).await?,
+        ImportInput {
+            store_path: &store_path,
+            file_hash: &staged.file_hash,
+            file_size: staged.file_size as i64,
+            nar_size: staged.nar_size as i64,
+            nar_hash: &nar_hash,
+            references: &references,
+            deriver: deriver.as_deref(),
+            ca: ca.as_deref(),
+        },
+        SignTargets::ProjectCaches(session.project.id),
+    )
+    .await?;
+
+    for cache in committed.signed {
+        state.events.publish(NarSigned {
+            cache,
+            hash: info.path.hash().to_string(),
+        });
+    }
+
+    Ok(())
+}
+
+async fn compress_into(
+    mut reader: impl AsyncRead + Unpin + Send,
+    path: &Path,
+) -> anyhow::Result<Staged> {
+    let mut encoder = ZstdEncoder::with_quality(
+        tokio::fs::File::create(path).await?,
+        Level::Precise(gradient_wire::constants::NAR_ZSTD_LEVEL),
+    );
+    let mut raw = Context::new(Algorithm::SHA256);
+    let mut nar_size = 0_u64;
+    let mut buf = vec![0_u8; 1 << 16];
+    loop {
+        let n = reader.read(&mut buf).await?;
+        if n == 0 {
+            break;
+        }
+
+        raw.update(&buf[..n]);
+        nar_size += n as u64;
+        encoder.write_all(&buf[..n]).await?;
+    }
+
+    encoder.shutdown().await?;
+
+    let mut compressed = tokio::fs::File::open(path).await?;
+    let mut file = Context::new(Algorithm::SHA256);
+    let mut file_size = 0_u64;
+    loop {
+        let n = compressed.read(&mut buf).await?;
+        if n == 0 {
+            break;
+        }
+
+        file.update(&buf[..n]);
+        file_size += n as u64;
+    }
+
+    Ok(Staged {
+        nar_hash: NarHash::try_from(raw.finish())?,
+        nar_size,
+        file_hash: Sha256::try_from(file.finish())?.as_sri().to_string(),
+        file_size,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gradient_db::permissions::{Permission, mask_from};
+    use gradient_types::CacheId;
+    use harmonia_protocol::valid_path_info::UnkeyedValidPathInfo;
+    use harmonia_store_path::{StoreDir, StorePath};
+    use sea_orm::{DatabaseBackend, DatabaseConnection, MockDatabase};
+    use std::sync::Arc;
+
+    const NAR: &[u8] = b"nix-archive-1 stand-in bytes";
+
+    fn session(db: DatabaseConnection, permissions: i64) -> Arc<Session> {
+        Arc::new(Session {
+            state: gradient_test_support::state::test_state(db),
+            user: gradient_test_support::fixtures::user(),
+            project: gradient_test_support::fixtures::project(),
+            permissions,
+            caches: vec![CacheId::now_v7()],
+        })
+    }
+
+    fn info(nar: &[u8]) -> ValidPathInfo {
+        ValidPathInfo {
+            path: StorePath::from_base_path("0123456789abcdfghijklmnpqrsvwxyz-hello")
+                .expect("path"),
+            info: UnkeyedValidPathInfo {
+                deriver: None,
+                nar_hash: NarHash::digest(nar),
+                references: Default::default(),
+                registration_time: None,
+                nar_size: nar.len() as u64,
+                ultimate: false,
+                signatures: Default::default(),
+                ca: None,
+                store_dir: StoreDir::default(),
+            },
+        }
+    }
+
+    #[tokio::test]
+    async fn a_nar_with_a_wrong_hash_is_rejected_before_any_row() {
+        let db = MockDatabase::new(DatabaseBackend::Postgres).into_connection();
+        let session = session(db.clone(), mask_from(&[Permission::TriggerEvaluation]));
+        let mut info = info(NAR);
+        info.info.nar_hash = NarHash::digest(b"other");
+
+        let e = import(&session, &info, NAR)
+            .await
+            .expect_err("hash mismatch");
+        assert!(e.to_string().contains("NAR hash"), "{e}");
+        assert!(db.into_transaction_log().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_nar_with_a_wrong_size_is_rejected() {
+        let db = MockDatabase::new(DatabaseBackend::Postgres).into_connection();
+        let session = session(db, mask_from(&[Permission::TriggerEvaluation]));
+        let mut info = info(NAR);
+        info.info.nar_size += 1;
+
+        let e = import(&session, &info, NAR)
+            .await
+            .expect_err("size mismatch");
+        assert!(e.to_string().contains("NAR size"), "{e}");
+    }
+
+    #[tokio::test]
+    async fn copying_in_without_trigger_evaluation_is_refused() {
+        let db = MockDatabase::new(DatabaseBackend::Postgres).into_connection();
+        let session = session(db, 0);
+
+        let e = import(&session, &info(NAR), NAR)
+            .await
+            .expect_err("refused");
+        assert!(e.to_string().contains("TriggerEvaluation"), "{e}");
+    }
+}
