@@ -23,4 +23,6 @@ assert lib.hasInfix "WORKER_NODES = [a, b]" prelude;
 assert lib.hasInfix ''PROVIDES = set(["distinct-upstream-workers"])'' prelude;
 assert lib.hasInfix "def requires(" prelude;
 assert !(builtins.tryEval (import ./contract.nix { inherit lib workers; topology = direct // { nodes = direct.nodes // { client = { }; }; }; })).success;
+assert !(builtins.tryEval (import ./contract.nix { inherit lib workers; topology = direct // { upstreamUrls = { ghost = "ws://ghost/proto"; }; }; })).success;
+assert import ./contract.nix { inherit lib workers; topology = direct // { upstreamUrls = { a = "ws://a/proto"; }; }; };
 pkgs.runCommand "test-topologies-check" { } "touch $out"

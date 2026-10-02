@@ -6,7 +6,7 @@
 
 # Every task is holding one trigger that is never firing.
 # Each phase is starting its own evaluation through the API.
-{ lib, pkgs, storeSpec, upstream, specNames, workerToken, upstreamPeers }:
+{ lib, pkgs, storeSpec, upstream, specNames, workerToken, upstreamPeers, upstreamUrls }:
 { ... }:
 {
   imports = [ ../../../modules/gradient.nix ];
@@ -111,11 +111,12 @@
           }];
         };
 
-        workers = lib.mapAttrs (_: id: {
+        workers = lib.mapAttrs (name: id: {
           worker_id = id;
           projects = [ "project" ];
           token_file = "/etc/gradient/secrets/worker_token";
           created_by = "admin";
+          url = upstreamUrls.${name} or null;
         }) upstreamPeers;
       };
     };
