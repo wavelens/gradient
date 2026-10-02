@@ -18,6 +18,7 @@ use gradient_entity::worker_registration::{
 use gradient_entity::{base_worker, project_base_worker};
 use gradient_pool::WorkerInfo;
 use gradient_scheduler::Scheduler;
+use gradient_scheduler::connection_failures::{ConnectionFailure, ConnectionFailures};
 use gradient_types::ids::*;
 use gradient_types::{AProjectBaseWorker, EBaseWorker, EProjectBaseWorker};
 use gradient_types::{BaseResponse, MUser};
@@ -73,8 +74,29 @@ pub struct ProjectWorkerEntry {
     pub enable_eval: bool,
     pub enable_build: bool,
     pub is_base: bool,
+    pub gradient_ci: bool,
+    #[serde(flatten)]
+    pub connection: WorkerConnection,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub live: Option<WorkerLiveInfo>,
+}
+
+#[derive(Serialize)]
+pub struct WorkerConnection {
+    pub connected: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_error: Option<ConnectionFailure>,
+}
+
+pub(crate) fn worker_connection(
+    live: &std::collections::HashMap<String, WorkerInfo>,
+    failures: &ConnectionFailures,
+    worker_id: &str,
+) -> WorkerConnection {
+    WorkerConnection {
+        connected: live.contains_key(worker_id),
+        last_error: failures.last(worker_id),
+    }
 }
 
 #[derive(Deserialize)]
@@ -213,9 +235,12 @@ fn base_worker_entry(
     bw: base_worker::Model,
     active: bool,
     live: Option<WorkerLiveInfo>,
+    connection: WorkerConnection,
 ) -> ProjectWorkerEntry {
     ProjectWorkerEntry {
         active,
+        gradient_ci: bw.gradient_ci,
+        connection,
         worker_id: bw.worker_id,
         display_name: bw.display_name,
         registered_at: bw.created_at,
@@ -287,7 +312,14 @@ pub async fn get_project_workers(
         .into_iter()
         .map(|reg| {
             let live = live_for(&reg.worker_id);
+            let connection = worker_connection(
+                &live_workers,
+                &scheduler.connection_failures,
+                &reg.worker_id,
+            );
             ProjectWorkerEntry {
+                gradient_ci: reg.gradient_ci,
+                connection,
                 worker_id: reg.worker_id,
                 display_name: reg.display_name,
                 registered_at: reg.created_at,
@@ -324,7 +356,9 @@ pub async fn get_project_workers(
             .map(|bw| {
                 let live = live_for(&bw.worker_id);
                 let active = enabled_ids.contains(&bw.id);
-                base_worker_entry(bw, active, live)
+                let connection =
+                    worker_connection(&live_workers, &scheduler.connection_failures, &bw.worker_id);
+                base_worker_entry(bw, active, live, connection)
             }),
     );
 
@@ -690,6 +724,7 @@ pub async fn delete_project_worker(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gradient_scheduler::connection_failures::ConnectionDirection;
     use std::collections::HashSet;
 
     fn worker(authorized: Option<Vec<ProjectId>>) -> WorkerInfo {
@@ -724,6 +759,43 @@ mod tests {
             gradient_sources::decrypt_secret(&path, &encrypted).unwrap(),
             "t1"
         );
+    }
+
+    #[test]
+    fn an_offline_worker_carries_its_last_failure() {
+        let failures = ConnectionFailures::default();
+        failures.record(
+            "w1",
+            ConnectionDirection::Outbound,
+            false,
+            "dial timed out after 10 s",
+        );
+
+        let connection = worker_connection(&std::collections::HashMap::new(), &failures, "w1");
+
+        assert!(!connection.connected);
+        assert_eq!(
+            connection.last_error.map(|e| e.reason),
+            Some("dial timed out after 10 s".to_string())
+        );
+    }
+
+    #[test]
+    fn the_entry_flattens_its_connection_state() {
+        let entry = base_worker_entry(
+            base_worker_model(),
+            true,
+            None,
+            WorkerConnection {
+                connected: false,
+                last_error: None,
+            },
+        );
+
+        let json = serde_json::to_value(&entry).unwrap();
+        assert_eq!(json["connected"], false);
+        assert_eq!(json["gradient_ci"], false);
+        assert!(json.get("last_error").is_none());
     }
 
     #[test]
