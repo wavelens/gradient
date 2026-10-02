@@ -20,12 +20,23 @@ use super::auth::{
     aggregate_enabled_caps, filter_project_peers_without_cache, negotiate_capabilities,
 };
 use super::socket::{ProtoWriter, send_server_msg};
-use crate::outbound::{Dialable, dialable};
+use crate::outbound::{DialTarget, Dialable, dialable};
 
 #[derive(Clone, Debug)]
 pub struct DialedSession {
     pub url: String,
     pub token_projects: Vec<String>,
+    pub base_worker: bool,
+}
+
+impl DialTarget {
+    pub(crate) fn session(&self) -> DialedSession {
+        DialedSession {
+            url: self.url.clone(),
+            token_projects: self.token_projects.clone(),
+            base_worker: self.base_worker,
+        }
+    }
 }
 
 pub(super) struct DialedWorkerAuthority {
@@ -55,7 +66,9 @@ async fn admit_dialed(
     session: &DialedSession,
 ) -> Result<AuthOutcome, sea_orm::DbErr> {
     Ok(match dialable(state, worker_id, &session.url).await? {
-        Dialable::Projects(current) => {
+        Dialable::Projects {
+            projects: current, ..
+        } => {
             let accepted = current
                 .into_iter()
                 .filter(|p| session.token_projects.contains(p))
@@ -75,8 +88,13 @@ pub(super) async fn refresh_dialed_peers(
     session: &DialedSession,
 ) -> bool {
     let outcome = match dialable(state, worker_id, &session.url).await {
-        Ok(Dialable::Projects(current)) => {
-            if let Some(added) = current.iter().find(|p| !session.token_projects.contains(p)) {
+        Ok(Dialable::Projects {
+            projects: current, ..
+        }) => {
+            let added = current.iter().find(|p| !session.token_projects.contains(p));
+            if !session.base_worker
+                && let Some(added) = added
+            {
                 info!(%worker_id, project = %added, "project not covered by this session's tokens - closing for a redial");
                 return false;
             }
@@ -149,7 +167,7 @@ mod tests {
     use super::*;
     use gradient_entity::project::Model as ProjectModel;
     use gradient_entity::project_cache::{CacheSubscriptionMode, Model as ProjectCacheModel};
-    use gradient_entity::{base_worker, worker_registration};
+    use gradient_entity::{base_worker, project_base_worker, worker_registration};
     use gradient_types::ids::{CacheId, ProjectCacheId};
     use gradient_wire::session::frame::WireMessage;
     use sea_orm::{DatabaseBackend, MockDatabase};
@@ -169,6 +187,7 @@ mod tests {
         DialedSession {
             url: URL.into(),
             token_projects: projects.iter().map(ToString::to_string).collect(),
+            base_worker: false,
         }
     }
 
@@ -278,6 +297,61 @@ mod tests {
 
         assert!(!kept);
         assert!(rx.try_recv().is_err(), "no AuthUpdate may reach the worker");
+    }
+
+    #[tokio::test]
+    async fn a_project_enabling_a_base_worker_joins_the_running_session() {
+        let (running, enabling) = (ProjectId::now_v7(), ProjectId::now_v7());
+        let enabled_by = |project| project_base_worker::Model {
+            project,
+            ..Default::default()
+        };
+        let cached = |project| ProjectCacheModel {
+            id: ProjectCacheId::now_v7(),
+            project,
+            cache: CacheId::now_v7(),
+            mode: CacheSubscriptionMode::ReadWrite,
+        };
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([Vec::<worker_registration::Model>::new()])
+            .append_query_results([vec![base_worker::Model {
+                worker_id: "w1".into(),
+                url: Some(URL.into()),
+                token_encrypted: Some("base".into()),
+                enabled: true,
+                ..Default::default()
+            }]])
+            .append_query_results([vec![enabled_by(running), enabled_by(enabling)]])
+            .append_query_results([vec![
+                ProjectModel {
+                    id: running,
+                    ..Default::default()
+                },
+                ProjectModel {
+                    id: enabling,
+                    ..Default::default()
+                },
+            ]])
+            .append_query_results([vec![cached(running), cached(enabling)]]);
+        let state = gradient_test_support::prelude::test_state(db.into_connection());
+        let scheduler = Scheduler::new(Arc::clone(&state));
+        scheduler.spawn_core(None).await.unwrap();
+        let (writer, mut rx) = ProtoWriter::spy(Duration::from_secs(1));
+        let base_session = DialedSession {
+            base_worker: true,
+            ..session(&[running])
+        };
+
+        let kept = refresh_dialed_peers(&writer, &state, &scheduler, "w1", &base_session).await;
+
+        assert!(kept);
+        assert_eq!(
+            sent(&mut rx).await,
+            ServerMessage::AuthUpdate {
+                authorized_peers: vec![running.to_string(), enabling.to_string()],
+                failed_peers: vec![],
+            }
+        );
     }
 
     #[tokio::test]

@@ -35,10 +35,14 @@ pub(crate) struct DialTarget {
     pub url: String,
     pub credentials: DialerCredentials,
     pub token_projects: Vec<String>,
+    pub base_worker: bool,
 }
 
 pub(crate) enum Dialable {
-    Projects(Vec<String>),
+    Projects {
+        projects: Vec<String>,
+        base_worker: bool,
+    },
     Refused(&'static str),
 }
 
@@ -49,6 +53,7 @@ struct DialRow {
     projects: Vec<String>,
     token_encrypted: Option<String>,
     idle_reason: Option<&'static str>,
+    base_worker: bool,
 }
 
 enum PlannedDial {
@@ -72,6 +77,7 @@ impl DialRow {
             url: reg.url.unwrap_or_default(),
             token_encrypted: reg.token_encrypted,
             idle_reason: None,
+            base_worker: false,
         }
     }
 
@@ -89,6 +95,7 @@ impl DialRow {
             token_peers,
             projects,
             token_encrypted: bw.token_encrypted,
+            base_worker: true,
         }
     }
 }
@@ -109,7 +116,10 @@ impl WorkerDial {
         if projects.is_empty() {
             Dialable::Refused(NO_STORED_TOKEN)
         } else {
-            Dialable::Projects(projects)
+            Dialable::Projects {
+                projects,
+                base_worker: self.rows.iter().any(|r| r.base_worker),
+            }
         }
     }
 
@@ -265,8 +275,11 @@ fn group_by_worker(rows: Vec<DialRow>) -> Vec<WorkerDial> {
 }
 
 fn plan_worker(group: WorkerDial, decrypt: &impl Fn(&str) -> Option<String>) -> PlannedDial {
-    let token_projects = match group.token_projects() {
-        Dialable::Projects(projects) => projects,
+    let (token_projects, base_worker) = match group.token_projects() {
+        Dialable::Projects {
+            projects,
+            base_worker,
+        } => (projects, base_worker),
         Dialable::Refused(reason) => {
             return PlannedDial::Skip {
                 worker_id: group.worker_id,
@@ -297,6 +310,7 @@ fn plan_worker(group: WorkerDial, decrypt: &impl Fn(&str) -> Option<String>) -> 
         },
         url: group.url,
         token_projects,
+        base_worker,
     })
 }
 
@@ -381,6 +395,7 @@ mod tests {
             projects: vec![peer.into()],
             token_encrypted: token.map(|t| format!("enc:{t}")),
             idle_reason: None,
+            base_worker: false,
         }
     }
 
