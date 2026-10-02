@@ -240,6 +240,8 @@ paths:
                   create_project: everyone
                   create_cache: everyone
                   github_app_enabled: false
+                  gradient_ci_enabled: true
+                  gradient_ci_url: https://servers.gradient.ci
 
   /proto:
     servers:
@@ -5546,6 +5548,47 @@ paths:
 
   # ── Admin ────────────────────────────────────────────────────────────────────
 
+  /gradient-ci/connections:
+    post:
+      tags: [workers]
+      summary: Connect Gradient.CI Servers
+      description: |
+        Stores a connection token pasted from servers.gradient.ci. `scope = project` creates a
+        worker registration for the project (same permission as registering a worker);
+        `scope = base` creates a base worker every project can enable (superusers). The server
+        dials `wss://<gradientCi.url host>/proto` within 15 s. Turned off by `gradientCi.enable = false`.
+      operationId: connectGradientCi
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GradientCiConnectionRequest'
+      responses:
+        '200':
+          description: Connection stored
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        $ref: '#/components/schemas/GradientCiConnectionResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Already connected
+
   /admin/workers:
     get:
       tags: [admin, workers]
@@ -5577,6 +5620,61 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+
+  /admin/base-workers:
+    get:
+      tags: [admin, workers]
+      summary: List base workers
+      description: Every base worker with its connection state. Requires the `superuser` flag.
+      operationId: listBaseWorkers
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Base worker list
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/BaseWorkerEntry'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /admin/base-workers/{worker_id}:
+    delete:
+      tags: [admin, workers]
+      summary: Disconnect a Gradient.CI base server
+      description: |
+        Deletes a base worker created by "Connect base server" and its project links. The key on
+        servers.gradient.ci stays until it is deleted there. State-declared base workers answer `409`.
+      operationId: deleteBaseWorker
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: worker_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Disconnected
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The base worker is managed by server state
 
   /admin/state:
     get:
@@ -10260,7 +10358,7 @@ components:
 
     ProjectWorkerEntry:
       type: object
-      required: [worker_id, display_name, registered_at, active, enable_fetch, enable_eval, enable_build, is_base]
+      required: [worker_id, display_name, registered_at, active, enable_fetch, enable_eval, enable_build, is_base, gradient_ci, connected]
       properties:
         worker_id:
           type: string
@@ -10296,6 +10394,14 @@ components:
         is_base:
           type: boolean
           description: Whether this entry is a server-level base worker (visible to every project, managed via state).
+        gradient_ci:
+          type: boolean
+          description: Whether this entry is a Gradient.CI Servers connection.
+        connected:
+          type: boolean
+          description: Whether the worker holds a session with this server, for any project.
+        last_error:
+          $ref: '#/components/schemas/ConnectionFailure'
         live:
           allOf:
             - $ref: '#/components/schemas/WorkerLiveInfo'
@@ -10351,6 +10457,69 @@ components:
         message:
           type: string
           description: Human-readable summary of the test result
+
+    ConnectionFailure:
+      type: object
+      required: [reason, at, direction, before_auth]
+      properties:
+        reason:
+          type: string
+          description: Last failure of a connection, e.g. `401 unknown worker id or wrong token` or `dial timed out after 10 s`.
+        at:
+          type: string
+          format: date-time
+        direction:
+          type: string
+          enum: [outbound, inbound]
+          description: '`outbound` when the server dialed the worker, `inbound` when the worker dialed the server.'
+        before_auth:
+          type: boolean
+          description: True when the worker id was only claimed, not proven by a token.
+
+    GradientCiConnectionRequest:
+      type: object
+      required: [scope, token]
+      properties:
+        scope:
+          type: string
+          enum: [base, project]
+        project:
+          type: string
+          description: Project name, required for `scope = project`.
+        token:
+          type: string
+          description: Connection token from servers.gradient.ci, `gci1_<worker_id>_<token>`.
+
+    GradientCiConnectionResponse:
+      type: object
+      required: [worker_id]
+      properties:
+        worker_id:
+          type: string
+          format: uuid
+
+    BaseWorkerEntry:
+      type: object
+      required: [worker_id, display_name, enabled, auto_enable, gradient_ci, connected]
+      properties:
+        worker_id:
+          type: string
+        display_name:
+          type: string
+        url:
+          type: string
+          nullable: true
+        enabled:
+          type: boolean
+        auto_enable:
+          type: boolean
+        gradient_ci:
+          type: boolean
+          description: Created by "Connect base server"; only these rows can be deleted through the API.
+        connected:
+          type: boolean
+        last_error:
+          $ref: '#/components/schemas/ConnectionFailure'
 
     ListItem:
       type: object
@@ -10480,7 +10649,7 @@ components:
 
     ServerConfig:
       type: object
-      required: [oidc_enabled, registration_enabled, email_verification_enabled, quic, smtp_enabled, create_project, create_cache, github_app_enabled, ssh_enabled]
+      required: [oidc_enabled, registration_enabled, email_verification_enabled, quic, smtp_enabled, create_project, create_cache, github_app_enabled, ssh_enabled, gradient_ci_enabled, gradient_ci_url]
       properties:
         oidc_enabled:
           type: boolean
@@ -10518,6 +10687,12 @@ components:
           type: integer
           nullable: true
           description: Port of the SSH server, `null` when SSH is disabled
+        gradient_ci_enabled:
+          type: boolean
+          description: Whether the Gradient.CI Servers offer (Connect, Enable) is shown (`gradientCi.enable`)
+        gradient_ci_url:
+          type: string
+          description: Address of Gradient.CI Servers (`gradientCi.url`)
     # ── Auth ─────────────────────────────────────────────────────────────────
 
     MakeLoginRequest:
