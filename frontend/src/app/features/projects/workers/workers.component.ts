@@ -4,14 +4,24 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, OnInit, inject, signal, ChangeDetectionStrategy } from '@angular/core';
+import { Component, OnInit, computed, inject, signal, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
+import { Observable, map } from 'rxjs';
+import { ConfigService } from '@core/services/config.service';
 import { WorkersService } from '@core/services/workers.service';
 import { ProjectsService } from '@core/services/projects.service';
 import { ProjectAccessService } from '@core/services/project-access.service';
-import { GradientCapabilities, Worker, WorkerRegistration, AccessState } from '@core/models';
+import {
+  AccessState,
+  ConnectionStatus,
+  GradientCapabilities,
+  Worker,
+  WorkerRegistration,
+  gradientCiEntry,
+  gradientCiKeysUrl,
+} from '@core/models';
 import {
   BadgeComponent,
   ButtonComponent,
@@ -30,7 +40,7 @@ import {
   RowListComponent,
   ToastComponent,
 } from '@gradient/ui/ui';
-import { LabelHelpComponent } from '@shared/ui';
+import { GradientCiConnectComponent, LabelHelpComponent } from '@shared/ui';
 import { WritableDirective, ManagedDisableDirective } from '@shared/access';
 
 @Component({
@@ -57,6 +67,7 @@ import { WritableDirective, ManagedDisableDirective } from '@shared/access';
     RowListComponent,
     RowComponent,
     CopyFieldComponent,
+    GradientCiConnectComponent,
   ],
   providers: [MessageService],
   templateUrl: './workers.component.html',
@@ -69,6 +80,7 @@ export class WorkersComponent implements OnInit {
   private projectsService = inject(ProjectsService);
   private projectAccess = inject(ProjectAccessService);
   private messageService = inject(MessageService);
+  config = inject(ConfigService);
 
   access = signal<AccessState>({ managed: false, canEdit: false, canTrigger: false });
 
@@ -129,6 +141,24 @@ export class WorkersComponent implements OnInit {
   lastRegistration = signal<WorkerRegistration | null>(null);
   tokenCopied = signal(false);
   peerIdCopied = signal(false);
+
+  gradientCi = computed(() => gradientCiEntry(this.config.gradientCiEnabled, this.workers()));
+  otherWorkers = computed(() => this.workers().filter((w) => !w.gradient_ci));
+  showGradientCiConnect = signal(false);
+  showGradientCiDisconnect = signal(false);
+
+  statusOf = (workerId: string): Observable<ConnectionStatus | undefined> =>
+    this.workersService
+      .getWorkers(this.projectName)
+      .pipe(map((workers) => workers.find((w) => w.worker_id === workerId)));
+
+  get gradientCiLabel(): string {
+    return `${window.location.host} / ${this.projectName}`;
+  }
+
+  get gradientCiKeysUrl(): string {
+    return gradientCiKeysUrl(this.config.gradientCiUrl);
+  }
 
   ngOnInit(): void {
     this.projectName = this.route.snapshot.paramMap.get('project') || '';
@@ -349,6 +379,22 @@ export class WorkersComponent implements OnInit {
         setTimeout(() => this.peerIdCopied.set(false), 2000);
       });
     }
+  }
+
+  setGradientCiEnabled(worker: Worker, enabled: boolean): void {
+    this.togglingId.set(worker.worker_id);
+    this.workersService.setWorkerActive(this.projectName, worker.worker_id, enabled).subscribe({
+      next: () => {
+        this.togglingId.set(null);
+        this.loadWorkers();
+      },
+      error: () => this.togglingId.set(null),
+    });
+  }
+
+  disconnectGradientCi(worker: Worker): void {
+    this.showGradientCiDisconnect.set(false);
+    this.deleteWorker(worker);
   }
 
   closeTokenDialog(): void {
