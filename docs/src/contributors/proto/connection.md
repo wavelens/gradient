@@ -28,7 +28,7 @@ sequenceDiagram
 
 `/var/lib/gradient-worker/worker-id` is holding the worker ID. The server is using the ID to match reconnects, reject duplicates and label the worker in the UI and logs.
 
-**Rejections:** The server is rejecting a session with the codes below. The worker is never rejecting the server.
+**Rejections:** The server is rejecting a session with the codes below. A dialed worker is rejecting the server with `400` or `401`, see [Server-Dialed Handshake](#server-dialed-handshake).
 
 | Code | Reason |
 |---|---|
@@ -37,6 +37,31 @@ sequenceDiagram
 | `403` | `unknown worker`, `worker is deactivated`, `base worker not enabled by any project`, or the server is not accepting connections |
 | `495` | `project has no cache subscribed`: every authorized project is lacking a cache |
 | `496` | `worker already connected` |
+
+## Server-Dialed Handshake
+
+The server is dialing every registration and base worker with a `url`. The server is proving itself with its tokens, and the worker's TLS certificate is proving the worker.
+
+```mermaid
+sequenceDiagram
+    participant S as Server
+    participant W as Worker
+    S->>W: Authenticate { version, worker_id, tokens }
+    W->>S: InitConnection { version, capabilities, id }
+    S->>W: InitAck { authorized_peers, failed_peers }
+```
+
+| Step | Message | Content |
+|---|---|---|
+| 1 | `Authenticate` | `version`, the dialed `worker_id`, one `(peer, token)` per registration at the dialed URL |
+| 2 | `InitConnection` or `Reject` | `401` for an unknown worker ID or any wrong token, `400` for another version |
+| 3 | `InitAck` or `Reject` | The projects registered at the dialed URL, without a challenge round |
+
+- The server is sending its tokens over `wss://`. A `ws://` URL is for local and operator setups only. The server is still sending the tokens and logging a warning.
+- `services.gradient.worker.acceptedServerTokensFile` is holding the hashes a worker is checking. The worker is accepting every server without the file.
+- The server is answering a reauth of a server-dialed session with `AuthUpdate` from its own registrations, never with `AuthChallenge`.
+- The server is keeping the last failure of every worker ID in memory as the worker's offline reason.
+- The server is keeping a failure before the token check only for a registered worker ID.
 
 ## Capabilities
 
@@ -72,7 +97,7 @@ A **peer** is anything registering a worker: a project, a cache or a proxy. Both
 - A project without a cache subscription is moving to `failed_peers`.
 - The reply is `495` if no peer is remaining.
 - **Reauth** is adding peers without reconnecting.
-- The server is sending `AuthChallenge` when a peer is registering the worker.
+- The server is sending `AuthChallenge` to a worker-dialed session when a peer is registering the worker.
 - The worker is sending `ReauthRequest` when its peers file is changing.
 - Both are ending in `AuthUpdate`. Reauth is never revoking granted peers.
 - One connection per worker ID. The server is rejecting a second connection with `496`.
@@ -114,7 +139,7 @@ sequenceDiagram
 
 ## Versioning
 
-`PROTO_VERSION` is `23` and is rising with every breaking wire change. Both sides must match exactly. One check in `session::handshake::on_init_connection` is covering every session kind.
+`PROTO_VERSION` is `24` and is rising with every breaking wire change. Both sides must match exactly. `on_init_connection` and `on_authenticate` in `session::handshake` are covering every session kind.
 
 ## Cache Sessions
 
@@ -132,7 +157,7 @@ sequenceDiagram
 ## Implementation
 
 - One pure handshake state machine in `gradient-wire/src/session/handshake.rs` is driving every session.
-- The server is running `as_authority`, and the worker is running `as_peer`.
+- The server is running `as_authority` for a worker dialing in and `as_dialer` for a worker the server is dialing. The worker is running `as_peer` and `as_dialed`.
 - The cache session is reusing the version gate.
 - `session/frame.rs` is splitting each socket into a typed reader and a writer. The writer is holding a control lane and a bulk lane.
 - Control is going first. A bulk batch is holding at most 256 KiB.
