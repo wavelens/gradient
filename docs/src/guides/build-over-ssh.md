@@ -52,7 +52,7 @@ The Nix daemon is opening the connection as `root` for substituters. Plain `nix 
 | Copy out | `nix copy --from ssh-ng://myproject@ci.example.com /nix/store/...-hello` |
 | Copy in | `nix copy --to ssh-ng://myproject@ci.example.com ./result` |
 | Build host | `nixos-rebuild switch --build-host ssh-ng://myproject@ci.example.com` |
-| Remote store | `nix build --store ssh-ng://myproject@ci.example.com .#hello` |
+| Remote store | `nix build --eval-store auto --store ssh-ng://myproject@ci.example.com .#hello` |
 
 - Gradient is answering reads from the project's subscribed caches.
 - Gradient is signing copied paths into the project's caches, like build outputs.
@@ -72,6 +72,7 @@ The command is printing the store URL and `Trusted: 0`. A build request is visib
 - Gradient is not supporting `ssh://` (`nix-store --serve`). `--build-host` is needing the `ssh-ng://` prefix.
 - Gradient is not supporting Nix's `builders` setting (`--builders ssh-ng://...`).
 - Gradient is rejecting content-addressed derivations.
+- `nix build --store` is needing `--eval-store auto`. Gradient is not taking evaluation writes.
 - A closed connection is leaving its builds running.
 
 ## Next Steps

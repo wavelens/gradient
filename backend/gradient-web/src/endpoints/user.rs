@@ -285,7 +285,7 @@ async fn resolve_project_pin(
     Ok(Some(project.id))
 }
 
-fn forbid_via_api_key(api_key: &MaybeApiKey) -> WebResult<()> {
+pub(crate) fn forbid_via_api_key(api_key: &MaybeApiKey) -> WebResult<()> {
     if api_key.as_ref().is_some() {
         return Err(WebError::forbidden(
             "API keys cannot manage API keys. Use a session token.",

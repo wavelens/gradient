@@ -14,13 +14,14 @@ use gradient_entity::evaluation::{EvaluationKind, EvaluationStatus};
 use gradient_graph::{RecordBatch, Transition};
 use gradient_types::*;
 use gradient_util::store_path::strip_nix_store_prefix;
-use gradient_wire::types::DiscoveredDerivation;
-use sea_orm::{ActiveModelTrait, IntoActiveModel};
+use gradient_wire::types::{BuildFailureKind, DiscoveredDerivation};
+use sea_orm::{ActiveModelTrait, IntoActiveModel, TransactionTrait};
 use std::collections::HashSet;
 use std::future::Future;
 use tokio::io::AsyncReadExt as _;
 
 const CONCURRENT_READS: usize = 32;
+const RECORD_BATCH_SIZE: usize = 50;
 
 pub trait DrvSource: Sync {
     fn read(
@@ -114,8 +115,39 @@ pub async fn start(
         session.project.name
     );
 
-    let state = &session.state;
     let closure = closure(&CacheDrvSource { session }, drv_paths).await?;
+    let (task, evaluation) = create_evaluation(session, drv_paths).await?;
+    if let Err(error) = record(session, task, evaluation, &closure, drv_paths).await {
+        let failed = session
+            .state
+            .graph
+            .transition(Transition::EvalFailed {
+                evaluation,
+                error: error.to_string(),
+                kind: BuildFailureKind::Permanent,
+                missing_paths: Vec::new(),
+            })
+            .await;
+        if let Err(e) = failed {
+            tracing::warn!(%evaluation, error = %e, "ssh evaluation could not be failed");
+        }
+
+        return Err(error);
+    }
+
+    let requested: HashSet<&str> = drv_paths.iter().map(String::as_str).collect();
+    let requested_drvs = closure
+        .into_iter()
+        .filter(|(path, _)| requested.contains(path.as_str()))
+        .collect();
+    Ok((evaluation, requested_drvs))
+}
+
+async fn create_evaluation(
+    session: &Session,
+    drv_paths: &[String],
+) -> anyhow::Result<(TaskId, EvaluationId)> {
+    let state = &session.state;
     let task = ensure_build_request_task(
         &state.web_db,
         session.project.id,
@@ -125,6 +157,7 @@ pub async fn start(
     .await?;
 
     let names: Vec<&str> = drv_paths.iter().map(|p| drv_name(p)).collect();
+    let tx = state.web_db.inner().begin().await?;
     let commit = MCommit {
         id: CommitId::now_v7(),
         message: format!("SSH build of {}", names.join(" ")),
@@ -133,7 +166,7 @@ pub async fn start(
         author_name: session.user.name.clone(),
     }
     .into_active_model()
-    .insert(&state.web_db)
+    .insert(&tx)
     .await?;
 
     let created = now();
@@ -153,9 +186,21 @@ pub async fn start(
         ..Default::default()
     }
     .into_active_model()
-    .insert(&state.web_db)
+    .insert(&tx)
     .await?;
+    tx.commit().await?;
 
+    Ok((task.id, evaluation.id))
+}
+
+async fn record(
+    session: &Session,
+    task: TaskId,
+    evaluation: EvaluationId,
+    closure: &[(String, Derivation)],
+    drv_paths: &[String],
+) -> anyhow::Result<()> {
+    let state = &session.state;
     let requested: HashSet<&str> = drv_paths.iter().map(String::as_str).collect();
     let derivations: Vec<DiscoveredDerivation> = closure
         .iter()
@@ -172,30 +217,26 @@ pub async fn start(
         })
         .collect();
 
-    let truly_substituted = gradient_scheduler::eval::assess_cached(state, &derivations).await;
-    state
-        .graph
-        .record(RecordBatch {
-            evaluation: evaluation.id,
-            task: Some(task.id),
-            derivations,
-            warnings: vec![],
-            errors: vec![],
-            truly_substituted,
-        })
-        .await?;
-    state
-        .graph
-        .transition(Transition::EvalStreamCompleted {
-            evaluation: evaluation.id,
-        })
-        .await?;
+    for batch in derivations.chunks(RECORD_BATCH_SIZE) {
+        let truly_substituted = gradient_scheduler::eval::assess_cached(state, batch).await;
+        state
+            .graph
+            .record(RecordBatch {
+                evaluation,
+                task: Some(task),
+                derivations: batch.to_vec(),
+                warnings: vec![],
+                errors: vec![],
+                truly_substituted,
+            })
+            .await?;
+    }
 
-    let requested_drvs = closure
-        .into_iter()
-        .filter(|(path, _)| requested.contains(path.as_str()))
-        .collect();
-    Ok((evaluation.id, requested_drvs))
+    state
+        .graph
+        .transition(Transition::EvalStreamCompleted { evaluation })
+        .await?;
+    Ok(())
 }
 
 pub async fn run(

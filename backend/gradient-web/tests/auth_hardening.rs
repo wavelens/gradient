@@ -417,3 +417,39 @@ async fn api_key_cannot_create_api_keys() {
         .await;
     res.assert_status(axum::http::StatusCode::FORBIDDEN);
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn api_key_cannot_add_ssh_keys() {
+    let raw = "y".repeat(64);
+    let now = Utc::now().naive_utc();
+    let key = api::Model {
+        id: ApiId::now_v7(),
+        owned_by: user_id(),
+        name: "self".into(),
+        key: hash_api_key(&raw),
+        last_used_at: now,
+        created_at: now,
+        permission: gradient_db::permissions::admin_mask(),
+        ..Default::default()
+    };
+
+    let s = server_with(|db| {
+        db.append_query_results([vec![key.clone()]])
+            .append_exec_results([MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 1,
+            }])
+            .append_query_results([vec![key.clone()]])
+            .append_query_results([vec![user()]])
+    });
+
+    let res = s
+        .post("/api/v1/user/ssh-keys")
+        .add_header("authorization", format!("Bearer GRAD{}", raw))
+        .json(&serde_json::json!({
+            "name": "laptop",
+            "public_key": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHfwJ61+Nu5yJhfB3PfAyywWMtpJcwybHAVPzGWnPQ6v test",
+        }))
+        .await;
+    res.assert_status(axum::http::StatusCode::FORBIDDEN);
+}

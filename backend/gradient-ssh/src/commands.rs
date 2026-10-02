@@ -52,7 +52,7 @@ pub fn parse(line: &str) -> Result<Command, CommandError> {
     let words = shell_words::split(line).map_err(|_| unsupported())?;
     let args: Vec<&str> = words.iter().map(String::as_str).collect();
 
-    match args.as_slice() {
+    match without_env_wrapper(&args) {
         ["nix-daemon", "--stdio", ..] => Ok(Command::Daemon),
         ["nix-store", "--serve", ..] => Err(CommandError::LegacyServe),
         ["mktemp", "-d", "-t", pattern] => Ok(Command::MakeTempDir {
@@ -85,6 +85,28 @@ pub fn parse(line: &str) -> Result<Command, CommandError> {
         }
         _ => Err(unsupported()),
     }
+}
+
+fn without_env_wrapper<'a>(args: &'a [&'a str]) -> &'a [&'a str] {
+    match args {
+        ["/bin/sh", "-c", script, "sh", rest @ ..] if is_env_reset(script) => rest,
+        _ => args,
+    }
+}
+
+fn is_env_reset(script: &str) -> bool {
+    let Some(assigns) = script
+        .strip_prefix("exec /usr/bin/env -i")
+        .and_then(|s| s.strip_suffix("\"$@\""))
+    else {
+        return false;
+    };
+
+    assigns.split_whitespace().all(|assign| {
+        assign
+            .split_once('=')
+            .is_some_and(|(key, _)| key.chars().all(|c| c.is_ascii_alphanumeric() || c == '_'))
+    })
 }
 
 fn is_tmp(path: &str) -> bool {
@@ -198,6 +220,35 @@ mod tests {
         ));
         assert!(matches!(
             parse("nix eval nixpkgs#hello"),
+            Err(CommandError::Unsupported(_))
+        ));
+    }
+
+    #[test]
+    fn nixos_rebuild_26_11_wraps_every_command_in_env() {
+        let wrap = r#"/bin/sh -c 'exec /usr/bin/env -i  "$@"' sh"#;
+        assert_eq!(
+            parse(&format!("{wrap} mktemp -d -t nixos-rebuild.XXXXX")),
+            Ok(Command::MakeTempDir {
+                pattern: "nixos-rebuild.XXXXX".into()
+            })
+        );
+        let with_path = r#"/bin/sh -c 'exec /usr/bin/env -i PATH="${PATH-}" "$@"' sh"#;
+        assert_eq!(
+            parse(&format!(
+                "{with_path} nix-store --realise {DRV} --add-root /tmp/a.b/c"
+            )),
+            Ok(Command::Realise {
+                derivations: vec![DRV.into()],
+                add_root: Some("/tmp/a.b/c".into())
+            })
+        );
+    }
+
+    #[test]
+    fn a_wrapper_running_another_script_is_unsupported() {
+        assert!(matches!(
+            parse("/bin/sh -c 'id; exec \"$@\"' sh mktemp -d -t x.XXXXX"),
             Err(CommandError::Unsupported(_))
         ));
     }

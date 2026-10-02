@@ -1106,8 +1106,7 @@ in {
 
         listenAddress = lib.mkOption {
           type = lib.types.str;
-          default = cfg.listenAddr;
-          defaultText = lib.literalExpression "config.services.gradient.listenAddr";
+          default = "0.0.0.0";
           description = "IP address the SSH server is listening on.";
         };
 
