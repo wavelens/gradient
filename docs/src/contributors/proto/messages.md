@@ -6,6 +6,7 @@ Every message on `/proto`, from `backend/gradient-wire/src/messages`. IDs (`job_
 
 | Message | Purpose | Key fields |
 |---|---|---|
+| `Authenticate` | First message of a server-dialed session | `version`, `worker_id`, `tokens` |
 | `AuthChallenge` | Peers that registered this worker | `peers` |
 | `InitAck` | Handshake accepted | `version`, `capabilities`, `authorized_peers`, `failed_peers` |
 | `AuthUpdate` | Result of a reauth | `authorized_peers`, `failed_peers` |
@@ -39,7 +40,7 @@ Every message on `/proto`, from `backend/gradient-wire/src/messages`. IDs (`job_
 | `InitConnection` | First message | `version`, `capabilities`, `id` |
 | `AuthResponse` | One token per challenged peer | `tokens` |
 | `ReauthRequest` | Asking for a new `AuthChallenge` | - |
-| `Reject` | Declining after `InitAck`. Defined, not sent by the reference worker | `code`, `reason` |
+| `Reject` | Declining a server-dialed session before `InitConnection` (`400`, `401`) | `code`, `reason` |
 | `WorkerCapabilities` | Systems, features, slots, CPU, RAM, core score, zone, endpoint | `architectures`, `system_features`, `max_concurrent_builds`, `zone`, `endpoint`, ... |
 | `WorkerMetrics` | Load heartbeat | `cpu_usage_pct`, `ram_free_mb`, `disk_speed_mbps`, `network_speed_mbps` |
 | `RequestJobList` | Asking for the full candidate list | - |

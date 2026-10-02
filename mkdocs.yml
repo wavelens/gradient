@@ -54,6 +54,7 @@ nav:
       - Declarative State: concepts/declarative-state.md
   - Guides:
       - Add a Remote Worker: guides/remote-worker.md
+      - Connect Gradient.CI Servers: guides/gradient-ci-servers.md
       - Connect GitHub: guides/github.md
       - Connect Gitea or Forgejo: guides/gitea.md
       - Connect GitLab: guides/gitlab.md
