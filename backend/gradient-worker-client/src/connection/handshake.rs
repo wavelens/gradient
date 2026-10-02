@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use std::sync::Arc;
+
 use anyhow::Result;
 use async_trait::async_trait;
 use gradient_wire::auth::verify_dialer_tokens;
@@ -93,14 +95,19 @@ pub async fn perform_handshake(
     Ok(result)
 }
 
-struct AcceptedServers(Option<Vec<(String, String)>>);
+struct AcceptedServers(Option<Arc<Vec<(String, String)>>>);
 
 #[async_trait]
 impl DialerVerifier for AcceptedServers {
     async fn verify(&self, _worker_id: &str, tokens: &[(String, String)]) -> bool {
-        self.0
-            .as_deref()
-            .is_none_or(|accepted| verify_dialer_tokens(accepted, tokens))
+        let Some(accepted) = self.0.clone() else {
+            return true;
+        };
+
+        let presented = tokens.to_vec();
+        tokio::task::spawn_blocking(move || verify_dialer_tokens(&accepted, &presented))
+            .await
+            .unwrap_or(false)
     }
 }
 
@@ -115,7 +122,7 @@ pub async fn perform_dialed_handshake(
         peer_tokens: Vec::new(),
     };
     let capabilities = StaticCapabilities(capabilities);
-    let verifier = AcceptedServers(accepted_server_tokens);
+    let verifier = AcceptedServers(accepted_server_tokens.map(Arc::new));
     let result = as_dialed(conn.socket_mut(), &identity, &capabilities, &verifier).await?;
     info!(
         server_version = result.server_version,
@@ -392,7 +399,7 @@ mod tests {
 
     #[tokio::test]
     async fn with_an_accepted_tokens_file_only_matching_tokens_pass() {
-        let accepted = AcceptedServers(Some(vec![("p1".into(), SHA256_OF_T1.into())]));
+        let accepted = AcceptedServers(Some(Arc::new(vec![("p1".into(), SHA256_OF_T1.into())])));
 
         assert!(accepted.verify("w1", &[("p1".into(), "t1".into())]).await);
         assert!(!accepted.verify("w1", &[("p1".into(), "t2".into())]).await);
