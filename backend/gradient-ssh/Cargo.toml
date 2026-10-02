@@ -15,15 +15,18 @@ workspace = true
 
 [dependencies]
 anyhow                         = { workspace = true }
+async-compression              = { workspace = true }
 bytes                          = { workspace = true }
 futures                        = { workspace = true }
 gradient-core                  = { workspace = true }
 gradient-daemon                = { workspace = true }
 gradient-db                    = { workspace = true }
+gradient-proto                 = { workspace = true }
 gradient-sources               = { workspace = true }
 gradient-storage               = { workspace = true }
 gradient-types                 = { workspace = true }
 gradient-util                  = { workspace = true }
+gradient-wire                  = { workspace = true }
 harmonia-protocol              = { workspace = true }
 harmonia-store-content-address = { workspace = true }
 harmonia-store-path            = { workspace = true }
@@ -34,8 +37,9 @@ rand                           = { workspace = true }
 sea-orm                        = { workspace = true }
 serde_json                     = { workspace = true }
 shell-words                    = { workspace = true }
+tempfile                       = { workspace = true }
 thiserror                      = { workspace = true }
-tokio                          = { workspace = true, features = ["io-util", "macros", "rt-multi-thread", "sync", "time"] }
+tokio                          = { workspace = true, features = ["fs", "io-util", "macros", "rt-multi-thread", "sync", "time"] }
 tracing                        = { workspace = true }
 
 [dev-dependencies]

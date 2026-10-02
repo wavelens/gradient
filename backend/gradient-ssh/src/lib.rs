@@ -5,6 +5,7 @@
  */
 
 pub mod commands;
+pub mod ingest;
 pub mod nar;
 pub mod roots;
 pub mod session;
