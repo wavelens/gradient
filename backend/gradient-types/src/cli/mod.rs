@@ -29,6 +29,7 @@ mod scim;
 mod secrets;
 mod sentry;
 mod server;
+mod ssh;
 mod state;
 mod upload;
 
@@ -54,6 +55,7 @@ pub use scim::ScimArgs;
 pub use secrets::SecretsArgs;
 pub use sentry::{DEFAULT_SENTRY_DSN, SentryArgs, effective_sentry_dsn};
 pub use server::ServerArgs;
+pub use ssh::SshArgs;
 pub use state::StateArgs;
 pub use upload::UploadArgs;
 

@@ -30,7 +30,7 @@ pub use self::cli::{
     BuildArgs, CacheArgs, CidrParseError, CreatePermission, DatabaseArgs, EmailArgs, EvalArgs,
     GcArgs, GitHubAppArgs, HttpArgs, LogArgs, MetricsArgs, NarArgs, OidcArgs, PermissionsArgs,
     ProtoArgs, PullRequestsArgs, RegistrationArgs, S3Args, SchedulerArgs, ScimArgs, SecretsArgs,
-    SentryArgs, ServerArgs, StateArgs, UploadArgs, in_any, parse_cidr_list,
+    SentryArgs, ServerArgs, SshArgs, StateArgs, UploadArgs, in_any, parse_cidr_list,
 };
 pub use self::config::{
     ConfigError, EmailConfig, GitHubAppConfig, MetricsConfig, NetworkConfig, OidcConfig,
@@ -112,6 +112,8 @@ pub struct Cli {
     pub s3: S3Args,
     #[command(flatten)]
     pub github_app: GitHubAppArgs,
+    #[command(flatten)]
+    pub ssh: SshArgs,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
