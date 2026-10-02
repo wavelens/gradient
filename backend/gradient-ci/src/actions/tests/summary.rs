@@ -152,3 +152,41 @@ fn collected_evaluation_still_yields_a_message() {
         assert_eq!(s.link, None);
     });
 }
+
+#[test]
+fn plain_names_scope_derivation_status_and_commit() {
+    assert_eq!(
+        build_failed().plain(),
+        "web/app: hello-2.12.1 failed on 3f9c2ab\nhttps://ci.example/project/web/log/e-1"
+    );
+}
+
+#[test]
+fn html_links_and_escapes() {
+    let mut s = build_failed();
+    s.task = Some("<b>&app".into());
+    assert_eq!(
+        s.html(),
+        "web/&lt;b&gt;&amp;app: hello-2.12.1 failed on 3f9c2ab<br>\
+         <a href=\"https://ci.example/project/web/log/e-1\">View evaluation</a>"
+    );
+}
+
+#[test]
+fn slack_escapes_and_links() {
+    let mut s = build_failed();
+    s.task = Some("a<b>&c".into());
+    assert_eq!(
+        s.slack(),
+        "web/a&lt;b&gt;&amp;c: hello-2.12.1 failed on 3f9c2ab \
+         <https://ci.example/project/web/log/e-1|View evaluation>"
+    );
+}
+
+#[test]
+fn plain_text_keeps_markup_characters() {
+    let mut s = build_failed();
+    s.task = Some("a<b>&c".into());
+    s.link = None;
+    assert_eq!(s.plain(), "web/a<b>&c: hello-2.12.1 failed on 3f9c2ab");
+}

@@ -5,7 +5,8 @@
  */
 
 use super::send::{
-    execute_git_host_status_report, execute_open_pr, execute_send_mail, execute_send_web_request,
+    execute_git_host_status_report, execute_open_pr, execute_send_mail,
+    execute_send_matrix_message, execute_send_slack_message, execute_send_web_request,
 };
 use super::{MAX_BODY_BYTES, truncate};
 use crate::context::CiContext;
@@ -30,8 +31,8 @@ pub async fn execute_action(
 ) -> Result<()> {
     let cfg: ActionConfig =
         serde_json::from_value(action.config.clone()).context("decoding action config")?;
-    let action_id_for_pr = action.id;
-    let task_for_pr = action.task;
+    let action_id = action.id;
+    let task_id = action.task;
     let started = Instant::now();
     let request_body = truncate(
         serde_json::to_string(&envelope).unwrap_or_default(),
@@ -71,8 +72,8 @@ pub async fn execute_action(
                 ctx,
                 event,
                 &content,
-                action_id_for_pr,
-                task_for_pr,
+                action_id,
+                task_id,
                 integration_id,
                 &branch_pattern,
                 title_template.as_deref(),
@@ -80,6 +81,25 @@ pub async fn execute_action(
                 update_existing,
             )
             .await
+        }
+        ActionConfig::SendMatrixMessage {
+            homeserver,
+            room_id,
+            access_token,
+        } => {
+            execute_send_matrix_message(
+                ctx,
+                action_id,
+                event,
+                &envelope,
+                &homeserver,
+                &room_id,
+                access_token.as_deref(),
+            )
+            .await
+        }
+        ActionConfig::SendSlackMessage { webhook_url } => {
+            execute_send_slack_message(ctx, event, &envelope, webhook_url.as_deref()).await
         }
     };
 
@@ -96,7 +116,6 @@ pub async fn execute_action(
         Err(e) => (None, None, Some(format!("{:#}", e))),
     };
 
-    let action_id = action.id;
     let delivery = MTaskActionDelivery {
         id: TaskActionDeliveryId::now_v7(),
         action_id,

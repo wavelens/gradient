@@ -6,6 +6,7 @@
 
 use chrono::NaiveDateTime;
 use num_enum::{IntoPrimitive, TryFromPrimitive};
+use sea_orm::Iterable;
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 
@@ -37,6 +38,36 @@ pub enum ActionType {
     GitHostStatusReport = 2,
     #[sea_orm(num_value = 3)]
     OpenPr = 3,
+    #[sea_orm(num_value = 4)]
+    SendMatrixMessage = 4,
+    #[sea_orm(num_value = 5)]
+    SendSlackMessage = 5,
+}
+
+impl ActionType {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ActionType::SendMail => "send_mail",
+            ActionType::SendWebRequest => "send_web_request",
+            ActionType::GitHostStatusReport => "git_host_status_report",
+            ActionType::OpenPr => "open_pr",
+            ActionType::SendMatrixMessage => "send_matrix_message",
+            ActionType::SendSlackMessage => "send_slack_message",
+        }
+    }
+
+    pub fn from_name(name: &str) -> Option<Self> {
+        Self::iter().find(|t| t.as_str() == name)
+    }
+
+    pub fn secret_field(self) -> Option<&'static str> {
+        match self {
+            ActionType::SendWebRequest => Some("token"),
+            ActionType::SendMatrixMessage => Some("access_token"),
+            ActionType::SendSlackMessage => Some("webhook_url"),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
@@ -82,3 +113,15 @@ impl Related<super::task_action_delivery::Entity> for Entity {
 }
 
 impl ActiveModelBehavior for ActiveModel {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn type_names_round_trip() {
+        for t in ActionType::iter() {
+            assert_eq!(ActionType::from_name(t.as_str()), Some(t));
+        }
+    }
+}

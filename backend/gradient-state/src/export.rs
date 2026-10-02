@@ -508,16 +508,23 @@ fn export_action(
             c.insert("update_existing".into(), update_existing.into());
             (ActionType::OpenPr, c)
         }
+        ActionConfig::SendMatrixMessage {
+            homeserver,
+            room_id,
+            ..
+        } => {
+            let mut c = serde_json::Map::new();
+            c.insert("homeserver".into(), homeserver.into());
+            c.insert("room_id".into(), room_id.into());
+            (ActionType::SendMatrixMessage, c)
+        }
+        ActionConfig::SendSlackMessage { .. } => {
+            (ActionType::SendSlackMessage, serde_json::Map::new())
+        }
     };
     Some(super::StateAction {
         name: a.name.clone(),
-        action_type: match action_type {
-            ActionType::SendMail => "send_mail",
-            ActionType::SendWebRequest => "send_web_request",
-            ActionType::GitHostStatusReport => "git_host_status_report",
-            ActionType::OpenPr => "open_pr",
-        }
-        .to_string(),
+        action_type: action_type.as_str().to_string(),
         active: a.active,
         events,
         config: serde_json::Value::Object(config),

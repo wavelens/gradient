@@ -4,7 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use anyhow::{Result, anyhow};
+use crate::context::CiContext;
+use anyhow::{Context, Result, anyhow};
 use gradient_types::input::load_secret_bytes;
 
 pub fn encrypt_action_secret(plaintext: &str, crypt_key: &[u8]) -> Result<String> {
@@ -28,4 +29,9 @@ pub fn decrypt_secret_with_file(
     let key =
         load_secret_bytes(crypt_secret_file).map_err(|e| anyhow!("loading crypt key: {}", e))?;
     decrypt_action_secret(ciphertext, key.expose()).map(gradient_types::SecretString::new)
+}
+
+pub(crate) fn decrypt_with_server_key(ctx: &CiContext, ciphertext: &str) -> Result<String> {
+    let key = load_secret_bytes(&ctx.db.config.secrets.crypt_file).context("loading crypt key")?;
+    decrypt_action_secret(ciphertext, key.expose())
 }
