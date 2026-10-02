@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use super::evaluation_rows::load_evaluation_rows;
+use super::evaluation_rows::{load_evaluation_rows, load_project_name};
 use crate::context::CiContext;
 use anyhow::{Context, Result};
 use gradient_types::input::vec_to_hex;
@@ -84,15 +84,16 @@ impl EventSummary {
         }
 
         let rows = load_evaluation_rows(ctx, &evaluation).await?;
+        let project_name = load_project_name(ctx, rows.task.project).await;
         self.task = Some(rows.task.name);
         self.commit = Some(short_sha(&vec_to_hex(&rows.commit.hash)));
-        self.link = rows.project_name.as_ref().map(|project| {
+        self.link = project_name.as_ref().map(|project| {
             format!(
                 "{}/project/{}/log/{}",
                 ctx.db.config.server.frontend_url, project, evaluation.id
             )
         });
-        self.project = rows.project_name;
+        self.project = project_name;
         Ok(())
     }
 
@@ -123,20 +124,20 @@ impl EventSummary {
     }
 
     pub(crate) fn html(&self) -> String {
-        let line = self.headline(escape_markup);
+        let line = self.headline(escape_html);
         match &self.link {
             Some(link) => format!(
                 "{line}<br><a href=\"{}\">View evaluation</a>",
-                escape_markup(link)
+                escape_html(link)
             ),
             None => line,
         }
     }
 
     pub(crate) fn slack(&self) -> String {
-        let line = self.headline(escape_markup);
+        let line = self.headline(escape_slack);
         match &self.link {
-            Some(link) => format!("{line} <{}|View evaluation>", escape_markup(link)),
+            Some(link) => format!("{line} <{}|View evaluation>", escape_slack(link)),
             None => line,
         }
     }
@@ -169,11 +170,14 @@ fn status_of(event: &str) -> String {
         .replace('_', " ")
 }
 
-fn escape_markup(s: &str) -> String {
+fn escape_slack(s: &str) -> String {
     s.replace('&', "&amp;")
         .replace('<', "&lt;")
         .replace('>', "&gt;")
-        .replace('"', "&quot;")
+}
+
+fn escape_html(s: &str) -> String {
+    escape_slack(s).replace('"', "&quot;")
 }
 
 fn derivation_name(path: &str) -> String {

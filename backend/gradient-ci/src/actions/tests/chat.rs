@@ -26,6 +26,15 @@ fn summary() -> EventSummary {
 }
 
 #[tokio::test]
+async fn slack_transport_error_hides_the_webhook_url() {
+    let webhook = "http://127.0.0.1:1/services/T0/B0/SECRET".parse().unwrap();
+    let Err(err) = post_slack_message(&http(), webhook, &summary()).await else {
+        panic!("nothing listens on port 1");
+    };
+    assert!(!format!("{err:#}").contains("SECRET"), "{err:#}");
+}
+
+#[tokio::test]
 async fn matrix_puts_an_html_message_under_a_path_prefix() {
     let server = MockServer::start().await;
     Mock::given(method("PUT"))
