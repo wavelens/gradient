@@ -47,7 +47,7 @@ Two layers bound evaluation memory.
 
 | Layer | Option | Behavior |
 |---|---|---|
-| Pool sizing | `worker.eval.maxRss` (8 GiB) | `pool_size * maxRss` is staying within a host-RAM share. A subprocess over the cap is recycled **between** calls |
+| Pool sizing | `worker.eval.maxRss` (2 GiB) | `pool_size * maxRss` is staying within a host-RAM share. A subprocess over the cap is recycled **between** calls |
 | Free-RAM reaper | `worker.system.minFreeRamMb` (`0` = 10% of RAM, clamped to 128 MiB - 1 GiB) | Sampling `MemAvailable` every 500 ms. A shortfall below the margin is triggering a SIGKILL of the largest evaluation subprocess with resident memory covering the whole shortfall. A 5 s wait is following |
 
 - The recycle check is running after a call. One unit (a large aggregate, IFD chains, runaway recursion) can grow the Boehm heap past the cap within a call. The reaper is the guard against that peak.

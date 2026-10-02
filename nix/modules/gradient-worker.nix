@@ -261,7 +261,7 @@ in {
 
       maxRss = lib.mkOption {
         type = lib.types.ints.positive;
-        default = 8589934592;
+        default = 2 * 1024 * 1024 * 1024;
         description = ''
           Memory in bytes above which the worker is recycling an evaluation subprocess after its
           current call. The limit is not hard. A subprocess may exceed the limit during a call. Keep
