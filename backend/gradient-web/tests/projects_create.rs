@@ -51,80 +51,68 @@ fn with_auth(db: MockDatabase, session_id: SessionId) -> MockDatabase {
         .append_query_results([vec![user()]])
 }
 
-#[test]
-fn put_project_returns_already_exists_via_pre_check() {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    rt.block_on(async {
-        let session_id = SessionId::now_v7();
-        let token = make_token(session_id);
+#[tokio::test]
+async fn put_project_returns_already_exists_via_pre_check() {
+    let session_id = SessionId::now_v7();
+    let token = make_token(session_id);
 
-        let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
-            .append_query_results([vec![project_row("dup")]]);
+    let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
+        .append_query_results([vec![project_row("dup")]]);
 
-        let server = make_test_server(db.into_connection());
-        let res = server
-            .put("/api/v1/projects")
-            .add_header("authorization", format!("Bearer {}", token))
-            .json(&json!({
-                "name": "dup",
-                "display_name": "dup",
-                "description": "",
-                "public": false,
-            }))
-            .await;
+    let server = make_test_server(db.into_connection());
+    let res = server
+        .put("/api/v1/projects")
+        .add_header("authorization", format!("Bearer {}", token))
+        .json(&json!({
+            "name": "dup",
+            "display_name": "dup",
+            "description": "",
+            "public": false,
+        }))
+        .await;
 
-        res.assert_status(axum::http::StatusCode::CONFLICT);
-        let body: Value = res.json();
-        assert_eq!(body["error"], true);
-        assert_eq!(body["code"], "already_exists");
-    });
+    res.assert_status(axum::http::StatusCode::CONFLICT);
+    let body: Value = res.json();
+    assert_eq!(body["error"], true);
+    assert_eq!(body["code"], "already_exists");
 }
 
-#[test]
-fn put_project_creates_project_and_admin_membership() {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    rt.block_on(async {
-        let session_id = SessionId::now_v7();
-        let token = make_token(session_id);
-        let inserted = project_row("fresh");
-        let membership = project_user_row(inserted.id);
+#[tokio::test]
+async fn put_project_creates_project_and_admin_membership() {
+    let session_id = SessionId::now_v7();
+    let token = make_token(session_id);
+    let inserted = project_row("fresh");
+    let membership = project_user_row(inserted.id);
 
-        let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
-            .append_query_results::<project::Model, _, _>([Vec::<project::Model>::new()])
-            .append_query_results([vec![inserted]])
-            .append_query_results([vec![membership]])
-            .append_query_results([Vec::<gradient_entity::base_worker::Model>::new()])
-            .append_exec_results([
-                MockExecResult {
-                    last_insert_id: 0,
-                    rows_affected: 1,
-                },
-                MockExecResult {
-                    last_insert_id: 0,
-                    rows_affected: 1,
-                },
-            ]);
+    let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
+        .append_query_results::<project::Model, _, _>([Vec::<project::Model>::new()])
+        .append_query_results([vec![inserted]])
+        .append_query_results([vec![membership]])
+        .append_query_results([Vec::<gradient_entity::base_worker::Model>::new()])
+        .append_exec_results([
+            MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 1,
+            },
+            MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 1,
+            },
+        ]);
 
-        let server = make_test_server_with(db.into_connection(), Some(temp_crypt_secret_file()));
-        let res = server
-            .put("/api/v1/projects")
-            .add_header("authorization", format!("Bearer {}", token))
-            .json(&json!({
-                "name": "fresh",
-                "display_name": "Fresh",
-                "description": "",
-                "public": false,
-            }))
-            .await;
+    let server = make_test_server_with(db.into_connection(), Some(temp_crypt_secret_file()));
+    let res = server
+        .put("/api/v1/projects")
+        .add_header("authorization", format!("Bearer {}", token))
+        .json(&json!({
+            "name": "fresh",
+            "display_name": "Fresh",
+            "description": "",
+            "public": false,
+        }))
+        .await;
 
-        res.assert_status_ok();
-        let body: Value = res.json();
-        assert_eq!(body["error"], false);
-    });
+    res.assert_status_ok();
+    let body: Value = res.json();
+    assert_eq!(body["error"], false);
 }

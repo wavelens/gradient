@@ -188,281 +188,239 @@ fn server_with_email(
 
 const BASE_URL: &str = "/api/v1/tasks/test-project/test-task/actions";
 
-#[test]
-fn list_actions_empty() {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    rt.block_on(async {
-        let session_id = SessionId::now_v7();
-        let token = make_token(session_id);
+#[tokio::test]
+async fn list_actions_empty() {
+    let session_id = SessionId::now_v7();
+    let token = make_token(session_id);
 
-        let db = with_task_member(with_auth(
-            MockDatabase::new(DatabaseBackend::Postgres),
-            session_id,
-        ))
-        .append_query_results([Vec::<task_action::Model>::new()]);
+    let db = with_task_member(with_auth(
+        MockDatabase::new(DatabaseBackend::Postgres),
+        session_id,
+    ))
+    .append_query_results([Vec::<task_action::Model>::new()]);
 
-        let server = make_test_server_with(db.into_connection(), None);
-        let res = server
-            .get(BASE_URL)
-            .add_header("authorization", format!("Bearer {}", token))
-            .await;
+    let server = make_test_server_with(db.into_connection(), None);
+    let res = server
+        .get(BASE_URL)
+        .add_header("authorization", format!("Bearer {}", token))
+        .await;
 
-        res.assert_status_ok();
-        let body: Value = res.json();
-        assert_eq!(body["error"], false);
-        let items = body["message"].as_array().expect("array");
-        assert!(items.is_empty());
-    });
+    res.assert_status_ok();
+    let body: Value = res.json();
+    assert_eq!(body["error"], false);
+    let items = body["message"].as_array().expect("array");
+    assert!(items.is_empty());
 }
 
-#[test]
-fn create_send_mail_returns_201_when_smtp_enabled() {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    rt.block_on(async {
-        let session_id = SessionId::now_v7();
-        let token = make_token(session_id);
+#[tokio::test]
+async fn create_send_mail_returns_201_when_smtp_enabled() {
+    let session_id = SessionId::now_v7();
+    let token = make_token(session_id);
 
-        let db = with_task_edit(with_auth(
-            MockDatabase::new(DatabaseBackend::Postgres),
-            session_id,
-        ))
-        .append_query_results([Vec::<task_action::Model>::new()])
-        .append_query_results([vec![send_mail_action_row()]]);
+    let db = with_task_edit(with_auth(
+        MockDatabase::new(DatabaseBackend::Postgres),
+        session_id,
+    ))
+    .append_query_results([Vec::<task_action::Model>::new()])
+    .append_query_results([vec![send_mail_action_row()]]);
 
-        let server = make_test_server_with(db.into_connection(), None);
-        let res = server
-            .post(BASE_URL)
-            .add_header("authorization", format!("Bearer {}", token))
-            .json(&json!({
-                "name": "ops-mail",
-                "config": {
-                    "type": "send_mail",
-                    "recipients": ["ops@example.com"],
-                },
-                "events": ["build.completed"],
-            }))
-            .await;
+    let server = make_test_server_with(db.into_connection(), None);
+    let res = server
+        .post(BASE_URL)
+        .add_header("authorization", format!("Bearer {}", token))
+        .json(&json!({
+            "name": "ops-mail",
+            "config": {
+                "type": "send_mail",
+                "recipients": ["ops@example.com"],
+            },
+            "events": ["build.completed"],
+        }))
+        .await;
 
-        res.assert_status_ok();
-        let body: Value = res.json();
-        assert_eq!(body["error"], false);
-        assert_eq!(body["message"]["action"]["action_type"], "send_mail");
-        assert_eq!(body["message"]["action"]["name"], "ops-mail");
-        assert!(body["message"]["token"].is_null());
-    });
+    res.assert_status_ok();
+    let body: Value = res.json();
+    assert_eq!(body["error"], false);
+    assert_eq!(body["message"]["action"]["action_type"], "send_mail");
+    assert_eq!(body["message"]["action"]["name"], "ops-mail");
+    assert!(body["message"]["token"].is_null());
 }
 
-#[test]
-fn create_send_mail_422_when_smtp_disabled() {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    rt.block_on(async {
-        let session_id = SessionId::now_v7();
-        let token = make_token(session_id);
+#[tokio::test]
+async fn create_send_mail_422_when_smtp_disabled() {
+    let session_id = SessionId::now_v7();
+    let token = make_token(session_id);
 
-        let db = with_task_edit(with_auth(
-            MockDatabase::new(DatabaseBackend::Postgres),
-            session_id,
-        ));
+    let db = with_task_edit(with_auth(
+        MockDatabase::new(DatabaseBackend::Postgres),
+        session_id,
+    ));
 
-        let server = server_with_email(
-            db.into_connection(),
-            Arc::new(InMemoryEmailSender::disabled()) as Arc<dyn EmailSender>,
-            None,
-        );
-        let res = server
-            .post(BASE_URL)
-            .add_header("authorization", format!("Bearer {}", token))
-            .json(&json!({
-                "name": "ops-mail",
-                "config": {
-                    "type": "send_mail",
-                    "recipients": ["ops@example.com"],
-                },
-            }))
-            .await;
+    let server = server_with_email(
+        db.into_connection(),
+        Arc::new(InMemoryEmailSender::disabled()) as Arc<dyn EmailSender>,
+        None,
+    );
+    let res = server
+        .post(BASE_URL)
+        .add_header("authorization", format!("Bearer {}", token))
+        .json(&json!({
+            "name": "ops-mail",
+            "config": {
+                "type": "send_mail",
+                "recipients": ["ops@example.com"],
+            },
+        }))
+        .await;
 
-        res.assert_status(axum::http::StatusCode::UNPROCESSABLE_ENTITY);
-        let body: Value = res.json();
-        assert_eq!(body["error"], true);
-        assert!(
-            body["message"].as_str().unwrap().contains("SMTP"),
-            "expected SMTP mention, got: {}",
-            body["message"]
-        );
-    });
+    res.assert_status(axum::http::StatusCode::UNPROCESSABLE_ENTITY);
+    let body: Value = res.json();
+    assert_eq!(body["error"], true);
+    assert!(
+        body["message"].as_str().unwrap().contains("SMTP"),
+        "expected SMTP mention, got: {}",
+        body["message"]
+    );
 }
 
-#[test]
-fn create_send_web_request_returns_token_once() {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    rt.block_on(async {
-        let session_id = SessionId::now_v7();
-        let token = make_token(session_id);
+#[tokio::test]
+async fn create_send_web_request_returns_token_once() {
+    let session_id = SessionId::now_v7();
+    let token = make_token(session_id);
 
-        let db = with_task_edit(with_auth(
-            MockDatabase::new(DatabaseBackend::Postgres),
-            session_id,
-        ))
-        .append_query_results([Vec::<task_action::Model>::new()])
-        .append_query_results([vec![web_request_action_row()]]);
+    let db = with_task_edit(with_auth(
+        MockDatabase::new(DatabaseBackend::Postgres),
+        session_id,
+    ))
+    .append_query_results([Vec::<task_action::Model>::new()])
+    .append_query_results([vec![web_request_action_row()]]);
 
-        let server = make_test_server_with(db.into_connection(), Some(temp_crypt_secret_file()));
-        let res = server
-            .post(BASE_URL)
-            .add_header("authorization", format!("Bearer {}", token))
-            .json(&json!({
-                "name": "hook",
-                "config": {
-                    "type": "send_web_request",
-                    "url": "https://example.com/hook",
-                    "token": "supersecret",
-                },
-                "events": ["build.completed"],
-            }))
-            .await;
+    let server = make_test_server_with(db.into_connection(), Some(temp_crypt_secret_file()));
+    let res = server
+        .post(BASE_URL)
+        .add_header("authorization", format!("Bearer {}", token))
+        .json(&json!({
+            "name": "hook",
+            "config": {
+                "type": "send_web_request",
+                "url": "https://example.com/hook",
+                "token": "supersecret",
+            },
+            "events": ["build.completed"],
+        }))
+        .await;
 
-        res.assert_status_ok();
-        let body: Value = res.json();
-        assert_eq!(body["error"], false);
-        assert_eq!(body["message"]["action"]["action_type"], "send_web_request");
-        assert_eq!(body["message"]["token"], "supersecret");
-        assert!(
-            body["message"]["action"]["config"].get("token").is_none(),
-            "stored config must not echo the token back: {}",
-            body["message"]["action"]["config"]
-        );
-    });
+    res.assert_status_ok();
+    let body: Value = res.json();
+    assert_eq!(body["error"], false);
+    assert_eq!(body["message"]["action"]["action_type"], "send_web_request");
+    assert_eq!(body["message"]["token"], "supersecret");
+    assert!(
+        body["message"]["action"]["config"].get("token").is_none(),
+        "stored config must not echo the token back: {}",
+        body["message"]["action"]["config"]
+    );
 }
 
-#[test]
-fn create_git_host_status_report_rejects_nonempty_events() {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    rt.block_on(async {
-        let session_id = SessionId::now_v7();
-        let token = make_token(session_id);
+#[tokio::test]
+async fn create_git_host_status_report_rejects_nonempty_events() {
+    let session_id = SessionId::now_v7();
+    let token = make_token(session_id);
 
-        let db = with_task_edit(with_auth(
-            MockDatabase::new(DatabaseBackend::Postgres),
-            session_id,
-        ));
+    let db = with_task_edit(with_auth(
+        MockDatabase::new(DatabaseBackend::Postgres),
+        session_id,
+    ));
 
-        let server = make_test_server_with(db.into_connection(), None);
-        let integration_id = IntegrationId::now_v7();
-        let res = server
-            .post(BASE_URL)
-            .add_header("authorization", format!("Bearer {}", token))
-            .json(&json!({
-                "name": "status",
-                "config": {
-                    "type": "git_host_status_report",
-                    "integration_id": integration_id.to_string(),
-                },
-                "events": ["build.started"],
-            }))
-            .await;
+    let server = make_test_server_with(db.into_connection(), None);
+    let integration_id = IntegrationId::now_v7();
+    let res = server
+        .post(BASE_URL)
+        .add_header("authorization", format!("Bearer {}", token))
+        .json(&json!({
+            "name": "status",
+            "config": {
+                "type": "git_host_status_report",
+                "integration_id": integration_id.to_string(),
+            },
+            "events": ["build.started"],
+        }))
+        .await;
 
-        res.assert_status(axum::http::StatusCode::UNPROCESSABLE_ENTITY);
-        let body: Value = res.json();
-        assert_eq!(body["error"], true);
-        assert!(
-            body["message"]
-                .as_str()
-                .unwrap()
-                .contains("git_host_status_report"),
-            "expected git_host_status_report mention, got: {}",
-            body["message"]
-        );
-    });
+    res.assert_status(axum::http::StatusCode::UNPROCESSABLE_ENTITY);
+    let body: Value = res.json();
+    assert_eq!(body["error"], true);
+    assert!(
+        body["message"]
+            .as_str()
+            .unwrap()
+            .contains("git_host_status_report"),
+        "expected git_host_status_report mention, got: {}",
+        body["message"]
+    );
 }
 
-#[test]
-fn read_action_strips_token_from_config() {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    rt.block_on(async {
-        let session_id = SessionId::now_v7();
-        let token = make_token(session_id);
+#[tokio::test]
+async fn read_action_strips_token_from_config() {
+    let session_id = SessionId::now_v7();
+    let token = make_token(session_id);
 
-        let db = with_task_member(with_auth(
-            MockDatabase::new(DatabaseBackend::Postgres),
-            session_id,
-        ))
-        .append_query_results([vec![web_request_action_row()]]);
+    let db = with_task_member(with_auth(
+        MockDatabase::new(DatabaseBackend::Postgres),
+        session_id,
+    ))
+    .append_query_results([vec![web_request_action_row()]]);
 
-        let server = make_test_server_with(db.into_connection(), None);
-        let url = format!("{}/{}", BASE_URL, action_id());
-        let res = server
-            .get(&url)
-            .add_header("authorization", format!("Bearer {}", token))
-            .await;
+    let server = make_test_server_with(db.into_connection(), None);
+    let url = format!("{}/{}", BASE_URL, action_id());
+    let res = server
+        .get(&url)
+        .add_header("authorization", format!("Bearer {}", token))
+        .await;
 
-        res.assert_status_ok();
-        let body: Value = res.json();
-        assert_eq!(body["error"], false);
-        assert!(
-            body["message"]["config"].get("token").is_none(),
-            "token must be stripped from read response: {}",
-            body["message"]["config"]
-        );
-        assert_eq!(body["message"]["action_type"], "send_web_request");
-    });
+    res.assert_status_ok();
+    let body: Value = res.json();
+    assert_eq!(body["error"], false);
+    assert!(
+        body["message"]["config"].get("token").is_none(),
+        "token must be stripped from read response: {}",
+        body["message"]["config"]
+    );
+    assert_eq!(body["message"]["action_type"], "send_web_request");
 }
 
-#[test]
-fn update_rejects_action_type_change() {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    rt.block_on(async {
-        let session_id = SessionId::now_v7();
-        let token = make_token(session_id);
+#[tokio::test]
+async fn update_rejects_action_type_change() {
+    let session_id = SessionId::now_v7();
+    let token = make_token(session_id);
 
-        let db = with_task_edit(with_auth(
-            MockDatabase::new(DatabaseBackend::Postgres),
-            session_id,
-        ))
-        .append_query_results([vec![send_mail_action_row()]]);
+    let db = with_task_edit(with_auth(
+        MockDatabase::new(DatabaseBackend::Postgres),
+        session_id,
+    ))
+    .append_query_results([vec![send_mail_action_row()]]);
 
-        let server = make_test_server_with(db.into_connection(), None);
-        let url = format!("{}/{}", BASE_URL, action_id());
-        let res = server
-            .patch(&url)
-            .add_header("authorization", format!("Bearer {}", token))
-            .json(&json!({
-                "config": {
-                    "type": "send_web_request",
-                    "url": "https://example.com/hook",
-                },
-            }))
-            .await;
+    let server = make_test_server_with(db.into_connection(), None);
+    let url = format!("{}/{}", BASE_URL, action_id());
+    let res = server
+        .patch(&url)
+        .add_header("authorization", format!("Bearer {}", token))
+        .json(&json!({
+            "config": {
+                "type": "send_web_request",
+                "url": "https://example.com/hook",
+            },
+        }))
+        .await;
 
-        res.assert_status(axum::http::StatusCode::UNPROCESSABLE_ENTITY);
-        let body: Value = res.json();
-        assert_eq!(body["error"], true);
-        assert!(
-            body["message"].as_str().unwrap().contains("action_type"),
-            "expected action_type mention, got: {}",
-            body["message"]
-        );
-    });
+    res.assert_status(axum::http::StatusCode::UNPROCESSABLE_ENTITY);
+    let body: Value = res.json();
+    assert_eq!(body["error"], true);
+    assert!(
+        body["message"].as_str().unwrap().contains("action_type"),
+        "expected action_type mention, got: {}",
+        body["message"]
+    );
 }
 
 #[test]
@@ -476,74 +434,62 @@ fn update_send_web_request_without_token_preserves_existing() {}
             A real integration test with a live DB is needed to validate end-to-end."]
 fn test_fire_returns_ok_for_send_web_request() {}
 
-#[test]
-fn regenerate_token_returns_new_plaintext() {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    rt.block_on(async {
-        let session_id = SessionId::now_v7();
-        let token = make_token(session_id);
+#[tokio::test]
+async fn regenerate_token_returns_new_plaintext() {
+    let session_id = SessionId::now_v7();
+    let token = make_token(session_id);
 
-        let db = with_task_edit(with_auth(
-            MockDatabase::new(DatabaseBackend::Postgres),
-            session_id,
-        ))
-        .append_query_results([vec![web_request_action_row()]])
-        .append_query_results([vec![web_request_action_row()]]);
+    let db = with_task_edit(with_auth(
+        MockDatabase::new(DatabaseBackend::Postgres),
+        session_id,
+    ))
+    .append_query_results([vec![web_request_action_row()]])
+    .append_query_results([vec![web_request_action_row()]]);
 
-        let server = make_test_server_with(db.into_connection(), Some(temp_crypt_secret_file()));
-        let url = format!("{}/{}/regenerate-token", BASE_URL, action_id());
-        let res = server
-            .post(&url)
-            .add_header("authorization", format!("Bearer {}", token))
-            .await;
+    let server = make_test_server_with(db.into_connection(), Some(temp_crypt_secret_file()));
+    let url = format!("{}/{}/regenerate-token", BASE_URL, action_id());
+    let res = server
+        .post(&url)
+        .add_header("authorization", format!("Bearer {}", token))
+        .await;
 
-        res.assert_status_ok();
-        let body: Value = res.json();
-        assert_eq!(body["error"], false);
-        let new_token = body["message"]["token"].as_str().expect("token string");
-        assert!(new_token.starts_with("gat_"), "token prefix: {}", new_token);
-        assert_ne!(new_token, "old", "token must be newly generated");
-    });
+    res.assert_status_ok();
+    let body: Value = res.json();
+    assert_eq!(body["error"], false);
+    let new_token = body["message"]["token"].as_str().expect("token string");
+    assert!(new_token.starts_with("gat_"), "token prefix: {}", new_token);
+    assert_ne!(new_token, "old", "token must be newly generated");
 }
 
-#[test]
-fn regenerate_token_rejects_non_web_request_action() {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    rt.block_on(async {
-        let session_id = SessionId::now_v7();
-        let token = make_token(session_id);
+#[tokio::test]
+async fn regenerate_token_rejects_non_web_request_action() {
+    let session_id = SessionId::now_v7();
+    let token = make_token(session_id);
 
-        let db = with_task_edit(with_auth(
-            MockDatabase::new(DatabaseBackend::Postgres),
-            session_id,
-        ))
-        .append_query_results([vec![send_mail_action_row()]]);
+    let db = with_task_edit(with_auth(
+        MockDatabase::new(DatabaseBackend::Postgres),
+        session_id,
+    ))
+    .append_query_results([vec![send_mail_action_row()]]);
 
-        let server = make_test_server_with(db.into_connection(), None);
-        let url = format!("{}/{}/regenerate-token", BASE_URL, action_id());
-        let res = server
-            .post(&url)
-            .add_header("authorization", format!("Bearer {}", token))
-            .await;
+    let server = make_test_server_with(db.into_connection(), None);
+    let url = format!("{}/{}/regenerate-token", BASE_URL, action_id());
+    let res = server
+        .post(&url)
+        .add_header("authorization", format!("Bearer {}", token))
+        .await;
 
-        res.assert_status(axum::http::StatusCode::UNPROCESSABLE_ENTITY);
-        let body: Value = res.json();
-        assert_eq!(body["error"], true);
-        assert!(
-            body["message"]
-                .as_str()
-                .unwrap()
-                .contains("send_web_request"),
-            "expected send_web_request mention, got: {}",
-            body["message"]
-        );
-    });
+    res.assert_status(axum::http::StatusCode::UNPROCESSABLE_ENTITY);
+    let body: Value = res.json();
+    assert_eq!(body["error"], true);
+    assert!(
+        body["message"]
+            .as_str()
+            .unwrap()
+            .contains("send_web_request"),
+        "expected send_web_request mention, got: {}",
+        body["message"]
+    );
 }
 
 fn delivery_id() -> TaskActionDeliveryId {
@@ -565,138 +511,114 @@ fn delivery_row() -> task_action_delivery::Model {
     }
 }
 
-#[test]
-fn list_deliveries_excludes_bodies() {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    rt.block_on(async {
-        let session_id = SessionId::now_v7();
-        let token = make_token(session_id);
+#[tokio::test]
+async fn list_deliveries_excludes_bodies() {
+    let session_id = SessionId::now_v7();
+    let token = make_token(session_id);
 
-        let db = with_task_member(with_auth(
-            MockDatabase::new(DatabaseBackend::Postgres),
-            session_id,
-        ))
-        .append_query_results([vec![send_mail_action_row()]])
-        .append_query_results([vec![delivery_row()]]);
+    let db = with_task_member(with_auth(
+        MockDatabase::new(DatabaseBackend::Postgres),
+        session_id,
+    ))
+    .append_query_results([vec![send_mail_action_row()]])
+    .append_query_results([vec![delivery_row()]]);
 
-        let server = make_test_server_with(db.into_connection(), None);
-        let url = format!("{}/{}/deliveries", BASE_URL, action_id());
-        let res = server
-            .get(&url)
-            .add_header("authorization", format!("Bearer {}", token))
-            .await;
+    let server = make_test_server_with(db.into_connection(), None);
+    let url = format!("{}/{}/deliveries", BASE_URL, action_id());
+    let res = server
+        .get(&url)
+        .add_header("authorization", format!("Bearer {}", token))
+        .await;
 
-        res.assert_status_ok();
-        let body: Value = res.json();
-        assert_eq!(body["error"], false);
-        let items = body["message"].as_array().expect("array");
-        assert_eq!(items.len(), 1);
-        assert!(
-            items[0].get("request_body").is_none(),
-            "list must not expose request_body"
-        );
-        assert!(
-            items[0].get("response_body").is_none(),
-            "list must not expose response_body"
-        );
-        assert_eq!(items[0]["event"], "build.completed");
-        assert_eq!(items[0]["success"], true);
-    });
+    res.assert_status_ok();
+    let body: Value = res.json();
+    assert_eq!(body["error"], false);
+    let items = body["message"].as_array().expect("array");
+    assert_eq!(items.len(), 1);
+    assert!(
+        items[0].get("request_body").is_none(),
+        "list must not expose request_body"
+    );
+    assert!(
+        items[0].get("response_body").is_none(),
+        "list must not expose response_body"
+    );
+    assert_eq!(items[0]["event"], "build.completed");
+    assert_eq!(items[0]["success"], true);
 }
 
-#[test]
-fn get_delivery_detail_includes_bodies() {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    rt.block_on(async {
-        let session_id = SessionId::now_v7();
-        let token = make_token(session_id);
+#[tokio::test]
+async fn get_delivery_detail_includes_bodies() {
+    let session_id = SessionId::now_v7();
+    let token = make_token(session_id);
 
-        let db = with_task_member(with_auth(
-            MockDatabase::new(DatabaseBackend::Postgres),
-            session_id,
-        ))
-        .append_query_results([vec![send_mail_action_row()]])
-        .append_query_results([vec![delivery_row()]]);
+    let db = with_task_member(with_auth(
+        MockDatabase::new(DatabaseBackend::Postgres),
+        session_id,
+    ))
+    .append_query_results([vec![send_mail_action_row()]])
+    .append_query_results([vec![delivery_row()]]);
 
-        let server = make_test_server_with(db.into_connection(), None);
-        let url = format!("{}/{}/deliveries/{}", BASE_URL, action_id(), delivery_id());
-        let res = server
-            .get(&url)
-            .add_header("authorization", format!("Bearer {}", token))
-            .await;
+    let server = make_test_server_with(db.into_connection(), None);
+    let url = format!("{}/{}/deliveries/{}", BASE_URL, action_id(), delivery_id());
+    let res = server
+        .get(&url)
+        .add_header("authorization", format!("Bearer {}", token))
+        .await;
 
-        res.assert_status_ok();
-        let body: Value = res.json();
-        assert_eq!(body["error"], false);
-        let msg = &body["message"];
-        assert_eq!(msg["request_body"], r#"{"event":"build.completed"}"#);
-        assert_eq!(msg["response_body"], r#"{"ok":true}"#);
-        assert_eq!(msg["event"], "build.completed");
-    });
+    res.assert_status_ok();
+    let body: Value = res.json();
+    assert_eq!(body["error"], false);
+    let msg = &body["message"];
+    assert_eq!(msg["request_body"], r#"{"event":"build.completed"}"#);
+    assert_eq!(msg["response_body"], r#"{"ok":true}"#);
+    assert_eq!(msg["event"], "build.completed");
 }
 
-#[test]
-fn list_deliveries_404_on_unknown_action() {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    rt.block_on(async {
-        let session_id = SessionId::now_v7();
-        let token = make_token(session_id);
+#[tokio::test]
+async fn list_deliveries_404_on_unknown_action() {
+    let session_id = SessionId::now_v7();
+    let token = make_token(session_id);
 
-        let db = with_task_member(with_auth(
-            MockDatabase::new(DatabaseBackend::Postgres),
-            session_id,
-        ))
-        .append_query_results([Vec::<task_action::Model>::new()]);
+    let db = with_task_member(with_auth(
+        MockDatabase::new(DatabaseBackend::Postgres),
+        session_id,
+    ))
+    .append_query_results([Vec::<task_action::Model>::new()]);
 
-        let server = make_test_server_with(db.into_connection(), None);
-        let unknown_id = TaskActionId::now_v7();
-        let url = format!("{}/{}/deliveries", BASE_URL, unknown_id);
-        let res = server
-            .get(&url)
-            .add_header("authorization", format!("Bearer {}", token))
-            .await;
+    let server = make_test_server_with(db.into_connection(), None);
+    let unknown_id = TaskActionId::now_v7();
+    let url = format!("{}/{}/deliveries", BASE_URL, unknown_id);
+    let res = server
+        .get(&url)
+        .add_header("authorization", format!("Bearer {}", token))
+        .await;
 
-        res.assert_status(axum::http::StatusCode::NOT_FOUND);
-        let body: Value = res.json();
-        assert_eq!(body["error"], true);
-    });
+    res.assert_status(axum::http::StatusCode::NOT_FOUND);
+    let body: Value = res.json();
+    assert_eq!(body["error"], true);
 }
 
-#[test]
-fn delete_returns_404_when_unknown() {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    rt.block_on(async {
-        let session_id = SessionId::now_v7();
-        let token = make_token(session_id);
+#[tokio::test]
+async fn delete_returns_404_when_unknown() {
+    let session_id = SessionId::now_v7();
+    let token = make_token(session_id);
 
-        let db = with_task_edit(with_auth(
-            MockDatabase::new(DatabaseBackend::Postgres),
-            session_id,
-        ))
-        .append_query_results([Vec::<task_action::Model>::new()]);
+    let db = with_task_edit(with_auth(
+        MockDatabase::new(DatabaseBackend::Postgres),
+        session_id,
+    ))
+    .append_query_results([Vec::<task_action::Model>::new()]);
 
-        let server = make_test_server_with(db.into_connection(), None);
-        let unknown_id = TaskActionId::now_v7();
-        let url = format!("{}/{}", BASE_URL, unknown_id);
-        let res = server
-            .delete(&url)
-            .add_header("authorization", format!("Bearer {}", token))
-            .await;
+    let server = make_test_server_with(db.into_connection(), None);
+    let unknown_id = TaskActionId::now_v7();
+    let url = format!("{}/{}", BASE_URL, unknown_id);
+    let res = server
+        .delete(&url)
+        .add_header("authorization", format!("Bearer {}", token))
+        .await;
 
-        res.assert_status(axum::http::StatusCode::NOT_FOUND);
-        let body: Value = res.json();
-        assert_eq!(body["error"], true);
-    });
+    res.assert_status(axum::http::StatusCode::NOT_FOUND);
+    let body: Value = res.json();
+    assert_eq!(body["error"], true);
 }

@@ -121,256 +121,234 @@ fn dispatch_url(session: UploadSessionId) -> String {
     format!("/api/v1/build-requests/{}/dispatch", session)
 }
 
-fn run<F: std::future::Future>(fut: F) -> F::Output {
-    tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap()
-        .block_on(fut)
+#[tokio::test]
+async fn rejects_already_dispatched_session() {
+    let session_id = SessionId::now_v7();
+    let token = make_token(session_id);
+    let upload = UploadSessionId::now_v7();
+
+    let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
+        .append_query_results([vec![upload_session(upload, vec![], true, false)]])
+        .append_query_results([vec![membership()]])
+        .append_query_results([vec![write_role_row()]]);
+
+    let server = make_test_server(db.into_connection());
+    let res = server
+        .post(&dispatch_url(upload))
+        .add_header("authorization", format!("Bearer {}", token))
+        .json(&json!({}))
+        .await;
+
+    res.assert_status(StatusCode::CONFLICT);
 }
 
-#[test]
-fn rejects_already_dispatched_session() {
-    run(async {
-        let session_id = SessionId::now_v7();
-        let token = make_token(session_id);
-        let upload = UploadSessionId::now_v7();
+#[tokio::test]
+async fn rejects_expired_session() {
+    let session_id = SessionId::now_v7();
+    let token = make_token(session_id);
+    let upload = UploadSessionId::now_v7();
 
-        let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
-            .append_query_results([vec![upload_session(upload, vec![], true, false)]])
-            .append_query_results([vec![membership()]])
-            .append_query_results([vec![write_role_row()]]);
+    let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
+        .append_query_results([vec![upload_session(upload, vec![], false, true)]])
+        .append_query_results([vec![membership()]])
+        .append_query_results([vec![write_role_row()]]);
 
-        let server = make_test_server(db.into_connection());
-        let res = server
-            .post(&dispatch_url(upload))
-            .add_header("authorization", format!("Bearer {}", token))
-            .json(&json!({}))
-            .await;
+    let server = make_test_server(db.into_connection());
+    let res = server
+        .post(&dispatch_url(upload))
+        .add_header("authorization", format!("Bearer {}", token))
+        .json(&json!({}))
+        .await;
 
-        res.assert_status(StatusCode::CONFLICT);
-    });
+    res.assert_status(StatusCode::GONE);
 }
 
-#[test]
-fn rejects_expired_session() {
-    run(async {
-        let session_id = SessionId::now_v7();
-        let token = make_token(session_id);
-        let upload = UploadSessionId::now_v7();
+#[tokio::test]
+async fn rejects_session_with_missing_blobs() {
+    let session_id = SessionId::now_v7();
+    let token = make_token(session_id);
+    let upload = UploadSessionId::now_v7();
 
-        let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
-            .append_query_results([vec![upload_session(upload, vec![], false, true)]])
-            .append_query_results([vec![membership()]])
-            .append_query_results([vec![write_role_row()]]);
+    let missing = vec!["a".repeat(64)];
 
-        let server = make_test_server(db.into_connection());
-        let res = server
-            .post(&dispatch_url(upload))
-            .add_header("authorization", format!("Bearer {}", token))
-            .json(&json!({}))
-            .await;
+    let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
+        .append_query_results([vec![upload_session(upload, missing, false, false)]])
+        .append_query_results([vec![membership()]])
+        .append_query_results([vec![write_role_row()]]);
 
-        res.assert_status(StatusCode::GONE);
-    });
+    let server = make_test_server(db.into_connection());
+    let res = server
+        .post(&dispatch_url(upload))
+        .add_header("authorization", format!("Bearer {}", token))
+        .json(&json!({}))
+        .await;
+
+    res.assert_status(StatusCode::CONFLICT);
 }
 
-#[test]
-fn rejects_session_with_missing_blobs() {
-    run(async {
-        let session_id = SessionId::now_v7();
-        let token = make_token(session_id);
-        let upload = UploadSessionId::now_v7();
+#[tokio::test]
+async fn rejects_session_not_found() {
+    let session_id = SessionId::now_v7();
+    let token = make_token(session_id);
+    let upload = UploadSessionId::now_v7();
 
-        let missing = vec!["a".repeat(64)];
+    let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
+        .append_query_results([Vec::<gradient_entity::upload_session::Model>::new()]);
 
-        let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
-            .append_query_results([vec![upload_session(upload, missing, false, false)]])
-            .append_query_results([vec![membership()]])
-            .append_query_results([vec![write_role_row()]]);
+    let server = make_test_server(db.into_connection());
+    let res = server
+        .post(&dispatch_url(upload))
+        .add_header("authorization", format!("Bearer {}", token))
+        .json(&json!({}))
+        .await;
 
-        let server = make_test_server(db.into_connection());
-        let res = server
-            .post(&dispatch_url(upload))
-            .add_header("authorization", format!("Bearer {}", token))
-            .json(&json!({}))
-            .await;
-
-        res.assert_status(StatusCode::CONFLICT);
-    });
+    res.assert_status(StatusCode::NOT_FOUND);
 }
 
-#[test]
-fn rejects_session_not_found() {
-    run(async {
-        let session_id = SessionId::now_v7();
-        let token = make_token(session_id);
-        let upload = UploadSessionId::now_v7();
+#[tokio::test]
+async fn happy_path_creates_task_commit_and_evaluation() {
+    let session_id = SessionId::now_v7();
+    let token = make_token(session_id);
+    let upload = UploadSessionId::now_v7();
 
-        let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
-            .append_query_results([Vec::<gradient_entity::upload_session::Model>::new()]);
+    let task_id = TaskId::now_v7();
+    let task_model = task_row(task_id, true);
+    let commit_model = commit_row();
+    let eval_model = eval_row(task_id, commit_model.id);
 
-        let server = make_test_server(db.into_connection());
-        let res = server
-            .post(&dispatch_url(upload))
-            .add_header("authorization", format!("Bearer {}", token))
-            .json(&json!({}))
-            .await;
+    let updated = gradient_entity::upload_session::Model {
+        dispatched_at: Some(Utc::now().naive_utc()),
+        ..upload_session(upload, vec![], false, false)
+    };
 
-        res.assert_status(StatusCode::NOT_FOUND);
-    });
+    let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
+        .append_query_results([vec![upload_session(upload, vec![], false, false)]])
+        .append_query_results([vec![membership()]])
+        .append_query_results([vec![write_role_row()]])
+        .append_query_results([Vec::<gradient_entity::task::Model>::new()])
+        .append_query_results([vec![task_model.clone()]])
+        .append_exec_results([MockExecResult {
+            last_insert_id: 0,
+            rows_affected: 1,
+        }])
+        .append_query_results([vec![commit_model.clone()]])
+        .append_exec_results([MockExecResult {
+            last_insert_id: 0,
+            rows_affected: 1,
+        }])
+        .append_query_results([vec![eval_model.clone()]])
+        .append_exec_results([MockExecResult {
+            last_insert_id: 0,
+            rows_affected: 1,
+        }])
+        .append_query_results([Vec::<gradient_entity::project_cache::Model>::new()])
+        .append_query_results([vec![updated]])
+        .append_exec_results([MockExecResult {
+            last_insert_id: 0,
+            rows_affected: 1,
+        }]);
+
+    let server = make_test_server(db.into_connection());
+    let res = server
+        .post(&dispatch_url(upload))
+        .add_header("authorization", format!("Bearer {}", token))
+        .json(&json!({}))
+        .await;
+
+    res.assert_status_ok();
+    let body: Value = res.json();
+    assert_eq!(body["error"], false);
+    assert_eq!(
+        body["message"]["task"].as_str().unwrap(),
+        task_id.to_string()
+    );
+    assert_eq!(
+        body["message"]["commit"].as_str().unwrap(),
+        commit_model.id.to_string()
+    );
+    assert_eq!(
+        body["message"]["evaluation"].as_str().unwrap(),
+        eval_model.id.to_string()
+    );
+    assert!(
+        body["message"].as_object().unwrap().contains_key("cache"),
+        "DispatchResponse must carry a `cache` field"
+    );
+    assert!(body["message"]["cache"].is_null());
 }
 
-#[test]
-fn happy_path_creates_task_commit_and_evaluation() {
-    run(async {
-        let session_id = SessionId::now_v7();
-        let token = make_token(session_id);
-        let upload = UploadSessionId::now_v7();
+#[tokio::test]
+async fn rejects_local_input_override() {
+    let session_id = SessionId::now_v7();
+    let token = make_token(session_id);
+    let upload = UploadSessionId::now_v7();
 
-        let task_id = TaskId::now_v7();
-        let task_model = task_row(task_id, true);
-        let commit_model = commit_row();
-        let eval_model = eval_row(task_id, commit_model.id);
+    let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
+        .append_query_results([vec![upload_session(upload, vec![], false, false)]])
+        .append_query_results([vec![membership()]])
+        .append_query_results([vec![write_role_row()]]);
 
-        let updated = gradient_entity::upload_session::Model {
-            dispatched_at: Some(Utc::now().naive_utc()),
-            ..upload_session(upload, vec![], false, false)
-        };
+    let server = make_test_server(db.into_connection());
+    let res = server
+        .post(&dispatch_url(upload))
+        .add_header("authorization", format!("Bearer {}", token))
+        .json(&json!({
+            "input_overrides": [{ "input_name": "nixpkgs", "url": "/home/u/np" }]
+        }))
+        .await;
 
-        let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
-            .append_query_results([vec![upload_session(upload, vec![], false, false)]])
-            .append_query_results([vec![membership()]])
-            .append_query_results([vec![write_role_row()]])
-            .append_query_results([Vec::<gradient_entity::task::Model>::new()])
-            .append_query_results([vec![task_model.clone()]])
-            .append_exec_results([MockExecResult {
-                last_insert_id: 0,
-                rows_affected: 1,
-            }])
-            .append_query_results([vec![commit_model.clone()]])
-            .append_exec_results([MockExecResult {
-                last_insert_id: 0,
-                rows_affected: 1,
-            }])
-            .append_query_results([vec![eval_model.clone()]])
-            .append_exec_results([MockExecResult {
-                last_insert_id: 0,
-                rows_affected: 1,
-            }])
-            .append_query_results([Vec::<gradient_entity::project_cache::Model>::new()])
-            .append_query_results([vec![updated]])
-            .append_exec_results([MockExecResult {
-                last_insert_id: 0,
-                rows_affected: 1,
-            }]);
-
-        let server = make_test_server(db.into_connection());
-        let res = server
-            .post(&dispatch_url(upload))
-            .add_header("authorization", format!("Bearer {}", token))
-            .json(&json!({}))
-            .await;
-
-        res.assert_status_ok();
-        let body: Value = res.json();
-        assert_eq!(body["error"], false);
-        assert_eq!(
-            body["message"]["task"].as_str().unwrap(),
-            task_id.to_string()
-        );
-        assert_eq!(
-            body["message"]["commit"].as_str().unwrap(),
-            commit_model.id.to_string()
-        );
-        assert_eq!(
-            body["message"]["evaluation"].as_str().unwrap(),
-            eval_model.id.to_string()
-        );
-        assert!(
-            body["message"].as_object().unwrap().contains_key("cache"),
-            "DispatchResponse must carry a `cache` field"
-        );
-        assert!(body["message"]["cache"].is_null());
-    });
+    res.assert_status(StatusCode::BAD_REQUEST);
 }
 
-#[test]
-fn rejects_local_input_override() {
-    run(async {
-        let session_id = SessionId::now_v7();
-        let token = make_token(session_id);
-        let upload = UploadSessionId::now_v7();
+#[tokio::test]
+async fn happy_path_reuses_existing_build_request_task() {
+    let session_id = SessionId::now_v7();
+    let token = make_token(session_id);
+    let upload = UploadSessionId::now_v7();
 
-        let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
-            .append_query_results([vec![upload_session(upload, vec![], false, false)]])
-            .append_query_results([vec![membership()]])
-            .append_query_results([vec![write_role_row()]]);
+    let task_id = TaskId::now_v7();
+    let task_model = task_row(task_id, true);
+    let commit_model = commit_row();
+    let eval_model = eval_row(task_id, commit_model.id);
 
-        let server = make_test_server(db.into_connection());
-        let res = server
-            .post(&dispatch_url(upload))
-            .add_header("authorization", format!("Bearer {}", token))
-            .json(&json!({
-                "input_overrides": [{ "input_name": "nixpkgs", "url": "/home/u/np" }]
-            }))
-            .await;
+    let updated = gradient_entity::upload_session::Model {
+        dispatched_at: Some(Utc::now().naive_utc()),
+        ..upload_session(upload, vec![], false, false)
+    };
 
-        res.assert_status(StatusCode::BAD_REQUEST);
-    });
-}
+    let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
+        .append_query_results([vec![upload_session(upload, vec![], false, false)]])
+        .append_query_results([vec![membership()]])
+        .append_query_results([vec![write_role_row()]])
+        .append_query_results([vec![task_model.clone()]])
+        .append_query_results([vec![commit_model.clone()]])
+        .append_exec_results([MockExecResult {
+            last_insert_id: 0,
+            rows_affected: 1,
+        }])
+        .append_query_results([vec![eval_model.clone()]])
+        .append_exec_results([MockExecResult {
+            last_insert_id: 0,
+            rows_affected: 1,
+        }])
+        .append_query_results([Vec::<gradient_entity::project_cache::Model>::new()])
+        .append_query_results([vec![updated]])
+        .append_exec_results([MockExecResult {
+            last_insert_id: 0,
+            rows_affected: 1,
+        }]);
 
-#[test]
-fn happy_path_reuses_existing_build_request_task() {
-    run(async {
-        let session_id = SessionId::now_v7();
-        let token = make_token(session_id);
-        let upload = UploadSessionId::now_v7();
+    let server = make_test_server(db.into_connection());
+    let res = server
+        .post(&dispatch_url(upload))
+        .add_header("authorization", format!("Bearer {}", token))
+        .json(&json!({}))
+        .await;
 
-        let task_id = TaskId::now_v7();
-        let task_model = task_row(task_id, true);
-        let commit_model = commit_row();
-        let eval_model = eval_row(task_id, commit_model.id);
-
-        let updated = gradient_entity::upload_session::Model {
-            dispatched_at: Some(Utc::now().naive_utc()),
-            ..upload_session(upload, vec![], false, false)
-        };
-
-        let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
-            .append_query_results([vec![upload_session(upload, vec![], false, false)]])
-            .append_query_results([vec![membership()]])
-            .append_query_results([vec![write_role_row()]])
-            .append_query_results([vec![task_model.clone()]])
-            .append_query_results([vec![commit_model.clone()]])
-            .append_exec_results([MockExecResult {
-                last_insert_id: 0,
-                rows_affected: 1,
-            }])
-            .append_query_results([vec![eval_model.clone()]])
-            .append_exec_results([MockExecResult {
-                last_insert_id: 0,
-                rows_affected: 1,
-            }])
-            .append_query_results([Vec::<gradient_entity::project_cache::Model>::new()])
-            .append_query_results([vec![updated]])
-            .append_exec_results([MockExecResult {
-                last_insert_id: 0,
-                rows_affected: 1,
-            }]);
-
-        let server = make_test_server(db.into_connection());
-        let res = server
-            .post(&dispatch_url(upload))
-            .add_header("authorization", format!("Bearer {}", token))
-            .json(&json!({}))
-            .await;
-
-        res.assert_status_ok();
-        let body: Value = res.json();
-        assert_eq!(
-            body["message"]["task"].as_str().unwrap(),
-            task_id.to_string()
-        );
-    });
+    res.assert_status_ok();
+    let body: Value = res.json();
+    assert_eq!(
+        body["message"]["task"].as_str().unwrap(),
+        task_id.to_string()
+    );
 }

@@ -138,112 +138,97 @@ fn live_session(id: SessionId) -> session::Model {
     }
 }
 
-#[test]
-fn jwt_with_revoked_session_is_rejected() {
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    rt.block_on(async {
-        let session = revoked_session();
-        let token = sign_session_jwt(user_id(), session.id, Duration::hours(1));
+#[tokio::test(flavor = "multi_thread")]
+async fn jwt_with_revoked_session_is_rejected() {
+    let session = revoked_session();
+    let token = sign_session_jwt(user_id(), session.id, Duration::hours(1));
 
-        let s = server_with(|db| db.append_query_results([vec![session]]));
+    let s = server_with(|db| db.append_query_results([vec![session]]));
 
-        let res = s
-            .get("/api/v1/user")
-            .add_header("authorization", format!("Bearer {}", token))
-            .await;
-        res.assert_status_unauthorized();
-    });
+    let res = s
+        .get("/api/v1/user")
+        .add_header("authorization", format!("Bearer {}", token))
+        .await;
+    res.assert_status_unauthorized();
 }
 
-#[test]
-fn jwt_with_unknown_session_is_rejected() {
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    rt.block_on(async {
-        let token = sign_session_jwt(user_id(), SessionId::now_v7(), Duration::hours(1));
+#[tokio::test(flavor = "multi_thread")]
+async fn jwt_with_unknown_session_is_rejected() {
+    let token = sign_session_jwt(user_id(), SessionId::now_v7(), Duration::hours(1));
 
-        let s = server_with(|db| db.append_query_results([Vec::<session::Model>::new()]));
+    let s = server_with(|db| db.append_query_results([Vec::<session::Model>::new()]));
 
-        let res = s
-            .get("/api/v1/user")
-            .add_header("authorization", format!("Bearer {}", token))
-            .await;
-        res.assert_status_unauthorized();
-    });
+    let res = s
+        .get("/api/v1/user")
+        .add_header("authorization", format!("Bearer {}", token))
+        .await;
+    res.assert_status_unauthorized();
 }
 
-#[test]
-fn jwt_with_expired_session_is_rejected() {
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    rt.block_on(async {
-        let now = Utc::now().naive_utc();
-        let mut session = live_session(SessionId::now_v7());
-        session.expires_at = now - chrono::Duration::seconds(1);
-        let token = sign_session_jwt(user_id(), session.id, Duration::hours(1));
+#[tokio::test(flavor = "multi_thread")]
+async fn jwt_with_expired_session_is_rejected() {
+    let now = Utc::now().naive_utc();
+    let mut session = live_session(SessionId::now_v7());
+    session.expires_at = now - chrono::Duration::seconds(1);
+    let token = sign_session_jwt(user_id(), session.id, Duration::hours(1));
 
-        let s = server_with(|db| db.append_query_results([vec![session]]));
+    let s = server_with(|db| db.append_query_results([vec![session]]));
 
-        let res = s
-            .get("/api/v1/user")
-            .add_header("authorization", format!("Bearer {}", token))
-            .await;
-        res.assert_status_unauthorized();
-    });
+    let res = s
+        .get("/api/v1/user")
+        .add_header("authorization", format!("Bearer {}", token))
+        .await;
+    res.assert_status_unauthorized();
 }
 
-#[test]
-fn revoked_api_key_is_rejected() {
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    rt.block_on(async {
-        let raw = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
-        let now = Utc::now().naive_utc();
-        let key = api::Model {
-            id: ApiId::now_v7(),
-            owned_by: user_id(),
-            name: "leaked".into(),
-            key: hash_api_key(raw),
-            last_used_at: now,
-            created_at: now,
-            revoked_at: Some(now),
-            permission: gradient_db::permissions::admin_mask(),
-            ..Default::default()
-        };
+#[tokio::test(flavor = "multi_thread")]
+async fn revoked_api_key_is_rejected() {
+    let raw = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+    let now = Utc::now().naive_utc();
+    let key = api::Model {
+        id: ApiId::now_v7(),
+        owned_by: user_id(),
+        name: "leaked".into(),
+        key: hash_api_key(raw),
+        last_used_at: now,
+        created_at: now,
+        revoked_at: Some(now),
+        permission: gradient_db::permissions::admin_mask(),
+        ..Default::default()
+    };
 
-        let s = server_with(|db| db.append_query_results([vec![key]]));
+    let s = server_with(|db| db.append_query_results([vec![key]]));
 
-        let res = s
-            .get("/api/v1/user")
-            .add_header("authorization", format!("Bearer GRAD{}", raw))
-            .await;
-        res.assert_status_unauthorized();
-    });
+    let res = s
+        .get("/api/v1/user")
+        .add_header("authorization", format!("Bearer GRAD{}", raw))
+        .await;
+    res.assert_status_unauthorized();
 }
 
-#[test]
-fn expired_api_key_is_rejected() {
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    rt.block_on(async {
-        let raw = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
-        let now = Utc::now().naive_utc();
-        let key = api::Model {
-            id: ApiId::now_v7(),
-            owned_by: user_id(),
-            name: "expired".into(),
-            key: hash_api_key(raw),
-            last_used_at: now,
-            created_at: now,
-            expires_at: Some(now - chrono::Duration::seconds(1)),
-            permission: gradient_db::permissions::admin_mask(),
-            ..Default::default()
-        };
+#[tokio::test(flavor = "multi_thread")]
+async fn expired_api_key_is_rejected() {
+    let raw = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+    let now = Utc::now().naive_utc();
+    let key = api::Model {
+        id: ApiId::now_v7(),
+        owned_by: user_id(),
+        name: "expired".into(),
+        key: hash_api_key(raw),
+        last_used_at: now,
+        created_at: now,
+        expires_at: Some(now - chrono::Duration::seconds(1)),
+        permission: gradient_db::permissions::admin_mask(),
+        ..Default::default()
+    };
 
-        let s = server_with(|db| db.append_query_results([vec![key]]));
+    let s = server_with(|db| db.append_query_results([vec![key]]));
 
-        let res = s
-            .get("/api/v1/user")
-            .add_header("authorization", format!("Bearer GRAD{}", raw))
-            .await;
-        res.assert_status_unauthorized();
-    });
+    let res = s
+        .get("/api/v1/user")
+        .add_header("authorization", format!("Bearer GRAD{}", raw))
+        .await;
+    res.assert_status_unauthorized();
 }
 
 fn auth_queue(db: MockDatabase, session: session::Model) -> MockDatabase {
@@ -256,197 +241,179 @@ fn auth_queue(db: MockDatabase, session: session::Model) -> MockDatabase {
         .append_query_results([vec![user()]])
 }
 
-#[test]
-fn delete_user_without_password_is_forbidden() {
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    rt.block_on(async {
-        let session = live_session(SessionId::now_v7());
-        let token = sign_session_jwt(user_id(), session.id, Duration::hours(1));
+#[tokio::test(flavor = "multi_thread")]
+async fn delete_user_without_password_is_forbidden() {
+    let session = live_session(SessionId::now_v7());
+    let token = sign_session_jwt(user_id(), session.id, Duration::hours(1));
 
-        let s = server_with(|db| auth_queue(db, session));
+    let s = server_with(|db| auth_queue(db, session));
 
-        let res = s
-            .delete("/api/v1/user")
-            .add_header("authorization", format!("Bearer {}", token))
-            .json(&serde_json::json!({}))
-            .await;
-        res.assert_status_forbidden();
-        let body: Value = res.json();
-        assert_eq!(body["error"], Value::Bool(true));
-    });
+    let res = s
+        .delete("/api/v1/user")
+        .add_header("authorization", format!("Bearer {}", token))
+        .json(&serde_json::json!({}))
+        .await;
+    res.assert_status_forbidden();
+    let body: Value = res.json();
+    assert_eq!(body["error"], Value::Bool(true));
 }
 
-#[test]
-fn delete_user_with_wrong_password_is_forbidden() {
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    rt.block_on(async {
-        let session = live_session(SessionId::now_v7());
-        let token = sign_session_jwt(user_id(), session.id, Duration::hours(1));
+#[tokio::test(flavor = "multi_thread")]
+async fn delete_user_with_wrong_password_is_forbidden() {
+    let session = live_session(SessionId::now_v7());
+    let token = sign_session_jwt(user_id(), session.id, Duration::hours(1));
 
-        let s = server_with(|db| auth_queue(db, session));
+    let s = server_with(|db| auth_queue(db, session));
 
-        let res = s
-            .delete("/api/v1/user")
-            .add_header("authorization", format!("Bearer {}", token))
-            .json(&serde_json::json!({ "password": "WrongPassword!" }))
-            .await;
-        res.assert_status_forbidden();
-    });
+    let res = s
+        .delete("/api/v1/user")
+        .add_header("authorization", format!("Bearer {}", token))
+        .json(&serde_json::json!({ "password": "WrongPassword!" }))
+        .await;
+    res.assert_status_forbidden();
 }
 
-#[test]
-fn api_key_with_only_view_cannot_trigger_evaluation() {
+#[tokio::test(flavor = "multi_thread")]
+async fn api_key_with_only_view_cannot_trigger_evaluation() {
     use gradient_db::permissions::{Permission, mask_from};
     use gradient_test_support::fixtures::{project, project_id};
+    let raw = "x".repeat(64);
+    let now = Utc::now().naive_utc();
+    let key = api::Model {
+        id: ApiId::now_v7(),
+        owned_by: user_id(),
+        name: "ci".into(),
+        key: hash_api_key(&raw),
+        last_used_at: now,
+        created_at: now,
+        permission: mask_from(&[Permission::ViewProject]),
+        ..Default::default()
+    };
+    let admin_membership = gradient_entity::project_user::Model {
+        id: gradient_entity::ids::ProjectUserId::now_v7(),
+        project: project_id(),
+        user: user_id(),
+        role: gradient_types::consts::BASE_ROLE_ADMIN_ID,
+    };
+    let admin_role = gradient_entity::role::Model {
+        id: gradient_types::consts::BASE_ROLE_ADMIN_ID,
+        name: "Admin".into(),
+        permission: gradient_db::permissions::admin_mask(),
+        ..Default::default()
+    };
 
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    rt.block_on(async {
-        let raw = "x".repeat(64);
-        let now = Utc::now().naive_utc();
-        let key = api::Model {
-            id: ApiId::now_v7(),
-            owned_by: user_id(),
-            name: "ci".into(),
-            key: hash_api_key(&raw),
-            last_used_at: now,
-            created_at: now,
-            permission: mask_from(&[Permission::ViewProject]),
-            ..Default::default()
-        };
-        let admin_membership = gradient_entity::project_user::Model {
-            id: gradient_entity::ids::ProjectUserId::now_v7(),
-            project: project_id(),
-            user: user_id(),
-            role: gradient_types::consts::BASE_ROLE_ADMIN_ID,
-        };
-        let admin_role = gradient_entity::role::Model {
-            id: gradient_types::consts::BASE_ROLE_ADMIN_ID,
-            name: "Admin".into(),
-            permission: gradient_db::permissions::admin_mask(),
-            ..Default::default()
-        };
-
-        let s = server_with(|db| {
-            db.append_query_results([vec![key.clone()]])
-                .append_exec_results([MockExecResult {
-                    last_insert_id: 0,
-                    rows_affected: 1,
-                }])
-                .append_query_results([vec![key.clone()]])
-                .append_query_results([vec![user()]])
-                .append_query_results([vec![project()]])
-                .append_query_results([vec![gradient_entity::task::Model {
-                    id: gradient_test_support::fixtures::task_id(),
-                    project: project_id(),
-                    name: "test-task".into(),
-                    display_name: "Test".into(),
-                    repository: "git@example.com:test/test.git".into(),
-                    wildcard: "*".into(),
-                    active: true,
-                    last_check_at: chrono::NaiveDate::from_ymd_opt(2026, 1, 1)
-                        .unwrap()
-                        .and_hms_opt(0, 0, 0)
-                        .unwrap(),
-                    created_by: user_id(),
-                    created_at: chrono::NaiveDate::from_ymd_opt(2026, 1, 1)
-                        .unwrap()
-                        .and_hms_opt(0, 0, 0)
-                        .unwrap(),
-                    keep_evaluations: 30,
-                    concurrency: ConcurrencyPolicy::Skip,
-                    sign_cache: true,
-                    ..Default::default()
-                }]])
-                .append_query_results([vec![admin_membership]])
-                .append_query_results([vec![admin_role]])
-        });
-
-        let res = s
-            .post("/api/v1/tasks/test-project/test-task/evaluate")
-            .add_header("authorization", format!("Bearer GRAD{}", raw))
-            .await;
-        res.assert_status(axum::http::StatusCode::FORBIDDEN);
+    let s = server_with(|db| {
+        db.append_query_results([vec![key.clone()]])
+            .append_exec_results([MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 1,
+            }])
+            .append_query_results([vec![key.clone()]])
+            .append_query_results([vec![user()]])
+            .append_query_results([vec![project()]])
+            .append_query_results([vec![gradient_entity::task::Model {
+                id: gradient_test_support::fixtures::task_id(),
+                project: project_id(),
+                name: "test-task".into(),
+                display_name: "Test".into(),
+                repository: "git@example.com:test/test.git".into(),
+                wildcard: "*".into(),
+                active: true,
+                last_check_at: chrono::NaiveDate::from_ymd_opt(2026, 1, 1)
+                    .unwrap()
+                    .and_hms_opt(0, 0, 0)
+                    .unwrap(),
+                created_by: user_id(),
+                created_at: chrono::NaiveDate::from_ymd_opt(2026, 1, 1)
+                    .unwrap()
+                    .and_hms_opt(0, 0, 0)
+                    .unwrap(),
+                keep_evaluations: 30,
+                concurrency: ConcurrencyPolicy::Skip,
+                sign_cache: true,
+                ..Default::default()
+            }]])
+            .append_query_results([vec![admin_membership]])
+            .append_query_results([vec![admin_role]])
     });
+
+    let res = s
+        .post("/api/v1/tasks/test-project/test-task/evaluate")
+        .add_header("authorization", format!("Bearer GRAD{}", raw))
+        .await;
+    res.assert_status(axum::http::StatusCode::FORBIDDEN);
 }
 
-#[test]
-fn api_key_pinned_to_other_project_is_invisible() {
+#[tokio::test(flavor = "multi_thread")]
+async fn api_key_pinned_to_other_project_is_invisible() {
     use gradient_db::permissions::{Permission, mask_from};
     use gradient_test_support::fixtures::project;
+    let raw = "y".repeat(64);
+    let now = Utc::now().naive_utc();
+    let pinned_elsewhere =
+        gradient_entity::ids::ProjectId::new(uuid::uuid!("ffffffff-ffff-ffff-ffff-ffffffffffff"));
+    let key = api::Model {
+        id: ApiId::now_v7(),
+        owned_by: user_id(),
+        name: "ci".into(),
+        key: hash_api_key(&raw),
+        last_used_at: now,
+        created_at: now,
+        permission: mask_from(Permission::ALL),
+        project: Some(pinned_elsewhere),
+        ..Default::default()
+    };
 
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    rt.block_on(async {
-        let raw = "y".repeat(64);
-        let now = Utc::now().naive_utc();
-        let pinned_elsewhere = gradient_entity::ids::ProjectId::new(uuid::uuid!(
-            "ffffffff-ffff-ffff-ffff-ffffffffffff"
-        ));
-        let key = api::Model {
-            id: ApiId::now_v7(),
-            owned_by: user_id(),
-            name: "ci".into(),
-            key: hash_api_key(&raw),
-            last_used_at: now,
-            created_at: now,
-            permission: mask_from(Permission::ALL),
-            project: Some(pinned_elsewhere),
-            ..Default::default()
-        };
-
-        let s = server_with(|db| {
-            db.append_query_results([vec![key.clone()]])
-                .append_exec_results([MockExecResult {
-                    last_insert_id: 0,
-                    rows_affected: 1,
-                }])
-                .append_query_results([vec![key.clone()]])
-                .append_query_results([vec![user()]])
-                .append_query_results([vec![project()]])
-        });
-
-        let res = s
-            .get("/api/v1/projects/test-project")
-            .add_header("authorization", format!("Bearer GRAD{}", raw))
-            .await;
-        res.assert_status(axum::http::StatusCode::NOT_FOUND);
+    let s = server_with(|db| {
+        db.append_query_results([vec![key.clone()]])
+            .append_exec_results([MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 1,
+            }])
+            .append_query_results([vec![key.clone()]])
+            .append_query_results([vec![user()]])
+            .append_query_results([vec![project()]])
     });
+
+    let res = s
+        .get("/api/v1/projects/test-project")
+        .add_header("authorization", format!("Bearer GRAD{}", raw))
+        .await;
+    res.assert_status(axum::http::StatusCode::NOT_FOUND);
 }
 
-#[test]
-fn api_key_cannot_create_api_keys() {
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    rt.block_on(async {
-        let raw = "z".repeat(64);
-        let now = Utc::now().naive_utc();
-        let key = api::Model {
-            id: ApiId::now_v7(),
-            owned_by: user_id(),
-            name: "self".into(),
-            key: hash_api_key(&raw),
-            last_used_at: now,
-            created_at: now,
-            permission: gradient_db::permissions::admin_mask(),
-            ..Default::default()
-        };
+#[tokio::test(flavor = "multi_thread")]
+async fn api_key_cannot_create_api_keys() {
+    let raw = "z".repeat(64);
+    let now = Utc::now().naive_utc();
+    let key = api::Model {
+        id: ApiId::now_v7(),
+        owned_by: user_id(),
+        name: "self".into(),
+        key: hash_api_key(&raw),
+        last_used_at: now,
+        created_at: now,
+        permission: gradient_db::permissions::admin_mask(),
+        ..Default::default()
+    };
 
-        let s = server_with(|db| {
-            db.append_query_results([vec![key.clone()]])
-                .append_exec_results([MockExecResult {
-                    last_insert_id: 0,
-                    rows_affected: 1,
-                }])
-                .append_query_results([vec![key.clone()]])
-                .append_query_results([vec![user()]])
-        });
-
-        let res = s
-            .post("/api/v1/user/keys")
-            .add_header("authorization", format!("Bearer GRAD{}", raw))
-            .json(&serde_json::json!({
-                "name": "child",
-                "permissions": ["viewProject"],
-            }))
-            .await;
-        res.assert_status(axum::http::StatusCode::FORBIDDEN);
+    let s = server_with(|db| {
+        db.append_query_results([vec![key.clone()]])
+            .append_exec_results([MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 1,
+            }])
+            .append_query_results([vec![key.clone()]])
+            .append_query_results([vec![user()]])
     });
+
+    let res = s
+        .post("/api/v1/user/keys")
+        .add_header("authorization", format!("Bearer GRAD{}", raw))
+        .json(&serde_json::json!({
+            "name": "child",
+            "permissions": ["viewProject"],
+        }))
+        .await;
+    res.assert_status(axum::http::StatusCode::FORBIDDEN);
 }

@@ -12,48 +12,36 @@ use gradient_web::create_router;
 use serde_json::Value;
 use std::sync::Arc;
 
-#[test]
-fn available_returns_true_when_signature_present() {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    rt.block_on(async {
-        let state = public_cache_available_true().await;
-        let server = TestServer::new(create_router(Arc::clone(&state)).expect("router"));
+#[tokio::test]
+async fn available_returns_true_when_signature_present() {
+    let state = public_cache_available_true().await;
+    let server = TestServer::new(create_router(Arc::clone(&state)).expect("router"));
 
-        let resp = server
-            .get(&format!(
-                "/api/v1/caches/{FIXTURE_CACHE_NAME}/nars/available"
-            ))
-            .add_query_param("hash", FIXTURE_PATH_HASH)
-            .await;
-        resp.assert_status_ok();
-        let body: Value = resp.json();
-        assert_eq!(body["error"], Value::Bool(false));
-        assert_eq!(body["message"]["available"], Value::Bool(true));
-    });
+    let resp = server
+        .get(&format!(
+            "/api/v1/caches/{FIXTURE_CACHE_NAME}/nars/available"
+        ))
+        .add_query_param("hash", FIXTURE_PATH_HASH)
+        .await;
+    resp.assert_status_ok();
+    let body: Value = resp.json();
+    assert_eq!(body["error"], Value::Bool(false));
+    assert_eq!(body["message"]["available"], Value::Bool(true));
 }
 
-#[test]
-fn available_returns_false_when_no_cached_path() {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    rt.block_on(async {
-        let state = public_cache_available_false().await;
-        let server = TestServer::new(create_router(Arc::clone(&state)).expect("router"));
+#[tokio::test]
+async fn available_returns_false_when_no_cached_path() {
+    let state = public_cache_available_false().await;
+    let server = TestServer::new(create_router(Arc::clone(&state)).expect("router"));
 
-        let resp = server
-            .get(&format!(
-                "/api/v1/caches/{FIXTURE_CACHE_NAME}/nars/available"
-            ))
-            .add_query_param("hash", FIXTURE_PATH_HASH)
-            .await;
-        resp.assert_status_ok();
-        let body: Value = resp.json();
-        assert_eq!(body["error"], Value::Bool(false));
-        assert_eq!(body["message"]["available"], Value::Bool(false));
-    });
+    let resp = server
+        .get(&format!(
+            "/api/v1/caches/{FIXTURE_CACHE_NAME}/nars/available"
+        ))
+        .add_query_param("hash", FIXTURE_PATH_HASH)
+        .await;
+    resp.assert_status_ok();
+    let body: Value = resp.json();
+    assert_eq!(body["error"], Value::Bool(false));
+    assert_eq!(body["message"]["available"], Value::Bool(false));
 }

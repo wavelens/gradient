@@ -127,594 +127,492 @@ fn with_task_edit(db: MockDatabase) -> MockDatabase {
 
 const BASE_URL: &str = "/api/v1/tasks/test-project/test-task/triggers";
 
-#[test]
-fn list_triggers_returns_rows() {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    rt.block_on(async {
-        let session_id = SessionId::now_v7();
-        let token = make_token(session_id);
+#[tokio::test]
+async fn list_triggers_returns_rows() {
+    let session_id = SessionId::now_v7();
+    let token = make_token(session_id);
 
-        let db = with_task_member(with_auth(
-            MockDatabase::new(DatabaseBackend::Postgres),
-            session_id,
-        ))
-        .append_query_results([vec![polling_trigger_row()]]);
+    let db = with_task_member(with_auth(
+        MockDatabase::new(DatabaseBackend::Postgres),
+        session_id,
+    ))
+    .append_query_results([vec![polling_trigger_row()]]);
 
-        let server = make_test_server(db.into_connection());
-        let res = server
-            .get(BASE_URL)
-            .add_header("authorization", format!("Bearer {}", token))
-            .await;
+    let server = make_test_server(db.into_connection());
+    let res = server
+        .get(BASE_URL)
+        .add_header("authorization", format!("Bearer {}", token))
+        .await;
 
-        res.assert_status_ok();
-        let body: Value = res.json();
-        assert_eq!(body["error"], false);
-        let items = body["message"].as_array().expect("message is array");
-        assert_eq!(items.len(), 1);
-        assert_eq!(items[0]["type"], "polling");
-        assert_eq!(items[0]["active"], true);
-    });
+    res.assert_status_ok();
+    let body: Value = res.json();
+    assert_eq!(body["error"], false);
+    let items = body["message"].as_array().expect("message is array");
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["type"], "polling");
+    assert_eq!(items[0]["active"], true);
 }
 
-#[test]
-fn get_trigger_returns_row() {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    rt.block_on(async {
-        let session_id = SessionId::now_v7();
-        let token = make_token(session_id);
-        let tid = trigger_id();
+#[tokio::test]
+async fn get_trigger_returns_row() {
+    let session_id = SessionId::now_v7();
+    let token = make_token(session_id);
+    let tid = trigger_id();
 
-        let db = with_task_member(with_auth(
-            MockDatabase::new(DatabaseBackend::Postgres),
-            session_id,
-        ))
-        .append_query_results([vec![polling_trigger_row()]]);
+    let db = with_task_member(with_auth(
+        MockDatabase::new(DatabaseBackend::Postgres),
+        session_id,
+    ))
+    .append_query_results([vec![polling_trigger_row()]]);
 
-        let server = make_test_server(db.into_connection());
-        let res = server
-            .get(&format!("{}/{}", BASE_URL, tid))
-            .add_header("authorization", format!("Bearer {}", token))
-            .await;
+    let server = make_test_server(db.into_connection());
+    let res = server
+        .get(&format!("{}/{}", BASE_URL, tid))
+        .add_header("authorization", format!("Bearer {}", token))
+        .await;
 
-        res.assert_status_ok();
-        let body: Value = res.json();
-        assert_eq!(body["error"], false);
-        assert_eq!(body["message"]["type"], "polling");
-        assert_eq!(body["message"]["id"], tid.to_string());
-    });
+    res.assert_status_ok();
+    let body: Value = res.json();
+    assert_eq!(body["error"], false);
+    assert_eq!(body["message"]["type"], "polling");
+    assert_eq!(body["message"]["id"], tid.to_string());
 }
 
-#[test]
-fn get_trigger_not_found_returns_404() {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    rt.block_on(async {
-        let session_id = SessionId::now_v7();
-        let token = make_token(session_id);
-        let tid = TaskTriggerId::now_v7();
+#[tokio::test]
+async fn get_trigger_not_found_returns_404() {
+    let session_id = SessionId::now_v7();
+    let token = make_token(session_id);
+    let tid = TaskTriggerId::now_v7();
 
-        let db = with_task_member(with_auth(
-            MockDatabase::new(DatabaseBackend::Postgres),
-            session_id,
-        ))
-        .append_query_results([Vec::<task_trigger::Model>::new()]);
+    let db = with_task_member(with_auth(
+        MockDatabase::new(DatabaseBackend::Postgres),
+        session_id,
+    ))
+    .append_query_results([Vec::<task_trigger::Model>::new()]);
 
-        let server = make_test_server(db.into_connection());
-        let res = server
-            .get(&format!("{}/{}", BASE_URL, tid))
-            .add_header("authorization", format!("Bearer {}", token))
-            .await;
+    let server = make_test_server(db.into_connection());
+    let res = server
+        .get(&format!("{}/{}", BASE_URL, tid))
+        .add_header("authorization", format!("Bearer {}", token))
+        .await;
 
-        res.assert_status_not_found();
-    });
+    res.assert_status_not_found();
 }
 
-#[test]
-fn create_polling_trigger_valid() {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    rt.block_on(async {
-        let session_id = SessionId::now_v7();
-        let token = make_token(session_id);
+#[tokio::test]
+async fn create_polling_trigger_valid() {
+    let session_id = SessionId::now_v7();
+    let token = make_token(session_id);
 
-        let db = with_task_edit(with_auth(
-            MockDatabase::new(DatabaseBackend::Postgres),
-            session_id,
-        ))
-        .append_query_results([vec![polling_trigger_row()]]);
+    let db = with_task_edit(with_auth(
+        MockDatabase::new(DatabaseBackend::Postgres),
+        session_id,
+    ))
+    .append_query_results([vec![polling_trigger_row()]]);
 
-        let server = make_test_server(db.into_connection());
-        let res = server
-            .post(BASE_URL)
-            .add_header("authorization", format!("Bearer {}", token))
-            .json(&serde_json::json!({
-                "config": {"type": "polling", "interval_secs": 60}
-            }))
-            .await;
+    let server = make_test_server(db.into_connection());
+    let res = server
+        .post(BASE_URL)
+        .add_header("authorization", format!("Bearer {}", token))
+        .json(&serde_json::json!({
+            "config": {"type": "polling", "interval_secs": 60}
+        }))
+        .await;
 
-        res.assert_status_ok();
-        let body: Value = res.json();
-        assert_eq!(body["error"], false);
-        assert_eq!(body["message"]["type"], "polling");
-    });
+    res.assert_status_ok();
+    let body: Value = res.json();
+    assert_eq!(body["error"], false);
+    assert_eq!(body["message"]["type"], "polling");
 }
 
-#[test]
-fn create_polling_trigger_interval_too_small_returns_400() {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    rt.block_on(async {
-        let session_id = SessionId::now_v7();
-        let token = make_token(session_id);
+#[tokio::test]
+async fn create_polling_trigger_interval_too_small_returns_400() {
+    let session_id = SessionId::now_v7();
+    let token = make_token(session_id);
 
-        let db = with_task_edit(with_auth(
-            MockDatabase::new(DatabaseBackend::Postgres),
-            session_id,
-        ));
+    let db = with_task_edit(with_auth(
+        MockDatabase::new(DatabaseBackend::Postgres),
+        session_id,
+    ));
 
-        let server = make_test_server(db.into_connection());
-        let res = server
-            .post(BASE_URL)
-            .add_header("authorization", format!("Bearer {}", token))
-            .json(&serde_json::json!({
-                "config": {"type": "polling", "interval_secs": 5}
-            }))
-            .await;
+    let server = make_test_server(db.into_connection());
+    let res = server
+        .post(BASE_URL)
+        .add_header("authorization", format!("Bearer {}", token))
+        .json(&serde_json::json!({
+            "config": {"type": "polling", "interval_secs": 5}
+        }))
+        .await;
 
-        res.assert_status_bad_request();
-        let body: Value = res.json();
-        assert_eq!(body["error"], true);
-        let msg = body["message"].as_str().unwrap();
-        assert!(
-            msg.contains("interval_secs"),
-            "expected interval message, got: {msg}"
-        );
-    });
+    res.assert_status_bad_request();
+    let body: Value = res.json();
+    assert_eq!(body["error"], true);
+    let msg = body["message"].as_str().unwrap();
+    assert!(
+        msg.contains("interval_secs"),
+        "expected interval message, got: {msg}"
+    );
 }
 
-#[test]
-fn create_invalid_cron_returns_400() {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    rt.block_on(async {
-        let session_id = SessionId::now_v7();
-        let token = make_token(session_id);
+#[tokio::test]
+async fn create_invalid_cron_returns_400() {
+    let session_id = SessionId::now_v7();
+    let token = make_token(session_id);
 
-        let db = with_task_edit(with_auth(
-            MockDatabase::new(DatabaseBackend::Postgres),
-            session_id,
-        ));
+    let db = with_task_edit(with_auth(
+        MockDatabase::new(DatabaseBackend::Postgres),
+        session_id,
+    ));
 
-        let server = make_test_server(db.into_connection());
-        let res = server
-            .post(BASE_URL)
-            .add_header("authorization", format!("Bearer {}", token))
-            .json(&serde_json::json!({
-                "config": {"type": "time", "cron": "not a cron"}
-            }))
-            .await;
+    let server = make_test_server(db.into_connection());
+    let res = server
+        .post(BASE_URL)
+        .add_header("authorization", format!("Bearer {}", token))
+        .json(&serde_json::json!({
+            "config": {"type": "time", "cron": "not a cron"}
+        }))
+        .await;
 
-        res.assert_status_bad_request();
-        let body: Value = res.json();
-        assert_eq!(body["error"], true);
-    });
+    res.assert_status_bad_request();
+    let body: Value = res.json();
+    assert_eq!(body["error"], true);
 }
 
-#[test]
-fn patch_trigger_updates_fields() {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    rt.block_on(async {
-        let session_id = SessionId::now_v7();
-        let token = make_token(session_id);
-        let tid = trigger_id();
+#[tokio::test]
+async fn patch_trigger_updates_fields() {
+    let session_id = SessionId::now_v7();
+    let token = make_token(session_id);
+    let tid = trigger_id();
 
-        let updated = polling_trigger_row();
+    let updated = polling_trigger_row();
 
-        let db = with_task_edit(with_auth(
-            MockDatabase::new(DatabaseBackend::Postgres),
-            session_id,
-        ))
-        .append_query_results([vec![polling_trigger_row()]])
-        .append_query_results([vec![updated]]);
+    let db = with_task_edit(with_auth(
+        MockDatabase::new(DatabaseBackend::Postgres),
+        session_id,
+    ))
+    .append_query_results([vec![polling_trigger_row()]])
+    .append_query_results([vec![updated]]);
 
-        let server = make_test_server(db.into_connection());
-        let res = server
-            .patch(&format!("{}/{}", BASE_URL, tid))
-            .add_header("authorization", format!("Bearer {}", token))
-            .json(&serde_json::json!({"active": false}))
-            .await;
+    let server = make_test_server(db.into_connection());
+    let res = server
+        .patch(&format!("{}/{}", BASE_URL, tid))
+        .add_header("authorization", format!("Bearer {}", token))
+        .json(&serde_json::json!({"active": false}))
+        .await;
 
-        res.assert_status_ok();
-        let body: Value = res.json();
-        assert_eq!(body["error"], false);
-        assert_eq!(body["message"]["type"], "polling");
-    });
+    res.assert_status_ok();
+    let body: Value = res.json();
+    assert_eq!(body["error"], false);
+    assert_eq!(body["message"]["type"], "polling");
 }
 
-#[test]
-fn patch_trigger_config_type_change() {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    rt.block_on(async {
-        let session_id = SessionId::now_v7();
-        let token = make_token(session_id);
-        let tid = trigger_id();
+#[tokio::test]
+async fn patch_trigger_config_type_change() {
+    let session_id = SessionId::now_v7();
+    let token = make_token(session_id);
+    let tid = trigger_id();
 
-        let updated = task_trigger::Model {
-            trigger_type: TriggerType::Time,
-            config: serde_json::json!({"cron": "0 0 2 * * *"}),
-            ..polling_trigger_row()
-        };
+    let updated = task_trigger::Model {
+        trigger_type: TriggerType::Time,
+        config: serde_json::json!({"cron": "0 0 2 * * *"}),
+        ..polling_trigger_row()
+    };
 
-        let db = with_task_edit(with_auth(
-            MockDatabase::new(DatabaseBackend::Postgres),
-            session_id,
-        ))
-        .append_query_results([vec![polling_trigger_row()]])
-        .append_query_results([vec![updated]]);
+    let db = with_task_edit(with_auth(
+        MockDatabase::new(DatabaseBackend::Postgres),
+        session_id,
+    ))
+    .append_query_results([vec![polling_trigger_row()]])
+    .append_query_results([vec![updated]]);
 
-        let server = make_test_server(db.into_connection());
-        let res = server
-            .patch(&format!("{}/{}", BASE_URL, tid))
-            .add_header("authorization", format!("Bearer {}", token))
-            .json(&serde_json::json!({
-                "config": {"type": "time", "cron": "0 0 2 * * *"}
-            }))
-            .await;
+    let server = make_test_server(db.into_connection());
+    let res = server
+        .patch(&format!("{}/{}", BASE_URL, tid))
+        .add_header("authorization", format!("Bearer {}", token))
+        .json(&serde_json::json!({
+            "config": {"type": "time", "cron": "0 0 2 * * *"}
+        }))
+        .await;
 
-        res.assert_status_ok();
-        let body: Value = res.json();
-        assert_eq!(body["error"], false);
-        assert_eq!(body["message"]["type"], "time");
-    });
+    res.assert_status_ok();
+    let body: Value = res.json();
+    assert_eq!(body["error"], false);
+    assert_eq!(body["message"]["type"], "time");
 }
 
-#[test]
-fn delete_trigger_removes_row() {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    rt.block_on(async {
-        let session_id = SessionId::now_v7();
-        let token = make_token(session_id);
-        let tid = trigger_id();
+#[tokio::test]
+async fn delete_trigger_removes_row() {
+    let session_id = SessionId::now_v7();
+    let token = make_token(session_id);
+    let tid = trigger_id();
 
-        let db = with_task_edit(with_auth(
-            MockDatabase::new(DatabaseBackend::Postgres),
-            session_id,
-        ))
-        .append_query_results([vec![polling_trigger_row()]])
-        .append_exec_results([MockExecResult {
-            last_insert_id: 0,
-            rows_affected: 1,
-        }]);
+    let db = with_task_edit(with_auth(
+        MockDatabase::new(DatabaseBackend::Postgres),
+        session_id,
+    ))
+    .append_query_results([vec![polling_trigger_row()]])
+    .append_exec_results([MockExecResult {
+        last_insert_id: 0,
+        rows_affected: 1,
+    }]);
 
-        let server = make_test_server(db.into_connection());
-        let res = server
-            .delete(&format!("{}/{}", BASE_URL, tid))
-            .add_header("authorization", format!("Bearer {}", token))
-            .await;
+    let server = make_test_server(db.into_connection());
+    let res = server
+        .delete(&format!("{}/{}", BASE_URL, tid))
+        .add_header("authorization", format!("Bearer {}", token))
+        .await;
 
-        res.assert_status_ok();
-        let body: Value = res.json();
-        assert_eq!(body["error"], false);
-        assert_eq!(body["message"]["deleted"], true);
-    });
+    res.assert_status_ok();
+    let body: Value = res.json();
+    assert_eq!(body["error"], false);
+    assert_eq!(body["message"]["deleted"], true);
 }
 
-#[test]
-fn delete_trigger_not_found_returns_404() {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    rt.block_on(async {
-        let session_id = SessionId::now_v7();
-        let token = make_token(session_id);
-        let tid = TaskTriggerId::now_v7();
+#[tokio::test]
+async fn delete_trigger_not_found_returns_404() {
+    let session_id = SessionId::now_v7();
+    let token = make_token(session_id);
+    let tid = TaskTriggerId::now_v7();
 
-        let db = with_task_edit(with_auth(
-            MockDatabase::new(DatabaseBackend::Postgres),
-            session_id,
-        ))
-        .append_query_results([Vec::<task_trigger::Model>::new()]);
+    let db = with_task_edit(with_auth(
+        MockDatabase::new(DatabaseBackend::Postgres),
+        session_id,
+    ))
+    .append_query_results([Vec::<task_trigger::Model>::new()]);
 
-        let server = make_test_server(db.into_connection());
-        let res = server
-            .delete(&format!("{}/{}", BASE_URL, tid))
-            .add_header("authorization", format!("Bearer {}", token))
-            .await;
+    let server = make_test_server(db.into_connection());
+    let res = server
+        .delete(&format!("{}/{}", BASE_URL, tid))
+        .add_header("authorization", format!("Bearer {}", token))
+        .await;
 
-        res.assert_status_not_found();
-    });
+    res.assert_status_not_found();
 }
 
-#[test]
-fn fire_now_on_inactive_trigger_returns_400() {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    rt.block_on(async {
-        let session_id = SessionId::now_v7();
-        let token = make_token(session_id);
-        let tid = trigger_id();
+#[tokio::test]
+async fn fire_now_on_inactive_trigger_returns_400() {
+    let session_id = SessionId::now_v7();
+    let token = make_token(session_id);
+    let tid = trigger_id();
 
-        let inactive_trigger = task_trigger::Model {
-            active: false,
-            ..polling_trigger_row()
-        };
+    let inactive_trigger = task_trigger::Model {
+        active: false,
+        ..polling_trigger_row()
+    };
 
-        let db = with_task_edit(with_auth(
-            MockDatabase::new(DatabaseBackend::Postgres),
-            session_id,
-        ))
-        .append_query_results([vec![inactive_trigger]]);
+    let db = with_task_edit(with_auth(
+        MockDatabase::new(DatabaseBackend::Postgres),
+        session_id,
+    ))
+    .append_query_results([vec![inactive_trigger]]);
 
-        let server = make_test_server(db.into_connection());
-        let res = server
-            .post(&format!("{}/{}/test", BASE_URL, tid))
-            .add_header("authorization", format!("Bearer {}", token))
-            .await;
+    let server = make_test_server(db.into_connection());
+    let res = server
+        .post(&format!("{}/{}/test", BASE_URL, tid))
+        .add_header("authorization", format!("Bearer {}", token))
+        .await;
 
-        res.assert_status_bad_request();
-        let body: Value = res.json();
-        assert_eq!(body["error"], true);
-        assert!(
-            body["message"].as_str().unwrap().contains("inactive"),
-            "expected inactive mention, got: {}",
-            body["message"]
-        );
-    });
+    res.assert_status_bad_request();
+    let body: Value = res.json();
+    assert_eq!(body["error"], true);
+    assert!(
+        body["message"].as_str().unwrap().contains("inactive"),
+        "expected inactive mention, got: {}",
+        body["message"]
+    );
 }
 
 // `fire_now` is not integration-tested here because `resolve_head` is making real git network
 // requests.
 
-#[test]
-fn create_task_seeds_default_polling_trigger() {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    rt.block_on(async {
-        let session_id = SessionId::now_v7();
-        let token = make_token(session_id);
+#[tokio::test]
+async fn create_task_seeds_default_polling_trigger() {
+    let session_id = SessionId::now_v7();
+    let token = make_token(session_id);
 
-        let created_task = task::Model {
-            id: task_id(),
-            project: project_id(),
-            name: "new-task".into(),
-            active: true,
-            display_name: "New Task".into(),
-            repository: "https://github.com/test/repo".into(),
-            wildcard: "*".into(),
-            last_check_at: test_date(),
-            created_by: user_id(),
-            created_at: test_date(),
-            keep_evaluations: 30,
-            concurrency: ConcurrencyPolicy::Skip,
-            sign_cache: true,
-            ..Default::default()
-        };
+    let created_task = task::Model {
+        id: task_id(),
+        project: project_id(),
+        name: "new-task".into(),
+        active: true,
+        display_name: "New Task".into(),
+        repository: "https://github.com/test/repo".into(),
+        wildcard: "*".into(),
+        last_check_at: test_date(),
+        created_by: user_id(),
+        created_at: test_date(),
+        keep_evaluations: 30,
+        concurrency: ConcurrencyPolicy::Skip,
+        sign_cache: true,
+        ..Default::default()
+    };
 
-        let seeded_trigger = task_trigger::Model {
-            id: trigger_id(),
-            task: task_id(),
-            config: serde_json::json!({"interval_secs": 300}),
-            active: true,
-            created_at: test_date(),
-            updated_at: test_date(),
-            ..Default::default()
-        };
+    let seeded_trigger = task_trigger::Model {
+        id: trigger_id(),
+        task: task_id(),
+        config: serde_json::json!({"interval_secs": 300}),
+        active: true,
+        created_at: test_date(),
+        updated_at: test_date(),
+        ..Default::default()
+    };
 
-        let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
-            .append_query_results([vec![project()]])
-            .append_query_results([vec![admin_membership()]])
-            .append_query_results([vec![admin_role_row()]])
-            .append_query_results([Vec::<task::Model>::new()])
-            .append_query_results([vec![created_task]])
-            .append_query_results([vec![seeded_trigger]]);
+    let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
+        .append_query_results([vec![project()]])
+        .append_query_results([vec![admin_membership()]])
+        .append_query_results([vec![admin_role_row()]])
+        .append_query_results([Vec::<task::Model>::new()])
+        .append_query_results([vec![created_task]])
+        .append_query_results([vec![seeded_trigger]]);
 
-        let server = make_test_server(db.into_connection());
-        let res = server
-            .put("/api/v1/tasks/test-project")
-            .add_header("authorization", format!("Bearer {}", token))
-            .json(&serde_json::json!({
-                "name": "new-task",
-                "display_name": "New Task",
-                "description": "",
-                "repository": "https://github.com/test/repo",
-                "wildcard": "*"
-            }))
-            .await;
+    let server = make_test_server(db.into_connection());
+    let res = server
+        .put("/api/v1/tasks/test-project")
+        .add_header("authorization", format!("Bearer {}", token))
+        .json(&serde_json::json!({
+            "name": "new-task",
+            "display_name": "New Task",
+            "description": "",
+            "repository": "https://github.com/test/repo",
+            "wildcard": "*"
+        }))
+        .await;
 
-        res.assert_status_ok();
-        let body: Value = res.json();
-        assert_eq!(body["error"], false);
-        assert_eq!(body["message"], task_id().to_string());
-    });
+    res.assert_status_ok();
+    let body: Value = res.json();
+    assert_eq!(body["error"], false);
+    assert_eq!(body["message"], task_id().to_string());
 }
 
-#[test]
-fn patch_task_concurrency_to_skip() {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    rt.block_on(async {
-        let session_id = SessionId::now_v7();
-        let token = make_token(session_id);
+#[tokio::test]
+async fn patch_task_concurrency_to_skip() {
+    let session_id = SessionId::now_v7();
+    let token = make_token(session_id);
 
-        let db = with_task_edit(with_auth(
-            MockDatabase::new(DatabaseBackend::Postgres),
-            session_id,
-        ))
-        .append_query_results([vec![task_row()]])
-        .append_exec_results([MockExecResult {
-            last_insert_id: 0,
-            rows_affected: 1,
-        }]);
+    let db = with_task_edit(with_auth(
+        MockDatabase::new(DatabaseBackend::Postgres),
+        session_id,
+    ))
+    .append_query_results([vec![task_row()]])
+    .append_exec_results([MockExecResult {
+        last_insert_id: 0,
+        rows_affected: 1,
+    }]);
 
-        let server = make_test_server(db.into_connection());
-        let res = server
-            .patch("/api/v1/tasks/test-project/test-task")
-            .add_header("authorization", format!("Bearer {}", token))
-            .json(&serde_json::json!({"concurrency": "skip"}))
-            .await;
+    let server = make_test_server(db.into_connection());
+    let res = server
+        .patch("/api/v1/tasks/test-project/test-task")
+        .add_header("authorization", format!("Bearer {}", token))
+        .json(&serde_json::json!({"concurrency": "skip"}))
+        .await;
 
-        res.assert_status_ok();
-        let body: Value = res.json();
-        assert_eq!(body["error"], false);
-    });
+    res.assert_status_ok();
+    let body: Value = res.json();
+    assert_eq!(body["error"], false);
 }
 
-#[test]
-fn list_reporter_trigger_includes_integration_metadata() {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    rt.block_on(async {
-        let session_id = SessionId::now_v7();
-        let token = make_token(session_id);
+#[tokio::test]
+async fn list_reporter_trigger_includes_integration_metadata() {
+    let session_id = SessionId::now_v7();
+    let token = make_token(session_id);
 
-        let db = with_task_member(with_auth(
-            MockDatabase::new(DatabaseBackend::Postgres),
-            session_id,
-        ))
-        .append_query_results([vec![reporter_push_trigger_row()]])
-        .append_query_results([vec![github_inbound_integration_row()]]);
+    let db = with_task_member(with_auth(
+        MockDatabase::new(DatabaseBackend::Postgres),
+        session_id,
+    ))
+    .append_query_results([vec![reporter_push_trigger_row()]])
+    .append_query_results([vec![github_inbound_integration_row()]]);
 
-        let server = make_test_server(db.into_connection());
-        let res = server
-            .get(BASE_URL)
-            .add_header("authorization", format!("Bearer {}", token))
-            .await;
+    let server = make_test_server(db.into_connection());
+    let res = server
+        .get(BASE_URL)
+        .add_header("authorization", format!("Bearer {}", token))
+        .await;
 
-        res.assert_status_ok();
-        let body: Value = res.json();
-        let item = &body["message"][0];
-        assert_eq!(item["type"], "reporter_push");
-        assert_eq!(
-            item["integration"]["id"],
-            github_integration_id().to_string()
-        );
-        assert_eq!(item["integration"]["name"], "github");
-        assert_eq!(item["integration"]["display_name"], "GitHub");
-        assert_eq!(item["integration"]["git_host_type"], "github");
-    });
+    res.assert_status_ok();
+    let body: Value = res.json();
+    let item = &body["message"][0];
+    assert_eq!(item["type"], "reporter_push");
+    assert_eq!(
+        item["integration"]["id"],
+        github_integration_id().to_string()
+    );
+    assert_eq!(item["integration"]["name"], "github");
+    assert_eq!(item["integration"]["display_name"], "GitHub");
+    assert_eq!(item["integration"]["git_host_type"], "github");
 }
 
-#[test]
-fn list_reporter_trigger_with_missing_integration_returns_null() {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    rt.block_on(async {
-        let session_id = SessionId::now_v7();
-        let token = make_token(session_id);
+#[tokio::test]
+async fn list_reporter_trigger_with_missing_integration_returns_null() {
+    let session_id = SessionId::now_v7();
+    let token = make_token(session_id);
 
-        let db = with_task_member(with_auth(
-            MockDatabase::new(DatabaseBackend::Postgres),
-            session_id,
-        ))
-        .append_query_results([vec![reporter_push_trigger_row()]])
-        .append_query_results([Vec::<integration::Model>::new()]);
+    let db = with_task_member(with_auth(
+        MockDatabase::new(DatabaseBackend::Postgres),
+        session_id,
+    ))
+    .append_query_results([vec![reporter_push_trigger_row()]])
+    .append_query_results([Vec::<integration::Model>::new()]);
 
-        let server = make_test_server(db.into_connection());
-        let res = server
-            .get(BASE_URL)
-            .add_header("authorization", format!("Bearer {}", token))
-            .await;
+    let server = make_test_server(db.into_connection());
+    let res = server
+        .get(BASE_URL)
+        .add_header("authorization", format!("Bearer {}", token))
+        .await;
 
-        res.assert_status_ok();
-        let body: Value = res.json();
-        assert_eq!(body["message"][0]["type"], "reporter_push");
-        assert!(body["message"][0]["integration"].is_null());
-    });
+    res.assert_status_ok();
+    let body: Value = res.json();
+    assert_eq!(body["message"][0]["type"], "reporter_push");
+    assert!(body["message"][0]["integration"].is_null());
 }
 
-#[test]
-fn list_polling_trigger_has_null_integration_and_skips_lookup() {
+#[tokio::test]
+async fn list_polling_trigger_has_null_integration_and_skips_lookup() {
     // No reporter trigger is listed, and the handler must not issue an integration SELECT.
     // MockDatabase is panicking on unexpected queries, and that is the assertion.
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    rt.block_on(async {
-        let session_id = SessionId::now_v7();
-        let token = make_token(session_id);
+    let session_id = SessionId::now_v7();
+    let token = make_token(session_id);
 
-        let db = with_task_member(with_auth(
-            MockDatabase::new(DatabaseBackend::Postgres),
-            session_id,
-        ))
-        .append_query_results([vec![polling_trigger_row()]]);
+    let db = with_task_member(with_auth(
+        MockDatabase::new(DatabaseBackend::Postgres),
+        session_id,
+    ))
+    .append_query_results([vec![polling_trigger_row()]]);
 
-        let server = make_test_server(db.into_connection());
-        let res = server
-            .get(BASE_URL)
-            .add_header("authorization", format!("Bearer {}", token))
-            .await;
+    let server = make_test_server(db.into_connection());
+    let res = server
+        .get(BASE_URL)
+        .add_header("authorization", format!("Bearer {}", token))
+        .await;
 
-        res.assert_status_ok();
-        let body: Value = res.json();
-        assert_eq!(body["message"][0]["type"], "polling");
-        assert!(body["message"][0]["integration"].is_null());
-    });
+    res.assert_status_ok();
+    let body: Value = res.json();
+    assert_eq!(body["message"][0]["type"], "polling");
+    assert!(body["message"][0]["integration"].is_null());
 }
 
-#[test]
-fn get_reporter_trigger_includes_integration_metadata() {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    rt.block_on(async {
-        let session_id = SessionId::now_v7();
-        let token = make_token(session_id);
-        let tid = trigger_id();
+#[tokio::test]
+async fn get_reporter_trigger_includes_integration_metadata() {
+    let session_id = SessionId::now_v7();
+    let token = make_token(session_id);
+    let tid = trigger_id();
 
-        let db = with_task_member(with_auth(
-            MockDatabase::new(DatabaseBackend::Postgres),
-            session_id,
-        ))
-        .append_query_results([vec![reporter_push_trigger_row()]])
-        .append_query_results([vec![github_inbound_integration_row()]]);
+    let db = with_task_member(with_auth(
+        MockDatabase::new(DatabaseBackend::Postgres),
+        session_id,
+    ))
+    .append_query_results([vec![reporter_push_trigger_row()]])
+    .append_query_results([vec![github_inbound_integration_row()]]);
 
-        let server = make_test_server(db.into_connection());
-        let res = server
-            .get(&format!("{}/{}", BASE_URL, tid))
-            .add_header("authorization", format!("Bearer {}", token))
-            .await;
+    let server = make_test_server(db.into_connection());
+    let res = server
+        .get(&format!("{}/{}", BASE_URL, tid))
+        .add_header("authorization", format!("Bearer {}", token))
+        .await;
 
-        res.assert_status_ok();
-        let body: Value = res.json();
-        assert_eq!(body["message"]["type"], "reporter_push");
-        assert_eq!(body["message"]["integration"]["display_name"], "GitHub");
-        assert_eq!(body["message"]["integration"]["git_host_type"], "github");
-    });
+    res.assert_status_ok();
+    let body: Value = res.json();
+    assert_eq!(body["message"]["type"], "reporter_push");
+    assert_eq!(body["message"]["integration"]["display_name"], "GitHub");
+    assert_eq!(body["message"]["integration"]["git_host_type"], "github");
 }

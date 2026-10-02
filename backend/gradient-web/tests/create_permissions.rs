@@ -4,11 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-#![expect(
-    clippy::unwrap_used,
-    reason = "test scaffolding: a fixture helper that cannot build its value should fail the test loudly"
-)]
-
 use axum::http::StatusCode;
 use gradient_entity::ids::*;
 use gradient_entity::{cache, project};
@@ -51,14 +46,6 @@ fn cache_row(name: &str) -> cache::Model {
     }
 }
 
-fn run<F: std::future::Future>(f: F) -> F::Output {
-    tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap()
-        .block_on(f)
-}
-
 fn project_body() -> Value {
     json!({ "name": "acme", "display_name": "Acme", "description": "", "public": false })
 }
@@ -70,160 +57,148 @@ fn cache_body() -> Value {
     })
 }
 
-#[test]
-fn create_project_superusers_rejects_regular_user() {
-    run(async {
-        let session_id = SessionId::now_v7();
-        let token = make_token(session_id);
-        let db = with_auth(
-            MockDatabase::new(DatabaseBackend::Postgres),
-            session_id,
-            user(),
-        );
-        let server = make_test_server_configured(db.into_connection(), |cli| {
-            cli.permissions.create_project = CreatePermission::Superusers;
-        });
-
-        let res = server
-            .put("/api/v1/projects")
-            .add_header("authorization", format!("Bearer {}", token))
-            .json(&project_body())
-            .await;
-
-        res.assert_status(StatusCode::FORBIDDEN);
-        let body: Value = res.json();
-        assert_eq!(body["code"], "superuser_required");
+#[tokio::test]
+async fn create_project_superusers_rejects_regular_user() {
+    let session_id = SessionId::now_v7();
+    let token = make_token(session_id);
+    let db = with_auth(
+        MockDatabase::new(DatabaseBackend::Postgres),
+        session_id,
+        user(),
+    );
+    let server = make_test_server_configured(db.into_connection(), |cli| {
+        cli.permissions.create_project = CreatePermission::Superusers;
     });
+
+    let res = server
+        .put("/api/v1/projects")
+        .add_header("authorization", format!("Bearer {}", token))
+        .json(&project_body())
+        .await;
+
+    res.assert_status(StatusCode::FORBIDDEN);
+    let body: Value = res.json();
+    assert_eq!(body["code"], "superuser_required");
 }
 
-#[test]
-fn create_project_none_rejects_superuser() {
-    run(async {
-        let session_id = SessionId::now_v7();
-        let token = make_token(session_id);
-        let db = with_auth(
-            MockDatabase::new(DatabaseBackend::Postgres),
-            session_id,
-            superuser_user(),
-        );
-        let server = make_test_server_configured(db.into_connection(), |cli| {
-            cli.permissions.create_project = CreatePermission::None;
-        });
-
-        let res = server
-            .put("/api/v1/projects")
-            .add_header("authorization", format!("Bearer {}", token))
-            .json(&project_body())
-            .await;
-
-        res.assert_status(StatusCode::FORBIDDEN);
-        let body: Value = res.json();
-        assert_eq!(body["code"], "creation_disabled");
+#[tokio::test]
+async fn create_project_none_rejects_superuser() {
+    let session_id = SessionId::now_v7();
+    let token = make_token(session_id);
+    let db = with_auth(
+        MockDatabase::new(DatabaseBackend::Postgres),
+        session_id,
+        superuser_user(),
+    );
+    let server = make_test_server_configured(db.into_connection(), |cli| {
+        cli.permissions.create_project = CreatePermission::None;
     });
+
+    let res = server
+        .put("/api/v1/projects")
+        .add_header("authorization", format!("Bearer {}", token))
+        .json(&project_body())
+        .await;
+
+    res.assert_status(StatusCode::FORBIDDEN);
+    let body: Value = res.json();
+    assert_eq!(body["code"], "creation_disabled");
 }
 
-#[test]
-fn create_project_superusers_allows_superuser_past_gate() {
-    run(async {
-        let session_id = SessionId::now_v7();
-        let token = make_token(session_id);
-        let db = with_auth(
-            MockDatabase::new(DatabaseBackend::Postgres),
-            session_id,
-            superuser_user(),
-        )
-        .append_query_results([vec![project_row("acme")]]);
-        let server = make_test_server_configured(db.into_connection(), |cli| {
-            cli.permissions.create_project = CreatePermission::Superusers;
-        });
-
-        let res = server
-            .put("/api/v1/projects")
-            .add_header("authorization", format!("Bearer {}", token))
-            .json(&project_body())
-            .await;
-
-        res.assert_status(StatusCode::CONFLICT);
-        let body: Value = res.json();
-        assert_eq!(body["code"], "already_exists");
+#[tokio::test]
+async fn create_project_superusers_allows_superuser_past_gate() {
+    let session_id = SessionId::now_v7();
+    let token = make_token(session_id);
+    let db = with_auth(
+        MockDatabase::new(DatabaseBackend::Postgres),
+        session_id,
+        superuser_user(),
+    )
+    .append_query_results([vec![project_row("acme")]]);
+    let server = make_test_server_configured(db.into_connection(), |cli| {
+        cli.permissions.create_project = CreatePermission::Superusers;
     });
+
+    let res = server
+        .put("/api/v1/projects")
+        .add_header("authorization", format!("Bearer {}", token))
+        .json(&project_body())
+        .await;
+
+    res.assert_status(StatusCode::CONFLICT);
+    let body: Value = res.json();
+    assert_eq!(body["code"], "already_exists");
 }
 
-#[test]
-fn create_cache_superusers_rejects_regular_user() {
-    run(async {
-        let session_id = SessionId::now_v7();
-        let token = make_token(session_id);
-        let db = with_auth(
-            MockDatabase::new(DatabaseBackend::Postgres),
-            session_id,
-            user(),
-        );
-        let server = make_test_server_configured(db.into_connection(), |cli| {
-            cli.permissions.create_cache = CreatePermission::Superusers;
-        });
-
-        let res = server
-            .put("/api/v1/caches")
-            .add_header("authorization", format!("Bearer {}", token))
-            .json(&cache_body())
-            .await;
-
-        res.assert_status(StatusCode::FORBIDDEN);
-        let body: Value = res.json();
-        assert_eq!(body["code"], "superuser_required");
+#[tokio::test]
+async fn create_cache_superusers_rejects_regular_user() {
+    let session_id = SessionId::now_v7();
+    let token = make_token(session_id);
+    let db = with_auth(
+        MockDatabase::new(DatabaseBackend::Postgres),
+        session_id,
+        user(),
+    );
+    let server = make_test_server_configured(db.into_connection(), |cli| {
+        cli.permissions.create_cache = CreatePermission::Superusers;
     });
+
+    let res = server
+        .put("/api/v1/caches")
+        .add_header("authorization", format!("Bearer {}", token))
+        .json(&cache_body())
+        .await;
+
+    res.assert_status(StatusCode::FORBIDDEN);
+    let body: Value = res.json();
+    assert_eq!(body["code"], "superuser_required");
 }
 
-#[test]
-fn create_cache_none_rejects_superuser() {
-    run(async {
-        let session_id = SessionId::now_v7();
-        let token = make_token(session_id);
-        let db = with_auth(
-            MockDatabase::new(DatabaseBackend::Postgres),
-            session_id,
-            superuser_user(),
-        );
-        let server = make_test_server_configured(db.into_connection(), |cli| {
-            cli.permissions.create_cache = CreatePermission::None;
-        });
-
-        let res = server
-            .put("/api/v1/caches")
-            .add_header("authorization", format!("Bearer {}", token))
-            .json(&cache_body())
-            .await;
-
-        res.assert_status(StatusCode::FORBIDDEN);
-        let body: Value = res.json();
-        assert_eq!(body["code"], "creation_disabled");
+#[tokio::test]
+async fn create_cache_none_rejects_superuser() {
+    let session_id = SessionId::now_v7();
+    let token = make_token(session_id);
+    let db = with_auth(
+        MockDatabase::new(DatabaseBackend::Postgres),
+        session_id,
+        superuser_user(),
+    );
+    let server = make_test_server_configured(db.into_connection(), |cli| {
+        cli.permissions.create_cache = CreatePermission::None;
     });
+
+    let res = server
+        .put("/api/v1/caches")
+        .add_header("authorization", format!("Bearer {}", token))
+        .json(&cache_body())
+        .await;
+
+    res.assert_status(StatusCode::FORBIDDEN);
+    let body: Value = res.json();
+    assert_eq!(body["code"], "creation_disabled");
 }
 
-#[test]
-fn create_cache_everyone_allows_regular_user_past_gate() {
-    run(async {
-        let session_id = SessionId::now_v7();
-        let token = make_token(session_id);
-        let db = with_auth(
-            MockDatabase::new(DatabaseBackend::Postgres),
-            session_id,
-            user(),
-        )
-        .append_query_results([vec![cache_row("acme")]]);
-        let server = make_test_server_configured(db.into_connection(), |cli| {
-            cli.permissions.create_cache = CreatePermission::Everyone;
-        });
-
-        let res = server
-            .put("/api/v1/caches")
-            .add_header("authorization", format!("Bearer {}", token))
-            .json(&cache_body())
-            .await;
-
-        res.assert_status(StatusCode::CONFLICT);
-        let body: Value = res.json();
-        assert_eq!(body["code"], "already_exists");
+#[tokio::test]
+async fn create_cache_everyone_allows_regular_user_past_gate() {
+    let session_id = SessionId::now_v7();
+    let token = make_token(session_id);
+    let db = with_auth(
+        MockDatabase::new(DatabaseBackend::Postgres),
+        session_id,
+        user(),
+    )
+    .append_query_results([vec![cache_row("acme")]]);
+    let server = make_test_server_configured(db.into_connection(), |cli| {
+        cli.permissions.create_cache = CreatePermission::Everyone;
     });
+
+    let res = server
+        .put("/api/v1/caches")
+        .add_header("authorization", format!("Bearer {}", token))
+        .json(&cache_body())
+        .await;
+
+    res.assert_status(StatusCode::CONFLICT);
+    let body: Value = res.json();
+    assert_eq!(body["code"], "already_exists");
 }

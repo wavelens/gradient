@@ -116,89 +116,73 @@ fn message(res: &axum_test::TestResponse) -> String {
     body["message"].as_str().unwrap_or_default().to_owned()
 }
 
-fn run<F: std::future::Future>(fut: F) -> F::Output {
-    tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap()
-        .block_on(fut)
+#[tokio::test]
+async fn a_member_of_a_project_that_built_the_derivation_downloads_without_a_token() {
+    let session = SessionId::now_v7();
+    let db = with_private_build(with_session(
+        MockDatabase::new(DatabaseBackend::Postgres),
+        session,
+    ))
+    .append_query_results([Vec::<gradient_entity::project_user::Model>::new()])
+    .append_query_results([vec![build_job(other_build_job_id(), other_eval_id())]])
+    .append_query_results([vec![gradient_entity::evaluation::Model {
+        task: Some(other_task_id()),
+        ..eval_at(other_eval_id(), 0)
+    }]])
+    .append_query_results([vec![task(other_task_id(), other_project_id())]])
+    .append_query_results([vec![gradient_entity::project_user::Model {
+        id: ProjectUserId::new(Uuid::from_u128(0x51)),
+        project: other_project_id(),
+        user: user_id(),
+        role: gradient_types::consts::BASE_ROLE_VIEW_ID,
+    }]]);
+    let server = make_test_server(no_outputs(db).into_connection());
+
+    let res = server
+        .get(&download_url(None))
+        .add_header("authorization", format!("Bearer {}", make_token(session)))
+        .await;
+
+    res.assert_status_not_found();
+    assert_eq!(message(&res), "File not found");
 }
 
-#[test]
-fn a_member_of_a_project_that_built_the_derivation_downloads_without_a_token() {
-    run(async {
-        let session = SessionId::now_v7();
-        let db = with_private_build(with_session(
-            MockDatabase::new(DatabaseBackend::Postgres),
-            session,
-        ))
-        .append_query_results([Vec::<gradient_entity::project_user::Model>::new()])
-        .append_query_results([vec![build_job(other_build_job_id(), other_eval_id())]])
-        .append_query_results([vec![gradient_entity::evaluation::Model {
-            task: Some(other_task_id()),
-            ..eval_at(other_eval_id(), 0)
-        }]])
-        .append_query_results([vec![task(other_task_id(), other_project_id())]])
-        .append_query_results([vec![gradient_entity::project_user::Model {
-            id: ProjectUserId::new(Uuid::from_u128(0x51)),
-            project: other_project_id(),
-            user: user_id(),
-            role: gradient_types::consts::BASE_ROLE_VIEW_ID,
-        }]]);
-        let server = make_test_server(no_outputs(db).into_connection());
+#[tokio::test]
+async fn an_anonymous_caller_without_a_token_is_refused_on_a_private_project() {
+    let db = with_private_build(MockDatabase::new(DatabaseBackend::Postgres));
+    let server = make_test_server(db.into_connection());
 
-        let res = server
-            .get(&download_url(None))
-            .add_header("authorization", format!("Bearer {}", make_token(session)))
-            .await;
+    let res = server.get(&download_url(None)).await;
 
-        res.assert_status_not_found();
-        assert_eq!(message(&res), "File not found");
-    });
+    res.assert_status_not_found();
+    assert_eq!(message(&res), "Build not found");
 }
 
-#[test]
-fn an_anonymous_caller_without_a_token_is_refused_on_a_private_project() {
-    run(async {
-        let db = with_private_build(MockDatabase::new(DatabaseBackend::Postgres));
-        let server = make_test_server(db.into_connection());
+#[tokio::test]
+async fn a_token_for_the_derivation_admits_an_anonymous_caller() {
+    let db = no_outputs(with_private_build(MockDatabase::new(
+        DatabaseBackend::Postgres,
+    )));
+    let server = make_test_server(db.into_connection());
 
-        let res = server.get(&download_url(None)).await;
+    let res = server
+        .get(&download_url(Some(&download_token(derivation_id()))))
+        .await;
 
-        res.assert_status_not_found();
-        assert_eq!(message(&res), "Build not found");
-    });
+    res.assert_status_not_found();
+    assert_eq!(message(&res), "File not found");
 }
 
-#[test]
-fn a_token_for_the_derivation_admits_an_anonymous_caller() {
-    run(async {
-        let db = no_outputs(with_private_build(MockDatabase::new(
-            DatabaseBackend::Postgres,
-        )));
-        let server = make_test_server(db.into_connection());
+#[tokio::test]
+async fn a_token_for_another_derivation_is_refused() {
+    let db = with_private_build(MockDatabase::new(DatabaseBackend::Postgres));
+    let server = make_test_server(db.into_connection());
+    let other = DerivationId::new(Uuid::from_u128(0xd9));
 
-        let res = server
-            .get(&download_url(Some(&download_token(derivation_id()))))
-            .await;
+    let res = server
+        .get(&download_url(Some(&download_token(other))))
+        .await;
 
-        res.assert_status_not_found();
-        assert_eq!(message(&res), "File not found");
-    });
-}
-
-#[test]
-fn a_token_for_another_derivation_is_refused() {
-    run(async {
-        let db = with_private_build(MockDatabase::new(DatabaseBackend::Postgres));
-        let server = make_test_server(db.into_connection());
-        let other = DerivationId::new(Uuid::from_u128(0xd9));
-
-        let res = server
-            .get(&download_url(Some(&download_token(other))))
-            .await;
-
-        res.assert_status_not_found();
-        assert_eq!(message(&res), "Build not found");
-    });
+    res.assert_status_not_found();
+    assert_eq!(message(&res), "Build not found");
 }

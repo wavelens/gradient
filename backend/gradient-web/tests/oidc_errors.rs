@@ -106,43 +106,34 @@ fn assert_no_leak(message: &str) {
     }
 }
 
-#[test]
-fn oidc_login_get_does_not_leak_idp_error() {
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    rt.block_on(async {
-        let s = server_with_broken_oidc();
-        let res = s.get("/api/v1/auth/oidc/login").await;
-        res.assert_status_unauthorized();
-        let body: Value = res.json();
-        let msg = body["message"].as_str().expect("message string");
-        assert_no_leak(msg);
-    });
+#[tokio::test(flavor = "multi_thread")]
+async fn oidc_login_get_does_not_leak_idp_error() {
+    let s = server_with_broken_oidc();
+    let res = s.get("/api/v1/auth/oidc/login").await;
+    res.assert_status_unauthorized();
+    let body: Value = res.json();
+    let msg = body["message"].as_str().expect("message string");
+    assert_no_leak(msg);
 }
 
-#[test]
-fn oauth_authorize_post_does_not_leak_idp_error() {
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    rt.block_on(async {
-        let s = server_with_broken_oidc();
-        let res = s.post("/api/v1/auth/oauth/authorize").await;
-        res.assert_status_unauthorized();
-        let body: Value = res.json();
-        let msg = body["message"].as_str().expect("message string");
-        assert_no_leak(msg);
-    });
+#[tokio::test(flavor = "multi_thread")]
+async fn oauth_authorize_post_does_not_leak_idp_error() {
+    let s = server_with_broken_oidc();
+    let res = s.post("/api/v1/auth/oauth/authorize").await;
+    res.assert_status_unauthorized();
+    let body: Value = res.json();
+    let msg = body["message"].as_str().expect("message string");
+    assert_no_leak(msg);
 }
 
-#[test]
-fn oauth_authorize_get_callback_does_not_leak_idp_error() {
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    rt.block_on(async {
-        let s = server_with_broken_oidc();
-        let res = s
-            .get("/api/v1/auth/oauth/authorize?code=abc&state=xyz")
-            .await;
-        res.assert_status_unauthorized();
-        let body: Value = res.json();
-        let msg = body["message"].as_str().expect("message string");
-        assert_no_leak(msg);
-    });
+#[tokio::test(flavor = "multi_thread")]
+async fn oauth_authorize_get_callback_does_not_leak_idp_error() {
+    let s = server_with_broken_oidc();
+    let res = s
+        .get("/api/v1/auth/oauth/authorize?code=abc&state=xyz")
+        .await;
+    res.assert_status_unauthorized();
+    let body: Value = res.json();
+    let msg = body["message"].as_str().expect("message string");
+    assert_no_leak(msg);
 }

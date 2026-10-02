@@ -149,183 +149,155 @@ fn pending_row(device_code: &str, user_code: &str) -> cli_device_authorization::
     }
 }
 
-#[test]
-fn start_returns_user_code_and_verification_uri() {
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    rt.block_on(async {
-        let inserted = pending_row("dev-code", "ABCD-EFGH");
-        let s = server_with(|db| {
-            db.append_query_results([Vec::<cli_device_authorization::Model>::new()])
-                .append_query_results([vec![inserted]])
-                .append_exec_results([MockExecResult {
-                    last_insert_id: 0,
-                    rows_affected: 1,
-                }])
-        });
-
-        let res = s.post("/api/v1/auth/cli/start").await;
-        res.assert_status_ok();
-        let body: Value = res.json();
-        assert_eq!(body["error"], Value::Bool(false));
-        let m = &body["message"];
-        assert!(m["device_code"].as_str().unwrap().len() >= 32);
-        assert!(m["user_code"].as_str().unwrap().contains('-'));
-        assert!(
-            m["verification_uri_complete"]
-                .as_str()
-                .unwrap()
-                .contains("/account/cli-authorize?code=")
-        );
-        assert!(m["interval"].as_u64().unwrap() >= 1);
-        assert!(m["expires_in"].as_i64().unwrap() > 0);
+#[tokio::test(flavor = "multi_thread")]
+async fn start_returns_user_code_and_verification_uri() {
+    let inserted = pending_row("dev-code", "ABCD-EFGH");
+    let s = server_with(|db| {
+        db.append_query_results([Vec::<cli_device_authorization::Model>::new()])
+            .append_query_results([vec![inserted]])
+            .append_exec_results([MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 1,
+            }])
     });
+
+    let res = s.post("/api/v1/auth/cli/start").await;
+    res.assert_status_ok();
+    let body: Value = res.json();
+    assert_eq!(body["error"], Value::Bool(false));
+    let m = &body["message"];
+    assert!(m["device_code"].as_str().unwrap().len() >= 32);
+    assert!(m["user_code"].as_str().unwrap().contains('-'));
+    assert!(
+        m["verification_uri_complete"]
+            .as_str()
+            .unwrap()
+            .contains("/account/cli-authorize?code=")
+    );
+    assert!(m["interval"].as_u64().unwrap() >= 1);
+    assert!(m["expires_in"].as_i64().unwrap() > 0);
 }
 
-#[test]
-fn poll_pending_returns_cli_auth_pending() {
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    rt.block_on(async {
-        let row = pending_row("dev-code-xyz", "ABCD-EFGH");
-        let s = server_with(|db| db.append_query_results([vec![row]]));
+#[tokio::test(flavor = "multi_thread")]
+async fn poll_pending_returns_cli_auth_pending() {
+    let row = pending_row("dev-code-xyz", "ABCD-EFGH");
+    let s = server_with(|db| db.append_query_results([vec![row]]));
 
-        let res = s
-            .post("/api/v1/auth/cli/poll")
-            .json(&serde_json::json!({ "device_code": "dev-code-xyz" }))
-            .await;
-        res.assert_status_bad_request();
-        let body: Value = res.json();
-        assert_eq!(body["code"], "cli_auth_pending");
-    });
+    let res = s
+        .post("/api/v1/auth/cli/poll")
+        .json(&serde_json::json!({ "device_code": "dev-code-xyz" }))
+        .await;
+    res.assert_status_bad_request();
+    let body: Value = res.json();
+    assert_eq!(body["code"], "cli_auth_pending");
 }
 
-#[test]
-fn poll_denied_returns_cli_auth_denied() {
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    rt.block_on(async {
-        let mut row = pending_row("dev-code-xyz", "ABCD-EFGH");
-        row.denied_at = Some(Utc::now().naive_utc());
-        let s = server_with(|db| db.append_query_results([vec![row]]));
+#[tokio::test(flavor = "multi_thread")]
+async fn poll_denied_returns_cli_auth_denied() {
+    let mut row = pending_row("dev-code-xyz", "ABCD-EFGH");
+    row.denied_at = Some(Utc::now().naive_utc());
+    let s = server_with(|db| db.append_query_results([vec![row]]));
 
-        let res = s
-            .post("/api/v1/auth/cli/poll")
-            .json(&serde_json::json!({ "device_code": "dev-code-xyz" }))
-            .await;
-        res.assert_status_bad_request();
-        let body: Value = res.json();
-        assert_eq!(body["code"], "cli_auth_denied");
-    });
+    let res = s
+        .post("/api/v1/auth/cli/poll")
+        .json(&serde_json::json!({ "device_code": "dev-code-xyz" }))
+        .await;
+    res.assert_status_bad_request();
+    let body: Value = res.json();
+    assert_eq!(body["code"], "cli_auth_denied");
 }
 
-#[test]
-fn poll_expired_returns_cli_auth_expired() {
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    rt.block_on(async {
-        let mut row = pending_row("dev-code-xyz", "ABCD-EFGH");
-        row.expires_at = Utc::now().naive_utc() - Duration::seconds(1);
-        let s = server_with(|db| db.append_query_results([vec![row]]));
+#[tokio::test(flavor = "multi_thread")]
+async fn poll_expired_returns_cli_auth_expired() {
+    let mut row = pending_row("dev-code-xyz", "ABCD-EFGH");
+    row.expires_at = Utc::now().naive_utc() - Duration::seconds(1);
+    let s = server_with(|db| db.append_query_results([vec![row]]));
 
-        let res = s
-            .post("/api/v1/auth/cli/poll")
-            .json(&serde_json::json!({ "device_code": "dev-code-xyz" }))
-            .await;
-        res.assert_status_bad_request();
-        let body: Value = res.json();
-        assert_eq!(body["code"], "cli_auth_expired");
-    });
+    let res = s
+        .post("/api/v1/auth/cli/poll")
+        .json(&serde_json::json!({ "device_code": "dev-code-xyz" }))
+        .await;
+    res.assert_status_bad_request();
+    let body: Value = res.json();
+    assert_eq!(body["code"], "cli_auth_expired");
 }
 
-#[test]
-fn poll_authorized_returns_token_once() {
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    rt.block_on(async {
-        let mut row = pending_row("dev-code-xyz", "ABCD-EFGH");
-        row.user_id = Some(user_id());
-        row.token = Some("the-session-jwt".to_string());
-        row.authorized_at = Some(Utc::now().naive_utc());
-        let s = server_with(|db| {
-            db.append_query_results([vec![row.clone()]])
-                .append_exec_results([MockExecResult {
-                    last_insert_id: 0,
-                    rows_affected: 1,
-                }])
-                .append_query_results([vec![cli_device_authorization::Model {
-                    token: None,
-                    ..row
-                }]])
-        });
-
-        let res = s
-            .post("/api/v1/auth/cli/poll")
-            .json(&serde_json::json!({ "device_code": "dev-code-xyz" }))
-            .await;
-        res.assert_status_ok();
-        let body: Value = res.json();
-        assert_eq!(body["error"], Value::Bool(false));
-        assert_eq!(body["message"], "the-session-jwt");
+#[tokio::test(flavor = "multi_thread")]
+async fn poll_authorized_returns_token_once() {
+    let mut row = pending_row("dev-code-xyz", "ABCD-EFGH");
+    row.user_id = Some(user_id());
+    row.token = Some("the-session-jwt".to_string());
+    row.authorized_at = Some(Utc::now().naive_utc());
+    let s = server_with(|db| {
+        db.append_query_results([vec![row.clone()]])
+            .append_exec_results([MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 1,
+            }])
+            .append_query_results([vec![cli_device_authorization::Model { token: None, ..row }]])
     });
+
+    let res = s
+        .post("/api/v1/auth/cli/poll")
+        .json(&serde_json::json!({ "device_code": "dev-code-xyz" }))
+        .await;
+    res.assert_status_ok();
+    let body: Value = res.json();
+    assert_eq!(body["error"], Value::Bool(false));
+    assert_eq!(body["message"], "the-session-jwt");
 }
 
-#[test]
-fn poll_unknown_device_code_returns_404() {
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    rt.block_on(async {
-        let s = server_with(|db| {
-            db.append_query_results([Vec::<cli_device_authorization::Model>::new()])
-        });
+#[tokio::test(flavor = "multi_thread")]
+async fn poll_unknown_device_code_returns_404() {
+    let s =
+        server_with(|db| db.append_query_results([Vec::<cli_device_authorization::Model>::new()]));
 
-        let res = s
-            .post("/api/v1/auth/cli/poll")
-            .json(&serde_json::json!({ "device_code": "nope" }))
-            .await;
-        res.assert_status_not_found();
-    });
+    let res = s
+        .post("/api/v1/auth/cli/poll")
+        .json(&serde_json::json!({ "device_code": "nope" }))
+        .await;
+    res.assert_status_not_found();
 }
 
-#[test]
-fn authorize_requires_auth() {
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    rt.block_on(async {
-        let s = server_with(|db| db);
+#[tokio::test(flavor = "multi_thread")]
+async fn authorize_requires_auth() {
+    let s = server_with(|db| db);
 
-        let res = s
-            .post("/api/v1/auth/cli/authorize")
-            .json(&serde_json::json!({ "user_code": "ABCD-EFGH" }))
-            .await;
-        res.assert_status_forbidden();
-    });
+    let res = s
+        .post("/api/v1/auth/cli/authorize")
+        .json(&serde_json::json!({ "user_code": "ABCD-EFGH" }))
+        .await;
+    res.assert_status_forbidden();
 }
 
-#[test]
-fn deny_marks_row_denied() {
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    rt.block_on(async {
-        let session = live_session(SessionId::now_v7());
-        let token = sign_session_jwt(user_id(), session.id);
-        let row = pending_row("dev-code-xyz", "ABCD-EFGH");
+#[tokio::test(flavor = "multi_thread")]
+async fn deny_marks_row_denied() {
+    let session = live_session(SessionId::now_v7());
+    let token = sign_session_jwt(user_id(), session.id);
+    let row = pending_row("dev-code-xyz", "ABCD-EFGH");
 
-        let s = server_with(|db| {
-            let db = auth_queue(db, session);
-            db.append_query_results([vec![row.clone()]])
-                .append_exec_results([MockExecResult {
-                    last_insert_id: 0,
-                    rows_affected: 1,
-                }])
-                .append_query_results([vec![cli_device_authorization::Model {
-                    denied_at: Some(Utc::now().naive_utc()),
-                    ..row
-                }]])
-                .append_query_results([Vec::<gradient_entity::audit_log::Model>::new()])
-                .append_exec_results([MockExecResult {
-                    last_insert_id: 0,
-                    rows_affected: 1,
-                }])
-        });
-
-        let res = s
-            .post("/api/v1/auth/cli/deny")
-            .add_header("authorization", format!("Bearer {}", token))
-            .json(&serde_json::json!({ "user_code": "ABCD-EFGH" }))
-            .await;
-        res.assert_status_ok();
+    let s = server_with(|db| {
+        let db = auth_queue(db, session);
+        db.append_query_results([vec![row.clone()]])
+            .append_exec_results([MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 1,
+            }])
+            .append_query_results([vec![cli_device_authorization::Model {
+                denied_at: Some(Utc::now().naive_utc()),
+                ..row
+            }]])
+            .append_query_results([Vec::<gradient_entity::audit_log::Model>::new()])
+            .append_exec_results([MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 1,
+            }])
     });
+
+    let res = s
+        .post("/api/v1/auth/cli/deny")
+        .add_header("authorization", format!("Bearer {}", token))
+        .json(&serde_json::json!({ "user_code": "ABCD-EFGH" }))
+        .await;
+    res.assert_status_ok();
 }

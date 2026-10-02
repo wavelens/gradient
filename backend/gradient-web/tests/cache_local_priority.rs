@@ -110,95 +110,77 @@ fn build_server(cache: gradient_entity::cache::Model, peer: &str) -> TestServer 
     TestServer::new(router)
 }
 
-fn run<F: std::future::Future<Output = ()>>(f: F) {
-    tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap()
-        .block_on(f);
+#[tokio::test]
+async fn local_priority_swapped_when_xff_in_local_ips() {
+    let server = build_server(cache_row(Some(10)), "127.0.0.1");
+    let resp = server
+        .get("/cache/test-cache/nix-cache-info")
+        .add_header("x-forwarded-for", "10.0.0.5")
+        .await;
+    resp.assert_status_ok();
+    let body = resp.text();
+    assert!(
+        body.contains("Priority: 10"),
+        "expected Priority: 10, got:\n{body}"
+    );
 }
 
-#[test]
-fn local_priority_swapped_when_xff_in_local_ips() {
-    run(async {
-        let server = build_server(cache_row(Some(10)), "127.0.0.1");
-        let resp = server
-            .get("/cache/test-cache/nix-cache-info")
-            .add_header("x-forwarded-for", "10.0.0.5")
-            .await;
-        resp.assert_status_ok();
-        let body = resp.text();
-        assert!(
-            body.contains("Priority: 10"),
-            "expected Priority: 10, got:\n{body}"
-        );
-    });
+#[tokio::test]
+async fn local_priority_not_swapped_for_non_local_xff() {
+    let server = build_server(cache_row(Some(10)), "127.0.0.1");
+    let resp = server
+        .get("/cache/test-cache/nix-cache-info")
+        .add_header("x-forwarded-for", "8.8.8.8")
+        .await;
+    resp.assert_status_ok();
+    let body = resp.text();
+    assert!(
+        body.contains("Priority: 40"),
+        "expected Priority: 40, got:\n{body}"
+    );
 }
 
-#[test]
-fn local_priority_not_swapped_for_non_local_xff() {
-    run(async {
-        let server = build_server(cache_row(Some(10)), "127.0.0.1");
-        let resp = server
-            .get("/cache/test-cache/nix-cache-info")
-            .add_header("x-forwarded-for", "8.8.8.8")
-            .await;
-        resp.assert_status_ok();
-        let body = resp.text();
-        assert!(
-            body.contains("Priority: 40"),
-            "expected Priority: 40, got:\n{body}"
-        );
-    });
+#[tokio::test]
+async fn local_priority_null_always_uses_default() {
+    let server = build_server(cache_row(None), "127.0.0.1");
+    let resp = server
+        .get("/cache/test-cache/nix-cache-info")
+        .add_header("x-forwarded-for", "10.0.0.5")
+        .await;
+    resp.assert_status_ok();
+    let body = resp.text();
+    assert!(
+        body.contains("Priority: 40"),
+        "expected Priority: 40, got:\n{body}"
+    );
 }
 
-#[test]
-fn local_priority_null_always_uses_default() {
-    run(async {
-        let server = build_server(cache_row(None), "127.0.0.1");
-        let resp = server
-            .get("/cache/test-cache/nix-cache-info")
-            .add_header("x-forwarded-for", "10.0.0.5")
-            .await;
-        resp.assert_status_ok();
-        let body = resp.text();
-        assert!(
-            body.contains("Priority: 40"),
-            "expected Priority: 40, got:\n{body}"
-        );
-    });
+#[tokio::test]
+async fn local_priority_zero_treated_as_disabled() {
+    let server = build_server(cache_row(Some(0)), "127.0.0.1");
+    let resp = server
+        .get("/cache/test-cache/nix-cache-info")
+        .add_header("x-forwarded-for", "10.0.0.5")
+        .await;
+    resp.assert_status_ok();
+    let body = resp.text();
+    assert!(
+        body.contains("Priority: 40"),
+        "expected Priority: 40, got:\n{body}"
+    );
 }
 
-#[test]
-fn local_priority_zero_treated_as_disabled() {
-    run(async {
-        let server = build_server(cache_row(Some(0)), "127.0.0.1");
-        let resp = server
-            .get("/cache/test-cache/nix-cache-info")
-            .add_header("x-forwarded-for", "10.0.0.5")
-            .await;
-        resp.assert_status_ok();
-        let body = resp.text();
-        assert!(
-            body.contains("Priority: 40"),
-            "expected Priority: 40, got:\n{body}"
-        );
-    });
-}
-
-#[test]
-fn untrusted_peer_xff_is_ignored_for_priority_decision() {
-    run(async {
-        let server = build_server(cache_row(Some(10)), "203.0.113.5");
-        let resp = server
-            .get("/cache/test-cache/nix-cache-info")
-            .add_header("x-forwarded-for", "10.0.0.5")
-            .await;
-        resp.assert_status_ok();
-        let body = resp.text();
-        assert!(
-            body.contains("Priority: 40"),
-            "expected Priority: 40, got:\n{body}"
-        );
-    });
+#[tokio::test]
+async fn untrusted_peer_xff_is_ignored_for_priority_decision() {
+    let server = build_server(cache_row(Some(10)), "203.0.113.5");
+    let resp = server
+        .get("/cache/test-cache/nix-cache-info")
+        .add_header("x-forwarded-for", "10.0.0.5")
+        .await;
+    resp.assert_status_ok();
+    let body = resp.text();
+    assert!(
+        body.contains("Priority: 40"),
+        "expected Priority: 40, got:\n{body}"
+    );
 }

@@ -66,90 +66,72 @@ fn make_state_with_limits(max_request_size: usize) -> Arc<ServerState> {
     })
 }
 
-#[test]
-fn webhook_body_over_limit_returns_413() {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    rt.block_on(async {
-        let state = make_state_with_limits(1024);
-        let router = create_router(state).expect("router");
-        let server = TestServer::new(router);
+#[tokio::test]
+async fn webhook_body_over_limit_returns_413() {
+    let state = make_state_with_limits(1024);
+    let router = create_router(state).expect("router");
+    let server = TestServer::new(router);
 
-        let oversized = vec![b'x'; 4096];
+    let oversized = vec![b'x'; 4096];
 
-        let response = server
-            .post("/api/v1/hooks/github")
-            .add_header("X-Hub-Signature-256", "sha256=deadbeef")
-            .add_header("X-GitHub-Event", "push")
-            .bytes(oversized.into())
-            .await;
+    let response = server
+        .post("/api/v1/hooks/github")
+        .add_header("X-Hub-Signature-256", "sha256=deadbeef")
+        .add_header("X-GitHub-Event", "push")
+        .bytes(oversized.into())
+        .await;
 
-        assert_eq!(
-            response.status_code(),
-            axum::http::StatusCode::PAYLOAD_TOO_LARGE,
-            "body over max_request_size must be rejected with 413, got {}",
-            response.status_code()
-        );
-    });
+    assert_eq!(
+        response.status_code(),
+        axum::http::StatusCode::PAYLOAD_TOO_LARGE,
+        "body over max_request_size must be rejected with 413, got {}",
+        response.status_code()
+    );
 }
 
-#[test]
-fn webhook_body_within_limit_reaches_handler() {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    rt.block_on(async {
-        let state = make_state_with_limits(1024);
-        let router = create_router(state).expect("router");
-        let server = TestServer::new(router);
+#[tokio::test]
+async fn webhook_body_within_limit_reaches_handler() {
+    let state = make_state_with_limits(1024);
+    let router = create_router(state).expect("router");
+    let server = TestServer::new(router);
 
-        let small = vec![b'x'; 256];
+    let small = vec![b'x'; 256];
 
-        let response = server
-            .post("/api/v1/hooks/github")
-            .add_header("X-Hub-Signature-256", "sha256=deadbeef")
-            .add_header("X-GitHub-Event", "push")
-            .bytes(small.into())
-            .await;
+    let response = server
+        .post("/api/v1/hooks/github")
+        .add_header("X-Hub-Signature-256", "sha256=deadbeef")
+        .add_header("X-GitHub-Event", "push")
+        .bytes(small.into())
+        .await;
 
-        assert_ne!(
-            response.status_code(),
-            axum::http::StatusCode::PAYLOAD_TOO_LARGE,
-            "body within max_request_size must not be rejected with 413"
-        );
-    });
+    assert_ne!(
+        response.status_code(),
+        axum::http::StatusCode::PAYLOAD_TOO_LARGE,
+        "body within max_request_size must not be rejected with 413"
+    );
 }
 
-#[test]
-fn blob_upload_route_uses_higher_limit() {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    rt.block_on(async {
-        let state = make_state_with_limits(1024);
-        let router = create_router(state).expect("router");
-        let server = TestServer::new(router);
+#[tokio::test]
+async fn blob_upload_route_uses_higher_limit() {
+    let state = make_state_with_limits(1024);
+    let router = create_router(state).expect("router");
+    let server = TestServer::new(router);
 
-        let body = vec![b'x'; 16 * 1024];
-        let session_id = Uuid::now_v7();
+    let body = vec![b'x'; 16 * 1024];
+    let session_id = Uuid::now_v7();
 
-        let response = server
-            .post(&format!("/api/v1/build-requests/{}/blobs", session_id))
-            .add_header("Content-Type", "multipart/form-data; boundary=----abc")
-            .bytes(body.into())
-            .await;
+    let response = server
+        .post(&format!("/api/v1/build-requests/{}/blobs", session_id))
+        .add_header("Content-Type", "multipart/form-data; boundary=----abc")
+        .bytes(body.into())
+        .await;
 
-        assert_ne!(
-            response.status_code(),
-            axum::http::StatusCode::PAYLOAD_TOO_LARGE,
-            "blob-upload route must not enforce the smaller global limit, got {}",
-            response.status_code()
-        );
-    });
+    assert_ne!(
+        response.status_code(),
+        axum::http::StatusCode::PAYLOAD_TOO_LARGE,
+        "blob-upload route must not enforce the smaller global limit, got {}",
+        response.status_code()
+    );
 }
 
 fn with_auth(db: MockDatabase, session_id: SessionId) -> MockDatabase {
@@ -161,32 +143,26 @@ fn with_auth(db: MockDatabase, session_id: SessionId) -> MockDatabase {
 
 /// The request must be authenticated. The `authorize` middleware is rejecting an anonymous
 /// `/build-requests/*` request before the body limit is evaluated.
-#[test]
-fn source_chunk_over_source_limit_returns_413() {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    rt.block_on(async {
-        let session_id = SessionId::now_v7();
-        let token = make_token(session_id);
-        let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id);
-        let server = make_test_server_configured(db.into_connection(), |cli| {
-            cli.http.max_source_upload_size = 32 * 1024;
-        });
-
-        let over = vec![b'x'; 64 * 1024];
-        let response = server
-            .put("/api/v1/build-requests/source/testupload/chunk?offset=0")
-            .add_header("authorization", format!("Bearer {}", token))
-            .add_header("Content-Type", "application/octet-stream")
-            .bytes(over.into())
-            .await;
-        assert_eq!(
-            response.status_code(),
-            axum::http::StatusCode::PAYLOAD_TOO_LARGE,
-            "chunk over max_source_upload_size must be 413'd, got {}",
-            response.status_code()
-        );
+#[tokio::test]
+async fn source_chunk_over_source_limit_returns_413() {
+    let session_id = SessionId::now_v7();
+    let token = make_token(session_id);
+    let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id);
+    let server = make_test_server_configured(db.into_connection(), |cli| {
+        cli.http.max_source_upload_size = 32 * 1024;
     });
+
+    let over = vec![b'x'; 64 * 1024];
+    let response = server
+        .put("/api/v1/build-requests/source/testupload/chunk?offset=0")
+        .add_header("authorization", format!("Bearer {}", token))
+        .add_header("Content-Type", "application/octet-stream")
+        .bytes(over.into())
+        .await;
+    assert_eq!(
+        response.status_code(),
+        axum::http::StatusCode::PAYLOAD_TOO_LARGE,
+        "chunk over max_source_upload_size must be 413'd, got {}",
+        response.status_code()
+    );
 }

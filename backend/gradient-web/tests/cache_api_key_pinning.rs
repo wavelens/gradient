@@ -103,133 +103,115 @@ fn view_cache_role() -> cache_role::Model {
     }
 }
 
-fn run<F: std::future::Future>(fut: F) -> F::Output {
-    tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap()
-        .block_on(fut)
+#[tokio::test]
+async fn cache_pinned_key_works_on_pinned_cache() {
+    let raw = "a".repeat(64);
+    let key = pinned_api_key(&raw, cache_id(), cache_admin_mask());
+
+    let db = api_key_db(MockDatabase::new(DatabaseBackend::Postgres), &key)
+        .append_query_results([vec![cache_row()]])
+        .append_query_results([Vec::<gradient_entity::cache_user::Model>::new()]);
+
+    let server = make_test_server(db.into_connection());
+    let res = server
+        .get("/api/v1/caches/test-cache")
+        .add_header("authorization", format!("Bearer GRAD{}", raw))
+        .await;
+
+    res.assert_status_ok();
+    let body: serde_json::Value = res.json();
+    assert_eq!(body["error"], false);
 }
 
-#[test]
-fn cache_pinned_key_works_on_pinned_cache() {
-    run(async {
-        let raw = "a".repeat(64);
-        let key = pinned_api_key(&raw, cache_id(), cache_admin_mask());
+#[tokio::test]
+async fn cache_pinned_key_rejected_on_other_cache() {
+    let raw = "b".repeat(64);
+    let key = pinned_api_key(&raw, other_cache_id(), cache_admin_mask());
 
-        let db = api_key_db(MockDatabase::new(DatabaseBackend::Postgres), &key)
-            .append_query_results([vec![cache_row()]])
-            .append_query_results([Vec::<gradient_entity::cache_user::Model>::new()]);
+    let db = api_key_db(MockDatabase::new(DatabaseBackend::Postgres), &key)
+        .append_query_results([vec![cache_row()]]);
 
-        let server = make_test_server(db.into_connection());
-        let res = server
-            .get("/api/v1/caches/test-cache")
-            .add_header("authorization", format!("Bearer GRAD{}", raw))
-            .await;
+    let server = make_test_server(db.into_connection());
+    let res = server
+        .get("/api/v1/caches/test-cache")
+        .add_header("authorization", format!("Bearer GRAD{}", raw))
+        .await;
 
-        res.assert_status_ok();
-        let body: serde_json::Value = res.json();
-        assert_eq!(body["error"], false);
-    });
+    res.assert_status(axum::http::StatusCode::FORBIDDEN);
 }
 
-#[test]
-fn cache_pinned_key_rejected_on_other_cache() {
-    run(async {
-        let raw = "b".repeat(64);
-        let key = pinned_api_key(&raw, other_cache_id(), cache_admin_mask());
+#[tokio::test]
+async fn cache_pinned_key_rejected_on_project_endpoint() {
+    let raw = "c".repeat(64);
+    let key = pinned_api_key(&raw, cache_id(), cache_admin_mask());
 
-        let db = api_key_db(MockDatabase::new(DatabaseBackend::Postgres), &key)
-            .append_query_results([vec![cache_row()]]);
+    let db = api_key_db(MockDatabase::new(DatabaseBackend::Postgres), &key)
+        .append_query_results([vec![gradient_test_support::fixtures::project()]]);
 
-        let server = make_test_server(db.into_connection());
-        let res = server
-            .get("/api/v1/caches/test-cache")
-            .add_header("authorization", format!("Bearer GRAD{}", raw))
-            .await;
+    let server = make_test_server(db.into_connection());
+    let res = server
+        .get("/api/v1/projects/test-project")
+        .add_header("authorization", format!("Bearer GRAD{}", raw))
+        .await;
 
-        res.assert_status(axum::http::StatusCode::FORBIDDEN);
-    });
+    res.assert_status(axum::http::StatusCode::FORBIDDEN);
 }
 
-#[test]
-fn cache_pinned_key_rejected_on_project_endpoint() {
-    run(async {
-        let raw = "c".repeat(64);
-        let key = pinned_api_key(&raw, cache_id(), cache_admin_mask());
-
-        let db = api_key_db(MockDatabase::new(DatabaseBackend::Postgres), &key)
-            .append_query_results([vec![gradient_test_support::fixtures::project()]]);
-
-        let server = make_test_server(db.into_connection());
-        let res = server
-            .get("/api/v1/projects/test-project")
-            .add_header("authorization", format!("Bearer GRAD{}", raw))
-            .await;
-
-        res.assert_status(axum::http::StatusCode::FORBIDDEN);
-    });
-}
-
-#[test]
-fn create_key_rejects_both_project_and_cache_pin() {
+#[tokio::test]
+async fn create_key_rejects_both_project_and_cache_pin() {
     // A session JWT is used because API keys cannot create API keys.
-    run(async {
-        let session_id = gradient_types::SessionId::now_v7();
-        let token = gradient_test_support::web::make_token(session_id);
-        let session = gradient_test_support::web::live_session(session_id);
+    let session_id = gradient_types::SessionId::now_v7();
+    let token = gradient_test_support::web::make_token(session_id);
+    let session = gradient_test_support::web::live_session(session_id);
 
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
-            .append_query_results([vec![session.clone()]])
-            .append_query_results([vec![session]])
-            .append_query_results([vec![user()]]);
+    let db = MockDatabase::new(DatabaseBackend::Postgres)
+        .append_query_results([vec![session.clone()]])
+        .append_query_results([vec![session]])
+        .append_query_results([vec![user()]]);
 
-        let server = make_test_server(db.into_connection());
-        let res = server
-            .post("/api/v1/user/keys")
-            .add_header("authorization", format!("Bearer {}", token))
-            .json(&serde_json::json!({
-                "name": "bad-key",
-                "permissions": ["viewCache"],
-                "project": "test-project",
-                "cache": "test-cache",
-            }))
-            .await;
+    let server = make_test_server(db.into_connection());
+    let res = server
+        .post("/api/v1/user/keys")
+        .add_header("authorization", format!("Bearer {}", token))
+        .json(&serde_json::json!({
+            "name": "bad-key",
+            "permissions": ["viewCache"],
+            "project": "test-project",
+            "cache": "test-cache",
+        }))
+        .await;
 
-        res.assert_status(axum::http::StatusCode::BAD_REQUEST);
-        let body: serde_json::Value = res.json();
-        assert_eq!(body["error"], true);
-    });
+    res.assert_status(axum::http::StatusCode::BAD_REQUEST);
+    let body: serde_json::Value = res.json();
+    assert_eq!(body["error"], true);
 }
 
-#[test]
-fn create_cache_pinned_key_cannot_exceed_member_mask() {
-    run(async {
-        let session_id = gradient_types::SessionId::now_v7();
-        let token = gradient_test_support::web::make_token(session_id);
-        let session = gradient_test_support::web::live_session(session_id);
+#[tokio::test]
+async fn create_cache_pinned_key_cannot_exceed_member_mask() {
+    let session_id = gradient_types::SessionId::now_v7();
+    let token = gradient_test_support::web::make_token(session_id);
+    let session = gradient_test_support::web::live_session(session_id);
 
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
-            .append_query_results([vec![session.clone()]])
-            .append_query_results([vec![session]])
-            .append_query_results([vec![user()]])
-            .append_query_results([Vec::<api::Model>::new()])
-            .append_query_results([vec![private_cache_row()]])
-            .append_query_results([vec![view_cache_member()]])
-            .append_query_results([vec![view_cache_member()]])
-            .append_query_results([vec![view_cache_role()]]);
+    let db = MockDatabase::new(DatabaseBackend::Postgres)
+        .append_query_results([vec![session.clone()]])
+        .append_query_results([vec![session]])
+        .append_query_results([vec![user()]])
+        .append_query_results([Vec::<api::Model>::new()])
+        .append_query_results([vec![private_cache_row()]])
+        .append_query_results([vec![view_cache_member()]])
+        .append_query_results([vec![view_cache_member()]])
+        .append_query_results([vec![view_cache_role()]]);
 
-        let server = make_test_server(db.into_connection());
-        let res = server
-            .post("/api/v1/user/keys")
-            .add_header("authorization", format!("Bearer {}", token))
-            .json(&serde_json::json!({
-                "name": "my-cache-key",
-                "permissions": ["writeStore"],
-                "cache": "test-cache",
-            }))
-            .await;
+    let server = make_test_server(db.into_connection());
+    let res = server
+        .post("/api/v1/user/keys")
+        .add_header("authorization", format!("Bearer {}", token))
+        .json(&serde_json::json!({
+            "name": "my-cache-key",
+            "permissions": ["writeStore"],
+            "cache": "test-cache",
+        }))
+        .await;
 
-        res.assert_status(axum::http::StatusCode::FORBIDDEN);
-    });
+    res.assert_status(axum::http::StatusCode::FORBIDDEN);
 }

@@ -128,189 +128,159 @@ fn with_project_manage(db: MockDatabase) -> MockDatabase {
 
 const SUMMARY_URL: &str = "/api/v1/projects/test-project/integrations/summary";
 
-#[test]
-fn summary_endpoint_returns_all_kinds() {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    rt.block_on(async {
-        let session_id = SessionId::now_v7();
-        let token = make_token(session_id);
+#[tokio::test]
+async fn summary_endpoint_returns_all_kinds() {
+    let session_id = SessionId::now_v7();
+    let token = make_token(session_id);
 
-        let db = with_project_member(with_auth(
-            MockDatabase::new(DatabaseBackend::Postgres),
-            session_id,
-        ))
-        .append_query_results([vec![
-            gitea_inbound_row(),
-            github_inbound_row(),
-            gitea_outbound_row(),
-        ]]);
+    let db = with_project_member(with_auth(
+        MockDatabase::new(DatabaseBackend::Postgres),
+        session_id,
+    ))
+    .append_query_results([vec![
+        gitea_inbound_row(),
+        github_inbound_row(),
+        gitea_outbound_row(),
+    ]]);
 
-        let server = make_test_server(db.into_connection());
-        let res = server
-            .get(SUMMARY_URL)
-            .add_header("authorization", format!("Bearer {}", token))
-            .await;
+    let server = make_test_server(db.into_connection());
+    let res = server
+        .get(SUMMARY_URL)
+        .add_header("authorization", format!("Bearer {}", token))
+        .await;
 
-        res.assert_status_ok();
-        let body: Value = res.json();
-        let items = body["message"].as_array().expect("array");
-        assert_eq!(items.len(), 3);
-        assert_eq!(items[0]["kind"], "inbound");
-        assert_eq!(items[0]["git_host_type"], "gitea");
-        assert_eq!(items[0]["name"], "my-gitea-hook");
-        assert_eq!(items[1]["git_host_type"], "github");
-        assert_eq!(items[1]["display_name"], "GitHub");
-        assert_eq!(items[2]["kind"], "outbound");
-    });
+    res.assert_status_ok();
+    let body: Value = res.json();
+    let items = body["message"].as_array().expect("array");
+    assert_eq!(items.len(), 3);
+    assert_eq!(items[0]["kind"], "inbound");
+    assert_eq!(items[0]["git_host_type"], "gitea");
+    assert_eq!(items[0]["name"], "my-gitea-hook");
+    assert_eq!(items[1]["git_host_type"], "github");
+    assert_eq!(items[1]["display_name"], "GitHub");
+    assert_eq!(items[2]["kind"], "outbound");
 }
 
-#[test]
-fn summary_endpoint_excludes_credential_state() {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    rt.block_on(async {
-        let session_id = SessionId::now_v7();
-        let token = make_token(session_id);
+#[tokio::test]
+async fn summary_endpoint_excludes_credential_state() {
+    let session_id = SessionId::now_v7();
+    let token = make_token(session_id);
 
-        let db = with_project_member(with_auth(
-            MockDatabase::new(DatabaseBackend::Postgres),
-            session_id,
-        ))
-        .append_query_results([vec![gitea_inbound_row(), gitea_outbound_row()]]);
+    let db = with_project_member(with_auth(
+        MockDatabase::new(DatabaseBackend::Postgres),
+        session_id,
+    ))
+    .append_query_results([vec![gitea_inbound_row(), gitea_outbound_row()]]);
 
-        let server = make_test_server(db.into_connection());
-        let res = server
-            .get(SUMMARY_URL)
-            .add_header("authorization", format!("Bearer {}", token))
-            .await;
+    let server = make_test_server(db.into_connection());
+    let res = server
+        .get(SUMMARY_URL)
+        .add_header("authorization", format!("Bearer {}", token))
+        .await;
 
-        res.assert_status_ok();
-        let body: Value = res.json();
-        for item in body["message"].as_array().unwrap() {
-            let obj = item.as_object().unwrap();
-            for forbidden in [
-                "secret",
-                "endpoint_url",
-                "access_token",
-                "has_secret",
-                "has_access_token",
-            ] {
-                assert!(
-                    !obj.contains_key(forbidden),
-                    "summary leaked `{forbidden}`: {obj:?}"
-                );
-            }
+    res.assert_status_ok();
+    let body: Value = res.json();
+    for item in body["message"].as_array().unwrap() {
+        let obj = item.as_object().unwrap();
+        for forbidden in [
+            "secret",
+            "endpoint_url",
+            "access_token",
+            "has_secret",
+            "has_access_token",
+        ] {
+            assert!(
+                !obj.contains_key(forbidden),
+                "summary leaked `{forbidden}`: {obj:?}"
+            );
         }
-    });
+    }
 }
 
-#[test]
-fn summary_endpoint_rejects_non_member() {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    rt.block_on(async {
-        let session_id = SessionId::now_v7();
-        let token = make_token(session_id);
+#[tokio::test]
+async fn summary_endpoint_rejects_non_member() {
+    let session_id = SessionId::now_v7();
+    let token = make_token(session_id);
 
-        let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
-            .append_query_results([vec![project()]])
-            .append_query_results([Vec::<project_user::Model>::new()]);
+    let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
+        .append_query_results([vec![project()]])
+        .append_query_results([Vec::<project_user::Model>::new()]);
 
-        let server = make_test_server(db.into_connection());
-        let res = server
-            .get(SUMMARY_URL)
-            .add_header("authorization", format!("Bearer {}", token))
-            .await;
+    let server = make_test_server(db.into_connection());
+    let res = server
+        .get(SUMMARY_URL)
+        .add_header("authorization", format!("Bearer {}", token))
+        .await;
 
-        res.assert_status_not_found();
-    });
+    res.assert_status_not_found();
 }
 
-#[test]
-fn delete_github_integration_removes_pair_and_installation() {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    rt.block_on(async {
-        let session_id = SessionId::now_v7();
-        let token = make_token(session_id);
-        let integration_id = github_integration_id();
+#[tokio::test]
+async fn delete_github_integration_removes_pair_and_installation() {
+    let session_id = SessionId::now_v7();
+    let token = make_token(session_id);
+    let integration_id = github_integration_id();
 
-        let db = with_project_manage(with_auth(
-            MockDatabase::new(DatabaseBackend::Postgres),
-            session_id,
+    let db = with_project_manage(with_auth(
+        MockDatabase::new(DatabaseBackend::Postgres),
+        session_id,
+    ))
+    .append_query_results([vec![github_inbound_row()]])
+    .append_exec_results([
+        MockExecResult {
+            last_insert_id: 0,
+            rows_affected: 2,
+        },
+        MockExecResult {
+            last_insert_id: 0,
+            rows_affected: 1,
+        },
+    ]);
+
+    let _ = github_installation_row();
+    let server = make_test_server(db.into_connection());
+    let res = server
+        .delete(&format!(
+            "/api/v1/projects/test-project/integrations/{}",
+            integration_id
         ))
-        .append_query_results([vec![github_inbound_row()]])
-        .append_exec_results([
-            MockExecResult {
-                last_insert_id: 0,
-                rows_affected: 2,
-            },
-            MockExecResult {
-                last_insert_id: 0,
-                rows_affected: 1,
-            },
-        ]);
+        .add_header("authorization", format!("Bearer {}", token))
+        .await;
 
-        let _ = github_installation_row();
-        let server = make_test_server(db.into_connection());
-        let res = server
-            .delete(&format!(
-                "/api/v1/projects/test-project/integrations/{}",
-                integration_id
-            ))
-            .add_header("authorization", format!("Bearer {}", token))
-            .await;
-
-        res.assert_status_ok();
-        let body: Value = res.json();
-        assert_eq!(body["error"], false);
-        assert_eq!(body["message"], true);
-    });
+    res.assert_status_ok();
+    let body: Value = res.json();
+    assert_eq!(body["error"], false);
+    assert_eq!(body["message"], true);
 }
 
-#[test]
-fn github_create_without_app_config_is_rejected() {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    rt.block_on(async {
-        let session_id = SessionId::now_v7();
-        let token = make_token(session_id);
+#[tokio::test]
+async fn github_create_without_app_config_is_rejected() {
+    let session_id = SessionId::now_v7();
+    let token = make_token(session_id);
 
-        let db = with_project_manage(with_auth(
-            MockDatabase::new(DatabaseBackend::Postgres),
-            session_id,
-        ));
+    let db = with_project_manage(with_auth(
+        MockDatabase::new(DatabaseBackend::Postgres),
+        session_id,
+    ));
 
-        let server = make_test_server(db.into_connection());
-        let res = server
-            .put("/api/v1/projects/test-project/integrations")
-            .add_header("authorization", format!("Bearer {}", token))
-            .json(&serde_json::json!({
-                "name": "my-gh",
-                "kind": "outbound",
-                "git_host_type": "github",
-                "installation_id": 42,
-            }))
-            .await;
+    let server = make_test_server(db.into_connection());
+    let res = server
+        .put("/api/v1/projects/test-project/integrations")
+        .add_header("authorization", format!("Bearer {}", token))
+        .json(&serde_json::json!({
+            "name": "my-gh",
+            "kind": "outbound",
+            "git_host_type": "github",
+            "installation_id": 42,
+        }))
+        .await;
 
-        res.assert_status_bad_request();
-        let body: Value = res.json();
-        assert_eq!(body["error"], true);
-        assert!(
-            body["message"].as_str().unwrap().contains("not configured"),
-            "expected 'not configured' in error: {}",
-            body["message"]
-        );
-    });
+    res.assert_status_bad_request();
+    let body: Value = res.json();
+    assert_eq!(body["error"], true);
+    assert!(
+        body["message"].as_str().unwrap().contains("not configured"),
+        "expected 'not configured' in error: {}",
+        body["message"]
+    );
 }

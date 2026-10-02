@@ -61,46 +61,34 @@ fn make_state() -> Arc<ServerState> {
     })
 }
 
-#[test]
-fn post_builds_returns_404() {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    rt.block_on(async {
-        let server = TestServer::new(create_router(make_state()).expect("router"));
+#[tokio::test]
+async fn post_builds_returns_404() {
+    let server = TestServer::new(create_router(make_state()).expect("router"));
 
-        let response = server
-            .post("/api/v1/builds")
-            .add_header("Content-Type", "multipart/form-data; boundary=----abc")
-            .bytes(b"--\r\n".as_slice().into())
-            .await;
+    let response = server
+        .post("/api/v1/builds")
+        .add_header("Content-Type", "multipart/form-data; boundary=----abc")
+        .bytes(b"--\r\n".as_slice().into())
+        .await;
 
-        assert_eq!(
-            response.status_code(),
-            axum::http::StatusCode::NOT_FOUND,
-            "legacy POST /builds must 404, got {}",
-            response.status_code()
-        );
-    });
+    assert_eq!(
+        response.status_code(),
+        axum::http::StatusCode::NOT_FOUND,
+        "legacy POST /builds must 404, got {}",
+        response.status_code()
+    );
 }
 
-#[test]
-fn get_recent_direct_builds_returns_404() {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    rt.block_on(async {
-        let server = TestServer::new(create_router(make_state()).expect("router"));
+#[tokio::test]
+async fn get_recent_direct_builds_returns_404() {
+    let server = TestServer::new(create_router(make_state()).expect("router"));
 
-        let response = server.get("/api/v1/builds/direct/recent").await;
+    let response = server.get("/api/v1/builds/direct/recent").await;
 
-        assert_eq!(
-            response.status_code(),
-            axum::http::StatusCode::NOT_FOUND,
-            "legacy GET /builds/direct/recent must 404, got {}",
-            response.status_code()
-        );
-    });
+    assert_eq!(
+        response.status_code(),
+        axum::http::StatusCode::NOT_FOUND,
+        "legacy GET /builds/direct/recent must 404, got {}",
+        response.status_code()
+    );
 }

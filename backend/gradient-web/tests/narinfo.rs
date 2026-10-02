@@ -50,16 +50,8 @@ fn test_date() -> chrono::NaiveDateTime {
 
 const FIXTURE_HASH: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
-#[test]
-fn narinfo_served_from_db_without_daemon_probe() {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    rt.block_on(async { narinfo_served_from_db_inner().await });
-}
-
-async fn narinfo_served_from_db_inner() {
+#[tokio::test]
+async fn narinfo_served_from_db_without_daemon_probe() {
     let cache_row = gradient_entity::cache::Model {
         id: cache_id(),
         name: "test-cache".into(),
@@ -205,16 +197,8 @@ async fn narinfo_served_from_db_inner() {
 
 /// A NULL `signature` must answer 404. The whole `sign_cache=false` privacy guarantee is depending
 /// on never serving an unsigned narinfo.
-#[test]
-fn narinfo_returns_404_when_signature_null() {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    rt.block_on(async { narinfo_unsigned_inner().await });
-}
-
-async fn narinfo_unsigned_inner() {
+#[tokio::test]
+async fn narinfo_returns_404_when_signature_null() {
     let cache_row = gradient_entity::cache::Model {
         id: cache_id(),
         name: "test-cache".into(),

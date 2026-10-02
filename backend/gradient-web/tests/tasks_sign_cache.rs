@@ -157,37 +157,31 @@ fn with_auth(db: MockDatabase, session_id: SessionId) -> MockDatabase {
         .append_query_results([vec![user()]])
 }
 
-#[test]
-fn get_task_includes_sign_cache() {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    rt.block_on(async {
-        let session_id = SessionId::now_v7();
-        let token = make_token(session_id);
+#[tokio::test]
+async fn get_task_includes_sign_cache() {
+    let session_id = SessionId::now_v7();
+    let token = make_token(session_id);
 
-        let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
-            .append_query_results([vec![project()]])
-            .append_query_results([vec![task_with(false)]])
-            .append_query_results([vec![admin_membership()]])
-            .append_query_results([vec![admin_membership()]])
-            .append_query_results([vec![admin_role_row()]])
-            .append_query_results([vec![admin_membership()]])
-            .append_query_results([vec![admin_role_row()]]);
+    let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
+        .append_query_results([vec![project()]])
+        .append_query_results([vec![task_with(false)]])
+        .append_query_results([vec![admin_membership()]])
+        .append_query_results([vec![admin_membership()]])
+        .append_query_results([vec![admin_role_row()]])
+        .append_query_results([vec![admin_membership()]])
+        .append_query_results([vec![admin_role_row()]]);
 
-        let server = make_server(db.into_connection());
-        let res = server
-            .get("/api/v1/tasks/test-project/test-task")
-            .add_header("authorization", format!("Bearer {}", token))
-            .await;
+    let server = make_server(db.into_connection());
+    let res = server
+        .get("/api/v1/tasks/test-project/test-task")
+        .add_header("authorization", format!("Bearer {}", token))
+        .await;
 
-        res.assert_status_ok();
-        let body: Value = res.json();
-        assert_eq!(body["error"], false);
-        assert_eq!(
-            body["message"]["sign_cache"], false,
-            "GET response must echo task.sign_cache verbatim, got: {body}"
-        );
-    });
+    res.assert_status_ok();
+    let body: Value = res.json();
+    assert_eq!(body["error"], false);
+    assert_eq!(
+        body["message"]["sign_cache"], false,
+        "GET response must echo task.sign_cache verbatim, got: {body}"
+    );
 }

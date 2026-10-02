@@ -3,11 +3,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-#![expect(
-    clippy::unwrap_used,
-    reason = "test scaffolding: a fixture helper that cannot build its value should fail the test loudly"
-)]
-
 use axum::http::StatusCode;
 use axum_test::TestServer;
 use axum_test::multipart::{MultipartForm, Part};
@@ -15,25 +10,16 @@ use gradient_test_support::cache_fixture::{FIXTURE_CACHE_NAME, public_cache_empt
 use gradient_web::create_router;
 use std::sync::Arc;
 
-fn rt() -> tokio::runtime::Runtime {
-    tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap()
-}
-
-#[test]
-fn upload_unauthenticated_returns_403() {
-    rt().block_on(async {
-        let state = public_cache_empty_nars().await;
-        let server = TestServer::new(create_router(Arc::clone(&state)).expect("router"));
-        let form = MultipartForm::new()
-            .add_part("narinfo", Part::text("{}"))
-            .add_part("nar", Part::bytes(vec![1u8, 2, 3]));
-        let resp = server
-            .post(&format!("/api/v1/caches/{FIXTURE_CACHE_NAME}/nars"))
-            .multipart(form)
-            .await;
-        resp.assert_status(StatusCode::FORBIDDEN);
-    });
+#[tokio::test]
+async fn upload_unauthenticated_returns_403() {
+    let state = public_cache_empty_nars().await;
+    let server = TestServer::new(create_router(Arc::clone(&state)).expect("router"));
+    let form = MultipartForm::new()
+        .add_part("narinfo", Part::text("{}"))
+        .add_part("nar", Part::bytes(vec![1u8, 2, 3]));
+    let resp = server
+        .post(&format!("/api/v1/caches/{FIXTURE_CACHE_NAME}/nars"))
+        .multipart(form)
+        .await;
+    resp.assert_status(StatusCode::FORBIDDEN);
 }

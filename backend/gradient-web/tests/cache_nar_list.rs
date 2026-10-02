@@ -13,67 +13,49 @@ use gradient_web::create_router;
 use serde_json::Value;
 use std::sync::Arc;
 
-#[test]
-fn list_empty_cache_returns_empty_items() {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    rt.block_on(async {
-        let state = public_cache_empty_nars().await;
-        let server = TestServer::new(create_router(Arc::clone(&state)).expect("router"));
+#[tokio::test]
+async fn list_empty_cache_returns_empty_items() {
+    let state = public_cache_empty_nars().await;
+    let server = TestServer::new(create_router(Arc::clone(&state)).expect("router"));
 
-        let resp = server
-            .get(&format!("/api/v1/caches/{FIXTURE_CACHE_NAME}/nars"))
-            .await;
-        resp.assert_status_ok();
-        let body: Value = resp.json();
-        assert_eq!(body["error"], Value::Bool(false));
-        let items = body["message"]["items"].as_array().expect("items array");
-        assert!(items.is_empty(), "expected no items, got {items:?}");
-        assert!(body["message"]["total"].is_number());
-        assert!(body["message"]["page"].is_number());
-        assert!(body["message"]["per_page"].is_number());
-    });
+    let resp = server
+        .get(&format!("/api/v1/caches/{FIXTURE_CACHE_NAME}/nars"))
+        .await;
+    resp.assert_status_ok();
+    let body: Value = resp.json();
+    assert_eq!(body["error"], Value::Bool(false));
+    let items = body["message"]["items"].as_array().expect("items array");
+    assert!(items.is_empty(), "expected no items, got {items:?}");
+    assert!(body["message"]["total"].is_number());
+    assert!(body["message"]["page"].is_number());
+    assert!(body["message"]["per_page"].is_number());
 }
 
-#[test]
-fn list_private_cache_anon_returns_not_found() {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    rt.block_on(async {
-        let state = private_cache_for_nars().await;
-        let server = TestServer::new(create_router(Arc::clone(&state)).expect("router"));
+#[tokio::test]
+async fn list_private_cache_anon_returns_not_found() {
+    let state = private_cache_for_nars().await;
+    let server = TestServer::new(create_router(Arc::clone(&state)).expect("router"));
 
-        let resp = server
-            .get(&format!("/api/v1/caches/{FIXTURE_CACHE_NAME}/nars"))
-            .await;
-        resp.assert_status(StatusCode::NOT_FOUND);
-    });
+    let resp = server
+        .get(&format!("/api/v1/caches/{FIXTURE_CACHE_NAME}/nars"))
+        .await;
+    resp.assert_status(StatusCode::NOT_FOUND);
 }
 
-#[test]
-fn list_returns_signed_nar_for_cache() {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    rt.block_on(async {
-        let state = public_cache_list_one_signed_nar().await;
-        let server = TestServer::new(create_router(Arc::clone(&state)).expect("router"));
+#[tokio::test]
+async fn list_returns_signed_nar_for_cache() {
+    let state = public_cache_list_one_signed_nar().await;
+    let server = TestServer::new(create_router(Arc::clone(&state)).expect("router"));
 
-        let resp = server
-            .get(&format!("/api/v1/caches/{FIXTURE_CACHE_NAME}/nars"))
-            .await;
-        resp.assert_status_ok();
-        let body: Value = resp.json();
-        assert_eq!(body["error"], Value::Bool(false));
-        assert_eq!(body["message"]["total"], 1);
-        let items = body["message"]["items"].as_array().expect("items array");
-        assert_eq!(items.len(), 1, "expected one item, got {items:?}");
-        assert_eq!(items[0]["hash"], FIXTURE_PATH_HASH);
-        assert_eq!(items[0]["package"], "hello");
-    });
+    let resp = server
+        .get(&format!("/api/v1/caches/{FIXTURE_CACHE_NAME}/nars"))
+        .await;
+    resp.assert_status_ok();
+    let body: Value = resp.json();
+    assert_eq!(body["error"], Value::Bool(false));
+    assert_eq!(body["message"]["total"], 1);
+    let items = body["message"]["items"].as_array().expect("items array");
+    assert_eq!(items.len(), 1, "expected one item, got {items:?}");
+    assert_eq!(items[0]["hash"], FIXTURE_PATH_HASH);
+    assert_eq!(items[0]["package"], "hello");
 }

@@ -68,87 +68,75 @@ fn with_auth(db: MockDatabase, session_id: SessionId) -> MockDatabase {
         .append_query_results([vec![user()]])
 }
 
-#[test]
-fn put_cache_returns_already_exists_via_pre_check() {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    rt.block_on(async {
-        let session_id = SessionId::now_v7();
-        let token = make_token(session_id);
+#[tokio::test]
+async fn put_cache_returns_already_exists_via_pre_check() {
+    let session_id = SessionId::now_v7();
+    let token = make_token(session_id);
 
-        let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
-            .append_query_results([vec![cache_row("dup")]]);
+    let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
+        .append_query_results([vec![cache_row("dup")]]);
 
-        let server = make_test_server(db.into_connection());
-        let res = server
-            .put("/api/v1/caches")
-            .add_header("authorization", format!("Bearer {}", token))
-            .json(&json!({
-                "name": "dup",
-                "display_name": "dup",
-                "description": "",
-                "priority": 30,
-                "public": false,
-            }))
-            .await;
+    let server = make_test_server(db.into_connection());
+    let res = server
+        .put("/api/v1/caches")
+        .add_header("authorization", format!("Bearer {}", token))
+        .json(&json!({
+            "name": "dup",
+            "display_name": "dup",
+            "description": "",
+            "priority": 30,
+            "public": false,
+        }))
+        .await;
 
-        res.assert_status(axum::http::StatusCode::CONFLICT);
-        let body: Value = res.json();
-        assert_eq!(body["error"], true);
-        assert_eq!(body["code"], "already_exists");
-    });
+    res.assert_status(axum::http::StatusCode::CONFLICT);
+    let body: Value = res.json();
+    assert_eq!(body["error"], true);
+    assert_eq!(body["code"], "already_exists");
 }
 
-#[test]
-fn put_cache_creates_cache_and_default_upstream() {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    rt.block_on(async {
-        let session_id = SessionId::now_v7();
-        let token = make_token(session_id);
-        let inserted = cache_row("fresh");
-        let upstream = cache_upstream_row(inserted.id);
-        let creator_admin = cache_user_row(inserted.id);
+#[tokio::test]
+async fn put_cache_creates_cache_and_default_upstream() {
+    let session_id = SessionId::now_v7();
+    let token = make_token(session_id);
+    let inserted = cache_row("fresh");
+    let upstream = cache_upstream_row(inserted.id);
+    let creator_admin = cache_user_row(inserted.id);
 
-        let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
-            .append_query_results::<cache::Model, _, _>([Vec::<cache::Model>::new()])
-            .append_query_results([vec![inserted]])
-            .append_query_results([vec![upstream]])
-            .append_query_results([vec![creator_admin]])
-            .append_exec_results([
-                MockExecResult {
-                    last_insert_id: 0,
-                    rows_affected: 1,
-                },
-                MockExecResult {
-                    last_insert_id: 0,
-                    rows_affected: 1,
-                },
-                MockExecResult {
-                    last_insert_id: 0,
-                    rows_affected: 1,
-                },
-            ]);
+    let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
+        .append_query_results::<cache::Model, _, _>([Vec::<cache::Model>::new()])
+        .append_query_results([vec![inserted]])
+        .append_query_results([vec![upstream]])
+        .append_query_results([vec![creator_admin]])
+        .append_exec_results([
+            MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 1,
+            },
+            MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 1,
+            },
+            MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 1,
+            },
+        ]);
 
-        let server = make_test_server_with(db.into_connection(), Some(temp_crypt_secret_file()));
-        let res = server
-            .put("/api/v1/caches")
-            .add_header("authorization", format!("Bearer {}", token))
-            .json(&json!({
-                "name": "fresh",
-                "display_name": "Fresh",
-                "description": "",
-                "priority": 30,
-                "public": false,
-            }))
-            .await;
+    let server = make_test_server_with(db.into_connection(), Some(temp_crypt_secret_file()));
+    let res = server
+        .put("/api/v1/caches")
+        .add_header("authorization", format!("Bearer {}", token))
+        .json(&json!({
+            "name": "fresh",
+            "display_name": "Fresh",
+            "description": "",
+            "priority": 30,
+            "public": false,
+        }))
+        .await;
 
-        res.assert_status_ok();
-        let body: Value = res.json();
-        assert_eq!(body["error"], false);
-    });
+    res.assert_status_ok();
+    let body: Value = res.json();
+    assert_eq!(body["error"], false);
 }

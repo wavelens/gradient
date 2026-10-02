@@ -128,280 +128,254 @@ fn pending_invitation() -> cache_invitation::Model {
     }
 }
 
-fn run<F: std::future::Future>(fut: F) -> F::Output {
-    tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap()
-        .block_on(fut)
+#[tokio::test]
+async fn list_members_requires_view_cache() {
+    let session_id = SessionId::now_v7();
+    let token = make_token(session_id);
+
+    let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
+        .append_query_results([vec![cache_row(false)]])
+        .append_query_results([vec![admin_member()]])
+        .append_query_results([vec![admin_role_row()]])
+        .append_query_results([vec![(admin_member(), Some(user()))]])
+        .append_query_results([vec![admin_role_row()]]);
+
+    let server = make_test_server(db.into_connection());
+    let res = server
+        .get("/api/v1/caches/test-cache/members")
+        .add_header("authorization", format!("Bearer {}", token))
+        .await;
+
+    res.assert_status_ok();
+    let body: Value = res.json();
+    assert_eq!(body["error"], false);
+    let members = body["message"].as_array().expect("members array");
+    assert_eq!(members.len(), 1);
+    assert_eq!(members[0]["id"], "testuser");
+    assert_eq!(members[0]["name"], "Admin");
 }
 
-#[test]
-fn list_members_requires_view_cache() {
-    run(async {
-        let session_id = SessionId::now_v7();
-        let token = make_token(session_id);
+#[tokio::test]
+async fn list_members_non_member_gets_not_found() {
+    let session_id = SessionId::now_v7();
+    let token = make_token(session_id);
 
-        let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
-            .append_query_results([vec![cache_row(false)]])
-            .append_query_results([vec![admin_member()]])
-            .append_query_results([vec![admin_role_row()]])
-            .append_query_results([vec![(admin_member(), Some(user()))]])
-            .append_query_results([vec![admin_role_row()]]);
+    let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
+        .append_query_results([vec![cache_row(false)]])
+        .append_query_results([Vec::<cache_user::Model>::new()]);
 
-        let server = make_test_server(db.into_connection());
-        let res = server
-            .get("/api/v1/caches/test-cache/members")
-            .add_header("authorization", format!("Bearer {}", token))
-            .await;
+    let server = make_test_server(db.into_connection());
+    let res = server
+        .get("/api/v1/caches/test-cache/members")
+        .add_header("authorization", format!("Bearer {}", token))
+        .await;
 
-        res.assert_status_ok();
-        let body: Value = res.json();
-        assert_eq!(body["error"], false);
-        let members = body["message"].as_array().expect("members array");
-        assert_eq!(members.len(), 1);
-        assert_eq!(members[0]["id"], "testuser");
-        assert_eq!(members[0]["name"], "Admin");
-    });
+    res.assert_status(axum::http::StatusCode::NOT_FOUND);
 }
 
-#[test]
-fn list_members_non_member_gets_not_found() {
-    run(async {
-        let session_id = SessionId::now_v7();
-        let token = make_token(session_id);
+#[tokio::test]
+async fn add_member_requires_manage_cache_members() {
+    let session_id = SessionId::now_v7();
+    let token = make_token(session_id);
 
-        let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
-            .append_query_results([vec![cache_row(false)]])
-            .append_query_results([Vec::<cache_user::Model>::new()]);
+    let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
+        .append_query_results([vec![cache_row(false)]])
+        .append_query_results([vec![view_member()]])
+        .append_query_results([vec![view_role_row()]]);
 
-        let server = make_test_server(db.into_connection());
-        let res = server
-            .get("/api/v1/caches/test-cache/members")
-            .add_header("authorization", format!("Bearer {}", token))
-            .await;
+    let server = make_test_server(db.into_connection());
+    let res = server
+        .post("/api/v1/caches/test-cache/members")
+        .add_header("authorization", format!("Bearer {}", token))
+        .json(&json!({"user": "otheruser", "role": "View"}))
+        .await;
 
-        res.assert_status(axum::http::StatusCode::NOT_FOUND);
-    });
+    res.assert_status(axum::http::StatusCode::FORBIDDEN);
 }
 
-#[test]
-fn add_member_requires_manage_cache_members() {
-    run(async {
-        let session_id = SessionId::now_v7();
-        let token = make_token(session_id);
+#[tokio::test]
+async fn add_member_admin_creates_a_pending_invitation() {
+    let session_id = SessionId::now_v7();
+    let token = make_token(session_id);
 
-        let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
-            .append_query_results([vec![cache_row(false)]])
-            .append_query_results([vec![view_member()]])
-            .append_query_results([vec![view_role_row()]]);
+    let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
+        .append_query_results([vec![cache_row(false)]])
+        .append_query_results([vec![admin_member()]])
+        .append_query_results([vec![admin_role_row()]])
+        .append_query_results([vec![other_user_row()]])
+        .append_query_results([Vec::<cache_user::Model>::new()])
+        .append_query_results([Vec::<cache_invitation::Model>::new()])
+        .append_query_results([vec![view_role_row()]])
+        .append_query_results([vec![pending_invitation()]])
+        .append_exec_results([MockExecResult {
+            last_insert_id: 0,
+            rows_affected: 1,
+        }]);
 
-        let server = make_test_server(db.into_connection());
-        let res = server
-            .post("/api/v1/caches/test-cache/members")
-            .add_header("authorization", format!("Bearer {}", token))
-            .json(&json!({"user": "otheruser", "role": "View"}))
-            .await;
+    let server = make_test_server(db.into_connection());
+    let res = server
+        .post("/api/v1/caches/test-cache/members")
+        .add_header("authorization", format!("Bearer {}", token))
+        .json(&json!({"user": "otheruser", "role": "View"}))
+        .await;
 
-        res.assert_status(axum::http::StatusCode::FORBIDDEN);
-    });
+    res.assert_status_ok();
+    let body: Value = res.json();
+    assert_eq!(
+        body["message"], "Invitation sent",
+        "an admin invites; membership waits on the user accepting"
+    );
 }
 
-#[test]
-fn add_member_admin_creates_a_pending_invitation() {
-    run(async {
-        let session_id = SessionId::now_v7();
-        let token = make_token(session_id);
+#[tokio::test]
+async fn add_member_superuser_skips_the_invitation() {
+    let session_id = SessionId::now_v7();
+    let token = make_token(session_id);
 
-        let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
-            .append_query_results([vec![cache_row(false)]])
-            .append_query_results([vec![admin_member()]])
-            .append_query_results([vec![admin_role_row()]])
-            .append_query_results([vec![other_user_row()]])
-            .append_query_results([Vec::<cache_user::Model>::new()])
-            .append_query_results([Vec::<cache_invitation::Model>::new()])
-            .append_query_results([vec![view_role_row()]])
-            .append_query_results([vec![pending_invitation()]])
-            .append_exec_results([MockExecResult {
-                last_insert_id: 0,
-                rows_affected: 1,
-            }]);
+    let new_member = cache_user::Model {
+        id: CacheUserId::now_v7(),
+        cache: cache_id(),
+        user: other_user_id(),
+        role: BASE_CACHE_ROLE_VIEW_ID,
+    };
 
-        let server = make_test_server(db.into_connection());
-        let res = server
-            .post("/api/v1/caches/test-cache/members")
-            .add_header("authorization", format!("Bearer {}", token))
-            .json(&json!({"user": "otheruser", "role": "View"}))
-            .await;
+    let db = with_superuser_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
+        .append_query_results([vec![cache_row(false)]])
+        .append_query_results([vec![admin_member()]])
+        .append_query_results([vec![admin_role_row()]])
+        .append_query_results([vec![other_user_row()]])
+        .append_query_results([Vec::<cache_user::Model>::new()])
+        .append_query_results([Vec::<cache_invitation::Model>::new()])
+        .append_query_results([vec![view_role_row()]])
+        .append_query_results([vec![new_member]])
+        .append_exec_results([MockExecResult {
+            last_insert_id: 0,
+            rows_affected: 1,
+        }]);
 
-        res.assert_status_ok();
-        let body: Value = res.json();
-        assert_eq!(
-            body["message"], "Invitation sent",
-            "an admin invites; membership waits on the user accepting"
-        );
-    });
+    let server = make_test_server(db.into_connection());
+    let res = server
+        .post("/api/v1/caches/test-cache/members")
+        .add_header("authorization", format!("Bearer {}", token))
+        .json(&json!({"user": "otheruser", "role": "View"}))
+        .await;
+
+    res.assert_status_ok();
+    let body: Value = res.json();
+    assert_eq!(body["message"], "User added");
 }
 
-#[test]
-fn add_member_superuser_skips_the_invitation() {
-    run(async {
-        let session_id = SessionId::now_v7();
-        let token = make_token(session_id);
+#[tokio::test]
+async fn update_member_changes_role() {
+    let session_id = SessionId::now_v7();
+    let token = make_token(session_id);
 
-        let new_member = cache_user::Model {
-            id: CacheUserId::now_v7(),
-            cache: cache_id(),
-            user: other_user_id(),
-            role: BASE_CACHE_ROLE_VIEW_ID,
-        };
+    let target_member = cache_user::Model {
+        id: CacheUserId::now_v7(),
+        cache: cache_id(),
+        user: other_user_id(),
+        role: BASE_CACHE_ROLE_VIEW_ID,
+    };
+    let updated_member = cache_user::Model {
+        role: BASE_CACHE_ROLE_ADMIN_ID,
+        ..target_member.clone()
+    };
 
-        let db = with_superuser_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
-            .append_query_results([vec![cache_row(false)]])
-            .append_query_results([vec![admin_member()]])
-            .append_query_results([vec![admin_role_row()]])
-            .append_query_results([vec![other_user_row()]])
-            .append_query_results([Vec::<cache_user::Model>::new()])
-            .append_query_results([Vec::<cache_invitation::Model>::new()])
-            .append_query_results([vec![view_role_row()]])
-            .append_query_results([vec![new_member]])
-            .append_exec_results([MockExecResult {
-                last_insert_id: 0,
-                rows_affected: 1,
-            }]);
+    let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
+        .append_query_results([vec![cache_row(false)]])
+        .append_query_results([vec![admin_member()]])
+        .append_query_results([vec![admin_role_row()]])
+        .append_query_results([vec![other_user_row()]])
+        .append_query_results([vec![target_member]])
+        .append_query_results([vec![admin_role_row()]])
+        .append_query_results([vec![updated_member]])
+        .append_exec_results([MockExecResult {
+            last_insert_id: 0,
+            rows_affected: 1,
+        }]);
 
-        let server = make_test_server(db.into_connection());
-        let res = server
-            .post("/api/v1/caches/test-cache/members")
-            .add_header("authorization", format!("Bearer {}", token))
-            .json(&json!({"user": "otheruser", "role": "View"}))
-            .await;
+    let server = make_test_server(db.into_connection());
+    let res = server
+        .patch("/api/v1/caches/test-cache/members")
+        .add_header("authorization", format!("Bearer {}", token))
+        .json(&json!({"user": "otheruser", "role": "Admin"}))
+        .await;
 
-        res.assert_status_ok();
-        let body: Value = res.json();
-        assert_eq!(body["message"], "User added");
-    });
+    res.assert_status_ok();
 }
 
-#[test]
-fn update_member_changes_role() {
-    run(async {
-        let session_id = SessionId::now_v7();
-        let token = make_token(session_id);
+#[tokio::test]
+async fn remove_member_blocks_last_admin() {
+    let session_id = SessionId::now_v7();
+    let token = make_token(session_id);
 
-        let target_member = cache_user::Model {
-            id: CacheUserId::now_v7(),
-            cache: cache_id(),
-            user: other_user_id(),
-            role: BASE_CACHE_ROLE_VIEW_ID,
-        };
-        let updated_member = cache_user::Model {
-            role: BASE_CACHE_ROLE_ADMIN_ID,
-            ..target_member.clone()
-        };
+    let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
+        .append_query_results([vec![cache_row(false)]])
+        .append_query_results([vec![admin_member()]])
+        .append_query_results([vec![admin_role_row()]])
+        .append_query_results([vec![user()]])
+        .append_query_results([vec![admin_member()]])
+        .append_query_results([vec![count_row(1)]]);
 
-        let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
-            .append_query_results([vec![cache_row(false)]])
-            .append_query_results([vec![admin_member()]])
-            .append_query_results([vec![admin_role_row()]])
-            .append_query_results([vec![other_user_row()]])
-            .append_query_results([vec![target_member]])
-            .append_query_results([vec![admin_role_row()]])
-            .append_query_results([vec![updated_member]])
-            .append_exec_results([MockExecResult {
-                last_insert_id: 0,
-                rows_affected: 1,
-            }]);
+    let server = make_test_server(db.into_connection());
+    let res = server
+        .delete("/api/v1/caches/test-cache/members")
+        .add_header("authorization", format!("Bearer {}", token))
+        .json(&json!({"user": "testuser"}))
+        .await;
 
-        let server = make_test_server(db.into_connection());
-        let res = server
-            .patch("/api/v1/caches/test-cache/members")
-            .add_header("authorization", format!("Bearer {}", token))
-            .json(&json!({"user": "otheruser", "role": "Admin"}))
-            .await;
-
-        res.assert_status_ok();
-    });
+    res.assert_status(axum::http::StatusCode::CONFLICT);
 }
 
-#[test]
-fn remove_member_blocks_last_admin() {
-    run(async {
-        let session_id = SessionId::now_v7();
-        let token = make_token(session_id);
+#[tokio::test]
+async fn remove_member_view_role_succeeds() {
+    let session_id = SessionId::now_v7();
+    let token = make_token(session_id);
 
-        let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
-            .append_query_results([vec![cache_row(false)]])
-            .append_query_results([vec![admin_member()]])
-            .append_query_results([vec![admin_role_row()]])
-            .append_query_results([vec![user()]])
-            .append_query_results([vec![admin_member()]])
-            .append_query_results([vec![count_row(1)]]);
+    let target_member = cache_user::Model {
+        id: CacheUserId::now_v7(),
+        cache: cache_id(),
+        user: other_user_id(),
+        role: BASE_CACHE_ROLE_VIEW_ID,
+    };
 
-        let server = make_test_server(db.into_connection());
-        let res = server
-            .delete("/api/v1/caches/test-cache/members")
-            .add_header("authorization", format!("Bearer {}", token))
-            .json(&json!({"user": "testuser"}))
-            .await;
+    let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
+        .append_query_results([vec![cache_row(false)]])
+        .append_query_results([vec![admin_member()]])
+        .append_query_results([vec![admin_role_row()]])
+        .append_query_results([vec![other_user_row()]])
+        .append_query_results([vec![target_member]])
+        .append_exec_results([MockExecResult {
+            last_insert_id: 0,
+            rows_affected: 1,
+        }]);
 
-        res.assert_status(axum::http::StatusCode::CONFLICT);
-    });
+    let server = make_test_server(db.into_connection());
+    let res = server
+        .delete("/api/v1/caches/test-cache/members")
+        .add_header("authorization", format!("Bearer {}", token))
+        .json(&json!({"user": "otheruser"}))
+        .await;
+
+    res.assert_status_ok();
 }
 
-#[test]
-fn remove_member_view_role_succeeds() {
-    run(async {
-        let session_id = SessionId::now_v7();
-        let token = make_token(session_id);
+#[tokio::test]
+async fn managed_cache_blocks_member_mutations() {
+    let session_id = SessionId::now_v7();
+    let token = make_token(session_id);
 
-        let target_member = cache_user::Model {
-            id: CacheUserId::now_v7(),
-            cache: cache_id(),
-            user: other_user_id(),
-            role: BASE_CACHE_ROLE_VIEW_ID,
-        };
+    let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
+        .append_query_results([vec![cache_row(true)]])
+        .append_query_results([vec![admin_member()]])
+        .append_query_results([vec![admin_role_row()]]);
 
-        let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
-            .append_query_results([vec![cache_row(false)]])
-            .append_query_results([vec![admin_member()]])
-            .append_query_results([vec![admin_role_row()]])
-            .append_query_results([vec![other_user_row()]])
-            .append_query_results([vec![target_member]])
-            .append_exec_results([MockExecResult {
-                last_insert_id: 0,
-                rows_affected: 1,
-            }]);
+    let server = make_test_server(db.into_connection());
+    let res = server
+        .patch("/api/v1/caches/test-cache/members")
+        .add_header("authorization", format!("Bearer {}", token))
+        .json(&json!({"user": "otheruser", "role": "View"}))
+        .await;
 
-        let server = make_test_server(db.into_connection());
-        let res = server
-            .delete("/api/v1/caches/test-cache/members")
-            .add_header("authorization", format!("Bearer {}", token))
-            .json(&json!({"user": "otheruser"}))
-            .await;
-
-        res.assert_status_ok();
-    });
-}
-
-#[test]
-fn managed_cache_blocks_member_mutations() {
-    run(async {
-        let session_id = SessionId::now_v7();
-        let token = make_token(session_id);
-
-        let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
-            .append_query_results([vec![cache_row(true)]])
-            .append_query_results([vec![admin_member()]])
-            .append_query_results([vec![admin_role_row()]]);
-
-        let server = make_test_server(db.into_connection());
-        let res = server
-            .patch("/api/v1/caches/test-cache/members")
-            .add_header("authorization", format!("Bearer {}", token))
-            .json(&json!({"user": "otheruser", "role": "View"}))
-            .await;
-
-        res.assert_status(axum::http::StatusCode::FORBIDDEN);
-    });
+    res.assert_status(axum::http::StatusCode::FORBIDDEN);
 }

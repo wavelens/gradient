@@ -80,41 +80,32 @@ fn assert_envelope(body: &Value, expected_message: &str) {
     );
 }
 
-#[test]
-fn missing_auth_header_returns_403_envelope() {
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    rt.block_on(async {
-        let s = server();
-        let res = s.get("/api/v1/user").await;
-        res.assert_status_forbidden();
-        assert_envelope(&res.json::<Value>(), "Authorization header not found");
-    });
+#[tokio::test(flavor = "multi_thread")]
+async fn missing_auth_header_returns_403_envelope() {
+    let s = server();
+    let res = s.get("/api/v1/user").await;
+    res.assert_status_forbidden();
+    assert_envelope(&res.json::<Value>(), "Authorization header not found");
 }
 
-#[test]
-fn malformed_bearer_returns_403_envelope() {
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    rt.block_on(async {
-        let s = server();
-        let res = s
-            .get("/api/v1/user")
-            .add_header("authorization", "NotBearer xyz")
-            .await;
-        res.assert_status_forbidden();
-        assert_envelope(&res.json::<Value>(), "Invalid Authorization header");
-    });
+#[tokio::test(flavor = "multi_thread")]
+async fn malformed_bearer_returns_403_envelope() {
+    let s = server();
+    let res = s
+        .get("/api/v1/user")
+        .add_header("authorization", "NotBearer xyz")
+        .await;
+    res.assert_status_forbidden();
+    assert_envelope(&res.json::<Value>(), "Invalid Authorization header");
 }
 
-#[test]
-fn undecodable_token_returns_401_envelope() {
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    rt.block_on(async {
-        let s = server();
-        let res = s
-            .get("/api/v1/user")
-            .add_header("authorization", "Bearer not-a-real-jwt")
-            .await;
-        res.assert_status_unauthorized();
-        assert_envelope(&res.json::<Value>(), "Unable to decode token");
-    });
+#[tokio::test(flavor = "multi_thread")]
+async fn undecodable_token_returns_401_envelope() {
+    let s = server();
+    let res = s
+        .get("/api/v1/user")
+        .add_header("authorization", "Bearer not-a-real-jwt")
+        .await;
+    res.assert_status_unauthorized();
+    assert_envelope(&res.json::<Value>(), "Unable to decode token");
 }

@@ -178,152 +178,130 @@ fn with_auth(db: MockDatabase, session_id: SessionId) -> MockDatabase {
         .append_query_results([vec![user()]])
 }
 
-fn run<F: std::future::Future>(fut: F) -> F::Output {
-    tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap()
-        .block_on(fut)
+#[tokio::test]
+async fn anon_can_read_commit_in_public_project() {
+    let db = MockDatabase::new(DatabaseBackend::Postgres)
+        .append_query_results([vec![commit_row()]])
+        .append_query_results([vec![eval_at(eval_id(), 0)]])
+        .append_query_results([vec![task_row()]])
+        .append_query_results([vec![public_project()]]);
+    let server = make_server(db.into_connection());
+
+    let res = server.get(&commit_url()).await;
+    res.assert_status_ok();
+    let body: Value = res.json();
+    assert_eq!(body["error"], false);
+    assert_eq!(body["message"]["id"], commit_id().to_string());
 }
 
-#[test]
-fn anon_can_read_commit_in_public_project() {
-    run(async {
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
-            .append_query_results([vec![commit_row()]])
-            .append_query_results([vec![eval_at(eval_id(), 0)]])
-            .append_query_results([vec![task_row()]])
-            .append_query_results([vec![public_project()]]);
-        let server = make_server(db.into_connection());
+#[tokio::test]
+async fn anon_cannot_read_commit_in_private_project() {
+    let db = MockDatabase::new(DatabaseBackend::Postgres)
+        .append_query_results([vec![commit_row()]])
+        .append_query_results([vec![eval_at(eval_id(), 0)]])
+        .append_query_results([vec![task_row()]])
+        .append_query_results([vec![project()]]);
+    let server = make_server(db.into_connection());
 
-        let res = server.get(&commit_url()).await;
-        res.assert_status_ok();
-        let body: Value = res.json();
-        assert_eq!(body["error"], false);
-        assert_eq!(body["message"]["id"], commit_id().to_string());
-    });
+    let res = server.get(&commit_url()).await;
+    res.assert_status_not_found();
+    let body: Value = res.json();
+    assert_eq!(body["error"], true);
 }
 
-#[test]
-fn anon_cannot_read_commit_in_private_project() {
-    run(async {
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
-            .append_query_results([vec![commit_row()]])
-            .append_query_results([vec![eval_at(eval_id(), 0)]])
-            .append_query_results([vec![task_row()]])
-            .append_query_results([vec![project()]]);
-        let server = make_server(db.into_connection());
+#[tokio::test]
+async fn member_can_read_commit_in_private_project() {
+    let session_id = SessionId::now_v7();
+    let token = make_token(session_id);
 
-        let res = server.get(&commit_url()).await;
-        res.assert_status_not_found();
-        let body: Value = res.json();
-        assert_eq!(body["error"], true);
-    });
+    let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
+        .append_query_results([vec![commit_row()]])
+        .append_query_results([vec![eval_at(eval_id(), 0)]])
+        .append_query_results([vec![task_row()]])
+        .append_query_results([vec![project()]])
+        .append_query_results([vec![membership_row()]]);
+    let server = make_server(db.into_connection());
+
+    let res = server
+        .get(&commit_url())
+        .add_header("authorization", format!("Bearer {}", token))
+        .await;
+    res.assert_status_ok();
+    let body: Value = res.json();
+    assert_eq!(body["error"], false);
+    assert_eq!(body["message"]["id"], commit_id().to_string());
 }
 
-#[test]
-fn member_can_read_commit_in_private_project() {
-    run(async {
-        let session_id = SessionId::now_v7();
-        let token = make_token(session_id);
+#[tokio::test]
+async fn non_member_cannot_read_commit() {
+    let session_id = SessionId::now_v7();
+    let token = make_token(session_id);
 
-        let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
-            .append_query_results([vec![commit_row()]])
-            .append_query_results([vec![eval_at(eval_id(), 0)]])
-            .append_query_results([vec![task_row()]])
-            .append_query_results([vec![project()]])
-            .append_query_results([vec![membership_row()]]);
-        let server = make_server(db.into_connection());
+    let foreign_task = gradient_entity::task::Model {
+        project: other_project_id(),
+        ..task_row()
+    };
+    let foreign_project = gradient_entity::project::Model {
+        id: other_project_id(),
+        ..project()
+    };
 
-        let res = server
-            .get(&commit_url())
-            .add_header("authorization", format!("Bearer {}", token))
-            .await;
-        res.assert_status_ok();
-        let body: Value = res.json();
-        assert_eq!(body["error"], false);
-        assert_eq!(body["message"]["id"], commit_id().to_string());
-    });
+    let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
+        .append_query_results([vec![commit_row()]])
+        .append_query_results([vec![eval_at(eval_id(), 0)]])
+        .append_query_results([vec![foreign_task]])
+        .append_query_results([vec![foreign_project]])
+        .append_query_results([Vec::<gradient_entity::project_user::Model>::new()]);
+    let server = make_server(db.into_connection());
+
+    let res = server
+        .get(&commit_url())
+        .add_header("authorization", format!("Bearer {}", token))
+        .await;
+    res.assert_status_not_found();
+    let body: Value = res.json();
+    assert_eq!(body["error"], true);
 }
 
-#[test]
-fn non_member_cannot_read_commit() {
-    run(async {
-        let session_id = SessionId::now_v7();
-        let token = make_token(session_id);
+#[tokio::test]
+async fn commit_referenced_only_via_orphan_eval_returns_404() {
+    let direct_eval = gradient_entity::evaluation::Model {
+        task: None,
+        ..eval_at(eval_id(), 0)
+    };
 
-        let foreign_task = gradient_entity::task::Model {
-            project: other_project_id(),
-            ..task_row()
-        };
-        let foreign_project = gradient_entity::project::Model {
-            id: other_project_id(),
-            ..project()
-        };
+    let db = MockDatabase::new(DatabaseBackend::Postgres)
+        .append_query_results([vec![commit_row()]])
+        .append_query_results([vec![direct_eval]]);
+    let server = make_server(db.into_connection());
 
-        let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
-            .append_query_results([vec![commit_row()]])
-            .append_query_results([vec![eval_at(eval_id(), 0)]])
-            .append_query_results([vec![foreign_task]])
-            .append_query_results([vec![foreign_project]])
-            .append_query_results([Vec::<gradient_entity::project_user::Model>::new()]);
-        let server = make_server(db.into_connection());
-
-        let res = server
-            .get(&commit_url())
-            .add_header("authorization", format!("Bearer {}", token))
-            .await;
-        res.assert_status_not_found();
-        let body: Value = res.json();
-        assert_eq!(body["error"], true);
-    });
+    let res = server.get(&commit_url()).await;
+    res.assert_status_not_found();
+    let body: Value = res.json();
+    assert_eq!(body["error"], true);
 }
 
-#[test]
-fn commit_referenced_only_via_orphan_eval_returns_404() {
-    run(async {
-        let direct_eval = gradient_entity::evaluation::Model {
-            task: None,
-            ..eval_at(eval_id(), 0)
-        };
+#[tokio::test]
+async fn nonexistent_commit_returns_404() {
+    let db = MockDatabase::new(DatabaseBackend::Postgres)
+        .append_query_results([Vec::<gradient_entity::commit::Model>::new()]);
+    let server = make_server(db.into_connection());
 
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
-            .append_query_results([vec![commit_row()]])
-            .append_query_results([vec![direct_eval]]);
-        let server = make_server(db.into_connection());
-
-        let res = server.get(&commit_url()).await;
-        res.assert_status_not_found();
-        let body: Value = res.json();
-        assert_eq!(body["error"], true);
-    });
+    let res = server.get(&commit_url()).await;
+    res.assert_status_not_found();
+    let body: Value = res.json();
+    assert_eq!(body["error"], true);
 }
 
-#[test]
-fn nonexistent_commit_returns_404() {
-    run(async {
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
-            .append_query_results([Vec::<gradient_entity::commit::Model>::new()]);
-        let server = make_server(db.into_connection());
+#[tokio::test]
+async fn commit_without_evaluation_returns_404() {
+    let db = MockDatabase::new(DatabaseBackend::Postgres)
+        .append_query_results([vec![commit_row()]])
+        .append_query_results([Vec::<gradient_entity::evaluation::Model>::new()]);
+    let server = make_server(db.into_connection());
 
-        let res = server.get(&commit_url()).await;
-        res.assert_status_not_found();
-        let body: Value = res.json();
-        assert_eq!(body["error"], true);
-    });
-}
-
-#[test]
-fn commit_without_evaluation_returns_404() {
-    run(async {
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
-            .append_query_results([vec![commit_row()]])
-            .append_query_results([Vec::<gradient_entity::evaluation::Model>::new()]);
-        let server = make_server(db.into_connection());
-
-        let res = server.get(&commit_url()).await;
-        res.assert_status_not_found();
-        let body: Value = res.json();
-        assert_eq!(body["error"], true);
-    });
+    let res = server.get(&commit_url()).await;
+    res.assert_status_not_found();
+    let body: Value = res.json();
+    assert_eq!(body["error"], true);
 }

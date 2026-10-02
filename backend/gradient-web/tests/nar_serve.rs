@@ -128,142 +128,128 @@ fn state(
     })
 }
 
-fn run<F: std::future::Future<Output = ()>>(f: F) {
-    tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap()
-        .block_on(f);
+#[tokio::test]
+async fn nar_serve_streams_stored_blob_byte_for_byte() {
+    let cli = test_cli();
+
+    let db = MockDatabase::new(DatabaseBackend::Postgres)
+        .append_query_results([vec![cache_row()]])
+        .append_query_results([vec![cached_path_row()]])
+        .append_query_results([vec![served()]])
+        .into_connection();
+
+    let nar_storage = NarStore::local(&cli.server.base_dir).expect("create test NarStore");
+    let data = blob();
+    nar_storage
+        .put(STORE_HASH, data.clone())
+        .await
+        .expect("seed NAR blob");
+
+    let state = state(&cli, db, nar_storage);
+
+    let peer: SocketAddr = "127.0.0.1:0".parse().unwrap();
+    let router = gradient_web::create_router(state)
+        .expect("router")
+        .layer(MockConnectInfo(peer));
+    let server = TestServer::new(router);
+
+    let resp = server
+        .get(&format!("/cache/test-cache/nar/{FILE_HASH_NIX32}.nar.zst"))
+        .await;
+
+    resp.assert_status_ok();
+    assert_eq!(
+        resp.header("content-type").to_str().unwrap(),
+        "application/x-nix-nar",
+    );
+    assert_eq!(
+        resp.header("content-length").to_str().unwrap(),
+        data.len().to_string(),
+        "streamed NAR must carry an explicit Content-Length equal to the object size",
+    );
+    assert_eq!(
+        resp.as_bytes().as_ref(),
+        data.as_slice(),
+        "served body must be byte-identical to the stored blob",
+    );
 }
 
-#[test]
-fn nar_serve_streams_stored_blob_byte_for_byte() {
-    run(async {
-        let cli = test_cli();
+#[tokio::test]
+async fn nar_serve_answers_from_the_hot_cache_on_the_second_request() {
+    let cli = test_cli();
+    let db = MockDatabase::new(DatabaseBackend::Postgres)
+        .append_query_results([vec![cache_row()]])
+        .append_query_results([vec![cached_path_row()]])
+        .append_query_results([vec![served()]])
+        .append_query_results([vec![cache_row()]])
+        .append_query_results([vec![cached_path_row()]])
+        .append_query_results([vec![served()]])
+        .into_connection();
 
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
-            .append_query_results([vec![cache_row()]])
-            .append_query_results([vec![cached_path_row()]])
-            .append_query_results([vec![served()]])
-            .into_connection();
+    let nar_storage = NarStore::local(&cli.server.base_dir)
+        .expect("create test NarStore")
+        .with_hot_cache(gradient_storage::HotNarCache::new(
+            4 * 1024 * 1024,
+            1024 * 1024,
+        ));
+    let data = blob();
+    nar_storage
+        .put(STORE_HASH, data.clone())
+        .await
+        .expect("seed NAR blob");
+    let hot = nar_storage.clone();
 
-        let nar_storage = NarStore::local(&cli.server.base_dir).expect("create test NarStore");
-        let data = blob();
-        nar_storage
-            .put(STORE_HASH, data.clone())
-            .await
-            .expect("seed NAR blob");
+    let state = state(&cli, db, nar_storage);
 
-        let state = state(&cli, db, nar_storage);
+    let peer: SocketAddr = "127.0.0.1:0".parse().unwrap();
+    let router = gradient_web::create_router(state)
+        .expect("router")
+        .layer(MockConnectInfo(peer));
+    let server = TestServer::new(router);
+    let url = format!("/cache/test-cache/nar/{FILE_HASH_NIX32}.nar.zst");
 
-        let peer: SocketAddr = "127.0.0.1:0".parse().unwrap();
-        let router = gradient_web::create_router(state)
-            .expect("router")
-            .layer(MockConnectInfo(peer));
-        let server = TestServer::new(router);
+    let first = server.get(&url).await;
+    first.assert_status_ok();
+    assert_eq!(first.as_bytes().as_ref(), data.as_slice());
+    assert_eq!(
+        hot.hot().stats().entries,
+        1,
+        "the first read filled the cache"
+    );
 
-        let resp = server
-            .get(&format!("/cache/test-cache/nar/{FILE_HASH_NIX32}.nar.zst"))
-            .await;
-
-        resp.assert_status_ok();
-        assert_eq!(
-            resp.header("content-type").to_str().unwrap(),
-            "application/x-nix-nar",
-        );
-        assert_eq!(
-            resp.header("content-length").to_str().unwrap(),
-            data.len().to_string(),
-            "streamed NAR must carry an explicit Content-Length equal to the object size",
-        );
-        assert_eq!(
-            resp.as_bytes().as_ref(),
-            data.as_slice(),
-            "served body must be byte-identical to the stored blob",
-        );
-    });
+    let second = server.get(&url).await;
+    second.assert_status_ok();
+    assert_eq!(
+        second.header("content-length").to_str().unwrap(),
+        data.len().to_string()
+    );
+    assert_eq!(second.as_bytes().as_ref(), data.as_slice());
+    assert_eq!(hot.hot().stats().hits, 1, "the second read was a hit");
 }
 
-#[test]
-fn nar_serve_answers_from_the_hot_cache_on_the_second_request() {
-    run(async {
-        let cli = test_cli();
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
-            .append_query_results([vec![cache_row()]])
-            .append_query_results([vec![cached_path_row()]])
-            .append_query_results([vec![served()]])
-            .append_query_results([vec![cache_row()]])
-            .append_query_results([vec![cached_path_row()]])
-            .append_query_results([vec![served()]])
-            .into_connection();
+#[tokio::test]
+async fn a_nar_this_cache_holds_no_claim_on_is_not_served() {
+    let cli = test_cli();
+    let db = MockDatabase::new(DatabaseBackend::Postgres)
+        .append_query_results([vec![cache_row()]])
+        .append_query_results([vec![cached_path_row()]])
+        .append_query_results([Vec::<std::collections::BTreeMap<&str, sea_orm::Value>>::new()])
+        .into_connection();
+    let nar_storage = NarStore::local(&cli.server.base_dir).expect("create test NarStore");
+    nar_storage
+        .put(STORE_HASH, blob())
+        .await
+        .expect("seed NAR blob");
+    let state = state(&cli, db, nar_storage);
 
-        let nar_storage = NarStore::local(&cli.server.base_dir)
-            .expect("create test NarStore")
-            .with_hot_cache(gradient_storage::HotNarCache::new(
-                4 * 1024 * 1024,
-                1024 * 1024,
-            ));
-        let data = blob();
-        nar_storage
-            .put(STORE_HASH, data.clone())
-            .await
-            .expect("seed NAR blob");
-        let hot = nar_storage.clone();
+    let router = gradient_web::create_router(state)
+        .expect("router")
+        .layer(MockConnectInfo(
+            "127.0.0.1:0".parse::<SocketAddr>().unwrap(),
+        ));
+    let resp = TestServer::new(router)
+        .get(&format!("/cache/test-cache/nar/{FILE_HASH_NIX32}.nar.zst"))
+        .await;
 
-        let state = state(&cli, db, nar_storage);
-
-        let peer: SocketAddr = "127.0.0.1:0".parse().unwrap();
-        let router = gradient_web::create_router(state)
-            .expect("router")
-            .layer(MockConnectInfo(peer));
-        let server = TestServer::new(router);
-        let url = format!("/cache/test-cache/nar/{FILE_HASH_NIX32}.nar.zst");
-
-        let first = server.get(&url).await;
-        first.assert_status_ok();
-        assert_eq!(first.as_bytes().as_ref(), data.as_slice());
-        assert_eq!(
-            hot.hot().stats().entries,
-            1,
-            "the first read filled the cache"
-        );
-
-        let second = server.get(&url).await;
-        second.assert_status_ok();
-        assert_eq!(
-            second.header("content-length").to_str().unwrap(),
-            data.len().to_string()
-        );
-        assert_eq!(second.as_bytes().as_ref(), data.as_slice());
-        assert_eq!(hot.hot().stats().hits, 1, "the second read was a hit");
-    });
-}
-
-#[test]
-fn a_nar_this_cache_holds_no_claim_on_is_not_served() {
-    run(async {
-        let cli = test_cli();
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
-            .append_query_results([vec![cache_row()]])
-            .append_query_results([vec![cached_path_row()]])
-            .append_query_results([Vec::<std::collections::BTreeMap<&str, sea_orm::Value>>::new()])
-            .into_connection();
-        let nar_storage = NarStore::local(&cli.server.base_dir).expect("create test NarStore");
-        nar_storage
-            .put(STORE_HASH, blob())
-            .await
-            .expect("seed NAR blob");
-        let state = state(&cli, db, nar_storage);
-
-        let router = gradient_web::create_router(state)
-            .expect("router")
-            .layer(MockConnectInfo(
-                "127.0.0.1:0".parse::<SocketAddr>().unwrap(),
-            ));
-        let resp = TestServer::new(router)
-            .get(&format!("/cache/test-cache/nar/{FILE_HASH_NIX32}.nar.zst"))
-            .await;
-
-        resp.assert_status_not_found();
-    });
+    resp.assert_status_not_found();
 }

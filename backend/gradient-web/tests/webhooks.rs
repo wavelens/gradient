@@ -85,129 +85,108 @@ fn temp_crypt_secret_file() -> String {
     path.to_string_lossy().into_owned()
 }
 
-fn runtime() -> tokio::runtime::Runtime {
-    tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap()
-}
-
 fn bearer(session_id: SessionId) -> String {
     format!("Bearer {}", make_token(session_id))
 }
 
-#[test]
-fn create_returns_the_secret_once() {
-    runtime().block_on(async {
-        let session_id = SessionId::now_v7();
-        let db = as_project_admin(session_id)
-            .append_query_results([Vec::<webhook::Model>::new()])
-            .append_query_results([vec![webhook_row()]]);
-        let server = make_test_server_with(db.into_connection(), Some(temp_crypt_secret_file()));
+#[tokio::test]
+async fn create_returns_the_secret_once() {
+    let session_id = SessionId::now_v7();
+    let db = as_project_admin(session_id)
+        .append_query_results([Vec::<webhook::Model>::new()])
+        .append_query_results([vec![webhook_row()]]);
+    let server = make_test_server_with(db.into_connection(), Some(temp_crypt_secret_file()));
 
-        let res = server
-            .post(PROJECT_URL)
-            .add_header("authorization", bearer(session_id))
-            .json(
-                &json!({ "name": "ci", "url": "https://example.com/hook", "events": ["build.*"] }),
-            )
-            .await;
+    let res = server
+        .post(PROJECT_URL)
+        .add_header("authorization", bearer(session_id))
+        .json(&json!({ "name": "ci", "url": "https://example.com/hook", "events": ["build.*"] }))
+        .await;
 
-        res.assert_status_ok();
-        let body: Value = res.json();
-        assert!(
-            body["message"]["secret"]
-                .as_str()
-                .unwrap()
-                .starts_with("whs_")
-        );
-        assert!(body["message"]["webhook"].get("secret").is_none());
-        assert_eq!(body["message"]["webhook"]["scope"], "project");
-    });
+    res.assert_status_ok();
+    let body: Value = res.json();
+    assert!(
+        body["message"]["secret"]
+            .as_str()
+            .unwrap()
+            .starts_with("whs_")
+    );
+    assert!(body["message"]["webhook"].get("secret").is_none());
+    assert_eq!(body["message"]["webhook"]["scope"], "project");
 }
 
-#[test]
-fn read_webhook_never_returns_the_secret() {
-    runtime().block_on(async {
-        let session_id = SessionId::now_v7();
-        let db = as_project_admin(session_id).append_query_results([vec![webhook_row()]]);
-        let server = make_test_server_with(db.into_connection(), None);
+#[tokio::test]
+async fn read_webhook_never_returns_the_secret() {
+    let session_id = SessionId::now_v7();
+    let db = as_project_admin(session_id).append_query_results([vec![webhook_row()]]);
+    let server = make_test_server_with(db.into_connection(), None);
 
-        let res = server
-            .get(&format!("{PROJECT_URL}/{}", webhook_id()))
-            .add_header("authorization", bearer(session_id))
-            .await;
+    let res = server
+        .get(&format!("{PROJECT_URL}/{}", webhook_id()))
+        .add_header("authorization", bearer(session_id))
+        .await;
 
-        res.assert_status_ok();
-        let body: Value = res.json();
-        assert_eq!(body["message"]["name"], "ci");
-        assert!(body["message"].get("secret").is_none());
-    });
+    res.assert_status_ok();
+    let body: Value = res.json();
+    assert_eq!(body["message"]["name"], "ci");
+    assert!(body["message"].get("secret").is_none());
 }
 
-#[test]
-fn create_rejects_a_private_url() {
-    runtime().block_on(async {
-        let session_id = SessionId::now_v7();
-        let server = make_test_server_with(as_project_admin(session_id).into_connection(), None);
+#[tokio::test]
+async fn create_rejects_a_private_url() {
+    let session_id = SessionId::now_v7();
+    let server = make_test_server_with(as_project_admin(session_id).into_connection(), None);
 
-        let res = server
-            .post(PROJECT_URL)
-            .add_header("authorization", bearer(session_id))
-            .json(&json!({ "name": "ci", "url": "http://127.0.0.1/hook", "events": [] }))
-            .await;
+    let res = server
+        .post(PROJECT_URL)
+        .add_header("authorization", bearer(session_id))
+        .json(&json!({ "name": "ci", "url": "http://127.0.0.1/hook", "events": [] }))
+        .await;
 
-        res.assert_status(axum::http::StatusCode::UNPROCESSABLE_ENTITY);
-    });
+    res.assert_status(axum::http::StatusCode::UNPROCESSABLE_ENTITY);
 }
 
-#[test]
-fn create_rejects_an_unbounded_event_pattern() {
-    runtime().block_on(async {
-        let session_id = SessionId::now_v7();
-        let server = make_test_server_with(as_project_admin(session_id).into_connection(), None);
+#[tokio::test]
+async fn create_rejects_an_unbounded_event_pattern() {
+    let session_id = SessionId::now_v7();
+    let server = make_test_server_with(as_project_admin(session_id).into_connection(), None);
 
-        let res = server
-            .post(PROJECT_URL)
-            .add_header("authorization", bearer(session_id))
-            .json(&json!({ "name": "ci", "url": "https://example.com/hook", "events": ["a**b"] }))
-            .await;
+    let res = server
+        .post(PROJECT_URL)
+        .add_header("authorization", bearer(session_id))
+        .json(&json!({ "name": "ci", "url": "https://example.com/hook", "events": ["a**b"] }))
+        .await;
 
-        res.assert_status(axum::http::StatusCode::UNPROCESSABLE_ENTITY);
-    });
+    res.assert_status(axum::http::StatusCode::UNPROCESSABLE_ENTITY);
 }
 
-#[test]
-fn a_view_role_cannot_manage_webhooks() {
-    runtime().block_on(async {
-        let session_id = SessionId::now_v7();
-        let view = gradient_types::consts::BASE_ROLE_VIEW_ID;
-        let db = with_auth(session_id)
-            .append_query_results([vec![project()]])
-            .append_query_results([vec![membership(view)]])
-            .append_query_results([vec![role_row(view, gradient_db::permissions::view_mask())]]);
-        let server = make_test_server_with(db.into_connection(), None);
+#[tokio::test]
+async fn a_view_role_cannot_manage_webhooks() {
+    let session_id = SessionId::now_v7();
+    let view = gradient_types::consts::BASE_ROLE_VIEW_ID;
+    let db = with_auth(session_id)
+        .append_query_results([vec![project()]])
+        .append_query_results([vec![membership(view)]])
+        .append_query_results([vec![role_row(view, gradient_db::permissions::view_mask())]]);
+    let server = make_test_server_with(db.into_connection(), None);
 
-        let res = server
-            .get(PROJECT_URL)
-            .add_header("authorization", bearer(session_id))
-            .await;
+    let res = server
+        .get(PROJECT_URL)
+        .add_header("authorization", bearer(session_id))
+        .await;
 
-        res.assert_status(axum::http::StatusCode::FORBIDDEN);
-    });
+    res.assert_status(axum::http::StatusCode::FORBIDDEN);
 }
 
-#[test]
-fn instance_webhooks_require_a_superuser() {
-    runtime().block_on(async {
-        let session_id = SessionId::now_v7();
-        let server = make_test_server_with(with_auth(session_id).into_connection(), None);
+#[tokio::test]
+async fn instance_webhooks_require_a_superuser() {
+    let session_id = SessionId::now_v7();
+    let server = make_test_server_with(with_auth(session_id).into_connection(), None);
 
-        let res = server
-            .get("/api/v1/admin/webhooks")
-            .add_header("authorization", bearer(session_id))
-            .await;
+    let res = server
+        .get("/api/v1/admin/webhooks")
+        .add_header("authorization", bearer(session_id))
+        .await;
 
-        res.assert_status(axum::http::StatusCode::FORBIDDEN);
-    });
+    res.assert_status(axum::http::StatusCode::FORBIDDEN);
 }

@@ -4,11 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-#![expect(
-    clippy::unwrap_used,
-    reason = "test scaffolding: a fixture helper that cannot build its value should fail the test loudly"
-)]
-
 use gradient_entity::cache_upstream::CacheUpstreamKind;
 use gradient_entity::project_cache::CacheSubscriptionMode;
 use gradient_entity::{cache, cache_upstream, ids::*};
@@ -47,42 +42,30 @@ fn upstream_row(cache_id: CacheId) -> cache_upstream::Model {
     }
 }
 
-fn run<F: std::future::Future<Output = ()>>(f: F) {
-    tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap()
-        .block_on(f);
+#[tokio::test]
+async fn anonymous_lists_public_cache_upstream_keys() {
+    let cache = cache_row(true);
+    let upstream = upstream_row(cache.id);
+    let db = MockDatabase::new(DatabaseBackend::Postgres)
+        .append_query_results([vec![cache]])
+        .append_query_results([vec![upstream]]);
+
+    let server = make_test_server(db.into_connection());
+    let res = server.get("/api/v1/caches/main/upstream-caches").await;
+
+    res.assert_status_ok();
+    let body: Value = res.json();
+    assert_eq!(body["error"], false);
+    assert_eq!(body["message"][0]["public_key"], NIXOS_KEY);
 }
 
-#[test]
-fn anonymous_lists_public_cache_upstream_keys() {
-    run(async {
-        let cache = cache_row(true);
-        let upstream = upstream_row(cache.id);
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
-            .append_query_results([vec![cache]])
-            .append_query_results([vec![upstream]]);
+#[tokio::test]
+async fn anonymous_cannot_list_private_upstream_caches() {
+    let cache = cache_row(false);
+    let db = MockDatabase::new(DatabaseBackend::Postgres).append_query_results([vec![cache]]);
 
-        let server = make_test_server(db.into_connection());
-        let res = server.get("/api/v1/caches/main/upstream-caches").await;
+    let server = make_test_server(db.into_connection());
+    let res = server.get("/api/v1/caches/main/upstream-caches").await;
 
-        res.assert_status_ok();
-        let body: Value = res.json();
-        assert_eq!(body["error"], false);
-        assert_eq!(body["message"][0]["public_key"], NIXOS_KEY);
-    });
-}
-
-#[test]
-fn anonymous_cannot_list_private_upstream_caches() {
-    run(async {
-        let cache = cache_row(false);
-        let db = MockDatabase::new(DatabaseBackend::Postgres).append_query_results([vec![cache]]);
-
-        let server = make_test_server(db.into_connection());
-        let res = server.get("/api/v1/caches/main/upstream-caches").await;
-
-        res.assert_status(axum::http::StatusCode::NOT_FOUND);
-    });
+    res.assert_status(axum::http::StatusCode::NOT_FOUND);
 }

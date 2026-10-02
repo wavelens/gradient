@@ -405,16 +405,8 @@ fn apply_trigger_db_chain(db: MockDatabase) -> MockDatabase {
         }])
 }
 
-#[test]
-fn git_host_webhook_no_matching_trigger() {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    rt.block_on(async { git_host_webhook_no_matching_trigger_inner().await });
-}
-
-async fn git_host_webhook_no_matching_trigger_inner() {
+#[tokio::test]
+async fn git_host_webhook_no_matching_trigger() {
     let plaintext_secret = "test-secret-plaintext";
     let crypt_path = temp_secret_file("this-is-a-32-byte-crypt-key!!!!");
     let ciphertext = encrypt_webhook_secret(&crypt_path, plaintext_secret).expect("encrypt");
@@ -449,16 +441,8 @@ async fn git_host_webhook_no_matching_trigger_inner() {
     assert!(msg["skipped"].as_array().unwrap().is_empty());
 }
 
-#[test]
-fn git_host_webhook_push_fires_trigger() {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    rt.block_on(async { git_host_webhook_push_fires_trigger_inner().await });
-}
-
-async fn git_host_webhook_push_fires_trigger_inner() {
+#[tokio::test]
+async fn git_host_webhook_push_fires_trigger() {
     let plaintext_secret = "test-secret-plaintext";
     let crypt_path = temp_secret_file("this-is-a-32-byte-crypt-key!!!!");
     let ciphertext = encrypt_webhook_secret(&crypt_path, plaintext_secret).expect("encrypt");
@@ -499,16 +483,8 @@ async fn git_host_webhook_push_fires_trigger_inner() {
     assert!(msg["skipped"].as_array().unwrap().is_empty());
 }
 
-#[test]
-fn git_host_webhook_test_ping_zero_sha_is_ok_noop() {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    rt.block_on(async { git_host_webhook_test_ping_zero_sha_is_ok_noop_inner().await });
-}
-
-async fn git_host_webhook_test_ping_zero_sha_is_ok_noop_inner() {
+#[tokio::test]
+async fn git_host_webhook_test_ping_zero_sha_is_ok_noop() {
     let plaintext_secret = "test-secret-plaintext";
     let crypt_path = temp_secret_file("this-is-a-32-byte-crypt-key!!!!");
     let ciphertext = encrypt_webhook_secret(&crypt_path, plaintext_secret).expect("encrypt");
@@ -542,16 +518,8 @@ async fn git_host_webhook_test_ping_zero_sha_is_ok_noop_inner() {
     assert!(msg["skipped"].as_array().unwrap().is_empty());
 }
 
-#[test]
-fn git_host_webhook_invalid_signature() {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    rt.block_on(async { git_host_webhook_invalid_signature_inner().await });
-}
-
-async fn git_host_webhook_invalid_signature_inner() {
+#[tokio::test]
+async fn git_host_webhook_invalid_signature() {
     let crypt_path = temp_secret_file("this-is-a-32-byte-crypt-key!!!!");
     let ciphertext = encrypt_webhook_secret(&crypt_path, "correct-secret").expect("encrypt");
 
@@ -580,16 +548,8 @@ async fn git_host_webhook_invalid_signature_inner() {
     assert_eq!(json["message"], "invalid webhook signature");
 }
 
-#[test]
-fn git_host_webhook_integration_not_found() {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    rt.block_on(async { git_host_webhook_integration_not_found_inner().await });
-}
-
-async fn git_host_webhook_integration_not_found_inner() {
+#[tokio::test]
+async fn git_host_webhook_integration_not_found() {
     let db = MockDatabase::new(DatabaseBackend::Postgres)
         .append_query_results([vec![project_row("test-project")]])
         .append_query_results([Vec::<gradient_entity::integration::Model>::new()])
@@ -616,16 +576,8 @@ async fn git_host_webhook_integration_not_found_inner() {
     assert_eq!(json["message"], "integration not found");
 }
 
-#[test]
-fn git_host_webhook_branch_glob_no_match_skipped() {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    rt.block_on(async { git_host_webhook_branch_glob_no_match_skipped_inner().await });
-}
-
-async fn git_host_webhook_branch_glob_no_match_skipped_inner() {
+#[tokio::test]
+async fn git_host_webhook_branch_glob_no_match_skipped() {
     let plaintext_secret = "test-secret-plaintext";
     let crypt_path = temp_secret_file("this-is-a-32-byte-crypt-key!!!!");
     let ciphertext = encrypt_webhook_secret(&crypt_path, plaintext_secret).expect("encrypt");
@@ -665,18 +617,8 @@ async fn git_host_webhook_branch_glob_no_match_skipped_inner() {
     assert_eq!(skipped[0]["reason"], "filter");
 }
 
-#[test]
-fn git_host_webhook_pr_fires_trigger() {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    rt.block_on(async { git_host_webhook_pr_fires_trigger_inner().await });
-}
-
-const VALID_SHA: &str = "abcdef0123456789abcdef0123456789abcdef01";
-
-async fn git_host_webhook_pr_fires_trigger_inner() {
+#[tokio::test]
+async fn git_host_webhook_pr_fires_trigger() {
     let plaintext_secret = "test-secret-plaintext";
     let crypt_path = temp_secret_file("this-is-a-32-byte-crypt-key!!!!");
     let ciphertext = encrypt_webhook_secret(&crypt_path, plaintext_secret).expect("encrypt");
@@ -736,16 +678,10 @@ async fn git_host_webhook_pr_fires_trigger_inner() {
     assert!(msg["skipped"].as_array().unwrap().is_empty());
 }
 
-#[test]
-fn git_host_webhook_pr_action_mismatch_skipped() {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    rt.block_on(async { git_host_webhook_pr_action_mismatch_skipped_inner().await });
-}
+const VALID_SHA: &str = "abcdef0123456789abcdef0123456789abcdef01";
 
-async fn git_host_webhook_pr_action_mismatch_skipped_inner() {
+#[tokio::test]
+async fn git_host_webhook_pr_action_mismatch_skipped() {
     let plaintext_secret = "test-secret-plaintext";
     let crypt_path = temp_secret_file("this-is-a-32-byte-crypt-key!!!!");
     let ciphertext = encrypt_webhook_secret(&crypt_path, plaintext_secret).expect("encrypt");
@@ -800,16 +736,8 @@ async fn git_host_webhook_pr_action_mismatch_skipped_inner() {
     assert_eq!(skipped[0]["reason"], "filter");
 }
 
-#[test]
-fn git_host_webhook_release_fires_releases_only_trigger() {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    rt.block_on(async { git_host_webhook_release_fires_releases_only_trigger_inner().await });
-}
-
-async fn git_host_webhook_release_fires_releases_only_trigger_inner() {
+#[tokio::test]
+async fn git_host_webhook_release_fires_releases_only_trigger() {
     let plaintext_secret = "test-secret-plaintext";
     let crypt_path = temp_secret_file("this-is-a-32-byte-crypt-key!!!!");
     let ciphertext = encrypt_webhook_secret(&crypt_path, plaintext_secret).expect("encrypt");
@@ -864,16 +792,8 @@ async fn git_host_webhook_release_fires_releases_only_trigger_inner() {
     assert!(msg["skipped"].as_array().unwrap().is_empty());
 }
 
-#[test]
-fn git_host_webhook_push_does_not_fire_releases_only_trigger() {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    rt.block_on(async { git_host_webhook_push_does_not_fire_releases_only_trigger_inner().await });
-}
-
-async fn git_host_webhook_push_does_not_fire_releases_only_trigger_inner() {
+#[tokio::test]
+async fn git_host_webhook_push_does_not_fire_releases_only_trigger() {
     let plaintext_secret = "test-secret-plaintext";
     let crypt_path = temp_secret_file("this-is-a-32-byte-crypt-key!!!!");
     let ciphertext = encrypt_webhook_secret(&crypt_path, plaintext_secret).expect("encrypt");
@@ -907,16 +827,8 @@ async fn git_host_webhook_push_does_not_fire_releases_only_trigger_inner() {
     assert!(msg["skipped"].as_array().unwrap().is_empty());
 }
 
-#[test]
-fn github_app_webhook_push_fires_trigger() {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    rt.block_on(async { github_app_webhook_push_fires_trigger_inner().await });
-}
-
-async fn github_app_webhook_push_fires_trigger_inner() {
+#[tokio::test]
+async fn github_app_webhook_push_fires_trigger() {
     let gh_secret = "github-webhook-secret";
     let gh_secret_path = temp_secret_file(gh_secret);
 
@@ -957,16 +869,8 @@ async fn github_app_webhook_push_fires_trigger_inner() {
     assert!(msg["skipped"].as_array().unwrap().is_empty());
 }
 
-#[test]
-fn github_app_webhook_ping() {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    rt.block_on(async { github_app_webhook_ping_inner().await });
-}
-
-async fn github_app_webhook_ping_inner() {
+#[tokio::test]
+async fn github_app_webhook_ping() {
     let gh_secret = "github-webhook-secret";
     let gh_secret_path = temp_secret_file(gh_secret);
 
@@ -996,16 +900,8 @@ async fn github_app_webhook_ping_inner() {
     assert!(msg["skipped"].as_array().unwrap().is_empty());
 }
 
-#[test]
-fn github_app_webhook_installation() {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    rt.block_on(async { github_app_webhook_installation_inner().await });
-}
-
-async fn github_app_webhook_installation_inner() {
+#[tokio::test]
+async fn github_app_webhook_installation() {
     let gh_secret = "github-webhook-secret";
     let gh_secret_path = temp_secret_file(gh_secret);
 
@@ -1043,16 +939,8 @@ async fn github_app_webhook_installation_inner() {
     assert!(msg["skipped"].as_array().unwrap().is_empty());
 }
 
-#[test]
-fn github_app_webhook_not_configured() {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    rt.block_on(async { github_app_webhook_not_configured_inner().await });
-}
-
-async fn github_app_webhook_not_configured_inner() {
+#[tokio::test]
+async fn github_app_webhook_not_configured() {
     let db = MockDatabase::new(DatabaseBackend::Postgres).into_connection();
 
     let state = make_state(db, None, None);
@@ -1072,18 +960,8 @@ async fn github_app_webhook_not_configured_inner() {
     assert_eq!(json["message"], "github app integration not configured");
 }
 
-#[test]
-fn github_app_webhook_multi_project_routes_to_matching_project() {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    rt.block_on(async {
-        github_app_webhook_multi_project_routes_to_matching_project_inner().await
-    });
-}
-
-async fn github_app_webhook_multi_project_routes_to_matching_project_inner() {
+#[tokio::test]
+async fn github_app_webhook_multi_project_routes_to_matching_project() {
     let gh_secret = "github-webhook-secret";
     let gh_secret_path = temp_secret_file(gh_secret);
 
@@ -1142,16 +1020,8 @@ async fn github_app_webhook_multi_project_routes_to_matching_project_inner() {
     assert_eq!(queued[0]["project"], "gh-project");
 }
 
-#[test]
-fn github_app_webhook_no_matching_repo_returns_zero() {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    rt.block_on(async { github_app_webhook_no_matching_repo_returns_zero_inner().await });
-}
-
-async fn github_app_webhook_no_matching_repo_returns_zero_inner() {
+#[tokio::test]
+async fn github_app_webhook_no_matching_repo_returns_zero() {
     let gh_secret = "github-webhook-secret";
     let gh_secret_path = temp_secret_file(gh_secret);
 

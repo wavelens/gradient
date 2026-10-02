@@ -69,72 +69,62 @@ fn eval_row(id: EvaluationId, status: EvaluationStatus) -> evaluation::Model {
     }
 }
 
-fn run<F: std::future::Future>(fut: F) -> F::Output {
-    tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap()
-        .block_on(fut)
-}
+#[tokio::test]
+async fn restart_failed_answers_with_the_new_evaluation_id() {
+    let session_id = SessionId::now_v7();
+    let session = live_session(session_id);
+    let previous = eval_row(EvaluationId::now_v7(), EvaluationStatus::Failed);
+    let restarted = eval_row(EvaluationId::now_v7(), EvaluationStatus::Completed);
 
-#[test]
-fn restart_failed_answers_with_the_new_evaluation_id() {
-    run(async {
-        let session_id = SessionId::now_v7();
-        let session = live_session(session_id);
-        let previous = eval_row(EvaluationId::now_v7(), EvaluationStatus::Failed);
-        let restarted = eval_row(EvaluationId::now_v7(), EvaluationStatus::Completed);
+    let db = MockDatabase::new(DatabaseBackend::Postgres)
+        .append_query_results([vec![session.clone()]])
+        .append_query_results([vec![session]])
+        .append_query_results([vec![user()]])
+        .append_query_results([vec![project::Model {
+            id: project_id(),
+            name: "test-project".into(),
+            display_name: "Test Project".into(),
+            public_key: "ssh-ed25519 AAAA test".into(),
+            private_key: "encrypted".into(),
+            created_by: user_id(),
+            created_at: test_date(),
+            ..Default::default()
+        }]])
+        .append_query_results([vec![task_row()]])
+        .append_query_results([vec![admin_membership()]])
+        .append_query_results([vec![admin_role()]])
+        .append_query_results([Vec::<evaluation::Model>::new()])
+        .append_query_results([vec![previous]])
+        .append_query_results([Vec::<entry_point::Model>::new()])
+        .append_query_results([vec![restarted.clone()]])
+        .append_query_results([Vec::<gradient_entity::task_flake_input_override::Model>::new()])
+        .append_exec_results([MockExecResult {
+            last_insert_id: 0,
+            rows_affected: 1,
+        }])
+        .append_query_results([vec![task_row()]]);
 
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
-            .append_query_results([vec![session.clone()]])
-            .append_query_results([vec![session]])
-            .append_query_results([vec![user()]])
-            .append_query_results([vec![project::Model {
-                id: project_id(),
-                name: "test-project".into(),
-                display_name: "Test Project".into(),
-                public_key: "ssh-ed25519 AAAA test".into(),
-                private_key: "encrypted".into(),
-                created_by: user_id(),
-                created_at: test_date(),
-                ..Default::default()
-            }]])
-            .append_query_results([vec![task_row()]])
-            .append_query_results([vec![admin_membership()]])
-            .append_query_results([vec![admin_role()]])
-            .append_query_results([Vec::<evaluation::Model>::new()])
-            .append_query_results([vec![previous]])
-            .append_query_results([Vec::<entry_point::Model>::new()])
-            .append_query_results([vec![restarted.clone()]])
-            .append_query_results([Vec::<gradient_entity::task_flake_input_override::Model>::new()])
-            .append_exec_results([MockExecResult {
-                last_insert_id: 0,
-                rows_affected: 1,
-            }])
-            .append_query_results([vec![task_row()]]);
+    let server = make_test_server(db.into_connection());
 
-        let server = make_test_server(db.into_connection());
+    let res = server
+        .post("/api/v1/tasks/test-project/test-task/evaluate")
+        .add_header(
+            "Authorization",
+            format!("Bearer {}", make_token(session_id)),
+        )
+        .json(&json!({ "mode": "restart_failed" }))
+        .await;
 
-        let res = server
-            .post("/api/v1/tasks/test-project/test-task/evaluate")
-            .add_header(
-                "Authorization",
-                format!("Bearer {}", make_token(session_id)),
-            )
-            .json(&json!({ "mode": "restart_failed" }))
-            .await;
-
-        res.assert_status_ok();
-        let body: Value = res.json();
-        assert_eq!(body["error"], false);
-        assert_eq!(
-            body["message"],
-            restarted.id.to_string(),
-            "expected the new evaluation id, got {}",
-            body["message"]
-        );
-        Uuid::parse_str(body["message"].as_str().unwrap()).expect("message must be a UUID");
-    });
+    res.assert_status_ok();
+    let body: Value = res.json();
+    assert_eq!(body["error"], false);
+    assert_eq!(
+        body["message"],
+        restarted.id.to_string(),
+        "expected the new evaluation id, got {}",
+        body["message"]
+    );
+    Uuid::parse_str(body["message"].as_str().unwrap()).expect("message must be a UUID");
 }
 
 fn authorized_db(session_id: SessionId) -> MockDatabase {
@@ -169,44 +159,40 @@ async fn evaluate(db: MockDatabase, session_id: SessionId, body: Value) -> axum_
         .await
 }
 
-#[test]
-fn rejects_a_commit_that_is_not_a_full_hash() {
-    run(async {
-        let session_id = SessionId::now_v7();
-        let res = evaluate(
-            authorized_db(session_id),
-            session_id,
-            json!({ "commit": "9c1a2b3" }),
-        )
-        .await;
+#[tokio::test]
+async fn rejects_a_commit_that_is_not_a_full_hash() {
+    let session_id = SessionId::now_v7();
+    let res = evaluate(
+        authorized_db(session_id),
+        session_id,
+        json!({ "commit": "9c1a2b3" }),
+    )
+    .await;
 
-        res.assert_status_bad_request();
-        let body: Value = res.json();
-        assert!(
-            body["message"].as_str().unwrap().contains("40-character"),
-            "unexpected message: {}",
-            body["message"]
-        );
-    });
+    res.assert_status_bad_request();
+    let body: Value = res.json();
+    assert!(
+        body["message"].as_str().unwrap().contains("40-character"),
+        "unexpected message: {}",
+        body["message"]
+    );
 }
 
-#[test]
-fn rejects_an_unparsable_attr() {
-    run(async {
-        let session_id = SessionId::now_v7();
-        let res = evaluate(
-            authorized_db(session_id),
-            session_id,
-            json!({ "attr": ".packages" }),
-        )
-        .await;
+#[tokio::test]
+async fn rejects_an_unparsable_attr() {
+    let session_id = SessionId::now_v7();
+    let res = evaluate(
+        authorized_db(session_id),
+        session_id,
+        json!({ "attr": ".packages" }),
+    )
+    .await;
 
-        res.assert_status_bad_request();
-        let body: Value = res.json();
-        assert!(
-            body["message"].as_str().unwrap().contains("attr"),
-            "unexpected message: {}",
-            body["message"]
-        );
-    });
+    res.assert_status_bad_request();
+    let body: Value = res.json();
+    assert!(
+        body["message"].as_str().unwrap().contains("attr"),
+        "unexpected message: {}",
+        body["message"]
+    );
 }

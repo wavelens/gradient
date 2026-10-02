@@ -106,476 +106,398 @@ fn with_managed_task_edit(db: MockDatabase) -> MockDatabase {
 
 const BASE_URL: &str = "/api/v1/tasks/test-project/test-task/flake-inputs";
 
-#[test]
-fn list_empty_returns_empty() {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    rt.block_on(async {
-        let session_id = SessionId::now_v7();
-        let token = make_token(session_id);
+#[tokio::test]
+async fn list_empty_returns_empty() {
+    let session_id = SessionId::now_v7();
+    let token = make_token(session_id);
 
-        let db = with_task_member(with_auth(
-            MockDatabase::new(DatabaseBackend::Postgres),
-            session_id,
-        ))
-        .append_query_results([Vec::<task_flake_input_override::Model>::new()]);
+    let db = with_task_member(with_auth(
+        MockDatabase::new(DatabaseBackend::Postgres),
+        session_id,
+    ))
+    .append_query_results([Vec::<task_flake_input_override::Model>::new()]);
 
-        let server = make_test_server(db.into_connection());
-        let res = server
-            .get(BASE_URL)
-            .add_header("authorization", format!("Bearer {}", token))
-            .await;
+    let server = make_test_server(db.into_connection());
+    let res = server
+        .get(BASE_URL)
+        .add_header("authorization", format!("Bearer {}", token))
+        .await;
 
-        res.assert_status_ok();
-        let body: Value = res.json();
-        assert_eq!(body["error"], false);
-        assert_eq!(body["message"].as_array().unwrap().len(), 0);
-    });
+    res.assert_status_ok();
+    let body: Value = res.json();
+    assert_eq!(body["error"], false);
+    assert_eq!(body["message"].as_array().unwrap().len(), 0);
 }
 
-#[test]
-fn create_then_list_returns_one() {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    rt.block_on(async {
-        let session_id = SessionId::now_v7();
-        let token = make_token(session_id);
+#[tokio::test]
+async fn create_then_list_returns_one() {
+    let session_id = SessionId::now_v7();
+    let token = make_token(session_id);
 
-        let db = with_task_edit(with_auth(
-            MockDatabase::new(DatabaseBackend::Postgres),
-            session_id,
-        ))
-        .append_query_results([Vec::<task_flake_input_override::Model>::new()])
-        .append_query_results([vec![nixpkgs_override_row()]]);
+    let db = with_task_edit(with_auth(
+        MockDatabase::new(DatabaseBackend::Postgres),
+        session_id,
+    ))
+    .append_query_results([Vec::<task_flake_input_override::Model>::new()])
+    .append_query_results([vec![nixpkgs_override_row()]]);
 
-        let server = make_test_server(db.into_connection());
-        let res = server
-            .post(BASE_URL)
-            .add_header("authorization", format!("Bearer {}", token))
-            .json(&serde_json::json!({
-                "input_name": "nixpkgs",
-                "url": "github:NixOS/nixpkgs/nixos-unstable"
-            }))
-            .await;
+    let server = make_test_server(db.into_connection());
+    let res = server
+        .post(BASE_URL)
+        .add_header("authorization", format!("Bearer {}", token))
+        .json(&serde_json::json!({
+            "input_name": "nixpkgs",
+            "url": "github:NixOS/nixpkgs/nixos-unstable"
+        }))
+        .await;
 
-        res.assert_status_ok();
-        let body: Value = res.json();
-        assert_eq!(body["error"], false);
-        assert_eq!(body["message"]["input_name"], "nixpkgs");
-        assert_eq!(
-            body["message"]["url"],
-            "github:NixOS/nixpkgs/nixos-unstable"
-        );
-    });
+    res.assert_status_ok();
+    let body: Value = res.json();
+    assert_eq!(body["error"], false);
+    assert_eq!(body["message"]["input_name"], "nixpkgs");
+    assert_eq!(
+        body["message"]["url"],
+        "github:NixOS/nixpkgs/nixos-unstable"
+    );
 }
 
-#[test]
-fn create_with_null_url_keep_url_mode() {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    rt.block_on(async {
-        let session_id = SessionId::now_v7();
-        let token = make_token(session_id);
+#[tokio::test]
+async fn create_with_null_url_keep_url_mode() {
+    let session_id = SessionId::now_v7();
+    let token = make_token(session_id);
 
-        let null_url_row = task_flake_input_override::Model {
-            id: override_id(),
-            task: task_id(),
-            input_name: "utils".into(),
-            created_at: test_date(),
-            updated_at: test_date(),
-            ..Default::default()
-        };
+    let null_url_row = task_flake_input_override::Model {
+        id: override_id(),
+        task: task_id(),
+        input_name: "utils".into(),
+        created_at: test_date(),
+        updated_at: test_date(),
+        ..Default::default()
+    };
 
-        let db = with_task_edit(with_auth(
-            MockDatabase::new(DatabaseBackend::Postgres),
-            session_id,
-        ))
-        .append_query_results([Vec::<task_flake_input_override::Model>::new()])
-        .append_query_results([vec![null_url_row]]);
+    let db = with_task_edit(with_auth(
+        MockDatabase::new(DatabaseBackend::Postgres),
+        session_id,
+    ))
+    .append_query_results([Vec::<task_flake_input_override::Model>::new()])
+    .append_query_results([vec![null_url_row]]);
 
-        let server = make_test_server(db.into_connection());
-        let res = server
-            .post(BASE_URL)
-            .add_header("authorization", format!("Bearer {}", token))
-            .json(&serde_json::json!({"input_name": "utils", "url": null}))
-            .await;
+    let server = make_test_server(db.into_connection());
+    let res = server
+        .post(BASE_URL)
+        .add_header("authorization", format!("Bearer {}", token))
+        .json(&serde_json::json!({"input_name": "utils", "url": null}))
+        .await;
 
-        res.assert_status_ok();
-        let body: Value = res.json();
-        assert_eq!(body["error"], false);
-        assert_eq!(body["message"]["input_name"], "utils");
-        assert!(body["message"]["url"].is_null());
-    });
+    res.assert_status_ok();
+    let body: Value = res.json();
+    assert_eq!(body["error"], false);
+    assert_eq!(body["message"]["input_name"], "utils");
+    assert!(body["message"]["url"].is_null());
 }
 
-#[test]
-fn create_with_glob_input_name() {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    rt.block_on(async {
-        let session_id = SessionId::now_v7();
-        let token = make_token(session_id);
+#[tokio::test]
+async fn create_with_glob_input_name() {
+    let session_id = SessionId::now_v7();
+    let token = make_token(session_id);
 
-        let glob_row = task_flake_input_override::Model {
-            id: override_id(),
-            task: task_id(),
-            input_name: "nixpkgs*".into(),
-            created_at: test_date(),
-            updated_at: test_date(),
-            ..Default::default()
-        };
+    let glob_row = task_flake_input_override::Model {
+        id: override_id(),
+        task: task_id(),
+        input_name: "nixpkgs*".into(),
+        created_at: test_date(),
+        updated_at: test_date(),
+        ..Default::default()
+    };
 
-        let db = with_task_edit(with_auth(
-            MockDatabase::new(DatabaseBackend::Postgres),
-            session_id,
-        ))
-        .append_query_results([Vec::<task_flake_input_override::Model>::new()])
-        .append_query_results([vec![glob_row]]);
+    let db = with_task_edit(with_auth(
+        MockDatabase::new(DatabaseBackend::Postgres),
+        session_id,
+    ))
+    .append_query_results([Vec::<task_flake_input_override::Model>::new()])
+    .append_query_results([vec![glob_row]]);
 
-        let server = make_test_server(db.into_connection());
-        let res = server
-            .post(BASE_URL)
-            .add_header("authorization", format!("Bearer {}", token))
-            .json(&serde_json::json!({"input_name": "nixpkgs*", "url": null}))
-            .await;
+    let server = make_test_server(db.into_connection());
+    let res = server
+        .post(BASE_URL)
+        .add_header("authorization", format!("Bearer {}", token))
+        .json(&serde_json::json!({"input_name": "nixpkgs*", "url": null}))
+        .await;
 
-        res.assert_status_ok();
-        let body: Value = res.json();
-        assert_eq!(body["error"], false);
-        assert_eq!(body["message"]["input_name"], "nixpkgs*");
-    });
+    res.assert_status_ok();
+    let body: Value = res.json();
+    assert_eq!(body["error"], false);
+    assert_eq!(body["message"]["input_name"], "nixpkgs*");
 }
 
-#[test]
-fn create_duplicate_input_name_rejects_400() {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    rt.block_on(async {
-        let session_id = SessionId::now_v7();
-        let token = make_token(session_id);
+#[tokio::test]
+async fn create_duplicate_input_name_rejects_400() {
+    let session_id = SessionId::now_v7();
+    let token = make_token(session_id);
 
-        let db = with_task_edit(with_auth(
-            MockDatabase::new(DatabaseBackend::Postgres),
-            session_id,
-        ))
-        .append_query_results([vec![nixpkgs_override_row()]]);
+    let db = with_task_edit(with_auth(
+        MockDatabase::new(DatabaseBackend::Postgres),
+        session_id,
+    ))
+    .append_query_results([vec![nixpkgs_override_row()]]);
 
-        let server = make_test_server(db.into_connection());
-        let res = server
-            .post(BASE_URL)
-            .add_header("authorization", format!("Bearer {}", token))
-            .json(&serde_json::json!({
-                "input_name": "nixpkgs",
-                "url": "github:NixOS/nixpkgs/nixos-unstable"
-            }))
-            .await;
+    let server = make_test_server(db.into_connection());
+    let res = server
+        .post(BASE_URL)
+        .add_header("authorization", format!("Bearer {}", token))
+        .json(&serde_json::json!({
+            "input_name": "nixpkgs",
+            "url": "github:NixOS/nixpkgs/nixos-unstable"
+        }))
+        .await;
 
-        res.assert_status_bad_request();
-        let body: Value = res.json();
-        assert_eq!(body["error"], true);
-    });
+    res.assert_status_bad_request();
+    let body: Value = res.json();
+    assert_eq!(body["error"], true);
 }
 
-#[test]
-fn create_invalid_input_name_rejects_400() {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    rt.block_on(async {
-        let session_id = SessionId::now_v7();
-        let token = make_token(session_id);
+#[tokio::test]
+async fn create_invalid_input_name_rejects_400() {
+    let session_id = SessionId::now_v7();
+    let token = make_token(session_id);
 
-        let db = with_task_edit(with_auth(
-            MockDatabase::new(DatabaseBackend::Postgres),
-            session_id,
-        ));
+    let db = with_task_edit(with_auth(
+        MockDatabase::new(DatabaseBackend::Postgres),
+        session_id,
+    ));
 
-        let server = make_test_server(db.into_connection());
-        let res = server
-            .post(BASE_URL)
-            .add_header("authorization", format!("Bearer {}", token))
-            .json(&serde_json::json!({"input_name": "bad name!", "url": "x"}))
-            .await;
+    let server = make_test_server(db.into_connection());
+    let res = server
+        .post(BASE_URL)
+        .add_header("authorization", format!("Bearer {}", token))
+        .json(&serde_json::json!({"input_name": "bad name!", "url": "x"}))
+        .await;
 
-        res.assert_status_bad_request();
-        let body: Value = res.json();
-        assert_eq!(body["error"], true);
-        assert!(
-            body["message"].as_str().unwrap().contains("input_name"),
-            "expected input_name in message, got: {}",
-            body["message"]
-        );
-    });
+    res.assert_status_bad_request();
+    let body: Value = res.json();
+    assert_eq!(body["error"], true);
+    assert!(
+        body["message"].as_str().unwrap().contains("input_name"),
+        "expected input_name in message, got: {}",
+        body["message"]
+    );
 }
 
-#[test]
-fn patch_updates_url_and_returns_new_row() {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    rt.block_on(async {
-        let session_id = SessionId::now_v7();
-        let token = make_token(session_id);
-        let oid = override_id();
+#[tokio::test]
+async fn patch_updates_url_and_returns_new_row() {
+    let session_id = SessionId::now_v7();
+    let token = make_token(session_id);
+    let oid = override_id();
 
-        let updated = task_flake_input_override::Model {
-            url: Some("github:NixOS/nixpkgs/nixos-24.05".into()),
-            ..nixpkgs_override_row()
-        };
+    let updated = task_flake_input_override::Model {
+        url: Some("github:NixOS/nixpkgs/nixos-24.05".into()),
+        ..nixpkgs_override_row()
+    };
 
-        let db = with_task_edit(with_auth(
-            MockDatabase::new(DatabaseBackend::Postgres),
-            session_id,
-        ))
-        .append_query_results([vec![nixpkgs_override_row()]])
-        .append_query_results([vec![updated]]);
+    let db = with_task_edit(with_auth(
+        MockDatabase::new(DatabaseBackend::Postgres),
+        session_id,
+    ))
+    .append_query_results([vec![nixpkgs_override_row()]])
+    .append_query_results([vec![updated]]);
 
-        let server = make_test_server(db.into_connection());
-        let res = server
-            .patch(&format!("{}/{}", BASE_URL, oid))
-            .add_header("authorization", format!("Bearer {}", token))
-            .json(&serde_json::json!({"url": "github:NixOS/nixpkgs/nixos-24.05"}))
-            .await;
+    let server = make_test_server(db.into_connection());
+    let res = server
+        .patch(&format!("{}/{}", BASE_URL, oid))
+        .add_header("authorization", format!("Bearer {}", token))
+        .json(&serde_json::json!({"url": "github:NixOS/nixpkgs/nixos-24.05"}))
+        .await;
 
-        res.assert_status_ok();
-        let body: Value = res.json();
-        assert_eq!(body["error"], false);
-        assert_eq!(body["message"]["url"], "github:NixOS/nixpkgs/nixos-24.05");
-    });
+    res.assert_status_ok();
+    let body: Value = res.json();
+    assert_eq!(body["error"], false);
+    assert_eq!(body["message"]["url"], "github:NixOS/nixpkgs/nixos-24.05");
 }
 
-#[test]
-fn patch_url_to_null_sets_keep_url() {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    rt.block_on(async {
-        let session_id = SessionId::now_v7();
-        let token = make_token(session_id);
-        let oid = override_id();
+#[tokio::test]
+async fn patch_url_to_null_sets_keep_url() {
+    let session_id = SessionId::now_v7();
+    let token = make_token(session_id);
+    let oid = override_id();
 
-        let updated = task_flake_input_override::Model {
-            url: None,
-            ..nixpkgs_override_row()
-        };
+    let updated = task_flake_input_override::Model {
+        url: None,
+        ..nixpkgs_override_row()
+    };
 
-        let db = with_task_edit(with_auth(
-            MockDatabase::new(DatabaseBackend::Postgres),
-            session_id,
-        ))
-        .append_query_results([vec![nixpkgs_override_row()]])
-        .append_query_results([vec![updated]]);
+    let db = with_task_edit(with_auth(
+        MockDatabase::new(DatabaseBackend::Postgres),
+        session_id,
+    ))
+    .append_query_results([vec![nixpkgs_override_row()]])
+    .append_query_results([vec![updated]]);
 
-        let server = make_test_server(db.into_connection());
-        let res = server
-            .patch(&format!("{}/{}", BASE_URL, oid))
-            .add_header("authorization", format!("Bearer {}", token))
-            .json(&serde_json::json!({"url": null}))
-            .await;
+    let server = make_test_server(db.into_connection());
+    let res = server
+        .patch(&format!("{}/{}", BASE_URL, oid))
+        .add_header("authorization", format!("Bearer {}", token))
+        .json(&serde_json::json!({"url": null}))
+        .await;
 
-        res.assert_status_ok();
-        let body: Value = res.json();
-        assert_eq!(body["error"], false);
-        assert!(body["message"]["url"].is_null());
-    });
+    res.assert_status_ok();
+    let body: Value = res.json();
+    assert_eq!(body["error"], false);
+    assert!(body["message"]["url"].is_null());
 }
 
-#[test]
-fn patch_omitting_url_does_not_change_it() {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    rt.block_on(async {
-        let session_id = SessionId::now_v7();
-        let token = make_token(session_id);
-        let oid = override_id();
+#[tokio::test]
+async fn patch_omitting_url_does_not_change_it() {
+    let session_id = SessionId::now_v7();
+    let token = make_token(session_id);
+    let oid = override_id();
 
-        let updated = task_flake_input_override::Model {
-            input_name: "renamed".into(),
-            url: Some("github:NixOS/nixpkgs/nixos-unstable".into()),
-            ..nixpkgs_override_row()
-        };
+    let updated = task_flake_input_override::Model {
+        input_name: "renamed".into(),
+        url: Some("github:NixOS/nixpkgs/nixos-unstable".into()),
+        ..nixpkgs_override_row()
+    };
 
-        let db = with_task_edit(with_auth(
-            MockDatabase::new(DatabaseBackend::Postgres),
-            session_id,
-        ))
-        .append_query_results([vec![nixpkgs_override_row()]])
-        .append_query_results([Vec::<task_flake_input_override::Model>::new()])
-        .append_query_results([vec![updated]]);
+    let db = with_task_edit(with_auth(
+        MockDatabase::new(DatabaseBackend::Postgres),
+        session_id,
+    ))
+    .append_query_results([vec![nixpkgs_override_row()]])
+    .append_query_results([Vec::<task_flake_input_override::Model>::new()])
+    .append_query_results([vec![updated]]);
 
-        let server = make_test_server(db.into_connection());
-        let res = server
-            .patch(&format!("{}/{}", BASE_URL, oid))
-            .add_header("authorization", format!("Bearer {}", token))
-            .json(&serde_json::json!({"input_name": "renamed"}))
-            .await;
+    let server = make_test_server(db.into_connection());
+    let res = server
+        .patch(&format!("{}/{}", BASE_URL, oid))
+        .add_header("authorization", format!("Bearer {}", token))
+        .json(&serde_json::json!({"input_name": "renamed"}))
+        .await;
 
-        res.assert_status_ok();
-        let body: Value = res.json();
-        assert_eq!(body["error"], false);
-        assert_eq!(body["message"]["input_name"], "renamed");
-        assert_eq!(
-            body["message"]["url"],
-            "github:NixOS/nixpkgs/nixos-unstable"
-        );
-    });
+    res.assert_status_ok();
+    let body: Value = res.json();
+    assert_eq!(body["error"], false);
+    assert_eq!(body["message"]["input_name"], "renamed");
+    assert_eq!(
+        body["message"]["url"],
+        "github:NixOS/nixpkgs/nixos-unstable"
+    );
 }
 
-#[test]
-fn delete_removes_the_row() {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    rt.block_on(async {
-        let session_id = SessionId::now_v7();
-        let token = make_token(session_id);
-        let oid = override_id();
+#[tokio::test]
+async fn delete_removes_the_row() {
+    let session_id = SessionId::now_v7();
+    let token = make_token(session_id);
+    let oid = override_id();
 
-        let db = with_task_edit(with_auth(
-            MockDatabase::new(DatabaseBackend::Postgres),
-            session_id,
-        ))
-        .append_query_results([vec![nixpkgs_override_row()]])
-        .append_exec_results([MockExecResult {
-            last_insert_id: 0,
-            rows_affected: 1,
-        }]);
+    let db = with_task_edit(with_auth(
+        MockDatabase::new(DatabaseBackend::Postgres),
+        session_id,
+    ))
+    .append_query_results([vec![nixpkgs_override_row()]])
+    .append_exec_results([MockExecResult {
+        last_insert_id: 0,
+        rows_affected: 1,
+    }]);
 
-        let server = make_test_server(db.into_connection());
-        let res = server
-            .delete(&format!("{}/{}", BASE_URL, oid))
-            .add_header("authorization", format!("Bearer {}", token))
-            .await;
+    let server = make_test_server(db.into_connection());
+    let res = server
+        .delete(&format!("{}/{}", BASE_URL, oid))
+        .add_header("authorization", format!("Bearer {}", token))
+        .await;
 
-        res.assert_status_ok();
-        let body: Value = res.json();
-        assert_eq!(body["error"], false);
-        assert_eq!(body["message"]["deleted"], true);
-    });
+    res.assert_status_ok();
+    let body: Value = res.json();
+    assert_eq!(body["error"], false);
+    assert_eq!(body["message"]["deleted"], true);
 }
 
-#[test]
-fn get_not_found_returns_404() {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    rt.block_on(async {
-        let session_id = SessionId::now_v7();
-        let token = make_token(session_id);
-        let oid = FlakeInputOverrideId::now_v7();
+#[tokio::test]
+async fn get_not_found_returns_404() {
+    let session_id = SessionId::now_v7();
+    let token = make_token(session_id);
+    let oid = FlakeInputOverrideId::now_v7();
 
-        let db = with_task_member(with_auth(
-            MockDatabase::new(DatabaseBackend::Postgres),
-            session_id,
-        ))
-        .append_query_results([Vec::<task_flake_input_override::Model>::new()]);
+    let db = with_task_member(with_auth(
+        MockDatabase::new(DatabaseBackend::Postgres),
+        session_id,
+    ))
+    .append_query_results([Vec::<task_flake_input_override::Model>::new()]);
 
-        let server = make_test_server(db.into_connection());
-        let res = server
-            .get(&format!("{}/{}", BASE_URL, oid))
-            .add_header("authorization", format!("Bearer {}", token))
-            .await;
+    let server = make_test_server(db.into_connection());
+    let res = server
+        .get(&format!("{}/{}", BASE_URL, oid))
+        .add_header("authorization", format!("Bearer {}", token))
+        .await;
 
-        res.assert_status_not_found();
-    });
+    res.assert_status_not_found();
 }
 
-#[test]
-fn list_sorted_by_input_name() {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    rt.block_on(async {
-        let session_id = SessionId::now_v7();
-        let token = make_token(session_id);
+#[tokio::test]
+async fn list_sorted_by_input_name() {
+    let session_id = SessionId::now_v7();
+    let token = make_token(session_id);
 
-        let alpha = task_flake_input_override::Model {
-            id: FlakeInputOverrideId::new(
-                Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap(),
-            ),
-            task: task_id(),
-            input_name: "alpha".into(),
-            created_at: test_date(),
-            updated_at: test_date(),
-            ..Default::default()
-        };
-        let zebra = task_flake_input_override::Model {
-            id: FlakeInputOverrideId::new(
-                Uuid::parse_str("00000000-0000-0000-0000-000000000002").unwrap(),
-            ),
-            task: task_id(),
-            input_name: "zebra".into(),
-            created_at: test_date(),
-            updated_at: test_date(),
-            ..Default::default()
-        };
+    let alpha = task_flake_input_override::Model {
+        id: FlakeInputOverrideId::new(
+            Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap(),
+        ),
+        task: task_id(),
+        input_name: "alpha".into(),
+        created_at: test_date(),
+        updated_at: test_date(),
+        ..Default::default()
+    };
+    let zebra = task_flake_input_override::Model {
+        id: FlakeInputOverrideId::new(
+            Uuid::parse_str("00000000-0000-0000-0000-000000000002").unwrap(),
+        ),
+        task: task_id(),
+        input_name: "zebra".into(),
+        created_at: test_date(),
+        updated_at: test_date(),
+        ..Default::default()
+    };
 
-        let db = with_task_member(with_auth(
-            MockDatabase::new(DatabaseBackend::Postgres),
-            session_id,
-        ))
-        .append_query_results([vec![alpha, zebra]]);
+    let db = with_task_member(with_auth(
+        MockDatabase::new(DatabaseBackend::Postgres),
+        session_id,
+    ))
+    .append_query_results([vec![alpha, zebra]]);
 
-        let server = make_test_server(db.into_connection());
-        let res = server
-            .get(BASE_URL)
-            .add_header("authorization", format!("Bearer {}", token))
-            .await;
+    let server = make_test_server(db.into_connection());
+    let res = server
+        .get(BASE_URL)
+        .add_header("authorization", format!("Bearer {}", token))
+        .await;
 
-        res.assert_status_ok();
-        let body: Value = res.json();
-        let items = body["message"].as_array().unwrap();
-        assert_eq!(items.len(), 2);
-        assert_eq!(items[0]["input_name"], "alpha");
-        assert_eq!(items[1]["input_name"], "zebra");
-    });
+    res.assert_status_ok();
+    let body: Value = res.json();
+    let items = body["message"].as_array().unwrap();
+    assert_eq!(items.len(), 2);
+    assert_eq!(items[0]["input_name"], "alpha");
+    assert_eq!(items[1]["input_name"], "zebra");
 }
 
-#[test]
-fn managed_task_rejects_mutations_403() {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    rt.block_on(async {
-        let session_id = SessionId::now_v7();
-        let token = make_token(session_id);
+#[tokio::test]
+async fn managed_task_rejects_mutations_403() {
+    let session_id = SessionId::now_v7();
+    let token = make_token(session_id);
 
-        let db = with_managed_task_edit(with_auth(
-            MockDatabase::new(DatabaseBackend::Postgres),
-            session_id,
-        ));
+    let db = with_managed_task_edit(with_auth(
+        MockDatabase::new(DatabaseBackend::Postgres),
+        session_id,
+    ));
 
-        let server = make_test_server(db.into_connection());
-        let res = server
-            .post(BASE_URL)
-            .add_header("authorization", format!("Bearer {}", token))
-            .json(&serde_json::json!({
-                "input_name": "nixpkgs",
-                "url": "github:NixOS/nixpkgs/nixos-unstable"
-            }))
-            .await;
+    let server = make_test_server(db.into_connection());
+    let res = server
+        .post(BASE_URL)
+        .add_header("authorization", format!("Bearer {}", token))
+        .json(&serde_json::json!({
+            "input_name": "nixpkgs",
+            "url": "github:NixOS/nixpkgs/nixos-unstable"
+        }))
+        .await;
 
-        res.assert_status_forbidden();
-        let body: Value = res.json();
-        assert_eq!(body["error"], true);
-    });
+    res.assert_status_forbidden();
+    let body: Value = res.json();
+    assert_eq!(body["error"], true);
 }

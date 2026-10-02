@@ -84,14 +84,6 @@ fn base_db(session_id: SessionId) -> MockDatabase {
         .append_query_results([vec![write_role()]])
 }
 
-fn run<F: std::future::Future>(fut: F) -> F::Output {
-    tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap()
-        .block_on(fut)
-}
-
 async fn post(db: MockDatabase, session_id: SessionId, body: Value) -> axum_test::TestResponse {
     make_test_server(db.into_connection())
         .post(URL)
@@ -103,154 +95,142 @@ async fn post(db: MockDatabase, session_id: SessionId, body: Value) -> axum_test
         .await
 }
 
-#[test]
-fn queues_an_evaluation_against_the_remote_url() {
-    run(async {
-        let session_id = SessionId::now_v7();
-        let commit = CommitId::now_v7();
-        let evaluation = EvaluationId::now_v7();
+#[tokio::test]
+async fn queues_an_evaluation_against_the_remote_url() {
+    let session_id = SessionId::now_v7();
+    let commit = CommitId::now_v7();
+    let evaluation = EvaluationId::now_v7();
 
-        let db = base_db(session_id)
-            .append_query_results([vec![reserved_task()]])
-            .append_query_results([vec![gradient_entity::commit::Model {
-                id: commit,
-                message: format!("Build request {REPO}@{REV}"),
-                hash: vec![0x9c; 20],
-                author: Some(user_id()),
-                author_name: user().name,
-            }]])
-            .append_query_results([vec![gradient_entity::evaluation::Model {
-                id: evaluation,
-                task: Some(task_id()),
-                repository: format!("git+{REPO}?rev={REV}"),
-                commit,
-                wildcard: "packages.x86_64-linux.hello".into(),
-                concurrent: true,
-                created_at: test_date(),
-                updated_at: test_date(),
-                ..Default::default()
-            }]])
-            .append_query_results([Vec::<gradient_entity::project_cache::Model>::new()])
-            .append_exec_results([MockExecResult {
-                last_insert_id: 0,
-                rows_affected: 1,
-            }]);
+    let db = base_db(session_id)
+        .append_query_results([vec![reserved_task()]])
+        .append_query_results([vec![gradient_entity::commit::Model {
+            id: commit,
+            message: format!("Build request {REPO}@{REV}"),
+            hash: vec![0x9c; 20],
+            author: Some(user_id()),
+            author_name: user().name,
+        }]])
+        .append_query_results([vec![gradient_entity::evaluation::Model {
+            id: evaluation,
+            task: Some(task_id()),
+            repository: format!("git+{REPO}?rev={REV}"),
+            commit,
+            wildcard: "packages.x86_64-linux.hello".into(),
+            concurrent: true,
+            created_at: test_date(),
+            updated_at: test_date(),
+            ..Default::default()
+        }]])
+        .append_query_results([Vec::<gradient_entity::project_cache::Model>::new()])
+        .append_exec_results([MockExecResult {
+            last_insert_id: 0,
+            rows_affected: 1,
+        }]);
 
-        let res = post(
-            db,
-            session_id,
-            json!({
-                "project": "test-project",
-                "url": REPO,
-                "rev": REV,
-                "target": "packages.x86_64-linux.hello",
-            }),
-        )
-        .await;
+    let res = post(
+        db,
+        session_id,
+        json!({
+            "project": "test-project",
+            "url": REPO,
+            "rev": REV,
+            "target": "packages.x86_64-linux.hello",
+        }),
+    )
+    .await;
 
-        res.assert_status_ok();
-        let body: Value = res.json();
-        assert_eq!(body["error"], false);
-        assert_eq!(body["message"]["evaluation"], evaluation.to_string());
-        assert_eq!(body["message"]["task"], task_id().to_string());
-        assert_eq!(body["message"]["commit"], commit.to_string());
-    });
+    res.assert_status_ok();
+    let body: Value = res.json();
+    assert_eq!(body["error"], false);
+    assert_eq!(body["message"]["evaluation"], evaluation.to_string());
+    assert_eq!(body["message"]["task"], task_id().to_string());
+    assert_eq!(body["message"]["commit"], commit.to_string());
 }
 
-#[test]
-fn rejects_ref_and_rev_together() {
-    run(async {
-        let session_id = SessionId::now_v7();
-        let res = post(
-            base_db(session_id),
-            session_id,
-            json!({"project": "test-project", "url": REPO, "rev": REV, "ref": "main"}),
-        )
-        .await;
+#[tokio::test]
+async fn rejects_ref_and_rev_together() {
+    let session_id = SessionId::now_v7();
+    let res = post(
+        base_db(session_id),
+        session_id,
+        json!({"project": "test-project", "url": REPO, "rev": REV, "ref": "main"}),
+    )
+    .await;
 
-        res.assert_status_bad_request();
-        let body: Value = res.json();
-        assert!(
-            body["message"].as_str().unwrap().contains("at most one"),
-            "unexpected message: {}",
-            body["message"]
-        );
-    });
+    res.assert_status_bad_request();
+    let body: Value = res.json();
+    assert!(
+        body["message"].as_str().unwrap().contains("at most one"),
+        "unexpected message: {}",
+        body["message"]
+    );
 }
 
-#[test]
-fn rejects_a_rev_that_is_not_a_full_hash() {
-    run(async {
-        let session_id = SessionId::now_v7();
-        let res = post(
-            base_db(session_id),
-            session_id,
-            json!({"project": "test-project", "url": REPO, "rev": "9c1a2b3"}),
-        )
-        .await;
+#[tokio::test]
+async fn rejects_a_rev_that_is_not_a_full_hash() {
+    let session_id = SessionId::now_v7();
+    let res = post(
+        base_db(session_id),
+        session_id,
+        json!({"project": "test-project", "url": REPO, "rev": "9c1a2b3"}),
+    )
+    .await;
 
-        res.assert_status_bad_request();
-        let body: Value = res.json();
-        assert!(
-            body["message"].as_str().unwrap().contains("40-character"),
-            "unexpected message: {}",
-            body["message"]
-        );
-    });
+    res.assert_status_bad_request();
+    let body: Value = res.json();
+    assert!(
+        body["message"].as_str().unwrap().contains("40-character"),
+        "unexpected message: {}",
+        body["message"]
+    );
 }
 
-#[test]
-fn rejects_an_empty_url() {
-    run(async {
-        let session_id = SessionId::now_v7();
-        let res = post(
-            base_db(session_id),
-            session_id,
-            json!({"project": "test-project", "url": "   ", "rev": REV}),
-        )
-        .await;
+#[tokio::test]
+async fn rejects_an_empty_url() {
+    let session_id = SessionId::now_v7();
+    let res = post(
+        base_db(session_id),
+        session_id,
+        json!({"project": "test-project", "url": "   ", "rev": REV}),
+    )
+    .await;
 
-        res.assert_status_bad_request();
-    });
+    res.assert_status_bad_request();
 }
 
-#[test]
-fn rejects_a_local_file_url() {
-    run(async {
-        let session_id = SessionId::now_v7();
-        let res = post(
-            base_db(session_id),
-            session_id,
-            json!({"project": "test-project", "url": "file:///etc", "rev": REV}),
-        )
-        .await;
+#[tokio::test]
+async fn rejects_a_local_file_url() {
+    let session_id = SessionId::now_v7();
+    let res = post(
+        base_db(session_id),
+        session_id,
+        json!({"project": "test-project", "url": "file:///etc", "rev": REV}),
+    )
+    .await;
 
-        res.assert_status_bad_request();
-        let body: Value = res.json();
-        assert!(
-            body["message"].as_str().unwrap().contains("repository URL"),
-            "unexpected message: {}",
-            body["message"]
-        );
-    });
+    res.assert_status_bad_request();
+    let body: Value = res.json();
+    assert!(
+        body["message"].as_str().unwrap().contains("repository URL"),
+        "unexpected message: {}",
+        body["message"]
+    );
 }
 
-#[test]
-fn rejects_a_local_input_override() {
-    run(async {
-        let session_id = SessionId::now_v7();
-        let res = post(
-            base_db(session_id),
-            session_id,
-            json!({
-                "project": "test-project",
-                "url": REPO,
-                "rev": REV,
-                "input_overrides": [{"input_name": "nixpkgs", "url": "/home/me/nixpkgs"}],
-            }),
-        )
-        .await;
+#[tokio::test]
+async fn rejects_a_local_input_override() {
+    let session_id = SessionId::now_v7();
+    let res = post(
+        base_db(session_id),
+        session_id,
+        json!({
+            "project": "test-project",
+            "url": REPO,
+            "rev": REV,
+            "input_overrides": [{"input_name": "nixpkgs", "url": "/home/me/nixpkgs"}],
+        }),
+    )
+    .await;
 
-        res.assert_status_bad_request();
-    });
+    res.assert_status_bad_request();
 }

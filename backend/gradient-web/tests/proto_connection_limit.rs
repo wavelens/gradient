@@ -37,60 +37,51 @@ fn make_server(limiter: Arc<ProtoLimiter>) -> TestServer {
     TestServer::builder().http_transport().build(app)
 }
 
-#[test]
-fn upgrade_rejected_with_503_and_retry_after_when_limit_exhausted() {
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    rt.block_on(async {
-        let limiter = Arc::new(ProtoLimiter::new(1));
-        let _hold = limiter.try_acquire().expect("first slot must be free");
-        assert_eq!(limiter.in_use(), 1);
+#[tokio::test(flavor = "multi_thread")]
+async fn upgrade_rejected_with_503_and_retry_after_when_limit_exhausted() {
+    let limiter = Arc::new(ProtoLimiter::new(1));
+    let _hold = limiter.try_acquire().expect("first slot must be free");
+    assert_eq!(limiter.in_use(), 1);
 
-        let server = make_server(Arc::clone(&limiter));
-        let res = upgrade_request(&server).await;
+    let server = make_server(Arc::clone(&limiter));
+    let res = upgrade_request(&server).await;
 
-        res.assert_status(http::StatusCode::SERVICE_UNAVAILABLE);
-        assert_eq!(
-            res.header(header::RETRY_AFTER),
-            "10",
-            "503 must advertise a retry-after",
-        );
-    });
+    res.assert_status(http::StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(
+        res.header(header::RETRY_AFTER),
+        "10",
+        "503 must advertise a retry-after",
+    );
 }
 
-#[test]
-fn upgrade_proceeds_past_limiter_when_slot_is_free() {
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    rt.block_on(async {
-        let limiter = Arc::new(ProtoLimiter::new(1));
-        let server = make_server(Arc::clone(&limiter));
-        let res = upgrade_request(&server).await;
+#[tokio::test(flavor = "multi_thread")]
+async fn upgrade_proceeds_past_limiter_when_slot_is_free() {
+    let limiter = Arc::new(ProtoLimiter::new(1));
+    let server = make_server(Arc::clone(&limiter));
+    let res = upgrade_request(&server).await;
 
-        assert_ne!(
-            res.status_code(),
-            http::StatusCode::SERVICE_UNAVAILABLE,
-            "fresh limiter must not reject the upgrade",
-        );
-    });
+    assert_ne!(
+        res.status_code(),
+        http::StatusCode::SERVICE_UNAVAILABLE,
+        "fresh limiter must not reject the upgrade",
+    );
 }
 
-#[test]
-fn slot_is_released_for_subsequent_upgrades_after_drop() {
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    rt.block_on(async {
-        let limiter = Arc::new(ProtoLimiter::new(1));
-        let hold = limiter.try_acquire().expect("first slot must be free");
-        let server = make_server(Arc::clone(&limiter));
+#[tokio::test(flavor = "multi_thread")]
+async fn slot_is_released_for_subsequent_upgrades_after_drop() {
+    let limiter = Arc::new(ProtoLimiter::new(1));
+    let hold = limiter.try_acquire().expect("first slot must be free");
+    let server = make_server(Arc::clone(&limiter));
 
-        upgrade_request(&server)
-            .await
-            .assert_status(http::StatusCode::SERVICE_UNAVAILABLE);
+    upgrade_request(&server)
+        .await
+        .assert_status(http::StatusCode::SERVICE_UNAVAILABLE);
 
-        drop(hold);
-        let res = upgrade_request(&server).await;
-        assert_ne!(
-            res.status_code(),
-            http::StatusCode::SERVICE_UNAVAILABLE,
-            "dropping the prior permit must let the next upgrade through",
-        );
-    });
+    drop(hold);
+    let res = upgrade_request(&server).await;
+    assert_ne!(
+        res.status_code(),
+        http::StatusCode::SERVICE_UNAVAILABLE,
+        "dropping the prior permit must let the next upgrade through",
+    );
 }

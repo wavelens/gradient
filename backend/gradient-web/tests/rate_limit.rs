@@ -61,80 +61,62 @@ fn make_state() -> Arc<ServerState> {
     })
 }
 
-#[test]
-fn auth_tier_throttles_burst() {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    rt.block_on(async {
-        let server = TestServer::new(create_router(make_state()).expect("router"));
+#[tokio::test]
+async fn auth_tier_throttles_burst() {
+    let server = TestServer::new(create_router(make_state()).expect("router"));
 
-        for i in 1..=5 {
-            let resp = server
-                .post("/api/v1/auth/check-username")
-                .json(&serde_json::json!({"username": "x"}))
-                .await;
-            assert_eq!(
-                resp.status_code(),
-                200,
-                "request {} unexpectedly throttled: {:?}",
-                i,
-                resp.status_code()
-            );
-        }
-
-        let throttled = server
+    for i in 1..=5 {
+        let resp = server
             .post("/api/v1/auth/check-username")
             .json(&serde_json::json!({"username": "x"}))
             .await;
         assert_eq!(
-            throttled.status_code(),
-            429,
-            "6th burst request should be 429, got {:?}",
-            throttled.status_code()
+            resp.status_code(),
+            200,
+            "request {} unexpectedly throttled: {:?}",
+            i,
+            resp.status_code()
         );
-    });
+    }
+
+    let throttled = server
+        .post("/api/v1/auth/check-username")
+        .json(&serde_json::json!({"username": "x"}))
+        .await;
+    assert_eq!(
+        throttled.status_code(),
+        429,
+        "6th burst request should be 429, got {:?}",
+        throttled.status_code()
+    );
 }
 
-#[test]
-fn cache_tier_does_not_throttle_moderate_burst() {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    rt.block_on(async {
-        let server = TestServer::new(create_router(make_state()).expect("router"));
+#[tokio::test]
+async fn cache_tier_does_not_throttle_moderate_burst() {
+    let server = TestServer::new(create_router(make_state()).expect("router"));
 
-        for i in 1..=50 {
-            let resp = server.get("/cache/missing-cache/nix-cache-info").await;
-            assert_ne!(
-                resp.status_code(),
-                429,
-                "cache request {} unexpectedly throttled",
-                i
-            );
-        }
-    });
+    for i in 1..=50 {
+        let resp = server.get("/cache/missing-cache/nix-cache-info").await;
+        assert_ne!(
+            resp.status_code(),
+            429,
+            "cache request {} unexpectedly throttled",
+            i
+        );
+    }
 }
 
-#[test]
-fn cache_proto_tier_does_not_throttle_burst() {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    rt.block_on(async {
-        let server = TestServer::new(create_router(make_state()).expect("router"));
+#[tokio::test]
+async fn cache_proto_tier_does_not_throttle_burst() {
+    let server = TestServer::new(create_router(make_state()).expect("router"));
 
-        for i in 1..=250 {
-            let resp = server.get("/cache/missing-cache/proto").await;
-            assert_ne!(
-                resp.status_code(),
-                429,
-                "cache proto request {} unexpectedly throttled",
-                i
-            );
-        }
-    });
+    for i in 1..=250 {
+        let resp = server.get("/cache/missing-cache/proto").await;
+        assert_ne!(
+            resp.status_code(),
+            429,
+            "cache proto request {} unexpectedly throttled",
+            i
+        );
+    }
 }

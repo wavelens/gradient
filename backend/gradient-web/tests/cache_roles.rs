@@ -84,193 +84,173 @@ fn with_auth(db: MockDatabase, session_id: SessionId) -> MockDatabase {
         .append_query_results([vec![user()]])
 }
 
-fn run<F: std::future::Future>(fut: F) -> F::Output {
-    tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap()
-        .block_on(fut)
+#[tokio::test]
+async fn list_returns_builtins_and_available_permissions() {
+    let session_id = SessionId::now_v7();
+    let token = make_token(session_id);
+    let custom_id = RoleId::now_v7();
+
+    let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
+        .append_query_results([vec![cache_row()]])
+        .append_query_results([vec![admin_member()]])
+        .append_query_results([vec![
+            admin_role_row(),
+            view_role_row(),
+            custom_role_row(custom_id, "pusher", 0),
+        ]]);
+
+    let server = make_test_server(db.into_connection());
+    let res = server
+        .get("/api/v1/caches/test-cache/roles")
+        .add_header("authorization", format!("Bearer {}", token))
+        .await;
+
+    res.assert_status_ok();
+    let body: Value = res.json();
+    assert_eq!(body["error"], false);
+    let roles = body["message"]["roles"].as_array().expect("roles");
+    assert!(roles.len() >= 2);
+    assert!(
+        roles
+            .iter()
+            .any(|r| r["name"] == "Admin" && r["builtin"] == true)
+    );
+    assert!(
+        roles
+            .iter()
+            .any(|r| r["name"] == "pusher" && r["builtin"] == false)
+    );
+    let perms = body["message"]["available_permissions"]
+        .as_array()
+        .expect("available_permissions");
+    assert!(perms.iter().any(|p| p["id"] == "manageCacheMembers"));
 }
 
-#[test]
-fn list_returns_builtins_and_available_permissions() {
-    run(async {
-        let session_id = SessionId::now_v7();
-        let token = make_token(session_id);
-        let custom_id = RoleId::now_v7();
+#[tokio::test]
+async fn create_role_rejects_duplicate_name() {
+    let session_id = SessionId::now_v7();
+    let token = make_token(session_id);
+    let existing = custom_role_row(RoleId::now_v7(), "pusher", 0);
 
-        let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
-            .append_query_results([vec![cache_row()]])
-            .append_query_results([vec![admin_member()]])
-            .append_query_results([vec![
-                admin_role_row(),
-                view_role_row(),
-                custom_role_row(custom_id, "pusher", 0),
-            ]]);
+    let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
+        .append_query_results([vec![cache_row()]])
+        .append_query_results([vec![admin_member()]])
+        .append_query_results([vec![admin_role_row()]])
+        .append_query_results([vec![existing]]);
 
-        let server = make_test_server(db.into_connection());
-        let res = server
-            .get("/api/v1/caches/test-cache/roles")
-            .add_header("authorization", format!("Bearer {}", token))
-            .await;
+    let server = make_test_server(db.into_connection());
+    let res = server
+        .post("/api/v1/caches/test-cache/roles")
+        .add_header("authorization", format!("Bearer {}", token))
+        .json(&json!({"name": "pusher", "permissions": []}))
+        .await;
 
-        res.assert_status_ok();
-        let body: Value = res.json();
-        assert_eq!(body["error"], false);
-        let roles = body["message"]["roles"].as_array().expect("roles");
-        assert!(roles.len() >= 2);
-        assert!(
-            roles
-                .iter()
-                .any(|r| r["name"] == "Admin" && r["builtin"] == true)
-        );
-        assert!(
-            roles
-                .iter()
-                .any(|r| r["name"] == "pusher" && r["builtin"] == false)
-        );
-        let perms = body["message"]["available_permissions"]
-            .as_array()
-            .expect("available_permissions");
-        assert!(perms.iter().any(|p| p["id"] == "manageCacheMembers"));
-    });
+    res.assert_status(axum::http::StatusCode::CONFLICT);
 }
 
-#[test]
-fn create_role_rejects_duplicate_name() {
-    run(async {
-        let session_id = SessionId::now_v7();
-        let token = make_token(session_id);
-        let existing = custom_role_row(RoleId::now_v7(), "pusher", 0);
+#[tokio::test]
+async fn create_role_rejects_unknown_permission() {
+    let session_id = SessionId::now_v7();
+    let token = make_token(session_id);
 
-        let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
-            .append_query_results([vec![cache_row()]])
-            .append_query_results([vec![admin_member()]])
-            .append_query_results([vec![admin_role_row()]])
-            .append_query_results([vec![existing]]);
+    let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
+        .append_query_results([vec![cache_row()]])
+        .append_query_results([vec![admin_member()]])
+        .append_query_results([vec![admin_role_row()]]);
 
-        let server = make_test_server(db.into_connection());
-        let res = server
-            .post("/api/v1/caches/test-cache/roles")
-            .add_header("authorization", format!("Bearer {}", token))
-            .json(&json!({"name": "pusher", "permissions": []}))
-            .await;
+    let server = make_test_server(db.into_connection());
+    let res = server
+        .post("/api/v1/caches/test-cache/roles")
+        .add_header("authorization", format!("Bearer {}", token))
+        .json(&json!({"name": "pusher", "permissions": ["notARealPermission"]}))
+        .await;
 
-        res.assert_status(axum::http::StatusCode::CONFLICT);
-    });
+    res.assert_status(axum::http::StatusCode::BAD_REQUEST);
+    let body: Value = res.json();
+    assert!(
+        body["message"]
+            .as_str()
+            .unwrap()
+            .contains("notARealPermission")
+    );
 }
 
-#[test]
-fn create_role_rejects_unknown_permission() {
-    run(async {
-        let session_id = SessionId::now_v7();
-        let token = make_token(session_id);
+#[tokio::test]
+async fn patch_role_rejects_builtin() {
+    let session_id = SessionId::now_v7();
+    let token = make_token(session_id);
 
-        let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
-            .append_query_results([vec![cache_row()]])
-            .append_query_results([vec![admin_member()]])
-            .append_query_results([vec![admin_role_row()]]);
+    let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
+        .append_query_results([vec![cache_row()]])
+        .append_query_results([vec![admin_member()]])
+        .append_query_results([vec![admin_role_row()]])
+        .append_query_results([vec![admin_role_row()]]);
 
-        let server = make_test_server(db.into_connection());
-        let res = server
-            .post("/api/v1/caches/test-cache/roles")
-            .add_header("authorization", format!("Bearer {}", token))
-            .json(&json!({"name": "pusher", "permissions": ["notARealPermission"]}))
-            .await;
+    let server = make_test_server(db.into_connection());
+    let res = server
+        .patch(&format!(
+            "/api/v1/caches/test-cache/roles/{}",
+            BASE_CACHE_ROLE_ADMIN_ID
+        ))
+        .add_header("authorization", format!("Bearer {}", token))
+        .json(&json!({"permissions": []}))
+        .await;
 
-        res.assert_status(axum::http::StatusCode::BAD_REQUEST);
-        let body: Value = res.json();
-        assert!(
-            body["message"]
-                .as_str()
-                .unwrap()
-                .contains("notARealPermission")
-        );
-    });
+    res.assert_status(axum::http::StatusCode::FORBIDDEN);
 }
 
-#[test]
-fn patch_role_rejects_builtin() {
-    run(async {
-        let session_id = SessionId::now_v7();
-        let token = make_token(session_id);
+#[tokio::test]
+async fn patch_role_rejects_managed() {
+    let session_id = SessionId::now_v7();
+    let token = make_token(session_id);
+    let custom_id = RoleId::now_v7();
+    let managed_custom = cache_role::Model {
+        managed: true,
+        ..custom_role_row(custom_id, "pusher", 0)
+    };
 
-        let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
-            .append_query_results([vec![cache_row()]])
-            .append_query_results([vec![admin_member()]])
-            .append_query_results([vec![admin_role_row()]])
-            .append_query_results([vec![admin_role_row()]]);
+    let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
+        .append_query_results([vec![cache_row()]])
+        .append_query_results([vec![admin_member()]])
+        .append_query_results([vec![admin_role_row()]])
+        .append_query_results([vec![managed_custom]]);
 
-        let server = make_test_server(db.into_connection());
-        let res = server
-            .patch(&format!(
-                "/api/v1/caches/test-cache/roles/{}",
-                BASE_CACHE_ROLE_ADMIN_ID
-            ))
-            .add_header("authorization", format!("Bearer {}", token))
-            .json(&json!({"permissions": []}))
-            .await;
+    let server = make_test_server(db.into_connection());
+    let res = server
+        .patch(&format!("/api/v1/caches/test-cache/roles/{}", custom_id))
+        .add_header("authorization", format!("Bearer {}", token))
+        .json(&json!({"permissions": []}))
+        .await;
 
-        res.assert_status(axum::http::StatusCode::FORBIDDEN);
-    });
+    res.assert_status(axum::http::StatusCode::FORBIDDEN);
 }
 
-#[test]
-fn patch_role_rejects_managed() {
-    run(async {
-        let session_id = SessionId::now_v7();
-        let token = make_token(session_id);
-        let custom_id = RoleId::now_v7();
-        let managed_custom = cache_role::Model {
-            managed: true,
-            ..custom_role_row(custom_id, "pusher", 0)
-        };
+#[tokio::test]
+async fn delete_role_rejects_role_in_use() {
+    let session_id = SessionId::now_v7();
+    let token = make_token(session_id);
+    let custom_id = RoleId::now_v7();
+    let custom = custom_role_row(custom_id, "pusher", 0);
 
-        let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
-            .append_query_results([vec![cache_row()]])
-            .append_query_results([vec![admin_member()]])
-            .append_query_results([vec![admin_role_row()]])
-            .append_query_results([vec![managed_custom]]);
+    let in_use = cache_user::Model {
+        id: CacheUserId::now_v7(),
+        cache: cache_id(),
+        user: user_id(),
+        role: custom_id,
+    };
 
-        let server = make_test_server(db.into_connection());
-        let res = server
-            .patch(&format!("/api/v1/caches/test-cache/roles/{}", custom_id))
-            .add_header("authorization", format!("Bearer {}", token))
-            .json(&json!({"permissions": []}))
-            .await;
+    let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
+        .append_query_results([vec![cache_row()]])
+        .append_query_results([vec![admin_member()]])
+        .append_query_results([vec![admin_role_row()]])
+        .append_query_results([vec![custom]])
+        .append_query_results([vec![in_use]]);
 
-        res.assert_status(axum::http::StatusCode::FORBIDDEN);
-    });
-}
+    let server = make_test_server(db.into_connection());
+    let res = server
+        .delete(&format!("/api/v1/caches/test-cache/roles/{}", custom_id))
+        .add_header("authorization", format!("Bearer {}", token))
+        .await;
 
-#[test]
-fn delete_role_rejects_role_in_use() {
-    run(async {
-        let session_id = SessionId::now_v7();
-        let token = make_token(session_id);
-        let custom_id = RoleId::now_v7();
-        let custom = custom_role_row(custom_id, "pusher", 0);
-
-        let in_use = cache_user::Model {
-            id: CacheUserId::now_v7(),
-            cache: cache_id(),
-            user: user_id(),
-            role: custom_id,
-        };
-
-        let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
-            .append_query_results([vec![cache_row()]])
-            .append_query_results([vec![admin_member()]])
-            .append_query_results([vec![admin_role_row()]])
-            .append_query_results([vec![custom]])
-            .append_query_results([vec![in_use]]);
-
-        let server = make_test_server(db.into_connection());
-        let res = server
-            .delete(&format!("/api/v1/caches/test-cache/roles/{}", custom_id))
-            .add_header("authorization", format!("Bearer {}", token))
-            .await;
-
-        res.assert_status(axum::http::StatusCode::BAD_REQUEST);
-    });
+    res.assert_status(axum::http::StatusCode::BAD_REQUEST);
 }

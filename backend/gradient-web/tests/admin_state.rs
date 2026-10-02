@@ -4,24 +4,11 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-#![expect(
-    clippy::unwrap_used,
-    reason = "test scaffolding: a fixture helper that cannot build its value should fail the test loudly"
-)]
-
 use gradient_test_support::fixtures::user;
 use gradient_test_support::web::{live_session, make_test_server, make_token};
 use gradient_types::SessionId;
 use sea_orm::{DatabaseBackend, MockDatabase};
 use serde_json::Value;
-
-fn run<F: std::future::Future>(fut: F) -> F::Output {
-    tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap()
-        .block_on(fut)
-}
 
 fn superuser() -> gradient_entity::user::Model {
     gradient_entity::user::Model {
@@ -63,112 +50,104 @@ fn with_empty_export(db: MockDatabase) -> MockDatabase {
         .append_query_results([Vec::<gradient_entity::github_installation::Model>::new()])
 }
 
-#[test]
-fn export_state_rejects_non_superuser() {
-    run(async {
-        let session_id = SessionId::now_v7();
-        let token = make_token(session_id);
-        let db = with_user(
-            MockDatabase::new(DatabaseBackend::Postgres),
-            session_id,
-            user(),
-        );
+#[tokio::test]
+async fn export_state_rejects_non_superuser() {
+    let session_id = SessionId::now_v7();
+    let token = make_token(session_id);
+    let db = with_user(
+        MockDatabase::new(DatabaseBackend::Postgres),
+        session_id,
+        user(),
+    );
 
-        let server = make_test_server(db.into_connection());
-        let res = server
-            .get("/api/v1/admin/state")
-            .add_header("authorization", format!("Bearer {}", token))
-            .await;
+    let server = make_test_server(db.into_connection());
+    let res = server
+        .get("/api/v1/admin/state")
+        .add_header("authorization", format!("Bearer {}", token))
+        .await;
 
-        res.assert_status_forbidden();
-    });
+    res.assert_status_forbidden();
 }
 
-#[test]
-fn export_state_rejects_unknown_format() {
-    run(async {
-        let session_id = SessionId::now_v7();
-        let token = make_token(session_id);
-        let db = with_user(
-            MockDatabase::new(DatabaseBackend::Postgres),
-            session_id,
-            superuser(),
-        );
+#[tokio::test]
+async fn export_state_rejects_unknown_format() {
+    let session_id = SessionId::now_v7();
+    let token = make_token(session_id);
+    let db = with_user(
+        MockDatabase::new(DatabaseBackend::Postgres),
+        session_id,
+        superuser(),
+    );
 
-        let server = make_test_server(db.into_connection());
-        let res = server
-            .get("/api/v1/admin/state?format=yaml")
-            .add_header("authorization", format!("Bearer {}", token))
-            .await;
+    let server = make_test_server(db.into_connection());
+    let res = server
+        .get("/api/v1/admin/state?format=yaml")
+        .add_header("authorization", format!("Bearer {}", token))
+        .await;
 
-        res.assert_status_bad_request();
-    });
+    res.assert_status_bad_request();
 }
 
-#[test]
-fn export_state_json_returns_empty_shape() {
-    run(async {
-        let session_id = SessionId::now_v7();
-        let token = make_token(session_id);
-        let db = with_empty_export(with_user(
-            MockDatabase::new(DatabaseBackend::Postgres),
-            session_id,
-            superuser(),
-        ));
+#[tokio::test]
+async fn export_state_json_returns_empty_shape() {
+    let session_id = SessionId::now_v7();
+    let token = make_token(session_id);
+    let db = with_empty_export(with_user(
+        MockDatabase::new(DatabaseBackend::Postgres),
+        session_id,
+        superuser(),
+    ));
 
-        let server = make_test_server(db.into_connection());
-        let res = server
-            .get("/api/v1/admin/state?format=json")
-            .add_header("authorization", format!("Bearer {}", token))
-            .await;
+    let server = make_test_server(db.into_connection());
+    let res = server
+        .get("/api/v1/admin/state?format=json")
+        .add_header("authorization", format!("Bearer {}", token))
+        .await;
 
-        res.assert_status_ok();
-        let body: Value = res.json();
-        assert_eq!(body["error"], false);
-        for key in [
-            "users",
-            "projects",
-            "tasks",
-            "caches",
-            "roles",
-            "api_keys",
-            "workers",
-            "integrations",
-        ] {
-            assert!(
-                body["message"][key].is_object(),
-                "missing key '{key}' in export"
-            );
-        }
-    });
-}
-
-#[test]
-fn export_state_defaults_to_nix() {
-    run(async {
-        let session_id = SessionId::now_v7();
-        let token = make_token(session_id);
-        let db = with_empty_export(with_user(
-            MockDatabase::new(DatabaseBackend::Postgres),
-            session_id,
-            superuser(),
-        ));
-
-        let server = make_test_server(db.into_connection());
-        let res = server
-            .get("/api/v1/admin/state")
-            .add_header("authorization", format!("Bearer {}", token))
-            .await;
-
-        res.assert_status_ok();
+    res.assert_status_ok();
+    let body: Value = res.json();
+    assert_eq!(body["error"], false);
+    for key in [
+        "users",
+        "projects",
+        "tasks",
+        "caches",
+        "roles",
+        "api_keys",
+        "workers",
+        "integrations",
+    ] {
         assert!(
-            res.header("content-type")
-                .to_str()
-                .unwrap()
-                .starts_with("text/plain"),
+            body["message"][key].is_object(),
+            "missing key '{key}' in export"
         );
-        let body = res.text();
-        assert!(body.starts_with("# Generated by"));
-        assert!(body.contains("users = { };"));
-    });
+    }
+}
+
+#[tokio::test]
+async fn export_state_defaults_to_nix() {
+    let session_id = SessionId::now_v7();
+    let token = make_token(session_id);
+    let db = with_empty_export(with_user(
+        MockDatabase::new(DatabaseBackend::Postgres),
+        session_id,
+        superuser(),
+    ));
+
+    let server = make_test_server(db.into_connection());
+    let res = server
+        .get("/api/v1/admin/state")
+        .add_header("authorization", format!("Bearer {}", token))
+        .await;
+
+    res.assert_status_ok();
+    assert!(
+        res.header("content-type")
+            .to_str()
+            .unwrap()
+            .starts_with("text/plain"),
+    );
+    let body = res.text();
+    assert!(body.starts_with("# Generated by"));
+    assert!(body.contains("users = { };"));
 }

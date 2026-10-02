@@ -64,50 +64,40 @@ fn hex_hash(byte: u8) -> String {
     s
 }
 
-fn run<F: std::future::Future>(fut: F) -> F::Output {
-    tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap()
-        .block_on(fut)
-}
+#[tokio::test]
+async fn rejects_oversized_total() {
+    let session_id = SessionId::now_v7();
+    let token = make_token(session_id);
 
-#[test]
-fn rejects_oversized_total() {
-    run(async {
-        let session_id = SessionId::now_v7();
-        let token = make_token(session_id);
-
-        let db = with_project_access(with_auth(
-            MockDatabase::new(DatabaseBackend::Postgres),
-            session_id,
-        ));
-        let server = make_test_server_configured(db.into_connection(), |cli| {
-            cli.http.max_source_upload_size = 20 * 1024 * 1024;
-        });
-
-        let body = json!({
-            "project": "test-project",
-            "files": [
-                {"path": "a", "hash": hex_hash(0xaa), "size": 20 * 1024 * 1024 + 1i64 },
-            ]
-        });
-
-        let res = server
-            .post(URL)
-            .add_header("authorization", format!("Bearer {}", token))
-            .json(&body)
-            .await;
-
-        res.assert_status(StatusCode::PAYLOAD_TOO_LARGE);
-        let body: Value = res.json();
-        assert_eq!(body["error"], true);
-        assert_eq!(body["code"], "payload_too_large");
+    let db = with_project_access(with_auth(
+        MockDatabase::new(DatabaseBackend::Postgres),
+        session_id,
+    ));
+    let server = make_test_server_configured(db.into_connection(), |cli| {
+        cli.http.max_source_upload_size = 20 * 1024 * 1024;
     });
+
+    let body = json!({
+        "project": "test-project",
+        "files": [
+            {"path": "a", "hash": hex_hash(0xaa), "size": 20 * 1024 * 1024 + 1i64 },
+        ]
+    });
+
+    let res = server
+        .post(URL)
+        .add_header("authorization", format!("Bearer {}", token))
+        .json(&body)
+        .await;
+
+    res.assert_status(StatusCode::PAYLOAD_TOO_LARGE);
+    let body: Value = res.json();
+    assert_eq!(body["error"], true);
+    assert_eq!(body["code"], "payload_too_large");
 }
 
-#[test]
-fn rejects_bad_paths() {
+#[tokio::test]
+async fn rejects_bad_paths() {
     let bad_paths = [
         "../escape",
         "/absolute",
@@ -119,81 +109,6 @@ fn rejects_bad_paths() {
     ];
 
     for path in bad_paths {
-        run(async move {
-            let session_id = SessionId::now_v7();
-            let token = make_token(session_id);
-
-            let db = with_project_access(with_auth(
-                MockDatabase::new(DatabaseBackend::Postgres),
-                session_id,
-            ));
-            let server = make_test_server(db.into_connection());
-
-            let body = json!({
-                "project": "test-project",
-                "files": [
-                    {"path": path, "hash": hex_hash(0xaa), "size": 1i64 },
-                ]
-            });
-
-            let res = server
-                .post(URL)
-                .add_header("authorization", format!("Bearer {}", token))
-                .json(&body)
-                .await;
-
-            res.assert_status(StatusCode::BAD_REQUEST);
-            let body: Value = res.json();
-            assert_eq!(body["error"], true);
-        });
-    }
-}
-
-#[test]
-fn rejects_bad_hashes() {
-    let bad_hashes = [
-        "".to_string(),
-        "abc".to_string(),
-        "g".repeat(64),
-        "A".repeat(64),
-        "a".repeat(63),
-        "a".repeat(65),
-    ];
-
-    for hash in bad_hashes {
-        run(async {
-            let session_id = SessionId::now_v7();
-            let token = make_token(session_id);
-
-            let db = with_project_access(with_auth(
-                MockDatabase::new(DatabaseBackend::Postgres),
-                session_id,
-            ));
-            let server = make_test_server(db.into_connection());
-
-            let body = json!({
-                "project": "test-project",
-                "files": [
-                    {"path": "foo.txt", "hash": hash, "size": 1i64 },
-                ]
-            });
-
-            let res = server
-                .post(URL)
-                .add_header("authorization", format!("Bearer {}", token))
-                .json(&body)
-                .await;
-
-            res.assert_status(StatusCode::BAD_REQUEST);
-            let body: Value = res.json();
-            assert_eq!(body["error"], true);
-        });
-    }
-}
-
-#[test]
-fn rejects_duplicate_paths() {
-    run(async {
         let session_id = SessionId::now_v7();
         let token = make_token(session_id);
 
@@ -206,8 +121,7 @@ fn rejects_duplicate_paths() {
         let body = json!({
             "project": "test-project",
             "files": [
-                {"path": "a", "hash": hex_hash(0xaa), "size": 1i64 },
-                {"path": "a", "hash": hex_hash(0xbb), "size": 1i64 },
+                {"path": path, "hash": hex_hash(0xaa), "size": 1i64 },
             ]
         });
 
@@ -218,47 +132,36 @@ fn rejects_duplicate_paths() {
             .await;
 
         res.assert_status(StatusCode::BAD_REQUEST);
-    });
+        let body: Value = res.json();
+        assert_eq!(body["error"], true);
+    }
 }
 
-#[test]
-fn happy_path_returns_session_and_missing() {
-    run(async {
+#[tokio::test]
+async fn rejects_bad_hashes() {
+    let bad_hashes = [
+        "".to_string(),
+        "abc".to_string(),
+        "g".repeat(64),
+        "A".repeat(64),
+        "a".repeat(63),
+        "a".repeat(65),
+    ];
+
+    for hash in bad_hashes {
         let session_id = SessionId::now_v7();
         let token = make_token(session_id);
-
-        let now_ts = chrono::Utc::now().naive_utc();
-        let inserted_session = gradient_entity::upload_session::Model {
-            id: UploadSessionId::now_v7(),
-            project: gradient_test_support::fixtures::project_id(),
-            manifest: json!([]),
-            missing: json!([]),
-            total_size: 300,
-            created_at: now_ts,
-            expires_at: now_ts + chrono::Duration::hours(1),
-            ..Default::default()
-        };
 
         let db = with_project_access(with_auth(
             MockDatabase::new(DatabaseBackend::Postgres),
             session_id,
-        ))
-        .append_query_results([Vec::<gradient_entity::build_request_blob::Model>::new()])
-        .append_query_results([vec![inserted_session]])
-        .append_exec_results([MockExecResult {
-            last_insert_id: 0,
-            rows_affected: 1,
-        }]);
-
+        ));
         let server = make_test_server(db.into_connection());
 
-        let hash_a = hex_hash(0xaa);
-        let hash_b = hex_hash(0xbb);
         let body = json!({
             "project": "test-project",
             "files": [
-                {"path": "flake.nix", "hash": hash_a, "size": 100i64 },
-                {"path": "src/main.rs", "hash": hash_b, "size": 200i64 },
+                {"path": "foo.txt", "hash": hash, "size": 1i64 },
             ]
         });
 
@@ -268,23 +171,102 @@ fn happy_path_returns_session_and_missing() {
             .json(&body)
             .await;
 
-        res.assert_status_ok();
+        res.assert_status(StatusCode::BAD_REQUEST);
         let body: Value = res.json();
-        assert_eq!(body["error"], false);
+        assert_eq!(body["error"], true);
+    }
+}
 
-        let session_str = body["message"]["session"].as_str().expect("session str");
-        assert!(
-            Uuid::parse_str(session_str).is_ok(),
-            "session is not a UUID: {session_str}"
-        );
+#[tokio::test]
+async fn rejects_duplicate_paths() {
+    let session_id = SessionId::now_v7();
+    let token = make_token(session_id);
 
-        let missing = body["message"]["missing"]
-            .as_array()
-            .expect("missing array");
-        let missing_set: std::collections::HashSet<&str> =
-            missing.iter().map(|v| v.as_str().unwrap()).collect();
-        assert_eq!(missing.len(), 2);
-        assert!(missing_set.contains(hash_a.as_str()));
-        assert!(missing_set.contains(hash_b.as_str()));
+    let db = with_project_access(with_auth(
+        MockDatabase::new(DatabaseBackend::Postgres),
+        session_id,
+    ));
+    let server = make_test_server(db.into_connection());
+
+    let body = json!({
+        "project": "test-project",
+        "files": [
+            {"path": "a", "hash": hex_hash(0xaa), "size": 1i64 },
+            {"path": "a", "hash": hex_hash(0xbb), "size": 1i64 },
+        ]
     });
+
+    let res = server
+        .post(URL)
+        .add_header("authorization", format!("Bearer {}", token))
+        .json(&body)
+        .await;
+
+    res.assert_status(StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn happy_path_returns_session_and_missing() {
+    let session_id = SessionId::now_v7();
+    let token = make_token(session_id);
+
+    let now_ts = chrono::Utc::now().naive_utc();
+    let inserted_session = gradient_entity::upload_session::Model {
+        id: UploadSessionId::now_v7(),
+        project: gradient_test_support::fixtures::project_id(),
+        manifest: json!([]),
+        missing: json!([]),
+        total_size: 300,
+        created_at: now_ts,
+        expires_at: now_ts + chrono::Duration::hours(1),
+        ..Default::default()
+    };
+
+    let db = with_project_access(with_auth(
+        MockDatabase::new(DatabaseBackend::Postgres),
+        session_id,
+    ))
+    .append_query_results([Vec::<gradient_entity::build_request_blob::Model>::new()])
+    .append_query_results([vec![inserted_session]])
+    .append_exec_results([MockExecResult {
+        last_insert_id: 0,
+        rows_affected: 1,
+    }]);
+
+    let server = make_test_server(db.into_connection());
+
+    let hash_a = hex_hash(0xaa);
+    let hash_b = hex_hash(0xbb);
+    let body = json!({
+        "project": "test-project",
+        "files": [
+            {"path": "flake.nix", "hash": hash_a, "size": 100i64 },
+            {"path": "src/main.rs", "hash": hash_b, "size": 200i64 },
+        ]
+    });
+
+    let res = server
+        .post(URL)
+        .add_header("authorization", format!("Bearer {}", token))
+        .json(&body)
+        .await;
+
+    res.assert_status_ok();
+    let body: Value = res.json();
+    assert_eq!(body["error"], false);
+
+    let session_str = body["message"]["session"].as_str().expect("session str");
+    assert!(
+        Uuid::parse_str(session_str).is_ok(),
+        "session is not a UUID: {session_str}"
+    );
+
+    let missing = body["message"]["missing"]
+        .as_array()
+        .expect("missing array");
+    let missing_set: std::collections::HashSet<&str> =
+        missing.iter().map(|v| v.as_str().unwrap()).collect();
+    assert_eq!(missing.len(), 2);
+    assert!(missing_set.contains(hash_a.as_str()));
+    assert!(missing_set.contains(hash_b.as_str()));
 }

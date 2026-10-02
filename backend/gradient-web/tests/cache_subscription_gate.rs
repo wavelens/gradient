@@ -129,163 +129,147 @@ fn with_auth(db: MockDatabase, session_id: SessionId) -> MockDatabase {
         .append_query_results([vec![user()]])
 }
 
-fn run<F: std::future::Future>(fut: F) -> F::Output {
-    tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap()
-        .block_on(fut)
+#[tokio::test]
+async fn subscribe_requires_project_manage_subscriptions() {
+    let session_id = SessionId::now_v7();
+    let token = make_token(session_id);
+
+    let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
+        .append_query_results([vec![project()]])
+        .append_query_results([vec![view_only_project_membership()]])
+        .append_query_results([vec![view_only_project_role()]]);
+
+    let server = make_test_server(db.into_connection());
+    let res = server
+        .post("/api/v1/projects/test-project/subscribe/test-cache")
+        .add_header("authorization", format!("Bearer {}", token))
+        .await;
+
+    res.assert_status(axum::http::StatusCode::FORBIDDEN);
 }
 
-#[test]
-fn subscribe_requires_project_manage_subscriptions() {
-    run(async {
-        let session_id = SessionId::now_v7();
-        let token = make_token(session_id);
+#[tokio::test]
+async fn subscribe_without_cache_permission_records_a_request() {
+    let session_id = SessionId::now_v7();
+    let token = make_token(session_id);
 
-        let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
-            .append_query_results([vec![project()]])
-            .append_query_results([vec![view_only_project_membership()]])
-            .append_query_results([vec![view_only_project_role()]]);
+    let pending = cache_subscription_request::Model {
+        id: CacheSubscriptionRequestId::now_v7(),
+        project: project_id(),
+        cache: cache_id(),
+        mode: project_cache::CacheSubscriptionMode::ReadWrite,
+        requested_by: user_id(),
+        created_at: test_date(),
+    };
 
-        let server = make_test_server(db.into_connection());
-        let res = server
-            .post("/api/v1/projects/test-project/subscribe/test-cache")
-            .add_header("authorization", format!("Bearer {}", token))
-            .await;
+    let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
+        .append_query_results([vec![project()]])
+        .append_query_results([vec![admin_project_membership()]])
+        .append_query_results([vec![admin_project_role()]])
+        .append_query_results([vec![cache_row(false)]])
+        .append_query_results([vec![view_cache_member()]])
+        .append_query_results([Vec::<project_cache::Model>::new()])
+        .append_query_results([Vec::<cache_subscription_request::Model>::new()])
+        .append_query_results([vec![view_cache_member()]])
+        .append_query_results([vec![view_cache_role()]])
+        .append_query_results([vec![pending]])
+        .append_exec_results([MockExecResult {
+            last_insert_id: 0,
+            rows_affected: 1,
+        }])
+        .append_query_results([Vec::<cache_user::Model>::new()]);
 
-        res.assert_status(axum::http::StatusCode::FORBIDDEN);
-    });
+    let server = make_test_server(db.into_connection());
+    let res = server
+        .post("/api/v1/projects/test-project/subscribe/test-cache")
+        .add_header("authorization", format!("Bearer {}", token))
+        .await;
+
+    res.assert_status_ok();
+    let body: serde_json::Value = res.json();
+    assert_eq!(
+        body["message"], "Subscription requested",
+        "no cache-side permission means a request, not a subscription"
+    );
 }
 
-#[test]
-fn subscribe_without_cache_permission_records_a_request() {
-    run(async {
-        let session_id = SessionId::now_v7();
-        let token = make_token(session_id);
+#[tokio::test]
+async fn subscribe_succeeds_when_both_granted() {
+    let session_id = SessionId::now_v7();
+    let token = make_token(session_id);
 
-        let pending = cache_subscription_request::Model {
-            id: CacheSubscriptionRequestId::now_v7(),
-            project: project_id(),
-            cache: cache_id(),
-            mode: project_cache::CacheSubscriptionMode::ReadWrite,
-            requested_by: user_id(),
-            created_at: test_date(),
-        };
+    let inserted_link = project_cache::Model {
+        id: ProjectCacheId::now_v7(),
+        project: project_id(),
+        cache: cache_id(),
+        mode: project_cache::CacheSubscriptionMode::ReadWrite,
+    };
 
-        let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
-            .append_query_results([vec![project()]])
-            .append_query_results([vec![admin_project_membership()]])
-            .append_query_results([vec![admin_project_role()]])
-            .append_query_results([vec![cache_row(false)]])
-            .append_query_results([vec![view_cache_member()]])
-            .append_query_results([Vec::<project_cache::Model>::new()])
-            .append_query_results([Vec::<cache_subscription_request::Model>::new()])
-            .append_query_results([vec![view_cache_member()]])
-            .append_query_results([vec![view_cache_role()]])
-            .append_query_results([vec![pending]])
-            .append_exec_results([MockExecResult {
-                last_insert_id: 0,
-                rows_affected: 1,
-            }])
-            .append_query_results([Vec::<cache_user::Model>::new()]);
+    let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
+        .append_query_results([vec![project()]])
+        .append_query_results([vec![admin_project_membership()]])
+        .append_query_results([vec![admin_project_role()]])
+        .append_query_results([vec![cache_row(false)]])
+        .append_query_results([vec![admin_cache_member()]])
+        .append_query_results([Vec::<project_cache::Model>::new()])
+        .append_query_results([Vec::<cache_subscription_request::Model>::new()])
+        .append_query_results([vec![admin_cache_member()]])
+        .append_query_results([vec![admin_cache_role()]])
+        .append_query_results([vec![inserted_link]])
+        .append_exec_results([MockExecResult {
+            last_insert_id: 0,
+            rows_affected: 1,
+        }])
+        .append_query_results([Vec::<gradient_entity::task::Model>::new()])
+        .append_query_results([Vec::<gradient_entity::derivation::Model>::new()]);
 
-        let server = make_test_server(db.into_connection());
-        let res = server
-            .post("/api/v1/projects/test-project/subscribe/test-cache")
-            .add_header("authorization", format!("Bearer {}", token))
-            .await;
+    let server = make_test_server(db.into_connection());
+    let res = server
+        .post("/api/v1/projects/test-project/subscribe/test-cache")
+        .add_header("authorization", format!("Bearer {}", token))
+        .await;
 
-        res.assert_status_ok();
-        let body: serde_json::Value = res.json();
-        assert_eq!(
-            body["message"], "Subscription requested",
-            "no cache-side permission means a request, not a subscription"
-        );
-    });
+    res.assert_status_ok();
+    let body: serde_json::Value = res.json();
+    assert_eq!(body["error"], false);
 }
 
-#[test]
-fn subscribe_succeeds_when_both_granted() {
-    run(async {
-        let session_id = SessionId::now_v7();
-        let token = make_token(session_id);
+#[tokio::test]
+async fn subscribe_to_a_public_cache_records_a_request_for_a_non_member() {
+    let session_id = SessionId::now_v7();
+    let token = make_token(session_id);
 
-        let inserted_link = project_cache::Model {
-            id: ProjectCacheId::now_v7(),
-            project: project_id(),
-            cache: cache_id(),
-            mode: project_cache::CacheSubscriptionMode::ReadWrite,
-        };
+    let pending = cache_subscription_request::Model {
+        id: CacheSubscriptionRequestId::now_v7(),
+        project: project_id(),
+        cache: cache_id(),
+        mode: project_cache::CacheSubscriptionMode::ReadWrite,
+        requested_by: user_id(),
+        created_at: test_date(),
+    };
 
-        let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
-            .append_query_results([vec![project()]])
-            .append_query_results([vec![admin_project_membership()]])
-            .append_query_results([vec![admin_project_role()]])
-            .append_query_results([vec![cache_row(false)]])
-            .append_query_results([vec![admin_cache_member()]])
-            .append_query_results([Vec::<project_cache::Model>::new()])
-            .append_query_results([Vec::<cache_subscription_request::Model>::new()])
-            .append_query_results([vec![admin_cache_member()]])
-            .append_query_results([vec![admin_cache_role()]])
-            .append_query_results([vec![inserted_link]])
-            .append_exec_results([MockExecResult {
-                last_insert_id: 0,
-                rows_affected: 1,
-            }])
-            .append_query_results([Vec::<gradient_entity::task::Model>::new()])
-            .append_query_results([Vec::<gradient_entity::derivation::Model>::new()]);
+    let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
+        .append_query_results([vec![project()]])
+        .append_query_results([vec![admin_project_membership()]])
+        .append_query_results([vec![admin_project_role()]])
+        .append_query_results([vec![cache_row(true)]])
+        .append_query_results([Vec::<project_cache::Model>::new()])
+        .append_query_results([Vec::<cache_subscription_request::Model>::new()])
+        .append_query_results([Vec::<cache_user::Model>::new()])
+        .append_query_results([vec![pending]])
+        .append_exec_results([MockExecResult {
+            last_insert_id: 0,
+            rows_affected: 1,
+        }])
+        .append_query_results([Vec::<cache_user::Model>::new()]);
 
-        let server = make_test_server(db.into_connection());
-        let res = server
-            .post("/api/v1/projects/test-project/subscribe/test-cache")
-            .add_header("authorization", format!("Bearer {}", token))
-            .await;
+    let server = make_test_server(db.into_connection());
+    let res = server
+        .post("/api/v1/projects/test-project/subscribe/test-cache")
+        .add_header("authorization", format!("Bearer {}", token))
+        .await;
 
-        res.assert_status_ok();
-        let body: serde_json::Value = res.json();
-        assert_eq!(body["error"], false);
-    });
-}
-
-#[test]
-fn subscribe_to_a_public_cache_records_a_request_for_a_non_member() {
-    run(async {
-        let session_id = SessionId::now_v7();
-        let token = make_token(session_id);
-
-        let pending = cache_subscription_request::Model {
-            id: CacheSubscriptionRequestId::now_v7(),
-            project: project_id(),
-            cache: cache_id(),
-            mode: project_cache::CacheSubscriptionMode::ReadWrite,
-            requested_by: user_id(),
-            created_at: test_date(),
-        };
-
-        let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
-            .append_query_results([vec![project()]])
-            .append_query_results([vec![admin_project_membership()]])
-            .append_query_results([vec![admin_project_role()]])
-            .append_query_results([vec![cache_row(true)]])
-            .append_query_results([Vec::<project_cache::Model>::new()])
-            .append_query_results([Vec::<cache_subscription_request::Model>::new()])
-            .append_query_results([Vec::<cache_user::Model>::new()])
-            .append_query_results([vec![pending]])
-            .append_exec_results([MockExecResult {
-                last_insert_id: 0,
-                rows_affected: 1,
-            }])
-            .append_query_results([Vec::<cache_user::Model>::new()]);
-
-        let server = make_test_server(db.into_connection());
-        let res = server
-            .post("/api/v1/projects/test-project/subscribe/test-cache")
-            .add_header("authorization", format!("Bearer {}", token))
-            .await;
-
-        res.assert_status_ok();
-        let body: serde_json::Value = res.json();
-        assert_eq!(body["message"], "Subscription requested");
-    });
+    res.assert_status_ok();
+    let body: serde_json::Value = res.json();
+    assert_eq!(body["message"], "Subscription requested");
 }
