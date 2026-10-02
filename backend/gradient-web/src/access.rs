@@ -16,8 +16,8 @@ use gradient_types::consts::{BASE_CACHE_ROLE_ADMIN_ID, BASE_ROLE_ADMIN_ID};
 use gradient_types::ids::{CacheId, IntegrationId, ProjectId, UserId};
 use gradient_types::{
     CCache, CCacheUser, CIntegration, CProjectCache, CProjectUser, CUser, ECacheRole, ECacheUser,
-    EIntegration, EProjectCache, EProjectUser, ERole, EUser, MCache, MIntegration, MProject,
-    MProjectUser, MTask, MUser,
+    EIntegration, EProjectCache, EProjectUser, EUser, MCache, MIntegration, MProject, MProjectUser,
+    MTask, MUser,
 };
 use sea_orm::{ColumnTrait, Condition, EntityTrait, QueryFilter};
 use std::sync::Arc;
@@ -359,16 +359,11 @@ pub async fn load_membership_with_permissions(
     {
         return Ok(None);
     }
-    let Some(membership) = load_project_membership(state, user_id, project_id).await? else {
+    let Some((membership, mask)) =
+        gradient_db::access::project_permission_mask(&state.web_db, project_id, user_id).await?
+    else {
         return Ok(None);
     };
-    // The `project_user.role -> role.id` FK is NOT NULL. A missing role is pointing at a skipped
-    // seed step or a hand-deleted row, and it is treated as no permissions instead of a panic.
-    let mask = ERole::find_by_id(membership.role)
-        .one(&state.web_db)
-        .await?
-        .map(|r| r.permission)
-        .unwrap_or(0);
     let effective = match api_key {
         Some(ctx) => mask & ctx.mask,
         None => mask,
