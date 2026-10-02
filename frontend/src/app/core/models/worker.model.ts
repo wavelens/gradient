@@ -22,6 +22,13 @@ export interface WorkerLiveInfo {
   draining: boolean;
 }
 
+export interface ConnectionFailure {
+  reason: string;
+  at: string;
+  direction: 'outbound' | 'inbound';
+  before_auth: boolean;
+}
+
 export interface Worker {
   worker_id: string;
   /** Human-readable display name. */
@@ -30,6 +37,9 @@ export interface Worker {
   active: boolean;
   /** True when this is a state-managed base worker shared across projects; `active` then means enabled for this project. */
   is_base: boolean;
+  gradient_ci: boolean;
+  connected: boolean;
+  last_error?: ConnectionFailure;
   registered_at?: string;
   /** WebSocket URL where the worker accepts incoming server connections. */
   url?: string;

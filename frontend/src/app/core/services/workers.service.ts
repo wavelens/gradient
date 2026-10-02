@@ -7,7 +7,13 @@
 import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
 import { ApiService } from './api.service';
-import { Worker, WorkerRegistration, WorkerTestResponse } from '@core/models';
+import {
+  GradientCiConnectRequest,
+  GradientCiConnectResponse,
+  Worker,
+  WorkerRegistration,
+  WorkerTestResponse,
+} from '@core/models';
 
 export interface WorkerSamplePoint {
   at: string;
@@ -94,5 +100,9 @@ export class WorkersService {
 
   testWorker(project: string, workerId: string): Observable<WorkerTestResponse> {
     return this.api.post<WorkerTestResponse>(`projects/${project}/workers/${workerId}/test`, {});
+  }
+
+  connectGradientCi(body: GradientCiConnectRequest): Observable<GradientCiConnectResponse> {
+    return this.api.post<GradientCiConnectResponse>('gradient-ci/connections', body);
   }
 }
