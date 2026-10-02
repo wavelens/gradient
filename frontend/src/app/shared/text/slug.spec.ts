@@ -7,10 +7,14 @@
 import { slugify } from './slug';
 
 describe('slugify', () => {
-  it('transliterates German umlauts instead of dropping them', () => {
-    expect(slugify('NüschtOS')).toBe('nuschtos');
-    expect(slugify('Übersicht')).toBe('ubersicht');
-    expect(slugify('Öl Ärger')).toBe('ol-arger');
+  it('spells out German umlauts with a trailing e', () => {
+    expect(slugify('NüschtOS')).toBe('nueschtos');
+    expect(slugify('Übersicht')).toBe('uebersicht');
+    expect(slugify('Öl Ärger')).toBe('oel-aerger');
+  });
+
+  it('spells out umlauts typed as a base letter plus combining diaeresis', () => {
+    expect(slugify('Ko\u0308ln')).toBe('koeln');
   });
 
   it('expands the sharp s to ss', () => {
