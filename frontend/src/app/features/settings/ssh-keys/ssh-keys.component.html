@@ -13,6 +13,9 @@
   <gr-form-field label="Build host">
     <gr-copy-field [value]="buildHostCommand" />
   </gr-form-field>
+  <gr-form-field label="SSH config">
+    <gr-copy-field [value]="sshConfig" multiline />
+  </gr-form-field>
 
   @if (loading()) {
     <gr-loading-spinner message="Loading SSH keys..." />

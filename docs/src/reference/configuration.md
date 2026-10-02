@@ -281,7 +281,7 @@ Declarative entities under `services.gradient.state` are in the [state reference
 |---|---|---|---|---|
 | `ssh.enable` | bool | `false` | `GRADIENT_SSH_ENABLE` | Whether to enable the Nix daemon over SSH for `ssh-ng://` substituters, `nix copy` and `nixos-rebuild --build-host`. |
 | `ssh.hostKeyFile` | null or path | `null` | `GRADIENT_SSH_HOST_KEY_FILE` | File containing the OpenSSH private host key. If unset, an ed25519 key is generated in `baseDir` on first start. |
-| `ssh.listenAddress` | string | `config.services.gradient.listenAddr` | `GRADIENT_SSH_LISTEN_ADDRESS` | IP address the SSH server is listening on. |
+| `ssh.listenAddress` | string | `"0.0.0.0"` | `GRADIENT_SSH_LISTEN_ADDRESS` | IP address the SSH server is listening on. |
 | `ssh.openFirewall` | bool | `false` | - | Whether to enable the SSH port in the firewall. |
 | `ssh.port` | port | `2222` | `GRADIENT_SSH_PORT` | Port the SSH server is listening on. |
 

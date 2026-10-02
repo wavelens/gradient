@@ -58,8 +58,9 @@ export class SshKeysComponent implements OnInit {
   formName = '';
   formPublicKey = '';
 
-  readonly storeUrl = `ssh-ng://<project>@${location.hostname}:${this.config.sshPort ?? 2222}`;
+  readonly storeUrl = `ssh-ng://<project>@${location.hostname}`;
   readonly buildHostCommand = `nixos-rebuild switch --build-host ${this.storeUrl}`;
+  readonly sshConfig = `Host ${location.hostname}\n  Port ${this.config.sshPort ?? 2222}`;
 
   ngOnInit(): void {
     this.loadKeys();

@@ -47,7 +47,11 @@ async fn load_session(
         return Ok(None);
     };
 
-    let Some(user) = EUser::find_by_id(key.user).one(&state.web_db).await? else {
+    let Some(user) = EUser::find_by_id(key.user)
+        .one(&state.web_db)
+        .await?
+        .filter(|u| u.active)
+    else {
         return Ok(None);
     };
 
@@ -125,5 +129,26 @@ mod tests {
             rejected.err().map(|r| r.to_string()),
             Some(Rejected.to_string())
         );
+    }
+
+    #[tokio::test]
+    async fn a_deactivated_user_is_rejected() {
+        let user = MUser {
+            active: false,
+            ..gradient_test_support::fixtures::user()
+        };
+        let key = MUserSshKey {
+            user: user.id,
+            ..Default::default()
+        };
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([vec![key]])
+            .append_query_results([vec![user]])
+            .into_connection();
+        let state = gradient_test_support::state::test_state(db.clone());
+
+        assert!(authorize(&state, "project", "SHA256:known").await.is_err());
+        let log = format!("{:?}", db.into_transaction_log());
+        assert!(!log.contains("project_user"), "{log}");
     }
 }

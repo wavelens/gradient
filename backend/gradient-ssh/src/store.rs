@@ -26,6 +26,7 @@ use std::future::{Future, ready};
 use std::pin::Pin;
 use std::sync::Arc;
 use tokio::io::AsyncBufRead;
+use tokio::task::JoinSet;
 
 pub struct SshBackend {
     session: Arc<Session>,
@@ -65,6 +66,16 @@ impl Backend for SshBackend {
 
 pub struct CacheStore {
     session: Arc<Session>,
+}
+
+const CONCURRENT_COMMITS: usize = 8;
+
+fn joined(result: Option<Result<anyhow::Result<()>, tokio::task::JoinError>>) -> DaemonResult<()> {
+    match result {
+        Some(Ok(committed)) => committed.map_err(err),
+        Some(Err(e)) => Err(err(e)),
+        None => Ok(()),
+    }
 }
 
 pub(crate) fn err(e: impl Display) -> DaemonError {
@@ -265,9 +276,26 @@ impl DaemonStore for CacheStore {
     {
         async move {
             let mut stream = std::pin::pin!(stream);
+            let mut commits = JoinSet::new();
             while let Some(item) = stream.next().await {
                 let AddToStoreItem { info, reader } = item?;
-                self.copy_in(&info, reader).await?;
+                if self.served(&info.path).await?.is_some() {
+                    tokio::io::copy(&mut std::pin::pin!(reader), &mut tokio::io::sink()).await?;
+                    continue;
+                }
+
+                let pending = crate::ingest::stage(&self.session, &info, reader)
+                    .await
+                    .map_err(err)?;
+                let session = self.session.clone();
+                commits.spawn(async move { crate::ingest::commit(&session, &info, pending).await });
+                while commits.len() >= CONCURRENT_COMMITS {
+                    joined(commits.join_next().await)?;
+                }
+            }
+
+            while let Some(result) = commits.join_next().await {
+                joined(Some(result))?;
             }
 
             Ok(())

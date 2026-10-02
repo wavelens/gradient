@@ -635,6 +635,21 @@ assert "ssh-ng://" in refused, refused
 machine.fail(f"{ssh} unknownproject@localhost nix-daemon --stdio < /dev/null")
 assert api("GET", "user/ssh-keys", token=token)[0]["last_used_at"] is not None
 
+# Copy in and back out through the state project's cache.
+sa_pub = machine.succeed(
+    "ssh-keygen -q -t ed25519 -N '' -f /root/.ssh/gradient-sa && cat /root/.ssh/gradient-sa.pub"
+).strip()
+api("POST", "user/ssh-keys", token=sa_token, body=json.dumps({"name": "vm", "public_key": sa_pub}))
+sa_ssh = "NIX_SSHOPTS='-p 2222 -i /root/.ssh/gradient-sa -o StrictHostKeyChecking=no'"
+nix = "nix --extra-experimental-features nix-command"
+store = "ssh-ng://stateproject@localhost"
+copied = machine.succeed("echo ssh-copy > /tmp/ssh-copy && nix-store --add /tmp/ssh-copy").strip()
+machine.succeed(f"{sa_ssh} {nix} copy --to {store} {copied}")
+machine.succeed(f"{sa_ssh} {nix} path-info --store {store} {copied}")
+machine.succeed(f"nix-store --delete {copied}")
+machine.succeed(f"{sa_ssh} {nix} copy --no-check-sigs --from {store} {copied}")
+machine.succeed(f"grep -q ssh-copy {copied}")
+
 # ── Phase 9: logout ───────────────────────────────────────────────────────────
 banner("Phase 9: logout")
 api("POST", "auth/logout", token=token)

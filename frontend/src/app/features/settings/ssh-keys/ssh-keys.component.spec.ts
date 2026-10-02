@@ -57,13 +57,15 @@ describe('SshKeysComponent', () => {
     expect(text).toContain('SHA256:abc');
   });
 
-  it('shows the ssh-ng address with the configured port', () => {
+  it('shows the ssh-ng address and the port as ssh config', () => {
     const fixture = setup([]);
-    const values = (Array.from(fixture.nativeElement.querySelectorAll('input')) as HTMLInputElement[])
-      .map((el) => el.value)
-      .join(' ');
-    expect(values).toContain('ssh-ng://<project>@');
-    expect(values).toContain(':2222');
+    const fields = Array.from(
+      fixture.nativeElement.querySelectorAll('input, textarea'),
+    ) as (HTMLInputElement | HTMLTextAreaElement)[];
+    const values = fields.map((el) => el.value);
+    const address = values.find((v) => v.startsWith('ssh-ng://'));
+    expect(address).toBe(`ssh-ng://<project>@${location.hostname}`);
+    expect(values.some((v) => v.includes('Port 2222'))).toBe(true);
   });
 
   it('deletes a key by id', () => {
