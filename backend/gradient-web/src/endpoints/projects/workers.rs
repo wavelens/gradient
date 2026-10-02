@@ -123,9 +123,7 @@ pub async fn post_project_worker(
     .await?;
 
     let worker_uuid = Uuid::parse_str(&body.worker_id)
-        .ok()
-        .filter(|u| u.get_version() == Some(uuid::Version::Random))
-        .ok_or_else(|| WebError::bad_request("worker_id must be a valid UUID v4"))?;
+        .map_err(|_| WebError::bad_request("worker_id must be a valid UUID"))?;
     let worker_id_str = worker_uuid.to_string();
 
     let (token, return_token) = if let Some(provided) = body.token {
