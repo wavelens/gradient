@@ -6,9 +6,10 @@
 
 use anyhow::Result;
 use async_trait::async_trait;
+use gradient_wire::auth::verify_dialer_tokens;
 use gradient_wire::messages::{GradientCapabilities, PROTO_VERSION};
-use gradient_wire::session::handshake::{HandshakeResult, as_peer};
-use gradient_wire::traits::{CapabilitiesProvider, PeerIdentity};
+use gradient_wire::session::handshake::{HandshakeResult, as_dialed, as_peer};
+use gradient_wire::traits::{CapabilitiesProvider, DialerVerifier, PeerIdentity};
 use tracing::info;
 
 use super::ProtoConnection;
@@ -89,6 +90,38 @@ pub async fn perform_handshake(
     for fp in &result.failed_peers {
         tracing::warn!(peer_id = %fp.peer_id, reason = %fp.reason, "peer auth failed");
     }
+    Ok(result)
+}
+
+struct AcceptedServers(Option<Vec<(String, String)>>);
+
+#[async_trait]
+impl DialerVerifier for AcceptedServers {
+    async fn verify(&self, _worker_id: &str, tokens: &[(String, String)]) -> bool {
+        self.0
+            .as_deref()
+            .is_none_or(|accepted| verify_dialer_tokens(accepted, tokens))
+    }
+}
+
+pub async fn perform_dialed_handshake(
+    conn: &mut ProtoConnection,
+    peer_id: String,
+    accepted_server_tokens: Option<Vec<(String, String)>>,
+    capabilities: GradientCapabilities,
+) -> Result<HandshakeResult> {
+    let identity = WorkerIdentity {
+        peer_id,
+        peer_tokens: Vec::new(),
+    };
+    let capabilities = StaticCapabilities(capabilities);
+    let verifier = AcceptedServers(accepted_server_tokens);
+    let result = as_dialed(conn.socket_mut(), &identity, &capabilities, &verifier).await?;
+    info!(
+        server_version = result.server_version,
+        authorized = result.authorized_peers.len(),
+        "server-dialed handshake successful"
+    );
     Ok(result)
 }
 
@@ -348,5 +381,21 @@ mod tests {
         let challenged = vec!["peer-y".to_owned()];
         let result = resolve_tokens_for_challenge(&tokens, &challenged);
         assert!(result.is_empty());
+    }
+
+    const SHA256_OF_T1: &str = "628b49d96dcde97a430dd4f597705899e09a968f793491e4b704cae33a40dc02";
+
+    #[tokio::test]
+    async fn without_an_accepted_tokens_file_every_server_is_accepted() {
+        assert!(AcceptedServers(None).verify("w1", &[]).await);
+    }
+
+    #[tokio::test]
+    async fn with_an_accepted_tokens_file_only_matching_tokens_pass() {
+        let accepted = AcceptedServers(Some(vec![("p1".into(), SHA256_OF_T1.into())]));
+
+        assert!(accepted.verify("w1", &[("p1".into(), "t1".into())]).await);
+        assert!(!accepted.verify("w1", &[("p1".into(), "t2".into())]).await);
+        assert!(!accepted.verify("w1", &[]).await);
     }
 }
