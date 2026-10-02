@@ -1,0 +1,67 @@
+<!--
+  SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+
+  SPDX-License-Identifier: AGPL-3.0-only
+-->
+
+<gr-page-layout title="Base Workers" subtitle="Workers every project can enable">
+  @if (canConnect()) {
+    <button slot="actions" grButton label="Connect base server" icon="link" (click)="showConnect.set(true)"></button>
+  }
+
+  @if (loading()) {
+    <gr-loading-spinner message="Loading base workers..." />
+  } @else if (workers().length === 0) {
+    <gr-empty-state icon="construction" title="No base workers">
+      <p>Declare base workers in the server state or connect Gradient.CI Servers.</p>
+    </gr-empty-state>
+  } @else {
+    <gr-row-list>
+      @for (worker of workers(); track worker.worker_id) {
+        <gr-row [icon]="worker.gradient_ci ? 'cloud' : 'construction'">
+          {{ worker.display_name }}
+          <div slot="meta">
+            <div class="worker-id">{{ worker.worker_id }}</div>
+            @if (!worker.connected && worker.last_error) {
+              <div class="worker-last-error text-secondary">{{ worker.last_error.reason }}</div>
+            }
+          </div>
+          <div slot="actions">
+            @if (worker.gradient_ci) {
+              <gr-badge severity="info">Gradient.CI</gr-badge>
+            }
+            @if (worker.auto_enable) {
+              <gr-badge severity="info">Auto-enabled</gr-badge>
+            }
+            <gr-badge [severity]="worker.connected ? 'success' : 'neutral'">{{ worker.connected ? 'Connected' : 'Offline' }}</gr-badge>
+            @if (worker.gradient_ci) {
+              <button grButton label="Disconnect" icon="link_off" severity="danger" size="small" (click)="disconnecting.set(worker)"></button>
+            }
+          </div>
+        </gr-row>
+      }
+    </gr-row-list>
+  }
+</gr-page-layout>
+
+<app-gradient-ci-connect
+  [(visible)]="showConnect"
+  scope="base"
+  [label]="label"
+  [statusOf]="statusOf"
+  (changed)="load()"
+/>
+
+@if (disconnecting(); as worker) {
+  <gr-dialog header="Disconnect Gradient.CI Servers" [visible]="true" (visibleChange)="disconnecting.set(null)" width="440px">
+    <p>Every project using this base server stops building on Gradient.CI Servers.</p>
+    <p class="text-secondary">
+      The key stays on servers.gradient.ci until it is deleted on its
+      <a [href]="keysUrl" target="_blank" rel="noopener">keys page</a>.
+    </p>
+    <div grDialogFooter>
+      <button grButton label="Cancel" severity="secondary" (click)="disconnecting.set(null)"></button>
+      <button grButton label="Disconnect" icon="link_off" severity="danger" (click)="disconnect(worker)"></button>
+    </div>
+  </gr-dialog>
+}
