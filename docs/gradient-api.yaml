@@ -5277,7 +5277,7 @@ paths:
               properties:
                 worker_id:
                   type: string
-                  description: Persistent worker identity string (UUID or human-readable name)
+                  description: Persistent worker identity UUID.
                 display_name:
                   type: string
                   description: Human-readable display name for this worker.
