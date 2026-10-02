@@ -11,10 +11,10 @@ use std::path::Path;
 
 #[derive(Args, Debug)]
 pub struct EvalArgs {
-    /// Attribute wildcard patterns, e.g. 'checks.*.*' 'packages.x86_64-linux.*'. Installable syntax
-    /// ('.#gradient-cli-full' or 'github:NixOS/patchelf#hydraJobs.*') is accepted. A bare attr is
-    /// qualified as 'packages.<system>.<attr>' like 'nix eval'. The flake part is selecting the
-    /// flake to evaluate, with the current directory as default.
+    /// Attribute wildcard patterns, e.g. 'checks.*.*' 'packages.x86_64-linux.*'. Patterns also
+    /// accept installable syntax ('.#gradient-cli-full' or 'github:NixOS/patchelf#hydraJobs.*'). A
+    /// bare attr is qualified as 'packages.<system>.<attr>' like 'nix eval'. The flake part is
+    /// selecting the flake to evaluate, with the current directory as default.
     #[arg(required = true, value_name = "PATTERN")]
     patterns: Vec<String>,
 }
