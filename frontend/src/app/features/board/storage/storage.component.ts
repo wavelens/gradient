@@ -59,6 +59,7 @@ interface StorageView {
       [categories]="categories()"
       [inset]="inset"
       [valueFormatter]="percent"
+      [yAxisMax]="100"
       [secondary]="{ title: 'stalls', valueFormatter: count }"
     ></gr-metric-chart>
 

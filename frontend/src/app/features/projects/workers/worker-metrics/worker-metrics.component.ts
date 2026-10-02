@@ -49,7 +49,7 @@ import { formatMegabytes, formatPercent, formatQuantity } from '@shared/text';
       </gr-card-grid>
 
       <gr-card-grid min="380px">
-        <gr-metric-chart title="CPU usage" type="line" [series]="cpuSeries()" [categories]="times()" [colors]="['#17a2b8']" [valueFormatter]="percent"></gr-metric-chart>
+        <gr-metric-chart title="CPU usage" type="line" [series]="cpuSeries()" [categories]="times()" [colors]="['#17a2b8']" [valueFormatter]="percent" [yAxisMax]="100"></gr-metric-chart>
         <gr-metric-chart title="RAM free" type="area" [series]="ramSeries()" [categories]="times()" [colors]="['#28a745']" [valueFormatter]="megabytes"></gr-metric-chart>
         <gr-metric-chart title="Network speed" type="line" [series]="netSeries()" [categories]="times()" [colors]="['#6f42c1']" [valueFormatter]="mbps"></gr-metric-chart>
         <gr-metric-chart title="Disk speed" type="line" [series]="diskSeries()" [categories]="times()" [colors]="['#fd7e14']" [valueFormatter]="mbps"></gr-metric-chart>

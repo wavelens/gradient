@@ -25,6 +25,7 @@ export interface MetricChartConfig {
   colors?: string[];
   horizontal?: boolean;
   yAxisTitle?: string;
+  yAxisMax?: number;
   valueFormatter?: (value: number) => string;
   secondary?: { title?: string; valueFormatter?: (value: number) => string };
   /// Fixed plot margins in px: charts stacked with the same inset share their x positions.
@@ -100,9 +101,10 @@ function cartesianOption(cfg: MetricChartConfig, format: (v: number) => string, 
   const categoryAxis = { type: 'category' as const, data: cfg.categories ?? [], boundaryGap: hasBars || !!inset, axisLabel: axisLabel(theme), axisLine: axisLine(theme) };
   // Two value axes tick independently, so each draws its own grid: one set of
   // lines, and a shared tick count so the right-hand labels land on them.
-  const valueAxis = (title: string | undefined, fmt: (v: number) => string, opposite = false) => ({
+  const valueAxis = (title: string | undefined, fmt: (v: number) => string, opposite = false, max?: number) => ({
     type: 'value' as const,
     name: title || undefined,
+    max,
     nameTextStyle: { color: theme.text },
     axisLabel: { ...axisLabel(theme), formatter: (v: number) => fmt(v) },
     axisLine: axisLine(theme),
@@ -113,7 +115,7 @@ function cartesianOption(cfg: MetricChartConfig, format: (v: number) => string, 
 
   const secondary = cfg.horizontal ? undefined : cfg.secondary;
   const secondaryFormat = secondary?.valueFormatter ?? format;
-  const primary = valueAxis(cfg.yAxisTitle, format);
+  const primary = valueAxis(cfg.yAxisTitle, format, false, cfg.yAxisMax);
   const values = secondary ? [primary, valueAxis(secondary.title, secondaryFormat, true)] : primary;
   const axisOf = (s: MetricSeries) => (s.axis === 'right' ? 1 : 0);
 
