@@ -335,7 +335,7 @@ mod tests {
     async fn building_without_trigger_evaluation_is_refused() {
         let db = MockDatabase::new(DatabaseBackend::Postgres).into_connection();
         let session = Session {
-            state: gradient_test_support::state::test_state(db.clone()),
+            state: gradient_test_support::state::test_state_web(db.clone()),
             user: gradient_test_support::fixtures::user(),
             project: gradient_test_support::fixtures::project(),
             permissions: 0,

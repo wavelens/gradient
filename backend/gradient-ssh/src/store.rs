@@ -407,7 +407,7 @@ mod tests {
 
     fn session_over(db: DatabaseConnection) -> Arc<Session> {
         Arc::new(Session {
-            state: gradient_test_support::state::test_state(db),
+            state: gradient_test_support::state::test_state_web(db),
             user: gradient_test_support::fixtures::user(),
             project: gradient_test_support::fixtures::project(),
             permissions: 0,
@@ -456,6 +456,17 @@ mod tests {
 
     fn hello() -> StorePath {
         StorePath::from_base_path(&format!("{HASH}-hello")).expect("path")
+    }
+
+    async fn nar_of(contents: &[u8]) -> Vec<u8> {
+        use futures::TryStreamExt as _;
+        let file = tempfile::NamedTempFile::new().expect("tempfile");
+        std::fs::write(file.path(), contents).expect("write");
+        let chunks: Vec<_> = harmonia_file_nar::NarByteStream::new(file.path().to_path_buf())
+            .try_collect()
+            .await
+            .expect("dump NAR");
+        chunks.concat()
     }
 
     #[tokio::test]
@@ -517,7 +528,7 @@ mod tests {
             .append_query_results([vec![served_row()]])
             .into_connection();
         let (_server, mut client) = connect(session_over(db)).await;
-        let nar = b"already there".to_vec();
+        let nar = nar_of(b"already there").await;
         let info = ValidPathInfo {
             path: hello(),
             info: UnkeyedValidPathInfo {
