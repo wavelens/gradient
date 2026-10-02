@@ -122,6 +122,13 @@ pub struct WorkerConfig {
     #[arg(long = "port", env = "GRADIENT_WORKER_PORT", default_value_t = 3100)]
     pub port: u16,
 
+    #[arg(
+        long = "accepted-server-tokens-file",
+        env = "GRADIENT_WORKER_ACCEPTED_SERVER_TOKENS_FILE",
+        help = "File of `peer_id:hash` lines a dialing server's tokens must match in discoverable mode; without it every server is accepted"
+    )]
+    pub accepted_server_tokens_file: Option<String>,
+
     /// Re-exec as a Nix evaluator subprocess (internal - do not set manually).
     #[arg(
         long = "eval-subprocess",
@@ -168,6 +175,7 @@ impl Default for WorkerConfig {
             discoverable: false,
             listen_addr: "127.0.0.1".to_owned(),
             port: 3100,
+            accepted_server_tokens_file: None,
             eval_subprocess: false,
             eval_driver: None,
             capabilities: CapabilitiesArgs::default(),
@@ -516,6 +524,17 @@ impl WorkerConfig {
             .collect()
     }
 
+    pub fn accepted_server_tokens(&self) -> Option<Vec<(String, String)>> {
+        let path = self.accepted_server_tokens_file.as_ref()?;
+        match std::fs::read_to_string(path) {
+            Ok(raw) => Some(parse_token_hashes(&raw)),
+            Err(e) => {
+                tracing::warn!(path, error = %e, "failed to read accepted server tokens file; rejecting every server");
+                Some(Vec::new())
+            }
+        }
+    }
+
     pub fn nar_partial_dir(&self) -> std::path::PathBuf {
         std::path::Path::new(&self.base_dir).join("nar-partial")
     }
@@ -541,6 +560,16 @@ impl WorkerConfig {
             cache: false,
         }
     }
+}
+
+fn parse_token_hashes(raw: &str) -> Vec<(String, String)> {
+    raw.lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .filter_map(|line| line.split_once(':'))
+        .map(|(peer, hash)| (peer.trim().to_owned(), hash.trim().to_owned()))
+        .filter(|(peer, hash)| !peer.is_empty() && !hash.is_empty())
+        .collect()
 }
 
 #[cfg(test)]
@@ -661,5 +690,49 @@ mod tests {
         let _ = std::fs::remove_file(&path);
         assert_eq!(tokens.len(), 1);
         assert_eq!(tokens[0].0, "peer-file");
+    }
+
+    #[test]
+    fn accepted_server_tokens_are_absent_without_a_file() {
+        assert!(WorkerConfig::default().accepted_server_tokens().is_none());
+    }
+
+    #[test]
+    fn accepted_server_tokens_read_peer_hash_lines() {
+        let path =
+            std::env::temp_dir().join(format!("gradient-test-accepted-{}", std::process::id()));
+        std::fs::write(
+            &path,
+            "# servers\np1:$argon2id$v=19$m=19456,t=2,p=1$c2FsdA$aGFzaA\n\n*:abc123\nbroken\n",
+        )
+        .unwrap();
+        let cfg = WorkerConfig {
+            accepted_server_tokens_file: Some(path.to_string_lossy().into_owned()),
+            ..Default::default()
+        };
+
+        let tokens = cfg.accepted_server_tokens();
+        let _ = std::fs::remove_file(&path);
+        assert_eq!(
+            tokens,
+            Some(vec![
+                (
+                    "p1".to_string(),
+                    "$argon2id$v=19$m=19456,t=2,p=1$c2FsdA$aGFzaA".to_string()
+                ),
+                ("*".to_string(), "abc123".to_string()),
+            ])
+        );
+    }
+
+    #[test]
+    fn an_unreadable_accepted_server_tokens_file_rejects_every_server() {
+        let cfg = WorkerConfig {
+            accepted_server_tokens_file: Some(
+                "/nonexistent/gradient-accepted-server-tokens".into(),
+            ),
+            ..Default::default()
+        };
+        assert_eq!(cfg.accepted_server_tokens(), Some(vec![]));
     }
 }

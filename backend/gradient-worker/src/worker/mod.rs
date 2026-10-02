@@ -23,7 +23,7 @@ use crate::proto::credentials::CredentialStore;
 use crate::proto::scorer::JobScorer;
 use crate::shutdown::Shutdown;
 use gradient_worker_client::connection::ProtoConnection;
-use gradient_worker_client::connection::handshake::perform_handshake;
+use gradient_worker_client::connection::handshake::{perform_dialed_handshake, perform_handshake};
 use gradient_worker_client::reconnect::RunOutcome;
 
 use id::load_or_generate_id;
@@ -87,7 +87,7 @@ impl Worker<Disconnected> {
     /// A reconnect must re-run the full handshake, capability advertisement and initial request.
     pub async fn reconnect(&self) -> Result<ProtoConnection> {
         let mut conn = ProtoConnection::open(&self.config.server_url).await?;
-        perform_setup(&mut conn, &self.config, "reconnect").await?;
+        perform_setup(&mut conn, &self.config, Side::Reconnect).await?;
         Ok(conn)
     }
 
@@ -162,14 +162,14 @@ impl Worker<Connected> {
 
 impl Worker<Connected> {
     async fn setup_connection(conn: &mut ProtoConnection, config: &WorkerConfig) -> Result<()> {
-        perform_setup(conn, config, "outbound").await
+        perform_setup(conn, config, Side::Outbound).await
     }
 
     async fn setup_connection_incoming(
         conn: &mut ProtoConnection,
         config: &WorkerConfig,
     ) -> Result<()> {
-        perform_setup(conn, config, "inbound").await
+        perform_setup(conn, config, Side::Inbound).await
     }
 
     async fn build_executor(config: &WorkerConfig) -> Result<(JobExecutor, JobScorer)> {
@@ -215,18 +215,37 @@ impl Worker<Connected> {
     }
 }
 
+#[derive(Clone, Copy, Debug)]
+enum Side {
+    Outbound,
+    Reconnect,
+    Inbound,
+}
+
 async fn perform_setup(
     conn: &mut ProtoConnection,
     config: &WorkerConfig,
-    direction: &str,
+    side: Side,
 ) -> Result<()> {
     let peer_id = load_or_generate_id(&config.base_dir, config.id.as_deref())
         .context("failed to load or generate persistent worker ID")?;
-    let peer_tokens = config.peer_tokens();
-    let handshake = perform_handshake(conn, peer_id, peer_tokens, config.capabilities()).await?;
+    let handshake = match side {
+        Side::Inbound => {
+            perform_dialed_handshake(
+                conn,
+                peer_id,
+                config.accepted_server_tokens(),
+                config.capabilities(),
+            )
+            .await?
+        }
+        Side::Outbound | Side::Reconnect => {
+            perform_handshake(conn, peer_id, config.peer_tokens(), config.capabilities()).await?
+        }
+    };
     conn.set_server_version(handshake.server_version);
     info!(
-        direction,
+        ?side,
         negotiated = ?handshake.negotiated,
         server_version = conn.server_version(),
         "capabilities negotiated"

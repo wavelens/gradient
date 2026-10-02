@@ -120,6 +120,11 @@ fn main() -> Result<()> {
         }
 
         if config.discoverable {
+            if config.accepted_server_tokens_file.is_none() {
+                warn!(
+                    "discoverable without --accepted-server-tokens-file; any server reaching the listener is accepted"
+                );
+            }
             let listener_config = config.clone();
             let listener_shutdown = shutdown.clone();
             let listener_sessions = sessions.clone();
