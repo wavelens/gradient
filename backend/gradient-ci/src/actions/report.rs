@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use super::evaluation_rows::{EvaluationRows, load_evaluation_rows};
+use super::evaluation_rows::{EvaluationRows, load_evaluation_rows, load_project_name};
 use super::matchers::requested_actions_for;
 use crate::context::CiContext;
 use crate::{parse_owner_repo, reporting};
@@ -115,11 +115,7 @@ pub(super) async fn build_ci_report_from_payload(
         );
     };
 
-    let EvaluationRows {
-        task,
-        project_name,
-        commit,
-    } = load_evaluation_rows(ctx, &evaluation).await?;
+    let EvaluationRows { task, commit } = load_evaluation_rows(ctx, &evaluation).await?;
 
     // Reports must target the task's base repository, not `evaluation.repository`. Fork PR
     // evaluations are pointing at the fork, where the GitHub App is missing and `/check-runs` is
@@ -161,7 +157,7 @@ pub(super) async fn build_ci_report_from_payload(
         }
     };
 
-    let details_url = project_name.as_ref().map(|project| {
+    let details_url = load_project_name(ctx, task.project).await.map(|project| {
         format!(
             "{}/project/{}/log/{}",
             ctx.db.config.server.frontend_url, project, evaluation.id

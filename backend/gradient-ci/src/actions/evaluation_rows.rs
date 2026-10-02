@@ -6,12 +6,11 @@
 
 use crate::context::CiContext;
 use anyhow::{Context, Result, anyhow};
-use gradient_types::{ECommit, EProject, ETask, MCommit, MEvaluation, MTask};
+use gradient_types::{ECommit, EProject, ETask, MCommit, MEvaluation, MTask, ProjectId};
 use sea_orm::EntityTrait;
 
 pub(super) struct EvaluationRows {
     pub task: MTask,
-    pub project_name: Option<String>,
     pub commit: MCommit,
 }
 
@@ -35,16 +34,14 @@ pub(super) async fn load_evaluation_rows(
         .context("loading commit")?
         .ok_or_else(|| anyhow!("commit {} not found", evaluation.commit))?;
 
-    let project_name = EProject::find_by_id(task.project)
+    Ok(EvaluationRows { task, commit })
+}
+
+pub(super) async fn load_project_name(ctx: &CiContext, project: ProjectId) -> Option<String> {
+    EProject::find_by_id(project)
         .one(&ctx.db.worker_db)
         .await
         .ok()
         .flatten()
-        .map(|p| p.name);
-
-    Ok(EvaluationRows {
-        task,
-        project_name,
-        commit,
-    })
+        .map(|p| p.name)
 }

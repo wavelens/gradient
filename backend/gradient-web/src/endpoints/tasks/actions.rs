@@ -103,9 +103,15 @@ fn validate_destination(cfg: &ActionConfig) -> WebResult<()> {
         ActionConfig::SendMatrixMessage {
             homeserver,
             room_id,
-            ..
+            access_token,
         } => {
             validate_webhook_url(homeserver).map_err(url_error)?;
+            if access_token.as_deref().is_some_and(|t| t.trim().is_empty()) {
+                return Err(WebError::unprocessable_entity(
+                    "access_token must not be empty",
+                ));
+            }
+
             if !is_matrix_room_id(room_id) {
                 return Err(WebError::unprocessable_entity(
                     "room_id must be a Matrix room ID like !abc:example.org",

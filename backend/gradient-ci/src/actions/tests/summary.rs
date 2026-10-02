@@ -173,6 +173,14 @@ fn html_links_and_escapes() {
 }
 
 #[test]
+fn quotes_are_escaped_for_html_only() {
+    let mut s = build_failed();
+    s.task = Some("a\"b".into());
+    assert!(s.html().contains("web/a&quot;b:"));
+    assert!(s.slack().contains("web/a\"b:"));
+}
+
+#[test]
 fn slack_escapes_and_links() {
     let mut s = build_failed();
     s.task = Some("a<b>&c".into());

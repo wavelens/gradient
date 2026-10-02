@@ -38,6 +38,7 @@ pub(crate) async fn post_slack_message(
         .json(&json!({ "text": summary.slack() }))
         .send()
         .await
+        .map_err(reqwest::Error::without_url)
         .context("Slack send failed")?;
     chat_response("Slack", resp).await
 }

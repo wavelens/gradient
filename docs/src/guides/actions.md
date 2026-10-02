@@ -116,7 +116,7 @@ web/app: hello-2.12.1 failed on 3f9c2ab
 | `3f9c2ab` | Short commit hash |
 
 - Gradient is retrying rate limits (`429`) and server errors (`5xx`).
-- Other errors are ending the delivery as failed, listed under **Deliveries**.
+- Other HTTP errors are ending the delivery as failed, listed under **Deliveries**.
 - The access token and the webhook URL are stored encrypted and never returned by the UI or the API.
 
 ### Matrix Access Token

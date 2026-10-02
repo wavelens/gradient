@@ -448,6 +448,21 @@ async fn create_matrix_action_requires_an_access_token() {
 }
 
 #[tokio::test]
+async fn create_matrix_action_rejects_an_empty_access_token() {
+    let body = create_rejected(json!({
+        "type": "send_matrix_message",
+        "homeserver": "https://matrix.example.org",
+        "room_id": "!ops:example.org",
+        "access_token": " ",
+    }))
+    .await;
+    assert!(
+        body["message"].as_str().unwrap().contains("access_token"),
+        "{body}"
+    );
+}
+
+#[tokio::test]
 async fn create_matrix_action_rejects_a_room_alias() {
     let body = create_rejected(json!({
         "type": "send_matrix_message",
