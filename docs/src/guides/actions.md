@@ -1,11 +1,12 @@
 # Notify with Actions
 
-Mails and web requests on evaluation and build events, e.g. a mail to the team on every failed build.
+Mails, web requests and Matrix or Slack messages on evaluation and build events, e.g. a mail to the team on every failed build.
 
 **Requirements:**
 
 - A task, see [First Project](../get-started/first-project.md)
 - [Email](../reference/configuration.md#email) configured on the server, for mail actions only
+- A [Matrix access token](#matrix-access-token) or a [Slack webhook URL](#slack-webhook-url), for chat actions only
 
 ## 1. Add the Action
 
@@ -17,6 +18,8 @@ Mails and web requests on evaluation and build events, e.g. a mail to the team o
     |---|---|
     | Send Mail | **Recipients**, comma-separated. Optional **Subject Template** |
     | Send Web Request | **URL**. Optional **Token**, shown once after saving |
+    | Send Matrix Message | **Homeserver**, **Room ID**, **Access Token** |
+    | Send Slack Message | **Webhook URL** |
 
     **Send Mail** is available only with email configured on the server.
 
@@ -39,6 +42,22 @@ Mails and web requests on evaluation and build events, e.g. a mail to the team o
           token_file = "/run/secrets/chat-hook-token";
         };
       }
+      {
+        name = "ops-room";
+        type = "send_matrix_message";
+        events = [ "evaluation.failed" "build.failed" ];
+        config = {
+          homeserver = "https://matrix.example.org";
+          room_id = "!abc123:example.org";
+          access_token_file = "/run/secrets/ops-room-token";
+        };
+      }
+      {
+        name = "ops-channel";
+        type = "send_slack_message";
+        events = [ "evaluation.failed" ];
+        config.webhook_url_file = "/run/secrets/ops-channel-webhook";
+      }
     ];
     ```
 
@@ -59,7 +78,7 @@ The full list is in the [events reference](../reference/events.md).
 
 - Subject placeholders: `{event}`, `{task}`, `{project}`, `{id}`, `{status}`.
 - Default subject: `[Gradient] {event}: {task}`.
-- Body: the event, task, status and a link to the evaluation or build.
+- Body: the [message line](#matrix-and-slack), the event, the time and a link to the evaluation log.
 
 ## Web Request
 
@@ -80,6 +99,44 @@ Each delivery is a `POST` with a JSON body. Receivers are reading the `content` 
 | `X-Gradient-Signature` | `sha256=<HMAC-SHA256 of the body, with the token as key>`, with a token only |
 
 Receivers can check the signature and reject requests that did not come from Gradient.
+
+## Matrix and Slack
+
+Both actions are posting one line per event, with a link to the evaluation log.
+
+```text
+web/app: hello-2.12.1 failed on 3f9c2ab
+```
+
+| Part | Content |
+|---|---|
+| `web/app` | Project and task |
+| `hello-2.12.1` | Derivation, on build events only |
+| `failed` | Status, taken from the event name |
+| `3f9c2ab` | Short commit hash |
+
+- Gradient is retrying rate limits (`429`) and server errors (`5xx`).
+- Other errors are ending the delivery as failed, listed under **Deliveries**.
+- The access token and the webhook URL are stored encrypted and never returned by the UI or the API.
+
+### Matrix Access Token
+
+- A dedicated bot account is the safest choice. The bot must have joined the room.
+- Encrypted rooms are not supported.
+- The **Room ID** is under room settings -> Advanced, in the form `!abc123:example.org`. Room aliases like `#ops:example.org` are rejected.
+
+A password login is returning the access token of the bot account.
+
+```sh
+curl -s -X POST https://matrix.example.org/_matrix/client/v3/login \
+  -d '{"type":"m.login.password","identifier":{"type":"m.id.user","user":"gradient-bot"},"password":"<password>"}' \
+  | jq -r .access_token
+```
+
+### Slack Webhook URL
+
+- A Slack app with **Incoming Webhooks** enabled is issuing one URL per channel, under **Add New Webhook to Workspace**.
+- The URL is in the form `https://hooks.slack.com/services/T.../B.../...`.
 
 ## Git Host Status Report
 
@@ -107,6 +164,8 @@ An evaluation started by `/gradient run <wildcard>` is reporting as `gradient/<t
 | **Send Mail** missing from the type list | Configure [email](../reference/configuration.md#email) on the server |
 | Delivery showing `connection refused` | The URL is unreachable from the server |
 | No deliveries | The action is inactive, or none of the events fired yet |
+| Matrix delivery showing `403` | The bot left the room, or the access token was revoked |
+| Slack delivery showing `403` or `404` | The webhook was removed in Slack |
 
 ## Next Steps
 

@@ -57,12 +57,12 @@ services.gradient.state = {
 
 | Option | Type | Default | Description |
 |---|---|---|---|
-| `actions` | list of submodule | `[ ]` | Task actions: email notifications, web requests, Git host status reports and pull request automation. |
+| `actions` | list of submodule | `[ ]` | Task actions: email notifications, web requests, Matrix and Slack messages, Git host status reports and pull request automation. |
 | `actions.*.active` | bool | `true` | Whether the action is active. |
 | `actions.*.config` | attribute set | `{ }` | Type-specific configuration. |
 | `actions.*.events` | list of string | `[ ]` | Events the action is subscribing to. |
 | `actions.*.name` | string | - | Action name, unique within the task. |
-| `actions.*.type` | one of `send_mail` `send_web_request` `git_host_status_report` `open_pr` | - | Action kind, determining the expected `config`. |
+| `actions.*.type` | one of `send_mail` `send_web_request` `send_matrix_message` `send_slack_message` `git_host_status_report` `open_pr` | - | Action kind, determining the expected `config`. |
 | `active` | bool | `true` | Whether the task is active. |
 | `concurrency` | one of `hard_abort` `soft_abort` `skip` `all` | `"soft_abort"` | Behavior of a new trigger event while an evaluation is running. |
 | `created_by` | string | - | User name of the task's creator. |
@@ -185,6 +185,8 @@ services.gradient.state = {
 |---|---|---|
 | `send_mail` | Required | `recipients`, `subject_template` |
 | `send_web_request` | Required | `url`, `token_file` |
+| `send_matrix_message` | Required | `homeserver`, `room_id`, `access_token_file` |
+| `send_slack_message` | Required | `webhook_url_file` |
 | `git_host_status_report` | Empty | `integration`: an outbound integration |
 | `open_pr` | Empty | `integration`, `generator`, `granularity`, `verify_gate`, `branch_pattern`, `title_template`, `body_template`, `update_existing`, see [Update Flake Inputs](../guides/flake-updates.md) |
 
