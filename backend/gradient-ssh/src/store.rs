@@ -10,11 +10,13 @@ use gradient_daemon::backend::{Backend, ConnInfo};
 use gradient_daemon::journal::Journal;
 use gradient_db::cache_paths::{ServedPath, served_hashes, served_path};
 use gradient_util::nix_hash::normalize_nar_hash;
+use harmonia_protocol::daemon::wire::types2::{BuildMode, KeyedBuildResult, QueryMissingResult};
 use harmonia_protocol::daemon::{
     AddToStoreItem, DaemonError, DaemonResult, DaemonStore, FutureResultExt as _,
     HandshakeDaemonStore, ResultLog, ResultLogExt as _, TrustLevel,
 };
 use harmonia_protocol::valid_path_info::{UnkeyedValidPathInfo, ValidPathInfo};
+use harmonia_store_derivation::derived_path::{DerivedPath, SingleDerivedPath};
 use harmonia_store_path::{StoreDir, StorePath, StorePathHash, StorePathSet};
 use harmonia_store_path_info::NarHash;
 use harmonia_utils_hash::fmt::Any;
@@ -287,6 +289,64 @@ impl DaemonStore for CacheStore {
         .empty_logs()
     }
 
+    fn build_paths<'a>(
+        &'a mut self,
+        drvs: &'a [DerivedPath],
+        _mode: BuildMode,
+    ) -> impl ResultLog<Output = DaemonResult<()>> + Send + 'a {
+        crate::daemon_build::build_paths(self.session.clone(), drvs.to_vec()).and_then(
+            |results| async move {
+                match results
+                    .into_iter()
+                    .find_map(|r| r.result.failure().map(|f| f.error_msg.clone()))
+                {
+                    Some(message) => Err(err(String::from_utf8_lossy(&message))),
+                    None => Ok(()),
+                }
+            },
+        )
+    }
+
+    fn build_paths_with_results<'a>(
+        &'a mut self,
+        drvs: &'a [DerivedPath],
+        _mode: BuildMode,
+    ) -> impl ResultLog<Output = DaemonResult<Vec<KeyedBuildResult>>> + Send + 'a {
+        crate::daemon_build::build_paths(self.session.clone(), drvs.to_vec())
+    }
+
+    fn query_missing<'a>(
+        &'a mut self,
+        paths: &'a [DerivedPath],
+    ) -> impl ResultLog<Output = DaemonResult<QueryMissingResult>> + Send + 'a {
+        async move {
+            let mut missing = QueryMissingResult {
+                will_build: StorePathSet::new(),
+                will_substitute: StorePathSet::new(),
+                unknown: StorePathSet::new(),
+                download_size: 0,
+                nar_size: 0,
+            };
+            for path in paths {
+                match path {
+                    DerivedPath::Built { drv_path, .. } => {
+                        if let SingleDerivedPath::Opaque(drv) = drv_path.as_ref() {
+                            missing.will_build.insert(drv.clone());
+                        }
+                    }
+                    DerivedPath::Opaque(p) => {
+                        if self.served(p).await?.is_none() {
+                            missing.unknown.insert(p.clone());
+                        }
+                    }
+                }
+            }
+
+            Ok(missing)
+        }
+        .empty_logs()
+    }
+
     fn add_temp_root<'a>(
         &'a mut self,
         _path: &'a StorePath,
@@ -304,6 +364,7 @@ mod tests {
     use super::*;
     use gradient_daemon::server::{next_conn, serve_stream};
     use gradient_types::CacheId;
+    use harmonia_protocol::daemon::wire::types2::{BuildResultInner, SuccessStatus};
     use harmonia_store_path::StorePath;
     use sea_orm::{DatabaseBackend, DatabaseConnection, MockDatabase, Value};
     use std::collections::BTreeMap;
@@ -455,5 +516,40 @@ mod tests {
             )
             .await
             .expect("skipped without TriggerEvaluation");
+    }
+
+    #[tokio::test]
+    async fn building_a_served_output_is_already_valid() {
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([vec![served_row()]])
+            .into_connection();
+        let (_server, mut client) = connect(session_over(db)).await;
+
+        let results = client
+            .build_paths_with_results(&[DerivedPath::Opaque(hello())], BuildMode::Normal)
+            .await
+            .expect("results");
+        assert_eq!(results.len(), 1);
+        assert!(matches!(
+            &results[0].result.inner,
+            BuildResultInner::Success(s) if s.status == SuccessStatus::AlreadyValid
+        ));
+    }
+
+    #[tokio::test]
+    async fn a_missing_opaque_path_fails_the_build() {
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .into_connection();
+        let (_server, mut client) = connect(session_over(db)).await;
+
+        let err = client
+            .build_paths(&[DerivedPath::Opaque(hello())], BuildMode::Normal)
+            .await
+            .expect_err("missing");
+        assert!(
+            err.to_string().contains("not in the project caches"),
+            "{err}"
+        );
     }
 }

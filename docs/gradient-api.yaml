@@ -11629,13 +11629,15 @@ components:
 
     EvaluationKind:
       type: string
-      enum: [normal, input_update]
+      enum: [normal, input_update, drv_recovery, ssh]
       default: normal
       description: |-
         | Value | Meaning |
         |---|---|
         | `normal` | Ordinary evaluation of the task's flake |
         | `input_update` | Evaluation of a candidate flake.lock with tracked inputs bumped, driving an `open_pr` action |
+        | `drv_recovery` | Re-evaluation of the task's flake to recover lost `.drv` files |
+        | `ssh` | Build request sent over SSH (`nix-store --realise`, `nix build`), no flake evaluation |
 
     EvaluationStatus:
       type: string

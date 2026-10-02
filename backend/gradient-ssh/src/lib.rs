@@ -4,7 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+pub mod build_request;
+pub mod build_wait;
 pub mod commands;
+pub mod daemon_build;
 pub mod ingest;
 pub mod nar;
 pub mod roots;

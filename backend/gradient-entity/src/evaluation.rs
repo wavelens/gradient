@@ -126,10 +126,11 @@ mod status_tests {
             (EvaluationKind::Normal, 0),
             (EvaluationKind::InputUpdate, 1),
             (EvaluationKind::DrvRecovery, 2),
+            (EvaluationKind::Ssh, 3),
         ] {
             assert_eq!(i32::from(kind), n);
         }
-        assert_eq!(EvaluationKind::iter().count(), 3);
+        assert_eq!(EvaluationKind::iter().count(), 4);
     }
 
     #[test]
@@ -180,6 +181,8 @@ pub enum EvaluationKind {
     InputUpdate = 1,
     #[sea_orm(num_value = 2)]
     DrvRecovery = 2,
+    #[sea_orm(num_value = 3)]
+    Ssh = 3,
 }
 
 #[repr(i32)]
