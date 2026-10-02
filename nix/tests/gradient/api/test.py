@@ -627,7 +627,7 @@ api("POST", "user/ssh-keys", token=token, expect_error=True,
     body=json.dumps({"name": "again", "public_key": pub}))  # one key, one user
 ssh = "ssh -p 2222 -i /root/.ssh/gradient -o StrictHostKeyChecking=no -o BatchMode=yes"
 machine.succeed(
-    f"NIX_SSHOPTS='-p 2222 -i /root/.ssh/gradient -o StrictHostKeyChecking=no' "
+    "NIX_SSHOPTS='-p 2222 -i /root/.ssh/gradient -o StrictHostKeyChecking=no' "
     "nix --extra-experimental-features nix-command store info --store ssh-ng://myproject@localhost"
 )
 refused = machine.fail(f"{ssh} myproject@localhost nix-store --serve --write 2>&1")
