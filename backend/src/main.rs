@@ -102,6 +102,11 @@ async fn run() -> std::io::Result<()> {
     info!("Starting cache service");
     gradient_cache::start_cache(Arc::clone(&state)).await?;
 
+    if state.config.ssh.enable {
+        info!("Starting SSH service");
+        gradient_ssh::start(Arc::clone(&state)).await?;
+    }
+
     info!("Starting web service");
     gradient_web::serve_web(Arc::clone(&state)).await?;
 

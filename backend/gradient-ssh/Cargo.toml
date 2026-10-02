@@ -41,6 +41,7 @@ harmonia-store-path-info       = { workspace = true }
 harmonia-utils-hash            = { workspace = true }
 harmonia-utils-signature       = { workspace = true }
 rand                           = { workspace = true }
+russh                          = { workspace = true }
 sea-orm                        = { workspace = true }
 serde_json                     = { workspace = true }
 shell-words                    = { workspace = true }

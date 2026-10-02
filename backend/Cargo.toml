@@ -267,6 +267,7 @@ sea-orm            = { workspace = true, optional = true }
 serde_json         = { workspace = true, optional = true }
 uuid               = { workspace = true, optional = true }
 gradient-core      = { workspace = true }
+gradient-ssh       = { workspace = true }
 gradient-state     = { workspace = true }
 gradient-util      = { workspace = true }
 gradient-types     = { workspace = true }
