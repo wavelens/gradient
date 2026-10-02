@@ -822,6 +822,88 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
+  /user/ssh-keys:
+    get:
+      tags: [user]
+      summary: List SSH keys
+      description: |-
+        Returns the SSH public keys of the authenticated user. Each key may log in
+        to the Nix daemon over SSH (`ssh-ng://<project>@<host>`). `404` when SSH is disabled.
+      operationId: getUserSshKeys
+      responses:
+        '200':
+          description: List of SSH keys
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/SshKeyInfo'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    post:
+      tags: [user]
+      summary: Add SSH key
+      description: Adds an OpenSSH public key. A key can belong to one user only.
+      operationId: createUserSshKey
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateSshKeyRequest'
+      responses:
+        '200':
+          description: Key added
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        $ref: '#/components/schemas/SshKeyInfo'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /user/ssh-keys/{ssh_key_id}:
+    delete:
+      tags: [user]
+      summary: Delete SSH key
+      operationId: deleteUserSshKey
+      parameters:
+        - name: ssh_key_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Key deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StringResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
   /user/keys/permissions:
     get:
       tags: [user]
@@ -10591,6 +10673,36 @@ components:
             are rejected with `403 forbidden_source_ip`.
           example: ["10.0.0.0/8", "203.0.113.5"]
 
+    SshKeyInfo:
+      type: object
+      required: [id, name, fingerprint, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        fingerprint:
+          type: string
+          description: SHA-256 fingerprint as printed by `ssh-keygen -l`
+          example: "SHA256:oriknbp5Jg0jqvSVYJ2XG6wWsyBelapZTV+AMQTOowo"
+        created_at:
+          type: string
+          format: date-time
+        last_used_at:
+          type: string
+          format: date-time
+          nullable: true
+    CreateSshKeyRequest:
+      type: object
+      required: [name, public_key]
+      properties:
+        name:
+          type: string
+        public_key:
+          type: string
+          description: One OpenSSH public key line
+          example: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHfwJ61+Nu5yJhfB3PfAyywWMtpJcwybHAVPzGWnPQ6v laptop"
     ApiKeyInfo:
       type: object
       required: [id, name, managed, permissions, created_at]

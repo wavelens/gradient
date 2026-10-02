@@ -45,6 +45,7 @@ git-url-parse = { workspace = true }
 hex           = { workspace = true }
 password-auth = { workspace = true }
 prometheus    = { workspace = true }
+ssh-key       = { workspace = true }
 opentelemetry = { workspace = true }
 opentelemetry_sdk = { workspace = true }
 opentelemetry-otlp = { workspace = true }

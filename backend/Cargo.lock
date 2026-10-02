@@ -2882,6 +2882,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.11.0",
+ "ssh-key",
  "subtle",
  "tempfile",
  "thiserror 2.0.21",
