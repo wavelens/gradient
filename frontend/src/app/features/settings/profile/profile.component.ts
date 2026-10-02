@@ -10,6 +10,7 @@ import { Router, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { UserService } from '@core/services/user.service';
 import { AuthService } from '@core/services/auth.service';
+import { ConfigService } from '@core/services/config.service';
 import { ThemeService, ThemePreference } from '@core/services/theme.service';
 import {
   ButtonComponent,
@@ -54,6 +55,7 @@ import { AccessState } from '@core/models';
 export class ProfileComponent implements OnInit {
   private userService = inject(UserService);
   private authService = inject(AuthService);
+  protected config = inject(ConfigService);
   private router = inject(Router);
   theme = inject(ThemeService);
 
