@@ -635,14 +635,14 @@ impl BatchWriter<'_> {
         let wanted_by =
             gradient_db::graph::runtime_dependencies::adopt_referenced_outputs(txn, &walked)
                 .await
-                .context("adopt the references naming newly walked outputs")?;
+                .context("adopt the runtime references recorded before either end was walked")?;
         if wanted_by.is_empty() {
             return Ok(wanted_by);
         }
 
         debug!(
             wanted_by = wanted_by.len(),
-            "adopted runtime dependencies recorded before their producers were walked"
+            "adopted runtime dependencies recorded before either end was walked"
         );
         let mut changes = gradient_db::graph::can_start::update_and_settle_need(txn, &wanted_by)
             .await?

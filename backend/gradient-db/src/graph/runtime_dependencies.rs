@@ -30,22 +30,36 @@ ON CONFLICT (derivation, dependency) DO UPDATE SET kind = 2 WHERE derivation_dep
     /// It would hash-join them against a sequential scan of every output.
     ADOPT_REFERENCED_OUTPUTS = r#"
 INSERT INTO derivation_dependency (derivation, dependency, kind)
-SELECT DISTINCT r.derivation, o.derivation, 1
-FROM derivation_output o
-CROSS JOIN LATERAL (VALUES (ARRAY[o.hash || '-' || o.package, '/nix/store/' || o.hash || '-' || o.package])) AS t(tokens)
-JOIN LATERAL (
-    SELECT cp.hash FROM cached_path cp WHERE string_to_array(cp."references", ' ') && t.tokens
-    UNION
-    SELECT ro.hash FROM derivation_output ro WHERE string_to_array(ro.references_list, ' ') && t.tokens
-) h ON true
-JOIN LATERAL (
-    SELECT p.derivation FROM derivation_output p
-    WHERE p.hash = h.hash
-      AND NOT EXISTS (SELECT 1 FROM derivation_output own
-                      WHERE own.derivation = p.derivation AND own.hash = o.hash)
-    OFFSET 0) r
-  ON r.derivation <> o.derivation
-WHERE o.derivation = ANY($1::uuid[])
+SELECT DISTINCT a.referrer, a.producer, 1
+FROM (
+    SELECT r.derivation AS referrer, o.derivation AS producer
+    FROM derivation_output o
+    CROSS JOIN LATERAL (VALUES (ARRAY[o.hash || '-' || o.package, '/nix/store/' || o.hash || '-' || o.package])) AS t(tokens)
+    JOIN LATERAL (
+        SELECT cp.hash FROM cached_path cp WHERE string_to_array(cp."references", ' ') && t.tokens
+        UNION
+        SELECT ro.hash FROM derivation_output ro WHERE string_to_array(ro.references_list, ' ') && t.tokens
+    ) h ON true
+    JOIN LATERAL (
+        SELECT p.derivation FROM derivation_output p
+        WHERE p.hash = h.hash
+          AND NOT EXISTS (SELECT 1 FROM derivation_output own
+                          WHERE own.derivation = p.derivation AND own.hash = o.hash)
+        OFFSET 0) r
+      ON r.derivation <> o.derivation
+    WHERE o.derivation = ANY($1::uuid[])
+    UNION ALL
+    SELECT o.derivation, p.derivation
+    FROM derivation_output o
+    JOIN cached_path cp ON cp.hash = o.hash
+    CROSS JOIN LATERAL (SELECT array_agg(tw.derivation) AS twins
+                        FROM derivation_output tw WHERE tw.hash = o.hash) tw
+    CROSS JOIN LATERAL unnest(string_to_array(cp."references", ' ')) AS t(token)
+    JOIN derivation_output p
+      ON p.hash = split_part(regexp_replace(t.token, '^/nix/store/', ''), '-', 1)
+     AND p.derivation <> ALL(tw.twins)
+    WHERE o.derivation = ANY($1::uuid[])
+) a
 ON CONFLICT (derivation, dependency) DO UPDATE SET kind = 2 WHERE derivation_dependency.kind = 0
 RETURNING derivation
 "#,
@@ -156,13 +170,31 @@ mod tests {
         );
         assert!(
             sql.contains(
-                "WHERE own.derivation = p.derivation AND own.hash = o.hash)\n    OFFSET 0) r"
+                "WHERE own.derivation = p.derivation AND own.hash = o.hash)\n        OFFSET 0) r"
             ),
             "unfenced, the producer lookup and its twin check seq-scan every output: {sql}"
         );
         assert!(
-            sql.contains("SELECT DISTINCT r.derivation, o.derivation, 1"),
+            sql.contains("SELECT DISTINCT a.referrer, a.producer, 1"),
             "a parent naming two outputs of one producer must land one row, or the upsert touches it twice: {sql}"
+        );
+    }
+
+    #[test]
+    fn a_walked_derivation_adopts_the_references_its_own_cached_nar_names() {
+        let sql = ADOPT_REFERENCED_OUTPUTS.text();
+        assert!(
+            sql.contains(concat!(
+                "    JOIN cached_path cp ON cp.hash = o.hash\n",
+                "    CROSS JOIN LATERAL (SELECT array_agg(tw.derivation) AS twins\n",
+                "                        FROM derivation_output tw WHERE tw.hash = o.hash) tw\n",
+                "    CROSS JOIN LATERAL unnest(string_to_array(cp.\"references\", ' ')) AS t(token)\n",
+                "    JOIN derivation_output p\n",
+                "      ON p.hash = split_part(regexp_replace(t.token, '^/nix/store/', ''), '-', 1)\n",
+                "     AND p.derivation <> ALL(tw.twins)\n",
+                "    WHERE o.derivation = ANY($1::uuid[])",
+            )),
+            "a twin must be excluded once per output, not probed once per reference: {sql}"
         );
     }
 
