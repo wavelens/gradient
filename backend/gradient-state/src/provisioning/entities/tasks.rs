@@ -15,7 +15,8 @@ use gradient_entity::*;
 use gradient_types::triggers::TriggerConfig;
 use gradient_types::*;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, IntoActiveModel, QueryFilter, Set,
+    ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, IntoActiveModel, Iterable,
+    QueryFilter, Set,
 };
 use std::collections::{HashMap, HashSet};
 
@@ -469,8 +470,8 @@ pub(crate) fn trigger_key(cfg: &TriggerConfig) -> String {
     format!("{}|{}", i16::from(cfg.trigger_type()), canonical)
 }
 
-/// `send_web_request` tokens are loaded from the credential `gradient_action_${name}_token`. They
-/// are encrypted with the server crypt key before storage, matching the REST `create_action` path.
+/// Action secrets are loaded from the credential `gradient_action_${name}_${field}`. They are
+/// encrypted with the server crypt key before storage, matching the REST `create_action` path.
 pub(crate) fn build_action_config(
     a: &StateAction,
     task_name: &str,
@@ -482,6 +483,10 @@ pub(crate) fn build_action_config(
         a.config
             .get(k)
             .ok_or_else(|| format!("action '{}' config missing '{}'", a.name, k).into())
+    };
+    let encrypt = |plain: &str| -> Result<String, DynError> {
+        gradient_ci::actions::encrypt_action_secret(plain, crypt_key)
+            .map_err(|e| format!("encrypt action secret: {e}").into())
     };
 
     match a.action_type.as_str() {
@@ -515,23 +520,40 @@ pub(crate) fn build_action_config(
             })
         }
         "send_web_request" => {
-            let url = want("url")?
-                .as_str()
-                .ok_or_else(|| format!("action '{}': url must be a string", a.name))?
-                .to_owned();
-            gradient_util::http_validation::validate_webhook_url(&url)
-                .map_err(|e| format!("action '{}': {}", a.name, e))?;
-            let token = if a.config.get("token_file").is_some() {
-                let (plain, _) =
-                    read_credential("action", &a.name, "token", "action token file")?;
-                let plain = plain.trim();
-                let enc = gradient_ci::actions::encrypt_action_secret(plain, crypt_key)
-                    .map_err(|e| format!("encrypt action token: {e}"))?;
-                Some(enc)
-            } else {
-                None
-            };
+            let url = string_field(a, "url")?;
+            checked_url(&a.name, &url)?;
+            let token = action_credential(a, "token")?
+                .map(|plain| encrypt(&plain))
+                .transpose()?;
             Ok(ActionConfig::SendWebRequest { url, token })
+        }
+        "send_matrix_message" => {
+            let homeserver = string_field(a, "homeserver")?;
+            checked_url(&a.name, &homeserver)?;
+            let room_id = string_field(a, "room_id")?;
+            if !gradient_types::actions::is_matrix_room_id(&room_id) {
+                return Err(format!(
+                    "action '{}': room_id must be a Matrix room ID like !abc:example.org",
+                    a.name
+                )
+                .into());
+            }
+
+            let plain = action_credential(a, "access_token")?
+                .ok_or_else(|| format!("action '{}': access_token_file is required", a.name))?;
+            Ok(ActionConfig::SendMatrixMessage {
+                homeserver,
+                room_id,
+                access_token: Some(encrypt(&plain)?),
+            })
+        }
+        "send_slack_message" => {
+            let plain = action_credential(a, "webhook_url")?
+                .ok_or_else(|| format!("action '{}': webhook_url_file is required", a.name))?;
+            checked_url(&a.name, &plain)?;
+            Ok(ActionConfig::SendSlackMessage {
+                webhook_url: Some(encrypt(&plain)?),
+            })
         }
         "git_host_status_report" => {
             if !a.events.is_empty() {
@@ -598,11 +620,44 @@ pub(crate) fn build_action_config(
             })
         }
         other => Err(format!(
-            "action '{}' has invalid type '{}': expected send_mail/send_web_request/git_host_status_report/open_pr",
-            a.name, other
+            "action '{}' has invalid type '{}': expected {}",
+            a.name,
+            other,
+            action_type_names()
         )
         .into()),
     }
+}
+
+fn action_type_names() -> String {
+    ActionType::iter()
+        .map(ActionType::as_str)
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
+fn string_field(a: &StateAction, key: &str) -> Result<String, DynError> {
+    a.config
+        .get(key)
+        .ok_or_else(|| format!("action '{}' config missing '{}'", a.name, key))?
+        .as_str()
+        .map(str::to_owned)
+        .ok_or_else(|| format!("action '{}': {} must be a string", a.name, key).into())
+}
+
+fn checked_url(action: &str, url: &str) -> Result<(), DynError> {
+    gradient_util::http_validation::validate_webhook_url(url)
+        .map(drop)
+        .map_err(|e| format!("action '{action}': {e}").into())
+}
+
+fn action_credential(a: &StateAction, field: &str) -> Result<Option<String>, DynError> {
+    if a.config.get(format!("{field}_file")).is_none() {
+        return Ok(None);
+    }
+
+    let (plain, _) = read_credential("action", &a.name, field, &format!("action {field} file"))?;
+    Ok(Some(plain.trim().to_owned()))
 }
 
 fn parse_action_enum<T>(a: &StateAction, key: &str) -> Result<T, DynError>
@@ -941,5 +996,57 @@ mod action_helper_tests {
         };
         let err = build_action_config(&a, "web", &HashMap::new(), true, &key()).unwrap_err();
         assert!(err.to_string().contains("invalid type"), "got: {err}");
+    }
+
+    #[test]
+    fn build_matrix_action_requires_an_access_token_file() {
+        let a = StateAction {
+            name: "matrix".into(),
+            action_type: "send_matrix_message".into(),
+            active: true,
+            events: vec!["build.failed".into()],
+            config: serde_json::json!({
+                "homeserver": "https://matrix.example.org",
+                "room_id": "!ops:example.org",
+            }),
+        };
+        let err = build_action_config(&a, "web", &HashMap::new(), true, &key()).unwrap_err();
+        assert!(err.to_string().contains("access_token_file"), "got: {err}");
+    }
+
+    #[test]
+    fn build_matrix_action_rejects_a_room_alias() {
+        let a = StateAction {
+            name: "matrix".into(),
+            action_type: "send_matrix_message".into(),
+            active: true,
+            events: vec!["build.failed".into()],
+            config: serde_json::json!({
+                "homeserver": "https://matrix.example.org",
+                "room_id": "#ops:example.org",
+                "access_token_file": "/run/secrets/t",
+            }),
+        };
+        let err = build_action_config(&a, "web", &HashMap::new(), true, &key()).unwrap_err();
+        assert!(err.to_string().contains("room_id"), "got: {err}");
+    }
+
+    #[test]
+    fn build_slack_action_requires_a_webhook_url_file() {
+        let a = StateAction {
+            name: "slack".into(),
+            action_type: "send_slack_message".into(),
+            active: true,
+            events: vec!["build.failed".into()],
+            config: serde_json::json!({}),
+        };
+        let err = build_action_config(&a, "web", &HashMap::new(), true, &key()).unwrap_err();
+        assert!(err.to_string().contains("webhook_url_file"), "got: {err}");
+    }
+
+    #[test]
+    fn slack_webhook_rejects_a_loopback_url() {
+        let err = checked_url("slack", "http://127.0.0.1/hook").unwrap_err();
+        assert!(err.to_string().contains("disallowed address"), "got: {err}");
     }
 }

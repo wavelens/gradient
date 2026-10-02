@@ -28,6 +28,7 @@ const SECRET_KEYS: &[&str] = &[
     "key_file",
     "secret_file",
     "access_token_file",
+    "webhook_url_file",
 ];
 
 /// The snapshot is covering the live system, not only state-managed rows. Rows an operator cannot

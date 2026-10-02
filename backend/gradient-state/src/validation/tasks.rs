@@ -5,7 +5,9 @@
  */
 
 use super::helpers::{EntityLookup, ErrorCollector};
+use gradient_types::ActionType;
 use gradient_types::triggers::TriggerType;
+use sea_orm::Iterable;
 use std::collections::HashSet;
 
 pub(super) fn validate(lookup: &EntityLookup, errors: &mut ErrorCollector) {
@@ -41,18 +43,18 @@ pub(super) fn validate(lookup: &EntityLookup, errors: &mut ErrorCollector) {
 
         let mut action_names: HashSet<&str> = HashSet::new();
         for action in &task.actions {
-            if !matches!(
-                action.action_type.as_str(),
-                "send_mail" | "send_web_request" | "git_host_status_report" | "open_pr"
-            ) {
+            if ActionType::from_name(&action.action_type).is_none() {
+                let names: Vec<&str> = ActionType::iter().map(ActionType::as_str).collect();
                 errors.push(
                     format!("tasks.{}.actions.{}.type", task.name, action.name),
                     format!(
-                        "Invalid action type '{}': expected send_mail/send_web_request/git_host_status_report/open_pr",
-                        action.action_type
+                        "Invalid action type '{}': expected {}",
+                        action.action_type,
+                        names.join("/")
                     ),
                 );
             }
+
             if matches!(
                 action.action_type.as_str(),
                 "git_host_status_report" | "open_pr"

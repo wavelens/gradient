@@ -59,11 +59,19 @@
   localTokenFile = "${cfg.worker.baseDir}/local-token";
   localPeersFile = "${cfg.worker.baseDir}/local-peers";
 
-  actionTokenFiles = lib.concatLists (lib.mapAttrsToList (_: task:
+  actionSecretFields = {
+    send_web_request = "token";
+    send_matrix_message = "access_token";
+    send_slack_message = "webhook_url";
+  };
+
+  actionSecretFiles = lib.concatLists (lib.mapAttrsToList (_: task:
     lib.concatMap (action:
-      let tokenFile = action.config.token_file or null; in
-      lib.optional (action.type == "send_web_request" && tokenFile != null)
-        "gradient_action_${action.name}_token:${tokenFile}"
+      let
+        field = actionSecretFields.${action.type} or null;
+        file = if field == null then null else action.config."${field}_file" or null;
+      in
+      lib.optional (file != null) "gradient_action_${action.name}_${field}:${file}"
     ) task.actions
   ) cfg.state.tasks);
 in {
@@ -1310,7 +1318,7 @@ in {
           "gradient_metrics_token:${cfg.metrics.tokenFile}"
         ++ userPasswordFiles ++ projectPrivateKeyFiles ++ cacheSigningKeyFiles ++ apiKeyFiles
           ++ workerTokenFiles ++ integrationSecretFiles ++ integrationTokenFiles
-          ++ actionTokenFiles;
+          ++ actionSecretFiles;
       };
 
       unitConfig = {
