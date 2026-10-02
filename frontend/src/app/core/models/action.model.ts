@@ -4,7 +4,13 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-export type ActionType = 'send_mail' | 'send_web_request' | 'git_host_status_report' | 'open_pr';
+export type ActionType =
+  | 'send_mail'
+  | 'send_web_request'
+  | 'git_host_status_report'
+  | 'open_pr'
+  | 'send_matrix_message'
+  | 'send_slack_message';
 
 export type PrGenerator = 'flake_lock';
 export type PrGranularity = 'per_run' | 'per_input';
@@ -24,7 +30,9 @@ export type ActionConfig =
       title_template?: string;
       body_template?: string;
       update_existing: boolean;
-    };
+    }
+  | { type: 'send_matrix_message'; homeserver: string; room_id: string; access_token?: string }
+  | { type: 'send_slack_message'; webhook_url?: string };
 
 export interface Action {
   id: string;

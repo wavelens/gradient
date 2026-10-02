@@ -259,6 +259,8 @@ export class TaskActionsComponent implements OnInit {
       case 'send_web_request': return 'Web Request';
       case 'git_host_status_report': return 'Git Host Status';
       case 'open_pr': return 'Open PR';
+      case 'send_matrix_message': return 'Matrix';
+      case 'send_slack_message': return 'Slack';
     }
   }
 
@@ -268,6 +270,8 @@ export class TaskActionsComponent implements OnInit {
       case 'send_web_request': return 'success';
       case 'git_host_status_report': return 'warning';
       case 'open_pr': return 'neutral';
+      case 'send_matrix_message': return 'info';
+      case 'send_slack_message': return 'info';
     }
   }
 
@@ -277,6 +281,8 @@ export class TaskActionsComponent implements OnInit {
       case 'send_web_request': return 'public';
       case 'git_host_status_report': return 'published_with_changes';
       case 'open_pr': return 'code';
+      case 'send_matrix_message': return 'forum';
+      case 'send_slack_message': return 'chat';
     }
   }
 
