@@ -2951,6 +2951,7 @@ dependencies = [
  "harmonia-utils-signature",
  "hex",
  "libc",
+ "nix 0.31.3",
  "rand 0.10.3",
  "reqwest",
  "rkyv",

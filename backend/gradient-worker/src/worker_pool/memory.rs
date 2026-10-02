@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use nix::sys::signal::{Signal, kill};
+use nix::unistd::Pid;
 use std::sync::Weak;
 use std::time::{Duration, Instant};
 use tracing::{debug, warn};
@@ -127,9 +129,8 @@ pub(super) async fn memory_reaper_loop(pool: Weak<EvalWorkerPool>, min_free_byte
             min_free_mb = min_free_bytes / (1024 * 1024),
             "host memory below safety margin; reaping the eval subprocess that can recover it"
         );
-        #[cfg(unix)]
-        unsafe {
-            libc::kill(pid as i32, libc::SIGKILL);
+        if let Err(err) = kill(Pid::from_raw(pid as i32), Signal::SIGKILL) {
+            debug!(pid, %err, "eval subprocess already gone before the reap");
         }
         last_reap = Some(Instant::now());
         reported_no_victim = false;
