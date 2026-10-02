@@ -6,7 +6,7 @@
 
 import { describe, expect, it } from 'vitest';
 import type { Worker } from './worker.model';
-import { connectWaitState, gradientCiConnectUrl, gradientCiEntry } from './gradient-ci.model';
+import { connectWaitState, gradientCiConnectUrl, gradientCiEntry, listedWorkers } from './gradient-ci.model';
 
 function worker(overrides: Partial<Worker>): Worker {
   return {
@@ -48,6 +48,24 @@ describe('gradientCiEntry', () => {
 
   it('keeps a connection listed when the option is off', () => {
     expect(gradientCiEntry(false, [registration])).toEqual({ state: 'connected', worker: registration });
+  });
+});
+
+describe('listedWorkers', () => {
+  const registration = worker({ worker_id: 'g1', gradient_ci: true });
+  const enabledBase = worker({ worker_id: 'g2', gradient_ci: true, is_base: true, active: true });
+  const own = worker({ worker_id: 'w1' });
+
+  it('lists an enabled base server next to the project connection so it can be disabled', () => {
+    const workers = [registration, enabledBase, own];
+    expect(listedWorkers(workers, gradientCiEntry(true, workers))).toEqual([enabledBase, own]);
+  });
+
+  it('leaves a base server not enabled here to the Gradient.CI entry', () => {
+    const notEnabled = { ...enabledBase, active: false };
+    const workers = [notEnabled, own];
+    expect(listedWorkers(workers, gradientCiEntry(true, workers))).toEqual([own]);
+    expect(listedWorkers(workers, gradientCiEntry(false, workers))).toEqual([own]);
   });
 });
 

@@ -49,6 +49,10 @@ export function gradientCiEntry(offered: boolean, workers: Worker[]): GradientCi
   return base ? { state: 'enable', worker: base } : { state: 'connect', worker: null };
 }
 
+export function listedWorkers(workers: Worker[], entry: GradientCiEntry): Worker[] {
+  return workers.filter((w) => w !== entry.worker && !(w.gradient_ci && w.is_base && !w.active));
+}
+
 export function gradientCiConnectUrl(serviceUrl: string, scope: GradientCiScope, label: string): string {
   const url = new URL('/connect', serviceUrl);
   url.searchParams.set('scope', scope);

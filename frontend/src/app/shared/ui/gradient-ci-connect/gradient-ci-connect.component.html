@@ -4,7 +4,7 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<gr-dialog header="Connect Gradient.CI Servers" [(visible)]="visible" width="480px">
+<gr-dialog header="Connect Gradient.CI Servers" [visible]="visible()" (visibleChange)="onVisibleChange($event)" width="480px">
   <p>Create a key on servers.gradient.ci, then paste its connection token.</p>
   <button grButton label="Open servers.gradient.ci" icon="open_in_new" severity="secondary" (click)="openShop()"></button>
   <gr-form-field label="Connection token" for="gradient-ci-token">
@@ -14,12 +14,15 @@
       autocomplete="off"
       placeholder="gci1_..."
       [(ngModel)]="token"
-      [disabled]="waiting()"
+      [disabled]="waiting() || !!notice()"
       (keyup.enter)="submit()"
     />
   </gr-form-field>
   @if (waiting()) {
     <p class="text-secondary">Waiting for the first connection...</p>
+  }
+  @if (notice()) {
+    <gr-message-banner type="info">{{ notice() }}</gr-message-banner>
   }
   @if (errorMessage()) {
     <gr-message-banner type="error">{{ errorMessage() }}</gr-message-banner>
@@ -31,7 +34,7 @@
       label="Connect"
       icon="link"
       [loading]="submitting() || waiting()"
-      [disabled]="!token.trim() || submitting() || waiting()"
+      [disabled]="!token.trim() || submitting() || waiting() || !!notice()"
       (click)="submit()"
     ></button>
   </div>
