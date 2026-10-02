@@ -322,6 +322,162 @@ async fn create_send_web_request_returns_token_once() {
     );
 }
 
+fn matrix_action_row() -> task_action::Model {
+    task_action::Model {
+        id: action_id(),
+        task: task_id(),
+        name: "matrix".into(),
+        action_type: ActionType::SendMatrixMessage,
+        config: json!({
+            "type": "send_matrix_message",
+            "homeserver": "https://matrix.example.org",
+            "room_id": "!ops:example.org",
+            "access_token": "ENCRYPTED_BLOB",
+        }),
+        events: json!(["build.failed"]),
+        active: true,
+        created_by: user_id(),
+        created_at: test_date(),
+        updated_at: test_date(),
+        ..Default::default()
+    }
+}
+
+#[tokio::test]
+async fn create_matrix_action_never_echoes_the_access_token() {
+    let session_id = SessionId::now_v7();
+    let token = make_token(session_id);
+
+    let db = with_task_edit(with_auth(
+        MockDatabase::new(DatabaseBackend::Postgres),
+        session_id,
+    ))
+    .append_query_results([Vec::<task_action::Model>::new()])
+    .append_query_results([vec![matrix_action_row()]]);
+
+    let server = make_test_server_with(db.into_connection(), Some(temp_crypt_secret_file()));
+    let res = server
+        .post(BASE_URL)
+        .add_header("authorization", format!("Bearer {}", token))
+        .json(&json!({
+            "name": "matrix",
+            "config": {
+                "type": "send_matrix_message",
+                "homeserver": "https://matrix.example.org",
+                "room_id": "!ops:example.org",
+                "access_token": "syt_plain",
+            },
+            "events": ["build.failed"],
+        }))
+        .await;
+
+    res.assert_status_ok();
+    let body: Value = res.json();
+    assert_eq!(
+        body["message"]["action"]["action_type"],
+        "send_matrix_message"
+    );
+    assert!(body["message"].get("token").is_none());
+    assert!(
+        body["message"]["action"]["config"]
+            .get("access_token")
+            .is_none()
+    );
+}
+
+#[tokio::test]
+async fn read_slack_action_strips_the_webhook_url() {
+    let session_id = SessionId::now_v7();
+    let token = make_token(session_id);
+
+    let row = task_action::Model {
+        action_type: ActionType::SendSlackMessage,
+        config: json!({ "type": "send_slack_message", "webhook_url": "ENCRYPTED_BLOB" }),
+        ..matrix_action_row()
+    };
+    let db = with_task_member(with_auth(
+        MockDatabase::new(DatabaseBackend::Postgres),
+        session_id,
+    ))
+    .append_query_results([vec![row]]);
+
+    let server = make_test_server_with(db.into_connection(), None);
+    let res = server
+        .get(&format!("{}/{}", BASE_URL, action_id()))
+        .add_header("authorization", format!("Bearer {}", token))
+        .await;
+
+    res.assert_status_ok();
+    let body: Value = res.json();
+    assert_eq!(body["message"]["action_type"], "send_slack_message");
+    assert!(body["message"]["config"].get("webhook_url").is_none());
+}
+
+async fn create_rejected(config: Value) -> Value {
+    let session_id = SessionId::now_v7();
+    let token = make_token(session_id);
+
+    let db = with_task_edit(with_auth(
+        MockDatabase::new(DatabaseBackend::Postgres),
+        session_id,
+    ));
+
+    let server = make_test_server_with(db.into_connection(), Some(temp_crypt_secret_file()));
+    let res = server
+        .post(BASE_URL)
+        .add_header("authorization", format!("Bearer {}", token))
+        .json(&json!({ "name": "chat", "config": config, "events": ["build.failed"] }))
+        .await;
+
+    res.assert_status(axum::http::StatusCode::UNPROCESSABLE_ENTITY);
+    res.json()
+}
+
+#[tokio::test]
+async fn create_matrix_action_requires_an_access_token() {
+    let body = create_rejected(json!({
+        "type": "send_matrix_message",
+        "homeserver": "https://matrix.example.org",
+        "room_id": "!ops:example.org",
+    }))
+    .await;
+    assert!(
+        body["message"].as_str().unwrap().contains("access_token"),
+        "{body}"
+    );
+}
+
+#[tokio::test]
+async fn create_matrix_action_rejects_a_room_alias() {
+    let body = create_rejected(json!({
+        "type": "send_matrix_message",
+        "homeserver": "https://matrix.example.org",
+        "room_id": "#ops:example.org",
+        "access_token": "t",
+    }))
+    .await;
+    assert!(
+        body["message"].as_str().unwrap().contains("room_id"),
+        "{body}"
+    );
+}
+
+#[tokio::test]
+async fn create_slack_action_rejects_a_loopback_webhook() {
+    let body = create_rejected(json!({
+        "type": "send_slack_message",
+        "webhook_url": "http://127.0.0.1/hook",
+    }))
+    .await;
+    assert!(
+        body["message"]
+            .as_str()
+            .unwrap()
+            .contains("disallowed address"),
+        "{body}"
+    );
+}
+
 #[tokio::test]
 async fn create_git_host_status_report_rejects_nonempty_events() {
     let session_id = SessionId::now_v7();
