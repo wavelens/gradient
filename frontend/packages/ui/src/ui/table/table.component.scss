@@ -56,12 +56,22 @@ table {
     white-space: nowrap;
   }
 
-  tbody tr:last-child td {
+  tbody tr:last-child > * {
     border-bottom: 0;
   }
 
-  tbody tr:hover td {
+  tbody tr:hover > * {
     background: var(--gr-surface-hover);
+  }
+
+  tbody a {
+    padding: 0;
+
+    &:hover {
+      background: none;
+      text-decoration: underline;
+      text-underline-offset: 2px;
+    }
   }
 
   tbody tr.is-clickable {
