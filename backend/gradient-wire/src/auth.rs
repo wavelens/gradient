@@ -51,6 +51,15 @@ pub fn validate_tokens(
     (authorized, failed)
 }
 
+pub fn verify_dialer_tokens(accepted: &[(String, String)], presented: &[(String, String)]) -> bool {
+    !presented.is_empty()
+        && presented.iter().all(|(peer, token)| {
+            accepted.iter().any(|(accepted_peer, hash)| {
+                (accepted_peer == peer || accepted_peer == "*") && verify_token(token, hash)
+            })
+        })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -173,5 +182,34 @@ mod tests {
         let (authorized, failed) = validate_tokens(&registered, &auth);
         assert_eq!(authorized, vec!["peer-a"]);
         assert!(failed.is_empty());
+    }
+
+    #[test]
+    fn every_presented_pair_must_match_a_stored_hash() {
+        let accepted = vec![
+            ("p1".to_string(), sha256_hex("t1")),
+            ("p2".to_string(), sha256_hex("t2")),
+        ];
+        let pair = |p: &str, t: &str| (p.to_string(), t.to_string());
+
+        assert!(verify_dialer_tokens(
+            &accepted,
+            &[pair("p1", "t1"), pair("p2", "t2")]
+        ));
+        assert!(!verify_dialer_tokens(
+            &accepted,
+            &[pair("p1", "t1"), pair("p3", "t1")]
+        ));
+        assert!(!verify_dialer_tokens(&accepted, &[pair("p1", "wrong")]));
+        assert!(!verify_dialer_tokens(&accepted, &[]));
+    }
+
+    #[test]
+    fn a_wildcard_hash_accepts_any_peer() {
+        let accepted = vec![("*".to_string(), argon2("t1"))];
+        assert!(verify_dialer_tokens(
+            &accepted,
+            &[("p9".to_string(), "t1".to_string())]
+        ));
     }
 }
