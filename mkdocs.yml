@@ -58,6 +58,7 @@ nav:
       - Connect Gitea or Forgejo: guides/gitea.md
       - Connect GitLab: guides/gitlab.md
       - Build Before Pushing: guides/build-before-push.md
+      - Build over SSH: guides/build-over-ssh.md
       - Share a Cache: guides/share-a-cache.md
       - Upload NARs: guides/upload-nars.md
       - Pull Deployment: guides/pull-deployment.md
