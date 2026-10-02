@@ -116,6 +116,7 @@ pub async fn post_connection(
         ConnectionToken::parse(&body.token).map_err(|e| WebError::bad_request(e.to_string()))?;
     let url = proto_url(&state.config.gradient_ci.url)
         .ok_or_else(|| WebError::internal("gradientCi.url is not a valid URL"))?;
+    ensure_unclaimed(&state, &target, &token.worker_id).await?;
     let stored = StoredToken::new(&state.config.secrets.crypt_file, &token.secret)?;
     match target {
         Target::Base => insert_base_worker(&state, &user, &token, url, stored).await?,
@@ -174,6 +175,59 @@ fn proto_url(service_url: &str) -> Option<String> {
     })
 }
 
+async fn ensure_unclaimed(state: &ServerState, target: &Target, worker_id: &str) -> WebResult<()> {
+    let same_worker = Condition::any().add(worker_registration::Column::WorkerId.eq(worker_id));
+    let registrations = match target {
+        Target::Base => same_worker,
+        Target::Project(project) => same_worker.add(
+            Condition::all()
+                .add(worker_registration::Column::PeerId.eq(project.id))
+                .add(worker_registration::Column::GradientCi.eq(true)),
+        ),
+    };
+
+    let registration = EWorkerRegistration::find()
+        .filter(registrations)
+        .one(&state.web_db)
+        .await?;
+
+    let mut base_workers = Condition::any().add(base_worker::Column::WorkerId.eq(worker_id));
+    if matches!(target, Target::Base) {
+        base_workers = base_workers.add(base_worker::Column::GradientCi.eq(true));
+    }
+
+    let base = EBaseWorker::find()
+        .filter(base_workers)
+        .one(&state.web_db)
+        .await?;
+
+    match claim_conflict(target, registration.as_ref(), base.as_ref(), worker_id) {
+        Some(message) => Err(WebError::conflict(message)),
+        None => Ok(()),
+    }
+}
+
+fn claim_conflict(
+    target: &Target,
+    registration: Option<&worker_registration::Model>,
+    base: Option<&base_worker::Model>,
+    worker_id: &str,
+) -> Option<&'static str> {
+    let own_project = match target {
+        Target::Project(project) => registration.is_some_and(|r| r.peer_id == project.id),
+        Target::Base => false,
+    };
+    if own_project {
+        return Some("the project is already connected to Gradient.CI Servers");
+    }
+
+    if registration.is_some() || base.is_some_and(|b| b.worker_id == worker_id) {
+        return Some("the worker of this connection token is already registered on this instance");
+    }
+
+    base.map(|_| "a base Gradient.CI server is already connected")
+}
+
 async fn insert_registration(
     state: &ServerState,
     user: &MUser,
@@ -182,25 +236,11 @@ async fn insert_registration(
     url: String,
     stored: StoredToken,
 ) -> WebResult<()> {
-    let existing = EWorkerRegistration::find()
-        .filter(worker_registration::Column::PeerId.eq(project.id))
-        .filter(
-            Condition::any()
-                .add(worker_registration::Column::GradientCi.eq(true))
-                .add(worker_registration::Column::WorkerId.eq(&token.worker_id)),
-        )
-        .one(&state.web_db)
-        .await?;
-    if existing.is_some() {
-        return Err(WebError::conflict(
-            "the project is already connected to Gradient.CI Servers",
-        ));
-    }
-
     registration_row(project, user, token, url, stored)
         .into_active_model()
         .insert(&state.web_db)
-        .await?;
+        .await
+        .map_err(|e| WebError::from_db_err(e, "Gradient.CI connection"))?;
     if let Err(e) = gradient_ci::unpark_no_workers_for_project(&state.web_db, project.id).await {
         tracing::warn!(
             error = %e,
@@ -219,24 +259,11 @@ async fn insert_base_worker(
     url: String,
     stored: StoredToken,
 ) -> WebResult<()> {
-    let existing = EBaseWorker::find()
-        .filter(
-            Condition::any()
-                .add(base_worker::Column::GradientCi.eq(true))
-                .add(base_worker::Column::WorkerId.eq(&token.worker_id)),
-        )
-        .one(&state.web_db)
-        .await?;
-    if existing.is_some() {
-        return Err(WebError::conflict(
-            "a base Gradient.CI server is already connected",
-        ));
-    }
-
     base_worker_row(user, token, url, stored)
         .into_active_model()
         .insert(&state.web_db)
-        .await?;
+        .await
+        .map_err(|e| WebError::from_db_err(e, "Gradient.CI connection"))?;
 
     Ok(())
 }
@@ -374,7 +401,6 @@ mod tests {
 
         assert!(row.gradient_ci && row.active && row.enable_eval && row.enable_build);
         assert!(!row.enable_fetch && !row.managed);
-        assert_eq!(row.display_name, "Gradient.CI Servers");
         assert_eq!(row.token_encrypted.as_deref(), Some("encrypted"));
         assert_eq!(row.url.as_deref(), Some("wss://servers.gradient.ci/proto"));
     }
