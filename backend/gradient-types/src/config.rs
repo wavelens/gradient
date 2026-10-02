@@ -6,9 +6,9 @@
 
 use super::Cli;
 use super::cli::{
-    BuildArgs, CacheArgs, DatabaseArgs, EvalArgs, GcArgs, HttpArgs, LogArgs, MetricsArgs, NarArgs,
-    PermissionsArgs, ProtoArgs, PullRequestsArgs, RegistrationArgs, SchedulerArgs, SecretsArgs,
-    SentryArgs, ServerArgs, SshArgs, StateArgs, UploadArgs,
+    BuildArgs, CacheArgs, DatabaseArgs, EvalArgs, GcArgs, GradientCiArgs, HttpArgs, LogArgs,
+    MetricsArgs, NarArgs, PermissionsArgs, ProtoArgs, PullRequestsArgs, RegistrationArgs,
+    SchedulerArgs, SecretsArgs, SentryArgs, ServerArgs, SshArgs, StateArgs, UploadArgs,
 };
 use ipnet::IpNet;
 
@@ -172,6 +172,7 @@ pub struct RuntimeConfig {
     pub state: StateArgs,
     pub permissions: PermissionsArgs,
     pub registration: RegistrationArgs,
+    pub gradient_ci: GradientCiArgs,
     pub ssh: SshArgs,
     pub sentry: SentryArgs,
     pub pull_requests: PullRequestsArgs,
@@ -206,6 +207,7 @@ impl RuntimeConfig {
             state: cli.state.clone(),
             permissions: cli.permissions.clone(),
             registration: cli.registration.clone(),
+            gradient_ci: cli.gradient_ci.clone(),
             ssh: cli.ssh.clone(),
             sentry: cli.sentry.clone(),
             pull_requests: cli.pull_requests.clone(),
