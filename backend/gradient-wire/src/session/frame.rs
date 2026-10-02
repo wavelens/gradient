@@ -91,6 +91,26 @@ pub enum Inbound<M> {
     Bulk(Frame<M>),
 }
 
+pub enum FirstMessage {
+    Worker(ClientMessage),
+    Server(ServerMessage),
+}
+
+fn first_message(bytes: Bytes) -> Option<FirstMessage> {
+    if let Ok(Inbound::Control(greeting @ ClientMessage::InitConnection { .. })) =
+        ClientMessage::decode(bytes.clone())
+    {
+        return Some(FirstMessage::Worker(greeting));
+    }
+
+    match ServerMessage::decode(bytes) {
+        Ok(Inbound::Control(authenticate @ ServerMessage::Authenticate { .. })) => {
+            Some(FirstMessage::Server(authenticate))
+        }
+        _ => None,
+    }
+}
+
 pub struct Frame<M> {
     bytes: Bytes,
     _direction: PhantomData<M>,
@@ -339,6 +359,11 @@ impl ProtoSocket {
         let bytes = msg.encode().ok_or(SendError::Encode)?;
         trace!(msg = ?Redacted(msg), bytes = bytes.len(), "send ClientMessage");
         self.send_bytes(bytes).await
+    }
+
+    pub async fn recv_first_message(&mut self) -> Option<FirstMessage> {
+        let bytes = self.recv_bytes().await?.ok()?;
+        first_message(bytes)
     }
 
     pub async fn recv_msg(&mut self) -> Option<ClientMessage> {
@@ -1213,5 +1238,47 @@ mod redaction_tests {
         assert!(!format!("{:?}", Redacted(&authenticate)).contains("s3cret"));
         assert!(!format!("{:?}", Redacted(&response)).contains("s3cret"));
         assert!(format!("{:?}", Redacted(&ServerMessage::Draining)).contains("Draining"));
+    }
+}
+
+#[cfg(test)]
+mod first_message_tests {
+    use super::*;
+    use crate::messages::{GradientCapabilities, PROTO_VERSION};
+
+    fn frame_of<M: WireMessage>(msg: &M) -> Bytes {
+        msg.encode().expect("encodes")
+    }
+
+    #[test]
+    fn a_worker_greeting_and_a_server_authenticate_are_told_apart() {
+        let greeting = ClientMessage::InitConnection {
+            version: PROTO_VERSION,
+            capabilities: GradientCapabilities::default(),
+            id: "w1".into(),
+        };
+        let authenticate = ServerMessage::Authenticate {
+            version: PROTO_VERSION,
+            worker_id: "w1".into(),
+            tokens: vec![("p1".into(), "s3cret".into())],
+        };
+
+        assert!(matches!(
+            first_message(frame_of(&greeting)),
+            Some(FirstMessage::Worker(ClientMessage::InitConnection { .. }))
+        ));
+        assert!(matches!(
+            first_message(frame_of(&authenticate)),
+            Some(FirstMessage::Server(ServerMessage::Authenticate { .. }))
+        ));
+    }
+
+    #[test]
+    fn any_other_opening_frame_is_neither() {
+        let response = ClientMessage::AuthResponse { tokens: vec![] };
+
+        assert!(first_message(frame_of(&response)).is_none());
+        assert!(first_message(frame_of(&ServerMessage::Draining)).is_none());
+        assert!(first_message(Bytes::new()).is_none());
     }
 }

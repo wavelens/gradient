@@ -162,6 +162,8 @@ where
     })
 }
 
+pub const UNKNOWN_WORKER_OR_WRONG_TOKEN: &str = "unknown worker id or wrong token";
+
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[error("handshake rejected ({code}): {reason}")]
 pub struct Rejected {
@@ -220,7 +222,7 @@ async fn reject_peer(
     .into()
 }
 
-async fn reject_dialer(socket: &mut ProtoSocket, code: u16, reason: String) -> anyhow::Error {
+pub async fn reject_dialer(socket: &mut ProtoSocket, code: u16, reason: String) -> anyhow::Error {
     let _ = socket
         .send_client_msg(&ClientMessage::Reject {
             code,
@@ -249,12 +251,23 @@ pub async fn as_authority<A>(
 where
     A: PeerAuthority + ?Sized,
 {
-    let init = socket
+    let greeting = socket
         .recv_msg()
         .await
         .ok_or_else(|| anyhow::anyhow!("connection closed before InitConnection"))?;
-    let claimed = claimed_id(&init);
-    let greeted = match on_init_connection(Opening, init, PROTO_VERSION) {
+    as_authority_with_greeting(socket, greeting, authority).await
+}
+
+pub async fn as_authority_with_greeting<A>(
+    socket: &mut ProtoSocket,
+    greeting: ClientMessage,
+    authority: &A,
+) -> anyhow::Result<HandshakeResult>
+where
+    A: PeerAuthority + ?Sized,
+{
+    let claimed = claimed_id(&greeting);
+    let greeted = match on_init_connection(Opening, greeting, PROTO_VERSION) {
         Ok(g) => g,
         Err(Intent::Reject { code, reason }) => {
             return Err(reject_peer(socket, code, reason, claimed).await);
@@ -433,10 +446,22 @@ where
     };
     let known = claim.worker_id == identity.peer_id();
     if !known || !verifier.verify(&claim.worker_id, &claim.tokens).await {
-        let reason = "unknown worker id or wrong token".to_string();
+        let reason = UNKNOWN_WORKER_OR_WRONG_TOKEN.to_string();
         return Err(reject_dialer(socket, 401, reason).await);
     }
 
+    answer_dialer(socket, identity, capabilities).await
+}
+
+pub async fn answer_dialer<I, C>(
+    socket: &mut ProtoSocket,
+    identity: &I,
+    capabilities: &C,
+) -> anyhow::Result<HandshakeResult>
+where
+    I: PeerIdentity + ?Sized,
+    C: CapabilitiesProvider + ?Sized,
+{
     send_client_msg(
         socket,
         &ClientMessage::InitConnection {
@@ -474,6 +499,7 @@ where
 mod tests {
     use super::*;
     use crate::messages::PROTO_VERSION;
+    use crate::session::frame::FirstMessage;
     use crate::testing::loopback;
 
     #[test]
@@ -782,6 +808,56 @@ mod tests {
         };
 
         let (outcome, ()) = tokio::join!(as_authority(&mut accepted, &NeverAsked), worker);
+        let rejected = rejection(outcome);
+        assert_eq!(
+            (rejected.code, rejected.claimed.as_deref()),
+            (400, Some("w1"))
+        );
+    }
+
+    #[tokio::test]
+    async fn a_dialed_side_that_checks_the_tokens_itself_answers_the_dialer() {
+        let (mut accepted, mut dialing) = loopback().await;
+        let dialed = async {
+            let Some(FirstMessage::Server(first)) = accepted.recv_first_message().await else {
+                panic!("expected Authenticate first");
+            };
+            let claim = on_authenticate(first, PROTO_VERSION).expect("current version");
+            assert_eq!(claim.tokens, credentials().tokens);
+            answer_dialer(&mut accepted, &Worker("w1"), &Worker("w1")).await
+        };
+
+        let (credentials, authority) = (credentials(), Admits(vec!["p1".into()]));
+        let (dialer, dialed) =
+            tokio::join!(as_dialer(&mut dialing, &credentials, &authority), dialed);
+        assert_eq!(dialer.expect("dialer handshake").peer_id, "w1");
+        assert_eq!(
+            dialed.expect("dialed handshake").authorized_peers,
+            vec!["p1".to_string()]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_greeting_read_by_the_caller_is_judged_like_one_read_by_the_authority() {
+        let (mut accepted, mut dialing) = loopback().await;
+        let worker = async {
+            dialing
+                .send_client_msg(&ClientMessage::InitConnection {
+                    version: PROTO_VERSION + 1,
+                    capabilities: GradientCapabilities::default(),
+                    id: "w1".into(),
+                })
+                .await
+                .expect("send InitConnection");
+        };
+        let authority = async {
+            let Some(FirstMessage::Worker(greeting)) = accepted.recv_first_message().await else {
+                panic!("expected InitConnection first");
+            };
+            as_authority_with_greeting(&mut accepted, greeting, &NeverAsked).await
+        };
+
+        let (outcome, ()) = tokio::join!(authority, worker);
         let rejected = rejection(outcome);
         assert_eq!(
             (rejected.code, rejected.claimed.as_deref()),
