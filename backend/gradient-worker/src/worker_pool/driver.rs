@@ -85,6 +85,9 @@ pub async fn run_eval_driver(requests_path: &str, eval_cache_dir: &str) -> Resul
                 .checkpoint(repository, input_overrides)
                 .await
                 .map(|()| json!({"kind": "checkpoint_ok"})),
+            EvalRequest::FetchInput { .. } => {
+                Err(anyhow::anyhow!("the eval driver does not fetch inputs"))
+            }
         };
 
         match output {

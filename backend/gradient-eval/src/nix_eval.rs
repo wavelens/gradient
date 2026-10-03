@@ -115,6 +115,28 @@ impl NixEvaluator {
             .map_err(|e| anyhow::anyhow!("eval stats: {e}"))
     }
 
+    pub fn stats_with(&self, ctx: &Context) -> Result<nix_bindings::EvalStats> {
+        Ok(self.state.stats_with(ctx)?)
+    }
+
+    pub fn fetch_tree(&self, locked: &str, git_ssh_command: Option<&str>) -> Result<String> {
+        // The pool reads nix's internal-json progress lines from stderr while this input downloads.
+        self.ctx.set_log_format("internal-json")?;
+        let _restore = SshCommand::set(git_ssh_command);
+        let fetched = self.fetch_tree_out_path(locked);
+        self.ctx.set_log_format("raw-with-logs")?;
+        fetched
+    }
+
+    fn fetch_tree_out_path(&self, locked: &str) -> Result<String> {
+        let fetch = self.state.eval_from_string(
+            "json: (builtins.fetchTree (builtins.fromJSON json)).outPath",
+            "/",
+        )?;
+        let json = self.state.make_string(locked)?;
+        Ok(fetch.call(&json)?.as_string()?)
+    }
+
     pub fn walker(
         &self,
         flake_ref: &str,
@@ -144,5 +166,27 @@ impl NixEvaluator {
             flake_ref,
             overrides,
         )
+    }
+}
+
+struct SshCommand(bool);
+
+impl SshCommand {
+    fn set(command: Option<&str>) -> Self {
+        let Some(command) = command else {
+            return Self(false);
+        };
+        // SAFETY: the eval worker is serving this one request; its stats ticker never reads the environment.
+        unsafe { std::env::set_var("GIT_SSH_COMMAND", command) };
+        Self(true)
+    }
+}
+
+impl Drop for SshCommand {
+    fn drop(&mut self) {
+        if self.0 {
+            // SAFETY: see SshCommand::set.
+            unsafe { std::env::remove_var("GIT_SSH_COMMAND") };
+        }
     }
 }

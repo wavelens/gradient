@@ -164,6 +164,15 @@ pub fn run_eval_worker() -> std::io::Result<()> {
                 send(&mut writer, &resp)?;
                 continue;
             }
+            EvalRequest::FetchInput {
+                locked,
+                git_ssh_command,
+            } => with_evaluator(&evaluator, |ev| {
+                or_err(
+                    ev.fetch_tree(&locked, git_ssh_command.as_deref())
+                        .map(|store_path| EvalResponse::FetchOk { store_path }),
+                )
+            }),
             EvalRequest::Fingerprint {
                 repository,
                 input_overrides,
@@ -331,6 +340,8 @@ fn response_kind(resp: &EvalResponse) -> String {
             format!("FingerprintOk({})", fingerprint.is_some())
         }
         EvalResponse::CheckpointOk => "CheckpointOk".to_string(),
+        EvalResponse::FetchOk { store_path } => format!("FetchOk({store_path})"),
+        EvalResponse::Stats { delta } => format!("Stats({} thunks)", delta.nr_thunks),
         EvalResponse::Err { message } => format!("Err({message})"),
     }
 }
