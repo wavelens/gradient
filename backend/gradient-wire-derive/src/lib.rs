@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use proc_macro2::{Ident, TokenStream};
+use proc_macro2::{Ident, TokenStream, TokenTree};
 use quote::{format_ident, quote};
 use syn::parse::ParseStream;
 use syn::{Attribute, Data, DeriveInput, Fields, LitInt, Token, Type, parse_macro_input};
@@ -302,6 +302,22 @@ fn enum_body(name: &Ident, data: &syn::DataEnum) -> syn::Result<Body> {
     Ok(body)
 }
 
+fn uses(body: &TokenStream, name: &str) -> bool {
+    body.clone().into_iter().any(|tree| match tree {
+        TokenTree::Ident(ident) => ident == name,
+        TokenTree::Group(group) => uses(&group.stream(), name),
+        _ => false,
+    })
+}
+
+fn param(body: &TokenStream, name: &str) -> Ident {
+    if uses(body, name) {
+        format_ident!("{name}")
+    } else {
+        format_ident!("_{name}")
+    }
+}
+
 fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
     let name = &input.ident;
     let top = versions(&input.attrs)?;
@@ -328,24 +344,27 @@ fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
         }
     };
 
+    let encode_version = param(&encode, "version");
+    let encode_out = param(&encode, "out");
+    let decode_input = param(&decode, "input");
+    let decode_version = param(&decode, "version");
+    let describe_version = param(&describe, "version");
+    let describe_out = param(&describe, "out");
     let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
     Ok(quote! {
         impl #impl_generics #codec::Proto for #name #ty_generics #where_clause {
             const OLDEST: u16 = #codec::max_of(&[#oldest_attr #(, #oldest)*]);
             const NEWEST: u16 = #codec::max_of(&[#oldest_attr #(, #newest)*]);
 
-            #[allow(unused_variables, reason = "types without fields read nothing")]
-            fn encode(&self, version: u16, out: &mut #codec::bytes::BytesMut) -> ::core::result::Result<(), #codec::EncodeError> {
+            fn encode(&self, #encode_version: u16, #encode_out: &mut #codec::bytes::BytesMut) -> ::core::result::Result<(), #codec::EncodeError> {
                 #encode
             }
 
-            #[allow(unused_variables, reason = "types without fields read nothing")]
-            fn decode(input: &mut #codec::bytes::Bytes, version: u16) -> ::core::result::Result<Self, #codec::DecodeError> {
+            fn decode(#decode_input: &mut #codec::bytes::Bytes, #decode_version: u16) -> ::core::result::Result<Self, #codec::DecodeError> {
                 #decode
             }
 
-            #[allow(unused_variables, reason = "types without fields read nothing")]
-            fn describe(version: u16, out: &mut ::std::string::String) {
+            fn describe(#describe_version: u16, #describe_out: &mut ::std::string::String) {
                 #describe
             }
         }
