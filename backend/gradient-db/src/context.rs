@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use std::collections::HashSet;
 use std::sync::Arc;
-
 use std::sync::Mutex;
 
 use tokio::sync::{Notify, mpsc};
@@ -13,7 +13,7 @@ use tokio::sync::{Notify, mpsc};
 use crate::pool::{WebDb, WorkerDb};
 use crate::scheduling::startable_set::StartableSet;
 use gradient_storage::StorageCtx;
-use gradient_types::{DerivationId, RuntimeConfig};
+use gradient_types::{DerivationId, EvaluationId, RuntimeConfig};
 use gradient_util::shutdown::Shutdown;
 
 /// Probing is HTTP and must stay out of the graph writer's transaction.
@@ -51,6 +51,29 @@ impl ProbeRequests {
     }
 }
 
+#[derive(Clone, Debug, Default)]
+pub struct HeldEvaluations(Arc<Mutex<HashSet<EvaluationId>>>);
+
+impl HeldEvaluations {
+    pub fn hold(&self, evaluation: EvaluationId) {
+        self.held().insert(evaluation);
+    }
+
+    pub fn release(&self, evaluation: EvaluationId) {
+        self.held().remove(&evaluation);
+    }
+
+    pub fn holds(&self, evaluation: EvaluationId) -> bool {
+        self.held().contains(&evaluation)
+    }
+
+    fn held(&self) -> std::sync::MutexGuard<'_, HashSet<EvaluationId>> {
+        self.0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct DbContext {
     pub worker_db: WorkerDb,
@@ -62,6 +85,7 @@ pub struct DbContext {
     pub delivery_wake: Arc<Notify>,
     pub probe_requests: ProbeRequests,
     pub startable_set: StartableSet,
+    pub held_evaluations: HeldEvaluations,
 }
 
 impl DbContext {

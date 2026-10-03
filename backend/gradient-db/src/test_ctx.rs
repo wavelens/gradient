@@ -86,6 +86,7 @@ pub(crate) async fn ctx_at(db: DatabaseConnection, dir: &std::path::Path) -> (Db
         events: gradient_types::EventBus::new(16),
         delivery_wake: Default::default(),
         probe_requests: ProbeRequests::default(),
+        held_evaluations: Default::default(),
         startable_set: Default::default(),
     };
 

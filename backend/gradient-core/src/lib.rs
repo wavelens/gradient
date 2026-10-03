@@ -236,6 +236,7 @@ pub async fn init_state(cli: Cli) -> Result<Arc<ServerState>, InitError> {
         eval_assign_wake: Arc::new(tokio::sync::Notify::new()),
         graph: Graph::new(),
         probe_requests: gradient_db::ProbeRequests::channel(),
+        held_evaluations: Default::default(),
         startable_set: Default::default(),
     }))
 }

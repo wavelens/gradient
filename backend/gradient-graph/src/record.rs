@@ -849,13 +849,14 @@ fn insert_entry_points(rows: Vec<AEntryPoint>) -> sea_orm::InsertMany<AEntryPoin
     )
 }
 
-fn accepts_batches(status: EvaluationStatus) -> bool {
-    matches!(
-        status,
+fn accepts_batches(status: EvaluationStatus, held: bool) -> bool {
+    match status {
         EvaluationStatus::Fetching
-            | EvaluationStatus::EvaluatingFlake
-            | EvaluationStatus::EvaluatingDerivation
-    )
+        | EvaluationStatus::EvaluatingFlake
+        | EvaluationStatus::EvaluatingDerivation => true,
+        EvaluationStatus::Building | EvaluationStatus::Waiting => held,
+        _ => false,
+    }
 }
 
 #[tracing::instrument(level = "debug", skip_all, fields(eval_id = %batch.evaluation, derivations = batch.derivations.len()))]
@@ -866,7 +867,7 @@ pub(crate) async fn apply_batch(ctx: &DbContext, batch: &RecordBatch) -> Result<
         .await
         .context("fetch evaluation")?
     {
-        Some(e) if !accepts_batches(e.status) => {
+        Some(e) if !accepts_batches(e.status, ctx.held_evaluations.holds(evaluation_id)) => {
             warn!(%evaluation_id, status = ?e.status, "batch for an evaluation that is not streaming; dropped as stale");
             return Ok(RecordReport {
                 evaluation: evaluation_id,
@@ -1241,6 +1242,18 @@ mod tests {
             .expect("commit");
 
         report
+    }
+
+    #[test]
+    fn only_a_held_evaluation_takes_batches_after_its_stream_ended() {
+        assert!(accepts_batches(
+            EvaluationStatus::EvaluatingDerivation,
+            false
+        ));
+        assert!(accepts_batches(EvaluationStatus::Building, true));
+        assert!(accepts_batches(EvaluationStatus::Waiting, true));
+        assert!(!accepts_batches(EvaluationStatus::Building, false));
+        assert!(!accepts_batches(EvaluationStatus::Aborted, true));
     }
 
     #[test]

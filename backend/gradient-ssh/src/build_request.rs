@@ -5,19 +5,21 @@
  */
 
 use crate::build_wait::{BuildOutcome, wait};
-use crate::session::Session;
+use crate::session::{ConnectionEvaluation, HeldEvaluation, Session};
 use futures::StreamExt as _;
 use gradient_db::build_request_task::ensure_build_request_task;
 use gradient_db::permissions::Permission;
 use gradient_derivation::{Derivation, discovered_derivation, parse_drv};
 use gradient_entity::evaluation::{EvaluationKind, EvaluationStatus};
 use gradient_graph::{RecordBatch, Transition};
+use gradient_scheduler::Scheduler;
 use gradient_types::*;
 use gradient_util::store_path::strip_nix_store_prefix;
 use gradient_wire::types::{BuildFailureKind, DiscoveredDerivation};
-use sea_orm::{ActiveModelTrait, IntoActiveModel, TransactionTrait};
+use sea_orm::{ActiveModelTrait, EntityTrait, IntoActiveModel, TransactionTrait};
 use std::collections::HashSet;
 use std::future::Future;
+use std::sync::Arc;
 use tokio::io::AsyncReadExt as _;
 
 const CONCURRENT_READS: usize = 32;
@@ -105,10 +107,14 @@ pub async fn closure(
     Ok(found)
 }
 
-pub async fn start(
-    session: &Session,
-    drv_paths: &[String],
-) -> anyhow::Result<(EvaluationId, Vec<(String, Derivation)>)> {
+#[derive(Debug)]
+pub struct Started {
+    pub evaluation: EvaluationId,
+    pub closure: Vec<String>,
+    pub requested: Vec<(String, Derivation)>,
+}
+
+pub async fn start(session: &Session, drv_paths: &[String]) -> anyhow::Result<Started> {
     anyhow::ensure!(
         session.may(Permission::TriggerEvaluation),
         "building in {} needs TriggerEvaluation",
@@ -116,37 +122,94 @@ pub async fn start(
     );
 
     let closure = closure(&CacheDrvSource { session }, drv_paths).await?;
-    let (task, evaluation) = create_evaluation(session, drv_paths).await?;
-    if let Err(error) = record(session, task, evaluation, &closure, drv_paths).await {
+    let held = evaluation_for(session, drv_paths).await?;
+    if let Err(error) = record(session, held, &closure, drv_paths).await {
         let failed = session
             .state
             .graph
             .transition(Transition::EvalFailed {
-                evaluation,
+                evaluation: held.evaluation,
                 error: error.to_string(),
                 kind: BuildFailureKind::Permanent,
                 missing_paths: Vec::new(),
             })
             .await;
         if let Err(e) = failed {
-            tracing::warn!(%evaluation, error = %e, "ssh evaluation could not be failed");
+            tracing::warn!(evaluation = %held.evaluation, error = %e, "ssh evaluation could not be failed");
         }
 
         return Err(error);
     }
 
     let requested: HashSet<&str> = drv_paths.iter().map(String::as_str).collect();
+    let paths = closure.iter().map(|(path, _)| path.clone()).collect();
     let requested_drvs = closure
         .into_iter()
         .filter(|(path, _)| requested.contains(path.as_str()))
         .collect();
-    Ok((evaluation, requested_drvs))
+    Ok(Started {
+        evaluation: held.evaluation,
+        closure: paths,
+        requested: requested_drvs,
+    })
+}
+
+async fn evaluation_for(session: &Session, drv_paths: &[String]) -> anyhow::Result<HeldEvaluation> {
+    let held_evaluations = &session.state.held_evaluations;
+    let mut slot = session.evaluation.lock().await;
+    match *slot {
+        ConnectionEvaluation::Closed => anyhow::bail!("the SSH connection is closing"),
+        ConnectionEvaluation::Open(held) if is_active(session, held.evaluation).await? => {
+            return Ok(held);
+        }
+        ConnectionEvaluation::Open(held) => held_evaluations.release(held.evaluation),
+        ConnectionEvaluation::None => {}
+    }
+
+    let held = create_evaluation(session, drv_paths).await?;
+    held_evaluations.hold(held.evaluation);
+    *slot = ConnectionEvaluation::Open(held);
+    Ok(held)
+}
+
+async fn is_active(session: &Session, evaluation: EvaluationId) -> anyhow::Result<bool> {
+    Ok(EEvaluation::find_by_id(evaluation)
+        .one(&session.state.web_db)
+        .await?
+        .is_some_and(|e| e.status.is_active()))
+}
+
+pub async fn release(session: &Session, scheduler: &Arc<Scheduler>) {
+    let previous = std::mem::replace(
+        &mut *session.evaluation.lock().await,
+        ConnectionEvaluation::Closed,
+    );
+    let ConnectionEvaluation::Open(held) = previous else {
+        return;
+    };
+
+    let state = &session.state;
+    let evaluation = held.evaluation;
+    state.held_evaluations.release(evaluation);
+    if let Err(e) = state
+        .graph
+        .transition(Transition::EvalStreamCompleted { evaluation })
+        .await
+    {
+        tracing::warn!(%evaluation, error = %e, "ssh evaluation could not be finished");
+    }
+
+    match EEvaluation::find_by_id(evaluation).one(&state.web_db).await {
+        Ok(Some(eval)) if eval.status.is_active() => scheduler.abort_evaluation(eval).await,
+        Ok(_) => {}
+        Err(e) => tracing::warn!(%evaluation, error = %e, "ssh evaluation could not be read"),
+    }
 }
 
 async fn create_evaluation(
     session: &Session,
     drv_paths: &[String],
-) -> anyhow::Result<(TaskId, EvaluationId)> {
+) -> anyhow::Result<HeldEvaluation> {
     let state = &session.state;
     let task = ensure_build_request_task(
         &state.web_db,
@@ -190,13 +253,15 @@ async fn create_evaluation(
     .await?;
     tx.commit().await?;
 
-    Ok((task.id, evaluation.id))
+    Ok(HeldEvaluation {
+        task: task.id,
+        evaluation: evaluation.id,
+    })
 }
 
 async fn record(
     session: &Session,
-    task: TaskId,
-    evaluation: EvaluationId,
+    held: HeldEvaluation,
     closure: &[(String, Derivation)],
     drv_paths: &[String],
 ) -> anyhow::Result<()> {
@@ -219,22 +284,29 @@ async fn record(
 
     for batch in derivations.chunks(RECORD_BATCH_SIZE) {
         let truly_substituted = gradient_scheduler::eval::assess_cached(state, batch).await;
-        state
+        let report = state
             .graph
             .record(RecordBatch {
-                evaluation,
-                task: Some(task),
+                evaluation: held.evaluation,
+                task: Some(held.task),
                 derivations: batch.to_vec(),
                 warnings: vec![],
                 errors: vec![],
                 truly_substituted,
             })
             .await?;
+        anyhow::ensure!(
+            !report.skipped,
+            "evaluation {} ended before the builds were added",
+            held.evaluation
+        );
     }
 
     state
         .graph
-        .transition(Transition::EvalStreamCompleted { evaluation })
+        .transition(Transition::EvalStreamCompleted {
+            evaluation: held.evaluation,
+        })
         .await?;
     Ok(())
 }
@@ -244,9 +316,9 @@ pub async fn run(
     drv_paths: &[String],
     log: impl Fn(String) + Send + Sync,
 ) -> anyhow::Result<BuildOutcome> {
-    let (evaluation, requested) = start(session, drv_paths).await?;
-    log(format!("Gradient evaluation {evaluation}"));
-    wait(session, evaluation, &requested, log).await
+    let started = start(session, drv_paths).await?;
+    log(format!("Gradient evaluation {}", started.evaluation));
+    wait(session, &started, log).await
 }
 
 #[cfg(test)]
@@ -340,10 +412,30 @@ mod tests {
             project: gradient_test_support::fixtures::project(),
             permissions: 0,
             caches: vec![],
+            evaluation: Default::default(),
         };
 
         let e = start(&session, &[path("a")]).await.expect_err("refused");
         assert!(e.to_string().contains("TriggerEvaluation"), "{e}");
+        assert!(db.into_transaction_log().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_closing_connection_starts_no_evaluation() {
+        let db = MockDatabase::new(DatabaseBackend::Postgres).into_connection();
+        let session = Session {
+            state: gradient_test_support::state::test_state_web(db.clone()),
+            user: gradient_test_support::fixtures::user(),
+            project: gradient_test_support::fixtures::project(),
+            permissions: 0,
+            caches: vec![],
+            evaluation: tokio::sync::Mutex::new(ConnectionEvaluation::Closed),
+        };
+
+        let e = evaluation_for(&session, &[path("a")])
+            .await
+            .expect_err("closing");
+        assert!(e.to_string().contains("closing"), "{e}");
         assert!(db.into_transaction_log().is_empty());
     }
 

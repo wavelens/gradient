@@ -136,6 +136,7 @@ fn server_with_pools(
         delivery_wake: Default::default(),
         eval_assign_wake: Default::default(),
         probe_requests: Default::default(),
+        held_evaluations: Default::default(),
         startable_set: Default::default(),
         graph: gradient_core::Graph::stub(),
         upstream_query: std::sync::Arc::new(tokio::sync::Semaphore::new(32)),

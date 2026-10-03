@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use crate::build_request::Started;
 use crate::session::Session;
 use gradient_derivation::Derivation;
 use gradient_entity::build::BuildStatus;
@@ -12,7 +13,7 @@ use gradient_types::*;
 use gradient_util::store_path::strip_nix_store_prefix;
 use harmonia_protocol::daemon::wire::types2::FailureStatus;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::time::Duration;
 
 const POLL: Duration = Duration::from_secs(1);
@@ -60,72 +61,106 @@ pub fn split_lines(prefix: &str, pending: &mut String, chunk: &str) -> Vec<Strin
         .collect()
 }
 
+fn settles_the_request(status: BuildStatus) -> bool {
+    status.is_terminal_success() || status.is_terminal_failure()
+}
+
 pub async fn wait(
     session: &Session,
-    evaluation: EvaluationId,
-    requested: &[(String, Derivation)],
+    started: &Started,
     log: impl Fn(String) + Send + Sync,
 ) -> anyhow::Result<BuildOutcome> {
     let state = &session.state;
-    let jobs = EBuildJob::find()
-        .filter(CBuildJob::Evaluation.eq(evaluation))
+    let derivations = closure_derivations(session, &started.closure).await?;
+    let jobs: Vec<MBuildJob> = EBuildJob::find()
+        .filter(CBuildJob::Evaluation.eq(started.evaluation))
         .all(&state.web_db)
-        .await?;
-    let build_of: HashMap<DerivationId, DerivationBuildId> = jobs
-        .iter()
-        .map(|j| (j.derivation, j.derivation_build))
+        .await?
+        .into_iter()
+        .filter(|j| derivations.contains_key(&j.derivation))
         .collect();
-    let prefixes = prefixes(session, &jobs).await?;
+    let build_of: HashMap<String, DerivationBuildId> = jobs
+        .iter()
+        .filter_map(|j| {
+            let path = derivations.get(&j.derivation)?.store_path();
+            Some((path, j.derivation_build))
+        })
+        .collect();
+    let prefixes: HashMap<DerivationBuildId, String> = jobs
+        .iter()
+        .filter_map(|j| {
+            let d = derivations.get(&j.derivation)?;
+            Some((
+                j.derivation_build,
+                d.pname.clone().unwrap_or(d.name.clone()),
+            ))
+        })
+        .collect();
+    let requested: Vec<DerivationBuildId> = started
+        .requested
+        .iter()
+        .filter_map(|(path, _)| build_of.get(path).copied())
+        .collect();
     let mut followed: HashMap<DerivationBuildId, Followed> = HashMap::new();
     let mut open: Vec<DerivationBuildId> = jobs.iter().map(|j| j.derivation_build).collect();
 
     loop {
-        let status = EEvaluation::find_by_id(evaluation)
+        let status = EEvaluation::find_by_id(started.evaluation)
             .one(&state.web_db)
             .await?
-            .ok_or_else(|| anyhow::anyhow!("evaluation {evaluation} disappeared"))?
+            .ok_or_else(|| anyhow::anyhow!("evaluation {} disappeared", started.evaluation))?
             .status;
 
         open = follow_logs(session, open, &prefixes, &mut followed, &log).await?;
-        if EvaluationStatus::TERMINAL.contains(&status) {
+        if EvaluationStatus::TERMINAL.contains(&status) || settled(session, &requested).await? {
             break;
         }
 
         tokio::time::sleep(POLL).await;
     }
 
-    let mut results = Vec::with_capacity(requested.len());
-    for (path, drv) in requested {
-        let result = requested_result(session, &build_of, path, drv).await?;
+    let mut results = Vec::with_capacity(started.requested.len());
+    for (path, drv) in &started.requested {
+        let result = requested_result(session, build_of.get(path).copied(), path, drv).await?;
         results.push((path.clone(), result));
     }
 
     Ok(BuildOutcome { results })
 }
 
-async fn prefixes(
+async fn closure_derivations(
     session: &Session,
-    jobs: &[MBuildJob],
-) -> anyhow::Result<HashMap<DerivationBuildId, String>> {
-    let ids: Vec<DerivationId> = jobs.iter().map(|j| j.derivation).collect();
-    let names: HashMap<DerivationId, String> = gradient_db::fetch_in_chunks(&ids, |chunk| async {
+    closure: &[String],
+) -> anyhow::Result<HashMap<DerivationId, MDerivation>> {
+    let paths: HashSet<&str> = closure.iter().map(String::as_str).collect();
+    let hashes: Vec<String> = closure
+        .iter()
+        .filter_map(|p| {
+            strip_nix_store_prefix(p)
+                .split_once('-')
+                .map(|(h, _)| h.to_string())
+        })
+        .collect();
+    Ok(gradient_db::fetch_in_chunks(&hashes, |chunk| async {
         EDerivation::find()
-            .filter(CDerivation::Id.is_in(chunk))
+            .filter(CDerivation::Hash.is_in(chunk))
             .all(&session.state.web_db)
             .await
     })
     .await?
     .into_iter()
-    .map(|d| (d.id, d.pname.unwrap_or(d.name)))
-    .collect();
+    .filter(|d| paths.contains(d.store_path().as_str()))
+    .map(|d| (d.id, d))
+    .collect())
+}
 
-    Ok(jobs
+async fn settled(session: &Session, requested: &[DerivationBuildId]) -> anyhow::Result<bool> {
+    Ok(EDerivationBuild::find()
+        .filter(CDerivationBuild::Id.is_in(requested.to_vec()))
+        .all(&session.state.web_db)
+        .await?
         .iter()
-        .map(|j| {
-            let name = names.get(&j.derivation).cloned().unwrap_or_default();
-            (j.derivation_build, name)
-        })
-        .collect())
+        .all(|b| settles_the_request(b.status)))
 }
 
 async fn follow_logs(
@@ -202,7 +237,7 @@ async fn emit_new_lines(
 
 async fn requested_result(
     session: &Session,
-    build_of: &HashMap<DerivationId, DerivationBuildId>,
+    build: Option<DerivationBuildId>,
     path: &str,
     drv: &Derivation,
 ) -> anyhow::Result<DrvResult> {
@@ -212,15 +247,7 @@ async fn requested_result(
         .map(|o| (o.name.clone(), o.path.clone()))
         .collect();
     let state = &session.state;
-    let base = strip_nix_store_prefix(path);
-    let (hash, name) = base.split_once('-').unwrap_or((&base, ""));
-    let derivation = EDerivation::find()
-        .filter(CDerivation::Hash.eq(hash))
-        .filter(CDerivation::Name.eq(name.strip_suffix(".drv").unwrap_or(name)))
-        .one(&state.web_db)
-        .await?;
-
-    let Some(build_id) = derivation.and_then(|d| build_of.get(&d.id).copied()) else {
+    let Some(build_id) = build else {
         return Ok(Ok(outputs));
     };
 
@@ -279,6 +306,29 @@ mod tests {
             failure_status(BuildStatus::Aborted),
             FailureStatus::MiscFailure
         );
+    }
+
+    #[test]
+    fn only_a_final_build_status_answers_the_request() {
+        for status in [
+            BuildStatus::Completed,
+            BuildStatus::Substituted,
+            BuildStatus::FailedPermanent,
+            BuildStatus::FailedTimeout,
+            BuildStatus::DependencyFailed,
+        ] {
+            assert!(settles_the_request(status), "{status:?}");
+        }
+
+        for status in [
+            BuildStatus::Created,
+            BuildStatus::Queued,
+            BuildStatus::Building,
+            BuildStatus::FailedTransient,
+            BuildStatus::Aborted,
+        ] {
+            assert!(!settles_the_request(status), "{status:?}");
+        }
     }
 
     #[test]

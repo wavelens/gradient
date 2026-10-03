@@ -8,6 +8,7 @@ use crate::auth::{authorize, fingerprint};
 use crate::roots::Roots;
 use crate::session::Session;
 use gradient_core::ServerState;
+use gradient_scheduler::Scheduler;
 use russh::keys::{PrivateKey, PublicKey};
 use russh::server::{Auth, ChannelOpenHandle, Msg, Session as SshSession};
 use russh::{Channel, ChannelId, MethodKind, MethodSet};
@@ -29,11 +30,16 @@ pub fn config(host_key: PrivateKey) -> russh::server::Config {
 pub struct SshServer {
     state: Arc<ServerState>,
     roots: Arc<Roots>,
+    scheduler: Arc<Scheduler>,
 }
 
 impl SshServer {
-    pub fn new(state: Arc<ServerState>, roots: Arc<Roots>) -> Self {
-        Self { state, roots }
+    pub fn new(state: Arc<ServerState>, roots: Arc<Roots>, scheduler: Arc<Scheduler>) -> Self {
+        Self {
+            state,
+            roots,
+            scheduler,
+        }
     }
 }
 
@@ -44,6 +50,7 @@ impl russh::server::Server for SshServer {
         Connection {
             state: self.state.clone(),
             roots: self.roots.clone(),
+            scheduler: self.scheduler.clone(),
             session: None,
             channels: HashMap::new(),
         }
@@ -53,8 +60,22 @@ impl russh::server::Server for SshServer {
 pub struct Connection {
     state: Arc<ServerState>,
     roots: Arc<Roots>,
+    scheduler: Arc<Scheduler>,
     session: Option<Arc<Session>>,
     channels: HashMap<ChannelId, Channel<Msg>>,
+}
+
+impl Drop for Connection {
+    fn drop(&mut self) {
+        let Some(session) = self.session.take() else {
+            return;
+        };
+
+        let scheduler = self.scheduler.clone();
+        self.state.shutdown.spawn(async move {
+            crate::build_request::release(&session, &scheduler).await;
+        });
+    }
 }
 
 impl russh::server::Handler for Connection {

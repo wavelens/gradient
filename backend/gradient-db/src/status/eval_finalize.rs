@@ -18,6 +18,10 @@ pub async fn check_evaluation_done(
     ctx: &DbContext,
     evaluation_id: EvaluationId,
 ) -> Result<(), DbErr> {
+    if ctx.held_evaluations.holds(evaluation_id) {
+        return Ok(());
+    }
+
     let db = &ctx.worker_db;
     let Some(counters) = crate::evaluations::counters::eval_counters(db, evaluation_id).await?
     else {
@@ -164,6 +168,20 @@ mod tests {
             log.iter().any(|s| s.contains(r#"UPDATE \"evaluation\""#)),
             "the evaluation settles once nothing blocks it: {log:?}"
         );
+    }
+
+    #[tokio::test]
+    async fn a_held_evaluation_stays_open() {
+        let eval = building();
+        let db = MockDatabase::new(DatabaseBackend::Postgres).into_connection();
+
+        let (ctx, pool) = crate::test_ctx::ctx(db).await;
+        ctx.held_evaluations.hold(eval.id);
+        check_evaluation_done(&ctx, eval.id).await.unwrap();
+        drop(ctx);
+
+        let log = crate::pool::statements(pool.into_transaction_log());
+        assert!(log.is_empty(), "{log:?}");
     }
 
     #[tokio::test]
