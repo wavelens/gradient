@@ -412,6 +412,7 @@ mod tests {
             ready_at: now,
             project_work_share: None,
             prioritized: false,
+            build_request: false,
             rescore_count: 0,
             now,
         };
@@ -425,6 +426,7 @@ mod tests {
             ready_at: now,
             project_work_share: None,
             prioritized: false,
+            build_request: false,
             rescore_count: 0,
             now,
         };
@@ -459,6 +461,7 @@ mod tests {
             ready_at: now,
             project_work_share: None,
             prioritized: false,
+            build_request: false,
             rescore_count: 0,
             now,
         };
@@ -472,6 +475,7 @@ mod tests {
             ready_at: now,
             project_work_share: None,
             prioritized: false,
+            build_request: false,
             rescore_count: 0,
             now,
         };
@@ -506,6 +510,7 @@ mod tests {
             ready_at: now,
             project_work_share: None,
             prioritized: false,
+            build_request: false,
             rescore_count: 0,
             now,
         };
@@ -519,6 +524,7 @@ mod tests {
             ready_at: now,
             project_work_share: None,
             prioritized: false,
+            build_request: false,
             rescore_count: 0,
             now,
         };
@@ -532,6 +538,7 @@ mod tests {
             ready_at: now,
             project_work_share: None,
             prioritized: false,
+            build_request: false,
             rescore_count: 0,
             now,
         };
@@ -564,6 +571,7 @@ mod tests {
             ready_at: now,
             project_work_share: None,
             prioritized: false,
+            build_request: false,
             rescore_count: 0,
             now,
         };
@@ -577,6 +585,7 @@ mod tests {
             ready_at: now,
             project_work_share: None,
             prioritized: false,
+            build_request: false,
             rescore_count: 0,
             now,
         };
@@ -621,6 +630,7 @@ mod tests {
             ready_at: now,
             project_work_share: None,
             prioritized: false,
+            build_request: false,
             rescore_count: 0,
             now,
         };
@@ -656,6 +666,7 @@ mod tests {
             ready_at: now,
             project_work_share: None,
             prioritized: false,
+            build_request: false,
             rescore_count: 0,
             now,
         };
@@ -669,6 +680,7 @@ mod tests {
             ready_at: now,
             project_work_share: None,
             prioritized: false,
+            build_request: false,
             rescore_count: 0,
             now,
         };
@@ -703,6 +715,7 @@ mod tests {
             ready_at: now,
             project_work_share: None,
             prioritized: false,
+            build_request: false,
             rescore_count: 0,
             now,
         };
@@ -716,6 +729,7 @@ mod tests {
             ready_at: now,
             project_work_share: None,
             prioritized: false,
+            build_request: false,
             rescore_count: 0,
             now,
         };
@@ -749,6 +763,7 @@ mod tests {
             ready_at: now,
             project_work_share: None,
             prioritized: false,
+            build_request: false,
             rescore_count: 0,
             now,
         };
@@ -774,6 +789,7 @@ mod tests {
             ready_at: now,
             project_work_share: None,
             prioritized: false,
+            build_request: false,
             rescore_count: 0,
             now,
         };
@@ -787,6 +803,7 @@ mod tests {
             ready_at: now - chrono::Duration::seconds(60),
             project_work_share: None,
             prioritized: false,
+            build_request: false,
             rescore_count: 0,
             now,
         };
@@ -800,6 +817,7 @@ mod tests {
             ready_at: now - chrono::Duration::seconds(10_000),
             project_work_share: None,
             prioritized: false,
+            build_request: false,
             rescore_count: 0,
             now,
         };
@@ -844,6 +862,7 @@ mod tests {
             ready_at: now,
             project_work_share: None,
             prioritized: false,
+            build_request: false,
             rescore_count: 0,
             now,
         };
@@ -857,6 +876,7 @@ mod tests {
             ready_at: now,
             project_work_share: None,
             prioritized: false,
+            build_request: false,
             rescore_count: 4,
             now,
         };
@@ -870,6 +890,7 @@ mod tests {
             ready_at: now,
             project_work_share: None,
             prioritized: false,
+            build_request: false,
             rescore_count: 0,
             now,
         };
@@ -883,6 +904,7 @@ mod tests {
             ready_at: now,
             project_work_share: None,
             prioritized: false,
+            build_request: false,
             rescore_count: 0,
             now,
         };
@@ -943,6 +965,7 @@ mod tests {
             ready_at: now,
             project_work_share: None,
             prioritized: false,
+            build_request: false,
             rescore_count: 0,
             now,
         };
@@ -956,6 +979,7 @@ mod tests {
             ready_at: now,
             project_work_share: None,
             prioritized: false,
+            build_request: false,
             rescore_count: 0,
             now,
         };
@@ -969,6 +993,7 @@ mod tests {
             ready_at: now,
             project_work_share: None,
             prioritized: false,
+            build_request: false,
             rescore_count: 0,
             now,
         };
@@ -1016,6 +1041,7 @@ mod tests {
             ready_at: now,
             project_work_share: None,
             prioritized: false,
+            build_request: false,
             rescore_count: 0,
             now,
         };

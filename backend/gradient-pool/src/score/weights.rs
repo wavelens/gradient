@@ -61,3 +61,4 @@ pub const DISK_REFERENCE_MBPS: f64 = 500.0;
 pub const FAIR_SHARE_WEIGHT: f64 = 500.0;
 
 pub const QOS_PRIORITIZED: f64 = 5000.0;
+pub const QOS_BUILD_REQUEST: f64 = 1000.0;

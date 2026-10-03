@@ -84,6 +84,7 @@ pub(crate) fn eval_job(peer: ProjectId) -> PendingEvalJob {
         ready_at: gradient_types::now(),
         rescore_count: 0,
         prioritized: false,
+        build_request: false,
         history: Default::default(),
         walk_mode: Default::default(),
     }
@@ -124,6 +125,7 @@ pub(crate) fn build_job(
         ready_at: gradient_types::now(),
         rescore_count: 0,
         prioritized: false,
+        build_request: false,
         pname: None,
         substitute: false,
     }
@@ -849,6 +851,7 @@ async fn cancel_evaluation_jobs_drops_eval_and_build_jobs() {
                 ready_at: gradient_types::now(),
                 rescore_count: 0,
                 prioritized: false,
+                build_request: false,
                 history: Default::default(),
                 walk_mode: Default::default(),
             },

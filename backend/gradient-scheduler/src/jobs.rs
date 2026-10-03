@@ -37,6 +37,7 @@ pub struct PendingEvalJob {
     pub history: gradient_pool::score::HistoryPrediction,
     pub walk_mode: WalkMode,
     pub prioritized: bool,
+    pub build_request: bool,
 }
 
 impl PendingEvalJob {
@@ -71,6 +72,7 @@ pub struct PendingBuildJob {
     pub ready_at: chrono::NaiveDateTime,
     pub rescore_count: u32,
     pub prioritized: bool,
+    pub build_request: bool,
     pub pname: Option<String>,
     pub substitute: bool,
 }
@@ -207,6 +209,13 @@ impl PendingJob {
         match self {
             PendingJob::Build(j) => j.prioritized,
             PendingJob::Eval(j) => j.prioritized,
+        }
+    }
+
+    pub fn build_request(&self) -> bool {
+        match self {
+            PendingJob::Build(j) => j.build_request,
+            PendingJob::Eval(j) => j.build_request,
         }
     }
 
@@ -737,6 +746,7 @@ impl JobTracker {
             ready_at: job.ready_at(),
             project_work_share: shares.share(job.project_id()),
             prioritized: job.prioritized(),
+            build_request: job.build_request(),
             rescore_count: job.rescore_count(),
             now,
         };
@@ -1372,6 +1382,7 @@ mod tests {
             ready_at: gradient_types::now(),
             rescore_count: 0,
             prioritized: false,
+            build_request: false,
             history: Default::default(),
             walk_mode: Default::default(),
         })
@@ -1404,6 +1415,7 @@ mod tests {
             ready_at: gradient_types::now(),
             rescore_count: 0,
             prioritized: false,
+            build_request: false,
             history: Default::default(),
             walk_mode: Default::default(),
         })
@@ -1468,6 +1480,7 @@ mod tests {
             ready_at: gradient_types::now(),
             rescore_count: 0,
             prioritized: false,
+            build_request: false,
             pname: None,
             substitute: false,
         })

@@ -174,6 +174,7 @@ struct BuildAssignMaps {
     histories: HashMap<DerivationId, gradient_pool::score::HistoryPrediction>,
     driving_eval: HashMap<DerivationBuildId, EvaluationId>,
     prioritized_by_eval: HashSet<DerivationBuildId>,
+    build_request_by_eval: HashSet<DerivationBuildId>,
     config: AssignConfig,
 }
 
@@ -262,7 +263,8 @@ impl BuildAssignMaps {
             }
         }
 
-        let prioritized_by_eval = prioritized_by_eval(&jobs_by_shared_build, &evaluations);
+        let prioritized_by_eval =
+            lifted_by_live_eval(&jobs_by_shared_build, &evaluations, |ev| ev.prioritized);
 
         let task_ids: Vec<TaskId> = evaluations
             .values()
@@ -270,14 +272,21 @@ impl BuildAssignMaps {
             .collect::<std::collections::HashSet<_>>()
             .into_iter()
             .collect();
+        let task_rows = gradient_db::fetch_in_chunks(&task_ids, |chunk| async move {
+            ETask::find().filter(CTask::Id.is_in(chunk)).all(db).await
+        })
+        .await?;
         let tasks: HashMap<TaskId, ProjectId> =
-            gradient_db::fetch_in_chunks(&task_ids, |chunk| async move {
-                ETask::find().filter(CTask::Id.is_in(chunk)).all(db).await
-            })
-            .await?
-            .into_iter()
-            .map(|p| (p.id, p.project))
+            task_rows.iter().map(|t| (t.id, t.project)).collect();
+        let build_request_tasks: HashSet<TaskId> = task_rows
+            .iter()
+            .filter(|t| gradient_db::build_request_task::is_build_request_task(t))
+            .map(|t| t.id)
             .collect();
+        let build_request_by_eval =
+            lifted_by_live_eval(&jobs_by_shared_build, &evaluations, |ev| {
+                ev.task.is_some_and(|t| build_request_tasks.contains(&t))
+            });
 
         let feature_edges = gradient_db::fetch_in_chunks(&drv_ids, |chunk| async move {
             EDerivationFeature::find()
@@ -435,6 +444,7 @@ impl BuildAssignMaps {
             histories,
             driving_eval,
             prioritized_by_eval,
+            build_request_by_eval,
             config: AssignConfig::from_state(state),
         })
     }
@@ -562,6 +572,7 @@ impl BuildAssignMaps {
             ready_at: now(),
             rescore_count: 0,
             prioritized,
+            build_request: self.build_request_by_eval.contains(&shared_build.id),
             pname: derivation.pname.clone(),
             substitute,
         };
@@ -630,9 +641,10 @@ async fn load_sizes_and_histories(
     (closure_sizes, histories, computed)
 }
 
-fn prioritized_by_eval(
+fn lifted_by_live_eval(
     jobs_by_shared_build: &HashMap<DerivationBuildId, Vec<EvaluationId>>,
     evaluations: &HashMap<EvaluationId, MEvaluation>,
+    lifts: impl Fn(&MEvaluation) -> bool,
 ) -> HashSet<DerivationBuildId> {
     jobs_by_shared_build
         .iter()
@@ -640,7 +652,7 @@ fn prioritized_by_eval(
             evals.iter().any(|e| {
                 evaluations
                     .get(e)
-                    .is_some_and(|ev| ev.prioritized && !eval_is_terminal(ev.status))
+                    .is_some_and(|ev| lifts(ev) && !eval_is_terminal(ev.status))
             })
         })
         .map(|(shared_build, _)| *shared_build)
@@ -836,7 +848,7 @@ mod priority_tests {
             HashMap::from([(live.id, live), (finished.id, finished), (plain.id, plain)]);
 
         assert_eq!(
-            prioritized_by_eval(&jobs_by_shared_build, &evaluations),
+            lifted_by_live_eval(&jobs_by_shared_build, &evaluations, |ev| ev.prioritized),
             HashSet::from([shared])
         );
     }

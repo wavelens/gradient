@@ -1049,6 +1049,7 @@ pub(in crate::handler) mod fixture {
             history: Default::default(),
             walk_mode: Default::default(),
             prioritized: false,
+            build_request: false,
         })
     }
 

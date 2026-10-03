@@ -275,6 +275,7 @@ mod tests {
             ready_at: now(),
             project_work_share: None,
             prioritized: false,
+            build_request: false,
             rescore_count: 0,
             now: now(),
         };
@@ -290,6 +291,7 @@ mod tests {
             ready_at: now() - chrono::Duration::seconds(3600),
             project_work_share: None,
             prioritized: false,
+            build_request: false,
             rescore_count: 0,
             now: now(),
         };
@@ -329,6 +331,7 @@ mod tests {
             ready_at: now(),
             project_work_share: None,
             prioritized: false,
+            build_request: false,
             rescore_count: 0,
             now: now(),
         };
@@ -386,6 +389,7 @@ mod tests {
             ready_at: now(),
             project_work_share: None,
             prioritized: false,
+            build_request: false,
             rescore_count: 0,
             now: now(),
         };
@@ -442,6 +446,7 @@ mod tests {
             ready_at: now(),
             project_work_share: None,
             prioritized: false,
+            build_request: false,
             rescore_count: 0,
             now: now(),
         };
@@ -488,6 +493,7 @@ mod tests {
             ready_at: n,
             project_work_share: None,
             prioritized: false,
+            build_request: false,
             rescore_count: 0,
             now: now(),
         };
@@ -503,6 +509,7 @@ mod tests {
             ready_at: n,
             project_work_share: None,
             prioritized: false,
+            build_request: false,
             rescore_count: 0,
             now: now(),
         };
@@ -530,6 +537,7 @@ mod tests {
             ready_at: now(),
             project_work_share: None,
             prioritized: false,
+            build_request: false,
             rescore_count: 0,
             now: now(),
         };
@@ -596,6 +604,7 @@ mod tests {
             ready_at: now(),
             project_work_share: None,
             prioritized: false,
+            build_request: false,
             rescore_count: 0,
             now: now(),
         };

@@ -131,6 +131,7 @@ pub(crate) async fn assign_queued_evals(scheduler: &Scheduler) -> anyhow::Result
             ready_at: eval.updated_at,
             rescore_count: 0,
             prioritized: eval.prioritized,
+            build_request: maps.build_request_tasks.contains(&task_id),
             history,
             walk_mode: eval.walk_mode,
         };
@@ -157,6 +158,7 @@ struct EvalAssignMaps {
     sidecars: HashMap<EvaluationId, gradient_entity::evaluation_input_update::Model>,
     overrides: HashMap<EvaluationId, Vec<gradient_wire::types::FlakeInputOverride>>,
     projects: HashMap<TaskId, ProjectId>,
+    build_request_tasks: HashSet<TaskId>,
 }
 
 impl EvalAssignMaps {
@@ -224,22 +226,26 @@ impl EvalAssignMaps {
             .collect::<HashSet<_>>()
             .into_iter()
             .collect();
-        let projects = gradient_db::fetch_in_chunks(&task_ids, |chunk| async move {
+        let tasks = gradient_db::fetch_in_chunks(&task_ids, |chunk| async move {
             ETask::find()
                 .filter(CTask::Id.is_in(chunk))
                 .all(&state.worker_db)
                 .await
         })
-        .await?
-        .into_iter()
-        .map(|p| (p.id, p.project))
-        .collect();
+        .await?;
+        let projects = tasks.iter().map(|t| (t.id, t.project)).collect();
+        let build_request_tasks = tasks
+            .iter()
+            .filter(|t| gradient_db::build_request_task::is_build_request_task(t))
+            .map(|t| t.id)
+            .collect();
 
         Ok(Self {
             commits,
             sidecars,
             overrides,
             projects,
+            build_request_tasks,
         })
     }
 }
