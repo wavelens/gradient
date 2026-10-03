@@ -76,7 +76,7 @@ async fn ws_upgrade(
                 .spawn(async move {
                     let _permit = permit;
                     session::handle_socket(
-                        socket::ProtoSocket::Axum(Box::new(sock)),
+                        socket::ProtoSocket::axum(sock),
                         state,
                         scheduler,
                         sessions,

@@ -51,5 +51,61 @@ async fn connect(request: http::Request<()>, url: &str) -> Result<ProtoSocket> {
         .await
         .with_context(|| format!("dial WebSocket {url}"))?;
 
-    Ok(ProtoSocket::Tungstenite(Box::new(ws)))
+    Ok(ProtoSocket::tungstenite(ws))
+}
+
+#[cfg(test)]
+mod tests {
+    use tokio::net::TcpListener;
+    use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
+
+    use super::dial;
+    use crate::session::frame::{MAX_PROTO_MESSAGE_SIZE, ProtoSocket};
+
+    async fn dial_one_shot() -> (
+        WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>,
+        ProtoSocket,
+    ) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let addr = listener.local_addr().expect("local addr");
+
+        let serve = async {
+            let (tcp, _) = listener.accept().await.expect("accept");
+            tokio_tungstenite::accept_async(MaybeTlsStream::Plain(tcp))
+                .await
+                .expect("server-side upgrade")
+        };
+
+        let url = format!("ws://{addr}/proto");
+        let (server, client) = tokio::join!(serve, dial(&url));
+        (server, client.expect("dial"))
+    }
+
+    #[tokio::test]
+    async fn dial_disables_nagle_on_the_connection() {
+        let (_server, client) = dial_one_shot().await;
+        let stream = client
+            .tungstenite_stream()
+            .expect("dial produces a tungstenite socket");
+
+        assert!(
+            stream
+                .get_ref()
+                .get_ref()
+                .nodelay()
+                .expect("read nodelay on the dialed socket")
+        );
+    }
+
+    #[tokio::test]
+    async fn dial_applies_the_proto_frame_ceiling() {
+        let (_server, client) = dial_one_shot().await;
+        let stream = client
+            .tungstenite_stream()
+            .expect("dial produces a tungstenite socket");
+
+        let config = stream.get_config();
+        assert_eq!(config.max_message_size, Some(MAX_PROTO_MESSAGE_SIZE));
+        assert_eq!(config.max_frame_size, Some(MAX_PROTO_MESSAGE_SIZE));
+    }
 }

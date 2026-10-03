@@ -7,5 +7,5 @@
 pub use crate::session::frame::accept_tungstenite;
 
 pub fn accept_axum(ws: axum::extract::ws::WebSocket) -> crate::session::frame::ProtoSocket {
-    crate::session::frame::ProtoSocket::Axum(Box::new(ws))
+    crate::session::frame::ProtoSocket::axum(ws)
 }
