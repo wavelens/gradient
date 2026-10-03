@@ -29,6 +29,8 @@ pub const BUILD_PROGRESS_INTERVAL: std::time::Duration = std::time::Duration::fr
 
 pub const EVAL_PROGRESS_INTERVAL: std::time::Duration = std::time::Duration::from_secs(1);
 
+pub const EVAL_PROGRESS_RESEND_INTERVAL: std::time::Duration = std::time::Duration::from_secs(30);
+
 pub use crate::constants::{NAR_ZSTD_LEVEL, PRESIGN_TTL};
 
 pub const TRANSFER_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(600);

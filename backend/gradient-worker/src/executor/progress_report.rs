@@ -6,14 +6,14 @@
 
 use std::convert::Infallible;
 
-use gradient_wire::messages::EVAL_PROGRESS_INTERVAL;
+use gradient_wire::messages::{EVAL_PROGRESS_INTERVAL, EVAL_PROGRESS_RESEND_INTERVAL};
 use gradient_wire::traits::EvalProgressSink;
 use gradient_wire::types::EvalProgress;
-use tokio::time::MissedTickBehavior;
+use tokio::time::{Instant, MissedTickBehavior};
 
 #[derive(Default)]
 pub(crate) struct ChangeReporter {
-    last: Option<EvalProgress>,
+    last: Option<(EvalProgress, Instant)>,
 }
 
 impl ChangeReporter {
@@ -36,9 +36,12 @@ impl ChangeReporter {
         snapshot: &impl Fn() -> Option<EvalProgress>,
     ) {
         let Some(now) = snapshot() else { return };
-        if self.last.as_ref() != Some(&now) {
+        let due = self.last.as_ref().is_none_or(|(last, sent)| {
+            *last != now || sent.elapsed() >= EVAL_PROGRESS_RESEND_INTERVAL
+        });
+        if due {
             sink.report(now.clone()).await;
-            self.last = Some(now);
+            self.last = Some((now, Instant::now()));
         }
     }
 }
@@ -92,6 +95,20 @@ mod tests {
                 EvalProgress::Evaluating { thunks: 2 },
             ]
         );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn an_unchanged_snapshot_is_sent_again_after_thirty_seconds() {
+        let sent = Sent::default();
+        let snapshot = || Some(EvalProgress::Evaluating { thunks: 1 });
+        let mut reporter = ChangeReporter::default();
+        let run = reporter.run(&sent, snapshot);
+        tokio::pin!(run);
+
+        tokio::select! { _ = &mut run => {}, () = tokio::time::sleep(Duration::from_millis(29_500)) => {} }
+        assert_eq!(sent.0.lock().len(), 1);
+        tokio::select! { _ = &mut run => {}, () = tokio::time::sleep(Duration::from_secs(1)) => {} }
+        assert_eq!(sent.0.lock().len(), 2);
     }
 
     #[tokio::test]
