@@ -22,7 +22,7 @@ use super::eval_stats::{EvalStatsAccumulator, EvalStatsTotals, StatsDelta};
 use super::input_fetch::{DownloadTarget, InputFetcher};
 use super::live_thunks::LiveThunks;
 use super::pool::{EvalWorkerPool, PooledEvalWorker};
-use super::transport::Listing;
+use super::transport::{EvalErrorResponse, Listing};
 
 #[derive(Debug)]
 pub struct WorkerPoolResolver {
@@ -421,13 +421,14 @@ impl InputFetcher for WorkerPoolResolver {
         target: DownloadTarget,
     ) -> Result<String> {
         let mut worker = self.pool.acquire().await?;
-        match worker.fetch_input(locked, git_ssh_command, target).await {
-            Ok(path) => Ok(path),
-            Err(e) => {
-                worker.mark_dead();
-                Err(e)
-            }
+        let fetched = worker.fetch_input(locked, git_ssh_command, target).await;
+        if fetched
+            .as_ref()
+            .is_err_and(|e| !e.is::<EvalErrorResponse>())
+        {
+            worker.mark_dead();
         }
+        fetched
     }
 }
 
@@ -707,6 +708,44 @@ mod tests {
             .collect();
 
         (result, stub.calls())
+    }
+
+    #[tokio::test]
+    async fn a_failed_fetch_keeps_the_worker_unless_its_pipe_broke() {
+        use super::super::input_fetch::InputBoard;
+        use super::super::pool::tests::replying_worker;
+        use super::super::transport::EvalWorker;
+        use gradient_eval::ipc::EvalResponse;
+        use gradient_wire::types::InputFetchState;
+
+        let resolver = WorkerPoolResolver::new(1, u64::MAX, String::new());
+        let target = || DownloadTarget {
+            board: InputBoard::new(vec![("a".into(), InputFetchState::Fetching)]),
+            index: 0,
+        };
+        let not_found = EvalResponse::Err {
+            message: "404".into(),
+        };
+        resolver
+            .pool
+            .push_for_test(replying_worker(&not_found, "fetch-404"));
+        let err = resolver
+            .fetch_input("{}".into(), None, target())
+            .await
+            .unwrap_err();
+        assert_eq!(err.to_string(), "eval worker: 404");
+        assert_eq!(resolver.pool.idle_count(), 1);
+
+        let mut exits = tokio::process::Command::new("sh");
+        exits.arg("-c").arg("head -c 1 >/dev/null");
+        resolver
+            .pool
+            .push_for_test(EvalWorker::from_command(exits, Arc::default()).unwrap());
+        resolver
+            .fetch_input("{}".into(), None, target())
+            .await
+            .unwrap_err();
+        assert_eq!(resolver.pool.idle_count(), 1);
     }
 
     #[tokio::test]
