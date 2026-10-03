@@ -9336,11 +9336,13 @@ paths:
       summary: Task live updates (WebSocket)
       description: |-
         Upgrades to a WebSocket emitting `evaluation_status_changed`,
-        `build_status_changed` and `evaluation_progress` events for this task,
-        so the task page refetches on change instead of polling.
-        `evaluation_progress` fires as builds and entry-points are persisted
-        during the evaluation phase, before any build changes status, so the
-        build/dependency totals grow live. Requires read access.
+        `build_status_changed`, `evaluation_progress` and `evaluation_activity`
+        events for this task, so the task page refetches on change instead of
+        polling. `evaluation_progress` fires as builds and entry-points are
+        persisted during the evaluation phase, before any build changes status,
+        so the build/dependency totals grow live. `evaluation_activity` carries
+        an `EvaluationProgress` snapshot at most once per second while the
+        evaluation fetches or evaluates. Requires read access.
       operationId: taskLive
       parameters:
         - { name: project, in: path, required: true, schema: { type: string } }
@@ -9355,10 +9357,12 @@ paths:
       summary: Evaluation live updates (WebSocket)
       description: |-
         Upgrades to a WebSocket emitting `evaluation_status_changed`,
-        `build_status_changed` and `evaluation_progress` events for this
-        evaluation. `evaluation_progress` fires as builds and entry-points are
-        persisted during the evaluation phase so the build list grows live.
-        Requires read access.
+        `build_status_changed`, `evaluation_progress` and `evaluation_activity`
+        events for this evaluation. `evaluation_progress` fires as builds and
+        entry-points are persisted during the evaluation phase so the build
+        list grows live. `evaluation_activity` carries an `EvaluationProgress`
+        snapshot at most once per second while the evaluation fetches or
+        evaluates. Requires read access.
       operationId: evaluationLive
       parameters:
         - { name: evaluation, in: path, required: true, schema: { type: string, format: uuid } }
@@ -11644,6 +11648,10 @@ components:
         updated_at:
           type: string
           format: date-time
+        progress:
+          description: Present only while the evaluation is fetching or evaluating.
+          allOf:
+            - $ref: '#/components/schemas/EvaluationProgress'
 
     TaskDetailsResponse:
       type: object
@@ -11911,6 +11919,10 @@ components:
           format: date-time
         waiting_reason:
           $ref: '#/components/schemas/WaitingReason'
+        progress:
+          description: Present only while the evaluation is fetching or evaluating.
+          allOf:
+            - $ref: '#/components/schemas/EvaluationProgress'
 
     WaitingReason:
       description: |
@@ -12486,6 +12498,39 @@ components:
           format: int64
           nullable: true
           description: Null when the source announced no size.
+
+    EvaluationProgress:
+      description: Live progress of a fetching or evaluating evaluation, held in server memory only.
+      oneOf:
+        - $ref: '#/components/schemas/EvaluationFetchProgress'
+        - $ref: '#/components/schemas/EvaluationThunkProgress'
+      discriminator:
+        propertyName: kind
+        mapping:
+          fetching: '#/components/schemas/EvaluationFetchProgress'
+          evaluating: '#/components/schemas/EvaluationThunkProgress'
+    EvaluationFetchProgress:
+      type: object
+      required: [kind, inputs]
+      properties:
+        kind: { type: string, enum: [fetching] }
+        inputs:
+          type: array
+          items: { $ref: '#/components/schemas/InputFetch' }
+    EvaluationThunkProgress:
+      type: object
+      required: [kind, thunks]
+      properties:
+        kind: { type: string, enum: [evaluating] }
+        thunks: { type: integer, format: int64, description: Thunks the Nix evaluator created so far. }
+    InputFetch:
+      type: object
+      required: [name, state, downloaded_bytes, expected_bytes]
+      properties:
+        name: { type: string, description: Root input name, or the flake.lock node key for a nested input. }
+        state: { type: string, enum: [Queued, Fetching, Done, Failed] }
+        downloaded_bytes: { type: integer, format: int64 }
+        expected_bytes: { type: integer, format: int64, description: 0 when the server sent no size. }
 
     DependencyNode:
       type: object

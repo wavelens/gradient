@@ -7,6 +7,7 @@
 pub mod actions;
 pub mod artefacts;
 pub mod log;
+mod progress;
 pub mod query;
 pub mod report;
 pub mod types;
@@ -14,6 +15,7 @@ pub mod types;
 pub use self::actions::*;
 pub use self::artefacts::*;
 pub use self::log::*;
+pub(crate) use self::progress::live_progress;
 pub use self::query::*;
 pub use self::report::*;
 pub use self::types::*;

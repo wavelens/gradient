@@ -15,12 +15,13 @@ use gradient_types::*;
 use sea_orm::{ColumnTrait, EntityTrait, Order, QueryFilter, QueryOrder};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
+use std::time::Instant;
 
-use super::EvalAccessContext;
 use super::types::{
     BuildItem, BuildsQuery, EntryPointBrief, EvaluationMessageResponse, EvaluationResponse,
     EvaluationTriggerSummary, PaginatedBuilds,
 };
+use super::{EvalAccessContext, live_progress};
 use gradient_entity::build::BuildStatus;
 
 pub async fn get_evaluation(
@@ -129,6 +130,12 @@ pub async fn get_evaluation(
         None
     };
 
+    let progress = live_progress(
+        &state.eval_progress,
+        evaluation.id,
+        evaluation.status,
+        Instant::now(),
+    );
     let res = BaseResponse {
         error: false,
         message: EvaluationResponse {
@@ -154,6 +161,7 @@ pub async fn get_evaluation(
             trigger,
             triggered_by,
             waiting_reason,
+            progress,
         },
     };
 
