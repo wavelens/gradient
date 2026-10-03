@@ -6,8 +6,13 @@
 
 # Every task is holding one trigger that is never firing.
 # Each phase is starting its own evaluation through the API.
-{ lib, pkgs, storeSpec, upstream, downloads, specNames, workerToken, upstreamPeers, upstreamUrls }:
+{ lib, pkgs, storeSpec, specs, workerToken, upstreamPeers, upstreamUrls }:
 { ... }:
+let
+  specNames = lib.unique (map (s: s.name) specs);
+  upstream = storeSpec.toUpstreamCache specs;
+  downloads = storeSpec.toDownloads specs;
+in
 {
   imports = [ ../../../modules/gradient.nix ];
 

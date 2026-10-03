@@ -16,11 +16,9 @@ let
     kill-pair = ./specs/kill-pair.nix;
   };
   specs = lib.attrValues specFiles;
-  specNames = lib.unique (map (s: s.name) specs);
 
   flakes = lib.mapAttrs (_: storeSpec.toFlake) specFiles;
   resolved = lib.mapAttrs (_: storeSpec.resolve) specFiles;
-  upstream = storeSpec.toUpstreamCache specs;
 
   workerToken = "C9ve6tvVONhtbRzFks56HQlYQotlRmXel/5NFLk/HjbSFGc+IZjCGfxegW2NKpY5";
   workerIds = {
@@ -81,7 +79,7 @@ pkgs.testers.runNixOSTest {
 
   nodes = {
     server = import ../scheduler/server.nix {
-      inherit lib pkgs storeSpec upstream specNames workerToken;
+      inherit lib pkgs storeSpec specs workerToken;
       inherit (topo) upstreamPeers;
       upstreamUrls = topo.upstreamUrls or { };
     };
