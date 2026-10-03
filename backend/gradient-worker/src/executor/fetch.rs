@@ -4,28 +4,25 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use gradient_wire::messages::{FlakeJob, FlakeSource};
-use gradient_wire::traits::{JobReporter, WorkerStore};
+use gradient_wire::traits::{EvalProgressSink, JobReporter, WorkerStore};
+use gradient_wire::types::{EvalProgress, InputFetchState};
 use tempfile::NamedTempFile;
 use tokio::sync::watch;
-use tracing::{debug, info, trace, warn};
+use tracing::{debug, info};
 
 use super::abort_true;
+use super::progress_report::ChangeReporter;
 use crate::proto::credentials::CredentialStore;
+use crate::worker_pool::{DownloadTarget, InputBoard, InputFetcher};
 
 pub struct FetchOutcome {
     pub source_path: String,
     pub archived_paths: Vec<String>,
-}
-
-#[derive(Clone, Copy)]
-struct NixTools<'a> {
-    nix: &'a str,
-    ssh: &'a str,
-    store: &'a dyn WorkerStore,
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
@@ -34,7 +31,7 @@ pub async fn fetch_repository(
     updater: &mut dyn JobReporter,
     credentials: &CredentialStore,
     store: &dyn WorkerStore,
-    binpath_nix: &str,
+    fetcher: &dyn InputFetcher,
     binpath_ssh: &str,
     mut abort: watch::Receiver<bool>,
 ) -> Result<FetchOutcome> {
@@ -82,18 +79,15 @@ pub async fn fetch_repository(
         }
     };
 
+    let lock = read_lock(&flake_root).await?;
     let overrides_in: Vec<OverrideInput> = job.input_overrides.iter().map(Into::into).collect();
-    let (applied_overrides, warnings) = if overrides_in.is_empty() {
-        (Vec::new(), Vec::new())
-    } else {
-        let lock_path = std::path::Path::new(&flake_root).join("flake.lock");
-        let lock_bytes = tokio::fs::read(&lock_path)
-            .await
-            .with_context(|| format!("failed to read {}", lock_path.display()))?;
-        let lock: serde_json::Value =
-            serde_json::from_slice(&lock_bytes).context("failed to parse flake.lock")?;
-        let declared = declared_inputs_from_lock(&lock)?;
-        resolve_overrides(&overrides_in, &declared, &lock)?
+    let (applied_overrides, warnings) = match (&lock, overrides_in.is_empty()) {
+        (_, true) => (Vec::new(), Vec::new()),
+        (Some(lock), false) => {
+            let declared = declared_inputs_from_lock(lock)?;
+            resolve_overrides(&overrides_in, &declared, lock)?
+        }
+        (None, false) => anyhow::bail!("input overrides need a flake.lock in {flake_root}"),
     };
 
     for msg in &warnings {
@@ -113,75 +107,239 @@ pub async fn fetch_repository(
         );
     }
 
-    let tools = NixTools {
-        nix: binpath_nix,
-        ssh: binpath_ssh,
-        store,
-    };
-    match archive_flake(
-        &source_path,
-        &flake_root,
-        &tools,
-        ssh_key.as_deref(),
-        &applied_overrides,
-        &mut abort,
-    )
-    .await
-    {
-        Ok(archived_paths) => {
-            info!(%source_path, inputs = archived_paths.len(), "flake archived to nix store");
-            Ok(FetchOutcome {
-                source_path,
-                archived_paths,
-            })
-        }
-        // `nix flake archive` is all-or-nothing. One unfetchable private input is failing the
-        // whole command, even when no eval target references it. Each locked input is
-        // prefetched on its own instead, as best-effort cache population.
-        Err(archive_err) => {
-            let archive_msg = archive_err.to_string();
-            warn!(error = %archive_msg, "nix flake archive failed; falling back to per-input prefetch");
-            match prefetch_flake_best_effort(
-                &source_path,
-                &flake_root,
-                &tools,
-                ssh_key.as_deref(),
-                &applied_overrides,
-                &mut abort,
+    let overridden: HashSet<String> = applied_overrides
+        .iter()
+        .map(|(name, _)| name.clone())
+        .collect();
+    let inputs = lock
+        .as_ref()
+        .map(|lock| locked_inputs(lock, &overridden))
+        .unwrap_or_default();
+    let key_env = ssh_key_env(ssh_key.as_deref(), binpath_ssh).await?;
+    let git_ssh_command = key_env.as_ref().map(|(_, command)| command.clone());
+    let sink = updater.eval_progress_sink();
+    let (mut archived_paths, input_warnings) =
+        fetch_inputs(inputs, store, fetcher, &*sink, git_ssh_command, &mut abort).await?;
+    for msg in &input_warnings {
+        updater
+            .send_eval_message(
+                gradient_wire::types::EvalMessageLevel::Warning,
+                "fetch",
+                msg,
             )
-            .await
-            {
-                Ok((archived_paths, input_warnings)) => {
-                    updater
-                        .send_eval_message(
-                            gradient_wire::types::EvalMessageLevel::Warning,
-                            "fetch",
-                            &format!(
-                                "nix flake archive failed, continued with best-effort per-input fetch: {}",
-                                archive_msg.trim()
-                            ),
-                        )
-                        .await?;
-                    for msg in &input_warnings {
-                        updater
-                            .send_eval_message(
-                                gradient_wire::types::EvalMessageLevel::Warning,
-                                "fetch",
-                                msg,
-                            )
-                            .await?;
-                    }
-                    info!(%source_path, inputs = archived_paths.len(), "flake prefetched to nix store after archive fallback");
-                    Ok(FetchOutcome {
-                        source_path,
-                        archived_paths,
-                    })
-                }
-                Err(prefetch_err) => Err(prefetch_err
-                    .context(format!("nix flake archive failed: {}", archive_msg.trim()))),
+            .await?;
+    }
+    archived_paths.push(source_path.clone());
+    require_present(store, &archived_paths).await?;
+    info!(%source_path, inputs = archived_paths.len(), "flake inputs in the nix store");
+    Ok(FetchOutcome {
+        source_path,
+        archived_paths,
+    })
+}
+
+#[derive(Debug, Clone)]
+struct LockedInput {
+    name: String,
+    domain: String,
+    store_path: String,
+    locked: String,
+}
+
+async fn read_lock(flake_root: &str) -> Result<Option<serde_json::Value>> {
+    let path = std::path::Path::new(flake_root).join("flake.lock");
+    match tokio::fs::read(&path).await {
+        Ok(bytes) => Ok(Some(
+            serde_json::from_slice(&bytes).context("failed to parse flake.lock")?,
+        )),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(e).with_context(|| format!("failed to read {}", path.display())),
+    }
+}
+
+fn locked_inputs(lock: &serde_json::Value, overridden: &HashSet<String>) -> Vec<LockedInput> {
+    let root = lock["root"].as_str().unwrap_or("root");
+    let nodes = &lock["nodes"];
+    let root_names: HashMap<&str, &str> = nodes[root]["inputs"]
+        .as_object()
+        .into_iter()
+        .flatten()
+        .filter_map(|(name, key)| Some((key.as_str()?, name.as_str())))
+        .collect();
+
+    let mut seen: HashSet<&str> = HashSet::new();
+    let mut queue: Vec<&str> = root_names
+        .iter()
+        .filter(|(_, name)| !overridden.contains(**name))
+        .map(|(key, _)| *key)
+        .collect();
+    let mut inputs = Vec::new();
+    while let Some(key) = queue.pop() {
+        if !seen.insert(key) {
+            continue;
+        }
+        let node = &nodes[key];
+        queue.extend(
+            node["inputs"]
+                .as_object()
+                .into_iter()
+                .flatten()
+                .filter_map(|(_, k)| k.as_str()),
+        );
+        let locked = &node["locked"];
+        let Some(store_path) = locked["narHash"].as_str().and_then(source_store_path) else {
+            continue;
+        };
+        inputs.push(LockedInput {
+            name: root_names.get(key).copied().unwrap_or(key).to_owned(),
+            domain: input_domain(locked),
+            store_path,
+            locked: locked.to_string(),
+        });
+    }
+    inputs.sort_by(|a, b| a.name.cmp(&b.name));
+    inputs
+}
+
+fn source_store_path(nar_hash: &str) -> Option<String> {
+    use harmonia_store_content_address::{ContentAddress, make_store_path_from_ca};
+    use harmonia_store_path::{StoreDir, StorePathName};
+    use harmonia_utils_hash::{Hash, fmt::SRI};
+
+    let store_dir = StoreDir::default();
+    let name: StorePathName = "source".parse().ok()?;
+    let hash = nar_hash.parse::<SRI<Hash>>().ok()?.into_hash();
+    let path = make_store_path_from_ca(&store_dir, name, ContentAddress::NixArchive(hash));
+    Some(store_dir.display(&path).to_string())
+}
+
+fn input_domain(locked: &serde_json::Value) -> String {
+    let default_host = match locked["type"].as_str() {
+        Some("github") => Some("github.com"),
+        Some("gitlab") => Some("gitlab.com"),
+        Some("sourcehut") => Some("git.sr.ht"),
+        _ => None,
+    };
+    let host = match default_host {
+        Some(default) => locked["host"].as_str().unwrap_or(default),
+        None => locked["url"].as_str().map(url_host).unwrap_or_default(),
+    };
+    second_level(host)
+}
+
+fn url_host(url: &str) -> &str {
+    let rest = url.split_once("://").map_or(url, |(_, rest)| rest);
+    let authority = rest.split('/').next().unwrap_or_default();
+    let host = authority
+        .rsplit_once('@')
+        .map_or(authority, |(_, host)| host);
+    host.split(':').next().unwrap_or_default()
+}
+
+fn second_level(host: &str) -> String {
+    if host.parse::<std::net::IpAddr>().is_ok() {
+        return host.to_owned();
+    }
+    let labels: Vec<&str> = host.rsplitn(3, '.').collect();
+    match labels.as_slice() {
+        [tld, sld, ..] => format!("{sld}.{tld}"),
+        _ => host.to_owned(),
+    }
+}
+
+async fn fetch_inputs(
+    inputs: Vec<LockedInput>,
+    store: &dyn WorkerStore,
+    fetcher: &dyn InputFetcher,
+    sink: &dyn EvalProgressSink,
+    git_ssh_command: Option<String>,
+    abort: &mut watch::Receiver<bool>,
+) -> Result<(Vec<String>, Vec<String>)> {
+    let paths: Vec<String> = inputs.iter().map(|i| i.store_path.clone()).collect();
+    let missing: HashSet<String> = missing_paths(store, &paths).await?.into_iter().collect();
+    let board = InputBoard::new(
+        inputs
+            .iter()
+            .map(|i| {
+                let state = if missing.contains(&i.store_path) {
+                    InputFetchState::Queued
+                } else {
+                    InputFetchState::Done
+                };
+                (i.name.clone(), state)
+            })
+            .collect(),
+    );
+
+    let mut by_domain: HashMap<&str, Vec<usize>> = HashMap::new();
+    for (index, input) in inputs
+        .iter()
+        .enumerate()
+        .filter(|(_, i)| missing.contains(&i.store_path))
+    {
+        by_domain
+            .entry(input.domain.as_str())
+            .or_default()
+            .push(index);
+    }
+    let fetch_domain = |indexes: Vec<usize>| {
+        let (board, inputs, git_ssh_command) = (&board, &inputs, &git_ssh_command);
+        async move {
+            let mut done = Vec::new();
+            for index in indexes {
+                board.set_state(index, InputFetchState::Fetching);
+                let target = DownloadTarget {
+                    board: Arc::clone(board),
+                    index,
+                };
+                let fetched = fetcher
+                    .fetch_input(
+                        inputs[index].locked.clone(),
+                        git_ssh_command.clone(),
+                        target,
+                    )
+                    .await;
+                let state = if fetched.is_ok() {
+                    InputFetchState::Done
+                } else {
+                    InputFetchState::Failed
+                };
+                board.set_state(index, state);
+                done.push((index, fetched));
             }
+            done
+        }
+    };
+    let fetches = futures::future::join_all(by_domain.into_values().map(fetch_domain));
+
+    let snapshot = || {
+        (!board.is_empty()).then(|| EvalProgress::Fetching {
+            inputs: board.snapshot(),
+        })
+    };
+    let mut reporter = ChangeReporter::default();
+    let fetched = tokio::select! {
+        biased;
+        () = abort_true(abort) => anyhow::bail!("job aborted during flake input fetch"),
+        fetched = fetches => fetched,
+        never = reporter.run(sink, snapshot) => match never {},
+    };
+    reporter.flush(sink, &snapshot).await;
+
+    let mut all: Vec<String> = paths.into_iter().filter(|p| !missing.contains(p)).collect();
+    let mut warnings = Vec::new();
+    for (index, result) in fetched.into_iter().flatten() {
+        match result {
+            Ok(path) => all.push(path),
+            Err(e) => warnings.push(format!(
+                "skipping flake input '{}': {}",
+                inputs[index].name,
+                format!("{e:#}").trim()
+            )),
         }
     }
+    warnings.sort();
+    Ok((all, warnings))
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
@@ -260,106 +418,6 @@ async fn run_input_update(
     updater.report_input_update(candidate, bumped).await
 }
 
-fn parse_nix_json(stdout: &[u8], cmd: &str) -> Result<serde_json::Value> {
-    serde_json::from_slice(stdout).with_context(|| format!("failed to parse {cmd} JSON"))
-}
-
-fn build_archive_argv(flake_ref: &str, overrides: &[(String, String)]) -> Vec<String> {
-    let mut argv = vec!["flake".to_owned(), "archive".to_owned()];
-    for (name, ref_str) in overrides {
-        argv.push("--override-input".to_owned());
-        argv.push(name.clone());
-        argv.push(ref_str.clone());
-    }
-    argv.push("--json".to_owned());
-    argv.push(flake_ref.to_owned());
-    argv
-}
-
-#[tracing::instrument(level = "debug", skip_all)]
-async fn archive_flake(
-    source_path: &str,
-    flake_root: &str,
-    tools: &NixTools<'_>,
-    ssh_key: Option<&str>,
-    overrides: &[(String, String)],
-    abort: &mut watch::Receiver<bool>,
-) -> Result<Vec<String>> {
-    let NixTools {
-        nix: binpath_nix,
-        ssh: binpath_ssh,
-        store,
-    } = *tools;
-    if overrides.is_empty()
-        && let Some(mut inputs) = present_locked_inputs(flake_root, store).await
-    {
-        debug!(%source_path, inputs = inputs.len(), "every locked input present; nothing to fetch");
-        inputs.push(source_path.to_owned());
-        return Ok(inputs);
-    }
-
-    let flake_ref = format!("path:{source_path}");
-    trace!(binpath_nix, flake_ref, "executing nix flake archive");
-    let key_env = ssh_key_env(ssh_key, binpath_ssh).await?;
-    let mut cmd = tokio::process::Command::new(binpath_nix);
-    cmd.args(build_archive_argv(&flake_ref, overrides));
-    if let Some((_guard, ssh_command)) = &key_env {
-        cmd.env("GIT_SSH_COMMAND", ssh_command);
-    }
-    let output = run_nix_subprocess(cmd, "nix flake archive", abort).await?;
-
-    let json: serde_json::Value = parse_nix_json(&output.stdout, "nix flake archive")?;
-    let mut all_paths: HashSet<String> = HashSet::new();
-    all_paths.insert(source_path.to_owned());
-    collect_input_paths(&json, &mut all_paths);
-
-    let all_paths: Vec<String> = all_paths.into_iter().collect();
-    require_present(store, &all_paths).await?;
-
-    Ok(all_paths)
-}
-
-async fn run_nix_subprocess(
-    mut cmd: tokio::process::Command,
-    label: &str,
-    abort: &mut watch::Receiver<bool>,
-) -> Result<std::process::Output> {
-    cmd.stdout(std::process::Stdio::piped());
-    cmd.stderr(std::process::Stdio::piped());
-    cmd.kill_on_drop(true);
-
-    let child = cmd
-        .spawn()
-        .with_context(|| format!("failed to spawn {label}"))?;
-
-    #[expect(
-        clippy::disallowed_methods,
-        reason = "reaping a kill_on_drop child, aborted by the select below rather than by shutdown"
-    )]
-    let task = tokio::spawn(async move { child.wait_with_output().await });
-    let abort_handle = task.abort_handle();
-
-    let output = tokio::select! {
-        biased;
-        _ = abort_true(abort) => {
-            abort_handle.abort();
-            anyhow::bail!("job aborted during {label}");
-        }
-        result = task => {
-            result
-                .with_context(|| format!("{label} task panicked"))?
-                .with_context(|| format!("failed to run {label}"))?
-        }
-    };
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        anyhow::bail!("{label} failed: {}", stderr.trim());
-    }
-
-    Ok(output)
-}
-
 async fn ssh_key_env(
     ssh_key: Option<&str>,
     binpath_ssh: &str,
@@ -384,110 +442,6 @@ async fn ssh_key_env(
     Ok(Some((kf, ssh_command)))
 }
 
-fn build_prefetch_argv(flake_ref: &str) -> Vec<String> {
-    let mut argv = vec!["flake".to_owned(), "prefetch".to_owned()];
-    if !is_indirect(flake_ref) {
-        argv.extend([
-            "--option".to_owned(),
-            "flake-registry".to_owned(),
-            String::new(),
-        ]);
-    }
-    argv.extend(["--json".to_owned(), flake_ref.to_owned()]);
-    argv
-}
-
-fn is_indirect(flake_ref: &str) -> bool {
-    flake_ref.starts_with("flake:") || !flake_ref.contains(':')
-}
-
-#[tracing::instrument(level = "debug", skip_all)]
-async fn prefetch_one(
-    flake_ref: &str,
-    binpath_nix: &str,
-    ssh_command: Option<&str>,
-    abort: &mut watch::Receiver<bool>,
-) -> Result<String> {
-    trace!(binpath_nix, flake_ref, "executing nix flake prefetch");
-    let mut cmd = tokio::process::Command::new(binpath_nix);
-    cmd.args(build_prefetch_argv(flake_ref));
-    if let Some(sc) = ssh_command {
-        cmd.env("GIT_SSH_COMMAND", sc);
-    }
-    let output = run_nix_subprocess(cmd, "nix flake prefetch", abort).await?;
-    let json = parse_nix_json(&output.stdout, "nix flake prefetch")?;
-    json["storePath"]
-        .as_str()
-        .context("nix flake prefetch JSON missing 'storePath' field")
-        .map(str::to_owned)
-}
-
-#[tracing::instrument(level = "debug", skip_all)]
-async fn prefetch_flake_best_effort(
-    source_path: &str,
-    flake_root: &str,
-    tools: &NixTools<'_>,
-    ssh_key: Option<&str>,
-    overrides: &[(String, String)],
-    abort: &mut watch::Receiver<bool>,
-) -> Result<(Vec<String>, Vec<String>)> {
-    let NixTools {
-        nix: binpath_nix,
-        ssh: binpath_ssh,
-        store,
-    } = *tools;
-    let key_env = ssh_key_env(ssh_key, binpath_ssh).await?;
-    let ssh_command = key_env.as_ref().map(|(_, c)| c.as_str());
-
-    let mut all_paths: HashSet<String> = HashSet::new();
-    all_paths.insert(source_path.to_owned());
-    let mut warnings: Vec<String> = Vec::new();
-
-    let lock_path = std::path::Path::new(flake_root).join("flake.lock");
-    match tokio::fs::read(&lock_path).await {
-        Ok(bytes) => {
-            let lock: serde_json::Value =
-                serde_json::from_slice(&bytes).context("failed to parse flake.lock")?;
-            let (refs, walk_warnings) = prefetch_refs_from_lock(&lock, overrides);
-            warnings.extend(walk_warnings);
-            for (name, input_ref) in refs {
-                if *abort.borrow() {
-                    anyhow::bail!("job aborted during flake input prefetch");
-                }
-                match prefetch_one(&input_ref, binpath_nix, ssh_command, abort).await {
-                    Ok(path) => {
-                        all_paths.insert(path);
-                    }
-                    Err(e) => warnings.push(format!(
-                        "skipping flake input '{name}': {}",
-                        e.to_string().trim()
-                    )),
-                }
-            }
-        }
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-        Err(e) => {
-            return Err(e).with_context(|| format!("failed to read {}", lock_path.display()));
-        }
-    }
-
-    let all_paths: Vec<String> = all_paths.into_iter().collect();
-    require_present(store, &all_paths).await?;
-
-    Ok((all_paths, warnings))
-}
-
-fn collect_input_paths(node: &serde_json::Value, paths: &mut HashSet<String>) {
-    if let Some(inputs) = node["inputs"].as_object() {
-        for input in inputs.values() {
-            if let Some(path) = input["path"].as_str() {
-                paths.insert(path.to_owned());
-            }
-            collect_input_paths(input, paths);
-        }
-    }
-}
-
 async fn require_present(store: &dyn WorkerStore, paths: &[String]) -> Result<()> {
     let missing = missing_paths(store, paths).await?;
     if !missing.is_empty() {
@@ -506,51 +460,6 @@ async fn missing_paths(store: &dyn WorkerStore, paths: &[String]) -> Result<Vec<
         .filter(|(_, valid)| !valid)
         .map(|(path, _)| path.clone())
         .collect())
-}
-
-async fn present_locked_inputs(flake_root: &str, store: &dyn WorkerStore) -> Option<Vec<String>> {
-    let bytes = tokio::fs::read(std::path::Path::new(flake_root).join("flake.lock"))
-        .await
-        .ok()?;
-    let lock: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
-    let paths = locked_input_paths(&lock)?;
-    match missing_paths(store, &paths).await {
-        Ok(missing) if missing.is_empty() => Some(paths),
-        Ok(missing) => {
-            debug!(?missing, "a locked input is not in the store; archiving");
-            None
-        }
-        Err(e) => {
-            debug!(error = %e, "store presence unknown; archiving");
-            None
-        }
-    }
-}
-
-fn locked_input_paths(lock: &serde_json::Value) -> Option<Vec<String>> {
-    use harmonia_store_content_address::{ContentAddress, make_store_path_from_ca};
-    use harmonia_store_path::{StoreDir, StorePathName};
-    use harmonia_utils_hash::{Hash, fmt::SRI};
-
-    let root = lock.get("root")?.as_str()?;
-    let store_dir = StoreDir::default();
-    let name: StorePathName = "source".parse().ok()?;
-    let mut paths: Vec<String> = lock
-        .get("nodes")?
-        .as_object()?
-        .iter()
-        .filter(|(key, _)| key.as_str() != root)
-        .map(|(_, node)| -> Option<String> {
-            let nar_hash = node.get("locked")?.get("narHash")?.as_str()?;
-            let hash = nar_hash.parse::<SRI<Hash>>().ok()?.into_hash();
-            let path =
-                make_store_path_from_ca(&store_dir, name.clone(), ContentAddress::NixArchive(hash));
-            Some(store_dir.display(&path).to_string())
-        })
-        .collect::<Option<_>>()?;
-    paths.sort_unstable();
-    paths.dedup();
-    Some(paths)
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
@@ -637,126 +546,6 @@ fn flake_ref_from_lock_original(original: &serde_json::Value) -> anyhow::Result<
         }
         other => anyhow::bail!("unsupported flake.lock input type '{other}'"),
     })
-}
-
-fn percent_encode_hash(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for c in s.chars() {
-        match c {
-            '+' => out.push_str("%2B"),
-            '/' => out.push_str("%2F"),
-            '=' => out.push_str("%3D"),
-            other => out.push(other),
-        }
-    }
-    out
-}
-
-fn nar_hash_param(locked: &serde_json::Value, sep: char) -> String {
-    match locked.get("narHash").and_then(|v| v.as_str()) {
-        Some(h) => format!("{sep}narHash={}", percent_encode_hash(h)),
-        None => String::new(),
-    }
-}
-
-fn flake_ref_from_lock_locked(locked: &serde_json::Value) -> anyhow::Result<String> {
-    use anyhow::Context;
-    let ty = locked
-        .get("type")
-        .and_then(|v| v.as_str())
-        .context("flake.lock node.locked missing 'type'")?;
-
-    let s = |k: &str| -> Option<&str> { locked.get(k).and_then(|v| v.as_str()) };
-
-    Ok(match ty {
-        "github" | "gitlab" | "sourcehut" => {
-            let owner = s("owner").with_context(|| format!("{ty} node missing 'owner'"))?;
-            let repo = s("repo").with_context(|| format!("{ty} node missing 'repo'"))?;
-            let rev = s("rev").with_context(|| format!("{ty} node missing 'rev'"))?;
-            format!("{ty}:{owner}/{repo}/{rev}{}", nar_hash_param(locked, '?'))
-        }
-        "git" => {
-            let url = s("url").context("git node missing 'url'")?;
-            let mut params: Vec<String> = Vec::new();
-            if let Some(r) = s("ref") {
-                params.push(format!("ref={r}"));
-            }
-            if let Some(rev) = s("rev") {
-                params.push(format!("rev={rev}"));
-            }
-            if let Some(h) = s("narHash") {
-                params.push(format!("narHash={}", percent_encode_hash(h)));
-            }
-            if params.is_empty() {
-                format!("git+{url}")
-            } else {
-                let sep = if url.contains('?') { '&' } else { '?' };
-                format!("git+{url}{sep}{}", params.join("&"))
-            }
-        }
-        "tarball" => {
-            let url = s("url").context("tarball node missing 'url'")?;
-            let sep = if url.contains('?') { '&' } else { '?' };
-            format!("{url}{}", nar_hash_param(locked, sep))
-        }
-        "path" => {
-            let path = s("path").context("path node missing 'path'")?;
-            format!("path:{path}")
-        }
-        other => anyhow::bail!("unsupported flake.lock locked type '{other}'"),
-    })
-}
-
-fn prefetch_refs_from_lock(
-    lock: &serde_json::Value,
-    overrides: &[(String, String)],
-) -> (Vec<(String, String)>, Vec<String>) {
-    let root_key = lock.get("root").and_then(|v| v.as_str()).unwrap_or("root");
-    let override_map: std::collections::HashMap<&str, &str> = overrides
-        .iter()
-        .map(|(n, r)| (n.as_str(), r.as_str()))
-        .collect();
-
-    let root_input_of: std::collections::HashMap<&str, &str> = lock
-        .get("nodes")
-        .and_then(|n| n.get(root_key))
-        .and_then(|r| r.get("inputs"))
-        .and_then(|i| i.as_object())
-        .map(|inputs| {
-            inputs
-                .iter()
-                .filter_map(|(name, key)| key.as_str().map(|k| (k, name.as_str())))
-                .collect()
-        })
-        .unwrap_or_default();
-
-    let Some(nodes) = lock.get("nodes").and_then(|n| n.as_object()) else {
-        return (Vec::new(), Vec::new());
-    };
-
-    let mut refs = Vec::new();
-    let mut warnings = Vec::new();
-    for (node_key, node) in nodes {
-        if node_key == root_key {
-            continue;
-        }
-        let root_name = root_input_of.get(node_key.as_str()).copied();
-        let display_name = root_name.unwrap_or(node_key.as_str());
-
-        if let Some(override_ref) = root_name.and_then(|name| override_map.get(name)) {
-            refs.push((display_name.to_owned(), (*override_ref).to_owned()));
-            continue;
-        }
-
-        let Some(locked) = node.get("locked") else {
-            continue;
-        };
-        match flake_ref_from_lock_locked(locked) {
-            Ok(r) => refs.push((display_name.to_owned(), r)),
-            Err(e) => warnings.push(format!("skipping flake input '{display_name}': {e}")),
-        }
-    }
-    (refs, warnings)
 }
 
 #[derive(Debug, Clone)]
@@ -867,7 +656,7 @@ mod tests {
             &mut reporter,
             &credentials,
             &FakeWorkerStore::new(),
-            "nix",
+            &FakeFetcher::new(""),
             "ssh",
             no_abort(),
         )
@@ -897,7 +686,7 @@ mod tests {
             &mut reporter,
             &credentials,
             &FakeWorkerStore::new(),
-            "nix",
+            &FakeFetcher::new(""),
             "ssh",
             no_abort(),
         )
@@ -981,7 +770,7 @@ mod tests {
             &mut reporter,
             &credentials,
             &store,
-            "nix",
+            &FakeFetcher::new(""),
             "ssh",
             no_abort(),
         )
@@ -995,24 +784,6 @@ mod tests {
         assert!(matches!(reporter.events()[0], ReportedEvent::Fetching));
     }
 
-    #[test]
-    fn a_locked_input_path_follows_from_its_nar_hash() {
-        let lock = serde_json::json!({
-            "nodes": {
-                "crane": {"locked": {"narHash": "sha256-jtT4yxZpR8seYnlCMMWSSPlFN92zO6ICuZ8pJrmi86k=", "type": "github"}},
-                "root": {"inputs": {"crane": "crane"}}
-            },
-            "root": "root",
-            "version": 7
-        });
-        assert_eq!(
-            locked_input_paths(&lock),
-            Some(vec![
-                "/nix/store/7rradzysxg41b2yx7qnh2f2bw73py192-source".to_owned()
-            ])
-        );
-    }
-
     #[tokio::test]
     async fn missing_paths_are_the_ones_the_store_does_not_hold() {
         let store = FakeWorkerStore::new().with_present_path("/nix/store/a-source");
@@ -1024,41 +795,6 @@ mod tests {
             missing_paths(&store, &paths).await.unwrap(),
             vec!["/nix/store/b-source".to_owned()]
         );
-    }
-
-    #[test]
-    fn a_direct_prefetch_never_loads_the_global_registry() {
-        assert_eq!(
-            build_prefetch_argv("git+file:///tmp/checkout?rev=abc"),
-            [
-                "flake",
-                "prefetch",
-                "--option",
-                "flake-registry",
-                "",
-                "--json",
-                "git+file:///tmp/checkout?rev=abc"
-            ]
-        );
-        for indirect in ["nixpkgs", "nixpkgs/nixos-24.05", "flake:nixpkgs"] {
-            assert_eq!(
-                build_prefetch_argv(indirect),
-                ["flake", "prefetch", "--json", indirect],
-                "{indirect}"
-            );
-        }
-    }
-
-    #[test]
-    fn an_input_without_a_nar_hash_sends_the_fetch_through_the_archive() {
-        let lock = serde_json::json!({
-            "nodes": {
-                "sub": {"locked": {"path": "./sub", "type": "path"}},
-                "root": {"inputs": {"sub": "sub"}}
-            },
-            "root": "root"
-        });
-        assert_eq!(locked_input_paths(&lock), None);
     }
 
     #[test]
@@ -1109,33 +845,6 @@ mod tests {
         assert_eq!(
             super::flake_ref_from_lock_original(&original).unwrap(),
             "git+https://example.test/r.git",
-        );
-    }
-
-    #[test]
-    fn build_archive_argv_appends_override_input_flags() {
-        let overrides = [
-            (
-                "nixpkgs".to_owned(),
-                "github:NixOS/nixpkgs/nixos-unstable".to_owned(),
-            ),
-            ("utils".to_owned(), "flake:flake-utils".to_owned()),
-        ];
-        let argv = super::build_archive_argv("git+file:///tmp/x?rev=abc", &overrides);
-        assert_eq!(
-            argv,
-            vec![
-                "flake".to_owned(),
-                "archive".to_owned(),
-                "--override-input".to_owned(),
-                "nixpkgs".to_owned(),
-                "github:NixOS/nixpkgs/nixos-unstable".to_owned(),
-                "--override-input".to_owned(),
-                "utils".to_owned(),
-                "flake:flake-utils".to_owned(),
-                "--json".to_owned(),
-                "git+file:///tmp/x?rev=abc".to_owned(),
-            ],
         );
     }
 
@@ -1243,113 +952,209 @@ mod tests {
         assert!(warnings[0].contains("missing"));
     }
 
+    use crate::worker_pool::{DownloadTarget, InputFetcher};
+    use gradient_util::sync::Mutex;
+    use gradient_wire::types::{EvalProgress, InputFetchState};
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    fn lock_with(nodes: serde_json::Value) -> serde_json::Value {
+        serde_json::json!({ "root": "root", "version": 7, "nodes": nodes })
+    }
+
+    fn nar_hash(fill: char) -> String {
+        format!("sha256-{}A=", fill.to_string().repeat(42))
+    }
+
+    fn github(repo: &str, hash: &str) -> serde_json::Value {
+        serde_json::json!({ "locked": { "type": "github", "owner": "o", "repo": repo, "rev": "r", "narHash": hash } })
+    }
+
     #[test]
-    fn percent_encode_hash_encodes_base64_specials() {
+    fn locked_inputs_skip_overridden_subtrees_and_name_by_root_input() {
+        let lock = lock_with(serde_json::json!({
+            "root": { "inputs": { "nixpkgs": "nixpkgs_2", "utils": "flake-utils", "home": "home" } },
+            "nixpkgs_2": github("nixpkgs", &nar_hash('A')),
+            "flake-utils": { "inputs": { "systems": "systems" },
+                "locked": { "type": "tarball", "url": "https://codeload.github.com/x.tar.gz", "narHash": nar_hash('B') } },
+            "systems": github("systems", &nar_hash('C')),
+            "home": { "inputs": { "lib": "lib" }, "locked": { "type": "gitlab", "owner": "o", "repo": "h", "rev": "r",
+                "narHash": nar_hash('D') } },
+            "lib": github("lib", &nar_hash('E')),
+            "stale": github("stale", &nar_hash('F')),
+        }));
+        let overridden = ["home".to_owned()].into_iter().collect();
+        let inputs = locked_inputs(&lock, &overridden);
+        let names: Vec<_> = inputs
+            .iter()
+            .map(|i| (i.name.as_str(), i.domain.as_str()))
+            .collect();
         assert_eq!(
-            super::percent_encode_hash("sha256:A+b/C="),
-            "sha256:A%2Bb%2FC%3D"
+            names,
+            vec![
+                ("nixpkgs", "github.com"),
+                ("systems", "github.com"),
+                ("utils", "github.com")
+            ]
         );
-        assert_eq!(
-            super::percent_encode_hash("plain-hash_123"),
-            "plain-hash_123"
+        assert!(
+            inputs
+                .iter()
+                .all(|i| i.store_path.starts_with("/nix/store/")
+                    && i.store_path.ends_with("-source"))
         );
     }
 
     #[test]
-    fn flake_ref_from_lock_locked_github_rev_narhash() {
-        let locked = serde_json::json!({
-            "type": "github",
-            "owner": "NixOS",
-            "repo": "nixpkgs",
-            "rev": "deadbeef",
-            "narHash": "sha256:x+y/z=",
-        });
+    fn domains_reduce_to_the_second_level() {
+        let d = |v: serde_json::Value| input_domain(&v);
+        assert_eq!(d(serde_json::json!({"type":"github"})), "github.com");
         assert_eq!(
-            super::flake_ref_from_lock_locked(&locked).unwrap(),
-            "github:NixOS/nixpkgs/deadbeef?narHash=sha256:x%2By%2Fz%3D",
+            d(serde_json::json!({"type":"github","host":"git.corp.example.org"})),
+            "example.org"
         );
+        assert_eq!(d(serde_json::json!({"type":"sourcehut"})), "sr.ht");
+        assert_eq!(
+            d(serde_json::json!({"type":"git","url":"ssh://git@gitlab.com/a/b"})),
+            "gitlab.com"
+        );
+        assert_eq!(
+            d(serde_json::json!({"type":"tarball","url":"https://releases.nixos.org/x.tar.xz"})),
+            "nixos.org"
+        );
+        assert_eq!(d(serde_json::json!({"type":"path","path":"/x"})), "");
     }
 
-    #[test]
-    fn flake_ref_from_lock_locked_git_ref_rev() {
-        let locked = serde_json::json!({
-            "type": "git",
-            "url": "ssh://git@example.test/r.git",
-            "ref": "main",
-            "rev": "abc123",
-        });
-        assert_eq!(
-            super::flake_ref_from_lock_locked(&locked).unwrap(),
-            "git+ssh://git@example.test/r.git?ref=main&rev=abc123",
-        );
+    struct FakeFetcher {
+        in_flight: Mutex<HashMap<String, usize>>,
+        overlapped: AtomicBool,
+        fail: &'static str,
     }
 
-    #[test]
-    fn flake_ref_from_lock_locked_tarball_narhash() {
-        let locked = serde_json::json!({
-            "type": "tarball",
-            "url": "https://example.test/x.tar.gz",
-            "narHash": "sha256:a/b=",
-        });
-        assert_eq!(
-            super::flake_ref_from_lock_locked(&locked).unwrap(),
-            "https://example.test/x.tar.gz?narHash=sha256:a%2Fb%3D",
-        );
+    impl FakeFetcher {
+        fn new(fail: &'static str) -> Self {
+            Self {
+                in_flight: Mutex::default(),
+                overlapped: AtomicBool::default(),
+                fail,
+            }
+        }
     }
 
-    #[test]
-    fn flake_ref_from_lock_locked_path() {
-        let locked = serde_json::json!({
-            "type": "path",
-            "path": "/nix/store/xxx-source",
-        });
-        assert_eq!(
-            super::flake_ref_from_lock_locked(&locked).unwrap(),
-            "path:/nix/store/xxx-source",
-        );
-    }
-
-    #[test]
-    fn prefetch_refs_from_lock_walks_all_and_applies_override() {
-        let lock = serde_json::json!({
-            "root": "root",
-            "nodes": {
-                "root": { "inputs": { "nixpkgs": "nixpkgs", "secret": "secret" } },
-                "nixpkgs": {
-                    "locked": { "type": "github", "owner": "NixOS", "repo": "nixpkgs", "rev": "aaa" },
-                    "inputs": { "flake-utils": "flake-utils" }
-                },
-                "flake-utils": {
-                    "locked": { "type": "github", "owner": "numtide", "repo": "flake-utils", "rev": "bbb" }
-                },
-                "secret": {
-                    "locked": { "type": "git", "url": "ssh://git@host/secret.git", "rev": "ccc" }
-                },
-                "weird": {
-                    "locked": { "type": "mercurial", "url": "http://x" }
+    #[async_trait::async_trait]
+    impl InputFetcher for FakeFetcher {
+        async fn fetch_input(
+            &self,
+            locked: String,
+            _: Option<String>,
+            target: DownloadTarget,
+        ) -> anyhow::Result<String> {
+            let v: serde_json::Value = serde_json::from_str(&locked)?;
+            let domain = input_domain(&v);
+            {
+                let mut in_flight = self.in_flight.lock();
+                let n = in_flight.entry(domain.clone()).or_default();
+                *n += 1;
+                assert_eq!(*n, 1, "two downloads in flight for {domain}");
+                if in_flight.values().filter(|n| **n > 0).count() > 1 {
+                    self.overlapped.store(true, Ordering::SeqCst);
                 }
             }
-        });
-        let overrides = [(
-            "nixpkgs".to_owned(),
-            "github:NixOS/nixpkgs/override-rev".to_owned(),
-        )];
-        let (refs, warnings) = super::prefetch_refs_from_lock(&lock, &overrides);
-        let map: std::collections::HashMap<String, String> = refs.into_iter().collect();
+            target.board.transfer(target.index, 1, 10, 0);
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            *self.in_flight.lock().get_mut(&domain).unwrap() -= 1;
+            if v["repo"] == self.fail {
+                anyhow::bail!("404");
+            }
+            Ok(format!("/nix/store/{}-source", v["repo"].as_str().unwrap()))
+        }
+    }
+
+    fn input(name: &str, domain: &str, repo: &str) -> LockedInput {
+        LockedInput {
+            name: name.into(),
+            domain: domain.into(),
+            store_path: format!("/nix/store/{repo}-source"),
+            locked: serde_json::json!({ "type": "github", "host": domain, "repo": repo })
+                .to_string(),
+        }
+    }
+
+    #[tokio::test]
+    async fn domains_overlap_while_each_domain_stays_serial_and_a_failure_is_a_warning() {
+        let fetcher = FakeFetcher::new("bad");
+        let reporter = RecordingJobReporter::new();
+        let store = FakeWorkerStore::default();
+        let inputs = vec![
+            input("a", "github.com", "a"),
+            input("b", "github.com", "bad"),
+            input("c", "gitlab.com", "c"),
+        ];
+        let (paths, warnings) = fetch_inputs(
+            inputs,
+            &store,
+            &fetcher,
+            &*reporter.eval_progress_sink(),
+            None,
+            &mut no_abort(),
+        )
+        .await
+        .unwrap();
+        assert!(fetcher.overlapped.load(Ordering::SeqCst));
+        assert_eq!(paths.len(), 2);
+        assert_eq!(warnings, vec!["skipping flake input 'b': 404".to_owned()]);
+        let Some(ReportedEvent::EvalProgress(EvalProgress::Fetching { inputs })) =
+            reporter.events().last().cloned()
+        else {
+            panic!("no final fetch snapshot");
+        };
+        let states: Vec<_> = inputs
+            .iter()
+            .map(|i| (i.name.as_str(), i.state, i.downloaded_bytes))
+            .collect();
         assert_eq!(
-            map.get("nixpkgs").map(String::as_str),
-            Some("github:NixOS/nixpkgs/override-rev")
+            states,
+            vec![
+                ("a", InputFetchState::Done, 10),
+                ("b", InputFetchState::Failed, 10),
+                ("c", InputFetchState::Done, 10),
+            ]
         );
-        assert_eq!(
-            map.get("flake-utils").map(String::as_str),
-            Some("github:numtide/flake-utils/bbb")
-        );
-        assert_eq!(
-            map.get("secret").map(String::as_str),
-            Some("git+ssh://git@host/secret.git?rev=ccc")
-        );
-        assert!(!map.contains_key("root"));
-        assert_eq!(warnings.len(), 1);
-        assert!(warnings[0].contains("weird"));
+    }
+
+    #[tokio::test]
+    async fn no_rows_sends_no_progress() {
+        let fetcher = FakeFetcher::new("");
+        let reporter = RecordingJobReporter::new();
+        let (paths, _) = fetch_inputs(
+            vec![],
+            &FakeWorkerStore::default(),
+            &fetcher,
+            &*reporter.eval_progress_sink(),
+            None,
+            &mut no_abort(),
+        )
+        .await
+        .unwrap();
+        assert!(paths.is_empty());
+        assert!(reporter.events().is_empty());
+    }
+
+    #[tokio::test]
+    async fn an_abort_stops_the_fetch() {
+        let fetcher = FakeFetcher::new("");
+        let reporter = RecordingJobReporter::new();
+        let (tx, mut rx) = watch::channel(false);
+        tx.send(true).unwrap();
+        let err = fetch_inputs(
+            vec![input("a", "github.com", "a")],
+            &FakeWorkerStore::default(),
+            &fetcher,
+            &*reporter.eval_progress_sink(),
+            None,
+            &mut rx,
+        )
+        .await
+        .unwrap_err();
+        assert!(err.to_string().contains("aborted"), "{err}");
     }
 }
