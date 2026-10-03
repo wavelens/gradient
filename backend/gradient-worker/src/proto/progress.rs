@@ -4,24 +4,36 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! The byte count is spanning every transfer of one build.
-//! A retried transfer is restarting from where the finished ones left off.
+//! Concurrent transfers of one build count into one shared tally.
+//! A retried or failed transfer gives back the bytes of its attempt.
+
+use std::future::Future;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 
 use gradient_wire::messages::{BUILD_PROGRESS_INTERVAL, ClientMessage};
 use gradient_wire::traits::EvalProgressSink;
-use gradient_wire::types::EvalProgress;
+use gradient_wire::types::{BuildProgressPhase, EvalProgress};
 use tokio::time::Instant;
 use tracing::debug;
 
 use gradient_worker_client::connection::ProtoWriter;
 use gradient_worker_client::correlation::AssignmentHandle;
 
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Transferred {
+    pub(crate) bytes_done: u64,
+    pub(crate) bytes_total: Option<u64>,
+    pub(crate) paths_done: u32,
+    pub(crate) paths_total: u32,
+}
+
 pub(crate) trait ProgressSink {
-    async fn report(&mut self, downloaded: u64, total: Option<u64>);
+    async fn report(&mut self, transferred: Transferred);
 }
 
 impl ProgressSink for () {
-    async fn report(&mut self, _: u64, _: Option<u64>) {}
+    async fn report(&mut self, _: Transferred) {}
 }
 
 pub(crate) struct BuildProgressSink {
@@ -29,18 +41,22 @@ pub(crate) struct BuildProgressSink {
     pub(crate) job_id: String,
     pub(crate) assignment_id: AssignmentHandle,
     pub(crate) build_id: String,
+    pub(crate) phase: BuildProgressPhase,
 }
 
 impl ProgressSink for BuildProgressSink {
-    async fn report(&mut self, downloaded: u64, total: Option<u64>) {
+    async fn report(&mut self, transferred: Transferred) {
         let sent = self
             .writer
             .send(ClientMessage::BuildProgress {
                 job_id: self.job_id.clone(),
                 assignment_id: self.assignment_id.get(),
                 build_id: self.build_id.clone(),
-                downloaded,
-                total,
+                phase: self.phase,
+                bytes_done: transferred.bytes_done,
+                bytes_total: transferred.bytes_total,
+                paths_done: transferred.paths_done,
+                paths_total: Some(transferred.paths_total),
             })
             .await;
         if let Err(e) = sent {
@@ -72,12 +88,76 @@ impl EvalProgressSink for EvalProgressSender {
     }
 }
 
+#[derive(Clone, Default)]
+pub(crate) struct Tally(Arc<Counts>);
+
+#[derive(Default)]
+struct Counts {
+    bytes: AtomicU64,
+    paths: AtomicU32,
+}
+
+impl Tally {
+    pub(crate) fn landed(&self, bytes: u64) {
+        let mut transfer = self.transfer();
+        transfer.at(bytes);
+        transfer.done();
+    }
+
+    fn transfer(&self) -> TransferBytes {
+        TransferBytes {
+            tally: self.clone(),
+            counted: 0,
+        }
+    }
+
+    fn bytes(&self) -> u64 {
+        self.0.bytes.load(Ordering::Relaxed)
+    }
+
+    fn paths(&self) -> u32 {
+        self.0.paths.load(Ordering::Relaxed)
+    }
+}
+
+struct TransferBytes {
+    tally: Tally,
+    counted: u64,
+}
+
+impl TransferBytes {
+    fn at(&mut self, bytes: u64) {
+        let total = &self.tally.0.bytes;
+        if bytes >= self.counted {
+            total.fetch_add(bytes - self.counted, Ordering::Relaxed);
+        } else {
+            total.fetch_sub(self.counted - bytes, Ordering::Relaxed);
+        }
+        self.counted = bytes;
+    }
+
+    fn done(mut self) {
+        self.tally.0.paths.fetch_add(1, Ordering::Relaxed);
+        self.counted = 0;
+    }
+}
+
+impl Drop for TransferBytes {
+    fn drop(&mut self) {
+        self.tally
+            .0
+            .bytes
+            .fetch_sub(self.counted, Ordering::Relaxed);
+    }
+}
+
 pub(crate) struct Progress<S> {
     sink: S,
-    total: Option<u64>,
-    finished: u64,
-    current: u64,
-    reported: u64,
+    tally: Tally,
+    current: TransferBytes,
+    bytes_total: Option<u64>,
+    paths_total: u32,
+    reported: Option<Transferred>,
     deadline: Instant,
 }
 
@@ -85,31 +165,53 @@ impl Progress<()> {
     pub(crate) fn silent() -> Self {
         Self::new(())
     }
+
+    pub(crate) fn counting(tally: Tally) -> Self {
+        Self::with_tally((), tally)
+    }
 }
 
 impl<S: ProgressSink> Progress<S> {
     pub(crate) fn new(sink: S) -> Self {
+        Self::with_tally(sink, Tally::default())
+    }
+
+    fn with_tally(sink: S, tally: Tally) -> Self {
         Self {
             sink,
-            total: None,
-            finished: 0,
-            current: 0,
-            reported: 0,
+            current: tally.transfer(),
+            tally,
+            bytes_total: None,
+            paths_total: 0,
+            reported: None,
             deadline: Instant::now() + BUILD_PROGRESS_INTERVAL,
         }
     }
 
-    pub(crate) fn set_total(&mut self, total: Option<u64>) {
-        self.total = total;
+    pub(crate) fn tally(&self) -> Tally {
+        self.tally.clone()
+    }
+
+    pub(crate) fn set_total(&mut self, bytes: Option<u64>, paths: u32) {
+        self.bytes_total = bytes;
+        self.paths_total = paths;
+    }
+
+    pub(crate) fn expect(&mut self, bytes: Option<u64>, paths: u32) {
+        self.bytes_total = match self.paths_total {
+            0 => bytes,
+            _ => self.bytes_total.zip(bytes).map(|(had, more)| had + more),
+        };
+        self.paths_total += paths;
     }
 
     pub(crate) fn at(&mut self, bytes: u64) {
-        self.current = bytes;
+        self.current.at(bytes);
     }
 
     pub(crate) fn transfer_done(&mut self) {
-        self.finished += self.current;
-        self.current = 0;
+        let next = self.tally.transfer();
+        std::mem::replace(&mut self.current, next).done();
     }
 
     pub(crate) fn deadline(&self) -> Instant {
@@ -118,20 +220,57 @@ impl<S: ProgressSink> Progress<S> {
 
     pub(crate) async fn tick(&mut self) {
         self.deadline = Instant::now() + BUILD_PROGRESS_INTERVAL;
-        let downloaded = self.downloaded();
-        if downloaded != self.reported {
-            self.reported = downloaded;
-            self.sink.report(downloaded, self.total).await;
+        let now = self.transferred();
+        if self.reported != Some(now) {
+            self.reported = Some(now);
+            self.sink.report(now).await;
         }
     }
 
-    pub(crate) async fn finish(&mut self) {
-        self.transfer_done();
-        self.sink.report(self.finished, self.total).await;
+    pub(crate) async fn during<T>(&mut self, work: impl Future<Output = T>) -> T {
+        report_during(std::slice::from_mut(self), work).await
     }
 
-    fn downloaded(&self) -> u64 {
-        self.finished + self.current
+    pub(crate) async fn finish(&mut self) {
+        let now = self.transferred();
+        if now.paths_total == 0 && now.bytes_done == 0 {
+            return;
+        }
+        self.reported = Some(now);
+        self.sink.report(now).await;
+    }
+
+    fn transferred(&self) -> Transferred {
+        Transferred {
+            bytes_done: self.tally.bytes(),
+            bytes_total: self.bytes_total,
+            paths_done: self.tally.paths(),
+            paths_total: self.paths_total,
+        }
+    }
+}
+
+pub(crate) async fn report_during<S: ProgressSink, T>(
+    progress: &mut [Progress<S>],
+    work: impl Future<Output = T>,
+) -> T {
+    tokio::pin!(work);
+    loop {
+        let next = progress.iter().map(Progress::deadline).min();
+        let due = async move {
+            match next {
+                Some(deadline) => tokio::time::sleep_until(deadline).await,
+                None => std::future::pending().await,
+            }
+        };
+        tokio::select! {
+            out = &mut work => return out,
+            () = due => {
+                for p in progress.iter_mut().filter(|p| p.deadline() <= Instant::now()) {
+                    p.tick().await;
+                }
+            }
+        }
     }
 }
 
@@ -160,24 +299,40 @@ pub(crate) async fn read_body(
 
 #[cfg(test)]
 #[derive(Default)]
-pub(crate) struct Recorded(pub(crate) Vec<(u64, Option<u64>)>);
+pub(crate) struct Recorded(pub(crate) Vec<Transferred>);
 
 #[cfg(test)]
 impl ProgressSink for &mut Recorded {
-    async fn report(&mut self, downloaded: u64, total: Option<u64>) {
-        self.0.push((downloaded, total));
+    async fn report(&mut self, transferred: Transferred) {
+        self.0.push(transferred);
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn transferred(
+    bytes_done: u64,
+    bytes_total: Option<u64>,
+    paths_done: u32,
+    paths_total: u32,
+) -> Transferred {
+    Transferred {
+        bytes_done,
+        bytes_total,
+        paths_done,
+        paths_total,
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Duration;
 
     #[tokio::test(start_paused = true)]
-    async fn a_deadline_reports_only_when_bytes_arrived_and_the_end_always_does() {
+    async fn a_deadline_reports_only_on_a_change_and_the_end_always_does() {
         let mut sent = Recorded::default();
         let mut progress = Progress::new(&mut sent);
-        progress.set_total(Some(100));
+        progress.set_total(Some(100), 1);
 
         progress.at(10);
         progress.tick().await;
@@ -189,7 +344,11 @@ mod tests {
 
         assert_eq!(
             sent.0,
-            vec![(10, Some(100)), (40, Some(100)), (90, Some(100))]
+            vec![
+                transferred(10, Some(100), 0, 1),
+                transferred(40, Some(100), 0, 1),
+                transferred(90, Some(100), 0, 1),
+            ]
         );
     }
 
@@ -218,7 +377,79 @@ mod tests {
         progress.at(20);
         progress.finish().await;
 
-        assert_eq!(sent.0, vec![(50, None)]);
+        assert_eq!(sent.0, vec![transferred(50, None, 1, 0)]);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn concurrent_transfers_share_one_report_and_a_failed_one_gives_its_bytes_back() {
+        let mut sent = Recorded::default();
+        let mut progress = Progress::new(&mut sent);
+        progress.expect(Some(50), 2);
+        let mut landed = Progress::counting(progress.tally());
+        let mut failed = Progress::counting(progress.tally());
+
+        landed.at(10);
+        failed.at(20);
+        progress.tick().await;
+        landed.transfer_done();
+        drop(failed);
+        progress.tick().await;
+
+        assert_eq!(
+            sent.0,
+            vec![
+                transferred(30, Some(50), 0, 2),
+                transferred(10, Some(50), 1, 2)
+            ]
+        );
+    }
+
+    #[test]
+    fn a_later_round_grows_the_totals_and_one_unknown_size_hides_the_bytes() {
+        let mut progress = Progress::silent();
+
+        progress.expect(Some(10), 1);
+        progress.expect(Some(5), 2);
+        assert_eq!(progress.transferred(), transferred(0, Some(15), 0, 3));
+
+        progress.expect(None, 1);
+        progress.expect(Some(7), 1);
+        assert_eq!(progress.transferred(), transferred(0, None, 0, 5));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn work_is_reported_every_interval_while_it_runs() {
+        let mut sent = Recorded::default();
+        let mut progress = Progress::new(&mut sent);
+        progress.set_total(Some(100), 1);
+        let mut transfer = Progress::counting(progress.tally());
+
+        progress
+            .during(async move {
+                transfer.at(50);
+                tokio::time::sleep(BUILD_PROGRESS_INTERVAL + Duration::from_secs(1)).await;
+                transfer.at(100);
+                transfer.transfer_done();
+            })
+            .await;
+        progress.finish().await;
+
+        assert_eq!(
+            sent.0,
+            vec![
+                transferred(50, Some(100), 0, 1),
+                transferred(100, Some(100), 1, 1)
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn nothing_expected_and_nothing_counted_sends_no_end() {
+        let mut sent = Recorded::default();
+
+        Progress::new(&mut sent).finish().await;
+
+        assert!(sent.0.is_empty());
     }
 
     #[tokio::test]
@@ -242,6 +473,6 @@ mod tests {
         progress.finish().await;
 
         assert_eq!(body.len(), 300_000);
-        assert_eq!(sent.0, vec![(300_000, None)]);
+        assert_eq!(sent.0, vec![transferred(300_000, None, 0, 0)]);
     }
 }

@@ -26,8 +26,7 @@ use gradient_notify::EmailSender;
 use gradient_state::{OidcGroupRoles, PendingProjectMemberships, ScimGroupRoles};
 use gradient_storage::{LogStorage, NarStore, StorageCtx};
 use gradient_types::{
-    DerivationBuildId, DownloadProgress, EvaluationId, EvaluationProgress, RuntimeConfig,
-    SecretString,
+    BuildProgress, DerivationBuildId, EvaluationId, EvaluationProgress, RuntimeConfig, SecretString,
 };
 use gradient_util::debounce::Debounce;
 use gradient_util::latest::Latest;
@@ -60,7 +59,7 @@ pub struct AppState {
     pub oidc_group_roles: Arc<OidcGroupRoles>,
     pub scim_group_roles: Arc<ScimGroupRoles>,
     pub events: gradient_types::EventBus,
-    pub download_progress: Arc<Latest<DerivationBuildId, DownloadProgress>>,
+    pub build_progress: Arc<Latest<DerivationBuildId, BuildProgress>>,
     pub eval_progress: Arc<Latest<EvaluationId, EvaluationProgress>>,
     pub delivery_wake: Arc<Notify>,
     pub eval_assign_wake: Arc<Notify>,
@@ -77,10 +76,10 @@ pub fn last_used_stamps() -> Debounce<Uuid> {
     Debounce::new(LAST_USED_STAMP_INTERVAL)
 }
 
-pub const DOWNLOAD_PROGRESS_TTL: Duration = Duration::from_secs(15);
+pub const BUILD_PROGRESS_TTL: Duration = Duration::from_secs(15);
 
-pub fn download_progress() -> Arc<Latest<DerivationBuildId, DownloadProgress>> {
-    Arc::new(Latest::new(DOWNLOAD_PROGRESS_TTL))
+pub fn build_progress() -> Arc<Latest<DerivationBuildId, BuildProgress>> {
+    Arc::new(Latest::new(BUILD_PROGRESS_TTL))
 }
 
 pub const EVAL_PROGRESS_TTL: Duration = Duration::from_secs(60);

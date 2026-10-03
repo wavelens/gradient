@@ -11,9 +11,20 @@ use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct DownloadProgress {
-    pub downloaded: u64,
-    pub total: Option<u64>,
+pub struct BuildProgress {
+    pub phase: BuildProgressPhase,
+    pub bytes_done: u64,
+    pub bytes_total: Option<u64>,
+    pub paths_done: u32,
+    pub paths_total: Option<u32>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BuildProgressPhase {
+    Download,
+    Prefetch,
+    Upload,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -96,7 +107,7 @@ impl EventKind for Reported {
 pub struct Progress {
     pub derivation_build: DerivationBuildId,
     #[serde(flatten)]
-    pub progress: DownloadProgress,
+    pub progress: BuildProgress,
 }
 firehose!(Progress, "build.progress");
 
@@ -132,6 +143,28 @@ mod tests {
         ] {
             assert_eq!(reported(s).name(), "build.failed");
         }
+    }
+
+    #[test]
+    fn progress_event_flattens_the_phase_and_counts() {
+        let event = Progress {
+            derivation_build: DerivationBuildId::now_v7(),
+            progress: BuildProgress {
+                phase: BuildProgressPhase::Prefetch,
+                bytes_done: 120,
+                bytes_total: Some(340),
+                paths_done: 12,
+                paths_total: Some(40),
+            },
+        };
+
+        let json = serde_json::to_value(&event).unwrap();
+
+        assert_eq!(json["phase"], "prefetch");
+        assert_eq!(json["bytes_done"], 120);
+        assert_eq!(json["bytes_total"], 340);
+        assert_eq!(json["paths_done"], 12);
+        assert_eq!(json["paths_total"], 40);
     }
 
     #[test]

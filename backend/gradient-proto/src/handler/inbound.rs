@@ -12,7 +12,7 @@ use gradient_core::ServerState;
 use gradient_entity::dispatched_job::DispatchedJobOutcome;
 use gradient_types::events::{build, evaluation};
 use gradient_types::ids::{DerivationBuildId, DispatchedJobId, EvaluationId, ProjectId, TaskId};
-use gradient_types::{DownloadProgress, EvaluationProgress};
+use gradient_types::{BuildProgress, BuildProgressPhase, EvaluationProgress};
 use gradient_util::store_path::strip_nix_store_prefix;
 use tokio::sync::Semaphore;
 use tracing::{Instrument as _, debug, debug_span, info, trace, warn};
@@ -25,7 +25,9 @@ use gradient_wire::messages::{
     JobKind, ServerMessage,
 };
 use gradient_wire::session::frame::{Frame, Inbound};
-use gradient_wire::types::EvalProgress as WireEvalProgress;
+use gradient_wire::types::{
+    BuildProgressPhase as WireBuildProgressPhase, EvalProgress as WireEvalProgress,
+};
 
 use super::auth::{expand_base_authorized, lookup_base_worker_challenge, lookup_registered_peers};
 use super::cache::handle_cache_query;
@@ -287,11 +289,21 @@ impl<'a> InboundContext<'a> {
                 job_id,
                 assignment_id,
                 build_id,
-                downloaded,
-                total,
+                phase,
+                bytes_done,
+                bytes_total,
+                paths_done,
+                paths_total,
             } => {
                 if self.owns(&job_id, &assignment_id) {
-                    self.on_build_progress(&build_id, DownloadProgress { downloaded, total });
+                    let progress = BuildProgress {
+                        phase: build_progress_phase(phase),
+                        bytes_done,
+                        bytes_total,
+                        paths_done,
+                        paths_total,
+                    };
+                    self.on_build_progress(&build_id, progress);
                 }
                 true
             }
@@ -717,13 +729,13 @@ impl<'a> InboundContext<'a> {
         }
     }
 
-    fn on_build_progress(&self, build_id: &str, progress: DownloadProgress) {
+    fn on_build_progress(&self, build_id: &str, progress: BuildProgress) {
         let Ok(shared_build) = build_id.parse::<DerivationBuildId>() else {
             warn!(peer_id = %self.peer_id, %build_id, "invalid derivation_build in BuildProgress");
             return;
         };
         self.state
-            .download_progress
+            .build_progress
             .set(shared_build, progress, Instant::now());
         self.state.events.publish(build::Progress {
             derivation_build: shared_build,
@@ -976,6 +988,14 @@ impl RpcContext {
                 },
             )
             .await;
+    }
+}
+
+fn build_progress_phase(phase: WireBuildProgressPhase) -> BuildProgressPhase {
+    match phase {
+        WireBuildProgressPhase::Download => BuildProgressPhase::Download,
+        WireBuildProgressPhase::Prefetch => BuildProgressPhase::Prefetch,
+        WireBuildProgressPhase::Upload => BuildProgressPhase::Upload,
     }
 }
 
@@ -1316,9 +1336,12 @@ mod assignment_response_tests {
         let active = ActiveJobs::from(HashMap::new());
         let mut events = state.events.subscribe();
         let shared_build = DerivationBuildId::now_v7();
-        let progress = DownloadProgress {
-            downloaded: 512,
-            total: Some(2048),
+        let progress = BuildProgress {
+            phase: BuildProgressPhase::Upload,
+            bytes_done: 512,
+            bytes_total: Some(2048),
+            paths_done: 1,
+            paths_total: Some(2),
         };
 
         let ctx = InboundContext {
@@ -1336,7 +1359,7 @@ mod assignment_response_tests {
         ctx.on_build_progress("not-a-uuid", progress);
 
         assert_eq!(
-            state.download_progress.get(&shared_build, Instant::now()),
+            state.build_progress.get(&shared_build, Instant::now()),
             Some(progress)
         );
         match events.try_recv().map(|env| env.event.clone()) {

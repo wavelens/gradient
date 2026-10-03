@@ -414,6 +414,14 @@ pub enum InputFetchState {
     Failed,
 }
 
+#[derive(Archive, Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[rkyv(derive(Debug, PartialEq))]
+pub enum BuildProgressPhase {
+    Download,
+    Prefetch,
+    Upload,
+}
+
 #[derive(Archive, Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[rkyv(derive(Debug, PartialEq))]
 pub enum JobPhase {
