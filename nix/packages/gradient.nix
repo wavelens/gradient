@@ -81,7 +81,7 @@ let
   dummyrs = pkgs.writeText "dummy.rs" ''
     #![allow(clippy::all)]
     #![allow(dead_code)]
-    pub fn main() {}
+    fn main() {}
   '';
 
   cargoArtifacts = craneLib.buildDepsOnly (commonArgs // {

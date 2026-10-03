@@ -55,7 +55,7 @@ let
   dummyrs = writeText "dummy.rs" ''
     #![allow(clippy::all)]
     #![allow(dead_code)]
-    pub fn main() {}
+    fn main() {}
   '';
 
   commonArgs = {
