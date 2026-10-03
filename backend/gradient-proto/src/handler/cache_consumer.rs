@@ -10,6 +10,8 @@ use gradient_wire::types::{CachedPath, GradientCapabilities, QueryMode};
 
 use gradient_wire::messages::{ClientMessage, ServerMessage};
 
+const SEND_TIMEOUT: Duration = Duration::from_secs(10);
+
 pub(super) fn proto_ws_url(base_url: &str, remote_cache: &str) -> String {
     let trimmed = base_url.trim_end_matches('/');
     let ws = if let Some(rest) = trimmed.strip_prefix("https://") {
@@ -59,6 +61,7 @@ pub(crate) async fn pull_paths(
         _ => return vec![],
     }
 
+    let (mut reader, writer, _writer_task) = socket.split_peer(SEND_TIMEOUT);
     let query = ClientMessage::CacheQuery {
         job_id: uuid::Uuid::now_v7().to_string(),
         query_id: uuid::Uuid::now_v7().to_string(),
@@ -67,11 +70,11 @@ pub(crate) async fn pull_paths(
         nar_sizes: Vec::new(),
         external: false,
     };
-    if socket.send_client_msg(&query).await.is_err() {
+    if writer.send_msg(&query).await.is_err() {
         return vec![];
     }
 
-    match tokio::time::timeout(Duration::from_secs(30), socket.recv_server_msg()).await {
+    match tokio::time::timeout(Duration::from_secs(30), reader.recv()).await {
         Ok(Some(ServerMessage::CacheStatus { cached, .. })) => {
             cached.into_iter().filter(|c| c.cached).collect()
         }

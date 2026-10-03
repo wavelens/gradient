@@ -30,6 +30,8 @@ sequenceDiagram
 
 `/var/lib/gradient-worker/worker-id` is holding the worker ID. The server is using the ID to match reconnects, reject duplicates and label the worker in the UI and logs.
 
+`MAX_HANDSHAKE_MESSAGE_SIZE` (64 KiB) is capping every handshake message. A larger message is ending the session with close code `1002`, without decoding.
+
 **Rejections:** The server is rejecting a session with the codes below. A dialed worker is rejecting the server with `400` or `401`, see [Server-Dialed Handshake](#server-dialed-handshake).
 
 | Code | Reason |
@@ -181,7 +183,7 @@ sequenceDiagram
 | Private cache | `Authorization: GRAD<key>` on the upgrade request |
 | Handshake | `InitConnection`, then `InitAck` with no peers. No challenge |
 | Allowed | `CacheQuery` in `Normal` or `Pull` mode, `NarRequest`. The server is rejecting everything else with `403` |
-| Limits | `proto.anonymousCache.maxConnectionsPerIp` (32) anonymous connections per IP. Every session is counting against `proto.maxConnections` (256) |
+| Limits | `proto.anonymousCache.maxConnectionsPerIp` (32) anonymous connections per IP. Every session is counting against `proto.maxConnections` (256). `SAFE_INFLIGHT_MESSAGE_SIZE` (2 MiB) is capping each message, enough for a `CacheQuery` of 1000 paths |
 | Idle | Closed after 120 s without a NAR transfer |
 
 ## Implementation
