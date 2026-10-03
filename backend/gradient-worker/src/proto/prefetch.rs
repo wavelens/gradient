@@ -970,7 +970,7 @@ mod tests {
         progress.finish().await;
 
         assert_eq!(fetched.len(), 2);
-        assert_eq!(sent.0, vec![transferred(500, Some(500), 2, 2)]);
+        assert_eq!(sent.0, vec![transferred(500, Some(500), 2, Some(2))]);
     }
 
     #[test]
