@@ -11,6 +11,10 @@ use sea_orm::{
 
 pub const BUILD_REQUEST_TASK_NAME: &str = "build-request";
 
+pub fn is_build_request_task(task: &MTask) -> bool {
+    task.managed && task.name == BUILD_REQUEST_TASK_NAME
+}
+
 pub async fn ensure_build_request_task<C: ConnectionTrait>(
     db: &C,
     project: ProjectId,

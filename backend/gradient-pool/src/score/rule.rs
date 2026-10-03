@@ -17,6 +17,7 @@ pub struct JobContext<'a> {
     pub ready_at: chrono::NaiveDateTime,
     pub project_work_share: Option<f32>,
     pub prioritized: bool,
+    pub build_request: bool,
     pub rescore_count: u32,
     pub now: chrono::NaiveDateTime,
 }

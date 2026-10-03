@@ -13957,6 +13957,8 @@ components:
         missing_nar_size: { type: integer, nullable: true }
         outputs_present: { type: boolean, description: The worker already holds every output and would only upload them. }
         project_work_share: { type: number, nullable: true }
+        prioritized: { type: boolean }
+        build_request: { type: boolean, description: The job belongs to an evaluation of the project's build-request task. }
         rescore_count: { type: integer }
         queued_at: { type: string }
         ready_at: { type: string }

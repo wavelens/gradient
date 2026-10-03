@@ -29,7 +29,7 @@ The worker is getting its highest-scoring job with a total of at least 0 and no 
 | `DependencyCountRule` | Bonus, up to 50 | Builds with many direct inputs |
 | `WaitTimeRule` | Bonus, growing | Long-waiting jobs rising, against starvation. Counted from the moment dependencies finished |
 | `BuiltinDeprioritizeRule` | Bonus, 50 or 100 | Real builds before `builtin` downloads. `builtin` jobs still reaching workers without systems |
-| `QosRule` | Bonus, 5000 | Prioritized jobs beating every other job |
+| `QosRule` | Bonus, 5000 and 1000 | Prioritized jobs beating every other job. Jobs of a build request ([`gradient build`](../guides/build-before-push.md) or [SSH](../guides/build-over-ssh.md)) gaining another 1000 |
 | `RescoreWaitRule` | Veto | Holding a build until a worker reported its missing data size. Lifted after 4 rounds |
 | `ReserveFetchWorkersRule` | Penalty | Keeping fetch-capable workers free for fetching while capacity is short |
 

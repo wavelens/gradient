@@ -74,6 +74,7 @@ pub struct JobContextView {
     pub outputs_present: bool,
     pub project_work_share: Option<f32>,
     pub prioritized: bool,
+    pub build_request: bool,
     pub rescore_count: u32,
     pub queued_at: chrono::NaiveDateTime,
     pub ready_at: chrono::NaiveDateTime,
@@ -105,6 +106,7 @@ impl JobContextView {
             outputs_present: ctx.outputs_present,
             project_work_share: ctx.project_work_share,
             prioritized: ctx.prioritized,
+            build_request: ctx.build_request,
             rescore_count: ctx.rescore_count,
             queued_at: ctx.queued_at,
             ready_at: ctx.ready_at,
@@ -191,6 +193,7 @@ mod tests {
             ready_at: now,
             rescore_count: 0,
             prioritized: false,
+            build_request: false,
             pname: Some("curl".into()),
             substitute: false,
         })
@@ -211,6 +214,7 @@ mod tests {
             ready_at: now,
             project_work_share: None,
             prioritized: false,
+            build_request: false,
             rescore_count: 0,
             now,
         };

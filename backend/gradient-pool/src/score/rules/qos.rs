@@ -10,12 +10,14 @@ use crate::score::rule::{JobContext, ScoreRule, WorkerContext};
 #[derive(Debug)]
 pub struct QosRule {
     pub prioritized: f64,
+    pub build_request: f64,
 }
 
 impl Default for QosRule {
     fn default() -> Self {
         Self {
             prioritized: crate::score::weights::QOS_PRIORITIZED,
+            build_request: crate::score::weights::QOS_BUILD_REQUEST,
         }
     }
 }
@@ -31,15 +33,12 @@ impl ScoreRule for QosRule {
         _worker: &WorkerContext<'_>,
         _instance: &InstanceContext,
     ) -> f64 {
-        if job.prioritized {
-            self.prioritized
-        } else {
-            0.0
-        }
+        let lift = |on: bool, weight: f64| if on { weight } else { 0.0 };
+        lift(job.prioritized, self.prioritized) + lift(job.build_request, self.build_request)
     }
 
     fn description(&self) -> &'static str {
-        "Quality of service: lifts a job whose evaluation or dependent build a user prioritized above every unprioritized job."
+        "Quality of service: lifts a job whose evaluation or dependent build a user prioritized above every unprioritized job, and a job of a build request above other jobs."
     }
 }
 
@@ -75,6 +74,7 @@ mod tests {
             ready_at: now(),
             project_work_share: None,
             prioritized,
+            build_request: false,
             rescore_count: 0,
             now: now(),
         }
@@ -104,5 +104,22 @@ mod tests {
         let total =
             |c: &JobContext<'_>| qos.score(c, &worker(), &inst) + wait.score(c, &worker(), &inst);
         assert!(total(&fresh) > total(&starving));
+    }
+
+    #[test]
+    fn a_build_request_ranks_between_a_prioritized_and_a_plain_job() {
+        let qos = QosRule::default();
+        let job = build_job();
+        let inst = InstanceContext::default();
+        let score = |prioritized, build_request| {
+            let c = JobContext {
+                build_request,
+                ..ctx(&job, prioritized)
+            };
+            qos.score(&c, &worker(), &inst)
+        };
+        assert!(score(true, false) > score(false, true));
+        assert!(score(false, true) > score(false, false));
+        assert!(score(true, true) > score(true, false));
     }
 }
