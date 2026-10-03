@@ -8,6 +8,7 @@ use std::collections::{HashSet, VecDeque};
 use std::sync::Arc;
 use std::time::Instant;
 
+use super::progress_report::{ChangeReporter, thunk_progress};
 use crate::worker_pool::{WorkerPoolResolver, budgeted_pool_size};
 use anyhow::{Context, Result};
 use futures::stream::{FuturesOrdered, FuturesUnordered, StreamExt as _};
@@ -267,19 +268,27 @@ pub async fn evaluate_derivations(
         }
     }
 
+    let thunks = evaluator.resolver.live_thunks();
+    thunks.reset();
+    let sink = updater.eval_progress_sink();
+    let snapshot = || thunk_progress(thunks.total());
+    let mut reporter = ChangeReporter::default();
+    let evaluated = tokio::select! {
+        evaluated = evaluate_derivations_with(
+            &*evaluator.resolver,
+            &FsDrvReader,
+            job,
+            local_flake_path,
+            updater,
+            abort,
+        ) => evaluated,
+        never = reporter.run(&*sink, snapshot) => match never {},
+    };
+    reporter.flush(&*sink, &snapshot).await;
     let EvalOutcome {
         flake_nodes,
         cacheable,
-    } = match evaluate_derivations_with(
-        &*evaluator.resolver,
-        &FsDrvReader,
-        job,
-        local_flake_path,
-        updater,
-        abort,
-    )
-    .await
-    {
+    } = match evaluated {
         Ok(outcome) => outcome,
         Err(e) => {
             if let Some(corrupt) = e.downcast_ref::<CorruptEvalCache>() {
