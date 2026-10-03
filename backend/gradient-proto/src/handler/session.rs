@@ -24,9 +24,8 @@ use gradient_wire::session::handshake::{HandshakeResult, Rejected};
 use gradient_wire::traits::{AuthOutcome, PeerAuthority};
 
 use super::auth::{
-    BaseWorkerChallenge, aggregate_enabled_caps, expand_base_authorized,
-    filter_project_peers_without_cache, has_any_registrations, lookup_base_worker_challenge,
-    lookup_registered_peers, negotiate_capabilities,
+    TeamWorkerChallenge, aggregate_enabled_caps, challenge_for, has_any_registrations,
+    negotiate_capabilities, resolve_authorized,
 };
 use super::dialed::{DialedSession, DialedWorkerAuthority};
 use super::failures::{record_dialed, record_inbound};
@@ -34,7 +33,6 @@ use super::session_actor::SessionArgs;
 use super::sessions::SessionsHandle;
 use super::socket::{HANDSHAKE_TIMEOUT, ProtoSocket, ProtoWriter, send_server_msg};
 use crate::outbound::DialTarget;
-use gradient_wire::auth::validate_tokens;
 
 pub(crate) enum SessionOrigin {
     WorkerDialed,
@@ -155,7 +153,7 @@ struct ServerAuthority {
 }
 
 struct ServerChallenge {
-    base: Option<BaseWorkerChallenge>,
+    team: Option<TeamWorkerChallenge>,
     registered_peers: Vec<(String, String)>,
 }
 
@@ -164,15 +162,11 @@ impl PeerAuthority for ServerAuthority {
     type Challenge = ServerChallenge;
 
     async fn challenge(&self, claimed: &str) -> Result<(ServerChallenge, Vec<String>)> {
-        let base = lookup_base_worker_challenge(&self.state, claimed).await;
-        let registered_peers = match &base {
-            Some(b) => b.challenge.clone(),
-            None => lookup_registered_peers(&self.state, claimed).await,
-        };
+        let (team, registered_peers) = challenge_for(&self.state, claimed).await;
         let names = registered_peers.iter().map(|(id, _)| id.clone()).collect();
         Ok((
             ServerChallenge {
-                base,
+                team,
                 registered_peers,
             },
             names,
@@ -186,34 +180,24 @@ impl PeerAuthority for ServerAuthority {
         tokens: &[(String, String)],
     ) -> Result<AuthOutcome> {
         let ServerChallenge {
-            base,
+            team,
             registered_peers,
         } = challenge;
-        let (token_authorized, mut failed_peers) = validate_tokens(&registered_peers, tokens);
-        self.proven
-            .store(!token_authorized.is_empty(), Ordering::Relaxed);
-        let token_authorized = expand_base_authorized(&base, token_authorized);
+        let resolved = resolve_authorized(&self.state, &team, &registered_peers, tokens).await;
+        self.proven.store(resolved.proven, Ordering::Relaxed);
 
-        let had_token_authorized = !token_authorized.is_empty();
-        let (authorized_peers, demoted) =
-            filter_project_peers_without_cache(&self.state, token_authorized).await;
-        let emptied_by_missing_cache =
-            authorized_peers.is_empty() && had_token_authorized && !demoted.is_empty();
-        failed_peers.extend(demoted);
-
-        let is_base = base.is_some();
         let has_any =
             registered_peers.is_empty() && has_any_registrations(&self.state, claimed).await;
         match decide_auth(
             registered_peers.is_empty(),
             has_any,
-            authorized_peers.is_empty(),
-            emptied_by_missing_cache,
-            is_base,
+            resolved.authorized.is_empty(),
+            resolved.emptied_by_missing_cache,
+            team.is_some(),
         ) {
             AuthDecision::Accept => Ok(AuthOutcome::Accept {
-                authorized_peers,
-                failed_peers,
+                authorized_peers: resolved.authorized,
+                failed_peers: resolved.failed,
             }),
             AuthDecision::Reject { code, reason } => Ok(AuthOutcome::Reject {
                 code,
@@ -289,12 +273,8 @@ pub(super) async fn on_reauth_notify(
     peer_id: &str,
 ) -> bool {
     debug!(%peer_id, "server-initiated reauth");
-    let base = lookup_base_worker_challenge(state, peer_id).await;
-    let registered_peers = match &base {
-        Some(b) => b.challenge.clone(),
-        None => lookup_registered_peers(state, peer_id).await,
-    };
-    if base.is_none() && registered_peers.is_empty() && has_any_registrations(state, peer_id).await
+    let (team, registered_peers) = challenge_for(state, peer_id).await;
+    if team.is_none() && registered_peers.is_empty() && has_any_registrations(state, peer_id).await
     {
         info!(%peer_id, "all registrations deactivated - disconnecting worker");
         let _ = send_server_msg(
@@ -366,9 +346,9 @@ fn decide_auth(
     has_any_registrations: bool,
     authorized_peers_empty: bool,
     emptied_by_missing_cache: bool,
-    is_base: bool,
+    is_team: bool,
 ) -> AuthDecision {
-    if is_base {
+    if is_team {
         return match (authorized_peers_empty, emptied_by_missing_cache) {
             (false, _) => AuthDecision::Accept,
             // The projects did enable this worker but have no cache. A "not enabled" message would
@@ -379,7 +359,7 @@ fn decide_auth(
             },
             (true, false) => AuthDecision::Reject {
                 code: 403,
-                reason: "base worker not enabled by any project",
+                reason: "no project grants this team's workers",
             },
         };
     }
@@ -465,7 +445,7 @@ mod auth_decision_tests {
     }
 
     #[test]
-    fn base_worker_emptied_by_missing_cache() {
+    fn team_worker_emptied_by_missing_cache() {
         assert_eq!(
             decide_auth(false, false, true, true, true),
             AuthDecision::Reject {
@@ -484,18 +464,18 @@ mod auth_decision_tests {
     }
 
     #[test]
-    fn base_worker_empty_authorized_rejected() {
+    fn a_team_worker_without_granted_projects_is_refused() {
         assert_eq!(
             decide_auth(false, false, true, false, true),
             AuthDecision::Reject {
                 code: 403,
-                reason: "base worker not enabled by any project",
+                reason: "no project grants this team's workers",
             }
         );
     }
 
     #[test]
-    fn base_worker_with_authorized_accepted() {
+    fn team_worker_with_authorized_accepted() {
         assert_eq!(
             decide_auth(false, false, false, false, true),
             AuthDecision::Accept
@@ -526,7 +506,7 @@ mod authority_tests {
             proven: AtomicBool::new(false),
         };
         let challenge = ServerChallenge {
-            base: None,
+            team: None,
             registered_peers: vec![(project.to_string(), SHA256_OF_T1.into())],
         };
 

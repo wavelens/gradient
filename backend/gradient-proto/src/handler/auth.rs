@@ -10,6 +10,7 @@ use std::collections::HashSet;
 use tracing::warn;
 use uuid::Uuid;
 
+use gradient_wire::auth::validate_tokens;
 use gradient_wire::messages::{FailedPeer, GradientCapabilities};
 
 pub(super) async fn filter_project_peers_without_cache(
@@ -108,62 +109,86 @@ pub(super) async fn lookup_registered_peers(
     }
 }
 
-pub(super) struct BaseWorkerChallenge {
-    pub challenge: Vec<(String, String)>,
-    pub authorize_against: Option<String>,
-    pub enabled_projects: Vec<String>,
+pub(super) struct TeamWorkerChallenge {
+    pub team: String,
+    pub token_hash: String,
+    pub granted_projects: Vec<String>,
 }
 
-pub(super) async fn lookup_base_worker_challenge(
+pub(super) async fn lookup_team_worker_challenge(
     state: &ServerState,
     worker_id: &str,
-) -> Option<BaseWorkerChallenge> {
-    let bw = gradient_db::projects::base_workers::enabled_base_worker_by_worker_id(
-        &state.worker_db,
-        worker_id,
-    )
-    .await
-    .ok()
-    .flatten()?;
-
-    let enabled_projects: Vec<String> =
-        gradient_db::projects::base_workers::projects_enabling_base_worker(&state.worker_db, bw.id)
+) -> Option<TeamWorkerChallenge> {
+    let worker = gradient_db::teams::workers::active_team_worker(&state.worker_db, worker_id)
+        .await
+        .ok()
+        .flatten()?;
+    let granted_projects =
+        gradient_db::teams::workers::projects_granted_with_workers(&state.worker_db, worker.team)
             .await
             .unwrap_or_default()
             .into_iter()
-            .map(|o| o.to_string())
+            .map(|project| project.to_string())
             .collect();
 
-    let challenge = match &bw.authorize_against {
-        Some(uuid) => vec![(uuid.to_string(), bw.token_hash.clone())],
-        None => enabled_projects
-            .iter()
-            .map(|o| (o.clone(), bw.token_hash.clone()))
-            .collect(),
-    };
-
-    Some(BaseWorkerChallenge {
-        challenge,
-        authorize_against: bw.authorize_against.map(|u| u.to_string()),
-        enabled_projects,
+    Some(TeamWorkerChallenge {
+        team: worker.team.to_string(),
+        token_hash: worker.token_hash,
+        granted_projects,
     })
 }
 
-pub(super) fn expand_base_authorized(
-    base: &Option<BaseWorkerChallenge>,
+pub(super) async fn challenge_for(
+    state: &ServerState,
+    worker_id: &str,
+) -> (Option<TeamWorkerChallenge>, Vec<(String, String)>) {
+    match lookup_team_worker_challenge(state, worker_id).await {
+        Some(team) => {
+            let peers = vec![(team.team.clone(), team.token_hash.clone())];
+            (Some(team), peers)
+        }
+        None => (None, lookup_registered_peers(state, worker_id).await),
+    }
+}
+
+pub(super) fn expand_team_authorized(
+    team: &Option<TeamWorkerChallenge>,
     token_authorized: Vec<String>,
 ) -> Vec<String> {
-    if let Some(b) = base
-        && let Some(identity) = &b.authorize_against
-    {
-        return if token_authorized.iter().any(|p| p == identity) {
-            b.enabled_projects.clone()
-        } else {
-            Vec::new()
-        };
+    match team {
+        Some(team) if token_authorized.contains(&team.team) => team.granted_projects.clone(),
+        Some(_) => Vec::new(),
+        None => token_authorized,
     }
+}
 
-    token_authorized
+pub(super) struct Resolved {
+    pub authorized: Vec<String>,
+    pub failed: Vec<FailedPeer>,
+    pub proven: bool,
+    pub emptied_by_missing_cache: bool,
+}
+
+pub(super) async fn resolve_authorized(
+    state: &ServerState,
+    team: &Option<TeamWorkerChallenge>,
+    registered: &[(String, String)],
+    tokens: &[(String, String)],
+) -> Resolved {
+    let (token_authorized, mut failed) = validate_tokens(registered, tokens);
+    let proven = !token_authorized.is_empty();
+    let expanded = expand_team_authorized(team, token_authorized);
+    let had_any = !expanded.is_empty();
+    let (authorized, demoted) = filter_project_peers_without_cache(state, expanded).await;
+    let emptied_by_missing_cache = authorized.is_empty() && had_any && !demoted.is_empty();
+    failed.extend(demoted);
+
+    Resolved {
+        authorized,
+        failed,
+        proven,
+        emptied_by_missing_cache,
+    }
 }
 
 /// A capability is enabled only when every active registration is enabling it. The handshake is
@@ -206,16 +231,13 @@ pub(super) async fn aggregate_enabled_caps(
     };
 
     if rows.is_empty() {
-        if let Ok(Some(bw)) = gradient_db::projects::base_workers::enabled_base_worker_by_worker_id(
-            &state.worker_db,
-            worker_id,
-        )
-        .await
+        if let Ok(Some(worker)) =
+            gradient_db::teams::workers::active_team_worker(&state.worker_db, worker_id).await
         {
             return EnabledCapsAggregate {
-                enable_fetch: bw.enable_fetch,
-                enable_eval: bw.enable_eval,
-                enable_build: bw.enable_build,
+                enable_fetch: worker.enable_fetch,
+                enable_eval: worker.enable_eval,
+                enable_build: worker.enable_build,
             };
         }
 
@@ -358,46 +380,6 @@ mod tests {
         assert!(!result.build);
     }
 
-    fn base_challenge(authorize_against: Option<&str>, enabled: &[&str]) -> BaseWorkerChallenge {
-        BaseWorkerChallenge {
-            challenge: enabled
-                .iter()
-                .map(|o| ((*o).into(), "hash".into()))
-                .collect(),
-            authorize_against: authorize_against.map(|s| s.into()),
-            enabled_projects: enabled.iter().map(|o| (*o).into()).collect(),
-        }
-    }
-
-    #[test]
-    fn expand_base_authorized_identity_present_expands_to_enabled_projects() {
-        let base = Some(base_challenge(Some("id-1"), &["project-1", "project-2"]));
-        let out = expand_base_authorized(&base, vec!["id-1".into()]);
-        assert_eq!(out, vec!["project-1".to_string(), "project-2".to_string()]);
-    }
-
-    #[test]
-    fn expand_base_authorized_identity_absent_returns_empty() {
-        let base = Some(base_challenge(Some("id-1"), &["project-1", "project-2"]));
-        let out = expand_base_authorized(&base, vec!["other".into()]);
-        assert!(out.is_empty());
-    }
-
-    #[test]
-    fn expand_base_authorized_per_project_mode_passes_through_unchanged() {
-        let base = Some(base_challenge(None, &["project-1", "project-2"]));
-        let token_authorized = vec!["project-1".to_string()];
-        let out = expand_base_authorized(&base, token_authorized.clone());
-        assert_eq!(out, token_authorized);
-    }
-
-    #[test]
-    fn expand_base_authorized_none_passes_through_unchanged() {
-        let token_authorized = vec!["project-1".to_string(), "project-2".to_string()];
-        let out = expand_base_authorized(&None, token_authorized.clone());
-        assert_eq!(out, token_authorized);
-    }
-
     use gradient_entity::project::Model as ProjectModel;
     use gradient_entity::project_cache::{CacheSubscriptionMode, Model as ProjectCacheModel};
     use sea_orm::{DatabaseBackend, MockDatabase};
@@ -509,5 +491,71 @@ mod tests {
         assert!(authorized.contains(&cache_peer.to_string()));
         assert_eq!(demoted.len(), 1);
         assert_eq!(demoted[0].peer_id, project_without.to_string());
+    }
+
+    const TEAM: &str = "7e000000-0000-0000-0000-0000000000aa";
+    const SHA256_OF_T1: &str = "628b49d96dcde97a430dd4f597705899e09a968f793491e4b704cae33a40dc02";
+
+    fn team_challenge(granted: &[ProjectId]) -> Option<TeamWorkerChallenge> {
+        Some(TeamWorkerChallenge {
+            team: TEAM.into(),
+            token_hash: SHA256_OF_T1.into(),
+            granted_projects: granted.iter().map(ToString::to_string).collect(),
+        })
+    }
+
+    #[test]
+    fn a_team_token_expands_to_the_projects_granted_with_workers() {
+        let (a, b) = (ProjectId::now_v7(), ProjectId::now_v7());
+        let expanded = expand_team_authorized(&team_challenge(&[a, b]), vec![TEAM.into()]);
+        assert_eq!(expanded, vec![a.to_string(), b.to_string()]);
+    }
+
+    #[test]
+    fn a_team_worker_without_a_valid_team_token_gets_nothing() {
+        let expanded = expand_team_authorized(&team_challenge(&[ProjectId::now_v7()]), vec![]);
+        assert!(expanded.is_empty());
+    }
+
+    #[test]
+    fn a_project_worker_keeps_the_projects_its_tokens_prove() {
+        let project = ProjectId::now_v7().to_string();
+        assert_eq!(
+            expand_team_authorized(&None, vec![project.clone()]),
+            vec![project]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_team_without_projects_granted_with_workers_resolves_to_nothing() {
+        let state = state_with_db(MockDatabase::new(DatabaseBackend::Postgres).into_connection());
+        let team = team_challenge(&[]);
+        let registered = vec![(TEAM.to_string(), SHA256_OF_T1.to_string())];
+
+        let resolved =
+            resolve_authorized(&state, &team, &registered, &[(TEAM.into(), "t1".into())]).await;
+
+        assert!(resolved.proven);
+        assert!(resolved.authorized.is_empty());
+        assert!(!resolved.emptied_by_missing_cache);
+    }
+
+    #[tokio::test]
+    async fn granted_projects_without_a_cache_are_demoted() {
+        let project = ProjectId::now_v7();
+        let state = state_with_db(
+            MockDatabase::new(DatabaseBackend::Postgres)
+                .append_query_results([vec![project_row(project)]])
+                .append_query_results([Vec::<gradient_entity::project_cache::Model>::new()])
+                .into_connection(),
+        );
+        let team = team_challenge(&[project]);
+        let registered = vec![(TEAM.to_string(), SHA256_OF_T1.to_string())];
+
+        let resolved =
+            resolve_authorized(&state, &team, &registered, &[(TEAM.into(), "t1".into())]).await;
+
+        assert!(resolved.authorized.is_empty());
+        assert!(resolved.emptied_by_missing_cache);
     }
 }

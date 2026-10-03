@@ -27,7 +27,7 @@ use gradient_wire::types::{
     BuildProgressPhase as WireBuildProgressPhase, EvalProgress as WireEvalProgress,
 };
 
-use super::auth::{expand_base_authorized, lookup_base_worker_challenge, lookup_registered_peers};
+use super::auth::{challenge_for, resolve_authorized};
 use super::cache::handle_cache_query;
 use super::dialed::{DialedSession, refresh_dialed_peers};
 use super::eval_cache::handle_eval_cache_pull;
@@ -38,7 +38,6 @@ use super::socket::{
     JOB_OFFER_CHUNK_SIZE, ProtoWriter, send_credentials_for_job, send_error, send_server_msg,
 };
 use super::upload::UploadSession;
-use gradient_wire::auth::validate_tokens;
 
 #[derive(Clone)]
 pub(crate) struct ActiveJob {
@@ -485,10 +484,7 @@ impl<'a> InboundContext<'a> {
             .await;
         }
 
-        let registered_peers = match lookup_base_worker_challenge(self.state, self.peer_id).await {
-            Some(b) => b.challenge,
-            None => lookup_registered_peers(self.state, self.peer_id).await,
-        };
+        let (_, registered_peers) = challenge_for(self.state, self.peer_id).await;
         send_server_msg(
             self.writer,
             &ServerMessage::AuthChallenge {
@@ -500,45 +496,35 @@ impl<'a> InboundContext<'a> {
     }
 
     async fn on_auth_response(&mut self, tokens: Vec<(String, String)>) -> bool {
-        let base = lookup_base_worker_challenge(self.state, self.peer_id).await;
-        let registered_peers = match &base {
-            Some(b) => b.challenge.clone(),
-            None => lookup_registered_peers(self.state, self.peer_id).await,
-        };
-        let (token_authorized, failed_peers) = validate_tokens(&registered_peers, &tokens);
-        let authorized_peers = expand_base_authorized(&base, token_authorized);
+        let (team, registered_peers) = challenge_for(self.state, self.peer_id).await;
+        let resolved = resolve_authorized(self.state, &team, &registered_peers, &tokens).await;
 
-        let is_base = gradient_db::projects::base_workers::worker_id_is_base(
-            &self.state.worker_db,
-            self.peer_id,
-        )
-        .await
-        .unwrap_or(false);
-        if is_base && authorized_peers.is_empty() {
-            info!(peer_id = %self.peer_id, "base worker not enabled by any project - disconnecting");
+        if resolved.authorized.is_empty() {
+            info!(peer_id = %self.peer_id, "no project authorizes this worker any more - disconnecting");
             let _ = send_server_msg(
                 self.writer,
                 &ServerMessage::Reject {
                     code: 403,
-                    reason: "base worker not enabled by any project".into(),
+                    reason: "no project authorizes this worker".into(),
                 },
             )
             .await;
             return false;
         }
 
-        let updated_uuids: HashSet<ProjectId> = authorized_peers
+        let updated: HashSet<ProjectId> = resolved
+            .authorized
             .iter()
             .filter_map(|s| s.parse().ok())
             .collect();
         self.scheduler
-            .update_authorized_peers(self.peer_id, updated_uuids)
+            .update_authorized_peers(self.peer_id, updated)
             .await;
         send_server_msg(
             self.writer,
             &ServerMessage::AuthUpdate {
-                authorized_peers,
-                failed_peers,
+                authorized_peers: resolved.authorized,
+                failed_peers: resolved.failed,
             },
         )
         .await
