@@ -10,7 +10,8 @@ import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { EvaluationLogComponent } from './evaluation-log.component';
 import { BuildItem, EvaluationsService } from '@core/services/evaluations.service';
-import { of } from 'rxjs';
+import { LiveEvent, LiveService } from '@core/services/live.service';
+import { Subject, of } from 'rxjs';
 import { Evaluation } from '@core/models';
 
 function build(id: string, name: string, status = 'Completed', depth = 0): BuildItem {
@@ -533,6 +534,44 @@ describe('EvaluationLogComponent', () => {
       expect(getBuild).toHaveBeenCalled();
       expect(getBuild.mock.invocationCallOrder[0]).toBeLessThan(getBuilds.mock.invocationCallOrder[0]);
       expect(fixture.componentInstance.builds().find(b => b.id === 'b1')?.prioritized).toBe(true);
+      fixture.destroy();
+    });
+  });
+
+  describe('evaluation progress', () => {
+    it('applies activity frames without refetching the evaluation', () => {
+      const frames = new Subject<LiveEvent>();
+      const getEvaluation = vi.fn(() => of({
+        id: 'eval-1', status: 'Fetching', created_at: '2026-01-01T00:00:00', updated_at: '2026-01-01T00:00:00',
+        started_at: '2026-01-01T00:00:00', finished_at: null, trigger: null, progress: { kind: 'fetching', inputs: [] },
+      }));
+      TestBed.configureTestingModule({
+        imports: [EvaluationLogComponent],
+        providers: [
+          provideRouter([]), provideHttpClient(), provideHttpClientTesting(),
+          { provide: ActivatedRoute, useValue: {
+            snapshot: {
+              paramMap: convertToParamMap({ project: 'proj', evaluationId: 'eval-1' }),
+              queryParamMap: convertToParamMap({}),
+              fragment: null,
+            },
+          } },
+          { provide: EvaluationsService, useValue: {
+            getEvaluation,
+            getBuilds: () => of({ builds: [], total: 0, active_count: 0 }),
+            getEvaluationMessages: () => of([]),
+          } },
+          { provide: LiveService, useValue: { connect: () => frames } },
+        ],
+      });
+      const fixture = TestBed.createComponent(EvaluationLogComponent);
+      fixture.componentInstance.ngOnInit();
+      expect(fixture.componentInstance.progress()).toEqual({ kind: 'fetching', inputs: [] });
+      getEvaluation.mockClear();
+
+      frames.next({ event: 'evaluation.activity', at: '', content: { evaluation_id: 'eval-1', progress: { kind: 'evaluating', thunks: 5 } } });
+      expect(fixture.componentInstance.progress()).toEqual({ kind: 'evaluating', thunks: 5 });
+      expect(getEvaluation).not.toHaveBeenCalled();
       fixture.destroy();
     });
   });

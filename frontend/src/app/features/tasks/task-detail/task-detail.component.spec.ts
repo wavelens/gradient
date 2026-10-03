@@ -10,13 +10,14 @@ import { ActivatedRoute, ParamMap, Router, convertToParamMap, provideRouter } fr
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { vi } from 'vitest';
-import { BehaviorSubject, NEVER, of, throwError } from 'rxjs';
+import { BehaviorSubject, NEVER, Subject, of, throwError } from 'rxjs';
 import { TaskDetailComponent, filenameFromDisposition } from './task-detail.component';
 import { TasksService } from '@core/services/tasks.service';
 import { EvaluationsService } from '@core/services/evaluations.service';
 import { ProjectsService } from '@core/services/projects.service';
 import { AuthService } from '@core/services/auth.service';
 import { StarsService } from '@core/services/stars.service';
+import { LiveEvent, LiveService } from '@core/services/live.service';
 import { AccessState } from '@core/models/access.model';
 import { BuildStatusCounts, EntryPointSummary, EvaluationSummary } from '@core/models/task.model';
 
@@ -141,8 +142,10 @@ function setup(
   tasksService: TasksService;
   evaluationsService: EvaluationsService;
   query: BehaviorSubject<ParamMap>;
+  frames: Subject<LiveEvent>;
 } {
   const query = new BehaviorSubject(convertToParamMap({}));
+  const frames = new Subject<LiveEvent>();
   const tasksService = makeTasksService(access, serviceOverrides);
   const evaluationsService = {
     prioritizeEvaluation: () => of('Success'),
@@ -160,11 +163,12 @@ function setup(
       { provide: ProjectsService, useValue: { getProject: () => of({ display_name: 'Acme' }) } },
       { provide: AuthService, useValue: { isAuthenticated: () => authenticated } },
       { provide: StarsService, useValue: { starred: vi.fn(() => of(true)), set: () => of(true) } },
+      { provide: LiveService, useValue: { connect: () => frames } },
     ],
   });
   const fixture = TestBed.createComponent(TaskDetailComponent);
   fixture.detectChanges();
-  return { fixture, tasksService, evaluationsService, query };
+  return { fixture, tasksService, evaluationsService, query, frames };
 }
 
 const failedBuilds = { builds: { ...zeroCounts(), failed: 2 } };
@@ -291,6 +295,26 @@ describe('TaskDetailComponent - in-progress state (#452)', () => {
   it('hides the title badge when the latest evaluation is terminal', () => {
     const { fixture } = setup({ managed: false, canEdit: true, canTrigger: true }, { primaryStatus: 'Completed' });
     expect(fixture.nativeElement.querySelector('.title-line gr-eval-status-badge')).toBeNull();
+  });
+});
+
+describe('TaskDetailComponent - evaluation progress', () => {
+  it('shows activity for the selected evaluation without reloading the task', () => {
+    const { fixture, tasksService, frames } = setup({ managed: false, canEdit: true, canTrigger: true }, { primaryStatus: 'Fetching' });
+    const getTask = vi.spyOn(tasksService, 'getTask');
+    frames.next({ event: 'evaluation.activity', at: '', content: { evaluation_id: 'e1', progress: { kind: 'evaluating', thunks: 7 } } });
+    expect(fixture.componentInstance.selectedProgress()).toEqual({ kind: 'evaluating', thunks: 7 });
+    expect(getTask).not.toHaveBeenCalled();
+  });
+
+  it('lists the inputs of a fetching evaluation in the packages panel', () => {
+    const inputs = [{ name: 'nixpkgs', state: 'Fetching' as const, downloaded_bytes: 10, expected_bytes: 40 }];
+    const { fixture } = setup({ managed: false, canEdit: true, canTrigger: true }, {
+      primaryStatus: 'Fetching',
+      primary: { progress: { kind: 'fetching', inputs } },
+    });
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('gr-input-fetch-list .input-row')?.textContent).toContain('nixpkgs');
   });
 });
 

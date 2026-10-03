@@ -27,14 +27,14 @@ import { CommonModule } from '@angular/common';
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { DomSanitizer, SafeHtml } from '@angular/platform-browser';
 import { Subscription, merge } from 'rxjs';
-import { auditTime, filter, map, switchMap } from 'rxjs/operators';
+import { auditTime, filter, map, share, switchMap } from 'rxjs/operators';
 import { EvaluationsService, BuildItem, BuildWithOutputs } from '@core/services/evaluations.service';
 import { LiveEvent, LiveService } from '@core/services/live.service';
 import { ProjectsService } from '@core/services/projects.service';
 import { TasksService } from '@core/services/tasks.service';
 import { AccessService, WritableDirective } from '@shared/access';
 import { AccessState, accessFromEntity } from '@core/models/access.model';
-import { DownloadProgress, Evaluation, EvaluationMessage, EvaluationStatus, WaitingReason, TriggerType } from '@core/models';
+import { DownloadProgress, Evaluation, EvaluationMessage, EvaluationProgress, EvaluationStatus, WaitingReason, TriggerType } from '@core/models';
 import { AuthService } from '@core/services/auth.service';
 import {
   BadgeComponent,
@@ -50,14 +50,14 @@ import {
   MessageService,
   ToastComponent,
 } from '@gradient/ui/ui';
-import { EvalStatusBadgeComponent } from '@shared/ui';
-import { buildDuration, commitLabel, evaluationDuration, formatEvaluationDuration, isPendingBuildStatus, isRunningEvaluationStatus } from '@shared/evaluation';
+import { EvalStatusBadgeComponent, InputFetchListComponent } from '@shared/ui';
+import { buildDuration, commitLabel, evaluationDuration, evaluationProgressText, formatEvaluationDuration, isPendingBuildStatus, isRunningEvaluationStatus } from '@shared/evaluation';
 import { environment } from '@environments/environment';
 
 @Component({
   selector: 'app-evaluation-log',
   standalone: true,
-  imports: [CommonModule, RouterModule, LoadingSpinnerComponent, ButtonComponent, DialogComponent, IconComponent, BadgeComponent, EvalStatusBadgeComponent, InputDirective, MenuComponent, MessageBannerComponent, ToastComponent, WritableDirective],
+  imports: [CommonModule, RouterModule, LoadingSpinnerComponent, ButtonComponent, DialogComponent, IconComponent, BadgeComponent, EvalStatusBadgeComponent, InputDirective, InputFetchListComponent, MenuComponent, MessageBannerComponent, ToastComponent, WritableDirective],
   providers: [MessageService],
   templateUrl: './evaluation-log.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
@@ -86,6 +86,12 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
 
   loading = signal(true);
   evaluation = signal<Evaluation | null>(null);
+  progress = signal<EvaluationProgress | null>(null);
+  progressText = computed(() => evaluationProgressText(this.progress()));
+  fetchRows = computed(() => {
+    const p = this.progress();
+    return p?.kind === 'fetching' ? p.inputs : [];
+  });
   builds = signal<BuildItem[]>([]);
   messages = signal<(EvaluationMessage & { renderedHtml: SafeHtml })[]>([]);
   selectedBuildId = signal<string | null>(null);
@@ -267,6 +273,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     this.evalService.getEvaluation(this.evaluationId).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (evaluation) => {
         this.evaluation.set(evaluation);
+        this.progress.set(evaluation.progress ?? null);
         this.loading.set(false);
         this.loadAccess(evaluation.task_name);
         if (this.initialBuildId) {
@@ -573,25 +580,33 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     this.stopLiveUpdates();
     if (!this.isRunningStatus(status)) return;
 
-    this.liveSub = this.live
-      .connect(`/evals/${this.evaluationId}/live`)
-      .pipe(
-        auditTime(300),
-        switchMap(() => this.evalService.getEvaluation(this.evaluationId)),
-      )
-      .subscribe({
-        next: (evaluation) => {
-          this.evaluation.set(evaluation);
-          this.loadBuilds();
-          if (!this.isRunningStatus(evaluation.status)) {
-            this.stopLiveUpdates();
-            this.updateDuration(evaluation);
-            this.stopDurationTimer();
-            this.loadBuilds(); // final update
-            this.loadMessages(); // pick up any messages recorded during eval
-          }
-        },
-      });
+    const frames = this.live.connect<LiveEvent>(`/evals/${this.evaluationId}/live`).pipe(share());
+    this.liveSub = frames
+      .pipe(filter(e => e.event === 'evaluation.activity'))
+      .subscribe(e => this.progress.set(e.content.progress ?? null));
+    this.liveSub.add(
+      frames
+        .pipe(
+          filter(e => e.event !== 'evaluation.activity'),
+          auditTime(300),
+          switchMap(() => this.evalService.getEvaluation(this.evaluationId)),
+        )
+        .subscribe({
+          next: (evaluation) => {
+            this.evaluation.set(evaluation);
+            if (evaluation.progress) this.progress.set(evaluation.progress);
+            this.loadBuilds();
+            if (!this.isRunningStatus(evaluation.status)) {
+              this.progress.set(null);
+              this.stopLiveUpdates();
+              this.updateDuration(evaluation);
+              this.stopDurationTimer();
+              this.loadBuilds(); // final update
+              this.loadMessages(); // pick up any messages recorded during eval
+            }
+          },
+        }),
+    );
   }
 
   stopLiveUpdates(): void {

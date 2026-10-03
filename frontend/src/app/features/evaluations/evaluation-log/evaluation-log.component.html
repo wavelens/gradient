@@ -232,13 +232,19 @@
             <div class="evaluating-hint">
               <gr-icon name="cloud_download" class="evaluating-icon" size="xl" />
               <span class="evaluating-title">Fetching</span>
-              <span class="evaluating-sub">Prefetching the Nix flake&hellip;</span>
+              @if (fetchRows().length) {
+                <gr-input-fetch-list [inputs]="fetchRows()" />
+              } @else {
+                <span class="evaluating-sub">Prefetching the Nix flake&hellip;</span>
+              }
             </div>
           } @else if (ev.status === 'EvaluatingFlake' || ev.status === 'EvaluatingDerivation') {
             <div class="evaluating-hint">
               <gr-icon name="manage_search" class="evaluating-icon" size="xl" />
               <span class="evaluating-title">Evaluating</span>
-              <span class="evaluating-sub">Discovering builds from the Nix flake&hellip;</span>
+              <span class="evaluating-sub">
+                @if (progressText(); as text) { {{ text }} } @else { Discovering builds from the Nix flake&hellip; }
+              </span>
             </div>
           } @else if (ev.status === 'Waiting') {
             <div class="queued-hint">

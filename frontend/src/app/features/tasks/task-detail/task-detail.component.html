@@ -160,7 +160,11 @@
               </div>
             }
           } @else if (isRunning(sel.status)) {
-            <gr-loading-spinner message="Evaluating, packages appear as their entry points are found..." />
+            @if (selectedFetchRows().length) {
+              <div class="fetch-rows"><gr-input-fetch-list [inputs]="selectedFetchRows()" /></div>
+            } @else {
+              <gr-loading-spinner [message]="selectedProgressText() ?? 'Evaluating, packages appear as their entry points are found...'" />
+            }
           } @else {
             <gr-empty-state flat icon="package_2" title="No packages"
               message="This evaluation produced no entry-point builds." />
