@@ -4,25 +4,20 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use std::io::Write;
+use std::io::{Read, Write};
 use tracing::{error, trace};
 
 use crate::flake_walk::FlakeWalker;
+use crate::frames::Frames;
 use crate::ipc::{
-    EVAL_IPC_VERSION, EvalRequest, EvalResponse, ResolvedItem, decode_request, encode_response,
-    read_frame, write_frame,
+    EVAL_IPC_VERSION, EvalRequest, EvalResponse, ResolvedItem, decode_request, read_frame,
 };
 use crate::nix_eval::NixEvaluator;
-use crate::stats::StatsDelta;
 
 pub fn run_eval_worker() -> std::io::Result<()> {
-    let stdin = std::io::stdin();
-    let stdout = std::io::stdout();
-    let mut reader = stdin.lock();
-    let mut writer = stdout.lock();
-
-    writer.write_all(&[EVAL_IPC_VERSION])?;
-    writer.flush()?;
+    let mut stdout = std::io::stdout();
+    stdout.write_all(&[EVAL_IPC_VERSION])?;
+    stdout.flush()?;
 
     let evaluator = match NixEvaluator::new() {
         Ok(e) => Some(e),
@@ -34,41 +29,62 @@ pub fn run_eval_worker() -> std::io::Result<()> {
             None
         }
     };
-
     let collect_stats = crate::stats::metrics_enabled();
-    let mut last = if collect_stats {
-        evaluator
-            .as_ref()
-            .and_then(|ev| ev.stats().ok())
-            .unwrap_or_default()
-    } else {
-        nix_bindings::EvalStats::default()
-    };
+    let last = evaluator
+        .as_ref()
+        .and_then(|ev| read_stats(ev, collect_stats))
+        .unwrap_or_default();
+    let frames = &Frames::new(stdout, last);
+    let (stop, stopped) = std::sync::mpsc::channel::<()>();
 
-    let mut take_delta = |ev: &NixEvaluator| -> Option<StatsDelta> {
-        if !collect_stats {
-            return None;
+    std::thread::scope(|scope| {
+        if let Some(ev) = evaluator.as_ref().filter(|_| collect_stats) {
+            scope.spawn(move || tick_stats(frames, ev, &stopped));
         }
+        let served = serve(
+            &mut std::io::stdin().lock(),
+            frames,
+            &evaluator,
+            collect_stats,
+        );
+        drop(stop);
+        served
+    })
+}
 
-        ev.stats().ok().map(|cur| {
-            let d = cur.saturating_sub(&last);
-            let heap = cur.gc_heap_size;
-            last = cur;
-            StatsDelta {
-                nr_thunks: d.nr_thunks,
-                nr_function_calls: d.nr_function_calls,
-                nr_primop_calls: d.nr_primop_calls,
-                nr_lookups: d.nr_lookups,
-                alloc_bytes: d.gc_total_bytes,
-                gc_heap_size: heap,
-            }
-        })
+const STATS_TICK: std::time::Duration = std::time::Duration::from_secs(1);
+
+fn tick_stats<W: Write>(
+    frames: &Frames<W>,
+    ev: &NixEvaluator,
+    stopped: &std::sync::mpsc::Receiver<()>,
+) {
+    let Ok(ctx) = nix_bindings::Context::new_no_load_config() else {
+        return;
     };
+    while let Err(std::sync::mpsc::RecvTimeoutError::Timeout) = stopped.recv_timeout(STATS_TICK) {
+        if let Ok(now) = ev.stats_with(&ctx)
+            && frames.tick(now).is_err()
+        {
+            return;
+        }
+    }
+}
 
+fn read_stats(ev: &NixEvaluator, collect_stats: bool) -> Option<nix_bindings::EvalStats> {
+    collect_stats.then(|| ev.stats().ok()).flatten()
+}
+
+fn serve<W: Write>(
+    reader: &mut impl Read,
+    frames: &Frames<W>,
+    evaluator: &Option<NixEvaluator>,
+    collect_stats: bool,
+) -> std::io::Result<()> {
     let mut walkers = WalkerCache { entry: None };
 
     loop {
-        let Some(payload) = read_frame(&mut reader).inspect_err(|e| {
+        let Some(payload) = read_frame(reader).inspect_err(|e| {
             error!(error = %e, "eval worker: stdin read error");
         })?
         else {
@@ -78,12 +94,9 @@ pub fn run_eval_worker() -> std::io::Result<()> {
         let req = match decode_request(&payload) {
             Ok(r) => r,
             Err(e) => {
-                send(
-                    &mut writer,
-                    &EvalResponse::Err {
-                        message: format!("malformed request: {e}"),
-                    },
-                )?;
+                frames.send(&EvalResponse::Err {
+                    message: format!("malformed request: {e}"),
+                })?;
                 continue;
             }
         };
@@ -98,7 +111,7 @@ pub fn run_eval_worker() -> std::io::Result<()> {
                 repository,
                 wildcards,
                 input_overrides,
-            } => with_evaluator(&evaluator, |ev| {
+            } => with_evaluator(evaluator, |ev| {
                 // Warnings from priming the prefix attrset are resurfacing in every shard.
                 // Per-attr eval errors are captured here, because a thrown shard root
                 // is leaving no shard for a later `List` to re-hit.
@@ -117,7 +130,8 @@ pub fn run_eval_worker() -> std::io::Result<()> {
                 wildcards,
                 only,
                 input_overrides,
-            } => with_evaluator(&evaluator, |ev| {
+            } => with_evaluator(evaluator, |ev| {
+                frames.begin();
                 let (result, warnings) = capture_warnings_during(|| {
                     walkers.with(ev, &repository, &input_overrides, |walker| {
                         let listing = walker.discover_split(&wildcards, only.as_deref())?;
@@ -125,7 +139,7 @@ pub fn run_eval_worker() -> std::io::Result<()> {
                         Ok(listing)
                     })
                 });
-                let stats = take_delta(ev);
+                let stats = frames.end(read_stats(ev, collect_stats));
                 or_err(
                     result.map(|(attrs, deferred, errors)| EvalResponse::ListOk {
                         attrs,
@@ -146,28 +160,27 @@ pub fn run_eval_worker() -> std::io::Result<()> {
                         message: "evaluator not initialized".to_string(),
                     },
                     Some(ev) => {
+                        frames.begin();
                         let (warnings, io) = stream_resolve(
-                            &mut writer,
+                            frames,
                             ev,
                             &mut walkers,
                             &repository,
                             &input_overrides,
                             attrs,
                         );
+                        let stats = frames.end(read_stats(ev, collect_stats));
                         io?;
-                        EvalResponse::ResolveEnd {
-                            warnings,
-                            stats: take_delta(ev),
-                        }
+                        EvalResponse::ResolveEnd { warnings, stats }
                     }
                 };
-                send(&mut writer, &resp)?;
+                frames.send(&resp)?;
                 continue;
             }
             EvalRequest::FetchInput {
                 locked,
                 git_ssh_command,
-            } => with_evaluator(&evaluator, |ev| {
+            } => with_evaluator(evaluator, |ev| {
                 or_err(
                     ev.fetch_tree(&locked, git_ssh_command.as_deref())
                         .map(|store_path| EvalResponse::FetchOk { store_path }),
@@ -176,7 +189,7 @@ pub fn run_eval_worker() -> std::io::Result<()> {
             EvalRequest::Fingerprint {
                 repository,
                 input_overrides,
-            } => with_evaluator(&evaluator, |ev| {
+            } => with_evaluator(evaluator, |ev| {
                 or_err(
                     ev.fingerprint(&repository, &input_overrides)
                         .map(|fingerprint| EvalResponse::FingerprintOk { fingerprint }),
@@ -185,7 +198,7 @@ pub fn run_eval_worker() -> std::io::Result<()> {
             EvalRequest::Checkpoint {
                 repository,
                 input_overrides,
-            } => with_evaluator(&evaluator, |ev| {
+            } => with_evaluator(evaluator, |ev| {
                 or_err(
                     walkers
                         .with(ev, &repository, &input_overrides, |walker| {
@@ -197,7 +210,7 @@ pub fn run_eval_worker() -> std::io::Result<()> {
         };
 
         trace!(kind = response_kind(&resp), "eval worker sending response");
-        send(&mut writer, &resp)?;
+        frames.send(&resp)?;
     }
 }
 
@@ -259,7 +272,7 @@ impl<'ev> WalkerCache<'ev> {
 }
 
 fn stream_resolve<'ev, W: Write>(
-    writer: &mut W,
+    frames: &Frames<W>,
     ev: &'ev NixEvaluator,
     walkers: &mut WalkerCache<'ev>,
     repository: &str,
@@ -268,9 +281,9 @@ fn stream_resolve<'ev, W: Write>(
 ) -> (Vec<String>, std::io::Result<()>) {
     let mut all_warnings = Vec::new();
     let mut io = Ok(());
-    let emit = |writer: &mut W, io: &mut std::io::Result<()>, item: ResolvedItem| {
+    let emit = |io: &mut std::io::Result<()>, item: ResolvedItem| {
         if io.is_ok() {
-            *io = send(writer, &EvalResponse::ResolveItem { item });
+            *io = frames.send(&EvalResponse::ResolveItem { item });
         }
     };
 
@@ -297,7 +310,7 @@ fn stream_resolve<'ev, W: Write>(
                         error: Some(format!("{e:#}")),
                     },
                 };
-                emit(writer, &mut io, item);
+                emit(&mut io, item);
             }
 
             let _ = walker.commit_cache();
@@ -306,7 +319,6 @@ fn stream_resolve<'ev, W: Write>(
             let msg = format!("{e:#}");
             for attr in attrs {
                 emit(
-                    writer,
                     &mut io,
                     ResolvedItem {
                         attr,
@@ -321,11 +333,6 @@ fn stream_resolve<'ev, W: Write>(
 
     all_warnings.dedup();
     (all_warnings, io)
-}
-
-fn send<W: Write>(w: &mut W, resp: &EvalResponse) -> std::io::Result<()> {
-    let payload = encode_response(resp).map_err(std::io::Error::other)?;
-    write_frame(w, &payload)
 }
 
 fn response_kind(resp: &EvalResponse) -> String {
