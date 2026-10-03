@@ -247,6 +247,41 @@ describe('TaskDetailComponent evaluation menu', () => {
     expect(spy).toHaveBeenCalledWith('acme', 'demo', 'full');
   });
 
+  describe('selecting the started evaluation', () => {
+    function startThenArrive(between: (comp: TaskDetailComponent) => void, startEvaluation?: () => ReturnType<TasksService['startEvaluation']>) {
+      const extraEvals = [evalSummary('e0', 'Completed')];
+      const { fixture, tasksService } = setup(trigger, { primaryStatus: 'Completed', extraEvals, startEvaluation });
+      let evals = fixture.componentInstance.evaluations();
+      vi.spyOn(tasksService, 'getTask').mockImplementation(() => of({ ...taskFor(trigger), last_evaluations: evals }));
+      const comp = fixture.componentInstance;
+      comp.startEvaluation();
+      between(comp);
+      evals = [evalSummary('e2', 'Queued'), ...evals];
+      comp.loadTaskData(false, true);
+      return comp;
+    }
+
+    it('selects the new evaluation once it appears', () => {
+      expect(startThenArrive(() => {}).selectedId()).toBe('e2');
+    });
+
+    it('keeps a card the user picked after pressing start', () => {
+      const comp = startThenArrive(c => c.select(c.evaluations()[1]));
+      expect(comp.selectedId()).toBe('e0');
+    });
+
+    it('keeps the selection after a click or key press', () => {
+      expect(startThenArrive(() => document.dispatchEvent(new Event('pointerdown'))).selectedId()).toBe('e1');
+      TestBed.resetTestingModule();
+      expect(startThenArrive(() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'a' }))).selectedId()).toBe('e1');
+    });
+
+    it('does not switch later when the start fails', () => {
+      const comp = startThenArrive(() => {}, () => throwError(() => new Error('nope')));
+      expect(comp.selectedId()).toBe('e1');
+    });
+  });
+
   it('holds the full rewalk while an evaluation is in progress', () => {
     const { fixture } = setup(trigger, { primaryStatus: 'Building' });
     expect(fixture.componentInstance.panelMenuModel().find(i => i.label === 'Full rewalk')?.disabled).toBe(true);
