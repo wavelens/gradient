@@ -8,6 +8,7 @@ pub mod auth;
 pub mod build_output_metadata;
 pub mod cached_path_info;
 pub mod client;
+pub mod codec;
 pub mod constants;
 pub mod limiter;
 pub mod messages;

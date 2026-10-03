@@ -1,6 +1,6 @@
 [workspace]
-members      = [".", "gradient-cache", "gradient-ci", "gradient-core", "gradient-daemon", "gradient-db", "gradient-derivation", "gradient-effects", "gradient-entity", "gradient-eval", "gradient-git-host", "gradient-graph", "gradient-migration", "gradient-notify", "gradient-pool", "gradient-proto", "gradient-report", "gradient-scheduler", "gradient-sources", "gradient-ssh", "gradient-state", "gradient-storage", "gradient-test-support", "gradient-types", "gradient-util", "gradient-web", "gradient-wire", "gradient-worker", "gradient-worker-client"]
-default-members = [".", "gradient-cache", "gradient-ci", "gradient-core", "gradient-daemon", "gradient-db", "gradient-derivation", "gradient-effects", "gradient-entity", "gradient-eval", "gradient-git-host", "gradient-graph", "gradient-migration", "gradient-notify", "gradient-pool", "gradient-proto", "gradient-report", "gradient-scheduler", "gradient-sources", "gradient-ssh", "gradient-state", "gradient-storage", "gradient-test-support", "gradient-types", "gradient-util", "gradient-web", "gradient-wire", "gradient-worker", "gradient-worker-client"]
+members      = [".", "gradient-cache", "gradient-ci", "gradient-core", "gradient-daemon", "gradient-db", "gradient-derivation", "gradient-effects", "gradient-entity", "gradient-eval", "gradient-git-host", "gradient-graph", "gradient-migration", "gradient-notify", "gradient-pool", "gradient-proto", "gradient-report", "gradient-scheduler", "gradient-sources", "gradient-ssh", "gradient-state", "gradient-storage", "gradient-test-support", "gradient-types", "gradient-util", "gradient-web", "gradient-wire", "gradient-wire-derive", "gradient-worker", "gradient-worker-client"]
+default-members = [".", "gradient-cache", "gradient-ci", "gradient-core", "gradient-daemon", "gradient-db", "gradient-derivation", "gradient-effects", "gradient-entity", "gradient-eval", "gradient-git-host", "gradient-graph", "gradient-migration", "gradient-notify", "gradient-pool", "gradient-proto", "gradient-report", "gradient-scheduler", "gradient-sources", "gradient-ssh", "gradient-state", "gradient-storage", "gradient-test-support", "gradient-types", "gradient-util", "gradient-web", "gradient-wire", "gradient-wire-derive", "gradient-worker", "gradient-worker-client"]
 resolver     = "2"
 
 [workspace.package]
@@ -49,6 +49,7 @@ gradient-types        = { path = "gradient-types" }
 gradient-util         = { path = "gradient-util" }
 gradient-web          = { path = "gradient-web" }
 gradient-wire         = { path = "gradient-wire" }
+gradient-wire-derive  = { path = "gradient-wire-derive" }
 gradient-worker       = { path = "gradient-worker" }
 gradient-worker-client = { path = "gradient-worker-client" }
 
@@ -61,6 +62,11 @@ tokio        = { version = "1.50", default-features = false, features = ["rt-mul
 tokio-test   = { version = "0.4", default-features = false }
 tokio-tungstenite = { version = "0.30", default-features = false, features = ["connect", "handshake", "rustls-tls-native-roots"] }
 tokio-util   = { version = "0.7", default-features = false }
+
+# Procedural macros
+proc-macro2 = { version = "1", default-features = false, features = ["proc-macro"] }
+quote       = { version = "1", default-features = false, features = ["proc-macro"] }
+syn         = { version = "2", default-features = false, features = ["derive", "parsing", "printing", "proc-macro"] }
 
 # Error handling
 anyhow    = { version = "1.0", default-features = false, features = ["std"] }

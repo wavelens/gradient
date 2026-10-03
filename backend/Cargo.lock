@@ -3223,6 +3223,7 @@ dependencies = [
  "bytes",
  "futures",
  "gradient-util",
+ "gradient-wire-derive",
  "hex",
  "password-auth",
  "rkyv",
@@ -3234,6 +3235,15 @@ dependencies = [
  "tokio-tungstenite 0.30.0",
  "tracing",
  "uuid",
+]
+
+[[package]]
+name = "gradient-wire-derive"
+version = "1.4.1"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
 ]
 
 [[package]]
