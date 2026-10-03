@@ -37,3 +37,11 @@
   font-weight: 600;
   color: var(--gr-text-primary);
 }
+
+.sg-build-progress {
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-lg;
+}
+
+.sg-download { padding-block: $spacing-lg; }
