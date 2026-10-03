@@ -14,6 +14,7 @@ use serde::Serialize;
 pub enum InviteKind {
     Project,
     Cache,
+    Team,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -58,9 +59,7 @@ pub struct InviteItem {
     pub expires_at: NaiveDateTime,
 }
 
-pub fn merge_invites(project: Vec<InviteItem>, cache: Vec<InviteItem>) -> Vec<InviteItem> {
-    let mut all = project;
-    all.extend(cache);
+pub fn merge_invites(mut all: Vec<InviteItem>) -> Vec<InviteItem> {
     all.sort_by_key(|i| std::cmp::Reverse(i.created_at));
     all
 }
@@ -137,20 +136,15 @@ mod tests {
     }
 
     #[test]
-    fn merge_returns_both_kinds_newest_first() {
-        let merged = merge_invites(
-            vec![item(InviteKind::Project, "older-project", 0)],
-            vec![item(InviteKind::Cache, "newer-cache", 10)],
-        );
+    fn merge_returns_every_kind_newest_first() {
+        let merged = merge_invites(vec![
+            item(InviteKind::Project, "older-project", 0),
+            item(InviteKind::Team, "newest-team", 20),
+            item(InviteKind::Cache, "newer-cache", 10),
+        ]);
 
         let scopes: Vec<&str> = merged.iter().map(|i| i.scope.as_str()).collect();
-        assert_eq!(scopes, vec!["newer-cache", "older-project"]);
-        assert_eq!(merged[0].kind, InviteKind::Cache);
-    }
-
-    #[test]
-    fn merge_handles_one_empty_side() {
-        let merged = merge_invites(vec![], vec![item(InviteKind::Cache, "only", 0)]);
-        assert_eq!(merged.len(), 1);
+        assert_eq!(scopes, vec!["newest-team", "newer-cache", "older-project"]);
+        assert_eq!(merged[0].kind, InviteKind::Team);
     }
 }
