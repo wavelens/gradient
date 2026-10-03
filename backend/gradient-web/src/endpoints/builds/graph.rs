@@ -12,13 +12,14 @@ use axum::{Extension, Json};
 use gradient_core::ServerState;
 use gradient_entity::build::BuildStatus;
 use gradient_types::*;
-use sea_orm::EntityTrait;
-use sea_orm::{ColumnTrait, QueryFilter};
+use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter};
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use super::BuildAccessContext;
+
+const GRAPH_NODE_CAP: usize = 500;
 
 pub(super) async fn authorize_build_opt(
     state: &Arc<ServerState>,
@@ -82,117 +83,124 @@ pub struct DependencyNode {
     pub updated_at: chrono::NaiveDateTime,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, PartialEq)]
+pub struct DependencyGraphNode {
+    pub id: DerivationId,
+    pub build: Option<BuildJobId>,
+    pub name: String,
+    pub path: String,
+    pub status: String,
+    pub created_at: chrono::NaiveDateTime,
+    pub updated_at: chrono::NaiveDateTime,
+}
+
+#[derive(Serialize, Deserialize, Debug, PartialEq)]
 pub struct DependencyEdge {
-    pub source: BuildJobId,
-    pub target: BuildJobId,
+    pub source: DerivationId,
+    pub target: DerivationId,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct BuildGraph {
-    pub root: BuildJobId,
-    pub nodes: Vec<DependencyNode>,
+    pub root: DerivationId,
+    pub nodes: Vec<DependencyGraphNode>,
     pub edges: Vec<DependencyEdge>,
 }
 
-struct GraphWaveResult {
-    nodes: Vec<DependencyNode>,
-    edges: Vec<DependencyEdge>,
-    next_wave: Vec<BuildJobId>,
+pub async fn dependency_graph<C: ConnectionTrait>(
+    db: &C,
+    root: &MBuildJob,
+) -> WebResult<BuildGraph> {
+    let (derivations, edges) = walk_dependencies(db, root.derivation).await?;
+    let nodes = graph_nodes(db, root.evaluation, &derivations).await?;
+
+    Ok(BuildGraph {
+        root: root.derivation,
+        nodes,
+        edges,
+    })
 }
 
-async fn process_graph_wave(
-    state: &Arc<ServerState>,
-    batch: &[BuildJobId],
-    evaluation_id: EvaluationId,
-    visited: &mut HashSet<BuildJobId>,
-) -> WebResult<GraphWaveResult> {
-    let jobs = EBuildJob::find()
-        .filter(CBuildJob::Id.is_in(batch.to_vec()))
-        .all(&state.web_db)
-        .await?;
+/// The walk follows recorded edges, not this evaluation's builds: an evaluation only names what it
+/// walked itself and the direct inputs of that.
+async fn walk_dependencies<C: ConnectionTrait>(
+    db: &C,
+    root: DerivationId,
+) -> WebResult<(Vec<DerivationId>, Vec<DependencyEdge>)> {
+    let mut reached = vec![root];
+    let mut seen = HashSet::from([root]);
+    let mut edges = Vec::new();
+    let mut frontier = vec![root];
 
-    let shared_build_ids: Vec<DerivationBuildId> =
-        jobs.iter().map(|j| j.derivation_build).collect();
-    let status_by_shared_build: HashMap<DerivationBuildId, BuildStatus> = EDerivationBuild::find()
-        .filter(CDerivationBuild::Id.is_in(shared_build_ids))
-        .all(&state.web_db)
+    while !frontier.is_empty() {
+        let rows = EDerivationDependency::find()
+            .filter(CDerivationDependency::Derivation.is_in(std::mem::take(&mut frontier)))
+            .all(db)
+            .await?;
+        for row in rows {
+            if reached.len() < GRAPH_NODE_CAP && seen.insert(row.dependency) {
+                reached.push(row.dependency);
+                frontier.push(row.dependency);
+            }
+            if seen.contains(&row.dependency) {
+                edges.push(DependencyEdge {
+                    source: row.dependency,
+                    target: row.derivation,
+                });
+            }
+        }
+    }
+
+    Ok((reached, edges))
+}
+
+async fn graph_nodes<C: ConnectionTrait>(
+    db: &C,
+    evaluation: EvaluationId,
+    derivations: &[DerivationId],
+) -> WebResult<Vec<DependencyGraphNode>> {
+    let builds: HashMap<DerivationId, BuildJobId> = EBuildJob::find()
+        .filter(CBuildJob::Evaluation.eq(evaluation))
+        .filter(CBuildJob::Derivation.is_in(derivations.to_vec()))
+        .all(db)
         .await?
         .into_iter()
-        .map(|a| (a.id, a.status))
+        .map(|j| (j.derivation, j.id))
         .collect();
-
-    let drv_ids: Vec<DerivationId> = jobs.iter().map(|j| j.derivation).collect();
+    let shared_builds: HashMap<DerivationId, MDerivationBuild> = EDerivationBuild::find()
+        .filter(CDerivationBuild::Derivation.is_in(derivations.to_vec()))
+        .all(db)
+        .await?
+        .into_iter()
+        .map(|b| (b.derivation, b))
+        .collect();
     let drv_by_id: HashMap<DerivationId, MDerivation> = EDerivation::find()
-        .filter(CDerivation::Id.is_in(drv_ids.clone()))
-        .all(&state.web_db)
+        .filter(CDerivation::Id.is_in(derivations.to_vec()))
+        .all(db)
         .await?
         .into_iter()
         .map(|d| (d.id, d))
         .collect();
 
-    let mut nodes: Vec<DependencyNode> = Vec::new();
-    for job in &jobs {
-        if let Some(drv) = drv_by_id.get(&job.derivation) {
-            let status = status_by_shared_build
-                .get(&job.derivation_build)
-                .copied()
-                .unwrap_or(BuildStatus::Queued);
-            nodes.push(DependencyNode {
-                id: job.id,
+    Ok(derivations
+        .iter()
+        .filter_map(|id| {
+            let drv = drv_by_id.get(id)?;
+            let shared_build = shared_builds.get(id);
+            Some(DependencyGraphNode {
+                id: *id,
+                build: builds.get(id).copied(),
                 name: drv.name.clone(),
                 path: drv.drv_path(),
-                status: format!("{:?}", status),
-                created_at: job.created_at,
-                updated_at: job.created_at,
-            });
-        }
-    }
-
-    let dep_rows = EDerivationDependency::find()
-        .filter(CDerivationDependency::Derivation.is_in(drv_ids))
-        .all(&state.web_db)
-        .await?;
-
-    if dep_rows.is_empty() {
-        return Ok(GraphWaveResult {
-            nodes,
-            edges: vec![],
-            next_wave: vec![],
-        });
-    }
-
-    let dep_drv_ids: Vec<DerivationId> = dep_rows.iter().map(|e| e.dependency).collect();
-    let dep_jobs = job_nodes_for_derivations(state, evaluation_id, &dep_drv_ids).await?;
-    let job_by_drv: HashMap<DerivationId, BuildJobId> =
-        dep_jobs.iter().map(|(drv, jn)| (*drv, jn.job.id)).collect();
-
-    let parent_job_by_drv: HashMap<DerivationId, BuildJobId> =
-        jobs.iter().map(|j| (j.derivation, j.id)).collect();
-
-    let mut edges: Vec<DependencyEdge> = Vec::new();
-    let mut next_wave: Vec<BuildJobId> = Vec::new();
-    for edge in dep_rows {
-        let Some(&parent_job_id) = parent_job_by_drv.get(&edge.derivation) else {
-            continue;
-        };
-        let Some(&dep_job_id) = job_by_drv.get(&edge.dependency) else {
-            continue;
-        };
-        edges.push(DependencyEdge {
-            source: dep_job_id,
-            target: parent_job_id,
-        });
-        if visited.insert(dep_job_id) {
-            next_wave.push(dep_job_id);
-        }
-    }
-
-    Ok(GraphWaveResult {
-        nodes,
-        edges,
-        next_wave,
-    })
+                status: format!(
+                    "{:?}",
+                    shared_build.map_or(BuildStatus::Queued, |b| b.status)
+                ),
+                created_at: shared_build.map_or(drv.created_at, |b| b.created_at),
+                updated_at: shared_build.map_or(drv.created_at, |b| b.updated_at),
+            })
+        })
+        .collect())
 }
 
 pub async fn get_build_dependencies(
@@ -248,37 +256,110 @@ pub async fn get_build_graph(
     Extension(api_key): Extension<MaybeApiKey>,
     Path(build_id): Path<BuildJobId>,
 ) -> WebResult<Json<BaseResponse<BuildGraph>>> {
-    authorize_build_opt(&state, build_id, &maybe_user, api_key.as_ref()).await?;
+    let ctx = BuildAccessContext::load(&state, build_id, &maybe_user, api_key.as_ref()).await?;
+    Ok(ok_json(
+        dependency_graph(&state.web_db, &ctx.build_job).await?,
+    ))
+}
 
-    let root_build = EBuildJob::find_by_id(build_id)
-        .one(&state.web_db)
-        .await?
-        .or_not_found("Build")?;
-    let evaluation_id = root_build.evaluation;
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gradient_entity::{build_job, derivation, derivation_build, derivation_dependency};
+    use sea_orm::{DatabaseBackend, MockDatabase};
 
-    let mut visited_builds: HashSet<BuildJobId> = HashSet::new();
-    let mut nodes: Vec<DependencyNode> = Vec::new();
-    let mut edges: Vec<DependencyEdge> = Vec::new();
-    let mut queue: VecDeque<Vec<BuildJobId>> = VecDeque::new();
-
-    visited_builds.insert(build_id);
-    queue.push_back(vec![build_id]);
-
-    while let Some(batch) = queue.pop_front() {
-        if nodes.len() >= 500 {
-            break;
-        }
-        let wave = process_graph_wave(&state, &batch, evaluation_id, &mut visited_builds).await?;
-        nodes.extend(wave.nodes);
-        edges.extend(wave.edges);
-        if !wave.next_wave.is_empty() {
-            queue.push_back(wave.next_wave);
+    fn drv(id: DerivationId, name: &str) -> derivation::Model {
+        derivation::Model {
+            id,
+            hash: format!("hash{name}"),
+            name: name.into(),
+            architecture: "x86_64-linux".into(),
+            created_at: gradient_types::now(),
+            ..Default::default()
         }
     }
 
-    Ok(ok_json(BuildGraph {
-        root: build_id,
-        nodes,
-        edges,
-    }))
+    fn shared_build(derivation: DerivationId, status: BuildStatus) -> derivation_build::Model {
+        derivation_build::Model {
+            id: DerivationBuildId::now_v7(),
+            derivation,
+            status,
+            created_at: gradient_types::now(),
+            updated_at: gradient_types::now(),
+            ..Default::default()
+        }
+    }
+
+    fn dep(derivation: DerivationId, dependency: DerivationId) -> derivation_dependency::Model {
+        derivation_dependency::Model {
+            derivation,
+            dependency,
+            ..Default::default()
+        }
+    }
+
+    #[tokio::test]
+    async fn the_graph_reaches_dependencies_the_evaluation_has_no_build_for() {
+        let evaluation = EvaluationId::now_v7();
+        let (root, input, interior) = (
+            DerivationId::now_v7(),
+            DerivationId::now_v7(),
+            DerivationId::now_v7(),
+        );
+        let root_build = shared_build(root, BuildStatus::Completed);
+        let root_job = build_job::Model {
+            id: BuildJobId::now_v7(),
+            evaluation,
+            derivation: root,
+            derivation_build: root_build.id,
+            created_at: gradient_types::now(),
+            ..Default::default()
+        };
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([vec![dep(root, input)]])
+            .append_query_results([vec![dep(input, interior)]])
+            .append_query_results([Vec::<derivation_dependency::Model>::new()])
+            .append_query_results([vec![root_job.clone()]])
+            .append_query_results([vec![
+                root_build,
+                shared_build(input, BuildStatus::Substituted),
+                shared_build(interior, BuildStatus::Substituted),
+            ]])
+            .append_query_results([vec![
+                drv(root, "root"),
+                drv(input, "input"),
+                drv(interior, "interior"),
+            ]])
+            .into_connection();
+
+        let graph = dependency_graph(&db, &root_job).await.unwrap();
+
+        let reached: Vec<(DerivationId, Option<BuildJobId>, &str)> = graph
+            .nodes
+            .iter()
+            .map(|n| (n.id, n.build, n.status.as_str()))
+            .collect();
+        assert_eq!(
+            reached,
+            [
+                (root, Some(root_job.id), "Completed"),
+                (input, None, "Substituted"),
+                (interior, None, "Substituted"),
+            ]
+        );
+        assert_eq!(
+            graph.edges,
+            [
+                DependencyEdge {
+                    source: input,
+                    target: root,
+                },
+                DependencyEdge {
+                    source: interior,
+                    target: input,
+                },
+            ]
+        );
+        assert_eq!(graph.root, root);
+    }
 }

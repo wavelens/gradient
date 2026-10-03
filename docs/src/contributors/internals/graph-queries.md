@@ -85,13 +85,14 @@ The instance pass is averaging nine `derivation_metric` values and four `dispatc
 
 ## Graph API
 
-`GET /builds/{build}/graph` (`gradient-web/src/endpoints/builds/graph.rs`) is walking `derivation_dependency` breadth-first. The endpoint is mapping each derivation to its `build_job` in the same evaluation.
+`GET /builds/{build}/graph` (`gradient-web/src/endpoints/builds/graph.rs`) is walking `derivation_dependency` breadth-first from the build's derivation.
 
 | Aspect | Behavior |
 |---|---|
-| Frontier | `BuildJobId`s. The walk is dropping a dependency without a `build_job` in the evaluation |
-| Cap | 500 nodes, soft, checked before each wave |
-| Cost | About five queries per wave, following the depth, not the node count |
+| Frontier | `DerivationId`s. An evaluation is listing only the derivations of its own walk and their direct inputs, and the walk is ignoring `build_job` for that reason |
+| Nodes | Derivation id, status of the shared build, and `build`: the `build_job` of the same evaluation, or null |
+| Cap | 500 nodes. The walk is still reading the edges of every kept node |
+| Cost | One query per wave, plus three for the nodes |
 | Edges | No `kind` filter, and runtime dependencies appear too. `DependencyEdge { source, target }`: `source` is first in build order, `target` second |
 | Neighbours | `GET /builds/{build}/dependencies` is listing direct dependencies |
 

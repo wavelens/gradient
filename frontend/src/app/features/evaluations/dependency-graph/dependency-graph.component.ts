@@ -39,6 +39,7 @@ const V_GAP = 90;
 
 interface LayoutNode {
   id: string;
+  build: string | null;
   name: string;
   path: string;
   status: string;
@@ -290,7 +291,7 @@ export class DependencyGraphComponent implements OnInit, OnDestroy {
     const ns = 'http://www.w3.org/2000/svg';
 
     const g = document.createElementNS(ns, 'g');
-    g.setAttribute('cursor', 'pointer');
+    g.setAttribute('cursor', node.build ? 'pointer' : 'default');
     g.setAttribute('data-id', node.id);
 
     // Drop shadow
@@ -377,10 +378,10 @@ export class DependencyGraphComponent implements OnInit, OnDestroy {
     // Click navigates to build log
     g.addEventListener('click', () => {
       const evalId = this.route.snapshot.queryParamMap.get('evalId');
-      if (evalId) {
+      if (evalId && node.build) {
         this.zone.run(() =>
           this.router.navigate(['/project', this.projectName, 'log', evalId], {
-            queryParams: { build: node.id },
+            queryParams: { build: node.build },
           })
         );
       }
