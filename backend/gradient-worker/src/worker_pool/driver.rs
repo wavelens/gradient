@@ -23,7 +23,7 @@ pub async fn run_eval_driver(requests_path: &str, eval_cache_dir: &str) -> Resul
         .with_context(|| format!("reading eval driver requests from {requests_path}"))?;
 
     let live = Arc::new(Mutex::new(HashSet::new()));
-    let mut worker = EvalWorker::spawn(eval_cache_dir, live)
+    let mut worker = EvalWorker::spawn(eval_cache_dir, live, Arc::default())
         .await
         .context("spawning eval worker for driver")?;
 

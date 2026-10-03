@@ -19,6 +19,8 @@ use std::sync::Arc;
 use tracing::debug;
 
 use super::eval_stats::{EvalStatsAccumulator, EvalStatsTotals, StatsDelta};
+use super::input_fetch::{DownloadTarget, InputFetcher};
+use super::live_thunks::LiveThunks;
 use super::pool::{EvalWorkerPool, PooledEvalWorker};
 use super::transport::Listing;
 
@@ -29,6 +31,7 @@ pub struct WorkerPoolResolver {
     stats: Arc<Mutex<EvalStatsAccumulator>>,
     patterns: Arc<Mutex<Vec<String>>>,
     resolve_warnings: Arc<Mutex<Vec<String>>>,
+    thunks: Arc<LiveThunks>,
 }
 
 type IndexedDerivation = (usize, ResolvedDerivation);
@@ -224,17 +227,24 @@ fn resolve_chunk<'a>(
 
 impl WorkerPoolResolver {
     pub fn new(pool_size: usize, max_eval_rss: u64, eval_cache_dir: String) -> Self {
+        let thunks = Arc::new(LiveThunks::default());
         Self {
             pool: Arc::new(EvalWorkerPool::new(
                 pool_size,
                 max_eval_rss,
                 eval_cache_dir.clone(),
+                Arc::clone(&thunks),
             )),
             eval_cache_dir,
             stats: Arc::new(Mutex::new(EvalStatsAccumulator::default())),
             patterns: Arc::new(Mutex::new(Vec::new())),
             resolve_warnings: Arc::new(Mutex::new(Vec::new())),
+            thunks,
         }
+    }
+
+    pub(crate) fn live_thunks(&self) -> Arc<LiveThunks> {
+        Arc::clone(&self.thunks)
     }
 
     pub fn start_memory_reaper(&self, min_free_bytes: u64) {
@@ -258,6 +268,7 @@ impl WorkerPoolResolver {
     fn finish_call(&self, worker: &mut PooledEvalWorker, bucket: &str, stats: Option<StatsDelta>) {
         let rss = worker.rss_bytes();
         if let Some(delta) = stats {
+            self.thunks.commit(worker.spawned_pid(), delta.nr_thunks);
             self.observe_stats(bucket, delta, rss);
         }
         if rss > self.pool.max_eval_rss() {
@@ -272,6 +283,7 @@ impl WorkerPoolResolver {
     }
 
     pub fn take_eval_stats(&self) -> EvalStatsTotals {
+        self.thunks.reset();
         let acc = std::mem::take(&mut *self.stats.lock());
         acc.finish()
     }
@@ -356,6 +368,7 @@ impl WorkerPoolResolver {
                 Ok(listing)
             }
             Err(e) => {
+                self.thunks.forget(worker.spawned_pid());
                 worker.mark_dead();
                 Err(e)
             }
@@ -380,6 +393,7 @@ impl WorkerPoolResolver {
                 Ok(BatchCall::Complete(items))
             }
             Err(e) => {
+                self.thunks.forget(worker.spawned_pid());
                 worker.mark_dead();
                 debug!(
                     error = format!("{e:#}"),
@@ -394,6 +408,25 @@ impl WorkerPoolResolver {
     fn record_warnings(&self, warnings: Vec<String>) {
         if !warnings.is_empty() {
             self.resolve_warnings.lock().extend(warnings);
+        }
+    }
+}
+
+#[async_trait]
+impl InputFetcher for WorkerPoolResolver {
+    async fn fetch_input(
+        &self,
+        locked: String,
+        git_ssh_command: Option<String>,
+        target: DownloadTarget,
+    ) -> Result<String> {
+        let mut worker = self.pool.acquire().await?;
+        match worker.fetch_input(locked, git_ssh_command, target).await {
+            Ok(path) => Ok(path),
+            Err(e) => {
+                worker.mark_dead();
+                Err(e)
+            }
         }
     }
 }
