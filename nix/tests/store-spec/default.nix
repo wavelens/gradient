@@ -23,6 +23,7 @@ let
     preferLocalBuild = false;
     allowSubstitutes = true;
     fixedOutput = false;
+    download = false;
     sameAs = null;
     outputs.out = { };
     build = {
@@ -92,7 +93,10 @@ let
     derivations = mapAttrs
       (id: node:
         let merged = recursiveUpdate (defaultNode id) node;
-        in merged // { outputs = mapAttrs (_: o: defaultOutput // o) merged.outputs; })
+        in merged // {
+          fixedOutput = merged.fixedOutput || merged.download;
+          outputs = mapAttrs (_: o: defaultOutput // o) merged.outputs;
+        })
       raw.derivations;
   };
 
@@ -137,7 +141,7 @@ let
     '';
 
   daemonNode = spec: id: node: lib.nameValuePair "${spec.name}/${id}"
-    (removeAttrs node [ "deps" "requiredSystemFeatures" "preferLocalBuild" "allowSubstitutes" "sameAs" ]);
+    (removeAttrs node [ "deps" "requiredSystemFeatures" "preferLocalBuild" "allowSubstitutes" "sameAs" "download" ]);
 
   toDaemonConfig = raws: worker: pkgs.writeText "gradient-daemon-${worker}.json" (builtins.toJSON {
     inherit worker;
@@ -151,9 +155,16 @@ let
       --secret-key-file ${./keys/upstream.sec} \
       --out $out
   '';
+
+  toDownloads = raws: pkgs.linkFarm "store-spec-downloads" (concatMap
+    (raw:
+      let spec = resolve raw;
+      in lib.mapAttrsToList (id: node: { name = "${spec.name}/${id}"; path = pkgs.writeText "${spec.name}-${id}" node.fodContent; })
+        (lib.filterAttrs (_: node: node.download) spec.derivations))
+    raws);
 in
 {
-  inherit normalize resolve toFlake toDaemonConfig toUpstreamCache;
+  inherit normalize resolve toFlake toDaemonConfig toUpstreamCache toDownloads;
   upstreamPublicKey = lib.fileContents ./keys/upstream.pub;
   presets = import ./presets.nix;
 }

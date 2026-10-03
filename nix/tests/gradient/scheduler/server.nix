@@ -6,7 +6,7 @@
 
 # Every task is holding one trigger that is never firing.
 # Each phase is starting its own evaluation through the API.
-{ lib, pkgs, storeSpec, upstream, specNames, workerToken, upstreamPeers, upstreamUrls }:
+{ lib, pkgs, storeSpec, upstream, downloads, specNames, workerToken, upstreamPeers, upstreamUrls }:
 { ... }:
 {
   imports = [ ../../../modules/gradient.nix ];
@@ -128,6 +128,7 @@
         alias = "${upstream}/";
         extraConfig = "autoindex off;";
       };
+      locations."/downloads/".alias = "${downloads}/";
     };
 
     postgresql = {
