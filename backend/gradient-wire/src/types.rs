@@ -99,6 +99,14 @@ pub enum FlakeStep {
 #[rkyv(derive(Debug, PartialEq))]
 pub struct BuildJob {
     pub builds: Vec<BuildSpec>,
+    pub requirement: BuildRequirement,
+}
+
+#[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Default)]
+#[rkyv(derive(Debug, PartialEq))]
+pub struct BuildRequirement {
+    pub architecture: String,
+    pub required_features: Vec<String>,
 }
 
 #[derive(Archive, Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -282,6 +290,7 @@ pub struct JobCandidate {
     pub required_paths: Vec<RequiredPath>,
     pub drv_paths: Vec<String>,
     pub output_paths: Vec<String>,
+    pub requirement: Option<BuildRequirement>,
 }
 
 #[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq)]

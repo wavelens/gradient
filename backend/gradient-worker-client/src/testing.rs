@@ -322,6 +322,7 @@ mod tests {
             }],
             drv_paths: vec![],
             output_paths: vec![],
+            requirement: None,
         };
 
         let (served, seen) = tokio::join!(
@@ -341,7 +342,10 @@ mod tests {
         sent.unwrap();
         assert_eq!(scores.unwrap(), vec![score]);
 
-        let job = Job::Build(BuildJob { builds: vec![] });
+        let job = Job::Build(BuildJob {
+            builds: vec![],
+            requirement: Default::default(),
+        });
         let server_side = async {
             assert_eq!(conn.job_request().await.unwrap(), JobKind::Build);
             assert!(conn.assign("build:1", "d-1", job.clone()).await.unwrap());

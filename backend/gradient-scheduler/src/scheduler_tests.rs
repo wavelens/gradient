@@ -109,10 +109,12 @@ pub(crate) fn build_job(
                 timeout_secs: None,
                 max_silent_secs: None,
             }],
+            requirement: gradient_wire::types::BuildRequirement {
+                architecture: "x86_64-linux".into(),
+                required_features: vec![],
+            },
         },
         required_paths: vec![],
-        architecture: "x86_64-linux".into(),
-        required_features: vec![],
         dependency_count: 0,
         closure_size: None,
         prefer_local_build: false,
@@ -1066,7 +1068,7 @@ async fn a_lost_build_claim_hands_its_shared_build_back_to_the_startable_set() {
         .update_worker_capabilities(
             "w1",
             WorkerCapabilities {
-                architectures: vec![job.architecture.clone()],
+                architectures: vec![job.job.requirement.architecture.clone()],
                 system_features: vec![],
                 max_concurrent_builds: 1,
                 cpu_count: 8,

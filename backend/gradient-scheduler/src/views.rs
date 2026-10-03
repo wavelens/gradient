@@ -139,7 +139,7 @@ impl JobContextView {
                         })
                         .collect(),
                 ),
-                ..common("Build", b.architecture.clone())
+                ..common("Build", b.job.requirement.architecture.clone())
             },
             PendingJob::Eval(e) => Self {
                 fetch_flake: Some(e.job.steps.contains(&FlakeStep::FetchFlake)),
@@ -173,10 +173,12 @@ mod tests {
                     timeout_secs: None,
                     max_silent_secs: None,
                 }],
+                requirement: gradient_wire::types::BuildRequirement {
+                    architecture: "x86_64-linux".into(),
+                    required_features: vec![],
+                },
             },
             required_paths: vec![],
-            architecture: "x86_64-linux".into(),
-            required_features: vec![],
             dependency_count: 3,
             closure_size: Some(42),
             prefer_local_build: true,

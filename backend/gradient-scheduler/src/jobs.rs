@@ -62,8 +62,6 @@ pub struct PendingBuildJob {
     pub project_id: ProjectId,
     pub job: BuildJob,
     pub required_paths: Vec<RequiredPath>,
-    pub architecture: String,
-    pub required_features: Vec<String>,
     pub dependency_count: u32,
     pub closure_size: Option<i64>,
     pub prefer_local_build: bool,
@@ -124,9 +122,9 @@ impl PendingJob {
     }
 
     pub fn as_candidate(&self, job_id: &str) -> JobCandidate {
-        let builds = match self {
-            PendingJob::Build(j) => j.job.builds.as_slice(),
-            PendingJob::Eval(_) => &[],
+        let (builds, requirement) = match self {
+            PendingJob::Build(j) => (j.job.builds.as_slice(), Some(j.job.requirement.clone())),
+            PendingJob::Eval(_) => (&[][..], None),
         };
         JobCandidate {
             job_id: job_id.to_owned(),
@@ -138,6 +136,7 @@ impl PendingJob {
                 .filter(|o| !o.path.is_empty())
                 .map(|o| o.path.clone())
                 .collect(),
+            requirement,
         }
     }
 
@@ -267,7 +266,10 @@ fn job_eligible_for_caps(job: &PendingJob, caps: Option<&WorkerCaps>) -> bool {
     match (job, caps) {
         (_, None) => true,
         (PendingJob::Eval(j), Some(c)) => c.can_eval(&j.job),
-        (PendingJob::Build(j), Some(c)) => c.can_build(&j.architecture, &j.required_features),
+        (PendingJob::Build(j), Some(c)) => c.can_build(
+            &j.job.requirement.architecture,
+            &j.job.requirement.required_features,
+        ),
     }
 }
 
@@ -331,8 +333,8 @@ fn assignment_record_for(
         substitute: matches!(job, PendingJob::Build(b) if b.substitute),
         build_context: match job {
             PendingJob::Build(b) => serde_json::json!({
-                "architecture": b.architecture,
-                "required_features": b.required_features,
+                "architecture": b.job.requirement.architecture,
+                "required_features": b.job.requirement.required_features,
                 "dependency_count": b.dependency_count,
                 "closure_size": b.closure_size,
                 "prefer_local_build": b.prefer_local_build,
@@ -717,7 +719,7 @@ impl JobTracker {
             PendingJob::Build(b) => ScoredJob::new_build(
                 id,
                 job.project_id(),
-                b.architecture.as_str(),
+                b.job.requirement.architecture.as_str(),
                 b.prefer_local_build,
                 b.is_fixed_output,
                 b.pname.as_deref(),
@@ -1117,8 +1119,8 @@ impl JobTracker {
             .map(|(_, worker_id, job)| {
                 let (architecture, required_features, fetch_step, eval_step) = match job {
                     PendingJob::Build(b) => (
-                        Some(b.architecture.clone()),
-                        b.required_features.clone(),
+                        Some(b.job.requirement.architecture.clone()),
+                        b.job.requirement.required_features.clone(),
                         false,
                         false,
                     ),
@@ -1285,7 +1287,8 @@ pub(crate) fn test_eval_job(peer: ProjectId) -> PendingJob {
 mod tests {
     use super::*;
     use gradient_wire::types::{
-        BuildJob, BuildSpec, BuildSpecKind, FlakeJob, FlakeSource, FlakeStep, GradientCapabilities,
+        BuildJob, BuildRequirement, BuildSpec, BuildSpecKind, FlakeJob, FlakeSource, FlakeStep,
+        GradientCapabilities,
     };
 
     #[test]
@@ -1450,10 +1453,12 @@ mod tests {
                     timeout_secs: None,
                     max_silent_secs: None,
                 }],
+                requirement: BuildRequirement {
+                    architecture: architecture.into(),
+                    required_features,
+                },
             },
             required_paths: required,
-            architecture: architecture.into(),
-            required_features,
             dependency_count: 0,
             closure_size: None,
             prefer_local_build: false,
@@ -1466,6 +1471,21 @@ mod tests {
             pname: None,
             substitute: false,
         })
+    }
+
+    #[test]
+    fn a_build_offer_carries_its_requirement_and_an_evaluation_offer_none() {
+        let peer = ProjectId::now_v7();
+        let build = build_job_arch(peer, vec![], "aarch64-linux", vec!["kvm".into()]);
+
+        assert_eq!(
+            build.as_candidate("build:1").requirement,
+            Some(BuildRequirement {
+                architecture: "aarch64-linux".into(),
+                required_features: vec!["kvm".into()],
+            })
+        );
+        assert_eq!(eval_job(peer).as_candidate("eval:1").requirement, None);
     }
 
     #[test]

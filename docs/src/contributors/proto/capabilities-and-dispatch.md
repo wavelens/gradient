@@ -53,6 +53,7 @@ Workers with the `build` capability send `WorkerCapabilities` after the handshak
 
 - Candidates are evaluations and builds the worker is authorized for and can run.
 - A `JobCandidate` is carrying `required_paths` (with NAR sizes when cached), `drv_paths` and `output_paths`.
+- A build candidate and its `BuildJob` are also carrying a `requirement`: the Nix system and the required system features. An evaluation candidate is carrying none.
 - The worker is keeping no candidate cache.
 - The worker is scoring every offered candidate against the local store.
 - `RequestJobChunk` is carrying the answer with `missing_count`, `missing_nar_size` and `outputs_present`.

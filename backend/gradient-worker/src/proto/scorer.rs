@@ -99,6 +99,7 @@ mod tests {
             required_paths: vec![],
             drv_paths: vec![],
             output_paths: vec![],
+            requirement: None,
         }];
         let scores = JobScorer::new()
             .score_candidates(&store, &candidates)
@@ -135,6 +136,7 @@ mod tests {
             ],
             drv_paths: vec!["/nix/store/zzzz-target.drv".to_owned()],
             output_paths: vec![],
+            requirement: None,
         }];
         let scores = JobScorer::new()
             .score_candidates(&store, &candidates)
@@ -150,6 +152,7 @@ mod tests {
             required_paths: vec![],
             drv_paths: vec!["/nix/store/zzzz-target.drv".to_owned()],
             output_paths: output_paths.iter().map(|p| (*p).to_owned()).collect(),
+            requirement: None,
         }
     }
 

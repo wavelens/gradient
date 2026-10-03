@@ -9,12 +9,12 @@ pub mod server;
 
 pub use crate::types::{
     BuildFailureKind, BuildJob, BuildMetrics, BuildOutput, BuildProduct, BuildProgressPhase,
-    BuildSpec, BuildSpecKind, BumpedInputWire, CacheInfo, CachedPath, CandidateScore,
-    ClusterAddress, ClusterMembership, ClusterPeer, CredentialKind, DerivationOutput,
-    DiscoveredDerivation, EvalAttrCost, EvalCachePullOutcome, EvalMessageLevel, EvalProgress,
-    EvalStatsReport, FlakeInputOverride, FlakeJob, FlakeOutputNode, FlakeSource, FlakeStep,
-    GradientCapabilities, InputFetch, InputFetchState, InputUpdateSpec, Job, JobCandidate, JobKind,
-    JobPhase, JobPhaseSpan, JobUpdateKind, QueryMode, RequiredPath,
+    BuildRequirement, BuildSpec, BuildSpecKind, BumpedInputWire, CacheInfo, CachedPath,
+    CandidateScore, ClusterAddress, ClusterMembership, ClusterPeer, CredentialKind,
+    DerivationOutput, DiscoveredDerivation, EvalAttrCost, EvalCachePullOutcome, EvalMessageLevel,
+    EvalProgress, EvalStatsReport, FlakeInputOverride, FlakeJob, FlakeOutputNode, FlakeSource,
+    FlakeStep, GradientCapabilities, InputFetch, InputFetchState, InputUpdateSpec, Job,
+    JobCandidate, JobKind, JobPhase, JobPhaseSpan, JobUpdateKind, QueryMode, RequiredPath,
 };
 pub use crate::types::{
     CompletedMultipart, GrantTarget, NarUploadMetadata, PresignedMultipart, UploadMetadata,
@@ -23,7 +23,7 @@ pub use crate::types::{
 pub use client::{ArchivedClientMessage, ClientMessage};
 pub use server::{ArchivedServerMessage, FailedPeer, ServerMessage};
 
-pub const PROTO_VERSION: u16 = 25;
+pub const PROTO_VERSION: u16 = 26;
 
 pub const PROGRESS_INTERVAL: std::time::Duration = std::time::Duration::from_secs(1);
 

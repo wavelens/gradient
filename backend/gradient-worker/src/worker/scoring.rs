@@ -130,6 +130,7 @@ mod tests {
             required_paths: vec![],
             drv_paths: vec!["/nix/store/zzzz-target.drv".to_owned()],
             output_paths: vec![],
+            requirement: None,
         };
 
         for offer in ["first", "repeated"] {

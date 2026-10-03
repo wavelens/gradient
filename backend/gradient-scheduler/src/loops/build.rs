@@ -26,7 +26,7 @@ use crate::Scheduler;
 use crate::actor::SchedulerMsg;
 use crate::jobs::PendingBuildJob;
 use gradient_wire::types::{
-    BuildJob, BuildSpec, BuildSpecKind, CacheInfo, DerivationOutput, RequiredPath,
+    BuildJob, BuildRequirement, BuildSpec, BuildSpecKind, CacheInfo, DerivationOutput, RequiredPath,
 };
 
 use super::{ASSIGN_BUDGET, ASSIGN_TICK, STARTABLE_RESYNC};
@@ -489,6 +489,17 @@ impl BuildAssignMaps {
         let job_id = crate::jobs::build_job_key(shared_build.id);
         let substitute = kind == BuildSpecKind::Substitute;
         let anywhere = kind != BuildSpecKind::Build;
+        let requirement = if anywhere {
+            BuildRequirement {
+                architecture: gradient_types::BUILTIN_ARCH.to_string(),
+                required_features: Vec::new(),
+            }
+        } else {
+            BuildRequirement {
+                architecture: derivation.architecture.clone(),
+                required_features: self.required_features(shared_build.derivation),
+            }
+        };
         let build_job = BuildJob {
             builds: vec![BuildSpec {
                 build_id: shared_build.id.to_string(),
@@ -509,14 +520,7 @@ impl BuildAssignMaps {
                     self.config.default_max_silent_secs,
                 ),
             }],
-        };
-        let (architecture, required_features) = if anywhere {
-            (gradient_types::BUILTIN_ARCH.to_string(), Vec::new())
-        } else {
-            (
-                derivation.architecture.clone(),
-                self.required_features(shared_build.derivation),
-            )
+            requirement,
         };
 
         let required_paths = if anywhere {
@@ -537,8 +541,6 @@ impl BuildAssignMaps {
             project_id,
             job: build_job,
             required_paths,
-            architecture,
-            required_features,
             dependency_count: self
                 .dep_counts
                 .get(&shared_build.derivation)
