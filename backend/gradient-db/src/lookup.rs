@@ -18,14 +18,14 @@ pub async fn get_project_by_name(
     EProject::find()
         .join_rev(
             JoinType::InnerJoin,
-            EProjectUser::belongs_to(gradient_entity::project::Entity)
-                .from(CProjectUser::Project)
+            EProjectAccess::belongs_to(gradient_entity::project::Entity)
+                .from(CProjectAccess::Project)
                 .to(CProject::Id)
                 .into(),
         )
         .filter(
             Condition::all()
-                .add(CProjectUser::User.eq(user_id))
+                .add(CProjectAccess::User.eq(user_id))
                 .add(CProject::Name.eq(name)),
         )
         .one(&ctx.web_db)

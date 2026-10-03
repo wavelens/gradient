@@ -24,8 +24,8 @@ use gradient_types::input::{check_index_name, validate_display_name};
 use gradient_types::*;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, JoinType, QueryFilter, QueryOrder,
-    QuerySelect, TransactionTrait,
+    ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter, QueryOrder,
+    TransactionTrait,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -141,16 +141,14 @@ pub async fn get(
     Extension(user): Extension<MUser>,
     Query(params): Query<PaginationParams>,
 ) -> WebResult<Json<BaseResponse<Paginated<Vec<ProjectSummary>>>>> {
+    let reachable = sea_orm::sea_query::Query::select()
+        .column(CProjectAccess::Project)
+        .from(gradient_entity::project_access::Entity)
+        .and_where(CProjectAccess::User.eq(user.id))
+        .to_owned();
     let listing = paginate(
         EProject::find()
-            .join_rev(
-                JoinType::InnerJoin,
-                EProjectUser::belongs_to(gradient_entity::project::Entity)
-                    .from(CProjectUser::Project)
-                    .to(CProject::Id)
-                    .into(),
-            )
-            .filter(CProjectUser::User.eq(user.id))
+            .filter(CProject::Id.in_subquery(reachable))
             .order_by_asc(CProject::Name)
             .order_by_asc(CProject::Id),
         &state.web_db,

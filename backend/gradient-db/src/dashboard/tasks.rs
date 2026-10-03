@@ -21,7 +21,7 @@ fn terminal() -> String {
 fn task_facts_sql() -> String {
     format!(
         "WITH viewer_tasks AS ( \
-            SELECT t.id FROM task t JOIN project_user pu ON pu.project = t.project WHERE pu.\"user\" = $1 \
+            SELECT t.id FROM task t JOIN project_access pu ON pu.project = t.project WHERE pu.\"user\" = $1 \
             UNION SELECT s.task FROM user_task_star s JOIN task st ON st.id = s.task \
             JOIN project sproj ON sproj.id = st.project WHERE s.\"user\" = $1 AND sproj.public) \
         SELECT p.name AS project, t.name AS task, \
