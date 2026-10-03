@@ -317,6 +317,25 @@ describe('TaskDetailComponent - evaluation progress', () => {
     expect(fixture.nativeElement.querySelector('gr-input-fetch-list .input-row')?.textContent).toContain('nixpkgs');
   });
 
+  it('shows the thunk count as plain text instead of a spinner while evaluating', () => {
+    const { fixture, frames } = setup({ managed: false, canEdit: true, canTrigger: true }, { primaryStatus: 'EvaluatingFlake' });
+    frames.next({ event: 'evaluation.activity', at: '', content: { evaluation_id: 'e1', progress: { kind: 'evaluating', thunks: 1234567 } } });
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('.panel gr-loading-spinner')).toBeNull();
+    expect(fixture.nativeElement.querySelector('.panel .pkg-wait')?.textContent?.trim()).toBe('Evaluating - 1,234,567 thunks');
+  });
+
+  it('hides the thunk count once the evaluation has packages', () => {
+    const { fixture, frames } = setup({ managed: false, canEdit: true, canTrigger: true }, {
+      primaryStatus: 'EvaluatingDerivation',
+      getEntryPoints: () => of({ entry_points: [epSummary('hello')], total: 1 }),
+    });
+    frames.next({ event: 'evaluation.activity', at: '', content: { evaluation_id: 'e1', progress: { kind: 'evaluating', thunks: 7 } } });
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('.pkg')).toBeTruthy();
+    expect(fixture.nativeElement.querySelector('.panel').textContent).not.toContain('thunks');
+  });
+
   it('drops the input list once the evaluation moves past Fetching', () => {
     const inputs = [{ name: 'nixpkgs', state: 'Done' as const, downloaded_bytes: 40, expected_bytes: 40 }];
     const { fixture } = setup({ managed: false, canEdit: true, canTrigger: true }, {
@@ -325,7 +344,7 @@ describe('TaskDetailComponent - evaluation progress', () => {
     });
     fixture.detectChanges();
     expect(fixture.nativeElement.querySelector('gr-input-fetch-list')).toBeNull();
-    expect(fixture.nativeElement.querySelector('.panel gr-loading-spinner')?.textContent).toContain('packages appear');
+    expect(fixture.nativeElement.querySelector('.panel .pkg-wait')?.textContent).toContain('packages appear');
   });
 
   it('falls back to the static text while Building, even with a late thunk frame', () => {
@@ -333,7 +352,7 @@ describe('TaskDetailComponent - evaluation progress', () => {
     frames.next({ event: 'evaluation.activity', at: '', content: { evaluation_id: 'e1', progress: { kind: 'evaluating', thunks: 7 } } });
     fixture.detectChanges();
     expect(fixture.componentInstance.selectedProgress()).toBeNull();
-    expect(fixture.nativeElement.querySelector('.panel gr-loading-spinner')?.textContent).not.toContain('thunks');
+    expect(fixture.nativeElement.querySelector('.panel .pkg-wait')?.textContent).not.toContain('thunks');
   });
 
   it('keeps the latest frame of each running evaluation apart', () => {
@@ -760,7 +779,8 @@ describe('TaskDetailComponent - #636 eval page', () => {
   it('shows a waiting state instead of "No packages" while the evaluation is in progress', () => {
     const { fixture } = setup(access, { primaryStatus: 'EvaluatingDerivation' });
     expect(fixture.nativeElement.textContent).not.toContain('No packages');
-    expect(fixture.nativeElement.querySelector('.panel gr-loading-spinner')).toBeTruthy();
+    expect(fixture.nativeElement.querySelector('.panel gr-loading-spinner')).toBeNull();
+    expect(fixture.nativeElement.querySelector('.panel .pkg-wait')?.textContent).toContain('packages appear');
   });
 
   it('says "No packages" once a finished evaluation has none', () => {

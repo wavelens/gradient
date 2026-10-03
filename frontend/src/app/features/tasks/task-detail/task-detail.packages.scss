@@ -9,7 +9,8 @@
 .pkg-label { margin: $space-section 0 $spacing-sm; h3 { font-size: $font-size-md; } }
 .pkg-list { display: flex; flex-direction: column; gap: $space-pair; }
 
-.pkg-more {
+.pkg-more,
+.pkg-wait {
   margin-top: $space-pair;
   padding: $spacing-sm $spacing-md;
   color: var(--gr-text-muted);
