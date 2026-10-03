@@ -27,10 +27,12 @@ impl ProtoConnection {
             .await
             .with_context(|| format!("failed to connect to {url}"))?;
 
-        socket
-            .agree_version()
-            .await
-            .with_context(|| format!("{url} shares no protocol version with this worker"))?;
+        if socket.agree_version().await.is_none() {
+            let reason = socket
+                .refusal()
+                .unwrap_or("connection closed during version agreement");
+            anyhow::bail!("{url}: {reason}");
+        }
 
         Ok(Self { socket })
     }
