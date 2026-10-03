@@ -6,6 +6,12 @@
 
 @use '@gradient/ui/styles/variables' as *;
 
+:host {
+  display: flex;
+  justify-content: center;
+  width: 100%;
+}
+
 .input-list {
   display: flex;
   flex-direction: column;

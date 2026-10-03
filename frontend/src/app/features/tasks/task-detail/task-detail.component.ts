@@ -9,8 +9,8 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { interval, Observable, Subscription } from 'rxjs';
-import { auditTime } from 'rxjs/operators';
-import { LiveService } from '@core/services/live.service';
+import { auditTime, filter, share } from 'rxjs/operators';
+import { LiveEvent, LiveService } from '@core/services/live.service';
 import { AuthService } from '@core/services/auth.service';
 import { StarsService } from '@core/services/stars.service';
 import { ProjectsService } from '@core/services/projects.service';
@@ -30,11 +30,11 @@ import {
   ToastComponent,
   TooltipDirective,
 } from '@gradient/ui/ui';
-import { EvalStatusBadgeComponent, StarButtonComponent, StatusIconComponent } from '@shared/ui';
+import { EvalStatusBadgeComponent, InputFetchListComponent, StarButtonComponent, StatusIconComponent } from '@shared/ui';
 import { AccessService, WritableDirective } from '@shared/access';
 import { injectTaskAccess } from '@core/resolvers/inject-access';
-import { StarTarget, TaskDetail, EvaluationSummary, EvaluationStatus, EntryPointSummary, BuildStatusCounts, WalkMode } from '@core/models';
-import { buildDuration, commitLabel, entryPointPhase, evaluationDuration, evaluationPhase, evaluationTitle, formatEvaluationDuration, isPendingBuildStatus, isRunningEvaluationStatus } from '@shared/evaluation';
+import { StarTarget, TaskDetail, EvaluationSummary, EvaluationProgress, EvaluationStatus, EntryPointSummary, BuildStatusCounts, WalkMode } from '@core/models';
+import { buildDuration, commitLabel, entryPointPhase, evaluationDuration, evaluationPhase, evaluationProgressText, evaluationTitle, formatEvaluationDuration, isPendingBuildStatus, isRunningEvaluationStatus } from '@shared/evaluation';
 import { SegmentedBarComponent } from './segmented-bar/segmented-bar.component';
 
 @Component({
@@ -44,7 +44,7 @@ import { SegmentedBarComponent } from './segmented-bar/segmented-bar.component';
     CommonModule, FormsModule, RouterModule, ButtonComponent, CheckboxComponent, DialogComponent, MenuComponent, TooltipDirective,
     LoadingSpinnerComponent, EmptyStateComponent, WritableDirective,
     SegmentedBarComponent, EvalStatusBadgeComponent,
-    IconComponent, InViewDirective, StatusIconComponent, ToastComponent, StarButtonComponent,
+    IconComponent, InViewDirective, StatusIconComponent, ToastComponent, StarButtonComponent, InputFetchListComponent,
   ],
   providers: [MessageService],
   templateUrl: './task-detail.component.html',
@@ -118,6 +118,19 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
     const s = this.selected();
     return s ? [s] : [];
   });
+
+  private activity = signal<{ evaluation_id: string; progress: EvaluationProgress } | null>(null);
+  selectedProgress = computed<EvaluationProgress | null>(() => {
+    const sel = this.selected();
+    if (!sel || !this.isRunning(sel.status)) return null;
+    const live = this.activity();
+    return live?.evaluation_id === sel.id ? live.progress : sel.progress ?? null;
+  });
+  selectedFetchRows = computed(() => {
+    const p = this.selectedProgress();
+    return p?.kind === 'fetching' ? p.inputs : [];
+  });
+  selectedProgressText = computed(() => evaluationProgressText(this.selectedProgress()));
 
   latestEvaluation = computed<EvaluationSummary | null>(() => this.evaluations()[0] ?? null);
   evaluationInProgress = computed(() => {
@@ -345,10 +358,20 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
   dismissError(): void { this.errorMessage.set(null); }
 
   private startLiveUpdates(): void {
-    this.liveSub = this.live
-      .connect(`/tasks/${this.projectName}/${this.taskName}/live`)
-      .pipe(auditTime(500))
-      .subscribe(() => this.loadTaskData(false, true));
+    const frames = this.live
+      .connect<LiveEvent>(`/tasks/${this.projectName}/${this.taskName}/live`)
+      .pipe(share());
+    this.liveSub = frames
+      .pipe(filter(e => e.event === 'evaluation.activity'))
+      .subscribe(e => {
+        const { evaluation_id, progress } = e.content;
+        if (evaluation_id && progress) this.activity.set({ evaluation_id, progress });
+      });
+    this.liveSub.add(
+      frames
+        .pipe(filter(e => e.event !== 'evaluation.activity'), auditTime(500))
+        .subscribe(() => this.loadTaskData(false, true)),
+    );
   }
 
   /// Left/right arrows step through the evaluation strip.
