@@ -4,10 +4,11 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use crate::codec::agreement::{agree, version_frame};
 use crate::constants::BULK_CHUNK_SIZE;
 use crate::messages::{
     CandidateScore, ClientMessage, GradientCapabilities, Job, JobCandidate, JobKind, PROTO_VERSION,
-    ServerMessage,
+    PROTO_VERSIONS, ServerMessage,
 };
 use crate::session::frame::WireMessage;
 use crate::types::{GrantTarget, NarUploadMetadata, UploadMetadata, UploadObject, UploadOutcome};
@@ -39,15 +40,25 @@ impl MockProtoServer {
 
     pub async fn accept(&self) -> MockServerConn {
         let (stream, _) = self.listener.accept().await.expect("accept failed");
-        let socket = accept_async(stream)
+        let mut socket = accept_async(stream)
             .await
             .expect("WebSocket handshake failed");
-        MockServerConn { socket }
+
+        socket
+            .send(Message::Binary(version_frame(&PROTO_VERSIONS)))
+            .await
+            .expect("send the version frame");
+
+        MockServerConn {
+            socket,
+            peer_version_read: false,
+        }
     }
 }
 
 pub struct MockServerConn {
     socket: WebSocketStream<TcpStream>,
+    peer_version_read: bool,
 }
 
 impl MockServerConn {
@@ -62,6 +73,10 @@ impl MockServerConn {
     pub async fn recv(&mut self) -> Result<ClientMessage> {
         loop {
             match self.socket.next().await {
+                Some(Ok(Message::Binary(bytes))) if !self.peer_version_read => {
+                    agree(&PROTO_VERSIONS, &bytes).map_err(anyhow::Error::msg)?;
+                    self.peer_version_read = true;
+                }
                 Some(Ok(Message::Binary(bytes))) => {
                     return ClientMessage::decode(bytes)
                         .and_then(|inbound| inbound.into_message())

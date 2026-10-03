@@ -591,7 +591,7 @@ mod tests {
         let (client, server) = tokio::join!(dial, accept);
 
         (
-            ProtoSocket::Tungstenite(Box::new(server)),
+            ProtoSocket::tungstenite(server).with_version(*gradient_wire::PROTO_VERSIONS.end()),
             client.unwrap().0,
         )
     }

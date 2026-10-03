@@ -8,7 +8,7 @@ use std::marker::PhantomData;
 use std::sync::Arc;
 use std::time::Duration;
 
-use axum::extract::ws::{Message as AxumMessage, WebSocket};
+use axum::extract::ws::{CloseFrame as AxumCloseFrame, Message as AxumMessage, WebSocket};
 use bytes::Bytes;
 use futures::stream::SplitStream;
 use futures::{SinkExt, StreamExt};
@@ -16,15 +16,19 @@ use rkyv::rancor::Error as RkyvError;
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
-use tokio_tungstenite::{
-    MaybeTlsStream, WebSocketStream, tungstenite::Message as TungsteniteMessage,
-};
+use tokio_tungstenite::tungstenite::Message as TungsteniteMessage;
+use tokio_tungstenite::tungstenite::protocol::CloseFrame as TungsteniteCloseFrame;
+use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
+use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 use tracing::{debug, trace, warn};
 
 use gradient_util::shutdown::Shutdown;
 use gradient_util::telemetry::{GAUGES, STATS, fill_permille, metric};
 
-use crate::messages::{ArchivedClientMessage, ArchivedServerMessage, ClientMessage, ServerMessage};
+use crate::codec::agreement::{agree, version_frame};
+use crate::messages::{
+    ArchivedClientMessage, ArchivedServerMessage, ClientMessage, PROTO_VERSIONS, ServerMessage,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum SendError {
@@ -282,18 +286,34 @@ impl Frame<ServerMessage> {
     }
 }
 
-pub enum ProtoSocket {
+pub struct ProtoSocket {
+    transport: Transport,
+    version: Option<u16>,
+}
+
+enum Transport {
     Axum(Box<WebSocket>),
     Tungstenite(Box<WebSocketStream<MaybeTlsStream<TcpStream>>>),
 }
 
-impl ProtoSocket {
-    async fn recv_bytes(&mut self) -> Option<Result<Bytes, ()>> {
+const PROTOCOL_ERROR: u16 = 1002;
+
+fn log_close_reason(reason: &str) {
+    if !reason.is_empty() {
+        warn!(%reason, "peer closed /proto");
+    }
+}
+
+impl Transport {
+    async fn recv_bytes(&mut self) -> Option<Bytes> {
         match self {
             Self::Axum(ws) => loop {
                 match ws.recv().await? {
-                    Ok(AxumMessage::Binary(bytes)) => return Some(Ok(bytes)),
-                    Ok(AxumMessage::Close(_)) => return None,
+                    Ok(AxumMessage::Binary(bytes)) => return Some(bytes),
+                    Ok(AxumMessage::Close(frame)) => {
+                        log_close_reason(frame.as_ref().map_or("", |f| f.reason.as_str()));
+                        return None;
+                    }
                     Ok(_) => continue,
                     Err(e) => {
                         warn!(error = %e, "WebSocket recv error");
@@ -303,9 +323,11 @@ impl ProtoSocket {
             },
             Self::Tungstenite(ws) => loop {
                 match ws.next().await? {
-                    Ok(TungsteniteMessage::Binary(bytes)) => return Some(Ok(bytes)),
-                    Ok(TungsteniteMessage::Close(_)) => return None,
-                    Ok(TungsteniteMessage::Ping(_) | TungsteniteMessage::Pong(_)) => continue,
+                    Ok(TungsteniteMessage::Binary(bytes)) => return Some(bytes),
+                    Ok(TungsteniteMessage::Close(frame)) => {
+                        log_close_reason(frame.as_ref().map_or("", |f| f.reason.as_str()));
+                        return None;
+                    }
                     Ok(_) => continue,
                     Err(e) => {
                         warn!(error = %e, "WebSocket recv error");
@@ -330,11 +352,102 @@ impl ProtoSocket {
         .map_err(|()| SendError::Closed)
     }
 
-    pub async fn recv_server_msg(&mut self) -> Option<ServerMessage> {
-        let bytes = match self.recv_bytes().await? {
-            Ok(b) => b,
-            Err(()) => return None,
+    async fn close(&mut self, reason: String) {
+        let sent = match self {
+            Self::Axum(ws) => ws
+                .send(AxumMessage::Close(Some(AxumCloseFrame {
+                    code: PROTOCOL_ERROR,
+                    reason: reason.into(),
+                })))
+                .await
+                .map_err(|e| e.to_string()),
+            Self::Tungstenite(ws) => ws
+                .send(TungsteniteMessage::Close(Some(TungsteniteCloseFrame {
+                    code: CloseCode::from(PROTOCOL_ERROR),
+                    reason: reason.into(),
+                })))
+                .await
+                .map_err(|e| e.to_string()),
         };
+        if let Err(error) = sent {
+            debug!(%error, "WebSocket close failed");
+        }
+    }
+}
+
+impl ProtoSocket {
+    pub fn axum(ws: WebSocket) -> Self {
+        Self {
+            transport: Transport::Axum(Box::new(ws)),
+            version: None,
+        }
+    }
+
+    pub fn tungstenite(ws: WebSocketStream<MaybeTlsStream<TcpStream>>) -> Self {
+        Self {
+            transport: Transport::Tungstenite(Box::new(ws)),
+            version: None,
+        }
+    }
+
+    #[cfg(any(test, feature = "testing"))]
+    pub fn with_version(mut self, version: u16) -> Self {
+        self.version = Some(version);
+        self
+    }
+
+    pub fn version(&self) -> Option<u16> {
+        self.version
+    }
+
+    #[cfg(test)]
+    pub(crate) fn tungstenite_stream(&self) -> Option<&WebSocketStream<MaybeTlsStream<TcpStream>>> {
+        match &self.transport {
+            Transport::Tungstenite(ws) => Some(ws),
+            Transport::Axum(_) => None,
+        }
+    }
+
+    pub async fn agree_version(&mut self) -> Option<u16> {
+        if self.version.is_none() {
+            self.version = self.agree().await;
+        }
+
+        self.version
+    }
+
+    async fn agree(&mut self) -> Option<u16> {
+        self.transport
+            .send_bytes(version_frame(&PROTO_VERSIONS))
+            .await
+            .ok()?;
+
+        let frame = self.transport.recv_bytes().await?;
+        match agree(&PROTO_VERSIONS, &frame) {
+            Ok(version) => {
+                debug!(version, "agreed on the /proto version");
+                Some(version)
+            }
+            Err(reason) => {
+                warn!(%reason, "closing /proto connection");
+                self.transport.close(reason).await;
+                None
+            }
+        }
+    }
+
+    async fn recv_bytes(&mut self) -> Option<Bytes> {
+        self.agree_version().await?;
+        self.transport.recv_bytes().await
+    }
+
+    async fn send_bytes(&mut self, bytes: Bytes) -> Result<(), SendError> {
+        self.agree_version().await.ok_or(SendError::Closed)?;
+        self.transport.send_bytes(bytes).await
+    }
+
+    pub async fn recv_server_msg(&mut self) -> Option<ServerMessage> {
+        let bytes = self.recv_bytes().await?;
         let len = bytes.len();
         match ServerMessage::decode(bytes) {
             Ok(Inbound::Control(msg)) => {
@@ -362,15 +475,11 @@ impl ProtoSocket {
     }
 
     pub async fn recv_first_message(&mut self) -> Option<FirstMessage> {
-        let bytes = self.recv_bytes().await?.ok()?;
-        first_message(bytes)
+        first_message(self.recv_bytes().await?)
     }
 
     pub async fn recv_msg(&mut self) -> Option<ClientMessage> {
-        let bytes = match self.recv_bytes().await? {
-            Ok(b) => b,
-            Err(()) => return None,
-        };
+        let bytes = self.recv_bytes().await?;
         let len = bytes.len();
         match ClientMessage::decode(bytes) {
             Ok(Inbound::Control(msg)) => {
@@ -441,23 +550,28 @@ impl ProtoSocket {
         send_chunk_timeout: Duration,
         spawn: impl FnOnce(WriterTask),
     ) -> (MsgReader<In>, MsgWriter<Out>) {
+        let version = self
+            .version
+            .expect("the handshake agreed a protocol version before the split");
+
         let (tx, bulk_rx) = mpsc::channel::<Bytes>(WRITER_QUEUE_DEPTH);
         let (control_tx, control_rx) = mpsc::channel::<Bytes>(CONTROL_QUEUE_DEPTH);
         let writer = MsgWriter {
             tx,
             control_tx,
             send_chunk_timeout,
+            version,
             observer: None,
             _direction: PhantomData,
         };
         let lanes = WriterLanes::new(control_rx, bulk_rx);
-        let inner = match self {
-            Self::Axum(ws) => {
+        let inner = match self.transport {
+            Transport::Axum(ws) => {
                 let (sink, stream) = (*ws).split();
                 spawn(Box::pin(axum_writer_task(lanes, sink)));
                 ReaderInner::Axum(stream)
             }
-            Self::Tungstenite(ws) => {
+            Transport::Tungstenite(ws) => {
                 let (sink, stream) = (*ws).split();
                 spawn(Box::pin(tungstenite_writer_task(lanes, sink)));
                 ReaderInner::Tungstenite(stream)
@@ -466,6 +580,7 @@ impl ProtoSocket {
         (
             MsgReader {
                 inner,
+                version,
                 _direction: PhantomData,
             },
             writer,
@@ -484,7 +599,10 @@ impl ReaderInner {
             match self {
                 Self::Axum(s) => match s.next().await? {
                     Ok(AxumMessage::Binary(bytes)) => return Some(bytes),
-                    Ok(AxumMessage::Close(_)) => return None,
+                    Ok(AxumMessage::Close(frame)) => {
+                        log_close_reason(frame.as_ref().map_or("", |f| f.reason.as_str()));
+                        return None;
+                    }
                     Ok(_) => continue,
                     Err(e) => {
                         warn!(error = %e, "WebSocket recv error");
@@ -493,8 +611,10 @@ impl ReaderInner {
                 },
                 Self::Tungstenite(s) => match s.next().await? {
                     Ok(TungsteniteMessage::Binary(bytes)) => return Some(bytes),
-                    Ok(TungsteniteMessage::Close(_)) => return None,
-                    Ok(TungsteniteMessage::Ping(_) | TungsteniteMessage::Pong(_)) => continue,
+                    Ok(TungsteniteMessage::Close(frame)) => {
+                        log_close_reason(frame.as_ref().map_or("", |f| f.reason.as_str()));
+                        return None;
+                    }
                     Ok(_) => continue,
                     Err(e) => {
                         warn!(error = %e, "WebSocket recv error");
@@ -508,11 +628,18 @@ impl ReaderInner {
 
 pub struct MsgReader<M> {
     inner: ReaderInner,
+    version: u16,
     _direction: PhantomData<M>,
 }
 
 pub type ProtoReader = MsgReader<ClientMessage>;
 pub type ServerReader = MsgReader<ServerMessage>;
+
+impl<M> MsgReader<M> {
+    pub fn version(&self) -> u16 {
+        self.version
+    }
+}
 
 impl<M: WireMessage> MsgReader<M> {
     pub async fn recv(&mut self) -> Option<Inbound<M>> {
@@ -538,6 +665,7 @@ pub struct MsgWriter<M> {
     pub(crate) tx: mpsc::Sender<Bytes>,
     pub(crate) control_tx: mpsc::Sender<Bytes>,
     pub(crate) send_chunk_timeout: Duration,
+    pub(crate) version: u16,
     pub(crate) observer: Option<Arc<dyn MsgObserver<M>>>,
     pub(crate) _direction: PhantomData<M>,
 }
@@ -551,6 +679,7 @@ impl<M> Clone for MsgWriter<M> {
             tx: self.tx.clone(),
             control_tx: self.control_tx.clone(),
             send_chunk_timeout: self.send_chunk_timeout,
+            version: self.version,
             observer: self.observer.clone(),
             _direction: PhantomData,
         }
@@ -558,6 +687,10 @@ impl<M> Clone for MsgWriter<M> {
 }
 
 impl<M> MsgWriter<M> {
+    pub fn version(&self) -> u16 {
+        self.version
+    }
+
     pub fn with_observer(mut self, observer: Arc<dyn MsgObserver<M>>) -> Self {
         self.observer = Some(observer);
         self
@@ -570,6 +703,7 @@ impl<M> MsgWriter<M> {
             control_tx: tx.clone(),
             tx,
             send_chunk_timeout,
+            version: *PROTO_VERSIONS.end(),
             observer: None,
             _direction: PhantomData,
         };
@@ -797,7 +931,7 @@ pub async fn send_client_msg(socket: &mut ProtoSocket, msg: &ClientMessage) -> a
 pub fn accept_tungstenite(
     ws: tokio_tungstenite::WebSocketStream<MaybeTlsStream<TcpStream>>,
 ) -> ProtoSocket {
-    ProtoSocket::Tungstenite(Box::new(ws))
+    ProtoSocket::tungstenite(ws)
 }
 
 #[cfg(test)]
@@ -1147,6 +1281,7 @@ mod writer_tests {
                 tx,
                 control_tx,
                 send_chunk_timeout: timeout,
+                version: *PROTO_VERSIONS.end(),
                 observer: None,
                 _direction: PhantomData,
             },
@@ -1280,5 +1415,64 @@ mod first_message_tests {
         assert!(first_message(frame_of(&response)).is_none());
         assert!(first_message(frame_of(&ServerMessage::Draining)).is_none());
         assert!(first_message(Bytes::new()).is_none());
+    }
+}
+
+#[cfg(test)]
+mod agreement_tests {
+    use futures::{SinkExt, StreamExt};
+    use tokio::net::TcpListener;
+
+    use super::*;
+    use crate::testing::loopback;
+
+    #[tokio::test]
+    async fn both_sides_agree_on_the_newest_shared_version_before_the_first_message() {
+        let (mut accepted, mut dialing) = loopback().await;
+        let (received, sent) = tokio::join!(
+            accepted.recv_msg(),
+            dialing.send_client_msg(&ClientMessage::RequestJobList),
+        );
+
+        assert_eq!(sent, Ok(()));
+        assert_eq!(received, Some(ClientMessage::RequestJobList));
+        assert_eq!(accepted.version(), Some(*PROTO_VERSIONS.end()));
+        assert_eq!(dialing.version(), Some(*PROTO_VERSIONS.end()));
+    }
+
+    #[tokio::test]
+    async fn a_peer_without_a_version_frame_is_closed_with_the_reason() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let addr = listener.local_addr().expect("local addr");
+        let accept = async {
+            let (tcp, _) = listener.accept().await.expect("accept");
+            let ws = tokio_tungstenite::accept_async(MaybeTlsStream::Plain(tcp))
+                .await
+                .expect("upgrade");
+
+            ProtoSocket::tungstenite(ws)
+        };
+        let (mut server, client) = tokio::join!(
+            accept,
+            tokio_tungstenite::connect_async(format!("ws://{addr}"))
+        );
+
+        let (mut client, _) = client.expect("dial");
+        client
+            .send(TungsteniteMessage::Binary(Bytes::from_static(b"rkyv")))
+            .await
+            .expect("send");
+
+        assert_eq!(server.recv_msg().await, None);
+        let close = loop {
+            match client.next().await {
+                Some(Ok(TungsteniteMessage::Close(frame))) => break frame,
+                Some(Ok(_)) => continue,
+                other => panic!("expected a close frame, got {other:?}"),
+            }
+        };
+        let close = close.expect("a close frame with a reason");
+        assert_eq!(close.code, CloseCode::Protocol);
+        assert_eq!(close.reason.as_str(), "peer protocol is older than 27");
     }
 }

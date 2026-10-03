@@ -19,10 +19,9 @@
  *   1 - protocol/transport error
  */
 
-use futures::{SinkExt, StreamExt};
+use gradient_wire::client::dial;
 use gradient_wire::messages::{ClientMessage, GradientCapabilities, PROTO_VERSION, ServerMessage};
-use gradient_wire::session::frame::WireMessage;
-use tokio_tungstenite::{connect_async, tungstenite::Message};
+use gradient_wire::session::frame::ProtoSocket;
 use uuid::Uuid;
 
 #[tokio::main]
@@ -34,8 +33,8 @@ async fn main() {
     let worker_id = Uuid::now_v7().to_string();
     eprintln!("[probe] connecting to {url} as fresh worker_id={worker_id}");
 
-    let (mut ws, _resp) = match connect_async(&url).await {
-        Ok(pair) => pair,
+    let mut ws = match dial(&url).await {
+        Ok(socket) => socket,
         Err(e) => {
             eprintln!("[probe] WebSocket connect failed: {e}");
             std::process::exit(1);
@@ -103,41 +102,15 @@ async fn main() {
     }
 }
 
-async fn send(
-    ws: &mut tokio_tungstenite::WebSocketStream<
-        tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
-    >,
-    msg: &ClientMessage,
-) {
-    let bytes = msg.encode().expect("rkyv serialize");
-    ws.send(Message::Binary(bytes)).await.expect("ws send");
+async fn send(ws: &mut ProtoSocket, msg: &ClientMessage) {
+    ws.send_client_msg(msg).await.expect("ws send");
 }
 
-async fn recv(
-    ws: &mut tokio_tungstenite::WebSocketStream<
-        tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
-    >,
-) -> ServerMessage {
-    loop {
-        match ws.next().await {
-            Some(Ok(Message::Binary(bytes))) => {
-                return ServerMessage::decode(bytes)
-                    .and_then(|inbound| inbound.into_message())
-                    .expect("rkyv deserialize ServerMessage");
-            }
-            Some(Ok(Message::Ping(_) | Message::Pong(_))) => continue,
-            Some(Ok(other)) => {
-                eprintln!("[probe] non-binary frame: {other:?}");
-                std::process::exit(1);
-            }
-            Some(Err(e)) => {
-                eprintln!("[probe] ws recv error: {e}");
-                std::process::exit(1);
-            }
-            None => {
-                eprintln!("[probe] connection closed by server");
-                std::process::exit(1);
-            }
-        }
-    }
+async fn recv(ws: &mut ProtoSocket) -> ServerMessage {
+    let Some(msg) = ws.recv_server_msg().await else {
+        eprintln!("[probe] connection closed by server");
+        std::process::exit(1);
+    };
+
+    msg
 }

@@ -26,9 +26,15 @@ pub struct ProtoConnection {
 impl ProtoConnection {
     #[instrument(skip_all, fields(%url))]
     pub async fn open(url: &str) -> Result<Self> {
-        let socket = gradient_wire::client::dial(url)
+        let mut socket = gradient_wire::client::dial(url)
             .await
             .with_context(|| format!("failed to connect to {url}"))?;
+
+        socket
+            .agree_version()
+            .await
+            .with_context(|| format!("{url} shares no protocol version with this worker"))?;
+
         Ok(Self {
             server_version: 0,
             socket,
