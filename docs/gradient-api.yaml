@@ -253,18 +253,20 @@ paths:
       tags: [general]
       summary: Binary WebSocket protocol endpoint
       description: |-
-        Upgrades the connection to a WebSocket carrying rkyv-encoded binary
-        frames. The upgrade always succeeds; a server with
-        `GRADIENT_PROTO_DISCOVERABLE=false` then rejects the handshake of a
-        worker it did not dial itself with a `403` reject frame.
+        Upgrades the connection to a WebSocket carrying binary frames encoded
+        by the `Proto` derive of `gradient-wire`. The upgrade always succeeds; a
+        server with `GRADIENT_PROTO_DISCOVERABLE=false` then rejects the
+        handshake of a worker it did not dial itself with a `403` reject frame.
 
         **Protocol flow**
-        1. Client sends `ClientMessage::InitConnection { version, features }`.
-        2. Server responds with `ServerMessage::InitAck { version, features }`
-           containing the negotiated protocol version and activated feature flags.
-        3. Further message types will be added as the protocol evolves.
-
-        Messages are raw rkyv bytes sent as WebSocket binary frames.
+        1. Both sides send an 8-byte version frame (`GRAD`, oldest and newest
+           supported version as `u16` little-endian) and encode every later
+           frame for the highest shared version. Without one, the WebSocket
+           closes with code `1002` and the reason.
+        2. Client sends `ClientMessage::InitConnection { capabilities, id }`.
+        3. Server responds with `ServerMessage::AuthChallenge`, then
+           `ServerMessage::InitAck { capabilities, .. }` with the negotiated
+           capabilities.
       security: []
       operationId: protoWebSocket
       responses:
@@ -8188,7 +8190,7 @@ paths:
 
       | Endpoint | Description |
       |---|---|
-      | `GET /cache/{cache}/proto` | WebSocket upgrade carrying rkyv-encoded binary frames (same wire format as `/proto`). Read-only, cache-scoped. PUBLIC caches allow anonymous connections (governed by `GRADIENT_PROTO_ANONYMOUS_CACHE_ENABLE`, default `true`); PRIVATE caches require `Authorization: GRAD<key>`. Anonymous sessions are capped per IP by `GRADIENT_PROTO_ANONYMOUS_CACHE_MAX_CONNECTIONS_PER_IP`; the upgrade request shares the NAR-download cache rate-limit tier. Only `CacheQuery` (Normal/Pull modes) and `NarRequest` messages are accepted; Push, job RPCs, and worker registration are rejected. |
+      | `GET /cache/{cache}/proto` | WebSocket upgrade carrying the same binary frames as `/proto`. Read-only, cache-scoped. PUBLIC caches allow anonymous connections (governed by `GRADIENT_PROTO_ANONYMOUS_CACHE_ENABLE`, default `true`); PRIVATE caches require `Authorization: GRAD<key>`. Anonymous sessions are capped per IP by `GRADIENT_PROTO_ANONYMOUS_CACHE_MAX_CONNECTIONS_PER_IP`; the upgrade request shares the NAR-download cache rate-limit tier. Only `CacheQuery` (Normal/Pull modes) and `NarRequest` messages are accepted; Push, job RPCs, and worker registration are rejected. |
 
       ### Inspection surface
 

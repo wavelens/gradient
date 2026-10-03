@@ -13,7 +13,7 @@ flowchart LR
 
 ## Subprocess IPC
 
-- **Frames:** a `u32` little-endian length prefix plus an rkyv payload (`gradient-eval/src/ipc.rs`), the conventions of `/proto`.
+- **Frames:** a `u32` little-endian length prefix plus an rkyv payload (`gradient-eval/src/ipc.rs`).
 - **Version byte:** the subprocess is writing `EVAL_IPC_VERSION` (currently 6) before the first frame. A binary swapped mid-evaluation is failing the handshake instead of sending undecodable frames.
 - **Streamed resolve:** `Resolve` is answering with one `ResolveItem` per attribute as soon as the attribute is resolved. `ResolveEnd` is following with the batch's warnings and stats delta.
 - **Single responses:** every other request is one request, one response.

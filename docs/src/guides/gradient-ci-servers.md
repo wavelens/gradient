@@ -43,7 +43,7 @@ An offline entry is showing its last failure to members who manage workers.
 |---|---|
 | `dial failed: ...` or `dial timed out after 10 s` | Allow outbound HTTPS from the Gradient server to servers.gradient.ci. |
 | `401 unknown worker id or wrong token` | A deleted key or a mistyped token. **Disconnect** and connect with a new key. |
-| `400 protocol version mismatch: ...` | Gradient and servers.gradient.ci are on different protocol versions. Update Gradient. |
+| `handshake failed: no shared protocol version: ...` | Gradient and servers.gradient.ci share no protocol version. Update Gradient. |
 | `base worker not enabled by any project` | **Enable** the base server in a project. |
 | `no connection token stored; register the worker again` | A worker with a `url` registered before Gradient.CI Servers. Delete and register the worker again. |
 | `495 project has no cache subscribed` | Subscribe the project to a cache. |
