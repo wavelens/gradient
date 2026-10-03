@@ -43,10 +43,6 @@ impl ProtoConnection {
         }
     }
 
-    pub fn version(&self) -> Option<u16> {
-        self.socket.version()
-    }
-
     pub fn socket_mut(&mut self) -> &mut ProtoSocket {
         &mut self.socket
     }
