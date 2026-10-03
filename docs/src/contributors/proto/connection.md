@@ -1,12 +1,14 @@
 # Connection
 
-Workers talk to the server over one WebSocket at `/proto`, with binary [rkyv](https://rkyv.org/) frames. A session is running **handshake -> authorization -> capabilities -> job loop**.
+Workers talk to the server over one WebSocket at `/proto`, with binary frames from the `Proto` derive. A session is running **version agreement -> handshake -> authorization -> capabilities -> job loop**.
 
 ```mermaid
 sequenceDiagram
     participant W as Worker
     participant S as Server
-    W->>S: InitConnection { version, capabilities, id }
+    W->>S: version range
+    S->>W: version range
+    W->>S: InitConnection { capabilities, id }
     S->>W: AuthChallenge { peers }
     W->>S: AuthResponse { tokens }
     S->>W: InitAck { authorized_peers, failed_peers }
@@ -21,7 +23,7 @@ sequenceDiagram
 
 | Step | Message | Content |
 |---|---|---|
-| 1 | `InitConnection` | `version`, `capabilities`, the worker's persistent `id` |
+| 1 | `InitConnection` | `capabilities`, the worker's persistent `id` |
 | 2 | `AuthChallenge` | The peers that registered this worker ID |
 | 3 | `AuthResponse` | One token per challenged peer the worker is holding |
 | 4 | `InitAck` or `Reject` | Authorized peers, failed peers with reasons |
@@ -32,7 +34,7 @@ sequenceDiagram
 
 | Code | Reason |
 |---|---|
-| `400` | Wrong protocol version, or an unexpected message during the handshake |
+| `400` | An unexpected message during the handshake |
 | `401` | `no valid peer tokens provided` |
 | `403` | `unknown worker`, `worker is deactivated`, `base worker not enabled by any project`, or the server is not accepting connections |
 | `495` | `project has no cache subscribed`: every authorized project is lacking a cache |
@@ -46,15 +48,15 @@ The server is dialing every registration and base worker with a `url`. The serve
 sequenceDiagram
     participant S as Server
     participant W as Worker
-    S->>W: Authenticate { version, worker_id, tokens }
-    W->>S: InitConnection { version, capabilities, id }
+    S->>W: Authenticate { worker_id, tokens }
+    W->>S: InitConnection { capabilities, id }
     S->>W: InitAck { authorized_peers, failed_peers }
 ```
 
 | Step | Message | Content |
 |---|---|---|
-| 1 | `Authenticate` | `version`, the dialed `worker_id`, one `(peer, token)` per registration with a stored token at the dialed URL |
-| 2 | `InitConnection` or `Reject` | `401` for an unknown worker ID or any wrong token, `400` for another version |
+| 1 | `Authenticate` | The dialed `worker_id`, one `(peer, token)` per registration with a stored token at the dialed URL |
+| 2 | `InitConnection` or `Reject` | `401` for an unknown worker ID or any wrong token, `400` for any other first message |
 | 3 | `InitAck` or `Reject` | The projects whose tokens the worker accepted, without a challenge round |
 
 - The server is sending its tokens over `wss://`. A `ws://` URL is for local and operator setups only. The server is still sending the tokens and logging a warning.
@@ -140,9 +142,34 @@ sequenceDiagram
 - `Draining` is ending the session, never the worker process.
 - The worker is reconnecting once the server is back.
 
-## Versioning
+## Version Agreement
 
-`PROTO_VERSION` is `26` and is rising with every breaking wire change. Both sides must match exactly. `on_init_connection` and `on_authenticate` in `session::handshake` are covering every session kind.
+```text
+"GRAD" | oldest: u16 LE | newest: u16 LE
+```
+
+- Each side is sending this 8-byte frame before its first message. The frame format is never changing.
+- `ProtoSocket` is agreeing on the first send or receive. Both sides are sending first and reading second.
+- The agreed version is the lower of both newest versions. Every later frame is encoded for that version.
+- Two ranges without overlap are ending the session with close code `1002` and `no shared protocol version: ours 27..=27, peer 30..=31`.
+- A first frame without `GRAD` is coming from protocol 26 or older. The session is ending with `peer protocol is older than 27`.
+- Both sides are logging the reason at `warn`. A server dialing a worker is keeping the reason as the worker's offline reason.
+- `gradient_wire::PROTO_VERSIONS` is the supported range, computed from the `#[proto]` annotations.
+- `writer.version()` is exposing the agreed version for feature checks.
+
+## Changing a Message
+
+| Change | Annotation | Effect |
+|---|---|---|
+| New field | `#[proto(28)]` | Field present since 28. The oldest supported version is rising to 28 |
+| New field with a fallback | `#[proto(28, default)]` | Older peers are leaving the field out. Decoding is filling `Default::default()` |
+| New variant | `#[proto(28)]` on the variant | Appended at the end. Sending the variant to a peer below 28 is an `EncodeError` |
+| Removed or reordered field or variant, changed meaning | `#[proto(oldest = 30)]` on `ClientMessage` and `ServerMessage` | The oldest supported version is rising to 30 |
+
+- A field without `default` is required. A forgotten `default` is costing compatibility, never correctness.
+- Variants are append-only. A variant older than the one before is a compile error.
+- `gradient-wire/schema/v{N}.txt` is holding the wire shape of each supported version. The `schema` test is comparing the files to the code.
+- `cargo run --example wire_schema` is writing the file of a new version and deleting files below the oldest. Existing files are never rewritten.
 
 ## Cache Sessions
 
@@ -161,10 +188,9 @@ sequenceDiagram
 
 - One pure handshake state machine in `gradient-wire/src/session/handshake.rs` is driving every session.
 - The server is running `as_authority` for a worker dialing in and `as_dialer` for a worker the server is dialing. The worker is running `as_peer` and `as_dialed`.
-- The cache session is reusing the version gate.
+- The cache session is agreeing on a version like every other session.
 - `session/frame.rs` is splitting each socket into a typed reader and a writer. The writer is holding a control lane and a bulk lane.
 - Control is going first. A bulk batch is holding at most 256 KiB.
 - A full bulk queue is never blocking control replies.
-- Validation of frames is happening where the socket put them.
 - Chunk payloads (`NarPush`, `UploadChunk`, `EvalCacheChunk`, `LogChunk`) reach the handler as slices of the frame, without a copy.
 - `client::dial` is disabling Nagle's algorithm on every socket. Small control frames go out without waiting for a delayed ACK.

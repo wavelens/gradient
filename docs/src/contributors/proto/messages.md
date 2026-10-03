@@ -6,9 +6,9 @@ Every message on `/proto`, from `backend/gradient-wire/src/messages`. IDs (`job_
 
 | Message | Purpose | Key fields |
 |---|---|---|
-| `Authenticate` | First message of a server-dialed session | `version`, `worker_id`, `tokens` |
+| `Authenticate` | First message of a server-dialed session | `worker_id`, `tokens` |
 | `AuthChallenge` | Peers that registered this worker | `peers` |
-| `InitAck` | Handshake accepted | `version`, `capabilities`, `authorized_peers`, `failed_peers` |
+| `InitAck` | Handshake accepted | `capabilities`, `authorized_peers`, `failed_peers` |
 | `AuthUpdate` | Result of a reauth | `authorized_peers`, `failed_peers` |
 | `Reject` | Declining the session, then closing | `code`, `reason` |
 | `Error` | Protocol error | `code`, `message` |
@@ -37,7 +37,7 @@ Every message on `/proto`, from `backend/gradient-wire/src/messages`. IDs (`job_
 
 | Message | Purpose | Key fields |
 |---|---|---|
-| `InitConnection` | First message | `version`, `capabilities`, `id` |
+| `InitConnection` | First message | `capabilities`, `id` |
 | `AuthResponse` | One token per challenged peer | `tokens` |
 | `ReauthRequest` | Asking for a new `AuthChallenge` | - |
 | `Reject` | Declining a server-dialed session before `InitConnection` (`400`, `401`) | `code`, `reason` |
