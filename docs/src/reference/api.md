@@ -66,7 +66,7 @@ Each path is upgrading to a WebSocket and pushing one [event envelope](events.md
 |---|---|
 | `/tasks/{project}/{task}/live` | `evaluation.<phase>`, `evaluation.progress`, `evaluation.activity` and `build.status_changed` of the task's evaluations |
 | `/evals/{evaluation}/live` | The same, for one evaluation |
-| `/builds/{build}/live` | The same for the build's evaluation, plus `build.progress` with downloaded and total bytes |
+| `/builds/{build}/live` | `evaluation.<phase>`, `evaluation.progress` and `build.status_changed` of the build's evaluation, plus `build.progress` with downloaded and total bytes |
 | `/board/live` | `worker.queue_depth`, `worker.job_dispatched`, `worker.connected`, and `worker.disconnected` for superusers |
 | `/board/cache/live` | `cache.changed`, a ping to refetch `/board/cache` |
 
