@@ -23,6 +23,14 @@ use crate::worker_pool::{DownloadTarget, InputBoard, InputFetcher};
 pub struct FetchOutcome {
     pub source_path: String,
     pub input_paths: Vec<String>,
+    pub progress: Option<EvalProgress>,
+}
+
+#[derive(Debug)]
+struct FetchedInputs {
+    paths: Vec<String>,
+    warnings: Vec<String>,
+    progress: Option<EvalProgress>,
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
@@ -118,9 +126,8 @@ pub async fn fetch_repository(
     let key_env = ssh_key_env(ssh_key.as_deref(), binpath_ssh).await?;
     let git_ssh_command = key_env.as_ref().map(|(_, command)| command.clone());
     let sink = updater.eval_progress_sink();
-    let (mut input_paths, input_warnings) =
-        fetch_inputs(inputs, store, fetcher, &*sink, git_ssh_command, &mut abort).await?;
-    for msg in &input_warnings {
+    let fetched = fetch_inputs(inputs, store, fetcher, &*sink, git_ssh_command, &mut abort).await?;
+    for msg in &fetched.warnings {
         updater
             .send_eval_message(
                 gradient_wire::types::EvalMessageLevel::Warning,
@@ -129,12 +136,14 @@ pub async fn fetch_repository(
             )
             .await?;
     }
+    let mut input_paths = fetched.paths;
     input_paths.push(source_path.clone());
     require_present(store, &input_paths).await?;
     info!(%source_path, inputs = input_paths.len(), "flake inputs in the nix store");
     Ok(FetchOutcome {
         source_path,
         input_paths,
+        progress: fetched.progress,
     })
 }
 
@@ -263,7 +272,7 @@ async fn fetch_inputs(
     sink: &dyn EvalProgressSink,
     git_ssh_command: Option<String>,
     abort: &mut watch::Receiver<bool>,
-) -> Result<(Vec<String>, Vec<String>)> {
+) -> Result<FetchedInputs> {
     let paths: Vec<String> = inputs.iter().map(|i| i.store_path.clone()).collect();
     let missing: HashSet<String> = missing_paths(store, &paths).await?.into_iter().collect();
     let board = InputBoard::new(
@@ -350,7 +359,11 @@ async fn fetch_inputs(
     all.sort();
     all.dedup();
     warnings.sort();
-    Ok((all, warnings))
+    Ok(FetchedInputs {
+        paths: all,
+        warnings,
+        progress: snapshot(),
+    })
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
@@ -1116,7 +1129,9 @@ mod tests {
             input("b", "github.com", "bad"),
             input("c", "gitlab.com", "c"),
         ];
-        let (paths, warnings) = fetch_inputs(
+        let FetchedInputs {
+            paths, warnings, ..
+        } = fetch_inputs(
             inputs,
             &store,
             &fetcher,
@@ -1152,7 +1167,7 @@ mod tests {
     async fn inputs_sharing_a_source_return_it_once() {
         let fetcher = FakeFetcher::new("");
         let reporter = RecordingJobReporter::new();
-        let (paths, _) = fetch_inputs(
+        let FetchedInputs { paths, .. } = fetch_inputs(
             vec![
                 input("systems", "github.com", "systems"),
                 input("systems_2", "github.com", "systems"),
@@ -1173,7 +1188,7 @@ mod tests {
         let fetcher = FakeFetcher::new("");
         let reporter = RecordingJobReporter::new();
         let store = FakeWorkerStore::new().with_present_path("/nix/store/a-source");
-        let (paths, _) = fetch_inputs(
+        let FetchedInputs { paths, .. } = fetch_inputs(
             vec![input("a", "github.com", "a")],
             &store,
             &fetcher,
@@ -1188,10 +1203,45 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_present_input_is_a_done_row_next_to_a_missing_one() {
+        let fetcher = FakeFetcher::new("");
+        let reporter = RecordingJobReporter::new();
+        let store = FakeWorkerStore::new().with_present_path("/nix/store/a-source");
+        let fetched = fetch_inputs(
+            vec![input("a", "github.com", "a"), input("b", "github.com", "b")],
+            &store,
+            &fetcher,
+            &*reporter.eval_progress_sink(),
+            None,
+            &mut no_abort(),
+        )
+        .await
+        .unwrap();
+        let Some(EvalProgress::Fetching { inputs }) = fetched.progress else {
+            panic!("no final fetch snapshot");
+        };
+        let rows: Vec<_> = inputs
+            .iter()
+            .map(|i| (i.name.as_str(), i.state, i.downloaded_bytes))
+            .collect();
+        assert_eq!(
+            rows,
+            vec![
+                ("a", InputFetchState::Done, 0),
+                ("b", InputFetchState::Done, 10),
+            ]
+        );
+        let Some(ReportedEvent::EvalProgress(sent)) = reporter.events().last().cloned() else {
+            panic!("the final snapshot was not sent");
+        };
+        assert_eq!(sent, EvalProgress::Fetching { inputs });
+    }
+
+    #[tokio::test]
     async fn no_rows_sends_no_progress() {
         let fetcher = FakeFetcher::new("");
         let reporter = RecordingJobReporter::new();
-        let (paths, _) = fetch_inputs(
+        let FetchedInputs { paths, .. } = fetch_inputs(
             vec![],
             &FakeWorkerStore::default(),
             &fetcher,
