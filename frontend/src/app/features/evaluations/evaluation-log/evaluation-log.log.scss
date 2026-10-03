@@ -306,25 +306,5 @@
 
 .download-bar {
   width: min(28rem, 80%);
-  height: 6px;
-  overflow: hidden;
-  border-radius: $border-radius-sm;
-  background: var(--gr-border-subtle);
-
-  .download-bar-fill {
-    height: 100%;
-    background: var(--gr-status-info);
-    transition: width 0.9s linear;
-  }
-
-  &--indeterminate .download-bar-fill {
-    animation: pulse 1.8s ease-in-out infinite;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .download-bar .download-bar-fill {
-    transition: none;
-    animation: none;
-  }
+  --segbar-h: 7px;
 }

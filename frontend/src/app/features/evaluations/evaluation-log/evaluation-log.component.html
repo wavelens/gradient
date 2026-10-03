@@ -296,16 +296,15 @@
           <div class="download-hint">
             <gr-icon name="download" class="download-icon" size="xl" />
             <span class="download-title">Downloading{{ d.percent === null ? '' : ' ' + d.percent + ' %' }}</span>
-            <div
+            <gr-segmented-bar
               class="download-bar"
+              [segments]="d.segments"
               role="progressbar"
-              [class.download-bar--indeterminate]="d.ratio === null"
+              aria-label="Download"
               [attr.aria-valuenow]="d.percent"
               aria-valuemin="0"
               aria-valuemax="100"
-            >
-              <div class="download-bar-fill" [style.width.%]="d.ratio === null ? 100 : d.ratio * 100"></div>
-            </div>
+            />
             <span class="download-sub">{{ d.label }}</span>
           </div>
         } @else {

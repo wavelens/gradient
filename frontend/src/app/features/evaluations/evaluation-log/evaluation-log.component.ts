@@ -50,14 +50,14 @@ import {
   MessageService,
   ToastComponent,
 } from '@gradient/ui/ui';
-import { EvalStatusBadgeComponent, InputFetchListComponent } from '@shared/ui';
+import { EvalStatusBadgeComponent, InputFetchListComponent, SegmentedBarComponent, byteSegments } from '@shared/ui';
 import { buildDuration, commitLabel, evaluationDuration, evaluationProgressText, formatEvaluationDuration, isPendingBuildStatus, isRunningEvaluationStatus } from '@shared/evaluation';
 import { environment } from '@environments/environment';
 
 @Component({
   selector: 'app-evaluation-log',
   standalone: true,
-  imports: [CommonModule, RouterModule, LoadingSpinnerComponent, ButtonComponent, DialogComponent, IconComponent, BadgeComponent, EvalStatusBadgeComponent, InputDirective, InputFetchListComponent, MenuComponent, MessageBannerComponent, ToastComponent, WritableDirective],
+  imports: [CommonModule, RouterModule, LoadingSpinnerComponent, ButtonComponent, DialogComponent, IconComponent, BadgeComponent, EvalStatusBadgeComponent, InputDirective, InputFetchListComponent, MenuComponent, MessageBannerComponent, SegmentedBarComponent, ToastComponent, WritableDirective],
   providers: [MessageService],
   templateUrl: './evaluation-log.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
@@ -185,7 +185,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     const d = this.download();
     if (!d) return null;
     const ratio = downloadRatio(d);
-    return { ratio, percent: ratio === null ? null : Math.floor(ratio * 100), label: downloadLabel(d) };
+    return { percent: ratio === null ? null : Math.floor(ratio * 100), segments: byteSegments(d.downloaded, d.total), label: downloadLabel(d) };
   });
 
   errorMessages = computed(() => this.messages().filter(m => m.level === 'Error'));
