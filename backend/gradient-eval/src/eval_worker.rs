@@ -12,7 +12,7 @@ use crate::frames::Frames;
 use crate::ipc::{
     EVAL_IPC_VERSION, EvalRequest, EvalResponse, ResolvedItem, decode_request, read_frame,
 };
-use crate::nix_eval::NixEvaluator;
+use crate::nix_eval::{NixEvaluator, StatsReader};
 
 pub fn run_eval_worker() -> std::io::Result<()> {
     let mut stdout = std::io::stdout();
@@ -38,8 +38,12 @@ pub fn run_eval_worker() -> std::io::Result<()> {
     let (stop, stopped) = std::sync::mpsc::channel::<()>();
 
     std::thread::scope(|scope| {
-        if let Some(ev) = evaluator.as_ref().filter(|_| collect_stats) {
-            scope.spawn(move || tick_stats(frames, ev, &stopped));
+        if let Some(reader) = evaluator
+            .as_ref()
+            .filter(|_| collect_stats)
+            .map(NixEvaluator::stats_reader)
+        {
+            scope.spawn(move || tick_stats(frames, reader, &stopped));
         }
         let served = serve(
             &mut std::io::stdin().lock(),
@@ -56,14 +60,14 @@ const STATS_TICK: std::time::Duration = std::time::Duration::from_secs(1);
 
 fn tick_stats<W: Write>(
     frames: &Frames<W>,
-    ev: &NixEvaluator,
+    reader: StatsReader<'_>,
     stopped: &std::sync::mpsc::Receiver<()>,
 ) {
     let Ok(ctx) = nix_bindings::Context::new_no_load_config() else {
         return;
     };
     while let Err(std::sync::mpsc::RecvTimeoutError::Timeout) = stopped.recv_timeout(STATS_TICK) {
-        if let Ok(now) = ev.stats_with(&ctx)
+        if let Ok(now) = reader.read(&ctx)
             && frames.tick(now).is_err()
         {
             return;
