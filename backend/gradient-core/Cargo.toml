@@ -55,7 +55,6 @@ ring                  = { workspace = true }
 rustls                = { workspace = true }
 rustls-native-certs   = { workspace = true }
 webpki-roots          = { workspace = true }
-rkyv                  = { workspace = true }
 sea-orm               = { workspace = true }
 sea-orm-migration     = { workspace = true }
 serde                 = { workspace = true }

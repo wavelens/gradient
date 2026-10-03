@@ -32,14 +32,14 @@ use super::socket::{
 };
 use super::upload::{UploadSession, UploadTable, abandon_transfer};
 use gradient_wire::messages::{ClientMessage, GradientCapabilities, ServerMessage};
-use gradient_wire::session::frame::{Inbound, ProtoReader};
+use gradient_wire::session::frame::ProtoReader;
 
 pub const SESSION_DRAIN_BUDGET: Duration = Duration::from_secs(20);
 
 const IN_FLIGHT_STAMP: Duration = Duration::from_secs(5);
 
 pub enum SessionMsg {
-    Frame(Inbound<ClientMessage>, RpcReplyPort<bool>),
+    Frame(ClientMessage, RpcReplyPort<bool>),
     Signal(SessionSignal),
     Reattach,
     ReaderClosed,
@@ -132,10 +132,12 @@ impl Actor for SessionActor {
         let send_chunk_timeout = Duration::from_secs(nar_cfg.send_chunk_timeout_secs);
         let max_serves = nar_cfg.max_concurrent_serves;
         let (reader, writer) = socket.split(send_chunk_timeout, &state.shutdown);
-        let writer = writer.with_observer(Arc::new(super::tap::ServerTap {
+        let tap = Arc::new(super::tap::ProtoTap {
             bus: state.events.clone(),
             worker_id: peer_id.clone(),
-        }));
+        });
+        let reader = reader.with_observer(tap.clone());
+        let writer = writer.with_observer(tap);
         let active = ActiveJobs::default();
         let rpc = RpcContext::new(
             Arc::clone(&state),
@@ -189,7 +191,7 @@ impl Actor for SessionActor {
         st: &mut Self::State,
     ) -> Result<(), ActorProcessingErr> {
         match msg {
-            SessionMsg::Frame(inbound, reply) => {
+            SessionMsg::Frame(msg, reply) => {
                 let keep = {
                     let mut ctx = InboundContext {
                         writer: &st.writer,
@@ -203,7 +205,7 @@ impl Actor for SessionActor {
                         dialed: st.dialed.as_ref(),
                     };
 
-                    ctx.handle(inbound, &mut st.uploads).await
+                    ctx.handle(msg, &mut st.uploads).await
                 };
                 let _ = reply.send(keep);
 
@@ -271,7 +273,7 @@ impl Actor for SessionActor {
                 let msg = ServerMessage::ClusterSignal {
                     attempt,
                     from,
-                    payload,
+                    payload: payload.into(),
                 };
                 if send_server_msg(&st.writer, &msg).await.is_err() {
                     myself.stop(Some("write failed".into()));
@@ -428,15 +430,9 @@ async fn read_loop(
             inbound = recv_client_msg(&mut reader), if unanswered.len() < READ_AHEAD => {
                 let Some(inbound) = inbound else { break };
                 stamp();
-                let inbound = match inbound {
-                    Inbound::Control(msg) => match serve(msg) {
-                        Some(msg) => Inbound::Control(msg),
-                        None => continue,
-                    },
-                    bulk => bulk,
-                };
+                let Some(msg) = serve(inbound) else { continue };
                 let (reply, answered) = oneshot::channel();
-                if session.send_message(SessionMsg::Frame(inbound, reply.into())).is_err() {
+                if session.send_message(SessionMsg::Frame(msg, reply.into())).is_err() {
                     return;
                 }
                 unanswered.push_back(answered);
@@ -504,7 +500,8 @@ mod tests {
     use super::*;
     use futures::{SinkExt, StreamExt};
     use gradient_test_support::prelude::*;
-    use gradient_wire::session::frame::WireMessage;
+    use gradient_wire::PROTO_VERSIONS;
+    use gradient_wire::codec::{from_bytes, to_bytes};
     use sea_orm::{DatabaseBackend, MockDatabase};
     use tokio::net::{TcpListener, TcpStream};
     use tokio::sync::Notify;
@@ -591,7 +588,7 @@ mod tests {
         let (client, server) = tokio::join!(dial, accept);
 
         (
-            ProtoSocket::tungstenite(server).with_version(*gradient_wire::PROTO_VERSIONS.end()),
+            ProtoSocket::tungstenite(server).with_version(*PROTO_VERSIONS.end()),
             client.unwrap().0,
         )
     }
@@ -634,10 +631,7 @@ mod tests {
             panic!("expected a binary frame, got {frame:?}");
         };
         assert_eq!(
-            ServerMessage::decode(bytes)
-                .unwrap()
-                .into_message()
-                .unwrap(),
+            from_bytes::<ServerMessage>(bytes, *PROTO_VERSIONS.end()).unwrap(),
             ServerMessage::AbortCluster {
                 attempt: "a1".into(),
                 reason: "member lost".into(),
@@ -681,10 +675,7 @@ mod tests {
             panic!("expected a binary frame, got {frame:?}");
         };
         assert!(matches!(
-            ServerMessage::decode(bytes)
-                .unwrap()
-                .into_message()
-                .unwrap(),
+            from_bytes::<ServerMessage>(bytes, *PROTO_VERSIONS.end()).unwrap(),
             ServerMessage::Draining
         ));
         assert!(
@@ -708,7 +699,7 @@ mod tests {
 
         client
             .send(Message::Binary(
-                ClientMessage::ReauthRequest.encode().unwrap(),
+                to_bytes(&ClientMessage::ReauthRequest, *PROTO_VERSIONS.end()).unwrap(),
             ))
             .await
             .unwrap();
@@ -742,7 +733,7 @@ mod tests {
 
         client
             .send(Message::Binary(
-                ClientMessage::ReauthRequest.encode().unwrap(),
+                to_bytes(&ClientMessage::ReauthRequest, *PROTO_VERSIONS.end()).unwrap(),
             ))
             .await
             .unwrap();
@@ -792,7 +783,9 @@ mod tests {
             },
         ] {
             client
-                .send(Message::Binary(msg.encode().unwrap()))
+                .send(Message::Binary(
+                    to_bytes(&msg, *PROTO_VERSIONS.end()).unwrap(),
+                ))
                 .await
                 .unwrap();
         }

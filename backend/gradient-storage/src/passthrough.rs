@@ -6,6 +6,7 @@
 
 use std::time::Duration;
 
+use bytes::Bytes;
 use futures::StreamExt;
 use gradient_util::telemetry::{STATS, metric};
 use gradient_wire::constants::BULK_CHUNK_SIZE;
@@ -247,7 +248,7 @@ pub async fn serve_nar(
                     &ServerMessage::NarPush {
                         job_id: job_id.to_owned(),
                         store_path: store_path.to_owned(),
-                        data: chunk,
+                        data: Bytes::from(chunk),
                         offset,
                         is_final: false,
                     },
@@ -278,7 +279,7 @@ pub async fn serve_nar(
         &ServerMessage::NarPush {
             job_id: job_id.to_owned(),
             store_path: store_path.to_owned(),
-            data: buf,
+            data: Bytes::from(buf),
             offset,
             is_final: true,
         },
@@ -300,9 +301,10 @@ pub async fn serve_nar(
 mod tests {
     use std::time::Duration;
 
+    use gradient_wire::PROTO_VERSIONS;
+    use gradient_wire::codec::from_bytes;
     use gradient_wire::constants::BULK_CHUNK_SIZE;
     use gradient_wire::messages::ServerMessage;
-    use gradient_wire::session::frame::WireMessage;
     use tempfile::TempDir;
 
     use super::*;
@@ -356,8 +358,7 @@ mod tests {
         drop(writer);
         let mut frames = Vec::new();
         while let Some(bytes) = sent.recv().await {
-            let inbound = ServerMessage::decode(bytes).expect("decode");
-            frames.push(inbound.into_message().expect("deserialize"));
+            frames.push(from_bytes(bytes, *PROTO_VERSIONS.end()).expect("decode"));
         }
         (result, frames)
     }

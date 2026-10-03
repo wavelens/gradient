@@ -7,6 +7,7 @@
 use std::io::Write as _;
 
 use anyhow::{Context, Result, bail};
+use bytes::Bytes;
 use futures::StreamExt;
 use gradient_util::nix_hash::nix32_encode;
 use gradient_wire::messages::{ClientMessage, NAR_ZSTD_LEVEL};
@@ -340,7 +341,7 @@ impl<'a> PassthroughStream<'a> {
         self.writer
             .send(ClientMessage::UploadChunk {
                 request_id: self.request_id,
-                data: Vec::new(),
+                data: Bytes::new(),
                 offset: self.produced,
                 is_final: true,
             })
@@ -356,7 +357,7 @@ impl PartSink for PassthroughStream<'_> {
             self.writer
                 .send(ClientMessage::UploadChunk {
                     request_id: self.request_id,
-                    data,
+                    data: Bytes::from(data),
                     offset,
                     is_final: false,
                 })
@@ -544,10 +545,8 @@ mod tests {
         let uploads = UploadClient::new(writer, 4);
         let delivered = uploads.clone();
         let pump = tokio::spawn(async move {
-            while let Some(inbound) = reader.recv().await {
-                if let gradient_wire::Inbound::Control(msg) = inbound {
-                    delivered.deliver(msg);
-                }
+            while let Some(msg) = reader.recv().await {
+                delivered.deliver(msg);
             }
         });
         (uploads, pump)

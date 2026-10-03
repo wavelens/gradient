@@ -174,7 +174,7 @@ async fn stream_blob_inline(
                     writer,
                     &ServerMessage::EvalCacheChunk {
                         job_id: job_id.to_owned(),
-                        data: chunk,
+                        data: chunk.into(),
                         offset,
                         is_final: false,
                     },
@@ -196,7 +196,7 @@ async fn stream_blob_inline(
         writer,
         &ServerMessage::EvalCacheChunk {
             job_id: job_id.to_owned(),
-            data: buf,
+            data: buf.into(),
             offset,
             is_final: true,
         },

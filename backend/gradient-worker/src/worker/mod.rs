@@ -242,11 +242,10 @@ async fn perform_setup(
             perform_handshake(conn, peer_id, config.peer_tokens(), config.capabilities()).await?
         }
     };
-    conn.set_server_version(handshake.server_version);
     info!(
         ?side,
         negotiated = ?handshake.negotiated,
-        server_version = conn.server_version(),
+        version = handshake.version,
         "capabilities negotiated"
     );
     if handshake.negotiated.build {

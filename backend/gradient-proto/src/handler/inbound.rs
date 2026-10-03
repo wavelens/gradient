@@ -21,10 +21,8 @@ use gradient_scheduler::actor::{WorkerCapabilities, WorkerMetrics};
 use gradient_scheduler::jobs::{Assignment, PendingJob};
 use gradient_scheduler::{ReportedTimeline, Scheduler};
 use gradient_wire::messages::{
-    ArchivedClientMessage, CACHE_QUERY_BUDGET, CandidateScore, ClientMessage, ClusterMembership,
-    JobKind, ServerMessage,
+    CACHE_QUERY_BUDGET, CandidateScore, ClientMessage, ClusterMembership, JobKind, ServerMessage,
 };
-use gradient_wire::session::frame::{Frame, Inbound};
 use gradient_wire::types::{
     BuildProgressPhase as WireBuildProgressPhase, EvalProgress as WireEvalProgress,
 };
@@ -153,52 +151,7 @@ pub(super) struct InboundContext<'a> {
 }
 
 impl<'a> InboundContext<'a> {
-    pub async fn handle(
-        &mut self,
-        inbound: Inbound<ClientMessage>,
-        uploads: &mut UploadSession,
-    ) -> bool {
-        super::tap::publish_inbound(&self.state.events, self.peer_id, &inbound);
-        match inbound {
-            Inbound::Bulk(frame) => {
-                self.handle_bulk(frame, uploads).await;
-                true
-            }
-            Inbound::Control(msg) => self.handle_control(msg, uploads).await,
-        }
-    }
-
-    async fn handle_bulk(&mut self, frame: Frame<ClientMessage>, uploads: &mut UploadSession) {
-        trace!(variant = frame.variant_name(), "received bulk frame");
-        match frame.archived() {
-            ArchivedClientMessage::UploadChunk {
-                request_id,
-                data,
-                offset,
-                is_final,
-            } => {
-                self.on_upload_chunk(
-                    request_id.to_native(),
-                    offset.to_native(),
-                    data.as_slice(),
-                    *is_final,
-                    uploads,
-                )
-                .await;
-            }
-            ArchivedClientMessage::LogChunk {
-                job_id,
-                task_index,
-                data,
-            } => {
-                self.on_log_chunk(job_id.as_str(), task_index.to_native(), data.as_slice())
-                    .await;
-            }
-            _ => warn!("non-bulk variant routed to the bulk lane"),
-        }
-    }
-
-    async fn handle_control(&mut self, msg: ClientMessage, uploads: &mut UploadSession) -> bool {
+    pub async fn handle(&mut self, msg: ClientMessage, uploads: &mut UploadSession) -> bool {
         trace!(variant = msg.variant_name(), "received client message");
         match msg {
             ClientMessage::InitConnection { .. } => {
@@ -256,7 +209,7 @@ impl<'a> InboundContext<'a> {
                 payload,
             } => {
                 self.scheduler
-                    .forward_cluster_signal(self.peer_id, &attempt, to, payload)
+                    .forward_cluster_signal(self.peer_id, &attempt, to, payload.into())
                     .await;
                 true
             }
@@ -434,8 +387,22 @@ impl<'a> InboundContext<'a> {
                 self.on_upload_finished(request_id, metadata, uploads).await;
                 true
             }
-            ClientMessage::UploadChunk { .. } | ClientMessage::LogChunk { .. } => {
-                warn!("bulk variant deserialised into the control lane");
+            ClientMessage::UploadChunk {
+                request_id,
+                data,
+                offset,
+                is_final,
+            } => {
+                self.on_upload_chunk(request_id, offset, &data, is_final, uploads)
+                    .await;
+                true
+            }
+            ClientMessage::LogChunk {
+                job_id,
+                task_index,
+                data,
+            } => {
+                self.on_log_chunk(&job_id, task_index, &data).await;
                 true
             }
         }
@@ -1032,7 +999,6 @@ pub(in crate::handler) mod fixture {
     use gradient_scheduler::jobs::PendingEvalJob;
     use gradient_storage::admission::Admitted;
     use gradient_types::ids::{CommitId, EvaluationId};
-    use gradient_wire::session::frame::WireMessage as _;
     use gradient_wire::types::{FlakeJob, FlakeSource, FlakeStep};
     use std::time::Duration;
     use tokio::sync::mpsc;
@@ -1168,10 +1134,11 @@ pub(in crate::handler) mod fixture {
     }
 
     pub(in crate::handler) fn decode(bytes: Bytes) -> ServerMessage {
-        ServerMessage::decode(bytes)
-            .expect("decode ServerMessage")
-            .into_message()
-            .expect("deserialise ServerMessage")
+        gradient_wire::codec::from_bytes::<ServerMessage>(
+            bytes,
+            *gradient_wire::PROTO_VERSIONS.end(),
+        )
+        .expect("deserialise ServerMessage")
     }
 }
 
@@ -1198,7 +1165,6 @@ mod assignment_response_tests {
     use crate::handler::job_events::SchedulerJobEvents;
     use gradient_test_support::prelude::*;
     use gradient_types::events::Event;
-    use gradient_wire::session::frame::WireMessage as _;
     use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
     use std::time::Duration;
 
@@ -1487,10 +1453,11 @@ mod assignment_response_tests {
             .await
             .expect("answered before the scheduler's call timeout")
             .expect("reply sent");
-        let reply = ServerMessage::decode(reply)
-            .expect("decode")
-            .into_message()
-            .expect("deserialise");
+        let reply = gradient_wire::codec::from_bytes::<ServerMessage>(
+            reply,
+            *gradient_wire::PROTO_VERSIONS.end(),
+        )
+        .expect("deserialise");
         assert!(
             matches!(
                 &reply,

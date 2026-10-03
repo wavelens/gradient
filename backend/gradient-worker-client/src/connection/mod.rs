@@ -8,9 +8,7 @@ pub mod handshake;
 
 use anyhow::{Context, Result};
 use gradient_wire::messages::{ClientMessage, ServerMessage};
-use gradient_wire::session::frame::{
-    ClientWriter, Inbound, ProtoSocket, ServerReader, accept_tungstenite,
-};
+use gradient_wire::session::frame::{ClientWriter, ProtoSocket, ServerReader, accept_tungstenite};
 use std::time::Duration;
 use tokio::net::TcpStream;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
@@ -19,7 +17,6 @@ use tracing::instrument;
 const SEND_TIMEOUT: Duration = Duration::from_secs(30);
 
 pub struct ProtoConnection {
-    pub server_version: u16,
     socket: ProtoSocket,
 }
 
@@ -35,25 +32,17 @@ impl ProtoConnection {
             .await
             .with_context(|| format!("{url} shares no protocol version with this worker"))?;
 
-        Ok(Self {
-            server_version: 0,
-            socket,
-        })
+        Ok(Self { socket })
     }
 
     pub fn from_accepted(socket: WebSocketStream<MaybeTlsStream<TcpStream>>) -> Self {
         Self {
-            server_version: 0,
             socket: accept_tungstenite(socket),
         }
     }
 
-    pub fn set_server_version(&mut self, version: u16) {
-        self.server_version = version;
-    }
-
-    pub fn server_version(&self) -> u16 {
-        self.server_version
+    pub fn version(&self) -> Option<u16> {
+        self.socket.version()
     }
 
     pub fn socket_mut(&mut self) -> &mut ProtoSocket {
@@ -137,7 +126,7 @@ pub struct ProtoReader {
 }
 
 impl ProtoReader {
-    pub async fn recv(&mut self) -> Option<Inbound<ServerMessage>> {
+    pub async fn recv(&mut self) -> Option<ServerMessage> {
         self.inner.recv().await
     }
 }

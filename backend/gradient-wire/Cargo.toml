@@ -24,7 +24,6 @@ bytes             = { workspace = true }
 futures           = { workspace = true }
 hex               = { workspace = true }
 password-auth     = { workspace = true }
-rkyv              = { workspace = true }
 serde             = { workspace = true }
 sha2              = { workspace = true }
 subtle            = { workspace = true }

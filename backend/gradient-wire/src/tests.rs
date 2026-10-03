@@ -5,7 +5,7 @@
  */
 
 /// Regression for #110. The `/proto` cap must exceed the largest legitimate frame, a 512 KiB
-/// `NarPush` plus rkyv overhead. It must stay well below tungstenite's 64 MiB default to keep a
+/// `NarPush` plus its encoding overhead. It must stay well below tungstenite's 64 MiB default to keep a
 /// malicious peer from forcing huge allocations.
 #[test]
 fn max_proto_message_size_is_sane() {

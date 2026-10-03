@@ -229,7 +229,6 @@ mod tests {
     use super::*;
     use gradient_storage::admission::{Admitted, ObjectKey};
     use gradient_test_support::state::test_state;
-    use gradient_wire::session::frame::WireMessage as _;
     use sea_orm::{DatabaseBackend, MockDatabase};
 
     async fn granted_permit(
@@ -280,10 +279,11 @@ mod tests {
         })
         .await;
 
-        let msg = ServerMessage::decode(sent.try_recv().unwrap())
-            .unwrap()
-            .into_message()
-            .unwrap();
+        let msg = gradient_wire::codec::from_bytes::<ServerMessage>(
+            sent.try_recv().unwrap(),
+            *gradient_wire::PROTO_VERSIONS.end(),
+        )
+        .unwrap();
         assert!(matches!(
             msg,
             ServerMessage::UploadCommitted {
@@ -324,10 +324,11 @@ mod tests {
         })
         .await;
 
-        let msg = ServerMessage::decode(sent.try_recv().unwrap())
-            .unwrap()
-            .into_message()
-            .unwrap();
+        let msg = gradient_wire::codec::from_bytes::<ServerMessage>(
+            sent.try_recv().unwrap(),
+            *gradient_wire::PROTO_VERSIONS.end(),
+        )
+        .unwrap();
         assert!(matches!(
             msg,
             ServerMessage::UploadCommitted {
@@ -428,10 +429,11 @@ mod tests {
         })
         .await;
 
-        let msg = ServerMessage::decode(sent.try_recv().unwrap())
-            .unwrap()
-            .into_message()
-            .unwrap();
+        let msg = gradient_wire::codec::from_bytes::<ServerMessage>(
+            sent.try_recv().unwrap(),
+            *gradient_wire::PROTO_VERSIONS.end(),
+        )
+        .unwrap();
         assert!(matches!(
             msg,
             ServerMessage::UploadCommitted {

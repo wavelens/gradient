@@ -356,10 +356,8 @@ mod tests {
         let client = UploadClient::new(writer, max);
         let pump_client = client.clone();
         let pump = tokio::spawn(async move {
-            while let Some(inbound) = reader.recv().await {
-                if let gradient_wire::Inbound::Control(msg) = inbound {
-                    pump_client.deliver(msg);
-                }
+            while let Some(msg) = reader.recv().await {
+                pump_client.deliver(msg);
             }
         });
         (client, accept.await.unwrap(), pump)

@@ -5,14 +5,15 @@
  */
 
 use crate::codec::agreement::{agree, version_frame};
+use crate::codec::{from_bytes, to_bytes};
 use crate::constants::BULK_CHUNK_SIZE;
 use crate::messages::{
-    CandidateScore, ClientMessage, GradientCapabilities, Job, JobCandidate, JobKind, PROTO_VERSION,
+    CandidateScore, ClientMessage, GradientCapabilities, Job, JobCandidate, JobKind,
     PROTO_VERSIONS, ServerMessage,
 };
-use crate::session::frame::WireMessage;
 use crate::types::{GrantTarget, NarUploadMetadata, UploadMetadata, UploadObject, UploadOutcome};
 use anyhow::{Context, Result};
+use bytes::Bytes;
 use futures::{SinkExt, StreamExt};
 use std::time::Duration;
 use tokio::net::{TcpListener, TcpStream};
@@ -63,7 +64,8 @@ pub struct MockServerConn {
 
 impl MockServerConn {
     pub async fn send(&mut self, msg: ServerMessage) -> Result<()> {
-        let bytes = msg.encode().context("failed to serialise ServerMessage")?;
+        let bytes =
+            to_bytes(&msg, *PROTO_VERSIONS.end()).context("failed to encode ServerMessage")?;
         self.socket
             .send(Message::Binary(bytes))
             .await
@@ -78,9 +80,8 @@ impl MockServerConn {
                     self.peer_version_read = true;
                 }
                 Some(Ok(Message::Binary(bytes))) => {
-                    return ClientMessage::decode(bytes)
-                        .and_then(|inbound| inbound.into_message())
-                        .context("failed to deserialise ClientMessage");
+                    return from_bytes(bytes, *PROTO_VERSIONS.end())
+                        .context("failed to decode ClientMessage");
                 }
                 Some(Ok(Message::Ping(_))) | Some(Ok(Message::Pong(_))) => continue,
                 Some(Ok(Message::Close(_))) => {
@@ -165,7 +166,6 @@ impl MockServerConn {
         self.recv_until(|msg| matches!(msg, ClientMessage::AuthResponse { .. }).then_some(()))
             .await?;
         self.send(ServerMessage::InitAck {
-            version: PROTO_VERSION,
             capabilities: negotiated,
             authorized_peers: vec![],
             failed_peers: vec![],
@@ -278,7 +278,7 @@ impl MockServerConn {
                         offset,
                         is_final,
                         ..
-                    } => Some(Arrival::Chunk(data, offset, is_final)),
+                    } => Some(Arrival::Chunk(data.to_vec(), offset, is_final)),
                     ClientMessage::UploadFinished { metadata, .. } => {
                         Some(Arrival::Finished(metadata))
                     }
@@ -345,7 +345,7 @@ impl MockServerConn {
             self.send(ServerMessage::NarPush {
                 job_id: job_id.clone(),
                 store_path: store_path.clone(),
-                data: chunk.to_vec(),
+                data: Bytes::copy_from_slice(chunk),
                 offset,
                 is_final: false,
             })
@@ -356,7 +356,7 @@ impl MockServerConn {
         self.send(ServerMessage::NarPush {
             job_id: job_id.clone(),
             store_path: store_path.clone(),
-            data: Vec::new(),
+            data: Bytes::new(),
             offset,
             is_final: true,
         })
@@ -466,7 +466,10 @@ mod tests {
                     target: GrantTarget::Passthrough { resume_offset: 0 },
                 }
             );
-            for (data, offset, is_final) in [(b"ab".to_vec(), 0, false), (Vec::new(), 2, true)] {
+            for (data, offset, is_final) in [
+                (Bytes::from_static(b"ab"), 0, false),
+                (Bytes::new(), 2, true),
+            ] {
                 socket
                     .send_client_msg(&ClientMessage::UploadChunk {
                         request_id: 7,

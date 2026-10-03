@@ -211,16 +211,12 @@ mod tests {
         uploads: UploadClient,
     ) -> tokio::task::JoinHandle<()> {
         tokio::spawn(async move {
-            while let Some(inbound) = reader.recv().await {
-                match inbound {
-                    gradient_wire::Inbound::Control(ServerMessage::CacheStatus {
-                        query_id,
-                        cached,
-                    }) => {
+            while let Some(msg) = reader.recv().await {
+                match msg {
+                    ServerMessage::CacheStatus { query_id, cached } => {
                         deliver_cache_reply(&cache_waiters, &query_id, Ok(cached));
                     }
-                    gradient_wire::Inbound::Control(msg) => uploads.deliver(msg),
-                    gradient_wire::Inbound::Bulk(_) => {}
+                    msg => uploads.deliver(msg),
                 }
             }
         })
