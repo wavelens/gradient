@@ -587,7 +587,7 @@ describe('EvaluationLogComponent', () => {
     it('shows the thunk count only until the first build appears', () => {
       const thunks = { kind: 'evaluating' as const, thunks: 1234567 };
       const before = setupLive(thunks, 'EvaluatingFlake');
-      expect(before.fixture.componentInstance.progressText()).toBe('Evaluating - 1,234,567 thunks');
+      expect(before.fixture.componentInstance.progressText()).toBe('1,234,567 thunks evaluated');
       before.fixture.destroy();
       TestBed.resetTestingModule();
 

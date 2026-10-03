@@ -24,7 +24,7 @@ export function phaseProgress(
 
 export function evaluationProgressText(progress: EvaluationProgress | null | undefined): string | null {
   if (progress?.kind !== 'evaluating') return null;
-  return `Evaluating - ${progress.thunks.toLocaleString('en-US')} thunks`;
+  return `${progress.thunks.toLocaleString('en-US')} thunks evaluated`;
 }
 
 export function inputFetchRatio(input: InputFetch): number | null {

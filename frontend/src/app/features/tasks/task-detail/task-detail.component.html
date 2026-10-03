@@ -162,8 +162,11 @@
           } @else if (isRunning(sel.status)) {
             @if (selectedFetchRows().length) {
               <div class="fetch-rows"><gr-input-fetch-list [inputs]="selectedFetchRows()" /></div>
+            } @else if (selectedProgressText(); as text) {
+              <gr-empty-state class="pkg-wait" flat icon="manage_search" title="Evaluating" [message]="text" />
             } @else {
-              <div class="pkg-wait">{{ selectedProgressText() ?? 'Evaluating, packages appear as their entry points are found...' }}</div>
+              <gr-empty-state class="pkg-wait" flat icon="hourglass_empty" title="Waiting for packages"
+                message="Packages appear as their entry points are found." />
             }
           } @else {
             <gr-empty-state flat icon="package_2" title="No packages"

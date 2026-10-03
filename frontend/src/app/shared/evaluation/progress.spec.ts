@@ -12,7 +12,7 @@ const row = (state: InputFetchState, downloaded_bytes: number, expected_bytes: n
 
 describe('evaluationProgressText', () => {
   it('formats thunks with separators', () => {
-    expect(evaluationProgressText({ kind: 'evaluating', thunks: 1234567 })).toBe('Evaluating - 1,234,567 thunks');
+    expect(evaluationProgressText({ kind: 'evaluating', thunks: 1234567 })).toBe('1,234,567 thunks evaluated');
   });
 
   it('has no text for fetching or missing progress', () => {
