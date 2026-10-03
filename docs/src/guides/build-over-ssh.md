@@ -38,12 +38,12 @@ cat ~/.ssh/gradient.pub
 programs.ssh.extraConfig = ''
   Host ci.example.com
     Port 2222
-    User myproject
+    User myproject # (1)!
     IdentityFile /root/.ssh/gradient
 '';
 ```
 
-`User` is the project name. A store URL without `myproject@` is taking the project from here.
+1.  The project name, used by store URLs without `myproject@`.
 
 The Nix daemon is opening the connection as `root` for substituters. Plain `nix copy` and `nixos-rebuild` are using the calling user's SSH setup.
 
