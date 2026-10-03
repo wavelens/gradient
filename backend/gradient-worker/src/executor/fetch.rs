@@ -347,6 +347,8 @@ async fn fetch_inputs(
             )),
         }
     }
+    all.sort();
+    all.dedup();
     warnings.sort();
     Ok((all, warnings))
 }
@@ -1144,6 +1146,26 @@ mod tests {
                 ("c", InputFetchState::Done, 10),
             ]
         );
+    }
+
+    #[tokio::test]
+    async fn inputs_sharing_a_source_return_it_once() {
+        let fetcher = FakeFetcher::new("");
+        let reporter = RecordingJobReporter::new();
+        let (paths, _) = fetch_inputs(
+            vec![
+                input("systems", "github.com", "systems"),
+                input("systems_2", "github.com", "systems"),
+            ],
+            &FakeWorkerStore::default(),
+            &fetcher,
+            &*reporter.eval_progress_sink(),
+            None,
+            &mut no_abort(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(paths, vec!["/nix/store/systems-source".to_owned()]);
     }
 
     #[tokio::test]
