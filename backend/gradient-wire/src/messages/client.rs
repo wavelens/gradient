@@ -4,18 +4,19 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use bytes::Bytes;
+
+use crate::codec::Proto;
 use crate::types::{
     BuildFailureKind, BuildProgressPhase, CandidateScore, ClusterAddress, EvalMessageLevel,
     EvalProgress, GradientCapabilities, JobKind, JobPhaseSpan, JobUpdateKind, QueryMode,
     UploadMetadata, UploadObject,
 };
-use rkyv::{Archive, Deserialize, Serialize};
 
-#[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq)]
-#[rkyv(derive(Debug, PartialEq))]
+#[derive(Proto, Debug, Clone, PartialEq)]
+#[proto(oldest = 27)]
 pub enum ClientMessage {
     InitConnection {
-        version: u16,
         capabilities: GradientCapabilities,
         id: String,
     },
@@ -107,7 +108,7 @@ pub enum ClientMessage {
     LogChunk {
         job_id: String,
         task_index: u32,
-        data: Vec<u8>,
+        data: Bytes,
     },
 
     NarRequest {
@@ -134,7 +135,7 @@ pub enum ClientMessage {
     ClusterSignal {
         attempt: String,
         to: Option<ClusterAddress>,
-        payload: Vec<u8>,
+        payload: Bytes,
     },
 
     CacheQuery {
@@ -172,7 +173,7 @@ pub enum ClientMessage {
     },
     UploadChunk {
         request_id: u64,
-        data: Vec<u8>,
+        data: Bytes,
         offset: u64,
         is_final: bool,
     },

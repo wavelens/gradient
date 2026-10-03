@@ -10,10 +10,9 @@ use std::sync::Arc;
 
 use anyhow::{Context as _, Result};
 use gradient_wire::messages::{
-    ArchivedServerMessage, BuildFailureKind, CachedPath, ClientMessage, ClusterAddress,
-    ClusterMembership, ClusterPeer, Job, JobCandidate, JobKind, ServerMessage,
+    BuildFailureKind, CachedPath, ClientMessage, ClusterAddress, ClusterMembership, ClusterPeer,
+    Job, JobCandidate, JobKind, ServerMessage,
 };
-use gradient_wire::session::frame::{Frame, Inbound};
 use tokio::sync::{mpsc, watch};
 use tracing::{debug, error, info, warn};
 
@@ -97,8 +96,7 @@ pub(super) async fn run_message_loop(
                 let kind = inbound.variant_name();
                 let result = match state.nar_recv.absorb(inbound).await {
                     None => Ok(()),
-                    Some(Inbound::Bulk(frame)) => state.route_bulk(frame).await,
-                    Some(Inbound::Control(msg)) => state.route(msg).await,
+                    Some(msg) => state.route(msg).await,
                 };
                 let elapsed_ms = started.elapsed().as_millis();
                 if elapsed_ms > 1_000 {
@@ -314,7 +312,7 @@ impl MessageLoopState {
                 from,
                 payload,
             } => {
-                if !self.channels.deliver(&attempt, from, payload) {
+                if !self.channels.deliver(&attempt, from, payload.into()) {
                     debug!(%attempt, "ClusterSignal for an attempt with no running member - dropped");
                 }
             }
@@ -325,7 +323,7 @@ impl MessageLoopState {
                 self.on_abort_job(job_id, reason).await?;
             }
             ServerMessage::Credential { kind, data } => {
-                self.on_credential(kind, data);
+                self.on_credential(kind, data.into());
             }
             ServerMessage::Draining => {
                 info!("server is draining; finishing in-flight work then disconnecting");
@@ -365,33 +363,21 @@ impl MessageLoopState {
             ServerMessage::EvalCachePullResult { job_id, outcome } => {
                 self.eval_cache_recv.deliver_pull_result(&job_id, outcome);
             }
-            ServerMessage::NarPush { .. }
-            | ServerMessage::EvalCacheChunk { .. }
-            | ServerMessage::NarStreamHeader { .. }
-            | ServerMessage::NarUnavailable { .. }
-            | ServerMessage::NarAbort { .. } => {
-                warn!("a NAR or bulk frame reached the control dispatch");
-            }
-        }
-        Ok(())
-    }
-
-    async fn route_bulk(&mut self, frame: Frame<ServerMessage>) -> Result<()> {
-        match frame.archived() {
-            ArchivedServerMessage::EvalCacheChunk {
+            ServerMessage::EvalCacheChunk {
                 job_id,
                 data,
                 offset,
                 is_final,
             } => {
-                self.eval_cache_recv.deliver_pull_chunk(
-                    job_id.as_str(),
-                    data.as_slice(),
-                    offset.to_native(),
-                    *is_final,
-                );
+                self.eval_cache_recv
+                    .deliver_pull_chunk(&job_id, &data, offset, is_final);
             }
-            _ => warn!("non-bulk variant routed to the bulk lane"),
+            ServerMessage::NarPush { .. }
+            | ServerMessage::NarStreamHeader { .. }
+            | ServerMessage::NarUnavailable { .. }
+            | ServerMessage::NarAbort { .. } => {
+                warn!("a NAR frame reached the control dispatch");
+            }
         }
         Ok(())
     }

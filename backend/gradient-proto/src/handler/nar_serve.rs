@@ -147,7 +147,6 @@ mod serve_nar_tests {
     use bytes::Bytes;
     use gradient_test_support::state::test_state;
     use gradient_wire::messages::ServerMessage;
-    use gradient_wire::session::frame::WireMessage;
     use sea_orm::{DatabaseBackend, MockDatabase};
     use tokio::sync::mpsc;
 
@@ -156,10 +155,11 @@ mod serve_nar_tests {
     }
 
     fn decode(bytes: Bytes) -> ServerMessage {
-        ServerMessage::decode(bytes)
-            .expect("decode ServerMessage")
-            .into_message()
-            .expect("deserialise ServerMessage")
+        gradient_wire::codec::from_bytes::<ServerMessage>(
+            bytes,
+            *gradient_wire::PROTO_VERSIONS.end(),
+        )
+        .expect("deserialise ServerMessage")
     }
 
     #[tokio::test]

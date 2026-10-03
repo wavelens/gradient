@@ -201,7 +201,7 @@ impl ClusterChannels {
             .send(ClientMessage::ClusterSignal {
                 attempt: attempt.to_owned(),
                 to,
-                payload,
+                payload: payload.into(),
             })
             .await
     }

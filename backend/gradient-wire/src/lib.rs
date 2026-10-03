@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+extern crate self as gradient_wire;
+
 pub mod auth;
 pub mod build_output_metadata;
 pub mod cached_path_info;
@@ -27,5 +29,5 @@ mod tests;
 pub use self::build_output_metadata::BuildOutputMetadata;
 pub use self::cached_path_info::CachedPathInfo;
 pub use self::limiter::{PerIpLimiter, ProtoLimiter};
-pub use self::messages::{ClientMessage, PROTO_VERSION, PROTO_VERSIONS, ServerMessage};
-pub use self::session::frame::{Frame, Inbound, WireMessage};
+pub use self::messages::{ClientMessage, PROTO_VERSIONS, ServerMessage};
+pub use self::session::frame::WireMessage;

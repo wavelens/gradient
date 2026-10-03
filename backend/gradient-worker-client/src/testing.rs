@@ -9,7 +9,6 @@ use gradient_wire::messages::{
     BuildFailureKind, CandidateScore, ClientMessage, GradientCapabilities, Job, JobCandidate,
     JobKind, ServerMessage,
 };
-use gradient_wire::session::frame::Inbound;
 use gradient_wire::session::handshake::HandshakeResult;
 use gradient_wire::testing::SCRIPT_TIMEOUT;
 use tokio::sync::mpsc;
@@ -77,7 +76,7 @@ impl ProtoPeer {
         )
         .await
         .context("the authority never finished the handshake")??;
-        conn.set_server_version(handshake.server_version);
+
         let (writer, mut reader, _flush) = conn.split();
         let nar_recv = NarReceiver::new();
         let (tx, inbox) = mpsc::unbounded_channel();
@@ -90,18 +89,18 @@ impl ProtoPeer {
             reason = "test harness, no shutdown tracker"
         )]
         let pump = tokio::spawn(async move {
-            while let Some(inbound) = reader.recv().await {
-                match routed.absorb(inbound).await {
-                    Some(Inbound::Control(
+            while let Some(msg) = reader.recv().await {
+                match routed.absorb(msg).await {
+                    Some(
                         msg @ (ServerMessage::UploadGrant { .. }
                         | ServerMessage::UploadCommitted { .. }),
-                    )) => delivered.deliver(msg),
-                    Some(Inbound::Control(msg)) => {
+                    ) => delivered.deliver(msg),
+                    Some(msg) => {
                         if tx.send(msg).is_err() {
                             break;
                         }
                     }
-                    _ => {}
+                    None => {}
                 }
             }
         });

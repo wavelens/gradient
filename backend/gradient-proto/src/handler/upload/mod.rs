@@ -553,11 +553,7 @@ mod tests {
             spans: Vec::new(),
             elapsed_ms: 0,
         };
-        ctx.handle(
-            gradient_wire::session::frame::Inbound::Control(failed),
-            uploads,
-        )
-        .await;
+        ctx.handle(failed, uploads).await;
 
         assert_eq!(state.upload_admission.in_flight(), 0);
         assert!(uploads.table.is_empty());

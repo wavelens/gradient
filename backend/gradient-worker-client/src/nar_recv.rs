@@ -11,9 +11,9 @@ use std::sync::{Arc, Weak};
 use std::time::Instant;
 
 use anyhow::Result;
+use bytes::Bytes;
 use gradient_storage::{PartialStore, PartialWriter};
-use gradient_wire::messages::{ArchivedServerMessage, ServerMessage, TRANSFER_TIMEOUT};
-use gradient_wire::session::frame::{Frame, Inbound};
+use gradient_wire::messages::{ServerMessage, TRANSFER_TIMEOUT};
 use tokio::sync::{mpsc, oneshot, watch};
 use tokio_util::task::TaskTracker;
 use tracing::{debug, warn};
@@ -21,6 +21,12 @@ use tracing::{debug, warn};
 const STAGE_QUEUE_DEPTH: usize = 8;
 
 type Key = (String, String);
+
+struct NarChunk {
+    data: Bytes,
+    offset: u64,
+    is_final: bool,
+}
 
 pub enum NarPayload {
     File(PathBuf),
@@ -123,7 +129,7 @@ impl std::error::Error for NarUnavailable {}
 
 #[derive(Default)]
 struct Inner {
-    streams: HashMap<Key, mpsc::Sender<Frame<ServerMessage>>>,
+    streams: HashMap<Key, mpsc::Sender<NarChunk>>,
     waiters: HashMap<Key, Waiter>,
 }
 
@@ -254,25 +260,17 @@ async fn stage_pull(
     stager: Stager,
     spec: StreamSpec,
     mut sink: Sink,
-    mut rx: mpsc::Receiver<Frame<ServerMessage>>,
+    mut rx: mpsc::Receiver<NarChunk>,
 ) {
     let key = &spec.key;
     let mut started: Option<Instant> = None;
 
-    while let Some(frame) = rx.recv().await {
-        let ArchivedServerMessage::NarPush {
-            data,
-            offset,
-            is_final,
-            ..
-        } = frame.archived()
-        else {
-            warn!(job_id = %key.0, store_path = %key.1, "non-NarPush frame on a NAR stream");
-            continue;
-        };
-
-        let (data, offset, is_final) = (data.as_slice(), offset.to_native(), *is_final);
-
+    while let Some(NarChunk {
+        data,
+        offset,
+        is_final,
+    }) = rx.recv().await
+    {
         if offset == 0 && sink.len() != 0 {
             warn!(job_id = %key.0, store_path = %key.1, "server restarted the NAR transfer from 0");
             sink = match stager.open_sink(&spec, Resume::Fresh).await {
@@ -288,7 +286,7 @@ async fn stage_pull(
 
         if !data.is_empty() {
             started.get_or_insert_with(Instant::now);
-            if let Err(e) = sink.append(offset, data).await {
+            if let Err(e) = sink.append(offset, &data).await {
                 stager
                     .abandon(&spec, format!("partial append failed: {e}"))
                     .await;
@@ -455,7 +453,7 @@ impl NarReceiver {
         }
     }
 
-    pub async fn accept_chunk(&self, job_id: &str, store_path: &str, frame: Frame<ServerMessage>) {
+    async fn accept_chunk(&self, job_id: &str, store_path: &str, chunk: NarChunk) {
         let key = (job_id.to_owned(), store_path.to_owned());
         let tx = {
             let g = self.inner.lock();
@@ -474,12 +472,12 @@ impl NarReceiver {
             return;
         };
 
-        if tx.send(frame).await.is_err() {
+        if tx.send(chunk).await.is_err() {
             debug!(%job_id, %store_path, "NAR chunk for a finished stream - discarding");
         }
     }
 
-    fn open_stream(&self, mut spec: StreamSpec) -> mpsc::Sender<Frame<ServerMessage>> {
+    fn open_stream(&self, mut spec: StreamSpec) -> mpsc::Sender<NarChunk> {
         let (tx, rx) = mpsc::channel(STAGE_QUEUE_DEPTH);
         {
             let mut g = self.inner.lock();
@@ -534,55 +532,47 @@ impl NarReceiver {
         g.waiters.retain(|(j, _), _| j != job_id);
     }
 
-    pub async fn absorb(&self, inbound: Inbound<ServerMessage>) -> Option<Inbound<ServerMessage>> {
-        match inbound {
-            Inbound::Bulk(frame) => {
-                let ArchivedServerMessage::NarPush {
-                    job_id,
-                    store_path,
+    pub async fn absorb(&self, msg: ServerMessage) -> Option<ServerMessage> {
+        match msg {
+            ServerMessage::NarPush {
+                job_id,
+                store_path,
+                data,
+                offset,
+                is_final,
+            } => {
+                debug!(%job_id, %store_path, offset, is_final, bytes = data.len(), "received NAR chunk");
+                let chunk = NarChunk {
+                    data,
                     offset,
                     is_final,
-                    data,
-                } = frame.archived()
-                else {
-                    return Some(Inbound::Bulk(frame));
                 };
-
-                debug!(
-                    job_id = job_id.as_str(),
-                    store_path = store_path.as_str(),
-                    offset = offset.to_native(),
-                    is_final = *is_final,
-                    bytes = data.len(),
-                    "received NAR chunk"
-                );
-                let (job_id, store_path) = (job_id.to_string(), store_path.to_string());
-                self.accept_chunk(&job_id, &store_path, frame).await;
+                self.accept_chunk(&job_id, &store_path, chunk).await;
                 None
             }
-            Inbound::Control(ServerMessage::NarStreamHeader {
+            ServerMessage::NarStreamHeader {
                 job_id,
                 store_path,
                 total_bytes,
                 stream_token,
-            }) => {
+            } => {
                 self.note_header(&job_id, &store_path, total_bytes, &stream_token);
                 None
             }
-            Inbound::Control(ServerMessage::NarUnavailable {
+            ServerMessage::NarUnavailable {
                 job_id,
                 store_path,
                 reason,
-            }) => {
+            } => {
                 warn!(%job_id, %store_path, %reason, "the cache cannot serve this NAR");
                 self.fail(&job_id, &store_path, TransferFailure::Unavailable(reason));
                 None
             }
-            Inbound::Control(ServerMessage::NarAbort {
+            ServerMessage::NarAbort {
                 job_id,
                 store_path,
                 reason,
-            }) => {
+            } => {
                 warn!(%job_id, %store_path, %reason, "server aborted a NAR transfer");
                 self.fail(&job_id, &store_path, TransferFailure::Transient(reason));
                 None
@@ -600,33 +590,19 @@ mod tests {
     )]
 
     use super::*;
-    use gradient_wire::session::frame::{Inbound, WireMessage};
     use std::time::Duration;
     use tempfile::TempDir;
 
-    fn frame(
-        job: &str,
-        path: &str,
-        offset: u64,
-        data: &[u8],
-        is_final: bool,
-    ) -> Frame<ServerMessage> {
-        let msg = ServerMessage::NarPush {
-            job_id: job.into(),
-            store_path: path.into(),
-            data: data.to_vec(),
+    fn chunk(offset: u64, data: &[u8], is_final: bool) -> NarChunk {
+        NarChunk {
+            data: Bytes::copy_from_slice(data),
             offset,
             is_final,
-        };
-        match ServerMessage::decode(msg.encode().expect("encodes")).expect("decodes") {
-            Inbound::Bulk(f) => f,
-            Inbound::Control(_) => panic!("NarPush is bulk"),
         }
     }
 
     async fn final_chunk(r: &NarReceiver, job: &str, path: &str, data: &[u8]) {
-        r.accept_chunk(job, path, frame(job, path, 0, data, true))
-            .await;
+        r.accept_chunk(job, path, chunk(0, data, true)).await;
     }
 
     fn bytes(payload: NarPayload) -> Vec<u8> {
@@ -664,24 +640,12 @@ mod tests {
         let r2 = r.clone();
         let task = tokio::spawn(async move { r2.wait_for("j", "/nix/store/x").await });
         tokio::task::yield_now().await;
-        r.accept_chunk(
-            "j",
-            "/nix/store/x",
-            frame("j", "/nix/store/x", 0, b"abc", false),
-        )
-        .await;
-        r.accept_chunk(
-            "j",
-            "/nix/store/x",
-            frame("j", "/nix/store/x", 3, b"def", false),
-        )
-        .await;
-        r.accept_chunk(
-            "j",
-            "/nix/store/x",
-            frame("j", "/nix/store/x", 6, b"ghi", true),
-        )
-        .await;
+        r.accept_chunk("j", "/nix/store/x", chunk(0, b"abc", false))
+            .await;
+        r.accept_chunk("j", "/nix/store/x", chunk(3, b"def", false))
+            .await;
+        r.accept_chunk("j", "/nix/store/x", chunk(6, b"ghi", true))
+            .await;
         assert_eq!(bytes(task.await.unwrap().unwrap()), b"abcdefghi");
     }
 
@@ -693,12 +657,8 @@ mod tests {
         tokio::task::yield_now().await;
 
         for i in 0..3u64 {
-            r.accept_chunk(
-                "j",
-                "/nix/store/big",
-                frame("j", "/nix/store/big", i, b"x", false),
-            )
-            .await;
+            r.accept_chunk("j", "/nix/store/big", chunk(i, b"x", false))
+                .await;
             tokio::time::advance(TRANSFER_TIMEOUT / 2).await;
         }
         final_chunk_at(&r, "j", "/nix/store/big", 3, b"y").await;
@@ -712,12 +672,8 @@ mod tests {
         let r2 = r.clone();
         let task = tokio::spawn(async move { r2.wait_for("j", "/nix/store/stuck").await });
         tokio::task::yield_now().await;
-        r.accept_chunk(
-            "j",
-            "/nix/store/stuck",
-            frame("j", "/nix/store/stuck", 0, b"x", false),
-        )
-        .await;
+        r.accept_chunk("j", "/nix/store/stuck", chunk(0, b"x", false))
+            .await;
 
         tokio::time::advance(TRANSFER_TIMEOUT + Duration::from_secs(1)).await;
 
@@ -726,8 +682,7 @@ mod tests {
     }
 
     async fn final_chunk_at(r: &NarReceiver, job: &str, path: &str, offset: u64, data: &[u8]) {
-        r.accept_chunk(job, path, frame(job, path, offset, data, true))
-            .await;
+        r.accept_chunk(job, path, chunk(offset, data, true)).await;
     }
 
     #[tokio::test]
@@ -742,10 +697,8 @@ mod tests {
         let task = tokio::spawn(async move { r2.wait_for("j", &p).await });
         tokio::task::yield_now().await;
         r.note_header("j", &path, 6, "len-6");
-        r.accept_chunk("j", &path, frame("j", &path, 0, b"abc", false))
-            .await;
-        r.accept_chunk("j", &path, frame("j", &path, 3, b"def", true))
-            .await;
+        r.accept_chunk("j", &path, chunk(0, b"abc", false)).await;
+        r.accept_chunk("j", &path, chunk(3, b"def", true)).await;
 
         let payload = task.await.unwrap().unwrap();
         let NarPayload::File(delivered) = &payload else {
@@ -774,26 +727,14 @@ mod tests {
             }
         };
 
-        r.accept_chunk(
-            "j",
-            "/nix/store/x",
-            frame("j", "/nix/store/x", 0, b"abc", false),
-        )
-        .await;
+        r.accept_chunk("j", "/nix/store/x", chunk(0, b"abc", false))
+            .await;
         staged(3).await.unwrap();
-        r.accept_chunk(
-            "j",
-            "/nix/store/x",
-            frame("j", "/nix/store/x", 0, b"ab", false),
-        )
-        .await;
+        r.accept_chunk("j", "/nix/store/x", chunk(0, b"ab", false))
+            .await;
         staged(2).await.unwrap();
-        r.accept_chunk(
-            "j",
-            "/nix/store/x",
-            frame("j", "/nix/store/x", 2, b"cd", true),
-        )
-        .await;
+        r.accept_chunk("j", "/nix/store/x", chunk(2, b"cd", true))
+            .await;
 
         assert_eq!(bytes(r.await_pending(pending).await.unwrap()), b"abcd");
         assert_eq!(*received.borrow(), 4);
@@ -898,10 +839,8 @@ mod tests {
 
         let r1 = NarReceiver::with_partial_store(store.clone());
         r1.note_header("j", &path, 9, "len-9");
-        r1.accept_chunk("j", &path, frame("j", &path, 0, b"abc", false))
-            .await;
-        r1.accept_chunk("j", &path, frame("j", &path, 3, b"def", false))
-            .await;
+        r1.accept_chunk("j", &path, chunk(0, b"abc", false)).await;
+        r1.accept_chunk("j", &path, chunk(3, b"def", false)).await;
         r1.fail("j", &path, TransferFailure::Transient("NarAbort".into()));
         settle(&r1).await;
 
@@ -915,8 +854,7 @@ mod tests {
         let task = tokio::spawn(async move { r2c.wait_for("j", &pathc).await });
         tokio::task::yield_now().await;
         r2.note_header("j", &path, 9, "len-9");
-        r2.accept_chunk("j", &path, frame("j", &path, 6, b"ghi", true))
-            .await;
+        r2.accept_chunk("j", &path, chunk(6, b"ghi", true)).await;
         assert_eq!(file_bytes(task.await.unwrap().unwrap()).await, b"abcdefghi");
     }
 
@@ -933,14 +871,10 @@ mod tests {
         let p1 = r.register("j1", &path);
         let p2 = r.register("j2", &path);
 
-        r.accept_chunk("j1", &path, frame("j1", &path, 0, b"aaa", false))
-            .await;
-        r.accept_chunk("j2", &path, frame("j2", &path, 0, b"bbb", false))
-            .await;
-        r.accept_chunk("j1", &path, frame("j1", &path, 3, b"AAA", true))
-            .await;
-        r.accept_chunk("j2", &path, frame("j2", &path, 3, b"BBB", true))
-            .await;
+        r.accept_chunk("j1", &path, chunk(0, b"aaa", false)).await;
+        r.accept_chunk("j2", &path, chunk(0, b"bbb", false)).await;
+        r.accept_chunk("j1", &path, chunk(3, b"AAA", true)).await;
+        r.accept_chunk("j2", &path, chunk(3, b"BBB", true)).await;
 
         assert_eq!(
             file_bytes(r.await_pending(p1).await.unwrap()).await,
@@ -966,10 +900,8 @@ mod tests {
         let r = NarReceiver::with_partial_store(store);
         let pending = r.register("j", &path);
         r.note_header("j", &path, 4, "len-4");
-        r.accept_chunk("j", &path, frame("j", &path, 0, b"abcd", false))
-            .await;
-        r.accept_chunk("j", &path, frame("j", &path, 4, b"", true))
-            .await;
+        r.accept_chunk("j", &path, chunk(0, b"abcd", false)).await;
+        r.accept_chunk("j", &path, chunk(4, b"", true)).await;
 
         assert_eq!(
             file_bytes(r.await_pending(pending).await.unwrap()).await,
@@ -988,8 +920,7 @@ mod tests {
         let stagers = r.stagers.clone();
         let _pending = r.register("j", &path);
         r.note_header("j", &path, 9, "len-9");
-        r.accept_chunk("j", &path, frame("j", &path, 0, b"abc", false))
-            .await;
+        r.accept_chunk("j", &path, chunk(0, b"abc", false)).await;
 
         drop(r);
         stagers.close();
@@ -1008,8 +939,7 @@ mod tests {
         let path = format!("/nix/store/{hash}-pkg");
 
         let r = NarReceiver::with_partial_store(store.clone());
-        r.accept_chunk("gone", &path, frame("gone", &path, 0, b"abc", false))
-            .await;
+        r.accept_chunk("gone", &path, chunk(0, b"abc", false)).await;
 
         assert!(r.inner.lock().streams.is_empty());
         assert_eq!(store.staged_len(&format!("gone/{hash}")).await, 0);
@@ -1025,13 +955,17 @@ mod tests {
             total_bytes: 3,
             stream_token: "t".into(),
         };
-        assert!(r.absorb(Inbound::Control(header)).await.is_none());
+        assert!(r.absorb(header).await.is_none());
 
-        for chunk in [
-            frame("j", "/nix/store/p", 0, b"abc", false),
-            frame("j", "/nix/store/p", 3, b"", true),
-        ] {
-            assert!(r.absorb(Inbound::Bulk(chunk)).await.is_none());
+        for (offset, data, is_final) in [(0, &b"abc"[..], false), (3, &b""[..], true)] {
+            let push = ServerMessage::NarPush {
+                job_id: "j".into(),
+                store_path: "/nix/store/p".into(),
+                data: Bytes::copy_from_slice(data),
+                offset,
+                is_final,
+            };
+            assert!(r.absorb(push).await.is_none());
         }
 
         assert_eq!(bytes(r.await_pending(pending).await.unwrap()), b"abc");
@@ -1052,8 +986,8 @@ mod tests {
             store_path: "/nix/store/dropped".into(),
             reason: "reset".into(),
         };
-        assert!(r.absorb(Inbound::Control(unavailable)).await.is_none());
-        assert!(r.absorb(Inbound::Control(abort)).await.is_none());
+        assert!(r.absorb(unavailable).await.is_none());
+        assert!(r.absorb(abort).await.is_none());
 
         let gone = r.await_pending(gone).await.unwrap_err();
         assert!(gone.downcast_ref::<NarUnavailable>().is_some());
@@ -1064,10 +998,7 @@ mod tests {
     #[tokio::test]
     async fn absorb_hands_back_what_is_not_a_nar_transfer() {
         let r = NarReceiver::new();
-        let back = r.absorb(Inbound::Control(ServerMessage::Draining)).await;
-        assert!(matches!(
-            back,
-            Some(Inbound::Control(ServerMessage::Draining))
-        ));
+        let back = r.absorb(ServerMessage::Draining).await;
+        assert!(matches!(back, Some(ServerMessage::Draining)));
     }
 }

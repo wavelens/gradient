@@ -4,21 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use rkyv::{Archive, Deserialize, Serialize};
+use crate::codec::Proto;
 use serde::{Deserialize as SerdeDeserialize, Serialize as SerdeSerialize};
 
-#[derive(
-    Archive,
-    Serialize,
-    Deserialize,
-    SerdeSerialize,
-    SerdeDeserialize,
-    Debug,
-    Clone,
-    PartialEq,
-    Default,
-)]
-#[rkyv(derive(Debug, PartialEq))]
+#[derive(Proto, SerdeSerialize, SerdeDeserialize, Debug, Clone, PartialEq, Default)]
 pub struct GradientCapabilities {
     pub core: bool,
     pub federate: bool,
@@ -39,45 +28,39 @@ impl std::ops::BitOrAssign for GradientCapabilities {
     }
 }
 
-#[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq)]
-#[rkyv(derive(Debug, PartialEq))]
+#[derive(Proto, Debug, Clone, PartialEq)]
 pub enum Job {
     Flake(FlakeJob),
     Build(BuildJob),
 }
 
-#[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq)]
-#[rkyv(derive(Debug, PartialEq))]
+#[derive(Proto, Debug, Clone, PartialEq)]
 pub enum FlakeSource {
     Repository { url: String, commit: String },
     Cached { store_path: String },
 }
 
-#[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq)]
-#[rkyv(derive(Debug, PartialEq))]
+#[derive(Proto, Debug, Clone, PartialEq)]
 pub struct FlakeInputOverride {
     pub input_name: String,
     pub url: Option<String>,
 }
 
-#[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq)]
-#[rkyv(derive(Debug, PartialEq))]
+#[derive(Proto, Debug, Clone, PartialEq)]
 pub struct InputUpdateSpec {
     pub generator: String,
     pub inputs: Vec<String>,
     pub discover_only: bool,
 }
 
-#[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq)]
-#[rkyv(derive(Debug, PartialEq))]
+#[derive(Proto, Debug, Clone, PartialEq)]
 pub struct BumpedInputWire {
     pub name: String,
     pub old_rev: Option<String>,
     pub new_rev: String,
 }
 
-#[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq)]
-#[rkyv(derive(Debug, PartialEq))]
+#[derive(Proto, Debug, Clone, PartialEq)]
 pub struct FlakeJob {
     pub steps: Vec<FlakeStep>,
     pub source: FlakeSource,
@@ -87,30 +70,26 @@ pub struct FlakeJob {
     pub input_update: Option<InputUpdateSpec>,
 }
 
-#[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq)]
-#[rkyv(derive(Debug, PartialEq))]
+#[derive(Proto, Debug, Clone, PartialEq)]
 pub enum FlakeStep {
     FetchFlake,
     EvaluateFlake,
     EvaluateDerivations,
 }
 
-#[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq)]
-#[rkyv(derive(Debug, PartialEq))]
+#[derive(Proto, Debug, Clone, PartialEq)]
 pub struct BuildJob {
     pub builds: Vec<BuildSpec>,
     pub requirement: BuildRequirement,
 }
 
-#[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Default)]
-#[rkyv(derive(Debug, PartialEq))]
+#[derive(Proto, Debug, Clone, PartialEq, Eq, Default)]
 pub struct BuildRequirement {
     pub architecture: String,
     pub required_features: Vec<String>,
 }
 
-#[derive(Archive, Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default)]
-#[rkyv(derive(Debug, PartialEq))]
+#[derive(Proto, Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum BuildSpecKind {
     #[default]
     Build,
@@ -118,8 +97,7 @@ pub enum BuildSpecKind {
     Download,
 }
 
-#[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq)]
-#[rkyv(derive(Debug, PartialEq))]
+#[derive(Proto, Debug, Clone, PartialEq)]
 pub struct BuildSpec {
     pub build_id: String,
     pub drv_path: String,
@@ -130,16 +108,14 @@ pub struct BuildSpec {
     pub max_silent_secs: Option<u64>,
 }
 
-#[derive(Archive, Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
-#[rkyv(derive(Debug, PartialEq))]
+#[derive(Proto, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EvalMessageLevel {
     Error,
     Warning,
     Notice,
 }
 
-#[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq)]
-#[rkyv(derive(Debug, PartialEq))]
+#[derive(Proto, Debug, Clone, PartialEq)]
 pub enum JobUpdateKind {
     Fetching,
     FetchResult {
@@ -172,15 +148,13 @@ pub enum JobUpdateKind {
     },
 }
 
-#[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq)]
-#[rkyv(derive(Debug, PartialEq))]
+#[derive(Proto, Debug, Clone, PartialEq)]
 pub struct CacheInfo {
     pub file_size: u64,
     pub nar_size: u64,
 }
 
-#[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq)]
-#[rkyv(derive(Debug, PartialEq))]
+#[derive(Proto, Debug, Clone, PartialEq)]
 pub enum EvalCachePullOutcome {
     Miss,
     Presigned {
@@ -192,8 +166,7 @@ pub enum EvalCachePullOutcome {
     },
 }
 
-#[derive(Archive, Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default)]
-#[rkyv(derive(Debug, PartialEq))]
+#[derive(Proto, Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum QueryMode {
     #[default]
     Normal,
@@ -201,30 +174,26 @@ pub enum QueryMode {
     Push,
 }
 
-#[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq)]
-#[rkyv(derive(Debug, PartialEq))]
+#[derive(Proto, Debug, Clone, PartialEq)]
 pub struct PresignedMultipart {
     pub upload_id: String,
     pub part_size: u64,
     pub part_urls: Vec<String>,
 }
 
-#[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq)]
-#[rkyv(derive(Debug, PartialEq))]
+#[derive(Proto, Debug, Clone, PartialEq)]
 pub struct CompletedMultipart {
     pub upload_id: String,
     pub etags: Vec<String>,
 }
 
-#[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq)]
-#[rkyv(derive(Debug, PartialEq))]
+#[derive(Proto, Debug, Clone, PartialEq)]
 pub enum UploadObject {
     Nar { store_path: String },
     EvalCache { fingerprint: String },
 }
 
-#[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq)]
-#[rkyv(derive(Debug, PartialEq))]
+#[derive(Proto, Debug, Clone, PartialEq)]
 pub enum GrantTarget {
     Skip,
     Passthrough { resume_offset: u64 },
@@ -232,8 +201,7 @@ pub enum GrantTarget {
     Multipart(PresignedMultipart),
 }
 
-#[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq)]
-#[rkyv(derive(Debug, PartialEq))]
+#[derive(Proto, Debug, Clone, PartialEq)]
 pub struct NarUploadMetadata {
     pub file_hash: String,
     pub file_size: u64,
@@ -245,23 +213,20 @@ pub struct NarUploadMetadata {
     pub multipart: Option<CompletedMultipart>,
 }
 
-#[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq)]
-#[rkyv(derive(Debug, PartialEq))]
+#[derive(Proto, Debug, Clone, PartialEq)]
 pub enum UploadMetadata {
     Nar(Box<NarUploadMetadata>),
     EvalCache { size_bytes: u64 },
 }
 
-#[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq)]
-#[rkyv(derive(Debug, PartialEq))]
+#[derive(Proto, Debug, Clone, PartialEq)]
 pub enum UploadOutcome {
     Ok,
     Retry { reason: String },
     Rejected { reason: String },
 }
 
-#[derive(Archive, Serialize, Deserialize, Debug, Clone, Default, PartialEq)]
-#[rkyv(derive(Debug, PartialEq))]
+#[derive(Proto, Debug, Clone, Default, PartialEq)]
 pub struct CachedPath {
     pub path: String,
     pub cached: bool,
@@ -276,15 +241,13 @@ pub struct CachedPath {
     pub ca: Option<String>,
 }
 
-#[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq)]
-#[rkyv(derive(Debug, PartialEq))]
+#[derive(Proto, Debug, Clone, PartialEq)]
 pub struct RequiredPath {
     pub path: String,
     pub cache_info: Option<CacheInfo>,
 }
 
-#[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq)]
-#[rkyv(derive(Debug, PartialEq))]
+#[derive(Proto, Debug, Clone, PartialEq)]
 pub struct JobCandidate {
     pub job_id: String,
     pub required_paths: Vec<RequiredPath>,
@@ -293,8 +256,7 @@ pub struct JobCandidate {
     pub requirement: Option<BuildRequirement>,
 }
 
-#[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq)]
-#[rkyv(derive(Debug, PartialEq))]
+#[derive(Proto, Debug, Clone, PartialEq)]
 pub struct CandidateScore {
     pub job_id: String,
     pub missing_count: u32,
@@ -302,8 +264,7 @@ pub struct CandidateScore {
     pub outputs_present: bool,
 }
 
-#[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq)]
-#[rkyv(derive(Debug, PartialEq))]
+#[derive(Proto, Debug, Clone, PartialEq)]
 pub struct DiscoveredDerivation {
     pub attr: String,
     pub drv_path: String,
@@ -320,15 +281,13 @@ pub struct DiscoveredDerivation {
     pub pname: Option<String>,
 }
 
-#[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq)]
-#[rkyv(derive(Debug, PartialEq))]
+#[derive(Proto, Debug, Clone, PartialEq)]
 pub struct DerivationOutput {
     pub name: String,
     pub path: String,
 }
 
-#[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq)]
-#[rkyv(derive(Debug, PartialEq))]
+#[derive(Proto, Debug, Clone, PartialEq)]
 pub struct BuildProduct {
     pub file_type: String,
     pub subtype: String,
@@ -337,8 +296,7 @@ pub struct BuildProduct {
     pub size: Option<u64>,
 }
 
-#[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq)]
-#[rkyv(derive(Debug, PartialEq))]
+#[derive(Proto, Debug, Clone, PartialEq)]
 pub struct BuildOutput {
     pub name: String,
     pub store_path: String,
@@ -348,8 +306,7 @@ pub struct BuildOutput {
     pub products: Vec<BuildProduct>,
 }
 
-#[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq, Default)]
-#[rkyv(derive(Debug, PartialEq))]
+#[derive(Proto, Debug, Clone, PartialEq, Default)]
 pub struct BuildMetrics {
     pub peak_ram_mb: Option<u64>,
     pub cpu_time_ms: Option<u64>,
@@ -361,8 +318,7 @@ pub struct BuildMetrics {
     pub peak_network_mbps: Option<f32>,
 }
 
-#[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq, Default)]
-#[rkyv(derive(Debug, PartialEq))]
+#[derive(Proto, Debug, Clone, PartialEq, Default)]
 pub struct EvalAttrCost {
     pub attr: String,
     pub thunks: u64,
@@ -371,8 +327,7 @@ pub struct EvalAttrCost {
     pub alloc_bytes: u64,
 }
 
-#[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq, Default)]
-#[rkyv(derive(Debug, PartialEq))]
+#[derive(Proto, Debug, Clone, PartialEq, Default)]
 pub struct FlakeOutputNode {
     pub path: String,
     pub parent: Option<String>,
@@ -382,8 +337,7 @@ pub struct FlakeOutputNode {
     pub drv_path: Option<String>,
 }
 
-#[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq, Default)]
-#[rkyv(derive(Debug, PartialEq))]
+#[derive(Proto, Debug, Clone, PartialEq, Default)]
 pub struct EvalStatsReport {
     pub total_thunks: u64,
     pub fn_calls: u64,
@@ -398,15 +352,13 @@ pub struct EvalStatsReport {
     pub flake_nodes: Vec<FlakeOutputNode>,
 }
 
-#[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq)]
-#[rkyv(derive(Debug, PartialEq))]
+#[derive(Proto, Debug, Clone, PartialEq)]
 pub enum EvalProgress {
     Fetching { inputs: Vec<InputFetch> },
     Evaluating { thunks: u64 },
 }
 
-#[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq)]
-#[rkyv(derive(Debug, PartialEq))]
+#[derive(Proto, Debug, Clone, PartialEq)]
 pub struct InputFetch {
     pub name: String,
     pub state: InputFetchState,
@@ -414,8 +366,7 @@ pub struct InputFetch {
     pub expected_bytes: u64,
 }
 
-#[derive(Archive, Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
-#[rkyv(derive(Debug, PartialEq))]
+#[derive(Proto, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InputFetchState {
     Queued,
     Fetching,
@@ -423,16 +374,14 @@ pub enum InputFetchState {
     Failed,
 }
 
-#[derive(Archive, Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
-#[rkyv(derive(Debug, PartialEq))]
+#[derive(Proto, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BuildProgressPhase {
     Download,
     Prefetch,
     Upload,
 }
 
-#[derive(Archive, Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default)]
-#[rkyv(derive(Debug, PartialEq))]
+#[derive(Proto, Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum JobPhase {
     #[default]
     Fetch,
@@ -554,8 +503,7 @@ impl JobPhase {
     }
 }
 
-#[derive(Archive, Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default)]
-#[rkyv(derive(Debug, PartialEq))]
+#[derive(Proto, Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct JobPhaseSpan {
     pub phase: JobPhase,
     pub start_ms: u64,
@@ -565,28 +513,24 @@ pub struct JobPhaseSpan {
     pub bytes: u64,
 }
 
-#[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq)]
-#[rkyv(derive(Debug, PartialEq))]
+#[derive(Proto, Debug, Clone, PartialEq)]
 pub enum CredentialKind {
     SshKey,
 }
 
-#[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq)]
-#[rkyv(derive(Debug, PartialEq))]
+#[derive(Proto, Debug, Clone, PartialEq)]
 pub enum JobKind {
     Flake,
     Build,
 }
 
-#[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
-#[rkyv(derive(Debug, PartialEq))]
+#[derive(Proto, Debug, Clone, PartialEq, Eq)]
 pub struct ClusterAddress {
     pub role: String,
     pub index: u32,
 }
 
-#[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
-#[rkyv(derive(Debug, PartialEq))]
+#[derive(Proto, Debug, Clone, PartialEq, Eq)]
 pub struct ClusterMembership {
     pub attempt: String,
     pub role: String,
@@ -594,8 +538,7 @@ pub struct ClusterMembership {
     pub hold_secs: u32,
 }
 
-#[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
-#[rkyv(derive(Debug, PartialEq))]
+#[derive(Proto, Debug, Clone, PartialEq, Eq)]
 pub struct ClusterPeer {
     pub role: String,
     pub index: u32,
@@ -604,8 +547,7 @@ pub struct ClusterPeer {
     pub endpoint: Option<String>,
 }
 
-#[derive(Archive, Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default)]
-#[rkyv(derive(Debug, PartialEq))]
+#[derive(Proto, Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum BuildFailureKind {
     /// This default is retrying a wire-decode glitch within the bounded attempt budget. A glitch
     /// must not poison the build-once shared build. Unclassified worker errors map to `Permanent`

@@ -77,7 +77,7 @@ async fn send_ssh_key_credential(writer: &ProtoWriter, state: &ServerState, proj
                         writer,
                         &ServerMessage::Credential {
                             kind: CredentialKind::SshKey,
-                            data: private_key.into_bytes(),
+                            data: private_key.into_bytes().into(),
                         },
                     )
                     .await;

@@ -9,7 +9,7 @@ use std::sync::Arc;
 use anyhow::Result;
 use async_trait::async_trait;
 use gradient_wire::auth::verify_dialer_tokens;
-use gradient_wire::messages::{GradientCapabilities, PROTO_VERSION};
+use gradient_wire::messages::GradientCapabilities;
 use gradient_wire::session::handshake::{HandshakeResult, as_dialed, as_peer};
 use gradient_wire::traits::{CapabilitiesProvider, DialerVerifier, PeerIdentity};
 use tracing::info;
@@ -83,8 +83,7 @@ pub async fn perform_handshake(
     let capabilities = StaticCapabilities(capabilities);
     let result = as_peer(conn.socket_mut(), &identity, &capabilities).await?;
     info!(
-        server_version = result.server_version,
-        client_version = PROTO_VERSION,
+        version = result.version,
         authorized = result.authorized_peers.len(),
         failed = result.failed_peers.len(),
         "handshake successful"
@@ -125,7 +124,7 @@ pub async fn perform_dialed_handshake(
     let verifier = AcceptedServers(accepted_server_tokens.map(Arc::new));
     let result = as_dialed(conn.socket_mut(), &identity, &capabilities, &verifier).await?;
     info!(
-        server_version = result.server_version,
+        version = result.version,
         authorized = result.authorized_peers.len(),
         "server-dialed handshake successful"
     );
@@ -186,7 +185,6 @@ mod tests {
         let url = server.url().to_owned();
 
         let ack = ServerMessage::InitAck {
-            version: PROTO_VERSION,
             capabilities: all_caps(),
             authorized_peers: vec!["peer-1".to_owned()],
             failed_peers: vec![],
@@ -209,7 +207,7 @@ mod tests {
         .await
         .unwrap();
 
-        assert_eq!(result.server_version, PROTO_VERSION);
+        assert_eq!(result.version, *gradient_wire::PROTO_VERSIONS.end());
         assert!(result.negotiated.eval);
         assert!(result.negotiated.build);
 
@@ -330,7 +328,6 @@ mod tests {
             }
 
             sc.send(ServerMessage::InitAck {
-                version: PROTO_VERSION,
                 capabilities: no_caps(),
                 authorized_peers: vec![],
                 failed_peers: vec![],

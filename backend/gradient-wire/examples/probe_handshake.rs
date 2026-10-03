@@ -20,7 +20,7 @@
  */
 
 use gradient_wire::client::dial;
-use gradient_wire::messages::{ClientMessage, GradientCapabilities, PROTO_VERSION, ServerMessage};
+use gradient_wire::messages::{ClientMessage, GradientCapabilities, ServerMessage};
 use gradient_wire::session::frame::ProtoSocket;
 use uuid::Uuid;
 
@@ -42,7 +42,6 @@ async fn main() {
     };
 
     let init = ClientMessage::InitConnection {
-        version: PROTO_VERSION,
         capabilities: GradientCapabilities {
             core: false,
             federate: false,
@@ -74,13 +73,13 @@ async fn main() {
 
     match recv(&mut ws).await {
         ServerMessage::InitAck {
-            version,
             capabilities,
             authorized_peers,
             failed_peers,
         } => {
+            let version = ws.version().unwrap_or_default();
             eprintln!(
-                "[probe] !!! InitAck received: server_version={version} \
+                "[probe] !!! InitAck received: version={version} \
                  negotiated={capabilities:?} authorized_peers={authorized_peers:?} \
                  failed_peers={failed_peers:?}"
             );

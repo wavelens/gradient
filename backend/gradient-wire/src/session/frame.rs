@@ -12,7 +12,6 @@ use axum::extract::ws::{CloseFrame as AxumCloseFrame, Message as AxumMessage, We
 use bytes::Bytes;
 use futures::stream::SplitStream;
 use futures::{SinkExt, StreamExt};
-use rkyv::rancor::Error as RkyvError;
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
@@ -26,9 +25,8 @@ use gradient_util::shutdown::Shutdown;
 use gradient_util::telemetry::{GAUGES, STATS, fill_permille, metric};
 
 use crate::codec::agreement::{agree, version_frame};
-use crate::messages::{
-    ArchivedClientMessage, ArchivedServerMessage, ClientMessage, PROTO_VERSIONS, ServerMessage,
-};
+use crate::codec::{self, Proto};
+use crate::messages::{ClientMessage, PROTO_VERSIONS, ServerMessage};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum SendError {
@@ -63,19 +61,12 @@ const WRITE_BATCH: usize = 32;
 
 const BULK_BATCH_BYTES: usize = 256 * 1024;
 
-pub trait WireMessage: Sized + std::fmt::Debug + Send + 'static {
-    fn encode(&self) -> Option<Bytes>;
-
-    fn decode(bytes: Bytes) -> Result<Inbound<Self>, RkyvError>;
-
+pub trait WireMessage: Proto + std::fmt::Debug + Send + 'static {
     fn variant_name(&self) -> &'static str;
 
     fn carries_secret(&self) -> bool;
 
     fn is_bulk(&self) -> bool;
-
-    fn frame_variant_name(frame: &Frame<Self>) -> &'static str;
-    fn frame_into_message(frame: Frame<Self>) -> Result<Self, RkyvError>;
 }
 
 pub struct Redacted<'a, M>(pub &'a M);
@@ -90,84 +81,34 @@ impl<M: WireMessage> std::fmt::Debug for Redacted<'_, M> {
     }
 }
 
-pub enum Inbound<M> {
-    Control(M),
-    Bulk(Frame<M>),
-}
-
 pub enum FirstMessage {
     Worker(ClientMessage),
     Server(ServerMessage),
 }
 
-fn first_message(bytes: Bytes) -> Option<FirstMessage> {
-    if let Ok(Inbound::Control(greeting @ ClientMessage::InitConnection { .. })) =
-        ClientMessage::decode(bytes.clone())
+fn first_message(bytes: Bytes, version: u16) -> Option<FirstMessage> {
+    if let Ok(greeting @ ClientMessage::InitConnection { .. }) =
+        codec::from_bytes(bytes.clone(), version)
     {
         return Some(FirstMessage::Worker(greeting));
     }
 
-    match ServerMessage::decode(bytes) {
-        Ok(Inbound::Control(authenticate @ ServerMessage::Authenticate { .. })) => {
+    match codec::from_bytes(bytes, version) {
+        Ok(authenticate @ ServerMessage::Authenticate { .. }) => {
             Some(FirstMessage::Server(authenticate))
         }
         _ => None,
     }
 }
 
-pub struct Frame<M> {
-    bytes: Bytes,
-    _direction: PhantomData<M>,
-}
-
-impl<M> Frame<M> {
-    pub fn len(&self) -> usize {
-        self.bytes.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.bytes.is_empty()
-    }
-}
-
-impl<M: WireMessage> Inbound<M> {
-    pub fn into_message(self) -> Result<M, RkyvError> {
-        match self {
-            Self::Control(msg) => Ok(msg),
-            Self::Bulk(frame) => M::frame_into_message(frame),
-        }
-    }
-
-    pub fn variant_name(&self) -> &'static str {
-        match self {
-            Self::Control(msg) => msg.variant_name(),
-            Self::Bulk(frame) => M::frame_variant_name(frame),
-        }
-    }
+fn encode<M: WireMessage>(msg: &M, version: u16) -> Result<Bytes, SendError> {
+    codec::to_bytes(msg, version).map_err(|e| {
+        warn!(error = %e, "failed to encode {}", msg.variant_name());
+        SendError::Encode
+    })
 }
 
 impl WireMessage for ClientMessage {
-    fn encode(&self) -> Option<Bytes> {
-        rkyv::to_bytes::<RkyvError>(self)
-            .map(Bytes::from_owner)
-            .map_err(|e| warn!(error = %e, "failed to serialize client message"))
-            .ok()
-    }
-
-    fn decode(bytes: Bytes) -> Result<Inbound<Self>, RkyvError> {
-        let archived = rkyv::access::<ArchivedClientMessage, RkyvError>(&bytes)?;
-        if matches!(
-            archived,
-            ArchivedClientMessage::UploadChunk { .. } | ArchivedClientMessage::LogChunk { .. }
-        ) {
-            return Ok(Inbound::Bulk(Frame {
-                bytes,
-                _direction: PhantomData,
-            }));
-        }
-        rkyv::deserialize::<ClientMessage, RkyvError>(archived).map(Inbound::Control)
-    }
-
     fn variant_name(&self) -> &'static str {
         ClientMessage::variant_name(self)
     }
@@ -185,58 +126,9 @@ impl WireMessage for ClientMessage {
                 | ClientMessage::JobCompleted { .. }
         )
     }
-
-    fn frame_variant_name(frame: &Frame<Self>) -> &'static str {
-        frame.variant_name()
-    }
-
-    fn frame_into_message(frame: Frame<Self>) -> Result<Self, RkyvError> {
-        frame.into_message()
-    }
-}
-
-impl Frame<ClientMessage> {
-    pub fn archived(&self) -> &ArchivedClientMessage {
-        // SAFETY: `ClientMessage::decode` validated these exact bytes. `Bytes` is immutable and the
-        // archive cannot change underneath.
-        unsafe { rkyv::access_unchecked::<ArchivedClientMessage>(&self.bytes) }
-    }
-
-    pub fn into_message(self) -> Result<ClientMessage, RkyvError> {
-        rkyv::deserialize::<ClientMessage, RkyvError>(self.archived())
-    }
-
-    pub fn variant_name(&self) -> &'static str {
-        match self.archived() {
-            ArchivedClientMessage::UploadChunk { .. } => "UploadChunk",
-            ArchivedClientMessage::LogChunk { .. } => "LogChunk",
-            _ => "Control",
-        }
-    }
 }
 
 impl WireMessage for ServerMessage {
-    fn encode(&self) -> Option<Bytes> {
-        rkyv::to_bytes::<RkyvError>(self)
-            .map(Bytes::from_owner)
-            .map_err(|e| warn!(error = %e, "failed to serialize server message"))
-            .ok()
-    }
-
-    fn decode(bytes: Bytes) -> Result<Inbound<Self>, RkyvError> {
-        let archived = rkyv::access::<ArchivedServerMessage, RkyvError>(&bytes)?;
-        if matches!(
-            archived,
-            ArchivedServerMessage::NarPush { .. } | ArchivedServerMessage::EvalCacheChunk { .. }
-        ) {
-            return Ok(Inbound::Bulk(Frame {
-                bytes,
-                _direction: PhantomData,
-            }));
-        }
-        rkyv::deserialize::<ServerMessage, RkyvError>(archived).map(Inbound::Control)
-    }
-
     fn variant_name(&self) -> &'static str {
         ServerMessage::variant_name(self)
     }
@@ -255,34 +147,6 @@ impl WireMessage for ServerMessage {
                 | ServerMessage::EvalCachePullResult { .. }
                 | ServerMessage::EvalCacheChunk { .. }
         )
-    }
-
-    fn frame_variant_name(frame: &Frame<Self>) -> &'static str {
-        frame.variant_name()
-    }
-
-    fn frame_into_message(frame: Frame<Self>) -> Result<Self, RkyvError> {
-        frame.into_message()
-    }
-}
-
-impl Frame<ServerMessage> {
-    pub fn archived(&self) -> &ArchivedServerMessage {
-        // SAFETY: `ServerMessage::decode` validated these exact bytes. `Bytes` is immutable and the
-        // archive cannot change underneath.
-        unsafe { rkyv::access_unchecked::<ArchivedServerMessage>(&self.bytes) }
-    }
-
-    pub fn into_message(self) -> Result<ServerMessage, RkyvError> {
-        rkyv::deserialize::<ServerMessage, RkyvError>(self.archived())
-    }
-
-    pub fn variant_name(&self) -> &'static str {
-        match self.archived() {
-            ArchivedServerMessage::NarPush { .. } => "NarPush",
-            ArchivedServerMessage::EvalCacheChunk { .. } => "EvalCacheChunk",
-            _ => "Control",
-        }
     }
 }
 
@@ -436,66 +300,52 @@ impl ProtoSocket {
         }
     }
 
-    async fn recv_bytes(&mut self) -> Option<Bytes> {
-        self.agree_version().await?;
-        self.transport.recv_bytes().await
+    async fn recv_bytes(&mut self) -> Option<(Bytes, u16)> {
+        let version = self.agree_version().await?;
+        Some((self.transport.recv_bytes().await?, version))
     }
 
-    async fn send_bytes(&mut self, bytes: Bytes) -> Result<(), SendError> {
-        self.agree_version().await.ok_or(SendError::Closed)?;
+    async fn send<M: WireMessage>(&mut self, msg: &M) -> Result<(), SendError> {
+        let version = self.agree_version().await.ok_or(SendError::Closed)?;
+        let bytes = encode(msg, version)?;
+        trace!(msg = ?Redacted(msg), bytes = bytes.len(), "send message");
         self.transport.send_bytes(bytes).await
     }
 
     pub async fn recv_server_msg(&mut self) -> Option<ServerMessage> {
-        let bytes = self.recv_bytes().await?;
+        let (bytes, version) = self.recv_bytes().await?;
         let len = bytes.len();
-        match ServerMessage::decode(bytes) {
-            Ok(Inbound::Control(msg)) => {
+        match codec::from_bytes::<ServerMessage>(bytes, version) {
+            Ok(msg) => {
                 trace!(msg = ?Redacted(&msg), bytes = len, "recv ServerMessage");
                 Some(msg)
             }
-            Ok(Inbound::Bulk(frame)) => {
-                warn!(
-                    variant = frame.variant_name(),
-                    "bulk frame before the connection was split"
-                );
-                None
-            }
             Err(e) => {
-                warn!(error = %e, "failed to deserialize server message");
+                warn!(error = %e, "failed to decode server message");
                 None
             }
         }
     }
 
     pub async fn send_client_msg(&mut self, msg: &ClientMessage) -> Result<(), SendError> {
-        let bytes = msg.encode().ok_or(SendError::Encode)?;
-        trace!(msg = ?Redacted(msg), bytes = bytes.len(), "send ClientMessage");
-        self.send_bytes(bytes).await
+        self.send(msg).await
     }
 
     pub async fn recv_first_message(&mut self) -> Option<FirstMessage> {
-        first_message(self.recv_bytes().await?)
+        let (bytes, version) = self.recv_bytes().await?;
+        first_message(bytes, version)
     }
 
     pub async fn recv_msg(&mut self) -> Option<ClientMessage> {
-        let bytes = self.recv_bytes().await?;
+        let (bytes, version) = self.recv_bytes().await?;
         let len = bytes.len();
-        match ClientMessage::decode(bytes) {
-            Ok(Inbound::Control(msg)) => {
+        match codec::from_bytes::<ClientMessage>(bytes, version) {
+            Ok(msg) => {
                 trace!(msg = ?Redacted(&msg), bytes = len, "recv ClientMessage");
                 Some(msg)
             }
-            Ok(Inbound::Bulk(frame)) => {
-                warn!(
-                    variant = frame.variant_name(),
-                    "bulk frame before the connection was split"
-                );
-                self.send_error(400, "unexpected bulk frame".into()).await;
-                None
-            }
             Err(e) => {
-                warn!(error = %e, "failed to deserialize client message");
+                warn!(error = %e, "failed to decode client message");
                 self.send_error(400, "malformed message".into()).await;
                 None
             }
@@ -503,9 +353,7 @@ impl ProtoSocket {
     }
 
     pub async fn send_msg(&mut self, msg: &ServerMessage) -> Result<(), SendError> {
-        let bytes = msg.encode().ok_or(SendError::Encode)?;
-        trace!(msg = ?Redacted(msg), bytes = bytes.len(), "send ServerMessage");
-        self.send_bytes(bytes).await
+        self.send(msg).await
     }
 
     pub async fn send_error(&mut self, code: u16, message: String) {
@@ -581,7 +429,7 @@ impl ProtoSocket {
             MsgReader {
                 inner,
                 version,
-                _direction: PhantomData,
+                observer: None,
             },
             writer,
         )
@@ -629,7 +477,7 @@ impl ReaderInner {
 pub struct MsgReader<M> {
     inner: ReaderInner,
     version: u16,
-    _direction: PhantomData<M>,
+    observer: Option<Arc<dyn MsgObserver<M>>>,
 }
 
 pub type ProtoReader = MsgReader<ClientMessage>;
@@ -639,26 +487,31 @@ impl<M> MsgReader<M> {
     pub fn version(&self) -> u16 {
         self.version
     }
+
+    pub fn with_observer(mut self, observer: Arc<dyn MsgObserver<M>>) -> Self {
+        self.observer = Some(observer);
+        self
+    }
 }
 
 impl<M: WireMessage> MsgReader<M> {
-    pub async fn recv(&mut self) -> Option<Inbound<M>> {
+    pub async fn recv(&mut self) -> Option<M> {
         let bytes = self.inner.recv_bytes().await?;
-        match M::decode(bytes) {
-            Ok(inbound) => {
-                trace!(variant = inbound.variant_name(), "recv message");
-                Some(inbound)
-            }
-            Err(e) => {
-                warn!(error = %e, "failed to deserialize message");
-                None
-            }
+        let len = bytes.len();
+        let msg = codec::from_bytes::<M>(bytes, self.version)
+            .map_err(|e| warn!(error = %e, "failed to decode message"))
+            .ok()?;
+        trace!(variant = msg.variant_name(), bytes = len, "recv message");
+        if let Some(observer) = &self.observer {
+            observer.observe(&msg, len);
         }
+
+        Some(msg)
     }
 }
 
 pub trait MsgObserver<M>: Send + Sync {
-    fn sent(&self, msg: &M, len: usize);
+    fn observe(&self, msg: &M, len: usize);
 }
 
 pub struct MsgWriter<M> {
@@ -713,11 +566,12 @@ impl<M> MsgWriter<M> {
 
 impl<M: WireMessage> MsgWriter<M> {
     pub async fn send_msg(&self, msg: &M) -> Result<(), SendError> {
-        let bytes = msg.encode().ok_or(SendError::Encode)?;
+        let bytes = encode(msg, self.version)?;
         trace!(msg = ?Redacted(msg), bytes = bytes.len(), "send message");
         if let Some(observer) = &self.observer {
-            observer.sent(msg, bytes.len());
+            observer.observe(msg, bytes.len());
         }
+
         let bulk = msg.is_bulk();
         let lane = if bulk { &self.tx } else { &self.control_tx };
         let lane_name = if bulk { "bulk" } else { "control" };
@@ -900,7 +754,7 @@ async fn tungstenite_writer_task(
     }
 }
 
-pub async fn recv_client_msg(reader: &mut ProtoReader) -> Option<Inbound<ClientMessage>> {
+pub async fn recv_client_msg(reader: &mut ProtoReader) -> Option<ClientMessage> {
     reader.recv().await
 }
 
@@ -997,7 +851,7 @@ mod tests {
         assert!(
             ClientMessage::UploadChunk {
                 request_id: 1,
-                data: vec![0u8; 8],
+                data: Bytes::from_static(&[0; 8]),
                 offset: 0,
                 is_final: false,
             }
@@ -1028,7 +882,7 @@ mod tests {
         ServerMessage::NarPush {
             job_id: "build:1".into(),
             store_path: "/nix/store/aaa-foo".into(),
-            data: vec![0u8; 8],
+            data: Bytes::from_static(&[0; 8]),
             offset,
             is_final: false,
         }
@@ -1182,8 +1036,9 @@ mod tests {
             cached,
         };
 
-        let query_bytes = query.encode().expect("query encodes").len();
-        let reply_bytes = reply.encode().expect("reply encodes").len();
+        let newest = *PROTO_VERSIONS.end();
+        let query_bytes = encode(&query, newest).expect("query encodes").len();
+        let reply_bytes = encode(&reply, newest).expect("reply encodes").len();
         assert!(
             query_bytes <= SAFE_INFLIGHT_MESSAGE_SIZE,
             "CacheQuery of {CACHE_QUERY_MAX_PATHS} paths encodes to {query_bytes} bytes"
@@ -1192,75 +1047,6 @@ mod tests {
             reply_bytes <= SAFE_INFLIGHT_MESSAGE_SIZE,
             "worst-case CacheStatus encodes to {reply_bytes} bytes"
         );
-    }
-}
-
-#[cfg(test)]
-mod codec_tests {
-    use super::*;
-
-    fn nar_push(data: Vec<u8>) -> ServerMessage {
-        ServerMessage::NarPush {
-            job_id: "build:1".into(),
-            store_path: "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-foo".into(),
-            data,
-            offset: 7,
-            is_final: true,
-        }
-    }
-
-    #[test]
-    fn a_misaligned_frame_is_read_in_place() {
-        let payload: Vec<u8> = (0..=255u8).cycle().take(3000).collect();
-        let encoded = nar_push(payload.clone()).encode().expect("encodes");
-        let mut shifted = Vec::with_capacity(encoded.len() + 1);
-        shifted.push(0u8);
-        shifted.extend_from_slice(&encoded);
-        let source = Bytes::from(shifted).slice(1..);
-        assert_ne!(
-            source.as_ptr() as usize % 16,
-            0,
-            "the test must start misaligned"
-        );
-
-        let Ok(Inbound::Bulk(frame)) = ServerMessage::decode(source.clone()) else {
-            panic!("NarPush must decode as a bulk frame");
-        };
-        let ArchivedServerMessage::NarPush { data, offset, .. } = frame.archived() else {
-            panic!("wrong variant");
-        };
-        assert_eq!(data.as_slice(), payload.as_slice());
-        assert_eq!(offset.to_native(), 7);
-        let range = source.as_ptr_range();
-        assert!(
-            range.contains(&data.as_slice().as_ptr()),
-            "payload was copied out of the frame"
-        );
-    }
-
-    #[test]
-    fn a_control_message_decodes_to_the_owned_enum() {
-        let msg = ServerMessage::CacheStatus {
-            query_id: "q".into(),
-            cached: Vec::new(),
-        };
-        let Ok(Inbound::Control(decoded)) = ServerMessage::decode(msg.encode().expect("encodes"))
-        else {
-            panic!("CacheStatus must decode as a control message");
-        };
-        assert_eq!(decoded, msg);
-    }
-
-    #[test]
-    fn a_bulk_frame_round_trips_through_into_message() {
-        let msg = nar_push(vec![1, 2, 3]);
-        let inbound = ServerMessage::decode(msg.encode().expect("encodes")).expect("decodes");
-        assert_eq!(inbound.into_message().expect("deserialises"), msg);
-    }
-
-    #[test]
-    fn garbage_is_rejected() {
-        assert!(ClientMessage::decode(Bytes::from_static(b"not an archive")).is_err());
     }
 }
 
@@ -1303,7 +1089,7 @@ mod writer_tests {
         ServerMessage::NarPush {
             job_id: "j".into(),
             store_path: "/nix/store/x".into(),
-            data: vec![0],
+            data: Bytes::from_static(&[0]),
             offset: 0,
             is_final: true,
         }
@@ -1357,12 +1143,10 @@ mod writer_tests {
 #[cfg(test)]
 mod redaction_tests {
     use super::*;
-    use crate::messages::PROTO_VERSION;
 
     #[test]
     fn a_traced_handshake_message_never_shows_its_tokens() {
         let authenticate = ServerMessage::Authenticate {
-            version: PROTO_VERSION,
             worker_id: "w1".into(),
             tokens: vec![("p1".into(), "s3cret".into())],
         };
@@ -1379,31 +1163,30 @@ mod redaction_tests {
 #[cfg(test)]
 mod first_message_tests {
     use super::*;
-    use crate::messages::{GradientCapabilities, PROTO_VERSION};
+    use crate::messages::GradientCapabilities;
 
-    fn frame_of<M: WireMessage>(msg: &M) -> Bytes {
-        msg.encode().expect("encodes")
+    fn first_message_of<M: WireMessage>(msg: &M) -> Option<FirstMessage> {
+        let newest = *PROTO_VERSIONS.end();
+        first_message(encode(msg, newest).expect("encodes"), newest)
     }
 
     #[test]
     fn a_worker_greeting_and_a_server_authenticate_are_told_apart() {
         let greeting = ClientMessage::InitConnection {
-            version: PROTO_VERSION,
             capabilities: GradientCapabilities::default(),
             id: "w1".into(),
         };
         let authenticate = ServerMessage::Authenticate {
-            version: PROTO_VERSION,
             worker_id: "w1".into(),
             tokens: vec![("p1".into(), "s3cret".into())],
         };
 
         assert!(matches!(
-            first_message(frame_of(&greeting)),
+            first_message_of(&greeting),
             Some(FirstMessage::Worker(ClientMessage::InitConnection { .. }))
         ));
         assert!(matches!(
-            first_message(frame_of(&authenticate)),
+            first_message_of(&authenticate),
             Some(FirstMessage::Server(ServerMessage::Authenticate { .. }))
         ));
     }
@@ -1412,9 +1195,9 @@ mod first_message_tests {
     fn any_other_opening_frame_is_neither() {
         let response = ClientMessage::AuthResponse { tokens: vec![] };
 
-        assert!(first_message(frame_of(&response)).is_none());
-        assert!(first_message(frame_of(&ServerMessage::Draining)).is_none());
-        assert!(first_message(Bytes::new()).is_none());
+        assert!(first_message_of(&response).is_none());
+        assert!(first_message_of(&ServerMessage::Draining).is_none());
+        assert!(first_message(Bytes::new(), *PROTO_VERSIONS.end()).is_none());
     }
 }
 

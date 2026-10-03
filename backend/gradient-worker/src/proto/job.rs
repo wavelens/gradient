@@ -8,6 +8,7 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result, bail};
 use async_trait::async_trait;
+use bytes::Bytes;
 use gradient_wire::messages::{
     BuildMetrics, BuildOutput, CachedPath, ClientMessage, DiscoveredDerivation,
     EvalCachePullOutcome, EvalMessageLevel, EvalStatsReport, JobPhase, JobUpdateKind, QueryMode,
@@ -57,7 +58,7 @@ async fn passthrough_blob(
         writer
             .send(ClientMessage::UploadChunk {
                 request_id,
-                data: chunk.to_vec(),
+                data: Bytes::copy_from_slice(chunk),
                 offset,
                 is_final: false,
             })
@@ -67,7 +68,7 @@ async fn passthrough_blob(
     writer
         .send(ClientMessage::UploadChunk {
             request_id,
-            data: Vec::new(),
+            data: Bytes::new(),
             offset,
             is_final: true,
         })
@@ -409,7 +410,7 @@ impl JobUpdater {
             .send(ClientMessage::LogChunk {
                 job_id: self.job_id.clone(),
                 task_index,
-                data,
+                data: data.into(),
             })
             .await
     }
@@ -556,7 +557,7 @@ impl JobReporter for JobUpdater {
             .send(ClientMessage::LogChunk {
                 job_id: self.job_id.clone(),
                 task_index,
-                data,
+                data: data.into(),
             })
             .await
     }
@@ -657,19 +658,15 @@ mod tests {
         known_waiters: KnownDerivationWaiters,
     ) -> tokio::task::JoinHandle<()> {
         tokio::spawn(async move {
-            while let Some(inbound) = reader.recv().await {
-                match inbound {
-                    gradient_wire::Inbound::Control(
-                        gradient_wire::messages::ServerMessage::CacheStatus { query_id, cached },
-                    ) => {
+            while let Some(msg) = reader.recv().await {
+                match msg {
+                    gradient_wire::messages::ServerMessage::CacheStatus { query_id, cached } => {
                         deliver_cache_reply(&cache_waiters, &query_id, Ok(cached));
                     }
-                    gradient_wire::Inbound::Control(
-                        gradient_wire::messages::ServerMessage::KnownDerivations {
-                            query_id,
-                            known,
-                        },
-                    ) => {
+                    gradient_wire::messages::ServerMessage::KnownDerivations {
+                        query_id,
+                        known,
+                    } => {
                         deliver_known_derivations(&known_waiters, &query_id, known);
                     }
                     _ => {}

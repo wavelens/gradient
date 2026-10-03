@@ -6,9 +6,7 @@
 
 use anyhow::Context;
 
-use crate::messages::{
-    ClientMessage, FailedPeer, GradientCapabilities, PROTO_VERSION, ServerMessage,
-};
+use crate::messages::{ClientMessage, FailedPeer, GradientCapabilities, ServerMessage};
 use crate::session::frame::{ProtoSocket, recv_server_msg, send_client_msg};
 use crate::traits::{
     AuthOutcome, CapabilitiesProvider, DialerAuthority, DialerVerifier, PeerAuthority, PeerIdentity,
@@ -42,30 +40,14 @@ pub enum Intent {
     Reject { code: u16, reason: String },
 }
 
-pub fn on_init_connection(
-    _: Opening,
-    msg: ClientMessage,
-    expected_version: u16,
-) -> Result<Greeted, Intent> {
-    let ClientMessage::InitConnection {
-        version,
-        capabilities,
-        id,
-    } = msg
-    else {
+pub fn on_init_connection(_: Opening, msg: ClientMessage) -> Result<Greeted, Intent> {
+    let ClientMessage::InitConnection { capabilities, id } = msg else {
         return Err(Intent::Reject {
             code: 400,
             reason: "expected InitConnection".into(),
         });
     };
-    if version != expected_version {
-        return Err(Intent::Reject {
-            code: 400,
-            reason: format!(
-                "protocol version mismatch: peer={version}, expected={expected_version}"
-            ),
-        });
-    }
+
     Ok(Greeted {
         peer_id: id,
         client_capabilities: capabilities,
@@ -104,7 +86,13 @@ pub struct HandshakeResult {
     pub negotiated: GradientCapabilities,
     pub authorized_peers: Vec<String>,
     pub failed_peers: Vec<FailedPeer>,
-    pub server_version: u16,
+    pub version: u16,
+}
+
+fn agreed_version(socket: &ProtoSocket) -> u16 {
+    socket
+        .version()
+        .expect("a handshake message was exchanged, so the version is agreed")
 }
 
 pub async fn as_peer<I, C>(
@@ -120,7 +108,6 @@ where
     send_client_msg(
         socket,
         &ClientMessage::InitConnection {
-            version: PROTO_VERSION,
             capabilities: caps.clone(),
             id: identity.peer_id(),
         },
@@ -141,7 +128,6 @@ where
 
     let ack = recv_server_msg(socket).await?;
     let ServerMessage::InitAck {
-        version,
         capabilities: negotiated,
         authorized_peers,
         failed_peers,
@@ -158,7 +144,7 @@ where
         negotiated,
         authorized_peers,
         failed_peers,
-        server_version: version,
+        version: agreed_version(socket),
     })
 }
 
@@ -183,26 +169,13 @@ pub struct DialerClaim {
     pub tokens: Vec<(String, String)>,
 }
 
-pub fn on_authenticate(msg: ServerMessage, expected_version: u16) -> Result<DialerClaim, Intent> {
-    let ServerMessage::Authenticate {
-        version,
-        worker_id,
-        tokens,
-    } = msg
-    else {
+pub fn on_authenticate(msg: ServerMessage) -> Result<DialerClaim, Intent> {
+    let ServerMessage::Authenticate { worker_id, tokens } = msg else {
         return Err(Intent::Reject {
             code: 400,
             reason: "expected Authenticate".into(),
         });
     };
-    if version != expected_version {
-        return Err(Intent::Reject {
-            code: 400,
-            reason: format!(
-                "protocol version mismatch: peer={version}, expected={expected_version}"
-            ),
-        });
-    }
 
     Ok(DialerClaim { worker_id, tokens })
 }
@@ -267,7 +240,7 @@ where
     A: PeerAuthority + ?Sized,
 {
     let claimed = claimed_id(&greeting);
-    let greeted = match on_init_connection(Opening, greeting, PROTO_VERSION) {
+    let greeted = match on_init_connection(Opening, greeting) {
         Ok(g) => g,
         Err(Intent::Reject { code, reason }) => {
             return Err(reject_peer(socket, code, reason, claimed).await);
@@ -324,7 +297,6 @@ where
 
     socket
         .send_msg(&ServerMessage::InitAck {
-            version: PROTO_VERSION,
             capabilities: negotiated.clone(),
             authorized_peers: authorized_peers.clone(),
             failed_peers: failed_peers.clone(),
@@ -338,7 +310,7 @@ where
         negotiated: registered.negotiated,
         authorized_peers,
         failed_peers,
-        server_version: PROTO_VERSION,
+        version: agreed_version(socket),
     })
 }
 
@@ -352,7 +324,6 @@ where
 {
     socket
         .send_msg(&ServerMessage::Authenticate {
-            version: PROTO_VERSION,
             worker_id: credentials.worker_id.clone(),
             tokens: credentials.tokens.clone(),
         })
@@ -380,7 +351,6 @@ where
         .context("negotiate")?;
     socket
         .send_msg(&ServerMessage::InitAck {
-            version: PROTO_VERSION,
             capabilities: negotiated.clone(),
             authorized_peers: authorized_peers.clone(),
             failed_peers: failed_peers.clone(),
@@ -393,7 +363,7 @@ where
         negotiated,
         authorized_peers,
         failed_peers,
-        server_version: PROTO_VERSION,
+        version: agreed_version(socket),
     })
 }
 
@@ -410,7 +380,7 @@ async fn greet_dialed_worker(socket: &mut ProtoSocket, worker_id: &str) -> anyho
         }
         Some(init) => init,
     };
-    let greeted = match on_init_connection(Opening, init, PROTO_VERSION) {
+    let greeted = match on_init_connection(Opening, init) {
         Ok(greeted) => greeted,
         Err(Intent::Reject { code, reason }) => {
             return Err(reject_peer(socket, code, reason, None).await);
@@ -437,7 +407,7 @@ where
     V: DialerVerifier + ?Sized,
 {
     let first = recv_server_msg(socket).await?;
-    let claim = match on_authenticate(first, PROTO_VERSION) {
+    let claim = match on_authenticate(first) {
         Ok(claim) => claim,
         Err(Intent::Reject { code, reason }) => {
             return Err(reject_dialer(socket, code, reason).await);
@@ -465,7 +435,6 @@ where
     send_client_msg(
         socket,
         &ClientMessage::InitConnection {
-            version: PROTO_VERSION,
             capabilities: capabilities.capabilities().await,
             id: identity.peer_id(),
         },
@@ -474,7 +443,6 @@ where
 
     match recv_server_msg(socket).await? {
         ServerMessage::InitAck {
-            version,
             capabilities: negotiated,
             authorized_peers,
             failed_peers,
@@ -483,7 +451,7 @@ where
             negotiated,
             authorized_peers,
             failed_peers,
-            server_version: version,
+            version: agreed_version(socket),
         }),
         ServerMessage::Reject { code, reason } => Err(Rejected {
             code,
@@ -498,7 +466,6 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::messages::PROTO_VERSION;
     use crate::session::frame::FirstMessage;
     use crate::testing::loopback;
 
@@ -507,37 +474,17 @@ mod tests {
         let result = on_init_connection(
             Opening,
             ClientMessage::InitConnection {
-                version: PROTO_VERSION,
                 capabilities: GradientCapabilities::default(),
                 id: "peer-1".into(),
             },
-            PROTO_VERSION,
         );
         let g = result.expect("expected Greeted");
         assert_eq!(g.peer_id, "peer-1");
     }
 
     #[test]
-    fn opening_rejects_version_mismatch() {
-        let result = on_init_connection(
-            Opening,
-            ClientMessage::InitConnection {
-                version: 999,
-                capabilities: GradientCapabilities::default(),
-                id: "peer-1".into(),
-            },
-            PROTO_VERSION,
-        );
-        let Err(Intent::Reject { code, reason }) = result else {
-            panic!("expected Reject");
-        };
-        assert_eq!(code, 400);
-        assert!(reason.contains("version mismatch"));
-    }
-
-    #[test]
     fn opening_rejects_wrong_variant() {
-        let result = on_init_connection(Opening, ClientMessage::Draining, PROTO_VERSION);
+        let result = on_init_connection(Opening, ClientMessage::Draining);
         assert!(matches!(result, Err(Intent::Reject { .. })));
     }
 
@@ -632,34 +579,6 @@ mod tests {
         }
     }
 
-    struct NeverAsked;
-
-    #[async_trait::async_trait]
-    impl PeerAuthority for NeverAsked {
-        type Challenge = ();
-
-        async fn challenge(&self, _: &str) -> anyhow::Result<((), Vec<String>)> {
-            anyhow::bail!("not reached")
-        }
-
-        async fn authorize(
-            &self,
-            _: &str,
-            _: (),
-            _: &[(String, String)],
-        ) -> anyhow::Result<AuthOutcome> {
-            anyhow::bail!("not reached")
-        }
-
-        async fn negotiate(
-            &self,
-            _: &str,
-            _: GradientCapabilities,
-        ) -> anyhow::Result<GradientCapabilities> {
-            anyhow::bail!("not reached")
-        }
-    }
-
     fn credentials() -> DialerCredentials {
         DialerCredentials {
             worker_id: "w1".into(),
@@ -687,6 +606,7 @@ mod tests {
         let dialer = dialer.expect("dialer handshake");
         let dialed = dialed.expect("dialed handshake");
         assert_eq!(dialer.peer_id, "w1");
+        assert_eq!(dialer.version, *crate::PROTO_VERSIONS.end());
         assert!(dialer.negotiated.build);
         assert_eq!(dialed.authorized_peers, vec!["p1".to_string()]);
     }
@@ -704,7 +624,6 @@ mod tests {
         let server = async {
             dialing
                 .send_msg(&ServerMessage::Authenticate {
-                    version: PROTO_VERSION,
                     worker_id: "w1".into(),
                     tokens: credentials().tokens,
                 })
@@ -739,90 +658,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn an_authenticate_from_another_protocol_version_is_rejected_with_400() {
-        let (mut accepted, mut dialing) = loopback().await;
-        let server = async {
-            dialing
-                .send_msg(&ServerMessage::Authenticate {
-                    version: PROTO_VERSION + 1,
-                    worker_id: "w1".into(),
-                    tokens: vec![],
-                })
-                .await
-                .expect("send Authenticate");
-            dialing.recv_msg().await
-        };
-
-        let verifier = Expects(vec![]);
-        let (outcome, reply) = tokio::join!(
-            as_dialed(&mut accepted, &Worker("w1"), &Worker("w1"), &verifier),
-            server
-        );
-        assert_eq!(rejection(outcome).code, 400);
-        assert!(matches!(
-            reply,
-            Some(ClientMessage::Reject { code: 400, .. })
-        ));
-    }
-
-    #[tokio::test]
-    async fn a_worker_on_an_older_protocol_is_rejected_with_400_by_the_dialer() {
-        let (mut accepted, mut dialing) = loopback().await;
-        let old_worker = async {
-            accepted
-                .send_client_msg(&ClientMessage::InitConnection {
-                    version: PROTO_VERSION - 1,
-                    capabilities: GradientCapabilities::default(),
-                    id: "w1".into(),
-                })
-                .await
-                .expect("send InitConnection");
-            let _authenticate = accepted.recv_server_msg().await;
-            accepted.recv_server_msg().await
-        };
-
-        let (credentials, authority) = (credentials(), Admits(vec![]));
-        let (dialer, reply) = tokio::join!(
-            as_dialer(&mut dialing, &credentials, &authority),
-            old_worker
-        );
-        assert_eq!(rejection(dialer).code, 400);
-        assert!(matches!(
-            reply,
-            Some(ServerMessage::Reject { code: 400, .. })
-        ));
-    }
-
-    #[tokio::test]
-    async fn a_rejected_worker_is_named_by_the_id_it_claimed() {
-        let (mut accepted, mut dialing) = loopback().await;
-        let worker = async {
-            dialing
-                .send_client_msg(&ClientMessage::InitConnection {
-                    version: PROTO_VERSION + 1,
-                    capabilities: GradientCapabilities::default(),
-                    id: "w1".into(),
-                })
-                .await
-                .expect("send InitConnection");
-        };
-
-        let (outcome, ()) = tokio::join!(as_authority(&mut accepted, &NeverAsked), worker);
-        let rejected = rejection(outcome);
-        assert_eq!(
-            (rejected.code, rejected.claimed.as_deref()),
-            (400, Some("w1"))
-        );
-    }
-
-    #[tokio::test]
     async fn a_dialed_side_that_checks_the_tokens_itself_answers_the_dialer() {
         let (mut accepted, mut dialing) = loopback().await;
         let dialed = async {
             let Some(FirstMessage::Server(first)) = accepted.recv_first_message().await else {
                 panic!("expected Authenticate first");
             };
-            let claim = on_authenticate(first, PROTO_VERSION).expect("current version");
+            let claim = on_authenticate(first).expect("an Authenticate");
             assert_eq!(claim.tokens, credentials().tokens);
             answer_dialer(&mut accepted, &Worker("w1"), &Worker("w1")).await
         };
@@ -834,34 +676,6 @@ mod tests {
         assert_eq!(
             dialed.expect("dialed handshake").authorized_peers,
             vec!["p1".to_string()]
-        );
-    }
-
-    #[tokio::test]
-    async fn a_greeting_read_by_the_caller_is_judged_like_one_read_by_the_authority() {
-        let (mut accepted, mut dialing) = loopback().await;
-        let worker = async {
-            dialing
-                .send_client_msg(&ClientMessage::InitConnection {
-                    version: PROTO_VERSION + 1,
-                    capabilities: GradientCapabilities::default(),
-                    id: "w1".into(),
-                })
-                .await
-                .expect("send InitConnection");
-        };
-        let authority = async {
-            let Some(FirstMessage::Worker(greeting)) = accepted.recv_first_message().await else {
-                panic!("expected InitConnection first");
-            };
-            as_authority_with_greeting(&mut accepted, greeting, &NeverAsked).await
-        };
-
-        let (outcome, ()) = tokio::join!(authority, worker);
-        let rejected = rejection(outcome);
-        assert_eq!(
-            (rejected.code, rejected.claimed.as_deref()),
-            (400, Some("w1"))
         );
     }
 }

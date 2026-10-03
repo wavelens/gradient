@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use gradient_wire::types::{CachedPath, GradientCapabilities, QueryMode};
 
-use gradient_wire::messages::{ClientMessage, PROTO_VERSION, ServerMessage};
+use gradient_wire::messages::{ClientMessage, ServerMessage};
 
 pub(super) fn proto_ws_url(base_url: &str, remote_cache: &str) -> String {
     let trimmed = base_url.trim_end_matches('/');
@@ -46,11 +46,11 @@ pub(crate) async fn pull_paths(
     };
 
     let init = ClientMessage::InitConnection {
-        version: PROTO_VERSION,
         capabilities: consumer_capabilities(),
         id: uuid::Uuid::now_v7().to_string(),
     };
-    if socket.send_client_msg(&init).await.is_err() {
+    let sent = tokio::time::timeout(Duration::from_secs(10), socket.send_client_msg(&init)).await;
+    if !matches!(sent, Ok(Ok(()))) {
         return vec![];
     }
 

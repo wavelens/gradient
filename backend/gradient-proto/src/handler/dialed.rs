@@ -169,7 +169,6 @@ mod tests {
     use gradient_entity::project_cache::{CacheSubscriptionMode, Model as ProjectCacheModel};
     use gradient_entity::{base_worker, project_base_worker, worker_registration};
     use gradient_types::ids::{CacheId, ProjectCacheId};
-    use gradient_wire::session::frame::WireMessage;
     use sea_orm::{DatabaseBackend, MockDatabase};
     use std::time::Duration;
 
@@ -177,10 +176,11 @@ mod tests {
 
     async fn sent(rx: &mut tokio::sync::mpsc::Receiver<bytes::Bytes>) -> ServerMessage {
         let bytes = rx.recv().await.expect("a frame");
-        ServerMessage::decode(bytes)
-            .expect("decodes")
-            .into_message()
-            .expect("a control message")
+        gradient_wire::codec::from_bytes::<ServerMessage>(
+            bytes,
+            *gradient_wire::PROTO_VERSIONS.end(),
+        )
+        .expect("a control message")
     }
 
     fn session(projects: &[ProjectId]) -> DialedSession {

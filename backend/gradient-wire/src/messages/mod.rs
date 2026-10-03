@@ -20,12 +20,14 @@ pub use crate::types::{
     CompletedMultipart, GrantTarget, NarUploadMetadata, PresignedMultipart, UploadMetadata,
     UploadObject, UploadOutcome,
 };
-pub use client::{ArchivedClientMessage, ClientMessage};
-pub use server::{ArchivedServerMessage, FailedPeer, ServerMessage};
+pub use client::ClientMessage;
+pub use server::{FailedPeer, ServerMessage};
 
-pub const PROTO_VERSION: u16 = 26;
+use crate::codec::{Proto, max};
 
-pub const PROTO_VERSIONS: std::ops::RangeInclusive<u16> = 27..=27;
+pub const PROTO_VERSIONS: std::ops::RangeInclusive<u16> =
+    max(ClientMessage::OLDEST, ServerMessage::OLDEST)
+        ..=max(ClientMessage::NEWEST, ServerMessage::NEWEST);
 
 pub const PROGRESS_INTERVAL: std::time::Duration = std::time::Duration::from_secs(1);
 

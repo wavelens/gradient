@@ -6,50 +6,39 @@
 
 use gradient_types::events::EventBus;
 use gradient_types::events::proto::{Direction, Message};
-use gradient_wire::messages::{ArchivedClientMessage, ClientMessage, ServerMessage};
-use gradient_wire::session::frame::{Inbound, MsgObserver};
+use gradient_wire::messages::{ClientMessage, ServerMessage};
+use gradient_wire::session::frame::MsgObserver;
 
-pub(super) struct ServerTap {
+pub(super) struct ProtoTap {
     pub bus: EventBus,
     pub worker_id: String,
 }
 
-impl MsgObserver<ServerMessage> for ServerTap {
-    fn sent(&self, msg: &ServerMessage, len: usize) {
+impl ProtoTap {
+    fn publish(&self, direction: Direction, message: &str, job_id: Option<&str>, len: usize) {
         if !self.bus.wire_active() {
             return;
         }
+
         self.bus.publish(Message {
-            direction: Direction::Server,
+            direction,
             worker_id: self.worker_id.clone(),
-            message: msg.variant_name().to_owned(),
-            job_id: msg.job_id().map(str::to_owned),
+            message: message.to_owned(),
+            job_id: job_id.map(str::to_owned),
             len: Some(len),
         });
     }
 }
 
-pub(super) fn publish_inbound(bus: &EventBus, worker_id: &str, inbound: &Inbound<ClientMessage>) {
-    if !bus.wire_active() {
-        return;
+impl MsgObserver<ServerMessage> for ProtoTap {
+    fn observe(&self, msg: &ServerMessage, len: usize) {
+        self.publish(Direction::Server, msg.variant_name(), msg.job_id(), len);
     }
-    let (job_id, len) = match inbound {
-        Inbound::Control(msg) => (msg.job_id().map(str::to_owned), None),
-        Inbound::Bulk(frame) => (bulk_job_id(frame.archived()), Some(frame.len())),
-    };
-    bus.publish(Message {
-        direction: Direction::Client,
-        worker_id: worker_id.to_owned(),
-        message: inbound.variant_name().to_owned(),
-        job_id,
-        len,
-    });
 }
 
-fn bulk_job_id(archived: &ArchivedClientMessage) -> Option<String> {
-    match archived {
-        ArchivedClientMessage::LogChunk { job_id, .. } => Some(job_id.to_string()),
-        _ => None,
+impl MsgObserver<ClientMessage> for ProtoTap {
+    fn observe(&self, msg: &ClientMessage, len: usize) {
+        self.publish(Direction::Client, msg.variant_name(), msg.job_id(), len);
     }
 }
 
@@ -57,11 +46,18 @@ fn bulk_job_id(archived: &ArchivedClientMessage) -> Option<String> {
 mod tests {
     use super::*;
 
+    fn tap(bus: &EventBus) -> ProtoTap {
+        ProtoTap {
+            bus: bus.clone(),
+            worker_id: "w1".into(),
+        }
+    }
+
     #[test]
-    fn an_inbound_control_message_is_published_as_a_proto_event() {
+    fn a_received_message_is_published_as_a_proto_event() {
         let bus = EventBus::new(4);
         let mut rx = bus.subscribe_firehose();
-        publish_inbound(&bus, "w1", &Inbound::Control(ClientMessage::RequestJobList));
+        tap(&bus).observe(&ClientMessage::RequestJobList, 1);
         let env = rx.try_recv().unwrap();
         assert_eq!(env.event.name(), "proto.client.request_job_list");
     }
@@ -70,7 +66,7 @@ mod tests {
     fn without_a_firehose_nothing_is_built() {
         let bus = EventBus::new(4);
         let mut live = bus.subscribe();
-        publish_inbound(&bus, "w1", &Inbound::Control(ClientMessage::RequestJobList));
+        tap(&bus).observe(&ClientMessage::RequestJobList, 1);
         assert!(live.try_recv().is_err());
     }
 
@@ -78,11 +74,7 @@ mod tests {
     fn a_sent_message_is_published_with_its_job_and_length() {
         let bus = EventBus::new(4);
         let mut rx = bus.subscribe_firehose();
-        let tap = ServerTap {
-            bus: bus.clone(),
-            worker_id: "w1".into(),
-        };
-        tap.sent(
+        tap(&bus).observe(
             &ServerMessage::AbortJob {
                 job_id: "j1".into(),
                 reason: "r".into(),

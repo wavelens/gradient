@@ -12,8 +12,7 @@ use gradient_types::ids::CacheId;
 use tokio::sync::Semaphore;
 use tracing::{debug, info, warn};
 
-use gradient_wire::messages::{ClientMessage, GradientCapabilities, PROTO_VERSION, ServerMessage};
-use gradient_wire::session::frame::Inbound;
+use gradient_wire::messages::{ClientMessage, GradientCapabilities, ServerMessage};
 use gradient_wire::session::handshake as handshake_fsm;
 
 use super::socket::{HANDSHAKE_TIMEOUT, ProtoSocket, recv_client_msg, send_server_msg};
@@ -51,16 +50,14 @@ pub async fn handle_cache_socket(
     info!(%cache_id, "cache websocket session opened");
 
     match tokio::time::timeout(HANDSHAKE_TIMEOUT, socket.recv_msg()).await {
-        Ok(Some(msg)) => {
-            match handshake_fsm::on_init_connection(handshake_fsm::Opening, msg, PROTO_VERSION) {
-                Ok(_) => {}
-                Err(handshake_fsm::Intent::Reject { code, reason }) => {
-                    socket.send_reject(code, reason).await;
-                    return;
-                }
-                Err(_) => return,
+        Ok(Some(msg)) => match handshake_fsm::on_init_connection(handshake_fsm::Opening, msg) {
+            Ok(_) => {}
+            Err(handshake_fsm::Intent::Reject { code, reason }) => {
+                socket.send_reject(code, reason).await;
+                return;
             }
-        }
+            Err(_) => return,
+        },
         Ok(None) => return,
         Err(_) => {
             warn!(%cache_id, "cache websocket handshake timed out");
@@ -70,7 +67,6 @@ pub async fn handle_cache_socket(
 
     if socket
         .send_msg(&ServerMessage::InitAck {
-            version: PROTO_VERSION,
             capabilities: readonly_capabilities(),
             authorized_peers: vec![],
             failed_peers: vec![],
@@ -107,11 +103,7 @@ pub async fn handle_cache_socket(
         let msg = tokio::select! {
             _ = cancel.cancelled() => break,
             m = next => match m {
-                Some(Inbound::Control(m)) => m,
-                Some(Inbound::Bulk(frame)) => {
-                    warn!(%cache_id, variant = frame.variant_name(), "ignoring bulk frame on a read-only cache session");
-                    continue;
-                }
+                Some(m) => m,
                 None => break,
             },
         };

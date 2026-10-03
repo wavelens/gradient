@@ -4,28 +4,28 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use bytes::Bytes;
+
+use crate::codec::Proto;
 use crate::types::{
     CachedPath, ClusterAddress, ClusterMembership, ClusterPeer, CredentialKind,
     EvalCachePullOutcome, GradientCapabilities, GrantTarget, Job, JobCandidate, UploadOutcome,
 };
-use rkyv::{Archive, Deserialize, Serialize};
 
-#[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq)]
-#[rkyv(derive(Debug, PartialEq))]
+#[derive(Proto, Debug, Clone, PartialEq)]
 pub struct FailedPeer {
     pub peer_id: String,
     pub reason: String,
 }
 
-#[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq)]
-#[rkyv(derive(Debug, PartialEq))]
+#[derive(Proto, Debug, Clone, PartialEq)]
+#[proto(oldest = 27)]
 pub enum ServerMessage {
     AuthChallenge {
         peers: Vec<String>,
     },
 
     InitAck {
-        version: u16,
         capabilities: GradientCapabilities,
         authorized_peers: Vec<String>,
         failed_peers: Vec<FailedPeer>,
@@ -77,7 +77,7 @@ pub enum ServerMessage {
     ClusterSignal {
         attempt: String,
         from: ClusterAddress,
-        payload: Vec<u8>,
+        payload: Bytes,
     },
 
     AbortCluster {
@@ -87,13 +87,13 @@ pub enum ServerMessage {
 
     Credential {
         kind: CredentialKind,
-        data: Vec<u8>,
+        data: Bytes,
     },
 
     NarPush {
         job_id: String,
         store_path: String,
-        data: Vec<u8>,
+        data: Bytes,
         offset: u64,
         is_final: bool,
     },
@@ -126,7 +126,7 @@ pub enum ServerMessage {
 
     EvalCacheChunk {
         job_id: String,
-        data: Vec<u8>,
+        data: Bytes,
         offset: u64,
         is_final: bool,
     },
@@ -157,7 +157,6 @@ pub enum ServerMessage {
         outcome: UploadOutcome,
     },
     Authenticate {
-        version: u16,
         worker_id: String,
         tokens: Vec<(String, String)>,
     },
