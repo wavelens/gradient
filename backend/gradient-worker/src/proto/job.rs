@@ -23,7 +23,9 @@ use crate::executor::timeline::{JobTimeline, PhaseGuard};
 use crate::nix::store::LocalNixStore;
 use crate::proto::eval_cache_recv::EvalCacheReceiver;
 use crate::proto::prefetch::MissingInputs;
-use crate::proto::progress::{BuildProgressSink, EvalProgressSender, Progress};
+use crate::proto::progress::{
+    BuildProgressSink, EvalProgressSender, Progress, Tally, count_delivery,
+};
 use gradient_wire::traits::{EvalProgressSink, JobReporter};
 use gradient_wire::types::{BuildProgressPhase, GrantTarget, UploadMetadata, UploadObject};
 use gradient_worker_client::connection::ProtoWriter;
@@ -252,7 +254,11 @@ impl JobUpdater {
         .await
     }
 
-    pub async fn request_nars(&self, paths: Vec<String>) -> Result<Vec<(String, NarPayload)>> {
+    pub(crate) async fn request_nars(
+        &self,
+        paths: Vec<String>,
+        tally: &Tally,
+    ) -> Result<Vec<(String, NarPayload)>> {
         use futures::future::join_all;
 
         if paths.is_empty() {
@@ -293,9 +299,11 @@ impl JobUpdater {
 
         let waits = pendings.into_iter().map(|pending| {
             let recv = self.nar_recv.clone();
+            let tally = tally.clone();
             async move {
                 let path = pending.store_path().to_owned();
-                let res = recv.await_pending(pending).await;
+                let received = pending.received();
+                let res = count_delivery(tally, received, recv.await_pending(pending)).await;
                 (path, res)
             }
         });

@@ -17,7 +17,7 @@ use sha2::{Digest, Sha256};
 use super::substitute::RawNar;
 use crate::proto::job::JobUpdater;
 use crate::proto::prefetch::{MissingInputs, download_one_presigned};
-use crate::proto::progress::{Progress, ProgressSink, read_body};
+use crate::proto::progress::{Progress, ProgressSink, Tally, read_body};
 use gradient_worker_client::compression::{
     decompress, extract_single_file_from_nar, parse_nar_hash_to_bytes, resolve_compression,
 };
@@ -216,7 +216,7 @@ impl DownloadIo for JobUpdaterIo<'_> {
         } else {
             match self
                 .0
-                .request_nars(vec![drv_path.to_owned()])
+                .request_nars(vec![drv_path.to_owned()], &Tally::default())
                 .await?
                 .into_iter()
                 .next()

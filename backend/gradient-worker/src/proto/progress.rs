@@ -14,11 +14,13 @@ use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use gradient_wire::messages::{ClientMessage, PROGRESS_INTERVAL};
 use gradient_wire::traits::EvalProgressSink;
 use gradient_wire::types::{BuildProgressPhase, EvalProgress};
+use tokio::sync::watch;
 use tokio::time::Instant;
 use tracing::debug;
 
 use gradient_worker_client::connection::ProtoWriter;
 use gradient_worker_client::correlation::AssignmentHandle;
+use gradient_worker_client::nar_recv::NarPayload;
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Transferred {
@@ -98,12 +100,6 @@ struct Counts {
 }
 
 impl Tally {
-    pub(crate) fn landed(&self, bytes: u64) {
-        let mut transfer = self.transfer();
-        transfer.at(bytes);
-        transfer.done();
-    }
-
     fn transfer(&self) -> TransferBytes {
         TransferBytes {
             tally: self.clone(),
@@ -272,6 +268,24 @@ pub(crate) async fn report_during<S: ProgressSink, T>(
             }
         }
     }
+}
+
+pub(crate) async fn count_delivery(
+    tally: Tally,
+    mut received: watch::Receiver<u64>,
+    delivery: impl Future<Output = anyhow::Result<NarPayload>>,
+) -> anyhow::Result<NarPayload> {
+    let mut counted = Progress::counting(tally);
+    tokio::pin!(delivery);
+    let payload = loop {
+        tokio::select! {
+            delivered = &mut delivery => break delivered?,
+            Ok(()) = received.changed() => counted.at(*received.borrow_and_update()),
+        }
+    };
+    counted.at(payload.byte_len().await);
+    counted.transfer_done();
+    Ok(payload)
 }
 
 /// A size a remote declared is a hint, never a reason to reserve unbounded memory.
@@ -446,6 +460,38 @@ mod tests {
         Progress::new(&mut sent).finish().await;
 
         assert!(sent.0.is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_nar_counts_its_staged_bytes_before_it_lands_and_a_failed_one_gives_them_back() {
+        let tally = Tally::default();
+        let (staged, received) = watch::channel(0);
+        let (deliver, delivery) = tokio::sync::oneshot::channel();
+        let landing = count_delivery(tally.clone(), received, async {
+            delivery.await.expect("delivered")
+        });
+        tokio::pin!(landing);
+
+        staged.send_replace(40);
+        assert!(futures::poll!(&mut landing).is_pending());
+        assert_eq!((tally.bytes(), tally.paths()), (40, 0));
+
+        deliver.send(Ok(NarPayload::Bytes(vec![0; 50]))).unwrap();
+        landing.await.unwrap();
+        assert_eq!((tally.bytes(), tally.paths()), (50, 1));
+
+        let (staged, received) = watch::channel(0);
+        let (abort, delivery) = tokio::sync::oneshot::channel();
+        let failing = count_delivery(tally.clone(), received, async {
+            delivery.await.expect("delivered")
+        });
+        tokio::pin!(failing);
+        staged.send_replace(30);
+        assert!(futures::poll!(&mut failing).is_pending());
+        assert_eq!(tally.bytes(), 80);
+        abort.send(Err(anyhow::anyhow!("aborted"))).unwrap();
+        failing.await.unwrap_err();
+        assert_eq!((tally.bytes(), tally.paths()), (50, 1));
     }
 
     #[tokio::test]

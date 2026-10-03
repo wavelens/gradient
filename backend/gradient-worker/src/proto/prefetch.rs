@@ -300,22 +300,17 @@ impl<'a> InputPrefetcher<'a> {
         }
 
         let paths: Vec<String> = by_request.iter().map(|c| c.path.clone()).collect();
-        let nars_by_path = self.updater.request_nars(paths).await?;
+        let nars_by_path = self.updater.request_nars(paths, tally).await?;
 
         let mut meta_by_path: HashMap<String, CachedPath> = by_request
             .into_iter()
             .map(|c| (c.path.clone(), c))
             .collect();
 
-        let results: Vec<_> = nars_by_path
+        Ok(nars_by_path
             .into_iter()
             .filter_map(|(path, nar)| meta_by_path.remove(&path).map(|meta| (path, nar, meta)))
-            .collect();
-        for (_, nar, _) in &results {
-            tally.landed(nar.byte_len().await);
-        }
-
-        Ok(results)
+            .collect())
     }
 
     async fn import_all(&self, results: Vec<(String, NarPayload, CachedPath)>) -> Result<usize> {
