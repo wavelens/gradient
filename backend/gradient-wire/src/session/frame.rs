@@ -152,8 +152,7 @@ impl WireMessage for ServerMessage {
 
 pub struct ProtoSocket {
     transport: Transport,
-    version: Option<u16>,
-    refusal: Option<String>,
+    agreement: Option<Result<u16, String>>,
 }
 
 enum Transport {
@@ -244,31 +243,35 @@ impl ProtoSocket {
     pub fn axum(ws: WebSocket) -> Self {
         Self {
             transport: Transport::Axum(Box::new(ws)),
-            version: None,
-            refusal: None,
+            agreement: None,
         }
     }
 
     pub fn tungstenite(ws: WebSocketStream<MaybeTlsStream<TcpStream>>) -> Self {
         Self {
             transport: Transport::Tungstenite(Box::new(ws)),
-            version: None,
-            refusal: None,
+            agreement: None,
         }
     }
 
     #[cfg(any(test, feature = "testing"))]
     pub fn with_version(mut self, version: u16) -> Self {
-        self.version = Some(version);
+        self.agreement = Some(Ok(version));
         self
     }
 
     pub fn version(&self) -> Option<u16> {
-        self.version
+        match self.agreement {
+            Some(Ok(version)) => Some(version),
+            _ => None,
+        }
     }
 
     pub fn refusal(&self) -> Option<&str> {
-        self.refusal.as_deref()
+        match &self.agreement {
+            Some(Err(reason)) => Some(reason),
+            _ => None,
+        }
     }
 
     #[cfg(test)]
@@ -280,32 +283,30 @@ impl ProtoSocket {
     }
 
     pub async fn agree_version(&mut self) -> Option<u16> {
-        if self.version.is_none() {
-            self.version = self.agree().await;
+        if self.agreement.is_none() {
+            self.agreement = self.agree().await;
         }
 
-        self.version
+        self.version()
     }
 
-    async fn agree(&mut self) -> Option<u16> {
+    async fn agree(&mut self) -> Option<Result<u16, String>> {
         self.transport
             .send_bytes(version_frame(&PROTO_VERSIONS))
             .await
             .ok()?;
 
         let frame = self.transport.recv_bytes().await?;
-        match agree(&PROTO_VERSIONS, &frame) {
-            Ok(version) => {
-                debug!(version, "agreed on the /proto version");
-                Some(version)
-            }
+        let agreement = agree(&PROTO_VERSIONS, &frame);
+        match &agreement {
+            Ok(version) => debug!(version, "agreed on the /proto version"),
             Err(reason) => {
                 warn!(%reason, "closing /proto connection");
                 self.transport.close(reason.clone()).await;
-                self.refusal = Some(reason);
-                None
             }
         }
+
+        Some(agreement)
     }
 
     async fn recv_bytes(&mut self) -> Option<(Bytes, u16)> {
@@ -407,7 +408,7 @@ impl ProtoSocket {
         spawn: impl FnOnce(WriterTask),
     ) -> (MsgReader<In>, MsgWriter<Out>) {
         let version = self
-            .version
+            .version()
             .expect("the handshake agreed a protocol version before the split");
 
         let (tx, bulk_rx) = mpsc::channel::<Bytes>(WRITER_QUEUE_DEPTH);
@@ -1262,10 +1263,8 @@ mod agreement_tests {
             server.send_msg(&ServerMessage::Draining).await,
             Err(SendError::Closed)
         );
-        assert_eq!(
-            server.refusal(),
-            Some("no shared protocol version: ours 27..=27, peer 30..=31")
-        );
+        let expected = format!("no shared protocol version: ours {PROTO_VERSIONS:?}, peer 30..=31");
+        assert_eq!(server.refusal(), Some(expected.as_str()));
     }
 
     #[tokio::test]
@@ -1286,6 +1285,7 @@ mod agreement_tests {
         };
         let close = close.expect("a close frame with a reason");
         assert_eq!(close.code, CloseCode::Protocol);
-        assert_eq!(close.reason.as_str(), "peer protocol is older than 27");
+        let expected = format!("peer protocol is older than {}", PROTO_VERSIONS.start());
+        assert_eq!(close.reason.as_str(), expected);
     }
 }
