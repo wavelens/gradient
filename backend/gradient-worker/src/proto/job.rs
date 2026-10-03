@@ -23,8 +23,8 @@ use crate::executor::timeline::{JobTimeline, PhaseGuard};
 use crate::nix::store::LocalNixStore;
 use crate::proto::eval_cache_recv::EvalCacheReceiver;
 use crate::proto::prefetch::MissingInputs;
-use crate::proto::progress::{BuildProgressSink, Progress};
-use gradient_wire::traits::JobReporter;
+use crate::proto::progress::{BuildProgressSink, EvalProgressSender, Progress};
+use gradient_wire::traits::{EvalProgressSink, JobReporter};
 use gradient_wire::types::{GrantTarget, UploadMetadata, UploadObject};
 use gradient_worker_client::connection::ProtoWriter;
 use gradient_worker_client::nar_recv::{NarPayload, NarReceiver, NarUnavailable};
@@ -415,6 +415,14 @@ impl JobUpdater {
 
 #[async_trait]
 impl JobReporter for JobUpdater {
+    fn eval_progress_sink(&self) -> Arc<dyn EvalProgressSink> {
+        Arc::new(EvalProgressSender {
+            writer: self.writer.clone(),
+            job_id: self.job_id.clone(),
+            assignment_id: self.assignment_id.clone(),
+        })
+    }
+
     async fn query_upstream(&mut self, path: String) -> Result<Option<CachedPath>> {
         JobUpdater::query_upstream(self, path).await
     }

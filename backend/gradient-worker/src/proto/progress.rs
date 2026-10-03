@@ -8,6 +8,8 @@
 //! A retried transfer is restarting from where the finished ones left off.
 
 use gradient_wire::messages::{BUILD_PROGRESS_INTERVAL, ClientMessage};
+use gradient_wire::traits::EvalProgressSink;
+use gradient_wire::types::EvalProgress;
 use tokio::time::Instant;
 use tracing::debug;
 
@@ -43,6 +45,29 @@ impl ProgressSink for BuildProgressSink {
             .await;
         if let Err(e) = sent {
             debug!(build_id = %self.build_id, error = %e, "build progress not sent");
+        }
+    }
+}
+
+pub(crate) struct EvalProgressSender {
+    pub(crate) writer: ProtoWriter,
+    pub(crate) job_id: String,
+    pub(crate) assignment_id: AssignmentHandle,
+}
+
+#[async_trait::async_trait]
+impl EvalProgressSink for EvalProgressSender {
+    async fn report(&self, progress: EvalProgress) {
+        let sent = self
+            .writer
+            .send(ClientMessage::EvalProgress {
+                job_id: self.job_id.clone(),
+                assignment_id: self.assignment_id.get(),
+                progress,
+            })
+            .await;
+        if let Err(e) = sent {
+            debug!(job_id = %self.job_id, error = %e, "eval progress not sent");
         }
     }
 }

@@ -11,9 +11,10 @@ pub use crate::types::{
     BuildFailureKind, BuildJob, BuildMetrics, BuildOutput, BuildProduct, BuildSpec, BuildSpecKind,
     BumpedInputWire, CacheInfo, CachedPath, CandidateScore, ClusterAddress, ClusterMembership,
     ClusterPeer, CredentialKind, DerivationOutput, DiscoveredDerivation, EvalAttrCost,
-    EvalCachePullOutcome, EvalMessageLevel, EvalStatsReport, FlakeInputOverride, FlakeJob,
-    FlakeOutputNode, FlakeSource, FlakeStep, GradientCapabilities, InputUpdateSpec, Job,
-    JobCandidate, JobKind, JobPhase, JobPhaseSpan, JobUpdateKind, QueryMode, RequiredPath,
+    EvalCachePullOutcome, EvalMessageLevel, EvalProgress, EvalStatsReport, FlakeInputOverride,
+    FlakeJob, FlakeOutputNode, FlakeSource, FlakeStep, GradientCapabilities, InputFetch,
+    InputFetchState, InputUpdateSpec, Job, JobCandidate, JobKind, JobPhase, JobPhaseSpan,
+    JobUpdateKind, QueryMode, RequiredPath,
 };
 pub use crate::types::{
     CompletedMultipart, GrantTarget, NarUploadMetadata, PresignedMultipart, UploadMetadata,
@@ -22,9 +23,11 @@ pub use crate::types::{
 pub use client::{ArchivedClientMessage, ClientMessage};
 pub use server::{ArchivedServerMessage, FailedPeer, ServerMessage};
 
-pub const PROTO_VERSION: u16 = 24;
+pub const PROTO_VERSION: u16 = 25;
 
 pub const BUILD_PROGRESS_INTERVAL: std::time::Duration = std::time::Duration::from_secs(5);
+
+pub const EVAL_PROGRESS_INTERVAL: std::time::Duration = std::time::Duration::from_secs(1);
 
 pub use crate::constants::{NAR_ZSTD_LEVEL, PRESIGN_TTL};
 
