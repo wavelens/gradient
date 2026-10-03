@@ -14,38 +14,32 @@ use harmonia_protocol::daemon::wire::types2::{
 };
 use harmonia_protocol::daemon::{DaemonResult, FutureResultExt as _, ResultLog};
 use harmonia_protocol::log::{LogMessage, Message, Verbosity};
+use harmonia_store_derivation::derivation::BasicDerivation;
 use harmonia_store_derivation::derived_path::{DerivedPath, SingleDerivedPath};
 use harmonia_store_derivation::realisation::UnkeyedRealisation;
 use std::collections::{BTreeMap, HashMap};
+use std::future::Future;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
-pub fn build_paths(
+fn streamed<T, W, F>(
     session: Arc<Session>,
-    paths: Vec<DerivedPath>,
-) -> impl ResultLog<Output = DaemonResult<Vec<KeyedBuildResult>>> + Send + 'static {
+    work: W,
+) -> impl ResultLog<Output = DaemonResult<T>> + Send + 'static
+where
+    T: Send + 'static,
+    W: FnOnce(Arc<Session>, Box<dyn Fn(String) + Send + Sync>) -> F + Send + 'static,
+    F: Future<Output = DaemonResult<T>> + Send + 'static,
+{
     let (tx, mut rx) = mpsc::unbounded_channel::<LogMessage>();
     let shutdown = session.state.shutdown.clone();
-    let task = shutdown.spawn(async move {
-        let derivations = requested_derivations(&session, &paths).await?;
-        let outcome = if derivations.is_empty() {
-            None
-        } else {
-            let log = move |line: String| {
-                let _ = tx.send(LogMessage::Message(Message {
-                    level: Verbosity::Info,
-                    text: line.into(),
-                }));
-            };
-            Some(
-                crate::build_request::run(&session, &derivations, log)
-                    .await
-                    .map_err(err)?,
-            )
-        };
-
-        Ok(keyed_results(&paths, outcome))
+    let log = Box::new(move |line: String| {
+        let _ = tx.send(LogMessage::Message(Message {
+            level: Verbosity::Info,
+            text: line.into(),
+        }));
     });
+    let task = shutdown.spawn(work(session, log));
 
     let logs = async_stream::stream! {
         while let Some(msg) = rx.recv().await {
@@ -54,6 +48,42 @@ pub fn build_paths(
     };
 
     async move { task.await.map_err(err)? }.with_logs(logs)
+}
+
+pub fn build_paths(
+    session: Arc<Session>,
+    paths: Vec<DerivedPath>,
+) -> impl ResultLog<Output = DaemonResult<Vec<KeyedBuildResult>>> + Send + 'static {
+    streamed(session, move |session, log| async move {
+        let derivations = requested_derivations(&session, &paths).await?;
+        let outcome = if derivations.is_empty() {
+            None
+        } else {
+            Some(
+                crate::build_request::run(&session, &derivations, log)
+                    .await
+                    .map_err(err)?,
+            )
+        };
+
+        Ok(keyed_results(&paths, outcome))
+    })
+}
+
+pub fn build_derivation(
+    session: Arc<Session>,
+    drv: BasicDerivation,
+) -> impl ResultLog<Output = DaemonResult<BuildResult>> + Send + 'static {
+    streamed(session, move |session, log| async move {
+        let drv_path = crate::basic_derivation::import(&session, &drv)
+            .await
+            .map_err(err)?;
+        let outcome = crate::build_request::run(&session, std::slice::from_ref(&drv_path), log)
+            .await
+            .map_err(err)?;
+        let result = outcome.results.iter().find(|(path, _)| *path == drv_path);
+        Ok(build_result(result_inner(result.map(|(_, r)| r))))
+    })
 }
 
 async fn requested_derivations(
@@ -99,15 +129,7 @@ fn keyed_results(paths: &[DerivedPath], outcome: Option<BuildOutcome>) -> Vec<Ke
             let inner = match path {
                 DerivedPath::Built { drv_path, .. } => match drv_path.as_ref() {
                     SingleDerivedPath::Opaque(drv) => {
-                        match by_drv.get(&format!("/nix/store/{drv}")) {
-                            Some(Ok(outputs)) => built(outputs),
-                            Some(Err(failure)) => BuildResultInner::Failure(BuildResultFailure {
-                                status: failure.status,
-                                error_msg: failure.message.clone().into_bytes(),
-                                is_non_deterministic: false,
-                            }),
-                            None => already_valid(),
-                        }
+                        result_inner(by_drv.get(&format!("/nix/store/{drv}")))
                     }
                     SingleDerivedPath::Built { .. } => already_valid(),
                 },
@@ -116,17 +138,33 @@ fn keyed_results(paths: &[DerivedPath], outcome: Option<BuildOutcome>) -> Vec<Ke
 
             KeyedBuildResult {
                 path: path.clone(),
-                result: BuildResult {
-                    inner,
-                    times_built: 0,
-                    start_time: 0,
-                    stop_time: 0,
-                    cpu_user: None,
-                    cpu_system: None,
-                },
+                result: build_result(inner),
             }
         })
         .collect()
+}
+
+fn result_inner(result: Option<&DrvResult>) -> BuildResultInner {
+    match result {
+        Some(Ok(outputs)) => built(outputs),
+        Some(Err(failure)) => BuildResultInner::Failure(BuildResultFailure {
+            status: failure.status,
+            error_msg: failure.message.clone().into_bytes(),
+            is_non_deterministic: false,
+        }),
+        None => already_valid(),
+    }
+}
+
+fn build_result(inner: BuildResultInner) -> BuildResult {
+    BuildResult {
+        inner,
+        times_built: 0,
+        start_time: 0,
+        stop_time: 0,
+        cpu_user: None,
+        cpu_system: None,
+    }
 }
 
 fn built(outputs: &BTreeMap<String, String>) -> BuildResultInner {

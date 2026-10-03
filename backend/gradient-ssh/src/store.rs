@@ -10,12 +10,15 @@ use gradient_daemon::backend::{Backend, ConnInfo};
 use gradient_daemon::journal::Journal;
 use gradient_db::cache_paths::{ServedPath, served_hashes, served_path};
 use gradient_util::nix_hash::normalize_nar_hash;
-use harmonia_protocol::daemon::wire::types2::{BuildMode, KeyedBuildResult, QueryMissingResult};
+use harmonia_protocol::daemon::wire::types2::{
+    BuildMode, BuildResult, KeyedBuildResult, QueryMissingResult,
+};
 use harmonia_protocol::daemon::{
     AddToStoreItem, DaemonError, DaemonResult, DaemonStore, FutureResultExt as _,
     HandshakeDaemonStore, ResultLog, ResultLogExt as _, TrustLevel,
 };
 use harmonia_protocol::valid_path_info::{UnkeyedValidPathInfo, ValidPathInfo};
+use harmonia_store_derivation::derivation::BasicDerivation;
 use harmonia_store_derivation::derived_path::{DerivedPath, SingleDerivedPath};
 use harmonia_store_path::{StoreDir, StorePath, StorePathHash, StorePathSet};
 use harmonia_store_path_info::NarHash;
@@ -341,6 +344,15 @@ impl DaemonStore for CacheStore {
         _mode: BuildMode,
     ) -> impl ResultLog<Output = DaemonResult<Vec<KeyedBuildResult>>> + Send + 'a {
         crate::daemon_build::build_paths(self.session.clone(), drvs.to_vec())
+    }
+
+    fn build_derivation<'a>(
+        &'a mut self,
+        _drv_path: &'a StorePath,
+        drv: &'a BasicDerivation,
+        _mode: BuildMode,
+    ) -> impl ResultLog<Output = DaemonResult<BuildResult>> + Send + 'a {
+        crate::daemon_build::build_derivation(self.session.clone(), drv.clone())
     }
 
     fn query_missing<'a>(

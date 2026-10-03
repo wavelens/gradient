@@ -2973,6 +2973,7 @@ dependencies = [
  "gradient-wire",
  "harmonia-file-nar",
  "harmonia-protocol",
+ "harmonia-store-aterm",
  "harmonia-store-content-address",
  "harmonia-store-derivation",
  "harmonia-store-path",

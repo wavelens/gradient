@@ -5,6 +5,7 @@
  */
 
 pub mod backend;
+pub mod ca_path;
 pub mod control;
 pub mod journal;
 pub mod server;

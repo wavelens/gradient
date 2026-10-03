@@ -11,6 +11,7 @@ use std::fmt;
 
 use anyhow::{Context, Result, bail};
 use gradient_derivation::DrvOutputSpec;
+use gradient_util::nar::single_file_nar;
 use gradient_util::nix_hash::nix32_encode;
 use gradient_wire::messages::{BuildSpec, QueryMode};
 use sha2::{Digest, Sha256};
@@ -55,27 +56,6 @@ pub(crate) struct FetchSpec {
     pub hash: FixedHash,
     pub output_path: String,
     pub drv_base: String,
-}
-
-fn nar_str(out: &mut Vec<u8>, s: &[u8]) {
-    out.extend_from_slice(&(s.len() as u64).to_le_bytes());
-    out.extend_from_slice(s);
-    out.extend(std::iter::repeat_n(0u8, (8 - s.len() % 8) % 8));
-}
-
-pub(crate) fn single_file_nar(contents: &[u8], executable: bool) -> Vec<u8> {
-    let mut out = Vec::with_capacity(contents.len() + 128);
-    for token in [b"nix-archive-1".as_slice(), b"(", b"type", b"regular"] {
-        nar_str(&mut out, token);
-    }
-    if executable {
-        nar_str(&mut out, b"executable");
-        nar_str(&mut out, b"");
-    }
-    nar_str(&mut out, b"contents");
-    nar_str(&mut out, contents);
-    nar_str(&mut out, b")");
-    out
 }
 
 pub(crate) fn fetch_spec(

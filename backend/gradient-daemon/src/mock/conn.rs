@@ -5,12 +5,13 @@
  */
 
 use crate::backend::ConnInfo;
+use crate::ca_path;
 use crate::journal::Violation;
 use crate::mock::nar::{NarFile, encode};
 use crate::mock::spec::Timing;
 use crate::mock::store::{MockStore, Origin};
 use crate::mock::timing::chunk_delay;
-use crate::mock::{MockState, build, ca_path, import, store_path};
+use crate::mock::{MockState, build, import, store_path};
 use futures::{Stream, StreamExt as _, TryStreamExt as _};
 use harmonia_file_nar::archive::NarByteStream;
 use harmonia_protocol::daemon::wire::types::Operation;
