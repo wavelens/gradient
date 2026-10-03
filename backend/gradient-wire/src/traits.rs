@@ -78,6 +78,13 @@ pub trait JobReporter: Send + Sync {
         source: &str,
         message: &str,
     ) -> Result<()>;
+
+    fn eval_progress_sink(&self) -> std::sync::Arc<dyn EvalProgressSink>;
+}
+
+#[async_trait]
+pub trait EvalProgressSink: Send + Sync {
+    async fn report(&self, progress: crate::types::EvalProgress);
 }
 
 #[async_trait]

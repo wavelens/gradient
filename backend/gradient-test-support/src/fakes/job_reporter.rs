@@ -10,7 +10,9 @@ use gradient_util::sync::Mutex;
 use gradient_wire::messages::{
     BuildMetrics, BuildOutput, CachedPath, DiscoveredDerivation, EvalMessageLevel, QueryMode,
 };
-use gradient_wire::traits::JobReporter;
+use gradient_wire::traits::{EvalProgressSink, JobReporter};
+use gradient_wire::types::EvalProgress;
+use std::sync::Arc;
 
 #[derive(Debug, Clone)]
 pub enum ReportedEvent {
@@ -47,11 +49,12 @@ pub enum ReportedEvent {
         source: String,
         message: String,
     },
+    EvalProgress(EvalProgress),
 }
 
 #[derive(Debug, Default)]
 pub struct RecordingJobReporter {
-    events: Mutex<Vec<ReportedEvent>>,
+    events: Arc<Mutex<Vec<ReportedEvent>>>,
     pub cached_paths: Vec<String>,
     pub known_drv_paths: Vec<String>,
     pub upstream: std::collections::HashMap<String, String>,
@@ -124,8 +127,21 @@ impl RecordingJobReporter {
     }
 }
 
+struct RecordingProgress(Arc<Mutex<Vec<ReportedEvent>>>);
+
+#[async_trait]
+impl EvalProgressSink for RecordingProgress {
+    async fn report(&self, progress: EvalProgress) {
+        self.0.lock().push(ReportedEvent::EvalProgress(progress));
+    }
+}
+
 #[async_trait]
 impl JobReporter for RecordingJobReporter {
+    fn eval_progress_sink(&self) -> Arc<dyn EvalProgressSink> {
+        Arc::new(RecordingProgress(Arc::clone(&self.events)))
+    }
+
     async fn query_upstream(&mut self, path: String) -> Result<Option<CachedPath>> {
         Ok(self.upstream.get(&path).map(|url| CachedPath {
             path: path.clone(),

@@ -5,8 +5,9 @@
  */
 
 use crate::types::{
-    BuildFailureKind, CandidateScore, ClusterAddress, EvalMessageLevel, GradientCapabilities,
-    JobKind, JobPhaseSpan, JobUpdateKind, QueryMode, UploadMetadata, UploadObject,
+    BuildFailureKind, CandidateScore, ClusterAddress, EvalMessageLevel, EvalProgress,
+    GradientCapabilities, JobKind, JobPhaseSpan, JobUpdateKind, QueryMode, UploadMetadata,
+    UploadObject,
 };
 use rkyv::{Archive, Deserialize, Serialize};
 
@@ -92,6 +93,12 @@ pub enum ClientMessage {
         build_id: String,
         downloaded: u64,
         total: Option<u64>,
+    },
+
+    EvalProgress {
+        job_id: String,
+        assignment_id: String,
+        progress: EvalProgress,
     },
 
     LogChunk {
@@ -183,6 +190,7 @@ impl ClientMessage {
             | ClientMessage::JobCompleted { job_id, .. }
             | ClientMessage::JobFailed { job_id, .. }
             | ClientMessage::BuildProgress { job_id, .. }
+            | ClientMessage::EvalProgress { job_id, .. }
             | ClientMessage::LogChunk { job_id, .. }
             | ClientMessage::NarRequest { job_id, .. }
             | ClientMessage::NarRequestResume { job_id, .. }
@@ -211,6 +219,7 @@ impl ClientMessage {
             ClientMessage::JobFailed { .. } => "JobFailed",
             ClientMessage::Draining => "Draining",
             ClientMessage::BuildProgress { .. } => "BuildProgress",
+            ClientMessage::EvalProgress { .. } => "EvalProgress",
             ClientMessage::LogChunk { .. } => "LogChunk",
             ClientMessage::NarRequest { .. } => "NarRequest",
             ClientMessage::NarRequestResume { .. } => "NarRequestResume",
@@ -244,5 +253,13 @@ mod job_id_tests {
         };
         assert_eq!(m.job_id(), Some("j1"));
         assert_eq!(ClientMessage::RequestJobList.job_id(), None);
+
+        let progress = ClientMessage::EvalProgress {
+            job_id: "j".into(),
+            assignment_id: "a".into(),
+            progress: EvalProgress::Evaluating { thunks: 3 },
+        };
+        assert_eq!(progress.job_id(), Some("j"));
+        assert_eq!(progress.variant_name(), "EvalProgress");
     }
 }

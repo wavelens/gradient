@@ -389,6 +389,31 @@ pub struct EvalStatsReport {
     pub flake_nodes: Vec<FlakeOutputNode>,
 }
 
+#[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[rkyv(derive(Debug, PartialEq))]
+pub enum EvalProgress {
+    Fetching { inputs: Vec<InputFetch> },
+    Evaluating { thunks: u64 },
+}
+
+#[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[rkyv(derive(Debug, PartialEq))]
+pub struct InputFetch {
+    pub name: String,
+    pub state: InputFetchState,
+    pub downloaded_bytes: u64,
+    pub expected_bytes: u64,
+}
+
+#[derive(Archive, Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[rkyv(derive(Debug, PartialEq))]
+pub enum InputFetchState {
+    Queued,
+    Fetching,
+    Done,
+    Failed,
+}
+
 #[derive(Archive, Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[rkyv(derive(Debug, PartialEq))]
 pub enum JobPhase {

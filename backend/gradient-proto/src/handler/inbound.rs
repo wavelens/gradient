@@ -25,6 +25,7 @@ use gradient_wire::messages::{
     JobKind, ServerMessage,
 };
 use gradient_wire::session::frame::{Frame, Inbound};
+use gradient_wire::types::EvalProgress as WireEvalProgress;
 
 use super::auth::{expand_base_authorized, lookup_base_worker_challenge, lookup_registered_peers};
 use super::cache::handle_cache_query;
@@ -284,6 +285,16 @@ impl<'a> InboundContext<'a> {
             } => {
                 if self.owns(&job_id, &assignment_id) {
                     self.on_build_progress(&build_id, DownloadProgress { downloaded, total });
+                }
+                true
+            }
+            ClientMessage::EvalProgress {
+                job_id,
+                assignment_id,
+                progress,
+            } => {
+                if self.owns(&job_id, &assignment_id) {
+                    self.on_eval_progress(&job_id, progress);
                 }
                 true
             }
@@ -712,6 +723,8 @@ impl<'a> InboundContext<'a> {
             progress,
         });
     }
+
+    fn on_eval_progress(&self, _job_id: &str, _progress: WireEvalProgress) {}
 
     async fn on_nar_request(&mut self, job_id: String, paths: Vec<String>) {
         debug!(peer_id = %self.peer_id, %job_id, count = paths.len(), "NarRequest");
