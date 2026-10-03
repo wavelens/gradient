@@ -14,7 +14,7 @@ use crate::stats::StatsDelta;
 
 /// The version must be bumped whenever the frame layout or a type's rkyv shape changes.
 /// A mismatch can only happen when the binary is replaced mid-run.
-pub const EVAL_IPC_VERSION: u8 = 6;
+pub const EVAL_IPC_VERSION: u8 = 7;
 
 pub const MAX_FRAME_BYTES: u32 = 64 * 1024 * 1024;
 
@@ -62,6 +62,11 @@ pub enum EvalRequest {
         #[serde(default)]
         input_overrides: Vec<(String, String)>,
     },
+    FetchInput {
+        locked: String,
+        #[serde(default)]
+        git_ssh_command: Option<String>,
+    },
     Shutdown,
 }
 
@@ -92,6 +97,12 @@ pub enum EvalResponse {
         fingerprint: Option<String>,
     },
     CheckpointOk,
+    FetchOk {
+        store_path: String,
+    },
+    Stats {
+        delta: StatsDelta,
+    },
     Err {
         message: String,
     },
@@ -195,6 +206,29 @@ mod tests {
         buf.extend_from_slice(&[0u8; 8]);
         let mut r = std::io::Cursor::new(buf);
         assert!(read_frame(&mut r).is_err());
+    }
+
+    #[test]
+    fn a_fetch_request_and_its_frames_round_trip() {
+        let req = EvalRequest::FetchInput {
+            locked: r#"{"type":"github","owner":"o","repo":"r","rev":"abc","narHash":"sha256-x"}"#
+                .into(),
+            git_ssh_command: Some("ssh -i key".into()),
+        };
+        let back = decode_request(&encode_request(&req).unwrap()).unwrap();
+        assert!(
+            matches!(back, EvalRequest::FetchInput { ref locked, ref git_ssh_command }
+            if locked.contains("github") && git_ssh_command.as_deref() == Some("ssh -i key"))
+        );
+
+        let stats = EvalResponse::Stats {
+            delta: StatsDelta {
+                nr_thunks: 7,
+                ..Default::default()
+            },
+        };
+        let back = decode_response(&encode_response(&stats).unwrap()).unwrap();
+        assert!(matches!(back, EvalResponse::Stats { delta } if delta.nr_thunks == 7));
     }
 
     #[test]
