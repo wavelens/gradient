@@ -5067,8 +5067,9 @@ paths:
       description: |-
         Returns the full dependency closure of the build's derivation with per-node
         uncompressed NAR sizes and an exact `total_size_bytes` over the whole closure.
-        The `nodes`/`edges` lists are capped (largest nodes first) with `truncated`
-        set when the cap is hit; `total_size_bytes` stays exact regardless. Intended
+        The `nodes`/`edges` lists are capped with `truncated` set when the cap is hit:
+        the heaviest subtrees are kept, each still linked to a root. `total_size_bytes`
+        stays exact regardless. Intended
         for the closure Sankey view and size-trimming tooling.
 
         **Access:** Same as the dependency graph endpoint.
@@ -12710,7 +12711,7 @@ components:
           type: integer
         truncated:
           type: boolean
-          description: True when the closure exceeded the node cap and the node/edge lists were trimmed (largest nodes kept)
+          description: True when the closure exceeded the node cap and the node/edge lists were trimmed (heaviest subtrees kept, each still linked to a root)
         nodes:
           type: array
           items:
