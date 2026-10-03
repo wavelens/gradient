@@ -5,6 +5,7 @@
  */
 
 // Gradient-specific primitives, bound to app models and services.
+export * from './build-progress/build-progress.component';
 export * from './eval-status-badge/eval-status-badge.component';
 export * from './gradient-ci-connect/gradient-ci-connect.component';
 export * from './input-fetch-list/input-fetch-list.component';

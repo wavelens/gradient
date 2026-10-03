@@ -626,6 +626,82 @@ describe('EvaluationLogComponent', () => {
     });
   });
 
+  describe('build progress', () => {
+    type Progress = { phase: 'prefetch' | 'download' | 'upload'; bytes_done: number; bytes_total: number | null; paths_done: number; paths_total: number | null };
+    const MiB = 1024 * 1024;
+    const frame = (p: Progress): LiveEvent => ({ event: 'build.progress', at: '', content: { derivation_build: 'd1', ...p } });
+
+    function setupBuild(seed: Progress | null) {
+      const frames = new Subject<LiveEvent>();
+      const getBuild = vi.fn(() => of({ progress: seed }));
+      TestBed.configureTestingModule({
+        imports: [EvaluationLogComponent],
+        providers: [
+          provideRouter([]), provideHttpClient(), provideHttpClientTesting(),
+          { provide: ActivatedRoute, useValue: {
+            snapshot: {
+              paramMap: convertToParamMap({ project: 'proj', evaluationId: 'eval-1' }),
+              queryParamMap: convertToParamMap({}),
+              fragment: null,
+            },
+          } },
+          { provide: EvaluationsService, useValue: {
+            getEvaluation: () => of({ id: 'eval-1', status: 'Building', created_at: '2026-01-01T00:00:00', updated_at: '2026-01-01T00:00:00', started_at: '2026-01-01T00:00:00', finished_at: null, trigger: null }),
+            getBuild,
+            getBuilds: () => of({ builds: [build('b1', 'hash-hello.drv', 'Building')], total: 1, active_count: 1 }),
+            getEvaluationMessages: () => of([]),
+          } },
+          { provide: LiveService, useValue: { connect: () => frames } },
+        ],
+      });
+      vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('{}', { status: 404 }));
+      const fixture = TestBed.createComponent(EvaluationLogComponent);
+      const cmp = fixture.componentInstance;
+      cmp.ngOnInit();
+      cmp.selectedBuildId.set('b1');
+      cmp.logLoading.set(false);
+      (cmp as unknown as { watchProgress: (id: string) => void }).watchProgress('b1');
+      fixture.detectChanges();
+      const panel = () => fixture.nativeElement.querySelector('gr-build-progress') as HTMLElement | null;
+      return { fixture, cmp, frames, getBuild, panel };
+    }
+
+    it('shows a prefetch as a compact strip above the running log', () => {
+      const { fixture, panel } = setupBuild({ phase: 'prefetch', bytes_done: 120 * MiB, bytes_total: 340 * MiB, paths_done: 12, paths_total: 40 });
+      expect(panel()?.querySelector('.build-progress--compact')).not.toBeNull();
+      expect(panel()?.closest('.log-container-wrapper')).not.toBeNull();
+      expect(panel()?.textContent).toContain('Prefetching inputs 35 %');
+      expect(panel()?.textContent).toContain('120 / 340 MiB');
+      expect(panel()?.textContent).toContain('12 / 40 paths');
+      fixture.destroy();
+    });
+
+    it('shows a download in place of the log', () => {
+      const { fixture, panel } = setupBuild({ phase: 'download', bytes_done: 1536, bytes_total: null, paths_done: 0, paths_total: 1 });
+      expect(panel()?.querySelector('.build-progress--compact')).toBeNull();
+      expect(fixture.nativeElement.querySelector('.log-container-wrapper')).toBeNull();
+      expect(panel()?.textContent).toContain('Downloading');
+      expect(panel()?.textContent).toContain('1.5 KiB');
+      fixture.destroy();
+    });
+
+    it('follows live frames into the upload without refetching the build, and drops a finished phase', () => {
+      const { fixture, frames, getBuild, panel } = setupBuild(null);
+      expect(panel()).toBeNull();
+
+      frames.next(frame({ phase: 'upload', bytes_done: 30, bytes_total: 120, paths_done: 1, paths_total: 3 }));
+      fixture.detectChanges();
+      expect(panel()?.textContent).toContain('Uploading outputs 25 %');
+      expect(panel()?.textContent).toContain('1 / 3 paths');
+
+      frames.next(frame({ phase: 'upload', bytes_done: 120, bytes_total: 120, paths_done: 3, paths_total: 3 }));
+      fixture.detectChanges();
+      expect(panel()).toBeNull();
+      expect(getBuild).toHaveBeenCalledTimes(1);
+      fixture.destroy();
+    });
+  });
+
   // The download must serve the complete log, not the virtualized window the
   // page happens to be showing.
   describe('log download', () => {
