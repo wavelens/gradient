@@ -19,7 +19,7 @@ use tokio::sync::watch;
 use super::NarUpload;
 use crate::proto::job::JobUpdater;
 use crate::proto::progress::{BuildProgressSink, Progress, Tally, report_during};
-use gradient_worker_client::nar::{NarSource, UploadedNar};
+use gradient_worker_client::nar::{NarSource, PathMeta, PathMetaSource, UploadedNar};
 
 pub(crate) struct OutputNar<'a> {
     pub build_id: String,
@@ -63,13 +63,14 @@ pub async fn push_outputs(
         })
         .collect();
 
-    let (mut progress, tallies) = upload_progress(updater, &pending).await;
+    let resolved = ResolvedMeta::of(&pending).await;
+    let (mut progress, tallies) = upload_progress(updater, &pending, &resolved);
     let uploads = pending
         .into_iter()
         .map(|(cached, output)| NarUpload {
             tally: tallies[&output.build_id].clone(),
             cached,
-            source: output.source,
+            source: resolved.source(output.source),
         })
         .collect();
     let uploaded = report_during(
@@ -83,13 +84,17 @@ pub async fn push_outputs(
     uploaded
 }
 
-async fn upload_progress(
+fn upload_progress(
     updater: &JobUpdater,
     pending: &[(CachedPath, OutputNar<'_>)],
+    resolved: &ResolvedMeta,
 ) -> (Vec<Progress<BuildProgressSink>>, HashMap<String, Tally>) {
     let mut totals: BTreeMap<&str, (Option<u64>, u32)> = BTreeMap::new();
     for (cached, output) in pending {
-        let size = nar_size(&output.source, &cached.path).await;
+        let size = match &output.source {
+            NarSource::Raw { nar, .. } => Some(nar.len() as u64),
+            NarSource::Path { .. } => resolved.nar_size(&cached.path),
+        };
         let (bytes, paths) = totals.entry(&output.build_id).or_insert((Some(0), 0));
         *bytes = bytes.zip(size).map(|(had, more)| had + more);
         *paths += 1;
@@ -108,11 +113,45 @@ async fn upload_progress(
     (progress, tallies)
 }
 
-async fn nar_size(source: &NarSource<'_>, store_path: &str) -> Option<u64> {
-    match source {
-        NarSource::Raw { nar, .. } => Some(nar.len() as u64),
-        NarSource::Path { meta: Some(meta) } => meta.path_meta(store_path).await?.nar_size,
-        NarSource::Path { meta: None } => None,
+struct ResolvedMeta(HashMap<String, PathMeta>);
+
+impl ResolvedMeta {
+    async fn of(pending: &[(CachedPath, OutputNar<'_>)]) -> Self {
+        let lookups = pending
+            .iter()
+            .filter_map(|(cached, output)| match output.source {
+                NarSource::Path { meta: Some(meta) } => Some(async move {
+                    let path = nix_store_path(&cached.path);
+                    let found = meta.path_meta(&path).await;
+                    found.map(|found| (path, found))
+                }),
+                _ => None,
+            });
+        Self(
+            futures::future::join_all(lookups)
+                .await
+                .into_iter()
+                .flatten()
+                .collect(),
+        )
+    }
+
+    fn nar_size(&self, store_path: &str) -> Option<u64> {
+        self.0.get(&nix_store_path(store_path))?.nar_size
+    }
+
+    fn source<'a>(&'a self, source: NarSource<'a>) -> NarSource<'a> {
+        match source {
+            NarSource::Path { meta: Some(_) } => NarSource::Path { meta: Some(self) },
+            other => other,
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl PathMetaSource for ResolvedMeta {
+    async fn path_meta(&self, store_path: &str) -> Option<PathMeta> {
+        self.0.get(&nix_store_path(store_path)).cloned()
     }
 }
 
@@ -505,6 +544,50 @@ mod tests {
             ]
         );
         pump.abort();
+    }
+
+    #[tokio::test]
+    async fn an_output_path_is_looked_up_once_for_its_total_and_its_upload() {
+        use super::ResolvedMeta;
+        use gradient_worker_client::nar::{PathMeta, PathMetaSource};
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        struct Counted(AtomicUsize);
+
+        #[async_trait::async_trait]
+        impl PathMetaSource for Counted {
+            async fn path_meta(&self, _: &str) -> Option<PathMeta> {
+                self.0.fetch_add(1, Ordering::SeqCst);
+                Some(PathMeta {
+                    nar_size: Some(7),
+                    ..Default::default()
+                })
+            }
+        }
+
+        let store = Counted(AtomicUsize::new(0));
+        let path = format!("/nix/store/{}-out", "o".repeat(32));
+        let pending = vec![(
+            uncached(&path),
+            OutputNar {
+                build_id: "b1".to_owned(),
+                store_path: path.clone(),
+                source: NarSource::Path { meta: Some(&store) },
+            },
+        )];
+
+        let resolved = ResolvedMeta::of(&pending).await;
+        let NarSource::Path {
+            meta: Some(upload_meta),
+        } = resolved.source(NarSource::Path { meta: Some(&store) })
+        else {
+            panic!("a path output stays a path upload");
+        };
+
+        assert_eq!(resolved.nar_size(&path), Some(7));
+        let upload_size = upload_meta.path_meta(&path).await.and_then(|m| m.nar_size);
+        assert_eq!(upload_size, Some(7));
+        assert_eq!(store.0.load(Ordering::SeqCst), 1);
     }
 
     #[test]
