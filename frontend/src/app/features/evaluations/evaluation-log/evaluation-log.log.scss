@@ -277,34 +277,4 @@
   word-break: break-word;
 }
 
-.download-hint {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: $spacing-sm;
-  height: 100%;
-  color: var(--gr-text-secondary);
-
-  .download-icon {
-    color: var(--gr-status-info);
-  }
-
-  .download-title {
-    font-size: $font-size-lg;
-    font-weight: 600;
-    color: var(--gr-text-primary);
-    font-variant-numeric: tabular-nums;
-  }
-
-  .download-sub {
-    font-size: $font-size-sm;
-    color: var(--gr-text-muted);
-    font-variant-numeric: tabular-nums;
-  }
-}
-
-.download-bar {
-  width: min(28rem, 80%);
-  --segbar-h: 7px;
-}
+.download-panel { height: 100%; }

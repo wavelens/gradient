@@ -15,10 +15,15 @@ export interface Build {
   updated_at: string;
 }
 
-/** Bytes a running Substitute or Download has fetched; `total` is null when the source announced no size. */
-export interface DownloadProgress {
-  downloaded: number;
-  total: number | null;
+export type BuildProgressPhase = 'prefetch' | 'download' | 'upload';
+
+/** Transfers of a running build; a total is null when the worker knows no size or count. */
+export interface BuildProgress {
+  phase: BuildProgressPhase;
+  bytes_done: number;
+  bytes_total: number | null;
+  paths_done: number;
+  paths_total: number | null;
 }
 
 export type BuildStatus =

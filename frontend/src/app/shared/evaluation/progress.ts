@@ -34,9 +34,13 @@ export function inputFetchRatio(input: InputFetch): number | null {
 
 export function inputFetchLabel(input: InputFetch): string {
   if (!input.downloaded_bytes) return '';
-  const done = formatBytes(input.downloaded_bytes);
-  if (input.state !== 'Fetching' || !input.expected_bytes) return done;
-  const total = formatBytes(input.expected_bytes);
-  const unit = done.slice(done.indexOf(' '));
-  return total.endsWith(unit) ? `${done.slice(0, -unit.length)} / ${total}` : `${done} / ${total}`;
+  return byteAmount(input.downloaded_bytes, input.state === 'Fetching' ? input.expected_bytes : null);
+}
+
+export function byteAmount(done: number, total: number | null): string {
+  const shown = formatBytes(done);
+  if (!total) return shown;
+  const all = formatBytes(total);
+  const unit = shown.slice(shown.indexOf(' '));
+  return all.endsWith(unit) ? `${shown.slice(0, -unit.length)} / ${all}` : `${shown} / ${all}`;
 }

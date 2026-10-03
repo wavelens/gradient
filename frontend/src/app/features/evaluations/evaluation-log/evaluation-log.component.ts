@@ -22,7 +22,6 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { LogChunkIndex, LogSearchHit, parseLineFragment, searchLines, windowAround } from './log-window';
 import { matchesBuildSearch } from './build-search';
 import { isTypingTarget } from './keyboard';
-import { downloadLabel, downloadRatio } from './download-progress';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { DomSanitizer, SafeHtml } from '@angular/platform-browser';
@@ -34,7 +33,7 @@ import { ProjectsService } from '@core/services/projects.service';
 import { TasksService } from '@core/services/tasks.service';
 import { AccessService, WritableDirective } from '@shared/access';
 import { AccessState, accessFromEntity } from '@core/models/access.model';
-import { DownloadProgress, Evaluation, EvaluationMessage, EvaluationProgress, EvaluationStatus, WaitingReason, TriggerType } from '@core/models';
+import { BuildProgress, Evaluation, EvaluationMessage, EvaluationProgress, EvaluationStatus, WaitingReason, TriggerType } from '@core/models';
 import { AuthService } from '@core/services/auth.service';
 import {
   BadgeComponent,
@@ -50,14 +49,14 @@ import {
   MessageService,
   ToastComponent,
 } from '@gradient/ui/ui';
-import { EvalStatusBadgeComponent, InputFetchListComponent, SegmentedBarComponent, byteSegments } from '@shared/ui';
-import { buildDuration, commitLabel, evaluationDuration, evaluationProgressText, formatEvaluationDuration, isPendingBuildStatus, isRunningEvaluationStatus, phaseProgress } from '@shared/evaluation';
+import { BuildProgressComponent, EvalStatusBadgeComponent, InputFetchListComponent } from '@shared/ui';
+import { buildDuration, buildPhaseFinished, commitLabel, evaluationDuration, evaluationProgressText, formatEvaluationDuration, isPendingBuildStatus, isRunningEvaluationStatus, phaseProgress } from '@shared/evaluation';
 import { environment } from '@environments/environment';
 
 @Component({
   selector: 'app-evaluation-log',
   standalone: true,
-  imports: [CommonModule, RouterModule, LoadingSpinnerComponent, ButtonComponent, DialogComponent, IconComponent, BadgeComponent, EvalStatusBadgeComponent, InputDirective, InputFetchListComponent, MenuComponent, MessageBannerComponent, SegmentedBarComponent, ToastComponent, WritableDirective],
+  imports: [CommonModule, RouterModule, LoadingSpinnerComponent, ButtonComponent, DialogComponent, IconComponent, BadgeComponent, BuildProgressComponent, EvalStatusBadgeComponent, InputDirective, InputFetchListComponent, MenuComponent, MessageBannerComponent, ToastComponent, WritableDirective],
   providers: [MessageService],
   templateUrl: './evaluation-log.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
@@ -184,19 +183,19 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     ];
   });
 
-  download = signal<DownloadProgress | null>(null);
-  downloadView = computed(() => {
-    const d = this.download();
-    if (!d) return null;
-    const ratio = downloadRatio(d);
-    return { percent: ratio === null ? null : Math.floor(ratio * 100), segments: byteSegments(d.downloaded, d.total), label: downloadLabel(d) };
+  buildProgress = signal<BuildProgress | null>(null);
+  shownProgress = computed(() => {
+    const p = this.buildProgress();
+    return p && !buildPhaseFinished(p) ? p : null;
   });
+  downloadProgress = computed(() => this.shownProgress()?.phase === 'download' ? this.shownProgress() : null);
+  transferProgress = computed(() => this.shownProgress()?.phase === 'download' ? null : this.shownProgress());
 
   errorMessages = computed(() => this.messages().filter(m => m.level === 'Error'));
   warningMessages = computed(() => this.messages().filter(m => m.level === 'Warning'));
 
   private liveSub?: Subscription;
-  private downloadSub?: Subscription;
+  private progressSub?: Subscription;
   private durationInterval?: ReturnType<typeof setInterval>;
   private activeStreamReader?: ReadableStreamDefaultReader<Uint8Array>;
   private streamingBuildId?: string;
@@ -741,31 +740,37 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     const isBuilding = build && ['Queued', 'Building'].includes(build.status);
     if (isBuilding) {
       this.startLogStream(buildId);
-      this.watchDownload(buildId);
+      this.watchProgress(buildId);
     }
   }
 
-  /// A Substitute or Download reports its bytes instead of log lines: seed from
-  /// the build, then follow the build's live channel until its log stream ends.
-  private watchDownload(buildId: string): void {
-    this.stopDownloadWatch();
+  /// A running build reports its prefetch, download and upload transfers: seed
+  /// from the build, then follow the build's live channel until its log stream ends.
+  private watchProgress(buildId: string): void {
+    this.stopProgressWatch();
     const seed = this.evalService.getBuild(buildId).pipe(
-      map(b => b.download_progress),
-      filter(() => this.download() === null),
+      map(b => b.progress),
+      filter(() => this.buildProgress() === null),
     );
     const updates = this.live.connect<LiveEvent>(`/builds/${buildId}/live`).pipe(
       filter(e => e.event === 'build.progress'),
-      map(e => ({ downloaded: e.content.downloaded ?? 0, total: e.content.total ?? null })),
+      map((e): BuildProgress => ({
+        phase: e.content.phase ?? 'download',
+        bytes_done: e.content.bytes_done ?? 0,
+        bytes_total: e.content.bytes_total ?? null,
+        paths_done: e.content.paths_done ?? 0,
+        paths_total: e.content.paths_total ?? null,
+      })),
     );
-    this.downloadSub = merge(seed, updates).subscribe(p => {
-      if (this.selectedBuildId() === buildId) this.download.set(p);
+    this.progressSub = merge(seed, updates).subscribe(p => {
+      if (this.selectedBuildId() === buildId) this.buildProgress.set(p);
     });
   }
 
-  private stopDownloadWatch(): void {
-    this.downloadSub?.unsubscribe();
-    this.downloadSub = undefined;
-    this.download.set(null);
+  private stopProgressWatch(): void {
+    this.progressSub?.unsubscribe();
+    this.progressSub = undefined;
+    this.buildProgress.set(null);
   }
 
   private async startLogStream(buildId: string): Promise<void> {
@@ -803,7 +808,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     } finally {
       this.activeStreamReader = undefined;
       this.streamingBuildId = undefined;
-      if (this.selectedBuildId() === buildId) this.stopDownloadWatch();
+      if (this.selectedBuildId() === buildId) this.stopProgressWatch();
     }
   }
 
@@ -813,7 +818,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     this.streamingBuildId = undefined;
     this.pendingLogLines = [];
     this.stopLogDrainTimer();
-    this.stopDownloadWatch();
+    this.stopProgressWatch();
   }
 
   // ── Virtualized log window ──────────────────────────────────────────────────
