@@ -29,6 +29,7 @@ pub mod search;
 pub mod stars;
 pub mod stats;
 pub mod tasks;
+pub mod teams;
 pub mod user;
 pub mod user_ssh_keys;
 pub mod webhooks;
