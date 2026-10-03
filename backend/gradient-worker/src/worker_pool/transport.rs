@@ -11,7 +11,7 @@ use std::process::Stdio;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt, BufReader};
-use tokio::process::{Child, ChildStdin, ChildStdout, Command};
+use tokio::process::{Child, ChildStderr, ChildStdin, ChildStdout, Command};
 use tracing::{debug, trace, warn};
 
 use gradient_eval::ipc::{
@@ -19,6 +19,9 @@ use gradient_eval::ipc::{
     decode_response, encode_request,
 };
 use gradient_eval::stats::StatsDelta;
+
+use super::input_fetch::{DownloadSlot, DownloadTarget, NixLine, NixLogParser};
+use super::live_thunks::LiveThunks;
 
 /// The stack size is matching upstream Nix's `initNix` `setStackSize(64 MiB)`.
 /// The libstdc++ `std::regex` executor behind `builtins.match` is overflowing 8 MiB stacks.
@@ -49,6 +52,8 @@ pub(super) struct EvalWorker {
     /// The pool must discard it, or the next request would read that frame as its answer.
     in_flight: bool,
     pid_guard: PidGuard,
+    thunks: Arc<LiveThunks>,
+    downloads: DownloadSlot,
 }
 
 pub(super) struct PidGuard {
@@ -68,6 +73,7 @@ impl EvalWorker {
     pub(super) async fn spawn(
         eval_cache_dir: &str,
         live: Arc<Mutex<HashSet<u32>>>,
+        thunks: Arc<LiveThunks>,
     ) -> Result<Self> {
         let exe = std::env::current_exe().context("locating current executable")?;
         trace!(exe = %exe.display(), "spawning eval worker subprocess");
@@ -100,7 +106,7 @@ impl EvalWorker {
             });
         }
 
-        let mut worker = Self::from_command(command)?;
+        let mut worker = Self::from_command(command, thunks)?;
 
         if let Some(pid) = worker.pid_guard.pid {
             live.lock().insert(pid);
@@ -120,22 +126,27 @@ impl EvalWorker {
         Ok(worker)
     }
 
-    pub(super) fn from_command(mut command: Command) -> Result<Self> {
+    pub(super) fn from_command(mut command: Command, thunks: Arc<LiveThunks>) -> Result<Self> {
         command
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::inherit())
+            .stderr(Stdio::piped())
             .kill_on_drop(true);
         let mut child = command.spawn().context("spawning eval worker subprocess")?;
         let pid = child.id();
         let stdin = child.stdin.take().context("worker stdin missing")?;
         let stdout = BufReader::new(child.stdout.take().context("worker stdout missing")?);
+        let stderr = child.stderr.take().context("worker stderr missing")?;
+        let downloads = DownloadSlot::default();
+        forward_stderr(stderr, Arc::clone(&downloads));
         Ok(Self {
             child,
             stdin,
             stdout,
             in_flight: false,
             pid_guard: PidGuard { live: None, pid },
+            thunks,
+            downloads,
         })
     }
 
@@ -155,6 +166,10 @@ impl EvalWorker {
 
     pub(super) fn pid(&self) -> Option<u32> {
         self.child.id()
+    }
+
+    pub(super) fn spawned_pid(&self) -> u32 {
+        self.pid_guard.pid.unwrap_or_default()
     }
 
     pub(super) fn is_alive(&mut self) -> bool {
@@ -184,6 +199,17 @@ impl EvalWorker {
     }
 
     async fn recv(&mut self) -> Result<EvalResponse> {
+        loop {
+            match self.recv_frame().await? {
+                EvalResponse::Stats { delta } => {
+                    self.thunks.tick(self.spawned_pid(), delta.nr_thunks)
+                }
+                other => return Ok(other),
+            }
+        }
+    }
+
+    async fn recv_frame(&mut self) -> Result<EvalResponse> {
         let mut len_buf = [0u8; 4];
         if let Err(e) = self.stdout.read_exact(&mut len_buf).await {
             anyhow::bail!("eval worker closed pipe ({})", self.describe_death(e).await);
@@ -347,6 +373,30 @@ impl EvalWorker {
         .await
     }
 
+    pub(super) async fn fetch_input(
+        &mut self,
+        locked: String,
+        git_ssh_command: Option<String>,
+        target: DownloadTarget,
+    ) -> Result<String> {
+        *self.downloads.lock() = Some(target);
+        let fetched = self
+            .call(
+                EvalRequest::FetchInput {
+                    locked,
+                    git_ssh_command,
+                },
+                "FetchInput",
+                |resp| match resp {
+                    EvalResponse::FetchOk { store_path } => Ok(store_path),
+                    other => Err(Box::new(other)),
+                },
+            )
+            .await;
+        *self.downloads.lock() = None;
+        fetched
+    }
+
     pub(super) async fn resolve(
         &mut self,
         repository: String,
@@ -421,6 +471,29 @@ impl EvalWorker {
     pub(super) fn child_mut(&mut self) -> &mut Child {
         &mut self.child
     }
+}
+
+fn forward_stderr(stderr: ChildStderr, downloads: DownloadSlot) {
+    use tokio::io::AsyncBufReadExt as _;
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "drains the child's stderr and ends at its EOF"
+    )]
+    tokio::spawn(async move {
+        let mut lines = BufReader::new(stderr).lines();
+        let mut parser = NixLogParser::default();
+        while let Ok(Some(line)) = lines.next_line().await {
+            match parser.feed(&line) {
+                NixLine::Transfer { id, done, expected } => {
+                    if let Some(target) = downloads.lock().as_ref() {
+                        target.board.transfer(target.index, id, done, expected);
+                    }
+                }
+                NixLine::Text(text) => eprintln!("{text}"),
+                NixLine::Quiet => {}
+            }
+        }
+    });
 }
 
 impl std::fmt::Debug for EvalWorker {
