@@ -10,7 +10,6 @@ use crate::helpers::ok_json;
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
 use gradient_core::ServerState;
-use gradient_entity::build::BuildStatus;
 use gradient_types::*;
 use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter};
 use serde::{Deserialize, Serialize};
@@ -27,7 +26,7 @@ pub struct DependencyGraphNode {
     pub build: Option<BuildJobId>,
     pub name: String,
     pub path: String,
-    pub status: String,
+    pub status: Option<String>,
     pub created_at: chrono::NaiveDateTime,
     pub updated_at: chrono::NaiveDateTime,
 }
@@ -130,10 +129,7 @@ async fn graph_nodes<C: ConnectionTrait>(
                 build: builds.get(id).copied(),
                 name: drv.name.clone(),
                 path: drv.drv_path(),
-                status: format!(
-                    "{:?}",
-                    shared_build.map_or(BuildStatus::Queued, |b| b.status)
-                ),
+                status: shared_build.map(|b| format!("{:?}", b.status)),
                 created_at: shared_build.map_or(drv.created_at, |b| b.created_at),
                 updated_at: shared_build.map_or(drv.created_at, |b| b.updated_at),
             })
@@ -156,6 +152,7 @@ pub async fn get_build_graph(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gradient_entity::build::BuildStatus;
     use gradient_entity::{build_job, derivation, derivation_build, derivation_dependency};
     use sea_orm::{DatabaseBackend, MockDatabase};
 
@@ -214,7 +211,6 @@ mod tests {
             .append_query_results([vec![
                 root_build,
                 shared_build(input, BuildStatus::Substituted),
-                shared_build(interior, BuildStatus::Substituted),
             ]])
             .append_query_results([vec![
                 drv(root, "root"),
@@ -225,17 +221,17 @@ mod tests {
 
         let graph = dependency_graph(&db, &root_job).await.unwrap();
 
-        let reached: Vec<(DerivationId, Option<BuildJobId>, &str)> = graph
+        let reached: Vec<(DerivationId, Option<BuildJobId>, Option<&str>)> = graph
             .nodes
             .iter()
-            .map(|n| (n.id, n.build, n.status.as_str()))
+            .map(|n| (n.id, n.build, n.status.as_deref()))
             .collect();
         assert_eq!(
             reached,
             [
-                (root, Some(root_job.id), "Completed"),
-                (input, None, "Substituted"),
-                (interior, None, "Substituted"),
+                (root, Some(root_job.id), Some("Completed")),
+                (input, None, Some("Substituted")),
+                (interior, None, None),
             ]
         );
         assert_eq!(
