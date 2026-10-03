@@ -65,7 +65,7 @@ describe('SshKeysComponent', () => {
     const values = fields.map((el) => el.value);
     const address = values.find((v) => v.startsWith('ssh-ng://'));
     expect(address).toBe(`ssh-ng://<project>@${location.hostname}`);
-    expect(values.some((v) => v.includes('Port 2222'))).toBe(true);
+    expect(values.some((v) => v.includes('Port 2222') && v.includes('User <project>'))).toBe(true);
   });
 
   it('deletes a key by id', () => {
