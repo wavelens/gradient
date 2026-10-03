@@ -328,7 +328,10 @@ where
             tokens: credentials.tokens.clone(),
         })
         .await
-        .map_err(|_| anyhow::anyhow!("send Authenticate"))?;
+        .map_err(|_| match socket.refusal() {
+            Some(reason) => anyhow::anyhow!("{reason}"),
+            None => anyhow::anyhow!("send Authenticate"),
+        })?;
 
     let greeted = greet_dialed_worker(socket, &credentials.worker_id).await?;
     let (authorized_peers, failed_peers) = match authority
