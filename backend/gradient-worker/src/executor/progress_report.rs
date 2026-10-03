@@ -6,7 +6,7 @@
 
 use std::convert::Infallible;
 
-use gradient_wire::messages::{EVAL_PROGRESS_INTERVAL, EVAL_PROGRESS_RESEND_INTERVAL};
+use gradient_wire::messages::{EVAL_PROGRESS_RESEND_INTERVAL, PROGRESS_INTERVAL};
 use gradient_wire::traits::EvalProgressSink;
 use gradient_wire::types::EvalProgress;
 use tokio::time::{Instant, MissedTickBehavior};
@@ -22,7 +22,7 @@ impl ChangeReporter {
         sink: &dyn EvalProgressSink,
         snapshot: impl Fn() -> Option<EvalProgress>,
     ) -> Infallible {
-        let mut ticks = tokio::time::interval(EVAL_PROGRESS_INTERVAL);
+        let mut ticks = tokio::time::interval(PROGRESS_INTERVAL);
         ticks.set_missed_tick_behavior(MissedTickBehavior::Delay);
         loop {
             ticks.tick().await;
