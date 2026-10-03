@@ -126,6 +126,11 @@ fn task_frame(
         | Event::EvaluationProgress(evaluation::Progress {
             task: Some(t),
             evaluation_id,
+        })
+        | Event::EvaluationActivity(evaluation::Activity {
+            task: Some(t),
+            evaluation_id,
+            ..
         }) if *t == task_id => {
             known.insert(*evaluation_id);
             frame(env)
@@ -201,6 +206,7 @@ fn eval_frame(env: &Envelope, eval_id: EvaluationId) -> Option<String> {
     let belongs = match &env.event {
         Event::EvaluationReported(e) => e.evaluation_id == eval_id,
         Event::EvaluationProgress(e) => e.evaluation_id == eval_id,
+        Event::EvaluationActivity(e) => e.evaluation_id == eval_id,
         Event::BuildStatusChanged(b) => b.evaluation_id == eval_id,
         _ => false,
     };
@@ -233,6 +239,8 @@ pub async fn cache_live_ws(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gradient_types::EvaluationProgress;
+    use gradient_types::events::evaluation::{InputFetch, InputFetchState};
     use gradient_types::events::{build, cache};
     use uuid::Uuid;
 
@@ -266,6 +274,42 @@ mod tests {
     }
     fn tid(n: u128) -> TaskId {
         TaskId::new(Uuid::from_u128(n))
+    }
+    fn activity(evaluation_id: EvaluationId, task: Option<TaskId>) -> Envelope {
+        env(Event::EvaluationActivity(evaluation::Activity {
+            evaluation_id,
+            task,
+            progress: EvaluationProgress::Evaluating { thunks: 9 },
+        }))
+    }
+
+    #[test]
+    fn both_channels_forward_their_activity() {
+        assert!(eval_frame(&activity(eid(1), Some(tid(1))), eid(1)).is_some());
+        assert!(eval_frame(&activity(eid(2), Some(tid(1))), eid(1)).is_none());
+        let mut known = HashSet::new();
+        assert!(task_frame(&activity(eid(1), Some(tid(1))), tid(1), &mut known).is_some());
+        assert!(task_frame(&activity(eid(1), Some(tid(2))), tid(1), &mut known).is_none());
+    }
+
+    #[test]
+    fn activity_serializes_its_kind_and_rows() {
+        let line = env(Event::EvaluationActivity(evaluation::Activity {
+            evaluation_id: eid(1),
+            task: None,
+            progress: EvaluationProgress::Fetching {
+                inputs: vec![InputFetch {
+                    name: "nixpkgs".into(),
+                    state: InputFetchState::Fetching,
+                    downloaded_bytes: 5,
+                    expected_bytes: 0,
+                }],
+            },
+        }))
+        .to_line();
+        assert!(line.contains(r#""event":"evaluation.activity""#), "{line}");
+        assert!(line.contains(r#""kind":"fetching""#), "{line}");
+        assert!(line.contains(r#""state":"Fetching""#), "{line}");
     }
 
     #[test]

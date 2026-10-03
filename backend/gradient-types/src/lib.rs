@@ -40,6 +40,7 @@ pub use self::config::{
 pub use self::consts::*;
 pub use self::entity_aliases::*;
 pub use self::events::build::DownloadProgress;
+pub use self::events::evaluation::EvaluationProgress;
 pub use self::events::{Envelope, Event, EventBus, EventRx};
 pub use self::flake_url::{NixFlakeUrl, RepositoryUrl};
 pub use self::git_host::GitHostType;

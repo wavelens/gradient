@@ -132,6 +132,7 @@ events! {
     BuildProgress(build::Progress),
     EvaluationReported(evaluation::Reported),
     EvaluationProgress(evaluation::Progress),
+    EvaluationActivity(evaluation::Activity),
     GraphRecorded(graph::Recorded),
     GraphNarCommitted(graph::NarCommitted),
     GraphTransitioned(graph::Transitioned),
