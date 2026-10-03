@@ -4,8 +4,18 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-.sg-segbar {
-  display: block;
-  width: min(360px, 100%);
-  --segbar-h: 7px;
+@use '@gradient/ui/styles/variables' as *;
+
+.sg-bars {
+  display: grid;
+  grid-template-columns: minmax(6rem, 360px) minmax(0, 1fr);
+  align-items: center;
+  gap: $spacing-md $spacing-lg;
+}
+
+.sg-segbar { --segbar-h: 7px; }
+
+.sg-bar-caption {
+  font-size: $font-size-sm;
+  color: var(--gr-text-muted);
 }
