@@ -6,6 +6,7 @@
 
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { SegmentedBarComponent } from './segmented-bar.component';
+import { byteSegments } from './byte-segments';
 import { BuildStatusCounts } from '@core/models';
 
 function counts(p: Partial<BuildStatusCounts>): BuildStatusCounts {
@@ -20,32 +21,28 @@ describe('SegmentedBarComponent', () => {
     fixture = TestBed.createComponent(SegmentedBarComponent);
   });
 
+  const widths = () => [...fixture.nativeElement.querySelectorAll('.seg')].map((s: HTMLElement) => [s.className, s.style.width]);
+
   it('renders all four segments proportionally excluding substituted/aborted, zero counts at 0% width', () => {
     fixture.componentRef.setInput('counts', counts({ completed: 3, failed: 1, substituted: 9000, aborted: 5 }));
     fixture.detectChanges();
-    const segs = fixture.componentInstance.segments();
-    expect(segs.map(s => s.key)).toEqual(['completed', 'failed', 'building', 'queued']);
-    expect(segs.find(s => s.key === 'completed')!.pct).toBeCloseTo(75, 0);
-    expect(segs.find(s => s.key === 'failed')!.pct).toBeCloseTo(25, 0);
-    expect(segs.find(s => s.key === 'building')!.pct).toBe(0);
-    expect(segs.find(s => s.key === 'queued')!.pct).toBe(0);
-    expect(fixture.componentInstance.isEmpty()).toBe(false);
+    expect(widths()).toEqual([
+      ['seg seg-completed', '75%'],
+      ['seg seg-failed', '25%'],
+      ['seg seg-building', '0%'],
+      ['seg seg-queued', '0%'],
+    ]);
   });
 
   it('renders a single full green segment when work finished entirely via substitution', () => {
     fixture.componentRef.setInput('counts', counts({ substituted: 100 }));
     fixture.detectChanges();
-    expect(fixture.componentInstance.allSubstituted()).toBe(true);
-    expect(fixture.componentInstance.isEmpty()).toBe(false);
-    const seg = fixture.nativeElement.querySelector('.seg-completed') as HTMLElement;
-    expect(seg).toBeTruthy();
-    expect(seg.style.width).toBe('100%');
+    expect(widths()).toEqual([['seg seg-completed', '100%']]);
   });
 
-  it('reports empty when all counts are zero', () => {
+  it('draws the empty track when all counts are zero', () => {
     fixture.componentRef.setInput('counts', counts({}));
     fixture.detectChanges();
-    expect(fixture.componentInstance.isEmpty()).toBe(true);
     expect(fixture.nativeElement.querySelector('.seg-empty')).toBeTruthy();
   });
 
@@ -60,5 +57,21 @@ describe('SegmentedBarComponent', () => {
     fixture.nativeElement.querySelector('.segbar')!.dispatchEvent(new MouseEvent('mouseleave'));
     fixture.detectChanges();
     expect(fixture.nativeElement.querySelector('.tipbox')).toBeNull();
+  });
+
+  it('draws a byte download as a building part and an idle remainder without hover', () => {
+    fixture.componentRef.setInput('segments', byteSegments(512, 2048));
+    fixture.detectChanges();
+    expect(widths()).toEqual([['seg seg-building', '25%'], ['seg seg-queued', '75%']]);
+    expect(fixture.nativeElement.querySelector('.segbar').classList).not.toContain('segbar--hover');
+    fixture.nativeElement.querySelector('.seg-building').dispatchEvent(new MouseEvent('mouseenter'));
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('.tipbox')).toBeNull();
+  });
+
+  it('fills a download of unknown size with one building segment', () => {
+    fixture.componentRef.setInput('segments', byteSegments(512, null));
+    fixture.detectChanges();
+    expect(widths()).toEqual([['seg seg-building', '100%']]);
   });
 });

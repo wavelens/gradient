@@ -23,9 +23,9 @@
   display: block;
   height: 100%;
   transition: width 0.5s ease, filter $transition-fast;
-
-  &:hover { filter: brightness(1.25); }
 }
+
+.segbar--hover .seg:hover { filter: brightness(1.25); }
 
 .seg-empty { width: 100%; background: var(--gr-surface-hover); }
 .seg-completed { background: var(--ok, var(--gr-status-success)); }

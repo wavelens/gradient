@@ -4,36 +4,42 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { ChangeDetectionStrategy, Component, input } from '@angular/core';
-import { IconComponent } from '@gradient/ui/ui';
+import { ChangeDetectionStrategy, Component, computed, input } from '@angular/core';
 import type { InputFetch } from '@core/models';
 import { inputFetchLabel, inputFetchRatio } from '@shared/evaluation';
+import { byteSegments } from '../segmented-bar/byte-segments';
+import { type BarSegment, SegmentedBarComponent } from '../segmented-bar/segmented-bar.component';
+
+function segments(row: InputFetch): BarSegment[] {
+  switch (row.state) {
+    case 'Queued': return [{ tone: 'queued', pct: 100 }];
+    case 'Fetching': return byteSegments(row.downloaded_bytes, row.expected_bytes);
+    case 'Done': return [{ tone: 'completed', pct: 100 }];
+    case 'Failed': return [{ tone: 'failed', pct: 100 }];
+  }
+}
+
+function percent(row: InputFetch): number | null {
+  if (row.state === 'Queued') return 0;
+  if (row.state === 'Done') return 100;
+  const ratio = row.state === 'Fetching' ? inputFetchRatio(row) : null;
+  return ratio === null ? null : Math.round(ratio * 100);
+}
 
 @Component({
   selector: 'gr-input-fetch-list',
   standalone: true,
-  imports: [IconComponent],
+  imports: [SegmentedBarComponent],
   template: `
     <ul class="input-list">
-      @for (row of inputs(); track row.name) {
+      @for (row of rows(); track row.name) {
         <li class="input-row" [attr.data-state]="row.state">
-          @switch (row.state) {
-            @case ('Queued') { <gr-icon name="schedule" size="sm" class="input-icon" /> }
-            @case ('Fetching') { <gr-icon name="progress_activity" size="sm" class="input-icon gr-spin" /> }
-            @case ('Done') { <gr-icon name="check_circle" size="sm" class="input-icon" /> }
-            @case ('Failed') { <gr-icon name="error" size="sm" class="input-icon" /> }
-          }
           <span class="input-name">{{ row.name }}</span>
-          @let r = ratio(row);
-          @if (r !== null) {
-            <div class="input-bar" role="progressbar" [attr.aria-label]="row.name"
-                 [attr.aria-valuenow]="round(r * 100)" aria-valuemin="0" aria-valuemax="100">
-              <div class="input-bar-fill" [style.width.%]="r * 100"></div>
-            </div>
-          }
-          @if (row.downloaded_bytes > 0) {
-            <span class="input-size">{{ label(row) }}</span>
-          }
+          <gr-segmented-bar class="input-bar" [segments]="row.segments"
+                            role="progressbar" aria-valuemin="0" aria-valuemax="100"
+                            [attr.aria-label]="row.name" [attr.aria-valuenow]="row.percent"
+                            [attr.aria-valuetext]="row.label ? row.state + ', ' + row.label : row.state" />
+          <span class="input-size" aria-hidden="true">{{ row.label }}</span>
         </li>
       }
     </ul>
@@ -43,7 +49,12 @@ import { inputFetchLabel, inputFetchRatio } from '@shared/evaluation';
 })
 export class InputFetchListComponent {
   inputs = input.required<InputFetch[]>();
-  protected readonly ratio = inputFetchRatio;
-  protected readonly label = inputFetchLabel;
-  protected readonly round = Math.round;
+
+  protected readonly rows = computed(() => this.inputs().map(row => ({
+    name: row.name,
+    state: row.state,
+    segments: segments(row),
+    percent: percent(row),
+    label: inputFetchLabel(row),
+  })));
 }

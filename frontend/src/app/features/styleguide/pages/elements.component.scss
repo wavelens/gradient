@@ -1,0 +1,11 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
+.sg-segbar {
+  display: block;
+  width: min(360px, 100%);
+  --segbar-h: 7px;
+}

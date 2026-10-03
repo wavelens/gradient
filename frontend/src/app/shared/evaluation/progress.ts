@@ -18,6 +18,10 @@ export function inputFetchRatio(input: InputFetch): number | null {
 }
 
 export function inputFetchLabel(input: InputFetch): string {
+  if (!input.downloaded_bytes) return '';
   const done = formatBytes(input.downloaded_bytes);
-  return input.expected_bytes ? `${done} / ${formatBytes(input.expected_bytes)}` : done;
+  if (input.state !== 'Fetching' || !input.expected_bytes) return done;
+  const total = formatBytes(input.expected_bytes);
+  const unit = done.slice(done.indexOf(' '));
+  return total.endsWith(unit) ? `${done.slice(0, -unit.length)} / ${total}` : `${done} / ${total}`;
 }
