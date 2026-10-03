@@ -94,3 +94,47 @@ pub struct EvaluationMessageResponse {
     pub created_at: chrono::NaiveDateTime,
     pub entry_points: Vec<EntryPointId>,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn response(progress: Option<EvaluationProgress>) -> serde_json::Value {
+        serde_json::to_value(EvaluationResponse {
+            id: EvaluationId::nil(),
+            task: None,
+            task_name: None,
+            task_display_name: None,
+            repository: String::new(),
+            commit: String::new(),
+            wildcard: String::new(),
+            status: gradient_entity::evaluation::EvaluationStatus::EvaluatingFlake,
+            previous: None,
+            next: None,
+            created_at: chrono::NaiveDateTime::default(),
+            started_at: None,
+            finished_at: None,
+            updated_at: chrono::NaiveDateTime::default(),
+            error_count: 0,
+            warning_count: 0,
+            error: None,
+            entry_points: vec![],
+            prioritized: false,
+            trigger: None,
+            triggered_by: None,
+            waiting_reason: None,
+            progress,
+        })
+        .unwrap()
+    }
+
+    #[test]
+    fn the_body_carries_progress_only_while_there_is_some() {
+        let body = response(Some(EvaluationProgress::Evaluating { thunks: 7 }));
+        assert_eq!(
+            body["progress"],
+            serde_json::json!({ "kind": "evaluating", "thunks": 7 })
+        );
+        assert!(response(None).get("progress").is_none());
+    }
+}

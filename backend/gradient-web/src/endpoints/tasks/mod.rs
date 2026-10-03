@@ -232,3 +232,43 @@ mod rollup_tests {
         assert_eq!(c.total(), 10);
     }
 }
+
+#[cfg(test)]
+mod summary_tests {
+    use super::*;
+
+    fn summary(progress: Option<EvaluationProgress>) -> serde_json::Value {
+        serde_json::to_value(EvaluationSummary {
+            id: EvaluationId::nil(),
+            commit: String::new(),
+            commit_message: None,
+            status: EvaluationStatus::Fetching,
+            wildcard: String::new(),
+            trigger: None,
+            triggered_by: None,
+            pr_number: None,
+            total_builds: 0,
+            builds: BuildStatusCounts::default(),
+            errors: 0,
+            warnings: 0,
+            dispatched_job: None,
+            prioritized: false,
+            created_at: chrono::NaiveDateTime::default(),
+            started_at: None,
+            finished_at: None,
+            updated_at: chrono::NaiveDateTime::default(),
+            progress,
+        })
+        .unwrap()
+    }
+
+    #[test]
+    fn the_summary_carries_progress_only_while_there_is_some() {
+        let body = summary(Some(EvaluationProgress::Evaluating { thunks: 7 }));
+        assert_eq!(
+            body["progress"],
+            serde_json::json!({ "kind": "evaluating", "thunks": 7 })
+        );
+        assert!(summary(None).get("progress").is_none());
+    }
+}
