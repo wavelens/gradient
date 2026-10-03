@@ -194,11 +194,19 @@ fn locked_inputs(lock: &serde_json::Value, overridden: &HashSet<String>) -> Vec<
             name: root_names.get(key).copied().unwrap_or(key).to_owned(),
             domain: input_domain(locked),
             store_path,
-            locked: locked.to_string(),
+            locked: fetcher_attrs(locked).to_string(),
         });
     }
     inputs.sort_by(|a, b| a.name.cmp(&b.name));
     inputs
+}
+
+fn fetcher_attrs(locked: &serde_json::Value) -> serde_json::Value {
+    let mut attrs = locked.clone();
+    if let Some(attrs) = attrs.as_object_mut() {
+        attrs.remove("dir");
+    }
+    attrs
 }
 
 fn source_store_path(nar_hash: &str) -> Option<String> {
@@ -1002,6 +1010,22 @@ mod tests {
                 .iter()
                 .all(|i| i.store_path.starts_with("/nix/store/")
                     && i.store_path.ends_with("-source"))
+        );
+    }
+
+    #[test]
+    fn a_subdirectory_input_is_fetched_without_its_dir() {
+        let lock = lock_with(serde_json::json!({
+            "root": { "inputs": { "nixpkgs-lib": "nixpkgs-lib" } },
+            "nixpkgs-lib": { "locked": { "type": "github", "owner": "NixOS", "repo": "nixpkgs",
+                "rev": "r", "dir": "lib", "narHash": nar_hash('A') } },
+        }));
+        let inputs = locked_inputs(&lock, &HashSet::new());
+        let locked: serde_json::Value = serde_json::from_str(&inputs[0].locked).unwrap();
+        assert_eq!(
+            locked,
+            serde_json::json!({ "type": "github", "owner": "NixOS", "repo": "nixpkgs",
+                "rev": "r", "narHash": nar_hash('A') })
         );
     }
 
