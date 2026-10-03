@@ -161,7 +161,19 @@
             }
           } @else if (isRunning(sel.status)) {
             @if (selectedFetchRows().length) {
-              <div class="fetch-rows"><gr-input-fetch-list [inputs]="selectedFetchRows()" /></div>
+              <div class="pkg-list">
+                @for (row of selectedFetchRows(); track row.name) {
+                  <div class="pkg" [attr.data-phase]="inputFetchPhase(row.state)" [style.animation-delay.ms]="$index * 18">
+                    <gr-status-icon class="si" [phase]="inputFetchPhase(row.state)" size="sm" />
+                    <span class="pkg-name mono">{{ row.name }}</span>
+                    <gr-segmented-bar class="pkg-bar" [segments]="row.segments"
+                                      role="progressbar" aria-valuemin="0" aria-valuemax="100"
+                                      [attr.aria-label]="row.name" [attr.aria-valuenow]="row.percent"
+                                      [attr.aria-valuetext]="row.label ? row.state + ', ' + row.label : row.state" />
+                    <span class="pkg-deps">{{ row.label }}</span>
+                  </div>
+                }
+              </div>
             } @else if (selectedProgressText(); as text) {
               <gr-empty-state class="pkg-wait" flat icon="manage_search" title="Evaluating" [message]="text" />
             } @else {

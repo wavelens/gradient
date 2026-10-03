@@ -10,6 +10,14 @@ import { inputFetchLabel, inputFetchRatio } from '@shared/evaluation';
 import { byteSegments } from '../segmented-bar/byte-segments';
 import { type BarSegment, SegmentedBarComponent } from '../segmented-bar/segmented-bar.component';
 
+export interface InputFetchRow {
+  name: string;
+  state: InputFetch['state'];
+  segments: BarSegment[];
+  percent: number | null;
+  label: string;
+}
+
 function segments(row: InputFetch): BarSegment[] {
   switch (row.state) {
     case 'Queued': return [{ tone: 'queued', pct: 100 }];
@@ -24,6 +32,16 @@ function percent(row: InputFetch): number | null {
   if (row.state === 'Done') return 100;
   const ratio = row.state === 'Fetching' ? inputFetchRatio(row) : null;
   return ratio === null ? null : Math.round(ratio * 100);
+}
+
+export function inputFetchRow(row: InputFetch): InputFetchRow {
+  return {
+    name: row.name,
+    state: row.state,
+    segments: segments(row),
+    percent: percent(row),
+    label: inputFetchLabel(row),
+  };
 }
 
 @Component({
@@ -50,11 +68,5 @@ function percent(row: InputFetch): number | null {
 export class InputFetchListComponent {
   inputs = input.required<InputFetch[]>();
 
-  protected readonly rows = computed(() => this.inputs().map(row => ({
-    name: row.name,
-    state: row.state,
-    segments: segments(row),
-    percent: percent(row),
-    label: inputFetchLabel(row),
-  })));
+  protected readonly rows = computed(() => this.inputs().map(inputFetchRow));
 }

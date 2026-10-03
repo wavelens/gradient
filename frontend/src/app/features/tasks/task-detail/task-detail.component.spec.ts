@@ -364,7 +364,9 @@ describe('TaskDetailComponent - evaluation progress', () => {
       primary: { progress: { kind: 'fetching', inputs } },
     });
     fixture.detectChanges();
-    expect(fixture.nativeElement.querySelector('gr-input-fetch-list .input-row')?.textContent).toContain('nixpkgs');
+    const row = fixture.nativeElement.querySelector('.pkg[data-phase="running"]');
+    expect(row?.querySelector('gr-status-icon')).toBeTruthy();
+    expect(row?.textContent).toContain('nixpkgs');
   });
 
   it('shows the thunk count as plain text instead of a spinner while evaluating', () => {
@@ -395,7 +397,7 @@ describe('TaskDetailComponent - evaluation progress', () => {
       primary: { progress: { kind: 'fetching', inputs } },
     });
     fixture.detectChanges();
-    expect(fixture.nativeElement.querySelector('gr-input-fetch-list')).toBeNull();
+    expect(fixture.nativeElement.querySelector('.pkg')).toBeNull();
     expect(fixture.nativeElement.querySelector('.panel .pkg-wait')?.textContent).toContain('Waiting for packages');
   });
 

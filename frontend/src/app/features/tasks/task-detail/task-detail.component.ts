@@ -30,11 +30,11 @@ import {
   ToastComponent,
   TooltipDirective,
 } from '@gradient/ui/ui';
-import { EvalStatusBadgeComponent, InputFetchListComponent, SegmentedBarComponent, StarButtonComponent, StatusIconComponent } from '@shared/ui';
+import { EvalStatusBadgeComponent, inputFetchRow, SegmentedBarComponent, StarButtonComponent, StatusIconComponent } from '@shared/ui';
 import { AccessService, WritableDirective } from '@shared/access';
 import { injectTaskAccess } from '@core/resolvers/inject-access';
 import { StarTarget, TaskDetail, EvaluationSummary, EvaluationProgress, EvaluationStatus, EntryPointSummary, BuildStatusCounts, WalkMode } from '@core/models';
-import { buildDuration, commitLabel, entryPointPhase, evaluationDuration, evaluationPhase, evaluationProgressText, evaluationTitle, formatEvaluationDuration, isPendingBuildStatus, isRunningEvaluationStatus, phaseProgress } from '@shared/evaluation';
+import { buildDuration, commitLabel, entryPointPhase, evaluationDuration, evaluationPhase, evaluationProgressText, evaluationTitle, formatEvaluationDuration, inputFetchPhase, isPendingBuildStatus, isRunningEvaluationStatus, phaseProgress } from '@shared/evaluation';
 
 @Component({
   selector: 'app-task-detail',
@@ -43,7 +43,7 @@ import { buildDuration, commitLabel, entryPointPhase, evaluationDuration, evalua
     CommonModule, FormsModule, RouterModule, ButtonComponent, CheckboxComponent, DialogComponent, MenuComponent, TooltipDirective,
     LoadingSpinnerComponent, EmptyStateComponent, WritableDirective,
     SegmentedBarComponent, EvalStatusBadgeComponent,
-    IconComponent, InViewDirective, StatusIconComponent, ToastComponent, StarButtonComponent, InputFetchListComponent,
+    IconComponent, InViewDirective, StatusIconComponent, ToastComponent, StarButtonComponent,
   ],
   providers: [MessageService],
   templateUrl: './task-detail.component.html',
@@ -127,7 +127,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
   });
   selectedFetchRows = computed(() => {
     const p = this.selectedProgress();
-    return p?.kind === 'fetching' ? p.inputs : [];
+    return p?.kind === 'fetching' ? p.inputs.map(inputFetchRow) : [];
   });
   selectedProgressText = computed(() => evaluationProgressText(this.selectedProgress()));
 
@@ -493,6 +493,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
 
   protected readonly evaluationPhase = evaluationPhase;
   protected readonly entryPointPhase = entryPointPhase;
+  protected readonly inputFetchPhase = inputFetchPhase;
 
   pkgMenuModel = signal<MenuItem[]>([]);
 

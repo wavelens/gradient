@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import type { BuildStatus, EntryPointSummary, EvaluationStatus } from '@core/models';
+import type { BuildStatus, EntryPointSummary, EvaluationStatus, InputFetchState } from '@core/models';
 
 export type StatusPhase = 'queued' | 'waiting' | 'running' | 'success' | 'failure' | 'aborted';
 
@@ -35,6 +35,15 @@ export function buildPhase(status: BuildStatus): StatusPhase {
     case 'Aborted':
     case 'DependencyFailed':
     case 'Skipped': return 'aborted';
+  }
+}
+
+export function inputFetchPhase(state: InputFetchState): StatusPhase {
+  switch (state) {
+    case 'Queued': return 'queued';
+    case 'Fetching': return 'running';
+    case 'Done': return 'success';
+    case 'Failed': return 'failure';
   }
 }
 
