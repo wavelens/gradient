@@ -12544,7 +12544,8 @@ components:
           description: Prefix-free `.drv` store path (`<hash>-<name>.drv`, no `/nix/store/`)
         status:
           type: string
-          description: Status of the derivation's shared build
+          nullable: true
+          description: Status of the derivation's shared build, null when the derivation has no shared build
         created_at:
           type: string
           format: date-time

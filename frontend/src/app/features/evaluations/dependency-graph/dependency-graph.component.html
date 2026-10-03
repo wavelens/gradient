@@ -85,7 +85,7 @@
         [style.top.px]="tooltipY()">
         <div class="tt-name">{{ hoveredNode()!.name }}</div>
         <div class="tt-status" [ngClass]="statusClass(hoveredNode()!.status)">
-          {{ hoveredNode()!.status }}
+          {{ statusLabel(hoveredNode()!.status) }}
         </div>
         <div class="tt-path">{{ hoveredNode()!.path }}</div>
       </div>

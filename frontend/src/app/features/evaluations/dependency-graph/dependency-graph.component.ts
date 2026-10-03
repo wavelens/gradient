@@ -36,13 +36,14 @@ const CARD_W = 200;
 const CARD_H = 78;
 const H_GAP = 32;
 const V_GAP = 90;
+const ACTIVE_STATUSES = ['Building', 'Queued', 'Created'];
 
 interface LayoutNode {
   id: string;
   build: string | null;
   name: string;
   path: string;
-  status: string;
+  status: string | null;
   created_at: string;
   updated_at: string;
   x: number;
@@ -348,7 +349,7 @@ export class DependencyGraphComponent implements OnInit, OnDestroy {
     statusText.setAttribute('font-size', '11');
     statusText.setAttribute('font-family', 'Arial, sans-serif');
     statusText.setAttribute('pointer-events', 'none');
-    statusText.textContent = node.status;
+    statusText.textContent = this.statusLabel(node.status);
     g.appendChild(statusText);
 
     // Build duration  [text index 3]
@@ -543,9 +544,7 @@ export class DependencyGraphComponent implements OnInit, OnDestroy {
       .connect(`/builds/${this.buildId}/live`)
       .pipe(filter((e) => e.event !== 'build.progress'), auditTime(300))
       .subscribe(() => {
-        const hasActive = this.layoutNodes.some(
-          (n) => n.status === 'Building' || n.status === 'Queued' || n.status === 'Created'
-        );
+        const hasActive = this.layoutNodes.some((n) => this.isActive(n.status));
         if (!hasActive) { this.liveSub?.unsubscribe(); return; }
 
         this.evalService.getBuildGraph(this.buildId).subscribe({
@@ -577,7 +576,7 @@ export class DependencyGraphComponent implements OnInit, OnDestroy {
         for (const [nodeId, el] of this.durationEls) {
           const node = this.nodeMap.get(nodeId);
           if (!node) continue;
-          if (['Building', 'Queued', 'Created'].includes(node.status)) {
+          if (this.isActive(node.status)) {
             el.textContent = this.calcDuration(node);
           }
         }
@@ -587,8 +586,17 @@ export class DependencyGraphComponent implements OnInit, OnDestroy {
 
   // ── Helpers ───────────────────────────────────────────────────────────────
 
+  private isActive(status: string | null): boolean {
+    return status !== null && ACTIVE_STATUSES.includes(status);
+  }
+
+  statusLabel(status: string | null): string {
+    return status ?? 'No build';
+  }
+
   private calcDuration(node: LayoutNode): string {
-    const isActive = ['Building', 'Queued', 'Created'].includes(node.status);
+    if (node.status === null) return '';
+    const isActive = this.isActive(node.status);
     const toUtc = (s: string) => new Date(s.includes('Z') || s.includes('+') ? s : s + 'Z').getTime();
     const startMs = toUtc(node.created_at);
     const endMs = isActive ? Date.now() : toUtc(node.updated_at);
@@ -596,7 +604,7 @@ export class DependencyGraphComponent implements OnInit, OnDestroy {
     return Number.isNaN(elapsed) || elapsed < 0 ? '' : formatDuration(elapsed);
   }
 
-  nodeColor(status: string): string {
+  nodeColor(status: string | null): string {
     switch (status) {
       case 'Completed':         return '#22c55e';
       case 'Substituted':       return '#22c55e';
@@ -625,7 +633,7 @@ export class DependencyGraphComponent implements OnInit, OnDestroy {
     { label: 'Skipped', tone: 'idle' },
   ];
 
-  statusSeverity(status: string): BadgeSeverity {
+  statusSeverity(status: string | null): BadgeSeverity {
     switch (this.statusClass(status)) {
       case 'status-success': return 'success';
       case 'status-danger': return 'danger';
@@ -634,7 +642,7 @@ export class DependencyGraphComponent implements OnInit, OnDestroy {
     }
   }
 
-  statusClass(status: string): string {
+  statusClass(status: string | null): string {
     switch (status) {
       case 'Completed':
       case 'Substituted':       return 'status-success';

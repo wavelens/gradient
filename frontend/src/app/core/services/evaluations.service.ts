@@ -14,7 +14,7 @@ export interface DependencyGraphNode {
   build: string | null;
   name: string;
   path: string;
-  status: string;
+  status: string | null;
   created_at: string;
   updated_at: string;
 }

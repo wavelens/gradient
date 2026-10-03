@@ -11,7 +11,7 @@ import { BuildGraph, EvaluationsService } from '@core/services/evaluations.servi
 import { LiveEvent, LiveService } from '@core/services/live.service';
 import { DependencyGraphComponent } from './dependency-graph.component';
 
-const node = (id: string, status: string) => ({
+const node = (id: string, status: string | null) => ({
   id, build: id, name: id, path: `/nix/store/hash-${id}.drv`, status,
   created_at: '2026-01-01T00:00:00', updated_at: '2026-01-01T00:00:00',
 });
@@ -55,6 +55,19 @@ describe('DependencyGraphComponent live updates', () => {
     expect(getBuildGraph).toHaveBeenCalledTimes(1);
     send('build.status_changed');
     expect(getBuildGraph).toHaveBeenCalledTimes(2);
+    fixture.destroy();
+  });
+
+  it('stops following once only derivations without a build are left unfinished', () => {
+    const { fixture, getBuildGraph, send } = setup({
+      root: 'root',
+      nodes: [node('root', 'Completed'), node('input', null)],
+      edges: [{ source: 'input', target: 'root' }],
+    });
+
+    send('build.status_changed');
+    expect(getBuildGraph).toHaveBeenCalledTimes(1);
+    expect(fixture.nativeElement.textContent).toContain('No build');
     fixture.destroy();
   });
 });
