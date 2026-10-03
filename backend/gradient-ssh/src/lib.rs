@@ -12,6 +12,7 @@ mod daemon_build;
 mod exec;
 mod host_key;
 mod ingest;
+mod listener;
 mod nar;
 mod roots;
 mod server;
@@ -38,7 +39,7 @@ pub async fn start(state: Arc<ServerState>) -> std::io::Result<()> {
     )
     .await
     .map_err(std::io::Error::other)?;
-    let listener = tokio::net::TcpListener::bind((host.as_str(), ssh.port)).await?;
+    let listener = listener::bind(&host, ssh.port).await?;
     tracing::info!(%host, port = ssh.port, "ssh server listening");
 
     let config = Arc::new(server::config(key));

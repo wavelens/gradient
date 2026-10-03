@@ -45,9 +45,10 @@ russh                          = { workspace = true }
 sea-orm                        = { workspace = true }
 serde_json                     = { workspace = true }
 shell-words                    = { workspace = true }
+socket2                        = { workspace = true }
 tempfile                       = { workspace = true }
 thiserror                      = { workspace = true }
-tokio                          = { workspace = true, features = ["fs", "io-util", "macros", "rt-multi-thread", "sync", "time"] }
+tokio                          = { workspace = true, features = ["fs", "io-util", "macros", "net", "rt-multi-thread", "sync", "time"] }
 tracing                        = { workspace = true }
 uuid                           = { workspace = true }
 

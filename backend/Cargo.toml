@@ -149,6 +149,7 @@ object_store = { version = "0.14", default-features = false, features = ["aws", 
 # Harmonia (git deps)
 russh       = { version = "0.63", default-features = false, features = ["aws-lc-rs"] }
 shell-words = { version = "1.1", default-features = false, features = ["std"] }
+socket2     = { version = "0.6", default-features = false }
 
 harmonia-daemon                = { git = "https://github.com/nix-community/harmonia.git", default-features = false }
 harmonia-file-nar              = { git = "https://github.com/nix-community/harmonia.git", default-features = false }

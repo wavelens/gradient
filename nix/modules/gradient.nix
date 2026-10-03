@@ -1121,8 +1121,11 @@ in {
 
         listenAddress = lib.mkOption {
           type = lib.types.str;
-          default = "0.0.0.0";
-          description = "IP address the SSH server is listening on.";
+          default = "::";
+          description = ''
+            IP address the SSH server is listening on.
+            An IPv6 address is also accepting IPv4 clients, and the default `::` is listening on every address of both families.
+          '';
         };
 
         port = lib.mkOption {
