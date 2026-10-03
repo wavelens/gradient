@@ -64,6 +64,7 @@ pub struct MailDeliveryResult {
 pub enum InviteScope {
     Project,
     Cache,
+    Team,
 }
 
 impl InviteScope {
@@ -71,6 +72,7 @@ impl InviteScope {
         match self {
             Self::Project => "project",
             Self::Cache => "cache",
+            Self::Team => "team",
         }
     }
 }

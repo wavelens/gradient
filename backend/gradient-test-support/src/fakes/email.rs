@@ -136,6 +136,7 @@ impl EmailSender for InMemoryEmailSender {
         let scope = match invite.scope {
             InviteScope::Project => "project",
             InviteScope::Cache => "cache",
+            InviteScope::Team => "team",
         };
         self.sent.lock().unwrap().push(SentEmail::Invitation {
             to_email: to_email.to_string(),
