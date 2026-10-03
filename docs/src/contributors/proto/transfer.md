@@ -1,6 +1,6 @@
 # Transfer
 
-NARs, logs, download progress and credentials moving between worker and server. The worker is always compressing NARs with zstd. The server is never re-compressing.
+NARs, logs, build progress and credentials moving between worker and server. The worker is always compressing NARs with zstd. The server is never re-compressing.
 
 ## Upload
 
@@ -72,12 +72,21 @@ The worker is prefetching every input missing from the local store ahead of the 
 - A build already in the store is forwarding its stored Nix log with `worker.log.fetchFromStore` (on by default).
 - The log is ending up as zstd chunks of `log.chunkBytes` (256 KiB) with a chunk index after the build.
 
-## Download Progress
+## Build Progress
 
-- `BuildProgress { downloaded, total }` is reporting the bytes of a running substitute or `builtin:fetchurl` download, every 5 s in which bytes arrived, plus once at the end.
-- `total` is `None` when a size is unknown.
-- Retried transfers never count twice.
-- The server is keeping the value in memory for 15 s and showing the value on the build.
+- `BuildProgress` is reporting the transfers of one build in three phases, each with bytes and paths done and total.
+
+| Phase | Transfer | Bytes |
+|---|---|---|
+| `Prefetch` | Missing inputs pulled from the Gradient cache before the build | Compressed NAR files, totals growing with each closure round |
+| `Download` | A substitute or `builtin:fetchurl` download | Compressed NAR file or the downloaded file |
+| `Upload` | The build's own uncached outputs at the end of the job | NAR bytes read from the store |
+
+- The worker is reporting at most once a second on a change, plus once at the end of a phase.
+- `bytes_total` is `None` when one size is unknown.
+- Retried or failed transfers never count twice.
+- The server is keeping the latest value per build in memory for 15 s.
+- The build response is showing the value only while the build is `Building`. The build is staying `Building` until its job finished the upload.
 - The server is also publishing `BuildProgress` events to the live endpoints.
 - `EvalProgress` is reporting fetch rows or live thunks at most once a second on a change. An unchanged value is sent again after 30 s.
 - The server is keeping `EvalProgress` the same way for 60 s, shown only while the evaluation is fetching or evaluating.
