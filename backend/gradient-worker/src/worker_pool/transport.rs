@@ -20,7 +20,7 @@ use gradient_eval::ipc::{
 };
 use gradient_eval::stats::StatsDelta;
 
-use super::input_fetch::{DownloadSlot, DownloadTarget, NixLine, NixLogParser};
+use super::input_fetch::{DownloadSlot, DownloadTarget, forward_nix_log};
 use super::live_thunks::LiveThunks;
 
 /// The stack size is matching upstream Nix's `initNix` `setStackSize(64 MiB)`.
@@ -474,26 +474,13 @@ impl EvalWorker {
 }
 
 fn forward_stderr(stderr: ChildStderr, downloads: DownloadSlot) {
-    use tokio::io::AsyncBufReadExt as _;
     #[expect(
         clippy::disallowed_methods,
         reason = "drains the child's stderr and ends at its EOF"
     )]
-    tokio::spawn(async move {
-        let mut lines = BufReader::new(stderr).lines();
-        let mut parser = NixLogParser::default();
-        while let Ok(Some(line)) = lines.next_line().await {
-            match parser.feed(&line) {
-                NixLine::Transfer { id, done, expected } => {
-                    if let Some(target) = downloads.lock().as_ref() {
-                        target.board.transfer(target.index, id, done, expected);
-                    }
-                }
-                NixLine::Text(text) => eprintln!("{text}"),
-                NixLine::Quiet => {}
-            }
-        }
-    });
+    tokio::spawn(forward_nix_log(BufReader::new(stderr), downloads, |text| {
+        eprintln!("{text}")
+    }));
 }
 
 impl std::fmt::Debug for EvalWorker {
