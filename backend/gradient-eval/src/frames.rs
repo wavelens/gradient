@@ -133,6 +133,25 @@ mod tests {
     }
 
     #[test]
+    fn planning_ticks_and_leaves_its_thunks_to_the_next_request() {
+        let frames = Frames::new(Vec::new(), stats(10));
+        frames.begin();
+        frames.tick(stats(25)).unwrap();
+        assert_eq!(frames.end(None).map(|d| d.nr_thunks), None);
+        frames.begin();
+        frames.tick(stats(40)).unwrap();
+        assert_eq!(frames.end(Some(stats(50))).map(|d| d.nr_thunks), Some(40));
+        let ticks: Vec<u64> = written(frames)
+            .into_iter()
+            .map(|r| match r {
+                EvalResponse::Stats { delta } => delta.nr_thunks,
+                other => panic!("unexpected {other:?}"),
+            })
+            .collect();
+        assert_eq!(ticks, vec![15, 30]);
+    }
+
+    #[test]
     fn a_request_without_metrics_keeps_the_baseline() {
         let frames = Frames::new(Vec::new(), stats(10));
         assert_eq!(frames.end(None).map(|d| d.nr_thunks), None);

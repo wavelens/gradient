@@ -457,6 +457,7 @@ impl DerivationResolver for WorkerPoolResolver {
             {
                 Ok(v) => v,
                 Err(e) => {
+                    self.thunks.forget(worker.spawned_pid());
                     worker.mark_dead();
                     return Err(e);
                 }
