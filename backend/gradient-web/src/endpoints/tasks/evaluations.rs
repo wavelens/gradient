@@ -10,6 +10,7 @@ use super::{
 };
 use crate::access::{Caller, TaskAccess, has_permission, is_project_member, load_task};
 use crate::authorization::{MaybeApiKey, MaybeUser};
+use crate::endpoints::evals::live_progress;
 use crate::endpoints::{archive_headers, build_product_headers};
 use crate::error::{ErrorCode, WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json};
@@ -37,6 +38,7 @@ use sea_orm::{
 use serde::Deserialize;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
+use std::time::Instant;
 
 #[derive(Deserialize, Default)]
 pub struct EvaluateRequest {
@@ -174,6 +176,12 @@ pub(super) async fn evaluations_to_summaries(
             started_at: evaluation.fetch_started_at,
             finished_at: evaluation.finished_at,
             updated_at: evaluation.updated_at,
+            progress: live_progress(
+                &state.eval_progress,
+                evaluation.id,
+                evaluation.status,
+                Instant::now(),
+            ),
         });
     }
     Ok(out)

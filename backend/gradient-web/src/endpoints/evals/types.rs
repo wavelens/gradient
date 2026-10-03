@@ -4,9 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use gradient_types::WaitingReason;
 use gradient_types::ids::*;
 use gradient_types::triggers::TriggerType;
+use gradient_types::{EvaluationProgress, WaitingReason};
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -67,6 +67,8 @@ pub struct EvaluationResponse {
     pub triggered_by: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub waiting_reason: Option<WaitingReason>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub progress: Option<EvaluationProgress>,
 }
 
 #[derive(Serialize, Debug)]

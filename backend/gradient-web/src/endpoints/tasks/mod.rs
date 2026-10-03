@@ -29,7 +29,7 @@ use gradient_types::ids::*;
 use gradient_entity::build::BuildStatus;
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_types::triggers::ConcurrencyPolicy;
-use gradient_types::{TaskTriggerId, TriggerType};
+use gradient_types::{EvaluationProgress, TaskTriggerId, TriggerType};
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -107,6 +107,8 @@ pub struct EvaluationSummary {
     pub started_at: Option<chrono::NaiveDateTime>,
     pub finished_at: Option<chrono::NaiveDateTime>,
     pub updated_at: chrono::NaiveDateTime,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub progress: Option<EvaluationProgress>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
