@@ -106,6 +106,7 @@ mod m20261002_000001_user_ssh_key;
 mod m20261002_000002_gradient_ci_connections;
 mod m20261003_000000_adopt_cached_nar_references;
 mod m20261003_000001_unique_task_name;
+mod m20261004_000000_teams;
 
 pub struct Migrator;
 
@@ -208,6 +209,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261002_000002_gradient_ci_connections::Migration),
             Box::new(m20261003_000000_adopt_cached_nar_references::Migration),
             Box::new(m20261003_000001_unique_task_name::Migration),
+            Box::new(m20261004_000000_teams::Migration),
         ]
     }
 }

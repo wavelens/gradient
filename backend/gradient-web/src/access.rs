@@ -317,21 +317,6 @@ pub async fn is_project_member(
         .is_some())
 }
 
-pub async fn has_permission(
-    state: &Arc<ServerState>,
-    user_id: UserId,
-    project_id: ProjectId,
-    permission: Permission,
-    api_key: Option<&ApiKeyContext>,
-) -> WebResult<bool> {
-    Ok(
-        match load_membership_with_permissions(state, user_id, project_id, api_key).await? {
-            Some((_, mask)) => mask_grants(mask, permission),
-            None => false,
-        },
-    )
-}
-
 pub async fn load_project_membership(
     state: &Arc<ServerState>,
     user_id: UserId,
@@ -347,28 +332,41 @@ pub async fn load_project_membership(
         .await?)
 }
 
+pub async fn has_permission(
+    state: &Arc<ServerState>,
+    user_id: UserId,
+    project_id: ProjectId,
+    permission: Permission,
+    api_key: Option<&ApiKeyContext>,
+) -> WebResult<bool> {
+    Ok(
+        load_membership_with_permissions(state, user_id, project_id, api_key)
+            .await?
+            .is_some_and(|mask| mask_grants(mask, permission)),
+    )
+}
+
 pub async fn load_membership_with_permissions(
     state: &Arc<ServerState>,
     user_id: UserId,
     project_id: ProjectId,
     api_key: Option<&ApiKeyContext>,
-) -> WebResult<Option<(MProjectUser, PermissionMask)>> {
+) -> WebResult<Option<PermissionMask>> {
     if let Some(ctx) = api_key
         && let Some(pinned) = ctx.project
         && pinned != project_id
     {
         return Ok(None);
     }
-    let Some((membership, mask)) =
+    let Some(mask) =
         gradient_db::access::project_permission_mask(&state.web_db, project_id, user_id).await?
     else {
         return Ok(None);
     };
-    let effective = match api_key {
+    Ok(Some(match api_key {
         Some(ctx) => mask & ctx.mask,
         None => mask,
-    };
-    Ok(Some((membership, effective)))
+    }))
 }
 
 async fn require_project_permission(
@@ -379,7 +377,7 @@ async fn require_project_permission(
     not_found_label: &str,
     api_key: Option<&ApiKeyContext>,
 ) -> WebResult<()> {
-    let (_, mask) = load_membership_with_permissions(state, user_id, project_id, api_key)
+    let mask = load_membership_with_permissions(state, user_id, project_id, api_key)
         .await?
         .ok_or_else(|| WebError::not_found(not_found_label))?;
 
