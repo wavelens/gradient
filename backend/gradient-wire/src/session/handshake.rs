@@ -210,13 +210,6 @@ pub async fn reject_dialer(socket: &mut ProtoSocket, code: u16, reason: String) 
     .into()
 }
 
-fn claimed_id(msg: &ClientMessage) -> Option<String> {
-    match msg {
-        ClientMessage::InitConnection { id, .. } => Some(id.clone()),
-        _ => None,
-    }
-}
-
 pub async fn as_authority<A>(
     socket: &mut ProtoSocket,
     authority: &A,
@@ -239,11 +232,10 @@ pub async fn as_authority_with_greeting<A>(
 where
     A: PeerAuthority + ?Sized,
 {
-    let claimed = claimed_id(&greeting);
     let greeted = match on_init_connection(Opening, greeting) {
         Ok(g) => g,
         Err(Intent::Reject { code, reason }) => {
-            return Err(reject_peer(socket, code, reason, claimed).await);
+            return Err(reject_peer(socket, code, reason, None).await);
         }
         Err(other) => anyhow::bail!("unexpected intent during init: {other:?}"),
     };

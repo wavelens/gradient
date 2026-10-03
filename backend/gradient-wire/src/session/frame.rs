@@ -506,10 +506,6 @@ pub type ProtoReader = MsgReader<ClientMessage>;
 pub type ServerReader = MsgReader<ServerMessage>;
 
 impl<M> MsgReader<M> {
-    pub fn version(&self) -> u16 {
-        self.version
-    }
-
     pub fn with_observer(mut self, observer: Arc<dyn MsgObserver<M>>) -> Self {
         self.observer = Some(observer);
         self
