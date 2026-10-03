@@ -10,6 +10,7 @@
 use std::fmt;
 
 use anyhow::{Context, Result, bail};
+use gradient_derivation::DrvOutputSpec;
 use gradient_util::nix_hash::nix32_encode;
 use gradient_wire::messages::{BuildSpec, QueryMode};
 use sha2::{Digest, Sha256};
@@ -19,7 +20,7 @@ use crate::proto::job::JobUpdater;
 use crate::proto::prefetch::{MissingInputs, download_one_presigned};
 use crate::proto::progress::{Progress, ProgressSink, Tally, read_body};
 use gradient_worker_client::compression::{
-    decompress, extract_single_file_from_nar, parse_nar_hash_to_bytes, resolve_compression,
+    decompress, extract_single_file_from_nar, resolve_compression,
 };
 
 #[derive(Debug)]
@@ -77,22 +78,6 @@ pub(crate) fn single_file_nar(contents: &[u8], executable: bool) -> Vec<u8> {
     out
 }
 
-fn parse_sha256(text: &str) -> Result<Vec<u8>> {
-    use base64::Engine as _;
-    let body = text
-        .strip_prefix("sha256-")
-        .or_else(|| text.strip_prefix("sha256:"))
-        .unwrap_or(text);
-    Ok(match body.len() {
-        64 => hex::decode(body).context("base16 outputHash")?,
-        52 => parse_nar_hash_to_bytes(&format!("sha256:{body}"))?.to_vec(),
-        44 => base64::engine::general_purpose::STANDARD
-            .decode(body)
-            .context("base64 outputHash")?,
-        n => bail!("outputHash of {n} characters is not a sha256"),
-    })
-}
-
 pub(crate) fn fetch_spec(
     drv: &gradient_derivation::Derivation,
     drv_path: &str,
@@ -100,31 +85,32 @@ pub(crate) fn fetch_spec(
     if drv.builder != "builtin:fetchurl" {
         return Err(anyhow::Error::new(UnsupportedFetch(drv.builder.clone())));
     }
-    let env = |key: &str| drv.environment.get(key).map(String::as_str).unwrap_or("");
-    if env("outputHashAlgo") != "sha256" {
-        return Err(anyhow::Error::new(UnsupportedFetch(format!(
-            "outputHashAlgo {}",
-            env("outputHashAlgo")
-        ))));
-    }
-    let digest = parse_sha256(env("outputHash"))?;
-    let hash = match env("outputHashMode") {
-        "recursive" => FixedHash::Recursive(digest),
-        _ => FixedHash::Flat(digest),
-    };
-    let output_path = drv
+    let out = drv
         .outputs
         .iter()
         .find(|o| o.name == "out")
-        .map(|o| o.path.clone())
         .context("builtin:fetchurl has an out output")?;
+    let DrvOutputSpec::FixedOutput { hash_algo, hash } = out.as_spec() else {
+        bail!("builtin:fetchurl output {} has no fixed hash", out.path);
+    };
+    let digest = hex::decode(hash).context("fixed output hash")?;
+    let hash = match hash_algo {
+        "sha256" => FixedHash::Flat(digest),
+        "r:sha256" => FixedHash::Recursive(digest),
+        other => {
+            return Err(anyhow::Error::new(UnsupportedFetch(format!(
+                "hash algorithm {other}"
+            ))));
+        }
+    };
+    let env = |key: &str| drv.environment.get(key).map(String::as_str).unwrap_or("");
 
     Ok(FetchSpec {
         url: env("url").to_owned(),
         unpack: env("unpack") == "1",
         executable: env("executable") == "1",
         hash,
-        output_path,
+        output_path: out.path.clone(),
         drv_base: drv_path.trim_start_matches("/nix/store/").to_owned(),
     })
 }
@@ -264,13 +250,13 @@ mod tests {
     const OUT: &str = "/nix/store/oooooooooooooooooooooooooooooooo-hello.txt";
     const DRV: &str = "/nix/store/dddddddddddddddddddddddddddddddd-hello.txt.drv";
 
-    fn drv(env: &[(&str, &str)]) -> gradient_derivation::Derivation {
+    fn drv(hash_algo: &str, hash: &str, env: &[(&str, &str)]) -> gradient_derivation::Derivation {
         gradient_derivation::Derivation {
             outputs: vec![gradient_derivation::DerivationOutput {
                 name: "out".to_owned(),
                 path: OUT.to_owned(),
-                hash_algo: String::new(),
-                hash: String::new(),
+                hash_algo: hash_algo.to_owned(),
+                hash: hash.to_owned(),
             }],
             input_derivations: vec![],
             input_sources: vec![],
@@ -355,13 +341,14 @@ mod tests {
     #[test]
     fn fetch_spec_reads_the_builtin_fetchurl_environment() {
         let spec = fetch_spec(
-            &drv(&[
-                ("url", "https://example.org/hello.txt"),
-                ("outputHash", &sha256_hex(b"hi\n")),
-                ("outputHashAlgo", "sha256"),
-                ("outputHashMode", "flat"),
-                ("executable", "1"),
-            ]),
+            &drv(
+                "sha256",
+                &sha256_hex(b"hi\n"),
+                &[
+                    ("url", "https://example.org/hello.txt"),
+                    ("executable", "1"),
+                ],
+            ),
             DRV,
         )
         .unwrap();
@@ -376,8 +363,46 @@ mod tests {
     }
 
     #[test]
+    fn an_sri_hash_with_an_empty_algorithm_is_read_from_the_output() {
+        let digest = sha256_hex(b"");
+        let spec = fetch_spec(
+            &drv(
+                "sha256",
+                &digest,
+                &[
+                    ("url", "https://example.org/a"),
+                    (
+                        "outputHash",
+                        "sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU=",
+                    ),
+                    ("outputHashAlgo", ""),
+                    ("outputHashMode", "flat"),
+                ],
+            ),
+            DRV,
+        )
+        .unwrap();
+        assert!(matches!(spec.hash, FixedHash::Flat(d) if hex::encode(&d) == digest));
+    }
+
+    #[test]
+    fn a_hash_algorithm_other_than_sha256_is_unsupported() {
+        let d = drv(
+            "sha512",
+            &"0".repeat(128),
+            &[("url", "https://example.org/x")],
+        );
+        let err = fetch_spec(&d, DRV).unwrap_err();
+        assert!(err.downcast_ref::<UnsupportedFetch>().is_some(), "{err}");
+    }
+
+    #[test]
     fn a_builder_that_is_not_fetchurl_is_unsupported() {
-        let mut d = drv(&[("url", "https://example.org/x")]);
+        let mut d = drv(
+            "sha256",
+            &sha256_hex(b""),
+            &[("url", "https://example.org/x")],
+        );
         d.builder = "/nix/store/bbbb-bash/bin/bash".to_owned();
         let err = fetch_spec(&d, DRV).unwrap_err();
         assert!(err.downcast_ref::<UnsupportedFetch>().is_some(), "{err}");
@@ -385,12 +410,11 @@ mod tests {
 
     #[tokio::test]
     async fn a_flat_download_is_verified_then_packed() {
-        let d = drv(&[
-            ("url", "https://example.org/hello.txt"),
-            ("outputHash", &sha256_hex(b"hi\n")),
-            ("outputHashAlgo", "sha256"),
-            ("outputHashMode", "flat"),
-        ]);
+        let d = drv(
+            "sha256",
+            &sha256_hex(b"hi\n"),
+            &[("url", "https://example.org/hello.txt")],
+        );
         let mut io = body("https://example.org/hello.txt", b"hi\n");
 
         let (path, raw) = download_with(&mut io, &d, &task(), &mut Progress::silent())
@@ -409,12 +433,11 @@ mod tests {
 
     #[tokio::test]
     async fn a_hash_mismatch_is_a_fixed_output_mismatch() {
-        let d = drv(&[
-            ("url", "https://example.org/hello.txt"),
-            ("outputHash", &sha256_hex(b"not this")),
-            ("outputHashAlgo", "sha256"),
-            ("outputHashMode", "flat"),
-        ]);
+        let d = drv(
+            "sha256",
+            &sha256_hex(b"not this"),
+            &[("url", "https://example.org/hello.txt")],
+        );
         let mut io = body("https://example.org/hello.txt", b"hi\n");
 
         let err = download_with(&mut io, &d, &task(), &mut Progress::silent())
@@ -427,13 +450,11 @@ mod tests {
     #[tokio::test]
     async fn an_unpacked_download_is_the_nar_itself() {
         let nar = single_file_nar(b"hi\n", false);
-        let d = drv(&[
-            ("url", "https://example.org/hello.nar.xz"),
-            ("outputHash", &sha256_hex(&nar)),
-            ("outputHashAlgo", "sha256"),
-            ("outputHashMode", "recursive"),
-            ("unpack", "1"),
-        ]);
+        let d = drv(
+            "r:sha256",
+            &sha256_hex(&nar),
+            &[("url", "https://example.org/hello.nar.xz"), ("unpack", "1")],
+        );
         let mut io = body("https://example.org/hello.nar.xz", &xz_encode(&nar));
 
         let (_, raw) = download_with(&mut io, &d, &task(), &mut Progress::silent())
