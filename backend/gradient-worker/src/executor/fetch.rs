@@ -247,6 +247,7 @@ fn second_level(host: &str) -> String {
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all, fields(inputs = inputs.len()))]
 async fn fetch_inputs(
     inputs: Vec<LockedInput>,
     store: &dyn WorkerStore,
