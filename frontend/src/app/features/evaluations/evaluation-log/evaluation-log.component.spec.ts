@@ -541,10 +541,10 @@ describe('EvaluationLogComponent', () => {
   describe('evaluation progress', () => {
     const rows = (name: string) => [{ name, state: 'Fetching' as const, downloaded_bytes: 1, expected_bytes: 0 }];
 
-    function setupLive(progress: Evaluation['progress']) {
+    function setupLive(progress: Evaluation['progress'], status = 'Fetching', builds: BuildItem[] = []) {
       const frames = new Subject<LiveEvent>();
       const getEvaluation = vi.fn(() => of({
-        id: 'eval-1', status: 'Fetching', created_at: '2026-01-01T00:00:00', updated_at: '2026-01-01T00:00:00',
+        id: 'eval-1', status, created_at: '2026-01-01T00:00:00', updated_at: '2026-01-01T00:00:00',
         started_at: '2026-01-01T00:00:00', finished_at: null, trigger: null, progress,
       }));
       TestBed.configureTestingModule({
@@ -560,7 +560,7 @@ describe('EvaluationLogComponent', () => {
           } },
           { provide: EvaluationsService, useValue: {
             getEvaluation,
-            getBuilds: () => of({ builds: [], total: 0, active_count: 0 }),
+            getBuilds: () => of({ builds, total: builds.length, active_count: 0 }),
             getEvaluationMessages: () => of([]),
           } },
           { provide: LiveService, useValue: { connect: () => frames } },
@@ -582,6 +582,20 @@ describe('EvaluationLogComponent', () => {
       fixture.detectChanges();
       expect(fixture.nativeElement.querySelector('gr-input-fetch-list .input-row')?.textContent).toContain('nixpkgs');
       fixture.destroy();
+    });
+
+    it('shows the thunk count only until the first build appears', () => {
+      const thunks = { kind: 'evaluating' as const, thunks: 1234567 };
+      const before = setupLive(thunks, 'EvaluatingFlake');
+      expect(before.fixture.componentInstance.progressText()).toBe('Evaluating - 1,234,567 thunks');
+      before.fixture.destroy();
+      TestBed.resetTestingModule();
+
+      const after = setupLive(thunks, 'EvaluatingDerivation', [build('b1', 'hello.drv', 'Queued')]);
+      after.fixture.detectChanges();
+      expect(after.fixture.componentInstance.progressText()).toBeNull();
+      expect(after.fixture.nativeElement.textContent).not.toContain('thunks');
+      after.fixture.destroy();
     });
 
     it('keeps a live frame over an older snapshot from a refetch', async () => {
