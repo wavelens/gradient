@@ -48,10 +48,6 @@ impl InputBoard {
             .insert(id, (done, expected));
     }
 
-    pub(crate) fn is_empty(&self) -> bool {
-        self.rows.lock().is_empty()
-    }
-
     pub(crate) fn snapshot(&self) -> Vec<InputFetch> {
         self.rows
             .lock()

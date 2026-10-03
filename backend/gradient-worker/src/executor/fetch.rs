@@ -322,7 +322,7 @@ async fn fetch_inputs(
     let fetches = futures::future::join_all(by_domain.into_values().map(fetch_domain));
 
     let snapshot = || {
-        (!board.is_empty()).then(|| EvalProgress::Fetching {
+        (!missing.is_empty()).then(|| EvalProgress::Fetching {
             inputs: board.snapshot(),
         })
     };
@@ -1166,6 +1166,25 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(paths, vec!["/nix/store/systems-source".to_owned()]);
+    }
+
+    #[tokio::test]
+    async fn present_inputs_send_no_progress() {
+        let fetcher = FakeFetcher::new("");
+        let reporter = RecordingJobReporter::new();
+        let store = FakeWorkerStore::new().with_present_path("/nix/store/a-source");
+        let (paths, _) = fetch_inputs(
+            vec![input("a", "github.com", "a")],
+            &store,
+            &fetcher,
+            &*reporter.eval_progress_sink(),
+            None,
+            &mut no_abort(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(paths, vec!["/nix/store/a-source".to_owned()]);
+        assert!(reporter.events().is_empty());
     }
 
     #[tokio::test]
