@@ -29,9 +29,10 @@ export function buildProgressBytes(p: BuildProgress): string {
 }
 
 export function buildProgressPaths(p: BuildProgress): string | null {
-  return p.paths_total && p.paths_total > 1 ? `${p.paths_done} / ${p.paths_total} paths` : null;
+  if (p.paths_total === null) return p.paths_done > 1 ? `${p.paths_done} paths` : null;
+  return p.paths_total > 1 ? `${p.paths_done} / ${p.paths_total} paths` : null;
 }
 
 export function buildPhaseFinished(p: BuildProgress): boolean {
-  return p.phase !== 'download' && !!p.paths_total && p.paths_done >= p.paths_total;
+  return !!p.paths_total && p.paths_done >= p.paths_total;
 }
