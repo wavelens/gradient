@@ -31,6 +31,7 @@ use gradient_wire::messages::JobPhase;
 
 use crate::nix::gcroots::{GcRootHandle, GcRootKeeper};
 use crate::nix::store::LocalNixStore;
+use crate::proto::progress::{Progress, Tally};
 use crate::proto::{credentials::CredentialStore, job::JobUpdater};
 use gradient_wire::messages::CachedPath;
 use gradient_wire::traits::WorkerStore;
@@ -67,36 +68,50 @@ pub(crate) async fn push_paths(
     Ok(())
 }
 
-fn pair_with_store<'a>(
-    entries: Vec<CachedPath>,
-    store: &'a LocalNixStore,
-) -> Vec<(CachedPath, nar::NarSource<'a>)> {
+pub(crate) struct NarUpload<'a> {
+    pub cached: CachedPath,
+    pub source: nar::NarSource<'a>,
+    pub tally: Tally,
+}
+
+fn pair_with_store<'a>(entries: Vec<CachedPath>, store: &'a LocalNixStore) -> Vec<NarUpload<'a>> {
     entries
         .into_iter()
-        .map(|cp| (cp, nar::NarSource::Path { meta: Some(store) }))
+        .map(|cached| NarUpload {
+            cached,
+            source: nar::NarSource::Path { meta: Some(store) },
+            tally: Tally::default(),
+        })
         .collect()
 }
 
-pub(crate) async fn upload_one_nar(
-    updater: &JobUpdater,
-    cp: &CachedPath,
-    source: nar::NarSource<'_>,
-) -> Result<nar::UploadedNar> {
+async fn upload_one_nar(updater: &JobUpdater, upload: NarUpload<'_>) -> Result<nar::UploadedNar> {
+    let cp = &upload.cached;
     if cp.cached {
         tracing::debug!(store_path = %cp.path, "skipping NAR upload - already cached");
         return Ok(nar::UploadedNar::default());
     }
-    nar::upload_nar(&updater.uploads, &updater.job_id, &cp.path, source).await
+    let mut counted = Progress::counting(upload.tally);
+    let uploaded = nar::upload_nar(
+        &updater.uploads,
+        &updater.job_id,
+        &cp.path,
+        upload.source,
+        &mut |read| counted.at(read),
+    )
+    .await?;
+    counted.transfer_done();
+    Ok(uploaded)
 }
 
 pub(crate) async fn upload_all(
     updater: &JobUpdater,
-    uploads: Vec<(CachedPath, nar::NarSource<'_>)>,
+    uploads: Vec<NarUpload<'_>>,
     abort: Option<&watch::Receiver<bool>>,
 ) -> Result<nar::UploadedNar> {
     use futures::stream::{FuturesUnordered, StreamExt as _};
 
-    let pending = uploads.iter().filter(|(cp, _)| !cp.cached).count();
+    let pending = uploads.iter().filter(|u| !u.cached.cached).count();
     if pending == 0 {
         return Ok(nar::UploadedNar::default());
     }
@@ -108,7 +123,7 @@ pub(crate) async fn upload_all(
     let mut uploaded = nar::UploadedNar::default();
     let mut running: FuturesUnordered<_> = uploads
         .into_iter()
-        .map(|(cp, source)| upload_unless_aborted(updater, cp, source, abort))
+        .map(|upload| upload_unless_aborted(updater, upload, abort))
         .collect();
     while let Some(result) = running.next().await {
         uploaded += result?;
@@ -120,15 +135,14 @@ pub(crate) async fn upload_all(
 
 async fn upload_unless_aborted(
     updater: &JobUpdater,
-    cp: CachedPath,
-    source: nar::NarSource<'_>,
+    upload: NarUpload<'_>,
     abort: Option<&watch::Receiver<bool>>,
 ) -> Result<nar::UploadedNar> {
     if let Some(abort) = abort {
         check_abort(abort)?;
     }
 
-    let result = upload_one_nar(updater, &cp, source).await;
+    let result = upload_one_nar(updater, upload).await;
     if result.is_err()
         && let Some(abort) = abort
     {
@@ -339,6 +353,7 @@ impl JobExecutor {
             realised
                 .into_iter()
                 .map(|(_, store_path)| compress::OutputNar {
+                    build_id: build_task.build_id.clone(),
                     store_path,
                     source: nar::NarSource::Path {
                         meta: Some(&*self.store),
@@ -416,6 +431,7 @@ impl JobExecutor {
                     realised
                         .into_iter()
                         .map(|(_, store_path)| compress::OutputNar {
+                            build_id: build_task.build_id.clone(),
                             store_path,
                             source: nar::NarSource::Path {
                                 meta: Some(&*self.store),
@@ -424,6 +440,7 @@ impl JobExecutor {
                 );
                 outputs.extend(fetched.into_iter().filter_map(|f| {
                     f.nar.map(|raw| compress::OutputNar {
+                        build_id: build_task.build_id.clone(),
                         store_path: f.store_path,
                         source: nar::NarSource::Raw {
                             nar: raw.nar,
@@ -463,6 +480,7 @@ impl JobExecutor {
                     .report_build_output(build_task.build_id.clone(), reported, None, false)
                     .await?;
                 outputs.push(compress::OutputNar {
+                    build_id: build_task.build_id.clone(),
                     store_path,
                     source: nar::NarSource::Raw {
                         nar: raw.nar,
@@ -503,6 +521,7 @@ impl JobExecutor {
                 gc_handles.push(self.gcroots.add(&o.store_path).await);
             }
             outputs.extend(built.into_iter().map(|o| compress::OutputNar {
+                build_id: build_task.build_id.clone(),
                 store_path: o.store_path,
                 source: nar::NarSource::Path {
                     meta: Some(&*self.store),

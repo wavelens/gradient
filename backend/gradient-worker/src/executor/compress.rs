@@ -9,17 +9,20 @@
 //! The gate that dispatched the job made its build closure complete in our cache first.
 //! The server is requesting a substitute's runtime references itself.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use anyhow::Result;
 use gradient_util::store_path::nix_store_path;
-use gradient_wire::messages::CachedPath;
+use gradient_wire::messages::{BuildProgressPhase, CachedPath};
 use tokio::sync::watch;
 
+use super::NarUpload;
 use crate::proto::job::JobUpdater;
+use crate::proto::progress::{BuildProgressSink, Progress, Tally, report_during};
 use gradient_worker_client::nar::{NarSource, UploadedNar};
 
 pub(crate) struct OutputNar<'a> {
+    pub build_id: String,
     pub store_path: String,
     pub source: NarSource<'a>,
 }
@@ -46,21 +49,71 @@ pub async fn push_outputs(
         })
         .collect();
     let entries = super::query_fetched_paths(updater, paths, sizes).await?;
-    let mut sources: HashMap<String, NarSource<'_>> = outputs
+    let mut sources: HashMap<String, OutputNar<'_>> = outputs
         .into_iter()
-        .map(|o| (nix_store_path(&o.store_path), o.source))
+        .map(|o| (nix_store_path(&o.store_path), o))
         .collect();
-    let uploads: Vec<(CachedPath, NarSource<'_>)> = entries
+    let pending: Vec<(CachedPath, OutputNar<'_>)> = entries
         .into_iter()
         .filter(|cp| !cp.cached)
         .filter_map(|cp| {
             sources
                 .remove(&nix_store_path(&cp.path))
-                .map(|source| (cp, source))
+                .map(|output| (cp, output))
         })
         .collect();
 
-    super::upload_all(updater, uploads, Some(abort)).await
+    let (mut progress, tallies) = upload_progress(updater, &pending).await;
+    let uploads = pending
+        .into_iter()
+        .map(|(cached, output)| NarUpload {
+            tally: tallies[&output.build_id].clone(),
+            cached,
+            source: output.source,
+        })
+        .collect();
+    let uploaded = report_during(
+        &mut progress,
+        super::upload_all(updater, uploads, Some(abort)),
+    )
+    .await;
+    for build in &mut progress {
+        build.finish().await;
+    }
+    uploaded
+}
+
+async fn upload_progress(
+    updater: &JobUpdater,
+    pending: &[(CachedPath, OutputNar<'_>)],
+) -> (Vec<Progress<BuildProgressSink>>, HashMap<String, Tally>) {
+    let mut totals: BTreeMap<&str, (Option<u64>, u32)> = BTreeMap::new();
+    for (cached, output) in pending {
+        let size = nar_size(&output.source, &cached.path).await;
+        let (bytes, paths) = totals.entry(&output.build_id).or_insert((Some(0), 0));
+        *bytes = bytes.zip(size).map(|(had, more)| had + more);
+        *paths += 1;
+    }
+
+    let mut tallies = HashMap::new();
+    let progress = totals
+        .into_iter()
+        .map(|(build_id, (bytes, paths))| {
+            let mut build = updater.build_progress(build_id.to_owned(), BuildProgressPhase::Upload);
+            build.set_total(bytes, paths);
+            tallies.insert(build_id.to_owned(), build.tally());
+            build
+        })
+        .collect();
+    (progress, tallies)
+}
+
+async fn nar_size(source: &NarSource<'_>, store_path: &str) -> Option<u64> {
+    match source {
+        NarSource::Raw { nar, .. } => Some(nar.len() as u64),
+        NarSource::Path { meta: Some(meta) } => meta.path_meta(store_path).await?.nar_size,
+        NarSource::Path { meta: None } => None,
+    }
 }
 
 #[cfg(test)]
@@ -210,15 +263,15 @@ mod tests {
 
         let task = tokio::spawn(async move {
             let sources = (0..PATHS)
-                .map(|i| {
-                    let cp = uncached(&format!("/nix/store/{}-p{i}", "a".repeat(32)));
-                    let source = NarSource::Raw {
+                .map(|i| crate::executor::NarUpload {
+                    cached: uncached(&format!("/nix/store/{}-p{i}", "a".repeat(32))),
+                    source: NarSource::Raw {
                         nar: b"nar bytes".to_vec(),
                         references: Vec::new(),
                         deriver: None,
                         ca: None,
-                    };
-                    (cp, source)
+                    },
+                    tally: Default::default(),
                 })
                 .collect();
             crate::executor::upload_all(&updater, sources, None).await
@@ -306,10 +359,12 @@ mod tests {
             &mut updater,
             vec![
                 OutputNar {
+                    build_id: "b1".to_owned(),
                     store_path: cached.clone(),
                     source: NarSource::Path { meta: None },
                 },
                 OutputNar {
+                    build_id: "b1".to_owned(),
                     store_path: raw_path.clone(),
                     source: NarSource::Raw {
                         nar: raw_nar,
@@ -334,6 +389,120 @@ mod tests {
             opened,
             vec![raw_path],
             "only the uncached output is streamed"
+        );
+        pump.abort();
+    }
+
+    #[tokio::test]
+    async fn each_build_reports_the_upload_of_its_own_uncached_outputs() {
+        use gradient_wire::messages::BuildProgressPhase;
+
+        let path = |name: &str| format!("/nix/store/{}-{name}", "p".repeat(32));
+        let raw = |len: usize| NarSource::Raw {
+            nar: vec![0u8; len],
+            references: vec![],
+            deriver: None,
+            ca: None,
+        };
+        let cached = path("cached");
+
+        let server = MockProtoServer::bind().await;
+        let url = server.url().to_owned();
+        let cached_for_server = cached.clone();
+        let server_task = tokio::spawn(async move {
+            let mut sc = server.accept().await;
+            let mut reports = Vec::new();
+            while reports.len() < 2 {
+                match sc.recv().await.unwrap() {
+                    ClientMessage::CacheQuery {
+                        query_id, paths, ..
+                    } => {
+                        let cached = paths
+                            .into_iter()
+                            .map(|p| CachedPath {
+                                cached: p == cached_for_server,
+                                ..uncached(&p)
+                            })
+                            .collect();
+                        sc.send(ServerMessage::CacheStatus { query_id, cached })
+                            .await
+                            .unwrap();
+                    }
+                    ClientMessage::UploadRequest { request_id, .. } => sc
+                        .send(ServerMessage::UploadGrant {
+                            request_id,
+                            target: GrantTarget::Passthrough { resume_offset: 0 },
+                        })
+                        .await
+                        .unwrap(),
+                    ClientMessage::UploadFinished { request_id, .. } => sc
+                        .send(ServerMessage::UploadCommitted {
+                            request_id,
+                            outcome: UploadOutcome::Ok,
+                        })
+                        .await
+                        .unwrap(),
+                    ClientMessage::BuildProgress {
+                        build_id,
+                        phase,
+                        bytes_done,
+                        bytes_total,
+                        paths_done,
+                        paths_total,
+                        ..
+                    } => reports.push((
+                        build_id,
+                        phase,
+                        bytes_done,
+                        bytes_total,
+                        paths_done,
+                        paths_total,
+                    )),
+                    _ => {}
+                }
+            }
+            reports.sort_by(|a, b| a.0.cmp(&b.0));
+            reports
+        });
+
+        let conn = ProtoConnection::open(&url).await.unwrap();
+        let (writer, reader, _flush) = conn.split();
+        let uploads = UploadClient::new(writer.clone(), 8);
+        let cache_waiters: CacheWaiters = Arc::new(Mutex::new(HashMap::new()));
+        let mut updater = updater(
+            "job-upload-progress",
+            writer,
+            cache_waiters.clone(),
+            uploads.clone(),
+        );
+        let pump = pump(reader, cache_waiters, uploads);
+        let (_tx, abort) = tokio::sync::watch::channel(false);
+        let output = |build_id: &str, store_path: String, source| OutputNar {
+            build_id: build_id.to_owned(),
+            store_path,
+            source,
+        };
+
+        push_outputs(
+            &mut updater,
+            vec![
+                output("b1", path("one"), raw(100)),
+                output("b1", path("two"), raw(50)),
+                output("b2", cached, raw(999)),
+                output("b2", path("three"), raw(30)),
+            ],
+            &abort,
+        )
+        .await
+        .unwrap();
+
+        let upload = BuildProgressPhase::Upload;
+        assert_eq!(
+            server_task.await.unwrap(),
+            vec![
+                ("b1".to_owned(), upload, 150, Some(150), 2, Some(2)),
+                ("b2".to_owned(), upload, 30, Some(30), 1, Some(1)),
+            ]
         );
         pump.abort();
     }

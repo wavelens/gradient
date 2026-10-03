@@ -124,6 +124,7 @@ pub async fn upload_nar(
     job_id: &str,
     store_path: &str,
     source: NarSource<'_>,
+    nar_read: &mut (dyn FnMut(u64) + Send),
 ) -> Result<UploadedNar> {
     let store_path = nix_store_path(store_path);
     let object = UploadObject::Nar {
@@ -139,8 +140,15 @@ pub async fn upload_nar(
             let threads = compression_threads(Some(nar_size));
             let mut upload = uploads.start(job_id, object, nar_size).await?;
             while let Some((request_id, target)) = upload.next_grant().await? {
-                let sent =
-                    send_path(uploads.writer(), request_id, &store_path, threads, target).await;
+                let sent = send_path(
+                    uploads.writer(),
+                    request_id,
+                    &store_path,
+                    threads,
+                    target,
+                    nar_read,
+                )
+                .await;
                 if let Some(uploaded) = settle(&mut upload, sent, &path_meta).await? {
                     return Ok(uploaded);
                 }
@@ -165,6 +173,9 @@ pub async fn upload_nar(
             let mut upload = uploads.start(job_id, object, nar_size).await?;
             while let Some((request_id, target)) = upload.next_grant().await? {
                 let sent = send_raw(uploads.writer(), request_id, &nar, target).await;
+                if sent.is_ok() {
+                    nar_read(nar_size);
+                }
                 if let Some(uploaded) = settle(&mut upload, sent, &path_meta).await? {
                     return Ok(uploaded);
                 }
@@ -195,21 +206,28 @@ async fn send_path(
     store_path: &str,
     threads: u32,
     target: GrantTarget,
+    nar_read: &mut (dyn FnMut(u64) + Send),
 ) -> Result<(CompressedNarMeta, Option<CompletedMultipart>)> {
     match target {
         GrantTarget::Passthrough { resume_offset } => {
             debug!(store_path, resume_offset, "passthrough NAR upload");
             let started = std::time::Instant::now();
             let mut passthrough = PassthroughStream::new(request_id, writer, resume_offset);
-            let meta =
-                pack_path_in_parts(store_path, threads, BULK_CHUNK_SIZE, &mut passthrough).await?;
+            let meta = pack_path_in_parts(
+                store_path,
+                threads,
+                BULK_CHUNK_SIZE,
+                &mut passthrough,
+                nar_read,
+            )
+            .await?;
             let sent = passthrough.finish().await?;
             crate::throughput::NETWORK.observe_transfer(sent, started.elapsed());
             Ok((meta, None))
         }
         GrantTarget::Put { url } => {
             debug!(store_path, "presigned NAR upload");
-            let (compressed, meta) = pack_compress_path(store_path, threads).await?;
+            let (compressed, meta) = pack_compress_path(store_path, threads, nar_read).await?;
             http_put(&url, compressed).await?;
             Ok((meta, None))
         }
@@ -220,8 +238,9 @@ async fn send_path(
                 "presigned multipart NAR upload"
             );
             let mut uploader = PartUploader::new(&grant);
-            let meta = pack_path_in_parts(store_path, threads, uploader.part_size(), &mut uploader)
-                .await?;
+            let part_size = uploader.part_size();
+            let meta =
+                pack_path_in_parts(store_path, threads, part_size, &mut uploader, nar_read).await?;
             Ok((meta, Some(uploader.finish().await?)))
         }
         GrantTarget::Skip => bail!("a skipped upload has no transfer"),
@@ -356,6 +375,7 @@ async fn pack_path_in_parts(
     threads: u32,
     part_size: usize,
     sink: &mut impl PartSink,
+    nar_read: &mut (dyn FnMut(u64) + Send),
 ) -> Result<CompressedNarMeta> {
     let mut nar_stream = harmonia_file_nar::NarByteStream::new(store_path.to_owned().into());
     let mut encoder = nar_encoder(Vec::with_capacity(part_size * 2), threads)?;
@@ -379,6 +399,7 @@ async fn pack_path_in_parts(
             file_size += part.len() as u64;
             sink.send_part(part).await?;
         }
+        nar_read(nar_size);
     }
 
     let remaining = encoder.finish().context("failed to finish zstd encoder")?;
@@ -399,6 +420,7 @@ async fn pack_path_in_parts(
 async fn pack_compress_path(
     store_path: &str,
     threads: u32,
+    nar_read: &mut (dyn FnMut(u64) + Send),
 ) -> Result<(Vec<u8>, CompressedNarMeta)> {
     let mut nar_stream = harmonia_file_nar::NarByteStream::new(store_path.to_owned().into());
     let mut encoder = nar_encoder(Vec::new(), threads)?;
@@ -412,6 +434,7 @@ async fn pack_compress_path(
         encoder
             .write_all(&chunk)
             .context("zstd compression failed")?;
+        nar_read(nar_size);
     }
 
     let compressed = encoder.finish().context("failed to finish zstd encoder")?;
@@ -576,6 +599,7 @@ mod tests {
                     "job-123",
                     &path,
                     NarSource::Path { meta: Some(&meta) },
+                    &mut |_| {},
                 )
                 .await
             },
@@ -594,6 +618,26 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_path_upload_reports_the_nar_bytes_it_read() {
+        let dir = make_temp_store_path();
+        let path = dir.to_str().unwrap().to_owned();
+        let mut read = Vec::new();
+
+        let served = served(
+            GrantTarget::Passthrough { resume_offset: 0 },
+            async |uploads| {
+                let source = NarSource::Path { meta: None };
+                upload_nar(uploads, "job-read", &path, source, &mut |n| read.push(n)).await
+            },
+        )
+        .await;
+
+        assert_eq!(read.last().copied(), Some(served.nar().nar_size));
+        assert!(read.is_sorted());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
     async fn path_passthrough_sends_contiguous_zstd_chunks_and_an_empty_final() {
         let dir = make_temp_store_path();
         let path = dir.to_str().unwrap().to_owned();
@@ -601,7 +645,14 @@ mod tests {
         let served = served(
             GrantTarget::Passthrough { resume_offset: 0 },
             async |uploads| {
-                upload_nar(uploads, "job-123", &path, NarSource::Path { meta: None }).await
+                upload_nar(
+                    uploads,
+                    "job-123",
+                    &path,
+                    NarSource::Path { meta: None },
+                    &mut |_| {},
+                )
+                .await
             },
         )
         .await;
@@ -641,7 +692,14 @@ mod tests {
         let served = served(
             GrantTarget::Passthrough { resume_offset: 0 },
             async |uploads| {
-                upload_nar(uploads, "job-tail", &path, NarSource::Path { meta: None }).await
+                upload_nar(
+                    uploads,
+                    "job-tail",
+                    &path,
+                    NarSource::Path { meta: None },
+                    &mut |_| {},
+                )
+                .await
             },
         )
         .await;
@@ -680,7 +738,7 @@ mod tests {
                     deriver: None,
                     ca: None,
                 };
-                upload_nar(uploads, "job-resume", &store_path("r"), source).await
+                upload_nar(uploads, "job-resume", &store_path("r"), source, &mut |_| {}).await
             },
         )
         .await;
@@ -764,7 +822,14 @@ mod tests {
         let (http_url, http_task) = one_shot_http_server().await;
 
         let served = served(GrantTarget::Put { url: http_url }, async |uploads| {
-            upload_nar(uploads, "job-xyz", &path, NarSource::Path { meta: None }).await
+            upload_nar(
+                uploads,
+                "job-xyz",
+                &path,
+                NarSource::Path { meta: None },
+                &mut |_| {},
+            )
+            .await
         })
         .await;
 
@@ -810,6 +875,7 @@ mod tests {
                 "job-multipart",
                 &path,
                 NarSource::Path { meta: None },
+                &mut |_| {},
             )
             .await
         })
@@ -853,6 +919,7 @@ mod tests {
             NarSource::Path {
                 meta: Some(&Unreachable),
             },
+            &mut |_| {},
         )
         .await;
 
@@ -874,7 +941,7 @@ mod tests {
                     deriver: None,
                     ca: None,
                 };
-                upload_nar(uploads, "job-raw", &store_path("raw"), source).await
+                upload_nar(uploads, "job-raw", &store_path("raw"), source, &mut |_| {}).await
             },
         )
         .await;
@@ -906,9 +973,15 @@ mod tests {
             ca: None,
         };
 
-        let uploaded = upload_nar(&uploads, "job-sizes", &store_path("sizes"), source)
-            .await
-            .unwrap();
+        let uploaded = upload_nar(
+            &uploads,
+            "job-sizes",
+            &store_path("sizes"),
+            source,
+            &mut |_| {},
+        )
+        .await
+        .unwrap();
         pump.abort();
         let served = script.await.unwrap();
 
@@ -929,7 +1002,14 @@ mod tests {
                 deriver: None,
                 ca: Some(ca.to_owned()),
             };
-            upload_nar(uploads, "job-ca", &store_path("hello-2.12"), source).await
+            upload_nar(
+                uploads,
+                "job-ca",
+                &store_path("hello-2.12"),
+                source,
+                &mut |_| {},
+            )
+            .await
         })
         .await;
 
@@ -948,7 +1028,14 @@ mod tests {
                 deriver: None,
                 ca: None,
             };
-            upload_nar(uploads, "job-verbatim", &store_path("verbatim"), source).await
+            upload_nar(
+                uploads,
+                "job-verbatim",
+                &store_path("verbatim"),
+                source,
+                &mut |_| {},
+            )
+            .await
         })
         .await;
 
