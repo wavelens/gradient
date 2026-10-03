@@ -11,7 +11,7 @@ use std::future::Future;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 
-use gradient_wire::messages::{BUILD_PROGRESS_INTERVAL, ClientMessage};
+use gradient_wire::messages::{ClientMessage, PROGRESS_INTERVAL};
 use gradient_wire::traits::EvalProgressSink;
 use gradient_wire::types::{BuildProgressPhase, EvalProgress};
 use tokio::time::Instant;
@@ -184,7 +184,7 @@ impl<S: ProgressSink> Progress<S> {
             bytes_total: None,
             paths_total: 0,
             reported: None,
-            deadline: Instant::now() + BUILD_PROGRESS_INTERVAL,
+            deadline: Instant::now() + PROGRESS_INTERVAL,
         }
     }
 
@@ -219,7 +219,7 @@ impl<S: ProgressSink> Progress<S> {
     }
 
     pub(crate) async fn tick(&mut self) {
-        self.deadline = Instant::now() + BUILD_PROGRESS_INTERVAL;
+        self.deadline = Instant::now() + PROGRESS_INTERVAL;
         let now = self.transferred();
         if self.reported != Some(now) {
             self.reported = Some(now);
@@ -326,7 +326,6 @@ pub(crate) fn transferred(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::Duration;
 
     #[tokio::test(start_paused = true)]
     async fn a_deadline_reports_only_on_a_change_and_the_end_always_does() {
@@ -355,14 +354,11 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn a_tick_moves_the_deadline_one_interval_on() {
         let mut progress = Progress::silent();
-        tokio::time::advance(BUILD_PROGRESS_INTERVAL * 3).await;
+        tokio::time::advance(PROGRESS_INTERVAL * 3).await;
 
         progress.tick().await;
 
-        assert_eq!(
-            progress.deadline(),
-            Instant::now() + BUILD_PROGRESS_INTERVAL
-        );
+        assert_eq!(progress.deadline(), Instant::now() + PROGRESS_INTERVAL);
     }
 
     #[tokio::test(start_paused = true)]
@@ -427,7 +423,7 @@ mod tests {
         progress
             .during(async move {
                 transfer.at(50);
-                tokio::time::sleep(BUILD_PROGRESS_INTERVAL + Duration::from_secs(1)).await;
+                tokio::time::sleep(PROGRESS_INTERVAL + PROGRESS_INTERVAL / 2).await;
                 transfer.at(100);
                 transfer.transfer_done();
             })

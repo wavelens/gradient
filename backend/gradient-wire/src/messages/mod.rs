@@ -25,9 +25,7 @@ pub use server::{ArchivedServerMessage, FailedPeer, ServerMessage};
 
 pub const PROTO_VERSION: u16 = 25;
 
-pub const BUILD_PROGRESS_INTERVAL: std::time::Duration = std::time::Duration::from_secs(5);
-
-pub const EVAL_PROGRESS_INTERVAL: std::time::Duration = std::time::Duration::from_secs(1);
+pub const PROGRESS_INTERVAL: std::time::Duration = std::time::Duration::from_secs(1);
 
 pub const EVAL_PROGRESS_RESEND_INTERVAL: std::time::Duration = std::time::Duration::from_secs(30);
 
