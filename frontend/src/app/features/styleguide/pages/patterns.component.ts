@@ -22,8 +22,8 @@ import {
   RowListComponent,
   SettingsSectionComponent,
 } from '@gradient/ui/ui';
-import { InputFetchListComponent } from '@shared/ui';
-import type { InputFetch } from '@core/models';
+import { BuildProgressComponent, InputFetchListComponent } from '@shared/ui';
+import type { BuildProgress, InputFetch } from '@core/models';
 
 @Component({
   selector: 'app-sg-patterns',
@@ -32,7 +32,7 @@ import type { InputFetch } from '@core/models';
     PageLayoutComponent, RowListComponent, RowComponent, CardGridComponent,
     SettingsSectionComponent, FormFieldComponent, FieldRowComponent, ButtonComponent,
     BadgeComponent, InputDirective, FormsModule,
-    NavCardComponent, SelectComponent, IconComponent, InputFetchListComponent,
+    NavCardComponent, SelectComponent, IconComponent, InputFetchListComponent, BuildProgressComponent,
   ],
   templateUrl: './patterns.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
@@ -61,4 +61,7 @@ export class PatternsComponent {
     { name: 'crane', state: 'Queued', downloaded_bytes: 0, expected_bytes: 0 },
     { name: 'private-overlay', state: 'Failed', downloaded_bytes: 0, expected_bytes: 0 },
   ];
+  prefetch: BuildProgress = { phase: 'prefetch', bytes_done: 126_000_000, bytes_total: 356_000_000, paths_done: 12, paths_total: 40 };
+  upload: BuildProgress = { phase: 'upload', bytes_done: 0, bytes_total: null, paths_done: 1, paths_total: 3 };
+  download: BuildProgress = { phase: 'download', bytes_done: 18_400_000, bytes_total: 46_000_000, paths_done: 0, paths_total: 1 };
 }

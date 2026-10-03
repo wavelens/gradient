@@ -108,6 +108,16 @@
   </div>
 </div>
 
+<h2>Build progress</h2>
+<p>The evaluation log shows the selected build's transfers. Prefetching inputs and uploading outputs sit as a strip
+   above the running log and disappear once every path landed. A download has no log, so it takes the whole panel.
+   The bar fills by bytes, by paths when a size is unknown, and pulses when neither total is known.</p>
+<div class="sg-frame sg-build-progress">
+  <gr-build-progress [progress]="prefetch" [compact]="true" />
+  <gr-build-progress [progress]="upload" [compact]="true" />
+  <gr-build-progress class="sg-download" [progress]="download" />
+</div>
+
 <h2>Settings destinations</h2>
 <p>A settings page that only points elsewhere uses linked rows, not buttons. The whole
    row navigates and the chevron says so.</p>
