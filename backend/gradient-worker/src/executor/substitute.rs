@@ -287,7 +287,10 @@ mod tests {
         .await
         .unwrap();
 
-        assert_eq!(sent.0, vec![transferred(body_len, Some(body_len), 1, 1)]);
+        assert_eq!(
+            sent.0,
+            vec![transferred(body_len, Some(body_len), 1, Some(1))]
+        );
     }
 
     #[test]

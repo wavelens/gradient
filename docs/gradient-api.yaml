@@ -12513,7 +12513,9 @@ components:
           type: integer
           format: int32
           nullable: true
-          description: Null when the number of paths is unknown.
+          description: |-
+            Null while a prefetch is still discovering paths. The last report
+            of a phase always carries the total.
 
     EvaluationProgress:
       description: Live progress of a fetching or evaluating evaluation, held in server memory only.

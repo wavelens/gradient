@@ -84,6 +84,7 @@ The worker is prefetching every input missing from the local store ahead of the 
 
 - The worker is reporting at most once a second on a change, plus once at the end of a phase.
 - `bytes_total` is `None` when one size is unknown.
+- `paths_total` is `None` while a prefetch is still discovering paths. The last report of a phase is always carrying the total.
 - Retried or failed transfers never count twice.
 - The server is keeping the latest value per build in memory for 15 s.
 - The build response is showing the value only while the build is `Building`. The build is staying `Building` until its job finished the upload.

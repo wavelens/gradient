@@ -27,7 +27,7 @@ pub(crate) struct Transferred {
     pub(crate) bytes_done: u64,
     pub(crate) bytes_total: Option<u64>,
     pub(crate) paths_done: u32,
-    pub(crate) paths_total: u32,
+    pub(crate) paths_total: Option<u32>,
 }
 
 pub(crate) trait ProgressSink {
@@ -58,7 +58,7 @@ impl ProgressSink for BuildProgressSink {
                 bytes_done: transferred.bytes_done,
                 bytes_total: transferred.bytes_total,
                 paths_done: transferred.paths_done,
-                paths_total: Some(transferred.paths_total),
+                paths_total: transferred.paths_total,
             })
             .await;
         if let Err(e) = sent {
@@ -153,6 +153,7 @@ pub(crate) struct Progress<S> {
     current: TransferBytes,
     bytes_total: Option<u64>,
     paths_total: u32,
+    paths_known: bool,
     reported: Option<Transferred>,
     deadline: Instant,
 }
@@ -179,6 +180,7 @@ impl<S: ProgressSink> Progress<S> {
             tally,
             bytes_total: None,
             paths_total: 0,
+            paths_known: false,
             reported: None,
             deadline: Instant::now() + PROGRESS_INTERVAL,
         }
@@ -191,6 +193,7 @@ impl<S: ProgressSink> Progress<S> {
     pub(crate) fn set_total(&mut self, bytes: Option<u64>, paths: u32) {
         self.bytes_total = bytes;
         self.paths_total = paths;
+        self.paths_known = true;
     }
 
     pub(crate) fn expect(&mut self, bytes: Option<u64>, paths: u32) {
@@ -228,8 +231,9 @@ impl<S: ProgressSink> Progress<S> {
     }
 
     pub(crate) async fn finish(&mut self) {
+        self.paths_known = true;
         let now = self.transferred();
-        if now.paths_total == 0 && now.bytes_done == 0 {
+        if self.paths_total == 0 && now.bytes_done == 0 {
             return;
         }
         self.reported = Some(now);
@@ -241,7 +245,7 @@ impl<S: ProgressSink> Progress<S> {
             bytes_done: self.tally.bytes(),
             bytes_total: self.bytes_total,
             paths_done: self.tally.paths(),
-            paths_total: self.paths_total,
+            paths_total: self.paths_known.then_some(self.paths_total),
         }
     }
 }
@@ -327,7 +331,7 @@ pub(crate) fn transferred(
     bytes_done: u64,
     bytes_total: Option<u64>,
     paths_done: u32,
-    paths_total: u32,
+    paths_total: Option<u32>,
 ) -> Transferred {
     Transferred {
         bytes_done,
@@ -358,9 +362,9 @@ mod tests {
         assert_eq!(
             sent.0,
             vec![
-                transferred(10, Some(100), 0, 1),
-                transferred(40, Some(100), 0, 1),
-                transferred(90, Some(100), 0, 1),
+                transferred(10, Some(100), 0, Some(1)),
+                transferred(40, Some(100), 0, Some(1)),
+                transferred(90, Some(100), 0, Some(1)),
             ]
         );
     }
@@ -387,7 +391,7 @@ mod tests {
         progress.at(20);
         progress.finish().await;
 
-        assert_eq!(sent.0, vec![transferred(50, None, 1, 0)]);
+        assert_eq!(sent.0, vec![transferred(50, None, 1, Some(0))]);
     }
 
     #[tokio::test(start_paused = true)]
@@ -408,8 +412,29 @@ mod tests {
         assert_eq!(
             sent.0,
             vec![
-                transferred(30, Some(50), 0, 2),
-                transferred(10, Some(50), 1, 2)
+                transferred(30, Some(50), 0, None),
+                transferred(10, Some(50), 1, None)
+            ]
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn growing_paths_stay_unknown_until_the_end() {
+        let mut sent = Recorded::default();
+        let mut progress = Progress::new(&mut sent);
+        progress.expect(Some(10), 1);
+        let mut transfer = Progress::counting(progress.tally());
+
+        transfer.at(10);
+        transfer.transfer_done();
+        progress.tick().await;
+        progress.finish().await;
+
+        assert_eq!(
+            sent.0,
+            vec![
+                transferred(10, Some(10), 1, None),
+                transferred(10, Some(10), 1, Some(1))
             ]
         );
     }
@@ -420,11 +445,11 @@ mod tests {
 
         progress.expect(Some(10), 1);
         progress.expect(Some(5), 2);
-        assert_eq!(progress.transferred(), transferred(0, Some(15), 0, 3));
+        assert_eq!(progress.transferred(), transferred(0, Some(15), 0, None));
 
         progress.expect(None, 1);
         progress.expect(Some(7), 1);
-        assert_eq!(progress.transferred(), transferred(0, None, 0, 5));
+        assert_eq!(progress.transferred(), transferred(0, None, 0, None));
     }
 
     #[tokio::test(start_paused = true)]
@@ -447,8 +472,8 @@ mod tests {
         assert_eq!(
             sent.0,
             vec![
-                transferred(50, Some(100), 0, 1),
-                transferred(100, Some(100), 1, 1)
+                transferred(50, Some(100), 0, Some(1)),
+                transferred(100, Some(100), 1, Some(1))
             ]
         );
     }
@@ -515,6 +540,6 @@ mod tests {
         progress.finish().await;
 
         assert_eq!(body.len(), 300_000);
-        assert_eq!(sent.0, vec![transferred(300_000, None, 0, 0)]);
+        assert_eq!(sent.0, vec![transferred(300_000, None, 0, Some(0))]);
     }
 }
