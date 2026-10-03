@@ -20,7 +20,7 @@ import {
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { Subscription } from 'rxjs';
-import { auditTime } from 'rxjs/operators';
+import { auditTime, filter } from 'rxjs/operators';
 import { EvaluationsService, BuildGraph } from '@core/services/evaluations.service';
 import { LiveService } from '@core/services/live.service';
 import {
@@ -541,7 +541,7 @@ export class DependencyGraphComponent implements OnInit, OnDestroy {
   private startLiveUpdates(): void {
     this.liveSub = this.live
       .connect(`/builds/${this.buildId}/live`)
-      .pipe(auditTime(300))
+      .pipe(filter((e) => e.event !== 'build.progress'), auditTime(300))
       .subscribe(() => {
         const hasActive = this.layoutNodes.some(
           (n) => n.status === 'Building' || n.status === 'Queued' || n.status === 'Created'
