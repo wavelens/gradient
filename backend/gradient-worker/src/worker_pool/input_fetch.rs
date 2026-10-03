@@ -10,6 +10,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use gradient_util::sync::Mutex;
 use gradient_wire::types::{InputFetch, InputFetchState};
+use tokio::io::{AsyncBufRead, AsyncBufReadExt};
 
 #[derive(Debug)]
 struct InputRow {
@@ -82,19 +83,19 @@ const FILE_TRANSFER: u64 = 101;
 const PROGRESS: u64 = 105;
 
 #[derive(Debug, PartialEq, Eq)]
-pub(crate) enum NixLine {
+enum NixLine {
     Transfer { id: u64, done: u64, expected: u64 },
     Text(String),
     Quiet,
 }
 
 #[derive(Debug, Default)]
-pub(crate) struct NixLogParser {
+struct NixLogParser {
     transfers: HashSet<u64>,
 }
 
 impl NixLogParser {
-    pub(crate) fn feed(&mut self, line: &str) -> NixLine {
+    fn feed(&mut self, line: &str) -> NixLine {
         let Some(json) = line.strip_prefix("@nix ") else {
             return NixLine::Text(line.to_owned());
         };
@@ -123,6 +124,28 @@ impl NixLogParser {
             Some("msg") => NixLine::Text(event["msg"].as_str().unwrap_or_default().to_owned()),
             _ => NixLine::Quiet,
         }
+    }
+}
+
+pub(crate) async fn forward_nix_log(
+    mut reader: impl AsyncBufRead + Unpin,
+    downloads: DownloadSlot,
+    mut print: impl FnMut(&str),
+) {
+    let mut parser = NixLogParser::default();
+    let mut line = Vec::new();
+    while matches!(reader.read_until(b'\n', &mut line).await, Ok(read) if read > 0) {
+        let text = String::from_utf8_lossy(&line);
+        match parser.feed(text.trim_end_matches(['\r', '\n'])) {
+            NixLine::Transfer { id, done, expected } => {
+                if let Some(target) = downloads.lock().as_ref() {
+                    target.board.transfer(target.index, id, done, expected);
+                }
+            }
+            NixLine::Text(text) => print(&text),
+            NixLine::Quiet => {}
+        }
+        line.clear();
     }
 }
 
@@ -171,6 +194,28 @@ mod tests {
             parser.feed("plain tracing line"),
             NixLine::Text("plain tracing line".into())
         );
+    }
+
+    #[tokio::test]
+    async fn a_line_that_is_not_utf8_does_not_end_the_log() {
+        let board = InputBoard::new(vec![("nixpkgs".into(), InputFetchState::Fetching)]);
+        let downloads = DownloadSlot::default();
+        *downloads.lock() = Some(DownloadTarget {
+            board: Arc::clone(&board),
+            index: 0,
+        });
+        let mut log = b"trace: \xff\xfe\n".to_vec();
+        log.extend_from_slice(b"@nix {\"action\":\"start\",\"id\":7,\"type\":101}\n");
+        log.extend_from_slice(
+            b"@nix {\"action\":\"result\",\"id\":7,\"type\":105,\"fields\":[3,9]}\n",
+        );
+        let mut printed = Vec::new();
+        forward_nix_log(log.as_slice(), downloads, |text| {
+            printed.push(text.to_owned())
+        })
+        .await;
+        assert_eq!(printed, vec!["trace: \u{fffd}\u{fffd}".to_owned()]);
+        assert_eq!(board.snapshot()[0].downloaded_bytes, 3);
     }
 
     #[test]
