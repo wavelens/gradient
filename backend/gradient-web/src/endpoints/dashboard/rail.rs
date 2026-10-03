@@ -62,7 +62,7 @@ fn nested_tasks(project: ProjectId, tasks: &[RailTaskRow]) -> Vec<RailTask> {
 }
 
 fn rail_project(p: RailProjectRow, tasks: &[RailTaskRow]) -> RailProject {
-    let tier = Tier::of(p.starred, p.recent_14d > 0);
+    let tier = Tier::of(p.starred, p.recent_14d > 0, p.team);
     RailProject {
         tasks: (tier == Tier::StarredActive).then(|| nested_tasks(p.id, tasks)),
         name: p.name,
@@ -122,6 +122,7 @@ mod tests {
             display_name: name.into(),
             starred,
             member: true,
+            team: false,
             recent_14d: recent,
             status: None,
             task_count: 2,

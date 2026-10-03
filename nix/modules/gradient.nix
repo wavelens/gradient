@@ -433,6 +433,15 @@ in {
             `superusers`, or `everyone` (any authenticated user).
           '';
         };
+
+        createTeam = lib.mkOption {
+          type = lib.types.enum [ "none" "superusers" "everyone" ];
+          default = "everyone";
+          description = ''
+            Who may create teams through the API: `none` (only the declarative state),
+            `superusers`, or `everyone` (any authenticated user).
+          '';
+        };
       };
 
       http = {
@@ -1393,6 +1402,7 @@ in {
         GRADIENT_CREDENTIALS_DIR = "%d";
         GRADIENT_PERMISSIONS_CREATE_PROJECT = cfg.permissions.createProject;
         GRADIENT_PERMISSIONS_CREATE_CACHE = cfg.permissions.createCache;
+        GRADIENT_PERMISSIONS_CREATE_TEAM = cfg.permissions.createTeam;
         GRADIENT_REGISTRATION_ENABLE = lib.boolToString cfg.registration.enable;
         GRADIENT_GRADIENT_CI_ENABLE = lib.boolToString cfg.gradientCi.enable;
         GRADIENT_GRADIENT_CI_URL = cfg.gradientCi.url;

@@ -51,6 +51,7 @@ fn to_facts(r: TaskFactsRow) -> TaskFacts {
         starred: r.starred,
         previous: r.previous,
         recent_14d: r.recent_14d,
+        team: r.team,
         speed_ms: r.speed_ms,
     }
 }
@@ -188,6 +189,7 @@ mod tests {
             ("project", Value::from("p")),
             ("task", Value::from("t")),
             ("starred", Value::from(true)),
+            ("team", Value::Bool(Some(false))),
             ("latest_id", Value::Uuid(latest.map(|(id, _)| id))),
             ("latest_status", Value::Int(latest.map(|(_, s)| s))),
             (

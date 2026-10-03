@@ -26,6 +26,7 @@ pub mod sql;
 pub mod state_machine;
 pub mod status;
 pub mod task_board;
+pub mod teams;
 
 #[cfg(test)]
 pub(crate) mod test_ctx;

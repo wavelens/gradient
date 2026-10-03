@@ -19,6 +19,7 @@ fn rail_projects_sql() -> String {
         SELECT p.id, p.name, p.display_name, \
             EXISTS (SELECT 1 FROM user_project_star s WHERE s.\"user\" = $1 AND s.project = p.id) AS starred, \
             EXISTS (SELECT 1 FROM project_access pu WHERE pu.\"user\" = $1 AND pu.project = p.id) AS member, \
+            EXISTS (SELECT 1 FROM project_access ta WHERE ta.project = p.id AND ta.\"user\" = $1 AND ta.via_team) AS team, \
             (SELECT count(*) FROM evaluation e JOIN task t ON t.id = e.task LEFT JOIN task_trigger tt ON tt.id = e.\"trigger\" \
                 WHERE t.project = p.id AND {NON_PR} AND e.created_at > now() - interval '14 days')::bigint AS recent_14d, \
             (SELECT e.status FROM evaluation e JOIN task t ON t.id = e.task LEFT JOIN task_trigger tt ON tt.id = e.\"trigger\" \
@@ -69,6 +70,7 @@ pub struct RailProjectRow {
     pub display_name: String,
     pub starred: bool,
     pub member: bool,
+    pub team: bool,
     pub recent_14d: i64,
     pub status: Option<EvaluationStatus>,
     pub task_count: i64,
@@ -102,6 +104,7 @@ fn rail_project_row(r: &QueryResult) -> Result<RailProjectRow, DbErr> {
         display_name: r.try_get("", "display_name")?,
         starred: r.try_get("", "starred")?,
         member: r.try_get("", "member")?,
+        team: r.try_get("", "team")?,
         recent_14d: r.try_get("", "recent_14d")?,
         status: optional_status(r)?,
         task_count: r.try_get("", "task_count")?,

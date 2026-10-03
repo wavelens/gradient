@@ -571,6 +571,53 @@ pub(crate) fn reject_managed_cache(cache: &MCache) -> WebResult<()> {
     Ok(())
 }
 
+#[derive(Clone, Copy)]
+pub enum TeamAccess {
+    Member,
+    Admin { reject_managed: bool },
+}
+
+pub async fn load_team(
+    state: &Arc<ServerState>,
+    user: &MUser,
+    api_key: Option<&ApiKeyContext>,
+    team_name: String,
+    access: TeamAccess,
+) -> WebResult<(MTeam, Option<TeamRole>)> {
+    if api_key.is_some_and(|k| k.project.is_some() || k.cache_pin.is_some()) {
+        return Err(WebError::forbidden(
+            "A pinned API key cannot be used on team endpoints.",
+        ));
+    }
+
+    let team = ETeam::find()
+        .filter(CTeam::Name.eq(team_name))
+        .one(&state.web_db)
+        .await?
+        .or_not_found("Team")?;
+    let role = gradient_db::teams::team_role_of(&state.web_db, team.id, user.id).await?;
+
+    match (access, role) {
+        (_, None) if !user.superuser => return Err(WebError::not_found("Team")),
+        (TeamAccess::Admin { .. }, Some(TeamRole::Member)) if !user.superuser => {
+            return Err(WebError::forbidden(
+                "You do not have permission to perform this action.",
+            ));
+        }
+        _ => {}
+    }
+
+    if let TeamAccess::Admin { reject_managed: true } = access
+        && team.managed
+    {
+        return Err(WebError::forbidden(
+            "Cannot modify state-managed team. This team is managed by configuration and cannot be edited through the API.",
+        ));
+    }
+
+    Ok((team, role))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
