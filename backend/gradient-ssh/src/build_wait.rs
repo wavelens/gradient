@@ -10,6 +10,7 @@ use gradient_derivation::Derivation;
 use gradient_entity::build::BuildStatus;
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_types::*;
+use gradient_util::log_lines::PrefixedLines;
 use gradient_util::store_path::strip_nix_store_prefix;
 use harmonia_protocol::daemon::wire::types2::FailureStatus;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
@@ -33,9 +34,8 @@ pub struct BuildOutcome {
 }
 
 struct Followed {
-    prefix: String,
     offset: usize,
-    pending: String,
+    lines: PrefixedLines,
 }
 
 pub fn failure_status(status: BuildStatus) -> FailureStatus {
@@ -46,19 +46,6 @@ pub fn failure_status(status: BuildStatus) -> FailureStatus {
         BuildStatus::FailedTransient => FailureStatus::TransientFailure,
         _ => FailureStatus::MiscFailure,
     }
-}
-
-pub fn split_lines(prefix: &str, pending: &mut String, chunk: &str) -> Vec<String> {
-    pending.push_str(chunk);
-    let Some(end) = pending.rfind('\n') else {
-        return Vec::new();
-    };
-
-    let complete: String = pending.drain(..=end).collect();
-    complete
-        .lines()
-        .map(|line| format!("{prefix}> {line}"))
-        .collect()
 }
 
 fn settles_the_request(status: BuildStatus) -> bool {
@@ -187,9 +174,8 @@ async fn follow_logs(
         );
         if build.status == BuildStatus::Building || (terminal && followed.contains_key(&build.id)) {
             let entry = followed.entry(build.id).or_insert_with(|| Followed {
-                prefix: prefixes.get(&build.id).cloned().unwrap_or_default(),
                 offset: 0,
-                pending: String::new(),
+                lines: PrefixedLines::new(prefixes.get(&build.id).cloned().unwrap_or_default()),
             });
             emit_new_lines(session, build.id, entry, terminal, log).await?;
         }
@@ -219,17 +205,13 @@ async fn emit_new_lines(
     let text = state.log_storage.read(attempt).await.unwrap_or_default();
     if let Some(new) = text.get(followed.offset..) {
         followed.offset = text.len();
-        for line in split_lines(&followed.prefix, &mut followed.pending, new) {
+        for line in followed.lines.push(new) {
             log(line);
         }
     }
 
-    if terminal && !followed.pending.is_empty() {
-        log(format!(
-            "{}> {}",
-            followed.prefix,
-            std::mem::take(&mut followed.pending)
-        ));
+    if terminal && let Some(rest) = followed.lines.finish() {
+        log(rest);
     }
 
     Ok(())
@@ -329,13 +311,5 @@ mod tests {
         ] {
             assert!(!settles_the_request(status), "{status:?}");
         }
-    }
-
-    #[test]
-    fn log_lines_carry_the_package_prefix() {
-        let mut pending = String::new();
-        let lines = split_lines("hello", &mut pending, "one\ntwo\nthr");
-        assert_eq!(lines, ["hello> one", "hello> two"]);
-        assert_eq!(pending, "thr");
     }
 }

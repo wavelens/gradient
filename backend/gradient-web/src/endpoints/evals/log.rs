@@ -14,6 +14,7 @@ use axum_streams::StreamBodyAs;
 use gradient_core::ServerState;
 use gradient_entity::build::BuildStatus;
 use gradient_types::*;
+use gradient_util::log_lines::PrefixedLines;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -61,6 +62,52 @@ async fn eval_shared_build_jobs(
     Ok(out)
 }
 
+struct Followed {
+    offset: usize,
+    lines: PrefixedLines,
+    done: bool,
+}
+
+impl Followed {
+    fn new(name: String) -> Self {
+        Self {
+            offset: 0,
+            lines: PrefixedLines::new(name),
+            done: false,
+        }
+    }
+}
+
+async fn read_new_lines(
+    state: &ServerState,
+    shared_build: DerivationBuildId,
+    followed: &mut Followed,
+    finished: bool,
+) -> Vec<String> {
+    let log = match gradient_db::scheduling::build_attempt::latest_attempt_id(
+        &state.web_db,
+        shared_build,
+    )
+    .await
+    .unwrap_or(None)
+    {
+        Some(key) => state.log_storage.read(key).await.unwrap_or_default(),
+        None => String::new(),
+    };
+
+    let mut lines = log
+        .get(followed.offset..)
+        .map(|new| followed.lines.push(new))
+        .unwrap_or_default();
+    followed.offset = log.len();
+    if finished {
+        lines.extend(followed.lines.finish());
+        followed.done = true;
+    }
+
+    lines
+}
+
 pub async fn post_evaluation_builds(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
@@ -78,29 +125,8 @@ pub async fn post_evaluation_builds(
     let evaluation = ctx.evaluation;
 
     let stream = stream! {
-        let mut last_logs: HashMap<DerivationBuildId, usize> = HashMap::new();
-
-        let past = match eval_shared_build_jobs(&state, evaluation.id).await {
-            Ok(jobs) => jobs,
-            Err(e) => {
-                error!(error = %e, "Failed to query past builds");
-                return;
-            }
-        };
-
-        for (shared_build, name) in past {
-            let log = match gradient_db::scheduling::build_attempt::latest_attempt_id(&state.web_db, shared_build.id).await.unwrap_or(None) {
-                Some(key) => state.log_storage.read(key).await.unwrap_or_default(),
-                None => String::new(),
-            };
-            last_logs.insert(shared_build.id, log.len());
-
-            yield log
-                .split("\n")
-                .map(|l| format!("{}> {}", name, l))
-                .collect::<Vec<String>>()
-                .join("\n");
-        }
+        let mut followed: HashMap<DerivationBuildId, Followed> = HashMap::new();
+        let mut first = true;
 
         loop {
             let current = match eval_shared_build_jobs(&state, evaluation.id).await {
@@ -111,54 +137,49 @@ pub async fn post_evaluation_builds(
                 }
             };
 
-            let building: Vec<(MDerivationBuild, String)> = current
-                .iter()
-                .filter(|(a, _)| a.status == BuildStatus::Building)
-                .cloned()
-                .collect();
-
-            if building.is_empty() {
-                let any_pending = current
-                    .iter()
-                    .any(|(a, _)| matches!(a.status, BuildStatus::Building | BuildStatus::Queued));
-                // The stream must stay open until the evaluation itself has finished. At the start
-                // it is still evaluating and is carrying no build_job yet.
-                if !any_pending {
-                    let still_active = EEvaluation::find_by_id(evaluation.id)
-                        .one(&state.web_db)
-                        .await
-                        .ok()
-                        .flatten()
-                        .is_some_and(|e| e.status.is_active());
-                    if !still_active {
-                        yield "".to_string();
-                        break;
-                    }
+            let mut any_pending = false;
+            for (shared_build, name) in current {
+                let building = shared_build.status == BuildStatus::Building;
+                let finished = !matches!(
+                    shared_build.status,
+                    BuildStatus::Created | BuildStatus::Queued | BuildStatus::Building
+                );
+                any_pending |= matches!(shared_build.status, BuildStatus::Queued | BuildStatus::Building);
+                let known = followed.contains_key(&shared_build.id);
+                if !(first || building || (known && finished)) {
+                    continue;
                 }
 
-                tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-                continue;
-            }
+                let entry = followed
+                    .entry(shared_build.id)
+                    .or_insert_with(|| Followed::new(name));
+                if entry.done {
+                    continue;
+                }
 
-            for (shared_build, name) in building {
-                let log = match gradient_db::scheduling::build_attempt::latest_attempt_id(&state.web_db, shared_build.id).await.unwrap_or(None) {
-                    Some(key) => state.log_storage.read(key).await.unwrap_or_default(),
-                    None => String::new(),
-                };
-                let last_offset = *last_logs.get(&shared_build.id).unwrap_or(&0);
-                let log_new = log[last_offset..].to_string();
-
-                if !log_new.is_empty() {
-                    last_logs.insert(shared_build.id, log.len());
-                    yield log_new
-                        .split("\n")
-                        .map(|l| format!("{}> {}", name, l))
-                        .collect::<Vec<String>>()
-                        .join("\n");
-                } else {
-                    last_logs.entry(shared_build.id).or_insert(0);
+                let lines = read_new_lines(&state, shared_build.id, entry, finished).await;
+                if !lines.is_empty() {
+                    yield lines.join("\n") + "\n";
                 }
             }
+            first = false;
+
+            // The stream must stay open until the evaluation itself has finished. At the start it
+            // is still evaluating and is carrying no build_job yet.
+            if !any_pending {
+                let still_active = EEvaluation::find_by_id(evaluation.id)
+                    .one(&state.web_db)
+                    .await
+                    .ok()
+                    .flatten()
+                    .is_some_and(|e| e.status.is_active());
+                if !still_active {
+                    yield "".to_string();
+                    break;
+                }
+            }
+
+            tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
         }
     };
 
