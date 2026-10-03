@@ -28,10 +28,12 @@ import {
 } from '@gradient/ui/ui';
 import {
   EvalStatusBadgeComponent,
+  InputFetchListComponent,
   MetricChartComponent,
   StarButtonComponent,
   StatusIconComponent,
 } from '@shared/ui';
+import type { InputFetch } from '@core/models';
 import type { StatusPhase } from '@shared/evaluation';
 
 @Component({
@@ -43,7 +45,7 @@ import type { StatusPhase } from '@shared/evaluation';
     StatCardComponent, TableComponent, DividerComponent, EvalStatusBadgeComponent,
     MetricChartComponent, ToastComponent, ButtonComponent,
     CardGridComponent,
-    LogoComponent, StarButtonComponent, StatusIconComponent,
+    LogoComponent, StarButtonComponent, StatusIconComponent, InputFetchListComponent,
   ],
   // The demo star toggles locally instead of writing the viewer's real stars.
   providers: [MessageService, { provide: StarsService, useValue: { set: () => of(true) } }],
@@ -60,6 +62,13 @@ export class ElementsComponent {
   ] as const;
   statusPhases: StatusPhase[] = ['queued', 'waiting', 'running', 'success', 'failure', 'aborted'];
   statusPhase = signal<StatusPhase>('queued');
+  inputFetches: InputFetch[] = [
+    { name: 'nixpkgs', state: 'Fetching', downloaded_bytes: 18_400_000, expected_bytes: 46_000_000 },
+    { name: 'home-manager', state: 'Fetching', downloaded_bytes: 2_100_000, expected_bytes: 0 },
+    { name: 'flake-utils', state: 'Done', downloaded_bytes: 15_300, expected_bytes: 0 },
+    { name: 'crane', state: 'Queued', downloaded_bytes: 0, expected_bytes: 0 },
+    { name: 'private-overlay', state: 'Failed', downloaded_bytes: 0, expected_bytes: 0 },
+  ];
   chartSeries = [{ name: 'Completed', data: [12, 18, 9, 24, 21] }];
   chartCategories = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'];
 
