@@ -71,9 +71,9 @@ async fn user_can_access_cache(state: &Arc<ServerState>, cache: &MCache, user: &
         return true;
     }
 
-    let direct = ECacheUser::find()
-        .filter(CCacheUser::Cache.eq(cache.id))
-        .filter(CCacheUser::User.eq(user.id))
+    let direct = ECacheAccess::find()
+        .filter(CCacheAccess::Cache.eq(cache.id))
+        .filter(CCacheAccess::User.eq(user.id))
         .one(&state.web_db)
         .await
         .unwrap_or(None);
@@ -81,8 +81,8 @@ async fn user_can_access_cache(state: &Arc<ServerState>, cache: &MCache, user: &
         return true;
     }
 
-    let project_ids: Vec<ProjectId> = EProjectUser::find()
-        .filter(CProjectUser::User.eq(user.id))
+    let project_ids: Vec<ProjectId> = EProjectAccess::find()
+        .filter(CProjectAccess::User.eq(user.id))
         .all(&state.web_db)
         .await
         .unwrap_or_default()

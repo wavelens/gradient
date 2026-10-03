@@ -7,7 +7,7 @@
 /// Visibility is mirroring `load_*(Readable)`, with no superuser bypass.
 macro_rules! project_readable {
     () => {
-        "(p.public OR EXISTS (SELECT 1 FROM project_user pu \
+        "(p.public OR EXISTS (SELECT 1 FROM project_access pu \
         WHERE pu.project = p.id AND pu.\"user\" = $1))"
     };
 }
@@ -15,8 +15,8 @@ macro_rules! project_readable {
 macro_rules! cache_readable {
     () => {
         "(c.public OR c.created_by = $1 \
-        OR EXISTS (SELECT 1 FROM cache_user cu WHERE cu.cache = c.id AND cu.\"user\" = $1) \
-        OR EXISTS (SELECT 1 FROM project_cache pc JOIN project_user pu ON pu.project = pc.project \
+        OR EXISTS (SELECT 1 FROM cache_access cu WHERE cu.cache = c.id AND cu.\"user\" = $1) \
+        OR EXISTS (SELECT 1 FROM project_cache pc JOIN project_access pu ON pu.project = pc.project \
         WHERE pc.cache = c.id AND pu.\"user\" = $1))"
     };
 }

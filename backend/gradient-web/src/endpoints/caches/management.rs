@@ -260,29 +260,13 @@ pub async fn get_cache(
     })?;
 
     let can_edit = match &maybe_user {
-        Some(u) => {
-            let mem = ECacheUser::find()
-                .filter(CCacheUser::Cache.eq(cache.id))
-                .filter(CCacheUser::User.eq(u.id))
-                .one(&state.web_db)
-                .await
-                .unwrap_or(None);
-            if let Some(m) = mem {
-                let role = ECacheRole::find_by_id(m.role)
-                    .one(&state.web_db)
-                    .await
-                    .unwrap_or(None);
-                role.map(|r| {
-                    crate::permissions::cache_mask_grants(
-                        r.permission,
-                        CachePermission::ManageCacheSettings,
-                    )
-                })
-                .unwrap_or(false)
-            } else {
-                false
-            }
-        }
+        Some(u) => gradient_db::access::cache_permission_mask(&state.web_db, cache.id, u.id)
+            .await
+            .ok()
+            .flatten()
+            .is_some_and(|mask| {
+                crate::permissions::cache_mask_grants(mask, CachePermission::ManageCacheSettings)
+            }),
         None => false,
     };
 

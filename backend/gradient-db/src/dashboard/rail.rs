@@ -13,12 +13,12 @@ use sea_orm::{ConnectionTrait, DbErr, QueryResult};
 
 fn rail_projects_sql() -> String {
     format!(
-        "WITH viewer AS (SELECT project FROM project_user WHERE \"user\" = $1 \
+        "WITH viewer AS (SELECT project FROM project_access WHERE \"user\" = $1 \
             UNION SELECT s.project FROM user_project_star s JOIN project sp ON sp.id = s.project \
             WHERE s.\"user\" = $1 AND sp.public) \
         SELECT p.id, p.name, p.display_name, \
             EXISTS (SELECT 1 FROM user_project_star s WHERE s.\"user\" = $1 AND s.project = p.id) AS starred, \
-            EXISTS (SELECT 1 FROM project_user pu WHERE pu.\"user\" = $1 AND pu.project = p.id) AS member, \
+            EXISTS (SELECT 1 FROM project_access pu WHERE pu.\"user\" = $1 AND pu.project = p.id) AS member, \
             (SELECT count(*) FROM evaluation e JOIN task t ON t.id = e.task LEFT JOIN task_trigger tt ON tt.id = e.\"trigger\" \
                 WHERE t.project = p.id AND {NON_PR} AND e.created_at > now() - interval '14 days')::bigint AS recent_14d, \
             (SELECT e.status FROM evaluation e JOIN task t ON t.id = e.task LEFT JOIN task_trigger tt ON tt.id = e.\"trigger\" \
@@ -33,7 +33,7 @@ fn rail_tasks_sql() -> String {
         "SELECT t.project, t.name, (SELECT e.status FROM evaluation e LEFT JOIN task_trigger tt ON tt.id = e.\"trigger\" \
             WHERE e.task = t.id AND {NON_PR} ORDER BY e.created_at DESC LIMIT 1) AS status \
         FROM task t WHERE t.project IN (SELECT s.project FROM user_project_star s JOIN project p ON p.id = s.project \
-            WHERE s.\"user\" = $1 AND (p.public OR EXISTS (SELECT 1 FROM project_user pu \
+            WHERE s.\"user\" = $1 AND (p.public OR EXISTS (SELECT 1 FROM project_access pu \
             WHERE pu.project = p.id AND pu.\"user\" = $1))) ORDER BY t.name"
     )
 }
@@ -53,8 +53,8 @@ crate::sql! {
             EXISTS (SELECT 1 FROM user_cache_star s WHERE s.\"user\" = $1 AND s.cache = c.id) AS starred, \
             (SELECT count(*) FROM cached_path_signature cs WHERE cs.cache = c.id)::bigint AS nar_count \
         FROM cache c WHERE c.created_by = $1 \
-            OR EXISTS (SELECT 1 FROM cache_user cu WHERE cu.cache = c.id AND cu.\"user\" = $1) \
-            OR EXISTS (SELECT 1 FROM project_cache pc JOIN project_user pu ON pu.project = pc.project \
+            OR EXISTS (SELECT 1 FROM cache_access cu WHERE cu.cache = c.id AND cu.\"user\" = $1) \
+            OR EXISTS (SELECT 1 FROM project_cache pc JOIN project_access pu ON pu.project = pc.project \
                 WHERE pc.cache = c.id AND pu.\"user\" = $1) \
             OR EXISTS (SELECT 1 FROM user_cache_star s WHERE s.\"user\" = $1 AND s.cache = c.id AND c.public) \
         ORDER BY starred DESC, c.name",

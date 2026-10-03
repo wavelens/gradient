@@ -15,7 +15,7 @@ gradient_db::sql! {
     PUBLIC_PROJECTS = "SELECT id FROM project WHERE public = true",
         params = [];
 
-    PROJECTS_FOR_USER = "SELECT project AS id FROM project_user WHERE \"user\" = $1",
+    PROJECTS_FOR_USER = "SELECT DISTINCT project AS id FROM project_access WHERE \"user\" = $1",
         params = [UserId];
 }
 

@@ -64,9 +64,9 @@ pub async fn get_commit(
     let accessible = if any_public {
         true
     } else if let Some(user) = &maybe_user {
-        EProjectUser::find()
-            .filter(CProjectUser::User.eq(user.id))
-            .filter(CProjectUser::Project.is_in(project_id_vec))
+        EProjectAccess::find()
+            .filter(CProjectAccess::User.eq(user.id))
+            .filter(CProjectAccess::Project.is_in(project_id_vec))
             .one(&state.web_db)
             .await?
             .is_some()

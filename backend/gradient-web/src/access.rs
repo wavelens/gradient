@@ -15,9 +15,9 @@ use gradient_db::lookup::{get_any_cache_by_name, get_any_project_by_name, get_an
 use gradient_types::consts::{BASE_CACHE_ROLE_ADMIN_ID, BASE_ROLE_ADMIN_ID};
 use gradient_types::ids::{CacheId, IntegrationId, ProjectId, UserId};
 use gradient_types::{
-    CCache, CCacheUser, CIntegration, CProjectCache, CProjectUser, CUser, ECacheRole, ECacheUser,
-    EIntegration, EProjectCache, EProjectUser, EUser, MCache, MIntegration, MProject, MProjectUser,
-    MTask, MUser,
+    CCache, CCacheAccess, CCacheUser, CIntegration, CProjectAccess, CProjectCache, CProjectUser,
+    CUser, ECacheAccess, ECacheUser, EIntegration, EProjectAccess, EProjectCache, EProjectUser,
+    EUser, MCache, MIntegration, MProject, MProjectUser, MTask, MUser,
 };
 use sea_orm::{ColumnTrait, Condition, EntityTrait, QueryFilter};
 use std::sync::Arc;
@@ -262,8 +262,8 @@ pub async fn visible_cache_condition(
     state: &Arc<ServerState>,
     user_id: UserId,
 ) -> WebResult<Condition> {
-    let project_ids: Vec<ProjectId> = EProjectUser::find()
-        .filter(CProjectUser::User.eq(user_id))
+    let project_ids: Vec<ProjectId> = EProjectAccess::find()
+        .filter(CProjectAccess::User.eq(user_id))
         .all(&state.web_db)
         .await?
         .into_iter()
@@ -312,9 +312,7 @@ pub async fn is_project_member(
     {
         return Ok(false);
     }
-    Ok(load_project_membership(state, user_id, project_id)
-        .await?
-        .is_some())
+    Ok(gradient_db::access::reaches_project(&state.web_db, project_id, user_id).await?)
 }
 
 pub async fn load_project_membership(
@@ -405,12 +403,12 @@ async fn is_cache_member(
     cache_id: CacheId,
     _api_key: Option<&ApiKeyContext>,
 ) -> WebResult<bool> {
-    let row = ECacheUser::find()
-        .filter(CCacheUser::Cache.eq(cache_id))
-        .filter(CCacheUser::User.eq(user_id))
+    Ok(ECacheAccess::find()
+        .filter(CCacheAccess::Cache.eq(cache_id))
+        .filter(CCacheAccess::User.eq(user_id))
         .one(&state.web_db)
-        .await?;
-    Ok(row.is_some())
+        .await?
+        .is_some())
 }
 
 async fn is_cache_project_subscriber(
@@ -438,9 +436,9 @@ async fn is_cache_project_subscriber(
         return Ok(false);
     }
 
-    let member = EProjectUser::find()
-        .filter(CProjectUser::User.eq(user_id))
-        .filter(CProjectUser::Project.is_in(allowed))
+    let member = EProjectAccess::find()
+        .filter(CProjectAccess::User.eq(user_id))
+        .filter(CProjectAccess::Project.is_in(allowed))
         .one(&state.web_db)
         .await?;
     Ok(member.is_some())
@@ -466,17 +464,7 @@ async fn cache_role_mask(
     user_id: UserId,
     cache_id: CacheId,
 ) -> WebResult<Option<i64>> {
-    let mem = ECacheUser::find()
-        .filter(CCacheUser::Cache.eq(cache_id))
-        .filter(CCacheUser::User.eq(user_id))
-        .one(&state.web_db)
-        .await?;
-    let Some(mem) = mem else { return Ok(None) };
-    let role = ECacheRole::find_by_id(mem.role)
-        .one(&state.web_db)
-        .await?
-        .ok_or_else(|| WebError::not_found("Cache Role"))?;
-    Ok(Some(role.permission))
+    Ok(gradient_db::access::cache_permission_mask(&state.web_db, cache_id, user_id).await?)
 }
 
 fn cache_mask_allows(
@@ -594,12 +582,12 @@ mod tests {
     use gradient_test_support::cli::test_cli;
     use gradient_test_support::fakes::email::InMemoryEmailSender;
     use gradient_test_support::log_storage::NoopLogStorage;
-    use gradient_types::ECache;
     use gradient_types::consts::{
         BASE_CACHE_ROLE_VIEW_ID, BASE_ROLE_ADMIN_ID, BASE_ROLE_VIEW_ID, BASE_ROLE_WRITE_ID,
     };
     use gradient_types::ids::{ProjectUserId, RoleId, TaskId};
     use gradient_types::{ConcurrencyPolicy, RuntimeConfig};
+    use gradient_types::{ECache, MProjectAccess};
     use sea_orm::{DatabaseBackend, MockDatabase};
     use uuid::uuid;
 
@@ -687,6 +675,11 @@ mod tests {
             email_verified: true,
             ..Default::default()
         }
+    }
+
+    fn make_state_with_log(db: MockDatabase) -> (Arc<ServerState>, sea_orm::DatabaseConnection) {
+        let conn = db.into_connection();
+        (make_state(conn.clone()), conn)
     }
 
     fn make_state(db: sea_orm::DatabaseConnection) -> Arc<ServerState> {
@@ -1587,5 +1580,47 @@ mod tests {
             let stmt = ECache::find().filter(cond).build(DatabaseBackend::Postgres);
             assert!(stmt.sql.contains("created_by"), "sql = {}", stmt.sql);
         });
+    }
+
+    #[tokio::test]
+    async fn a_private_project_is_resolved_through_project_access() {
+        let project = MProject {
+            id: ProjectId::now_v7(),
+            name: "private".into(),
+            public: false,
+            ..Default::default()
+        };
+        let user = MUser {
+            id: UserId::now_v7(),
+            ..Default::default()
+        };
+        let mock = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([vec![project.clone()]])
+            .append_query_results([vec![MProjectAccess {
+                project: project.id,
+                user: user.id,
+                role: BASE_ROLE_VIEW_ID,
+            }]]);
+        let (state, db) = make_state_with_log(mock);
+
+        load_project(
+            &state,
+            Caller::User(&user),
+            None,
+            "private".into(),
+            ProjectAccess::Readable { label: "Project" },
+        )
+        .await
+        .expect("a team grant is enough to read the project");
+
+        let read_access_view = db
+            .into_transaction_log()
+            .iter()
+            .flat_map(|t| t.statements().to_vec())
+            .any(|s| s.sql.contains("\"project_access\""));
+        assert!(
+            read_access_view,
+            "visibility must be read from project_access"
+        );
     }
 }
