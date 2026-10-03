@@ -79,29 +79,33 @@ where
     let total: i64 = size_by_drv.values().sum();
     let total_size_bytes = if total > 0 { Some(total) } else { None };
 
-    let nodes: Vec<ClosureNode> = EDerivation::find()
-        .filter(CDerivation::Id.is_in(all_ids.clone()))
-        .all(db)
-        .await?
-        .into_iter()
-        .map(|d| ClosureNode {
-            nar_size: size_by_drv.get(&d.id).copied(),
-            id: d.id.to_string(),
-            name: d.name.clone(),
-            path: d.drv_path(),
-        })
-        .collect();
+    let nodes: Vec<ClosureNode> = gradient_db::fetch_in_chunks(&all_ids, |chunk| {
+        EDerivation::find()
+            .filter(CDerivation::Id.is_in(chunk))
+            .all(db)
+    })
+    .await?
+    .into_iter()
+    .map(|d| ClosureNode {
+        nar_size: size_by_drv.get(&d.id).copied(),
+        id: d.id.to_string(),
+        name: d.name.clone(),
+        path: d.drv_path(),
+    })
+    .collect();
 
-    let edges: Vec<ClosureEdge> = EDerivationDependency::find()
-        .filter(CDerivationDependency::Derivation.is_in(all_ids))
-        .all(db)
-        .await?
-        .into_iter()
-        .map(|e| ClosureEdge {
-            source: e.dependency.to_string(),
-            target: e.derivation.to_string(),
-        })
-        .collect();
+    let edges: Vec<ClosureEdge> = gradient_db::fetch_in_chunks(&all_ids, |chunk| {
+        EDerivationDependency::find()
+            .filter(CDerivationDependency::Derivation.is_in(chunk))
+            .all(db)
+    })
+    .await?
+    .into_iter()
+    .map(|e| ClosureEdge {
+        source: e.dependency.to_string(),
+        target: e.derivation.to_string(),
+    })
+    .collect();
 
     let roots = roots.iter().map(|r| r.to_string()).collect();
     Ok(closure_graph(roots, total_size_bytes, nodes, edges))
