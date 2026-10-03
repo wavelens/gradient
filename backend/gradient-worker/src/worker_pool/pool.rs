@@ -236,7 +236,7 @@ impl Drop for PooledEvalWorker {
 }
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     #![allow(
         clippy::disallowed_methods,
         reason = "tests stand in for their peers by hand"
@@ -273,7 +273,10 @@ mod tests {
         EvalWorker::from_command(cmd, Arc::default()).expect("spawn sh")
     }
 
-    fn replying_worker(resp: &gradient_eval::ipc::EvalResponse, tag: &str) -> EvalWorker {
+    pub(in super::super) fn replying_worker(
+        resp: &gradient_eval::ipc::EvalResponse,
+        tag: &str,
+    ) -> EvalWorker {
         let payload = gradient_eval::ipc::encode_response(resp).expect("encode response");
         let mut frame = (payload.len() as u32).to_le_bytes().to_vec();
         frame.extend_from_slice(&payload);

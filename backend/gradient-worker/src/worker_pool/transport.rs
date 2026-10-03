@@ -36,6 +36,17 @@ const SHUTDOWN_GRACE: Duration = Duration::from_secs(5);
 const EXIT_PROBE_TIMEOUT: Duration = Duration::from_secs(2);
 
 #[derive(Debug)]
+pub(super) struct EvalErrorResponse(String);
+
+impl std::fmt::Display for EvalErrorResponse {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "eval worker: {}", self.0)
+    }
+}
+
+impl std::error::Error for EvalErrorResponse {}
+
+#[derive(Debug)]
 pub(super) struct Listing {
     pub(super) attrs: Vec<String>,
     pub(super) deferred: Vec<DiscoveryShard>,
@@ -273,7 +284,7 @@ impl EvalWorker {
         match extract(resp) {
             Ok(v) => Ok(v),
             Err(other) => match *other {
-                EvalResponse::Err { message } => Err(anyhow::anyhow!("eval worker: {message}")),
+                EvalResponse::Err { message } => Err(EvalErrorResponse(message).into()),
                 other => anyhow::bail!("eval worker: unexpected response to {what}: {other:?}"),
             },
         }
