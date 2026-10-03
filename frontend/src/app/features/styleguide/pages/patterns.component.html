@@ -97,6 +97,17 @@
   </gr-settings-section>
 </div>
 
+<h2>Flake input fetching</h2>
+<p>The evaluation log shows this while an evaluation has the status Fetching. Each flake input gets a live row.
+   The bar fills when the input size is known and pulses otherwise.</p>
+<div class="sg-frame">
+  <div class="sg-fetch-hint">
+    <gr-icon name="cloud_download" class="sg-fetch-icon" size="xl" />
+    <span class="sg-fetch-title">Fetching</span>
+    <gr-input-fetch-list [inputs]="inputFetches" />
+  </div>
+</div>
+
 <h2>Settings destinations</h2>
 <p>A settings page that only points elsewhere uses linked rows, not buttons. The whole
    row navigates and the chevron says so.</p>

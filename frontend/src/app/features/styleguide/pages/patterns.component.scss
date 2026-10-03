@@ -22,3 +22,18 @@
 
   h3 { margin: 0 0 $spacing-sm; font-size: $font-size-md; }
 }
+
+.sg-fetch-hint {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: $spacing-sm;
+}
+
+.sg-fetch-icon { color: var(--gr-status-info); }
+
+.sg-fetch-title {
+  font-size: $font-size-lg;
+  font-weight: 600;
+  color: var(--gr-text-primary);
+}

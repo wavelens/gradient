@@ -10,6 +10,7 @@ import {
   BadgeComponent,
   ButtonComponent,
   CardGridComponent,
+  IconComponent,
   Crumb,
   FieldRowComponent,
   FormFieldComponent,
@@ -21,6 +22,8 @@ import {
   RowListComponent,
   SettingsSectionComponent,
 } from '@gradient/ui/ui';
+import { InputFetchListComponent } from '@shared/ui';
+import type { InputFetch } from '@core/models';
 
 @Component({
   selector: 'app-sg-patterns',
@@ -29,7 +32,7 @@ import {
     PageLayoutComponent, RowListComponent, RowComponent, CardGridComponent,
     SettingsSectionComponent, FormFieldComponent, FieldRowComponent, ButtonComponent,
     BadgeComponent, InputDirective, FormsModule,
-    NavCardComponent, SelectComponent,
+    NavCardComponent, SelectComponent, IconComponent, InputFetchListComponent,
   ],
   templateUrl: './patterns.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
@@ -50,5 +53,12 @@ export class PatternsComponent {
     { name: 'gradient', status: 'passing', severity: 'success' as const },
     { name: 'nixpkgs-mirror', status: 'failed', severity: 'danger' as const },
     { name: 'infra', status: 'queued', severity: 'neutral' as const },
+  ];
+  inputFetches: InputFetch[] = [
+    { name: 'nixpkgs', state: 'Fetching', downloaded_bytes: 18_400_000, expected_bytes: 46_000_000 },
+    { name: 'home-manager', state: 'Fetching', downloaded_bytes: 2_100_000, expected_bytes: 0 },
+    { name: 'flake-utils', state: 'Done', downloaded_bytes: 15_300, expected_bytes: 0 },
+    { name: 'crane', state: 'Queued', downloaded_bytes: 0, expected_bytes: 0 },
+    { name: 'private-overlay', state: 'Failed', downloaded_bytes: 0, expected_bytes: 0 },
   ];
 }

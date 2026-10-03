@@ -28,14 +28,19 @@ import {
 } from '@gradient/ui/ui';
 import {
   EvalStatusBadgeComponent,
-  InputFetchListComponent,
+  type BarSegment,
   MetricChartComponent,
   SegmentedBarComponent,
   StarButtonComponent,
   StatusIconComponent,
+  byteSegments,
 } from '@shared/ui';
-import type { InputFetch } from '@core/models';
+import type { BuildStatusCounts } from '@core/models';
 import type { StatusPhase } from '@shared/evaluation';
+
+function counts(c: Partial<BuildStatusCounts>): BuildStatusCounts {
+  return { completed: 0, failed: 0, building: 0, queued: 0, substituted: 0, aborted: 0, ...c };
+}
 
 @Component({
   selector: 'app-sg-elements',
@@ -46,7 +51,7 @@ import type { StatusPhase } from '@shared/evaluation';
     StatCardComponent, TableComponent, DividerComponent, EvalStatusBadgeComponent,
     MetricChartComponent, ToastComponent, ButtonComponent,
     CardGridComponent,
-    LogoComponent, StarButtonComponent, StatusIconComponent, InputFetchListComponent, SegmentedBarComponent,
+    LogoComponent, StarButtonComponent, StatusIconComponent, SegmentedBarComponent,
   ],
   // The demo star toggles locally instead of writing the viewer's real stars.
   providers: [MessageService, { provide: StarsService, useValue: { set: () => of(true) } }],
@@ -63,12 +68,14 @@ export class ElementsComponent {
   ] as const;
   statusPhases: StatusPhase[] = ['queued', 'waiting', 'running', 'success', 'failure', 'aborted'];
   statusPhase = signal<StatusPhase>('queued');
-  inputFetches: InputFetch[] = [
-    { name: 'nixpkgs', state: 'Fetching', downloaded_bytes: 18_400_000, expected_bytes: 46_000_000 },
-    { name: 'home-manager', state: 'Fetching', downloaded_bytes: 2_100_000, expected_bytes: 0 },
-    { name: 'flake-utils', state: 'Done', downloaded_bytes: 15_300, expected_bytes: 0 },
-    { name: 'crane', state: 'Queued', downloaded_bytes: 0, expected_bytes: 0 },
-    { name: 'private-overlay', state: 'Failed', downloaded_bytes: 0, expected_bytes: 0 },
+  progressBars: { caption: string; counts?: BuildStatusCounts; segments?: BarSegment[] }[] = [
+    { caption: 'Build counts: completed, failed, building, queued', counts: counts({ completed: 12, failed: 2, building: 3, queued: 8 }) },
+    { caption: 'Every build substituted from a cache', counts: counts({ substituted: 40 }) },
+    { caption: 'No builds yet', counts: counts({}) },
+    { caption: 'Download of a known size, 17.5 / 43.9 MiB', segments: byteSegments(18_400_000, 46_000_000) },
+    { caption: 'Download of an unknown size, pulsing at full width', segments: byteSegments(2_100_000, null) },
+    { caption: 'Finished download', segments: [{ tone: 'completed', pct: 100 }] },
+    { caption: 'Failed download', segments: [{ tone: 'failed', pct: 100 }] },
   ];
   chartSeries = [{ name: 'Completed', data: [12, 18, 9, 24, 21] }];
   chartCategories = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'];
