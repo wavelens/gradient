@@ -5,7 +5,7 @@
  */
 
 import { ComponentFixture, TestBed } from '@angular/core/testing';
-import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/router';
+import { ActivatedRoute, Router, convertToParamMap, provideRouter } from '@angular/router';
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { EvaluationLogComponent } from './evaluation-log.component';
@@ -607,6 +607,21 @@ describe('EvaluationLogComponent', () => {
       await new Promise(resolve => setTimeout(resolve, 350));
       expect(getEvaluation).toHaveBeenCalled();
       expect(fixture.componentInstance.progress()).toEqual({ kind: 'fetching', inputs: rows('live') });
+      fixture.destroy();
+    });
+
+    it('drops the previous evaluation live frame when moving to another evaluation', () => {
+      const { fixture, frames, getEvaluation } = setupLive({ kind: 'fetching', inputs: rows('first') });
+      frames.next({ event: 'evaluation.activity', at: '', content: { evaluation_id: 'eval-1', progress: { kind: 'fetching', inputs: rows('first-live') } } });
+      vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
+      getEvaluation.mockReturnValue(of({
+        id: 'eval-2', status: 'Fetching', created_at: '2026-01-01T00:00:00', updated_at: '2026-01-01T00:00:00',
+        started_at: '2026-01-01T00:00:00', finished_at: null, trigger: null, progress: { kind: 'fetching', inputs: rows('second') },
+      }));
+
+      fixture.componentInstance.navigateToEvaluation('eval-2');
+
+      expect(fixture.componentInstance.progress()).toEqual({ kind: 'fetching', inputs: rows('second') });
       fixture.destroy();
     });
   });

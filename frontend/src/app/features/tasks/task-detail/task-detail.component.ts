@@ -181,7 +181,9 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
         const started = task.last_evaluations.find(e => this.evaluationsBeforeStart && !this.evaluationsBeforeStart.has(e.id));
         if (started) {
           this.select(started);
-        } else if (!this.selectedId() && task.last_evaluations.length) {
+          return;
+        }
+        if (!this.selectedId() && task.last_evaluations.length) {
           this.selectedId.set(task.last_evaluations[0].id);
         }
         // The entry-point page walks the graph for stale histograms; on live pings
