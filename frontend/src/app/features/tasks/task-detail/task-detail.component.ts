@@ -5,7 +5,7 @@
  */
 
 import { Component, OnInit, OnDestroy, ElementRef, HostListener, computed, inject, signal, ChangeDetectionStrategy } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { CommonModule, DOCUMENT } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { interval, Observable, Subscription } from 'rxjs';
@@ -65,6 +65,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
   private messageService = inject(MessageService);
   private accessService = inject(AccessService);
   private live = inject(LiveService);
+  private document = inject(DOCUMENT);
   private stars = inject(StarsService);
 
   access = injectTaskAccess();
@@ -82,6 +83,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
   private entryPointsAppending = false;
   selectedId = signal<string | null>(null);
   starting = signal(false);
+  private evaluationsBeforeStart: Set<string> | null = null;
   starred = signal(false);
   errorMessage = signal<string | null>(null);
   abortTarget = signal<string | null>(null);
@@ -151,6 +153,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
   }
 
   ngOnDestroy(): void {
+    this.cancelNewEvaluationSelect();
     this.liveSub?.unsubscribe();
     this.querySub?.unsubscribe();
     this.tickSubscription?.unsubscribe();
@@ -175,7 +178,10 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
         if (this.starting() && task.last_evaluations.some(e => this.isRunning(e.status))) {
           this.starting.set(false);
         }
-        if (!this.selectedId() && task.last_evaluations.length) {
+        const started = task.last_evaluations.find(e => this.evaluationsBeforeStart && !this.evaluationsBeforeStart.has(e.id));
+        if (started) {
+          this.select(started);
+        } else if (!this.selectedId() && task.last_evaluations.length) {
           this.selectedId.set(task.last_evaluations[0].id);
         }
         // The entry-point page walks the graph for stale histograms; on live pings
@@ -206,6 +212,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
   }
 
   select(evaluation: EvaluationSummary): void {
+    this.cancelNewEvaluationSelect();
     this.showEvaluation(evaluation.id);
     // Keep the selection in the URL so navigating away and back restores it.
     this.router.navigate([], {
@@ -313,14 +320,28 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
   startEvaluation(walk: WalkMode = 'pruned'): void {
     this.starting.set(true);
     this.errorMessage.set(null);
+    this.selectNextNewEvaluation();
     this.tasksService.startEvaluation(this.projectName, this.taskName, walk).subscribe({
       next: () => this.loadTaskData(false),
       error: (error) => {
+        this.cancelNewEvaluationSelect();
         this.errorMessage.set(error?.message || 'Failed to start evaluation.');
         this.starting.set(false);
       },
     });
   }
+
+  private selectNextNewEvaluation(): void {
+    this.evaluationsBeforeStart = new Set(this.evaluations().map(e => e.id));
+    this.document.addEventListener('pointerdown', this.cancelNewEvaluationSelect, true);
+    this.document.addEventListener('keydown', this.cancelNewEvaluationSelect, true);
+  }
+
+  private cancelNewEvaluationSelect = (): void => {
+    this.evaluationsBeforeStart = null;
+    this.document.removeEventListener('pointerdown', this.cancelNewEvaluationSelect, true);
+    this.document.removeEventListener('keydown', this.cancelNewEvaluationSelect, true);
+  };
 
   restartFailedBuilds(): void {
     this.starting.set(true);
