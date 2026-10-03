@@ -80,7 +80,7 @@ The prelude is also re-exporting the protocol doubles.
 
 ### VM Tests
 
-- **A module under test is getting a scripted API.** Some modules only consume the HTTP API (`gradient-deploy.nix`). Such a module is tested against a stdlib-only stub driven through `/control`.
+- **A module under test is getting a scripted API.** Some modules only consume the HTTP API (`gradient-client/deploy.nix`). Such a module is tested against a stdlib-only stub driven through `/control`.
 - The stub's `/control` is swapping the scripted state and pushing the matching WebSocket event. The VM is needing no Postgres and no builder.
 - **Assert on the database's own accounting.** The e2e test is checking plan shapes (`EXPLAIN`: nested loop, no merge join). The test is billing the round through `pg_stat_statements`. Thresholds stay loose (pathology detectors on a slow VM), and the top statements are printed.
 - **Two database sessions prove a lock.** The setup is using two FIFO-fed `psql` sessions from one script and a third connection polling `pg_stat_activity` for `wait_event_type = 'Lock'`. The same interleaving is played twice, with and without the lock. The test is asserting the contrast.
