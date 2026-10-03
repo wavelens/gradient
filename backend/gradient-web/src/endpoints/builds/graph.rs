@@ -4,9 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::authorization::{ApiKeyContext, MaybeApiKey, MaybeUser};
+use crate::authorization::{MaybeApiKey, MaybeUser};
 use crate::error::WebResult;
-use crate::helpers::{OptionExt, ok_json};
+use crate::helpers::ok_json;
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
 use gradient_core::ServerState;
@@ -20,68 +20,6 @@ use std::sync::Arc;
 use super::BuildAccessContext;
 
 const GRAPH_NODE_CAP: usize = 500;
-
-pub(super) async fn authorize_build_opt(
-    state: &Arc<ServerState>,
-    build_id: BuildJobId,
-    maybe_user: &Option<MUser>,
-    api_key: Option<&ApiKeyContext>,
-) -> WebResult<()> {
-    BuildAccessContext::load(state, build_id, maybe_user, api_key)
-        .await
-        .map(|_| ())
-}
-
-struct JobNode {
-    job: MBuildJob,
-    status: BuildStatus,
-}
-
-async fn job_nodes_for_derivations(
-    state: &Arc<ServerState>,
-    evaluation_id: EvaluationId,
-    derivations: &[DerivationId],
-) -> WebResult<HashMap<DerivationId, JobNode>> {
-    if derivations.is_empty() {
-        return Ok(HashMap::new());
-    }
-
-    let jobs = EBuildJob::find()
-        .filter(CBuildJob::Evaluation.eq(evaluation_id))
-        .filter(CBuildJob::Derivation.is_in(derivations.to_vec()))
-        .all(&state.web_db)
-        .await?;
-    let shared_build_ids: Vec<DerivationBuildId> =
-        jobs.iter().map(|j| j.derivation_build).collect();
-    let status_by_shared_build: HashMap<DerivationBuildId, BuildStatus> = EDerivationBuild::find()
-        .filter(CDerivationBuild::Id.is_in(shared_build_ids))
-        .all(&state.web_db)
-        .await?
-        .into_iter()
-        .map(|a| (a.id, a.status))
-        .collect();
-
-    Ok(jobs
-        .into_iter()
-        .map(|job| {
-            let status = status_by_shared_build
-                .get(&job.derivation_build)
-                .copied()
-                .unwrap_or(BuildStatus::Queued);
-            (job.derivation, JobNode { job, status })
-        })
-        .collect())
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct DependencyNode {
-    pub id: BuildJobId,
-    pub name: String,
-    pub path: String,
-    pub status: String,
-    pub created_at: chrono::NaiveDateTime,
-    pub updated_at: chrono::NaiveDateTime,
-}
 
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
 pub struct DependencyGraphNode {
@@ -201,53 +139,6 @@ async fn graph_nodes<C: ConnectionTrait>(
             })
         })
         .collect())
-}
-
-pub async fn get_build_dependencies(
-    state: State<Arc<ServerState>>,
-    Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
-    Path(build_id): Path<BuildJobId>,
-) -> WebResult<Json<BaseResponse<Vec<DependencyNode>>>> {
-    authorize_build_opt(&state, build_id, &maybe_user, api_key.as_ref()).await?;
-
-    let build_job = EBuildJob::find_by_id(build_id)
-        .one(&state.web_db)
-        .await?
-        .or_not_found("Build")?;
-
-    let dep_edges = EDerivationDependency::find()
-        .filter(CDerivationDependency::Derivation.eq(build_job.derivation))
-        .all(&state.web_db)
-        .await?;
-
-    let dep_drv_ids: Vec<DerivationId> = dep_edges.iter().map(|d| d.dependency).collect();
-
-    let mut nodes: Vec<DependencyNode> = Vec::new();
-    if !dep_drv_ids.is_empty() {
-        let dep_jobs =
-            job_nodes_for_derivations(&state, build_job.evaluation, &dep_drv_ids).await?;
-        let dep_drvs = EDerivation::find()
-            .filter(CDerivation::Id.is_in(dep_drv_ids))
-            .all(&state.web_db)
-            .await?;
-        let drv_by_id: HashMap<DerivationId, MDerivation> =
-            dep_drvs.into_iter().map(|d| (d.id, d)).collect();
-        for (drv_id, jn) in dep_jobs {
-            if let Some(drv) = drv_by_id.get(&drv_id) {
-                nodes.push(DependencyNode {
-                    id: jn.job.id,
-                    name: drv.name.clone(),
-                    path: drv.drv_path(),
-                    status: format!("{:?}", jn.status),
-                    created_at: jn.job.created_at,
-                    updated_at: jn.job.created_at,
-                });
-            }
-        }
-    }
-
-    Ok(ok_json(nodes))
 }
 
 pub async fn get_build_graph(

@@ -5122,33 +5122,6 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
-  /builds/{build}/dependencies:
-    parameters:
-      - $ref: '#/components/parameters/BuildId'
-    get:
-      tags: [builds]
-      summary: List direct dependencies
-      description: Returns only the immediate (one-hop) dependencies of the given build.
-      operationId: getBuildDependencies
-      responses:
-        '200':
-          description: Direct dependencies
-          content:
-            application/json:
-              schema:
-                allOf:
-                  - $ref: '#/components/schemas/BaseResponse'
-                  - type: object
-                    properties:
-                      message:
-                        type: array
-                        items:
-                          $ref: '#/components/schemas/DependencyNode'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '404':
-          $ref: '#/components/responses/NotFound'
-
   /builds/{build}/downloads:
     parameters:
       - $ref: '#/components/parameters/BuildId'
@@ -12549,31 +12522,6 @@ components:
         state: { type: string, enum: [Queued, Fetching, Done, Failed] }
         downloaded_bytes: { type: integer, format: int64 }
         expected_bytes: { type: integer, format: int64, description: 0 when the server sent no size. }
-
-    DependencyNode:
-      type: object
-      required: [id, name, path, status, created_at, updated_at]
-      properties:
-        id:
-          type: string
-          format: uuid
-        name:
-          type: string
-          description: Human-readable derivation name (hash-prefix stripped)
-          example: hello-2.12.1
-        path:
-          type: string
-          description: Prefix-free `.drv` store path (`<hash>-<name>.drv`, no `/nix/store/`)
-          example: "abc123-hello-2.12.1.drv"
-        status:
-          type: string
-          description: Build status string
-        created_at:
-          type: string
-          format: date-time
-        updated_at:
-          type: string
-          format: date-time
 
     DependencyGraphNode:
       type: object

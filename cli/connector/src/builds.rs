@@ -25,16 +25,6 @@ pub struct BuildGraph {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct BuildDependency {
-    pub id: String,
-    pub name: String,
-    pub path: String,
-    pub status: String,
-    pub created_at: String,
-    pub updated_at: String,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct BuildDownload {
     pub file_type: String,
     pub subtype: String,
@@ -129,18 +119,6 @@ impl BuildsApi<'_> {
             self.0.token(),
             Method::GET,
             &format!("builds/{id}/graph"),
-            true,
-        )?;
-        http::decode(req.send().await?).await
-    }
-
-    pub async fn dependencies(&self, id: &str) -> Result<Vec<BuildDependency>, ConnectorError> {
-        let req = http::request(
-            self.0.http(),
-            self.0.base_url(),
-            self.0.token(),
-            Method::GET,
-            &format!("builds/{id}/dependencies"),
             true,
         )?;
         http::decode(req.send().await?).await
