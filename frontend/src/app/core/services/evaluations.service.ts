@@ -18,6 +18,10 @@ export interface DependencyNode {
   updated_at: string;
 }
 
+export interface DependencyGraphNode extends DependencyNode {
+  build: string | null;
+}
+
 export interface DependencyEdge {
   source: string;
   target: string;
@@ -25,7 +29,7 @@ export interface DependencyEdge {
 
 export interface BuildGraph {
   root: string;
-  nodes: DependencyNode[];
+  nodes: DependencyGraphNode[];
   edges: DependencyEdge[];
 }
 

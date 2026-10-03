@@ -5035,9 +5035,11 @@ paths:
       tags: [builds]
       summary: Get dependency graph
       description: |-
-        Returns the full transitive dependency graph rooted at the given build via BFS,
-        capped at 500 nodes. Each edge `source -> target` means `source` must be built
-        before `target`.
+        Returns the full transitive dependency graph rooted at the given build's derivation
+        via BFS over the recorded derivation dependencies, capped at 500 nodes. Node ids are
+        derivation UUIDs; `build` is the build of the same evaluation, or null for a
+        derivation that evaluation does not list. Each edge `source -> target` means
+        `source` must be built before `target`.
 
         **Access:** Accessible to members of any project whose evaluation references this derivation (a derivation is built once and shared across projects via cache reachability). See `docs/src/concepts/overview.md#shared-builds`.
       operationId: getBuildGraph
@@ -12558,6 +12560,35 @@ components:
           type: string
           format: date-time
 
+    DependencyGraphNode:
+      type: object
+      required: [id, build, name, path, status, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Derivation UUID
+        build:
+          type: string
+          format: uuid
+          nullable: true
+          description: Build of the requested build's evaluation, null when that evaluation does not list the derivation
+        name:
+          type: string
+          example: hello-2.12.1
+        path:
+          type: string
+          description: Prefix-free `.drv` store path (`<hash>-<name>.drv`, no `/nix/store/`)
+        status:
+          type: string
+          description: Status of the derivation's shared build
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
     DependencyEdge:
       type: object
       required: [source, target]
@@ -12565,11 +12596,11 @@ components:
         source:
           type: string
           format: uuid
-          description: Dependency - must be built first
+          description: Derivation that must be built first
         target:
           type: string
           format: uuid
-          description: Build that depends on `source`
+          description: Derivation that depends on `source`
 
     LogChunkMeta:
       type: object
@@ -12648,12 +12679,12 @@ components:
         root:
           type: string
           format: uuid
-          description: UUID of the root build (the one requested)
+          description: Derivation UUID of the requested build
         nodes:
           type: array
           items:
-            $ref: '#/components/schemas/DependencyNode'
-          description: All builds in the transitive graph (max 500)
+            $ref: '#/components/schemas/DependencyGraphNode'
+          description: All derivations in the transitive graph (max 500)
         edges:
           type: array
           items:
