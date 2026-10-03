@@ -68,7 +68,7 @@ Workers with the `build` capability send `WorkerCapabilities` after the handshak
 - The server is claiming the winner by inserting a `dispatched_job` row.
 - A lost race is moving on to the next job, up to 3 times.
 - `AssignJob` is going out only after the claim.
-- `AssignJob.assignment_id` is the claim's ID. Every report (`JobUpdate`, `JobCompleted`, `JobFailed`, `BuildProgress`) is echoing the ID. The server is dropping reports with a stale ID.
+- `AssignJob.assignment_id` is the claim's ID. Every report (`JobUpdate`, `JobCompleted`, `JobFailed`, `BuildProgress`, `EvalProgress`) is echoing the ID. The server is dropping reports with a stale ID.
 - The worker is answering with `AssignJobResponse`.
 - The server is re-queuing a declined job (worker draining or full) and offering the job again.
 - An `AssignJob` with `cluster` set is one member of a [cluster job](../scheduler/clusters.md). The server is pushing such a job instead of answering a `RequestJob`. The worker is holding the slot, running nothing until `StartCluster`. The worker is freeing the slot after `cluster.hold_secs` without a `StartCluster`.

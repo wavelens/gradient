@@ -87,6 +87,8 @@ A build job is carrying exactly one `BuildSpec`: one shared build (`derivation_b
 | `BuildOutput` | Output sizes, build products, metrics, the `substituted` flag |
 | `Compressing` | No change |
 
+`EvalProgress` is carrying one download row per flake input while fetching and the live thunk count while evaluating. The eval worker is downloading the inputs itself, with one download in flight per second-level domain.
+
 `JobCompleted` and `JobFailed` carry the phase timeline shown on the [Job Board](../../ui/job-board.md#job-inspection). The server is dropping reports from a stale `assignment_id`.
 
 ## Failures

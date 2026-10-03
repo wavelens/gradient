@@ -28,7 +28,7 @@ One JSON shape for websocket frames, webhook bodies and task action bodies.
 | `project.*`, `task.*`, `cache.*` | yes | `project.create`, `task.star`, `task.action.update`, `cache.nar.upload`, `cache.member.create` |
 | `gc.*` | yes | `gc.swept`, `gc.deep_finished` |
 | account activity | yes, instance webhooks only | `login.success`, `api_key.create`, `session.revoke` |
-| `build.status_changed`, `build.progress`, `evaluation.progress` | no | every build job transition, download progress |
+| `build.status_changed`, `build.progress`, `evaluation.progress`, `evaluation.activity` | no | every build job transition, download progress, fetch and eval progress |
 | `graph.*` | no | `graph.recorded`, `graph.demoted`, `graph.collected` |
 | `worker.*` | no | `worker.connected`, `worker.job_dispatched`, `worker.queue_depth` |
 | `proto.client.*`, `proto.server.*` | no | message type, worker, job id and size, never the payload |
