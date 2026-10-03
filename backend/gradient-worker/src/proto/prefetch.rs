@@ -13,14 +13,14 @@ use gradient_derivation::parse_drv;
 use gradient_util::store_path::nix_store_path;
 use gradient_wire::CachedPathInfo;
 use gradient_wire::messages::{BuildSpec, CachedPath, EvalMessageLevel, QueryMode};
-use gradient_wire::types::JobPhase;
+use gradient_wire::types::{BuildProgressPhase, JobPhase};
 use tracing::{debug, error, warn};
 
 use crate::nix::store::LocalNixStore;
 use crate::proto::compression::drv_closure_seeds_from_compressed_nar;
 use crate::proto::job::JobUpdater;
 use crate::proto::nar_daemon_import::import_received_nar;
-use crate::proto::progress::{Progress, ProgressSink, read_body};
+use crate::proto::progress::{Progress, ProgressSink, Tally, read_body};
 use gradient_worker_client::compression::resolve_compression;
 use gradient_worker_client::nar_recv::NarPayload;
 
@@ -95,6 +95,10 @@ fn presigned_body_is_short(declared: Option<u64>, received: usize) -> bool {
 }
 
 type PresignedFetch = (String, Option<(Vec<u8>, CachedPath)>);
+
+pub(crate) fn download_size<'a>(entries: impl Iterator<Item = &'a CachedPath>) -> Option<u64> {
+    entries.map(|c| c.file_size).sum()
+}
 
 pub(crate) async fn download_one_presigned(
     http: &reqwest::Client,
@@ -196,7 +200,10 @@ impl<'a> InputPrefetcher<'a> {
     /// The target `.drv` is usually missing here because evaluation ran on another worker.
     /// The fetch is pulling its whole reference chain too.
     /// `add_to_store_nar` is rejecting a `.drv` whose declared references are absent locally.
-    async fn ensure_self_drv_present(&mut self) -> Result<()> {
+    async fn ensure_self_drv_present(
+        &mut self,
+        progress: &mut Progress<impl ProgressSink>,
+    ) -> Result<()> {
         let full_drv_path = nix_store_path(&self.drv_path);
         if tokio::fs::try_exists(&full_drv_path).await.unwrap_or(false) {
             return Ok(());
@@ -208,7 +215,8 @@ impl<'a> InputPrefetcher<'a> {
             "build target drv absent locally; fetching from server cache"
         );
 
-        self.fetch_closure(vec![self.drv_path.to_owned()]).await?;
+        self.fetch_closure(vec![self.drv_path.to_owned()], progress)
+            .await?;
 
         if !tokio::fs::try_exists(&full_drv_path).await.unwrap_or(false) {
             return Err(anyhow::anyhow!(
@@ -285,6 +293,7 @@ impl<'a> InputPrefetcher<'a> {
     async fn fetch_by_request(
         &mut self,
         by_request: Vec<CachedPath>,
+        tally: &Tally,
     ) -> Result<Vec<(String, NarPayload, CachedPath)>> {
         if by_request.is_empty() {
             return Ok(vec![]);
@@ -298,45 +307,12 @@ impl<'a> InputPrefetcher<'a> {
             .map(|c| (c.path.clone(), c))
             .collect();
 
-        let results = nars_by_path
+        let results: Vec<_> = nars_by_path
             .into_iter()
             .filter_map(|(path, nar)| meta_by_path.remove(&path).map(|meta| (path, nar, meta)))
             .collect();
-
-        Ok(results)
-    }
-
-    async fn download_by_url(
-        &self,
-        by_url: Vec<CachedPath>,
-    ) -> Result<Vec<(String, NarPayload, CachedPath)>> {
-        if by_url.is_empty() {
-            return Ok(vec![]);
-        }
-
-        let http = gradient_worker_client::http::download_client();
-
-        let outcomes: Vec<Result<PresignedFetch>> =
-            futures::stream::iter(by_url.into_iter().map(|cp| {
-                let http = http.clone();
-                async move { download_one_presigned(&http, cp, &mut Progress::silent()).await }
-            }))
-            .buffer_unordered(PREFETCH_CONCURRENCY)
-            .collect()
-            .await;
-
-        let mut results = Vec::new();
-        let mut missing = Vec::new();
-        for outcome in outcomes {
-            let (path, fetched) = outcome.context("presigned NAR download failed")?;
-            match fetched {
-                Some((bytes, cp)) => results.push((path, NarPayload::Bytes(bytes), cp)),
-                None => missing.push(path),
-            }
-        }
-
-        if !missing.is_empty() {
-            return Err(anyhow::Error::new(MissingInputs(missing)));
+        for (_, nar, _) in &results {
+            tally.landed(nar.byte_len().await);
         }
 
         Ok(results)
@@ -425,8 +401,8 @@ impl<'a> InputPrefetcher<'a> {
         Ok(completed)
     }
 
-    async fn run(&mut self) -> Result<Prefetched> {
-        self.ensure_self_drv_present().await?;
+    async fn run(&mut self, progress: &mut Progress<impl ProgressSink>) -> Result<Prefetched> {
+        self.ensure_self_drv_present(progress).await?;
 
         let wanted = self.enumerate_inputs().await?;
         if wanted.is_empty() {
@@ -441,10 +417,14 @@ impl<'a> InputPrefetcher<'a> {
             );
             return Ok(Prefetched::default());
         }
-        self.fetch_closure(initial_missing).await
+        self.fetch_closure(initial_missing, progress).await
     }
 
-    async fn fetch_closure(&mut self, initial_missing: Vec<String>) -> Result<Prefetched> {
+    async fn fetch_closure(
+        &mut self,
+        initial_missing: Vec<String>,
+        progress: &mut Progress<impl ProgressSink>,
+    ) -> Result<Prefetched> {
         const MAX_ITERATIONS: usize = 1024;
 
         debug!(
@@ -471,7 +451,14 @@ impl<'a> InputPrefetcher<'a> {
             }
 
             let (by_url, by_request) = self.query_and_split(to_query).await?;
-            let batch = self.fetch_round(by_url, by_request).await?;
+            progress.expect(
+                download_size(by_url.iter().chain(&by_request)),
+                (by_url.len() + by_request.len()) as u32,
+            );
+            let tally = progress.tally();
+            let batch = progress
+                .during(self.fetch_round(by_url, by_request, &tally))
+                .await?;
             fetched_bytes += payload_bytes(&batch).await;
 
             for (path, _, meta) in &batch {
@@ -564,13 +551,57 @@ impl<'a> InputPrefetcher<'a> {
         &mut self,
         by_url: Vec<CachedPath>,
         by_request: Vec<CachedPath>,
+        tally: &Tally,
     ) -> Result<Vec<(String, NarPayload, CachedPath)>> {
         let mut fetch = self.updater.phase(JobPhase::NarFetch);
-        let mut batch = self.fetch_by_request(by_request).await?;
-        batch.extend(self.download_by_url(by_url).await?);
+        let mut batch = self.fetch_by_request(by_request, tally).await?;
+        batch.extend(download_by_url(by_url, tally).await?);
         fetch.record(batch.len() as u32, payload_bytes(&batch).await);
         Ok(batch)
     }
+}
+
+async fn download_by_url(
+    by_url: Vec<CachedPath>,
+    tally: &Tally,
+) -> Result<Vec<(String, NarPayload, CachedPath)>> {
+    if by_url.is_empty() {
+        return Ok(vec![]);
+    }
+
+    let http = gradient_worker_client::http::download_client();
+
+    let outcomes: Vec<Result<PresignedFetch>> =
+        futures::stream::iter(by_url.into_iter().map(|cp| {
+            let http = http.clone();
+            let mut counted = Progress::counting(tally.clone());
+            async move {
+                let fetched = download_one_presigned(&http, cp, &mut counted).await;
+                if matches!(fetched, Ok((_, Some(_)))) {
+                    counted.transfer_done();
+                }
+                fetched
+            }
+        }))
+        .buffer_unordered(PREFETCH_CONCURRENCY)
+        .collect()
+        .await;
+
+    let mut results = Vec::new();
+    let mut missing = Vec::new();
+    for outcome in outcomes {
+        let (path, fetched) = outcome.context("presigned NAR download failed")?;
+        match fetched {
+            Some((bytes, cp)) => results.push((path, NarPayload::Bytes(bytes), cp)),
+            None => missing.push(path),
+        }
+    }
+
+    if !missing.is_empty() {
+        return Err(anyhow::Error::new(MissingInputs(missing)));
+    }
+
+    Ok(results)
 }
 
 async fn payload_bytes(batch: &[(String, NarPayload, CachedPath)]) -> u64 {
@@ -588,7 +619,11 @@ pub async fn prefetch_inputs(
     updater: &mut JobUpdater,
 ) -> Result<Prefetched> {
     let drv = task.drv_path.clone();
-    let result = InputPrefetcher::new(store, task, updater).run().await;
+    let mut progress = updater.build_progress(task.build_id.clone(), BuildProgressPhase::Prefetch);
+    let result = InputPrefetcher::new(store, task, updater)
+        .run(&mut progress)
+        .await;
+    progress.finish().await;
     if let Err(e) = &result {
         let summary = format!("input prefetch failed for {}: {:#}", drv, e);
         if let Err(send_err) = updater
@@ -610,7 +645,7 @@ pub async fn ensure_path(
         return Ok(());
     }
     InputPrefetcher::for_path(store, path.to_owned(), updater)
-        .fetch_closure(vec![path.to_owned()])
+        .fetch_closure(vec![path.to_owned()], &mut Progress::silent())
         .await?;
     Ok(())
 }
@@ -905,6 +940,42 @@ mod tests {
             fetched.is_none(),
             "a body shorter than the declared file_size must be a miss, not bytes"
         );
+    }
+
+    #[tokio::test]
+    async fn concurrent_presigned_downloads_count_into_the_build_progress() {
+        use crate::proto::progress::{Recorded, transferred};
+        use wiremock::matchers::{method, path as path_matcher};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let objects = MockServer::start().await;
+        for (name, len) in [("a", 300usize), ("b", 200)] {
+            Mock::given(method("GET"))
+                .and(path_matcher(format!("/{name}")))
+                .respond_with(ResponseTemplate::new(200).set_body_bytes(vec![1u8; len]))
+                .mount(&objects)
+                .await;
+        }
+        let entries: Vec<CachedPath> = [("a", 300), ("b", 200)]
+            .into_iter()
+            .map(|(name, len)| {
+                let mut cp = cached(
+                    &format!("/nix/store/aaaa-{name}"),
+                    Some(&format!("{}/{name}", objects.uri())),
+                );
+                cp.file_size = Some(len);
+                cp
+            })
+            .collect();
+        let mut sent = Recorded::default();
+        let mut progress = Progress::new(&mut sent);
+        progress.expect(download_size(entries.iter()), entries.len() as u32);
+
+        let fetched = download_by_url(entries, &progress.tally()).await.unwrap();
+        progress.finish().await;
+
+        assert_eq!(fetched.len(), 2);
+        assert_eq!(sent.0, vec![transferred(500, Some(500), 2, 2)]);
     }
 
     #[test]

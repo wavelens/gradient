@@ -87,7 +87,7 @@ fn server_with(web_db_setup: impl FnOnce(MockDatabase) -> MockDatabase) -> TestS
         http: gradient_util::http::build_client().expect("http client"),
         shutdown: gradient_util::shutdown::Shutdown::new(),
         last_used_stamps: gradient_core::last_used_stamps(),
-        download_progress: gradient_core::download_progress(),
+        build_progress: gradient_core::build_progress(),
         eval_progress: gradient_core::eval_progress(),
         cache_traffic: gradient_db::metrics::cache_traffic::CacheTraffic::shared(),
         jwt_secret: SecretString::new(JWT_SECRET.to_string()),

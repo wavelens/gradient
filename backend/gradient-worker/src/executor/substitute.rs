@@ -16,7 +16,7 @@ use gradient_wire::messages::{CachedPath, JobPhase};
 
 use crate::proto::job::JobUpdater;
 use crate::proto::prefetch::{
-    CorruptCachedNar, MissingInputs, SubstituteNotOnUpstream, download_one_presigned,
+    CorruptCachedNar, MissingInputs, SubstituteNotOnUpstream, download_one_presigned, download_size,
 };
 use crate::proto::progress::{Progress, ProgressSink};
 use gradient_worker_client::compression::{decompress, resolve_compression};
@@ -53,9 +53,11 @@ pub(crate) async fn fetch_outputs(
     progress: &mut Progress<impl ProgressSink>,
 ) -> Result<Vec<FetchedOutput>> {
     let located = locate_missing(io, outputs).await?;
-    progress.set_total(download_size(
-        located.iter().filter_map(|(_, _, u)| u.as_ref()),
-    ));
+    let upstream: Vec<&CachedPath> = located.iter().filter_map(|(_, _, u)| u.as_ref()).collect();
+    progress.set_total(
+        download_size(upstream.iter().copied()),
+        upstream.len() as u32,
+    );
 
     let mut fetched = Vec::with_capacity(located.len());
     for (name, store_path, upstream) in located {
@@ -98,10 +100,6 @@ async fn locate_missing(
     }
 
     Ok(located)
-}
-
-fn download_size<'a>(upstream_caches: impl Iterator<Item = &'a CachedPath>) -> Option<u64> {
-    upstream_caches.map(|u| u.file_size).sum()
 }
 
 async fn fetch_one(
@@ -182,7 +180,7 @@ impl UpstreamIo for JobUpdaterIo<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::proto::progress::Recorded;
+    use crate::proto::progress::{Recorded, transferred};
     use std::collections::BTreeMap;
 
     struct Fake {
@@ -289,7 +287,7 @@ mod tests {
         .await
         .unwrap();
 
-        assert_eq!(sent.0, vec![(body_len, Some(body_len))]);
+        assert_eq!(sent.0, vec![transferred(body_len, Some(body_len), 1, 1)]);
     }
 
     #[test]

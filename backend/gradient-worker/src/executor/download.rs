@@ -247,8 +247,9 @@ impl DownloadIo for JobUpdaterIo<'_> {
         }
         let response = response.error_for_status()?;
         let size = response.content_length();
-        progress.set_total(size);
+        progress.set_total(size, 1);
         let body = read_body(response, size, progress).await?;
+        progress.transfer_done();
         progress.finish().await;
         Ok(Some(body))
     }

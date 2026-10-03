@@ -372,14 +372,17 @@ mod tests {
     }
 
     #[test]
-    fn build_channel_adds_only_its_own_download_progress() {
+    fn build_channel_adds_only_its_own_build_progress() {
         let shared_build = DerivationBuildId::new(Uuid::from_u128(2));
         let download = |derivation_build| {
             env(build::Progress {
                 derivation_build,
-                progress: DownloadProgress {
-                    downloaded: 1,
-                    total: Some(4),
+                progress: BuildProgress {
+                    phase: BuildProgressPhase::Download,
+                    bytes_done: 1,
+                    bytes_total: Some(4),
+                    paths_done: 0,
+                    paths_total: Some(1),
                 },
             })
         };
@@ -401,9 +404,12 @@ mod tests {
     fn build_progress_serializes_its_numbers_flat() {
         let line = frame(&env(build::Progress {
             derivation_build: DerivationBuildId::new(Uuid::nil()),
-            progress: DownloadProgress {
-                downloaded: 1,
-                total: None,
+            progress: BuildProgress {
+                phase: BuildProgressPhase::Prefetch,
+                bytes_done: 1,
+                bytes_total: None,
+                paths_done: 2,
+                paths_total: Some(3),
             },
         }))
         .unwrap();
@@ -413,8 +419,11 @@ mod tests {
             v["content"],
             serde_json::json!({
                 "derivation_build": "00000000-0000-0000-0000-000000000000",
-                "downloaded": 1,
-                "total": null
+                "phase": "prefetch",
+                "bytes_done": 1,
+                "bytes_total": null,
+                "paths_done": 2,
+                "paths_total": 3
             })
         );
     }

@@ -22,7 +22,7 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use gradient_wire::messages::{
-    BuildJob, BuildOutput, BuildSpec, BuildSpecKind, FlakeJob, FlakeStep,
+    BuildJob, BuildOutput, BuildProgressPhase, BuildSpec, BuildSpecKind, FlakeJob, FlakeStep,
 };
 use tokio::sync::watch;
 use tracing::instrument;
@@ -385,7 +385,8 @@ impl JobExecutor {
                     gc_handles.push(self.gcroots.add(path).await);
                 }
 
-                let mut progress = updater.download_progress(build_task.build_id.clone());
+                let mut progress = updater
+                    .build_progress(build_task.build_id.clone(), BuildProgressPhase::Download);
                 let fetched = substitute::fetch_outputs(
                     &mut substitute::JobUpdaterIo(updater),
                     &missing,
@@ -438,7 +439,8 @@ impl JobExecutor {
             if build_task.kind == BuildSpecKind::Download {
                 let (store_path, raw) = {
                     let _phase = updater.phase(JobPhase::Download);
-                    let mut progress = updater.download_progress(build_task.build_id.clone());
+                    let mut progress = updater
+                        .build_progress(build_task.build_id.clone(), BuildProgressPhase::Download);
                     download::download_output(
                         &mut download::JobUpdaterIo(updater),
                         build_task,

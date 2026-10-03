@@ -35,16 +35,16 @@ pub struct BuildWithOutputs {
     pub prioritized: bool,
     pub created_at: chrono::NaiveDateTime,
     pub updated_at: chrono::NaiveDateTime,
-    pub download_progress: Option<DownloadProgress>,
+    pub progress: Option<BuildProgress>,
 }
 
 /// A finished shared build's last report is outliving it by up to the TTL. It is not shown.
-fn running_download(
-    progress: &Latest<DerivationBuildId, DownloadProgress>,
+fn running_progress(
+    progress: &Latest<DerivationBuildId, BuildProgress>,
     shared_build: DerivationBuildId,
     status: gradient_entity::build::BuildStatus,
     now: Instant,
-) -> Option<DownloadProgress> {
+) -> Option<BuildProgress> {
     (status == gradient_entity::build::BuildStatus::Building)
         .then(|| progress.get(&shared_build, now))
         .flatten()
@@ -107,8 +107,8 @@ pub async fn get_build(
         prioritized: shared_build.prioritized,
         created_at: build_job.created_at,
         updated_at: shared_build.updated_at,
-        download_progress: running_download(
-            &state.download_progress,
+        progress: running_progress(
+            &state.build_progress,
             shared_build.id,
             shared_build.status,
             Instant::now(),
@@ -124,22 +124,25 @@ mod tests {
     use gradient_entity::build::BuildStatus;
 
     #[test]
-    fn only_a_building_shared_build_shows_its_download() {
+    fn only_a_building_shared_build_shows_its_progress() {
         let latest = Latest::new(std::time::Duration::from_secs(10));
         let shared_build = DerivationBuildId::now_v7();
         let now = Instant::now();
-        let progress = DownloadProgress {
-            downloaded: 1,
-            total: Some(2),
+        let progress = BuildProgress {
+            phase: BuildProgressPhase::Upload,
+            bytes_done: 1,
+            bytes_total: Some(2),
+            paths_done: 0,
+            paths_total: Some(1),
         };
         latest.set(shared_build, progress, now);
 
         assert_eq!(
-            running_download(&latest, shared_build, BuildStatus::Building, now),
+            running_progress(&latest, shared_build, BuildStatus::Building, now),
             Some(progress)
         );
         assert_eq!(
-            running_download(&latest, shared_build, BuildStatus::Substituted, now),
+            running_progress(&latest, shared_build, BuildStatus::Completed, now),
             None
         );
     }

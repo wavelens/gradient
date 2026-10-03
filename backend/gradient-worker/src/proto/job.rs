@@ -25,7 +25,7 @@ use crate::proto::eval_cache_recv::EvalCacheReceiver;
 use crate::proto::prefetch::MissingInputs;
 use crate::proto::progress::{BuildProgressSink, EvalProgressSender, Progress};
 use gradient_wire::traits::{EvalProgressSink, JobReporter};
-use gradient_wire::types::{GrantTarget, UploadMetadata, UploadObject};
+use gradient_wire::types::{BuildProgressPhase, GrantTarget, UploadMetadata, UploadObject};
 use gradient_worker_client::connection::ProtoWriter;
 use gradient_worker_client::nar_recv::{NarPayload, NarReceiver, NarUnavailable};
 use gradient_worker_client::upload::UploadClient;
@@ -362,12 +362,17 @@ impl JobUpdater {
         .await
     }
 
-    pub(crate) fn download_progress(&self, build_id: String) -> Progress<BuildProgressSink> {
+    pub(crate) fn build_progress(
+        &self,
+        build_id: String,
+        phase: BuildProgressPhase,
+    ) -> Progress<BuildProgressSink> {
         Progress::new(BuildProgressSink {
             writer: self.writer.clone(),
             job_id: self.job_id.clone(),
             assignment_id: self.assignment_id.clone(),
             build_id,
+            phase,
         })
     }
 

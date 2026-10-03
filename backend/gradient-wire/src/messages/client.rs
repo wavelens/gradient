@@ -5,9 +5,9 @@
  */
 
 use crate::types::{
-    BuildFailureKind, CandidateScore, ClusterAddress, EvalMessageLevel, EvalProgress,
-    GradientCapabilities, JobKind, JobPhaseSpan, JobUpdateKind, QueryMode, UploadMetadata,
-    UploadObject,
+    BuildFailureKind, BuildProgressPhase, CandidateScore, ClusterAddress, EvalMessageLevel,
+    EvalProgress, GradientCapabilities, JobKind, JobPhaseSpan, JobUpdateKind, QueryMode,
+    UploadMetadata, UploadObject,
 };
 use rkyv::{Archive, Deserialize, Serialize};
 
@@ -91,8 +91,11 @@ pub enum ClientMessage {
         job_id: String,
         assignment_id: String,
         build_id: String,
-        downloaded: u64,
-        total: Option<u64>,
+        phase: BuildProgressPhase,
+        bytes_done: u64,
+        bytes_total: Option<u64>,
+        paths_done: u32,
+        paths_total: Option<u32>,
     },
 
     EvalProgress {
@@ -261,5 +264,18 @@ mod job_id_tests {
         };
         assert_eq!(progress.job_id(), Some("j"));
         assert_eq!(progress.variant_name(), "EvalProgress");
+
+        let upload = ClientMessage::BuildProgress {
+            job_id: "j".into(),
+            assignment_id: "a".into(),
+            build_id: "b".into(),
+            phase: BuildProgressPhase::Upload,
+            bytes_done: 1,
+            bytes_total: Some(2),
+            paths_done: 0,
+            paths_total: Some(1),
+        };
+        assert_eq!(upload.job_id(), Some("j"));
+        assert_eq!(upload.variant_name(), "BuildProgress");
     }
 }

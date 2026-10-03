@@ -8,13 +8,13 @@ pub mod client;
 pub mod server;
 
 pub use crate::types::{
-    BuildFailureKind, BuildJob, BuildMetrics, BuildOutput, BuildProduct, BuildSpec, BuildSpecKind,
-    BumpedInputWire, CacheInfo, CachedPath, CandidateScore, ClusterAddress, ClusterMembership,
-    ClusterPeer, CredentialKind, DerivationOutput, DiscoveredDerivation, EvalAttrCost,
-    EvalCachePullOutcome, EvalMessageLevel, EvalProgress, EvalStatsReport, FlakeInputOverride,
-    FlakeJob, FlakeOutputNode, FlakeSource, FlakeStep, GradientCapabilities, InputFetch,
-    InputFetchState, InputUpdateSpec, Job, JobCandidate, JobKind, JobPhase, JobPhaseSpan,
-    JobUpdateKind, QueryMode, RequiredPath,
+    BuildFailureKind, BuildJob, BuildMetrics, BuildOutput, BuildProduct, BuildProgressPhase,
+    BuildSpec, BuildSpecKind, BumpedInputWire, CacheInfo, CachedPath, CandidateScore,
+    ClusterAddress, ClusterMembership, ClusterPeer, CredentialKind, DerivationOutput,
+    DiscoveredDerivation, EvalAttrCost, EvalCachePullOutcome, EvalMessageLevel, EvalProgress,
+    EvalStatsReport, FlakeInputOverride, FlakeJob, FlakeOutputNode, FlakeSource, FlakeStep,
+    GradientCapabilities, InputFetch, InputFetchState, InputUpdateSpec, Job, JobCandidate, JobKind,
+    JobPhase, JobPhaseSpan, JobUpdateKind, QueryMode, RequiredPath,
 };
 pub use crate::types::{
     CompletedMultipart, GrantTarget, NarUploadMetadata, PresignedMultipart, UploadMetadata,
