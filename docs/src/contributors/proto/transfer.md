@@ -79,6 +79,7 @@ The worker is prefetching every input missing from the local store ahead of the 
 - Retried transfers never count twice.
 - The server is keeping the value in memory for 15 s and showing the value on the build.
 - The server is also publishing `BuildProgress` events to the live endpoints.
+- `EvalProgress` is reporting fetch rows or live thunks at most once a second on a change. An unchanged value is sent again after 30 s.
 - The server is keeping `EvalProgress` the same way for 60 s, shown only while the evaluation is fetching or evaluating.
 - The server is publishing `EvalProgress` as `evaluation.activity` events to the evaluation and task live endpoints.
 
