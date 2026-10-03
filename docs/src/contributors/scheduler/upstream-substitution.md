@@ -7,6 +7,7 @@ flowchart LR
     D[Shared build is needed] --> P[upstream-probe]
     P -->|every output served| R[Passthrough: Substitute job]
     P -->|miss| B[Build: Build job]
+    P -->|no answer| P
     R -->|narinfo References| D
     B -->|build inputs| D
 ```
@@ -37,9 +38,19 @@ flowchart LR
 3. Skip outputs already cached anywhere (`is_cached` or `external_url`).
 4. Group the rest by an evaluation naming the shared build (`build_job`). The evaluation's project is picking the upstream caches.
 5. `probe_outputs` (`gradient-scheduler/src/eval.rs`) is asking for each output's `<hash>.narinfo` and flushing `upstream_metric`.
-6. Hits go to `GraphMsg::UpstreamHits`. Every shared build of step 2 is then going to `GraphMsg::UpstreamProbed`, hit or miss.
+6. Hits go to `GraphMsg::UpstreamHits`. Every shared build of step 2 is then going to `GraphMsg::UpstreamProbed`, hit or miss, unless one of its outputs got [no answer](#no-answer).
 
 A shared build with `probed = false` is not yet a real build. Nothing below the shared build is getting built or handed out until the answer is in. A build queued on "no answer yet" cannot be recalled once a worker is holding the job.
+
+### No Answer
+
+A miss is final only after every upstream cache answered with `404` or an unsigned narinfo. A timeout, an error status, a tripped breaker or an unreadable upstream list is no answer.
+
+- The shared build is now keeping `probed = false` and is not buildable yet.
+- The recovery check is now asking again within `PROBE_SWEEP`.
+- The server is now logging a warning per silent upstream cache and round.
+- The evaluation is now showing that warning once per upstream cache, with source `upstream-probe`.
+- An admin can deactivate a silent upstream cache. The next round is then asking only the remaining upstream caches.
 
 ## Applying a Hit
 

@@ -191,6 +191,36 @@ const PERMIT_ACQUIRE_TIMEOUT: std::time::Duration = std::time::Duration::from_se
 pub struct ProbeResult {
     pub best: Option<(CacheUpstreamId, CachedPath)>,
     pub samples: Vec<ProbeSample>,
+    pub unanswered: Vec<CacheUpstreamId>,
+}
+
+impl ProbeResult {
+    /// A miss is final only once every upstream has answered. A timeout, an error or a tripped
+    /// breaker is no answer, and the path is to be asked again rather than built.
+    fn settle(
+        best: Option<(CacheUpstreamId, CachedPath)>,
+        samples: Vec<ProbeSample>,
+        tripped: Vec<CacheUpstreamId>,
+    ) -> Self {
+        let unanswered = if best.is_some() {
+            Vec::new()
+        } else {
+            tripped
+                .into_iter()
+                .chain(
+                    samples
+                        .iter()
+                        .filter(|s| s.kind == SampleKind::Error)
+                        .map(|s| s.upstream),
+                )
+                .collect()
+        };
+        Self {
+            best,
+            samples,
+            unanswered,
+        }
+    }
 }
 
 async fn probe_one(
@@ -314,14 +344,18 @@ pub async fn lookup_upstream_narinfo(
 
     // A tripped upstream is skipped rather than probed and recorded. Folding a sample never taken
     // would poison the hit rate that the ordering is built on.
-    let endpoints: Arc<Vec<UpstreamEndpoint>> = if endpoints.iter().all(|e| breakers().allows(e.id))
-    {
+    let tripped: Vec<CacheUpstreamId> = endpoints
+        .iter()
+        .map(|e| e.id)
+        .filter(|id| !breakers().allows(*id))
+        .collect();
+    let endpoints: Arc<Vec<UpstreamEndpoint>> = if tripped.is_empty() {
         endpoints
     } else {
         Arc::new(
             endpoints
                 .iter()
-                .filter(|e| breakers().allows(e.id))
+                .filter(|e| !tripped.contains(&e.id))
                 .cloned()
                 .collect(),
         )
@@ -352,8 +386,7 @@ pub async fn lookup_upstream_narinfo(
             results.push((id, latency, cp));
         }
 
-        let best = select_best_hit(results);
-        return ProbeResult { best, samples };
+        return ProbeResult::settle(select_best_hit(results), samples, tripped);
     }
 
     for ep in endpoints.iter() {
@@ -365,33 +398,30 @@ pub async fn lookup_upstream_narinfo(
             kind,
         });
         if is_hit && let Some(cp) = cp {
-            return ProbeResult {
-                best: Some((ep.id, cp)),
-                samples,
-            };
+            return ProbeResult::settle(Some((ep.id, cp)), samples, tripped);
         }
     }
 
-    ProbeResult {
-        best: None,
-        samples,
-    }
+    ProbeResult::settle(None, samples, tripped)
+}
+
+#[derive(Debug, Default)]
+pub struct BatchProbe {
+    pub found: HashMap<String, CachedPath>,
+    pub unanswered: HashMap<String, Vec<CacheUpstreamId>>,
+    pub stats: HashMap<CacheUpstreamId, UpstreamAccum>,
 }
 
 pub async fn probe_batch(
     mut endpoints: Vec<UpstreamEndpoint>,
     pool: Arc<Semaphore>,
     targets: Vec<(String, String)>,
-) -> (
-    HashMap<String, CachedPath>,
-    HashMap<CacheUpstreamId, UpstreamAccum>,
-) {
+) -> BatchProbe {
     use futures::stream::{FuturesUnordered, StreamExt as _};
 
-    let mut found = HashMap::new();
-    let mut stats = HashMap::new();
+    let mut batch = BatchProbe::default();
     if targets.is_empty() || endpoints.is_empty() {
-        return (found, stats);
+        return batch;
     }
 
     order_endpoints(&mut endpoints);
@@ -416,9 +446,11 @@ pub async fn probe_batch(
     }
 
     while let Some((hash, res)) = futs.next().await {
-        fold_samples(&res.samples, &mut stats);
+        fold_samples(&res.samples, &mut batch.stats);
         if let Some((_, cp)) = res.best {
-            found.insert(hash, cp);
+            batch.found.insert(hash, cp);
+        } else if !res.unanswered.is_empty() {
+            batch.unanswered.insert(hash, res.unanswered);
         }
 
         if let Some((hash, path)) = iter.next() {
@@ -426,7 +458,7 @@ pub async fn probe_batch(
         }
     }
 
-    (found, stats)
+    batch
 }
 
 pub fn verified_narinfo(
@@ -688,6 +720,70 @@ mod tests {
     }
 
     use super::*;
+
+    async fn upstream_answering(status: u16) -> (wiremock::MockServer, UpstreamEndpoint) {
+        let server = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::method("GET"))
+            .respond_with(wiremock::ResponseTemplate::new(status))
+            .mount(&server)
+            .await;
+        let endpoint = UpstreamEndpoint {
+            url: server.uri(),
+            ..ep(None, None)
+        };
+        (server, endpoint)
+    }
+
+    async fn lookup(endpoints: Vec<UpstreamEndpoint>) -> ProbeResult {
+        lookup_upstream_narinfo(
+            Arc::new(endpoints),
+            Arc::new(Semaphore::new(4)),
+            SIGNED_HASH.to_owned(),
+            SIGNED_PATH.to_owned(),
+        )
+        .await
+    }
+
+    #[tokio::test]
+    async fn an_upstream_failing_to_answer_leaves_the_path_unanswered() {
+        let (_missing, missing) = upstream_answering(404).await;
+        let (_failing, failing) = upstream_answering(503).await;
+        let failing_id = failing.id;
+
+        let result = lookup(vec![missing, failing]).await;
+
+        assert!(result.best.is_none());
+        assert_eq!(result.unanswered, vec![failing_id]);
+    }
+
+    #[tokio::test]
+    async fn a_miss_on_every_upstream_is_an_answer() {
+        let (_a, a) = upstream_answering(404).await;
+        let (_b, b) = upstream_answering(404).await;
+
+        let result = lookup(vec![a, b]).await;
+
+        assert!(result.best.is_none());
+        assert!(result.unanswered.is_empty(), "{:?}", result.unanswered);
+    }
+
+    #[tokio::test]
+    async fn a_tripped_upstream_leaves_the_path_unanswered() {
+        let (url, _listener) = black_hole().await;
+        let tripped = UpstreamEndpoint {
+            url,
+            ..ep(None, None)
+        };
+        for _ in 0..TRIP_AFTER {
+            breakers().record(tripped.id, SampleKind::Error);
+        }
+        let tripped_id = tripped.id;
+
+        let result = lookup(vec![tripped]).await;
+
+        assert!(result.best.is_none());
+        assert_eq!(result.unanswered, vec![tripped_id]);
+    }
 
     #[test]
     fn parse_upstream_narinfo_full_fields() {

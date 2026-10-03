@@ -67,44 +67,58 @@ pub async fn assess_cached(
     truly_substituted
 }
 
+#[derive(Debug, Default)]
+pub struct ProbeAnswer {
+    pub hits: HashMap<String, UpstreamHit>,
+    pub unanswered: HashSet<String>,
+}
+
 /// This is the only function here leaving the process. Probing is running in its own loop for that
 /// reason, never on a graph path.
 pub async fn probe_outputs(
     state: &Arc<ServerState>,
     evaluation: &MEvaluation,
     to_probe: Vec<(String, String)>,
-) -> HashMap<String, UpstreamHit> {
-    let mut hits = HashMap::new();
+) -> ProbeAnswer {
+    let mut answer = ProbeAnswer::default();
     if to_probe.is_empty() {
-        return hits;
+        return answer;
     }
 
     let db = &state.worker_db;
     let Some(project_id) = crate::loops::project_id_for_eval(state, evaluation).await else {
-        return hits;
+        return answer;
     };
-    let endpoints = gradient_db::caches::upstream::upstream_endpoints_for_project(
+    let endpoints = match gradient_db::caches::upstream::upstream_endpoints_for_project(
         db,
         project_id,
         UPSTREAM_WINDOW_MINUTES,
     )
     .await
-    .unwrap_or_default();
+    {
+        Ok(endpoints) => endpoints,
+        Err(e) => {
+            warn!(error = %e, evaluation = %evaluation.id, "upstream probe: could not read the upstream caches; asking again later");
+            answer.unanswered = to_probe.into_iter().map(|(hash, _)| hash).collect();
+            return answer;
+        }
+    };
     if endpoints.is_empty() {
-        return hits;
+        return answer;
     }
 
     let id_to_url: HashMap<_, String> = endpoints.iter().map(|e| (e.id, e.url.clone())).collect();
-    let (found, stats) = gradient_core::upstream::probe_batch(
+    let batch = gradient_core::upstream::probe_batch(
         endpoints,
         Arc::clone(&state.upstream_query),
         to_probe,
     )
     .await;
+    warn_unanswered(state, evaluation, &batch.unanswered, &id_to_url).await;
 
     // The same URL under different upstream ids is folding into one metric series (#417).
     let mut by_url: HashMap<String, gradient_db::caches::upstream::UpstreamAccum> = HashMap::new();
-    for (id, accum) in &stats {
+    for (id, accum) in &batch.stats {
         if let Some(url) = id_to_url.get(id) {
             by_url.entry(url.clone()).or_default().merge(accum);
         }
@@ -123,8 +137,9 @@ pub async fn probe_outputs(
         warn!(error = %e, "failed to flush upstream metrics");
     }
 
-    for (hash, cp) in found {
-        hits.insert(
+    answer.unanswered = batch.unanswered.into_keys().collect();
+    for (hash, cp) in batch.found {
+        answer.hits.insert(
             hash,
             UpstreamHit {
                 url: cp.url.clone(),
@@ -139,5 +154,39 @@ pub async fn probe_outputs(
         );
     }
 
-    hits
+    answer
+}
+
+async fn warn_unanswered(
+    state: &Arc<ServerState>,
+    evaluation: &MEvaluation,
+    unanswered: &HashMap<String, Vec<CacheUpstreamId>>,
+    id_to_url: &HashMap<CacheUpstreamId, String>,
+) {
+    let mut outputs_by_url: HashMap<&str, usize> = HashMap::new();
+    for url in unanswered
+        .values()
+        .flatten()
+        .filter_map(|id| id_to_url.get(id))
+    {
+        *outputs_by_url.entry(url.as_str()).or_default() += 1;
+    }
+
+    for (url, outputs) in outputs_by_url {
+        warn!(upstream = url, outputs, evaluation = %evaluation.id, "upstream cache did not answer; asking again later instead of building");
+        let message = format!(
+            "upstream cache {url} did not answer; outputs it may serve wait for it instead of being built. Deactivate the upstream to build them"
+        );
+        if let Err(e) = gradient_db::status::insert_evaluation_message_once(
+            &state.worker_db,
+            evaluation.id,
+            MessageLevel::Warning,
+            message,
+            Some(crate::probe::HEALTH_NAME.to_owned()),
+        )
+        .await
+        {
+            warn!(error = %e, upstream = url, "failed to record the unanswered upstream warning");
+        }
+    }
 }

@@ -198,6 +198,25 @@ pub async fn insert_evaluation_message<C: ConnectionTrait>(
     Ok(())
 }
 
+pub async fn insert_evaluation_message_once<C: ConnectionTrait>(
+    db: &C,
+    evaluation_id: EvaluationId,
+    level: MessageLevel,
+    message: String,
+    source: Option<String>,
+) -> Result<(), sea_orm::DbErr> {
+    let recorded = EEvaluationMessage::find()
+        .filter(CEvaluationMessage::Evaluation.eq(evaluation_id))
+        .filter(CEvaluationMessage::Message.eq(message.as_str()))
+        .count(db)
+        .await?;
+    if recorded > 0 {
+        return Ok(());
+    }
+
+    insert_evaluation_message(db, evaluation_id, level, message, source).await
+}
+
 pub async fn record_evaluation_message(
     ctx: &DbContext,
     evaluation_id: EvaluationId,

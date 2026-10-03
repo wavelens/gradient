@@ -392,19 +392,17 @@ async fn extend_with_upstream_results(
 
     let id_to_url: HashMap<_, String> = endpoints.iter().map(|e| (e.id, e.url.clone())).collect();
 
-    let (found, stats) = gradient_core::upstream::probe_batch(
+    let batch = gradient_core::upstream::probe_batch(
         endpoints,
         std::sync::Arc::clone(&state.upstream_query),
         uncached_pairs,
     )
     .await;
 
-    for (_hash, cp) in found {
-        result.push(cp);
-    }
+    result.extend(batch.found.into_values());
 
     let mut by_url: HashMap<String, gradient_db::caches::upstream::UpstreamAccum> = HashMap::new();
-    for (id, accum) in &stats {
+    for (id, accum) in &batch.stats {
         if let Some(url) = id_to_url.get(id) {
             by_url.entry(url.clone()).or_default().merge(accum);
         }

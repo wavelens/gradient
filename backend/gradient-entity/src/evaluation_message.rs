@@ -25,7 +25,8 @@ pub enum MessageLevel {
 }
 
 /// Messages without `entry_point_message` rows are evaluation-scoped. `source` is one of
-/// `flake-prefetch`, `nix-eval`, `nix-eval:<attr>`, `dep-graph` or `db-insert`.
+/// `flake-prefetch`, `nix-eval`, `nix-eval:<attr>`, `dep-graph`, `db-insert`, `scheduler` or
+/// `upstream-probe`.
 #[derive(Clone, Debug, Default, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
 #[sea_orm(table_name = "evaluation_message")]
 pub struct Model {

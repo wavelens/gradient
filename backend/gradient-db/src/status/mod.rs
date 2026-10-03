@@ -21,5 +21,6 @@ pub use eval_finalize::{check_evaluation_done, finalize_evals_for_derivations};
 pub use evaluation_status::{update_evaluation_status, update_evaluation_status_with_error};
 pub use logging::{
     PhaseSubjectKind, enqueue_log_finalize, finalize_build_log, insert_evaluation_message,
-    record_evaluation_message, record_phase_event, record_phase_events,
+    insert_evaluation_message_once, record_evaluation_message, record_phase_event,
+    record_phase_events,
 };

@@ -83,32 +83,36 @@ async fn probe_round(
     }
 
     let plan = plan_probes(state, &shared_builds).await?;
-    for (evaluation, targets) in plan.rounds {
+    let mut unanswered_outputs: HashSet<String> = HashSet::new();
+    for (evaluation, targets) in &plan.rounds {
         for chunk in targets.chunks(PROBE_BATCH) {
-            let hits = crate::eval::probe_outputs(state, &evaluation, chunk.to_vec()).await;
+            let answer = crate::eval::probe_outputs(state, evaluation, chunk.to_vec()).await;
             debug!(
-                hits = hits.len(),
+                hits = answer.hits.len(),
+                unanswered = answer.unanswered.len(),
                 asked = chunk.len(),
                 "upstream probe round"
             );
-            if hits.is_empty() {
+            unanswered_outputs.extend(answer.unanswered);
+            if answer.hits.is_empty() {
                 continue;
             }
             state
                 .graph
-                .upstream_hits(hits)
+                .upstream_hits(answer.hits)
                 .await
                 .context("apply what the upstream probe found")?;
         }
     }
 
+    let answered = plan.answered_except(&unanswered_outputs);
     state
         .graph
-        .upstream_probed(plan.answered.clone())
+        .upstream_probed(answered.clone())
         .await
         .context("record the shared builds this round answered for")?;
 
-    let answered: HashSet<DerivationId> = plan.answered.into_iter().collect();
+    let answered: HashSet<DerivationId> = answered.into_iter().collect();
     Ok(shared_builds
         .into_iter()
         .filter(|a| !answered.contains(a))
@@ -202,6 +206,26 @@ async fn forget(seen: &Mutex<HashMap<DerivationId, Instant>>, unanswered: &[Deri
 pub(crate) struct ProbePlan {
     pub rounds: Vec<(MEvaluation, Vec<(String, String)>)>,
     pub answered: Vec<DerivationId>,
+    pub owners: HashMap<String, Vec<DerivationId>>,
+}
+
+impl ProbePlan {
+    pub(crate) fn answered_except(
+        &self,
+        unanswered_outputs: &HashSet<String>,
+    ) -> Vec<DerivationId> {
+        let waiting: HashSet<DerivationId> = unanswered_outputs
+            .iter()
+            .filter_map(|hash| self.owners.get(hash))
+            .flatten()
+            .copied()
+            .collect();
+        self.answered
+            .iter()
+            .copied()
+            .filter(|d| !waiting.contains(d))
+            .collect()
+    }
 }
 
 pub(crate) async fn plan_probes(
@@ -256,6 +280,7 @@ pub(crate) async fn plan_probes(
     }
 
     let mut by_evaluation: HashMap<EvaluationId, HashMap<String, String>> = HashMap::new();
+    let mut owners: HashMap<String, Vec<DerivationId>> = HashMap::new();
     for o in outputs.iter().filter(|o| !o.is_cached_anywhere()) {
         let Some(evaluation) = evaluation_of.get(&o.derivation) else {
             continue;
@@ -265,11 +290,13 @@ pub(crate) async fn plan_probes(
             .entry(*evaluation)
             .or_default()
             .insert(o.hash.clone(), sp.full());
+        owners.entry(o.hash.clone()).or_default().push(o.derivation);
     }
     if by_evaluation.is_empty() {
         return Ok(ProbePlan {
             rounds: Vec::new(),
             answered,
+            owners,
         });
     }
 
@@ -292,7 +319,11 @@ pub(crate) async fn plan_probes(
         })
         .collect();
 
-    Ok(ProbePlan { rounds, answered })
+    Ok(ProbePlan {
+        rounds,
+        answered,
+        owners,
+    })
 }
 
 #[cfg(test)]
@@ -357,6 +388,43 @@ mod tests {
             targets.iter().map(|(h, _)| h.as_str()).collect::<Vec<_>>(),
             vec!["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"],
             "an output already in our cache must not be asked for"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_shared_build_with_an_unanswered_output_is_asked_again() {
+        let silent = DerivationId::now_v7();
+        let missed = DerivationId::now_v7();
+        let evaluation = EvaluationId::now_v7();
+        let job = |derivation| MBuildJob {
+            id: gradient_types::ids::BuildJobId::now_v7(),
+            evaluation,
+            derivation,
+            ..Default::default()
+        };
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([vec![wanted(silent), wanted(missed)]])
+            .append_query_results([vec![
+                output(silent, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", false),
+                output(missed, "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", false),
+            ]])
+            .append_query_results([vec![job(silent), job(missed)]])
+            .append_query_results([vec![MEvaluation {
+                id: evaluation,
+                ..Default::default()
+            }]])
+            .into_connection();
+
+        let plan = plan_probes(&test_state(db), &[silent, missed])
+            .await
+            .expect("the plan is read");
+
+        assert_eq!(
+            plan.answered_except(&HashSet::from([
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_owned()
+            ])),
+            vec![missed],
+            "only a miss every upstream answered is a reason to build"
         );
     }
 
