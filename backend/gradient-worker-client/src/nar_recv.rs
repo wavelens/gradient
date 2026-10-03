@@ -150,6 +150,10 @@ impl PendingNar {
     pub fn store_path(&self) -> &str {
         &self.store_path
     }
+
+    pub fn received(&self) -> watch::Receiver<u64> {
+        self.progress.clone()
+    }
 }
 
 fn store_hash(store_path: &str) -> Option<&str> {
@@ -291,7 +295,7 @@ async fn stage_pull(
                 return;
             }
             if let Some(progress) = &spec.progress {
-                progress.send_modify(|staged| *staged += data.len() as u64);
+                progress.send_replace(sink.len());
             }
         }
 
@@ -753,6 +757,46 @@ mod tests {
         );
         assert_eq!(r.resumable("j", &path).await.0, 0);
         assert_eq!(file_bytes(payload).await, b"abcdef");
+    }
+
+    #[tokio::test]
+    async fn a_pending_nar_reports_the_bytes_staged_so_far() {
+        let r = NarReceiver::new();
+        let pending = r.register("j", "/nix/store/x");
+        let received = pending.received();
+        let staged = |want: u64| {
+            let mut received = received.clone();
+            async move {
+                tokio::time::timeout(Duration::from_secs(5), received.wait_for(|n| *n == want))
+                    .await
+                    .expect("staged bytes reported")
+                    .map(|_| ())
+            }
+        };
+
+        r.accept_chunk(
+            "j",
+            "/nix/store/x",
+            frame("j", "/nix/store/x", 0, b"abc", false),
+        )
+        .await;
+        staged(3).await.unwrap();
+        r.accept_chunk(
+            "j",
+            "/nix/store/x",
+            frame("j", "/nix/store/x", 0, b"ab", false),
+        )
+        .await;
+        staged(2).await.unwrap();
+        r.accept_chunk(
+            "j",
+            "/nix/store/x",
+            frame("j", "/nix/store/x", 2, b"cd", true),
+        )
+        .await;
+
+        assert_eq!(bytes(r.await_pending(pending).await.unwrap()), b"abcd");
+        assert_eq!(*received.borrow(), 4);
     }
 
     #[tokio::test]
