@@ -14,6 +14,7 @@ use crate::authorization::{MaybeApiKey, MaybeUser};
 use crate::client_ip::ClientIp;
 use crate::error::{WebError, WebResult};
 use gradient_core::ServerState;
+use gradient_wire::session::frame::SAFE_INFLIGHT_MESSAGE_SIZE;
 use gradient_wire::{PerIpLimiter, ProtoLimiter};
 
 #[allow(
@@ -58,8 +59,8 @@ pub async fn cache_proto(
     };
 
     let upgrade = ws
-        .max_message_size(gradient_wire::session::frame::MAX_PROTO_MESSAGE_SIZE)
-        .max_frame_size(gradient_wire::session::frame::MAX_PROTO_MESSAGE_SIZE);
+        .max_message_size(SAFE_INFLIGHT_MESSAGE_SIZE)
+        .max_frame_size(SAFE_INFLIGHT_MESSAGE_SIZE);
 
     let shutdown = state.shutdown.clone();
     Ok(upgrade.on_upgrade(move |sock| async move {

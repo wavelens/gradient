@@ -53,6 +53,8 @@ pub const SAFE_INFLIGHT_MESSAGE_SIZE: usize = 2 * 1024 * 1024;
 
 pub const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(15);
 
+pub const MAX_HANDSHAKE_MESSAGE_SIZE: usize = 64 * 1024;
+
 const WRITER_QUEUE_DEPTH: usize = 16;
 
 const CONTROL_QUEUE_DEPTH: usize = 256;
@@ -311,7 +313,18 @@ impl ProtoSocket {
 
     async fn recv_bytes(&mut self) -> Option<(Bytes, u16)> {
         let version = self.agree_version().await?;
-        Some((self.transport.recv_bytes().await?, version))
+        let bytes = self.transport.recv_bytes().await?;
+        if bytes.len() > MAX_HANDSHAKE_MESSAGE_SIZE {
+            let reason = format!(
+                "a handshake message is limited to {MAX_HANDSHAKE_MESSAGE_SIZE} bytes, got {}",
+                bytes.len()
+            );
+            warn!(%reason, "closing /proto connection");
+            self.transport.close(reason).await;
+            return None;
+        }
+
+        Some((bytes, version))
     }
 
     async fn send<M: WireMessage>(&mut self, msg: &M) -> Result<(), SendError> {
@@ -1267,6 +1280,20 @@ mod agreement_tests {
         assert_eq!(server.refusal(), Some(expected.as_str()));
     }
 
+    async fn close_frame(
+        client: &mut WebSocketStream<MaybeTlsStream<TcpStream>>,
+    ) -> TungsteniteCloseFrame {
+        let close = loop {
+            match client.next().await {
+                Some(Ok(TungsteniteMessage::Close(frame))) => break frame,
+                Some(Ok(_)) => continue,
+                other => panic!("expected a close frame, got {other:?}"),
+            }
+        };
+
+        close.expect("a close frame with a reason")
+    }
+
     #[tokio::test]
     async fn a_peer_without_a_version_frame_is_closed_with_the_reason() {
         let (mut server, mut client) = raw_peer().await;
@@ -1276,16 +1303,31 @@ mod agreement_tests {
             .expect("send");
 
         assert_eq!(server.recv_msg().await, None);
-        let close = loop {
-            match client.next().await {
-                Some(Ok(TungsteniteMessage::Close(frame))) => break frame,
-                Some(Ok(_)) => continue,
-                other => panic!("expected a close frame, got {other:?}"),
-            }
-        };
-        let close = close.expect("a close frame with a reason");
+        let close = close_frame(&mut client).await;
         assert_eq!(close.code, CloseCode::Protocol);
         let expected = format!("peer protocol is older than {}", PROTO_VERSIONS.start());
         assert_eq!(close.reason.as_str(), expected);
+    }
+
+    #[tokio::test]
+    async fn an_oversized_handshake_message_is_refused_without_decoding() {
+        let (mut server, mut client) = raw_peer().await;
+        let newest = *PROTO_VERSIONS.end();
+        let greeting = ClientMessage::InitConnection {
+            capabilities: crate::messages::GradientCapabilities::default(),
+            id: "w".repeat(MAX_HANDSHAKE_MESSAGE_SIZE),
+        };
+        for frame in [
+            version_frame(&PROTO_VERSIONS),
+            encode(&greeting, newest).expect("encodes"),
+        ] {
+            client
+                .send(TungsteniteMessage::Binary(frame))
+                .await
+                .expect("send");
+        }
+
+        assert_eq!(server.recv_msg().await, None);
+        assert_eq!(close_frame(&mut client).await.code, CloseCode::Protocol);
     }
 }
