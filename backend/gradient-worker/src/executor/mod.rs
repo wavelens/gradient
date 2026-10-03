@@ -13,6 +13,7 @@ pub mod eval;
 pub(crate) mod failure;
 pub mod fetch;
 pub mod log_limit;
+mod progress_report;
 mod source;
 mod substitute;
 pub mod timeline;
@@ -191,7 +192,6 @@ pub struct JobExecutor {
     pub(crate) store: Arc<LocalNixStore>,
     pub(crate) evaluator: Arc<WorkerEvaluator>,
     pub(crate) gcroots: GcRootKeeper,
-    pub(crate) binpath_nix: String,
     pub(crate) binpath_ssh: String,
     pub(crate) build_metrics: bool,
     pub(crate) build_cgroup_root: String,
@@ -209,7 +209,6 @@ impl JobExecutor {
         store: LocalNixStore,
         evaluator: WorkerEvaluator,
         gcroots: GcRootKeeper,
-        binpath_nix: String,
         binpath_ssh: String,
         build_metrics: bool,
         build_cgroup_root: String,
@@ -221,7 +220,6 @@ impl JobExecutor {
             store: Arc::new(store),
             evaluator: Arc::new(evaluator),
             gcroots,
-            binpath_nix,
             binpath_ssh,
             build_metrics,
             build_cgroup_root,
@@ -258,7 +256,7 @@ impl JobExecutor {
                         updater as &mut dyn gradient_wire::traits::JobReporter,
                         credentials,
                         &*self.store,
-                        &self.binpath_nix,
+                        &**self.evaluator.resolver(),
                         &self.binpath_ssh,
                         abort.clone(),
                     )

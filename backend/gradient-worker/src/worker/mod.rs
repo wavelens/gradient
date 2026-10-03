@@ -192,7 +192,6 @@ impl Worker<Connected> {
             store,
             evaluator,
             gcroots,
-            config.nix_bin.clone(),
             config.ssh_bin.clone(),
             config.build.metrics,
             config.build.cgroup_root.clone(),

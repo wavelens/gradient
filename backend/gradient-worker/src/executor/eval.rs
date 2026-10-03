@@ -153,6 +153,10 @@ pub struct WorkerEvaluator {
 }
 
 impl WorkerEvaluator {
+    pub(crate) fn resolver(&self) -> &Arc<WorkerPoolResolver> {
+        &self.resolver
+    }
+
     pub fn new(
         fork_workers: usize,
         max_eval_rss: u64,
