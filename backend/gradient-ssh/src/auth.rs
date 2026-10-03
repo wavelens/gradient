@@ -62,7 +62,7 @@ async fn load_session(
         return Ok(None);
     };
 
-    let Some((_, permissions)) =
+    let Some(permissions) =
         gradient_db::access::project_permission_mask(&state.web_db, project.id, user.id).await?
     else {
         return Ok(None);
