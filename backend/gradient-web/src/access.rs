@@ -16,8 +16,9 @@ use gradient_types::consts::{BASE_CACHE_ROLE_ADMIN_ID, BASE_ROLE_ADMIN_ID};
 use gradient_types::ids::{CacheId, IntegrationId, ProjectId, UserId};
 use gradient_types::{
     CCache, CCacheAccess, CCacheUser, CIntegration, CProjectAccess, CProjectCache, CProjectUser,
-    CUser, ECacheAccess, ECacheUser, EIntegration, EProjectAccess, EProjectCache, EProjectUser,
-    EUser, MCache, MIntegration, MProject, MProjectUser, MTask, MUser,
+    CTeam, CUser, ECacheAccess, ECacheUser, EIntegration, EProjectAccess, EProjectCache,
+    EProjectUser, ETeam, EUser, MCache, MIntegration, MProject, MProjectUser, MTask, MTeam, MUser,
+    TeamRole,
 };
 use sea_orm::{ColumnTrait, Condition, EntityTrait, QueryFilter};
 use std::sync::Arc;
@@ -607,7 +608,9 @@ pub async fn load_team(
         _ => {}
     }
 
-    if let TeamAccess::Admin { reject_managed: true } = access
+    if let TeamAccess::Admin {
+        reject_managed: true,
+    } = access
         && team.managed
     {
         return Err(WebError::forbidden(

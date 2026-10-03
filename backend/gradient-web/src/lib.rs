@@ -220,6 +220,21 @@ pub fn create_router_with_scheduler(
                 .delete(projects::delete_project_role),
         )
         .route(
+            "/teams",
+            get(endpoints::teams::management::get_teams)
+                .put(endpoints::teams::management::put_team),
+        )
+        .route(
+            "/teams/available",
+            get(endpoints::teams::management::get_team_name_available),
+        )
+        .route(
+            "/teams/{team}",
+            get(endpoints::teams::management::get_team)
+                .patch(endpoints::teams::management::patch_team)
+                .delete(endpoints::teams::management::delete_team),
+        )
+        .route(
             "/projects/{project}/ssh",
             get(projects::get_project_ssh).post(projects::post_project_ssh),
         )
