@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -82,48 +82,39 @@ pub(crate) type DownloadSlot = Arc<Mutex<Option<DownloadTarget>>>;
 const FILE_TRANSFER: u64 = 101;
 const PROGRESS: u64 = 105;
 
-#[derive(Debug, PartialEq, Eq)]
-enum NixLine {
-    Transfer { id: u64, done: u64, expected: u64 },
-    Text(String),
-    Quiet,
-}
-
 #[derive(Debug, Default)]
 struct NixLogParser {
-    transfers: HashSet<u64>,
+    transfers: HashMap<u64, DownloadTarget>,
 }
 
 impl NixLogParser {
-    fn feed(&mut self, line: &str) -> NixLine {
-        let Some(json) = line.strip_prefix("@nix ") else {
-            return NixLine::Text(line.to_owned());
-        };
-        let Ok(event) = serde_json::from_str::<serde_json::Value>(json) else {
-            return NixLine::Text(line.to_owned());
+    fn feed(&mut self, line: &str, downloads: &DownloadSlot) -> Option<String> {
+        let Some(event) = line
+            .strip_prefix("@nix ")
+            .and_then(|json| serde_json::from_str::<serde_json::Value>(json).ok())
+        else {
+            return Some(line.to_owned());
         };
         let id = event["id"].as_u64().unwrap_or_default();
         match event["action"].as_str() {
             Some("start") if event["type"].as_u64() == Some(FILE_TRANSFER) => {
-                self.transfers.insert(id);
-                NixLine::Quiet
+                if let Some(target) = downloads.lock().clone() {
+                    self.transfers.insert(id, target);
+                }
             }
             Some("stop") => {
                 self.transfers.remove(&id);
-                NixLine::Quiet
             }
-            Some("result")
-                if event["type"].as_u64() == Some(PROGRESS) && self.transfers.contains(&id) =>
-            {
-                NixLine::Transfer {
-                    id,
-                    done: event["fields"][0].as_u64().unwrap_or_default(),
-                    expected: event["fields"][1].as_u64().unwrap_or_default(),
+            Some("result") if event["type"].as_u64() == Some(PROGRESS) => {
+                if let Some(target) = self.transfers.get(&id) {
+                    let field = |i: usize| event["fields"][i].as_u64().unwrap_or_default();
+                    target.board.transfer(target.index, id, field(0), field(1));
                 }
             }
-            Some("msg") => NixLine::Text(event["msg"].as_str().unwrap_or_default().to_owned()),
-            _ => NixLine::Quiet,
+            Some("msg") => return Some(event["msg"].as_str().unwrap_or_default().to_owned()),
+            _ => {}
         }
+        None
     }
 }
 
@@ -136,14 +127,8 @@ pub(crate) async fn forward_nix_log(
     let mut line = Vec::new();
     while matches!(reader.read_until(b'\n', &mut line).await, Ok(read) if read > 0) {
         let text = String::from_utf8_lossy(&line);
-        match parser.feed(text.trim_end_matches(['\r', '\n'])) {
-            NixLine::Transfer { id, done, expected } => {
-                if let Some(target) = downloads.lock().as_ref() {
-                    target.board.transfer(target.index, id, done, expected);
-                }
-            }
-            NixLine::Text(text) => print(&text),
-            NixLine::Quiet => {}
+        if let Some(text) = parser.feed(text.trim_end_matches(['\r', '\n']), &downloads) {
+            print(&text);
         }
         line.clear();
     }
@@ -163,37 +148,73 @@ pub(crate) trait InputFetcher: Send + Sync {
 mod tests {
     use super::*;
 
+    fn slot_on(board: &Arc<InputBoard>, index: usize) -> DownloadSlot {
+        Arc::new(Mutex::new(Some(DownloadTarget {
+            board: Arc::clone(board),
+            index,
+        })))
+    }
+
+    fn bytes(board: &InputBoard) -> Vec<u64> {
+        board
+            .snapshot()
+            .iter()
+            .map(|r| r.downloaded_bytes)
+            .collect()
+    }
+
     #[test]
     fn only_file_transfer_activities_count() {
+        let board = InputBoard::new(vec![("nixpkgs".into(), InputFetchState::Fetching)]);
+        let slot = slot_on(&board, 0);
         let mut parser = NixLogParser::default();
+        let lines = [
+            r#"@nix {"action":"start","id":7,"type":101,"text":"downloading"}"#,
+            r#"@nix {"action":"start","id":8,"type":100,"text":"copying"}"#,
+            r#"@nix {"action":"result","id":7,"type":105,"fields":[512,2048,0,0]}"#,
+            r#"@nix {"action":"result","id":8,"type":105,"fields":[1,1,0,0]}"#,
+        ];
+        for line in lines {
+            assert_eq!(parser.feed(line, &slot), None);
+        }
+        assert_eq!(bytes(&board), vec![512]);
+        assert_eq!(board.snapshot()[0].expected_bytes, 2048);
         assert_eq!(
-            parser.feed(r#"@nix {"action":"start","id":7,"type":101,"text":"downloading"}"#),
-            NixLine::Quiet
+            parser.feed(
+                r#"@nix {"action":"msg","level":1,"msg":"warning: x"}"#,
+                &slot
+            ),
+            Some("warning: x".into())
         );
         assert_eq!(
-            parser.feed(r#"@nix {"action":"start","id":8,"type":100,"text":"copying"}"#),
-            NixLine::Quiet
+            parser.feed("plain tracing line", &slot),
+            Some("plain tracing line".into())
         );
-        assert_eq!(
-            parser.feed(r#"@nix {"action":"result","id":7,"type":105,"fields":[512,2048,0,0]}"#),
-            NixLine::Transfer {
-                id: 7,
-                done: 512,
-                expected: 2048
-            }
+    }
+
+    #[test]
+    fn a_transfer_stays_with_the_row_it_started_on() {
+        let board = InputBoard::new(vec![
+            ("nixpkgs".into(), InputFetchState::Done),
+            ("utils".into(), InputFetchState::Fetching),
+        ]);
+        let mut parser = NixLogParser::default();
+        parser.feed(
+            r#"@nix {"action":"start","id":7,"type":101}"#,
+            &slot_on(&board, 0),
         );
-        assert_eq!(
-            parser.feed(r#"@nix {"action":"result","id":8,"type":105,"fields":[1,1,0,0]}"#),
-            NixLine::Quiet
+        let next = slot_on(&board, 1);
+        parser.feed(
+            r#"@nix {"action":"result","id":7,"type":105,"fields":[40,90]}"#,
+            &next,
         );
-        assert_eq!(
-            parser.feed(r#"@nix {"action":"msg","level":1,"msg":"warning: x"}"#),
-            NixLine::Text("warning: x".into())
+        assert_eq!(bytes(&board), vec![40, 0]);
+        parser.feed(r#"@nix {"action":"stop","id":7}"#, &next);
+        parser.feed(
+            r#"@nix {"action":"result","id":7,"type":105,"fields":[90,90]}"#,
+            &next,
         );
-        assert_eq!(
-            parser.feed("plain tracing line"),
-            NixLine::Text("plain tracing line".into())
-        );
+        assert_eq!(bytes(&board), vec![40, 0]);
     }
 
     #[tokio::test]
