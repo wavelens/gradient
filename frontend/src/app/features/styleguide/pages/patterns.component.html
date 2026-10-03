@@ -110,7 +110,7 @@
 
 <h2>Build progress</h2>
 <p>The evaluation log shows the selected build's transfers. Prefetching inputs and uploading outputs sit as a strip
-   above the running log and disappear once every path landed. A download has no log, so it takes the whole panel.
+   above the running log. A download has no log, so it takes the whole panel. Each disappears once every path landed.
    The bar fills by bytes, by paths when a size is unknown, and pulses when neither total is known.</p>
 <div class="sg-frame sg-build-progress">
   <gr-build-progress [progress]="prefetch" [compact]="true" />

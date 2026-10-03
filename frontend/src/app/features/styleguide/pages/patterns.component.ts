@@ -62,6 +62,6 @@ export class PatternsComponent {
     { name: 'private-overlay', state: 'Failed', downloaded_bytes: 0, expected_bytes: 0 },
   ];
   prefetch: BuildProgress = { phase: 'prefetch', bytes_done: 126_000_000, bytes_total: 356_000_000, paths_done: 12, paths_total: 40 };
-  upload: BuildProgress = { phase: 'upload', bytes_done: 0, bytes_total: null, paths_done: 1, paths_total: 3 };
+  upload: BuildProgress = { phase: 'upload', bytes_done: 30 * 1024 * 1024, bytes_total: 80 * 1024 * 1024, paths_done: 1, paths_total: 3 };
   download: BuildProgress = { phase: 'download', bytes_done: 18_400_000, bytes_total: 46_000_000, paths_done: 0, paths_total: 1 };
 }

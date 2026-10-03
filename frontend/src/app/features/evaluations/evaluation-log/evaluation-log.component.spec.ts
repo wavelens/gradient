@@ -685,6 +685,13 @@ describe('EvaluationLogComponent', () => {
       fixture.destroy();
     });
 
+    it('hands the panel back to the log once the download landed', () => {
+      const { fixture, panel } = setupBuild({ phase: 'download', bytes_done: 1536, bytes_total: 1536, paths_done: 1, paths_total: 1 });
+      expect(panel()).toBeNull();
+      expect(fixture.nativeElement.querySelector('.log-container-wrapper')).not.toBeNull();
+      fixture.destroy();
+    });
+
     it('follows live frames into the upload without refetching the build, and drops a finished phase', () => {
       const { fixture, frames, getBuild, panel } = setupBuild(null);
       expect(panel()).toBeNull();

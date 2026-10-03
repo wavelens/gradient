@@ -48,12 +48,21 @@ describe('buildProgress labels', () => {
     expect(buildProgressPaths(progress({ paths_done: 0, paths_total: 1 }))).toBeNull();
     expect(buildProgressPaths(progress({}))).toBeNull();
   });
+
+  it('counts the landed paths alone while the total is still growing', () => {
+    expect(buildProgressPaths(progress({ paths_done: 12 }))).toBe('12 paths');
+    expect(buildProgressPaths(progress({ paths_done: 1 }))).toBeNull();
+  });
 });
 
 describe('buildPhaseFinished', () => {
-  it('ends a prefetch or upload once every path landed, never a download', () => {
+  it('ends a phase once every path of a known total landed', () => {
     expect(buildPhaseFinished(progress({ paths_done: 40, paths_total: 40 }))).toBe(true);
     expect(buildPhaseFinished(progress({ phase: 'upload', paths_done: 1, paths_total: 2 }))).toBe(false);
-    expect(buildPhaseFinished(progress({ phase: 'download', paths_done: 1, paths_total: 1 }))).toBe(false);
+    expect(buildPhaseFinished(progress({ phase: 'download', paths_done: 1, paths_total: 1 }))).toBe(true);
+  });
+
+  it('keeps a prefetch whose total is still growing', () => {
+    expect(buildPhaseFinished(progress({ paths_done: 12, paths_total: null }))).toBe(false);
   });
 });
