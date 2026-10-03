@@ -6,6 +6,7 @@
 
 @use '@gradient/ui/styles/variables' as *;
 
+// The bar and the size column copy the entry point rows on the task page.
 :host {
   display: flex;
   justify-content: center;
@@ -15,8 +16,8 @@
 .input-list {
   display: flex;
   flex-direction: column;
-  gap: $spacing-xs;
-  width: min(32rem, 90%);
+  gap: $space-pair;
+  width: min(48rem, 100%);
   margin: 0;
   padding: 0;
   list-style: none;
@@ -24,45 +25,26 @@
 
 .input-row {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) minmax(6rem, 360px) 7.5rem;
   align-items: center;
   gap: $spacing-sm;
-  font-size: $font-size-sm;
-  color: var(--gr-text-secondary);
-
-  &[data-state='Done'] .input-icon { color: var(--gr-status-success); }
-  &[data-state='Failed'] .input-icon { color: var(--gr-status-danger); }
-  &[data-state='Fetching'] .input-icon { color: var(--gr-status-info); }
 }
 
 .input-name {
   overflow: hidden;
   font-family: $font-family-mono;
+  font-size: $font-size-sm;
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--gr-text-primary);
 }
 
-.input-bar {
-  grid-column: 2 / 3;
-  height: 4px;
-  overflow: hidden;
-  border-radius: $border-radius-sm;
-  background: var(--gr-border-subtle);
-
-  .input-bar-fill {
-    height: 100%;
-    background: var(--gr-status-info);
-    transition: width 0.9s linear;
-  }
-}
+.input-bar { --segbar-h: 7px; }
 
 .input-size {
-  grid-column: 3 / 4;
+  font-size: $font-size-xs;
   font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
   color: var(--gr-text-muted);
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .input-bar .input-bar-fill { transition: none; }
 }

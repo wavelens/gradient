@@ -89,8 +89,12 @@
 }
 
 <h2>Input fetch list</h2>
-<p>One row per flake input while an evaluation fetches. The bar appears only when the size is known.</p>
+<p>One row per flake input while an evaluation fetches. The bar fills when the size is known and pulses otherwise.</p>
 <gr-input-fetch-list [inputs]="inputFetches" />
+
+<h2>Segmented bar</h2>
+<p>Build counts of an evaluation or an entry point. Hover a segment for its count.</p>
+<gr-segmented-bar class="sg-segbar" [counts]="{ completed: 12, failed: 2, building: 3, queued: 8, substituted: 40, aborted: 0 }" />
 
 <h2>Star button</h2>
 <p>Optimistic toggle; a failed request rolls the star back. Page headers use the labeled variant.</p>

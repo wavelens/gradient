@@ -11,5 +11,7 @@ export * from './input-fetch-list/input-fetch-list.component';
 export * from './label-help/label-help.component';
 export * from './metric-chart/metric-chart.component';
 export * from './metric-chart/metric-chart.options';
+export * from './segmented-bar/byte-segments';
+export * from './segmented-bar/segmented-bar.component';
 export * from './star-button/star-button.component';
 export * from './status-icon/status-icon.component';

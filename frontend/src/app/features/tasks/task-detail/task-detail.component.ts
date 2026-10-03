@@ -30,12 +30,11 @@ import {
   ToastComponent,
   TooltipDirective,
 } from '@gradient/ui/ui';
-import { EvalStatusBadgeComponent, InputFetchListComponent, StarButtonComponent, StatusIconComponent } from '@shared/ui';
+import { EvalStatusBadgeComponent, InputFetchListComponent, SegmentedBarComponent, StarButtonComponent, StatusIconComponent } from '@shared/ui';
 import { AccessService, WritableDirective } from '@shared/access';
 import { injectTaskAccess } from '@core/resolvers/inject-access';
 import { StarTarget, TaskDetail, EvaluationSummary, EvaluationProgress, EvaluationStatus, EntryPointSummary, BuildStatusCounts, WalkMode } from '@core/models';
 import { buildDuration, commitLabel, entryPointPhase, evaluationDuration, evaluationPhase, evaluationProgressText, evaluationTitle, formatEvaluationDuration, isPendingBuildStatus, isRunningEvaluationStatus } from '@shared/evaluation';
-import { SegmentedBarComponent } from './segmented-bar/segmented-bar.component';
 
 @Component({
   selector: 'app-task-detail',

@@ -104,7 +104,7 @@
                 </div>
               </div>
               <div class="bar-line">
-                <app-segmented-bar class="eval-bar" [counts]="sel.builds" />
+                <gr-segmented-bar class="eval-bar" [counts]="sel.builds" />
                 <span><b>{{ doneCount(sel.builds) }} / {{ totalCount(sel.builds) }}</b> builds</span>
                 <span class="dur"><gr-icon name="timer" size="sm" /> <b>{{ evalDuration(sel) }}</b></span>
                 @if (sel.errors > 0) {
@@ -142,7 +142,7 @@
                   <gr-status-icon class="si" [phase]="entryPointPhase(ep)" size="sm" />
                   <span class="pkg-name">{{ attrLabel(ep.eval) }}</span>
                   <span class="chip-arch mono">{{ ep.architecture }}</span>
-                  <app-segmented-bar class="pkg-bar" [counts]="barCounts(ep)" />
+                  <gr-segmented-bar class="pkg-bar" [counts]="barCounts(ep)" />
                   <span class="pkg-deps">{{ doneCount(barCounts(ep)) }} / {{ totalCount(barCounts(ep)) }} deps</span>
                   <span class="pkg-time">
                     {{ pkgDuration(ep) }}

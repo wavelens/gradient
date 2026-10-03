@@ -30,6 +30,7 @@ import {
   EvalStatusBadgeComponent,
   InputFetchListComponent,
   MetricChartComponent,
+  SegmentedBarComponent,
   StarButtonComponent,
   StatusIconComponent,
 } from '@shared/ui';
@@ -45,13 +46,13 @@ import type { StatusPhase } from '@shared/evaluation';
     StatCardComponent, TableComponent, DividerComponent, EvalStatusBadgeComponent,
     MetricChartComponent, ToastComponent, ButtonComponent,
     CardGridComponent,
-    LogoComponent, StarButtonComponent, StatusIconComponent, InputFetchListComponent,
+    LogoComponent, StarButtonComponent, StatusIconComponent, InputFetchListComponent, SegmentedBarComponent,
   ],
   // The demo star toggles locally instead of writing the viewer's real stars.
   providers: [MessageService, { provide: StarsService, useValue: { set: () => of(true) } }],
   templateUrl: './elements.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
-  styleUrl: './demo.scss',
+  styleUrls: ['./demo.scss', './elements.component.scss'],
 })
 export class ElementsComponent {
   private messages = inject(MessageService);
