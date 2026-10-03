@@ -129,6 +129,7 @@ The prelude is also re-exporting the protocol doubles.
 |---|---|
 | Store spec | A plain attrset: `derivations.<id>` with `deps`, `outputs.<o>.references` (`"<node>.<output>"`), `build.outcome` (`success`, `fail`, `hang`), `present.workers`, `present.cache`, `sameAs` (a twin: another `.drv` with the same name, output paths and FOD content). Defaults and invariants in `nix/tests/store-spec/default.nix`. Presets `chain n`, `diamond`, `fanOut n`, `wide depth width` |
 | Paths | `derivations.nix` is feeding both the published flake and the daemon config. The `store-spec` check is asserting that drv and output paths agree |
+| Downloads | `download = true` is turning a node into a real `<nix/fetchurl.nix>` call with an SRI hash. The server node is serving its content under `/downloads/`, and a worker is fetching it without the mock daemon |
 | Presence | `present.workers` is seeded at boot. `present.cache` is becoming a signed file cache used as upstream cache |
 | Timing | Seeded lognormal delays (median 40 ms). `GRADIENT_DAEMON_SEED` is replaying a round |
 | Violations | A build with a missing input, a rebuild of a valid output, an unknown derivation, an unmodelled op. Every phase is ending with `violations == []` |

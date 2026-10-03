@@ -129,6 +129,14 @@ only_build("upstream-cached", "app")
 assert_clean()
 latency_report("upstream-cached")
 
+e = phase("download")
+wait_evaluation(e, "Completed")
+assert builds_of("download", "src") == [], "a builtin:fetchurl reached the daemon instead of the worker's download"
+assert uploaded(out_of("download", "src"))
+only_build("download", "app")
+assert_clean()
+latency_report("download")
+
 e = phase("twins")
 wait_evaluation(e, "Completed")
 assert all(builds_of("twins", n) == [] for n in ["lib1", "lib2"]), "a twin served upstream was rebuilt"

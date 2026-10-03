@@ -15,7 +15,13 @@ let
     if referenced == [ ] then [ (head (attrNames spec.derivations.${d}.outputs)) ] else referenced;
   identity = id: let twin = spec.derivations.${id}.sameAs or null; in if twin == null then id else twin;
   fodContent = id: "gradient-daemon fod ${spec.name}/${identity id}\n";
+  download = id: import <nix/fetchurl.nix> {
+    inherit (spec.derivations.${identity id}) name;
+    url = "http://server/downloads/${spec.name}/${identity id}";
+    hash = builtins.convertHash { hash = hashString "sha256" (fodContent id); hashAlgo = "sha256"; toHashFormat = "sri"; };
+  };
   drvs = mapAttrs (id: node:
+    if node.download then download id else
     derivation ({
       inherit (spec.derivations.${identity id}) name;
       inherit (spec) system;

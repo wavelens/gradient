@@ -19,6 +19,7 @@ let
     cross-worker = ./specs/cross-worker.nix;
     already-present = ./specs/already-present.nix;
     upstream-cached = ./specs/upstream-cached.nix;
+    download = ./specs/download.nix;
     twins = ./specs/twins.nix;
     hang = ./specs/hang.nix;
     frozen = ./specs/frozen.nix;
@@ -31,6 +32,7 @@ let
   flakes = lib.mapAttrs (_: storeSpec.toFlake) specFiles;
   resolved = lib.mapAttrs (_: storeSpec.resolve) specFiles;
   upstream = storeSpec.toUpstreamCache specs;
+  downloads = storeSpec.toDownloads specs;
 
   workerToken = "C9ve6tvVONhtbRzFks56HQlYQotlRmXel/5NFLk/HjbSFGc+IZjCGfxegW2NKpY5";
   workerIds = {
@@ -74,7 +76,7 @@ let
   };
 
   serverNode = import ./server.nix {
-    inherit lib pkgs storeSpec upstream specNames workerToken;
+    inherit lib pkgs storeSpec upstream downloads specNames workerToken;
     inherit (topo) upstreamPeers;
     upstreamUrls = topo.upstreamUrls or { };
   };
