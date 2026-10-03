@@ -145,6 +145,37 @@ pub struct Progress {
 }
 firehose!(Progress, "evaluation.progress");
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum EvaluationProgress {
+    Fetching { inputs: Vec<InputFetch> },
+    Evaluating { thunks: u64 },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct InputFetch {
+    pub name: String,
+    pub state: InputFetchState,
+    pub downloaded_bytes: u64,
+    pub expected_bytes: u64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum InputFetchState {
+    Queued,
+    Fetching,
+    Done,
+    Failed,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Activity {
+    pub evaluation_id: EvaluationId,
+    pub task: Option<TaskId>,
+    pub progress: EvaluationProgress,
+}
+firehose!(Activity, "evaluation.activity");
+
 #[cfg(test)]
 mod tests {
     use super::*;

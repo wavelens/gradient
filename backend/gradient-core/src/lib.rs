@@ -10,8 +10,8 @@ pub mod upstream_source;
 
 pub use gradient_graph::Graph;
 pub use state_root::{
-    AppState, DOWNLOAD_PROGRESS_TTL, LAST_USED_STAMP_INTERVAL, ServerState, download_progress,
-    last_used_stamps,
+    AppState, DOWNLOAD_PROGRESS_TTL, EVAL_PROGRESS_TTL, LAST_USED_STAMP_INTERVAL, ServerState,
+    download_progress, eval_progress, last_used_stamps,
 };
 
 use gradient_db::{
@@ -224,6 +224,7 @@ pub async fn init_state(cli: Cli) -> Result<Arc<ServerState>, InitError> {
         shutdown: Shutdown::new(),
         last_used_stamps: last_used_stamps(),
         download_progress: download_progress(),
+        eval_progress: eval_progress(),
         cache_traffic: gradient_db::metrics::cache_traffic::CacheTraffic::shared(),
         jwt_secret,
         started_at: chrono::Utc::now(),

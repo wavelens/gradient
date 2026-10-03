@@ -10,9 +10,9 @@ use std::time::Instant;
 
 use gradient_core::ServerState;
 use gradient_entity::dispatched_job::DispatchedJobOutcome;
-use gradient_types::DownloadProgress;
-use gradient_types::events::build;
-use gradient_types::ids::{DerivationBuildId, DispatchedJobId, ProjectId};
+use gradient_types::events::{build, evaluation};
+use gradient_types::ids::{DerivationBuildId, DispatchedJobId, EvaluationId, ProjectId, TaskId};
+use gradient_types::{DownloadProgress, EvaluationProgress};
 use gradient_util::store_path::strip_nix_store_prefix;
 use tokio::sync::Semaphore;
 use tracing::{Instrument as _, debug, debug_span, info, trace, warn};
@@ -75,6 +75,13 @@ impl ActiveJobs {
         match &self.0.lock().get(job_id)?.pending {
             PendingJob::Build(j) => j.job.builds.get(task_index as usize)?.build_id.parse().ok(),
             PendingJob::Eval(_) => None,
+        }
+    }
+
+    pub(crate) fn eval(&self, job_id: &str) -> Option<(EvaluationId, Option<TaskId>)> {
+        match &self.0.lock().get(job_id)?.pending {
+            PendingJob::Eval(j) => Some((j.evaluation_id, j.task_id)),
+            PendingJob::Build(_) => None,
         }
     }
 
@@ -724,7 +731,20 @@ impl<'a> InboundContext<'a> {
         });
     }
 
-    fn on_eval_progress(&self, _job_id: &str, _progress: WireEvalProgress) {}
+    fn on_eval_progress(&self, job_id: &str, progress: WireEvalProgress) {
+        let Some((evaluation_id, task)) = self.active.eval(job_id) else {
+            return;
+        };
+        let progress = evaluation_progress(progress);
+        self.state
+            .eval_progress
+            .set(evaluation_id, progress.clone(), Instant::now());
+        self.state.events.publish(evaluation::Activity {
+            evaluation_id,
+            task,
+            progress,
+        });
+    }
 
     async fn on_nar_request(&mut self, job_id: String, paths: Vec<String>) {
         debug!(peer_id = %self.peer_id, %job_id, count = paths.len(), "NarRequest");
@@ -956,6 +976,30 @@ impl RpcContext {
                 },
             )
             .await;
+    }
+}
+
+fn evaluation_progress(progress: WireEvalProgress) -> EvaluationProgress {
+    use gradient_types::events::evaluation::{InputFetch, InputFetchState};
+    use gradient_wire::types::InputFetchState as Wire;
+    match progress {
+        WireEvalProgress::Evaluating { thunks } => EvaluationProgress::Evaluating { thunks },
+        WireEvalProgress::Fetching { inputs } => EvaluationProgress::Fetching {
+            inputs: inputs
+                .into_iter()
+                .map(|i| InputFetch {
+                    name: i.name,
+                    state: match i.state {
+                        Wire::Queued => InputFetchState::Queued,
+                        Wire::Fetching => InputFetchState::Fetching,
+                        Wire::Done => InputFetchState::Done,
+                        Wire::Failed => InputFetchState::Failed,
+                    },
+                    downloaded_bytes: i.downloaded_bytes,
+                    expected_bytes: i.expected_bytes,
+                })
+                .collect(),
+        },
     }
 }
 
@@ -1304,6 +1348,68 @@ mod assignment_response_tests {
         }
         assert!(events.try_recv().is_err());
         assert!(log_db.into_transaction_log().is_empty());
+    }
+
+    #[tokio::test]
+    async fn an_eval_progress_report_is_held_in_memory_and_broadcast() {
+        let db = MockDatabase::new(DatabaseBackend::Postgres).into_connection();
+        let state = test_state(db);
+        let scheduler = Arc::new(Scheduler::new(Arc::clone(&state)));
+        let writer = detached_writer();
+        let semaphore = Arc::new(Semaphore::new(1));
+        let job_events = JobEvents::spawn(
+            &state.shutdown,
+            "w1",
+            SchedulerJobEvents {
+                scheduler: Arc::clone(&scheduler),
+                writer: writer.clone(),
+                peer_id: "w1".into(),
+            },
+        );
+        let pending = pending_eval();
+        let PendingJob::Eval(job) = &pending else {
+            unreachable!()
+        };
+        let (evaluation_id, task) = (job.evaluation_id, job.task_id);
+        let active = ActiveJobs::from(HashMap::from([(
+            "job-1".to_owned(),
+            ActiveJob {
+                assignment_id: DispatchedJobId::now_v7(),
+                pending,
+                cluster: None,
+            },
+        )]));
+        let mut events = state.events.subscribe();
+
+        let ctx = InboundContext {
+            writer: &writer,
+            state: &state,
+            scheduler: &scheduler,
+            peer_id: "w1",
+            nar_serve_semaphore: &semaphore,
+            active: &active,
+            job_events: &job_events,
+            logs: &LogLane::spawn(&state.shutdown, |_, _| async {}),
+            dialed: None,
+        };
+        ctx.on_eval_progress("job-1", WireEvalProgress::Evaluating { thunks: 42 });
+        ctx.on_eval_progress("unknown-job", WireEvalProgress::Evaluating { thunks: 1 });
+
+        let expected = EvaluationProgress::Evaluating { thunks: 42 };
+        assert_eq!(
+            state.eval_progress.get(&evaluation_id, Instant::now()),
+            Some(expected.clone())
+        );
+        match events.try_recv().map(|env| env.event.clone()) {
+            Ok(Event::EvaluationActivity(sent)) => {
+                assert_eq!(
+                    (sent.evaluation_id, sent.task, sent.progress),
+                    (evaluation_id, task, expected)
+                );
+            }
+            other => panic!("expected evaluation.activity, got {other:?}"),
+        }
+        assert!(events.try_recv().is_err());
     }
 
     #[tokio::test]
