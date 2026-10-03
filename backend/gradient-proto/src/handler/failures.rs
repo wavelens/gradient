@@ -45,7 +45,7 @@ pub(super) fn record_dialed(failures: &ConnectionFailures, worker_id: &str, erro
 
 async fn is_registered(state: &ServerState, worker_id: &str) -> bool {
     has_any_registrations(state, worker_id).await
-        || gradient_db::projects::base_workers::worker_id_is_base(&state.worker_db, worker_id)
+        || gradient_db::teams::workers::is_team_worker(&state.worker_db, worker_id)
             .await
             .unwrap_or(false)
 }
@@ -53,7 +53,7 @@ async fn is_registered(state: &ServerState, worker_id: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gradient_entity::{base_worker, worker_registration};
+    use gradient_entity::{team_worker, worker_registration};
     use sea_orm::{DatabaseBackend, MockDatabase};
 
     fn rejected(claimed: &str) -> Rejected {
@@ -77,7 +77,7 @@ mod tests {
     async fn an_unregistered_claim_leaves_no_trace() {
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             .append_query_results([Vec::<worker_registration::Model>::new()])
-            .append_query_results([Vec::<base_worker::Model>::new()])
+            .append_query_results([Vec::<team_worker::Model>::new()])
             .into_connection();
         let state = gradient_test_support::prelude::test_state(db);
         let failures = ConnectionFailures::default();
