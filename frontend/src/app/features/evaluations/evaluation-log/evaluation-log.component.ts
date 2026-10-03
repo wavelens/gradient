@@ -1599,6 +1599,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
 
   navigateToEvaluation(id: string): void {
     this.stopLiveUpdates();
+    this.liveProgress.set(null);
     this.stopDurationTimer();
     this.stopActiveStream();
     this.selectedBuildId.set(null);

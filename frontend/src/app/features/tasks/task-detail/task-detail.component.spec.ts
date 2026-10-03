@@ -276,6 +276,21 @@ describe('TaskDetailComponent evaluation menu', () => {
       expect(startThenArrive(() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'a' }))).selectedId()).toBe('e1');
     });
 
+    it('fetches the packages of the new evaluation once', () => {
+      const { fixture, tasksService } = setup(trigger, { primaryStatus: 'Completed' });
+      let evals = fixture.componentInstance.evaluations();
+      vi.spyOn(tasksService, 'getTask').mockImplementation(() => of({ ...taskFor(trigger), last_evaluations: evals }));
+      const comp = fixture.componentInstance;
+      comp.startEvaluation();
+      const entryPoints = vi.spyOn(tasksService, 'getEntryPoints').mockReturnValue(of({ entry_points: [], total: 0 }));
+      evals = [evalSummary('e2', 'Queued'), ...evals];
+
+      comp.loadTaskData(false);
+
+      expect(comp.selectedId()).toBe('e2');
+      expect(entryPoints).toHaveBeenCalledTimes(1);
+    });
+
     it('does not switch later when the start fails', () => {
       const comp = startThenArrive(() => {}, () => throwError(() => new Error('nope')));
       expect(comp.selectedId()).toBe('e1');
