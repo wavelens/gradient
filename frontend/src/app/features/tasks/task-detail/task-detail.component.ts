@@ -34,7 +34,7 @@ import { EvalStatusBadgeComponent, InputFetchListComponent, SegmentedBarComponen
 import { AccessService, WritableDirective } from '@shared/access';
 import { injectTaskAccess } from '@core/resolvers/inject-access';
 import { StarTarget, TaskDetail, EvaluationSummary, EvaluationProgress, EvaluationStatus, EntryPointSummary, BuildStatusCounts, WalkMode } from '@core/models';
-import { buildDuration, commitLabel, entryPointPhase, evaluationDuration, evaluationPhase, evaluationProgressText, evaluationTitle, formatEvaluationDuration, isPendingBuildStatus, isRunningEvaluationStatus } from '@shared/evaluation';
+import { buildDuration, commitLabel, entryPointPhase, evaluationDuration, evaluationPhase, evaluationProgressText, evaluationTitle, formatEvaluationDuration, isPendingBuildStatus, isRunningEvaluationStatus, phaseProgress } from '@shared/evaluation';
 
 @Component({
   selector: 'app-task-detail',
@@ -118,12 +118,10 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
     return s ? [s] : [];
   });
 
-  private activity = signal<{ evaluation_id: string; progress: EvaluationProgress } | null>(null);
+  private activity = signal<Record<string, EvaluationProgress>>({});
   selectedProgress = computed<EvaluationProgress | null>(() => {
     const sel = this.selected();
-    if (!sel || !this.isRunning(sel.status)) return null;
-    const live = this.activity();
-    return live?.evaluation_id === sel.id ? live.progress : sel.progress ?? null;
+    return sel ? phaseProgress(sel.status, this.activity()[sel.id], sel.progress) : null;
   });
   selectedFetchRows = computed(() => {
     const p = this.selectedProgress();
@@ -364,7 +362,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
       .pipe(filter(e => e.event === 'evaluation.activity'))
       .subscribe(e => {
         const { evaluation_id, progress } = e.content;
-        if (evaluation_id && progress) this.activity.set({ evaluation_id, progress });
+        if (evaluation_id && progress) this.activity.update(all => ({ ...this.runningActivity(all), [evaluation_id]: progress }));
       });
     this.liveSub.add(
       frames
@@ -394,6 +392,11 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
   }
 
   isRunning(status: EvaluationStatus): boolean { return isRunningEvaluationStatus(status); }
+
+  private runningActivity(all: Record<string, EvaluationProgress>): Record<string, EvaluationProgress> {
+    const running = new Set(this.evaluations().filter(e => this.isRunning(e.status)).map(e => e.id));
+    return Object.fromEntries(Object.entries(all).filter(([id]) => running.has(id)));
+  }
 
   evalDuration(evaluation: EvaluationSummary): string {
     return formatEvaluationDuration(evaluationDuration(evaluation, this.tick()));

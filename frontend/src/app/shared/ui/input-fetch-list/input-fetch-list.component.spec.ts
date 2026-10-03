@@ -5,6 +5,7 @@
  */
 
 import { TestBed } from '@angular/core/testing';
+import { vi } from 'vitest';
 import type { InputFetch } from '@core/models';
 import { InputFetchListComponent } from './input-fetch-list.component';
 
@@ -37,6 +38,17 @@ describe('InputFetchListComponent', () => {
     expect(bar(row).hasAttribute('aria-valuenow')).toBe(false);
     expect(segs(row)).toEqual([['seg-building', '100%']]);
     expect(size(row)).toBe('2.0 MiB');
+  });
+
+  it('renders inputs that share a name as separate rows', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const rows = render([
+      { name: 'nixpkgs', state: 'Done', downloaded_bytes: 1024, expected_bytes: 0 },
+      { name: 'nixpkgs', state: 'Fetching', downloaded_bytes: 0, expected_bytes: 0 },
+    ]);
+    expect(rows.map(r => r.getAttribute('data-state'))).toEqual(['Done', 'Fetching']);
+    expect(warn.mock.calls.flat().join(' ')).not.toContain('NG0955');
+    warn.mockRestore();
   });
 
   it('shows the queued, done and failed state through the bar tone', () => {
