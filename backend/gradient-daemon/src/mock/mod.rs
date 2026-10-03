@@ -6,7 +6,6 @@
 
 pub mod artefact;
 pub mod build;
-pub mod ca_path;
 pub mod cache_export;
 pub mod conn;
 pub mod control;
