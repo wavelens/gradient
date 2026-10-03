@@ -115,15 +115,14 @@ fn serve<W: Write>(
                 // Warnings from priming the prefix attrset are resurfacing in every shard.
                 // Per-attr eval errors are captured here, because a thrown shard root
                 // is leaving no shard for a later `List` to re-hit.
-                or_err(
-                    walkers
-                        .with(ev, &repository, &input_overrides, |walker| {
-                            let (shards, errors) = walker.plan_shards(&wildcards)?;
-                            let _ = walker.commit_cache();
-                            Ok((shards, errors))
-                        })
-                        .map(|(shards, errors)| EvalResponse::PlanOk { shards, errors }),
-                )
+                frames.begin();
+                let planned = walkers.with(ev, &repository, &input_overrides, |walker| {
+                    let (shards, errors) = walker.plan_shards(&wildcards)?;
+                    let _ = walker.commit_cache();
+                    Ok((shards, errors))
+                });
+                frames.end(None);
+                or_err(planned.map(|(shards, errors)| EvalResponse::PlanOk { shards, errors }))
             }),
             EvalRequest::List {
                 repository,
