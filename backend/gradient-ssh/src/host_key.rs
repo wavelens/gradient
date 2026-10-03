@@ -23,14 +23,14 @@ pub async fn load_or_generate(file: Option<&str>, base_dir: &Path) -> anyhow::Re
 
     let key = PrivateKey::random(&mut rand::rng(), Algorithm::Ed25519)?;
     let pem = key.to_openssh(LineEnding::LF)?;
-    tokio::fs::OpenOptions::new()
+    let mut file = tokio::fs::OpenOptions::new()
         .write(true)
         .create_new(true)
         .mode(0o600)
         .open(&path)
-        .await?
-        .write_all(pem.as_bytes())
         .await?;
+    file.write_all(pem.as_bytes()).await?;
+    file.sync_all().await?;
 
     tracing::info!(path = %path.display(), "generated ssh host key");
     Ok(key)
