@@ -27,75 +27,58 @@ pub struct GraphTree {
 impl GraphTree {
     #[cfg(test)]
     pub fn from_edges(nodes: &[(&str, &str)], edges: &[(&str, &str)], roots: Vec<NodeId>) -> Self {
-        let mut map: HashMap<NodeId, Node> = HashMap::new();
-        for (id, label) in nodes {
-            map.insert(
-                (*id).to_string(),
-                Node {
-                    label: (*label).to_string(),
-                    children: Vec::new(),
-                    expanded: false,
-                },
-            );
-        }
-        for (parent, child) in edges {
-            if let Some(n) = map.get_mut(*parent) {
-                n.children.push((*child).to_string());
-            }
-        }
-        let mut t = Self {
+        Self::new(
+            nodes
+                .iter()
+                .map(|(id, label)| (id.to_string(), label.to_string())),
+            edges
+                .iter()
+                .map(|(parent, child)| (parent.to_string(), child.to_string())),
             roots,
-            nodes: map,
-            flat: Vec::new(),
-            selected: 0,
-        };
-        t.rebuild_flat();
-        t
+        )
     }
 
     pub fn from_build_graph(g: &BuildGraph) -> Self {
-        let nodes: Vec<(String, String)> = g
-            .nodes
-            .iter()
-            .filter_map(|n| {
-                let id = n.get("id")?.as_str()?.to_string();
-                let label = n
-                    .get("name")
-                    .and_then(|v| v.as_str())
-                    .or_else(|| n.get("path").and_then(|v| v.as_str()))
-                    .unwrap_or("?")
-                    .to_string();
-                Some((id, label))
-            })
-            .collect();
-        let edges: Vec<(String, String)> = g
-            .edges
-            .iter()
-            .filter_map(|e| {
-                Some((
-                    e.get("source")?.as_str()?.to_string(),
-                    e.get("target")?.as_str()?.to_string(),
-                ))
-            })
-            .collect();
+        let nodes = g.nodes.iter().filter_map(|n| {
+            let id = n.get("id")?.as_str()?.to_string();
+            let label = n
+                .get("name")
+                .and_then(|v| v.as_str())
+                .or_else(|| n.get("path").and_then(|v| v.as_str()))
+                .unwrap_or("?")
+                .to_string();
+            Some((id, label))
+        });
+        let dependencies = g.edges.iter().filter_map(|e| {
+            Some((
+                e.get("target")?.as_str()?.to_string(),
+                e.get("source")?.as_str()?.to_string(),
+            ))
+        });
+        Self::new(nodes, dependencies, vec![g.root.clone()])
+    }
 
-        let mut map: HashMap<NodeId, Node> = HashMap::new();
-        for (id, label) in &nodes {
-            map.insert(
-                id.clone(),
-                Node {
-                    label: label.clone(),
+    fn new(
+        nodes: impl IntoIterator<Item = (NodeId, String)>,
+        edges: impl IntoIterator<Item = (NodeId, NodeId)>,
+        roots: Vec<NodeId>,
+    ) -> Self {
+        let mut map: HashMap<NodeId, Node> = nodes
+            .into_iter()
+            .map(|(id, label)| {
+                let node = Node {
+                    label,
                     children: Vec::new(),
                     expanded: false,
-                },
-            );
-        }
-        for (source, target) in &edges {
-            if let Some(n) = map.get_mut(source) {
-                n.children.push(target.clone());
+                };
+                (id, node)
+            })
+            .collect();
+        for (parent, child) in edges {
+            if let Some(n) = map.get_mut(&parent) {
+                n.children.push(child);
             }
         }
-        let roots = vec![g.root.clone()];
         let mut t = Self {
             roots,
             nodes: map,
@@ -243,6 +226,31 @@ mod tests {
         let mut t = tree();
         t.toggle_expand();
         assert_eq!(t.flat_len(), 3);
+    }
+
+    #[test]
+    fn a_build_graph_lists_the_dependencies_of_the_root_under_it() {
+        let graph: BuildGraph = serde_json::from_value(serde_json::json!({
+            "root": "root",
+            "nodes": [
+                { "id": "root", "name": "root-pkg" },
+                { "id": "lib", "name": "lib-pkg" },
+                { "id": "libc", "name": "libc-pkg" },
+            ],
+            "edges": [
+                { "source": "lib", "target": "root" },
+                { "source": "libc", "target": "lib" },
+            ],
+        }))
+        .unwrap();
+        let mut t = GraphTree::from_build_graph(&graph);
+
+        t.toggle_expand();
+        t.move_down();
+        t.toggle_expand();
+
+        let shown: Vec<(&str, usize)> = t.flat.iter().map(|(id, d)| (id.as_str(), *d)).collect();
+        assert_eq!(shown, [("root", 0), ("lib", 1), ("libc", 2)]);
     }
 
     #[test]
