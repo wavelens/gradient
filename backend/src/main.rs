@@ -99,16 +99,18 @@ async fn run() -> std::io::Result<()> {
         .await
         .map_err(std::io::Error::other)?;
 
+    let scheduler = Arc::new(gradient_scheduler::Scheduler::new(Arc::clone(&state)));
+
     info!("Starting cache service");
     gradient_cache::start_cache(Arc::clone(&state)).await?;
 
     if state.config.ssh.enable {
         info!("Starting SSH service");
-        gradient_ssh::start(Arc::clone(&state)).await?;
+        gradient_ssh::start(Arc::clone(&state), Arc::clone(&scheduler)).await?;
     }
 
     info!("Starting web service");
-    gradient_web::serve_web(Arc::clone(&state)).await?;
+    gradient_web::serve_web(Arc::clone(&state), scheduler).await?;
 
     Ok(())
 }

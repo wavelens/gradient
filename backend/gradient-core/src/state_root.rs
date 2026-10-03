@@ -18,7 +18,8 @@ use gradient_ci::CiContext;
 use gradient_ci::manifest_state::{ManifestStateStore, PendingCredentialsStore};
 use gradient_db::metrics::cache_traffic::CacheTraffic;
 use gradient_db::{
-    CacheDb, DbContext, ProbeRequests, WebDb, WorkerDb, scheduling::startable_set::StartableSet,
+    CacheDb, DbContext, HeldEvaluations, ProbeRequests, WebDb, WorkerDb,
+    scheduling::startable_set::StartableSet,
 };
 use gradient_git_host::GitHostRegistry;
 use gradient_graph::Graph;
@@ -65,6 +66,7 @@ pub struct AppState {
     pub eval_assign_wake: Arc<Notify>,
     pub graph: Arc<Graph>,
     pub probe_requests: ProbeRequests,
+    pub held_evaluations: HeldEvaluations,
     pub startable_set: StartableSet,
 }
 
@@ -106,6 +108,7 @@ impl AppState {
             events: self.events.clone(),
             delivery_wake: self.delivery_wake.clone(),
             probe_requests: self.probe_requests.clone(),
+            held_evaluations: self.held_evaluations.clone(),
             startable_set: self.startable_set.clone(),
         }
     }

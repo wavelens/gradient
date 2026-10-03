@@ -133,6 +133,7 @@ async fn authorize_redirect_carries_pkce_and_cookie_holds_verifier() {
         delivery_wake: Default::default(),
         eval_assign_wake: Default::default(),
         probe_requests: Default::default(),
+        held_evaluations: Default::default(),
         startable_set: Default::default(),
         graph: gradient_core::Graph::stub(),
     });

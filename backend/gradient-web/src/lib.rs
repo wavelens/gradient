@@ -93,6 +93,14 @@ fn rate_limit(
 }
 
 pub fn create_router(state: Arc<ServerState>) -> Result<Router, InitError> {
+    let scheduler = Arc::new(Scheduler::new(Arc::clone(&state)));
+    create_router_with_scheduler(state, scheduler)
+}
+
+pub fn create_router_with_scheduler(
+    state: Arc<ServerState>,
+    scheduler: Arc<Scheduler>,
+) -> Result<Router, InitError> {
     let serve_url: http::HeaderValue =
         state
             .config
@@ -685,7 +693,6 @@ pub fn create_router(state: Arc<ServerState>) -> Result<Router, InitError> {
             get(admin::github_app::callback),
         );
 
-    let scheduler = Arc::new(Scheduler::new(Arc::clone(&state)));
     scheduler.start();
     state
         .shutdown
@@ -857,7 +864,7 @@ fn tuned_listener(
     listener.tap_io(tap as fn(&mut tokio::net::TcpStream))
 }
 
-pub async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
+pub async fn serve_web(state: Arc<ServerState>, scheduler: Arc<Scheduler>) -> std::io::Result<()> {
     let server_url = format!(
         "{}:{}",
         state.config.server.listen_addr.clone(),
@@ -902,7 +909,7 @@ pub async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
         Err(e) => tracing::error!(error = ?e, "failed to recover draining-parked evaluations"),
     }
 
-    let app = create_router(Arc::clone(&state))
+    let app = create_router_with_scheduler(Arc::clone(&state), scheduler)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?;
 
     let listener = tokio::net::TcpListener::bind(&server_url)

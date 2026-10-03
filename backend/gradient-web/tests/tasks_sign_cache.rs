@@ -108,6 +108,7 @@ fn make_server(db: sea_orm::DatabaseConnection) -> TestServer {
         delivery_wake: Default::default(),
         eval_assign_wake: Default::default(),
         probe_requests: Default::default(),
+        held_evaluations: Default::default(),
         startable_set: Default::default(),
         graph: gradient_core::Graph::stub(),
     });

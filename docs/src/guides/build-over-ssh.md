@@ -59,7 +59,9 @@ The Nix daemon is opening the connection as `root` for substituters. Plain `nix 
 
 - Gradient is answering reads from the project's subscribed caches.
 - Gradient is signing copied paths into the project's caches, like build outputs.
-- A build request is becoming one evaluation under the project's **Build Requests** task.
+- One SSH connection is becoming one evaluation under the project's **Build Requests** task.
+- Every further build request on the same connection is adding entry points to that evaluation.
+- The evaluation is staying in building while the connection is open.
 - Build logs are streaming back with the package name in front of each line.
 
 ## Verify Deployment
@@ -76,7 +78,7 @@ The command is printing the store URL and `Trusted: 0`. A build request is visib
 - Gradient is not supporting Nix's `builders` setting (`--builders ssh-ng://...`).
 - Gradient is rejecting content-addressed derivations.
 - `nix build --store` is needing `--eval-store auto`. Gradient is not taking evaluation writes.
-- A closed connection is leaving its builds running.
+- A closed connection is aborting its unfinished builds.
 
 ## Next Steps
 
