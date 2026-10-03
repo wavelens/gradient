@@ -14,7 +14,7 @@ use gradient_core::ServerState;
 use gradient_types::*;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 
 use super::BuildAccessContext;
@@ -79,12 +79,10 @@ where
     let total: i64 = size_by_drv.values().sum();
     let total_size_bytes = if total > 0 { Some(total) } else { None };
 
-    let drvs = EDerivation::find()
+    let nodes: Vec<ClosureNode> = EDerivation::find()
         .filter(CDerivation::Id.is_in(all_ids.clone()))
         .all(db)
-        .await?;
-
-    let mut nodes: Vec<ClosureNode> = drvs
+        .await?
         .into_iter()
         .map(|d| ClosureNode {
             nar_size: size_by_drv.get(&d.id).copied(),
@@ -93,36 +91,126 @@ where
             path: d.drv_path(),
         })
         .collect();
-    nodes.sort_by_key(|n| std::cmp::Reverse(n.nar_size.unwrap_or(0)));
 
-    let truncated = nodes.len() > CLOSURE_NODE_CAP;
-    if truncated {
-        nodes.truncate(CLOSURE_NODE_CAP);
-    }
-    let kept: HashSet<String> = nodes.iter().map(|n| n.id.clone()).collect();
-
-    let dep_rows = EDerivationDependency::find()
+    let edges: Vec<ClosureEdge> = EDerivationDependency::find()
         .filter(CDerivationDependency::Derivation.is_in(all_ids))
         .all(db)
-        .await?;
-    let edges: Vec<ClosureEdge> = dep_rows
+        .await?
         .into_iter()
         .map(|e| ClosureEdge {
             source: e.dependency.to_string(),
             target: e.derivation.to_string(),
         })
-        .filter(|e| kept.contains(&e.source) && kept.contains(&e.target))
         .collect();
 
-    Ok(ClosureGraph {
-        roots: roots.iter().map(|r| r.to_string()).collect(),
+    let roots = roots.iter().map(|r| r.to_string()).collect();
+    Ok(closure_graph(roots, total_size_bytes, nodes, edges))
+}
+
+fn closure_graph(
+    roots: Vec<String>,
+    total_size_bytes: Option<i64>,
+    nodes: Vec<ClosureNode>,
+    edges: Vec<ClosureEdge>,
+) -> ClosureGraph {
+    let truncated = nodes.len() > CLOSURE_NODE_CAP;
+    let rank = heaviest_rooted(&roots, &nodes, &edges, CLOSURE_NODE_CAP);
+
+    let mut nodes: Vec<ClosureNode> = nodes
+        .into_iter()
+        .filter(|n| rank.contains_key(&n.id))
+        .collect();
+    nodes.sort_by_key(|n| rank[&n.id]);
+    let edges: Vec<ClosureEdge> = edges
+        .into_iter()
+        .filter(|e| rank.contains_key(&e.source) && rank.contains_key(&e.target))
+        .collect();
+
+    ClosureGraph {
+        roots,
         total_size_bytes,
         node_count: nodes.len(),
         edge_count: edges.len(),
         truncated,
         nodes,
         edges,
-    })
+    }
+}
+
+/// A node is never kept without the node that reached it, so every kept node still leads to a root.
+fn heaviest_rooted(
+    roots: &[String],
+    nodes: &[ClosureNode],
+    edges: &[ClosureEdge],
+    cap: usize,
+) -> HashMap<String, usize> {
+    let order = spanning_order(roots, nodes, edges);
+
+    let mut subtree: HashMap<&str, i64> = nodes
+        .iter()
+        .map(|n| (n.id.as_str(), n.nar_size.unwrap_or(0)))
+        .collect();
+    for &(node, parent) in order.iter().rev() {
+        if let Some(parent) = parent {
+            let size = subtree[node];
+            *subtree.entry(parent).or_default() += size;
+        }
+    }
+
+    let mut ranked: Vec<(usize, &str)> = order
+        .iter()
+        .enumerate()
+        .map(|(index, &(node, _))| (index, node))
+        .collect();
+    ranked.sort_by_key(|&(index, node)| (std::cmp::Reverse(subtree[node]), index));
+
+    ranked
+        .into_iter()
+        .take(cap)
+        .enumerate()
+        .map(|(rank, (_, node))| (node.to_owned(), rank))
+        .collect()
+}
+
+fn spanning_order<'a>(
+    roots: &'a [String],
+    nodes: &'a [ClosureNode],
+    edges: &'a [ClosureEdge],
+) -> Vec<(&'a str, Option<&'a str>)> {
+    let known: HashSet<&str> = nodes.iter().map(|n| n.id.as_str()).collect();
+    let mut dependencies: HashMap<&str, Vec<&str>> = HashMap::new();
+    for e in edges {
+        dependencies
+            .entry(e.target.as_str())
+            .or_default()
+            .push(e.source.as_str());
+    }
+
+    let mut seen: HashSet<&str> = HashSet::new();
+    let mut queue: VecDeque<(&str, Option<&str>)> = roots
+        .iter()
+        .map(String::as_str)
+        .filter(|r| known.contains(r) && seen.insert(r))
+        .map(|r| (r, None))
+        .collect();
+    let mut unreached = nodes.iter().map(|n| n.id.as_str());
+    let mut order = Vec::with_capacity(nodes.len());
+    loop {
+        while let Some((node, parent)) = queue.pop_front() {
+            order.push((node, parent));
+            for &dep in dependencies.get(node).into_iter().flatten() {
+                if known.contains(dep) && seen.insert(dep) {
+                    queue.push_back((dep, Some(node)));
+                }
+            }
+        }
+        match unreached.find(|id| seen.insert(id)) {
+            Some(id) => queue.push_back((id, None)),
+            None => break,
+        }
+    }
+
+    order
 }
 
 pub async fn get_build_closure(
@@ -171,7 +259,7 @@ where
     let total: i64 = reached.values().filter_map(|r| r.nar_size).sum();
     let total_size_bytes = (total > 0).then_some(total);
 
-    let mut nodes: Vec<ClosureNode> = reached
+    let nodes: Vec<ClosureNode> = reached
         .values()
         .map(|r| ClosureNode {
             id: r.hash.clone(),
@@ -180,41 +268,29 @@ where
             nar_size: r.nar_size,
         })
         .collect();
-    nodes.sort_by_key(|n| std::cmp::Reverse(n.nar_size.unwrap_or(0)));
 
-    let truncated = nodes.len() > CLOSURE_NODE_CAP;
-    if truncated {
-        nodes.truncate(CLOSURE_NODE_CAP);
-    }
-    let kept: HashSet<String> = nodes.iter().map(|n| n.id.clone()).collect();
-
-    let kept_hashes: Vec<String> = kept.iter().cloned().collect();
-    let mut edges: Vec<ClosureEdge> = Vec::new();
-    for (parent, dep) in
-        gradient_db::graph::runtime_closure::reference_edges(db, &kept_hashes).await?
-    {
-        if dep != parent && kept.contains(&dep) {
-            edges.push(ClosureEdge {
-                source: dep,
-                target: parent,
-            });
-        }
-    }
+    let edges: Vec<ClosureEdge> = reached
+        .values()
+        .flat_map(|r| {
+            r.references
+                .as_deref()
+                .unwrap_or_default()
+                .split_whitespace()
+                .filter_map(gradient_db::graph::runtime_closure::parse_reference_hash)
+                .filter(|dep| *dep != r.hash && reached.contains_key(dep))
+                .map(|dep| ClosureEdge {
+                    source: dep,
+                    target: r.hash.clone(),
+                })
+        })
+        .collect();
 
     let roots: Vec<String> = seed_hashes
         .into_iter()
         .filter(|h| reached.contains_key(h))
         .collect();
 
-    Ok(ClosureGraph {
-        roots,
-        total_size_bytes,
-        node_count: nodes.len(),
-        edge_count: edges.len(),
-        truncated,
-        nodes,
-        edges,
-    })
+    Ok(closure_graph(roots, total_size_bytes, nodes, edges))
 }
 
 pub async fn get_build_runtime_closure(
@@ -335,5 +411,43 @@ mod tests {
                 target: root.to_string(),
             }
         );
+    }
+
+    fn sized(id: &str, nar_size: i64) -> ClosureNode {
+        ClosureNode {
+            id: id.into(),
+            name: id.into(),
+            path: id.into(),
+            nar_size: Some(nar_size),
+        }
+    }
+
+    fn needs(target: &str, source: &str) -> ClosureEdge {
+        ClosureEdge {
+            source: source.into(),
+            target: target.into(),
+        }
+    }
+
+    #[test]
+    fn a_capped_closure_keeps_its_small_root_and_the_heaviest_paths_down_to_it() {
+        let nodes = vec![
+            sized("root", 1),
+            sized("light", 10),
+            sized("heavy", 100),
+            sized("deep", 50),
+        ];
+        let edges = vec![
+            needs("root", "light"),
+            needs("root", "heavy"),
+            needs("heavy", "deep"),
+        ];
+
+        let rank = heaviest_rooted(&["root".to_string()], &nodes, &edges, 3);
+
+        let mut kept: Vec<&str> = rank.keys().map(String::as_str).collect();
+        kept.sort_unstable();
+        assert_eq!(kept, ["deep", "heavy", "root"]);
+        assert_eq!(rank["root"], 0);
     }
 }
