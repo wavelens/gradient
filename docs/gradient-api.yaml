@@ -9381,9 +9381,10 @@ paths:
         Upgrades to a WebSocket emitting `build_status_changed` events
         (`build_id`, `derivation_build`, `evaluation_id`, `status`) for every
         build in this build's evaluation (covers its dependency graph), and
-        `build_progress` events (`derivation_build`, `downloaded`, `total`)
-        while this build's Substitute or Download is fetching. Requires read
-        access.
+        `build_progress` events (`derivation_build`, `phase`, `bytes_done`,
+        `bytes_total`, `paths_done`, `paths_total`) while this build prefetches
+        its inputs, fetches a Substitute or Download, or uploads its outputs.
+        Requires read access.
       operationId: buildLive
       parameters:
         - { name: build, in: path, required: true, schema: { type: string, format: uuid } }
@@ -12482,25 +12483,37 @@ components:
           type: string
           format: date-time
           description: When the build status was last updated
-        download_progress:
+        progress:
           nullable: true
           description: |-
-            Bytes a running Substitute or Download has fetched, held in server
-            memory only. Null unless the build is `Building` and its worker
-            reported within the last 15 s.
+            Latest transfer progress of the build, held in server memory only.
+            Null unless the build is `Building` and its worker reported within
+            the last 15 s.
           allOf:
-            - $ref: '#/components/schemas/DownloadProgress'
+            - $ref: '#/components/schemas/BuildProgress'
 
-    DownloadProgress:
+    BuildProgress:
       type: object
-      required: [downloaded, total]
+      required: [phase, bytes_done, bytes_total, paths_done, paths_total]
       properties:
-        downloaded: { type: integer, format: int64, minimum: 0 }
-        total:
+        phase:
+          type: string
+          enum: [prefetch, download, upload]
+          description: |-
+            `prefetch` pulls missing inputs before the build, `download` fetches
+            a Substitute or Download, `upload` pushes the build's outputs.
+        bytes_done: { type: integer, format: int64, minimum: 0 }
+        bytes_total:
           type: integer
           format: int64
           nullable: true
-          description: Null when the source announced no size.
+          description: Null when a size is unknown.
+        paths_done: { type: integer, format: int32, minimum: 0 }
+        paths_total:
+          type: integer
+          format: int32
+          nullable: true
+          description: Null when the number of paths is unknown.
 
     EvaluationProgress:
       description: Live progress of a fetching or evaluating evaluation, held in server memory only.
