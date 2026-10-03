@@ -88,6 +88,10 @@
   <gr-eval-status-badge [status]="status" />
 }
 
+<h2>Input fetch list</h2>
+<p>One row per flake input while an evaluation fetches. The bar appears only when the size is known.</p>
+<gr-input-fetch-list [inputs]="inputFetches" />
+
 <h2>Star button</h2>
 <p>Optimistic toggle; a failed request rolls the star back. Page headers use the labeled variant.</p>
 <gr-star-button [target]="{ kind: 'project', project: 'gradient' }" />

@@ -7,7 +7,7 @@
 import { Injectable } from '@angular/core';
 import { Observable } from 'rxjs';
 import { environment } from '@environments/environment';
-import type { EventEnvelope } from '@core/models';
+import type { EvaluationProgress, EventEnvelope } from '@core/models';
 
 export type LiveEvent = EventEnvelope<{
   task?: string | null;
@@ -17,6 +17,7 @@ export type LiveEvent = EventEnvelope<{
   status?: number;
   downloaded?: number;
   total?: number | null;
+  progress?: EvaluationProgress;
 }>;
 
 const MAX_BACKOFF_MS = 15000;

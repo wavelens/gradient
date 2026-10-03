@@ -6,4 +6,5 @@
 
 export * from './commit';
 export * from './duration';
+export * from './progress';
 export * from './status-phase';

@@ -64,6 +64,7 @@ export interface EvaluationSummary {
   started_at: string | null;
   finished_at: string | null;
   updated_at: string;
+  progress?: EvaluationProgress;
 }
 
 export interface EntryPointSummary {
@@ -136,6 +137,7 @@ export interface Evaluation {
   waiting_reason?: WaitingReason;
   trigger: { id: string; type: TriggerType } | null;
   prioritized: boolean;
+  progress?: EvaluationProgress;
 }
 
 export type WaitingReason =
@@ -203,3 +205,16 @@ export type EvaluationStatus =
   | 'Completed'
   | 'Failed'
   | 'Aborted';
+
+export type InputFetchState = 'Queued' | 'Fetching' | 'Done' | 'Failed';
+
+export interface InputFetch {
+  name: string;
+  state: InputFetchState;
+  downloaded_bytes: number;
+  expected_bytes: number;
+}
+
+export type EvaluationProgress =
+  | { kind: 'fetching'; inputs: InputFetch[] }
+  | { kind: 'evaluating'; thunks: number };
