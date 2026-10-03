@@ -26,7 +26,10 @@ use super::session_actor::{SESSION_DRAIN_BUDGET, SessionActor, SessionArgs, Sess
 pub type AttachedSession = (ActorRef<SessionMsg>, JoinHandle<()>);
 
 pub enum SessionsMsg {
-    Attach(SessionArgs, RpcReplyPort<Result<AttachedSession, String>>),
+    Attach(
+        Box<SessionArgs>,
+        RpcReplyPort<Result<AttachedSession, String>>,
+    ),
     Reattach,
 }
 
@@ -68,7 +71,10 @@ impl SessionsHandle {
         };
 
         match actor
-            .call(|reply| SessionsMsg::Attach(args, reply), Some(CALL_TIMEOUT))
+            .call(
+                |reply| SessionsMsg::Attach(Box::new(args), reply),
+                Some(CALL_TIMEOUT),
+            )
             .await
         {
             Ok(CallResult::Success(result)) => result,
@@ -130,7 +136,7 @@ impl Actor for Sessions {
             SessionsMsg::Attach(args, reply) => {
                 let peer_id = args.peer_id.clone();
                 let result =
-                    match Actor::spawn_linked(None, SessionActor, args, myself.get_cell()).await {
+                    match Actor::spawn_linked(None, SessionActor, *args, myself.get_cell()).await {
                         Ok((actor, join)) => {
                             st.live.insert(actor.get_id(), (peer_id, actor.clone()));
                             Ok((actor, join))

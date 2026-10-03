@@ -153,6 +153,7 @@ impl WireMessage for ServerMessage {
 pub struct ProtoSocket {
     transport: Transport,
     version: Option<u16>,
+    refusal: Option<String>,
 }
 
 enum Transport {
@@ -244,6 +245,7 @@ impl ProtoSocket {
         Self {
             transport: Transport::Axum(Box::new(ws)),
             version: None,
+            refusal: None,
         }
     }
 
@@ -251,6 +253,7 @@ impl ProtoSocket {
         Self {
             transport: Transport::Tungstenite(Box::new(ws)),
             version: None,
+            refusal: None,
         }
     }
 
@@ -262,6 +265,10 @@ impl ProtoSocket {
 
     pub fn version(&self) -> Option<u16> {
         self.version
+    }
+
+    pub fn refusal(&self) -> Option<&str> {
+        self.refusal.as_deref()
     }
 
     #[cfg(test)]
@@ -294,7 +301,8 @@ impl ProtoSocket {
             }
             Err(reason) => {
                 warn!(%reason, "closing /proto connection");
-                self.transport.close(reason).await;
+                self.transport.close(reason.clone()).await;
+                self.refusal = Some(reason);
                 None
             }
         }
@@ -1223,8 +1231,7 @@ mod agreement_tests {
         assert_eq!(dialing.version(), Some(*PROTO_VERSIONS.end()));
     }
 
-    #[tokio::test]
-    async fn a_peer_without_a_version_frame_is_closed_with_the_reason() {
+    async fn raw_peer() -> (ProtoSocket, WebSocketStream<MaybeTlsStream<TcpStream>>) {
         let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
         let addr = listener.local_addr().expect("local addr");
         let accept = async {
@@ -1235,12 +1242,35 @@ mod agreement_tests {
 
             ProtoSocket::tungstenite(ws)
         };
-        let (mut server, client) = tokio::join!(
+        let (server, client) = tokio::join!(
             accept,
             tokio_tungstenite::connect_async(format!("ws://{addr}"))
         );
 
-        let (mut client, _) = client.expect("dial");
+        (server, client.expect("dial").0)
+    }
+
+    #[tokio::test]
+    async fn a_peer_without_a_shared_version_is_refused_with_both_ranges() {
+        let (mut server, mut client) = raw_peer().await;
+        client
+            .send(TungsteniteMessage::Binary(version_frame(&(30..=31))))
+            .await
+            .expect("send");
+
+        assert_eq!(
+            server.send_msg(&ServerMessage::Draining).await,
+            Err(SendError::Closed)
+        );
+        assert_eq!(
+            server.refusal(),
+            Some("no shared protocol version: ours 27..=27, peer 30..=31")
+        );
+    }
+
+    #[tokio::test]
+    async fn a_peer_without_a_version_frame_is_closed_with_the_reason() {
+        let (mut server, mut client) = raw_peer().await;
         client
             .send(TungsteniteMessage::Binary(Bytes::from_static(b"rkyv")))
             .await
