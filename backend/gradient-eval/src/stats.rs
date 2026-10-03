@@ -27,3 +27,17 @@ pub struct StatsDelta {
     pub alloc_bytes: u64,
     pub gc_heap_size: u64,
 }
+
+impl StatsDelta {
+    pub fn between(now: &nix_bindings::EvalStats, base: &nix_bindings::EvalStats) -> Self {
+        let d = now.saturating_sub(base);
+        Self {
+            nr_thunks: d.nr_thunks,
+            nr_function_calls: d.nr_function_calls,
+            nr_primop_calls: d.nr_primop_calls,
+            nr_lookups: d.nr_lookups,
+            alloc_bytes: d.gc_total_bytes,
+            gc_heap_size: now.gc_heap_size,
+        }
+    }
+}
