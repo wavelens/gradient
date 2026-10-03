@@ -69,8 +69,8 @@ The timeline is showing where a slow job spent its time. The score is explaining
 ??? note "Timeline Phases"
     | Phase | Meaning |
     |---|---|
-    | `fetch` | Cloning or archiving the flake source |
-    | `push_inputs` | Uploading the archived source to the cache |
+    | `fetch` | Cloning the flake source and fetching its missing flake inputs |
+    | `push_inputs` | Uploading the flake source and its inputs to the cache |
     | `eval_flake` | Evaluating the flake outputs |
     | `eval_derivations` | Resolving the outputs to derivations |
     | `eval_cache_pull`, `eval_cache_push` | Waiting for and returning the shared evaluation cache |

@@ -382,7 +382,7 @@ Declarative entities under `services.gradient.state` are in the [state reference
 |---|---|---|---|---|
 | `worker.packages.git` | package | `config.programs.git.package` | - | Git package available to the worker for cloning repositories. |
 | `worker.packages.gradient` | package | derived | - | The gradient package to use. |
-| `worker.packages.nix` | package | derived | `GRADIENT_WORKER_NIX_BIN` (part) | Nix package whose `nix` the worker is running for evaluation and fetching. |
+| `worker.packages.nix` | package | derived | `GRADIENT_WORKER_NIX_BIN` (part) | Nix package whose `nix` the worker is running to detect its system features. |
 | `worker.packages.ssh` | package | `config.programs.ssh.package` | `GRADIENT_WORKER_SSH_BIN` (part) | OpenSSH package used as `GIT_SSH_COMMAND` to fetch private flake inputs. |
 
 ## `worker.reverseProxy`

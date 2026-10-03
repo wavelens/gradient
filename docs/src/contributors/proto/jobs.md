@@ -23,8 +23,9 @@ A flake job is fetching and evaluating a flake. The server is fixing the steps a
 **Fetch:**
 
 1. Clone the repository, apply overrides (dropping unknown inputs with a warning).
-2. Serialise the tree at the pinned commit as a NAR, without a nix process. Add the NAR to the store as `<narHash>-source`, the same path `nix flake prefetch` is producing for the tree. The fetch is done when every locked input's `<narHash>-source` path is already in the store. `nix flake archive` is fetching the inputs in every other case, falling back to `nix flake prefetch` per input.
-3. Upload every fetched path with a `Push` cache query, then report `FetchResult { flake_source }`.
+2. Serialise the tree at the pinned commit as a NAR, without a nix process. Add the NAR to the store as `<narHash>-source`, the same path `nix flake prefetch` is producing for the tree.
+3. Fetch every locked input missing from the store with `builtins.fetchTree` in an eval worker. The worker is fetching one input at a time per domain (such as `github.com`) and different domains in parallel. A failed input is skipped with a warning.
+4. Upload the source and every input path with a `Push` cache query, then report `FetchResult { flake_source }`.
 
 **Evaluate:** The worker is walking the derivations breadth-first in waves of up to 256.
 
