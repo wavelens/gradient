@@ -41,6 +41,17 @@ enum Message {
     },
 }
 
+#[derive(Proto, Debug, Clone, PartialEq)]
+#[proto(oldest = 27)]
+enum Grown {
+    Hello,
+    #[proto(28)]
+    Later {
+        #[proto(28)]
+        detail: String,
+    },
+}
+
 fn at<T: Proto>(value: &T, version: u16) -> Bytes {
     to_bytes(value, version).expect("encodes")
 }
@@ -76,6 +87,11 @@ fn a_default_field_holding_a_newer_type_raises_the_oldest_version() {
 #[test]
 fn the_enum_range_spans_its_oldest_attribute_and_newest_variant() {
     assert_eq!((Message::OLDEST, Message::NEWEST), (27, 28));
+}
+
+#[test]
+fn a_field_as_new_as_its_variant_keeps_the_oldest_version() {
+    assert_eq!((Grown::OLDEST, Grown::NEWEST), (27, 28));
 }
 
 #[test]
