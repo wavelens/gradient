@@ -51,7 +51,7 @@ import {
   ToastComponent,
 } from '@gradient/ui/ui';
 import { EvalStatusBadgeComponent, InputFetchListComponent, SegmentedBarComponent, byteSegments } from '@shared/ui';
-import { buildDuration, commitLabel, evaluationDuration, evaluationProgressText, formatEvaluationDuration, isPendingBuildStatus, isRunningEvaluationStatus } from '@shared/evaluation';
+import { buildDuration, commitLabel, evaluationDuration, evaluationProgressText, formatEvaluationDuration, isPendingBuildStatus, isRunningEvaluationStatus, phaseProgress } from '@shared/evaluation';
 import { environment } from '@environments/environment';
 
 @Component({
@@ -86,7 +86,11 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
 
   loading = signal(true);
   evaluation = signal<Evaluation | null>(null);
-  progress = signal<EvaluationProgress | null>(null);
+  private liveProgress = signal<EvaluationProgress | null>(null);
+  progress = computed(() => {
+    const ev = this.evaluation();
+    return ev ? phaseProgress(ev.status, this.liveProgress(), ev.progress) : null;
+  });
   progressText = computed(() => evaluationProgressText(this.progress()));
   fetchRows = computed(() => {
     const p = this.progress();
@@ -273,7 +277,6 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     this.evalService.getEvaluation(this.evaluationId).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (evaluation) => {
         this.evaluation.set(evaluation);
-        this.progress.set(evaluation.progress ?? null);
         this.loading.set(false);
         this.loadAccess(evaluation.task_name);
         if (this.initialBuildId) {
@@ -583,7 +586,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     const frames = this.live.connect<LiveEvent>(`/evals/${this.evaluationId}/live`).pipe(share());
     this.liveSub = frames
       .pipe(filter(e => e.event === 'evaluation.activity'))
-      .subscribe(e => this.progress.set(e.content.progress ?? null));
+      .subscribe(e => this.liveProgress.set(e.content.progress ?? null));
     this.liveSub.add(
       frames
         .pipe(
@@ -594,10 +597,8 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
         .subscribe({
           next: (evaluation) => {
             this.evaluation.set(evaluation);
-            if (evaluation.progress) this.progress.set(evaluation.progress);
             this.loadBuilds();
             if (!this.isRunningStatus(evaluation.status)) {
-              this.progress.set(null);
               this.stopLiveUpdates();
               this.updateDuration(evaluation);
               this.stopDurationTimer();

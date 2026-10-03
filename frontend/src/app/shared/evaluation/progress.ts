@@ -4,8 +4,23 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import type { EvaluationProgress, InputFetch } from '@core/models';
+import type { EvaluationProgress, EvaluationStatus, InputFetch } from '@core/models';
 import { formatBytes } from '@shared/text';
+
+const PHASE_KIND: Partial<Record<EvaluationStatus, EvaluationProgress['kind']>> = {
+  Fetching: 'fetching',
+  EvaluatingFlake: 'evaluating',
+  EvaluatingDerivation: 'evaluating',
+};
+
+export function phaseProgress(
+  status: EvaluationStatus,
+  ...candidates: (EvaluationProgress | null | undefined)[]
+): EvaluationProgress | null {
+  const kind = PHASE_KIND[status];
+  if (!kind) return null;
+  return candidates.find(p => p?.kind === kind) ?? null;
+}
 
 export function evaluationProgressText(progress: EvaluationProgress | null | undefined): string | null {
   if (progress?.kind !== 'evaluating') return null;

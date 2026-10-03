@@ -300,7 +300,7 @@ describe('TaskDetailComponent - in-progress state (#452)', () => {
 
 describe('TaskDetailComponent - evaluation progress', () => {
   it('shows activity for the selected evaluation without reloading the task', () => {
-    const { fixture, tasksService, frames } = setup({ managed: false, canEdit: true, canTrigger: true }, { primaryStatus: 'Fetching' });
+    const { fixture, tasksService, frames } = setup({ managed: false, canEdit: true, canTrigger: true }, { primaryStatus: 'EvaluatingFlake' });
     const getTask = vi.spyOn(tasksService, 'getTask');
     frames.next({ event: 'evaluation.activity', at: '', content: { evaluation_id: 'e1', progress: { kind: 'evaluating', thunks: 7 } } });
     expect(fixture.componentInstance.selectedProgress()).toEqual({ kind: 'evaluating', thunks: 7 });
@@ -315,6 +315,40 @@ describe('TaskDetailComponent - evaluation progress', () => {
     });
     fixture.detectChanges();
     expect(fixture.nativeElement.querySelector('gr-input-fetch-list .input-row')?.textContent).toContain('nixpkgs');
+  });
+
+  it('drops the input list once the evaluation moves past Fetching', () => {
+    const inputs = [{ name: 'nixpkgs', state: 'Done' as const, downloaded_bytes: 40, expected_bytes: 40 }];
+    const { fixture } = setup({ managed: false, canEdit: true, canTrigger: true }, {
+      primaryStatus: 'EvaluatingFlake',
+      primary: { progress: { kind: 'fetching', inputs } },
+    });
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('gr-input-fetch-list')).toBeNull();
+    expect(fixture.nativeElement.querySelector('.panel gr-loading-spinner')?.textContent).toContain('packages appear');
+  });
+
+  it('falls back to the static text while Building, even with a late thunk frame', () => {
+    const { fixture, frames } = setup({ managed: false, canEdit: true, canTrigger: true }, { primaryStatus: 'Building' });
+    frames.next({ event: 'evaluation.activity', at: '', content: { evaluation_id: 'e1', progress: { kind: 'evaluating', thunks: 7 } } });
+    fixture.detectChanges();
+    expect(fixture.componentInstance.selectedProgress()).toBeNull();
+    expect(fixture.nativeElement.querySelector('.panel gr-loading-spinner')?.textContent).not.toContain('thunks');
+  });
+
+  it('keeps the latest frame of each running evaluation apart', () => {
+    const { fixture, frames } = setup({ managed: false, canEdit: true, canTrigger: true }, {
+      primaryStatus: 'EvaluatingFlake',
+      extraEvals: [evalSummary('e2', 'EvaluatingDerivation'), evalSummary('e3', 'Completed')],
+    });
+    const comp = fixture.componentInstance;
+    frames.next({ event: 'evaluation.activity', at: '', content: { evaluation_id: 'e3', progress: { kind: 'evaluating', thunks: 1 } } });
+    frames.next({ event: 'evaluation.activity', at: '', content: { evaluation_id: 'e1', progress: { kind: 'evaluating', thunks: 7 } } });
+    frames.next({ event: 'evaluation.activity', at: '', content: { evaluation_id: 'e2', progress: { kind: 'evaluating', thunks: 9 } } });
+    expect(comp.selectedProgress()).toEqual({ kind: 'evaluating', thunks: 7 });
+    comp.selectedId.set('e2');
+    expect(comp.selectedProgress()).toEqual({ kind: 'evaluating', thunks: 9 });
+    expect(Object.keys((comp as unknown as { activity: () => object }).activity())).toEqual(['e1', 'e2']);
   });
 });
 

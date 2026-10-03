@@ -539,11 +539,13 @@ describe('EvaluationLogComponent', () => {
   });
 
   describe('evaluation progress', () => {
-    it('applies activity frames without refetching the evaluation', () => {
+    const rows = (name: string) => [{ name, state: 'Fetching' as const, downloaded_bytes: 1, expected_bytes: 0 }];
+
+    function setupLive(progress: Evaluation['progress']) {
       const frames = new Subject<LiveEvent>();
       const getEvaluation = vi.fn(() => of({
         id: 'eval-1', status: 'Fetching', created_at: '2026-01-01T00:00:00', updated_at: '2026-01-01T00:00:00',
-        started_at: '2026-01-01T00:00:00', finished_at: null, trigger: null, progress: { kind: 'fetching', inputs: [] },
+        started_at: '2026-01-01T00:00:00', finished_at: null, trigger: null, progress,
       }));
       TestBed.configureTestingModule({
         imports: [EvaluationLogComponent],
@@ -566,12 +568,31 @@ describe('EvaluationLogComponent', () => {
       });
       const fixture = TestBed.createComponent(EvaluationLogComponent);
       fixture.componentInstance.ngOnInit();
+      return { fixture, frames, getEvaluation };
+    }
+
+    it('applies activity frames without refetching the evaluation', () => {
+      const { fixture, frames, getEvaluation } = setupLive({ kind: 'fetching', inputs: [] });
       expect(fixture.componentInstance.progress()).toEqual({ kind: 'fetching', inputs: [] });
       getEvaluation.mockClear();
 
-      frames.next({ event: 'evaluation.activity', at: '', content: { evaluation_id: 'eval-1', progress: { kind: 'evaluating', thunks: 5 } } });
-      expect(fixture.componentInstance.progress()).toEqual({ kind: 'evaluating', thunks: 5 });
+      frames.next({ event: 'evaluation.activity', at: '', content: { evaluation_id: 'eval-1', progress: { kind: 'fetching', inputs: rows('nixpkgs') } } });
+      expect(fixture.componentInstance.progress()).toEqual({ kind: 'fetching', inputs: rows('nixpkgs') });
       expect(getEvaluation).not.toHaveBeenCalled();
+      fixture.detectChanges();
+      expect(fixture.nativeElement.querySelector('gr-input-fetch-list .input-row')?.textContent).toContain('nixpkgs');
+      fixture.destroy();
+    });
+
+    it('keeps a live frame over an older snapshot from a refetch', async () => {
+      const { fixture, frames, getEvaluation } = setupLive({ kind: 'fetching', inputs: rows('stale') });
+      frames.next({ event: 'evaluation.activity', at: '', content: { evaluation_id: 'eval-1', progress: { kind: 'fetching', inputs: rows('live') } } });
+      getEvaluation.mockClear();
+
+      frames.next({ event: 'build.status', at: '', content: {} } as LiveEvent);
+      await new Promise(resolve => setTimeout(resolve, 350));
+      expect(getEvaluation).toHaveBeenCalled();
+      expect(fixture.componentInstance.progress()).toEqual({ kind: 'fetching', inputs: rows('live') });
       fixture.destroy();
     });
   });

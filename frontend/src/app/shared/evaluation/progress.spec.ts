@@ -5,7 +5,7 @@
  */
 
 import type { InputFetch, InputFetchState } from '@core/models';
-import { evaluationProgressText, inputFetchLabel, inputFetchRatio } from './progress';
+import { evaluationProgressText, inputFetchLabel, inputFetchRatio, phaseProgress } from './progress';
 
 const row = (state: InputFetchState, downloaded_bytes: number, expected_bytes: number): InputFetch =>
   ({ name: 'nixpkgs', state, downloaded_bytes, expected_bytes });
@@ -18,6 +18,22 @@ describe('evaluationProgressText', () => {
   it('has no text for fetching or missing progress', () => {
     expect(evaluationProgressText({ kind: 'fetching', inputs: [] })).toBeNull();
     expect(evaluationProgressText(undefined)).toBeNull();
+  });
+});
+
+describe('phaseProgress', () => {
+  const fetching = { kind: 'fetching' as const, inputs: [] };
+  const evaluating = { kind: 'evaluating' as const, thunks: 3 };
+
+  it('takes the first candidate of the kind the status belongs to', () => {
+    expect(phaseProgress('Fetching', null, fetching)).toBe(fetching);
+    expect(phaseProgress('EvaluatingFlake', fetching, evaluating)).toBe(evaluating);
+    expect(phaseProgress('EvaluatingDerivation', fetching)).toBeNull();
+  });
+
+  it('has no progress outside the fetching and evaluating statuses', () => {
+    expect(phaseProgress('Building', evaluating)).toBeNull();
+    expect(phaseProgress('Queued', fetching)).toBeNull();
   });
 });
 

@@ -32,7 +32,7 @@ function percent(row: InputFetch): number | null {
   imports: [SegmentedBarComponent],
   template: `
     <ul class="input-list">
-      @for (row of rows(); track row.name) {
+      @for (row of rows(); track $index) {
         <li class="input-row" [attr.data-state]="row.state">
           <span class="input-name">{{ row.name }}</span>
           <gr-segmented-bar class="input-bar" [segments]="row.segments"
