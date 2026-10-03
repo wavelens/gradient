@@ -46,6 +46,23 @@ impl ChangeReporter {
     }
 }
 
+pub(crate) async fn resend_during<T>(
+    sink: &dyn EvalProgressSink,
+    sent: Option<EvalProgress>,
+    work: impl Future<Output = T>,
+) -> T {
+    let Some(sent) = sent else {
+        return work.await;
+    };
+    let mut reporter = ChangeReporter {
+        last: Some((sent.clone(), Instant::now())),
+    };
+    tokio::select! {
+        out = work => out,
+        never = reporter.run(sink, || Some(sent.clone())) => match never {},
+    }
+}
+
 pub(crate) fn thunk_progress(thunks: u64) -> Option<EvalProgress> {
     (thunks > 0).then_some(EvalProgress::Evaluating { thunks })
 }
@@ -109,6 +126,21 @@ mod tests {
         assert_eq!(sent.0.lock().len(), 1);
         tokio::select! { _ = &mut run => {}, () = tokio::time::sleep(Duration::from_secs(1)) => {} }
         assert_eq!(sent.0.lock().len(), 2);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_sent_snapshot_is_repeated_every_thirty_seconds_while_the_work_runs() {
+        let sent = Sent::default();
+        let fetching = EvalProgress::Fetching { inputs: vec![] };
+
+        resend_during(
+            &sent,
+            Some(fetching.clone()),
+            tokio::time::sleep(Duration::from_secs(65)),
+        )
+        .await;
+
+        assert_eq!(*sent.0.lock(), vec![fetching.clone(), fetching]);
     }
 
     #[tokio::test]

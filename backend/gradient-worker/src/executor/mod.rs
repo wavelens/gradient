@@ -262,19 +262,13 @@ impl JobExecutor {
                     )
                     .await?;
 
-                    let sizes = vec![None; outcome.input_paths.len()];
-                    let cache_entries =
-                        query_fetched_paths(updater, outcome.input_paths.clone(), sizes).await?;
-                    {
-                        let mut push = updater.phase(JobPhase::PushInputs);
-                        push.record(cache_entries.len() as u32, 0);
-                        upload_all(updater, pair_with_store(cache_entries, &self.store), None)
-                            .await?;
-                    }
-
-                    updater
-                        .report_fetch_result(Some(outcome.source_path.clone()))
-                        .await?;
+                    let sink = gradient_wire::traits::JobReporter::eval_progress_sink(&*updater);
+                    progress_report::resend_during(
+                        &*sink,
+                        outcome.progress,
+                        self.push_inputs(updater, &outcome.input_paths, &outcome.source_path),
+                    )
+                    .await?;
                     local_flake_path = Some(outcome.source_path);
                 }
                 FlakeStep::EvaluateFlake => {
@@ -301,6 +295,25 @@ impl JobExecutor {
             }
         }
         Ok(())
+    }
+
+    async fn push_inputs(
+        &self,
+        updater: &JobUpdater,
+        input_paths: &[String],
+        source_path: &str,
+    ) -> Result<()> {
+        let sizes = vec![None; input_paths.len()];
+        let cache_entries = query_fetched_paths(updater, input_paths.to_vec(), sizes).await?;
+        {
+            let mut push = updater.phase(JobPhase::PushInputs);
+            push.record(cache_entries.len() as u32, 0);
+            upload_all(updater, pair_with_store(cache_entries, &self.store), None).await?;
+        }
+
+        updater
+            .report_fetch_result(Some(source_path.to_owned()))
+            .await
     }
 
     async fn adopt_realised<'a>(
