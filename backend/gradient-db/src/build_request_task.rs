@@ -6,8 +6,7 @@
 
 use gradient_types::*;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, Condition, ConnectionTrait, DbErr, EntityTrait, IntoActiveModel,
-    QueryFilter, SqlErr,
+    ColumnTrait, Condition, ConnectionTrait, DbErr, EntityTrait, IntoActiveModel, QueryFilter,
 };
 
 pub const BUILD_REQUEST_TASK_NAME: &str = "build-request";
@@ -22,7 +21,18 @@ pub async fn ensure_build_request_task<C: ConnectionTrait>(
         return Ok(existing);
     }
 
-    let task = MTask {
+    ETask::insert(new_task(project, created_by, keep_evaluations).into_active_model())
+        .on_conflict_do_nothing_on([CTask::Project, CTask::Name])
+        .exec_without_returning(db)
+        .await?;
+
+    find(db, project).await?.ok_or_else(|| {
+        DbErr::RecordNotFound(format!("{BUILD_REQUEST_TASK_NAME} task of {project}"))
+    })
+}
+
+fn new_task(project: ProjectId, created_by: UserId, keep_evaluations: i32) -> MTask {
+    MTask {
         id: TaskId::now_v7(),
         project,
         name: BUILD_REQUEST_TASK_NAME.to_string(),
@@ -40,15 +50,6 @@ pub async fn ensure_build_request_task<C: ConnectionTrait>(
         concurrency: ConcurrencyPolicy::All,
         sign_cache: true,
         ..Default::default()
-    }
-    .into_active_model();
-
-    match task.insert(db).await {
-        Ok(row) => Ok(row),
-        Err(err) if matches!(err.sql_err(), Some(SqlErr::UniqueConstraintViolation(_))) => {
-            find(db, project).await?.ok_or(err)
-        }
-        Err(err) => Err(err),
     }
 }
 
@@ -109,5 +110,34 @@ mod tests {
         let log = format!("{:?}", db.into_transaction_log());
         assert!(log.contains("INSERT INTO"), "{log}");
         assert!(log.contains("build-request"), "{log}");
+    }
+
+    #[tokio::test]
+    async fn a_concurrent_insert_returns_the_task_that_won() {
+        let winner = MTask {
+            id: TaskId::now_v7(),
+            name: BUILD_REQUEST_TASK_NAME.to_string(),
+            ..Default::default()
+        };
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([Vec::<MTask>::new()])
+            .append_exec_results([MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 0,
+            }])
+            .append_query_results([vec![winner.clone()]])
+            .into_connection();
+
+        let task = ensure_build_request_task(&db, ProjectId::now_v7(), UserId::now_v7(), 5)
+            .await
+            .expect("task");
+        assert_eq!(task.id, winner.id);
+        let log = db.into_transaction_log();
+        assert!(
+            log.iter().flat_map(|t| t.statements()).any(|s| s
+                .sql
+                .contains(r#"ON CONFLICT ("project", "name") DO NOTHING"#)),
+            "{log:?}"
+        );
     }
 }
