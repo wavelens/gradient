@@ -64,6 +64,34 @@ The Nix daemon is opening the connection as `root` for substituters. Plain `nix 
 - The evaluation is staying in building while the connection is open.
 - Build logs are streaming back with the package name in front of each line.
 
+## 5. Add a Remote Builder
+
+The `client` module is registering Gradient as a Nix remote builder. Nix is then sending builds for the listed systems to the CI workers.
+
+```nix
+# flake.nix
+nixosConfigurations.laptop = nixpkgs.lib.nixosSystem {
+  modules = [
+    ./configuration.nix
+    gradient.nixosModules.client
+  ];
+};
+```
+
+```nix
+# configuration.nix
+nix.gradient-ssh = {
+  enable = true;
+  host = "ci.example.com";
+  project = "myproject";
+  identityFile = "/root/.ssh/gradient"; # (1)!
+  systems = [ "x86_64-linux" "aarch64-linux" ];
+  supportedFeatures = [ "big-parallel" "kvm" "nixos-test" ];
+};
+```
+
+1.  The module is writing the SSH settings of step 3 for this host. The Nix daemon is reading the key as `root`.
+
 ## Verify Deployment
 
 ```sh
@@ -75,7 +103,6 @@ The command is printing the store URL and `Trusted: 0`. A build request is visib
 ## Limits
 
 - Gradient is not supporting `ssh://` (`nix-store --serve`). `--build-host` is needing the `ssh-ng://` prefix.
-- Gradient is not supporting Nix's `builders` setting (`--builders ssh-ng://...`).
 - Gradient is rejecting content-addressed derivations.
 - `nix build --store` is needing `--eval-store auto`. Gradient is not taking evaluation writes.
 - A closed connection is aborting its unfinished builds.

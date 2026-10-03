@@ -28,7 +28,7 @@ Open **Settings -> API Keys -> New API Key** and set **Scope** Project to the ta
 nixosConfigurations.office-pc = nixpkgs.lib.nixosSystem {
   modules = [
     ./configuration.nix
-    gradient.nixosModules.deploy
+    gradient.nixosModules.client
   ];
 };
 ```

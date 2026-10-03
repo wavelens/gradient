@@ -6,7 +6,7 @@
 
 { pkgs, ... }: let
   target = { lib, pkgs, ... }: {
-    imports = [ ../../../modules/gradient-deploy.nix ];
+    imports = [ ../../../modules/gradient-client ];
 
     networking.firewall.enable = false;
     documentation.enable = false;
