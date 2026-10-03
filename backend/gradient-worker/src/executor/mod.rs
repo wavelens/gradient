@@ -262,9 +262,9 @@ impl JobExecutor {
                     )
                     .await?;
 
-                    let sizes = vec![None; outcome.archived_paths.len()];
+                    let sizes = vec![None; outcome.input_paths.len()];
                     let cache_entries =
-                        query_fetched_paths(updater, outcome.archived_paths.clone(), sizes).await?;
+                        query_fetched_paths(updater, outcome.input_paths.clone(), sizes).await?;
                     {
                         let mut push = updater.phase(JobPhase::PushInputs);
                         push.record(cache_entries.len() as u32, 0);

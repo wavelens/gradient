@@ -95,14 +95,6 @@ pub enum SourceError {
     GitOutputParsing,
     #[error("Insufficient commit information returned from git")]
     InsufficientCommitInfo,
-    #[error("Nix command not found or not in PATH")]
-    NixNotFound,
-    #[error("SSH authentication failed for flake input")]
-    FlakeSSHAuth,
-    #[error("Network connection failed while fetching flake inputs")]
-    FlakeNetworkConnection,
-    #[error("Nix flake archive failed: {stderr}")]
-    NixFlakeArchiveFailed { stderr: String },
     #[error("URL parsing failed")]
     UrlParsing,
     #[error("Unable to extract hash from Git URL")]

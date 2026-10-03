@@ -22,7 +22,7 @@ use crate::worker_pool::{DownloadTarget, InputBoard, InputFetcher};
 
 pub struct FetchOutcome {
     pub source_path: String,
-    pub archived_paths: Vec<String>,
+    pub input_paths: Vec<String>,
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
@@ -74,7 +74,7 @@ pub async fn fetch_repository(
             (source_path, tmp_path)
         }
         FlakeSource::Cached { store_path } => {
-            debug!(%store_path, has_ssh_key = ssh_key.is_some(), "archiving cached build source");
+            debug!(%store_path, has_ssh_key = ssh_key.is_some(), "using the cached build source");
             (store_path.clone(), store_path.clone())
         }
     };
@@ -118,7 +118,7 @@ pub async fn fetch_repository(
     let key_env = ssh_key_env(ssh_key.as_deref(), binpath_ssh).await?;
     let git_ssh_command = key_env.as_ref().map(|(_, command)| command.clone());
     let sink = updater.eval_progress_sink();
-    let (mut archived_paths, input_warnings) =
+    let (mut input_paths, input_warnings) =
         fetch_inputs(inputs, store, fetcher, &*sink, git_ssh_command, &mut abort).await?;
     for msg in &input_warnings {
         updater
@@ -129,12 +129,12 @@ pub async fn fetch_repository(
             )
             .await?;
     }
-    archived_paths.push(source_path.clone());
-    require_present(store, &archived_paths).await?;
-    info!(%source_path, inputs = archived_paths.len(), "flake inputs in the nix store");
+    input_paths.push(source_path.clone());
+    require_present(store, &input_paths).await?;
+    info!(%source_path, inputs = input_paths.len(), "flake inputs in the nix store");
     Ok(FetchOutcome {
         source_path,
-        archived_paths,
+        input_paths,
     })
 }
 
@@ -790,7 +790,7 @@ mod tests {
 
         assert!(outcome.source_path.starts_with("/nix/store/"));
         assert!(outcome.source_path.ends_with("-source"));
-        assert_eq!(outcome.archived_paths, vec![outcome.source_path.clone()]);
+        assert_eq!(outcome.input_paths, vec![outcome.source_path.clone()]);
         assert!(store.has_path(&outcome.source_path).await.unwrap());
         assert!(matches!(reporter.events()[0], ReportedEvent::Fetching));
     }
