@@ -38,6 +38,7 @@ let
       (lib.fileset.fileFilter (file: file.hasExt "sql") unfilteredRoot)
       (lib.fileset.fileFilter (file: file.hasExt "json") ../../backend/gradient-db/tests)
       (lib.fileset.fileFilter (file: file.hasExt "json") ../../backend/gradient-daemon/tests)
+      ../../backend/gradient-wire/schema
     ];
   };
 

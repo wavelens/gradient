@@ -14,6 +14,7 @@ pub mod codec;
 pub mod constants;
 pub mod limiter;
 pub mod messages;
+pub mod schema;
 pub mod server;
 pub mod session;
 pub mod traits;
