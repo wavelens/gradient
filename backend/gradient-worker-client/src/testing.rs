@@ -239,7 +239,7 @@ impl ProtoPeer {
             deriver: None,
             ca: None,
         };
-        upload_nar(&self.uploads, job_id, store_path, source)
+        upload_nar(&self.uploads, job_id, store_path, source, &mut |_| {})
             .await
             .map(drop)
     }
