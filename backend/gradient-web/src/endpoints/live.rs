@@ -198,6 +198,7 @@ fn build_frame(
 ) -> Option<String> {
     match &env.event {
         Event::BuildProgress(p) if p.derivation_build == shared_build => frame(env),
+        Event::EvaluationActivity(_) => None,
         _ => eval_frame(env, eval_id),
     }
 }
@@ -284,12 +285,14 @@ mod tests {
     }
 
     #[test]
-    fn both_channels_forward_their_activity() {
+    fn the_task_and_evaluation_channels_forward_activity_and_the_build_channel_does_not() {
         assert!(eval_frame(&activity(eid(1), Some(tid(1))), eid(1)).is_some());
         assert!(eval_frame(&activity(eid(2), Some(tid(1))), eid(1)).is_none());
         let mut known = HashSet::new();
         assert!(task_frame(&activity(eid(1), Some(tid(1))), tid(1), &mut known).is_some());
         assert!(task_frame(&activity(eid(1), Some(tid(2))), tid(1), &mut known).is_none());
+        let shared_build = DerivationBuildId::new(Uuid::from_u128(2));
+        assert!(build_frame(&activity(eid(1), Some(tid(1))), eid(1), shared_build).is_none());
     }
 
     #[test]
