@@ -26,6 +26,7 @@ fn task_facts_sql() -> String {
             JOIN project sproj ON sproj.id = st.project WHERE s.\"user\" = $1 AND sproj.public) \
         SELECT p.name AS project, t.name AS task, \
             EXISTS (SELECT 1 FROM user_task_star s WHERE s.\"user\" = $1 AND s.task = t.id) AS starred, \
+            EXISTS (SELECT 1 FROM project_access ta WHERE ta.project = t.project AND ta.\"user\" = $1 AND ta.via_team) AS team, \
             l.id AS latest_id, l.status AS latest_status, encode(c.hash, 'hex') AS latest_commit, \
             l.created_at AS latest_created_at, pv.id AS previous_id, \
             coalesce(a.recent_14d, 0) AS recent_14d, sp.speed_ms \
@@ -103,6 +104,7 @@ pub struct TaskFactsRow {
     pub latest: Option<(EvaluationId, EvaluationStatus, String, NaiveDateTime)>,
     pub previous: Option<EvaluationId>,
     pub recent_14d: i64,
+    pub team: bool,
     pub speed_ms: Option<i64>,
 }
 
@@ -145,6 +147,7 @@ fn task_facts_row(r: &QueryResult) -> Result<TaskFactsRow, DbErr> {
         project: r.try_get("", "project")?,
         task: r.try_get("", "task")?,
         starred: r.try_get("", "starred")?,
+        team: r.try_get("", "team")?,
         latest: latest(r)?,
         previous: r
             .try_get::<Option<Uuid>>("", "previous_id")?

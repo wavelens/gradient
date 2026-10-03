@@ -30,4 +30,12 @@ pub struct PermissionsArgs {
     /// or `everyone` (any authenticated user).
     #[arg(long = "permissions-create-cache", value_enum, env = "GRADIENT_PERMISSIONS_CREATE_CACHE", default_value_t = CreatePermission::Everyone)]
     pub create_cache: CreatePermission,
+    #[arg(
+        long = "permissions-create-team",
+        value_enum,
+        env = "GRADIENT_PERMISSIONS_CREATE_TEAM",
+        default_value_t = CreatePermission::Everyone,
+        help = "Who may create teams through the API: `none` (only the declarative state), `superusers`, or `everyone` (any authenticated user)."
+    )]
+    pub create_team: CreatePermission,
 }

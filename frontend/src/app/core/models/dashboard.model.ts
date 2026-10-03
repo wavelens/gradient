@@ -6,7 +6,7 @@
 
 import { EvaluationStatus } from './task.model';
 
-export type Tier = 'starred_active' | 'active' | 'starred' | 'member';
+export type Tier = 'starred_active' | 'active' | 'starred' | 'team' | 'member';
 export type DashboardFilter = 'all' | 'failing' | 'starred';
 
 export interface HistoryBar {

@@ -17,16 +17,18 @@ pub enum Tier {
     StarredActive,
     Active,
     Starred,
+    Team,
     Member,
 }
 
 impl Tier {
-    pub fn of(starred: bool, active: bool) -> Self {
-        match (starred, active) {
-            (true, true) => Tier::StarredActive,
-            (false, true) => Tier::Active,
-            (true, false) => Tier::Starred,
-            (false, false) => Tier::Member,
+    pub fn of(starred: bool, active: bool, team: bool) -> Self {
+        match (starred, active, team) {
+            (true, true, _) => Tier::StarredActive,
+            (false, true, _) => Tier::Active,
+            (true, false, _) => Tier::Starred,
+            (false, false, true) => Tier::Team,
+            (false, false, false) => Tier::Member,
         }
     }
 }
@@ -63,6 +65,7 @@ pub struct TaskFacts {
     pub latest: Option<Latest>,
     pub previous: Option<EvaluationId>,
     pub recent_14d: i64,
+    pub team: bool,
     pub speed_ms: Option<i64>,
 }
 
@@ -105,7 +108,7 @@ impl TaskRow {
             .is_some_and(|l| l.status == EvaluationStatus::Failed)
             || latest_outcomes.is_some_and(|o| o.failing > 0);
         TaskRow {
-            tier: Tier::of(f.starred, f.recent_14d > 0),
+            tier: Tier::of(f.starred, f.recent_14d > 0, f.team),
             entry_points: latest_outcomes,
             delta,
             failing,
@@ -192,6 +195,7 @@ mod tests {
         task: &str,
         starred: bool,
         recent: i64,
+        team: bool,
         latest: Option<(EvaluationStatus, u32)>,
     ) -> TaskFacts {
         TaskFacts {
@@ -206,6 +210,7 @@ mod tests {
             }),
             previous: Some(EvaluationId::now_v7()),
             recent_14d: recent,
+            team,
             speed_ms: Some(60_000),
         }
     }
@@ -240,30 +245,76 @@ mod tests {
     }
 
     #[test]
-    fn tiers_follow_star_then_activity() {
-        assert_eq!(Tier::of(true, true), Tier::StarredActive);
-        assert_eq!(Tier::of(false, true), Tier::Active);
-        assert_eq!(Tier::of(true, false), Tier::Starred);
-        assert_eq!(Tier::of(false, false), Tier::Member);
+    fn tiers_follow_star_then_activity_then_team() {
+        assert_eq!(Tier::of(true, true, false), Tier::StarredActive);
+        assert_eq!(Tier::of(false, true, true), Tier::Active);
+        assert_eq!(Tier::of(true, false, true), Tier::Starred);
+        assert_eq!(Tier::of(false, false, true), Tier::Team);
+        assert_eq!(Tier::of(false, false, false), Tier::Member);
+    }
+
+    #[test]
+    fn team_tasks_rank_after_starred_and_before_direct_memberships() {
+        let mut rows: Vec<TaskRow> = vec![
+            facts(
+                "member",
+                false,
+                0,
+                false,
+                Some((EvaluationStatus::Completed, 21)),
+            ),
+            facts(
+                "team",
+                false,
+                0,
+                true,
+                Some((EvaluationStatus::Completed, 1)),
+            ),
+            facts(
+                "starred",
+                true,
+                0,
+                false,
+                Some((EvaluationStatus::Completed, 2)),
+            ),
+        ]
+        .into_iter()
+        .map(|f| TaskRow::build(f, &HashMap::new()))
+        .collect();
+        rank(&mut rows);
+        let names: Vec<&str> = rows.iter().map(|r| r.task.as_str()).collect();
+        assert_eq!(names, ["starred", "team", "member"]);
     }
 
     #[test]
     fn delta_is_failing_growth_once_latest_finished() {
-        let f = facts("a", false, 1, Some((EvaluationStatus::Completed, 20)));
+        let f = facts(
+            "a",
+            false,
+            1,
+            false,
+            Some((EvaluationStatus::Completed, 20)),
+        );
         let o = outcomes(&f, 3, 1);
         assert_eq!(TaskRow::build(f, &o).delta, Some(2));
     }
 
     #[test]
     fn delta_waits_for_a_running_latest() {
-        let f = facts("a", false, 1, Some((EvaluationStatus::Building, 20)));
+        let f = facts("a", false, 1, false, Some((EvaluationStatus::Building, 20)));
         let o = outcomes(&f, 3, 1);
         assert_eq!(TaskRow::build(f, &o).delta, None);
     }
 
     #[test]
     fn delta_needs_a_previous() {
-        let mut f = facts("a", false, 1, Some((EvaluationStatus::Completed, 20)));
+        let mut f = facts(
+            "a",
+            false,
+            1,
+            false,
+            Some((EvaluationStatus::Completed, 20)),
+        );
         let o = outcomes(&f, 3, 1);
         f.previous = None;
         assert_eq!(TaskRow::build(f, &o).delta, None);
@@ -271,7 +322,7 @@ mod tests {
 
     #[test]
     fn row_without_evaluations() {
-        let row = TaskRow::build(facts("a", false, 0, None), &HashMap::new());
+        let row = TaskRow::build(facts("a", false, 0, false, None), &HashMap::new());
         assert!(row.latest.is_none());
         assert_eq!(row.delta, None);
         assert_eq!(row.tier, Tier::Member);
@@ -280,9 +331,15 @@ mod tests {
 
     #[test]
     fn failing_means_failed_or_failing_entry_points() {
-        let f = facts("a", false, 1, Some((EvaluationStatus::Failed, 20)));
+        let f = facts("a", false, 1, false, Some((EvaluationStatus::Failed, 20)));
         assert!(TaskRow::build(f, &HashMap::new()).matches(Filter::Failing));
-        let f = facts("b", false, 1, Some((EvaluationStatus::Completed, 20)));
+        let f = facts(
+            "b",
+            false,
+            1,
+            false,
+            Some((EvaluationStatus::Completed, 20)),
+        );
         let o = outcomes(&f, 1, 1);
         assert!(TaskRow::build(f, &o).matches(Filter::Failing));
     }
@@ -290,21 +347,41 @@ mod tests {
     #[test]
     fn rank_orders_tier_then_newest() {
         let mut rows: Vec<TaskRow> = vec![
-            facts("member", false, 0, Some((EvaluationStatus::Completed, 21))),
+            facts(
+                "member",
+                false,
+                0,
+                false,
+                Some((EvaluationStatus::Completed, 21)),
+            ),
             facts(
                 "active_old",
                 false,
                 2,
+                false,
                 Some((EvaluationStatus::Completed, 10)),
             ),
-            facts("starred", true, 0, Some((EvaluationStatus::Completed, 1))),
+            facts(
+                "starred",
+                true,
+                0,
+                false,
+                Some((EvaluationStatus::Completed, 1)),
+            ),
             facts(
                 "active_new",
                 false,
                 2,
+                false,
                 Some((EvaluationStatus::Completed, 22)),
             ),
-            facts("both", true, 1, Some((EvaluationStatus::Completed, 2))),
+            facts(
+                "both",
+                true,
+                1,
+                false,
+                Some((EvaluationStatus::Completed, 2)),
+            ),
         ]
         .into_iter()
         .map(|f| TaskRow::build(f, &HashMap::new()))
@@ -320,8 +397,14 @@ mod tests {
     #[test]
     fn counts_cover_every_row() {
         let rows: Vec<TaskRow> = vec![
-            facts("a", true, 1, Some((EvaluationStatus::Failed, 20))),
-            facts("b", false, 1, Some((EvaluationStatus::Completed, 20))),
+            facts("a", true, 1, false, Some((EvaluationStatus::Failed, 20))),
+            facts(
+                "b",
+                false,
+                1,
+                false,
+                Some((EvaluationStatus::Completed, 20)),
+            ),
         ]
         .into_iter()
         .map(|f| TaskRow::build(f, &HashMap::new()))
@@ -374,8 +457,14 @@ mod tests {
     #[test]
     fn rank_puts_tasks_without_evaluations_last_in_their_tier() {
         let mut rows: Vec<TaskRow> = vec![
-            facts("never", true, 0, None),
-            facts("old", true, 0, Some((EvaluationStatus::Completed, 1))),
+            facts("never", true, 0, false, None),
+            facts(
+                "old",
+                true,
+                0,
+                false,
+                Some((EvaluationStatus::Completed, 1)),
+            ),
         ]
         .into_iter()
         .map(|f| TaskRow::build(f, &HashMap::new()))

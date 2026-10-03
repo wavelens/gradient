@@ -189,6 +189,7 @@ Declarative entities under `services.gradient.state` are in the [state reference
 |---|---|---|---|---|
 | `permissions.createCache` | one of `none` `superusers` `everyone` | `"everyone"` | `GRADIENT_PERMISSIONS_CREATE_CACHE` | Who may create caches through the API: `none` (only the declarative state), `superusers`, or `everyone` (any authenticated user). |
 | `permissions.createProject` | one of `none` `superusers` `everyone` | `"everyone"` | `GRADIENT_PERMISSIONS_CREATE_PROJECT` | Who may create projects through the API: `none` (only the declarative state), `superusers`, or `everyone` (any authenticated user). |
+| `permissions.createTeam` | one of `none` `superusers` `everyone` | `"everyone"` | `GRADIENT_PERMISSIONS_CREATE_TEAM` | Who may create teams through the API: `none` (only the declarative state), `superusers`, or `everyone` (any authenticated user). |
 
 ## `postgres`
 

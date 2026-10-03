@@ -18,6 +18,7 @@ async fn config_defaults_to_everyone() {
     res.assert_status_ok();
     let body: Value = res.json();
     assert_eq!(body["message"]["create_project"], "everyone");
+    assert_eq!(body["message"]["create_team"], "everyone");
     assert_eq!(body["message"]["create_cache"], "everyone");
     assert_eq!(body["message"]["github_app_enabled"], false);
 }
