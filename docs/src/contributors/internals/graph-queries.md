@@ -94,7 +94,6 @@ The instance pass is averaging nine `derivation_metric` values and four `dispatc
 | Cap | 500 nodes. The walk is still reading the edges of every kept node |
 | Cost | One query per wave, plus three for the nodes |
 | Edges | No `kind` filter, and runtime dependencies appear too. `DependencyEdge { source, target }`: `source` is first in build order, `target` second |
-| Neighbours | `GET /builds/{build}/dependencies` is listing direct dependencies |
 
 ## SQL/PGQ
 

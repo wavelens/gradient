@@ -9,17 +9,14 @@ import { Observable } from 'rxjs';
 import { ApiService } from './api.service';
 import { BuildProgress, Evaluation, EvaluationMessage } from '@core/models';
 
-export interface DependencyNode {
+export interface DependencyGraphNode {
   id: string;
+  build: string | null;
   name: string;
   path: string;
   status: string;
   created_at: string;
   updated_at: string;
-}
-
-export interface DependencyGraphNode extends DependencyNode {
-  build: string | null;
 }
 
 export interface DependencyEdge {
@@ -144,10 +141,6 @@ export class EvaluationsService {
 
   getBuildLog(buildId: string): Observable<string> {
     return this.api.get<string>(`builds/${buildId}/log`);
-  }
-
-  getBuildDependencies(buildId: string): Observable<DependencyNode[]> {
-    return this.api.get<DependencyNode[]>(`builds/${buildId}/dependencies`);
   }
 
   getBuildGraph(buildId: string): Observable<BuildGraph> {

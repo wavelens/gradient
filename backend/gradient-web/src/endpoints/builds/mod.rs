@@ -21,9 +21,7 @@ pub use self::closure::{
 pub use self::downloads::{
     BuildProduct, DownloadQuery, get_build_download, get_build_download_token, get_build_downloads,
 };
-pub use self::graph::{
-    BuildGraph, DependencyEdge, DependencyNode, get_build_dependencies, get_build_graph,
-};
+pub use self::graph::{BuildGraph, DependencyEdge, get_build_graph};
 pub use self::log::{get_build_log, post_build_log};
 pub use self::log_chunks::{
     get_build_log_chunk, get_build_log_chunks, get_build_log_lines, get_build_log_search,

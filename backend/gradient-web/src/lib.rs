@@ -564,10 +564,6 @@ pub fn create_router(state: Arc<ServerState>) -> Result<Router, InitError> {
             "/builds/{build}/log/search",
             get(builds::get_build_log_search),
         )
-        .route(
-            "/builds/{build}/dependencies",
-            get(builds::get_build_dependencies),
-        )
         .route("/builds/{build}/graph", get(builds::get_build_graph))
         .route("/builds/{build}/closure", get(builds::get_build_closure))
         .route(
