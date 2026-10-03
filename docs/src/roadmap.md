@@ -32,6 +32,10 @@ The first release with a stability pledge.
 
     Jobs that run on several workers at once. Gradient is allocating all members together. Jobs needing a fast interconnect get all members from one [zone](concepts/workers.md#zones).
 
+-   :material-console-network: **SSH Builds**
+
+    An [`ssh-ng://` store](guides/build-over-ssh.md) for every project. `nixos-rebuild --build-host` and `nix copy` talk straight to the CI workers and caches.
+
 -   :material-palette: **Corporate Design**
 
     Own logo for web interface.

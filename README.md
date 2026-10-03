@@ -100,7 +100,7 @@ A REST API backs the web UI and the CLI: [OpenAPI spec](./docs/gradient-api.yaml
 
 | Release | Highlights |
 |---|---|
-| **v2.0.0** | Stability pledge, organizations, storage migrations, continuous deep GC, cluster jobs, corporate design |
+| **v2.0.0** | Stability pledge, organizations, storage migrations, continuous deep GC, cluster jobs, SSH builds, corporate design |
 | **v2.1.0** | Multi-node evaluations |
 | **v2.2.0** | Runner workers, executing jobs outside the Nix sandbox |
 | **v3.0.0** | High availability, federation between Gradient instances |
