@@ -175,7 +175,14 @@ pub async fn link_result(
     };
     let realise_path = out_path.full_store_path();
 
-    let (cache_opts, _netrc) = cache_substituter_opts(client, started, out).await;
+    if let Some(cache) = cache_source(client, started, out).await
+        && let Err(stderr) = copy_from_cache(&cache, &realise_path).await
+    {
+        out.err(
+            ExitKind::Api,
+            untrusted_copy_message(&realise_path, &stderr, cache.public_key.as_deref()),
+        );
+    }
 
     let mut cmd = tokio::process::Command::new("nix-store");
     cmd.args([
@@ -185,7 +192,6 @@ pub async fn link_result(
         "result",
         "--indirect",
     ]);
-    cmd.args(&cache_opts);
     match cmd.output().await {
         Ok(o) if o.status.success() => out.human(format!("result -> {realise_path}")),
         Ok(o) => out.err(
@@ -200,35 +206,62 @@ pub async fn link_result(
     }
 }
 
-/// The returned netrc guard must outlive the nix process.
-async fn cache_substituter_opts(
+struct CacheSource {
+    url: String,
+    public_key: Option<String>,
+    netrc: Option<tempfile::NamedTempFile>,
+}
+
+async fn cache_source(
     client: &connector::Client,
     started: &BuildStartResponse,
     out: Output,
-) -> (Vec<String>, Option<tempfile::NamedTempFile>) {
+) -> Option<CacheSource> {
     let Some(cache) = started.cache.as_deref() else {
         out.human("Project has no cache; using local substituters only.");
-        return (Vec::new(), None);
+        return None;
     };
 
     let base = server_base(out);
-    let cache_url = format!("{}/cache/{}", base.trim_end_matches('/'), cache);
-    let mut opts = vec!["--option".into(), "extra-substituters".into(), cache_url];
+    Some(CacheSource {
+        url: format!("{}/cache/{}", base.trim_end_matches('/'), cache),
+        public_key: client.caches().public_key(cache).await.ok(),
+        netrc: private_cache_netrc(client, cache, &base, out).await,
+    })
+}
 
-    if let Ok(public_key) = client.caches().public_key(cache).await {
-        opts.push("--option".into());
-        opts.push("extra-trusted-public-keys".into());
-        opts.push(public_key);
+/// The Nix client is downloading the closure itself. A daemon is ignoring the substituters and the
+/// netrc of a user it is not trusting, but it is accepting paths signed by a key it trusts.
+async fn copy_from_cache(cache: &CacheSource, path: &str) -> Result<(), String> {
+    let mut cmd = tokio::process::Command::new("nix");
+    cmd.args([
+        "--extra-experimental-features",
+        "nix-command",
+        "copy",
+        "--from",
+        &cache.url,
+        path,
+    ]);
+    if let Some(netrc) = &cache.netrc {
+        cmd.args(["--option", "netrc-file"]).arg(netrc.path());
     }
 
-    let netrc = private_cache_netrc(client, cache, &base, out).await;
-    if let Some(file) = &netrc {
-        opts.push("--option".into());
-        opts.push("netrc-file".into());
-        opts.push(file.path().to_string_lossy().into_owned());
+    match cmd.output().await {
+        Ok(o) if o.status.success() => Ok(()),
+        Ok(o) => Err(String::from_utf8_lossy(&o.stderr).trim_end().to_owned()),
+        Err(e) => Err(format!("Failed to run nix: {e}")),
     }
+}
 
-    (opts, netrc)
+fn untrusted_copy_message(path: &str, stderr: &str, public_key: Option<&str>) -> String {
+    match public_key {
+        Some(key) if stderr.contains("lacks a signature by a trusted key") => format!(
+            "Could not copy {path} from the gradient cache: the local Nix daemon does not trust \
+             its signing key. Add `{key}` to `trusted-public-keys` in nix.conf, or add this \
+             user to `trusted-users`."
+        ),
+        _ => format!("Could not copy {path} from the gradient cache.\n{stderr}"),
+    }
 }
 
 async fn private_cache_netrc(
@@ -254,6 +287,14 @@ async fn private_cache_netrc(
 mod tests {
     use super::*;
     use reqwest::StatusCode;
+
+    #[test]
+    fn an_untrusted_signature_names_the_key_to_trust() {
+        let stderr = "error: cannot add path '/nix/store/x-ollama' because it lacks a signature by a trusted key";
+        let message = untrusted_copy_message("/nix/store/x-ollama", stderr, Some("cache:abc="));
+        assert!(message.contains("`cache:abc=`"), "{message}");
+        assert!(message.contains("trusted-public-keys"), "{message}");
+    }
 
     #[test]
     fn human_bytes_scales() {

@@ -31,6 +31,8 @@ gradient build .#hello
 
 The primary output is landing in a `result` symlink, fetched from the project cache into the local store. `--no-link` is skipping the link.
 
+The local Nix daemon is only accepting the fetched paths with the cache's public key in `trusted-public-keys`, see [Share a Cache](share-a-cache.md). A user in `trusted-users` is needing no key.
+
 The [static binary](../reference/cli.md#install) is lacking Nix support. This binary is downloading the build products into a `result/` folder instead.
 
 ## Override Inputs
