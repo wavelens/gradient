@@ -8,7 +8,7 @@ use sea_orm::{
     ColumnTrait, ConnectionTrait, DatabaseTransaction, DbErr, EntityTrait, FromQueryResult,
     QueryFilter, TransactionTrait,
 };
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 
 use gradient_types::*;
 
@@ -54,22 +54,6 @@ pub async fn output_hashes_for_drvs<C: ConnectionTrait>(
 crate::sql! {
     REFERENCES_FOR_HASHES = "SELECT hash, \"references\" FROM cached_path WHERE hash = ANY($1)",
         params = [CachedPathHashes(64)];
-}
-
-pub async fn reference_edges<C: ConnectionTrait>(
-    db: &C,
-    wanted_by: &[String],
-) -> Result<Vec<(String, String)>, DbErr> {
-    let mut edges = Vec::new();
-    for (parent, refs) in references_for_hashes(db, wanted_by).await? {
-        for token in refs {
-            if let Some(hash) = parse_reference_hash(&token) {
-                edges.push((parent.clone(), hash));
-            }
-        }
-    }
-
-    Ok(edges)
 }
 
 pub async fn references_for_hash<C: ConnectionTrait>(
@@ -150,7 +134,29 @@ where
         .collect();
     walk.commit().await?;
 
-    Ok(reached)
+    Ok(referenced_from(seed_hashes, reached))
+}
+
+/// The derivation walk reaches every output of a reached derivation, the unreferenced ones too.
+fn referenced_from(
+    seed_hashes: &[String],
+    mut reached: HashMap<String, gradient_entity::cached_path::Model>,
+) -> HashMap<String, gradient_entity::cached_path::Model> {
+    let mut queue: VecDeque<String> = seed_hashes.iter().cloned().collect();
+    let mut closure = HashMap::new();
+    while let Some(hash) = queue.pop_front() {
+        let Some(path) = reached.remove(&hash) else {
+            continue;
+        };
+        queue.extend(
+            tokens(path.references.clone())
+                .iter()
+                .filter_map(|token| parse_reference_hash(token)),
+        );
+        closure.insert(hash, path);
+    }
+
+    closure
 }
 
 pub async fn runtime_closure_size<C>(db: &C, seed_hashes: &[String]) -> Result<i64, DbErr>
@@ -221,6 +227,40 @@ mod tests {
             "{log:?}"
         );
         assert!(log[1].contains("derivation_dependency"), "{log:?}");
+    }
+
+    fn path(hash: &str, references: &str) -> gradient_entity::cached_path::Model {
+        gradient_entity::cached_path::Model {
+            hash: hash.into(),
+            package: format!("{hash}-pkg"),
+            references: Some(references.into()),
+            nar_size: Some(10),
+            ..Default::default()
+        }
+    }
+
+    #[tokio::test]
+    async fn an_output_nothing_references_is_outside_the_runtime_closure() {
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_exec_results([sea_orm::MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 0,
+            }])
+            .append_query_results([vec![
+                path("root", "root-pkg lib-pkg"),
+                path("lib", "lib-pkg"),
+                path("dev", "dev-pkg lib-pkg headers-pkg"),
+                path("headers", ""),
+            ]])
+            .into_connection();
+
+        let reached = runtime_closure_reachable(&db, &["root".to_string()])
+            .await
+            .expect("the walk runs");
+
+        let mut hashes: Vec<&str> = reached.keys().map(String::as_str).collect();
+        hashes.sort_unstable();
+        assert_eq!(hashes, ["lib", "root"]);
     }
 
     /// The walk must dedupe on the derivation alone.
