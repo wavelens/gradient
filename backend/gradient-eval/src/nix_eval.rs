@@ -4,10 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! `nix_bindings` is embedding Boehm GC, which is requiring stop-the-world signals on every thread.
-//! Tokio worker threads are blocking those signals. Every `NixEvaluator` method must run in a
-//! blocking context such as `spawn_blocking`.
-
 use std::sync::Arc;
 
 use anyhow::{Context as _, Result};
@@ -22,13 +18,17 @@ pub struct NixEvaluator {
     state: EvalState,
 }
 
-// SAFETY: NixEvaluator is only used from one thread at a time (spawn_blocking).
-unsafe impl Send for NixEvaluator {}
-unsafe impl Sync for NixEvaluator {}
+pub struct StatsReader<'ev>(&'ev EvalState);
 
-/// New-master nix is refusing to remount a read-only `/nix/store` writable outside its own mount
-/// namespace. The nix CLI is creating that namespace in `main`, and the eval worker must mirror it.
-/// This is a no-op off Linux, when not root, or when the store is already writable.
+// SAFETY: `stats_with` reads only atomic counters and `GC_get_heap_usage_safe`, so a reader may run beside the evaluating thread.
+unsafe impl Send for StatsReader<'_> {}
+
+impl StatsReader<'_> {
+    pub fn read(&self, ctx: &Context) -> Result<nix_bindings::EvalStats> {
+        Ok(self.0.stats_with(ctx)?)
+    }
+}
+
 #[cfg(target_os = "linux")]
 fn ensure_store_writable() {
     static ONCE: std::sync::Once = std::sync::Once::new();
@@ -115,12 +115,11 @@ impl NixEvaluator {
             .map_err(|e| anyhow::anyhow!("eval stats: {e}"))
     }
 
-    pub fn stats_with(&self, ctx: &Context) -> Result<nix_bindings::EvalStats> {
-        Ok(self.state.stats_with(ctx)?)
+    pub fn stats_reader(&self) -> StatsReader<'_> {
+        StatsReader(&self.state)
     }
 
     pub fn fetch_tree(&self, locked: &str, git_ssh_command: Option<&str>) -> Result<String> {
-        // The pool reads nix's internal-json progress lines from stderr while this input downloads.
         self.ctx.set_log_format("internal-json")?;
         let _restore = SshCommand::set(git_ssh_command);
         let fetched = self.fetch_tree_out_path(locked);
@@ -176,7 +175,8 @@ impl SshCommand {
         let Some(command) = command else {
             return Self(false);
         };
-        // SAFETY: the eval worker is serving this one request; its stats ticker never reads the environment.
+        // SAFETY (set and remove): the stats ticker never reads the environment, and nix's curl thread
+        // reads proxy variables only inside a transfer, which starts and ends within this fetch.
         unsafe { std::env::set_var("GIT_SSH_COMMAND", command) };
         Self(true)
     }
@@ -185,7 +185,6 @@ impl SshCommand {
 impl Drop for SshCommand {
     fn drop(&mut self) {
         if self.0 {
-            // SAFETY: see SshCommand::set.
             unsafe { std::env::remove_var("GIT_SSH_COMMAND") };
         }
     }
