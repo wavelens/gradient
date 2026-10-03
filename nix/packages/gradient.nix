@@ -39,6 +39,7 @@ let
       (lib.fileset.fileFilter (file: file.hasExt "json") ../../backend/gradient-db/tests)
       (lib.fileset.fileFilter (file: file.hasExt "json") ../../backend/gradient-daemon/tests)
       ../../backend/gradient-wire/schema
+      ../../backend/gradient-ssh/testdata
     ];
   };
 
