@@ -247,6 +247,16 @@ pub fn create_router_with_scheduler(
                 .delete(endpoints::teams::invitations::delete_team_invitation),
         )
         .route(
+            "/teams/{team}/workers",
+            get(endpoints::teams::workers::get_team_workers)
+                .post(endpoints::teams::workers::post_team_worker),
+        )
+        .route(
+            "/teams/{team}/workers/{worker_id}",
+            patch(endpoints::teams::workers::patch_team_worker)
+                .delete(endpoints::teams::workers::delete_team_worker),
+        )
+        .route(
             "/projects/{project}/ssh",
             get(projects::get_project_ssh).post(projects::post_project_ssh),
         )

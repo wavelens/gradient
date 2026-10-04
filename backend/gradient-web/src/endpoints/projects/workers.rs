@@ -8,7 +8,6 @@ use crate::access::{Caller, ProjectAccess, has_permission, load_project};
 use crate::authorization::MaybeApiKey;
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
-use base64::Engine as _;
 use chrono::NaiveDateTime;
 use gradient_core::ServerState;
 use gradient_db::permissions::Permission;
@@ -16,15 +15,12 @@ use gradient_entity::worker_registration::{
     self, ActiveModel as AWorkerRegistration, Entity as EWorkerRegistration,
     Model as MWorkerRegistration,
 };
-use gradient_entity::{base_worker, project_base_worker};
 use gradient_pool::WorkerInfo;
 use gradient_scheduler::Scheduler;
 use gradient_scheduler::connection_failures::{ConnectionFailure, ConnectionFailures};
 use gradient_types::ids::*;
-use gradient_types::{AProjectBaseWorker, EBaseWorker, EProjectBaseWorker};
 use gradient_types::{BaseResponse, MUser};
 use gradient_wire::types::GradientCapabilities;
-use rand::RngExt as _;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, PaginatorTrait, QueryFilter,
@@ -74,7 +70,8 @@ pub struct ProjectWorkerEntry {
     pub enable_fetch: bool,
     pub enable_eval: bool,
     pub enable_build: bool,
-    pub is_base: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub team: Option<String>,
     pub gradient_ci: bool,
     #[serde(flatten)]
     pub connection: WorkerConnection,
@@ -109,7 +106,7 @@ pub struct PatchWorkerRequest {
     pub enable_build: Option<bool>,
 }
 
-fn patch_edits_managed_fields(body: &PatchWorkerRequest) -> bool {
+pub(crate) fn patch_edits_managed_fields(body: &PatchWorkerRequest) -> bool {
     body.display_name.is_some()
         || body.enable_fetch.is_some()
         || body.enable_eval.is_some()
@@ -131,7 +128,7 @@ pub(crate) fn encrypt_token(crypt_file: &str, token: &str) -> WebResult<String> 
         .map_err(|e| WebError::internal(format!("encrypting the worker token failed: {e}")))
 }
 
-fn encrypt_for_dialing(
+pub(crate) fn encrypt_for_dialing(
     crypt_file: &str,
     url: Option<&str>,
     token: &str,
@@ -163,26 +160,14 @@ pub async fn post_project_worker(
     let worker_uuid = Uuid::parse_str(&body.worker_id)
         .map_err(|_| WebError::bad_request("worker_id must be a valid UUID"))?;
     let worker_id_str = worker_uuid.to_string();
+    if gradient_db::teams::workers::is_team_worker(&state.web_db, &worker_id_str).await? {
+        return Err(WebError::conflict("the worker id belongs to a team worker"));
+    }
     if body.url.as_deref().is_some_and(|u| !u.trim().is_empty()) {
         ensure_dialable_worker_id(&state, &worker_id_str).await?;
     }
 
-    let (token, return_token) = if let Some(provided) = body.token {
-        let t = provided.trim().to_string();
-        let decoded = base64::engine::general_purpose::STANDARD
-            .decode(&t)
-            .map_err(|_| WebError::bad_request("token is not valid base64"))?;
-        if decoded.len() != 48 {
-            return Err(WebError::bad_request(
-                "token must be 48 raw bytes encoded as base64 (openssl rand -base64 48)",
-            ));
-        }
-        (t, false)
-    } else {
-        let mut raw = [0u8; 48];
-        rand::rng().fill(&mut raw);
-        (base64::engine::general_purpose::STANDARD.encode(raw), true)
-    };
+    let (token, return_token) = crate::endpoints::worker_tokens::issue(body.token)?;
 
     let token_hash = password_auth::generate_hash(&token);
     let token_encrypted = encrypt_for_dialing(
@@ -228,8 +213,7 @@ pub async fn post_project_worker(
 }
 
 async fn ensure_dialable_worker_id(state: &ServerState, worker_id: &str) -> WebResult<()> {
-    let base =
-        gradient_db::projects::base_workers::worker_id_is_base(&state.web_db, worker_id).await?;
+    let team_worker = gradient_db::teams::workers::is_team_worker(&state.web_db, worker_id).await?;
 
     let gradient_ci = EWorkerRegistration::find()
         .filter(worker_registration::Column::WorkerId.eq(worker_id))
@@ -237,9 +221,9 @@ async fn ensure_dialable_worker_id(state: &ServerState, worker_id: &str) -> WebR
         .one(&state.web_db)
         .await?
         .is_some();
-    if base || gradient_ci {
+    if team_worker || gradient_ci {
         return Err(WebError::conflict(
-            "the worker id belongs to a base worker or a Gradient.CI connection",
+            "the worker id belongs to a team worker or a Gradient.CI connection",
         ));
     }
 
@@ -254,37 +238,10 @@ fn worker_live_for_project(info: &WorkerInfo, project: ProjectId) -> bool {
         .is_none_or(|peers| peers.contains(&project))
 }
 
-fn base_worker_entry(
-    bw: base_worker::Model,
-    active: bool,
-    live: Option<WorkerLiveInfo>,
-    connection: WorkerConnection,
-) -> ProjectWorkerEntry {
-    ProjectWorkerEntry {
-        active,
-        gradient_ci: bw.gradient_ci,
-        connection,
-        worker_id: bw.worker_id,
-        display_name: bw.display_name,
-        registered_at: bw.created_at,
-        url: bw.url,
-        created_by: bw.created_by,
-        enable_fetch: bw.enable_fetch,
-        enable_eval: bw.enable_eval,
-        enable_build: bw.enable_build,
-        is_base: true,
-        live,
-    }
-}
-
-fn unshadowed_base_workers(
-    base_workers: Vec<base_worker::Model>,
-    registered_worker_ids: &std::collections::HashSet<String>,
-) -> Vec<base_worker::Model> {
-    base_workers
-        .into_iter()
-        .filter(|bw| !registered_worker_ids.contains(&bw.worker_id))
-        .collect()
+pub(crate) fn live_workers(
+    workers: Vec<WorkerInfo>,
+) -> std::collections::HashMap<String, WorkerInfo> {
+    workers.into_iter().map(|w| (w.id.clone(), w)).collect()
 }
 
 pub async fn get_project_workers(
@@ -321,12 +278,7 @@ pub async fn get_project_workers(
         .all(&state.web_db)
         .await?;
 
-    let live_workers: std::collections::HashMap<String, WorkerInfo> = scheduler
-        .workers_info()
-        .await
-        .into_iter()
-        .map(|w| (w.id.clone(), w))
-        .collect();
+    let live_workers = live_workers(scheduler.workers_info().await);
 
     let live_for = |worker_id: &str| {
         live_workers
@@ -359,37 +311,33 @@ pub async fn get_project_workers(
                 enable_fetch: reg.enable_fetch,
                 enable_eval: reg.enable_eval,
                 enable_build: reg.enable_build,
-                is_base: false,
+                team: None,
                 live,
             }
         })
         .collect();
 
-    let base_workers = EBaseWorker::find()
-        .filter(base_worker::Column::Enabled.eq(true))
-        .all(&state.web_db)
-        .await?;
-    let enabled_ids: std::collections::HashSet<BaseWorkerId> = EProjectBaseWorker::find()
-        .filter(project_base_worker::Column::Project.eq(project.id))
-        .all(&state.web_db)
-        .await?
-        .into_iter()
-        .map(|r| r.base_worker)
-        .collect();
-
-    let registered_ids: std::collections::HashSet<String> =
-        entries.iter().map(|e| e.worker_id.clone()).collect();
-
-    entries.extend(
-        unshadowed_base_workers(base_workers, &registered_ids)
-            .into_iter()
-            .map(|bw| {
-                let live = live_for(&bw.worker_id);
-                let active = enabled_ids.contains(&bw.id);
-                let connection = worker_connection(&live_workers, failures, &bw.worker_id);
-                base_worker_entry(bw, active, live, connection)
-            }),
-    );
+    let team_workers =
+        gradient_db::teams::workers::team_workers_for_project(&state.web_db, project.id).await?;
+    entries.extend(team_workers.into_iter().map(|(team, worker)| {
+        let live = live_for(&worker.worker_id);
+        let connection = worker_connection(&live_workers, failures, &worker.worker_id);
+        ProjectWorkerEntry {
+            worker_id: worker.worker_id,
+            display_name: worker.display_name,
+            registered_at: worker.created_at,
+            active: worker.active,
+            url: worker.url,
+            created_by: worker.created_by,
+            enable_fetch: worker.enable_fetch,
+            enable_eval: worker.enable_eval,
+            enable_build: worker.enable_build,
+            team: Some(team),
+            gradient_ci: worker.gradient_ci,
+            connection,
+            live,
+        }
+    }));
 
     Ok(ok_json(entries))
 }
@@ -422,10 +370,6 @@ pub struct WorkerMetricsResponse {
     pub jobs_dispatched: u64,
 }
 
-fn worker_display_name(registration: Option<String>, base: Option<String>) -> Option<String> {
-    registration.or(base)
-}
-
 pub async fn get_project_worker_metrics(
     state: State<Arc<ServerState>>,
     Path((project, worker_id)): Path<(String, String)>,
@@ -449,21 +393,16 @@ pub async fn get_project_worker_metrics(
         .one(&state.web_db)
         .await?
         .map(|r| r.display_name);
-    let base_name = EBaseWorker::find()
-        .filter(base_worker::Column::WorkerId.eq(&worker_id))
-        .filter(
-            base_worker::Column::Id.in_subquery(
-                sea_orm::sea_query::Query::select()
-                    .column(project_base_worker::Column::BaseWorker)
-                    .from(project_base_worker::Entity)
-                    .and_where(project_base_worker::Column::Project.eq(project.id))
-                    .to_owned(),
-            ),
-        )
-        .one(&state.web_db)
-        .await?
-        .map(|bw| bw.display_name);
-    let display_name = worker_display_name(registration_name, base_name)
+    let team_name = match registration_name {
+        Some(_) => None,
+        None => gradient_db::teams::workers::team_workers_for_project(&state.web_db, project.id)
+            .await?
+            .into_iter()
+            .find(|(_, worker)| worker.worker_id == worker_id)
+            .map(|(_, worker)| worker.display_name),
+    };
+    let display_name = registration_name
+        .or(team_name)
         .ok_or_else(|| WebError::not_found("worker"))?;
 
     let samples = gradient_entity::worker_sample::Entity::find()
@@ -586,60 +525,10 @@ pub async fn patch_project_worker(
     )
     .await?;
 
-    if let Some(bw) = gradient_db::projects::base_workers::enabled_base_worker_by_worker_id(
-        &state.web_db,
-        &worker_id,
-    )
-    .await?
-    {
-        if patch_edits_managed_fields(&body) {
-            return Err(WebError::conflict(
-                "base workers are managed by server state",
-            ));
-        }
-
-        use gradient_entity::project_base_worker::{Column as OBWC, Entity as OBW};
-
-        match body.active {
-            Some(true) => {
-                let exists = OBW::find()
-                    .filter(OBWC::Project.eq(project.id))
-                    .filter(OBWC::BaseWorker.eq(bw.id))
-                    .one(&state.web_db)
-                    .await?
-                    .is_some();
-                if !exists {
-                    AProjectBaseWorker {
-                        id: Set(ProjectBaseWorkerId::now_v7()),
-                        project: Set(project.id),
-                        base_worker: Set(bw.id),
-                        created_by: Set(Some(user.id)),
-                        created_at: Set(gradient_types::now()),
-                    }
-                    .insert(&state.web_db)
-                    .await?;
-                }
-            }
-            Some(false) => {
-                OBW::delete_many()
-                    .filter(OBWC::Project.eq(project.id))
-                    .filter(OBWC::BaseWorker.eq(bw.id))
-                    .exec(&state.web_db)
-                    .await?;
-                let project_set = std::collections::HashSet::from([project.id]);
-                scheduler
-                    .abort_project_jobs_on_worker(&worker_id, &project_set)
-                    .await;
-            }
-            None => {}
-        }
-
-        scheduler.request_reauth(&worker_id).await;
-        if matches!(body.active, Some(true)) {
-            let _ = gradient_ci::unpark_no_workers_for_project(&state.web_db, project.id).await;
-        }
-
-        return Ok(ok_json("ok".to_string()));
+    if gradient_db::teams::workers::is_team_worker(&state.web_db, &worker_id).await? {
+        return Err(WebError::conflict(
+            "team workers are managed on the team page",
+        ));
     }
 
     let reg = EWorkerRegistration::find()
@@ -716,8 +605,6 @@ pub async fn delete_project_worker(
     )
     .await?;
 
-    // A normal registration is shadowing a base worker of the same id (#407). It is deleted first,
-    // and the base-worker guard is only a fallback.
     let result = EWorkerRegistration::delete_many()
         .filter(worker_registration::Column::PeerId.eq(project.id))
         .filter(worker_registration::Column::WorkerId.eq(&worker_id))
@@ -725,15 +612,9 @@ pub async fn delete_project_worker(
         .await?;
 
     if result.rows_affected == 0 {
-        if gradient_db::projects::base_workers::enabled_base_worker_by_worker_id(
-            &state.web_db,
-            &worker_id,
-        )
-        .await?
-        .is_some()
-        {
+        if gradient_db::teams::workers::is_team_worker(&state.web_db, &worker_id).await? {
             return Err(WebError::conflict(
-                "base workers cannot be deleted; manage them via server state",
+                "team workers are managed on the team page",
             ));
         }
 
@@ -813,20 +694,30 @@ mod tests {
 
     #[test]
     fn the_entry_flattens_its_connection_state() {
-        let entry = base_worker_entry(
-            base_worker_model(),
-            true,
-            None,
-            WorkerConnection {
+        let entry = ProjectWorkerEntry {
+            worker_id: "w1".into(),
+            display_name: "Worker 1".into(),
+            registered_at: gradient_types::now(),
+            active: true,
+            url: None,
+            created_by: None,
+            enable_fetch: true,
+            enable_eval: true,
+            enable_build: true,
+            team: None,
+            gradient_ci: false,
+            connection: WorkerConnection {
                 connected: false,
                 last_error: None,
             },
-        );
+            live: None,
+        };
 
         let json = serde_json::to_value(&entry).unwrap();
         assert_eq!(json["connected"], false);
         assert_eq!(json["gradient_ci"], false);
         assert!(json.get("last_error").is_none());
+        assert!(json.get("team").is_none());
     }
 
     #[test]
@@ -842,20 +733,6 @@ mod tests {
     fn open_worker_is_live_on_any_project() {
         let w = worker(None);
         assert!(worker_live_for_project(&w, ProjectId::now_v7()));
-    }
-
-    fn base_worker_model() -> base_worker::Model {
-        base_worker::Model {
-            id: BaseWorkerId::now_v7(),
-            worker_id: "bw1".into(),
-            display_name: "Base 1".into(),
-            enable_fetch: true,
-            enable_eval: true,
-            enable_build: true,
-            enabled: true,
-            created_at: gradient_types::now(),
-            ..Default::default()
-        }
     }
 
     fn empty_patch() -> PatchWorkerRequest {
@@ -922,28 +799,5 @@ mod tests {
         let (ok, msg) = worker_test_result(true, true);
         assert!(ok);
         assert_eq!(msg, "worker is connected and authorized");
-    }
-
-    #[test]
-    fn a_registration_names_the_worker_over_a_base_of_the_same_id() {
-        assert_eq!(
-            worker_display_name(Some("builder-1".into()), Some("shared-1".into())),
-            Some("builder-1".to_string()),
-            "the project's own registration wins, as it does in the list",
-        );
-    }
-
-    #[test]
-    fn registration_shadows_base_worker_of_same_id() {
-        let shadowed = base_worker_model();
-        let mut other = base_worker_model();
-        other.id = BaseWorkerId::now_v7();
-        other.worker_id = "bw2".into();
-
-        let registered = HashSet::from(["bw1".to_string()]);
-        let visible = unshadowed_base_workers(vec![shadowed, other], &registered);
-
-        assert_eq!(visible.len(), 1, "the registered worker_id is hidden");
-        assert_eq!(visible[0].worker_id, "bw2");
     }
 }

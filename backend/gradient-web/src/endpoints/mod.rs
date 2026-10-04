@@ -33,6 +33,7 @@ pub mod teams;
 pub mod user;
 pub mod user_ssh_keys;
 pub mod webhooks;
+pub mod worker_tokens;
 pub mod workers;
 
 use crate::error::WebResult;
