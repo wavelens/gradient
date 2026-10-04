@@ -74,7 +74,7 @@
         @for (e of evaluations(); track e.id) {
           <div class="eval-card" [attr.data-phase]="evaluationPhase(e.status)" [class.selected]="selected()?.id === e.id" (click)="select(e)">
             <div class="l1">
-              <gr-status-icon class="si" [phase]="evaluationPhase(e.status)" size="sm" />
+              <gr-status-icon class="si" [phase]="evaluationPhase(e.status)" [prioritized]="e.prioritized" size="sm" />
               <span class="ev-title" [class.mono]="!e.commit_message">{{ evalTitle(e) }}</span>
             </div>
             <div class="l2"><span>{{ triggerLabel(e) }}</span><span>{{ evalDuration(e) }}</span></div>
@@ -89,12 +89,12 @@
           <div class="panel-head">
             <div>
               <div class="panel-title">
-                <gr-status-icon class="s-ico" [phase]="evaluationPhase(sel.status)" />
+                <gr-status-icon class="s-ico" [phase]="evaluationPhase(sel.status)" [prioritized]="sel.prioritized" />
                 <div>
                   <div class="title-line">
                     <h2 [title]="evalTitle(sel)">{{ evalTitle(sel) }}</h2>
                     @if (isRunning(sel.status)) {
-                      <gr-eval-status-badge [status]="sel.status" />
+                      <gr-eval-status-badge [status]="sel.status" [prioritized]="sel.prioritized" />
                     }
                   </div>
                   <div class="sub">
@@ -139,7 +139,7 @@
                      (contextmenu)="openPkgContextMenu($event, ep, sel.id, pkgMenu)">
                   <a class="pkg-link" [routerLink]="['/project', projectName, 'log', sel.id]" [queryParams]="{ build: ep.build_id }"
                      [title]="ep.eval + ' - ' + ep.derivation_path" [attr.aria-label]="attrLabel(ep.eval)"></a>
-                  <gr-status-icon class="si" [phase]="entryPointPhase(ep)" size="sm" />
+                  <gr-status-icon class="si" [phase]="entryPointPhase(ep)" [prioritized]="ep.prioritized" size="sm" />
                   <span class="pkg-name">{{ attrLabel(ep.eval) }}</span>
                   <span class="chip-arch mono">{{ ep.architecture }}</span>
                   <gr-segmented-bar class="pkg-bar" [counts]="barCounts(ep)" />

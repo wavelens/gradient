@@ -107,6 +107,25 @@ describe('StatusIconComponent', () => {
     expect(spin.updatePlaybackRate).toHaveBeenLastCalledWith(1);
   });
 
+  it('spins a prioritized run 2.5 times as fast and follows the flag', () => {
+    const fixture = TestBed.createComponent(StatusIconComponent);
+    fixture.componentRef.setInput('phase', 'running');
+    fixture.componentRef.setInput('prioritized', true);
+    fixture.detectChanges();
+    expect(spin.updatePlaybackRate).toHaveBeenLastCalledWith(2.5);
+    fixture.componentRef.setInput('prioritized', false);
+    fixture.detectChanges();
+    expect(spin.updatePlaybackRate).toHaveBeenLastCalledWith(1);
+  });
+
+  it('keeps a prioritized queue at its own pace', () => {
+    const fixture = TestBed.createComponent(StatusIconComponent);
+    fixture.componentRef.setInput('phase', 'queued');
+    fixture.componentRef.setInput('prioritized', true);
+    fixture.detectChanges();
+    expect(spin.updatePlaybackRate).toHaveBeenLastCalledWith(0.25);
+  });
+
   it('finishes the current lap instead of snapping when the run ends', () => {
     const fixture = render('running');
     change(fixture, 'success');

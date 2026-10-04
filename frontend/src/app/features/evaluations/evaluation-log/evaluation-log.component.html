@@ -38,7 +38,7 @@
 
       <div class="overview-block">
         <div class="eval-status-row">
-          <gr-eval-status-badge [status]="ev.status" />
+          <gr-eval-status-badge [status]="ev.status" [prioritized]="ev.prioritized" />
           <span class="builds-count">{{ completedBuildsCount() }}/{{ totalBuildsCount() }}</span>
         </div>
       </div>
@@ -146,7 +146,7 @@
       <div class="info-bar">
         <div class="info-bar-left">
           <div class="info-metric">
-            <gr-eval-status-badge [status]="ev.status" />
+            <gr-eval-status-badge [status]="ev.status" [prioritized]="ev.prioritized" />
           </div>
           <div class="info-metric">
             <span class="metric-label">Duration</span>

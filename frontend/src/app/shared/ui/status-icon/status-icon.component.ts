@@ -23,6 +23,7 @@ export type StatusIconSize = 'sm' | 'md';
 const SPIN_RATE: Partial<Record<StatusPhase, number>> = { queued: 0.25, running: 1 };
 const SPIN_KEYFRAMES: Keyframe[] = [{ transform: 'rotate(0deg)' }, { transform: 'rotate(360deg)' }];
 const SPIN_LAP_MS = 1000;
+const PRIORITIZED_RUN_BOOST = 2.5;
 
 function motionAllowed(): boolean {
   return typeof Element.prototype.animate === 'function'
@@ -65,6 +66,7 @@ export class StatusIconComponent {
   phase = input.required<StatusPhase>();
   size = input<StatusIconSize>('md');
   label = input<string>();
+  prioritized = input(false);
 
   private readonly spinner = viewChild.required<ElementRef<SVGGElement>>('spinner');
   private readonly motion = motionAllowed();
@@ -78,15 +80,15 @@ export class StatusIconComponent {
   protected readonly animate = computed(() => this.motion && this.changed());
 
   constructor() {
-    afterRenderEffect(() => this.syncSpin(this.phase()));
+    afterRenderEffect(() => this.syncSpin(this.phase(), this.prioritized()));
     inject(DestroyRef).onDestroy(() => this.spin?.cancel());
   }
 
-  private syncSpin(phase: StatusPhase): void {
+  private syncSpin(phase: StatusPhase, prioritized: boolean): void {
     if (!this.motion) return;
     const rate = SPIN_RATE[phase];
     if (rate === undefined) this.finishLap();
-    else this.spinning().updatePlaybackRate(rate);
+    else this.spinning().updatePlaybackRate(phase === 'running' && prioritized ? rate * PRIORITIZED_RUN_BOOST : rate);
   }
 
   private spinning(): Animation {
