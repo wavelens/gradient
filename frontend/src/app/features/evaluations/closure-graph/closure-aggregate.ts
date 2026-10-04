@@ -131,3 +131,20 @@ export function buildClosureSankey(graph: ClosureGraph, topN: number): ClosureSa
   const totalSize = graph.total_size_bytes ?? [...own.values()].reduce((acc, s) => acc + s, 0);
   return { nodes, links, totalSize };
 }
+
+export function contributesTo(graph: ClosureGraph, id: string): Set<string> {
+  const consumersOf = new Map<string, string[]>();
+  for (const e of graph.edges) {
+    (consumersOf.get(e.source) ?? consumersOf.set(e.source, []).get(e.source)!).push(e.target);
+  }
+
+  const reached = new Set<string>();
+  const pending = id.startsWith(OTHERS_PREFIX) ? [id.slice(OTHERS_PREFIX.length)] : (consumersOf.get(id) ?? []).slice();
+  while (pending.length) {
+    const next = pending.pop()!;
+    if (reached.has(next)) continue;
+    reached.add(next);
+    pending.push(...(consumersOf.get(next) ?? []));
+  }
+  return reached;
+}

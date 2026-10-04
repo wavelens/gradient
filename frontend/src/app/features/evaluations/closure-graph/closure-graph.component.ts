@@ -19,7 +19,7 @@ import {
   LoadingSpinnerComponent,
 } from '@gradient/ui/ui';
 import { formatBytes } from '@shared/text';
-import { buildClosureSankey, SankeyNode, SankeyLink } from './closure-aggregate';
+import { buildClosureSankey, contributesTo, SankeyNode, SankeyLink } from './closure-aggregate';
 
 const TOP_N = 500;
 const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -27,6 +27,10 @@ const ACCENT = '#fd7e14';
 const OTHERS_FILL = '#4b5563';
 const MIN_SCALE = 0.02;
 const MAX_SCALE = 4;
+const NODE_PADDING = 28;
+const ROW_HEIGHT = 56;
+const COLUMN_WIDTH = 320;
+const LINK_OPACITY = '0.35';
 
 type LaidNode = SankeyNode & { x0: number; x1: number; y0: number; y1: number; depth: number };
 type LaidLink = { source: LaidNode; target: LaidNode; width?: number; value: number };
@@ -67,6 +71,11 @@ export class ClosureGraphComponent implements OnInit, OnDestroy {
   id = '';
   closureType = 'runtime';
   typeLabel = signal('');
+  hovered = signal<{ name: string; consumers: number } | null>(null);
+
+  private graph: ClosureGraph | null = null;
+  private nodeEls = new Map<string, SVGElement[]>();
+  private linkEls: { el: SVGPathElement; source: string; target: string }[] = [];
 
   private bounds = { minX: 0, minY: 0, maxX: 0, maxY: 0 };
   private isPanning = false;
@@ -115,6 +124,7 @@ export class ClosureGraphComponent implements OnInit, OnDestroy {
     const group = this.graphRef?.nativeElement;
     const svg = this.svgRef?.nativeElement;
     if (!group || !svg || !graph.nodes.length) return;
+    this.graph = graph;
     const model = buildClosureSankey(graph, TOP_N);
 
     const { sankey, sankeyLinkHorizontal, sankeyJustify } = await import('d3-sankey');
@@ -127,7 +137,7 @@ export class ClosureGraphComponent implements OnInit, OnDestroy {
           sankey<SankeyNode, SankeyLink>()
             .nodeId((d) => d.id)
             .nodeWidth(14)
-            .nodePadding(14)
+            .nodePadding(NODE_PADDING)
             .nodeAlign(sankeyJustify)
             .extent([[1, 6], [width - 1, height - 6]])({
             nodes: model.nodes.map((n) => ({ ...n })),
@@ -141,8 +151,8 @@ export class ClosureGraphComponent implements OnInit, OnDestroy {
         for (const n of probe.nodes) perDepth.set(n.depth ?? 0, (perDepth.get(n.depth ?? 0) ?? 0) + 1);
         const columns = Math.max(...perDepth.keys()) + 1;
         const densest = Math.max(...perDepth.values());
-        const width = Math.max(probeWidth, columns * 240);
-        const height = Math.max(480, densest * 28);
+        const width = Math.max(probeWidth, columns * COLUMN_WIDTH);
+        const height = Math.max(480, densest * ROW_HEIGHT);
         const { nodes, links } = layout(width, height);
 
         const linkPath = sankeyLinkHorizontal() as unknown as (l: unknown) => string;
@@ -164,6 +174,8 @@ export class ClosureGraphComponent implements OnInit, OnDestroy {
     linkPath: (l: unknown) => string,
   ): void {
     group.innerHTML = '';
+    this.nodeEls.clear();
+    this.linkEls = [];
 
     const linkLayer = document.createElementNS(SVG_NS, 'g');
     linkLayer.setAttribute('fill', 'none');
@@ -172,9 +184,10 @@ export class ClosureGraphComponent implements OnInit, OnDestroy {
       path.setAttribute('d', linkPath(l));
       path.setAttribute('stroke', this.fill(l.source));
       path.setAttribute('stroke-width', `${Math.max(1, l.width ?? 1)}`);
-      path.setAttribute('stroke-opacity', '0.35');
-      path.appendChild(this.titleEl(`${l.source.name} → ${l.target.name}\n${formatBytes(l.value)}`));
+      path.setAttribute('stroke-opacity', LINK_OPACITY);
+      path.appendChild(this.titleEl(`${l.source.name} -> ${l.target.name}\n${formatBytes(l.value)}`));
       linkLayer.appendChild(path);
+      this.linkEls.push({ el: path, source: l.source.id, target: l.target.id });
     }
     group.appendChild(linkLayer);
 
@@ -188,7 +201,10 @@ export class ClosureGraphComponent implements OnInit, OnDestroy {
       rect.setAttribute('fill', this.fill(n));
       rect.setAttribute('rx', '1');
       rect.appendChild(this.titleEl(this.nodeTooltip(n)));
+      rect.addEventListener('mouseenter', () => this.highlight(n));
+      rect.addEventListener('mouseleave', () => this.clearHighlight());
       nodeLayer.appendChild(rect);
+      this.nodeEls.set(n.id, [rect]);
 
       if (n.y1 - n.y0 < 3) continue; // skip labels on slivers to cut clutter
       const text = document.createElementNS(SVG_NS, 'text');
@@ -201,8 +217,30 @@ export class ClosureGraphComponent implements OnInit, OnDestroy {
       text.setAttribute('font-size', '11');
       text.textContent = `${this.shortName(n.name)} · ${formatBytes(n.value)}`;
       nodeLayer.appendChild(text);
+      this.nodeEls.get(n.id)!.push(text);
     }
     group.appendChild(nodeLayer);
+  }
+
+  private highlight(n: SankeyNode): void {
+    if (!this.graph) return;
+    const consumers = contributesTo(this.graph, n.id);
+    const lit = new Set([...consumers, n.id]);
+    for (const [id, els] of this.nodeEls) {
+      for (const el of els) el.setAttribute('opacity', lit.has(id) ? '1' : '0.2');
+    }
+    for (const { el, source, target } of this.linkEls) {
+      el.setAttribute('stroke-opacity', lit.has(source) && lit.has(target) ? '0.75' : '0.05');
+    }
+    this.zone.run(() => this.hovered.set({ name: n.name, consumers: consumers.size }));
+  }
+
+  private clearHighlight(): void {
+    for (const els of this.nodeEls.values()) {
+      for (const el of els) el.removeAttribute('opacity');
+    }
+    for (const { el } of this.linkEls) el.setAttribute('stroke-opacity', LINK_OPACITY);
+    this.zone.run(() => this.hovered.set(null));
   }
 
   private fill(n: SankeyNode): string {

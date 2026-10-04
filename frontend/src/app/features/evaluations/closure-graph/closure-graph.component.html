@@ -33,6 +33,10 @@
               <span class="sep">·</span>
               <span class="warn">large closure - node list truncated</span>
             }
+            @if (hovered(); as h) {
+              <span class="sep">·</span>
+              <span>{{ h.name }} contributes to {{ h.consumers }} {{ h.consumers === 1 ? 'package' : 'packages' }}</span>
+            }
           </div>
         </div>
       </div>

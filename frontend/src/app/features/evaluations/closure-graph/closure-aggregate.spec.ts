@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { buildClosureSankey, othersIdFor } from './closure-aggregate';
+import { buildClosureSankey, contributesTo, othersIdFor } from './closure-aggregate';
 import type { ClosureGraph } from '@core/services/evaluations.service';
 
 function graph(
@@ -102,5 +102,26 @@ describe('buildClosureSankey', () => {
     const s = buildClosureSankey(g, 30);
     expect(s.nodes.find((n) => n.id === 'o')!.value).toBe(7);
     expect(s.links.length).toBe(0);
+  });
+});
+
+describe('contributesTo', () => {
+  // s is shared by a and b, both feed the root r; x is unrelated.
+  const g = graph(
+    [['r', 0], ['a', 10], ['b', 10], ['s', 5], ['x', 1]],
+    [['a', 'r'], ['b', 'r'], ['s', 'a'], ['s', 'b'], ['x', 'r']],
+    ['r'],
+  );
+
+  it('names every package a dependency flows into, through all of its consumers', () => {
+    expect([...contributesTo(g, 's')].sort()).toEqual(['a', 'b', 'r']);
+  });
+
+  it('follows a bucket into the package it was collapsed under', () => {
+    expect([...contributesTo(g, othersIdFor('a'))].sort()).toEqual(['a', 'r']);
+  });
+
+  it('leaves a root contributing to nothing', () => {
+    expect(contributesTo(g, 'r').size).toBe(0);
   });
 });
