@@ -5,8 +5,10 @@
  */
 
 use crate::permissions::PermissionMask;
+use gradient_types::consts::{BASE_ROLE_ADMIN_ID, BASE_ROLE_VIEW_ID, BASE_ROLE_WRITE_ID};
 use gradient_types::*;
 use sea_orm::{ColumnTrait, ConnectionTrait, DbErr, EntityTrait, QueryFilter};
+use std::collections::HashMap;
 
 pub async fn project_permission_mask<C: ConnectionTrait>(
     db: &C,
@@ -59,6 +61,53 @@ pub async fn reaches_project<C: ConnectionTrait>(
     user: UserId,
 ) -> Result<bool, DbErr> {
     Ok(!project_roles(db, project, user).await?.is_empty())
+}
+
+pub async fn project_role_names<C: ConnectionTrait>(
+    db: &C,
+    user: UserId,
+    projects: Vec<ProjectId>,
+) -> Result<HashMap<ProjectId, String>, DbErr> {
+    let access = EProjectAccess::find()
+        .filter(CProjectAccess::User.eq(user))
+        .filter(CProjectAccess::Project.is_in(projects))
+        .all(db)
+        .await?;
+    if access.is_empty() {
+        return Ok(HashMap::new());
+    }
+    let names: HashMap<RoleId, String> = ERole::find()
+        .filter(CRole::Id.is_in(access.iter().map(|a| a.role)))
+        .all(db)
+        .await?
+        .into_iter()
+        .map(|role| (role.id, role.name))
+        .collect();
+
+    let mut strongest: HashMap<ProjectId, RoleId> = HashMap::new();
+    for row in access {
+        strongest
+            .entry(row.project)
+            .and_modify(|role| {
+                if role_rank(row.role) > role_rank(*role) {
+                    *role = row.role;
+                }
+            })
+            .or_insert(row.role);
+    }
+    Ok(strongest
+        .into_iter()
+        .filter_map(|(project, role)| names.get(&role).map(|name| (project, name.clone())))
+        .collect())
+}
+
+fn role_rank(role: RoleId) -> u8 {
+    match role {
+        BASE_ROLE_ADMIN_ID => 3,
+        BASE_ROLE_WRITE_ID => 2,
+        BASE_ROLE_VIEW_ID => 0,
+        _ => 1,
+    }
 }
 
 async fn project_roles<C: ConnectionTrait>(
@@ -130,6 +179,34 @@ mod tests {
         assert!(mask_grants(mask, Permission::ViewProject));
         assert!(mask_grants(mask, Permission::TriggerEvaluation));
         assert!(!mask_grants(mask, Permission::ManageMembers));
+    }
+
+    #[tokio::test]
+    async fn the_strongest_role_names_the_access_to_a_project() {
+        use gradient_types::consts::{BASE_ROLE_VIEW_ID, BASE_ROLE_WRITE_ID};
+        let (project, user) = (ProjectId::now_v7(), UserId::now_v7());
+        let row = |role| MProjectAccess {
+            project,
+            user,
+            role,
+        };
+        let named = |id, name: &str| MRole {
+            id,
+            name: name.into(),
+            ..Default::default()
+        };
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([vec![row(BASE_ROLE_VIEW_ID), row(BASE_ROLE_WRITE_ID)]])
+            .append_query_results([vec![
+                named(BASE_ROLE_VIEW_ID, "View"),
+                named(BASE_ROLE_WRITE_ID, "Write"),
+            ]])
+            .into_connection();
+
+        let names = project_role_names(&db, user, vec![project])
+            .await
+            .expect("query");
+        assert_eq!(names.get(&project).map(String::as_str), Some("Write"));
     }
 
     #[tokio::test]
