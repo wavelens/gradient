@@ -353,6 +353,58 @@ async fn test_job_rejected_requeues() {
 }
 
 #[tokio::test]
+async fn a_rejected_build_closes_the_attempt_its_assignment_opened() {
+    use crate::jobs::{PendingJob, build_job_key};
+    use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
+
+    let ok = MockExecResult {
+        last_insert_id: 0,
+        rows_affected: 1,
+    };
+    let db = MockDatabase::new(DatabaseBackend::Postgres)
+        .append_exec_results(vec![ok; 32])
+        .into_connection();
+    let log_db = db.clone();
+    let scheduler = test_scheduler_with(db).await;
+    let shared = DerivationBuildId::now_v7();
+    let (session, _signals) = port();
+    scheduler
+        .reattach_worker(
+            "w1",
+            build_worker_caps(),
+            HashSet::new(),
+            session,
+            vec![crate::jobs::Reattached::single(
+                build_job_key(shared),
+                PendingJob::Build(build_job(
+                    EvaluationId::now_v7(),
+                    ProjectId::now_v7(),
+                    shared,
+                )),
+            )],
+        )
+        .await
+        .expect("reattach");
+
+    scheduler.job_rejected("w1", &build_job_key(shared)).await;
+
+    let log = log_db.into_transaction_log();
+    let close = log
+        .iter()
+        .flat_map(|t| t.statements())
+        .find(|s| {
+            s.sql
+                .starts_with("UPDATE \"build_attempt\" SET \"outcome\"")
+        })
+        .expect("the attempt of the rejected assignment is closed");
+    assert!(
+        format!("{:?}", close.values).contains(&shared.to_string()),
+        "{:?}",
+        close.values
+    );
+}
+
+#[tokio::test]
 async fn test_worker_disconnect_requeues_jobs() {
     let scheduler = test_scheduler().await;
     let peer = ProjectId::now_v7();

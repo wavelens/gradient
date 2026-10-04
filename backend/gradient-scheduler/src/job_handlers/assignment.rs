@@ -91,6 +91,20 @@ impl Scheduler {
     }
 
     pub async fn job_rejected(&self, worker_id: &str, job_id: &str) {
+        if let Some(shared_build) = self
+            .active_job(job_id)
+            .await
+            .and_then(|job| job.derivation_build())
+            && let Err(e) = gradient_db::scheduling::build_attempt::abort_running_attempts(
+                &self.state.worker_db,
+                &[shared_build],
+                "the worker rejected the job",
+            )
+            .await
+        {
+            warn!(error = %e, %worker_id, %job_id, "failed to close the attempt of a rejected job");
+        }
+
         let worker = worker_id.to_owned();
         let job_id = job_id.to_owned();
         let _ = self

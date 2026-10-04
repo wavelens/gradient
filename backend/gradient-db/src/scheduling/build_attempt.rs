@@ -10,6 +10,7 @@ use gradient_entity::ids::{
     BuildAttemptId, BuildJobId, DerivationBuildId, DerivationId, DispatchedJobId, EvaluationId,
 };
 use sea_orm::ActiveValue::Set;
+use sea_orm::sea_query::Expr;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, ConnectionTrait, DbErr, EntityTrait, IntoActiveModel,
     PaginatorTrait, QueryFilter, QueryOrder,
@@ -252,6 +253,25 @@ pub async fn succeed_latest_attempt<C: ConnectionTrait>(
     outcome: AttemptOutcome,
 ) -> Result<(), DbErr> {
     finish_latest_attempt(db, derivation_build, outcome, None, None).await
+}
+
+pub async fn abort_running_attempts<C: ConnectionTrait>(
+    db: &C,
+    shared_builds: &[DerivationBuildId],
+    failure_message: &str,
+) -> Result<(), DbErr> {
+    let now = gradient_types::now();
+    crate::for_each_chunk(shared_builds, |chunk| async move {
+        Entity::update_many()
+            .col_expr(Column::Outcome, Expr::value(AttemptOutcome::Aborted))
+            .col_expr(Column::FailureMessage, Expr::value(failure_message))
+            .col_expr(Column::BuildFinishedAt, Expr::value(now))
+            .filter(Column::DerivationBuild.is_in(chunk))
+            .filter(Column::Outcome.eq(AttemptOutcome::Running))
+            .exec(db)
+            .await
+    })
+    .await
 }
 
 pub async fn inputs_unavailable_attempt_count<C: ConnectionTrait>(
