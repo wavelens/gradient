@@ -52,6 +52,57 @@ fn settles_the_request(status: BuildStatus) -> bool {
     status.is_terminal_success() || status.is_terminal_failure()
 }
 
+#[derive(Default)]
+struct Waiting {
+    systems: Option<String>,
+}
+
+impl Waiting {
+    fn observe(&mut self, evaluation: &MEvaluation) -> Option<String> {
+        if EvaluationStatus::TERMINAL.contains(&evaluation.status) {
+            return None;
+        }
+
+        let systems = missing_systems(evaluation);
+        let announce = systems
+            .as_ref()
+            .filter(|s| self.systems.as_ref() != Some(*s))
+            .map(|s| format!("waiting for a worker that provides {s}"));
+        self.systems = systems;
+        announce
+    }
+
+    fn unbuilt(&self, path: &str, evaluation: &MEvaluation) -> BuildFailure {
+        let mut message = format!(
+            "build of {path} stopped because Gradient evaluation {} ended ({:?})",
+            evaluation.id, evaluation.status
+        );
+        if let Some(systems) = &self.systems {
+            message.push_str(&format!(
+                " while waiting for a worker that provides {systems}"
+            ));
+        }
+
+        BuildFailure {
+            status: FailureStatus::MiscFailure,
+            message,
+        }
+    }
+}
+
+fn missing_systems(evaluation: &MEvaluation) -> Option<String> {
+    match WaitingReason::from_json(evaluation.waiting_reason.as_ref()?)? {
+        WaitingReason::Workers { unmet, .. } if !unmet.is_empty() => Some(
+            unmet
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join("; "),
+        ),
+        _ => None,
+    }
+}
+
 pub async fn wait(
     session: &Session,
     started: &Started,
@@ -90,25 +141,32 @@ pub async fn wait(
         .collect();
     let mut followed: HashMap<DerivationBuildId, Followed> = HashMap::new();
     let mut open: Vec<DerivationBuildId> = jobs.iter().map(|j| j.derivation_build).collect();
+    let mut waiting = Waiting::default();
 
-    loop {
-        let status = EEvaluation::find_by_id(started.evaluation)
+    let evaluation = loop {
+        let evaluation = EEvaluation::find_by_id(started.evaluation)
             .one(&state.web_db)
             .await?
-            .ok_or_else(|| anyhow::anyhow!("evaluation {} disappeared", started.evaluation))?
-            .status;
+            .ok_or_else(|| anyhow::anyhow!("evaluation {} disappeared", started.evaluation))?;
+        if let Some(line) = waiting.observe(&evaluation) {
+            log(line);
+        }
 
         open = follow_logs(session, open, &prefixes, &mut followed, &log).await?;
-        if EvaluationStatus::TERMINAL.contains(&status) || settled(session, &requested).await? {
-            break;
+        if EvaluationStatus::TERMINAL.contains(&evaluation.status)
+            || settled(session, &requested).await?
+        {
+            break evaluation;
         }
 
         tokio::time::sleep(POLL).await;
-    }
+    };
 
     let mut results = Vec::with_capacity(started.requested.len());
     for (path, drv) in &started.requested {
-        let result = requested_result(session, build_of.get(path).copied(), path, drv).await?;
+        let build = build_of.get(path).copied();
+        let unbuilt = waiting.unbuilt(path, &evaluation);
+        let result = requested_result(session, build, path, drv, unbuilt).await?;
         results.push((path.clone(), result));
     }
 
@@ -222,6 +280,7 @@ async fn requested_result(
     build: Option<DerivationBuildId>,
     path: &str,
     drv: &Derivation,
+    unbuilt: BuildFailure,
 ) -> anyhow::Result<DrvResult> {
     let outputs: Outputs = drv
         .outputs
@@ -242,6 +301,10 @@ async fn requested_result(
 
     if build.status.is_terminal_success() {
         return Ok(Ok(outputs));
+    }
+
+    if !build.status.is_terminal_failure() {
+        return Ok(Err(unbuilt));
     }
 
     let tail =
@@ -287,6 +350,40 @@ mod tests {
         assert_eq!(
             failure_status(BuildStatus::Aborted),
             FailureStatus::MiscFailure
+        );
+    }
+
+    #[test]
+    fn an_aborted_evaluation_names_the_workers_it_waited_for() {
+        let unmet = UnmetRequirement {
+            architecture: "aarch64-linux".into(),
+            required_features: vec![],
+            build_count: 1,
+        };
+        let parked = MEvaluation {
+            status: EvaluationStatus::Waiting,
+            waiting_reason: Some(WaitingReason::workers(vec![unmet], 0, vec![]).to_json()),
+            ..Default::default()
+        };
+        let aborted = MEvaluation {
+            status: EvaluationStatus::Aborted,
+            waiting_reason: None,
+            ..parked.clone()
+        };
+        let mut waiting = Waiting::default();
+
+        let line = waiting.observe(&parked).expect("the park is announced");
+        assert!(line.contains("aarch64-linux"), "{line}");
+        assert_eq!(waiting.observe(&parked), None);
+        assert_eq!(waiting.observe(&aborted), None);
+
+        let failure = waiting.unbuilt("/nix/store/a.drv", &aborted);
+        assert_eq!(failure.status, FailureStatus::MiscFailure);
+        assert!(failure.message.contains("Aborted"), "{}", failure.message);
+        assert!(
+            failure.message.contains("aarch64-linux"),
+            "{}",
+            failure.message
         );
     }
 

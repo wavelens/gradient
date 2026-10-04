@@ -92,23 +92,34 @@ impl BuildabilityChecker {
             if a.status != BuildStatus::Queued {
                 return false;
             }
-            let Some(drv) = self.drv_by_id.get(&a.derivation) else {
-                return false;
-            };
-            match decide_build_spec_kind(a.cache_available, &drv.architecture, drv.is_fixed_output)
-            {
-                BuildSpecKind::Substitute | BuildSpecKind::Download => true,
-                BuildSpecKind::Build => {
-                    let required: Vec<&str> = self.required_features_for(&a.derivation);
-                    worker_caps.iter().any(|(arch, feats)| {
-                        let arch_ok = drv.architecture == gradient_types::BUILTIN_ARCH
-                            || arch.iter().any(|a| a == &drv.architecture);
-                        let feats_ok = required.iter().all(|f| feats.iter().any(|sf| sf == f));
-                        arch_ok && feats_ok
-                    })
-                }
-            }
+            self.drv_by_id
+                .get(&a.derivation)
+                .is_some_and(|drv| self.runnable(a, drv, worker_caps))
         })
+    }
+
+    fn runnable(
+        &self,
+        build: &MDerivationBuild,
+        drv: &MDerivation,
+        worker_caps: &[(Vec<String>, Vec<String>)],
+    ) -> bool {
+        match decide_build_spec_kind(
+            build.cache_available,
+            &drv.architecture,
+            drv.is_fixed_output,
+        ) {
+            BuildSpecKind::Substitute | BuildSpecKind::Download => !worker_caps.is_empty(),
+            BuildSpecKind::Build => {
+                let required = self.required_features_for(&build.derivation);
+                worker_caps.iter().any(|(arch, feats)| {
+                    let arch_ok = drv.architecture == gradient_types::BUILTIN_ARCH
+                        || arch.iter().any(|a| a == &drv.architecture);
+                    let feats_ok = required.iter().all(|f| feats.iter().any(|sf| sf == f));
+                    arch_ok && feats_ok
+                })
+            }
+        }
     }
 
     fn required_features_for(&self, drv_id: &DerivationId) -> Vec<&str> {
@@ -136,9 +147,7 @@ impl BuildabilityChecker {
             let Some(drv) = self.drv_by_id.get(&a.derivation) else {
                 continue;
             };
-            if decide_build_spec_kind(a.cache_available, &drv.architecture, drv.is_fixed_output)
-                != BuildSpecKind::Build
-            {
+            if self.runnable(a, drv, worker_caps) {
                 continue;
             }
             let required_owned: Vec<String> = self
@@ -146,17 +155,6 @@ impl BuildabilityChecker {
                 .into_iter()
                 .map(str::to_owned)
                 .collect();
-            let satisfied = worker_caps.iter().any(|(arch, feats)| {
-                let arch_ok = drv.architecture == gradient_types::BUILTIN_ARCH
-                    || arch.iter().any(|a| a == &drv.architecture);
-                let feats_ok = required_owned
-                    .iter()
-                    .all(|f| feats.iter().any(|sf| sf == f));
-                arch_ok && feats_ok
-            });
-            if satisfied {
-                continue;
-            }
             *grouped
                 .entry((drv.architecture.clone(), required_owned))
                 .or_default() += 1;
@@ -363,6 +361,26 @@ mod tests {
         let reason = checker.compute_waiting_reason(&builds, &caps);
         let (unmet, _, _) = workers_view(&reason);
         assert!(unmet.is_empty());
+    }
+
+    #[test]
+    fn without_a_connected_worker_nothing_is_substituted_or_downloaded() {
+        let eval_id = EvaluationId::now_v7();
+        let passthrough = drv(DerivationId::now_v7(), "x86_64-linux");
+        let mut source = drv(DerivationId::now_v7(), gradient_types::BUILTIN_ARCH);
+        source.is_fixed_output = true;
+        let builds = [
+            cache_available_build(passthrough.id, eval_id),
+            build_for(source.id, eval_id),
+        ];
+        let checker = checker_with(vec![passthrough, source], vec![]);
+
+        assert!(!checker.any_buildable(&builds, &[]));
+        let reason = checker.compute_waiting_reason(&builds, &[]);
+        let (unmet, _, _) = workers_view(&reason);
+        let mut systems: Vec<&str> = unmet.iter().map(|u| u.architecture.as_str()).collect();
+        systems.sort_unstable();
+        assert_eq!(systems, [gradient_types::BUILTIN_ARCH, "x86_64-linux"]);
     }
 
     #[test]

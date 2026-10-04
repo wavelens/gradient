@@ -40,17 +40,7 @@ pub(crate) fn unbuildable(
 }
 
 pub(crate) fn unbuildable_warning(unmet: &[UnmetRequirement]) -> String {
-    let systems: Vec<String> = unmet
-        .iter()
-        .map(|u| {
-            let features = if u.required_features.is_empty() {
-                String::new()
-            } else {
-                format!(" with features {}", u.required_features.join(", "))
-            };
-            format!("{}{features} ({} builds)", u.architecture, u.build_count)
-        })
-        .collect();
+    let systems: Vec<String> = unmet.iter().map(ToString::to_string).collect();
 
     format!(
         "Aborted: no connected worker provides {}. Enable waiting for workers on the task to wait instead.",

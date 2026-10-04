@@ -144,7 +144,7 @@ pub(crate) async fn refresh_waiting_state(
             | EvaluationStatus::Fetching
             | EvaluationStatus::EvaluatingFlake
             | EvaluationStatus::EvaluatingDerivation => {
-                decide_pre_build_target(eval.status, project_workers)
+                decide_pre_build_target(eval.kind, eval.status, project_workers)
             }
             EvaluationStatus::Building => {
                 match build_phase_decision(
@@ -591,7 +591,11 @@ async fn eval_blocking_shared_builds(
         .collect())
 }
 
-fn pre_build_capability(status: EvaluationStatus) -> Option<EvalCapability> {
+fn pre_build_capability(kind: EvaluationKind, status: EvaluationStatus) -> Option<EvalCapability> {
+    if kind == EvaluationKind::Ssh {
+        return None;
+    }
+
     match status {
         EvaluationStatus::Fetching => Some(EvalCapability::Fetch),
         EvaluationStatus::Queued
@@ -633,10 +637,11 @@ impl ProjectWorkerCounts {
 }
 
 fn decide_pre_build_target(
+    kind: EvaluationKind,
     current: EvaluationStatus,
     workers: ProjectWorkerCounts,
 ) -> Option<(EvaluationStatus, Option<WaitingReason>)> {
-    let capability = pre_build_capability(current)?;
+    let capability = pre_build_capability(kind, current)?;
     if workers.provide(capability) {
         return None;
     }
@@ -770,6 +775,7 @@ mod tests {
         let workers = [worker(true, Some(HashSet::from([other])))];
 
         let (target, reason) = decide_pre_build_target(
+            EvaluationKind::Normal,
             EvaluationStatus::Queued,
             ProjectWorkerCounts::of(&workers, Some(own)),
         )
@@ -800,8 +806,12 @@ mod tests {
 
     #[test]
     fn pre_build_target_queued_no_eval_worker_stalls_to_eval_waiting() {
-        let (target, reason) = decide_pre_build_target(EvaluationStatus::Queued, counts(0, 1, 3))
-            .expect("stall must produce a transition");
+        let (target, reason) = decide_pre_build_target(
+            EvaluationKind::Normal,
+            EvaluationStatus::Queued,
+            counts(0, 1, 3),
+        )
+        .expect("stall must produce a transition");
         assert_eq!(target, EvaluationStatus::Waiting);
         let (cap, connected) = eval_workers_view(&reason.expect("stall carries a reason"));
         assert_eq!(cap, EvalCapability::Eval);
@@ -810,8 +820,12 @@ mod tests {
 
     #[test]
     fn pre_build_target_fetching_no_fetch_worker_stalls_to_fetch_waiting() {
-        let (target, reason) = decide_pre_build_target(EvaluationStatus::Fetching, counts(2, 0, 2))
-            .expect("stall must produce a transition");
+        let (target, reason) = decide_pre_build_target(
+            EvaluationKind::Normal,
+            EvaluationStatus::Fetching,
+            counts(2, 0, 2),
+        )
+        .expect("stall must produce a transition");
         assert_eq!(target, EvaluationStatus::Waiting);
         let (cap, connected) = eval_workers_view(&reason.expect("stall carries a reason"));
         assert_eq!(cap, EvalCapability::Fetch);
@@ -827,16 +841,42 @@ mod tests {
             EvaluationStatus::Queued,
         ] {
             assert!(
-                decide_pre_build_target(status, counts(1, 1, 1)).is_none(),
+                decide_pre_build_target(EvaluationKind::Normal, status, counts(1, 1, 1)).is_none(),
                 "{status:?} with capable workers must be left alone"
             );
         }
     }
 
     #[test]
+    fn an_ssh_evaluation_records_its_derivations_without_eval_workers() {
+        assert!(
+            decide_pre_build_target(
+                EvaluationKind::Ssh,
+                EvaluationStatus::EvaluatingDerivation,
+                counts(0, 0, 0)
+            )
+            .is_none()
+        );
+    }
+
+    #[test]
     fn pre_build_target_ignores_waiting() {
-        assert!(decide_pre_build_target(EvaluationStatus::Waiting, counts(0, 0, 0)).is_none());
-        assert!(decide_pre_build_target(EvaluationStatus::Waiting, counts(2, 2, 2)).is_none());
+        assert!(
+            decide_pre_build_target(
+                EvaluationKind::Normal,
+                EvaluationStatus::Waiting,
+                counts(0, 0, 0)
+            )
+            .is_none()
+        );
+        assert!(
+            decide_pre_build_target(
+                EvaluationKind::Normal,
+                EvaluationStatus::Waiting,
+                counts(2, 2, 2)
+            )
+            .is_none()
+        );
     }
 
     #[test]

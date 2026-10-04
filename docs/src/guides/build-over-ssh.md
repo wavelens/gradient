@@ -62,6 +62,8 @@ The Nix daemon will open the connection as `root` for substituters. Plain `nix c
 - One SSH connection will become one evaluation under the project's **Build Requests** task.
 - Further build requests on the same connection add entry points to that evaluation.
 - The evaluation will stay in building while the connection is open.
+- Nix will print the missing systems while no connected worker can build them.
+- An abort of the evaluation will stop every unfinished build with an error, e.g. after [5 minutes without a matching worker](../concepts/evaluations-and-builds.md).
 - Build logs are streaming back with the package name in front of each line.
 
 ## 5. Add a Remote Builder

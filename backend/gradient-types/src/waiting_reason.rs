@@ -46,6 +46,17 @@ pub struct UnmetRequirement {
     pub build_count: u32,
 }
 
+impl std::fmt::Display for UnmetRequirement {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.architecture)?;
+        if !self.required_features.is_empty() {
+            write!(f, " with features {}", self.required_features.join(", "))?;
+        }
+
+        write!(f, " ({} builds)", self.build_count)
+    }
+}
+
 impl WaitingReason {
     pub fn to_json(&self) -> serde_json::Value {
         serde_json::to_value(self).unwrap_or(serde_json::Value::Null)
