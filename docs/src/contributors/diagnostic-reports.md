@@ -48,13 +48,13 @@ The dialog is always sending all four explicitly.
 |---|---|
 | This evaluation only | The evaluation's own rows, `dispatched_job`, `dispatched_job_phase` |
 | Shared builds | `build_attempt`, `phase_event`, `derivation*`: rows made for other evaluations of the same derivation, older attempts included |
-| Whole instance | `worker_registration`, `base_worker`, `upstream_metric` |
-| This project | `project_base_worker` |
+| Whole instance | `worker_registration`, `team_worker`, `upstream_metric` |
+| This project | `team_project` |
 | Workers of this evaluation | `worker_connection`, `worker_sample`, from creation until finish or the report |
 
 - The `scope` column is worth reading before trusting a count.
 - `worker_connection` and `worker_sample` carry no project. Their telemetry is describing the worker.
-- `worker_registration` is empty under a base-worker fleet. The names are in `base_worker`.
+- `worker_registration` is empty under a fleet of team workers. The names are in `team_worker`.
 
 ## Closure Boundary
 
@@ -173,10 +173,10 @@ vendor-registry: Queued, waiting on walked, blocking_deps = 1
 
 ## Schema Versions
 
-- The inspector is reading exactly one schema (currently 18) and refusing every other. The message is naming both schemas.
+- The inspector is reading exactly one schema (currently 19) and refusing every other. The message is naming both schemas.
 - A schema bump is changing `SCHEMA_VERSION` in `backend/gradient-report/src/schema.rs` and `SUPPORTED_SCHEMA` in `nix/tools/report-inspector/gradient_report/db.py` together.
 - The inspector package is failing to evaluate while the two differ.
 - The schema is moving on its own, not with the release (12 to 16 inside 1.3.0).
 - The matching inspector is built from the revision that wrote the report, with `nix build .#gradient-report`.
 - A `nix develop` shell entered before a schema bump is keeping the old inspector until re-entered.
-- Reports before schema 17 carry no base-worker telemetry.
+- Reports before schema 19 carry no `team_worker` table.

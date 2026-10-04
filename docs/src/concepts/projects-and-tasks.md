@@ -17,6 +17,7 @@ flowchart LR
 - **Members and Roles**: Admin, Write, View, or custom roles built from single permissions.
 - **SSH Key**: one Ed25519 key per project, generated automatically, for cloning private repositories.
 - **Workers**: a worker is only receiving jobs from projects with the worker enabled.
+- **Teams**: granted [teams](teams.md) bring their users with a role, their workers, or both.
 - **Cache Subscriptions**: Gradient is pushing every build output of a project to its subscribed caches.
 - **Integrations**: connections to GitHub, Gitea / Forgejo or GitLab for incoming events and outgoing status.
 

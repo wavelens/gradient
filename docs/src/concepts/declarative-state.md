@@ -17,9 +17,10 @@ flowchart LR
 | Tasks | Repository, wildcard, triggers, actions, concurrency |
 | Integrations | Git host connections for incoming events and outgoing status |
 | Caches | Signing key, upstream caches, members |
-| Roles | Custom project and cache roles, OIDC and SCIM group mappings |
+| Roles | Custom project and cache roles |
+| Teams | Members, OIDC and SCIM groups, grants on projects and caches |
 | API Keys | Scoped keys, the token hash read from a secret file |
-| Workers | Project workers and base workers |
+| Workers | Project workers and team workers |
 
 ## UI-Managed and Nix-Managed
 

@@ -1,6 +1,6 @@
 # Set Up Single Sign-On
 
-Sign-in through the company identity provider (Keycloak, Kanidm, Authentik, Okta, Entra ID), with project roles from the provider's groups.
+Sign-in through the company identity provider (Keycloak, Kanidm, Authentik, Okta, Entra ID), with team memberships from the provider's groups.
 
 **Requirements:**
 
@@ -14,7 +14,7 @@ Create an OIDC client with the settings below.
 | Setting | Value |
 |---|---|
 | Redirect URL | `https://gradient.example.com/api/v1/auth/oidc/callback` |
-| Scopes | `openid`, `email`, `profile`, plus `groups` for role mapping |
+| Scopes | `openid`, `email`, `profile`, plus `groups` for team mapping |
 | PKCE | `S256`. Gradient is always sending PKCE |
 
 Store the client secret as a file on the server.
@@ -33,22 +33,30 @@ services.gradient.oidc = {
 ```
 
 1.  Gradient is reading every endpoint from `<discoveryUrl>/.well-known/openid-configuration`.
-2.  `groups` is not in the default scopes. Add `groups` for [role mapping](#3-map-groups-to-roles) where the provider is supporting the scope.
+2.  `groups` is not in the default scopes. Add `groups` for [team mapping](#3-map-groups-to-teams) where the provider is supporting the scope.
 3.  Hiding the username and password login. Leave out to offer both.
 
-## 3. Map Groups to Roles
+## 3. Map Groups to Teams
 
-A custom role is listing the provider groups that grant the role.
+A [team](../concepts/teams.md) can follow one provider group. Grants of the team then decide the projects and caches of its members.
 
-```nix
-services.gradient.state.roles.acme-engineer = {
-  project = "acme";
-  permissions = [ "viewProject" "triggerEvaluation" ];
-  oidc_group = [ "acme-eng" ];
-};
-```
+=== "UI"
 
-A member of `acme-eng` is receiving the `acme-engineer` role in `acme` on each sign-in. Groups only add roles. A member leaving a group keeps every role. Only SCIM or an admin can take a role away.
+    Superusers can set **OIDC group** on the team's **Settings** page.
+
+=== "Declarative"
+
+    ```nix
+    services.gradient.state.teams.acme-eng = {
+      display_name = "ACME Engineering";
+      oidc_group = "acme-eng";
+    };
+    services.gradient.state.projects.acme.teams = [
+      { team = "acme-eng"; role = "Write"; workers = false; }
+    ];
+    ```
+
+Members of `acme-eng` join the team on each sign-in. Users without `acme-eng` in the claim leave the team on the next sign-in. Members added by hand stay.
 
 ## 4. Provision with SCIM
 
@@ -60,7 +68,7 @@ services.gradient.scim = {
   tokenFile = "/run/secrets/gradient-scim-token"; # (1)!
 };
 
-services.gradient.state.roles.acme-engineer.scim_group = [ "acme-eng" ];
+services.gradient.state.teams.acme-eng.scim_group = "acme-eng";
 ```
 
 1.  Any random string, e.g. `openssl rand -hex 32`. The provider is sending the same value as bearer token.
@@ -70,26 +78,27 @@ Set the SCIM base URL `https://gradient.example.com/scim/v2` and the bearer toke
 | Provider action | Effect in Gradient |
 |---|---|
 | Add a user | A new passwordless account, claimed on the first OIDC sign-in |
-| Add to a group | Every role with that `scim_group` granted |
-| Remove from a group | Those roles revoked |
+| Add to a group | Member of the team with that `scim_group` |
+| Remove from a group | Team membership removed |
 | Deactivate or delete | Sign-in blocked, history kept. `scim.hardDelete = true` is deleting the account |
 
 ## Verify Deployment
 
 - The login page is showing the provider's button.
 - Signing in is landing on the dashboard.
-- **Members & Roles** in `acme` is listing the user with the `acme-engineer` role.
+- The user is now listed on the `acme-eng` team page, with the **Group** badge.
 
 ## Troubleshooting
 
 | Symptom | Fix |
 |---|---|
 | `An account already exists with this username or email` | A password account is holding the same name or email. Delete or rename the account, or sign in with the password |
-| No roles after sign-in | The `groups` scope is missing, or the group name does not match `oidc_group` |
+| No team after sign-in | The `groups` scope is missing, or the group name does not match the team's `oidc_group` |
 | `account is deactivated` | SCIM deactivated the account in the provider |
-| SCIM calls return `404` for a group | No role is listing the group in `scim_group` |
+| SCIM calls return `404` for a group | No team has the group as `scim_group` |
 
 ## Next Steps
 
-- [Declarative State](../concepts/declarative-state.md): roles, projects and members as NixOS options
+- [Teams](../concepts/teams.md): grants, roles and team workers
+- [Declarative State](../concepts/declarative-state.md): teams, projects and members as NixOS options
 - [Configuration](../reference/configuration.md#oidc): every OIDC and SCIM option

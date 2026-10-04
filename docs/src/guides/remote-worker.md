@@ -34,14 +34,12 @@ cat /proc/sys/kernel/random/uuid
         worker_id = "<worker id from step 1>";
         projects = [ "acme" ];
         token_file = "/run/secrets/builder-1-token"; # (2)!
-        base_worker = false; # (3)!
       };
     };
     ```
 
     1.  Pinned for the worker's peers file. The peers file is naming the project before the server's first start.
     2.  Created with `openssl rand -base64 48`. The worker's peers file is holding the same token.
-    3.  Declared workers are base workers by default.
 
     The peers file entry on the worker machine is `<project uuid>:<token>`.
 
@@ -82,7 +80,7 @@ The local worker is connecting on the loopback address without this setting.
 - The next evaluation of the project is showing builds on the new worker.
 
 !!! tip "One Machine, Many Projects"
-    Register the same worker ID in each project. Add each project's peers file entry as its own line. A [base worker](../reference/state.md#workersname) is the alternative for a worker every project may use.
+    Register the same worker ID in each project. Add each project's peers file entry as its own line. A [team worker](../concepts/teams.md#team-workers) is the alternative for a worker of one team.
 
 ## Peers File
 
@@ -104,6 +102,8 @@ A single `*:<token>` line is answering every project with the same token instead
 | Fit | Workers shared between teams | A worker owned by one team, serving all of that team's projects |
 
 Prefer one line per project. Use `*` only for workers whose projects all share one owner.
+
+A [team worker](../concepts/teams.md#team-workers) needs one line for its team, `<team id>:<token>`, or `*:<token>`.
 
 ## Next Steps
 

@@ -16,12 +16,14 @@ Mails, web requests and Matrix or Slack messages on evaluation and build events,
 
     | Type | Fields |
     |---|---|
-    | Send Mail | **Recipients**, comma-separated. Optional **Subject Template** |
+    | Send Mail | **Recipients**, comma-separated email addresses or `team:<name>`. Optional **Subject Template** |
     | Send Web Request | **URL**. Optional **Token**, shown once after saving |
     | Send Matrix Message | **Homeserver**, **Room ID**, **Access Token** |
     | Send Slack Message | **Webhook URL** |
 
     **Send Mail** is available only with email configured on the server.
+
+    A `team:<name>` recipient is a [team](../concepts/teams.md) granted with users on the project. Its verified members get the mail.
 
 === "Declarative"
 

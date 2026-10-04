@@ -17,7 +17,7 @@ Declarative entities under `services.gradient.state` are in the [state reference
 | `domain` | string | - | - | Domain under which Gradient is served. |
 | `enable` | bool | `false` | - | Whether to enable Gradient. |
 | `listenAddr` | string | `"127.0.0.1"` | `GRADIENT_LISTEN_ADDR` | IP address the Gradient server is listening on. |
-| `localWorker` | bool | `worker.enable` | - | Whether to provision credentials for a `worker` running on this host. These are a worker identity derived from the hostname, a token generated on first start, the matching peers file and an `auto_enable` base worker registration. |
+| `localWorker` | bool | `worker.enable` | - | Whether to provision credentials for a `worker` running on this host. These are a worker identity derived from the hostname, a token generated on first start, the matching peers file and a worker of the state-declared team `server`. New projects get the team's workers. |
 | `port` | port | `3000` | `GRADIENT_PORT` | Port the Gradient server is listening on. |
 | `retentionDays` | int | `90` | `GRADIENT_RETENTION_DAYS` | Days to keep job assignment records, finished deliveries, worker connection history, webhook and task action deliveries, expired sessions and CLI logins. The same limit is covering finished admin tasks, the audit log, per-build resource samples and finished cluster jobs. Pruned resource samples are no longer feeding build predictions. A finished cluster job without remaining members is going on the next hourly pass. The pruning is sparing the newest finished admin task of each kind and active cluster jobs. An open worker connection is kept until the same worker is connecting again. `0` is keeping every record forever. |
 | `serveUrl` | string | derived | `GRADIENT_SERVE_URL` | Public URL under which clients are reaching Gradient. This option is needed for a URL other than `domain`, for example behind a port mapping. |
@@ -420,7 +420,7 @@ The derivation attributes `timeout`, `maxSilent` and `preferLocalBuild` are over
 
 - A stable worker ID derived from the host name.
 - A token generated on first start in `/var/lib/gradient-worker/local-token`. Deleting the file and restarting both services is rotating the token.
-- A base worker with `auto_enable`. Every project, including later ones, is using the worker.
+- A worker of the state-declared team `server`, set to grant every new project its workers. Projects created before the team existed get the worker once they grant the `server` team.
 
 The worker is waiting in reconnect backoff (at most 60 s) until a project with a cache subscription is available.
 

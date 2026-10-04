@@ -38,13 +38,13 @@ sequenceDiagram
 |---|---|
 | `400` | An unexpected message during the handshake |
 | `401` | `no valid peer tokens provided` |
-| `403` | `unknown worker`, `worker is deactivated`, `base worker not enabled by any project`, or the server is not accepting connections |
+| `403` | `unknown worker`, `worker is deactivated`, `no project grants this team's workers`, or the server is not accepting connections |
 | `495` | `project has no cache subscribed`: every authorized project is lacking a cache |
 | `496` | `worker already connected` |
 
 ## Server-Dialed Handshake
 
-The server is dialing every registration and base worker with a `url`. The server is proving itself with its tokens, and the worker's TLS certificate is proving the worker.
+The server is dialing every registration and team worker with a `url`. The server is proving itself with its tokens, and the worker's TLS certificate is proving the worker.
 
 ```mermaid
 sequenceDiagram
@@ -65,8 +65,8 @@ sequenceDiagram
 - `services.gradient.worker.acceptedServerTokensFile` is holding the hashes a worker is checking. The worker is accepting every server without the file.
 - A reauth of a server-dialed session is answered with `AuthUpdate`, never with `AuthChallenge`.
 - A reauth finding a new registration is closing the session. The next dial is carrying the new project's token.
-- A project enabling a base worker is joining the running session. Every enabling project is sharing the base worker's one token.
-- A registration may not reuse the worker ID of a base worker. Gradient.CI worker IDs belong to one registration or base worker only.
+- Projects granting a team's workers join the running session. All of them share the team worker's one token for the team ID.
+- A registration may not reuse the worker ID of a team worker. Gradient.CI worker IDs belong to one registration or team worker only.
 - The server is keeping the last failure of every worker ID in memory as the worker's offline reason.
 - The server is keeping a failure before the token check only for a registered worker ID.
 
