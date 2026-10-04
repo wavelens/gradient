@@ -6,6 +6,7 @@
 
 mod auth;
 mod basic_derivation;
+mod build_log;
 mod build_request;
 mod build_wait;
 mod commands;

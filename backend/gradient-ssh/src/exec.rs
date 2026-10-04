@@ -4,10 +4,12 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use crate::build_log::PlainLog;
 use crate::commands::Command;
 use crate::roots::Roots;
 use crate::session::Session;
 use crate::store::SshBackend;
+use harmonia_protocol::log::LogMessage;
 use russh::ChannelId;
 use russh::server::{Handle, Msg};
 use russh::{Channel, ChannelStream};
@@ -150,16 +152,19 @@ async fn realise(
     derivations: &[String],
     add_root: Option<String>,
 ) -> u32 {
-    let (tx, mut rx) = mpsc::unbounded_channel::<String>();
+    let (tx, mut rx) = mpsc::unbounded_channel::<LogMessage>();
     let build = async move {
-        crate::build_request::run(session, derivations, move |line| {
-            let _ = tx.send(line);
+        crate::build_request::run(session, derivations, move |message| {
+            let _ = tx.send(message);
         })
         .await
     };
     let forward = async {
-        while let Some(line) = rx.recv().await {
-            output.stderr(line).await;
+        let mut plain = PlainLog::default();
+        while let Some(message) = rx.recv().await {
+            if let Some(line) = plain.line(message) {
+                output.stderr(line).await;
+            }
         }
     };
     let (outcome, ()) = tokio::join!(build, forward);

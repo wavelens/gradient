@@ -64,7 +64,7 @@ The Nix daemon will open the connection as `root` for substituters. Plain `nix c
 - The evaluation will stay in building while the connection is open.
 - Nix will print the missing systems while no connected worker can build them.
 - An abort of the evaluation will stop every unfinished build with an error, e.g. after [5 minutes without a matching worker](../concepts/evaluations-and-builds.md).
-- Build logs are streaming back with the package name in front of each line.
+- Build logs are streaming back like logs of local builds. `nix build -L` will print every line with the package name in front.
 
 ## 5. Add a Remote Builder
 

@@ -13,7 +13,7 @@ use harmonia_protocol::daemon::wire::types2::{
     SuccessStatus,
 };
 use harmonia_protocol::daemon::{DaemonResult, FutureResultExt as _, ResultLog};
-use harmonia_protocol::log::{LogMessage, Message, Verbosity};
+use harmonia_protocol::log::LogMessage;
 use harmonia_store_derivation::derivation::BasicDerivation;
 use harmonia_store_derivation::derived_path::{DerivedPath, SingleDerivedPath};
 use harmonia_store_derivation::realisation::UnkeyedRealisation;
@@ -28,16 +28,13 @@ fn streamed<T, W, F>(
 ) -> impl ResultLog<Output = DaemonResult<T>> + Send + 'static
 where
     T: Send + 'static,
-    W: FnOnce(Arc<Session>, Box<dyn Fn(String) + Send + Sync>) -> F + Send + 'static,
+    W: FnOnce(Arc<Session>, Box<dyn Fn(LogMessage) + Send + Sync>) -> F + Send + 'static,
     F: Future<Output = DaemonResult<T>> + Send + 'static,
 {
     let (tx, mut rx) = mpsc::unbounded_channel::<LogMessage>();
     let shutdown = session.state.shutdown.clone();
-    let log = Box::new(move |line: String| {
-        let _ = tx.send(LogMessage::Message(Message {
-            level: Verbosity::Info,
-            text: line.into(),
-        }));
+    let log = Box::new(move |message: LogMessage| {
+        let _ = tx.send(message);
     });
     let task = shutdown.spawn(work(session, log));
 

@@ -4,15 +4,16 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use crate::build_log::BuildLogs;
 use crate::build_request::Started;
 use crate::session::Session;
 use gradient_derivation::Derivation;
 use gradient_entity::build::BuildStatus;
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_types::*;
-use gradient_util::log_lines::PrefixedLines;
 use gradient_util::store_path::strip_nix_store_prefix;
 use harmonia_protocol::daemon::wire::types2::FailureStatus;
+use harmonia_protocol::log::LogMessage;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::time::Duration;
@@ -33,11 +34,6 @@ pub struct BuildOutcome {
     pub results: Vec<(String, DrvResult)>,
 }
 
-struct Followed {
-    offset: usize,
-    lines: PrefixedLines,
-}
-
 pub fn failure_status(status: BuildStatus) -> FailureStatus {
     match status {
         BuildStatus::FailedTimeout => FailureStatus::TimedOut,
@@ -48,7 +44,7 @@ pub fn failure_status(status: BuildStatus) -> FailureStatus {
     }
 }
 
-fn settles_the_request(status: BuildStatus) -> bool {
+pub(crate) fn settles_the_request(status: BuildStatus) -> bool {
     status.is_terminal_success() || status.is_terminal_failure()
 }
 
@@ -106,7 +102,7 @@ fn missing_systems(evaluation: &MEvaluation) -> Option<String> {
 pub async fn wait(
     session: &Session,
     started: &Started,
-    log: impl Fn(String) + Send + Sync,
+    log: impl Fn(LogMessage) + Send + Sync,
 ) -> anyhow::Result<BuildOutcome> {
     let state = &session.state;
     let derivations = closure_derivations(session, &started.closure).await?;
@@ -124,23 +120,16 @@ pub async fn wait(
             Some((path, j.derivation_build))
         })
         .collect();
-    let prefixes: HashMap<DerivationBuildId, String> = jobs
-        .iter()
-        .filter_map(|j| {
-            let d = derivations.get(&j.derivation)?;
-            Some((
-                j.derivation_build,
-                d.pname.clone().unwrap_or(d.name.clone()),
-            ))
-        })
-        .collect();
     let requested: Vec<DerivationBuildId> = started
         .requested
         .iter()
         .filter_map(|(path, _)| build_of.get(path).copied())
         .collect();
-    let mut followed: HashMap<DerivationBuildId, Followed> = HashMap::new();
-    let mut open: Vec<DerivationBuildId> = jobs.iter().map(|j| j.derivation_build).collect();
+    let drv_paths = build_of
+        .iter()
+        .map(|(path, build)| (*build, path.clone()))
+        .collect();
+    let mut logs = BuildLogs::unsettled(session, drv_paths).await?;
     let mut waiting = Waiting::default();
 
     let evaluation = loop {
@@ -149,18 +138,19 @@ pub async fn wait(
             .await?
             .ok_or_else(|| anyhow::anyhow!("evaluation {} disappeared", started.evaluation))?;
         if let Some(line) = waiting.observe(&evaluation) {
-            log(line);
+            log(LogMessage::message(line));
         }
 
-        open = follow_logs(session, open, &prefixes, &mut followed, &log).await?;
-        if EvaluationStatus::TERMINAL.contains(&evaluation.status)
-            || settled(session, &requested).await?
-        {
+        let done = EvaluationStatus::TERMINAL.contains(&evaluation.status)
+            || settled(session, &requested).await?;
+        logs.follow(session, &log).await?;
+        if done {
             break evaluation;
         }
 
         tokio::time::sleep(POLL).await;
     };
+    logs.finish(&log);
 
     let mut results = Vec::with_capacity(started.requested.len());
     for (path, drv) in &started.requested {
@@ -206,73 +196,6 @@ async fn settled(session: &Session, requested: &[DerivationBuildId]) -> anyhow::
         .await?
         .iter()
         .all(|b| settles_the_request(b.status)))
-}
-
-async fn follow_logs(
-    session: &Session,
-    open: Vec<DerivationBuildId>,
-    prefixes: &HashMap<DerivationBuildId, String>,
-    followed: &mut HashMap<DerivationBuildId, Followed>,
-    log: &(impl Fn(String) + Send + Sync),
-) -> anyhow::Result<Vec<DerivationBuildId>> {
-    let state = &session.state;
-    let builds = gradient_db::fetch_in_chunks(&open, |chunk| async {
-        EDerivationBuild::find()
-            .filter(CDerivationBuild::Id.is_in(chunk))
-            .all(&state.web_db)
-            .await
-    })
-    .await?;
-
-    let mut still_open = Vec::new();
-    for build in builds {
-        let terminal = !matches!(
-            build.status,
-            BuildStatus::Created | BuildStatus::Queued | BuildStatus::Building
-        );
-        if build.status == BuildStatus::Building || (terminal && followed.contains_key(&build.id)) {
-            let entry = followed.entry(build.id).or_insert_with(|| Followed {
-                offset: 0,
-                lines: PrefixedLines::new(prefixes.get(&build.id).cloned().unwrap_or_default()),
-            });
-            emit_new_lines(session, build.id, entry, terminal, log).await?;
-        }
-
-        if !terminal {
-            still_open.push(build.id);
-        }
-    }
-
-    Ok(still_open)
-}
-
-async fn emit_new_lines(
-    session: &Session,
-    build: DerivationBuildId,
-    followed: &mut Followed,
-    terminal: bool,
-    log: &(impl Fn(String) + Send + Sync),
-) -> anyhow::Result<()> {
-    let state = &session.state;
-    let Some(attempt) =
-        gradient_db::scheduling::build_attempt::latest_attempt_id(&state.web_db, build).await?
-    else {
-        return Ok(());
-    };
-
-    let text = state.log_storage.read(attempt).await.unwrap_or_default();
-    if let Some(new) = text.get(followed.offset..) {
-        followed.offset = text.len();
-        for line in followed.lines.push(new) {
-            log(line);
-        }
-    }
-
-    if terminal && let Some(rest) = followed.lines.finish() {
-        log(rest);
-    }
-
-    Ok(())
 }
 
 async fn requested_result(

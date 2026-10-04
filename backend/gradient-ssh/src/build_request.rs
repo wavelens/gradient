@@ -16,6 +16,7 @@ use gradient_scheduler::Scheduler;
 use gradient_types::*;
 use gradient_util::store_path::strip_nix_store_prefix;
 use gradient_wire::types::{BuildFailureKind, DiscoveredDerivation};
+use harmonia_protocol::log::LogMessage;
 use sea_orm::{ActiveModelTrait, EntityTrait, IntoActiveModel, TransactionTrait};
 use std::collections::HashSet;
 use std::future::Future;
@@ -314,10 +315,13 @@ async fn record(
 pub async fn run(
     session: &Session,
     drv_paths: &[String],
-    log: impl Fn(String) + Send + Sync,
+    log: impl Fn(LogMessage) + Send + Sync,
 ) -> anyhow::Result<BuildOutcome> {
     let started = start(session, drv_paths).await?;
-    log(format!("Gradient evaluation {}", started.evaluation));
+    log(LogMessage::message(format!(
+        "Gradient evaluation {}",
+        started.evaluation
+    )));
     wait(session, &started, log).await
 }
 
