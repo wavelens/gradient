@@ -534,6 +534,14 @@ impl JobReporter for JobUpdater {
         crate::executor::push_paths(paths, self, &store).await
     }
 
+    async fn pull_paths(&mut self, paths: Vec<String>) -> Result<()> {
+        let Some(store) = self.store.clone() else {
+            return Ok(());
+        };
+
+        crate::proto::prefetch::pull_cached(&store, paths, self).await
+    }
+
     async fn report_building(&mut self, build_id: String) -> Result<()> {
         self.send_update(JobUpdateKind::Building { build_id }).await
     }

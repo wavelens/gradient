@@ -30,6 +30,9 @@ pub enum ReportedEvent {
     PathsPushed {
         paths: Vec<(String, Option<u64>)>,
     },
+    PathsPulled {
+        paths: Vec<String>,
+    },
     Building {
         build_id: String,
     },
@@ -238,6 +241,11 @@ impl JobReporter for RecordingJobReporter {
         self.record(ReportedEvent::PathsPushed {
             paths: paths.to_vec(),
         });
+        Ok(())
+    }
+
+    async fn pull_paths(&mut self, paths: Vec<String>) -> Result<()> {
+        self.record(ReportedEvent::PathsPulled { paths });
         Ok(())
     }
 

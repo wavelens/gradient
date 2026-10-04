@@ -62,6 +62,8 @@ pub trait JobReporter: Send + Sync {
     /// upload is failing the evaluation instead of a later build.
     async fn push_paths(&self, paths: &[(String, Option<u64>)]) -> Result<()>;
 
+    async fn pull_paths(&mut self, paths: Vec<String>) -> Result<()>;
+
     async fn report_building(&mut self, build_id: String) -> Result<()>;
     async fn report_build_output(
         &mut self,

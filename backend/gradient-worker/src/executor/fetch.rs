@@ -124,6 +124,7 @@ pub async fn fetch_repository(
         .unwrap_or_default();
     let key_env = ssh_key_env(ssh_key.as_deref(), binpath_ssh).await?;
     let git_ssh_command = key_env.as_ref().map(|(_, command)| command.clone());
+    pull_from_cache(updater, store, &inputs, &mut abort).await?;
     let sink = updater.eval_progress_sink();
     let fetched = fetch_inputs(inputs, store, fetcher, &*sink, git_ssh_command, &mut abort).await?;
     for msg in &fetched.warnings {
@@ -261,6 +262,34 @@ fn second_level(host: &str) -> String {
         [tld, sld, ..] => format!("{sld}.{tld}"),
         _ => host.to_owned(),
     }
+}
+
+#[tracing::instrument(level = "debug", skip_all, fields(inputs = inputs.len()))]
+async fn pull_from_cache(
+    updater: &mut dyn JobReporter,
+    store: &dyn WorkerStore,
+    inputs: &[LockedInput],
+    abort: &mut AbortSignal,
+) -> Result<()> {
+    let mut paths: Vec<String> = inputs.iter().map(|i| i.store_path.clone()).collect();
+    paths.sort();
+    paths.dedup();
+    let missing = missing_paths(store, &paths).await?;
+    if missing.is_empty() {
+        return Ok(());
+    }
+    let pulled = tokio::select! {
+        biased;
+        () = abort.aborted() => anyhow::bail!("job aborted during flake input fetch"),
+        pulled = updater.pull_paths(missing) => pulled,
+    };
+    if let Err(e) = pulled {
+        debug!(
+            error = format!("{e:#}"),
+            "flake inputs not pulled from the cache, fetching them from their origin"
+        );
+    }
+    Ok(())
 }
 
 #[tracing::instrument(level = "debug", skip_all, fields(inputs = inputs.len()))]
@@ -1180,6 +1209,33 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(paths, vec!["/nix/store/systems-source".to_owned()]);
+    }
+
+    #[tokio::test]
+    async fn only_inputs_missing_from_the_store_are_pulled_from_the_cache_once() {
+        let mut reporter = RecordingJobReporter::new();
+        let store = FakeWorkerStore::new().with_present_path("/nix/store/a-source");
+        pull_from_cache(
+            &mut reporter,
+            &store,
+            &[
+                input("a", "github.com", "a"),
+                input("b", "github.com", "b"),
+                input("b_2", "github.com", "b"),
+            ],
+            &mut no_abort(),
+        )
+        .await
+        .unwrap();
+        let pulled: Vec<_> = reporter
+            .events()
+            .into_iter()
+            .filter_map(|e| match e {
+                ReportedEvent::PathsPulled { paths } => Some(paths),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(pulled, vec![vec!["/nix/store/b-source".to_owned()]]);
     }
 
     #[tokio::test]

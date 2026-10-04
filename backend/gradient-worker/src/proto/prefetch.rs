@@ -645,6 +645,27 @@ pub async fn ensure_path(
     Ok(())
 }
 
+pub async fn pull_cached(
+    store: &LocalNixStore,
+    paths: Vec<String>,
+    updater: &mut JobUpdater,
+) -> Result<()> {
+    let entries = updater.query_cache(paths.clone(), QueryMode::Pull).await?;
+    let Classified {
+        by_url, by_request, ..
+    } = classify_cached_entries(&paths, entries);
+    if by_url.is_empty() && by_request.is_empty() {
+        return Ok(());
+    }
+
+    let mut prefetcher = InputPrefetcher::for_path(store, "flake inputs".to_owned(), updater);
+    let batch = prefetcher
+        .fetch_round(by_url, by_request, &Tally::default())
+        .await?;
+    prefetcher.import_all(batch).await?;
+    Ok(())
+}
+
 async fn read_local_drv(drv_path: &str) -> Result<gradient_derivation::Derivation> {
     let full = nix_store_path(drv_path);
     let bytes = tokio::fs::read(&full)
