@@ -80,6 +80,15 @@ export class ActionFormComponent implements OnChanges {
   events = signal<string[]>([]);
   readonly taskFamilies = ['build', 'evaluation', 'task'];
   recipientsRaw = signal('');
+  teams = input<string[]>([]);
+  teamOptions = computed(() => this.teams().map((team) => ({ label: team, value: team })));
+
+  addTeamRecipient(team: string | null): void {
+    if (!team) return;
+    const current = this.recipientsRaw().trim();
+    const entry = `team:${team}`;
+    this.recipientsRaw.set(current ? `${current}, ${entry}` : entry);
+  }
   subjectTemplate = signal('');
   url = signal('');
   tokenValue = signal('');

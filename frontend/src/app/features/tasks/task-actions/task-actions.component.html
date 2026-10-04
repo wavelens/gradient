@@ -126,6 +126,7 @@
   [open]="showCreateDialog()"
   [error]="error()"
   [outboundIntegrations]="outboundIntegrations()"
+  [teams]="mailTeams()"
   (saved)="onCreateSaved($event)"
   (closed)="showCreateDialog.set(false)"
 />
@@ -136,6 +137,7 @@
   [error]="error()"
   [existing]="editingAction()"
   [outboundIntegrations]="outboundIntegrations()"
+  [teams]="mailTeams()"
   (saved)="onEditSaved($event)"
   (closed)="showEditDialog.set(false); editingAction.set(null)"
 />

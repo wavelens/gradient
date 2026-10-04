@@ -188,4 +188,13 @@ describe('ActionFormComponent', () => {
     expect(opts).toContain('send_matrix_message');
     expect(opts).toContain('send_slack_message');
   });
+  it('adds a team as team:<name> to the recipients', () => {
+    const fixture = TestBed.createComponent(ActionFormComponent);
+    fixture.componentRef.setInput('teams', ['platform']);
+    fixture.detectChanges();
+    const component = fixture.componentInstance;
+    component.recipientsRaw.set('ops@example.com');
+    component.addTeamRecipient('platform');
+    expect(component.recipientsRaw()).toBe('ops@example.com, team:platform');
+  });
 });

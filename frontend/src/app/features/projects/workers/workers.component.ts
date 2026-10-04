@@ -382,17 +382,6 @@ export class WorkersComponent implements OnInit {
     }
   }
 
-  setGradientCiEnabled(worker: Worker, enabled: boolean): void {
-    this.togglingId.set(worker.worker_id);
-    this.workersService.setWorkerActive(this.projectName, worker.worker_id, enabled).subscribe({
-      next: () => {
-        this.togglingId.set(null);
-        this.loadWorkers();
-      },
-      error: () => this.togglingId.set(null),
-    });
-  }
-
   disconnectGradientCi(worker: Worker): void {
     this.showGradientCiDisconnect.set(false);
     this.deleteWorker(worker);

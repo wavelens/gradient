@@ -32,7 +32,6 @@ const workerUnmanaged: Worker = {
   display_name: 'Builder',
   managed: false,
   active: true,
-  is_base: false,
   gradient_ci: false,
   connected: false,
   enable_fetch: true,
@@ -45,7 +44,6 @@ const workerManaged: Worker = {
   display_name: 'Nix-managed',
   managed: true,
   active: true,
-  is_base: false,
   gradient_ci: false,
   connected: false,
   enable_fetch: true,
@@ -53,12 +51,12 @@ const workerManaged: Worker = {
   enable_build: true,
 };
 
-const workerBase: Worker = {
+const workerOfTeam: Worker = {
   worker_id: 'w3',
-  display_name: 'Base worker',
+  display_name: 'Team worker',
   managed: true,
   active: true,
-  is_base: true,
+  team: 'platform',
   gradient_ci: false,
   connected: false,
   enable_fetch: true,
@@ -178,28 +176,23 @@ describe('WorkersComponent - access gating', () => {
   });
 });
 
-describe('WorkersComponent - base workers', () => {
-  it('renders a Base badge and leaves Activate/Fire Test enabled but Edit/Delete disabled', async () => {
+describe('WorkersComponent - team workers', () => {
+  it('renders a team worker read-only with a link to its team', async () => {
     const fixture = setup({
       access: { managed: false, canEdit: true, canTrigger: true },
-      workers: [workerBase],
+      workers: [workerOfTeam],
       caches: [{ id: 'c', name: 'c' }],
     });
     await settled(fixture);
 
     const badge = (Array.from(fixture.nativeElement.querySelectorAll('gr-badge')) as HTMLElement[])
-      .find((el) => (el.textContent ?? '').trim() === 'Base');
-    expect(badge, 'Base badge').toBeTruthy();
-
-    const deactivate = findByText(fixture.nativeElement, 'deactivate') as HTMLButtonElement | null;
-    const fireTest = findByText(fixture.nativeElement, 'fire test') as HTMLButtonElement | null;
-    const edit = findByText(fixture.nativeElement, 'edit') as HTMLButtonElement | null;
-    const del = findByText(fixture.nativeElement, 'delete') as HTMLButtonElement | null;
-
-    expect(deactivate!.disabled).toBe(false);
-    expect(fireTest!.disabled).toBe(false);
-    expect(edit!.disabled).toBe(true);
-    expect(del!.disabled).toBe(true);
+      .find((el) => (el.textContent ?? '').trim() === 'Team platform');
+    expect(badge, 'Team badge').toBeTruthy();
+    const link = (fixture.nativeElement as HTMLElement).querySelector('a[href="/team/platform/workers"]');
+    expect(link?.textContent).toContain('Manage on team');
+    expect(findByText(fixture.nativeElement, 'edit')).toBeNull();
+    expect(findByText(fixture.nativeElement, 'deactivate')).toBeNull();
+    expect(findByText(fixture.nativeElement, 'delete')).toBeNull();
   });
 
   it('keeps Deactivate usable on a managed worker in a managed project, since state restores it on restart', async () => {
@@ -219,7 +212,7 @@ describe('WorkersComponent - base workers', () => {
     const testWorker = vi.fn(() => of({ ok: true, connected: true, authorized_for_project: true, message: 'reachable' }));
     const fixture = setup({
       access: { managed: false, canEdit: true, canTrigger: true },
-      workers: [workerBase],
+      workers: [workerOfTeam],
       caches: [{ id: 'c', name: 'c' }],
       testWorker,
     });
@@ -227,9 +220,9 @@ describe('WorkersComponent - base workers', () => {
     const cmp = fixture.componentInstance;
     const addSpy = vi.spyOn(cmp['messageService'], 'add');
 
-    cmp.fireTest(workerBase);
+    cmp.fireTest(workerOfTeam);
 
-    expect(testWorker).toHaveBeenCalledWith('demo', workerBase.worker_id);
+    expect(testWorker).toHaveBeenCalledWith('demo', workerOfTeam.worker_id);
     expect(cmp.testingId()).toBeNull();
     expect(addSpy).toHaveBeenCalledWith(
       expect.objectContaining({ severity: 'success', detail: 'reachable' }),
@@ -282,7 +275,6 @@ const gciRegistration: Worker = {
   display_name: 'Gradient.CI Servers',
   managed: false,
   active: true,
-  is_base: false,
   gradient_ci: true,
   connected: false,
   last_error: {
@@ -296,7 +288,7 @@ const gciRegistration: Worker = {
   enable_build: true,
 };
 
-const gciBase: Worker = { ...gciRegistration, worker_id: 'g2', is_base: true, active: false, last_error: undefined };
+const gciTeam: Worker = { ...gciRegistration, worker_id: 'g2', team: 'platform', last_error: undefined };
 const writable: AccessState = { managed: false, canEdit: true, canTrigger: true };
 const caches = [{ id: 'c', name: 'c' }];
 
@@ -307,13 +299,6 @@ describe('WorkersComponent - Gradient.CI Servers entry', () => {
     expect(buttonsLabelled(entry(fixture)!, 'Connect').length).toBe(1);
   });
 
-  it('offers Enable for an instance base server not enabled here', async () => {
-    const fixture = setup({ access: writable, workers: [gciBase], caches });
-    await settled(fixture);
-    expect(buttonsLabelled(entry(fixture)!, 'Enable').length).toBe(1);
-    expect(buttonsLabelled(entry(fixture)!, 'Connect').length).toBe(0);
-  });
-
   it('shows a project connection with its offline reason and Disconnect', async () => {
     const fixture = setup({ access: writable, workers: [gciRegistration], caches });
     await settled(fixture);
@@ -321,14 +306,15 @@ describe('WorkersComponent - Gradient.CI Servers entry', () => {
     expect(buttonsLabelled(entry(fixture)!, 'Disconnect').length).toBe(1);
   });
 
-  it('shows an enabled base server with Disable', async () => {
-    const fixture = setup({ access: writable, workers: [{ ...gciBase, active: true }], caches });
+  it('shows a connection of a granted team as coming from that team', async () => {
+    const fixture = setup({ access: writable, workers: [gciTeam], caches });
     await settled(fixture);
-    expect(buttonsLabelled(entry(fixture)!, 'Disable').length).toBe(1);
+    expect(entry(fixture)!.textContent).toContain('Via team platform');
+    expect(buttonsLabelled(entry(fixture)!, 'Disconnect').length).toBe(0);
   });
 
   it('hides the entry when the option is off and nothing is connected', async () => {
-    const fixture = setup({ access: writable, workers: [gciBase], caches, gradientCi: false });
+    const fixture = setup({ access: writable, workers: [], caches, gradientCi: false });
     await settled(fixture);
     expect(entry(fixture)).toBeNull();
   });

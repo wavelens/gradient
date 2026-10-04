@@ -6,7 +6,12 @@
 
 <gr-page-layout [breadcrumb]="[{ label: 'Teams', link: ['/teams'] }, { label: team()?.display_name || teamName, link: ['/team', teamName] }, { label: 'Workers' }]" title="Workers">
   @if (isAdmin() && !team()?.managed) {
-    <button slot="actions" grButton label="Register Worker" icon="add" (click)="showRegister.set(true)"></button>
+    <div slot="actions">
+      @if (canConnectGradientCi()) {
+        <button grButton label="Connect Gradient.CI Servers" icon="link" severity="secondary" (click)="showGradientCiConnect.set(true)"></button>
+      }
+      <button grButton label="Register Worker" icon="add" (click)="showRegister.set(true)"></button>
+    </div>
   }
   @if (error(); as message) {
     <gr-message-banner type="error">{{ message }}</gr-message-banner>
@@ -81,3 +86,12 @@
     <button grButton label="I've saved the token" icon="check" (click)="issuedToken.set(null)"></button>
   </div>
 </gr-dialog>
+
+<app-gradient-ci-connect
+  [(visible)]="showGradientCiConnect"
+  scope="team"
+  [team]="teamName"
+  [label]="gradientCiLabel"
+  [statusOf]="statusOf"
+  (changed)="load()"
+/>

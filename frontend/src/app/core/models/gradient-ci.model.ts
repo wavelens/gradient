@@ -6,8 +6,8 @@
 
 import type { ConnectionFailure, Worker } from './worker.model';
 
-export type GradientCiScope = 'base' | 'project';
-export type GradientCiState = 'hidden' | 'connect' | 'enable' | 'connected';
+export type GradientCiScope = 'team' | 'project';
+export type GradientCiState = 'hidden' | 'connect' | 'connected';
 
 export interface GradientCiEntry {
   state: GradientCiState;
@@ -21,6 +21,7 @@ export interface ConnectionStatus {
 
 export interface GradientCiConnectRequest {
   scope: GradientCiScope;
+  team?: string;
   project?: string;
   token: string;
 }
@@ -29,28 +30,16 @@ export interface GradientCiConnectResponse {
   worker_id: string;
 }
 
-export interface BaseWorkerEntry extends ConnectionStatus {
-  worker_id: string;
-  display_name: string;
-  url?: string | null;
-  enabled: boolean;
-  auto_enable: boolean;
-  gradient_ci: boolean;
-}
-
 export const CONNECT_WAIT_MS = 30_000;
 
 export function gradientCiEntry(offered: boolean, workers: Worker[]): GradientCiEntry {
-  const connections = workers.filter((w) => w.gradient_ci);
-  const connected = connections.find((w) => !w.is_base || w.active);
+  const connected = workers.find((w) => w.gradient_ci);
   if (connected) return { state: 'connected', worker: connected };
-  if (!offered) return { state: 'hidden', worker: null };
-  const base = connections.find((w) => w.is_base);
-  return base ? { state: 'enable', worker: base } : { state: 'connect', worker: null };
+  return offered ? { state: 'connect', worker: null } : { state: 'hidden', worker: null };
 }
 
 export function listedWorkers(workers: Worker[], entry: GradientCiEntry): Worker[] {
-  return workers.filter((w) => w !== entry.worker && !(w.gradient_ci && w.is_base && !w.active));
+  return workers.filter((w) => w !== entry.worker);
 }
 
 export function gradientCiConnectUrl(serviceUrl: string, scope: GradientCiScope, label: string): string {

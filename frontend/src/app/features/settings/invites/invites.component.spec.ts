@@ -24,6 +24,15 @@ const projectInvite: Invite = {
   expires_at: '2026-09-12T12:00:00',
 };
 
+const teamInvite: Invite = {
+  ...projectInvite,
+  kind: 'team',
+  token: 'tok-team',
+  scope: 'platform',
+  scope_display_name: 'Platform',
+  role: 'Member',
+};
+
 function setup(invites: Invite[], queryToken: string | null = null) {
   const accept = vi.fn().mockReturnValue(of('Invitation accepted'));
   const decline = vi.fn().mockReturnValue(of('Invitation declined'));
@@ -65,6 +74,13 @@ function buttonByText(root: HTMLElement, text: string): HTMLButtonElement | unde
 }
 
 describe('InvitesComponent', () => {
+  it('lists a team invite as a team', () => {
+    const { fixture } = setup([teamInvite]);
+    const text = (fixture.nativeElement as HTMLElement).textContent || '';
+    expect(text).toContain('Platform');
+    expect(text).toContain('team');
+  });
+
   it('lists a pending invite with its scope and role', () => {
     const { fixture } = setup([projectInvite]);
     const text = (fixture.nativeElement as HTMLElement).textContent || '';

@@ -1,0 +1,63 @@
+<!--
+  SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+
+  SPDX-License-Identifier: AGPL-3.0-only
+-->
+
+<gr-settings-section title="Teams" [card]="false" maxWidth="none">
+  @if (canEdit()) {
+    <button slot="actions" grButton label="Grant Team" (click)="openGrant()"></button>
+  }
+  @if (error(); as message) {
+    <gr-message-banner type="error">{{ message }}</gr-message-banner>
+  }
+  @if (grants().length > 0) {
+    <gr-row-list>
+      @for (grant of grants(); track grant.team) {
+        <gr-row icon="groups" [link]="['/team', grant.team]" linkLabel="Open team">
+          {{ grant.display_name }}
+          <span slot="meta">
+            @if (grant.users) { Users as {{ grant.role }} }
+            @if (grant.users && grant.workers) { · }
+            @if (grant.workers) { Workers }
+          </span>
+          <div slot="actions">
+            @if (grant.pending) {
+              <gr-badge severity="warning">Pending</gr-badge>
+            }
+            @if (canEdit() && kind() === 'project' && !grant.pending) {
+              <button grButton size="small" severity="secondary" [label]="grant.workers ? 'Stop Workers' : 'Use Workers'"
+                [loading]="busy() === grant.team" (click)="toggleWorkers(grant)"></button>
+            }
+            @if (canEdit()) {
+              <button grButton icon="close" severity="danger" size="small" [loading]="busy() === grant.team"
+                (click)="remove(grant)"></button>
+            }
+          </div>
+        </gr-row>
+      }
+    </gr-row-list>
+  } @else {
+    <gr-empty-state icon="groups" title="No teams" />
+  }
+</gr-settings-section>
+
+<gr-dialog header="Grant Team" [(visible)]="showGrant" width="420px">
+  <gr-form-field label="Team" hint="A team you are not Admin of receives a request to approve.">
+    <gr-autocomplete [(ngModel)]="form.team" [suggestions]="suggestions()" (completeMethod)="search($event)"
+      [forceSelection]="false" />
+  </gr-form-field>
+  @if (kind() === 'project') {
+    <gr-checkbox inputId="grant-users" label="Users" [(ngModel)]="form.users" [binary]="true" />
+    <gr-checkbox inputId="grant-workers" label="Workers" [(ngModel)]="form.workers" [binary]="true" />
+  }
+  @if (kind() === 'cache' || form.users) {
+    <gr-form-field label="Role">
+      <gr-select [(ngModel)]="form.role" [options]="roleOptions()" optionLabel="label" optionValue="value" />
+    </gr-form-field>
+  }
+  <div grDialogFooter>
+    <button grButton label="Cancel" severity="secondary" (click)="showGrant.set(false)"></button>
+    <button grButton label="Grant" [loading]="busy() === 'grant'" (click)="grant()"></button>
+  </div>
+</gr-dialog>
