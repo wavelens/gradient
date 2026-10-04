@@ -9,16 +9,16 @@ use gradient_wire::session::frame::{BULK_CHUNK_SIZE, MAX_PROTO_MESSAGE_SIZE};
 use tokio::net::TcpListener;
 use tokio_tungstenite::accept_async_with_config;
 use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
+use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
 use tracing::{error, info, warn};
 
 use crate::config::WorkerConfig;
-use crate::shutdown::Shutdown;
 use crate::worker::Worker;
 
 pub async fn start_listener(
     config: WorkerConfig,
-    shutdown: Shutdown,
+    stop: CancellationToken,
     sessions: TaskTracker,
 ) -> Result<()> {
     let addr = format!("{}:{}", config.listen_addr, config.port);
@@ -29,7 +29,7 @@ pub async fn start_listener(
 
     loop {
         tokio::select! {
-            _ = shutdown.drain_requested() => {
+            _ = stop.cancelled() => {
                 info!("shutdown requested; closing inbound listener");
                 return Ok(());
             }
@@ -37,9 +37,9 @@ pub async fn start_listener(
                 Ok((stream, addr)) => {
                     info!(%addr, "incoming connection accepted");
                     let config = config.clone();
-                    let conn_shutdown = shutdown.clone();
+                    let conn_stop = stop.clone();
                     sessions.spawn(async move {
-                        if let Err(e) = handle_incoming(stream, config, conn_shutdown).await {
+                        if let Err(e) = handle_incoming(stream, config, conn_stop).await {
                             error!(%addr, error = %e, "incoming connection failed");
                         }
                     });
@@ -65,7 +65,7 @@ async fn accept_tuned(
 async fn handle_incoming(
     stream: tokio::net::TcpStream,
     config: WorkerConfig,
-    shutdown: Shutdown,
+    stop: CancellationToken,
 ) -> Result<()> {
     let ws_config = WebSocketConfig::default()
         .max_message_size(Some(MAX_PROTO_MESSAGE_SIZE))
@@ -80,7 +80,7 @@ async fn handle_incoming(
 
     let worker = Worker::from_accepted(ws, config).await?;
     let executor_handle = worker.executor_handle();
-    let (_disconnected, outcome) = worker.run(shutdown).await;
+    let (_disconnected, outcome) = worker.run(stop).await;
     executor_handle.shutdown().await;
     outcome.map(|_| ())
 }

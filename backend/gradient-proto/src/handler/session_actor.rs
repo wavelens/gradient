@@ -34,8 +34,6 @@ use super::upload::{UploadSession, UploadTable, abandon_transfer};
 use gradient_wire::messages::{ClientMessage, GradientCapabilities, ServerMessage};
 use gradient_wire::session::frame::ProtoReader;
 
-pub const SESSION_DRAIN_BUDGET: Duration = Duration::from_secs(20);
-
 const IN_FLIGHT_STAMP: Duration = Duration::from_secs(5);
 
 pub enum SessionMsg {
@@ -43,7 +41,6 @@ pub enum SessionMsg {
     Signal(SessionSignal),
     Reattach,
     ReaderClosed,
-    DrainDeadline,
     Admitted(gradient_storage::admission::Admitted),
     SweepUploads,
 }
@@ -81,7 +78,6 @@ pub struct SessionState {
     active: ActiveJobs,
     job_events: JobEvents,
     logs: LogLane,
-    draining: bool,
     reader: JoinHandle<()>,
 }
 
@@ -179,7 +175,6 @@ impl Actor for SessionActor {
             active,
             logs,
             job_events,
-            draining: false,
             reader,
         })
     }
@@ -211,8 +206,6 @@ impl Actor for SessionActor {
 
                 if !keep {
                     myself.stop(Some("peer closed".into()));
-                } else if st.draining && st.active.is_empty() {
-                    myself.stop(Some("drained".into()));
                 }
             }
             SessionMsg::Admitted(admitted) => {
@@ -224,7 +217,7 @@ impl Actor for SessionActor {
                 ctx.sweep_uploads(uploads).await;
             }
             SessionMsg::Signal(SessionSignal::Offers(generation)) => {
-                if generation > st.offers_seen && !st.draining && !offer_jobs(st).await {
+                if generation > st.offers_seen && !offer_jobs(st).await {
                     myself.stop(Some("write failed".into()));
                 }
             }
@@ -308,26 +301,6 @@ impl Actor for SessionActor {
             SessionMsg::Signal(SessionSignal::Close { reason }) => {
                 warn!(peer_id = %st.peer_id, %reason, "closing session at the scheduler's request");
                 myself.stop(Some(reason));
-            }
-            SessionMsg::Signal(SessionSignal::Drain) => {
-                if st.draining {
-                    return Ok(());
-                }
-
-                st.draining = true;
-                info!(peer_id = %st.peer_id, active = st.active.len(), "draining session");
-                let _ = send_server_msg(&st.writer, &ServerMessage::Draining).await;
-                st.scheduler.mark_worker_draining(&st.peer_id).await;
-
-                if st.active.is_empty() {
-                    myself.stop(Some("drained".into()));
-                } else {
-                    myself.send_after(SESSION_DRAIN_BUDGET, || SessionMsg::DrainDeadline);
-                }
-            }
-            SessionMsg::DrainDeadline => {
-                warn!(peer_id = %st.peer_id, active = st.active.len(), "drain budget expired; closing with jobs in flight");
-                myself.stop(Some("drain deadline".into()));
             }
             SessionMsg::Reattach => {
                 let port: Arc<dyn SessionPort> = Arc::new(SessionRef(myself.clone()));
@@ -497,11 +470,13 @@ fn split_uploads(st: &mut SessionState) -> (InboundContext<'_>, &mut UploadSessi
 
 #[cfg(test)]
 mod tests {
+    use super::super::sessions::{Sessions, SessionsArgs, SessionsMsg};
     use super::*;
     use futures::{SinkExt, StreamExt};
     use gradient_test_support::prelude::*;
     use gradient_wire::PROTO_VERSIONS;
     use gradient_wire::codec::{from_bytes, to_bytes};
+    use ractor::rpc::CallResult;
     use sea_orm::{DatabaseBackend, MockDatabase};
     use tokio::net::{TcpListener, TcpStream};
     use tokio::sync::Notify;
@@ -563,7 +538,7 @@ mod tests {
                     *held = Some(reply);
                     received.notify_one();
                 }
-                SessionMsg::DrainDeadline => {
+                SessionMsg::Reattach => {
                     if let Some(reply) = held.take() {
                         let _ = reply.send(false);
                     }
@@ -640,52 +615,53 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn drain_sends_draining_and_closes_an_idle_session() {
+    async fn stopping_the_sessions_closes_every_socket_without_a_draining_frame() {
         let (socket, mut client) = connected_pair().await;
         let state = test_state(MockDatabase::new(DatabaseBackend::Postgres).into_connection());
         let scheduler = Arc::new(Scheduler::new(Arc::clone(&state)));
         scheduler.spawn_core(None).await.unwrap();
-        let (actor, join) = Actor::spawn(
+        let (sessions, sessions_join) = Actor::spawn(
             None,
-            SessionActor,
-            SessionArgs {
-                peer_id: "w1".into(),
-                state: Arc::clone(&state),
+            Sessions,
+            SessionsArgs {
                 scheduler: Arc::clone(&scheduler),
-                socket,
-                capabilities: GradientCapabilities::default(),
-                authorized_peers: HashSet::new(),
-                dialed: None,
+                shutdown: state.shutdown.clone(),
             },
         )
         .await
         .unwrap();
+        let args = SessionArgs {
+            peer_id: "w1".into(),
+            state: Arc::clone(&state),
+            scheduler: Arc::clone(&scheduler),
+            socket,
+            capabilities: GradientCapabilities::default(),
+            authorized_peers: HashSet::new(),
+            dialed: None,
+        };
+        let CallResult::Success(Ok((_session, session_join))) = sessions
+            .call(|reply| SessionsMsg::Attach(Box::new(args), reply), None)
+            .await
+            .unwrap()
+        else {
+            panic!("the session attaches");
+        };
         assert!(scheduler.is_worker_connected("w1").await);
 
-        actor
-            .send_message(SessionMsg::Signal(SessionSignal::Drain))
-            .unwrap();
+        sessions.stop(None);
+        sessions_join.await.unwrap();
+        session_join.await.unwrap();
 
-        let frame = client
-            .next()
-            .await
-            .expect("a frame")
-            .expect("no transport error");
-        let Message::Binary(bytes) = frame else {
-            panic!("expected a binary frame, got {frame:?}");
-        };
-        assert!(matches!(
-            from_bytes::<ServerMessage>(bytes, *PROTO_VERSIONS.end()).unwrap(),
-            ServerMessage::Draining
-        ));
-        assert!(
-            matches!(
-                client.next().await,
-                None | Some(Ok(Message::Close(_))) | Some(Err(_))
-            ),
-            "the server closes after Draining"
-        );
-        join.await.unwrap();
+        let frames = tokio::time::timeout(Duration::from_secs(5), async {
+            let mut frames = Vec::new();
+            while let Some(Ok(Message::Binary(bytes))) = client.next().await {
+                frames.push(from_bytes::<ServerMessage>(bytes, *PROTO_VERSIONS.end()).unwrap());
+            }
+            frames
+        })
+        .await
+        .expect("the server closes the socket");
+        assert!(!frames.contains(&ServerMessage::Draining), "{frames:?}");
         assert!(!scheduler.is_worker_connected("w1").await);
     }
 
@@ -749,7 +725,7 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(200)).await;
         let stamped = last_seen.load(Ordering::Relaxed);
 
-        session.send_message(SessionMsg::DrainDeadline).unwrap();
+        session.send_message(SessionMsg::Reattach).unwrap();
         reading.await.unwrap();
         session.stop(None);
         join.await.unwrap();
@@ -807,7 +783,7 @@ mod tests {
             .await
             .expect("the lookup is not queued behind the held frame");
 
-        session.send_message(SessionMsg::DrainDeadline).unwrap();
+        session.send_message(SessionMsg::Reattach).unwrap();
         reading.await.unwrap();
         session.stop(None);
         join.await.unwrap();

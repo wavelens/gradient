@@ -23,6 +23,7 @@ pub(crate) enum FailureOutcome {
     Requeue,
     Exhausted,
     Aborted,
+    Canceled,
 }
 
 pub(crate) fn decide_failure_outcome(
@@ -36,6 +37,7 @@ pub(crate) fn decide_failure_outcome(
         BuildFailureKind::Timeout => FailureOutcome::Timeout,
         BuildFailureKind::Permanent => FailureOutcome::Permanent,
         BuildFailureKind::Aborted => FailureOutcome::Aborted,
+        BuildFailureKind::Canceled => FailureOutcome::Canceled,
         BuildFailureKind::SubstituteUnavailable => requeue_or_exhaust(substitution),
         BuildFailureKind::InputsUnavailable | BuildFailureKind::Transient => {
             if (attempt + 1) < max_attempts as i32 {
@@ -111,13 +113,14 @@ pub(crate) fn attempt_reason(kind: BuildFailureKind) -> Option<AttemptFailureRea
         BuildFailureKind::Timeout => Some(AttemptFailureReason::WallClockTimeout),
         BuildFailureKind::Transient
         | BuildFailureKind::CorruptEvalCache
-        | BuildFailureKind::Aborted => None,
+        | BuildFailureKind::Aborted
+        | BuildFailureKind::Canceled => None,
     }
 }
 
 pub(crate) fn attempt_outcome(kind: BuildFailureKind) -> AttemptOutcome {
     match kind {
-        BuildFailureKind::Aborted => AttemptOutcome::Aborted,
+        BuildFailureKind::Aborted | BuildFailureKind::Canceled => AttemptOutcome::Aborted,
         _ => AttemptOutcome::Failed,
     }
 }
@@ -239,6 +242,34 @@ mod tests {
     }
 
     #[test]
+    fn a_canceled_job_requeues_without_spending_the_attempt_or_substitution_budget() {
+        for attempt in [0, 2, 99] {
+            for misses in [0, 1, 7] {
+                assert_eq!(
+                    decide_failure_outcome(
+                        BuildFailureKind::Canceled,
+                        attempt,
+                        3,
+                        sub(true, misses)
+                    ),
+                    FailureOutcome::Canceled,
+                    "attempt {attempt}, misses {misses}"
+                );
+            }
+        }
+        assert!(!spends_substitute_budget(BuildFailureKind::Canceled));
+        assert_eq!(
+            attempt_reason_for(BuildFailureKind::Canceled, FailureOutcome::Canceled),
+            None,
+            "no reason, so the attempt counts as no substitution miss"
+        );
+        assert_eq!(
+            attempt_outcome(BuildFailureKind::Canceled),
+            AttemptOutcome::Aborted
+        );
+    }
+
+    #[test]
     fn only_a_real_builder_exit_records_builder_nonzero() {
         assert_eq!(
             attempt_reason(BuildFailureKind::Permanent),
@@ -255,6 +286,7 @@ mod tests {
             BuildFailureKind::InputsUnavailable,
             BuildFailureKind::CorruptEvalCache,
             BuildFailureKind::Aborted,
+            BuildFailureKind::Canceled,
         ] {
             assert_ne!(
                 attempt_reason(kind),

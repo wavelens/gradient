@@ -62,6 +62,9 @@ impl EvalStateMachine {
             (EvaluationStatus::EvaluatingFlake, EvaluationStatus::Waiting) => Ok(to),
             (EvaluationStatus::EvaluatingDerivation, EvaluationStatus::Waiting) => Ok(to),
             (EvaluationStatus::Waiting, EvaluationStatus::Queued) => Ok(to),
+            (EvaluationStatus::Fetching, EvaluationStatus::Queued) => Ok(to),
+            (EvaluationStatus::EvaluatingFlake, EvaluationStatus::Queued) => Ok(to),
+            (EvaluationStatus::EvaluatingDerivation, EvaluationStatus::Queued) => Ok(to),
 
             (_, EvaluationStatus::Failed) => Ok(to),
             (_, EvaluationStatus::Aborted) => Ok(to),
@@ -177,6 +180,25 @@ mod tests {
     fn eval_sm_waiting_recovers_to_queued() {
         assert!(
             EvalStateMachine::validate(EvaluationStatus::Waiting, EvaluationStatus::Queued).is_ok()
+        );
+    }
+
+    #[test]
+    fn eval_sm_an_interrupted_eval_job_goes_back_to_queued() {
+        for from in [
+            EvaluationStatus::Fetching,
+            EvaluationStatus::EvaluatingFlake,
+            EvaluationStatus::EvaluatingDerivation,
+        ] {
+            assert!(
+                EvalStateMachine::validate(from, EvaluationStatus::Queued).is_ok(),
+                "{from:?} -> Queued should be allowed"
+            );
+        }
+        assert!(
+            EvalStateMachine::validate(EvaluationStatus::Building, EvaluationStatus::Queued)
+                .is_err(),
+            "a Building evaluation has no eval job left to repeat"
         );
     }
 

@@ -22,10 +22,10 @@ use crate::executor::{JobExecutor, WorkerEvaluator};
 use crate::nix::store::LocalNixStore;
 use crate::proto::credentials::CredentialStore;
 use crate::proto::scorer::JobScorer;
-use crate::shutdown::Shutdown;
 use gradient_worker_client::connection::ProtoConnection;
 use gradient_worker_client::connection::handshake::{perform_dialed_handshake, perform_handshake};
 use gradient_worker_client::reconnect::RunOutcome;
+use tokio_util::sync::CancellationToken;
 
 use id::load_or_generate_id;
 
@@ -113,7 +113,7 @@ impl Worker<Disconnected> {
 }
 
 impl Worker<Connected> {
-    pub async fn run(self, shutdown: Shutdown) -> (Worker<Disconnected>, Result<RunOutcome>) {
+    pub async fn run(self, stop: CancellationToken) -> (Worker<Disconnected>, Result<RunOutcome>) {
         let Worker {
             config,
             executor,
@@ -131,12 +131,12 @@ impl Worker<Connected> {
             scorer,
             credentials.clone(),
         );
-        let outcome = message_loop::run_message_loop(state, reader, shutdown.clone()).await;
+        let outcome = message_loop::run_message_loop(state, reader, stop.clone()).await;
 
         // Only background tasks can still hold a writer clone at this point.
         // A stopping worker must see its last reports leave the queue.
         // A session ending for a reconnect is closing at once.
-        if shutdown.is_stopping() {
+        if stop.is_cancelled() {
             flush.flush(WRITER_FLUSH_BUDGET).await;
         } else {
             flush.close();

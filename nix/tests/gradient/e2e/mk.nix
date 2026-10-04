@@ -2356,7 +2356,7 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
         f"the unguarded arm did not drift, so the keys are not what the others prove:\n{out}"
     )
 
-    banner("Phase 11: every supervised loop is running; SIGTERM drains")
+    banner("Phase 11: every supervised loop is running; SIGTERM stops the server")
     health = json.loads(api_get(token, "board/health"))["message"]
     names = sorted(l["name"] for l in health["supervised"])
     print(names)
@@ -2374,13 +2374,12 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
     print(f"gradient-server stopped in {stop_secs:.1f}s")
     assert stop_secs < 40, f"shutdown took {stop_secs:.1f}s; the drain budget is 30s"
     server.succeed("journalctl -u gradient-server --no-pager | grep -q 'background tasks drained cleanly'")
-    builder.succeed("journalctl -u gradient-worker --no-pager | grep -q 'server is draining'")
 
-    banner("Phase 12: the worker survives the drain and reconnects")
+    banner("Phase 12: the worker survives the server stop and reconnects")
     builder.succeed("systemctl is-active gradient-worker.service")
-    own_session = requires("Phase 12's drained-session checks", "distinct-upstream-workers")
+    own_session = requires("Phase 12's closed-session checks", "distinct-upstream-workers")
     if own_session:
-        builder.succeed("journalctl -u gradient-worker --no-pager | grep -q 'server drained the session'")
+        builder.succeed("journalctl -u gradient-worker --no-pager | grep -q 'connection closed; reconnecting'")
 
     server.succeed("systemctl start gradient-server.service")
     server.wait_for_open_port(3000)
@@ -2389,14 +2388,14 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
             "journalctl -u gradient-worker --no-pager | grep -q 'reconnected successfully'", timeout=180
         )
 
-    banner("Phase 12b: SIGTERM drains the worker, then stops it")
+    banner("Phase 12b: SIGTERM stops the worker")
     t0 = time.time()
     builder.succeed("systemctl stop gradient-worker.service")
     stop_secs = time.time() - t0
     print(f"gradient-worker stopped in {stop_secs:.1f}s")
-    assert stop_secs < 40, f"an idle worker took {stop_secs:.1f}s to drain"
+    assert stop_secs < 40, f"an idle worker took {stop_secs:.1f}s to stop"
     builder.succeed(
-        "journalctl -u gradient-worker --no-pager | grep -q 'draining: no new jobs'"
+        "journalctl -u gradient-worker --no-pager | grep -q 'stop requested; aborting running jobs'"
     )
     assert builder.succeed(
         "systemctl show -p Result --value gradient-worker.service"

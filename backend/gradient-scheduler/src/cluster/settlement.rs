@@ -36,6 +36,13 @@ pub enum MemberOutcome {
 }
 
 impl MemberReport {
+    pub fn from_failure(job: PendingJob, failure: Failure) -> Self {
+        match failure.kind {
+            BuildFailureKind::Canceled => Self::Lost { job },
+            _ => Self::Failed { job, failure },
+        }
+    }
+
     pub fn outcome(&self) -> MemberOutcome {
         match self {
             Self::Completed { .. } => MemberOutcome::Succeeded,
@@ -332,6 +339,22 @@ mod tests {
             dispose(resolution, completed()),
             Disposition::Complete(_)
         ));
+    }
+
+    #[test]
+    fn a_canceled_member_retries_its_cluster_like_a_lost_one() {
+        let canceled = MemberReport::from_failure(
+            job(),
+            Failure {
+                error: "the worker stopped before the job finished".into(),
+                kind: BuildFailureKind::Canceled,
+                missing_paths: Vec::new(),
+            },
+        );
+        assert_eq!(canceled.outcome(), MemberOutcome::Lost);
+
+        let members = [member("a", false, Some(canceled)), member("b", false, None)];
+        assert_eq!(verdict(&members), Some(Fate::Retry));
     }
 
     #[test]

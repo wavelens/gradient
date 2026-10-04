@@ -590,11 +590,22 @@ pub enum BuildFailureKind {
     InputsUnavailable,
     CorruptEvalCache,
     Aborted,
+    #[proto(30)]
+    Canceled,
 }
+
+pub const PROTO_CANCELED: u16 = 30;
 
 #[cfg(test)]
 mod tests {
-    use super::JobPhase;
+    use super::{BuildFailureKind, JobPhase, PROTO_CANCELED};
+    use crate::codec::to_bytes;
+
+    #[test]
+    fn canceled_is_encoded_only_for_a_peer_that_knows_it() {
+        assert!(to_bytes(&BuildFailureKind::Canceled, PROTO_CANCELED - 1).is_err());
+        assert!(to_bytes(&BuildFailureKind::Canceled, PROTO_CANCELED).is_ok());
+    }
 
     #[test]
     fn every_stored_phase_discriminant_is_listed() {

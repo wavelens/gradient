@@ -8,6 +8,10 @@
   cfg = config.services.gradient.worker;
   logLevelType = lib.types.enum [ "trace" "debug" "info" "warn" "error" ];
 in {
+  imports = [
+    (lib.mkRemovedOptionModule [ "services" "gradient" "worker" "drainTimeoutSecs" ] "a stop aborts the running jobs and the server queues them again")
+  ];
+
   options.services.gradient.worker = {
     enable = lib.mkEnableOption "the Gradient worker";
 
@@ -172,18 +176,6 @@ in {
         is only read with {option}`services.gradient.worker.discoverable`.
 
         `null` is accepting every server, and the worker is logging a warning at start.
-      '';
-    };
-
-    drainTimeoutSecs = lib.mkOption {
-      type = lib.types.ints.unsigned;
-      default = 60;
-      description = ''
-        Seconds a stop is waiting for running jobs. The worker is no longer accepting work,
-        finishing and reporting what is running, then exiting. Jobs still running at the deadline
-        are aborted and re-queued. The unit's `TimeoutStopSec` is derived from this value. `0` is
-        waiting without limit, and a stuck build is then blocking {command}`systemctl stop` until a
-        second signal.
       '';
     };
 
@@ -496,13 +488,6 @@ in {
             ++ lib.optional (cfg.log.traceDir != null) cfg.log.traceDir;
           Restart = "on-failure";
           RestartSec = 10;
-          # SIGTERM is draining the worker until its in-flight jobs are finished. systemd must outwait
-          # the drain budget instead of killing a build about to finish.
-          TimeoutStopSec =
-            if cfg.drainTimeoutSecs == 0 then
-              "infinity"
-            else
-              cfg.drainTimeoutSecs + 30;
           KillMode = "mixed";
           LimitNOFILE = 65535;
           # Secrets are mlock'd to keep them off swap. The lock is failing with EPERM below this
@@ -528,7 +513,6 @@ in {
           GRADIENT_WORKER_NIX_BIN = lib.getExe' cfg.packages.nix "nix";
           GRADIENT_WORKER_SSH_BIN = lib.getExe' cfg.packages.ssh "ssh";
           GRADIENT_WORKER_GCROOTS_DIR = cfg.gcrootsDir;
-          GRADIENT_WORKER_DRAIN_TIMEOUT_SECS = toString cfg.drainTimeoutSecs;
           GRADIENT_WORKER_DISCOVERABLE = lib.boolToString cfg.discoverable;
           GRADIENT_WORKER_LISTEN_ADDR = cfg.listenAddr;
           GRADIENT_WORKER_PORT = toString cfg.port;

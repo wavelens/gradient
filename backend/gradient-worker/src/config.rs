@@ -90,18 +90,6 @@ pub struct WorkerConfig {
     )]
     pub gcroots_dir: String,
 
-    /// Seconds a SIGINT/SIGTERM drain is waiting for in-flight jobs.
-    /// The worker is stopping new work at once, then finishing, reporting and exiting.
-    /// Jobs still running at the deadline are aborted and re-queued by the server.
-    /// A value of 0 is waiting indefinitely.
-    /// The unit's `TimeoutStopSec` must stay above this value.
-    #[arg(
-        long = "drain-timeout-secs",
-        env = "GRADIENT_WORKER_DRAIN_TIMEOUT_SECS",
-        default_value_t = 600
-    )]
-    pub drain_timeout_secs: u64,
-
     /// Accept incoming `/proto` connections from the server (reverse-proxy mode).
     #[arg(
         long = "discoverable",
@@ -171,7 +159,6 @@ impl Default for WorkerConfig {
             nix_bin: "nix".to_owned(),
             ssh_bin: "ssh".to_owned(),
             gcroots_dir: "/nix/var/nix/gcroots/gradient".to_owned(),
-            drain_timeout_secs: 600,
             discoverable: false,
             listen_addr: "127.0.0.1".to_owned(),
             port: 3100,

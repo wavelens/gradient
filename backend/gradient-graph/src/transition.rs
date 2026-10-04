@@ -241,6 +241,11 @@ async fn eval_failed(
         return Ok(());
     }
 
+    if kind == BuildFailureKind::Canceled {
+        info!(%evaluation_id, "eval job stopped with its worker; re-queued");
+        return requeue_evaluation(ctx, evaluation_id).await;
+    }
+
     if kind == BuildFailureKind::Transient {
         let attempts = gradient_db::scheduling::assignment_record::eval_attempts(
             &ctx.worker_db,
@@ -622,14 +627,14 @@ async fn build_failed(
             info!(%derivation_build, attempt = attempt + 1, "transient build failure; scheduled for retry");
             return Ok(());
         }
-        FailureOutcome::Requeue => {
+        FailureOutcome::Requeue | FailureOutcome::Canceled => {
             // `repair_missing_inputs` above is purging stale cached inputs in this same call.
             // A purged input is raising this shared build's `blocking_deps`.
             // The settle is what makes the `Queued` write legal.
             update_derivation_build_status(ctx, shared_build, BuildStatus::Queued).await?;
             let settled = unpromote_ungated(&ctx.worker_db, &[derivation_id]).await?;
             emit_transition_effects(ctx, &settled).await?;
-            info!(%derivation_build, "substitute unavailable; re-queued for re-dispatch/escalation");
+            info!(%derivation_build, ?outcome, "re-queued for re-dispatch");
             return Ok(());
         }
         FailureOutcome::Exhausted => {
@@ -976,6 +981,50 @@ mod tests {
     use crate::test_ctx::ctx;
     use gradient_entity::build_attempt::AttemptOutcome;
     use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
+
+    #[tokio::test]
+    async fn a_canceled_eval_job_puts_its_evaluation_back_in_the_queue() {
+        let evaluating = MEvaluation {
+            id: EvaluationId::now_v7(),
+            status: EvaluationStatus::EvaluatingFlake,
+            ..Default::default()
+        };
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([vec![evaluating.clone()]])
+            .append_exec_results([MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 1,
+            }])
+            .into_connection();
+        let log_db = db.clone();
+        let (ctx, _) = ctx(db).await;
+
+        let _ = apply(
+            &ctx,
+            Transition::EvalFailed {
+                evaluation: evaluating.id,
+                error: "the worker stopped before the job finished".into(),
+                kind: BuildFailureKind::Canceled,
+                missing_paths: Vec::new(),
+            },
+        )
+        .await;
+
+        let log = log_db.into_transaction_log();
+        let updates: Vec<_> = log
+            .iter()
+            .flat_map(|t| t.statements())
+            .filter(|s| s.sql.starts_with("UPDATE \"evaluation\""))
+            .collect();
+        assert_eq!(updates.len(), 1, "{updates:?}");
+        assert_eq!(
+            updates[0].values.as_ref().map(|v| v.0[0].clone()),
+            Some(sea_orm::Value::Int(Some(i32::from(
+                EvaluationStatus::Queued
+            )))),
+            "{updates:?}"
+        );
+    }
 
     #[tokio::test]
     async fn an_orphaned_build_closes_its_running_attempt_before_it_is_queued_again() {

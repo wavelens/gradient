@@ -1277,8 +1277,10 @@ mod agreement_tests {
     #[tokio::test]
     async fn a_peer_without_a_shared_version_is_refused_with_both_ranges() {
         let (mut server, mut client) = raw_peer().await;
+        let newest = *PROTO_VERSIONS.end();
+        let peer = newest + 1..=newest + 2;
         client
-            .send(TungsteniteMessage::Binary(version_frame(&(30..=31))))
+            .send(TungsteniteMessage::Binary(version_frame(&peer)))
             .await
             .expect("send");
 
@@ -1286,7 +1288,8 @@ mod agreement_tests {
             server.send_msg(&ServerMessage::Draining).await,
             Err(SendError::Closed)
         );
-        let expected = format!("no shared protocol version: ours {PROTO_VERSIONS:?}, peer 30..=31");
+        let expected =
+            format!("no shared protocol version: ours {PROTO_VERSIONS:?}, peer {peer:?}");
         assert_eq!(server.refusal(), Some(expected.as_str()));
     }
 

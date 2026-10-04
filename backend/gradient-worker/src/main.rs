@@ -11,7 +11,6 @@ mod listener;
 mod metrics;
 mod nix;
 mod proto;
-mod shutdown;
 mod traits;
 mod worker;
 mod worker_pool;
@@ -20,6 +19,7 @@ use std::time::Duration;
 
 use anyhow::Result;
 use clap::Parser;
+use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
 use tracing::{error, info, warn};
 
@@ -28,7 +28,6 @@ use gradient_util::logging::{LogSetup, LogWriter, TraceSetup};
 use gradient_worker_client::reconnect::{
     RunOutcome, SessionEnd, backoff_after_session, retry_reconnect,
 };
-use shutdown::Shutdown;
 use worker::Worker;
 
 const MAX_BACKOFF: Duration = Duration::from_secs(60);
@@ -84,15 +83,15 @@ fn main() -> Result<()> {
             );
         }
 
-        let shutdown = Shutdown::new();
-        install_signal_handler(shutdown.clone(), drain_budget(&config));
+        let stop = CancellationToken::new();
+        install_signal_handler(stop.clone());
 
         let sessions = TaskTracker::new();
 
         if config.nar.partial_ttl_secs > 0 {
             let gc_config = config.clone();
-            let gc_shutdown = shutdown.clone();
-            #[expect(clippy::disallowed_methods, reason = "returns on drain_requested")]
+            let gc_stop = stop.clone();
+            #[expect(clippy::disallowed_methods, reason = "returns once the worker stops")]
             tokio::spawn(async move {
                 let ttl = std::time::Duration::from_secs(gc_config.nar.partial_ttl_secs);
                 let store = match gradient_storage::PartialStore::new(gc_config.nar_partial_dir()) {
@@ -107,7 +106,7 @@ fn main() -> Result<()> {
                 let mut tick = tokio::time::interval(period);
                 loop {
                     tokio::select! {
-                        _ = gc_shutdown.drain_requested() => return,
+                        _ = gc_stop.cancelled() => return,
                         _ = tick.tick() => {}
                     }
                     match store.gc(ttl).await {
@@ -126,13 +125,13 @@ fn main() -> Result<()> {
                 );
             }
             let listener_config = config.clone();
-            let listener_shutdown = shutdown.clone();
+            let listener_stop = stop.clone();
             let listener_sessions = sessions.clone();
-            #[expect(clippy::disallowed_methods, reason = "returns on drain_requested")]
+            #[expect(clippy::disallowed_methods, reason = "returns once the worker stops")]
             tokio::spawn(async move {
                 if let Err(e) = listener::start_listener(
                     listener_config,
-                    listener_shutdown,
+                    listener_stop,
                     listener_sessions,
                 )
                 .await
@@ -146,7 +145,7 @@ fn main() -> Result<()> {
         let mut backoff = INITIAL_BACKOFF;
 
         let initial = tokio::select! {
-            _ = shutdown.drain_requested() => None,
+            _ = stop.cancelled() => None,
             w = async {
                 loop {
                     match Worker::connect(config.clone()).await {
@@ -166,7 +165,7 @@ fn main() -> Result<()> {
         };
         let Some(mut worker) = initial else {
             info!("shutdown requested during initial connect");
-            drain_sessions(&sessions, &shutdown).await;
+            wait_for_inbound_sessions(&sessions).await;
             return Ok(());
         };
         backoff = INITIAL_BACKOFF;
@@ -174,12 +173,12 @@ fn main() -> Result<()> {
         let executor_handle = worker.executor_handle();
 
         loop {
-            let (disconnected, outcome) = worker.run(shutdown.clone()).await;
+            let (disconnected, outcome) = worker.run(stop.clone()).await;
 
-            if shutdown.is_stopping() {
-                info!("worker drained; tearing down");
+            if stop.is_cancelled() {
+                info!("worker stopped; tearing down");
                 drop(disconnected);
-                drain_sessions(&sessions, &shutdown).await;
+                wait_for_inbound_sessions(&sessions).await;
                 executor_handle.shutdown().await;
                 return Ok(());
             }
@@ -208,7 +207,7 @@ fn main() -> Result<()> {
             };
 
             let reconnected = tokio::select! {
-                _ = shutdown.drain_requested() => None,
+                _ = stop.cancelled() => None,
                 conn = retry_reconnect(
                     async || disconnected.reconnect().await,
                     |delay| tokio::time::sleep(delay),
@@ -225,7 +224,7 @@ fn main() -> Result<()> {
                 }
                 None => {
                     info!("shutdown requested during reconnect");
-                    drain_sessions(&sessions, &shutdown).await;
+                    wait_for_inbound_sessions(&sessions).await;
                     executor_handle.shutdown().await;
                     return Ok(());
                 }
@@ -234,36 +233,28 @@ fn main() -> Result<()> {
     })
 }
 
-fn install_signal_handler(shutdown: Shutdown, budget: Option<Duration>) {
+fn install_signal_handler(stop: CancellationToken) {
     #[expect(
         clippy::disallowed_methods,
-        reason = "outlives every session; the second signal or the budget ends it"
+        reason = "outlives every session; ends with the first stop signal"
     )]
     tokio::spawn(async move {
-        crate::shutdown::stop_sequence(&shutdown, budget, next_stop_signal).await
+        next_stop_signal().await;
+        info!("stop requested; aborting running jobs so the server queues them again");
+        stop.cancel();
     });
 }
 
-fn drain_budget(config: &WorkerConfig) -> Option<Duration> {
-    (config.drain_timeout_secs > 0).then(|| Duration::from_secs(config.drain_timeout_secs))
-}
-
-async fn drain_sessions(sessions: &TaskTracker, shutdown: &Shutdown) {
+async fn wait_for_inbound_sessions(sessions: &TaskTracker) {
     sessions.close();
-    if sessions.is_empty() {
-        return;
+    if !sessions.is_empty() {
+        info!(
+            sessions = sessions.len(),
+            "waiting for inbound sessions to stop"
+        );
     }
 
-    info!(
-        sessions = sessions.len(),
-        "waiting for inbound sessions to drain"
-    );
-    tokio::select! {
-        () = sessions.wait() => {}
-        () = shutdown.abort_requested() => {
-            warn!(sessions = sessions.len(), "inbound sessions still draining; stopping anyway")
-        }
-    }
+    sessions.wait().await;
 }
 
 async fn next_stop_signal() {

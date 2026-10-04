@@ -14,7 +14,6 @@ pub enum SessionSignal {
         job_id: String,
         reason: String,
     },
-    Drain,
     /// The scheduler has already re-queued the in-flight jobs. The worker must reconnect instead of
     /// reporting into a session the pool no longer knows.
     Close {

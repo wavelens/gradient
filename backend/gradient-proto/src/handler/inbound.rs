@@ -24,7 +24,8 @@ use gradient_wire::messages::{
     CACHE_QUERY_BUDGET, CandidateScore, ClientMessage, ClusterMembership, JobKind, ServerMessage,
 };
 use gradient_wire::types::{
-    BuildProgressPhase as WireBuildProgressPhase, EvalProgress as WireEvalProgress,
+    BuildFailureKind, BuildProgressPhase as WireBuildProgressPhase,
+    EvalProgress as WireEvalProgress,
 };
 
 use super::auth::{challenge_for, resolve_authorized};
@@ -98,14 +99,6 @@ impl ActiveJobs {
             jobs.remove(id);
         }
         members
-    }
-
-    pub(crate) fn len(&self) -> usize {
-        self.0.lock().len()
-    }
-
-    pub(crate) fn is_empty(&self) -> bool {
-        self.0.lock().is_empty()
     }
 
     pub(crate) fn pending(&self) -> Vec<gradient_scheduler::jobs::Reattached> {
@@ -313,11 +306,12 @@ impl<'a> InboundContext<'a> {
                 } else if let Some(assignment_id) = self.owned(&job_id, &assignment_id) {
                     warn!(peer_id = %self.peer_id, %job_id, %error, ?kind, phases = report.spans.len(), "job failed");
                     self.active.remove(&job_id);
-                    self.scheduler.record_job_timeline(
-                        assignment_id,
-                        DispatchedJobOutcome::Failed,
-                        report,
-                    );
+                    let outcome = match kind {
+                        BuildFailureKind::Canceled => DispatchedJobOutcome::Abandoned,
+                        _ => DispatchedJobOutcome::Failed,
+                    };
+                    self.scheduler
+                        .record_job_timeline(assignment_id, outcome, report);
                     self.job_events
                         .push(JobEvent::Failed {
                             job_id,
@@ -1190,7 +1184,7 @@ mod assignment_response_tests {
         ctx.on_assign_job_response("j1".into(), false, Some("at capacity".into()))
             .await;
 
-        assert!(active.is_empty());
+        assert!(active.pending().is_empty());
         let log = log_db.into_transaction_log();
         let close = log
             .iter()

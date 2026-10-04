@@ -222,7 +222,7 @@ impl Scheduler {
         };
         if self.attempt_of(job_id).is_some() {
             return self
-                .on_cluster_member_closed(job_id, MemberReport::Failed { job, failure })
+                .on_cluster_member_closed(job_id, MemberReport::from_failure(job, failure))
                 .await;
         }
 

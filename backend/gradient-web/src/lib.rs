@@ -966,9 +966,7 @@ pub async fn serve_web(state: Arc<ServerState>, scheduler: Arc<Scheduler>) -> st
                 || r.attempts_aborted > 0
                 || r.builds_requeued > 0
                 || r.builds_unpromoted > 0
-                || r.builds_aborted > 0
-                || r.evals_aborted > 0
-                || r.tasks_forced > 0
+                || r.evals_requeued > 0
                 || r.cluster_attempts_closed > 0 =>
         {
             tracing::warn!(
@@ -976,9 +974,7 @@ pub async fn serve_web(state: Arc<ServerState>, scheduler: Arc<Scheduler>) -> st
                 attempts_aborted = r.attempts_aborted,
                 builds_requeued = r.builds_requeued,
                 builds_unpromoted = r.builds_unpromoted,
-                builds_aborted = r.builds_aborted,
-                evals_aborted = r.evals_aborted,
-                tasks_forced = r.tasks_forced,
+                evals_requeued = r.evals_requeued,
                 cluster_attempts_closed = r.cluster_attempts_closed,
                 clusters_requeued = r.clusters_requeued,
                 clusters_aborted = r.clusters_aborted,

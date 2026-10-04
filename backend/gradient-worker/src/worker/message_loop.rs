@@ -7,13 +7,16 @@
 use gradient_util::sync::Mutex;
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::{Context as _, Result};
 use gradient_wire::messages::{
     BuildFailureKind, CachedPath, ClientMessage, ClusterAddress, ClusterMembership, ClusterPeer,
-    Job, JobCandidate, JobKind, ServerMessage,
+    Job, JobCandidate, JobKind, JobPhaseSpan, ServerMessage,
 };
+use gradient_wire::types::PROTO_CANCELED;
 use tokio::sync::{mpsc, watch};
+use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};
 
 use crate::config::WorkerConfig;
@@ -22,12 +25,13 @@ use crate::executor::{AbortSignal, JobExecutor};
 use crate::proto::credentials::CredentialStore;
 use crate::proto::job::JobUpdater;
 use crate::proto::scorer::JobScorer;
-use crate::shutdown::Shutdown;
 use gradient_worker_client::connection::{ProtoReader, ProtoWriter};
 use gradient_worker_client::correlation::{AssignmentHandle, CacheWaiters, KnownDerivationWaiters};
 
 use super::cluster::{ClusterChannels, ClusterHolds, HeldJob};
 use super::scoring::spawn_scoring_task;
+
+const STOP_BUDGET: Duration = Duration::from_secs(5);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct LoopEnd {
@@ -38,7 +42,7 @@ pub(super) struct LoopEnd {
 pub(super) async fn run_message_loop(
     mut state: MessageLoopState,
     mut reader: ProtoReader,
-    shutdown: Shutdown,
+    stop: CancellationToken,
 ) -> Result<LoopEnd> {
     let mut done_rx = state
         .done_rx
@@ -48,7 +52,7 @@ pub(super) async fn run_message_loop(
     let mut heartbeat = tokio::time::interval(std::time::Duration::from_secs(10));
     heartbeat.tick().await;
 
-    let mut local_drain = false;
+    let mut stop_deadline = None;
 
     info!("entering dispatch loop");
 
@@ -56,27 +60,23 @@ pub(super) async fn run_message_loop(
         tokio::select! {
             biased;
 
-            _ = shutdown.abort_requested() => {
-                warn!(active = state.jobs.len(), "stop requested; abandoning in-flight jobs");
-                break;
-            }
-
-            _ = shutdown.drain_requested(), if !local_drain => {
-                local_drain = true;
-                state.begin_drain().await?;
+            _ = stop.cancelled(), if !state.stopping => {
+                state.begin_stop().await?;
                 if state.jobs.is_idle() {
                     break;
                 }
-                info!(
-                    active = state.jobs.len(),
-                    "draining: finishing in-flight jobs before shutdown"
-                );
+                stop_deadline = Some(tokio::time::Instant::now() + STOP_BUDGET);
+            }
+
+            () = stop_budget_elapsed(stop_deadline) => {
+                warn!(active = state.jobs.len(), "stop budget expired; closing without the remaining job reports");
+                break;
             }
 
             Some((job_id, result)) = done_rx.recv() => {
                 state.on_job_done(job_id, result).await?;
-                if local_drain && state.jobs.is_idle() {
-                    info!("drained: every in-flight job has reported");
+                if state.stopping && state.jobs.is_idle() {
+                    info!("stopped: every aborted job has reported");
                     break;
                 }
             }
@@ -106,9 +106,28 @@ pub(super) async fn run_message_loop(
     }
 
     Ok(LoopEnd {
-        draining: state.draining && !local_drain,
+        draining: state.draining && !state.stopping,
         refused: state.refused,
     })
+}
+
+async fn stop_budget_elapsed(deadline: Option<tokio::time::Instant>) {
+    match deadline {
+        Some(deadline) => tokio::time::sleep_until(deadline).await,
+        None => std::future::pending().await,
+    }
+}
+
+fn failure_to_report(
+    kind: BuildFailureKind,
+    stopping: bool,
+    version: u16,
+) -> Option<BuildFailureKind> {
+    match (stopping, version >= PROTO_CANCELED) {
+        (false, _) => Some(kind),
+        (true, true) => Some(BuildFailureKind::Canceled),
+        (true, false) => None,
+    }
 }
 
 struct ActiveJob {
@@ -179,6 +198,13 @@ impl JobRegistry {
         }
     }
 
+    fn abort_all(&self) -> usize {
+        self.running
+            .values()
+            .filter(|j| j.abort.send(true).is_ok())
+            .count()
+    }
+
     fn abort_attempt(&self, attempt: &str) -> usize {
         self.running
             .values()
@@ -210,6 +236,7 @@ pub(super) struct MessageLoopState {
     executor: JobExecutor,
     config: WorkerConfig,
     draining: bool,
+    stopping: bool,
     refused: bool,
     pending_handover: Option<String>,
 }
@@ -256,6 +283,7 @@ impl MessageLoopState {
             executor,
             config,
             draining: false,
+            stopping: false,
             refused: false,
             pending_handover: None,
         }
@@ -266,6 +294,17 @@ impl MessageLoopState {
         let held = self.holds.release_all();
         self.report_released(held, "worker draining").await?;
         self.writer.send(ClientMessage::Draining).await
+    }
+
+    async fn begin_stop(&mut self) -> Result<()> {
+        self.stopping = true;
+        self.begin_drain().await?;
+        let aborted = self.jobs.abort_all();
+        info!(
+            aborted,
+            "stopping: aborted every running job, collecting their reports"
+        );
+        Ok(())
     }
 
     fn occupied(&self, kind: JobKind) -> u32 {
@@ -385,9 +424,7 @@ impl MessageLoopState {
             return self.writer.send(ClientMessage::HandoverDone).await;
         }
 
-        for job in self.jobs.running.values() {
-            let _ = job.abort.send(true);
-        }
+        self.jobs.abort_all();
         self.pending_handover = Some(id);
         self.finish_handover().await
     }
@@ -455,21 +492,7 @@ impl MessageLoopState {
                     .await?;
             }
             Err(e) => {
-                let error_chain = format!("{e:#}");
-                let (kind, missing_paths) = crate::executor::failure::wire_failure(&e);
-                let metrics = crate::executor::failure::failure_metrics(&e);
-                error!(%job_id, error = %error_chain, ?kind, phases = spans.len(), "job failed");
-                self.writer
-                    .send(ClientMessage::JobFailed {
-                        job_id,
-                        assignment_id,
-                        error: error_chain,
-                        kind,
-                        missing_paths,
-                        spans,
-                        elapsed_ms,
-                        metrics,
-                    })
+                self.report_failure(job_id, assignment_id, &e, spans, elapsed_ms)
                     .await?;
             }
         }
@@ -482,6 +505,45 @@ impl MessageLoopState {
         }
 
         self.finish_handover().await
+    }
+
+    async fn report_failure(
+        &self,
+        job_id: String,
+        assignment_id: String,
+        e: &anyhow::Error,
+        spans: Vec<JobPhaseSpan>,
+        elapsed_ms: u64,
+    ) -> Result<()> {
+        let (kind, missing_paths) = crate::executor::failure::wire_failure(e);
+        let Some(kind) = failure_to_report(kind, self.stopping, self.writer.version()) else {
+            info!(%job_id, "job stopped; the server queues it again once the session closes");
+            return Ok(());
+        };
+
+        let error = match kind {
+            BuildFailureKind::Canceled => {
+                info!(%job_id, phases = spans.len(), "job stopped; reported as canceled");
+                "the worker stopped before the job finished".to_owned()
+            }
+            _ => {
+                let error = format!("{e:#}");
+                error!(%job_id, %error, ?kind, phases = spans.len(), "job failed");
+                error
+            }
+        };
+        self.writer
+            .send(ClientMessage::JobFailed {
+                job_id,
+                assignment_id,
+                error,
+                kind,
+                missing_paths,
+                spans,
+                elapsed_ms,
+                metrics: crate::executor::failure::failure_metrics(e),
+            })
+            .await
     }
 
     /// A failed send is ending the session.
@@ -1016,6 +1078,27 @@ mod tests {
         assert_eq!(job.assignment_id.get(), "dispatch-2");
         assert!(jobs.is_idle());
         assert!(jobs.finish("job-1").is_none());
+    }
+
+    #[test]
+    fn a_stopping_worker_reports_a_failed_job_as_canceled_only_to_a_peer_that_knows_it() {
+        for kind in [BuildFailureKind::Aborted, BuildFailureKind::Permanent] {
+            assert_eq!(
+                failure_to_report(kind, true, PROTO_CANCELED),
+                Some(BuildFailureKind::Canceled),
+                "{kind:?}"
+            );
+            assert_eq!(
+                failure_to_report(kind, true, PROTO_CANCELED - 1),
+                None,
+                "an older server queues the job again once the session closes"
+            );
+        }
+        assert_eq!(
+            failure_to_report(BuildFailureKind::Aborted, false, PROTO_CANCELED),
+            Some(BuildFailureKind::Aborted),
+            "a job the server aborted is no stop"
+        );
     }
 
     #[tokio::test]

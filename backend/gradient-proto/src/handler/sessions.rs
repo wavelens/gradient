@@ -6,22 +6,18 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
 
 use arc_swap::ArcSwapOption;
-use gradient_pool::session_port::SessionSignal;
 use gradient_scheduler::Scheduler;
 use gradient_scheduler::actor::CALL_TIMEOUT;
 use gradient_util::shutdown::Shutdown;
 use gradient_util::supervision::{ChildCtx, ChildSpec};
 use ractor::rpc::CallResult;
-use ractor::{
-    Actor, ActorId, ActorProcessingErr, ActorRef, ActorStatus, RpcReplyPort, SupervisionEvent,
-};
+use ractor::{Actor, ActorId, ActorProcessingErr, ActorRef, RpcReplyPort, SupervisionEvent};
 use tokio::task::JoinHandle;
 use tracing::{info, warn};
 
-use super::session_actor::{SESSION_DRAIN_BUDGET, SessionActor, SessionArgs, SessionMsg};
+use super::session_actor::{SessionActor, SessionArgs, SessionMsg};
 
 pub type AttachedSession = (ActorRef<SessionMsg>, JoinHandle<()>);
 
@@ -188,19 +184,7 @@ impl Actor for Sessions {
         st: &mut Self::State,
     ) -> Result<(), ActorProcessingErr> {
         st.core_watch.abort();
-        info!(sessions = st.live.len(), "draining sessions");
-        for (_, actor) in st.live.values() {
-            let _ = actor.send_message(SessionMsg::Signal(SessionSignal::Drain));
-        }
-        let deadline = Instant::now() + SESSION_DRAIN_BUDGET + Duration::from_secs(1);
-        while Instant::now() < deadline
-            && st
-                .live
-                .values()
-                .any(|(_, a)| a.get_cell().get_status() != ActorStatus::Stopped)
-        {
-            tokio::time::sleep(Duration::from_millis(100)).await;
-        }
+        info!(sessions = st.live.len(), "closing sessions");
         for (_, actor) in st.live.values() {
             actor.stop(Some("shutdown".into()));
         }

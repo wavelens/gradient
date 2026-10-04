@@ -12,16 +12,11 @@ use sea_orm::{ColumnTrait, ConnectionTrait, DbErr, EntityTrait, QueryFilter};
 
 use gradient_types::*;
 
-fn eval_survives_restart(status: EvaluationStatus) -> bool {
-    matches!(status, EvaluationStatus::Queued | EvaluationStatus::Waiting)
-}
-
-fn lost_eval_statuses() -> Vec<EvaluationStatus> {
-    EvaluationStatus::ACTIVE
-        .into_iter()
-        .filter(|s| !eval_survives_restart(*s))
-        .collect()
-}
+const EVAL_JOB_STATUSES: [EvaluationStatus; 3] = [
+    EvaluationStatus::Fetching,
+    EvaluationStatus::EvaluatingFlake,
+    EvaluationStatus::EvaluatingDerivation,
+];
 
 #[derive(Debug, Default)]
 pub struct RecoveryReport {
@@ -29,9 +24,7 @@ pub struct RecoveryReport {
     pub attempts_aborted: u64,
     pub builds_requeued: u64,
     pub builds_unpromoted: u64,
-    pub builds_aborted: u64,
-    pub evals_aborted: u64,
-    pub tasks_forced: u64,
+    pub evals_requeued: u64,
     pub cluster_attempts_closed: u64,
     pub clusters_requeued: u64,
     pub clusters_aborted: u64,
@@ -95,58 +88,7 @@ pub async fn recover_interrupted_work<C: ConnectionTrait>(
         .len() as u64;
     crate::task_board::dep_counts::bump_graph_version_for_derivations(conn, &requeued).await?;
 
-    let inflight_evals = EEvaluation::find()
-        .filter(CEvaluation::Status.is_in(lost_eval_statuses()))
-        .all(conn)
-        .await?;
-
-    let eval_ids: Vec<EvaluationId> = inflight_evals.iter().map(|e| e.id).collect();
-    if !eval_ids.is_empty() {
-        let res = EEvaluation::update_many()
-            .col_expr(CEvaluation::Status, Expr::value(EvaluationStatus::Aborted))
-            .col_expr(CEvaluation::UpdatedAt, Expr::value(now))
-            .col_expr(CEvaluation::FinishedAt, Expr::value(now))
-            .col_expr(
-                CEvaluation::GraphVersion,
-                Expr::col(CEvaluation::GraphVersion).add(1),
-            )
-            .filter(CEvaluation::Id.is_in(eval_ids.clone()))
-            .exec(conn)
-            .await?;
-        report.evals_aborted = res.rows_affected;
-
-        let subjects: Vec<uuid::Uuid> = eval_ids.iter().map(|e| e.into_inner()).collect();
-        crate::status::record_phase_events(
-            conn,
-            crate::status::PhaseSubjectKind::Evaluation,
-            &subjects,
-            i32::from(EvaluationStatus::Aborted) as i16,
-            now,
-        )
-        .await?;
-    }
-
-    if !eval_ids.is_empty() {
-        let aborted = abort_shared_builds_for_evals(conn, &eval_ids).await?;
-        report.builds_aborted = aborted.len() as u64;
-        crate::task_board::dep_counts::bump_graph_version_for_derivations(conn, &aborted).await?;
-    }
-
-    let task_ids: Vec<TaskId> = inflight_evals
-        .into_iter()
-        .filter_map(|e| e.task)
-        .collect::<std::collections::HashSet<_>>()
-        .into_iter()
-        .collect();
-
-    if !task_ids.is_empty() {
-        let res = ETask::update_many()
-            .col_expr(CTask::ForceEvaluation, Expr::value(true))
-            .filter(CTask::Id.is_in(task_ids))
-            .exec(conn)
-            .await?;
-        report.tasks_forced = res.rows_affected;
-    }
+    report.evals_requeued = requeue_interrupted_evals(conn).await?;
 
     let clusters = crate::scheduling::cluster::recover_cluster_attempts(conn).await?;
     report.cluster_attempts_closed = clusters.attempts_closed;
@@ -157,79 +99,50 @@ pub async fn recover_interrupted_work<C: ConnectionTrait>(
     Ok(report)
 }
 
-fn abort_shared_builds_for_evals_sql() -> String {
-    format!(
-        r#"
-        UPDATE derivation_build db
-        SET status = {aborted}, updated_at = (now() AT TIME ZONE 'UTC')
-        WHERE db.status IN ({created}, {queued}, {building})
-          AND EXISTS (
-            SELECT 1 FROM build_job bj
-            WHERE bj.derivation_build = db.id AND bj.evaluation = ANY($1))
-          AND NOT EXISTS (
-            SELECT 1 FROM build_job bj2
-            JOIN evaluation e2 ON e2.id = bj2.evaluation
-            WHERE bj2.derivation_build = db.id
-              AND e2.status NOT IN ({completed}, {failed}, {eval_aborted}))
-        RETURNING db.derivation
-        "#,
-        aborted = BuildStatus::Aborted as i32,
-        created = BuildStatus::Created as i32,
-        queued = BuildStatus::Queued as i32,
-        building = BuildStatus::Building as i32,
-        completed = EvaluationStatus::Completed as i32,
-        failed = EvaluationStatus::Failed as i32,
-        eval_aborted = EvaluationStatus::Aborted as i32,
-    )
-}
+async fn requeue_interrupted_evals<C: ConnectionTrait>(conn: &C) -> Result<u64, DbErr> {
+    let ids: Vec<EvaluationId> = EEvaluation::find()
+        .filter(CEvaluation::Status.is_in(EVAL_JOB_STATUSES))
+        .all(conn)
+        .await?
+        .into_iter()
+        .map(|e| e.id)
+        .collect();
+    if ids.is_empty() {
+        return Ok(0);
+    }
 
-crate::sql_fn! {
-    ABORT_SHARED_BUILDS_FOR_EVALS = abort_shared_builds_for_evals_sql,
-        params = [EvaluationIds(64)],
-        tier = Sweep;
-}
-
-async fn abort_shared_builds_for_evals<C: ConnectionTrait>(
-    conn: &C,
-    eval_ids: &[EvaluationId],
-) -> Result<Vec<DerivationId>, DbErr> {
-    let ids: Vec<uuid::Uuid> = eval_ids.iter().map(|e| e.into_inner()).collect();
-    let rows = conn
-        .query_all_raw(ABORT_SHARED_BUILDS_FOR_EVALS.bind([ids.into()]))
+    let now = now();
+    let res = EEvaluation::update_many()
+        .col_expr(CEvaluation::Status, Expr::value(EvaluationStatus::Queued))
+        .col_expr(
+            CEvaluation::WaitingReason,
+            Expr::value(None::<serde_json::Value>),
+        )
+        .col_expr(CEvaluation::UpdatedAt, Expr::value(now))
+        .col_expr(
+            CEvaluation::GraphVersion,
+            Expr::col(CEvaluation::GraphVersion).add(1),
+        )
+        .filter(CEvaluation::Id.is_in(ids.clone()))
+        .exec(conn)
         .await?;
 
-    Ok(crate::graph::promotion::returned_derivations(rows))
+    let subjects: Vec<uuid::Uuid> = ids.iter().map(|e| e.into_inner()).collect();
+    crate::status::record_phase_events(
+        conn,
+        crate::status::PhaseSubjectKind::Evaluation,
+        &subjects,
+        i32::from(EvaluationStatus::Queued) as i16,
+        now,
+    )
+    .await?;
+
+    Ok(res.rows_affected)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn recovery_owns_every_active_status_a_restart_loses() {
-        let lost = lost_eval_statuses();
-        assert!(lost.contains(&EvaluationStatus::Building), "{lost:?}");
-        assert!(lost.contains(&EvaluationStatus::Fetching), "{lost:?}");
-        assert!(
-            lost.contains(&EvaluationStatus::EvaluatingFlake),
-            "{lost:?}"
-        );
-        assert!(
-            lost.contains(&EvaluationStatus::EvaluatingDerivation),
-            "{lost:?}"
-        );
-    }
-
-    #[test]
-    fn the_lost_set_is_exactly_active_minus_the_survivors() {
-        let lost = lost_eval_statuses();
-        let expected: Vec<EvaluationStatus> = EvaluationStatus::ACTIVE
-            .into_iter()
-            .filter(|s| !matches!(s, EvaluationStatus::Queued | EvaluationStatus::Waiting))
-            .collect();
-        assert_eq!(lost, expected);
-        assert_eq!(lost.len(), EvaluationStatus::ACTIVE.len() - 2);
-    }
 
     use gradient_entity::evaluation::Model as MEval;
     use gradient_entity::ids::{CommitId, EvaluationId, TaskId};
@@ -302,20 +215,6 @@ mod tests {
                 rows_affected: 1,
             }])
             .append_query_results([crate::test_ctx::inserted_phase_event()])
-            .append_query_results([vec![
-                derivation_row(DerivationId::now_v7()),
-                derivation_row(DerivationId::now_v7()),
-                derivation_row(DerivationId::now_v7()),
-                derivation_row(DerivationId::now_v7()),
-            ]])
-            .append_exec_results([MockExecResult {
-                last_insert_id: 0,
-                rows_affected: 2,
-            }])
-            .append_exec_results([MockExecResult {
-                last_insert_id: 0,
-                rows_affected: 1,
-            }])
             .append_exec_results([1, 0, 0, 0, 1].map(|n| MockExecResult {
                 last_insert_id: 0,
                 rows_affected: n,
@@ -329,12 +228,23 @@ mod tests {
         assert_eq!(report.attempts_aborted, 3);
         assert_eq!(report.builds_requeued, 2);
         assert_eq!(report.builds_unpromoted, 1);
-        assert_eq!(report.builds_aborted, 4);
-        assert_eq!(report.evals_aborted, 1);
-        assert_eq!(report.tasks_forced, 1);
+        assert_eq!(report.evals_requeued, 1);
         assert_eq!(report.cluster_attempts_closed, 1);
         assert_eq!(report.clusters_requeued, 1);
         assert_eq!(report.clusters_aborted, 0);
+
+        let log = db.into_transaction_log();
+        let eval_updates: Vec<_> = log
+            .iter()
+            .flat_map(|t| t.statements())
+            .filter(|s| s.sql.starts_with("UPDATE \"evaluation\""))
+            .collect();
+        assert_eq!(eval_updates.len(), 1, "{eval_updates:?}");
+        assert_eq!(
+            eval_updates[0].values.as_ref().map(|v| v.0[0].clone()),
+            Some(Value::Int(Some(i32::from(EvaluationStatus::Queued)))),
+            "an interrupted evaluation is queued again, not aborted"
+        );
     }
 
     #[tokio::test]
@@ -407,7 +317,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn task_force_step_skipped_when_no_pre_build_evals() {
+    async fn nothing_is_reported_without_interrupted_work() {
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             .append_exec_results([MockExecResult {
                 last_insert_id: 0,
@@ -432,8 +342,6 @@ mod tests {
         assert_eq!(report.attempts_aborted, 0);
         assert_eq!(report.builds_requeued, 0);
         assert_eq!(report.builds_unpromoted, 0);
-        assert_eq!(report.builds_aborted, 0);
-        assert_eq!(report.evals_aborted, 0);
-        assert_eq!(report.tasks_forced, 0);
+        assert_eq!(report.evals_requeued, 0);
     }
 }
