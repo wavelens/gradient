@@ -10,6 +10,38 @@ use sea_orm::{
     ActiveModelTrait, ColumnTrait, Condition, ConnectionTrait, DbErr, EntityTrait, QueryFilter,
 };
 
+pub async fn project_role_granted_to_a_team<C: ConnectionTrait>(
+    db: &C,
+    role: RoleId,
+) -> Result<bool, DbErr> {
+    Ok(ETeamProject::find()
+        .filter(CTeamProject::Role.eq(role))
+        .one(db)
+        .await?
+        .is_some()
+        || ETeamProjectRequest::find()
+            .filter(CTeamProjectRequest::Role.eq(role))
+            .one(db)
+            .await?
+            .is_some())
+}
+
+pub async fn cache_role_granted_to_a_team<C: ConnectionTrait>(
+    db: &C,
+    role: RoleId,
+) -> Result<bool, DbErr> {
+    Ok(ETeamCache::find()
+        .filter(CTeamCache::Role.eq(role))
+        .one(db)
+        .await?
+        .is_some()
+        || ETeamCacheRequest::find()
+            .filter(CTeamCacheRequest::Role.eq(role))
+            .one(db)
+            .await?
+            .is_some())
+}
+
 pub async fn apply_new_project_grants<C: ConnectionTrait>(
     db: &C,
     project: ProjectId,

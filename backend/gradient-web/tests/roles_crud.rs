@@ -365,6 +365,41 @@ async fn delete_role_in_use_is_rejected() {
 }
 
 #[tokio::test]
+async fn delete_role_granted_to_a_team_is_rejected() {
+    let session_id = SessionId::now_v7();
+    let token = make_token(session_id);
+    let custom_id = RoleId::now_v7();
+    let custom = custom_role_row(custom_id, "releaser", Permission::ViewProject.bit());
+
+    let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
+        .append_query_results([vec![project()]])
+        .append_query_results([vec![admin_membership()]])
+        .append_query_results([vec![admin_role_row()]])
+        .append_query_results([vec![custom]])
+        .append_query_results::<project_user::Model, _, _>([Vec::<project_user::Model>::new()])
+        .append_query_results([vec![gradient_entity::team_project::Model {
+            id: TeamProjectId::now_v7(),
+            team: TeamId::now_v7(),
+            project: project_id(),
+            role: Some(custom_id),
+            includes_users: true,
+            includes_workers: true,
+            created_at: chrono::Utc::now().naive_utc(),
+        }]]);
+
+    let server = make_test_server(db.into_connection());
+    let res = server
+        .delete(&format!(
+            "/api/v1/projects/test-project/roles/{}",
+            custom_id
+        ))
+        .add_header("authorization", format!("Bearer {}", token))
+        .await;
+
+    res.assert_status(axum::http::StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
 async fn delete_unused_custom_role_succeeds() {
     let session_id = SessionId::now_v7();
     let token = make_token(session_id);
@@ -377,6 +412,8 @@ async fn delete_unused_custom_role_succeeds() {
         .append_query_results([vec![admin_role_row()]])
         .append_query_results([vec![custom]])
         .append_query_results::<project_user::Model, _, _>([Vec::<project_user::Model>::new()])
+        .append_query_results([Vec::<gradient_entity::team_project::Model>::new()])
+        .append_query_results([Vec::<gradient_entity::team_project_request::Model>::new()])
         .append_exec_results([MockExecResult {
             last_insert_id: 0,
             rows_affected: 1,

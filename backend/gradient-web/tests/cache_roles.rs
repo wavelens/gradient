@@ -226,6 +226,36 @@ async fn patch_role_rejects_managed() {
 }
 
 #[tokio::test]
+async fn delete_role_rejects_a_role_granted_to_a_team() {
+    let session_id = SessionId::now_v7();
+    let token = make_token(session_id);
+    let custom_id = RoleId::now_v7();
+    let custom = custom_role_row(custom_id, "pusher", 0);
+
+    let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
+        .append_query_results([vec![cache_row()]])
+        .append_query_results([vec![admin_member()]])
+        .append_query_results([vec![admin_role_row()]])
+        .append_query_results([vec![custom]])
+        .append_query_results([Vec::<cache_user::Model>::new()])
+        .append_query_results([vec![gradient_entity::team_cache::Model {
+            id: TeamCacheId::now_v7(),
+            team: TeamId::now_v7(),
+            cache: cache_id(),
+            role: custom_id,
+            created_at: chrono::Utc::now().naive_utc(),
+        }]]);
+
+    let server = make_test_server(db.into_connection());
+    let res = server
+        .delete(&format!("/api/v1/caches/test-cache/roles/{}", custom_id))
+        .add_header("authorization", format!("Bearer {}", token))
+        .await;
+
+    res.assert_status(axum::http::StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
 async fn delete_role_rejects_role_in_use() {
     let session_id = SessionId::now_v7();
     let token = make_token(session_id);

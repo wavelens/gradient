@@ -352,6 +352,11 @@ pub async fn delete_project_role(
             "Role is still assigned to members. Reassign them before deleting the role.",
         ));
     }
+    if gradient_db::teams::grants::project_role_granted_to_a_team(&state.web_db, role_id).await? {
+        return Err(WebError::bad_request(
+            "Role is still granted to a team. Change the team grant before deleting the role.",
+        ));
+    }
 
     let role_name = role.name.clone();
     role.into_active_model().delete(&state.web_db).await?;
