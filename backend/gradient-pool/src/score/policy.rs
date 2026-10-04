@@ -8,7 +8,7 @@ use crate::score::context::InstanceContext;
 use crate::score::rule::{JobContext, ScoreRule, WorkerContext};
 use crate::score::rules::{
     EstimatedTimeRule, FairShareRule, QosRule, RescoreWaitRule, ReserveFetchWorkersRule,
-    ResourceSaturationRule, WaitTimeRule,
+    ResourceSaturationRule, TransferLimitRule, WaitTimeRule,
 };
 
 pub trait ScoringPolicy: Send + Sync + std::fmt::Debug {
@@ -124,6 +124,7 @@ fn simple_table() -> Vec<RuleSpec> {
         spec(true, Box::new(RescoreWaitRule::default())),
         spec(true, Box::new(WaitTimeRule::default())),
         spec(true, Box::new(ReserveFetchWorkersRule::default())),
+        spec(true, Box::new(TransferLimitRule::default())),
         spec(true, Box::new(QosRule::default())),
     ]
 }
@@ -485,7 +486,7 @@ mod tests {
             (breakdown.total - total).abs() < 1e-9,
             "total must match score()"
         );
-        assert_eq!(breakdown.rules.len(), 5, "simple policy has 5 rules");
+        assert_eq!(breakdown.rules.len(), 6, "simple policy has 6 rules");
         assert!(breakdown.rules.contains_key("EstimatedTimeRule"));
         assert!(breakdown.rules.contains_key("QosRule"));
         assert!(breakdown.rules.contains_key("WaitTimeRule"));
@@ -506,12 +507,44 @@ mod tests {
             "RescoreWaitRule",
             "ReserveFetchWorkersRule",
             "ResourceSaturationRule",
+            "TransferLimitRule",
             "WaitTimeRule",
         ];
         let mut got: Vec<&str> = resource_aware_rules().iter().map(|r| r.name()).collect();
         got.sort_unstable();
         assert_eq!(got, expected);
         assert_eq!(FairShareRule::default().name(), "FairShareRule");
+    }
+
+    #[test]
+    fn a_held_transfer_drops_below_the_floor_until_its_wait_releases_it() {
+        let policy = policy_by_name("simple");
+        let archs = vec!["x86_64-linux".to_string()];
+        let feats: Vec<String> = vec![];
+        let w = worker_ctx(&archs, &feats);
+        let j = scored_job("x86_64-linux");
+        let waited = |secs| JobContext {
+            job: &j,
+            missing_count: Some(0),
+            missing_nar_size: Some(4 << 30),
+            outputs_present: false,
+            dependency_count: 0,
+            queued_at: now() - chrono::Duration::seconds(secs),
+            ready_at: now() - chrono::Duration::seconds(secs),
+            project_work_share: None,
+            prioritized: false,
+            build_request: false,
+            rescore_count: 0,
+            now: now(),
+        };
+        let full = InstanceContext {
+            downloads_in_flight: 16,
+            download_slots: 16,
+            ..Default::default()
+        };
+
+        assert!(policy.score(&waited(0), &w, &full) < crate::score::weights::ASSIGN_FLOOR);
+        assert!(policy.score(&waited(36_000), &w, &full) >= crate::score::weights::ASSIGN_FLOOR);
     }
 
     #[test]

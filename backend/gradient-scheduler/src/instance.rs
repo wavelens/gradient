@@ -18,6 +18,8 @@ pub struct InstanceCounts {
     pub cpu_core_score_mean: Option<f64>,
     pub upload_speed_mean_mbps: Option<f64>,
     pub download_speed_mean_mbps: Option<f64>,
+    pub download_slots: u32,
+    pub upload_slots: u32,
 }
 
 /// A window with no data must stay distinguishable from a measured zero.
@@ -400,6 +402,8 @@ pub async fn compute_instance_context(
         storage_write_mbps: storage.write_mbps,
         compression_ratio,
         per_path_secs,
+        download_slots: counts.download_slots,
+        upload_slots: counts.upload_slots,
         ..Default::default()
     }
 }
@@ -599,6 +603,8 @@ mod tests {
             cpu_core_score_mean: None,
             upload_speed_mean_mbps: Some(400.0),
             download_speed_mean_mbps: None,
+            download_slots: 16,
+            upload_slots: 8,
         };
         let ic = compute_instance_context(&db, counts, gradient_types::now()).await;
 

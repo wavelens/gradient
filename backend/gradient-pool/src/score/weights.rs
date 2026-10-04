@@ -14,6 +14,8 @@ pub const WAIT_TIME_GAIN: f64 = 60.0;
 pub const WAIT_TIME_FALLBACK_AVG_SECS: f64 = 60.0;
 pub const WAIT_TIME_CAP: f64 = 4000.0;
 
+pub const TRANSFER_LIMIT_HOLD: f64 = WAIT_TIME_CAP;
+
 pub const RESERVE_FETCH_PENALTY: f64 = 300.0;
 
 pub const RESCORE_MAX_ROUNDS: u32 = 4;
