@@ -7,16 +7,11 @@
 pub mod builtin;
 pub mod estimated_time;
 pub mod fair_share;
-pub mod prefer_local;
 pub mod qos;
 pub mod resource;
 
-pub use builtin::{
-    BuiltinDeprioritizeRule, DependencyCountRule, RealisedOutputsRule, RescoreWaitRule,
-    ReserveFetchWorkersRule, WaitTimeRule,
-};
+pub use builtin::{RescoreWaitRule, ReserveFetchWorkersRule, WaitTimeRule};
 pub use estimated_time::EstimatedTimeRule;
 pub use fair_share::FairShareRule;
-pub use prefer_local::PreferLocalBuildRule;
 pub use qos::QosRule;
-pub use resource::{ResourceFitRule, ResourceSaturationRule};
+pub use resource::ResourceSaturationRule;

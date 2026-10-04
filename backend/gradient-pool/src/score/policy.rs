@@ -6,13 +6,9 @@
 
 use crate::score::context::InstanceContext;
 use crate::score::rule::{JobContext, ScoreRule, WorkerContext};
-use crate::score::rules::builtin::{
-    BuiltinDeprioritizeRule, DependencyCountRule, RealisedOutputsRule, RescoreWaitRule,
-    ReserveFetchWorkersRule, WaitTimeRule,
-};
 use crate::score::rules::{
-    EstimatedTimeRule, FairShareRule, PreferLocalBuildRule, QosRule, ResourceFitRule,
-    ResourceSaturationRule,
+    EstimatedTimeRule, FairShareRule, QosRule, RescoreWaitRule, ReserveFetchWorkersRule,
+    ResourceSaturationRule, WaitTimeRule,
 };
 
 pub trait ScoringPolicy: Send + Sync + std::fmt::Debug {
@@ -125,11 +121,8 @@ fn spec(enabled: bool, rule: Box<dyn ScoreRule>) -> RuleSpec {
 fn simple_table() -> Vec<RuleSpec> {
     vec![
         spec(true, Box::new(EstimatedTimeRule::default())),
-        spec(true, Box::new(RealisedOutputsRule::default())),
         spec(true, Box::new(RescoreWaitRule::default())),
-        spec(true, Box::new(DependencyCountRule::default())),
         spec(true, Box::new(WaitTimeRule::default())),
-        spec(true, Box::new(BuiltinDeprioritizeRule::default())),
         spec(true, Box::new(ReserveFetchWorkersRule::default())),
         spec(true, Box::new(QosRule::default())),
     ]
@@ -137,9 +130,7 @@ fn simple_table() -> Vec<RuleSpec> {
 
 fn resource_aware_table() -> Vec<RuleSpec> {
     let mut rules = simple_table();
-    rules.push(spec(true, Box::new(ResourceFitRule::default())));
     rules.push(spec(true, Box::new(ResourceSaturationRule::default())));
-    rules.push(spec(true, Box::new(PreferLocalBuildRule::default())));
     // FairShareRule is disabled because its idle gate is counting zero occupancy, not spare
     // capacity. Re-enabling it is a scheduling-policy decision (#476).
     rules.push(spec(false, Box::new(FairShareRule::default())));
@@ -374,7 +365,8 @@ mod tests {
             None,
             None,
             HistoryPrediction {
-                avg_cpu_time_ms: Some(30 * 60_000),
+                build_time_ms: Some(30 * 60_000),
+                uncontended_build_time_ms: Some(30 * 60_000),
                 predicted_peak_ram_mb: Some(64_000),
                 samples: 5,
                 ..Default::default()
@@ -493,7 +485,7 @@ mod tests {
             (breakdown.total - total).abs() < 1e-9,
             "total must match score()"
         );
-        assert_eq!(breakdown.rules.len(), 8, "simple policy has 8 rules");
+        assert_eq!(breakdown.rules.len(), 5, "simple policy has 5 rules");
         assert!(breakdown.rules.contains_key("EstimatedTimeRule"));
         assert!(breakdown.rules.contains_key("QosRule"));
         assert!(breakdown.rules.contains_key("WaitTimeRule"));
@@ -509,15 +501,10 @@ mod tests {
     #[test]
     fn rule_names_are_pinned() {
         let expected = [
-            "BuiltinDeprioritizeRule",
-            "DependencyCountRule",
             "EstimatedTimeRule",
-            "PreferLocalBuildRule",
             "QosRule",
-            "RealisedOutputsRule",
             "RescoreWaitRule",
             "ReserveFetchWorkersRule",
-            "ResourceFitRule",
             "ResourceSaturationRule",
             "WaitTimeRule",
         ];
