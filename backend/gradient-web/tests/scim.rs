@@ -8,14 +8,14 @@ use axum::http::StatusCode;
 use axum_test::TestServer;
 use gradient_core::ServerState;
 use gradient_db::{WebDb, WorkerDb};
-use gradient_entity::{project_user, user};
+use gradient_entity::team_user::TeamRole;
+use gradient_entity::{team, team_user, user};
 use gradient_notify::EmailSender;
-use gradient_state::ScimGroupRoles;
 use gradient_storage::NarStore;
 use gradient_test_support::cli::test_cli;
 use gradient_test_support::fakes::email::InMemoryEmailSender;
 use gradient_test_support::log_storage::NoopLogStorage;
-use gradient_types::{ProjectId, RoleId, RuntimeConfig, UserId};
+use gradient_types::{RuntimeConfig, TeamId, TeamUserId, UserId};
 use gradient_web::create_router;
 use sea_orm::{DatabaseBackend, DatabaseConnection, MockDatabase, MockExecResult};
 use serde_json::{Value, json};
@@ -36,18 +36,10 @@ fn scim_server(db: DatabaseConnection) -> TestServer {
 }
 
 fn scim_server_with(db: DatabaseConnection, hard_delete: bool) -> TestServer {
-    build_server(db, hard_delete, ScimGroupRoles::new())
+    build_server(db, hard_delete)
 }
 
-fn scim_server_with_groups(db: DatabaseConnection, groups: ScimGroupRoles) -> TestServer {
-    build_server(db, false, groups)
-}
-
-fn build_server(
-    db: DatabaseConnection,
-    hard_delete: bool,
-    scim_group_roles: ScimGroupRoles,
-) -> TestServer {
+fn build_server(db: DatabaseConnection, hard_delete: bool) -> TestServer {
     let jwt_path = std::env::temp_dir().join(format!("gradient-scim-jwt-{}", Uuid::now_v7()));
     std::fs::write(&jwt_path, "test-jwt-secret").expect("write jwt secret file");
 
@@ -80,8 +72,6 @@ fn build_server(
         jwt_secret: gradient_types::SecretString::new("test-jwt-secret".to_string()),
         started_at: chrono::Utc::now(),
         pending_project_memberships: std::sync::Arc::new(std::collections::HashMap::new()),
-        oidc_group_roles: std::sync::Arc::new(std::collections::HashMap::new()),
-        scim_group_roles: std::sync::Arc::new(scim_group_roles),
         events: gradient_types::EventBus::default(),
         git_host: gradient_git_host::GitHostRegistry::with_builtin(),
         github_app_install_url: Default::default(),
@@ -280,65 +270,70 @@ async fn scim_delete_user_hard_deletes() {
     res.assert_status(StatusCode::NO_CONTENT);
 }
 
-fn group_with_grant(name: &str) -> (ScimGroupRoles, ProjectId, RoleId) {
-    let project = ProjectId::now_v7();
-    let role = RoleId::now_v7();
-    let mut groups = ScimGroupRoles::new();
-    groups.insert(name.to_string(), vec![(project, role)]);
-    (groups, project, role)
+fn scim_team() -> team::Model {
+    team::Model {
+        id: TeamId::now_v7(),
+        name: "acme-eng".into(),
+        display_name: "ACME Eng".into(),
+        scim_group: Some("acme-eng".into()),
+        ..Default::default()
+    }
 }
 
-fn membership(project: ProjectId, user: UserId, role: RoleId) -> project_user::Model {
-    project_user::Model {
-        id: Uuid::now_v7().into(),
-        project,
+fn team_member(team: TeamId, user: UserId) -> team_user::Model {
+    team_user::Model {
+        id: TeamUserId::now_v7(),
+        team,
         user,
-        role,
+        role: TeamRole::Member,
+        via_group: true,
     }
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn scim_unknown_group_returns_404() {
-    let db = MockDatabase::new(DatabaseBackend::Postgres).into_connection();
-    let s = scim_server(db);
-    let res = s
+    let db = MockDatabase::new(DatabaseBackend::Postgres)
+        .append_query_results([Vec::<team::Model>::new()])
+        .into_connection();
+    let res = scim_server(db)
         .get("/scim/v2/Groups/nope")
         .add_header("Authorization", auth_header())
         .await;
-
-    res.assert_status_not_found();
+    res.assert_status(StatusCode::NOT_FOUND);
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn scim_get_group_lists_members() {
-    let (groups, project, role) = group_with_grant("acme-eng");
+async fn scim_get_group_lists_the_team_members() {
+    let team = scim_team();
     let member = UserId::now_v7();
     let db = MockDatabase::new(DatabaseBackend::Postgres)
-        .append_query_results([vec![membership(project, member, role)]])
+        .append_query_results([vec![team.clone()]])
+        .append_query_results([vec![team_member(team.id, member)]])
         .into_connection();
-    let s = scim_server_with_groups(db, groups);
-    let res = s
+    let res = scim_server(db)
         .get("/scim/v2/Groups/acme-eng")
         .add_header("Authorization", auth_header())
         .await;
-
     res.assert_status_ok();
     let body: Value = res.json();
-    assert_eq!(body["displayName"], "acme-eng");
     assert_eq!(body["members"][0]["value"], member.to_string());
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn scim_patch_group_add_member_inserts_membership() {
-    let (groups, project, role) = group_with_grant("acme-eng");
+async fn scim_patch_group_add_member_joins_the_team() {
+    let team = scim_team();
     let member = UserId::now_v7();
     let db = MockDatabase::new(DatabaseBackend::Postgres)
-        .append_query_results([Vec::<project_user::Model>::new()])
-        .append_query_results([vec![membership(project, member, role)]])
-        .append_query_results([vec![membership(project, member, role)]])
+        .append_query_results([vec![team.clone()]])
+        .append_query_results([Vec::<team_user::Model>::new()])
+        .append_query_results([vec![team_member(team.id, member)]])
+        .append_exec_results([MockExecResult {
+            last_insert_id: 0,
+            rows_affected: 1,
+        }])
+        .append_query_results([vec![team_member(team.id, member)]])
         .into_connection();
-    let s = scim_server_with_groups(db, groups);
-    let res = s
+    let res = scim_server(db)
         .patch("/scim/v2/Groups/acme-eng")
         .add_header("Authorization", auth_header())
         .json(&json!({
@@ -346,25 +341,24 @@ async fn scim_patch_group_add_member_inserts_membership() {
             "Operations": [{"op": "add", "path": "members", "value": [{"value": member.to_string()}]}]
         }))
         .await;
-
     res.assert_status_ok();
     let body: Value = res.json();
     assert_eq!(body["members"][0]["value"], member.to_string());
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn scim_patch_group_remove_member_deletes_membership() {
-    let (groups, _project, _role) = group_with_grant("acme-eng");
+async fn scim_patch_group_remove_member_leaves_the_team() {
+    let team = scim_team();
     let member = UserId::now_v7();
     let db = MockDatabase::new(DatabaseBackend::Postgres)
+        .append_query_results([vec![team.clone()]])
         .append_exec_results([MockExecResult {
             last_insert_id: 0,
             rows_affected: 1,
         }])
-        .append_query_results([Vec::<project_user::Model>::new()])
+        .append_query_results([Vec::<team_user::Model>::new()])
         .into_connection();
-    let s = scim_server_with_groups(db, groups);
-    let res = s
+    let res = scim_server(db)
         .patch("/scim/v2/Groups/acme-eng")
         .add_header("Authorization", auth_header())
         .json(&json!({
@@ -372,10 +366,9 @@ async fn scim_patch_group_remove_member_deletes_membership() {
             "Operations": [{"op": "remove", "path": format!("members[value eq \"{member}\"]")}]
         }))
         .await;
-
     res.assert_status_ok();
     let body: Value = res.json();
-    assert_eq!(body["members"].as_array().unwrap().len(), 0);
+    assert_eq!(body["members"].as_array().map(Vec::len), Some(0));
 }
 
 #[tokio::test(flavor = "multi_thread")]

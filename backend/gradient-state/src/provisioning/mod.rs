@@ -35,8 +35,6 @@ pub type PendingProjectMemberships = HashMap<String, Vec<PendingProjectMembershi
 
 pub struct StateApplyResult {
     pub pending: PendingProjectMemberships,
-    pub oidc_group_roles: crate::OidcGroupRoles,
-    pub scim_group_roles: crate::ScimGroupRoles,
 }
 
 pub(super) async fn apply_state_to_database(
@@ -58,7 +56,7 @@ pub(super) async fn apply_state_to_database(
 
     app.apply_users(&config.users).await?;
     app.apply_projects_without_members(&config.projects).await?;
-    let role_ids = app.apply_roles(&config.roles).await?;
+    app.apply_roles(&config.roles).await?;
     app.apply_project_members(&config.projects, &mut pending)
         .await?;
     let team_ids = app.apply_teams(&config.teams).await?;
@@ -73,15 +71,8 @@ pub(super) async fn apply_state_to_database(
     app.apply_workers(&config.workers, &team_ids).await?;
     app.unmark_removed_entities(config, delete_state).await?;
 
-    let oidc_group_roles = super::resolve_oidc_group_roles(config, &role_ids);
-    let scim_group_roles = super::resolve_scim_group_roles(config, &role_ids);
-
     tracing::info!("State applied successfully");
-    Ok(StateApplyResult {
-        pending,
-        oidc_group_roles,
-        scim_group_roles,
-    })
+    Ok(StateApplyResult { pending })
 }
 
 struct StateApplicator<'a> {

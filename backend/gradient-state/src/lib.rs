@@ -17,63 +17,7 @@ pub use provisioning::{
 };
 pub use validation::{ValidationError, ValidationResult};
 
-use gradient_types::{ProjectId, RoleId};
 use sea_orm::DatabaseConnection;
-use std::collections::HashMap;
-
-pub type OidcGroupRoles = HashMap<String, Vec<(ProjectId, RoleId)>>;
-
-pub fn resolve_oidc_group_roles(
-    config: &StateConfiguration,
-    role_ids: &HashMap<(String, String), (ProjectId, RoleId)>,
-) -> OidcGroupRoles {
-    let mut map: OidcGroupRoles = HashMap::new();
-    for role in config.roles.values() {
-        if role.oidc_group.is_empty() {
-            continue;
-        }
-        let key = (role.project.clone(), role.name.clone());
-        let Some(&grant) = role_ids.get(&key) else {
-            tracing::warn!(
-                project = %role.project,
-                role = %role.name,
-                "oidc_group references a role that was not provisioned; skipping",
-            );
-            continue;
-        };
-        for group in &role.oidc_group {
-            map.entry(group.clone()).or_default().push(grant);
-        }
-    }
-    map
-}
-
-pub type ScimGroupRoles = HashMap<String, Vec<(ProjectId, RoleId)>>;
-
-pub fn resolve_scim_group_roles(
-    config: &StateConfiguration,
-    role_ids: &HashMap<(String, String), (ProjectId, RoleId)>,
-) -> ScimGroupRoles {
-    let mut map: ScimGroupRoles = HashMap::new();
-    for role in config.roles.values() {
-        if role.scim_group.is_empty() {
-            continue;
-        }
-        let key = (role.project.clone(), role.name.clone());
-        let Some(&grant) = role_ids.get(&key) else {
-            tracing::warn!(
-                project = %role.project,
-                role = %role.name,
-                "scim_group references a role that was not provisioned; skipping",
-            );
-            continue;
-        };
-        for group in &role.scim_group {
-            map.entry(group.clone()).or_default().push(grant);
-        }
-    }
-    map
-}
 
 pub fn validate_state_file(path: &str) -> Result<Vec<String>, Box<dyn std::error::Error>> {
     let config = StateConfiguration::from_file(path)?;
@@ -96,8 +40,6 @@ pub async fn load_and_apply_state(
         tracing::info!("No state file configured, skipping state management");
         return Ok(StateApplyResult {
             pending: PendingProjectMemberships::new(),
-            oidc_group_roles: OidcGroupRoles::new(),
-            scim_group_roles: ScimGroupRoles::new(),
         });
     };
 

@@ -117,8 +117,6 @@ fn assemble(
         jwt_secret: SecretString::new("test-jwt-secret".to_string()),
         started_at: chrono::Utc::now(),
         pending_project_memberships: Arc::new(std::collections::HashMap::new()),
-        oidc_group_roles: Arc::new(std::collections::HashMap::new()),
-        scim_group_roles: Arc::new(Default::default()),
         events: gradient_types::EventBus::default(),
         delivery_wake: Default::default(),
         eval_assign_wake: Default::default(),

@@ -6,10 +6,8 @@
 
 mod fixtures;
 
-use super::{StateConfiguration, resolve_oidc_group_roles, resolve_scim_group_roles};
+use super::StateConfiguration;
 use fixtures::{integration_cfg, reporter_cfg, worker_cfg};
-use gradient_types::{ProjectId, RoleId};
-use std::collections::HashMap;
 
 #[test]
 fn project_task_cache_descriptions_optional() {
@@ -634,80 +632,6 @@ fn state_worker_rejects_unknown_project_in_list() {
         "expected unknown-project error mentioning 'ghost', got: {:?}",
         v.errors
     );
-}
-
-#[test]
-fn resolves_group_to_project_role_grants() {
-    let json = r#"{
-        "roles": {
-            "platform": {
-                "name": "platform-admin",
-                "project": "acme",
-                "permissions": ["create_task"],
-                "oidc_group": ["platform-team", "ops"]
-            },
-            "unmapped": {
-                "name": "viewer",
-                "project": "acme",
-                "permissions": ["view_task"]
-            }
-        }
-    }"#;
-    let cfg: StateConfiguration = serde_json::from_str(json).unwrap();
-
-    let project = ProjectId::now_v7();
-    let role = RoleId::now_v7();
-    let mut role_ids = HashMap::new();
-    role_ids.insert(
-        ("acme".to_string(), "platform-admin".to_string()),
-        (project, role),
-    );
-    role_ids.insert(
-        ("acme".to_string(), "viewer".to_string()),
-        (project, RoleId::now_v7()),
-    );
-
-    let resolved = resolve_oidc_group_roles(&cfg, &role_ids);
-    assert_eq!(resolved.get("platform-team"), Some(&vec![(project, role)]));
-    assert_eq!(resolved.get("ops"), Some(&vec![(project, role)]));
-    assert!(!resolved.contains_key("unmapped"));
-}
-
-#[test]
-fn resolves_scim_group_to_project_role_grants() {
-    let json = r#"{
-        "roles": {
-            "eng": {
-                "name": "platform-admin",
-                "project": "acme",
-                "permissions": ["create_task"],
-                "scim_group": ["acme-eng", "ops"]
-            },
-            "unmapped": {
-                "name": "viewer",
-                "project": "acme",
-                "permissions": ["view_task"]
-            }
-        }
-    }"#;
-    let cfg: StateConfiguration = serde_json::from_str(json).unwrap();
-
-    let project = ProjectId::now_v7();
-    let role = RoleId::now_v7();
-    let mut role_ids = HashMap::new();
-    role_ids.insert(
-        ("acme".to_string(), "platform-admin".to_string()),
-        (project, role),
-    );
-    role_ids.insert(
-        ("acme".to_string(), "viewer".to_string()),
-        (project, RoleId::now_v7()),
-    );
-
-    let resolved = resolve_scim_group_roles(&cfg, &role_ids);
-    assert_eq!(resolved.get("acme-eng"), Some(&vec![(project, role)]));
-    assert_eq!(resolved.get("ops"), Some(&vec![(project, role)]));
-    assert!(!resolved.contains_key("unmapped"));
 }
 
 #[test]

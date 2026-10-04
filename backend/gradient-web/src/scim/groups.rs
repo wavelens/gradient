@@ -4,19 +4,16 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::http::{StatusCode, header};
 use axum::response::{IntoResponse, Response};
-use sea_orm::sea_query::Expr;
-use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, Set};
+use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter};
 
 use gradient_core::ServerState;
-use gradient_entity::project_user;
-use gradient_types::{ProjectId, RoleId, UserId};
+use gradient_types::*;
 
 use super::dto::*;
 use super::error::{SCIM_CONTENT_TYPE, ScimError, ScimResult};
@@ -36,32 +33,31 @@ fn scim_json(status: StatusCode, body: impl serde::Serialize) -> Response {
     }
 }
 
-fn grants<'a>(state: &'a Arc<ServerState>, group: &str) -> Option<&'a Vec<(ProjectId, RoleId)>> {
-    state.scim_group_roles.get(group)
+async fn team_for_group(state: &Arc<ServerState>, group: &str) -> ScimResult<MTeam> {
+    ETeam::find()
+        .filter(CTeam::ScimGroup.eq(group))
+        .one(state.web_db.inner())
+        .await?
+        .ok_or_else(|| ScimError::not_found("group not found"))
 }
 
-async fn group_resource(state: &Arc<ServerState>, group: &str) -> ScimResult<GroupResource> {
-    let grants = grants(state, group).ok_or_else(|| ScimError::not_found("group not found"))?;
-    let db = state.web_db.inner();
-    let mut members: Vec<GroupMember> = Vec::new();
-    if let Some((project, role)) = grants.first() {
-        let rows = project_user::Entity::find()
-            .filter(project_user::Column::Project.eq(*project))
-            .filter(project_user::Column::Role.eq(*role))
-            .all(db)
-            .await?;
-        for r in rows {
-            members.push(GroupMember {
-                value: r.user.to_string(),
-                display: None,
-            });
-        }
-    }
+async fn group_resource(state: &Arc<ServerState>, team: &MTeam) -> ScimResult<GroupResource> {
+    let group = team.scim_group.clone().unwrap_or_default();
+    let members = ETeamUser::find()
+        .filter(CTeamUser::Team.eq(team.id))
+        .all(state.web_db.inner())
+        .await?
+        .into_iter()
+        .map(|membership| GroupMember {
+            value: membership.user.to_string(),
+            display: None,
+        })
+        .collect();
 
     Ok(GroupResource {
         schemas: [GROUP_SCHEMA],
-        id: group.to_string(),
-        display_name: group.to_string(),
+        id: group.clone(),
+        display_name: group,
         members,
         meta: Meta {
             resource_type: "Group",
@@ -78,28 +74,29 @@ pub async fn list(
     State(state): State<Arc<ServerState>>,
     Query(q): Query<ListQuery>,
 ) -> ScimResult<impl IntoResponse> {
-    let names: Vec<String> = match q.filter.as_deref().and_then(parse_eq_filter) {
-        Some((attr, val)) if attr == "displayname" => vec![val],
+    let filter = match q.filter.as_deref().and_then(parse_eq_filter) {
+        Some((attr, val)) if attr == "displayname" => CTeam::ScimGroup.eq(val),
         Some(_) => {
             return Err(ScimError::bad_request(
                 "invalidFilter",
                 "unsupported filter",
             ));
         }
-        None => state.scim_group_roles.keys().cloned().collect(),
+        None => CTeam::ScimGroup.is_not_null(),
     };
+    let teams = ETeam::find()
+        .filter(filter)
+        .all(state.web_db.inner())
+        .await?;
 
-    let mut resources = Vec::new();
-    for name in names {
-        if grants(&state, &name).is_some() {
-            resources.push(group_resource(&state, &name).await?);
-        }
+    let mut resources = Vec::with_capacity(teams.len());
+    for team in &teams {
+        resources.push(group_resource(&state, team).await?);
     }
-
     let total = resources.len();
     Ok(scim_json(
         StatusCode::OK,
-        ListResponse::new(resources, total, 1),
+        super::dto::ListResponse::new(resources, total, 1),
     ))
 }
 
@@ -107,9 +104,10 @@ pub async fn get(
     State(state): State<Arc<ServerState>>,
     Path(id): Path<String>,
 ) -> ScimResult<impl IntoResponse> {
+    let team = team_for_group(&state, &id).await?;
     Ok(scim_json(
         StatusCode::OK,
-        group_resource(&state, &id).await?,
+        group_resource(&state, &team).await?,
     ))
 }
 
@@ -118,9 +116,7 @@ pub async fn patch(
     Path(id): Path<String>,
     Json(body): Json<PatchRequest>,
 ) -> ScimResult<impl IntoResponse> {
-    let grants = grants(&state, &id)
-        .ok_or_else(|| ScimError::not_found("group not found"))?
-        .clone();
+    let team = team_for_group(&state, &id).await?;
     for op in &body.operations {
         let path = op.path.as_deref().unwrap_or("").to_ascii_lowercase();
         if !path.is_empty() && !path.starts_with("members") {
@@ -131,12 +127,12 @@ pub async fn patch(
         match op.op.to_ascii_lowercase().as_str() {
             "add" | "replace" => {
                 for uid in &member_ids {
-                    add_member(&state, &grants, uid).await?;
+                    add_member(&state, team.id, uid).await?;
                 }
             }
             "remove" => {
                 for uid in member_ids_for_remove(op, &member_ids) {
-                    remove_member(&state, &grants, &uid).await?;
+                    remove_member(&state, team.id, &uid).await?;
                 }
             }
             _ => {}
@@ -145,7 +141,7 @@ pub async fn patch(
 
     Ok(scim_json(
         StatusCode::OK,
-        group_resource(&state, &id).await?,
+        group_resource(&state, &team).await?,
     ))
 }
 
@@ -177,70 +173,36 @@ fn member_ids_for_remove(op: &PatchOperation, parsed: &[String]) -> Vec<String> 
         .collect()
 }
 
-async fn add_member(
-    state: &Arc<ServerState>,
-    grants: &[(ProjectId, RoleId)],
-    uid: &str,
-) -> ScimResult<()> {
-    let user_id = parse_uid(uid)?;
+async fn add_member(state: &Arc<ServerState>, team: TeamId, uid: &str) -> ScimResult<()> {
+    let user = parse_uid(uid)?;
     let db = state.web_db.inner();
-
-    let projects: Vec<ProjectId> = grants.iter().map(|(p, _)| *p).collect();
-    let existing: HashSet<ProjectId> = project_user::Entity::find()
-        .filter(project_user::Column::Project.is_in(projects))
-        .filter(project_user::Column::User.eq(user_id))
-        .all(db)
-        .await?
-        .into_iter()
-        .map(|m| m.project)
-        .collect();
-
-    let mut by_role: HashMap<RoleId, Vec<ProjectId>> = HashMap::new();
-    let mut new_rows = Vec::new();
-    for (project, role) in grants {
-        if existing.contains(project) {
-            by_role.entry(*role).or_default().push(*project);
-        } else {
-            new_rows.push(project_user::ActiveModel {
-                project: Set(*project),
-                user: Set(user_id),
-                role: Set(*role),
-                ..Default::default()
-            });
+    let existing = ETeamUser::find()
+        .filter(CTeamUser::Team.eq(team))
+        .filter(CTeamUser::User.eq(user))
+        .one(db)
+        .await?;
+    if existing.is_none() {
+        MTeamUser {
+            id: TeamUserId::now_v7(),
+            team,
+            user,
+            role: TeamRole::Member,
+            via_group: true,
         }
+        .into_active_model()
+        .insert(db)
+        .await?;
     }
-
-    for (role, projects) in by_role {
-        project_user::Entity::update_many()
-            .col_expr(project_user::Column::Role, Expr::value(role))
-            .filter(project_user::Column::Project.is_in(projects))
-            .filter(project_user::Column::User.eq(user_id))
-            .exec(db)
-            .await?;
-    }
-
-    if !new_rows.is_empty() {
-        project_user::Entity::insert_many(new_rows).exec(db).await?;
-    }
-
     Ok(())
 }
 
-async fn remove_member(
-    state: &Arc<ServerState>,
-    grants: &[(ProjectId, RoleId)],
-    uid: &str,
-) -> ScimResult<()> {
-    let user_id = parse_uid(uid)?;
-    let db = state.web_db.inner();
-    let projects: Vec<ProjectId> = grants.iter().map(|(p, _)| *p).collect();
-
-    project_user::Entity::delete_many()
-        .filter(project_user::Column::Project.is_in(projects))
-        .filter(project_user::Column::User.eq(user_id))
-        .exec(db)
+async fn remove_member(state: &Arc<ServerState>, team: TeamId, uid: &str) -> ScimResult<()> {
+    let user = parse_uid(uid)?;
+    ETeamUser::delete_many()
+        .filter(CTeamUser::Team.eq(team))
+        .filter(CTeamUser::User.eq(user))
+        .exec(state.web_db.inner())
         .await?;
-
     Ok(())
 }
 

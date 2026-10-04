@@ -5,6 +5,7 @@
  */
 
 pub mod grants;
+pub mod members;
 pub mod workers;
 
 use gradient_types::*;
