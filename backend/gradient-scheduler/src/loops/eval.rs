@@ -117,7 +117,7 @@ pub(crate) async fn assign_queued_evals(scheduler: &Scheduler) -> anyhow::Result
             continue;
         };
 
-        let history = eval_history.get(&task_id).copied().unwrap_or_default();
+        let history = eval_history.for_task(task_id);
 
         let pending = PendingEvalJob {
             evaluation_id: eval.id,

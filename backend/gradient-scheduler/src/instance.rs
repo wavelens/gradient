@@ -424,35 +424,104 @@ gradient_db::sql! {
         params = [Now];
 }
 
+#[derive(Debug, Default, FromQueryResult)]
+struct EvalDurationRow {
+    task: TaskId,
+    elapsed_ms: f64,
+    samples: i64,
+}
+
+gradient_db::sql! {
+    EVAL_HISTORY_DURATION = r#"
+        SELECT task,
+               AVG(worker_elapsed_ms)::float8 AS elapsed_ms,
+               COUNT(*)::bigint AS samples
+        FROM dispatched_job
+        WHERE kind = $2 AND outcome = $3 AND dispatched_at >= $1
+          AND task IS NOT NULL AND worker_elapsed_ms IS NOT NULL
+        GROUP BY task
+    "#,
+        params = [Now, Int(0), Int(0)];
+}
+
+const EVAL_DURATION_WINDOW_DAYS: i64 = 7;
+
+#[derive(Debug, Default)]
+pub struct EvalHistory {
+    tasks: HashMap<TaskId, gradient_pool::score::HistoryPrediction>,
+    fleet_elapsed_ms: Option<u64>,
+}
+
+impl EvalHistory {
+    pub fn for_task(&self, task: TaskId) -> gradient_pool::score::HistoryPrediction {
+        let mut history = self.tasks.get(&task).copied().unwrap_or_default();
+        if history.uncontended_build_time_ms.is_none() {
+            history.uncontended_build_time_ms = self.fleet_elapsed_ms;
+        }
+
+        history
+    }
+
+    fn from_rows(ram: Vec<EvalHistoryRow>, durations: Vec<EvalDurationRow>) -> Self {
+        let mut tasks: HashMap<TaskId, gradient_pool::score::HistoryPrediction> = ram
+            .into_iter()
+            .map(|r| {
+                (
+                    r.task,
+                    gradient_pool::score::HistoryPrediction {
+                        predicted_peak_ram_mb: Some(r.p95_ram.max(0.0) as u64),
+                        samples: r.samples.max(0) as u32,
+                        ..Default::default()
+                    },
+                )
+            })
+            .collect();
+
+        let (mut weighted_ms, mut runs) = (0.0, 0.0);
+        for row in durations {
+            let elapsed_ms = row.elapsed_ms.max(0.0) as u64;
+            let history = tasks.entry(row.task).or_default();
+            history.build_time_ms = Some(elapsed_ms);
+            history.uncontended_build_time_ms = Some(elapsed_ms);
+            weighted_ms += row.elapsed_ms.max(0.0) * row.samples as f64;
+            runs += row.samples as f64;
+        }
+
+        Self {
+            tasks,
+            fleet_elapsed_ms: (runs > 0.0).then(|| (weighted_ms / runs) as u64),
+        }
+    }
+}
+
 pub async fn compute_eval_history(
     db: &impl ConnectionTrait,
     now: chrono::NaiveDateTime,
-) -> HashMap<TaskId, gradient_pool::score::HistoryPrediction> {
-    let since = now - chrono::Duration::hours(24);
+) -> EvalHistory {
+    use gradient_entity::dispatched_job::{DispatchedJobKind, DispatchedJobOutcome};
 
-    let rows = match EvalHistoryRow::find_by_statement(EVAL_HISTORY_P95_RAM.bind([since.into()]))
+    let since = now - chrono::Duration::hours(24);
+    let ram = EvalHistoryRow::find_by_statement(EVAL_HISTORY_P95_RAM.bind([since.into()]))
         .all(db)
         .await
-    {
-        Ok(r) => r,
-        Err(e) => {
+        .unwrap_or_else(|e| {
             error!(error = %e, "eval history query failed");
-            return HashMap::new();
-        }
-    };
+            Vec::new()
+        });
 
-    rows.into_iter()
-        .map(|r| {
-            (
-                r.task,
-                gradient_pool::score::HistoryPrediction {
-                    predicted_peak_ram_mb: Some(r.p95_ram.max(0.0) as u64),
-                    samples: r.samples.max(0) as u32,
-                    ..Default::default()
-                },
-            )
-        })
-        .collect()
+    let durations = EvalDurationRow::find_by_statement(EVAL_HISTORY_DURATION.bind([
+        (now - chrono::Duration::days(EVAL_DURATION_WINDOW_DAYS)).into(),
+        i16::from(DispatchedJobKind::Eval).into(),
+        i16::from(DispatchedJobOutcome::Completed).into(),
+    ]))
+    .all(db)
+    .await
+    .unwrap_or_else(|e| {
+        error!(error = %e, "eval duration query failed");
+        Vec::new()
+    });
+
+    EvalHistory::from_rows(ram, durations)
 }
 
 #[cfg(test)]
@@ -595,11 +664,42 @@ mod tests {
 
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             .append_query_results([vec![row]])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .into_connection();
 
-        let history = compute_eval_history(&db, gradient_types::now()).await;
-        let h = history.get(&pid).expect("task present");
+        let h = compute_eval_history(&db, gradient_types::now())
+            .await
+            .for_task(pid);
         assert_eq!(h.predicted_peak_ram_mb, Some(42_000));
         assert_eq!(h.samples, 7);
+    }
+
+    #[test]
+    fn a_task_without_eval_runs_takes_the_mean_of_every_run() {
+        let (seen, unseen) = (TaskId::now_v7(), TaskId::now_v7());
+        let history = EvalHistory::from_rows(
+            Vec::new(),
+            vec![
+                EvalDurationRow {
+                    task: seen,
+                    elapsed_ms: 10_000.0,
+                    samples: 3,
+                },
+                EvalDurationRow {
+                    task: TaskId::now_v7(),
+                    elapsed_ms: 50_000.0,
+                    samples: 1,
+                },
+            ],
+        );
+
+        assert_eq!(
+            history.for_task(seen).uncontended_build_time_ms,
+            Some(10_000)
+        );
+        assert_eq!(
+            history.for_task(unseen).uncontended_build_time_ms,
+            Some(20_000)
+        );
     }
 }
