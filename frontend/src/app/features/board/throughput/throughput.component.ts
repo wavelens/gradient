@@ -11,6 +11,7 @@ import { BoardService, MetricPoint, BoardWorker } from '@core/services/board.ser
 import { LoadingSpinnerComponent } from '@gradient/ui/ui';
 import { MetricChartComponent } from '@shared/ui';
 import { firstLoad } from '../first-load';
+import { workerAxisLabel } from '../worker-label';
 
 @Component({
   selector: 'app-board-throughput',
@@ -22,6 +23,7 @@ import { firstLoad } from '../first-load';
     } @else {
       <gr-metric-chart
         title="Build pipeline (hourly)"
+        doc="ui/job-board/"
         type="line"
         [series]="buildSeries()"
         [categories]="buildCategories()"
@@ -30,6 +32,7 @@ import { firstLoad } from '../first-load';
 
       <gr-metric-chart
         title="Evaluations (hourly)"
+        doc="ui/job-board/"
         type="line"
         [series]="evalSeries()"
         [categories]="evalCategories()"
@@ -38,6 +41,7 @@ import { firstLoad } from '../first-load';
 
       <gr-metric-chart
         title="Active jobs per worker"
+        doc="ui/job-board/"
         type="bar"
         [series]="workerSeries()"
         [categories]="workerCategories()"
@@ -95,7 +99,7 @@ export class BoardThroughputComponent implements OnInit {
 
   private applyWorkers(workers: BoardWorker[]): void {
     const named = workers.filter((w) => w.id !== null);
-    this.workerCategories.set(named.map((w) => (w.id ?? '').slice(0, 12)));
+    this.workerCategories.set(named.map((w) => workerAxisLabel(w.name, w.id)));
     this.workerSeries.set([{ name: 'assigned', data: named.map((w) => w.assigned_jobs) }]);
   }
 }

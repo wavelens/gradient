@@ -87,13 +87,14 @@ function taskFor(
   extraEvals: EvaluationSummary[] = [],
   primaryStatus: EvaluationSummary['status'] = 'Building',
   primary: Partial<EvaluationSummary> = {},
+  repository = '',
 ) {
   return {
     id: 'p',
     name: 'demo',
     display_name: 'Demo',
     description: '',
-    repository: '',
+    repository,
     wildcard: '*',
     active: true,
     created_at: '2026-01-01T00:00:00',
@@ -122,10 +123,11 @@ function makeTasksService(access: AccessState, overrides: Partial<{
   extraEvals: EvaluationSummary[];
   primaryStatus: EvaluationSummary['status'];
   primary: Partial<EvaluationSummary>;
+  repository: string;
 }> = {}): TasksService {
   const extraEvals = overrides.extraEvals ?? [];
   return {
-    getTask: () => of(taskFor(access, extraEvals, overrides.primaryStatus, overrides.primary)),
+    getTask: () => of(taskFor(access, extraEvals, overrides.primaryStatus, overrides.primary, overrides.repository)),
     getEntryPoints: overrides.getEntryPoints ?? (() => of({ entry_points: [], total: 0 })),
     startEvaluation: overrides.startEvaluation ?? (() => of('ok')),
     restartFailedBuilds: overrides.restartFailedBuilds ?? (() => of('ok')),
@@ -996,6 +998,27 @@ describe('TaskDetailComponent header star', () => {
   it('shows no star to a guest', () => {
     const { fixture } = setup(access, {}, false);
     expect((fixture.nativeElement as HTMLElement).querySelector('gr-star-button')).toBeNull();
+  });
+});
+
+describe('TaskDetailComponent repository chip', () => {
+  const access = { managed: false, canEdit: false, canTrigger: false };
+  const repositoryChip = (fixture: ComponentFixture<TaskDetailComponent>) =>
+    (fixture.nativeElement as HTMLElement).querySelector('.meta-chips > :first-child') as HTMLElement;
+
+  it('makes the whole chip the link for a web repository', () => {
+    const { fixture } = setup(access, { repository: 'https://github.com/acme/demo' });
+    const chip = repositoryChip(fixture);
+    expect(chip.tagName).toBe('A');
+    expect(chip.getAttribute('href')).toBe('https://github.com/acme/demo');
+    expect(chip.querySelector('gr-icon')).not.toBeNull();
+  });
+
+  it('keeps a non-web repository a plain chip', () => {
+    const { fixture } = setup(access, { repository: 'git@github.com:acme/demo.git' });
+    const chip = repositoryChip(fixture);
+    expect(chip.tagName).toBe('SPAN');
+    expect(chip.querySelector('a')).toBeNull();
   });
 });
 

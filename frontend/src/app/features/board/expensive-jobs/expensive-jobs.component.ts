@@ -12,8 +12,9 @@ import {
   ExpensiveResource,
   TopProjectBuildTime,
 } from '@core/services/board.service';
+import { AuthService } from '@core/services/auth.service';
 import { LoadingSpinnerComponent, TableComponent } from '@gradient/ui/ui';
-import { MetricChartComponent } from '@shared/ui';
+import { LabelHelpComponent, MetricChartComponent } from '@shared/ui';
 import { firstLoad } from '../first-load';
 import { formatDuration, formatQuantity } from '@shared/text';
 
@@ -22,7 +23,7 @@ type Tab = 'time' | 'ram' | 'cpu' | 'disk';
 @Component({
   selector: 'app-board-expensive-jobs',
   standalone: true,
-  imports: [CommonModule, MetricChartComponent, TableComponent, LoadingSpinnerComponent],
+  imports: [CommonModule, MetricChartComponent, LabelHelpComponent, TableComponent, LoadingSpinnerComponent],
   template: `
     @if (first.loading()) {
       <gr-loading-spinner message="Loading jobs..." />
@@ -68,7 +69,7 @@ type Tab = 'time' | 'ram' | 'cpu' | 'disk';
       }
 
       @if (topProjects().length) {
-        <h2>Top projects by build time (superuser)</h2>
+        <h2>Top projects by build time <gr-label-help doc="ui/job-board/" title="About the Job Board" /></h2>
         <gr-metric-chart
           type="bar"
           [horizontal]="true"
@@ -86,6 +87,7 @@ type Tab = 'time' | 'ram' | 'cpu' | 'disk';
 })
 export class BoardExpensiveJobsComponent implements OnInit {
   private board = inject(BoardService);
+  private auth = inject(AuthService);
   protected first = firstLoad();
   builds = signal<ExpensiveBuild[]>([]);
   resources = signal<ExpensiveResource[]>([]);
@@ -104,7 +106,7 @@ export class BoardExpensiveJobsComponent implements OnInit {
   readonly quantity = formatQuantity;
 
   valueHeader = computed(() => this.tabs.find((t) => t.key === this.tab())?.label ?? '');
-  topProjectCategories = computed(() => this.topProjects().map((o) => o.project_name));
+  topProjectCategories = computed(() => this.topProjects().map((o) => o.project_display_name || o.project_name));
   topProjectSeries = computed(() => [
     { name: 'build time', data: this.topProjects().map((o) => o.total_build_ms) },
   ]);
@@ -122,6 +124,7 @@ export class BoardExpensiveJobsComponent implements OnInit {
         .pipe(this.first.track())
         .subscribe((r) => this.resources.set(r));
     }
+    if (this.auth.user()?.superuser !== true) return;
     this.board.getTopProjects(this.windowDays).pipe(this.first.track()).subscribe({
       next: (o) => this.topProjects.set(o),
       error: () => this.topProjects.set([]),

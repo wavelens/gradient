@@ -11,10 +11,8 @@
   @if (loading()) {
     <gr-loading-spinner message="Loading caches..." />
   } @else {
-    <!-- Active Caches -->
     @if (activeCaches.length > 0) {
       <div class="section">
-        <h2>Active Caches</h2>
         <gr-card-grid>
           @for (cache of activeCaches; track cache.id) {
             <gr-nav-card

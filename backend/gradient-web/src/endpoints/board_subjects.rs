@@ -4,11 +4,15 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use crate::metrics_scope::MetricsScope;
 use gradient_types::input::vec_to_hex;
 use gradient_types::*;
-use sea_orm::{ColumnTrait, ConnectionTrait, DbErr, EntityTrait, QueryFilter, QuerySelect};
+use sea_orm::{
+    ColumnTrait, ConnectionTrait, DbErr, EntityTrait, QueryFilter, QueryOrder, QuerySelect, Select,
+};
 use serde::Serialize;
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
+use uuid::Uuid;
 
 pub struct JobSubjects {
     derivations: HashMap<DerivationBuildId, String>,
@@ -99,6 +103,99 @@ async fn repositories<C: ConnectionTrait>(
     )
 }
 
+/// A worker's display name comes only from registrations in projects the caller can see.
+pub struct WorkerNames(HashMap<String, String>);
+
+impl WorkerNames {
+    pub async fn load<C: ConnectionTrait>(
+        db: &C,
+        scope: &MetricsScope,
+        workers: impl IntoIterator<Item = String>,
+    ) -> Result<Self, DbErr> {
+        let workers: Vec<String> = workers
+            .into_iter()
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect();
+        let visible = scope.project_ids();
+        let rows: Vec<(String, String)> = gradient_db::fetch_in_chunks(&workers, |chunk| {
+            worker_names_query(chunk, visible.as_deref())
+                .into_tuple()
+                .all(db)
+        })
+        .await?;
+
+        let mut names = HashMap::new();
+        for (worker, name) in rows {
+            names.entry(worker).or_insert(name);
+        }
+        Ok(Self(names))
+    }
+
+    pub fn name(&self, worker: &str) -> Option<String> {
+        self.0.get(worker).cloned()
+    }
+}
+
+fn worker_names_query(
+    workers: Vec<String>,
+    visible_projects: Option<&[Uuid]>,
+) -> Select<EWorkerRegistration> {
+    let query = EWorkerRegistration::find()
+        .select_only()
+        .column(CWorkerRegistration::WorkerId)
+        .column(CWorkerRegistration::DisplayName)
+        .filter(CWorkerRegistration::WorkerId.is_in(workers))
+        .filter(CWorkerRegistration::DisplayName.ne(""))
+        .order_by_desc(CWorkerRegistration::Active)
+        .order_by_desc(CWorkerRegistration::CreatedAt);
+
+    match visible_projects {
+        Some(projects) => query.filter(CWorkerRegistration::PeerId.is_in(projects.to_vec())),
+        None => query,
+    }
+}
+
+#[derive(Serialize, Clone, Default)]
+pub struct BoardProject {
+    pub id: Uuid,
+    pub name: String,
+    pub display_name: String,
+}
+
+pub async fn board_projects<C: ConnectionTrait>(
+    db: &C,
+    projects: &[Uuid],
+) -> Result<HashMap<Uuid, BoardProject>, DbErr> {
+    let rows: Vec<(Uuid, String, String)> =
+        gradient_db::fetch_in_chunks(projects, |chunk| async move {
+            EProject::find()
+                .select_only()
+                .column(CProject::Id)
+                .column(CProject::Name)
+                .column(CProject::DisplayName)
+                .filter(CProject::Id.is_in(chunk))
+                .into_tuple()
+                .all(db)
+                .await
+        })
+        .await?;
+
+    Ok(rows
+        .into_iter()
+        .map(|(id, name, display_name)| {
+            (
+                id,
+                BoardProject {
+                    id,
+                    name,
+                    display_name,
+                },
+            )
+        })
+        .collect())
+}
+
 #[derive(Serialize)]
 pub struct JobEvaluationView {
     pub repository: String,
@@ -178,12 +275,63 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_worker_takes_the_name_of_its_first_ranked_registration() {
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([vec![
+                row([
+                    ("worker_id", "w1".into()),
+                    ("display_name", "builder".into()),
+                ]),
+                row([
+                    ("worker_id", "w1".into()),
+                    ("display_name", "retired".into()),
+                ]),
+            ]])
+            .into_connection();
+
+        let names = WorkerNames::load(
+            &db,
+            &MetricsScope::All,
+            ["w1".to_string(), "w2".to_string()],
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(names.name("w1").as_deref(), Some("builder"));
+        assert_eq!(names.name("w2"), None);
+    }
+
+    #[test]
+    fn worker_names_come_only_from_registrations_the_caller_can_see() {
+        use sea_orm::QueryTrait;
+        let visible = [Uuid::now_v7()];
+        let sql = |projects: Option<&[Uuid]>| {
+            worker_names_query(vec!["w1".into()], projects)
+                .build(DatabaseBackend::Postgres)
+                .to_string()
+        };
+
+        let scoped = sql(Some(&visible));
+        assert!(
+            scoped.contains(&format!("\"peer_id\" IN ('{}')", visible[0])),
+            "{scoped}"
+        );
+        assert!(scoped.contains("\"display_name\" <> ''"), "{scoped}");
+        assert!(!sql(None).contains("peer_id"));
+    }
+
+    #[tokio::test]
     async fn nothing_to_name_asks_nothing() {
         let db = MockDatabase::new(DatabaseBackend::Postgres).into_connection();
 
         let subjects = JobSubjects::load(&db, &[], &[]).await.unwrap();
+        let names = WorkerNames::load(&db, &MetricsScope::All, [])
+            .await
+            .unwrap();
+        let projects = board_projects(&db, &[]).await.unwrap();
 
         assert!(subjects.subject(None, EvaluationId::now_v7()).is_none());
+        assert!(names.name("w1").is_none() && projects.is_empty());
         assert!(db.into_transaction_log().is_empty());
     }
 }

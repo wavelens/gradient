@@ -36,6 +36,7 @@ interface StorageView {
 
     <gr-metric-chart
       title="Storage latency (avg / max)"
+      doc="ui/job-board/#storage-metrics"
       type="line"
       [series]="latency()"
       [categories]="categories()"
@@ -45,6 +46,7 @@ interface StorageView {
 
     <gr-metric-chart
       title="Storage errors"
+      doc="ui/job-board/#storage-metrics"
       type="bar"
       [series]="errors()"
       [categories]="categories()"
@@ -54,6 +56,7 @@ interface StorageView {
 
     <gr-metric-chart
       title="Writer lanes (peak fill, send stalls)"
+      doc="ui/job-board/#storage-metrics"
       type="line"
       [series]="lanes()"
       [categories]="categories()"
@@ -65,6 +68,7 @@ interface StorageView {
 
     <gr-metric-chart
       title="NAR serves (peak waiting / active, failures)"
+      doc="ui/job-board/#storage-metrics"
       type="line"
       [series]="serves()"
       [categories]="categories()"

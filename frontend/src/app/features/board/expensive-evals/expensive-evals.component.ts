@@ -6,6 +6,7 @@
 
 import { Component, OnInit, inject, signal, computed, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { RouterModule } from '@angular/router';
 import { LoadingSpinnerComponent, TableComponent } from '@gradient/ui/ui';
 import { firstLoad } from '../first-load';
 import { formatQuantity } from '@shared/text';
@@ -16,7 +17,7 @@ type Tab = 'time' | 'rss' | 'heap' | 'thunks' | 'fncalls' | 'alloc';
 @Component({
   selector: 'app-board-expensive-evals',
   standalone: true,
-  imports: [CommonModule, TableComponent, LoadingSpinnerComponent],
+  imports: [CommonModule, RouterModule, TableComponent, LoadingSpinnerComponent],
   template: `
     @if (first.loading()) {
       <gr-loading-spinner message="Loading evaluations..." />
@@ -38,12 +39,22 @@ type Tab = 'time' | 'rss' | 'heap' | 'thunks' | 'fncalls' | 'alloc';
       </div>
 
       <gr-table class="expensive">
-        <thead><tr><th>#</th><th>Evaluation</th><th>{{ valueHeader() }}</th><th>Worker</th></tr></thead>
+        <thead><tr><th>#</th><th>Project / Task</th><th>Evaluation</th><th>{{ valueHeader() }}</th><th>Worker</th></tr></thead>
         <tbody>
           @for (r of rows(); track r.evaluation; let i = $index) {
-            <tr><td>{{ i + 1 }}</td><td class="mono">{{ r.name }}</td><td>{{ quantity(r.value, r.unit) }}</td><td class="mono">{{ r.worker || '-' }}</td></tr>
+            <tr>
+              <td>{{ i + 1 }}</td>
+              <td>
+                <a [routerLink]="['/project', r.project_name]">{{ r.project_display_name || r.project_name }}</a>
+                /
+                <a [routerLink]="['/project', r.project_name, 'task', r.task_name]">{{ r.task_display_name || r.task_name }}</a>
+              </td>
+              <td class="mono">{{ r.name }}</td>
+              <td>{{ quantity(r.value, r.unit) }}</td>
+              <td class="mono">{{ r.worker_name ?? (r.worker || '-') }}</td>
+            </tr>
           } @empty {
-            <tr><td colspan="4" class="muted">No evaluation metrics recorded in this window.</td></tr>
+            <tr><td colspan="5" class="muted">No evaluation metrics recorded in this window.</td></tr>
           }
         </tbody>
       </gr-table>

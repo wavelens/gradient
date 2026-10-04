@@ -13,6 +13,7 @@ export interface AssignedJobSummary {
   kind: number;
   project: string;
   worker_id: string;
+  worker_name: string | null;
   score: number;
   dispatched_at: string;
   build_id: string | null;
@@ -56,6 +57,7 @@ export interface DecisionCandidateView {
 export interface AssignmentDecisionView {
   at: string;
   worker_id: string;
+  worker_name: string | null;
   kind: number;
   winner: string | null;
   candidates: DecisionCandidateView[];
@@ -160,6 +162,7 @@ export interface AssignedJobDetail extends Omit<AssignedJobSummary, 'subject'> {
   pname: string | null;
   evaluation: JobEvaluationView | null;
   project_name: string;
+  project_display_name: string;
   queued_at: string;
   finished_at: string | null;
   ready_at: string | null;
@@ -186,9 +189,16 @@ export interface AssignedJobDetail extends Omit<AssignedJobSummary, 'subject'> {
   passed_over: boolean;
 }
 
+export interface BoardProject {
+  id: string;
+  name: string;
+  display_name: string;
+}
+
 export interface BoardWorker {
   id: string | null;
-  projects: string[];
+  name: string | null;
+  projects: BoardProject[];
   draining: boolean;
   assigned_jobs: number;
   max_concurrent_builds: number;
@@ -309,6 +319,7 @@ export interface HttpRouteStat {
 
 export interface WorkerNet {
   worker_id: string | null;
+  worker_name: string | null;
   upload_speed_mbps: number | null;
   download_speed_mbps: number | null;
   disk_speed_mbps: number | null;
@@ -406,6 +417,7 @@ export interface DurationsHeatmap {
 export interface TopProjectBuildTime {
   project: string;
   project_name: string;
+  project_display_name: string;
   total_build_ms: number;
   build_count: number;
 }
@@ -423,10 +435,15 @@ export interface ExpensiveResource {
 export interface ExpensiveEval {
   evaluation: string;
   project: string;
+  project_name: string;
+  project_display_name: string;
+  task_name: string;
+  task_display_name: string;
   name: string;
   value: number;
   unit: string;
   worker: string;
+  worker_name: string | null;
 }
 
 export interface FlakeGraphNode {

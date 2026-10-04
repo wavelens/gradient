@@ -305,3 +305,42 @@ describe('plot inset', () => {
     }
   });
 });
+
+describe('value axis minimum', () => {
+  const axisMin = (axis: any, min: number, max: number) => axis.min({ min, max });
+  const dual = {
+    type: 'bar' as const,
+    categories: cats,
+    series: [
+      { name: 'bytes', data: [0, 0, 0] },
+      { name: 'errors', data: [0, 0, 0], axis: 'right' as const },
+    ],
+    secondary: { title: 'errors' },
+  };
+
+  it('starts an all-zero series at 0', () => {
+    const y = buildMetricChartOption({ type: 'bar', series: [{ name: 'a', data: [0, 0, 0] }], categories: cats }, THEME).yAxis;
+    expect(axisMin(y, 0, 0)).toBe(0);
+  });
+
+  it('starts positive data at 0 rather than at its smallest value', () => {
+    const y = buildMetricChartOption({ type: 'line', series: one, categories: cats }, THEME).yAxis;
+    expect(axisMin(y, 1, 3)).toBe(0);
+  });
+
+  it('still shows a real negative value', () => {
+    const y = buildMetricChartOption({ type: 'bar', series: [{ name: 'a', data: [-8, 12] }], categories: cats }, THEME).yAxis;
+    expect(axisMin(y, -8, 12)).toBe(-8);
+  });
+
+  it('applies to both axes of a dual-axis chart', () => {
+    const [left, right] = buildMetricChartOption(dual, THEME).yAxis as any[];
+    expect([axisMin(left, 0, 0), axisMin(right, 0, 0)]).toEqual([0, 0]);
+    expect(axisMin(right, -2, 4)).toBe(-2);
+  });
+
+  it('applies to the value axis of a horizontal bar', () => {
+    const x = buildMetricChartOption({ type: 'bar', series: one, categories: cats, horizontal: true }, THEME).xAxis;
+    expect(axisMin(x, 0, 0)).toBe(0);
+  });
+});

@@ -125,7 +125,7 @@ export const LIGHT_ROLES: Record<string, string> = {
   '--gr-surface-control': '--gr-white',
   '--gr-surface-hover': '--gr-gray-75',
   '--gr-surface-active': '--gr-gray-60',
-  '--gr-border': '--gr-gray-250',
+  '--gr-border': '--gr-gray-650',
   '--gr-border-subtle': '--gr-gray-60',
   '--gr-accent': '--gr-emerald-700',
   '--gr-accent-hover': '--gr-emerald-800',

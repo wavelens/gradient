@@ -104,6 +104,7 @@ function cartesianOption(cfg: MetricChartConfig, format: (v: number) => string, 
   const valueAxis = (title: string | undefined, fmt: (v: number) => string, opposite = false, max?: number) => ({
     type: 'value' as const,
     name: title || undefined,
+    min: (extent: { min: number }) => Math.min(0, extent.min),
     max,
     nameTextStyle: { color: theme.text },
     axisLabel: { ...axisLabel(theme), formatter: (v: number) => fmt(v) },

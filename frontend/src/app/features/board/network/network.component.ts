@@ -7,9 +7,11 @@
 import { Component, OnInit, inject, signal, computed, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { BoardService, BoardNetworkStats, HttpRouteStat } from '@core/services/board.service';
+import { AuthService } from '@core/services/auth.service';
 import { LoadingSpinnerComponent, TableComponent } from '@gradient/ui/ui';
 import { MetricChartComponent } from '@shared/ui';
 import { firstLoad } from '../first-load';
+import { workerAxisLabel } from '../worker-label';
 import { formatBytes, formatCount, formatDuration, formatQuantity } from '@shared/text';
 
 type HttpSortKey = keyof Pick<HttpRouteStat, 'method' | 'route' | 'count' | 'avg_ms' | 'errors'>;
@@ -24,6 +26,7 @@ type HttpSortKey = keyof Pick<HttpRouteStat, 'method' | 'route' | 'count' | 'avg
     } @else {
       <gr-metric-chart
         title="NAR egress (served per hour)"
+        doc="ui/job-board/"
         type="area"
         [series]="egressSeries()"
         [categories]="egressCats()"
@@ -33,6 +36,7 @@ type HttpSortKey = keyof Pick<HttpRouteStat, 'method' | 'route' | 'count' | 'avg
 
       <gr-metric-chart
         title="Worker upload and download speed (latest sample)"
+        doc="ui/job-board/"
         type="bar"
         [series]="transferSeries()"
         [categories]="workerCats()"
@@ -42,6 +46,7 @@ type HttpSortKey = keyof Pick<HttpRouteStat, 'method' | 'route' | 'count' | 'avg
 
       <gr-metric-chart
         title="Worker disk speed (latest sample)"
+        doc="ui/job-board/"
         type="bar"
         [series]="diskSeries()"
         [categories]="workerCats()"
@@ -49,31 +54,33 @@ type HttpSortKey = keyof Pick<HttpRouteStat, 'method' | 'route' | 'count' | 'avg
         [valueFormatter]="mbps"
       ></gr-metric-chart>
 
-      <h2>HTTP routes @if (!stats()?.http?.length) {<span class="muted">(superuser-only)</span>}</h2>
-      <gr-table class="http">
-        <thead>
-          <tr>
-            @for (c of httpColumns; track c.key) {
-              <th [class.num]="c.numeric" [attr.aria-sort]="ariaSort(c.key)">
-                <button class="gr-th-sort" type="button" (click)="sortBy(c.key)">{{ c.label }}</button>
-              </th>
-            }
-          </tr>
-        </thead>
-        <tbody>
-          @for (r of sortedHttp(); track r.method + r.route) {
+      @if (superuser()) {
+        <h2>HTTP routes</h2>
+        <gr-table class="http">
+          <thead>
             <tr>
-              <td>{{ r.method }}</td>
-              <td class="mono">{{ r.route }}</td>
-              <td class="num">{{ count(r.count) }}</td>
-              <td class="num">{{ duration(r.avg_ms) }}</td>
-              <td class="num" [class.bad]="r.errors > 0">{{ r.errors }}</td>
+              @for (c of httpColumns; track c.key) {
+                <th [class.num]="c.numeric" [attr.aria-sort]="ariaSort(c.key)">
+                  <button class="gr-th-sort" type="button" (click)="sortBy(c.key)">{{ c.label }}</button>
+                </th>
+              }
             </tr>
-          } @empty {
-            <tr><td colspan="5" class="muted">No HTTP route data.</td></tr>
-          }
-        </tbody>
-      </gr-table>
+          </thead>
+          <tbody>
+            @for (r of sortedHttp(); track r.method + r.route) {
+              <tr>
+                <td>{{ r.method }}</td>
+                <td class="mono">{{ r.route }}</td>
+                <td class="num">{{ count(r.count) }}</td>
+                <td class="num">{{ duration(r.avg_ms) }}</td>
+                <td class="num" [class.bad]="r.errors > 0">{{ r.errors }}</td>
+              </tr>
+            } @empty {
+              <tr><td colspan="5" class="muted">No HTTP route data.</td></tr>
+            }
+          </tbody>
+        </gr-table>
+      }
     }
   `,
   changeDetection: ChangeDetectionStrategy.Eager,
@@ -81,7 +88,9 @@ type HttpSortKey = keyof Pick<HttpRouteStat, 'method' | 'route' | 'count' | 'avg
 })
 export class BoardNetworkComponent implements OnInit {
   private board = inject(BoardService);
+  private auth = inject(AuthService);
   protected first = firstLoad();
+  protected superuser = computed(() => this.auth.user()?.superuser === true);
 
   protected readonly httpColumns: { key: HttpSortKey; label: string; numeric: boolean }[] = [
     { key: 'method', label: 'Method', numeric: false },
@@ -132,7 +141,7 @@ export class BoardNetworkComponent implements OnInit {
     { name: 'egress', data: (this.stats()?.nar_egress ?? []).map((p) => p.sum) },
   ]);
   workerCats = computed(() =>
-    (this.stats()?.workers ?? []).map((w) => (w.worker_id ?? '-').slice(0, 12))
+    (this.stats()?.workers ?? []).map((w) => workerAxisLabel(w.worker_name, w.worker_id))
   );
   transferSeries = computed(() => [
     { name: 'upload', data: (this.stats()?.workers ?? []).map((w) => w.upload_speed_mbps ?? 0) },

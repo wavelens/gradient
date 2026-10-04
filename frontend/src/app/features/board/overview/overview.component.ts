@@ -30,6 +30,7 @@ import { firstLoad } from '../first-load';
 
       <gr-metric-chart
         title="Builds completed per hour (24h)"
+        doc="ui/job-board/"
         type="area"
         [series]="completedSeries()"
         [categories]="categories()"

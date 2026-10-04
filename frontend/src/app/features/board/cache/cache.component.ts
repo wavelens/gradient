@@ -16,14 +16,14 @@ import {
 } from '@core/services/board.service';
 import { LiveService } from '@core/services/live.service';
 import { LoadingSpinnerComponent } from '@gradient/ui/ui';
-import { MetricChartComponent } from '@shared/ui';
+import { LabelHelpComponent, MetricChartComponent } from '@shared/ui';
 import { formatBytes, formatCount, formatDuration, formatPercent } from '@shared/text';
 import { firstLoad } from '../first-load';
 
 @Component({
   selector: 'app-board-cache',
   standalone: true,
-  imports: [CommonModule, MetricChartComponent, LoadingSpinnerComponent],
+  imports: [CommonModule, MetricChartComponent, LabelHelpComponent, LoadingSpinnerComponent],
   template: `
     @if (first.loading()) {
       <gr-loading-spinner message="Loading cache stats..." />
@@ -38,6 +38,7 @@ import { firstLoad } from '../first-load';
 
       <gr-metric-chart
         title="Cache traffic (served per hour)"
+        doc="ui/job-board/"
         type="area"
         [series]="trafficSeries()"
         [categories]="trafficCats()"
@@ -47,6 +48,7 @@ import { firstLoad } from '../first-load';
 
       <gr-metric-chart
         title="NAR requests per hour"
+        doc="ui/job-board/"
         type="line"
         [series]="requestSeries()"
         [categories]="trafficCats()"
@@ -56,6 +58,7 @@ import { firstLoad } from '../first-load';
 
       <gr-metric-chart
         title="Storage growth (added per hour)"
+        doc="ui/job-board/"
         type="area"
         [series]="storageSeries()"
         [categories]="storageCats()"
@@ -63,7 +66,7 @@ import { firstLoad } from '../first-load';
         [valueFormatter]="bytes"
       ></gr-metric-chart>
 
-      <h3 class="upstream-caches-title">Upstream Caches</h3>
+      <h3 class="upstream-caches-title">Upstream Caches <gr-label-help doc="concepts/caches/#upstream-types" title="About upstream caches" /></h3>
       @for (u of upstreamCacheStats()?.upstream_caches ?? []; track u.upstream_id) {
         <gr-metric-chart
           [title]="upstreamTitle(u)"

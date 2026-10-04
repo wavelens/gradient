@@ -52,12 +52,13 @@
   <div class="pad task-info">
     <p class="desc">{{ proj.description || 'No description' }}</p>
     <div class="meta-chips">
-      <span class="chip">
-        <gr-icon name="link" size="sm" />
-        @if (proj.repository.startsWith('http')) {
-          <a [href]="proj.repository" target="_blank" rel="noopener noreferrer">{{ proj.repository }}</a>
-        } @else { {{ proj.repository }} }
-      </span>
+      @if (proj.repository.startsWith('http')) {
+        <a class="chip chip--link" [href]="proj.repository" target="_blank" rel="noopener noreferrer">
+          <gr-icon name="link" size="sm" />{{ proj.repository }}
+        </a>
+      } @else {
+        <span class="chip"><gr-icon name="link" size="sm" />{{ proj.repository }}</span>
+      }
       <span class="chip mono" [title]="proj.wildcard">{{ truncate(proj.wildcard) }}</span>
       @if (proj.last_check_at) {
         <span class="chip">checked {{ proj.last_check_at + 'Z' | date: 'MMM d, HH:mm' }}</span>

@@ -5,6 +5,7 @@
  */
 
 use crate::authorization::MaybeUser;
+use crate::endpoints::board::worker_name_sql;
 use crate::endpoints::metrics::{
     HttpRouteStat, ProcessStat, collect, http_snapshot, process_snapshot,
 };
@@ -293,6 +294,7 @@ pub async fn get_board_upstream_caches(
 #[derive(Serialize)]
 pub struct WorkerNet {
     pub worker_id: Option<String>,
+    pub worker_name: Option<String>,
     pub upload_speed_mbps: Option<f32>,
     pub download_speed_mbps: Option<f32>,
     pub disk_speed_mbps: Option<f32>,
@@ -318,18 +320,17 @@ fn workers_serving(project_list: &str) -> String {
 }
 
 fn board_network_sql(project_filter: Option<&str>) -> String {
-    let mut sql = String::from(
-        "SELECT DISTINCT ON (worker_id) worker_id, upload_speed_mbps, download_speed_mbps, disk_speed_mbps \
-         FROM worker_sample \
-         WHERE at >= (now() AT TIME ZONE 'UTC') - interval '1 hour'",
-    );
-
-    if let Some(list) = project_filter {
-        sql.push_str(&workers_serving(list));
-    }
-
-    sql.push_str(" ORDER BY worker_id, at DESC");
-    sql
+    format!(
+        "SELECT s.*, wn.display_name AS worker_name FROM ( \
+           SELECT DISTINCT ON (worker_id) worker_id, upload_speed_mbps, download_speed_mbps, disk_speed_mbps \
+           FROM worker_sample \
+           WHERE at >= (now() AT TIME ZONE 'UTC') - interval '1 hour'{scope} \
+           ORDER BY worker_id, at DESC \
+         ) s {worker_name} \
+         ORDER BY s.worker_id",
+        scope = project_filter.map(workers_serving).unwrap_or_default(),
+        worker_name = worker_name_sql("s.worker_id", project_filter),
+    )
 }
 
 gradient_db::sql_fn! {
@@ -366,6 +367,7 @@ pub async fn get_board_network(
         .into_iter()
         .map(|r| WorkerNet {
             worker_id: r.try_get("", "worker_id").ok(),
+            worker_name: r.try_get("", "worker_name").ok(),
             upload_speed_mbps: r.try_get("", "upload_speed_mbps").ok().flatten(),
             download_speed_mbps: r.try_get("", "download_speed_mbps").ok().flatten(),
             disk_speed_mbps: r.try_get("", "disk_speed_mbps").ok().flatten(),
@@ -728,6 +730,9 @@ mod tests {
             );
             assert!(sql.contains("team_project tp"), "{sql}");
         }
+        assert!(super::board_network_sql(Some("'p'")).contains(
+            "wr.worker_id = s.worker_id AND wr.display_name <> '' AND wr.peer_id IN ('p')"
+        ));
     }
 
     #[test]

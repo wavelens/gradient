@@ -17,7 +17,9 @@ const DETAIL: AssignedJobDetail = {
   kind: 1,
   project: 'o1',
   project_name: 'project-one',
+  project_display_name: 'Project One',
   worker_id: 'w1',
+  worker_name: 'Builder One',
   score: 12.5,
   dispatched_at: '2026-06-08T00:01:00Z',
   build_id: null,
@@ -247,6 +249,21 @@ describe('BoardJobDetailComponent - structured context panels', () => {
     const link = el.querySelector('.ids .worker-link') as HTMLAnchorElement;
     expect(link).toBeTruthy();
     expect(link.getAttribute('href')).toBe('/project/project-one/workers/w1/metrics');
+  });
+
+  it('names the worker and the project by their display names', () => {
+    const el = setup().nativeElement as HTMLElement;
+    const project = el.querySelector('.ids .project-link') as HTMLElement;
+    expect(project.textContent?.trim()).toBe('Project One');
+    expect(project.getAttribute('href')).toBe('/project/project-one');
+    expect(el.querySelector('.ids .worker-link')?.textContent?.trim()).toBe('Builder One');
+  });
+
+  it('falls back to the worker id and project name without display names', () => {
+    const detail = { ...DETAIL, worker_name: null, project_display_name: '' };
+    const el = setup({ getJob: () => of(detail) }).nativeElement as HTMLElement;
+    expect(el.querySelector('.ids .project-link')?.textContent?.trim()).toBe('project-one');
+    expect(el.querySelector('.ids .worker-link')?.textContent?.trim()).toBe('w1');
   });
 
   it('shows the architecture for build jobs', () => {

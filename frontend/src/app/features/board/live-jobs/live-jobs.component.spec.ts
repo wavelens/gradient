@@ -7,10 +7,16 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
 import { of, EMPTY } from 'rxjs';
+import { vi } from 'vitest';
 import { BoardLiveJobsComponent } from './live-jobs.component';
 import { BoardService } from '@core/services/board.service';
 import { BoardLiveService } from '@core/services/board-live.service';
+import { AuthService } from '@core/services/auth.service';
 import { AssignmentDecisionView, AssignedJobSummary, PendingJobSummary } from '@core/services/board.service';
+
+function authAs(superuser: boolean) {
+  return { provide: AuthService, useValue: { user: () => ({ superuser }) } };
+}
 
 const PENDING: PendingJobSummary = {
   kind: 1,
@@ -38,6 +44,7 @@ function setup(): ComponentFixture<BoardLiveJobsComponent> {
         provide: BoardLiveService,
         useValue: { connect: () => EMPTY },
       },
+      authAs(false),
     ],
   });
   const fixture = TestBed.createComponent(BoardLiveJobsComponent);
@@ -50,6 +57,7 @@ const ASSIGNED: AssignedJobSummary = {
   kind: 1,
   project: 'o1',
   worker_id: 'worker-1',
+  worker_name: null,
   score: 42.0,
   dispatched_at: '2026-06-08T00:00:00Z',
   build_id: 'b1',
@@ -73,6 +81,7 @@ function setupWithAssigned(assigned: AssignedJobSummary[]): ComponentFixture<Boa
         provide: BoardLiveService,
         useValue: { connect: () => EMPTY },
       },
+      authAs(false),
     ],
   });
   const fixture = TestBed.createComponent(BoardLiveJobsComponent);
@@ -104,6 +113,14 @@ describe('BoardLiveJobsComponent - assigned subject column', () => {
     expect((fixture.nativeElement as HTMLElement).textContent).toContain('Derivation / Evaluation');
   });
 
+  it('shows the worker display name, falling back to its id', () => {
+    const fixture = setupWithAssigned([{ ...ASSIGNED, worker_name: 'Builder One' }, { ...ASSIGNED, id: 'j2' }]);
+    fixture.detectChanges();
+    const workers = Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('tbody tr'))
+      .map((row) => row.querySelectorAll('td')[1].textContent?.trim());
+    expect(workers).toEqual(['Builder One', 'worker-1']);
+  });
+
   it('renders - when the subject is unknown', () => {
     const fixture = setupWithAssigned([{ ...ASSIGNED, subject: null }]);
     fixture.detectChanges();
@@ -117,6 +134,7 @@ const DECISIONS: AssignmentDecisionView[] = [
   {
     at: '2026-06-08T00:00:00Z',
     worker_id: 'w1',
+    worker_name: 'Builder One',
     kind: 1,
     winner: 'j1',
     candidates: [
@@ -129,7 +147,10 @@ const DECISIONS: AssignmentDecisionView[] = [
 describe('BoardLiveJobsComponent - decision scores (#419)', () => {
   beforeEach(() => sessionStorage.clear());
 
-  function setupDecisions(): ComponentFixture<BoardLiveJobsComponent> {
+  const getAssignmentDecisions = vi.fn(() => of(DECISIONS));
+
+  function setupDecisions(superuser = true): ComponentFixture<BoardLiveJobsComponent> {
+    getAssignmentDecisions.mockClear();
     TestBed.configureTestingModule({
       imports: [BoardLiveJobsComponent],
       providers: [
@@ -139,10 +160,11 @@ describe('BoardLiveJobsComponent - decision scores (#419)', () => {
           useValue: {
             getAssignedJobs: () => of({ jobs: [], other_running: 0 }),
             getPendingJobs: () => of({ jobs: [], other_pending: 0 }),
-            getAssignmentDecisions: () => of(DECISIONS),
+            getAssignmentDecisions,
           },
         },
         { provide: BoardLiveService, useValue: { connect: () => EMPTY } },
+        authAs(superuser),
       ],
     });
     const fixture = TestBed.createComponent(BoardLiveJobsComponent);
@@ -164,6 +186,18 @@ describe('BoardLiveJobsComponent - decision scores (#419)', () => {
     const text = (fixture.nativeElement as HTMLElement).textContent ?? '';
     expect(text).toContain('passed over');
     expect(text).toContain('-8');
+    expect(rows.every((r) => r.worker === 'Builder One')).toBe(true);
+  });
+
+  it('hides the decision scores from a non-superuser and never asks for them', () => {
+    sessionStorage.setItem('board.live-jobs.filters', JSON.stringify({ scoreScope: 'all' }));
+    const fixture = setupDecisions(false);
+    const text = (fixture.nativeElement as HTMLElement).textContent ?? '';
+
+    expect(text).not.toContain('incl. rejected');
+    expect(text).not.toContain('superuser');
+    expect(text).toContain('No matching assigned jobs.');
+    expect(getAssignmentDecisions).not.toHaveBeenCalled();
   });
 });
 

@@ -24,10 +24,15 @@ const apiUrl = environment.apiUrl;
 const sampleEval: ExpensiveEval = {
   evaluation: 'eval-1',
   project: 'project-1',
+  project_name: 'acme',
+  project_display_name: 'Acme',
+  task_name: 'ci',
+  task_display_name: 'CI',
   name: 'nixpkgs#hello',
   value: 1234,
   unit: 'MB',
   worker: 'worker-1',
+  worker_name: null,
 };
 
 const sampleBuild: ExpensiveBuild = {
@@ -52,6 +57,7 @@ const sampleResource: ExpensiveResource = {
 const sampleTopProject: TopProjectBuildTime = {
   project: 'project-1',
   project_name: 'nixpkgs',
+  project_display_name: 'Nixpkgs',
   total_build_ms: 60000,
   build_count: 3,
 };

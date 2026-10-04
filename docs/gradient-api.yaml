@@ -9174,7 +9174,9 @@ paths:
       description: >-
         Connected workers with capability and live load. `projects` lists the
         served projects visible to the caller; a worker serving none of them has
-        its identity and metrics masked for non-superusers.
+        its identity and metrics masked for non-superusers. Each project is
+        `{ id, name, display_name }`. The worker's `name` is its display name
+        from a registration in a project the caller can see.
       operationId: getBoardWorkers
       responses:
         '200':
@@ -9318,7 +9320,7 @@ paths:
     get:
       tags: [board]
       summary: Network & API statistics
-      description: NAR egress series, per-worker latest upload, download and disk speeds (project-scoped), and per-route HTTP latency/throughput (superuser-only).
+      description: NAR egress series, per-worker latest upload, download and disk speeds with the worker's `worker_name` (project-scoped), and per-route HTTP latency/throughput (superuser-only).
       operationId: getBoardNetwork
       parameters:
         - { name: window_hours, in: query, required: false, schema: { type: integer, default: 24 } }
@@ -9370,6 +9372,7 @@ paths:
                   properties:
                     project: { type: string, format: uuid }
                     project_name: { type: string }
+                    project_display_name: { type: string }
                     total_build_ms: { type: integer, format: int64 }
                     build_count: { type: integer, format: int64 }
         '403':
@@ -13701,7 +13704,7 @@ components:
 
     ExpensiveEval:
       type: object
-      required: [evaluation, project, name, value, unit, worker]
+      required: [evaluation, project, project_name, project_display_name, task_name, task_display_name, name, value, unit, worker]
       properties:
         evaluation:
           type: string
@@ -13709,6 +13712,14 @@ components:
         project:
           type: string
           format: uuid
+        project_name:
+          type: string
+        project_display_name:
+          type: string
+        task_name:
+          type: string
+        task_display_name:
+          type: string
         name:
           type: string
           description: Evaluation wildcard (entry-point attribute pattern)
@@ -13722,6 +13733,10 @@ components:
         worker:
           type: string
           description: Worker that produced the evaluation metric
+        worker_name:
+          type: string
+          nullable: true
+          description: The worker's display name from a registration in a project the caller can see
 
     FlakeGraphNode:
       type: object
@@ -15018,7 +15033,9 @@ components:
         kind: { type: integer }
         project: { type: string, format: uuid }
         project_name: { type: string }
+        project_display_name: { type: string }
         worker_id: { type: string }
+        worker_name: { type: string, nullable: true, description: The worker's display name from a registration in a project the caller can see. }
         score: { type: number }
         queued_at: { type: string, format: date-time }
         dispatched_at: { type: string, format: date-time }
@@ -15175,6 +15192,7 @@ components:
         kind: { type: integer }
         project: { type: string, format: uuid }
         worker_id: { type: string }
+        worker_name: { type: string, nullable: true, description: The worker's display name from a registration in a project the caller can see. }
         score: { type: number }
         dispatched_at: { type: string, format: date-time }
         build_id: { type: string, format: uuid, nullable: true }
@@ -15275,6 +15293,7 @@ components:
       properties:
         at: { type: string, format: date-time }
         worker_id: { type: string }
+        worker_name: { type: string, nullable: true }
         kind: { type: integer }
         winner: { type: string, nullable: true }
         candidates:

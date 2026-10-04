@@ -4,7 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use super::board_subjects::{JobEvaluationView, JobSubjects, job_evaluation};
+use super::board_subjects::{
+    BoardProject, JobEvaluationView, JobSubjects, WorkerNames, board_projects, job_evaluation,
+};
 use crate::authorization::{MaybeApiKey, MaybeUser};
 use crate::endpoints::evals::EvalAccessContext;
 use crate::error::{WebError, WebResult, require_superuser};
@@ -35,6 +37,7 @@ pub struct DispatchedJobSummary {
     pub kind: i16,
     pub project: Uuid,
     pub worker_id: String,
+    pub worker_name: Option<String>,
     pub score: f64,
     pub dispatched_at: String,
     pub build_id: Option<Uuid>,
@@ -142,6 +145,12 @@ pub async fn get_dispatched_jobs(
         .map(|j| j.evaluation_id)
         .collect();
     let subjects = JobSubjects::load(&state.web_db, &shared_builds, &evaluations).await?;
+    let worker_names = WorkerNames::load(
+        &state.web_db,
+        &scope,
+        visible.iter().map(|j| j.worker_id.clone()),
+    )
+    .await?;
 
     let mut jobs = Vec::with_capacity(visible.len());
     for j in visible {
@@ -152,6 +161,7 @@ pub async fn get_dispatched_jobs(
             id: j.id.into(),
             kind: i16::from(j.kind),
             project: j.project.into(),
+            worker_name: worker_names.name(&j.worker_id),
             worker_id: j.worker_id,
             score: j.score,
             dispatched_at: j.dispatched_at.and_utc().to_rfc3339(),
@@ -184,6 +194,7 @@ pub struct DecisionCandidateView {
 pub struct AssignDecisionView {
     pub at: String,
     pub worker_id: String,
+    pub worker_name: Option<String>,
     pub kind: i16,
     pub winner: Option<String>,
     pub candidates: Vec<DecisionCandidateView>,
@@ -207,11 +218,18 @@ pub async fn get_assign_decisions(
         .map(|c| c.evaluation_id)
         .collect();
     let subjects = JobSubjects::load(&state.web_db, &shared_builds, &evaluations).await?;
+    let worker_names = WorkerNames::load(
+        &state.web_db,
+        &MetricsScope::All,
+        decisions.iter().map(|d| d.worker_id.clone()),
+    )
+    .await?;
 
     let views = decisions
         .into_iter()
         .map(|d| AssignDecisionView {
             at: d.at.and_utc().to_rfc3339(),
+            worker_name: worker_names.name(&d.worker_id),
             worker_id: d.worker_id,
             kind: d.kind,
             winner: d.winner,
@@ -382,7 +400,9 @@ pub struct DispatchedJobDetail {
     pub kind: i16,
     pub project: Uuid,
     pub project_name: String,
+    pub project_display_name: String,
     pub worker_id: String,
+    pub worker_name: Option<String>,
     pub score: f64,
     pub queued_at: String,
     pub dispatched_at: String,
@@ -422,11 +442,8 @@ pub async fn get_dispatched_job(
             return Err(WebError::not_found("Job"));
         }
 
-        let project_name = gradient_entity::project::Entity::find_by_id(c.project)
-            .one(&state.web_db)
-            .await?
-            .map(|o| o.name)
-            .unwrap_or_default();
+        let (project, worker_name) =
+            job_names(&state.web_db, &scope, c.project.into(), &c.worker_id).await?;
 
         let derivations = job_derivations(&state.web_db, c.evaluation_id, &c.job_context).await;
         let build_id = match c.derivation_build {
@@ -444,8 +461,10 @@ pub async fn get_dispatched_job(
             id: c.id.into(),
             kind: c.kind,
             project: c.project.into(),
-            project_name,
+            project_name: project.name,
+            project_display_name: project.display_name,
             worker_id: c.worker_id,
+            worker_name,
             score: c.score,
             queued_at: c.queued_at.and_utc().to_rfc3339(),
             dispatched_at: c.scored_at.and_utc().to_rfc3339(),
@@ -479,11 +498,8 @@ pub async fn get_dispatched_job(
         return Err(WebError::not_found("Job"));
     }
 
-    let project_name = gradient_entity::project::Entity::find_by_id(j.project)
-        .one(&state.web_db)
-        .await?
-        .map(|o| o.name)
-        .unwrap_or_default();
+    let (project, worker_name) =
+        job_names(&state.web_db, &scope, j.project.into(), &j.worker_id).await?;
 
     let this_attempt = build_attempt::Entity::find()
         .filter(build_attempt::Column::DispatchedJob.eq(j.id))
@@ -551,8 +567,10 @@ pub async fn get_dispatched_job(
         id: j.id.into(),
         kind: i16::from(j.kind),
         project: j.project.into(),
-        project_name,
+        project_name: project.name,
+        project_display_name: project.display_name,
         worker_id: j.worker_id,
+        worker_name,
         score: j.score,
         queued_at: j.queued_at.and_utc().to_rfc3339(),
         dispatched_at: j.dispatched_at.and_utc().to_rfc3339(),
@@ -581,6 +599,23 @@ pub async fn get_dispatched_job(
     }))
 }
 
+async fn job_names<C: ConnectionTrait>(
+    db: &C,
+    scope: &MetricsScope,
+    project: Uuid,
+    worker: &str,
+) -> Result<(BoardProject, Option<String>), sea_orm::DbErr> {
+    let project = board_projects(db, &[project])
+        .await?
+        .remove(&project)
+        .unwrap_or_default();
+    let worker_name = WorkerNames::load(db, scope, [worker.to_string()])
+        .await?
+        .name(worker);
+
+    Ok((project, worker_name))
+}
+
 async fn eval_job_evaluation<C: ConnectionTrait>(
     db: &C,
     kind: i16,
@@ -596,7 +631,8 @@ async fn eval_job_evaluation<C: ConnectionTrait>(
 #[derive(Serialize)]
 pub struct BoardWorker {
     pub id: Option<String>,
-    pub projects: Vec<Uuid>,
+    pub name: Option<String>,
+    pub projects: Vec<BoardProject>,
     pub draining: bool,
     pub assigned_jobs: i64,
     pub max_concurrent_builds: i64,
@@ -615,17 +651,43 @@ pub async fn get_board_workers(
     Extension(scheduler): Extension<Arc<Scheduler>>,
 ) -> WebResult<Json<BaseResponse<Vec<BoardWorker>>>> {
     let scope = MetricsScope::resolve(&state.web_db, &maybe_user).await?;
-    let out = scheduler
+    let workers: Vec<_> = scheduler
         .board_workers()
         .await
         .into_iter()
-        .map(|w| {
-            let projects = scope.worker_projects(w.authorized_peers.as_ref());
+        .map(|w| (scope.worker_projects(w.authorized_peers.as_ref()), w))
+        .collect();
+
+    let visible_projects: Vec<Uuid> = workers
+        .iter()
+        .flat_map(|(projects, _)| projects.iter().flatten().copied())
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .collect();
+    let projects_by_id = board_projects(&state.web_db, &visible_projects).await?;
+    let worker_names = WorkerNames::load(
+        &state.web_db,
+        &scope,
+        workers
+            .iter()
+            .filter(|(projects, _)| projects.is_some())
+            .map(|(_, w)| w.id.clone()),
+    )
+    .await?;
+
+    let out = workers
+        .into_iter()
+        .map(|(projects, w)| {
             let accessible = projects.is_some();
 
             BoardWorker {
                 id: accessible.then(|| w.id.clone()),
-                projects: projects.unwrap_or_default(),
+                name: accessible.then(|| worker_names.name(&w.id)).flatten(),
+                projects: projects
+                    .unwrap_or_default()
+                    .iter()
+                    .filter_map(|p| projects_by_id.get(p).cloned())
+                    .collect(),
                 draining: w.draining,
                 assigned_jobs: w.assigned_job_count as i64,
                 max_concurrent_builds: w.max_concurrent_builds as i64,
@@ -796,7 +858,7 @@ pub struct ExpensiveBuild {
     pub worker_name: Option<String>,
 }
 
-fn worker_name_sql(worker_col: &str, project_filter: Option<&str>) -> String {
+pub(crate) fn worker_name_sql(worker_col: &str, project_filter: Option<&str>) -> String {
     let scope = project_filter
         .map(|list| format!(" AND wr.peer_id IN ({list})"))
         .unwrap_or_default();
@@ -1111,6 +1173,7 @@ pub async fn get_scoring_summary(
 pub struct TopProjectBuildTime {
     pub project: Uuid,
     pub project_name: String,
+    pub project_display_name: String,
     pub total_build_ms: i64,
     pub build_count: i64,
 }
@@ -1128,12 +1191,12 @@ fn top_projects_by_buildtime_sql(window_days: i64) -> String {
            ) named \
            WHERE {clauses} \
          ) \
-         SELECT a.project, p.name AS project_name, \
+         SELECT a.project, p.name AS project_name, p.display_name AS project_display_name, \
          sum({BUILD_TIME_MS})::bigint AS total, count(*)::bigint AS cnt \
          FROM shared_build a \
          JOIN project p ON p.id = a.project {timing} \
          WHERE {BUILD_IS_TIMED} \
-         GROUP BY a.project, p.name ORDER BY total DESC LIMIT 15",
+         GROUP BY a.project, p.name, p.display_name ORDER BY total DESC LIMIT 15",
         metric = latest_build_metric_cte(window_days),
         clauses = completed_build_clauses(window_days).join(" AND "),
         timing = build_time_joins("a"),
@@ -1166,6 +1229,7 @@ pub async fn get_top_projects_by_buildtime(
         .map(|r| TopProjectBuildTime {
             project: r.try_get("", "project").unwrap_or_default(),
             project_name: r.try_get("", "project_name").unwrap_or_default(),
+            project_display_name: r.try_get("", "project_display_name").unwrap_or_default(),
             total_build_ms: r.try_get("", "total").unwrap_or(0),
             build_count: r.try_get("", "cnt").unwrap_or(0),
         })
@@ -1376,10 +1440,15 @@ pub struct EvalResourceParams {
 pub struct ExpensiveEval {
     pub evaluation: Uuid,
     pub project: Uuid,
+    pub project_name: String,
+    pub project_display_name: String,
+    pub task_name: String,
+    pub task_display_name: String,
     pub name: String,
     pub value: f64,
     pub unit: &'static str,
     pub worker: String,
+    pub worker_name: Option<String>,
 }
 
 fn eval_metric_expr(metric: &str) -> Option<(&'static str, &'static str)> {
@@ -1401,7 +1470,7 @@ fn expensive_evals_by_resource_sql(
 ) -> String {
     let mut clauses = Vec::new();
     if let Some(list) = project_filter {
-        clauses.push(format!("p.project IN ({list})"));
+        clauses.push(format!("t.project IN ({list})"));
     }
 
     clauses.push(format!(
@@ -1409,12 +1478,21 @@ fn expensive_evals_by_resource_sql(
     ));
 
     format!(
-        "SELECT em.evaluation, p.project, ev.wildcard AS name, {value_expr} AS value, em.worker_id \
-         FROM evaluation_metric em \
-         JOIN evaluation ev ON ev.id = em.evaluation \
-         JOIN task p ON p.id = ev.task \
-         WHERE {} ORDER BY value DESC LIMIT 20",
-        clauses.join(" AND ")
+        "WITH ranked AS ( \
+           SELECT em.evaluation, t.project, t.name AS task_name, t.display_name AS task_display_name, \
+           ev.wildcard AS name, {value_expr} AS value, em.worker_id \
+           FROM evaluation_metric em \
+           JOIN evaluation ev ON ev.id = em.evaluation \
+           JOIN task t ON t.id = ev.task \
+           WHERE {clauses} ORDER BY value DESC LIMIT 20 \
+         ) \
+         SELECT r.*, p.name AS project_name, p.display_name AS project_display_name, \
+         wn.display_name AS worker_name \
+         FROM ranked r \
+         JOIN project p ON p.id = r.project {worker_name} \
+         ORDER BY r.value DESC",
+        clauses = clauses.join(" AND "),
+        worker_name = worker_name_sql("r.worker_id", project_filter),
     )
 }
 
@@ -1458,10 +1536,15 @@ pub async fn get_expensive_evals_by_resource(
         .map(|r| ExpensiveEval {
             evaluation: r.try_get("", "evaluation").unwrap_or_default(),
             project: r.try_get("", "project").unwrap_or_default(),
+            project_name: r.try_get("", "project_name").unwrap_or_default(),
+            project_display_name: r.try_get("", "project_display_name").unwrap_or_default(),
+            task_name: r.try_get("", "task_name").unwrap_or_default(),
+            task_display_name: r.try_get("", "task_display_name").unwrap_or_default(),
             name: r.try_get("", "name").unwrap_or_default(),
             value: r.try_get("", "value").unwrap_or(0.0),
             unit,
             worker: r.try_get("", "worker_id").unwrap_or_default(),
+            worker_name: r.try_get("", "worker_name").ok(),
         })
         .collect();
 
@@ -1839,6 +1922,7 @@ mod tests {
         for sql in [
             expensive_jobs_sql(30, Some(SCOPE)),
             expensive_by_resource_sql("dm.cpu_time_ms::double precision", 30, Some(SCOPE)),
+            expensive_evals_by_resource_sql("em.total_eval_ms::double precision", 30, Some(SCOPE)),
         ] {
             assert!(sql.contains("AS worker_name"), "sql = {sql}");
             assert!(

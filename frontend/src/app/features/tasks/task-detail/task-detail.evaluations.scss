@@ -52,7 +52,16 @@ h1 { font-size: $font-size-xxl; margin: 0; }
   font-size: $font-size-xs;
   color: var(--gr-text-secondary);
 
-  a { color: inherit; text-decoration: none; }
+  &--link {
+    text-decoration: none;
+    cursor: pointer;
+
+    &:hover, &:focus-visible {
+      color: var(--gr-text-primary);
+      background: var(--gr-surface-hover);
+      border-color: var(--gr-accent);
+    }
+  }
 
   &.queue {
     color: var(--run);

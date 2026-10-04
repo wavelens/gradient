@@ -11,6 +11,8 @@ import { GridComponent, LegendComponent, RadarComponent, TooltipComponent, Visua
 import { SVGRenderer } from 'echarts/renderers';
 import { ChartTheme, MetricChartConfig, MetricChartType, MetricSeries, buildMetricChartOption } from './metric-chart.options';
 import { ThemeService } from '@core/services/theme.service';
+import { DocLink } from '@core/docs';
+import { LabelHelpComponent } from '../label-help/label-help.component';
 
 /// Charts need concrete colours, so the semantic roles are read once per render.
 export function resolveChartTheme(): ChartTheme {
@@ -51,12 +53,18 @@ echarts.use([
 @Component({
   selector: 'gr-metric-chart',
   standalone: true,
+  imports: [LabelHelpComponent],
   template: `
     <div class="metric-chart" [class.metric-chart--bare]="bare()">
       @if (title() && !bare()) {
         <header class="metric-chart__header">
           <div>
-            <h3>{{ title() }}</h3>
+            <h3>
+              {{ title() }}
+              @if (doc(); as link) {
+                <gr-label-help [doc]="link" [title]="'About ' + title()" />
+              }
+            </h3>
             @if (subtitle()) {
               <p class="metric-chart__subtitle">{{ subtitle() }}</p>
             }
@@ -75,6 +83,7 @@ echarts.use([
 export class MetricChartComponent implements OnDestroy {
   title = input('');
   subtitle = input('');
+  doc = input<DocLink | undefined>(undefined);
   type = input<MetricChartType>('area');
   height = input(260, { transform: numberAttribute });
   horizontal = input(false, { transform: booleanAttribute });

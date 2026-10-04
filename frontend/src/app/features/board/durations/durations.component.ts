@@ -22,6 +22,7 @@ import { formatDuration } from '@shared/text';
     } @else {
       <gr-metric-chart
         title="Build duration distribution (count by band × hour)"
+        doc="ui/job-board/"
         type="heatmap"
         [height]="300"
         [series]="heatmapSeries()"
@@ -30,6 +31,7 @@ import { formatDuration } from '@shared/text';
 
       <gr-metric-chart
         title="Build duration (hourly avg vs max)"
+        doc="ui/job-board/"
         type="area"
         [series]="buildSeries()"
         [categories]="buildCategories()"
@@ -39,6 +41,7 @@ import { formatDuration } from '@shared/text';
 
       <gr-metric-chart
         title="Wait (hourly avg): queue (excl. deps) vs dependency"
+        doc="ui/job-board/"
         type="area"
         [series]="waitSeries()"
         [categories]="waitCategories()"

@@ -75,6 +75,15 @@ impl MetricsScope {
         (self.is_all() || !visible.is_empty()).then_some(visible)
     }
 
+    pub fn project_ids(&self) -> Option<Vec<Uuid>> {
+        match self {
+            MetricsScope::All => None,
+            MetricsScope::Projects(projects) => {
+                Some(projects.iter().filter_map(|p| p.parse().ok()).collect())
+            }
+        }
+    }
+
     pub fn project_in_list(&self) -> Option<String> {
         match self {
             MetricsScope::All => None,

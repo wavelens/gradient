@@ -8,14 +8,14 @@ import { Component, OnInit, inject, signal, computed, ChangeDetectionStrategy } 
 import { CommonModule } from '@angular/common';
 import { BoardService, MetricPoint, RuleDescription, ScoringSummary } from '@core/services/board.service';
 import { LoadingSpinnerComponent, PopoverComponent, TableComponent } from '@gradient/ui/ui';
-import { MetricChartComponent } from '@shared/ui';
+import { LabelHelpComponent, MetricChartComponent } from '@shared/ui';
 import { firstLoad } from '../first-load';
 import { formatDuration } from '@shared/text';
 
 @Component({
   selector: 'app-board-scheduler',
   standalone: true,
-  imports: [CommonModule, PopoverComponent, MetricChartComponent, TableComponent, LoadingSpinnerComponent],
+  imports: [CommonModule, PopoverComponent, MetricChartComponent, LabelHelpComponent, TableComponent, LoadingSpinnerComponent],
   template: `
     @if (first.loading()) {
       <gr-loading-spinner message="Loading scheduler stats..." />
@@ -28,6 +28,7 @@ import { formatDuration } from '@shared/text';
 
       <gr-metric-chart
         title="Wait breakdown (hourly avg): queue (excl. deps) vs dependency"
+        doc="ui/job-board/"
         type="line"
         [series]="waitSeries()"
         [categories]="waitCategories()"
@@ -37,13 +38,14 @@ import { formatDuration } from '@shared/text';
 
       <gr-metric-chart
         title="Score distribution (24h)"
+        doc="reference/scheduler-policies/"
         type="bar"
         [series]="histogramSeries()"
         [categories]="histogramCategories()"
         [colors]="['#6f42c1']"
       ></gr-metric-chart>
 
-      <h2>Per-rule mean contribution</h2>
+      <h2>Per-rule mean contribution <gr-label-help doc="reference/scheduler-policies/" title="About the scoring rules" /></h2>
       <gr-table class="rules">
         <thead><tr><th>Rule</th><th class="num">Avg</th><th class="num">Min</th><th class="num">Max</th><th>Weight</th></tr></thead>
         <tbody>

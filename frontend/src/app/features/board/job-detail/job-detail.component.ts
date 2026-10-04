@@ -26,6 +26,7 @@ import {
   TableComponent,
 } from '@gradient/ui/ui';
 import { formatBytes, formatDuration, formatMegabytes } from '@shared/text';
+import { LabelHelpComponent } from '@shared/ui';
 import { JobTimelineComponent } from './job-timeline.component';
 
 interface RuleRow {
@@ -39,7 +40,7 @@ interface RuleRow {
 @Component({
   selector: 'app-board-job-detail',
   standalone: true,
-  imports: [CommonModule, RouterModule, DialogComponent, ButtonComponent, PopoverComponent, JobTimelineComponent, TableComponent, LoadingSpinnerComponent],
+  imports: [CommonModule, RouterModule, DialogComponent, ButtonComponent, PopoverComponent, JobTimelineComponent, TableComponent, LoadingSpinnerComponent, LabelHelpComponent],
   template: `
     <a routerLink="/board/live" class="back">← Live Jobs</a>
 
@@ -57,8 +58,12 @@ interface RuleRow {
 
       <section class="ids">
         <div>
+          <span class="label">Project</span>
+          <a class="project-link" [routerLink]="['/project', j.project_name]">{{ j.project_display_name || j.project_name }}</a>
+        </div>
+        <div>
           <span class="label">Worker</span>
-          <a class="mono worker-link" [routerLink]="['/project', j.project_name, 'workers', j.worker_id, 'metrics']">{{ j.worker_id }}</a>
+          <a class="mono worker-link" [routerLink]="['/project', j.project_name, 'workers', j.worker_id, 'metrics']">{{ j.worker_name ?? j.worker_id }}</a>
         </div>
         <div>
           <span class="label">Evaluation</span>
@@ -101,11 +106,11 @@ interface RuleRow {
       </section>
 
       @if (!j.passed_over) {
-        <h2>Worker timeline</h2>
+        <h2>Worker timeline <gr-label-help doc="ui/job-board/#job-inspection" title="About the worker timeline" /></h2>
         <gr-job-timeline [phases]="j.phases" />
       }
 
-      <h2>Score breakdown</h2>
+      <h2>Score breakdown <gr-label-help doc="reference/scheduler-policies/" title="About the scoring rules" /></h2>
       <gr-table class="rules">
         <thead><tr><th>Rule</th><th class="num">Contribution</th><th>Share</th></tr></thead>
         <tbody>
@@ -305,7 +310,7 @@ interface RuleRow {
           <div><span class="label">Build ID</span><span class="mono">{{ b.id }}</span></div>
           <div><span class="label">Status</span><span class="mono">{{ b.status }}</span></div>
           <div><span class="label">Architecture</span><span class="mono">{{ b.architecture }}</span></div>
-          <div><span class="label">Worker</span><span class="mono">{{ b.worker ?? '-' }}</span></div>
+          <div><span class="label">Worker</span><span class="mono">{{ buildWorker() }}</span></div>
           <div class="span2"><span class="label">Derivation</span><span class="mono">{{ b.derivation_path }}</span></div>
           <div><span class="label">Created</span><span>{{ b.created_at | date: 'medium' }}</span></div>
           <div><span class="label">Updated</span><span>{{ b.updated_at | date: 'medium' }}</span></div>
@@ -378,6 +383,12 @@ export class BoardJobDetailComponent implements OnInit {
     this.activeRule.set({ rule: row.name, description: row.description });
     popover.toggle(event);
   }
+
+  buildWorker = computed(() => {
+    const worker = this.build()?.worker ?? null;
+    const job = this.job();
+    return (worker === job?.worker_id ? job.worker_name : null) ?? worker ?? '-';
+  });
 
   waitLabel = computed(() => {
     const j = this.job();

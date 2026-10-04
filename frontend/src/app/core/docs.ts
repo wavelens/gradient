@@ -27,7 +27,12 @@ export type DocLink =
   | 'guides/share-a-cache/#2-share-with-another-project'
   | 'reference/events/#event-families'
   | 'reference/events/#webhooks'
+  | 'reference/scheduler-policies/'
   | 'reference/wildcards/'
+  | 'ui/job-board/'
+  | 'ui/job-board/#job-inspection'
+  | 'ui/job-board/#storage-metrics'
+  | 'ui/job-board/#workers'
   | 'ui/members-and-roles/#project-roles'
   | 'ui/members-and-roles/#cache-roles';
 

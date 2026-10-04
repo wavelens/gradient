@@ -11,6 +11,7 @@ import { Router, RouterModule } from '@angular/router';
 import { Subscription } from 'rxjs';
 import { BoardService, AssignedJobSummary, AssignmentDecisionView, PendingJobSummary } from '@core/services/board.service';
 import { BoardLiveService } from '@core/services/board-live.service';
+import { AuthService } from '@core/services/auth.service';
 import { LoadingSpinnerComponent, TableComponent } from '@gradient/ui/ui';
 import { firstLoad } from '../first-load';
 
@@ -21,7 +22,7 @@ type ScoreScope = 'current' | 'all';
 interface DecisionRow {
   id: string;
   at: string;
-  worker_id: string;
+  worker: string;
   kind: number;
   subject: string | null;
   score: number;
@@ -50,12 +51,14 @@ interface DecisionRow {
         </div>
 
         <div class="filters">
-          <label>Scores
-            <select [ngModel]="scoreScope()" (ngModelChange)="setScoreScope($event)">
-              <option value="current">assigned</option>
-              <option value="all">incl. rejected</option>
-            </select>
-          </label>
+          @if (superuser()) {
+            <label>Scores
+              <select [ngModel]="scoreScope()" (ngModelChange)="setScoreScope($event)">
+                <option value="current">assigned</option>
+                <option value="all">incl. rejected</option>
+              </select>
+            </label>
+          }
           <label>Type
             <select [ngModel]="kindFilter()" (ngModelChange)="kindFilter.set($event)">
               <option value="all">all</option>
@@ -78,7 +81,7 @@ interface DecisionRow {
           </label>
         </div>
 
-        @if (scoreScope() === 'current') {
+        @if (!showDecisions()) {
           <gr-table class="jobs">
             <thead>
               <tr><th>Kind</th><th>Worker</th><th>Derivation / Evaluation</th><th>Score</th><th>Assigned</th><th></th></tr>
@@ -87,7 +90,7 @@ interface DecisionRow {
               @for (j of filteredJobs(); track j.id) {
                 <tr [class.live]="isLive(j)" [class.clickable]="canInspect(j)" (click)="inspect(j)">
                   <td>{{ j.kind === 1 ? 'build' : 'eval' }}</td>
-                  <td class="mono">{{ j.worker_id }}</td>
+                  <td class="mono">{{ j.worker_name ?? j.worker_id }}</td>
                   <td class="mono subject" [title]="j.subject ?? ''">{{ j.subject ?? '-' }}</td>
                   <td>{{ j.score | number: '1.1-1' }}</td>
                   <td>{{ j.dispatched_at | date: 'HH:mm:ss' }}</td>
@@ -108,14 +111,14 @@ interface DecisionRow {
                 <tr [class.negative]="r.score < 0" class="clickable" (click)="inspectDecision(r)">
                   <td>{{ r.won ? 'assigned' : 'passed over' }}</td>
                   <td>{{ r.kind === 1 ? 'build' : 'eval' }}</td>
-                  <td class="mono">{{ r.worker_id }}</td>
+                  <td class="mono">{{ r.worker }}</td>
                   <td class="mono subject" [title]="r.subject ?? ''">{{ r.subject ?? '-' }}</td>
                   <td>{{ r.score | number: '1.1-1' }}</td>
                   <td>{{ r.at | date: 'HH:mm:ss' }}</td>
                   <td>›</td>
                 </tr>
               } @empty {
-                <tr><td colspan="7" class="muted">No recent decisions (superuser-only).</td></tr>
+                <tr><td colspan="7" class="muted">No recent decisions.</td></tr>
               }
             </tbody>
           </gr-table>
@@ -157,6 +160,7 @@ export class BoardLiveJobsComponent implements OnInit, OnDestroy {
   private board = inject(BoardService);
   private live = inject(BoardLiveService);
   private router = inject(Router);
+  private auth = inject(AuthService);
   private sub?: Subscription;
   private refreshTimer?: ReturnType<typeof setTimeout>;
   protected first = firstLoad();
@@ -175,6 +179,8 @@ export class BoardLiveJobsComponent implements OnInit, OnDestroy {
 
   scoreScope = signal<ScoreScope>('current');
   decisions = signal<AssignmentDecisionView[]>([]);
+  protected superuser = computed(() => this.auth.user()?.superuser === true);
+  showDecisions = computed(() => this.superuser() && this.scoreScope() === 'all');
 
   constructor() {
     this.restoreState();
@@ -228,7 +234,7 @@ export class BoardLiveJobsComponent implements OnInit, OnDestroy {
         rows.push({
           id: c.id,
           at: d.at,
-          worker_id: d.worker_id,
+          worker: d.worker_name ?? d.worker_id,
           kind: c.kind,
           subject: c.subject,
           score: c.score,
@@ -243,7 +249,7 @@ export class BoardLiveJobsComponent implements OnInit, OnDestroy {
   ngOnInit(): void {
     this.loadAssigned();
     if (this.view() === 'pending') this.loadPending();
-    if (this.scoreScope() === 'all') this.loadDecisions();
+    if (this.showDecisions()) this.loadDecisions();
     this.sub = this.live.connect().subscribe({
       next: ({ event, content: ev }) => {
         if (event === 'worker.job_dispatched' && ev.project) {
@@ -254,6 +260,7 @@ export class BoardLiveJobsComponent implements OnInit, OnDestroy {
                 kind: ev.kind ?? 0,
                 project: ev.project!,
                 worker_id: ev.worker_id ?? '',
+                worker_name: null,
                 score: ev.score ?? 0,
                 dispatched_at: new Date().toISOString(),
                 build_id: ev.build_id ?? null,
@@ -282,7 +289,7 @@ export class BoardLiveJobsComponent implements OnInit, OnDestroy {
 
   setScoreScope(scope: ScoreScope): void {
     this.scoreScope.set(scope);
-    if (scope === 'all') this.loadDecisions();
+    if (this.showDecisions()) this.loadDecisions();
   }
 
   private loadDecisions(): void {

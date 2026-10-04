@@ -6,6 +6,7 @@
 
 import { Component, OnInit, inject, signal, computed, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { RouterModule } from '@angular/router';
 import {
   BoardService,
   BoardWorker,
@@ -17,17 +18,19 @@ import { firstLoad } from '../first-load';
 import { formatMegabytes, formatPercent } from '@shared/text';
 import { LoadingSpinnerComponent, TableComponent } from '@gradient/ui/ui';
 import { MetricChartComponent } from '@shared/ui';
+import { workerAxisLabel } from '../worker-label';
 
 @Component({
   selector: 'app-board-workers',
   standalone: true,
-  imports: [CommonModule, MetricChartComponent, TableComponent, LoadingSpinnerComponent],
+  imports: [CommonModule, RouterModule, MetricChartComponent, TableComponent, LoadingSpinnerComponent],
   template: `
     @if (first.loading()) {
       <gr-loading-spinner message="Loading workers..." />
     } @else {
       <gr-metric-chart
         title="Fleet over time (connected vs draining)"
+        doc="ui/job-board/#workers"
         type="area"
         [series]="fleetSeries()"
         [categories]="fleetCats()"
@@ -36,6 +39,7 @@ import { MetricChartComponent } from '@shared/ui';
 
       <gr-metric-chart
         title="Capability over time"
+        doc="ui/job-board/#workers"
         type="line"
         [series]="capOverTime()"
         [categories]="fleetCats()"
@@ -45,6 +49,7 @@ import { MetricChartComponent } from '@shared/ui';
       <div class="row">
         <gr-metric-chart
           title="Load by capability (busy %)"
+          doc="ui/job-board/#workers"
           type="radar"
           [height]="300"
           [series]="capLoad().series"
@@ -54,6 +59,7 @@ import { MetricChartComponent } from '@shared/ui';
         ></gr-metric-chart>
         <gr-metric-chart
           title="Load by architecture (busy %)"
+          doc="ui/job-board/#workers"
           type="radar"
           [height]="300"
           [series]="archLoad().series"
@@ -65,6 +71,7 @@ import { MetricChartComponent } from '@shared/ui';
 
       <gr-metric-chart
         title="Load by feature (busy %)"
+        doc="ui/job-board/#workers"
         type="bar"
         [height]="300"
         [series]="featLoad().series"
@@ -75,6 +82,7 @@ import { MetricChartComponent } from '@shared/ui';
 
       <gr-metric-chart
         title="Slot utilisation per worker (%)"
+        doc="ui/job-board/#workers"
         type="bar"
         [height]="300"
         [series]="utilSeries()"
@@ -90,8 +98,12 @@ import { MetricChartComponent } from '@shared/ui';
         <tbody>
           @for (w of workers(); track $index) {
             <tr>
-              <td class="mono">{{ w.id ?? '-' }}</td>
-              <td class="mono">{{ w.projects.join(', ') || '-' }}</td>
+              <td class="mono">{{ w.name ?? w.id ?? '-' }}</td>
+              <td class="projects">
+                @for (p of w.projects; track p.id; let last = $last) {
+                  <a [routerLink]="['/project', p.name]">{{ p.display_name || p.name }}</a>@if (!last) {, }
+                } @empty { - }
+              </td>
               <td>{{ w.draining ? 'draining' : 'active' }}</td>
               <td>{{ w.assigned_jobs }}/{{ w.max_concurrent_builds }}</td>
               <td>{{ w.cpu_usage_pct !== null ? percent(w.cpu_usage_pct) : '-' }}</td>
@@ -148,7 +160,7 @@ export class BoardWorkersComponent implements OnInit {
   featLoad = computed(() => this.radar(this.load()?.by_feature ?? []));
 
   workerCats = computed(() =>
-    this.workers().filter((w) => w.id !== null).map((w) => (w.id ?? '').slice(0, 12))
+    this.workers().filter((w) => w.id !== null).map((w) => workerAxisLabel(w.name, w.id))
   );
   utilSeries = computed(() => [
     {
