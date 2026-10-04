@@ -12,7 +12,7 @@ use rusqlite::Connection;
 /// Bump this whenever an exported table's shape or scope changes. `report-inspector` is pinning the
 /// one version it reads and refusing other files. Its derivation is reading both constants and
 /// failing evaluation when they disagree.
-pub const SCHEMA_VERSION: i64 = 18;
+pub const SCHEMA_VERSION: i64 = 19;
 
 #[derive(Clone, Copy, Debug)]
 pub struct ReportOptions {
