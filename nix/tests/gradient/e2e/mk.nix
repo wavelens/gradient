@@ -464,7 +464,7 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
       echo "LOCKRACE TIMEOUT: $2"
       echo "--- retire session ---"
       cat $D/a.out || true
-      echo "--- recount session ---"
+      echo "--- mark session ---"
       cat $D/b.out || true
       q "SELECT pid, application_name, state, wait_event_type, wait_event, left(query, 90) FROM pg_stat_activity WHERE datname = 'gradient' ORDER BY pid"
       exit 1
@@ -473,12 +473,37 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
     send_a() { printf '%s\\n' "$1" >&3; }
     send_b() { printf '%s\\n' "$1" >&4; }
 
-    retired() {
-      if [ "$(grep -c '^DELETE 1$' $D/a.out)" != "$1" ]; then
-        echo "LOCKRACE: the retire deleted no row, its fixture was gone before the arm ran"
-        cat $D/a.out
-        exit 1
+    fail() {
+      echo "LOCKRACE: $1"
+      echo "--- retire session ---"
+      cat $D/a.out
+      echo "--- mark session ---"
+      cat $D/b.out
+      exit 1
+    }
+
+    expect() {
+      if [ "$(grep -cx "$2" $D/$1.out)" != "$3" ]; then
+        fail "$4"
       fi
+    }
+
+    fixture() {
+      q "INSERT INTO derivation (id, created_at, architecture, hash, name, prefer_local_build, allow_substitutes, is_fixed_output, walked) VALUES ('$1', now() AT TIME ZONE 'UTC', 'x86_64-linux', '$2', '$4', false, true, false, false); INSERT INTO derivation_build (id, derivation, status, cache_available, substituted, fetchable, blocking_deps, attempt, created_at, updated_at) VALUES (uuidv7(), '$1', 3, false, false, false, 0, 0, now() AT TIME ZONE 'UTC', now() AT TIME ZONE 'UTC'); INSERT INTO derivation_output (id, derivation, name, hash, package, is_cached, created_at) VALUES (uuidv7(), '$1', 'out', '$3', '$4-out', true, now() AT TIME ZONE 'UTC'); INSERT INTO cached_path (id, hash, package, file_hash, file_size, nar_size, nar_hash, confirmed, created_at) VALUES (uuidv7(), '$3', '$4-out', 'sha256:lockrace', 1, 1, 'sha256:lockrace', false, now() AT TIME ZONE 'UTC');"
+    }
+
+    retire() {
+      send_a "BEGIN;"
+      send_a "SELECT 1 FROM cached_path WHERE hash = ANY(ARRAY['$2']) ORDER BY hash FOR NO KEY UPDATE;"
+      send_a "DELETE FROM cached_path WHERE hash = ANY(ARRAY['$2']);"
+      send_a "SELECT 'held ' || fetchable::int FROM derivation_build WHERE derivation = ANY(ARRAY['$1']::uuid[]) ORDER BY derivation FOR NO KEY UPDATE;"
+      wait_state "application_name = 'lockrace_a' AND state = 'idle in transaction' AND query LIKE '%fetchable::int%'" "the retire session never reached its held state"
+      expect a "DELETE 1" "$3" "the retire deleted no row, its fixture was gone before the arm ran"
+      expect a "held 0" "$3" "the retire held a fixture that was already fetchable: a consistency pass marked it between its insert and the retire"
+    }
+
+    mark() {
+      printf '%s\\n' "UPDATE derivation_build db SET fetchable = true WHERE db.derivation = ANY(ARRAY['$1']::uuid[]) AND NOT db.fetchable AND (db.status IN (3, 7) AND (db.missing_runtime_deps = 0 AND (EXISTS (SELECT 1 FROM derivation_output o2 WHERE o2.derivation = db.derivation) AND NOT EXISTS (SELECT 1 FROM derivation_output o LEFT JOIN cached_path cp ON cp.hash = o.hash WHERE o.derivation = db.derivation AND cp.file_hash IS NULL)))) RETURNING 'marked ' || db.derivation;"
     }
 
     rm -rf $D
@@ -491,68 +516,46 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
     BPID=$!
     exec 3> $D/a.in
     exec 4> $D/b.in
-
-    recount() {
-      printf '%s\\n' "UPDATE derivation_build db SET fetchable = x.f FROM (SELECT p.derivation, p.fetchable AS old, (p.cache_available OR (p.status IN (3, 7) AND p.missing_runtime_deps = 0 AND EXISTS (SELECT 1 FROM derivation_output o2 WHERE o2.derivation = p.derivation) AND NOT EXISTS (SELECT 1 FROM derivation_output o LEFT JOIN cached_path cp ON cp.hash = o.hash WHERE o.derivation = p.derivation AND cp.file_hash IS NULL))) AS f FROM derivation_build p WHERE p.derivation = ANY(ARRAY['$1']::uuid[])) x WHERE db.derivation = x.derivation AND db.fetchable = x.old AND x.old <> x.f;"
-    }
-
     send_a "SET application_name = 'lockrace_a';"
-    send_a "BEGIN;"
-    send_a "SELECT 1 FROM cached_path WHERE hash = ANY(ARRAY['$LR_OUT']) ORDER BY hash FOR UPDATE;"
-    send_a "DELETE FROM cached_path WHERE hash = ANY(ARRAY['$LR_OUT']);"
-    send_a "SELECT 1 FROM derivation_build WHERE derivation = ANY(ARRAY['$LR_DRV']::uuid[]) ORDER BY derivation FOR UPDATE;"
-    wait_state "application_name = 'lockrace_a' AND state = 'idle in transaction'" "the retire session never reached its held state"
-    retired 1
-
     send_b "SET application_name = 'lockrace_b';"
+
+    fixture "$LR_DRV" "$LR_DRV_HASH" "$LR_OUT" lockrace-probe
+    retire "$LR_DRV" "$LR_OUT" 1
+
     send_b "BEGIN;"
-    send_b "SELECT 1 FROM derivation_build WHERE derivation = ANY(ARRAY['$LR_DRV']::uuid[]) ORDER BY derivation FOR UPDATE;"
-    wait_state "application_name = 'lockrace_b' AND wait_event_type = 'Lock'" "the recount session never blocked on the shared build lock"
-    echo "lockrace: the recount is blocked on the retire"
+    send_b "SELECT 1 FROM derivation_build WHERE derivation = ANY(ARRAY['$LR_DRV']::uuid[]) ORDER BY derivation FOR NO KEY UPDATE;"
+    wait_state "application_name = 'lockrace_b' AND wait_event_type = 'Lock'" "the mark session never blocked on the shared build lock"
+    echo "lockrace: the locked mark is blocked on the retire"
 
     send_a "COMMIT;"
     wait_state "application_name = 'lockrace_a' AND state = 'idle'" "the retire session never committed"
 
-    send_b "$(recount "$LR_DRV")"
+    send_b "$(mark "$LR_DRV")"
     send_b "COMMIT;"
-    wait_state "application_name = 'lockrace_b' AND state = 'idle'" "the recount session never committed"
+    wait_state "application_name = 'lockrace_b' AND state = 'idle'" "the locked mark session never committed"
 
     if grep -q ERROR $D/a.out $D/b.out; then
-      echo "LOCKRACE: a session reported an error"
-      cat $D/a.out
-      cat $D/b.out
-      exit 1
+      fail "a session reported an error in the locked arm"
     fi
+    expect b "UPDATE 0" 1 "the locked mark wrote fetchable = true for a shared build whose only output the retire deleted: its snapshot was not ordered after that commit"
+    echo "lockrace: the locked mark read the committed retire and wrote nothing"
 
-    if ! grep -q "UPDATE 0" $D/b.out; then
-      echo "LOCKRACE: the recount did not run, or wrote a value the retire made stale"
-      cat $D/b.out
-      exit 1
-    fi
-    echo "lockrace: both sessions committed and the recount was a no-op"
-
-    send_a "BEGIN;"
-    send_a "SELECT 1 FROM cached_path WHERE hash = ANY(ARRAY['$LR_OUT2']) ORDER BY hash FOR UPDATE;"
-    send_a "DELETE FROM cached_path WHERE hash = ANY(ARRAY['$LR_OUT2']);"
-    send_a "SELECT 1 FROM derivation_build WHERE derivation = ANY(ARRAY['$LR_DRV2']::uuid[]) ORDER BY derivation FOR UPDATE;"
-    wait_state "application_name = 'lockrace_a' AND state = 'idle in transaction'" "the retire session never held its second row"
-    retired 2
+    fixture "$LR_DRV2" "$LR_DRV2_HASH" "$LR_OUT2" lockrace-unlocked
+    retire "$LR_DRV2" "$LR_OUT2" 2
 
     send_b "BEGIN;"
-    send_b "$(recount "$LR_DRV2")"
-    wait_state "application_name = 'lockrace_b' AND wait_event_type = 'Lock'" "the unlocked recount never blocked on the retire"
+    send_b "$(mark "$LR_DRV2")"
+    wait_state "application_name = 'lockrace_b' AND wait_event_type = 'Lock'" "the unlocked mark never blocked on the retire"
     send_a "COMMIT;"
-    wait_state "application_name = 'lockrace_b' AND state = 'idle in transaction'" "the unlocked recount never resumed after the retire committed"
+    wait_state "application_name = 'lockrace_b' AND state = 'idle in transaction'" "the unlocked mark never resumed after the retire committed"
     send_b "COMMIT;"
-    wait_state "application_name = 'lockrace_b' AND state = 'idle'" "the unlocked recount session never committed"
+    wait_state "application_name = 'lockrace_b' AND state = 'idle'" "the unlocked mark session never committed"
 
     if grep -q ERROR $D/a.out $D/b.out; then
-      echo "LOCKRACE: a session reported an error in the unlocked arm"
-      cat $D/a.out
-      cat $D/b.out
-      exit 1
+      fail "a session reported an error in the unlocked arm"
     fi
-    echo "lockrace: the unlocked arm committed; the driver checks what it wrote"
+    expect b "marked $LR_DRV2" 1 "the UNLOCKED mark did not write the stale fetchable = true this lock exists to prevent. The two arms now agree, which means taking the shared build lock in its own statement is no longer what makes the mark correct: re-derive the discipline in gradient_db::graph::can_start before trusting it"
+    echo "lockrace: the unlocked mark wrote the stale fetchable = true from its pre-commit snapshot"
     """
 
     COUNTER_RACE_SH = """
@@ -1825,36 +1828,13 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
     )
     assert churn == "", f"a build-once shared build was rebuilt past the one granted retry: {churn}"
 
-    banner("Phase 10f: a retire holds its locks while a can-start recount waits")
+    banner("Phase 10f: a retire holds its locks while a can-start mark waits")
     LR_DRV = "aaaaaaaa-0000-4000-8000-00000000fe01"
     LR_DRV2 = "aaaaaaaa-0000-4000-8000-00000000fe02"
     lr_drv_hash = "lockraced".ljust(32, "0")
     lr_out_hash = "lockraceo".ljust(32, "0")
     lr_drv2_hash = "lockracee".ljust(32, "0")
     lr_out2_hash = "lockracep".ljust(32, "0")
-
-    def lockrace_fixture(drv, drv_hash, out_hash, name):
-        sql(
-            f"INSERT INTO derivation (id, created_at, architecture, hash, name, "
-            f"prefer_local_build, allow_substitutes, is_fixed_output, walked) VALUES "
-            f"('{drv}', now() AT TIME ZONE 'UTC', 'x86_64-linux', '{drv_hash}', "
-            f"'{name}', false, true, false, false);\n"
-            f"INSERT INTO derivation_build (id, derivation, status, cache_available, substituted, "
-            f"fetchable, blocking_deps, attempt, created_at, updated_at) VALUES "
-            f"(uuidv7(), '{drv}', 3, false, false, false, 0, 0, "
-            f"now() AT TIME ZONE 'UTC', now() AT TIME ZONE 'UTC');\n"
-            f"INSERT INTO derivation_output (id, derivation, name, hash, package, is_cached, "
-            f"created_at) VALUES (uuidv7(), '{drv}', 'out', '{out_hash}', '{name}-out', "
-            f"true, now() AT TIME ZONE 'UTC');\n"
-            f"INSERT INTO cached_path (id, hash, package, file_hash, file_size, nar_size, nar_hash, "
-            f"confirmed, created_at) VALUES (uuidv7(), '{out_hash}', '{name}-out', "
-            f"'sha256:lockrace', 1, 1, 'sha256:lockrace', false, now() AT TIME ZONE 'UTC');"
-        )
-        assert sql(
-            f"SELECT db.fetchable::int::text || ' ' || (SELECT count(*)::text FROM cached_path "
-            f"WHERE hash = '{out_hash}' AND file_hash IS NOT NULL) "
-            f"FROM derivation_build db WHERE db.derivation = '{drv}';"
-        ) == "0 1", f"the {name} fixture did not land as a drifted shared build over a complete output"
 
     def lockrace_cleanup(drv, out_hash):
         sql(
@@ -1864,36 +1844,17 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
             f"DELETE FROM derivation WHERE id = '{drv}';"
         )
 
-    lockrace_fixture(LR_DRV, lr_drv_hash, lr_out_hash, "lockrace-probe")
-    lockrace_fixture(LR_DRV2, lr_drv2_hash, lr_out2_hash, "lockrace-unlocked")
-
     server.succeed(f"cat > /tmp/lockrace.sh <<'LOCKRACE'\n{LOCK_RACE_SH}\nLOCKRACE")
     print(server.succeed(
-        f"LR_DRV={LR_DRV} LR_OUT={lr_out_hash} "
-        f"LR_DRV2={LR_DRV2} LR_OUT2={lr_out2_hash} sh /tmp/lockrace.sh"
+        f"LR_DRV={LR_DRV} LR_DRV_HASH={lr_drv_hash} LR_OUT={lr_out_hash} "
+        f"LR_DRV2={LR_DRV2} LR_DRV2_HASH={lr_drv2_hash} LR_OUT2={lr_out2_hash} "
+        f"sh /tmp/lockrace.sh"
     ))
 
-    locked = sql(f"SELECT db.fetchable::int FROM derivation_build db WHERE db.derivation = '{LR_DRV}';")
-    unlocked = sql(f"SELECT db.fetchable::int FROM derivation_build db WHERE db.derivation = '{LR_DRV2}';")
-    rows_left = int(sql(
-        f"SELECT count(*) FROM cached_path WHERE hash IN ('{lr_out_hash}', '{lr_out2_hash}');"
-    ))
     lockrace_cleanup(LR_DRV, lr_out_hash)
     lockrace_cleanup(LR_DRV2, lr_out2_hash)
     race_drift = runtime_drift()
     race_shared_build_drift = shared_build_drift()
-
-    assert rows_left == 0, "a retire session did not commit its delete"
-    assert locked == "0", (
-        f"the locked recount stored fetchable = {locked!r} for a shared build whose only output "
-        f"the retire deleted: its snapshot was not ordered after that commit"
-    )
-    assert unlocked == "1", (
-        f"the UNLOCKED recount stored fetchable = {unlocked!r}, so it did not write the stale "
-        f"true this lock exists to prevent. The two arms now agree, which means taking the "
-        f"shared build lock in its own statement is no longer what makes the recount correct: "
-        f"re-derive the discipline in gradient_db::graph::can_start before trusting it"
-    )
     assert race_drift == 0 and race_shared_build_drift == 0, (
         f"counters disagree with their recount after the lock race "
         f"(complete closure {race_drift}, can-start {race_shared_build_drift})"
