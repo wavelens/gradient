@@ -60,7 +60,7 @@ in {
 
     speedFactor = lib.mkOption {
       type = lib.types.ints.positive;
-      default = 4;
+      default = 128;
       description = "Preference of Gradient over other build machines. A higher value is preferring Gradient.";
     };
   };
