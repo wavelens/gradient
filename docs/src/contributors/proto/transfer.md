@@ -25,7 +25,7 @@ sequenceDiagram
 | `Multipart` | S3, NAR over 1 GiB | Presigned parts of at least 64 MiB |
 
 - **Admission** is server-wide and fair across sessions.
-    - The limits are `upload.concurrency` (16) large uploads and `upload.bytesBudget` (8 GiB) at once.
+    - The limits are `upload.concurrency` (8) large uploads and `upload.bytesBudget` (8 GiB) at once.
     - Small uploads (at most 1 MiB of NAR, `SMALL_UPLOAD_BYTES`) get a window of their own, `SMALL_UPLOADS_IN_FLIGHT` (128).
     - The cost of a small upload is its two round trips. Each `EvalResult` batch of an evaluation will wait on the push of its own `.drv` files.
     - Small uploads go ahead of larger ones in their session. The server will turn first to sessions with a waiting small upload.
@@ -57,7 +57,7 @@ Workers prefetch every input missing from the local store ahead of the build.
 | Condition | Delivered As |
 |---|---|
 | S3 store, confirmed NAR above `nar.smallBytes` (1 MiB) | Presigned GET URL |
-| Anything else | Stream over `/proto`, at most `nar.maxConcurrentServes` (8) paths per connection |
+| Anything else | Stream over `/proto`, at most `nar.maxConcurrentServes` (8) paths per connection and `nar.maxConcurrentDownloads` (16) across all connections |
 
 - Small NARs come from an in-memory hot cache, `nar.hotCacheBytes` (512 MiB).
 - A `NarUnavailable` answer will also remove the stale cache row on the server.

@@ -24,7 +24,7 @@ The worker will get its highest-scoring job with a total of at least 0 and no ve
 | Rule | Kind | Effect |
 |---|---|---|
 | `MissingPathsRule` | Bonus, up to 200 | Worker already holding most of the inputs |
-| `MissingNarSizeRule` | Bonus, up to 500 | Little data to download before the build |
+| `EstimatedTimeRule` | Bonus, up to 3600 | Builds expected to finish soonest on this worker, see [Estimated Time](#estimated-time) |
 | `RealisedOutputsRule` | Bonus, 2500 | Worker already holding every output and only uploading them |
 | `DependencyCountRule` | Bonus, up to 50 | Builds with many direct inputs |
 | `WaitTimeRule` | Bonus, growing | Long-waiting jobs rising, against starvation. Counted from the moment dependencies finished |
@@ -42,15 +42,27 @@ The memory predictions (`ResourceFitRule`, the out-of-memory check) are requirin
 | Rule | Kind | Effect |
 |---|---|---|
 | `ResourceFitRule` | Penalty | Predicted peak memory above the worker's free memory, for builds and evaluations |
-| `ResourceSaturationRule` | Penalty, up to -10000 | Worker above 80% CPU (90% for `builtin` jobs) or below 10% free memory, or a likely out-of-memory build |
+| `ResourceSaturationRule` | Penalty, up to -17200 | Worker above 80% CPU (90% for `builtin` jobs) or below 10% free memory, or a likely out-of-memory build |
 | `PreferLocalBuildRule` | Bonus | `preferLocalBuild` derivations on a worker holding most of the closure |
-| `NetworkAffinityRule` | Bonus, up to 80 | Fixed-output downloads on workers downloading at least as fast as the fleet mean |
-| `OutputUploadRule` | Penalty, up to 400 | Builds with large outputs away from workers uploading slower than the fleet mean, 2 per extra second of upload |
-| `DiskAffinityRule` | Bonus | Disk-heavy builds on workers with fast disks |
-| `CpuAffinityRule` | Bonus or penalty, up to 1200 | Long builds on faster cores than the fleet average, away from slower ones |
 | `FairShareRule` | Penalty, disabled | Would slow projects holding a large share of running work |
 
-Workers are measuring upload, download and disk speed from their own NAR transfers and builds. Transfers under 1 MiB stay out. The speed rules are adding nothing until the first measured transfer. `OutputUploadRule` can read the output size of earlier builds of the same package.
+## Estimated Time
+
+`EstimatedTimeRule` can sum the seconds a build should take on the worker. Each second costs one point below the cap of 3600. Workers already holding every output get the full 3600.
+
+| Part | Estimate |
+|---|---|
+| Download | Missing NAR size over the slower of the worker's download speed and its share of the storage read throughput |
+| Build | Build time of earlier builds of the package, scaled by their CPU score over the worker's, plus 4% per build already running there |
+| Upload | Output size of earlier builds over the slower of the worker's upload speed and its share of the storage write throughput |
+
+- The storage share is the best total throughput of the last hour, split across the transfers in flight plus this one.
+- The storage throughput will be 150 MB/s for reads and 140 MB/s for writes before the first measurement.
+- A package without history can use the instance's mean build time.
+- The CPU score ratio must stay between 0.5 and 2.
+- Workers measure upload, download and disk speed from their own NAR transfers, substitutions and builds. Transfers under 1 MiB stay out.
+
+The cap of 3600 lies below the 4000 of `WaitTimeRule`. A long-waiting job can always overtake a shorter one. A prioritized job with its 5000 can outrank any estimate gap. The penalty of `ResourceSaturationRule` includes the cap and can still keep a build off a saturated worker.
 
 ## Custom Policies
 

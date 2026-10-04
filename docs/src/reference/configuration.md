@@ -157,6 +157,7 @@ Declarative entities under `services.gradient.state` are in the [state reference
 | Option | Type | Default | Env | Description |
 |---|---|---|---|---|
 | `nar.hotCacheBytes` | int | `536870912` | `GRADIENT_NAR_HOT_CACHE_BYTES` | Capacity in bytes of the in-memory NAR cache. |
+| `nar.maxConcurrentDownloads` | int | `16` | `GRADIENT_NAR_MAX_CONCURRENT_DOWNLOADS` | NAR downloads from storage that may run at once across all connections, keeping the storage near its best total throughput. |
 | `nar.maxConcurrentServes` | int | `8` | `GRADIENT_NAR_MAX_CONCURRENT_SERVES` | NAR serving tasks that may run at once per worker connection, bounding memory and storage fan-out for large batches. |
 | `nar.maxUploadSize` | int | `536870912` | `GRADIENT_NAR_MAX_UPLOAD_SIZE` | Maximum size in bytes of a NAR uploaded to the cache upload endpoint. |
 | `nar.partialTtlSecs` | int | `86400` | `GRADIENT_NAR_PARTIAL_TTL_SECS` | Seconds since the last write of an unfinished upload staged under `<baseDir>`, after which the next [deep GC](../contributors/internals/nar-storage.md#deep-gc) is removing the upload. `0` is keeping every unfinished upload. |
@@ -298,7 +299,7 @@ Declarative entities under `services.gradient.state` are in the [state reference
 | Option | Type | Default | Env | Description |
 |---|---|---|---|---|
 | `upload.bytesBudget` | int | `8589934592` | `GRADIENT_UPLOAD_BYTES_BUDGET` | Total size in bytes of admitted uploads. |
-| `upload.concurrency` | int | `16` | `GRADIENT_UPLOAD_CONCURRENCY` | Uploads over 1 MiB (NARs and eval cache blobs) admitted at once across all workers and REST clients. Smaller uploads have a window of 128 of their own. An upload is holding its permit until the object is in storage. |
+| `upload.concurrency` | int | `8` | `GRADIENT_UPLOAD_CONCURRENCY` | Uploads over 1 MiB (NARs and eval cache blobs) admitted at once across all workers and REST clients. Smaller uploads have a window of 128 of their own. An upload is holding its permit until the object is in storage. |
 | `upload.leaseIdleSecs` | int | `300` | `GRADIENT_UPLOAD_LEASE_IDLE_SECS` | Seconds a granted worker upload may go without data before the server is reclaiming its permit and telling the worker to retry. |
 | `upload.restWaitSecs` | int | `30` | `GRADIENT_UPLOAD_REST_WAIT_SECS` | Seconds a NAR upload to the cache upload endpoint is waiting for a permit before the server is answering with 503 and `Retry-After`. |
 
