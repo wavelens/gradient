@@ -88,7 +88,7 @@ async fn put_project_creates_project_and_admin_membership() {
         .append_query_results::<project::Model, _, _>([Vec::<project::Model>::new()])
         .append_query_results([vec![inserted]])
         .append_query_results([vec![membership]])
-        .append_query_results([Vec::<gradient_entity::base_worker::Model>::new()])
+        .append_query_results([Vec::<gradient_entity::team::Model>::new()])
         .append_exec_results([
             MockExecResult {
                 last_insert_id: 0,
