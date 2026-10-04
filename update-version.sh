@@ -7,7 +7,7 @@ set -euo pipefail
 
 usage() {
     echo "Usage: $0 <new-version>"
-    echo "  Example: $0 1.2.3"
+    echo "  Example: $0 1.2.3 or $0 2.0.0-rc.1"
     exit 1
 }
 
@@ -15,8 +15,8 @@ usage() {
 
 VERSION="$1"
 
-if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-    echo "Error: version must be in X.Y.Z format (got '$VERSION')"
+if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+(\.[0-9A-Za-z]+)*)?$ ]]; then
+    echo "Error: version must be X.Y.Z or X.Y.Z-<pre-release>, e.g. 2.0.0-rc.1 (got '$VERSION')"
     exit 1
 fi
 
@@ -88,7 +88,8 @@ echo "cleared the pnpm dependency hash in nix/packages/gradient-frontend.nix"
 # ── OpenAPI spec ─────────────────────────────────────────────────────────────
 
 OPENAPI_SPEC="$REPO_ROOT/docs/gradient-api.yaml"
-sed -i "0,/^  version: [0-9]\+\.[0-9]\+\.[0-9]\+$/{s/^  version: [0-9]\+\.[0-9]\+\.[0-9]\+$/  version: $VERSION/}" "$OPENAPI_SPEC"
+OPENAPI_VERSION='^  version: [0-9]\+\.[0-9]\+\.[0-9]\+\(-[0-9A-Za-z.]\+\)\?$'
+sed -i "0,/$OPENAPI_VERSION/{s/$OPENAPI_VERSION/  version: $VERSION/}" "$OPENAPI_SPEC"
 echo "updated docs/gradient-api.yaml"
 
 echo ""
