@@ -68,6 +68,7 @@ export class TeamMembersComponent implements OnInit {
   invitations = signal<PendingInvitation[]>([]);
   suggestions = signal<string[]>([]);
   error = signal<string | null>(null);
+  addError = signal<string | null>(null);
   busy = signal<string | null>(null);
   showAdd = signal(false);
   newMember: { user: string; role: TeamRole } = { user: '', role: 'member' };
@@ -107,17 +108,25 @@ export class TeamMembersComponent implements OnInit {
     });
   }
 
+  openAdd(): void {
+    this.addError.set(null);
+    this.showAdd.set(true);
+  }
+
   addMember(): void {
     if (!this.newMember.user) return;
     this.busy.set('add');
-    this.error.set(null);
+    this.addError.set(null);
     this.teams.addMember(this.teamName, this.newMember.user, this.newMember.role).subscribe({
       next: () => {
         this.busy.set(null);
         this.showAdd.set(false);
         this.load();
       },
-      error: (err: Error) => this.fail(err, 'Failed to add the member.'),
+      error: (err: Error) => {
+        this.busy.set(null);
+        this.addError.set(err.message || 'Failed to add the member.');
+      },
     });
   }
 

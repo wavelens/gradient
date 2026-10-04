@@ -6,7 +6,7 @@
 
 import { TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
-import { of } from 'rxjs';
+import { of, throwError } from 'rxjs';
 import { GrantedPart, TeamGrantsComponent } from './team-grants.component';
 import { TeamsService } from '@core/services/teams.service';
 import { TeamGrant } from '@core/models';
@@ -130,6 +130,18 @@ describe('TeamGrantsComponent', () => {
       component.remove(grantOf('ops'));
       expect(service.removeProjectGrant).toHaveBeenCalledWith('acme', 'ops');
     });
+  });
+
+  it('shows a failed grant inside the grant dialog', () => {
+    const { fixture, component, service, text } = setup('project', 'users');
+    service.grantProject.mockReturnValue(throwError(() => new Error('Team not found')));
+    component.openGrant();
+    fixture.detectChanges();
+    component.form = { team: 'unknown', role: 'View' };
+    component.grant();
+    fixture.detectChanges();
+    expect(document.querySelector('.gr-dialog')?.textContent).toContain('Team not found');
+    expect(text()).not.toContain('Team not found');
   });
 
   it('grants a cache only users with a role', () => {

@@ -88,6 +88,19 @@ describe('TeamMembersComponent', () => {
     expect(addMember).toHaveBeenCalledWith('platform', 'carol', 'member');
   });
 
+  it('shows a failed addition inside the add dialog', () => {
+    const { fixture, addMember } = setup();
+    addMember.mockReturnValue(throwError(() => new Error('User not found')));
+    const component = fixture.componentInstance;
+    component.openAdd();
+    fixture.detectChanges();
+    component.newMember = { user: 'nobody', role: 'member' };
+    component.addMember();
+    fixture.detectChanges();
+    expect(document.querySelector('.gr-dialog')?.textContent).toContain('User not found');
+    expect((fixture.nativeElement as HTMLElement).textContent).not.toContain('User not found');
+  });
+
   it('shows why the last admin cannot be removed', () => {
     const conflict = vi.fn().mockReturnValue(
       throwError(() => new Error('Cannot remove the last Admin from the team.')),

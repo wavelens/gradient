@@ -39,6 +39,9 @@
 </gr-settings-section>
 
 <gr-dialog header="Grant Team" [(visible)]="showGrant" width="420px">
+  @if (grantError(); as message) {
+    <gr-message-banner type="error">{{ message }}</gr-message-banner>
+  }
   <gr-form-field label="Team" hint="A team you are not Admin of receives a request to approve.">
     <gr-autocomplete [(ngModel)]="form.team" [suggestions]="suggestions()" (completeMethod)="search($event)"
       [forceSelection]="false" />

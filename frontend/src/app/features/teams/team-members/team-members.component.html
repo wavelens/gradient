@@ -11,7 +11,7 @@
 
   <gr-settings-section title="Members" [card]="false" maxWidth="none">
     @if (canEdit()) {
-      <button slot="actions" grButton label="Add Member" (click)="showAdd.set(true)"></button>
+      <button slot="actions" grButton label="Add Member" (click)="openAdd()"></button>
     }
     @if (loading()) {
       <gr-loading-spinner message="Loading members..." />
@@ -63,6 +63,9 @@
 </gr-page-layout>
 
 <gr-dialog header="Add Member" [(visible)]="showAdd" width="420px">
+  @if (addError(); as message) {
+    <gr-message-banner type="error">{{ message }}</gr-message-banner>
+  }
   <gr-form-field label="Username">
     <gr-autocomplete [(ngModel)]="newMember.user" [suggestions]="suggestions()" (completeMethod)="search($event)"
       [forceSelection]="false" (enter)="addMember()" />
