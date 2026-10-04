@@ -46,6 +46,7 @@ pub struct AppState {
     pub nar_storage: NarStore,
     pub http: reqwest::Client,
     pub upstream_query: Arc<Semaphore>,
+    pub nar_downloads: Arc<Semaphore>,
     pub upload_admission: Arc<gradient_storage::admission::UploadAdmission>,
     pub git_host: GitHostRegistry,
     pub github_app_install_url: Arc<tokio::sync::OnceCell<String>>,

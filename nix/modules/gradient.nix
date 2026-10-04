@@ -530,7 +530,7 @@ in {
       upload = {
         concurrency = lib.mkOption {
           type = lib.types.ints.positive;
-          default = 16;
+          default = 8;
           description = ''
             Uploads over 1 MiB (NARs and eval cache blobs) admitted at once across all workers and
             REST clients. Smaller uploads have a window of 128 of their own. An upload is holding its
@@ -624,6 +624,15 @@ in {
           description = ''
             NAR serving tasks that may run at once per worker connection, bounding memory and
             storage fan-out for large batches.
+          '';
+        };
+
+        maxConcurrentDownloads = lib.mkOption {
+          type = lib.types.ints.positive;
+          default = 16;
+          description = ''
+            NAR downloads from storage that may run at once across all connections, keeping the
+            storage near its best total throughput.
           '';
         };
 
@@ -1439,6 +1448,7 @@ in {
         GRADIENT_NAR_STORAGE_OPEN_TIMEOUT_SECS = toString cfg.nar.storageOpenTimeoutSecs;
         GRADIENT_NAR_SEND_CHUNK_TIMEOUT_SECS = toString cfg.nar.sendChunkTimeoutSecs;
         GRADIENT_NAR_MAX_CONCURRENT_SERVES = toString cfg.nar.maxConcurrentServes;
+        GRADIENT_NAR_MAX_CONCURRENT_DOWNLOADS = toString cfg.nar.maxConcurrentDownloads;
         GRADIENT_NAR_PARTIAL_TTL_SECS = toString cfg.nar.partialTtlSecs;
         GRADIENT_CACHE_UPSTREAM_QUERY_CONCURRENCY = toString cfg.cache.upstreamQueryConcurrency;
         GRADIENT_CACHE_MAX_STORAGE_GB = toString cfg.cache.maxStorageGb;

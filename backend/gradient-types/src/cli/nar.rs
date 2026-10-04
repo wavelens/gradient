@@ -74,6 +74,16 @@ pub struct NarArgs {
     )]
     pub max_concurrent_serves: usize,
 
+    /// NAR downloads from storage that may run at once across all connections, keeping the storage
+    /// near its best total throughput.
+    #[arg(
+        long = "nar-max-concurrent-downloads",
+        env = "GRADIENT_NAR_MAX_CONCURRENT_DOWNLOADS",
+        value_parser = greater_than_zero::<usize>,
+        default_value_t = 16
+    )]
+    pub max_concurrent_downloads: usize,
+
     /// Seconds since the last write of an unfinished upload staged under `<base_dir>`, after which
     /// the next deep GC is removing the upload. `0` is keeping every unfinished upload.
     #[arg(
@@ -94,6 +104,7 @@ impl Default for NarArgs {
             storage_open_timeout_secs: 60,
             send_chunk_timeout_secs: 30,
             max_concurrent_serves: 8,
+            max_concurrent_downloads: 16,
             partial_ttl_secs: 86400,
         }
     }

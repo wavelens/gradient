@@ -19,7 +19,8 @@ use tracing::warn;
 use super::socket::ProtoWriter;
 
 pub(super) struct ServeSlot {
-    _permit: OwnedSemaphorePermit,
+    _connection: OwnedSemaphorePermit,
+    _server: OwnedSemaphorePermit,
     gauges: &'static Gauges,
 }
 
@@ -32,22 +33,30 @@ impl Drop for Waiting {
 }
 
 impl ServeSlot {
-    pub(super) async fn acquire(semaphore: Arc<Semaphore>) -> Option<Self> {
-        Self::acquire_with(semaphore, &GAUGES).await
+    pub(super) async fn acquire(
+        connection: Arc<Semaphore>,
+        server: Arc<Semaphore>,
+    ) -> Option<Self> {
+        Self::acquire_with(connection, server, &GAUGES).await
     }
 
+    /// The connection's own permit comes first. A connection queueing many paths must not hold
+    /// server-wide permits while it waits for its own.
     pub(super) async fn acquire_with(
-        semaphore: Arc<Semaphore>,
+        connection: Arc<Semaphore>,
+        server: Arc<Semaphore>,
         gauges: &'static Gauges,
     ) -> Option<Self> {
         gauges.serves_waiting.inc();
         let waiting = Waiting(gauges);
-        let permit = semaphore.acquire_owned().await.ok()?;
+        let connection = connection.acquire_owned().await.ok()?;
+        let server = server.acquire_owned().await.ok()?;
         drop(waiting);
         gauges.serves_active.inc();
 
         Some(Self {
-            _permit: permit,
+            _connection: connection,
+            _server: server,
             gauges,
         })
     }
@@ -324,12 +333,22 @@ mod serve_slot_tests {
         Box::leak(Box::new(Gauges::new()))
     }
 
+    fn permits(n: usize) -> Arc<Semaphore> {
+        Arc::new(Semaphore::new(n))
+    }
+
+    async fn take(
+        connection: &Arc<Semaphore>,
+        server: &Arc<Semaphore>,
+        g: &'static Gauges,
+    ) -> Option<ServeSlot> {
+        ServeSlot::acquire_with(Arc::clone(connection), Arc::clone(server), g).await
+    }
+
     #[tokio::test]
     async fn a_slot_is_active_until_dropped() {
         let g = gauges();
-        let slot = ServeSlot::acquire_with(Arc::new(Semaphore::new(1)), g)
-            .await
-            .expect("slot");
+        let slot = take(&permits(1), &permits(1), g).await.expect("slot");
 
         assert_eq!(g.serves_active.get(), 1);
         assert_eq!(g.serves_waiting.get(), 0);
@@ -340,11 +359,9 @@ mod serve_slot_tests {
     #[tokio::test]
     async fn a_queued_serve_counts_as_waiting() {
         let g = gauges();
-        let sem = Arc::new(Semaphore::new(1));
-        let held = ServeSlot::acquire_with(Arc::clone(&sem), g)
-            .await
-            .expect("slot");
-        let mut queued = Box::pin(ServeSlot::acquire_with(Arc::clone(&sem), g));
+        let (sem, server) = (permits(1), permits(8));
+        let held = take(&sem, &server, g).await.expect("slot");
+        let mut queued = Box::pin(take(&sem, &server, g));
         let still_queued = tokio::time::timeout(Duration::from_millis(20), &mut queued).await;
 
         assert!(still_queued.is_err());
@@ -357,10 +374,27 @@ mod serve_slot_tests {
     }
 
     #[tokio::test]
+    async fn the_server_wide_limit_holds_back_another_connection() {
+        let g = gauges();
+        let server = permits(1);
+        let held = take(&permits(8), &server, g).await.expect("slot");
+        let other_connection = permits(8);
+        let mut other = Box::pin(take(&other_connection, &server, g));
+
+        assert!(
+            tokio::time::timeout(Duration::from_millis(20), &mut other)
+                .await
+                .is_err()
+        );
+        drop(held);
+        assert!(other.await.is_some());
+    }
+
+    #[tokio::test]
     async fn cancelled_wait_releases_waiting() {
         let g = gauges();
-        let sem = Arc::new(Semaphore::new(0));
-        let waiting = ServeSlot::acquire_with(Arc::clone(&sem), g);
+        let (sem, server) = (permits(0), permits(1));
+        let waiting = take(&sem, &server, g);
         let cancelled = tokio::time::timeout(Duration::from_millis(20), waiting).await;
 
         assert!(cancelled.is_err());
@@ -371,10 +405,10 @@ mod serve_slot_tests {
     #[tokio::test]
     async fn a_closed_semaphore_yields_no_slot() {
         let g = gauges();
-        let sem = Arc::new(Semaphore::new(0));
+        let sem = permits(0);
         sem.close();
 
-        assert!(ServeSlot::acquire_with(sem, g).await.is_none());
+        assert!(take(&sem, &permits(1), g).await.is_none());
         assert_eq!(g.serves_waiting.get(), 0);
     }
 }
