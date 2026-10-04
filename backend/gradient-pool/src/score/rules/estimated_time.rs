@@ -74,6 +74,18 @@ pub fn download_secs(
     })
 }
 
+pub fn path_secs(job: &JobContext<'_>, instance: &InstanceContext) -> f64 {
+    let paths = job
+        .missing_count
+        .map(f64::from)
+        .or(instance.missing_paths.w1h)
+        .unwrap_or(0.0);
+    paths
+        * instance
+            .per_path_secs
+            .unwrap_or(weights::PER_PATH_FALLBACK_SECS)
+}
+
 pub fn upload_secs(
     history: &HistoryPrediction,
     worker: Option<&WorkerMetricsView>,
@@ -137,6 +149,7 @@ pub fn estimated_secs(
     let history = job.build_history();
     let metrics = worker.metrics.as_ref();
     download_secs(job, metrics, instance)
+        + path_secs(job, instance)
         + build_secs(&history, metrics, instance)
         + upload_secs(&history, metrics, instance)
 }
@@ -341,6 +354,30 @@ mod tests {
             fetch: false,
             metrics: Some(metrics),
         }
+    }
+
+    #[test]
+    fn every_missing_path_costs_the_learned_overhead() {
+        let job = build_job(HistoryPrediction::default());
+        let inst = InstanceContext {
+            per_path_secs: Some(0.5),
+            missing_paths: Windowed {
+                w1h: Some(8.0),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let scored = JobContext {
+            missing_count: Some(6),
+            ..ctx(&job, Some(0), false)
+        };
+        let unscored = JobContext {
+            missing_count: None,
+            ..ctx(&job, None, false)
+        };
+
+        assert_eq!(path_secs(&scored, &inst), 3.0);
+        assert_eq!(path_secs(&unscored, &inst), 4.0);
     }
 
     #[test]
