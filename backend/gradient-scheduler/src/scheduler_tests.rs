@@ -682,6 +682,84 @@ async fn abort_leaves_a_shared_build_running_for_the_other_evaluation() {
 }
 
 #[tokio::test]
+async fn abort_stops_a_shared_build_dispatched_for_an_evaluation_aborted_earlier() {
+    use crate::jobs::{PendingJob, build_job_key};
+
+    let scheduler = test_scheduler().await;
+    let peer = ProjectId::now_v7();
+    let dispatched_for = EvaluationId::now_v7();
+    let last_wanting = EvaluationId::now_v7();
+    let shared = DerivationBuildId::now_v7();
+
+    let (session, mut signals) = port();
+    scheduler
+        .reattach_worker(
+            "w1",
+            build_worker_caps(),
+            HashSet::new(),
+            session,
+            vec![crate::jobs::Reattached::single(
+                build_job_key(shared),
+                PendingJob::Build(build_job(dispatched_for, peer, shared)),
+            )],
+        )
+        .await
+        .expect("reattach");
+
+    let aborted = scheduler
+        .abort_evaluation_jobs(last_wanting, vec![shared])
+        .await;
+
+    assert_eq!(aborted, vec![("w1".to_string(), build_job_key(shared))]);
+    assert_eq!(
+        signals.recv().await,
+        Some(SessionSignal::Abort {
+            job_id: build_job_key(shared),
+            reason: "evaluation aborted".into()
+        })
+    );
+}
+
+#[tokio::test]
+async fn cancelling_an_evaluation_aborts_its_running_jobs_instead_of_forgetting_them() {
+    use crate::jobs::{PendingJob, build_job_key};
+
+    let scheduler = test_scheduler().await;
+    let peer = ProjectId::now_v7();
+    let eval_id = EvaluationId::now_v7();
+    let shared = DerivationBuildId::now_v7();
+
+    let (session, mut signals) = port();
+    scheduler
+        .reattach_worker(
+            "w1",
+            build_worker_caps(),
+            HashSet::new(),
+            session,
+            vec![crate::jobs::Reattached::single(
+                build_job_key(shared),
+                PendingJob::Build(build_job(eval_id, peer, shared)),
+            )],
+        )
+        .await
+        .expect("reattach");
+
+    scheduler.cancel_evaluation_jobs(eval_id, &[shared]).await;
+
+    assert_eq!(
+        signals.recv().await,
+        Some(SessionSignal::Abort {
+            job_id: build_job_key(shared),
+            reason: "evaluation aborted".into()
+        })
+    );
+    assert!(
+        scheduler.active_job(&build_job_key(shared)).await.is_some(),
+        "the job stays tracked until the worker confirms, so the reaper can still close it"
+    );
+}
+
+#[tokio::test]
 async fn record_eval_message_drops_when_job_unknown() {
     let scheduler = test_scheduler().await;
     let r = scheduler

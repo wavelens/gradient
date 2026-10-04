@@ -129,5 +129,5 @@ A [cluster member](../scheduler/clusters.md) will arrive as `AssignJob` with `cl
 
 ## Abort and Lost Workers
 
-- **Abort** (API or a newer evaluation): The evaluation will turn `Aborted`, and `AbortJob` will go to its jobs. The server will remove pending jobs. The worker will stop the daemon build at once and answer `JobFailed { Aborted }`. The server will reap aborts unconfirmed after 5 min.
+- **Abort** (API or a newer evaluation): The evaluation will turn `Aborted`. `AbortJob` will go to its evaluation job and to every running build wanted by no other live evaluation. The evaluation that dispatched such a build does not matter. The server will remove pending jobs. The worker will stop the daemon build at once and answer `JobFailed { Aborted }`. The server will reap aborts unconfirmed after 5 min.
 - **Lost Worker:** Open assignments close as abandoned. Any build in `Building` will return to `Queued`. A running evaluation will go to `Waiting` and back into the queue. The evaluation will fail after 10 lost assignments.
