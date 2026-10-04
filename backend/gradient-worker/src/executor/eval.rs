@@ -17,24 +17,20 @@ use gradient_sources::{DerivationResolver, FlakeDiscovery};
 use gradient_wire::messages::{
     DiscoveredDerivation, EvalAttrCost, EvalStatsReport, FlakeJob, FlakeOutputNode, FlakeSource,
 };
-use tokio::sync::{mpsc, watch};
+use tokio::sync::mpsc;
 use tracing::{debug, info, warn};
 
 fn abort_err() -> anyhow::Error {
     crate::executor::failure::JobAborted("evaluation aborted by server".to_owned()).into()
 }
 
-fn is_aborted(abort: &mut watch::Receiver<bool>) -> bool {
-    *abort.borrow_and_update()
-}
-
 async fn unless_aborted<T>(
-    abort: &mut watch::Receiver<bool>,
+    abort: &mut super::AbortSignal,
     work: impl Future<Output = Result<T>>,
 ) -> Result<T> {
     tokio::select! {
         biased;
-        Ok(_) = abort.wait_for(|aborted| *aborted) => Err(abort_err()),
+        () = abort.aborted() => Err(abort_err()),
         out = work => out,
     }
 }
@@ -227,7 +223,7 @@ pub async fn evaluate_derivations(
     job: &FlakeJob,
     local_flake_path: Option<&str>,
     updater: &mut JobUpdater,
-    abort: &mut watch::Receiver<bool>,
+    abort: &mut super::AbortSignal,
 ) -> Result<()> {
     let repo = build_flake_url(job, local_flake_path);
     let start = Instant::now();
@@ -543,12 +539,12 @@ impl<'a> ClosureWalker<'a> {
     async fn walk(
         mut self,
         reporter: &dyn JobReporter,
-        abort: &mut watch::Receiver<bool>,
+        abort: &mut super::AbortSignal,
         warnings: Vec<String>,
         errors: Vec<String>,
     ) -> Result<()> {
         while !self.queue.is_empty() {
-            if is_aborted(abort) {
+            if abort.is_aborted() {
                 return Err(abort_err());
             }
             self.process_wave(reporter).await?;
@@ -731,9 +727,9 @@ pub async fn evaluate_derivations_with(
     job: &FlakeJob,
     local_flake_path: Option<&str>,
     updater: &mut dyn JobReporter,
-    abort: &mut watch::Receiver<bool>,
+    abort: &mut super::AbortSignal,
 ) -> Result<EvalOutcome> {
-    if is_aborted(abort) {
+    if abort.is_aborted() {
         return Err(abort_err());
     }
     updater.report_evaluating_derivations().await?;
@@ -988,9 +984,8 @@ mod tests {
         }
     }
 
-    fn never_abort() -> watch::Receiver<bool> {
-        let (_tx, rx) = watch::channel(false);
-        rx
+    fn never_abort() -> crate::executor::AbortSignal {
+        crate::executor::AbortSignal::never()
     }
 
     #[test]
@@ -1313,7 +1308,7 @@ mod tests {
         let job = make_flake_job(repo);
         let mut reporter = RecordingJobReporter::new();
 
-        let (tx, rx) = watch::channel(false);
+        let (tx, rx) = crate::executor::AbortSignal::channel();
         let mut abort = rx;
         tx.send(true).unwrap();
 
@@ -1374,7 +1369,7 @@ mod tests {
         let (_, drv_reader) = setup_from_fixture(&fixture, "https://example.com/repo", "hello");
         let job = make_flake_job("https://example.com/repo");
         let mut reporter = RecordingJobReporter::new();
-        let (tx, mut abort) = watch::channel(false);
+        let (tx, mut abort) = crate::executor::AbortSignal::channel();
 
         let eval = evaluate_derivations_with(
             &StalledResolver,

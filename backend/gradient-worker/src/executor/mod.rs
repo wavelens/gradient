@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+pub mod abort;
 pub mod build;
 mod build_metrics;
 pub mod compress;
@@ -27,7 +28,6 @@ use gradient_wire::messages::{
     BuildJob, BuildOutput, BuildProgressPhase, BuildSpec, BuildSpecKind, BuildStage, FlakeJob,
     FlakeStep,
 };
-use tokio::sync::watch;
 use tracing::instrument;
 
 use gradient_wire::messages::JobPhase;
@@ -41,6 +41,7 @@ use gradient_wire::messages::CachedPath;
 use gradient_wire::traits::WorkerStore;
 use gradient_worker_client::nar;
 
+pub use abort::AbortSignal;
 pub use build_metrics::BuildHost;
 pub use eval::WorkerEvaluator;
 
@@ -154,7 +155,7 @@ impl<'a> PushSpans<'a> {
 pub(crate) async fn upload_all(
     updater: &JobUpdater,
     uploads: Vec<NarUpload<'_>>,
-    abort: Option<&watch::Receiver<bool>>,
+    abort: Option<&AbortSignal>,
 ) -> Result<nar::UploadedNar> {
     use futures::stream::{FuturesUnordered, StreamExt as _};
 
@@ -181,18 +182,18 @@ pub(crate) async fn upload_all(
 async fn upload_unless_aborted(
     updater: &JobUpdater,
     upload: NarUpload<'_>,
-    abort: Option<&watch::Receiver<bool>>,
+    abort: Option<&AbortSignal>,
     spans: &PushSpans<'_>,
 ) -> Result<nar::UploadedNar> {
     if let Some(abort) = abort {
-        check_abort(abort)?;
+        abort.check()?;
     }
 
     let result = upload_one_nar(updater, upload, spans).await;
     if result.is_err()
         && let Some(abort) = abort
     {
-        check_abort(abort)?;
+        abort.check()?;
     }
     result
 }
@@ -295,7 +296,7 @@ impl JobExecutor {
         job: FlakeJob,
         updater: &mut JobUpdater,
         credentials: &CredentialStore,
-        abort: watch::Receiver<bool>,
+        abort: AbortSignal,
     ) -> Result<()> {
         let mut local_flake_path: Option<String> = None;
 
@@ -411,12 +412,12 @@ impl JobExecutor {
         job: BuildJob,
         updater: &mut JobUpdater,
         _credentials: &CredentialStore,
-        mut abort: watch::Receiver<bool>,
+        mut abort: AbortSignal,
     ) -> Result<()> {
         let mut outputs: Vec<compress::OutputNar<'_>> = Vec::new();
         let mut gc_handles: Vec<GcRootHandle> = Vec::new();
         for (index, build_task) in job.builds.iter().enumerate() {
-            check_abort(&abort)?;
+            abort.check()?;
             // The build must reach `Building` before anything that can fail. The server is only
             // accepting `Building -> Failed`. An earlier `JobFailed` would leave the build in
             // `Queued` forever.
@@ -583,26 +584,6 @@ impl JobExecutor {
         drop(gc_handles);
         Ok(())
     }
-}
-
-pub(crate) async fn abort_true(abort: &mut watch::Receiver<bool>) {
-    loop {
-        match abort.changed().await {
-            Ok(()) => {
-                if *abort.borrow() {
-                    return;
-                }
-            }
-            Err(_) => std::future::pending::<()>().await,
-        }
-    }
-}
-
-pub(crate) fn check_abort(abort: &watch::Receiver<bool>) -> Result<()> {
-    if *abort.borrow() {
-        return Err(failure::JobAborted("job aborted by server".to_owned()).into());
-    }
-    Ok(())
 }
 
 #[cfg(test)]

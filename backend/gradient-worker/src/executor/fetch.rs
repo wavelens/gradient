@@ -12,10 +12,9 @@ use gradient_wire::messages::{FlakeJob, FlakeSource};
 use gradient_wire::traits::{EvalProgressSink, JobReporter, WorkerStore};
 use gradient_wire::types::{EvalProgress, InputFetchState};
 use tempfile::NamedTempFile;
-use tokio::sync::watch;
 use tracing::{debug, info};
 
-use super::abort_true;
+use super::AbortSignal;
 use super::progress_report::ChangeReporter;
 use crate::proto::credentials::CredentialStore;
 use crate::worker_pool::{DownloadTarget, InputBoard, InputFetcher};
@@ -41,9 +40,9 @@ pub async fn fetch_repository(
     store: &dyn WorkerStore,
     fetcher: &dyn InputFetcher,
     binpath_ssh: &str,
-    mut abort: watch::Receiver<bool>,
+    mut abort: AbortSignal,
 ) -> Result<FetchOutcome> {
-    if *abort.borrow() {
+    if abort.is_aborted() {
         anyhow::bail!("job aborted");
     }
 
@@ -66,7 +65,7 @@ pub async fn fetch_repository(
 
             let tmp_path = tokio::select! {
                 biased;
-                _ = abort_true(&mut abort) => {
+                () = abort.aborted() => {
                     anyhow::bail!("job aborted during git clone");
                 }
                 result = clone_task => {
@@ -271,7 +270,7 @@ async fn fetch_inputs(
     fetcher: &dyn InputFetcher,
     sink: &dyn EvalProgressSink,
     git_ssh_command: Option<String>,
-    abort: &mut watch::Receiver<bool>,
+    abort: &mut AbortSignal,
 ) -> Result<FetchedInputs> {
     let paths: Vec<String> = inputs.iter().map(|i| i.store_path.clone()).collect();
     let missing: HashSet<String> = missing_paths(store, &paths).await?.into_iter().collect();
@@ -338,7 +337,7 @@ async fn fetch_inputs(
     let mut reporter = ChangeReporter::default();
     let fetched = tokio::select! {
         biased;
-        () = abort_true(abort) => anyhow::bail!("job aborted during flake input fetch"),
+        () = abort.aborted() => anyhow::bail!("job aborted during flake input fetch"),
         fetched = fetches => fetched,
         never = reporter.run(sink, snapshot) => match never {},
     };
@@ -665,8 +664,8 @@ mod tests {
         }
     }
 
-    fn no_abort() -> watch::Receiver<bool> {
-        watch::channel(false).1
+    fn no_abort() -> AbortSignal {
+        AbortSignal::never()
     }
 
     #[tokio::test]
@@ -1259,7 +1258,7 @@ mod tests {
     async fn an_abort_stops_the_fetch() {
         let fetcher = FakeFetcher::new("");
         let reporter = RecordingJobReporter::new();
-        let (tx, mut rx) = watch::channel(false);
+        let (tx, mut rx) = AbortSignal::channel();
         tx.send(true).unwrap();
         let err = fetch_inputs(
             vec![input("a", "github.com", "a")],
