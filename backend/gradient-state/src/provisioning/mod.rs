@@ -55,11 +55,12 @@ pub(super) async fn apply_state_to_database(
     let mut pending: PendingProjectMemberships = HashMap::new();
 
     app.apply_users(&config.users).await?;
+    // Teams must exist before projects, for their new-project grants (the local worker's `server`).
+    let team_ids = app.apply_teams(&config.teams).await?;
     app.apply_projects_without_members(&config.projects).await?;
     app.apply_roles(&config.roles).await?;
     app.apply_project_members(&config.projects, &mut pending)
         .await?;
-    let team_ids = app.apply_teams(&config.teams).await?;
     // Integrations must land before tasks. Task triggers and `git_host_status_report` actions are
     // resolving integrations by name at apply time (#332).
     app.apply_integrations(&config.integrations).await?;

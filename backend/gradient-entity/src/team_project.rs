@@ -20,6 +20,7 @@ pub struct Model {
     pub role: Option<RoleId>,
     pub includes_users: bool,
     pub includes_workers: bool,
+    pub managed: bool,
     pub created_at: NaiveDateTime,
 }
 

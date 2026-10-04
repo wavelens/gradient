@@ -68,6 +68,7 @@ pub async fn apply_new_project_grants<C: ConnectionTrait>(
             role: Set(team.new_project_role.filter(|_| users)),
             includes_users: Set(users),
             includes_workers: Set(team.new_project_workers),
+            managed: Set(false),
             created_at: Set(gradient_types::now()),
         }
         .insert(db)

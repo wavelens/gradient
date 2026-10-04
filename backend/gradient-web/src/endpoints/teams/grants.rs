@@ -336,6 +336,7 @@ pub async fn post_project_team(
         role,
         includes_users: body.users,
         includes_workers: body.workers,
+        managed: false,
         created_at: gradient_types::now(),
     }
     .into_active_model()
@@ -651,6 +652,7 @@ pub async fn post_cache_team(
         team: team.id,
         cache: cache.id,
         role,
+        managed: false,
         created_at: gradient_types::now(),
     }
     .into_active_model()

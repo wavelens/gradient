@@ -53,7 +53,7 @@ services.gradient.state = {
 | `name` | string | attribute name | Unique project name. |
 | `private_key_file` | string | - | File containing the SSH private key used for Git access. |
 | `public` | bool | `false` | Whether the project is visible to all users. |
-| `teams` | list of submodule | `[ ]` | Teams granted on this project. The project's grants stay untouched by an empty list. A non-empty list is the source of truth. |
+| `teams` | list of submodule | `[ ]` | Teams granted on this project. Grants declared here before and no longer listed leave on the next state apply. Grants from the API or from new-project settings stay. |
 | `teams.*.role` | null or string | `null` | Role of the team's users: a built-in `Admin`, `Write` or `View`, or a custom role of the project. Required when `users` is true. |
 | `teams.*.team` | string | - | Team granted on the project. |
 | `teams.*.users` | bool | `true` | Whether the team's users get `role` on the project. |
@@ -123,7 +123,7 @@ services.gradient.state = {
 | `priority` | int | `10` | Priority advertised in `nix-cache-info`. Nix is querying caches with a lower value first. |
 | `projects` | list of string | `[ ]` | Names of the projects using this cache. |
 | `public` | bool | `false` | Whether the cache is available to all projects. |
-| `teams` | list of submodule | `[ ]` | Teams granted on this cache. The cache's grants stay untouched by an empty list. A non-empty list is the source of truth. |
+| `teams` | list of submodule | `[ ]` | Teams granted on this cache. Grants declared here before and no longer listed leave on the next state apply. Grants from the API stay. |
 | `teams.*.role` | string | - | Role of the team's users: `Admin`, `Write`, `View` or a custom role of the cache. |
 | `teams.*.team` | string | - | Team granted on the cache. |
 | `roles` | list of submodule | `[ ]` | Custom roles of this cache. |

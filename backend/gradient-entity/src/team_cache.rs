@@ -18,6 +18,7 @@ pub struct Model {
     pub team: TeamId,
     pub cache: CacheId,
     pub role: RoleId,
+    pub managed: bool,
     pub created_at: NaiveDateTime,
 }
 
