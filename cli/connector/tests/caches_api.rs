@@ -130,3 +130,40 @@ async fn a_busy_chunk_upload_is_retried_after_the_servers_delay() {
     assert_eq!(received, 3);
     assert_eq!(server.received_requests().await.unwrap().len(), 2);
 }
+
+#[tokio::test]
+async fn a_rate_limited_finalize_is_retried_after_the_servers_delay() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/v1/caches/mycache/nars/abc/finalize"))
+        .respond_with(ResponseTemplate::new(429).insert_header("Retry-After", "0"))
+        .up_to_n_times(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/api/v1/caches/mycache/nars/abc/finalize"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(ok(serde_json::json!({}))))
+        .mount(&server)
+        .await;
+
+    let client = Client::builder()
+        .base_url(server.uri())
+        .token("t")
+        .build()
+        .unwrap();
+    let info = connector::caches::NarinfoUpload {
+        store_path: "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-x".into(),
+        file_hash: "sha256:a".into(),
+        file_size: 3,
+        nar_size: 3,
+        nar_hash: "sha256:b".into(),
+        references: vec![],
+        deriver: None,
+    };
+    client
+        .caches()
+        .nar_upload_finalize("mycache", "abc", info)
+        .await
+        .expect("retried past the 429");
+    assert_eq!(server.received_requests().await.unwrap().len(), 2);
+}
