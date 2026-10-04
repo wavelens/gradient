@@ -28,7 +28,9 @@ use crate::proto::progress::{
     BuildProgressSink, EvalProgressSender, Progress, Tally, count_delivery,
 };
 use gradient_wire::traits::{EvalProgressSink, JobReporter};
-use gradient_wire::types::{BuildProgressPhase, GrantTarget, UploadMetadata, UploadObject};
+use gradient_wire::types::{
+    BuildProgressPhase, BuildStage, GrantTarget, PROTO_BUILD_STAGES, UploadMetadata, UploadObject,
+};
 use gradient_worker_client::connection::ProtoWriter;
 use gradient_worker_client::nar_recv::{NarPayload, NarReceiver, NarUnavailable};
 use gradient_worker_client::upload::UploadClient;
@@ -385,8 +387,12 @@ impl JobUpdater {
         })
     }
 
-    pub async fn report_compressing(&self) -> Result<()> {
-        self.send_update(JobUpdateKind::Compressing).await
+    pub async fn report_stage(&self, stage: BuildStage) -> Result<()> {
+        if self.writer.version() < PROTO_BUILD_STAGES {
+            return Ok(());
+        }
+
+        self.send_update(JobUpdateKind::Stage(stage)).await
     }
 
     pub async fn send_eval_message(
@@ -546,10 +552,6 @@ impl JobReporter for JobUpdater {
             substituted,
         })
         .await
-    }
-
-    async fn report_compressing(&mut self) -> Result<()> {
-        self.send_update(JobUpdateKind::Compressing).await
     }
 
     async fn send_log_chunk(&mut self, task_index: u32, data: Vec<u8>) -> Result<()> {

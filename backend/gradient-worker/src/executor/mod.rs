@@ -19,16 +19,20 @@ mod substitute;
 pub mod timeline;
 
 use std::sync::Arc;
+use std::time::Instant;
 
 use anyhow::Result;
+use gradient_util::sync::Mutex;
 use gradient_wire::messages::{
-    BuildJob, BuildOutput, BuildProgressPhase, BuildSpec, BuildSpecKind, FlakeJob, FlakeStep,
+    BuildJob, BuildOutput, BuildProgressPhase, BuildSpec, BuildSpecKind, BuildStage, FlakeJob,
+    FlakeStep,
 };
 use tokio::sync::watch;
 use tracing::instrument;
 
 use gradient_wire::messages::JobPhase;
 
+use crate::executor::timeline::PhaseGuard;
 use crate::nix::gcroots::{GcRootHandle, GcRootKeeper};
 use crate::nix::store::LocalNixStore;
 use crate::proto::progress::{Progress, Tally};
@@ -37,6 +41,7 @@ use gradient_wire::messages::CachedPath;
 use gradient_wire::traits::WorkerStore;
 use gradient_worker_client::nar;
 
+pub use build_metrics::BuildHost;
 pub use eval::WorkerEvaluator;
 
 async fn query_fetched_paths(
@@ -85,7 +90,11 @@ fn pair_with_store<'a>(entries: Vec<CachedPath>, store: &'a LocalNixStore) -> Ve
         .collect()
 }
 
-async fn upload_one_nar(updater: &JobUpdater, upload: NarUpload<'_>) -> Result<nar::UploadedNar> {
+async fn upload_one_nar(
+    updater: &JobUpdater,
+    upload: NarUpload<'_>,
+    spans: &PushSpans<'_>,
+) -> Result<nar::UploadedNar> {
     let cp = &upload.cached;
     if cp.cached {
         tracing::debug!(store_path = %cp.path, "skipping NAR upload - already cached");
@@ -97,11 +106,49 @@ async fn upload_one_nar(updater: &JobUpdater, upload: NarUpload<'_>) -> Result<n
         &updater.job_id,
         &cp.path,
         upload.source,
-        &mut |read| counted.at(read),
+        &mut |event| match event {
+            nar::UploadEvent::Granted => spans.granted(),
+            nar::UploadEvent::Read(read) => counted.at(read),
+        },
     )
     .await?;
     counted.transfer_done();
     Ok(uploaded)
+}
+
+/// The batch is getting one span pair because the uploads overlap. Per-path spans would chart as
+/// nested and double count.
+struct PushSpans<'a> {
+    updater: &'a JobUpdater,
+    waiting: Mutex<Option<PhaseGuard>>,
+    pushing: Mutex<Option<(PhaseGuard, Instant)>>,
+}
+
+impl<'a> PushSpans<'a> {
+    fn start(updater: &'a JobUpdater) -> Self {
+        Self {
+            updater,
+            waiting: Mutex::new(Some(updater.phase(JobPhase::UploadWait))),
+            pushing: Mutex::new(None),
+        }
+    }
+
+    fn granted(&self) {
+        let Some(wait) = self.waiting.lock().take() else {
+            return;
+        };
+
+        drop(wait);
+        *self.pushing.lock() = Some((self.updater.phase(JobPhase::NarPush), Instant::now()));
+    }
+
+    fn finish(self, paths: usize, uploaded: nar::UploadedNar) {
+        if let Some((mut push, started)) = self.pushing.into_inner() {
+            gradient_worker_client::throughput::UPLOAD
+                .observe_transfer(uploaded.nar_size, started.elapsed());
+            push.record(paths as u32, uploaded.file_size);
+        }
+    }
 }
 
 pub(crate) async fn upload_all(
@@ -116,23 +163,18 @@ pub(crate) async fn upload_all(
         return Ok(nar::UploadedNar::default());
     }
 
-    // The batch is getting one span because the uploads overlap. The timeline is parenting a
-    // span to the innermost open one. Per-path spans would chart as nested and double count.
-    let mut guard = updater.phase(JobPhase::NarPush);
-    guard.record(pending as u32, 0);
-    let started = std::time::Instant::now();
+    let spans = PushSpans::start(updater);
     let mut uploaded = nar::UploadedNar::default();
     let mut running: FuturesUnordered<_> = uploads
         .into_iter()
-        .map(|upload| upload_unless_aborted(updater, upload, abort))
+        .map(|upload| upload_unless_aborted(updater, upload, abort, &spans))
         .collect();
     while let Some(result) = running.next().await {
         uploaded += result?;
     }
 
-    gradient_worker_client::throughput::UPLOAD
-        .observe_transfer(uploaded.nar_size, started.elapsed());
-    guard.record(0, uploaded.file_size);
+    drop(running);
+    spans.finish(pending, uploaded);
     Ok(uploaded)
 }
 
@@ -140,12 +182,13 @@ async fn upload_unless_aborted(
     updater: &JobUpdater,
     upload: NarUpload<'_>,
     abort: Option<&watch::Receiver<bool>>,
+    spans: &PushSpans<'_>,
 ) -> Result<nar::UploadedNar> {
     if let Some(abort) = abort {
         check_abort(abort)?;
     }
 
-    let result = upload_one_nar(updater, upload).await;
+    let result = upload_one_nar(updater, upload, spans).await;
     if result.is_err()
         && let Some(abort) = abort
     {
@@ -212,7 +255,7 @@ pub struct JobExecutor {
     pub(crate) binpath_ssh: String,
     pub(crate) log_limits: crate::executor::log_limit::LogRateLimits,
     pub(crate) log_fetch_from_store: bool,
-    pub(crate) build_cores: u32,
+    pub(crate) host: BuildHost,
 }
 
 impl JobExecutor {
@@ -227,7 +270,7 @@ impl JobExecutor {
         binpath_ssh: String,
         log_limits: crate::executor::log_limit::LogRateLimits,
         log_fetch_from_store: bool,
-        build_cores: u32,
+        host: BuildHost,
     ) -> Self {
         Self {
             store: Arc::new(store),
@@ -236,7 +279,7 @@ impl JobExecutor {
             binpath_ssh,
             log_limits,
             log_fetch_from_store,
-            build_cores,
+            host,
         }
     }
 
@@ -491,6 +534,7 @@ impl JobExecutor {
 
             gc_handles.push(self.gcroots.add(&build_task.drv_path).await);
 
+            updater.report_stage(BuildStage::Prefetch).await?;
             {
                 let mut prefetch = updater.phase(JobPhase::Prefetch);
                 let fetched =
@@ -500,6 +544,7 @@ impl JobExecutor {
                 prefetch.record(fetched.paths, fetched.bytes);
             }
 
+            updater.report_stage(BuildStage::Build).await?;
             let _build = updater.phase(JobPhase::Build);
             let built = build::build_derivation(
                 &self.store,
@@ -509,7 +554,7 @@ impl JobExecutor {
                 &mut abort,
                 self.log_limits,
                 self.log_fetch_from_store,
-                self.build_cores,
+                self.host,
             )
             .await?;
             for o in &built {

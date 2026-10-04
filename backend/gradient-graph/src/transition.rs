@@ -785,6 +785,9 @@ async fn record_metrics(
         disk_write_bytes: metrics.disk_write_bytes.map(|v| v as i64),
         oom_killed: metrics.oom_killed,
         build_time_ms: metrics.build_time_ms.map(|v| v as i64),
+        concurrent_builds: metrics.concurrent_builds.map(|v| v as i32),
+        build_cores: metrics.build_cores.map(|v| v as i32),
+        cpu_core_score: metrics.cpu_core_score.map(|v| v as i32),
         worker_id: gradient_db::scheduling::build_attempt::latest_attempt_worker(
             &ctx.worker_db,
             shared_build.id,

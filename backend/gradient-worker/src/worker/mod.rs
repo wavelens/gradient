@@ -198,7 +198,10 @@ impl Worker<Connected> {
                 sustained_bytes_per_hour: config.log.sustained_bytes_per_hour,
             },
             config.log.fetch_from_store,
-            config.build_cores(),
+            crate::executor::BuildHost {
+                build_cores: config.build_cores(),
+                cpu_core_score: config.cpu_core_score(),
+            },
         );
         Ok((executor, JobScorer::new()))
     }
@@ -249,10 +252,7 @@ async fn perform_setup(
             None => detect_system_features(&config.nix_bin).await,
         };
         let host = crate::metrics::host_static();
-        let cpu_core_score = config
-            .system
-            .cpu_core_score
-            .unwrap_or_else(crate::metrics::cpu_core_score);
+        let cpu_core_score = config.cpu_core_score();
         info!(
             ?architectures,
             ?system_features,

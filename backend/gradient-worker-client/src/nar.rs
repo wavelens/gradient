@@ -120,12 +120,18 @@ impl std::ops::AddAssign for UploadedNar {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UploadEvent {
+    Granted,
+    Read(u64),
+}
+
 pub async fn upload_nar(
     uploads: &UploadClient,
     job_id: &str,
     store_path: &str,
     source: NarSource<'_>,
-    nar_read: &mut (dyn FnMut(u64) + Send),
+    events: &mut (dyn FnMut(UploadEvent) + Send),
 ) -> Result<UploadedNar> {
     let store_path = nix_store_path(store_path);
     let object = UploadObject::Nar {
@@ -141,13 +147,14 @@ pub async fn upload_nar(
             let threads = compression_threads(Some(nar_size));
             let mut upload = uploads.start(job_id, object, nar_size).await?;
             while let Some((request_id, target)) = upload.next_grant().await? {
+                events(UploadEvent::Granted);
                 let sent = send_path(
                     uploads.writer(),
                     request_id,
                     &store_path,
                     threads,
                     target,
-                    nar_read,
+                    &mut |n| events(UploadEvent::Read(n)),
                 )
                 .await;
                 if let Some(uploaded) = settle(&mut upload, sent, &path_meta).await? {
@@ -173,9 +180,10 @@ pub async fn upload_nar(
             };
             let mut upload = uploads.start(job_id, object, nar_size).await?;
             while let Some((request_id, target)) = upload.next_grant().await? {
+                events(UploadEvent::Granted);
                 let sent = send_raw(uploads.writer(), request_id, &nar, target).await;
                 if sent.is_ok() {
-                    nar_read(nar_size);
+                    events(UploadEvent::Read(nar_size));
                 }
                 if let Some(uploaded) = settle(&mut upload, sent, &path_meta).await? {
                     return Ok(uploaded);
@@ -615,20 +623,28 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_path_upload_reports_the_nar_bytes_it_read() {
+    async fn a_path_upload_reports_its_grant_and_then_the_nar_bytes_it_read() {
         let dir = make_temp_store_path();
         let path = dir.to_str().unwrap().to_owned();
-        let mut read = Vec::new();
+        let mut events = Vec::new();
 
         let served = served(
             GrantTarget::Passthrough { resume_offset: 0 },
             async |uploads| {
                 let source = NarSource::Path { meta: None };
-                upload_nar(uploads, "job-read", &path, source, &mut |n| read.push(n)).await
+                upload_nar(uploads, "job-read", &path, source, &mut |e| events.push(e)).await
             },
         )
         .await;
 
+        assert_eq!(events.first(), Some(&UploadEvent::Granted));
+        let read: Vec<u64> = events[1..]
+            .iter()
+            .map(|e| match e {
+                UploadEvent::Read(n) => *n,
+                UploadEvent::Granted => panic!("a second grant: {events:?}"),
+            })
+            .collect();
         assert_eq!(read.last().copied(), Some(served.nar().nar_size));
         assert!(read.is_sorted());
         let _ = std::fs::remove_dir_all(&dir);

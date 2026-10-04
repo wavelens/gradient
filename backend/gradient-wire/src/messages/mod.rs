@@ -9,7 +9,7 @@ pub mod server;
 
 pub use crate::types::{
     BuildFailureKind, BuildJob, BuildMetrics, BuildOutput, BuildProduct, BuildProgressPhase,
-    BuildRequirement, BuildSpec, BuildSpecKind, BumpedInputWire, CacheInfo, CachedPath,
+    BuildRequirement, BuildSpec, BuildSpecKind, BuildStage, BumpedInputWire, CacheInfo, CachedPath,
     CandidateScore, ClusterAddress, ClusterMembership, ClusterPeer, CredentialKind,
     DerivationOutput, DiscoveredDerivation, EvalAttrCost, EvalCachePullOutcome, EvalMessageLevel,
     EvalProgress, EvalStatsReport, FlakeInputOverride, FlakeJob, FlakeOutputNode, FlakeSource,

@@ -16,7 +16,7 @@ use sea_orm::{
 use tracing::{debug, info, warn};
 
 use gradient_types::ids::ProjectId;
-use gradient_wire::types::GradientCapabilities;
+use gradient_wire::types::{BuildStage, GradientCapabilities};
 
 use crate::Scheduler;
 use crate::actor::{Registered, Registration, SchedulerMsg, WorkerCapabilities, WorkerMetrics};
@@ -249,6 +249,16 @@ impl Scheduler {
                 worker,
                 metrics,
                 reply,
+            })
+            .await;
+    }
+
+    pub async fn enter_build_stage(&self, worker_id: &str, job_id: &str, stage: BuildStage) {
+        let _ = self
+            .cast(SchedulerMsg::EnterStage {
+                worker: worker_id.to_owned(),
+                job_id: job_id.to_owned(),
+                stage,
             })
             .await;
     }

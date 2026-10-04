@@ -4,14 +4,14 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::marker::PhantomData;
 use std::sync::Arc;
 use std::sync::atomic::AtomicI64;
 
 use gradient_types::ids::ProjectId;
 
-use gradient_wire::types::GradientCapabilities;
+use gradient_wire::types::{BuildStage, GradientCapabilities};
 
 use crate::peer_auth::PeerAuth;
 use crate::session_port::SessionPort;
@@ -60,7 +60,7 @@ pub struct WorkerShared {
     pub disk_speed_mbps: Option<f32>,
     pub upload_speed_mbps: Option<f32>,
     pub download_speed_mbps: Option<f32>,
-    pub assigned_jobs: HashSet<String>,
+    pub assigned_jobs: HashMap<String, Option<BuildStage>>,
     pub peer_auth: PeerAuth,
     pub sent_candidates: HashSet<String>,
     pub session: Arc<dyn SessionPort>,
@@ -70,6 +70,13 @@ pub struct WorkerShared {
 }
 
 impl WorkerShared {
+    pub fn jobs_in(&self, stage: BuildStage) -> u32 {
+        self.assigned_jobs
+            .values()
+            .filter(|s| **s == Some(stage))
+            .count() as u32
+    }
+
     pub fn profile(&self) -> WorkerProfile {
         WorkerProfile {
             architectures: self.architectures.clone(),
@@ -147,7 +154,7 @@ impl TypedWorker<Active> {
                 disk_speed_mbps: None,
                 upload_speed_mbps: None,
                 download_speed_mbps: None,
-                assigned_jobs: HashSet::new(),
+                assigned_jobs: HashMap::new(),
                 peer_auth: PeerAuth::from_peers(authorized_peers),
                 sent_candidates: HashSet::new(),
                 session,

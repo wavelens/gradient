@@ -406,7 +406,15 @@ impl MessageLoopState {
         let completed_kind = job.kind;
         let assignment_id = job.assignment_id.get();
         let dropped_spans = job.timeline.dropped();
-        let TimelineSnapshot { spans, elapsed_ms } = job.timeline.snapshot();
+        let TimelineSnapshot {
+            mut spans,
+            elapsed_ms,
+        } = job.timeline.snapshot();
+        let version = self.writer.version();
+        for span in &mut spans {
+            span.phase = span.phase.known_to(version);
+        }
+
         if dropped_spans > 0 {
             debug!(%job_id, dropped_spans, "phase timeline hit its span cap");
         }

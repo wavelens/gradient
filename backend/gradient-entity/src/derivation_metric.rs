@@ -26,6 +26,9 @@ pub struct Model {
     pub disk_write_bytes: Option<i64>,
     pub oom_killed: bool,
     pub build_time_ms: Option<i64>,
+    pub concurrent_builds: Option<i32>,
+    pub build_cores: Option<i32>,
+    pub cpu_core_score: Option<i32>,
     pub worker_id: String,
     pub created_at: NaiveDateTime,
 }

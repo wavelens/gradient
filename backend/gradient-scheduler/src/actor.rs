@@ -13,7 +13,9 @@ use gradient_pool::score::{InstanceContext, ScoringPolicy};
 use gradient_types::ids::{
     ClusterAttemptId, DerivationBuildId, DispatchedJobId, EvaluationId, ProjectId,
 };
-use gradient_wire::types::{CandidateScore, GradientCapabilities, JobCandidate, JobKind};
+use gradient_wire::types::{
+    BuildStage, CandidateScore, GradientCapabilities, JobCandidate, JobKind,
+};
 use ractor::{Actor, ActorProcessingErr, ActorRef, RpcReplyPort};
 use tracing::{debug, info};
 
@@ -128,6 +130,11 @@ pub enum SchedulerMsg {
     MarkDraining {
         worker: String,
         reply: RpcReplyPort<()>,
+    },
+    EnterStage {
+        worker: String,
+        job_id: String,
+        stage: BuildStage,
     },
     Enqueue {
         job_id: String,
@@ -318,6 +325,14 @@ impl SchedulerCore {
         self.pool.signal_active(SessionSignal::Offers(self.offers));
     }
 
+    fn with_live_transfers(&self, instance: &InstanceContext) -> InstanceContext {
+        InstanceContext {
+            downloads_in_flight: self.pool.fleet_jobs_in(BuildStage::Prefetch),
+            uploads_in_flight: self.pool.fleet_jobs_in(BuildStage::Upload),
+            ..*instance
+        }
+    }
+
     fn auth_and_caps(&self, worker: &str) -> (Option<HashSet<ProjectId>>, Option<WorkerCaps>) {
         let authorized = self
             .pool
@@ -364,13 +379,14 @@ impl SchedulerCore {
             return self.idle(worker, slot, caps.as_ref());
         }
         let policy = Arc::clone(&self.policy);
+        let instance = self.with_live_transfers(instance);
         match self.tracker.take_best_of_kind(
             worker,
             authorized.as_ref(),
             caps.as_ref(),
             kind,
             &*policy,
-            instance,
+            &instance,
         ) {
             Some(assignment) => {
                 self.idle.clear(worker, slot);
@@ -430,6 +446,7 @@ impl SchedulerCore {
             .collect();
 
         let policy = Arc::clone(&self.policy);
+        let instance = self.with_live_transfers(instance);
         let seats: Vec<CommittedSeat> = placement
             .seats
             .iter()
@@ -447,7 +464,7 @@ impl SchedulerCore {
                         &m.key,
                         &job,
                         &*policy,
-                        instance,
+                        &instance,
                     ),
                     job,
                     role: m.role.clone(),
@@ -677,6 +694,11 @@ impl Actor for CoreActor {
                 core.idle.forget_worker(&worker);
                 let _ = reply.send(());
             }
+            SchedulerMsg::EnterStage {
+                worker,
+                job_id,
+                stage,
+            } => core.pool.enter_stage(&worker, &job_id, stage),
             SchedulerMsg::Enqueue { job_id, job, reply } => {
                 core.tracker.add_pending(job_id.clone(), job);
                 core.pool.remove_sent_candidate(&job_id);

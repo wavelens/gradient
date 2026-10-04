@@ -531,6 +531,12 @@ impl WorkerConfig {
         self.build.max_cores.unwrap_or(0)
     }
 
+    pub fn cpu_core_score(&self) -> u32 {
+        self.system
+            .cpu_core_score
+            .unwrap_or_else(crate::metrics::cpu_core_score)
+    }
+
     pub fn capabilities(&self) -> GradientCapabilities {
         GradientCapabilities {
             core: false,

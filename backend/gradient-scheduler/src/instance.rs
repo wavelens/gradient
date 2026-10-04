@@ -219,6 +219,7 @@ pub async fn compute_instance_context(
         cpu_core_score_mean: counts.cpu_core_score_mean,
         upload_speed_mean_mbps: counts.upload_speed_mean_mbps,
         download_speed_mean_mbps: counts.download_speed_mean_mbps,
+        ..Default::default()
     }
 }
 

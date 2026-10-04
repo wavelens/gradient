@@ -9,7 +9,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, Ordering};
 
 use gradient_types::ids::ProjectId;
-use gradient_wire::types::{GradientCapabilities, JobKind};
+use gradient_wire::types::{BuildStage, GradientCapabilities, JobKind};
 
 use crate::peer_auth::PeerAuth;
 use crate::session_port::{SessionPort, SessionSignal};
@@ -190,6 +190,7 @@ impl WorkerPool {
                 disk_speed_mbps: s.disk_speed_mbps,
                 upload_speed_mbps: s.upload_speed_mbps,
                 download_speed_mbps: s.download_speed_mbps,
+                running_builds: s.jobs_in(BuildStage::Build),
             }
         })
     }
@@ -204,7 +205,7 @@ impl WorkerPool {
                 shared.session.signal(SessionSignal::Close {
                     reason: "unregistered by the scheduler".into(),
                 });
-                shared.assigned_jobs.iter().cloned().collect()
+                shared.assigned_jobs.keys().cloned().collect()
             })
             .unwrap_or_default()
     }
@@ -268,8 +269,27 @@ impl WorkerPool {
 
     pub fn assign_job(&mut self, worker_id: &str, job_id: &str) {
         if let Some(slot) = self.workers.get_mut(worker_id) {
-            slot.shared_mut().assigned_jobs.insert(job_id.to_owned());
+            slot.shared_mut()
+                .assigned_jobs
+                .insert(job_id.to_owned(), None);
         }
+    }
+
+    pub fn enter_stage(&mut self, worker_id: &str, job_id: &str, stage: BuildStage) {
+        if let Some(current) = self
+            .workers
+            .get_mut(worker_id)
+            .and_then(|slot| slot.shared_mut().assigned_jobs.get_mut(job_id))
+        {
+            *current = Some(stage);
+        }
+    }
+
+    pub fn fleet_jobs_in(&self, stage: BuildStage) -> u32 {
+        self.workers
+            .values()
+            .map(|slot| slot.shared().jobs_in(stage))
+            .sum()
     }
 
     pub fn release_job(&mut self, worker_id: &str, job_id: &str) -> bool {
@@ -758,6 +778,30 @@ mod tests {
 
         assert!(pool.release_job("w1", "j2"));
         assert_eq!(pool.all_workers()[0].assigned_job_count, 0);
+    }
+
+    #[test]
+    fn a_jobs_stage_counts_for_its_worker_and_the_fleet_until_it_is_released() {
+        let mut pool = WorkerPool::new();
+        for id in ["w1", "w2"] {
+            pool.register(id.into(), caps(), HashSet::new(), port().0);
+        }
+        pool.assign_job("w1", "a");
+        pool.assign_job("w1", "b");
+        pool.assign_job("w2", "c");
+        pool.enter_stage("w1", "a", BuildStage::Build);
+        pool.enter_stage("w1", "b", BuildStage::Prefetch);
+        pool.enter_stage("w2", "c", BuildStage::Prefetch);
+        pool.enter_stage("w2", "never-assigned", BuildStage::Build);
+
+        assert_eq!(pool.metrics_for("w1").unwrap().running_builds, 1);
+        assert_eq!(pool.metrics_for("w2").unwrap().running_builds, 0);
+        assert_eq!(pool.fleet_jobs_in(BuildStage::Prefetch), 2);
+
+        pool.enter_stage("w1", "b", BuildStage::Build);
+        pool.release_job("w1", "a");
+        assert_eq!(pool.metrics_for("w1").unwrap().running_builds, 1);
+        assert_eq!(pool.fleet_jobs_in(BuildStage::Prefetch), 1);
     }
 
     #[test]

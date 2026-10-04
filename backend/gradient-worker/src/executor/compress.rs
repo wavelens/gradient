@@ -13,7 +13,7 @@ use std::collections::{BTreeMap, HashMap};
 
 use anyhow::Result;
 use gradient_util::store_path::nix_store_path;
-use gradient_wire::messages::{BuildProgressPhase, CachedPath};
+use gradient_wire::messages::{BuildProgressPhase, BuildStage, CachedPath};
 use tokio::sync::watch;
 
 use super::NarUpload;
@@ -36,7 +36,7 @@ pub async fn push_outputs(
         return Ok(UploadedNar::default());
     }
 
-    updater.report_compressing().await?;
+    updater.report_stage(BuildStage::Upload).await?;
     let paths: Vec<String> = outputs
         .iter()
         .map(|o| nix_store_path(&o.store_path))

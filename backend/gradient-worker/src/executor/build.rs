@@ -25,7 +25,7 @@ use tracing::{debug, info, warn};
 use crate::nix::store::LocalNixStore;
 use crate::proto::job::JobUpdater;
 
-use super::build_metrics::{ResourceUsage, build_metrics};
+use super::build_metrics::{BuildHost, RUNNING_BUILDS, ResourceUsage, build_metrics};
 use super::derivation::get_basic_derivation;
 pub use super::failure::BuildError;
 use super::failure::classify_build_error;
@@ -286,7 +286,7 @@ pub async fn build_derivation(
     abort: &mut watch::Receiver<bool>,
     log_limits: crate::executor::log_limit::LogRateLimits,
     log_fetch_from_store: bool,
-    build_cores: u32,
+    host: BuildHost,
 ) -> Result<Vec<BuildOutput>, BuildError> {
     let parsed = ParsedDerivation::load(&task.drv_path)
         .await
@@ -300,9 +300,10 @@ pub async fn build_derivation(
         task.max_silent_secs,
         abort,
         log_limits,
-        build_cores,
+        host.build_cores,
     );
 
+    let running = RUNNING_BUILDS.start();
     let started = std::time::Instant::now();
     let realized = match task.timeout_secs.map(std::time::Duration::from_secs) {
         Some(d) => tokio::time::timeout(d, realize).await.unwrap_or_else(|_| {
@@ -315,7 +316,8 @@ pub async fn build_derivation(
     };
 
     let usage = realized.as_ref().map(ResourceUsage::of).unwrap_or_default();
-    let metrics = build_metrics(usage, started.elapsed().as_millis() as u64);
+    let metrics = build_metrics(usage, started.elapsed().as_millis() as u64, host, &running);
+    drop(running);
     let built = match realized {
         Ok(result) => {
             parsed
