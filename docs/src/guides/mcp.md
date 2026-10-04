@@ -1,6 +1,6 @@
 # Connect an AI Assistant
 
-Evaluations, builds and build logs readable by any [Model Context Protocol](https://modelcontextprotocol.io) client (Claude Code, Claude Desktop, Cursor), through `gradient mcp`. An assistant can find the failed build and read the log line that broke the build.
+Every evaluation, build and build log readable through `gradient mcp` by any [Model Context Protocol](https://modelcontextprotocol.io) client (Claude Code, Claude Desktop, Cursor). An assistant can find the failed build and read the log line that broke the build.
 
 **Requirements:**
 
@@ -12,7 +12,7 @@ Evaluations, builds and build logs readable by any [Model Context Protocol](http
 gradient login https://gradient.example.com
 ```
 
-Every tool call is running as this user. Tool calls see only the user's projects. `gradient project select <name>` is setting the default project for tools that take one.
+Every tool call will run as this user. Tool calls see only the user's projects. `gradient project select <name>` can set the default project for tools that take one.
 
 ## 2. Add the Server to the Client
 
@@ -37,7 +37,7 @@ Every tool call is running as this user. Tool calls see only the user's projects
 
 ## Verify Deployment
 
-Ask the assistant: "Explain the last failed evaluation of `web-app`." The assistant is walking down the tools.
+Ask the assistant: "Explain the last failed evaluation of `web-app`." The assistant will walk down the tools.
 
 ```mermaid
 flowchart LR
@@ -56,7 +56,7 @@ flowchart LR
 
 ## Control Tools
 
-`gradient mcp --control` is letting the assistant act on the CI, limited by the user's project permissions.
+`gradient mcp --control` will let the assistant act on the CI, limited by the user's project permissions.
 
 | Tool | Effect |
 |---|---|

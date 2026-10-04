@@ -1,6 +1,6 @@
 # Evaluation Wildcards
 
-A task's wildcard is selecting the flake outputs for Gradient to build. The wildcard is a comma-separated list of attribute paths. `*` and `#` are matching any name at their level. The default is `packages.x86_64-linux.*`.
+A task's wildcard will select the flake outputs for Gradient to build. The wildcard is a comma-separated list of attribute paths. `*` and `#` are matching any name at their level. The default is `packages.x86_64-linux.*`.
 
 ## Examples
 
@@ -34,7 +34,7 @@ packages.x86_64-linux.#   # only the derivations directly under x86_64-linux
 packages.x86_64-linux.*   # the same, plus derivations inside attribute sets one level down
 ```
 
-`#` is the recommended choice over the `*` default. Flake outputs are keeping derivations at a fixed depth, and `#` is selecting exactly that depth. `*` is fitting outputs with nested package sets, such as `legacyPackages`.
+`#` is the recommended choice over the `*` default. Flake outputs are keeping derivations at a fixed depth, and `#` will select exactly that depth. A `*` is the right fit for outputs with nested package sets, such as `legacyPackages`.
 
 ## Roots
 

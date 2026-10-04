@@ -1,6 +1,6 @@
 # Architecture
 
-Gradient is a Rust server, a Rust worker, an Angular frontend and a Rust CLI. The server is holding the database and the NAR store and is never talking to a Nix daemon. Workers are performing every store operation.
+Gradient is a Rust server, a Rust worker, an Angular frontend and a Rust CLI. The database and the NAR store belong to the server. The server has no connection to a Nix daemon. Workers perform every store operation.
 
 ```mermaid
 flowchart LR
@@ -24,13 +24,13 @@ flowchart LR
 | `gradient-server` | `backend/` (root) | HTTP API, binary cache, worker sessions, scheduler |
 | `gradient-worker` | `gradient-worker` | Fetch, evaluate and build against a local `nix-daemon` |
 | `gradient` | `cli/` | Command-line client for the REST API |
-| `gradient-sql-gate` | `backend/` (feature `sql-gate`) | Explaining every registered statement, see [Tests](tests.md#sql-plan-gate) |
+| `gradient-sql-gate` | `backend/` (feature `sql-gate`) | Explaining every registered statement, see [Tests](tests.md#sql-plan-check) |
 | `gradient-daemon` | `gradient-daemon` (feature `mock`) | Nix daemon protocol server with a mock store, for VM tests |
 | `gradient-proxy` | Separate, closed-source repository | [Federation](proto/federation.md) gateway |
 
 ## Server
 
-The server is one process. Its long-lived work is running under a supervision tree (`gradient_util::supervision`, on ractor), started from the shared `Shutdown` coordinator. Subsystems are registering children with `Shutdown::supervise` or `supervise_now`.
+The server is one process. Long-lived server tasks run under a supervision tree (`gradient_util::supervision`, on ractor), started from the shared `Shutdown` coordinator. Subsystems register children with `Shutdown::supervise` or `supervise_now`.
 
 ```text
 root
@@ -61,29 +61,30 @@ root
 |---|---|---|
 | `graph` | Every request-path write to `derivation*`, `build_job`, `build_attempt`, `cached_path`, and the retires of maintenance | [Shared Builds](scheduler/shared-builds.md) |
 | `scheduler-core` | `WorkerPool` and the candidate cache (`JobTracker`). `Scheduler` is a facade, one message per method | [Capabilities and Assignment](proto/capabilities-and-dispatch.md) |
-| `SessionActor` | One worker connection. The reader is handing the actor frames in order, up to 64 unanswered. TCP backpressure is holding any frame beyond that | [Connection](proto/connection.md) |
+| `SessionActor` | One worker connection. The reader will hand the actor frames in order, up to 64 unanswered. TCP backpressure will hold any frame beyond that | [Connection](proto/connection.md) |
 | `effects` | Pending deliveries (`pending_delivery`): 8 workers, 6 attempts with backoff doubling from 30 s (capped at 15 min), then dead letter | [Events and Webhooks](../reference/events.md) |
 
-- **Pull-based assignment:** a claim is a `dispatched_job` insert in Postgres (`gradient_db::scheduling::assignment_record::claim_assignment`). The scheduler actor is only caching candidates.
-- **Session signals:** the scheduler is reaching a session only through `SessionPort` (`Offers`, `Reauth`, `Abort`, `Drain`, `Close`). A burst of enqueues is collapsing into one offer per generation.
-- **Off-session RPCs:** the reader is starting `CacheQuery` and `QueryKnownDerivations` as tracked tasks the moment they arrive. The session is starting `WorkerMetrics` the same way. A slow frame can never hold back a lookup the worker is waiting on. Log chunks go through a per-session lane, flushed before a job's completion. A respawned core actor is getting every live session and its jobs back from the sessions supervisor.
-- **State:** `AppState` (alias `ServerState`) is holding three pools (`worker_db`, `web_db`, `cache_db`), `RuntimeConfig` and the NAR store. `AppState` is also holding `UploadAdmission`, the graph handle, the event bus, and the `startable_set` and `probe_requests` channels for build-dispatch and the probe.
-- **Events** are typed (`gradient_types::events::Event`) and are flowing two ways. The in-process `EventBus` is feeding live sockets and `/api/v1/metrics/events`, with a slow subscriber skipping. `gradient_db::deliveries::events::record` is writing durable pending deliveries (`pending_delivery` rows) in the caller's transaction. `effects` is fanning these rows out into action and webhook deliveries.
-- **Uploads** are admitted before any byte is moving. Admission is using one server-wide count and byte budget, round-robin across sessions, FIFO within one, small uploads first. See [Transfer](proto/transfer.md#upload) and [NAR Storage](internals/nar-storage.md).
+- **Pull-based assignment:** A claim is a `dispatched_job` insert in Postgres (`gradient_db::scheduling::assignment_record::claim_assignment`). The scheduler actor can only cache candidates.
+- **Session signals:** The scheduler can reach a session only through `SessionPort` (`Offers`, `Reauth`, `Abort`, `Drain`, `Close`). A burst of enqueues will collapse into one offer per generation.
+- **Off-session RPCs:** The reader will start `CacheQuery` and `QueryKnownDerivations` as tracked tasks the moment they arrive. The session will start `WorkerMetrics` the same way. A slow frame can never hold back a lookup the worker needs. Log chunks go through a per-session lane, flushed before a job's completion. A respawned core actor will get every live session and its jobs back from the sessions supervisor.
+- **State:** The parts of `AppState` (alias `ServerState`) are three pools (`worker_db`, `web_db`, `cache_db`), `RuntimeConfig` and the NAR store. Other parts of `AppState` are `UploadAdmission`, the graph handle and the event bus. The `startable_set` and `probe_requests` channels for build-dispatch and the probe are part of the state too.
+- **Events:** Events are typed (`gradient_types::events::Event`) and are flowing two ways. The in-process `EventBus` will feed live sockets and `/api/v1/metrics/events`, with a slow subscriber skipping. `gradient_db::deliveries::events::record` will write durable pending deliveries (`pending_delivery` rows) in the caller's transaction. The `effects` actor will spread these rows out into action and webhook deliveries.
+- **Uploads:** Uploads are admitted before any byte can move. Uploads share one server-wide count and byte budget for admission, round-robin across sessions, FIFO within one, small uploads first. See [Transfer](proto/transfer.md#upload) and [NAR Storage](internals/nar-storage.md).
 
 ### Supervision Rules
 
 - A panicking or exiting child is respawned after a backoff of 1 s doubling to 60 s. The backoff is reset after five healthy minutes.
-- A pass over its budget is cancelled in place and is ticking again afterwards.
-- Restarts, errors, timeouts and the last good pass per child are on `/api/v1/board/health`.
-- Work outliving a request is running as a tracked task. Shutdown is draining these tasks. Bare `tokio::spawn` is a clippy error in the backend workspace.
+- A pass over its budget is cancelled in place and will tick again afterwards.
+- Restarts, errors, timeouts and the last good pass per child are on the `/api/v1/board/health` endpoint.
+- Work outliving a request must run as a tracked task. Shutdown will drain these tasks. Bare `tokio::spawn` is a clippy error in the backend workspace.
 
 ## Worker
 
-- Connecting to the server at `/proto`, or accepting connections with `discoverable`.
-- Running flake jobs (fetch, evaluate) and build jobs, see [Jobs](proto/jobs.md). Evaluation is running in a subprocess pool, see [Eval Worker Setup](eval-worker.md).
+- Connecting to the server at `/proto`, or accepting connections with the `discoverable` option.
+- Running flake jobs (fetch, evaluate) and build jobs ([Jobs](proto/jobs.md)).
+- Evaluating in a subprocess pool ([Eval Worker Setup](eval-worker.md)).
 - Talking to the local `nix-daemon` through harmonia and holding GC roots for the worker's builds.
-- Never signing. The server is signing every cached path, see [Cache Serving](internals/cache-serving.md).
+- Never signing. Signatures for every cached path come from the server ([Cache Serving](internals/cache-serving.md)).
 
 ## Crates
 
@@ -123,23 +124,23 @@ Every backend crate is `backend/gradient-<name>`. The workspace root is `gradien
 
 ## Database
 
-- PostgreSQL 18 or newer is the only database. Migrations live in `backend/gradient-migration/src/`. The server is applying them at startup, see [Migrations](migrations.md).
+- PostgreSQL 18 or newer is the only database. Migrations live in `backend/gradient-migration/src/`. The server will apply them at startup ([Migrations](migrations.md)).
 - Graph transactions aborted by a deadlock or serialization failure get at most three attempts. Passes outside the graph writer are not retried and repeat on their next tick.
-- Advisory locks in namespace `643` (`gradient_db::graph::shared_build_guard`) and hash-ordered row locks keep counter seeds and flips consistent, see [Shared Builds](scheduler/shared-builds.md).
-- Postgres is requiring `max_locks_per_transaction` of at least 256. The server is logging an error below that.
-- Timestamps are `NaiveDateTime` in UTC. `NULL_TIME` (`1970-01-01 00:00:00`) is standing for "never".
-- `backend/clippy.toml` is forbidding `reqwest::Client::new` and raw `Statement` construction. Statements go through `gradient_db::sql!` for the plan gate.
+- Advisory locks in namespace `643` (`gradient_db::graph::shared_build_guard`) and hash-ordered row locks keep counter seeds and state changes consistent ([Shared Builds](scheduler/shared-builds.md)).
+- Postgres must allow a `max_locks_per_transaction` value of at least 256. The server will log an error below that.
+- Timestamps are `NaiveDateTime` in UTC. The `NULL_TIME` value (`1970-01-01 00:00:00`) can mean "never".
+- `backend/clippy.toml` will forbid `reqwest::Client::new` and raw `Statement` construction. Statements go through `gradient_db::sql!` for the plan check.
 
 ## Frontend
 
-- A standalone Angular 22 app in `frontend/`, talking only to the REST API, built to static files and served by nginx or Caddy.
+- A standalone Angular 22 app in `frontend/`, talking only to the REST API, built to static files and delivered through nginx or Caddy.
 - Standalone components with signals, the in-repo `gr-ui` layer on `@angular/cdk`, Apache ECharts, SCSS variables from `_variables.scss`. See the [Frontend Style Guide](frontend-style-guide.md).
 
 ## CLI
 
 - A separate workspace in `cli/`: the `gradient-cli` package (binary `gradient`) and `connector`, the typed REST client.
-- The optional `eval` feature is path-depending on `backend/gradient-eval` for local evaluation.
-- The configuration file is `$XDG_CONFIG_HOME/gradient/config.toml` (`~/.config/gradient/config.toml`). macOS is keeping an existing legacy native path.
+- The optional `eval` feature has a path dependency on `backend/gradient-eval` for local evaluation.
+- The configuration file is `$XDG_CONFIG_HOME/gradient/config.toml` (`~/.config/gradient/config.toml`). An existing legacy native path on macOS will stay in use.
 
 ## Related
 

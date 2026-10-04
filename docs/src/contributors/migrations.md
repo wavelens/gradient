@@ -1,6 +1,6 @@
 # Database Migrations
 
-Gradient is using [SeaORM migrations](https://www.sea-ql.org/SeaORM/docs/migration/setting-up-migration/). Files live in `backend/gradient-migration/src/`, registered in its `lib.rs`. Every server start is applying the ones not yet in `seaql_migrations`.
+Gradient migrations are [SeaORM migrations](https://www.sea-ql.org/SeaORM/docs/migration/setting-up-migration/). Files live in `backend/gradient-migration/src/`, registered in its `lib.rs`. Each server start will apply the ones not yet in `seaql_migrations`.
 
 ```mermaid
 flowchart LR
@@ -15,20 +15,20 @@ flowchart LR
 
 ## Adding a Migration
 
-1. A new file `mYYYYMMDD_NNNNNN_<name>.rs` in `backend/gradient-migration/src/`, registered in `lib.rs`.
-2. The matching entity in `backend/gradient-entity/src/`.
+1. A new file `mYYYYMMDD_NNNNNN_<name>.rs` in `backend/gradient-migration/src/`, registered in the `lib.rs` file.
+2. The matching entity in the `backend/gradient-entity/src/` directory.
 3. A `down()` that is a real inverse, or an explicit `Err(DbErr::Migration("... is irreversible"))` for a lossy change. A silent no-op `down()` is not allowed. Such a `down()` would be claiming a reversibility missing from the migration.
 
 ## Baseline
 
-`m20241101_000000_baseline` is replacing the 151 migrations before globalization (`m20241107_135027_create_table_user` to `m20260619_000001_drop_cached_path_store_path`, #478).
+`m20241101_000000_baseline` replaced the 151 migrations before globalization (`m20241107_135027_create_table_user` to `m20260619_000001_drop_cached_path_store_path`, #478).
 
 | Database | Baseline behavior |
 |---|---|
 | Fresh | Emitting the schema left by that chain: a cleaned `pg_dump` of the real chain, verified by dump diff, plus the constant `cache_role` seed rows |
-| Already provisioned | Detecting the schema and doing nothing. `prune_removed_migrations` is dropping the deleted files' `seaql_migrations` rows |
+| Already provisioned | Detecting the schema and doing nothing. `prune_removed_migrations` will drop the deleted files' `seaql_migrations` rows |
 
-**Upgrade floor:** a database must be at or past `m20260619_010000_globalize_derivation` before upgrading to a release with the baseline. A database stuck earlier is upgrading through an older release first.
+**Upgrade floor:** a database must be at or past `m20260619_010000_globalize_derivation` before upgrading to a release with the baseline. A database stuck earlier must upgrade through an older release first.
 
 ### Regenerating After a Future Squash
 
@@ -39,14 +39,14 @@ flowchart LR
 
 ## Cancelling Pairs
 
-Some columns are added in one release and dropped in a later one. Such a column is leaving an `add_X` / `drop_X` pair every new install is running for nothing. Such pairs are removed under the rules below.
+Some columns are added in one release and dropped in a later one. Such a column will leave an `add_X` / `drop_X` pair behind. Every new install would run that pair for nothing. Such pairs are removed under the rules below.
 
 ### Removal Conditions
 
 Both conditions must hold.
 
 - The release with `drop_X` is out, plus at least one later minor release on top of that release. Live installs are getting a window to apply the drop.
-- No migration between the two is touching `X` in a way the removal would change. `rg -n "<ColumnName>|<column_name>" backend/gradient-migration/` is checking this.
+- No migration between the two may touch `X` in a way the removal would change. `rg -n "<ColumnName>|<column_name>" backend/gradient-migration/` can check this condition.
 
 ### Removal Limits
 
@@ -55,8 +55,8 @@ Both conditions must hold.
 
 ### Existing Installs
 
-- Existing installs keep `seaql_migrations` rows for deleted files. SeaORM is rejecting these rows ("Applied migrations not found in migration list").
-- `prune_removed_migrations` (`backend/gradient-db/src/connection/mod.rs`) is deleting every row not in `Migrator::migrations()` before `Migrator::up`. The function is logging the pruned versions at `info`.
+- Existing installs keep `seaql_migrations` rows for deleted files. SeaORM would reject these rows ("Applied migrations not found in migration list").
+- `prune_removed_migrations` (`backend/gradient-db/src/connection/mod.rs`) can delete every row not in `Migrator::migrations()` before the `Migrator::up` call. The function will log the removed versions at `info` level.
 - Deleting the file and its `lib.rs` entry is the whole change.
 
 ## Retired Pairs

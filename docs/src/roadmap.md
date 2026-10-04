@@ -14,7 +14,7 @@ The first release with a stability pledge.
 
 -   :material-shield-check: **Stability Pledge**
 
-    Stable, professional releases become a commitment. Each release is shipping migrations for the NixOS module options, the PostgreSQL schema, cache storage, the API and the worker protocol.
+    Stable, professional releases become a commitment. Every release will include migrations for the NixOS module options, the PostgreSQL schema, cache storage, the API and the worker protocol.
 
 -   :material-database-sync: **Storage Migrations**
 
@@ -22,11 +22,11 @@ The first release with a stability pledge.
 
 -   :material-broom: **Continuous Deep GC**
 
-    Deep garbage collection is running slowly in the background at all times. Checkpoints let each pass resume where the last one stopped.
+    Deep garbage collection will run slowly in the background at all times. Checkpoints let each pass resume where the last one stopped.
 
 -   :material-server-network: **Cluster Jobs**
 
-    Jobs that run on several workers at once. Gradient is allocating all members together. Jobs needing a fast interconnect get all members from one [zone](concepts/workers.md#zones).
+    Jobs that run on many workers at once. Gradient will allocate all members together. Jobs needing a fast interconnect get all members from one [zone](concepts/workers.md#zones).
 
 -   :material-console-network: **SSH Builds**
 
@@ -50,7 +50,7 @@ Faster evaluation of large flakes.
 
 -   :material-graph: **Multi-Node Evaluations**
 
-    One evaluation split across several workers. Large flakes like nixpkgs or fleets of NixOS hosts finish in a fraction of the time.
+    One evaluation split across many workers. Large flakes like nixpkgs or fleets of NixOS hosts finish in a fraction of the time.
 
 </div>
 
@@ -66,7 +66,7 @@ Jobs beyond the Nix sandbox.
 
 -   :material-play-network: **Runner Workers**
 
-    Workers that build outside the sandbox. Integration tests with network access, real hardware or deployment credentials.
+    Workers that build outside the sandbox. Integration testing with network access, real hardware or deployment credentials.
 
 </div>
 
@@ -82,11 +82,11 @@ Gradient without a single point of failure.
 
 -   :material-server-plus: **High Availability**
 
-    Several Gradient servers run one instance. Builds, caches and the web interface stay up while a server is failing or updating.
+    A group of Gradient servers can run one instance. Builds, caches and the web interface stay up during the failure or update of a server.
 
 -   :material-earth: **Federation**
 
-    Gradient instances connect to each other. Builds and caches flow between instances. Other instances are never rebuilding a path that one instance already built.
+    Gradient instances connect to each other. Builds and caches flow between instances. Other instances will never rebuild a path that one instance already built.
 
 </div>
 

@@ -1,6 +1,6 @@
 # Projects and Tasks
 
-A **project** is grouping people, machines and caches. A **task** inside a project is naming one repository and the flake outputs to build from that repository.
+A **project** is a group of people, machines and caches. A **task** inside a project is one repository plus the flake outputs to build from that repository.
 
 ```mermaid
 flowchart LR
@@ -16,9 +16,9 @@ flowchart LR
 
 - **Members and Roles**: Admin, Write, View, or custom roles built from single permissions.
 - **SSH Key**: one Ed25519 key per project, generated automatically, for cloning private repositories.
-- **Workers**: a worker is only receiving jobs from projects with the worker enabled.
+- **Workers**: workers only receive jobs from projects with the worker enabled.
 - **Teams**: granted [teams](teams.md) bring their users with a role, their workers, or both.
-- **Cache Subscriptions**: Gradient is pushing every build output of a project to its subscribed caches.
+- **Cache Subscriptions**: build outputs of a project go to every subscribed cache.
 - **Integrations**: connections to GitHub, Gitea / Forgejo or GitLab for incoming events and outgoing status.
 
 ## Task
@@ -34,16 +34,16 @@ flowchart LR
 
 ## Concurrency
 
-A task is limited to one active evaluation at a time. A trigger firing during a running evaluation is following the task's concurrency policy.
+A task is limited to one active evaluation at a time. Triggers firing during a running evaluation follow the task's concurrency policy.
 
 | Policy | Running evaluation | Running builds |
 |---|---|---|
-| `soft_abort` (default) | Aborted, with the new evaluation taking over | Finish, and the new evaluation is reusing their outputs |
+| `soft_abort` (default) | Aborted, with the new evaluation taking over | Finish, and the new evaluation will reuse their outputs |
 | `hard_abort` | Aborted | Cancelled |
-| `skip` | Running on | Keep running. Gradient is dropping the new event |
+| `skip` | Running on | Keep running. The new event is dropped |
 | `all` | Running on, with the new evaluation running alongside | Keep running |
 
 ## Related
 
 - [First Project](../get-started/first-project.md): create a project and a task
-- [Overview](overview.md): how evaluations, builds, workers and caches connect
+- [Overview](overview.md): the whole path from evaluation and build to worker and cache

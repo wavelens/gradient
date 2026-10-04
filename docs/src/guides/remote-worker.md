@@ -9,7 +9,7 @@ A second machine evaluating and building for a project, next to or instead of th
 
 ## 1. Pick a Worker ID
 
-Every worker is carrying a UUID as its ID. The command below is generating one.
+Every worker has a UUID as its ID. The command below can generate one.
 
 ```sh
 cat /proc/sys/kernel/random/uuid
@@ -21,7 +21,7 @@ cat /proc/sys/kernel/random/uuid
 
     Open **Settings -> Workers -> Register Worker** in the project. Enter a name and the worker ID from step 1.
 
-    The dialog is showing a **Peers file entry** once. Store the entry as a secret on the worker machine, e.g. `/run/secrets/gradient-worker-peers`.
+    The dialog will show a **Peers file entry** once. Store the entry as a secret on the worker machine, e.g. `/run/secrets/gradient-worker-peers`.
 
 === "Declarative"
 
@@ -38,21 +38,21 @@ cat /proc/sys/kernel/random/uuid
     };
     ```
 
-    1.  Pinned for the worker's peers file. The peers file is naming the project before the server's first start.
-    2.  Created with `openssl rand -base64 48`. The worker's peers file is holding the same token.
+    1.  Pinned for the worker's peers file. The peers file must name the project before the server's first start.
+    2.  Created with `openssl rand -base64 48`. The worker's peers file must hold the same token.
 
     The peers file entry on the worker machine is `<project uuid>:<token>`.
 
 ## 3. Open the Server to Workers
 
-Remote workers connect over a WebSocket on `/proto`. The bundled nginx is forwarding `/proto` only with `proto.public` enabled.
+Remote workers connect over a WebSocket on `/proto`. The bundled nginx will forward `/proto` only with `proto.public` enabled.
 
 ```nix
 # configuration.nix on the server
 services.gradient.proto.public = true;
 ```
 
-The local worker is connecting on the loopback address without this setting.
+The local worker can connect on the loopback address without this setting.
 
 ## 4. Configure the Machine
 
@@ -72,19 +72,19 @@ The local worker is connecting on the loopback address without this setting.
 ```
 
 1.  One line per project on this worker, see [Peers File](#peers-file).
-2.  Optional. Recording memory and CPU per build. The scheduler is using the numbers to place heavy builds on machines that fit them.
+2.  Optional. Recording memory and CPU per build. The scheduler will use the numbers to place heavy builds on machines that fit them.
 
 ## Verify Deployment
 
-- **Settings -> Workers** is listing the worker as connected, with the detected systems and features.
-- The next evaluation of the project is showing builds on the new worker.
+- The page **Settings -> Workers** will list the worker as connected, with the detected systems and features.
+- The next evaluation of the project will show builds on the new worker.
 
 !!! tip "One Machine, Many Projects"
     Register the same worker ID in each project. Add each project's peers file entry as its own line. A [team worker](../concepts/teams.md#team-workers) is the alternative for a worker of one team.
 
 ## Peers File
 
-The worker is authenticating with one line per project.
+The worker will authenticate with one line per project.
 
 ```text
 # /run/secrets/gradient-worker-peers
@@ -92,7 +92,7 @@ The worker is authenticating with one line per project.
 <other project uuid>:<other token>
 ```
 
-A single `*:<token>` line is answering every project with the same token instead.
+A single `*:<token>` line can cover every project with the same token instead.
 
 | | One line per project | `*:<token>` |
 |---|---|---|

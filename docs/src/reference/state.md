@@ -1,6 +1,6 @@
 # Declarative State
 
-Every option under `services.gradient.state`, generated from `nix/modules`. [Manage Gradient with Nix](../guides/manage-with-nix.md) is covering the workflow. [Declarative State](../concepts/declarative-state.md) is explaining the model.
+Every option under `services.gradient.state`, generated from `nix/modules`. [Manage Gradient with Nix](../guides/manage-with-nix.md) can guide through the workflow. [Declarative State](../concepts/declarative-state.md) can explain the model.
 
 ```nix
 services.gradient.state = {
@@ -183,7 +183,7 @@ services.gradient.state = {
 | `enable_fetch` | bool | `true` | Whether the server is granting this registration the worker's `fetch` capability. |
 | `enabled` | bool | `true` | Whether the worker is active. Changes from the UI last until the next server start. |
 | `projects` | list of string | `[ ]` | Projects the worker is registered under, one registration per project. Leave empty for a team worker. |
-| `team` | null or string | `null` | Team owning this worker. A team worker can serve every project granting the team's workers. Mutually exclusive with `projects`. |
+| `team` | null or string | `null` | Team owning this worker. A team worker can build for every project granting the team's workers. Mutually exclusive with `projects`. |
 | `token_file` | path | - | File containing the worker's authentication token. |
 | `url` | null or string | `null` | WebSocket URL on which the worker is accepting server connections. |
 | `worker_id` | string | - | Worker identity. |
@@ -197,7 +197,7 @@ services.gradient.state = {
 | `reporter_pull_request` | Inbound integration | `branches`, `actions` (default `opened`, `synchronize`, `reopened`), `require_approval` (default `true`: pull requests from non-writers are waiting for a maintainer's approval) |
 | `time` | - | `cron`, six fields in UTC: `sec min hour dom mon dow`, e.g. `"0 0 2 * * *"` |
 
-`triggers = null` is keeping the existing triggers. A new task declared without `triggers` is starting with none. An empty list is invalid.
+`triggers = null` will keep the existing triggers. A new task declared without `triggers` will start with none. An empty list is invalid.
 
 ## Action Types
 

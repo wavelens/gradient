@@ -1,6 +1,6 @@
 # Overview
 
-Gradient is organising CI around **projects**. A project is holding **tasks**. Each task is turning a flake into **evaluations**. Each evaluation is fanning out into **builds**. Builds run on **workers** and end up in **caches**.
+CI in Gradient is organised around **projects**. Projects hold **tasks**. Tasks turn a flake into **evaluations**. Evaluations split into **builds**. **Workers** run the builds, and the outputs end up in **caches**.
 
 ```mermaid
 flowchart LR
@@ -31,7 +31,7 @@ flowchart LR
 
 ## Shared Builds
 
-The whole instance is building a derivation only once. Two projects depending on the same derivation share one build. The first evaluation reaching the derivation is starting the build. The other evaluations wait for the same result.
+The whole instance will build a derivation only once. Two projects depending on the same derivation share one build. The first evaluation reaching the derivation will start the build. The other evaluations wait for the same result.
 
 ## Related
 

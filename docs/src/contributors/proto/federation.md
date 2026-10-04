@@ -1,6 +1,6 @@
 # Federation
 
-`gradient-proxy` is joining pools of workers to customers' Gradient servers. Each customer (tenant) is seeing the proxy as one worker. The proxy is speaking this protocol on both legs. The proxy is an authority to its own workers and a worker to every tenant's server.
+The `gradient-proxy` service can join pools of workers to customers' Gradient servers. Customers (tenants) see the proxy as one worker. Both legs of the proxy use this protocol. The proxy is an authority to its own workers and a worker to every tenant's server.
 
 ```mermaid
 flowchart RL
@@ -10,15 +10,15 @@ flowchart RL
     P -->|session B| SB[Server B]
 ```
 
-`gradient-proxy` is a separate repository with its own NixOS module and `GRADIENT_PROXY_*` configuration. A full Gradient server is never connecting to another server.
+`gradient-proxy` is a separate repository with its own NixOS module and `GRADIENT_PROXY_*` configuration. Full Gradient servers never connect to other servers.
 
 ## Upstream Leg
 
-The proxy is opening one normal worker session per tenant. The session is following the [connection page](connection.md): `InitConnection`, `AuthChallenge`, `AuthResponse`, `InitAck`. The customer is registering the proxy's worker ID and token on their server like any worker. The operator is storing both as the tenant's upstream link.
+The proxy will open one normal worker session per tenant. These sessions follow `InitConnection`, `AuthChallenge`, `AuthResponse` and `InitAck` from the [connection page](connection.md) like any worker session. Customers register the proxy's worker ID and token on their server like any worker. The operator will store both as the tenant's upstream link.
 
 - A session is open while the link is `enabled` and the tenant may run.
-- An auth rejection (401 or 403) is marking the link `failing` with the reason.
-- No new session is starting until the link is set again.
+- An auth rejection (401 or 403) will mark the link `failing` with the reason.
+- No new session can start until the link is set again.
 
 | Aspect | Behavior |
 |---|---|
@@ -30,20 +30,20 @@ The proxy is opening one normal worker session per tenant. The session is follow
 
 ## Downstream Leg
 
-The proxy is authorizing its own workers from its small Postgres database.
+The proxy will authorize its own workers from its small Postgres database.
 
 - Each authorized worker is a row: ID, name, tenant, argon2 token hash and allowed capabilities.
-- `AuthChallenge` is naming only the worker's own ID.
+- The `AuthChallenge` will name only the worker's own ID.
 - The negotiated capabilities are the worker's offer AND the allowed set, with `federate` always off.
-- Revoking a row is closing the worker's live session.
-- Every worker is serving every peer its tenant's server authorized.
+- Revoking a row will close the worker's live session.
+- Every worker can take jobs from every peer its tenant's server authorized.
 
 ## Job Forwarding
 
 | Step | Proxy behavior |
 |---|---|
 | Tenants | One hub per tenant. A worker's row is naming its tenant, and frames never cross tenants |
-| Offers | Mirroring the upstream offer book and fanning candidates out to capable workers |
+| Offers | Mirroring the upstream offer book and handing candidates out to capable workers |
 | Scores | Forwarding the best score per candidate, changes only, once per second |
 | `RequestJob` | A worker's poll is becoming an upstream poll. The best capable waiting worker is getting the `AssignJob`. The proxy is declining without such a worker |
 | Reports | Routed by `job_id`. Queries get a fresh `query_id`. The proxy is dropping reports for jobs the worker does not own |
@@ -54,15 +54,15 @@ The proxy is authorizing its own workers from its small Postgres database.
 
 ## Passthrough
 
-- Every NAR pull, cache query and upload is going to the tenant's own Gradient server, under the remapped `job_id`, `query_id` or `request_id`.
-- The proxy is storing nothing.
+- NAR pulls, cache queries and uploads go to the tenant's own Gradient server, under the remapped `job_id`, `query_id` or `request_id`.
+- Nothing is stored on the proxy.
 - The tenant's server is the cache.
 - Transfers over upstream presigned URLs bypass the proxy.
-- The proxy is exposing no cache to its upstream servers.
+- No cache on the proxy is exposed to its upstream servers.
 
 ## Hetzner Workers
 
-The proxy is booting Hetzner Cloud VMs dedicated to one tenant. A reconcile pass every 60 s is comparing each tenant's pending jobs with the tenant's VMs and the servers labelled `gradient-tenant`.
+The proxy can boot Hetzner Cloud VMs dedicated to one tenant. A reconcile pass every 60 s will compare each tenant's pending jobs with the tenant's VMs and the servers labelled `gradient-tenant`.
 
 | Rule | Behavior |
 |---|---|
@@ -74,7 +74,7 @@ The proxy is booting Hetzner Cloud VMs dedicated to one tenant. A reconcile pass
 | Leak guard | The proxy is deleting a labelled server without a VM row. The proxy is closing a row with a missing server |
 | Rate limit | Hetzner `429` and `5xx` back the tenant off from 1 s to 5 minutes. Billing is starting only after server creation |
 
-Deleting a VM is revoking the VM's token. `vm_usage` is metering each VM's uptime, from creation to deletion.
+Deleting a VM will revoke the VM's token. The `vm_usage` table will meter each VM's uptime, from creation to deletion.
 
 ## Access Control
 
@@ -83,4 +83,4 @@ Deleting a VM is revoking the VM's token. `vm_usage` is metering each VM's uptim
 | Server -> proxy | Per project: the proxy's `worker_registration` rows, tokens and `enable_fetch` / `enable_eval` / `enable_build` |
 | Proxy -> worker | Per worker: `authorized_peers` rows with tenant, token hash and allowed capabilities |
 
-The handshake is negotiating the `federate` capability, `proto.federate` on the server and `capabilities.federate` on the worker. No code is acting on the flag yet.
+The handshake will negotiate the `federate` capability, `proto.federate` on the server and `capabilities.federate` on the worker. The flag has no effect in the code yet.

@@ -1,6 +1,6 @@
 # Quick Start
 
-A running Gradient instance with its own worker, on one NixOS host. [Standalone](standalone.md) is covering a first try without a NixOS host.
+A running Gradient instance with its own worker, on one NixOS host. [Standalone](standalone.md) has a first try without a NixOS host.
 
 **Requirements:**
 
@@ -36,7 +36,7 @@ openssl rand -base64 48 > /var/lib/gradient-secrets/jwt
 openssl rand -base64 48 > /var/lib/gradient-secrets/crypt
 ```
 
-`jwt` is signing login sessions. `crypt` is encrypting secrets stored in the database. The worker is creating its own token without any file here.
+`jwt` is the key for signing login sessions. `crypt` is the key for encrypting secrets stored in the database. The worker will create its own token without any file here.
 
 !!! tip
     Manage these files with [sops-nix](https://github.com/Mic92/sops-nix) or [agenix](https://github.com/ryantm/agenix) on a production host.
@@ -60,17 +60,17 @@ openssl rand -base64 48 > /var/lib/gradient-secrets/crypt
 }
 ```
 
-1.  An nginx virtual host, set up by the module, is serving this domain.
+1.  An nginx virtual host from the module, answering on this domain.
 2.  A local PostgreSQL database for Gradient.
 3.  A worker on the same host, self-registering and joining every project.
-4.  Gradient is requiring PostgreSQL 18 or newer. The NixOS default may be older.
+4.  Gradient needs PostgreSQL 18 or newer. The NixOS default may be older.
 
 ## Verify Deployment
 
-- The login page is loading at `https://gradient.example.com`.
-- `systemctl status gradient-server gradient-worker` is showing both services running.
+- The login page is reachable at `https://gradient.example.com`.
+- `systemctl status gradient-server gradient-worker` shows both services running.
 
-The worker is staying in a reconnect loop until the first project with a cache is in place. This loop is expected. The next page is creating both.
+The worker will stay in a reconnect loop until the first project with a cache is in place. This loop is expected. The next page will create both.
 
 ## Next Steps
 

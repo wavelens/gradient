@@ -30,9 +30,9 @@ One SQLite file explaining a stuck or failed evaluation, for attaching to a [bug
 | Include build logs | off | On: the full log of every failed or aborted attempt |
 | Include instance context | on | Workers, upstream caches and the server settings. The `manageWorkers` permission is required |
 
-- The API is taking the options as query parameters (`anonymize_identities`, `anonymize_packages`, `include_logs`, `include_instance`).
+- The API can take the options as query parameters (`anonymize_identities`, `anonymize_packages`, `include_logs`, `include_instance`).
 - `include_logs` is on by default in the API.
-- The same name is always mapping to the same token within one report.
+- The same name will always map to the same token within one report.
 - Dependencies stay readable.
 - Two reports cannot be linked.
 - Store hashes stay in the file for checking a path against public caches.
@@ -46,13 +46,13 @@ Open an issue at <https://github.com/wavelens/gradient/issues> with what went wr
 
 ## Verify Deployment
 
-The browser is downloading `gradient-report-<id>-<date>.db`. The inspector is printing the summary maintainers start from.
+The browser will download `gradient-report-<id>-<date>.db`. The inspector will print the summary maintainers start from.
 
 ```sh
 nix run github:wavelens/gradient#gradient-report -- gradient-report-*.db summary
 ```
 
-The inspector is reading only the report schema of its own source revision. Reports from an older server need that release's tag, e.g. `github:wavelens/gradient/v1.4.0#gradient-report`.
+The inspector can read only the report schema of its own source revision. Reports from an older server need that release's tag, e.g. `github:wavelens/gradient/v1.4.0#gradient-report`.
 
 ## Next Steps
 

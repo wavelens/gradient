@@ -1,6 +1,6 @@
 # Monitor Gradient
 
-Server metrics in Prometheus or any OpenTelemetry collector: workers, queue, builds, evaluations, cache size and HTTP traffic. The [Job Board](../ui/job-board.md) is covering the same data inside Gradient. This guide is feeding existing dashboards and alerts.
+Server metrics in Prometheus or any OpenTelemetry collector: workers, queue, build and evaluation counts, cache size and HTTP traffic. The [Job Board](../ui/job-board.md) can show the same data inside Gradient. This guide is for feeding existing dashboards and alerts.
 
 **Requirements:**
 
@@ -25,10 +25,10 @@ services.prometheus.scrapeConfigs = [{
 }];
 ```
 
-1.  Any random string, e.g. `openssl rand -base64 32`. `GET /metrics` is answering `404` without the file.
-2.  The bundled reverse proxy does not forward `/metrics`. The scraper is talking to `listenAddr` and `port` directly.
+1.  Any random string, e.g. `openssl rand -base64 32`. `GET /metrics` will answer `404` without the file.
+2.  The bundled reverse proxy does not forward `/metrics`. The scraper must talk to `listenAddr` and `port` directly.
 
-The endpoint is refilling one request per second, with a burst of 5.
+The endpoint rate limit will refill one request per second, with a burst of 5.
 
 ## 2. OpenTelemetry
 
@@ -43,8 +43,8 @@ services.gradient.metrics.otlp = {
 
 ## Verify Deployment
 
-- Prometheus: the `gradient` target is showing **UP**. `gradient_workers_connected` is returning the number of connected workers.
-- OpenTelemetry: the server log is showing `OTLP metric push enabled`. The collector is receiving `gradient_jobs_pending`.
+- Prometheus: the `gradient` target will show **UP**. `gradient_workers_connected` will return the number of connected workers.
+- OpenTelemetry: the server log will show `OTLP metric push enabled`. The collector will receive `gradient_jobs_pending`.
 
 ## Metrics
 
@@ -77,5 +77,5 @@ groups:
 
 ## Next Steps
 
-- [Job Board](../ui/job-board.md): scheduler scores, worker load and costly builds
+- [Job Board](../ui/job-board.md): scheduler scores, worker load and build cost
 - [Configuration](../reference/configuration.md#metrics): retention and sampling intervals

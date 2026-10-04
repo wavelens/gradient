@@ -29,7 +29,7 @@ flowchart LR
 
 -   :material-graph-outline: **[Graph Queries](graph-queries.md)**
 
-    Recursive walks, the `OFFSET 0` fence, indexes, counter ripples, metrics and the graph API.
+    Recursive walks, the `OFFSET 0` fence, indexes, counter updates, metrics and the graph API.
 
 -   :material-key: **[Authentication](authentication.md)**
 
@@ -43,7 +43,7 @@ flowchart LR
 |---|---|
 | Evaluation steps, fetch and walk | [Jobs](../proto/jobs.md), [Eval Worker Setup](../eval-worker.md) |
 | Batch import, shared builds | [Shared Builds](../scheduler/shared-builds.md) |
-| Promotion, assignment gates, failure cascade | [Promotion and Counters](../scheduler/promotion-and-counters.md) |
+| Queueing, start conditions, failure cascade | [Queueing and Counters](../scheduler/queueing-and-counters.md) |
 | Offers, assignment, scoring | [Capabilities and Assignment](../proto/capabilities-and-dispatch.md), [Scoring](../scheduler/scoring.md) |
 | Uploads and downloads | [Transfer](../proto/transfer.md) |
 | Complete closures, cache access | [Cache Closure](../scheduler/cache-closure.md) |

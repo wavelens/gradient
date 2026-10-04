@@ -1,6 +1,6 @@
 # CLI
 
-Every `gradient` command, generated from the CLI's `--help`. Commands are acting on the selected project and task unless an argument (or `--project` on `gradient build`) is naming another.
+Every `gradient` command, generated from the CLI's `--help`. Commands act on the selected project and task. An argument (or `--project` on `gradient build`) can name another one.
 
 ## Install
 
@@ -39,14 +39,14 @@ Every `gradient` command, generated from the CLI's `--help`. Commands are acting
 gradient login https://gradient.example.com
 ```
 
-- `gradient login` is opening the browser to confirm the login.
-- `--no-browser` is printing the URL instead.
+- `gradient login` will open the browser to confirm the login.
+- `--no-browser` will print the URL instead.
 - `--username` and `--password` are skipping the browser for scripts.
-- The CLI is asking which project to select when several are available.
-- `~/.config/gradient/config.toml` (`$XDG_CONFIG_HOME/gradient`) is holding server, token and selections.
-- `gradient config <key> [value]` is reading or setting one of `server`, `authtoken`, `selectedproject`, `selectedtask`, `selectedbuild`.
-- `--json` on any command is printing machine-readable output and disabling prompts.
-- A server behind a private CA is working once the CA is in the system trust store, e.g. `security.pki.certificateFiles` on NixOS.
+- The CLI will ask which project to select when more than one is available.
+- `~/.config/gradient/config.toml` (`$XDG_CONFIG_HOME/gradient`) will hold server, token and selections.
+- `gradient config <key> [value]` can read or set one of `server`, `authtoken`, `selectedproject`, `selectedtask`, `selectedbuild`.
+- `--json` on any command will print machine-readable output and disable prompts.
+- A server behind a private CA will work once the CA is in the system trust store, e.g. `security.pki.certificateFiles` on NixOS.
 
 ## Account
 
@@ -132,7 +132,7 @@ gradient login https://gradient.example.com
 
 ## Interactive Mode
 
-`-i` is opening a full-screen view instead of plain output. `--json` is ignoring the flag.
+`-i` will open a full-screen view instead of plain output. `--json` will ignore the flag.
 
 | Command | View | Keys |
 |---|---|---|
@@ -142,11 +142,11 @@ gradient login https://gradient.example.com
 
 ## Download Filters
 
-`gradient download` is picking an evaluation and its build products interactively. `--evaluation` and `--products all` (or `1,3-5`) are skipping the pickers. A positional `'#packages.x86_64-linux.app'` (comma-separated for several) is selecting by attribute instead of `--products`.
+`gradient download` will pick an evaluation and its build products interactively. `--evaluation` and `--products all` (or `1,3-5`) are skipping the pickers. A positional `'#packages.x86_64-linux.app'` (comma-separated for more) can select by attribute instead of `--products`.
 
 ## Local Evaluation
 
-`gradient eval` is running the worker's evaluator locally, like `nix-eval-jobs`. The output is one JSON line per attribute with `attr`, `attrPath` and `drvPath`, or `error` for a failed attribute.
+`gradient eval` can start the worker's evaluator locally, like `nix-eval-jobs`. The output is one JSON line per attribute with `attr`, `attrPath` and `drvPath`, or `error` for a failed attribute.
 
 ```sh
 gradient eval 'packages.x86_64-linux.#'             # the flake in the current directory
@@ -154,4 +154,4 @@ gradient eval .#hello                              # one attribute, as fast as n
 gradient eval 'github:NixOS/patchelf#hydraJobs.*'  # any flake ref before the #
 ```
 
-`gradient eval` is treating a local flake inside a Git checkout like `nix eval .`. Only tracked files are reaching the store.
+`gradient eval` will treat a local flake inside a Git checkout like `nix eval .`. Only tracked files are reaching the store.
