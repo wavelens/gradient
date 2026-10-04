@@ -14,7 +14,7 @@
   @if (shownGrants().length > 0) {
     <gr-row-list>
       @for (grant of shownGrants(); track grant.team) {
-        <gr-row icon="groups" [link]="['/team', grant.team]" linkLabel="Open team">
+        <gr-row icon="groups" [link]="teamLink(grant.team)" linkLabel="Open team">
           {{ grant.display_name }}
           @if (part() === 'users') {
             <span slot="meta">Role {{ grant.role }}</span>

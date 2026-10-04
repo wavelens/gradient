@@ -4,12 +4,14 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
 import { of, throwError } from 'rxjs';
 import { GrantedPart, TeamGrantsComponent } from './team-grants.component';
 import { TeamsService } from '@core/services/teams.service';
-import { TeamGrant } from '@core/models';
+import { AuthService } from '@core/services/auth.service';
+import { TeamGrant, TeamSummary } from '@core/models';
 
 const grants: TeamGrant[] = [
   { team: 'platform', display_name: 'Platform', role: 'Write', users: true, workers: true, pending: false },
@@ -18,9 +20,14 @@ const grants: TeamGrant[] = [
   { team: 'qa', display_name: 'QA', role: null, users: false, workers: true, pending: true },
 ];
 
-function setup(kind: 'project' | 'cache', part?: GrantedPart) {
+const myTeams: TeamSummary[] = [
+  { name: 'platform', display_name: 'Platform', role: 'member' },
+  { name: 'infra', display_name: 'Build Farm', role: 'admin' },
+];
+
+function setup(kind: 'project' | 'cache', part?: GrantedPart, superuser = false) {
   const service = {
-    list: () => of([]),
+    list: () => of(myTeams),
     projectGrants: () => of(grants),
     cacheGrants: () => of(grants.filter((g) => g.users)),
     grantProject: vi.fn().mockReturnValue(of('Team granted')),
@@ -32,7 +39,11 @@ function setup(kind: 'project' | 'cache', part?: GrantedPart) {
   };
   TestBed.configureTestingModule({
     imports: [TeamGrantsComponent],
-    providers: [provideRouter([]), { provide: TeamsService, useValue: service }],
+    providers: [
+      provideRouter([]),
+      { provide: TeamsService, useValue: service },
+      { provide: AuthService, useValue: { user: signal({ superuser }) } },
+    ],
   });
   const fixture = TestBed.createComponent(TeamGrantsComponent);
   fixture.componentRef.setInput('kind', kind);
@@ -130,6 +141,32 @@ describe('TeamGrantsComponent', () => {
       component.remove(grantOf('ops'));
       expect(service.removeProjectGrant).toHaveBeenCalledWith('acme', 'ops');
     });
+  });
+
+  it('links only the teams the viewer can open', () => {
+    const { fixture } = setup('project', 'users');
+    const row = (name: string) =>
+      Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('gr-row')).find((r) => r.textContent?.includes(name))!;
+    expect(row('Platform').querySelector('a.row-link')).not.toBeNull();
+    expect(row('Docs').querySelector('a.row-link')).toBeNull();
+  });
+
+  it('links every team for a superuser', () => {
+    const { fixture } = setup('project', 'users', true);
+    expect((fixture.nativeElement as HTMLElement).querySelectorAll('a.row-link').length).toBe(2);
+  });
+
+  it('suggests teams by their display name', () => {
+    const { component } = setup('project', 'users');
+    component.search({ query: 'farm' });
+    expect(component.suggestions()).toEqual(['infra']);
+  });
+
+  it('grants the team whose display name was typed', () => {
+    const { component, service } = setup('project', 'users');
+    component.form = { team: 'build farm', role: 'View' };
+    component.grant();
+    expect(service.grantProject).toHaveBeenCalledWith('acme', { team: 'infra', role: 'View', users: true, workers: false });
   });
 
   it('shows a failed grant inside the grant dialog', () => {

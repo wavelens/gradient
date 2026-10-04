@@ -19,7 +19,8 @@ import { FormsModule } from '@angular/forms';
 import { RouterModule } from '@angular/router';
 import { Observable } from 'rxjs';
 import { TeamsService } from '@core/services/teams.service';
-import { TeamGrant } from '@core/models';
+import { AuthService } from '@core/services/auth.service';
+import { TeamGrant, TeamSummary } from '@core/models';
 import {
   AutoCompleteComponent,
   BadgeComponent,
@@ -64,6 +65,7 @@ interface GrantForm {
 })
 export class TeamGrantsComponent implements OnInit {
   private teams = inject(TeamsService);
+  private authService = inject(AuthService);
 
   kind = input.required<'project' | 'cache'>();
   name = input.required<string>();
@@ -76,6 +78,7 @@ export class TeamGrantsComponent implements OnInit {
   roleOptions = computed(() => this.roles().map((role) => ({ label: role, value: role })));
   allGrants = signal<TeamGrant[]>([]);
   shownGrants = computed(() => this.allGrants().filter((grant) => grant[this.part()]));
+  myTeams = signal<TeamSummary[]>([]);
   suggestions = signal<string[]>([]);
   error = signal<string | null>(null);
   grantError = signal<string | null>(null);
@@ -85,6 +88,12 @@ export class TeamGrantsComponent implements OnInit {
 
   ngOnInit(): void {
     this.load();
+    this.teams.list().subscribe({ next: (mine) => this.myTeams.set(mine) });
+  }
+
+  teamLink(team: string): string[] | undefined {
+    const opens = this.authService.user()?.superuser === true || this.myTeams().some((mine) => mine.name === team);
+    return opens ? ['/team', team] : undefined;
   }
 
   load(): void {
@@ -96,10 +105,12 @@ export class TeamGrantsComponent implements OnInit {
   }
 
   search(event: { query: string }): void {
-    this.teams.list().subscribe({
-      next: (mine) => this.suggestions.set(mine.map((t) => t.name).filter((n) => n.includes(event.query))),
-      error: () => this.suggestions.set([]),
-    });
+    const query = event.query.toLowerCase();
+    this.suggestions.set(
+      this.myTeams()
+        .filter((team) => `${team.name} ${team.display_name}`.toLowerCase().includes(query))
+        .map((team) => team.name),
+    );
   }
 
   openGrant(): void {
@@ -110,16 +121,24 @@ export class TeamGrantsComponent implements OnInit {
 
   grant(): void {
     if (!this.form.team) return;
+    const form = { ...this.form, team: this.teamNamed(this.form.team) };
     const request =
-      this.kind() === 'project'
-        ? this.grantProject(this.form)
-        : this.teams.grantCache(this.name(), this.form.team, this.form.role);
+      this.kind() === 'project' ? this.grantProject(form) : this.teams.grantCache(this.name(), form.team, form.role);
     this.run('grant', request, this.grantError, () => this.showGrant.set(false));
   }
 
   remove(grant: TeamGrant): void {
     const request = this.kind() === 'project' ? this.removeFromProject(grant) : this.teams.removeCacheGrant(this.name(), grant.team);
     this.run(grant.team, request, this.error);
+  }
+
+  private teamNamed(typed: string): string {
+    const text = typed.trim();
+    const mine = this.myTeams();
+    const match =
+      mine.find((team) => team.name === text) ??
+      mine.find((team) => team.display_name.toLowerCase() === text.toLowerCase());
+    return match?.name ?? text;
   }
 
   private grantProject({ team, role }: GrantForm): Observable<string> {
