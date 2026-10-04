@@ -595,6 +595,55 @@ assert [w["worker_id"] for w in team_workers] == [team_worker_id], team_workers
 test_res = api("POST", f"projects/stateproject/workers/{team_worker_id}/test", token=sa_token)
 assert test_res["connected"] is False and test_res["ok"] is False, test_res
 
+banner("Teams")
+member_token = api("POST", "auth/basic/login", body=json.dumps({
+    "loginname": "statemember", "password": "admin_password"}))
+
+state_team_members = {m["user"]: m["role"] for m in api("GET", "teams/stateteam/members", token=sa_token)}
+assert state_team_members == {"stateadmin": "admin", "statemember": "member"}, state_team_members
+assert any(g["team"] == "stateteam" and g["users"] and g["workers"]
+           for g in api("GET", "projects/stateproject/teams", token=sa_token))
+
+api("PUT", "teams", token=sa_token, body=json.dumps({"name": "runtimeteam", "display_name": "Runtime Team"}))
+assert any(t["name"] == "runtimeteam" and t["role"] == "admin" for t in api("GET", "teams", token=sa_token))
+
+api("PUT", "projects", token=sa_token, body=json.dumps({
+    "name": "teamproject", "display_name": "Team Project", "description": ""}))
+status("GET", "projects/teamproject", token=member_token, code=404)
+
+assert api("POST", "projects/teamproject/teams", token=sa_token, body=json.dumps({
+    "team": "runtimeteam", "role": "View", "users": True, "workers": False,
+})) == "Team granted"
+assert api("POST", "teams/runtimeteam/members", token=sa_token,
+           body=json.dumps({"user": "statemember", "role": "member"})) == "User added"
+
+# The project is private: only the team grant lets statemember read it.
+api("GET", "projects/teamproject", token=member_token)
+patch_code = machine.succeed(
+    f"curl -sS -o /dev/null -w '%{{http_code}}' -X PATCH {API}/projects/teamproject"
+    f" -H 'Authorization: Bearer {member_token}' -H 'Content-Type: application/json'"
+    """ -d '{"display_name": "nope"}'""").strip()
+assert patch_code == "403", patch_code
+
+api("DELETE", "teams/runtimeteam/members", token=sa_token, body=json.dumps({"user": "statemember"}))
+status("GET", "projects/teamproject", token=member_token, code=404)
+
+out = curl("DELETE", "teams/runtimeteam/members", token=sa_token, body=json.dumps({"user": "stateadmin"}))
+assert json.loads(out)["error"] is True, out
+
+api("PUT", "projects", token=member_token, body=json.dumps({
+    "name": "memberproject", "display_name": "Member Project", "description": ""}))
+assert api("POST", "projects/memberproject/teams", token=member_token, body=json.dumps({
+    "team": "runtimeteam", "role": "View", "users": True, "workers": False,
+})) == "Request sent"
+request = next(r for r in api("GET", "teams/runtimeteam/requests", token=sa_token) if r["target"] == "memberproject")
+api("POST", f"teams/runtimeteam/requests/{request['id']}", token=sa_token, body="{}")
+assert any(g["team"] == "runtimeteam" and not g["pending"]
+           for g in api("GET", "projects/memberproject/teams", token=member_token))
+
+api("DELETE", "teams/runtimeteam", token=sa_token)
+assert not any(g["team"] == "runtimeteam" for g in api("GET", "projects/teamproject/teams", token=sa_token))
+
 # Both integration kinds applied.
 ints = {(i["name"], i["kind"]) for i in api("GET", "projects/stateproject/integrations", token=sa_token)}
 assert ("state-inbound", "inbound") in ints and ("state-outbound", "outbound") in ints, ints
