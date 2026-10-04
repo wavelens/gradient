@@ -89,6 +89,7 @@ fn build_server(cache: gradient_entity::cache::Model, peer: &str) -> TestServer 
         git_host: gradient_git_host::GitHostRegistry::with_builtin(),
         github_app_install_url: Default::default(),
         upstream_query: std::sync::Arc::new(tokio::sync::Semaphore::new(32)),
+        nar_downloads: std::sync::Arc::new(tokio::sync::Semaphore::new(16)),
         upload_admission: gradient_storage::admission::UploadAdmission::new(
             gradient_storage::admission::Limits {
                 concurrency: 16,

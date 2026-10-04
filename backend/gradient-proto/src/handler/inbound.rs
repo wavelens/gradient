@@ -713,7 +713,8 @@ impl<'a> InboundContext<'a> {
             let peer_id = self.peer_id.to_owned();
             let job_id = job_id.clone();
             shutdown.spawn(async move {
-                let Some(_slot) = ServeSlot::acquire(permit).await else {
+                let server = Arc::clone(&state.nar_downloads);
+                let Some(_slot) = ServeSlot::acquire(permit, server).await else {
                     return;
                 };
 
@@ -740,7 +741,8 @@ impl<'a> InboundContext<'a> {
         let peer_id = self.peer_id.to_owned();
         let shutdown = self.state.shutdown.clone();
         shutdown.spawn(async move {
-            let Some(_slot) = ServeSlot::acquire(permit).await else {
+            let server = Arc::clone(&state.nar_downloads);
+            let Some(_slot) = ServeSlot::acquire(permit, server).await else {
                 return;
             };
 

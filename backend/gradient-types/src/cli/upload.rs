@@ -14,7 +14,7 @@ pub struct UploadArgs {
     #[arg(
         long = "upload-concurrency",
         env = "GRADIENT_UPLOAD_CONCURRENCY",
-        default_value_t = 16
+        default_value_t = 8
     )]
     pub concurrency: usize,
 
@@ -46,7 +46,7 @@ pub struct UploadArgs {
 impl Default for UploadArgs {
     fn default() -> Self {
         Self {
-            concurrency: 16,
+            concurrency: 8,
             bytes_budget: 8 * 1024 * 1024 * 1024,
             lease_idle_secs: 300,
             rest_wait_secs: 30,

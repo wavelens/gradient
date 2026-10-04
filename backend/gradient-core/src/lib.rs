@@ -197,6 +197,7 @@ pub async fn init_state(cli: Cli) -> Result<Arc<ServerState>, InitError> {
     };
 
     let upstream_query_concurrency = config.cache.upstream_query_concurrency;
+    let nar_downloads = config.nar.max_concurrent_downloads.max(1);
     let upload_limits = gradient_storage::admission::Limits {
         concurrency: config.upload.concurrency.max(1),
         bytes: config.upload.bytes_budget.max(1),
@@ -216,6 +217,7 @@ pub async fn init_state(cli: Cli) -> Result<Arc<ServerState>, InitError> {
         upstream_query: Arc::new(tokio::sync::Semaphore::new(
             upstream_query_concurrency.max(1),
         )),
+        nar_downloads: Arc::new(tokio::sync::Semaphore::new(nar_downloads)),
         upload_admission: gradient_storage::admission::UploadAdmission::new(upload_limits),
         git_host: gradient_git_host::GitHostRegistry::with_builtin(),
         github_app_install_url: Default::default(),

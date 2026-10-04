@@ -146,9 +146,11 @@ pub async fn handle_cache_socket(
                         debug!(%cache_id, %store_path, "skipping path not in this cache");
                         continue;
                     }
-                    let Some(slot) =
-                        super::nar_serve::ServeSlot::acquire(Arc::clone(&nar_serve_semaphore))
-                            .await
+                    let Some(slot) = super::nar_serve::ServeSlot::acquire(
+                        Arc::clone(&nar_serve_semaphore),
+                        Arc::clone(&state.nar_downloads),
+                    )
+                    .await
                     else {
                         warn!("nar serve semaphore closed");
                         return;
