@@ -150,8 +150,10 @@
                 [routerLink]="['/project', projectName, 'workers', worker.worker_id, 'metrics']"
               ></a>
               @if (worker.team) {
-                <a grButton label="Manage on team" icon="groups" severity="secondary" size="small" class="worker-action-btn"
-                  [routerLink]="['/team', worker.team, 'workers']"></a>
+                @if (canOpenTeam(worker.team)) {
+                  <a grButton label="Manage on team" icon="groups" severity="secondary" size="small" class="worker-action-btn"
+                    [routerLink]="['/team', worker.team, 'workers']"></a>
+                }
               } @else {
                 <button
                   *appWritable="access()"

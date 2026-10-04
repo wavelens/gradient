@@ -13,10 +13,13 @@ import { ConfigService } from '@core/services/config.service';
 import { WorkersService } from '@core/services/workers.service';
 import { ProjectsService } from '@core/services/projects.service';
 import { ProjectAccessService } from '@core/services/project-access.service';
+import { TeamsService } from '@core/services/teams.service';
+import { AuthService } from '@core/services/auth.service';
 import {
   AccessState,
   ConnectionStatus,
   GradientCapabilities,
+  TeamSummary,
   Worker,
   WorkerRegistration,
   gradientCiEntry,
@@ -42,7 +45,7 @@ import {
   ToastComponent,
 } from '@gradient/ui/ui';
 import { GradientCiConnectComponent, LabelHelpComponent } from '@shared/ui';
-import { WritableDirective, ManagedDisableDirective } from '@shared/access';
+import { WritableDirective, ManagedDisableDirective, canOpenTeam } from '@shared/access';
 import { TeamGrantsComponent } from '@features/teams/team-grants/team-grants.component';
 
 @Component({
@@ -83,7 +86,10 @@ export class WorkersComponent implements OnInit {
   private projectsService = inject(ProjectsService);
   private projectAccess = inject(ProjectAccessService);
   private messageService = inject(MessageService);
+  private teamsService = inject(TeamsService);
+  private authService = inject(AuthService);
   config = inject(ConfigService);
+  private myTeams = signal<TeamSummary[]>([]);
 
   access = signal<AccessState>({ managed: false, canEdit: false, canTrigger: false });
 
@@ -169,6 +175,11 @@ export class WorkersComponent implements OnInit {
     this.loadProjectId();
     this.loadWorkers();
     this.loadCacheSubscriptions();
+    this.teamsService.list().subscribe({ next: (mine) => this.myTeams.set(mine), error: () => {} });
+  }
+
+  canOpenTeam(team: string): boolean {
+    return canOpenTeam(this.authService.user(), this.myTeams(), team);
   }
 
   private loadProjectId(): void {

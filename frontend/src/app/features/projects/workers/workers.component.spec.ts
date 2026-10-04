@@ -17,6 +17,9 @@ import { ProjectAccessService } from '@core/services/project-access.service';
 import { ConfigService } from '@core/services/config.service';
 import { AccessState } from '@core/models/access.model';
 import { Worker } from '@core/models/worker.model';
+import { TeamsService } from '@core/services/teams.service';
+import { AuthService } from '@core/services/auth.service';
+import { signal } from '@angular/core';
 
 type MockedProjects = {
   getProject: ReturnType<typeof vi.fn>;
@@ -70,6 +73,7 @@ function setup(opts: {
   caches: { id: string; name: string }[];
   testWorker?: ReturnType<typeof vi.fn>;
   gradientCi?: boolean;
+  memberOf?: string[];
 }) {
   const workersService = {
     getWorkers: vi.fn(() => of(opts.workers)),
@@ -87,6 +91,14 @@ function setup(opts: {
       provideHttpClientTesting(),
       { provide: WorkersService, useValue: workersService },
       { provide: ProjectsService, useValue: projects },
+      {
+        provide: TeamsService,
+        useValue: {
+          list: () => of((opts.memberOf ?? ['platform']).map((name) => ({ name, display_name: name }))),
+          projectGrants: () => of([]),
+        },
+      },
+      { provide: AuthService, useValue: { user: signal({ superuser: false }) } },
       { provide: ProjectAccessService, useValue: { forProject: () => Promise.resolve(opts.access) } },
       { provide: ActivatedRoute, useValue: activatedRouteStub() },
       {
@@ -193,6 +205,18 @@ describe('WorkersComponent - team workers', () => {
     expect(findByText(fixture.nativeElement, 'edit')).toBeNull();
     expect(findByText(fixture.nativeElement, 'deactivate')).toBeNull();
     expect(findByText(fixture.nativeElement, 'delete')).toBeNull();
+  });
+
+  it('offers no team link to a viewer outside the team, whose team page would not load', async () => {
+    const fixture = setup({
+      access: { managed: false, canEdit: true, canTrigger: true },
+      workers: [workerOfTeam],
+      caches: [{ id: 'c', name: 'c' }],
+      memberOf: [],
+    });
+    await settled(fixture);
+
+    expect((fixture.nativeElement as HTMLElement).querySelector('a[href="/team/platform/workers"]')).toBeNull();
   });
 
   it('keeps Deactivate usable on a managed worker in a managed project, since state restores it on restart', async () => {

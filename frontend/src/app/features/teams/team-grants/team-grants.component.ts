@@ -21,6 +21,7 @@ import { Observable } from 'rxjs';
 import { TeamsService } from '@core/services/teams.service';
 import { AuthService } from '@core/services/auth.service';
 import { TeamGrant, TeamSummary } from '@core/models';
+import { canOpenTeam } from '@shared/access';
 import {
   AutoCompleteComponent,
   BadgeComponent,
@@ -92,8 +93,7 @@ export class TeamGrantsComponent implements OnInit {
   }
 
   teamLink(team: string): string[] | undefined {
-    const opens = this.authService.user()?.superuser === true || this.myTeams().some((mine) => mine.name === team);
-    return opens ? ['/team', team] : undefined;
+    return canOpenTeam(this.authService.user(), this.myTeams(), team) ? ['/team', team] : undefined;
   }
 
   load(): void {
