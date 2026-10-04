@@ -8,7 +8,7 @@ use crate::access::{Caller, ProjectAccess, load_project};
 use crate::audit::{RequestInfo, changed_fields, record as audit_record};
 use crate::authorization::{MaybeApiKey, MaybeUser};
 use crate::error::{WebError, WebResult, require_create_permission};
-use crate::helpers::{ok_json, paginate, role_names};
+use crate::helpers::{ok_json, paginate};
 use crate::permissions::Permission;
 use anyhow::Context;
 use axum::extract::{Path, Query, State};
@@ -159,21 +159,8 @@ pub async fn get(
     let project_ids: Vec<ProjectId> = listing.items.iter().map(|o| o.id).collect();
     let running_per_project = count_running_evaluations(&state, &project_ids).await?;
 
-    let project_users = EProjectUser::find()
-        .filter(CProjectUser::User.eq(user.id))
-        .filter(CProjectUser::Project.is_in(project_ids))
-        .all(&state.web_db)
-        .await?;
-
-    let role_name_map = role_names(
-        &state.web_db,
-        project_users.iter().map(|ou| ou.role).collect(),
-    )
-    .await?;
-    let project_role_map: HashMap<ProjectId, String> = project_users
-        .into_iter()
-        .filter_map(|ou| role_name_map.get(&ou.role).map(|n| (ou.project, n.clone())))
-        .collect();
+    let project_role_map =
+        gradient_db::access::project_role_names(&state.web_db, user.id, project_ids).await?;
 
     let listing = listing.map(|o| ProjectSummary {
         running_evaluations: *running_per_project.get(&o.id).unwrap_or(&0),
@@ -323,22 +310,13 @@ pub async fn get_project(
     )
     .await?;
 
-    let role = if let Some(ref user) = maybe_user {
-        let project_user = EProjectUser::find()
-            .filter(CProjectUser::User.eq(user.id))
-            .filter(CProjectUser::Project.eq(project.id))
-            .one(&state.web_db)
-            .await?;
-        if let Some(ou) = project_user {
-            ERole::find_by_id(ou.role)
-                .one(&state.web_db)
+    let role = match maybe_user {
+        Some(ref user) => {
+            gradient_db::access::project_role_names(&state.web_db, user.id, vec![project.id])
                 .await?
-                .map(|r| r.name)
-        } else {
-            None
+                .remove(&project.id)
         }
-    } else {
-        None
+        None => None,
     };
 
     Ok(ok_json(ProjectResponse {
