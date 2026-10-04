@@ -9,7 +9,8 @@ import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { TeamsService } from '@core/services/teams.service';
 import { AuthService } from '@core/services/auth.service';
-import { PatchTeam, Team } from '@core/models';
+import { AccessState, PatchTeam, Team } from '@core/models';
+import { ManagedDisableDirective, WritableDirective } from '@shared/access';
 import {
   ButtonComponent,
   CheckboxComponent,
@@ -39,6 +40,8 @@ interface SettingsForm {
   imports: [
     FormsModule,
     RouterModule,
+    ManagedDisableDirective,
+    WritableDirective,
     ButtonComponent,
     CheckboxComponent,
     DialogComponent,
@@ -78,6 +81,8 @@ export class TeamSettingsComponent implements OnInit {
   form: SettingsForm = this.formOf(null);
 
   isSuperuser = computed(() => this.authService.user()?.superuser === true);
+  access = computed(() => this.accessFor(this.team()?.role === 'admin' || this.isSuperuser()));
+  superuserAccess = computed(() => this.accessFor(this.isSuperuser()));
 
   ngOnInit(): void {
     this.teamName = this.route.snapshot.paramMap.get('team') || '';
@@ -129,6 +134,10 @@ export class TeamSettingsComponent implements OnInit {
         this.error.set(err.message || 'Failed to delete the team.');
       },
     });
+  }
+
+  private accessFor(canEdit: boolean): AccessState {
+    return { managed: this.team()?.managed ?? false, canEdit, canTrigger: canEdit };
   }
 
   private formOf(team: Team | null): SettingsForm {
