@@ -257,6 +257,38 @@ pub fn create_router_with_scheduler(
                 .delete(endpoints::teams::workers::delete_team_worker),
         )
         .route(
+            "/projects/{project}/teams",
+            post(endpoints::teams::grants::post_project_team),
+        )
+        .route(
+            "/projects/{project}/teams/{team}",
+            patch(endpoints::teams::grants::patch_project_team)
+                .delete(endpoints::teams::grants::delete_project_team),
+        )
+        .route(
+            "/caches/{cache}/teams",
+            get(endpoints::teams::grants::get_cache_teams)
+                .post(endpoints::teams::grants::post_cache_team),
+        )
+        .route(
+            "/caches/{cache}/teams/{team}",
+            patch(endpoints::teams::grants::patch_cache_team)
+                .delete(endpoints::teams::grants::delete_cache_team),
+        )
+        .route(
+            "/teams/{team}/grants",
+            get(endpoints::teams::requests::get_team_grants),
+        )
+        .route(
+            "/teams/{team}/requests",
+            get(endpoints::teams::requests::get_team_requests),
+        )
+        .route(
+            "/teams/{team}/requests/{request_id}",
+            post(endpoints::teams::requests::post_approve_team_request)
+                .delete(endpoints::teams::requests::delete_team_request),
+        )
+        .route(
             "/projects/{project}/ssh",
             get(projects::get_project_ssh).post(projects::post_project_ssh),
         )
@@ -544,6 +576,10 @@ pub fn create_router_with_scheduler(
         .route(
             "/projects/{project}/users",
             get(projects::get_project_users),
+        )
+        .route(
+            "/projects/{project}/teams",
+            get(endpoints::teams::grants::get_project_teams),
         )
         .route("/tasks/{project}", get(tasks::get))
         .route("/tasks/{project}/{task}", get(tasks::get_task))

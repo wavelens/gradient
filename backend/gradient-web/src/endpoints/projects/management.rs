@@ -258,12 +258,8 @@ pub async fn put(
     .insert(&tx)
     .await?;
 
-    let auto_enabled = gradient_db::projects::base_workers::enable_auto_base_workers_for_project(
-        &tx,
-        project.id,
-        Some(user.id),
-    )
-    .await?;
+    let granted_teams =
+        gradient_db::teams::grants::apply_new_project_grants(&tx, project.id).await?;
 
     tx.commit().await?;
 
@@ -284,8 +280,9 @@ pub async fn put(
     .await;
 
     // A connected worker is learning about the new project only when it re-auths.
-    for worker_id in &auto_enabled {
-        scheduler.request_reauth(worker_id).await;
+    for team in granted_teams {
+        let workers = gradient_db::teams::team_worker_ids(&state.web_db, team).await?;
+        crate::endpoints::teams::workers::reauth_team_workers(&scheduler, &workers).await;
     }
 
     Ok(Json(BaseResponse {
