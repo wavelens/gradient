@@ -7,3 +7,4 @@
 pub mod invitations;
 pub mod management;
 pub mod members;
+pub mod workers;
