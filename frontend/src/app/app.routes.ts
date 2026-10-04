@@ -551,15 +551,6 @@ export const routes: Routes = [
         (m) => m.GithubAppComponent,
       ),
   },
-  {
-    path: 'admin/base-workers',
-    title: 'Base Workers (admin)',
-    canActivate: [authGuard, adminGuard],
-    loadComponent: () =>
-      import('./features/admin/base-workers/base-workers.component').then(
-        (m) => m.BaseWorkersComponent,
-      ),
-  },
 
   // Style guide (developer reference, intentionally unlinked)
   {

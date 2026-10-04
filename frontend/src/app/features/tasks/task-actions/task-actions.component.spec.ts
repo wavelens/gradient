@@ -13,6 +13,7 @@ import { TaskActionsComponent } from './task-actions.component';
 import { ActionsService } from '@core/services/actions.service';
 import { IntegrationsService } from '@core/services/integrations.service';
 import { ProjectsService } from '@core/services/projects.service';
+import { TeamsService } from '@core/services/teams.service';
 import { ConfigService } from '@core/services/config.service';
 import { AccessState } from '@core/models/access.model';
 import { Action } from '@core/models';
@@ -68,6 +69,7 @@ function setup(
       },
       { provide: IntegrationsService, useValue: { listProjectIntegrations: () => of([]) } },
       { provide: ProjectsService, useValue: { getProject: () => of({ display_name: 'Acme' }) } },
+      { provide: TeamsService, useValue: { projectGrants: () => of([]) } },
       { provide: ConfigService, useValue: { smtpEnabled: true } },
     ],
   });

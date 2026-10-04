@@ -14,15 +14,17 @@ import { ConnectionStatus, GradientCiScope } from '@core/models';
 type StatusOf = (workerId: string) => Observable<ConnectionStatus | undefined>;
 
 function setup(scope: GradientCiScope, statusOf: StatusOf) {
+  const connectGradientCi = vi.fn(() => of({ worker_id: 'g1' }));
   TestBed.configureTestingModule({
     imports: [GradientCiConnectComponent],
     providers: [
       { provide: ConfigService, useValue: { gradientCiUrl: 'https://servers.gradient.ci' } },
-      { provide: WorkersService, useValue: { connectGradientCi: vi.fn(() => of({ worker_id: 'g1' })) } },
+      { provide: WorkersService, useValue: { connectGradientCi } },
     ],
   });
   const fixture = TestBed.createComponent(GradientCiConnectComponent);
   fixture.componentRef.setInput('scope', scope);
+  if (scope === 'team') fixture.componentRef.setInput('team', 'platform');
   fixture.componentRef.setInput('label', 'ci.example.com');
   fixture.componentRef.setInput('statusOf', statusOf);
   fixture.componentRef.setInput('visible', true);
@@ -30,7 +32,7 @@ function setup(scope: GradientCiScope, statusOf: StatusOf) {
   const component = fixture.componentInstance;
   component.token = 'gci1_0199a0b1-c2d3-7e4f-8a6b-9c0d1e2f3a4b_s3cret';
   component.submit();
-  return { fixture, component };
+  return { fixture, component, connectGradientCi };
 }
 
 describe('GradientCiConnectComponent', () => {
@@ -64,9 +66,11 @@ describe('GradientCiConnectComponent', () => {
     expect(statusOf).not.toHaveBeenCalled();
   });
 
-  it('finishes a base connection with a notice instead of waiting for a dial', () => {
+  it('finishes a team connection with a notice instead of waiting for a dial', () => {
     const statusOf = vi.fn(() => of(undefined));
-    const { component } = setup('base', statusOf);
+    const { component, connectGradientCi } = setup('team', statusOf);
+
+    expect(connectGradientCi).toHaveBeenCalledWith(expect.objectContaining({ scope: 'team', team: 'platform' }));
 
     vi.advanceTimersByTime(40_000);
 

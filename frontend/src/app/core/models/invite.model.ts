@@ -5,7 +5,7 @@
  */
 
 export interface Invite {
-  kind: 'project' | 'cache';
+  kind: 'project' | 'cache' | 'team';
   token: string;
   scope: string;
   scope_display_name: string;

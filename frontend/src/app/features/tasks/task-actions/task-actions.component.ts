@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+import { TeamsService } from '@core/services/teams.service';
 import { Component, OnInit, computed, inject, signal, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterModule } from '@angular/router';
@@ -68,6 +69,7 @@ export class TaskActionsComponent implements OnInit {
   private integrationsService = inject(IntegrationsService);
   private projectsService = inject(ProjectsService);
   private accessSvc = inject(AccessService);
+  private teamsService = inject(TeamsService);
 
   access = injectTaskAccess();
 
@@ -100,6 +102,7 @@ export class TaskActionsComponent implements OnInit {
 
   actions = signal<Action[]>([]);
   outboundIntegrations = signal<IntegrationOption[]>([]);
+  mailTeams = signal<string[]>([]);
 
   editingAction = signal<Action | null>(null);
   showCreateDialog = signal(false);
@@ -121,6 +124,10 @@ export class TaskActionsComponent implements OnInit {
     });
     this.loadActions();
     this.loadIntegrations();
+    this.teamsService.projectGrants(this.projectName).subscribe({
+      next: (grants) => this.mailTeams.set(grants.filter((g) => g.users && !g.pending).map((g) => g.team)),
+      error: () => this.mailTeams.set([]),
+    });
   }
 
   loadActions(): void {

@@ -29,6 +29,7 @@ import {
   SettingsSectionComponent,
 } from '@gradient/ui/ui';
 import { LabelHelpComponent } from '@shared/ui';
+import { TeamGrantsComponent } from '@features/teams/team-grants/team-grants.component';
 import { WritableDirective, ManagedDisableDirective } from '@shared/access';
 import { injectCacheAccess } from '@core/resolvers/inject-access';
 import { PendingInvitation } from '@core/models';
@@ -43,6 +44,7 @@ interface RoleFormState {
   selector: 'app-cache-members-roles',
   standalone: true,
   imports: [
+    TeamGrantsComponent,
     LabelHelpComponent,
     CommonModule,
     RouterModule,
@@ -90,6 +92,7 @@ export class CacheMembersRolesComponent implements OnInit {
   members = signal<CacheMemberItem[]>([]);
   invitations = signal<PendingInvitation[]>([]);
   roles = signal<CacheRole[]>([]);
+  roleNames = computed(() => this.roles().map((r) => r.name));
   availablePermissions = signal<CachePermissionDescriptor[]>([]);
   userSuggestions = signal<string[]>([]);
   memberError = signal<string | null>(null);

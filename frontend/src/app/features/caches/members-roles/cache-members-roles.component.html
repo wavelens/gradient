@@ -85,6 +85,8 @@
     </gr-settings-section>
   }
 
+  <app-team-grants kind="cache" [name]="cacheName" [roles]="roleNames()" [canEdit]="access().canEdit && !access().managed" />
+
   <!-- Roles -->
   <gr-settings-section title="Roles" [card]="false" maxWidth="none">
     <button

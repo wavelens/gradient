@@ -38,7 +38,7 @@
   </gr-form-field>
 
   @if (type() === 'send_mail') {
-    <gr-form-field label="Recipients" for="action-recipients" hint="Comma-separated email addresses.">
+    <gr-form-field label="Recipients" for="action-recipients" hint="Comma-separated email addresses or team:<name>.">
       <input
         grInput
         id="action-recipients"
@@ -47,6 +47,12 @@
         placeholder="alice@example.com, ops@example.com"
       />
     </gr-form-field>
+    @if (teams().length > 0) {
+      <gr-form-field label="Add a Team">
+        <gr-select [options]="teamOptions()" optionLabel="label" optionValue="value" placeholder="Team granted on this project"
+          [ngModel]="null" (ngModelChange)="addTeamRecipient($event)" />
+      </gr-form-field>
+    }
     <gr-form-field label="Subject Template (optional)" for="action-subject">
       <input
         grInput

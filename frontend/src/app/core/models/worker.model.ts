@@ -35,8 +35,7 @@ export interface Worker {
   display_name: string;
   managed: boolean;
   active: boolean;
-  /** True when this is a state-managed base worker shared across projects; `active` then means enabled for this project. */
-  is_base: boolean;
+  team?: string;
   gradient_ci: boolean;
   connected: boolean;
   last_error?: ConnectionFailure;

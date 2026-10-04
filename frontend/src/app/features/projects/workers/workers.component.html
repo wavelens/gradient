@@ -52,18 +52,11 @@
               @case ('connect') {
                 <button *appWritable="access()" grButton label="Connect" icon="link" size="small" (click)="showGradientCiConnect.set(true)"></button>
               }
-              @case ('enable') {
-                @if (gradientCi().worker; as w) {
-                  <button *appWritable="access()" grButton label="Enable" icon="play_arrow" severity="success" size="small"
-                    [loading]="togglingId() === w.worker_id" (click)="setGradientCiEnabled(w, true)"></button>
-                }
-              }
               @case ('connected') {
                 @if (gradientCi().worker; as w) {
                   <gr-badge [severity]="w.connected ? 'success' : 'neutral'">{{ w.connected ? 'Connected' : 'Offline' }}</gr-badge>
-                  @if (w.is_base) {
-                    <button *appWritable="access()" grButton label="Disable" icon="pause" severity="warn" size="small"
-                      [loading]="togglingId() === w.worker_id" (click)="setGradientCiEnabled(w, false)"></button>
+                  @if (w.team) {
+                    <span class="text-secondary">Via team {{ w.team }}</span>
                   } @else {
                     <button *appWritable="access()" grButton label="Disconnect" icon="link_off" severity="danger" size="small"
                       (click)="showGradientCiDisconnect.set(true)"></button>
@@ -128,8 +121,8 @@
                 }
             </div>
             <div slot="actions">
-              @if (worker.is_base) {
-                <gr-badge severity="info">Base</gr-badge>
+              @if (worker.team) {
+                <gr-badge severity="info">Team {{ worker.team }}</gr-badge>
               }
               @if (worker.managed) {
                 <gr-badge severity="info">Managed</gr-badge>
@@ -156,31 +149,36 @@
                 class="worker-action-btn"
                 [routerLink]="['/project', projectName, 'workers', worker.worker_id, 'metrics']"
               ></a>
-              <button
-                *appWritable="access()"
-                grButton
-                label="Edit"
-                icon="edit"
-                severity="secondary"
-                size="small"
-                class="worker-action-btn"
-                [disabled]="deletingId() !== null || togglingId() !== null || testingId() !== null || renaming()"
-                [appManagedDisable]="rowAccess(worker)"
-                (click)="openRenameDialog(worker)"
-              ></button>
-              <button
-                *appWritable="access()"
-                grButton
-                [label]="worker.active ? 'Deactivate' : 'Activate'"
-                [icon]="worker.active ? 'pause' : 'play_arrow'"
-                [severity]="worker.active ? 'warn' : 'success'"
-                size="small"
-                class="worker-action-btn"
-                [disabled]="togglingId() !== null || deletingId() !== null || testingId() !== null"
-                [appManagedDisable]="actionAccess()"
-                [loading]="togglingId() === worker.worker_id"
-                (click)="requestToggleWorker(worker)"
-              ></button>
+              @if (worker.team) {
+                <a grButton label="Manage on team" icon="groups" severity="secondary" size="small" class="worker-action-btn"
+                  [routerLink]="['/team', worker.team, 'workers']"></a>
+              } @else {
+                <button
+                  *appWritable="access()"
+                  grButton
+                  label="Edit"
+                  icon="edit"
+                  severity="secondary"
+                  size="small"
+                  class="worker-action-btn"
+                  [disabled]="deletingId() !== null || togglingId() !== null || testingId() !== null || renaming()"
+                  [appManagedDisable]="rowAccess(worker)"
+                  (click)="openRenameDialog(worker)"
+                ></button>
+                <button
+                  *appWritable="access()"
+                  grButton
+                  [label]="worker.active ? 'Deactivate' : 'Activate'"
+                  [icon]="worker.active ? 'pause' : 'play_arrow'"
+                  [severity]="worker.active ? 'warn' : 'success'"
+                  size="small"
+                  class="worker-action-btn"
+                  [disabled]="togglingId() !== null || deletingId() !== null || testingId() !== null"
+                  [appManagedDisable]="actionAccess()"
+                  [loading]="togglingId() === worker.worker_id"
+                  (click)="requestToggleWorker(worker)"
+                ></button>
+              }
               <button
                 *appWritable="access()"
                 grButton
@@ -194,19 +192,21 @@
                 [loading]="testingId() === worker.worker_id"
                 (click)="fireTest(worker)"
               ></button>
-              <button
-                *appWritable="access()"
-                grButton
-                label="Delete"
-                icon="delete"
-                severity="danger"
-                size="small"
-                class="worker-action-btn"
-                [disabled]="deletingId() !== null || togglingId() !== null || testingId() !== null"
-                [appManagedDisable]="rowAccess(worker)"
-                [loading]="deletingId() === worker.worker_id"
-                (click)="deleteWorker(worker)"
-              ></button>
+              @if (!worker.team) {
+                <button
+                  *appWritable="access()"
+                  grButton
+                  label="Delete"
+                  icon="delete"
+                  severity="danger"
+                  size="small"
+                  class="worker-action-btn"
+                  [disabled]="deletingId() !== null || togglingId() !== null || testingId() !== null"
+                  [appManagedDisable]="rowAccess(worker)"
+                  [loading]="deletingId() === worker.worker_id"
+                  (click)="deleteWorker(worker)"
+                ></button>
+              }
             </div>
           </gr-row>
         }

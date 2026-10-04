@@ -4,7 +4,7 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<gr-page-layout title="My Invites" subtitle="Projects and caches waiting for your answer">
+<gr-page-layout title="My Invites" subtitle="Projects, caches and teams waiting for your answer">
   @if (errorMessage()) {
     <gr-message-banner slot="banner" type="error">{{ errorMessage() }}</gr-message-banner>
   }
@@ -19,12 +19,12 @@
     <gr-empty-state
       icon="mail"
       title="No pending invitations"
-      message="Invitations to projects and caches appear here."
+      message="Invitations to projects, caches and teams appear here."
     />
   } @else {
     <gr-row-list>
       @for (invite of invites(); track invite.token) {
-        <gr-row [icon]="invite.kind === 'cache' ? 'inventory_2' : 'folder'">
+        <gr-row [icon]="invite.kind === 'cache' ? 'inventory_2' : invite.kind === 'team' ? 'groups' : 'folder'">
           {{ invite.scope_display_name }}
           <gr-badge severity="info">{{ invite.kind }}</gr-badge>
           <span slot="meta">

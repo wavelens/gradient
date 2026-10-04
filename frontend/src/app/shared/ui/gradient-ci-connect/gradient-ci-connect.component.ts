@@ -13,8 +13,8 @@ import { ConfigService } from '@core/services/config.service';
 import { WorkersService } from '@core/services/workers.service';
 
 const POLL_MS = 3000;
-const BASE_CONNECTED =
-  'Connected. Gradient.CI Servers is dialed once a project enables the base server on its Workers page.';
+const TEAM_CONNECTED =
+  "Connected. Gradient.CI Servers is dialed once a project grants this team's workers.";
 
 @Component({
   selector: 'app-gradient-ci-connect',
@@ -29,6 +29,7 @@ export class GradientCiConnectComponent {
 
   visible = model(false);
   scope = input.required<GradientCiScope>();
+  team = input<string | undefined>(undefined);
   project = input<string | undefined>(undefined);
   label = input.required<string>();
   statusOf = input.required<(workerId: string) => Observable<ConnectionStatus | undefined>>();
@@ -58,12 +59,13 @@ export class GradientCiConnectComponent {
     if (!token || this.submitting() || this.waiting() || this.notice()) return;
     this.submitting.set(true);
     this.errorMessage.set(null);
-    this.workersService.connectGradientCi({ scope: this.scope(), project: this.project(), token }).subscribe({
+    const request = { scope: this.scope(), team: this.team(), project: this.project(), token };
+    this.workersService.connectGradientCi(request).subscribe({
       next: (res) => {
         this.submitting.set(false);
-        if (this.scope() === 'base') {
+        if (this.scope() === 'team') {
           this.token = '';
-          this.notice.set(BASE_CONNECTED);
+          this.notice.set(TEAM_CONNECTED);
           this.changed.emit();
           return;
         }

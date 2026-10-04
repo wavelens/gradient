@@ -34,6 +34,7 @@ import {
   SettingsSectionComponent,
 } from '@gradient/ui/ui';
 import { LabelHelpComponent } from '@shared/ui';
+import { TeamGrantsComponent } from '@features/teams/team-grants/team-grants.component';
 import { WritableDirective, ManagedDisableDirective } from '@shared/access';
 import { AccessState, PendingInvitation } from '@core/models';
 import { permissionLabel } from '@shared/text';
@@ -47,6 +48,7 @@ interface RoleFormState {
   selector: 'app-members-roles',
   standalone: true,
   imports: [
+    TeamGrantsComponent,
     LabelHelpComponent,
     CommonModule,
     RouterModule,
@@ -95,6 +97,7 @@ export class MembersRolesComponent implements OnInit {
   members = signal<ProjectMember[]>([]);
   invitations = signal<PendingInvitation[]>([]);
   roles = signal<ProjectRole[]>([]);
+  roleNames = computed(() => this.roles().map((r) => r.name));
   availablePermissions = signal<PermissionDescriptor[]>([]);
   userSuggestions = signal<string[]>([]);
   memberError = signal<string | null>(null);

@@ -9,7 +9,10 @@ import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, RouterModule } from '@angular/router';
 import { TeamsService } from '@core/services/teams.service';
 import { AuthService } from '@core/services/auth.service';
-import { RegisterTeamWorker, Team, TeamWorker } from '@core/models';
+import { ConfigService } from '@core/services/config.service';
+import { ConnectionStatus, RegisterTeamWorker, Team, TeamWorker } from '@core/models';
+import { GradientCiConnectComponent } from '@shared/ui';
+import { Observable, map } from 'rxjs';
 import {
   BadgeComponent,
   ButtonComponent,
@@ -30,6 +33,7 @@ import {
   standalone: true,
   imports: [
     FormsModule,
+    GradientCiConnectComponent,
     RouterModule,
     BadgeComponent,
     ButtonComponent,
@@ -51,6 +55,7 @@ export class TeamWorkersComponent implements OnInit {
   private route = inject(ActivatedRoute);
   private teams = inject(TeamsService);
   private authService = inject(AuthService);
+  private config = inject(ConfigService);
 
   teamName = '';
   team = signal<Team | null>(null);
@@ -59,10 +64,21 @@ export class TeamWorkersComponent implements OnInit {
   busy = signal<string | null>(null);
   error = signal<string | null>(null);
   showRegister = signal(false);
+  showGradientCiConnect = signal(false);
   issuedToken = signal<string | null>(null);
   form: RegisterTeamWorker = { worker_id: '', display_name: '' };
 
   isAdmin = computed(() => this.team()?.role === 'admin' || this.authService.user()?.superuser === true);
+  canConnectGradientCi = computed(
+    () => this.isAdmin() && this.config.gradientCiEnabled && !this.workers().some((w) => w.gradient_ci),
+  );
+
+  statusOf = (workerId: string): Observable<ConnectionStatus | undefined> =>
+    this.teams.workers(this.teamName).pipe(map((workers) => workers.find((w) => w.worker_id === workerId)));
+
+  get gradientCiLabel(): string {
+    return `${window.location.host} / ${this.teamName}`;
+  }
 
   ngOnInit(): void {
     this.teamName = this.route.snapshot.paramMap.get('team') || '';
