@@ -7,12 +7,12 @@
 use crate::score::context::InstanceContext;
 use crate::score::rule::{JobContext, ScoreRule, WorkerContext};
 use crate::score::rules::builtin::{
-    BuiltinDeprioritizeRule, DependencyCountRule, MissingNarSizeRule, MissingPathsRule,
-    RealisedOutputsRule, RescoreWaitRule, ReserveFetchWorkersRule, WaitTimeRule,
+    BuiltinDeprioritizeRule, DependencyCountRule, MissingPathsRule, RealisedOutputsRule,
+    RescoreWaitRule, ReserveFetchWorkersRule, WaitTimeRule,
 };
 use crate::score::rules::{
-    CpuAffinityRule, DiskAffinityRule, FairShareRule, NetworkAffinityRule, OutputUploadRule,
-    PreferLocalBuildRule, QosRule, ResourceFitRule, ResourceSaturationRule,
+    EstimatedTimeRule, FairShareRule, PreferLocalBuildRule, QosRule, ResourceFitRule,
+    ResourceSaturationRule,
 };
 
 pub trait ScoringPolicy: Send + Sync + std::fmt::Debug {
@@ -125,7 +125,7 @@ fn spec(enabled: bool, rule: Box<dyn ScoreRule>) -> RuleSpec {
 fn simple_table() -> Vec<RuleSpec> {
     vec![
         spec(true, Box::new(MissingPathsRule::default())),
-        spec(true, Box::new(MissingNarSizeRule::default())),
+        spec(true, Box::new(EstimatedTimeRule::default())),
         spec(true, Box::new(RealisedOutputsRule::default())),
         spec(true, Box::new(RescoreWaitRule::default())),
         spec(true, Box::new(DependencyCountRule::default())),
@@ -144,10 +144,6 @@ fn resource_aware_table() -> Vec<RuleSpec> {
     // FairShareRule is disabled because its idle gate is counting zero occupancy, not spare
     // capacity. Re-enabling it is a scheduling-policy decision (#476).
     rules.push(spec(false, Box::new(FairShareRule::default())));
-    rules.push(spec(true, Box::new(NetworkAffinityRule::default())));
-    rules.push(spec(true, Box::new(OutputUploadRule::default())));
-    rules.push(spec(true, Box::new(DiskAffinityRule::default())));
-    rules.push(spec(true, Box::new(CpuAffinityRule::default())));
     rules
 }
 
@@ -307,61 +303,6 @@ mod tests {
     }
 
     #[test]
-    fn resource_aware_prefers_fast_net_for_fod() {
-        use crate::score::context::WorkerMetricsView;
-        let policy = policy_by_name("resource-aware");
-        let archs = vec!["x86_64-linux".to_string()];
-        let feats: Vec<String> = vec![];
-        let j = ScoredJob::new_build(
-            "j",
-            ProjectId::now_v7(),
-            "x86_64-linux",
-            false,
-            true,
-            None,
-            None,
-            HistoryPrediction::default(),
-        );
-        let c = JobContext {
-            job: &j,
-            missing_count: Some(0),
-            missing_nar_size: Some(0),
-            outputs_present: false,
-            dependency_count: 0,
-            queued_at: now(),
-            ready_at: now(),
-            project_work_share: None,
-            prioritized: false,
-            build_request: false,
-            rescore_count: 0,
-            now: now(),
-        };
-        let fast = WorkerContext {
-            architectures: &archs,
-            system_features: &feats,
-            fetch: false,
-            metrics: Some(WorkerMetricsView {
-                download_speed_mbps: Some(100.0),
-                ..Default::default()
-            }),
-        };
-        let slow = WorkerContext {
-            architectures: &archs,
-            system_features: &feats,
-            fetch: false,
-            metrics: Some(WorkerMetricsView {
-                download_speed_mbps: Some(5.0),
-                ..Default::default()
-            }),
-        };
-        let inst = InstanceContext {
-            download_speed_mean_mbps: Some(50.0),
-            ..Default::default()
-        };
-        assert!(policy.score(&c, &fast, &inst) > policy.score(&c, &slow, &inst));
-    }
-
-    #[test]
     fn resource_aware_sends_heavy_build_to_fast_cold_worker_over_slow_warm_one() {
         use crate::score::context::WorkerMetricsView;
         let policy = policy_by_name("resource-aware");
@@ -376,7 +317,9 @@ mod tests {
             None,
             None,
             HistoryPrediction {
-                avg_cpu_time_ms: Some(30 * 60_000),
+                build_time_ms: Some(20 * 60_000),
+                uncontended_build_time_ms: Some(20 * 60_000),
+                build_core_score: Some(10_000),
                 samples: 5,
                 ..Default::default()
             },
@@ -568,13 +511,9 @@ mod tests {
     fn rule_names_are_pinned() {
         let expected = [
             "BuiltinDeprioritizeRule",
-            "CpuAffinityRule",
             "DependencyCountRule",
-            "DiskAffinityRule",
-            "MissingNarSizeRule",
+            "EstimatedTimeRule",
             "MissingPathsRule",
-            "NetworkAffinityRule",
-            "OutputUploadRule",
             "PreferLocalBuildRule",
             "QosRule",
             "RealisedOutputsRule",

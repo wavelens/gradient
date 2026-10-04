@@ -56,6 +56,8 @@ pub struct HistoryPrediction {
     pub predicted_peak_ram_mb: Option<u64>,
     pub avg_cpu_time_ms: Option<u64>,
     pub build_time_ms: Option<u64>,
+    pub uncontended_build_time_ms: Option<u64>,
+    pub build_core_score: Option<u32>,
     pub avg_disk_bytes: Option<u64>,
     pub output_nar_size: Option<u64>,
     pub oom_rate: f32,
@@ -117,6 +119,13 @@ impl BuildContext {
         out.history.oom_rate = items.iter().map(|i| i.history.oom_rate).fold(0.0, f32::max);
         out.history.avg_cpu_time_ms = known(|h| h.avg_cpu_time_ms).reduce(u64::saturating_add);
         out.history.build_time_ms = known(|h| h.build_time_ms).max();
+        let longest = items
+            .iter()
+            .filter(|i| i.history.uncontended_build_time_ms.is_some())
+            .max_by_key(|i| i.history.uncontended_build_time_ms);
+        out.history.uncontended_build_time_ms =
+            longest.and_then(|i| i.history.uncontended_build_time_ms);
+        out.history.build_core_score = longest.and_then(|i| i.history.build_core_score);
         out.history.avg_disk_bytes = known(|h| h.avg_disk_bytes).reduce(u64::saturating_add);
         out.history.output_nar_size = known(|h| h.output_nar_size).reduce(u64::saturating_add);
         out.history.samples = items.iter().map(|i| i.history.samples).min().unwrap_or(0);
@@ -280,6 +289,8 @@ mod tests {
                 predicted_peak_ram_mb: Some(500),
                 avg_cpu_time_ms: Some(1000),
                 build_time_ms: None,
+                uncontended_build_time_ms: None,
+                build_core_score: None,
                 avg_disk_bytes: Some(10),
                 output_nar_size: Some(7),
                 oom_rate: 0.1,

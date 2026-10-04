@@ -56,49 +56,6 @@ impl ScoreRule for MissingPathsRule {
 }
 
 #[derive(Debug)]
-pub struct MissingNarSizeRule {
-    pub cap: f64,
-    pub k: f64,
-}
-
-impl Default for MissingNarSizeRule {
-    fn default() -> Self {
-        Self {
-            cap: crate::score::weights::MISSING_NAR_SIZE_CAP,
-            k: crate::score::weights::MISSING_NAR_SIZE_BASELINE_K,
-        }
-    }
-}
-
-impl ScoreRule for MissingNarSizeRule {
-    fn name(&self) -> &'static str {
-        "MissingNarSizeRule"
-    }
-
-    fn score(
-        &self,
-        job: &JobContext<'_>,
-        _worker: &WorkerContext<'_>,
-        instance: &InstanceContext,
-    ) -> f64 {
-        match job.missing_nar_size {
-            None => 0.0,
-            Some(0) => self.cap,
-            Some(b) => {
-                let mb = b as f64 / 1_048_576.0;
-                let baseline = self.k * instance.nar_size_mb.w1h_or(1024.0);
-
-                self.cap * (1.0 - (mb / baseline).clamp(0.0, 1.0))
-            }
-        }
-    }
-
-    fn description(&self) -> &'static str {
-        "Rewards jobs with little or no data left to download, favouring small substitution transfers over large ones."
-    }
-}
-
-#[derive(Debug)]
 pub struct RealisedOutputsRule {
     pub bonus: f64,
 }
@@ -483,70 +440,6 @@ mod tests {
         assert!(rule.score(&c1, &w, &inst) > rule.score(&c2, &w, &inst));
         assert!(rule.score(&c1, &w, &inst) >= 0.0);
         assert!(rule.score(&c2, &w, &inst) >= 0.0);
-    }
-
-    #[test]
-    fn missing_nar_size_bounded_bonus() {
-        let rule = MissingNarSizeRule::default();
-        let job = build_job("x86_64-linux");
-        let archs = vec!["x86_64-linux".to_string()];
-        let w = worker(&archs, false);
-        let now = gradient_types::now();
-        let inst = crate::score::context::InstanceContext {
-            nar_size_mb: crate::score::context::Windowed {
-                w1h: Some(100.0),
-                ..Default::default()
-            },
-            ..Default::default()
-        };
-
-        let c_none = JobContext {
-            job: &job,
-            missing_count: None,
-            missing_nar_size: None,
-            outputs_present: false,
-            dependency_count: 0,
-            queued_at: now,
-            ready_at: now,
-            project_work_share: None,
-            prioritized: false,
-            build_request: false,
-            rescore_count: 0,
-            now,
-        };
-        let c_zero = JobContext {
-            job: &job,
-            missing_count: None,
-            missing_nar_size: Some(0),
-            outputs_present: false,
-            dependency_count: 0,
-            queued_at: now,
-            ready_at: now,
-            project_work_share: None,
-            prioritized: false,
-            build_request: false,
-            rescore_count: 0,
-            now,
-        };
-        let c_huge = JobContext {
-            job: &job,
-            missing_count: None,
-            missing_nar_size: Some(100_000_000_000),
-            outputs_present: false,
-            dependency_count: 0,
-            queued_at: now,
-            ready_at: now,
-            project_work_share: None,
-            prioritized: false,
-            build_request: false,
-            rescore_count: 0,
-            now,
-        };
-
-        assert_eq!(rule.score(&c_none, &w, &inst), 0.0);
-        assert!((rule.score(&c_zero, &w, &inst) - 500.0).abs() < 1e-9);
-        assert!(rule.score(&c_huge, &w, &inst) >= 0.0);
-        assert!(rule.score(&c_zero, &w, &inst) > rule.score(&c_huge, &w, &inst));
     }
 
     #[test]
