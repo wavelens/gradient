@@ -997,8 +997,8 @@
         default = null;
         example = "platform";
         description = ''
-          Team owning this worker. A team worker serves every project granted the team's workers
-          and is mutually exclusive with `projects`.
+          Team owning this worker. A team worker can build for every project granting the team's
+          workers. Mutually exclusive with `projects`.
         '';
       };
 

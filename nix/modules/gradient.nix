@@ -98,7 +98,7 @@ in {
       domain = lib.mkOption {
         type = lib.types.str;
         example = "gradient.example.com";
-        description = "Domain under which Gradient is served.";
+        description = "Domain under which Gradient is reachable.";
       };
 
       serveUrl = lib.mkOption {
@@ -139,13 +139,13 @@ in {
         default = 90;
         description = ''
           Days to keep job assignment records, finished deliveries, worker connection history,
-          webhook and task action deliveries, expired sessions and CLI logins. The same limit is
-          covering finished admin tasks, the audit log, per-build resource samples and finished
-          cluster jobs. Pruned resource samples are no longer feeding build predictions. A finished
-          cluster job without remaining members is going on the next hourly pass. The pruning is
-          sparing the newest finished admin task of each kind and active cluster jobs. An open
-          worker connection is kept until the same worker is connecting again. `0` is keeping every
-          record forever.
+          webhook and task action deliveries, expired sessions and CLI logins. The same limit will
+          cover finished admin tasks, the audit log, per-build resource samples and finished
+          cluster jobs. Removed resource samples are no longer feeding build predictions. A finished
+          cluster job without remaining members will go on the next hourly pass. The cleanup will
+          spare the newest finished admin task of each kind and active cluster jobs. An open
+          worker connection is kept until the next connection of the same worker. `0` will keep
+          every record forever.
         '';
       };
 
