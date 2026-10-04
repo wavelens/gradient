@@ -43,6 +43,7 @@ import {
 } from '@gradient/ui/ui';
 import { GradientCiConnectComponent, LabelHelpComponent } from '@shared/ui';
 import { WritableDirective, ManagedDisableDirective } from '@shared/access';
+import { TeamGrantsComponent } from '@features/teams/team-grants/team-grants.component';
 
 @Component({
   selector: 'app-workers',
@@ -69,6 +70,7 @@ import { WritableDirective, ManagedDisableDirective } from '@shared/access';
     RowComponent,
     CopyFieldComponent,
     GradientCiConnectComponent,
+    TeamGrantsComponent,
   ],
   providers: [MessageService],
   templateUrl: './workers.component.html',

@@ -11,23 +11,17 @@
   @if (error(); as message) {
     <gr-message-banner type="error">{{ message }}</gr-message-banner>
   }
-  @if (grants().length > 0) {
+  @if (shownGrants().length > 0) {
     <gr-row-list>
-      @for (grant of grants(); track grant.team) {
+      @for (grant of shownGrants(); track grant.team) {
         <gr-row icon="groups" [link]="['/team', grant.team]" linkLabel="Open team">
           {{ grant.display_name }}
-          <span slot="meta">
-            @if (grant.users) { Users as {{ grant.role }} }
-            @if (grant.users && grant.workers) { · }
-            @if (grant.workers) { Workers }
-          </span>
+          @if (part() === 'users') {
+            <span slot="meta">Role {{ grant.role }}</span>
+          }
           <div slot="actions">
             @if (grant.pending) {
               <gr-badge severity="warning">Pending</gr-badge>
-            }
-            @if (canEdit() && kind() === 'project' && !grant.pending) {
-              <button grButton size="small" severity="secondary" [label]="grant.workers ? 'Stop Workers' : 'Use Workers'"
-                [loading]="busy() === grant.team" (click)="toggleWorkers(grant)"></button>
             }
             @if (canEdit()) {
               <button grButton icon="close" severity="danger" size="small" [loading]="busy() === grant.team"
@@ -37,8 +31,10 @@
         </gr-row>
       }
     </gr-row-list>
+  } @else if (part() === 'workers') {
+    <gr-empty-state icon="groups" title="No teams" message="Grant a team to run this project's builds on the team's workers." />
   } @else {
-    <gr-empty-state icon="groups" title="No teams" />
+    <gr-empty-state icon="groups" title="No teams" message="Grant a team to give its members a role here." />
   }
 </gr-settings-section>
 
@@ -47,11 +43,7 @@
     <gr-autocomplete [(ngModel)]="form.team" [suggestions]="suggestions()" (completeMethod)="search($event)"
       [forceSelection]="false" />
   </gr-form-field>
-  @if (kind() === 'project') {
-    <gr-checkbox inputId="grant-users" label="Users" [(ngModel)]="form.users" [binary]="true" />
-    <gr-checkbox inputId="grant-workers" label="Workers" [(ngModel)]="form.workers" [binary]="true" />
-  }
-  @if (kind() === 'cache' || form.users) {
+  @if (part() === 'users') {
     <gr-form-field label="Role">
       <gr-select [(ngModel)]="form.role" [options]="roleOptions()" optionLabel="label" optionValue="value" />
     </gr-form-field>
