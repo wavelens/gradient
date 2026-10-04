@@ -82,8 +82,17 @@ for f in "${NIX_FILES[@]}"; do
     echo "updated $f"
 done
 
-sed -i 's/^    hash = "[^"]*";/    hash = "";/' "$REPO_ROOT/nix/packages/gradient-frontend.nix"
-echo "cleared the pnpm dependency hash in nix/packages/gradient-frontend.nix"
+FRONTEND_NIX="$REPO_ROOT/nix/packages/gradient-frontend.nix"
+sed -i 's/^    hash = "[^"]*";/    hash = "";/' "$FRONTEND_NIX"
+FRONTEND_BUILD="$(nix build --no-link "$REPO_ROOT#gradient-frontend.pnpmDeps" 2>&1 || true)"
+FRONTEND_HASH="$(grep -oP 'got:\s+\Ksha256-[A-Za-z0-9+/=]+' <<< "$FRONTEND_BUILD" || true)"
+if [[ -z "$FRONTEND_HASH" ]]; then
+    echo "$FRONTEND_BUILD" | tail -20
+    echo "Error: the pnpm dependency build reported no hash"
+    exit 1
+fi
+sed -i "s|^    hash = \"\";|    hash = \"$FRONTEND_HASH\";|" "$FRONTEND_NIX"
+echo "updated the pnpm dependency hash in nix/packages/gradient-frontend.nix"
 
 # ── OpenAPI spec ─────────────────────────────────────────────────────────────
 
