@@ -30,6 +30,8 @@ pub struct ServerArgs {
         default_value = "http://127.0.0.1:8000"
     )]
     pub frontend_url: String,
+    #[arg(long = "frontend-logo-url", env = "GRADIENT_FRONTEND_LOGO_URL")]
+    pub frontend_logo_url: Option<String>,
     /// Whether the server is served over TLS (HTTPS). It is controlling the `Secure` flag on
     /// session cookies. Set it to `false` for plain HTTP deployments.
     #[arg(long = "use-tls", env = "GRADIENT_USE_TLS", default_value = "true")]
@@ -91,6 +93,7 @@ impl Default for ServerArgs {
             port: 3000,
             serve_url: "http://127.0.0.1:8000".into(),
             frontend_url: "http://127.0.0.1:8000".into(),
+            frontend_logo_url: None,
             use_tls: true,
             use_quic: false,
             base_dir: ".".into(),

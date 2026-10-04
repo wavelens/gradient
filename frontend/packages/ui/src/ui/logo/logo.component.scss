@@ -19,3 +19,9 @@
   background: currentcolor;
   mask: url('/images/logo.svg') no-repeat center / contain;
 }
+
+.custom {
+  display: block;
+  height: 100%;
+  width: auto;
+}

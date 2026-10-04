@@ -135,6 +135,7 @@ pub struct ServerConfig {
     pub ssh_port: Option<u16>,
     pub gradient_ci_enabled: bool,
     pub gradient_ci_url: String,
+    pub logo_url: Option<String>,
 }
 
 pub async fn get_config(
@@ -164,6 +165,7 @@ pub async fn get_config(
             ssh_port: state.config.ssh.enable.then_some(state.config.ssh.port),
             gradient_ci_enabled: state.config.gradient_ci.enable,
             gradient_ci_url: state.config.gradient_ci.url.clone(),
+            logo_url: state.config.server.frontend_logo_url.clone(),
         },
     };
 

@@ -86,6 +86,7 @@ Declarative entities under `services.gradient.state` are in the [state reference
 |---|---|---|---|---|
 | `frontend.enable` | bool | `true` | - | Whether to enable the Gradient web frontend. |
 | `frontend.url` | string | derived | `GRADIENT_FRONTEND_URL` | Public URL of the Gradient frontend, used for links in CI status reports. |
+| `frontend.logoUrl` | string or null | `null` | `GRADIENT_FRONTEND_LOGO_URL` | URL of an image in place of the Gradient logo on the sign-in pages, drawn in its own colors. `null` for the Gradient logo. |
 
 ## `gc`
 

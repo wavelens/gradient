@@ -15,6 +15,7 @@ import {
 import { ActivatedRoute, Router } from '@angular/router';
 import { ApiService } from '@core/services/api.service';
 import { AuthService } from '@core/services/auth.service';
+import { ConfigService } from '@core/services/config.service';
 import { take } from 'rxjs';
 import {
   ButtonComponent,
@@ -46,6 +47,7 @@ export class CliAuthorizeComponent implements OnInit {
   private auth = inject(AuthService);
   private route = inject(ActivatedRoute);
   private router = inject(Router);
+  private config = inject(ConfigService);
 
   form: FormGroup;
   info = signal<CliDeviceInfo | null>(null);
@@ -53,6 +55,7 @@ export class CliAuthorizeComponent implements OnInit {
   submitting = signal(false);
   status = signal<'pending' | 'authorized' | 'denied'>('pending');
   errorMessage = signal<string | null>(null);
+  get logoUrl() { return this.config.logoUrl; }
 
   constructor() {
     this.form = this.fb.group({

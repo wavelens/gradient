@@ -188,6 +188,7 @@ export class RegisterComponent {
   }
 
   get oidcRequired() { return this.config.oidcRequired; }
+  get logoUrl() { return this.config.logoUrl; }
   get registrationDisabled() { return this.config.registrationDisabled; }
 
   loginWithOIDC(): void {

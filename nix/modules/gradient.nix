@@ -220,6 +220,16 @@ in {
           example = "https://gradient.example.com";
           description = "Public URL of the Gradient frontend, used for links in CI status reports.";
         };
+
+        logoUrl = lib.mkOption {
+          type = lib.types.nullOr lib.types.str;
+          default = null;
+          example = "https://example.com/logo.svg";
+          description = ''
+            URL of an image shown in place of the Gradient logo on the sign-in pages,
+            drawn in its own colors. `null` shows the Gradient logo.
+          '';
+        };
       };
 
       secrets = {
@@ -1488,6 +1498,8 @@ in {
         GRADIENT_LOG_CHUNK_BYTES = toString cfg.log.chunkBytes;
         GRADIENT_OIDC_ENABLE = lib.boolToString cfg.oidc.enable;
         GRADIENT_SCIM_ENABLE = lib.boolToString cfg.scim.enable;
+      } // lib.optionalAttrs (cfg.frontend.logoUrl != null) {
+        GRADIENT_FRONTEND_LOGO_URL = cfg.frontend.logoUrl;
       } // lib.optionalAttrs (cfg.pullRequests.commitName != null) {
         GRADIENT_PULL_REQUESTS_COMMIT_NAME = cfg.pullRequests.commitName;
       } // lib.optionalAttrs (cfg.pullRequests.commitEmail != null) {

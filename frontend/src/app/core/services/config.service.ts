@@ -26,6 +26,7 @@ interface ServerConfig {
   ssh_port: number | null;
   gradient_ci_enabled: boolean;
   gradient_ci_url: string;
+  logo_url: string | null;
 }
 
 @Injectable({ providedIn: 'root' })
@@ -47,6 +48,7 @@ export class ConfigService {
   sshPort: number | null = null;
   gradientCiEnabled = false;
   gradientCiUrl = 'https://servers.gradient.ci';
+  logoUrl: string | null = null;
 
   canCreate(permission: CreatePermission, isSuperuser: boolean): boolean {
     switch (permission) {
@@ -81,6 +83,7 @@ export class ConfigService {
           this.sshPort = res.message.ssh_port ?? null;
           this.gradientCiEnabled = res.message.gradient_ci_enabled ?? false;
           this.gradientCiUrl = res.message.gradient_ci_url ?? this.gradientCiUrl;
+          this.logoUrl = res.message.logo_url ?? null;
         }
       })
       .catch(() => {

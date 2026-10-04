@@ -246,6 +246,7 @@ paths:
                   github_app_enabled: false
                   gradient_ci_enabled: true
                   gradient_ci_url: https://servers.gradient.ci
+                  logo_url: null
 
   /proto:
     servers:
@@ -11655,6 +11656,10 @@ components:
         gradient_ci_url:
           type: string
           description: Address of Gradient.CI Servers (`gradientCi.url`)
+        logo_url:
+          type: string
+          nullable: true
+          description: Image shown instead of the Gradient logo on the sign-in pages (`frontend.logoUrl`), `null` for the Gradient logo
     # ── Auth ─────────────────────────────────────────────────────────────────
 
     MakeLoginRequest:
