@@ -156,11 +156,18 @@ impl Scheduler {
                 .iter()
                 .map(|id| crate::jobs::build_job_key(*id)),
         );
-        if let Err(e) = self
-            .call(|reply| SchedulerMsg::RemoveJobs { job_ids, reply })
+        match self
+            .call(|reply| SchedulerMsg::CancelJobs { job_ids, reply })
             .await
         {
-            tracing::warn!(error = %e, %eval_id, "cancel_evaluation_jobs did not reach the scheduler");
+            Ok(running) => {
+                for (worker_id, job_id) in running {
+                    tracing::info!(%worker_id, %job_id, %eval_id, "sent AbortJob to worker");
+                }
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, %eval_id, "cancel_evaluation_jobs did not reach the scheduler");
+            }
         }
     }
 

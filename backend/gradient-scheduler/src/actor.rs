@@ -242,9 +242,9 @@ pub enum SchedulerMsg {
         shared_builds: Vec<DerivationBuildId>,
         reply: RpcReplyPort<()>,
     },
-    RemoveJobs {
+    CancelJobs {
         job_ids: Vec<String>,
-        reply: RpcReplyPort<()>,
+        reply: RpcReplyPort<Vec<(String, String)>>,
     },
     ActiveJob {
         job_id: String,
@@ -323,6 +323,22 @@ impl SchedulerCore {
     fn bump_offers(&mut self) {
         self.offers = self.offers.wrapping_add(1);
         self.pool.signal_active(SessionSignal::Offers(self.offers));
+    }
+
+    fn abort_running(&mut self, keep: impl Fn(&str, &PendingJob) -> bool) -> Vec<(String, String)> {
+        let running: Vec<(String, String)> = self
+            .tracker
+            .active_jobs()
+            .filter(|(job_id, _, job)| keep(job_id, job))
+            .map(|(job_id, worker, _)| (worker.to_owned(), job_id.to_owned()))
+            .collect();
+        let now = Instant::now();
+        for (worker, job_id) in &running {
+            self.pool
+                .send_abort(worker, job_id.clone(), "evaluation aborted".to_owned());
+            self.tracker.mark_aborting(job_id, now);
+        }
+        running
     }
 
     fn with_live_transfers(&self, instance: &InstanceContext) -> InstanceContext {
@@ -870,23 +886,10 @@ impl Actor for CoreActor {
             } => {
                 let aborted_shared_builds: HashSet<DerivationBuildId> =
                     aborted_shared_builds.into_iter().collect();
-                let to_abort: Vec<(String, String)> = core
-                    .tracker
-                    .active_jobs()
-                    .filter(|(_, _, job)| job.evaluation_id() == evaluation_id)
-                    .filter(|(_, _, job)| {
-                        job.derivation_build().is_none_or(|shared_build| {
-                            aborted_shared_builds.contains(&shared_build)
-                        })
-                    })
-                    .map(|(job_id, worker, _)| (worker.to_owned(), job_id.to_owned()))
-                    .collect();
-                let now = Instant::now();
-                for (worker, job_id) in &to_abort {
-                    core.pool
-                        .send_abort(worker, job_id.clone(), "evaluation aborted".to_owned());
-                    core.tracker.mark_aborting(job_id, now);
-                }
+                let to_abort = core.abort_running(|_, job| match job.derivation_build() {
+                    Some(shared_build) => aborted_shared_builds.contains(&shared_build),
+                    None => job.evaluation_id() == evaluation_id,
+                });
                 core.tracker.remove_pending_for_evaluation(evaluation_id);
                 let _ = reply.send(to_abort);
             }
@@ -899,11 +902,15 @@ impl Actor for CoreActor {
                     .prioritize(evaluation, &shared_builds.into_iter().collect());
                 let _ = reply.send(());
             }
-            SchedulerMsg::RemoveJobs { job_ids, reply } => {
-                for id in &job_ids {
+            SchedulerMsg::CancelJobs { job_ids, reply } => {
+                let running = core.abort_running(|job_id, _| job_ids.iter().any(|id| id == job_id));
+                for id in job_ids
+                    .iter()
+                    .filter(|id| !running.iter().any(|(_, job_id)| job_id == *id))
+                {
                     core.tracker.remove_job(id);
                 }
-                let _ = reply.send(());
+                let _ = reply.send(running);
             }
             SchedulerMsg::ActiveJob { job_id, reply } => {
                 let _ = reply.send(core.tracker.active_job(&job_id).cloned());
