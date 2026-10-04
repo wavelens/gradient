@@ -34,6 +34,8 @@ def create_personal_project(machine, base, token, repo):
         {"name": "personal", "display_name": "Personal", "description": "standalone"})
     api(machine, base, "PUT", "caches", token,
         {"name": "main", "display_name": "Main", "description": "standalone", "priority": 10})
+    for upstream in api(machine, base, "GET", "caches/main/upstream-caches", token):
+        api(machine, base, "DELETE", f"caches/main/upstream-caches/{upstream['id']}", token)
     api(machine, base, "POST", "projects/personal/subscribe/main", token)
     api(machine, base, "PUT", "tasks/personal", token,
         {"name": "packages", "display_name": "Packages", "description": "standalone",
