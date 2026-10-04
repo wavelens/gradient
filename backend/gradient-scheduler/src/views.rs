@@ -21,7 +21,8 @@ pub struct WorkerContextView {
     pub ram_free_mb: Option<u64>,
     pub cpu_usage_pct: Option<f32>,
     pub disk_speed_mbps: Option<f32>,
-    pub network_speed_mbps: Option<f32>,
+    pub upload_speed_mbps: Option<f32>,
+    pub download_speed_mbps: Option<f32>,
 }
 
 impl WorkerContextView {
@@ -37,7 +38,8 @@ impl WorkerContextView {
             ram_free_mb: m.ram_free_mb,
             cpu_usage_pct: m.cpu_usage_pct,
             disk_speed_mbps: m.disk_speed_mbps,
-            network_speed_mbps: m.network_speed_mbps,
+            upload_speed_mbps: m.upload_speed_mbps,
+            download_speed_mbps: m.download_speed_mbps,
         }
     }
 }
@@ -48,6 +50,7 @@ pub struct HistoryView {
     pub avg_cpu_time_ms: Option<u64>,
     pub build_time_ms: Option<u64>,
     pub avg_disk_bytes: Option<u64>,
+    pub output_nar_size: Option<u64>,
     pub oom_rate: f32,
     pub samples: u32,
 }
@@ -59,6 +62,7 @@ impl From<&HistoryPrediction> for HistoryView {
             avg_cpu_time_ms: h.avg_cpu_time_ms,
             build_time_ms: h.build_time_ms,
             avg_disk_bytes: h.avg_disk_bytes,
+            output_nar_size: h.output_nar_size,
             oom_rate: h.oom_rate,
             samples: h.samples,
         }

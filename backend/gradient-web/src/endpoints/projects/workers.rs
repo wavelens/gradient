@@ -349,7 +349,8 @@ pub struct WorkerSamplePoint {
     pub ram_free_mb: Option<i64>,
     pub ram_total_mb: Option<i64>,
     pub disk_speed_mbps: Option<f32>,
-    pub network_speed_mbps: Option<f32>,
+    pub upload_speed_mbps: Option<f32>,
+    pub download_speed_mbps: Option<f32>,
     pub assigned_jobs: i32,
     pub max_concurrent_builds: i32,
     pub state: i16,
@@ -418,7 +419,8 @@ pub async fn get_project_worker_metrics(
             ram_free_mb: s.ram_free_mb,
             ram_total_mb: s.ram_total_mb,
             disk_speed_mbps: s.disk_speed_mbps,
-            network_speed_mbps: s.network_speed_mbps,
+            upload_speed_mbps: s.upload_speed_mbps,
+            download_speed_mbps: s.download_speed_mbps,
             assigned_jobs: s.assigned_jobs,
             max_concurrent_builds: s.max_concurrent_builds,
             state: i16::from(s.state),
@@ -652,7 +654,8 @@ mod tests {
             ram_free_mb: None,
             ram_total_mb: 0,
             disk_speed_mbps: None,
-            network_speed_mbps: None,
+            upload_speed_mbps: None,
+            download_speed_mbps: None,
         }
     }
 

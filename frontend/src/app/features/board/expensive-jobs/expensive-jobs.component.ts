@@ -17,7 +17,7 @@ import { MetricChartComponent } from '@shared/ui';
 import { firstLoad } from '../first-load';
 import { formatDuration, formatQuantity } from '@shared/text';
 
-type Tab = 'time' | 'ram' | 'cpu' | 'disk' | 'network';
+type Tab = 'time' | 'ram' | 'cpu' | 'disk';
 
 @Component({
   selector: 'app-board-expensive-jobs',
@@ -55,9 +55,6 @@ type Tab = 'time' | 'ram' | 'cpu' | 'disk' | 'network';
           </tbody>
         </gr-table>
       } @else {
-        @if (tab() === 'network') {
-          <p class="note">Network is a host-level peak measured during each build's window (cgroup v2 has no per-build network accounting); exact only when the build is the host's sole network user.</p>
-        }
         <gr-table class="expensive">
           <thead><tr><th>#</th><th>Derivation</th><th>{{ valueHeader() }}</th><th>Worker</th></tr></thead>
           <tbody>
@@ -101,7 +98,6 @@ export class BoardExpensiveJobsComponent implements OnInit {
     { key: 'ram', label: 'Peak RAM' },
     { key: 'cpu', label: 'CPU time' },
     { key: 'disk', label: 'Disk I/O' },
-    { key: 'network', label: 'Network' },
   ];
 
   readonly duration = formatDuration;
@@ -122,7 +118,7 @@ export class BoardExpensiveJobsComponent implements OnInit {
       this.board.getExpensive(this.windowDays).pipe(this.first.track()).subscribe((b) => this.builds.set(b));
     } else {
       this.board
-        .getExpensiveByResource(this.tab() as 'ram' | 'cpu' | 'disk' | 'network', this.windowDays)
+        .getExpensiveByResource(this.tab() as 'ram' | 'cpu' | 'disk', this.windowDays)
         .pipe(this.first.track())
         .subscribe((r) => this.resources.set(r));
     }

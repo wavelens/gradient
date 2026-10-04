@@ -511,8 +511,8 @@ pub fn instance_tables() -> &'static [TableSpec] {
         ),
         spec!(
             "worker_sample",
-            "CREATE TABLE worker_sample (id TEXT, worker_id TEXT, at TEXT, cpu_usage_pct REAL, ram_free_mb INTEGER, ram_total_mb INTEGER, disk_speed_mbps REAL, network_speed_mbps REAL, assigned_jobs INTEGER, max_concurrent_builds INTEGER, state INTEGER, capabilities TEXT)",
-            "WITH w AS (SELECT created_at AS started, COALESCE(finished_at, (now() AT TIME ZONE \'UTC\')) AS ended FROM evaluation WHERE id = $1) SELECT s.id::text, s.worker_id::text, s.at::text, s.cpu_usage_pct::text, s.ram_free_mb::text, s.ram_total_mb::text, s.disk_speed_mbps::text, s.network_speed_mbps::text, s.assigned_jobs::text, s.max_concurrent_builds::text, s.state::text, s.capabilities::text FROM worker_sample s, w WHERE s.worker_id IN (SELECT worker_id FROM dispatched_job WHERE evaluation_id = $1) AND s.at BETWEEN w.started AND w.ended",
+            "CREATE TABLE worker_sample (id TEXT, worker_id TEXT, at TEXT, cpu_usage_pct REAL, ram_free_mb INTEGER, ram_total_mb INTEGER, disk_speed_mbps REAL, upload_speed_mbps REAL, download_speed_mbps REAL, assigned_jobs INTEGER, max_concurrent_builds INTEGER, state INTEGER, capabilities TEXT)",
+            "WITH w AS (SELECT created_at AS started, COALESCE(finished_at, (now() AT TIME ZONE \'UTC\')) AS ended FROM evaluation WHERE id = $1) SELECT s.id::text, s.worker_id::text, s.at::text, s.cpu_usage_pct::text, s.ram_free_mb::text, s.ram_total_mb::text, s.disk_speed_mbps::text, s.upload_speed_mbps::text, s.download_speed_mbps::text, s.assigned_jobs::text, s.max_concurrent_builds::text, s.state::text, s.capabilities::text FROM worker_sample s, w WHERE s.worker_id IN (SELECT worker_id FROM dispatched_job WHERE evaluation_id = $1) AND s.at BETWEEN w.started AND w.ended",
             "the workers that ran this evaluation, while it ran",
             [
                 "id",
@@ -522,7 +522,8 @@ pub fn instance_tables() -> &'static [TableSpec] {
                 "ram_free_mb",
                 "ram_total_mb",
                 "disk_speed_mbps",
-                "network_speed_mbps",
+                "upload_speed_mbps",
+                "download_speed_mbps",
                 "assigned_jobs",
                 "max_concurrent_builds",
                 "state",

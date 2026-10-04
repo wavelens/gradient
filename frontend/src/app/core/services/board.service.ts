@@ -77,14 +77,15 @@ export interface WorkerContextView {
   ram_free_mb: number | null;
   cpu_usage_pct: number | null;
   disk_speed_mbps: number | null;
-  network_speed_mbps: number | null;
+  upload_speed_mbps: number | null;
+  download_speed_mbps: number | null;
 }
 
 export interface DerivationRef { build_id: string; drv_path: string; pname: string | null; }
 
 export interface JobHistoryView {
   peak_ram_mb: number | null; avg_cpu_time_ms: number | null; build_time_ms: number | null;
-  avg_disk_bytes: number | null; oom_rate: number; samples: number;
+  avg_disk_bytes: number | null; output_nar_size: number | null; oom_rate: number; samples: number;
 }
 
 export interface JobContextView {
@@ -114,7 +115,6 @@ export interface InstanceContextView {
   cpu_time_ms: Windowed;
   avg_cpu_pct: Windowed;
   disk_bytes: Windowed;
-  network_mbps: Windowed;
   oom_rate: Windowed;
   closure_size: Windowed;
   nar_size_mb: Windowed;
@@ -309,7 +309,8 @@ export interface HttpRouteStat {
 
 export interface WorkerNet {
   worker_id: string | null;
-  network_speed_mbps: number | null;
+  upload_speed_mbps: number | null;
+  download_speed_mbps: number | null;
   disk_speed_mbps: number | null;
 }
 
@@ -521,7 +522,7 @@ export class BoardService {
   }
 
   getExpensiveByResource(
-    metric: 'ram' | 'cpu' | 'disk' | 'network',
+    metric: 'ram' | 'cpu' | 'disk',
     windowDays = 30
   ): Observable<ExpensiveResource[]> {
     return this.api.get<ExpensiveResource[]>(

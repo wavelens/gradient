@@ -18,12 +18,10 @@ fn raw_to_build_metrics(
     raw: Option<BuildMetricsRaw>,
     build_time_ms: u64,
     cpu_count: u32,
-    peak_network_mbps: Option<f32>,
 ) -> BuildMetrics {
     let Some(raw) = raw else {
         return BuildMetrics {
             build_time_ms: Some(build_time_ms),
-            peak_network_mbps,
             ..Default::default()
         };
     };
@@ -44,7 +42,6 @@ fn raw_to_build_metrics(
         disk_write_bytes: Some(raw.disk_write_bytes),
         oom_killed: raw.oom_killed,
         build_time_ms: Some(build_time_ms),
-        peak_network_mbps,
     }
 }
 
@@ -77,7 +74,6 @@ pub(super) fn assemble_build_metrics(
     sampled: Option<BuildMetricsRaw>,
     cpu_usec: Option<u64>,
     build_time_ms: u64,
-    peak_network_mbps: Option<f32>,
 ) -> BuildMetrics {
     let cpu_count = crate::metrics::host_static().cpu_count;
     let raw = match (sampled, cpu_usec) {
@@ -97,60 +93,7 @@ pub(super) fn assemble_build_metrics(
             gradient_worker_client::throughput::DISK.observe(mb_per_s);
         }
     }
-    raw_to_build_metrics(raw, build_time_ms, cpu_count, peak_network_mbps)
-}
-
-/// The peak is host-level because cgroup v2 is carrying no per-build network accounting. It is
-/// exact only when the build is the sole network consumer.
-pub(super) struct NetworkPeakSampler {
-    peak: std::sync::Arc<std::sync::atomic::AtomicU64>,
-    stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
-    handle: tokio::task::JoinHandle<()>,
-}
-
-impl NetworkPeakSampler {
-    pub(super) fn start() -> Self {
-        use std::sync::Arc;
-        use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-        let peak = Arc::new(AtomicU64::new(0));
-        let stop = Arc::new(AtomicBool::new(false));
-        let (p, s) = (peak.clone(), stop.clone());
-        #[expect(
-            clippy::disallowed_methods,
-            reason = "stopped through the flag when the build ends"
-        )]
-        let handle = tokio::spawn(async move {
-            while !s.load(Ordering::Relaxed) {
-                if let Some(v) = gradient_worker_client::throughput::NETWORK.current() {
-                    let bits = (v as f64).to_bits();
-                    let mut prev = p.load(Ordering::Relaxed);
-                    while f64::from_bits(prev) < v as f64 {
-                        match p.compare_exchange_weak(
-                            prev,
-                            bits,
-                            Ordering::Relaxed,
-                            Ordering::Relaxed,
-                        ) {
-                            Ok(_) => break,
-                            Err(cur) => prev = cur,
-                        }
-                    }
-                }
-                tokio::time::sleep(std::time::Duration::from_millis(250)).await;
-            }
-        });
-        Self { peak, stop, handle }
-    }
-
-    pub(super) async fn finish(self) -> Option<f32> {
-        use std::sync::atomic::Ordering;
-        self.stop.store(true, Ordering::Relaxed);
-        let _ = self.handle.await;
-        match self.peak.load(Ordering::Relaxed) {
-            0 => None,
-            b => Some(f64::from_bits(b) as f32),
-        }
-    }
+    raw_to_build_metrics(raw, build_time_ms, cpu_count)
 }
 
 /// Nix is destroying the build cgroup as soon as the build is done. The sampler must read it while
@@ -273,7 +216,7 @@ mod tests {
 
     #[test]
     fn raw_to_metrics_always_sets_build_time() {
-        let m = raw_to_build_metrics(None, 5_000, 4, None);
+        let m = raw_to_build_metrics(None, 5_000, 4);
         assert_eq!(m.build_time_ms, Some(5_000));
         assert_eq!(m.peak_ram_mb, None);
         assert_eq!(m.cpu_time_ms, None);
@@ -290,9 +233,9 @@ mod tests {
             disk_write_bytes: 20,
             oom_killed: false,
         };
-        let m = raw_to_build_metrics(Some(raw), 0, 4, None);
+        let m = raw_to_build_metrics(Some(raw), 0, 4);
         assert_eq!(m.avg_cpu_pct, None);
-        let m = raw_to_build_metrics(Some(raw), 1_000, 0, None);
+        let m = raw_to_build_metrics(Some(raw), 1_000, 0);
         assert_eq!(m.avg_cpu_pct, None);
         assert_eq!(m.peak_ram_mb, Some(2));
         assert_eq!(m.cpu_time_ms, Some(1_000));
@@ -309,10 +252,9 @@ mod tests {
             disk_write_bytes: 0,
             oom_killed: false,
         };
-        let m = raw_to_build_metrics(Some(raw), 4_000, 4, Some(125.0));
+        let m = raw_to_build_metrics(Some(raw), 4_000, 4);
         assert_eq!(m.cpu_time_ms, Some(8_000));
         assert_eq!(m.avg_cpu_pct, Some(50.0));
-        assert_eq!(m.peak_network_mbps, Some(125.0));
     }
 
     fn sample(cpu_usage_usec: Option<u64>) -> BuildMetricsRaw {
@@ -335,9 +277,9 @@ mod tests {
 
     #[test]
     fn assemble_falls_back_to_the_sampled_cpu_without_daemon_times() {
-        let m = assemble_build_metrics(Some(sample(Some(3_000_000))), None, 1_000, None);
+        let m = assemble_build_metrics(Some(sample(Some(3_000_000))), None, 1_000);
         assert_eq!(m.cpu_time_ms, Some(3_000));
-        let m = assemble_build_metrics(Some(sample(Some(3_000_000))), Some(4_000_000), 1_000, None);
+        let m = assemble_build_metrics(Some(sample(Some(3_000_000))), Some(4_000_000), 1_000);
         assert_eq!(m.cpu_time_ms, Some(4_000));
     }
 }

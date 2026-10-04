@@ -11,7 +11,7 @@ pub mod prefer_local;
 pub mod qos;
 pub mod resource;
 
-pub use affinity::{CpuAffinityRule, DiskAffinityRule, NetworkAffinityRule};
+pub use affinity::{CpuAffinityRule, DiskAffinityRule, NetworkAffinityRule, OutputUploadRule};
 pub use builtin::{
     BuiltinDeprioritizeRule, DependencyCountRule, MissingNarSizeRule, MissingPathsRule,
     RealisedOutputsRule, RescoreWaitRule, ReserveFetchWorkersRule, WaitTimeRule,

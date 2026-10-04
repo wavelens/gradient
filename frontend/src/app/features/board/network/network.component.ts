@@ -32,11 +32,11 @@ type HttpSortKey = keyof Pick<HttpRouteStat, 'method' | 'route' | 'count' | 'avg
       ></gr-metric-chart>
 
       <gr-metric-chart
-        title="Worker network speed (latest sample)"
+        title="Worker upload and download speed (latest sample)"
         type="bar"
-        [series]="netSeries()"
+        [series]="transferSeries()"
         [categories]="workerCats()"
-        [colors]="['#6f42c1']"
+        [colors]="['#6f42c1', '#20c997']"
         [valueFormatter]="mbps"
       ></gr-metric-chart>
 
@@ -134,8 +134,9 @@ export class BoardNetworkComponent implements OnInit {
   workerCats = computed(() =>
     (this.stats()?.workers ?? []).map((w) => (w.worker_id ?? '-').slice(0, 12))
   );
-  netSeries = computed(() => [
-    { name: 'network', data: (this.stats()?.workers ?? []).map((w) => w.network_speed_mbps ?? 0) },
+  transferSeries = computed(() => [
+    { name: 'upload', data: (this.stats()?.workers ?? []).map((w) => w.upload_speed_mbps ?? 0) },
+    { name: 'download', data: (this.stats()?.workers ?? []).map((w) => w.download_speed_mbps ?? 0) },
   ]);
   diskSeries = computed(() => [
     { name: 'disk', data: (this.stats()?.workers ?? []).map((w) => w.disk_speed_mbps ?? 0) },

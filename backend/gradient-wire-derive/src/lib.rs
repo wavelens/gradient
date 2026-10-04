@@ -17,11 +17,17 @@ pub fn derive_proto(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
         .into()
 }
 
+struct Removed {
+    until: u16,
+    ty: Type,
+}
+
 #[derive(Default)]
 struct Versions {
     since: u16,
     default: bool,
     oldest: Option<u16>,
+    removed: Vec<Removed>,
 }
 
 fn versions(attrs: &[Attribute]) -> syn::Result<Versions> {
@@ -51,10 +57,18 @@ fn parse_versions(input: ParseStream, out: &mut Versions) -> syn::Result<()> {
                     input.parse::<Token![=]>()?;
                     out.oldest = Some(input.parse::<LitInt>()?.base10_parse()?);
                 }
+                "removed" => {
+                    let content;
+                    syn::parenthesized!(content in input);
+                    let until = content.parse::<LitInt>()?.base10_parse()?;
+                    content.parse::<Token![,]>()?;
+                    let ty = content.parse()?;
+                    out.removed.push(Removed { until, ty });
+                }
                 _ => {
                     return Err(syn::Error::new(
                         word.span(),
-                        "expected a version, `default` or `oldest = N`",
+                        "expected a version, `default`, `oldest = N` or `removed(N, Type)`",
                     ));
                 }
             }
@@ -84,6 +98,13 @@ fn fields(fields: &Fields) -> syn::Result<Vec<Field>> {
             let v = versions(&f.attrs)?;
             if v.oldest.is_some() {
                 return Err(syn::Error::new_spanned(f, "`oldest` belongs on the type"));
+            }
+
+            if !v.removed.is_empty() {
+                return Err(syn::Error::new_spanned(
+                    f,
+                    "`removed` belongs on the struct or variant that lost the field",
+                ));
             }
 
             Ok(Field {
@@ -140,6 +161,22 @@ fn field_versions(fields: &[Field], present_since: u16) -> (Vec<TokenStream>, Ve
         .unzip()
 }
 
+fn encode_removed(removed: &[Removed]) -> TokenStream {
+    let codec = codec();
+    let steps = removed.iter().map(|Removed { until, ty }| {
+        quote!(if version < #until { #codec::Proto::encode(&<#ty as ::core::default::Default>::default(), version, out)?; })
+    });
+    quote!(#(#steps)*)
+}
+
+fn decode_removed(removed: &[Removed]) -> TokenStream {
+    let codec = codec();
+    let steps = removed.iter().map(|Removed { until, ty }| {
+        quote!(if version < #until { <#ty as #codec::Proto>::decode(input, version)?; })
+    });
+    quote!(#(#steps)*)
+}
+
 fn encode_fields(fields: &[Field], present_since: u16) -> TokenStream {
     let codec = codec();
     let steps = fields.iter().map(|f| {
@@ -169,26 +206,30 @@ fn decode_fields(fields: &[Field], present_since: u16) -> TokenStream {
     quote!(#(#steps)*)
 }
 
-fn describe_fields(fields: &[Field], present_since: u16) -> TokenStream {
-    if fields.is_empty() {
+fn describe_fields(fields: &[Field], removed: &[Removed], present_since: u16) -> TokenStream {
+    if fields.is_empty() && removed.is_empty() {
         return quote!(out.push_str("{}"););
     }
 
     let codec = codec();
-    let steps = fields.iter().map(|f| {
-        let ty = &f.ty;
-        when_present(
-            f.since.max(present_since),
-            quote! {
-                #codec::push_separator(out, &mut first);
-                <#ty as #codec::Proto>::describe(version, out);
-            },
-        )
+    let describe = |ty: &Type| {
+        quote! {
+            #codec::push_separator(out, &mut first);
+            <#ty as #codec::Proto>::describe(version, out);
+        }
+    };
+    let steps = fields
+        .iter()
+        .map(|f| when_present(f.since.max(present_since), describe(&f.ty)));
+    let removed_steps = removed.iter().map(|Removed { until, ty }| {
+        let step = describe(ty);
+        quote!(if version < #until { #step })
     });
     quote!({
         out.push('{');
         let mut first = true;
         #(#steps)*
+        #(#removed_steps)*
         out.push('}');
     })
 }
@@ -201,19 +242,22 @@ struct Body {
     describe: TokenStream,
 }
 
-fn struct_body(shape: &Fields) -> syn::Result<Body> {
+fn struct_body(shape: &Fields, removed: &[Removed]) -> syn::Result<Body> {
     let fs = fields(shape)?;
-    let (oldest, newest) = field_versions(&fs, 0);
+    let (oldest, mut newest) = field_versions(&fs, 0);
+    newest.extend(removed.iter().map(|r| r.until).map(|until| quote!(#until)));
     let pat = pattern(quote!(Self), &fs, shape);
     let encode = encode_fields(&fs, 0);
+    let encode_removed = encode_removed(removed);
     let decode = decode_fields(&fs, 0);
+    let decode_removed = decode_removed(removed);
     let bind = (!fs.is_empty()).then(|| quote!(let #pat = self;));
     Ok(Body {
         oldest,
         newest,
-        encode: quote! { #bind #encode Ok(()) },
-        decode: quote! { #decode Ok(#pat) },
-        describe: describe_fields(&fs, 0),
+        encode: quote! { #bind #encode #encode_removed Ok(()) },
+        decode: quote! { #decode #decode_removed Ok(#pat) },
+        describe: describe_fields(&fs, removed, 0),
     })
 }
 
@@ -235,7 +279,7 @@ fn enum_body(name: &Ident, data: &syn::DataEnum) -> syn::Result<Body> {
         if v.default || v.oldest.is_some() {
             return Err(syn::Error::new_spanned(
                 variant,
-                "a variant takes only its version",
+                "a variant takes only its version and `removed(N, Type)`",
             ));
         }
 
@@ -257,10 +301,16 @@ fn enum_body(name: &Ident, data: &syn::DataEnum) -> syn::Result<Body> {
         body.oldest.extend(oldest);
         body.newest.extend(newest);
         body.newest.push(quote!(#since));
+        body.newest.extend(
+            v.removed
+                .iter()
+                .map(|r| r.until)
+                .map(|until| quote!(#until)),
+        );
         let pat = pattern(quote!(Self::#ident), &fs, &variant.fields);
-        let encode = encode_fields(&fs, since);
-        let decode = decode_fields(&fs, since);
-        let describe = describe_fields(&fs, since);
+        let (encode, encode_removed) = (encode_fields(&fs, since), encode_removed(&v.removed));
+        let (decode, decode_removed) = (decode_fields(&fs, since), decode_removed(&v.removed));
+        let describe = describe_fields(&fs, &v.removed, since);
         let refuse_older_peer = (since > 0).then(|| {
             quote! {
                 if version < #since {
@@ -270,10 +320,10 @@ fn enum_body(name: &Ident, data: &syn::DataEnum) -> syn::Result<Body> {
         });
         let guard = (since > 0).then(|| quote!(if version >= #since));
         encode_arms.push(quote! {
-            #pat => { #refuse_older_peer #codec::put_varint(out, #tag); #encode }
+            #pat => { #refuse_older_peer #codec::put_varint(out, #tag); #encode #encode_removed }
         });
         decode_arms.push(quote! {
-            #tag #guard => { #decode Ok(#pat) }
+            #tag #guard => { #decode #decode_removed Ok(#pat) }
         });
         describe_arms.push(when_present(
             since,
@@ -321,10 +371,11 @@ fn param(body: &TokenStream, name: &str) -> Ident {
 fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
     let name = &input.ident;
     let top = versions(&input.attrs)?;
-    if top.since != 0 || top.default {
+    let removed_on_enum = matches!(input.data, Data::Enum(_)) && !top.removed.is_empty();
+    if top.since != 0 || top.default || removed_on_enum {
         return Err(syn::Error::new_spanned(
             name,
-            "only `oldest = N` belongs on the type",
+            "only `oldest = N` belongs on the type, plus `removed(N, Type)` on a struct",
         ));
     }
 
@@ -337,7 +388,7 @@ fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
         decode,
         describe,
     } = match &input.data {
-        Data::Struct(data) => struct_body(&data.fields)?,
+        Data::Struct(data) => struct_body(&data.fields, &top.removed)?,
         Data::Enum(data) => enum_body(name, data)?,
         Data::Union(_) => {
             return Err(syn::Error::new_spanned(name, "unions are not supported"));

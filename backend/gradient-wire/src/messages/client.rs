@@ -43,11 +43,15 @@ pub enum ClientMessage {
         endpoint: Option<String>,
     },
 
+    #[proto(removed(28, Option<f32>))]
     WorkerMetrics {
         cpu_usage_pct: f32,
         ram_free_mb: u64,
         disk_speed_mbps: Option<f32>,
-        network_speed_mbps: Option<f32>,
+        #[proto(28, default)]
+        upload_speed_mbps: Option<f32>,
+        #[proto(28, default)]
+        download_speed_mbps: Option<f32>,
     },
 
     RequestJobList,

@@ -190,14 +190,16 @@ impl<'a> InboundContext<'a> {
                 cpu_usage_pct,
                 ram_free_mb,
                 disk_speed_mbps,
-                network_speed_mbps,
+                upload_speed_mbps,
+                download_speed_mbps,
             } => {
-                self.spawn_worker_metrics(
+                self.spawn_worker_metrics(WorkerMetrics {
                     cpu_usage_pct,
                     ram_free_mb,
                     disk_speed_mbps,
-                    network_speed_mbps,
-                );
+                    upload_speed_mbps,
+                    download_speed_mbps,
+                });
                 true
             }
             ClientMessage::RequestJobList => self.on_request_job_list().await,
@@ -433,22 +435,10 @@ impl<'a> InboundContext<'a> {
         }
     }
 
-    fn spawn_worker_metrics(
-        &self,
-        cpu_usage_pct: f32,
-        ram_free_mb: u64,
-        disk_speed_mbps: Option<f32>,
-        network_speed_mbps: Option<f32>,
-    ) {
+    fn spawn_worker_metrics(&self, metrics: WorkerMetrics) {
         let rpc = self.rpc();
         self.state.shutdown.spawn(async move {
-            rpc.on_worker_metrics(
-                cpu_usage_pct,
-                ram_free_mb,
-                disk_speed_mbps,
-                network_speed_mbps,
-            )
-            .await;
+            rpc.on_worker_metrics(metrics).await;
         });
     }
 
@@ -924,24 +914,10 @@ impl RpcContext {
         }
     }
 
-    async fn on_worker_metrics(
-        &self,
-        cpu_usage_pct: f32,
-        ram_free_mb: u64,
-        disk_speed_mbps: Option<f32>,
-        network_speed_mbps: Option<f32>,
-    ) {
-        debug!(peer_id = %self.peer_id, cpu_usage_pct, ram_free_mb, ?disk_speed_mbps, ?network_speed_mbps, "WorkerMetrics");
+    async fn on_worker_metrics(&self, metrics: WorkerMetrics) {
+        debug!(peer_id = %self.peer_id, ?metrics, "WorkerMetrics");
         self.scheduler
-            .update_worker_metrics(
-                &self.peer_id,
-                WorkerMetrics {
-                    cpu_usage_pct,
-                    ram_free_mb,
-                    disk_speed_mbps,
-                    network_speed_mbps,
-                },
-            )
+            .update_worker_metrics(&self.peer_id, metrics)
             .await;
     }
 }

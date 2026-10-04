@@ -11,8 +11,8 @@ use crate::score::rules::builtin::{
     RealisedOutputsRule, RescoreWaitRule, ReserveFetchWorkersRule, WaitTimeRule,
 };
 use crate::score::rules::{
-    CpuAffinityRule, DiskAffinityRule, FairShareRule, NetworkAffinityRule, PreferLocalBuildRule,
-    QosRule, ResourceFitRule, ResourceSaturationRule,
+    CpuAffinityRule, DiskAffinityRule, FairShareRule, NetworkAffinityRule, OutputUploadRule,
+    PreferLocalBuildRule, QosRule, ResourceFitRule, ResourceSaturationRule,
 };
 
 pub trait ScoringPolicy: Send + Sync + std::fmt::Debug {
@@ -145,6 +145,7 @@ fn resource_aware_table() -> Vec<RuleSpec> {
     // capacity. Re-enabling it is a scheduling-policy decision (#476).
     rules.push(spec(false, Box::new(FairShareRule::default())));
     rules.push(spec(true, Box::new(NetworkAffinityRule::default())));
+    rules.push(spec(true, Box::new(OutputUploadRule::default())));
     rules.push(spec(true, Box::new(DiskAffinityRule::default())));
     rules.push(spec(true, Box::new(CpuAffinityRule::default())));
     rules
@@ -340,7 +341,7 @@ mod tests {
             system_features: &feats,
             fetch: false,
             metrics: Some(WorkerMetricsView {
-                network_speed_mbps: Some(100.0),
+                download_speed_mbps: Some(100.0),
                 ..Default::default()
             }),
         };
@@ -349,14 +350,15 @@ mod tests {
             system_features: &feats,
             fetch: false,
             metrics: Some(WorkerMetricsView {
-                network_speed_mbps: Some(5.0),
+                download_speed_mbps: Some(5.0),
                 ..Default::default()
             }),
         };
-        assert!(
-            policy.score(&c, &fast, &InstanceContext::default())
-                > policy.score(&c, &slow, &InstanceContext::default())
-        );
+        let inst = InstanceContext {
+            download_speed_mean_mbps: Some(50.0),
+            ..Default::default()
+        };
+        assert!(policy.score(&c, &fast, &inst) > policy.score(&c, &slow, &inst));
     }
 
     #[test]
@@ -572,6 +574,7 @@ mod tests {
             "MissingNarSizeRule",
             "MissingPathsRule",
             "NetworkAffinityRule",
+            "OutputUploadRule",
             "PreferLocalBuildRule",
             "QosRule",
             "RealisedOutputsRule",

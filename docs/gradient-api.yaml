@@ -9059,10 +9059,10 @@ paths:
     get:
       tags: [board]
       summary: Most expensive builds by resource
-      description: Top 20 derivations by a captured per-build resource (peak RAM, CPU time, total disk bytes, or host network peak) from each derivation's latest `derivation_metric` row in the window, skipping zero values. Project-scoped; `worker_name` is shown only when the worker is registered by a project the caller can see.
+      description: Top 20 derivations by a captured per-build resource (peak RAM, CPU time or total disk bytes) from each derivation's latest `derivation_metric` row in the window, skipping zero values. Project-scoped; `worker_name` is shown only when the worker is registered by a project the caller can see.
       operationId: getBoardExpensiveByResource
       parameters:
-        - { name: metric, in: query, required: true, schema: { type: string, enum: [ram, cpu, disk, network] } }
+        - { name: metric, in: query, required: true, schema: { type: string, enum: [ram, cpu, disk] } }
         - { name: window_days, in: query, schema: { type: integer } }
       responses:
         '200':
@@ -9078,7 +9078,7 @@ paths:
                     project: { type: string, format: uuid }
                     name: { type: string }
                     value: { type: number }
-                    unit: { type: string, enum: [MB, ms, bytes, Mbps] }
+                    unit: { type: string, enum: [MB, ms, bytes] }
                     worker: { type: string }
                     worker_name: { type: string, nullable: true }
         '404':
@@ -9316,7 +9316,7 @@ paths:
     get:
       tags: [board]
       summary: Network & API statistics
-      description: NAR egress series, per-worker latest network/disk speeds (project-scoped), and per-route HTTP latency/throughput (superuser-only).
+      description: NAR egress series, per-worker latest upload, download and disk speeds (project-scoped), and per-route HTTP latency/throughput (superuser-only).
       operationId: getBoardNetwork
       parameters:
         - { name: window_hours, in: query, required: false, schema: { type: integer, default: 24 } }
@@ -9452,7 +9452,7 @@ paths:
     get:
       tags: [board]
       summary: Per-worker metrics
-      description: Live-metric sample time-series (CPU, RAM, disk, network, load), connect/disconnect history, and total assigned-job count for one worker. Project members only, and only for a worker registered in the project or enabled for it as a base worker; the telemetry covers everything the worker did, not only this project's jobs.
+      description: Live-metric sample time-series (CPU, RAM, disk, upload, download, load), connect/disconnect history, and total assigned-job count for one worker. Project members only, and only for a worker registered in the project or enabled for it as a base worker; the telemetry covers everything the worker did, not only this project's jobs.
       operationId: getProjectWorkerMetrics
       parameters:
         - { name: project, in: path, required: true, schema: { type: string } }
@@ -14913,7 +14913,8 @@ components:
         ram_free_mb: { type: integer, nullable: true, description: Null until the worker's first live-metrics heartbeat. }
         cpu_usage_pct: { type: number, nullable: true, description: Null until the worker's first live-metrics heartbeat. }
         disk_speed_mbps: { type: number, nullable: true }
-        network_speed_mbps: { type: number, nullable: true }
+        upload_speed_mbps: { type: number, nullable: true, description: Output NAR megabits per second of whole upload batches. }
+        download_speed_mbps: { type: number, nullable: true, description: Input NAR megabits per second of whole download batches. }
 
     JobContext:
       type: object
@@ -14947,6 +14948,7 @@ components:
             avg_cpu_time_ms: { type: integer, nullable: true }
             build_time_ms: { type: integer, nullable: true }
             avg_disk_bytes: { type: integer, nullable: true }
+            output_nar_size: { type: integer, nullable: true, description: Mean summed NAR size of the outputs of prior builds. }
             oom_rate: { type: number }
             samples: { type: integer }
         derivations:
@@ -14974,7 +14976,6 @@ components:
         cpu_time_ms: { $ref: '#/components/schemas/Windowed' }
         avg_cpu_pct: { $ref: '#/components/schemas/Windowed' }
         disk_bytes: { $ref: '#/components/schemas/Windowed' }
-        network_mbps: { $ref: '#/components/schemas/Windowed' }
         oom_rate: { $ref: '#/components/schemas/Windowed' }
         closure_size: { $ref: '#/components/schemas/Windowed' }
         nar_size_mb: { $ref: '#/components/schemas/Windowed' }
@@ -14986,6 +14987,8 @@ components:
         total_workers: { type: integer }
         idle_workers: { type: integer }
         cpu_core_score_mean: { type: number, nullable: true, description: Mean cpu_core_score of the connected workers that reported one. }
+        upload_speed_mean_mbps: { type: number, nullable: true, description: Mean upload_speed_mbps of the connected workers that measured one. }
+        download_speed_mean_mbps: { type: number, nullable: true, description: Mean download_speed_mbps of the connected workers that measured one. }
 
     DispatchedJobDetail:
       type: object

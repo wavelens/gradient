@@ -120,6 +120,7 @@ pub(crate) async fn upload_all(
     // span to the innermost open one. Per-path spans would chart as nested and double count.
     let mut guard = updater.phase(JobPhase::NarPush);
     guard.record(pending as u32, 0);
+    let started = std::time::Instant::now();
     let mut uploaded = nar::UploadedNar::default();
     let mut running: FuturesUnordered<_> = uploads
         .into_iter()
@@ -129,6 +130,8 @@ pub(crate) async fn upload_all(
         uploaded += result?;
     }
 
+    gradient_worker_client::throughput::UPLOAD
+        .observe_transfer(uploaded.nar_size, started.elapsed());
     guard.record(0, uploaded.file_size);
     Ok(uploaded)
 }

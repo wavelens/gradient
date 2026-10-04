@@ -16,6 +16,8 @@ pub struct InstanceCounts {
     pub total_workers: u32,
     pub idle_workers: u32,
     pub cpu_core_score_mean: Option<f64>,
+    pub upload_speed_mean_mbps: Option<f64>,
+    pub download_speed_mean_mbps: Option<f64>,
 }
 
 /// A window with no data must stay distinguishable from a measured zero.
@@ -41,9 +43,6 @@ struct MetricRow {
     disk_5m: Option<f64>,
     disk_1h: Option<f64>,
     disk_24h: Option<f64>,
-    network_5m: Option<f64>,
-    network_1h: Option<f64>,
-    network_24h: Option<f64>,
     build_time_5m: Option<f64>,
     build_time_1h: Option<f64>,
     build_time_24h: Option<f64>,
@@ -89,9 +88,6 @@ gradient_db::sql! {
           (AVG(disk_read_bytes + disk_write_bytes) FILTER (WHERE created_at >= $1))::float8 AS disk_5m,
           (AVG(disk_read_bytes + disk_write_bytes) FILTER (WHERE created_at >= $2))::float8 AS disk_1h,
           (AVG(disk_read_bytes + disk_write_bytes) FILTER (WHERE created_at >= $3))::float8 AS disk_24h,
-          (AVG(peak_network_mbps) FILTER (WHERE created_at >= $1))::float8 AS network_5m,
-          (AVG(peak_network_mbps) FILTER (WHERE created_at >= $2))::float8 AS network_1h,
-          (AVG(peak_network_mbps) FILTER (WHERE created_at >= $3))::float8 AS network_24h,
           (AVG(build_time_ms)  FILTER (WHERE created_at >= $1))::float8 AS build_time_5m,
           (AVG(build_time_ms)  FILTER (WHERE created_at >= $2))::float8 AS build_time_1h,
           (AVG(build_time_ms)  FILTER (WHERE created_at >= $3))::float8 AS build_time_24h,
@@ -194,7 +190,6 @@ pub async fn compute_instance_context(
         cpu_time_ms: windowed(metric.cpu_time_5m, metric.cpu_time_1h, metric.cpu_time_24h),
         avg_cpu_pct: windowed(metric.cpu_pct_5m, metric.cpu_pct_1h, metric.cpu_pct_24h),
         disk_bytes: windowed(metric.disk_5m, metric.disk_1h, metric.disk_24h),
-        network_mbps: windowed(metric.network_5m, metric.network_1h, metric.network_24h),
         oom_rate: windowed(metric.oom_5m, metric.oom_1h, metric.oom_24h),
         closure_size: windowed(metric.closure_5m, metric.closure_1h, metric.closure_24h),
         nar_size_mb: windowed(
@@ -222,6 +217,8 @@ pub async fn compute_instance_context(
         total_workers: counts.total_workers,
         idle_workers: counts.idle_workers,
         cpu_core_score_mean: counts.cpu_core_score_mean,
+        upload_speed_mean_mbps: counts.upload_speed_mean_mbps,
+        download_speed_mean_mbps: counts.download_speed_mean_mbps,
     }
 }
 
@@ -298,9 +295,6 @@ mod tests {
             f("disk_5m", 4.0),
             f("disk_1h", 5.0),
             f("disk_24h", 6.0),
-            f("network_5m", 7.0),
-            f("network_1h", 8.0),
-            f("network_24h", 9.0),
             f("build_time_5m", 11.0),
             f("build_time_1h", 12.0),
             f("build_time_24h", 13.0),
@@ -344,6 +338,8 @@ mod tests {
             total_workers: 5,
             idle_workers: 1,
             cpu_core_score_mean: None,
+            upload_speed_mean_mbps: Some(400.0),
+            download_speed_mean_mbps: None,
         };
         let ic = compute_instance_context(&db, counts, gradient_types::now()).await;
 
@@ -360,6 +356,7 @@ mod tests {
         assert_eq!(ic.pending_builds, 3);
         assert_eq!(ic.total_workers, 5);
         assert_eq!(ic.idle_workers, 1);
+        assert_eq!(ic.upload_speed_mean_mbps, Some(400.0));
     }
 
     #[tokio::test]

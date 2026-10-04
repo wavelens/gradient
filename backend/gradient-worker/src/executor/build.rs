@@ -25,9 +25,7 @@ use tracing::{debug, info, warn};
 use crate::nix::store::LocalNixStore;
 use crate::proto::job::JobUpdater;
 
-use super::build_metrics::{
-    CgroupSampler, NetworkPeakSampler, assemble_build_metrics, daemon_cpu_usec,
-};
+use super::build_metrics::{CgroupSampler, assemble_build_metrics, daemon_cpu_usec};
 use super::derivation::get_basic_derivation;
 pub use super::failure::BuildError;
 use super::failure::classify_build_error;
@@ -302,7 +300,6 @@ pub async fn build_derivation(
         build_cores,
     );
 
-    let net_sampler = build_metrics.then(NetworkPeakSampler::start);
     let cgroup_sampler = build_metrics.then(|| CgroupSampler::start(cgroup_root, &task.drv_path));
     let started = std::time::Instant::now();
     let realize_result: Result<(Vec<BuildOutput>, bool, Option<u64>), BuildError> =
@@ -318,16 +315,12 @@ pub async fn build_derivation(
         };
 
     let build_time_ms = started.elapsed().as_millis() as u64;
-    let peak_network_mbps = match net_sampler {
-        Some(s) => s.finish().await,
-        None => None,
-    };
     let cgroup_raw = match cgroup_sampler {
         Some(s) => s.finish().await,
         None => None,
     };
     let cpu_usec = realize_result.as_ref().ok().and_then(|(_, _, c)| *c);
-    let metrics = assemble_build_metrics(cgroup_raw, cpu_usec, build_time_ms, peak_network_mbps);
+    let metrics = assemble_build_metrics(cgroup_raw, cpu_usec, build_time_ms);
 
     let (outputs, substituted, _) = realize_result.map_err(|e| e.with_metrics(metrics.clone()))?;
     updater

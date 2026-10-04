@@ -10,14 +10,12 @@ use crate::score::rule::{JobContext, ScoreRule, WorkerContext};
 #[derive(Debug)]
 pub struct NetworkAffinityRule {
     pub bonus: f64,
-    pub reference_mbps: f64,
 }
 
 impl Default for NetworkAffinityRule {
     fn default() -> Self {
         Self {
             bonus: crate::score::weights::NETWORK_AFFINITY_BONUS,
-            reference_mbps: crate::score::weights::NETWORK_REFERENCE_MBPS,
         }
     }
 }
@@ -38,16 +36,75 @@ impl ScoreRule for NetworkAffinityRule {
             return 0.0;
         }
 
-        let Some(net) = worker.metrics.and_then(|m| m.network_speed_mbps) else {
+        let Some(download) = worker.metrics.and_then(|m| m.download_speed_mbps) else {
+            return 0.0;
+        };
+        let Some(fleet) = instance.download_speed_mean_mbps.filter(|f| *f > 0.0) else {
             return 0.0;
         };
 
-        let reference = instance.network_mbps.w24h_or(self.reference_mbps);
-        self.bonus * (net as f64 / reference).min(1.0)
+        self.bonus * (download as f64 / fleet).min(1.0)
     }
 
     fn description(&self) -> &'static str {
-        "Steers fixed-output (network-fetching) derivations towards workers with faster measured network throughput."
+        "Steers fixed-output (network-fetching) derivations towards workers whose measured download speed reaches the fleet mean."
+    }
+}
+
+#[derive(Debug)]
+pub struct OutputUploadRule {
+    pub penalty_per_sec: f64,
+    pub cap: f64,
+}
+
+impl Default for OutputUploadRule {
+    fn default() -> Self {
+        Self {
+            penalty_per_sec: crate::score::weights::OUTPUT_UPLOAD_PENALTY_PER_SEC,
+            cap: crate::score::weights::OUTPUT_UPLOAD_PENALTY_CAP,
+        }
+    }
+}
+
+fn upload_secs(nar_bytes: u64, mbps: f64) -> f64 {
+    nar_bytes as f64 * 8.0 / (mbps * 1_000_000.0)
+}
+
+impl ScoreRule for OutputUploadRule {
+    fn name(&self) -> &'static str {
+        "OutputUploadRule"
+    }
+
+    fn score(
+        &self,
+        job: &JobContext<'_>,
+        worker: &WorkerContext<'_>,
+        instance: &InstanceContext,
+    ) -> f64 {
+        if job.job.build().is_none() {
+            return 0.0;
+        }
+
+        let Some(nar_bytes) = job.build_history().output_nar_size else {
+            return 0.0;
+        };
+        let Some(upload) = worker
+            .metrics
+            .and_then(|m| m.upload_speed_mbps)
+            .filter(|u| *u > 0.0)
+        else {
+            return 0.0;
+        };
+        let Some(fleet) = instance.upload_speed_mean_mbps.filter(|f| *f > 0.0) else {
+            return 0.0;
+        };
+
+        let extra_secs = upload_secs(nar_bytes, upload as f64) - upload_secs(nar_bytes, fleet);
+        -(self.penalty_per_sec * extra_secs.max(0.0)).min(self.cap)
+    }
+
+    fn description(&self) -> &'static str {
+        "Penalises workers uploading slower than the fleet mean by the extra time the build's historical output size would take them to upload."
     }
 }
 
@@ -212,47 +269,141 @@ mod tests {
         }
     }
 
-    #[test]
-    fn network_rule_prefers_fast_net_for_fod() {
-        let rule = NetworkAffinityRule::default();
-        let j = job(true, HistoryPrediction::default());
-        let fast = worker_with(WorkerMetricsView {
-            network_speed_mbps: Some(100.0),
+    fn download_fleet(mean: f64) -> InstanceContext {
+        InstanceContext {
+            download_speed_mean_mbps: Some(mean),
             ..Default::default()
-        });
-        let slow = worker_with(WorkerMetricsView {
-            network_speed_mbps: Some(10.0),
+        }
+    }
+
+    fn downloading(download_speed_mbps: f32) -> WorkerContext<'static> {
+        worker_with(WorkerMetricsView {
+            download_speed_mbps: Some(download_speed_mbps),
             ..Default::default()
-        });
-        assert!(
-            rule.score(&ctx(&j), &fast, &InstanceContext::default())
-                > rule.score(&ctx(&j), &slow, &InstanceContext::default())
-        );
+        })
     }
 
     #[test]
-    fn network_rule_zero_for_non_fod() {
+    fn network_rule_rewards_fod_workers_up_to_the_fleet_mean_download_speed() {
         let rule = NetworkAffinityRule::default();
-        let j = job(false, HistoryPrediction::default());
-        let fast = worker_with(WorkerMetricsView {
-            network_speed_mbps: Some(100.0),
-            ..Default::default()
-        });
+        let j = job(true, HistoryPrediction::default());
+        let inst = download_fleet(100.0);
+
         assert_eq!(
-            rule.score(&ctx(&j), &fast, &InstanceContext::default()),
+            rule.score(&ctx(&j), &downloading(50.0), &inst),
+            rule.bonus / 2.0
+        );
+        assert_eq!(rule.score(&ctx(&j), &downloading(400.0), &inst), rule.bonus);
+    }
+
+    #[test]
+    fn network_rule_ignores_non_fod_and_unmeasured_workers() {
+        let rule = NetworkAffinityRule::default();
+        let inst = download_fleet(100.0);
+        let fod = job(true, HistoryPrediction::default());
+
+        assert_eq!(
+            rule.score(
+                &ctx(&job(false, HistoryPrediction::default())),
+                &downloading(100.0),
+                &inst
+            ),
+            0.0
+        );
+        assert_eq!(
+            rule.score(
+                &ctx(&fod),
+                &worker_with(WorkerMetricsView::default()),
+                &inst
+            ),
+            0.0
+        );
+        assert_eq!(
+            rule.score(&ctx(&fod), &downloading(100.0), &InstanceContext::default()),
             0.0
         );
     }
 
-    #[test]
-    fn network_rule_zero_without_metric() {
-        let rule = NetworkAffinityRule::default();
-        let j = job(true, HistoryPrediction::default());
-        let w = worker_with(WorkerMetricsView {
-            network_speed_mbps: None,
+    fn producing(output_nar_size: u64) -> ScoredJob<'static> {
+        job(
+            false,
+            HistoryPrediction {
+                output_nar_size: Some(output_nar_size),
+                samples: 5,
+                ..Default::default()
+            },
+        )
+    }
+
+    fn uploading(upload_speed_mbps: f32) -> WorkerContext<'static> {
+        worker_with(WorkerMetricsView {
+            upload_speed_mbps: Some(upload_speed_mbps),
             ..Default::default()
-        });
-        assert_eq!(rule.score(&ctx(&j), &w, &InstanceContext::default()), 0.0);
+        })
+    }
+
+    fn upload_fleet(mean: f64) -> InstanceContext {
+        InstanceContext {
+            upload_speed_mean_mbps: Some(mean),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn upload_rule_charges_the_extra_seconds_a_slow_uploader_needs() {
+        let rule = OutputUploadRule::default();
+        let gigabyte = producing(1_000_000_000);
+        let inst = upload_fleet(800.0);
+
+        assert_eq!(
+            rule.score(&ctx(&gigabyte), &uploading(400.0), &inst),
+            -10.0 * rule.penalty_per_sec
+        );
+        assert_eq!(rule.score(&ctx(&gigabyte), &uploading(1_600.0), &inst), 0.0);
+        assert_eq!(
+            rule.score(&ctx(&gigabyte), &uploading(1.0), &inst),
+            -rule.cap
+        );
+    }
+
+    #[test]
+    fn upload_rule_weighs_larger_outputs_more() {
+        let rule = OutputUploadRule::default();
+        let inst = upload_fleet(800.0);
+        let slow = uploading(100.0);
+
+        assert!(
+            rule.score(&ctx(&producing(500_000_000)), &slow, &inst)
+                < rule.score(&ctx(&producing(50_000_000)), &slow, &inst)
+        );
+    }
+
+    #[test]
+    fn upload_rule_needs_an_output_size_a_worker_speed_and_a_fleet_mean() {
+        let rule = OutputUploadRule::default();
+        let unknown_size = job(false, HistoryPrediction::default());
+        let gigabyte = producing(1_000_000_000);
+
+        assert_eq!(
+            rule.score(&ctx(&unknown_size), &uploading(1.0), &upload_fleet(800.0)),
+            0.0
+        );
+        assert_eq!(
+            rule.score(
+                &ctx(&gigabyte),
+                &worker_with(WorkerMetricsView::default()),
+                &upload_fleet(800.0)
+            ),
+            0.0
+        );
+        assert_eq!(
+            rule.score(
+                &ctx(&gigabyte),
+                &uploading(1.0),
+                &InstanceContext::default()
+            ),
+            0.0
+        );
     }
 
     #[test]

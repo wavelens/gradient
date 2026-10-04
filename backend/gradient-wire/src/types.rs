@@ -307,6 +307,7 @@ pub struct BuildOutput {
 }
 
 #[derive(Proto, Debug, Clone, PartialEq, Default)]
+#[proto(removed(28, Option<f32>))]
 pub struct BuildMetrics {
     pub peak_ram_mb: Option<u64>,
     pub cpu_time_ms: Option<u64>,
@@ -315,7 +316,6 @@ pub struct BuildMetrics {
     pub disk_write_bytes: Option<u64>,
     pub oom_killed: bool,
     pub build_time_ms: Option<u64>,
-    pub peak_network_mbps: Option<f32>,
 }
 
 #[derive(Proto, Debug, Clone, PartialEq, Default)]

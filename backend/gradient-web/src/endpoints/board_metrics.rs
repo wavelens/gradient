@@ -293,7 +293,8 @@ pub async fn get_board_upstream_caches(
 #[derive(Serialize)]
 pub struct WorkerNet {
     pub worker_id: Option<String>,
-    pub network_speed_mbps: Option<f32>,
+    pub upload_speed_mbps: Option<f32>,
+    pub download_speed_mbps: Option<f32>,
     pub disk_speed_mbps: Option<f32>,
 }
 
@@ -318,7 +319,7 @@ fn workers_serving(project_list: &str) -> String {
 
 fn board_network_sql(project_filter: Option<&str>) -> String {
     let mut sql = String::from(
-        "SELECT DISTINCT ON (worker_id) worker_id, network_speed_mbps, disk_speed_mbps \
+        "SELECT DISTINCT ON (worker_id) worker_id, upload_speed_mbps, download_speed_mbps, disk_speed_mbps \
          FROM worker_sample \
          WHERE at >= (now() AT TIME ZONE 'UTC') - interval '1 hour'",
     );
@@ -365,7 +366,8 @@ pub async fn get_board_network(
         .into_iter()
         .map(|r| WorkerNet {
             worker_id: r.try_get("", "worker_id").ok(),
-            network_speed_mbps: r.try_get("", "network_speed_mbps").ok().flatten(),
+            upload_speed_mbps: r.try_get("", "upload_speed_mbps").ok().flatten(),
+            download_speed_mbps: r.try_get("", "download_speed_mbps").ok().flatten(),
             disk_speed_mbps: r.try_get("", "disk_speed_mbps").ok().flatten(),
         })
         .collect();
