@@ -64,7 +64,7 @@ PACKAGE_JSON="$REPO_ROOT/frontend/package.json"
 sed -i "0,/\"version\": \"[^\"]*\"/{s/\"version\": \"[^\"]*\"/\"version\": \"$VERSION\"/}" "$PACKAGE_JSON"
 echo "updated frontend/package.json"
 
-pnpm --dir "$REPO_ROOT/frontend" update
+pnpm --dir "$REPO_ROOT/frontend" update --recursive
 echo "updated frontend/pnpm-lock.yaml"
 
 # ── Nix packages ─────────────────────────────────────────────────────────────
