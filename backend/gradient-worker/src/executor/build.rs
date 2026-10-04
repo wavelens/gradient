@@ -19,7 +19,6 @@ use harmonia_store_path::StorePath;
 use harmonia_store_remote::DaemonStore as _;
 use std::collections::BTreeMap;
 use std::pin::{Pin, pin};
-use tokio::sync::watch;
 use tracing::{debug, info, warn};
 
 use crate::nix::store::LocalNixStore;
@@ -70,7 +69,7 @@ impl ParsedDerivation {
         updater: &mut JobUpdater,
         drv_path: &str,
         max_silent_secs: Option<u64>,
-        abort: &mut watch::Receiver<bool>,
+        abort: &mut super::AbortSignal,
         log_limits: crate::executor::log_limit::LogRateLimits,
         build_cores: u32,
     ) -> Result<BuildResult, BuildError> {
@@ -283,7 +282,7 @@ pub async fn build_derivation(
     task: &BuildSpec,
     task_index: u32,
     updater: &mut JobUpdater,
-    abort: &mut watch::Receiver<bool>,
+    abort: &mut super::AbortSignal,
     log_limits: crate::executor::log_limit::LogRateLimits,
     log_fetch_from_store: bool,
     host: BuildHost,
@@ -391,17 +390,17 @@ enum NextLog {
 async fn next_log_event<S>(
     mut logs: Pin<&mut S>,
     silent: Option<std::time::Duration>,
-    abort: &mut watch::Receiver<bool>,
+    abort: &mut super::AbortSignal,
 ) -> Result<NextLog>
 where
     S: futures::Stream<Item = LogMessage>,
 {
-    if *abort.borrow() {
+    if abort.is_aborted() {
         return Ok(NextLog::Aborted);
     }
     tokio::select! {
         biased;
-        _ = abort.changed() => Ok(NextLog::Aborted),
+        () = abort.aborted() => Ok(NextLog::Aborted),
         item = logs.next() => Ok(match item {
             Some(msg) => NextLog::Message(msg),
             None => NextLog::StreamEnd,
@@ -425,7 +424,7 @@ async fn drain_build_logs_with_timeout<S>(
     updater: &mut JobUpdater,
     task_index: u32,
     silent: Option<std::time::Duration>,
-    abort: &mut watch::Receiver<bool>,
+    abort: &mut super::AbortSignal,
     log_limits: crate::executor::log_limit::LogRateLimits,
 ) -> Result<DrainOutcome>
 where
@@ -705,11 +704,11 @@ mod tests {
         assert!(pairs.is_empty());
     }
 
-    use tokio::sync::watch;
+    use crate::executor::AbortSignal;
 
     #[tokio::test]
     async fn next_log_event_returns_aborted_when_already_set() {
-        let (tx, mut rx) = watch::channel(false);
+        let (tx, mut rx) = AbortSignal::channel();
         tx.send(true).unwrap();
         let stream = futures::stream::pending::<LogMessage>();
         let mut stream = std::pin::pin!(stream);
@@ -719,7 +718,7 @@ mod tests {
 
     #[tokio::test]
     async fn next_log_event_aborts_while_waiting_on_stalled_stream() {
-        let (tx, mut rx) = watch::channel(false);
+        let (tx, mut rx) = AbortSignal::channel();
         let stream = futures::stream::pending::<LogMessage>();
         let mut stream = std::pin::pin!(stream);
         let mut fut = std::pin::pin!(next_log_event(stream.as_mut(), None, &mut rx));
@@ -730,7 +729,7 @@ mod tests {
 
     #[tokio::test]
     async fn next_log_event_reports_stream_end() {
-        let (_tx, mut rx) = watch::channel(false);
+        let (_tx, mut rx) = AbortSignal::channel();
         let stream = futures::stream::empty::<LogMessage>();
         let mut stream = std::pin::pin!(stream);
         let out = next_log_event(stream.as_mut(), None, &mut rx).await;
@@ -739,7 +738,7 @@ mod tests {
 
     #[tokio::test(start_paused = true)]
     async fn next_log_event_errors_on_silent_timeout() {
-        let (_tx, mut rx) = watch::channel(false);
+        let (_tx, mut rx) = AbortSignal::channel();
         let stream = futures::stream::pending::<LogMessage>();
         let mut stream = std::pin::pin!(stream);
         let mut fut = std::pin::pin!(next_log_event(

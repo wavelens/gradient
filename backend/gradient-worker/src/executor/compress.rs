@@ -14,7 +14,6 @@ use std::collections::{BTreeMap, HashMap};
 use anyhow::Result;
 use gradient_util::store_path::nix_store_path;
 use gradient_wire::messages::{BuildProgressPhase, BuildStage, CachedPath};
-use tokio::sync::watch;
 
 use super::NarUpload;
 use crate::proto::job::JobUpdater;
@@ -30,7 +29,7 @@ pub(crate) struct OutputNar<'a> {
 pub async fn push_outputs(
     updater: &mut JobUpdater,
     outputs: Vec<OutputNar<'_>>,
-    abort: &watch::Receiver<bool>,
+    abort: &super::AbortSignal,
 ) -> Result<UploadedNar> {
     if outputs.is_empty() {
         return Ok(UploadedNar::default());
@@ -161,9 +160,6 @@ mod tests {
         clippy::disallowed_methods,
         reason = "tests stand in for their peers by hand"
     )]
-
-    use crate::executor::check_abort;
-    use tokio::sync::watch;
 
     use std::collections::HashMap;
     use std::sync::Arc;
@@ -388,7 +384,7 @@ mod tests {
         let cache_waiters: CacheWaiters = Arc::new(Mutex::new(HashMap::new()));
         let mut updater = updater(JOB, writer, cache_waiters.clone(), uploads.clone());
         let pump = pump(reader, cache_waiters, uploads);
-        let (_tx, abort) = tokio::sync::watch::channel(false);
+        let (_tx, abort) = crate::executor::AbortSignal::channel();
 
         push_outputs(
             &mut updater,
@@ -511,7 +507,7 @@ mod tests {
             uploads.clone(),
         );
         let pump = pump(reader, cache_waiters, uploads);
-        let (_tx, abort) = tokio::sync::watch::channel(false);
+        let (_tx, abort) = crate::executor::AbortSignal::channel();
         let output = |build_id: &str, store_path: String, source| OutputNar {
             build_id: build_id.to_owned(),
             store_path,
@@ -584,19 +580,5 @@ mod tests {
         let upload_size = upload_meta.path_meta(&path).await.and_then(|m| m.nar_size);
         assert_eq!(upload_size, Some(7));
         assert_eq!(store.0.load(Ordering::SeqCst), 1);
-    }
-
-    #[test]
-    fn check_abort_returns_ok_when_not_aborted() {
-        let (_tx, rx) = watch::channel(false);
-        assert!(check_abort(&rx).is_ok());
-    }
-
-    #[test]
-    fn check_abort_returns_err_after_signal() {
-        let (tx, rx) = watch::channel(false);
-        tx.send(true).unwrap();
-        let err = check_abort(&rx).unwrap_err();
-        assert!(err.to_string().contains("aborted"), "got: {err}");
     }
 }

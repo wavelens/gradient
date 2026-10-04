@@ -17,10 +17,8 @@ use tokio::sync::{mpsc, watch};
 use tracing::{debug, error, info, warn};
 
 use crate::config::WorkerConfig;
-use crate::executor::JobExecutor;
-use crate::executor::abort_true;
-use crate::executor::failure::JobAborted;
 use crate::executor::timeline::{JobTimeline, TimelineSnapshot};
+use crate::executor::{AbortSignal, JobExecutor};
 use crate::proto::credentials::CredentialStore;
 use crate::proto::job::JobUpdater;
 use crate::proto::scorer::JobScorer;
@@ -107,13 +105,6 @@ pub(super) async fn run_message_loop(
         }
     }
 
-    // Running jobs are detached from this loop and can never report over the dead writer.
-    // Aborting them is preventing a double execution after the reconnect.
-    // The server is re-queuing the orphaned jobs on its side.
-    for (_job_id, job) in state.jobs.running.drain() {
-        let _ = job.abort.send(true);
-    }
-
     Ok(LoopEnd {
         draining: state.draining && !local_drain,
         refused: state.refused,
@@ -128,6 +119,8 @@ struct ActiveJob {
     cluster: Option<String>,
 }
 
+// Every exit of a session drops the registry and with it each job's abort sender, which aborts
+// the job: it can never report over the dead writer, and the server queues it again elsewhere.
 struct JobRegistry {
     running: HashMap<String, ActiveJob>,
     done_tx: mpsc::UnboundedSender<(String, Result<()>)>,
@@ -152,9 +145,9 @@ impl JobRegistry {
         kind: JobKind,
         assignment_id: String,
         cluster: Option<String>,
-    ) -> (AssignmentHandle, watch::Receiver<bool>, Arc<JobTimeline>) {
+    ) -> (AssignmentHandle, AbortSignal, Arc<JobTimeline>) {
         let assignment_id = AssignmentHandle::new(assignment_id);
-        let (abort, abort_rx) = watch::channel(false);
+        let (abort, abort_rx) = AbortSignal::channel();
         let timeline = JobTimeline::new();
         self.running.insert(
             job_id,
@@ -903,41 +896,43 @@ async fn run_job(
     job: Job,
     updater: &mut JobUpdater,
     credentials: &CredentialStore,
-    abort: watch::Receiver<bool>,
+    abort: AbortSignal,
 ) -> Result<()> {
-    match job {
-        Job::Flake(flake_job) => {
-            let run = executor.execute_flake_job(flake_job, updater, credentials, abort.clone());
-            until_aborted(run, abort).await
+    let job_abort = abort.clone();
+    let run = async move {
+        match job {
+            Job::Flake(flake_job) => {
+                executor
+                    .execute_flake_job(flake_job, updater, credentials, job_abort)
+                    .await
+            }
+            Job::Build(build_job) => {
+                executor
+                    .execute_build_job(build_job, updater, credentials, job_abort)
+                    .await
+            }
         }
-        Job::Build(build_job) => {
-            executor
-                .execute_build_job(build_job, updater, credentials, abort)
-                .await
-        }
-    }
+    };
+    until_aborted(run, abort).await
 }
 
 async fn until_aborted(
     job: impl std::future::Future<Output = Result<()>>,
-    mut abort: watch::Receiver<bool>,
+    mut abort: AbortSignal,
 ) -> Result<()> {
-    if *abort.borrow() {
-        return Err(JobAborted("evaluation aborted by server".to_owned()).into());
-    }
+    abort.check()?;
 
     tokio::select! {
         biased;
         result = job => result,
-        () = abort_true(&mut abort) => {
-            Err(JobAborted("evaluation aborted by server".to_owned()).into())
-        }
+        () = abort.aborted() => abort.check(),
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::executor::failure::JobAborted;
 
     fn registry() -> (JobRegistry, mpsc::UnboundedReceiver<(String, Result<()>)>) {
         let (done_tx, done_rx) = mpsc::unbounded_channel();
@@ -973,7 +968,10 @@ mod tests {
             "no second task is registered"
         );
         assert!(jobs.abort("job-1"));
-        assert!(*abort_rx.borrow(), "the first task still hears the abort");
+        assert!(
+            abort_rx.is_aborted(),
+            "the first task still hears the abort"
+        );
         assert!(
             !jobs.readopt("job-9", "dispatch-3"),
             "an unknown job is a fresh assignment"
@@ -998,8 +996,8 @@ mod tests {
 
         assert_eq!(jobs.abort_attempt("a1"), 1);
 
-        assert!(*member.borrow(), "the member hears the abort");
-        assert!(!*single.borrow(), "a single job keeps running");
+        assert!(member.is_aborted(), "the member hears the abort");
+        assert!(!single.is_aborted(), "a single job keeps running");
     }
 
     #[test]
@@ -1022,7 +1020,7 @@ mod tests {
 
     #[tokio::test]
     async fn an_aborted_job_stops_without_reaching_a_checkpoint() {
-        let (abort, abort_rx) = watch::channel(false);
+        let (abort, abort_rx) = AbortSignal::channel();
         abort.send(true).expect("the job listens");
 
         let err = until_aborted(std::future::pending(), abort_rx)
@@ -1037,7 +1035,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_job_nobody_aborts_reports_its_own_result() {
-        let (_abort, abort_rx) = watch::channel(false);
+        let (_abort, abort_rx) = AbortSignal::channel();
 
         let result = until_aborted(async { Err(anyhow::anyhow!("nix failed")) }, abort_rx).await;
 
@@ -1048,17 +1046,33 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_closed_abort_channel_does_not_stop_the_job() {
-        let (abort, abort_rx) = watch::channel(false);
-        drop(abort);
+    async fn a_session_that_ends_stops_every_job_it_was_running() {
+        let (mut jobs, _done_rx) = registry();
+        let (_, waiting, _) = jobs.register(
+            "build:x".to_owned(),
+            JobKind::Build,
+            "dispatch-1".to_owned(),
+            None,
+        );
+        let (_, idle, _) = jobs.register(
+            "eval:y".to_owned(),
+            JobKind::Flake,
+            "dispatch-2".to_owned(),
+            None,
+        );
+        let mut job = std::pin::pin!(until_aborted(std::future::pending(), waiting));
+        assert!(futures::poll!(job.as_mut()).is_pending());
 
-        let job = async {
-            tokio::task::yield_now().await;
-            Ok(())
-        };
+        drop(jobs);
 
-        until_aborted(job, abort_rx)
+        let err = tokio::time::timeout(std::time::Duration::from_secs(5), job)
             .await
-            .expect("the job runs to its end");
+            .expect("the job stops once its session is gone")
+            .expect_err("a job of a dead session fails");
+        assert!(
+            err.downcast_ref::<JobAborted>().is_some(),
+            "reported as an abort: {err:#}"
+        );
+        assert!(idle.is_aborted(), "a job between checkpoints sees it too");
     }
 }
