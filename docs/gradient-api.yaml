@@ -14948,7 +14948,7 @@ components:
             peak_ram_mb: { type: integer, nullable: true }
             avg_cpu_time_ms: { type: integer, nullable: true }
             build_time_ms: { type: integer, nullable: true }
-            uncontended_build_time_ms: { type: integer, nullable: true, description: Mean build time with the slowdown of concurrent builds on the worker removed. }
+            uncontended_build_time_ms: { type: integer, nullable: true, description: Mean build time with the slowdown of concurrent builds on the worker removed. Mean run time of the task for an evaluation. }
             build_core_score: { type: integer, nullable: true, description: Mean cpu_core_score of the workers behind the build times. }
             avg_disk_bytes: { type: integer, nullable: true }
             output_nar_size: { type: integer, nullable: true, description: Mean summed NAR size of the outputs of prior builds. }
@@ -14997,6 +14997,9 @@ components:
         storage_read_mbps: { type: number, nullable: true, description: Best total stored megabits per second of overlapping NAR downloads in the last hour. }
         storage_write_mbps: { type: number, nullable: true, description: Best total stored megabits per second of overlapping NAR uploads in the last hour. }
         compression_ratio: { type: number, nullable: true, description: Stored bytes per NAR byte of the uploads in the last hour. }
+        per_path_secs: { type: number, nullable: true, description: Seconds a missing path costs beyond its bytes, fitted over the prefetches of the last 24 hours. }
+        download_slots: { type: integer, description: The configured nar.maxConcurrentDownloads. }
+        upload_slots: { type: integer, description: The configured upload.concurrency. }
 
     DispatchedJobDetail:
       type: object
