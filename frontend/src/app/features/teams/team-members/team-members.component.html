@@ -22,10 +22,10 @@
             <span class="mono">{{ member.user }}</span>
             <span slot="meta">{{ member.name }}</span>
             <div slot="actions">
-              @if (member.via_group) {
-                <gr-badge severity="info">Group</gr-badge>
+              @if (sourceLabels[member.source]; as label) {
+                <gr-badge severity="info">{{ label }}</gr-badge>
               }
-              @if (canEdit()) {
+              @if (canEdit() && member.source !== 'state') {
                 <gr-select [ngModel]="member.role" [options]="roles" optionLabel="label" optionValue="value"
                   (ngModelChange)="updateRole(member.user, $event)" />
                 <button grButton icon="close" severity="danger" size="small" [loading]="busy() === member.user"

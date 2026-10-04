@@ -213,6 +213,9 @@
       </gr-row-list>
     }
   }
+
+  <app-team-grants kind="project" grants="workers" [name]="projectName" [canEdit]="access().canEdit && !access().managed"
+    (changed)="loadWorkers()" />
 </gr-page-layout>
 
 <!-- Register Worker Dialog -->

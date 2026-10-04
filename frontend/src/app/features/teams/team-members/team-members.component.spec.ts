@@ -27,11 +27,12 @@ const team: Team = {
 };
 
 const members: TeamMember[] = [
-  { user: 'alice', name: 'Alice', role: 'admin', via_group: false },
-  { user: 'bob', name: 'Bob', role: 'member', via_group: true },
+  { user: 'alice', name: 'Alice', role: 'admin', source: 'api' },
+  { user: 'bob', name: 'Bob', role: 'member', source: 'group' },
+  { user: 'dave', name: 'Dave', role: 'member', source: 'state' },
 ];
 
-function setup(removeMember = vi.fn().mockReturnValue(of('User removed'))) {
+function setup(removeMember = vi.fn().mockReturnValue(of('User removed')), managed = false) {
   const addMember = vi.fn().mockReturnValue(of('Invitation sent'));
   TestBed.configureTestingModule({
     imports: [TeamMembersComponent],
@@ -43,7 +44,7 @@ function setup(removeMember = vi.fn().mockReturnValue(of('User removed'))) {
       {
         provide: TeamsService,
         useValue: {
-          get: () => of(team),
+          get: () => of({ ...team, managed }),
           members: () => of(members),
           invitations: () => of([]),
           addMember,
@@ -60,12 +61,23 @@ function setup(removeMember = vi.fn().mockReturnValue(of('User removed'))) {
 }
 
 describe('TeamMembersComponent', () => {
-  it('lists members and marks the ones added by a group', () => {
+  it('lists members and marks the ones added by a group or the state', () => {
     const { fixture } = setup();
     const text = (fixture.nativeElement as HTMLElement).textContent || '';
     expect(text).toContain('alice');
     expect(text).toContain('bob');
     expect(text).toContain('Group');
+    expect(text).toContain('State');
+  });
+
+  it('lets an admin of a state-managed team change every member except the declared ones', () => {
+    const { fixture } = setup(undefined, true);
+    const element = fixture.nativeElement as HTMLElement;
+    const row = (user: string) => Array.from(element.querySelectorAll('gr-row')).find((r) => r.textContent?.includes(user))!;
+    expect(element.textContent).toContain('Add Member');
+    expect(row('alice').querySelector('gr-select')).not.toBeNull();
+    expect(row('dave').querySelector('gr-select')).toBeNull();
+    expect(row('dave').querySelector('button')).toBeNull();
   });
 
   it('invites a user with the chosen role', () => {

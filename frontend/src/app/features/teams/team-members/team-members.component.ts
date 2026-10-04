@@ -10,7 +10,7 @@ import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, RouterModule } from '@angular/router';
 import { TeamsService } from '@core/services/teams.service';
 import { UserService } from '@core/services/user.service';
-import { PendingInvitation, Team, TeamMember, TeamRole } from '@core/models';
+import { PendingInvitation, Team, TeamMember, TeamMemberSource, TeamRole } from '@core/models';
 import {
   AutoCompleteComponent,
   BadgeComponent,
@@ -72,10 +72,9 @@ export class TeamMembersComponent implements OnInit {
   showAdd = signal(false);
   newMember: { user: string; role: TeamRole } = { user: '', role: 'member' };
 
-  canEdit = computed(() => {
-    const team = this.team();
-    return !!team && !team.managed && team.role === 'admin';
-  });
+  readonly sourceLabels: Record<TeamMemberSource, string | null> = { api: null, state: 'State', group: 'Group' };
+
+  canEdit = computed(() => this.team()?.role === 'admin');
 
   ngOnInit(): void {
     this.teamName = this.route.snapshot.paramMap.get('team') || '';

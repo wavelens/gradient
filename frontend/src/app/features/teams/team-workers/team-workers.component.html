@@ -5,7 +5,7 @@
 -->
 
 <gr-page-layout [breadcrumb]="[{ label: 'Teams', link: ['/teams'] }, { label: team()?.display_name || teamName, link: ['/team', teamName] }, { label: 'Workers' }]" title="Workers">
-  @if (isAdmin() && !team()?.managed) {
+  @if (isAdmin()) {
     <div slot="actions">
       @if (canConnectGradientCi()) {
         <button grButton label="Connect Gradient.CI Servers" icon="link" severity="secondary" (click)="showGradientCiConnect.set(true)"></button>

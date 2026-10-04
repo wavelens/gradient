@@ -37,11 +37,13 @@ export interface PatchTeam {
   scim_group?: string;
 }
 
+export type TeamMemberSource = 'api' | 'state' | 'group';
+
 export interface TeamMember {
   user: string;
   name: string;
   role: TeamRole;
-  via_group: boolean;
+  source: TeamMemberSource;
 }
 
 export interface TeamWorker {
