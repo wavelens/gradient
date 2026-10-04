@@ -4,11 +4,13 @@
 name: Release Branches
 
 on:
-  release:
-    types: [published]
+  push:
+    tags: ["v*"]
 
 permissions:
   contents: write
+
+concurrency: release-branches
 
 jobs:
   move:
@@ -17,24 +19,31 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          fetch-tags: true
 
-      - name: Move latest and beta to the release
+      - name: Move latest and beta to the tag
         env:
-          TAG: ${{ github.event.release.tag_name }}
-          PRERELEASE: ${{ github.event.release.prerelease }}
+          TAG: ${{ github.ref_name }}
         run: |
           commit="$(git rev-parse "$TAG^{commit}")"
-          branches=(beta)
-          if [ "$PRERELEASE" != true ]; then
-            branches=(latest beta)
+          branches=(latest beta)
+          if [[ "$TAG" == *-* ]]; then
+            branches=(beta)
           fi
 
           for branch in "${branches[@]}"; do
-            if git rev-parse --verify --quiet "origin/$branch" > /dev/null \
-              && ! git merge-base --is-ancestor "origin/$branch" "$commit"; then
-              echo "::warning::$branch is not behind $TAG, leaving it in place"
+            current="$(git rev-parse --verify --quiet "origin/$branch" || true)"
+            other_releases=""
+            if [ -n "$current" ]; then
+              other_releases="$(git tag --points-at "$current" --list 'v*' | grep -vxF "$TAG" || true)"
+            fi
+            if [ -z "$current" ] || git merge-base --is-ancestor "$current" "$commit"; then
+              git push origin "$commit:refs/heads/$branch"
+            elif [ -z "$other_releases" ]; then
+              git push --force origin "$commit:refs/heads/$branch"
+            else
+              echo "::warning::$branch is on another release, leaving it in place"
               continue
             fi
-            git push origin "$commit:refs/heads/$branch"
             echo "$branch -> $TAG"
           done
