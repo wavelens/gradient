@@ -32,6 +32,10 @@ The first release with a stability pledge.
 
     An [`ssh-ng://` store](guides/build-over-ssh.md) for every project. `nixos-rebuild --build-host` and `nix copy` talk straight to the CI workers and caches.
 
+-   :material-palette: **Teams**
+
+    Organizational structures for better team management.
+
 -   :material-palette: **Corporate Design**
 
     Own logo for web interface.
