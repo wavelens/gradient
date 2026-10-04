@@ -109,9 +109,14 @@ mod tests {
         let roots = Roots::new(Duration::from_secs(3600));
         let user = UserId::now_v7();
         let dir = roots.make_dir(user, "nixos-rebuild.XXXXX");
-        assert!(dir.starts_with("/tmp"));
-        assert!(dir.to_string_lossy().starts_with("/tmp/nixos-rebuild."));
-        assert!(!dir.to_string_lossy().contains('X'));
+        let suffix = dir
+            .to_string_lossy()
+            .strip_prefix("/tmp/nixos-rebuild.")
+            .map(str::to_owned)
+            .expect("the pattern prefix is kept");
+        assert_eq!(suffix.len(), 5);
+        assert!(suffix.chars().all(|c| c.is_ascii_alphanumeric()));
+        assert_ne!(suffix, "XXXXX");
 
         let root = dir.join("f00");
         assert!(roots.add(user, &root, "/nix/store/aaa-system".into()));
