@@ -21,6 +21,7 @@ pub(crate) struct ManagedKeepSets<'a> {
     task_names: HashSet<&'a String>,
     cache_names: HashSet<&'a String>,
     api_key_names: HashSet<&'a String>,
+    team_names: HashSet<&'a String>,
 }
 
 pub(crate) fn managed_keep_sets(config: &StateConfiguration) -> ManagedKeepSets<'_> {
@@ -30,6 +31,7 @@ pub(crate) fn managed_keep_sets(config: &StateConfiguration) -> ManagedKeepSets<
         task_names: config.tasks.values().map(|p| &p.name).collect(),
         cache_names: config.caches.values().map(|c| &c.name).collect(),
         api_key_names: config.api_keys.values().map(|k| &k.name).collect(),
+        team_names: config.teams.values().map(|t| &t.name).collect(),
     }
 }
 
@@ -69,6 +71,7 @@ impl<'a> StateApplicator<'a> {
             task_names,
             cache_names,
             api_key_names,
+            team_names,
         } = managed_keep_sets(config);
         let worker_keys: HashSet<(String, ProjectId)> = {
             let map = self.project_lookup().await?;
@@ -90,6 +93,7 @@ impl<'a> StateApplicator<'a> {
         unmark_managed!(db, task, task_names, name, delete_state, "task");
         unmark_managed!(db, cache, cache_names, name, delete_state, "cache");
         unmark_managed!(db, api, api_key_names, name, delete_state, "API key");
+        unmark_managed!(db, team, team_names, name, delete_state, "team");
 
         let role_keys: HashSet<(String, String)> = config
             .roles
@@ -151,66 +155,34 @@ impl<'a> StateApplicator<'a> {
             }
         }
 
-        let base_worker_ids: HashSet<&String> = config
+        let team_worker_ids: HashSet<&String> = config
             .workers
             .values()
-            .filter(|w| w.base_worker)
+            .filter(|w| w.team.is_some())
             .map(|w| &w.worker_id)
             .collect();
-        let base_workers = base_worker::Entity::find().all(db).await?;
-        for bw in removable_base_workers(base_workers, &base_worker_ids) {
-            project_base_worker::Entity::delete_many()
-                .filter(project_base_worker::Column::BaseWorker.eq(bw.id))
+        let managed_team_workers = team_worker::Entity::find()
+            .filter(team_worker::Column::Managed.eq(true))
+            .all(db)
+            .await?;
+        for worker in managed_team_workers {
+            if team_worker_ids.contains(&worker.worker_id) {
+                continue;
+            }
+            let worker_id = worker.worker_id.clone();
+            team_worker::Entity::delete_by_id(worker.id)
                 .exec(db)
                 .await?;
-            let worker_id = bw.worker_id.clone();
-            base_worker::Entity::delete_by_id(bw.id).exec(db).await?;
-            tracing::info!(worker_id, "Deleted base worker");
+            tracing::info!(worker_id, "Deleted team worker");
         }
 
         Ok(())
     }
 }
 
-fn removable_base_workers(
-    rows: Vec<base_worker::Model>,
-    declared: &HashSet<&String>,
-) -> Vec<base_worker::Model> {
-    rows.into_iter()
-        .filter(|bw| !bw.gradient_ci && !declared.contains(&bw.worker_id))
-        .collect()
-}
-
 #[cfg(test)]
 mod keep_set_tests {
     use super::*;
-
-    #[test]
-    fn a_gradient_ci_base_worker_survives_reconciliation() {
-        let declared_id = "declared".to_string();
-        let declared = HashSet::from([&declared_id]);
-        let rows = vec![
-            base_worker::Model {
-                worker_id: "declared".into(),
-                ..Default::default()
-            },
-            base_worker::Model {
-                worker_id: "connected".into(),
-                gradient_ci: true,
-                ..Default::default()
-            },
-            base_worker::Model {
-                worker_id: "removed".into(),
-                ..Default::default()
-            },
-        ];
-
-        let removable: Vec<String> = removable_base_workers(rows, &declared)
-            .into_iter()
-            .map(|bw| bw.worker_id)
-            .collect();
-        assert_eq!(removable, vec!["removed".to_string()]);
-    }
 
     #[test]
     fn keep_sets_track_inner_name_not_attrset_key() {

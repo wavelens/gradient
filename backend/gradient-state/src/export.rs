@@ -5,9 +5,10 @@
  */
 
 use super::{
-    StateApiKey, StateCache, StateCacheMemberEntry, StateCacheRoleEntry, StateConfiguration,
-    StateFlakeInputOverride, StateIntegration, StateProject, StateProjectMemberEntry, StateRole,
-    StateTask, StateTrigger, StateUpstream, StateUser, StateWorker,
+    StateApiKey, StateCache, StateCacheMemberEntry, StateCacheRoleEntry, StateCacheTeam,
+    StateConfiguration, StateFlakeInputOverride, StateIntegration, StateNewProjectGrant,
+    StateProject, StateProjectMemberEntry, StateProjectTeam, StateRole, StateTask, StateTeam,
+    StateTeamMember, StateTrigger, StateUpstream, StateUser, StateWorker,
 };
 use gradient_ci::IntegrationKind;
 use gradient_db::permissions::{
@@ -15,6 +16,7 @@ use gradient_db::permissions::{
 };
 use gradient_entity::cache_upstream::CacheUpstreamKind;
 use gradient_entity::ids::*;
+use gradient_entity::team_user::TeamRole;
 use gradient_types::actions::{ActionConfig, ActionType};
 use gradient_types::triggers::{TriggerConfig, TriggerType};
 use sea_orm::{ColumnTrait, ConnectionTrait, DbErr, EntityTrait, QueryFilter};
@@ -33,7 +35,7 @@ const SECRET_KEYS: &[&str] = &[
 
 /// The snapshot is covering the live system, not only state-managed rows. Rows an operator cannot
 /// hand-author are excluded. These are the `build-request` task, server-managed GitHub integration
-/// rows, Gradient.CI connections and the built-in `Admin`/`Write`/`View` roles.
+/// rows, Gradient.CI connections, members added through an SSO group and the built-in `Admin`/`Write`/`View` roles.
 pub async fn export_state<C: ConnectionTrait>(db: &C) -> Result<StateConfiguration, DbErr> {
     let users = gradient_entity::user::Entity::find().all(db).await?;
     let projects = gradient_entity::project::Entity::find().all(db).await?;
@@ -46,11 +48,17 @@ pub async fn export_state<C: ConnectionTrait>(db: &C) -> Result<StateConfigurati
         .filter(gradient_entity::worker_registration::Column::GradientCi.eq(false))
         .all(db)
         .await?;
-    let base_workers = gradient_entity::base_worker::Entity::find()
-        .filter(gradient_entity::base_worker::Column::GradientCi.eq(false))
+    let teams = gradient_entity::team::Entity::find().all(db).await?;
+    let team_users = gradient_entity::team_user::Entity::find()
+        .filter(gradient_entity::team_user::Column::ViaGroup.eq(false))
         .all(db)
         .await?;
-    let base_worker_projects = gradient_entity::project_base_worker::Entity::find()
+    let team_projects = gradient_entity::team_project::Entity::find()
+        .all(db)
+        .await?;
+    let team_caches = gradient_entity::team_cache::Entity::find().all(db).await?;
+    let team_workers = gradient_entity::team_worker::Entity::find()
+        .filter(gradient_entity::team_worker::Column::GradientCi.eq(false))
         .all(db)
         .await?;
     let integrations = gradient_entity::integration::Entity::find().all(db).await?;
@@ -82,6 +90,7 @@ pub async fn export_state<C: ConnectionTrait>(db: &C) -> Result<StateConfigurati
     let cache_role_name = id_name_map(cache_roles.iter().map(|r| (r.id, r.name.clone())));
     let integration_name = id_name_map(integrations.iter().map(|i| (i.id, i.name.clone())));
     let github_install_by_id: HashMap<_, _> = github_installs.iter().map(|g| (g.id, g)).collect();
+    let team_name = id_name_map(teams.iter().map(|t| (t.id, t.name.clone())));
 
     let mut config = StateConfiguration {
         users: HashMap::new(),
@@ -92,6 +101,7 @@ pub async fn export_state<C: ConnectionTrait>(db: &C) -> Result<StateConfigurati
         api_keys: HashMap::new(),
         workers: HashMap::new(),
         integrations: HashMap::new(),
+        teams: HashMap::new(),
     };
 
     for u in &users {
@@ -119,6 +129,18 @@ pub async fn export_state<C: ConnectionTrait>(db: &C) -> Result<StateConfigurati
                 })
             })
             .collect();
+        let teams = team_projects
+            .iter()
+            .filter(|g| g.project == o.id)
+            .filter_map(|g| {
+                Some(StateProjectTeam {
+                    team: team_name.get(&g.team)?.clone(),
+                    role: g.role.and_then(|role| role_name.get(&role).cloned()),
+                    users: g.includes_users,
+                    workers: g.includes_workers,
+                })
+            })
+            .collect();
         config.projects.insert(
             o.name.clone(),
             StateProject {
@@ -131,6 +153,7 @@ pub async fn export_state<C: ConnectionTrait>(db: &C) -> Result<StateConfigurati
                 hide_build_requests: o.hide_build_requests,
                 created_by: name_or_blank(&username, o.created_by),
                 members,
+                teams,
             },
         );
     }
@@ -216,6 +239,16 @@ pub async fn export_state<C: ConnectionTrait>(db: &C) -> Result<StateConfigurati
                 })
             })
             .collect();
+        let teams = team_caches
+            .iter()
+            .filter(|g| g.cache == c.id)
+            .filter_map(|g| {
+                Some(StateCacheTeam {
+                    team: team_name.get(&g.team)?.clone(),
+                    role: cache_role_name.get(&g.role)?.clone(),
+                })
+            })
+            .collect();
         config.caches.insert(
             c.name.clone(),
             StateCache {
@@ -233,7 +266,15 @@ pub async fn export_state<C: ConnectionTrait>(db: &C) -> Result<StateConfigurati
                 created_by: name_or_blank(&username, c.created_by),
                 roles,
                 members,
+                teams,
             },
+        );
+    }
+
+    for t in &teams {
+        config.teams.insert(
+            t.name.clone(),
+            export_team(t, &team_users, &username, &role_name),
         );
     }
 
@@ -304,18 +345,16 @@ pub async fn export_state<C: ConnectionTrait>(db: &C) -> Result<StateConfigurati
                 enable_fetch: reg.enable_fetch,
                 enable_eval: reg.enable_eval,
                 enable_build: reg.enable_build,
-                base_worker: false,
-                authorize_against: None,
+                team: None,
                 enabled: true,
-                auto_enable: false,
             },
         );
     }
 
-    for bw in &base_workers {
+    for worker in &team_workers {
         config.workers.insert(
-            bw.worker_id.clone(),
-            export_base_worker(bw, &base_worker_projects, &project_name, &username),
+            worker.worker_id.clone(),
+            export_team_worker(worker, &team_name, &username),
         );
     }
 
@@ -349,32 +388,58 @@ pub async fn export_state<C: ConnectionTrait>(db: &C) -> Result<StateConfigurati
     Ok(config)
 }
 
-fn export_base_worker(
-    bw: &gradient_entity::base_worker::Model,
-    project_links: &[gradient_entity::project_base_worker::Model],
-    project_name: &HashMap<ProjectId, String>,
+fn export_team(
+    team: &gradient_entity::team::Model,
+    members: &[gradient_entity::team_user::Model],
+    username: &HashMap<UserId, String>,
+    role_name: &HashMap<RoleId, String>,
+) -> StateTeam {
+    StateTeam {
+        name: team.name.clone(),
+        display_name: team.display_name.clone(),
+        members: members
+            .iter()
+            .filter(|m| m.team == team.id)
+            .filter_map(|m| {
+                Some(StateTeamMember {
+                    user: username.get(&m.user)?.clone(),
+                    role: match m.role {
+                        TeamRole::Admin => "Admin",
+                        TeamRole::Member => "Member",
+                    }
+                    .to_string(),
+                })
+            })
+            .collect(),
+        oidc_group: team.oidc_group.clone(),
+        scim_group: team.scim_group.clone(),
+        new_projects: StateNewProjectGrant {
+            users: team.new_project_users,
+            workers: team.new_project_workers,
+            role: team
+                .new_project_role
+                .and_then(|role| role_name.get(&role).cloned()),
+        },
+    }
+}
+
+fn export_team_worker(
+    worker: &gradient_entity::team_worker::Model,
+    team_name: &HashMap<TeamId, String>,
     username: &HashMap<UserId, String>,
 ) -> StateWorker {
-    let projects = project_links
-        .iter()
-        .filter(|l| l.base_worker == bw.id)
-        .filter_map(|l| project_name.get(&l.project).cloned())
-        .collect();
-
     StateWorker {
-        worker_id: bw.worker_id.clone(),
-        url: bw.url.clone(),
-        projects,
+        worker_id: worker.worker_id.clone(),
+        url: worker.url.clone(),
+        projects: Vec::new(),
+        team: team_name.get(&worker.team).cloned(),
         token_file: String::new(),
-        display_name: bw.display_name.clone(),
-        created_by: bw.created_by.and_then(|id| username.get(&id).cloned()),
-        enable_fetch: bw.enable_fetch,
-        enable_eval: bw.enable_eval,
-        enable_build: bw.enable_build,
-        base_worker: true,
-        authorize_against: bw.authorize_against.map(|u| u.to_string()),
-        enabled: bw.enabled,
-        auto_enable: bw.auto_enable,
+        display_name: worker.display_name.clone(),
+        created_by: worker.created_by.and_then(|id| username.get(&id).cloned()),
+        enable_fetch: worker.enable_fetch,
+        enable_eval: worker.enable_eval,
+        enable_build: worker.enable_build,
+        enabled: worker.active,
     }
 }
 
@@ -681,53 +746,32 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn export_base_worker_emits_flag_projects_and_authorize_against() {
-        let project_a = ProjectId::now_v7();
-        let project_b = ProjectId::now_v7();
+    fn export_team_worker_names_its_team() {
+        let team = TeamId::now_v7();
         let user = UserId::now_v7();
-        let bw_id = BaseWorkerId::now_v7();
-        let auth = uuid::Uuid::now_v7();
-
-        let bw = gradient_entity::base_worker::Model {
-            id: bw_id,
-            worker_id: "bw-1".to_string(),
+        let worker = gradient_entity::team_worker::Model {
+            team,
+            worker_id: "tw-1".to_string(),
             token_hash: "hash".to_string(),
-            url: Some("https://bw.example".to_string()),
-            display_name: "Base".to_string(),
+            url: Some("https://tw.example".to_string()),
+            display_name: "Team Worker".to_string(),
             enable_fetch: true,
             enable_eval: false,
             enable_build: true,
-            enabled: true,
-            authorize_against: Some(auth),
+            active: true,
             created_by: Some(user),
             ..Default::default()
         };
-        let links = vec![
-            gradient_entity::project_base_worker::Model {
-                project: project_a,
-                base_worker: bw_id,
-                ..Default::default()
-            },
-            gradient_entity::project_base_worker::Model {
-                project: project_b,
-                base_worker: BaseWorkerId::now_v7(),
-                ..Default::default()
-            },
-        ];
-        let project_name = HashMap::from([
-            (project_a, "project-a".to_string()),
-            (project_b, "project-b".to_string()),
-        ]);
+        let team_name = HashMap::from([(team, "platform".to_string())]);
         let username = HashMap::from([(user, "alice".to_string())]);
 
-        let sw = export_base_worker(&bw, &links, &project_name, &username);
+        let sw = export_team_worker(&worker, &team_name, &username);
 
-        assert!(sw.base_worker);
+        assert_eq!(sw.team, Some("platform".to_string()));
+        assert!(sw.projects.is_empty());
         assert!(sw.enabled);
         assert!(!sw.enable_eval);
         assert_eq!(sw.created_by, Some("alice".to_string()));
-        assert_eq!(sw.authorize_against, Some(auth.to_string()));
-        assert_eq!(sw.projects, vec!["project-a".to_string()]);
         assert!(sw.token_file.is_empty());
     }
 

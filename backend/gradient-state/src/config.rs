@@ -41,6 +41,8 @@ pub struct StateProject {
     /// recorded as pending until registration or first OIDC login.
     #[serde(default)]
     pub members: Vec<StateProjectMemberEntry>,
+    #[serde(default)]
+    pub teams: Vec<StateProjectTeam>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -167,6 +169,8 @@ pub struct StateCache {
     pub roles: Vec<StateCacheRoleEntry>,
     #[serde(default)]
     pub members: Vec<StateCacheMemberEntry>,
+    #[serde(default)]
+    pub teams: Vec<StateCacheTeam>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -231,7 +235,10 @@ pub struct StateWorker {
     pub worker_id: String,
     #[serde(default)]
     pub url: Option<String>,
+    #[serde(default)]
     pub projects: Vec<String>,
+    #[serde(default)]
+    pub team: Option<String>,
     pub token_file: String,
     pub display_name: String,
     #[serde(default)]
@@ -242,14 +249,55 @@ pub struct StateWorker {
     pub enable_eval: bool,
     #[serde(default = "default_true")]
     pub enable_build: bool,
-    #[serde(default)]
-    pub base_worker: bool,
-    #[serde(default)]
-    pub authorize_against: Option<String>,
     #[serde(default = "default_true")]
     pub enabled: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StateTeam {
+    pub name: String,
+    pub display_name: String,
     #[serde(default)]
-    pub auto_enable: bool,
+    pub members: Vec<StateTeamMember>,
+    #[serde(default)]
+    pub oidc_group: Option<String>,
+    #[serde(default)]
+    pub scim_group: Option<String>,
+    #[serde(default)]
+    pub new_projects: StateNewProjectGrant,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StateTeamMember {
+    pub user: String,
+    pub role: String,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct StateNewProjectGrant {
+    #[serde(default)]
+    pub users: bool,
+    #[serde(default)]
+    pub workers: bool,
+    #[serde(default)]
+    pub role: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StateProjectTeam {
+    pub team: String,
+    #[serde(default)]
+    pub role: Option<String>,
+    #[serde(default = "default_true")]
+    pub users: bool,
+    #[serde(default = "default_true")]
+    pub workers: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StateCacheTeam {
+    pub team: String,
+    pub role: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -270,6 +318,8 @@ pub struct StateConfiguration {
     pub workers: HashMap<String, StateWorker>,
     #[serde(default)]
     pub integrations: HashMap<String, StateIntegration>,
+    #[serde(default)]
+    pub teams: HashMap<String, StateTeam>,
 }
 
 fn default_true() -> bool {

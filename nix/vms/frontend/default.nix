@@ -160,7 +160,6 @@ in {
             worker_id = "a0000000-0000-0000-0000-000000000001";
             projects = [ "testproject" ];
             token_file = toString workerToken;
-            base_worker = false;
             display_name = "Dev Worker";
             created_by = "admin";
           };

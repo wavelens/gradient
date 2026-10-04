@@ -44,4 +44,8 @@ impl<'a> EntityLookup<'a> {
     pub(super) fn project_exists(&self, name: &str) -> bool {
         self.config.projects.contains_key(name)
     }
+
+    pub(super) fn team_exists(&self, name: &str) -> bool {
+        self.config.teams.contains_key(name)
+    }
 }

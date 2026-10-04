@@ -61,13 +61,16 @@ pub(super) async fn apply_state_to_database(
     let role_ids = app.apply_roles(&config.roles).await?;
     app.apply_project_members(&config.projects, &mut pending)
         .await?;
+    let team_ids = app.apply_teams(&config.teams).await?;
     // Integrations must land before tasks. Task triggers and `git_host_status_report` actions are
     // resolving integrations by name at apply time (#332).
     app.apply_integrations(&config.integrations).await?;
     app.apply_tasks(&config.tasks).await?;
     app.apply_caches(&config.caches).await?;
+    app.apply_project_teams(&config.projects, &team_ids).await?;
+    app.apply_cache_teams(&config.caches, &team_ids).await?;
     app.apply_api_keys(&config.api_keys).await?;
-    app.apply_workers(&config.workers).await?;
+    app.apply_workers(&config.workers, &team_ids).await?;
     app.unmark_removed_entities(config, delete_state).await?;
 
     let oidc_group_roles = super::resolve_oidc_group_roles(config, &role_ids);

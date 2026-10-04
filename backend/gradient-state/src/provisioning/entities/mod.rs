@@ -10,5 +10,6 @@ mod integrations;
 mod projects;
 mod roles;
 mod tasks;
+mod teams;
 mod users;
 mod workers;

@@ -11,6 +11,7 @@ mod integrations;
 mod projects;
 mod roles;
 mod tasks;
+mod teams;
 mod users;
 mod workers;
 
@@ -41,6 +42,7 @@ impl StateConfiguration {
         integrations::validate(&lookup, &mut errors);
         caches::validate(&lookup, &mut errors);
         roles::validate(&lookup, &mut errors);
+        teams::validate(&lookup, &mut errors);
         api_keys::validate(&lookup, &mut errors);
         workers::validate(&lookup, &mut errors);
 

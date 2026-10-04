@@ -434,61 +434,19 @@ fn state_worker_accepts_multiple_projects() {
 }
 
 #[test]
-fn state_worker_rejects_empty_projects() {
+fn state_worker_without_team_rejects_empty_projects() {
     let cfg = worker_cfg("[]");
     let v = cfg.validate();
     assert!(!v.is_valid);
     assert!(
         v.errors.iter().any(
             |e| e.field == "workers.550e8400-e29b-41d4-a716-446655440001.projects"
-                && e.message.contains("at least one")
+                && e.message
+                    .contains("a team or be registered under at least one project")
         ),
         "expected at-least-one-project error, got: {:?}",
         v.errors
     );
-}
-
-fn base_worker_cfg(authorize_against: &str) -> StateConfiguration {
-    let json = format!(
-        r#"{{
-            "users": {{
-                "alice": {{ "username": "alice", "name": "Alice", "email": "alice@example.com", "password_file": "/dev/null" }}
-            }},
-            "workers": {{
-                "base-1": {{
-                    "worker_id": "550e8400-e29b-41d4-a716-446655440001",
-                    "projects": [],
-                    "token_file": "/dev/null",
-                    "display_name": "Base Build Server",
-                    "created_by": "alice",
-                    "base_worker": true,
-                    "authorize_against": {authorize_against}
-                }}
-            }}
-        }}"#
-    );
-
-    serde_json::from_str(&json).unwrap()
-}
-
-#[test]
-fn base_worker_rejects_bad_authorize_against() {
-    let cfg = base_worker_cfg(r#""not-a-uuid""#);
-    let v = cfg.validate();
-    assert!(!v.is_valid);
-    assert!(
-        v.errors
-            .iter()
-            .any(|e| e.message.contains("authorize_against")),
-        "expected authorize_against error, got: {:?}",
-        v.errors
-    );
-}
-
-#[test]
-fn base_worker_accepts_valid_authorize_against_and_empty_projects() {
-    let cfg = base_worker_cfg(r#""018f6f3a-0000-7000-8000-000000000001""#);
-    assert!(cfg.validate().is_valid, "{:?}", cfg.validate().errors);
 }
 
 #[test]
@@ -755,14 +713,13 @@ fn resolves_scim_group_to_project_role_grants() {
 #[test]
 fn state_worker_accepts_missing_created_by() {
     let json = r#"{
+        "teams": { "server": { "name": "server", "display_name": "Server" } },
         "workers": {
             "local": {
                 "worker_id": "550e8400-e29b-41d4-a716-446655440099",
-                "projects": [],
                 "token_file": "/dev/null",
                 "display_name": "Local Worker",
-                "base_worker": true,
-                "auto_enable": true
+                "team": "server"
             }
         }
     }"#;
@@ -775,13 +732,13 @@ fn state_worker_accepts_missing_created_by() {
 #[test]
 fn state_worker_rejects_unknown_created_by() {
     let json = r#"{
+        "teams": { "server": { "name": "server", "display_name": "Server" } },
         "workers": {
             "builder-1": {
                 "worker_id": "550e8400-e29b-41d4-a716-446655440001",
-                "projects": [],
                 "token_file": "/dev/null",
                 "display_name": "Builder",
-                "base_worker": true,
+                "team": "server",
                 "created_by": "ghost"
             }
         }
@@ -795,6 +752,88 @@ fn state_worker_rejects_unknown_created_by() {
             .ends_with("550e8400-e29b-41d4-a716-446655440001.created_by")
             && e.message.contains("ghost")),
         "expected unknown created_by error, got: {:?}",
+        v.errors
+    );
+}
+
+#[test]
+fn a_team_with_an_unknown_member_is_rejected() {
+    let json = r#"{
+        "teams": {
+            "platform": {
+                "name": "platform", "display_name": "Platform",
+                "members": [{ "user": "ghost", "role": "Admin" }]
+            }
+        }
+    }"#;
+    let cfg: StateConfiguration = serde_json::from_str(json).unwrap();
+    let v = cfg.validate();
+    assert!(
+        v.errors
+            .iter()
+            .any(|e| e.field == "teams.platform.members.ghost.user"),
+        "{:?}",
+        v.errors
+    );
+}
+
+#[test]
+fn a_project_grant_with_users_needs_a_role() {
+    let json = r#"{
+        "users": { "alice": { "username": "alice", "name": "Alice", "email": "a@x.io", "password_file": "/dev/null" } },
+        "teams": { "platform": { "name": "platform", "display_name": "Platform" } },
+        "projects": {
+            "acme": {
+                "name": "acme", "display_name": "ACME", "private_key_file": "/dev/null",
+                "public": false, "created_by": "alice",
+                "teams": [{ "team": "platform", "users": true, "workers": false }]
+            }
+        }
+    }"#;
+    let cfg: StateConfiguration = serde_json::from_str(json).unwrap();
+    let v = cfg.validate();
+    assert!(
+        v.errors
+            .iter()
+            .any(|e| e.field == "projects.acme.teams.platform.role"),
+        "{:?}",
+        v.errors
+    );
+}
+
+#[test]
+fn a_worker_belongs_to_a_team_or_to_projects() {
+    let json = r#"{
+        "teams": { "platform": { "name": "platform", "display_name": "Platform" } },
+        "workers": {
+            "both": { "worker_id": "w1", "projects": ["acme"], "team": "platform", "token_file": "/dev/null", "display_name": "Both" },
+            "neither": { "worker_id": "w2", "projects": [], "token_file": "/dev/null", "display_name": "Neither" }
+        }
+    }"#;
+    let cfg: StateConfiguration = serde_json::from_str(json).unwrap();
+    let v = cfg.validate();
+    assert!(
+        v.errors.iter().any(|e| e.field == "workers.w1.team"),
+        "{:?}",
+        v.errors
+    );
+    assert!(
+        v.errors.iter().any(|e| e.field == "workers.w2.projects"),
+        "{:?}",
+        v.errors
+    );
+}
+
+#[test]
+fn a_worker_of_an_unknown_team_is_rejected() {
+    let json = r#"{
+        "workers": { "w": { "worker_id": "w3", "team": "ghosts", "token_file": "/dev/null", "display_name": "W" } }
+    }"#;
+    let cfg: StateConfiguration = serde_json::from_str(json).unwrap();
+    let v = cfg.validate();
+    assert!(
+        v.errors.iter().any(|e| e.field == "workers.w3.team"),
+        "{:?}",
         v.errors
     );
 }
