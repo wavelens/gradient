@@ -114,15 +114,16 @@ fn core_ratio(built_on: Option<f64>, runs_on: Option<f64>) -> f64 {
     }
 }
 
-pub fn build_secs(
+fn run_secs(
     history: &HistoryPrediction,
     worker: Option<&WorkerMetricsView>,
     instance: &InstanceContext,
+    fallback_ms: Option<f64>,
 ) -> f64 {
     let fleet = instance.cpu_core_score_mean;
     let (uncontended_ms, built_on) = match history.uncontended_build_time_ms {
         Some(ms) => (ms as f64, history.build_core_score.map(f64::from).or(fleet)),
-        None => match instance.build_time_ms.w1h.or(instance.build_time_ms.w24h) {
+        None => match fallback_ms {
             Some(ms) => (ms, fleet),
             None => return 0.0,
         },
@@ -135,6 +136,23 @@ pub fn build_secs(
     let running = worker.map_or(0, |m| m.running_builds);
 
     uncontended_ms / 1000.0 * core_ratio(built_on, runs_on) * contention_factor(running)
+}
+
+pub fn build_secs(
+    history: &HistoryPrediction,
+    worker: Option<&WorkerMetricsView>,
+    instance: &InstanceContext,
+) -> f64 {
+    let window = instance.build_time_ms.w1h.or(instance.build_time_ms.w24h);
+    run_secs(history, worker, instance, window)
+}
+
+pub fn eval_secs(
+    history: &HistoryPrediction,
+    worker: Option<&WorkerMetricsView>,
+    instance: &InstanceContext,
+) -> f64 {
+    run_secs(history, worker, instance, None)
 }
 
 pub fn oom_retry_secs(
@@ -161,6 +179,12 @@ pub fn estimated_secs(
     instance: &InstanceContext,
 ) -> f64 {
     let metrics = worker.metrics.as_ref();
+    if job.job.build().is_none() {
+        let history = job.job.history();
+        let run = eval_secs(&history, metrics, instance);
+        return run + oom_retry_secs(&history, metrics, run);
+    }
+
     if job.outputs_present {
         return upload_secs(&job.job.history(), metrics, instance);
     }
@@ -200,10 +224,6 @@ impl ScoreRule for EstimatedTimeRule {
         worker: &WorkerContext<'_>,
         instance: &InstanceContext,
     ) -> f64 {
-        if job.job.build().is_none() {
-            return 0.0;
-        }
-
         let estimate = estimated_secs(job, worker, instance).min(self.cap_secs);
         self.points_per_sec * (self.cap_secs - estimate)
     }
@@ -506,17 +526,29 @@ mod tests {
     }
 
     #[test]
-    fn an_evaluation_is_not_estimated() {
+    fn an_evaluation_is_estimated_by_its_run_time_alone() {
         let rule = EstimatedTimeRule::default();
         let eval = ScoredJob::new_eval("e", ProjectId::now_v7(), true, built(100_000, None));
+        let unknown =
+            ScoredJob::new_eval("e", ProjectId::now_v7(), true, HistoryPrediction::default());
+        let inst = InstanceContext {
+            per_path_secs: Some(1.0),
+            build_time_ms: Windowed {
+                w1h: Some(999_000.0),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let w = worker(on(1_000, 0));
 
         assert_eq!(
-            rule.score(
-                &ctx(&eval, None, false),
-                &worker(on(1, 0)),
-                &InstanceContext::default()
-            ),
-            0.0
+            rule.score(&ctx(&eval, Some(10), false), &w, &inst),
+            rule.points_per_sec * (rule.cap_secs - 100.0)
+        );
+        assert_eq!(
+            rule.score(&ctx(&unknown, None, false), &w, &inst),
+            rule.points_per_sec * rule.cap_secs,
+            "an evaluation never takes the build time of the instance"
         );
     }
 }

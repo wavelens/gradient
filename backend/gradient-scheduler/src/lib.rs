@@ -57,14 +57,7 @@ pub struct Scheduler {
     pub(crate) kick_gen: Arc<AtomicU64>,
     pub(crate) policy: Arc<dyn gradient_pool::score::ScoringPolicy>,
     pub(crate) instance: Arc<arc_swap::ArcSwap<gradient_pool::score::InstanceContext>>,
-    pub(crate) eval_history: Arc<
-        arc_swap::ArcSwap<
-            std::collections::HashMap<
-                gradient_types::ids::TaskId,
-                gradient_pool::score::HistoryPrediction,
-            >,
-        >,
-    >,
+    pub(crate) eval_history: Arc<arc_swap::ArcSwap<crate::instance::EvalHistory>>,
     pub draining: Arc<AtomicBool>,
     pub(crate) assessments: Arc<std::sync::Mutex<assessment_memo::AssessmentMemo>>,
     pub(crate) cluster_wake: Arc<tokio::sync::Notify>,
@@ -93,7 +86,7 @@ impl Scheduler {
                 gradient_pool::score::InstanceContext::default(),
             )),
             eval_history: Arc::new(arc_swap::ArcSwap::from_pointee(
-                std::collections::HashMap::new(),
+                crate::instance::EvalHistory::default(),
             )),
             draining: Arc::new(AtomicBool::new(false)),
             assessments: Arc::default(),
