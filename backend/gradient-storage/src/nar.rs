@@ -11,7 +11,7 @@ use anyhow::{Context, Result};
 use bytes::{Bytes, BytesMut};
 use futures::StreamExt as _;
 use futures::stream::BoxStream;
-use gradient_util::telemetry::STATS;
+use gradient_util::telemetry::{GAUGES, STATS};
 use gradient_wire::constants::{BULK_CHUNK_SIZE, MULTIPART_NAR_BYTES, PRESIGN_TTL};
 use object_store::{ClientOptions, ObjectStore, ObjectStoreExt as _, PutPayload, path::Path};
 pub use object_store::{MultipartUpload, WriteMultipart};
@@ -123,7 +123,7 @@ impl NarStore {
         let store = object_store::local::LocalFileSystem::new_with_prefix(base_path)
             .context("Failed to create local NAR storage")?;
         Ok(Self {
-            inner: Arc::new(TimedStore::new(Arc::new(store), &STATS)),
+            inner: Arc::new(TimedStore::new(Arc::new(store), &STATS, &GAUGES)),
             prefix: String::new(),
             local_base: Some(base_path.to_string()),
             s3_signer: None,
@@ -183,6 +183,7 @@ impl NarStore {
             inner: Arc::new(TimedStore::new(
                 Arc::clone(&store) as Arc<dyn ObjectStore>,
                 &STATS,
+                &GAUGES,
             )),
             prefix: crate::layout::normalize_prefix(prefix),
             local_base: None,
@@ -256,7 +257,8 @@ impl NarStore {
             .await;
 
             guard.finish_with(opened.is_ok());
-            return opened.map(|found| found.map(|(size, s)| (size, watch_stream(s, &STATS))));
+            return opened
+                .map(|found| found.map(|(size, s)| (size, watch_stream(s, &STATS, &GAUGES))));
         }
 
         let Some(offset) = offset else {

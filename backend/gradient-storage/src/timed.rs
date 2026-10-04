@@ -16,7 +16,7 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use futures::StreamExt;
 use futures::stream::BoxStream;
-use gradient_util::telemetry::{MinuteStats, metric};
+use gradient_util::telemetry::{Gauges, MinuteStats, metric};
 use object_store::path::Path;
 use object_store::{
     CopyOptions, GetOptions, GetResult, GetResultPayload, ListResult, MultipartUpload, ObjectMeta,
@@ -27,11 +27,20 @@ use object_store::{
 pub(crate) struct TimedStore {
     inner: Arc<dyn ObjectStore>,
     stats: &'static MinuteStats,
+    gauges: &'static Gauges,
 }
 
 impl TimedStore {
-    pub(crate) fn new(inner: Arc<dyn ObjectStore>, stats: &'static MinuteStats) -> Self {
-        Self { inner, stats }
+    pub(crate) fn new(
+        inner: Arc<dyn ObjectStore>,
+        stats: &'static MinuteStats,
+        gauges: &'static Gauges,
+    ) -> Self {
+        Self {
+            inner,
+            stats,
+            gauges,
+        }
     }
 }
 
@@ -99,11 +108,15 @@ impl Drop for OpGuard {
 pub(crate) fn watch_stream<E: Send + 'static>(
     stream: BoxStream<'static, Result<Bytes, E>>,
     stats: &'static MinuteStats,
+    gauges: &'static Gauges,
 ) -> BoxStream<'static, Result<Bytes, E>> {
+    let reading = gauges.storage_reads.enter();
     stream
         .inspect(move |item| {
-            if item.is_err() {
-                stats.record(metric::STORAGE_OP_ERRORS, "read/error", 1.0);
+            let _reading = &reading;
+            match item {
+                Ok(chunk) => stats.record(metric::STORAGE_READ_BYTES, "", chunk.len() as f64),
+                Err(_) => stats.record(metric::STORAGE_OP_ERRORS, "read/error", 1.0),
             }
         })
         .boxed()
@@ -112,6 +125,7 @@ pub(crate) fn watch_stream<E: Send + 'static>(
 struct TimedUpload {
     inner: Box<dyn MultipartUpload>,
     stats: &'static MinuteStats,
+    gauges: &'static Gauges,
 }
 
 impl fmt::Debug for TimedUpload {
@@ -124,8 +138,17 @@ impl fmt::Debug for TimedUpload {
 impl MultipartUpload for TimedUpload {
     fn put_part(&mut self, data: PutPayload) -> UploadPart {
         let guard = OpGuard::start(self.stats, "put_part");
+        self.stats.record(
+            metric::STORAGE_WRITE_BYTES,
+            "",
+            data.content_length() as f64,
+        );
+        let writing = self.gauges.storage_writes.enter();
         let part = self.inner.put_part(data);
-        Box::pin(async move { guard.finish(part.await) })
+        Box::pin(async move {
+            let _writing = writing;
+            guard.finish(part.await)
+        })
     }
 
     async fn complete(&mut self) -> Result<PutResult> {
@@ -147,6 +170,12 @@ impl ObjectStore for TimedStore {
         opts: PutOptions,
     ) -> Result<PutResult> {
         let guard = OpGuard::start(self.stats, "put");
+        self.stats.record(
+            metric::STORAGE_WRITE_BYTES,
+            "",
+            payload.content_length() as f64,
+        );
+        let _writing = self.gauges.storage_writes.enter();
         guard.finish(self.inner.put_opts(location, payload, opts).await)
     }
 
@@ -160,6 +189,7 @@ impl ObjectStore for TimedStore {
         Ok(Box::new(TimedUpload {
             inner,
             stats: self.stats,
+            gauges: self.gauges,
         }))
     }
 
@@ -169,7 +199,8 @@ impl ObjectStore for TimedStore {
         let mut result = guard.finish(self.inner.get_opts(location, options).await)?;
 
         if let GetResultPayload::Stream(stream) = result.payload {
-            result.payload = GetResultPayload::Stream(watch_stream(stream, self.stats));
+            result.payload =
+                GetResultPayload::Stream(watch_stream(stream, self.stats, self.gauges));
         }
 
         Ok(result)
@@ -233,7 +264,20 @@ mod tests {
 
     fn timed() -> (TimedStore, &'static MinuteStats) {
         let stats: &'static MinuteStats = Box::leak(Box::default());
-        (TimedStore::new(Arc::new(InMemory::new()), stats), stats)
+        let gauges: &'static Gauges = Box::leak(Box::default());
+        (
+            TimedStore::new(Arc::new(InMemory::new()), stats, gauges),
+            stats,
+        )
+    }
+
+    fn sum(stats: &MinuteStats, metric: &str) -> f64 {
+        stats
+            .snapshot()
+            .iter()
+            .filter(|(k, _)| k.metric == metric)
+            .map(|(_, a)| a.sum)
+            .sum()
     }
 
     fn count(stats: &MinuteStats, metric: &str, label: &str) -> i64 {
@@ -259,6 +303,27 @@ mod tests {
         assert_eq!(count(stats, metric::STORAGE_OP_MS, "put"), 1);
         assert_eq!(count(stats, metric::STORAGE_OP_MS, "head"), 1);
         assert_eq!(count(stats, metric::STORAGE_OP_MS, "get"), 1);
+    }
+
+    #[tokio::test]
+    async fn written_and_streamed_bytes_are_counted() {
+        let (store, stats) = timed();
+        let path = Path::from("a");
+        store
+            .put(&path, PutPayload::from_static(b"nar"))
+            .await
+            .expect("put");
+        let read: Vec<_> = store
+            .get(&path)
+            .await
+            .expect("get")
+            .into_stream()
+            .collect()
+            .await;
+
+        assert_eq!(read.len(), 1);
+        assert_eq!(sum(stats, metric::STORAGE_WRITE_BYTES), 3.0);
+        assert_eq!(sum(stats, metric::STORAGE_READ_BYTES), 3.0);
     }
 
     #[tokio::test]
@@ -305,7 +370,7 @@ mod tests {
         })])
         .boxed();
 
-        let mut stream = watch_stream(failing, stats);
+        let mut stream = watch_stream(failing, stats, Box::leak(Box::default()));
         assert!(stream.next().await.expect("item").is_err());
         assert_eq!(count(stats, metric::STORAGE_OP_ERRORS, "read/error"), 1);
     }
