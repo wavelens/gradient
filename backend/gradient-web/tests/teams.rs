@@ -43,7 +43,7 @@ fn membership(role: TeamRole) -> team_user::Model {
         team: team_id(),
         user: user_id(),
         role,
-        via_group: false,
+        ..Default::default()
     }
 }
 

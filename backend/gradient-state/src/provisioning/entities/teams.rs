@@ -9,7 +9,7 @@ use super::super::StateApplicator;
 use super::super::lookup_id;
 use crate::config::*;
 use anyhow::Result;
-use gradient_entity::team_user::TeamRole;
+use gradient_entity::team_user::{TeamMemberSource, TeamRole};
 use gradient_entity::*;
 use gradient_types::consts::{
     BASE_CACHE_ROLE_ADMIN_ID, BASE_CACHE_ROLE_VIEW_ID, BASE_CACHE_ROLE_WRITE_ID,
@@ -46,7 +46,7 @@ fn team_role(name: &str) -> TeamRole {
     }
 }
 
-// The state only removes the grants it declared (`managed`), keeping API and new-project grants.
+// The state only removes the grants and members it declared, keeping API, group and new-project rows.
 impl<'a> StateApplicator<'a> {
     pub(crate) async fn apply_teams(
         &self,
@@ -130,11 +130,11 @@ impl<'a> StateApplicator<'a> {
                 .one(self.db)
                 .await?;
             match existing {
-                Some(row) if row.role == role && !row.via_group => {}
+                Some(row) if row.role == role && row.source == TeamMemberSource::State => {}
                 Some(row) => {
                     let mut active: team_user::ActiveModel = row.into();
                     active.role = Set(role);
-                    active.via_group = Set(false);
+                    active.source = Set(TeamMemberSource::State);
                     active.update(self.db).await?;
                 }
                 None => {
@@ -143,7 +143,7 @@ impl<'a> StateApplicator<'a> {
                         team: team_id,
                         user,
                         role,
-                        via_group: false,
+                        source: TeamMemberSource::State,
                     }
                     .into_active_model()
                     .insert(self.db)
@@ -152,13 +152,7 @@ impl<'a> StateApplicator<'a> {
             }
         }
 
-        team_user::Entity::delete_many()
-            .filter(team_user::Column::Team.eq(team_id))
-            .filter(team_user::Column::ViaGroup.eq(false))
-            .filter(team_user::Column::User.is_not_in(declared))
-            .exec(self.db)
-            .await?;
-
+        remove_undeclared_team_members(self.db, team_id, declared).await?;
         Ok(())
     }
 
@@ -318,6 +312,20 @@ impl<'a> StateApplicator<'a> {
     }
 }
 
+async fn remove_undeclared_team_members<C: ConnectionTrait>(
+    db: &C,
+    team: TeamId,
+    declared: Vec<UserId>,
+) -> Result<(), sea_orm::DbErr> {
+    team_user::Entity::delete_many()
+        .filter(team_user::Column::Team.eq(team))
+        .filter(team_user::Column::Source.eq(TeamMemberSource::State))
+        .filter(team_user::Column::User.is_not_in(declared))
+        .exec(db)
+        .await?;
+    Ok(())
+}
+
 async fn remove_undeclared_project_grants<C: ConnectionTrait>(
     db: &C,
     project: ProjectId,
@@ -351,7 +359,7 @@ mod grant_tests {
     use super::*;
     use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
 
-    fn deletes_only_managed_grants(db: sea_orm::DatabaseConnection, table: &str) {
+    fn deletes_only_state_rows(db: sea_orm::DatabaseConnection, table: &str, marker: &str) {
         let delete = format!("DELETE FROM \"{table}\"");
         let statements: Vec<String> = db
             .into_transaction_log()
@@ -361,7 +369,8 @@ mod grant_tests {
             .filter(|sql| sql.starts_with(&delete))
             .collect();
         assert_eq!(statements.len(), 1, "{statements:?}");
-        assert!(statements[0].contains("\"managed\""), "{}", statements[0]);
+        let marker = format!("\"{marker}\"");
+        assert!(statements[0].contains(&marker), "{}", statements[0]);
     }
 
     fn executed() -> MockDatabase {
@@ -377,7 +386,7 @@ mod grant_tests {
         remove_undeclared_project_grants(&db, ProjectId::now_v7(), Vec::new())
             .await
             .unwrap();
-        deletes_only_managed_grants(db, "team_project");
+        deletes_only_state_rows(db, "team_project", "managed");
     }
 
     #[tokio::test]
@@ -386,6 +395,15 @@ mod grant_tests {
         remove_undeclared_cache_grants(&db, CacheId::now_v7(), Vec::new())
             .await
             .unwrap();
-        deletes_only_managed_grants(db, "team_cache");
+        deletes_only_state_rows(db, "team_cache", "managed");
+    }
+
+    #[tokio::test]
+    async fn an_empty_member_list_removes_the_members_the_state_declared() {
+        let db = executed().into_connection();
+        remove_undeclared_team_members(&db, TeamId::now_v7(), Vec::new())
+            .await
+            .unwrap();
+        deletes_only_state_rows(db, "team_user", "source");
     }
 }

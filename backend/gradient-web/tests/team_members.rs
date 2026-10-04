@@ -11,7 +11,7 @@
 
 use axum::http::StatusCode;
 use gradient_entity::ids::*;
-use gradient_entity::team_user::TeamRole;
+use gradient_entity::team_user::{TeamMemberSource, TeamRole};
 use gradient_entity::{team, team_invitation, team_user};
 use gradient_test_support::fixtures::{test_date, user, user_id};
 use gradient_test_support::web::{live_session, make_test_server, make_token};
@@ -33,6 +33,13 @@ fn team_row() -> team::Model {
         created_by: Some(user_id()),
         created_at: test_date(),
         ..Default::default()
+    }
+}
+
+fn managed_team_row() -> team::Model {
+    team::Model {
+        managed: true,
+        ..team_row()
     }
 }
 
@@ -77,7 +84,7 @@ fn member_row(user: UserId, role: TeamRole) -> team_user::Model {
         team: team_id(),
         user,
         role,
-        via_group: false,
+        ..Default::default()
     }
 }
 
@@ -100,11 +107,26 @@ fn invitation() -> team_invitation::Model {
     }
 }
 
+fn state_member() -> team_user::Model {
+    team_user::Model {
+        source: TeamMemberSource::State,
+        ..member_row(other_user_id(), TeamRole::Member)
+    }
+}
+
+fn with_state_member(session_id: SessionId) -> MockDatabase {
+    with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
+        .append_query_results([vec![managed_team_row()]])
+        .append_query_results([vec![member_row(user_id(), TeamRole::Admin)]])
+        .append_query_results([vec![other_user()]])
+        .append_query_results([vec![state_member()]])
+}
+
 #[tokio::test]
-async fn an_admin_invites_a_user_into_the_team() {
+async fn an_admin_invites_a_user_into_a_state_managed_team() {
     let session_id = SessionId::now_v7();
     let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
-        .append_query_results([vec![team_row()]])
+        .append_query_results([vec![managed_team_row()]])
         .append_query_results([vec![member_row(user_id(), TeamRole::Admin)]])
         .append_query_results([vec![other_user()]])
         .append_query_results([Vec::<team_user::Model>::new()])
@@ -125,6 +147,34 @@ async fn an_admin_invites_a_user_into_the_team() {
     res.assert_status_ok();
     let body: Value = res.json();
     assert_eq!(body["message"], "Invitation sent");
+}
+
+#[tokio::test]
+async fn a_member_declared_by_the_state_cannot_change_role() {
+    let session_id = SessionId::now_v7();
+    let server = make_test_server(with_state_member(session_id).into_connection());
+
+    let res = server
+        .patch("/api/v1/teams/platform/members")
+        .add_header("authorization", bearer(session_id))
+        .json(&json!({ "user": "otheruser", "role": "admin" }))
+        .await;
+
+    res.assert_status(StatusCode::CONFLICT);
+}
+
+#[tokio::test]
+async fn a_member_declared_by_the_state_cannot_be_removed() {
+    let session_id = SessionId::now_v7();
+    let server = make_test_server(with_state_member(session_id).into_connection());
+
+    let res = server
+        .delete("/api/v1/teams/platform/members")
+        .add_header("authorization", bearer(session_id))
+        .json(&json!({ "user": "otheruser" }))
+        .await;
+
+    res.assert_status(StatusCode::CONFLICT);
 }
 
 #[tokio::test]
@@ -188,7 +238,7 @@ async fn the_last_admin_cannot_be_demoted() {
 async fn a_group_member_made_admin_stays_past_the_group_sync() {
     let session_id = SessionId::now_v7();
     let group_member = team_user::Model {
-        via_group: true,
+        source: TeamMemberSource::Group,
         ..member_row(other_user_id(), TeamRole::Member)
     };
     let conn = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
@@ -198,7 +248,7 @@ async fn a_group_member_made_admin_stays_past_the_group_sync() {
         .append_query_results([vec![group_member.clone()]])
         .append_query_results([vec![team_user::Model {
             role: TeamRole::Admin,
-            via_group: false,
+            source: TeamMemberSource::Api,
             ..group_member
         }]])
         .into_connection();
@@ -216,7 +266,7 @@ async fn a_group_member_made_admin_stays_past_the_group_sync() {
         .into_transaction_log()
         .iter()
         .flat_map(|t| t.statements().to_vec())
-        .any(|s| s.sql.starts_with("UPDATE \"team_user\"") && s.sql.contains("\"via_group\""));
+        .any(|s| s.sql.starts_with("UPDATE \"team_user\"") && s.sql.contains("\"source\""));
     assert!(
         clears_group_flag,
         "a new Admin must no longer count as added by a group"

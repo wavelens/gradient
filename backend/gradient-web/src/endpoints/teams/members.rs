@@ -30,7 +30,7 @@ pub struct TeamMemberItem {
     pub user: String,
     pub name: String,
     pub role: TeamRole,
-    pub via_group: bool,
+    pub source: TeamMemberSource,
 }
 
 #[derive(Deserialize)]
@@ -69,6 +69,14 @@ async fn find_membership(
         .filter(CTeamUser::User.eq(user))
         .one(&state.web_db)
         .await?)
+}
+
+fn ensure_not_state_managed(membership: &MTeamUser) -> WebResult<()> {
+    if membership.source == TeamMemberSource::State {
+        return Err(WebError::conflict("member is managed by server state"));
+    }
+
+    Ok(())
 }
 
 async fn ensure_not_last_admin(
@@ -117,7 +125,7 @@ pub async fn get_team_members(
                     user: member.username,
                     name: member.name,
                     role: membership.role,
-                    via_group: membership.via_group,
+                    source: membership.source,
                 })
             })
             .collect(),
@@ -138,7 +146,7 @@ pub async fn post_team_members(
         api_key.as_ref(),
         team,
         TeamAccess::Admin {
-            reject_managed: true,
+            reject_managed: false,
         },
     )
     .await?;
@@ -169,7 +177,7 @@ pub async fn post_team_members(
             team: team.id,
             user: target.id,
             role: body.role,
-            via_group: false,
+            source: TeamMemberSource::Api,
         }
         .into_active_model()
         .insert(&state.web_db)
@@ -250,7 +258,7 @@ pub async fn patch_team_members(
         api_key.as_ref(),
         team,
         TeamAccess::Admin {
-            reject_managed: true,
+            reject_managed: false,
         },
     )
     .await?;
@@ -258,6 +266,7 @@ pub async fn patch_team_members(
     let membership = find_membership(&state, team.id, target.id)
         .await?
         .ok_or_else(|| WebError::bad_request("User not in Team"))?;
+    ensure_not_state_managed(&membership)?;
 
     if body.role != TeamRole::Admin {
         ensure_not_last_admin(&state, team.id, &membership).await?;
@@ -266,7 +275,7 @@ pub async fn patch_team_members(
     let mut active: ATeamUser = membership.into();
     active.role = Set(body.role);
     if body.role == TeamRole::Admin {
-        active.via_group = Set(false);
+        active.source = Set(TeamMemberSource::Api);
     }
     active.update(&state.web_db).await?;
 
@@ -301,7 +310,7 @@ pub async fn delete_team_members(
         api_key.as_ref(),
         team,
         TeamAccess::Admin {
-            reject_managed: true,
+            reject_managed: false,
         },
     )
     .await?;
@@ -309,6 +318,7 @@ pub async fn delete_team_members(
     let membership = find_membership(&state, team.id, target.id)
         .await?
         .ok_or_else(|| WebError::bad_request("User not in Team"))?;
+    ensure_not_state_managed(&membership)?;
 
     ensure_not_last_admin(&state, team.id, &membership).await?;
     membership.into_active_model().delete(&state.web_db).await?;

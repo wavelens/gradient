@@ -76,6 +76,14 @@ async fn find_team(state: &Arc<ServerState>, name: &str) -> WebResult<MTeam> {
         .or_not_found("Team")
 }
 
+fn grant_permission(includes_users: bool) -> Permission {
+    if includes_users {
+        Permission::ManageMembers
+    } else {
+        Permission::ManageWorkers
+    }
+}
+
 async fn removes_as_team_admin(
     state: &Arc<ServerState>,
     user: &MUser,
@@ -249,11 +257,7 @@ pub async fn post_project_team(
             "A grant includes users, workers or both.",
         ));
     }
-    let permission = if body.users {
-        Permission::ManageMembers
-    } else {
-        Permission::ManageWorkers
-    };
+    let permission = grant_permission(body.users);
     let project = load_project(
         &state,
         Caller::User(&user),
@@ -449,23 +453,25 @@ pub async fn delete_project_team(
         .or_not_found("Project")?;
     let team = find_team(&state, &team).await?;
     let grant = project_grant(&state, team.id, project.id).await?;
-    let request = match grant {
-        Some(_) => None,
-        None => Some(
-            ETeamProjectRequest::find()
+    let (request, includes_users) = match &grant {
+        Some(grant) => (None, grant.includes_users),
+        None => {
+            let request = ETeamProjectRequest::find()
                 .filter(CTeamProjectRequest::Team.eq(team.id))
                 .filter(CTeamProjectRequest::Project.eq(project.id))
                 .one(&state.web_db)
                 .await?
-                .or_not_found("Team grant")?,
-        ),
+                .or_not_found("Team grant")?;
+            let includes_users = request.includes_users;
+            (Some(request), includes_users)
+        }
     };
 
     let allowed = has_permission(
         &state,
         user.id,
         project.id,
-        Permission::ManageMembers,
+        grant_permission(includes_users),
         api_key.as_ref(),
     )
     .await?

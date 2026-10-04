@@ -10,6 +10,7 @@
 )]
 
 use axum::http::StatusCode;
+use gradient_db::permissions::{Permission, mask_from};
 use gradient_entity::ids::*;
 use gradient_entity::team_user::TeamRole;
 use gradient_entity::{
@@ -44,7 +45,7 @@ fn membership(role: TeamRole) -> team_user::Model {
         team: team_id(),
         user: user_id(),
         role,
-        via_group: false,
+        ..Default::default()
     }
 }
 
@@ -96,6 +97,15 @@ fn write_role() -> role::Model {
         id: BASE_ROLE_WRITE_ID,
         name: "Write".into(),
         permission: gradient_db::permissions::write_mask(),
+        ..Default::default()
+    }
+}
+
+fn workers_manager_role() -> role::Model {
+    role::Model {
+        id: BASE_ROLE_WRITE_ID,
+        name: "Workers".into(),
+        permission: mask_from(&[Permission::ManageWorkers]),
         ..Default::default()
     }
 }
@@ -263,4 +273,48 @@ async fn removing_a_grant_with_workers_withdraws_the_team_workers() {
         looked_up_workers,
         "removing workers must find the team's workers to withdraw"
     );
+}
+
+#[tokio::test]
+async fn managing_workers_is_enough_to_remove_a_workers_only_grant() {
+    let session_id = SessionId::now_v7();
+    let conn = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
+        .append_query_results([vec![project()]])
+        .append_query_results([vec![team_row()]])
+        .append_query_results([vec![grant(false, true)]])
+        .append_query_results([vec![admin_access()]])
+        .append_query_results([vec![workers_manager_role()]])
+        .append_query_results([Vec::<team_worker::Model>::new()])
+        .append_exec_results([exec_ok()])
+        .into_connection();
+    let server = make_test_server(conn.clone());
+
+    let res = server
+        .delete("/api/v1/projects/test-project/teams/platform")
+        .add_header("authorization", bearer(session_id))
+        .await;
+
+    res.assert_status_ok();
+    drop(server);
+    assert!(ran(conn, "DELETE FROM \"team_project\""));
+}
+
+#[tokio::test]
+async fn managing_workers_is_not_enough_to_remove_a_grant_with_users() {
+    let session_id = SessionId::now_v7();
+    let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
+        .append_query_results([vec![project()]])
+        .append_query_results([vec![team_row()]])
+        .append_query_results([vec![grant(true, true)]])
+        .append_query_results([vec![admin_access()]])
+        .append_query_results([vec![workers_manager_role()]])
+        .append_query_results([Vec::<team_user::Model>::new()]);
+    let server = make_test_server(db.into_connection());
+
+    let res = server
+        .delete("/api/v1/projects/test-project/teams/platform")
+        .add_header("authorization", bearer(session_id))
+        .await;
+
+    res.assert_status(StatusCode::NOT_FOUND);
 }

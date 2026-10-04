@@ -9986,7 +9986,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: The last Admin of a team cannot be demoted
+          description: The last Admin of a team cannot be demoted, or the member is managed by server state
           content:
             application/json:
               schema:
@@ -10017,7 +10017,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: The last Admin of a team cannot be removed
+          description: The last Admin of a team cannot be removed, or the member is managed by server state
           content:
             application/json:
               schema:
@@ -10404,7 +10404,7 @@ paths:
       tags: [teams]
       summary: Remove a project team grant
       description: |
-        Allowed for `manageMembers` on the project or Admin in the team. Removing workers aborts their running jobs of the project.
+        Allowed for Admin in the team, or on the project for `manageWorkers` when the grant includes only workers and `manageMembers` otherwise. Removing workers aborts their running jobs of the project.
         Without a grant, the pending request is withdrawn instead.
       operationId: removeProjectTeam
       responses:
@@ -11336,12 +11336,15 @@ components:
 
     TeamMember:
       type: object
-      required: [user, name, role, via_group]
+      required: [user, name, role, source]
       properties:
         user: { type: string }
         name: { type: string }
         role: { $ref: '#/components/schemas/TeamRole' }
-        via_group: { type: boolean, description: Added by an OIDC or SCIM group }
+        source:
+          type: string
+          enum: [api, state, group]
+          description: Added through the API, declared by the server state, or added by an OIDC or SCIM group
 
     TeamMemberRequest:
       type: object

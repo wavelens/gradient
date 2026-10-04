@@ -715,7 +715,10 @@
         type = types.str;
         default = name;
         defaultText = "<attrset key>";
-        description = "Team name. Teams managed here cannot be changed through the API.";
+        description = ''
+          Team name. The settings of a team managed here cannot be changed through the API, while
+          other members and workers can still be added there.
+        '';
       };
       display_name = mkOption {
         type = types.str;
@@ -727,8 +730,10 @@
         type = types.listOf teamMemberType;
         default = [ ];
         description = ''
-          Users in the team. The next state apply removes members not listed, except members
-          added through an OIDC or SCIM group.
+          Users in the team. The next state apply removes members the state declared before and no
+          longer lists. Members added through the API,
+          {option}`services.gradient.state.teams.<name>.oidc_group` or
+          {option}`services.gradient.state.teams.<name>.scim_group` stay.
         '';
       };
       oidc_group = mkOption {

@@ -43,7 +43,7 @@ fn membership(role: TeamRole) -> team_user::Model {
         team: team_id(),
         user: user_id(),
         role,
-        via_group: false,
+        ..Default::default()
     }
 }
 
@@ -86,10 +86,14 @@ fn team_worker_row() -> team_worker::Model {
 }
 
 #[tokio::test]
-async fn a_team_admin_registers_a_worker_and_sees_its_token_once() {
+async fn an_admin_of_a_state_managed_team_registers_a_worker_and_sees_its_token_once() {
     let session_id = SessionId::now_v7();
+    let managed_team = team::Model {
+        managed: true,
+        ..team_row()
+    };
     let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
-        .append_query_results([vec![team_row()]])
+        .append_query_results([vec![managed_team]])
         .append_query_results([vec![membership(TeamRole::Admin)]])
         .append_query_results([Vec::<worker_registration::Model>::new()])
         .append_query_results([Vec::<team_worker::Model>::new()])

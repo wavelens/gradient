@@ -145,7 +145,7 @@ pub async fn post_team_worker(
         api_key.as_ref(),
         team,
         TeamAccess::Admin {
-            reject_managed: true,
+            reject_managed: false,
         },
     )
     .await?;

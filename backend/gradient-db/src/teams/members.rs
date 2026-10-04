@@ -39,7 +39,7 @@ pub async fn sync_group_memberships<C: ConnectionTrait>(
     let present: HashSet<TeamId> = current.iter().map(|membership| membership.team).collect();
 
     for membership in current {
-        if membership.via_group
+        if membership.source == TeamMemberSource::Group
             && synced.contains(&membership.team)
             && !wanted.contains(&membership.team)
         {
@@ -53,7 +53,7 @@ pub async fn sync_group_memberships<C: ConnectionTrait>(
             team: *team,
             user,
             role: TeamRole::Member,
-            via_group: true,
+            source: TeamMemberSource::Group,
         }
         .into_active_model()
         .insert(db)
@@ -76,13 +76,13 @@ mod tests {
         }
     }
 
-    fn membership(team: TeamId, user: UserId, via_group: bool) -> MTeamUser {
+    fn membership(team: TeamId, user: UserId, source: TeamMemberSource) -> MTeamUser {
         MTeamUser {
             id: TeamUserId::now_v7(),
             team,
             user,
             role: TeamRole::Member,
-            via_group,
+            source,
         }
     }
 
@@ -96,7 +96,11 @@ mod tests {
         };
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             .append_query_results([Vec::<MTeam>::new()])
-            .append_query_results([vec![membership(scim_only.id, user, true)]])
+            .append_query_results([vec![membership(
+                scim_only.id,
+                user,
+                TeamMemberSource::Group,
+            )]])
             .into_connection();
 
         sync_group_memberships(&db, user, &[]).await.expect("sync");
@@ -116,14 +120,14 @@ mod tests {
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             .append_query_results([vec![joined.clone(), left.clone(), manual.clone()]])
             .append_query_results([vec![
-                membership(left.id, user, true),
-                membership(manual.id, user, false),
+                membership(left.id, user, TeamMemberSource::Group),
+                membership(manual.id, user, TeamMemberSource::Api),
             ]])
             .append_exec_results([MockExecResult {
                 last_insert_id: 0,
                 rows_affected: 1,
             }])
-            .append_query_results([vec![membership(joined.id, user, true)]])
+            .append_query_results([vec![membership(joined.id, user, TeamMemberSource::Group)]])
             .append_exec_results([MockExecResult {
                 last_insert_id: 0,
                 rows_affected: 1,

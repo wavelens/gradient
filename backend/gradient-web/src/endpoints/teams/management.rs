@@ -190,7 +190,7 @@ pub async fn put_team(
         team: team.id,
         user: user.id,
         role: TeamRole::Admin,
-        via_group: false,
+        source: TeamMemberSource::Api,
     }
     .into_active_model()
     .insert(&tx)
