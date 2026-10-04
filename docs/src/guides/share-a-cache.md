@@ -25,7 +25,7 @@ Public caches need nothing more. Private caches need an API key from **Settings 
 === "CLI"
 
     ```sh
-    sudo nix run github:wavelens/gradient#gradient-cli -- cache install-netrc \
+    sudo nix run github:wavelens/gradient/latest#gradient-cli -- cache install-netrc \
       --server https://gradient.example.com --cache main --token <api key>
     ```
 

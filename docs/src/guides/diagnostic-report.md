@@ -49,7 +49,7 @@ Open an issue at <https://github.com/wavelens/gradient/issues> with what went wr
 The browser will download `gradient-report-<id>-<date>.db`. The inspector will print the summary maintainers start from.
 
 ```sh
-nix run github:wavelens/gradient#gradient-report -- gradient-report-*.db summary
+nix run github:wavelens/gradient/latest#gradient-report -- gradient-report-*.db summary
 ```
 
 The inspector can read only the report schema of its own source revision. Reports from an older server need that release's tag, e.g. `github:wavelens/gradient/v1.4.0#gradient-report`.

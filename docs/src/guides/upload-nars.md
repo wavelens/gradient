@@ -5,7 +5,7 @@ Store paths built outside Gradient, pushed into a cache with the `gradient` CLI.
 **Requirements:**
 
 - A cache and the Write role on the cache, see [Share a Cache](share-a-cache.md)
-- The CLI: `nix shell github:wavelens/gradient#gradient-cli`
+- The CLI: `nix shell github:wavelens/gradient/latest#gradient-cli`
 
 ## 1. Log In
 

@@ -1,0 +1,40 @@
+# SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+# SPDX-License-Identifier: AGPL-3.0-only
+
+name: Release Branches
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  move:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Move latest and beta to the release
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+          PRERELEASE: ${{ github.event.release.prerelease }}
+        run: |
+          commit="$(git rev-parse "$TAG^{commit}")"
+          branches=(beta)
+          if [ "$PRERELEASE" != true ]; then
+            branches=(latest beta)
+          fi
+
+          for branch in "${branches[@]}"; do
+            if git rev-parse --verify --quiet "origin/$branch" > /dev/null \
+              && ! git merge-base --is-ancestor "origin/$branch" "$commit"; then
+              echo "::warning::$branch is not behind $TAG, leaving it in place"
+              continue
+            fi
+            git push origin "$commit:refs/heads/$branch"
+            echo "$branch -> $TAG"
+          done

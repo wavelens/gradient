@@ -24,7 +24,7 @@ A complete Gradient on one machine for trying Gradient on a personal repository.
 === "Nix"
 
     ```sh
-    nix run github:wavelens/gradient#standalone
+    nix run github:wavelens/gradient/latest#standalone
     ```
 
     A QEMU VM on the terminal, logged in as root. The disk image `gradient.qcow2` in the current directory will keep projects, the cache and every build across restarts. Stop the VM with `Ctrl-a x`.
@@ -79,7 +79,7 @@ Follow [First Project](first-project.md) from step 2 for a cache, a project and 
 === "Nix"
 
     ```sh
-    nix run github:wavelens/gradient#standalone --refresh
+    nix run github:wavelens/gradient/latest#standalone --refresh
     ```
 
 !!! warning

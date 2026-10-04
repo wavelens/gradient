@@ -12,21 +12,22 @@ A running Gradient instance with its own worker, on one NixOS host. [Standalone]
 ```nix
 # flake.nix
 {
-  inputs.gradient.url = "github:wavelens/gradient";
+  inputs.gradient.url = "github:wavelens/gradient/latest"; # (1)!
 
   outputs = { nixpkgs, gradient, ... }: {
     nixosConfigurations.gradient = nixpkgs.lib.nixosSystem {
       system = "x86_64-linux";
       modules = [
         ./configuration.nix
-        gradient.nixosModules.default # (1)!
+        gradient.nixosModules.default # (2)!
       ];
     };
   };
 }
 ```
 
-1.  Source of the `services.gradient` options for the server, the worker and the declarative state.
+1.  Stable releases only. `github:wavelens/gradient/beta` for pre-releases as well, `github:wavelens/gradient` for every commit on `main`.
+2.  Source of the `services.gradient` options for the server, the worker and the declarative state.
 
 ## 2. Create Secrets
 

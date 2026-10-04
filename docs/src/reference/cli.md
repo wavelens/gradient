@@ -24,7 +24,7 @@ Every `gradient` command, generated from the CLI's `--help`. Commands act on the
 === "Without installing"
 
     ```sh
-    nix run github:wavelens/gradient#gradient-cli -- --help
+    nix run github:wavelens/gradient/latest#gradient-cli -- --help
     ```
 
 | Package | Contains |

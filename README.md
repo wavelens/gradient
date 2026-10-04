@@ -48,7 +48,7 @@ Gradient evaluates and builds Nix flakes on a pool of workers, starts builds whi
 # Install Gradient
 curl -fLo gradient "https://public.gradient.ci/api/v1/tasks/gradient/main/entry-point-downloads?eval=packages.x86_64-linux.gradient-cli-static&filename=gradient"
 chmod +x gradient && sudo mv gradient /usr/local/bin/
-# or via Nix: nix run github:wavelens/gradient#gradient-cli-full -- [flags]
+# or via Nix: nix run github:wavelens/gradient/latest#gradient-cli-full -- [flags]
 
 gradient login https://gradient.example.com
 gradient build .#hello
@@ -82,7 +82,7 @@ For a first try on a personal repository, the [Standalone](https://wavelens.gith
 ```sh
 docker run -dt --name gradient --privileged --cgroupns=host -p 127.0.0.1:8080:80 -v gradient:/var/lib ghcr.io/wavelens/gradient-standalone
 # or
-nix run github:wavelens/gradient#standalone
+nix run github:wavelens/gradient/latest#standalone
 ```
 
 Pre-built Gradient packages:
