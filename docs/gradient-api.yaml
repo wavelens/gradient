@@ -9876,6 +9876,33 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+  /teams/{team}/evaluations:
+    parameters:
+      - $ref: '#/components/parameters/TeamName'
+    get:
+      tags: [teams]
+      summary: List recent team evaluations
+      description: |
+        The ten newest evaluations of projects granting the team with users. Members of the team and superusers can read it.
+      operationId: getTeamEvaluations
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/TeamEvaluation'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
   /teams/{team}/members:
     parameters:
       - $ref: '#/components/parameters/TeamName'
@@ -11397,6 +11424,15 @@ components:
               display_name: { type: string }
               role: { type: string }
 
+    TeamEvaluation:
+      type: object
+      required: [id, project, task, status, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        project: { type: string }
+        task: { type: string }
+        status: { $ref: '#/components/schemas/EvaluationStatus' }
+        created_at: { type: string, format: date-time }
     TeamRequest:
       type: object
       required: [id, kind, target, display_name, users, workers, created_at]

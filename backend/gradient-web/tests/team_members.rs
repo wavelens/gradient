@@ -217,7 +217,10 @@ async fn a_group_member_made_admin_stays_past_the_group_sync() {
         .iter()
         .flat_map(|t| t.statements().to_vec())
         .any(|s| s.sql.starts_with("UPDATE \"team_user\"") && s.sql.contains("\"via_group\""));
-    assert!(clears_group_flag, "a new Admin must no longer count as added by a group");
+    assert!(
+        clears_group_flag,
+        "a new Admin must no longer count as added by a group"
+    );
 }
 
 #[tokio::test]

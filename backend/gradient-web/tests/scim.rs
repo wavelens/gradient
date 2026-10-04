@@ -376,7 +376,10 @@ async fn scim_patch_group_remove_member_leaves_the_team() {
         .iter()
         .flat_map(|t| t.statements().to_vec())
         .any(|s| s.sql.starts_with("DELETE FROM \"team_user\"") && s.sql.contains("\"via_group\""));
-    assert!(only_group_rows, "SCIM must not remove members added by hand");
+    assert!(
+        only_group_rows,
+        "SCIM must not remove members added by hand"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]

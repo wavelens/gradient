@@ -15,6 +15,7 @@ import {
   Team,
   TeamGrant,
   TeamGrants,
+  TeamEvaluation,
   TeamMember,
   TeamRequest,
   TeamRole,
@@ -36,6 +37,10 @@ export class TeamsService {
 
   get(team: string): Observable<Team> {
     return this.api.get<Team>(`teams/${team}`);
+  }
+
+  evaluations(team: string): Observable<TeamEvaluation[]> {
+    return this.api.get<TeamEvaluation[]>(`teams/${team}/evaluations`);
   }
 
   update(team: string, patch: PatchTeam): Observable<string> {

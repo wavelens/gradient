@@ -5,6 +5,7 @@
  */
 
 import { ConnectionFailure } from './worker.model';
+import { EvaluationStatus } from './task.model';
 
 export type TeamRole = 'admin' | 'member';
 
@@ -83,6 +84,14 @@ export interface GrantRequest {
 export interface TeamGrants {
   projects: { project: string; display_name: string; role: string | null; users: boolean; workers: boolean }[];
   caches: { cache: string; display_name: string; role: string }[];
+}
+
+export interface TeamEvaluation {
+  id: string;
+  project: string;
+  task: string;
+  status: EvaluationStatus;
+  created_at: string;
 }
 
 export interface TeamRequest {
