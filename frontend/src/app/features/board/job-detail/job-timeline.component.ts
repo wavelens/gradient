@@ -80,6 +80,7 @@ const PHASE_LABELS: Record<string, string> = {
   download: 'Download',
   build: 'Build',
   compress: 'Compress',
+  upload_wait: 'Upload wait',
   nar_push: 'NAR push',
   cache_query_wait: 'Cache-query wait',
 };

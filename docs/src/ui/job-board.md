@@ -61,7 +61,7 @@ Jobs opened from **Live Jobs** show five parts.
 - The server's marks: **Queued**, **Ready**, **Assigned**, **Finished**.
 - **Worker tail**: the worker's time after its last phase, for finished jobs.
 - **Transit**: the rest of the time between **Assigned** and **Finished** of a finished job, spent on the network and in queues on both ends.
-- The worker timeline: nested phases (fetch, evaluate, build, compress, NAR push) with duration, share and bytes moved.
+- The worker timeline: nested phases (fetch, evaluate, build, compress, upload wait, NAR push) with duration, share and bytes moved.
 - The score breakdown: each scoring rule's contribution to the winning worker.
 
 The timeline shows where a slow job spent its time. The score will explain the worker choice for the job.

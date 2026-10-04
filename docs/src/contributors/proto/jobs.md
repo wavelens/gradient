@@ -86,11 +86,12 @@ Build jobs carry exactly one `BuildSpec`, meaning one shared build (`derivation_
 | `InputUpdateResult`, `InputUpdateExpansion` | Flake update candidate lock and bumped inputs |
 | `Building { build_id }` | Build turning `Building`. An already aborted build is getting `AbortJob` instead |
 | `BuildOutput` | Output sizes, build products, metrics, the `substituted` flag |
-| `Compressing` | No change |
+| `Stage(Prefetch / Build / Upload)` | Live stage of the job in the worker pool, for the [estimated time](../../reference/scheduler-policies.md#estimated-time). Sent to servers on protocol 28 and later |
+| `Compressing` | No change. Workers no longer send it |
 
 An `EvalProgress` message will carry one download row per flake input while fetching and the live thunk count while evaluating. The eval worker will download the inputs itself, with one download in flight per second-level domain.
 
-`JobCompleted` and `JobFailed` carry the phase timeline shown on the [Job Board](../../ui/job-board.md#job-inspection). The server will drop reports from a stale `assignment_id`.
+`JobCompleted` and `JobFailed` carry the phase timeline shown on the [Job Board](../../ui/job-board.md#job-inspection). A server before protocol 28 will receive `NarPush` in place of the `UploadWait` phase. Build metrics also hold the number of concurrent builds on the worker, the cores of the build and the worker's CPU score. The server will drop reports from a stale `assignment_id`.
 
 ## Failures
 

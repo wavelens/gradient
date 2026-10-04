@@ -14913,8 +14913,9 @@ components:
         ram_free_mb: { type: integer, nullable: true, description: Null until the worker's first live-metrics heartbeat. }
         cpu_usage_pct: { type: number, nullable: true, description: Null until the worker's first live-metrics heartbeat. }
         disk_speed_mbps: { type: number, nullable: true }
-        upload_speed_mbps: { type: number, nullable: true, description: Output NAR megabits per second of whole upload batches. }
-        download_speed_mbps: { type: number, nullable: true, description: Input NAR megabits per second of whole download batches. }
+        upload_speed_mbps: { type: number, nullable: true, description: Output NAR megabits per second of upload batches from the first grant on. }
+        download_speed_mbps: { type: number, nullable: true, description: NAR megabits per second of input download batches and substitutions. }
+        running_builds: { type: integer, description: Jobs of this worker in the build stage. }
 
     JobContext:
       type: object
@@ -14947,6 +14948,8 @@ components:
             peak_ram_mb: { type: integer, nullable: true }
             avg_cpu_time_ms: { type: integer, nullable: true }
             build_time_ms: { type: integer, nullable: true }
+            uncontended_build_time_ms: { type: integer, nullable: true, description: Mean build time with the slowdown of concurrent builds on the worker removed. }
+            build_core_score: { type: integer, nullable: true, description: Mean cpu_core_score of the workers behind the build times. }
             avg_disk_bytes: { type: integer, nullable: true }
             output_nar_size: { type: integer, nullable: true, description: Mean summed NAR size of the outputs of prior builds. }
             oom_rate: { type: number }
@@ -14989,6 +14992,11 @@ components:
         cpu_core_score_mean: { type: number, nullable: true, description: Mean cpu_core_score of the connected workers that reported one. }
         upload_speed_mean_mbps: { type: number, nullable: true, description: Mean upload_speed_mbps of the connected workers that measured one. }
         download_speed_mean_mbps: { type: number, nullable: true, description: Mean download_speed_mbps of the connected workers that measured one. }
+        downloads_in_flight: { type: integer, description: Build jobs of every worker in the prefetch stage. }
+        uploads_in_flight: { type: integer, description: Build jobs of every worker in the upload stage. }
+        storage_read_mbps: { type: number, nullable: true, description: Best total stored megabits per second of overlapping NAR downloads in the last hour. }
+        storage_write_mbps: { type: number, nullable: true, description: Best total stored megabits per second of overlapping NAR uploads in the last hour. }
+        compression_ratio: { type: number, nullable: true, description: Stored bytes per NAR byte of the uploads in the last hour. }
 
     DispatchedJobDetail:
       type: object
@@ -15112,6 +15120,7 @@ components:
             - compress
             - nar_push
             - cache_query_wait
+            - upload_wait
         start_ms: { type: integer, format: int64 }
         end_ms: { type: integer, format: int64 }
         paths:
