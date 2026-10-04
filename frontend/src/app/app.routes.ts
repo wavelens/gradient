@@ -425,6 +425,38 @@ export const routes: Routes = [
           ),
       },
 
+      // Teams
+      {
+        path: 'teams',
+        title: 'Teams',
+        loadComponent: () =>
+          import('./features/teams/teams-list/teams-list.component').then((m) => m.TeamsListComponent),
+      },
+      {
+        path: 'team/:team',
+        title: 'Team',
+        loadComponent: () =>
+          import('./features/teams/team-overview/team-overview.component').then((m) => m.TeamOverviewComponent),
+      },
+      {
+        path: 'team/:team/settings',
+        title: 'Team Settings',
+        loadComponent: () =>
+          import('./features/teams/team-settings/team-settings.component').then((m) => m.TeamSettingsComponent),
+      },
+      {
+        path: 'team/:team/members',
+        title: 'Team Members',
+        loadComponent: () =>
+          import('./features/teams/team-members/team-members.component').then((m) => m.TeamMembersComponent),
+      },
+      {
+        path: 'team/:team/workers',
+        title: 'Team Workers',
+        loadComponent: () =>
+          import('./features/teams/team-workers/team-workers.component').then((m) => m.TeamWorkersComponent),
+      },
+
       // Integrations
       {
         path: 'project/:project/integrations',

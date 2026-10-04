@@ -1,0 +1,69 @@
+<!--
+  SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+
+  SPDX-License-Identifier: AGPL-3.0-only
+-->
+
+<gr-page-layout [breadcrumb]="[{ label: 'Teams', link: ['/teams'] }, { label: team()?.display_name || teamName, link: ['/team', teamName] }, { label: 'Settings' }]" title="Settings">
+  @if (error(); as message) {
+    <gr-message-banner type="error">{{ message }}</gr-message-banner>
+  }
+
+  @if (loading()) {
+    <gr-loading-spinner message="Loading team..." />
+  } @else if (team()?.managed) {
+    <gr-message-banner type="info">This team is managed by the server configuration and cannot be changed here.</gr-message-banner>
+  } @else if (team()) {
+    <gr-settings-section title="General">
+      <gr-form-field label="Display Name" for="team-display-name">
+        <input grInput id="team-display-name" [(ngModel)]="form.display_name" />
+      </gr-form-field>
+    </gr-settings-section>
+
+    <gr-settings-section title="New Projects" description="What every project created from now on grants this team.">
+      <gr-form-field>
+        <gr-checkbox inputId="new-project-users" [(ngModel)]="form.new_project_users" [binary]="true" label="Grant the team's users" />
+      </gr-form-field>
+      <gr-form-field label="Role of the team's users">
+        <gr-select [(ngModel)]="form.new_project_role" [options]="roleOptions" optionLabel="label" optionValue="value" />
+      </gr-form-field>
+      <gr-form-field>
+        <gr-checkbox inputId="new-project-workers" [(ngModel)]="form.new_project_workers" [binary]="true" label="Grant the team's workers" />
+      </gr-form-field>
+    </gr-settings-section>
+
+    @if (isSuperuser()) {
+      <gr-settings-section title="Single Sign-On" description="Members of these groups join the team.">
+        <gr-form-field label="OIDC group" for="team-oidc-group" hint="Taken from the groups claim at each sign-in.">
+          <input grInput id="team-oidc-group" [(ngModel)]="form.oidc_group" />
+        </gr-form-field>
+        <gr-form-field label="SCIM group" for="team-scim-group">
+          <input grInput id="team-scim-group" [(ngModel)]="form.scim_group" />
+        </gr-form-field>
+      </gr-settings-section>
+    }
+
+    @if (saved()) {
+      <gr-message-banner type="success">Changes saved.</gr-message-banner>
+    }
+    <div>
+      <button grButton label="Save" icon="save" [loading]="saving()" (click)="save()"></button>
+    </div>
+
+    <gr-settings-section title="Danger Zone" [danger]="true" [card]="false" maxWidth="none">
+      <gr-row>
+        Delete Team
+        <span slot="meta">Removes the team, its grants, requests, invitations and workers.</span>
+        <button slot="actions" grButton label="Delete Team" icon="delete" severity="danger" (click)="showDelete.set(true)"></button>
+      </gr-row>
+    </gr-settings-section>
+  }
+</gr-page-layout>
+
+<gr-dialog header="Delete Team" [(visible)]="showDelete" width="400px">
+  <p>Are you sure you want to delete <strong>{{ team()?.display_name }}</strong>? This action cannot be undone.</p>
+  <div grDialogFooter>
+    <button grButton label="Cancel" severity="secondary" (click)="showDelete.set(false)" [disabled]="deleting()"></button>
+    <button grButton label="Delete" severity="danger" (click)="remove()" [loading]="deleting()"></button>
+  </div>
+</gr-dialog>

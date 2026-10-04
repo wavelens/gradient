@@ -1,0 +1,83 @@
+<!--
+  SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+
+  SPDX-License-Identifier: AGPL-3.0-only
+-->
+
+<gr-page-layout [breadcrumb]="[{ label: 'Teams', link: ['/teams'] }, { label: team()?.display_name || teamName, link: ['/team', teamName] }, { label: 'Workers' }]" title="Workers">
+  @if (isAdmin() && !team()?.managed) {
+    <button slot="actions" grButton label="Register Worker" icon="add" (click)="showRegister.set(true)"></button>
+  }
+  @if (error(); as message) {
+    <gr-message-banner type="error">{{ message }}</gr-message-banner>
+  }
+
+  @if (loading()) {
+    <gr-loading-spinner message="Loading workers..." />
+  } @else if (workers().length > 0) {
+    <gr-row-list>
+      @for (worker of workers(); track worker.worker_id) {
+        <gr-row [icon]="worker.gradient_ci ? 'cloud' : 'construction'">
+          {{ worker.display_name }}
+          <div slot="meta">
+            <div class="mono">{{ worker.worker_id }}</div>
+            @if (worker.url) {
+              <div class="text-secondary">{{ worker.url }}</div>
+            }
+            @if (!worker.connected && worker.last_error) {
+              <div class="text-secondary">{{ worker.last_error.reason }}</div>
+            }
+          </div>
+          <div slot="actions">
+            @if (worker.managed) {
+              <gr-badge severity="info">Managed</gr-badge>
+            }
+            <gr-badge [severity]="worker.connected ? 'success' : 'neutral'">{{ worker.connected ? 'Connected' : 'Offline' }}</gr-badge>
+            @if (isAdmin()) {
+              @if (worker.active) {
+                <button grButton label="Deactivate" icon="pause" severity="warn" size="small"
+                  [loading]="busy() === worker.worker_id" (click)="setActive(worker, false)"></button>
+              } @else {
+                <button grButton label="Activate" icon="play_arrow" severity="success" size="small"
+                  [loading]="busy() === worker.worker_id" (click)="setActive(worker, true)"></button>
+              }
+              <button grButton icon="delete" severity="danger" size="small" [disabled]="worker.managed || busy() === worker.worker_id"
+                (click)="remove(worker)"></button>
+            }
+          </div>
+        </gr-row>
+      }
+    </gr-row-list>
+  } @else {
+    <gr-empty-state icon="construction" title="No workers"
+      message="A team worker serves every project that grants the team's workers." />
+  }
+</gr-page-layout>
+
+<gr-dialog header="Register Worker" [(visible)]="showRegister" width="480px">
+  <gr-form-field label="Worker ID" for="team-worker-id" hint="The worker's UUID from services.gradient.worker.id.">
+    <input grInput id="team-worker-id" [(ngModel)]="form.worker_id" />
+  </gr-form-field>
+  <gr-form-field label="Display Name" for="team-worker-name">
+    <input grInput id="team-worker-name" [(ngModel)]="form.display_name" />
+  </gr-form-field>
+  <gr-form-field label="URL" for="team-worker-url" hint="Optional. Set it when the server dials the worker.">
+    <input grInput id="team-worker-url" [(ngModel)]="form.url" placeholder="wss://worker.example.com/proto" />
+  </gr-form-field>
+  <div grDialogFooter>
+    <button grButton label="Cancel" severity="secondary" (click)="showRegister.set(false)"></button>
+    <button grButton label="Register" [loading]="busy() === 'register'" (click)="register()"></button>
+  </div>
+</gr-dialog>
+
+<gr-dialog header="Worker Registered" [visible]="issuedToken() !== null" width="520px" [closable]="false">
+  @if (issuedToken(); as token) {
+    <gr-form-field label="Token">
+      <span slot="hint">Shown once. Put <code>{{ team()?.id }}:{{ token }}</code> or <code>*:{{ token }}</code> into the worker's peers file.</span>
+      <gr-copy-field [value]="token" />
+    </gr-form-field>
+  }
+  <div grDialogFooter>
+    <button grButton label="I've saved the token" icon="check" (click)="issuedToken.set(null)"></button>
+  </div>
+</gr-dialog>

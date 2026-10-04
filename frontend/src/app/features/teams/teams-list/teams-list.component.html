@@ -1,0 +1,42 @@
+<!--
+  SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+
+  SPDX-License-Identifier: AGPL-3.0-only
+-->
+
+<gr-page-layout title="Teams">
+  @if (canCreateTeam) {
+    <button slot="actions" grButton label="New Team" icon="add" (click)="showCreate.set(true)"></button>
+  }
+  @if (loading()) {
+    <gr-loading-spinner message="Loading teams..." />
+  } @else if (items().length > 0) {
+    <gr-row-list>
+      @for (team of items(); track team.name) {
+        <gr-row icon="groups" [link]="['/team', team.name]" linkLabel="Open team">
+          {{ team.display_name }}
+          <span slot="meta">{{ team.name }}</span>
+          <div slot="actions"><gr-badge severity="info">{{ team.role }}</gr-badge></div>
+        </gr-row>
+      }
+    </gr-row-list>
+  } @else {
+    <gr-empty-state icon="groups" title="No teams" />
+  }
+</gr-page-layout>
+
+<gr-dialog header="New Team" [(visible)]="showCreate" width="420px">
+  @if (error(); as message) {
+    <gr-message-banner type="error">{{ message }}</gr-message-banner>
+  }
+  <gr-form-field label="Name" for="team-name" hint="Lowercase letters, digits and dashes.">
+    <input grInput id="team-name" [(ngModel)]="form.name" />
+  </gr-form-field>
+  <gr-form-field label="Display Name" for="team-display-name">
+    <input grInput id="team-display-name" [(ngModel)]="form.displayName" />
+  </gr-form-field>
+  <div grDialogFooter>
+    <button grButton label="Cancel" severity="secondary" (click)="showCreate.set(false)"></button>
+    <button grButton label="Create" [loading]="creating()" (click)="create()"></button>
+  </div>
+</gr-dialog>

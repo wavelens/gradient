@@ -16,6 +16,7 @@ const BRAND: Brand = { label: 'Gradient', href: '/' };
 const SIGNED_IN_NAV: NavLink[] = [
   { label: 'Dashboard', href: '/', exact: true },
   { label: 'Job Board', href: '/board' },
+  { label: 'Teams', href: '/teams' },
 ];
 const PUBLIC_NAV: NavLink[] = [
   { label: 'Projects', href: '/projects' },
