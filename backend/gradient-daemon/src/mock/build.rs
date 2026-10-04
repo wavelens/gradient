@@ -249,6 +249,10 @@ fn success(built_outputs: BuiltOutputs, started: i64) -> BuildResult {
         stop_time: now_secs(),
         cpu_user: None,
         cpu_system: None,
+        memory_peak: None,
+        io_read_bytes: None,
+        io_write_bytes: None,
+        oom_kills: None,
     }
 }
 
@@ -264,6 +268,10 @@ fn failure(status: FailureStatus, msg: &str) -> BuildResult {
         stop_time: 0,
         cpu_user: None,
         cpu_system: None,
+        memory_peak: None,
+        io_read_bytes: None,
+        io_write_bytes: None,
+        oom_kills: None,
     }
 }
 
