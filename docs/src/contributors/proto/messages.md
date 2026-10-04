@@ -50,7 +50,7 @@ Every message on `/proto`, from `backend/gradient-wire/src/messages`. IDs (`job_
 | `ClusterSignal` | Control message to one member (`to`) or every other member (`to` unset) of a started attempt | `attempt`, `to`, `payload` |
 | `JobUpdate` | Progress of a job | `job_id`, `assignment_id`, `update` |
 | `JobCompleted` | Job done, with the phase timeline | `job_id`, `assignment_id`, `spans` |
-| `JobFailed` | Job failed | `job_id`, `assignment_id`, `error`, `kind`, `missing_paths`, `spans` |
+| `JobFailed` | Job failed, with the metrics of a failed build | `job_id`, `assignment_id`, `error`, `kind`, `missing_paths`, `spans`, `metrics` |
 | `BuildProgress` | Bytes and paths of a build's prefetch, download or upload | `job_id`, `assignment_id`, `build_id`, `phase`, `bytes_done`, `bytes_total`, `paths_done`, `paths_total` |
 | `EvalProgress` | Flake input downloads or live thunks of an eval job, at most once per second | `job_id`, `assignment_id`, `progress` |
 | `Draining` | Worker draining | - |

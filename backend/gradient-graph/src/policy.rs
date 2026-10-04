@@ -6,7 +6,7 @@
 
 use gradient_entity::build::BuildStatus;
 use gradient_entity::build_attempt::{AttemptFailureReason, AttemptOutcome};
-use gradient_wire::types::BuildFailureKind;
+use gradient_wire::types::{BuildFailureKind, BuildMetrics};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Substitution {
@@ -122,6 +122,23 @@ pub(crate) fn attempt_outcome(kind: BuildFailureKind) -> AttemptOutcome {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum BuildEnd {
+    Built,
+    Substituted,
+    Failed,
+}
+
+/// A failed build is only joining the history when it ran out of memory. Its time and CPU are
+/// partial, but its peak memory is what the scheduler must not repeat.
+pub(crate) fn history_sample(metrics: Option<BuildMetrics>, end: BuildEnd) -> Option<BuildMetrics> {
+    metrics.filter(|m| match end {
+        BuildEnd::Built => true,
+        BuildEnd::Substituted => false,
+        BuildEnd::Failed => m.oom_killed,
+    })
+}
+
 pub(crate) fn inputs_unavailable_circuit_open(prior_failures: i64, max_loops: u32) -> bool {
     prior_failures >= max_loops as i64
 }
@@ -164,14 +181,42 @@ mod tests {
         }
     }
     use super::{
-        FailureOutcome, Substitution, attempt_outcome, attempt_reason, attempt_reason_for,
-        decide_failure_outcome, inputs_unavailable_circuit_open, retry_backoff_elapsed,
-        retry_failed_eval, spends_substitute_budget, terminal_success_outcome,
-        terminal_success_status, truncate_failure_message,
+        BuildEnd, FailureOutcome, Substitution, attempt_outcome, attempt_reason,
+        attempt_reason_for, decide_failure_outcome, history_sample,
+        inputs_unavailable_circuit_open, retry_backoff_elapsed, retry_failed_eval,
+        spends_substitute_budget, terminal_success_outcome, terminal_success_status,
+        truncate_failure_message,
     };
     use gradient_entity::build::BuildStatus;
     use gradient_entity::build_attempt::{AttemptFailureReason, AttemptOutcome};
-    use gradient_wire::types::BuildFailureKind;
+    use gradient_wire::types::{BuildFailureKind, BuildMetrics};
+
+    #[test]
+    fn history_keeps_real_builds_and_out_of_memory_failures_only() {
+        let measured = BuildMetrics {
+            peak_ram_mb: Some(512),
+            ..Default::default()
+        };
+        let killed = BuildMetrics {
+            oom_killed: true,
+            ..measured.clone()
+        };
+
+        assert_eq!(
+            history_sample(Some(measured.clone()), BuildEnd::Built),
+            Some(measured.clone())
+        );
+        assert_eq!(
+            history_sample(Some(measured.clone()), BuildEnd::Substituted),
+            None
+        );
+        assert_eq!(history_sample(Some(measured), BuildEnd::Failed), None);
+        assert_eq!(
+            history_sample(Some(killed.clone()), BuildEnd::Failed),
+            Some(killed)
+        );
+        assert_eq!(history_sample(None, BuildEnd::Built), None);
+    }
 
     #[test]
     fn abort_is_not_a_deterministic_build_failure() {

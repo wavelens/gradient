@@ -232,6 +232,7 @@ mod tests {
                 missing_paths: vec![],
                 spans: vec![],
                 elapsed_ms: 0,
+                metrics: None,
             })
             .is_some()
         );

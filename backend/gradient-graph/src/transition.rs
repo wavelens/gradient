@@ -82,8 +82,18 @@ pub(crate) async fn apply(ctx: &DbContext, transition: Transition) -> Result<Tra
             log_banner,
             kind,
             missing_paths,
+            metrics,
         } => {
-            build_failed(ctx, shared_build, &error, &log_banner, kind, &missing_paths).await?;
+            build_failed(
+                ctx,
+                shared_build,
+                &error,
+                &log_banner,
+                kind,
+                &missing_paths,
+                metrics,
+            )
+            .await?;
             Ok(TransitionReport::default())
         }
         Transition::Assigned {
@@ -316,7 +326,12 @@ async fn build_output(
 
     let build_id = shared_build.id;
     let derivation_id = shared_build.derivation;
-    if let Some(metrics) = metrics {
+    let end = if substituted {
+        policy::BuildEnd::Substituted
+    } else {
+        policy::BuildEnd::Built
+    };
+    if let Some(metrics) = policy::history_sample(metrics, end) {
         record_metrics(ctx, &shared_build, derivation_id, &metrics).await;
     }
 
@@ -497,6 +512,7 @@ async fn build_failed(
     log_banner: &str,
     kind: BuildFailureKind,
     missing_paths: &[String],
+    metrics: Option<BuildMetrics>,
 ) -> Result<()> {
     let Some(shared_build) = EDerivationBuild::find_by_id(derivation_build)
         .one(&ctx.worker_db)
@@ -505,6 +521,10 @@ async fn build_failed(
         warn!(%derivation_build, "shared build not found on job_failed");
         return Ok(());
     };
+
+    if let Some(metrics) = policy::history_sample(metrics, policy::BuildEnd::Failed) {
+        record_metrics(ctx, &shared_build, shared_build.derivation, &metrics).await;
+    }
 
     if let Some(attempt_id) =
         gradient_db::scheduling::build_attempt::latest_attempt_id(&ctx.worker_db, shared_build.id)

@@ -329,7 +329,7 @@ pub async fn build_derivation(
     let cpu_usec = realize_result.as_ref().ok().and_then(|(_, _, c)| *c);
     let metrics = assemble_build_metrics(cgroup_raw, cpu_usec, build_time_ms, peak_network_mbps);
 
-    let (outputs, substituted, _) = realize_result?;
+    let (outputs, substituted, _) = realize_result.map_err(|e| e.with_metrics(metrics.clone()))?;
     updater
         .report_build_output(
             task.build_id.clone(),

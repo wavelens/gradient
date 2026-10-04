@@ -86,7 +86,9 @@ impl ScoreRule for DiskAffinityRule {
         let heavy_threshold = instance
             .disk_bytes
             .w24h_or(self.heavy_threshold_bytes as f64);
-        if h.samples == 0 || (h.avg_disk_bytes as f64) < heavy_threshold {
+        if h.avg_disk_bytes
+            .is_none_or(|b| (b as f64) < heavy_threshold)
+        {
             return 0.0;
         }
 
@@ -145,14 +147,12 @@ impl ScoreRule for CpuAffinityRule {
         let Some(fleet) = instance.cpu_core_score_mean.filter(|f| *f > 0.0) else {
             return 0.0;
         };
-        if h.samples == 0 || cores == 0 {
+        if cores == 0 {
             return 0.0;
         }
 
-        let work_ms = if h.avg_cpu_time_ms > 0 {
-            h.avg_cpu_time_ms
-        } else {
-            h.build_time_ms
+        let Some(work_ms) = h.avg_cpu_time_ms.filter(|ms| *ms > 0).or(h.build_time_ms) else {
+            return 0.0;
         };
         let Some(heaviness) = self.heaviness(work_ms, instance) else {
             return 0.0;
@@ -259,7 +259,7 @@ mod tests {
     fn disk_rule_prefers_fast_disk_for_heavy_build() {
         let rule = DiskAffinityRule::default();
         let heavy = HistoryPrediction {
-            avg_disk_bytes: 500 * 1_048_576,
+            avg_disk_bytes: Some(500 * 1_048_576),
             samples: 5,
             ..Default::default()
         };
@@ -282,7 +282,7 @@ mod tests {
     fn disk_rule_zero_for_light_build() {
         let rule = DiskAffinityRule::default();
         let light = HistoryPrediction {
-            avg_disk_bytes: 1_048_576,
+            avg_disk_bytes: Some(1_048_576),
             samples: 5,
             ..Default::default()
         };
@@ -303,8 +303,7 @@ mod tests {
         let j = job(
             false,
             HistoryPrediction {
-                avg_disk_bytes: 999 * 1_048_576,
-                samples: 0,
+                samples: 5,
                 ..Default::default()
             },
         );
@@ -324,7 +323,7 @@ mod tests {
         let j = job(
             false,
             HistoryPrediction {
-                avg_disk_bytes: 50 * 1_048_576,
+                avg_disk_bytes: Some(50 * 1_048_576),
                 samples: 5,
                 ..Default::default()
             },
@@ -346,7 +345,7 @@ mod tests {
 
     fn cpu_history(avg_cpu_time_ms: u64) -> HistoryPrediction {
         HistoryPrediction {
-            avg_cpu_time_ms,
+            avg_cpu_time_ms: Some(avg_cpu_time_ms),
             samples: 5,
             ..Default::default()
         }
@@ -402,8 +401,7 @@ mod tests {
         let unmeasured = job(
             false,
             HistoryPrediction {
-                avg_cpu_time_ms: 10 * 60_000,
-                samples: 0,
+                samples: 5,
                 ..Default::default()
             },
         );
@@ -437,7 +435,7 @@ mod tests {
         let j = job(
             false,
             HistoryPrediction {
-                build_time_ms: 10 * 60_000,
+                build_time_ms: Some(10 * 60_000),
                 samples: 5,
                 ..Default::default()
             },

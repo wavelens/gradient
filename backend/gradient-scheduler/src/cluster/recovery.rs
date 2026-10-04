@@ -143,7 +143,7 @@ impl Scheduler {
         for disposition in dispositions {
             let settled = match disposition {
                 Disposition::Complete(job) => self.settle_completed(job, false).await,
-                Disposition::Fail(job, failure) => self.settle_failed(job, &failure).await,
+                Disposition::Fail(job, failure) => self.settle_failed(job, &failure, None).await,
                 Disposition::Requeue(job) => {
                     requeue.push(job);
                     Ok(())
@@ -160,7 +160,7 @@ impl Scheduler {
     async fn settle_single(&self, report: MemberReport) -> Result<()> {
         match report {
             MemberReport::Completed { job } => self.settle_completed(job, false).await,
-            MemberReport::Failed { job, failure } => self.settle_failed(job, &failure).await,
+            MemberReport::Failed { job, failure } => self.settle_failed(job, &failure, None).await,
             MemberReport::Lost { job } => {
                 crate::build::requeue_orphaned_jobs(&self.state, &[job]).await;
                 Ok(())

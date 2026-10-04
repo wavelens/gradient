@@ -44,10 +44,10 @@ impl WorkerContextView {
 
 #[derive(Serialize)]
 pub struct HistoryView {
-    pub peak_ram_mb: u64,
-    pub avg_cpu_time_ms: u64,
-    pub build_time_ms: u64,
-    pub avg_disk_bytes: u64,
+    pub peak_ram_mb: Option<u64>,
+    pub avg_cpu_time_ms: Option<u64>,
+    pub build_time_ms: Option<u64>,
+    pub avg_disk_bytes: Option<u64>,
     pub oom_rate: f32,
     pub samples: u32,
 }

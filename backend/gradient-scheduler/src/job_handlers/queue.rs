@@ -62,7 +62,7 @@ impl Scheduler {
                     kind: gradient_wire::types::BuildFailureKind::Aborted,
                     missing_paths: Vec::new(),
                 };
-                self.settle_failed(job, &failure).await
+                self.settle_failed(job, &failure, None).await
             }
         }
     }

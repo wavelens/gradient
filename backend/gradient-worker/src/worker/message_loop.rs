@@ -426,6 +426,7 @@ impl MessageLoopState {
             Err(e) => {
                 let error_chain = format!("{e:#}");
                 let (kind, missing_paths) = crate::executor::failure::wire_failure(&e);
+                let metrics = crate::executor::failure::failure_metrics(&e);
                 error!(%job_id, error = %error_chain, ?kind, phases = spans.len(), "job failed");
                 self.writer
                     .send(ClientMessage::JobFailed {
@@ -436,6 +437,7 @@ impl MessageLoopState {
                         missing_paths,
                         spans,
                         elapsed_ms,
+                        metrics,
                     })
                     .await?;
             }
@@ -733,6 +735,7 @@ impl MessageLoopState {
                     missing_paths: Vec::new(),
                     spans: Vec::new(),
                     elapsed_ms: 0,
+                    metrics: None,
                 })
                 .await?;
         }
