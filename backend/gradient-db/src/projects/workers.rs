@@ -23,7 +23,10 @@ pub async fn project_has_eval_capable_worker_registration<C: ConnectionTrait>(
         return Ok(true);
     }
 
-    crate::projects::base_workers::project_has_eval_capable_base_worker(db, project).await
+    Ok(crate::teams::workers::team_workers_for_project(db, project)
+        .await?
+        .iter()
+        .any(|(_, worker)| worker.active && worker.enable_eval))
 }
 
 #[cfg(test)]
@@ -65,7 +68,7 @@ mod tests {
     async fn returns_false_when_no_registrations_exist() {
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             .append_query_results([Vec::<gradient_entity::worker_registration::Model>::new()])
-            .append_query_results([Vec::<gradient_entity::project_base_worker::Model>::new()])
+            .append_query_results([Vec::<gradient_entity::team_project::Model>::new()])
             .into_connection();
 
         let out = project_has_eval_capable_worker_registration(&db, ProjectId::nil())

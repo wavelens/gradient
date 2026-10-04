@@ -45,14 +45,14 @@ pub fn redact_value(
         | ("worker_sample", "worker_id")
         | ("worker_registration", "worker_id") => r.identity(&v, "worker"),
         ("worker_registration", "display_name") => r.identity(&v, "worker"),
-        ("base_worker", "worker_id") | ("base_worker", "display_name") => r.identity(&v, "worker"),
-        ("worker_registration", "url") | ("cache_upstream", "url") | ("base_worker", "url") => {
+        ("team_worker", "worker_id") | ("team_worker", "display_name") => r.identity(&v, "worker"),
+        ("worker_registration", "url") | ("cache_upstream", "url") | ("team_worker", "url") => {
             r.identity(&v, "url")
         }
         ("upstream_metric", "upstream_url") => r.identity(&v, "url"),
-        ("worker_registration", "created_by")
-        | ("base_worker", "created_by")
-        | ("project_base_worker", "created_by") => r.identity(&v, "user"),
+        ("worker_registration", "created_by") | ("team_worker", "created_by") => {
+            r.identity(&v, "user")
+        }
         ("cache_upstream", "display_name")
         | ("cache_upstream", "remote_cache_name")
         | ("cached_path_signature", "cache_name") => r.identity(&v, "cache"),
@@ -563,16 +563,18 @@ pub fn instance_tables() -> &'static [TableSpec] {
             ]
         ),
         spec!(
-            "base_worker",
-            "CREATE TABLE base_worker (id TEXT, worker_id TEXT, display_name TEXT, url TEXT, enabled INTEGER, enable_fetch INTEGER, enable_eval INTEGER, enable_build INTEGER, created_by TEXT, created_at TEXT)",
-            "SELECT id::text, worker_id::text, display_name::text, url::text, enabled::int::text, enable_fetch::int::text, enable_eval::int::text, enable_build::int::text, created_by::text, created_at::text FROM base_worker WHERE $1 IS NOT NULL",
+            "team_worker",
+            "CREATE TABLE team_worker (id TEXT, team TEXT, worker_id TEXT, display_name TEXT, url TEXT, active INTEGER, gradient_ci INTEGER, enable_fetch INTEGER, enable_eval INTEGER, enable_build INTEGER, created_by TEXT, created_at TEXT)",
+            "SELECT id::text, team::text, worker_id::text, display_name::text, url::text, active::int::text, gradient_ci::int::text, enable_fetch::int::text, enable_eval::int::text, enable_build::int::text, created_by::text, created_at::text FROM team_worker WHERE $1 IS NOT NULL",
             "the whole instance",
             [
                 "id",
+                "team",
                 "worker_id",
                 "display_name",
                 "url",
-                "enabled",
+                "active",
+                "gradient_ci",
                 "enable_fetch",
                 "enable_eval",
                 "enable_build",
@@ -581,11 +583,18 @@ pub fn instance_tables() -> &'static [TableSpec] {
             ]
         ),
         spec!(
-            "project_base_worker",
-            "CREATE TABLE project_base_worker (id TEXT, project TEXT, base_worker TEXT, created_by TEXT, created_at TEXT)",
-            "SELECT id::text, project::text, base_worker::text, created_by::text, created_at::text FROM project_base_worker WHERE project = $1",
-            "this project's base worker opt-ins",
-            ["id", "project", "base_worker", "created_by", "created_at"]
+            "team_project",
+            "CREATE TABLE team_project (id TEXT, team TEXT, project TEXT, includes_users INTEGER, includes_workers INTEGER, created_at TEXT)",
+            "SELECT id::text, team::text, project::text, includes_users::int::text, includes_workers::int::text, created_at::text FROM team_project WHERE project = $1",
+            "this project's team grants",
+            [
+                "id",
+                "team",
+                "project",
+                "includes_users",
+                "includes_workers",
+                "created_at"
+            ]
         ),
     ];
 

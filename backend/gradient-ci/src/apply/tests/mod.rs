@@ -556,7 +556,7 @@ async fn no_eval_capable_worker_parks_evaluation_in_waiting_workers() {
     let db = with_writable_cache(db);
     let db = with_storage_not_full(db)
         .append_query_results([Vec::<gradient_entity::worker_registration::Model>::new()])
-        .append_query_results([Vec::<gradient_entity::project_base_worker::Model>::new()])
+        .append_query_results([Vec::<gradient_entity::team_project::Model>::new()])
         .append_query_results([vec![parked_eval.clone()]])
         .append_exec_results([MockExecResult {
             last_insert_id: 0,
