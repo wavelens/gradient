@@ -193,8 +193,6 @@ impl Worker<Connected> {
             evaluator,
             gcroots,
             config.ssh_bin.clone(),
-            config.build.metrics,
-            config.build.cgroup_root.clone(),
             crate::executor::log_limit::LogRateLimits {
                 burst_bytes_per_min: config.log.burst_bytes_per_min,
                 sustained_bytes_per_hour: config.log.sustained_bytes_per_hour,
@@ -202,14 +200,6 @@ impl Worker<Connected> {
             config.log.fetch_from_store,
             config.build_cores(),
         );
-        if config.build.metrics {
-            tracing::info!(
-                cgroup_root = %config.build.cgroup_root,
-                "build metrics enabled: CPU from daemon build result, peak RAM/disk sampled from the build cgroup"
-            );
-        } else {
-            tracing::debug!("build metrics disabled; reporting wall-clock build time only");
-        }
         Ok((executor, JobScorer::new()))
     }
 }

@@ -85,7 +85,7 @@ flowchart LR
 |---|---|---|
 | `upload_speed_mbps` | Each NAR upload batch (`upload_all`), passthrough, presigned PUT and multipart alike | NAR bits / batch seconds incl. packing and compression / 10^6 |
 | `download_speed_mbps` | Each NAR fetch round (`fetch_round`), passthrough and presigned GET alike | NAR bits / round seconds / 10^6 |
-| `disk_speed_mbps` | `build_metrics.rs` after each build | cgroup `disk_read_bytes + disk_write_bytes` in MiB / build seconds |
+| `disk_speed_mbps` | `build_metrics.rs` after each build | Daemon `io_read_bytes + io_write_bytes` in MiB / build seconds |
 | `cpu_core_score` | Startup micro-benchmark, or `GRADIENT_WORKER_SYSTEM_CPU_CORE_SCORE` | Static, sent with `WorkerCapabilities` |
 
 - Upload, download and disk are EWMAs (`alpha = 0.3`) in `gradient-worker-client/src/throughput.rs`, `None` until the first sample.

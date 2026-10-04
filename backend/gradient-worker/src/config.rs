@@ -353,23 +353,6 @@ pub struct BuildArgs {
     /// The default is all available cores.
     #[arg(long = "build-max-cores", env = "GRADIENT_WORKER_BUILD_MAX_CORES")]
     pub max_cores: Option<u32>,
-
-    /// Capture per-build resource metrics (peak RAM, CPU time, disk I/O) from the build's cgroup.
-    /// The daemon must enable Nix's experimental `use-cgroups` feature.
-    #[arg(
-        long = "build-metrics",
-        env = "GRADIENT_WORKER_BUILD_METRICS",
-        default_value = "false"
-    )]
-    pub metrics: bool,
-
-    /// The nix daemon's cgroup holding each build's `nix-build@<drv-hash>-<uid>` cgroup.
-    #[arg(
-        long = "build-cgroup-root",
-        env = "GRADIENT_WORKER_BUILD_CGROUP_ROOT",
-        default_value = "/sys/fs/cgroup/system.slice/nix-daemon.service"
-    )]
-    pub cgroup_root: String,
 }
 
 impl Default for BuildArgs {
@@ -377,8 +360,6 @@ impl Default for BuildArgs {
         Self {
             max_concurrent: 1,
             max_cores: None,
-            metrics: false,
-            cgroup_root: "/sys/fs/cgroup/system.slice/nix-daemon.service".to_owned(),
         }
     }
 }

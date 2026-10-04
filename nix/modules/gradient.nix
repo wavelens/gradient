@@ -83,6 +83,7 @@ in {
     (lib.mkRemovedOptionModule [ "services" "gradient" "nar" "maxBufferBytes" ] "replaced by services.gradient.upload.concurrency and services.gradient.upload.bytesBudget")
     (lib.mkRemovedOptionModule [ "services" "gradient" "scheduler" "recordCandidates" ] "runner-up candidates were never recorded")
     (lib.mkRemovedOptionModule [ "services" "gradient" "oidc" "iconUrl" ] "the login page never showed the icon")
+    (lib.mkRemovedOptionModule [ "services" "gradient" "worker" "build" "cgroupRoot" ] "the Nix daemon reports build resource usage in the build result")
     (lib.mkRenamedOptionModule [ "services" "gradient" "scheduler" "dispatchRetentionDays" ] [ "services" "gradient" "retentionDays" ])
   ];
 

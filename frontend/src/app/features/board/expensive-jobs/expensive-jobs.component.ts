@@ -61,7 +61,7 @@ type Tab = 'time' | 'ram' | 'cpu' | 'disk';
             @for (r of resources(); track r.derivation; let i = $index) {
               <tr><td>{{ i + 1 }}</td><td class="mono">{{ r.name }}</td><td>{{ quantity(r.value, r.unit) }}</td><td class="mono">{{ r.worker_name ?? (r.worker || '-') }}</td></tr>
             } @empty {
-              <tr><td colspan="4" class="muted">No per-build metrics recorded in this window (needs cgroup metrics enabled on workers).</td></tr>
+              <tr><td colspan="4" class="muted">No per-build metrics recorded in this window (needs build metrics enabled on workers).</td></tr>
             }
           </tbody>
         </gr-table>

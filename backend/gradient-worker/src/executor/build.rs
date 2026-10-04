@@ -25,7 +25,7 @@ use tracing::{debug, info, warn};
 use crate::nix::store::LocalNixStore;
 use crate::proto::job::JobUpdater;
 
-use super::build_metrics::{CgroupSampler, assemble_build_metrics, daemon_cpu_usec};
+use super::build_metrics::{ResourceUsage, build_metrics};
 use super::derivation::get_basic_derivation;
 pub use super::failure::BuildError;
 use super::failure::classify_build_error;
@@ -64,7 +64,7 @@ impl ParsedDerivation {
         reason = "arg-heavy; refactor tracked in #503"
     )]
     pub(super) async fn realize(
-        self,
+        &self,
         store: &LocalNixStore,
         task_index: u32,
         updater: &mut JobUpdater,
@@ -72,9 +72,8 @@ impl ParsedDerivation {
         max_silent_secs: Option<u64>,
         abort: &mut watch::Receiver<bool>,
         log_limits: crate::executor::log_limit::LogRateLimits,
-        log_fetch_from_store: bool,
         build_cores: u32,
-    ) -> Result<(Vec<BuildOutput>, bool, Option<u64>), BuildError> {
+    ) -> Result<BuildResult, BuildError> {
         let mut guard = store.acquire().await.map_err(BuildError::transient)?;
 
         debug!(
@@ -148,21 +147,28 @@ impl ParsedDerivation {
                 ))
             })?;
 
-        let result = match drained {
-            Drained::Completed(r) => r,
+        match drained {
+            Drained::Completed(result) => Ok(result),
             Drained::Aborted => {
                 guard.mark_broken();
-                return Err(BuildError::aborted(drv_path));
+                Err(BuildError::aborted(drv_path))
             }
             Drained::Timeout(e) => {
                 guard.mark_broken();
-                return Err(BuildError::timeout(e));
+                Err(BuildError::timeout(e))
             }
-        };
+        }
+    }
 
-        let cpu_usec = daemon_cpu_usec(result.cpu_user, result.cpu_system);
-
-        match result.inner {
+    pub(super) async fn outputs(
+        &self,
+        result: BuildResultInner,
+        updater: &mut JobUpdater,
+        task_index: u32,
+        drv_path: &str,
+        log_fetch_from_store: bool,
+    ) -> Result<(Vec<BuildOutput>, bool), BuildError> {
+        match result {
             BuildResultInner::Success(s) => {
                 info!(drv = %drv_path, "build succeeded");
                 let pairs = output_pairs_from_built_or_drv(&s.built_outputs, &self.drv);
@@ -202,7 +208,7 @@ impl ParsedDerivation {
                         products,
                     });
                 }
-                Ok((outputs, substituted, cpu_usec))
+                Ok((outputs, substituted))
             }
 
             BuildResultInner::Failure(f) => {
@@ -278,8 +284,6 @@ pub async fn build_derivation(
     task_index: u32,
     updater: &mut JobUpdater,
     abort: &mut watch::Receiver<bool>,
-    build_metrics: bool,
-    cgroup_root: &str,
     log_limits: crate::executor::log_limit::LogRateLimits,
     log_fetch_from_store: bool,
     build_cores: u32,
@@ -296,33 +300,38 @@ pub async fn build_derivation(
         task.max_silent_secs,
         abort,
         log_limits,
-        log_fetch_from_store,
         build_cores,
     );
 
-    let cgroup_sampler = build_metrics.then(|| CgroupSampler::start(cgroup_root, &task.drv_path));
     let started = std::time::Instant::now();
-    let realize_result: Result<(Vec<BuildOutput>, bool, Option<u64>), BuildError> =
-        match task.timeout_secs.map(std::time::Duration::from_secs) {
-            Some(d) => match tokio::time::timeout(d, realize).await {
-                Ok(r) => r,
-                Err(_) => Err(BuildError::timeout(anyhow::anyhow!(
-                    "build exceeded wall-clock timeout of {}s",
-                    d.as_secs()
-                ))),
-            },
-            None => realize.await,
-        };
-
-    let build_time_ms = started.elapsed().as_millis() as u64;
-    let cgroup_raw = match cgroup_sampler {
-        Some(s) => s.finish().await,
-        None => None,
+    let realized = match task.timeout_secs.map(std::time::Duration::from_secs) {
+        Some(d) => tokio::time::timeout(d, realize).await.unwrap_or_else(|_| {
+            Err(BuildError::timeout(anyhow::anyhow!(
+                "build exceeded wall-clock timeout of {}s",
+                d.as_secs()
+            )))
+        }),
+        None => realize.await,
     };
-    let cpu_usec = realize_result.as_ref().ok().and_then(|(_, _, c)| *c);
-    let metrics = assemble_build_metrics(cgroup_raw, cpu_usec, build_time_ms);
 
-    let (outputs, substituted, _) = realize_result.map_err(|e| e.with_metrics(metrics.clone()))?;
+    let usage = realized.as_ref().map(ResourceUsage::of).unwrap_or_default();
+    let metrics = build_metrics(usage, started.elapsed().as_millis() as u64);
+    let built = match realized {
+        Ok(result) => {
+            parsed
+                .outputs(
+                    result.inner,
+                    updater,
+                    task_index,
+                    &task.drv_path,
+                    log_fetch_from_store,
+                )
+                .await
+        }
+        Err(e) => Err(e),
+    };
+
+    let (outputs, substituted) = built.map_err(|e| e.with_metrics(metrics.clone()))?;
     updater
         .report_build_output(
             task.build_id.clone(),
