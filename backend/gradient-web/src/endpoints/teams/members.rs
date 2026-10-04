@@ -265,6 +265,9 @@ pub async fn patch_team_members(
 
     let mut active: ATeamUser = membership.into();
     active.role = Set(body.role);
+    if body.role == TeamRole::Admin {
+        active.via_group = Set(false);
+    }
     active.update(&state.web_db).await?;
 
     audit_record(

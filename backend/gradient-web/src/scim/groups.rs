@@ -201,6 +201,7 @@ async fn remove_member(state: &Arc<ServerState>, team: TeamId, uid: &str) -> Sci
     ETeamUser::delete_many()
         .filter(CTeamUser::Team.eq(team))
         .filter(CTeamUser::User.eq(user))
+        .filter(CTeamUser::ViaGroup.eq(true))
         .exec(state.web_db.inner())
         .await?;
     Ok(())

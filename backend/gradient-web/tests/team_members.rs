@@ -185,6 +185,42 @@ async fn the_last_admin_cannot_be_demoted() {
 }
 
 #[tokio::test]
+async fn a_group_member_made_admin_stays_past_the_group_sync() {
+    let session_id = SessionId::now_v7();
+    let group_member = team_user::Model {
+        via_group: true,
+        ..member_row(other_user_id(), TeamRole::Member)
+    };
+    let conn = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
+        .append_query_results([vec![team_row()]])
+        .append_query_results([vec![member_row(user_id(), TeamRole::Admin)]])
+        .append_query_results([vec![other_user()]])
+        .append_query_results([vec![group_member.clone()]])
+        .append_query_results([vec![team_user::Model {
+            role: TeamRole::Admin,
+            via_group: false,
+            ..group_member
+        }]])
+        .into_connection();
+    let server = make_test_server(conn.clone());
+
+    let res = server
+        .patch("/api/v1/teams/platform/members")
+        .add_header("authorization", bearer(session_id))
+        .json(&json!({ "user": "otheruser", "role": "admin" }))
+        .await;
+
+    res.assert_status_ok();
+    drop(server);
+    let clears_group_flag = conn
+        .into_transaction_log()
+        .iter()
+        .flat_map(|t| t.statements().to_vec())
+        .any(|s| s.sql.starts_with("UPDATE \"team_user\"") && s.sql.contains("\"via_group\""));
+    assert!(clears_group_flag, "a new Admin must no longer count as added by a group");
+}
+
+#[tokio::test]
 async fn accepting_a_team_invite_adds_the_membership() {
     let session_id = SessionId::now_v7();
     let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
