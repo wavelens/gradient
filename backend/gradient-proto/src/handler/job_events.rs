@@ -14,7 +14,7 @@ use gradient_entity::dispatched_job::DispatchedJobOutcome;
 use gradient_scheduler::{ReportedTimeline, Scheduler};
 use gradient_types::ids::DispatchedJobId;
 use gradient_util::shutdown::Shutdown;
-use gradient_wire::types::BuildFailureKind;
+use gradient_wire::types::{BuildFailureKind, BuildMetrics};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use tracing::{Instrument as _, debug, debug_span, error, info, warn};
@@ -41,6 +41,7 @@ pub(super) enum JobEvent {
         error: String,
         kind: BuildFailureKind,
         missing_paths: Vec<String>,
+        metrics: Option<BuildMetrics>,
     },
 }
 
@@ -151,7 +152,11 @@ impl ApplyJobEvent for SchedulerJobEvents {
                 error,
                 kind,
                 missing_paths,
-            } => self.failed(job_id, error, kind, missing_paths).await,
+                metrics,
+            } => {
+                self.failed(job_id, error, kind, missing_paths, metrics)
+                    .await
+            }
         }
     }
 }
@@ -257,11 +262,12 @@ impl SchedulerJobEvents {
         error: String,
         kind: BuildFailureKind,
         missing_paths: Vec<String>,
+        metrics: Option<BuildMetrics>,
     ) {
         let peer_id = self.peer_id.as_str();
         if let Err(e) = self
             .scheduler
-            .handle_job_failed(peer_id, &job_id, &error, kind, &missing_paths)
+            .handle_job_failed(peer_id, &job_id, &error, kind, &missing_paths, metrics)
             .await
         {
             error!(%peer_id, %job_id, error = %e, "handle_job_failed failed");

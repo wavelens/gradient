@@ -374,7 +374,7 @@ mod tests {
             None,
             None,
             HistoryPrediction {
-                avg_cpu_time_ms: 30 * 60_000,
+                avg_cpu_time_ms: Some(30 * 60_000),
                 samples: 5,
                 ..Default::default()
             },
@@ -430,8 +430,8 @@ mod tests {
             None,
             None,
             HistoryPrediction {
-                avg_cpu_time_ms: 30 * 60_000,
-                predicted_peak_ram_mb: 64_000,
+                avg_cpu_time_ms: Some(30 * 60_000),
+                predicted_peak_ram_mb: Some(64_000),
                 samples: 5,
                 ..Default::default()
             },

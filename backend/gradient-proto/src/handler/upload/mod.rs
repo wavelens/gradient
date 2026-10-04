@@ -552,6 +552,7 @@ mod tests {
             missing_paths: Vec::new(),
             spans: Vec::new(),
             elapsed_ms: 0,
+            metrics: None,
         };
         ctx.handle(failed, uploads).await;
 

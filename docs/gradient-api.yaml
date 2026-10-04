@@ -14941,12 +14941,12 @@ components:
         is_fixed_output: { type: boolean, description: Build-only. }
         history:
           type: object
-          description: Build-only history prediction from prior builds of this derivation.
+          description: Build-only history prediction from prior builds of this derivation. A value is null when no prior build measured it.
           properties:
-            peak_ram_mb: { type: integer }
-            avg_cpu_time_ms: { type: integer }
-            build_time_ms: { type: integer }
-            avg_disk_bytes: { type: integer }
+            peak_ram_mb: { type: integer, nullable: true }
+            avg_cpu_time_ms: { type: integer, nullable: true }
+            build_time_ms: { type: integer, nullable: true }
+            avg_disk_bytes: { type: integer, nullable: true }
             oom_rate: { type: number }
             samples: { type: integer }
         derivations:

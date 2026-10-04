@@ -8,9 +8,9 @@ use bytes::Bytes;
 
 use crate::codec::Proto;
 use crate::types::{
-    BuildFailureKind, BuildProgressPhase, CandidateScore, ClusterAddress, EvalMessageLevel,
-    EvalProgress, GradientCapabilities, JobKind, JobPhaseSpan, JobUpdateKind, QueryMode,
-    UploadMetadata, UploadObject,
+    BuildFailureKind, BuildMetrics, BuildProgressPhase, CandidateScore, ClusterAddress,
+    EvalMessageLevel, EvalProgress, GradientCapabilities, JobKind, JobPhaseSpan, JobUpdateKind,
+    QueryMode, UploadMetadata, UploadObject,
 };
 
 #[derive(Proto, Debug, Clone, PartialEq)]
@@ -84,6 +84,8 @@ pub enum ClientMessage {
         missing_paths: Vec<String>,
         spans: Vec<JobPhaseSpan>,
         elapsed_ms: u64,
+        #[proto(28, default)]
+        metrics: Option<BuildMetrics>,
     },
 
     Draining,

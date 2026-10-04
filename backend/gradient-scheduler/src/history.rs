@@ -38,24 +38,20 @@ fn summarize(rows: &[MDerivationMetric]) -> gradient_pool::score::HistoryPredict
     let samples = rows.len() as u32;
 
     let mut peaks: Vec<i64> = rows.iter().filter_map(|r| r.peak_ram_mb).collect();
-    let predicted_peak_ram_mb = percentile_or_max(&mut peaks, 0.95).max(0) as u64;
+    let predicted_peak_ram_mb = percentile_or_max(&mut peaks, 0.95);
 
     let cpu: Vec<i64> = rows.iter().filter_map(|r| r.cpu_time_ms).collect();
-    let avg_cpu_time_ms = mean_nonnull(&cpu);
+    let avg_cpu_time_ms = mean(&cpu);
 
     let durations: Vec<i64> = rows.iter().filter_map(|r| r.build_time_ms).collect();
-    let build_time_ms = mean_nonnull(&durations);
+    let build_time_ms = mean(&durations);
 
     let disk: Vec<i64> = rows
         .iter()
         .map(|r| r.disk_read_bytes.unwrap_or(0) + r.disk_write_bytes.unwrap_or(0))
         .filter(|&b| b > 0)
         .collect();
-    let avg_disk_bytes = if disk.is_empty() {
-        0
-    } else {
-        (disk.iter().sum::<i64>() / disk.len() as i64).max(0) as u64
-    };
+    let avg_disk_bytes = mean(&disk);
 
     let oom = rows.iter().filter(|r| r.oom_killed).count();
     let oom_rate = oom as f32 / samples as f32;
@@ -70,24 +66,22 @@ fn summarize(rows: &[MDerivationMetric]) -> gradient_pool::score::HistoryPredict
     }
 }
 
-fn mean_nonnull(vals: &[i64]) -> u64 {
+fn mean(vals: &[i64]) -> Option<u64> {
     if vals.is_empty() {
-        return 0;
+        return None;
     }
 
-    (vals.iter().sum::<i64>() / vals.len() as i64).max(0) as u64
+    Some((vals.iter().sum::<i64>() / vals.len() as i64).max(0) as u64)
 }
 
-fn percentile_or_max(values: &mut [i64], p: f64) -> i64 {
-    if values.is_empty() {
-        return 0;
-    }
+fn percentile_or_max(values: &mut [i64], p: f64) -> Option<u64> {
     values.sort_unstable();
-    if values.len() < 20 {
-        return values[values.len() - 1];
-    }
-    let idx = ((values.len() as f64 - 1.0) * p).round() as usize;
-    values[idx]
+    let idx = if values.len() < 20 {
+        values.len().checked_sub(1)?
+    } else {
+        ((values.len() as f64 - 1.0) * p).round() as usize
+    };
+    Some(values[idx].max(0) as u64)
 }
 
 #[cfg(test)]
@@ -109,7 +103,21 @@ mod tests {
     fn empty_rows_yield_default() {
         let p = summarize(&[]);
         assert_eq!(p.samples, 0);
-        assert_eq!(p.predicted_peak_ram_mb, 0);
+        assert_eq!(p.predicted_peak_ram_mb, None);
+    }
+
+    #[test]
+    fn a_value_no_build_measured_stays_unknown_instead_of_zero() {
+        let unmeasured = MDerivationMetric {
+            build_time_ms: Some(300),
+            ..Default::default()
+        };
+        let p = summarize(&[unmeasured.clone(), unmeasured]);
+        assert_eq!(p.samples, 2);
+        assert_eq!(p.build_time_ms, Some(300));
+        assert_eq!(p.predicted_peak_ram_mb, None);
+        assert_eq!(p.avg_cpu_time_ms, None);
+        assert_eq!(p.avg_disk_bytes, None);
     }
 
     #[test]
@@ -121,8 +129,8 @@ mod tests {
         ];
         let p = summarize(&rows);
         assert_eq!(p.samples, 3);
-        assert_eq!(p.predicted_peak_ram_mb, 300);
-        assert_eq!(p.avg_cpu_time_ms, 2000);
+        assert_eq!(p.predicted_peak_ram_mb, Some(300));
+        assert_eq!(p.avg_cpu_time_ms, Some(2000));
         assert!((p.oom_rate - (1.0 / 3.0)).abs() < 1e-6);
     }
 
@@ -133,7 +141,7 @@ mod tests {
             metric(Some(200), Some(2000), false),
         ];
         let p = summarize(&rows);
-        assert_eq!(p.avg_disk_bytes, 50_000_000);
+        assert_eq!(p.avg_disk_bytes, Some(50_000_000));
     }
 
     #[tokio::test]

@@ -201,6 +201,7 @@ impl Scheduler {
         error: &str,
         kind: BuildFailureKind,
         missing_paths: &[String],
+        metrics: Option<BuildMetrics>,
     ) -> Result<()> {
         let worker = worker_id.to_owned();
         let released = self
@@ -225,10 +226,15 @@ impl Scheduler {
                 .await;
         }
 
-        self.settle_failed(job, &failure).await
+        self.settle_failed(job, &failure, metrics).await
     }
 
-    pub(crate) async fn settle_failed(&self, job: PendingJob, failure: &Failure) -> Result<()> {
+    pub(crate) async fn settle_failed(
+        &self,
+        job: PendingJob,
+        failure: &Failure,
+        metrics: Option<BuildMetrics>,
+    ) -> Result<()> {
         match job {
             PendingJob::Eval(j) => {
                 let r = self
@@ -254,6 +260,7 @@ impl Scheduler {
                     log_banner: gradient_sources::strip_nix_log_tail(&failure.error),
                     kind: failure.kind,
                     missing_paths: failure.missing_paths.clone(),
+                    metrics,
                 })
                 .await
                 .map(|_| ()),

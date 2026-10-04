@@ -47,10 +47,10 @@ pub struct InstanceContext {
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct HistoryPrediction {
-    pub predicted_peak_ram_mb: u64,
-    pub avg_cpu_time_ms: u64,
-    pub build_time_ms: u64,
-    pub avg_disk_bytes: u64,
+    pub predicted_peak_ram_mb: Option<u64>,
+    pub avg_cpu_time_ms: Option<u64>,
+    pub build_time_ms: Option<u64>,
+    pub avg_disk_bytes: Option<u64>,
     pub oom_rate: f32,
     pub samples: u32,
 }
@@ -101,19 +101,14 @@ impl BuildContext {
         } else {
             None
         };
-        out.history.predicted_peak_ram_mb = items
-            .iter()
-            .map(|i| i.history.predicted_peak_ram_mb)
-            .max()
-            .unwrap_or(0);
+        let known = |value: fn(&HistoryPrediction) -> Option<u64>| {
+            items.iter().filter_map(move |i| value(&i.history))
+        };
+        out.history.predicted_peak_ram_mb = known(|h| h.predicted_peak_ram_mb).max();
         out.history.oom_rate = items.iter().map(|i| i.history.oom_rate).fold(0.0, f32::max);
-        out.history.avg_cpu_time_ms = items.iter().map(|i| i.history.avg_cpu_time_ms).sum();
-        out.history.build_time_ms = items
-            .iter()
-            .map(|i| i.history.build_time_ms)
-            .max()
-            .unwrap_or(0);
-        out.history.avg_disk_bytes = items.iter().map(|i| i.history.avg_disk_bytes).sum();
+        out.history.avg_cpu_time_ms = known(|h| h.avg_cpu_time_ms).reduce(u64::saturating_add);
+        out.history.build_time_ms = known(|h| h.build_time_ms).max();
+        out.history.avg_disk_bytes = known(|h| h.avg_disk_bytes).reduce(u64::saturating_add);
         out.history.samples = items.iter().map(|i| i.history.samples).min().unwrap_or(0);
         out.derivations = items.iter().flat_map(|i| i.derivations.clone()).collect();
         out
@@ -272,10 +267,10 @@ mod tests {
             pname: Some("curl".into()),
             closure_size: Some(100),
             history: HistoryPrediction {
-                predicted_peak_ram_mb: 500,
-                avg_cpu_time_ms: 1000,
-                build_time_ms: 0,
-                avg_disk_bytes: 10,
+                predicted_peak_ram_mb: Some(500),
+                avg_cpu_time_ms: Some(1000),
+                build_time_ms: None,
+                avg_disk_bytes: Some(10),
                 oom_rate: 0.1,
                 samples: 5,
             },
@@ -284,14 +279,17 @@ mod tests {
         assert_eq!(BuildContext::aggregate(std::slice::from_ref(&a)), a);
 
         let mut b = a.clone();
-        b.history.predicted_peak_ram_mb = 900;
-        b.history.avg_cpu_time_ms = 4000;
+        b.history.predicted_peak_ram_mb = Some(900);
+        b.history.avg_cpu_time_ms = Some(4000);
+        b.history.avg_disk_bytes = None;
         b.history.samples = 2;
         b.pname = Some("git".into());
         b.prefer_local_build = true;
         let agg = BuildContext::aggregate(&[a.clone(), b]);
-        assert_eq!(agg.history.predicted_peak_ram_mb, 900);
-        assert_eq!(agg.history.avg_cpu_time_ms, 5000);
+        assert_eq!(agg.history.predicted_peak_ram_mb, Some(900));
+        assert_eq!(agg.history.avg_cpu_time_ms, Some(5000));
+        assert_eq!(agg.history.avg_disk_bytes, Some(10));
+        assert_eq!(agg.history.build_time_ms, None);
         assert_eq!(agg.history.samples, 2);
         assert_eq!(agg.dependency_count, 4);
         assert!(agg.prefer_local_build);

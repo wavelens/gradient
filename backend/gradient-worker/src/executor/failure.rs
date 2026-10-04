@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use gradient_wire::messages::BuildFailureKind;
+use gradient_wire::messages::{BuildFailureKind, BuildMetrics};
 use gradient_worker_client::connection::{Unresponsive, WriterUnavailable};
 
 use crate::executor::eval::CorruptEvalCache;
@@ -15,6 +15,7 @@ pub struct BuildError {
     pub kind: BuildFailureKind,
     pub source: anyhow::Error,
     pub missing_paths: Vec<String>,
+    pub metrics: Option<Box<BuildMetrics>>,
 }
 
 impl std::fmt::Display for BuildError {
@@ -30,6 +31,13 @@ impl BuildError {
             kind,
             source,
             missing_paths: Vec::new(),
+            metrics: None,
+        }
+    }
+    pub(super) fn with_metrics(self, metrics: BuildMetrics) -> Self {
+        Self {
+            metrics: Some(Box::new(metrics)),
+            ..self
         }
     }
     pub(crate) fn transient(e: impl Into<anyhow::Error>) -> Self {
@@ -52,6 +60,7 @@ impl BuildError {
             kind: BuildFailureKind::InputsUnavailable,
             source: e.into(),
             missing_paths,
+            metrics: None,
         }
     }
     /// An abort must never be reported as `Permanent`.
@@ -179,6 +188,11 @@ pub(crate) fn wire_failure(e: &anyhow::Error) -> (BuildFailureKind, Vec<String>)
     }
 }
 
+pub(crate) fn failure_metrics(e: &anyhow::Error) -> Option<BuildMetrics> {
+    e.downcast_ref::<BuildError>()
+        .and_then(|be| be.metrics.as_deref().cloned())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -250,6 +264,20 @@ mod tests {
         let (kind, missing) = wire_failure(&e);
         assert_eq!(kind, BuildFailureKind::InputsUnavailable);
         assert_eq!(missing, vec!["/nix/store/x-y".to_owned()]);
+    }
+
+    #[test]
+    fn a_failed_build_reports_the_metrics_of_its_attempt() {
+        let metrics = BuildMetrics {
+            peak_ram_mb: Some(7_000),
+            oom_killed: true,
+            ..Default::default()
+        };
+        let e: anyhow::Error = BuildError::transient(anyhow::anyhow!("Killed"))
+            .with_metrics(metrics.clone())
+            .into();
+        assert_eq!(failure_metrics(&e), Some(metrics));
+        assert_eq!(failure_metrics(&anyhow::anyhow!("eval failed")), None);
     }
 
     #[test]

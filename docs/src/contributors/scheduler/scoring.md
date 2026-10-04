@@ -53,7 +53,10 @@ flowchart LR
 | Build history | `history::predict`: latest 20 `derivation_metric` rows with the same `history_name` (`pname`, else `name`) and architecture, within [`retentionDays`](../../reference/configuration.md#general). One query per distinct pair |
 | Evaluation history | `compute_eval_history`: per-task p95 of `evaluation_metric.peak_rss_mb` over 24 h |
 
-`HistoryPrediction` must carry the p95 peak RAM, mean CPU time, mean build time, mean disk bytes, OOM rate and a `samples` count. Rules treat `samples == 0` as no history and add nothing.
+- Only real builds can write a `derivation_metric` row. A substituted output will write none.
+- A failed build will write a row only after an out-of-memory kill.
+
+`HistoryPrediction` must carry the p95 peak RAM, mean CPU time, mean build time, mean disk bytes, OOM rate and a `samples` count. A value will stay `None` when no build in the window measured it. Rules add nothing for a `None` value.
 
 ## Instance Windows
 

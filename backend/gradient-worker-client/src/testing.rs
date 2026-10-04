@@ -227,6 +227,7 @@ impl ProtoPeer {
             missing_paths: vec![],
             spans: vec![],
             elapsed_ms: 0,
+            metrics: None,
         })
         .await
     }

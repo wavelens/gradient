@@ -107,6 +107,7 @@ pub enum Transition {
         log_banner: String,
         kind: BuildFailureKind,
         missing_paths: Vec<String>,
+        metrics: Option<BuildMetrics>,
     },
     Assigned {
         evaluation: EvaluationId,

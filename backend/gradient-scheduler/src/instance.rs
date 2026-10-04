@@ -267,7 +267,7 @@ pub async fn compute_eval_history(
             (
                 r.task,
                 gradient_pool::score::HistoryPrediction {
-                    predicted_peak_ram_mb: r.p95_ram.max(0.0) as u64,
+                    predicted_peak_ram_mb: Some(r.p95_ram.max(0.0) as u64),
                     samples: r.samples.max(0) as u32,
                     ..Default::default()
                 },
@@ -379,7 +379,7 @@ mod tests {
 
         let history = compute_eval_history(&db, gradient_types::now()).await;
         let h = history.get(&pid).expect("task present");
-        assert_eq!(h.predicted_peak_ram_mb, 42_000);
+        assert_eq!(h.predicted_peak_ram_mb, Some(42_000));
         assert_eq!(h.samples, 7);
     }
 }

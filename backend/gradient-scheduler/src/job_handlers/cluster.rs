@@ -491,7 +491,7 @@ impl Scheduler {
                 missing_paths: Vec::new(),
             };
             for job in waiting.members.into_iter().filter_map(|m| m.job) {
-                if let Err(e) = self.settle_failed(job, &failure).await {
+                if let Err(e) = self.settle_failed(job, &failure, None).await {
                     warn!(error = %e, %cluster, "settling a member of an aborted cluster failed");
                 }
             }

@@ -809,11 +809,12 @@ impl JobTracker {
         if policy.uses_project_work_share() {
             for ActiveJob { job, .. } in self.active.values() {
                 if let PendingJob::Build(b) = job {
-                    let w = if b.history.build_time_ms > 0 {
-                        b.history.build_time_ms as f64
-                    } else {
-                        (if b.prefer_local_build { 0.5 } else { 1.0 })
-                            * instance.build_time_ms.w1h.unwrap_or(0.0)
+                    let w = match b.history.build_time_ms.filter(|ms| *ms > 0) {
+                        Some(ms) => ms as f64,
+                        None => {
+                            (if b.prefer_local_build { 0.5 } else { 1.0 })
+                                * instance.build_time_ms.w1h.unwrap_or(0.0)
+                        }
                     };
                     *by_project.entry(b.project_id).or_default() += w;
                     total += w;

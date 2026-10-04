@@ -298,6 +298,7 @@ impl<'a> InboundContext<'a> {
                 missing_paths,
                 spans,
                 elapsed_ms,
+                metrics,
             } => {
                 let report = ReportedTimeline::received(spans, elapsed_ms);
                 self.forget_uploads(&job_id, uploads).await;
@@ -321,6 +322,7 @@ impl<'a> InboundContext<'a> {
                             error,
                             kind,
                             missing_paths,
+                            metrics,
                         })
                         .await;
                 }

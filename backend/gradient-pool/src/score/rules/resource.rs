@@ -35,17 +35,16 @@ impl ScoreRule for ResourceFitRule {
     ) -> f64 {
         let Some(m) = worker.metrics else { return 0.0 };
         let h = job.build_history();
-        if h.samples == 0 {
+        let Some(peak) = h.predicted_peak_ram_mb else {
             return 0.0;
-        }
+        };
 
         let mut s = 0.0;
         if let Some(free) = m.ram_free_mb
             && free > 0
-            && h.predicted_peak_ram_mb > free
+            && peak > free
         {
-            let overshoot =
-                ((h.predicted_peak_ram_mb - free) as f64 / free as f64).min(self.max_overshoot);
+            let overshoot = ((peak - free) as f64 / free as f64).min(self.max_overshoot);
             s -= self.ram_overshoot_penalty
                 * overshoot
                 * (1.0 + h.oom_rate as f64)
@@ -115,10 +114,9 @@ impl ScoreRule for ResourceSaturationRule {
             s -= self.penalty;
         }
 
-        let h = job.build_history();
-        if h.samples > 0
+        if let Some(peak) = job.build_history().predicted_peak_ram_mb
             && m.ram_free_mb
-                .is_some_and(|f| h.predicted_peak_ram_mb as f64 * self.ram_fit_headroom > f as f64)
+                .is_some_and(|f| peak as f64 * self.ram_fit_headroom > f as f64)
         {
             s -= self.penalty;
         }
@@ -191,12 +189,12 @@ mod tests {
         let w = worker_with(m);
 
         let small = job_with_history(HistoryPrediction {
-            predicted_peak_ram_mb: 1500,
+            predicted_peak_ram_mb: Some(1500),
             samples: 5,
             ..Default::default()
         });
         let large = job_with_history(HistoryPrediction {
-            predicted_peak_ram_mb: 3000,
+            predicted_peak_ram_mb: Some(3000),
             samples: 5,
             ..Default::default()
         });
@@ -218,7 +216,7 @@ mod tests {
             ..Default::default()
         });
         let job = job_with_history(HistoryPrediction {
-            predicted_peak_ram_mb: 1_000_000,
+            predicted_peak_ram_mb: Some(1_000_000),
             oom_rate: 1.0,
             samples: 5,
             ..Default::default()
@@ -251,13 +249,13 @@ mod tests {
         });
 
         let low = job_with_history(HistoryPrediction {
-            predicted_peak_ram_mb: 2000,
+            predicted_peak_ram_mb: Some(2000),
             oom_rate: 0.0,
             samples: 5,
             ..Default::default()
         });
         let high = job_with_history(HistoryPrediction {
-            predicted_peak_ram_mb: 2000,
+            predicted_peak_ram_mb: Some(2000),
             oom_rate: 0.5,
             samples: 5,
             ..Default::default()
@@ -274,7 +272,7 @@ mod tests {
         let rule = ResourceFitRule::default();
         let job = || {
             eval_job_with_history(HistoryPrediction {
-                predicted_peak_ram_mb: 40_000,
+                predicted_peak_ram_mb: Some(40_000),
                 samples: 5,
                 ..Default::default()
             })
@@ -295,16 +293,15 @@ mod tests {
     }
 
     #[test]
-    fn no_samples_is_zero() {
+    fn an_unmeasured_peak_is_zero() {
         let rule = ResourceFitRule::default();
         let w = worker_with(WorkerMetricsView {
             ram_free_mb: Some(100),
             ..Default::default()
         });
         let job = job_with_history(HistoryPrediction {
-            predicted_peak_ram_mb: 9000,
-            avg_cpu_time_ms: 999_999,
-            samples: 0,
+            avg_cpu_time_ms: Some(999_999),
+            samples: 5,
             ..Default::default()
         });
         assert_eq!(rule.score(&ctx(&job), &w, &InstanceContext::default()), 0.0);
@@ -320,7 +317,7 @@ mod tests {
             metrics: None,
         };
         let job = job_with_history(HistoryPrediction {
-            predicted_peak_ram_mb: 9000,
+            predicted_peak_ram_mb: Some(9000),
             samples: 5,
             ..Default::default()
         });
@@ -435,7 +432,7 @@ mod tests {
             ..Default::default()
         };
         let job = job_with_history(HistoryPrediction {
-            predicted_peak_ram_mb: 64_000,
+            predicted_peak_ram_mb: Some(64_000),
             samples: 5,
             ..Default::default()
         });
@@ -469,7 +466,7 @@ mod tests {
     fn ram_prediction_exceeding_free_penalizes_and_stacks_with_saturation() {
         let rule = ResourceSaturationRule::default();
         let job = job_with_history(HistoryPrediction {
-            predicted_peak_ram_mb: 10_000,
+            predicted_peak_ram_mb: Some(10_000),
             samples: 5,
             ..Default::default()
         });
@@ -516,7 +513,7 @@ mod tests {
             ..Default::default()
         });
         let job = job_with_history(HistoryPrediction {
-            predicted_peak_ram_mb: 2000,
+            predicted_peak_ram_mb: Some(2000),
             samples: 5,
             ..Default::default()
         });
