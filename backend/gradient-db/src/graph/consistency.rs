@@ -84,6 +84,7 @@ pub async fn graph_consistency_report(ctx: &DbContext) -> Result<ConsistencyRepo
         crate::graph::runtime_can_start::recount_missing_runtime_deps(db).await? as i64;
     let scope = crate::graph::can_start::can_start_scope(db).await?;
     let fetchable = crate::graph::can_start::repair_fetchable(db, &scope).await?;
+    crate::status::emit_transition_effects(ctx, &fetchable.unqueued).await?;
 
     let need_drift = crate::graph::can_start::recount_wanted(db).await? as i64;
 
@@ -124,7 +125,7 @@ pub async fn graph_consistency_report(ctx: &DbContext) -> Result<ConsistencyRepo
     let wedged_building_evals = count(db, WEDGED_BUILDING_EVALS.stmt()).await?;
 
     Ok(ConsistencyReport {
-        counter_drift: (fetchable + repaired.blocking_deps) as i64,
+        counter_drift: (fetchable.marked + repaired.blocking_deps) as i64,
         walk_drift,
         runtime_drift,
         need_drift,
@@ -168,7 +169,15 @@ mod tests {
                 "derivation".to_owned(),
                 Value::from(uuid::Uuid::now_v7()),
             )])]])
-            .append_exec_results([exec(0), exec(3), exec(0)])
+            .append_exec_results([exec(0), exec(0)])
+            .append_query_results([
+                vec![BTreeMap::from([(
+                    "derivation".to_owned(),
+                    Value::from(uuid::Uuid::now_v7()),
+                )])],
+                empty.clone(),
+                empty.clone(),
+            ])
             .append_query_results([drifted])
             .append_query_results([empty.clone(), empty.clone()])
             .append_exec_results([exec(0), exec(5)])
@@ -207,7 +216,7 @@ mod tests {
         drop(ctx);
 
         assert_eq!(
-            report.counter_drift, 8,
+            report.counter_drift, 6,
             "both can-start recounts are reported, not one of them"
         );
         assert_eq!(
@@ -249,49 +258,52 @@ mod tests {
             "the repair scope is read once, contradicting flags included: {log:?}"
         );
         assert!(
-            log[5].contains("FOR NO KEY UPDATE") && log[6].contains("SET fetchable"),
+            log[5].contains("FOR NO KEY UPDATE")
+                && log[6].contains("SET fetchable = true")
+                && log[7].contains("blocking_deps - c.n")
+                && log[8].contains("SET fetchable = false"),
             "the flag is repaired under its own ordered lock, before the need walk \
              that stops at a fetchable shared build: {log:?}"
         );
         assert!(
-            log[7].contains("SET LOCAL work_mem") && log[8].contains("SET wanted ="),
+            log[9].contains("SET LOCAL work_mem") && log[10].contains("SET wanted ="),
             "the table-wide need walk takes place under its own raise, on a repaired flag: {log:?}"
         );
         assert!(
-            log[9].contains("db.status IN (5, 10) AND db.wanted")
-                && log[10].contains("db.status = 0 AND NOT db.wanted"),
+            log[11].contains("db.status IN (5, 10) AND db.wanted")
+                && log[12].contains("db.status = 0 AND NOT db.wanted"),
             "both Skipped directions read the need this pass corrected: {log:?}"
         );
         assert!(
-            log[11].contains("FOR NO KEY UPDATE") && log[12].contains("SET blocking_deps"),
+            log[13].contains("FOR NO KEY UPDATE") && log[14].contains("SET blocking_deps"),
             "the counter recount follows the need recount, in a second locked pass \
              over the same scope: {log:?}"
         );
         assert!(
-            log[13].contains("SET status = 0") && log[14].contains("SET status = 1"),
+            log[15].contains("SET status = 0") && log[16].contains("SET status = 1"),
             "the queue is settled against the repaired counters and the corrected need: {log:?}"
         );
         assert!(
-            log[15].contains(
+            log[17].contains(
                 "NOT EXISTS (SELECT 1 FROM build_job bj WHERE bj.derivation = db.derivation) LIMIT 1"
             ),
             "the naming backstop asks before it walks: {log:?}"
         );
         assert!(
-            log[16].contains("SELECT DISTINCT o.hash"),
+            log[18].contains("SELECT DISTINCT o.hash"),
             "the unbacked alarm follows the repairs: {log:?}"
         );
         assert!(
-            log[17].contains("SELECT id FROM evaluation WHERE status IN")
-                && log[18].contains("pg_advisory_xact_lock")
-                && log[19].contains("DELETE FROM evaluation_shared_build_delta"),
+            log[19].contains("SELECT id FROM evaluation WHERE status IN")
+                && log[20].contains("pg_advisory_xact_lock")
+                && log[21].contains("DELETE FROM evaluation_shared_build_delta"),
             "the evaluation counters are recounted under the fold's lock: {log:?}"
         );
         assert!(
-            log[20].contains("active_shared_builds = 0"),
+            log[22].contains("active_shared_builds = 0"),
             "the wedged alarm reads the counters the recount just corrected: {log:?}"
         );
-        assert_eq!(log.len(), 21, "{log:?}");
+        assert_eq!(log.len(), 23, "{log:?}");
     }
 
     #[tokio::test]
@@ -303,25 +315,25 @@ mod tests {
         assert_eq!(report.adopted, 1);
         let log = crate::pool::statements(pool.into_transaction_log());
         assert!(
-            log[15].contains("LIMIT 1")
-                && log[16].contains("SET LOCAL work_mem")
-                && log[17].contains("INSERT INTO build_job"),
+            log[17].contains("LIMIT 1")
+                && log[18].contains("SET LOCAL work_mem")
+                && log[19].contains("INSERT INTO build_job"),
             "the probe guards the walk that names: {log:?}"
         );
         assert!(
-            log[18].contains("SET LOCAL work_mem")
-                && log[19].contains("ORDER BY derivation FOR NO KEY UPDATE")
-                && log[20].contains("ON d.derivation = r.derivation ORDER BY r.derivation"),
+            log[20].contains("SET LOCAL work_mem")
+                && log[21].contains("ORDER BY derivation FOR NO KEY UPDATE")
+                && log[22].contains("ON d.derivation = r.derivation ORDER BY r.derivation"),
             "a name gives the closure below it a need, in this pass and not the next: {log:?}"
         );
         assert!(
-            log[21].contains("SET status = 1")
-                && log[22].contains("graph_version = e.graph_version + 1"),
+            log[23].contains("SET status = 1")
+                && log[24].contains("graph_version = e.graph_version + 1"),
             "then queue what was named and bump: {log:?}"
         );
         assert!(
-            log[23].contains("SELECT DISTINCT o.hash")
-                && log[27].contains("active_shared_builds = 0"),
+            log[25].contains("SELECT DISTINCT o.hash")
+                && log[29].contains("active_shared_builds = 0"),
             "the alarms still come last: {log:?}"
         );
     }

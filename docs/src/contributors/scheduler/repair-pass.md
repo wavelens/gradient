@@ -83,7 +83,7 @@ Both mutation models report `(derivation, from, to)` moves to `emit_transition_e
 |---|---|---|
 | 1 | Recount `unwalked_inputs` | `walk_drift` |
 | 2 | Recount `missing_runtime_deps`, table-wide | `runtime_drift` |
-| 3 | Recount `fetchable` over the repair scope | `counter_drift` |
+| 3 | Correct `fetchable` over the repair scope, moving each parent's `blocking_deps` along | `counter_drift` |
 | 4 | Recount `wanted`, table-wide | `need_drift` |
 | 5 | `settle_skipped`: settle shared builds wanted by no evaluation to `Skipped`, thaw needed ones | `skipped_moves` |
 | 6 | Recount `blocking_deps` over the repair scope, then un-queue and queue | `counter_drift`, `unpromoted_startable` |

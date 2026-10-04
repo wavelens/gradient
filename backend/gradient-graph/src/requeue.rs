@@ -6,7 +6,7 @@
 
 use gradient_db::{
     DbContext,
-    graph::can_start::unpromote_ungated,
+    graph::can_start::promote,
     status::{emit_transition_effects, update_derivation_build_status},
 };
 use gradient_entity::build::BuildStatus;
@@ -22,10 +22,7 @@ pub(crate) async fn apply(ctx: &DbContext, scope: RequeueScope) -> anyhow::Resul
     }
 }
 
-/// The settle after the requeue is making it legal, not the elapsed backoff.
-/// A demoted dependency is keeping `blocking_deps` above zero.
-/// The dispatch gate is trusting `Queued` without re-checking whether the build can start.
-/// An unsettled requeue would dispatch a build against an input nothing can provide.
+/// A retry committed as `Queued` is dispatchable before anything checks its inputs.
 async fn transient_retries(ctx: &DbContext) -> anyhow::Result<u64> {
     let base = ctx.config.build.retry_backoff_secs;
     let now = gradient_types::now();
@@ -42,21 +39,21 @@ async fn transient_retries(ctx: &DbContext) -> anyhow::Result<u64> {
             base,
         ) {
             let derivation = shared_build.derivation;
-            update_derivation_build_status(ctx, shared_build, BuildStatus::Queued).await?;
+            update_derivation_build_status(ctx, shared_build, BuildStatus::Created).await?;
             requeued.push(derivation);
         }
     }
 
-    let settled = unpromote_ungated(&ctx.worker_db, &requeued).await?;
-    if !settled.is_empty() {
+    let queued = promote(&ctx.worker_db, &requeued).await?;
+    if queued.len() < requeued.len() {
         debug!(
-            unpromoted = settled.len(),
+            queued = queued.len(),
             requeued = requeued.len(),
-            "retried shared builds whose gates no longer hold left the queue again"
+            "retried shared builds wait in Created until their inputs can be fetched"
         );
     }
 
-    emit_transition_effects(ctx, &settled).await?;
+    emit_transition_effects(ctx, &queued).await?;
 
     Ok(requeued.len() as u64)
 }

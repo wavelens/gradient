@@ -558,8 +558,6 @@ impl BatchWriter<'_> {
     }
 
     /// One lock is covering the union of both sets to avoid an ABBA cycle with a retire.
-    /// The mark must run before the seed because the seed is evaluating fetchability itself.
-    /// A later ripple would take a parent below its true count, and zero is then unreachable.
     /// The un-promote is covering a row the stale-low ripple queued and the seed raised again.
     /// Only the net transition committed, and only the net transition may fan out.
     #[tracing::instrument(level = "debug", skip_all)]

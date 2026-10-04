@@ -110,6 +110,7 @@ mod m20261004_000000_teams;
 mod m20261004_000001_drop_base_workers;
 mod m20261004_000002_transfer_speeds;
 mod m20261004_000003_build_conditions;
+mod m20261004_000004_recount_blocking_deps;
 
 pub struct Migrator;
 
@@ -216,6 +217,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261004_000001_drop_base_workers::Migration),
             Box::new(m20261004_000002_transfer_speeds::Migration),
             Box::new(m20261004_000003_build_conditions::Migration),
+            Box::new(m20261004_000004_recount_blocking_deps::Migration),
         ]
     }
 }
