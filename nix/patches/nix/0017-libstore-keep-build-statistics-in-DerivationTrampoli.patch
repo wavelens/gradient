@@ -1,0 +1,55 @@
+From ef85fe76c5212dfb9d4d3fe71935331c8963c1cb Mon Sep 17 00:00:00 2001
+From: Dennis Wuitz <dennish@wuitz.de>
+Date: Sun, 4 Oct 2026 11:05:44 +0200
+Subject: [PATCH 17/18] libstore: keep build statistics in
+ DerivationTrampolineGoal results
+
+The trampoline goal rebuilt its result from the status and outputs
+only, so timesBuilt, startTime, stopTime, cpuUser and cpuSystem never
+reached clients of Worker::buildDerivation, e.g. daemon clients using
+BuildDerivation.
+---
+ src/libstore/build/derivation-trampoline-goal.cc | 12 +++++++++---
+ 1 file changed, 9 insertions(+), 3 deletions(-)
+
+diff --git a/src/libstore/build/derivation-trampoline-goal.cc b/src/libstore/build/derivation-trampoline-goal.cc
+index 14864ed..1c34798 100644
+--- a/src/libstore/build/derivation-trampoline-goal.cc
++++ b/src/libstore/build/derivation-trampoline-goal.cc
+@@ -184,6 +184,7 @@ Goal::Co DerivationTrampolineGoal::haveDerivation(StorePath drvPath, Derivation
+         /* Report the exit status of *some* failing goal. This might not be strictly
+            correct, since multiple subgoals can fail independently, but this should be
+            a good enough heuristic without --keep-going. */
++        buildResult = g->buildResult;
+         co_return doneFailure(exitCode, *failure);
+     }
+ 
+@@ -198,8 +199,6 @@ Goal::Co DerivationTrampolineGoal::haveDerivation(StorePath drvPath, Derivation
+     for (const auto & success : successes)
+         std::ranges::copy(success.builtOutputs, std::inserter(outputs, outputs.end()));
+ 
+-    auto statuses = successes | std::views::transform(&BuildResult::Success::status);
+-
+     /* Aggregate the status code. If some outputs we already valid, but we had
+        to build/substitute the other ones, report it as the smallest common
+        denominator. */
+@@ -224,8 +223,15 @@ Goal::Co DerivationTrampolineGoal::haveDerivation(StorePath drvPath, Derivation
+         return toPriority(a) < toPriority(b);
+     };
+ 
++    /* Keep the statistics (build times, CPU usage) of the goal that did the
++       most work, `Worker::buildDerivation` reports them to daemon clients. */
++    const auto & mostWork = *std::ranges::min_element(concreteDrvGoals, compareSuccesses, [](const GoalPtr & goal) {
++        return goal->buildResult.tryGetSuccess()->status;
++    });
++    buildResult = mostWork->buildResult;
++
+     co_return doneSuccess({
+-        .status = std::ranges::min(statuses, compareSuccesses),
++        .status = mostWork->buildResult.tryGetSuccess()->status,
+         .builtOutputs = std::move(outputs),
+     });
+ }
+-- 
+2.55.0
+

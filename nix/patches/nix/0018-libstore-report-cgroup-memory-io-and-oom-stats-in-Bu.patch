@@ -1,0 +1,322 @@
+From 6033fa639dd6e21500e89410b55bd122c8cb4df4 Mon Sep 17 00:00:00 2001
+From: Dennis Wuitz <dennish@wuitz.de>
+Date: Sun, 4 Oct 2026 11:05:44 +0200
+Subject: [PATCH 18/18] libstore: report cgroup memory, io and oom stats in
+ BuildResult
+
+Read memory.peak, the rbytes/wbytes sums of io.stat and the oom_kill
+count of memory.events from the build cgroup next to cpu.stat. When the
+build-resource-usage worker protocol feature is negotiated, BuildResult
+carries memoryPeak, ioReadBytes, ioWriteBytes and oomKills after
+cpuSystem, each as an optional 64-bit number.
+---
+ .../json/schema/build-result-v1.yaml          | 28 +++++++++
+ src/libstore/build-result.cc                  | 15 +++++
+ .../include/nix/store/build-result.hh         |  7 +++
+ .../include/nix/store/worker-protocol.hh      |  8 +++
+ .../linux/build/linux-derivation-builder.cc   |  4 ++
+ src/libstore/worker-protocol.cc               | 37 ++++++++++++
+ src/libutil/linux/cgroup.cc                   | 59 ++++++++++++++-----
+ src/libutil/linux/include/nix/util/cgroup.hh  |  1 +
+ 8 files changed, 143 insertions(+), 16 deletions(-)
+
+diff --git a/doc/manual/source/protocols/json/schema/build-result-v1.yaml b/doc/manual/source/protocols/json/schema/build-result-v1.yaml
+index d0d8d8a..696f956 100644
+--- a/doc/manual/source/protocols/json/schema/build-result-v1.yaml
++++ b/doc/manual/source/protocols/json/schema/build-result-v1.yaml
+@@ -49,6 +49,34 @@ properties:
+     description: |
+       System CPU time the build took, in microseconds.
+ 
++  memoryPeak:
++    type: integer
++    minimum: 0
++    title: Peak memory
++    description: |
++      Peak memory usage of the build, in bytes.
++
++  ioReadBytes:
++    type: integer
++    minimum: 0
++    title: Bytes read
++    description: |
++      Bytes the build read from block devices.
++
++  ioWriteBytes:
++    type: integer
++    minimum: 0
++    title: Bytes written
++    description: |
++      Bytes the build wrote to block devices.
++
++  oomKills:
++    type: integer
++    minimum: 0
++    title: Out-of-memory kill count
++    description: |
++      How many processes of the build the kernel killed for running out of memory.
++
+ "$defs":
+   success:
+     type: object
+diff --git a/src/libstore/build-result.cc b/src/libstore/build-result.cc
+index c9d78e5..021971f 100644
+--- a/src/libstore/build-result.cc
++++ b/src/libstore/build-result.cc
+@@ -127,6 +127,15 @@ static BuildResult::Failure::Status failureStatusFromString(std::string_view str
+     throw Error("unknown built result failure status '%s'", str);
+ }
+ 
++using ResourceUsageField = std::optional<uint64_t> BuildResult::*;
++
++static constexpr std::array<std::pair<std::string_view, ResourceUsageField>, 4> resourceUsageFields{{
++    {"memoryPeak", &BuildResult::memoryPeak},
++    {"ioReadBytes", &BuildResult::ioReadBytes},
++    {"ioWriteBytes", &BuildResult::ioWriteBytes},
++    {"oomKills", &BuildResult::oomKills},
++}};
++
+ bool BuildError::operator==(const BuildError & other) const noexcept
+ {
+     return status == other.status && isNonDeterministic == other.isNonDeterministic && message() == other.message();
+@@ -162,6 +171,9 @@ void adl_serializer<BuildResult>::to_json(json & res, const BuildResult & br)
+     if (br.cpuSystem.has_value()) {
+         res["cpuSystem"] = br.cpuSystem->count();
+     }
++    for (auto [name, field] : resourceUsageFields)
++        if (auto & value = br.*field)
++            res[std::string{name}] = *value;
+ 
+     // Handle success or failure variant
+     std::visit(
+@@ -198,6 +210,9 @@ BuildResult adl_serializer<BuildResult>::from_json(const json & _json)
+     if (auto cpuSystem = optionalValueAt(json, "cpuSystem")) {
+         br.cpuSystem = std::chrono::microseconds(getUnsigned(*cpuSystem));
+     }
++    for (auto [name, field] : resourceUsageFields)
++        if (auto value = optionalValueAt(json, name))
++            br.*field = getUnsigned(*value);
+ 
+     // Determine success or failure based on success field
+     bool success = getBoolean(valueAt(json, "success"));
+diff --git a/src/libstore/include/nix/store/build-result.hh b/src/libstore/include/nix/store/build-result.hh
+index 808fcc8..5be5749 100644
+--- a/src/libstore/include/nix/store/build-result.hh
++++ b/src/libstore/include/nix/store/build-result.hh
+@@ -193,6 +193,13 @@ struct BuildResult
+      */
+     std::optional<std::chrono::microseconds> cpuUser, cpuSystem;
+ 
++    /**
++     * Peak memory usage and bytes read from and written to block
++     * devices by the build, and how many of its processes were killed
++     * for running out of memory.
++     */
++    std::optional<uint64_t> memoryPeak, ioReadBytes, ioWriteBytes, oomKills;
++
+     bool operator==(const BuildResult &) const noexcept;
+     std::strong_ordering operator<=>(const BuildResult &) const noexcept;
+ };
+diff --git a/src/libstore/include/nix/store/worker-protocol.hh b/src/libstore/include/nix/store/worker-protocol.hh
+index d09d304..55ae493 100644
+--- a/src/libstore/include/nix/store/worker-protocol.hh
++++ b/src/libstore/include/nix/store/worker-protocol.hh
+@@ -135,6 +135,12 @@ struct WorkerProto
+      */
+     static constexpr std::string_view featureDisableSetOptions = "disable-set-options";
+ 
++    /**
++     * Feature for transmitting the peak memory, block I/O and
++     * out-of-memory kill count of a build in `BuildResult`.
++     */
++    static constexpr std::string_view featureBuildResourceUsage = "build-resource-usage";
++
+     /**
+      * A unidirectional read connection, to be used by the read half of the
+      * canonical serializers below.
+@@ -349,6 +355,8 @@ DECLARE_WORKER_SERIALISER(std::optional<TrustedFlag>);
+ template<>
+ DECLARE_WORKER_SERIALISER(std::optional<std::chrono::microseconds>);
+ template<>
++DECLARE_WORKER_SERIALISER(std::optional<uint64_t>);
++template<>
+ DECLARE_WORKER_SERIALISER(WorkerProto::ClientHandshakeInfo);
+ 
+ template<>
+diff --git a/src/libstore/linux/build/linux-derivation-builder.cc b/src/libstore/linux/build/linux-derivation-builder.cc
+index d8376da..2262779 100644
+--- a/src/libstore/linux/build/linux-derivation-builder.cc
++++ b/src/libstore/linux/build/linux-derivation-builder.cc
+@@ -949,6 +949,10 @@ void ChrootLinuxDerivationBuilder::killSandbox(bool getStats)
+         if (getStats) {
+             buildResult.cpuUser = stats.cpuUser;
+             buildResult.cpuSystem = stats.cpuSystem;
++            buildResult.memoryPeak = stats.memoryPeak;
++            buildResult.ioReadBytes = stats.ioReadBytes;
++            buildResult.ioWriteBytes = stats.ioWriteBytes;
++            buildResult.oomKills = stats.oomKills;
+         }
+         return;
+     }
+diff --git a/src/libstore/worker-protocol.cc b/src/libstore/worker-protocol.cc
+index 37aa4e3..c82c37c 100644
+--- a/src/libstore/worker-protocol.cc
++++ b/src/libstore/worker-protocol.cc
+@@ -29,6 +29,7 @@ const WorkerProto::Version WorkerProto::latest = {
+                 WorkerProto::featureRealisationWithPath,
+             },
+             std::string{WorkerProto::featureDeleteDeadSpecificReferrers},
++            std::string{WorkerProto::featureBuildResourceUsage},
+         },
+ };
+ 
+@@ -191,6 +192,30 @@ void WorkerProto::Serialise<std::optional<std::chrono::microseconds>>::write(
+     }
+ }
+ 
++std::optional<uint64_t>
++WorkerProto::Serialise<std::optional<uint64_t>>::read(const StoreDirConfig & store, WorkerProto::ReadConn conn)
++{
++    auto tag = readNum<uint8_t>(conn.from);
++    switch (tag) {
++    case 0:
++        return std::nullopt;
++    case 1:
++        return readNum<uint64_t>(conn.from);
++    default:
++        throw Error("Invalid optional tag from remote");
++    }
++}
++
++void WorkerProto::Serialise<std::optional<uint64_t>>::write(
++    const StoreDirConfig & store, WorkerProto::WriteConn conn, const std::optional<uint64_t> & optValue)
++{
++    if (!optValue.has_value()) {
++        conn.to << uint8_t{0};
++    } else {
++        conn.to << uint8_t{1} << *optValue;
++    }
++}
++
+ DerivedPath WorkerProto::Serialise<DerivedPath>::read(const StoreDirConfig & store, WorkerProto::ReadConn conn)
+ {
+     auto s = readString(conn.from);
+@@ -264,6 +289,12 @@ BuildResult WorkerProto::Serialise<BuildResult>::read(const StoreDirConfig & sto
+         res.cpuUser = WorkerProto::Serialise<std::optional<std::chrono::microseconds>>::read(store, conn);
+         res.cpuSystem = WorkerProto::Serialise<std::optional<std::chrono::microseconds>>::read(store, conn);
+     }
++    if (conn.version.features.contains(WorkerProto::featureBuildResourceUsage)) {
++        res.memoryPeak = WorkerProto::Serialise<std::optional<uint64_t>>::read(store, conn);
++        res.ioReadBytes = WorkerProto::Serialise<std::optional<uint64_t>>::read(store, conn);
++        res.ioWriteBytes = WorkerProto::Serialise<std::optional<uint64_t>>::read(store, conn);
++        res.oomKills = WorkerProto::Serialise<std::optional<uint64_t>>::read(store, conn);
++    }
+ 
+     if (conn.version.features.contains(WorkerProto::featureRealisationWithPath)) {
+         success.builtOutputs = WorkerProto::Serialise<std::map<OutputName, UnkeyedRealisation>>::read(store, conn);
+@@ -315,6 +346,12 @@ void WorkerProto::Serialise<BuildResult>::write(
+             WorkerProto::write(store, conn, res.cpuUser);
+             WorkerProto::write(store, conn, res.cpuSystem);
+         }
++        if (conn.version.features.contains(WorkerProto::featureBuildResourceUsage)) {
++            WorkerProto::write(store, conn, res.memoryPeak);
++            WorkerProto::write(store, conn, res.ioReadBytes);
++            WorkerProto::write(store, conn, res.ioWriteBytes);
++            WorkerProto::write(store, conn, res.oomKills);
++        }
+ 
+         if (conn.version.features.contains(WorkerProto::featureRealisationWithPath)) {
+             WorkerProto::write(store, conn, builtOutputs);
+diff --git a/src/libutil/linux/cgroup.cc b/src/libutil/linux/cgroup.cc
+index 9ebc3ab..5a2fac9 100644
+--- a/src/libutil/linux/cgroup.cc
++++ b/src/libutil/linux/cgroup.cc
+@@ -49,30 +49,57 @@ StringMap getCgroups(const std::filesystem::path & cgroupFile)
+     return cgroups;
+ }
+ 
++static std::optional<std::string> readCgroupFile(const std::filesystem::path & path)
++{
++    if (!pathExists(path))
++        return std::nullopt;
++    return readFile(path);
++}
++
++/* For "flat keyed" and "nested keyed" files, see "Format" in the
++   kernel's cgroup-v2 documentation. */
++static std::optional<uint64_t> getFlatKeyedValue(std::string_view contents, std::string_view key)
++{
++    for (auto & line : tokenizeString<std::vector<std::string>>(contents, "\n")) {
++        auto fields = tokenizeString<std::vector<std::string>>(line);
++        if (fields.size() == 2 && fields[0] == key)
++            return string2Int<uint64_t>(fields[1]);
++    }
++    return std::nullopt;
++}
++
++static uint64_t sumNestedKeyedValues(std::string_view contents, std::string_view key)
++{
++    auto prefix = std::string(key) + "=";
++    uint64_t sum = 0;
++    for (auto & field : tokenizeString<std::vector<std::string>>(contents))
++        if (hasPrefix(field, prefix))
++            if (auto n = string2Int<uint64_t>(field.substr(prefix.size())))
++                sum += *n;
++    return sum;
++}
++
+ CgroupStats getCgroupStats(const std::filesystem::path & cgroup)
+ {
+     CgroupStats stats;
+ 
+-    auto cpustatPath = cgroup / "cpu.stat";
++    if (auto cpuStat = readCgroupFile(cgroup / "cpu.stat")) {
++        auto toMicroseconds = [](uint64_t n) { return std::chrono::microseconds(n); };
++        stats.cpuUser = getFlatKeyedValue(*cpuStat, "user_usec").transform(toMicroseconds);
++        stats.cpuSystem = getFlatKeyedValue(*cpuStat, "system_usec").transform(toMicroseconds);
++    }
+ 
+-    if (pathExists(cpustatPath)) {
+-        for (auto & line : tokenizeString<std::vector<std::string>>(readFile(cpustatPath), "\n")) {
+-            std::string_view userPrefix = "user_usec ";
+-            if (hasPrefix(line, userPrefix)) {
+-                auto n = string2Int<uint64_t>(line.substr(userPrefix.size()));
+-                if (n)
+-                    stats.cpuUser = std::chrono::microseconds(*n);
+-            }
++    if (auto memoryPeak = readCgroupFile(cgroup / "memory.peak"))
++        stats.memoryPeak = string2Int<uint64_t>(trim(*memoryPeak));
+ 
+-            std::string_view systemPrefix = "system_usec ";
+-            if (hasPrefix(line, systemPrefix)) {
+-                auto n = string2Int<uint64_t>(line.substr(systemPrefix.size()));
+-                if (n)
+-                    stats.cpuSystem = std::chrono::microseconds(*n);
+-            }
+-        }
++    if (auto ioStat = readCgroupFile(cgroup / "io.stat")) {
++        stats.ioReadBytes = sumNestedKeyedValues(*ioStat, "rbytes");
++        stats.ioWriteBytes = sumNestedKeyedValues(*ioStat, "wbytes");
+     }
+ 
++    if (auto memoryEvents = readCgroupFile(cgroup / "memory.events"))
++        stats.oomKills = getFlatKeyedValue(*memoryEvents, "oom_kill");
++
+     return stats;
+ }
+ 
+diff --git a/src/libutil/linux/include/nix/util/cgroup.hh b/src/libutil/linux/include/nix/util/cgroup.hh
+index 7b50ffe..ced9c77 100644
+--- a/src/libutil/linux/include/nix/util/cgroup.hh
++++ b/src/libutil/linux/include/nix/util/cgroup.hh
+@@ -17,6 +17,7 @@ StringMap getCgroups(const std::filesystem::path & cgroupFile);
+ struct CgroupStats
+ {
+     std::optional<std::chrono::microseconds> cpuUser, cpuSystem;
++    std::optional<uint64_t> memoryPeak, ioReadBytes, ioWriteBytes, oomKills;
+ };
+ 
+ /**
+-- 
+2.55.0
+
