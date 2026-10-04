@@ -41,11 +41,31 @@ for f in "${TOML_FILES[@]}"; do
     echo "updated $f"
 done
 
+# ── Cargo dependencies ───────────────────────────────────────────────────────
+
+CARGO_WORKSPACES=(
+    backend
+    cli
+)
+
+for ws in "${CARGO_WORKSPACES[@]}"; do
+    cargo update --manifest-path "$REPO_ROOT/$ws/Cargo.toml"
+    echo "updated $ws/Cargo.lock"
+done
+
+# ── Flake inputs ─────────────────────────────────────────────────────────────
+
+nix flake update --flake "$REPO_ROOT"
+echo "updated flake.lock"
+
 # ── frontend/package.json ─────────────────────────────────────────────────────
 
 PACKAGE_JSON="$REPO_ROOT/frontend/package.json"
 sed -i "0,/\"version\": \"[^\"]*\"/{s/\"version\": \"[^\"]*\"/\"version\": \"$VERSION\"/}" "$PACKAGE_JSON"
 echo "updated frontend/package.json"
+
+pnpm --dir "$REPO_ROOT/frontend" update
+echo "updated frontend/pnpm-lock.yaml"
 
 # ── Nix packages ─────────────────────────────────────────────────────────────
 
@@ -61,6 +81,9 @@ for f in "${NIX_FILES[@]}"; do
     sed -i "s/^  version = \"[^\"]*\";/  version = \"$VERSION\";/" "$path"
     echo "updated $f"
 done
+
+sed -i 's/^    hash = "[^"]*";/    hash = "";/' "$REPO_ROOT/nix/packages/gradient-frontend.nix"
+echo "cleared the pnpm dependency hash in nix/packages/gradient-frontend.nix"
 
 # ── OpenAPI spec ─────────────────────────────────────────────────────────────
 
