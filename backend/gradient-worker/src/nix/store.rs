@@ -28,6 +28,8 @@ use tracing::{debug, warn};
 use gradient_wire::traits::WorkerStore;
 use gradient_worker_client::nar::{PathMeta, PathMetaSource};
 
+use super::visibility::PathVisibility;
+
 const POOL_ACQUIRE_TIMEOUT: Duration = Duration::from_secs(600);
 
 const POOL_CONNECT_TIMEOUT: Duration = Duration::from_secs(600);
@@ -45,6 +47,7 @@ const DEFAULT_DAEMON_SOCKET: &str = "/nix/var/nix/daemon-socket/socket";
 #[derive(Clone)]
 pub struct LocalNixStore {
     pool: ConnectionPool,
+    visibility: PathVisibility,
 }
 
 impl LocalNixStore {
@@ -55,7 +58,24 @@ impl LocalNixStore {
     pub fn connect_at(socket_path: &str, pool_size: usize) -> Result<Self> {
         Ok(Self {
             pool: ConnectionPool::new(socket_path, build_pool_config(pool_size)),
+            visibility: PathVisibility::default(),
         })
+    }
+
+    pub fn visibility(&self) -> &PathVisibility {
+        &self.visibility
+    }
+
+    pub async fn has_path(&self, store_path: &str) -> Result<bool> {
+        Ok(self.visibility.allows(store_path) && self.is_on_disk(store_path).await?)
+    }
+
+    pub async fn is_hidden(&self, store_path: &str) -> Result<bool> {
+        Ok(!self.visibility.allows(store_path) && self.is_on_disk(store_path).await?)
+    }
+
+    pub async fn reveal(&self, store_paths: &[String]) -> Result<()> {
+        self.visibility.reveal(store_paths).await
     }
 
     pub async fn acquire(&self) -> Result<PooledConnectionGuard> {
@@ -72,7 +92,7 @@ impl LocalNixStore {
     /// `is_valid_path` is the authoritative check for a parent the daemon will accept.
     /// `query_path_info` can still report metadata after a GC race or an interrupted import.
     /// That false positive would make the prefetch walk skip a path the daemon then rejects.
-    pub async fn has_path(&self, store_path: &str) -> Result<bool> {
+    async fn is_on_disk(&self, store_path: &str) -> Result<bool> {
         let hash_name = strip_store_prefix(store_path);
         let sp = StorePath::from_base_path(hash_name)
             .map_err(|e| anyhow::anyhow!("invalid store path {store_path}: {e}"))?;
@@ -115,16 +135,19 @@ impl LocalNixStore {
     }
 
     pub async fn import_nar(&self, info: &ValidPathInfo, nar: &[u8]) -> Result<()> {
+        let path = info.info.store_dir.display(&info.path).to_string();
+        let repair = !self.visibility.allows(&path);
         let mut guard = self.acquire().await?;
         guard
             .execute(|client| async move {
-                let logs = client.add_to_store_nar(info, nar, false, true);
+                let logs = client.add_to_store_nar(info, nar, repair, true);
                 let mut logs = pin!(logs);
                 while let Some(_msg) = logs.next().await {}
                 logs.await
             })
             .await
-            .map_err(|e| anyhow::anyhow!("daemon add_to_store_nar({}) failed: {e}", info.path))
+            .map_err(|e| anyhow::anyhow!("daemon add_to_store_nar({}) failed: {e}", info.path))?;
+        self.reveal(&[path]).await
     }
 
     fn content_addressed(name: &str, nar: &[u8]) -> Result<ValidPathInfo> {
