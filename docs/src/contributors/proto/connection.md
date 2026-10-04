@@ -125,25 +125,15 @@ A restart can lose work in flight, never a queued job.
 | Worker | Aborting every running job and reconnecting with backoff (1 s, doubling up to 60 s) |
 | Worker | Sending a full handshake, then `RequestJobList` and one `RequestJob` per kind |
 | Server | Dropping every report whose `job_id` and `assignment_id` the current session did not hand out |
-| Server | `recover_interrupted_work` is closing open assignments and aborting running attempts before the first session. The pass is also re-queuing `Building` builds and re-evaluating interrupted evaluations |
+| Server | `recover_interrupted_work` is closing open assignments and aborting running attempts before the first session. The pass will also re-queue every `Building` build and every interrupted evaluation |
 
-## Graceful Shutdown
+## Server Stop
 
-```mermaid
-sequenceDiagram
-    participant W as Worker
-    participant S as Server
-    S->>W: Draining
-    Note left of W: stopping job requests
-    W->>S: JobCompleted (in flight)
-    S-xW: close
-```
-
-- The server will send `Draining` on `SIGTERM` and assign nothing more.
-- The server will close each session once the worker is idle, after 20 s at the latest.
-- Startup recovery will re-queue whatever the cut-off interrupted.
-- A `Draining` message will end the session, never the worker process.
+- The server will close every session at once on `SIGTERM`.
+- Workers abort every running job of the closed session.
+- [Startup recovery](../scheduler/waiting-and-recovery.md#startup-recovery) will re-queue the interrupted work on the next start.
 - Workers reconnect once the server is back.
+- A `Draining` message from the server will end the session, never the worker process.
 
 ## Version Agreement
 

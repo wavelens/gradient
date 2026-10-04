@@ -14,7 +14,7 @@ flowchart LR
 
 -   :material-handshake: **[Connection](connection.md)**
 
-    Handshake, authorization, server restarts, graceful shutdown and cache sessions.
+    Handshake, authorization, server restarts, server stop and cache sessions.
 
 -   :material-clipboard-list: **[Capabilities and Assignment](capabilities-and-dispatch.md)**
 

@@ -42,7 +42,7 @@ Workers with the `build` capability send `WorkerCapabilities` after the handshak
 - The server will mark a worker as seen on every message.
 - The `worker_liveness_pass` will drop workers silent for `proto.workerHeartbeatTimeoutSecs` (120 s, `0` disabling the check).
 - A worker's own `Draining` will stop new assignments.
-- Workers drain for up to 600 s after `SIGTERM`, and a second signal will abort the drain.
+- Workers send `Draining` on `SIGTERM` and abort every running job. See [Worker Stop](jobs.md#worker-stop).
 
 ## Offers
 

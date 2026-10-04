@@ -312,7 +312,6 @@ Declarative entities under `services.gradient.state` are in the [state reference
 | `worker.baseDir` | path | `"/var/lib/gradient-worker"` | `GRADIENT_WORKER_BASE_DIR` | Directory holding the worker's state. |
 | `worker.discoverable` | bool | `false` | `GRADIENT_WORKER_DISCOVERABLE` | Whether to enable incoming server connections on `/proto`. |
 | `worker.domain` | string | `""` | - | Domain of the worker's reverse proxy virtual host. |
-| `worker.drainTimeoutSecs` | int | `60` | `GRADIENT_WORKER_DRAIN_TIMEOUT_SECS` | Seconds a stop is waiting for running jobs. |
 | `worker.enable` | bool | `false` | - | Whether to enable the Gradient worker. |
 | `worker.endpoint` | null or string | `null` | `GRADIENT_WORKER_ENDPOINT` | Address at which other members of a cluster job are reaching this worker, passed through verbatim in the cluster roster. |
 | `worker.gcrootsDir` | string | `"/nix/var/nix/gcroots/gradient"` | `GRADIENT_WORKER_GCROOTS_DIR` | Directory for the indirect GC roots pinning each running build's inputs and outputs against a concurrent `nix-collect-garbage`. |

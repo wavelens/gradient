@@ -12,7 +12,7 @@ Every message on `/proto`, from `backend/gradient-wire/src/messages`. IDs (`job_
 | `AuthUpdate` | Result of a reauth | `authorized_peers`, `failed_peers` |
 | `Reject` | Declining the session, then closing | `code`, `reason` |
 | `Error` | Protocol error | `code`, `message` |
-| `Draining` | Server shutting down. Request no more jobs | - |
+| `Draining` | Session ending soon. Request no more jobs | - |
 | `JobListChunk` | Full candidate list, answer to `RequestJobList` | `candidates`, `is_final` |
 | `JobOffer` | New candidates, up to 1 000 per message | `candidates` |
 | `AssignJob` | Assigning a job. `cluster` is marking one member of a cluster attempt, held until `StartCluster` | `job_id`, `assignment_id`, `job`, `cluster` |
@@ -54,7 +54,7 @@ Every message on `/proto`, from `backend/gradient-wire/src/messages`. IDs (`job_
 | `JobFailed` | Job failed, with the metrics of a failed build | `job_id`, `assignment_id`, `error`, `kind`, `missing_paths`, `spans`, `metrics` |
 | `BuildProgress` | Bytes and paths of a build's prefetch, download or upload | `job_id`, `assignment_id`, `build_id`, `phase`, `bytes_done`, `bytes_total`, `paths_done`, `paths_total` |
 | `EvalProgress` | Flake input downloads or live thunks of an eval job, at most once per second | `job_id`, `assignment_id`, `progress` |
-| `Draining` | Worker draining | - |
+| `Draining` | Worker stopping. Assign no more jobs | - |
 | `LogChunk` (bulk) | Build log | `job_id`, `task_index`, `data` |
 | `EvalMessage` | Warning or error on the evaluation | `job_id`, `level`, `source`, `message` |
 | `NarRequest` | Pull these paths | `job_id`, `paths` |

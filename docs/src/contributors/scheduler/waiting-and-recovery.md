@@ -79,10 +79,8 @@ Offers are deltas. The server will send a worker only candidates missing from it
 1. **Assignments:** all open `dispatched_job` rows close as `Abandoned` rows. Both assignment selections refuse a job with an open row. Re-queued work would otherwise wait for its worker to reconnect or for the 1800 s check for abandoned assignments.
 2. **Attempts:** `Running` build attempts turn `Aborted`.
 3. **Shared builds:** every `Building` shared build must turn `Queued` first. `unpromote_ungated` will move those with failing queue conditions back to `Created` status.
-4. **Evaluations:** all statuses in `EvaluationStatus::ACTIVE` except `Queued` and `Waiting` turn `Aborted` with `finished_at` set. `Building` is included. Nothing else could drive the remaining builds of such an evaluation.
-5. **Their shared builds:** `Created`, `Queued` and `Building` shared builds of those evaluations turn `Aborted`, unless they are also named in a non-terminal evaluation.
-6. **Tasks:** each affected task will get `force_evaluation` set. The fresh evaluation will thaw the aborted shared builds through `RepairScope::Eval` once its stream is complete.
-7. **Clusters:** all open [cluster attempts](clusters.md) close (`PrepareFailed` when unstarted, `Aborted` otherwise). A `Running` cluster will go back to `Queued`, or to `Aborted` when a member evaluation or shared build can no longer finish.
+4. **Evaluations:** `Fetching`, `EvaluatingFlake` and `EvaluatingDerivation` evaluations turn `Queued`, with a phase event each. Their eval job was on a worker. `Building` evaluations keep their status and their re-queued builds.
+5. **Clusters:** all open [cluster attempts](clusters.md) close (`PrepareFailed` when unstarted, `Aborted` otherwise). A `Running` cluster will go back to `Queued`, or to `Aborted` when a member evaluation or shared build can no longer finish.
 
 - `Queued` evaluations return through the eval assignment pass. `Waiting` ones through the waiting pass.
 - Recovery will skip the live effects of `update_evaluation_status` calls. The rows are consistent on their own.

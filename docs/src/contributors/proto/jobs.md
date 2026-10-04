@@ -104,6 +104,7 @@ An `EvalProgress` message will carry one download row per flake input while fetc
 | `InputsUnavailable` | Self-heal, see below |
 | `CorruptEvalCache` | Purging the evaluation cache blob and re-queuing the evaluation |
 | `Aborted` | Aborted by the server. No cascade |
+| `Canceled` | Stopped by the worker. Re-queued without using an attempt, see [Worker Stop](#worker-stop) |
 
 - **InputsUnavailable:** An input listed by the cache was not found (uncached, `404`/`410` on the URL, or `NarUnavailable`). The server will delete the stale cache row and object. The server will also reset the producing build and retry. The build will fail permanently after `build.inputsUnavailableMaxLoops` (3) loops.
 - **DependencyFailed** can spread upward over the dependency graph from `Permanent` and `Timeout` failures, across evaluations.
@@ -122,7 +123,7 @@ A [cluster member](../scheduler/clusters.md) will arrive as `AssignJob` with `cl
 | `ClusterSignal` to the server | Sent by the member. `to = None` is reaching every other member |
 | `AbortCluster { attempt }` | Dropping a held member unreported and aborting a running one (`JobFailed { Aborted }`) |
 | No `StartCluster` within `hold_secs` | Releasing the slot and reporting `JobFailed { Aborted }` with `cluster start timed out` |
-| Local drain | Releasing every held member the same way, with `worker draining` |
+| Worker stop | Releasing every held member the same way, with `worker draining` |
 
 - A held member will count against `eval.maxConcurrent` / `build.maxConcurrent` like a running job.
 - The server will set `hold_secs` to its prepare timeout plus a 10 s margin.
@@ -131,3 +132,23 @@ A [cluster member](../scheduler/clusters.md) will arrive as `AssignJob` with `cl
 
 - **Abort** (API or a newer evaluation): The evaluation will turn `Aborted`. `AbortJob` will go to its evaluation job and to every running build wanted by no other live evaluation. The evaluation that dispatched such a build does not matter. The server will remove pending jobs. The worker will stop the daemon build at once and answer `JobFailed { Aborted }`. The server will reap aborts unconfirmed after 5 min.
 - **Lost Worker:** Open assignments close as abandoned. Any build in `Building` will return to `Queued`, and its running attempt will close as `Aborted`. A running evaluation will go to `Waiting` and back into the queue. The evaluation will fail after 10 lost assignments.
+
+## Worker Stop
+
+```mermaid
+sequenceDiagram
+    participant W as Worker
+    participant S as Server
+    Note left of W: SIGTERM
+    W->>S: Draining
+    Note left of W: aborting every running job
+    W->>S: JobFailed with Canceled
+    W-xS: close
+```
+
+- The worker will send `Draining`, release held cluster members and abort every running job.
+- Each aborted job will report `JobFailed { Canceled }` with its phase timeline. The worker will wait at most 5 s for these reports.
+- A server before protocol 30 will receive no report. The closed session will re-queue those jobs as for a lost worker.
+- A canceled build will return to `Queued`. Its attempt will close as `Aborted` and count against neither `build.maxAttempts` nor the substitution miss count.
+- A canceled eval job will return its evaluation to `Queued`.
+- The assignment will close as abandoned and count toward no failure limit.

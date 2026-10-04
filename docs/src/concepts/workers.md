@@ -53,9 +53,13 @@ A team worker is part of one [team](teams.md), with one token for the whole team
 
 A worker ID is either a team worker or a set of project registrations, never both.
 
-## Ephemeral Workers
+## Worker Stop
 
-A worker in a throwaway VM can announce draining. The server will then send no new jobs. The running jobs finish. A fresh VM can then replace the old one.
+Any worker can stop at any time, a throwaway VM included. A stop can lose no job.
+
+- The stopping worker will announce draining. The server will then send no new jobs.
+- The worker will abort its running jobs.
+- The server will queue those jobs again for other workers.
 
 ## Related
 
