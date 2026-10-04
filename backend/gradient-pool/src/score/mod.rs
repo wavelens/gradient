@@ -18,3 +18,4 @@ pub use context::{
 };
 pub use policy::{RulePolicy, ScoringPolicy, policy_by_name, rule_catalog};
 pub use rule::{JobContext, ScoreRule, WorkerContext};
+pub use rules::estimated_time::contention_factor;

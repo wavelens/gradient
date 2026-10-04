@@ -83,6 +83,12 @@ fn summarize(rows: &[MDerivationMetric]) -> gradient_pool::score::HistoryPredict
 
     let durations: Vec<i64> = rows.iter().filter_map(|r| r.build_time_ms).collect();
     let build_time_ms = mean(&durations);
+    let uncontended: Vec<i64> = rows.iter().filter_map(uncontended_build_time_ms).collect();
+    let built_on: Vec<i64> = rows
+        .iter()
+        .filter(|r| r.build_time_ms.is_some())
+        .filter_map(|r| r.cpu_core_score.map(i64::from))
+        .collect();
 
     let disk: Vec<i64> = rows
         .iter()
@@ -98,11 +104,19 @@ fn summarize(rows: &[MDerivationMetric]) -> gradient_pool::score::HistoryPredict
         predicted_peak_ram_mb,
         avg_cpu_time_ms,
         build_time_ms,
+        uncontended_build_time_ms: mean(&uncontended),
+        build_core_score: mean(&built_on).map(|score| score as u32),
         avg_disk_bytes,
         output_nar_size: None,
         oom_rate,
         samples,
     }
+}
+
+fn uncontended_build_time_ms(row: &MDerivationMetric) -> Option<i64> {
+    let others = row.concurrent_builds.unwrap_or(0).max(0) as u32;
+    row.build_time_ms
+        .map(|ms| (ms as f64 / gradient_pool::score::contention_factor(others)).round() as i64)
 }
 
 fn mean(vals: &[i64]) -> Option<u64> {
@@ -171,6 +185,25 @@ mod tests {
         assert_eq!(p.predicted_peak_ram_mb, Some(300));
         assert_eq!(p.avg_cpu_time_ms, Some(2000));
         assert!((p.oom_rate - (1.0 / 3.0)).abs() < 1e-6);
+    }
+
+    #[test]
+    fn the_build_time_drops_the_slowdown_of_the_builds_beside_it() {
+        let row = |build_time_ms, concurrent_builds, cpu_core_score| MDerivationMetric {
+            build_time_ms: Some(build_time_ms),
+            concurrent_builds,
+            cpu_core_score,
+            ..Default::default()
+        };
+        let p = summarize(&[
+            row(120_000, Some(5), Some(2_000)),
+            row(100_000, None, Some(4_000)),
+            row(80_000, Some(0), None),
+        ]);
+
+        assert_eq!(p.build_time_ms, Some(100_000));
+        assert_eq!(p.uncontended_build_time_ms, Some(93_333));
+        assert_eq!(p.build_core_score, Some(3_000));
     }
 
     #[test]
