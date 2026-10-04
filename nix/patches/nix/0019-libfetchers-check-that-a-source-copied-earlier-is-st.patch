@@ -1,0 +1,37 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Dennis Wuitz <dennish@wuitz.de>
+Date: Mon, 5 Oct 2026 00:56:03 +0200
+Subject: [PATCH] libfetchers: check that a source copied earlier is still in
+ the store
+
+---
+ src/libfetchers/fetch-to-store.cc | 13 +++++++++++--
+ 1 file changed, 11 insertions(+), 2 deletions(-)
+
+diff --git a/src/libfetchers/fetch-to-store.cc b/src/libfetchers/fetch-to-store.cc
+index acedca6..95b4d80 100644
+--- a/src/libfetchers/fetch-to-store.cc
++++ b/src/libfetchers/fetch-to-store.cc
+@@ -55,8 +55,17 @@ std::pair<StorePath, Hash> fetchToStore2(
+ 
+     if (!filter) {
+         auto dstPathCached = getConcurrent(settings.srcToStore->cache, srcToStoreKey);
+-        if (dstPathCached && (mode == FetchMode::DryRun || std::get<2>(*dstPathCached) == FetchMode::Copy))
+-            return std::make_pair(std::get<0>(*dstPathCached), std::get<1>(*dstPathCached));
++        if (dstPathCached) {
++            auto & [storePath, hash, cachedMode] = *dstPathCached;
++            if (mode == FetchMode::DryRun)
++                return {storePath, hash};
++            /* A long-lived evaluator outlives the copy: the store path may have been garbage collected since. */
++            if (cachedMode == FetchMode::Copy) {
++                store.addTempRoot(storePath);
++                if (store.isValidPath(storePath))
++                    return {storePath, hash};
++            }
++        }
+     }
+ 
+     std::optional<fetchers::Cache::Key> cacheKey;
+-- 
+2.55.0
+
