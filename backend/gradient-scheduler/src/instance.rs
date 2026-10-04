@@ -193,6 +193,86 @@ gradient_db::sql! {
 
 const STORAGE_WINDOW_HOURS: i64 = 1;
 
+#[derive(Debug, Default, FromQueryResult)]
+struct PathFitRow {
+    n: f64,
+    sb: Option<f64>,
+    sp: Option<f64>,
+    sy: Option<f64>,
+    sbb: Option<f64>,
+    spp: Option<f64>,
+    sbp: Option<f64>,
+    sby: Option<f64>,
+    spy: Option<f64>,
+}
+
+gradient_db::sql! {
+    PREFETCH_TIME_FIT = r#"
+        SELECT COUNT(*)::float8 AS n,
+               SUM(b)::float8 AS sb, SUM(p)::float8 AS sp, SUM(y)::float8 AS sy,
+               SUM(b * b)::float8 AS sbb, SUM(p * p)::float8 AS spp, SUM(b * p)::float8 AS sbp,
+               SUM(b * y)::float8 AS sby, SUM(p * y)::float8 AS spy
+        FROM (
+          SELECT (end_ms - start_ms) / 1000.0 AS y, bytes / 1000000.0 AS b, paths::numeric AS p
+          FROM dispatched_job_phase
+          WHERE phase = $2 AND created_at >= $1
+        ) span
+    "#,
+        params = [Now, Int(8)];
+}
+
+const PER_PATH_WINDOW_HOURS: i64 = 24;
+const PER_PATH_MIN_SPANS: f64 = 100.0;
+
+fn det3(m: [[f64; 3]; 3]) -> f64 {
+    m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1])
+        - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0])
+        + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0])
+}
+
+fn per_path_secs(row: &PathFitRow) -> Option<f64> {
+    if row.n < PER_PATH_MIN_SPANS {
+        return None;
+    }
+
+    let normal = [
+        [row.n, row.sb?, row.sp?],
+        [row.sb?, row.sbb?, row.sbp?],
+        [row.sp?, row.sbp?, row.spp?],
+    ];
+    let det = det3(normal);
+    if det.abs() < f64::EPSILON {
+        return None;
+    }
+
+    let mut paths_column = normal;
+    for (row_index, value) in [row.sy?, row.sby?, row.spy?].into_iter().enumerate() {
+        paths_column[row_index][2] = value;
+    }
+
+    Some(det3(paths_column) / det).filter(|secs| secs.is_finite() && *secs > 0.0)
+}
+
+async fn learned_per_path_secs(
+    db: &impl ConnectionTrait,
+    now: chrono::NaiveDateTime,
+) -> Option<f64> {
+    use gradient_wire::types::JobPhase;
+
+    let since = now - chrono::Duration::hours(PER_PATH_WINDOW_HOURS);
+    let row = PathFitRow::find_by_statement(
+        PREFETCH_TIME_FIT.bind([since.into(), JobPhase::Prefetch.as_i16().into()]),
+    )
+    .one(db)
+    .await
+    .unwrap_or_else(|e| {
+        error!(error = %e, "instance metrics: per-path fit query failed");
+        None
+    })?;
+
+    per_path_secs(&row)
+}
+
 async fn storage_throughput(
     db: &impl ConnectionTrait,
     now: chrono::NaiveDateTime,
@@ -270,6 +350,7 @@ pub async fn compute_instance_context(
         };
 
     let (storage, compression_ratio) = storage_throughput(db, now).await;
+    let per_path_secs = learned_per_path_secs(db, now).await;
 
     gradient_pool::score::InstanceContext {
         wait_secs: windowed(
@@ -318,6 +399,7 @@ pub async fn compute_instance_context(
         storage_read_mbps: storage.read_mbps,
         storage_write_mbps: storage.write_mbps,
         compression_ratio,
+        per_path_secs,
         ..Default::default()
     }
 }
@@ -437,6 +519,7 @@ mod tests {
             .append_query_results([vec![assignment_id]])
             .append_query_results([vec![storage]])
             .append_query_results([vec![compression]])
+            .append_query_results([vec![BTreeMap::from([f("n", 0.0)])]])
             .into_connection();
 
         let counts = InstanceCounts {
@@ -467,6 +550,36 @@ mod tests {
         assert_eq!(ic.storage_read_mbps, Some(1_200.0));
         assert_eq!(ic.storage_write_mbps, Some(900.0));
         assert_eq!(ic.compression_ratio, Some(0.4));
+    }
+
+    #[test]
+    fn the_path_coefficient_is_the_time_beyond_the_bytes() {
+        let spans: Vec<(f64, f64)> = (0..200)
+            .map(|i| (f64::from(i % 7) * 30.0, f64::from(i % 11)))
+            .collect();
+        let mut row = PathFitRow {
+            n: spans.len() as f64,
+            ..Default::default()
+        };
+        let add = |sum: &mut Option<f64>, value: f64| *sum = Some(sum.unwrap_or(0.0) + value);
+        for (b, p) in spans {
+            let y = 2.0 + 0.04 * b + 0.25 * p;
+            add(&mut row.sb, b);
+            add(&mut row.sp, p);
+            add(&mut row.sy, y);
+            add(&mut row.sbb, b * b);
+            add(&mut row.spp, p * p);
+            add(&mut row.sbp, b * p);
+            add(&mut row.sby, b * y);
+            add(&mut row.spy, p * y);
+        }
+
+        assert!((per_path_secs(&row).unwrap() - 0.25).abs() < 1e-9);
+        assert_eq!(
+            per_path_secs(&PathFitRow { n: 10.0, ..row }),
+            None,
+            "too few spans"
+        );
     }
 
     #[tokio::test]

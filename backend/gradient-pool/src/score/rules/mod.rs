@@ -12,8 +12,8 @@ pub mod qos;
 pub mod resource;
 
 pub use builtin::{
-    BuiltinDeprioritizeRule, DependencyCountRule, MissingPathsRule, RealisedOutputsRule,
-    RescoreWaitRule, ReserveFetchWorkersRule, WaitTimeRule,
+    BuiltinDeprioritizeRule, DependencyCountRule, RealisedOutputsRule, RescoreWaitRule,
+    ReserveFetchWorkersRule, WaitTimeRule,
 };
 pub use estimated_time::EstimatedTimeRule;
 pub use fair_share::FairShareRule;

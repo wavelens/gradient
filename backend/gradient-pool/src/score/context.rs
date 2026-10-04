@@ -49,6 +49,7 @@ pub struct InstanceContext {
     pub storage_read_mbps: Option<f64>,
     pub storage_write_mbps: Option<f64>,
     pub compression_ratio: Option<f64>,
+    pub per_path_secs: Option<f64>,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]

@@ -7,8 +7,8 @@
 use crate::score::context::InstanceContext;
 use crate::score::rule::{JobContext, ScoreRule, WorkerContext};
 use crate::score::rules::builtin::{
-    BuiltinDeprioritizeRule, DependencyCountRule, MissingPathsRule, RealisedOutputsRule,
-    RescoreWaitRule, ReserveFetchWorkersRule, WaitTimeRule,
+    BuiltinDeprioritizeRule, DependencyCountRule, RealisedOutputsRule, RescoreWaitRule,
+    ReserveFetchWorkersRule, WaitTimeRule,
 };
 use crate::score::rules::{
     EstimatedTimeRule, FairShareRule, PreferLocalBuildRule, QosRule, ResourceFitRule,
@@ -124,7 +124,6 @@ fn spec(enabled: bool, rule: Box<dyn ScoreRule>) -> RuleSpec {
 
 fn simple_table() -> Vec<RuleSpec> {
     vec![
-        spec(true, Box::new(MissingPathsRule::default())),
         spec(true, Box::new(EstimatedTimeRule::default())),
         spec(true, Box::new(RealisedOutputsRule::default())),
         spec(true, Box::new(RescoreWaitRule::default())),
@@ -494,8 +493,8 @@ mod tests {
             (breakdown.total - total).abs() < 1e-9,
             "total must match score()"
         );
-        assert_eq!(breakdown.rules.len(), 9, "simple policy has 9 rules");
-        assert!(breakdown.rules.contains_key("MissingPathsRule"));
+        assert_eq!(breakdown.rules.len(), 8, "simple policy has 8 rules");
+        assert!(breakdown.rules.contains_key("EstimatedTimeRule"));
         assert!(breakdown.rules.contains_key("QosRule"));
         assert!(breakdown.rules.contains_key("WaitTimeRule"));
         let sum: f64 = breakdown.rules.values().sum();
@@ -513,7 +512,6 @@ mod tests {
             "BuiltinDeprioritizeRule",
             "DependencyCountRule",
             "EstimatedTimeRule",
-            "MissingPathsRule",
             "PreferLocalBuildRule",
             "QosRule",
             "RealisedOutputsRule",
