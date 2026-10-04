@@ -358,7 +358,8 @@ async fn scim_patch_group_remove_member_leaves_the_team() {
         }])
         .append_query_results([Vec::<team_user::Model>::new()])
         .into_connection();
-    let res = scim_server(db)
+    let server = scim_server(db.clone());
+    let res = server
         .patch("/scim/v2/Groups/acme-eng")
         .add_header("Authorization", auth_header())
         .json(&json!({
@@ -369,6 +370,13 @@ async fn scim_patch_group_remove_member_leaves_the_team() {
     res.assert_status_ok();
     let body: Value = res.json();
     assert_eq!(body["members"].as_array().map(Vec::len), Some(0));
+    drop(server);
+    let only_group_rows = db
+        .into_transaction_log()
+        .iter()
+        .flat_map(|t| t.statements().to_vec())
+        .any(|s| s.sql.starts_with("DELETE FROM \"team_user\"") && s.sql.contains("\"via_group\""));
+    assert!(only_group_rows, "SCIM must not remove members added by hand");
 }
 
 #[tokio::test(flavor = "multi_thread")]
