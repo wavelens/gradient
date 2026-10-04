@@ -46,6 +46,8 @@ pub struct InstanceContext {
     pub download_speed_mean_mbps: Option<f64>,
     pub downloads_in_flight: u32,
     pub uploads_in_flight: u32,
+    pub download_slots: u32,
+    pub upload_slots: u32,
     pub storage_read_mbps: Option<f64>,
     pub storage_write_mbps: Option<f64>,
     pub compression_ratio: Option<f64>,
