@@ -91,6 +91,10 @@ pub struct ProtoWriter {
 }
 
 impl ProtoWriter {
+    pub fn version(&self) -> u16 {
+        self.inner.version()
+    }
+
     pub async fn send(&self, msg: ClientMessage) -> Result<()> {
         self.inner
             .send_msg(&msg)

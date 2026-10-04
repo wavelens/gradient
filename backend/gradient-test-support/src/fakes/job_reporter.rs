@@ -39,7 +39,6 @@ pub enum ReportedEvent {
         metrics: Option<BuildMetrics>,
         substituted: bool,
     },
-    Compressing,
     LogChunk {
         task_index: u32,
         data: Vec<u8>,
@@ -260,11 +259,6 @@ impl JobReporter for RecordingJobReporter {
             metrics,
             substituted,
         });
-        Ok(())
-    }
-
-    async fn report_compressing(&mut self) -> Result<()> {
-        self.record(ReportedEvent::Compressing);
         Ok(())
     }
 

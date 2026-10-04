@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use std::sync::OnceLock;
 use std::time::Instant;
 
 use sysinfo::{CpuRefreshKind, MemoryRefreshKind, RefreshKind, System};
@@ -57,6 +58,11 @@ const SCORE_MIN: u32 = 1;
 const SCORE_MAX: u32 = 100_000;
 
 pub fn cpu_core_score() -> u32 {
+    static SCORE: OnceLock<u32> = OnceLock::new();
+    *SCORE.get_or_init(benchmark_cpu_core_score)
+}
+
+fn benchmark_cpu_core_score() -> u32 {
     let start = Instant::now();
     let mut hash: u64 = FNV_OFFSET;
     for i in 0..BENCH_ITERATIONS {

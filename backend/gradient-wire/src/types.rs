@@ -146,6 +146,17 @@ pub enum JobUpdateKind {
     InputUpdateExpansion {
         matched: Vec<String>,
     },
+    #[proto(28)]
+    Stage(BuildStage),
+}
+
+pub const PROTO_BUILD_STAGES: u16 = 28;
+
+#[derive(Proto, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum BuildStage {
+    Prefetch,
+    Build,
+    Upload,
 }
 
 #[derive(Proto, Debug, Clone, PartialEq)]
@@ -316,6 +327,12 @@ pub struct BuildMetrics {
     pub disk_write_bytes: Option<u64>,
     pub oom_killed: bool,
     pub build_time_ms: Option<u64>,
+    #[proto(28, default)]
+    pub concurrent_builds: Option<u32>,
+    #[proto(28, default)]
+    pub build_cores: Option<u32>,
+    #[proto(28, default)]
+    pub cpu_core_score: Option<u32>,
 }
 
 #[derive(Proto, Debug, Clone, PartialEq, Default)]
@@ -401,10 +418,12 @@ pub enum JobPhase {
     CacheQueryWait,
     NarFetch,
     NarImport,
+    #[proto(28)]
+    UploadWait,
 }
 
 impl JobPhase {
-    pub const ALL: [Self; 17] = [
+    pub const ALL: [Self; 18] = [
         Self::Fetch,
         Self::PushInputs,
         Self::EvalFlake,
@@ -422,6 +441,7 @@ impl JobPhase {
         Self::CacheQueryWait,
         Self::NarFetch,
         Self::NarImport,
+        Self::UploadWait,
     ];
 
     pub const fn as_str(self) -> &'static str {
@@ -443,6 +463,7 @@ impl JobPhase {
             Self::CacheQueryWait => "cache_query_wait",
             Self::NarFetch => "nar_fetch",
             Self::NarImport => "nar_import",
+            Self::UploadWait => "upload_wait",
         }
     }
 
@@ -468,6 +489,7 @@ impl JobPhase {
             Self::Download => 15,
             Self::NarFetch => 16,
             Self::NarImport => 17,
+            Self::UploadWait => 18,
         }
     }
 
@@ -490,8 +512,16 @@ impl JobPhase {
             15 => Self::Download,
             16 => Self::NarFetch,
             17 => Self::NarImport,
+            18 => Self::UploadWait,
             _ => return None,
         })
+    }
+
+    pub const fn known_to(self, version: u16) -> Self {
+        match self {
+            Self::UploadWait if version < PROTO_BUILD_STAGES => Self::NarPush,
+            phase => phase,
+        }
     }
 
     pub fn name_of(v: i16) -> std::borrow::Cow<'static, str> {

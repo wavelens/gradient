@@ -23,6 +23,7 @@ pub struct WorkerContextView {
     pub disk_speed_mbps: Option<f32>,
     pub upload_speed_mbps: Option<f32>,
     pub download_speed_mbps: Option<f32>,
+    pub running_builds: u32,
 }
 
 impl WorkerContextView {
@@ -40,6 +41,7 @@ impl WorkerContextView {
             disk_speed_mbps: m.disk_speed_mbps,
             upload_speed_mbps: m.upload_speed_mbps,
             download_speed_mbps: m.download_speed_mbps,
+            running_builds: m.running_builds,
         }
     }
 }

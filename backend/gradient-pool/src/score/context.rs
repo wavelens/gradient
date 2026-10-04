@@ -44,6 +44,8 @@ pub struct InstanceContext {
     pub cpu_core_score_mean: Option<f64>,
     pub upload_speed_mean_mbps: Option<f64>,
     pub download_speed_mean_mbps: Option<f64>,
+    pub downloads_in_flight: u32,
+    pub uploads_in_flight: u32,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -67,6 +69,7 @@ pub struct WorkerMetricsView {
     pub disk_speed_mbps: Option<f32>,
     pub upload_speed_mbps: Option<f32>,
     pub download_speed_mbps: Option<f32>,
+    pub running_builds: u32,
 }
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]

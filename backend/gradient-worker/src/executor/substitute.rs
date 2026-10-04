@@ -167,12 +167,20 @@ impl UpstreamIo for JobUpdaterIo<'_> {
         progress: &mut Progress<impl ProgressSink>,
     ) -> Result<Option<Vec<u8>>> {
         let _fetch = self.0.phase(JobPhase::SubstituteFetch);
+        let started = std::time::Instant::now();
         let (_, body) = download_one_presigned(
             gradient_worker_client::http::download_client(),
             upstream.clone(),
             progress,
         )
         .await?;
+        if body.is_some()
+            && let Some(nar_size) = upstream.nar_size
+        {
+            gradient_worker_client::throughput::DOWNLOAD
+                .observe_transfer(nar_size, started.elapsed());
+        }
+
         Ok(body.map(|(bytes, _)| bytes))
     }
 }

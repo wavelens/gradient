@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use std::sync::atomic::{AtomicU32, Ordering};
+
 use gradient_wire::messages::BuildMetrics;
 use harmonia_protocol::daemon_wire::types2::{BuildResult, Microseconds};
 
@@ -40,13 +42,62 @@ fn cpu_usec(user: Option<Microseconds>, system: Option<Microseconds>) -> Option<
     }
 }
 
-pub(super) fn build_metrics(usage: ResourceUsage, build_time_ms: u64) -> BuildMetrics {
+#[derive(Debug, Clone, Copy)]
+pub struct BuildHost {
+    pub build_cores: u32,
+    pub cpu_core_score: u32,
+}
+
+pub(super) static RUNNING_BUILDS: RunningBuilds = RunningBuilds::new();
+
+pub(super) struct RunningBuilds(AtomicU32);
+
+impl RunningBuilds {
+    const fn new() -> Self {
+        Self(AtomicU32::new(0))
+    }
+
+    pub(super) fn start(&self) -> RunningBuild<'_> {
+        RunningBuild {
+            others: self.0.fetch_add(1, Ordering::Relaxed),
+            builds: self,
+        }
+    }
+}
+
+pub(super) struct RunningBuild<'a> {
+    others: u32,
+    builds: &'a RunningBuilds,
+}
+
+impl Drop for RunningBuild<'_> {
+    fn drop(&mut self) {
+        self.builds.0.fetch_sub(1, Ordering::Relaxed);
+    }
+}
+
+pub(super) fn build_metrics(
+    usage: ResourceUsage,
+    build_time_ms: u64,
+    host: BuildHost,
+    running: &RunningBuild<'_>,
+) -> BuildMetrics {
     observe_disk_speed(usage, build_time_ms);
-    metrics_from(
-        usage,
-        build_time_ms,
-        crate::metrics::host_static().cpu_count,
-    )
+    let cpu_count = crate::metrics::host_static().cpu_count;
+    BuildMetrics {
+        concurrent_builds: Some(running.others),
+        build_cores: Some(effective_cores(host.build_cores, cpu_count)),
+        cpu_core_score: Some(host.cpu_core_score),
+        ..metrics_from(usage, build_time_ms, cpu_count)
+    }
+}
+
+fn effective_cores(build_cores: u32, cpu_count: u32) -> u32 {
+    if build_cores == 0 {
+        cpu_count
+    } else {
+        build_cores.min(cpu_count)
+    }
 }
 
 fn observe_disk_speed(usage: ResourceUsage, build_time_ms: u64) {
@@ -74,6 +125,7 @@ fn metrics_from(usage: ResourceUsage, build_time_ms: u64, cpu_count: u32) -> Bui
         disk_write_bytes: usage.io_write_bytes,
         oom_killed: usage.oom_kills.is_some_and(|kills| kills > 0),
         build_time_ms: Some(build_time_ms),
+        ..Default::default()
     }
 }
 
@@ -126,6 +178,7 @@ mod tests {
                 disk_write_bytes: Some(20),
                 oom_killed: true,
                 build_time_ms: Some(4_000),
+                ..Default::default()
             }
         );
     }
@@ -137,6 +190,24 @@ mod tests {
             ..Default::default()
         };
         assert!(!metrics_from(usage, 1_000, 4).oom_killed);
+    }
+
+    #[test]
+    fn a_build_counts_the_builds_running_beside_it() {
+        let builds = RunningBuilds::new();
+        let first = builds.start();
+        let second = builds.start();
+        drop(first);
+        let third = builds.start();
+
+        assert_eq!((second.others, third.others), (1, 1));
+    }
+
+    #[test]
+    fn zero_build_cores_is_every_core_and_a_larger_value_is_capped() {
+        assert_eq!(effective_cores(0, 16), 16);
+        assert_eq!(effective_cores(4, 16), 4);
+        assert_eq!(effective_cores(64, 16), 16);
     }
 
     #[test]
