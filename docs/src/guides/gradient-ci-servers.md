@@ -8,27 +8,41 @@ Build capacity from servers.gradient.ci, connected with one pasted token. One co
 - An account on [servers.gradient.ci](https://servers.gradient.ci)
 - `gradientCi.enable` left on, see [Turn the Offer Off](#turn-the-offer-off)
 
-## 1. Connect a Project
+## 1. Choose Project or Team
 
-1. Open **Settings -> Workers** in the project. The first entry is **Gradient.CI Servers**.
-2. Select **Connect**, then **Open servers.gradient.ci** in the dialog.
-3. Sign in, name the key and select **Create key**. The page will show the connection token once.
-4. Paste the token into **Connection token** and select **Connect**.
+One connection is enough. Connect either a project or a [team](../concepts/teams.md), not both.
 
-Connection tokens start with `gci1_`. The entry will turn **Connected** within 30 s.
+| Connection | Builds for | Fits |
+|---|---|---|
+| Project | One project | A single project |
+| Team | Every project granting the team's [workers](../concepts/teams.md#team-workers) | Many projects behind one key |
 
-## 2. Connect a Team
+A team connection is the better pick for more than one project. One key can build for every project, and each new project needs only a grant.
 
-A [team](../concepts/teams.md) Admin can connect one [team worker](../concepts/teams.md#team-workers) for every project granting the team's workers.
+## 2. Connect
 
-1. Open the team's **Workers** page.
-2. Select **Connect Gradient.CI Servers** and paste the token as in step 1.
+=== "Project"
 
-The dialog is now showing a confirmation notice. Projects get the team connection only after granting the team's workers.
+    1. Open **Settings -> Workers** in the project. The first entry is **Gradient.CI Servers**.
+    2. Select **Connect**, then **Open servers.gradient.ci** in the dialog.
+    3. Sign in, name the key and select **Create key**. The page will show the connection token once.
+    4. Paste the token into **Connection token** and select **Connect**.
 
-## 3. Grant the Team's Workers
+    The entry will turn **Connected** within 30 s.
 
-Builds of a project start on the team connection only after a grant with **Workers** on the project's **Members & Roles** page.
+=== "Team"
+
+    A team Admin can connect the team.
+
+    1. Open the team's **Workers** page and select **Connect Gradient.CI Servers**.
+    2. Select **Open servers.gradient.ci** in the dialog.
+    3. Sign in, name the key and select **Create key**. The page will show the connection token once.
+    4. Paste the token into **Connection token** and select **Connect**.
+    5. Grant the team **Workers** on the **Members & Roles** page of every project to build on the connection.
+
+    Builds of a project start only after the grant.
+
+Connection tokens start with `gci1_`.
 
 ## Verify Deployment
 
