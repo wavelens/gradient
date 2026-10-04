@@ -20,6 +20,7 @@ interface ServerConfig {
   smtp_enabled: boolean;
   create_project: CreatePermission;
   create_cache: CreatePermission;
+  create_team: CreatePermission;
   github_app_enabled: boolean;
   ssh_enabled: boolean;
   ssh_port: number | null;
@@ -40,6 +41,7 @@ export class ConfigService {
   smtpEnabled = false;
   createProject: CreatePermission = 'everyone';
   createCache: CreatePermission = 'everyone';
+  createTeam: CreatePermission = 'everyone';
   githubAppEnabled = false;
   sshEnabled = false;
   sshPort: number | null = null;
@@ -73,6 +75,7 @@ export class ConfigService {
           this.smtpEnabled = res.message.smtp_enabled;
           this.createProject = res.message.create_project ?? 'everyone';
           this.createCache = res.message.create_cache ?? 'everyone';
+          this.createTeam = res.message.create_team ?? 'everyone';
           this.githubAppEnabled = res.message.github_app_enabled ?? false;
           this.sshEnabled = res.message.ssh_enabled ?? false;
           this.sshPort = res.message.ssh_port ?? null;

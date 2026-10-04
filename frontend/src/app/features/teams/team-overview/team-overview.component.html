@@ -1,0 +1,100 @@
+<!--
+  SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+
+  SPDX-License-Identifier: AGPL-3.0-only
+-->
+
+<gr-page-layout [breadcrumb]="[{ label: 'Teams', link: ['/teams'] }, { label: team()?.display_name || teamName }]" [title]="team()?.display_name || teamName" subtitle="Team">
+  @if (isAdmin()) {
+    <div slot="actions">
+      <button grButton label="Members" icon="group" severity="secondary" [routerLink]="['/team', teamName, 'members']"></button>
+      <button grButton label="Workers" icon="construction" severity="secondary" [routerLink]="['/team', teamName, 'workers']"></button>
+      <button grButton label="Settings" icon="settings" severity="secondary" [routerLink]="['/team', teamName, 'settings']"></button>
+    </div>
+  }
+  @if (error(); as message) {
+    <gr-message-banner type="error">{{ message }}</gr-message-banner>
+  }
+
+  @if (loading()) {
+    <gr-loading-spinner message="Loading team..." />
+  } @else {
+    @if (isAdmin() && requests().length > 0) {
+      <gr-settings-section title="Requests" [card]="false" maxWidth="none">
+        <gr-row-list>
+          @for (request of requests(); track request.id) {
+            <gr-row icon="mark_email_unread">
+              {{ request.display_name }}
+              <span slot="meta">{{ requestMeta(request) }}</span>
+              <div slot="actions">
+                <button grButton label="Approve" icon="check" severity="success" size="small"
+                  [loading]="busy() === request.id" (click)="approve(request.id)"></button>
+                <button grButton label="Deny" icon="close" severity="danger" size="small"
+                  [disabled]="busy() === request.id" (click)="deny(request.id)"></button>
+              </div>
+            </gr-row>
+          }
+        </gr-row-list>
+      </gr-settings-section>
+    }
+
+    <gr-settings-section title="Members" [description]="members().length + (members().length === 1 ? ' member' : ' members')" [card]="false" maxWidth="none">
+      @if (members().length > 0) {
+        <gr-row-list>
+          @for (member of firstMembers(); track member.user) {
+            <gr-row icon="person">
+              <span class="mono">{{ member.user }}</span>
+              <span slot="meta">{{ member.name }}</span>
+              <div slot="actions"><gr-badge severity="neutral">{{ member.role }}</gr-badge></div>
+            </gr-row>
+          }
+        </gr-row-list>
+      } @else {
+        <gr-empty-state icon="group" title="No members" />
+      }
+    </gr-settings-section>
+
+    <gr-settings-section title="Workers" [card]="false" maxWidth="none">
+      @if (workers().length > 0) {
+        <gr-row-list>
+          @for (worker of workers(); track worker.worker_id) {
+            <gr-row [icon]="worker.gradient_ci ? 'cloud' : 'construction'">
+              {{ worker.display_name }}
+              <span slot="meta" class="mono">{{ worker.worker_id }}</span>
+              <div slot="actions">
+                @if (!worker.active) {
+                  <gr-badge severity="warning">Inactive</gr-badge>
+                }
+                <gr-badge [severity]="worker.connected ? 'success' : 'neutral'">{{ worker.connected ? 'Connected' : 'Offline' }}</gr-badge>
+              </div>
+            </gr-row>
+          }
+        </gr-row-list>
+      } @else {
+        <gr-empty-state icon="construction" title="No workers" />
+      }
+    </gr-settings-section>
+
+    <gr-settings-section title="Projects and Caches" [card]="false" maxWidth="none">
+      @if (grants().projects.length + grants().caches.length > 0) {
+        <gr-row-list>
+          @for (grant of grants().projects; track grant.project) {
+            <gr-row icon="corporate_fare" [link]="['/project', grant.project]" linkLabel="Open project">
+              {{ grant.display_name }}
+              <span slot="meta">{{ grantMeta(grant) }}</span>
+            </gr-row>
+          }
+          @for (grant of grants().caches; track grant.cache) {
+            <gr-row icon="storage" [link]="['/caches', grant.cache]" linkLabel="Open cache">
+              {{ grant.display_name }}
+              <span slot="meta">Users as {{ grant.role }}</span>
+            </gr-row>
+          }
+        </gr-row-list>
+      } @else {
+        <gr-empty-state icon="corporate_fare" title="No projects or caches"
+          message="A project or cache grants the team on its Members & Roles page." />
+      }
+    </gr-settings-section>
+  }
+</gr-page-layout>
