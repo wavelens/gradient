@@ -73,6 +73,7 @@ impl ParsedDerivation {
         abort: &mut watch::Receiver<bool>,
         log_limits: crate::executor::log_limit::LogRateLimits,
         build_cores: u32,
+        mode: BuildMode,
     ) -> Result<BuildResult, BuildError> {
         let mut guard = store.acquire().await.map_err(BuildError::transient)?;
 
@@ -118,7 +119,7 @@ impl ParsedDerivation {
         let abort_ref = &mut *abort;
         let drained = guard
             .execute(|client| async move {
-                let logs = client.build_derivation(harmonia_path, basic_drv, BuildMode::Normal);
+                let logs = client.build_derivation(harmonia_path, basic_drv, mode);
                 let mut logs = pin!(logs);
                 match drain_build_logs_with_timeout(
                     logs.as_mut(),
@@ -274,6 +275,15 @@ pub(super) async fn load_products(store_path: &str) -> Vec<BuildProduct> {
     products
 }
 
+async fn build_mode(store: &LocalNixStore, task: &BuildSpec) -> anyhow::Result<BuildMode> {
+    for output in task.outputs.iter().filter(|o| !o.path.is_empty()) {
+        if store.is_hidden(&output.path).await? {
+            return Ok(BuildMode::Repair);
+        }
+    }
+    Ok(BuildMode::Normal)
+}
+
 #[allow(
     clippy::too_many_arguments,
     reason = "arg-heavy; refactor tracked in #503"
@@ -291,6 +301,9 @@ pub async fn build_derivation(
     let parsed = ParsedDerivation::load(&task.drv_path)
         .await
         .map_err(BuildError::transient)?;
+    let mode = build_mode(store, task)
+        .await
+        .map_err(BuildError::transient)?;
 
     let realize = parsed.realize(
         store,
@@ -301,6 +314,7 @@ pub async fn build_derivation(
         abort,
         log_limits,
         host.build_cores,
+        mode,
     );
 
     let running = RUNNING_BUILDS.start();
@@ -334,6 +348,11 @@ pub async fn build_derivation(
     };
 
     let (outputs, substituted) = built.map_err(|e| e.with_metrics(metrics.clone()))?;
+    let output_paths: Vec<String> = outputs.iter().map(|o| o.store_path.clone()).collect();
+    store
+        .reveal(&output_paths)
+        .await
+        .map_err(BuildError::transient)?;
     updater
         .report_build_output(
             task.build_id.clone(),

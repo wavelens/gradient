@@ -5,6 +5,7 @@
  */
 
 mod cluster;
+mod handover;
 mod id;
 mod message_loop;
 mod scoring;

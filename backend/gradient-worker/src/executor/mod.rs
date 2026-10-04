@@ -68,6 +68,7 @@ pub(crate) async fn push_paths(
     let mut guard = updater.phase(JobPhase::DrvClosurePush);
     guard.record(paths.len() as u32, 0);
     let (paths, sizes): (Vec<String>, Vec<Option<u64>>) = paths.iter().cloned().unzip();
+    store.reveal(&paths).await?;
     let cache_entries = query_fetched_paths(updater, paths, sizes).await?;
     upload_all(updater, pair_with_store(cache_entries, store), None).await?;
     Ok(())

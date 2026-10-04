@@ -284,6 +284,23 @@ impl MessageLoopState {
         }
     }
 
+    async fn on_handover(&mut self, index: u32, paths: Vec<String>, is_final: bool) -> Result<()> {
+        let visibility = self.executor.store.visibility().clone();
+        if index == 0 {
+            for job in self.jobs.running.values() {
+                let _ = job.abort.send(true);
+            }
+            super::handover::forget_previous_user(&self.executor, &self.config).await?;
+            visibility.start_list();
+        }
+        visibility.extend(paths);
+        if is_final {
+            visibility.report_to(self.writer.clone());
+            self.writer.send(ClientMessage::HandoverDone).await?;
+        }
+        Ok(())
+    }
+
     async fn route(&mut self, msg: ServerMessage) -> Result<()> {
         match msg {
             ServerMessage::JobListChunk {
@@ -378,8 +395,12 @@ impl MessageLoopState {
             | ServerMessage::NarAbort { .. } => {
                 warn!("a NAR frame reached the control dispatch");
             }
-            ServerMessage::Handover { .. } => {
-                warn!("handover is not supported yet");
+            ServerMessage::Handover {
+                index,
+                paths,
+                is_final,
+            } => {
+                self.on_handover(index, paths, is_final).await?;
             }
         }
         Ok(())
