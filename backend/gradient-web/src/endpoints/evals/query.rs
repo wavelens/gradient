@@ -181,10 +181,10 @@ fn status_rank(status: BuildStatus) -> u32 {
     match status {
         Building => 0,
         FailedPermanent | FailedTimeout | FailedTransient => 1,
-        DependencyFailed => 2,
-        Aborted => 3,
-        Created | Queued => 4,
-        Completed | Substituted => 5,
+        Aborted => 2,
+        Created | Queued => 3,
+        Completed | Substituted => 4,
+        DependencyFailed => 5,
         Skipped => 6,
     }
 }

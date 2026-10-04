@@ -316,22 +316,23 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   private readonly buildStatusOrder: Record<string, number> = {
     building: 0,
     failed: 1,
-    dependencyfailed: 2,
-    aborted: 3,
-    queued: 4,
-    completed: 5,
-    substituted: 5,
+    aborted: 2,
+    queued: 3,
+    completed: 4,
+    substituted: 4,
+    dependencyfailed: 5,
+    skipped: 6,
   };
 
   /// Sidebar sections, in display order. Failures sort above queued so they stay
-  /// visible. `Completed` absorbs `Substituted`, `Failed` absorbs `DependencyFailed`.
+  /// visible. `Completed` absorbs `Substituted`, `Skipped` absorbs `DependencyFailed`.
   private readonly buildGroups: { key: string; label: string; members: string[] }[] = [
     { key: 'building', label: 'Building', members: ['building'] },
-    { key: 'failed', label: 'Failed', members: ['failed', 'dependencyfailed'] },
+    { key: 'failed', label: 'Failed', members: ['failed'] },
     { key: 'aborted', label: 'Aborted', members: ['aborted'] },
     { key: 'queued', label: 'Queued', members: ['queued'] },
     { key: 'completed', label: 'Completed', members: ['completed', 'substituted'] },
-    { key: 'skipped', label: 'Skipped', members: ['skipped'] },
+    { key: 'skipped', label: 'Skipped', members: ['dependencyfailed', 'skipped'] },
   ];
 
   collapsedGroups = signal<ReadonlySet<string>>(new Set());
