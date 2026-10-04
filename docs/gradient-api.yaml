@@ -12456,7 +12456,7 @@ components:
       type: object
       required: [id, build_id, derivation_path, eval, build_status, has_artefacts, outputs, architecture, deps, deps_total, created_at, prioritized]
       properties:
-        prioritized: { type: boolean, description: "The entry point's build is handed out ahead of unprioritized work." }
+        prioritized: { type: boolean, description: "The build gets a QoS bonus: a user prioritized it or a build that depends on it, or it belongs to a running evaluation that is prioritized or runs a build request." }
         id: { type: string, format: uuid }
         build_id: { type: string, format: uuid }
         derivation_path: { type: string, description: "Prefix-free `.drv` store path (`<hash>-<name>.drv`, no `/nix/store/`)" }
@@ -12533,7 +12533,7 @@ components:
       type: object
       required: [id, commit, status, wildcard, total_builds, builds, errors, warnings, created_at, updated_at, prioritized]
       properties:
-        prioritized: { type: boolean, description: "The evaluation's whole build tree is handed out ahead of unprioritized work." }
+        prioritized: { type: boolean, description: "The evaluation gets a QoS bonus while it runs: a user prioritized it or it runs a build request." }
         id:
           type: string
           format: uuid
@@ -12800,7 +12800,7 @@ components:
       type: object
       required: [id, repository, commit, wildcard, status, created_at, updated_at, prioritized]
       properties:
-        prioritized: { type: boolean, description: "The evaluation's whole build tree is handed out ahead of unprioritized work. Cleared when the evaluation fails or is aborted." }
+        prioritized: { type: boolean, description: "The evaluation gets a QoS bonus while it runs: a user prioritized it or it runs a build request." }
         id:
           type: string
           format: uuid
@@ -13092,7 +13092,7 @@ components:
       type: object
       required: [id, name, status, has_artefacts, updated_at, build_time_ms, dispatched_job, depth, prioritized]
       properties:
-        prioritized: { type: boolean, description: "The build is handed out ahead of unprioritized work. Cleared when it fails permanently, dependency-fails, times out, is aborted or is skipped." }
+        prioritized: { type: boolean, description: "The build gets a QoS bonus: a user prioritized it or a build that depends on it, or it belongs to a running evaluation that is prioritized or runs a build request." }
         id:
           type: string
           format: uuid
@@ -13380,7 +13380,7 @@ components:
       type: object
       required: [id, evaluation, status, derivation_path, architecture, output, created_at, updated_at, prioritized]
       properties:
-        prioritized: { type: boolean, description: "The build is handed out ahead of unprioritized work. Cleared when it fails permanently, dependency-fails, times out, is aborted or is skipped." }
+        prioritized: { type: boolean, description: "The build gets a QoS bonus: a user prioritized it or a build that depends on it, or it belongs to a running evaluation that is prioritized or runs a build request." }
         id:
           type: string
           format: uuid

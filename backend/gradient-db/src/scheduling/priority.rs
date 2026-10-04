@@ -4,11 +4,13 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::{DbContext, graph::closure::transitive_closure_reachable};
+use crate::build_request_task::BUILD_REQUEST_TASK_NAME;
+use crate::{DbContext, fetch_in_chunks, graph::closure::transitive_closure_reachable};
 use gradient_entity::build::BuildStatus;
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_types::*;
 use sea_orm::{ConnectionTrait, DbErr, FromQueryResult};
+use std::collections::HashSet;
 
 pub const PRIORITIZABLE: [BuildStatus; 4] = [
     BuildStatus::Created,
@@ -18,7 +20,7 @@ pub const PRIORITIZABLE: [BuildStatus; 4] = [
 ];
 
 #[derive(FromQueryResult)]
-struct SharedBuildRow {
+struct IdRow {
     id: uuid::Uuid,
 }
 
@@ -26,11 +28,7 @@ fn prioritize_evaluation_sql() -> String {
     format!(
         "UPDATE evaluation SET prioritized = true \
          WHERE id = $1 AND status NOT IN ({}) RETURNING id",
-        crate::sql::status::eval_in(&[
-            EvaluationStatus::Completed,
-            EvaluationStatus::Failed,
-            EvaluationStatus::Aborted,
-        ])
+        crate::sql::status::eval_in(&EvaluationStatus::TERMINAL)
     )
 }
 
@@ -70,6 +68,45 @@ crate::sql_fn! {
         tier = Bulk;
 }
 
+/// Mirrors the scheduler's QoS lift: a running evaluation that a user prioritized or that runs a
+/// build request.
+fn evaluation_has_qos_sql(evaluation: &str) -> String {
+    format!(
+        "{evaluation}.status NOT IN ({}) AND ({evaluation}.prioritized OR EXISTS (\
+         SELECT 1 FROM task t WHERE t.id = {evaluation}.task AND t.managed AND t.name = '{}'))",
+        crate::sql::status::eval_in(&EvaluationStatus::TERMINAL),
+        BUILD_REQUEST_TASK_NAME,
+    )
+}
+
+fn evaluations_with_qos_sql() -> String {
+    format!(
+        "SELECT e.id AS id FROM evaluation e WHERE e.id = ANY($1) AND {}",
+        evaluation_has_qos_sql("e")
+    )
+}
+
+crate::sql_fn! {
+    EVALUATIONS_WITH_QOS = evaluations_with_qos_sql,
+        params = [EvaluationIds(64)];
+}
+
+fn shared_builds_with_qos_sql() -> String {
+    format!(
+        "SELECT db.id AS id FROM derivation_build db \
+         WHERE db.id = ANY($1) AND (db.prioritized OR EXISTS (\
+         SELECT 1 FROM build_job bj JOIN evaluation e ON e.id = bj.evaluation \
+         WHERE bj.derivation_build = db.id AND {}))",
+        evaluation_has_qos_sql("e")
+    )
+}
+
+crate::sql_fn! {
+    SHARED_BUILDS_WITH_QOS = shared_builds_with_qos_sql,
+        params = [SharedBuildIds(64)],
+        tier = Bulk;
+}
+
 pub async fn prioritize_evaluation(
     ctx: &DbContext,
     evaluation: EvaluationId,
@@ -83,7 +120,7 @@ pub async fn prioritize_evaluation(
         return Ok(Vec::new());
     }
 
-    let rows = SharedBuildRow::find_by_statement(EVALUATION_OPEN_SHARED_BUILDS.bind([id]))
+    let rows = IdRow::find_by_statement(EVALUATION_OPEN_SHARED_BUILDS.bind([id]))
         .all(&ctx.worker_db)
         .await?;
     Ok(rows
@@ -104,9 +141,40 @@ pub async fn prioritize_build_closure(
             .collect();
     closure.sort_unstable();
 
-    let rows = SharedBuildRow::find_by_statement(PRIORITIZE_SHARED_BUILDS.bind([closure.into()]))
+    let rows = IdRow::find_by_statement(PRIORITIZE_SHARED_BUILDS.bind([closure.into()]))
         .all(&ctx.worker_db)
         .await?;
+    Ok(rows
+        .into_iter()
+        .map(|r| DerivationBuildId::from(r.id))
+        .collect())
+}
+
+pub async fn evaluations_with_qos<C: ConnectionTrait>(
+    db: &C,
+    evaluations: &[EvaluationId],
+) -> Result<HashSet<EvaluationId>, DbErr> {
+    let rows = fetch_in_chunks(evaluations, |chunk| async move {
+        let ids: Vec<uuid::Uuid> = chunk.iter().map(|id| id.into_inner()).collect();
+        IdRow::find_by_statement(EVALUATIONS_WITH_QOS.bind([ids.into()]))
+            .all(db)
+            .await
+    })
+    .await?;
+    Ok(rows.into_iter().map(|r| EvaluationId::from(r.id)).collect())
+}
+
+pub async fn shared_builds_with_qos<C: ConnectionTrait>(
+    db: &C,
+    shared_builds: &[DerivationBuildId],
+) -> Result<HashSet<DerivationBuildId>, DbErr> {
+    let rows = fetch_in_chunks(shared_builds, |chunk| async move {
+        let ids: Vec<uuid::Uuid> = chunk.iter().map(|id| id.into_inner()).collect();
+        IdRow::find_by_statement(SHARED_BUILDS_WITH_QOS.bind([ids.into()]))
+            .all(db)
+            .await
+    })
+    .await?;
     Ok(rows
         .into_iter()
         .map(|r| DerivationBuildId::from(r.id))

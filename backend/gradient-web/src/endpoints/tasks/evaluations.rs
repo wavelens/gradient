@@ -111,6 +111,7 @@ pub(super) async fn evaluations_to_summaries(
     let message_counts = gradient_db::task_board::evaluation_message_counts(db, &eval_ids).await?;
     let eval_jobs =
         gradient_db::scheduling::assignment_record::latest_eval_jobs(db, &eval_ids).await?;
+    let with_qos = gradient_db::scheduling::priority::evaluations_with_qos(db, &eval_ids).await?;
 
     let mut out = Vec::with_capacity(evaluations.len());
     for evaluation in evaluations {
@@ -171,7 +172,7 @@ pub(super) async fn evaluations_to_summaries(
             errors,
             warnings,
             dispatched_job: eval_jobs.get(&evaluation.id).copied(),
-            prioritized: evaluation.prioritized,
+            prioritized: with_qos.contains(&evaluation.id),
             created_at: evaluation.created_at,
             started_at: evaluation.fetch_started_at,
             finished_at: evaluation.finished_at,
@@ -622,6 +623,7 @@ pub async fn get_task_entry_points(
 
 struct EntryPointRelatedData {
     shared_builds: HashMap<DerivationId, MDerivationBuild>,
+    with_qos: HashSet<DerivationBuildId>,
     build_jobs: HashMap<DerivationId, BuildJobId>,
     derivations: HashMap<DerivationId, MDerivation>,
     has_products: HashMap<DerivationId, bool>,
@@ -736,9 +738,13 @@ impl EntryPointRelatedData {
             m
         };
 
+        let shared_build_ids: Vec<DerivationBuildId> =
+            shared_builds.values().map(|a| a.id).collect();
+        let with_qos =
+            gradient_db::scheduling::priority::shared_builds_with_qos(db, &shared_build_ids)
+                .await?;
+
         let attempts: HashMap<DerivationId, MBuildAttempt> = {
-            let shared_build_ids: Vec<DerivationBuildId> =
-                shared_builds.values().map(|a| a.id).collect();
             let mut by_shared_build =
                 gradient_db::scheduling::build_attempt::latest_attempts(db, &shared_build_ids)
                     .await?;
@@ -770,6 +776,7 @@ impl EntryPointRelatedData {
 
         Ok(Self {
             shared_builds,
+            with_qos,
             build_jobs,
             derivations,
             has_products,
@@ -816,7 +823,7 @@ impl EntryPointRelatedData {
                 prioritized: self
                     .shared_builds
                     .get(&ep.derivation)
-                    .is_some_and(|a| a.prioritized),
+                    .is_some_and(|a| self.with_qos.contains(&a.id)),
                 created_at: ep.created_at,
             });
         }

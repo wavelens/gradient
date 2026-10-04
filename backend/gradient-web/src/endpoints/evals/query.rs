@@ -130,6 +130,10 @@ pub async fn get_evaluation(
         None
     };
 
+    let prioritized =
+        gradient_db::scheduling::priority::evaluations_with_qos(&state.web_db, &[evaluation.id])
+            .await?
+            .contains(&evaluation.id);
     let progress = live_progress(
         &state.eval_progress,
         evaluation.id,
@@ -157,7 +161,7 @@ pub async fn get_evaluation(
             warning_count,
             error,
             entry_points,
-            prioritized: evaluation.prioritized,
+            prioritized,
             trigger,
             triggered_by,
             waiting_reason,
@@ -321,6 +325,11 @@ pub async fn get_evaluation_builds(
         &page_shared_build_ids,
     )
     .await?;
+    let with_qos = gradient_db::scheduling::priority::shared_builds_with_qos(
+        &state.web_db,
+        &page_shared_build_ids,
+    )
+    .await?;
 
     let mut page = Vec::with_capacity(page_slice.len());
     for (_, layer, _, j, status) in &page_slice {
@@ -343,7 +352,7 @@ pub async fn get_evaluation_builds(
             build_started_at: attempt.and_then(|a| a.build_started_at),
             dispatched_job: attempt.map(|a| a.dispatched_job),
             depth: *layer,
-            prioritized: shared_build.prioritized,
+            prioritized: with_qos.contains(&j.derivation_build),
         });
     }
 
