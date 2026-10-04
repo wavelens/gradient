@@ -15,7 +15,7 @@ import { StatusIconComponent } from '../status-icon/status-icon.component';
   imports: [StatusIconComponent],
   template: `
     <span class="eval-status-badge" [attr.data-phase]="phase()">
-      <gr-status-icon [phase]="phase()" size="sm" />
+      <gr-status-icon [phase]="phase()" [prioritized]="prioritized()" size="sm" />
       {{ label() }}
     </span>
   `,
@@ -24,6 +24,7 @@ import { StatusIconComponent } from '../status-icon/status-icon.component';
 })
 export class EvalStatusBadgeComponent {
   status = input.required<EvaluationStatus>();
+  prioritized = input(false);
 
   phase = computed(() => evaluationPhase(this.status()));
 
