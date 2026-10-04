@@ -8,7 +8,7 @@ use axum::http::StatusCode;
 use axum_test::TestServer;
 use gradient_core::ServerState;
 use gradient_db::{WebDb, WorkerDb};
-use gradient_entity::team_user::TeamRole;
+use gradient_entity::team_user::{TeamMemberSource, TeamRole};
 use gradient_entity::{team, team_user, user};
 use gradient_notify::EmailSender;
 use gradient_storage::NarStore;
@@ -287,7 +287,7 @@ fn team_member(team: TeamId, user: UserId) -> team_user::Model {
         team,
         user,
         role: TeamRole::Member,
-        via_group: true,
+        source: TeamMemberSource::Group,
     }
 }
 
@@ -376,10 +376,10 @@ async fn scim_patch_group_remove_member_leaves_the_team() {
         .into_transaction_log()
         .iter()
         .flat_map(|t| t.statements().to_vec())
-        .any(|s| s.sql.starts_with("DELETE FROM \"team_user\"") && s.sql.contains("\"via_group\""));
+        .any(|s| s.sql.starts_with("DELETE FROM \"team_user\"") && s.sql.contains("\"source\""));
     assert!(
         only_group_rows,
-        "SCIM must not remove members added by hand"
+        "SCIM must not remove members added by hand or by the state"
     );
 }
 

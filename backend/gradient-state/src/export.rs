@@ -16,7 +16,7 @@ use gradient_db::permissions::{
 };
 use gradient_entity::cache_upstream::CacheUpstreamKind;
 use gradient_entity::ids::*;
-use gradient_entity::team_user::TeamRole;
+use gradient_entity::team_user::{TeamMemberSource, TeamRole};
 use gradient_types::actions::{ActionConfig, ActionType};
 use gradient_types::triggers::{TriggerConfig, TriggerType};
 use sea_orm::{ColumnTrait, ConnectionTrait, DbErr, EntityTrait, QueryFilter};
@@ -50,7 +50,7 @@ pub async fn export_state<C: ConnectionTrait>(db: &C) -> Result<StateConfigurati
         .await?;
     let teams = gradient_entity::team::Entity::find().all(db).await?;
     let team_users = gradient_entity::team_user::Entity::find()
-        .filter(gradient_entity::team_user::Column::ViaGroup.eq(false))
+        .filter(gradient_entity::team_user::Column::Source.ne(TeamMemberSource::Group))
         .all(db)
         .await?;
     let team_projects = gradient_entity::team_project::Entity::find()

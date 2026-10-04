@@ -143,7 +143,7 @@ async fn a_team_connection_needs_a_team_admin() {
             team: team_row().id,
             user: user_id(),
             role: TeamRole::Member,
-            via_group: false,
+            ..Default::default()
         }]]);
     let server = make_test_server(db.into_connection());
 

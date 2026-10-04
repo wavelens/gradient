@@ -11,7 +11,7 @@ use gradient_entity::*;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-pub use gradient_entity::team_user::TeamRole;
+pub use gradient_entity::team_user::{TeamMemberSource, TeamRole};
 pub use gradient_entity::{STORE_DIR, StorePath};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

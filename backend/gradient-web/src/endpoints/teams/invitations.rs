@@ -81,7 +81,7 @@ pub async fn delete_team_invitation(
         api_key.as_ref(),
         team,
         TeamAccess::Admin {
-            reject_managed: true,
+            reject_managed: false,
         },
     )
     .await?;

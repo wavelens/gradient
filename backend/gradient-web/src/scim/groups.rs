@@ -187,7 +187,7 @@ async fn add_member(state: &Arc<ServerState>, team: TeamId, uid: &str) -> ScimRe
             team,
             user,
             role: TeamRole::Member,
-            via_group: true,
+            source: TeamMemberSource::Group,
         }
         .into_active_model()
         .insert(db)
@@ -201,7 +201,7 @@ async fn remove_member(state: &Arc<ServerState>, team: TeamId, uid: &str) -> Sci
     ETeamUser::delete_many()
         .filter(CTeamUser::Team.eq(team))
         .filter(CTeamUser::User.eq(user))
-        .filter(CTeamUser::ViaGroup.eq(true))
+        .filter(CTeamUser::Source.eq(TeamMemberSource::Group))
         .exec(state.web_db.inner())
         .await?;
     Ok(())

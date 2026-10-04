@@ -162,10 +162,10 @@ services.gradient.state = {
 | Option | Type | Default | Description |
 |---|---|---|---|
 | `display_name` | string | attribute name | Display name of the team. |
-| `members` | list of submodule | `[ ]` | Users in the team. Members missing from the list leave the team on the next state apply. Members from an OIDC or SCIM group stay. |
+| `members` | list of submodule | `[ ]` | Users in the team. Members declared here before and no longer listed leave the team on the next state apply. Members from the API, an OIDC group or a SCIM group stay. |
 | `members.*.role` | one of `Admin` `Member` | `"Member"` | Role in the team. Admins manage members, workers, grants and requests. |
 | `members.*.user` | string | - | User name, resolved when the state is applied. |
-| `name` | string | attribute name | Team name. Teams managed here cannot be changed through the API. |
+| `name` | string | attribute name | Team name. The settings of a team managed here are locked in the API. Other members and workers can still join through the API. |
 | `new_projects.role` | null or one of `Admin` `Write` `View` | `null` | Project role for the team's users on new projects. |
 | `new_projects.users` | bool | `false` | Whether new projects grant this team's users `new_projects.role`. |
 | `new_projects.workers` | bool | `false` | Whether new projects grant this team's workers. |

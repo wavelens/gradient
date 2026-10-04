@@ -354,7 +354,7 @@ pub async fn post_accept_invite(
                     team,
                     user: member,
                     role,
-                    via_group: false,
+                    source: TeamMemberSource::Api,
                 }
                 .into_active_model()
                 .insert(&tx)
