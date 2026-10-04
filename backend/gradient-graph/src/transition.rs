@@ -545,10 +545,7 @@ async fn build_failed(
         && let Err(e) = ctx
             .storage
             .log_storage
-            .append(
-                attempt_id,
-                &format!("\n=== build failed: {log_banner} ===\n"),
-            )
+            .append(attempt_id, &policy::failure_log_entry(log_banner))
             .await
     {
         warn!(%derivation_build, error = %e, "failed to append worker error to build log");

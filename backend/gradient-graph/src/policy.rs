@@ -143,6 +143,10 @@ pub(crate) fn inputs_unavailable_circuit_open(prior_failures: i64, max_loops: u3
     prior_failures >= max_loops as i64
 }
 
+pub(crate) fn failure_log_entry(message: &str) -> String {
+    format!("\nerror: build failed: {}\n", message.trim())
+}
+
 pub(crate) fn retry_failed_eval(kind: BuildFailureKind, attempts: u64, max_attempts: u32) -> bool {
     kind == BuildFailureKind::Transient && attempts < u64::from(max_attempts)
 }
@@ -182,7 +186,7 @@ mod tests {
     }
     use super::{
         BuildEnd, FailureOutcome, Substitution, attempt_outcome, attempt_reason,
-        attempt_reason_for, decide_failure_outcome, history_sample,
+        attempt_reason_for, decide_failure_outcome, failure_log_entry, history_sample,
         inputs_unavailable_circuit_open, retry_backoff_elapsed, retry_failed_eval,
         spends_substitute_budget, terminal_success_outcome, terminal_success_status,
         truncate_failure_message,
@@ -508,6 +512,15 @@ mod tests {
                 AttemptOutcome::Aborted
             );
         }
+    }
+
+    #[test]
+    fn a_multi_line_failure_ends_the_log_without_a_trailing_marker() {
+        let message = "hash mismatch in fixed-output derivation 'x.drv':\n  specified: sha256-A\n     got:    sha256-B\n";
+        assert_eq!(
+            failure_log_entry(message),
+            "\nerror: build failed: hash mismatch in fixed-output derivation 'x.drv':\n  specified: sha256-A\n     got:    sha256-B\n"
+        );
     }
 
     #[test]
