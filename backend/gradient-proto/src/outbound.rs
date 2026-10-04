@@ -9,9 +9,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use gradient_core::ServerState;
-use gradient_entity::{base_worker, worker_registration};
+use gradient_entity::{team_worker, worker_registration};
 use gradient_types::ids::ProjectId;
-use gradient_types::{EBaseWorker, EWorkerRegistration};
+use gradient_types::{ETeamWorker, EWorkerRegistration};
 use gradient_util::supervision::ChildSpec;
 use gradient_wire::session::handshake::DialerCredentials;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
@@ -23,7 +23,7 @@ use gradient_scheduler::Scheduler;
 use gradient_scheduler::connection_failures::ConnectionDirection;
 
 const DIAL_TIMEOUT: Duration = Duration::from_secs(10);
-const NOT_ENABLED_BY_ANY_PROJECT: &str = "base worker not enabled by any project";
+const NOT_GRANTED_TO_ANY_PROJECT: &str = "no project grants this team's workers";
 const NO_STORED_TOKEN: &str = "no connection token stored; register the worker again";
 const DEACTIVATED: &str = "worker is deactivated";
 const UNDECRYPTABLE: &str =
@@ -35,13 +35,13 @@ pub(crate) struct DialTarget {
     pub url: String,
     pub credentials: DialerCredentials,
     pub token_projects: Vec<String>,
-    pub base_worker: bool,
+    pub team_worker: bool,
 }
 
 pub(crate) enum Dialable {
     Projects {
         projects: Vec<String>,
-        base_worker: bool,
+        team_worker: bool,
     },
     Refused(&'static str),
 }
@@ -53,7 +53,7 @@ struct DialRow {
     projects: Vec<String>,
     token_encrypted: Option<String>,
     idle_reason: Option<&'static str>,
-    base_worker: bool,
+    team_worker: bool,
 }
 
 enum PlannedDial {
@@ -77,25 +77,21 @@ impl DialRow {
             url: reg.url.unwrap_or_default(),
             token_encrypted: reg.token_encrypted,
             idle_reason: None,
-            base_worker: false,
+            team_worker: false,
         }
     }
 
-    fn from_base_worker(bw: base_worker::Model, projects: Vec<ProjectId>) -> Self {
+    fn from_team_worker(worker: team_worker::Model, projects: Vec<ProjectId>) -> Self {
         let projects: Vec<String> = projects.iter().map(ToString::to_string).collect();
-        let token_peers = match bw.authorize_against {
-            Some(identity) => vec![identity.to_string()],
-            None => projects.clone(),
-        };
 
         Self {
-            idle_reason: projects.is_empty().then_some(NOT_ENABLED_BY_ANY_PROJECT),
-            worker_id: bw.worker_id,
-            url: bw.url.unwrap_or_default(),
-            token_peers,
+            idle_reason: projects.is_empty().then_some(NOT_GRANTED_TO_ANY_PROJECT),
+            token_peers: vec![worker.team.to_string()],
+            worker_id: worker.worker_id,
+            url: worker.url.unwrap_or_default(),
             projects,
-            token_encrypted: bw.token_encrypted,
-            base_worker: true,
+            token_encrypted: worker.token_encrypted,
+            team_worker: true,
         }
     }
 }
@@ -118,7 +114,7 @@ impl WorkerDial {
         } else {
             Dialable::Projects {
                 projects,
-                base_worker: self.rows.iter().any(|r| r.base_worker),
+                team_worker: self.rows.iter().any(|r| r.team_worker),
             }
         }
     }
@@ -203,51 +199,51 @@ async fn dial_rows(
     let mut registrations = EWorkerRegistration::find()
         .filter(worker_registration::Column::Url.is_not_null())
         .filter(worker_registration::Column::Active.eq(true));
-    let mut base_workers = EBaseWorker::find()
-        .filter(base_worker::Column::Url.is_not_null())
-        .filter(base_worker::Column::Enabled.eq(true));
+    let mut team_workers = ETeamWorker::find()
+        .filter(team_worker::Column::Url.is_not_null())
+        .filter(team_worker::Column::Active.eq(true));
     if let Some(worker_id) = only {
         registrations = registrations.filter(worker_registration::Column::WorkerId.eq(worker_id));
-        base_workers = base_workers.filter(base_worker::Column::WorkerId.eq(worker_id));
+        team_workers = team_workers.filter(team_worker::Column::WorkerId.eq(worker_id));
     }
 
     let registrations = registrations
         .order_by_asc(worker_registration::Column::CreatedAt)
         .all(&state.worker_db)
         .await?;
-    let base_workers = base_workers
-        .order_by_asc(base_worker::Column::CreatedAt)
+    let team_workers = team_workers
+        .order_by_asc(team_worker::Column::CreatedAt)
         .all(&state.worker_db)
         .await?;
 
-    let mut base_rows = Vec::with_capacity(base_workers.len());
-    for bw in base_workers {
-        let projects = gradient_db::projects::base_workers::projects_enabling_base_worker(
+    let mut team_rows = Vec::with_capacity(team_workers.len());
+    for worker in team_workers {
+        let projects = gradient_db::teams::workers::projects_granted_with_workers(
             &state.worker_db,
-            bw.id,
+            worker.team,
         )
         .await?;
-        base_rows.push(DialRow::from_base_worker(bw, projects));
+        team_rows.push(DialRow::from_team_worker(worker, projects));
     }
 
-    Ok(merge_rows(base_rows, registrations))
+    Ok(merge_rows(team_rows, registrations))
 }
 
 fn merge_rows(
-    mut base_rows: Vec<DialRow>,
+    mut team_rows: Vec<DialRow>,
     registrations: Vec<worker_registration::Model>,
 ) -> Vec<DialRow> {
-    let base_ids: HashSet<String> = base_rows.iter().map(|r| r.worker_id.clone()).collect();
+    let team_ids: HashSet<String> = team_rows.iter().map(|r| r.worker_id.clone()).collect();
     for reg in registrations {
-        if base_ids.contains(&reg.worker_id) {
-            warn!(worker_id = %reg.worker_id, "ignoring a registration that reuses a base worker id");
+        if team_ids.contains(&reg.worker_id) {
+            warn!(worker_id = %reg.worker_id, "ignoring a registration that reuses a team worker id");
             continue;
         }
 
-        base_rows.push(DialRow::from_registration(reg));
+        team_rows.push(DialRow::from_registration(reg));
     }
 
-    base_rows
+    team_rows
 }
 
 fn plan_dials(rows: Vec<DialRow>, decrypt: impl Fn(&str) -> Option<String>) -> Vec<PlannedDial> {
@@ -275,11 +271,11 @@ fn group_by_worker(rows: Vec<DialRow>) -> Vec<WorkerDial> {
 }
 
 fn plan_worker(group: WorkerDial, decrypt: &impl Fn(&str) -> Option<String>) -> PlannedDial {
-    let (token_projects, base_worker) = match group.token_projects() {
+    let (token_projects, team_worker) = match group.token_projects() {
         Dialable::Projects {
             projects,
-            base_worker,
-        } => (projects, base_worker),
+            team_worker,
+        } => (projects, team_worker),
         Dialable::Refused(reason) => {
             return PlannedDial::Skip {
                 worker_id: group.worker_id,
@@ -310,7 +306,7 @@ fn plan_worker(group: WorkerDial, decrypt: &impl Fn(&str) -> Option<String>) -> 
         },
         url: group.url,
         token_projects,
-        base_worker,
+        team_worker,
     })
 }
 
@@ -386,6 +382,7 @@ async fn dial(scheduler: &Arc<Scheduler>, sessions: &Arc<SessionsHandle>, target
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gradient_types::ids::TeamId;
 
     fn registration(worker_id: &str, peer: &str, url: &str, token: Option<&str>) -> DialRow {
         DialRow {
@@ -395,7 +392,7 @@ mod tests {
             projects: vec![peer.into()],
             token_encrypted: token.map(|t| format!("enc:{t}")),
             idle_reason: None,
-            base_worker: false,
+            team_worker: false,
         }
     }
 
@@ -503,12 +500,14 @@ mod tests {
     }
 
     #[test]
-    fn a_registration_reusing_a_base_worker_id_does_not_replace_the_base_worker() {
-        let enabling = ProjectId::now_v7();
-        let base = base_worker::Model {
+    fn a_registration_reusing_a_team_worker_id_does_not_replace_the_team_worker() {
+        let granting = ProjectId::now_v7();
+        let team = TeamId::now_v7();
+        let worker = team_worker::Model {
+            team,
             worker_id: "b1".into(),
             url: Some("wss://b1.example/proto".into()),
-            token_encrypted: Some("enc:base".into()),
+            token_encrypted: Some("enc:team".into()),
             ..Default::default()
         };
         let squatter = worker_registration::Model {
@@ -521,30 +520,30 @@ mod tests {
         };
 
         let rows = merge_rows(
-            vec![DialRow::from_base_worker(base, vec![enabling])],
+            vec![DialRow::from_team_worker(worker, vec![granting])],
             vec![squatter],
         );
         let target = only_dial(plan_dials(rows, plain));
 
-        assert_eq!(target.token_projects, vec![enabling.to_string()]);
+        assert_eq!(target.token_projects, vec![granting.to_string()]);
         assert_eq!(
             target.credentials.tokens,
-            vec![(enabling.to_string(), "base".to_string())]
+            vec![(team.to_string(), "team".to_string())]
         );
     }
 
     #[test]
-    fn a_base_worker_without_enabled_projects_is_not_dialed() {
-        let base = base_worker::Model {
+    fn a_team_worker_without_granted_projects_is_not_dialed() {
+        let worker = team_worker::Model {
             worker_id: "b1".into(),
             url: Some("wss://b1.example/proto".into()),
             ..Default::default()
         };
-        let planned = plan_dials(vec![DialRow::from_base_worker(base, vec![])], plain);
+        let planned = plan_dials(vec![DialRow::from_team_worker(worker, vec![])], plain);
 
         assert!(matches!(
             planned.as_slice(),
-            [PlannedDial::Skip { reason, .. }] if reason.as_str() == NOT_ENABLED_BY_ANY_PROJECT
+            [PlannedDial::Skip { reason, .. }] if reason.as_str() == NOT_GRANTED_TO_ANY_PROJECT
         ));
     }
 

@@ -26,7 +26,7 @@ use crate::outbound::{DialTarget, Dialable, dialable};
 pub struct DialedSession {
     pub url: String,
     pub token_projects: Vec<String>,
-    pub base_worker: bool,
+    pub team_worker: bool,
 }
 
 impl DialTarget {
@@ -34,7 +34,7 @@ impl DialTarget {
         DialedSession {
             url: self.url.clone(),
             token_projects: self.token_projects.clone(),
-            base_worker: self.base_worker,
+            team_worker: self.team_worker,
         }
     }
 }
@@ -92,7 +92,7 @@ pub(super) async fn refresh_dialed_peers(
             projects: current, ..
         }) => {
             let added = current.iter().find(|p| !session.token_projects.contains(p));
-            if !session.base_worker
+            if !session.team_worker
                 && let Some(added) = added
             {
                 info!(%worker_id, project = %added, "project not covered by this session's tokens - closing for a redial");
@@ -167,8 +167,8 @@ mod tests {
     use super::*;
     use gradient_entity::project::Model as ProjectModel;
     use gradient_entity::project_cache::{CacheSubscriptionMode, Model as ProjectCacheModel};
-    use gradient_entity::{base_worker, project_base_worker, worker_registration};
-    use gradient_types::ids::{CacheId, ProjectCacheId};
+    use gradient_entity::{team_project, team_worker, worker_registration};
+    use gradient_types::ids::{CacheId, ProjectCacheId, TeamId};
     use sea_orm::{DatabaseBackend, MockDatabase};
     use std::time::Duration;
 
@@ -187,7 +187,7 @@ mod tests {
         DialedSession {
             url: URL.into(),
             token_projects: projects.iter().map(ToString::to_string).collect(),
-            base_worker: false,
+            team_worker: false,
         }
     }
 
@@ -205,7 +205,7 @@ mod tests {
     fn registered(rows: Vec<worker_registration::Model>) -> MockDatabase {
         MockDatabase::new(DatabaseBackend::Postgres)
             .append_query_results([rows])
-            .append_query_results([Vec::<base_worker::Model>::new()])
+            .append_query_results([Vec::<team_worker::Model>::new()])
     }
 
     fn with_cache(db: MockDatabase, project: ProjectId) -> MockDatabase {
@@ -300,10 +300,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_project_enabling_a_base_worker_joins_the_running_session() {
-        let (running, enabling) = (ProjectId::now_v7(), ProjectId::now_v7());
-        let enabled_by = |project| project_base_worker::Model {
+    async fn a_project_granting_a_team_its_workers_joins_the_running_session() {
+        let (running, granting) = (ProjectId::now_v7(), ProjectId::now_v7());
+        let team = TeamId::now_v7();
+        let granted = |project| team_project::Model {
+            team,
             project,
+            includes_workers: true,
             ..Default::default()
         };
         let cached = |project| ProjectCacheModel {
@@ -314,44 +317,71 @@ mod tests {
         };
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             .append_query_results([Vec::<worker_registration::Model>::new()])
-            .append_query_results([vec![base_worker::Model {
+            .append_query_results([vec![team_worker::Model {
+                team,
                 worker_id: "w1".into(),
                 url: Some(URL.into()),
-                token_encrypted: Some("base".into()),
-                enabled: true,
+                token_encrypted: Some("team".into()),
+                active: true,
                 ..Default::default()
             }]])
-            .append_query_results([vec![enabled_by(running), enabled_by(enabling)]])
+            .append_query_results([vec![granted(running), granted(granting)]])
             .append_query_results([vec![
                 ProjectModel {
                     id: running,
                     ..Default::default()
                 },
                 ProjectModel {
-                    id: enabling,
+                    id: granting,
                     ..Default::default()
                 },
             ]])
-            .append_query_results([vec![cached(running), cached(enabling)]]);
+            .append_query_results([vec![cached(running), cached(granting)]]);
         let state = gradient_test_support::prelude::test_state(db.into_connection());
         let scheduler = Scheduler::new(Arc::clone(&state));
         scheduler.spawn_core(None).await.unwrap();
         let (writer, mut rx) = ProtoWriter::spy(Duration::from_secs(1));
-        let base_session = DialedSession {
-            base_worker: true,
+        let team_session = DialedSession {
+            team_worker: true,
             ..session(&[running])
         };
 
-        let kept = refresh_dialed_peers(&writer, &state, &scheduler, "w1", &base_session).await;
+        let kept = refresh_dialed_peers(&writer, &state, &scheduler, "w1", &team_session).await;
 
         assert!(kept);
         assert_eq!(
             sent(&mut rx).await,
             ServerMessage::AuthUpdate {
-                authorized_peers: vec![running.to_string(), enabling.to_string()],
+                authorized_peers: vec![running.to_string(), granting.to_string()],
                 failed_peers: vec![],
             }
         );
+    }
+
+    #[tokio::test]
+    async fn a_team_session_whose_grants_are_gone_ends() {
+        let team = TeamId::now_v7();
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([Vec::<worker_registration::Model>::new()])
+            .append_query_results([vec![team_worker::Model {
+                team,
+                worker_id: "w1".into(),
+                url: Some(URL.into()),
+                token_encrypted: Some("team".into()),
+                active: true,
+                ..Default::default()
+            }]])
+            .append_query_results([Vec::<team_project::Model>::new()]);
+        let state = gradient_test_support::prelude::test_state(db.into_connection());
+        let scheduler = Scheduler::new(Arc::clone(&state));
+        scheduler.spawn_core(None).await.unwrap();
+        let (writer, _rx) = ProtoWriter::spy(Duration::from_secs(1));
+        let team_session = DialedSession {
+            team_worker: true,
+            ..session(&[ProjectId::now_v7()])
+        };
+
+        assert!(!refresh_dialed_peers(&writer, &state, &scheduler, "w1", &team_session).await);
     }
 
     #[tokio::test]
