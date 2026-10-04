@@ -95,6 +95,13 @@ pub async fn get_build(
         None => None,
     };
 
+    let prioritized = gradient_db::scheduling::priority::shared_builds_with_qos(
+        &state.web_db,
+        &[shared_build.id],
+    )
+    .await?
+    .contains(&shared_build.id);
+
     let build_with_outputs = BuildWithOutputs {
         id: build_job.id,
         evaluation: build_job.evaluation,
@@ -104,7 +111,7 @@ pub async fn get_build(
         worker,
         dispatched_job: attempt.map(|a| a.dispatched_job),
         output: outputs,
-        prioritized: shared_build.prioritized,
+        prioritized,
         created_at: build_job.created_at,
         updated_at: shared_build.updated_at,
         progress: running_progress(

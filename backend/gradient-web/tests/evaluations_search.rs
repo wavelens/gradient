@@ -86,6 +86,7 @@ fn with_summary_rollups(db: MockDatabase) -> MockDatabase {
     db.append_query_results([Vec::<commit::Model>::new()])
         .append_query_results([Vec::<commit::Model>::new()])
         .append_query_results([Vec::<commit::Model>::new()])
+        .append_query_results([Vec::<commit::Model>::new()])
 }
 
 fn base_db(session_id: SessionId) -> MockDatabase {
