@@ -157,6 +157,36 @@ async fn only_a_superuser_grants_a_team_on_every_new_project() {
 }
 
 #[tokio::test]
+async fn deleting_a_team_withdraws_its_workers_from_the_granted_projects() {
+    let session_id = SessionId::now_v7();
+    let conn = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
+        .append_query_results([vec![team_row()]])
+        .append_query_results([vec![membership(TeamRole::Admin)]])
+        .append_query_results([Vec::<gradient_entity::team_worker::Model>::new()])
+        .append_query_results([Vec::<gradient_entity::team_project::Model>::new()])
+        .append_exec_results([exec_ok(), exec_ok()])
+        .into_connection();
+    let server = make_test_server(conn.clone());
+
+    let res = server
+        .delete("/api/v1/teams/platform")
+        .add_header("authorization", bearer(session_id))
+        .await;
+
+    res.assert_status_ok();
+    drop(server);
+    let looked_up_projects = conn
+        .into_transaction_log()
+        .iter()
+        .flat_map(|t| t.statements().to_vec())
+        .any(|s| s.sql.contains("FROM \"team_project\""));
+    assert!(
+        looked_up_projects,
+        "deleting a team must find the projects whose jobs its workers lose"
+    );
+}
+
+#[tokio::test]
 async fn a_team_is_hidden_from_non_members() {
     let session_id = SessionId::now_v7();
     let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)

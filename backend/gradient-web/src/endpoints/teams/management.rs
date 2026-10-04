@@ -24,7 +24,8 @@ use sea_orm::{
     QuerySelect, RelationTrait, TransactionTrait,
 };
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use super::workers::withdraw_team_workers;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 #[derive(Serialize)]
@@ -314,11 +315,14 @@ pub async fn delete_team(
     .await?;
 
     let workers = gradient_db::teams::team_worker_ids(&state.web_db, team.id).await?;
+    let projects: HashSet<ProjectId> =
+        gradient_db::teams::workers::projects_granted_with_workers(&state.web_db, team.id)
+            .await?
+            .into_iter()
+            .collect();
     let team_id = team.id;
     team.into_active_model().delete(&state.web_db).await?;
-    for worker_id in &workers {
-        scheduler.request_reauth(worker_id).await;
-    }
+    withdraw_team_workers(&scheduler, &workers, &projects).await;
 
     audit_record(
         &state,
