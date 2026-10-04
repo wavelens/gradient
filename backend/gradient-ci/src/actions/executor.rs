@@ -47,6 +47,7 @@ pub async fn execute_action(
         } => {
             execute_send_mail(
                 ctx,
+                task_id,
                 event,
                 &envelope,
                 &recipients,
