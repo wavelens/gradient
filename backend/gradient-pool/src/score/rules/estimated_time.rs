@@ -137,20 +137,40 @@ pub fn build_secs(
     uncontended_ms / 1000.0 * core_ratio(built_on, runs_on) * contention_factor(running)
 }
 
+pub fn oom_retry_secs(
+    history: &HistoryPrediction,
+    worker: Option<&WorkerMetricsView>,
+    run_secs: f64,
+) -> f64 {
+    let overshoot = match (
+        history.predicted_peak_ram_mb,
+        worker.and_then(|m| m.ram_free_mb),
+    ) {
+        (Some(peak), Some(free)) if free > 0 && peak > free => {
+            ((peak - free) as f64 / free as f64).min(1.0)
+        }
+        _ => 0.0,
+    };
+
+    (f64::from(history.oom_rate) + overshoot).min(1.0) * run_secs
+}
+
 pub fn estimated_secs(
     job: &JobContext<'_>,
     worker: &WorkerContext<'_>,
     instance: &InstanceContext,
 ) -> f64 {
+    let metrics = worker.metrics.as_ref();
     if job.outputs_present {
-        return 0.0;
+        return upload_secs(&job.job.history(), metrics, instance);
     }
 
     let history = job.build_history();
-    let metrics = worker.metrics.as_ref();
+    let run = build_secs(&history, metrics, instance);
     download_secs(job, metrics, instance)
         + path_secs(job, instance)
-        + build_secs(&history, metrics, instance)
+        + run
+        + oom_retry_secs(&history, metrics, run)
         + upload_secs(&history, metrics, instance)
 }
 
@@ -396,8 +416,52 @@ mod tests {
         assert_eq!(
             rule.score(&ctx(&endless, Some(0), true), &w, &inst),
             rule.points_per_sec * rule.cap_secs,
-            "a worker holding the outputs only uploads them"
+            "a worker holding the outputs builds nothing"
         );
+    }
+
+    #[test]
+    fn a_build_that_may_run_out_of_memory_expects_to_lose_its_time_again() {
+        let history = HistoryPrediction {
+            predicted_peak_ram_mb: Some(3_000),
+            oom_rate: 0.25,
+            ..built(100_000, None)
+        };
+        let with_free = |ram_free_mb| WorkerMetricsView {
+            ram_free_mb: Some(ram_free_mb),
+            ..Default::default()
+        };
+
+        assert_eq!(
+            oom_retry_secs(&history, Some(&with_free(8_000)), 100.0),
+            25.0
+        );
+        assert_eq!(
+            oom_retry_secs(&history, Some(&with_free(2_000)), 100.0),
+            75.0
+        );
+        assert_eq!(
+            oom_retry_secs(&history, Some(&with_free(1_000)), 100.0),
+            100.0
+        );
+    }
+
+    #[test]
+    fn a_worker_holding_the_outputs_only_uploads_them() {
+        let job = build_job(HistoryPrediction {
+            output_nar_size: Some(GIGABYTE as u64),
+            ..built(100_000, None)
+        });
+        let w = worker(WorkerMetricsView {
+            upload_speed_mbps: Some(400.0),
+            ..Default::default()
+        });
+        let inst = InstanceContext {
+            storage_write_mbps: Some(1_000_000.0),
+            ..Default::default()
+        };
+
+        assert!((estimated_secs(&ctx(&job, Some(0), true), &w, &inst) - 20.0).abs() < 1e-9);
     }
 
     #[test]
