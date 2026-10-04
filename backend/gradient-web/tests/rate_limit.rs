@@ -108,6 +108,24 @@ async fn cache_tier_does_not_throttle_moderate_burst() {
 }
 
 #[tokio::test]
+async fn cache_upload_tier_outlasts_the_api_burst() {
+    let server = TestServer::new(create_router(make_state()).expect("router"));
+
+    for i in 1..=300 {
+        let resp = server
+            .post("/api/v1/caches/mycache/nars/abc/finalize")
+            .json(&serde_json::json!({}))
+            .await;
+        assert_ne!(
+            resp.status_code(),
+            429,
+            "upload request {} unexpectedly throttled",
+            i
+        );
+    }
+}
+
+#[tokio::test]
 async fn cache_proto_tier_does_not_throttle_burst() {
     let server = TestServer::new(create_router(make_state()).expect("router"));
 

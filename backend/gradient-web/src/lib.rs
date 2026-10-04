@@ -437,19 +437,6 @@ pub fn create_router_with_scheduler(
             patch(caches::patch_cache).delete(caches::delete_cache),
         )
         .route(
-            "/caches/{cache}/nars",
-            post(caches::nars_upload)
-                .layer(DefaultBodyLimit::max(state.config.nar.max_upload_size)),
-        )
-        .route(
-            "/caches/{cache}/nars/{hash}/chunk",
-            put(caches::nar_chunk).layer(DefaultBodyLimit::max(NAR_UPLOAD_CHUNK_LIMIT)),
-        )
-        .route(
-            "/caches/{cache}/nars/{hash}/finalize",
-            post(caches::nar_finalize),
-        )
-        .route(
             "/caches/{cache}/nars/{hash}",
             axum::routing::delete(caches::nars_delete),
         )
@@ -806,10 +793,35 @@ pub fn create_router_with_scheduler(
 
     let proto_limiter = Arc::new(ProtoLimiter::new(state.config.proto.max_connections));
 
-    let api = api.route_layer(GovernorLayer::new(rate_limit(
-        Duration::from_millis(200),
-        150,
-    )?));
+    let cache_upload_api = Router::new()
+        .route(
+            "/caches/{cache}/nars",
+            post(caches::nars_upload)
+                .layer(DefaultBodyLimit::max(state.config.nar.max_upload_size)),
+        )
+        .route(
+            "/caches/{cache}/nars/{hash}/chunk",
+            put(caches::nar_chunk).layer(DefaultBodyLimit::max(NAR_UPLOAD_CHUNK_LIMIT)),
+        )
+        .route(
+            "/caches/{cache}/nars/{hash}/finalize",
+            post(caches::nar_finalize),
+        )
+        .route_layer(middleware::from_fn_with_state(
+            Arc::clone(&state),
+            authorization::authorize,
+        ))
+        .route_layer(GovernorLayer::new(rate_limit(
+            Duration::from_millis(2),
+            10_000,
+        )?));
+
+    let api = api
+        .route_layer(GovernorLayer::new(rate_limit(
+            Duration::from_millis(200),
+            150,
+        )?))
+        .merge(cache_upload_api);
     let api = api.route_layer(axum::middleware::from_fn(metrics::track_http_metrics));
     let api = api.layer(DefaultBodyLimit::max(state.config.http.max_request_size));
 
