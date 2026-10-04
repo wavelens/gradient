@@ -86,12 +86,12 @@ Build jobs carry exactly one `BuildSpec`, meaning one shared build (`derivation_
 | `InputUpdateResult`, `InputUpdateExpansion` | Flake update candidate lock and bumped inputs |
 | `Building { build_id }` | Build turning `Building`. An already aborted build is getting `AbortJob` instead |
 | `BuildOutput` | Output sizes, build products, metrics, the `substituted` flag |
-| `Stage(Prefetch / Build / Upload)` | Live stage of the job in the worker pool, for the [estimated time](../../reference/scheduler-policies.md#estimated-time). Sent to servers on protocol 28 and later |
+| `Stage(Prefetch / Build / Upload)` | Live stage of the job in the worker pool, for the [estimated time](../../reference/scheduler-policies.md#estimated-time). |
 | `Compressing` | No change. Workers no longer send it |
 
 An `EvalProgress` message will carry one download row per flake input while fetching and the live thunk count while evaluating. The eval worker will download the inputs itself, with one download in flight per second-level domain.
 
-`JobCompleted` and `JobFailed` carry the phase timeline shown on the [Job Board](../../ui/job-board.md#job-inspection). A server before protocol 28 will receive `NarPush` in place of the `UploadWait` phase. Build metrics also hold the number of concurrent builds on the worker, the cores of the build and the worker's CPU score. The server will drop reports from a stale `assignment_id`.
+`JobCompleted` and `JobFailed` carry the phase timeline shown on the [Job Board](../../ui/job-board.md#job-inspection). Build metrics also hold the number of concurrent builds on the worker, the cores of the build and the worker's CPU score. The server will drop reports from a stale `assignment_id`.
 
 ## Failures
 
@@ -148,7 +148,7 @@ sequenceDiagram
 
 - The worker will send `Draining`, release held cluster members and abort every running job.
 - Each aborted job will report `JobFailed { Canceled }` with its phase timeline. The worker will wait at most 5 s for these reports.
-- A server before protocol 30 will receive no report. The closed session will re-queue those jobs as for a lost worker.
+- Jobs without a report within the 5 s re-queue with the closed session, as for a lost worker.
 - A canceled build will return to `Queued`. Its attempt will close as `Aborted` and count against neither `build.maxAttempts` nor the substitution miss count.
 - A canceled eval job will return its evaluation to `Queued`.
 - The assignment will close as abandoned and count toward no failure limit.

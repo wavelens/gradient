@@ -29,7 +29,7 @@ use crate::proto::progress::{
 };
 use gradient_wire::traits::{EvalProgressSink, JobReporter};
 use gradient_wire::types::{
-    BuildProgressPhase, BuildStage, GrantTarget, PROTO_BUILD_STAGES, UploadMetadata, UploadObject,
+    BuildProgressPhase, BuildStage, GrantTarget, UploadMetadata, UploadObject,
 };
 use gradient_worker_client::connection::ProtoWriter;
 use gradient_worker_client::nar_recv::{NarPayload, NarReceiver, NarUnavailable};
@@ -388,10 +388,6 @@ impl JobUpdater {
     }
 
     pub async fn report_stage(&self, stage: BuildStage) -> Result<()> {
-        if self.writer.version() < PROTO_BUILD_STAGES {
-            return Ok(());
-        }
-
         self.send_update(JobUpdateKind::Stage(stage)).await
     }
 

@@ -17,7 +17,7 @@ Activity of the scheduler and the workers, right now and over time. Live jobs, t
 | Network | NAR egress, worker upload, download and disk speed, HTTP latency per route | |
 | Jobs | The costliest builds by wall time, peak RAM, CPU time and disk I/O | Pick the time window |
 | Evals | The costliest evaluations by time, peak memory, thunks, function calls and allocations | Pick the time window |
-| System Health | Server runtime, metric pipeline lag, route stats. Superusers only | **Run Deep GC**. **Enable Draining** before stopping the server |
+| System Health | Server runtime, metric pipeline lag, route stats. Superusers only | **Run Deep GC**. **Enable Draining** |
 
 === "Live Jobs"
 
@@ -31,7 +31,7 @@ Activity of the scheduler and the workers, right now and over time. Live jobs, t
 
     ![Jobs tab](../assets/screenshots/job_board_expensive_jobs.png)
 
-Draining will stop new job handouts and park running evaluations for a safe server stop. The next start will clear the flag.
+Draining will stop new job handouts and park running evaluations. The next start will clear the flag. A server stop is safe without draining, and the next start will queue interrupted work again.
 
 ## Storage Metrics
 

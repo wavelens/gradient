@@ -14,7 +14,6 @@ use gradient_wire::messages::{
     BuildFailureKind, CachedPath, ClientMessage, ClusterAddress, ClusterMembership, ClusterPeer,
     Job, JobCandidate, JobKind, JobPhaseSpan, ServerMessage,
 };
-use gradient_wire::types::PROTO_CANCELED;
 use tokio::sync::{mpsc, watch};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};
@@ -115,18 +114,6 @@ async fn stop_budget_elapsed(deadline: Option<tokio::time::Instant>) {
     match deadline {
         Some(deadline) => tokio::time::sleep_until(deadline).await,
         None => std::future::pending().await,
-    }
-}
-
-fn failure_to_report(
-    kind: BuildFailureKind,
-    stopping: bool,
-    version: u16,
-) -> Option<BuildFailureKind> {
-    match (stopping, version >= PROTO_CANCELED) {
-        (false, _) => Some(kind),
-        (true, true) => Some(BuildFailureKind::Canceled),
-        (true, false) => None,
     }
 }
 
@@ -466,14 +453,7 @@ impl MessageLoopState {
         let completed_kind = job.kind;
         let assignment_id = job.assignment_id.get();
         let dropped_spans = job.timeline.dropped();
-        let TimelineSnapshot {
-            mut spans,
-            elapsed_ms,
-        } = job.timeline.snapshot();
-        let version = self.writer.version();
-        for span in &mut spans {
-            span.phase = span.phase.known_to(version);
-        }
+        let TimelineSnapshot { spans, elapsed_ms } = job.timeline.snapshot();
 
         if dropped_spans > 0 {
             debug!(%job_id, dropped_spans, "phase timeline hit its span cap");
@@ -516,9 +496,10 @@ impl MessageLoopState {
         elapsed_ms: u64,
     ) -> Result<()> {
         let (kind, missing_paths) = crate::executor::failure::wire_failure(e);
-        let Some(kind) = failure_to_report(kind, self.stopping, self.writer.version()) else {
-            info!(%job_id, "job stopped; the server queues it again once the session closes");
-            return Ok(());
+        let kind = if self.stopping {
+            BuildFailureKind::Canceled
+        } else {
+            kind
         };
 
         let error = match kind {
@@ -1078,27 +1059,6 @@ mod tests {
         assert_eq!(job.assignment_id.get(), "dispatch-2");
         assert!(jobs.is_idle());
         assert!(jobs.finish("job-1").is_none());
-    }
-
-    #[test]
-    fn a_stopping_worker_reports_a_failed_job_as_canceled_only_to_a_peer_that_knows_it() {
-        for kind in [BuildFailureKind::Aborted, BuildFailureKind::Permanent] {
-            assert_eq!(
-                failure_to_report(kind, true, PROTO_CANCELED),
-                Some(BuildFailureKind::Canceled),
-                "{kind:?}"
-            );
-            assert_eq!(
-                failure_to_report(kind, true, PROTO_CANCELED - 1),
-                None,
-                "an older server queues the job again once the session closes"
-            );
-        }
-        assert_eq!(
-            failure_to_report(BuildFailureKind::Aborted, false, PROTO_CANCELED),
-            Some(BuildFailureKind::Aborted),
-            "a job the server aborted is no stop"
-        );
     }
 
     #[tokio::test]

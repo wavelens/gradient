@@ -45,7 +45,7 @@ flowchart LR
 
 ## Build Stages
 
-Workers on protocol 28 report `JobUpdateKind::Stage` on entering `Prefetch`, `Build` or `Upload` in a build job. The worker pool can store the stage next to each assigned job.
+Workers report `JobUpdateKind::Stage` on entering `Prefetch`, `Build` or `Upload` in a build job. The worker pool can store the stage next to each assigned job.
 
 | Count | Meaning |
 |---|---|

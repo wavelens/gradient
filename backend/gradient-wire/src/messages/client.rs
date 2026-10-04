@@ -14,7 +14,7 @@ use crate::types::{
 };
 
 #[derive(Proto, Debug, Clone, PartialEq)]
-#[proto(oldest = 27)]
+#[proto(oldest = 30)]
 pub enum ClientMessage {
     InitConnection {
         capabilities: GradientCapabilities,
@@ -43,14 +43,11 @@ pub enum ClientMessage {
         endpoint: Option<String>,
     },
 
-    #[proto(removed(28, Option<f32>))]
     WorkerMetrics {
         cpu_usage_pct: f32,
         ram_free_mb: u64,
         disk_speed_mbps: Option<f32>,
-        #[proto(28, default)]
         upload_speed_mbps: Option<f32>,
-        #[proto(28, default)]
         download_speed_mbps: Option<f32>,
     },
 
@@ -88,7 +85,6 @@ pub enum ClientMessage {
         missing_paths: Vec<String>,
         spans: Vec<JobPhaseSpan>,
         elapsed_ms: u64,
-        #[proto(28, default)]
         metrics: Option<BuildMetrics>,
     },
 
@@ -190,7 +186,6 @@ pub enum ClientMessage {
     UploadCancel {
         request_id: u64,
     },
-    #[proto(29)]
     HandoverDone,
 }
 

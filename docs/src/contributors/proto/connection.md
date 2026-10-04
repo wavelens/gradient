@@ -144,8 +144,9 @@ A restart can lose work in flight, never a queued job.
 - Both sides send this 8-byte frame before their first message. The frame format will never change.
 - The `ProtoSocket` type will agree on the first send or receive. Both sides are sending first and reading second.
 - The agreed version is the lower of both newest versions. Every later frame is encoded for that version.
-- Two ranges without overlap will end the session with close code `1002` and `no shared protocol version: ours 27..=27, peer 30..=31`.
-- A first frame without `GRAD` came from protocol 26 or older. The session will end with `peer protocol is older than 27`.
+- Two ranges without overlap will end the session with close code `1002` and `no shared protocol version: ours 30..=30, peer 31..=32`.
+- A first frame without `GRAD` came from protocol 26 or older. The session will end with `peer protocol is older than 30`.
+- The oldest supported version is 30. Older workers must upgrade.
 - Both sides are logging the reason at the `warn` level.
 - A server dialing a worker will keep the reason as the worker's offline reason.
 - `gradient_wire::PROTO_VERSIONS` is the supported range, computed from the `#[proto]` annotations.
@@ -155,10 +156,10 @@ A restart can lose work in flight, never a queued job.
 
 | Change | Annotation | Effect |
 |---|---|---|
-| New field | `#[proto(28)]` | Field present since 28. The oldest supported version is rising to 28 |
-| New field with a fallback | `#[proto(28, default)]` | Older peers are leaving the field out. Decoding is filling `Default::default()` |
-| New variant | `#[proto(28)]` on the variant | Appended at the end. Sending the variant to a peer below 28 is an `EncodeError` |
-| Removed or reordered field or variant, changed meaning | `#[proto(oldest = 30)]` on `ClientMessage` and `ServerMessage` | The oldest supported version is rising to 30 |
+| New field | `#[proto(N)]` | Field present since N. The oldest supported version is rising to N |
+| New field with a fallback | `#[proto(N, default)]` | Older peers are leaving the field out. Decoding is filling `Default::default()` |
+| New variant | `#[proto(N)]` on the variant | Appended at the end. Sending the variant to a peer below N is an `EncodeError` |
+| Removed or reordered field or variant, changed meaning | `#[proto(oldest = N)]` on `ClientMessage` and `ServerMessage` | The oldest supported version is rising to N |
 
 - A field without `default` is required. A forgotten `default` can cost compatibility, never correctness.
 - Variants are append-only. A variant older than the one before is a compile error.

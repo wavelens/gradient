@@ -146,11 +146,8 @@ pub enum JobUpdateKind {
     InputUpdateExpansion {
         matched: Vec<String>,
     },
-    #[proto(28)]
     Stage(BuildStage),
 }
-
-pub const PROTO_BUILD_STAGES: u16 = 28;
 
 #[derive(Proto, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum BuildStage {
@@ -318,7 +315,6 @@ pub struct BuildOutput {
 }
 
 #[derive(Proto, Debug, Clone, PartialEq, Default)]
-#[proto(removed(28, Option<f32>))]
 pub struct BuildMetrics {
     pub peak_ram_mb: Option<u64>,
     pub cpu_time_ms: Option<u64>,
@@ -327,11 +323,8 @@ pub struct BuildMetrics {
     pub disk_write_bytes: Option<u64>,
     pub oom_killed: bool,
     pub build_time_ms: Option<u64>,
-    #[proto(28, default)]
     pub concurrent_builds: Option<u32>,
-    #[proto(28, default)]
     pub build_cores: Option<u32>,
-    #[proto(28, default)]
     pub cpu_core_score: Option<u32>,
 }
 
@@ -418,7 +411,6 @@ pub enum JobPhase {
     CacheQueryWait,
     NarFetch,
     NarImport,
-    #[proto(28)]
     UploadWait,
 }
 
@@ -517,13 +509,6 @@ impl JobPhase {
         })
     }
 
-    pub const fn known_to(self, version: u16) -> Self {
-        match self {
-            Self::UploadWait if version < PROTO_BUILD_STAGES => Self::NarPush,
-            phase => phase,
-        }
-    }
-
     pub fn name_of(v: i16) -> std::borrow::Cow<'static, str> {
         match (Self::from_i16(v), v) {
             (Some(phase), _) => phase.as_str().into(),
@@ -590,22 +575,12 @@ pub enum BuildFailureKind {
     InputsUnavailable,
     CorruptEvalCache,
     Aborted,
-    #[proto(30)]
     Canceled,
 }
 
-pub const PROTO_CANCELED: u16 = 30;
-
 #[cfg(test)]
 mod tests {
-    use super::{BuildFailureKind, JobPhase, PROTO_CANCELED};
-    use crate::codec::to_bytes;
-
-    #[test]
-    fn canceled_is_encoded_only_for_a_peer_that_knows_it() {
-        assert!(to_bytes(&BuildFailureKind::Canceled, PROTO_CANCELED - 1).is_err());
-        assert!(to_bytes(&BuildFailureKind::Canceled, PROTO_CANCELED).is_ok());
-    }
+    use super::JobPhase;
 
     #[test]
     fn every_stored_phase_discriminant_is_listed() {

@@ -29,13 +29,12 @@ fn every_phase_round_trips_through_its_own_code() {
 }
 
 #[test]
-fn every_phase_encodes_for_every_supported_peer_once_mapped_to_its_version() {
+fn every_phase_encodes_for_every_supported_peer() {
     for version in gradient_wire::PROTO_VERSIONS {
         for phase in JobPhase::ALL {
-            let known = phase.known_to(version);
             assert!(
-                gradient_wire::codec::to_bytes(&known, version).is_ok(),
-                "{phase:?} as {known:?} at protocol {version}"
+                gradient_wire::codec::to_bytes(&phase, version).is_ok(),
+                "{phase:?} at protocol {version}"
             );
         }
     }
