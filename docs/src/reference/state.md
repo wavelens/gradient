@@ -22,6 +22,7 @@ services.gradient.state = {
 | `projects` | attrs of submodule | `{ }` | Projects to create, one entry per name. |
 | `roles` | attrs of submodule | `{ }` | Custom roles, one entry per role name. |
 | `tasks` | attrs of submodule | `{ }` | Tasks to create, one entry per name. |
+| `teams` | attrs of submodule | `{ }` | Teams, one entry per team name. |
 | `users` | attrs of submodule | `{ }` | Users to create, one entry per user name. |
 | `validate` | bool | `true` | Whether to validate the generated state at build time with the server's `--state-validate`. Schema and reference errors are then failing the Nix build instead of the first server start. |
 | `workers` | attrs of submodule | `{ }` | Worker registrations, one entry per worker ID. |
@@ -52,6 +53,11 @@ services.gradient.state = {
 | `name` | string | attribute name | Unique project name. |
 | `private_key_file` | string | - | File containing the SSH private key used for Git access. |
 | `public` | bool | `false` | Whether the project is visible to all users. |
+| `teams` | list of submodule | `[ ]` | Teams granted on this project. The project's grants stay untouched by an empty list. A non-empty list is the source of truth. |
+| `teams.*.role` | null or string | `null` | Role of the team's users: a built-in `Admin`, `Write` or `View`, or a custom role of the project. Required when `users` is true. |
+| `teams.*.team` | string | - | Team granted on the project. |
+| `teams.*.users` | bool | `true` | Whether the team's users get `role` on the project. |
+| `teams.*.workers` | bool | `true` | Whether the team's workers take the project's jobs. |
 
 ## `tasks.<name>`
 
@@ -117,6 +123,9 @@ services.gradient.state = {
 | `priority` | int | `10` | Priority advertised in `nix-cache-info`. Nix is querying caches with a lower value first. |
 | `projects` | list of string | `[ ]` | Names of the projects using this cache. |
 | `public` | bool | `false` | Whether the cache is available to all projects. |
+| `teams` | list of submodule | `[ ]` | Teams granted on this cache. The cache's grants stay untouched by an empty list. A non-empty list is the source of truth. |
+| `teams.*.role` | string | - | Role of the team's users: `Admin`, `Write`, `View` or a custom role of the cache. |
+| `teams.*.team` | string | - | Team granted on the cache. |
 | `roles` | list of submodule | `[ ]` | Custom roles of this cache. |
 | `roles.*.name` | string | - | Custom role name, distinct from the built-in roles. |
 | `roles.*.permissions` | list of string | `[ ]` | Cache permissions granted by the role: `viewCache`, `readStore`, `writeStore`, `manageCacheSettings`, `manageCacheKeys`, `manageUpstreamCaches`, `manageCacheMembers`, `manageCacheRoles`, `manageCacheSubscriptions`, `manageCacheWebhooks` or `deleteCache`. |
@@ -135,10 +144,8 @@ services.gradient.state = {
 | Option | Type | Default | Description |
 |---|---|---|---|
 | `name` | string | attribute name | Role name, distinct from the built-in `Admin`, `Write` and `View` and unique within its project. |
-| `oidc_group` | list of string | `[ ]` | OIDC groups granting this role on login. |
 | `permissions` | list of string | `[ ]` | Permissions granted by the role, as camelCase identifiers. |
 | `project` | string | - | Project owning the role. |
-| `scim_group` | list of string | `[ ]` | SCIM groups granting this role. |
 
 ## `api_keys.<name>`
 
@@ -150,20 +157,33 @@ services.gradient.state = {
 | `permissions` | list of string | `[ ]` | Permissions granted by the key, as camelCase identifiers such as `viewProject`, `triggerEvaluation`, `editTask` or `manageMembers`. |
 | `project` | null or string | `null` | Project the key is restricted to. |
 
+## `teams.<name>`
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `display_name` | string | attribute name | Display name of the team. |
+| `members` | list of submodule | `[ ]` | Users in the team. Members missing from the list leave the team on the next state apply. Members from an OIDC or SCIM group stay. |
+| `members.*.role` | one of `Admin` `Member` | `"Member"` | Role in the team. Admins manage members, workers, grants and requests. |
+| `members.*.user` | string | - | User name, resolved when the state is applied. |
+| `name` | string | attribute name | Team name. Teams managed here cannot be changed through the API. |
+| `new_projects.role` | null or one of `Admin` `Write` `View` | `null` | Project role for the team's users on new projects. |
+| `new_projects.users` | bool | `false` | Whether new projects grant this team's users `new_projects.role`. |
+| `new_projects.workers` | bool | `false` | Whether new projects grant this team's workers. |
+| `oidc_group` | null or string | `null` | OIDC group whose members join the team on sign-in and leave it once the group is gone from their `groups` claim. The `groups` scope is required. |
+| `scim_group` | null or string | `null` | SCIM group mapped onto the team's members. |
+
 ## `workers.<name>`
 
 | Option | Type | Default | Description |
 |---|---|---|---|
-| `authorize_against` | null or string | `null` | UUID a base worker is authenticating as, instead of the per-project challenge. |
-| `auto_enable` | bool | `true` | Whether every new project is enabling this base worker on creation instead of opting in through the web UI. |
-| `base_worker` | bool | `true` | Whether this is a base worker available to every project instead of a per-project registration. |
 | `created_by` | null or string | `null` | User name of the registration's creator. |
 | `display_name` | string | attribute name | Display name of the worker. |
 | `enable_build` | bool | `true` | Whether the server is granting this registration the worker's `build` capability. |
 | `enable_eval` | bool | `true` | Whether the server is granting this registration the worker's `eval` capability. |
 | `enable_fetch` | bool | `true` | Whether the server is granting this registration the worker's `fetch` capability. |
-| `enabled` | bool | `true` | Whether the worker is active. The UI can toggle this value on a per-project registration, and the next server start is restoring it. The UI is toggling only a project's enablement of a base worker. |
-| `projects` | list of string | `[ ]` | Projects the worker is registered under, one registration per project. A single worker can serve several projects. |
+| `enabled` | bool | `true` | Whether the worker is active. Changes from the UI last until the next server start. |
+| `projects` | list of string | `[ ]` | Projects the worker is registered under, one registration per project. Leave empty for a team worker. |
+| `team` | null or string | `null` | Team owning this worker. A team worker can serve every project granting the team's workers. Mutually exclusive with `projects`. |
 | `token_file` | path | - | File containing the worker's authentication token. |
 | `url` | null or string | `null` | WebSocket URL on which the worker is accepting server connections. |
 | `worker_id` | string | - | Worker identity. |

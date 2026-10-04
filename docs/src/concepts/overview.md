@@ -20,6 +20,7 @@ flowchart LR
 | Concept | Role |
 |---|---|
 | [Project](projects-and-tasks.md#project) | Unit of access: members, roles, workers and cache subscriptions |
+| [Team](teams.md) | Users and workers granted on projects and caches |
 | [Task](projects-and-tasks.md#task) | One repository plus the flake outputs to build, selected by a wildcard |
 | Trigger | Starting an evaluation of a task: push, pull request, polling or schedule |
 | [Evaluation](evaluations-and-builds.md#evaluation) | One pass over a task at one commit, listing every derivation to build |

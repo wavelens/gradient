@@ -16,10 +16,6 @@ The first release with a stability pledge.
 
     Stable, professional releases become a commitment. Each release is shipping migrations for the NixOS module options, the PostgreSQL schema, cache storage, the API and the worker protocol.
 
--   :material-office-building: **Organizations**
-
-    A new level above projects. One organization is holding the projects, members and workers of a team.
-
 -   :material-database-sync: **Storage Migrations**
 
     Changes to the S3 and file layout migrate existing caches in place. An interrupted migration can resume after a restart.

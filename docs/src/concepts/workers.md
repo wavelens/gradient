@@ -36,23 +36,22 @@ Workers in one datacenter share a zone label, `services.gradient.worker.zone` (d
 | Kind | Registered | Serving |
 |---|---|---|
 | Project worker | Under one project | That project |
-| Base worker | On the server, visible in every project | Every project with the worker enabled |
-| Local worker | On the server host, automatically | Every project, enabled by default |
+| Team worker | Under one [team](teams.md) | Every project granting the team's workers |
+| Local worker | On the server host, automatically | Every new project, as a worker of the state-declared team `server` |
 
 A worker is only receiving jobs from projects with a cache subscription.
 
-## Base Workers
+## Team Workers
 
-A base worker is a server-level worker declared in [`services.gradient.state.workers`](../reference/state.md#workersname). Every project's worker list is showing the base worker. Projects can enable or disable a base worker, but cannot edit or delete one.
+A team worker is part of one [team](teams.md), with one token for the whole team. Granted projects list the team worker read-only. Changes take place on the team's **Workers** page.
 
 | Setting | Effect |
 |---|---|
-| `projects` | Projects starting with the worker enabled. Other projects opt in from the UI |
-| `auto_enable` | Every project is enabling the worker on creation. A project turning the worker off is staying off |
-| `enabled` | Global switch. Off is hiding the worker from every project |
-| `authorize_against` | A fixed UUID for worker authentication, instead of one token line per project |
+| Grant with workers | Team worker active in the project |
+| `new_projects.workers` | Team workers granted to every new project |
+| `enabled` | Global switch for the worker in every granted project |
 
-The local worker is a base worker with `auto_enable`. A project registering its own worker under the same worker ID is hiding the base worker in that project.
+A worker ID is either a team worker or a set of project registrations, never both.
 
 ## Ephemeral Workers
 
