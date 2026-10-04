@@ -5,28 +5,60 @@
  */
 
 use gradient_wire::messages::BuildMetrics;
-use harmonia_protocol::daemon_wire::types2::Microseconds;
-use std::path::{Path, PathBuf};
-use tracing::debug;
-
-use crate::metrics::cgroup::{BuildMetricsRaw, read_build_cgroup};
+use harmonia_protocol::daemon_wire::types2::{BuildResult, Microseconds};
 
 const BYTES_PER_MB: u64 = 1_048_576;
-const CGROUP_SAMPLE_MS: u64 = 200;
 
-fn raw_to_build_metrics(
-    raw: Option<BuildMetricsRaw>,
-    build_time_ms: u64,
-    cpu_count: u32,
-) -> BuildMetrics {
-    let Some(raw) = raw else {
-        return BuildMetrics {
-            build_time_ms: Some(build_time_ms),
-            ..Default::default()
-        };
-    };
+/// The daemon is reading these from the build's cgroup. A daemon without cgroups or without the
+/// `build-resource-usage` feature is leaving all but the CPU times empty.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub(super) struct ResourceUsage {
+    cpu_usec: Option<u64>,
+    memory_peak: Option<u64>,
+    io_read_bytes: Option<u64>,
+    io_write_bytes: Option<u64>,
+    oom_kills: Option<u64>,
+}
 
-    let cpu_time_ms = raw.cpu_usage_usec.map(|u| u / 1000);
+impl ResourceUsage {
+    pub(super) fn of(result: &BuildResult) -> Self {
+        Self {
+            cpu_usec: cpu_usec(result.cpu_user, result.cpu_system),
+            memory_peak: result.memory_peak,
+            io_read_bytes: result.io_read_bytes,
+            io_write_bytes: result.io_write_bytes,
+            oom_kills: result.oom_kills,
+        }
+    }
+}
+
+fn cpu_usec(user: Option<Microseconds>, system: Option<Microseconds>) -> Option<u64> {
+    let us = |m: Microseconds| m.0.max(0) as u64;
+    match (user, system) {
+        (None, None) => None,
+        (u, s) => Some(u.map(us).unwrap_or(0) + s.map(us).unwrap_or(0)),
+    }
+}
+
+pub(super) fn build_metrics(usage: ResourceUsage, build_time_ms: u64) -> BuildMetrics {
+    observe_disk_speed(usage, build_time_ms);
+    metrics_from(
+        usage,
+        build_time_ms,
+        crate::metrics::host_static().cpu_count,
+    )
+}
+
+fn observe_disk_speed(usage: ResourceUsage, build_time_ms: u64) {
+    let bytes = usage.io_read_bytes.unwrap_or(0) + usage.io_write_bytes.unwrap_or(0);
+    if build_time_ms > 0 && bytes > 0 {
+        let mb_per_s = (bytes as f64 / BYTES_PER_MB as f64) / (build_time_ms as f64 / 1000.0);
+        gradient_worker_client::throughput::DISK.observe(mb_per_s);
+    }
+}
+
+fn metrics_from(usage: ResourceUsage, build_time_ms: u64, cpu_count: u32) -> BuildMetrics {
+    let cpu_time_ms = usage.cpu_usec.map(|u| u / 1000);
     let avg_cpu_pct = match cpu_time_ms {
         Some(cpu_ms) if build_time_ms > 0 && cpu_count > 0 => {
             Some(cpu_ms as f32 / (build_time_ms as f32 * cpu_count as f32) * 100.0)
@@ -35,135 +67,13 @@ fn raw_to_build_metrics(
     };
 
     BuildMetrics {
-        peak_ram_mb: raw.peak_ram_bytes.map(|b| b / BYTES_PER_MB),
+        peak_ram_mb: usage.memory_peak.map(|b| b / BYTES_PER_MB),
         cpu_time_ms,
         avg_cpu_pct,
-        disk_read_bytes: Some(raw.disk_read_bytes),
-        disk_write_bytes: Some(raw.disk_write_bytes),
-        oom_killed: raw.oom_killed,
+        disk_read_bytes: usage.io_read_bytes,
+        disk_write_bytes: usage.io_write_bytes,
+        oom_killed: usage.oom_kills.is_some_and(|kills| kills > 0),
         build_time_ms: Some(build_time_ms),
-    }
-}
-
-fn build_cgroup(root: &Path, drv_path: &str) -> Option<PathBuf> {
-    let (hash, _) = Path::new(drv_path).file_name()?.to_str()?.split_once('-')?;
-    let prefix = format!("nix-build@{hash}-");
-    std::fs::read_dir(root)
-        .ok()?
-        .flatten()
-        .map(|entry| entry.path())
-        .find(|path| {
-            path.file_name()
-                .and_then(|name| name.to_str())
-                .is_some_and(|name| name.starts_with(&prefix))
-        })
-}
-
-pub(super) fn daemon_cpu_usec(
-    user: Option<Microseconds>,
-    system: Option<Microseconds>,
-) -> Option<u64> {
-    let us = |m: Microseconds| m.0.max(0) as u64;
-    match (user, system) {
-        (None, None) => None,
-        (u, s) => Some(u.map(us).unwrap_or(0) + s.map(us).unwrap_or(0)),
-    }
-}
-
-pub(super) fn assemble_build_metrics(
-    sampled: Option<BuildMetricsRaw>,
-    cpu_usec: Option<u64>,
-    build_time_ms: u64,
-) -> BuildMetrics {
-    let cpu_count = crate::metrics::host_static().cpu_count;
-    let raw = match (sampled, cpu_usec) {
-        (None, None) => None,
-        (s, cpu) => {
-            let s = s.unwrap_or_default();
-            Some(BuildMetricsRaw {
-                cpu_usage_usec: cpu.or(s.cpu_usage_usec),
-                ..s
-            })
-        }
-    };
-    if let Some(r) = raw.as_ref() {
-        let bytes = r.disk_read_bytes + r.disk_write_bytes;
-        if build_time_ms > 0 && bytes > 0 {
-            let mb_per_s = (bytes as f64 / 1_048_576.0) / (build_time_ms as f64 / 1000.0);
-            gradient_worker_client::throughput::DISK.observe(mb_per_s);
-        }
-    }
-    raw_to_build_metrics(raw, build_time_ms, cpu_count)
-}
-
-/// Nix is destroying the build cgroup as soon as the build is done. The sampler must read it while
-/// the build is running and keep the last good reading.
-pub(super) struct CgroupSampler {
-    stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
-    handle: tokio::task::JoinHandle<Option<BuildMetricsRaw>>,
-}
-
-impl CgroupSampler {
-    pub(super) fn start(cgroup_root: &str, drv_path: &str) -> Self {
-        use std::sync::Arc;
-        use std::sync::atomic::{AtomicBool, Ordering};
-        let stop = Arc::new(AtomicBool::new(false));
-        let s = stop.clone();
-        let root = PathBuf::from(cgroup_root);
-        let drv_path = drv_path.to_owned();
-        #[expect(
-            clippy::disallowed_methods,
-            reason = "stopped through the flag when the build ends"
-        )]
-        let handle = tokio::spawn(async move {
-            let mut cgroup: Option<PathBuf> = None;
-            let mut last: Option<BuildMetricsRaw> = None;
-            while !s.load(Ordering::Relaxed) {
-                let root = root.clone();
-                let drv_path = drv_path.clone();
-                let known = cgroup.clone();
-                let sample = tokio::task::spawn_blocking(move || {
-                    let cgroup = known.or_else(|| build_cgroup(&root, &drv_path))?;
-                    let raw = read_build_cgroup(&cgroup);
-                    Some((cgroup, raw))
-                })
-                .await
-                .ok()
-                .flatten();
-
-                match sample {
-                    Some((dir, Some(cur))) => {
-                        if cgroup.is_none() {
-                            debug!(cgroup = %dir.display(), "sampling build cgroup for metrics");
-                        }
-                        cgroup = Some(dir);
-                        last = Some(merge_cgroup_sample(last, cur));
-                    }
-                    Some((_, None)) => break,
-                    None => {}
-                }
-                tokio::time::sleep(std::time::Duration::from_millis(CGROUP_SAMPLE_MS)).await;
-            }
-            last
-        });
-        Self { stop, handle }
-    }
-
-    pub(super) async fn finish(self) -> Option<BuildMetricsRaw> {
-        use std::sync::atomic::Ordering;
-        self.stop.store(true, Ordering::Relaxed);
-        self.handle.await.ok().flatten()
-    }
-}
-
-fn merge_cgroup_sample(prev: Option<BuildMetricsRaw>, cur: BuildMetricsRaw) -> BuildMetricsRaw {
-    let prev = prev.unwrap_or_default();
-    BuildMetricsRaw {
-        peak_ram_bytes: prev.peak_ram_bytes.max(cur.peak_ram_bytes),
-        cpu_usage_usec: cur.cpu_usage_usec.or(prev.cpu_usage_usec),
-        disk_read_bytes: cur.disk_read_bytes,
-        disk_write_bytes: cur.disk_write_bytes,
-        oom_killed: prev.oom_killed || cur.oom_killed,
     }
 }
 
@@ -171,115 +81,71 @@ fn merge_cgroup_sample(prev: Option<BuildMetricsRaw>, cur: BuildMetricsRaw) -> B
 mod tests {
     use super::*;
 
-    const DRV: &str = "/nix/store/0123456789abcdfghijklmnpqrsvwxyz-hello.drv";
-
     #[test]
-    fn build_cgroup_matches_the_derivation_among_siblings() {
-        let root = tempfile::tempdir().unwrap();
-        for name in [
-            "nix-daemon",
-            "nix-build@zyxwvsrqpnmlkjihgfdcba9876543210-30001",
-            "nix-build@0123456789abcdfghijklmnpqrsvwxyz-30002",
-        ] {
-            std::fs::create_dir(root.path().join(name)).unwrap();
-        }
+    fn cpu_usec_sums_present_fields() {
+        assert_eq!(cpu_usec(None, None), None);
+        assert_eq!(cpu_usec(Some(Microseconds(700)), None), Some(700));
         assert_eq!(
-            build_cgroup(root.path(), DRV),
-            Some(
-                root.path()
-                    .join("nix-build@0123456789abcdfghijklmnpqrsvwxyz-30002")
-            ),
-        );
-    }
-
-    #[test]
-    fn build_cgroup_none_before_the_build_starts() {
-        let root = tempfile::tempdir().unwrap();
-        std::fs::create_dir(root.path().join("nix-daemon")).unwrap();
-        assert!(build_cgroup(root.path(), DRV).is_none());
-        assert!(build_cgroup(&root.path().join("missing"), DRV).is_none());
-    }
-
-    #[test]
-    fn daemon_cpu_usec_sums_present_fields() {
-        assert_eq!(daemon_cpu_usec(None, None), None);
-        assert_eq!(daemon_cpu_usec(Some(Microseconds(700)), None), Some(700));
-        assert_eq!(
-            daemon_cpu_usec(Some(Microseconds(700)), Some(Microseconds(300))),
+            cpu_usec(Some(Microseconds(700)), Some(Microseconds(300))),
             Some(1000),
         );
         assert_eq!(
-            daemon_cpu_usec(Some(Microseconds(-1)), Some(Microseconds(5))),
+            cpu_usec(Some(Microseconds(-1)), Some(Microseconds(5))),
             Some(5)
         );
     }
 
     #[test]
-    fn raw_to_metrics_always_sets_build_time() {
-        let m = raw_to_build_metrics(None, 5_000, 4);
-        assert_eq!(m.build_time_ms, Some(5_000));
-        assert_eq!(m.peak_ram_mb, None);
-        assert_eq!(m.cpu_time_ms, None);
-        assert_eq!(m.avg_cpu_pct, None);
-        assert!(!m.oom_killed);
+    fn a_daemon_without_resource_usage_leaves_only_the_build_time() {
+        let m = metrics_from(ResourceUsage::default(), 5_000, 4);
+        assert_eq!(
+            m,
+            BuildMetrics {
+                build_time_ms: Some(5_000),
+                ..Default::default()
+            }
+        );
     }
 
     #[test]
-    fn raw_to_metrics_handles_zero_divisors() {
-        let raw = BuildMetricsRaw {
-            peak_ram_bytes: Some(2 * BYTES_PER_MB),
-            cpu_usage_usec: Some(1_000_000),
-            disk_read_bytes: 10,
-            disk_write_bytes: 20,
-            oom_killed: false,
+    fn the_daemon_usage_becomes_the_build_metrics() {
+        let usage = ResourceUsage {
+            cpu_usec: Some(8_000_000),
+            memory_peak: Some(3 * BYTES_PER_MB + 1),
+            io_read_bytes: Some(10),
+            io_write_bytes: Some(20),
+            oom_kills: Some(1),
         };
-        let m = raw_to_build_metrics(Some(raw), 0, 4);
-        assert_eq!(m.avg_cpu_pct, None);
-        let m = raw_to_build_metrics(Some(raw), 1_000, 0);
-        assert_eq!(m.avg_cpu_pct, None);
-        assert_eq!(m.peak_ram_mb, Some(2));
-        assert_eq!(m.cpu_time_ms, Some(1_000));
-        assert_eq!(m.disk_read_bytes, Some(10));
-        assert_eq!(m.disk_write_bytes, Some(20));
+        assert_eq!(
+            metrics_from(usage, 4_000, 4),
+            BuildMetrics {
+                peak_ram_mb: Some(3),
+                cpu_time_ms: Some(8_000),
+                avg_cpu_pct: Some(50.0),
+                disk_read_bytes: Some(10),
+                disk_write_bytes: Some(20),
+                oom_killed: true,
+                build_time_ms: Some(4_000),
+            }
+        );
     }
 
     #[test]
-    fn raw_to_metrics_computes_avg_cpu_pct() {
-        let raw = BuildMetricsRaw {
-            peak_ram_bytes: None,
-            cpu_usage_usec: Some(8_000_000),
-            disk_read_bytes: 0,
-            disk_write_bytes: 0,
-            oom_killed: false,
+    fn no_out_of_memory_kill_is_not_an_out_of_memory_build() {
+        let usage = ResourceUsage {
+            oom_kills: Some(0),
+            ..Default::default()
         };
-        let m = raw_to_build_metrics(Some(raw), 4_000, 4);
-        assert_eq!(m.cpu_time_ms, Some(8_000));
-        assert_eq!(m.avg_cpu_pct, Some(50.0));
-    }
-
-    fn sample(cpu_usage_usec: Option<u64>) -> BuildMetricsRaw {
-        BuildMetricsRaw {
-            peak_ram_bytes: Some(BYTES_PER_MB),
-            cpu_usage_usec,
-            disk_read_bytes: 1,
-            disk_write_bytes: 2,
-            oom_killed: false,
-        }
+        assert!(!metrics_from(usage, 1_000, 4).oom_killed);
     }
 
     #[test]
-    fn merge_keeps_the_latest_cumulative_cpu_usage() {
-        let merged = merge_cgroup_sample(Some(sample(Some(1_000))), sample(Some(5_000)));
-        assert_eq!(merged.cpu_usage_usec, Some(5_000));
-        let merged = merge_cgroup_sample(Some(sample(Some(5_000))), sample(None));
-        assert_eq!(merged.cpu_usage_usec, Some(5_000));
-    }
-
-    #[test]
-    fn assemble_falls_back_to_the_sampled_cpu_without_daemon_times() {
-        let m = assemble_build_metrics(Some(sample(Some(3_000_000))), None, 1_000);
-        assert_eq!(m.cpu_time_ms, Some(3_000));
-        let m = assemble_build_metrics(Some(sample(Some(3_000_000))), Some(4_000_000), 1_000);
-        assert_eq!(m.cpu_time_ms, Some(4_000));
+    fn the_cpu_share_needs_a_build_time_and_cores() {
+        let usage = ResourceUsage {
+            cpu_usec: Some(1_000_000),
+            ..Default::default()
+        };
+        assert_eq!(metrics_from(usage, 0, 4).avg_cpu_pct, None);
+        assert_eq!(metrics_from(usage, 1_000, 0).avg_cpu_pct, None);
     }
 }

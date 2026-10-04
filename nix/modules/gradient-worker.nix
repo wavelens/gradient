@@ -329,20 +329,11 @@ in {
         type = lib.types.bool;
         default = false;
         description = ''
-          Whether to record per-build peak memory, CPU time and disk I/O. Enabling it is turning on
-          Nix's experimental `cgroups` feature and `use-cgroups` and delegating cgroup controllers to
-          {file}`nix-daemon.service`. Peak memory and disk I/O need Gradient's Nix fork on the
-          daemon, and {option}`nix.package` is defaulting to its package. Wall-clock time is always
-          recorded.
-        '';
-      };
-
-      cgroupRoot = lib.mkOption {
-        type = lib.types.str;
-        default = "/sys/fs/cgroup/system.slice/nix-daemon.service";
-        description = ''
-          Cgroup of the Nix daemon. The daemon is creating each build's cgroup under this cgroup when
-          {option}`services.gradient.worker.build.metrics` is enabled.
+          Whether to record per-build peak memory, CPU time, disk I/O and out-of-memory kills. Enabling
+          it is turning on Nix's experimental `cgroups` feature and `use-cgroups` and delegating cgroup
+          controllers to {file}`nix-daemon.service`. The daemon is reporting the values in each build
+          result. Peak memory, disk I/O and out-of-memory kills need Gradient's Nix fork on the daemon,
+          and {option}`nix.package` is defaulting to its package. Wall-clock time is always recorded.
         '';
       };
     };
@@ -552,8 +543,6 @@ in {
           GRADIENT_WORKER_EVAL_METRICS = lib.boolToString cfg.eval.metrics;
           GRADIENT_WORKER_EVAL_CACHE_SHARE = lib.boolToString cfg.eval.cache.share;
           GRADIENT_WORKER_BUILD_MAX_CONCURRENT = toString cfg.build.maxConcurrent;
-          GRADIENT_WORKER_BUILD_METRICS = lib.boolToString cfg.build.metrics;
-          GRADIENT_WORKER_BUILD_CGROUP_ROOT = cfg.build.cgroupRoot;
           GRADIENT_WORKER_NAR_MAX_CONCURRENT_UPLOADS = toString cfg.nar.maxConcurrentUploads;
           GRADIENT_WORKER_NAR_PARTIAL_TTL_SECS = toString cfg.nar.partialTtlSecs;
           GRADIENT_WORKER_LOG_LEVEL_DEFAULT = cfg.log.level.default;

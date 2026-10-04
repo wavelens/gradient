@@ -326,10 +326,9 @@ Declarative entities under `services.gradient.state` are in the [state reference
 
 | Option | Type | Default | Env | Description |
 |---|---|---|---|---|
-| `worker.build.cgroupRoot` | string | `"/sys/fs/cgroup/system.slice/nix-daemon.service"` | `GRADIENT_WORKER_BUILD_CGROUP_ROOT` | Cgroup of the Nix daemon. The daemon is creating each build's cgroup under this cgroup when `worker.build.metrics` is enabled. |
 | `worker.build.maxConcurrent` | int | `32` | `GRADIENT_WORKER_BUILD_MAX_CONCURRENT` | Maximum simultaneous builds. |
 | `worker.build.maxCores` | null or (int) | `null` | `GRADIENT_WORKER_BUILD_MAX_CORES` | CPU cores a single build may use, passed as `--cores`. |
-| `worker.build.metrics` | bool | `false` | `GRADIENT_WORKER_BUILD_METRICS` | Whether to record per-build peak memory, CPU time and disk I/O. |
+| `worker.build.metrics` | bool | `false` | - | Whether to record per-build peak memory, CPU time, disk I/O and out-of-memory kills. |
 
 ## `worker.capabilities`
 

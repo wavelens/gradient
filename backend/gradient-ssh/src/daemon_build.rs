@@ -164,6 +164,10 @@ fn build_result(inner: BuildResultInner) -> BuildResult {
         stop_time: 0,
         cpu_user: None,
         cpu_system: None,
+        memory_peak: None,
+        io_read_bytes: None,
+        io_write_bytes: None,
+        oom_kills: None,
     }
 }
 
