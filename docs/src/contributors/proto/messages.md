@@ -32,6 +32,7 @@ Every message on `/proto`, from `backend/gradient-wire/src/messages`. IDs (`job_
 | `CacheError` | Cache state unknown. The worker is retrying | `query_id`, `message` |
 | `UploadGrant` | Upload admission: skip, passthrough (with resume offset), presigned PUT or multipart | `request_id`, `target` |
 | `UploadCommitted` | Upload outcome: ok, retry or rejected | `request_id`, `outcome` |
+| `Handover` | Path list of the next user of a shared worker, in chunks. Index 0 starts a new list and wipes per-user caches. Paths off the list stay hidden from jobs | `index`, `paths`, `is_final` |
 
 ## Worker -> Server
 
@@ -65,6 +66,8 @@ Every message on `/proto`, from `backend/gradient-wire/src/messages`. IDs (`job_
 | `UploadChunk` (bulk) | Passthrough upload bytes | `request_id`, `data`, `offset`, `is_final` |
 | `UploadFinished` | Upload done, with NAR metadata | `request_id`, `metadata` |
 | `UploadCancel` | Cancelling an upload | `request_id` |
+| `HandoverDone` | Last `Handover` chunk applied | - |
+| `PathsAdded` | Paths verified, imported or built for the current user of a shared worker | `paths` |
 
 ## Cache Query Modes
 

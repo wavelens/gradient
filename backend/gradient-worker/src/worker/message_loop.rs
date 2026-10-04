@@ -378,6 +378,9 @@ impl MessageLoopState {
             | ServerMessage::NarAbort { .. } => {
                 warn!("a NAR frame reached the control dispatch");
             }
+            ServerMessage::Handover { .. } => {
+                warn!("handover is not supported yet");
+            }
         }
         Ok(())
     }

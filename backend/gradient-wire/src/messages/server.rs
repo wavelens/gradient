@@ -160,6 +160,12 @@ pub enum ServerMessage {
         worker_id: String,
         tokens: Vec<(String, String)>,
     },
+    #[proto(29)]
+    Handover {
+        index: u32,
+        paths: Vec<String>,
+        is_final: bool,
+    },
 }
 
 impl ServerMessage {
@@ -205,6 +211,7 @@ impl ServerMessage {
             ServerMessage::UploadGrant { .. } => "UploadGrant",
             ServerMessage::UploadCommitted { .. } => "UploadCommitted",
             ServerMessage::Authenticate { .. } => "Authenticate",
+            ServerMessage::Handover { .. } => "Handover",
         }
     }
 

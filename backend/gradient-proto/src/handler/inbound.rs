@@ -334,6 +334,10 @@ impl<'a> InboundContext<'a> {
                 self.on_draining().await;
                 true
             }
+            ClientMessage::HandoverDone | ClientMessage::PathsAdded { .. } => {
+                warn!(peer_id = %self.peer_id, "worker sent a shared-worker message the server does not handle");
+                true
+            }
             ClientMessage::NarRequest { job_id, paths } => {
                 self.on_nar_request(job_id, paths).await;
                 true

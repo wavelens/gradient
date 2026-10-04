@@ -190,6 +190,12 @@ pub enum ClientMessage {
     UploadCancel {
         request_id: u64,
     },
+    #[proto(29)]
+    HandoverDone,
+    #[proto(29)]
+    PathsAdded {
+        paths: Vec<String>,
+    },
 }
 
 impl ClientMessage {
@@ -243,6 +249,8 @@ impl ClientMessage {
             ClientMessage::UploadChunk { .. } => "UploadChunk",
             ClientMessage::UploadFinished { .. } => "UploadFinished",
             ClientMessage::UploadCancel { .. } => "UploadCancel",
+            ClientMessage::HandoverDone => "HandoverDone",
+            ClientMessage::PathsAdded { .. } => "PathsAdded",
         }
     }
 
