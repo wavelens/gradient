@@ -135,6 +135,100 @@ fn assignment_windows_sql() -> String {
     )
 }
 
+#[derive(Debug, Default, FromQueryResult)]
+struct StorageRow {
+    read_mbps: Option<f64>,
+    write_mbps: Option<f64>,
+}
+
+gradient_db::sql! {
+    STORAGE_PEAK_THROUGHPUT = r#"
+        WITH span AS (
+          SELECT p.phase,
+                 d.finished_at - make_interval(secs => (d.worker_elapsed_ms - p.start_ms) / 1000.0) AS started,
+                 d.finished_at - make_interval(secs => (d.worker_elapsed_ms - p.end_ms) / 1000.0) AS ended,
+                 p.bytes * 8.0 / (1000.0 * (p.end_ms - p.start_ms)) AS mbps
+          FROM dispatched_job_phase p
+          JOIN dispatched_job d ON d.id = p.dispatched_job
+          WHERE p.phase IN ($2, $3) AND p.created_at >= $1
+            AND p.bytes >= 1048576 AND p.end_ms - p.start_ms >= 1000
+            AND d.finished_at IS NOT NULL AND d.worker_elapsed_ms IS NOT NULL
+        ),
+        change AS (
+          SELECT phase, started AS at, mbps AS delta FROM span
+          UNION ALL
+          SELECT phase, ended, -mbps FROM span
+        ),
+        running AS (
+          SELECT phase, SUM(delta) OVER (PARTITION BY phase ORDER BY at, delta ROWS UNBOUNDED PRECEDING) AS mbps
+          FROM change
+        )
+        SELECT (MAX(mbps) FILTER (WHERE phase = $2))::float8 AS read_mbps,
+               (MAX(mbps) FILTER (WHERE phase = $3))::float8 AS write_mbps
+        FROM running
+    "#,
+        params = [Now, Int(16), Int(12)];
+}
+
+#[derive(Debug, Default, FromQueryResult)]
+struct CompressionRow {
+    ratio: Option<f64>,
+}
+
+gradient_db::sql! {
+    STORED_TO_NAR_RATIO = r#"
+        SELECT (SUM(push.bytes)::float8 / NULLIF(SUM(c.bytes), 0))::float8 AS ratio
+        FROM (
+          SELECT dispatched_job, parent_seq, SUM(bytes) AS bytes
+          FROM dispatched_job_phase
+          WHERE phase = $2 AND created_at >= $1 AND parent_seq IS NOT NULL
+          GROUP BY dispatched_job, parent_seq
+        ) push
+        JOIN dispatched_job_phase c
+          ON c.dispatched_job = push.dispatched_job AND c.seq = push.parent_seq
+        WHERE c.phase = $3 AND c.bytes > 0
+    "#,
+        params = [Now, Int(12), Int(11)];
+}
+
+const STORAGE_WINDOW_HOURS: i64 = 1;
+
+async fn storage_throughput(
+    db: &impl ConnectionTrait,
+    now: chrono::NaiveDateTime,
+) -> (StorageRow, Option<f64>) {
+    use gradient_wire::types::JobPhase;
+
+    let since = now - chrono::Duration::hours(STORAGE_WINDOW_HOURS);
+    let peak = StorageRow::find_by_statement(STORAGE_PEAK_THROUGHPUT.bind([
+        since.into(),
+        JobPhase::NarFetch.as_i16().into(),
+        JobPhase::NarPush.as_i16().into(),
+    ]))
+    .one(db)
+    .await
+    .unwrap_or_else(|e| {
+        error!(error = %e, "instance metrics: storage throughput query failed");
+        None
+    })
+    .unwrap_or_default();
+
+    let ratio = CompressionRow::find_by_statement(STORED_TO_NAR_RATIO.bind([
+        since.into(),
+        JobPhase::NarPush.as_i16().into(),
+        JobPhase::Compress.as_i16().into(),
+    ]))
+    .one(db)
+    .await
+    .unwrap_or_else(|e| {
+        error!(error = %e, "instance metrics: compression ratio query failed");
+        None
+    })
+    .and_then(|row| row.ratio);
+
+    (peak, ratio)
+}
+
 pub async fn compute_instance_context(
     db: &impl ConnectionTrait,
     counts: InstanceCounts,
@@ -174,6 +268,8 @@ pub async fn compute_instance_context(
                 AssignmentWindowRow::default()
             }
         };
+
+    let (storage, compression_ratio) = storage_throughput(db, now).await;
 
     gradient_pool::score::InstanceContext {
         wait_secs: windowed(
@@ -219,6 +315,9 @@ pub async fn compute_instance_context(
         cpu_core_score_mean: counts.cpu_core_score_mean,
         upload_speed_mean_mbps: counts.upload_speed_mean_mbps,
         download_speed_mean_mbps: counts.download_speed_mean_mbps,
+        storage_read_mbps: storage.read_mbps,
+        storage_write_mbps: storage.write_mbps,
+        compression_ratio,
         ..Default::default()
     }
 }
@@ -328,9 +427,16 @@ mod tests {
         .into_iter()
         .collect();
 
+        let storage: BTreeMap<String, Value> = [f("read_mbps", 1_200.0), f("write_mbps", 900.0)]
+            .into_iter()
+            .collect();
+        let compression: BTreeMap<String, Value> = [f("ratio", 0.4)].into_iter().collect();
+
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             .append_query_results([vec![metric]])
             .append_query_results([vec![assignment_id]])
+            .append_query_results([vec![storage]])
+            .append_query_results([vec![compression]])
             .into_connection();
 
         let counts = InstanceCounts {
@@ -358,6 +464,9 @@ mod tests {
         assert_eq!(ic.total_workers, 5);
         assert_eq!(ic.idle_workers, 1);
         assert_eq!(ic.upload_speed_mean_mbps, Some(400.0));
+        assert_eq!(ic.storage_read_mbps, Some(1_200.0));
+        assert_eq!(ic.storage_write_mbps, Some(900.0));
+        assert_eq!(ic.compression_ratio, Some(0.4));
     }
 
     #[tokio::test]

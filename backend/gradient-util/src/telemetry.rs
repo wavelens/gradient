@@ -10,7 +10,7 @@
 use std::collections::HashMap;
 use std::sync::LazyLock;
 use std::sync::atomic::{AtomicI64, AtomicU32, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use crate::sync::Mutex;
 
@@ -20,6 +20,9 @@ pub mod metric {
     pub const PROTO_BULK_LANE_FILL: &str = "proto.bulk_lane_fill";
     pub const PROTO_CONTROL_LANE_FILL: &str = "proto.control_lane_fill";
     pub const PROTO_SEND_STALLS: &str = "proto.send_stalls";
+    pub const STORAGE_READ_BYTES: &str = "storage.read_bytes";
+    pub const STORAGE_WRITE_BYTES: &str = "storage.write_bytes";
+    pub const STORAGE_BUSY_MS: &str = "storage.busy_ms";
     pub const NAR_SERVES_WAITING: &str = "nar.serves_waiting";
     pub const NAR_SERVES_ACTIVE: &str = "nar.serves_active";
     pub const NAR_SERVE_FAILURES: &str = "nar.serve_failures";
@@ -134,6 +137,16 @@ impl MinuteStats {
             gauges.serves_active.get() as f64,
             minute,
         );
+
+        for (label, clock) in [
+            ("read", &gauges.storage_reads),
+            ("write", &gauges.storage_writes),
+        ] {
+            let busy_ms = clock.take_ms();
+            if busy_ms > 0.0 {
+                self.record_at(metric::STORAGE_BUSY_MS, label, busy_ms, minute);
+            }
+        }
     }
 }
 
@@ -191,11 +204,72 @@ impl Default for Level {
     }
 }
 
+struct Busy {
+    active: u32,
+    since: Option<Instant>,
+    ms: f64,
+}
+
+pub struct BusyClock(Mutex<Busy>);
+
+impl BusyClock {
+    pub const fn new() -> Self {
+        Self(Mutex::new(Busy {
+            active: 0,
+            since: None,
+            ms: 0.0,
+        }))
+    }
+
+    pub fn enter(&self) -> BusyGuard<'_> {
+        let mut busy = self.0.lock();
+        if busy.active == 0 {
+            busy.since = Some(Instant::now());
+        }
+
+        busy.active += 1;
+        BusyGuard(self)
+    }
+
+    pub fn take_ms(&self) -> f64 {
+        let mut busy = self.0.lock();
+        if busy.active > 0
+            && let Some(since) = busy.since.replace(Instant::now())
+        {
+            busy.ms += since.elapsed().as_secs_f64() * 1000.0;
+        }
+
+        std::mem::take(&mut busy.ms)
+    }
+}
+
+impl Default for BusyClock {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+pub struct BusyGuard<'a>(&'a BusyClock);
+
+impl Drop for BusyGuard<'_> {
+    fn drop(&mut self) {
+        let mut busy = self.0.0.lock();
+        busy.active -= 1;
+        if busy.active == 0
+            && let Some(since) = busy.since.take()
+        {
+            busy.ms += since.elapsed().as_secs_f64() * 1000.0;
+        }
+    }
+}
+
 pub struct Gauges {
     pub bulk_lane_peak: Peak,
     pub control_lane_peak: Peak,
     pub serves_waiting: Level,
     pub serves_active: Level,
+    pub storage_reads: BusyClock,
+    pub storage_writes: BusyClock,
 }
 
 impl Gauges {
@@ -205,6 +279,8 @@ impl Gauges {
             control_lane_peak: Peak::new(),
             serves_waiting: Level::new(),
             serves_active: Level::new(),
+            storage_reads: BusyClock::new(),
+            storage_writes: BusyClock::new(),
         }
     }
 }
@@ -326,5 +402,23 @@ mod tests {
         assert_eq!(value(metric::NAR_SERVES_ACTIVE), 1.0);
         assert_eq!(gauges.bulk_lane_peak.get(), 0);
         assert_eq!(gauges.serves_waiting.get(), 2, "levels are not reset");
+    }
+
+    #[test]
+    fn overlapping_operations_count_their_busy_time_once() {
+        let pause = || std::thread::sleep(std::time::Duration::from_millis(100));
+        let clock = BusyClock::new();
+        let first = clock.enter();
+        pause();
+        let second = clock.enter();
+        pause();
+        drop(first);
+        pause();
+        drop(second);
+        pause();
+
+        let busy_ms = clock.take_ms();
+        assert!((300.0..400.0).contains(&busy_ms), "{busy_ms}");
+        assert_eq!(clock.take_ms(), 0.0, "an idle clock adds nothing");
     }
 }
