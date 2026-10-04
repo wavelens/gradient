@@ -9,19 +9,21 @@ use std::sync::Arc;
 use axum::extract::State;
 use axum::{Extension, Json};
 use gradient_core::ServerState;
-use gradient_entity::{base_worker, worker_registration};
-use gradient_types::ids::{BaseWorkerId, WorkerRegistrationId};
-use gradient_types::{BaseResponse, EBaseWorker, EWorkerRegistration, MProject, MUser};
+use gradient_entity::{team_worker, worker_registration};
+use gradient_types::ids::{TeamId, TeamWorkerId, UserId, WorkerRegistrationId};
+use gradient_types::{
+    BaseResponse, ETeamWorker, EWorkerRegistration, MProject, MTeam, MTeamWorker, MUser,
+};
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, Condition, EntityTrait, IntoActiveModel, QueryFilter,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::access::{Caller, ProjectAccess, load_project};
+use crate::access::{Caller, ProjectAccess, TeamAccess, load_project, load_team};
 use crate::authorization::MaybeApiKey;
 use crate::endpoints::projects::workers::encrypt_token;
-use crate::error::{WebError, WebResult, require_superuser};
+use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
 
 const DISPLAY_NAME: &str = "Gradient.CI Servers";
@@ -30,13 +32,14 @@ const PREFIX: &str = "gci1_";
 #[derive(Deserialize, Clone, Copy)]
 #[serde(rename_all = "snake_case")]
 pub enum ConnectionScope {
-    Base,
+    Team,
     Project,
 }
 
 #[derive(Deserialize)]
 pub struct ConnectionRequest {
     pub scope: ConnectionScope,
+    pub team: Option<String>,
     pub project: Option<String>,
     pub token: String,
 }
@@ -67,7 +70,7 @@ struct StoredToken {
 }
 
 enum Target {
-    Base,
+    Team(MTeam),
     Project(MProject),
 }
 
@@ -119,7 +122,7 @@ pub async fn post_connection(
     ensure_unclaimed(&state, &target, &token.worker_id).await?;
     let stored = StoredToken::new(&state.config.secrets.crypt_file, &token.secret)?;
     match target {
-        Target::Base => insert_base_worker(&state, &user, &token, url, stored).await?,
+        Target::Team(team) => insert_team_worker(&state, &user, &team, &token, url, stored).await?,
         Target::Project(project) => {
             insert_registration(&state, &user, &project, &token, url, stored).await?
         }
@@ -137,9 +140,22 @@ async fn authorize_target(
     body: &ConnectionRequest,
 ) -> WebResult<Target> {
     match body.scope {
-        ConnectionScope::Base => {
-            require_superuser(user)?;
-            Ok(Target::Base)
+        ConnectionScope::Team => {
+            let name = body
+                .team
+                .clone()
+                .ok_or_else(|| WebError::bad_request("team is required for a team connection"))?;
+            let (team, _) = load_team(
+                state,
+                user,
+                api_key.as_ref(),
+                name,
+                TeamAccess::Admin {
+                    reject_managed: false,
+                },
+            )
+            .await?;
+            Ok(Target::Team(team))
         }
         ConnectionScope::Project => {
             let name = body
@@ -178,7 +194,7 @@ fn proto_url(service_url: &str) -> Option<String> {
 async fn ensure_unclaimed(state: &ServerState, target: &Target, worker_id: &str) -> WebResult<()> {
     let same_worker = Condition::any().add(worker_registration::Column::WorkerId.eq(worker_id));
     let registrations = match target {
-        Target::Base => same_worker,
+        Target::Team(_) => same_worker,
         Target::Project(project) => same_worker.add(
             Condition::all()
                 .add(worker_registration::Column::PeerId.eq(project.id))
@@ -191,17 +207,26 @@ async fn ensure_unclaimed(state: &ServerState, target: &Target, worker_id: &str)
         .one(&state.web_db)
         .await?;
 
-    let mut base_workers = Condition::any().add(base_worker::Column::WorkerId.eq(worker_id));
-    if matches!(target, Target::Base) {
-        base_workers = base_workers.add(base_worker::Column::GradientCi.eq(true));
+    let mut team_workers = Condition::any().add(team_worker::Column::WorkerId.eq(worker_id));
+    if let Target::Team(team) = target {
+        team_workers = team_workers.add(
+            Condition::all()
+                .add(team_worker::Column::Team.eq(team.id))
+                .add(team_worker::Column::GradientCi.eq(true)),
+        );
     }
 
-    let base = EBaseWorker::find()
-        .filter(base_workers)
+    let team_worker = ETeamWorker::find()
+        .filter(team_workers)
         .one(&state.web_db)
         .await?;
 
-    match claim_conflict(target, registration.as_ref(), base.as_ref(), worker_id) {
+    match claim_conflict(
+        target,
+        registration.as_ref(),
+        team_worker.as_ref(),
+        worker_id,
+    ) {
         Some(message) => Err(WebError::conflict(message)),
         None => Ok(()),
     }
@@ -210,22 +235,22 @@ async fn ensure_unclaimed(state: &ServerState, target: &Target, worker_id: &str)
 fn claim_conflict(
     target: &Target,
     registration: Option<&worker_registration::Model>,
-    base: Option<&base_worker::Model>,
+    team_worker: Option<&team_worker::Model>,
     worker_id: &str,
 ) -> Option<&'static str> {
     let own_project = match target {
         Target::Project(project) => registration.is_some_and(|r| r.peer_id == project.id),
-        Target::Base => false,
+        Target::Team(_) => false,
     };
     if own_project {
         return Some("the project is already connected to Gradient.CI Servers");
     }
 
-    if registration.is_some() || base.is_some_and(|b| b.worker_id == worker_id) {
+    if registration.is_some() || team_worker.is_some_and(|w| w.worker_id == worker_id) {
         return Some("the worker of this connection token is already registered on this instance");
     }
 
-    base.map(|_| "a base Gradient.CI server is already connected")
+    team_worker.map(|_| "the team is already connected to Gradient.CI Servers")
 }
 
 async fn insert_registration(
@@ -252,18 +277,31 @@ async fn insert_registration(
     Ok(())
 }
 
-async fn insert_base_worker(
+async fn insert_team_worker(
     state: &ServerState,
     user: &MUser,
+    team: &MTeam,
     token: &ConnectionToken,
     url: String,
     stored: StoredToken,
 ) -> WebResult<()> {
-    base_worker_row(user, token, url, stored)
+    team_worker_row(team.id, token.worker_id.clone(), url, stored, user.id)
         .into_active_model()
         .insert(&state.web_db)
         .await
         .map_err(|e| WebError::from_db_err(e, "Gradient.CI connection"))?;
+
+    let projects =
+        gradient_db::teams::workers::projects_granted_with_workers(&state.web_db, team.id).await?;
+    for project in projects {
+        if let Err(e) = gradient_ci::unpark_no_workers_for_project(&state.web_db, project).await {
+            tracing::warn!(
+                error = %e,
+                project_id = %project,
+                "failed to unpark no-workers evaluations after a Gradient.CI connection",
+            );
+        }
+    }
 
     Ok(())
 }
@@ -294,27 +332,28 @@ fn registration_row(
     }
 }
 
-fn base_worker_row(
-    user: &MUser,
-    token: &ConnectionToken,
+fn team_worker_row(
+    team: TeamId,
+    worker_id: String,
     url: String,
-    stored: StoredToken,
-) -> base_worker::Model {
-    base_worker::Model {
-        id: BaseWorkerId::now_v7(),
-        worker_id: token.worker_id.clone(),
-        token_hash: stored.hash,
-        token_encrypted: Some(stored.encrypted),
+    token: StoredToken,
+    user: UserId,
+) -> MTeamWorker {
+    MTeamWorker {
+        id: TeamWorkerId::now_v7(),
+        team,
+        worker_id,
+        token_hash: token.hash,
+        token_encrypted: Some(token.encrypted),
         url: Some(url),
         display_name: DISPLAY_NAME.into(),
+        gradient_ci: true,
         enable_fetch: false,
         enable_eval: true,
         enable_build: true,
-        enabled: true,
-        auto_enable: false,
-        authorize_against: None,
-        gradient_ci: true,
-        created_by: Some(user.id),
+        active: true,
+        managed: false,
+        created_by: Some(user),
         created_at: gradient_types::now(),
     }
 }

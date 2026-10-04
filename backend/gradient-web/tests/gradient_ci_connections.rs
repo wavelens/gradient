@@ -6,7 +6,8 @@
 
 use std::sync::Arc;
 
-use gradient_entity::{base_worker, ids::*, project_user, worker_registration};
+use gradient_entity::team_user::TeamRole;
+use gradient_entity::{ids::*, project_user, team, team_user, team_worker, worker_registration};
 use gradient_test_support::fixtures::{project, project_id, user, user_id};
 use gradient_test_support::web::{
     live_session, make_test_server, make_test_server_configured, make_test_server_with, make_token,
@@ -91,6 +92,19 @@ fn with_auth(db: MockDatabase, session_id: SessionId) -> MockDatabase {
         .append_query_results([vec![user()]])
 }
 
+fn team_row() -> team::Model {
+    team::Model {
+        id: TeamId::new(
+            uuid::Uuid::parse_str("7e000000-0000-0000-0000-000000000001").expect("uuid"),
+        ),
+        name: "platform".into(),
+        display_name: "Platform".into(),
+        created_by: Some(user_id()),
+        created_at: gradient_test_support::fixtures::test_date(),
+        ..Default::default()
+    }
+}
+
 fn member() -> project_user::Model {
     project_user::Model {
         id: ProjectUserId::now_v7(),
@@ -120,9 +134,17 @@ async fn connecting_is_refused_while_gradient_ci_is_turned_off() {
 }
 
 #[tokio::test]
-async fn a_base_connection_needs_a_superuser() {
+async fn a_team_connection_needs_a_team_admin() {
     let session_id = SessionId::now_v7();
-    let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id);
+    let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
+        .append_query_results([vec![team_row()]])
+        .append_query_results([vec![team_user::Model {
+            id: TeamUserId::now_v7(),
+            team: team_row().id,
+            user: user_id(),
+            role: TeamRole::Member,
+            via_group: false,
+        }]]);
     let server = make_test_server(db.into_connection());
 
     let res = server
@@ -131,7 +153,7 @@ async fn a_base_connection_needs_a_superuser() {
             "authorization",
             format!("Bearer {}", make_token(session_id)),
         )
-        .json(&json!({ "scope": "base", "token": TOKEN }))
+        .json(&json!({ "scope": "team", "team": "platform", "token": TOKEN }))
         .await;
 
     res.assert_status_forbidden();
@@ -194,7 +216,7 @@ async fn a_worker_connected_by_another_project_cannot_be_claimed() {
             gradient_ci: true,
             ..Default::default()
         }]])
-        .append_query_results([Vec::<base_worker::Model>::new()]);
+        .append_query_results([Vec::<team_worker::Model>::new()]);
     let server = make_test_server(db.into_connection());
 
     let res = connect_project(&server, session_id).await;
@@ -207,7 +229,7 @@ async fn a_concurrent_second_connection_is_a_conflict() {
     let session_id = SessionId::now_v7();
     let db = as_member(session_id)
         .append_query_results([Vec::<worker_registration::Model>::new()])
-        .append_query_results([Vec::<base_worker::Model>::new()])
+        .append_query_results([Vec::<team_worker::Model>::new()])
         .append_query_errors([unique_violation()]);
     let server = make_test_server_with(db.into_connection(), Some(temp_crypt_file()));
 
