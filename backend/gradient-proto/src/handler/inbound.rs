@@ -334,7 +334,7 @@ impl<'a> InboundContext<'a> {
                 self.on_draining().await;
                 true
             }
-            ClientMessage::HandoverDone | ClientMessage::PathsAdded { .. } => {
+            ClientMessage::HandoverDone => {
                 warn!(peer_id = %self.peer_id, "worker sent a shared-worker message the server does not handle");
                 true
             }

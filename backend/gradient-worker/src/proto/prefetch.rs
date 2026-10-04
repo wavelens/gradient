@@ -16,7 +16,6 @@ use gradient_wire::messages::{BuildSpec, CachedPath, EvalMessageLevel, QueryMode
 use gradient_wire::types::{BuildProgressPhase, JobPhase};
 use tracing::{debug, error, warn};
 
-use crate::nix::adopt::adopt_hidden;
 use crate::nix::store::LocalNixStore;
 use crate::proto::compression::drv_closure_seeds_from_compressed_nar;
 use crate::proto::job::JobUpdater;
@@ -444,8 +443,6 @@ impl<'a> InputPrefetcher<'a> {
             }
 
             let (by_url, by_request) = self.query_and_split(to_query).await?;
-            let (adopted_by_url, by_url) = adopt_hidden(self.store, by_url).await?;
-            let (adopted_by_request, by_request) = adopt_hidden(self.store, by_request).await?;
             progress.expect(
                 download_size(by_url.iter().chain(&by_request)),
                 (by_url.len() + by_request.len()) as u32,
@@ -465,9 +462,7 @@ impl<'a> InputPrefetcher<'a> {
             }
             let mut refs: HashSet<String> = batch
                 .iter()
-                .map(|(_, _, meta)| meta)
-                .chain(adopted_by_url.iter().chain(&adopted_by_request))
-                .flat_map(|meta| meta.references.clone().unwrap_or_default())
+                .flat_map(|(_, _, meta)| meta.references.clone().unwrap_or_default())
                 .filter(|r| !queried.contains(r))
                 .collect();
 

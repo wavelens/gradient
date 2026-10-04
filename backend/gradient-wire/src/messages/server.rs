@@ -162,9 +162,7 @@ pub enum ServerMessage {
     },
     #[proto(29)]
     Handover {
-        index: u32,
-        paths: Vec<String>,
-        is_final: bool,
+        id: String,
     },
 }
 

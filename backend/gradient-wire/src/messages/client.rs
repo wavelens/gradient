@@ -192,10 +192,6 @@ pub enum ClientMessage {
     },
     #[proto(29)]
     HandoverDone,
-    #[proto(29)]
-    PathsAdded {
-        paths: Vec<String>,
-    },
 }
 
 impl ClientMessage {
@@ -250,7 +246,6 @@ impl ClientMessage {
             ClientMessage::UploadFinished { .. } => "UploadFinished",
             ClientMessage::UploadCancel { .. } => "UploadCancel",
             ClientMessage::HandoverDone => "HandoverDone",
-            ClientMessage::PathsAdded { .. } => "PathsAdded",
         }
     }
 

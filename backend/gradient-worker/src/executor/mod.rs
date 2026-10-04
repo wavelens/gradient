@@ -68,7 +68,6 @@ pub(crate) async fn push_paths(
     let mut guard = updater.phase(JobPhase::DrvClosurePush);
     guard.record(paths.len() as u32, 0);
     let (paths, sizes): (Vec<String>, Vec<Option<u64>>) = paths.iter().cloned().unzip();
-    store.reveal(&paths).await?;
     let cache_entries = query_fetched_paths(updater, paths, sizes).await?;
     upload_all(updater, pair_with_store(cache_entries, store), None).await?;
     Ok(())
@@ -257,6 +256,7 @@ pub struct JobExecutor {
     pub(crate) log_limits: crate::executor::log_limit::LogRateLimits,
     pub(crate) log_fetch_from_store: bool,
     pub(crate) host: BuildHost,
+    pub(crate) handover_id: Arc<gradient_util::sync::Mutex<Option<String>>>,
 }
 
 impl JobExecutor {
@@ -281,6 +281,7 @@ impl JobExecutor {
             log_limits,
             log_fetch_from_store,
             host,
+            handover_id: Arc::default(),
         }
     }
 

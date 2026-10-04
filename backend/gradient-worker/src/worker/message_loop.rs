@@ -218,6 +218,7 @@ pub(super) struct MessageLoopState {
     config: WorkerConfig,
     draining: bool,
     refused: bool,
+    pending_handover: Option<String>,
 }
 
 impl MessageLoopState {
@@ -263,6 +264,7 @@ impl MessageLoopState {
             config,
             draining: false,
             refused: false,
+            pending_handover: None,
         }
     }
 
@@ -282,23 +284,6 @@ impl MessageLoopState {
             JobKind::Flake => self.max_eval,
             JobKind::Build => self.max_build,
         }
-    }
-
-    async fn on_handover(&mut self, index: u32, paths: Vec<String>, is_final: bool) -> Result<()> {
-        let visibility = self.executor.store.visibility().clone();
-        if index == 0 {
-            for job in self.jobs.running.values() {
-                let _ = job.abort.send(true);
-            }
-            super::handover::forget_previous_user(&self.executor, &self.config).await?;
-            visibility.start_list();
-        }
-        visibility.extend(paths);
-        if is_final {
-            visibility.report_to(self.writer.clone());
-            self.writer.send(ClientMessage::HandoverDone).await?;
-        }
-        Ok(())
     }
 
     async fn route(&mut self, msg: ServerMessage) -> Result<()> {
@@ -395,15 +380,36 @@ impl MessageLoopState {
             | ServerMessage::NarAbort { .. } => {
                 warn!("a NAR frame reached the control dispatch");
             }
-            ServerMessage::Handover {
-                index,
-                paths,
-                is_final,
-            } => {
-                self.on_handover(index, paths, is_final).await?;
+            ServerMessage::Handover { id } => {
+                self.on_handover(id).await?;
             }
         }
         Ok(())
+    }
+
+    async fn on_handover(&mut self, id: String) -> Result<()> {
+        if self.executor.handover_id.lock().as_deref() == Some(id.as_str()) {
+            return self.writer.send(ClientMessage::HandoverDone).await;
+        }
+
+        for job in self.jobs.running.values() {
+            let _ = job.abort.send(true);
+        }
+        self.pending_handover = Some(id);
+        self.finish_handover().await
+    }
+
+    async fn finish_handover(&mut self) -> Result<()> {
+        if !self.jobs.running.is_empty() {
+            return Ok(());
+        }
+        let Some(id) = self.pending_handover.take() else {
+            return Ok(());
+        };
+
+        super::handover::forget_eval_cache(&self.executor, &self.config).await?;
+        *self.executor.handover_id.lock() = Some(id);
+        self.writer.send(ClientMessage::HandoverDone).await
     }
 
     async fn on_job_done(&mut self, job_id: String, result: Result<()>) -> Result<()> {
@@ -482,7 +488,7 @@ impl MessageLoopState {
             }
         }
 
-        Ok(())
+        self.finish_handover().await
     }
 
     /// A failed send is ending the session.
