@@ -4,14 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use std::collections::HashSet;
-use std::sync::Arc;
-
-use anyhow::{Context, Result};
-use gradient_core::ServerState;
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_types::*;
-use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QuerySelect};
 
 /// The grace is keeping a server restart or worker redeploy from aborting everything in flight
 /// before the pool is back.
@@ -20,28 +14,6 @@ const UNBUILDABLE_GRACE_SECS: i64 = 300;
 pub(crate) struct Unbuildable {
     pub evaluation: MEvaluation,
     pub unmet: Vec<UnmetRequirement>,
-}
-
-pub(crate) async fn tasks_waiting_for_workers(
-    state: &Arc<ServerState>,
-    evals: &[MEvaluation],
-) -> Result<HashSet<TaskId>> {
-    let tasks: HashSet<TaskId> = evals.iter().filter_map(|e| e.task).collect();
-    if tasks.is_empty() {
-        return Ok(HashSet::new());
-    }
-
-    let waiting: Vec<TaskId> = ETask::find()
-        .select_only()
-        .column(CTask::Id)
-        .filter(CTask::Id.is_in(tasks))
-        .filter(CTask::WaitForWorkers.eq(true))
-        .into_tuple()
-        .all(&state.worker_db)
-        .await
-        .context("fetch tasks waiting for workers")?;
-
-    Ok(waiting.into_iter().collect())
 }
 
 pub(crate) fn unbuildable(

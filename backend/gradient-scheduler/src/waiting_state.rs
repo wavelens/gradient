@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
@@ -14,23 +14,22 @@ use gradient_core::ServerState;
 use gradient_db::status::update_evaluation_status;
 use gradient_entity::build::BuildStatus;
 use gradient_entity::evaluation::{EvaluationKind, EvaluationStatus};
+use gradient_pool::WorkerInfo;
 use gradient_types::*;
-use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, Value};
+use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QuerySelect, Value};
 use tracing::{error, info, warn};
 
 const DRV_RECOVERY_GRACE_SECS: i64 = 120;
 
 use crate::assessment_memo::AssessmentMemo;
 use crate::buildability::BuildabilityChecker;
-use crate::unbuildable::{Unbuildable, tasks_waiting_for_workers, unbuildable};
+use crate::unbuildable::{Unbuildable, unbuildable};
 use gradient_db::evaluations::counters::EvalCounters;
 
 pub(crate) async fn refresh_waiting_state(
     state: &Arc<ServerState>,
     memo: &Mutex<AssessmentMemo>,
-    worker_caps: &[(Vec<String>, Vec<String>)],
-    eval_capable_workers: usize,
-    fetch_capable_workers: usize,
+    workers: &[WorkerInfo],
     draining: bool,
 ) -> Result<Vec<Unbuildable>> {
     gradient_db::evaluations::counters::fold_shared_build_deltas(&state.worker_db)
@@ -83,10 +82,14 @@ pub(crate) async fn refresh_waiting_state(
         return Ok(Vec::new());
     }
 
-    let waiting_tasks = tasks_waiting_for_workers(state, &evals).await?;
+    let tasks = EvalTasks::load(state, &evals).await?;
+    let worker_caps: Vec<(Vec<String>, Vec<String>)> = workers
+        .iter()
+        .map(|w| (w.architectures.clone(), w.system_features.clone()))
+        .collect();
+    let worker_caps = worker_caps.as_slice();
     let now = gradient_types::now();
     let mut unbuildables = Vec::new();
-    let connected_workers = worker_caps.len() as u32;
     let ids: Vec<EvaluationId> = evals.iter().map(|e| e.id).collect();
     let counters = gradient_db::evaluations::counters::in_flight_counters(&state.worker_db, &ids)
         .await
@@ -99,6 +102,7 @@ pub(crate) async fn refresh_waiting_state(
             .waiting_reason
             .as_ref()
             .and_then(WaitingReason::from_json);
+        let project_workers = ProjectWorkerCounts::of(workers, tasks.project_of(&eval));
 
         if eval.status == EvaluationStatus::Waiting
             && reason.as_ref().is_some_and(|r| {
@@ -115,12 +119,9 @@ pub(crate) async fn refresh_waiting_state(
 
         let outcome = match eval.status {
             EvaluationStatus::Waiting => match reason {
-                Some(WaitingReason::EvalWorkers { capability, .. }) => Some(decide_eval_recovery(
-                    capability,
-                    eval_capable_workers,
-                    fetch_capable_workers,
-                    connected_workers,
-                )),
+                Some(WaitingReason::EvalWorkers { capability, .. }) => {
+                    Some(decide_eval_recovery(capability, project_workers))
+                }
                 Some(WaitingReason::Draining) => Some((EvaluationStatus::Queued, None)),
                 _ => match build_phase_decision(
                     state,
@@ -134,23 +135,17 @@ pub(crate) async fn refresh_waiting_state(
                 {
                     BuildPhase::Pending(a) => Some((a.target, a.reason)),
                     BuildPhase::Settled => continue,
-                    BuildPhase::Unnamed => Some(decide_eval_recovery(
-                        EvalCapability::Eval,
-                        eval_capable_workers,
-                        fetch_capable_workers,
-                        connected_workers,
-                    )),
+                    BuildPhase::Unnamed => {
+                        Some(decide_eval_recovery(EvalCapability::Eval, project_workers))
+                    }
                 },
             },
             EvaluationStatus::Queued
             | EvaluationStatus::Fetching
             | EvaluationStatus::EvaluatingFlake
-            | EvaluationStatus::EvaluatingDerivation => decide_pre_build_target(
-                eval.status,
-                eval_capable_workers,
-                fetch_capable_workers,
-                connected_workers,
-            ),
+            | EvaluationStatus::EvaluatingDerivation => {
+                decide_pre_build_target(eval.status, project_workers)
+            }
             EvaluationStatus::Building => {
                 match build_phase_decision(
                     state,
@@ -173,7 +168,7 @@ pub(crate) async fn refresh_waiting_state(
             continue;
         };
 
-        let waits = eval.task.is_some_and(|t| waiting_tasks.contains(&t));
+        let waits = tasks.wait_for_workers(&eval);
         if let Some(unmet) = unbuildable(&eval, reason.as_ref(), new_reason.as_ref(), waits, now) {
             unbuildables.push(Unbuildable {
                 evaluation: eval,
@@ -187,9 +182,9 @@ pub(crate) async fn refresh_waiting_state(
                 evaluation_id = %eval.id,
                 from = ?eval.status,
                 to = ?target,
-                workers = connected_workers,
-                eval_workers = eval_capable_workers,
-                fetch_workers = fetch_capable_workers,
+                workers = project_workers.connected,
+                eval_workers = project_workers.eval,
+                fetch_workers = project_workers.fetch,
                 "refreshing evaluation waiting state"
             );
         }
@@ -202,6 +197,50 @@ pub(crate) async fn refresh_waiting_state(
     }
 
     Ok(unbuildables)
+}
+
+#[derive(Default)]
+struct EvalTasks {
+    projects: HashMap<TaskId, ProjectId>,
+    waiting_for_workers: HashSet<TaskId>,
+}
+
+impl EvalTasks {
+    async fn load(state: &Arc<ServerState>, evals: &[MEvaluation]) -> Result<Self> {
+        let ids: HashSet<TaskId> = evals.iter().filter_map(|e| e.task).collect();
+        if ids.is_empty() {
+            return Ok(Self::default());
+        }
+
+        let rows: Vec<(TaskId, ProjectId, bool)> = ETask::find()
+            .select_only()
+            .columns([CTask::Id, CTask::Project, CTask::WaitForWorkers])
+            .filter(CTask::Id.is_in(ids))
+            .into_tuple()
+            .all(&state.worker_db)
+            .await
+            .context("fetch tasks of in-flight evaluations")?;
+
+        Ok(Self {
+            projects: rows
+                .iter()
+                .map(|(id, project, _)| (*id, *project))
+                .collect(),
+            waiting_for_workers: rows
+                .into_iter()
+                .filter_map(|(id, _, waits)| waits.then_some(id))
+                .collect(),
+        })
+    }
+
+    fn project_of(&self, eval: &MEvaluation) -> Option<ProjectId> {
+        eval.task.and_then(|t| self.projects.get(&t).copied())
+    }
+
+    fn wait_for_workers(&self, eval: &MEvaluation) -> bool {
+        eval.task
+            .is_some_and(|t| self.waiting_for_workers.contains(&t))
+    }
 }
 
 async fn build_phase_decision(
@@ -562,46 +601,62 @@ fn pre_build_capability(status: EvaluationStatus) -> Option<EvalCapability> {
     }
 }
 
-fn capability_available(
-    capability: EvalCapability,
-    eval_capable_workers: usize,
-    fetch_capable_workers: usize,
-) -> bool {
-    match capability {
-        EvalCapability::Fetch => fetch_capable_workers > 0,
-        EvalCapability::Eval => eval_capable_workers > 0,
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct ProjectWorkerCounts {
+    eval: usize,
+    fetch: usize,
+    connected: u32,
+}
+
+impl ProjectWorkerCounts {
+    fn of(workers: &[WorkerInfo], project: Option<ProjectId>) -> Self {
+        workers
+            .iter()
+            .filter(|w| {
+                w.authorized_peers
+                    .as_ref()
+                    .is_none_or(|peers| project.is_some_and(|p| peers.contains(&p)))
+            })
+            .fold(Self::default(), |counts, w| Self {
+                eval: counts.eval + usize::from(w.capabilities.eval),
+                fetch: counts.fetch + usize::from(w.capabilities.fetch),
+                connected: counts.connected + 1,
+            })
+    }
+
+    fn provide(self, capability: EvalCapability) -> bool {
+        match capability {
+            EvalCapability::Fetch => self.fetch > 0,
+            EvalCapability::Eval => self.eval > 0,
+        }
     }
 }
 
 fn decide_pre_build_target(
     current: EvaluationStatus,
-    eval_capable_workers: usize,
-    fetch_capable_workers: usize,
-    connected_workers: u32,
+    workers: ProjectWorkerCounts,
 ) -> Option<(EvaluationStatus, Option<WaitingReason>)> {
     let capability = pre_build_capability(current)?;
-    if capability_available(capability, eval_capable_workers, fetch_capable_workers) {
+    if workers.provide(capability) {
         return None;
     }
 
     Some((
         EvaluationStatus::Waiting,
-        Some(WaitingReason::eval_workers(capability, connected_workers)),
+        Some(WaitingReason::eval_workers(capability, workers.connected)),
     ))
 }
 
 fn decide_eval_recovery(
     capability: EvalCapability,
-    eval_capable_workers: usize,
-    fetch_capable_workers: usize,
-    connected_workers: u32,
+    workers: ProjectWorkerCounts,
 ) -> (EvaluationStatus, Option<WaitingReason>) {
-    if capability_available(capability, eval_capable_workers, fetch_capable_workers) {
+    if workers.provide(capability) {
         (EvaluationStatus::Queued, None)
     } else {
         (
             EvaluationStatus::Waiting,
-            Some(WaitingReason::eval_workers(capability, connected_workers)),
+            Some(WaitingReason::eval_workers(capability, workers.connected)),
         )
     }
 }
@@ -678,9 +733,74 @@ mod tests {
         }
     }
 
+    fn counts(eval: usize, fetch: usize, connected: u32) -> ProjectWorkerCounts {
+        ProjectWorkerCounts {
+            eval,
+            fetch,
+            connected,
+        }
+    }
+
+    fn worker(eval: bool, authorized_peers: Option<HashSet<ProjectId>>) -> WorkerInfo {
+        WorkerInfo {
+            id: "00000000-0000-4000-8000-000000000001".into(),
+            capabilities: gradient_wire::types::GradientCapabilities {
+                eval,
+                fetch: eval,
+                ..Default::default()
+            },
+            architectures: vec![],
+            system_features: vec![],
+            max_concurrent_builds: 1,
+            assigned_job_count: 0,
+            draining: false,
+            authorized_peers,
+            cpu_usage_pct: None,
+            ram_free_mb: None,
+            ram_total_mb: 0,
+            disk_speed_mbps: None,
+            upload_speed_mbps: None,
+            download_speed_mbps: None,
+        }
+    }
+
+    #[test]
+    fn a_queued_evaluation_waits_when_only_other_projects_have_eval_workers() {
+        let (own, other) = (ProjectId::now_v7(), ProjectId::now_v7());
+        let workers = [worker(true, Some(HashSet::from([other])))];
+
+        let (target, reason) = decide_pre_build_target(
+            EvaluationStatus::Queued,
+            ProjectWorkerCounts::of(&workers, Some(own)),
+        )
+        .expect("a project without its own eval worker must stall");
+        assert_eq!(target, EvaluationStatus::Waiting);
+        assert_eq!(
+            eval_workers_view(&reason.expect("stall carries a reason")),
+            (EvalCapability::Eval, 0)
+        );
+    }
+
+    #[test]
+    fn project_worker_counts_include_open_and_authorized_workers_only() {
+        let (own, other) = (ProjectId::now_v7(), ProjectId::now_v7());
+        let workers = [
+            worker(true, None),
+            worker(true, Some(HashSet::from([own]))),
+            worker(false, Some(HashSet::from([own, other]))),
+            worker(true, Some(HashSet::from([other]))),
+        ];
+
+        assert_eq!(
+            ProjectWorkerCounts::of(&workers, Some(own)),
+            counts(2, 2, 3)
+        );
+        assert_eq!(ProjectWorkerCounts::of(&workers, None), counts(1, 1, 1));
+    }
+
     #[test]
     fn pre_build_target_queued_no_eval_worker_stalls_to_eval_waiting() {
-        let (target, reason) = decide_pre_build_target(EvaluationStatus::Queued, 0, 1, 3)
+        let (target, reason) = decide_pre_build_target(EvaluationStatus::Queued, counts(0, 1, 3))
             .expect("stall must produce a transition");
         assert_eq!(target, EvaluationStatus::Waiting);
         let (cap, connected) = eval_workers_view(&reason.expect("stall carries a reason"));
@@ -690,7 +810,7 @@ mod tests {
 
     #[test]
     fn pre_build_target_fetching_no_fetch_worker_stalls_to_fetch_waiting() {
-        let (target, reason) = decide_pre_build_target(EvaluationStatus::Fetching, 2, 0, 2)
+        let (target, reason) = decide_pre_build_target(EvaluationStatus::Fetching, counts(2, 0, 2))
             .expect("stall must produce a transition");
         assert_eq!(target, EvaluationStatus::Waiting);
         let (cap, connected) = eval_workers_view(&reason.expect("stall carries a reason"));
@@ -707,7 +827,7 @@ mod tests {
             EvaluationStatus::Queued,
         ] {
             assert!(
-                decide_pre_build_target(status, 1, 1, 1).is_none(),
+                decide_pre_build_target(status, counts(1, 1, 1)).is_none(),
                 "{status:?} with capable workers must be left alone"
             );
         }
@@ -715,24 +835,24 @@ mod tests {
 
     #[test]
     fn pre_build_target_ignores_waiting() {
-        assert!(decide_pre_build_target(EvaluationStatus::Waiting, 0, 0, 0).is_none());
-        assert!(decide_pre_build_target(EvaluationStatus::Waiting, 2, 2, 2).is_none());
+        assert!(decide_pre_build_target(EvaluationStatus::Waiting, counts(0, 0, 0)).is_none());
+        assert!(decide_pre_build_target(EvaluationStatus::Waiting, counts(2, 2, 2)).is_none());
     }
 
     #[test]
     fn eval_recovery_unparks_to_queued_when_capability_returns() {
-        let (target, reason) = decide_eval_recovery(EvalCapability::Eval, 1, 0, 1);
+        let (target, reason) = decide_eval_recovery(EvalCapability::Eval, counts(1, 0, 1));
         assert_eq!(target, EvaluationStatus::Queued);
         assert!(reason.is_none());
 
-        let (target, reason) = decide_eval_recovery(EvalCapability::Fetch, 0, 1, 1);
+        let (target, reason) = decide_eval_recovery(EvalCapability::Fetch, counts(0, 1, 1));
         assert_eq!(target, EvaluationStatus::Queued);
         assert!(reason.is_none());
     }
 
     #[test]
     fn eval_recovery_refreshes_reason_while_capability_absent() {
-        let (target, reason) = decide_eval_recovery(EvalCapability::Fetch, 5, 0, 5);
+        let (target, reason) = decide_eval_recovery(EvalCapability::Fetch, counts(5, 0, 5));
         assert_eq!(target, EvaluationStatus::Waiting);
         let (cap, connected) = eval_workers_view(&reason.expect("refresh carries a reason"));
         assert_eq!(cap, EvalCapability::Fetch);

@@ -285,22 +285,10 @@ impl Scheduler {
 
     pub async fn refresh_waiting_state(&self) -> Result<()> {
         let workers = self.board_workers().await;
-        let eval_capable = workers.iter().filter(|w| w.capabilities.eval).count();
-        let fetch_capable = workers.iter().filter(|w| w.capabilities.fetch).count();
-        let caps: Vec<(Vec<String>, Vec<String>)> = workers
-            .into_iter()
-            .map(|w| (w.architectures, w.system_features))
-            .collect();
         let draining = self.draining.load(std::sync::atomic::Ordering::Relaxed);
-        let unbuildables = build::refresh_waiting_state(
-            &self.state,
-            &self.assessments,
-            &caps,
-            eval_capable,
-            fetch_capable,
-            draining,
-        )
-        .await?;
+        let unbuildables =
+            build::refresh_waiting_state(&self.state, &self.assessments, &workers, draining)
+                .await?;
         for unbuildable in unbuildables {
             self.abort_unbuildable_evaluation(unbuildable).await;
         }
