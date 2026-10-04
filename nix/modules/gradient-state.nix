@@ -1114,27 +1114,6 @@
           Permissions granted by the role, as camelCase identifiers. It must not be empty.
         '';
       };
-
-      oidc_group = mkOption {
-        type = types.listOf types.str;
-        default = [];
-        example = [ "platform-team" "ops" ];
-        description = ''
-          OIDC groups granting this role on login. A user whose `groups` claim is containing a
-          listed group is getting the role in its project. These grants are only adding
-          memberships. The `groups` scope is required.
-        '';
-      };
-
-      scim_group = mkOption {
-        type = types.listOf types.str;
-        default = [];
-        example = [ "acme-eng" ];
-        description = ''
-          SCIM groups granting this role. Adding a user to a listed group is granting the role in
-          its project, and removing the user is removing the membership.
-        '';
-      };
     };
   });
 

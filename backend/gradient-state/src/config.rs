@@ -224,10 +224,6 @@ pub struct StateRole {
     pub name: String,
     pub project: String,
     pub permissions: Vec<String>,
-    #[serde(default)]
-    pub oidc_group: Vec<String>,
-    #[serde(default)]
-    pub scim_group: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

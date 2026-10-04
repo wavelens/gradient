@@ -151,8 +151,6 @@ fn make_server(db: sea_orm::DatabaseConnection) -> TestServer {
         jwt_secret: SecretString::new(JWT_SECRET.to_string()),
         started_at: chrono::Utc::now(),
         pending_project_memberships: std::sync::Arc::new(std::collections::HashMap::new()),
-        oidc_group_roles: std::sync::Arc::new(std::collections::HashMap::new()),
-        scim_group_roles: std::sync::Arc::new(Default::default()),
         events: gradient_types::EventBus::default(),
         git_host: gradient_git_host::GitHostRegistry::with_builtin(),
         github_app_install_url: Default::default(),

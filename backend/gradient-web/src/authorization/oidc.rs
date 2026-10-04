@@ -62,62 +62,6 @@ fn is_claimable(password: &Option<String>, oidc_subject: &Option<String>) -> boo
     password.is_none() && oidc_subject.is_none()
 }
 
-fn grants_for_groups(
-    map: &gradient_state::OidcGroupRoles,
-    groups: &[String],
-) -> Vec<(ProjectId, RoleId)> {
-    let mut out: Vec<(ProjectId, RoleId)> = Vec::new();
-    for group in groups {
-        for &grant in map.get(group).into_iter().flatten() {
-            if !out.contains(&grant) {
-                out.push(grant);
-            }
-        }
-    }
-    out
-}
-
-/// Grants are additive. A membership is never removed here.
-async fn apply_oidc_group_grants<C: sea_orm::ConnectionTrait>(
-    tx: &C,
-    map: &gradient_state::OidcGroupRoles,
-    groups: &[String],
-    user_id: UserId,
-) -> Result<()> {
-    for (project_id, role_id) in grants_for_groups(map, groups) {
-        let existing = EProjectUser::find()
-            .filter(CProjectUser::Project.eq(project_id))
-            .filter(CProjectUser::User.eq(user_id))
-            .one(tx)
-            .await
-            .context("query project membership for OIDC group grant")?;
-        match existing {
-            Some(row) if row.role == role_id => {}
-            Some(row) => {
-                let mut active: AProjectUser = row.into();
-                active.role = Set(role_id);
-                active
-                    .update(tx)
-                    .await
-                    .context("update project role from OIDC group")?;
-            }
-            None => {
-                MProjectUser {
-                    id: ProjectUserId::now_v7(),
-                    project: project_id,
-                    user: user_id,
-                    role: role_id,
-                }
-                .into_active_model()
-                .insert(tx)
-                .await
-                .context("insert project membership from OIDC group")?;
-            }
-        }
-    }
-    Ok(())
-}
-
 fn random_url_safe(bytes: usize) -> String {
     let mut buf = vec![0u8; bytes];
     rand::rng().fill(buf.as_mut_slice());
@@ -399,10 +343,10 @@ async fn create_or_update_user(
             .context("Failed to update OIDC user")?;
 
         if let Err(e) =
-            apply_oidc_group_grants(&tx, &state.oidc_group_roles, &groups, user.id).await
+            gradient_db::teams::members::sync_group_memberships(&tx, user.id, &groups).await
         {
             tracing::warn!(error = %e, username = %user.username,
-                "Failed to apply OIDC group role grants");
+                "Failed to sync OIDC group team memberships");
         }
 
         tx.commit()
@@ -462,10 +406,10 @@ async fn create_or_update_user(
         }
 
         if let Err(e) =
-            apply_oidc_group_grants(&tx, &state.oidc_group_roles, &groups, user_id).await
+            gradient_db::teams::members::sync_group_memberships(&tx, user_id, &groups).await
         {
             tracing::warn!(error = %e, username = %user.username,
-                "Failed to apply OIDC group role grants");
+                "Failed to sync OIDC group team memberships");
         }
 
         tx.commit()
@@ -507,9 +451,10 @@ async fn create_or_update_user(
         );
     }
 
-    if let Err(e) = apply_oidc_group_grants(&tx, &state.oidc_group_roles, &groups, user.id).await {
+    if let Err(e) = gradient_db::teams::members::sync_group_memberships(&tx, user.id, &groups).await
+    {
         tracing::warn!(error = %e, username = %user.username,
-            "Failed to apply OIDC group role grants");
+            "Failed to sync OIDC group team memberships");
     }
 
     tx.commit()
@@ -545,23 +490,5 @@ mod tests {
             &Some("$argon2id$...".into()),
             &Some("existing-subject".into())
         ));
-    }
-
-    #[test]
-    fn collects_distinct_grants_for_presented_groups() {
-        use std::collections::HashMap;
-        let project = ProjectId::now_v7();
-        let role = RoleId::now_v7();
-        let mut map: gradient_state::OidcGroupRoles = HashMap::new();
-        map.insert("platform-team".into(), vec![(project, role)]);
-        map.insert("ops".into(), vec![(project, role)]);
-
-        let grants = super::grants_for_groups(
-            &map,
-            &["platform-team".into(), "ops".into(), "irrelevant".into()],
-        );
-        assert_eq!(grants, vec![(project, role)]);
-
-        assert!(super::grants_for_groups(&map, &["nobody".into()]).is_empty());
     }
 }

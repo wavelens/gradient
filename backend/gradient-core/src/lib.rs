@@ -90,8 +90,6 @@ pub async fn init_state(cli: Cli) -> Result<Arc<ServerState>, InitError> {
     .await
     .map_err(|e| InitError::StateLoad(e.to_string()))?;
     let pending_project_memberships = Arc::new(state_result.pending);
-    let oidc_group_roles = Arc::new(state_result.oidc_group_roles);
-    let scim_group_roles = Arc::new(state_result.scim_group_roles);
 
     if let Some(max) = cli.eval.keep_evaluations_max() {
         let over_limit = ETask::find()
@@ -229,8 +227,6 @@ pub async fn init_state(cli: Cli) -> Result<Arc<ServerState>, InitError> {
         jwt_secret,
         started_at: chrono::Utc::now(),
         pending_project_memberships,
-        oidc_group_roles,
-        scim_group_roles,
         events: gradient_types::EventBus::default(),
         delivery_wake: Arc::new(tokio::sync::Notify::new()),
         eval_assign_wake: Arc::new(tokio::sync::Notify::new()),

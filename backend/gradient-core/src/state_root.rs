@@ -24,7 +24,7 @@ use gradient_db::{
 use gradient_git_host::GitHostRegistry;
 use gradient_graph::Graph;
 use gradient_notify::EmailSender;
-use gradient_state::{OidcGroupRoles, PendingProjectMemberships, ScimGroupRoles};
+use gradient_state::PendingProjectMemberships;
 use gradient_storage::{LogStorage, NarStore, StorageCtx};
 use gradient_types::{
     BuildProgress, DerivationBuildId, EvaluationId, EvaluationProgress, RuntimeConfig, SecretString,
@@ -57,8 +57,6 @@ pub struct AppState {
     pub jwt_secret: SecretString,
     pub started_at: DateTime<Utc>,
     pub pending_project_memberships: Arc<PendingProjectMemberships>,
-    pub oidc_group_roles: Arc<OidcGroupRoles>,
-    pub scim_group_roles: Arc<ScimGroupRoles>,
     pub events: gradient_types::EventBus,
     pub build_progress: Arc<Latest<DerivationBuildId, BuildProgress>>,
     pub eval_progress: Arc<Latest<EvaluationId, EvaluationProgress>>,

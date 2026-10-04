@@ -18,9 +18,8 @@ impl<'a> StateApplicator<'a> {
     pub(crate) async fn apply_roles(
         &self,
         state_roles: &HashMap<String, StateRole>,
-    ) -> Result<HashMap<(String, String), (ProjectId, RoleId)>, DynError> {
+    ) -> Result<(), DynError> {
         let project_lookup = self.project_lookup().await?;
-        let mut role_ids: HashMap<(String, String), (ProjectId, RoleId)> = HashMap::new();
 
         for state_role in state_roles.values() {
             let project_id = lookup_id(&project_lookup, &state_role.project, "Project")?;
@@ -52,18 +51,15 @@ impl<'a> StateApplicator<'a> {
                 .one(self.db)
                 .await?;
 
-            let role_id = if let Some(existing) = existing {
-                let id = existing.id;
+            if let Some(existing) = existing {
                 let mut active: role::ActiveModel = existing.into();
                 active.permission = Set(mask);
                 active.managed = Set(true);
                 active.update(self.db).await?;
                 tracing::info!(name = %state_role.name, "Updated managed role");
-                id
             } else {
-                let id = RoleId::now_v7();
                 let active = role::Model {
-                    id,
+                    id: RoleId::now_v7(),
                     name: state_role.name.clone(),
                     project: Some(project_id),
                     permission: mask,
@@ -73,15 +69,9 @@ impl<'a> StateApplicator<'a> {
 
                 active.insert(self.db).await?;
                 tracing::info!(name = %state_role.name, "Created managed role");
-                id
-            };
-
-            role_ids.insert(
-                (state_role.project.clone(), state_role.name.clone()),
-                (project_id, role_id),
-            );
+            }
         }
 
-        Ok(role_ids)
+        Ok(())
     }
 }

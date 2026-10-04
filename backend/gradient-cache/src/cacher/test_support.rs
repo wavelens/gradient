@@ -51,8 +51,6 @@ pub(crate) fn test_server_state_with_log(
         jwt_secret: gradient_types::SecretString::new("test-jwt-secret".to_string()),
         started_at: chrono::Utc::now(),
         pending_project_memberships: Arc::new(std::collections::HashMap::new()),
-        oidc_group_roles: Arc::new(std::collections::HashMap::new()),
-        scim_group_roles: Arc::new(Default::default()),
         events: gradient_types::EventBus::default(),
         git_host: gradient_git_host::GitHostRegistry::with_builtin(),
         github_app_install_url: Default::default(),
