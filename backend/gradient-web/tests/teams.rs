@@ -133,6 +133,30 @@ async fn only_a_superuser_maps_sso_groups_onto_a_team() {
 }
 
 #[tokio::test]
+async fn only_a_superuser_grants_a_team_on_every_new_project() {
+    for body in [
+        json!({ "new_project_users": true, "new_project_role": "Admin" }),
+        json!({ "new_project_workers": true }),
+    ] {
+        let session_id = SessionId::now_v7();
+        let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
+            .append_query_results([vec![team_row()]])
+            .append_query_results([vec![membership(TeamRole::Admin)]]);
+        let server = make_test_server(db.into_connection());
+
+        let res = server
+            .patch("/api/v1/teams/platform")
+            .add_header("authorization", bearer(session_id))
+            .json(&body)
+            .await;
+
+        res.assert_status(StatusCode::FORBIDDEN);
+        let body: Value = res.json();
+        assert_eq!(body["code"], "superuser_required");
+    }
+}
+
+#[tokio::test]
 async fn a_team_is_hidden_from_non_members() {
     let session_id = SessionId::now_v7();
     let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)

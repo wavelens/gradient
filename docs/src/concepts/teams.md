@@ -54,7 +54,7 @@ A team worker is registered once on the team's **Workers** page. One team worker
 
 ## New Projects
 
-The team settings can grant every new project the team's users with a role, its workers, or both. The [local worker](workers.md#access) is a worker of the state-declared team `server`, granted to every new project this way.
+The team settings can grant every new project the team's users with a role, its workers, or both. Only superusers can set these fields. The [local worker](workers.md#access) is a worker of the state-declared team `server`, granted to every new project this way.
 
 ## Single Sign-On
 
