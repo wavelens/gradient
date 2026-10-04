@@ -397,7 +397,7 @@ mod tests {
     async fn unpark_no_workers_is_noop_when_no_eval_capable_registration() {
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             .append_query_results([Vec::<gradient_entity::worker_registration::Model>::new()])
-            .append_query_results([Vec::<gradient_entity::project_base_worker::Model>::new()])
+            .append_query_results([Vec::<gradient_entity::team_project::Model>::new()])
             .into_connection();
         let out = unpark_no_workers_for_project(&db, ProjectId::now_v7())
             .await

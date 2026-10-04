@@ -142,8 +142,6 @@ id_newtype!(MetricRollupId);
 id_newtype!(PhaseEventId);
 id_newtype!(WorkerConnectionId);
 id_newtype!(WorkerSampleId);
-id_newtype!(BaseWorkerId);
-id_newtype!(ProjectBaseWorkerId);
 id_newtype!(WebhookId);
 id_newtype!(WebhookDeliveryId);
 id_newtype!(TeamId);

@@ -305,13 +305,14 @@ pub struct BoardNetworkStats {
 }
 
 /// Worker telemetry is carrying no project. It is attributed to every project the worker is
-/// registered in, or that opted into it as a base worker.
+/// registered in, or that grants the worker's team its workers.
 fn workers_serving(project_list: &str) -> String {
     format!(
         " AND worker_id IN (\
          SELECT worker_id FROM worker_registration WHERE peer_id IN ({project_list}) \
-         UNION SELECT b.worker_id FROM base_worker b \
-         JOIN project_base_worker p ON p.base_worker = b.id WHERE p.project IN ({project_list}))"
+         UNION SELECT tw.worker_id FROM team_worker tw \
+         JOIN team_project tp ON tp.team = tw.team \
+         WHERE tp.includes_workers AND tp.project IN ({project_list}))"
     )
 }
 
@@ -723,7 +724,7 @@ mod tests {
                 sql.contains("worker_registration WHERE peer_id IN ('p')"),
                 "{sql}"
             );
-            assert!(sql.contains("project_base_worker"), "{sql}");
+            assert!(sql.contains("team_project tp"), "{sql}");
         }
     }
 
