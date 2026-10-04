@@ -31,6 +31,7 @@ import {
   LoadingSpinnerComponent,
 } from '@gradient/ui/ui';
 import { formatDuration } from '@shared/text';
+import { longestPathDepths } from './dependency-depths';
 
 const CARD_W = 200;
 const CARD_H = 78;
@@ -176,31 +177,11 @@ export class DependencyGraphComponent implements OnInit, OnDestroy {
     const nodes = this.layoutNodes;
     const edges = this.layoutEdges;
 
-    // deps.get(N)       = what N directly depends on (tree children - built first)
-    // wantedBy.get(N)   = what directly depends on N (tree parents - built after)
-    const deps = new Map<string, string[]>();
     const wantedBy = new Map<string, string[]>();
-    for (const n of nodes) { deps.set(n.id, []); wantedBy.set(n.id, []); }
-    for (const e of edges) {
-      deps.get(e.target)?.push(e.source);
-      wantedBy.get(e.source)?.push(e.target);
-    }
+    for (const n of nodes) wantedBy.set(n.id, []);
+    for (const e of edges) wantedBy.get(e.source)?.push(e.target);
 
-    // BFS assigning MAXIMUM depth (longest path from root -> minimises upward long-edges)
-    const depth = new Map<string, number>();
-    depth.set(rootId, 0);
-    const q: string[] = [rootId];
-    let qi = 0;
-    while (qi < q.length) {
-      const id = q[qi++];
-      const d = depth.get(id)!;
-      for (const child of (deps.get(id) || [])) {
-        if ((depth.get(child) ?? -1) < d + 1) {
-          depth.set(child, d + 1);
-          q.push(child);
-        }
-      }
-    }
+    const depth = longestPathDepths(rootId, edges);
 
     // Group nodes by level
     const byLevel = new Map<number, LayoutNode[]>();
@@ -218,11 +199,8 @@ export class DependencyGraphComponent implements OnInit, OnDestroy {
       const group = byLevel.get(lv) || [];
 
       if (lv > 0) {
-        group.sort((a, b) => {
-          const ax = this.avgX(a.id, wantedBy, posX);
-          const bx = this.avgX(b.id, wantedBy, posX);
-          return ax - bx;
-        });
+        const parentX = new Map(group.map((n) => [n.id, this.avgX(n.id, wantedBy, posX)]));
+        group.sort((a, b) => parentX.get(a.id)! - parentX.get(b.id)!);
       }
 
       const totalW = group.length * CARD_W + Math.max(0, group.length - 1) * H_GAP;

@@ -10,6 +10,7 @@ use crate::helpers::ok_json;
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
 use gradient_core::ServerState;
+use gradient_entity::derivation_dependency::EdgeKind;
 use gradient_types::*;
 use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter};
 use serde::{Deserialize, Serialize};
@@ -72,6 +73,7 @@ async fn walk_dependencies<C: ConnectionTrait>(
     while !frontier.is_empty() {
         let rows = EDerivationDependency::find()
             .filter(CDerivationDependency::Derivation.is_in(std::mem::take(&mut frontier)))
+            .filter(CDerivationDependency::Kind.is_in([EdgeKind::Buildtime, EdgeKind::Both]))
             .all(db)
             .await?;
         for row in rows {
@@ -248,5 +250,29 @@ mod tests {
             ]
         );
         assert_eq!(graph.root, root);
+    }
+
+    #[tokio::test]
+    async fn the_walk_follows_build_inputs_only() {
+        let root_job = build_job::Model {
+            derivation: DerivationId::now_v7(),
+            ..Default::default()
+        };
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([Vec::<derivation_dependency::Model>::new()])
+            .append_query_results([Vec::<build_job::Model>::new()])
+            .append_query_results([Vec::<derivation_build::Model>::new()])
+            .append_query_results([Vec::<derivation::Model>::new()])
+            .into_connection();
+
+        dependency_graph(&db, &root_job).await.unwrap();
+
+        let log = db.into_transaction_log();
+        let walk = &log[0].statements()[0];
+        let values = &walk.values.as_ref().unwrap().0;
+        assert!(walk.sql.contains(r#""kind" IN"#), "{}", walk.sql);
+        assert!(values.contains(&sea_orm::Value::SmallInt(Some(0))));
+        assert!(values.contains(&sea_orm::Value::SmallInt(Some(2))));
+        assert!(!values.contains(&sea_orm::Value::SmallInt(Some(1))));
     }
 }
