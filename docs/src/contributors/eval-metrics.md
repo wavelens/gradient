@@ -8,7 +8,7 @@ flowchart LR
     worker -->|EvalStats| server[Server]
     server --> tables[(evaluation_metric,<br/>evaluation_attr_cost,<br/>flake_output_node)]
     tables --> board[Job Board: Evals]
-    tables --> rule[ResourceFitRule: p95 RAM per task]
+    tables --> rule[EstimatedTimeRule: p95 RAM per task]
 ```
 
 ## Tables
@@ -28,7 +28,7 @@ flowchart LR
 
 ## RAM Routing
 
-`ResourceFitRule` (see [Scoring](scheduler/scoring.md)) can read a per-task rolling p95 of `peak_rss_mb` over the last 24 h. Tasks whose evaluations needed much RAM go to big-RAM workers. The prediction can update as evaluations finish, with no manual thresholds.
+`EstimatedTimeRule` (see [Scoring](scheduler/scoring.md)) can read a per-task rolling p95 of `peak_rss_mb` over the last 24 h. Predicted RAM above a worker's free memory can add the expected time of a repeated evaluation. Tasks whose evaluations needed much RAM go to big-RAM workers. The prediction can update as evaluations finish, with no manual thresholds.
 
 ## Endpoints
 
