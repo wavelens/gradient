@@ -198,6 +198,41 @@ async fn turning_on_a_teams_workers_needs_admin_in_the_team() {
 }
 
 #[tokio::test]
+async fn the_project_side_withdraws_a_pending_request() {
+    let session_id = SessionId::now_v7();
+    let conn = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
+        .append_query_results([vec![project()]])
+        .append_query_results([vec![team_row()]])
+        .append_query_results([Vec::<team_project::Model>::new()])
+        .append_query_results([vec![team_project_request::Model {
+            id: TeamProjectRequestId::now_v7(),
+            team: team_id(),
+            project: project_id(),
+            role: Some(BASE_ROLE_WRITE_ID),
+            includes_users: true,
+            includes_workers: false,
+            requested_by: Some(user_id()),
+            created_at: test_date(),
+        }]])
+        .append_query_results([vec![admin_access()]])
+        .append_query_results([vec![admin_role()]])
+        .append_exec_results([exec_ok()])
+        .into_connection();
+    let server = make_test_server(conn.clone());
+
+    let res = server
+        .delete("/api/v1/projects/test-project/teams/platform")
+        .add_header("authorization", bearer(session_id))
+        .await;
+
+    res.assert_status_ok();
+    let body: Value = res.json();
+    assert_eq!(body["message"], "Request withdrawn");
+    drop(server);
+    assert!(ran(conn, "DELETE FROM \"team_project_request\""));
+}
+
+#[tokio::test]
 async fn removing_a_grant_with_workers_withdraws_the_team_workers() {
     let session_id = SessionId::now_v7();
     let conn = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)

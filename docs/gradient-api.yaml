@@ -10377,10 +10377,11 @@ paths:
       summary: Remove a project team grant
       description: |
         Allowed for `manageMembers` on the project or Admin in the team. Removing workers aborts their running jobs of the project.
+        Without a grant, the pending request is withdrawn instead.
       operationId: removeProjectTeam
       responses:
         '200':
-          description: OK
+          description: '`Team grant removed` or `Request withdrawn`'
           content:
             application/json:
               schema:
@@ -10485,10 +10486,11 @@ paths:
       summary: Remove a cache team grant
       description: |
         Allowed for `manageCacheMembers` on the cache or Admin in the team.
+        Without a grant, the pending request is withdrawn instead.
       operationId: removeCacheTeam
       responses:
         '200':
-          description: OK
+          description: '`Team grant removed` or `Request withdrawn`'
           content:
             application/json:
               schema:

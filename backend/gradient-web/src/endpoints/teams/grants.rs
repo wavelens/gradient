@@ -447,9 +447,18 @@ pub async fn delete_project_team(
         .await?
         .or_not_found("Project")?;
     let team = find_team(&state, &team).await?;
-    let grant = project_grant(&state, team.id, project.id)
-        .await?
-        .or_not_found("Team grant")?;
+    let grant = project_grant(&state, team.id, project.id).await?;
+    let request = match grant {
+        Some(_) => None,
+        None => Some(
+            ETeamProjectRequest::find()
+                .filter(CTeamProjectRequest::Team.eq(team.id))
+                .filter(CTeamProjectRequest::Project.eq(project.id))
+                .one(&state.web_db)
+                .await?
+                .or_not_found("Team grant")?,
+        ),
+    };
 
     let allowed = has_permission(
         &state,
@@ -469,6 +478,12 @@ pub async fn delete_project_team(
         ));
     }
 
+    let Some(grant) = grant else {
+        if let Some(request) = request {
+            request.into_active_model().delete(&state.web_db).await?;
+        }
+        return Ok(ok_json("Request withdrawn".to_string()));
+    };
     let had_workers = grant.includes_workers;
     grant.into_active_model().delete(&state.web_db).await?;
     if had_workers {
@@ -711,9 +726,18 @@ pub async fn delete_cache_team(
         .await?
         .or_not_found("Cache")?;
     let team = find_team(&state, &team).await?;
-    let grant = cache_grant(&state, team.id, cache.id)
-        .await?
-        .or_not_found("Team grant")?;
+    let grant = cache_grant(&state, team.id, cache.id).await?;
+    let request = match grant {
+        Some(_) => None,
+        None => Some(
+            ETeamCacheRequest::find()
+                .filter(CTeamCacheRequest::Team.eq(team.id))
+                .filter(CTeamCacheRequest::Cache.eq(cache.id))
+                .one(&state.web_db)
+                .await?
+                .or_not_found("Team grant")?,
+        ),
+    };
 
     let allowed = has_cache_permission(
         &state,
@@ -733,6 +757,12 @@ pub async fn delete_cache_team(
         ));
     }
 
+    let Some(grant) = grant else {
+        if let Some(request) = request {
+            request.into_active_model().delete(&state.web_db).await?;
+        }
+        return Ok(ok_json("Request withdrawn".to_string()));
+    };
     grant.into_active_model().delete(&state.web_db).await?;
 
     audit_record(
