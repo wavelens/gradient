@@ -9,8 +9,6 @@
 
 pub use gradient_eval::{eval_worker, wildcard_walk};
 
-pub mod adopt;
 pub mod gcroots;
 pub mod log;
 pub mod store;
-pub mod visibility;

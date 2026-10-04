@@ -36,7 +36,7 @@ impl<'a> NarImporter<'a> {
         }
     }
 
-    fn build_path_info(&self, nar_size: u64) -> Result<ValidPathInfo> {
+    fn build_path_info(&self, meta: &CachedPath, nar_size: u64) -> Result<ValidPathInfo> {
         let path_base = self
             .store_path
             .strip_prefix("/nix/store/")
@@ -45,7 +45,7 @@ impl<'a> NarImporter<'a> {
         let path = StorePath::from_base_path(path_base)
             .map_err(|e| anyhow::anyhow!("invalid store path {}: {}", self.store_path, e))?;
 
-        let info = build_unkeyed_path_info(self.store_path, self.meta, nar_size)?;
+        let info = build_unkeyed_path_info(self.store_path, meta, nar_size)?;
         Ok(ValidPathInfo { path, info })
     }
 
@@ -89,11 +89,19 @@ impl<'a> NarImporter<'a> {
         })
         .await
         .context("decompress task panicked")??;
-        let valid_info = self.build_path_info(decompressed.len() as u64)?;
+        let meta = with_nar_hash(self.meta, &decompressed);
+        let valid_info = self.build_path_info(&meta, decompressed.len() as u64)?;
         self.store.import_nar(&valid_info, &decompressed).await?;
         debug!(%self.store_path, bytes = compressed_len, "imported NAR into local store");
         Ok(())
     }
+}
+
+fn with_nar_hash(meta: &CachedPath, nar: &[u8]) -> CachedPath {
+    let mut meta = meta.clone();
+    meta.nar_hash
+        .get_or_insert_with(|| gradient_worker_client::nar::sha256_nix32(nar));
+    meta
 }
 
 /// A mismatch is a typed [`CorruptCachedNar`]. The executor is routing it into demote-and-refetch
@@ -146,4 +154,34 @@ pub async fn import_received_nar(
     NarImporter::new(store, store_path, meta)
         .import(payload)
         .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_nar_without_a_claimed_hash_is_registered_under_the_hash_of_its_bytes() {
+        let meta = CachedPath {
+            path: "/nix/store/aaaa-hello".into(),
+            ..CachedPath::default()
+        };
+        let filled = with_nar_hash(&meta, b"nar bytes");
+        assert_eq!(
+            filled.nar_hash.as_deref(),
+            Some(gradient_worker_client::nar::sha256_nix32(b"nar bytes").as_str())
+        );
+    }
+
+    #[test]
+    fn a_claimed_hash_is_kept() {
+        let meta = CachedPath {
+            nar_hash: Some("sha256:claimed".into()),
+            ..CachedPath::default()
+        };
+        assert_eq!(
+            with_nar_hash(&meta, b"nar bytes").nar_hash.as_deref(),
+            Some("sha256:claimed")
+        );
+    }
 }
