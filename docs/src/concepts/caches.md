@@ -1,6 +1,6 @@
 # Caches
 
-A **cache** is a Nix binary cache built into Gradient. Projects subscribe to caches. Every build output of a project is landing in its subscribed caches. `nix` on any machine can substitute from those caches.
+A **cache** is a Nix binary cache built into Gradient. Projects subscribe to caches. Build outputs of a project land in every cache the project subscribed to. `nix` on any machine can substitute from those caches.
 
 ```mermaid
 flowchart LR
@@ -11,9 +11,9 @@ flowchart LR
 
 ## Using a Cache
 
-The cache page is showing the substituter URL and the public key for the Nix configuration. A public cache is serving anyone. A private cache is requiring credentials, described in [Authentication](../guides/share-a-cache.md#1-use-the-cache-on-a-machine).
+The cache page shows the substituter URL and the public key for the Nix configuration. Public caches are open to anyone. Private caches need credentials, described in [Authentication](../guides/share-a-cache.md#1-use-the-cache-on-a-machine).
 
-Each cache is announcing a priority to `nix`, with lower values winning and a default of `10`. A cache can announce a different priority to clients on the local network. Machines next to the server then prefer the Gradient cache over remote ones.
+Caches announce a priority to `nix`, with a default of `10`. Lower values win. A cache can announce a different priority to clients on the local network. Machines next to the server then prefer the Gradient cache over remote ones.
 
 ## Upstream Types
 
@@ -31,28 +31,28 @@ Upstream caches live under **Settings -> Upstream Caches** on the cache page.
 
 Declared caches in [`services.gradient.state`](../reference/state.md#cachesname) take Internal and HTTP (`external` in Nix) upstream caches. Gradient Proto upstream caches are configurable in the UI.
 
-**Deactivate** is disabling an upstream cache without removing the entry. **Activate** is turning the upstream cache back on. An inactive upstream cache is keeping its settings. Gradient is never querying an inactive upstream cache. Paths then come from the remaining upstream caches. A declared cache is also accepting **Deactivate** and **Activate**. The next server start is restoring the declared `active` value.
+**Deactivate** can disable an upstream cache without removing the entry. **Activate** can turn the upstream cache back on. Inactive upstream caches keep their settings. Gradient will never query an inactive upstream cache. Paths then come from the remaining upstream caches. Declared caches also accept **Deactivate** and **Activate**. The next server start will restore the declared `active` value.
 
-**Test** on an HTTP upstream is fetching its `nix-cache-info` over HTTP/1.1 and over HTTP/2. The test is reporting each result. Gradient is switching an HTTP upstream with broken HTTP/2 transfers to HTTP/1.1 for good. Such an upstream is showing an **HTTP/1.1** badge.
+**Test** on an HTTP upstream can fetch its `nix-cache-info` over HTTP/1.1 and over HTTP/2. The test will report each result. HTTP upstream caches with broken HTTP/2 transfers switch to HTTP/1.1 for good. Such upstream caches show an **HTTP/1.1** badge.
 
 ## Pull-Through
 
-A cache is serving paths from its upstream caches as if the cache held them. A client asking for a missing path is receiving the upstream copy through the cache. The cache is re-signing that copy with its own key. Clients configure one URL and one key, wherever a path came from.
+Caches deliver paths from their upstream caches as if the cache held them. A client asking for a missing path will receive the upstream copy through the cache. The cache will re-sign that copy with its own key. Clients configure one URL and one key, wherever a path came from.
 
 ## Substitution
 
-Gradient is deciding per derivation whether a build is needed at all, before building anything.
+Gradient will decide per derivation whether a build is needed at all, before building anything.
 
-1. An output already in any cache on the instance is requiring no work.
-2. Gradient is asking the upstream caches of the subscribed caches for each output missing on the instance.
-3. A build with every output found is **substituted**. A worker is fetching the outputs. Gradient is neither building nor fetching anything below the derivation.
-4. A worker is building a derivation with a missing output. Its inputs go through the same check.
+1. Outputs already in any cache on the instance need no work.
+2. Outputs missing on the instance are looked up in the upstream caches of the subscribed caches.
+3. A build with every output found is **substituted**. A worker will fetch the outputs. Nothing below the derivation is built or fetched.
+4. Derivations with a missing output go to a worker for building. Their inputs go through the same check.
 
-Gradient is only asking for derivations actually needed by an evaluation. Gradient is pausing an unresponsive upstream cache for a minute instead of slowing every lookup.
+Lookups only cover derivations an evaluation actually needs. Unresponsive upstream caches pause for a minute instead of slowing every lookup.
 
 ## Sharing
 
-Projects subscribe to a cache for pushing outputs there and substituting from there. Subscribing is requiring rights on both sides. A subscription without cache rights is turning into a request. A cache admin can approve the request under **Subscriptions** on the cache page.
+Projects subscribe to a cache for pushing outputs there and substituting from there. Subscribing needs rights on both sides. Subscriptions without cache rights turn into a request. A cache admin can approve the request under **Subscriptions** on the cache page.
 
 ## Roles
 

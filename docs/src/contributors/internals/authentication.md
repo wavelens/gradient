@@ -1,6 +1,6 @@
 # Authentication
 
-HTTP requests are proving their identity with session JWTs, API keys, download tokens or OIDC sign-in. Worker authentication on `/proto` is covered on [Connection](../proto/connection.md).
+HTTP requests prove their identity with session JWTs, API keys, download tokens or OIDC sign-in. Worker authentication on `/proto` is covered on [Connection](../proto/connection.md).
 
 ```mermaid
 flowchart LR
@@ -19,10 +19,10 @@ flowchart LR
 | API key | 64 random alphanumeric characters, stored as SHA-256 hex, returned with a `GRAD` prefix | `expires_at` or none | API key endpoints |
 | Download token | HS256 JWT with `derivation` and `evaluation` claims | 1 h | `encode_download_token` |
 
-- Each request is checking the session row for revocation and expiry.
-- An API key is carrying `expires_at`, `revoked_at`, an optional project or cache pin, a permission mask and `allowed_ips`.
-- The server is stamping `api.last_used_at` and `session.last_used_at` at most once a minute (`LAST_USED_STAMP_INTERVAL`).
-- A failed stamp is only producing a log line, never a fatal error.
+- Every request must check the session row for revocation and expiry.
+- API keys carry `expires_at`, `revoked_at`, `allowed_ips`, a permission mask and an optional project or cache pin.
+- The server will stamp `api.last_used_at` and `session.last_used_at` at most once a minute (`LAST_USED_STAMP_INTERVAL`).
+- A failed stamp can only produce a log line, never a fatal error.
 
 ## OIDC
 
@@ -42,10 +42,10 @@ sequenceDiagram
     G->>B: session JWT
 ```
 
-- PKCE is using S256.
+- PKCE must use S256.
 - Endpoints come from `<discoveryUrl>/.well-known/openid-configuration`.
-- `oidc_login_verify` is returning the user.
-- The endpoint is minting the session.
+- `oidc_login_verify` will return the user.
+- The same endpoint will mint the session.
 
 ## Related
 

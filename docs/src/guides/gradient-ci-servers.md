@@ -1,6 +1,6 @@
 # Connect Gradient.CI Servers
 
-Build capacity from servers.gradient.ci, connected with one pasted token. One connection can serve a project or a whole team.
+Build capacity from servers.gradient.ci, connected with one pasted token. One connection can build for a project or a whole team.
 
 **Requirements:**
 
@@ -12,10 +12,10 @@ Build capacity from servers.gradient.ci, connected with one pasted token. One co
 
 1. Open **Settings -> Workers** in the project. The first entry is **Gradient.CI Servers**.
 2. Select **Connect**, then **Open servers.gradient.ci** in the dialog.
-3. Sign in, name the key and select **Create key**. The page is showing the connection token once.
+3. Sign in, name the key and select **Create key**. The page will show the connection token once.
 4. Paste the token into **Connection token** and select **Connect**.
 
-A connection token is starting with `gci1_`. The entry is turning **Connected** within 30 s.
+Connection tokens start with `gci1_`. The entry will turn **Connected** within 30 s.
 
 ## 2. Connect a Team
 
@@ -32,12 +32,12 @@ Builds of a project start on the team connection only after a grant with **Worke
 
 ## Verify Deployment
 
-- The **Gradient.CI Servers** entry is showing **Connected**.
-- The next evaluation of the project is showing builds on **Gradient.CI Servers**.
+- The **Gradient.CI Servers** entry will show **Connected**.
+- The next evaluation of the project will show builds on **Gradient.CI Servers**.
 
 ## Offline Reasons
 
-An offline entry is showing its last failure to members who manage workers.
+Offline entries show their last failure to members who manage workers.
 
 | Reason | Fix |
 |---|---|
@@ -51,10 +51,10 @@ An offline entry is showing its last failure to members who manage workers.
 
 ## Disconnect
 
-- **Disconnect** on a project entry is deleting the project's connection.
+- **Disconnect** on a project entry: project connection deleted.
 - **Stop Workers** on a project's team grant: team connection removed from that project.
 - **Delete** on the team's **Workers** page: team connection removed from every project.
-- The key on servers.gradient.ci is staying until a deletion on the servers.gradient.ci keys page.
+- The key on servers.gradient.ci will stay until a deletion on the servers.gradient.ci keys page.
 
 ## Turn the Offer Off
 

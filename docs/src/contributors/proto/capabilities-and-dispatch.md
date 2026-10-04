@@ -1,6 +1,6 @@
 # Capabilities and Assignment
 
-Worker capabilities, job offers and the server's job choice for each free slot. Assignment is pull-based. The server is only assigning a job in answer to `RequestJob`.
+Worker capabilities, job offers and the server's job choice for each free slot. Assignment is pull-based. The server will only assign a job in answer to `RequestJob`.
 
 ```mermaid
 sequenceDiagram
@@ -31,18 +31,18 @@ Workers with the `build` capability send `WorkerCapabilities` after the handshak
 
 - `GRADIENT_WORKER_SYSTEM_ARCHITECTURES` and `GRADIENT_WORKER_SYSTEM_FEATURES` replace the detected lists.
 - An override must list every system and feature the worker should accept.
-- A build is matching a worker when the build's system is in `architectures` and every required feature is in `system_features`.
-- A `builtin` build is skipping the system check.
-- A later `WorkerCapabilities` is replacing the fields and triggering job assignment. Running jobs and existing offers stay.
+- A build can match a worker when the worker's `architectures` contain the build's system and its `system_features` contain every required feature.
+- Every `builtin` build will skip the system check.
+- A later `WorkerCapabilities` will replace the fields and trigger job assignment. Running jobs and existing offers stay.
 
 ## Metrics and Liveness
 
-- `WorkerMetrics` (`cpu_usage_pct`, `ram_free_mb`, `disk_speed_mbps`, `network_speed_mbps`) is riding the 10 s heartbeat.
-- Scoring is using unknown values for a worker without metrics.
-- The server is marking a worker as seen on every message.
-- `worker_liveness_pass` is dropping workers silent for `proto.workerHeartbeatTimeoutSecs` (120 s, `0` disabling the check).
-- A worker's own `Draining` is stopping new assignments.
-- The worker is draining for up to 600 s after `SIGTERM`. A second signal is aborting the drain.
+- The `WorkerMetrics` fields (`cpu_usage_pct`, `ram_free_mb`, `disk_speed_mbps`, `network_speed_mbps`) travel with the 10 s heartbeat.
+- Workers without metrics get unknown values in scoring.
+- The server will mark a worker as seen on every message.
+- The `worker_liveness_pass` will drop workers silent for `proto.workerHeartbeatTimeoutSecs` (120 s, `0` disabling the check).
+- A worker's own `Draining` will stop new assignments.
+- Workers drain for up to 600 s after `SIGTERM`, and a second signal will abort the drain.
 
 ## Offers
 
@@ -51,28 +51,33 @@ Workers with the `build` capability send `WorkerCapabilities` after the handshak
 | `JobListChunk` | Answer to `RequestJobList`: the full candidate list in pages of 1 000, the last one `is_final` |
 | `JobOffer` | Candidates not sent to this worker yet, up to 1 000 each. The server is offering a requeued job again |
 
-- Candidates are evaluations and builds the worker is authorized for and can run.
-- A `JobCandidate` is carrying `required_paths` (with NAR sizes when cached), `drv_paths` and `output_paths`.
-- A build candidate and its `BuildJob` are also carrying a `requirement`: the Nix system and the required system features. An evaluation candidate is carrying none.
-- The worker is keeping no candidate cache.
-- The worker is scoring every offered candidate against the local store.
-- `RequestJobChunk` is carrying the answer with `missing_count`, `missing_nar_size` and `outputs_present`.
+- Candidates are evaluations or build jobs the worker is authorized for and can run.
+- The fields `required_paths` (with NAR sizes when cached), `drv_paths` and `output_paths` are part of every `JobCandidate` message.
+- A build candidate and its `BuildJob` also carry a `requirement` with the Nix system and the required system features. Evaluation candidates carry no requirement.
+- Workers keep no candidate cache.
+- Workers score every offered candidate against the local store.
+- The worker will send the answer in `RequestJobChunk` with the fields `missing_count`, `missing_nar_size` and `outputs_present` set.
 
 ## Assignment
 
-- The worker is sending `RequestJob { kind }` for each free slot.
-- The worker is repeating the request after every `AssignJob` while slots remain, and every 10 s while idle.
-- The server is remembering an unanswered request as an idle slot for [cluster placement](../scheduler/clusters.md#tracking), not as a queued request.
-- The server is scoring every pending job of that kind for this worker on `RequestJob`.
-- The [scheduling policy](../../reference/scheduler-policies.md) is providing the score, and the server is picking the highest. Ties go to the smaller job ID.
-- The server is handing out nothing below the assignment floor of 0.
-- The server is claiming the winner by inserting a `dispatched_job` row.
-- A lost race is moving on to the next job, up to 3 times.
-- `AssignJob` is going out only after the claim.
-- `AssignJob.assignment_id` is the claim's ID. Every report (`JobUpdate`, `JobCompleted`, `JobFailed`, `BuildProgress`, `EvalProgress`) is echoing the ID. The server is dropping reports with a stale ID.
-- The worker is answering with `AssignJobResponse`.
-- The server is re-queuing a declined job (worker draining or full) and offering the job again.
-- An `AssignJob` with `cluster` set is one member of a [cluster job](../scheduler/clusters.md). The server is pushing such a job instead of answering a `RequestJob`. The worker is holding the slot, running nothing until `StartCluster`. The worker is freeing the slot after `cluster.hold_secs` without a `StartCluster`.
+- Workers send `RequestJob { kind }` for each free slot.
+- Workers repeat the request after every `AssignJob` while slots remain, and every 10 s while idle.
+- The server will remember an unanswered request as an idle slot for [cluster placement](../scheduler/clusters.md#tracking), not as a queued request.
+- The server will score every pending job of that kind for this worker on each `RequestJob` message.
+- The [scheduling policy](../../reference/scheduler-policies.md) can provide the score, and the server will pick the highest. Ties go to the smaller job ID.
+- Nothing below the assignment floor of 0 is handed out.
+- The server will claim the winner with a new `dispatched_job` row.
+- A lost race can move the server on to the next job, up to 3 times.
+- The `AssignJob` message will go out only after the claim.
+- The claim's ID is `AssignJob.assignment_id`, and every report must echo the ID.
+- Reports are the messages `JobUpdate`, `JobCompleted`, `JobFailed`, `BuildProgress` and `EvalProgress` from the worker.
+- The server will drop reports with a stale ID.
+- Workers answer with an `AssignJobResponse` message.
+- The server will re-queue a declined job (worker draining or full) and offer the job again.
+- An `AssignJob` with `cluster` set is one member of a [cluster job](../scheduler/clusters.md).
+- The server will push such a job instead of answering a `RequestJob` message.
+- The worker will hold the slot and run nothing until the `StartCluster` message.
+- The worker will free the slot after `cluster.hold_secs` without a `StartCluster` message.
 
 ## Candidate Sources
 

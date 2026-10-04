@@ -4,7 +4,7 @@ The path from an evaluated derivation to a finished, cached build. Every derivat
 
 ```mermaid
 flowchart LR
-    shared[Shared Builds] --> promo[Promotion and Counters]
+    shared[Shared Builds] --> promo[Queueing and Counters]
     promo --> subst[Upstream Substitution]
     promo --> score[Scoring]
     subst --> closure[Cache Closure]
@@ -18,7 +18,7 @@ flowchart LR
 
     One `derivation_build` row per derivation, and the graph writer owning every write.
 
--   :material-counter: **[Promotion and Counters](promotion-and-counters.md)**
+-   :material-counter: **[Queueing and Counters](queueing-and-counters.md)**
 
     A shared build moving from `Created` to `Queued`, and the counters behind every start condition.
 
@@ -32,7 +32,7 @@ flowchart LR
 
 -   :material-sync: **[Repair Pass](repair-pass.md)**
 
-    Heals for state beyond the reach of any event, and the emitter fanning out every shared build move.
+    Heals for state beyond the reach of any event, and the emitter sending out every shared build move.
 
 -   :material-timer-sand: **[Waiting and Recovery](waiting-and-recovery.md)**
 

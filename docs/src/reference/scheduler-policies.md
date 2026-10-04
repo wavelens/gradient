@@ -1,6 +1,6 @@
 # Scheduler Policies
 
-The scheduler is scoring every queued job a worker can take on each request for work. The highest-scoring job is going to the worker. The score is the sum of the policy's rules. The [Job Board](../ui/job-board.md#job-inspection) is showing each rule's share for every assigned job.
+The scheduler will score every queued job a worker can take on each request for work. The highest-scoring job will go to the worker. The score is the sum of the policy's rules. The [Job Board](../ui/job-board.md#job-inspection) can show each rule's share for every assigned job.
 
 ```nix
 services.gradient.scheduler.scoringPolicy = "resource-aware"; # (1)!
@@ -13,11 +13,11 @@ services.gradient.scheduler.scoringPolicy = "resource-aware"; # (1)!
 | `resource-aware` (default) | All rules below | Workers reporting metrics, with heavy builds meant for machines that fit them |
 | `simple` | The first table only | Workers without metrics, or placement by cache warmth and wait time alone |
 
-An unknown name is falling back to `resource-aware`.
+An unknown name will fall back to `resource-aware`.
 
 ## Negative Scores
 
-The worker is getting its highest-scoring job with a total of at least 0 and no veto from any rule. A vetoed or negative job is waiting for a better fit. The worker is idling this round without any eligible job. Bonus rules are never going below zero. Only penalties and vetoes can hold a job back.
+The worker will get its highest-scoring job with a total of at least 0 and no veto from any rule. A vetoed or negative job will wait for a better fit. The worker will idle this round without any eligible job. Bonus rules are never going below zero. Only penalties and vetoes can hold a job back.
 
 ## Rules in Both Policies
 
@@ -33,11 +33,11 @@ The worker is getting its highest-scoring job with a total of at least 0 and no 
 | `RescoreWaitRule` | Veto | Holding a build until a worker reported its missing data size. Lifted after 4 rounds |
 | `ReserveFetchWorkersRule` | Penalty | Keeping fetch-capable workers free for fetching while capacity is short |
 
-**Prioritize** in the task or evaluation menu is setting the `QosRule` flag on a build and its dependencies, or on a whole evaluation. The flag is clearing on a failed or aborted build or evaluation.
+The **Prioritize** entry in the task or evaluation menu can set the `QosRule` flag on a build and its dependencies, or on a whole evaluation. The flag will clear on a failed or aborted build or evaluation.
 
 ## Rules in `resource-aware` Only
 
-The memory predictions (`ResourceFitRule`, the out-of-memory check) are requiring `services.gradient.worker.build.metrics` on the workers and earlier builds of the same package. The CPU and memory saturation check is using live worker load.
+The memory predictions (`ResourceFitRule`, the out-of-memory check) are requiring `services.gradient.worker.build.metrics` on the workers. They also need earlier builds of the same package. The CPU and memory saturation check will use live worker load.
 
 | Rule | Kind | Effect |
 |---|---|---|
@@ -55,11 +55,11 @@ Workers are measuring network and disk speed from their own NAR transfers and bu
 
 A policy is a named list of rules. Every rule is a small, separately tested scoring function. Production systems with special placement needs (license-bound machines, a fixed build order, cost-based routing) can get a custom policy without touching the scheduler.
 
-1. Write a rule: one function from the job, the worker and the instance averages to a score, plus a description for the Job Board.
-2. Combine the rule with the existing ones into a new named policy in `backend/gradient-pool/src/score/policy.rs`.
-3. Add the name to the allowed values of `scheduler.scoringPolicy` in `nix/modules/gradient.nix` and select the policy there.
+1. Write a rule as one function from the job, the worker and the averages of the instance to a score. The rule also needs a description for the Job Board.
+2. Combine the rule and the existing ones into a new named policy (in `backend/gradient-pool/src/score/policy.rs`).
+3. Add the name to the allowed values of `scheduler.scoringPolicy` (in `nix/modules/gradient.nix`). Select the policy there.
 
-The Job Board is then showing the new rule's share in every assignment decision, next to the built-in rules.
+The Job Board will then show the new rule's share in every assignment decision, next to the built-in rules.
 
 ## Related
 

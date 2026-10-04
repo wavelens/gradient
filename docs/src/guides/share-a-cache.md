@@ -9,7 +9,7 @@ One cache, used by machines, other projects and other people.
 
 ## 1. Use the Cache on a Machine
 
-The cache page is showing the substituter URL and the public key.
+The cache page will show the substituter URL and the public key.
 
 ```nix
 nix.settings = {
@@ -18,7 +18,7 @@ nix.settings = {
 };
 ```
 
-The one key is covering every path, even paths pulled through from an [upstream cache](../concepts/caches.md#pull-through). Gradient is verifying these paths against the upstream cache's key. Gradient is then signing them again with the cache's own key.
+The one key can cover every path, even paths pulled through from an [upstream cache](../concepts/caches.md#pull-through). Gradient will verify these paths against the upstream cache's key. Gradient is then signing them again with the cache's own key.
 
 Public caches need nothing more. Private caches need an API key from **Settings -> API Keys** in a netrc file for the Nix daemon.
 
@@ -29,7 +29,7 @@ Public caches need nothing more. Private caches need an API key from **Settings 
       --server https://gradient.example.com --cache main --token <api key>
     ```
 
-    The command is writing the entry to `/etc/nix/netrc`.
+    The command will write the entry to `/etc/nix/netrc`.
 
 === "Declarative"
 
@@ -45,18 +45,18 @@ Public caches need nothing more. Private caches need an API key from **Settings 
     };
     ```
 
-    1.  The default `nix.settings.netrc-file`. Gradient is ignoring the login and reading the password as the API key.
+    1.  The default `nix.settings.netrc-file`. Gradient will ignore the login and read the password as the API key.
 
 ## 2. Share with Another Project
 
-A subscribed project is pushing its outputs to the cache. The project is also substituting from the cache.
+Subscribed projects push their outputs to the cache. The project is also substituting from the cache.
 
 === "UI"
 
     Open **Settings -> Cache Subscriptions -> Subscribe to Cache** in the other project.
 
     - The subscription is active at once with the Admin role on both sides.
-    - Any other subscription is waiting as a request, marked **Pending approval**. A cache admin can approve or deny the request under **Subscriptions** on the cache page.
+    - Any other subscription will wait as a request, marked **Pending approval**. A cache admin can approve or deny the request under **Subscriptions** on the cache page.
 
 === "Declarative"
 
@@ -72,10 +72,10 @@ Members get a role on the cache itself, independent of any project.
 
 === "UI"
 
-    Open **Members & Roles -> Add Member** on the cache page. Enter a user name and a role. The invitee can accept under **Settings -> My Invites**. Access is granted only after accepting.
+    Open **Members & Roles -> Add Member** on the cache page. Enter a user name and a role. The invitee can accept on the **My Invites** page under **Settings**. Access is granted only after accepting.
 
     - Invitations expire after 7 days.
-    - The invitee is also receiving a mail with a link once [mail](../reference/configuration.md#email) is configured.
+    - The invitee will also receive a mail with a link once [mail](../reference/configuration.md#email) is configured.
 
 === "Declarative"
 
@@ -94,9 +94,9 @@ Members get a role on the cache itself, independent of any project.
 nix store info --store https://gradient.example.com/cache/main
 ```
 
-- The command is printing the cache's store info.
-- A private cache is answering `401` without a valid netrc entry.
-- The other project is listing the cache under **Settings -> Cache Subscriptions** without a pending badge.
+- The command will print the cache's store info.
+- A private cache will answer `401` without a valid netrc entry.
+- The other project will list the cache under **Settings -> Cache Subscriptions** without a pending badge.
 - The member is listed under **Members & Roles** on the cache page.
 
 ## Next Steps

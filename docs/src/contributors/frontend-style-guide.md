@@ -1,6 +1,6 @@
 # Frontend Style Guide
 
-The frontend is shipping its own design system page at `/styleguide`: every shared primitive, colour role and layout pattern, live. A new feature is reusing a primitive before building a new one.
+The frontend has its own design system page at `/styleguide`. The page can show every shared primitive, colour role and layout pattern live. New features must reuse a primitive before building a new one.
 
 ```mermaid
 flowchart LR
@@ -25,11 +25,11 @@ flowchart LR
 ## Rules
 
 - Any store path, hash, key, ID or URL is a `gr-copy-field`, never a bare code span.
-- Colour is coming from semantic roles. No hex outside the palette, and no component reading a palette token directly.
+- Colours come from semantic roles. No hex outside the palette, and no component reading a palette token directly.
 - New shared classes go into the design system, never into a component stylesheet.
 - Content shapes are `gr-row-list` or `gr-card-grid`, never named per entity.
-- Every element is staying legible in both themes. Nothing is hard-coding black or white.
-- Text is sitting at most one step from body: 16px interactive, 14px secondary, 12px badges only.
+- All elements stay legible in both themes. No component may hard-code black or white.
+- Text sizes stay at most one step from body. Sizes are 16px for interactive text, 14px for secondary text and 12px for badges only.
 
 ## Shared UI Package
 
@@ -42,9 +42,11 @@ flowchart LR
 | `@gradient/ui/tokens` | Colour tokens from `tokens.ts` |
 | `@gradient/ui/styles/*` | SCSS partials `variables`, `themes`, `grids` and the global `base` styles |
 
-- Primitives go into the package only when they import nothing from `@core`, `@shared` or `@features`. An ESLint rule is blocking such imports inside `packages/ui`.
-- `pnpm tokens:generate` and `pnpm tokens:check` are delegating to the package. `ng test` is covering the package specs too.
-- The `gradient-proxy` frontend is linking the package with `link:../../frontend/packages/ui`.
+- Only primitives without imports from `@core`, `@shared` or `@features` go into the package.
+- An ESLint rule will block such imports in the `packages/ui` code.
+- `pnpm tokens:generate` and `pnpm tokens:check` are delegating to the package.
+- `ng test` will cover the package specs too.
+- The `gradient-proxy` frontend can link the package with `link:../../frontend/packages/ui`.
 
 ## `gr-ui`
 
@@ -74,10 +76,10 @@ import { MetricChartComponent } from '@shared/ui';
 | Class | Layout |
 |---|---|
 | `.gr-grid-stats` | Auto-fit grid of stat cards, 220px minimum |
-| `.gr-grid-form` | Two-column form, one column below `$breakpoint-md`. `.gr-grid-form__full` is spanning both |
+| `.gr-grid-form` | Two-column form, one column below `$breakpoint-md`. `.gr-grid-form__full` will span both |
 | `.gr-grid-cards` | Auto-fill grid of cards, 280px minimum |
 | `.gr-grid-rows` | Label, value, actions rows |
-| `.gr-form-actions` | Row of form buttons. `--end` is aligning right |
+| `.gr-form-actions` | Row of form buttons. `--end` will align right |
 
 ## Related
 

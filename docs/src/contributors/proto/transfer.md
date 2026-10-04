@@ -1,6 +1,6 @@
 # Transfer
 
-NARs, logs, build progress and credentials moving between worker and server. The worker is always compressing NARs with zstd. The server is never re-compressing.
+NARs, logs, build progress and credentials moving between worker and server. Workers always compress NARs with zstd. The server will never re-compress them.
 
 ## Upload
 
@@ -26,55 +26,57 @@ sequenceDiagram
 
 - **Admission** is server-wide and fair across sessions.
     - The limits are `upload.concurrency` (16) large uploads and `upload.bytesBudget` (8 GiB) at once.
-    - A small upload (at most 1 MiB of NAR, `SMALL_UPLOAD_BYTES`) is getting a window of its own, `SMALL_UPLOADS_IN_FLIGHT` (128).
-    - The cost of a small upload is its two round trips. Each `EvalResult` batch of an evaluation is waiting on the push of its own `.drv` files.
-    - A small upload is going ahead of larger ones in its session. The server is serving a session with a waiting small upload first.
-    - A permit is returning once the object is in storage, ahead of the graph record.
+    - Small uploads (at most 1 MiB of NAR, `SMALL_UPLOAD_BYTES`) get a window of their own, `SMALL_UPLOADS_IN_FLIGHT` (128).
+    - The cost of a small upload is its two round trips. Each `EvalResult` batch of an evaluation will wait on the push of its own `.drv` files.
+    - Small uploads go ahead of larger ones in their session. The server will turn first to sessions with a waiting small upload.
+    - A permit will return once the object is in storage, ahead of the graph record.
     - Requests for the same object coalesce. Followers get `Skip` once the first upload is in storage.
 - **Worker Side:** `worker.nar.maxConcurrentUploads` (16) slots for large uploads and 128 for small ones.
-    - One job is holding at most half of the large slots.
+    - One job can hold at most half of the large slots.
     - A slot is busy from the request until sending `UploadFinished`, not through the commit.
-    - The graph writer is receiving commits in bursts and batching them.
-    - The worker is retrying a `Retry` up to 3 times. `Rejected` is failing the upload.
+    - The graph writer will receive commits in bursts and batch them.
+    - The worker will retry a `Retry` up to 3 times. A `Rejected` answer will fail the upload.
     - Both rules also hold for an answer arriving before the grant.
-    - A failed transfer or an abandoned request is sending `UploadCancel`.
-- **Commit:** The server is checking a passthrough upload by length and SHA-256, then moving the upload into the NAR store. The commit of a presigned upload is completing the multipart and checking the object size. The full digest check is happening only with `nar.verifyDigest`.
-- **Leases:** A passthrough upload is expiring after `upload.leaseIdleSecs` (300 s) without progress. A failed job or closed session is releasing its uploads.
+    - A failed transfer or an abandoned request will send an `UploadCancel` message.
+- **Commit:** The server will check a passthrough upload by length and SHA-256, then move the upload into the NAR store.
+    - The commit of a presigned upload will complete the multipart and check the object size.
+    - The full digest check will happen only with `nar.verifyDigest` set.
+- **Leases:** A passthrough upload will expire after `upload.leaseIdleSecs` (300 s) without progress. A failed job or closed session will release its uploads.
 - **Evaluation cache blobs** use the same handshake with `UploadObject::EvalCache`.
 
 ## Download for a Build
 
-The worker is prefetching every input missing from the local store ahead of the build.
+Workers prefetch every input missing from the local store ahead of the build.
 
-1. `CacheQuery { mode: Pull }` for the missing paths. An uncached path is failing the build as `InputsUnavailable`.
-2. Paths with a presigned `url` download directly, 8 in parallel, with 4 attempts. A download is failing after 30 s without a byte, never on total length.
-3. The rest go through `NarRequest`. The server is answering each path with `NarStreamHeader`, then 512 KiB `NarPush` frames, or with `NarUnavailable` / `NarAbort`.
-4. A broken stream is resuming with `NarRequestResume { received_bytes, stream_token }` from `<baseDir>/nar-partial`.
-5. The worker is importing the NARs into the Nix store in dependency order.
+1. `CacheQuery { mode: Pull }` for the missing paths. An uncached path will fail the build with the failure kind `InputsUnavailable` set.
+2. Paths with a presigned `url` download directly, 8 in parallel, with 4 attempts. A download will fail after 30 s without a byte, never on total length.
+3. The rest go through `NarRequest`. The server will answer each path with `NarStreamHeader`, then 512 KiB `NarPush` frames, or with a `NarUnavailable` / `NarAbort` message.
+4. A broken stream will resume with `NarRequestResume { received_bytes, stream_token }` from the `<baseDir>/nar-partial` directory.
+5. Workers import the NARs into the Nix store in dependency order.
 
-| Condition | Served As |
+| Condition | Delivered As |
 |---|---|
 | S3 store, confirmed NAR above `nar.smallBytes` (1 MiB) | Presigned GET URL |
 | Anything else | Stream over `/proto`, at most `nar.maxConcurrentServes` (8) paths per connection |
 
 - Small NARs come from an in-memory hot cache, `nar.hotCacheBytes` (512 MiB).
-- `NarUnavailable` is also removing the stale cache row on the server.
-- A storage error or timeout is answering with `NarAbort` and leaving the row and object in place.
-- Substitute builds may get an upstream URL through a single-path `Pull` query with `external`.
+- A `NarUnavailable` answer will also remove the stale cache row on the server.
+- A storage error or timeout will answer with `NarAbort` and leave the row and object in place.
+- A substitute build may get an upstream URL through a single-path `Pull` query with `external` set.
 
 ## Logs
 
-- `LogChunk { job_id, task_index, data }` is streaming build output on the bulk lane, without acknowledgement.
-- The server is appending each chunk to the open attempt of the build at `task_index`.
-- The server is dropping chunks for evaluations or finished attempts.
-- The worker is limiting each build's log to `worker.log.burstBytesPerMin` (8 MiB) and `worker.log.sustainedBytesPerHour` (64 MiB).
-- The worker is then stopping the forward and adding a truncation note.
-- A build already in the store is forwarding its stored Nix log with `worker.log.fetchFromStore` (on by default).
-- The log is ending up as zstd chunks of `log.chunkBytes` (256 KiB) with a chunk index after the build.
+- The `LogChunk { job_id, task_index, data }` messages stream build output on the bulk lane, without acknowledgement.
+- The server will append each chunk to the open attempt of the build at `task_index`.
+- The server will drop chunks for evaluations or finished attempts.
+- The worker will limit each build's log to `worker.log.burstBytesPerMin` (8 MiB) and `worker.log.sustainedBytesPerHour` (64 MiB).
+- The worker will then stop the forward and add a truncation note.
+- A build already in the store can forward its stored Nix log with `worker.log.fetchFromStore` (on by default).
+- The log will end up as zstd chunks of `log.chunkBytes` (256 KiB) with a chunk index after the build.
 
 ## Build Progress
 
-- `BuildProgress` is reporting the transfers of one build in three phases, each with bytes and paths done and total.
+- The `BuildProgress` message will report the transfers of one build in three phases, each with bytes and paths done and total.
 
 | Phase | Transfer | Bytes |
 |---|---|---|
@@ -82,27 +84,29 @@ The worker is prefetching every input missing from the local store ahead of the 
 | `Download` | A substitute or `builtin:fetchurl` download | Compressed NAR file or the downloaded file |
 | `Upload` | The build's own uncached outputs at the end of the job | NAR bytes read from the store |
 
-- The worker is reporting at most once a second on a change, plus once at the end of a phase.
+- Workers report at most once a second on a change, plus once at the end of a phase.
 - `bytes_total` is `None` when one size is unknown.
-- `paths_total` is `None` while a prefetch is still discovering paths. The last report of a phase is always carrying the total.
-- Retried or failed transfers never count twice.
-- The server is keeping the latest value per build in memory for 15 s.
-- The build response is showing the value only while the build is `Building`. The build is staying `Building` until its job finished the upload.
-- The server is also publishing `BuildProgress` events to the live endpoints.
-- `EvalProgress` is reporting fetch rows or live thunks at most once a second on a change. An unchanged value is sent again after 30 s.
-- The server is keeping `EvalProgress` the same way for 60 s, shown only while the evaluation is fetching or evaluating.
-- The server is publishing `EvalProgress` as `evaluation.activity` events to the evaluation and task live endpoints.
+- `paths_total` is `None` while a prefetch is still discovering paths. The last report of a phase will always carry the total.
+- Retried or failed transfers count only once.
+- The server will keep the latest value per build for 15 s in memory.
+- The build response will show the value only while the build has the `Building` status.
+- The build will stay `Building` until its job finished the upload.
+- The server will also publish `BuildProgress` events to the live endpoints.
+- Eval workers report fetch rows or live thunks through `EvalProgress` at most once a second on a change.
+- An unchanged value is sent again once 30 s have passed.
+- The server will keep `EvalProgress` values the same way for 60 s, shown only during the fetch and evaluation steps.
+- The server will publish `EvalProgress` as `evaluation.activity` events to the evaluation and task live endpoints.
 
 ## Credentials
 
 - The only credential is the project's SSH key, for cloning private repositories and inputs.
-- The server is decrypting the key and sending `Credential { SshKey }` right before `AssignJob`.
-- The credential is going only to a flake job with a fetch step on a `fetch`-capable worker.
-- A project without a key is getting no credential.
-- The worker is keeping the key in locked memory, zeroed on drop.
-- The worker is clearing the key at job completion.
+- The server will decrypt the key and send `Credential { SshKey }` right before the `AssignJob` message.
+- The credential will go only to a flake job with a fetch step on a `fetch`-capable worker.
+- Projects without a key get no credential.
+- Workers keep the key in locked memory, zeroed on drop.
+- Workers clear the key at job completion.
 
 ## Memory
 
-- A `Put` upload and a presigned download each hold the whole compressed NAR in memory, up to 1 GiB.
+- A `Put` upload and a presigned download each hold the whole compressed NAR of up to 1 GiB in memory.
 - Passthrough and multipart uploads from a store path stream through a packer and never hold the whole NAR.

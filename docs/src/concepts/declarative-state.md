@@ -1,6 +1,6 @@
 # Declarative State
 
-Everything created in the UI can also be declared in Nix under `services.gradient.state`. Gradient is applying the declared state on every start. Declared entities become read-only in the UI. The Nix configuration is the source of truth.
+Everything created in the UI can also be declared in Nix under `services.gradient.state`. Every start of Gradient will apply the declared state. Declared entities become read-only in the UI. The Nix configuration is the source of truth.
 
 ```mermaid
 flowchart LR
@@ -35,11 +35,11 @@ Both kinds live side by side. A declared project can hold tasks created in the U
 
 ## Validation
 
-`services.gradient.state.validate` is checking the declared state while the NixOS configuration is building. The option is on by default. Unknown users or projects, duplicate ids and broken references fail the build instead of the server start.
+`services.gradient.state.validate` can check the declared state during the build of the NixOS configuration. The option is on by default. Unknown users or projects, duplicate ids and broken references fail the build instead of the server start.
 
 ## Secrets
 
-Secrets never go into the Nix store. Every `*_file` option is pointing at a file on the server, e.g. from sops-nix or agenix. The server is reading the files on start.
+Secrets never go into the Nix store. All `*_file` options point at a file on the server, e.g. from sops-nix or agenix. The server will read the files on start.
 
 | Option | Content | Generate |
 |---|---|---|
@@ -51,20 +51,20 @@ Secrets never go into the Nix store. Every `*_file` option is pointing at a file
 | `integrations.<name>.secret_file` | Webhook secret shared with the Git host | `openssl rand -hex 32` |
 | `integrations.<name>.access_token_file` | Git host access token | From the Git host |
 
-- `gradient hash` is prompting for the password twice and printing the hash. A password piped through `<<<` is carrying a trailing newline into the hash. Later sign-ins then fail.
+- `gradient hash` will prompt for the password twice and print the hash. A password piped through `<<<` would carry a trailing newline into the hash. Later sign-ins then fail.
 - The public half `acme-ssh-key.pub` is the deploy key on the Git host.
-- `nix-store` is writing `main:<key>`. Gradient is expecting the key without the `main:` prefix. Gradient is deriving the public key itself.
+- `nix-store` will write `main:<key>`. The key file must hold the key without the `main:` prefix. Gradient can derive the public key itself.
 - A user without `password_file` can sign in through OIDC only.
 
 ### API Key Files
 
-The server is storing only a digest of each API key. `key_file` is holding that digest. Clients send the token with a `GRAD` prefix.
+The server will store only a digest of each API key. `key_file` must hold that digest. Clients send the token with a `GRAD` prefix.
 
 ```sh
 gradient generate apikey
 ```
 
-The command is printing the `API token` for clients (`Authorization: Bearer GRAD...`). The command is also printing the `key_file digest` for the `key_file`.
+The command will print the `API token` for clients (`Authorization: Bearer GRAD...`). The command will also print the `key_file digest` for the `key_file`.
 
 ??? note "Without the CLI"
     ```sh
@@ -73,15 +73,15 @@ The command is printing the `API token` for clients (`Authorization: Bearer GRAD
     echo "GRAD$TOKEN"
     ```
 
-    1.  `printf %s` is keeping a trailing newline out of the digest.
+    1.  `printf %s` will keep a trailing newline out of the digest.
 
 ## Removal
 
-`services.gradient.state.delete` is deleting users, projects and caches that disappear from the configuration. The option is on by default. These entities stay in the database and become editable in the UI with the option off.
+`services.gradient.state.delete` will delete users, projects and caches that disappear from the configuration. The option is on by default. These entities stay in the database and become editable in the UI with the option off.
 
 ## Export
 
-`GET /api/v1/admin/state` is returning the running instance in the shape of `services.gradient.state`. The export is useful for moving a UI-built setup into Nix.
+`GET /api/v1/admin/state` will return the running instance in the shape of `services.gradient.state`. The export is useful for moving a UI-built setup into Nix.
 
 ## Related
 

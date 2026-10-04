@@ -1,6 +1,6 @@
 # Evaluation Metrics
 
-Evaluation workers record Nix metrics per evaluation, the way builds record resource metrics. The numbers are feeding the Job Board's **Evals** tab. They are also routing RAM-heavy evaluations to big machines.
+Evaluation workers record Nix metrics per evaluation, the same way build jobs record resource metrics. The numbers are feeding the Job Board's **Evals** tab. They are also routing RAM-heavy evaluations to big machines.
 
 ```mermaid
 flowchart LR
@@ -20,15 +20,15 @@ flowchart LR
 | `flake_output_node` | The walked flake-output tree: `path`, `parent`, `name`, `kind`, `is_derivation`, `drv_path` |
 
 - The phase columns are not coming from the Nix stats.
-- The server is summing the phase columns from the job timeline's `fetch`, `eval_flake` and `eval_derivations` spans on the job's terminal message.
+- The phase columns hold the sum of the job timeline's `fetch`, `eval_flake` and `eval_derivations` spans. The server will compute them on the job's terminal message.
 - The phase columns are 0 between `EvalStats` and completion. They stay 0 when the worker vanished before reporting. Phase names are on the [Job Board](../ui/job-board.md#job-inspection).
 - Entry-point costs are aggregated in the resolver on each completed request.
-- `flake_output_node` is recording only the nodes visited by the discovery walk. Nothing extra is evaluated.
-- The frontend is rendering the rows as a `nix flake show`-like tree.
+- `flake_output_node` can only record the nodes visited by the discovery walk. Nothing extra is evaluated.
+- The frontend will render the rows as a `nix flake show`-like tree.
 
 ## RAM Routing
 
-A per-task rolling p95 of `peak_rss_mb` over the last 24 h is feeding `ResourceFitRule` (see [Scoring](scheduler/scoring.md)). Tasks whose evaluations needed much RAM go to big-RAM workers. The prediction is updating as evaluations finish, with no manual thresholds.
+`ResourceFitRule` (see [Scoring](scheduler/scoring.md)) can read a per-task rolling p95 of `peak_rss_mb` over the last 24 h. Tasks whose evaluations needed much RAM go to big-RAM workers. The prediction can update as evaluations finish, with no manual thresholds.
 
 ## Endpoints
 
@@ -39,5 +39,5 @@ A per-task rolling p95 of `peak_rss_mb` over the last 24 h is feeding `ResourceF
 
 ## Overhead
 
-- `GRADIENT_WORKER_EVAL_METRICS` (default `true`) is gating capture. `false` is skipping the stats read entirely.
+- `GRADIENT_WORKER_EVAL_METRICS` (default `true`) can switch capture off. The value `false` will skip the stats read entirely.
 - The enabled cost is one cumulative-counter read per resolver request, diffed per worker. No `--count-calls`-style instrumentation.

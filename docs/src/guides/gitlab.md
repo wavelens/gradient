@@ -4,8 +4,8 @@ Evaluations on every push and merge request, with commit statuses back on GitLab
 
 **Requirements:**
 
+- A GitLab access token with the `api` scope and at least the Developer role on the repository.
 - A task with a repository URL pointing to GitLab (gitlab.com or self-hosted), see [First Project](../get-started/first-project.md)
-- A GitLab access token with the `api` scope and at least the Developer role on the repository
 
 ## 1. Create the Integrations
 
@@ -15,7 +15,7 @@ Evaluations on every push and merge request, with commit statuses back on GitLab
 
     | Kind | Fields |
     |---|---|
-    | Inbound | Name, **Git Host** GitLab and a **Webhook Secret**. The refresh button is generating a secret. The secret is shown once and must be copied. The created integration is showing the **Webhook URL**. |
+    | Inbound | Name, **Git Host** GitLab and a **Webhook Secret**. The refresh button can generate a secret. The secret is shown once and must be copied. The created integration will show the **Webhook URL**. |
     | Outbound | Name, **Git Host** GitLab, **Endpoint URL** (e.g. `https://gitlab.com`) and the **Access Token** |
 
 === "Declarative"
@@ -40,7 +40,7 @@ Evaluations on every push and merge request, with commit statuses back on GitLab
     };
     ```
 
-    1.  Any random string, e.g. `openssl rand -hex 32`. The GitLab webhook is using the same value.
+    1.  Any random string, e.g. `openssl rand -hex 32`. The GitLab webhook must use the same value.
 
     The webhook URL is `https://gradient.example.com/api/v1/hooks/gitlab/acme/gitlab-in`.
 
@@ -58,16 +58,16 @@ A push-only webhook is never delivering merge requests or the `/gradient` commen
 
 ## 3. Wire the Task
 
-Gradient is adding a **Push (reporter)** trigger and a **Git Host Status Report** action automatically to a new task. The task must be created after the integrations. Its repository host must match exactly one inbound and one outbound integration. Other tasks need both added by hand.
+Gradient will add a **Push (reporter)** trigger and a **Git Host Status Report** action automatically to a new task. The task must be created after the integrations. Its repository host must match exactly one inbound and one outbound integration. Other tasks need both added by hand.
 
 - **Triggers -> New Trigger**: **Push (reporter)** and, for merge requests, **Pull Request (reporter)**, each with the inbound integration.
 - **Actions -> New Action**: **Git Host Status Report** with the outbound integration.
 
 ## Verify Deployment
 
-- A push is starting an evaluation within seconds.
-- **Settings -> Webhooks -> Edit -> Recent events** is showing a `200` delivery.
-- The commit on GitLab is showing Gradient's pipeline status.
+- A push will start an evaluation within seconds.
+- The webhook's **Settings -> Webhooks -> Edit -> Recent events** page will show a `200` delivery.
+- The commit on GitLab will show Gradient's pipeline status.
 
 ## Merge Requests
 
@@ -77,7 +77,7 @@ Gradient is adding a **Push (reporter)** trigger and a **Git Host Status Report*
 | Comment `/gradient run` | New evaluation of the merge request |
 | Comment `/gradient approve` | Release of a merge request from a fork waiting for maintainer approval |
 
-The approval gate is a setting of the **Pull Request (reporter)** trigger: **Require maintainer approval for PRs from non-writers**. GitLab is sending no webhook for review approvals. The comment is the only way to approve.
+The approval check is a setting of the **Pull Request (reporter)** trigger: **Require maintainer approval for PRs from non-writers**. Review approvals on GitLab trigger no webhook. The comment is the only way to approve.
 
 ## Troubleshooting
 

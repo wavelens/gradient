@@ -1,11 +1,11 @@
 # Configuration
 
-Every option of the `services.gradient` NixOS module, generated from `nix/modules`. Each option is mapping onto a flag and an environment variable of the same name.
+Every option of the `services.gradient` NixOS module, generated from `nix/modules`. Each option will map onto a flag and an environment variable of the same name.
 
 - `upload.bytesBudget` is `--upload-bytes-budget` and `GRADIENT_UPLOAD_BYTES_BUDGET`.
 - `worker.build.maxConcurrent` is `--build-max-concurrent` and `GRADIENT_WORKER_BUILD_MAX_CONCURRENT`.
 - Module-only options (`packages`, `reverseProxy`, `postgres`, ...) have no environment variable.
-- **(part)** is marking a variable built from several options.
+- Variables marked **(part)** are built from more than one option.
 
 Declarative entities under `services.gradient.state` are in the [state reference](state.md).
 
@@ -14,12 +14,12 @@ Declarative entities under `services.gradient.state` are in the [state reference
 | Option | Type | Default | Env | Description |
 |---|---|---|---|---|
 | `baseDir` | path | `"/var/lib/gradient"` | `GRADIENT_BASE_DIR` | Directory holding Gradient's state, NAR files and caches. |
-| `domain` | string | - | - | Domain under which Gradient is served. |
+| `domain` | string | - | - | Domain under which Gradient is reachable. |
 | `enable` | bool | `false` | - | Whether to enable Gradient. |
 | `listenAddr` | string | `"127.0.0.1"` | `GRADIENT_LISTEN_ADDR` | IP address the Gradient server is listening on. |
 | `localWorker` | bool | `worker.enable` | - | Whether to provision credentials for a `worker` running on this host. These are a worker identity derived from the hostname, a token generated on first start, the matching peers file and a worker of the state-declared team `server`. New projects get the team's workers. |
 | `port` | port | `3000` | `GRADIENT_PORT` | Port the Gradient server is listening on. |
-| `retentionDays` | int | `90` | `GRADIENT_RETENTION_DAYS` | Days to keep job assignment records, finished deliveries, worker connection history, webhook and task action deliveries, expired sessions and CLI logins. The same limit is covering finished admin tasks, the audit log, per-build resource samples and finished cluster jobs. Pruned resource samples are no longer feeding build predictions. A finished cluster job without remaining members is going on the next hourly pass. The pruning is sparing the newest finished admin task of each kind and active cluster jobs. An open worker connection is kept until the same worker is connecting again. `0` is keeping every record forever. |
+| `retentionDays` | int | `90` | `GRADIENT_RETENTION_DAYS` | Days to keep job assignment records, finished deliveries, worker connection history, webhook and task action deliveries, expired sessions and CLI logins. The same limit will cover finished admin tasks, the audit log, per-build resource samples and finished cluster jobs. Removed resource samples are no longer feeding build predictions. A finished cluster job without remaining members will go on the next hourly pass. The cleanup will spare the newest finished admin task of each kind and active cluster jobs. An open worker connection is kept until the next connection of the same worker. `0` will keep every record forever. |
 | `serveUrl` | string | derived | `GRADIENT_SERVE_URL` | Public URL under which clients are reaching Gradient. This option is needed for a URL other than `domain`, for example behind a port mapping. |
 | `useQuic` | bool | `false` | `GRADIENT_USE_QUIC` | Whether to enable advertising HTTP/3 (QUIC) to clients. |
 | `useTls` | bool | `true` | `GRADIENT_USE_TLS` | Whether to enable TLS. |
@@ -412,21 +412,21 @@ Declarative entities under `services.gradient.state` are in the [state reference
 | `FailedTransient` | Yes, `build.maxAttempts` times with a doubling `build.retryBackoffSecs` | Out of memory, full disk, network or substitution failure, builder crash |
 | `FailedTimeout` | No | `build.defaultTimeoutSecs` or `build.defaultMaxSilentSecs` exceeded |
 
-The derivation attributes `timeout`, `maxSilent` and `preferLocalBuild` are overriding the server defaults. `meta.*` attributes are never reaching the `.drv` and have no effect here.
+The derivation attributes `timeout`, `maxSilent` and `preferLocalBuild` will override the server defaults. `meta.*` attributes are never reaching the `.drv` and have no effect here.
 
 ## Local Worker
 
-`localWorker` is registering the worker of the same host without manual steps if `worker.enable` is set.
+`localWorker` will register the worker of the same host without manual steps if `worker.enable` is set.
 
 - A stable worker ID derived from the host name.
-- A token generated on first start in `/var/lib/gradient-worker/local-token`. Deleting the file and restarting both services is rotating the token.
+- A token generated on first start in `/var/lib/gradient-worker/local-token`. A deletion of the file and a restart of both services will rotate the token.
 - A worker of the state-declared team `server`, set to grant every new project its workers. Projects created before the team existed get the worker once they grant the `server` team.
 
-The worker is waiting in reconnect backoff (at most 60 s) until a project with a cache subscription is available.
+The worker will wait in reconnect backoff (at most 60 s) until a project with a cache subscription is available.
 
 ## Postgres Sizing
 
-`postgres.enable` is setting host-independent defaults, each a `mkDefault`.
+`postgres.enable` will set host-independent defaults, each a `mkDefault`.
 
 | Setting | Default | Reason |
 |---|---|---|
@@ -443,7 +443,7 @@ The RAM-dependent settings are module options.
 | `postgres.workMem` | `"32MB"` for the default pool sizes |
 | `postgres.maintenanceWorkMem` | Up to `"1GB"` with RAM to spare |
 
-An external database (`database.urlFile`) is requiring the same seven values, set by hand.
+An external database (`database.urlFile`) must have the same seven values, set by hand.
 
 ## Prometheus and OpenTelemetry
 
@@ -451,4 +451,4 @@ Setup, metric names and alert examples are in [Monitor Gradient](../guides/monit
 
 ## Hashing
 
-Gradient is hashing NARs and cache files with SHA-256. Nix clients need no experimental feature. `blake3:` hashes from older uploads are still resolving.
+Gradient will hash NARs and cache files with SHA-256. Nix clients need no experimental feature. `blake3:` hashes from older uploads are still resolving.

@@ -22,11 +22,11 @@
 
 -   :material-server-network: **[Scales With Workers](concepts/workers.md)**
 
-    Evaluation and builds both running on workers. Every added machine is adding capacity.
+    Evaluation and building both on workers. More capacity with every added machine.
 
 -   :material-robot: **[MCP Server](guides/mcp.md)**
 
-    Failed builds, logs and evaluations, readable by any AI assistant.
+    Logs, evaluations and failed builds, readable by any AI assistant.
 
 -   :material-rocket-launch: **[Pull Deployment](guides/pull-deployment.md)**
 
@@ -38,7 +38,7 @@
 
 -   :material-account-group: **[SSO and Teams](guides/sso.md)**
 
-    OIDC login, SCIM provisioning, roles and invites per project and cache.
+    OIDC login, SCIM provisioning, roles and invitations per project and cache.
 
 </div>
 
@@ -48,7 +48,7 @@
 |---|---|---|---|
 | Build start | After the end of the whole evaluation | After the job has evaluated the flake | While the evaluation is still running |
 | Evaluation | On the server, limited by one machine | Inside each job, limited by the runner | On workers, scaling with them |
-| Nix store | Kept on the server and builders | Empty on every job. Each job is downloading its closure again | Kept on the workers between builds |
+| Nix store | Kept on the server and builders | Empty on every job. Every job will download its closure again | Kept on the workers between builds |
 | Shared work | One build per derivation | Parallel jobs can build the same derivation twice | Every derivation built once, shared across projects |
 | Build outputs | Pass through the server | Pushed from the runner to Cachix | Large outputs go from worker straight to S3 |
 | Server host | Writable Nix store required | Hosted by GitHub | No Nix store required, small enough for a micro-VM |
@@ -78,4 +78,4 @@ Public Key: public.gradient.ci-main:qmxRE+saUvhNa3jqaCMWje+feVU77TjABchZrPGf7A8=
 [Get started](get-started/quick-start.md){ .md-button .md-button--primary }
 [Try the public instance](https://public.gradient.ci){ .md-button }
 
-[Wavelens GmbH](https://wavelens.io) is developing Gradient. Gradient is available under the [AGPL-3.0-only](https://github.com/wavelens/gradient/blob/main/LICENSE) license.
+The developer of Gradient is [Wavelens GmbH](https://wavelens.io). Gradient is available under the [AGPL-3.0-only](https://github.com/wavelens/gradient/blob/main/LICENSE) license.

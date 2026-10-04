@@ -65,7 +65,7 @@ Mails, web requests and Matrix or Slack messages on evaluation and build events,
 
 ## 2. Pick the Events
 
-An action without events never fires. The table is listing the events most actions need.
+An action without events never fires. The events most actions need are in the table below.
 
 | Event | Trigger |
 |---|---|
@@ -117,7 +117,7 @@ web/app: hello-2.12.1 failed on 3f9c2ab
 | `failed` | Status, taken from the event name |
 | `3f9c2ab` | Short commit hash |
 
-- Gradient is retrying rate limits (`429`) and server errors (`5xx`).
+- Gradient will retry rate limits (`429`) and server errors (`5xx`).
 - Other HTTP errors are ending the delivery as failed, listed under **Deliveries**.
 - The access token and the webhook URL are stored encrypted and never returned by the UI or the API.
 
@@ -127,7 +127,7 @@ web/app: hello-2.12.1 failed on 3f9c2ab
 - Encrypted rooms are not supported.
 - The **Room ID** is under room settings -> Advanced, in the form `!abc123:example.org`. Room aliases like `#ops:example.org` are rejected.
 
-A password login is returning the access token of the bot account.
+A password login can return the access token of the bot account.
 
 ```sh
 curl -s -X POST https://matrix.example.org/_matrix/client/v3/login \
@@ -137,12 +137,12 @@ curl -s -X POST https://matrix.example.org/_matrix/client/v3/login \
 
 ### Slack Webhook URL
 
-- A Slack app with **Incoming Webhooks** enabled is issuing one URL per channel, under **Add New Webhook to Workspace**.
+- Slack apps with **Incoming Webhooks** enabled issue one URL per channel, under **Add New Webhook to Workspace**.
 - The URL is in the form `https://hooks.slack.com/services/T.../B.../...`.
 
 ## Git Host Status Report
 
-The **Git Host Status Report** action is posting one check per step on each commit and pull request. The [Git host guides](github.md#4-wire-the-task) are covering its setup.
+The **Git Host Status Report** action can post one check per step on each commit and pull request. The [Git host guides](github.md#4-wire-the-task) cover its setup.
 
 | Check | State |
 |---|---|
@@ -150,14 +150,14 @@ The **Git Host Status Report** action is posting one check per step on each comm
 | `gradient/<task>: Evaluation` | Pending while the evaluation is active, then success or failure |
 | `gradient/<task>: Build <entry point>` | One per entry point: pending, running, then success or failure |
 
-An evaluation started by `/gradient run <wildcard>` is reporting as `gradient/<task>: Evaluation: <wildcard>` next to the default checks.
+Evaluations started with `/gradient run <wildcard>` report as `gradient/<task>: Evaluation: <wildcard>` next to the default checks.
 
-**Test** is checking the integration's access to the repository without posting a status.
+**Test** can check the integration's access to the repository without posting a status.
 
 ## Verify Deployment
 
-- **Test** on the action row is sending a sample event, marked `"synthetic": true`.
-- **Deliveries** on the action row is listing every request with status, duration, request and response body.
+- A click on **Test** in the action row can send a sample event, marked `"synthetic": true` for the receiver.
+- The **Deliveries** view of the action row can list every request with status, duration, request and response body.
 
 ## Troubleshooting
 
@@ -172,5 +172,5 @@ An evaluation started by `/gradient run <wildcard>` is reporting as `gradient/<t
 ## Next Steps
 
 - [Update Flake Inputs](flake-updates.md): pull requests that bump `flake.lock`
-- [Connect GitHub](github.md): status checks with the **Git Host Status Report** action
+- [Connect GitHub](github.md): commit statuses with the **Git Host Status Report** action
 - [Projects and Tasks](../concepts/projects-and-tasks.md): triggers and actions

@@ -1,11 +1,11 @@
 # Installation
 
-A production instance with managed secrets, a chosen database, and TLS matching the network in front of the server. This page is extending the [Quick Start](quick-start.md) configuration.
+A production instance with managed secrets, a chosen database, and TLS matching the network in front of the server. The steps below extend the [Quick Start](quick-start.md) configuration.
 
 **Requirements:**
 
 - A NixOS host configured through a flake, with the Gradient module added ([Quick Start, step 1](quick-start.md#1-flake-input))
-- PostgreSQL 18 or newer. The server is refusing to start against older versions.
+- PostgreSQL 18 or newer. The server will refuse to start against older versions.
 
 ## 1. Public Binary Cache
 
@@ -22,10 +22,10 @@ nix.settings = {
 
 ## 2. Secrets
 
-Gradient is requiring two secrets, each 48 random bytes in base64.
+Gradient needs two secrets, each 48 random bytes in base64.
 
-- `jwtFile` is signing login sessions.
-- `cryptFile` is encrypting secrets stored in the database.
+- `jwtFile`: key for signing login sessions.
+- `cryptFile`: key for encrypting secrets stored in the database.
 
 === "sops-nix"
 
@@ -66,7 +66,7 @@ Gradient is requiring two secrets, each 48 random bytes in base64.
     };
     ```
 
-The files can stay owned by root. The server is reading them as systemd credentials.
+Root can keep ownership of the files. The server will read them as systemd credentials.
 
 !!! warning
     Every secret stored in the database is unreadable without `cryptFile`. Back up `cryptFile` together with the database.
@@ -88,11 +88,11 @@ The files can stay owned by root. The server is reading them as systemd credenti
     services.gradient.database.urlFile = "/run/secrets/gradient-database-url";
     ```
 
-    The file is holding a connection URL such as `postgresql://gradient:<password>@db.example.com/gradient`.
+    The file must hold a connection URL such as `postgresql://gradient:<password>@db.example.com/gradient`.
 
 ## 4. Reverse Proxy and TLS
 
-The server is serving the API, the worker protocol and the cache. A reverse proxy in front is serving the web frontend and TLS.
+The server will handle the API, the worker protocol and the cache. A reverse proxy in front will deliver the web frontend and TLS.
 
 === "nginx (default)"
 
@@ -112,17 +112,17 @@ The server is serving the API, the worker protocol and the cache. A reverse prox
     ```
 
     1.  Used instead of nginx.
-    2.  An existing certificate from `security.acme.certs`. Caddy is requesting no certificate for this host.
+    2.  An existing certificate from `security.acme.certs`. Caddy will request no certificate for this host.
 
 === "TLS terminated upstream"
 
-    A load balancer or Cloudflare is terminating TLS and forwarding plain HTTP.
+    A load balancer or Cloudflare will terminate TLS and forward plain HTTP.
 
     ```nix
     services.gradient.reverseProxy.nginx.manageTls = false; # (1)!
     ```
 
-    1.  nginx is no longer requesting a certificate. `useTls` is staying `true`, and Gradient is still emitting `https://` links and secure cookies.
+    1.  nginx will no longer request a certificate. `useTls` will stay `true`, and Gradient will still emit `https://` links and secure cookies.
 
 === "Own proxy"
 
@@ -136,7 +136,7 @@ The server is serving the API, the worker protocol and the cache. A reverse prox
     | everything else | static files from `${pkgs.gradient-frontend}/share/gradient-frontend` |
 
 !!! warning
-    `services.gradient.useTls = false` is only for plain HTTP end to end. Browsers then drop the session cookie behind any HTTPS proxy, and login is breaking.
+    `services.gradient.useTls = false` is only for plain HTTP end to end. Browsers then drop the session cookie behind any HTTPS proxy, and login will break.
 
 ## 5. Workers
 
@@ -145,11 +145,11 @@ The server is serving the API, the worker protocol and the cache. A reverse prox
 
 ## Verify Deployment
 
-- `https://gradient.example.com` is showing the login page with a valid certificate.
-- `journalctl -u gradient-server` is showing no database or secret errors.
+- `https://gradient.example.com` shows the login page with a valid certificate.
+- `journalctl -u gradient-server` shows no database or secret errors.
 
 ??? note "Crash Reports"
-    `services.gradient.sentry.enable = true` is sending crash reports to the Gradient developers. Crash reports are off by default.
+    `services.gradient.sentry.enable = true` will send crash reports to the Gradient developers. Crash reports are off by default.
 
 ??? note "Network Tuning for Fast or Distant Links"
     A default deployment is fine without tuning. BBR and larger TCP buffers help on a high-bandwidth or high-latency link between workers and server.

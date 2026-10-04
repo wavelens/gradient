@@ -1,6 +1,6 @@
 # Build Before Pushing
 
-Uncommitted changes built on the CI workers with `gradient build`, with a `result` link at the end like `nix build`. No builders and no Nix evaluation on the laptop.
+Uncommitted changes built on the CI workers with `gradient build`. A `result` link at the end, like `nix build`. No builders and no Nix evaluation on the laptop.
 
 **Requirements:**
 
@@ -15,9 +15,9 @@ Uncommitted changes built on the CI workers with `gradient build`, with a `resul
 gradient build .#hello
 ```
 
-- The CLI is uploading the tracked files, including uncommitted changes.
+- The CLI will upload the tracked files, including uncommitted changes.
 - Unchanged files are never sent twice.
-- A worker is evaluating the upload under the project's `build-request` task.
+- A worker will evaluate the upload under the project's `build-request` task.
 - The workers are building the result.
 - Logs are streaming until every build is finished.
 
@@ -29,11 +29,11 @@ gradient build .#hello
 
 ## 2. Use the Result
 
-The primary output is landing in a `result` symlink, fetched from the project cache into the local store. `--no-link` is skipping the link.
+The primary output will land in a `result` symlink, fetched from the project cache into the local store. `--no-link` can skip the link.
 
-The local Nix daemon is only accepting the fetched paths with the cache's public key in `trusted-public-keys`, see [Share a Cache](share-a-cache.md). A user in `trusted-users` is needing no key.
+The local Nix daemon will only accept the fetched paths with the cache's public key in `trusted-public-keys`. [Share a Cache](share-a-cache.md) has the setup. Users in `trusted-users` need no key.
 
-The [static binary](../reference/cli.md#install) is lacking Nix support. This binary is downloading the build products into a `result/` folder instead.
+The [static binary](../reference/cli.md#install) has no Nix support. This binary will download the build products into a `result/` folder instead.
 
 ## Override Inputs
 
@@ -41,11 +41,11 @@ The [static binary](../reference/cli.md#install) is lacking Nix support. This bi
 gradient build .#hello --override-input nixpkgs github:NixOS/nixpkgs/nixos-unstable
 ```
 
-The override is applying to this run only. The flag is repeatable for several inputs.
+The override will apply to this run only. The flag is repeatable for more inputs.
 
-The evaluation is running on a worker. The reference must be remote (`github:`, `git+ssh://`, `https://`, ...), never a local path.
+Workers handle the evaluation. The reference must be remote (`github:`, `git+ssh://`, `https://`, ...), never a local path.
 
-[Update Flake Inputs](flake-updates.md) is covering an override on every run.
+[Update Flake Inputs](flake-updates.md) can cover an override on every run.
 
 ## Background Evaluations
 
@@ -62,12 +62,12 @@ gradient watch "$eval"
 
 ## Verify Deployment
 
-The command is ending with every build completed and `result` pointing into `/nix/store`. The UI is listing the run under the project's **Build Requests** task.
+The command will end with every build completed and `result` pointing into `/nix/store`. The UI will list the run under the project's **Build Requests** task.
 
 ## Limits
 
-- The upload is holding only files tracked by Git. Untracked files are left out.
-- `http.maxSourceUploadSize` is capping the upload, 512 MiB by default.
+- The upload can hold only files tracked by Git. Untracked files are left out.
+- `http.maxSourceUploadSize` can cap the upload, 512 MiB by default.
 - Private `git+ssh://` inputs are using the project's SSH key.
 
 ## Next Steps

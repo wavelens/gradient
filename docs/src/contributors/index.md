@@ -1,6 +1,6 @@
 # Contributors
 
-How Gradient is built, for anyone changing the code. Reading is starting with the architecture, followed by the part matching the change.
+How Gradient is built, for anyone changing the code. Readers can start with the architecture and then read the part matching the change.
 
 ```mermaid
 flowchart LR

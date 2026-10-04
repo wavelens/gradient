@@ -1,12 +1,12 @@
 # API
 
-The REST API behind the web UI and the CLI, at `https://gradient.example.com/api/v1`. The OpenAPI spec is listing every endpoint with its parameters and responses.
+The REST API behind the web UI and the CLI, at `https://gradient.example.com/api/v1`. The OpenAPI spec will list every endpoint with its parameters and responses.
 
 [Open in Swagger UI](https://petstore.swagger.io/?url=https://raw.githubusercontent.com/wavelens/gradient/main/docs/gradient-api.yaml){ .md-button .md-button--primary }
 
 ## Authentication
 
-Every endpoint except `/auth/*`, `/health` and `/config` is requiring a bearer token.
+Every endpoint except `/auth/*`, `/health` and `/config` must have a bearer token.
 
 ```http
 Authorization: Bearer <token>
@@ -17,15 +17,15 @@ Authorization: Bearer <token>
 | Session | `POST /auth/basic/login`, or `gradient login` | JWT |
 | API key | **Settings -> API Keys** or `POST /user/keys` | `GRAD...` |
 
-Every response is the envelope `{ "error": false, "message": <payload> }`. A failure is setting `error` to `true`, with the reason in `message`.
+Every response is the envelope `{ "error": false, "message": <payload> }`. A failure will set `error` to `true`, with the reason in `message`.
 
 ## API Keys
 
-- A key is acting with its own permissions, intersected with the owner's role in each project.
-- A key pinned to a project is answering `404` for every other project.
-- A key pinned to a cache is working only on that cache.
-- `allowed_ips` is limiting a key to CIDR ranges. Other sources are getting `403 forbidden_source_ip`.
-- The server is reading `X-Forwarded-For` only from `http.trustedProxies`.
+- Keys act with their own permissions, intersected with the owner's role in each project.
+- A key pinned to a project will answer `404` for every other project.
+- A key pinned to a cache can work only on that cache.
+- `allowed_ips` can limit a key to a list of CIDR blocks. Other sources are getting `403 forbidden_source_ip`.
+- The server will read `X-Forwarded-For` only from `http.trustedProxies`.
 - API keys cannot create, edit or delete API keys. Only a session can.
 
 ```sh
@@ -54,13 +54,13 @@ curl -G https://gradient.example.com/api/v1/tasks/acme/web-app/entry-points \
   -H "Authorization: Bearer $TOKEN" --data-urlencode "evaluation_id=$EVAL_ID"
 ```
 
-The entry point is carrying `outputs.out` as soon as the evaluation has resolved the attribute. `build_status` is telling whether the path is built and in the cache.
+The entry point will carry `outputs.out` as soon as the evaluation has resolved the attribute. The field `build_status` can tell whether the path is built and in the cache.
 
-The closure endpoints are `/builds/{build}/closure`, `/runtime-closure` and the same paths under `/evals`. Their response is holding `roots`, `total_size_bytes` (always exact), `truncated`, `nodes` (`id`, `name`, `path`, `nar_size`) and `edges` (`source`, `target`). Each edge's `target` is depending on its `source`. The [closure view](../ui/closure-view.md) is drawing this data.
+The closure endpoints are `/builds/{build}/closure`, `/runtime-closure` and the same paths under `/evals`. The response fields are `roots`, `total_size_bytes` (always exact), `truncated`, `nodes` (`id`, `name`, `path`, `nar_size`) and `edges` (`source`, `target`). Each edge's `target` is dependent on its `source`. The [closure view](../ui/closure-view.md) will draw this data.
 
 ## Live Updates
 
-Each path is upgrading to a WebSocket and pushing one [event envelope](events.md#envelope) per frame on every change of the resource.
+Each path will upgrade to a WebSocket and push one [event envelope](events.md#envelope) per frame on every change of the resource.
 
 | Path | Events |
 |---|---|
@@ -72,7 +72,7 @@ Each path is upgrading to a WebSocket and pushing one [event envelope](events.md
 
 ## Binary Cache
 
-The cache paths are at the root, without `/api/v1`. Private caches are accepting HTTP Basic auth with any user name and a session or API key as password, e.g. through [netrc](../guides/share-a-cache.md#1-use-the-cache-on-a-machine).
+The cache paths are at the root, without `/api/v1`. Private caches accept HTTP Basic auth with any user name. The password is a session or API key, e.g. through [netrc](../guides/share-a-cache.md#1-use-the-cache-on-a-machine).
 
 | Method | Path | Description |
 |---|---|---|
@@ -84,7 +84,7 @@ The cache paths are at the root, without `/api/v1`. Private caches are accepting
 | `GET` | `/cache/{cache}/ls/{hash}` | File listing of a NAR |
 | `GET` | `/cache/{cache}/serve/{hash}/{path}` | One file, or a directory as `tar.zst`, from a NAR |
 
-- Unknown keys are always answering `404`, and Nix is moving on to the next substituter.
+- Unknown keys are always answering `404`, and Nix will move on to the next substituter.
 - `log` and `debuginfo` are falling back to the upstream caches for substituted paths.
-- The rate limit of `ls`, `serve` and `log` is refilling one request every 333 ms (about 180 per minute).
+- The rate limit of `ls`, `serve` and `log` will refill one request every 333 ms (about 180 per minute).
 - The burst is 180 for `ls` and `serve` and 900 for `log`.

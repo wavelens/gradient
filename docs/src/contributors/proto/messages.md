@@ -1,6 +1,6 @@
 # Messages
 
-Every message on `/proto`, from `backend/gradient-wire/src/messages`. IDs (`job_id`, `assignment_id`, peer IDs) are strings on the wire. **Bulk** messages carry payload chunks and travel on the bulk lane. Everything else is travelling on the control lane.
+Every message on `/proto`, from `backend/gradient-wire/src/messages`. IDs (`job_id`, `assignment_id`, peer IDs) are strings on the wire. **Bulk** messages carry payload chunks and travel on the bulk lane. All other messages travel on the control lane.
 
 ## Server -> Worker
 
@@ -60,7 +60,7 @@ Every message on `/proto`, from `backend/gradient-wire/src/messages`. IDs (`job_
 | `NarRequestResume` | Resume a pull from an offset | `job_id`, `store_path`, `received_bytes`, `stream_token` |
 | `EvalCachePull` | Asking for the evaluation cache | `job_id`, `fingerprint` |
 | `CacheQuery` | Bulk cache lookup | `job_id`, `query_id`, `paths`, `mode`, `nar_sizes`, `external` |
-| `QueryKnownDerivations` | The `.drv` files known to the server, for pruning the walk | `job_id`, `query_id`, `drv_paths` |
+| `QueryKnownDerivations` | The `.drv` files known to the server, for shortening the walk | `job_id`, `query_id`, `drv_paths` |
 | `UploadRequest` | Asking for an upload slot for a NAR or the evaluation cache | `job_id`, `request_id`, `object`, `size` |
 | `UploadChunk` (bulk) | Passthrough upload bytes | `request_id`, `data`, `offset`, `is_final` |
 | `UploadFinished` | Upload done, with NAR metadata | `request_id`, `metadata` |
@@ -76,9 +76,9 @@ Every message on `/proto`, from `backend/gradient-wire/src/messages`. IDs (`job_
 
 ## Evaluation Messages
 
-`EvalMessage` is attaching a message to the evaluation of the job, shown on the evaluation page.
+An `EvalMessage` can attach a message to the evaluation of the job, shown on the evaluation page.
 
-- The server is storing the message only while the job is active.
-- The server is dropping later messages.
-- An `Error` message is failing the evaluation once the evaluation is finished.
+- The server will store the message only while the job is active.
+- The server will drop later messages.
+- An `Error` message will fail the evaluation once the evaluation is finished.
 - Sources in the reference worker: `fetch` (warnings while fetching inputs) and `build-prefetch`.

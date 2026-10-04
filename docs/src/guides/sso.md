@@ -32,8 +32,8 @@ services.gradient.oidc = {
 };
 ```
 
-1.  Gradient is reading every endpoint from `<discoveryUrl>/.well-known/openid-configuration`.
-2.  `groups` is not in the default scopes. Add `groups` for [team mapping](#3-map-groups-to-teams) where the provider is supporting the scope.
+1.  Gradient will read every endpoint from `<discoveryUrl>/.well-known/openid-configuration`.
+2.  `groups` is not in the default scopes. Add `groups` for [team mapping](#3-map-groups-to-teams) where the provider can offer the scope.
 3.  Hiding the username and password login. Leave out to offer both.
 
 ## 3. Map Groups to Teams
@@ -60,7 +60,7 @@ Members of `acme-eng` join the team on each sign-in. Users without `acme-eng` in
 
 ## 4. Provision with SCIM
 
-Optional. The provider is creating, updating and disabling Gradient accounts before the first sign-in. Group changes apply at once.
+Optional. The provider can create, update and disable Gradient accounts before the first sign-in. Group changes apply at once.
 
 ```nix
 services.gradient.scim = {
@@ -71,7 +71,7 @@ services.gradient.scim = {
 services.gradient.state.teams.acme-eng.scim_group = "acme-eng";
 ```
 
-1.  Any random string, e.g. `openssl rand -hex 32`. The provider is sending the same value as bearer token.
+1.  Any random string, e.g. `openssl rand -hex 32`. The provider must send the same value as bearer token.
 
 Set the SCIM base URL `https://gradient.example.com/scim/v2` and the bearer token in the provider. Enable pushing users, profile updates and groups.
 
@@ -84,8 +84,8 @@ Set the SCIM base URL `https://gradient.example.com/scim/v2` and the bearer toke
 
 ## Verify Deployment
 
-- The login page is showing the provider's button.
-- Signing in is landing on the dashboard.
+- The login page will show the provider's button.
+- A sign-in will land on the dashboard.
 - The user is now listed on the `acme-eng` team page, with the **Group** badge.
 
 ## Troubleshooting

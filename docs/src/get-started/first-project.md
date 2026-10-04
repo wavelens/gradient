@@ -11,19 +11,19 @@ A flake built by Gradient, with the outputs in a binary cache.
 
 Open `https://gradient.example.com/account/register` and create the first user.
 
-The server is refusing registration with `registration.enable = false` or `oidc.required`. Sign in through OIDC instead, or declare the first user in [`services.gradient.state.users`](../reference/state.md#usersname).
+The server will refuse registration with `registration.enable = false` or `oidc.required`. Sign in through OIDC instead, or declare the first user in [`services.gradient.state.users`](../reference/state.md#usersname).
 
 ## 2. Create a Cache
 
 **Caches -> Create Cache**, then pick a name and a visibility.
 
-A cache is storing every build output of the project. The cache is serving those outputs to `nix` as a substituter.
+Caches store every build output of the project. `nix` can fetch those outputs from the cache as a substituter.
 
 ## 3. Create a Project
 
 **Projects -> Create Project**, then open **Settings -> Cache Subscriptions -> Subscribe to Cache** and pick the cache from step 2.
 
-A project is the unit of access. Members, workers and caches belong to a project. The local worker is appearing under **Settings -> Workers** within a minute of the subscription.
+A project is the unit of access. Members, workers and caches belong to a project. The local worker will appear under **Settings -> Workers** within a minute of the subscription.
 
 ## 4. Create a Task
 
@@ -37,20 +37,20 @@ A project is the unit of access. Members, workers and caches belong to a project
 A task is one repository plus the outputs to build from that repository.
 
 !!! tip "Private Repositories"
-    Each project is holding its own SSH key under **Settings -> SSH Key**. Add the public key as a deploy key on the Git host.
+    Every project has its own SSH key under **Settings -> SSH Key**. Add the public key as a deploy key on the Git host.
 
 ## 5. Start an Evaluation
 
-**Start Evaluation** on the task page. Gradient is reading the flake and finding every derivation selected by the wildcard. The builds then go to the worker.
+**Start Evaluation** on the task page. Gradient will read the flake and find every derivation matching the wildcard. The builds then go to the worker.
 
 ## Verify Deployment
 
-- The evaluation page is listing every build with live logs, grouped by status.
-- Finished builds show as completed, and the outputs are in the cache.
+- The evaluation page shows every build with live logs, grouped by status.
+- Every finished build has the status completed, with the outputs in the cache.
 
 ## Next Steps
 
-- [Evaluation wildcards](../reference/wildcards.md): select exactly the outputs to build
+- [Evaluation wildcards](../reference/wildcards.md): pick the outputs to build
 - [Connect GitHub](../guides/github.md): evaluate on every push and pull request
 - [Share a Cache](../guides/share-a-cache.md): use the cache from other machines
 - [Add a Remote Worker](../guides/remote-worker.md): add build machines

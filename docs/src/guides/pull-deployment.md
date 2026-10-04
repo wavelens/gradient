@@ -1,6 +1,6 @@
 # Pull Deployment
 
-NixOS machines that fetch and switch to their newest configuration built by Gradient on their own. Machines need only outbound access to the server. No deploy host is pushing.
+NixOS machines that fetch and switch to their newest configuration built by Gradient on their own. Machines need only outbound access to the server. No deploy host has to push.
 
 **Requirements:**
 
@@ -9,13 +9,13 @@ NixOS machines that fetch and switch to their newest configuration built by Grad
 
 ## 1. Build the System
 
-The task's wildcard is selecting the system of every machine to deploy.
+The task's wildcard must select the system of every machine to deploy.
 
 ```text
 nixosConfigurations.*.config.system.build.toplevel
 ```
 
-Each machine is picking the output named `nixos-system-<hostname>-...`. The host name in the configuration must match the machine's `deployFor`.
+Each machine will pick the output named `nixos-system-<hostname>-...`. The host name in the configuration must match the machine's `deployFor`.
 
 ## 2. Create an API Key
 
@@ -54,13 +54,13 @@ sudo gradient-update
 journalctl -u gradient-deploy
 ```
 
-`gradient-update` is running the deployment at once, without waiting for the timer. The journal is ending with `Deployment to /nix/store/...-nixos-system-office-pc-... completed successfully`, or with the reason no deployment ran.
+`gradient-update` will start the deployment at once, without waiting for the timer. The journal will end with `Deployment to /nix/store/...-nixos-system-office-pc-... completed successfully`, or with the reason no deployment ran.
 
 `... without a deployment for <name>` is a sign that no system matched. The `networking.hostName` of the built configuration does not match `deployFor`.
 
 ## Run Behavior
 
-Each round is reading the task's newest evaluation and picking one of these outcomes.
+Each round will read the task's newest evaluation and pick one of these outcomes.
 
 | Newest system for the machine | Result |
 |---|---|
@@ -69,7 +69,7 @@ Each round is reading the task's newest evaluation and picking one of these outc
 | Still building | Waiting for the build, then switching |
 | Failed, or the evaluation failed | Stopping, reported in the journal |
 
-None of these fail the unit. The waiting service is following the task's live WebSocket. The service is reacting the moment the build is finished.
+None of these fail the unit. The waiting service will follow the task's live WebSocket. The service can react the moment the build is finished.
 
 | Option | Default | Effect |
 |---|---|---|
@@ -82,4 +82,4 @@ None of these fail the unit. The waiting service is following the task's live We
 ## Next Steps
 
 - [Share a Cache](share-a-cache.md): the substituter and netrc on the machine
-- [Evaluations and Builds](../concepts/evaluations-and-builds.md): what the machine is waiting for
+- [Evaluations and Builds](../concepts/evaluations-and-builds.md): the build states a machine can wait for

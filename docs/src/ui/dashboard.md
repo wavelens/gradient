@@ -8,7 +8,7 @@ The start page after sign-in, listing every task needing attention across all pr
 |---|---|---|
 | Stats | CPU time, builds, cache size, busy workers and queue wait across the visible projects | |
 | Filter | **All**, **Failing** and **Starred**, each with a count | Switch the task list. The choice stays in the URL |
-| Task list | The top 10 tasks: latest commit, recent evaluations as bars, entry points ok/total, change in failures, speed | Open a task from the row, an evaluation from a bar. **Show all** is paging through every task |
+| Task list | The top 10 tasks: latest commit, recent evaluations as bars, entry points ok/total, change in failures, speed | Open a task from the row, an evaluation from a bar. Page through every task with **Show all** |
 | Activity | A calendar of the last year | Switch between evaluations and failures |
 | Rail | Projects by rank, caches with starred first | Star a project or cache. Open its tasks |
 
@@ -18,7 +18,7 @@ New users without projects or caches see the first steps instead. These steps co
 
 ## Ranking
 
-The task list is holding the tasks of the user's projects, plus starred tasks of public projects. Four tiers are ordering the list.
+The task list has the tasks of the user's projects, plus starred tasks of public projects. Four tiers set the order of the list.
 
 1. Starred and active
 2. Active
@@ -44,7 +44,7 @@ A task is active with an evaluation other than a pull request in the last 14 day
 | A store path or NAR hash | NARs in every readable cache |
 | Empty | The starred items |
 
-Arrow keys or Ctrl+J / Ctrl+K move the selection. Enter is opening the item, and Escape is closing the palette.
+Arrow keys or Ctrl+J / Ctrl+K move the selection. Enter will open the item, and Escape will close the palette.
 
 ## Related
 

@@ -6,16 +6,16 @@ Who can do what in a project or a cache. Projects and caches each have their own
 
 | Area | Content | Actions |
 |---|---|---|
-| Members | Every member with their role | **Add Member** is inviting a user. Change a role. Remove a member |
+| Members | Every member with their role | Invite a user with **Add Member**. Change a role. Remove a member |
 | Pending Invitations | Invitations not yet accepted | **Revoke** |
 | Roles | The built-in roles and custom roles | **New Role**: a name and single permissions |
 
 ## Invitations
 
-- **Add Member** is sending an invitation. The user is without access until accepting under **Settings -> My Invites**.
+- **Add Member** will send an invitation. The user has no access before accepting the invitation on the **My Invites** page of the user settings.
 - Invitations expire after 7 days. One user can hold at most one open invitation per project or cache.
-- The invitee is also receiving a link by mail with [email](../reference/configuration.md#email) configured.
-- A superuser already holding the permission is adding members directly.
+- The invitee will also receive a link by mail with [email](../reference/configuration.md#email) configured.
+- A superuser already holding the permission can add members directly.
 - Projects and caches [declared in Nix](../guides/manage-with-nix.md) take their members from the configuration only.
 
 ## Project Roles

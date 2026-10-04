@@ -99,7 +99,7 @@ nav:
       - Scheduler:
           - contributors/scheduler/index.md
           - Shared Builds: contributors/scheduler/shared-builds.md
-          - Promotion and Counters: contributors/scheduler/promotion-and-counters.md
+          - Queueing and Counters: contributors/scheduler/queueing-and-counters.md
           - Repair Pass: contributors/scheduler/repair-pass.md
           - Upstream Substitution: contributors/scheduler/upstream-substitution.md
           - Cache Closure: contributors/scheduler/cache-closure.md

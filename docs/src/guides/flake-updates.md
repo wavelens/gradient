@@ -4,8 +4,8 @@ Pull requests that bump `flake.lock`, opened only after a successful build of th
 
 **Requirements:**
 
-- A task connected to a Git host with an outbound integration, see [Connect GitHub](github.md), [Connect Gitea or Forgejo](gitea.md) or [Connect GitLab](gitlab.md)
-- A **Polling** or **Time (cron)** trigger on the task, setting how often updates start
+- A task with an outbound Git host integration, see [Connect GitHub](github.md), [Connect Gitea or Forgejo](gitea.md) or [Connect GitLab](gitlab.md)
+- A **Polling** or **Time (cron)** trigger, for the update interval
 
 ## 1. Track the Inputs
 
@@ -22,12 +22,12 @@ Pull requests that bump `flake.lock`, opened only after a successful build of th
     };
     ```
 
-    1.  `*` and `?` match several inputs. A bare `*` is tracking every input.
+    1.  `*` and `?` match many inputs. A bare `*` will track every input.
 
 `github`, `gitlab` and `git` inputs are supported, including `git` over SSH with the project's SSH key.
 
 !!! warning
-    An override with a **URL** is pinning that input. The pin is blocking every update run of the task. No pull request can land while an input is held.
+    An override with a **URL** will pin that input. The pin will block every update run of the task. No pull request can land while an input is held.
 
 ## 2. Add the Open PR Action
 
@@ -56,7 +56,7 @@ Pull requests that bump `flake.lock`, opened only after a successful build of th
 
 ## Update Run
 
-Each trigger fire (and each **Start Evaluation**) is starting an update evaluation next to the normal one.
+Each trigger fire (and each **Start Evaluation**) will start an update evaluation next to the normal one.
 
 ```mermaid
 flowchart LR
@@ -66,12 +66,12 @@ flowchart LR
 - Gradient is force-pushing the branch as one commit on the current base.
 - The pull request is never falling behind.
 - No pull request for an unchanged `flake.lock`.
-- No pull request after a failed build, with the default `build` gate.
+- No pull request after a failed build, with the default `build` check.
 
 ## Verify Deployment
 
-- **Start Evaluation** on the task is showing a second evaluation for the update.
-- The Git host is showing the pull request with each input's old and new revision after the evaluation.
+- A click on **Start Evaluation** in the task will add a second evaluation for the update.
+- The Git host will show the pull request with each input's old and new revision after the evaluation.
 
 ## Next Steps
 

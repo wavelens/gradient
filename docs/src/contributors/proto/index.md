@@ -1,6 +1,6 @@
 # Proto
 
-The protocol between server and workers: one WebSocket at `/proto` with binary frames from the `Proto` derive. A session is running version agreement, handshake, authorization, capabilities, then the job loop.
+The protocol between server and workers: one WebSocket at `/proto` with binary frames from the `Proto` derive. Sessions pass through version agreement, handshake, authorization, capabilities, then the job loop.
 
 ```mermaid
 flowchart LR

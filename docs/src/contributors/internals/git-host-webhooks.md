@@ -1,6 +1,6 @@
 # Git Host Webhooks
 
-`gradient-web/src/endpoints/git_host_hooks/` is receiving Git host events. The routes carry no session. Each delivery is proving its origin with the Git host's signature. A push is ending as a `Queued` evaluation.
+The endpoints in `gradient-web/src/endpoints/git_host_hooks/` receive Git host events. The routes carry no session. Every delivery must prove its origin with the Git host's signature. A push will end as a `Queued` evaluation.
 
 ```mermaid
 sequenceDiagram
@@ -23,10 +23,10 @@ sequenceDiagram
 | `POST /api/v1/hooks/github` | `X-Hub-Signature-256` against `GRADIENT_GITHUB_APP_WEBHOOK_SECRET_FILE`. `503` until the App is fully configured |
 | `POST /api/v1/hooks/{git_host}/{project}/{integration_name}` | `gitea` / `forgejo`: HMAC from `X-Forgejo-Signature`, then `X-Gitea-Signature`. `gitlab`: `X-Gitlab-Token` compared in constant time. `github` is answering `400` |
 
-- The generic route is finding the integration by `(project, inbound, name)`, without `git_host_type`.
-- One inbound row is serving all three Git hosts.
-- The server is decrypting the secret with the crypt file.
-- `allowed_ips` is rejecting other sources with `403`.
+- The generic route can find the integration by `(project, inbound, name)`, without `git_host_type`.
+- One inbound row can answer all three Git hosts.
+- The server will decrypt the secret with the crypt file.
+- `allowed_ips` will reject other sources with `403`.
 - GitHub `installation` / `installation_repositories` events upsert or clear `github_installation` and seed the `github-<login>` integration pair (`github-<installation_id>` without a login).
 
 ## GitHub App Events

@@ -4,8 +4,8 @@ Evaluations on every push and pull request, with commit statuses back on the Git
 
 **Requirements:**
 
-- A task with a repository URL pointing to the Gitea or Forgejo instance, see [First Project](../get-started/first-project.md)
-- An access token on the Git host with write access to the repository
+- A task with a repository URL on the Gitea or Forgejo instance, see [First Project](../get-started/first-project.md)
+- A Git host access token with repository write access
 
 ## 1. Create the Integrations
 
@@ -15,7 +15,7 @@ Evaluations on every push and pull request, with commit statuses back on the Git
 
     | Kind | Fields |
     |---|---|
-    | Inbound | Name, **Git Host** Gitea or Forgejo and a **Webhook Secret**. The refresh button is generating a secret. The secret is shown once and must be copied. The created integration is showing the **Webhook URL**. |
+    | Inbound | Name, **Git Host** Gitea or Forgejo and a **Webhook Secret**. The refresh button can generate a secret. The secret is shown once and must be copied. The created integration will show the **Webhook URL**. |
     | Outbound | Name, **Git Host**, **Endpoint URL** (e.g. `https://gitea.example.com`) and the **Access Token** |
 
 === "Declarative"
@@ -41,7 +41,7 @@ Evaluations on every push and pull request, with commit statuses back on the Git
     ```
 
     1.  `forgejo` for Forgejo.
-    2.  Any random string, e.g. `openssl rand -hex 32`. The Git host webhook is using the same value.
+    2.  Any random string, e.g. `openssl rand -hex 32`. The Git host webhook must use the same value.
 
     The webhook URL is `https://gradient.example.com/api/v1/hooks/gitea/acme/gitea-in` (`forgejo` instead of `gitea` for Forgejo).
 
@@ -60,16 +60,16 @@ A push-only webhook is never delivering pull requests or the `/gradient` comment
 
 ## 3. Wire the Task
 
-Gradient is adding a **Push (reporter)** trigger and a **Git Host Status Report** action automatically to a new task. The task must be created after the integrations. Its repository host must match exactly one inbound and one outbound integration. Other tasks need both added by hand.
+Gradient will add a **Push (reporter)** trigger and a **Git Host Status Report** action automatically to a new task. The task must be created after the integrations. Its repository host must match exactly one inbound and one outbound integration. Other tasks need both added by hand.
 
 - **Triggers -> New Trigger**: **Push (reporter)** and, for pull requests, **Pull Request (reporter)**, each with the inbound integration.
 - **Actions -> New Action**: **Git Host Status Report** with the outbound integration.
 
 ## Verify Deployment
 
-- A push is starting an evaluation within seconds.
-- The Git host's webhook page is showing a `200` delivery.
-- The commit on the Git host is showing Gradient's status.
+- A push will start an evaluation within seconds.
+- The Git host's webhook page will show a `200` delivery.
+- The commit on the Git host will show Gradient's status.
 
 ## Pull Requests
 
@@ -79,7 +79,7 @@ Gradient is adding a **Push (reporter)** trigger and a **Git Host Status Report*
 | Comment `/gradient run` | New evaluation of the pull request |
 | Comment `/gradient approve` or approve the review | Release of a pull request from a fork waiting for maintainer approval |
 
-The approval gate is a setting of the **Pull Request (reporter)** trigger: **Require maintainer approval for PRs from non-writers**.
+The approval check is a setting of the **Pull Request (reporter)** trigger: **Require maintainer approval for PRs from non-writers**.
 
 ## Troubleshooting
 

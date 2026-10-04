@@ -46,7 +46,7 @@ Only a team Admin can turn on the team's workers in an existing grant.
 
 ## Team Workers
 
-A team worker is registered once on the team's **Workers** page. One team worker can serve every project granting the team's workers.
+A team worker is registered once on the team's **Workers** page. One team worker can take jobs from every project granting the team's workers.
 
 - **Peers file**: one token line, `<team id>:<token>` or `*:<token>`, see the [peers file](../guides/remote-worker.md#peers-file).
 - **Caches**: granted projects without a [cache subscription](caches.md) get no team workers.
