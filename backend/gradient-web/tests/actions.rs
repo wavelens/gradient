@@ -12,7 +12,7 @@
 use axum_test::TestServer;
 use gradient_core::ServerState;
 use gradient_db::{WebDb, WorkerDb};
-use gradient_entity::{ids::*, project_user, task, task_action, task_action_delivery};
+use gradient_entity::{ids::*, project_user, task, task_action, task_action_delivery, team};
 use gradient_notify::EmailSender;
 use gradient_storage::NarStore;
 use gradient_test_support::cli::{test_cli, test_cli_with_crypt};
@@ -244,6 +244,34 @@ async fn create_send_mail_returns_201_when_smtp_enabled() {
     assert_eq!(body["message"]["action"]["action_type"], "send_mail");
     assert_eq!(body["message"]["action"]["name"], "ops-mail");
     assert!(body["message"]["token"].is_null());
+}
+
+#[tokio::test]
+async fn a_mail_action_cannot_address_a_team_without_access() {
+    let session_id = SessionId::now_v7();
+    let token = make_token(session_id);
+
+    let db = with_task_edit(with_auth(
+        MockDatabase::new(DatabaseBackend::Postgres),
+        session_id,
+    ))
+    .append_query_results([Vec::<team::Model>::new()]);
+
+    let server = make_test_server_with(db.into_connection(), None);
+    let res = server
+        .post(BASE_URL)
+        .add_header("authorization", format!("Bearer {}", token))
+        .json(&json!({
+            "name": "team-mail",
+            "config": {
+                "type": "send_mail",
+                "recipients": ["team:ghosts"],
+            },
+            "events": ["build.completed"],
+        }))
+        .await;
+
+    res.assert_status(axum::http::StatusCode::UNPROCESSABLE_ENTITY);
 }
 
 #[tokio::test]

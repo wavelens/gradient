@@ -94,6 +94,26 @@ fn encrypt_secret(state: &ServerState, plain: &str) -> WebResult<String> {
     encrypt_action_secret(plain, key.expose()).map_err(|e| WebError::internal(e.to_string()))
 }
 
+async fn validate_mail_teams(
+    state: &Arc<ServerState>,
+    project: ProjectId,
+    cfg: &ActionConfig,
+) -> WebResult<()> {
+    let ActionConfig::SendMail { recipients, .. } = cfg else {
+        return Ok(());
+    };
+    for name in recipients.iter().filter_map(|r| r.strip_prefix("team:")) {
+        if !gradient_db::teams::mail::team_reaches_project_users(&state.web_db, project, name)
+            .await?
+        {
+            return Err(WebError::unprocessable_entity(format!(
+                "team '{name}' has no access to this project"
+            )));
+        }
+    }
+    Ok(())
+}
+
 fn validate_destination(cfg: &ActionConfig) -> WebResult<()> {
     let url_error = |e: WebhookUrlError| WebError::unprocessable_entity(e.to_string());
     match cfg {
@@ -220,6 +240,7 @@ pub async fn create_action(
     }
 
     validate_destination(&body.config)?;
+    validate_mail_teams(&state, project.id, &body.config).await?;
     if matches!(
         body.config,
         ActionConfig::SendMatrixMessage {
@@ -403,6 +424,7 @@ pub async fn update_action(
         }
 
         validate_destination(new_cfg)?;
+        validate_mail_teams(&state, project.id, new_cfg).await?;
         match new_cfg {
             ActionConfig::SendMail { recipients, .. } if recipients.is_empty() => {
                 return Err(WebError::unprocessable_entity(

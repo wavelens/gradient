@@ -5,6 +5,7 @@
  */
 
 pub mod grants;
+pub mod mail;
 pub mod members;
 pub mod workers;
 
