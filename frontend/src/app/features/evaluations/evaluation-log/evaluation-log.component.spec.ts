@@ -122,6 +122,15 @@ describe('EvaluationLogComponent', () => {
       expect(sorted.map(b => b.id)).toEqual(['dep', 'top']);
     });
 
+    it('puts the failed build above the dependents it failed', () => {
+      const { cmp } = setup();
+      const sorted = (cmp as unknown as Internals).sortBuilds([
+        build('top', 'hash-app.drv', 'DependencyFailed', 0),
+        build('dep', 'hash-openssl.drv', 'FailedPermanent', 1),
+      ]);
+      expect(sorted.map(b => b.id)).toEqual(['dep', 'top']);
+    });
+
     it('dedups the same derivation arriving under two ids', () => {
       const { cmp } = setup();
       const sorted = (cmp as unknown as Internals).sortBuilds([

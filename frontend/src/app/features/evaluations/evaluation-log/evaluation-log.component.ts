@@ -316,11 +316,11 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   private readonly buildStatusOrder: Record<string, number> = {
     building: 0,
     failed: 1,
-    dependencyfailed: 1,
-    aborted: 2,
-    queued: 3,
-    completed: 4,
-    substituted: 4,
+    dependencyfailed: 2,
+    aborted: 3,
+    queued: 4,
+    completed: 5,
+    substituted: 5,
   };
 
   /// Sidebar sections, in display order. Failures sort above queued so they stay
