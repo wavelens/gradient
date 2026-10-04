@@ -9824,7 +9824,7 @@ paths:
       tags: [teams]
       summary: Change team
       description: |
-        Needs Admin in the team. Only superusers set `oidc_group` and `scim_group`. State-managed teams refuse changes.
+        Needs Admin in the team. Only superusers set `oidc_group`, `scim_group` and the `new_project_*` fields. State-managed teams refuse changes.
       operationId: patchTeam
       requestBody:
         required: true
@@ -9844,7 +9844,7 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          description: Not Admin in the team, a state-managed team, or `superuser_required` for the group fields
+          description: Not Admin in the team, a state-managed team, or `superuser_required` for the group and new project fields
           content:
             application/json:
               schema:

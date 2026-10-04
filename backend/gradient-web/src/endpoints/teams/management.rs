@@ -238,7 +238,12 @@ pub async fn patch_team(
     )
     .await?;
 
-    if body.oidc_group.is_some() || body.scim_group.is_some() {
+    if body.oidc_group.is_some()
+        || body.scim_group.is_some()
+        || body.new_project_users.is_some()
+        || body.new_project_workers.is_some()
+        || body.new_project_role.is_some()
+    {
         require_superuser(&user)?;
     }
 

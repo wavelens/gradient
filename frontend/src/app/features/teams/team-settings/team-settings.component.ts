@@ -145,12 +145,14 @@ export class TeamSettingsComponent implements OnInit {
   private changes(team: Team): PatchTeam {
     const patch: PatchTeam = {};
     if (this.form.display_name !== team.display_name) patch.display_name = this.form.display_name;
-    if (this.form.new_project_users !== team.new_project_users) patch.new_project_users = this.form.new_project_users;
-    if (this.form.new_project_workers !== team.new_project_workers) {
-      patch.new_project_workers = this.form.new_project_workers;
-    }
-    if (this.form.new_project_role !== (team.new_project_role ?? '')) patch.new_project_role = this.form.new_project_role;
     if (this.isSuperuser()) {
+      if (this.form.new_project_users !== team.new_project_users) patch.new_project_users = this.form.new_project_users;
+      if (this.form.new_project_workers !== team.new_project_workers) {
+        patch.new_project_workers = this.form.new_project_workers;
+      }
+      if (this.form.new_project_role !== (team.new_project_role ?? '')) {
+        patch.new_project_role = this.form.new_project_role;
+      }
       if (this.form.oidc_group !== (team.oidc_group ?? '')) patch.oidc_group = this.form.oidc_group;
       if (this.form.scim_group !== (team.scim_group ?? '')) patch.scim_group = this.form.scim_group;
     }

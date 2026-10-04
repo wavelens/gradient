@@ -20,19 +20,19 @@
       </gr-form-field>
     </gr-settings-section>
 
-    <gr-settings-section title="New Projects" description="What every project created from now on grants this team.">
-      <gr-form-field>
-        <gr-checkbox inputId="new-project-users" [(ngModel)]="form.new_project_users" [binary]="true" label="Grant the team's users" />
-      </gr-form-field>
-      <gr-form-field label="Role of the team's users">
-        <gr-select [(ngModel)]="form.new_project_role" [options]="roleOptions" optionLabel="label" optionValue="value" />
-      </gr-form-field>
-      <gr-form-field>
-        <gr-checkbox inputId="new-project-workers" [(ngModel)]="form.new_project_workers" [binary]="true" label="Grant the team's workers" />
-      </gr-form-field>
-    </gr-settings-section>
-
     @if (isSuperuser()) {
+      <gr-settings-section title="New Projects" description="What every project created from now on grants this team.">
+        <gr-form-field>
+          <gr-checkbox inputId="new-project-users" [(ngModel)]="form.new_project_users" [binary]="true" label="Grant the team's users" />
+        </gr-form-field>
+        <gr-form-field label="Role of the team's users">
+          <gr-select [(ngModel)]="form.new_project_role" [options]="roleOptions" optionLabel="label" optionValue="value" />
+        </gr-form-field>
+        <gr-form-field>
+          <gr-checkbox inputId="new-project-workers" [(ngModel)]="form.new_project_workers" [binary]="true" label="Grant the team's workers" />
+        </gr-form-field>
+      </gr-settings-section>
+
       <gr-settings-section title="Single Sign-On" description="Members of these groups join the team.">
         <gr-form-field label="OIDC group" for="team-oidc-group" hint="Taken from the groups claim at each sign-in.">
           <input grInput id="team-oidc-group" [(ngModel)]="form.oidc_group" />
