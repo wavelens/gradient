@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use super::workers::withdraw_team_workers;
 use crate::access::{TeamAccess, load_team};
 use crate::audit::{RequestInfo, record as audit_record};
 use crate::authorization::MaybeApiKey;
@@ -24,7 +25,6 @@ use sea_orm::{
     QuerySelect, RelationTrait, TransactionTrait,
 };
 use serde::{Deserialize, Serialize};
-use super::workers::withdraw_team_workers;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
@@ -218,6 +218,18 @@ pub async fn get_team(
 ) -> WebResult<Json<BaseResponse<TeamResponse>>> {
     let (team, role) = load_team(&state, &user, api_key.as_ref(), team, TeamAccess::Member).await?;
     Ok(ok_json(team_response(team, role)))
+}
+
+pub async fn get_team_evaluations(
+    state: State<Arc<ServerState>>,
+    Extension(user): Extension<MUser>,
+    Extension(api_key): Extension<MaybeApiKey>,
+    Path(team): Path<String>,
+) -> WebResult<Json<BaseResponse<Vec<gradient_db::teams::evaluations::TeamEvaluation>>>> {
+    let (team, _) = load_team(&state, &user, api_key.as_ref(), team, TeamAccess::Member).await?;
+    Ok(ok_json(
+        gradient_db::teams::evaluations::recent_evaluations(&state.web_db, team.id, 10).await?,
+    ))
 }
 
 pub async fn patch_team(

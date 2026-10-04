@@ -235,6 +235,10 @@ pub fn create_router_with_scheduler(
                 .delete(endpoints::teams::management::delete_team),
         )
         .route(
+            "/teams/{team}/evaluations",
+            get(endpoints::teams::management::get_team_evaluations),
+        )
+        .route(
             "/teams/{team}/members",
             get(endpoints::teams::members::get_team_members)
                 .post(endpoints::teams::members::post_team_members)
