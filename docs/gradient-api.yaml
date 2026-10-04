@@ -115,6 +115,8 @@ tags:
     description: Personal dashboard - the viewer's task table, stat tiles and activity heatmap
   - name: projects
     description: Project management, members, SSH keys, cache subscriptions
+  - name: teams
+    description: Teams, their members, workers, grants and requests
   - name: tasks
     description: Task management and evaluation triggers
   - name: triggers
@@ -239,6 +241,7 @@ paths:
                   quic: false
                   create_project: everyone
                   create_cache: everyone
+                  create_team: everyone
                   github_app_enabled: false
                   gradient_ci_enabled: true
                   gradient_ci_url: https://servers.gradient.ci
@@ -1310,7 +1313,7 @@ paths:
       summary: Ranked task table of the current user
       description: |-
         Tasks of the viewer's projects plus starred tasks of public projects, PR-triggered evaluations excluded.
-        Ranked by tier (`starred_active`, `active`, `starred`, `member`), then newest latest evaluation first.
+        Ranked by tier (`starred_active`, `active`, `starred`, `team`, `member`), then newest latest evaluation first.
         Active means a non-PR evaluation in the last 14 days. `counts` always covers every task; `total` is the number of tasks matching `filter`.
       operationId: getDashboardTasks
       parameters:
@@ -1388,7 +1391,7 @@ paths:
                                   type: boolean
                                 tier:
                                   type: string
-                                  enum: [starred_active, active, starred, member]
+                                  enum: [starred_active, active, starred, team, member]
                                 latest:
                                   type: object
                                   nullable: true
@@ -1584,7 +1587,7 @@ paths:
       tags: [dashboard]
       summary: Sidebar rail of the current user
       description: |-
-        Projects: member projects plus starred public ones, sorted by tier (`starred_active`, `active`, `starred`, `member`), then name.
+        Projects: member projects plus starred public ones, sorted by tier (`starred_active`, `active`, `starred`, `team`, `member`), then name.
         Active means a non-PR evaluation in the last 14 days; `status` is the latest non-PR evaluation's status or `null`.
         `tasks` is present only on `starred_active` projects and omitted otherwise.
         Caches: those the viewer created, is a member of or reaches through a member project, plus starred public ones; starred first, then name. Superusers get no extra caches here.
@@ -1617,7 +1620,7 @@ paths:
                                   type: boolean
                                 tier:
                                   type: string
-                                  enum: [starred_active, active, starred, member]
+                                  enum: [starred_active, active, starred, team, member]
                                 status:
                                   allOf:
                                     - $ref: '#/components/schemas/EvaluationStatus'
@@ -5292,11 +5295,9 @@ paths:
       description: |
         Returns all workers registered under this project (peer), merged with
         live status from the scheduler for currently connected workers, plus the
-        server-level base workers (`is_base: true`) the project can opt into.
+        workers of every team the project grants its workers (`team` set, read-only here).
         Live fields (`architectures`, `system_features`, etc.) are only populated
-        for build-capable workers that have sent `WorkerCapabilities`. A base
-        worker is omitted when the project already has a normal registration with the
-        same `worker_id` - that registration shadows it.
+        for build-capable workers that have sent `WorkerCapabilities`.
       operationId: listProjectWorkers
       security:
         - bearerAuth: []
@@ -5385,7 +5386,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: '`url` is set and `worker_id` belongs to a base worker or a Gradient.CI connection.'
+          description: '`worker_id` belongs to a team worker, or `url` is set and it belongs to a Gradient.CI connection.'
 
   /projects/{project}/workers/{worker_id}:
     parameters:
@@ -5409,8 +5410,9 @@ paths:
         Sets the `active` flag on a worker registration. Deactivating a worker
         triggers an immediate re-auth request, causing the worker to be disconnected
         if it is currently connected. Active jobs may be aborted.
-        A state-managed or base worker accepts only `active` and answers `409` for other fields.
-        The next server start restores the declared value.
+        A state-managed worker accepts only `active` and answers `409` for other fields.
+        The next server start restores the declared value. A team worker answers `409`;
+        it is changed on its team.
       operationId: patchProjectWorker
       security:
         - bearerAuth: []
@@ -5460,9 +5462,7 @@ paths:
       description: |
         Removes the worker registration. The worker may still be connected until
         it disconnects naturally - it will not be able to reconnect after that.
-        The project's own registration is removed first, so a normal worker is deleted
-        even when a base worker shares its `worker_id`; `409` is only returned when
-        the id resolves solely to a base worker (managed via server state).
+        A team worker answers `409`; it is deleted on its team.
       operationId: deleteProjectWorker
       security:
         - bearerAuth: []
@@ -5483,7 +5483,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: The id resolves only to a base worker, which is managed via server state.
+          description: The id belongs to a team worker, which is managed on its team.
 
   /projects/{project}/workers/{worker_id}/test:
     post:
@@ -5492,7 +5492,7 @@ paths:
       description: |
         Checks whether the worker is currently connected and whether it has
         successfully authorized for the given project. Useful for
-        verifying base-worker setup without waiting for a real job.
+        verifying worker setup without waiting for a real job.
       operationId: testProjectWorker
       security:
         - bearerAuth: []
@@ -5535,9 +5535,9 @@ paths:
       description: |
         Stores a connection token pasted from servers.gradient.ci. `scope = project` creates a
         worker registration for the project (same permission as registering a worker);
-        `scope = base` creates a base worker every project can enable (superusers). The server
-        dials `wss://<gradientCi.url host>/proto` within 15 s, a base server only once a project
-        enables it. Turned off by `gradientCi.enable = false`.
+        `scope = team` creates a worker of the team (Admin in the team). The server
+        dials `wss://<gradientCi.url host>/proto` within 15 s, a team connection only once a
+        project grants the team its workers. Turned off by `gradientCi.enable = false`.
       operationId: connectGradientCi
       security:
         - bearerAuth: []
@@ -5604,69 +5604,14 @@ paths:
         '403':
           $ref: '#/components/responses/Forbidden'
 
-  /admin/base-workers:
-    get:
-      tags: [admin, workers]
-      summary: List base workers
-      description: Every base worker with its connection state. Requires the `superuser` flag.
-      operationId: listBaseWorkers
-      security:
-        - bearerAuth: []
-      responses:
-        '200':
-          description: Base worker list
-          content:
-            application/json:
-              schema:
-                allOf:
-                  - $ref: '#/components/schemas/BaseResponse'
-                  - type: object
-                    properties:
-                      message:
-                        type: array
-                        items:
-                          $ref: '#/components/schemas/BaseWorkerEntry'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/Forbidden'
-
-  /admin/base-workers/{worker_id}:
-    delete:
-      tags: [admin, workers]
-      summary: Disconnect a Gradient.CI base server
-      description: |
-        Deletes a base worker created by "Connect base server" and its project links. The key on
-        servers.gradient.ci stays until it is deleted there. State-declared base workers answer `409`.
-      operationId: deleteBaseWorker
-      security:
-        - bearerAuth: []
-      parameters:
-        - name: worker_id
-          in: path
-          required: true
-          schema:
-            type: string
-      responses:
-        '200':
-          description: Disconnected
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/Forbidden'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '409':
-          description: The base worker is managed by server state
-
   /admin/state:
     get:
       tags: [admin]
       summary: Export the live state configuration
       description: |
         Reconstructs the current users, projects, tasks, caches,
-        custom roles, API keys, workers (including server-level base workers
-        with their pre-enabled projects) and integrations into a
+        custom roles, API keys, teams with their members and grants, workers
+        (team workers name their team) and integrations into a
         declarative `services.gradient.state` shape, so operators can codify
         the running system back into their nix configuration.
 
@@ -9761,6 +9706,799 @@ paths:
         '404':
           $ref: '#/components/responses/ScimNotFound'
 
+  /teams:
+    get:
+      tags: [teams]
+      summary: List my teams
+      description: |
+        Teams the caller is a member of, with the caller's role, sorted by name.
+      operationId: listTeams
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/TeamSummary'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    put:
+      tags: [teams]
+      summary: Create team
+      description: |
+        Creates a team and makes the caller its Admin. Who may create teams is set by `--permissions-create-team`.
+      operationId: createTeam
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MakeTeamRequest'
+      responses:
+        '200':
+          description: Team created
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        type: string
+                        format: uuid
+                        description: Id of the new team
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: '`superuser_required` or `creation_disabled` by `--permissions-create-team`'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BaseResponse'
+        '409':
+          description: '`already_exists`: the name is taken'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BaseResponse'
+  /teams/available:
+    get:
+      tags: [teams]
+      summary: Check a team name
+      operationId: teamNameAvailable
+      parameters:
+        - name: name
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Whether the name is valid and free
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        type: boolean
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /teams/{team}:
+    parameters:
+      - $ref: '#/components/parameters/TeamName'
+    get:
+      tags: [teams]
+      summary: Get team
+      description: |
+        Members of the team and superusers can read it.
+      operationId: getTeam
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        $ref: '#/components/schemas/Team'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      tags: [teams]
+      summary: Change team
+      description: |
+        Needs Admin in the team. Only superusers set `oidc_group` and `scim_group`. State-managed teams refuse changes.
+      operationId: patchTeam
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchTeamRequest'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StringResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: Not Admin in the team, a state-managed team, or `superuser_required` for the group fields
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BaseResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The SCIM group is used by another team
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BaseResponse'
+    delete:
+      tags: [teams]
+      summary: Delete team
+      description: |
+        Needs Admin in the team. Deletes its grants, requests, invitations and workers; connected team workers lose those projects.
+      operationId: deleteTeam
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StringResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /teams/{team}/members:
+    parameters:
+      - $ref: '#/components/parameters/TeamName'
+    get:
+      tags: [teams]
+      summary: List team members
+      operationId: listTeamMembers
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/TeamMember'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    post:
+      tags: [teams]
+      summary: Invite team member
+      description: |
+        Needs Admin in the team. The user joins after accepting the invitation (`Invitation sent`); a superuser adds the member directly (`User added`).
+      operationId: addTeamMember
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TeamMemberRequest'
+      responses:
+        '200':
+          description: Invitation sent, or member added when the caller is a superuser
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StringResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The user is already a member or already invited
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BaseResponse'
+    patch:
+      tags: [teams]
+      summary: Change team member role
+      description: |
+        Needs Admin in the team.
+      operationId: patchTeamMember
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TeamMemberRequest'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StringResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The last Admin of a team cannot be demoted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BaseResponse'
+    delete:
+      tags: [teams]
+      summary: Remove team member
+      description: |
+        Needs Admin in the team.
+      operationId: removeTeamMember
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RemoveUserRequest'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StringResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The last Admin of a team cannot be removed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BaseResponse'
+  /teams/{team}/invitations:
+    parameters:
+      - $ref: '#/components/parameters/TeamName'
+    get:
+      tags: [teams]
+      summary: List pending team invitations
+      description: |
+        Needs Admin in the team.
+      operationId: listTeamInvitations
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/PendingInvitation'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [teams]
+      summary: Revoke team invitation
+      description: |
+        Needs Admin in the team.
+      operationId: revokeTeamInvitation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RemoveUserRequest'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StringResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /teams/{team}/workers:
+    parameters:
+      - $ref: '#/components/parameters/TeamName'
+    get:
+      tags: [teams]
+      summary: List team workers
+      description: |
+        A team worker serves every project that grants the team its workers. `last_error` is shown to team Admins.
+      operationId: listTeamWorkers
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/TeamWorker'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    post:
+      tags: [teams]
+      summary: Register team worker
+      description: |
+        Needs Admin in the team. The worker answers the server challenge with `<team id>:<token>` or `*:<token>` in its peers file. `token` is returned only when the server generated it.
+      operationId: registerTeamWorker
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterTeamWorkerRequest'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        type: object
+                        required: [team]
+                        properties:
+                          team: { type: string, format: uuid }
+                          token: { type: string }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The worker id is already registered
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BaseResponse'
+  /teams/{team}/workers/{worker_id}:
+    parameters:
+      - $ref: '#/components/parameters/TeamName'
+      - $ref: '#/components/parameters/WorkerIdPath'
+    patch:
+      tags: [teams]
+      summary: Change team worker
+      description: |
+        Needs Admin in the team. Deactivating aborts the worker's running jobs of the granted projects.
+      operationId: patchTeamWorker
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchTeamWorkerRequest'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StringResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The worker is managed by server state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BaseResponse'
+    delete:
+      tags: [teams]
+      summary: Delete team worker
+      description: |
+        Needs Admin in the team.
+      operationId: deleteTeamWorker
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StringResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The worker is managed by server state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BaseResponse'
+  /teams/{team}/grants:
+    parameters:
+      - $ref: '#/components/parameters/TeamName'
+    get:
+      tags: [teams]
+      summary: List team grants
+      description: |
+        Projects and caches that grant the team.
+      operationId: listTeamGrants
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        $ref: '#/components/schemas/TeamGrants'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /teams/{team}/requests:
+    parameters:
+      - $ref: '#/components/parameters/TeamName'
+    get:
+      tags: [teams]
+      summary: List grant requests
+      description: |
+        Needs Admin in the team. Newest first.
+      operationId: listTeamRequests
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/TeamRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /teams/{team}/requests/{request_id}:
+    parameters:
+      - $ref: '#/components/parameters/TeamName'
+      - $ref: '#/components/parameters/TeamRequestId'
+    post:
+      tags: [teams]
+      summary: Approve grant request
+      description: |
+        Needs Admin in the team. The grant becomes active.
+      operationId: approveTeamRequest
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StringResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [teams]
+      summary: Deny grant request
+      description: |
+        Needs Admin in the team.
+      operationId: denyTeamRequest
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StringResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /projects/{project}/teams:
+    parameters:
+      - $ref: '#/components/parameters/ProjectSlug'
+    get:
+      tags: [teams]
+      summary: List project team grants
+      description: |
+        Includes pending requests.
+      operationId: listProjectTeams
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/TeamGrant'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    post:
+      tags: [teams]
+      summary: Grant a team on a project
+      description: |
+        Needs `manageMembers` when the grant includes users and `manageWorkers` when it includes workers.
+        A grant is active at once when the caller is Admin in the team (or a superuser).
+        Otherwise a request waits for a team Admin and the answer is `Request sent`.
+      operationId: grantProjectTeam
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GrantProjectRequest'
+      responses:
+        '200':
+          description: '`Team granted` or `Request sent`'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StringResponse'
+        '400':
+          description: The grant includes neither users nor workers, or users without a role
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BaseResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The team is already granted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BaseResponse'
+  /projects/{project}/teams/{team}:
+    parameters:
+      - $ref: '#/components/parameters/ProjectSlug'
+      - $ref: '#/components/parameters/TeamName'
+    patch:
+      tags: [teams]
+      summary: Change a project team grant
+      description: |
+        Needs the project permission of the changed part. Turning workers on also needs Admin in the team.
+      operationId: patchProjectTeam
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchProjectGrantRequest'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StringResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: Missing permission, or turning workers on without Admin in the team
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BaseResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [teams]
+      summary: Remove a project team grant
+      description: |
+        Allowed for `manageMembers` on the project or Admin in the team. Removing workers aborts their running jobs of the project.
+      operationId: removeProjectTeam
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StringResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /caches/{cache}/teams:
+    parameters:
+      - $ref: '#/components/parameters/CacheSlug'
+    get:
+      tags: [teams]
+      summary: List cache team grants
+      description: |
+        Includes pending requests.
+      operationId: listCacheTeams
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/TeamGrant'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    post:
+      tags: [teams]
+      summary: Grant a team on a cache
+      description: |
+        Needs `manageCacheMembers`.
+        A grant is active at once when the caller is Admin in the team (or a superuser).
+        Otherwise a request waits for a team Admin and the answer is `Request sent`.
+      operationId: grantCacheTeam
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GrantCacheRequest'
+      responses:
+        '200':
+          description: '`Team granted` or `Request sent`'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StringResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The team is already granted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BaseResponse'
+  /caches/{cache}/teams/{team}:
+    parameters:
+      - $ref: '#/components/parameters/CacheSlug'
+      - $ref: '#/components/parameters/TeamName'
+    patch:
+      tags: [teams]
+      summary: Change a cache team grant
+      description: |
+        Needs `manageCacheMembers`.
+      operationId: patchCacheTeam
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchCacheGrantRequest'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StringResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [teams]
+      summary: Remove a cache team grant
+      description: |
+        Allowed for `manageCacheMembers` on the cache or Admin in the team.
+      operationId: removeCacheTeam
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StringResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
   /scim/v2/Groups:
     servers:
       - url: http://127.0.0.1:3000
@@ -9771,9 +10509,8 @@ paths:
       tags: [scim]
       summary: List SCIM groups
       description: |-
-        Lists SCIM groups. A SCIM group is an IdP group name that resolves to
-        `(project, role)` grants via `scim_group` on a state role; groups are
-        not created through SCIM. Supports the `displayName eq "..."` filter.
+        Lists SCIM groups. A SCIM group is a team with `scim_group` set, and its
+        members are the team's members; groups are not created through SCIM. Supports the `displayName eq "..."` filter.
       operationId: scimListGroups
       security:
         - scimBearer: []
@@ -9821,8 +10558,8 @@ paths:
       tags: [scim]
       summary: Patch SCIM group membership
       description: |-
-        Adds or removes members. Membership maps to `project_user` grants for
-        the `(project, role)` the group resolves to. Unknown group names return 404.
+        Adds or removes members of the team whose `scim_group` matches. Added users
+        join as Members. Unknown group names return 404.
       operationId: scimPatchGroup
       security:
         - scimBearer: []
@@ -9882,6 +10619,33 @@ components:
         pattern: '^[a-z0-9][a-z0-9-]*[a-z0-9]$'
         example: my-project
       description: Project name (slug)
+
+    TeamName:
+      name: team
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: '^[a-z0-9][a-z0-9-]*[a-z0-9]$'
+        example: platform
+      description: Team name
+
+    WorkerIdPath:
+      name: worker_id
+      in: path
+      required: true
+      schema:
+        type: string
+      description: Worker id
+
+    TeamRequestId:
+      name: request_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+      description: Id of a project or cache grant request
 
     TaskSlug:
       name: task
@@ -10346,7 +11110,7 @@ components:
 
     ProjectWorkerEntry:
       type: object
-      required: [worker_id, display_name, registered_at, active, enable_fetch, enable_eval, enable_build, is_base, gradient_ci, connected]
+      required: [worker_id, display_name, registered_at, active, enable_fetch, enable_eval, enable_build, gradient_ci, connected]
       properties:
         worker_id:
           type: string
@@ -10379,9 +11143,9 @@ components:
         enable_build:
           type: boolean
           description: Server-side gate for the worker's `build` capability for this registration.
-        is_base:
-          type: boolean
-          description: Whether this entry is a server-level base worker (visible to every project, managed via state).
+        team:
+          type: string
+          description: Team whose grant brings this worker; read-only in the project.
         gradient_ci:
           type: boolean
           description: Whether this entry is a Gradient.CI Servers connection.
@@ -10472,7 +11236,10 @@ components:
       properties:
         scope:
           type: string
-          enum: [base, project]
+          enum: [team, project]
+        team:
+          type: string
+          description: Team name, required for `scope = team`. Connecting needs Admin in the team.
         project:
           type: string
           description: Project name, required for `scope = project`.
@@ -10488,28 +11255,187 @@ components:
           type: string
           format: uuid
 
-    BaseWorkerEntry:
+    TeamRole:
+      type: string
+      enum: [admin, member]
+
+    TeamSummary:
       type: object
-      required: [worker_id, display_name, enabled, auto_enable, gradient_ci, connected]
+      required: [name, display_name, role]
       properties:
-        worker_id:
-          type: string
-        display_name:
-          type: string
-        url:
-          type: string
-          nullable: true
-        enabled:
-          type: boolean
-        auto_enable:
-          type: boolean
-        gradient_ci:
-          type: boolean
-          description: Created by "Connect base server"; only these rows can be deleted through the API.
-        connected:
-          type: boolean
-        last_error:
-          $ref: '#/components/schemas/ConnectionFailure'
+        name: { type: string }
+        display_name: { type: string }
+        role: { $ref: '#/components/schemas/TeamRole' }
+
+    Team:
+      type: object
+      required: [id, name, display_name, managed, role, new_project_users, new_project_workers]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        display_name: { type: string }
+        managed: { type: boolean }
+        role:
+          description: The caller's role, null for a superuser outside the team
+          oneOf:
+            - $ref: '#/components/schemas/TeamRole'
+            - type: 'null'
+        oidc_group: { type: [string, 'null'] }
+        scim_group: { type: [string, 'null'] }
+        new_project_users: { type: boolean }
+        new_project_workers: { type: boolean }
+        new_project_role: { type: [string, 'null'], enum: [Admin, Write, View, null] }
+
+    MakeTeamRequest:
+      type: object
+      required: [name, display_name]
+      properties:
+        name: { type: string, example: platform }
+        display_name: { type: string, example: Platform }
+
+    PatchTeamRequest:
+      type: object
+      description: An empty string clears `new_project_role`, `oidc_group` or `scim_group`.
+      properties:
+        display_name: { type: string }
+        new_project_users: { type: boolean }
+        new_project_workers: { type: boolean }
+        new_project_role: { type: string }
+        oidc_group: { type: string }
+        scim_group: { type: string }
+
+    TeamMember:
+      type: object
+      required: [user, name, role, via_group]
+      properties:
+        user: { type: string }
+        name: { type: string }
+        role: { $ref: '#/components/schemas/TeamRole' }
+        via_group: { type: boolean, description: Added by an OIDC or SCIM group }
+
+    TeamMemberRequest:
+      type: object
+      required: [user, role]
+      properties:
+        user: { type: string, example: bob }
+        role: { $ref: '#/components/schemas/TeamRole' }
+
+    TeamWorker:
+      type: object
+      required: [worker_id, display_name, registered_at, active, managed, gradient_ci, enable_fetch, enable_eval, enable_build, connected]
+      properties:
+        worker_id: { type: string }
+        display_name: { type: string }
+        registered_at: { type: string, format: date-time }
+        active: { type: boolean }
+        managed: { type: boolean }
+        url: { type: string }
+        gradient_ci: { type: boolean }
+        enable_fetch: { type: boolean }
+        enable_eval: { type: boolean }
+        enable_build: { type: boolean }
+        connected: { type: boolean }
+
+    TeamGrant:
+      type: object
+      required: [team, display_name, users, workers, pending]
+      properties:
+        team: { type: string }
+        display_name: { type: string }
+        role: { type: [string, 'null'] }
+        users: { type: boolean }
+        workers: { type: boolean }
+        pending: { type: boolean, description: Waiting for a team Admin }
+
+    GrantProjectRequest:
+      type: object
+      required: [team]
+      properties:
+        team: { type: string }
+        role: { type: string, description: Required when `users` is true }
+        users: { type: boolean, default: false }
+        workers: { type: boolean, default: false }
+
+    PatchProjectGrantRequest:
+      type: object
+      properties:
+        role: { type: string }
+        users: { type: boolean }
+        workers: { type: boolean }
+
+    GrantCacheRequest:
+      type: object
+      required: [team, role]
+      properties:
+        team: { type: string }
+        role: { type: string }
+
+    TeamGrants:
+      type: object
+      required: [projects, caches]
+      properties:
+        projects:
+          type: array
+          items:
+            type: object
+            required: [project, display_name, users, workers]
+            properties:
+              project: { type: string }
+              display_name: { type: string }
+              role: { type: [string, 'null'] }
+              users: { type: boolean }
+              workers: { type: boolean }
+        caches:
+          type: array
+          items:
+            type: object
+            required: [cache, display_name, role]
+            properties:
+              cache: { type: string }
+              display_name: { type: string }
+              role: { type: string }
+
+    TeamRequest:
+      type: object
+      required: [id, kind, target, display_name, users, workers, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        kind: { type: string, enum: [project, cache] }
+        target: { type: string }
+        display_name: { type: string }
+        role: { type: [string, 'null'] }
+        users: { type: boolean }
+        workers: { type: boolean }
+        requested_by: { type: [string, 'null'] }
+        created_at: { type: string, format: date-time }
+
+    RegisterTeamWorkerRequest:
+      type: object
+      required: [worker_id, display_name]
+      properties:
+        worker_id: { type: string, format: uuid }
+        display_name: { type: string }
+        url: { type: string, description: WebSocket URL when the server dials the worker }
+        token: { type: string, description: Base64 of 48 random bytes; generated when omitted }
+        enable_fetch: { type: boolean, default: true }
+        enable_eval: { type: boolean, default: true }
+        enable_build: { type: boolean, default: true }
+
+    PatchTeamWorkerRequest:
+      type: object
+      description: A state-managed worker accepts only `active`.
+      properties:
+        active: { type: boolean }
+        display_name: { type: string }
+        enable_fetch: { type: boolean }
+        enable_eval: { type: boolean }
+        enable_build: { type: boolean }
+
+    PatchCacheGrantRequest:
+      type: object
+      required: [role]
+      properties:
+        role: { type: string }
 
     ListItem:
       type: object
@@ -10544,7 +11470,7 @@ components:
       properties:
         kind:
           type: string
-          enum: [project, cache]
+          enum: [project, cache, team]
           description: What the invitation grants membership of
         token:
           type: string
@@ -10639,7 +11565,7 @@ components:
 
     ServerConfig:
       type: object
-      required: [oidc_enabled, registration_enabled, email_verification_enabled, quic, smtp_enabled, create_project, create_cache, github_app_enabled, ssh_enabled, gradient_ci_enabled, gradient_ci_url]
+      required: [oidc_enabled, registration_enabled, email_verification_enabled, quic, smtp_enabled, create_project, create_cache, create_team, github_app_enabled, ssh_enabled, gradient_ci_enabled, gradient_ci_url]
       properties:
         oidc_enabled:
           type: boolean
@@ -10667,6 +11593,10 @@ components:
           type: string
           enum: [none, superusers, everyone]
           description: Who may create caches via the API (`none` = only the declarative state).
+        create_team:
+          type: string
+          enum: [none, superusers, everyone]
+          description: Who may create teams via the API (`none` = only the declarative state).
         github_app_enabled:
           type: boolean
           description: Whether a GitHub App is configured (app id, private key and webhook secret)
@@ -10990,7 +11920,11 @@ components:
       required: [type, recipients]
       properties:
         type: { type: string, enum: [send_mail] }
-        recipients: { type: array, items: { type: string, format: email } }
+        recipients:
+          type: array
+          items:
+            type: string
+            description: An email address, or `team:<name>` for a team granted with users on the task's project
         subject_template: { type: string, nullable: true }
 
     ActionConfigSendWebRequest:
@@ -14349,7 +15283,7 @@ components:
       type: object
       description: |-
         SCIM core Group (RFC 7643 §4.2). `id`/`displayName` are the IdP group name;
-        `members` are users holding the resolved `(project, role)` grant.
+        `members` are the members of the team with that `scim_group`.
       properties:
         schemas:
           type: array
