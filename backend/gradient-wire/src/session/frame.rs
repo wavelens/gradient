@@ -126,6 +126,7 @@ impl WireMessage for ClientMessage {
                 | ClientMessage::NarRequestResume { .. }
                 | ClientMessage::LogChunk { .. }
                 | ClientMessage::JobCompleted { .. }
+                | ClientMessage::JobFailed { .. }
         )
     }
 }
@@ -936,13 +937,26 @@ mod tests {
     }
 
     #[test]
-    fn a_job_completion_rides_behind_its_log_chunks() {
+    fn a_job_end_rides_behind_its_log_chunks() {
         assert!(
             ClientMessage::JobCompleted {
                 job_id: "build:1".into(),
                 assignment_id: "dispatch-1".into(),
                 spans: Vec::new(),
                 elapsed_ms: 0,
+            }
+            .is_bulk()
+        );
+        assert!(
+            ClientMessage::JobFailed {
+                job_id: "build:1".into(),
+                assignment_id: "dispatch-1".into(),
+                error: "builder failed".into(),
+                kind: crate::types::BuildFailureKind::Permanent,
+                missing_paths: Vec::new(),
+                spans: Vec::new(),
+                elapsed_ms: 0,
+                metrics: None,
             }
             .is_bulk()
         );
