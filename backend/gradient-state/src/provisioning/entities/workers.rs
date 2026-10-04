@@ -21,6 +21,7 @@ impl<'a> StateApplicator<'a> {
     pub(crate) async fn apply_workers(
         &self,
         state_workers: &HashMap<String, StateWorker>,
+        team_ids: &HashMap<String, TeamId>,
     ) -> Result<(), DynError> {
         let project_map = self.project_lookup().await?;
         let user_map = self.user_lookup().await?;
@@ -40,17 +41,17 @@ impl<'a> StateApplicator<'a> {
                 .map(|user| lookup_id(&user_map, user, "User"))
                 .transpose()?;
 
-            if state_worker.base_worker {
-                apply_base_worker(
+            if let Some(team) = &state_worker.team {
+                let team_id = lookup_id(team_ids, team, "Team")?;
+                apply_team_worker(
                     self.db,
                     state_worker,
-                    &project_map,
+                    team_id,
                     created_by_id,
                     token_hash,
                     token_encrypted,
                 )
                 .await?;
-
                 continue;
             }
 
@@ -143,182 +144,104 @@ impl<'a> StateApplicator<'a> {
     }
 }
 
-/// Pre-enablements are only added. Frontend opt-ins are not state-managed and must survive
-/// reconciliation.
-async fn apply_base_worker<C: ConnectionTrait>(
+async fn apply_team_worker<C: ConnectionTrait>(
     db: &C,
     worker: &StateWorker,
-    project_map: &HashMap<String, ProjectId>,
-    user_id: Option<UserId>,
+    team: TeamId,
+    created_by: Option<UserId>,
     token_hash: String,
     token_encrypted: Option<String>,
 ) -> Result<(), DynError> {
-    let authorize_against = worker
-        .authorize_against
-        .as_ref()
-        .map(|s| s.parse::<uuid::Uuid>())
-        .transpose()?;
-
-    let existing = base_worker::Entity::find()
-        .filter(base_worker::Column::WorkerId.eq(worker.worker_id.clone()))
+    let existing = team_worker::Entity::find()
+        .filter(team_worker::Column::WorkerId.eq(worker.worker_id.clone()))
         .one(db)
         .await?;
 
-    // Sweeping every existing project is one-shot, on first provisioning and when `auto_enable` is
-    // newly switched on. Repeating it on each restart would undo a deliberate opt-out from the UI.
-    let (base_worker_id, sweep_projects) = if let Some(row) = existing {
-        let id = row.id;
-        let newly_auto = worker.auto_enable && !row.auto_enable;
-        let mut am: base_worker::ActiveModel = row.into();
-        am.token_hash = Set(token_hash);
-        am.token_encrypted = Set(token_encrypted);
-        am.url = Set(worker.url.clone());
-        am.display_name = Set(worker.display_name.clone());
-        am.enable_fetch = Set(worker.enable_fetch);
-        am.enable_eval = Set(worker.enable_eval);
-        am.enable_build = Set(worker.enable_build);
-        am.enabled = Set(worker.enabled);
-        am.auto_enable = Set(worker.auto_enable);
-        am.authorize_against = Set(authorize_against);
-        am.update(db).await?;
-        tracing::info!(worker_id = %worker.worker_id, "Updated base worker");
-        (id, newly_auto)
-    } else {
-        let id = BaseWorkerId::now_v7();
-        base_worker::Model {
-            id,
-            worker_id: worker.worker_id.clone(),
-            token_hash,
-            token_encrypted,
-            url: worker.url.clone(),
-            display_name: worker.display_name.clone(),
-            gradient_ci: false,
-            enable_fetch: worker.enable_fetch,
-            enable_eval: worker.enable_eval,
-            enable_build: worker.enable_build,
-            enabled: worker.enabled,
-            auto_enable: worker.auto_enable,
-            authorize_against,
-            created_by: user_id,
-            created_at: now(),
-        }
-        .into_active_model()
-        .insert(db)
-        .await?;
-        tracing::info!(worker_id = %worker.worker_id, "Created base worker");
-        (id, worker.auto_enable)
-    };
-
-    reconcile_pre_enabled_projects(db, base_worker_id, worker, project_map, user_id).await?;
-
-    if sweep_projects {
-        let enabled = gradient_db::projects::base_workers::enable_base_worker_for_all_projects(
-            db,
-            base_worker_id,
-            user_id,
-        )
-        .await?;
-        tracing::info!(
-            worker_id = %worker.worker_id,
-            projects = enabled,
-            "auto-enabled base worker for existing projects"
-        );
+    if let Some(row) = existing {
+        let mut active: team_worker::ActiveModel = row.into();
+        active.team = Set(team);
+        active.token_hash = Set(token_hash);
+        active.token_encrypted = Set(token_encrypted);
+        active.url = Set(worker.url.clone());
+        active.display_name = Set(worker.display_name.clone());
+        active.enable_fetch = Set(worker.enable_fetch);
+        active.enable_eval = Set(worker.enable_eval);
+        active.enable_build = Set(worker.enable_build);
+        active.active = Set(worker.enabled);
+        active.managed = Set(true);
+        active.update(db).await?;
+        tracing::info!(worker_id = %worker.worker_id, "Updated team worker");
+        return Ok(());
     }
 
-    Ok(())
-}
-
-async fn reconcile_pre_enabled_projects<C: ConnectionTrait>(
-    db: &C,
-    base_worker_id: BaseWorkerId,
-    worker: &StateWorker,
-    project_map: &HashMap<String, ProjectId>,
-    user_id: Option<UserId>,
-) -> Result<(), DynError> {
-    let existing = project_base_worker::Entity::find()
-        .filter(project_base_worker::Column::BaseWorker.eq(base_worker_id))
-        .all(db)
-        .await?;
-
-    for project_name in &worker.projects {
-        let project_id = lookup_id(project_map, project_name, "Project")?;
-        if existing.iter().any(|r| r.project == project_id) {
-            continue;
-        }
-
-        project_base_worker::Model {
-            id: ProjectBaseWorkerId::now_v7(),
-            project: project_id,
-            base_worker: base_worker_id,
-            created_by: user_id,
-            created_at: now(),
-        }
-        .into_active_model()
-        .insert(db)
-        .await?;
-        tracing::info!(
-            worker_id = %worker.worker_id,
-            project = %project_name,
-            "Pre-enabled base worker for project"
-        );
+    team_worker::Model {
+        id: TeamWorkerId::now_v7(),
+        team,
+        worker_id: worker.worker_id.clone(),
+        token_hash,
+        token_encrypted,
+        url: worker.url.clone(),
+        display_name: worker.display_name.clone(),
+        gradient_ci: false,
+        enable_fetch: worker.enable_fetch,
+        enable_eval: worker.enable_eval,
+        enable_build: worker.enable_build,
+        active: worker.enabled,
+        managed: true,
+        created_by,
+        created_at: now(),
     }
-
+    .into_active_model()
+    .insert(db)
+    .await?;
+    tracing::info!(worker_id = %worker.worker_id, "Created team worker");
     Ok(())
 }
 
 #[cfg(test)]
-mod base_worker_tests {
+mod team_worker_tests {
     use super::*;
-    use sea_orm::{DatabaseBackend, MockDatabase};
+    use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
 
-    fn base_worker() -> StateWorker {
-        StateWorker {
-            worker_id: "bw-1".to_string(),
-            url: Some("https://bw.example".to_string()),
+    #[tokio::test]
+    async fn a_declared_team_worker_is_inserted_as_managed() {
+        let team = TeamId::now_v7();
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([Vec::<team_worker::Model>::new()])
+            .append_query_results([vec![team_worker::Model {
+                team,
+                worker_id: "w1".into(),
+                ..Default::default()
+            }]])
+            .append_exec_results([MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 1,
+            }])
+            .into_connection();
+        let worker = StateWorker {
+            worker_id: "w1".into(),
+            url: None,
             projects: vec![],
-            token_file: "/dev/null".to_string(),
-            display_name: "Base".to_string(),
-            created_by: Some("alice".to_string()),
+            team: Some("platform".into()),
+            token_file: "/dev/null".into(),
+            display_name: "W".into(),
+            created_by: None,
             enable_fetch: true,
             enable_eval: true,
             enable_build: true,
-            base_worker: true,
-            authorize_against: None,
             enabled: true,
-            auto_enable: false,
-        }
-    }
-
-    #[tokio::test]
-    async fn apply_base_worker_inserts_when_absent() {
-        let inserted = base_worker::Model {
-            worker_id: "bw-1".to_string(),
-            ..Default::default()
         };
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
-            .append_query_results([Vec::<base_worker::Model>::new()])
-            .append_query_results([vec![inserted]])
-            .append_query_results([Vec::<project_base_worker::Model>::new()])
-            .into_connection();
 
-        apply_base_worker(
-            &db,
-            &base_worker(),
-            &HashMap::new(),
-            Some(UserId::now_v7()),
-            "hash".to_string(),
-            None,
-        )
-        .await
-        .unwrap();
+        apply_team_worker(&db, &worker, team, None, "hash".into(), None)
+            .await
+            .unwrap();
 
-        let logs = db.into_transaction_log();
-        let insert = logs
+        let inserted = db
+            .into_transaction_log()
             .iter()
-            .flat_map(|t| t.statements())
-            .find(|s| s.sql.to_lowercase().contains("insert into \"base_worker\""))
-            .expect("expected an INSERT INTO base_worker statement");
-
-        assert!(insert.sql.to_lowercase().contains("\"worker_id\""));
+            .flat_map(|t| t.statements().to_vec())
+            .find(|s| s.sql.starts_with("INSERT INTO \"team_worker\""))
+            .expect("an INSERT INTO team_worker");
+        assert!(inserted.sql.contains("\"managed\""));
     }
 }

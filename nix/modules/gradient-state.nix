@@ -200,6 +200,15 @@
           existing yet are applied on the user's registration or first OIDC sign-in.
         '';
       };
+
+      teams = mkOption {
+        type = types.listOf projectTeamType;
+        default = [ ];
+        description = ''
+          Teams granted on this project. An empty list leaves the project's grants alone; a
+          non-empty list is the source of truth and the next state apply removes grants not listed.
+        '';
+      };
     };
   });
 
@@ -686,6 +695,117 @@
     };
   };
 
+  teamMemberType = types.submodule {
+    options = {
+      user = mkOption {
+        type = types.str;
+        description = "User name, resolved when the state is applied.";
+      };
+      role = mkOption {
+        type = types.enum [ "Admin" "Member" ];
+        default = "Member";
+        description = "Role in the team. Admins manage members, workers, grants and requests.";
+      };
+    };
+  };
+
+  teamType = types.submodule ({ name, ... }: {
+    options = {
+      name = mkOption {
+        type = types.str;
+        default = name;
+        defaultText = "<attrset key>";
+        description = "Team name. Teams managed here cannot be changed through the API.";
+      };
+      display_name = mkOption {
+        type = types.str;
+        default = name;
+        defaultText = "<attrset key>";
+        description = "Display name of the team.";
+      };
+      members = mkOption {
+        type = types.listOf teamMemberType;
+        default = [ ];
+        description = ''
+          Users in the team. The next state apply removes members not listed, except members
+          added through an OIDC or SCIM group.
+        '';
+      };
+      oidc_group = mkOption {
+        type = types.nullOr types.str;
+        default = null;
+        example = "platform-team";
+        description = ''
+          OIDC group whose members join the team on sign-in and leave it once the group is gone
+          from their `groups` claim. The `groups` scope is required.
+        '';
+      };
+      scim_group = mkOption {
+        type = types.nullOr types.str;
+        default = null;
+        example = "acme-eng";
+        description = "SCIM group mapped onto the team's members.";
+      };
+      new_projects = {
+        users = mkOption {
+          type = types.bool;
+          default = false;
+          description = "Whether every new project grants this team's users `new_projects.role`.";
+        };
+        workers = mkOption {
+          type = types.bool;
+          default = false;
+          description = "Whether every new project grants this team's workers.";
+        };
+        role = mkOption {
+          type = types.nullOr (types.enum [ "Admin" "Write" "View" ]);
+          default = null;
+          description = "Project role for the team's users on new projects.";
+        };
+      };
+    };
+  });
+
+  projectTeamType = types.submodule {
+    options = {
+      team = mkOption {
+        type = types.str;
+        description = "Team granted on the project.";
+      };
+      role = mkOption {
+        type = types.nullOr types.str;
+        default = null;
+        description = ''
+          Role of the team's users: a built-in `Admin`, `Write` or `View`, or a custom role of the
+          project. Required when `users` is true.
+        '';
+      };
+      users = mkOption {
+        type = types.bool;
+        default = true;
+        description = "Whether the team's users get `role` on the project.";
+      };
+      workers = mkOption {
+        type = types.bool;
+        default = true;
+        description = "Whether the team's workers take the project's jobs.";
+      };
+    };
+  };
+
+  cacheTeamType = types.submodule {
+    options = {
+      team = mkOption {
+        type = types.str;
+        description = "Team granted on the cache.";
+      };
+      role = mkOption {
+        type = types.str;
+        description = "Role of the team's users: `Admin`, `Write`, `View` or a custom role of the cache.";
+      };
+    };
+  };
+
   cacheRoleType = types.submodule {
     options = {
       name = mkOption {
@@ -806,6 +926,15 @@
         description = "Users with direct roles on this cache.";
       };
 
+      teams = mkOption {
+        type = types.listOf cacheTeamType;
+        default = [ ];
+        description = ''
+          Teams granted on this cache. An empty list leaves the cache's grants alone; a non-empty
+          list is the source of truth and the next state apply removes grants not listed.
+        '';
+      };
+
       roles = mkOption {
         type = types.listOf cacheRoleType;
         default = [];
@@ -858,9 +987,18 @@
         default = [ ];
         example = [ "acme-corp" "globex" ];
         description = ''
-          Projects the worker is registered under, one registration per project. A single worker
-          can serve several projects. A base worker is listing projects to enable up front here and
-          may leave the list empty. Other workers need at least one.
+          Projects the worker is registered under, one registration per project. Leave empty for a
+          team worker.
+        '';
+      };
+
+      team = mkOption {
+        type = types.nullOr types.str;
+        default = null;
+        example = "platform";
+        description = ''
+          Team owning this worker. A team worker serves every project granted the team's workers
+          and is mutually exclusive with `projects`.
         '';
       };
 
@@ -900,42 +1038,10 @@
         '';
       };
 
-      base_worker = mkOption {
-        type = types.bool;
-        default = true;
-        description = ''
-          Whether this is a base worker available to every project instead of a per-project
-          registration. `projects` is then listing projects to enable up front.
-        '';
-      };
-
-      authorize_against = mkOption {
-        type = types.nullOr types.str;
-        default = null;
-        example = "123e4567-e89b-12d3-a456-426614174000";
-        description = ''
-          UUID a base worker is authenticating as, instead of the per-project challenge. `null` is
-          challenging the worker once per enabled project. Other workers are ignoring it.
-        '';
-      };
-
-      auto_enable = mkOption {
-        type = types.bool;
-        default = true;
-        description = ''
-          Whether every new project is enabling this base worker on creation instead of opting in
-          through the web UI. Other workers are ignoring it.
-        '';
-      };
-
       enabled = mkOption {
         type = types.bool;
         default = true;
-        description = ''
-          Whether the worker is active. The UI can toggle this value on a per-project registration,
-          and the next server start is restoring it. The UI is toggling only a project's enablement
-          of a base worker.
-        '';
+        description = "Whether the worker is active. The next server start restores it.";
       };
     };
   });
@@ -1122,6 +1228,12 @@
         type = types.attrsOf apiKeyType;
         default = { };
         description = "API keys to create, one entry per name.";
+      };
+
+      teams = mkOption {
+        type = types.attrsOf teamType;
+        default = { };
+        description = "Teams, one entry per team name.";
       };
 
       workers = mkOption {

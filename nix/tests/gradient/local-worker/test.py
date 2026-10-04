@@ -37,19 +37,17 @@ assert perms == "400 gradient-worker gradient-worker", f"token perms: {perms}"
 token = machine.succeed("cat /var/lib/gradient-worker/local-token").strip()
 assert len(token) == 64, f"token must be 64 base64 chars, got {len(token)}"
 
-# The peers file is the only place the derived identity is written down, and
-# the worker answers the server's challenge straight out of it.
+# The team id is only known at runtime, so the worker answers every challenged
+# peer, its team included, with the one wildcard line.
 peers = machine.succeed("cat /var/lib/gradient-worker/local-peers").strip()
-identity, _, peer_token = peers.partition(":")
-assert len(identity) == 36 and identity.count("-") == 4, \
-    f"identity is not a UUID: {identity!r}"
-assert peer_token == token, f"peers line carries a different token: {peers!r}"
+assert peers.startswith("*:"), f"peers line is not a wildcard: {peers!r}"
+assert peers[2:] == token, f"peers line carries a different token: {peers!r}"
 
-banner("Server provisions the base worker from generated state")
+banner("Server provisions the team worker from generated state")
 machine.wait_for_unit("gradient-server.service")
 machine.wait_for_open_port(3000)
 machine.wait_for_unit("gradient-worker.service")
-machine.wait_until_succeeds("journalctl -u gradient-server.service | grep -q 'Created base worker'", timeout=60)
+machine.wait_until_succeeds("journalctl -u gradient-server.service | grep -q 'Created team worker'", timeout=60)
 
 banner("A new project enables the worker with no registration step")
 admin = api("POST", "auth/basic/login", body=json.dumps({
@@ -67,14 +65,16 @@ api("PUT", "caches", token=admin, body=json.dumps({
 api("POST", "projects/demo/subscribe/democache", token=admin)
 
 workers = api("GET", "projects/demo/workers", token=admin)
-entry = next((w for w in workers if w["worker_id"] == identity), None)
+entry = next((w for w in workers if w.get("team") == "server"), None)
 assert entry is not None, f"local worker missing from the project's worker list: {workers}"
-assert entry["is_base"], "local worker should be a base worker"
-assert entry["active"], "local worker should be auto-enabled for a new project"
+identity = entry["worker_id"]
+assert len(identity) == 36 and identity.count("-") == 4, \
+    f"identity is not a UUID: {identity!r}"
+assert entry["active"], "the server team's worker should serve a new project"
 
 banner("Worker authenticates and reports live")
-# Until the project existed the worker was refused (a base worker enabled by
-# nobody), so it is sitting in its reconnect backoff. Restart it to retry now
+# Until the project existed the worker was refused (no project granted the
+# server team's workers), so it is sitting in its reconnect backoff. Restart it to retry now
 # rather than making the test wait out a delay it is not asserting on.
 machine.systemctl("restart gradient-worker.service")
 
@@ -89,17 +89,15 @@ def worker_is_live():
 with machine.nested("waiting for the worker to connect"):
     retry(lambda _: worker_is_live(), timeout_seconds=60)
 
-banner("An opt-out is not undone by auto_enable")
-api("PATCH", f"projects/demo/workers/{identity}", token=admin,
-    body=json.dumps({"active": False}))
+banner("A removed grant stays removed across a restart")
+api("DELETE", "projects/demo/teams/server", token=admin)
 machine.systemctl("restart gradient-server.service")
 machine.wait_for_open_port(3000)
 admin = api("POST", "auth/basic/login", body=json.dumps({
     "loginname": "admin", "password": "admin_password"}))
 workers = api("GET", "projects/demo/workers", token=admin)
-entry = next((w for w in workers if w["worker_id"] == identity), None)
-assert entry is not None and not entry["active"], \
-    "a project that opted out must stay opted out across a restart"
+assert not any(w.get("team") == "server" for w in workers), \
+    "a project that removed the server team must not get it back on restart"
 
 banner("Credentials survive a restart")
 machine.succeed("systemctl restart gradient-local-worker-token.service")

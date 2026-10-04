@@ -579,30 +579,20 @@ worker = next(w for w in api("GET", "projects/stateproject/workers", token=sa_to
               if w["worker_id"] == "a0000000-0000-0000-0000-0000000000aa")
 assert worker["enable_eval"] is True and worker["enable_fetch"] is False, worker
 
-# base workers (#115)
-base_id = "a0000000-0000-0000-0000-0000000000bb"
-base_id2 = "a0000000-0000-0000-0000-0000000000cc"
-
+# team workers
+team_worker_id = "a0000000-0000-0000-0000-0000000000bb"
 sa_workers = api("GET", "projects/stateproject/workers", token=sa_token)
-base = next(w for w in sa_workers if w["worker_id"] == base_id)
-assert base["is_base"] is True, base
-assert base["active"] is True, "base worker pre-enabled via projects should be active"
+team_worker = next(w for w in sa_workers if w["worker_id"] == team_worker_id)
+assert team_worker["team"] == "stateteam", team_worker
 
-base2 = next(w for w in sa_workers if w["worker_id"] == base_id2)
-assert base2["is_base"] is True and base2["active"] is False, base2
+api("PATCH", f"projects/stateproject/workers/{team_worker_id}", token=sa_token, expect_error=True,
+    body=json.dumps({"active": False}))
+api("DELETE", f"projects/stateproject/workers/{team_worker_id}", token=sa_token, expect_error=True)
 
-api("PATCH", f"projects/stateproject/workers/{base_id2}", token=sa_token, body=json.dumps({"active": True}))
-assert next(w for w in api("GET", "projects/stateproject/workers", token=sa_token)
-            if w["worker_id"] == base_id2)["active"] is True, "enable failed"
-api("PATCH", f"projects/stateproject/workers/{base_id2}", token=sa_token, body=json.dumps({"active": False}))
-assert next(w for w in api("GET", "projects/stateproject/workers", token=sa_token)
-            if w["worker_id"] == base_id2)["active"] is False, "disable failed"
+team_workers = api("GET", "teams/stateteam/workers", token=sa_token)
+assert [w["worker_id"] for w in team_workers] == [team_worker_id], team_workers
 
-api("PATCH", f"projects/stateproject/workers/{base_id}", token=sa_token, expect_error=True,
-    body=json.dumps({"display_name": "nope"}))
-api("DELETE", f"projects/stateproject/workers/{base_id}", token=sa_token, expect_error=True)
-
-test_res = api("POST", f"projects/stateproject/workers/{base_id}/test", token=sa_token)
+test_res = api("POST", f"projects/stateproject/workers/{team_worker_id}/test", token=sa_token)
 assert test_res["connected"] is False and test_res["ok"] is False, test_res
 
 # Both integration kinds applied.

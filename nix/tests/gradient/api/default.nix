@@ -78,6 +78,7 @@ in {
                   { user = "stateadmin"; role = "Admin"; }
                   { user = "statemember"; role = "releaser"; }
                 ];
+                teams = [ { team = "stateteam"; role = "View"; users = true; workers = true; } ];
               };
 
               roles.releaser = {
@@ -136,22 +137,16 @@ in {
                 enable_fetch = false;
               };
 
-              workers.statebaseworker = {
-                worker_id = "a0000000-0000-0000-0000-0000000000bb";
-                base_worker = true;
-                projects = [ "stateproject" ];
-                token_file = toString stateWorkerToken;
-                display_name = "State Base Worker";
-                created_by = "stateadmin";
+              teams.stateteam = {
+                display_name = "State Team";
+                members = [ { user = "stateadmin"; role = "Admin"; } { user = "statemember"; } ];
               };
 
-              workers.statebaseworker2 = {
-                worker_id = "a0000000-0000-0000-0000-0000000000cc";
-                base_worker = true;
-                auto_enable = false;
-                projects = [ ];
+              workers.stateteamworker = {
+                worker_id = "a0000000-0000-0000-0000-0000000000bb";
+                team = "stateteam";
                 token_file = toString stateWorkerToken;
-                display_name = "State Base Worker 2";
+                display_name = "State Team Worker";
                 created_by = "stateadmin";
               };
 

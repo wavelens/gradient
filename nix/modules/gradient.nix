@@ -156,8 +156,9 @@ in {
         description = ''
           Whether to provision credentials for a {option}`services.gradient.worker` running on this
           host. These are a worker identity derived from the hostname, a token generated on first
-          start, the matching peers file and an `auto_enable` base worker registration. No UUID,
-          token or web UI registration step is needed.
+          start, the matching peers file and a worker of the state-declared team `server`, which
+          every new project grants its workers. No UUID, token or web UI registration step is
+          needed.
 
           Disable it to run a co-located worker authenticating like a remote one, with
           {option}`services.gradient.worker.id` and {option}`services.gradient.worker.peersFile` set
@@ -1248,14 +1249,16 @@ in {
     networking.firewall.allowedTCPPorts = lib.mkIf (cfg.ssh.enable && cfg.ssh.openFirewall) [ cfg.ssh.port ];
 
     services.gradient = lib.mkIf localWorker {
+      state.teams.server = {
+        display_name = "Server";
+        new_projects.workers = true;
+      };
+
       state.workers.local = {
         display_name = "Local Worker";
         worker_id = localIdentity;
         token_file = localTokenFile;
-        projects = [ ];
-        base_worker = true;
-        authorize_against = localIdentity;
-        auto_enable = true;
+        team = "server";
       };
 
       worker = {
@@ -1300,7 +1303,7 @@ in {
           ${lib.getExe pkgs.openssl} rand -base64 48 > ${localTokenFile}.new
           mv ${localTokenFile}.new ${localTokenFile}
         fi
-        printf '%s:%s\n' ${localIdentity} "$(cat ${localTokenFile})" > ${localPeersFile}.new
+        printf '*:%s\n' "$(cat ${localTokenFile})" > ${localPeersFile}.new
         mv ${localPeersFile}.new ${localPeersFile}
         chmod 0400 ${localTokenFile} ${localPeersFile}
       '';
