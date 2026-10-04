@@ -85,7 +85,7 @@ done
 FRONTEND_NIX="$REPO_ROOT/nix/packages/gradient-frontend.nix"
 sed -i 's/^    hash = "[^"]*";/    hash = "";/' "$FRONTEND_NIX"
 FRONTEND_BUILD="$(nix build --no-link "$REPO_ROOT#gradient-frontend.pnpmDeps" 2>&1 || true)"
-FRONTEND_HASH="$(grep -oP 'got:\s+\Ksha256-[A-Za-z0-9+/=]+' <<< "$FRONTEND_BUILD" || true)"
+FRONTEND_HASH="$(grep -m1 -oP 'got:\s+\Ksha256-[A-Za-z0-9+/=]+' <<< "$FRONTEND_BUILD" || true)"
 if [[ -z "$FRONTEND_HASH" ]]; then
     echo "$FRONTEND_BUILD" | tail -20
     echo "Error: the pnpm dependency build reported no hash"
