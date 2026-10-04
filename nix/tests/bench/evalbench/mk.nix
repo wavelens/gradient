@@ -161,6 +161,7 @@ pkgs.testers.runNixOSTest ({ lib, ... }: {
               projects = [ "project" ];
               public = true;
               created_by = "admin";
+              upstream_caches = [ ];
             };
 
             workers = lib.mapAttrs (_: id: {
