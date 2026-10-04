@@ -59,7 +59,7 @@ impl BuildStateMachine {
             (BuildStatus::Queued, BuildStatus::Building) => Ok(to),
             (BuildStatus::Queued, BuildStatus::Created) => Ok(to),
 
-            (BuildStatus::FailedTransient, BuildStatus::Queued) => Ok(to),
+            (BuildStatus::FailedTransient, BuildStatus::Created) => Ok(to),
 
             // A substitute miss is re-queueing a `Building` attempt without an `attempt` bump.
             (BuildStatus::Building, BuildStatus::Queued) => Ok(to),
@@ -227,9 +227,13 @@ mod tests {
     }
 
     #[test]
-    fn build_sm_failed_transient_to_queued_for_retry() {
+    fn build_sm_failed_transient_retries_through_created_so_the_queue_checks_its_inputs() {
         assert!(
-            BuildStateMachine::validate(BuildStatus::FailedTransient, BuildStatus::Queued).is_ok()
+            BuildStateMachine::validate(BuildStatus::FailedTransient, BuildStatus::Created).is_ok()
+        );
+        assert!(
+            BuildStateMachine::validate(BuildStatus::FailedTransient, BuildStatus::Queued).is_err(),
+            "a retry queued directly is dispatchable before anything checks its inputs"
         );
     }
 

@@ -48,7 +48,7 @@ The graph writer, `GraphWriter` (`gradient-graph/src/writer.rs`), is a root chil
 | `UpstreamProbed` | `probed = true` on answered shared builds, and the needs-build marks set below them by a miss |
 | `CommitNar` | The `cached_path` row, its references, signed `cached_path_signature` rows, the backed outputs |
 | `Transition` | Evaluation and shared build state: stream completed, eval failed, build started/output/completed/failed, assigned, orphaned, can start, repair, abort, prioritize |
-| `Requeue` | `FailedTransient` shared builds whose backoff elapsed, back to `Queued` |
+| `Requeue` | `FailedTransient` shared builds whose backoff elapsed, back to `Created`, queued once they can start |
 | `Demote` | `MissingNar`, operator `Path` invalidation, one cache dropping its `CacheClaim` |
 | `Gc` | Bounded deletes of derivations, stale paths and evaluations, re-checked against rows that became live since the scan |
 

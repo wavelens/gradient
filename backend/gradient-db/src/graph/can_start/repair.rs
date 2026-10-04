@@ -4,11 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::graph::predicates::fetchable_predicate;
 use crate::graph::promotion::{returned_derivations, returned_transitions, transitions_from};
 use crate::status::TransitionChange;
 
-use super::fetchable::blocking_dependency_count;
+use super::fetchable::{blocking_dependency_count, mark_fetchable, mark_unfetchable};
 use super::lock::{SharedBuildLock, ids, lock_shared_builds};
 use super::queue::{PROMOTE_ANY_QUERY, UNPROMOTE_UNGATED_QUERY};
 use gradient_entity::build::BuildStatus;
@@ -40,28 +39,13 @@ crate::sql_fn! {
         tier = Sweep;
 }
 
-static RECOUNT_FETCHABLE: LazyLock<String> = LazyLock::new(|| {
-    format!(
-        "UPDATE derivation_build db SET fetchable = x.f \
-         FROM (SELECT p.derivation, p.fetchable AS old, {pred} AS f \
-               FROM derivation_build p WHERE p.derivation = ANY($1::uuid[])) x \
-         WHERE db.derivation = x.derivation AND db.fetchable = x.old AND x.old <> x.f",
-        pred = fetchable_predicate("p"),
-    )
-});
-
-crate::sql_lazy! {
-    RECOUNT_FETCHABLE_QUERY = || RECOUNT_FETCHABLE.as_str(),
-        params = [DerivationIds(64)];
-}
-
 pub(super) static RECOUNT_BLOCKING_DEPS: LazyLock<String> = LazyLock::new(|| {
     format!(
         "UPDATE derivation_build db SET blocking_deps = x.n \
          FROM (SELECT p.derivation, p.blocking_deps AS old, {count} AS n \
                FROM derivation_build p WHERE p.derivation = ANY($1::uuid[])) x \
          WHERE db.derivation = x.derivation AND db.blocking_deps = x.old AND x.old <> x.n",
-        count = blocking_dependency_count("p", "dep.fetchable"),
+        count = blocking_dependency_count("p"),
     )
 });
 
@@ -69,6 +53,12 @@ crate::sql_lazy! {
     RECOUNT_BLOCKING_DEPS_QUERY = || RECOUNT_BLOCKING_DEPS.as_str(),
         params = [DerivationIds(64)],
         tier = Bulk;
+}
+
+#[derive(Debug, Default)]
+pub struct RepairedFetchable {
+    pub marked: u64,
+    pub unqueued: Vec<TransitionChange>,
 }
 
 #[derive(Debug, Default)]
@@ -89,41 +79,37 @@ pub async fn can_start_scope<C: ConnectionTrait>(db: &C) -> Result<Vec<Derivatio
         .collect()
 }
 
-async fn recount_fetchable(lock: &SharedBuildLock<'_>) -> Result<u64, DbErr> {
-    recount(lock, &RECOUNT_FETCHABLE_QUERY).await
-}
-
 async fn recount_blocking_deps(lock: &SharedBuildLock<'_>) -> Result<u64, DbErr> {
-    recount(lock, &RECOUNT_BLOCKING_DEPS_QUERY).await
-}
-
-async fn recount(lock: &SharedBuildLock<'_>, query: &crate::sql::Query) -> Result<u64, DbErr> {
     if lock.derivations.is_empty() {
         return Ok(0);
     }
 
     Ok(lock
         .txn
-        .execute_raw(query.bind([ids(&lock.derivations)]))
+        .execute_raw(RECOUNT_BLOCKING_DEPS_QUERY.bind([ids(&lock.derivations)]))
         .await?
         .rows_affected())
 }
 
-/// Every chunk is recounted before [`repair_can_start`] starts.
-/// A counter computed from a stale `fetchable = true` would be too low and would promote.
-pub async fn repair_fetchable<C>(db: &C, scope: &[DerivationId]) -> Result<u64, DbErr>
+/// A column corrected without adjusting its parents' `blocking_deps` leaves them off by one for good.
+/// Queueing what reached zero is left to [`repair_can_start`], after every counter is recounted.
+pub async fn repair_fetchable<C>(db: &C, scope: &[DerivationId]) -> Result<RepairedFetchable, DbErr>
 where
     C: ConnectionTrait + TransactionTrait<Transaction = DatabaseTransaction>,
 {
-    let mut fetchable = 0u64;
+    let mut repaired = RepairedFetchable::default();
     for chunk in scope.chunks(crate::IN_CHUNK_SIZE) {
         let txn = db.begin().await?;
         let lock = lock_shared_builds(&txn, chunk).await?;
-        fetchable += recount_fetchable(&lock).await?;
+        let fetchable = mark_fetchable(&lock).await?;
+        let unfetchable = mark_unfetchable(&lock).await?;
         txn.commit().await?;
+
+        repaired.marked += (fetchable.marked + unfetchable.marked.len()) as u64;
+        repaired.unqueued.extend(unfetchable.unqueued);
     }
 
-    Ok(fetchable)
+    Ok(repaired)
 }
 
 /// The un-promote is going first.
@@ -158,52 +144,32 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::graph::can_start::fetchable::SEED_BLOCKING_DEPS;
     use crate::graph::can_start::test_rows::{drv, exec, norm, transition_row};
     use crate::pool::statements;
     use sea_orm::{DatabaseBackend, MockDatabase, Value};
     use std::collections::BTreeMap;
 
-    #[test]
-    fn the_seed_evaluates_the_predicate_while_the_recount_reads_the_column() {
-        let seed = norm(&SEED_BLOCKING_DEPS);
-        assert!(
-            seed.contains(&norm(&fetchable_predicate("dep"))),
-            "the seed must evaluate the predicate on its dependencies: {seed}"
-        );
-        assert!(
-            !seed.contains("NOT (dep.fetchable)"),
-            "the seed must not trust the column: {seed}"
-        );
-
-        let recount = norm(&RECOUNT_BLOCKING_DEPS);
-        assert!(recount.contains("NOT (dep.fetchable)"), "{recount}");
-        assert!(
-            !recount.contains(&norm(&fetchable_predicate("dep"))),
-            "the recount reads the column it just repaired: {recount}"
-        );
+    fn startable_row(id: DerivationId) -> BTreeMap<String, Value> {
+        BTreeMap::from([
+            ("derivation".to_owned(), Value::from(id.into_inner())),
+            ("startable".to_owned(), Value::from(true)),
+        ])
     }
 
     #[test]
-    fn the_recounts_are_compare_and_swaps_over_the_locked_chunk() {
-        for sql in [norm(&RECOUNT_FETCHABLE), norm(&RECOUNT_BLOCKING_DEPS)] {
-            assert!(
-                sql.contains("FROM derivation_build p WHERE p.derivation = ANY($1::uuid[])"),
-                "the chunk is the whole bound: {sql}"
-            );
-            assert!(
-                !sql.contains("WHERE p.status IN"),
-                "a status scope would widen a recount past its lock: {sql}"
-            );
-        }
-
+    fn the_counter_recount_is_a_compare_and_swap_over_the_locked_chunk() {
+        let sql = norm(&RECOUNT_BLOCKING_DEPS);
         assert!(
-            norm(&RECOUNT_FETCHABLE).contains("db.fetchable = x.old AND x.old <> x.f"),
-            "compare-and-swap plus drift filter"
+            sql.contains("FROM derivation_build p WHERE p.derivation = ANY($1::uuid[])"),
+            "the chunk is the whole bound: {sql}"
         );
         assert!(
-            norm(&RECOUNT_BLOCKING_DEPS).contains("db.blocking_deps = x.old AND x.old <> x.n"),
-            "compare-and-swap plus drift filter"
+            !sql.contains("WHERE p.status IN"),
+            "a status scope would widen a recount past its lock: {sql}"
+        );
+        assert!(
+            sql.contains("db.blocking_deps = x.old AND x.old <> x.n"),
+            "compare-and-swap plus drift filter: {sql}"
         );
     }
 
@@ -229,7 +195,57 @@ mod tests {
         );
         assert!(
             !sql.contains("derivation_output"),
-            "the scope reads columns only; the recount evaluates the predicate: {sql}"
+            "the scope reads columns only; the mark evaluates the predicate: {sql}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_repaired_column_adjusts_its_parents_in_the_same_transaction_and_queues_nothing() {
+        let now_fetchable = DerivationId::now_v7();
+        let unblocked_parent = DerivationId::now_v7();
+        let no_longer_fetchable = DerivationId::now_v7();
+        let unqueued_parent = DerivationId::now_v7();
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_exec_results([exec(0)])
+            .append_query_results([vec![drv(now_fetchable)]])
+            .append_query_results([vec![startable_row(unblocked_parent)]])
+            .append_query_results([vec![drv(no_longer_fetchable)]])
+            .append_query_results([vec![transition_row(unqueued_parent, 1, 0)]])
+            .into_connection();
+
+        let repaired = repair_fetchable(&db, &[now_fetchable, no_longer_fetchable])
+            .await
+            .unwrap();
+
+        assert_eq!(repaired.marked, 2);
+        assert_eq!(repaired.unqueued.len(), 1);
+        assert_eq!(repaired.unqueued[0].derivation, unqueued_parent);
+        assert_eq!(
+            (repaired.unqueued[0].from, repaired.unqueued[0].to),
+            (BuildStatus::Queued, BuildStatus::Created)
+        );
+
+        let raw = db.into_transaction_log();
+        assert_eq!(raw.len(), 1, "{raw:?}");
+        let inside: Vec<&str> = raw[0].statements().iter().map(|s| s.sql.as_str()).collect();
+        assert_eq!(
+            inside.len(),
+            7,
+            "BEGIN, lock, two marks with their parents, COMMIT: {inside:?}"
+        );
+        assert!(inside[1].contains("FOR NO KEY UPDATE"), "{inside:?}");
+        assert!(
+            inside[2].contains("SET fetchable = true") && inside[3].contains("blocking_deps - c.n"),
+            "{inside:?}"
+        );
+        assert!(
+            inside[4].contains("SET fetchable = false")
+                && inside[5].contains("blocking_deps + c.n"),
+            "{inside:?}"
+        );
+        assert!(
+            !inside.iter().any(|s| s.contains("SET status = 1")),
+            "a parent reaching zero is queued by repair_can_start, after its recount: {inside:?}"
         );
     }
 
@@ -238,9 +254,11 @@ mod tests {
         let a = DerivationId::now_v7();
         let demoted = DerivationId::now_v7();
         let promoted = DerivationId::now_v7();
+        let empty = Vec::<BTreeMap<String, Value>>::new;
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             .append_query_results([vec![drv(a)]])
-            .append_exec_results([exec(0), exec(2), exec(0), exec(3)])
+            .append_exec_results([exec(0), exec(0), exec(3)])
+            .append_query_results([empty(), empty()])
             .append_query_results([vec![transition_row(demoted, 1, 0)]])
             .append_query_results([vec![drv(promoted)]])
             .into_connection();
@@ -249,7 +267,7 @@ mod tests {
         let fetchable = repair_fetchable(&db, &scope).await.unwrap();
         let repaired = repair_can_start(&db, &scope).await.unwrap();
 
-        assert_eq!((fetchable, repaired.blocking_deps), (2, 3));
+        assert_eq!((fetchable.marked, repaired.blocking_deps), (0, 3));
         assert_eq!(repaired.unpromoted.len(), 1);
         assert_eq!(repaired.unpromoted[0].derivation, demoted);
         assert_eq!(repaired.promoted.len(), 1);
@@ -262,24 +280,22 @@ mod tests {
             "the scope select, one transaction per pass, then the queue: {raw:?}"
         );
 
-        for (entry, recount) in [(1, "SET fetchable = x.f"), (2, "SET blocking_deps = x.n")] {
+        for (entry, first_write) in [(1, "SET fetchable = true"), (2, "SET blocking_deps = x.n")] {
             let inside: Vec<&str> = raw[entry]
                 .statements()
                 .iter()
                 .map(|s| s.sql.as_str())
                 .collect();
-            assert_eq!(inside.len(), 4, "BEGIN, lock, recount, COMMIT: {inside:?}");
             assert!(
                 inside[1].contains("ORDER BY derivation FOR NO KEY UPDATE"),
                 "{inside:?}"
             );
-            assert!(inside[2].contains(recount), "{inside:?}");
+            assert!(inside[2].contains(first_write), "{inside:?}");
         }
 
         let log = statements(raw);
-        assert_eq!(log.len(), 7, "{log:?}");
-        assert!(log[5].contains("SET status = 0"), "{log:?}");
-        assert!(log[6].contains("SET status = 1"), "{log:?}");
+        assert!(log[log.len() - 2].contains("SET status = 0"), "{log:?}");
+        assert!(log[log.len() - 1].contains("SET status = 1"), "{log:?}");
     }
 
     #[tokio::test]
@@ -287,11 +303,11 @@ mod tests {
         let scope: Vec<BTreeMap<String, Value>> = (0..crate::IN_CHUNK_SIZE + 1)
             .map(|_| drv(DerivationId::now_v7()))
             .collect();
+        let empty = Vec::<BTreeMap<String, Value>>::new;
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             .append_query_results([scope])
-            .append_exec_results(vec![exec(1); 8])
-            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
-            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_exec_results(vec![exec(1); 6])
+            .append_query_results([empty(), empty(), empty(), empty(), empty(), empty()])
             .into_connection();
 
         let scope = can_start_scope(&db).await.unwrap();
@@ -299,16 +315,16 @@ mod tests {
         let repaired = repair_can_start(&db, &scope).await.unwrap();
 
         assert_eq!(
-            (fetchable, repaired.blocking_deps),
-            (2, 2),
-            "one row per chunk per pass"
+            (fetchable.marked, repaired.blocking_deps),
+            (0, 2),
+            "one recounted row per chunk"
         );
 
         let log = statements(db.into_transaction_log());
         let columns: Vec<&str> = log
             .iter()
             .filter_map(|s| {
-                if s.contains("SET fetchable = x.f") {
+                if s.contains("SET fetchable = true") || s.contains("SET fetchable = false") {
                     Some("fetchable")
                 } else if s.contains("SET blocking_deps = x.n") {
                     Some("blocking_deps")
@@ -319,8 +335,20 @@ mod tests {
             .collect();
         assert_eq!(
             columns,
-            ["fetchable", "fetchable", "blocking_deps", "blocking_deps"],
+            [
+                "fetchable",
+                "fetchable",
+                "fetchable",
+                "fetchable",
+                "blocking_deps",
+                "blocking_deps"
+            ],
             "two chunks, both fetchable passes first: {log:?}"
+        );
+        assert!(
+            log[log.len() - 2].contains("SET status = 0")
+                && log[log.len() - 1].contains("SET status = 1"),
+            "the queue is settled after the counters: {log:?}"
         );
     }
 }

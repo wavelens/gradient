@@ -19,12 +19,12 @@ use std::sync::LazyLock;
 /// A `LEFT JOIN` is counting a dependency with no shared build row as blocking.
 /// An inner join would fail open, in a gate meant to stop a dispatch against a missing input.
 /// Runtime-only edges are not build inputs, and `missing_runtime_deps` is covering them.
-pub(super) fn blocking_dependency_count(alias: &str, dep_ready: &str) -> String {
+pub(super) fn blocking_dependency_count(alias: &str) -> String {
     format!(
         "(SELECT count(*) FROM derivation_dependency e \
          LEFT JOIN derivation_build dep ON dep.derivation = e.dependency \
          WHERE e.derivation = {alias}.derivation AND e.kind IN (0, 2) \
-           AND (dep.derivation IS NULL OR NOT ({dep_ready})))"
+           AND (dep.derivation IS NULL OR NOT dep.fetchable))"
     )
 }
 
@@ -32,7 +32,7 @@ pub(super) static SEED_BLOCKING_DEPS: LazyLock<String> = LazyLock::new(|| {
     format!(
         "UPDATE derivation_build db SET blocking_deps = {count} \
          WHERE db.derivation = ANY($1::uuid[])",
-        count = blocking_dependency_count("db", &fetchable_predicate("dep")),
+        count = blocking_dependency_count("db"),
     )
 });
 
@@ -71,7 +71,7 @@ crate::sql_lazy! {
 }
 
 crate::sql! {
-    RIPPLE_DOWN = r#"
+    UNBLOCK_PARENTS = r#"
     UPDATE derivation_build d
     SET blocking_deps = d.blocking_deps - c.n
     FROM (SELECT e.derivation, count(*) AS n FROM derivation_dependency e
@@ -83,7 +83,7 @@ crate::sql! {
         tier = Bulk;
 }
 
-static RIPPLE_UP: LazyLock<String> = LazyLock::new(|| {
+static BLOCK_PARENTS: LazyLock<String> = LazyLock::new(|| {
     format!(
         "UPDATE derivation_build d \
          SET blocking_deps = d.blocking_deps + c.n, \
@@ -107,16 +107,11 @@ static RIPPLE_UP: LazyLock<String> = LazyLock::new(|| {
 });
 
 crate::sql_lazy! {
-    RIPPLE_UP_QUERY = || RIPPLE_UP.as_str(),
+    BLOCK_PARENTS_QUERY = || BLOCK_PARENTS.as_str(),
         params = [DerivationIds(64)],
         tier = Bulk;
 }
 
-/// The count is written absolutely, never adjusted.
-/// The replaced value was counted over an older edge set.
-/// An adjustment would carry that error forward.
-/// Each dependency is evaluated with the predicate, not with the `fetchable` column.
-/// This seed is the first reader and is running before any sweep could fix a stale flag.
 pub async fn seed_blocking_deps(lock: &SeedLock<'_>) -> Result<u64, DbErr> {
     if lock.derivations.is_empty() {
         return Ok(0);
@@ -147,15 +142,21 @@ async fn mark(lock: &SharedBuildLock<'_>, to: bool) -> Result<Vec<DerivationId>,
     ))
 }
 
-pub async fn became_fetchable(lock: &SharedBuildLock<'_>) -> Result<Vec<TransitionChange>, DbErr> {
-    let flipped = mark(lock, true).await?;
-    if flipped.is_empty() {
-        return Ok(Vec::new());
+#[derive(Debug, Default)]
+pub(super) struct MarkedFetchable {
+    pub(super) marked: usize,
+    pub(super) startable: Vec<DerivationId>,
+}
+
+pub(super) async fn mark_fetchable(lock: &SharedBuildLock<'_>) -> Result<MarkedFetchable, DbErr> {
+    let marked = mark(lock, true).await?;
+    if marked.is_empty() {
+        return Ok(MarkedFetchable::default());
     }
 
     let rows = lock
         .txn
-        .query_all_raw(RIPPLE_DOWN.bind([ids(&flipped)]))
+        .query_all_raw(UNBLOCK_PARENTS.bind([ids(&marked)]))
         .await?;
 
     let mut startable = Vec::new();
@@ -167,7 +168,41 @@ pub async fn became_fetchable(lock: &SharedBuildLock<'_>) -> Result<Vec<Transiti
         }
     }
 
-    promote(lock.txn, &startable).await
+    Ok(MarkedFetchable {
+        marked: marked.len(),
+        startable,
+    })
+}
+
+#[derive(Debug, Default)]
+pub(super) struct MarkedUnfetchable {
+    pub(super) marked: Vec<DerivationId>,
+    pub(super) unqueued: Vec<TransitionChange>,
+}
+
+pub(super) async fn mark_unfetchable(
+    lock: &SharedBuildLock<'_>,
+) -> Result<MarkedUnfetchable, DbErr> {
+    let marked = mark(lock, false).await?;
+    if marked.is_empty() {
+        return Ok(MarkedUnfetchable::default());
+    }
+
+    let rows = lock
+        .txn
+        .query_all_raw(BLOCK_PARENTS_QUERY.bind([ids(&marked)]))
+        .await?;
+    let unqueued = returned_transitions(rows)
+        .into_iter()
+        .filter(|c| c.from != c.to)
+        .collect();
+
+    Ok(MarkedUnfetchable { marked, unqueued })
+}
+
+pub async fn became_fetchable(lock: &SharedBuildLock<'_>) -> Result<Vec<TransitionChange>, DbErr> {
+    let marked = mark_fetchable(lock).await?;
+    promote(lock.txn, &marked.startable).await
 }
 
 pub async fn advance_fetchable<C>(
@@ -190,24 +225,18 @@ where
 }
 
 pub async fn lost_fetchability(lock: &SharedBuildLock<'_>) -> Result<Vec<TransitionChange>, DbErr> {
-    let flipped = mark(lock, false).await?;
-    if flipped.is_empty() {
-        return Ok(Vec::new());
+    let MarkedUnfetchable {
+        marked,
+        mut unqueued,
+    } = mark_unfetchable(lock).await?;
+    if marked.is_empty() {
+        return Ok(unqueued);
     }
 
-    let rows = lock
-        .txn
-        .query_all_raw(RIPPLE_UP_QUERY.bind([ids(&flipped)]))
-        .await?;
-    let mut changes: Vec<TransitionChange> = returned_transitions(rows)
-        .into_iter()
-        .filter(|c| c.from != c.to)
-        .collect();
+    let moved = update_need(lock.txn, &marked).await?;
+    unqueued.extend(settle_need(lock.txn, &moved).await?);
 
-    let moved = update_need(lock.txn, &flipped).await?;
-    changes.extend(settle_need(lock.txn, &moved).await?);
-
-    Ok(changes)
+    Ok(unqueued)
 }
 
 #[cfg(test)]
@@ -233,8 +262,8 @@ mod tests {
         for sql in [
             SEED_BLOCKING_DEPS.to_string(),
             RECOUNT_BLOCKING_DEPS.to_string(),
-            RIPPLE_DOWN.text().into_owned(),
-            RIPPLE_UP.to_string(),
+            UNBLOCK_PARENTS.text().into_owned(),
+            BLOCK_PARENTS.to_string(),
         ] {
             assert!(sql.contains("e.kind IN (0, 2)"), "{sql}");
         }
@@ -242,14 +271,28 @@ mod tests {
 
     #[test]
     fn the_count_treats_a_dependency_with_no_shared_build_as_blocking() {
-        let sql = norm(&blocking_dependency_count("db", "dep.fetchable"));
+        let sql = norm(&blocking_dependency_count("db"));
         assert_eq!(
             sql,
             "(SELECT count(*) FROM derivation_dependency e \
              LEFT JOIN derivation_build dep ON dep.derivation = e.dependency \
              WHERE e.derivation = db.derivation \
              AND e.kind IN (0, 2) \
-             AND (dep.derivation IS NULL OR NOT (dep.fetchable)))"
+             AND (dep.derivation IS NULL OR NOT dep.fetchable))"
+        );
+    }
+
+    #[test]
+    fn the_seed_counts_the_column_every_mark_adjusts_parents_by() {
+        let seed = norm(&SEED_BLOCKING_DEPS);
+        assert!(
+            seed.contains(&norm(&blocking_dependency_count("db"))),
+            "{seed}"
+        );
+        assert!(
+            !seed.contains(&norm(&fetchable_predicate("dep"))),
+            "a dependency whose column lags the predicate is left out of the seed and \
+             then subtracted again when its mark lands: {seed}"
         );
     }
 
@@ -439,7 +482,7 @@ mod tests {
                 &crate::scheduling::assignment_record::build_job_key_sql("d.id"),
             ),
         );
-        let sql = norm(&RIPPLE_UP);
+        let sql = norm(&BLOCK_PARENTS);
         for column in ["status", "updated_at"] {
             assert!(
                 sql.contains(&format!(
