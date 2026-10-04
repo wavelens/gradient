@@ -31,7 +31,6 @@ pub struct InstanceContext {
     pub cpu_time_ms: Windowed,
     pub avg_cpu_pct: Windowed,
     pub disk_bytes: Windowed,
-    pub network_mbps: Windowed,
     pub oom_rate: Windowed,
     pub closure_size: Windowed,
     pub nar_size_mb: Windowed,
@@ -43,6 +42,8 @@ pub struct InstanceContext {
     pub total_workers: u32,
     pub idle_workers: u32,
     pub cpu_core_score_mean: Option<f64>,
+    pub upload_speed_mean_mbps: Option<f64>,
+    pub download_speed_mean_mbps: Option<f64>,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -51,6 +52,7 @@ pub struct HistoryPrediction {
     pub avg_cpu_time_ms: Option<u64>,
     pub build_time_ms: Option<u64>,
     pub avg_disk_bytes: Option<u64>,
+    pub output_nar_size: Option<u64>,
     pub oom_rate: f32,
     pub samples: u32,
 }
@@ -63,7 +65,8 @@ pub struct WorkerMetricsView {
     pub ram_free_mb: Option<u64>,
     pub cpu_usage_pct: Option<f32>,
     pub disk_speed_mbps: Option<f32>,
-    pub network_speed_mbps: Option<f32>,
+    pub upload_speed_mbps: Option<f32>,
+    pub download_speed_mbps: Option<f32>,
 }
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -109,6 +112,7 @@ impl BuildContext {
         out.history.avg_cpu_time_ms = known(|h| h.avg_cpu_time_ms).reduce(u64::saturating_add);
         out.history.build_time_ms = known(|h| h.build_time_ms).max();
         out.history.avg_disk_bytes = known(|h| h.avg_disk_bytes).reduce(u64::saturating_add);
+        out.history.output_nar_size = known(|h| h.output_nar_size).reduce(u64::saturating_add);
         out.history.samples = items.iter().map(|i| i.history.samples).min().unwrap_or(0);
         out.derivations = items.iter().flat_map(|i| i.derivations.clone()).collect();
         out
@@ -271,6 +275,7 @@ mod tests {
                 avg_cpu_time_ms: Some(1000),
                 build_time_ms: None,
                 avg_disk_bytes: Some(10),
+                output_nar_size: Some(7),
                 oom_rate: 0.1,
                 samples: 5,
             },
@@ -282,6 +287,7 @@ mod tests {
         b.history.predicted_peak_ram_mb = Some(900);
         b.history.avg_cpu_time_ms = Some(4000);
         b.history.avg_disk_bytes = None;
+        b.history.output_nar_size = Some(3);
         b.history.samples = 2;
         b.pname = Some("git".into());
         b.prefer_local_build = true;
@@ -289,6 +295,7 @@ mod tests {
         assert_eq!(agg.history.predicted_peak_ram_mb, Some(900));
         assert_eq!(agg.history.avg_cpu_time_ms, Some(5000));
         assert_eq!(agg.history.avg_disk_bytes, Some(10));
+        assert_eq!(agg.history.output_nar_size, Some(10));
         assert_eq!(agg.history.build_time_ms, None);
         assert_eq!(agg.history.samples, 2);
         assert_eq!(agg.dependency_count, 4);

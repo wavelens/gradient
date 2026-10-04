@@ -1199,7 +1199,6 @@ fn resource_metric_expr(metric: &str) -> Option<(&'static str, &'static str)> {
             "(coalesce(dm.disk_read_bytes,0) + coalesce(dm.disk_write_bytes,0))::double precision",
             "bytes",
         ),
-        "network" => ("dm.peak_network_mbps", "Mbps"),
         _ => return None,
     })
 }
@@ -1546,7 +1545,8 @@ mod tests {
             ram_free_mb: None,
             ram_total_mb: 0,
             disk_speed_mbps: None,
-            network_speed_mbps: None,
+            upload_speed_mbps: None,
+            download_speed_mbps: None,
         }
     }
 
@@ -1818,7 +1818,7 @@ mod tests {
 
     #[test]
     fn expensive_resources_skip_zero_values_for_every_metric() {
-        for metric in ["ram", "cpu", "disk", "network"] {
+        for metric in ["ram", "cpu", "disk"] {
             let (value_expr, _) = resource_metric_expr(metric).unwrap();
             let sql = expensive_by_resource_sql(value_expr, 30, None);
             assert!(sql.contains(&format!("{value_expr} > 0")), "sql = {sql}");

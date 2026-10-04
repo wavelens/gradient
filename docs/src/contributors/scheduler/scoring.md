@@ -33,8 +33,8 @@ flowchart LR
 |---|---|---|
 | `JobContext` | `ScoredJob` (kind, architecture, `prefer_local_build`, `is_fixed_output`, `pname`, closure size, history), `missing_count`, `missing_nar_size`, `outputs_present`, `dependency_count`, `queued_at`, `ready_at`, `project_work_share`, `prioritized`, `rescore_count`, `now` | `JobTracker::score_candidates` in `gradient-scheduler/src/jobs.rs` |
 | `WorkerContext` | `architectures`, `system_features`, `fetch`, `metrics` | `worker_context_of` from the worker's `WorkerCaps` |
-| `WorkerMetricsView` | `cpu_count`, `cpu_core_score`, `ram_total_mb`, `ram_free_mb`, `cpu_usage_pct`, `disk_speed_mbps`, `network_speed_mbps` | `WorkerCapabilities` (static) and the 10 s `WorkerMetrics` heartbeat (live) |
-| `InstanceContext` | 13 `Windowed` averages, `active_builds`, `pending_builds`, `total_workers`, `idle_workers`, `cpu_core_score_mean` | `instance_metrics_pass`, see below |
+| `WorkerMetricsView` | `cpu_count`, `cpu_core_score`, `ram_total_mb`, `ram_free_mb`, `cpu_usage_pct`, `disk_speed_mbps`, `upload_speed_mbps`, `download_speed_mbps` | `WorkerCapabilities` (static) and the 10 s `WorkerMetrics` heartbeat (live) |
+| `InstanceContext` | 12 `Windowed` averages, `active_builds`, `pending_builds`, `total_workers`, `idle_workers`, `cpu_core_score_mean`, `upload_speed_mean_mbps`, `download_speed_mean_mbps` | `instance_metrics_pass`, see below |
 
 - `missing_count`, `missing_nar_size` and `outputs_present` are per worker. The worker must score each offered candidate against its store and send a `CandidateScore` (see [Offers](../proto/capabilities-and-dispatch.md#offers)). The values are `None` until that worker reported.
 - `dependency_count` is the number of direct input derivations (`derivation_dependency` rows), not the number of builds needing the derivation.
@@ -51,12 +51,13 @@ flowchart LR
 |---|---|
 | Closure size | `derivation.closure_size`, else one batched `transitive_closure_sizes` walk. The graph writer will persist computed sizes |
 | Build history | `history::predict`: latest 20 `derivation_metric` rows with the same `history_name` (`pname`, else `name`) and architecture, within [`retentionDays`](../../reference/configuration.md#general). One query per distinct pair |
+| Output size | `derivation_output.nar_size` of the derivations behind those rows, summed per derivation. One more query per pair with history |
 | Evaluation history | `compute_eval_history`: per-task p95 of `evaluation_metric.peak_rss_mb` over 24 h |
 
 - Only real builds can write a `derivation_metric` row. A substituted output will write none.
 - A failed build will write a row only after an out-of-memory kill.
 
-`HistoryPrediction` must carry the p95 peak RAM, mean CPU time, mean build time, mean disk bytes, OOM rate and a `samples` count. A value will stay `None` when no build in the window measured it. Rules add nothing for a `None` value.
+`HistoryPrediction` must carry the p95 peak RAM, mean CPU time, mean build time, mean disk bytes, mean output NAR size, OOM rate and a `samples` count. A value will stay `None` when no build in the window measured it. Rules add nothing for a `None` value.
 
 ## Instance Windows
 
@@ -64,7 +65,7 @@ flowchart LR
 
 | Source table | Windows |
 |---|---|
-| `derivation_metric` | `peak_ram_mb`, `cpu_time_ms`, `avg_cpu_pct`, `disk_bytes`, `network_mbps`, `build_time_ms`, `closure_size`, `oom_rate`, `completed` |
+| `derivation_metric` | `peak_ram_mb`, `cpu_time_ms`, `avg_cpu_pct`, `disk_bytes`, `build_time_ms`, `closure_size`, `oom_rate`, `completed` |
 | `dispatched_job` (builds with `ready_at`) | `wait_secs`, `nar_size_mb`, `missing_paths`, `dependency_cnt` |
 
 - Each `Windowed` value can hold 5 min, 1 h and 24 h averages. `None` will stand for no samples. A measured zero will stay zero.
@@ -82,12 +83,16 @@ flowchart LR
 
 | Signal | Measured in | Formula |
 |---|---|---|
-| `network_speed_mbps` | Passthrough NAR upload (`nar.rs`), NAR receive (`nar_recv.rs`), presigned PUT (`object_put.rs`) and presigned download (`download_one_presigned`) | bits / elapsed seconds / 10^6 |
+| `upload_speed_mbps` | Each NAR upload batch (`upload_all`), passthrough, presigned PUT and multipart alike | NAR bits / batch seconds incl. packing and compression / 10^6 |
+| `download_speed_mbps` | Each NAR fetch round (`fetch_round`), passthrough and presigned GET alike | NAR bits / round seconds / 10^6 |
 | `disk_speed_mbps` | `build_metrics.rs` after each build | cgroup `disk_read_bytes + disk_write_bytes` in MiB / build seconds |
 | `cpu_core_score` | Startup micro-benchmark, or `GRADIENT_WORKER_SYSTEM_CPU_CORE_SCORE` | Static, sent with `WorkerCapabilities` |
 
-- Network and disk are EWMAs (`alpha = 0.3`) in `gradient-worker-client/src/throughput.rs`, `None` until the first sample.
-- `cpu_core_score_mean` is the mean over connected workers with a non-zero score.
+- Upload, download and disk are EWMAs (`alpha = 0.3`) in `gradient-worker-client/src/throughput.rs`, `None` until the first sample.
+- Batches under 1 MiB stay out of the upload and download speeds. Connection setup would dominate their time.
+- Eval-cache blobs feed neither speed.
+- `cpu_core_score_mean`, `upload_speed_mean_mbps` and `download_speed_mean_mbps` are means over connected workers with a measured value.
+- `OutputUploadRule` can estimate the upload time as output NAR size / upload speed and charge the extra seconds over the fleet mean.
 
 ## Adding a Rule
 

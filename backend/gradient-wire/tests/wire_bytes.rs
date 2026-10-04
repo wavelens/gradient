@@ -41,7 +41,8 @@ fn worker_metrics_keep_their_baseline_bytes() {
             cpu_usage_pct: 1.5,
             ram_free_mb: 128,
             disk_speed_mbps: Some(-2.0),
-            network_speed_mbps: None,
+            upload_speed_mbps: None,
+            download_speed_mbps: None,
         },
         "050000c03f800101000000c000",
     );

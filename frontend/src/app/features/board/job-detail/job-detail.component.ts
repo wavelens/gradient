@@ -152,7 +152,8 @@ interface RuleRow {
             <tr><td class="label">RAM total</td><td class="mono">{{ formatMegabytes(j.worker_context.ram_total_mb) }}</td></tr>
             <tr><td class="label">RAM free</td><td class="mono">{{ formatMegabytes(j.worker_context.ram_free_mb) }}</td></tr>
             <tr><td class="label">Disk speed</td><td class="mono">{{ j.worker_context.disk_speed_mbps != null ? (j.worker_context.disk_speed_mbps | number) + ' MB/s' : '-' }}</td></tr>
-            <tr><td class="label">Network speed</td><td class="mono">{{ j.worker_context.network_speed_mbps != null ? (j.worker_context.network_speed_mbps | number) + ' Mbps' : '-' }}</td></tr>
+            <tr><td class="label">Upload speed</td><td class="mono">{{ j.worker_context.upload_speed_mbps != null ? (j.worker_context.upload_speed_mbps | number) + ' Mbps' : '-' }}</td></tr>
+            <tr><td class="label">Download speed</td><td class="mono">{{ j.worker_context.download_speed_mbps != null ? (j.worker_context.download_speed_mbps | number) + ' Mbps' : '-' }}</td></tr>
           </tbody>
         </gr-table>
       </section>
@@ -192,6 +193,7 @@ interface RuleRow {
               <tr><td class="label">Avg CPU time</td><td class="mono">{{ formatDuration(h.avg_cpu_time_ms) }}</td></tr>
               <tr><td class="label">Build time</td><td class="mono">{{ formatDuration(h.build_time_ms) }}</td></tr>
               <tr><td class="label">Avg disk usage</td><td class="mono">{{ formatBytes(h.avg_disk_bytes) }}</td></tr>
+              <tr><td class="label">Output size</td><td class="mono">{{ formatBytes(h.output_nar_size) }}</td></tr>
               <tr><td class="label">OOM rate</td><td class="mono">{{ h.oom_rate | number: '1.0-3' }}</td></tr>
               <tr><td class="label">Samples</td><td class="mono">{{ h.samples }}</td></tr>
             </tbody>
@@ -451,7 +453,6 @@ export class BoardJobDetailComponent implements OnInit {
       { name: 'CPU time (ms)', w: inst.cpu_time_ms },
       { name: 'Avg CPU (%)', w: inst.avg_cpu_pct },
       { name: 'Disk bytes', w: inst.disk_bytes },
-      { name: 'Network (Mbps)', w: inst.network_mbps },
       { name: 'OOM rate', w: inst.oom_rate },
       { name: 'Closure size', w: inst.closure_size },
       { name: 'NAR size (MB)', w: inst.nar_size_mb },

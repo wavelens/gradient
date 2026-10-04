@@ -850,7 +850,8 @@ fn send_live_metrics(writer: &ProtoWriter) {
                 cpu_usage_pct: m.cpu_usage_pct,
                 ram_free_mb: m.ram_free_mb,
                 disk_speed_mbps: gradient_worker_client::throughput::DISK.current(),
-                network_speed_mbps: gradient_worker_client::throughput::NETWORK.current(),
+                upload_speed_mbps: gradient_worker_client::throughput::UPLOAD.current(),
+                download_speed_mbps: gradient_worker_client::throughput::DOWNLOAD.current(),
             })
             .await
         {

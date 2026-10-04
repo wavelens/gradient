@@ -8,7 +8,6 @@ use gradient_util::sync::Mutex;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Weak};
-use std::time::Instant;
 
 use anyhow::Result;
 use bytes::Bytes;
@@ -263,7 +262,6 @@ async fn stage_pull(
     mut rx: mpsc::Receiver<NarChunk>,
 ) {
     let key = &spec.key;
-    let mut started: Option<Instant> = None;
 
     while let Some(NarChunk {
         data,
@@ -285,7 +283,6 @@ async fn stage_pull(
         }
 
         if !data.is_empty() {
-            started.get_or_insert_with(Instant::now);
             if let Err(e) = sink.append(offset, &data).await {
                 stager
                     .abandon(&spec, format!("partial append failed: {e}"))
@@ -302,9 +299,6 @@ async fn stage_pull(
         }
 
         let staged = sink.len();
-        if let Some(start) = started {
-            crate::throughput::NETWORK.observe_transfer(staged, start.elapsed());
-        }
 
         if let Some(total) = spec.expected
             && staged != total

@@ -21,7 +21,8 @@ export interface WorkerSamplePoint {
   ram_free_mb: number | null;
   ram_total_mb: number | null;
   disk_speed_mbps: number | null;
-  network_speed_mbps: number | null;
+  upload_speed_mbps: number | null;
+  download_speed_mbps: number | null;
   assigned_jobs: number;
   max_concurrent_builds: number;
   state: number;

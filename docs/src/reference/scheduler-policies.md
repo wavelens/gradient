@@ -44,12 +44,13 @@ The memory predictions (`ResourceFitRule`, the out-of-memory check) are requirin
 | `ResourceFitRule` | Penalty | Predicted peak memory above the worker's free memory, for builds and evaluations |
 | `ResourceSaturationRule` | Penalty, up to -10000 | Worker above 80% CPU (90% for `builtin` jobs) or below 10% free memory, or a likely out-of-memory build |
 | `PreferLocalBuildRule` | Bonus | `preferLocalBuild` derivations on a worker holding most of the closure |
-| `NetworkAffinityRule` | Bonus | Fixed-output downloads on workers with fast network |
+| `NetworkAffinityRule` | Bonus, up to 80 | Fixed-output downloads on workers downloading at least as fast as the fleet mean |
+| `OutputUploadRule` | Penalty, up to 400 | Builds with large outputs away from workers uploading slower than the fleet mean, 2 per extra second of upload |
 | `DiskAffinityRule` | Bonus | Disk-heavy builds on workers with fast disks |
 | `CpuAffinityRule` | Bonus or penalty, up to 1200 | Long builds on faster cores than the fleet average, away from slower ones |
 | `FairShareRule` | Penalty, disabled | Would slow projects holding a large share of running work |
 
-Workers are measuring network and disk speed from their own NAR transfers and builds. The affinity rules are adding nothing until the first transfer.
+Workers are measuring upload, download and disk speed from their own NAR transfers and builds. Transfers under 1 MiB stay out. The speed rules are adding nothing until the first measured transfer. `OutputUploadRule` can read the output size of earlier builds of the same package.
 
 ## Custom Policies
 

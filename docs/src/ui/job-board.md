@@ -14,8 +14,8 @@ Activity of the scheduler and the workers, right now and over time. Live jobs, t
 | Workers | Fleet size, load by capability, system and feature, slot use per worker | Spot the missing kind of worker |
 | Cache | Stored size, traffic, growth, latency per upstream cache | |
 | Storage | NAR storage latency and errors per operation (file or S3), writer lane fill and send stalls, NAR delivery queue and failures. Every chart on one time axis over the whole window, minute resolution up to 6 h. Superusers only | Pick the time window |
-| Network | NAR egress, worker network and disk speed, HTTP latency per route | |
-| Jobs | The costliest builds by wall time, peak RAM, CPU time, disk I/O and network | Pick the time window |
+| Network | NAR egress, worker upload, download and disk speed, HTTP latency per route | |
+| Jobs | The costliest builds by wall time, peak RAM, CPU time and disk I/O | Pick the time window |
 | Evals | The costliest evaluations by time, peak memory, thunks, function calls and allocations | Pick the time window |
 | System Health | Server runtime, metric pipeline lag, route stats. Superusers only | **Run Deep GC**. **Enable Draining** before stopping the server |
 
@@ -94,7 +94,7 @@ The timeline shows where a slow job spent its time. The score will explain the w
 
 Load charts set the running jobs of one kind against the slots of the workers taking that kind. A chart near 100% will name the worker type to add: evaluation, build, a system such as `aarch64-linux`, or a feature such as `kvm`.
 
-**Project -> Workers -> Metrics** has the per-worker CPU, memory, disk and network history. The connection and disconnect history will stay there for [`retentionDays`](../reference/configuration.md#general) (90 days by default).
+**Project -> Workers -> Metrics** has the per-worker CPU, memory, disk, upload and download history. The connection and disconnect history will stay there for [`retentionDays`](../reference/configuration.md#general) (90 days by default).
 
 ## Visibility
 

@@ -52,8 +52,95 @@ enum Grown {
     },
 }
 
+#[derive(Proto, Debug, Clone, PartialEq, Default)]
+#[proto(removed(28, Option<f32>))]
+struct Trimmed {
+    id: String,
+    #[proto(28, default)]
+    upload: Option<f32>,
+}
+
+#[derive(Proto, Debug, Clone, PartialEq, Default)]
+struct BeforeTrim {
+    id: String,
+    peak: Option<f32>,
+}
+
+#[derive(Proto, Debug, Clone, PartialEq)]
+#[proto(oldest = 27)]
+enum Heartbeat {
+    #[proto(removed(28, Option<f32>))]
+    Load {
+        cpu: u32,
+        #[proto(28, default)]
+        upload: Option<f32>,
+    },
+}
+
+#[derive(Proto, Debug, Clone, PartialEq)]
+#[proto(oldest = 27)]
+enum HeartbeatBeforeTrim {
+    Load { cpu: u32, peak: Option<f32> },
+}
+
+#[derive(Proto, Debug, Clone, PartialEq)]
+#[proto(oldest = 27)]
+enum HeartbeatAfterTrim {
+    Load { cpu: u32, upload: Option<f32> },
+}
+
 fn at<T: Proto>(value: &T, version: u16) -> Bytes {
     to_bytes(value, version).expect("encodes")
+}
+
+fn shape<T: Proto>(version: u16) -> String {
+    let mut out = String::new();
+    T::describe(version, &mut out);
+    out
+}
+
+#[test]
+fn a_removed_field_keeps_its_place_for_older_peers_only() {
+    let trimmed = Trimmed {
+        id: "j".into(),
+        upload: Some(8.0),
+    };
+    let unset = BeforeTrim {
+        id: "j".into(),
+        peak: None,
+    };
+    assert_eq!(at(&trimmed, 27), at(&unset, 27));
+    assert_eq!(shape::<Trimmed>(27), shape::<BeforeTrim>(27));
+
+    let sent_by_old_peer = BeforeTrim {
+        peak: Some(3.0),
+        ..unset
+    };
+    assert_eq!(
+        from_bytes::<Trimmed>(at(&sent_by_old_peer, 27), 27),
+        Ok(Trimmed {
+            id: "j".into(),
+            upload: None,
+        })
+    );
+    assert_eq!(from_bytes::<Trimmed>(at(&trimmed, 28), 28), Ok(trimmed));
+    assert_eq!((Trimmed::OLDEST, Trimmed::NEWEST), (0, 28));
+}
+
+#[test]
+fn a_variant_drops_a_removed_field_from_the_version_that_removed_it() {
+    assert_eq!(shape::<Heartbeat>(27), shape::<HeartbeatBeforeTrim>(27));
+    assert_eq!(shape::<Heartbeat>(28), shape::<HeartbeatAfterTrim>(28));
+
+    let load = Heartbeat::Load {
+        cpu: 4,
+        upload: Some(8.0),
+    };
+    assert_eq!(
+        at(&load, 27),
+        at(&HeartbeatBeforeTrim::Load { cpu: 4, peak: None }, 27)
+    );
+    assert_eq!(from_bytes::<Heartbeat>(at(&load, 28), 28), Ok(load));
 }
 
 #[test]

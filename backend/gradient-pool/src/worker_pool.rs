@@ -13,7 +13,7 @@ use gradient_wire::types::{GradientCapabilities, JobKind};
 
 use crate::peer_auth::PeerAuth;
 use crate::session_port::{SessionPort, SessionSignal};
-use crate::worker_state::{Active, Draining, TypedWorker};
+use crate::worker_state::{Active, Draining, TypedWorker, WorkerShared};
 
 pub enum WorkerSlot {
     Active(TypedWorker<Active>),
@@ -165,14 +165,16 @@ impl WorkerPool {
         cpu_usage_pct: f32,
         ram_free_mb: u64,
         disk_speed_mbps: Option<f32>,
-        network_speed_mbps: Option<f32>,
+        upload_speed_mbps: Option<f32>,
+        download_speed_mbps: Option<f32>,
     ) {
         if let Some(slot) = self.workers.get_mut(id) {
             let s = slot.shared_mut();
             s.cpu_usage_pct = Some(cpu_usage_pct);
             s.ram_free_mb = Some(ram_free_mb);
             s.disk_speed_mbps = disk_speed_mbps;
-            s.network_speed_mbps = network_speed_mbps;
+            s.upload_speed_mbps = upload_speed_mbps;
+            s.download_speed_mbps = download_speed_mbps;
         }
     }
 
@@ -186,7 +188,8 @@ impl WorkerPool {
                 ram_free_mb: s.ram_free_mb,
                 cpu_usage_pct: s.cpu_usage_pct,
                 disk_speed_mbps: s.disk_speed_mbps,
-                network_speed_mbps: s.network_speed_mbps,
+                upload_speed_mbps: s.upload_speed_mbps,
+                download_speed_mbps: s.download_speed_mbps,
             }
         })
     }
@@ -295,14 +298,28 @@ impl WorkerPool {
     }
 
     pub fn mean_cpu_core_score(&self) -> Option<f64> {
-        let scores: Vec<f64> = self
+        self.mean_of(|s| {
+            Some(s.cpu_core_score)
+                .filter(|score| *score > 0)
+                .map(f64::from)
+        })
+    }
+
+    pub fn mean_upload_speed_mbps(&self) -> Option<f64> {
+        self.mean_of(|s| s.upload_speed_mbps.map(f64::from))
+    }
+
+    pub fn mean_download_speed_mbps(&self) -> Option<f64> {
+        self.mean_of(|s| s.download_speed_mbps.map(f64::from))
+    }
+
+    fn mean_of(&self, value: impl Fn(&WorkerShared) -> Option<f64>) -> Option<f64> {
+        let values: Vec<f64> = self
             .workers
             .values()
-            .map(|slot| slot.shared().cpu_core_score)
-            .filter(|s| *s > 0)
-            .map(f64::from)
+            .filter_map(|slot| value(slot.shared()))
             .collect();
-        (!scores.is_empty()).then(|| scores.iter().sum::<f64>() / scores.len() as f64)
+        (!values.is_empty()).then(|| values.iter().sum::<f64>() / values.len() as f64)
     }
 
     fn info_for(&self, id: &str, slot: &WorkerSlot) -> WorkerInfo {
@@ -320,7 +337,8 @@ impl WorkerPool {
             ram_free_mb: s.ram_free_mb,
             ram_total_mb: s.ram_total_mb,
             disk_speed_mbps: s.disk_speed_mbps,
-            network_speed_mbps: s.network_speed_mbps,
+            upload_speed_mbps: s.upload_speed_mbps,
+            download_speed_mbps: s.download_speed_mbps,
         }
     }
 
@@ -361,7 +379,9 @@ pub struct WorkerInfo {
     #[serde(skip)]
     pub disk_speed_mbps: Option<f32>,
     #[serde(skip)]
-    pub network_speed_mbps: Option<f32>,
+    pub upload_speed_mbps: Option<f32>,
+    #[serde(skip)]
+    pub download_speed_mbps: Option<f32>,
 }
 
 #[cfg(test)]
@@ -443,6 +463,18 @@ mod tests {
         assert_eq!(jobs, vec!["j1", "j2"]);
         assert!(!pool.is_connected("w1"));
         assert_eq!(pool.worker_count(), 0);
+    }
+
+    #[test]
+    fn fleet_speed_means_skip_workers_that_measured_nothing() {
+        let mut pool = WorkerPool::new();
+        for (id, upload) in [("w1", Some(100.0)), ("w2", Some(300.0)), ("w3", None)] {
+            pool.register(id.into(), caps(), HashSet::new(), port().0);
+            pool.update_metrics(id, 0.0, 0, None, upload, None);
+        }
+
+        assert_eq!(pool.mean_upload_speed_mbps(), Some(200.0));
+        assert_eq!(pool.mean_download_speed_mbps(), None);
     }
 
     #[test]
@@ -552,14 +584,16 @@ mod tests {
         assert_eq!(view.cpu_usage_pct, None);
         assert_eq!(view.ram_free_mb, None);
         assert_eq!(view.disk_speed_mbps, None);
-        assert_eq!(view.network_speed_mbps, None);
+        assert_eq!(view.upload_speed_mbps, None);
+        assert_eq!(view.download_speed_mbps, None);
 
-        pool.update_metrics("w1", 42.5, 3000, Some(550.0), Some(120.0));
+        pool.update_metrics("w1", 42.5, 3000, Some(550.0), Some(120.0), Some(900.0));
         let view = pool.metrics_for("w1").unwrap();
         assert_eq!(view.cpu_usage_pct, Some(42.5));
         assert_eq!(view.ram_free_mb, Some(3000));
         assert_eq!(view.disk_speed_mbps, Some(550.0));
-        assert_eq!(view.network_speed_mbps, Some(120.0));
+        assert_eq!(view.upload_speed_mbps, Some(120.0));
+        assert_eq!(view.download_speed_mbps, Some(900.0));
         assert_eq!(view.cpu_count, 4);
         assert_eq!(view.ram_total_mb, 8192);
 
@@ -591,7 +625,7 @@ mod tests {
                 ..Default::default()
             },
         );
-        pool.update_metrics("w1", 12.5, 9000, None, None);
+        pool.update_metrics("w1", 12.5, 9000, None, None, None);
 
         let caps = pool.worker_caps("w1").unwrap();
         assert!(caps.fetch);

@@ -45,7 +45,8 @@ pub struct WorkerMetrics {
     pub cpu_usage_pct: f32,
     pub ram_free_mb: u64,
     pub disk_speed_mbps: Option<f32>,
-    pub network_speed_mbps: Option<f32>,
+    pub upload_speed_mbps: Option<f32>,
+    pub download_speed_mbps: Option<f32>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -78,6 +79,8 @@ pub struct Counts {
     pub pending_builds: u32,
     pub active_builds: u32,
     pub cpu_core_score_mean: Option<f64>,
+    pub upload_speed_mean_mbps: Option<f64>,
+    pub download_speed_mean_mbps: Option<f64>,
 }
 
 #[allow(
@@ -664,7 +667,8 @@ impl Actor for CoreActor {
                     metrics.cpu_usage_pct,
                     metrics.ram_free_mb,
                     metrics.disk_speed_mbps,
-                    metrics.network_speed_mbps,
+                    metrics.upload_speed_mbps,
+                    metrics.download_speed_mbps,
                 );
                 let _ = reply.send(());
             }
@@ -922,6 +926,8 @@ impl Actor for CoreActor {
                     pending_builds,
                     active_builds,
                     cpu_core_score_mean: core.pool.mean_cpu_core_score(),
+                    upload_speed_mean_mbps: core.pool.mean_upload_speed_mbps(),
+                    download_speed_mean_mbps: core.pool.mean_download_speed_mbps(),
                 });
             }
             SchedulerMsg::PendingSnapshot { reply } => {

@@ -212,7 +212,6 @@ async fn send_path(
     match target {
         GrantTarget::Passthrough { resume_offset } => {
             debug!(store_path, resume_offset, "passthrough NAR upload");
-            let started = std::time::Instant::now();
             let mut passthrough = PassthroughStream::new(request_id, writer, resume_offset);
             let meta = pack_path_in_parts(
                 store_path,
@@ -222,8 +221,7 @@ async fn send_path(
                 nar_read,
             )
             .await?;
-            let sent = passthrough.finish().await?;
-            crate::throughput::NETWORK.observe_transfer(sent, started.elapsed());
+            passthrough.finish().await?;
             Ok((meta, None))
         }
         GrantTarget::Put { url } => {
@@ -337,7 +335,7 @@ impl<'a> PassthroughStream<'a> {
         }
     }
 
-    async fn finish(self) -> Result<u64> {
+    async fn finish(self) -> Result<()> {
         self.writer
             .send(ClientMessage::UploadChunk {
                 request_id: self.request_id,
@@ -346,7 +344,7 @@ impl<'a> PassthroughStream<'a> {
                 is_final: true,
             })
             .await?;
-        Ok(self.produced.saturating_sub(self.resume_from))
+        Ok(())
     }
 }
 

@@ -783,7 +783,6 @@ async fn record_metrics(
         avg_cpu_pct: metrics.avg_cpu_pct.map(|v| v as f64),
         disk_read_bytes: metrics.disk_read_bytes.map(|v| v as i64),
         disk_write_bytes: metrics.disk_write_bytes.map(|v| v as i64),
-        peak_network_mbps: metrics.peak_network_mbps.map(|v| v as f64),
         oom_killed: metrics.oom_killed,
         build_time_ms: metrics.build_time_ms.map(|v| v as i64),
         worker_id: gradient_db::scheduling::build_attempt::latest_attempt_worker(

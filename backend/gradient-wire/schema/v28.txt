@@ -4,13 +4,13 @@ client
 2:{}
 3:{u16,str}
 4:{seq<str>,seq<str>,u32,u32,u64,u32,opt<str>,opt<str>}
-5:{f32,u64,opt<f32>,opt<f32>}
+5:{f32,u64,opt<f32>,opt<f32>,opt<f32>}
 6:{}
 7:{seq<{str,u32,u64,bool}>,bool}
 8:{str,bool,opt<str>}
-9:{str,str,[0:{},1:{opt<str>},2:{},3:{},4:{seq<{str,str,seq<{str,str}>,seq<str>,seq<str>,str,seq<str>,opt<u64>,opt<u64>,bool,bool,bool,opt<str>}>,seq<str>,seq<str>},5:{str},6:{str,seq<{str,str,str,opt<i64>,opt<str>,seq<{str,str,str,str,opt<u64>}>}>,opt<{opt<u64>,opt<u64>,opt<f32>,opt<u64>,opt<u64>,bool,opt<u64>,opt<f32>}>,bool},7:{},8:{{u64,u64,u64,u64,u64,u64,u64,u64,str,seq<{str,u64,u64,u64,u64}>,seq<{str,opt<str>,str,str,bool,opt<str>}>}},9:{str,seq<{str,opt<str>,str}>},10:{seq<str>}]}
+9:{str,str,[0:{},1:{opt<str>},2:{},3:{},4:{seq<{str,str,seq<{str,str}>,seq<str>,seq<str>,str,seq<str>,opt<u64>,opt<u64>,bool,bool,bool,opt<str>}>,seq<str>,seq<str>},5:{str},6:{str,seq<{str,str,str,opt<i64>,opt<str>,seq<{str,str,str,str,opt<u64>}>}>,opt<{opt<u64>,opt<u64>,opt<f32>,opt<u64>,opt<u64>,bool,opt<u64>}>,bool},7:{},8:{{u64,u64,u64,u64,u64,u64,u64,u64,str,seq<{str,u64,u64,u64,u64}>,seq<{str,opt<str>,str,str,bool,opt<str>}>}},9:{str,seq<{str,opt<str>,str}>},10:{seq<str>}]}
 10:{str,str,seq<{[0:{},1:{},2:{},3:{},4:{},5:{},6:{},7:{},8:{},9:{},10:{},11:{},12:{},13:{},14:{},15:{},16:{}],u64,u64,opt<u32>,u32,u64}>,u64}
-11:{str,str,str,[0:{},1:{},2:{},3:{},4:{},5:{},6:{}],seq<str>,seq<{[0:{},1:{},2:{},3:{},4:{},5:{},6:{},7:{},8:{},9:{},10:{},11:{},12:{},13:{},14:{},15:{},16:{}],u64,u64,opt<u32>,u32,u64}>,u64,opt<{opt<u64>,opt<u64>,opt<f32>,opt<u64>,opt<u64>,bool,opt<u64>,opt<f32>}>}
+11:{str,str,str,[0:{},1:{},2:{},3:{},4:{},5:{},6:{}],seq<str>,seq<{[0:{},1:{},2:{},3:{},4:{},5:{},6:{},7:{},8:{},9:{},10:{},11:{},12:{},13:{},14:{},15:{},16:{}],u64,u64,opt<u32>,u32,u64}>,u64,opt<{opt<u64>,opt<u64>,opt<f32>,opt<u64>,opt<u64>,bool,opt<u64>}>}
 12:{}
 13:{str,str,str,[0:{},1:{},2:{}],u64,opt<u64>,u32,opt<u32>}
 14:{str,str,[0:{seq<{str,[0:{},1:{},2:{},3:{}],u64,u64}>},1:{u64}]}

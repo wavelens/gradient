@@ -51,7 +51,7 @@ import { formatMegabytes, formatPercent, formatQuantity } from '@shared/text';
       <gr-card-grid min="380px">
         <gr-metric-chart title="CPU usage" type="line" [series]="cpuSeries()" [categories]="times()" [colors]="['#17a2b8']" [valueFormatter]="percent" [yAxisMax]="100"></gr-metric-chart>
         <gr-metric-chart title="RAM free" type="area" [series]="ramSeries()" [categories]="times()" [colors]="['#28a745']" [valueFormatter]="megabytes"></gr-metric-chart>
-        <gr-metric-chart title="Network speed" type="line" [series]="netSeries()" [categories]="times()" [colors]="['#6f42c1']" [valueFormatter]="mbps"></gr-metric-chart>
+        <gr-metric-chart title="Upload and download speed" type="line" [series]="transferSeries()" [categories]="times()" [colors]="['#6f42c1', '#20c997']" [valueFormatter]="mbps"></gr-metric-chart>
         <gr-metric-chart title="Disk speed" type="line" [series]="diskSeries()" [categories]="times()" [colors]="['#fd7e14']" [valueFormatter]="mbps"></gr-metric-chart>
         <gr-metric-chart title="Assigned jobs" type="area" [series]="loadSeries()" [categories]="times()" [colors]="['#e83e8c']"></gr-metric-chart>
       </gr-card-grid>
@@ -95,7 +95,10 @@ export class WorkerMetricsComponent implements OnInit {
   times = computed(() => this.samples().map((s) => s.at.slice(11, 16)));
   cpuSeries = computed(() => [{ name: 'cpu', data: this.samples().map((s) => s.cpu_usage_pct ?? 0) }]);
   ramSeries = computed(() => [{ name: 'ram free', data: this.samples().map((s) => s.ram_free_mb ?? 0) }]);
-  netSeries = computed(() => [{ name: 'network', data: this.samples().map((s) => s.network_speed_mbps ?? 0) }]);
+  transferSeries = computed(() => [
+    { name: 'upload', data: this.samples().map((s) => s.upload_speed_mbps ?? 0) },
+    { name: 'download', data: this.samples().map((s) => s.download_speed_mbps ?? 0) },
+  ]);
   diskSeries = computed(() => [{ name: 'disk', data: this.samples().map((s) => s.disk_speed_mbps ?? 0) }]);
   loadSeries = computed(() => [{ name: 'assigned', data: this.samples().map((s) => s.assigned_jobs) }]);
 

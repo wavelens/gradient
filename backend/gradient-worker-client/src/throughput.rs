@@ -8,7 +8,11 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 const ALPHA: f64 = 0.3;
 
-pub static NETWORK: ThroughputEwma = ThroughputEwma::new();
+/// Below this size the connection setup and round trips are dominating the elapsed time.
+const MIN_TRANSFER_BYTES: u64 = 1024 * 1024;
+
+pub static UPLOAD: ThroughputEwma = ThroughputEwma::new();
+pub static DOWNLOAD: ThroughputEwma = ThroughputEwma::new();
 pub static DISK: ThroughputEwma = ThroughputEwma::new();
 
 /// The `0` bit pattern is marking "no sample yet".
@@ -46,6 +50,10 @@ impl ThroughputEwma {
     }
 
     pub fn observe_transfer(&self, bytes: u64, elapsed: std::time::Duration) {
+        if bytes < MIN_TRANSFER_BYTES {
+            return;
+        }
+
         self.observe(bytes as f64 * 8.0 / elapsed.as_secs_f64().max(1e-6) / 1_000_000.0);
     }
 
@@ -93,8 +101,15 @@ mod tests {
     #[test]
     fn a_transfer_is_observed_in_megabits_per_second() {
         let e = ThroughputEwma::new();
-        e.observe_transfer(1_000_000, std::time::Duration::from_secs(1));
-        assert_eq!(e.current(), Some(8.0));
+        e.observe_transfer(4_000_000, std::time::Duration::from_secs(2));
+        assert_eq!(e.current(), Some(16.0));
+    }
+
+    #[test]
+    fn a_transfer_under_a_mebibyte_is_ignored() {
+        let e = ThroughputEwma::new();
+        e.observe_transfer(MIN_TRANSFER_BYTES - 1, std::time::Duration::from_millis(1));
+        assert_eq!(e.current(), None);
     }
 
     #[test]
