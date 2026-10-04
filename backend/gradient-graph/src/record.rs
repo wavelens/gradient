@@ -66,8 +66,8 @@ ON CONFLICT (hash, name) DO NOTHING
 
     EDGE_INSERT = r#"
 INSERT INTO derivation_dependency (derivation, dependency)
-SELECT e.derivation, e.dependency FROM unnest($1::uuid[], $2::uuid[]) AS e(derivation, dependency)
-ON CONFLICT DO NOTHING
+SELECT DISTINCT e.derivation, e.dependency FROM unnest($1::uuid[], $2::uuid[]) AS e(derivation, dependency)
+ON CONFLICT (derivation, dependency) DO UPDATE SET kind = 2 WHERE derivation_dependency.kind = 1
 RETURNING derivation
 "#,
         params = [DerivationIds(64), DerivationIds(64)];
@@ -1252,6 +1252,18 @@ mod tests {
         assert!(accepts_batches(EvaluationStatus::Waiting, true));
         assert!(!accepts_batches(EvaluationStatus::Building, false));
         assert!(!accepts_batches(EvaluationStatus::Aborted, true));
+    }
+
+    #[test]
+    fn a_build_edge_landing_on_a_runtime_edge_becomes_both_and_reseeds_its_parent() {
+        let sql = EDGE_INSERT.text();
+        assert!(
+            sql.contains(
+                "ON CONFLICT (derivation, dependency) DO UPDATE SET kind = 2 WHERE derivation_dependency.kind = 1\nRETURNING derivation"
+            ),
+            "a runtime edge recorded before its parent was walked again must start counting as a build input, \
+             and the parent must come back in the grown set so both counters are recounted: {sql}"
+        );
     }
 
     #[test]
