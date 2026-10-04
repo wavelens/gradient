@@ -8,7 +8,9 @@ use anyhow::{Context, Result};
 use gradient_db::{
     DbContext,
     graph::{can_start::unpromote_ungated, promotion::cascade_dependency_failed},
-    scheduling::build_attempt::{fail_latest_attempt, succeed_latest_attempt},
+    scheduling::build_attempt::{
+        abort_running_attempts, fail_latest_attempt, succeed_latest_attempt,
+    },
     status::{
         emit_transition_effects, update_derivation_build_status, update_evaluation_status,
         update_evaluation_status_with_error,
@@ -127,11 +129,20 @@ pub(crate) async fn apply(ctx: &DbContext, transition: Transition) -> Result<Tra
                 }
             };
 
-            let mut requeued = Vec::new();
-            for row in rows
+            let building: Vec<_> = rows
                 .into_iter()
                 .filter(|r| r.status == BuildStatus::Building)
-            {
+                .collect();
+            let ids: Vec<DerivationBuildId> = building.iter().map(|r| r.id).collect();
+            abort_running_attempts(
+                &ctx.worker_db,
+                &ids,
+                "the worker disconnected before the build finished",
+            )
+            .await?;
+
+            let mut requeued = Vec::new();
+            for row in building {
                 let derivation = row.derivation;
                 update_derivation_build_status(ctx, row, BuildStatus::Queued).await?;
                 requeued.push(derivation);
@@ -960,4 +971,67 @@ async fn ready(
     .await?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_ctx::ctx;
+    use gradient_entity::build_attempt::AttemptOutcome;
+    use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
+
+    #[tokio::test]
+    async fn an_orphaned_build_closes_its_running_attempt_before_it_is_queued_again() {
+        let building = MDerivationBuild {
+            id: DerivationBuildId::now_v7(),
+            derivation: DerivationId::now_v7(),
+            status: BuildStatus::Building,
+            ..Default::default()
+        };
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([vec![building.clone()]])
+            .append_exec_results([MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 1,
+            }])
+            .into_connection();
+        let log_db = db.clone();
+        let (ctx, _) = ctx(db).await;
+
+        let _ = apply(
+            &ctx,
+            Transition::OrphanedBuilds {
+                shared_builds: vec![building.id],
+            },
+        )
+        .await;
+
+        let log = log_db.into_transaction_log();
+        let statements: Vec<_> = log.iter().flat_map(|t| t.statements()).collect();
+        let position = |prefix: &str| {
+            statements
+                .iter()
+                .position(|s| s.sql.starts_with(prefix))
+                .unwrap_or_else(|| panic!("no {prefix}: {statements:?}"))
+        };
+        let close = position("UPDATE \"build_attempt\" SET \"outcome\" = $1");
+        let requeue = position("UPDATE \"derivation_build\"");
+        assert!(close < requeue, "{statements:?}");
+
+        let close = statements[close];
+        assert!(
+            close.sql.contains("\"build_attempt\".\"outcome\" = $"),
+            "only the running attempt is closed: {}",
+            close.sql
+        );
+        let values = format!("{:?}", close.values);
+        assert!(values.contains(&building.id.to_string()), "{values}");
+        assert!(
+            values.contains(&format!(
+                "Int(Some({}))",
+                i32::from(AttemptOutcome::Aborted)
+            )),
+            "{values}"
+        );
+    }
 }
