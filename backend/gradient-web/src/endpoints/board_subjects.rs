@@ -8,7 +8,8 @@ use crate::metrics_scope::MetricsScope;
 use gradient_types::input::vec_to_hex;
 use gradient_types::*;
 use sea_orm::{
-    ColumnTrait, ConnectionTrait, DbErr, EntityTrait, QueryFilter, QueryOrder, QuerySelect, Select,
+    ColumnTrait, ConnectionTrait, DbErr, EntityTrait, FromQueryResult, QueryFilter, QueryOrder,
+    QuerySelect, Select,
 };
 use serde::Serialize;
 use std::collections::{BTreeSet, HashMap};
@@ -118,23 +119,30 @@ impl WorkerNames {
             .into_iter()
             .collect();
         let visible = scope.project_ids();
-        let rows: Vec<(String, String)> = gradient_db::fetch_in_chunks(&workers, |chunk| {
+        let rows: Vec<WorkerNameRow> = gradient_db::fetch_in_chunks(&workers, |chunk| {
             worker_names_query(chunk, visible.as_deref())
-                .into_tuple()
+                .into_model()
                 .all(db)
         })
         .await?;
 
         let mut names = HashMap::new();
-        for (worker, name) in rows {
-            names.entry(worker).or_insert(name);
+        for row in rows {
+            names.entry(row.worker_id).or_insert(row.display_name);
         }
+
         Ok(Self(names))
     }
 
     pub fn name(&self, worker: &str) -> Option<String> {
         self.0.get(worker).cloned()
     }
+}
+
+#[derive(FromQueryResult)]
+struct WorkerNameRow {
+    worker_id: String,
+    display_name: String,
 }
 
 fn worker_names_query(
