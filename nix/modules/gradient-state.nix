@@ -205,8 +205,8 @@
         type = types.listOf projectTeamType;
         default = [ ];
         description = ''
-          Teams granted on this project. An empty list leaves the project's grants alone; a
-          non-empty list is the source of truth and the next state apply removes grants not listed.
+          Teams granted on this project. The next state apply removes grants declared here
+          before and no longer listed. Grants from the API or from new-project settings stay.
         '';
       };
     };
@@ -930,8 +930,8 @@
         type = types.listOf cacheTeamType;
         default = [ ];
         description = ''
-          Teams granted on this cache. An empty list leaves the cache's grants alone; a non-empty
-          list is the source of truth and the next state apply removes grants not listed.
+          Teams granted on this cache. The next state apply removes grants declared here before
+          and no longer listed. Grants from the API stay.
         '';
       };
 

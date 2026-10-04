@@ -39,6 +39,7 @@ const UP: [&str; 17] = [
         role uuid REFERENCES role(id) ON DELETE CASCADE,
         includes_users boolean NOT NULL,
         includes_workers boolean NOT NULL,
+        managed boolean NOT NULL DEFAULT false,
         created_at timestamp without time zone NOT NULL,
         UNIQUE (team, project),
         CHECK (includes_users OR includes_workers),
@@ -50,6 +51,7 @@ const UP: [&str; 17] = [
         team uuid NOT NULL REFERENCES team(id) ON DELETE CASCADE,
         cache uuid NOT NULL REFERENCES cache(id) ON DELETE CASCADE,
         role uuid NOT NULL REFERENCES cache_role(id) ON DELETE CASCADE,
+        managed boolean NOT NULL DEFAULT false,
         created_at timestamp without time zone NOT NULL,
         UNIQUE (team, cache)
     )",

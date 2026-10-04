@@ -16,7 +16,9 @@ use gradient_types::consts::{
     BASE_ROLE_ADMIN_ID, BASE_ROLE_VIEW_ID, BASE_ROLE_WRITE_ID,
 };
 use gradient_types::*;
-use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter, Set};
+use sea_orm::{
+    ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, IntoActiveModel, QueryFilter, Set,
+};
 use std::collections::HashMap;
 
 fn builtin_project_role(name: &str) -> Option<RoleId> {
@@ -44,8 +46,7 @@ fn team_role(name: &str) -> TeamRole {
     }
 }
 
-// An empty `teams` list on a project or cache leaves its grants alone, like an empty `members`
-// list, so the grants of teams set to grant new projects survive; a non-empty list is authoritative.
+// The state only removes the grants it declared (`managed`), keeping API and new-project grants.
 impl<'a> StateApplicator<'a> {
     pub(crate) async fn apply_teams(
         &self,
@@ -201,14 +202,7 @@ impl<'a> StateApplicator<'a> {
                     .await?;
             }
 
-            if declared.is_empty() {
-                continue;
-            }
-            team_project::Entity::delete_many()
-                .filter(team_project::Column::Project.eq(project_id))
-                .filter(team_project::Column::Team.is_not_in(declared))
-                .exec(self.db)
-                .await?;
+            remove_undeclared_project_grants(self.db, project_id, declared).await?;
         }
 
         Ok(())
@@ -232,6 +226,7 @@ impl<'a> StateApplicator<'a> {
             active.role = Set(role);
             active.includes_users = Set(grant.users);
             active.includes_workers = Set(grant.workers);
+            active.managed = Set(true);
             active.update(self.db).await?;
             return Ok(());
         }
@@ -243,6 +238,7 @@ impl<'a> StateApplicator<'a> {
             role,
             includes_users: grant.users,
             includes_workers: grant.workers,
+            managed: true,
             created_at: now(),
         }
         .into_active_model()
@@ -292,10 +288,11 @@ impl<'a> StateApplicator<'a> {
                     .one(self.db)
                     .await?;
                 match existing {
-                    Some(row) if row.role == role => {}
+                    Some(row) if row.role == role && row.managed => {}
                     Some(row) => {
                         let mut active: team_cache::ActiveModel = row.into();
                         active.role = Set(role);
+                        active.managed = Set(true);
                         active.update(self.db).await?;
                     }
                     None => {
@@ -304,6 +301,7 @@ impl<'a> StateApplicator<'a> {
                             team,
                             cache: cache_id,
                             role,
+                            managed: true,
                             created_at: now(),
                         }
                         .into_active_model()
@@ -313,16 +311,81 @@ impl<'a> StateApplicator<'a> {
                 }
             }
 
-            if declared.is_empty() {
-                continue;
-            }
-            team_cache::Entity::delete_many()
-                .filter(team_cache::Column::Cache.eq(cache_id))
-                .filter(team_cache::Column::Team.is_not_in(declared))
-                .exec(self.db)
-                .await?;
+            remove_undeclared_cache_grants(self.db, cache_id, declared).await?;
         }
 
         Ok(())
+    }
+}
+
+async fn remove_undeclared_project_grants<C: ConnectionTrait>(
+    db: &C,
+    project: ProjectId,
+    declared: Vec<TeamId>,
+) -> Result<(), sea_orm::DbErr> {
+    team_project::Entity::delete_many()
+        .filter(team_project::Column::Project.eq(project))
+        .filter(team_project::Column::Managed.eq(true))
+        .filter(team_project::Column::Team.is_not_in(declared))
+        .exec(db)
+        .await?;
+    Ok(())
+}
+
+async fn remove_undeclared_cache_grants<C: ConnectionTrait>(
+    db: &C,
+    cache: CacheId,
+    declared: Vec<TeamId>,
+) -> Result<(), sea_orm::DbErr> {
+    team_cache::Entity::delete_many()
+        .filter(team_cache::Column::Cache.eq(cache))
+        .filter(team_cache::Column::Managed.eq(true))
+        .filter(team_cache::Column::Team.is_not_in(declared))
+        .exec(db)
+        .await?;
+    Ok(())
+}
+
+#[cfg(test)]
+mod grant_tests {
+    use super::*;
+    use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
+
+    fn deletes_only_managed_grants(db: sea_orm::DatabaseConnection, table: &str) {
+        let delete = format!("DELETE FROM \"{table}\"");
+        let statements: Vec<String> = db
+            .into_transaction_log()
+            .iter()
+            .flat_map(|t| t.statements().to_vec())
+            .map(|s| s.sql)
+            .filter(|sql| sql.starts_with(&delete))
+            .collect();
+        assert_eq!(statements.len(), 1, "{statements:?}");
+        assert!(statements[0].contains("\"managed\""), "{}", statements[0]);
+    }
+
+    fn executed() -> MockDatabase {
+        MockDatabase::new(DatabaseBackend::Postgres).append_exec_results([MockExecResult {
+            last_insert_id: 0,
+            rows_affected: 1,
+        }])
+    }
+
+    #[tokio::test]
+    async fn an_empty_project_team_list_removes_the_grants_the_state_declared() {
+        let db = executed().into_connection();
+        remove_undeclared_project_grants(&db, ProjectId::now_v7(), Vec::new())
+            .await
+            .unwrap();
+        deletes_only_managed_grants(db, "team_project");
+    }
+
+    #[tokio::test]
+    async fn an_empty_cache_team_list_removes_the_grants_the_state_declared() {
+        let db = executed().into_connection();
+        remove_undeclared_cache_grants(&db, CacheId::now_v7(), Vec::new())
+            .await
+            .unwrap();
+        deletes_only_managed_grants(db, "team_cache");
     }
 }

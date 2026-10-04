@@ -288,6 +288,7 @@ pub async fn post_approve_team_request(
             role: request.role,
             includes_users: request.includes_users,
             includes_workers: workers,
+            managed: false,
             created_at: gradient_types::now(),
         }
         .into_active_model()
@@ -324,6 +325,7 @@ pub async fn post_approve_team_request(
         team: team.id,
         cache,
         role: request.role,
+        managed: false,
         created_at: gradient_types::now(),
     }
     .into_active_model()
