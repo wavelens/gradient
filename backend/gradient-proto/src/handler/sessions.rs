@@ -180,14 +180,15 @@ impl Actor for Sessions {
 
     async fn post_stop(
         &self,
-        _myself: ActorRef<Self::Msg>,
+        myself: ActorRef<Self::Msg>,
         st: &mut Self::State,
     ) -> Result<(), ActorProcessingErr> {
         st.core_watch.abort();
         info!(sessions = st.live.len(), "closing sessions");
-        for (_, actor) in st.live.values() {
-            actor.stop(Some("shutdown".into()));
-        }
+        // Ractor kills children still running once this returns, which skips their `post_stop`.
+        myself
+            .stop_children_and_wait(Some("shutdown".into()), Some(CALL_TIMEOUT))
+            .await;
 
         Ok(())
     }

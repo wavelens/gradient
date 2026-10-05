@@ -14,9 +14,9 @@ fn hex(bytes: &[u8]) -> String {
 }
 
 fn assert_pinned(message: ClientMessage, expected: &str) {
-    let bytes = to_bytes(&message, 27).expect("encodes");
+    let bytes = to_bytes(&message, 30).expect("encodes");
     assert_eq!(hex(&bytes), expected);
-    assert_eq!(from_bytes::<ClientMessage>(bytes, 27), Ok(message));
+    assert_eq!(from_bytes::<ClientMessage>(bytes, 30), Ok(message));
 }
 
 #[test]
@@ -44,7 +44,7 @@ fn worker_metrics_keep_their_baseline_bytes() {
             upload_speed_mbps: None,
             download_speed_mbps: None,
         },
-        "050000c03f800101000000c000",
+        "050000c03f800101000000c00000",
     );
 }
 
