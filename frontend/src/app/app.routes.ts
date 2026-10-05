@@ -561,6 +561,13 @@ export const routes: Routes = [
 
   // Error pages
   {
+    path: 'error/429',
+    title: 'Too Many Requests',
+    data: { code: 429 },
+    loadComponent: () =>
+      import('./features/errors/error-page/error-page.component').then((m) => m.ErrorPageComponent),
+  },
+  {
     path: 'error/500',
     title: 'Internal Server Error',
     data: { code: 500 },

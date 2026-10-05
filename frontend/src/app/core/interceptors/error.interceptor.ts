@@ -7,7 +7,16 @@
 import { HttpInterceptorFn, HttpErrorResponse } from '@angular/common/http';
 import { inject } from '@angular/core';
 import { Router } from '@angular/router';
-import { catchError, throwError } from 'rxjs';
+import { Observable, catchError, retry, throwError, timer } from 'rxjs';
+
+const THROTTLE_RETRIES = 3;
+const MIN_THROTTLE_WAIT_MS = 250;
+
+function waitOutThrottle(error: unknown): Observable<number> {
+  if (!(error instanceof HttpErrorResponse) || error.status !== 429) return throwError(() => error);
+  const seconds = Number(error.headers.get('retry-after'));
+  return timer(Math.max(MIN_THROTTLE_WAIT_MS, Number.isFinite(seconds) ? seconds * 1000 : 0));
+}
 
 /**
  * HTTP interceptor that handles global error responses.
@@ -30,6 +39,7 @@ export const errorInterceptor: HttpInterceptorFn = (req, next) => {
   };
 
   return next(req).pipe(
+    retry({ count: THROTTLE_RETRIES, delay: waitOutThrottle }),
     catchError((error: HttpErrorResponse) => {
       switch (error.status) {
         case 401: {
@@ -47,6 +57,7 @@ export const errorInterceptor: HttpInterceptorFn = (req, next) => {
           showErrorPage(503);
           break;
 
+        case 429:
         case 502:
         case 503:
         case 504:

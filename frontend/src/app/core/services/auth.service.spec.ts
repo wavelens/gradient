@@ -65,6 +65,15 @@ describe('AuthService session probe', () => {
     expect(service.isAuthenticated()).toBe(false);
   });
 
+  it('leaves the session unknown when the server throttles the probe', () => {
+    boot(() =>
+      httpMock
+        .expectOne(userUrl)
+        .flush('Too Many Requests', { status: 429, statusText: 'Too Many Requests' })
+    );
+    expect(service.serverUnreachable()).toBe(true);
+  });
+
   it('re-probes once the server answers again, without a fresh page load', async () => {
     boot(() =>
       httpMock

@@ -4,10 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { HttpErrorResponse, HttpRequest } from '@angular/common/http';
+import { HttpErrorResponse, HttpHeaders, HttpRequest, HttpResponse } from '@angular/common/http';
 import { TestBed } from '@angular/core/testing';
 import { Router, UrlTree, provideRouter } from '@angular/router';
-import { firstValueFrom, throwError } from 'rxjs';
+import { defer, firstValueFrom, of, throwError } from 'rxjs';
 import { errorInterceptor } from './error.interceptor';
 
 function unauthorized(): Promise<unknown> {
@@ -51,5 +51,48 @@ describe('errorInterceptor on 401', () => {
     vi.spyOn(router, 'url', 'get').mockReturnValue('/account/login');
     await unauthorized();
     expect(navigate).toHaveBeenCalledWith(['/account/login'], {});
+  });
+});
+
+describe('errorInterceptor on 429', () => {
+  beforeEach(() => {
+    TestBed.configureTestingModule({ providers: [provideRouter([])] });
+    vi.useFakeTimers();
+  });
+  afterEach(() => vi.useRealTimers());
+
+  function throttledFor(times: number) {
+    let calls = 0;
+    const result = TestBed.runInInjectionContext(() =>
+      firstValueFrom(
+        errorInterceptor(new HttpRequest('GET', '/api/v1/user'), () =>
+          defer(() =>
+            ++calls <= times
+              ? throwError(() => new HttpErrorResponse({ status: 429, headers: new HttpHeaders({ 'retry-after': '1' }) }))
+              : of(new HttpResponse({ status: 200 })),
+          ),
+        ),
+      ),
+    );
+    return { result, calls: () => calls };
+  }
+
+  it('sends a throttled request again after the wait the server named', async () => {
+    const { result, calls } = throttledFor(1);
+    await vi.advanceTimersByTimeAsync(999);
+    expect(calls()).toBe(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(((await result) as HttpResponse<unknown>).status).toBe(200);
+    expect(calls()).toBe(2);
+  });
+
+  it('passes the 429 on and shows its error page when the server keeps throttling', async () => {
+    const navigate = vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
+    const { result, calls } = throttledFor(Infinity);
+    const settled = result.catch((e: HttpErrorResponse) => e.status);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(await settled).toBe(429);
+    expect(calls()).toBe(4);
+    expect(navigate).toHaveBeenCalledWith(['/error/429'], expect.objectContaining({ skipLocationChange: true }));
   });
 });

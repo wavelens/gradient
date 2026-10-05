@@ -26,7 +26,7 @@ export class ApiError extends Error {
   /// The server could not be reached or is not serving: nothing about the
   /// request itself was rejected.
   get unreachable(): boolean {
-    return this.status === 0 || this.status === 502 || this.status === 503 || this.status === 504;
+    return [0, 429, 502, 503, 504].includes(this.status);
   }
 }
 
