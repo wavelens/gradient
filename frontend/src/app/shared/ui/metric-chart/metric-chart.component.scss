@@ -34,6 +34,8 @@
 .metric-chart__placeholder {
   position: absolute;
   inset: 0;
+  width: auto;
+  height: auto;
 }
 .metric-chart__header {
   display: flex;

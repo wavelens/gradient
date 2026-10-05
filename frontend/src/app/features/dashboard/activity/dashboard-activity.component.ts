@@ -63,7 +63,7 @@ const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
             }
           </svg>
         } @else {
-          <gr-skeleton class="heat" height="auto" />
+          <gr-skeleton class="heat" />
         }
       </section>
     }

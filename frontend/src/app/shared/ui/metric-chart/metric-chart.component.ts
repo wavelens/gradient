@@ -79,7 +79,7 @@ echarts.use([
       <div class="metric-chart__body">
         <div #host class="metric-chart__plot" [class.metric-chart__plot--waiting]="loading()" [style.height.px]="height()"></div>
         @if (loading()) {
-          <gr-skeleton class="metric-chart__placeholder" height="auto" />
+          <gr-skeleton class="metric-chart__placeholder" />
         }
       </div>
     </div>
