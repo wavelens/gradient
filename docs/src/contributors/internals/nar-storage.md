@@ -43,7 +43,8 @@ Stored paths keep the first content they received, like valid paths in Nix. Non-
 - **Commit:** The NAR commit must keep the content fields of a stored row. Only `deriver` can change.
 - **Signatures:** Workers with other bytes get the stored content signed into their project caches. REST and SSH clients with other bytes get no signature.
 - **SSH:** An `AddMultipleToStore` with other bytes must succeed. The server can drain and drop those bytes.
-- **Concurrent Uploads:** Two first uploads at the same moment can still race. The verify-on-read self-heal can demote a path with an object not matching its `file_hash`.
+- **Concurrent Uploads:** Uploads of a path take turns on a server and check the row again on their turn, see [Transfer](../proto/transfer.md#upload).
+- **Self-Heal:** The verify-on-read self-heal can demote a path with an object not matching its `file_hash`.
 
 !!! warning "Bucket Requirements"
     - No object versioning, object lock or replication. Object lock and replication force versioning.
