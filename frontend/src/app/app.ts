@@ -7,7 +7,7 @@
 import { Component, DestroyRef, inject, computed, ChangeDetectionStrategy } from '@angular/core';
 import { Router, RouterOutlet, NavigationEnd } from '@angular/router';
 import { toSignal } from '@angular/core/rxjs-interop';
-import { filter, map, startWith } from 'rxjs/operators';
+import { filter, map } from 'rxjs/operators';
 import { FooterComponent, FooterLink } from '@gradient/ui/chrome';
 import { AppHeaderComponent } from '@shared/chrome/header/header.component';
 import { CommandPaletteComponent } from '@shared/chrome/command-palette/command-palette.component';
@@ -51,15 +51,17 @@ export class App {
   private routeData = toSignal(
     this.router.events.pipe(
       filter((e) => e instanceof NavigationEnd),
-      startWith(null),
       map(() => {
         let route = this.router.routerState.root;
         while (route.firstChild) route = route.firstChild;
         return route.snapshot.data;
       })
     ),
-    { initialValue: {} }
+    { initialValue: null }
   );
 
-  showFooter = computed(() => !(this.routeData() as Record<string, unknown>)['hideFooter']);
+  showFooter = computed(() => {
+    const data = this.routeData();
+    return data !== null && !data['hideFooter'];
+  });
 }
