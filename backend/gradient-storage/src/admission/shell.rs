@@ -7,7 +7,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use gradient_util::sync::Mutex;
 use tokio::sync::mpsc;
@@ -113,6 +113,25 @@ impl UploadAdmission {
         }
     }
 
+    pub async fn admit(
+        self: &Arc<Self>,
+        label: &str,
+        object: ObjectKey,
+        size: u64,
+        wait: Duration,
+    ) -> Option<Admission> {
+        let (session, mut admitted) = self.open_session(label);
+        session.request(0, object, size, false);
+        match tokio::time::timeout(wait, admitted.recv()).await {
+            Ok(Some(Admitted::Granted { permit, .. })) => Some(Admission::Granted(HeldPermit {
+                permit,
+                _session: session,
+            })),
+            Ok(Some(Admitted::Skip { .. })) => Some(Admission::AlreadyCommitted),
+            _ => None,
+        }
+    }
+
     fn record_grant(&self, session: SessionId, id: u64) {
         if let Some(at) = self.enqueued_at.lock().remove(&(session, id)) {
             let waited = at.elapsed().as_micros().min(u64::MAX as u128) as u64;
@@ -160,6 +179,22 @@ impl UploadAdmission {
         if let Some(tx) = tx {
             let _ = tx.send(admitted);
         }
+    }
+}
+
+pub enum Admission {
+    Granted(HeldPermit),
+    AlreadyCommitted,
+}
+
+pub struct HeldPermit {
+    permit: UploadPermit,
+    _session: AdmissionSession,
+}
+
+impl HeldPermit {
+    pub fn committed(self) {
+        self.permit.committed();
     }
 }
 
@@ -217,6 +252,12 @@ pub struct UploadPermit {
 impl UploadPermit {
     pub fn committed(mut self) {
         self.settle(Outcome::Committed);
+    }
+
+    pub fn release_budget(&mut self) {
+        let (session, id) = (self.session, self.id);
+        self.admission
+            .apply(|core| core.release_budget(session, id));
     }
 
     fn settle(&mut self, outcome: Outcome) {

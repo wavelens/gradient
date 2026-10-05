@@ -51,6 +51,7 @@ pub struct AdmissionCore {
     ring: VecDeque<SessionId>,
     queues: HashMap<SessionId, VecDeque<Request>>,
     granted: HashMap<(SessionId, u64), Request>,
+    budget_returned: HashMap<(SessionId, u64), ObjectKey>,
     leaders: HashSet<ObjectKey>,
     followers: HashMap<ObjectKey, Vec<Request>>,
     bytes_in_flight: u64,
@@ -64,6 +65,7 @@ impl AdmissionCore {
             ring: VecDeque::new(),
             queues: HashMap::new(),
             granted: HashMap::new(),
+            budget_returned: HashMap::new(),
             leaders: HashSet::new(),
             followers: HashMap::new(),
             bytes_in_flight: 0,
@@ -98,9 +100,14 @@ impl AdmissionCore {
         decisions
     }
 
+    pub fn release_budget(&mut self, session: SessionId, id: u64) -> Vec<Decision> {
+        self.return_budget(session, id);
+        self.pump()
+    }
+
     pub fn cancel(&mut self, session: SessionId, id: u64) -> Vec<Decision> {
         if self.granted.contains_key(&(session, id)) {
-            return self.release(session, id, Outcome::Failed);
+            return self.release_budget(session, id);
         }
         if let Some(queue) = self.queues.get_mut(&session) {
             queue.retain(|r| r.id != id);
@@ -124,24 +131,33 @@ impl AdmissionCore {
             .filter(|(s, _)| *s == session)
             .map(|(_, id)| *id)
             .collect();
-        let mut decisions = Vec::new();
         for id in held {
-            decisions.extend(self.finish(session, id, Outcome::Failed));
+            self.return_budget(session, id);
         }
-        decisions.extend(self.pump());
-        decisions
+        self.pump()
     }
 
-    fn finish(&mut self, session: SessionId, id: u64, outcome: Outcome) -> Vec<Decision> {
+    fn return_budget(&mut self, session: SessionId, id: u64) {
         let Some(request) = self.granted.remove(&(session, id)) else {
-            return Vec::new();
+            return;
         };
+
         self.bytes_in_flight -= request.size;
         if request.priority {
             self.small_in_flight -= 1;
         }
-        self.leaders.remove(&request.object);
-        let followers = self.followers.remove(&request.object).unwrap_or_default();
+
+        self.budget_returned.insert((session, id), request.object);
+    }
+
+    fn finish(&mut self, session: SessionId, id: u64, outcome: Outcome) -> Vec<Decision> {
+        self.return_budget(session, id);
+        let Some(object) = self.budget_returned.remove(&(session, id)) else {
+            return Vec::new();
+        };
+
+        self.leaders.remove(&object);
+        let followers = self.followers.remove(&object).unwrap_or_default();
         match outcome {
             Outcome::Committed => followers.into_iter().map(Decision::Skip).collect(),
             Outcome::Failed => {
@@ -444,7 +460,7 @@ mod tests {
     }
 
     #[test]
-    fn removing_a_session_frees_everything_it_held() {
+    fn removing_a_session_returns_its_budget_and_its_permits_keep_their_objects() {
         let mut c = core(2, 10 * GIB);
         c.enqueue(req(1, 1, "a", 1));
         c.enqueue(req(1, 2, "b", 1));
@@ -452,8 +468,33 @@ mod tests {
         c.enqueue(req(2, 1, "d", 1));
         c.enqueue(req(2, 2, "a", 1));
         let decisions = c.remove_session(1);
-        assert_eq!(granted(&decisions), vec![(2, 1), (2, 2)]);
+        assert_eq!(granted(&decisions), vec![(2, 1)]);
         assert_eq!(c.queued(1), 0);
-        assert_eq!(c.in_flight(), 2);
+        assert_eq!(c.in_flight(), 1);
+        assert_eq!(granted(&c.release(1, 1, Outcome::Failed)), vec![(2, 2)]);
+    }
+
+    #[test]
+    fn a_returned_budget_grants_others_but_keeps_its_object_led() {
+        let mut c = core(1, 10 * GIB);
+        c.enqueue(req(1, 1, "a", 1));
+        assert!(c.enqueue(req(2, 1, "a", 1)).is_empty());
+        assert!(c.enqueue(req(2, 2, "b", 1)).is_empty());
+        assert_eq!(granted(&c.release_budget(1, 1)), vec![(2, 2)]);
+        assert_eq!(c.in_flight(), 1);
+        assert_eq!(
+            c.release(1, 1, Outcome::Committed),
+            vec![Decision::Skip(req(2, 1, "a", 1))]
+        );
+    }
+
+    #[test]
+    fn a_cancelled_leader_keeps_its_object_until_its_permit_settles() {
+        let mut c = core(16, 10 * GIB);
+        c.enqueue(req(1, 1, "a", 1));
+        c.enqueue(req(2, 1, "a", 1));
+        assert!(c.cancel(1, 1).is_empty());
+        assert_eq!(c.in_flight(), 0);
+        assert_eq!(granted(&c.release(1, 1, Outcome::Failed)), vec![(2, 1)]);
     }
 }

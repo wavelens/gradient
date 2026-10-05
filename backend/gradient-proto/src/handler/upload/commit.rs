@@ -33,14 +33,20 @@ pub(super) struct Commit {
     pub permit: UploadPermit,
 }
 
-/// The permit is bounding bytes in flight and is returned once the object is stored. The graph is
-/// recording it afterwards without holding the next upload.
+/// The byte budget is returned once the object is stored. The path stays claimed until the graph
+/// recorded it, and a second upload of the path is waiting instead of overwriting the object.
 pub(super) async fn run(c: Commit) {
     let outcome = match place(&c.state, &c.object, c.transfer, &c.metadata).await {
         Ok(()) => {
-            c.permit.committed();
+            let mut permit = c.permit;
+            permit.release_budget();
             let project_id = c.project.await;
-            record(&c.state, project_id, &c.object, &c.metadata).await
+            let outcome = record(&c.state, project_id, &c.object, &c.metadata).await;
+            if matches!(outcome, UploadOutcome::Ok) {
+                permit.committed();
+            }
+
+            outcome
         }
         Err(outcome) => {
             drop(c.permit);
@@ -392,7 +398,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_placed_nar_frees_its_permit_before_the_graph_records_it() {
+    async fn a_placed_nar_frees_its_budget_but_keeps_its_path_until_the_graph_records_it() {
         let Ok(mut unwired) = Arc::try_unwrap(test_state(
             MockDatabase::new(DatabaseBackend::Postgres)
                 .append_query_results([Vec::<gradient_types::MCachedPath>::new()])
@@ -445,7 +451,15 @@ mod tests {
             }
         })
         .await
-        .expect("the permit is back once the bytes are stored");
+        .expect("the budget is back once the bytes are stored");
+
+        let (other, mut other_rx) = state.upload_admission.open_session("other");
+        other.request(2, ObjectKey::Nar("c".repeat(32)), 3, false);
+        tokio::select! {
+            () = &mut commit => panic!("the graph has not recorded the upload yet"),
+            _ = other_rx.recv() => panic!("a second upload of the path must wait for the graph"),
+            () = tokio::time::sleep(std::time::Duration::from_millis(200)) => {}
+        }
     }
 
     #[tokio::test]

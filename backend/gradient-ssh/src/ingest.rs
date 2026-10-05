@@ -5,12 +5,13 @@
  */
 
 use crate::session::Session;
+use anyhow::Context as _;
 use async_compression::Level;
 use async_compression::tokio::write::ZstdEncoder;
 use gradient_db::permissions::Permission;
 use gradient_graph::NarCommit;
 use gradient_proto::import::{ImportInput, SignTargets, import_nar_reader, stored_path};
-use gradient_storage::admission::{AdmissionSession, Admitted, ObjectKey, UploadPermit};
+use gradient_storage::admission::{Admission, HeldPermit, ObjectKey};
 use gradient_types::events::cache::NarSigned;
 use gradient_types::*;
 use gradient_util::nix_hash::normalize_nar_hash;
@@ -34,8 +35,7 @@ pub struct Staged {
     nar_size: u64,
     file_hash: String,
     file_size: u64,
-    permit: UploadPermit,
-    _admission: AdmissionSession,
+    permit: HeldPermit,
 }
 
 pub async fn import(
@@ -58,11 +58,17 @@ pub async fn stage(
         session.project.name
     );
 
-    let announced = info.info.nar_hash.as_sri().to_string();
-    if let Some(known) = stored_path(&session.state.web_db, &info.path.hash().to_string()).await? {
+    let state = &session.state;
+    let hash = info.path.hash().to_string();
+    let claim = claim_path(state, &hash, info.info.nar_size).await?;
+    if let Some(known) = stored_path(&state.web_db, &hash).await? {
+        if let Some(claim) = claim {
+            claim.committed();
+        }
+
         tokio::io::copy(&mut reader, &mut tokio::io::sink()).await?;
-        if known.nar_hash.as_deref().map(normalize_nar_hash) == Some(normalize_nar_hash(&announced))
-        {
+        let announced = normalize_nar_hash(&info.info.nar_hash.as_sri().to_string());
+        if known.nar_hash.as_deref().map(normalize_nar_hash) == Some(announced) {
             return Ok(Pending::Known(known));
         }
 
@@ -70,8 +76,12 @@ pub async fn stage(
         return Ok(Pending::OtherContentStored);
     }
 
-    let state = &session.state;
-    let (admission, permit) = admit(state, info.info.nar_size).await?;
+    let permit = claim.with_context(|| {
+        format!(
+            "{} was stored by another upload and removed again, retry",
+            info.path
+        )
+    })?;
     let dir = state.config.server.nar_upload_partial_dir();
     tokio::fs::create_dir_all(&dir).await?;
     let file = tempfile::NamedTempFile::new_in(&dir)?;
@@ -95,7 +105,6 @@ pub async fn stage(
         file_hash,
         file_size,
         permit,
-        _admission: admission,
     }))
 }
 
@@ -159,21 +168,20 @@ pub async fn commit(
     Ok(())
 }
 
-async fn admit(
+async fn claim_path(
     state: &gradient_core::ServerState,
+    hash: &str,
     size: u64,
-) -> anyhow::Result<(AdmissionSession, UploadPermit)> {
-    let (session, mut admitted) = state.upload_admission.open_session("ssh");
-    session.request(
-        0,
-        ObjectKey::Rest(uuid::Uuid::now_v7().to_string()),
-        size,
-        false,
-    );
+) -> anyhow::Result<Option<HeldPermit>> {
     let wait = Duration::from_secs(state.config.upload.rest_wait_secs);
-    match tokio::time::timeout(wait, admitted.recv()).await {
-        Ok(Some(Admitted::Granted { permit, .. })) => Ok((session, permit)),
-        _ => anyhow::bail!("upload capacity exhausted, retry later"),
+    match state
+        .upload_admission
+        .admit("ssh", ObjectKey::Nar(hash.to_owned()), size, wait)
+        .await
+    {
+        Some(Admission::Granted(permit)) => Ok(Some(permit)),
+        Some(Admission::AlreadyCommitted) => Ok(None),
+        None => anyhow::bail!("upload capacity exhausted, retry later"),
     }
 }
 
@@ -228,6 +236,7 @@ async fn compress_into(
 mod tests {
     use super::*;
     use gradient_db::permissions::{Permission, mask_from};
+    use gradient_storage::admission::Admitted;
     use gradient_types::{CacheId, MCachedPath};
     use harmonia_protocol::valid_path_info::UnkeyedValidPathInfo;
     use harmonia_store_path::{StoreDir, StorePath};
@@ -344,5 +353,43 @@ mod tests {
         assert!(upload.is_empty(), "the NAR bytes are drained");
         let log = db.into_transaction_log();
         assert_eq!(log.len(), 1, "only the lookup, nothing signed: {log:?}");
+    }
+
+    #[tokio::test]
+    async fn an_upload_waits_for_the_upload_holding_its_path_and_then_checks_again() {
+        let existing = MCachedPath {
+            hash: "0123456789abcdfghijklmnpqrsvwxyz".into(),
+            package: "hello".into(),
+            nar_hash: Some(NarHash::digest(b"original").as_sri().to_string()),
+            file_hash: Some("sha256-x".into()),
+            confirmed: true,
+            ..Default::default()
+        };
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([vec![existing]])
+            .into_connection();
+        let session = session(db, mask_from(&[Permission::TriggerEvaluation]));
+        let info = info(NAR);
+        let (holder, mut admitted) = session.state.upload_admission.open_session("holder");
+        holder.request(1, ObjectKey::Nar(info.path.hash().to_string()), 1, false);
+        let Some(Admitted::Granted { permit, .. }) = admitted.recv().await else {
+            panic!("the holder leads the path");
+        };
+        let mut upload = NAR;
+
+        {
+            let waiting = import(&session, &info, &mut upload);
+            tokio::pin!(waiting);
+            assert!(
+                tokio::time::timeout(Duration::from_millis(200), &mut waiting)
+                    .await
+                    .is_err(),
+                "the upload waits while another upload holds the path"
+            );
+            permit.committed();
+            waiting.await.expect("the stored content stays");
+        }
+
+        assert!(upload.is_empty(), "the NAR bytes are drained");
     }
 }
