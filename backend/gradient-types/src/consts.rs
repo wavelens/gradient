@@ -32,6 +32,13 @@ pub const FLAKE_START: [&str; 7] = [
     "hydraJobs",
 ];
 
+pub const DEFAULT_TASK_WILDCARD: &str = "packages.x86_64-linux.*";
+
+pub const NIXOS_CACHE_NAME: &str = "cache.nixos.org";
+pub const NIXOS_CACHE_URL: &str = "https://cache.nixos.org";
+pub const NIXOS_CACHE_PUBLIC_KEY: &str =
+    "cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY=";
+
 pub const BASE_ROLE_ADMIN_ID: RoleId = RoleId::new(uuid!("00000000-0000-0000-0000-000000000001"));
 pub const BASE_ROLE_WRITE_ID: RoleId = RoleId::new(uuid!("00000000-0000-0000-0000-000000000002"));
 pub const BASE_ROLE_VIEW_ID: RoleId = RoleId::new(uuid!("00000000-0000-0000-0000-000000000003"));
