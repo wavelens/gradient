@@ -37,10 +37,40 @@ Projects created after the installation need the integration by hand. Open **Int
 
 ## 4. Wire the Task
 
-Gradient will add a **Push (reporter)** trigger and a **Git Host Status Report** action automatically to a task with a matching repository URL. Other tasks need both added by hand.
+Tasks connect the two integrations. Triggers point at the inbound integration, actions at the outbound integration. Both share the name `github-<account>`.
 
-- **Triggers -> New Trigger**: **Push (reporter)** and, for pull requests, **Pull Request (reporter)**, each with the `github-<account>` integration.
-- **Actions -> New Action**: **Git Host Status Report** with the `github-<account>` integration.
+=== "UI"
+
+    Tasks with a matching repository URL get a **Push (reporter)** trigger and a **Git Host Status Report** action automatically. Other tasks need both added by hand.
+
+    - **Triggers -> New Trigger**: **Push (reporter)** and, for pull requests, **Pull Request (reporter)**, each with the `github-<account>` integration.
+    - **Actions -> New Action**: **Git Host Status Report** with the `github-<account>` integration.
+
+=== "Declarative"
+
+    Declared tasks get no automatic trigger or action. Both belong in the task's `triggers` and `actions` lists.
+
+    ```nix
+    services.gradient.state.tasks.app = {
+      project = "acme";
+      repository = "https://github.com/acme/app.git";
+      created_by = "alice";
+      triggers = [
+        { type = "reporter_push"; integration = "github-acme"; } # (1)!
+        { type = "reporter_pull_request"; integration = "github-acme"; }
+      ];
+      actions = [
+        {
+          name = "report-status";
+          type = "git_host_status_report";
+          config.integration = "github-acme"; # (2)!
+        }
+      ];
+    };
+    ```
+
+    1.  Trigger-level `integration`, naming the inbound integration of the App installation.
+    2.  `config.integration`, naming the outbound integration of the App installation.
 
 ## Verify Deployment
 

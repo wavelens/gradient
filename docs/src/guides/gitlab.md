@@ -1,13 +1,53 @@
 # Connect GitLab
 
-Evaluations on every push and merge request, with commit statuses back on GitLab. Two integrations connect GitLab: an **inbound** one receiving webhooks and an **outbound** one reporting status.
+Evaluations on every push and merge request. Commit statuses back on GitLab.
 
 **Requirements:**
 
-- A GitLab access token with the `api` scope and at least the Developer role on the repository.
 - A task with a repository URL pointing to GitLab (gitlab.com or self-hosted), see [First Project](../get-started/first-project.md)
+- The Maintainer role on the GitLab project or group, for an access token
+
+## Inbound and Outbound
+
+Gradient and GitLab exchange data in two directions. Each direction is a separate integration of the project.
+
+```mermaid
+flowchart LR
+    host["GitLab"] -- webhook --> inbound["Inbound integration"]
+    inbound --> trigger["Push (reporter) trigger"]
+    trigger --> eval["Evaluation"]
+    eval --> action["Git Host Status Report action"]
+    action --> outbound["Outbound integration"]
+    outbound -- "API token" --> host
+```
+
+| | Inbound | Outbound |
+|---|---|---|
+| Direction | GitLab -> Gradient | Gradient -> GitLab |
+| Holds | Webhook secret, allowed source IPs | Endpoint URL, access token |
+| Picked by | **Push (reporter)** and **Pull Request (reporter)** triggers | **Git Host Status Report** and **Open PR** actions |
+| Covers | Evaluations on push, merge request and release. `/gradient` comment commands | Commit statuses. Reactions to `/gradient` comments. Writer check of merge request authors. [Flake update](flake-updates.md) merge requests |
+| Without | GitLab events never reach Gradient | No status on commits. `/gradient` comments ignored. All merge request authors count as non-writers |
+
+- A single inbound integration can receive webhooks from all repositories of the project's tasks. Incoming events match tasks by the `owner/repo` part of the repository URL.
+- Outbound calls act as the token's account. Statuses and comments appear under that account's name.
+- Writer checks and comment reactions use the outbound integration of the task's **Git Host Status Report** action.
 
 ## 1. Create the Integrations
+
+### Access Token
+
+Project and group access tokens come with their own bot user on GitLab. Group tokens cover all projects of the group.
+
+| Setting | Value |
+|---|---|
+| Where | **Settings -> Access tokens -> Add new token** of the GitLab project or group |
+| Role | **Developer**. Writer checks treat Developer and above as writers |
+| Scopes | `api` |
+
+A personal access token of a dedicated account also works. The account then needs the Developer role on each project.
+
+### Integrations
 
 === "UI"
 
@@ -15,8 +55,8 @@ Evaluations on every push and merge request, with commit statuses back on GitLab
 
     | Kind | Fields |
     |---|---|
-    | Inbound | Name, **Git Host** GitLab and a **Webhook Secret**. The refresh button can generate a secret. The secret is shown once and must be copied. The created integration will show the **Webhook URL**. |
-    | Outbound | Name, **Git Host** GitLab, **Endpoint URL** (e.g. `https://gitlab.com`) and the **Access Token** |
+    | Inbound | Name, **Git Host** GitLab and a **Webhook Secret**. The refresh button can generate a secret. The secret is visible only once, copy it right away. Created integrations display the **Webhook URL**. |
+    | Outbound | Name, **Git Host** GitLab, **Endpoint URL** (e.g. `https://gitlab.com`, without `/api/v4`) and the **Access Token** |
 
 === "Declarative"
 
@@ -33,14 +73,16 @@ Evaluations on every push and merge request, with commit statuses back on GitLab
         project = "acme";
         kind = "outbound";
         git_host_type = "gitlab";
-        endpoint_url = "https://gitlab.com";
-        access_token_file = "/run/secrets/gitlab-token";
+        endpoint_url = "https://gitlab.com"; # (2)!
+        access_token_file = "/run/secrets/gitlab-token"; # (3)!
         created_by = "alice";
       };
     };
     ```
 
     1.  Any random string, e.g. `openssl rand -hex 32`. The GitLab webhook must use the same value.
+    2.  Base URL of GitLab, without `/api/v4`.
+    3.  The access token from above, as the only content of the file.
 
     The webhook URL is `https://gradient.example.com/api/v1/hooks/gitlab/acme/gitlab-in`.
 
@@ -54,20 +96,56 @@ Open **Settings -> Webhooks -> Add new webhook** in the GitLab project (or group
 | Secret token | The secret from step 1 |
 | Trigger | **Push events**, **Tag push events**, **Comments**, **Merge request events**, **Releases events** |
 
-A push-only webhook is never delivering merge requests or the `/gradient` comment commands.
+A push-only webhook can never deliver merge requests or the `/gradient` comment commands.
 
 ## 3. Wire the Task
 
-Gradient will add a **Push (reporter)** trigger and a **Git Host Status Report** action automatically to a new task. The task must be created after the integrations. Its repository host must match exactly one inbound and one outbound integration. Other tasks need both added by hand.
+Tasks connect the two integrations. Triggers point at the inbound integration, actions at the outbound integration.
 
-- **Triggers -> New Trigger**: **Push (reporter)** and, for merge requests, **Pull Request (reporter)**, each with the inbound integration.
-- **Actions -> New Action**: **Git Host Status Report** with the outbound integration.
+=== "UI"
+
+    New tasks get a **Push (reporter)** trigger and a **Git Host Status Report** action automatically. Two conditions apply.
+
+    - Task created after both integrations.
+    - A single inbound and a single outbound integration matching the repository host.
+
+    Other tasks need both added by hand.
+
+    - **Triggers -> New Trigger**: **Push (reporter)** and, for merge requests, **Pull Request (reporter)**, each with the inbound integration.
+    - **Actions -> New Action**: **Git Host Status Report** with the outbound integration.
+
+=== "Declarative"
+
+    Declared tasks get no automatic trigger or action. Both belong in the task's `triggers` and `actions` lists.
+
+    ```nix
+    services.gradient.state.tasks.app = {
+      project = "acme";
+      repository = "https://gitlab.com/acme/app.git";
+      created_by = "alice";
+      triggers = [
+        { type = "reporter_push"; integration = "gitlab-in"; } # (1)!
+        { type = "reporter_pull_request"; integration = "gitlab-in"; } # (2)!
+      ];
+      actions = [
+        {
+          name = "report-status";
+          type = "git_host_status_report";
+          config.integration = "gitlab-out"; # (3)!
+        }
+      ];
+    };
+    ```
+
+    1.  Trigger-level `integration`, naming the inbound integration. Branch and tag filters go into `config`, see [Trigger Types](../reference/state.md#trigger-types).
+    2.  Optional. Evaluations of merge requests, with fork merge requests waiting for maintainer approval.
+    3.  `config.integration`, naming the outbound integration.
 
 ## Verify Deployment
 
-- A push will start an evaluation within seconds.
-- The webhook's **Settings -> Webhooks -> Edit -> Recent events** page will show a `200` delivery.
-- The commit on GitLab will show Gradient's pipeline status.
+- Pushes start an evaluation within seconds.
+- A `200` delivery on the webhook's **Settings -> Webhooks -> Edit -> Recent events** page.
+- Gradient's pipeline status visible on the GitLab commit.
 
 ## Merge Requests
 
@@ -77,7 +155,9 @@ Gradient will add a **Push (reporter)** trigger and a **Git Host Status Report**
 | Comment `/gradient run` | New evaluation of the merge request |
 | Comment `/gradient approve` | Release of a merge request from a fork waiting for maintainer approval |
 
-The approval check is a setting of the **Pull Request (reporter)** trigger: **Require maintainer approval for PRs from non-writers**. Review approvals on GitLab trigger no webhook. The comment is the only way to approve.
+The approval check is a setting of the **Pull Request (reporter)** trigger: **Require maintainer approval for PRs from non-writers** (`require_approval` in `config`). Review approvals on GitLab trigger no webhook. The comment is the only way to approve.
+
+Only project members with the Developer role or above can issue `/gradient` commands. Accepted commands get a 👀 reaction, rejected commands a 😕.
 
 ## Troubleshooting
 
@@ -87,9 +167,10 @@ The approval check is a setting of the **Pull Request (reporter)** trigger: **Re
 | `403 forbidden_source_ip` | GitLab's address is missing from the integration's allowed source IPs |
 | `404` | Wrong project or integration name in the webhook URL, or an inbound integration without a secret |
 | `200`, but no evaluation | No task trigger is using this integration, or no task repository URL is matching |
-| No status on the commit | The token is lacking the `api` scope or the Developer role |
+| No status on the commit | Task without **Git Host Status Report** action, or token without the `api` scope or the Developer role |
 
 ## Next Steps
 
 - [Actions](actions.md): mail, web requests and flake update merge requests
+- [Declarative State](../reference/state.md): all task, trigger and action options
 - [Connect Gitea or Forgejo](gitea.md): the same setup for Gitea and Forgejo
