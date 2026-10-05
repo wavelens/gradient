@@ -19,7 +19,7 @@ sequenceDiagram
 
 | Grant | When | Transfer |
 |---|---|---|
-| `Skip` | The object arrived meanwhile, or the server does not want the evaluation cache blob | Nothing |
+| `Skip` | The path is already stored, or the server does not want the evaluation cache blob | Nothing |
 | `Passthrough { resume_offset }` | Local NAR storage | 512 KiB `UploadChunk` frames into `<baseDir>/nar-partial`, resuming after a break |
 | `Put { url }` | S3, NAR up to 1 GiB | One presigned PUT, valid 1 h |
 | `Multipart` | S3, NAR over 1 GiB | Presigned parts of at least 64 MiB |
@@ -29,8 +29,9 @@ sequenceDiagram
     - Small uploads (at most 1 MiB of NAR, `SMALL_UPLOAD_BYTES`) get a window of their own, `SMALL_UPLOADS_IN_FLIGHT` (128).
     - The cost of a small upload is its two round trips. Each `EvalResult` batch of an evaluation will wait on the push of its own `.drv` files.
     - Small uploads go ahead of larger ones in their session. The server will turn first to sessions with a waiting small upload.
-    - A permit will return once the object is in storage, ahead of the graph record.
-    - Requests for the same object coalesce. Followers get `Skip` once the first upload is in storage.
+    - Count and bytes of a permit come back after the object landed in storage, ahead of the graph record.
+    - Requests for a path coalesce across workers, REST and SSH. Followers get `Skip` after the graph recorded the first upload.
+    - Followers take over the path after a failed first upload.
 - **Worker Side:** `worker.nar.maxConcurrentUploads` (16) slots for large uploads and 128 for small ones.
     - One job can hold at most half of the large slots.
     - A slot is busy from the request until sending `UploadFinished`, not through the commit.
