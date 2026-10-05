@@ -67,6 +67,7 @@ All commands: [CLI Reference](https://wavelens.github.io/gradient/reference/cli/
 | Build outputs | Pass through the server | Pushed from the runner to Cachix | Large outputs go from worker straight to S3 |
 | Server host | Needs a writable Nix store | Hosted by GitHub | Needs no Nix store, fits in a micro-VM |
 | Heavy builds | Static machine list with speed factors | Fixed runner sizes | Scoring system places them by predicted memory, learned from past builds |
+| Remote building over SSH | Only outbound, to its own build machines | Not available | [`ssh-ng://` store](https://wavelens.github.io/gradient/guides/build-over-ssh/) for `nixos-rebuild --build-host` and `nix copy` straight to the CI workers |
 | Private caches | One store for the whole instance | Free plan: 5 GB, filled quickly by full closures | Per-project caches with access control, on own S3 or disk storage |
 | Sign-in | Local accounts, LDAP, OIDC with roles for the whole instance | GitHub accounts | [OIDC](https://wavelens.github.io/gradient/guides/sso/) with provider groups mapped to roles per project, SCIM provisioning |
 | Integrations | Minimal JSON API | GitHub only | REST API, webhooks, Git Integrations and MCP server |
