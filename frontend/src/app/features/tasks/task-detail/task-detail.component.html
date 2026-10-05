@@ -6,13 +6,11 @@
 
 <gr-toast />
 
-@if (loading()) {
-  <gr-loading-spinner message="Loading task..." />
-} @else if (task(); as proj) {
+@if (task(); as proj) {
   <div class="pp-head pad">
     <div>
       <nav class="breadcrumb" aria-label="Breadcrumb">
-        <a class="breadcrumb-link" [routerLink]="['/project', projectName]">{{ projectDisplayName() || projectName }}</a>
+        <a class="breadcrumb-link" [routerLink]="['/project', projectName]">@if (projectDisplayName(); as name) {{{ name }}} @else {<gr-skeleton width="8ch" />}</a>
         <span class="breadcrumb-separator" aria-hidden="true">/</span>
         <span class="breadcrumb-current" aria-current="page">{{ proj.display_name }}</span>
       </nav>
@@ -132,7 +130,18 @@
           </div>
           <div class="pkg-label"><h3>Packages</h3></div>
           @if (entryPointsLoading() && entryPoints().length === 0) {
-            <gr-loading-spinner message="Loading packages..." />
+            <div class="pkg-list" aria-busy="true">
+              @for (_ of packagePlaceholders; track $index) {
+                <div class="pkg pkg--placeholder">
+                  <gr-skeleton class="si" />
+                  <gr-skeleton class="pkg-name" />
+                  <gr-skeleton class="chip-arch mono" width="12ch" />
+                  <gr-skeleton class="pkg-bar" />
+                  <gr-skeleton class="pkg-deps" width="7ch" />
+                  <gr-skeleton class="pkg-time" width="4ch" />
+                </div>
+              }
+            </div>
           } @else if (entryPoints().length > 0) {
             <div class="pkg-list">
               @for (ep of entryPoints(); track ep.id) {

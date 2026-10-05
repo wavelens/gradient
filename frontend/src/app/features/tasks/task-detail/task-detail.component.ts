@@ -23,16 +23,16 @@ import {
   EmptyStateComponent,
   IconComponent,
   InViewDirective,
-  LoadingSpinnerComponent,
   MenuComponent,
   MenuItem,
   MessageService,
+  SkeletonComponent,
   ToastComponent,
   TooltipDirective,
 } from '@gradient/ui/ui';
 import { EvalStatusBadgeComponent, inputFetchRow, SegmentedBarComponent, StarButtonComponent, StatusIconComponent } from '@shared/ui';
 import { AccessService, WritableDirective } from '@shared/access';
-import { injectTaskAccess } from '@core/resolvers/inject-access';
+import { injectTaskAccess, injectTaskAccessData } from '@core/resolvers/inject-access';
 import { StarTarget, TaskDetail, EvaluationSummary, EvaluationProgress, EvaluationStatus, EntryPointSummary, BuildStatusCounts, WalkMode } from '@core/models';
 import { buildDuration, commitLabel, entryPointPhase, evaluationDuration, evaluationPhase, evaluationProgressText, evaluationTitle, formatEvaluationDuration, inputFetchPhase, isPendingBuildStatus, isRunningEvaluationStatus, phaseProgress } from '@shared/evaluation';
 
@@ -41,7 +41,7 @@ import { buildDuration, commitLabel, entryPointPhase, evaluationDuration, evalua
   standalone: true,
   imports: [
     CommonModule, FormsModule, RouterModule, ButtonComponent, CheckboxComponent, DialogComponent, MenuComponent, TooltipDirective,
-    LoadingSpinnerComponent, EmptyStateComponent, WritableDirective,
+    SkeletonComponent, EmptyStateComponent, WritableDirective,
     SegmentedBarComponent, EvalStatusBadgeComponent,
     IconComponent, InViewDirective, StatusIconComponent, ToastComponent, StarButtonComponent,
   ],
@@ -71,7 +71,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
   access = injectTaskAccess();
   triggerAccess = computed(() => this.accessService.triggerAccess(this.access()));
 
-  loading = signal(true);
+  private resolved = injectTaskAccessData();
   task = signal<TaskDetail | null>(null);
   entryPoints = signal<EntryPointSummary[]>([]);
   entryPointsTotal = signal(0);
@@ -91,7 +91,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
   tick = signal(Date.now());
 
   projectName = '';
-  projectDisplayName = signal('');
+  projectDisplayName = signal<string | null>(null);
   taskName = '';
   starTarget: StarTarget = { kind: 'task', project: '', task: '' };
 
@@ -105,6 +105,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
   private entryPointsEvalId?: string;
   private entryPointsSig = '';
   private lastEntryPointsFetch = 0;
+  readonly packagePlaceholders = Array.from({ length: 5 });
   private readonly ENTRY_POINTS_LIVE_INTERVAL_MS = 4000;
 
   evaluations = computed(() => this.task()?.last_evaluations ?? []);
@@ -145,9 +146,11 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
     this.querySub = this.route.queryParamMap.subscribe((q) => this.followEvalParam(q.get('eval')));
     this.projectsService.getProject(this.projectName).subscribe({
       next: (project) => this.projectDisplayName.set(project.display_name),
-      error: () => {},
+      error: () => this.projectDisplayName.set(this.projectName),
     });
-    this.loadTaskData();
+    const resolved = this.resolved()?.task;
+    if (resolved) this.applyTask(resolved, false);
+    this.loadTaskData(!!resolved);
     this.startLiveUpdates();
     this.tickSubscription = interval(1000).subscribe(() => this.tick.set(Date.now()));
   }
@@ -165,39 +168,36 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
     else this.selectedId.set(id);
   }
 
-  loadTaskData(showLoading = true, live = false): void {
-    if (showLoading) this.loading.set(true);
+  loadTaskData(live = false): void {
     this.tasksService.getTask(this.projectName, this.taskName).subscribe({
-      next: (task) => {
-        const sig = this.taskSignature(task);
-        if (sig !== this.taskSig) {
-          this.taskSig = sig;
-          this.task.set(task);
-        }
-        if (showLoading) this.loading.set(false);
-        if (this.starting() && task.last_evaluations.some(e => this.isRunning(e.status))) {
-          this.starting.set(false);
-        }
-        const started = task.last_evaluations.find(e => this.evaluationsBeforeStart && !this.evaluationsBeforeStart.has(e.id));
-        if (started) {
-          this.select(started);
-          return;
-        }
-        if (!this.selectedId() && task.last_evaluations.length) {
-          this.selectedId.set(task.last_evaluations[0].id);
-        }
-        // The entry-point page walks the graph for stale histograms; on live pings
-        // throttle it so a running evaluation's rapid status stream doesn't
-        // hammer the backend. The cheap summary above keeps headline counts live.
-        if (!live || Date.now() - this.lastEntryPointsFetch >= this.ENTRY_POINTS_LIVE_INTERVAL_MS) {
-          this.loadEntryPoints(this.selected()?.id);
-        }
-      },
-      error: (error) => {
-        console.error('Failed to load task:', error);
-        if (showLoading) this.loading.set(false);
-      },
+      next: (task) => this.applyTask(task, live),
+      error: (error) => console.error('Failed to load task:', error),
     });
+  }
+
+  private applyTask(task: TaskDetail, live: boolean): void {
+    const sig = this.taskSignature(task);
+    if (sig !== this.taskSig) {
+      this.taskSig = sig;
+      this.task.set(task);
+    }
+    if (this.starting() && task.last_evaluations.some(e => this.isRunning(e.status))) {
+      this.starting.set(false);
+    }
+    const started = task.last_evaluations.find(e => this.evaluationsBeforeStart && !this.evaluationsBeforeStart.has(e.id));
+    if (started) {
+      this.select(started);
+      return;
+    }
+    if (!this.selectedId() && task.last_evaluations.length) {
+      this.selectedId.set(task.last_evaluations[0].id);
+    }
+    // The entry-point page walks the graph for stale histograms; on live pings
+    // throttle it so a running evaluation's rapid status stream doesn't
+    // hammer the backend. The cheap summary above keeps headline counts live.
+    if (!live || Date.now() - this.lastEntryPointsFetch >= this.ENTRY_POINTS_LIVE_INTERVAL_MS) {
+      this.loadEntryPoints(this.selected()?.id);
+    }
   }
 
   /// Fields whose change should re-render the header / eval strip / panel.
@@ -324,7 +324,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
     this.errorMessage.set(null);
     this.selectNextNewEvaluation();
     this.tasksService.startEvaluation(this.projectName, this.taskName, walk).subscribe({
-      next: () => this.loadTaskData(false),
+      next: () => this.loadTaskData(),
       error: (error) => {
         this.cancelNewEvaluationSelect();
         this.errorMessage.set(error?.message || 'Failed to start evaluation.');
@@ -349,7 +349,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
     this.starting.set(true);
     this.errorMessage.set(null);
     this.tasksService.restartFailedBuilds(this.projectName, this.taskName).subscribe({
-      next: () => this.loadTaskData(false),
+      next: () => this.loadTaskData(),
       error: (error) => {
         this.errorMessage.set(error?.message || 'Failed to restart failed builds.');
         this.starting.set(false);
@@ -365,7 +365,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
       next: () => {
         this.aborting.set(false);
         this.abortTarget.set(null);
-        this.loadTaskData(false);
+        this.loadTaskData();
       },
       error: (error: Error) => {
         this.aborting.set(false);
@@ -390,7 +390,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
     this.liveSub.add(
       frames
         .pipe(filter(e => e.event !== 'evaluation.activity'), auditTime(500))
-        .subscribe(() => this.loadTaskData(false, true)),
+        .subscribe(() => this.loadTaskData(true)),
     );
   }
 
@@ -547,7 +547,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
     request.subscribe({
       next: () => {
         this.messageService.add({ severity: 'success', summary: `${target} prioritized` });
-        this.loadTaskData(false);
+        this.loadTaskData();
       },
       error: (error: Error) => this.errorMessage.set(error?.message || `Failed to prioritize ${target.toLowerCase()}.`),
     });

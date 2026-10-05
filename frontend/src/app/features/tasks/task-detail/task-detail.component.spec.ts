@@ -71,14 +71,14 @@ function evalSummary(
   };
 }
 
-function activatedRouteStub(access: AccessState, query: BehaviorSubject<ParamMap>): ActivatedRoute {
+function activatedRouteStub(access: AccessState, query: BehaviorSubject<ParamMap>, task: unknown): ActivatedRoute {
   return {
     snapshot: {
       paramMap: convertToParamMap({ project: 'acme', task: 'demo' }),
     },
     queryParamMap: query,
     data: of({}),
-    parent: { data: of({ taskAccess: { task: {}, access } }) },
+    parent: { data: of({ taskAccess: { task, access } }) },
   } as unknown as ActivatedRoute;
 }
 
@@ -115,7 +115,9 @@ function findByText(root: HTMLElement, text: string): HTMLElement | null {
   ) ?? null;
 }
 
-function makeTasksService(access: AccessState, overrides: Partial<{
+type SetupOverrides = Partial<{
+  getTask: () => ReturnType<TasksService['getTask']>;
+  getProject: () => ReturnType<ProjectsService['getProject']>;
   startEvaluation: () => ReturnType<TasksService['startEvaluation']>;
   restartFailedBuilds: () => ReturnType<TasksService['restartFailedBuilds']>;
   abortEvaluation: (project: string, proj: string, id: string) => ReturnType<TasksService['abortEvaluation']>;
@@ -124,10 +126,15 @@ function makeTasksService(access: AccessState, overrides: Partial<{
   primaryStatus: EvaluationSummary['status'];
   primary: Partial<EvaluationSummary>;
   repository: string;
-}> = {}): TasksService {
-  const extraEvals = overrides.extraEvals ?? [];
+}>;
+
+function resolvedTask(access: AccessState, overrides: SetupOverrides) {
+  return taskFor(access, overrides.extraEvals ?? [], overrides.primaryStatus, overrides.primary, overrides.repository);
+}
+
+function makeTasksService(access: AccessState, overrides: SetupOverrides = {}): TasksService {
   return {
-    getTask: () => of(taskFor(access, extraEvals, overrides.primaryStatus, overrides.primary, overrides.repository)),
+    getTask: overrides.getTask ?? (() => of(resolvedTask(access, overrides))),
     getEntryPoints: overrides.getEntryPoints ?? (() => of({ entry_points: [], total: 0 })),
     startEvaluation: overrides.startEvaluation ?? (() => of('ok')),
     restartFailedBuilds: overrides.restartFailedBuilds ?? (() => of('ok')),
@@ -159,10 +166,10 @@ function setup(
       provideRouter([]),
       provideHttpClient(),
       provideHttpClientTesting(),
-      { provide: ActivatedRoute, useValue: activatedRouteStub(access, query) },
+      { provide: ActivatedRoute, useValue: activatedRouteStub(access, query, resolvedTask(access, serviceOverrides)) },
       { provide: TasksService, useValue: tasksService },
       { provide: EvaluationsService, useValue: evaluationsService },
-      { provide: ProjectsService, useValue: { getProject: () => of({ display_name: 'Acme' }) } },
+      { provide: ProjectsService, useValue: { getProject: serviceOverrides.getProject ?? (() => of({ display_name: 'Acme' })) } },
       { provide: AuthService, useValue: { isAuthenticated: () => authenticated } },
       { provide: StarsService, useValue: { starred: vi.fn(() => of(true)), set: () => of(true) } },
       { provide: LiveService, useValue: { connect: () => frames } },
@@ -176,6 +183,32 @@ function setup(
 const failedBuilds = { builds: { ...zeroCounts(), failed: 2 } };
 const menuLabels = (fixture: ComponentFixture<TaskDetailComponent>) =>
   fixture.componentInstance.panelMenuModel().map(i => i.label);
+
+describe('TaskDetailComponent - loading', () => {
+  const access = { managed: false, canEdit: true, canTrigger: true };
+
+  it('renders the resolved task at once while it refreshes in the background', () => {
+    const { fixture } = setup(access, { getTask: () => NEVER });
+    const root = fixture.nativeElement as HTMLElement;
+    expect(root.querySelector('gr-loading-spinner')).toBeNull();
+    expect(root.querySelector('h1')?.textContent).toContain('Demo');
+    expect(root.querySelector('.eval-card')).not.toBeNull();
+  });
+
+  it('holds the project crumb with a placeholder until the project name arrives', () => {
+    const { fixture } = setup(access, { getProject: () => NEVER });
+    expect((fixture.nativeElement as HTMLElement).querySelector('.breadcrumb-link gr-skeleton')).not.toBeNull();
+  });
+
+  it('holds the packages with placeholder rows until the entry points arrive', () => {
+    const { fixture } = setup(access, { getEntryPoints: () => NEVER });
+    const root = fixture.nativeElement as HTMLElement;
+    expect(root.querySelector('gr-loading-spinner')).toBeNull();
+    const list = root.querySelector('.pkg-list')!;
+    expect(list.getAttribute('aria-busy')).toBe('true');
+    expect(list.querySelectorAll('.pkg gr-skeleton').length).toBeGreaterThan(0);
+  });
+});
 
 describe('TaskDetailComponent - access gating', () => {
   it('hides Start Evaluation / Restart / Abort when canTrigger is false', () => {
@@ -259,7 +292,7 @@ describe('TaskDetailComponent evaluation menu', () => {
       comp.startEvaluation();
       between(comp);
       evals = [evalSummary('e2', 'Queued'), ...evals];
-      comp.loadTaskData(false, true);
+      comp.loadTaskData(true);
       return comp;
     }
 
@@ -287,7 +320,7 @@ describe('TaskDetailComponent evaluation menu', () => {
       const entryPoints = vi.spyOn(tasksService, 'getEntryPoints').mockReturnValue(of({ entry_points: [], total: 0 }));
       evals = [evalSummary('e2', 'Queued'), ...evals];
 
-      comp.loadTaskData(false);
+      comp.loadTaskData();
 
       expect(comp.selectedId()).toBe('e2');
       expect(entryPoints).toHaveBeenCalledTimes(1);
@@ -558,7 +591,7 @@ describe('TaskDetailComponent - evaluation selection', () => {
 
     const spy = vi.spyOn(tasksService, 'getEntryPoints')
       .mockReturnValue(of({ entry_points: [epSummary('a'), epSummary('b')], total: 300 }));
-    component.loadTaskData(false);
+    component.loadTaskData();
     const [, , , limit, offset] = spy.mock.calls.at(-1)!;
 
     expect(limit).toBe(25);
@@ -600,7 +633,7 @@ describe('TaskDetailComponent - evaluation selection', () => {
     expect(component.entryPoints().map(e => e.id)).toEqual(['a', 'b']);
 
     vi.spyOn(tasksService, 'getEntryPoints').mockReturnValue(of({ entry_points: [inPage], total: 2 }));
-    component.loadTaskData(false);
+    component.loadTaskData();
 
     expect(component.entryPoints().map(e => e.id)).toEqual(['a', 'b']);
   });
@@ -620,7 +653,7 @@ describe('TaskDetailComponent - evaluation selection', () => {
     expect(component.entryPoints().map(e => e.id)).toEqual(['a', 'b']);
 
     vi.spyOn(tasksService, 'getEntryPoints').mockReturnValue(of({ entry_points: [first], total: 2 }));
-    component.loadTaskData(false);
+    component.loadTaskData();
 
     expect(component.entryPoints().map(e => e.id)).toEqual(['a', 'b']);
   });
@@ -645,7 +678,7 @@ describe('TaskDetailComponent - evaluation selection', () => {
     component.select(component.evaluations()[1]);
     expect(component.selected()?.id).toBe(component.evaluations()[1].id);
 
-    component.loadTaskData(false);
+    component.loadTaskData();
     expect(component.selected()?.id).toBe(component.evaluations()[1].id);
   });
 

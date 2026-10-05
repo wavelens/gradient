@@ -86,6 +86,14 @@
   }
 }
 
+.pkg--placeholder {
+  animation: none;
+
+  &:hover { border-color: var(--gr-border-subtle); border-left-color: var(--idle); }
+  .pkg-bar { height: var(--segbar-h); }
+  .chip-arch { border-color: transparent; }
+}
+
 @keyframes pkg-in {
   from { opacity: 0; transform: translateY(6px); }
 }
