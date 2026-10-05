@@ -1382,11 +1382,11 @@ in {
           "gradient_crypt_secret:${cfg.secrets.cryptFile}"
           "gradient_jwt_secret:${cfg.secrets.jwtFile}"
           "gradient_state:${validatedStateJsonFile}"
-        ] ++ lib.optional cfg.oidc.enable [
+        ] ++ lib.optionals cfg.oidc.enable [
           "gradient_oidc_client_secret:${cfg.oidc.clientSecretFile}"
-        ] ++ lib.optional cfg.scim.enable [
+        ] ++ lib.optionals cfg.scim.enable [
           "gradient_scim_token:${cfg.scim.tokenFile}"
-        ] ++ lib.optional cfg.email.enable [
+        ] ++ lib.optionals cfg.email.enable [
           "gradient_email_smtp_password:${cfg.email.smtp.passwordFile}"
         ] ++ lib.optionals (cfg.s3.enable && cfg.s3.secretAccessKeyFile != null) [
           "gradient_s3_secret_access_key:${cfg.s3.secretAccessKeyFile}"
