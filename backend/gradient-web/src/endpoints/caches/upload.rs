@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use super::admit::admit;
+use super::admit::{admit, admit_nar};
 use crate::access::{CacheAccess, Caller, load_cache};
 use crate::audit::{RequestInfo, record as audit_record};
 use crate::authorization::MaybeApiKey;
@@ -141,6 +141,13 @@ pub async fn nars_upload(
         ));
     }
 
+    permit.committed();
+    let claim = admit_nar(
+        &state,
+        &narinfo_hash(&narinfo.store_path),
+        narinfo.file_size as u64,
+    )
+    .await?;
     let nar_reader = upload_store
         .open_read(&stage_key)
         .await
@@ -164,7 +171,10 @@ pub async fn nars_upload(
     )
     .await
     .map_err(WebError::from)?;
-    permit.committed();
+    if let Some(claim) = claim {
+        claim.committed();
+    }
+
     let _ = upload_store.discard(&stage_key).await;
 
     for cache in outcome.signed {
@@ -345,7 +355,12 @@ pub async fn nar_finalize(
         ));
     }
 
-    let permit = admit(&state, narinfo.file_size as u64).await?;
+    let claim = admit_nar(
+        &state,
+        &narinfo_hash(&narinfo.store_path),
+        narinfo.file_size as u64,
+    )
+    .await?;
     let verify_reader = store
         .open_read(&key)
         .await
@@ -385,7 +400,10 @@ pub async fn nar_finalize(
     )
     .await
     .map_err(WebError::from)?;
-    permit.committed();
+    if let Some(claim) = claim {
+        claim.committed();
+    }
+
     let _ = store.discard(&key).await;
 
     for cache in outcome.signed {
