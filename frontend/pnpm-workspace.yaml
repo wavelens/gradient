@@ -29,3 +29,8 @@ overrides:
   undici@>=7.17.0 <7.24.0: '>=7.24.0'
 
 minimumReleaseAge: 1440
+
+supportedArchitectures:
+  os: [current, linux]
+  cpu: [current, x64, arm64]
+  libc: [current, glibc]
