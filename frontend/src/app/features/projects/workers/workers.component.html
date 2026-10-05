@@ -40,7 +40,8 @@
           <div slot="meta">
             @if (gradientCi().worker; as w) {
               <div class="worker-id">{{ w.worker_id }}</div>
-              @if (gradientCi().state === 'connected' && !w.connected && w.last_error && access().canEdit) {
+              <gr-allowed-capabilities [value]="w" />
+              @if (!w.connected && w.last_error && access().canEdit) {
                 <div class="worker-last-error text-secondary">{{ w.last_error.reason }}</div>
               }
             } @else {
@@ -54,10 +55,16 @@
               }
               @case ('connected') {
                 @if (gradientCi().worker; as w) {
+                  @if (!w.active) {
+                    <gr-badge severity="danger">Inactive</gr-badge>
+                  }
                   <gr-badge [severity]="w.connected ? 'success' : 'neutral'">{{ w.connected ? 'Connected' : 'Offline' }}</gr-badge>
+                  <a grButton [label]="gradientCiHost" icon="open_in_new" severity="secondary" size="small" class="worker-action-btn"
+                    [href]="config.gradientCiUrl" target="_blank" rel="noopener"></a>
                   @if (w.team) {
                     <span class="text-secondary">Via team {{ w.team }}</span>
                   } @else {
+                    <ng-container *ngTemplateOutlet="editAndToggle; context: { $implicit: w }" />
                     <button *appWritable="access()" grButton label="Disconnect" icon="link_off" severity="danger" size="small"
                       (click)="showGradientCiDisconnect.set(true)"></button>
                   }
@@ -92,12 +99,7 @@
                 @if (worker.url) {
                   <div class="worker-url text-secondary">{{ worker.url }}</div>
                 }
-                <div class="worker-gate-summary text-secondary">
-                  Gates:
-                  <span class="gate-pill" [class.gate-on]="worker.enable_fetch" [class.gate-off]="!worker.enable_fetch">fetch</span>
-                  <span class="gate-pill" [class.gate-on]="worker.enable_eval" [class.gate-off]="!worker.enable_eval">eval</span>
-                  <span class="gate-pill" [class.gate-on]="worker.enable_build" [class.gate-off]="!worker.enable_build">build</span>
-                </div>
+                <gr-allowed-capabilities [value]="worker" />
                 @if (!worker.connected && worker.last_error && access().canEdit) {
                   <div class="worker-last-error text-secondary">{{ worker.last_error.reason }}</div>
                 }
@@ -155,31 +157,7 @@
                     [routerLink]="['/team', worker.team, 'workers']"></a>
                 }
               } @else {
-                <button
-                  *appWritable="access()"
-                  grButton
-                  label="Edit"
-                  icon="edit"
-                  severity="secondary"
-                  size="small"
-                  class="worker-action-btn"
-                  [disabled]="deletingId() !== null || togglingId() !== null || testingId() !== null || renaming()"
-                  [appManagedDisable]="rowAccess(worker)"
-                  (click)="openRenameDialog(worker)"
-                ></button>
-                <button
-                  *appWritable="access()"
-                  grButton
-                  [label]="worker.active ? 'Deactivate' : 'Activate'"
-                  [icon]="worker.active ? 'pause' : 'play_arrow'"
-                  [severity]="worker.active ? 'warn' : 'success'"
-                  size="small"
-                  class="worker-action-btn"
-                  [disabled]="togglingId() !== null || deletingId() !== null || testingId() !== null"
-                  [appManagedDisable]="actionAccess()"
-                  [loading]="togglingId() === worker.worker_id"
-                  (click)="requestToggleWorker(worker)"
-                ></button>
+                <ng-container *ngTemplateOutlet="editAndToggle; context: { $implicit: worker }" />
               }
               <button
                 *appWritable="access()"
@@ -215,6 +193,34 @@
       </gr-row-list>
     }
   }
+
+  <ng-template #editAndToggle let-worker>
+    <button
+      *appWritable="access()"
+      grButton
+      label="Edit"
+      icon="edit"
+      severity="secondary"
+      size="small"
+      class="worker-action-btn"
+      [disabled]="deletingId() !== null || togglingId() !== null || testingId() !== null || renaming()"
+      [appManagedDisable]="rowAccess(worker)"
+      (click)="openRenameDialog(worker)"
+    ></button>
+    <button
+      *appWritable="access()"
+      grButton
+      [label]="worker.active ? 'Deactivate' : 'Activate'"
+      [icon]="worker.active ? 'pause' : 'play_arrow'"
+      [severity]="worker.active ? 'warn' : 'success'"
+      size="small"
+      class="worker-action-btn"
+      [disabled]="togglingId() !== null || deletingId() !== null || testingId() !== null"
+      [appManagedDisable]="actionAccess()"
+      [loading]="togglingId() === worker.worker_id"
+      (click)="requestToggleWorker(worker)"
+    ></button>
+  </ng-template>
 
   <app-team-grants kind="project" grants="workers" [name]="projectName" [canEdit]="access().canEdit && !access().managed"
     (changed)="loadWorkers()" />
@@ -275,40 +281,9 @@
       placeholder="Output of: openssl rand -base64 48"
     />
   </gr-form-field>
-  <gr-form-field label="Server-side capability gates">
+  <gr-form-field label="Allowed">
     <gr-label-help slot="label" doc="concepts/workers/#capabilities" title="Worker capabilities" />
-    <div class="cap-tag-group">
-      <button
-        type="button"
-        class="cap-tag"
-        [class.cap-tag-on]="newEnableFetch"
-        [class.cap-tag-off]="!newEnableFetch"
-        (click)="newEnableFetch = !newEnableFetch"
-      >
-        <gr-icon [name]="newEnableFetch ? 'check' : 'close'" size="sm" />
-        fetch
-      </button>
-      <button
-        type="button"
-        class="cap-tag"
-        [class.cap-tag-on]="newEnableEval"
-        [class.cap-tag-off]="!newEnableEval"
-        (click)="newEnableEval = !newEnableEval"
-      >
-        <gr-icon [name]="newEnableEval ? 'check' : 'close'" size="sm" />
-        eval
-      </button>
-      <button
-        type="button"
-        class="cap-tag"
-        [class.cap-tag-on]="newEnableBuild"
-        [class.cap-tag-off]="!newEnableBuild"
-        (click)="newEnableBuild = !newEnableBuild"
-      >
-        <gr-icon [name]="newEnableBuild ? 'check' : 'close'" size="sm" />
-        build
-      </button>
-    </div>
+    <gr-allowed-capabilities editable [(value)]="newAllowed" />
   </gr-form-field>
   <div grDialogFooter>
     <button grButton label="Cancel" severity="secondary" (click)="showRegisterDialog.set(false)" [disabled]="registering()"></button>
@@ -389,49 +364,20 @@
 >
   @if (renamingWorker(); as worker) {
     <gr-field-row label="Worker" [value]="worker.worker_id" mono />
-    <gr-form-field label="Name" for="rename-name">
-      <input
-        grInput
-        id="rename-name"
-        [(ngModel)]="newName"
-        placeholder="e.g. Primary Build Server"
-        (keyup.enter)="confirmRename()"
-      />
-    </gr-form-field>
-    <gr-form-field label="Server-side capability gates" hint="Changes take effect on the worker's next reconnect (a re-auth is triggered automatically).">
+    @if (!worker.gradient_ci) {
+      <gr-form-field label="Name" for="rename-name">
+        <input
+          grInput
+          id="rename-name"
+          [(ngModel)]="newName"
+          placeholder="e.g. Primary Build Server"
+          (keyup.enter)="confirmRename()"
+        />
+      </gr-form-field>
+    }
+    <gr-form-field label="Allowed" hint="Changes take effect on the worker's next reconnect (a re-auth is triggered automatically).">
       <gr-label-help slot="label" doc="concepts/workers/#capabilities" title="Worker capabilities" />
-      <div class="cap-tag-group">
-        <button
-          type="button"
-          class="cap-tag"
-          [class.cap-tag-on]="editEnableFetch"
-          [class.cap-tag-off]="!editEnableFetch"
-          (click)="editEnableFetch = !editEnableFetch"
-        >
-          <gr-icon [name]="editEnableFetch ? 'check' : 'close'" size="sm" />
-          fetch
-        </button>
-        <button
-          type="button"
-          class="cap-tag"
-          [class.cap-tag-on]="editEnableEval"
-          [class.cap-tag-off]="!editEnableEval"
-          (click)="editEnableEval = !editEnableEval"
-        >
-          <gr-icon [name]="editEnableEval ? 'check' : 'close'" size="sm" />
-          eval
-        </button>
-        <button
-          type="button"
-          class="cap-tag"
-          [class.cap-tag-on]="editEnableBuild"
-          [class.cap-tag-off]="!editEnableBuild"
-          (click)="editEnableBuild = !editEnableBuild"
-        >
-          <gr-icon [name]="editEnableBuild ? 'check' : 'close'" size="sm" />
-          build
-        </button>
-      </div>
+      <gr-allowed-capabilities editable [(value)]="editAllowed" />
     </gr-form-field>
   }
   <div grDialogFooter>

@@ -29,7 +29,26 @@ export interface ConnectionFailure {
   before_auth: boolean;
 }
 
-export interface Worker {
+export interface AllowedCapabilities {
+  enable_fetch: boolean;
+  enable_eval: boolean;
+  enable_build: boolean;
+}
+
+export interface WorkerPatch extends Partial<AllowedCapabilities> {
+  active?: boolean;
+  display_name?: string;
+}
+
+export function changedCapabilities(
+  before: AllowedCapabilities,
+  after: AllowedCapabilities,
+): Partial<AllowedCapabilities> {
+  const keys: (keyof AllowedCapabilities)[] = ['enable_fetch', 'enable_eval', 'enable_build'];
+  return Object.fromEntries(keys.filter((k) => before[k] !== after[k]).map((k) => [k, after[k]]));
+}
+
+export interface Worker extends AllowedCapabilities {
   worker_id: string;
   /** Human-readable display name. */
   display_name: string;
@@ -44,12 +63,6 @@ export interface Worker {
   url?: string;
   /** User who registered this worker. Null for legacy or declarative rows. */
   created_by?: string | null;
-  /** Per-registration server-side gate for `fetch`. */
-  enable_fetch: boolean;
-  /** Per-registration server-side gate for `eval`. */
-  enable_eval: boolean;
-  /** Per-registration server-side gate for `build`. */
-  enable_build: boolean;
   /** Present when the worker is currently connected via proto. */
   live?: WorkerLiveInfo;
 }

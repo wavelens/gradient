@@ -49,6 +49,10 @@ export function gradientCiConnectUrl(serviceUrl: string, scope: GradientCiScope,
   return url.toString();
 }
 
+export function gradientCiHost(serviceUrl: string): string {
+  return new URL(serviceUrl).host;
+}
+
 export function gradientCiKeysUrl(serviceUrl: string): string {
   return new URL('/account/keys', serviceUrl).toString();
 }

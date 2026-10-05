@@ -123,6 +123,11 @@
 <gr-star-button labeled [target]="{ kind: 'project', project: 'gradient' }" />
 <gr-star-button labeled [target]="{ kind: 'cache', cache: 'main' }" [starred]="true" />
 
+<h2>Allowed capabilities</h2>
+<p>What a worker may run. The editable variant is the toggle group of worker dialogs.</p>
+<gr-allowed-capabilities [value]="{ enable_fetch: false, enable_eval: true, enable_build: true }" />
+<gr-allowed-capabilities editable [(value)]="allowed" />
+
 <h2>Status icon</h2>
 <p>One SVG per icon that morphs between phases. The first render is static; reduced motion switches instantly.</p>
 <gr-status-icon [phase]="statusPhase()" size="sm" />

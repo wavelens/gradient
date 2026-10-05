@@ -8,9 +8,11 @@ import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
 import { ApiService } from './api.service';
 import {
+  AllowedCapabilities,
   GradientCiConnectRequest,
   GradientCiConnectResponse,
   Worker,
+  WorkerPatch,
   WorkerRegistration,
   WorkerTestResponse,
 } from '@core/models';
@@ -59,7 +61,7 @@ export class WorkersService {
     displayName: string,
     url?: string,
     token?: string,
-    caps?: { enable_fetch: boolean; enable_eval: boolean; enable_build: boolean },
+    caps?: AllowedCapabilities,
   ): Observable<WorkerRegistration> {
     return this.api.post<WorkerRegistration>(`projects/${project}/workers`, {
       worker_id: workerId,
@@ -76,22 +78,7 @@ export class WorkersService {
     return this.api.patch<string>(`projects/${project}/workers/${workerId}`, { active });
   }
 
-  renameWorker(project: string, workerId: string, displayName: string): Observable<string> {
-    return this.api.patch<string>(`projects/${project}/workers/${workerId}`, { display_name: displayName });
-  }
-
-  setWorkerCapability(
-    project: string,
-    workerId: string,
-    cap: 'fetch' | 'eval' | 'build',
-    enabled: boolean,
-  ): Observable<string> {
-    const body: Record<string, boolean> = {};
-    body[`enable_${cap}`] = enabled;
-    return this.api.patch<string>(`projects/${project}/workers/${workerId}`, body);
-  }
-
-  patchWorker(project: string, workerId: string, body: Record<string, unknown>): Observable<string> {
+  patchWorker(project: string, workerId: string, body: WorkerPatch): Observable<string> {
     return this.api.patch<string>(`projects/${project}/workers/${workerId}`, body);
   }
 

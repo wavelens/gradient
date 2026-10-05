@@ -21,6 +21,7 @@ import {
   TeamRole,
   TeamSummary,
   TeamWorker,
+  WorkerPatch,
 } from '@core/models';
 
 @Injectable({ providedIn: 'root' })
@@ -83,7 +84,7 @@ export class TeamsService {
     return this.api.post<{ team: string; token?: string }>(`teams/${team}/workers`, worker);
   }
 
-  updateWorker(team: string, workerId: string, patch: { active?: boolean; display_name?: string }): Observable<string> {
+  updateWorker(team: string, workerId: string, patch: WorkerPatch): Observable<string> {
     return this.api.patch<string>(`teams/${team}/workers/${workerId}`, patch);
   }
 

@@ -78,6 +78,8 @@ function setup(opts: {
   const workersService = {
     getWorkers: vi.fn(() => of(opts.workers)),
     testWorker: opts.testWorker ?? vi.fn(() => of({ ok: true, connected: true, authorized_for_project: true, message: 'ok' })),
+    patchWorker: vi.fn(() => of('updated')),
+    setWorkerActive: vi.fn(() => of('updated')),
   };
   const projects: MockedProjects = {
     getProject: vi.fn(() => of({ id: 'project-uuid', display_name: 'Project' } as never)),
@@ -334,7 +336,51 @@ describe('WorkersComponent - Gradient.CI Servers entry', () => {
     const fixture = setup({ access: writable, workers: [gciTeam], caches });
     await settled(fixture);
     expect(entry(fixture)!.textContent).toContain('Via team platform');
+    expect(entry(fixture)!.textContent).toContain('Allowed:');
     expect(buttonsLabelled(entry(fixture)!, 'Disconnect').length).toBe(0);
+    expect(buttonsLabelled(entry(fixture)!, 'Edit').length).toBe(0);
+    expect(buttonsLabelled(entry(fixture)!, 'Deactivate').length).toBe(0);
+  });
+
+  it('switches a project connection off and on like a registered worker', async () => {
+    const fixture = setup({ access: writable, workers: [{ ...gciRegistration, active: false }], caches });
+    await settled(fixture);
+    const workers = TestBed.inject(WorkersService) as unknown as { setWorkerActive: ReturnType<typeof vi.fn> };
+
+    buttonsLabelled(entry(fixture)!, 'Activate')[0].click();
+
+    expect(workers.setWorkerActive).toHaveBeenCalledWith('demo', 'g1', true);
+  });
+
+  it('saves what a project connection is allowed from its Edit dialog', async () => {
+    const fixture = setup({ access: writable, workers: [gciRegistration], caches });
+    await settled(fixture);
+    const workers = TestBed.inject(WorkersService) as unknown as { patchWorker: ReturnType<typeof vi.fn> };
+    expect(entry(fixture)!.textContent).toContain('Allowed:');
+
+    buttonsLabelled(entry(fixture)!, 'Edit')[0].click();
+    fixture.detectChanges();
+    const dialog = document.querySelector('.gr-dialog')!;
+    expect(dialog.querySelector('#rename-name')).toBeNull();
+    Array.from(dialog.querySelectorAll('gr-allowed-capabilities button'))
+      .find((b) => b.textContent?.includes('fetch'))!
+      .dispatchEvent(new Event('click'));
+    buttonsLabelled(dialog, 'Save')[0].click();
+
+    expect(workers.patchWorker).toHaveBeenCalledWith('demo', 'g1', { enable_fetch: true });
+  });
+
+  it('links to the Gradient.CI site only while connected', async () => {
+    const link = (fixture: ComponentFixture<WorkersComponent>) =>
+      entry(fixture)!.querySelector('a[href="https://servers.gradient.ci"]');
+    const connected = setup({ access: writable, workers: [gciRegistration], caches });
+    await settled(connected);
+    expect(link(connected)?.getAttribute('target')).toBe('_blank');
+
+    TestBed.resetTestingModule();
+    const offered = setup({ access: writable, workers: [], caches });
+    await settled(offered);
+    expect(link(offered)).toBeNull();
   });
 
   it('hides the entry when the option is off and nothing is connected', async () => {

@@ -30,6 +30,7 @@ import {
   ToastComponent,
 } from '@gradient/ui/ui';
 import {
+  AllowedCapabilitiesComponent,
   EvalStatusBadgeComponent,
   type BarSegment,
   MetricChartComponent,
@@ -38,7 +39,7 @@ import {
   StatusIconComponent,
   byteSegments,
 } from '@shared/ui';
-import type { BuildStatusCounts } from '@core/models';
+import type { AllowedCapabilities, BuildStatusCounts } from '@core/models';
 import type { StatusPhase } from '@shared/evaluation';
 
 function counts(c: Partial<BuildStatusCounts>): BuildStatusCounts {
@@ -55,6 +56,7 @@ function counts(c: Partial<BuildStatusCounts>): BuildStatusCounts {
     MetricChartComponent, ToastComponent, ButtonComponent,
     CardGridComponent, RowComponent, RowListComponent, SkeletonComponent,
     LogoComponent, StarButtonComponent, StatusIconComponent, SegmentedBarComponent,
+    AllowedCapabilitiesComponent,
   ],
   // The demo star toggles locally instead of writing the viewer's real stars.
   providers: [MessageService, { provide: StarsService, useValue: { set: () => of(true) } }],
@@ -71,6 +73,7 @@ export class ElementsComponent {
   ] as const;
   statusPhases: StatusPhase[] = ['queued', 'waiting', 'running', 'success', 'failure', 'aborted'];
   statusPhase = signal<StatusPhase>('queued');
+  allowed: AllowedCapabilities = { enable_fetch: true, enable_eval: true, enable_build: false };
   progressBars: { caption: string; counts?: BuildStatusCounts; segments?: BarSegment[] }[] = [
     { caption: 'Build counts: completed, failed, building, queued', counts: counts({ completed: 12, failed: 2, building: 3, queued: 8 }) },
     { caption: 'Every build substituted from a cache', counts: counts({ substituted: 40 }) },
