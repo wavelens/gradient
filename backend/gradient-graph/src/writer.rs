@@ -9,6 +9,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context as _, anyhow};
 use gradient_db::DbContext;
+use gradient_entity::StorePath;
 use gradient_types::DerivationId;
 use gradient_util::supervision::SupervisorHealth;
 use ractor::{Actor, ActorProcessingErr, ActorRef, RpcReplyPort};
@@ -21,7 +22,7 @@ use crate::messages::{
     RecordReport, RequeueScope, Transition, TransitionReport, UpstreamHit,
 };
 use crate::record;
-use crate::{demote, gc, nar, requeue, transition};
+use crate::{claims, demote, gc, nar, requeue, transition};
 
 pub const CALL_TIMEOUT: Duration = Duration::from_secs(30);
 /// This budget is the only bound on a caller waiting out the queue ahead of its message.
@@ -218,6 +219,7 @@ async fn flush(myself: &ActorRef<GraphMsg>, st: &mut GraphState) {
         }
 
         let committed = commit_nars(&scoped, commits_ref).await?;
+        claim_landed_paths(&scoped, commits_ref, &committed).await?;
         Ok((recorded, committed))
     })
     .await;
@@ -311,6 +313,35 @@ async fn commit_nars(
         committed.push(escalate_retryable(commit_one(scoped, commit).await)?);
     }
     Ok(committed)
+}
+
+#[tracing::instrument(level = "debug", skip_all)]
+async fn claim_landed_paths(
+    scoped: &DbContext,
+    commits: &[NarCommit],
+    committed: &[anyhow::Result<NarCommitted>],
+) -> anyhow::Result<()> {
+    let hashes: Vec<String> = commits
+        .iter()
+        .zip(committed)
+        .filter(|(_, outcome)| outcome.is_ok())
+        .filter_map(|(commit, _)| StorePath::parse(&commit.store_path).ok())
+        .map(|path| path.hash().to_owned())
+        .collect();
+    if hashes.is_empty() {
+        return Ok(());
+    }
+
+    let hashes = &hashes;
+    let claimed = in_savepoint(scoped, |inner| async move {
+        claims::claim_committed_paths(&inner, hashes).await
+    })
+    .await;
+    if let Err(e) = escalate_retryable(claimed)? {
+        warn!(error = %e, paths = hashes.len(), "committed paths stay unclaimed until their next record or commit");
+    }
+
+    Ok(())
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
@@ -534,6 +565,7 @@ mod tests {
             .append_query_results([Vec::<MCachedPath>::new()])
             .append_query_results([none(), none()])
             .append_query_results([Vec::<MDerivationOutput>::new()])
+            .append_query_results([none()])
             .append_exec_results([MockExecResult::default()])
             .into_connection();
         let (ctx, pool) = ctx(db).await;
@@ -567,6 +599,58 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn landed_nars_are_claimed_for_the_projects_waiting_on_them() {
+        let (h1, h2) = (
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        );
+        let none = Vec::<std::collections::BTreeMap<String, sea_orm::Value>>::new;
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_exec_results(transactions(1))
+            .append_query_results([Vec::<MCachedPath>::new()])
+            .append_query_results([none(), none()])
+            .append_query_results([Vec::<MDerivationOutput>::new()])
+            .append_query_results([none()])
+            .append_exec_results([MockExecResult::default()])
+            .into_connection();
+        let (ctx, pool) = ctx(db).await;
+        let graph = crate::Graph::new();
+        let writer = graph.spawn(ctx, None, None).await.unwrap();
+
+        let (tx1, rx1) = ractor::concurrency::oneshot();
+        let (tx2, rx2) = ractor::concurrency::oneshot();
+        writer
+            .send_message(GraphMsg::CommitNar(nar(h1), tx1.into()))
+            .unwrap();
+        writer
+            .send_message(GraphMsg::CommitNar(nar(h2), tx2.into()))
+            .unwrap();
+        rx1.await.unwrap().unwrap();
+        rx2.await.unwrap().unwrap();
+
+        writer.stop_and_wait(None, None).await.unwrap();
+        drop((writer, graph));
+        let statements = gradient_db::pool::raw_statements(pool.into_transaction_log());
+        let at = |needle: &str| {
+            statements
+                .iter()
+                .position(|s| s.sql.contains(needle))
+                .unwrap_or_else(|| panic!("{needle} must run: {statements:?}"))
+        };
+        let inserted = at(r#"INSERT INTO "cached_path""#);
+        let claimed = at("WITH claim AS");
+        assert!(
+            inserted < claimed,
+            "the claim reads the rows the commit wrote: {statements:?}"
+        );
+        let bound = format!("{:?}", statements[claimed].values);
+        assert!(
+            bound.contains(h1) && bound.contains(h2),
+            "every landed path is claimed in a single read: {bound}"
+        );
+    }
+
+    #[tokio::test]
     async fn a_failed_batch_commits_its_nars_one_by_one() {
         let good = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
         let none = Vec::<std::collections::BTreeMap<String, sea_orm::Value>>::new;
@@ -575,6 +659,7 @@ mod tests {
             .append_query_results([Vec::<MCachedPath>::new()])
             .append_query_results([vec![cached_path(good)]])
             .append_query_results([none(), none()])
+            .append_query_results([none()])
             .append_exec_results([MockExecResult::default()])
             .into_connection();
         let (ctx, _pool) = ctx(db).await;

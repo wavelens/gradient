@@ -27,8 +27,12 @@ sequenceDiagram
 - **Keys:** One Ed25519 key per cache, encrypted with the crypt secret.
     - The `format_cache_key` function will return the decrypted private key.
     - The `format_cache_public_key` function will return the `<host>-<name>:<base64>` public key.
-- **Signer:** Only the server can sign, never the worker. The `sign_into_caches` function (`gradient-graph/src/nar.rs`) will sign inside the NAR commit, for worker and REST uploads alike.
-- **Signatures:** A commit will write the `cached_path_signature` row of every subscribed cache. The same statement will sign each row with the cache's key.
+- **Signer:** Only the server can sign, never the worker. Most signatures come from the graph writer's transaction, for worker and REST uploads alike.
+- **Signatures:** Paths get a signed `cached_path_signature` row in every cache of the projects needing them.
+    - Projects need a path once their signing tasks hold a job on the path's derivation. Tasks with `sign_cache` off add no row.
+    - Each NAR commit can sign into the caches of the upload (`sign_into_caches` in `gradient-graph/src/nar.rs`).
+    - Projects with a job on a committed path then receive its signature in their caches (`gradient-graph/src/claims.rs`).
+    - Recorded batches sign the already cached outputs of their jobs into the caches of their project. Builds finished earlier for another project qualify too.
     - The sign sweep (`sign_missing_signatures` in `gradient-cache/src/cacher/sign_sweep.rs`) will fill rows inserted with a later subscription.
     - The sweep will also fill rows a commit left unsigned.
 

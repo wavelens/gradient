@@ -767,6 +767,17 @@ impl BatchWriter<'_> {
     }
 
     #[tracing::instrument(level = "debug", skip_all)]
+    async fn claim_cached_outputs(&self, ids: &HashMap<String, DerivationId>) -> Result<()> {
+        let mut jobs: Vec<DerivationId> = ids.values().copied().collect();
+        jobs.sort_unstable();
+        jobs.dedup();
+
+        crate::claims::claim_reused_outputs(self.ctx, self.evaluation_id, &jobs)
+            .await
+            .context("claim the cached outputs of the batch's jobs")
+    }
+
+    #[tracing::instrument(level = "debug", skip_all)]
     async fn record_eval_messages(&self, warnings: &[String], errors: &[String]) {
         for warning in warnings {
             record_evaluation_message(
@@ -936,6 +947,7 @@ pub(crate) async fn apply_batch(ctx: &DbContext, batch: &RecordBatch) -> Result<
             .context("bump the graph version of evaluations sharing the new edges")?;
         }
 
+        writer.claim_cached_outputs(ids).await?;
         report.walked = newly_walked.len();
         debug!(%evaluation_id, walked = report.walked, named = ids.len(), "batch written");
     }
@@ -1431,6 +1443,12 @@ mod tests {
     }
 
     fn walk_of_a(eval: MEvaluation, a: &MDerivation, b: &MDerivation) -> DatabaseConnection {
+        scripted_walk_of_a(eval, a, b)
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .into_connection()
+    }
+
+    fn scripted_walk_of_a(eval: MEvaluation, a: &MDerivation, b: &MDerivation) -> MockDatabase {
         MockDatabase::new(DatabaseBackend::Postgres)
             .append_query_results([vec![eval]])
             .append_query_results([vec![hash_row(&a.hash)]])
@@ -1447,7 +1465,78 @@ mod tests {
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_exec_results(vec![ok(1); 6])
-            .into_connection()
+    }
+
+    #[tokio::test]
+    async fn a_batch_claims_the_cached_outputs_of_its_jobs_for_its_projects_caches() {
+        let evaluation = EvaluationId::now_v7();
+        let (eval, a, b) = scripted(evaluation);
+        let (cached_path, cache) = (
+            gradient_types::ids::CachedPathId::now_v7(),
+            gradient_types::ids::CacheId::now_v7(),
+        );
+        let claim = BTreeMap::from([
+            (
+                "cached_path".to_owned(),
+                Value::from(cached_path.into_inner()),
+            ),
+            (
+                "hash".to_owned(),
+                Value::from("cccccccccccccccccccccccccccccccc"),
+            ),
+            ("package".to_owned(), Value::from("b-1.0")),
+            (
+                "nar_hash".to_owned(),
+                Value::from(Some("sha256:def".to_owned())),
+            ),
+            ("nar_size".to_owned(), Value::from(Some(5_i64))),
+            ("references".to_owned(), Value::from(None::<String>)),
+            ("cache".to_owned(), Value::from(cache.into_inner())),
+        ]);
+        let db = scripted_walk_of_a(eval, &a, &b)
+            .append_query_results([vec![claim]])
+            .append_query_results([vec![MCache {
+                id: cache,
+                ..Default::default()
+            }]])
+            .append_exec_results([ok(1)])
+            .into_connection();
+        let (ctx, pool) = ctx(db).await;
+
+        apply(
+            &ctx,
+            &RecordBatch {
+                evaluation,
+                derivations: vec![drv(A, &[B])],
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        drop(ctx);
+
+        let log = gradient_db::pool::raw_statements(pool.into_transaction_log());
+        let at = |needle: &str| {
+            log.iter()
+                .position(|s| s.sql.contains(needle))
+                .unwrap_or_else(|| panic!("{needle} must run: {log:?}"))
+        };
+        let jobs = at("INSERT INTO \"build_job\"");
+        let claims = at("WITH claim AS");
+        let signatures = at("INSERT INTO \"cached_path_signature\"");
+        assert!(
+            jobs < claims && claims < signatures,
+            "the claim reads the jobs the batch inserted: {log:?}"
+        );
+        let bound = format!("{:?}", log[claims].values);
+        for id in [evaluation.to_string(), a.id.to_string(), b.id.to_string()] {
+            assert!(bound.contains(&id), "{id} is not bound: {bound}");
+        }
+        assert!(
+            format!("{:?}", log[signatures].values).contains(&cached_path.to_string()),
+            "{:?}",
+            log[signatures]
+        );
     }
 
     #[tokio::test]
@@ -1494,8 +1583,8 @@ mod tests {
         let log = gradient_db::pool::statements(pool.into_transaction_log());
         assert_eq!(
             log.len(),
-            20,
-            "evaluation, walked, stubs, resolve, edges, walk lock, walk seed, shared build insert, shared build select, jobs, reference adoption, lock, mark, seed, promote, unpromote, version, and the raised, locked need update: {log:?}"
+            21,
+            "evaluation, walked, stubs, resolve, edges, walk lock, walk seed, shared build insert, shared build select, jobs, reference adoption, lock, mark, seed, promote, unpromote, version, the raised, locked need update, and the claim of the cached outputs: {log:?}"
         );
         let walked = log
             .iter()
@@ -1686,6 +1775,7 @@ mod tests {
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_exec_results(vec![ok(1); 6])
             .into_connection();
         let (ctx, pool) = ctx(db).await;
@@ -1723,6 +1813,7 @@ mod tests {
             .append_query_results([Vec::<MDerivationBuild>::new()])
             .append_query_results([vec![shared_build_row(a.id), shared_build_row(b.id)]])
             .append_query_results([Vec::<MBuildJob>::new()])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
@@ -1803,6 +1894,7 @@ mod tests {
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_exec_results(vec![ok(1); 7])
             .into_connection();
         let (ctx, pool) = ctx(db).await;
@@ -1874,6 +1966,7 @@ mod tests {
             .append_query_results([vec![drv_row(a.id)]])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([vec![transition_row(a.id, 1, 0)]])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_exec_results(vec![ok(1); 6])
             .into_connection();
@@ -1949,6 +2042,7 @@ mod tests {
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([vec![transition_row(a.id, 1, 0)]])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_exec_results(vec![ok(1); 10])
             .into_connection();
         let (ctx, pool) = ctx(db).await;
@@ -2009,6 +2103,7 @@ mod tests {
             .append_query_results([vec![drv_row(b.id)]])
             .append_query_results([Vec::<MBuildJob>::new()])
             .append_query_results([Vec::<MEntryPoint>::new()])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_exec_results(vec![ok(1); 6])
             .into_connection();
         let (ctx, pool) = ctx(db).await;
@@ -2072,6 +2167,7 @@ mod tests {
             .append_query_results([Vec::<MDerivationBuild>::new()])
             .append_query_results([vec![shared_build_row(a.id), shared_build_row(b.id)]])
             .append_query_results([Vec::<MBuildJob>::new()])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_exec_results(vec![ok(0); 2])
             .into_connection();
         let (ctx, pool) = ctx(db).await;
@@ -2178,6 +2274,7 @@ mod tests {
             .append_query_results([Vec::<MDerivationBuild>::new()])
             .append_query_results([vec![shared_build_row(a.id)]])
             .append_query_results([Vec::<MBuildJob>::new()])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
