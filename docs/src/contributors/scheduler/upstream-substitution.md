@@ -100,7 +100,7 @@ The `BuildSpec` must carry the `(name, store_path)` pairs. The worker will never
 
 1. Skip outputs the Gradient cache is already holding.
 2. Locate each remaining output with `CacheQuery { external: true }` (one path per query). The server can answer from the persisted `external_url`, else from probing `Http` upstream caches, else from `GradientProto` upstream caches.
-3. Download with the redirect-following client. A body length differing from the declared `file_size` is a missing output.
+3. Download with the redirect-following client. A body length differing from the declared `file_size` must still match `nar_hash` after decompression. Any other body is a missing output.
 4. Detect compression from the magic bytes, with the URL extension as fallback.
 5. Check the NAR against `nar_hash`, then push the bytes like any other output.
 

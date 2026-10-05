@@ -21,7 +21,9 @@ use crate::proto::compression::drv_closure_seeds_from_compressed_nar;
 use crate::proto::job::JobUpdater;
 use crate::proto::nar_daemon_import::import_received_nar;
 use crate::proto::progress::{Progress, ProgressSink, Tally, read_body};
-use gradient_worker_client::compression::resolve_compression;
+use gradient_util::nix_hash::normalize_nar_hash;
+use gradient_worker_client::compression::{decompress, resolve_compression};
+use gradient_worker_client::nar::sha256_nix32;
 use gradient_worker_client::nar_recv::NarPayload;
 
 const PREFETCH_CONCURRENCY: usize = 8;
@@ -94,6 +96,26 @@ fn presigned_body_is_short(declared: Option<u64>, received: usize) -> bool {
     declared.is_some_and(|want| want != received as u64)
 }
 
+async fn body_holds_the_nar(body: Vec<u8>, cp: &CachedPath) -> (Vec<u8>, bool) {
+    if !presigned_body_is_short(cp.file_size, body.len()) {
+        return (body, true);
+    }
+
+    let (Some(claimed), url, nar_size) = (cp.nar_hash.clone(), cp.url.clone(), cp.nar_size) else {
+        return (body, false);
+    };
+    tokio::task::spawn_blocking(move || {
+        let matches =
+            decompress(&body, resolve_compression(&body, url.as_deref())).is_ok_and(|nar| {
+                nar_size.is_none_or(|size| size == nar.len() as u64)
+                    && normalize_nar_hash(&claimed) == sha256_nix32(&nar)
+            });
+        (body, matches)
+    })
+    .await
+    .unwrap_or_else(|_| (Vec::new(), false))
+}
+
 type PresignedFetch = (String, Option<(Vec<u8>, CachedPath)>);
 
 pub(crate) fn download_size<'a>(entries: impl Iterator<Item = &'a CachedPath>) -> Option<u64> {
@@ -132,12 +154,13 @@ pub(crate) async fn download_one_presigned(
                     let bytes = read_body(resp, cp.file_size, progress)
                         .await
                         .with_context(|| format!("read body of {url}"))?;
-                    if presigned_body_is_short(cp.file_size, bytes.len()) {
+                    let (bytes, intact) = body_holds_the_nar(bytes, &cp).await;
+                    if !intact {
                         warn!(
                             %path,
                             declared = ?cp.file_size,
                             received = bytes.len(),
-                            "presigned NAR body does not match the declared file_size; \
+                            "presigned NAR body does not match the declared file_size or nar_hash; \
                              treating as a missing input (self-heal demotes it)"
                         );
                         return Ok((path, None));
@@ -929,6 +952,36 @@ mod tests {
             fetched.is_none(),
             "a body shorter than the declared file_size must be a miss, not bytes"
         );
+    }
+
+    #[tokio::test]
+    async fn a_stale_file_size_does_not_reject_a_body_that_holds_the_claimed_nar() {
+        use wiremock::matchers::{method, path as path_matcher};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let nar = b"nix-archive-1 recompressed by the upstream".to_vec();
+        let body = zstd::encode_all(nar.as_slice(), 19).expect("compress");
+        let cache = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path_matcher("/nar/abc.nar.zst"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(body.clone()))
+            .mount(&cache)
+            .await;
+
+        let mut cp = cached(
+            "/nix/store/aaaa-recompressed",
+            Some(&format!("{}/nar/abc.nar.zst", cache.uri())),
+        );
+        cp.file_size = Some(body.len() as u64 + 8421);
+        cp.nar_size = Some(nar.len() as u64);
+        cp.nar_hash = Some(format!("sha256:{}", sha256_nix32(&nar)));
+
+        let http = gradient_util::http::build_download_client().expect("download client");
+        let (_, fetched) = download_one_presigned(&http, cp, &mut Progress::silent())
+            .await
+            .expect("download");
+        let (bytes, _) = fetched.expect("the NAR hash vouches for the body");
+        assert_eq!(bytes, body);
     }
 
     #[tokio::test]
