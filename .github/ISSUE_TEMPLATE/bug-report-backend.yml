@@ -1,0 +1,41 @@
+name: Bug report (backend)
+description: A stuck or failed evaluation, build or worker, with a diagnostic report attached.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Generate the report on the evaluation panel: three-dot menu -> **Diagnostic report** -> **Generate**. See [Report a Bug with a Diagnostic Report](https://wavelens.github.io/gradient/guides/diagnostic-report/).
+
+  - type: textarea
+    id: description
+    attributes:
+      label: What went wrong
+      description: What happened and what you expected instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: report
+    attributes:
+      label: Diagnostic report
+      description: GitHub does not accept `.db` files. Compress the report first (`gzip gradient-report-*.db`), then drag the `.db.gz` file in here.
+      placeholder: Drop gradient-report-<id>-<date>.db.gz here
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Gradient version
+      description: Shown in the frontend footer.
+      placeholder: 2.0.0
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Server or worker logs
+      description: Relevant lines from `journalctl -u gradient-server` or `journalctl -u gradient-worker`.
+      render: text
