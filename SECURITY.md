@@ -2,7 +2,7 @@
 
 ## Supported Versions
 
-Security patches land on `main` and in the latest release. Older releases get no backports.
+Security patches land on `main` and in the latest release. Older releases get backports only under [long-term support](./SUPPORT.md#long-term-support).
 
 ## Reporting a Vulnerability
 
