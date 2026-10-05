@@ -11,7 +11,13 @@
     </div>
   }
   <div class="stat-content">
-    <div class="stat-value">{{ value() }}</div>
+    <div class="stat-value">
+      @if (value() === null) {
+        <gr-skeleton width="5ch" height="1lh" />
+      } @else {
+        {{ value() }}
+      }
+    </div>
     <div class="stat-label">{{ label() }}</div>
   </div>
 </div>

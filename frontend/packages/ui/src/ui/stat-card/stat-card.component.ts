@@ -6,20 +6,20 @@
 
 import { Component, booleanAttribute, input, ChangeDetectionStrategy } from '@angular/core';
 import { IconComponent } from '../icon/icon.component';
+import { SkeletonComponent } from '../skeleton/skeleton.component';
 import { CommonModule } from '@angular/common';
 
 @Component({
   selector: 'gr-stat-card',
   standalone: true,
-  imports: [IconComponent, CommonModule],
+  imports: [IconComponent, SkeletonComponent, CommonModule],
   templateUrl: './stat-card.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './stat-card.component.scss',
 })
 export class StatCardComponent {
   icon = input<string>();
-  value = input.required<number | string>();
+  value = input.required<number | string | null>();
   label = input.required<string>();
   compact = input(false, { transform: booleanAttribute });
-
 }

@@ -8,14 +8,14 @@ import { ChangeDetectionStrategy, Component, OnInit, inject, output, signal } fr
 import { RouterLink } from '@angular/router';
 import { DashboardService } from '@core/services/dashboard.service';
 import { Rail } from '@core/models';
-import { ButtonComponent } from '@gradient/ui/ui';
+import { ButtonComponent, SkeletonComponent } from '@gradient/ui/ui';
 import { StarButtonComponent } from '@shared/ui';
 import { formatCount } from '@shared/text';
 
 @Component({
   selector: 'app-dashboard-rail',
   standalone: true,
-  imports: [RouterLink, ButtonComponent, StarButtonComponent],
+  imports: [RouterLink, ButtonComponent, SkeletonComponent, StarButtonComponent],
   changeDetection: ChangeDetectionStrategy.Eager,
   templateUrl: './dashboard-rail.component.html',
   styleUrl: './dashboard-rail.component.scss',
@@ -24,6 +24,7 @@ export class DashboardRailComponent implements OnInit {
   private dashboard = inject(DashboardService);
   rail = signal<Rail | null>(null);
   failed = signal(false);
+  hidden = signal(false);
   empty = output<boolean>();
 
   readonly count = formatCount;
@@ -40,6 +41,7 @@ export class DashboardRailComponent implements OnInit {
         this.empty.emit(r.projects.length === 0 && r.caches.length === 0);
       },
       error: (e: { status?: number }) => {
+        this.hidden.set(e?.status === 403);
         this.failed.set(e?.status !== 403);
         this.empty.emit(false);
       },

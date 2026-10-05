@@ -9,12 +9,10 @@
     <div class="main">
       @if (newUser()) {
         <app-dashboard-start />
-      } @else if (newUser() === false) {
+      } @else {
         <app-dashboard-stats />
         <app-dashboard-task-table />
         <app-dashboard-activity />
-      } @else {
-        <gr-loading-spinner message="Loading dashboard..." />
       }
     </div>
     <app-dashboard-rail [class.hidden]="newUser()" (empty)="newUser.set($event)" />

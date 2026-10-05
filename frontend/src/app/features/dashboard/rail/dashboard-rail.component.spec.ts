@@ -6,7 +6,7 @@
 
 import { TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
-import { Observable, of, throwError } from 'rxjs';
+import { NEVER, Observable, of, throwError } from 'rxjs';
 import { DashboardRailComponent } from './dashboard-rail.component';
 import { DashboardService } from '@core/services/dashboard.service';
 import { StarsService } from '@core/services/stars.service';
@@ -58,6 +58,14 @@ describe('DashboardRailComponent', () => {
     expect(names).toEqual(['B', 'A']);
     expect(root.textContent).toContain('1 task');
     expect(root.textContent).toContain('3 tasks');
+  });
+
+  it('holds both sections with placeholder rows until the rail arrives', () => {
+    const { root, empty } = mount(() => NEVER);
+    expect(Array.from(root.querySelectorAll('h3')).map((h) => h.textContent?.trim())).toEqual(['Projects', 'Caches']);
+    expect(root.querySelectorAll('gr-skeleton').length).toBeGreaterThan(0);
+    expect(root.querySelector('.rail')?.getAttribute('aria-busy')).toBe('true');
+    expect(empty).toEqual([]);
   });
 
   it('reports an empty rail', () => {

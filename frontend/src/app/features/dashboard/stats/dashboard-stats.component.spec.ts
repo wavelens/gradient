@@ -5,7 +5,7 @@
  */
 
 import { TestBed } from '@angular/core/testing';
-import { Observable, of, throwError } from 'rxjs';
+import { NEVER, Observable, of, throwError } from 'rxjs';
 import { DashboardStatsComponent } from './dashboard-stats.component';
 import { DashboardService } from '@core/services/dashboard.service';
 import { DashboardStats } from '@core/models';
@@ -46,6 +46,12 @@ describe('DashboardStatsComponent', () => {
       'Workers busy': '72%',
       'Avg. Queue wait': '38.0 s',
     });
+  });
+
+  it('lays out every labelled card with a placeholder value until the stats arrive', () => {
+    const root = render(() => NEVER).root;
+    expect(Object.keys(cards(root))).toEqual(['CPU time', 'Builds', 'Cache size', 'Workers busy', 'Avg. Queue wait']);
+    expect(root.querySelectorAll('.stat-value gr-skeleton').length).toBe(5);
   });
 
   it('shows an inline error and loads again on retry', () => {

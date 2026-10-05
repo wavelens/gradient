@@ -58,4 +58,17 @@
     Projects and caches unavailable.
     <button grButton size="small" [text]="true" label="Retry" (click)="load()"></button>
   </p>
+} @else if (!hidden()) {
+  <aside class="rail" aria-busy="true">
+    @for (title of ['Projects', 'Caches']; track title) {
+      <section>
+        <h3>{{ title }}</h3>
+        <ul>
+          @for (_ of [1, 2, 3, 4]; track $index) {
+            <li class="row"><gr-skeleton /></li>
+          }
+        </ul>
+      </section>
+    }
+  </aside>
 }
