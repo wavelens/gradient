@@ -108,21 +108,21 @@ in {
         defaultText = lib.literalExpression ''"http''${lib.optionalString config.services.gradient.useTls "s"}://''${config.services.gradient.domain}"'';
         example = "http://localhost:8080";
         description = ''
-          Public URL under which clients are reaching Gradient. This option is needed for a URL
-          other than {option}`services.gradient.domain`, for example behind a port mapping.
+          Public URL under which clients reach Gradient. Set this for a URL other than
+          {option}`services.gradient.domain`, for example behind a port mapping.
         '';
       };
 
       listenAddr = lib.mkOption {
         type = lib.types.str;
         default = "127.0.0.1";
-        description = "IP address the Gradient server is listening on.";
+        description = "IP address for the Gradient server to listen on.";
       };
 
       port = lib.mkOption {
         type = lib.types.port;
         default = 3000;
-        description = "Port the Gradient server is listening on.";
+        description = "Port for the Gradient server to listen on.";
       };
 
       baseDir = lib.mkOption {
@@ -140,13 +140,12 @@ in {
         default = 90;
         description = ''
           Days to keep job assignment records, finished deliveries, worker connection history,
-          webhook and task action deliveries, expired sessions and CLI logins. The same limit will
-          cover finished admin tasks, the audit log, per-build resource samples and finished
-          cluster jobs. Removed resource samples are no longer feeding build predictions. A finished
-          cluster job without remaining members will go on the next hourly pass. The cleanup will
-          spare the newest finished admin task of each kind and active cluster jobs. An open
-          worker connection is kept until the next connection of the same worker. `0` will keep
-          every record forever.
+          webhook and task action deliveries, expired sessions and CLI logins. Finished admin
+          tasks, the audit log, per-build resource samples and finished cluster jobs share the same
+          limit. Removed resource samples no longer feed build predictions. Finished cluster jobs
+          without remaining members go on the next hourly pass. Active cluster jobs and the newest
+          finished admin task of each kind stay exempt. Open worker connections stay until the
+          next connection of the same worker. Set it to `0` to keep every record forever.
         '';
       };
 
@@ -156,12 +155,12 @@ in {
         defaultText = lib.literalExpression "config.services.gradient.worker.enable";
         description = ''
           Whether to provision credentials for a {option}`services.gradient.worker` running on this
-          host. These are a worker identity derived from the hostname, a token generated on first
-          start, the matching peers file and a worker of the state-declared team `server`, which
-          every new project grants its workers. No UUID, token or web UI registration step is
-          needed.
+          host. The credentials are a worker identity derived from the hostname, a token generated
+          on first start and the matching peers file. They also include a worker of the
+          state-declared team `server`, which all new projects grant their workers. The local
+          worker needs no UUID, token or web UI registration step.
 
-          Disable it to run a co-located worker authenticating like a remote one, with
+          Disable it to authenticate a co-located worker like a remote worker, with
           {option}`services.gradient.worker.id` and {option}`services.gradient.worker.peersFile` set
           by hand.
         '';
@@ -178,12 +177,12 @@ in {
             type = lib.types.bool;
             default = true;
             description = ''
-              Whether nginx is obtaining and serving the TLS certificate itself, by setting the
-              virtual host's `enableACME` and `forceSSL`. Disable it when an upstream proxy
-              (Traefik, Cloudflare, a load balancer) is terminating TLS and forwarding plain HTTP to
-              nginx. Keep {option}`services.gradient.useTls` enabled in that case for `https://`
-              URLs and `Secure` session cookies. The option is without effect with
-              {option}`services.gradient.useTls` disabled.
+              Whether to let nginx obtain and present the TLS certificate itself through the virtual
+              host's `enableACME` and `forceSSL` settings. Disable it for upstream proxies (Traefik,
+              Cloudflare, load balancers) that terminate TLS and forward plain HTTP to nginx. Keep
+              {option}`services.gradient.useTls` enabled in that case for `https://` URLs and
+              `Secure` session cookies. It has no effect with {option}`services.gradient.useTls`
+              disabled.
             '';
           };
         };
@@ -194,9 +193,9 @@ in {
             type = lib.types.nullOr lib.types.str;
             default = null;
             description = ''
-              Host of an existing ACME certificate to use, passed to
-              {option}`services.caddy.virtualHosts.<name>.useACMEHost`. No certificate is requested
-              for it. `null` is leaving certificate management to Caddy.
+              Host of an existing ACME certificate for
+              {option}`services.caddy.virtualHosts.<name>.useACMEHost`, used instead of requesting a
+              new certificate. Set it to `null` to leave certificate management to Caddy.
             '';
           };
 
@@ -256,9 +255,9 @@ in {
             Size it to a quarter of the host's RAM. Gradient's working set is the build graph's
             indexes, and the stock 128 MB cannot keep them resident.
 
-            This value is one fixed allocation, unlike `work_mem` and `maintenance_work_mem`. The
-            default is a quarter of the smallest supported host and a floor to raise on larger
-            hosts. `null` is keeping the PostgreSQL default.
+            This value is a single fixed allocation, unlike `work_mem` and `maintenance_work_mem`.
+            The default is a quarter of the smallest supported host. Raise it on larger hosts. Set
+            it to `null` to keep the PostgreSQL default.
           '';
         };
 
@@ -268,8 +267,9 @@ in {
           example = "12GB";
           description = ''
             `effective_cache_size` of the cluster set up by
-            {option}`services.gradient.postgres.enable`, typically three quarters of the host's RAM.
-            It is a planner hint, not an allocation. `null` is keeping the PostgreSQL default.
+            {option}`services.gradient.postgres.enable`. Set it to three quarters of the host's RAM.
+            It is a planner hint, not an allocation. Set it to `null` to keep the PostgreSQL
+            default.
           '';
         };
 
@@ -279,9 +279,9 @@ in {
           example = "32MB";
           description = ''
             `work_mem` of the cluster set up by {option}`services.gradient.postgres.enable`. It is
-            the floor every query is getting. Graph walks are raising their own ceiling for a single
-            statement. PostgreSQL is charging it per sort or hash node. `"32MB"` is suiting a host
-            sized for the three server pools and is too much for a small one. `null` is keeping the
+            the floor for every query. Graph walks raise their own ceiling for a single statement.
+            Every sort or hash node in a query can claim this much. Use `"32MB"` on a host sized for
+            the three server pools. It is too much for a small host. Set it to `null` to keep the
             PostgreSQL default.
           '';
         };
@@ -292,9 +292,9 @@ in {
           example = "1GB";
           description = ''
             `maintenance_work_mem` of the cluster set up by
-            {option}`services.gradient.postgres.enable`, used by index builds and autovacuum. Each
-            of `autovacuum_max_workers` can claim this much at once. `null` is keeping the
-            PostgreSQL default.
+            {option}`services.gradient.postgres.enable`, used for building indexes and by
+            autovacuum. Each of `autovacuum_max_workers` can claim this much at once. Set it to
+            `null` to keep the PostgreSQL default.
           '';
         };
       };
@@ -315,7 +315,7 @@ in {
           defaultText = lib.literalExpression "pkgs.writeText \"database_url\" config.services.gradient.database.url;";
           example = "/etc/gradient/database_url";
           description = ''
-            File containing the PostgreSQL connection URL. It is taking precedence over
+            File containing the PostgreSQL connection URL, taking precedence over
             {option}`services.gradient.database.url`.
           '';
         };
@@ -324,8 +324,8 @@ in {
           type = lib.types.ints.positive;
           default = 16;
           description = ''
-            Maximum connections of the scheduler and worker pool. Each server process is opening up
-            to the sum of {option}`services.gradient.database.maxConnections`,
+            Maximum connections of the scheduler and worker pool. Server processes each open up to
+            the sum of {option}`services.gradient.database.maxConnections`,
             {option}`services.gradient.database.cache.maxConnections` and
             {option}`services.gradient.database.web.maxConnections`. PostgreSQL's `max_connections`
             must accommodate that sum.
@@ -382,9 +382,9 @@ in {
           default = "https://servers.gradient.ci";
           example = "http://localhost:3200";
           description = ''
-            Address of Gradient.CI Servers. "Connect" is opening `<url>/connect`, and a new
-            connection is dialing the host and port of this address at `/proto`, over `wss://`
-            for `https://` and `ws://` for `http://`.
+            Address of Gradient.CI Servers. "Connect" links to `<url>/connect`. New connections go
+            to the host and port of this address at `/proto`, over `wss://` for `https://` and
+            `ws://` for `http://`.
           '';
         };
       };
@@ -397,8 +397,8 @@ in {
           default = null;
           example = "https://your-key@your-sentry.example.com/1";
           description = ''
-            Sentry DSN used when {option}`services.gradient.sentry.enable` is set. `null` is sending
-            reports to the upstream Wavelens instance at `reports.wavelens.io`.
+            Sentry DSN to use with {option}`services.gradient.sentry.enable` set. Set it to `null`
+            to send reports to the upstream Wavelens instance at `reports.wavelens.io`.
           '';
         };
       };
@@ -408,9 +408,9 @@ in {
           type = lib.types.nullOr lib.types.str;
           default = null;
           description = ''
-            Git author and committer name for commits pushed by the `open_pr` action. `null` is
-            letting each Git host choose. GitHub is crediting the App bot and marking the commit
-            verified. Gitea, Forgejo and GitLab are using the token owner and falling back to
+            Git author and committer name for commits pushed by the `open_pr` action. Set it to
+            `null` to let each Git host choose. Expect GitHub to credit the App bot and mark the
+            commit verified. Gitea, Forgejo and GitLab use the token owner and fall back to
             `Gradient <gradient@users.noreply.HOST>`. That token must carry the `read:user` or
             `read_user` scope.
           '';
@@ -420,8 +420,8 @@ in {
           type = lib.types.nullOr lib.types.str;
           default = null;
           description = ''
-            Git author and committer email for commits pushed by the `open_pr` action. `null` is
-            letting each Git host choose, as described for
+            Git author and committer email for commits pushed by the `open_pr` action. Set it to
+            `null` to let each Git host choose, as described for
             {option}`services.gradient.pullRequests.commitName`.
           '';
         };
@@ -432,7 +432,7 @@ in {
           type = lib.types.enum [ "none" "superusers" "everyone" ];
           default = "everyone";
           description = ''
-            Who may create projects through the API: `none` (only the declarative state),
+            Who can create projects through the API: `none` (only the declarative state),
             `superusers`, or `everyone` (any authenticated user).
           '';
         };
@@ -441,7 +441,7 @@ in {
           type = lib.types.enum [ "none" "superusers" "everyone" ];
           default = "everyone";
           description = ''
-            Who may create caches through the API: `none` (only the declarative state),
+            Who can create caches through the API: `none` (only the declarative state),
             `superusers`, or `everyone` (any authenticated user).
           '';
         };
@@ -450,7 +450,7 @@ in {
           type = lib.types.enum [ "none" "superusers" "everyone" ];
           default = "everyone";
           description = ''
-            Who may create teams through the API: `none` (only the declarative state),
+            Who can create teams through the API: `none` (only the declarative state),
             `superusers`, or `everyone` (any authenticated user).
           '';
         };
@@ -461,8 +461,8 @@ in {
           type = lib.types.ints.positive;
           default = 2 * 1024 * 1024;
           description = ''
-            Maximum HTTP request body size in bytes for most endpoints, keeping an unbounded body from
-            exhausting server memory. Build request blob uploads are using a fixed 20 MiB cap.
+            Maximum HTTP request body size in bytes for most endpoints, to keep an unbounded body
+            from exhausting server memory. Build request blob uploads use a fixed 20 MiB cap.
           '';
         };
 
@@ -471,8 +471,8 @@ in {
           default = 512 * 1024 * 1024;
           description = ''
             Maximum size in bytes of a source upload to `POST /build-requests/source` (as sent by
-            `gradient build`) and of a chunked manifest in total. The built-in reverse proxy's body
-            size limit is raised to fit it.
+            `gradient build`) and of a chunked manifest in total. The built-in reverse proxies raise
+            their body size limit to fit it.
           '';
         };
 
@@ -480,7 +480,7 @@ in {
           type = lib.types.listOf lib.types.str;
           default = [ "127.0.0.1/8" "::1/128" ];
           description = ''
-            CIDR ranges of peers allowed to set `X-Forwarded-For`. The default is trusting a reverse
+            CIDR ranges of peers allowed to set `X-Forwarded-For`. The defaults trust a reverse
             proxy on the same host.
           '';
         };
@@ -489,7 +489,7 @@ in {
           type = lib.types.listOf lib.types.str;
           default = [ "192.168.0.0/16" "172.16.0.0/12" "100.64.0.0/10" "10.0.0.0/8" "fc00::/7" ];
           description = ''
-            CIDR ranges whose clients are receiving a cache's `local_priority`, if set and non-zero.
+            Clients in these CIDR ranges receive a cache's `local_priority`, if set and non-zero.
           '';
         };
       };
@@ -509,11 +509,10 @@ in {
           type = lib.types.ints.unsigned;
           default = 120;
           description = ''
-            Seconds a connected worker may stay silent before the server is declaring the worker
-            dead and re-queuing its jobs. Workers heartbeat every 10 seconds, and the default is
-            tolerating twelve missed beats. The timeout is the only detection for a worker lost
-            without a clean TCP close (OOM kill, frozen host, network partition). `0` is disabling
-            the watchdog.
+            Seconds a connected worker can stay silent before counting as dead, with its jobs
+            re-queued. Workers heartbeat every 10 seconds, giving the default a tolerance of twelve
+            missed beats. The timeout is the only detection for a worker lost without a clean TCP
+            close (OOM kill, frozen host, network partition). Set it to `0` to disable the watchdog.
           '';
         };
 
@@ -522,8 +521,8 @@ in {
             type = lib.types.bool;
             default = true;
             description = ''
-              Whether unauthenticated clients may use `GET /cache/{cache}/proto` for public caches.
-              Private caches are always requiring an API key.
+              Whether unauthenticated clients can use `GET /cache/{cache}/proto` for public caches.
+              Private caches always require an API key.
             '';
           };
 
@@ -542,9 +541,10 @@ in {
           type = lib.types.ints.positive;
           default = 8;
           description = ''
-            Uploads over 1 MiB (NARs and eval cache blobs) admitted at once across all workers and
-            REST clients. Smaller uploads have a window of 128 of their own. An upload is holding its
-            permit until the object is in storage. Further uploads are waiting for a permit.
+            Number of uploads over 1 MiB (NARs and eval cache blobs) admitted at once across all
+            workers and REST clients. Smaller uploads have a window of 128 of their own. Uploads
+            hold their permit until the object is in storage. Other uploads wait for a permit in
+            the meantime.
           '';
         };
 
@@ -552,9 +552,8 @@ in {
           type = lib.types.ints.positive;
           default = 8589934592;
           description = ''
-            Total size in bytes of admitted uploads. An upload not fitting the remaining budget is
-            waiting. An upload larger than the whole budget is running alone once nothing else is in
-            flight.
+            Total size in bytes of admitted uploads. Uploads that exceed the remaining budget wait.
+            An upload larger than the whole budget can run alone once nothing else is in flight.
           '';
         };
 
@@ -562,8 +561,8 @@ in {
           type = lib.types.ints.positive;
           default = 300;
           description = ''
-            Seconds a granted worker upload may go without data before the server is reclaiming its
-            permit and telling the worker to retry.
+            Seconds granted worker uploads can go without data before they lose their permit and
+            their workers receive a request to retry.
           '';
         };
 
@@ -571,8 +570,8 @@ in {
           type = lib.types.ints.positive;
           default = 30;
           description = ''
-            Seconds a NAR upload to the cache upload endpoint is waiting for a permit before the
-            server is answering with 503 and `Retry-After`.
+            Seconds NAR uploads to the cache upload endpoint wait for a permit before getting a 503
+            answer with `Retry-After`.
           '';
         };
       };
@@ -588,7 +587,7 @@ in {
           type = lib.types.ints.unsigned;
           default = 1024 * 1024;
           description = ''
-            Size in bytes up to which the server is serving a NAR download itself instead of a
+            Size in bytes up to which NAR downloads come from the server itself instead of a
             presigned S3 URL. NARs up to this size also stay in the in-memory cache. Uploads do not
             depend on this value.
           '';
@@ -597,7 +596,7 @@ in {
         hotCacheBytes = lib.mkOption {
           type = lib.types.ints.unsigned;
           default = 512 * 1024 * 1024;
-          description = "Capacity in bytes of the in-memory NAR cache. `0` is disabling it.";
+          description = "Capacity in bytes of the in-memory NAR cache. Set it to `0` to disable the cache.";
         };
 
         verifyDigest = lib.mkOption {
@@ -605,8 +604,8 @@ in {
           default = false;
           description = ''
             Whether to download NARs committed through presigned S3 uploads and verify their hash,
-            catching same-length corruption at the cost of a full object read. The size is checked
-            either way. Passthrough and REST uploads are always verified.
+            catching same-length corruption at the cost of a full object read. Size checks run
+            either way. Passthrough and REST uploads always go through verification.
           '';
         };
 
@@ -615,7 +614,7 @@ in {
           default = 60;
           description = ''
             Seconds to wait for a NAR object stream from storage (for example an S3 GET) before
-            answering the worker with `NarAbort`. The worker is retrying after a `NarAbort`.
+            answering the worker with `NarAbort`. Workers retry after a `NarAbort`.
           '';
         };
 
@@ -623,7 +622,7 @@ in {
           type = lib.types.ints.positive;
           default = 30;
           description = ''
-            Seconds an outbound `NarPush` chunk may wait for the WebSocket to drain before an abort
+            Seconds an outbound `NarPush` chunk can wait for the WebSocket to drain before an abort
             of the transfer with `NarAbort`.
           '';
         };
@@ -632,7 +631,7 @@ in {
           type = lib.types.ints.positive;
           default = 8;
           description = ''
-            NAR serving tasks that may run at once per worker connection, bounding memory and
+            NAR serving tasks that can run at once per worker connection, bounding memory and
             storage fan-out for large batches.
           '';
         };
@@ -641,7 +640,7 @@ in {
           type = lib.types.ints.positive;
           default = 16;
           description = ''
-            NAR downloads from storage that may run at once across all connections, keeping the
+            NAR downloads from storage that can run at once across all connections, keeping the
             storage near its best total throughput.
           '';
         };
@@ -650,9 +649,9 @@ in {
           type = lib.types.ints.unsigned;
           default = 86400;
           description = ''
-            Seconds since the last write of an unfinished upload staged under
-            {file}`<services.gradient.baseDir>`, after which the next deep GC is removing the upload.
-            `0` is keeping every unfinished upload.
+            Maximum age in seconds of an unfinished upload staged under
+            {file}`<services.gradient.baseDir>`, counted from its last write. Older uploads disappear
+            in the next deep GC. Set it to `0` to keep every unfinished upload.
           '';
         };
       };
@@ -670,9 +669,9 @@ in {
           type = lib.types.ints.unsigned;
           default = 0;
           description = ''
-            Instance-wide limit on cached NAR storage in GB. New evaluations are waiting while every
-            writable cache of a project has less than 10 MiB left. `0` is disabling the limit.
-            Per-cache limits are still applying.
+            Instance-wide limit on cached NAR storage in GB. New evaluations wait while every
+            writable cache of a project has less than 10 MiB left. Set it to `0` to disable the
+            limit. Per-cache limits still apply.
           '';
         };
 
@@ -680,8 +679,8 @@ in {
           type = lib.types.ints.positive;
           default = 3600;
           description = ''
-            Seconds between NAR signature backfill passes. Uploads are signed immediately. The pass
-            is only catching subscription placeholders and unsigned leftovers.
+            Seconds between NAR signature backfill passes. Uploads receive their signature
+            immediately. Only subscription placeholders and unsigned leftovers need the pass.
           '';
         };
 
@@ -689,9 +688,9 @@ in {
           type = lib.types.ints.positive;
           default = 300;
           description = ''
-            Seconds between DWARF build ID index backfill passes. Uploads are indexed immediately.
-            The pass is only catching paths cached before the index existed or interrupted by a
-            restart.
+            Seconds between passes of the DWARF build ID index backfill. Uploads enter the index
+            immediately. Only paths cached before the index existed or interrupted by a restart need
+            the pass.
           '';
         };
       };
@@ -708,9 +707,9 @@ in {
           default = 336;
           description = ''
             Hours to keep a cached path outside the live closure of retained evaluations after its
-            last fetch, or its upload if never fetched.
-            {option}`services.gradient.gc.narUploadGraceHours` is always applying on top. `0` is
-            keeping nothing beyond that grace.
+            last fetch, or its upload if never fetched. These hours always come on top of
+            {option}`services.gradient.gc.narUploadGraceHours`. Set it to `0` to keep nothing
+            beyond that grace.
           '';
         };
 
@@ -728,8 +727,8 @@ in {
           default = 24;
           description = ''
             Hours before the deletion of a derivation outside the build closure of every retained
-            evaluation. The grace is letting a quick re-evaluation reuse the derivation. `0` is
-            deleting it on the next run.
+            evaluation. Quick re-evaluations can reuse the derivation during this grace. Set it to
+            `0` to delete such derivations on the next run.
           '';
         };
 
@@ -737,9 +736,9 @@ in {
           type = lib.types.ints.unsigned;
           default = 24;
           description = ''
-            Hours an evaluation may stay in one phase before counting as stuck. A stuck evaluation
-            is no longer blocking evaluation garbage collection. `0` is never counting an evaluation
-            as stuck.
+            Hours an evaluation can stay in one phase before counting as stuck. Stuck evaluations no
+            longer block evaluation garbage collection. Set it to `0` to treat no evaluation as
+            stuck.
           '';
         };
 
@@ -748,7 +747,7 @@ in {
           default = 3600;
           description = ''
             Seconds from the end of one background deep garbage collection round to the start of the
-            next. `0` is running a round only on request.
+            next. Set it to `0` to run rounds only on request.
           '';
         };
 
@@ -757,7 +756,7 @@ in {
           default = 1000;
           description = ''
             Milliseconds between two units of a storage migration or a background deep garbage
-            collection round. A requested round is running its units without a pause.
+            collection round. Requested rounds run their units without a pause.
           '';
         };
       };
@@ -767,8 +766,8 @@ in {
           type = lib.types.ints.unsigned;
           default = 30;
           description = ''
-            Maximum number of evaluations kept per task. It is capping the per-task setting, and new
-            tasks are starting at the lower of 30 and this value. `0` is disabling the limit.
+            Maximum number of evaluations kept per task. It is the cap for the per-task setting, and
+            new tasks start at the lower of 30 and this value. Set it to `0` to disable the limit.
           '';
         };
 
@@ -777,8 +776,8 @@ in {
             type = lib.types.ints.unsigned;
             default = 10 * 1024 * 1024 * 1024;
             description = ''
-              Total size in bytes of shared eval cache blobs. Older blobs are evicted until the
-              total is fitting.
+              Total size in bytes of shared eval cache blobs. Older blobs leave the cache until the
+              total is within this size.
             '';
           };
 
@@ -786,7 +785,7 @@ in {
             type = lib.types.ints.unsigned;
             default = 30;
             description = ''
-              Days after which an eval cache blob is evicted regardless of the size limit.
+              Days after which eval cache blobs leave the cache, regardless of the size limit.
             '';
           };
 
@@ -810,8 +809,8 @@ in {
           default = 2;
           description = ''
             Free re-queues of a derivation available in a cache within one evaluation, before
-            Gradient is building the derivation like any other. A re-queue is not counting as a
-            build attempt. This threshold is the only bound on that loop.
+            building the derivation like any other. A re-queue does not count as a build attempt.
+            This threshold is the only bound on that loop.
           '';
         };
 
@@ -819,7 +818,7 @@ in {
           type = lib.types.ints.positive;
           default = 3;
           description = ''
-            Times a build may retry after missing inputs before failing instead of retrying again.
+            Times a build can retry after missing inputs before failing instead of retrying again.
           '';
         };
 
@@ -835,7 +834,8 @@ in {
           type = lib.types.ints.unsigned;
           default = 14400;
           description = ''
-            Build timeout in seconds for derivations without `timeout`. `0` is disabling it.
+            Build timeout in seconds for derivations without `timeout`. Set it to `0` to disable
+            the timeout.
           '';
         };
 
@@ -843,8 +843,8 @@ in {
           type = lib.types.ints.unsigned;
           default = 3600;
           description = ''
-            Timeout in seconds without build output for derivations without `maxSilent`. `0` is
-            disabling it.
+            Timeout in seconds without build output for derivations without `maxSilent`. Set it to
+            `0` to disable the timeout.
           '';
         };
       };
@@ -854,8 +854,8 @@ in {
           type = lib.types.ints.positive;
           default = 30;
           description = ''
-            Seconds for every member of a cluster job attempt to accept its assignment. An attempt
-            not accepted by all members in time is aborted, and the cluster job is queued again.
+            Seconds for every member of a cluster job attempt to accept its assignment. Attempts not
+            accepted by all members in time abort, and their cluster jobs return to the queue.
           '';
         };
 
@@ -863,9 +863,9 @@ in {
           type = lib.types.ints.positive;
           default = 600;
           description = ''
-            Seconds a cluster job that can start is waiting for enough simultaneously idle workers
-            before reserving a placement. Reserved workers are receiving no new single jobs until the
-            cluster job is starting or the reservation is expiring.
+            Seconds cluster jobs that can start wait for enough simultaneously idle workers before
+            reserving a placement. Reserved workers receive no new single jobs until the cluster
+            job's start or the reservation's expiry.
           '';
         };
 
@@ -873,8 +873,8 @@ in {
           type = lib.types.ints.positive;
           default = 1800;
           description = ''
-            Seconds to hold a cluster job reservation before the scheduler is releasing the
-            reservation and planning the cluster job again.
+            Seconds to hold a cluster job reservation before releasing it and planning the cluster
+            job again.
           '';
         };
 
@@ -882,10 +882,10 @@ in {
           type = lib.types.enum [ "simple" "resource-aware" ];
           default = "resource-aware";
           description = ''
-            Policy ranking queued jobs for a requesting worker. `simple` is weighing path
+            Policy ranking queued jobs for a requesting worker. Factors of `simple`: path
             availability, NAR size, dependency count, waiting time, builtins and fetch worker
-            reservation. `resource-aware` is also weighing memory fit, worker saturation, CPU, disk
-            and network affinity and `preferLocalBuild`.
+            reservation. Factors of `resource-aware`: the same plus memory fit, worker saturation,
+            CPU, disk and network affinity and `preferLocalBuild`.
           '';
         };
       };
@@ -895,8 +895,8 @@ in {
           type = lib.types.nullOr lib.types.path;
           default = null;
           description = ''
-            File containing the bearer token required to scrape `GET /metrics`. `null` is disabling
-            the endpoint.
+            File containing the bearer token required to scrape `GET /metrics`. Set it to `null` to
+            disable the endpoint.
           '';
         };
 
@@ -912,7 +912,7 @@ in {
             default = 14;
             description = ''
               Days to keep raw phase and worker samples and the per-minute cache and upstream traffic
-              counters. `0` is keeping them forever.
+              counters. Set it to `0` to keep them forever.
             '';
           };
 
@@ -920,8 +920,8 @@ in {
             type = lib.types.ints.unsigned;
             default = 400;
             description = ''
-              Days to keep minute and hour rollups. Day and week rollups are staying forever. `0` is
-              keeping every rollup forever.
+              Days to keep minute and hour rollups. Day and week rollups stay forever. Set it to `0`
+              to keep every rollup forever.
             '';
           };
         };
@@ -954,8 +954,8 @@ in {
           type = lib.types.ints.unsigned;
           default = 300;
           description = ''
-            Seconds between build graph consistency checks. The check is also repairing the NAR
-            reference counter. `0` is disabling both.
+            Seconds between build graph consistency checks. These checks also repair the NAR
+            reference counter. Set it to `0` to disable both.
           '';
         };
 
@@ -964,7 +964,7 @@ in {
             type = lib.types.nullOr lib.types.str;
             default = null;
             description = ''
-              OTLP collector endpoint to push metrics to. `null` is disabling OTLP export.
+              OTLP collector endpoint to push metrics to. Set it to `null` to disable OTLP export.
             '';
           };
 
@@ -990,7 +990,7 @@ in {
                 type = lib.types.nullOr logLevelType;
                 default = null;
                 description = ''
-                  Log level of the cache. `null` is using
+                  Log level of the cache. Set it to `null` to use
                   {option}`services.gradient.log.level.default`.
                 '';
               };
@@ -999,7 +999,7 @@ in {
                 type = lib.types.nullOr logLevelType;
                 default = null;
                 description = ''
-                  Log level of the web API. `null` is using
+                  Log level of the web API. Set it to `null` to use
                   {option}`services.gradient.log.level.default`.
                 '';
               };
@@ -1008,7 +1008,7 @@ in {
                 type = lib.types.nullOr logLevelType;
                 default = null;
                 description = ''
-                  Log level of the protocol layer. `null` is using
+                  Log level of the protocol layer. Set it to `null` to use
                   {option}`services.gradient.log.level.default`.
                 '';
               };
@@ -1017,22 +1017,22 @@ in {
                 type = lib.types.nullOr logLevelType;
                 default = null;
                 description = ''
-                  Log level of the scheduler. `null` is using
+                  Log level of the scheduler. Set it to `null` to use
                   {option}`services.gradient.log.level.default`.
                 '';
               };
             };
           };
           default = { };
-          description = "Log levels per component. {env}`RUST_LOG` is overriding them at runtime.";
+          description = "Log levels per component, overridden at runtime by {env}`RUST_LOG`.";
         };
 
         chunkBytes = lib.mkOption {
           type = lib.types.ints.positive;
           default = 262144;
           description = ''
-            Target uncompressed size in bytes of a stored build log chunk. Chunks are splitting on
-            line boundaries, and a long line may exceed the target.
+            Target uncompressed size in bytes of a stored build log chunk. Chunks split on line
+            boundaries, and a long line can exceed the target.
           '';
         };
 
@@ -1042,7 +1042,7 @@ in {
           example = "/var/lib/gradient/trace";
           description = ''
             Directory receiving every closed stage span of the server as JSON lines, one file per
-            process. `null` is disabling span tracing.
+            process. Set it to `null` to disable span tracing.
           '';
         };
       };
@@ -1153,23 +1153,23 @@ in {
           type = lib.types.str;
           default = "::";
           description = ''
-            IP address the SSH server is listening on.
-            An IPv6 address is also accepting IPv4 clients, and the default `::` is listening on every address of both families.
+            IP address for the SSH server to listen on. IPv6 addresses also accept IPv4 clients.
+            The default `::` thus means listening on every address of both families.
           '';
         };
 
         port = lib.mkOption {
           type = lib.types.port;
           default = 2222;
-          description = "Port the SSH server is listening on.";
+          description = "Port for the SSH server to listen on.";
         };
 
         hostKeyFile = lib.mkOption {
           type = lib.types.nullOr lib.types.path;
           default = null;
           description = ''
-            File containing the OpenSSH private host key.
-            If unset, an ed25519 key is generated in {option}`services.gradient.baseDir` on first start.
+            File containing the OpenSSH private host key. Set it to `null` to generate an ed25519
+            key in {option}`services.gradient.baseDir` on first start.
           '';
         };
 
@@ -1183,8 +1183,8 @@ in {
           default = "";
           description = ''
             Name of the S3 bucket. The bucket must not have versioning, object lock or replication
-            enabled. Gradient is overwriting objects in place and never removing old versions. A
-            versioned bucket would keep an unreclaimable copy per upload.
+            enabled. Object overwrites happen in place, and old versions stay in the bucket.
+            Versioned buckets thus keep an unreclaimable copy per upload.
           '';
         };
 
@@ -1198,21 +1198,22 @@ in {
           type = lib.types.nullOr lib.types.str;
           default = null;
           description = ''
-            Endpoint of an S3-compatible service such as MinIO or Cloudflare R2. `null` is using AWS.
+            Endpoint of an S3-compatible service such as MinIO or Cloudflare R2. Set it to `null` to
+            use AWS.
           '';
         };
 
         accessKeyId = lib.mkOption {
           type = lib.types.nullOr lib.types.str;
           default = null;
-          description = "AWS access key ID. `null` is using instance credentials or the environment.";
+          description = "AWS access key ID. Set it to `null` to use instance credentials or the environment.";
         };
 
         secretAccessKeyFile = lib.mkOption {
           type = lib.types.nullOr lib.types.path;
           default = null;
           description = ''
-            File containing the AWS secret access key. `null` is using instance credentials.
+            File containing the AWS secret access key. Set it to `null` to use instance credentials.
           '';
         };
 
@@ -1220,8 +1221,8 @@ in {
           type = lib.types.str;
           default = "";
           description = ''
-            Key prefix inside the bucket, such as `gradient/`. An empty string is storing at the
-            bucket root.
+            Key prefix inside the bucket, such as `gradient/`. Leave it empty to store at the bucket
+            root.
           '';
         };
 
@@ -1232,7 +1233,7 @@ in {
             Whether to address a custom {option}`services.gradient.s3.endpoint` virtual-hosted style
             (`https://<bucket>.<endpoint>/key`) instead of path style
             (`https://<endpoint>/<bucket>/key`). MinIO, Garage and most self-hosted services need
-            path style. The option is ignored without a custom endpoint.
+            path style. It has no effect without a custom endpoint.
           '';
         };
 
@@ -1240,8 +1241,8 @@ in {
           type = lib.types.int;
           default = 60;
           description = ''
-            Seconds an S3 response may stall before the request is failing. Every received chunk is
-            resetting the timer, and large NARs keep streaming as long as they make progress.
+            Seconds an S3 response can stall before failing the request. Received chunks reset the
+            timer, and large NARs keep streaming as long as they make progress.
           '';
         };
 
@@ -1255,10 +1256,9 @@ in {
           type = lib.types.int;
           default = 250;
           description = ''
-            Seconds after the first attempt past which no S3 retry is starting. Keep it above
-            `(maxRetries + 1) * readTimeoutSecs` to still retry requests failing on the read
-            timeout. Keep it below 5 minutes as well, since retries are reusing the original
-            credentials.
+            Seconds after the first attempt past which no S3 retries start. Keep it above
+            `(maxRetries + 1) * readTimeoutSecs` to still retry requests that fail on the read
+            timeout. Keep it below 5 minutes as well, since retries reuse the original credentials.
           '';
         };
       };

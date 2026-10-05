@@ -22,7 +22,7 @@ in {
         default = pkgs.gradient-nix;
         defaultText = lib.literalExpression "pkgs.gradient-nix";
         description = ''
-          Nix package whose {command}`nix` the worker is running to detect its system features.
+          Nix package whose {command}`nix` the worker runs to detect its system features.
           The default is Gradient's Nix fork, matching the worker's embedded evaluator.
         '';
       };
@@ -54,7 +54,7 @@ in {
           description = ''
             Host of an existing ACME certificate to use, passed to
             {option}`services.caddy.virtualHosts.<name>.useACMEHost`. No certificate is requested
-            for it. `null` is leaving certificate management to Caddy.
+            for it. `null` leaves certificate management to Caddy.
           '';
         };
 
@@ -78,7 +78,7 @@ in {
       default = "";
       example = "worker.example.com";
       description = ''
-        Domain of the worker's reverse proxy virtual host. It is only used with a reverse proxy
+        Domain of the worker's reverse proxy virtual host. It only applies with a reverse proxy
         enabled.
       '';
     };
@@ -88,7 +88,7 @@ in {
       default = null;
       example = "wss://gradient.example.com/proto";
       description = ''
-        WebSocket URL of the Gradient server's `/proto` endpoint. `null` is leaving the worker
+        WebSocket URL of the Gradient server's `/proto` endpoint. `null` leaves the worker
         waiting for the server to connect.
       '';
     };
@@ -102,13 +102,13 @@ in {
     listenAddr = lib.mkOption {
       type = lib.types.str;
       default = "127.0.0.1";
-      description = "IP address the worker is listening on for incoming server connections.";
+      description = "IP address the worker listens on for incoming server connections.";
     };
 
     port = lib.mkOption {
       type = lib.types.port;
       default = 3100;
-      description = "Port the worker is listening on for incoming server connections.";
+      description = "Port the worker listens on for incoming server connections.";
     };
 
     id = lib.mkOption {
@@ -116,7 +116,7 @@ in {
       default = null;
       example = "550e8400-e29b-41d4-a716-446655440001";
       description = ''
-        Worker UUID. `null` is generating one on first start and storing it in
+        Worker UUID. `null` generates one on first start and stores it in
         {file}`<services.gradient.worker.baseDir>/worker-id`. Set it when the UUID must be known in
         advance, for example to register the worker in {option}`services.gradient.state.workers`.
       '';
@@ -127,8 +127,8 @@ in {
       default = null;
       example = "fra1";
       description = ''
-        Locality label advertised to the scheduler. A cluster job asking for one zone is placing
-        every member on workers with the same label. `null` is putting the worker in the zone of
+        Locality label advertised to the scheduler. A cluster job asking for one zone places
+        every member on workers with the same label. `null` puts the worker in the zone of
         all unlabelled workers.
       '';
     };
@@ -138,8 +138,8 @@ in {
       default = null;
       example = "10.0.0.7:7000";
       description = ''
-        Address at which other members of a cluster job are reaching this worker, passed through
-        verbatim in the cluster roster. `null` is advertising none.
+        Address at which other members of a cluster job reach this worker, passed through
+        verbatim in the cluster roster. `null` advertises none.
       '';
     };
 
@@ -155,13 +155,12 @@ in {
         *:<token>
         ```
 
-        The peer ID `*` is matching any UUID in the server's challenge. Each token is a 48 byte
+        The peer ID `*` matches any UUID in the server's challenge. Each token is a 48 byte
         random secret, for example from {command}`openssl rand -base64 48`, registered through
         `POST /api/v1/projects/{project}/workers`. Pin a project UUID with
         {option}`services.gradient.state.projects.<name>.id` to reference it here.
 
-        `null` is connecting in open mode, where the server is accepting the worker without a
-        token.
+        `null` connects in open mode, where the server accepts the worker without a token.
       '';
     };
 
@@ -169,13 +168,13 @@ in {
       type = lib.types.nullOr lib.types.path;
       default = null;
       description = ''
-        File of token hashes a server must present when it is dialing this worker, one
+        File of token hashes a server must present when it connects to this worker, one
         `peer_id:hash` per line. Lines starting with `#` are ignored. A hash is an argon2 PHC
         string or the lowercase SHA-256 hex digest of the token, for example from
-        {command}`printf %s "$TOKEN" | sha256sum`. The peer ID `*` is matching any peer. The file
+        {command}`printf %s "$TOKEN" | sha256sum`. The peer ID `*` matches any peer. The file
         is only read with {option}`services.gradient.worker.discoverable`.
 
-        `null` is accepting every server, and the worker is logging a warning at start.
+        `null` accepts every server, and the worker logs a warning at start.
       '';
     };
 
@@ -184,7 +183,7 @@ in {
       default = "/nix/var/nix/gcroots/gradient";
       description = ''
         Directory for the indirect GC roots pinning each running build's inputs and outputs against
-        a concurrent {command}`nix-collect-garbage`. An empty string is disabling pinning.
+        a concurrent {command}`nix-collect-garbage`. An empty string disables pinning.
       '';
     };
 
@@ -201,7 +200,7 @@ in {
         default = [ pkgs.stdenv.hostPlatform.system ] ++ lib.optional (pkgs.stdenv.hostPlatform.system == "x86_64-linux") "i686-linux";
         defaultText = lib.literalExpression ''[ pkgs.stdenv.hostPlatform.system ] ++ lib.optional (pkgs.stdenv.hostPlatform.system == "x86_64-linux") "i686-linux"'';
         example = [ "x86_64-linux" "aarch64-linux" ];
-        description = "Nix system types this worker is building for.";
+        description = "Nix system types this worker builds for.";
       };
 
       features = lib.mkOption {
@@ -209,7 +208,7 @@ in {
         default = [ ];
         example = [ "nixos-test" "benchmark" "big-parallel" ];
         description = ''
-          Nix system features this worker is advertising. An empty list is detecting them at runtime from
+          Nix system features this worker advertises. An empty list detects them at runtime from
           {command}`nix config show system-features`, including CPU-derived `gccarch-*` levels.
         '';
       };
@@ -218,8 +217,8 @@ in {
         type = lib.types.nullOr lib.types.ints.positive;
         default = null;
         description = ''
-          Single-core speed score advertised to the scheduler, higher is faster. `null` is
-          benchmarking the host at startup.
+          Single-core speed score advertised to the scheduler, higher is faster. `null`
+          benchmarks the host at startup.
         '';
       };
 
@@ -227,10 +226,10 @@ in {
         type = lib.types.ints.unsigned;
         default = 0;
         description = ''
-          Free memory in MiB below which the worker is killing the one evaluation subprocess large
-          enough to restore the margin. The worker is reporting that evaluation as failed instead of
-          letting the host freeze. `0` is using 10% of total memory, clamped to 128 MiB to 1 GiB.
-          {option}`services.gradient.worker.eval.maxRss` is still bounding steady-state memory.
+          Free memory in MiB below which the worker kills the one evaluation subprocess large
+          enough to restore the margin. The worker reports that evaluation as failed instead of
+          letting the host freeze. `0` uses 10% of total memory, clamped to 128 MiB to 1 GiB.
+          {option}`services.gradient.worker.eval.maxRss` still bounds steady-state memory.
         '';
       };
     };
@@ -241,7 +240,7 @@ in {
         default = cfg.build.maxConcurrent * 9 + 16;
         defaultText = lib.literalExpression "config.services.gradient.worker.build.maxConcurrent * 9 + 16";
         description = ''
-          Maximum connections to the local Nix daemon. Each build is holding one for its whole run
+          Maximum connections to the local Nix daemon. Each build holds one for its whole run
           plus up to 8 for parallel NAR imports. The rest is headroom for path checks.
         '';
       };
@@ -258,10 +257,9 @@ in {
         type = lib.types.nullOr lib.types.ints.positive;
         default = null;
         description = ''
-          Evaluation subprocesses in the pool, equal to the evaluation concurrency. `null` is sizing
-          the pool to the host's core count, capped at 16. The pool is shrinking further until its
-          size times {option}`services.gradient.worker.eval.maxRss` is fitting in 75% of the host's
-          RAM.
+          Evaluation subprocesses in the pool, equal to the evaluation concurrency. `null` sizes
+          the pool to the host's core count, capped at 16. The pool shrinks further until its size
+          times {option}`services.gradient.worker.eval.maxRss` fits in 75% of the host's RAM.
         '';
       };
 
@@ -269,8 +267,8 @@ in {
         type = lib.types.ints.positive;
         default = 2 * 1024 * 1024 * 1024;
         description = ''
-          Memory in bytes above which the worker is recycling an evaluation subprocess after its
-          current call. The limit is not hard. A subprocess may exceed the limit during a call. Keep
+          Memory in bytes above which the worker recycles an evaluation subprocess after its
+          current call. The limit is not hard. A subprocess can exceed the limit during a call. Keep
           it above a typical evaluation's heap to avoid recycling warm subprocesses mid-evaluation.
         '';
       };
@@ -280,7 +278,7 @@ in {
         default = true;
         description = ''
           Whether to collect per-evaluation Nix statistics (thunks, heap, peak memory, hotspots,
-          flake graph). Disabling it is removing their overhead.
+          flake graph). Disabling it removes their overhead.
         '';
       };
 
@@ -290,7 +288,7 @@ in {
           default = null;
           description = ''
             Eval cache directory, exported to evaluation subprocesses as {env}`NIX_CACHE_HOME`.
-            `null` is using {file}`<services.gradient.worker.baseDir>/eval-cache`.
+            `null` uses {file}`<services.gradient.worker.baseDir>/eval-cache`.
           '';
         };
 
@@ -313,7 +311,7 @@ in {
         type = lib.types.nullOr lib.types.ints.positive;
         default = null;
         description = ''
-          CPU cores a single build may use, passed as `--cores`. `null` is using all cores.
+          CPU cores a single build can use, passed as `--cores`. `null` uses all cores.
         '';
       };
 
@@ -335,10 +333,9 @@ in {
         type = lib.types.ints.positive;
         default = 16;
         description = ''
-          Upload requests over 1 MiB the worker is keeping open at once, waiting for a server grant
-          or transferring. One job is holding at most half. Smaller uploads have a window of 128 of
-          their own. The server's upload budget is deciding how many run. This limit is bounding
-          worker memory.
+          Upload requests over 1 MiB the worker keeps open at once, waiting for a server grant or
+          transferring. One job holds at most half. Smaller uploads have a window of 128 of their
+          own. The server's upload budget decides how many run. This limit bounds worker memory.
         '';
       };
 
@@ -347,7 +344,7 @@ in {
         default = 86400;
         description = ''
           Seconds after its last write before the deletion of an unfinished NAR download under
-          {file}`<services.gradient.worker.baseDir>/nar-partial`. `0` is disabling the cleanup.
+          {file}`<services.gradient.worker.baseDir>/nar-partial`. `0` disables the cleanup.
         '';
       };
     };
@@ -366,7 +363,7 @@ in {
               type = lib.types.nullOr logLevelType;
               default = null;
               description = ''
-                Log level of the evaluator. `null` is using
+                Log level of the evaluator. `null` uses
                 {option}`services.gradient.worker.log.level.default`.
               '';
             };
@@ -375,7 +372,7 @@ in {
               type = lib.types.nullOr logLevelType;
               default = null;
               description = ''
-                Log level of the builder. `null` is using
+                Log level of the builder. `null` uses
                 {option}`services.gradient.worker.log.level.default`.
               '';
             };
@@ -384,7 +381,7 @@ in {
               type = lib.types.nullOr logLevelType;
               default = null;
               description = ''
-                Log level of the protocol layer. `null` is using
+                Log level of the protocol layer. `null` uses
                 {option}`services.gradient.worker.log.level.default`.
               '';
             };
@@ -398,8 +395,8 @@ in {
         type = lib.types.int;
         default = 8 * 1024 * 1024;
         description = ''
-          Build log bytes forwarded per build within any minute. The worker is no longer forwarding
-          a build's log past this limit. The build itself is continuing.
+          Build log bytes forwarded per build within any minute. The worker stops forwarding
+          a build's log past this limit. The build itself continues.
         '';
       };
 
@@ -424,7 +421,7 @@ in {
         example = "/var/lib/gradient-worker/trace";
         description = ''
           Directory receiving every closed stage span of the worker and its eval subprocesses as
-          JSON lines, one file per process. `null` is disabling span tracing.
+          JSON lines, one file per process. `null` disables span tracing.
         '';
       };
     };

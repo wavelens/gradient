@@ -41,7 +41,7 @@
         default = null;
         description = ''
           Display name of the upstream cache. It is required for `external` upstream caches. `null`
-          is using the name of the internal cache.
+          uses the name of the internal cache.
         '';
       };
 
@@ -72,8 +72,8 @@
         type = types.bool;
         default = true;
         description = ''
-          Whether the upstream cache is active. Gradient is keeping inactive upstream caches but never
-          querying them. The UI can toggle this value, and the next server start is restoring it.
+          Whether the upstream cache is active. Gradient keeps inactive upstream caches but never
+          queries them. The UI can toggle this value, and the next server start restores it.
         '';
       };
     };
@@ -104,7 +104,7 @@
         type = types.nullOr types.str;
         default = null;
         description = ''
-          File containing the hashed password. `null` is creating the account without a local
+          File containing the hashed password. `null` creates the account without a local
           password, and an OIDC login with the same email can claim it.
         '';
       };
@@ -143,17 +143,17 @@
         type = types.nullOr types.str;
         default = null;
         description = ''
-          Project UUID. `null` is letting the server generate one. Set it to reference the project
+          Project UUID. `null` lets the server generate one. Set it to reference the project
           as `<id>:<token>` in a worker's {option}`services.gradient.worker.peersFile` in a fully
-          declarative deployment. It is only applied on creation, and a value conflicting with an
-          existing project is rejected. Generate one with {command}`uuidgen`.
+          declarative deployment. The server applies it only on creation and rejects a value
+          conflicting with an existing project. Generate one with {command}`uuidgen`.
         '';
       };
 
       description = mkOption {
         type = types.nullOr types.str;
         default = null;
-        description = "Description of the project. `null` is leaving it empty.";
+        description = "Description of the project. Set to `null` to leave it empty.";
       };
 
       private_key_file = mkOption {
@@ -172,7 +172,7 @@
         default = false;
         description = ''
           Whether to hide the project's automatic `build-request` task from task listings in the web
-          UI. The task is still receiving evaluations from {command}`gradient build`.
+          UI. The task still receives evaluations from {command}`gradient build`.
         '';
       };
 
@@ -192,12 +192,12 @@
           ]
         '';
         description = ''
-          Users with roles on this project. An empty list is keeping the legacy behaviour, making
+          Users with roles on this project. An empty list keeps the legacy behaviour, making
           `created_by` Admin and reconciling no other memberships.
 
-          A non-empty list is the source of truth. The next state apply is revoking memberships not
-          listed and is not making `created_by` Admin implicitly. Members referring to users not
-          existing yet are applied on the user's registration or first OIDC sign-in.
+          A non-empty list is the source of truth. The next state apply revokes memberships not
+          listed and does not make `created_by` Admin implicitly. Members referring to users that do
+          not exist yet are applied on the user's registration or first OIDC sign-in.
         '';
       };
 
@@ -218,7 +218,7 @@
         type = types.nullOr types.str;
         default = null;
         description = ''
-          Flake reference overriding this input. `null` together with `keep_url` is force-updating
+          Flake reference overriding this input. `null` together with `keep_url` force-updates
           the input from the URL declared in the task's {file}`flake.nix`.
         '';
       };
@@ -257,7 +257,7 @@
       description = mkOption {
         type = types.nullOr types.str;
         default = null;
-        description = "Description of the task. `null` is leaving it empty.";
+        description = "Description of the task. Set to `null` to leave it empty.";
       };
 
       repository = mkOption {
@@ -269,8 +269,8 @@
         type = types.str;
         default = "packages.x86_64-linux.*";
         description = ''
-          Comma-separated Nix attribute paths to evaluate from the flake. A `*` or `#` segment is
-          matching any attribute name. A pattern prefixed with `!` is excluding matching paths.
+          Comma-separated Nix attribute paths to evaluate from the flake. A `*` or `#` segment
+          matches any attribute name. A pattern prefixed with `!` excludes matching paths.
         '';
       };
 
@@ -285,7 +285,7 @@
         default = 30;
         description = ''
           Number of finished evaluations kept for metrics and history, regardless of outcome. Older
-          ones are garbage collected, and the collection is pausing while an evaluation is active.
+          ones are garbage collected, and the collection pauses while an evaluation is active.
           It must be at least 1 and at most {option}`services.gradient.eval.maxKeep`.
         '';
       };
@@ -294,8 +294,8 @@
         type = types.bool;
         default = true;
         description = ''
-          Whether to sign the narinfo of outputs pushed by this task. External Nix clients are not
-          trusting unsigned outputs, which is keeping them private even in a public cache. A path
+          Whether to sign the narinfo of outputs pushed by this task. External Nix clients do not
+          trust unsigned outputs, which keeps them private even in a public cache. A path
           also produced by a signing task is still signed.
         '';
       };
@@ -304,8 +304,8 @@
         type = types.bool;
         default = false;
         description = ''
-          Whether an evaluation is waiting for a worker when its builds need an architecture or
-          system features no connected worker is providing. The server is otherwise aborting such an
+          Whether an evaluation waits for a worker when its builds need an architecture or
+          system features no connected worker provides. Otherwise the server aborts such an
           evaluation with a warning naming what is missing.
         '';
       };
@@ -314,13 +314,13 @@
         type = types.enum [ "hard_abort" "soft_abort" "skip" "all" ];
         default = "soft_abort";
         description = ''
-          Behavior of a new trigger event while an evaluation is running.
+          Behavior of a new trigger event while an evaluation runs.
 
-          - `hard_abort` is cancelling the running evaluation and its builds and starting a new one.
-          - `soft_abort` is marking the running evaluation aborted and making the new one canonical.
-            Its builds are finishing, and their outputs are flowing into the new evaluation.
-          - `skip` is discarding the new event.
-          - `all` is running the new evaluation alongside the current one.
+          - `hard_abort` cancels the running evaluation and its builds and starts a new one.
+          - `soft_abort` marks the running evaluation aborted and makes the new one canonical.
+            Its builds finish, and their outputs flow into the new evaluation.
+          - `skip` discards the new event.
+          - `all` runs the new evaluation alongside the current one.
         '';
       };
 
@@ -346,8 +346,8 @@
         '';
         description = ''
           Evaluation triggers of the task: polling, Git host push, Git host pull request or cron schedule.
-          `null` is leaving existing triggers untouched, and a new task declared with `null` is
-          starting with none. An empty list is rejected.
+          `null` leaves existing triggers untouched, and a new task declared with `null`
+          starts with none. An empty list is rejected.
         '';
       };
 
@@ -361,8 +361,8 @@
           }
         '';
         description = ''
-          Overrides applied when fetching flake inputs, one entry per input name. An empty set is
-          using {file}`flake.lock` as is.
+          Overrides applied when fetching flake inputs, one entry per input name. An empty set
+          uses {file}`flake.lock` as is.
         '';
       };
 
@@ -442,7 +442,7 @@
       display_name = mkOption {
         type = types.nullOr types.str;
         default = null;
-        description = "Display name of the integration. `null` is using `name`.";
+        description = "Display name of the integration. Set to `null` to use `name`.";
       };
 
       project = mkOption {
@@ -462,12 +462,12 @@
         type = types.enum [ "gitea" "forgejo" "gitlab" "github" ];
         description = ''
           Target Git host of this integration. It is display metadata only for inbound
-          integrations. One inbound row is serving Gitea, Forgejo and GitLab through the Git host
+          integrations. One inbound row covers Gitea, Forgejo and GitLab through the Git host
           segment of the webhook URL.
 
-          `github` is requiring `installation_id` instead of a secret, token or endpoint and is
-          provisioning the linked GitHub App installation. Installing the App on the project is
-          also creating GitHub rows, and a declared one is merged additively.
+          `github` requires `installation_id` instead of a secret, token or endpoint and
+          provisions the linked GitHub App installation. Installing the App on the project
+          also creates GitHub rows, and a declared one is merged additively.
         '';
       };
 
@@ -491,7 +491,7 @@
         default = null;
         description = ''
           File containing the HMAC signing secret of an inbound integration. It is loaded as a
-          systemd credential and stored encrypted. Outbound integrations are ignoring it.
+          systemd credential and stored encrypted. Outbound integrations ignore it.
         '';
       };
 
@@ -500,7 +500,7 @@
         default = null;
         description = ''
           Base URL of the Git host API for outbound integrations, such as
-          `https://gitea.example.com`. Inbound integrations are ignoring it.
+          `https://gitea.example.com`. Inbound integrations ignore it.
         '';
       };
 
@@ -509,7 +509,7 @@
         default = null;
         description = ''
           File containing the Git host API token of an outbound integration. It is loaded as a systemd
-          credential and stored encrypted. GitHub integrations are not using it and are taking their
+          credential and stored encrypted. GitHub integrations do not use it and take their
           credentials from {option}`services.gradient.githubApp`.
         '';
       };
@@ -548,23 +548,23 @@
           { interval_secs = 60; }
         '';
         description = ''
-          Type-specific configuration. Its shape is depending on `type`.
+          Type-specific configuration. Its shape depends on `type`.
 
-          - `polling` is taking `{ interval_secs = 300; branch = "main"; }`. The interval is at
-            least 10 seconds, and `branch` is defaulting to the remote HEAD.
-          - `reporter_push` is taking
+          - `polling` takes `{ interval_secs = 300; branch = "main"; }`. The interval is at
+            least 10 seconds, and `branch` defaults to the remote HEAD.
+          - `reporter_push` takes
             `{ branches = [ "main" "release/*" ]; tags = [ ]; releases_only = false; }`.
-          - `reporter_pull_request` is taking
+          - `reporter_pull_request` takes
             `{ branches = [ ]; actions = [ "opened" "synchronize" "reopened" ]; require_approval = true; }`.
-          - `time` is taking `{ cron = "0 0 2 * * *"; }`, six fields in UTC
+          - `time` takes `{ cron = "0 0 2 * * *"; }`, six fields in UTC
             (`sec min hour dom mon dow`).
 
-          Empty `branches`, `tags` and `actions` lists are matching everything.
+          Empty `branches`, `tags` and `actions` lists match everything.
 
-          `require_approval` is defaulting to `true` for pull request triggers. It is parking
+          `require_approval` defaults to `true` for pull request triggers. It parks
           evaluations of pull requests from contributors without write access on the Git host. A
-          maintainer is releasing them with "Approve and run" on the GitHub check or a
-          `/gradient approve` or `/gradient run` comment. `false` is running every pull request
+          maintainer releases them with "Approve and run" on the GitHub check or a
+          `/gradient approve` or `/gradient run` comment. `false` runs every pull request
           build automatically.
         '';
       };
@@ -572,7 +572,7 @@
       active = mkOption {
         type = types.bool;
         default = true;
-        description = "Whether the trigger is active. Gradient is keeping inactive triggers but never firing them.";
+        description = "Whether the trigger is active. Gradient keeps inactive triggers but never fires them.";
       };
     };
   });
@@ -582,7 +582,7 @@
       name = mkOption {
         type = types.str;
         description = ''
-          Action name, unique within the task. Renaming it is creating a new action and deleting the
+          Action name, unique within the task. Renaming it creates a new action and deletes the
           old one on the next state apply.
         '';
       };
@@ -602,14 +602,14 @@
       active = mkOption {
         type = types.bool;
         default = true;
-        description = "Whether the action is active. Gradient is keeping inactive actions but never firing them.";
+        description = "Whether the action is active. Gradient keeps inactive actions but never fires them.";
       };
 
       events = mkOption {
         type = types.listOf types.str;
         default = [];
         description = ''
-          Events the action is subscribing to. It must be empty for `git_host_status_report`, whose
+          Events the action subscribes to. It must be empty for `git_host_status_report`, whose
           events are derived from build state.
         '';
       };
@@ -620,39 +620,39 @@
           { recipients = [ "ops@example.com" ]; }
         '';
         description = ''
-          Type-specific configuration. Its shape is depending on `type`.
+          Type-specific configuration. Its shape depends on `type`.
 
-          - `send_mail` is taking
+          - `send_mail` takes
             `{ recipients = [ "ops@example.com" ]; subject_template = null; }`.
-          - `send_web_request` is taking
+          - `send_web_request` takes
             `{ url = "https://hooks.example.com/gradient"; token_file = "/etc/gradient/secrets/<name>-token"; }`.
-          - `send_matrix_message` is taking
+          - `send_matrix_message` takes
             `{ homeserver = "https://matrix.example.org"; room_id = "!abc:example.org"; access_token_file = "/etc/gradient/secrets/<name>-matrix"; }`.
             The room must be unencrypted and joined by the token's user.
-          - `send_slack_message` is taking
+          - `send_slack_message` takes
             `{ webhook_url_file = "/etc/gradient/secrets/<name>-slack"; }`, the file holding the
             incoming webhook URL.
-          - `git_host_status_report` is taking `{ integration = "gitea-prod"; }`, naming an
+          - `git_host_status_report` takes `{ integration = "gitea-prod"; }`, naming an
             outbound integration in the same project.
-          - `open_pr` is opening a pull request on the Git host with the result of a generator.
-            Its fields are listed below.
-            - `integration` (string) is naming an outbound integration in the same project, as
+          - `open_pr` opens a pull request on the Git host with the result of a generator.
+            It takes the following fields.
+            - `integration` (string) names an outbound integration in the same project, as
               for `git_host_status_report`.
-            - `generator` (string, default `"flake_lock"`) is choosing the change generator.
-              `flake_lock` is currently the only one and is updating {file}`flake.lock`.
+            - `generator` (string, default `"flake_lock"`) chooses the change generator.
+              `flake_lock` is currently the only one and updates {file}`flake.lock`.
             - `granularity` (string, default `"per_run"`) is `"per_run"` for one pull request
               with every input update or `"per_input"` for one per updated input.
             - `verify_gate` (string, default `"build"`) is `"none"`, `"eval"` or `"build"`. The
-              pull request is only opened once the generated change is passing that stage.
+              action opens the pull request only once the generated change passes that stage.
             - `branch_pattern` (string, default `"gradient/flake-lock-update"`) is the branch the
               pull request is opened from. It must contain the `{input}` placeholder for
               `per_input`, substituted with each input name.
             - `title_template` (string, optional) is the template of the pull request title.
             - `body_template` (string, optional) is the template of the pull request body.
-            - `update_existing` (bool, default `true`) is force-pushing new contents to an open
+            - `update_existing` (bool, default `true`) force-pushes new contents to an open
               pull request of the same branch instead of opening a duplicate.
 
-          A `send_web_request` action without `token_file` is sending unauthenticated requests.
+          A `send_web_request` action without `token_file` sends unauthenticated requests.
           Secret files (`token_file`, `access_token_file`, `webhook_url_file`) are read from the
           systemd credential `gradient_action_''${name}_<field>` and stored encrypted with the
           server's crypt key.
@@ -681,8 +681,8 @@
       user = mkOption {
         type = types.str;
         description = ''
-          User name to grant membership to. A membership of a user not existing yet is applied on
-          the user's registration or first OIDC sign-in.
+          User name to grant membership to. A membership of a user that does not exist yet is applied
+          on the user's registration or first OIDC sign-in.
         '';
       };
       role = mkOption {
@@ -782,7 +782,7 @@
         default = null;
         description = ''
           Role of the team's users: a built-in `Admin`, `Write` or `View`, or a custom role of the
-          project. Required when `users` is true.
+          project. It is required when `users` is true.
         '';
       };
       users = mkOption {
@@ -849,20 +849,20 @@
       description = mkOption {
         type = types.nullOr types.str;
         default = null;
-        description = "Description of the cache. `null` is leaving it empty.";
+        description = "Description of the cache. Set to `null` to leave it empty.";
       };
 
       active = mkOption {
         type = types.bool;
         default = true;
-        description = "Whether the cache is active. The UI can toggle this value, and the next server start is restoring it.";
+        description = "Whether the cache is active. The UI can toggle this value, and the next server start restores it.";
       };
 
       priority = mkOption {
         type = types.ints.positive;
         default = 10;
         description = ''
-          Priority advertised in {file}`nix-cache-info`. Nix is querying caches with a lower value
+          Priority advertised in {file}`nix-cache-info`. Nix queries caches with a lower value
           first.
         '';
       };
@@ -872,7 +872,7 @@
         default = null;
         description = ''
           Priority advertised in {file}`nix-cache-info` to clients within
-          {option}`services.gradient.http.localIps`. `null` or `0` is disabling the override.
+          {option}`services.gradient.http.localIps`. `null` or `0` disables the override.
         '';
       };
 
@@ -880,8 +880,8 @@
         type = types.ints.unsigned;
         default = 0;
         description = ''
-          Storage limit of the cache in GB. New evaluations are waiting while every writable cache
-          of a project has less than 10 MiB left. `0` is disabling the limit.
+          Storage limit of the cache in GB. New evaluations wait while every writable cache
+          of a project has less than 10 MiB left. `0` disables the limit.
         '';
       };
 
@@ -981,9 +981,8 @@
         default = null;
         example = "wss://worker.example.com/proto";
         description = ''
-          WebSocket URL on which the worker is accepting server connections. The server is
-          connecting to the worker with a URL set. `null` is letting the worker connect to the
-          server.
+          WebSocket URL on which the worker accepts server connections. With a URL set, the
+          server connects to the worker. `null` lets the worker connect to the server.
         '';
       };
 
@@ -992,7 +991,7 @@
         default = [ ];
         example = [ "acme-corp" "globex" ];
         description = ''
-          Projects the worker is registered under, one registration per project. Leave empty for a
+          Projects the worker is registered under, one registration per project. Leave it empty for a
           team worker.
         '';
       };
@@ -1003,7 +1002,7 @@
         example = "platform";
         description = ''
           Team owning this worker. A team worker can build for every project granting the team's
-          workers. Mutually exclusive with `projects`.
+          workers. It is mutually exclusive with `projects`.
         '';
       };
 
@@ -1016,8 +1015,8 @@
         type = types.nullOr types.str;
         default = null;
         description = ''
-          User name of the registration's creator. `null` is leaving it unattributed, as for a
-          worker a host is provisioning for itself.
+          User name of the registration's creator. `null` leaves it unattributed, as for a
+          worker a host provisions for itself.
         '';
       };
 
@@ -1025,21 +1024,21 @@
         type = types.bool;
         default = true;
         description = ''
-          Whether the server is granting this registration the worker's `fetch` capability.
+          Whether to grant this registration the worker's `fetch` capability.
         '';
       };
 
       enable_eval = mkOption {
         type = types.bool;
         default = true;
-        description = "Whether the server is granting this registration the worker's `eval` capability.";
+        description = "Whether to grant this registration the worker's `eval` capability.";
       };
 
       enable_build = mkOption {
         type = types.bool;
         default = true;
         description = ''
-          Whether the server is granting this registration the worker's `build` capability.
+          Whether to grant this registration the worker's `build` capability.
         '';
       };
 
@@ -1064,7 +1063,7 @@
         type = types.str;
         description = ''
           File containing the lowercase hex SHA-256 digest of the API token, without its `GRAD`
-          prefix. The server is only storing and comparing hashes. Generate it with
+          prefix. The server only stores and compares hashes. Generate it with
           {command}`printf %s "$TOKEN" | sha256sum | cut -d' ' -f1`.
         '';
       };
@@ -1080,7 +1079,7 @@
         description = ''
           Permissions granted by the key, as camelCase identifiers such as `viewProject`,
           `triggerEvaluation`, `editTask` or `manageMembers`. It must not be empty.
-          `GET /user/keys/permissions` is listing them all.
+          `GET /user/keys/permissions` lists them all.
         '';
       };
 
@@ -1088,7 +1087,7 @@
         type = types.nullOr types.str;
         default = null;
         description = ''
-          Project the key is restricted to. `null` is allowing every project the owner is a member
+          Project the key is restricted to. `null` allows every project the owner is a member
           of.
         '';
       };
@@ -1129,7 +1128,7 @@
         default = true;
         description = ''
           Whether to validate the generated state at build time with the server's
-          `--state-validate`. Schema and reference errors are then failing the Nix build instead of
+          `--state-validate`. Schema and reference errors then fail the Nix build instead of
           the first server start. No database is touched.
         '';
       };
