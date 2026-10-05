@@ -105,6 +105,14 @@ Planned releases in the [Roadmap](https://wavelens.github.io/gradient/roadmap/).
 
 Contributions are welcome: see the [Contributing Guidelines](CONTRIBUTING.md) and the [Contributor Docs](https://wavelens.github.io/gradient/contributors/).
 
+## Project
+
+- **[Support](SUPPORT.md)**: community help, long-term and commercial support.
+- **[Security Policy](SECURITY.md)**: private vulnerability reports.
+- **[Privacy](PRIVACY.md)**: no telemetry, all data self-hosted.
+- **[Governance](GOVERNANCE.md)**: roles, maintainers and decisions.
+- **[Accessibility](ACCESSIBILITY.md)**: web UI support and barrier reports.
+
 ## License
 
 [AGPL-3.0-only](./LICENSE), with license notices following the [REUSE guidelines](https://reuse.software/). Developed by [Wavelens GmbH](https://wavelens.io).
