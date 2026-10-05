@@ -53,7 +53,14 @@
 
 .nar-actions {
   display: flex;
+  align-items: center;
   justify-content: flex-end;
   gap: $spacing-xs;
   white-space: nowrap;
+}
+
+.nar-actions gr-skeleton {
+  width: 1.25rem;
+  height: 1.25rem;
+  margin: calc((#{$control-height} - 1.25rem) / 2) $spacing-sm;
 }

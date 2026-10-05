@@ -4,14 +4,15 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<gr-page-layout [breadcrumb]="[{ label: 'Caches', link: ['/caches'] }, { label: cacheDisplayName || cacheName, link: ['/caches', cacheName] }, { label: 'NARs' }]" title="NARs" subtitle="Browse and manage Nix archives stored in this cache.">
-  @if (stats(); as s) {
-    <gr-card-grid class="nar-stats" min="150px">
-      <gr-stat-card compact label="Total NARs" [value]="formatCount(s.total_nars)" />
-      <gr-stat-card compact label="NAR size" [value]="formatBytes(s.total_nar_size)" />
-      <gr-stat-card compact label="File size" [value]="formatBytes(s.total_file_size)" />
-      <gr-stat-card compact label="Last uploaded" [value]="relativeTime(s.last_uploaded_at)" />
-      <gr-stat-card compact label="Oldest fetched" [value]="relativeTime(s.oldest_fetched_at)" />
+<gr-page-layout [breadcrumb]="[{ label: 'Caches', link: ['/caches'] }, { label: cache()?.display_name || cacheName, link: ['/caches', cacheName] }, { label: 'NARs' }]" title="NARs" subtitle="Browse and manage Nix archives stored in this cache.">
+  @if (!statsFailed()) {
+    @let s = stats();
+    <gr-card-grid class="nar-stats" min="150px" [attr.aria-busy]="!s || null">
+      <gr-stat-card compact label="Total NARs" [value]="s && formatCount(s.total_nars)" />
+      <gr-stat-card compact label="NAR size" [value]="s && formatBytes(s.total_nar_size)" />
+      <gr-stat-card compact label="File size" [value]="s && formatBytes(s.total_file_size)" />
+      <gr-stat-card compact label="Last uploaded" [value]="s && relativeTime(s.last_uploaded_at)" />
+      <gr-stat-card compact label="Oldest fetched" [value]="s && relativeTime(s.oldest_fetched_at)" />
     </gr-card-grid>
   }
 
@@ -37,12 +38,10 @@
     </div>
   }
 
-  @if (loading()) {
-    <gr-loading-spinner message="Loading NARs..." />
-  } @else if (rows().length === 0) {
+  @if (rows()?.length === 0) {
     <gr-empty-state icon="inbox" title="No NARs found" message="No archives match the current filters." />
-  } @else {
-    <gr-table>
+  } @else if (rows() || !loadError()) {
+    <gr-table [attr.aria-busy]="loading() || null">
       <thead>
         <tr>
           <th>Hash</th>
@@ -76,6 +75,17 @@
         </tr>
       </thead>
       <tbody>
+        @for (_ of rows() ? [] : placeholders; track $index) {
+          <tr>
+            <td><code class="mono"><gr-skeleton width="32ch" /></code></td>
+            <td><gr-skeleton width="12ch" /></td>
+            <td class="size-col"><gr-skeleton width="6ch" /></td>
+            <td class="size-col"><gr-skeleton width="6ch" /></td>
+            <td><gr-skeleton width="7ch" /></td>
+            <td><gr-skeleton width="7ch" /></td>
+            <td class="nar-actions"><gr-skeleton /><gr-skeleton /></td>
+          </tr>
+        }
         @for (row of rows(); track row.hash) {
           <tr class="is-clickable" (click)="show(row)">
             <td><code class="mono">{{ row.hash }}</code></td>
@@ -103,17 +113,19 @@
       </tbody>
     </gr-table>
 
-    <div class="pagination">
-      <span class="text-secondary">
-        Page {{ page() }} of {{ totalPages() }} &middot; {{ total() }} total
-      </span>
-      <div class="pagination-actions">
-        <button grButton icon="keyboard_double_arrow_left" severity="secondary" [disabled]="page() <= 1" (click)="goToPage(1)"></button>
-        <button grButton icon="chevron_left" severity="secondary" [disabled]="page() <= 1" (click)="goToPage(page() - 1)"></button>
-        <button grButton icon="chevron_right" severity="secondary" [disabled]="page() >= totalPages()" (click)="goToPage(page() + 1)"></button>
-        <button grButton icon="keyboard_double_arrow_right" severity="secondary" [disabled]="page() >= totalPages()" (click)="goToPage(totalPages())"></button>
+    @if (rows()) {
+      <div class="pagination">
+        <span class="text-secondary">
+          Page {{ page() }} of {{ totalPages() }} &middot; {{ total() }} total
+        </span>
+        <div class="pagination-actions">
+          <button grButton icon="keyboard_double_arrow_left" severity="secondary" [disabled]="page() <= 1" (click)="goToPage(1)"></button>
+          <button grButton icon="chevron_left" severity="secondary" [disabled]="page() <= 1" (click)="goToPage(page() - 1)"></button>
+          <button grButton icon="chevron_right" severity="secondary" [disabled]="page() >= totalPages()" (click)="goToPage(page() + 1)"></button>
+          <button grButton icon="keyboard_double_arrow_right" severity="secondary" [disabled]="page() >= totalPages()" (click)="goToPage(totalPages())"></button>
+        </div>
       </div>
-    </div>
+    }
   }
 </gr-page-layout>
 
