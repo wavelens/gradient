@@ -20,6 +20,6 @@ import { ChangeDetectionStrategy, Component, input } from '@angular/core';
   styleUrl: './skeleton.component.scss',
 })
 export class SkeletonComponent {
-  width = input('100%');
-  height = input('1em');
+  width = input<string>();
+  height = input<string>();
 }
