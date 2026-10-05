@@ -128,16 +128,17 @@
               }
             </div>
           </div>
-          <div class="pkg-label"><h3>Packages</h3></div>
-          @if (entryPoints().length > 0) {
+          @for (group of entryPointGroups(); track group.title) {
+            <div class="pkg-label"><h3>{{ group.title }}</h3></div>
             <div class="pkg-list">
-              @for (ep of entryPoints(); track ep.id) {
+              @for (row of group.rows; track row.entry.id) {
+                @let ep = row.entry;
                 <div class="pkg" [attr.data-phase]="entryPointPhase(ep)" [style.animation-delay.ms]="$index * 18"
                      (contextmenu)="openPkgContextMenu($event, ep, sel.id, pkgMenu)">
                   <a class="pkg-link" [routerLink]="['/project', projectName, 'log', sel.id]" [queryParams]="{ build: ep.build_id }"
-                     [title]="ep.eval + ' - ' + ep.derivation_path" [attr.aria-label]="attrLabel(ep.eval)"></a>
+                     [title]="ep.eval + ' - ' + ep.derivation_path" [attr.aria-label]="row.label"></a>
                   <gr-status-icon class="si" [phase]="entryPointPhase(ep)" [prioritized]="ep.prioritized" size="sm" />
-                  <span class="pkg-name">{{ attrLabel(ep.eval) }}</span>
+                  <span class="pkg-name">{{ row.label }}</span>
                   <span class="chip-arch mono">{{ ep.architecture }}</span>
                   <gr-segmented-bar class="pkg-bar" [counts]="barCounts(ep)" />
                   <span class="pkg-deps">{{ doneCount(barCounts(ep)) }} / {{ totalCount(barCounts(ep)) }} deps</span>
@@ -151,6 +152,10 @@
                 </div>
               }
             </div>
+          } @empty {
+            <div class="pkg-label"><h3>Packages</h3></div>
+          }
+          @if (entryPoints().length > 0) {
             @if (entryPoints().length < entryPointsTotal()) {
               <div class="pkg-more" (grInView)="loadMoreEntryPoints()" [grInViewKey]="entryPoints().length">
                 Loading more ({{ entryPoints().length }} of {{ entryPointsTotal() }})

@@ -529,53 +529,21 @@ describe('TaskDetailComponent - evaluation selection', () => {
 
   /// The row label has to be the field the server sorts by, or the list looks
   /// unordered; the derivation name it used to show is not that field.
-  it('labels a package by the last segment of its attribute path', () => {
-    const { fixture } = setup({ managed: false, canEdit: true, canTrigger: true });
-    const component = fixture.componentInstance;
-    expect(component.attrLabel('packages."x86_64-linux".hello')).toBe('hello');
-    expect(component.attrLabel('hello')).toBe('hello');
-    expect(component.attrLabel('packages."x86_64-linux"."foo.bar"')).toBe('foo.bar');
-  });
-
-  /// A NixOS flake's entry points all end `.config.system.build.toplevel`, so the
-  /// last segment labelled every row of a 74-host list `toplevel`. The label is
-  /// what the shared wrapper leaves behind, at both ends of the path.
-  it('drops the attribute-path segments every row on the page shares', () => {
-    const host = (n: string) =>
-      epSummary(n, `nixosConfigurations.${n}.config.system.build.toplevel`);
-    const { fixture } = setup(
-      { managed: false, canEdit: true, canTrigger: true },
-      { getEntryPoints: () => of({ entry_points: [host('broker'), host('caveman')], total: 2 }) },
-    );
-    const component = fixture.componentInstance;
-
-    expect(component.attrLabel('nixosConfigurations.broker.config.system.build.toplevel'))
-      .toBe('broker');
-    expect(component.attrLabel('nixosConfigurations.caveman.config.system.build.toplevel'))
-      .toBe('caveman');
-  });
-
-  /// Stripping the shared wrapper must never strip the whole path: one row shares
-  /// every segment with itself, and rows with nothing in common keep theirs.
-  it('always leaves at least one segment', () => {
+  it('heads each attribute set and labels its rows without the set and architecture', () => {
     const { fixture } = setup(
       { managed: false, canEdit: true, canTrigger: true },
       {
+        primaryStatus: 'Completed',
         getEntryPoints: () => of({
-          entry_points: [
-            epSummary('a', 'packages."x86_64-linux".hello'),
-            epSummary('b', 'nixosConfigurations.broker.config.system.build.toplevel'),
-          ],
+          entry_points: [epSummary('a', 'packages."x86_64-linux".hello'), epSummary('b', 'checks."x86_64-linux".fmt')],
           total: 2,
         }),
       },
     );
-    const component = fixture.componentInstance;
-
-    expect(component.attrLabel('packages."x86_64-linux".hello'))
-      .toBe('packages.x86_64-linux.hello');
-    expect(component.attrLabel('nixosConfigurations.broker.config.system.build.toplevel'))
-      .toBe('nixosConfigurations.broker.config.system.build.toplevel');
+    const root = fixture.nativeElement as HTMLElement;
+    const text = (sel: string) => Array.from(root.querySelectorAll(sel)).map((e) => e.textContent?.trim());
+    expect(text('.pkg-label h3')).toEqual(['Packages', 'Checks']);
+    expect(text('.pkg-name')).toEqual(['hello', 'fmt']);
   });
 
   /// The server walks one dependency closure per entry point it returns, so a
