@@ -92,6 +92,15 @@ describe('gr-row projection into a linked row', () => {
     expect(root.querySelector('.row-info > .lead')).not.toBeNull();
     expect(root.querySelector('.row-name .lead')).toBeNull();
   });
+
+  it('keeps a projected action clickable on top of the row link', async () => {
+    TestBed.configureTestingModule({ imports: [LinkedHost], providers: [provideRouter([])] });
+    const fixture = TestBed.createComponent(LinkedHost);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    const action = (fixture.nativeElement as HTMLElement).querySelector('.row-actions button')!;
+    expect(getComputedStyle(action).pointerEvents).toBe('auto');
+  });
 });
 
 @Component({
