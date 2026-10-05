@@ -6,6 +6,9 @@
 
 use gradient_entity::project_cache::CacheSubscriptionMode;
 use gradient_types::triggers::{ConcurrencyPolicy, TriggerType};
+use gradient_types::{
+    DEFAULT_TASK_WILDCARD, NIXOS_CACHE_NAME, NIXOS_CACHE_PUBLIC_KEY, NIXOS_CACHE_URL,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
@@ -17,7 +20,7 @@ pub struct StateUser {
     pub email: String,
     #[serde(default)]
     pub password_file: Option<String>,
-    #[serde(default)]
+    #[serde(default = "default_true")]
     pub email_verified: bool,
     #[serde(default)]
     pub superuser: bool,
@@ -59,7 +62,7 @@ pub struct StateTask {
     #[serde(default)]
     pub description: Option<String>,
     pub repository: String,
-    #[serde(default = "default_main", alias = "evaluation_wildcard")]
+    #[serde(default = "default_wildcard", alias = "evaluation_wildcard")]
     pub wildcard: String,
     #[serde(default = "default_true")]
     pub active: bool,
@@ -161,7 +164,7 @@ pub struct StateCache {
     pub signing_key_file: String,
     #[serde(default)]
     pub projects: Vec<String>,
-    #[serde(default)]
+    #[serde(default = "default_upstream_caches")]
     pub upstream_caches: Vec<StateUpstream>,
     pub public: bool,
     pub created_by: String,
@@ -322,8 +325,17 @@ fn default_true() -> bool {
     true
 }
 
-fn default_main() -> String {
-    "main".to_string()
+fn default_wildcard() -> String {
+    DEFAULT_TASK_WILDCARD.to_string()
+}
+
+fn default_upstream_caches() -> Vec<StateUpstream> {
+    vec![StateUpstream::External {
+        display_name: NIXOS_CACHE_NAME.to_string(),
+        url: NIXOS_CACHE_URL.to_string(),
+        public_key: NIXOS_CACHE_PUBLIC_KEY.to_string(),
+        active: true,
+    }]
 }
 
 fn default_priority() -> i32 {

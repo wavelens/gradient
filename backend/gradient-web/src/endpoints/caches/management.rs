@@ -179,13 +179,11 @@ pub async fn put(
     MCacheUpstream {
         id: CacheUpstreamId::now_v7(),
         cache: cache.id,
-        display_name: "cache.nixos.org".to_string(),
+        display_name: NIXOS_CACHE_NAME.to_string(),
         mode: CacheSubscriptionMode::ReadOnly,
         kind: CacheUpstreamKind::Http,
-        url: Some("https://cache.nixos.org".to_string()),
-        public_key: Some(
-            "cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY=".to_string(),
-        ),
+        url: Some(NIXOS_CACHE_URL.to_string()),
+        public_key: Some(NIXOS_CACHE_PUBLIC_KEY.to_string()),
         ..Default::default()
     }
     .into_active_model()
