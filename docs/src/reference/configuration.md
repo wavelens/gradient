@@ -16,6 +16,7 @@ Declarative entities under `services.gradient.state` are in the [state reference
 | `baseDir` | path | `"/var/lib/gradient"` | `GRADIENT_BASE_DIR` | Directory holding Gradient's state, NAR files and caches. |
 | `domain` | string | - | - | Domain under which Gradient is reachable. |
 | `enable` | bool | `false` | - | Whether to enable Gradient. |
+| `environmentVariables` | attribute set of (null or bool, int, string or path) | `{ }` | - | Extra environment variables of the Gradient server, with precedence over variables from other options. `null` values clear a variable. |
 | `listenAddr` | string | `"127.0.0.1"` | `GRADIENT_LISTEN_ADDR` | IP address the Gradient server is listening on. |
 | `localWorker` | bool | `worker.enable` | - | Whether to provision credentials for a `worker` running on this host. These are a worker identity derived from the hostname, a token generated on first start, the matching peers file and a worker of the state-declared team `server`. New projects get the team's workers. |
 | `port` | port | `3000` | `GRADIENT_PORT` | Port the Gradient server is listening on. |
@@ -313,6 +314,7 @@ Declarative entities under `services.gradient.state` are in the [state reference
 | `worker.discoverable` | bool | `false` | `GRADIENT_WORKER_DISCOVERABLE` | Whether to enable incoming server connections on `/proto`. |
 | `worker.domain` | string | `""` | - | Domain of the worker's reverse proxy virtual host. |
 | `worker.enable` | bool | `false` | - | Whether to enable the Gradient worker. |
+| `worker.environmentVariables` | attribute set of (null or bool, int, string or path) | `{ }` | - | Extra environment variables of the Gradient worker, with precedence over variables from other options. `null` values clear a variable. |
 | `worker.endpoint` | null or string | `null` | `GRADIENT_WORKER_ENDPOINT` | Address at which other members of a cluster job are reaching this worker, passed through verbatim in the cluster roster. |
 | `worker.gcrootsDir` | string | `"/nix/var/nix/gcroots/gradient"` | `GRADIENT_WORKER_GCROOTS_DIR` | Directory for the indirect GC roots pinning each running build's inputs and outputs against a concurrent `nix-collect-garbage`. |
 | `worker.id` | null or string | `null` | `GRADIENT_WORKER_ID` | Worker UUID. |

@@ -7,6 +7,7 @@
 { lib, pkgs, config, ... }: let
   cfg = config.services.gradient;
   logLevelType = lib.types.enum [ "trace" "debug" "info" "warn" "error" ];
+  environmentValue = value: if lib.isBool value then lib.boolToString value else lib.mapNullable toString value;
 
   proxyMaxBodyBytes = lib.max cfg.http.maxRequestSize
     (lib.max cfg.nar.maxUploadSize cfg.http.maxSourceUploadSize);
@@ -94,6 +95,16 @@ in {
       packages = {
         server = lib.mkPackageOption pkgs "gradient" { };
         frontend = lib.mkPackageOption pkgs "gradient-frontend" { };
+      };
+
+      environmentVariables = lib.mkOption {
+        type = with lib.types; attrsOf (nullOr (either (either bool int) (either str path)));
+        default = { };
+        example = { GRADIENT_GC_INTERVAL_SECS = 600; };
+        description = ''
+          Extra environment variables of the Gradient server, taking precedence over variables
+          from other options. `null` unsets a variable.
+        '';
       };
 
       domain = lib.mkOption {
@@ -1563,7 +1574,7 @@ in {
         GRADIENT_METRICS_TOKEN_FILE = "%d/gradient_metrics_token";
       } // lib.optionalAttrs (cfg.metrics.otlp.endpoint != null) {
         GRADIENT_METRICS_OTLP_ENDPOINT = cfg.metrics.otlp.endpoint;
-      };
+      } // lib.mapAttrs (_: environmentValue) cfg.environmentVariables;
     };
 
     services = {

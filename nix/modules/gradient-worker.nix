@@ -7,6 +7,7 @@
 { lib, pkgs, config, ... }: let
   cfg = config.services.gradient.worker;
   logLevelType = lib.types.enum [ "trace" "debug" "info" "warn" "error" ];
+  environmentValue = value: if lib.isBool value then lib.boolToString value else lib.mapNullable toString value;
 in {
   imports = [
     (lib.mkRemovedOptionModule [ "services" "gradient" "worker" "drainTimeoutSecs" ] "a stop aborts the running jobs and the server queues them again")
@@ -14,6 +15,16 @@ in {
 
   options.services.gradient.worker = {
     enable = lib.mkEnableOption "the Gradient worker";
+
+    environmentVariables = lib.mkOption {
+      type = with lib.types; attrsOf (nullOr (either (either bool int) (either str path)));
+      default = { };
+      example = { GRADIENT_WORKER_BUILD_MAX_CONCURRENT = 8; };
+      description = ''
+        Extra environment variables of the Gradient worker, taking precedence over variables
+        from other options. `null` unsets a variable.
+      '';
+    };
 
     packages = {
       gradient = lib.mkPackageOption pkgs "gradient" { };
@@ -562,7 +573,7 @@ in {
           GRADIENT_WORKER_LOG_LEVEL_BUILD = cfg.log.level.build;
         } // lib.optionalAttrs (cfg.log.level.proto != null) {
           GRADIENT_WORKER_LOG_LEVEL_PROTO = cfg.log.level.proto;
-        };
+        } // lib.mapAttrs (_: environmentValue) cfg.environmentVariables;
       };
     };
 
