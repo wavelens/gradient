@@ -2366,7 +2366,7 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
         assert want in names, f"{want} missing from supervised loops: {names}"
     bad = [l for l in health["supervised"] if l["restarts"] or l["pass_timeouts"]]
     assert not bad, f"restarted or stalled loops: {bad}"
-    assert health["proto_sessions"] >= 1, health
+    assert health["workers_connected"] >= 1, health
 
     t0 = time.time()
     server.succeed("systemctl stop gradient-server.service")
