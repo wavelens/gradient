@@ -22,8 +22,18 @@
   border-radius: 0;
   padding: 0;
 }
+.metric-chart__body {
+  position: relative;
+}
 .metric-chart__plot {
   width: 100%;
+}
+.metric-chart__plot--waiting {
+  visibility: hidden;
+}
+.metric-chart__placeholder {
+  position: absolute;
+  inset: 0;
 }
 .metric-chart__header {
   display: flex;
