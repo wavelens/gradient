@@ -38,7 +38,9 @@ pub(crate) async fn commit(ctx: &DbContext, c: &NarCommit) -> anyhow::Result<Nar
         cached_path,
         created,
         was_backed,
+        recorded,
     } = upsert_cached_path(db, sp.hash(), sp.name(), c).await?;
+    let c = &recorded;
 
     let producers =
         gradient_db::graph::reachability::producers_of_hashes(txn, &[sp.hash().to_owned()]).await?;
@@ -132,6 +134,8 @@ pub(crate) async fn commit_batch(
     }
 
     let upserted = upsert_cached_paths(db, commits, &paths).await?;
+    let recorded: Vec<NarCommit> = upserted.iter().map(|u| u.recorded.clone()).collect();
+    let commits = recorded.as_slice();
     let (backed, fresh): (Vec<_>, Vec<_>) = hashes
         .iter()
         .zip(&upserted)
@@ -201,12 +205,11 @@ async fn upsert_cached_paths(
     for (c, sp) in commits.iter().zip(paths) {
         match existing.remove(sp.hash()) {
             Some(row) => {
-                upserted.push(Upserted {
-                    cached_path: row.id,
-                    created: false,
-                    was_backed: row.is_fully_cached(),
-                });
-                refreshed(row, c).update(db).await?;
+                let (existing, update) = existing_row(row, c);
+                upserted.push(existing);
+                if let Some(update) = update {
+                    update.update(db).await?;
+                }
             }
             None => {
                 let row = new_row(sp.hash(), sp.name(), c);
@@ -214,6 +217,7 @@ async fn upsert_cached_paths(
                     cached_path: row.id,
                     created: true,
                     was_backed: false,
+                    recorded: c.clone(),
                 });
                 inserts.push(row.into_active_model());
             }
@@ -368,6 +372,7 @@ struct Upserted {
     cached_path: CachedPathId,
     created: bool,
     was_backed: bool,
+    recorded: NarCommit,
 }
 
 async fn upsert_cached_path(
@@ -383,14 +388,12 @@ async fn upsert_cached_path(
         .await?
     {
         Some(row) => {
-            let id = row.id;
-            let was_backed = row.is_fully_cached();
-            refreshed(row, c).update(db).await?;
-            Ok(Upserted {
-                cached_path: id,
-                created: false,
-                was_backed,
-            })
+            let (existing, update) = existing_row(row, c);
+            if let Some(update) = update {
+                update.update(db).await?;
+            }
+
+            Ok(existing)
         }
         None => {
             let row = new_row(hash, package, c)
@@ -401,8 +404,51 @@ async fn upsert_cached_path(
                 cached_path: row.id,
                 created: true,
                 was_backed: false,
+                recorded: c.clone(),
             })
         }
+    }
+}
+
+fn existing_row(row: MCachedPath, c: &NarCommit) -> (Upserted, Option<ACachedPath>) {
+    let mut existing = Upserted {
+        cached_path: row.id,
+        created: false,
+        was_backed: row.is_fully_cached(),
+        recorded: c.clone(),
+    };
+    if !row.is_stored() {
+        return (existing, Some(refreshed(row, c)));
+    }
+
+    existing.recorded = recorded_by_stored_row(&row, c);
+    let update = (c.deriver.is_some() && c.deriver != row.deriver).then(|| ACachedPath {
+        deriver: Set(c.deriver.clone()),
+        ..row.into_active_model()
+    });
+
+    (existing, update)
+}
+
+fn recorded_by_stored_row(row: &MCachedPath, c: &NarCommit) -> NarCommit {
+    let same = |stored: &Option<String>, offered: &str| {
+        stored.as_deref().map(normalize_nar_hash) == Some(normalize_nar_hash(offered))
+    };
+    let same_content = same(&row.file_hash, &c.file_hash) && same(&row.nar_hash, &c.nar_hash);
+    if !same_content {
+        debug!(store_path = %c.store_path, stored = ?row.nar_hash, offered = %c.nar_hash, "kept the first stored content");
+    }
+
+    let targets = if same_content || c.built_by_worker {
+        c.targets
+    } else {
+        SignTargets::None
+    };
+
+    NarCommit {
+        deriver: c.deriver.clone().or_else(|| row.deriver.clone()),
+        built_by_worker: c.built_by_worker,
+        ..NarCommit::from_stored_row(row, targets)
     }
 }
 
@@ -636,6 +682,7 @@ mod tests {
             ca: None,
             targets: SignTargets::None,
             confirmed: true,
+            built_by_worker: false,
         }
     }
 
@@ -1121,9 +1168,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_recommit_with_new_bytes_takes_the_commits_confirmed_flag() {
+    async fn an_unconfirmed_row_takes_the_bytes_of_a_recommit() {
         let existing = MCachedPath {
-            confirmed: true,
+            confirmed: false,
             file_hash: Some("sha256:old".to_owned()),
             ..returned_cached_path(HASH)
         };
@@ -1133,23 +1180,150 @@ mod tests {
             .append_exec_results([exec(1)])
             .into_connection();
 
-        let log = commit_and_raw_log(
-            db,
-            &NarCommit {
-                confirmed: false,
-                ..commit_for(SP)
-            },
-        )
-        .await;
+        let log = commit_and_raw_log(db, &commit_for(SP)).await;
 
         let update = log
             .iter()
             .find(|s| s.sql.starts_with("UPDATE \"cached_path\""))
             .expect("the update");
         assert_eq!(
-            bound(update, "confirmed"),
-            Value::Bool(Some(false)),
+            bound(update, "file_hash"),
+            Value::from(normalize_nar_hash("sha256:abc")),
             "{update:?}"
+        );
+    }
+
+    const STORED_NAR_HASH: &str = "sha256:1b8m03r63zqhnjf7l5wnldhh7c134ap5vpj0850ymkq1iyzicy5s";
+
+    fn stored_row() -> MCachedPath {
+        MCachedPath {
+            confirmed: true,
+            file_hash: Some("sha256:stored-file".to_owned()),
+            file_size: Some(9),
+            nar_hash: Some(STORED_NAR_HASH.to_owned()),
+            nar_size: Some(7),
+            ..returned_cached_path(HASH)
+        }
+    }
+
+    #[tokio::test]
+    async fn a_recommit_with_other_content_leaves_the_stored_row_untouched() {
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([vec![stored_row()]])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_exec_results([exec(1)])
+            .into_connection();
+
+        let log = commit_and_log(db, &commit_for(SP)).await;
+
+        assert!(
+            !log.iter().any(|s| s.contains("UPDATE \"cached_path\"")),
+            "the first stored content must stay: {log:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_batch_recommit_with_other_content_leaves_the_stored_row_untouched() {
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([vec![stored_row()]])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([Vec::<MDerivationOutput>::new()])
+            .into_connection();
+        let (ctx, pool) = ctx(db).await;
+        let tx = Arc::new(ctx.worker_db.begin().await.expect("begin"));
+        let scoped = ctx.in_transaction(Arc::clone(&tx));
+        commit_batch(&scoped, &[commit_for(SP)])
+            .await
+            .expect("commit");
+        drop(scoped);
+        Arc::try_unwrap(tx)
+            .expect("no handle outlives the commit")
+            .commit()
+            .await
+            .expect("commit the transaction");
+        drop(ctx);
+
+        let log = statements(pool);
+        assert!(
+            !log.iter().any(|s| s.contains("UPDATE \"cached_path\"")),
+            "the first stored content must stay: {log:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_worker_recommit_with_other_content_signs_the_stored_content() {
+        let (_file, secret) = secret_file();
+        let (private_key, _) =
+            gradient_sources::generate_signing_key(&secret).expect("signing key");
+        let cache = cache_row(private_key);
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([vec![stored_row()]])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([vec![project_cache_row()]])
+            .append_query_results([vec![cache.clone()]])
+            .append_exec_results([exec(1), exec(1)])
+            .into_connection();
+        let (ctx, pool) = crate::test_ctx::ctx_with_crypt_file(db, &secret).await;
+        let signer = signer_for(&ctx, &cache).expect("signer");
+
+        let committed = commit_in_transaction(
+            &ctx,
+            &NarCommit {
+                targets: SignTargets::ProjectCaches(project()),
+                built_by_worker: true,
+                ..commit_for(SP)
+            },
+        )
+        .await
+        .expect("commit");
+        drop(ctx);
+
+        assert_eq!(committed.signed, vec![cache_id()]);
+        let log = raw_statements(pool);
+        let insert = log
+            .iter()
+            .find(|s| s.sql.contains("INSERT INTO \"cached_path_signature\""))
+            .expect("the signature row");
+        let stored = signer.sign_narinfo_raw(
+            &StorePath::parse(SP).unwrap().full(),
+            &normalize_nar_hash(STORED_NAR_HASH),
+            7,
+            &[],
+        );
+        assert_eq!(
+            bound(insert, "signature"),
+            Value::Bytes(Some(stored.to_vec())),
+            "{insert:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_client_recommit_with_other_content_signs_nothing() {
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([vec![stored_row()]])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_exec_results([exec(1)])
+            .into_connection();
+        let (ctx, pool) = ctx(db).await;
+
+        let committed = commit_in_transaction(
+            &ctx,
+            &NarCommit {
+                targets: SignTargets::ProjectCaches(project()),
+                ..commit_for(SP)
+            },
+        )
+        .await
+        .expect("commit");
+        drop(ctx);
+
+        assert!(committed.signed.is_empty());
+        assert!(
+            !statements(pool)
+                .iter()
+                .any(|s| s.contains("cached_path_signature")),
+            "a client must not get the stored content signed into its caches"
         );
     }
 }

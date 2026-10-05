@@ -17,6 +17,7 @@ use tracing::warn;
 use super::super::nar::{NarUploadRecord, mark_nar_stored, record_nar_push_metric};
 use super::super::socket::{ProtoWriter, send_server_msg};
 use super::table::Transfer;
+use crate::import::{WriteNeeded, nar_write_needed};
 
 pub(super) struct Commit {
     pub writer: ProtoWriter,
@@ -153,6 +154,15 @@ async fn place_passed_through(
             rejected(reason)
         });
     }
+
+    let needed =
+        nar_write_needed(&state.worker_db, &state.nar_storage, hash, &meta.file_hash).await;
+    if !matches!(needed, Ok(WriteNeeded::Write)) {
+        let _ = tokio::fs::remove_file(&staged.path).await;
+        needed.map_err(retry)?;
+        return Ok(());
+    }
+
     state
         .nar_storage
         .adopt_file(hash, &staged.path)
@@ -339,9 +349,54 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_passed_through_nar_for_a_stored_path_leaves_the_stored_object() {
+        let hash = "s".repeat(32);
+        let stored = gradient_types::MCachedPath {
+            hash: hash.clone(),
+            file_hash: Some("sha256:stored".into()),
+            confirmed: true,
+            ..Default::default()
+        };
+        let state = test_state(
+            MockDatabase::new(DatabaseBackend::Postgres)
+                .append_query_results([vec![stored]])
+                .into_connection(),
+        );
+        state.nar_storage.put(&hash, b"OLD".to_vec()).await.unwrap();
+        let dir = tempfile::TempDir::new().unwrap();
+        let partials = gradient_storage::PartialStore::new(dir.path()).unwrap();
+        let mut writer = partials.open_writer("peer/s", "s", 0, 0).await.unwrap();
+        writer.append(0, b"abc").await.unwrap();
+
+        place(
+            &state,
+            &UploadObject::Nar {
+                store_path: format!("/nix/store/{hash}-p"),
+            },
+            Transfer::Passthrough(Box::new(writer)),
+            &UploadMetadata::Nar(Box::new(NarUploadMetadata {
+                file_hash: gradient_storage::file_hash_sri(b"abc"),
+                file_size: 3,
+                nar_size: 3,
+                nar_hash: "sha256:1111".into(),
+                references: Vec::new(),
+                deriver: None,
+                ca: None,
+                multipart: None,
+            })),
+        )
+        .await
+        .unwrap_or_else(|outcome| panic!("the upload settles: {outcome:?}"));
+
+        assert_eq!(state.nar_storage.get(&hash).await.unwrap().unwrap(), b"OLD");
+    }
+
+    #[tokio::test]
     async fn a_placed_nar_frees_its_permit_before_the_graph_records_it() {
         let Ok(mut unwired) = Arc::try_unwrap(test_state(
-            MockDatabase::new(DatabaseBackend::Postgres).into_connection(),
+            MockDatabase::new(DatabaseBackend::Postgres)
+                .append_query_results([Vec::<gradient_types::MCachedPath>::new()])
+                .into_connection(),
         )) else {
             panic!("sole owner")
         };

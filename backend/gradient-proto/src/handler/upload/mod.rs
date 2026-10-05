@@ -112,6 +112,24 @@ impl InboundContext<'_> {
                 let Some(queued) = uploads.table.take_queued(id) else {
                     return;
                 };
+                match self.already_stored(&key).await {
+                    Ok(false) => {}
+                    Ok(true) => {
+                        permit.committed();
+                        return self.grant(id, GrantTarget::Skip).await;
+                    }
+                    Err(e) => {
+                        drop(permit);
+                        return self
+                            .settle(
+                                id,
+                                UploadOutcome::Retry {
+                                    reason: format!("checking the cache index: {e:#}"),
+                                },
+                            )
+                            .await;
+                    }
+                }
                 match self.open_transfer(&key, queued.size, uploads).await {
                     Ok((target, transfer, lease)) => {
                         uploads.table.grant(
@@ -143,6 +161,16 @@ impl InboundContext<'_> {
                 }
             }
         }
+    }
+
+    async fn already_stored(&self, key: &ObjectKey) -> Result<bool, sea_orm::DbErr> {
+        let ObjectKey::Nar(hash) = key else {
+            return Ok(false);
+        };
+
+        Ok(crate::import::stored_path(&self.state.worker_db, hash)
+            .await?
+            .is_some())
     }
 
     async fn open_transfer(
@@ -364,6 +392,7 @@ mod tests {
     use super::*;
     use crate::handler::inbound::fixture::{JOB, TestSession, decode};
     use gradient_test_support::state::test_state;
+    use gradient_types::MCachedPath;
     use gradient_wire::messages::ClientMessage;
     use sea_orm::{DatabaseBackend, MockDatabase};
 
@@ -371,6 +400,41 @@ mod tests {
         UploadObject::Nar {
             store_path: format!("/nix/store/{}-p", c.to_string().repeat(32)),
         }
+    }
+
+    fn unknown_path() -> sea_orm::DatabaseConnection {
+        MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([Vec::<MCachedPath>::new()])
+            .into_connection()
+    }
+
+    #[tokio::test]
+    async fn a_request_for_a_stored_path_is_skipped_without_a_transfer() {
+        let stored = MCachedPath {
+            hash: "h".repeat(32),
+            file_hash: Some("sha256:stored".into()),
+            confirmed: true,
+            ..Default::default()
+        };
+        let state = test_state(
+            MockDatabase::new(DatabaseBackend::Postgres)
+                .append_query_results([vec![stored]])
+                .into_connection(),
+        );
+        let (mut session, mut sent, mut admitted) = TestSession::new(&state).await;
+        let (mut ctx, uploads) = session.split();
+        ctx.on_upload_request(JOB.into(), 1, nar('h'), 1024, uploads)
+            .await;
+        ctx.on_upload_admitted(admitted.recv().await.unwrap(), uploads)
+            .await;
+        assert!(matches!(
+            decode(sent.try_recv().unwrap()),
+            ServerMessage::UploadGrant {
+                request_id: 1,
+                target: GrantTarget::Skip
+            }
+        ));
+        assert_eq!(state.upload_admission.in_flight(), 0);
     }
 
     #[tokio::test]
@@ -392,7 +456,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_request_on_the_local_backend_is_granted_a_passthrough() {
-        let state = test_state(MockDatabase::new(DatabaseBackend::Postgres).into_connection());
+        let state = test_state(unknown_path());
         let (mut session, mut sent, mut admitted) = TestSession::new(&state).await;
         let (mut ctx, uploads) = session.split();
         ctx.on_upload_request(JOB.into(), 1, nar('b'), 1024, uploads)
@@ -426,7 +490,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_granted_passthrough_accepts_contiguous_chunks_and_rejects_a_gap() {
-        let state = test_state(MockDatabase::new(DatabaseBackend::Postgres).into_connection());
+        let state = test_state(unknown_path());
         let (mut session, mut sent, mut admitted) = TestSession::new(&state).await;
         let (mut ctx, uploads) = session.split();
         ctx.on_upload_request(JOB.into(), 1, nar('c'), 1024, uploads)
@@ -453,7 +517,7 @@ mod tests {
 
     #[tokio::test]
     async fn an_expired_grant_is_told_to_retry_and_frees_its_permit() {
-        let state = test_state(MockDatabase::new(DatabaseBackend::Postgres).into_connection());
+        let state = test_state(unknown_path());
         let (mut session, mut sent, mut admitted) = TestSession::new(&state).await;
         let (mut ctx, uploads) = session.split();
         uploads.idle_lease = Duration::ZERO;
@@ -480,7 +544,7 @@ mod tests {
     /// the last chunks. The commit must wait for them.
     #[tokio::test]
     async fn a_finish_that_overtakes_the_final_chunk_waits_for_it() {
-        let state = test_state(MockDatabase::new(DatabaseBackend::Postgres).into_connection());
+        let state = test_state(unknown_path());
         let (mut session, mut sent, mut admitted) = TestSession::new(&state).await;
         let (mut ctx, uploads) = session.split();
         let body = b"compressed nar bytes".to_vec();
@@ -533,7 +597,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_failed_job_releases_its_granted_and_queued_uploads() {
-        let state = test_state(MockDatabase::new(DatabaseBackend::Postgres).into_connection());
+        let state = test_state(unknown_path());
         let (mut session, _sent, mut admitted) = TestSession::new(&state).await;
         let (mut ctx, uploads) = session.split();
         ctx.on_upload_request(JOB.into(), 1, nar('f'), 8, uploads)

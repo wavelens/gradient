@@ -210,6 +210,7 @@ pub(super) async fn finalize_build_request(
             ca: None,
             targets: SignTargets::ProjectCaches(project),
             confirmed: true,
+            built_by_worker: false,
         })
         .await
         .map_err(|e| WebError::internal(format!("failed to record source NAR: {e}")))?;

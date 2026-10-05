@@ -540,6 +540,7 @@ mod tests {
             ca: None,
             targets: crate::messages::SignTargets::None,
             confirmed: true,
+            built_by_worker: false,
         }
     }
 
