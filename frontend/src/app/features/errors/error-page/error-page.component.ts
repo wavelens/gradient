@@ -22,6 +22,12 @@ const ERROR_META: Record<number, ErrorMeta> = {
     icon: 'link_off',
     retryable: false,
   },
+  429: {
+    title: 'Too Many Requests',
+    description: 'The server is limiting how often it answers this address. Please try again in a few seconds.',
+    icon: 'hourglass_top',
+    retryable: true,
+  },
   500: {
     title: 'Internal Server Error',
     description: 'Something went wrong on the server. Please try again later.',
