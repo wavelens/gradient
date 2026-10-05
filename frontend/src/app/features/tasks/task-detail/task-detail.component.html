@@ -129,20 +129,7 @@
             </div>
           </div>
           <div class="pkg-label"><h3>Packages</h3></div>
-          @if (entryPointsLoading() && entryPoints().length === 0) {
-            <div class="pkg-list" aria-busy="true">
-              @for (_ of packagePlaceholders; track $index) {
-                <div class="pkg pkg--placeholder">
-                  <gr-skeleton class="si" />
-                  <gr-skeleton class="pkg-name" />
-                  <gr-skeleton class="chip-arch mono" width="12ch" />
-                  <gr-skeleton class="pkg-bar" />
-                  <gr-skeleton class="pkg-deps" width="7ch" />
-                  <gr-skeleton class="pkg-time" width="4ch" />
-                </div>
-              }
-            </div>
-          } @else if (entryPoints().length > 0) {
+          @if (entryPoints().length > 0) {
             <div class="pkg-list">
               @for (ep of entryPoints(); track ep.id) {
                 <div class="pkg" [attr.data-phase]="entryPointPhase(ep)" [style.animation-delay.ms]="$index * 18"
@@ -169,7 +156,7 @@
                 Loading more ({{ entryPoints().length }} of {{ entryPointsTotal() }})
               </div>
             }
-          } @else if (isRunning(sel.status)) {
+          } @else if (!entryPointsLoading() && isRunning(sel.status)) {
             @if (selectedFetchRows().length) {
               <div class="pkg-list">
                 @for (row of selectedFetchRows(); track row.name) {
@@ -190,7 +177,7 @@
               <gr-empty-state class="pkg-wait" flat icon="hourglass_empty" title="Waiting for packages"
                 message="Packages appear as their entry points are found." />
             }
-          } @else {
+          } @else if (!entryPointsLoading()) {
             <gr-empty-state flat icon="package_2" title="No packages"
               message="This evaluation produced no entry-point builds." />
           }
