@@ -11,10 +11,6 @@ Every page of the Gradient frontend should work with a keyboard and a screen rea
 
 ## Reporting a Barrier
 
-Open an [issue](https://github.com/wavelens/gradient/issues/new?labels=frontend) with:
-
-- The page and the element that is hard or impossible to use.
-- The assistive technology, browser and operating system.
-- The expected behavior.
+Barriers go into a [Bug report (frontend)](https://github.com/wavelens/gradient/issues/new?template=bug-report-frontend.yml), together with the assistive technology in use.
 
 Accessibility issues are bugs and get the same priority as functional ones.

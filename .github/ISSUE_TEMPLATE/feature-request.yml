@@ -1,0 +1,44 @@
+name: Feature request
+description: A new capability or a change to existing behavior.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Check the [Roadmap](https://wavelens.github.io/gradient/roadmap/) first. Open questions fit better in [GitHub Discussions](https://github.com/wavelens/gradient/discussions).
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Server
+        - Worker
+        - Frontend
+        - CLI
+        - NixOS module
+        - Documentation
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: The use case and the current blocker.
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+      description: How Gradient could solve it, from the user's side.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives
+      description: Workarounds in use today, or how other CI systems solve it.
