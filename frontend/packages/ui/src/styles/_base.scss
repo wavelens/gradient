@@ -8,6 +8,7 @@
 
 html {
   background-color: var(--gr-surface-sunken);
+  scrollbar-gutter: stable;
 }
 
 // UA heading margins are em-based (0.67em, 0.83em) so they land off the scale
