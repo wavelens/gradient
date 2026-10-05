@@ -538,7 +538,7 @@ async fn target_signers(
         .collect())
 }
 
-fn signer_for(ctx: &DbContext, cache: &MCache) -> Option<CacheSigner> {
+pub(crate) fn signer_for(ctx: &DbContext, cache: &MCache) -> Option<CacheSigner> {
     if cache.private_key.is_empty() {
         return None;
     }
@@ -553,7 +553,7 @@ fn signer_for(ctx: &DbContext, cache: &MCache) -> Option<CacheSigner> {
     .ok()
 }
 
-async fn insert_signatures(db: &WorkerDb, rows: Vec<ACachedPathSignature>) {
+pub(crate) async fn insert_signatures(db: &WorkerDb, rows: Vec<ACachedPathSignature>) {
     if rows.is_empty() {
         return;
     }

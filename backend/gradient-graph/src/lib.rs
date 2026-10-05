@@ -7,6 +7,7 @@
 pub mod messages;
 pub mod writer;
 
+mod claims;
 mod demote;
 mod gc;
 mod known;
