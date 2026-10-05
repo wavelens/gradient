@@ -17,12 +17,16 @@ import { TeamsService } from '@core/services/teams.service';
 import { AuthService } from '@core/services/auth.service';
 import {
   AccessState,
+  AllowedCapabilities,
   ConnectionStatus,
   GradientCapabilities,
   TeamSummary,
   Worker,
+  WorkerPatch,
   WorkerRegistration,
+  changedCapabilities,
   gradientCiEntry,
+  gradientCiHost,
   gradientCiKeysUrl,
   listedWorkers,
 } from '@core/models';
@@ -44,14 +48,17 @@ import {
   RowListComponent,
   ToastComponent,
 } from '@gradient/ui/ui';
-import { GradientCiConnectComponent, LabelHelpComponent } from '@shared/ui';
+import { AllowedCapabilitiesComponent, GradientCiConnectComponent, LabelHelpComponent } from '@shared/ui';
 import { WritableDirective, ManagedDisableDirective, canOpenTeam } from '@shared/access';
 import { TeamGrantsComponent } from '@features/teams/team-grants/team-grants.component';
+
+const ALL_ALLOWED: AllowedCapabilities = { enable_fetch: true, enable_eval: true, enable_build: true };
 
 @Component({
   selector: 'app-workers',
   standalone: true,
   imports: [
+    AllowedCapabilitiesComponent,
     LabelHelpComponent,
     CommonModule,
     RouterModule,
@@ -139,14 +146,9 @@ export class WorkersComponent implements OnInit {
   newWorkerName = '';
   newWorkerUrl = '';
   newWorkerToken = '';
-  newEnableFetch = true;
-  newEnableEval = true;
-  newEnableBuild = true;
+  newAllowed: AllowedCapabilities = ALL_ALLOWED;
   newName = '';
-  editEnableFetch = true;
-  editEnableEval = true;
-  editEnableBuild = true;
-  capUpdating = signal<string | null>(null);
+  editAllowed: AllowedCapabilities = ALL_ALLOWED;
   lastRegistration = signal<WorkerRegistration | null>(null);
   tokenCopied = signal(false);
   peerIdCopied = signal(false);
@@ -163,6 +165,10 @@ export class WorkersComponent implements OnInit {
 
   get gradientCiLabel(): string {
     return `${window.location.host} / ${this.projectName}`;
+  }
+
+  get gradientCiHost(): string {
+    return gradientCiHost(this.config.gradientCiUrl);
   }
 
   get gradientCiKeysUrl(): string {
@@ -218,9 +224,7 @@ export class WorkersComponent implements OnInit {
     this.newWorkerName = '';
     this.newWorkerUrl = '';
     this.newWorkerToken = '';
-    this.newEnableFetch = true;
-    this.newEnableEval = true;
-    this.newEnableBuild = true;
+    this.newAllowed = ALL_ALLOWED;
     this.errorMessage.set(null);
     this.showRegisterDialog.set(true);
   }
@@ -231,11 +235,7 @@ export class WorkersComponent implements OnInit {
     this.errorMessage.set(null);
     const url = this.newWorkerUrl.trim() || undefined;
     const token = this.newWorkerToken.trim() || undefined;
-    this.workersService.registerWorker(this.projectName, this.newWorkerId.trim(), this.newWorkerName.trim(), url, token, {
-      enable_fetch: this.newEnableFetch,
-      enable_eval: this.newEnableEval,
-      enable_build: this.newEnableBuild,
-    }).subscribe({
+    this.workersService.registerWorker(this.projectName, this.newWorkerId.trim(), this.newWorkerName.trim(), url, token, this.newAllowed).subscribe({
       next: (reg) => {
         this.registering.set(false);
         this.showRegisterDialog.set(false);
@@ -305,9 +305,7 @@ export class WorkersComponent implements OnInit {
   openRenameDialog(worker: Worker): void {
     this.renamingWorker.set(worker);
     this.newName = worker.display_name;
-    this.editEnableFetch = worker.enable_fetch;
-    this.editEnableEval = worker.enable_eval;
-    this.editEnableBuild = worker.enable_build;
+    this.editAllowed = worker;
     this.showRenameDialog.set(true);
   }
 
@@ -315,10 +313,8 @@ export class WorkersComponent implements OnInit {
     const worker = this.renamingWorker();
     if (!worker || !this.newName.trim()) return;
     this.renaming.set(true);
-    const body: any = { display_name: this.newName.trim() };
-    if (this.editEnableFetch !== worker.enable_fetch) body.enable_fetch = this.editEnableFetch;
-    if (this.editEnableEval !== worker.enable_eval) body.enable_eval = this.editEnableEval;
-    if (this.editEnableBuild !== worker.enable_build) body.enable_build = this.editEnableBuild;
+    const body: WorkerPatch = changedCapabilities(worker, this.editAllowed);
+    if (this.newName.trim() !== worker.display_name) body.display_name = this.newName.trim();
     this.workersService.patchWorker(this.projectName, worker.worker_id, body).subscribe({
       next: () => {
         this.renaming.set(false);
@@ -356,21 +352,6 @@ export class WorkersComponent implements OnInit {
           summary: 'Worker test failed',
           detail: err?.message || 'Failed to reach worker.',
         });
-      },
-    });
-  }
-
-  toggleCapability(worker: Worker, cap: 'fetch' | 'eval' | 'build', enabled: boolean): void {
-    const key = `${worker.worker_id}:${cap}`;
-    this.capUpdating.set(key);
-    this.workersService.setWorkerCapability(this.projectName, worker.worker_id, cap, enabled).subscribe({
-      next: () => {
-        this.capUpdating.set(null);
-        this.loadWorkers();
-      },
-      error: (err) => {
-        console.error(`Failed to update worker ${cap} capability:`, err);
-        this.capUpdating.set(null);
       },
     });
   }

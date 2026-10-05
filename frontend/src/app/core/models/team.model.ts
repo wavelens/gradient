@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { ConnectionFailure } from './worker.model';
+import { AllowedCapabilities, ConnectionFailure } from './worker.model';
 import { EvaluationStatus } from './task.model';
 
 export type TeamRole = 'admin' | 'member';
@@ -46,7 +46,7 @@ export interface TeamMember {
   source: TeamMemberSource;
 }
 
-export interface TeamWorker {
+export interface TeamWorker extends AllowedCapabilities {
   worker_id: string;
   display_name: string;
   registered_at: string;
@@ -54,9 +54,6 @@ export interface TeamWorker {
   managed: boolean;
   url?: string;
   gradient_ci: boolean;
-  enable_fetch: boolean;
-  enable_eval: boolean;
-  enable_build: boolean;
   connected: boolean;
   last_error?: ConnectionFailure;
 }

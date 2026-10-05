@@ -1,0 +1,65 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
+@use '@gradient/ui/styles/variables' as *;
+
+.allowed-toggles {
+  display: flex;
+  gap: $spacing-sm;
+  flex-wrap: wrap;
+  margin-bottom: $spacing-xs;
+}
+
+.allowed-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: $spacing-xs;
+  padding: $spacing-xs $spacing-md;
+  border-radius: 999px;
+  font-size: $font-size-sm;
+  font-weight: 500;
+  cursor: pointer;
+  user-select: none;
+  border: 1px solid color-mix(in srgb, var(--gr-status-danger) 40%, transparent);
+  background: color-mix(in srgb, var(--gr-status-danger) 8%, transparent);
+  color: var(--gr-text-secondary);
+  text-decoration: line-through;
+  text-decoration-color: color-mix(in srgb, var(--gr-status-danger) 50%, transparent);
+  transition: $transition-base;
+
+  &:hover { border-color: var(--gr-text-secondary); }
+
+  &--on {
+    background: color-mix(in srgb, var(--gr-status-success) 15%, transparent);
+    border-color: var(--gr-status-success);
+    color: var(--gr-status-success);
+    text-decoration: none;
+  }
+}
+
+.allowed-summary {
+  display: inline-flex;
+  align-items: center;
+  gap: $spacing-xs;
+  font-size: $font-size-xs;
+  color: var(--gr-text-secondary);
+  margin-top: $spacing-xs;
+}
+
+.allowed-pill {
+  padding: 1px $spacing-sm;
+  border-radius: 999px;
+  font-weight: 500;
+  background: color-mix(in srgb, var(--gr-status-danger) 10%, transparent);
+  color: var(--gr-status-danger);
+  text-decoration: line-through;
+
+  &--on {
+    background: color-mix(in srgb, var(--gr-status-success) 15%, transparent);
+    color: var(--gr-status-success);
+    text-decoration: none;
+  }
+}

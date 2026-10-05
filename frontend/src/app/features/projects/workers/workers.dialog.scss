@@ -6,8 +6,8 @@
 
 @use '@gradient/ui/styles/variables' as *;
 
-// Add-worker dialog, token reveal, and capability gate/tag controls. Split from
-// the worker list to stay within the per-component style budget (#325).
+// Add-worker dialog and token reveal. Split from the worker list to stay
+// within the per-component style budget (#325).
 
 .dialog-error {
   display: flex;
@@ -49,73 +49,4 @@
   margin-bottom: $spacing-lg;
 
   gr-icon { flex-shrink: 0; }
-}
-
-.worker-cap-gates {
-  display: flex;
-  gap: $spacing-xs;
-  flex-wrap: wrap;
-  margin-top: $spacing-xs;
-}
-
-.cap-tag-group {
-  display: flex;
-  gap: $spacing-sm;
-  flex-wrap: wrap;
-  margin-bottom: $spacing-xs;
-}
-
-.cap-tag {
-  display: inline-flex;
-  align-items: center;
-  gap: $spacing-xs;
-  padding: $spacing-xs $spacing-md;
-  border-radius: 999px;
-  font-size: $font-size-sm;
-  font-weight: 500;
-  cursor: pointer;
-  user-select: none;
-  border: 1px solid var(--gr-border-subtle);
-  background: var(--gr-surface-sunken);
-  color: var(--gr-text-primary);
-  transition: $transition-base;
-
-  &:hover { border-color: var(--gr-text-secondary); }
-
-  &.cap-tag-on {
-    background: color-mix(in srgb, var(--gr-status-success) 15%, transparent);
-    border-color: var(--gr-status-success);
-    color: var(--gr-status-success);
-  }
-  &.cap-tag-off {
-    background: color-mix(in srgb, var(--gr-status-danger) 8%, transparent);
-    border-color: color-mix(in srgb, var(--gr-status-danger) 40%, transparent);
-    color: var(--gr-text-secondary);
-    text-decoration: line-through;
-    text-decoration-color: color-mix(in srgb, var(--gr-status-danger) 50%, transparent);
-  }
-}
-
-.worker-gate-summary {
-  display: inline-flex;
-  align-items: center;
-  gap: $spacing-xs;
-  font-size: $font-size-xs;
-  margin-top: $spacing-xs;
-}
-
-.gate-pill {
-  padding: 1px $spacing-sm;
-  border-radius: 999px;
-  font-weight: 500;
-
-  &.gate-on {
-    background: color-mix(in srgb, var(--gr-status-success) 15%, transparent);
-    color: var(--gr-status-success);
-  }
-  &.gate-off {
-    background: color-mix(in srgb, var(--gr-status-danger) 10%, transparent);
-    color: var(--gr-status-danger);
-    text-decoration: line-through;
-  }
 }

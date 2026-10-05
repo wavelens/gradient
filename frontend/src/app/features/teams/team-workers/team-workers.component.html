@@ -29,6 +29,7 @@
             @if (worker.url) {
               <div class="text-secondary">{{ worker.url }}</div>
             }
+            <gr-allowed-capabilities [value]="worker" />
             @if (!worker.connected && worker.last_error) {
               <div class="text-secondary">{{ worker.last_error.reason }}</div>
             }
@@ -37,8 +38,17 @@
             @if (worker.managed) {
               <gr-badge severity="info">Managed</gr-badge>
             }
+            @if (!worker.active) {
+              <gr-badge severity="danger">Inactive</gr-badge>
+            }
             <gr-badge [severity]="worker.connected ? 'success' : 'neutral'">{{ worker.connected ? 'Connected' : 'Offline' }}</gr-badge>
+            @if (worker.gradient_ci) {
+              <a grButton [label]="gradientCiHost" icon="open_in_new" severity="secondary" size="small"
+                [href]="config.gradientCiUrl" target="_blank" rel="noopener"></a>
+            }
             @if (isAdmin()) {
+              <button grButton label="Edit" icon="edit" severity="secondary" size="small"
+                [disabled]="worker.managed || busy() === worker.worker_id" (click)="openEdit(worker)"></button>
               @if (worker.active) {
                 <button grButton label="Deactivate" icon="pause" severity="warn" size="small"
                   [loading]="busy() === worker.worker_id" (click)="setActive(worker, false)"></button>
@@ -84,6 +94,23 @@
   }
   <div grDialogFooter>
     <button grButton label="I've saved the token" icon="check" (click)="issuedToken.set(null)"></button>
+  </div>
+</gr-dialog>
+
+<gr-dialog header="Edit Worker" [visible]="editing() !== null" (hide)="editing.set(null)" width="480px">
+  @if (editing(); as worker) {
+    @if (!worker.gradient_ci) {
+      <gr-form-field label="Display Name" for="team-worker-edit-name">
+        <input grInput id="team-worker-edit-name" [(ngModel)]="editName" />
+      </gr-form-field>
+    }
+    <gr-form-field label="Allowed" hint="Changes take effect on the worker's next reconnect.">
+      <gr-allowed-capabilities editable [(value)]="editAllowed" />
+    </gr-form-field>
+  }
+  <div grDialogFooter>
+    <button grButton label="Cancel" severity="secondary" (click)="editing.set(null)"></button>
+    <button grButton label="Save" icon="check" [loading]="busy() === 'edit'" [disabled]="!editName.trim()" (click)="saveEdit()"></button>
   </div>
 </gr-dialog>
 
