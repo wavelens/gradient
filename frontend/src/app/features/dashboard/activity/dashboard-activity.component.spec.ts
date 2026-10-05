@@ -5,7 +5,7 @@
  */
 
 import { TestBed } from '@angular/core/testing';
-import { of, throwError } from 'rxjs';
+import { NEVER, of, throwError } from 'rxjs';
 import { DashboardActivityComponent } from './dashboard-activity.component';
 import { DashboardService } from '@core/services/dashboard.service';
 import { ActivityDay } from '@core/models';
@@ -48,6 +48,13 @@ describe('DashboardActivityComponent', () => {
     root.querySelectorAll('rect.day')[1].dispatchEvent(new MouseEvent('mouseenter'));
     expect(document.querySelector('.gr-tooltip')!.textContent).toBe('2026-09-23: 2 evaluations, 2 failed');
     root.querySelectorAll('rect.day')[1].dispatchEvent(new MouseEvent('mouseleave'));
+  });
+
+  it('holds the heatmap space with a placeholder until the days arrive', () => {
+    const { root } = render(() => NEVER);
+    expect(root.querySelector('svg')).toBeNull();
+    expect(root.querySelector('gr-skeleton.heat')).not.toBeNull();
+    expect(root.querySelector('section')?.getAttribute('aria-busy')).toBe('true');
   });
 
   it('shows an inline error with retry, and hides itself on 403', () => {

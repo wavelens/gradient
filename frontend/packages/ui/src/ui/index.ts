@@ -36,6 +36,7 @@ export * from './row-list/row.component';
 export * from './select-button/select-button.component';
 export * from './select/select.component';
 export * from './settings-section/settings-section.component';
+export * from './skeleton/skeleton.component';
 export * from './stat-card/stat-card.component';
 export * from './tab-switch/tab-switch.component';
 export * from './table/table.component';

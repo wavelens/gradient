@@ -28,6 +28,7 @@ import {
   MessageBannerComponent,
   RowComponent,
   RowListComponent,
+  SkeletonComponent,
   TabSwitchComponent,
 } from '@gradient/ui/ui';
 import { StatusIconComponent } from '@shared/ui';
@@ -58,6 +59,7 @@ function parseFilter(value: string | null): DashboardFilter {
     MessageBannerComponent,
     RowComponent,
     RowListComponent,
+    SkeletonComponent,
     StatusIconComponent,
     TabSwitchComponent,
     EvaluationHistoryComponent,
@@ -86,6 +88,7 @@ export class DashboardTaskTableComponent implements OnInit {
     FILTERS.map((f) => ({ label: `${f.label} ${this.data()?.counts?.[f.key] ?? 0}`, value: f.key })),
   );
 
+  readonly placeholders = Array.from({ length: TOP });
   readonly duration = formatDuration;
   readonly age = relativeTime;
   readonly phase = evaluationPhase;

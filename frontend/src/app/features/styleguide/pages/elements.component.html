@@ -81,6 +81,23 @@
   <gr-stat-card label="Last uploaded" value="3d ago" />
 </gr-card-grid>
 
+<h2>Skeletons</h2>
+<p>A page block that loads its own data keeps its real layout and puts a <code>gr-skeleton</code> where each
+  value will land, so nothing shifts when the data arrives. The container carries <code>aria-busy</code>.
+  A stat card with a <code>null</code> value shows a skeleton.</p>
+<gr-card-grid min="220px" aria-busy="true">
+  <gr-stat-card label="Packages stored" [value]="null" />
+  <gr-stat-card label="Uncompressed size" [value]="null" />
+</gr-card-grid>
+<gr-row-list aria-busy="true">
+  @for (_ of [1, 2]; track $index) {
+    <gr-row>
+      <gr-skeleton width="12rem" />
+      <gr-skeleton slot="meta" width="7rem" />
+    </gr-row>
+  }
+</gr-row-list>
+
 <h2>Evaluation status</h2>
 <p>All nine statuses the API can return. The two evaluating states deliberately share
    one label, so they render identically.</p>

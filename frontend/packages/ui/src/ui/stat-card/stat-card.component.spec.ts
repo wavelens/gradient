@@ -45,6 +45,11 @@ describe('gr-stat-card', () => {
     expect((await render({ value: 1, label: 'A', compact: true })).querySelector('.stat-card.compact')).not.toBeNull();
   });
 
+  it('holds a value that has not arrived with a placeholder and keeps the label', async () => {
+    const root = await render({ value: null, label: 'Queued' });
+    expect(root.querySelector('.stat-value gr-skeleton')).not.toBeNull();
+    expect(root.querySelector('.stat-label')?.textContent).toContain('Queued');
+  });
 
 });
 

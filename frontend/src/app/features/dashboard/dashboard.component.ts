@@ -5,7 +5,6 @@
  */
 
 import { ChangeDetectionStrategy, Component, signal } from '@angular/core';
-import { LoadingSpinnerComponent } from '@gradient/ui/ui';
 import { DashboardStatsComponent } from './stats/dashboard-stats.component';
 import { DashboardTaskTableComponent } from './task-table/dashboard-task-table.component';
 import { DashboardActivityComponent } from './activity/dashboard-activity.component';
@@ -21,13 +20,12 @@ import { DashboardStartComponent } from './start/dashboard-start.component';
     DashboardActivityComponent,
     DashboardRailComponent,
     DashboardStartComponent,
-    LoadingSpinnerComponent,
   ],
   templateUrl: './dashboard.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './dashboard.component.scss',
 })
 export class DashboardComponent {
-  // null until the rail answers; the rail alone decides between first steps and the router blocks.
+  // null until the rail answers; the router blocks load alongside it and give way if it reports first steps.
   newUser = signal<boolean | null>(null);
 }

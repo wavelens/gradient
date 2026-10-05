@@ -11,6 +11,7 @@ import { FormsModule } from '@angular/forms';
 import {
   ButtonComponent,
   MessageBannerComponent,
+  SkeletonComponent,
   TabSwitchComponent,
   TooltipDirective,
 } from '@gradient/ui/ui';
@@ -24,11 +25,11 @@ const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
 @Component({
   selector: 'app-dashboard-activity',
   standalone: true,
-  imports: [FormsModule, ButtonComponent, MessageBannerComponent, TabSwitchComponent, TooltipDirective],
+  imports: [FormsModule, ButtonComponent, MessageBannerComponent, SkeletonComponent, TabSwitchComponent, TooltipDirective],
   changeDetection: ChangeDetectionStrategy.Eager,
   template: `
     @if (!hidden()) {
-      <section class="section">
+      <section class="section" [attr.aria-busy]="!days() && !failed()">
         <h2>Activity</h2>
         <div class="toolbar">
           <gr-tab-switch ariaLabel="Activity measure" [options]="modes" [ngModel]="mode()" (ngModelChange)="mode.set($event)" />
@@ -61,6 +62,8 @@ const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
               ></rect>
             }
           </svg>
+        } @else {
+          <gr-skeleton class="heat" height="auto" />
         }
       </section>
     }

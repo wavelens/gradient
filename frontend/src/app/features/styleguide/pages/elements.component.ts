@@ -22,6 +22,9 @@ import {
   LogoComponent,
   MessageBannerComponent,
   MessageService,
+  RowComponent,
+  RowListComponent,
+  SkeletonComponent,
   StatCardComponent,
   TableComponent,
   ToastComponent,
@@ -50,7 +53,7 @@ function counts(c: Partial<BuildStatusCounts>): BuildStatusCounts {
     MessageBannerComponent, EmptyStateComponent, LoadingSpinnerComponent,
     StatCardComponent, TableComponent, DividerComponent, EvalStatusBadgeComponent,
     MetricChartComponent, ToastComponent, ButtonComponent,
-    CardGridComponent,
+    CardGridComponent, RowComponent, RowListComponent, SkeletonComponent,
     LogoComponent, StarButtonComponent, StatusIconComponent, SegmentedBarComponent,
   ],
   // The demo star toggles locally instead of writing the viewer's real stars.

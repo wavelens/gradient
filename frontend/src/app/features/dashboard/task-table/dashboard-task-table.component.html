@@ -57,6 +57,21 @@
           <button grButton severity="secondary" size="small" label="Next" [disabled]="page() === pages()" (click)="go(page() + 1)"></button>
         </nav>
       }
+    } @else {
+      <gr-row-list aria-busy="true">
+        @for (_ of placeholders; track $index) {
+          <gr-row>
+            <gr-skeleton width="12rem" />
+            <gr-skeleton slot="meta" width="7rem" />
+            <div slot="actions" class="cells">
+              <gr-skeleton height="26px" />
+              @for (_ of [1, 2, 3]; track $index) {
+                <gr-skeleton class="value" height="2lh" />
+              }
+            </div>
+          </gr-row>
+        }
+      </gr-row-list>
     }
   </section>
 }

@@ -6,7 +6,7 @@
 
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { ActivatedRoute, Router, convertToParamMap, provideRouter } from '@angular/router';
-import { BehaviorSubject, Observable, Subject, of, throwError } from 'rxjs';
+import { BehaviorSubject, NEVER, Observable, Subject, of, throwError } from 'rxjs';
 import { DashboardTaskTableComponent } from './dashboard-task-table.component';
 import { DashboardService } from '@core/services/dashboard.service';
 import { TaskRow, TasksPage } from '@core/models';
@@ -126,6 +126,16 @@ describe('DashboardTaskTableComponent', () => {
     f.detectChanges();
     expect(tasks).toHaveBeenCalledTimes(2);
     expect(tasks).toHaveBeenLastCalledWith('all', 1, 10, 20);
+  });
+
+  it('holds the list with placeholder rows until the tasks arrive', async () => {
+    const { f, root } = render(null, () => NEVER);
+    await settle(f);
+    const list = root.querySelector('gr-row-list')!;
+    expect(list.getAttribute('aria-busy')).toBe('true');
+    expect(list.querySelectorAll('gr-row').length).toBeGreaterThan(0);
+    expect(list.querySelector('gr-row a')).toBeNull();
+    expect(list.querySelector('gr-skeleton')).not.toBeNull();
   });
 
   it('shows an inline error and loads again on retry', () => {

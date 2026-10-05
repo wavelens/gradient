@@ -1,0 +1,37 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
+@use '../../styles/variables' as *;
+
+:host {
+  display: block;
+  max-width: 100%;
+  border-radius: $border-radius-sm;
+  background: linear-gradient(
+      90deg,
+      var(--gr-surface-hover) 25%,
+      var(--gr-surface-active) 50%,
+      var(--gr-surface-hover) 75%
+    )
+    0 0 / 200% 100%;
+  animation: shimmer 1.4s ease-in-out infinite;
+}
+
+@keyframes shimmer {
+  from {
+    background-position: 100% 0;
+  }
+
+  to {
+    background-position: -100% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :host {
+    animation: none;
+  }
+}

@@ -50,10 +50,11 @@ describe('DashboardComponent', () => {
     expect(root.querySelector('app-dashboard-start')).toBeNull();
   });
 
-  it('shows a loading line until the rail answers', () => {
+  it('loads the router blocks alongside the rail instead of waiting for it', () => {
     const root = render(NEVER);
-    expect(root.querySelector('gr-loading-spinner')).not.toBeNull();
-    expect(root.querySelector('app-dashboard-stats')).toBeNull();
+    expect(root.querySelector('app-dashboard-stats')).not.toBeNull();
+    expect(root.querySelector('app-dashboard-task-table')).not.toBeNull();
     expect(root.querySelector('app-dashboard-start')).toBeNull();
+    expect(root.querySelector('gr-loading-spinner')).toBeNull();
   });
 });
