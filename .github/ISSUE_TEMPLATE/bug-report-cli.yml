@@ -1,0 +1,41 @@
+name: Bug report (CLI)
+description: A failing or misbehaving `gradient` command.
+labels: ["bug"]
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: What went wrong
+      description: What happened and what you expected instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: command
+    attributes:
+      label: Command and output
+      description: The full command line and its output. Remove tokens and other secrets first.
+      render: shell
+    validations:
+      required: true
+
+  - type: input
+    id: cli-version
+    attributes:
+      label: CLI version
+      description: Output of `gradient --version`.
+    validations:
+      required: true
+
+  - type: input
+    id: server-version
+    attributes:
+      label: Server version
+      description: Shown in the frontend footer.
+      placeholder: 2.0.0
+
+  - type: input
+    id: system
+    attributes:
+      label: Operating system and installation
+      placeholder: NixOS 26.05, nix profile install github:wavelens/gradient#gradient-cli

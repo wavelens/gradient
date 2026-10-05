@@ -1,0 +1,60 @@
+name: Bug report (frontend)
+description: A broken page, wrong display or accessibility barrier in the web UI.
+labels: ["bug", "frontend"]
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: What went wrong
+      description: What happened and what you expected instead.
+    validations:
+      required: true
+
+  - type: input
+    id: page
+    attributes:
+      label: Page
+      description: Path of the affected page, without the domain.
+      placeholder: /project/web/task/main/settings
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open the task page
+        2. Click the three-dot menu on the evaluation panel
+        3. ...
+
+  - type: textarea
+    id: screenshot
+    attributes:
+      label: Screenshot or recording
+      description: Drag images or videos in here.
+
+  - type: input
+    id: browser
+    attributes:
+      label: Browser and operating system
+      description: Also any assistive technology, e.g. a screen reader.
+      placeholder: Firefox 143, NixOS 26.05
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Gradient version
+      description: Shown in the frontend footer.
+      placeholder: 2.0.0
+    validations:
+      required: true
+
+  - type: textarea
+    id: console
+    attributes:
+      label: Browser console errors
+      description: Errors from the developer tools console (F12).
+      render: text
