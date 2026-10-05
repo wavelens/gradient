@@ -42,7 +42,13 @@ One SQLite file explaining a stuck or failed evaluation, for attaching to a [bug
 
 ## 3. Attach the Report
 
-Open an issue at <https://github.com/wavelens/gradient/issues> with what went wrong and attach `gradient-report-<id>-<date>.db`.
+GitHub cannot take `.db` attachments. Compress the file first.
+
+```sh
+gzip gradient-report-*.db
+```
+
+Open a [Bug report (backend)](https://github.com/wavelens/gradient/issues/new?template=bug-report-backend.yml) with what went wrong and attach `gradient-report-<id>-<date>.db.gz`.
 
 ## Verify Deployment
 
