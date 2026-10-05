@@ -82,7 +82,7 @@ fn joined(result: Option<Result<anyhow::Result<()>, tokio::task::JoinError>>) ->
 }
 
 pub(crate) fn err(e: impl Display) -> DaemonError {
-    DaemonError::custom(e.to_string())
+    DaemonError::custom(format!("{e:#}"))
 }
 
 fn parse_store_path(path: &str) -> anyhow::Result<StorePath> {
@@ -516,6 +516,13 @@ mod tests {
                 .expect("info")
                 .is_none()
         );
+    }
+
+    #[test]
+    fn the_client_sees_the_cause_behind_a_context() {
+        let e = anyhow::anyhow!("permission denied").context("Failed to initiate multipart upload");
+        let message = err(e).to_string();
+        assert!(message.contains("permission denied"), "{message}");
     }
 
     #[tokio::test]
