@@ -244,7 +244,7 @@ dependencies = [
  "regex",
  "rustc-hash",
  "shlex",
- "syn 2.0.119",
+ "syn 3.0.6",
 ]
 
 [[package]]
@@ -392,9 +392,9 @@ dependencies = [
 
 [[package]]
 name = "cc"
-version = "1.5.1"
+version = "1.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f360145194ee8e21db5ee7f3fcd4fe52210864c75c985dae33218202c8bbe040"
+checksum = "f74872d07caf508b30a21f6836e7d7016a2eaf7d9ff4f48deaa58cd8a0407630"
 dependencies = [
  "find-msvc-tools",
  "jobserver",
@@ -550,7 +550,7 @@ dependencies = [
 
 [[package]]
 name = "connector"
-version = "1.4.1"
+version = "2.0.0-rc.1"
 dependencies = [
  "bytes",
  "futures",
@@ -1208,7 +1208,7 @@ checksum = "e4eba85ea1d0a966a983acd07deee566e67395d2d96b6fb39e62b5a833f1eb0b"
 
 [[package]]
 name = "gradient-cli"
-version = "1.4.1"
+version = "2.0.0-rc.1"
 dependencies = [
  "anyhow",
  "assert_cmd",
@@ -1246,7 +1246,7 @@ dependencies = [
 
 [[package]]
 name = "gradient-eval"
-version = "1.4.1"
+version = "2.0.0-rc.1"
 dependencies = [
  "anyhow",
  "libc",
@@ -1279,7 +1279,7 @@ dependencies = [
 [[package]]
 name = "harmonia-file-core"
 version = "3.3.0"
-source = "git+https://github.com/nix-community/harmonia.git#acf86e8a667266a7cfe54714db503dffafd14d60"
+source = "git+https://github.com/nix-community/harmonia.git#708f61901f420d00da9dd4afc810dde4bbfe5885"
 dependencies = [
  "serde",
  "serde_json",
@@ -1289,7 +1289,7 @@ dependencies = [
 [[package]]
 name = "harmonia-file-nar"
 version = "3.3.0"
-source = "git+https://github.com/nix-community/harmonia.git#acf86e8a667266a7cfe54714db503dffafd14d60"
+source = "git+https://github.com/nix-community/harmonia.git#708f61901f420d00da9dd4afc810dde4bbfe5885"
 dependencies = [
  "bstr",
  "bytes",
@@ -1313,7 +1313,7 @@ dependencies = [
 [[package]]
 name = "harmonia-protocol"
 version = "3.3.0"
-source = "git+https://github.com/nix-community/harmonia.git#acf86e8a667266a7cfe54714db503dffafd14d60"
+source = "git+https://github.com/nix-community/harmonia.git#708f61901f420d00da9dd4afc810dde4bbfe5885"
 dependencies = [
  "async-stream",
  "bstr",
@@ -1347,7 +1347,7 @@ dependencies = [
 [[package]]
 name = "harmonia-protocol-derive"
 version = "3.3.0"
-source = "git+https://github.com/nix-community/harmonia.git#acf86e8a667266a7cfe54714db503dffafd14d60"
+source = "git+https://github.com/nix-community/harmonia.git#708f61901f420d00da9dd4afc810dde4bbfe5885"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1357,7 +1357,7 @@ dependencies = [
 [[package]]
 name = "harmonia-store-aterm"
 version = "0.0.0-alpha.0"
-source = "git+https://github.com/nix-community/harmonia.git#acf86e8a667266a7cfe54714db503dffafd14d60"
+source = "git+https://github.com/nix-community/harmonia.git#708f61901f420d00da9dd4afc810dde4bbfe5885"
 dependencies = [
  "bytes",
  "harmonia-store-content-address",
@@ -1373,7 +1373,7 @@ dependencies = [
 [[package]]
 name = "harmonia-store-build-result"
 version = "3.3.0"
-source = "git+https://github.com/nix-community/harmonia.git#acf86e8a667266a7cfe54714db503dffafd14d60"
+source = "git+https://github.com/nix-community/harmonia.git#708f61901f420d00da9dd4afc810dde4bbfe5885"
 dependencies = [
  "harmonia-store-derivation",
  "num_enum",
@@ -1384,7 +1384,7 @@ dependencies = [
 [[package]]
 name = "harmonia-store-content-address"
 version = "3.3.0"
-source = "git+https://github.com/nix-community/harmonia.git#acf86e8a667266a7cfe54714db503dffafd14d60"
+source = "git+https://github.com/nix-community/harmonia.git#708f61901f420d00da9dd4afc810dde4bbfe5885"
 dependencies = [
  "derive_more",
  "harmonia-store-path",
@@ -1396,7 +1396,7 @@ dependencies = [
 [[package]]
 name = "harmonia-store-derivation"
 version = "0.0.0-alpha.0"
-source = "git+https://github.com/nix-community/harmonia.git#acf86e8a667266a7cfe54714db503dffafd14d60"
+source = "git+https://github.com/nix-community/harmonia.git#708f61901f420d00da9dd4afc810dde4bbfe5885"
 dependencies = [
  "bytes",
  "data-encoding",
@@ -1415,7 +1415,7 @@ dependencies = [
 [[package]]
 name = "harmonia-store-path"
 version = "3.3.0"
-source = "git+https://github.com/nix-community/harmonia.git#acf86e8a667266a7cfe54714db503dffafd14d60"
+source = "git+https://github.com/nix-community/harmonia.git#708f61901f420d00da9dd4afc810dde4bbfe5885"
 dependencies = [
  "derive_more",
  "harmonia-utils-base-encoding",
@@ -1428,7 +1428,7 @@ dependencies = [
 [[package]]
 name = "harmonia-store-path-info"
 version = "3.3.0"
-source = "git+https://github.com/nix-community/harmonia.git#acf86e8a667266a7cfe54714db503dffafd14d60"
+source = "git+https://github.com/nix-community/harmonia.git#708f61901f420d00da9dd4afc810dde4bbfe5885"
 dependencies = [
  "harmonia-store-content-address",
  "harmonia-store-path",
@@ -1440,7 +1440,7 @@ dependencies = [
 [[package]]
 name = "harmonia-store-remote"
 version = "3.3.0"
-source = "git+https://github.com/nix-community/harmonia.git#acf86e8a667266a7cfe54714db503dffafd14d60"
+source = "git+https://github.com/nix-community/harmonia.git#708f61901f420d00da9dd4afc810dde4bbfe5885"
 dependencies = [
  "async-stream",
  "futures-core",
@@ -1460,7 +1460,7 @@ dependencies = [
 [[package]]
 name = "harmonia-utils-base-encoding"
 version = "0.0.0-alpha.0"
-source = "git+https://github.com/nix-community/harmonia.git#acf86e8a667266a7cfe54714db503dffafd14d60"
+source = "git+https://github.com/nix-community/harmonia.git#708f61901f420d00da9dd4afc810dde4bbfe5885"
 dependencies = [
  "data-encoding",
  "derive_more",
@@ -1470,7 +1470,7 @@ dependencies = [
 [[package]]
 name = "harmonia-utils-hash"
 version = "0.0.0-alpha.0"
-source = "git+https://github.com/nix-community/harmonia.git#acf86e8a667266a7cfe54714db503dffafd14d60"
+source = "git+https://github.com/nix-community/harmonia.git#708f61901f420d00da9dd4afc810dde4bbfe5885"
 dependencies = [
  "blake3",
  "data-encoding",
@@ -1487,7 +1487,7 @@ dependencies = [
 [[package]]
 name = "harmonia-utils-io"
 version = "0.0.0-alpha.0"
-source = "git+https://github.com/nix-community/harmonia.git#acf86e8a667266a7cfe54714db503dffafd14d60"
+source = "git+https://github.com/nix-community/harmonia.git#708f61901f420d00da9dd4afc810dde4bbfe5885"
 dependencies = [
  "bytes",
  "futures-util",
@@ -1501,7 +1501,7 @@ dependencies = [
 [[package]]
 name = "harmonia-utils-signature"
 version = "3.3.0"
-source = "git+https://github.com/nix-community/harmonia.git#acf86e8a667266a7cfe54714db503dffafd14d60"
+source = "git+https://github.com/nix-community/harmonia.git#708f61901f420d00da9dd4afc810dde4bbfe5885"
 dependencies = [
  "data-encoding",
  "ed25519-dalek",
@@ -1977,15 +1977,15 @@ checksum = "bf36173d4167ed999940f804952e6b08197cae5ad5d572eb4db150ce8ad5d58f"
 
 [[package]]
 name = "lazy_static"
-version = "1.5.0"
+version = "1.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bbd2bcb4c963f2ddae06a2efc7e9f3591312473c50c6685e1f298068316e66fe"
+checksum = "20870f649af7073d53e38067b2a84312175d56ea15217e1b15bc83506ec50afb"
 
 [[package]]
 name = "libc"
-version = "0.2.189"
+version = "0.2.190"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3eaf3ede3fee6db1a4c2ee091bf8a8b4dccdc6d17f656fb07896ee72867612f2"
+checksum = "ce5d3ddc6d3fa000eb1536d85e147bfe31aacaba692ed6a876f95cb7c855be78"
 
 [[package]]
 name = "libgit2-sys"
@@ -2086,12 +2086,12 @@ checksum = "4050469837a6ff301cd14c1f8f24f88549e6d548f24f64e2148eb0f72cebc51f"
 
 [[package]]
 name = "mac_address"
-version = "1.1.8"
+version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c0aeb26bf5e836cc1c341c8106051b573f1766dfa05aa87f0b98be5e51b02303"
+checksum = "b367b50a9be9a5d3b5718c1da74e5d6b9c17647f89752ee2562a470cc3c4eb1a"
 dependencies = [
- "nix 0.29.0",
- "winapi",
+ "nix 0.30.1",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2145,9 +2145,9 @@ checksum = "68354c5c6bd36d73ff3feceb05efa59b6acb7626617f4962be322a825e61f79a"
 
 [[package]]
 name = "mio"
-version = "1.2.3"
+version = "1.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4b18443e9c262bfe8fa82f51666e2642c53393f7e5c27b3e1aeab922cff5b9d8"
+checksum = "1788edb87fdc09c7e26304471e2f5be8cdefb1b6930d6e3985fc02ff53bf86ee"
 dependencies = [
  "libc",
  "log",
@@ -2186,6 +2186,18 @@ name = "nix"
 version = "0.29.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "71e2746dc3a24dd78b3cfcb7be93368c6de9963d30f43a6a73998a9cf4b17b46"
+dependencies = [
+ "bitflags 2.13.2",
+ "cfg-if",
+ "cfg_aliases",
+ "libc",
+]
+
+[[package]]
+name = "nix"
+version = "0.30.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "74523f3a35e05aba87a1d978330aef40f67b0304ac79c1c00b294c9830543db6"
 dependencies = [
  "bitflags 2.13.2",
  "cfg-if",
@@ -2658,9 +2670,9 @@ dependencies = [
 
 [[package]]
 name = "quinn-proto"
-version = "0.11.18"
+version = "0.11.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a9746dbde176634f4f2f1faf2404e30a31b2bc1e9cafb5329c95d8177a18c9fc"
+checksum = "0e750cca55fe4f0439a15d0bb529da9651e79993e8e72c61a899a36d462befbe"
 dependencies = [
  "aws-lc-rs",
  "bytes",
@@ -2681,9 +2693,9 @@ dependencies = [
 
 [[package]]
 name = "quinn-udp"
-version = "0.5.15"
+version = "0.5.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "35a133f956daabe89a61a685c2649f13d82d5aa4bd5d12d1277e1072a21c0694"
+checksum = "af66907df18639dcf4db56ca65490cabc4b27a97dbadd96f2926cca73298f016"
 dependencies = [
  "cfg_aliases",
  "libc",
@@ -3777,9 +3789,9 @@ checksum = "fd3ca314f692efd6c868f8408f53fe444634a845f96c028b97d35f6a1f79f0ee"
 
 [[package]]
 name = "tokio"
-version = "1.53.1"
+version = "1.53.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "202caea871b69668250d242070849eb495be178ed697a3e98aebce5bc81a0bed"
+checksum = "e95f91fcc7a621e8b030f6aa23c71fe9838ae2fb4d8118b75602a328f5144044"
 dependencies = [
  "bytes",
  "libc",
@@ -4044,9 +4056,9 @@ checksum = "06abde3611657adf66d383f00b093d7faecc7fa57071cce2578660c9f1010821"
 
 [[package]]
 name = "uuid"
-version = "1.26.1"
+version = "1.27.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2ef6dac1e96601b4fb3acccccff2139741fcb757cb9a36089bf5be91cfb285ce"
+checksum = "97277d36b9c3ace13e58fa6e753f8b0bbbf302a18dd193240d70f9e29681059a"
 dependencies = [
  "atomic",
  "getrandom 0.4.3",

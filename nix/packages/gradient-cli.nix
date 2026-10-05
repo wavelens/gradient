@@ -98,7 +98,7 @@ in
 craneLib.buildPackage (commonArgs // rec {
   inherit cargoArtifacts;
   pname = "gradient-cli";
-  version = "1.4.1";
+  version = "2.0.0-rc.1";
   separateDebugInfo = true;
 
   doCheck = false;

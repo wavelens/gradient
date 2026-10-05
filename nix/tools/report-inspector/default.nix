@@ -30,7 +30,7 @@ assert lib.assertMsg (read == written) ''
 
 python3Packages.buildPythonApplication {
   pname = "gradient-report-inspector";
-  version = "1.4.1";
+  version = "2.0.0-rc.1";
   pyproject = true;
   src = ./.;
 

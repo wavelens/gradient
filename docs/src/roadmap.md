@@ -60,6 +60,10 @@ Jobs beyond the Nix sandbox.
 
     Workers that build outside the sandbox. Integration testing with network access, real hardware or deployment credentials.
 
+-   :material-play-network: **Input-From-Derivation Support**
+
+    Gradient gets full IFD Support.
+
 </div>
 
 </div>
