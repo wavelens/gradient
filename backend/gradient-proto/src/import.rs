@@ -9,9 +9,9 @@ use gradient_graph::Graph;
 use gradient_storage::nar::NarStore;
 use gradient_types::*;
 use gradient_util::nix_hash::{is_nix32_hash, normalize_nar_hash};
-use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter};
+use sea_orm::{ColumnTrait, ConnectionTrait, DbErr, EntityTrait, QueryFilter};
 use tokio::io::AsyncRead;
-use tracing::{debug, warn};
+use tracing::debug;
 
 pub use gradient_graph::{NarCommit, NarCommitted, SignTargets};
 
@@ -39,6 +39,7 @@ impl ImportInput<'_> {
             ca: self.ca.map(str::to_owned),
             targets,
             confirmed: true,
+            built_by_worker: false,
         }
     }
 }
@@ -50,20 +51,6 @@ fn parse_store_path(store_path: &str) -> anyhow::Result<StorePath> {
     }
 
     Ok(sp)
-}
-
-pub async fn import_nar<C: ConnectionTrait>(
-    db: &C,
-    nar_storage: &NarStore,
-    graph: &Graph,
-    nar_bytes: Vec<u8>,
-    input: ImportInput<'_>,
-    targets: SignTargets,
-) -> anyhow::Result<NarCommitted> {
-    let sp = parse_store_path(input.store_path)?;
-    // The NAR is written first. A DB failure is leaving an unreferenced blob for GC to reclaim.
-    put_nar_idempotent(db, nar_storage, sp.hash(), input.file_hash, nar_bytes).await?;
-    graph.commit_nar(input.to_commit(targets)).await
 }
 
 pub async fn import_nar_reader<C, R>(
@@ -83,20 +70,6 @@ where
     graph.commit_nar(input.to_commit(targets)).await
 }
 
-pub async fn put_nar_idempotent<C: ConnectionTrait>(
-    db: &C,
-    nar_storage: &NarStore,
-    hash: &str,
-    file_hash: &str,
-    nar_bytes: Vec<u8>,
-) -> anyhow::Result<bool> {
-    if nar_write_needed(db, nar_storage, hash, file_hash).await? == WriteNeeded::Stored {
-        return Ok(false);
-    }
-    nar_storage.put(hash, nar_bytes).await?;
-    Ok(true)
-}
-
 pub async fn put_nar_idempotent_reader<C, R>(
     db: &C,
     nar_storage: &NarStore,
@@ -108,40 +81,41 @@ where
     C: ConnectionTrait,
     R: AsyncRead + Unpin + Send,
 {
-    if nar_write_needed(db, nar_storage, hash, file_hash).await? == WriteNeeded::Stored {
+    if nar_write_needed(db, nar_storage, hash, file_hash).await? != WriteNeeded::Write {
         return Ok(false);
     }
+
     nar_storage.put_reader(hash, reader).await?;
     Ok(true)
 }
 
-/// The lookup is a best-effort optimization and must not propagate a transient DB error.
-/// Propagating would terminally fail a succeeded eval, and "must write" is always safe.
+pub async fn stored_path<C: ConnectionTrait>(
+    db: &C,
+    hash: &str,
+) -> Result<Option<MCachedPath>, DbErr> {
+    Ok(ECachedPath::find()
+        .filter(CCachedPath::Hash.eq(hash))
+        .one(db)
+        .await?
+        .filter(MCachedPath::is_stored))
+}
+
 pub async fn nar_write_needed<C: ConnectionTrait>(
     db: &C,
     nar_storage: &NarStore,
     hash: &str,
     file_hash: &str,
 ) -> anyhow::Result<WriteNeeded> {
-    let incoming = normalize_nar_hash(file_hash);
-    let recorded = match ECachedPath::find()
-        .filter(CCachedPath::Hash.eq(hash))
-        .one(db)
-        .await
-    {
-        Ok(row) => row.filter(|r| r.file_hash.as_deref() == Some(incoming.as_str())),
-        Err(e) => {
-            warn!(%hash, error = %e, "idempotency lookup failed; writing NAR unconditionally");
-            None
-        }
-    };
-
-    let Some(row) = recorded else {
+    let Some(row) = stored_path(db, hash).await? else {
         return Ok(WriteNeeded::Write);
     };
 
-    if row.confirmed && nar_storage.exists(hash).await? {
-        debug!(%hash, "NAR already stored with matching file_hash; skipping re-upload");
+    if row.file_hash.as_deref().map(normalize_nar_hash) != Some(normalize_nar_hash(file_hash)) {
+        debug!(%hash, "other content is stored for this path; keeping it");
+        return Ok(WriteNeeded::OtherContentStored);
+    }
+
+    if nar_storage.exists(hash).await? {
         return Ok(WriteNeeded::Stored);
     }
 
@@ -152,6 +126,7 @@ pub async fn nar_write_needed<C: ConnectionTrait>(
 pub enum WriteNeeded {
     Write,
     Stored,
+    OtherContentStored,
 }
 
 #[cfg(test)]
@@ -199,11 +174,11 @@ mod tests {
     async fn malformed_store_path_bails_before_any_io() {
         let db = MockDatabase::new(DatabaseBackend::Postgres).into_connection();
         let store = temp_store();
-        let err = import_nar(
+        let err = import_nar_reader(
             &db,
             &store,
             &Graph::stub(),
-            vec![1],
+            &b"x"[..],
             input("not-a-store-path"),
             SignTargets::Cache(cache_id()),
         )
@@ -219,110 +194,68 @@ mod tests {
         row
     }
 
+    async fn put(db: &sea_orm::DatabaseConnection, store: &NarStore) -> anyhow::Result<bool> {
+        put_nar_idempotent_reader(db, store, IDEM_HASH, "sha256:abc", &b"NEW"[..]).await
+    }
+
     #[tokio::test]
-    async fn idempotent_skips_when_present_and_hash_matches() {
+    async fn an_identical_stored_nar_is_not_written_again() {
         let store = temp_store();
         store.put(IDEM_HASH, b"OLD".to_vec()).await.unwrap();
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             .append_query_results([vec![row_with_file_hash("sha256:abc")]])
             .into_connection();
 
-        let wrote = put_nar_idempotent(&db, &store, IDEM_HASH, "sha256:abc", b"NEW".to_vec())
-            .await
-            .unwrap();
-        assert!(!wrote, "must skip when an identical NAR is already stored");
+        assert!(!put(&db, &store).await.unwrap());
         assert_eq!(store.get(IDEM_HASH).await.unwrap().unwrap(), b"OLD");
     }
 
     #[tokio::test]
-    async fn idempotent_writes_when_no_row() {
+    async fn a_path_without_a_row_is_written() {
         let store = temp_store();
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             .append_query_results([Vec::<gradient_entity::cached_path::Model>::new()])
             .into_connection();
 
-        let wrote = put_nar_idempotent(&db, &store, IDEM_HASH, "sha256:abc", b"NEW".to_vec())
-            .await
-            .unwrap();
-        assert!(wrote);
+        assert!(put(&db, &store).await.unwrap());
         assert_eq!(store.get(IDEM_HASH).await.unwrap().unwrap(), b"NEW");
     }
 
     #[tokio::test]
-    async fn idempotent_writes_when_hash_differs() {
+    async fn a_stored_path_with_other_content_is_never_overwritten() {
         let store = temp_store();
         store.put(IDEM_HASH, b"OLD".to_vec()).await.unwrap();
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             .append_query_results([vec![row_with_file_hash("sha256:different")]])
             .into_connection();
 
-        let wrote = put_nar_idempotent(&db, &store, IDEM_HASH, "sha256:abc", b"NEW".to_vec())
-            .await
-            .unwrap();
-        assert!(wrote);
-        assert_eq!(store.get(IDEM_HASH).await.unwrap().unwrap(), b"NEW");
+        assert!(!put(&db, &store).await.unwrap());
+        assert_eq!(store.get(IDEM_HASH).await.unwrap().unwrap(), b"OLD");
     }
 
     #[tokio::test]
-    async fn idempotent_writes_when_object_missing() {
+    async fn an_identical_row_whose_object_is_gone_is_written_again() {
         let store = temp_store();
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             .append_query_results([vec![row_with_file_hash("sha256:abc")]])
             .into_connection();
 
-        let wrote = put_nar_idempotent(&db, &store, IDEM_HASH, "sha256:abc", b"NEW".to_vec())
-            .await
-            .unwrap();
-        assert!(wrote, "a zombie row whose object is gone must re-write");
+        assert!(put(&db, &store).await.unwrap());
         assert_eq!(store.get(IDEM_HASH).await.unwrap().unwrap(), b"NEW");
     }
 
     #[tokio::test]
-    async fn idempotent_writes_when_lookup_errors() {
+    async fn a_failed_lookup_writes_nothing() {
         use sea_orm::{DbErr, RuntimeErr};
         let store = temp_store();
+        store.put(IDEM_HASH, b"OLD".to_vec()).await.unwrap();
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             .append_query_errors(vec![DbErr::Conn(RuntimeErr::Internal(
                 "Connection pool timed out".to_string(),
             ))])
             .into_connection();
 
-        let wrote = put_nar_idempotent(&db, &store, IDEM_HASH, "sha256:abc", b"NEW".to_vec())
-            .await
-            .expect("a transient lookup error must not fail the commit");
-        assert!(
-            wrote,
-            "must write the NAR when the idempotency lookup errors"
-        );
-        assert_eq!(store.get(IDEM_HASH).await.unwrap().unwrap(), b"NEW");
-    }
-
-    #[tokio::test]
-    async fn idempotent_reader_writes_when_no_row() {
-        let store = temp_store();
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
-            .append_query_results([Vec::<gradient_entity::cached_path::Model>::new()])
-            .into_connection();
-
-        let wrote = put_nar_idempotent_reader(&db, &store, IDEM_HASH, "sha256:abc", &b"NEW"[..])
-            .await
-            .unwrap();
-        assert!(wrote);
-        assert_eq!(store.get(IDEM_HASH).await.unwrap().unwrap(), b"NEW");
-    }
-
-    #[tokio::test]
-    async fn idempotent_reader_skips_when_present_and_hash_matches() {
-        let store = temp_store();
-        store.put(IDEM_HASH, b"OLD".to_vec()).await.unwrap();
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
-            .append_query_results([vec![row_with_file_hash("sha256:abc")]])
-            .into_connection();
-
-        let wrote = put_nar_idempotent_reader(&db, &store, IDEM_HASH, "sha256:abc", &b"NEW"[..])
-            .await
-            .unwrap();
-        assert!(!wrote, "must skip when an identical NAR is already stored");
+        assert!(put(&db, &store).await.is_err());
         assert_eq!(store.get(IDEM_HASH).await.unwrap().unwrap(), b"OLD");
     }
 }

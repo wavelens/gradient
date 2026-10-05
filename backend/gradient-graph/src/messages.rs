@@ -68,6 +68,31 @@ pub struct NarCommit {
     pub ca: Option<String>,
     pub targets: SignTargets,
     pub confirmed: bool,
+    pub built_by_worker: bool,
+}
+
+impl NarCommit {
+    pub fn from_stored_row(row: &MCachedPath, targets: SignTargets) -> Self {
+        Self {
+            store_path: row.store_path(),
+            file_hash: row.file_hash.clone().unwrap_or_default(),
+            file_size: row.file_size.unwrap_or_default(),
+            nar_size: row.nar_size.unwrap_or_default(),
+            nar_hash: row.nar_hash.clone().unwrap_or_default(),
+            references: row
+                .references
+                .as_deref()
+                .unwrap_or_default()
+                .split_whitespace()
+                .map(str::to_owned)
+                .collect(),
+            deriver: row.deriver.clone(),
+            ca: row.ca.clone(),
+            targets,
+            confirmed: true,
+            built_by_worker: false,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

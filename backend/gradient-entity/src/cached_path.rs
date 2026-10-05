@@ -51,4 +51,8 @@ impl Model {
     pub fn is_fully_cached(&self) -> bool {
         self.file_hash.is_some()
     }
+
+    pub fn is_stored(&self) -> bool {
+        self.confirmed && self.is_fully_cached()
+    }
 }

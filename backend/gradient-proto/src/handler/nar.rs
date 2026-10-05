@@ -77,6 +77,7 @@ pub(super) async fn mark_nar_stored(
             ca: record.ca.map(str::to_owned),
             targets,
             confirmed: record.confirmed,
+            built_by_worker: true,
         })
         .await?;
 

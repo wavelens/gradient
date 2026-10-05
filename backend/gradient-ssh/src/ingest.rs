@@ -9,7 +9,7 @@ use async_compression::Level;
 use async_compression::tokio::write::ZstdEncoder;
 use gradient_db::permissions::Permission;
 use gradient_graph::NarCommit;
-use gradient_proto::import::{ImportInput, SignTargets, import_nar_reader};
+use gradient_proto::import::{ImportInput, SignTargets, import_nar_reader, stored_path};
 use gradient_storage::admission::{AdmissionSession, Admitted, ObjectKey, UploadPermit};
 use gradient_types::events::cache::NarSigned;
 use gradient_types::*;
@@ -17,13 +17,14 @@ use gradient_util::nix_hash::normalize_nar_hash;
 use harmonia_protocol::valid_path_info::ValidPathInfo;
 use harmonia_store_path_info::NarHash;
 use harmonia_utils_hash::{Algorithm, Context, HashFormat as _, Sha256};
-use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use std::path::Path;
 use std::time::Duration;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
+use tracing::debug;
 
 pub enum Pending {
     Known(MCachedPath),
+    OtherContentStored,
     New(Staged),
 }
 
@@ -58,15 +59,15 @@ pub async fn stage(
     );
 
     let announced = info.info.nar_hash.as_sri().to_string();
-    if let Some(known) = known_path(session, &info.path.hash().to_string()).await? {
-        anyhow::ensure!(
-            known.nar_hash.as_deref().map(normalize_nar_hash)
-                == Some(normalize_nar_hash(&announced)),
-            "{} is already stored with different content",
-            info.path
-        );
+    if let Some(known) = stored_path(&session.state.web_db, &info.path.hash().to_string()).await? {
         tokio::io::copy(&mut reader, &mut tokio::io::sink()).await?;
-        return Ok(Pending::Known(known));
+        if known.nar_hash.as_deref().map(normalize_nar_hash) == Some(normalize_nar_hash(&announced))
+        {
+            return Ok(Pending::Known(known));
+        }
+
+        debug!(path = %info.path, "other content is stored for this path; dropping the upload");
+        return Ok(Pending::OtherContentStored);
     }
 
     let state = &session.state;
@@ -109,27 +110,11 @@ pub async fn commit(
         Pending::Known(known) => {
             state
                 .graph
-                .commit_nar(NarCommit {
-                    store_path: known.store_path(),
-                    file_hash: known.file_hash.unwrap_or_default(),
-                    file_size: known.file_size.unwrap_or_default(),
-                    nar_size: known.nar_size.unwrap_or_default(),
-                    nar_hash: known.nar_hash.unwrap_or_default(),
-                    references: known
-                        .references
-                        .as_deref()
-                        .unwrap_or_default()
-                        .split_whitespace()
-                        .map(str::to_owned)
-                        .collect(),
-                    deriver: known.deriver,
-                    ca: known.ca,
-                    targets,
-                    confirmed: true,
-                })
+                .commit_nar(NarCommit::from_stored_row(&known, targets))
                 .await?
                 .signed
         }
+        Pending::OtherContentStored => Vec::new(),
         Pending::New(staged) => {
             let store_path = format!("/nix/store/{}", info.path);
             let references: Vec<String> =
@@ -172,14 +157,6 @@ pub async fn commit(
     }
 
     Ok(())
-}
-
-async fn known_path(session: &Session, hash: &str) -> anyhow::Result<Option<MCachedPath>> {
-    Ok(ECachedPath::find()
-        .filter(CCachedPath::Hash.eq(hash))
-        .one(&session.state.web_db)
-        .await?
-        .filter(|p| p.confirmed && p.nar_hash.is_some() && p.file_hash.is_some()))
 }
 
 async fn admit(
@@ -345,7 +322,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_known_path_with_other_content_is_refused() {
+    async fn a_known_path_with_other_content_is_drained_and_dropped() {
         let existing = MCachedPath {
             hash: "0123456789abcdfghijklmnpqrsvwxyz".into(),
             package: "hello".into(),
@@ -357,11 +334,15 @@ mod tests {
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             .append_query_results([vec![existing]])
             .into_connection();
-        let session = session(db, mask_from(&[Permission::TriggerEvaluation]));
+        let session = session(db.clone(), mask_from(&[Permission::TriggerEvaluation]));
+        let mut upload = NAR;
 
-        let e = import(&session, &info(NAR), NAR)
+        import(&session, &info(NAR), &mut upload)
             .await
-            .expect_err("overwrite");
-        assert!(e.to_string().contains("different content"), "{e}");
+            .expect("the stored content stays and the upload is accepted");
+
+        assert!(upload.is_empty(), "the NAR bytes are drained");
+        let log = db.into_transaction_log();
+        assert_eq!(log.len(), 1, "only the lookup, nothing signed: {log:?}");
     }
 }
