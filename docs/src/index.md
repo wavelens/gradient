@@ -76,6 +76,14 @@ Public Key: public.gradient.ci-main:qmxRE+saUvhNa3jqaCMWje+feVU77TjABchZrPGf7A8=
 - NixOS options search: <https://wavelens.github.io/gradient-search>
 - Chat: [#gradient-ci:matrix.org](https://matrix.to/#/#gradient-ci:matrix.org)
 
+## Project
+
+- **[Support](https://github.com/wavelens/gradient/blob/main/SUPPORT.md)**: community help, long-term and commercial support.
+- **[Security Policy](https://github.com/wavelens/gradient/blob/main/SECURITY.md)**: private vulnerability reports.
+- **[Privacy](https://github.com/wavelens/gradient/blob/main/PRIVACY.md)**: no telemetry, all data self-hosted.
+- **[Governance](https://github.com/wavelens/gradient/blob/main/GOVERNANCE.md)**: roles, maintainers and decisions.
+- **[Accessibility](https://github.com/wavelens/gradient/blob/main/ACCESSIBILITY.md)**: web UI support and barrier reports.
+
 [Get started](get-started/quick-start.md){ .md-button .md-button--primary }
 [Try the public instance](https://public.gradient.ci){ .md-button }
 
