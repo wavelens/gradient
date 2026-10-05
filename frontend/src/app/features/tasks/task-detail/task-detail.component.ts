@@ -33,6 +33,7 @@ import {
 import { EvalStatusBadgeComponent, inputFetchRow, SegmentedBarComponent, StarButtonComponent, StatusIconComponent } from '@shared/ui';
 import { AccessService, WritableDirective } from '@shared/access';
 import { injectTaskAccess, injectTaskAccessData } from '@core/resolvers/inject-access';
+import { groupEntryPoints } from './entry-point-groups';
 import { StarTarget, TaskDetail, EvaluationSummary, EvaluationProgress, EvaluationStatus, EntryPointSummary, BuildStatusCounts, WalkMode } from '@core/models';
 import { buildDuration, commitLabel, entryPointPhase, evaluationDuration, evaluationPhase, evaluationProgressText, evaluationTitle, formatEvaluationDuration, inputFetchPhase, isPendingBuildStatus, isRunningEvaluationStatus, phaseProgress } from '@shared/evaluation';
 
@@ -452,43 +453,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
     return match ? match[1] : parts;
   }
 
-  // Segments are dot-separated outside quotes, so `pkgs."x.y"` ends at `x.y`.
-  private static attrSegments(attr: string): string[] {
-    const parts = attr.match(/"[^"]*"|[^."]+/g) ?? [];
-    const segments = parts.map(s => s.replace(/^"|"$/g, '')).filter(s => s.length > 0);
-    return segments.length ? segments : [attr];
-  }
-
-  /// The label of each attribute path on the page, with the segments every path
-  /// shares stripped from both ends. The last segment alone does not identify a
-  /// row: a NixOS flake's entry points all end
-  /// `.config.system.build.toplevel`, so every one of them reads `toplevel`.
-  /// Dropping the shared wrapper leaves exactly what distinguishes them, and at
-  /// least one segment always survives.
-  entryPointLabels = computed(() => {
-    const paths = this.entryPoints().map(ep => ep.eval);
-    const labels = new Map<string, string>();
-    if (!paths.length) return labels;
-
-    const segs = paths.map(p => TaskDetailComponent.attrSegments(p));
-    const shortest = segs.reduce((n, s) => Math.min(n, s.length), Infinity);
-    let head = 0;
-    while (head < shortest - 1 && segs.every(s => s[head] === segs[0][head])) head++;
-    let tail = 0;
-    while (
-      head + tail < shortest - 1 &&
-      segs.every(s => s[s.length - 1 - tail] === segs[0][segs[0].length - 1 - tail])
-    ) tail++;
-
-    segs.forEach((s, i) => labels.set(paths[i], s.slice(head, s.length - tail).join('.')));
-    return labels;
-  });
-
-  attrLabel(attr: string): string {
-    const shared = this.entryPointLabels().get(attr);
-    if (shared) return shared;
-    return TaskDetailComponent.attrSegments(attr).at(-1) ?? attr;
-  }
+  entryPointGroups = computed(() => groupEntryPoints(this.entryPoints()));
 
   protected readonly evaluationPhase = evaluationPhase;
   protected readonly entryPointPhase = entryPointPhase;
