@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, ElementRef, OnDestroy, afterNextRender, booleanAttribute, effect, inject, input, numberAttribute, viewChild, ChangeDetectionStrategy } from '@angular/core';
+import { Component, ElementRef, OnDestroy, afterRenderEffect, booleanAttribute, inject, input, numberAttribute, viewChild, ChangeDetectionStrategy } from '@angular/core';
 import * as echarts from 'echarts/core';
 import { BarChart, HeatmapChart, LineChart, RadarChart } from 'echarts/charts';
 import { GridComponent, LegendComponent, RadarComponent, TooltipComponent, VisualMapComponent } from 'echarts/components';
@@ -15,7 +15,8 @@ import { DocLink } from '@core/docs';
 import { LabelHelpComponent } from '../label-help/label-help.component';
 import { SkeletonComponent } from '@gradient/ui/ui';
 
-/// Charts need concrete colours, so the semantic roles are read once per render.
+/// Charts need concrete colours, so the semantic roles are read after each render: read during change
+/// detection, the computed styles would settle on siblings whose bindings have not landed yet.
 export function resolveChartTheme(): ChartTheme {
   const style = getComputedStyle(document.documentElement);
   const read = (name: string) => style.getPropertyValue(name).trim();
@@ -110,20 +111,21 @@ export class MetricChartComponent implements OnDestroy {
   private theme = inject(ThemeService);
 
   constructor() {
-    afterNextRender(() => {
-      const el = this.host().nativeElement;
-      this.chart = echarts.init(el, undefined, { renderer: 'svg' });
-      this.chart.setOption(this.option(), { notMerge: true });
-      if (typeof ResizeObserver !== 'undefined') {
-        this.resize = new ResizeObserver(() => this.chart?.resize());
-        this.resize.observe(el);
-      }
-    });
-
-    effect(() => {
+    afterRenderEffect(() => {
       const option = this.option();
-      this.chart?.setOption(option, { notMerge: true });
+      this.chart ??= this.createChart();
+      this.chart.setOption(option, { notMerge: true });
     });
+  }
+
+  private createChart(): echarts.ECharts {
+    const el = this.host().nativeElement;
+    const chart = echarts.init(el, undefined, { renderer: 'svg' });
+    if (typeof ResizeObserver !== 'undefined') {
+      this.resize = new ResizeObserver(() => chart.resize());
+      this.resize.observe(el);
+    }
+    return chart;
   }
 
   ngOnDestroy(): void {
