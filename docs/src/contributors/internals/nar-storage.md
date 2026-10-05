@@ -31,11 +31,23 @@ ${baseDir}/nars/<2 chars>/<rest>.nar.zst
 |---|---|
 | Presigned upload (S3) | The worker is writing to S3 directly. The server is completing multipart on `UploadFinished` |
 | Passthrough (local storage) | Every upload is streaming through the server. The commit is checking length and SHA-256, then moving the file in with `adopt_file` |
-| REST upload (`nix copy`) | `import_nar_reader` -> `put_nar_idempotent`: skipped when `cached_path` is recording the same `file_hash` and a `HEAD` is finding the object |
+| REST upload (`nix copy`) | `import_nar_reader` -> `put_nar_idempotent_reader`: skipped for a stored path, see [First Content](#first-content) |
+
+### First Content
+
+Stored paths keep the first content they received, like valid paths in Nix. Non-reproducible builds can produce other bytes for one input-addressed path.
+
+- **Stored:** A confirmed `cached_path` row with a `file_hash` (`MCachedPath::is_stored`).
+- **Grant:** Workers asking to upload a stored path get a `Skip` grant. They drop the NAR and count the output as uploaded.
+- **Writes:** Passthrough, REST and SSH leave the object of a stored path untouched. Only identical bytes can replace a missing object.
+- **Commit:** The NAR commit must keep the content fields of a stored row. Only `deriver` can change.
+- **Signatures:** Workers with other bytes get the stored content signed into their project caches. REST and SSH clients with other bytes get no signature.
+- **SSH:** An `AddMultipleToStore` with other bytes must succeed. The server can drain and drop those bytes.
+- **Concurrent Uploads:** Two first uploads at the same moment can still race. The verify-on-read self-heal can demote a path with an object not matching its `file_hash`.
 
 !!! warning "Bucket Requirements"
     - No object versioning, object lock or replication. Object lock and replication force versioning.
-    - A PUT must overwrite the existing object for Gradient. A versioned bucket will keep one copy per re-upload, and no S3 GC will reclaim those copies.
+    - Versioned buckets keep a copy of every deleted NAR. No S3 GC can reclaim those copies.
     - An `AbortIncompleteMultipartUpload` lifecycle rule (e.g. 7 days). NARs over 1 GiB go up as multipart. A worker dying mid-upload will leave the parts behind.
 
 ## Build Logs
