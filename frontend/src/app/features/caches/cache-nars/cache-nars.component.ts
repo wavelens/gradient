@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, OnInit, computed, inject, signal, ChangeDetectionStrategy } from '@angular/core';
+import { Component, OnInit, computed, inject, linkedSignal, signal, ChangeDetectionStrategy } from '@angular/core';
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
@@ -21,13 +21,13 @@ import {
   EmptyStateComponent,
   IconComponent,
   InputDirective,
-  LoadingSpinnerComponent,
   PageLayoutComponent,
+  SkeletonComponent,
   StatCardComponent,
   TableComponent,
 } from '@gradient/ui/ui';
 import { WritableDirective } from '@shared/access';
-import { injectCacheAccess } from '@core/resolvers/inject-access';
+import { injectCacheAccess, injectCacheAccessData } from '@core/resolvers/inject-access';
 import { CacheNarsDetailDrawerComponent } from './cache-nars-detail-drawer.component';
 import { formatBytes, formatCount, relativeTime } from '@shared/text';
 import { narSearchText, parseNarSearch } from './nar-search';
@@ -45,7 +45,7 @@ type SortOrder = 'asc' | 'desc';
     DialogComponent,
     ButtonComponent,
     InputDirective,
-    LoadingSpinnerComponent,
+    SkeletonComponent,
     WritableDirective,
     CacheNarsDetailDrawerComponent,
     IconComponent,
@@ -68,8 +68,9 @@ export class CacheNarsComponent implements OnInit {
 
   rowDisabled = computed(() => this.deletingHash() !== null);
 
+  private resolved = injectCacheAccessData();
+  cache = linkedSignal(() => this.resolved()?.cache ?? null);
   cacheName = '';
-  cacheDisplayName = '';
 
   search = signal('');
   private filter = computed(() => parseNarSearch(this.search()));
@@ -79,9 +80,11 @@ export class CacheNarsComponent implements OnInit {
   perPage = signal(50);
 
   loading = signal(false);
-  rows = signal<NarSummary[]>([]);
+  rows = signal<NarSummary[] | null>(null);
   total = signal(0);
   stats = signal<NarStats | null>(null);
+  statsFailed = signal(false);
+  readonly placeholders = Array.from({ length: 10 });
   loadError = signal<string | null>(null);
   deleteError = signal<string | null>(null);
 
@@ -97,7 +100,7 @@ export class CacheNarsComponent implements OnInit {
   ngOnInit(): void {
     this.cacheName = this.route.snapshot.paramMap.get('cache') || '';
     this.cachesService.getCache(this.cacheName).subscribe({
-      next: (c) => { this.cacheDisplayName = c.display_name; },
+      next: (c) => this.cache.set(c),
       error: () => {},
     });
     this.route.queryParamMap.subscribe((q) => {
@@ -136,8 +139,11 @@ export class CacheNarsComponent implements OnInit {
 
   private loadStats(): void {
     this.cachesService.getCacheNarStats(this.cacheName).subscribe({
-      next: (s) => this.stats.set(s),
-      error: () => {},
+      next: (s) => {
+        this.stats.set(s);
+        this.statsFailed.set(false);
+      },
+      error: () => this.statsFailed.set(true),
     });
   }
 
@@ -213,7 +219,7 @@ export class CacheNarsComponent implements OnInit {
     this.deletingHash.set(row.hash);
     this.cachesService.deleteCacheNar(this.cacheName, row.hash).subscribe({
       next: () => {
-        this.rows.set(this.rows().filter((r) => r.hash !== row.hash));
+        this.rows.update((rows) => rows?.filter((r) => r.hash !== row.hash) ?? rows);
         this.total.set(Math.max(0, this.total() - 1));
         this.deletingHash.set(null);
         this.pendingDelete.set(null);
