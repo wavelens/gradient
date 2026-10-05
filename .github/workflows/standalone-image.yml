@@ -11,6 +11,8 @@ on:
 permissions:
   contents: read
   packages: write
+  id-token: write
+  attestations: write
 
 env:
   IMAGE: ghcr.io/wavelens/gradient-standalone
@@ -33,14 +35,48 @@ jobs:
             extra-substituters = https://public.gradient.ci/cache/main
             extra-trusted-public-keys = public.gradient.ci-main:qmxRE+saUvhNa3jqaCMWje+feVU77TjABchZrPGf7A8=
 
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
       - name: "Build image"
         run: nix build -L .#packages.${{ matrix.system }}.standalone-image
 
       - name: "Push image"
+        id: push
         env:
           CREDS: ${{ github.actor }}:${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ github.ref_name }}-${{ matrix.arch }}
-        run: nix run nixpkgs#skopeo -- copy --dest-creds "$CREDS" docker-archive:result "docker://$IMAGE:$TAG"
+        run: |
+          nix run nixpkgs#skopeo -- copy --digestfile digest --dest-creds "$CREDS" docker-archive:result "docker://$IMAGE:$TAG"
+          echo "digest=$(cat digest)" >> "$GITHUB_OUTPUT"
+
+      - name: "Generate SBOM"
+        uses: anchore/sbom-action@v0.24.3
+        with:
+          image: ${{ env.IMAGE }}@${{ steps.push.outputs.digest }}
+          registry-username: ${{ github.actor }}
+          registry-password: ${{ secrets.GITHUB_TOKEN }}
+          format: spdx-json
+          output-file: sbom.spdx.json
+          upload-artifact: false
+
+      - name: "Attest build provenance"
+        uses: actions/attest-build-provenance@v4.2.2
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: true
+
+      - name: "Attest SBOM"
+        uses: actions/attest-sbom@v4.1.0
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ steps.push.outputs.digest }}
+          sbom-path: sbom.spdx.json
+          push-to-registry: true
 
   manifest:
     needs: build
@@ -53,9 +89,18 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: "Publish multi-arch manifest"
+        id: manifest
         env:
           REF: ${{ github.ref_name }}
         run: |
           for tag in "$REF" latest; do
             docker buildx imagetools create -t "$IMAGE:$tag" "$IMAGE:$REF-amd64" "$IMAGE:$REF-arm64"
           done
+          echo "digest=$(docker buildx imagetools inspect "$IMAGE:$REF" --format '{{json .Manifest}}' | jq -r .digest)" >> "$GITHUB_OUTPUT"
+
+      - name: "Attest build provenance"
+        uses: actions/attest-build-provenance@v4.2.2
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ steps.manifest.outputs.digest }}
+          push-to-registry: true

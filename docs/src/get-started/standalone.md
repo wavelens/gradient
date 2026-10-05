@@ -29,6 +29,13 @@ A complete Gradient on one machine for trying Gradient on a personal repository.
 
     A QEMU VM on the terminal, logged in as root. The disk image `gradient.qcow2` in the current directory will keep projects, the cache and every build across restarts. Stop the VM with `Ctrl-a x`.
 
+??? note "Image Provenance"
+    Release images come with a signed build provenance and an SBOM. The GitHub CLI can check the provenance against the repository.
+
+    ```sh
+    gh attestation verify oci://ghcr.io/wavelens/gradient-standalone:latest -R wavelens/gradient
+    ```
+
 The first boot will take a minute. PostgreSQL will initialize, and Gradient will generate its secrets.
 
 ## 2. Log In
