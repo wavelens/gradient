@@ -1,0 +1,60 @@
+# SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+# SPDX-License-Identifier: AGPL-3.0-only
+
+name: "All checks"
+
+on:
+  pull_request:
+
+permissions:
+  checks: read
+  statuses: read
+
+concurrency:
+  group: all-checks-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  all-checks:
+    name: "all checks pass"
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - name: "Wait for every other check on the head commit"
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ github.event.pull_request.head.sha }}
+          SELF: "all checks pass"
+          REQUIRED_APP: "gradient-ci"
+        run: |
+          while true; do
+            sleep 60
+
+            runs=$(gh api --paginate "repos/$GITHUB_REPOSITORY/commits/$SHA/check-runs?per_page=100" \
+              --jq '.check_runs[] | select(.name != env.SELF) | [.app.slug, .status, (.conclusion // "-"), .name] | @tsv')
+            statuses=$(gh api --paginate "repos/$GITHUB_REPOSITORY/commits/$SHA/status?per_page=100" \
+              --jq '.statuses[] | [.state, .context] | @tsv')
+
+            failed=$(
+              awk -F'\t' '$2 == "completed" && $3 !~ /^(success|skipped|neutral)$/ { print $3 ": " $4 }' <<< "$runs"
+              awk -F'\t' '$1 ~ /^(failure|error)$/ { print $1 ": " $2 }' <<< "$statuses"
+            )
+            if [ -n "$failed" ]; then
+              echo "::error::failed checks:"
+              echo "$failed"
+              exit 1
+            fi
+
+            pending=$(
+              awk -F'\t' '$2 != "completed" { print $2 ": " $4 }' <<< "$runs"
+              awk -F'\t' '$1 == "pending" { print $1 ": " $2 }' <<< "$statuses"
+            )
+            if ! cut -f1 <<< "$runs" | grep -qx "$REQUIRED_APP"; then
+              echo "waiting for $REQUIRED_APP to report"
+            elif [ -n "$pending" ]; then
+              echo "waiting for $(wc -l <<< "$pending") checks"
+            else
+              echo "all checks passed"
+              exit 0
+            fi
+          done
