@@ -154,15 +154,13 @@ in {
         default = cfg.worker.enable;
         defaultText = lib.literalExpression "config.services.gradient.worker.enable";
         description = ''
-          Whether to provision credentials for a {option}`services.gradient.worker` running on this
-          host. The credentials are a worker identity derived from the hostname, a token generated
-          on first start and the matching peers file. They also include a worker of the
-          state-declared team `server`, which all new projects grant their workers. The local
-          worker needs no UUID, token or web UI registration step.
+          Whether to register the {option}`services.gradient.worker` on this host automatically,
+          with an ID from the hostname and a token and peers file from the first start. Members of
+          the state-declared team `server` reach every new project, the local worker included. No
+          UUID, token or web UI step is necessary.
 
-          Disable it to authenticate a co-located worker like a remote worker, with
-          {option}`services.gradient.worker.id` and {option}`services.gradient.worker.peersFile` set
-          by hand.
+          Disable it to register the local worker like a remote worker, with
+          {option}`services.gradient.worker.id` and {option}`services.gradient.worker.peersFile`.
         '';
       };
 
@@ -225,8 +223,8 @@ in {
           default = null;
           example = "https://example.com/logo.svg";
           description = ''
-            URL of an image shown in place of the Gradient logo on the sign-in pages,
-            drawn in its own colors. `null` shows the Gradient logo.
+            URL of an image to display instead of the Gradient logo on the sign-in pages, in its
+            original colors. Set it to `null` to keep the Gradient logo.
           '';
         };
       };
@@ -408,11 +406,13 @@ in {
           type = lib.types.nullOr lib.types.str;
           default = null;
           description = ''
-            Git author and committer name for commits pushed by the `open_pr` action. Set it to
-            `null` to let each Git host choose. Expect GitHub to credit the App bot and mark the
-            commit verified. Gitea, Forgejo and GitLab use the token owner and fall back to
-            `Gradient <gradient@users.noreply.HOST>`. That token must carry the `read:user` or
-            `read_user` scope.
+            Git author and committer name for commits of the `open_pr` action. Set it to `null` to
+            use the default of the Git host.
+
+            - GitHub: the App bot, with the commit marked as verified.
+            - Gitea, Forgejo and GitLab: the token owner, with
+              `Gradient <gradient@users.noreply.HOST>` as fallback. Grant the token the `read:user`
+              or `read_user` scope for the owner lookup.
           '';
         };
 
@@ -420,8 +420,8 @@ in {
           type = lib.types.nullOr lib.types.str;
           default = null;
           description = ''
-            Git author and committer email for commits pushed by the `open_pr` action. Set it to
-            `null` to let each Git host choose, as described for
+            Git author and committer email for commits of the `open_pr` action. Set it to `null` to
+            use the default of the Git host, as listed for
             {option}`services.gradient.pullRequests.commitName`.
           '';
         };
