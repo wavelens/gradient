@@ -7,6 +7,7 @@
 @use '@gradient/ui/styles/themes';
 @use '@gradient/ui/styles/grids';
 @use '@gradient/ui/styles/base';
+@use '@gradient/ui/styles/variables' as *;
 
 // Fonts are loaded via <link> tags in index.html
 
@@ -20,6 +21,16 @@ body {
 // Angular's router-outlet inserts activated components as siblings of the outlet element.
 app-root > *:not(app-header):not(gr-footer):not(app-command-palette):not(router-outlet) {
   flex: 1;
+}
+
+// index.html paints this in place of the header until Angular replaces the app-root content.
+.header-placeholder {
+  flex: none;
+  box-sizing: content-box;
+  height: calc(1lh + 2 * #{$spacing-sm});
+  padding-block: $spacing-md;
+  border-bottom: 1px solid var(--gr-border);
+  background-color: var(--gr-surface-sunken);
 }
 
 // Overscroll paints the root color: the header's near the top, the footer's near the bottom.
