@@ -84,7 +84,8 @@
 <h2>Skeletons</h2>
 <p>A page block that loads its own data keeps its real layout and puts a <code>gr-skeleton</code> where each
   value will land, so nothing shifts when the data arrives. The container carries <code>aria-busy</code>.
-  A stat card with a <code>null</code> value shows a skeleton.</p>
+  A stat card with a <code>null</code> value shows a skeleton, and <code>gr-metric-chart</code> with
+  <code>loading</code> covers its plot with a skeleton while keeping its header.</p>
 <gr-card-grid min="220px" aria-busy="true">
   <gr-stat-card label="Packages stored" [value]="null" />
   <gr-stat-card label="Uncompressed size" [value]="null" />

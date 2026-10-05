@@ -4,9 +4,7 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-@if (loading()) {
-  <gr-loading-spinner message="Loading cache..." />
-} @else if (cache(); as c) {
+@if (cache(); as c) {
   <gr-page-layout
     [breadcrumb]="[{ label: 'Caches', link: ['/caches'] }, { label: c.display_name }]"
     [title]="c.display_name"
@@ -30,17 +28,15 @@
     <!-- Stats -->
   <div class="section">
     <h2>Storage</h2>
-    @if (statsLoading()) {
-      <gr-loading-spinner message="Loading stats..." />
-    } @else {
-      <gr-card-grid min="220px">
-        <gr-stat-card label="Packages stored" [value]="formatCount(stats()?.total_packages ?? 0)" />
-        <gr-stat-card label="Uncompressed size" [value]="formatBytes(stats()?.total_nar_bytes ?? 0)" />
-        <gr-stat-card label="Compressed stored" [value]="formatBytes(stats()?.total_bytes ?? 0)" />
-      </gr-card-grid>
+    <gr-card-grid min="220px" [attr.aria-busy]="statsLoading() || null">
+      <gr-stat-card label="Packages stored" [value]="statsLoading() ? null : formatCount(stats()?.total_packages ?? 0)" />
+      <gr-stat-card label="Uncompressed size" [value]="statsLoading() ? null : formatBytes(stats()?.total_nar_bytes ?? 0)" />
+      <gr-stat-card label="Compressed stored" [value]="statsLoading() ? null : formatBytes(stats()?.total_bytes ?? 0)" />
+    </gr-card-grid>
 
-      <gr-metric-chart title="Storage over time"
+    <gr-metric-chart title="Storage over time"
         type="area"
+        [loading]="statsLoading()"
         [height]="220"
         [series]="storageSeries()"
         [categories]="storageCategories()"
@@ -58,22 +54,19 @@
           (ngModelChange)="setWindow($event)"
           />
       </gr-metric-chart>
-    }
   </div>
 
   <!-- Traffic -->
   <div class="section">
     <h2>Traffic</h2>
-    @if (statsLoading()) {
-      <gr-loading-spinner message="Loading stats..." />
-    } @else {
-      <gr-card-grid min="220px">
-        <gr-stat-card label="Requests (last hour)" [value]="formatCount($any(stats()?.hours | slice:-1)[0]?.requests ?? 0)" />
-        <gr-stat-card label="Traffic (last hour)" [value]="formatBytes($any(stats()?.hours | slice:-1)[0]?.bytes ?? 0)" />
-      </gr-card-grid>
+    <gr-card-grid min="220px" [attr.aria-busy]="statsLoading() || null">
+      <gr-stat-card label="Requests (last hour)" [value]="statsLoading() ? null : formatCount($any(stats()?.hours | slice:-1)[0]?.requests ?? 0)" />
+      <gr-stat-card label="Traffic (last hour)" [value]="statsLoading() ? null : formatBytes($any(stats()?.hours | slice:-1)[0]?.bytes ?? 0)" />
+    </gr-card-grid>
 
-      <gr-metric-chart title="Traffic over time"
+    <gr-metric-chart title="Traffic over time"
         type="area"
+        [loading]="statsLoading()"
         [height]="220"
         [series]="trafficSeries()"
         [categories]="trafficCategories()"
@@ -91,7 +84,6 @@
           (ngModelChange)="setWindow($event)"
           />
       </gr-metric-chart>
-    }
   </div>
 
   <gr-settings-section

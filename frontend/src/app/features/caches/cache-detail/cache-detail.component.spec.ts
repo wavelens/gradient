@@ -65,6 +65,36 @@ describe('CacheDetailComponent cache usage instructions', () => {
   });
 });
 
+describe('CacheDetailComponent loading', () => {
+  it('shows the resolved cache at once and holds the stats with placeholders', () => {
+    TestBed.configureTestingModule({
+      imports: [CacheDetailComponent],
+      providers: [
+        provideRouter([]),
+        provideHttpClient(),
+        provideHttpClientTesting(),
+        { provide: CachesService, useValue: { getCache: () => NEVER, getCacheStats: () => NEVER } },
+        {
+          provide: ActivatedRoute,
+          useValue: {
+            snapshot: { paramMap: convertToParamMap({ cache: 'main' }) },
+            parent: { data: of({ cacheAccess: { cache: { name: 'main', display_name: 'Main', active: true, public: true } } }) },
+          },
+        },
+        { provide: StarsService, useValue: { starred: () => of(false), set: () => of(true) } },
+      ],
+    });
+    const fixture = TestBed.createComponent(CacheDetailComponent);
+    fixture.detectChanges();
+    const root = fixture.nativeElement as HTMLElement;
+
+    expect(root.querySelector('gr-loading-spinner')).toBeNull();
+    expect(root.querySelector('h1')?.textContent).toContain('Main');
+    expect(root.querySelectorAll('.stat-value gr-skeleton').length).toBe(5);
+    expect(root.querySelectorAll('gr-metric-chart gr-skeleton').length).toBe(2);
+  });
+});
+
 describe('CacheDetailComponent header', () => {
   function render(authenticated: boolean) {
     const starred = vi.fn(() => of(true));

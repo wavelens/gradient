@@ -79,6 +79,22 @@ describe('MetricChartComponent', () => {
     expect(root.querySelector('.metric-chart__subtitle')?.textContent).toContain('Sum of all');
   });
 
+  it('covers the plot with a placeholder while loading and keeps the header', async () => {
+    const fixture = TestBed.createComponent(MetricChartComponent);
+    fixture.componentRef.setInput('title', 'Traffic over time');
+    fixture.componentRef.setInput('loading', true);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    const root = fixture.nativeElement as HTMLElement;
+    expect(root.querySelector('h3')?.textContent).toContain('Traffic over time');
+    expect(root.querySelector('.metric-chart')?.getAttribute('aria-busy')).toBe('true');
+    expect(root.querySelector('gr-skeleton')).not.toBeNull();
+
+    fixture.componentRef.setInput('loading', false);
+    fixture.detectChanges();
+    expect(root.querySelector('gr-skeleton')).toBeNull();
+  });
+
   it('drops the header entirely when bare', async () => {
     const fixture = TestBed.createComponent(MetricChartComponent);
     fixture.componentRef.setInput('title', 'Total');

@@ -13,6 +13,7 @@ import { ChartTheme, MetricChartConfig, MetricChartType, MetricSeries, buildMetr
 import { ThemeService } from '@core/services/theme.service';
 import { DocLink } from '@core/docs';
 import { LabelHelpComponent } from '../label-help/label-help.component';
+import { SkeletonComponent } from '@gradient/ui/ui';
 
 /// Charts need concrete colours, so the semantic roles are read once per render.
 export function resolveChartTheme(): ChartTheme {
@@ -53,9 +54,9 @@ echarts.use([
 @Component({
   selector: 'gr-metric-chart',
   standalone: true,
-  imports: [LabelHelpComponent],
+  imports: [LabelHelpComponent, SkeletonComponent],
   template: `
-    <div class="metric-chart" [class.metric-chart--bare]="bare()">
+    <div class="metric-chart" [class.metric-chart--bare]="bare()" [attr.aria-busy]="loading() || null">
       @if (title() && !bare()) {
         <header class="metric-chart__header">
           <div>
@@ -74,7 +75,12 @@ echarts.use([
           </div>
         </header>
       }
-      <div #host class="metric-chart__plot" [style.height.px]="height()"></div>
+      <div class="metric-chart__body">
+        <div #host class="metric-chart__plot" [class.metric-chart__plot--waiting]="loading()" [style.height.px]="height()"></div>
+        @if (loading()) {
+          <gr-skeleton class="metric-chart__placeholder" height="auto" />
+        }
+      </div>
     </div>
   `,
   changeDetection: ChangeDetectionStrategy.Eager,
@@ -91,6 +97,7 @@ export class MetricChartComponent implements OnDestroy {
   categories = input<string[]>([]);
   colors = input<string[]>([]);
   bare = input(false, { transform: booleanAttribute });
+  loading = input(false, { transform: booleanAttribute });
   yAxisTitle = input('');
   yAxisMax = input<number | undefined>(undefined);
   valueFormatter = input<((value: number) => string) | undefined>(undefined);

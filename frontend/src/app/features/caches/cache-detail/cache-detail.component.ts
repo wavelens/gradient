@@ -4,12 +4,13 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, OnInit, inject, signal, computed, ChangeDetectionStrategy } from '@angular/core';
+import { Component, OnInit, inject, signal, computed, linkedSignal, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterModule } from '@angular/router';
 import { CachesService, CacheStats, CacheMetricPoint, StorageMetricPoint } from '@core/services/caches.service';
 import { AuthService } from '@core/services/auth.service';
 import { StarsService } from '@core/services/stars.service';
+import { injectCacheAccessData } from '@core/resolvers/inject-access';
 import {
   BadgeComponent,
   ButtonComponent,
@@ -17,7 +18,6 @@ import {
   CopyFieldComponent,
   DividerComponent,
   FormFieldComponent,
-  LoadingSpinnerComponent,
   PageLayoutComponent,
   TabSwitchComponent,
   SettingsSectionComponent,
@@ -50,7 +50,6 @@ const CHART_COLORS = {
     CommonModule,
     RouterModule,
     ButtonComponent,
-    LoadingSpinnerComponent,
     LabelHelpComponent,
     MetricChartComponent,
     PageLayoutComponent,
@@ -76,9 +75,9 @@ export class CacheDetailComponent implements OnInit {
   private stars = inject(StarsService);
   protected authService = inject(AuthService);
 
-  loading = signal(true);
+  private access = injectCacheAccessData();
+  cache = linkedSignal<Cache | null>(() => this.access()?.cache ?? null);
   statsLoading = signal(true);
-  cache = signal<Cache | null>(null);
   stats = signal<CacheStats | null>(null);
   activeWindow = signal<Window>('hours');
   starred = signal(false);
@@ -164,17 +163,7 @@ export class CacheDetailComponent implements OnInit {
   }
 
   loadCache(): void {
-    this.loading.set(true);
-    this.cachesService.getCache(this.cacheName).subscribe({
-      next: (cache) => {
-        this.cache.set(cache);
-        this.loading.set(false);
-      },
-      error: (error) => {
-        console.error('Failed to load cache:', error);
-        this.loading.set(false);
-      },
-    });
+    this.cachesService.getCache(this.cacheName).subscribe((cache) => this.cache.set(cache));
   }
 
   loadStats(): void {
