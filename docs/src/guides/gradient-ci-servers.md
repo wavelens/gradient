@@ -49,6 +49,19 @@ Connection tokens start with `gci1_`.
 - The **Gradient.CI Servers** entry will show **Connected**.
 - The next evaluation of the project will show builds on **Gradient.CI Servers**.
 
+## Allowed Capabilities
+
+New connections allow `eval` and `build`, shown as **Allowed** on the entry. The project's own workers must fetch the sources.
+
+| Workers of the project | Allowed on Gradient.CI Servers |
+|---|---|
+| An own worker allowed to fetch | `eval`, `build` (default) |
+| Gradient.CI Servers only | `fetch`, `eval`, `build` |
+
+- **Edit** on the entry can change the allowed [capabilities](../concepts/workers.md#capabilities).
+- **Deactivate** can pause the connection without a deletion.
+- Team connections are editable on the team's **Workers** page.
+
 ## Offline Reasons
 
 Offline entries show their last failure to members who manage workers.
