@@ -200,13 +200,13 @@ describe('TaskDetailComponent - loading', () => {
     expect((fixture.nativeElement as HTMLElement).querySelector('.breadcrumb-link gr-skeleton')).not.toBeNull();
   });
 
-  it('holds the packages with placeholder rows until the entry points arrive', () => {
-    const { fixture } = setup(access, { getEntryPoints: () => NEVER });
+  it('leaves the packages empty under their heading until the entry points arrive', () => {
+    const { fixture } = setup(access, { primaryStatus: 'Completed', getEntryPoints: () => NEVER });
     const root = fixture.nativeElement as HTMLElement;
-    expect(root.querySelector('gr-loading-spinner')).toBeNull();
-    const list = root.querySelector('.pkg-list')!;
-    expect(list.getAttribute('aria-busy')).toBe('true');
-    expect(list.querySelectorAll('.pkg gr-skeleton').length).toBeGreaterThan(0);
+    expect(root.querySelector('.pkg-label')?.textContent).toContain('Packages');
+    for (const sel of ['gr-loading-spinner', '.pkg', 'gr-empty-state']) {
+      expect(root.querySelector(sel)).toBeNull();
+    }
   });
 });
 

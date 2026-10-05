@@ -105,7 +105,6 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
   private entryPointsEvalId?: string;
   private entryPointsSig = '';
   private lastEntryPointsFetch = 0;
-  readonly packagePlaceholders = Array.from({ length: 5 });
   private readonly ENTRY_POINTS_LIVE_INTERVAL_MS = 4000;
 
   evaluations = computed(() => this.task()?.last_evaluations ?? []);
