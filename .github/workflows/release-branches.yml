@@ -8,7 +8,7 @@ on:
     tags: ["v*"]
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency: release-branches
 
@@ -20,6 +20,7 @@ jobs:
         with:
           fetch-depth: 0
           fetch-tags: true
+          ssh-key: ${{ secrets.RELEASE_BRANCHES_DEPLOY_KEY }}
 
       - name: Move latest and beta to the tag
         env:
@@ -39,10 +40,10 @@ jobs:
             fi
             if [ -z "$current" ] || git merge-base --is-ancestor "$current" "$commit"; then
               git push origin "$commit:refs/heads/$branch"
-            elif [ -z "$other_releases" ]; then
+            elif [ "$branch" = beta ] && [ -z "$other_releases" ]; then
               git push --force origin "$commit:refs/heads/$branch"
             else
-              echo "::warning::$branch is on another release, leaving it in place"
+              echo "::warning::$branch is not behind $TAG, leaving it in place"
               continue
             fi
             echo "$branch -> $TAG"
