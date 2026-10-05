@@ -974,7 +974,7 @@ mod tests {
         );
         cp.file_size = Some(body.len() as u64 + 8421);
         cp.nar_size = Some(nar.len() as u64);
-        cp.nar_hash = Some(format!("sha256:{}", sha256_nix32(&nar)));
+        cp.nar_hash = Some(sha256_nix32(&nar));
 
         let http = gradient_util::http::build_download_client().expect("download client");
         let (_, fetched) = download_one_presigned(&http, cp, &mut Progress::silent())
