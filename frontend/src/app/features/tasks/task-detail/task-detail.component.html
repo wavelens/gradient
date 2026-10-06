@@ -18,7 +18,7 @@
         <h1>{{ proj.display_name }}</h1>
       </div>
     </div>
-    <div class="head-actions">
+    <div class="head-actions phone-icon-buttons">
       @if (authService.isAuthenticated()) {
         <button *appWritable="triggerAccess()" grButton label="Start Evaluation" icon="play_arrow"
                 (click)="startEvaluation()" [loading]="starting()"
