@@ -32,7 +32,6 @@ Every message on `/proto`, from `backend/gradient-wire/src/messages`. IDs (`job_
 | `CacheError` | Cache state unknown. The worker is retrying | `query_id`, `message` |
 | `UploadGrant` | Upload admission: skip, passthrough (with resume offset), presigned PUT or multipart | `request_id`, `target` |
 | `UploadCommitted` | Upload outcome: ok, retry or rejected | `request_id`, `outcome` |
-| `Handover` | Shared worker changing hands. A new `id` wipes the evaluation cache | `id` |
 
 ## Worker -> Server
 
@@ -66,7 +65,6 @@ Every message on `/proto`, from `backend/gradient-wire/src/messages`. IDs (`job_
 | `UploadChunk` (bulk) | Passthrough upload bytes | `request_id`, `data`, `offset`, `is_final` |
 | `UploadFinished` | Upload done, with NAR metadata | `request_id`, `metadata` |
 | `UploadCancel` | Cancelling an upload | `request_id` |
-| `HandoverDone` | `Handover` applied | - |
 
 ## Cache Query Modes
 

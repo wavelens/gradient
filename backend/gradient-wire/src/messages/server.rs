@@ -19,7 +19,7 @@ pub struct FailedPeer {
 }
 
 #[derive(Proto, Debug, Clone, PartialEq)]
-#[proto(oldest = 30)]
+#[proto(oldest = 31)]
 pub enum ServerMessage {
     AuthChallenge {
         peers: Vec<String>,
@@ -160,9 +160,6 @@ pub enum ServerMessage {
         worker_id: String,
         tokens: Vec<(String, String)>,
     },
-    Handover {
-        id: String,
-    },
 }
 
 impl ServerMessage {
@@ -208,7 +205,6 @@ impl ServerMessage {
             ServerMessage::UploadGrant { .. } => "UploadGrant",
             ServerMessage::UploadCommitted { .. } => "UploadCommitted",
             ServerMessage::Authenticate { .. } => "Authenticate",
-            ServerMessage::Handover { .. } => "Handover",
         }
     }
 

@@ -14,7 +14,7 @@ use crate::types::{
 };
 
 #[derive(Proto, Debug, Clone, PartialEq)]
-#[proto(oldest = 30)]
+#[proto(oldest = 31)]
 pub enum ClientMessage {
     InitConnection {
         capabilities: GradientCapabilities,
@@ -186,7 +186,6 @@ pub enum ClientMessage {
     UploadCancel {
         request_id: u64,
     },
-    HandoverDone,
 }
 
 impl ClientMessage {
@@ -240,7 +239,6 @@ impl ClientMessage {
             ClientMessage::UploadChunk { .. } => "UploadChunk",
             ClientMessage::UploadFinished { .. } => "UploadFinished",
             ClientMessage::UploadCancel { .. } => "UploadCancel",
-            ClientMessage::HandoverDone => "HandoverDone",
         }
     }
 

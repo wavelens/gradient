@@ -257,7 +257,6 @@ pub struct JobExecutor {
     pub(crate) log_limits: crate::executor::log_limit::LogRateLimits,
     pub(crate) log_fetch_from_store: bool,
     pub(crate) host: BuildHost,
-    pub(crate) handover_id: Arc<gradient_util::sync::Mutex<Option<String>>>,
 }
 
 impl JobExecutor {
@@ -282,7 +281,6 @@ impl JobExecutor {
             log_limits,
             log_fetch_from_store,
             host,
-            handover_id: Arc::default(),
         }
     }
 
