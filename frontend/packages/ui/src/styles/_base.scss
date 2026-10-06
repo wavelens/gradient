@@ -131,11 +131,11 @@ a {
 
 // Page header buttons keep only their icon on phones, the label stays for assistive tech.
 @media (max-width: $breakpoint-sm) {
-  .page-layout__actions .gr-button:has(.gr-button__icon) {
+  :is(.page-layout__actions, .head-actions) .gr-button:has(.gr-button__icon) {
     padding: 0 $spacing-sm;
   }
 
-  .page-layout__actions .gr-button__icon ~ .gr-button__label {
+  :is(.page-layout__actions, .head-actions) .gr-button__icon ~ .gr-button__label {
     @include sr-only;
   }
 }
