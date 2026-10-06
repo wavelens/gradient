@@ -113,7 +113,7 @@ a {
 }
 
 // Names a control for assistive tech without showing the label.
-.sr-only {
+@mixin sr-only {
   position: absolute;
   width: 1px;
   height: 1px;
@@ -123,6 +123,21 @@ a {
   clip-path: inset(50%);
   white-space: nowrap;
   border: 0;
+}
+
+.sr-only {
+  @include sr-only;
+}
+
+// Page header buttons keep only their icon on phones, the label stays for assistive tech.
+@media (max-width: $breakpoint-sm) {
+  .page-layout__actions .gr-button:has(.gr-button__icon) {
+    padding: 0 $spacing-sm;
+  }
+
+  .page-layout__actions .gr-button__icon ~ .gr-button__label {
+    @include sr-only;
+  }
 }
 
 // A block of page body: a heading and the content under it. Children stack on
