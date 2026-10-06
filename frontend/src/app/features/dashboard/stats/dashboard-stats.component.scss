@@ -1,0 +1,23 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
+@use '@gradient/ui/styles/variables' as *;
+
+@media (max-width: $breakpoint-sm) {
+  gr-card-grid {
+    grid-template-columns: none;
+    grid-auto-columns: 42%;
+    grid-auto-flow: column;
+    gap: $spacing-md;
+    overflow-x: auto;
+    scroll-snap-type: x mandatory;
+    scrollbar-width: none;
+  }
+
+  gr-stat-card {
+    scroll-snap-align: start;
+  }
+}

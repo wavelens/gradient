@@ -35,6 +35,7 @@ import { formatCpuTime } from '../format';
       </gr-card-grid>
     }
   `,
+  styleUrl: './dashboard-stats.component.scss',
 })
 export class DashboardStatsComponent implements OnInit {
   private dashboard = inject(DashboardService);
