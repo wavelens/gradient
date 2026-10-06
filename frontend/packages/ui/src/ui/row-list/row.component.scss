@@ -151,4 +151,26 @@
   .row-chevron {
     grid-area: chevron;
   }
+
+  .row:not(:has(.row-info > :not(.row-text))) {
+    column-gap: 0;
+
+    .row-actions,
+    .row-chevron {
+      margin-left: $spacing-md;
+    }
+  }
+
+  .row:has(.row-actions :is(.gr-button:not(.gr-button--icon-only), gr-select-button)) {
+    grid-template-areas:
+      'icon name name chevron'
+      'icon meta meta chevron'
+      'icon actions actions chevron';
+
+    .row-actions {
+      justify-self: start;
+      margin-top: $spacing-xs;
+      margin-left: 0;
+    }
+  }
 }

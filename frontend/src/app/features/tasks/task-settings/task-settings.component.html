@@ -31,7 +31,7 @@
     </gr-form-field>
 
     <gr-form-field label="Repository URL" for="proj-repo">
-      <div class="repo-row">
+      <div class="repo-row phone-icon-buttons">
         <input grInput id="proj-repo" [(ngModel)]="formData.repository" [appManagedDisable]="access()" />
         <button *appWritable="access()" grButton type="button" label="Test connection" icon="lan"
                 severity="secondary" [loading]="checkingRepo()"
