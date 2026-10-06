@@ -61,3 +61,7 @@ h3 {
   font-size: $font-size-xs;
 }
     
+
+.metric-chart--compact .metric-chart__header {
+  flex-direction: column;
+}

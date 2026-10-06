@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, ElementRef, OnDestroy, afterRenderEffect, booleanAttribute, inject, input, numberAttribute, viewChild, ChangeDetectionStrategy } from '@angular/core';
+import { Component, ElementRef, OnDestroy, afterRenderEffect, booleanAttribute, computed, inject, input, numberAttribute, signal, viewChild, ChangeDetectionStrategy } from '@angular/core';
 import * as echarts from 'echarts/core';
 import { BarChart, HeatmapChart, LineChart, RadarChart } from 'echarts/charts';
 import { GridComponent, LegendComponent, RadarComponent, TooltipComponent, VisualMapComponent } from 'echarts/components';
@@ -37,6 +37,8 @@ export function resolveChartTheme(): ChartTheme {
   };
 }
 
+const COMPACT_BELOW_PX = 520;
+
 echarts.use([
   BarChart,
   HeatmapChart,
@@ -57,7 +59,7 @@ echarts.use([
   standalone: true,
   imports: [LabelHelpComponent, SkeletonComponent],
   template: `
-    <div class="metric-chart" [class.metric-chart--bare]="bare()" [attr.aria-busy]="loading() || null">
+    <div class="metric-chart" [class.metric-chart--bare]="bare()" [class.metric-chart--compact]="compact()" [attr.aria-busy]="loading() || null">
       @if (title() && !bare()) {
         <header class="metric-chart__header">
           <div>
@@ -108,6 +110,8 @@ export class MetricChartComponent implements OnDestroy {
   private host = viewChild.required<ElementRef<HTMLElement>>('host');
   private chart?: echarts.ECharts;
   private resize?: ResizeObserver;
+  private width = signal(Infinity);
+  protected compact = computed(() => this.width() < COMPACT_BELOW_PX);
   private theme = inject(ThemeService);
 
   constructor() {
@@ -122,7 +126,10 @@ export class MetricChartComponent implements OnDestroy {
     const el = this.host().nativeElement;
     const chart = echarts.init(el, undefined, { renderer: 'svg' });
     if (typeof ResizeObserver !== 'undefined') {
-      this.resize = new ResizeObserver(() => chart.resize());
+      this.resize = new ResizeObserver(([entry]) => {
+        this.width.set(entry.contentRect.width);
+        chart.resize();
+      });
       this.resize.observe(el);
     }
     return chart;
@@ -146,6 +153,7 @@ export class MetricChartComponent implements OnDestroy {
       valueFormatter: this.valueFormatter(),
       secondary: this.secondary(),
       inset: this.inset(),
+      compact: this.compact(),
     }, resolveChartTheme());
   }
 }
