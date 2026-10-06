@@ -18,7 +18,7 @@
     <gr-row-list>
       @for (s of sessions(); track s.id) {
         <gr-row icon="computer">
-          {{ s.user_agent || 'Unknown device' }}
+          <span [title]="s.user_agent ?? ''">{{ deviceName(s.user_agent) }}</span>
           @if (s.current) {
             <gr-badge severity="info">This device</gr-badge>
           }
