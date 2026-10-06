@@ -43,25 +43,28 @@ const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
             <button grButton size="small" [text]="true" label="Retry" (click)="load()"></button>
           </gr-message-banner>
         } @else if (days()) {
-          <svg
-            role="img"
-            [attr.aria-label]="summary()"
-            [attr.viewBox]="'0 0 ' + width() + ' ' + 7 * STEP"
-            class="heat"
-            [class.heat--failed]="mode() === 'failed'"
-          >
-            @for (c of cells(); track c.date) {
-              <rect
-                [attr.class]="'day day--' + c.level"
-                [attr.x]="c.x"
-                [attr.y]="c.y"
-                width="11"
-                height="11"
-                rx="2"
-                [grTooltip]="c.title"
-              ></rect>
-            }
-          </svg>
+          <div class="heat-scroll">
+            <svg
+              role="img"
+              [attr.aria-label]="summary()"
+              [attr.viewBox]="'0 0 ' + width() + ' ' + 7 * STEP"
+              class="heat"
+              [class.heat--failed]="mode() === 'failed'"
+              [style.--heat-width]="width() + 'px'"
+            >
+              @for (c of cells(); track c.date) {
+                <rect
+                  [attr.class]="'day day--' + c.level"
+                  [attr.x]="c.x"
+                  [attr.y]="c.y"
+                  width="11"
+                  height="11"
+                  rx="2"
+                  [grTooltip]="c.title"
+                ></rect>
+              }
+            </svg>
+          </div>
         } @else {
           <gr-skeleton class="heat" />
         }
