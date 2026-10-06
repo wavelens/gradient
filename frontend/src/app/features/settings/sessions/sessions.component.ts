@@ -8,6 +8,7 @@ import { Component, OnInit, inject, signal, ChangeDetectionStrategy } from '@ang
 import { CommonModule } from '@angular/common';
 import { UserService } from '@core/services/user.service';
 import { Session } from '@core/models';
+import { deviceName } from '@shared/text';
 import {
   BadgeComponent,
   ButtonComponent,
@@ -38,6 +39,7 @@ import {
 })
 export class SessionsComponent implements OnInit {
   private userService = inject(UserService);
+  protected readonly deviceName = deviceName;
 
   loading = signal(true);
   revokingId = signal<string | null>(null);
