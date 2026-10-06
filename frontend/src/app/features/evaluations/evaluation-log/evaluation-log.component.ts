@@ -99,6 +99,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   messages = signal<(EvaluationMessage & { renderedHtml: SafeHtml })[]>([]);
   selectedBuildId = signal<string | null>(null);
   selectedSection = signal<'messages' | null>(null);
+  buildsOpen = signal(false);
   logLineCount = signal(0);
   logLoading = signal(true);
   aborting = signal(false);
@@ -620,6 +621,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   // ── Build selection & log loading ──────────────────────────────────────────
 
   selectEvaluationSection(): void {
+    this.buildsOpen.set(false);
     this.selectedSection.set('messages');
     this.selectedBuildId.set(null);
     this.stopActiveStream();
@@ -679,6 +681,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   }
 
   selectBuild(build: BuildItem, isUserAction = false): void {
+    this.buildsOpen.set(false);
     this.selectedSection.set(null);
     if (this.selectedBuildId() === build.id) return;
 
