@@ -143,6 +143,26 @@ describe('EvaluationLogComponent', () => {
     });
   });
 
+  describe('builds drawer', () => {
+    it('closes once a build or the evaluation is picked', () => {
+      const { cmp } = setup();
+      const b = build('a', 'aaa');
+      cmp.visibleBuilds.set([b]);
+
+      cmp.buildsOpen.set(true);
+      cmp.selectBuild(b, true);
+      expect(cmp.buildsOpen()).toBe(false);
+
+      cmp.buildsOpen.set(true);
+      cmp.selectBuild(b, true);
+      expect(cmp.buildsOpen()).toBe(false);
+
+      cmp.buildsOpen.set(true);
+      cmp.selectEvaluationSection();
+      expect(cmp.buildsOpen()).toBe(false);
+    });
+  });
+
   describe('sidebar search', () => {
     it('filters grouped builds by name, case-insensitively', () => {
       const { cmp } = setup();

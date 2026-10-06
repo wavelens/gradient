@@ -19,7 +19,11 @@
   <div class="eval-layout">
 
     <!-- ── Sidebar ──────────────────────────────────────────────── -->
-    <aside class="builds-sidebar" (focusin)="setSidebarFocus(true)" (focusout)="setSidebarFocus(false)">
+    @if (buildsOpen()) {
+      <div class="builds-backdrop gr-dialog-backdrop" aria-hidden="true" (click)="buildsOpen.set(false)"></div>
+    }
+    <aside id="builds-drawer" class="builds-sidebar" [class.open]="buildsOpen()"
+           (focusin)="setSidebarFocus(true)" (focusout)="setSidebarFocus(false)" (keydown.escape)="buildsOpen.set(false)">
 
       <div class="sidebar-breadcrumb">
         <a [routerLink]="['/project', projectName]" class="breadcrumb-link">{{ projectDisplayName() || projectName }}</a>
@@ -144,6 +148,9 @@
 
       <!-- Info bar -->
       <div class="info-bar">
+        <button grButton class="builds-toggle" icon="view_list" severity="secondary" size="small"
+          aria-label="Builds" aria-controls="builds-drawer" [attr.aria-expanded]="buildsOpen()"
+          (click)="buildsOpen.set(!buildsOpen())"></button>
         <div class="info-bar-left">
           <div class="info-metric">
             <gr-eval-status-badge [status]="ev.status" [prioritized]="ev.prioritized" />
