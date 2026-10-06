@@ -248,3 +248,29 @@ h1 { font-size: $font-size-xxl; margin: 0; }
 
 .report-note { color: var(--gr-status-danger); font-size: $font-size-sm; margin: $spacing-sm 0 0; }
 .report-options { display: flex; flex-direction: column; gap: $spacing-sm; margin-top: $spacing-md; }
+
+@media (max-width: $breakpoint-sm) {
+  .pad {
+    padding-inline: $spacing-md;
+  }
+
+  .pp-head {
+    gap: $spacing-md;
+
+    > :first-child {
+      min-width: 0;
+    }
+  }
+
+  .head-actions {
+    flex-wrap: nowrap;
+  }
+
+  .chip {
+    max-width: 100%;
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+}
