@@ -235,3 +235,36 @@
 
   &:hover { color: var(--gr-text-primary); }
 }
+
+.builds-backdrop {
+  display: none;
+}
+
+@media (max-width: $breakpoint-md) {
+  .builds-sidebar {
+    position: absolute;
+    inset-block: 0;
+    left: 0;
+    z-index: $z-dropdown;
+    width: min(85vw, 320px);
+    transform: translateX(-100%);
+    visibility: hidden;
+    transition: transform $transition-base, visibility $transition-base;
+
+    &.open {
+      transform: none;
+      visibility: visible;
+    }
+  }
+
+  .builds-backdrop {
+    display: block;
+    position: absolute;
+    inset: 0;
+    z-index: $z-dropdown - 1;
+  }
+}
+
+@media (max-width: $breakpoint-md) and (prefers-reduced-motion: reduce) {
+  .builds-sidebar { transition: none; }
+}
