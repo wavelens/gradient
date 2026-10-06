@@ -42,3 +42,7 @@
 }
 
 .gr-menu__icon { color: var(--gr-text-secondary); font-size: 1.125rem; }
+
+.gr-menu__item--danger {
+  color: var(--gr-status-danger-text);
+}

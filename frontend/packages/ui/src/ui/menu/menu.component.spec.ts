@@ -26,7 +26,7 @@ class HostComponent {
   model = signal<MenuItem[]>([
     { label: 'Edit', icon: 'edit', command: () => this.ran.set(this.ran() + 1) },
     { separator: true },
-    { label: 'Delete', icon: 'delete', disabled: true },
+    { label: 'Delete', icon: 'delete', disabled: true, danger: true },
     { label: 'Open', icon: 'open_in_new', routerLink: ['/elsewhere'] },
   ]);
 }
@@ -69,6 +69,13 @@ describe('MenuComponent', () => {
     fixture.detectChanges();
     expect(fixture.componentInstance.ran()).toBe(1);
     expect(items()).toHaveLength(0);
+  });
+
+  it('marks destructive items as danger', () => {
+    const { fixture, row } = render();
+    fixture.componentInstance.menu().show(row());
+    fixture.detectChanges();
+    expect(items().map((i) => i.classList.contains('gr-menu__item--danger'))).toEqual([false, true, false]);
   });
 
   it('disables the items that ask for it', () => {

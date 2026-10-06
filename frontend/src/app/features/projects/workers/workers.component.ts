@@ -41,9 +41,12 @@ import {
   IconComponent,
   InputDirective,
   LoadingSpinnerComponent,
+  MenuComponent,
+  MenuItem,
   MessageBannerComponent,
   MessageService,
   PageLayoutComponent,
+  PopoverComponent,
   RowComponent,
   RowListComponent,
   ToastComponent,
@@ -78,6 +81,8 @@ const ALL_ALLOWED: AllowedCapabilities = { enable_fetch: true, enable_eval: true
     BadgeComponent,
     RowListComponent,
     RowComponent,
+    MenuComponent,
+    PopoverComponent,
     CopyFieldComponent,
     GradientCiConnectComponent,
     TeamGrantsComponent,
@@ -155,6 +160,32 @@ export class WorkersComponent implements OnInit {
 
   gradientCi = computed(() => gradientCiEntry(this.config.gradientCiEnabled, this.workers()));
   otherWorkers = computed(() => listedWorkers(this.workers(), this.gradientCi()));
+  workerMenus = computed(() => new Map(this.otherWorkers().map((w) => [w.worker_id, this.menuFor(w)])));
+
+  private menuFor(worker: Worker): MenuItem[] {
+    const busy = this.deletingId() !== null || this.togglingId() !== null || this.testingId() !== null;
+    const canEdit = this.access().canEdit;
+    const rowLocked = this.rowAccess(worker).managed;
+    if (worker.team) {
+      return [
+        ...(this.canOpenTeam(worker.team) ? [{ label: 'Manage on team', icon: 'groups', routerLink: ['/team', worker.team, 'workers'] }] : []),
+        ...(canEdit ? [{ label: 'Fire Test', icon: 'bolt', disabled: busy, command: () => this.fireTest(worker) }] : []),
+      ];
+    }
+    if (!canEdit) return [];
+    return [
+      { label: 'Edit', icon: 'edit', disabled: busy || this.renaming() || rowLocked, command: () => this.openRenameDialog(worker) },
+      {
+        label: worker.active ? 'Deactivate' : 'Activate',
+        icon: worker.active ? 'pause' : 'play_arrow',
+        disabled: busy,
+        command: () => this.requestToggleWorker(worker),
+      },
+      { label: 'Fire Test', icon: 'bolt', disabled: busy, command: () => this.fireTest(worker) },
+      { separator: true },
+      { label: 'Delete', icon: 'delete', danger: true, disabled: busy || rowLocked, command: () => this.deleteWorker(worker) },
+    ];
+  }
   showGradientCiConnect = signal(false);
   showGradientCiDisconnect = signal(false);
 
