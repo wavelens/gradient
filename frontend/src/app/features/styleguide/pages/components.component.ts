@@ -69,6 +69,6 @@ export class ComponentsComponent {
   menuItems: MenuItem[] = [
     { label: 'Rebuild', icon: 'refresh' },
     { separator: true },
-    { label: 'Delete', icon: 'delete' },
+    { label: 'Delete', icon: 'delete', danger: true },
   ];
 }

@@ -20,6 +20,7 @@ import { Worker } from '@core/models/worker.model';
 import { TeamsService } from '@core/services/teams.service';
 import { AuthService } from '@core/services/auth.service';
 import { signal } from '@angular/core';
+import { MenuItem } from '@gradient/ui/ui';
 
 type MockedProjects = {
   getProject: ReturnType<typeof vi.fn>;
@@ -125,11 +126,12 @@ function findByText(root: HTMLElement, text: string): HTMLElement | null {
   ) ?? null;
 }
 
-function findAllByText(root: HTMLElement, text: string): HTMLButtonElement[] {
-  const target = text.toLowerCase();
-  return (Array.from(root.querySelectorAll('button')) as HTMLButtonElement[]).filter(
-    (el) => (el.textContent ?? '').trim().toLowerCase().includes(target),
-  );
+function menuOf(fixture: ComponentFixture<WorkersComponent>, worker: Worker): MenuItem[] {
+  return fixture.componentInstance.workerMenus().get(worker.worker_id) ?? [];
+}
+
+function itemOf(menu: MenuItem[], label: string): MenuItem | undefined {
+  return menu.find((i) => i.label === label);
 }
 
 describe('WorkersComponent - no-cache banner (existing)', () => {
@@ -159,12 +161,11 @@ describe('WorkersComponent - access gating', () => {
     expect(findByText(fixture.nativeElement, 'register worker')).toBeNull();
   });
 
-  it('hides per-row Edit / Activate / Delete under read-only project access', async () => {
+  it('offers no row menu under read-only project access', async () => {
     const fixture = setup({ access: { managed: false, canEdit: false, canTrigger: false }, workers: [workerUnmanaged], caches: [{ id: 'c', name: 'c' }] });
     await settled(fixture);
-    expect(findByText(fixture.nativeElement, 'edit')).toBeNull();
-    expect(findByText(fixture.nativeElement, 'delete')).toBeNull();
-    expect(findByText(fixture.nativeElement, 'deactivate')).toBeNull();
+    expect(menuOf(fixture, workerUnmanaged)).toEqual([]);
+    expect(fixture.nativeElement.querySelector('[aria-label="Worker actions"]')).toBeNull();
   });
 
   it('shows but disables Register Worker under state-managed project', async () => {
@@ -182,11 +183,28 @@ describe('WorkersComponent - access gating', () => {
       caches: [{ id: 'c', name: 'c' }],
     });
     await settled(fixture);
-    const editButtons = findAllByText(fixture.nativeElement, 'edit');
-    expect(editButtons.length).toBe(2);
-    // Buttons appear in DOM order matching workers[] order
-    expect(editButtons[0].disabled).toBe(false);
-    expect(editButtons[1].disabled).toBe(true);
+    expect(itemOf(menuOf(fixture, workerUnmanaged), 'Edit')?.disabled).toBe(false);
+    expect(itemOf(menuOf(fixture, workerManaged), 'Edit')?.disabled).toBe(true);
+  });
+
+  it('keeps Edit, Fire Test and Delete in the row menu, each running its action', async () => {
+    const fixture = setup({ access: { managed: false, canEdit: true, canTrigger: true }, workers: [workerUnmanaged], caches: [{ id: 'c', name: 'c' }] });
+    await settled(fixture);
+    const cmp = fixture.componentInstance;
+    const rename = vi.spyOn(cmp, 'openRenameDialog').mockImplementation(() => undefined);
+    const test = vi.spyOn(cmp, 'fireTest').mockImplementation(() => undefined);
+    const remove = vi.spyOn(cmp, 'deleteWorker').mockImplementation(() => undefined);
+    const menu = menuOf(fixture, workerUnmanaged);
+
+    itemOf(menu, 'Edit')?.command?.();
+    itemOf(menu, 'Fire Test')?.command?.();
+    itemOf(menu, 'Delete')?.command?.();
+
+    expect(rename).toHaveBeenCalledWith(workerUnmanaged);
+    expect(test).toHaveBeenCalledWith(workerUnmanaged);
+    expect(remove).toHaveBeenCalledWith(workerUnmanaged);
+    expect(itemOf(menu, 'Delete')?.danger).toBe(true);
+    expect(findByText(fixture.nativeElement, 'fire test')).toBeNull();
   });
 });
 
@@ -202,11 +220,11 @@ describe('WorkersComponent - team workers', () => {
     const badge = (Array.from(fixture.nativeElement.querySelectorAll('gr-badge')) as HTMLElement[])
       .find((el) => (el.textContent ?? '').trim() === 'Team platform');
     expect(badge, 'Team badge').toBeTruthy();
-    const link = (fixture.nativeElement as HTMLElement).querySelector('a[href="/team/platform/workers"]');
-    expect(link?.textContent).toContain('Manage on team');
-    expect(findByText(fixture.nativeElement, 'edit')).toBeNull();
-    expect(findByText(fixture.nativeElement, 'deactivate')).toBeNull();
-    expect(findByText(fixture.nativeElement, 'delete')).toBeNull();
+    const menu = menuOf(fixture, workerOfTeam);
+    expect(itemOf(menu, 'Manage on team')?.routerLink).toEqual(['/team', 'platform', 'workers']);
+    expect(itemOf(menu, 'Edit')).toBeUndefined();
+    expect(itemOf(menu, 'Deactivate')).toBeUndefined();
+    expect(itemOf(menu, 'Delete')).toBeUndefined();
   });
 
   it('offers no team link to a viewer outside the team, whose team page would not load', async () => {
@@ -218,7 +236,7 @@ describe('WorkersComponent - team workers', () => {
     });
     await settled(fixture);
 
-    expect((fixture.nativeElement as HTMLElement).querySelector('a[href="/team/platform/workers"]')).toBeNull();
+    expect(itemOf(menuOf(fixture, workerOfTeam), 'Manage on team')).toBeUndefined();
   });
 
   it('keeps Deactivate usable on a managed worker in a managed project, since state restores it on restart', async () => {
@@ -228,10 +246,9 @@ describe('WorkersComponent - team workers', () => {
       caches: [{ id: 'c', name: 'c' }],
     });
     await settled(fixture);
-    const deactivate = findByText(fixture.nativeElement, 'deactivate') as HTMLButtonElement | null;
-    const edit = findByText(fixture.nativeElement, 'edit') as HTMLButtonElement | null;
-    expect(deactivate!.disabled).toBe(false);
-    expect(edit!.disabled).toBe(true);
+    const menu = menuOf(fixture, workerManaged);
+    expect(itemOf(menu, 'Deactivate')?.disabled).toBe(false);
+    expect(itemOf(menu, 'Edit')?.disabled).toBe(true);
   });
 
   it('fireTest calls the service and surfaces the result via a toast', async () => {
@@ -253,6 +270,28 @@ describe('WorkersComponent - team workers', () => {
     expect(addSpy).toHaveBeenCalledWith(
       expect.objectContaining({ severity: 'success', detail: 'reachable' }),
     );
+  });
+});
+
+describe('WorkersComponent - system features', () => {
+  it('lists the architectures and keeps the system features behind an info button', async () => {
+    const live = {
+      capabilities: { fetch: true, eval: true, build: true, federate: false },
+      architectures: ['x86_64-linux'], system_features: ['kvm', 'nixos-test'], max_concurrent_builds: 1, assigned_job_count: 0, draining: false,
+    } as unknown as Worker['live'];
+    const fixture = setup({
+      access: { managed: false, canEdit: true, canTrigger: true },
+      workers: [{ ...workerUnmanaged, live }],
+      caches: [{ id: 'c', name: 'c' }],
+    });
+    await settled(fixture);
+    const root = fixture.nativeElement as HTMLElement;
+    expect(root.querySelector('.worker-archs')?.textContent).toContain('x86_64-linux');
+    expect(root.textContent).not.toContain('nixos-test');
+
+    (root.querySelector('[aria-label="System features"]') as HTMLButtonElement).click();
+    fixture.detectChanges();
+    expect(document.body.textContent).toContain('kvm, nixos-test');
   });
 });
 
