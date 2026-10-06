@@ -48,3 +48,9 @@
     background: var(--gr-graph-running);
   }
 }
+
+@media (max-width: $breakpoint-sm) {
+  .history {
+    justify-content: flex-end;
+  }
+}
