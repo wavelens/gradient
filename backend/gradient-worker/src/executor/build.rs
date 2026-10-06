@@ -11,28 +11,29 @@ use gradient_sources::get_hash_from_path;
 use gradient_util::hydra::parse_hydra_product_line;
 use gradient_util::store_path::{nix_store_path, strip_store_prefix};
 use gradient_wire::messages::{BuildOutput, BuildProduct, BuildSpec};
-use harmonia_protocol::daemon_wire::types2::{BuildMode, BuildResult, BuildResultInner};
+use harmonia_protocol::daemon_wire::types2::{
+    BuildMode, BuildResult, BuildResultInner, KeyedBuildResult,
+};
 use harmonia_protocol::log::{ActivityType, Field, LogMessage, ResultType, Verbosity};
 use harmonia_protocol::types::ClientOptions;
-use harmonia_store_derivation::derivation::BasicDerivation;
+use harmonia_store_derivation::derived_path::{DerivedPath, OutputSpec, SingleDerivedPath};
 use harmonia_store_path::StorePath;
 use harmonia_store_remote::DaemonStore as _;
 use std::collections::BTreeMap;
 use std::pin::{Pin, pin};
+use std::sync::Arc;
 use tracing::{debug, info, warn};
 
 use crate::nix::store::LocalNixStore;
 use crate::proto::job::JobUpdater;
 
 use super::build_metrics::{BuildHost, RUNNING_BUILDS, ResourceUsage, build_metrics};
-use super::derivation::get_basic_derivation;
 pub use super::failure::BuildError;
 use super::failure::classify_build_error;
 
 pub(super) struct ParsedDerivation {
     drv: gradient_derivation::Derivation,
-    harmonia_path: StorePath,
-    basic_drv: BasicDerivation,
+    request: [DerivedPath; 1],
 }
 
 impl ParsedDerivation {
@@ -46,15 +47,15 @@ impl ParsedDerivation {
 
         let drv = parse_drv(&drv_bytes).with_context(|| format!("parse .drv file: {}", path))?;
 
-        let harmonia_path = StorePath::from_base_path(strip_store_prefix(&path))
+        let drv_store_path = StorePath::from_base_path(strip_store_prefix(&path))
             .map_err(|e| anyhow::anyhow!("invalid store path {}: {}", path, e))?;
-
-        let basic_drv = get_basic_derivation(&path, &drv).await?;
 
         Ok(Self {
             drv,
-            harmonia_path,
-            basic_drv,
+            request: [DerivedPath::Built {
+                drv_path: Arc::new(SingleDerivedPath::Opaque(drv_store_path)),
+                outputs: OutputSpec::All,
+            }],
         })
     }
 
@@ -83,7 +84,7 @@ impl ParsedDerivation {
             input_drvs = self.drv.input_derivations.len(),
             input_srcs = self.drv.input_sources.len(),
             env_keys = ?self.drv.environment.keys().collect::<Vec<_>>(),
-            "sending BasicDerivation to nix-daemon"
+            "asking nix-daemon to build derivation"
         );
 
         let mut opts = ClientOptions::default();
@@ -107,17 +108,16 @@ impl ParsedDerivation {
         // in-flight build only once its socket closes.
         let silent = max_silent_secs.map(std::time::Duration::from_secs);
         enum Drained {
-            Completed(BuildResult),
+            Completed(Vec<KeyedBuildResult>),
             Aborted,
             Timeout(anyhow::Error),
         }
-        let harmonia_path = &self.harmonia_path;
-        let basic_drv = &self.basic_drv;
+        let request = &self.request;
         let updater_ref = &mut *updater;
         let abort_ref = &mut *abort;
         let drained = guard
             .execute(|client| async move {
-                let logs = client.build_derivation(harmonia_path, basic_drv, BuildMode::Normal);
+                let logs = client.build_paths_with_results(request, BuildMode::Normal);
                 let mut logs = pin!(logs);
                 match drain_build_logs_with_timeout(
                     logs.as_mut(),
@@ -140,14 +140,14 @@ impl ParsedDerivation {
             .await
             .map_err(|e| {
                 BuildError::transient(anyhow::anyhow!(
-                    "build_derivation failed for {}: {}",
+                    "build_paths_with_results failed for {}: {}",
                     drv_path,
                     e
                 ))
             })?;
 
         match drained {
-            Drained::Completed(result) => Ok(result),
+            Drained::Completed(results) => single_result(results, drv_path),
             Drained::Aborted => {
                 guard.mark_broken();
                 Err(BuildError::aborted(drv_path))
@@ -221,6 +221,21 @@ impl ParsedDerivation {
             }
         }
     }
+}
+
+fn single_result(
+    results: Vec<KeyedBuildResult>,
+    drv_path: &str,
+) -> Result<BuildResult, BuildError> {
+    results
+        .into_iter()
+        .next()
+        .map(|keyed| keyed.result)
+        .ok_or_else(|| {
+            BuildError::transient(anyhow::anyhow!(
+                "nix-daemon returned no build result for {drv_path}"
+            ))
+        })
 }
 
 /// The daemon's `built_outputs` is authoritative for CA and deferred outputs. An empty map is
