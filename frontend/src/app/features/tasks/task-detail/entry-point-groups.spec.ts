@@ -22,7 +22,7 @@ describe('groupEntryPoints', () => {
   it('keeps a second segment that is not the entry point architecture', () => {
     expect(shape([ep('legacyPackages.x86_64-linux.python3Packages.requests'), ep('lib.aarch64-linux.hello')]))
       .toEqual([
-        ['LegacyPackages', ['python3Packages.requests']],
+        ['Legacy Packages', ['python3Packages.requests']],
         ['Lib', ['aarch64-linux.hello']],
       ]);
   });
@@ -39,7 +39,7 @@ describe('groupEntryPoints', () => {
   /// last segment labelled every row of a 74-host list `toplevel`.
   it('drops the trailing segments every row of a set shares', () => {
     const host = (n: string) => ep(`nixosConfigurations.${n}.config.system.build.toplevel`);
-    expect(shape([host('broker'), host('caveman')])).toEqual([['NixosConfigurations', ['broker', 'caveman']]]);
+    expect(shape([host('broker'), host('caveman')])).toEqual([['Nixos Configurations', ['broker', 'caveman']]]);
   });
 
   it('never strips a label down to nothing', () => {
