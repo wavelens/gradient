@@ -161,7 +161,11 @@
     }
   }
 
-  .row:has(.row-actions :is(.gr-button:not(.gr-button--icon-only), gr-select-button)) {
+  .row:has(.row-meta:empty) {
+    grid-template-areas: 'icon name actions chevron';
+  }
+
+  .row:not(:has(.row-meta:empty)):has(.row-actions :is(.gr-button:not(.gr-button--icon-only), gr-select-button)) {
     grid-template-areas:
       'icon name name chevron'
       'icon meta meta chevron'
