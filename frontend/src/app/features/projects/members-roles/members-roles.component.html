@@ -217,21 +217,7 @@
     </gr-form-field>
     <gr-form-field label="Permissions">
       <gr-label-help slot="label" doc="ui/members-and-roles/#project-roles" title="Project permissions" />
-      <div class="permissions-list">
-        @for (perm of availablePermissions(); track perm.id) {
-          <div class="permission-row">
-            <gr-checkbox
-              [inputId]="'perm-' + perm.id"
-              [label]="permissionLabel(perm.id)"
-              [(ngModel)]="roleForm.permissions[perm.id]"
-              [binary]="true"
-            />
-            <gr-badge [severity]="perm.mutating ? 'warning' : 'success'">
-              {{ perm.mutating ? 'mutating' : 'read-only' }}
-            </gr-badge>
-          </div>
-        }
-      </div>
+      <app-permission-picker [permissions]="availablePermissions()" [(selection)]="roleForm.permissions" />
     </gr-form-field>
   </div>
   <div grDialogFooter>

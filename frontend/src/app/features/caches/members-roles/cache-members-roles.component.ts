@@ -15,7 +15,6 @@ import {
   AutoCompleteComponent,
   BadgeComponent,
   ButtonComponent,
-  CheckboxComponent,
   DialogComponent,
   EmptyStateComponent,
   FormFieldComponent,
@@ -28,7 +27,7 @@ import {
   SelectComponent,
   SettingsSectionComponent,
 } from '@gradient/ui/ui';
-import { LabelHelpComponent } from '@shared/ui';
+import { LabelHelpComponent, PermissionPickerComponent } from '@shared/ui';
 import { TeamGrantsComponent } from '@features/teams/team-grants/team-grants.component';
 import { WritableDirective, ManagedDisableDirective } from '@shared/access';
 import { injectCacheAccess } from '@core/resolvers/inject-access';
@@ -44,6 +43,7 @@ interface RoleFormState {
   selector: 'app-cache-members-roles',
   standalone: true,
   imports: [
+    PermissionPickerComponent,
     TeamGrantsComponent,
     LabelHelpComponent,
     CommonModule,
@@ -53,7 +53,6 @@ interface RoleFormState {
     ButtonComponent,
     InputDirective,
     AutoCompleteComponent,
-    CheckboxComponent,
     LoadingSpinnerComponent,
     WritableDirective,
     ManagedDisableDirective,
@@ -69,7 +68,6 @@ interface RoleFormState {
   ],
   templateUrl: './cache-members-roles.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
-  styleUrl: './cache-members-roles.component.scss',
 })
 export class CacheMembersRolesComponent implements OnInit {
   private route = inject(ActivatedRoute);
@@ -307,7 +305,6 @@ export class CacheMembersRolesComponent implements OnInit {
     });
   }
 
-  readonly permissionLabel = permissionLabel;
 
   rolePermissionLabel(role: CacheRole): string {
     if (role.permissions.length === 0) return 'No permissions';
