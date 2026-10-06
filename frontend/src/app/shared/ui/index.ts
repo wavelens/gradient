@@ -17,3 +17,4 @@ export * from './segmented-bar/byte-segments';
 export * from './segmented-bar/segmented-bar.component';
 export * from './star-button/star-button.component';
 export * from './status-icon/status-icon.component';
+export * from './permission-picker/permission-picker.component';

@@ -16,7 +16,6 @@ import { PermissionDescriptor } from '@core/models/permission.model';
 import {
   BadgeComponent,
   ButtonComponent,
-  CheckboxComponent,
   CopyFieldComponent,
   DialogComponent,
   DividerComponent,
@@ -35,6 +34,7 @@ import {
 import { ManagedDisableDirective } from '@shared/access';
 import { AccessState } from '@core/models';
 import { permissionLabel } from '@shared/text';
+import { PermissionPickerComponent } from '@shared/ui';
 
 type ScopeType = 'none' | 'project' | 'cache';
 
@@ -47,13 +47,13 @@ interface SelectOption {
   selector: 'app-api-keys',
   standalone: true,
   imports: [
+    PermissionPickerComponent,
     CommonModule,
     RouterModule,
     FormsModule,
     DialogComponent,
     ButtonComponent,
     InputDirective,
-    CheckboxComponent,
     DividerComponent,
     SelectComponent,
     SelectButtonComponent,
@@ -298,7 +298,6 @@ export class ApiKeysComponent implements OnInit {
     });
   }
 
-  readonly permissionLabel = permissionLabel;
 
   permissionTooltip(key: ApiKey): string {
     if (key.permissions.length === 0) return 'No permissions';

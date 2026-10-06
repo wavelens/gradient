@@ -128,6 +128,10 @@
 <gr-allowed-capabilities [value]="{ enable_fetch: false, enable_eval: true, enable_build: true }" />
 <gr-allowed-capabilities editable [(value)]="allowed" />
 
+<h2>Permission picker</h2>
+<p>Role and API key dialogs. Each permission says whether it can change anything.</p>
+<app-permission-picker [permissions]="demoPermissions" [(selection)]="demoSelection" />
+
 <h2>Status icon</h2>
 <p>One SVG per icon that morphs between phases. The first render is static; reduced motion switches instantly.</p>
 <gr-status-icon [phase]="statusPhase()" size="sm" />

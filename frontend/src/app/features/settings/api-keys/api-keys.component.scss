@@ -30,21 +30,3 @@
 
 }
 
-.permission-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: $spacing-xs $spacing-md;
-}
-
-.permission-row {
-  display: flex;
-  align-items: center;
-  gap: $spacing-sm;
-  padding: 2px 0;
-
-  label {
-    font-family: $font-family-mono;
-    font-size: $font-size-sm;
-    cursor: pointer;
-  }
-}

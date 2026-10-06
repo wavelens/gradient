@@ -4,7 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-@use '@gradient/ui/styles/variables' as *;// One permission per line: the names are long enough that two columns collide.
+@use '@gradient/ui/styles/variables' as *;
+
 .permissions-list {
   display: flex;
   flex-direction: column;
