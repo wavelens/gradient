@@ -7,7 +7,7 @@
 import { Component, OnInit, inject, signal, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterModule } from '@angular/router';
-import { LoadingSpinnerComponent, TableComponent } from '@gradient/ui/ui';
+import { CardGridComponent, LoadingSpinnerComponent, TableComponent, StatCardComponent } from '@gradient/ui/ui';
 import { BoardService, BoardHealth } from '@core/services/board.service';
 import { AdminService, AdminTask } from '@core/services/admin.service';
 import { ConfigService } from '@core/services/config.service';
@@ -16,19 +16,19 @@ import { formatBytes, formatDuration } from '@shared/text';
 @Component({
   selector: 'app-board-health',
   standalone: true,
-  imports: [CommonModule, RouterModule, TableComponent, LoadingSpinnerComponent],
+  imports: [CommonModule, CardGridComponent, StatCardComponent, RouterModule, TableComponent, LoadingSpinnerComponent],
   template: `
     @if (health(); as h) {
       @if (h.draining) {
         <div class="drain-banner">Instance is draining: scheduling is paused and in-flight evaluations are parked. Clears on restart.</div>
       }
-      <div class="kpis">
-        <div class="kpi"><span class="label">Version</span><span class="value sm">{{ h.version }}</span></div>
-        <div class="kpi"><span class="label">Uptime</span><span class="value sm">{{ seconds(h.uptime_seconds) }}</span></div>
-        <div class="kpi"><span class="label">Workers</span><span class="value">{{ h.workers_connected }}</span></div>
-        <div class="kpi"><span class="label">Jobs pending / active</span><span class="value sm">{{ h.jobs_pending }} / {{ h.jobs_active }}</span></div>
-        <div class="kpi"><span class="label">Sessions</span><span class="value">{{ h.proto_sessions }}</span></div>
-      </div>
+      <gr-card-grid class="kpis" min="180px">
+        <gr-stat-card compact label="Version" [value]="h.version" />
+        <gr-stat-card compact label="Uptime" [value]="seconds(h.uptime_seconds)" />
+        <gr-stat-card compact label="Workers" [value]="h.workers_connected" />
+        <gr-stat-card compact label="Jobs pending / active" [value]="h.jobs_pending + ' / ' + h.jobs_active" />
+        <gr-stat-card compact label="Sessions" [value]="h.proto_sessions" />
+      </gr-card-grid>
 
       <h2>Process</h2>
       <div class="grid">
