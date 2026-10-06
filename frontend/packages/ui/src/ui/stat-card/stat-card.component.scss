@@ -6,7 +6,12 @@
 
 @use '../../styles/variables' as *;
 
+:host {
+  display: block;
+}
+
 .stat-card {
+  height: 100%;
   background-color: var(--gr-surface-raised);
   border: 1px solid var(--gr-border-subtle);
   border-radius: $border-radius-md;
@@ -51,7 +56,7 @@
   color: var(--gr-text-secondary);
 }
 
-.stat-card.compact {
+@mixin compact {
   padding: $spacing-md;
 
   .stat-content { min-width: 0; }
@@ -62,5 +67,20 @@
     overflow-wrap: normal;
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+}
+
+.stat-card.compact {
+  @include compact;
+}
+
+@media (max-width: $breakpoint-sm) {
+  :host {
+    min-width: 42cqi;
+    scroll-snap-align: start;
+  }
+
+  .stat-card {
+    @include compact;
   }
 }
