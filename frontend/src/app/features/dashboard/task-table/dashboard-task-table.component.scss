@@ -77,10 +77,3 @@ code {
     display: none;
   }
 }
-
-@media (max-width: $breakpoint-sm) {
-  .name {
-    white-space: normal;
-    overflow-wrap: anywhere;
-  }
-}

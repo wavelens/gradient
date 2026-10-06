@@ -113,3 +113,42 @@
   gap: $spacing-sm;
   flex-shrink: 0;
 }
+
+@media (max-width: $breakpoint-sm) {
+  .row {
+    display: grid;
+    grid-template-areas:
+      'icon name name chevron'
+      'icon meta actions chevron';
+    grid-template-columns: auto minmax(0, 1fr) auto auto;
+    gap: $spacing-xs $spacing-md;
+  }
+
+  .row-info,
+  .row-text {
+    display: contents;
+  }
+
+  .row-name,
+  .row-meta {
+    position: relative;
+    min-width: 0;
+  }
+
+  .row-name {
+    grid-area: name;
+  }
+
+  .row-meta {
+    grid-area: meta;
+    margin-top: 0;
+  }
+
+  .row-actions {
+    grid-area: actions;
+  }
+
+  .row-chevron {
+    grid-area: chevron;
+  }
+}
