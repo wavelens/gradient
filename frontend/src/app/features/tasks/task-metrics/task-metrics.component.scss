@@ -28,3 +28,9 @@
 .chart--full {
   grid-column: 1 / -1;
 }
+
+@media (max-width: $breakpoint-sm) {
+  .charts-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

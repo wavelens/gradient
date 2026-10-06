@@ -344,3 +344,28 @@ describe('value axis minimum', () => {
     expect(axisMin(x, 0, 0)).toBe(0);
   });
 });
+
+describe('compact charts', () => {
+  const dual = {
+    type: 'line' as const,
+    series: [{ name: 'bytes', data: [1, 2] }, { name: 'packages', data: [3, 4], axis: 'right' as const }],
+    categories: ['x', 'y'],
+    yAxisTitle: 'Bytes',
+    secondary: { title: 'Packages' },
+    compact: true,
+  };
+
+  it('leaves the value axes to the tooltip', () => {
+    const axes = buildMetricChartOption(dual, THEME)['yAxis'] as any[];
+    for (const axis of axes) {
+      expect(axis.axisLabel.show).toBe(false);
+      expect(axis.name).toBeUndefined();
+    }
+  });
+
+  it('moves the legend below the plot', () => {
+    const legend = buildMetricChartOption(dual, THEME)['legend'] as any;
+    expect(legend.bottom).toBe(0);
+    expect(legend.top).toBeUndefined();
+  });
+});
