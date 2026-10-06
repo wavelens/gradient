@@ -9,24 +9,24 @@ import { CommonModule } from '@angular/common';
 import { Subscription } from 'rxjs';
 import { BoardService, MetricPoint } from '@core/services/board.service';
 import { BoardLiveService } from '@core/services/board-live.service';
-import { LoadingSpinnerComponent } from '@gradient/ui/ui';
+import { CardGridComponent, LoadingSpinnerComponent, StatCardComponent } from '@gradient/ui/ui';
 import { MetricChartComponent } from '@shared/ui';
 import { firstLoad } from '../first-load';
 
 @Component({
   selector: 'app-board-overview',
   standalone: true,
-  imports: [CommonModule, MetricChartComponent, LoadingSpinnerComponent],
+  imports: [CommonModule, CardGridComponent, StatCardComponent, MetricChartComponent, LoadingSpinnerComponent],
   template: `
     @if (first.loading()) {
       <gr-loading-spinner message="Loading overview..." />
     } @else {
-      <div class="kpis">
-        <div class="kpi"><span class="label">Connected workers</span><span class="value">{{ workers() }}</span></div>
-        <div class="kpi"><span class="label">Jobs pending</span><span class="value">{{ pending() }}</span></div>
-        <div class="kpi"><span class="label">Jobs active</span><span class="value">{{ active() }}</span></div>
-        <div class="kpi"><span class="label">Assigned (live)</span><span class="value">{{ assignedCount() }}</span></div>
-      </div>
+      <gr-card-grid class="kpis" min="180px">
+        <gr-stat-card compact label="Connected workers" [value]="workers()" />
+        <gr-stat-card compact label="Jobs pending" [value]="pending()" />
+        <gr-stat-card compact label="Jobs active" [value]="active()" />
+        <gr-stat-card compact label="Assigned (live)" [value]="assignedCount()" />
+      </gr-card-grid>
 
       <gr-metric-chart
         title="Builds completed per hour (24h)"
