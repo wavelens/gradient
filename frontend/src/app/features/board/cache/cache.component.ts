@@ -15,7 +15,7 @@ import {
   BoardUpstreamCacheStats,
 } from '@core/services/board.service';
 import { LiveService } from '@core/services/live.service';
-import { LoadingSpinnerComponent } from '@gradient/ui/ui';
+import { CardGridComponent, LoadingSpinnerComponent, StatCardComponent } from '@gradient/ui/ui';
 import { LabelHelpComponent, MetricChartComponent } from '@shared/ui';
 import { formatBytes, formatCount, formatDuration, formatPercent } from '@shared/text';
 import { firstLoad } from '../first-load';
@@ -23,18 +23,18 @@ import { firstLoad } from '../first-load';
 @Component({
   selector: 'app-board-cache',
   standalone: true,
-  imports: [CommonModule, MetricChartComponent, LabelHelpComponent, LoadingSpinnerComponent],
+  imports: [CommonModule, CardGridComponent, StatCardComponent, MetricChartComponent, LabelHelpComponent, LoadingSpinnerComponent],
   template: `
     @if (first.loading()) {
       <gr-loading-spinner message="Loading cache stats..." />
     } @else {
-      <div class="kpis">
-        <div class="kpi"><span class="label">Compressed size</span><span class="value">{{ bytes(stats()?.totals?.bytes ?? 0) }}</span></div>
-        <div class="kpi"><span class="label">NAR size</span><span class="value">{{ bytes(stats()?.totals?.nar_bytes ?? 0) }}</span></div>
-        <div class="kpi"><span class="label">Packages</span><span class="value">{{ count(stats()?.totals?.packages ?? 0) }}</span></div>
-        <div class="kpi"><span class="label">Served total</span><span class="value">{{ bytes(stats()?.totals?.bytes_sent_total ?? 0) }}</span></div>
-        <div class="kpi"><span class="label">Requests total</span><span class="value">{{ count(stats()?.totals?.requests_total ?? 0) }}</span></div>
-      </div>
+      <gr-card-grid class="kpis" min="160px">
+        <gr-stat-card compact label="Compressed size" [value]="bytes(stats()?.totals?.bytes ?? 0)" />
+        <gr-stat-card compact label="NAR size" [value]="bytes(stats()?.totals?.nar_bytes ?? 0)" />
+        <gr-stat-card compact label="Packages" [value]="count(stats()?.totals?.packages ?? 0)" />
+        <gr-stat-card compact label="Served total" [value]="bytes(stats()?.totals?.bytes_sent_total ?? 0)" />
+        <gr-stat-card compact label="Requests total" [value]="count(stats()?.totals?.requests_total ?? 0)" />
+      </gr-card-grid>
 
       <gr-metric-chart
         title="Cache traffic (served per hour)"
