@@ -23,8 +23,9 @@ function attrSegments(attr: string): string[] {
   return segments.length ? segments : [attr];
 }
 
-function capitalize(word: string): string {
-  return word.charAt(0).toUpperCase() + word.slice(1);
+function headingOf(set: string): string {
+  const words = set.replace(/([a-z0-9])([A-Z])/g, '$1 $2');
+  return words.charAt(0).toUpperCase() + words.slice(1);
 }
 
 function pathWithinSet(entry: EntryPointSummary): { set: string; path: string[] } {
@@ -50,7 +51,7 @@ export function groupEntryPoints(entryPoints: EntryPointSummary[]): EntryPointGr
   return [...sets].map(([set, members]) => {
     const tail = members.length > 1 ? sharedTailLength(members.map((m) => m.path)) : 0;
     return {
-      title: capitalize(set),
+      title: headingOf(set),
       rows: members.map(({ entry, path }) => ({ entry, label: path.slice(0, path.length - tail).join('.') })),
     };
   });
