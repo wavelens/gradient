@@ -2767,6 +2767,16 @@ paths:
           schema:
             type: integer
             minimum: 1
+        - name: before
+          in: query
+          required: false
+          description: >-
+            Evaluation of this task to page back from. Only older evaluations
+            come back. Pass the oldest id of a page to load the next page. Ids of
+            other tasks give `404`.
+          schema:
+            type: string
+            format: uuid
         - name: commit
           in: query
           required: false

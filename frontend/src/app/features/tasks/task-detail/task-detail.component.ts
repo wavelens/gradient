@@ -8,7 +8,7 @@ import { Component, OnInit, OnDestroy, ElementRef, HostListener, computed, injec
 import { CommonModule, DOCUMENT } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
-import { interval, Observable, Subscription } from 'rxjs';
+import { finalize, interval, Observable, Subscription } from 'rxjs';
 import { auditTime, filter, share } from 'rxjs/operators';
 import { LiveEvent, LiveService } from '@core/services/live.service';
 import { AuthService } from '@core/services/auth.service';
@@ -108,7 +108,15 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
   private lastEntryPointsFetch = 0;
   private readonly ENTRY_POINTS_LIVE_INTERVAL_MS = 4000;
 
-  evaluations = computed(() => this.task()?.last_evaluations ?? []);
+  private readonly OLDER_PAGE = 10;
+  private olderEvaluations = signal<EvaluationSummary[]>([]);
+  private loadingOlder = false;
+  hasOlderEvaluations = signal(true);
+  evaluations = computed(() => {
+    const newest = this.task()?.last_evaluations ?? [];
+    const shown = new Set(newest.map(e => e.id));
+    return [...newest, ...this.olderEvaluations().filter(e => !shown.has(e.id))];
+  });
   selected = computed<EvaluationSummary | null>(() => {
     const id = this.selectedId();
     const list = this.evaluations();
@@ -166,6 +174,21 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
     if (!id || id === this.selectedId()) return;
     if (this.task()) this.showEvaluation(id);
     else this.selectedId.set(id);
+  }
+
+  loadOlderEvaluations(): void {
+    const oldest = this.evaluations().at(-1);
+    if (this.loadingOlder || !this.hasOlderEvaluations() || !oldest) return;
+    this.loadingOlder = true;
+    this.tasksService.getEvaluations(this.projectName, this.taskName, this.OLDER_PAGE, oldest.id)
+      .pipe(finalize(() => (this.loadingOlder = false)))
+      .subscribe({
+        next: page => {
+          this.olderEvaluations.update(loaded => [...loaded, ...page]);
+          if (page.length < this.OLDER_PAGE) this.hasOlderEvaluations.set(false);
+        },
+        error: () => this.hasOlderEvaluations.set(false),
+      });
   }
 
   loadTaskData(live = false): void {

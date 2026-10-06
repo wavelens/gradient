@@ -79,6 +79,9 @@
             <div class="l2"><span>{{ triggerLabel(e) }}</span><span>{{ evalDuration(e) }}</span></div>
           </div>
         }
+        @if (hasOlderEvaluations()) {
+          <div class="strip-more" aria-hidden="true" (grInView)="loadOlderEvaluations()" [grInViewKey]="evaluations().length"></div>
+        }
       </div>
     </div>
 

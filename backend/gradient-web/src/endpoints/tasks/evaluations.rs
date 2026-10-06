@@ -33,7 +33,8 @@ use gradient_types::input::{hex_to_vec, vec_to_hex};
 use gradient_types::*;
 use sea_orm::sea_query::Query as SeaQuery;
 use sea_orm::{
-    ColumnTrait, EntityTrait, Iterable, PaginatorTrait, QueryFilter, QueryOrder, QuerySelect,
+    ColumnTrait, Condition, EntityTrait, Iterable, PaginatorTrait, QueryFilter, QueryOrder,
+    QuerySelect,
 };
 use serde::Deserialize;
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -373,6 +374,15 @@ pub async fn get_task_evaluations(
 
     let mut query = EEvaluation::find().filter(CEvaluation::Task.eq(task.id));
 
+    if let Some(before) = params.before {
+        let cursor = EEvaluation::find_by_id(before)
+            .filter(CEvaluation::Task.eq(task.id))
+            .one(&state.web_db)
+            .await?
+            .or_not_found("Evaluation")?;
+        query = query.filter(older_than(&cursor));
+    }
+
     if let Some(commit) = params.commit.as_deref() {
         let hash = hex_to_vec(commit)
             .ok()
@@ -398,7 +408,9 @@ pub async fn get_task_evaluations(
         query = query.filter(CEvaluation::Status.is_in(parse_status_filter(status)?));
     }
 
-    let query = query.order_by_desc(CEvaluation::CreatedAt);
+    let query = query
+        .order_by_desc(CEvaluation::CreatedAt)
+        .order_by_desc(CEvaluation::Id);
 
     let evaluations = match attr {
         Some(attr) => query
@@ -501,12 +513,23 @@ pub async fn get_task_details(
 #[derive(Deserialize, Debug, Default)]
 pub struct EvaluationsQuery {
     pub limit: Option<u64>,
+    pub before: Option<EvaluationId>,
     pub commit: Option<String>,
     pub status: Option<String>,
     pub attr: Option<String>,
 }
 
 const COMMIT_HASH_BYTES: usize = 20;
+
+fn older_than(cursor: &MEvaluation) -> Condition {
+    Condition::any()
+        .add(CEvaluation::CreatedAt.lt(cursor.created_at))
+        .add(
+            Condition::all()
+                .add(CEvaluation::CreatedAt.eq(cursor.created_at))
+                .add(CEvaluation::Id.lt(cursor.id)),
+        )
+}
 
 const ATTR_SCAN_LIMIT: u64 = 1000;
 

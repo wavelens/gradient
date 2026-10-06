@@ -9,7 +9,7 @@ use gradient_entity::{commit, evaluation, ids::*, project, task};
 use gradient_test_support::fixtures::{commit_id, project_id, task_id, test_date, user, user_id};
 use gradient_test_support::web::{live_session, make_test_server, make_token};
 use gradient_types::{ConcurrencyPolicy, SessionId};
-use sea_orm::{DatabaseBackend, MockDatabase};
+use sea_orm::{DatabaseBackend, DatabaseConnection, MockDatabase, Statement};
 use serde_json::Value;
 
 const COMMIT_HEX: &str = "1111111111111111111111111111111111111111";
@@ -221,4 +221,61 @@ async fn attr_filter_matches_queued_evaluation() {
     assert_eq!(rows[0]["status"], "Queued");
     assert_eq!(rows[0]["wildcard"], "packages.*.*");
     assert_eq!(rows[0]["commit"], COMMIT_HEX);
+}
+
+fn statements(db: DatabaseConnection) -> Vec<Statement> {
+    db.into_transaction_log()
+        .iter()
+        .flat_map(|t| t.statements().to_vec())
+        .collect()
+}
+
+#[tokio::test]
+async fn before_an_evaluation_of_another_task_is_not_found() {
+    let session_id = SessionId::now_v7();
+    let db = base_db(session_id).append_query_results([Vec::<evaluation::Model>::new()]);
+    let server = make_test_server(db.into_connection());
+
+    let res = server
+        .get(&format!("{URL}?before={}", EvaluationId::now_v7()))
+        .add_header(
+            "Authorization",
+            format!("Bearer {}", make_token(session_id)),
+        )
+        .await;
+
+    res.assert_status_not_found();
+}
+
+#[tokio::test]
+async fn before_pages_to_evaluations_older_than_the_cursor() {
+    let session_id = SessionId::now_v7();
+    let cursor = eval_row(EvaluationId::now_v7(), "*", EvaluationStatus::Queued);
+    let db = base_db(session_id)
+        .append_query_results([vec![cursor.clone()]])
+        .append_query_results([Vec::<evaluation::Model>::new()])
+        .into_connection();
+    let server = make_test_server(db.clone());
+
+    let res = server
+        .get(&format!("{URL}?before={}&limit=10", cursor.id))
+        .add_header(
+            "Authorization",
+            format!("Bearer {}", make_token(session_id)),
+        )
+        .await;
+
+    res.assert_status_ok();
+    drop(server);
+    let page = statements(db).pop().expect("page query");
+    assert!(
+        page.sql.contains(r#""evaluation"."created_at" < $"#),
+        "page must stop at the cursor: {}",
+        page.sql
+    );
+    assert!(
+        page.sql.contains(r#""evaluation"."id" < $"#),
+        "evaluations created at the same time must page by id: {}",
+        page.sql
+    );
 }

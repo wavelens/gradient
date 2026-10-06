@@ -84,6 +84,7 @@ h1 { font-size: $font-size-xxl; margin: 0; }
 }
 
 .eval-strip { display: flex; gap: $spacing-sm; align-items: flex-start; }
+.strip-more { flex: none; width: 1px; align-self: stretch; }
 
 .eval-card {
   border: 1px solid var(--gr-border-subtle);

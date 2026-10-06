@@ -64,8 +64,11 @@ export class TasksService {
     return this.api.get<PaginatedEntryPoints>(`tasks/${project}/${task}/entry-points${query}`);
   }
 
-  getEvaluations(project: string, task: string, limit?: number): Observable<EvaluationSummary[]> {
-    const q = limit ? `?limit=${limit}` : '';
+  getEvaluations(project: string, task: string, limit?: number, before?: string): Observable<EvaluationSummary[]> {
+    const params: string[] = [];
+    if (limit) params.push(`limit=${limit}`);
+    if (before) params.push(`before=${before}`);
+    const q = params.length ? `?${params.join('&')}` : '';
     return this.api.get<EvaluationSummary[]>(`tasks/${project}/${task}/evaluations${q}`);
   }
 
