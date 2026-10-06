@@ -38,6 +38,6 @@
 @media (max-width: $breakpoint-lg) {
   .layout {
     grid-template-columns: minmax(0, 1fr);
-    gap: $spacing-xxl;
+    gap: $space-block;
   }
 }

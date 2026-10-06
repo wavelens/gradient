@@ -54,3 +54,16 @@ gr-skeleton.heat {
     fill: var(--heat);
   }
 }
+
+@media (max-width: $breakpoint-sm) {
+  .heat-scroll {
+    overflow-x: auto;
+    direction: rtl;
+    scrollbar-width: none;
+  }
+
+  .heat {
+    min-width: var(--heat-width);
+    direction: ltr;
+  }
+}
