@@ -34,6 +34,7 @@ import {
   EvalStatusBadgeComponent,
   type BarSegment,
   MetricChartComponent,
+  PermissionPickerComponent,
   SegmentedBarComponent,
   StarButtonComponent,
   StatusIconComponent,
@@ -57,6 +58,7 @@ function counts(c: Partial<BuildStatusCounts>): BuildStatusCounts {
     CardGridComponent, RowComponent, RowListComponent, SkeletonComponent,
     LogoComponent, StarButtonComponent, StatusIconComponent, SegmentedBarComponent,
     AllowedCapabilitiesComponent,
+    PermissionPickerComponent,
   ],
   // The demo star toggles locally instead of writing the viewer's real stars.
   providers: [MessageService, { provide: StarsService, useValue: { set: () => of(true) } }],
@@ -65,6 +67,13 @@ function counts(c: Partial<BuildStatusCounts>): BuildStatusCounts {
   styleUrls: ['./demo.scss', './elements.component.scss'],
 })
 export class ElementsComponent {
+  readonly demoPermissions = [
+    { id: 'viewProject', mutating: false },
+    { id: 'createTask', mutating: true },
+    { id: 'deleteProject', mutating: true },
+  ];
+  demoSelection: Record<string, boolean> = { viewProject: true };
+
   private messages = inject(MessageService);
 
   evalStatuses = [
