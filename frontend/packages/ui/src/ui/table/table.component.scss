@@ -17,6 +17,10 @@
 
 .gr-table__scroll {
   overflow-x: auto;
+
+  @media (max-width: $breakpoint-sm) {
+    scrollbar-width: none;
+  }
 }
 
 table {
