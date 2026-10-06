@@ -225,7 +225,6 @@ pub(super) struct MessageLoopState {
     draining: bool,
     stopping: bool,
     refused: bool,
-    pending_handover: Option<String>,
 }
 
 impl MessageLoopState {
@@ -272,7 +271,6 @@ impl MessageLoopState {
             draining: false,
             stopping: false,
             refused: false,
-            pending_handover: None,
         }
     }
 
@@ -399,34 +397,8 @@ impl MessageLoopState {
             | ServerMessage::NarAbort { .. } => {
                 warn!("a NAR frame reached the control dispatch");
             }
-            ServerMessage::Handover { id } => {
-                self.on_handover(id).await?;
-            }
         }
         Ok(())
-    }
-
-    async fn on_handover(&mut self, id: String) -> Result<()> {
-        if self.executor.handover_id.lock().as_deref() == Some(id.as_str()) {
-            return self.writer.send(ClientMessage::HandoverDone).await;
-        }
-
-        self.jobs.abort_all();
-        self.pending_handover = Some(id);
-        self.finish_handover().await
-    }
-
-    async fn finish_handover(&mut self) -> Result<()> {
-        if !self.jobs.running.is_empty() {
-            return Ok(());
-        }
-        let Some(id) = self.pending_handover.take() else {
-            return Ok(());
-        };
-
-        super::handover::forget_eval_cache(&self.executor, &self.config).await?;
-        *self.executor.handover_id.lock() = Some(id);
-        self.writer.send(ClientMessage::HandoverDone).await
     }
 
     async fn on_job_done(&mut self, job_id: String, result: Result<()>) -> Result<()> {
@@ -484,7 +456,7 @@ impl MessageLoopState {
             }
         }
 
-        self.finish_handover().await
+        Ok(())
     }
 
     async fn report_failure(

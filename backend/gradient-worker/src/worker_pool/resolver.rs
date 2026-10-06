@@ -296,10 +296,6 @@ impl WorkerPoolResolver {
         self.pool.shutdown().await;
     }
 
-    pub async fn release_idle(&self) {
-        self.pool.release_idle().await;
-    }
-
     pub async fn fingerprint(
         &self,
         repository: String,
