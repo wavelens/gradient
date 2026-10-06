@@ -14,7 +14,7 @@ type Callback = (entries: Partial<IntersectionObserverEntry>[]) => void;
 class FakeObserver {
   static live: FakeObserver[] = [];
   observed: Element[] = [];
-  constructor(readonly callback: Callback) { FakeObserver.live.push(this); }
+  constructor(readonly callback: Callback, readonly options?: IntersectionObserverInit) { FakeObserver.live.push(this); }
   observe(el: Element) { this.observed.push(el); }
   disconnect() { FakeObserver.live = FakeObserver.live.filter(o => o !== this); }
 }
@@ -22,11 +22,12 @@ class FakeObserver {
 @Component({
   standalone: true,
   imports: [InViewDirective],
-  template: `<div class="sentinel" (grInView)="seen.set(seen() + 1)" [grInViewKey]="key()"></div>`,
+  template: `<div class="sentinel" (grInView)="seen.set(seen() + 1)" [grInViewKey]="key()" [grInViewMargin]="margin()"></div>`,
 })
 class HostComponent {
   seen = signal(0);
   key = signal(0);
+  margin = signal('200px');
 }
 
 function render() {
@@ -61,5 +62,12 @@ describe('InViewDirective', () => {
     expect(FakeObserver.live).toHaveLength(1);
     FakeObserver.live[0].callback([{ isIntersecting: true }]);
     expect(fixture.componentInstance.seen()).toBe(1);
+  });
+
+  it('fires early by the margin a list asks for', () => {
+    const fixture = render();
+    fixture.componentInstance.margin.set('100%');
+    fixture.detectChanges();
+    expect(FakeObserver.live[0].options?.rootMargin).toBe('100%');
   });
 });

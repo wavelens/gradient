@@ -913,7 +913,8 @@ describe('TaskDetailComponent - #636 eval page', () => {
     fixture.detectChanges();
     const spy = vi.spyOn(tasksService, 'getEntryPoints').mockReturnValue(of({ entry_points: [epSummary('b')], total: 2 }));
     const sentinel = fixture.debugElement.query(By.css('.pkg-more'));
-    expect(fixture.nativeElement.textContent).not.toContain('Show more');
+    expect(sentinel.nativeElement.querySelectorAll('gr-skeleton').length).toBeGreaterThan(0);
+    expect(sentinel.nativeElement.textContent.trim()).toBe('');
     sentinel.triggerEventHandler('grInView');
     expect(spy).toHaveBeenCalledWith('acme', 'demo', 'e1', 25, 1);
     fixture.detectChanges();
