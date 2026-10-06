@@ -30,6 +30,8 @@ export interface MetricChartConfig {
   secondary?: { title?: string; valueFormatter?: (value: number) => string };
   /// Fixed plot margins in px: charts stacked with the same inset share their x positions.
   inset?: { left: number; right: number };
+  /// Narrow charts leave values to the tooltip and put the legend under the plot.
+  compact?: boolean;
 }
 
 /// Resolved from semantic tokens by the component, so charts follow the active theme.
@@ -80,7 +82,7 @@ export function buildMetricChartOption(cfg: MetricChartConfig, theme: ChartTheme
       pageTextStyle: { color: theme.text },
       pageIconColor: theme.text,
       pageIconInactiveColor: theme.muted,
-      top: 0,
+      ...(cfg.compact ? { bottom: 0 } : { top: 0 }),
     },
     tooltip: {
       ...tooltipChrome(theme),
@@ -98,16 +100,17 @@ function cartesianOption(cfg: MetricChartConfig, format: (v: number) => string, 
   const kindOf = (s: MetricSeries): MetricSeriesType => s.type ?? (cfg.type === 'bar' ? 'bar' : 'line');
   const hasBars = cfg.series.some((s) => kindOf(s) === 'bar') || cfg.type === 'bar';
   const inset = cfg.horizontal ? undefined : cfg.inset;
-  const categoryAxis = { type: 'category' as const, data: cfg.categories ?? [], boundaryGap: hasBars || !!inset, axisLabel: axisLabel(theme), axisLine: axisLine(theme) };
+  const edgeLabels = cfg.compact ? { alignMinLabel: 'left' as const, alignMaxLabel: 'right' as const, hideOverlap: true } : {};
+  const categoryAxis = { type: 'category' as const, data: cfg.categories ?? [], boundaryGap: hasBars || !!inset, axisLabel: { ...axisLabel(theme), ...edgeLabels }, axisLine: axisLine(theme) };
   // Two value axes tick independently, so each draws its own grid: one set of
   // lines, and a shared tick count so the right-hand labels land on them.
   const valueAxis = (title: string | undefined, fmt: (v: number) => string, opposite = false, max?: number) => ({
     type: 'value' as const,
-    name: title || undefined,
+    name: (!cfg.compact && title) || undefined,
     min: (extent: { min: number }) => Math.min(0, extent.min),
     max,
     nameTextStyle: { color: theme.text },
-    axisLabel: { ...axisLabel(theme), formatter: (v: number) => fmt(v) },
+    axisLabel: { ...axisLabel(theme), show: !cfg.compact, formatter: (v: number) => fmt(v) },
     axisLine: axisLine(theme),
     splitNumber: AXIS_TICKS,
     splitLine: opposite ? { show: false } : splitLine(theme),
@@ -121,9 +124,7 @@ function cartesianOption(cfg: MetricChartConfig, format: (v: number) => string, 
   const axisOf = (s: MetricSeries) => (s.axis === 'right' ? 1 : 0);
 
   return {
-    grid: inset
-      ? { left: inset.left, right: inset.right, top: 28, bottom: 24, containLabel: false }
-      : { left: 8, right: secondary ? 8 : 12, top: 28, bottom: 4, containLabel: true },
+    grid: gridOf(cfg, inset, !!secondary),
     xAxis: cfg.horizontal ? primary : categoryAxis,
     yAxis: cfg.horizontal ? categoryAxis : values,
     ...(secondary ? { tooltip: dualAxisTooltip(cfg, format, secondaryFormat, theme) } : {}),
@@ -141,6 +142,12 @@ function cartesianOption(cfg: MetricChartConfig, format: (v: number) => string, 
       };
     }),
   };
+}
+
+function gridOf(cfg: MetricChartConfig, inset: MetricChartConfig['inset'], secondary: boolean) {
+  if (cfg.compact) return { left: 4, right: 4, top: 8, bottom: cfg.series.length > 1 ? 32 : 4, containLabel: true };
+  if (inset) return { left: inset.left, right: inset.right, top: 28, bottom: 24, containLabel: false };
+  return { left: 8, right: secondary ? 8 : 12, top: 28, bottom: 4, containLabel: true };
 }
 
 function dualAxisTooltip(

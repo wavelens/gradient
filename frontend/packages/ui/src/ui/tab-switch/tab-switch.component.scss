@@ -49,3 +49,9 @@
     opacity: 0.5;
   }
 }
+
+@media (max-width: $breakpoint-sm) {
+  .tab-switch__tab {
+    padding-inline: $spacing-sm;
+  }
+}
