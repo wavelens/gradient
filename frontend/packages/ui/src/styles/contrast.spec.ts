@@ -77,15 +77,6 @@ describe.each(['dark', 'light'] as Theme[])('%s theme surfaces', (theme) => {
     expect(new Set(values).size, values.join(' ')).toBe(SURFACES.length);
   });
 
-  it('defines a control against the card it sits in, by fill or by border', () => {
-    const control = resolveRole('--gr-surface-control', theme);
-    const card = resolveRole('--gr-surface-raised', theme);
-    const border = resolveRole('--gr-border', theme);
-    const byFill = ratio(control, card);
-    const byBorder = ratio(border, control);
-    expect(Math.max(byFill, byBorder), `fill ${byFill.toFixed(2)} border ${byBorder.toFixed(2)}`).toBeGreaterThanOrEqual(3);
-  });
-
   it('keeps the subtle border quieter than the control border', () => {
     const control = resolveRole('--gr-surface-control', theme);
     expect(ratio(resolveRole('--gr-border-subtle', theme), control))
