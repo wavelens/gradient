@@ -16,7 +16,7 @@
     </gr-card-grid>
   }
 
-  <form class="filter-row" role="search" (ngSubmit)="applyFilters()">
+  <form class="filter-row phone-icon-buttons" role="search" (ngSubmit)="applyFilters()">
     <input
       grInput
       type="search"
@@ -28,7 +28,7 @@
       class="w-full"
     />
     <button grButton type="submit" label="Search" icon="search"></button>
-    <button grButton type="button" label="Reset" severity="secondary" (click)="reset()"></button>
+    <button grButton type="button" label="Reset" icon="restart_alt" severity="secondary" (click)="reset()"></button>
   </form>
 
   @if (loadError()) {
