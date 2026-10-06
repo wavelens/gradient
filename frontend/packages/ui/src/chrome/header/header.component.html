@@ -4,7 +4,11 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<header class="main-header">
+@if (menuOpen()) {
+  <div class="header-backdrop gr-dialog-backdrop" aria-hidden="true" (click)="closeMenu()"></div>
+}
+
+<header class="main-header" [class.menu-open]="menuOpen()">
   <div class="header-content">
     <div class="header-logo">
       <a [routerLink]="brand().href" [attr.aria-label]="brand().label">
@@ -15,15 +19,34 @@
       </a>
     </div>
 
-    <nav class="header-nav">
-      @for (link of nav(); track link.href) {
-        <a [routerLink]="link.href" routerLinkActive="active" [routerLinkActiveOptions]="{ exact: link.exact ?? false }">
-          {{ link.label }}
-        </a>
-      }
-    </nav>
+    <div id="header-menu" class="header-menu">
+      <nav class="header-nav">
+        @for (link of nav(); track link.href) {
+          <a [routerLink]="link.href" routerLinkActive="active" [routerLinkActiveOptions]="{ exact: link.exact ?? false }">
+            {{ link.label }}
+          </a>
+        }
+      </nav>
 
-    <ng-content select="[slot=actions]" />
-    <ng-content select="[slot=lang]" />
+      <div class="header-account">
+        <ng-content select="[slot=actions]" />
+        <ng-content select="[slot=lang]" />
+      </div>
+    </div>
+
+    <div class="header-search">
+      <ng-content select="[slot=search]" />
+    </div>
+
+    <button
+      type="button"
+      class="menu-toggle"
+      aria-controls="header-menu"
+      [attr.aria-expanded]="menuOpen()"
+      [attr.aria-label]="menuOpen() ? 'Close menu' : 'Open menu'"
+      (click)="toggleMenu()"
+    >
+      <gr-icon [name]="menuOpen() ? 'close' : 'menu'" />
+    </button>
   </div>
 </header>

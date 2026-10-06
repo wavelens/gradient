@@ -50,3 +50,21 @@
 .footer-lang {
   margin-left: auto;
 }
+
+@media (max-width: $breakpoint-sm) {
+  .footer-content {
+    flex-wrap: wrap;
+    justify-content: center;
+    row-gap: $spacing-xs;
+  }
+
+  .footer-license,
+  .footer-version,
+  .footer-link {
+    white-space: nowrap;
+  }
+
+  .footer-lang {
+    margin-left: 0;
+  }
+}

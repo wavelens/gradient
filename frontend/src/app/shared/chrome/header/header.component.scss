@@ -6,12 +6,6 @@
 
 @use '@gradient/ui/styles/variables' as *;
 
-.header-actions {
-  display: flex;
-  align-items: center;
-  gap: $spacing-xl;
-}
-
 .search-trigger {
   display: flex;
   align-items: center;
