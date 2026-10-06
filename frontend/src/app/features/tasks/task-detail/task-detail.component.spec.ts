@@ -122,6 +122,7 @@ type SetupOverrides = Partial<{
   restartFailedBuilds: () => ReturnType<TasksService['restartFailedBuilds']>;
   abortEvaluation: (project: string, proj: string, id: string) => ReturnType<TasksService['abortEvaluation']>;
   getEntryPoints: () => ReturnType<TasksService['getEntryPoints']>;
+  getEvaluations: TasksService['getEvaluations'];
   extraEvals: EvaluationSummary[];
   primaryStatus: EvaluationSummary['status'];
   primary: Partial<EvaluationSummary>;
@@ -136,6 +137,7 @@ function makeTasksService(access: AccessState, overrides: SetupOverrides = {}): 
   return {
     getTask: overrides.getTask ?? (() => of(resolvedTask(access, overrides))),
     getEntryPoints: overrides.getEntryPoints ?? (() => of({ entry_points: [], total: 0 })),
+    getEvaluations: overrides.getEvaluations ?? (() => of([])),
     startEvaluation: overrides.startEvaluation ?? (() => of('ok')),
     restartFailedBuilds: overrides.restartFailedBuilds ?? (() => of('ok')),
     abortEvaluation: overrides.abortEvaluation ?? (() => of('ok')),
@@ -183,6 +185,43 @@ function setup(
 const failedBuilds = { builds: { ...zeroCounts(), failed: 2 } };
 const menuLabels = (fixture: ComponentFixture<TaskDetailComponent>) =>
   fixture.componentInstance.panelMenuModel().map(i => i.label);
+
+describe('TaskDetailComponent - older evaluations', () => {
+  const access = { managed: false, canEdit: true, canTrigger: true };
+  const page = (prefix: string, n: number) => Array.from({ length: n }, (_, i) => evalSummary(`${prefix}${i}`, 'Queued'));
+
+  it('appends the page before the oldest card and stops after a short page', () => {
+    const getEvaluations = vi.fn()
+      .mockReturnValueOnce(of(page('a', 10)))
+      .mockReturnValueOnce(of(page('b', 3)));
+    const { fixture } = setup(access, { extraEvals: [evalSummary('e2', 'Queued')], getEvaluations });
+    const cmp = fixture.componentInstance;
+    const more = () => (fixture.nativeElement as HTMLElement).querySelector('.strip-more');
+    expect(more()).not.toBeNull();
+
+    cmp.loadOlderEvaluations();
+    expect(getEvaluations).toHaveBeenLastCalledWith('acme', 'demo', 10, 'e2');
+    cmp.loadOlderEvaluations();
+    expect(getEvaluations).toHaveBeenLastCalledWith('acme', 'demo', 10, 'a9');
+    cmp.loadOlderEvaluations();
+    fixture.detectChanges();
+
+    expect(getEvaluations).toHaveBeenCalledTimes(2);
+    expect(cmp.evaluations().map((e) => e.id)).toEqual(['e1', 'e2', ...page('a', 10).map((e) => e.id), 'b0', 'b1', 'b2']);
+    expect(more()).toBeNull();
+  });
+
+  it('lists an evaluation once when a refresh moves it into the newest page', () => {
+    const getEvaluations = vi.fn(() => of(page('a', 10)));
+    const { fixture } = setup(access, { getEvaluations });
+    const cmp = fixture.componentInstance;
+    cmp.loadOlderEvaluations();
+    cmp.task.set({ ...cmp.task()!, last_evaluations: [evalSummary('new'), evalSummary('e1'), evalSummary('a0', 'Queued')] });
+
+    const ids = cmp.evaluations().map((e) => e.id);
+    expect(ids).toEqual(['new', 'e1', 'a0', ...page('a', 10).slice(1).map((e) => e.id)]);
+  });
+});
 
 describe('TaskDetailComponent - loading', () => {
   const access = { managed: false, canEdit: true, canTrigger: true };
