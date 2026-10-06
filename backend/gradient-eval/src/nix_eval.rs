@@ -87,7 +87,6 @@ impl NixEvaluator {
         let ctx = Arc::new(Context::new().context("nix context init")?);
         ctx.set_setting("show-trace", "true")?;
         ctx.set_setting("builders", "")?;
-        ctx.set_setting("build-hook", "")?;
 
         let store = Arc::new(Store::open(&ctx, None).context("nix store open")?);
         let flake_settings = Arc::new(FlakeSettings::new(&ctx)?);
