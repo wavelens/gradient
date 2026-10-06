@@ -86,6 +86,36 @@
   }
 }
 
+@media (max-width: $breakpoint-sm) {
+  .pkg {
+    display: grid;
+    grid-template-areas:
+      'icon name name name name kebab'
+      'icon arch bar deps time kebab';
+    grid-template-columns: auto auto minmax(0, 1fr) auto auto auto;
+    gap: $spacing-xs $spacing-sm;
+
+    .si { grid-area: icon; }
+    .chip-arch { grid-area: arch; }
+    .pkg-deps { grid-area: deps; }
+    .pkg-time { grid-area: time; }
+    .kebab { grid-area: kebab; align-self: stretch; }
+
+    .pkg-name {
+      grid-area: name;
+      width: auto;
+      white-space: normal;
+      overflow-wrap: anywhere;
+    }
+
+    .pkg-bar {
+      grid-area: bar;
+      width: auto;
+      align-self: center;
+    }
+  }
+}
+
 @keyframes pkg-in {
   from { opacity: 0; transform: translateY(6px); }
 }
