@@ -90,13 +90,13 @@
   .pkg {
     display: grid;
     grid-template-areas:
-      'icon name name name name kebab'
-      'icon arch bar deps time kebab';
-    grid-template-columns: auto auto minmax(0, 1fr) auto auto auto;
+      'icon name arch arch kebab'
+      'icon bar deps time kebab';
+    grid-template-columns: auto minmax(0, 1fr) auto auto auto;
     gap: $spacing-xs $spacing-sm;
 
     .si { grid-area: icon; }
-    .chip-arch { grid-area: arch; }
+    .chip-arch { grid-area: arch; justify-self: end; }
     .pkg-deps { grid-area: deps; }
     .pkg-time { grid-area: time; }
     .kebab { grid-area: kebab; align-self: stretch; }
