@@ -52,7 +52,7 @@ fn full(p: &StorePath) -> String {
 }
 
 impl MockConn {
-    fn unimplemented(&self, op: Operation) -> DaemonError {
+    pub(crate) fn unimplemented(&self, op: Operation) -> DaemonError {
         let name = format!("{op:?}");
         self.state
             .journal
@@ -186,7 +186,7 @@ impl MockConn {
         )
     }
 
-    fn outputs_valid(&self, drv: &StorePath) -> anyhow::Result<bool> {
+    pub(crate) fn outputs_valid(&self, drv: &StorePath) -> anyhow::Result<bool> {
         let Some(outputs) = self.drv_outputs(drv) else {
             return Ok(false);
         };
@@ -269,24 +269,21 @@ impl MockConn {
     }
 }
 
-fn already_valid(path: &DerivedPath) -> KeyedBuildResult {
-    KeyedBuildResult {
-        path: path.clone(),
-        result: BuildResult {
-            inner: BuildResultInner::Success(BuildResultSuccess {
-                status: SuccessStatus::AlreadyValid,
-                built_outputs: BTreeMap::new(),
-            }),
-            times_built: 0,
-            start_time: 0,
-            stop_time: 0,
-            cpu_user: None,
-            cpu_system: None,
-            memory_peak: None,
-            io_read_bytes: None,
-            io_write_bytes: None,
-            oom_kills: None,
-        },
+pub(crate) fn already_valid() -> BuildResult {
+    BuildResult {
+        inner: BuildResultInner::Success(BuildResultSuccess {
+            status: SuccessStatus::AlreadyValid,
+            built_outputs: BTreeMap::new(),
+        }),
+        times_built: 0,
+        start_time: 0,
+        stop_time: 0,
+        cpu_user: None,
+        cpu_system: None,
+        memory_peak: None,
+        io_read_bytes: None,
+        io_write_bytes: None,
+        oom_kills: None,
     }
 }
 
@@ -380,23 +377,16 @@ impl DaemonStore for MockConn {
         drvs: &'a [DerivedPath],
         _mode: BuildMode,
     ) -> impl ResultLog<Output = DaemonResult<Vec<KeyedBuildResult>>> + Send + 'a {
-        let result = match self.requested_valid(drvs) {
-            Ok(true) => self
-                .journal_only("build_paths_with_results", vec![])
-                .map(|()| drvs.iter().map(already_valid).collect()),
-            Ok(false) => Err(self.unimplemented(Operation::BuildPathsWithResults)),
-            Err(e) => Err(err(e)),
-        };
-        ready(result).empty_logs()
+        build::build_paths(self.clone(), drvs.to_vec())
     }
 
     fn build_derivation<'a>(
         &'a mut self,
-        drv_path: &'a StorePath,
-        drv: &'a BasicDerivation,
+        _drv_path: &'a StorePath,
+        _drv: &'a BasicDerivation,
         _mode: BuildMode,
     ) -> impl ResultLog<Output = DaemonResult<BuildResult>> + Send + 'a {
-        build::build_derivation(self.clone(), drv_path.clone(), drv.clone())
+        ready(Err(self.unimplemented(Operation::BuildDerivation))).empty_logs()
     }
 
     fn query_missing<'a>(

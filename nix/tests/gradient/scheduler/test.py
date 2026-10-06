@@ -35,11 +35,11 @@ def latency_report(spec):
     journal = merged_journal()
     valid_at: dict[str, int] = {}
     for e in journal:
-        if e["ok"] and e["op"] in ("add_to_store_nar", "build_derivation"):
+        if e["ok"] and e["op"] in ("add_to_store_nar", "build_paths_with_results"):
             for p in e["paths"]:
                 valid_at.setdefault(p, e["at_us"] + e["duration_us"])
     for name, node in nodes.items():
-        b = next((e for e in journal if e["op"] == "build_derivation" and node["drvPath"] in e["paths"]), None)
+        b = next((e for e in journal if e["op"] == "build_paths_with_results" and node["drvPath"] in e["paths"]), None)
         if b:
             for out in node["outputs"].values():
                 valid_at.setdefault(out["path"], b["at_us"] + b["duration_us"])
@@ -49,7 +49,7 @@ def latency_report(spec):
     first: int | None = None
     last = 0
     for name, node in nodes.items():
-        b = next((e for e in journal if e["op"] == "build_derivation" and node["drvPath"] in e["paths"]), None)
+        b = next((e for e in journal if e["op"] == "build_paths_with_results" and node["drvPath"] in e["paths"]), None)
         if not b:
             continue
         inputs = [o["path"] for d in node["deps"] for o in nodes[d]["outputs"].values()]
