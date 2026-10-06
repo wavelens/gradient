@@ -8,7 +8,6 @@ pub mod abort;
 pub mod build;
 mod build_metrics;
 pub mod compress;
-mod derivation;
 mod download;
 pub mod eval;
 pub(crate) mod failure;

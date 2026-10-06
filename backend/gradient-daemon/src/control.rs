@@ -46,7 +46,7 @@ fn generic<B: Backend>(backend: &B, req: &Request) -> Option<anyhow::Result<Valu
             journal
                 .since(since)
                 .into_iter()
-                .filter(|e| e.op == "build_derivation")
+                .filter(|e| e.op == "build_paths_with_results")
                 .collect::<Vec<_>>(),
         ),
         "violations" => serde_json::to_value(journal.violations()),

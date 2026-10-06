@@ -5,22 +5,23 @@
  */
 
 use crate::journal::Violation;
-use crate::mock::conn::{MockConn, err};
+use crate::mock::conn::{MockConn, already_valid, err};
 use crate::mock::spec::{Node, Outcome};
 use crate::mock::store::{MockStore, Origin};
 use crate::mock::{MockState, artefact, store_path, timing};
+use harmonia_protocol::daemon::wire::types::Operation;
 use harmonia_protocol::daemon::wire::types2::{
     BuildResult, BuildResultFailure, BuildResultInner, BuildResultSuccess, FailureStatus,
-    SuccessStatus,
+    KeyedBuildResult, SuccessStatus,
 };
 use harmonia_protocol::daemon::{DaemonResult, FutureResultExt as _, ResultLog};
 use harmonia_protocol::log::{
     Activity, ActivityResult, ActivityType, Field, LogMessage, ResultType, StopActivity, Verbosity,
 };
-use harmonia_store_derivation::derivation::BasicDerivation;
-use harmonia_store_derivation::derived_path::OutputName;
+use harmonia_store_aterm::parse_derivation_aterm;
+use harmonia_store_derivation::derived_path::{DerivedPath, OutputName, SingleDerivedPath};
 use harmonia_store_derivation::realisation::UnkeyedRealisation;
-use harmonia_store_path::StorePath;
+use harmonia_store_path::{StoreDir, StorePath, StorePathSet};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use tokio::sync::{Notify, mpsc};
@@ -31,28 +32,19 @@ const ACTIVITY: u64 = 1;
 type Logs = mpsc::UnboundedSender<LogMessage>;
 type BuiltOutputs = BTreeMap<OutputName, UnkeyedRealisation>;
 
-pub fn build_derivation(
+pub fn build_paths(
     conn: MockConn,
-    drv_path: StorePath,
-    drv: BasicDerivation,
-) -> impl ResultLog<Output = DaemonResult<BuildResult>> + Send + 'static {
+    paths: Vec<DerivedPath>,
+) -> impl ResultLog<Output = DaemonResult<Vec<KeyedBuildResult>>> + Send + 'static {
     let (tx, mut rx) = mpsc::unbounded_channel();
     let mut task = JoinSet::new();
     task.spawn(async move {
-        let paths = vec![format!("/nix/store/{drv_path}")];
-        let timer = conn
-            .state
-            .journal
-            .start(conn.conn.id, "build_derivation", paths);
-        let result = run(&conn.state, &drv_path, &drv, &tx).await;
-        let failure = match &result {
-            Ok(r) => r
-                .failure()
-                .map(|f| String::from_utf8_lossy(&f.error_msg).into_owned()),
-            Err(e) => Some(e.to_string()),
-        };
-        timer.finish(failure.is_none(), failure);
-        result
+        let mut results = Vec::with_capacity(paths.len());
+        for path in paths {
+            let result = build_path(&conn, &path, &tx).await?;
+            results.push(KeyedBuildResult { path, result });
+        }
+        Ok(results)
     });
     let logs = async_stream::stream! {
         while let Some(msg) = rx.recv().await {
@@ -66,6 +58,40 @@ pub fn build_derivation(
     .with_logs(logs)
 }
 
+async fn build_path(conn: &MockConn, path: &DerivedPath, logs: &Logs) -> DaemonResult<BuildResult> {
+    let drv_path = match path {
+        DerivedPath::Built { drv_path, .. } => match drv_path.as_ref() {
+            SingleDerivedPath::Opaque(drv) => drv,
+            SingleDerivedPath::Built { .. } => {
+                return Err(conn.unimplemented(Operation::BuildPathsWithResults));
+            }
+        },
+        DerivedPath::Opaque(p) if conn.state.store.is_valid(p).map_err(err)? => {
+            return Ok(already_valid());
+        }
+        DerivedPath::Opaque(_) => return Err(conn.unimplemented(Operation::BuildPathsWithResults)),
+    };
+
+    let timer = conn.state.journal.start(
+        conn.conn.id,
+        "build_paths_with_results",
+        vec![format!("/nix/store/{drv_path}")],
+    );
+    let result = if conn.outputs_valid(drv_path).map_err(err)? {
+        Ok(already_valid())
+    } else {
+        run(&conn.state, drv_path, logs).await
+    };
+    let failure = match &result {
+        Ok(r) => r
+            .failure()
+            .map(|f| String::from_utf8_lossy(&f.error_msg).into_owned()),
+        Err(e) => Some(e.to_string()),
+    };
+    timer.finish(failure.is_none(), failure);
+    result
+}
+
 pub fn release(state: &MockState, id: &str) {
     state.overrides.lock().expect("overrides").remove(id);
     hang(state, id).notify_one();
@@ -74,7 +100,6 @@ pub fn release(state: &MockState, id: &str) {
 pub async fn run(
     state: &MockState,
     drv_path: &StorePath,
-    drv: &BasicDerivation,
     logs: &Logs,
 ) -> DaemonResult<BuildResult> {
     let full = format!("/nix/store/{drv_path}");
@@ -88,7 +113,7 @@ pub async fn run(
         ));
     };
 
-    let missing = missing_inputs(state, drv);
+    let missing = missing_inputs(state, &inputs(state, drv_path).map_err(err)?);
     if !missing.is_empty() {
         state
             .journal
@@ -132,8 +157,38 @@ pub async fn run(
     Ok(result)
 }
 
-fn missing_inputs(state: &MockState, drv: &BasicDerivation) -> Vec<String> {
+fn inputs(state: &MockState, drv_path: &StorePath) -> anyhow::Result<StorePathSet> {
+    let aterm = std::fs::read(state.store.real_path(drv_path))?;
+    let name = drv_path.name().to_string();
+    let name = name.strip_suffix(".drv").unwrap_or(&name).parse()?;
+    let drv = parse_derivation_aterm(&StoreDir::default(), &aterm, name)?;
     drv.inputs
+        .iter()
+        .map(|input| input_path(state, input))
+        .collect()
+}
+
+fn input_path(state: &MockState, input: &SingleDerivedPath) -> anyhow::Result<StorePath> {
+    let (drv, output) = match input {
+        SingleDerivedPath::Opaque(path) => return Ok(path.clone()),
+        SingleDerivedPath::Built { drv_path, output } => match drv_path.as_ref() {
+            SingleDerivedPath::Opaque(drv) => (drv, output.to_string()),
+            SingleDerivedPath::Built { .. } => anyhow::bail!("mock: dynamic derivation input"),
+        },
+    };
+    let (_, node) = state
+        .config
+        .by_drv(&format!("/nix/store/{drv}"))
+        .ok_or_else(|| anyhow::anyhow!("mock: unknown input derivation {drv}"))?;
+    let out = node
+        .outputs
+        .get(&output)
+        .ok_or_else(|| anyhow::anyhow!("mock: {drv} has no output {output}"))?;
+    store_path(&out.path)
+}
+
+fn missing_inputs(state: &MockState, inputs: &StorePathSet) -> Vec<String> {
+    inputs
         .iter()
         .filter(|p| !state.store.is_valid(p).unwrap_or(false))
         .map(|p| format!("/nix/store/{p}"))
@@ -303,13 +358,13 @@ fn now_secs() -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::mock::nar::{NarFile, encode};
     use crate::mock::spec::DaemonConfig;
     use crate::mock::{MockBackend, seed_node};
     use crate::server::{TestClient as Client, connect_duplex};
     use harmonia_protocol::daemon::DaemonStore as _;
     use harmonia_protocol::daemon::wire::types2::BuildMode;
-    use harmonia_store_derivation::derivation::DerivationOutput;
-    use harmonia_store_path::StorePathSet;
+    use harmonia_store_derivation::derived_path::OutputSpec;
 
     fn config() -> DaemonConfig {
         DaemonConfig::load(
@@ -323,8 +378,39 @@ mod tests {
         let backend = MockBackend::new(config(), dir.path().to_path_buf(), None)
             .await
             .expect("backend");
+        write_drv(&backend, "t/lib", &[]).await;
+        write_drv(&backend, "t/app", &["t/lib"]).await;
         let (server, client) = connect_duplex(&backend).await;
         (backend, client, (dir, server))
+    }
+
+    async fn write_drv(backend: &MockBackend, id: &str, deps: &[&str]) {
+        let input_drvs: Vec<String> = deps
+            .iter()
+            .map(|dep| format!("(\"{}\",[\"out\"])", config().derivations[*dep].drv_path))
+            .collect();
+        let aterm = format!(
+            "Derive([(\"out\",\"{}\",\"\",\"\")],[{}],[],\"x86_64-linux\",\"/bin/sh\",[],[])",
+            config().derivations[id].outputs["out"].path,
+            input_drvs.join(",")
+        );
+        let file = NarFile {
+            contents: aterm.into_bytes(),
+            executable: false,
+        };
+        let nar = encode(&BTreeMap::from([(String::new(), file)]));
+        let refs = deps.iter().map(|dep| node_path(dep)).collect();
+        backend
+            .0
+            .store
+            .register(
+                &node_path(id),
+                &nar,
+                MockStore::describe(&nar, refs, None, None),
+                Origin::Evaluated,
+            )
+            .await
+            .expect("register drv");
     }
 
     fn hang(backend: &MockBackend, id: &str) {
@@ -352,39 +438,27 @@ mod tests {
         store_path(&config().derivations[id].outputs["out"].path).expect("out")
     }
 
-    fn basic(id: &str, inputs: StorePathSet) -> BasicDerivation {
-        let node = &config().derivations[id];
-        BasicDerivation {
-            name: node.name.parse().expect("name"),
-            outputs: BTreeMap::from([(
-                "out".parse().expect("out"),
-                DerivationOutput::InputAddressed(node_out(id)),
-            )]),
-            inputs,
-            platform: "x86_64-linux".into(),
-            builder: "/bin/sh".into(),
-            args: vec![],
-            env: BTreeMap::new(),
-            structured_attrs: None,
-        }
+    fn request(drv: StorePath) -> [DerivedPath; 1] {
+        [DerivedPath::Built {
+            drv_path: Arc::new(SingleDerivedPath::Opaque(drv)),
+            outputs: OutputSpec::All,
+        }]
     }
 
-    fn app_basic() -> BasicDerivation {
-        basic("t/app", StorePathSet::from([node_out("t/lib")]))
-    }
-
-    fn lib_basic() -> BasicDerivation {
-        basic("t/lib", StorePathSet::new())
+    async fn build(client: &mut Client, drv: StorePath) -> BuildResult {
+        let mut results = client
+            .build_paths_with_results(&request(drv), BuildMode::Normal)
+            .await
+            .expect("rpc ok");
+        assert_eq!(results.len(), 1);
+        results.remove(0).result
     }
 
     #[tokio::test]
     async fn builds_after_inputs_are_valid_and_registers_outputs() {
         let (backend, mut client, _dir) = setup().await;
         seed(&backend, "t/lib").await;
-        let result = client
-            .build_derivation(&node_path("t/app"), &app_basic(), BuildMode::Normal)
-            .await
-            .expect("build");
+        let result = build(&mut client, node_path("t/app")).await;
         assert!(result.success().is_some());
         let out = node_out("t/app");
         assert!(backend.0.store.is_valid(&out).expect("valid"));
@@ -394,16 +468,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn missing_input_fails_and_is_a_violation() {
+    async fn an_input_named_by_the_stored_derivation_that_is_missing_fails_and_is_a_violation() {
         let (backend, mut client, _dir) = setup().await;
-        let result = client
-            .build_derivation(&node_path("t/app"), &app_basic(), BuildMode::Normal)
-            .await
-            .expect("rpc ok");
+        let result = build(&mut client, node_path("t/app")).await;
         assert!(result.success().is_none());
         assert!(matches!(
-            backend.0.journal.violations()[0],
-            Violation::BuildWithMissingInput { .. }
+            &backend.0.journal.violations()[0],
+            Violation::BuildWithMissingInput { missing, .. }
+                if *missing == vec![format!("/nix/store/{}", node_out("t/lib"))]
         ));
     }
 
@@ -412,10 +484,7 @@ mod tests {
         let (backend, mut client, _dir) = setup().await;
         let stray =
             StorePath::from_base_path(&format!("{}-stray.drv", "3".repeat(32))).expect("path");
-        let result = client
-            .build_derivation(&stray, &app_basic(), BuildMode::Normal)
-            .await
-            .expect("rpc ok");
+        let result = build(&mut client, stray.clone()).await;
         assert!(result.success().is_none());
         assert!(matches!(
             backend.0.journal.violations()[0],
@@ -434,10 +503,7 @@ mod tests {
             .lock()
             .expect("overrides")
             .insert("t/app".into(), Outcome::Fail);
-        let result = client
-            .build_derivation(&node_path("t/app"), &app_basic(), BuildMode::Normal)
-            .await
-            .expect("rpc ok");
+        let result = build(&mut client, node_path("t/app")).await;
         let failure = result.failure().expect("failure");
         assert_eq!(failure.status, FailureStatus::PermanentFailure);
         assert!(!backend.0.store.is_valid(&node_out("t/app")).expect("valid"));
@@ -448,18 +514,18 @@ mod tests {
         let (backend, mut client, _dir) = setup().await;
         seed(&backend, "t/lib").await;
         hang(&backend, "t/app");
-        let mut build = JoinSet::new();
-        build.spawn(async move {
-            client
-                .build_derivation(&node_path("t/app"), &app_basic(), BuildMode::Normal)
-                .await
-        });
+        let mut build_task = JoinSet::new();
+        build_task.spawn(async move { build(&mut client, node_path("t/app")).await });
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-        assert!(build.try_join_next().is_none());
+        assert!(build_task.try_join_next().is_none());
         assert_eq!(running(&backend), BTreeMap::from([("t/app".to_owned(), 1)]));
         release(&backend.0, "t/app");
-        let result = build.join_next().await.expect("spawned").expect("join");
-        assert!(result.expect("build").success().is_some());
+        let result = build_task
+            .join_next()
+            .await
+            .expect("spawned")
+            .expect("join");
+        assert!(result.success().is_some());
         assert!(running(&backend).is_empty());
     }
 
@@ -468,9 +534,9 @@ mod tests {
         let (backend, mut client, (_dir, server)) = setup().await;
         seed(&backend, "t/lib").await;
         hang(&backend, "t/app");
-        let (drv_path, drv) = (node_path("t/app"), app_basic());
-        let build = client.build_derivation(&drv_path, &drv, BuildMode::Normal);
-        let pending = tokio::time::timeout(std::time::Duration::from_millis(100), build).await;
+        let paths = request(node_path("t/app"));
+        let pending = client.build_paths_with_results(&paths, BuildMode::Normal);
+        let pending = tokio::time::timeout(std::time::Duration::from_millis(100), pending).await;
         assert!(pending.is_err(), "a hanging build returned");
         assert_eq!(running(&backend), BTreeMap::from([("t/app".to_owned(), 1)]));
         drop(server);
@@ -489,8 +555,8 @@ mod tests {
     #[tokio::test]
     async fn log_lines_arrive_as_build_log_results() {
         let (backend, mut client, _dir) = setup().await;
-        let (drv_path, drv) = (node_path("t/lib"), lib_basic());
-        let logs = client.build_derivation(&drv_path, &drv, BuildMode::Normal);
+        let paths = request(node_path("t/lib"));
+        let logs = client.build_paths_with_results(&paths, BuildMode::Normal);
         let mut logs = std::pin::pin!(logs);
         let mut lines = Vec::new();
         while let Some(msg) = futures::StreamExt::next(&mut logs).await {
@@ -498,23 +564,23 @@ mod tests {
                 lines.push(r.fields.clone());
             }
         }
-        assert!(logs.await.expect("build").success().is_some());
+        let results = logs.await.expect("build");
+        assert!(results[0].result.success().is_some());
         assert_eq!(lines, vec![vec![Field::String("building lib".into())]]);
         assert!(backend.0.journal.violations().is_empty());
     }
 
     #[tokio::test]
-    async fn rebuilding_a_valid_output_is_a_violation() {
+    async fn a_valid_output_is_reported_already_valid_without_a_build() {
         let (backend, mut client, _dir) = setup().await;
         seed(&backend, "t/lib").await;
-        let result = client
-            .build_derivation(&node_path("t/lib"), &lib_basic(), BuildMode::Normal)
-            .await
-            .expect("build");
-        assert!(result.success().is_some());
-        assert!(matches!(
-            backend.0.journal.violations()[0],
-            Violation::RebuildOfValidOutput { .. }
-        ));
+        let result = build(&mut client, node_path("t/lib")).await;
+        assert_eq!(
+            result.success().map(|s| s.status),
+            Some(SuccessStatus::AlreadyValid)
+        );
+        assert!(running(&backend).is_empty());
+        assert!(backend.0.attempts.lock().expect("attempts").is_empty());
+        assert!(backend.0.journal.violations().is_empty());
     }
 }
