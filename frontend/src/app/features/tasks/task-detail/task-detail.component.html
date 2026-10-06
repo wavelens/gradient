@@ -160,8 +160,12 @@
           }
           @if (entryPoints().length > 0) {
             @if (entryPoints().length < entryPointsTotal()) {
-              <div class="pkg-more" (grInView)="loadMoreEntryPoints()" [grInViewKey]="entryPoints().length">
-                Loading more ({{ entryPoints().length }} of {{ entryPointsTotal() }})
+              <div class="pkg pkg-more" aria-busy="true" [attr.aria-label]="'Loading packages, ' + entryPoints().length + ' of ' + entryPointsTotal()"
+                   (grInView)="loadMoreEntryPoints()" [grInViewKey]="entryPoints().length" grInViewMargin="100%">
+                <gr-skeleton class="si" />
+                <gr-skeleton class="pkg-name" />
+                <gr-skeleton class="pkg-bar" height="7px" />
+                <gr-skeleton class="pkg-deps" width="5rem" />
               </div>
             }
           } @else if (!entryPointsLoading() && isRunning(sel.status)) {
