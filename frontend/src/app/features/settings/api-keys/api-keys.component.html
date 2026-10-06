@@ -159,18 +159,7 @@
   <gr-divider />
 
   <gr-form-field label="Permissions">
-    <div class="permission-grid">
-      @for (p of activePermissions(); track p.id) {
-        <div class="permission-row">
-          <gr-checkbox
-            [(ngModel)]="formPermissions[p.id]"
-            [binary]="true"
-            [inputId]="'perm-' + p.id"
-          />
-          <label [for]="'perm-' + p.id">{{ permissionLabel(p.id) }}</label>
-        </div>
-      }
-    </div>
+    <app-permission-picker [permissions]="activePermissions()" [(selection)]="formPermissions" />
   </gr-form-field>
 
   <div grDialogFooter>

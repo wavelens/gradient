@@ -20,7 +20,6 @@ import {
   AutoCompleteComponent,
   BadgeComponent,
   ButtonComponent,
-  CheckboxComponent,
   DialogComponent,
   EmptyStateComponent,
   FormFieldComponent,
@@ -33,7 +32,7 @@ import {
   SelectComponent,
   SettingsSectionComponent,
 } from '@gradient/ui/ui';
-import { LabelHelpComponent } from '@shared/ui';
+import { LabelHelpComponent, PermissionPickerComponent } from '@shared/ui';
 import { TeamGrantsComponent } from '@features/teams/team-grants/team-grants.component';
 import { WritableDirective, ManagedDisableDirective } from '@shared/access';
 import { AccessState, PendingInvitation } from '@core/models';
@@ -48,6 +47,7 @@ interface RoleFormState {
   selector: 'app-members-roles',
   standalone: true,
   imports: [
+    PermissionPickerComponent,
     TeamGrantsComponent,
     LabelHelpComponent,
     CommonModule,
@@ -57,7 +57,6 @@ interface RoleFormState {
     ButtonComponent,
     InputDirective,
     AutoCompleteComponent,
-    CheckboxComponent,
     LoadingSpinnerComponent,
     WritableDirective,
     ManagedDisableDirective,
@@ -73,7 +72,6 @@ interface RoleFormState {
   ],
   templateUrl: './members-roles.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
-  styleUrl: './members-roles.component.scss',
 })
 export class MembersRolesComponent implements OnInit {
   private route = inject(ActivatedRoute);
@@ -319,7 +317,6 @@ export class MembersRolesComponent implements OnInit {
     });
   }
 
-  readonly permissionLabel = permissionLabel;
 
   rolePermissionLabel(role: ProjectRole): string {
     if (role.permissions.length === 0) return 'No permissions';
