@@ -5,30 +5,26 @@
 -->
 
 <gr-header [brand]="brand" [nav]="nav()">
-  <div slot="actions" class="header-actions">
-    @if (authService.isAuthenticated()) {
-      <button type="button" class="search-trigger" aria-label="Search" (click)="palette.open()">
-        <gr-icon name="search" size="sm" />
-        <span>Search</span>
-        <kbd>/</kbd>
-      </button>
-    }
+  @if (authService.isAuthenticated()) {
+    <button slot="search" type="button" class="search-trigger" aria-label="Search" (click)="palette.open()">
+      <gr-icon name="search" size="sm" />
+      <span>Search</span>
+      <kbd>/</kbd>
+    </button>
+  }
 
+  <div slot="actions" class="header-user">
     @if (authService.user(); as user) {
-      <div class="header-user">
-        <span class="user-name">{{ user.name }}</span>
-        <a routerLink="/settings/profile" class="user-link">Settings</a>
-        <button class="logout-btn" (click)="logout()">
-          <gr-icon name="logout" />
-        </button>
-      </div>
+      <span class="user-name">{{ user.name }}</span>
+      <a routerLink="/settings/profile" class="user-link">Settings</a>
+      <button class="logout-btn" aria-label="Log out" (click)="logout()">
+        <gr-icon name="logout" />
+      </button>
     } @else {
-      <div class="header-user">
-        <a routerLink="/account/login" [queryParams]="router.url.startsWith('/account/') ? null : { next: router.url }" class="user-link">Login</a>
-        @if (!registrationDisabled) {
-          <a routerLink="/account/register" class="user-link">Register</a>
-        }
-      </div>
+      <a routerLink="/account/login" [queryParams]="router.url.startsWith('/account/') ? null : { next: router.url }" class="user-link">Login</a>
+      @if (!registrationDisabled) {
+        <a routerLink="/account/register" class="user-link">Register</a>
+      }
     }
   </div>
 </gr-header>
