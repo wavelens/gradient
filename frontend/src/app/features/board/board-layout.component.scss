@@ -21,8 +21,12 @@ h1 {
   gap: 0.25rem;
   margin-bottom: 1.5rem;
   border-bottom: 1px solid var(--gr-border-subtle);
+  overflow-x: auto;
+  scrollbar-width: none;
 }
 .board-nav a {
+  flex-shrink: 0;
+  white-space: nowrap;
   color: var(--gr-text-secondary);
   padding: 0.5rem 0.75rem;
   text-decoration: none;
