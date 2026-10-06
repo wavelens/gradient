@@ -90,8 +90,9 @@
 
 .row-name {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: $spacing-sm;
+  gap: $spacing-xs $spacing-sm;
   color: var(--gr-text-primary);
   font-size: $font-size-md;
 }
