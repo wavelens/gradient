@@ -113,7 +113,15 @@
                     <div class="worker-archs text-secondary">
                       {{ worker.live.architectures.join(', ') }}
                       @if (worker.live.system_features.length > 0) {
-                        <span class="worker-features"> · {{ worker.live.system_features.join(', ') }}</span>
+                        <button type="button" class="features-info" aria-label="System features" (click)="features.toggle($event)">
+                          <gr-icon name="info" size="sm" />
+                        </button>
+                        <gr-popover #features>
+                          <div class="features-list">
+                            <strong>System features</strong>
+                            <p>{{ worker.live.system_features.join(', ') }}</p>
+                          </div>
+                        </gr-popover>
                       }
                     </div>
                   }
@@ -151,41 +159,12 @@
                 class="worker-action-btn"
                 [routerLink]="['/project', projectName, 'workers', worker.worker_id, 'metrics']"
               ></a>
-              @if (worker.team) {
-                @if (canOpenTeam(worker.team)) {
-                  <a grButton label="Manage on team" icon="groups" severity="secondary" size="small" class="worker-action-btn"
-                    [routerLink]="['/team', worker.team, 'workers']"></a>
+              @if (workerMenus().get(worker.worker_id); as items) {
+                @if (items.length) {
+                  <button grButton icon="more_vert" severity="secondary" size="small" aria-label="Worker actions"
+                    (click)="actions.toggle($event)"></button>
+                  <gr-menu #actions [model]="items" />
                 }
-              } @else {
-                <ng-container *ngTemplateOutlet="editAndToggle; context: { $implicit: worker }" />
-              }
-              <button
-                *appWritable="access()"
-                grButton
-                label="Fire Test"
-                icon="bolt"
-                severity="secondary"
-                size="small"
-                class="worker-action-btn"
-                [disabled]="testingId() !== null || togglingId() !== null || deletingId() !== null"
-                [appManagedDisable]="actionAccess()"
-                [loading]="testingId() === worker.worker_id"
-                (click)="fireTest(worker)"
-              ></button>
-              @if (!worker.team) {
-                <button
-                  *appWritable="access()"
-                  grButton
-                  label="Delete"
-                  icon="delete"
-                  severity="danger"
-                  size="small"
-                  class="worker-action-btn"
-                  [disabled]="deletingId() !== null || togglingId() !== null || testingId() !== null"
-                  [appManagedDisable]="rowAccess(worker)"
-                  [loading]="deletingId() === worker.worker_id"
-                  (click)="deleteWorker(worker)"
-                ></button>
               }
             </div>
           </gr-row>

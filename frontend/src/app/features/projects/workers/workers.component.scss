@@ -26,7 +26,23 @@
 }
 
 .worker-archs { font-family: $font-family-mono; }
-.worker-features { color: var(--gr-text-muted); }
+.worker-archs { display: flex; flex-wrap: wrap; align-items: center; gap: $spacing-xs; }
+.features-info {
+  display: inline-flex;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--gr-text-muted);
+  cursor: pointer;
+
+  &:hover { color: var(--gr-text-primary); }
+}
+.features-list {
+  max-width: 22rem;
+
+  strong { display: block; margin-bottom: $spacing-xs; color: var(--gr-text-primary); }
+  p { margin: 0; font-family: $font-family-mono; font-size: $font-size-sm; color: var(--gr-text-secondary); }
+}
 
 .worker-caps {
   display: flex;

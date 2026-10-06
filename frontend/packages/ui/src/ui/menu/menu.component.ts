@@ -56,6 +56,7 @@ const CONTEXT_POSITIONS: ConnectedPosition[] = [
                 <a
                   role="menuitem"
                   class="gr-menu__item"
+                  [class.gr-menu__item--danger]="item.danger"
                   [routerLink]="item.routerLink"
                   [queryParams]="item.queryParams ?? null"
                   (click)="run(item)"
@@ -71,6 +72,7 @@ const CONTEXT_POSITIONS: ConnectedPosition[] = [
                   type="button"
                   role="menuitem"
                   class="gr-menu__item"
+                  [class.gr-menu__item--danger]="item.danger"
                   [disabled]="item.disabled"
                   (click)="run(item)"
                 >

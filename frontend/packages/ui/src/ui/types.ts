@@ -12,6 +12,7 @@ export interface MenuItem {
   label?: string;
   icon?: string;
   disabled?: boolean;
+  danger?: boolean;
   separator?: boolean;
   command?: () => void;
   routerLink?: string | unknown[];
