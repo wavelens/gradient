@@ -1776,6 +1776,7 @@ pub fn parse_owner_repo(repository_url: &str) -> Option<(String, String)> {
         .strip_prefix("https://")
         .or_else(|| url.strip_prefix("http://"))
         .or_else(|| url.strip_prefix("git://"))
+        .or_else(|| url.strip_prefix("ssh://"))
     {
         rest.split_once('/')?.1
     } else {
@@ -2028,6 +2029,18 @@ mod tests {
     #[test]
     fn parse_owner_repo_unknown_scheme_rejected() {
         assert_eq!(parse_owner_repo("ftp-no-colon-owner-repo"), None);
+    }
+
+    #[test]
+    fn parse_owner_repo_ssh_url_with_user_and_port() {
+        let got = parse_owner_repo("ssh://forgejo@gitea.home.lan:2222/internal/infra-home");
+        assert_eq!(got, Some(("internal".into(), "infra-home".into())));
+    }
+
+    #[test]
+    fn parse_owner_repo_git_plus_ssh_url() {
+        let got = parse_owner_repo("git+ssh://git@github.com/acme/widgets.git");
+        assert_eq!(got, Some(("acme".into(), "widgets".into())));
     }
 
     #[test]
