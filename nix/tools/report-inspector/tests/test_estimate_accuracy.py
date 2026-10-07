@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
 # SPDX-License-Identifier: AGPL-3.0-only
-"""j1 and j2 are builds, j3 an evaluation, j4 to j6 must not be compared."""
+"""j1, j2 and j8 are builds, j3 an evaluation, j4 to j7 must not be compared. j7 ran out of memory."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ import pytest
 from gradient_report.db import SUPPORTED_SCHEMA, open_report
 from gradient_report.estimate_accuracy import estimate_accuracy
 
-PREFETCH, BUILD, COMPRESS, NAR_FETCH = 8, 10, 11, 16
+PREFETCH, BUILD, COMPRESS, SUBSTITUTE_FETCH, NAR_FETCH = 8, 10, 11, 14, 16
 
 
 def breakdown(**estimate) -> str:
@@ -56,6 +56,8 @@ def report(tmp_path):
         ("j4", 1, "w1", 0, json.dumps({"rules": {}, "total": 0.0}), 1_000),
         ("j5", 1, "w1", 0, None, 1_000),
         ("j6", 1, "w1", 1, breakdown(build_secs=1.0), 1_000),
+        ("j7", 1, "w1", 1, breakdown(build_secs=40.0, oom_chance=1.0), 1_000),
+        ("j8", 1, "w1", 0, breakdown(build_secs=50.0), None),
     ]
     for job, kind, worker, outcome, score, elapsed in jobs:
         conn.execute(
@@ -69,16 +71,22 @@ def report(tmp_path):
         ("j2", PREFETCH, 0, 50_000, 0, 4000), ("j2", NAR_FETCH, 0, 40_000, 0, 4000),
         ("j2", BUILD, 50_000, 150_000, 0, 0),
         ("j6", BUILD, 0, 99_000, 0, 0),
+        ("j7", BUILD, 0, 70_000, 0, 0),
+        ("j8", SUBSTITUTE_FETCH, 0, 5_000, 0, 0),
     ]
     conn.executemany("INSERT INTO dispatched_job_phase VALUES (?, ?, ?, ?, ?, ?)", phases)
-    conn.executemany("INSERT INTO derivation VALUES (?, ?)", [("d1", "openssl-3.7.2"), ("d2", "zlib-1.3.2")])
-    conn.executemany("INSERT INTO derivation_build VALUES (?, ?)", [("b1", "d1"), ("b2", "d2")])
+    conn.executemany("INSERT INTO derivation VALUES (?, ?)", [("d1", "openssl-3.7.2"), ("d2", "zlib-1.3.2"), ("d3", "llvm-21.1.0")])
+    conn.executemany("INSERT INTO derivation_build VALUES (?, ?)", [("b1", "d1"), ("b2", "d2"), ("b3", "d3")])
     conn.executemany(
-        "INSERT INTO build_attempt VALUES (?, ?, ?)", [("a1", "j1", "b1"), ("a2", "j2", "b2")]
+        "INSERT INTO build_attempt VALUES (?, ?, ?)", [("a1", "j1", "b1"), ("a2", "j2", "b2"), ("a3", "j7", "b3")]
     )
     conn.executemany(
         "INSERT INTO derivation_metric VALUES (?, ?, ?, ?)",
-        [("d1", "w1", 1, "2026-10-08 10:01:30"), ("d1", "w1", 1, "2026-10-08 11:00:00")],
+        [
+            ("d1", "w1", 1, "2026-10-08 10:01:30"),
+            ("d1", "w1", 1, "2026-10-08 11:00:00"),
+            ("d3", "w1", 1, "2026-10-08 10:02:50"),
+        ],
     )
     conn.commit()
     conn.close()
@@ -112,7 +120,7 @@ def test_total_needs_the_worker_elapsed_time(report):
 
 def test_jobs_before_estimates_and_unfinished_jobs_are_left_out(report):
     out = estimate_accuracy(report)
-    assert "estimate accuracy over 3 completed jobs" in out
+    assert "estimate accuracy over 4 completed jobs" in out
     assert "2 jobs recorded before estimates were stored" in out
 
 
@@ -126,8 +134,14 @@ def test_recorded_inputs_are_compared(report):
     assert row(estimate_accuracy(report), "nar_bytes")[4] == "x2.50"
 
 
-def test_out_of_memory_kills_are_counted_inside_the_job(report):
-    assert "out of memory: expected 0.50 kills over 2 build jobs, 1 recorded" in estimate_accuracy(report)
+def test_out_of_memory_kills_count_the_failed_jobs_they_ended(report):
+    assert "out of memory: expected 1.50 kills over 5 build jobs, 2 recorded" in estimate_accuracy(report)
+
+
+def test_a_substituted_job_is_kept_out_of_the_build_row(report):
+    out = estimate_accuracy(report)
+    assert row(out, "substitute") == ["substitute", "1", "50.0s", "5.0s", "x0.10", "x0.10", "x0.10", "0"]
+    assert row(out, "build")[1] == "2"
 
 
 def test_a_fallback_is_set_against_the_jobs_without_it(report):
