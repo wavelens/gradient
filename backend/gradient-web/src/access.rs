@@ -563,6 +563,15 @@ async fn admin_emails(state: &Arc<ServerState>, ids: Vec<UserId>) -> WebResult<V
         .collect())
 }
 
+pub(crate) fn reject_managed_integration(integration: &MIntegration) -> WebResult<()> {
+    if integration.managed {
+        return Err(WebError::forbidden(
+            "Cannot modify state-managed integration. This integration is managed by configuration and cannot be edited through the API.",
+        ));
+    }
+    Ok(())
+}
+
 pub(crate) fn reject_managed_cache(cache: &MCache) -> WebResult<()> {
     if cache.managed {
         return Err(WebError::forbidden(

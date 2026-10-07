@@ -21,7 +21,9 @@ use std::collections::HashMap;
 pub(crate) use credentials::{
     derive_public_key, parse_api_key_hash, parse_password_phc, read_credential,
 };
-pub(crate) use lookups::{inbound_integrations_by_name, lookup_id, outbound_integrations_by_name};
+pub(crate) use lookups::{
+    inbound_integrations_by_name, lookup_id, outbound_integrations_by_name, parse_integration_kind,
+};
 
 pub(crate) type DynError = Box<dyn std::error::Error>;
 

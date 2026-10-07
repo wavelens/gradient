@@ -6,6 +6,7 @@
 
 use super::DynError;
 use super::StateApplicator;
+use super::parse_integration_kind;
 use crate::config::StateConfiguration;
 use gradient_entity::*;
 use gradient_types::*;
@@ -73,18 +74,22 @@ impl<'a> StateApplicator<'a> {
             api_key_names,
             team_names,
         } = managed_keep_sets(config);
-        let worker_keys: HashSet<(String, ProjectId)> = {
-            let map = self.project_lookup().await?;
-            let mut set = HashSet::new();
-            for worker in config.workers.values() {
-                for project in &worker.projects {
-                    if let Some(peer_id) = map.get(project) {
-                        set.insert((worker.worker_id.clone(), *peer_id));
-                    }
-                }
-            }
-            set
-        };
+        let project_lookup = self.project_lookup().await?;
+        let worker_keys: HashSet<(String, ProjectId)> = config
+            .workers
+            .values()
+            .flat_map(|worker| {
+                worker.projects.iter().filter_map(|project| {
+                    project_lookup
+                        .get(project)
+                        .map(|peer_id| (worker.worker_id.clone(), *peer_id))
+                })
+            })
+            .collect();
+        let project_name_by_id: HashMap<ProjectId, String> = project_lookup
+            .into_iter()
+            .map(|(name, id)| (id, name))
+            .collect();
 
         let db = self.db;
 
@@ -95,45 +100,10 @@ impl<'a> StateApplicator<'a> {
         unmark_managed!(db, api, api_key_names, name, delete_state, "API key");
         unmark_managed!(db, team, team_names, name, delete_state, "team");
 
-        let role_keys: HashSet<(String, String)> = config
-            .roles
-            .values()
-            .map(|r| (r.project.clone(), r.name.clone()))
-            .collect();
-        let project_lookup = self.project_lookup().await?;
-        let mut project_name_by_id: HashMap<ProjectId, String> = HashMap::new();
-        for (name, id) in &project_lookup {
-            project_name_by_id.insert(*id, name.clone());
-        }
-        let managed_roles = role::Entity::find()
-            .filter(role::Column::Managed.eq(true))
-            .all(db)
+        self.unmark_removed_roles(config, &project_name_by_id, delete_state)
             .await?;
-        for managed in managed_roles {
-            let owner_project = match managed.project {
-                Some(id) => id,
-                None => continue,
-            };
-            let owner_name = match project_name_by_id.get(&owner_project) {
-                Some(n) => n.clone(),
-                None => continue,
-            };
-            let key = (owner_name, managed.name.clone());
-            if role_keys.contains(&key) {
-                continue;
-            }
-            let role_id = managed.id;
-            let role_name = managed.name.clone();
-            if delete_state {
-                role::Entity::delete_by_id(role_id).exec(db).await?;
-                tracing::info!(role = %role_name, "Deleted managed role");
-            } else {
-                let mut active: role::ActiveModel = managed.into();
-                active.managed = Set(false);
-                active.update(db).await?;
-                tracing::info!(role = %role_name, "Unmarked managed role");
-            }
-        }
+        self.unmark_removed_integrations(config, &project_name_by_id, delete_state)
+            .await?;
 
         let managed_workers = worker_registration::Entity::find()
             .filter(worker_registration::Column::Managed.eq(true))
@@ -176,6 +146,85 @@ impl<'a> StateApplicator<'a> {
             tracing::info!(worker_id, "Deleted team worker");
         }
 
+        Ok(())
+    }
+
+    async fn unmark_removed_roles(
+        &self,
+        config: &StateConfiguration,
+        project_name_by_id: &HashMap<ProjectId, String>,
+        delete_state: bool,
+    ) -> Result<(), DynError> {
+        let role_keys: HashSet<(&str, &str)> = config
+            .roles
+            .values()
+            .map(|r| (r.project.as_str(), r.name.as_str()))
+            .collect();
+        let managed_roles = role::Entity::find()
+            .filter(role::Column::Managed.eq(true))
+            .all(self.db)
+            .await?;
+        for managed in managed_roles {
+            let Some(owner_name) = managed.project.and_then(|id| project_name_by_id.get(&id))
+            else {
+                continue;
+            };
+            if role_keys.contains(&(owner_name.as_str(), managed.name.as_str())) {
+                continue;
+            }
+            let role_name = managed.name.clone();
+            if delete_state {
+                role::Entity::delete_by_id(managed.id).exec(self.db).await?;
+                tracing::info!(role = %role_name, "Deleted managed role");
+            } else {
+                let mut active: role::ActiveModel = managed.into();
+                active.managed = Set(false);
+                active.update(self.db).await?;
+                tracing::info!(role = %role_name, "Unmarked managed role");
+            }
+        }
+        Ok(())
+    }
+
+    async fn unmark_removed_integrations(
+        &self,
+        config: &StateConfiguration,
+        project_name_by_id: &HashMap<ProjectId, String>,
+        delete_state: bool,
+    ) -> Result<(), DynError> {
+        let integration_keys: HashSet<(&str, integration::IntegrationKind, &str)> = config
+            .integrations
+            .values()
+            .filter_map(|i| {
+                let kind = parse_integration_kind(&i.kind)?;
+                Some((i.project.as_str(), kind, i.name.as_str()))
+            })
+            .collect();
+        let managed_integrations = integration::Entity::find()
+            .filter(integration::Column::Managed.eq(true))
+            .all(self.db)
+            .await?;
+        for managed in managed_integrations {
+            let Some(project_name) = project_name_by_id.get(&managed.project) else {
+                continue;
+            };
+            let key = (project_name.as_str(), managed.kind, managed.name.as_str());
+            if integration_keys.contains(&key) {
+                continue;
+            }
+            let integration_name = managed.name.clone();
+            if delete_state {
+                integration::Entity::delete_by_id(managed.id)
+                    .exec(self.db)
+                    .await?;
+                tracing::info!(project = %project_name, integration = %integration_name, "Deleted managed integration");
+            } else {
+                let mut active: integration::ActiveModel = managed.into();
+                active.managed = Set(false);
+                active.update(self.db).await?;
+                tracing::info!(project = %project_name, integration = %integration_name, "Unmarked managed integration");
+            }
+        }
         Ok(())
     }
 }
@@ -258,5 +307,123 @@ mod keep_set_tests {
         let key_key = "key-key".to_string();
         assert!(sets.api_key_names.contains(&ci_runner));
         assert!(!sets.api_key_names.contains(&key_key));
+    }
+}
+
+#[cfg(test)]
+mod integration_reconciliation_tests {
+    use super::*;
+    use integration::IntegrationKind;
+    use sea_orm::{DatabaseBackend, DatabaseConnection, MockDatabase, MockExecResult, Statement};
+
+    fn state_listing_inbound_hook_of_acme() -> StateConfiguration {
+        serde_json::from_value(serde_json::json!({
+            "integrations": {
+                "hook-key": {
+                    "name": "hook",
+                    "project": "acme",
+                    "kind": "inbound",
+                    "git_host_type": "gitea",
+                    "created_by": "alice"
+                }
+            }
+        }))
+        .unwrap()
+    }
+
+    fn managed_row(project: ProjectId, kind: IntegrationKind, name: &str) -> integration::Model {
+        integration::Model {
+            id: IntegrationId::now_v7(),
+            project,
+            name: name.into(),
+            kind,
+            managed: true,
+            ..Default::default()
+        }
+    }
+
+    async fn reconcile(db: &DatabaseConnection, acme: ProjectId, other: ProjectId, delete: bool) {
+        let app = StateApplicator {
+            db,
+            crypt_secret_file: "",
+            email_enabled: false,
+        };
+        let project_name_by_id =
+            HashMap::from([(acme, "acme".to_string()), (other, "other".to_string())]);
+        app.unmark_removed_integrations(
+            &state_listing_inbound_hook_of_acme(),
+            &project_name_by_id,
+            delete,
+        )
+        .await
+        .unwrap();
+    }
+
+    fn logged_statements(db: DatabaseConnection) -> Vec<Statement> {
+        db.into_transaction_log()
+            .iter()
+            .flat_map(|t| t.statements().to_vec())
+            .collect()
+    }
+
+    fn mentions(statement: &Statement, id: IntegrationId) -> bool {
+        format!("{:?}", statement.values).contains(&id.to_string())
+    }
+
+    #[tokio::test]
+    async fn delete_state_removes_integrations_missing_by_project_kind_and_name() {
+        let (acme, other) = (ProjectId::now_v7(), ProjectId::now_v7());
+        let listed = managed_row(acme, IntegrationKind::Inbound, "hook");
+        let other_kind = managed_row(acme, IntegrationKind::Outbound, "hook");
+        let other_project = managed_row(other, IntegrationKind::Inbound, "hook");
+        let deleted = MockExecResult {
+            last_insert_id: 0,
+            rows_affected: 1,
+        };
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([vec![
+                listed.clone(),
+                other_kind.clone(),
+                other_project.clone(),
+            ]])
+            .append_exec_results([deleted.clone(), deleted])
+            .into_connection();
+
+        reconcile(&db, acme, other, true).await;
+
+        let deletes: Vec<Statement> = logged_statements(db)
+            .into_iter()
+            .filter(|s| s.sql.starts_with("DELETE FROM \"integration\""))
+            .collect();
+        assert_eq!(deletes.len(), 2);
+        assert!(deletes.iter().any(|s| mentions(s, other_kind.id)));
+        assert!(deletes.iter().any(|s| mentions(s, other_project.id)));
+        assert!(!deletes.iter().any(|s| mentions(s, listed.id)));
+    }
+
+    #[tokio::test]
+    async fn without_delete_state_a_removed_integration_is_unmanaged_not_deleted() {
+        let (acme, other) = (ProjectId::now_v7(), ProjectId::now_v7());
+        let listed = managed_row(acme, IntegrationKind::Inbound, "hook");
+        let removed = managed_row(acme, IntegrationKind::Inbound, "old-hook");
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([vec![listed.clone(), removed.clone()]])
+            .append_query_results([vec![integration::Model {
+                managed: false,
+                ..removed.clone()
+            }]])
+            .into_connection();
+
+        reconcile(&db, acme, other, false).await;
+
+        let log = logged_statements(db);
+        assert!(!log.iter().any(|s| s.sql.starts_with("DELETE")));
+        let updates: Vec<&Statement> = log
+            .iter()
+            .filter(|s| s.sql.starts_with("UPDATE \"integration\""))
+            .collect();
+        assert_eq!(updates.len(), 1);
+        assert!(mentions(updates[0], removed.id));
+        assert!(format!("{:?}", updates[0].values).contains("Bool(Some(false))"));
     }
 }

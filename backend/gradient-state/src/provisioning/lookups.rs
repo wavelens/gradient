@@ -12,6 +12,14 @@ use gradient_types::*;
 use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter};
 use std::collections::HashMap;
 
+pub(crate) fn parse_integration_kind(kind: &str) -> Option<IntegrationKind> {
+    match kind {
+        "inbound" => Some(IntegrationKind::Inbound),
+        "outbound" => Some(IntegrationKind::Outbound),
+        _ => None,
+    }
+}
+
 pub(crate) fn lookup_id<T: Copy>(
     map: &HashMap<String, T>,
     name: &str,

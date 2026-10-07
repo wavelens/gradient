@@ -7531,6 +7531,7 @@ paths:
 
         `git_host_type=github` rows are managed by the App and installation; PATCH
         rejects them with `400`. Delete the row to remove the integration.
+        State-managed integrations are rejected with `403`.
       operationId: patchProjectIntegration
       requestBody:
         required: true
@@ -7565,7 +7566,9 @@ paths:
         Deletes an integration. Any task `task_integration` rows
         referencing it are cleared via `ON DELETE SET NULL`.
         `git_host_type=github` rows can be deleted; deleting removes the
-        installation binding for that account.
+        installation binding for that account. State-managed integrations
+        are rejected with `403`, other integrations of a state-managed
+        project can be deleted.
       operationId: deleteProjectIntegration
       responses:
         '200':
@@ -14234,7 +14237,7 @@ components:
 
     Integration:
       type: object
-      required: [id, project, name, display_name, kind, git_host_type, has_secret, has_access_token, created_by, created_at]
+      required: [id, project, name, display_name, kind, git_host_type, has_secret, has_access_token, created_by, created_at, managed]
       properties:
         id:
           type: string
@@ -14297,6 +14300,9 @@ components:
         created_at:
           type: string
           format: date-time
+        managed:
+          type: boolean
+          description: Whether this integration is declared in server state. PATCH and DELETE reject managed integrations with `403`.
 
     IntegrationSummary:
       type: object

@@ -19,6 +19,7 @@ use crate::ids::{GithubInstallationId, IntegrationId, ProjectId, UserId};
     Default,
     PartialEq,
     Eq,
+    Hash,
     DeriveActiveEnum,
     EnumIter,
     Deserialize,
@@ -109,6 +110,7 @@ pub struct Model {
     pub github_installation: Option<GithubInstallationId>,
     pub created_by: UserId,
     pub created_at: NaiveDateTime,
+    pub managed: bool,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -152,6 +154,7 @@ impl std::fmt::Debug for Model {
             .field("github_installation", &self.github_installation)
             .field("created_by", &self.created_by)
             .field("created_at", &self.created_at)
+            .field("managed", &self.managed)
             .finish()
     }
 }

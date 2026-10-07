@@ -7,7 +7,9 @@
 //! Secrets and access tokens are stored encrypted with the server's crypt key. Responses are
 //! exposing only the `has_secret` and `has_access_token` flags.
 
-use crate::access::{Caller, ProjectAccess, load_integration_in_project, load_project};
+use crate::access::{
+    Caller, ProjectAccess, load_integration_in_project, load_project, reject_managed_integration,
+};
 use crate::authorization::MaybeApiKey;
 use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
@@ -44,6 +46,7 @@ pub struct IntegrationResponse {
     pub account_login: Option<String>,
     pub created_by: UserId,
     pub created_at: chrono::NaiveDateTime,
+    pub managed: bool,
 }
 
 fn base_from(m: MIntegration) -> IntegrationResponse {
@@ -62,6 +65,7 @@ fn base_from(m: MIntegration) -> IntegrationResponse {
         account_login: None,
         created_by: m.created_by,
         created_at: m.created_at,
+        managed: m.managed,
     }
 }
 
@@ -370,6 +374,7 @@ pub async fn put_integration(
         github_installation: None,
         created_by: user.id,
         created_at: gradient_types::now(),
+        managed: false,
     }
     .into_active_model();
 
@@ -417,11 +422,12 @@ pub async fn patch_integration(
         project,
         ProjectAccess::Require {
             permission: Permission::ManageIntegrations,
-            reject_managed: true,
+            reject_managed: false,
         },
     )
     .await?;
     let integration = load_integration_in_project(&state, project.id, integration_id).await?;
+    reject_managed_integration(&integration)?;
     if integration.git_host_type == GitHostType::GitHub {
         return Err(WebError::bad_request(
             "GitHub App integrations are managed automatically and cannot be edited.",
@@ -522,11 +528,12 @@ pub async fn delete_integration(
         project,
         ProjectAccess::Require {
             permission: Permission::ManageIntegrations,
-            reject_managed: true,
+            reject_managed: false,
         },
     )
     .await?;
     let integration = load_integration_in_project(&state, project.id, integration_id).await?;
+    reject_managed_integration(&integration)?;
     if integration.git_host_type == GitHostType::GitHub {
         let txn = state.web_db.inner().begin().await?;
         match integration.github_installation {
