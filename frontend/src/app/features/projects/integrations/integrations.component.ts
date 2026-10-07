@@ -91,6 +91,9 @@ export class IntegrationsComponent implements OnInit {
   projectDisplayName = signal('');
   project = signal<Project | null>(null);
   integrations = signal<Integration[]>([]);
+  integrationAccess = computed(
+    () => new Map(this.integrations().map((i) => [i.id, { ...this.access(), managed: i.managed }])),
+  );
 
   private readonly namePattern = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/;
 
