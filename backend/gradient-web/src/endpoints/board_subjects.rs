@@ -7,6 +7,7 @@
 use crate::metrics_scope::MetricsScope;
 use gradient_types::input::vec_to_hex;
 use gradient_types::*;
+use sea_orm::sea_query::Query;
 use sea_orm::{
     ColumnTrait, ConnectionTrait, DbErr, EntityTrait, FromQueryResult, QueryFilter, QueryOrder,
     QuerySelect, Select,
@@ -104,7 +105,7 @@ async fn repositories<C: ConnectionTrait>(
     )
 }
 
-/// A worker's display name comes only from registrations in projects the caller can see.
+/// A worker's display name comes only from registrations and team workers in projects the caller can see.
 pub struct WorkerNames(HashMap<String, String>);
 
 impl WorkerNames {
@@ -119,15 +120,21 @@ impl WorkerNames {
             .into_iter()
             .collect();
         let visible = scope.project_ids();
-        let rows: Vec<WorkerNameRow> = gradient_db::fetch_in_chunks(&workers, |chunk| {
-            worker_names_query(chunk, visible.as_deref())
+        let registrations: Vec<WorkerNameRow> = gradient_db::fetch_in_chunks(&workers, |chunk| {
+            registration_names_query(chunk, visible.as_deref())
+                .into_model()
+                .all(db)
+        })
+        .await?;
+        let team_workers: Vec<WorkerNameRow> = gradient_db::fetch_in_chunks(&workers, |chunk| {
+            team_worker_names_query(chunk, visible.as_deref())
                 .into_model()
                 .all(db)
         })
         .await?;
 
         let mut names = HashMap::new();
-        for row in rows {
+        for row in registrations.into_iter().chain(team_workers) {
             names.entry(row.worker_id).or_insert(row.display_name);
         }
 
@@ -145,7 +152,7 @@ struct WorkerNameRow {
     display_name: String,
 }
 
-fn worker_names_query(
+fn registration_names_query(
     workers: Vec<String>,
     visible_projects: Option<&[Uuid]>,
 ) -> Select<EWorkerRegistration> {
@@ -160,6 +167,32 @@ fn worker_names_query(
 
     match visible_projects {
         Some(projects) => query.filter(CWorkerRegistration::PeerId.is_in(projects.to_vec())),
+        None => query,
+    }
+}
+
+fn team_worker_names_query(
+    workers: Vec<String>,
+    visible_projects: Option<&[Uuid]>,
+) -> Select<ETeamWorker> {
+    let query = ETeamWorker::find()
+        .select_only()
+        .column(CTeamWorker::WorkerId)
+        .column(CTeamWorker::DisplayName)
+        .filter(CTeamWorker::WorkerId.is_in(workers))
+        .filter(CTeamWorker::DisplayName.ne(""));
+
+    match visible_projects {
+        Some(projects) => query.filter(
+            CTeamWorker::Team.in_subquery(
+                Query::select()
+                    .column(CTeamProject::Team)
+                    .from(gradient_entity::team_project::Entity)
+                    .and_where(CTeamProject::IncludesWorkers.eq(true))
+                    .and_where(CTeamProject::Project.is_in(projects.to_vec()))
+                    .to_owned(),
+            ),
+        ),
         None => query,
     }
 }
@@ -283,7 +316,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_worker_takes_the_name_of_its_first_ranked_registration() {
+    async fn a_worker_takes_the_name_of_its_first_ranked_registration_then_its_team_worker() {
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             .append_query_results([vec![
                 row([
@@ -295,37 +328,56 @@ mod tests {
                     ("display_name", "retired".into()),
                 ]),
             ]])
+            .append_query_results([vec![row([
+                ("worker_id", "w2".into()),
+                ("display_name", "team builder".into()),
+            ])]])
             .into_connection();
 
         let names = WorkerNames::load(
             &db,
             &MetricsScope::All,
-            ["w1".to_string(), "w2".to_string()],
+            ["w1".to_string(), "w2".to_string(), "w3".to_string()],
         )
         .await
         .unwrap();
 
         assert_eq!(names.name("w1").as_deref(), Some("builder"));
-        assert_eq!(names.name("w2"), None);
+        assert_eq!(names.name("w2").as_deref(), Some("team builder"));
+        assert_eq!(names.name("w3"), None);
     }
 
     #[test]
-    fn worker_names_come_only_from_registrations_the_caller_can_see() {
+    fn worker_names_come_only_from_workers_the_caller_can_see() {
         use sea_orm::QueryTrait;
         let visible = [Uuid::now_v7()];
-        let sql = |projects: Option<&[Uuid]>| {
-            worker_names_query(vec!["w1".into()], projects)
+        let registrations = |projects: Option<&[Uuid]>| {
+            registration_names_query(vec!["w1".into()], projects)
+                .build(DatabaseBackend::Postgres)
+                .to_string()
+        };
+        let team_workers = |projects: Option<&[Uuid]>| {
+            team_worker_names_query(vec!["w1".into()], projects)
                 .build(DatabaseBackend::Postgres)
                 .to_string()
         };
 
-        let scoped = sql(Some(&visible));
+        let scoped = registrations(Some(&visible));
         assert!(
             scoped.contains(&format!("\"peer_id\" IN ('{}')", visible[0])),
             "{scoped}"
         );
         assert!(scoped.contains("\"display_name\" <> ''"), "{scoped}");
-        assert!(!sql(None).contains("peer_id"));
+        assert!(!registrations(None).contains("peer_id"));
+
+        let scoped = team_workers(Some(&visible));
+        assert!(scoped.contains("\"includes_workers\" = TRUE"), "{scoped}");
+        assert!(
+            scoped.contains(&format!("\"project\" IN ('{}')", visible[0])),
+            "{scoped}"
+        );
+        assert!(scoped.contains("\"display_name\" <> ''"), "{scoped}");
+        assert!(!team_workers(None).contains("team_project"));
     }
 
     #[tokio::test]
