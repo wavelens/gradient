@@ -461,6 +461,7 @@ impl EvalHistory {
         let mut history = self.tasks.get(&task).copied().unwrap_or_default();
         if history.uncontended_build_time_ms.is_none() {
             history.uncontended_build_time_ms = self.fleet_elapsed_ms;
+            history.from_fleet_mean = self.fleet_elapsed_ms.is_some();
         }
 
         history
@@ -707,5 +708,7 @@ mod tests {
             history.for_task(unseen).uncontended_build_time_ms,
             Some(20_000)
         );
+        assert!(!history.for_task(seen).from_fleet_mean);
+        assert!(history.for_task(unseen).from_fleet_mean);
     }
 }

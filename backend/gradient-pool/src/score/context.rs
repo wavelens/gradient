@@ -65,6 +65,7 @@ pub struct HistoryPrediction {
     pub output_nar_size: Option<u64>,
     pub oom_rate: f32,
     pub samples: u32,
+    pub from_fleet_mean: bool,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -298,6 +299,7 @@ mod tests {
                 output_nar_size: Some(7),
                 oom_rate: 0.1,
                 samples: 5,
+                from_fleet_mean: false,
             },
             derivations: vec![],
         };

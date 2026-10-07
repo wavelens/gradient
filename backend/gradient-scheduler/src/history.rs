@@ -110,6 +110,7 @@ fn summarize(rows: &[MDerivationMetric]) -> gradient_pool::score::HistoryPredict
         output_nar_size: None,
         oom_rate,
         samples,
+        from_fleet_mean: false,
     }
 }
 
