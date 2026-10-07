@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use serde::{Deserialize, Serialize};
+
 use crate::score::context::{HistoryPrediction, InstanceContext, WorkerMetricsView};
 use crate::score::rule::{JobContext, ScoreRule, WorkerContext};
 use crate::score::weights;
@@ -11,6 +13,48 @@ use crate::score::weights;
 const BYTES_PER_MIB: f64 = 1_048_576.0;
 const BITS_PER_BYTE: f64 = 8.0;
 const BITS_PER_MEGABIT: f64 = 1_000_000.0;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Fallback {
+    MissingNarSize,
+    MissingCount,
+    BuildHistory,
+    CoreScore,
+    DownloadSpeed,
+    UploadSpeed,
+    StorageReadSpeed,
+    StorageWriteSpeed,
+    CompressionRatio,
+    PerPathSecs,
+    OutputNarSize,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct TimeEstimate {
+    pub download_secs: f64,
+    pub path_secs: f64,
+    pub build_secs: f64,
+    pub oom_retry_secs: f64,
+    pub upload_secs: f64,
+    pub eval_secs: f64,
+    pub nar_bytes: f64,
+    pub paths: f64,
+    pub output_nar_bytes: f64,
+    pub oom_chance: f64,
+    pub fallbacks: Vec<Fallback>,
+}
+
+impl TimeEstimate {
+    pub fn total(&self) -> f64 {
+        self.download_secs
+            + self.path_secs
+            + self.build_secs
+            + self.oom_retry_secs
+            + self.upload_secs
+            + self.eval_secs
+    }
+}
 
 pub fn contention_factor(other_builds: u32) -> f64 {
     1.0 + weights::BUILD_CONTENTION_PER_BUILD * f64::from(other_builds)
@@ -38,69 +82,115 @@ pub fn transfer_secs(t: Transfer) -> f64 {
     t.nar_bytes * BITS_PER_BYTE / BITS_PER_MEGABIT / mbps
 }
 
-fn stored_per_nar_byte(instance: &InstanceContext) -> f64 {
-    instance
-        .compression_ratio
-        .filter(|r| *r > 0.0)
-        .unwrap_or(weights::STORED_PER_NAR_BYTE_FALLBACK)
+fn known<T>(value: Option<T>, fallback: Fallback, fallbacks: &mut Vec<Fallback>) -> Option<T> {
+    if value.is_none() {
+        fallbacks.push(fallback);
+    }
+    value
 }
 
-fn speed(own: Option<f32>, fleet_mean: Option<f64>) -> Option<f64> {
-    own.map(f64::from).or(fleet_mean)
+fn stored_per_nar_byte(instance: &InstanceContext, fallbacks: &mut Vec<Fallback>) -> f64 {
+    known(
+        instance.compression_ratio.filter(|r| *r > 0.0),
+        Fallback::CompressionRatio,
+        fallbacks,
+    )
+    .unwrap_or(weights::STORED_PER_NAR_BYTE_FALLBACK)
 }
 
-pub fn download_secs(
+fn speed(
+    own: Option<f32>,
+    fleet_mean: Option<f64>,
+    fallback: Fallback,
+    fallbacks: &mut Vec<Fallback>,
+) -> Option<f64> {
+    known(own.map(f64::from), fallback, fallbacks).or(fleet_mean)
+}
+
+fn missing_nar_bytes(
     job: &JobContext<'_>,
+    instance: &InstanceContext,
+    fallbacks: &mut Vec<Fallback>,
+) -> f64 {
+    known(
+        job.missing_nar_size.map(|b| b as f64),
+        Fallback::MissingNarSize,
+        fallbacks,
+    )
+    .or_else(|| instance.nar_size_mb.w1h.map(|mb| mb * BYTES_PER_MIB))
+    .unwrap_or(0.0)
+}
+
+fn missing_paths(
+    job: &JobContext<'_>,
+    instance: &InstanceContext,
+    fallbacks: &mut Vec<Fallback>,
+) -> f64 {
+    known(
+        job.missing_count.map(f64::from),
+        Fallback::MissingCount,
+        fallbacks,
+    )
+    .or(instance.missing_paths.w1h)
+    .unwrap_or(0.0)
+}
+
+fn output_nar_bytes(history: &HistoryPrediction, fallbacks: &mut Vec<Fallback>) -> f64 {
+    known(history.output_nar_size, Fallback::OutputNarSize, fallbacks).unwrap_or(0) as f64
+}
+
+fn download_secs(
+    nar_bytes: f64,
     worker: Option<&WorkerMetricsView>,
     instance: &InstanceContext,
+    fallbacks: &mut Vec<Fallback>,
 ) -> f64 {
-    let nar_bytes = job
-        .missing_nar_size
-        .map(|b| b as f64)
-        .or_else(|| instance.nar_size_mb.w1h.map(|mb| mb * BYTES_PER_MIB))
-        .unwrap_or(0.0);
-
     transfer_secs(Transfer {
         nar_bytes,
         worker_mbps: speed(
             worker.and_then(|m| m.download_speed_mbps),
             instance.download_speed_mean_mbps,
+            Fallback::DownloadSpeed,
+            fallbacks,
         ),
-        storage_mbps: instance
-            .storage_read_mbps
-            .unwrap_or(weights::STORAGE_READ_FALLBACK_MBPS),
-        stored_per_nar_byte: stored_per_nar_byte(instance),
+        storage_mbps: known(
+            instance.storage_read_mbps,
+            Fallback::StorageReadSpeed,
+            fallbacks,
+        )
+        .unwrap_or(weights::STORAGE_READ_FALLBACK_MBPS),
+        stored_per_nar_byte: stored_per_nar_byte(instance, fallbacks),
         in_flight: instance.downloads_in_flight,
     })
 }
 
-pub fn path_secs(job: &JobContext<'_>, instance: &InstanceContext) -> f64 {
-    let paths = job
-        .missing_count
-        .map(f64::from)
-        .or(instance.missing_paths.w1h)
-        .unwrap_or(0.0);
+fn path_secs(paths: f64, instance: &InstanceContext, fallbacks: &mut Vec<Fallback>) -> f64 {
     paths
-        * instance
-            .per_path_secs
+        * known(instance.per_path_secs, Fallback::PerPathSecs, fallbacks)
             .unwrap_or(weights::PER_PATH_FALLBACK_SECS)
 }
 
-pub fn upload_secs(
-    history: &HistoryPrediction,
+fn upload_secs(
+    output_nar_bytes: f64,
     worker: Option<&WorkerMetricsView>,
     instance: &InstanceContext,
+    fallbacks: &mut Vec<Fallback>,
 ) -> f64 {
     transfer_secs(Transfer {
-        nar_bytes: history.output_nar_size.unwrap_or(0) as f64,
+        nar_bytes: output_nar_bytes,
         worker_mbps: speed(
             worker.and_then(|m| m.upload_speed_mbps),
             instance.upload_speed_mean_mbps,
+            Fallback::UploadSpeed,
+            fallbacks,
         ),
-        storage_mbps: instance
-            .storage_write_mbps
-            .unwrap_or(weights::STORAGE_WRITE_FALLBACK_MBPS),
-        stored_per_nar_byte: stored_per_nar_byte(instance),
+        storage_mbps: known(
+            instance.storage_write_mbps,
+            Fallback::StorageWriteSpeed,
+            fallbacks,
+        )
+        .unwrap_or(weights::STORAGE_WRITE_FALLBACK_MBPS),
+        stored_per_nar_byte: stored_per_nar_byte(instance, fallbacks),
         in_flight: instance.uploads_in_flight,
     })
 }
@@ -119,47 +209,53 @@ fn run_secs(
     worker: Option<&WorkerMetricsView>,
     instance: &InstanceContext,
     fallback_ms: Option<f64>,
+    fallbacks: &mut Vec<Fallback>,
 ) -> f64 {
     let fleet = instance.cpu_core_score_mean;
+    if history.from_fleet_mean {
+        fallbacks.push(Fallback::BuildHistory);
+    }
     let (uncontended_ms, built_on) = match history.uncontended_build_time_ms {
-        Some(ms) => (ms as f64, history.build_core_score.map(f64::from).or(fleet)),
-        None => match fallback_ms {
-            Some(ms) => (ms, fleet),
-            None => return 0.0,
-        },
+        Some(ms) => (
+            ms as f64,
+            known(history.build_core_score, Fallback::CoreScore, fallbacks)
+                .map(f64::from)
+                .or(fleet),
+        ),
+        None => {
+            fallbacks.push(Fallback::BuildHistory);
+            match fallback_ms {
+                Some(ms) => {
+                    fallbacks.push(Fallback::CoreScore);
+                    (ms, fleet)
+                }
+                None => return 0.0,
+            }
+        }
     };
-    let runs_on = worker
-        .map(|m| m.cpu_core_score)
-        .filter(|score| *score > 0)
-        .map(f64::from)
-        .or(fleet);
+    let runs_on = known(
+        worker.map(|m| m.cpu_core_score).filter(|score| *score > 0),
+        Fallback::CoreScore,
+        fallbacks,
+    )
+    .map(f64::from)
+    .or(fleet);
     let running = worker.map_or(0, |m| m.running_builds);
 
     uncontended_ms / 1000.0 * core_ratio(built_on, runs_on) * contention_factor(running)
 }
 
-pub fn build_secs(
+fn build_secs(
     history: &HistoryPrediction,
     worker: Option<&WorkerMetricsView>,
     instance: &InstanceContext,
+    fallbacks: &mut Vec<Fallback>,
 ) -> f64 {
     let window = instance.build_time_ms.w1h.or(instance.build_time_ms.w24h);
-    run_secs(history, worker, instance, window)
+    run_secs(history, worker, instance, window, fallbacks)
 }
 
-pub fn eval_secs(
-    history: &HistoryPrediction,
-    worker: Option<&WorkerMetricsView>,
-    instance: &InstanceContext,
-) -> f64 {
-    run_secs(history, worker, instance, None)
-}
-
-pub fn oom_retry_secs(
-    history: &HistoryPrediction,
-    worker: Option<&WorkerMetricsView>,
-    run_secs: f64,
-) -> f64 {
+fn oom_chance(history: &HistoryPrediction, worker: Option<&WorkerMetricsView>) -> f64 {
     let overshoot = match (
         history.predicted_peak_ram_mb,
         worker.and_then(|m| m.ram_free_mb),
@@ -170,32 +266,83 @@ pub fn oom_retry_secs(
         _ => 0.0,
     };
 
-    (f64::from(history.oom_rate) + overshoot).min(1.0) * run_secs
+    (f64::from(history.oom_rate) + overshoot).min(1.0)
 }
 
-pub fn estimated_secs(
+fn eval_estimate(
+    history: &HistoryPrediction,
+    worker: Option<&WorkerMetricsView>,
+    instance: &InstanceContext,
+    fallbacks: &mut Vec<Fallback>,
+) -> TimeEstimate {
+    let eval_secs = run_secs(history, worker, instance, None, fallbacks);
+    let oom_chance = oom_chance(history, worker);
+    TimeEstimate {
+        eval_secs,
+        oom_chance,
+        oom_retry_secs: oom_chance * eval_secs,
+        ..Default::default()
+    }
+}
+
+fn upload_estimate(
+    history: &HistoryPrediction,
+    worker: Option<&WorkerMetricsView>,
+    instance: &InstanceContext,
+    fallbacks: &mut Vec<Fallback>,
+) -> TimeEstimate {
+    let output_nar_bytes = output_nar_bytes(history, fallbacks);
+    TimeEstimate {
+        upload_secs: upload_secs(output_nar_bytes, worker, instance, fallbacks),
+        output_nar_bytes,
+        ..Default::default()
+    }
+}
+
+fn build_estimate(
+    job: &JobContext<'_>,
+    worker: Option<&WorkerMetricsView>,
+    instance: &InstanceContext,
+    fallbacks: &mut Vec<Fallback>,
+) -> TimeEstimate {
+    let history = job.build_history();
+    let nar_bytes = missing_nar_bytes(job, instance, fallbacks);
+    let paths = missing_paths(job, instance, fallbacks);
+    let build_secs = build_secs(&history, worker, instance, fallbacks);
+    let oom_chance = oom_chance(&history, worker);
+    let output_nar_bytes = output_nar_bytes(&history, fallbacks);
+    TimeEstimate {
+        download_secs: download_secs(nar_bytes, worker, instance, fallbacks),
+        path_secs: path_secs(paths, instance, fallbacks),
+        build_secs,
+        oom_retry_secs: oom_chance * build_secs,
+        upload_secs: upload_secs(output_nar_bytes, worker, instance, fallbacks),
+        nar_bytes,
+        paths,
+        output_nar_bytes,
+        oom_chance,
+        ..Default::default()
+    }
+}
+
+pub fn estimate(
     job: &JobContext<'_>,
     worker: &WorkerContext<'_>,
     instance: &InstanceContext,
-) -> f64 {
+) -> TimeEstimate {
     let metrics = worker.metrics.as_ref();
-    if job.job.build().is_none() {
-        let history = job.job.history();
-        let run = eval_secs(&history, metrics, instance);
-        return run + oom_retry_secs(&history, metrics, run);
-    }
-
-    if job.outputs_present {
-        return upload_secs(&job.job.history(), metrics, instance);
-    }
-
-    let history = job.build_history();
-    let run = build_secs(&history, metrics, instance);
-    download_secs(job, metrics, instance)
-        + path_secs(job, instance)
-        + run
-        + oom_retry_secs(&history, metrics, run)
-        + upload_secs(&history, metrics, instance)
+    let mut fallbacks = Vec::new();
+    let mut estimate = if job.job.build().is_none() {
+        eval_estimate(&job.job.history(), metrics, instance, &mut fallbacks)
+    } else if job.outputs_present {
+        upload_estimate(&job.job.history(), metrics, instance, &mut fallbacks)
+    } else {
+        build_estimate(job, metrics, instance, &mut fallbacks)
+    };
+    fallbacks.sort_unstable();
+    fallbacks.dedup();
+    estimate.fallbacks = fallbacks;
+    estimate
 }
 
 #[derive(Debug)]
@@ -224,7 +371,7 @@ impl ScoreRule for EstimatedTimeRule {
         worker: &WorkerContext<'_>,
         instance: &InstanceContext,
     ) -> f64 {
-        let estimate = estimated_secs(job, worker, instance).min(self.cap_secs);
+        let estimate = estimate(job, worker, instance).total().min(self.cap_secs);
         self.points_per_sec * (self.cap_secs - estimate)
     }
 
@@ -293,14 +440,22 @@ mod tests {
         }
     }
 
+    fn secs(
+        history: &HistoryPrediction,
+        worker: &WorkerMetricsView,
+        inst: &InstanceContext,
+    ) -> f64 {
+        build_secs(history, Some(worker), inst, &mut Vec::new())
+    }
+
     #[test]
     fn a_build_takes_longer_on_a_slower_core_and_beside_running_builds() {
         let history = built(100_000, Some(3_000));
         let inst = InstanceContext::default();
 
-        assert_eq!(build_secs(&history, Some(&on(3_000, 0)), &inst), 100.0);
-        assert_eq!(build_secs(&history, Some(&on(1_500, 0)), &inst), 200.0);
-        assert!((build_secs(&history, Some(&on(1_500, 5)), &inst) - 240.0).abs() < 1e-9);
+        assert_eq!(secs(&history, &on(3_000, 0), &inst), 100.0);
+        assert_eq!(secs(&history, &on(1_500, 0), &inst), 200.0);
+        assert!((secs(&history, &on(1_500, 5), &inst) - 240.0).abs() < 1e-9);
     }
 
     #[test]
@@ -308,8 +463,8 @@ mod tests {
         let history = built(100_000, Some(3_000));
         let inst = InstanceContext::default();
 
-        assert_eq!(build_secs(&history, Some(&on(1, 0)), &inst), 200.0);
-        assert_eq!(build_secs(&history, Some(&on(1_000_000, 0)), &inst), 50.0);
+        assert_eq!(secs(&history, &on(1, 0), &inst), 200.0);
+        assert_eq!(secs(&history, &on(1_000_000, 0), &inst), 50.0);
     }
 
     #[test]
@@ -319,14 +474,8 @@ mod tests {
             ..Default::default()
         };
 
-        assert_eq!(
-            build_secs(&built(100_000, None), Some(&on(1_500, 0)), &inst),
-            200.0
-        );
-        assert_eq!(
-            build_secs(&built(100_000, Some(1_500)), Some(&on(0, 0)), &inst),
-            50.0
-        );
+        assert_eq!(secs(&built(100_000, None), &on(1_500, 0), &inst), 200.0);
+        assert_eq!(secs(&built(100_000, Some(1_500)), &on(0, 0), &inst), 50.0);
     }
 
     #[test]
@@ -340,14 +489,15 @@ mod tests {
         };
 
         assert_eq!(
-            build_secs(&HistoryPrediction::default(), Some(&on(2_000, 0)), &inst),
+            secs(&HistoryPrediction::default(), &on(2_000, 0), &inst),
             60.0
         );
         assert_eq!(
             build_secs(
                 &HistoryPrediction::default(),
                 None,
-                &InstanceContext::default()
+                &InstanceContext::default(),
+                &mut Vec::new()
             ),
             0.0
         );
@@ -415,9 +565,10 @@ mod tests {
             missing_count: None,
             ..ctx(&job, None, false)
         };
+        let f = &mut Vec::new();
 
-        assert_eq!(path_secs(&scored, &inst), 3.0);
-        assert_eq!(path_secs(&unscored, &inst), 4.0);
+        assert_eq!(path_secs(missing_paths(&scored, &inst, f), &inst, f), 3.0);
+        assert_eq!(path_secs(missing_paths(&unscored, &inst, f), &inst, f), 4.0);
     }
 
     #[test]
@@ -452,18 +603,9 @@ mod tests {
             ..Default::default()
         };
 
-        assert_eq!(
-            oom_retry_secs(&history, Some(&with_free(8_000)), 100.0),
-            25.0
-        );
-        assert_eq!(
-            oom_retry_secs(&history, Some(&with_free(2_000)), 100.0),
-            75.0
-        );
-        assert_eq!(
-            oom_retry_secs(&history, Some(&with_free(1_000)), 100.0),
-            100.0
-        );
+        assert_eq!(oom_chance(&history, Some(&with_free(8_000))), 0.25);
+        assert_eq!(oom_chance(&history, Some(&with_free(2_000))), 0.75);
+        assert_eq!(oom_chance(&history, Some(&with_free(1_000))), 1.0);
     }
 
     #[test]
@@ -481,11 +623,14 @@ mod tests {
             ..Default::default()
         };
 
-        assert!((estimated_secs(&ctx(&job, Some(0), true), &w, &inst) - 20.0).abs() < 1e-9);
+        let e = estimate(&ctx(&job, Some(0), true), &w, &inst);
+        assert!((e.upload_secs - 20.0).abs() < 1e-9);
+        assert_eq!(e.total(), e.upload_secs);
+        assert_eq!(e.build_secs, 0.0);
     }
 
     #[test]
-    fn the_estimate_sums_download_build_and_upload() {
+    fn the_estimate_records_download_build_and_upload_apart() {
         let history = HistoryPrediction {
             output_nar_size: Some(GIGABYTE as u64),
             ..built(30_000, None)
@@ -502,8 +647,106 @@ mod tests {
             ..Default::default()
         });
 
-        let estimate = estimated_secs(&ctx(&job, Some(GIGABYTE as u64), false), &w, &inst);
-        assert!((estimate - (10.0 + 30.0 + 20.0)).abs() < 1e-9, "{estimate}");
+        let e = estimate(&ctx(&job, Some(GIGABYTE as u64), false), &w, &inst);
+        assert!((e.download_secs - 10.0).abs() < 1e-9, "{e:?}");
+        assert!((e.build_secs - 30.0).abs() < 1e-9, "{e:?}");
+        assert!((e.upload_secs - 20.0).abs() < 1e-9, "{e:?}");
+        assert!((e.total() - 60.0).abs() < 1e-9, "{e:?}");
+        assert_eq!(e.nar_bytes, GIGABYTE);
+        assert_eq!(e.output_nar_bytes, GIGABYTE);
+    }
+
+    #[test]
+    fn the_estimate_names_each_input_it_had_to_guess() {
+        let job = build_job(HistoryPrediction::default());
+        let c = JobContext {
+            missing_count: None,
+            ..ctx(&job, None, false)
+        };
+        let w = WorkerContext {
+            architectures: &[],
+            system_features: &[],
+            fetch: false,
+            metrics: None,
+        };
+        let inst = InstanceContext {
+            build_time_ms: Windowed {
+                w24h: Some(60_000.0),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        assert_eq!(
+            estimate(&c, &w, &inst).fallbacks,
+            vec![
+                Fallback::MissingNarSize,
+                Fallback::MissingCount,
+                Fallback::BuildHistory,
+                Fallback::CoreScore,
+                Fallback::DownloadSpeed,
+                Fallback::UploadSpeed,
+                Fallback::StorageReadSpeed,
+                Fallback::StorageWriteSpeed,
+                Fallback::CompressionRatio,
+                Fallback::PerPathSecs,
+                Fallback::OutputNarSize,
+            ]
+        );
+    }
+
+    #[test]
+    fn a_fully_measured_build_guesses_nothing() {
+        let job = build_job(HistoryPrediction {
+            output_nar_size: Some(1),
+            ..built(30_000, Some(2_000))
+        });
+        let c = JobContext {
+            missing_count: Some(3),
+            ..ctx(&job, Some(1), false)
+        };
+        let w = worker(WorkerMetricsView {
+            cpu_core_score: 2_000,
+            download_speed_mbps: Some(100.0),
+            upload_speed_mbps: Some(100.0),
+            ..Default::default()
+        });
+        let inst = InstanceContext {
+            storage_read_mbps: Some(1_000.0),
+            storage_write_mbps: Some(1_000.0),
+            compression_ratio: Some(0.5),
+            per_path_secs: Some(0.1),
+            ..Default::default()
+        };
+
+        assert_eq!(estimate(&c, &w, &inst).fallbacks, Vec::new());
+    }
+
+    #[test]
+    fn an_evaluation_timed_by_the_fleet_mean_says_so() {
+        let fleet = ScoredJob::new_eval(
+            "e",
+            ProjectId::now_v7(),
+            true,
+            HistoryPrediction {
+                from_fleet_mean: true,
+                ..built(100_000, None)
+            },
+        );
+        let own = ScoredJob::new_eval("e", ProjectId::now_v7(), true, built(100_000, None));
+        let w = worker(on(1_000, 0));
+        let inst = InstanceContext::default();
+
+        assert!(
+            estimate(&ctx(&fleet, None, false), &w, &inst)
+                .fallbacks
+                .contains(&Fallback::BuildHistory)
+        );
+        assert!(
+            !estimate(&ctx(&own, None, false), &w, &inst)
+                .fallbacks
+                .contains(&Fallback::BuildHistory)
+        );
     }
 
     #[test]
