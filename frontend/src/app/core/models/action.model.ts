@@ -12,6 +12,15 @@ export type ActionType =
   | 'send_matrix_message'
   | 'send_slack_message';
 
+export const ACTION_TYPE_LABEL: Record<ActionType, string> = {
+  send_mail: 'Mail',
+  send_web_request: 'Webhook',
+  send_matrix_message: 'Matrix',
+  send_slack_message: 'Slack',
+  git_host_status_report: 'Git Status',
+  open_pr: 'PR',
+};
+
 export type PrGenerator = 'flake_lock';
 export type PrGranularity = 'per_run' | 'per_input';
 export type PrVerifyGate = 'none' | 'eval' | 'build';

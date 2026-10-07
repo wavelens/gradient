@@ -10,6 +10,7 @@ import { FormsModule } from '@angular/forms';
 import { ConfigService } from '@core/services/config.service';
 import {
   Action,
+  ACTION_TYPE_LABEL,
   ActionConfig,
   ActionType,
   CreateActionRequest,
@@ -121,16 +122,20 @@ export class ActionFormComponent implements OnChanges {
 
   readonly smtpEnabled = computed(() => this.config.smtpEnabled);
 
-  readonly typeOptions = computed(() => {
-    const opts: { label: string; value: ActionType }[] = [];
-    if (this.smtpEnabled()) opts.push({ label: 'Send Mail', value: 'send_mail' });
-    opts.push({ label: 'Send Web Request', value: 'send_web_request' });
-    opts.push({ label: 'Send Matrix Message', value: 'send_matrix_message' });
-    opts.push({ label: 'Send Slack Message', value: 'send_slack_message' });
-    opts.push({ label: 'Git Host Status Report', value: 'git_host_status_report' });
-    opts.push({ label: 'Open PR', value: 'open_pr' });
-    return opts;
-  });
+  readonly typeOptions = computed(() =>
+    (
+      [
+        'send_mail',
+        'send_web_request',
+        'send_matrix_message',
+        'send_slack_message',
+        'git_host_status_report',
+        'open_pr',
+      ] as ActionType[]
+    )
+      .filter((value) => value !== 'send_mail' || this.smtpEnabled())
+      .map((value) => ({ label: ACTION_TYPE_LABEL[value], value })),
+  );
 
   readonly integrationOptions = computed(() =>
     this.outboundIntegrations().map((i) => ({ label: i.display_name, value: i.id })),
@@ -142,7 +147,7 @@ export class ActionFormComponent implements OnChanges {
 
   // `git_host_status_report` and `open_pr` fire on an internal gate, not
   // user-selected events: the status reporter tracks the whole lifecycle, and
-  // Open PR fires when an input_update evaluation passes its verify gate.
+  // A PR action fires when an input_update evaluation passes its verify gate.
   readonly eventsHardwired = computed(
     () => this.type() === 'git_host_status_report' || this.type() === 'open_pr',
   );

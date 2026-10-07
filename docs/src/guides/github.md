@@ -41,10 +41,10 @@ Tasks connect the two integrations. Triggers point at the inbound integration, a
 
 === "UI"
 
-    Tasks with a matching repository URL get a **Push (reporter)** trigger and a **Git Host Status Report** action automatically. Other tasks need both added by hand.
+    Tasks with a matching repository URL get a **Push (reporter)** trigger and a **Git Status** action automatically. Other tasks need both added by hand.
 
     - **Triggers -> New Trigger**: **Push (reporter)** and, for pull requests, **Pull Request (reporter)**, each with the `github-<account>` integration.
-    - **Actions -> New Action**: **Git Host Status Report** with the `github-<account>` integration.
+    - **Actions -> New Action**: **Git Status** with the `github-<account>` integration.
 
 === "Declarative"
 

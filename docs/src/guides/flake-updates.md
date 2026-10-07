@@ -29,11 +29,11 @@ Pull requests that bump `flake.lock`, opened only after a successful build of th
 !!! warning
     An override with a **URL** will pin that input. The pin will block every update run of the task. No pull request can land while an input is held.
 
-## 2. Add the Open PR Action
+## 2. Add the PR Action
 
 === "UI"
 
-    Open **Actions -> New Action** on the task. Pick the type **Open PR** and the **Outbound Integration**. The defaults fit most repositories.
+    Open **Actions -> New Action** on the task. Pick the type **PR** and the **Outbound Integration**. The defaults fit most repositories.
 
 === "Declarative"
 
