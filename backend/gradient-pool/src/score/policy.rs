@@ -29,6 +29,7 @@ pub trait ScoringPolicy: Send + Sync + std::fmt::Debug {
             rules: std::collections::BTreeMap::new(),
             total: self.score(job, worker, instance),
             vetoes: Vec::new(),
+            estimate: None,
         }
     }
     fn uses_history(&self) -> bool {
@@ -97,6 +98,9 @@ impl ScoringPolicy for RulePolicy {
             rules,
             total,
             vetoes,
+            estimate: Some(crate::score::rules::estimated_time::estimate(
+                job, worker, instance,
+            )),
         }
     }
 
@@ -494,6 +498,17 @@ mod tests {
         assert!(
             (sum - total).abs() < 1e-9,
             "rule contributions must sum to total"
+        );
+
+        let estimate = breakdown
+            .estimate
+            .as_ref()
+            .expect("the rule policy records the estimate");
+        let rule = crate::score::rules::EstimatedTimeRule::default();
+        assert_eq!(
+            breakdown.rules["EstimatedTimeRule"],
+            rule.points_per_sec * (rule.cap_secs - estimate.total().min(rule.cap_secs)),
+            "the stored estimate matches the rule's score"
         );
     }
 

@@ -2789,6 +2789,7 @@ dependencies = [
  "gradient-types",
  "gradient-wire",
  "serde",
+ "serde_json",
  "tokio",
  "tracing",
 ]

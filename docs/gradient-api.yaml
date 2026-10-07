@@ -15117,7 +15117,7 @@ components:
         score_breakdown:
           type: object
           additionalProperties: true
-          description: Per-rule score contributions.
+          description: Per-rule score contributions, and under `estimate` the seconds of each element of the time estimate with the inputs it guessed.
         worker_context: { $ref: '#/components/schemas/WorkerContext' }
         job_context: { $ref: '#/components/schemas/JobContext' }
         instance_context: { $ref: '#/components/schemas/InstanceContext' }

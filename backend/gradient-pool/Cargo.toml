@@ -21,3 +21,4 @@ tracing = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["sync", "macros", "rt"] }
+serde_json = { workspace = true }
