@@ -47,9 +47,10 @@ The `report_manifest` table will record per table the rows included against the 
 | Scope | Tables |
 |---|---|
 | This evaluation only | The evaluation's own rows, `dispatched_job`, `dispatched_job_phase` |
-| Shared builds | `build_attempt`, `phase_event`, `derivation*`: rows made for other evaluations of the same derivation, older attempts included |
+| Shared builds | `build_attempt`, `phase_event`, `derivation`, `derivation_build`, `derivation_output`, `derivation_dependency`: rows made for other evaluations of the same derivation, older attempts included |
 | Whole instance | `worker_registration`, `team_worker`, `upstream_metric` |
 | This project | `team_project` |
+| This evaluation's derivations, while it ran | `derivation_metric` |
 | Workers of this evaluation | `worker_connection`, `worker_sample`, from creation until finish or the report |
 
 - The `scope` column is worth reading before trusting a count.
@@ -146,6 +147,7 @@ sqlite3 report.db \
 | `failed` | Failed attempts. `--log ATTEMPT` will dump one log |
 | `workers` | Registration and connection history |
 | `manifest` | The report's contents and omissions |
+| `estimate-accuracy` | The recorded time estimate of each job against the job's phases. `--element NAME` will list the jobs of an element |
 | `sql "QUERY"` | Raw access |
 | `store-spec -o FILE` | A `gradient-daemon` store spec replaying the evaluation |
 
@@ -171,12 +173,28 @@ vendor-registry: Queued, waiting on walked, blocking_deps = 1
 - The line `ed-1.22.5: Created, waiting on wanted` is a shared build nothing will ever fetch.
 - A stub or unwalked line can point at the walk, not the build.
 
+**`estimate-accuracy`** will set the time estimate of each finished job against the phases the worker recorded.
+
+| Element | Phase |
+|---|---|
+| `download` | `NarFetch` |
+| `paths` | `Prefetch` without its `NarFetch` spans |
+| `build` | `Build` |
+| `upload` | `Compress`, with `NarPush` and `UploadWait` inside |
+| `eval`, `total` | `dispatched_job.worker_elapsed_ms` |
+
+- Ratios above `x1.00` mark jobs slower than their estimate.
+- The `zero` column will count jobs with an estimate of 0 that still took time.
+- The `fallbacks` lines name the inputs the estimate had to guess. Their ratios stand against the jobs without the guess.
+- `--element build` will list the build jobs, the worst estimate first.
+
 ## Schema Versions
 
-- The inspector can read exactly one schema (currently 19) and will refuse every other. The error message will name both schemas.
+- The inspector can read exactly one schema (currently 20) and will refuse every other. The error message will name both schemas.
 - A schema bump must change `SCHEMA_VERSION` in `backend/gradient-report/src/schema.rs` and `SUPPORTED_SCHEMA` in `nix/tools/report-inspector/gradient_report/db.py` together.
 - The inspector package will fail to evaluate while the two differ.
 - The schema version can move on its own, not with the release (12 to 16 inside 1.3.0).
 - The matching inspector is built from the revision that wrote the report, with `nix build .#gradient-report` there.
 - A `nix develop` shell entered before a schema bump will keep the old inspector until re-entered.
 - Reports before schema 19 carry no `team_worker` table.
+- Reports before schema 20 hold no `derivation_metric` table, no `worker_elapsed_ms` and no estimates.
