@@ -112,6 +112,7 @@ mod m20261004_000002_transfer_speeds;
 mod m20261004_000003_build_conditions;
 mod m20261004_000004_recount_blocking_deps;
 mod m20261004_000005_team_member_source;
+mod m20261007_000000_integration_managed;
 
 pub struct Migrator;
 
@@ -220,6 +221,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261004_000003_build_conditions::Migration),
             Box::new(m20261004_000004_recount_blocking_deps::Migration),
             Box::new(m20261004_000005_team_member_source::Migration),
+            Box::new(m20261007_000000_integration_managed::Migration),
         ]
     }
 }

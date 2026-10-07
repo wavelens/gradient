@@ -121,9 +121,20 @@ fn admin_role() -> role::Model {
 }
 
 fn with_project_manage(db: MockDatabase) -> MockDatabase {
-    db.append_query_results([vec![project()]])
+    with_admin_of(db, project())
+}
+
+fn with_admin_of(db: MockDatabase, project: gradient_entity::project::Model) -> MockDatabase {
+    db.append_query_results([vec![project]])
         .append_query_results([vec![admin_membership()]])
         .append_query_results([vec![admin_role()]])
+}
+
+fn state_managed_project() -> gradient_entity::project::Model {
+    gradient_entity::project::Model {
+        managed: true,
+        ..project()
+    }
 }
 
 const SUMMARY_URL: &str = "/api/v1/projects/test-project/integrations/summary";
@@ -283,4 +294,59 @@ async fn github_create_without_app_config_is_rejected() {
         "expected 'not configured' in error: {}",
         body["message"]
     );
+}
+
+fn delete_url(id: IntegrationId) -> String {
+    format!("/api/v1/projects/test-project/integrations/{id}")
+}
+
+#[tokio::test]
+async fn delete_state_managed_integration_is_forbidden() {
+    let session_id = SessionId::now_v7();
+    let token = make_token(session_id);
+    let managed = integration::Model {
+        managed: true,
+        ..gitea_inbound_row()
+    };
+
+    let db = with_admin_of(
+        with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id),
+        state_managed_project(),
+    )
+    .append_query_results([vec![managed.clone()]]);
+
+    let server = make_test_server(db.into_connection());
+    let res = server
+        .delete(&delete_url(managed.id))
+        .add_header("authorization", format!("Bearer {}", token))
+        .await;
+
+    res.assert_status(axum::http::StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn delete_unmanaged_integration_of_state_managed_project_succeeds() {
+    let session_id = SessionId::now_v7();
+    let token = make_token(session_id);
+    let leftover = gitea_inbound_row();
+
+    let db = with_admin_of(
+        with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id),
+        state_managed_project(),
+    )
+    .append_query_results([vec![leftover.clone()]])
+    .append_exec_results([MockExecResult {
+        last_insert_id: 0,
+        rows_affected: 1,
+    }]);
+
+    let server = make_test_server(db.into_connection());
+    let res = server
+        .delete(&delete_url(leftover.id))
+        .add_header("authorization", format!("Bearer {}", token))
+        .await;
+
+    res.assert_status_ok();
+    let body: Value = res.json();
+    assert_eq!(body["message"], true);
 }

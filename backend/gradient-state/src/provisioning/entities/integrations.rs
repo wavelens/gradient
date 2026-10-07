@@ -6,10 +6,9 @@
 
 use super::super::DynError;
 use super::super::StateApplicator;
-use super::super::{lookup_id, read_credential};
+use super::super::{lookup_id, parse_integration_kind, read_credential};
 use crate::config::*;
 use anyhow::Result;
-use gradient_ci::IntegrationKind;
 use gradient_ci::actions::encrypt_secret_with_file;
 use gradient_entity::*;
 use gradient_types::GitHostType;
@@ -42,17 +41,12 @@ impl<'a> StateApplicator<'a> {
 
             let created_by_id = lookup_id(&user_map, &state_int.created_by, "User")?;
 
-            let kind = match state_int.kind.as_str() {
-                "inbound" => IntegrationKind::Inbound,
-                "outbound" => IntegrationKind::Outbound,
-                other => {
-                    return Err(format!(
-                        "Integration '{}' has invalid kind '{}': expected 'inbound' or 'outbound'",
-                        state_int.name, other
-                    )
-                    .into());
-                }
-            };
+            let kind = parse_integration_kind(&state_int.kind).ok_or_else(|| {
+                format!(
+                    "Integration '{}' has invalid kind '{}': expected 'inbound' or 'outbound'",
+                    state_int.name, state_int.kind
+                )
+            })?;
 
             let git_host = GitHostType::from_path_segment(&state_int.git_host_type).ok_or_else(|| {
                 format!(
@@ -121,6 +115,7 @@ impl<'a> StateApplicator<'a> {
                 active.access_token = Set(encrypted_token);
                 active.github_installation = Set(github_installation);
                 active.created_by = Set(created_by_id);
+                active.managed = Set(true);
                 active.update(self.db).await?;
                 tracing::info!(name = %state_int.name, "Updated managed integration");
             } else {
@@ -137,6 +132,7 @@ impl<'a> StateApplicator<'a> {
                     github_installation,
                     created_by: created_by_id,
                     created_at: now(),
+                    managed: true,
                     ..Default::default()
                 }
                 .into_active_model();
