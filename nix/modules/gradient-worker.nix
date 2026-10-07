@@ -498,9 +498,6 @@ in {
           RestartSec = 10;
           KillMode = "mixed";
           LimitNOFILE = 65535;
-          # Secrets are mlock'd to keep them off swap. The lock is failing with EPERM below this
-          # limit and flooding the log on every SSH-key git operation.
-          LimitMEMLOCK = "128M";
           RestrictAddressFamilies = [ "AF_INET" "AF_INET6" "AF_UNIX" ];
           RestrictNamespaces = true;
           RestrictRealtime = true;
