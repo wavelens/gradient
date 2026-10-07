@@ -533,7 +533,7 @@ pub(crate) fn build_action_config(
             let room_id = string_field(a, "room_id")?;
             if !gradient_types::actions::is_matrix_room_id(&room_id) {
                 return Err(format!(
-                    "action '{}': room_id must be a Matrix room ID like !abc:example.org",
+                    "action '{}': room_id must be a Matrix room ID like !abc123 or !abc:example.org",
                     a.name
                 )
                 .into());

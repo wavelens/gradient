@@ -12051,7 +12051,7 @@ components:
         homeserver: { type: string, format: uri }
         room_id:
           type: string
-          description: "Room ID like `!abc:example.org`; aliases are not accepted"
+          description: "Room ID like `!abc123` (room version 12 and later) or `!abc:example.org`; aliases are not accepted"
         access_token:
           type: string
           nullable: true

@@ -125,7 +125,7 @@ web/app: hello-2.12.1 failed on 3f9c2ab
 
 - A dedicated bot account is the safest choice. The bot must have joined the room.
 - Encrypted rooms are not supported.
-- The **Room ID** is under room settings -> Advanced, in the form `!abc123:example.org`. Room aliases like `#ops:example.org` are rejected.
+- The **Room ID** is under room settings -> Advanced, in the form `!abc123:example.org`. Rooms of version 12 and later have IDs without the server part, like `!abc123`. Room aliases like `#ops:example.org` are rejected.
 
 A password login can return the access token of the bot account.
 

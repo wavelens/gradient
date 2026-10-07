@@ -118,9 +118,16 @@ impl ActionConfig {
 }
 
 pub fn is_matrix_room_id(s: &str) -> bool {
-    s.strip_prefix('!')
-        .and_then(|rest| rest.split_once(':'))
-        .is_some_and(|(local, server)| !local.is_empty() && !server.is_empty())
+    let Some(rest) = s.strip_prefix('!') else {
+        return false;
+    };
+    let (opaque, server) = rest
+        .split_once(':')
+        .map_or((rest, None), |(local, server)| (local, Some(server)));
+
+    !opaque.is_empty()
+        && server.is_none_or(|server| !server.is_empty())
+        && !rest.contains(char::is_whitespace)
 }
 
 #[cfg(test)]
@@ -167,9 +174,15 @@ mod tests {
     }
 
     #[test]
-    fn room_id_needs_bang_and_server() {
+    fn room_id_needs_a_bang_and_an_id_with_an_optional_server() {
         assert!(is_matrix_room_id("!abc:example.org"));
+        assert!(is_matrix_room_id(
+            "!31hneApxJ_1o-63DmFrpeqnkFfWppnzWso1JvH3ogLM"
+        ));
         assert!(!is_matrix_room_id("#ops:example.org"));
-        assert!(!is_matrix_room_id("!abc"));
+        assert!(!is_matrix_room_id("!"));
+        assert!(!is_matrix_room_id("!abc:"));
+        assert!(!is_matrix_room_id("!:example.org"));
+        assert!(!is_matrix_room_id("!abc def"));
     }
 }

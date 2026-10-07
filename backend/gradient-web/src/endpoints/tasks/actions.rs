@@ -134,7 +134,7 @@ fn validate_destination(cfg: &ActionConfig) -> WebResult<()> {
 
             if !is_matrix_room_id(room_id) {
                 return Err(WebError::unprocessable_entity(
-                    "room_id must be a Matrix room ID like !abc:example.org",
+                    "room_id must be a Matrix room ID like !abc123 or !abc:example.org",
                 ));
             }
         }
