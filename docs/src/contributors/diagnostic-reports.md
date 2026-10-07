@@ -180,6 +180,7 @@ vendor-registry: Queued, waiting on walked, blocking_deps = 1
 | `download` | `NarFetch` |
 | `paths` | `Prefetch` without its `NarFetch` spans |
 | `build` | `Build` |
+| `substitute` | `SubstituteFetch` and `Download`, for jobs without a `Build` span |
 | `upload` | `Compress`, with `NarPush` and `UploadWait` inside |
 | `eval`, `total` | `dispatched_job.worker_elapsed_ms` |
 
@@ -187,6 +188,7 @@ vendor-registry: Queued, waiting on walked, blocking_deps = 1
 - The `zero` column will count jobs with an estimate of 0 that still took time.
 - The `fallbacks` lines name the inputs the estimate had to guess. Their ratios stand against the jobs without the guess.
 - `--element build` will list the build jobs, the worst estimate first.
+- The out of memory line will also count failed jobs. A build killed for memory will end its job.
 
 ## Schema Versions
 

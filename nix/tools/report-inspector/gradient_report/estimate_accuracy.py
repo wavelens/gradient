@@ -13,16 +13,17 @@ from statistics import median
 
 from .db import table_exists
 
-PREFETCH, BUILD, COMPRESS, NAR_FETCH = 8, 10, 11, 16
+PREFETCH, BUILD, COMPRESS, SUBSTITUTE_FETCH, DOWNLOAD, NAR_FETCH = 8, 10, 11, 14, 15, 16
 EVAL_KIND = 0
 COMPLETED = 0
 
-ELEMENTS = ("download", "paths", "build", "upload", "eval", "total")
+ELEMENTS = ("download", "paths", "build", "substitute", "upload", "eval", "total")
 INPUTS = ("paths", "nar_bytes", "output_nar_bytes")
 ESTIMATE_FIELD = {
     "download": "download_secs",
     "paths": "path_secs",
     "build": "build_secs",
+    "substitute": "build_secs",
     "upload": "upload_secs",
     "eval": "eval_secs",
 }
@@ -32,8 +33,8 @@ SECS_FIELDS = (
 FEEDS = {
     "missing_nar_size": ("download",),
     "missing_count": ("paths",),
-    "build_history": ("build", "eval"),
-    "core_score": ("build", "eval"),
+    "build_history": ("build", "substitute", "eval"),
+    "core_score": ("build", "substitute", "eval"),
     "download_speed": ("download",),
     "upload_speed": ("upload",),
     "storage_read_speed": ("download",),
@@ -51,7 +52,8 @@ SUBJECTS_SQL = (
 )
 OOM_KILLS_SQL = (
     "SELECT count(*) AS n FROM derivation_metric m "
-    "WHERE m.oom_killed = 1 AND m.worker_id = ? AND m.created_at BETWEEN ? AND ? "
+    "WHERE m.oom_killed = 1 AND m.worker_id = ? "
+    "AND m.created_at BETWEEN ? AND datetime(?, '+60 seconds') "
     "AND m.derivation IN (SELECT db.derivation FROM build_attempt a "
     "JOIN derivation_build db ON db.id = a.derivation_build WHERE a.dispatched_job = ?)"
 )
@@ -74,6 +76,7 @@ class Job:
     elements: dict[str, Pair]
     inputs: dict[str, Pair]
     build: bool
+    completed: bool
     oom_chance: float
     oom_kills: int
 
@@ -81,8 +84,10 @@ class Job:
 def estimate_accuracy(conn: sqlite3.Connection, element: str | None = None) -> str:
     jobs, skipped = _load(conn)
     if element is not None:
-        return "\n".join(_listing(jobs, element))
+        return "\n".join(_listing([j for j in jobs if j.completed], element))
 
+    builds = [j for j in jobs if j.build]
+    jobs = [j for j in jobs if j.completed]
     out = [f"estimate accuracy over {len(jobs)} completed jobs"]
     if skipped:
         out.append(f"{skipped} jobs recorded before estimates were stored")
@@ -90,7 +95,7 @@ def estimate_accuracy(conn: sqlite3.Connection, element: str | None = None) -> s
     for name in ELEMENTS:
         out += _worst(jobs, name)
     out += ["", *_table("input", INPUTS, jobs, lambda j: j.inputs, "")]
-    out += ["", _out_of_memory(jobs)]
+    out += ["", _out_of_memory(builds)]
     out += ["", "fallbacks", *_fallbacks(jobs)]
     return "\n".join(out)
 
@@ -102,25 +107,26 @@ def _load(conn: sqlite3.Connection) -> tuple[list[Job], int]:
     jobs: list[Job] = []
     skipped = 0
     for r in conn.execute(
-        "SELECT id, kind, worker_id, dispatched_at, finished_at, score_breakdown, worker_elapsed_ms "
-        "FROM dispatched_job WHERE outcome = ?",
-        (COMPLETED,),
+        "SELECT id, kind, outcome, worker_id, dispatched_at, finished_at, score_breakdown, worker_elapsed_ms "
+        "FROM dispatched_job WHERE outcome IS NOT NULL"
     ):
         estimate = _estimate(r["score_breakdown"])
         if estimate is None:
-            skipped += 1
+            skipped += r["outcome"] == COMPLETED
             continue
         elapsed = None if r["worker_elapsed_ms"] is None else r["worker_elapsed_ms"] / 1000
         build = r["kind"] != EVAL_KIND
+        completed = r["outcome"] == COMPLETED
         s = spans.get(r["id"], Spans())
         jobs.append(
             Job(
                 subject=subjects.get(r["id"], r["id"]) if build else "evaluation",
                 worker=names.get(r["worker_id"], r["worker_id"]),
                 fallbacks=estimate.get("fallbacks", []),
-                elements=_build_elements(estimate, s, elapsed) if build else _eval_elements(estimate, elapsed),
-                inputs=_inputs(estimate, s) if build else {},
+                elements=_elements(build, estimate, s, elapsed) if completed else {},
+                inputs=_inputs(estimate, s) if build and completed else {},
                 build=build,
+                completed=completed,
                 oom_chance=estimate.get("oom_chance", 0.0),
                 oom_kills=_oom_kills(conn, r) if build else 0,
             )
@@ -165,12 +171,19 @@ def _compared(pairs: dict[str, Pair]) -> dict[str, Pair]:
     return {name: p for name, p in pairs.items() if p[0] > 0 or p[1] > 0}
 
 
+def _elements(build: bool, estimate: dict, s: Spans, elapsed: float | None) -> dict[str, Pair]:
+    return _build_elements(estimate, s, elapsed) if build else _eval_elements(estimate, elapsed)
+
+
 def _build_elements(estimate: dict, s: Spans, elapsed: float | None) -> dict[str, Pair]:
     fetch = s.secs.get(NAR_FETCH, 0.0)
+    built = s.secs.get(BUILD, 0.0)
+    substituted = s.secs.get(SUBSTITUTE_FETCH, 0.0) + s.secs.get(DOWNLOAD, 0.0)
+    run = "build" if built > 0 or substituted <= 0 else "substitute"
     actual = {
         "download": fetch,
         "paths": max(s.secs.get(PREFETCH, 0.0) - fetch, 0.0),
-        "build": s.secs.get(BUILD, 0.0),
+        run: built if run == "build" else substituted,
         "upload": s.secs.get(COMPRESS, 0.0),
     }
     pairs = {name: (estimate.get(ESTIMATE_FIELD[name], 0.0), secs) for name, secs in actual.items()}
