@@ -16,7 +16,7 @@ flowchart LR
     host["Gitea / Forgejo"] -- webhook --> inbound["Inbound integration"]
     inbound --> trigger["Push (reporter) trigger"]
     trigger --> eval["Evaluation"]
-    eval --> action["Git Host Status Report action"]
+    eval --> action["Git Status action"]
     action --> outbound["Outbound integration"]
     outbound -- "API token" --> host
 ```
@@ -25,13 +25,13 @@ flowchart LR
 |---|---|---|
 | Direction | Git host -> Gradient | Gradient -> Git host |
 | Holds | Webhook secret, allowed source IPs | Endpoint URL, access token of a bot account |
-| Picked by | **Push (reporter)** and **Pull Request (reporter)** triggers | **Git Host Status Report** and **Open PR** actions |
+| Picked by | **Push (reporter)** and **Pull Request (reporter)** triggers | **Git Status** and **PR** actions |
 | Covers | Evaluations on push, pull request and release. `/gradient` comment commands | Commit statuses. Reactions to `/gradient` comments. Writer check of pull request authors. [Flake update](flake-updates.md) pull requests |
 | Without | Git host events never reach Gradient | No status on commits. `/gradient` comments ignored. All pull request authors count as non-writers |
 
 - A inbound integration can receive webhooks from all repositories of the project's tasks. Incoming events match tasks by the `owner/repo` part of the repository URL.
 - Outbound calls act as the token's account. Statuses and comments appear under that account's name.
-- Writer checks and comment reactions use the outbound integration of the task's **Git Host Status Report** action.
+- Writer checks and comment reactions use the outbound integration of the task's **Git Status** action.
 
 ## 1. Create the Integrations
 
@@ -127,7 +127,7 @@ Tasks connect the two integrations. Triggers point at the inbound integration, a
 
 === "UI"
 
-    New tasks get a **Push (reporter)** trigger and a **Git Host Status Report** action automatically. Two conditions apply.
+    New tasks get a **Push (reporter)** trigger and a **Git Status** action automatically. Two conditions apply.
 
     - Task created after both integrations.
     - A single inbound and a single outbound integration matching the repository host.
@@ -135,7 +135,7 @@ Tasks connect the two integrations. Triggers point at the inbound integration, a
     Other tasks need both added by hand.
 
     - **Triggers -> New Trigger**: **Push (reporter)** and, for pull requests, **Pull Request (reporter)**, each with the inbound integration.
-    - **Actions -> New Action**: **Git Host Status Report** with the outbound integration.
+    - **Actions -> New Action**: **Git Status** with the outbound integration.
 
 === "Declarative"
 
@@ -190,7 +190,7 @@ Only repository writers can issue `/gradient` commands. Accepted commands get a 
 | `403 forbidden_source_ip` | The Git host's address is missing from the integration's allowed source IPs |
 | `404` | Wrong project or integration name in the webhook URL, or an inbound integration without a secret |
 | `200`, but no evaluation | No task trigger is using this integration, or no task repository URL is matching |
-| No status on the commit | Task without **Git Host Status Report** action, or token without `write:repository` |
+| No status on the commit | Task without **Git Status** action, or token without `write:repository` |
 | 😕 on a maintainer's `/gradient` comment | Bot account without admin access to the repository |
 
 ## Next Steps

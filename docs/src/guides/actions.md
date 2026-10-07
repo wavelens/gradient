@@ -16,12 +16,12 @@ Mails, web requests and Matrix or Slack messages on evaluation and build events,
 
     | Type | Fields |
     |---|---|
-    | Send Mail | **Recipients**, comma-separated email addresses or `team:<name>`. Optional **Subject Template** |
-    | Send Web Request | **URL**. Optional **Token**, shown once after saving |
-    | Send Matrix Message | **Homeserver**, **Room ID**, **Access Token** |
-    | Send Slack Message | **Webhook URL** |
+    | Mail | **Recipients**, comma-separated email addresses or `team:<name>`. Optional **Subject Template** |
+    | Webhook | **URL**. Optional **Token**, shown once after saving |
+    | Matrix | **Homeserver**, **Room ID**, **Access Token** |
+    | Slack | **Webhook URL** |
 
-    **Send Mail** is available only with email configured on the server.
+    **Mail** is available only with email configured on the server.
 
     A `team:<name>` recipient is a [team](../concepts/teams.md) granted with users on the project. Its verified members get the mail.
 
@@ -140,9 +140,9 @@ curl -s -X POST https://matrix.example.org/_matrix/client/v3/login \
 - Slack apps with **Incoming Webhooks** enabled issue one URL per channel, under **Add New Webhook to Workspace**.
 - The URL is in the form `https://hooks.slack.com/services/T.../B.../...`.
 
-## Git Host Status Report
+## Git Status
 
-The **Git Host Status Report** action can post one check per step on each commit and pull request. The [Git host guides](github.md#4-wire-the-task) cover its setup.
+The **Git Status** action can post one check per step on each commit and pull request. The [Git host guides](github.md#4-wire-the-task) cover its setup.
 
 | Check | State |
 |---|---|
@@ -163,7 +163,7 @@ Evaluations started with `/gradient run <wildcard>` report as `gradient/<task>: 
 
 | Symptom | Fix |
 |---|---|
-| **Send Mail** missing from the type list | Configure [email](../reference/configuration.md#email) on the server |
+| **Mail** missing from the type list | Configure [email](../reference/configuration.md#email) on the server |
 | Delivery showing `connection refused` | The URL is unreachable from the server |
 | No deliveries | The action is inactive, or none of the events fired yet |
 | Matrix delivery showing `403` | The bot left the room, or the access token was revoked |
@@ -172,5 +172,5 @@ Evaluations started with `/gradient run <wildcard>` report as `gradient/<task>: 
 ## Next Steps
 
 - [Update Flake Inputs](flake-updates.md): pull requests that bump `flake.lock`
-- [Connect GitHub](github.md): commit statuses with the **Git Host Status Report** action
+- [Connect GitHub](github.md): commit statuses with the **Git Status** action
 - [Projects and Tasks](../concepts/projects-and-tasks.md): triggers and actions

@@ -25,6 +25,7 @@ import {
 import { WritableDirective, ManagedDisableDirective, AccessService } from '@shared/access';
 import { injectTaskAccess } from '@core/resolvers/inject-access';
 import {
+  ACTION_TYPE_LABEL,
   Action,
   ActionType,
   CreateActionRequest,
@@ -261,14 +262,7 @@ export class TaskActionsComponent implements OnInit {
   }
 
   typeLabel(type: ActionType): string {
-    switch (type) {
-      case 'send_mail': return 'Send Mail';
-      case 'send_web_request': return 'Web Request';
-      case 'git_host_status_report': return 'Git Host Status';
-      case 'open_pr': return 'Open PR';
-      case 'send_matrix_message': return 'Matrix';
-      case 'send_slack_message': return 'Slack';
-    }
+    return ACTION_TYPE_LABEL[type];
   }
 
   typeSeverity(type: ActionType): BadgeSeverity {
