@@ -532,11 +532,9 @@ for needle in ["myproject = {", "mytask = {", "maincache = {", "signing_key_file
 # resource type landed and that permissions / the API key are enforced.
 banner("Phase 8d: declarative state apply")
 
-# #349: secrets mlock without flooding the log once LimitMEMLOCK is granted.
-memlock = machine.succeed("systemctl show gradient-server -p LimitMEMLOCK --value").strip()
-assert int(memlock) >= 67108864, f"LimitMEMLOCK not raised: {memlock}"
+# #349: secrets mlock within the systemd default LimitMEMLOCK.
 assert "mlock failed" not in machine.succeed("journalctl -u gradient-server --no-pager"), \
-    "mlock warnings present despite raised LimitMEMLOCK"
+    "mlock warnings present under the default LimitMEMLOCK"
 
 # State user + password applied; superuser flag unlocks the admin export.
 time.sleep(8)
