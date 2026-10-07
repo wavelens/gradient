@@ -7,7 +7,7 @@ from __future__ import annotations
 import argparse
 import sys
 
-from . import commands, store_spec
+from . import commands, estimate_accuracy, store_spec
 from .db import NotAReport, UnsupportedSchema, open_report
 
 
@@ -24,6 +24,13 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("why-stuck", help="which gate holds each waiting build")
     sub.add_parser("workers", help="registration and connection history")
     sub.add_parser("manifest", help="what the report contains and what it left out")
+
+    accuracy = sub.add_parser(
+        "estimate-accuracy", help="how far each element of the time estimate is from the time the job took"
+    )
+    accuracy.add_argument(
+        "--element", choices=estimate_accuracy.ELEMENTS, help="list the jobs of an element, worst first"
+    )
 
     failed = sub.add_parser("failed", help="failed attempts, and one attempt's log")
     failed.add_argument("--log", metavar="ATTEMPT", help="print this attempt's log")
@@ -72,6 +79,8 @@ def main(argv: list[str] | None = None) -> int:
             print(commands.manifest(conn))
         case "failed":
             print(commands.failed(conn, args.log))
+        case "estimate-accuracy":
+            print(estimate_accuracy.estimate_accuracy(conn, args.element))
         case "sql":
             print(commands.sql(conn, args.query))
         case "store-spec":
