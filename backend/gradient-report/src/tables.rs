@@ -41,6 +41,7 @@ pub fn redact_value(
         ("evaluation_metric", "worker_id")
         | ("phase_event", "worker_id")
         | ("dispatched_job", "worker_id")
+        | ("derivation_metric", "worker_id")
         | ("worker_connection", "worker_id")
         | ("worker_sample", "worker_id")
         | ("worker_registration", "worker_id") => r.identity(&v, "worker"),
@@ -335,8 +336,8 @@ pub fn eval_scope_tables() -> &'static [TableSpec] {
         ),
         spec!(
             "dispatched_job",
-            "CREATE TABLE dispatched_job (id TEXT, kind INTEGER, evaluation_id TEXT, project TEXT, task TEXT, worker_id TEXT, score REAL, queued_at TEXT, ready_at TEXT, dispatched_at TEXT, finished_at TEXT, outcome INTEGER, score_breakdown TEXT, worker_context TEXT, job_context TEXT, candidates TEXT, created_at TEXT, instance_context TEXT)",
-            "SELECT id::text, kind::text, evaluation_id::text, project::text, task::text, worker_id::text, score::text, queued_at::text, ready_at::text, dispatched_at::text, finished_at::text, outcome::text, score_breakdown::text, worker_context::text, job_context::text, candidates::text, created_at::text, instance_context::text FROM dispatched_job WHERE evaluation_id = $1",
+            "CREATE TABLE dispatched_job (id TEXT, kind INTEGER, evaluation_id TEXT, project TEXT, task TEXT, worker_id TEXT, score REAL, queued_at TEXT, ready_at TEXT, dispatched_at TEXT, finished_at TEXT, outcome INTEGER, score_breakdown TEXT, worker_context TEXT, job_context TEXT, candidates TEXT, created_at TEXT, instance_context TEXT, worker_elapsed_ms INTEGER)",
+            "SELECT id::text, kind::text, evaluation_id::text, project::text, task::text, worker_id::text, score::text, queued_at::text, ready_at::text, dispatched_at::text, finished_at::text, outcome::text, score_breakdown::text, worker_context::text, job_context::text, candidates::text, created_at::text, instance_context::text, worker_elapsed_ms::text FROM dispatched_job WHERE evaluation_id = $1",
             "the evaluation",
             [
                 "id",
@@ -356,7 +357,8 @@ pub fn eval_scope_tables() -> &'static [TableSpec] {
                 "job_context",
                 "candidates",
                 "created_at",
-                "instance_context"
+                "instance_context",
+                "worker_elapsed_ms"
             ]
         ),
         spec!(
@@ -374,6 +376,27 @@ pub fn eval_scope_tables() -> &'static [TableSpec] {
                 "end_ms",
                 "paths",
                 "bytes",
+                "created_at"
+            ]
+        ),
+        spec!(
+            "derivation_metric",
+            "CREATE TABLE derivation_metric (id TEXT, derivation TEXT, worker_id TEXT, build_time_ms INTEGER, peak_ram_mb INTEGER, oom_killed INTEGER, concurrent_builds INTEGER, cpu_core_score INTEGER, created_at TEXT)",
+            concat!(
+                "WITH w AS (SELECT created_at AS started, COALESCE(finished_at, (now() AT TIME ZONE 'UTC')) AS ended FROM evaluation WHERE id = $1) SELECT m.id::text, m.derivation::text, m.worker_id::text, m.build_time_ms::text, m.peak_ram_mb::text, m.oom_killed::int::text, m.concurrent_builds::text, m.cpu_core_score::text, m.created_at::text FROM derivation_metric m, w WHERE m.derivation IN (",
+                own_derivations!(),
+                ") AND m.created_at BETWEEN w.started AND w.ended"
+            ),
+            "the evaluation's own derivations, measured while it ran",
+            [
+                "id",
+                "derivation",
+                "worker_id",
+                "build_time_ms",
+                "peak_ram_mb",
+                "oom_killed",
+                "concurrent_builds",
+                "cpu_core_score",
                 "created_at"
             ]
         ),
@@ -707,6 +730,21 @@ mod tests {
             .chain(instance_tables())
             .find(|s| s.name == name)
             .expect("spec exists")
+    }
+
+    #[test]
+    fn derivation_metrics_are_the_evaluations_own_while_it_ran() {
+        let sql = spec_named("derivation_metric").sql;
+        assert!(
+            sql.contains(
+                "m.derivation IN (SELECT derivation FROM build_job WHERE evaluation = $1)"
+            ),
+            "{sql}"
+        );
+        assert!(
+            sql.contains("m.created_at BETWEEN w.started AND w.ended"),
+            "{sql}"
+        );
     }
 
     #[test]
