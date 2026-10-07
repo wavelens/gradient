@@ -28,6 +28,7 @@ const baseIntegration: Integration = {
   allowed_ips: [],
   created_by: 'u',
   created_at: '2026-01-01T00:00:00Z',
+  managed: false,
 };
 
 const githubOutbound: Integration = {
@@ -45,6 +46,7 @@ const githubOutbound: Integration = {
   created_at: '2026-01-01T00:00:00Z',
   installation_id: 99999,
   account_login: 'acme-project',
+  managed: false,
 };
 
 const githubInbound: Integration = {
@@ -125,7 +127,7 @@ describe('IntegrationsComponent - access gating', () => {
     expect(findByText(fixture.nativeElement, 'delete')).toBeNull();
   });
 
-  it('shows but disables New Integration / Edit / Delete under state-managed access', async () => {
+  it('disables New Integration in a state-managed project but keeps Edit / Delete of an unmanaged integration', async () => {
     const fixture = setup({ managed: true, canEdit: true, canTrigger: true }, [baseIntegration]);
     await settled(fixture);
     const newBtn = findByText(fixture.nativeElement, 'new integration') as HTMLButtonElement | null;
@@ -136,8 +138,21 @@ describe('IntegrationsComponent - access gating', () => {
     const deleteButtons = findAllByText(fixture.nativeElement, 'delete');
     expect(editButtons.length).toBeGreaterThan(0);
     expect(deleteButtons.length).toBeGreaterThan(0);
-    expect(editButtons.every((b) => b.disabled)).toBe(true);
-    expect(deleteButtons.every((b) => b.disabled)).toBe(true);
+    expect(editButtons.some((b) => b.disabled)).toBe(false);
+    expect(deleteButtons.some((b) => b.disabled)).toBe(false);
+  });
+
+  it('shows but disables Edit / Delete of a state-managed integration', async () => {
+    const fixture = setup({ managed: false, canEdit: true, canTrigger: true }, [
+      { ...baseIntegration, managed: true },
+    ]);
+    await settled(fixture);
+    const editButtons = findAllByText(fixture.nativeElement, 'edit');
+    const deleteButtons = findAllByText(fixture.nativeElement, 'delete');
+    expect(editButtons.length).toBeGreaterThan(0);
+    expect(deleteButtons.length).toBeGreaterThan(0);
+    expect(editButtons.some((b) => !b.disabled)).toBe(false);
+    expect(deleteButtons.some((b) => !b.disabled)).toBe(false);
   });
 
   it('shows working New Integration / Edit / Delete under full access', async () => {

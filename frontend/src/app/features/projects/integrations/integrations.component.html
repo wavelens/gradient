@@ -85,7 +85,7 @@
                       severity="secondary"
                       size="small"
                       (click)="openEditDialog(integration)"
-                      [appManagedDisable]="access()"
+                      [appManagedDisable]="integrationAccess().get(integration.id)"
                     ></button>
                   }
                   <button
@@ -98,7 +98,7 @@
                     [loading]="deletingId() === integration.id"
                     [disabled]="deletingId() !== null"
                     (click)="deleteIntegration(integration)"
-                    [appManagedDisable]="access()"
+                    [appManagedDisable]="integrationAccess().get(integration.id)"
                   ></button>
                 </div>
               </div>

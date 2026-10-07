@@ -23,6 +23,7 @@ export interface Integration {
   created_at: string;
   installation_id?: number | null;
   account_login?: string | null;
+  managed: boolean;
 }
 
 /** Credential-free integration handle returned by the project-member summary
