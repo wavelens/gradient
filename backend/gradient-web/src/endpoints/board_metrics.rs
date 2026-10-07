@@ -730,9 +730,15 @@ mod tests {
             );
             assert!(sql.contains("team_project tp"), "{sql}");
         }
-        assert!(super::board_network_sql(Some("'p'")).contains(
-            "wr.worker_id = s.worker_id AND wr.display_name <> '' AND wr.peer_id IN ('p')"
-        ));
+        let network = super::board_network_sql(Some("'p'"));
+        assert!(
+            network.contains("wr.worker_id = s.worker_id AND wr.peer_id IN ('p')"),
+            "{network}"
+        );
+        assert!(
+            network.contains("tw.worker_id = s.worker_id AND tw.team IN"),
+            "{network}"
+        );
     }
 
     #[test]

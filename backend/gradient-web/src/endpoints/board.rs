@@ -859,15 +859,28 @@ pub struct ExpensiveBuild {
 }
 
 pub(crate) fn worker_name_sql(worker_col: &str, project_filter: Option<&str>) -> String {
-    let scope = project_filter
-        .map(|list| format!(" AND wr.peer_id IN ({list})"))
+    let (registration_scope, team_scope) = project_filter
+        .map(|list| {
+            (
+                format!(" AND wr.peer_id IN ({list})"),
+                format!(
+                    " AND tw.team IN (SELECT tp.team FROM team_project tp \
+                     WHERE tp.includes_workers AND tp.project IN ({list}))"
+                ),
+            )
+        })
         .unwrap_or_default();
 
     format!(
         "LEFT JOIN LATERAL ( \
-           SELECT wr.display_name FROM worker_registration wr \
-           WHERE wr.worker_id = {worker_col} AND wr.display_name <> ''{scope} \
-           ORDER BY wr.active DESC, wr.created_at DESC LIMIT 1 \
+           SELECT n.display_name FROM ( \
+             SELECT wr.display_name, wr.active, wr.created_at FROM worker_registration wr \
+             WHERE wr.worker_id = {worker_col}{registration_scope} \
+             UNION ALL \
+             SELECT tw.display_name, tw.active, tw.created_at FROM team_worker tw \
+             WHERE tw.worker_id = {worker_col}{team_scope} \
+           ) n WHERE n.display_name <> '' \
+           ORDER BY n.active DESC, n.created_at DESC LIMIT 1 \
          ) wn ON true"
     )
 }
@@ -1910,14 +1923,22 @@ mod tests {
     }
 
     #[test]
-    fn worker_names_come_from_the_callers_own_registrations() {
+    fn worker_names_come_from_the_callers_own_registrations_and_team_workers() {
         let scoped = worker_name_sql("r.worker", Some(SCOPE));
         assert!(scoped.contains("wr.worker_id = r.worker"), "sql = {scoped}");
+        assert!(scoped.contains("tw.worker_id = r.worker"), "sql = {scoped}");
         assert!(
             scoped.contains(&format!("wr.peer_id IN ({SCOPE})")),
             "sql = {scoped}"
         );
-        assert!(!worker_name_sql("r.worker", None).contains("peer_id"));
+        assert!(
+            scoped.contains(&format!(
+                "WHERE tp.includes_workers AND tp.project IN ({SCOPE})"
+            )),
+            "sql = {scoped}"
+        );
+        let unscoped = worker_name_sql("r.worker", None);
+        assert!(!unscoped.contains("peer_id") && !unscoped.contains("team_project"));
 
         for sql in [
             expensive_jobs_sql(30, Some(SCOPE)),
