@@ -750,7 +750,7 @@ pub async fn evaluate_derivations_with(
 
     debug!(repo = %repo, "listing flake derivations");
     let FlakeDiscovery {
-        attrs,
+        derivations,
         mut warnings,
         errors: mut failed,
     } = match unless_aborted(
@@ -776,7 +776,7 @@ pub async fn evaluate_derivations_with(
         return Err(anyhow::Error::new(corrupt));
     }
 
-    if attrs.is_empty() {
+    if derivations.is_empty() {
         warn!("no derivations found for evaluation");
         report_failed_attrs(updater, &failed).await?;
         updater
@@ -788,27 +788,8 @@ pub async fn evaluate_derivations_with(
         });
     }
 
-    let (resolved, resolve_warnings) = match unless_aborted(
-        abort,
-        resolver.resolve_derivation_paths(repo.clone(), attrs, &eval_overrides),
-    )
-    .await
-    {
-        Err(e) if e.is::<crate::executor::failure::JobAborted>() => return Err(e),
-        Ok(v) => v,
-        Err(e) => {
-            let err_msg = format!("resolve_derivation_paths failed: {:#}", e);
-            warn!(error = %err_msg, "reporting eval error to server");
-            let _ = updater
-                .report_eval_result(vec![], warnings, vec![err_msg])
-                .await;
-            return Err(e).context("resolve_derivation_paths failed");
-        }
-    };
-    warnings.extend(resolve_warnings);
-
     let mut root_drvs: Vec<(String, String)> = Vec::new();
-    for (attr, result) in resolved {
+    for (attr, result) in derivations {
         match result {
             Ok((drv_path, _refs)) => root_drvs.push((attr, drv_path)),
             Err(e) => failed.push(AttrError {
@@ -1354,15 +1335,6 @@ mod tests {
             _: Vec<String>,
             _: &[(String, String)],
         ) -> Result<FlakeDiscovery> {
-            std::future::pending().await
-        }
-
-        async fn resolve_derivation_paths(
-            &self,
-            _: String,
-            _: Vec<String>,
-            _: &[(String, String)],
-        ) -> Result<(Vec<gradient_sources::ResolvedDerivation>, Vec<String>)> {
             std::future::pending().await
         }
 

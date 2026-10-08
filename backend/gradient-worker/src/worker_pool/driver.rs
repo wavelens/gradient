@@ -55,22 +55,12 @@ pub async fn run_eval_driver(requests_path: &str, eval_cache_dir: &str) -> Resul
                 .map(|l| {
                     json!({
                         "kind": "list_ok",
-                        "attrs": l.attrs,
+                        "items": l.items,
                         "deferred": l.deferred,
                         "warnings": l.warnings,
                         "errors": l.errors,
                     })
                 }),
-            EvalRequest::Resolve {
-                repository,
-                attrs,
-                input_overrides,
-            } => {
-                let (items, end) = worker.resolve(repository, attrs, input_overrides).await;
-                end.map(|(warnings, _stats)| {
-                    json!({"kind": "resolve_ok", "items": items, "warnings": warnings})
-                })
-            }
             EvalRequest::Fingerprint {
                 repository,
                 input_overrides,

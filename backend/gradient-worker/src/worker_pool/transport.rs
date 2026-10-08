@@ -48,7 +48,7 @@ impl std::error::Error for EvalErrorResponse {}
 
 #[derive(Debug, Default)]
 pub(super) struct Listing {
-    pub(super) attrs: Vec<String>,
+    pub(super) items: Vec<ResolvedItem>,
     pub(super) deferred: Vec<DiscoveryShard>,
     pub(super) warnings: Vec<String>,
     pub(super) errors: Vec<AttrError>,
@@ -328,13 +328,13 @@ impl EvalWorker {
             "List",
             |resp| match resp {
                 EvalResponse::ListOk {
-                    attrs,
+                    items,
                     deferred,
                     warnings,
                     errors,
                     stats,
                 } => Ok(Listing {
-                    attrs,
+                    items,
                     deferred,
                     warnings,
                     errors,
@@ -406,50 +406,6 @@ impl EvalWorker {
             .await;
         *self.downloads.lock() = None;
         fetched
-    }
-
-    pub(super) async fn resolve(
-        &mut self,
-        repository: String,
-        attrs: Vec<String>,
-        input_overrides: Vec<(String, String)>,
-    ) -> (Vec<ResolvedItem>, Result<(Vec<String>, Option<StatsDelta>)>) {
-        let mut items = Vec::new();
-        let end = self
-            .resolve_inner(repository, attrs, input_overrides, &mut items)
-            .await;
-        (items, end)
-    }
-
-    async fn resolve_inner(
-        &mut self,
-        repository: String,
-        attrs: Vec<String>,
-        input_overrides: Vec<(String, String)>,
-        items: &mut Vec<ResolvedItem>,
-    ) -> Result<(Vec<String>, Option<StatsDelta>)> {
-        self.send(&EvalRequest::Resolve {
-            repository,
-            attrs,
-            input_overrides,
-        })
-        .await?;
-        loop {
-            match self.recv().await? {
-                EvalResponse::ResolveItem { item } => items.push(item),
-                EvalResponse::ResolveEnd { warnings, stats } => {
-                    self.in_flight = false;
-                    return Ok((warnings, stats));
-                }
-                EvalResponse::Err { message } => {
-                    self.in_flight = false;
-                    anyhow::bail!("eval worker: {message}")
-                }
-                other => {
-                    anyhow::bail!("eval worker: unexpected response to Resolve: {other:?}")
-                }
-            }
-        }
     }
 
     pub(super) async fn shutdown(mut self) {
