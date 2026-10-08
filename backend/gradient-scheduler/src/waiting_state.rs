@@ -95,6 +95,13 @@ pub(crate) async fn refresh_waiting_state(
         .await
         .context("read evaluation shared build counters")?;
     lock(memo).retain(&ids.iter().copied().collect::<HashSet<_>>());
+    let evaluating: Vec<EvaluationId> = evals
+        .iter()
+        .filter(|e| e.status == EvaluationStatus::EvaluatingDerivation)
+        .filter(|e| !tasks.wait_for_workers(e))
+        .map(|e| e.id)
+        .collect();
+    fail_unbuildable_imports(state, &evaluating, worker_caps, now).await?;
 
     for eval in evals {
         let eval_counters = counters.get(&eval.id).copied().unwrap_or_default();
@@ -197,6 +204,42 @@ pub(crate) async fn refresh_waiting_state(
     }
 
     Ok(unbuildables)
+}
+
+async fn fail_unbuildable_imports(
+    state: &Arc<ServerState>,
+    evaluations: &[EvaluationId],
+    worker_caps: &[(Vec<String>, Vec<String>)],
+    now: chrono::NaiveDateTime,
+) -> Result<()> {
+    let imports = gradient_db::evaluations::imports::pending_imports(&state.worker_db, evaluations)
+        .await
+        .context("fetch pending imports of evaluating evaluations")?;
+    if imports.is_empty() {
+        return Ok(());
+    }
+
+    let checker = BuildabilityChecker::load(state, &imports).await?;
+    for (shared_build, unmet) in checker.unbuildable_imports(&imports, worker_caps, now) {
+        let error = format!("no connected worker provides {unmet}");
+        info!(%shared_build, %error, "failing an import no worker can build");
+        if let Err(e) = state
+            .graph
+            .transition(gradient_graph::Transition::BuildFailed {
+                shared_build,
+                log_banner: error.clone(),
+                error,
+                kind: gradient_wire::types::BuildFailureKind::Permanent,
+                missing_paths: Vec::new(),
+                metrics: None,
+            })
+            .await
+        {
+            error!(error = %e, %shared_build, "failing an unbuildable import did not reach the graph writer");
+        }
+    }
+
+    Ok(())
 }
 
 #[derive(Default)]

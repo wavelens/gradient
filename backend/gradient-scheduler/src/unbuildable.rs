@@ -9,7 +9,7 @@ use gradient_types::*;
 
 /// The grace is keeping a server restart or worker redeploy from aborting everything in flight
 /// before the pool is back.
-const UNBUILDABLE_GRACE_SECS: i64 = 300;
+pub(crate) const UNBUILDABLE_GRACE_SECS: i64 = 300;
 
 pub(crate) struct Unbuildable {
     pub evaluation: MEvaluation,

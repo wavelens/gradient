@@ -137,6 +137,37 @@ impl BuildabilityChecker {
             .unwrap_or_default()
     }
 
+    pub(crate) fn unbuildable_imports(
+        &self,
+        imports: &[MDerivationBuild],
+        worker_caps: &[(Vec<String>, Vec<String>)],
+        now: chrono::NaiveDateTime,
+    ) -> Vec<(DerivationBuildId, UnmetRequirement)> {
+        imports
+            .iter()
+            .filter(|b| {
+                (now - b.updated_at).num_seconds() >= crate::unbuildable::UNBUILDABLE_GRACE_SECS
+            })
+            .filter_map(|b| {
+                let drv = self.drv_by_id.get(&b.derivation)?;
+                (!self.runnable(b, drv, worker_caps)).then(|| {
+                    (
+                        b.id,
+                        UnmetRequirement {
+                            architecture: drv.architecture.clone(),
+                            required_features: self
+                                .required_features_for(&b.derivation)
+                                .into_iter()
+                                .map(str::to_owned)
+                                .collect(),
+                            build_count: 1,
+                        },
+                    )
+                })
+            })
+            .collect()
+    }
+
     pub(crate) fn compute_waiting_reason(
         &self,
         shared_builds: &[MDerivationBuild],
@@ -425,5 +456,31 @@ mod tests {
             shared_builds,
             &[(vec!["aarch64-linux".to_string()], vec![])]
         ));
+    }
+
+    #[test]
+    fn an_import_no_worker_can_build_is_unbuildable_once_the_grace_passed() {
+        let now = gradient_types::now();
+        let aged = |drv_id, secs| MDerivationBuild {
+            updated_at: now - chrono::Duration::seconds(secs),
+            status: BuildStatus::Created,
+            ..build_for(drv_id, EvaluationId::now_v7())
+        };
+        let darwin = drv(DerivationId::now_v7(), "aarch64-darwin");
+        let linux = drv(DerivationId::now_v7(), "x86_64-linux");
+        let grace = crate::unbuildable::UNBUILDABLE_GRACE_SECS;
+        let (old, fresh, buildable) = (
+            aged(darwin.id, grace),
+            aged(darwin.id, grace - 1),
+            aged(linux.id, grace),
+        );
+        let checker = checker_with(vec![darwin, linux], vec![]);
+        let caps = vec![(vec!["x86_64-linux".to_string()], vec![])];
+
+        let unbuildable = checker.unbuildable_imports(&[old.clone(), fresh, buildable], &caps, now);
+
+        assert_eq!(unbuildable.len(), 1, "{unbuildable:?}");
+        assert_eq!(unbuildable[0].0, old.id);
+        assert_eq!(unbuildable[0].1.architecture, "aarch64-darwin");
     }
 }
