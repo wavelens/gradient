@@ -268,6 +268,7 @@ mod tests {
             project_work_share: None,
             prioritized: false,
             build_request: false,
+            ifd: false,
             rescore_count: 0,
             now: now(),
         };
@@ -284,6 +285,7 @@ mod tests {
             project_work_share: None,
             prioritized: false,
             build_request: false,
+            ifd: false,
             rescore_count: 0,
             now: now(),
         };
@@ -330,6 +332,7 @@ mod tests {
             project_work_share: None,
             prioritized: false,
             build_request: false,
+            ifd: false,
             rescore_count: 0,
             now: now(),
         };
@@ -388,6 +391,7 @@ mod tests {
             project_work_share: None,
             prioritized: false,
             build_request: false,
+            ifd: false,
             rescore_count: 0,
             now: now(),
         };
@@ -435,6 +439,7 @@ mod tests {
             project_work_share: None,
             prioritized: false,
             build_request: false,
+            ifd: false,
             rescore_count: 0,
             now: now(),
         };
@@ -451,6 +456,7 @@ mod tests {
             project_work_share: None,
             prioritized: false,
             build_request: false,
+            ifd: false,
             rescore_count: 0,
             now: now(),
         };
@@ -479,6 +485,7 @@ mod tests {
             project_work_share: None,
             prioritized: false,
             build_request: false,
+            ifd: false,
             rescore_count: 0,
             now: now(),
         };
@@ -549,6 +556,7 @@ mod tests {
             project_work_share: None,
             prioritized: false,
             build_request: false,
+            ifd: false,
             rescore_count: 0,
             now: now(),
         };
@@ -580,6 +588,7 @@ mod tests {
             project_work_share: None,
             prioritized: false,
             build_request: false,
+            ifd: false,
             rescore_count: 0,
             now: now(),
         };

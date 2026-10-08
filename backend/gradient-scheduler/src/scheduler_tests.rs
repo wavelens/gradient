@@ -126,6 +126,7 @@ pub(crate) fn build_job(
         rescore_count: 0,
         prioritized: false,
         build_request: false,
+        ifd: false,
         pname: None,
         substitute: false,
     }

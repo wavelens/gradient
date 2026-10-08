@@ -175,6 +175,7 @@ struct BuildAssignMaps {
     driving_eval: HashMap<DerivationBuildId, EvaluationId>,
     prioritized_by_eval: HashSet<DerivationBuildId>,
     build_request_by_eval: HashSet<DerivationBuildId>,
+    ifd_lifted: HashSet<DerivationBuildId>,
     config: AssignConfig,
 }
 
@@ -287,6 +288,11 @@ impl BuildAssignMaps {
             lifted_by_live_eval(&jobs_by_shared_build, &evaluations, |ev| {
                 ev.task.is_some_and(|t| build_request_tasks.contains(&t))
             });
+
+        let shared_build_ids: Vec<DerivationBuildId> = shared_builds.iter().map(|b| b.id).collect();
+        let ifd_lifted =
+            gradient_db::scheduling::priority::import_lifted_shared_builds(db, &shared_build_ids)
+                .await?;
 
         let feature_edges = gradient_db::fetch_in_chunks(&drv_ids, |chunk| async move {
             EDerivationFeature::find()
@@ -445,6 +451,7 @@ impl BuildAssignMaps {
             driving_eval,
             prioritized_by_eval,
             build_request_by_eval,
+            ifd_lifted,
             config: AssignConfig::from_state(state),
         })
     }
@@ -573,6 +580,7 @@ impl BuildAssignMaps {
             rescore_count: 0,
             prioritized,
             build_request: self.build_request_by_eval.contains(&shared_build.id),
+            ifd: self.ifd_lifted.contains(&shared_build.id),
             pname: derivation.pname.clone(),
             substitute,
         };

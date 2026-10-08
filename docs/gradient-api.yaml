@@ -14987,6 +14987,7 @@ components:
         project_work_share: { type: number, nullable: true }
         prioritized: { type: boolean }
         build_request: { type: boolean, description: The job belongs to an evaluation of the project's build-request task. }
+        ifd: { type: boolean, description: True for a build of a derivation a running evaluation imported, or of an unfinished dependency of it. }
         rescore_count: { type: integer }
         queued_at: { type: string }
         ready_at: { type: string }

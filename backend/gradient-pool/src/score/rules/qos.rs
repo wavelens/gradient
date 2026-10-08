@@ -11,6 +11,7 @@ use crate::score::rule::{JobContext, ScoreRule, WorkerContext};
 pub struct QosRule {
     pub prioritized: f64,
     pub build_request: f64,
+    pub ifd: f64,
 }
 
 impl Default for QosRule {
@@ -18,6 +19,7 @@ impl Default for QosRule {
         Self {
             prioritized: crate::score::weights::QOS_PRIORITIZED,
             build_request: crate::score::weights::QOS_BUILD_REQUEST,
+            ifd: crate::score::weights::QOS_IFD,
         }
     }
 }
@@ -34,11 +36,13 @@ impl ScoreRule for QosRule {
         _instance: &InstanceContext,
     ) -> f64 {
         let lift = |on: bool, weight: f64| if on { weight } else { 0.0 };
-        lift(job.prioritized, self.prioritized) + lift(job.build_request, self.build_request)
+        lift(job.prioritized, self.prioritized)
+            + lift(job.build_request, self.build_request)
+            + lift(job.ifd, self.ifd)
     }
 
     fn description(&self) -> &'static str {
-        "Quality of service: lifts a job whose evaluation or dependent build a user prioritized above every unprioritized job, and a job of a build request above other jobs."
+        "Quality of service: lifts a job whose evaluation or dependent build a user prioritized above every unprioritized job, and a job of a build request above other jobs, and a build an evaluation imports, or a dependency of it, above other builds."
     }
 }
 
@@ -75,6 +79,7 @@ mod tests {
             project_work_share: None,
             prioritized,
             build_request: false,
+            ifd: false,
             rescore_count: 0,
             now: now(),
         }
@@ -121,5 +126,28 @@ mod tests {
         assert!(score(true, false) > score(false, true));
         assert!(score(false, true) > score(false, false));
         assert!(score(true, true) > score(true, false));
+    }
+
+    #[test]
+    fn an_ifd_job_gains_the_lift_and_stacks_with_prioritized() {
+        let qos = QosRule::default();
+        let job = build_job();
+        let inst = InstanceContext::default();
+        let score = |prioritized, ifd| {
+            let c = JobContext {
+                ifd,
+                ..ctx(&job, prioritized)
+            };
+            qos.score(&c, &worker(), &inst)
+        };
+        assert_eq!(
+            score(false, true) - score(false, false),
+            QosRule::default().ifd
+        );
+        assert_eq!(
+            score(true, true),
+            QosRule::default().prioritized + QosRule::default().ifd
+        );
+        assert!(score(true, false) > score(false, true));
     }
 }
