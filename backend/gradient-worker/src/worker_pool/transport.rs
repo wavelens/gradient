@@ -217,7 +217,13 @@ impl EvalWorker {
                     self.thunks.tick(self.spawned_pid(), delta.nr_thunks)
                 }
                 EvalResponse::NeedsBuild { derived_paths } => {
-                    let error = imports.build_imports(derived_paths).await.err();
+                    let error = tokio::select! {
+                        built = imports.build_imports(derived_paths) => built.err(),
+                        status = self.child.wait() => anyhow::bail!(
+                            "eval worker exited during an import: {}",
+                            status.map_or_else(|e| e.to_string(), |s| s.to_string())
+                        ),
+                    };
                     self.send(&EvalRequest::BuildDone { error }).await?;
                 }
                 other => return Ok(other),

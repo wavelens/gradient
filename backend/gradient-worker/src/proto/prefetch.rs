@@ -692,13 +692,21 @@ pub async fn pull_cached(
         .chain(&by_request)
         .map(|cp| cp.path.clone())
         .collect();
-    if cached.is_empty() {
-        return Ok(());
+    let uncached: Vec<&String> = missing.iter().filter(|p| !cached.contains(p)).collect();
+    if !cached.is_empty() {
+        prefetcher
+            .fetch_closure(cached, &mut Progress::silent())
+            .await?;
     }
-
-    prefetcher
-        .fetch_closure(cached, &mut Progress::silent())
-        .await?;
+    anyhow::ensure!(
+        uncached.is_empty(),
+        "not in the cache: {}",
+        uncached
+            .iter()
+            .map(|p| p.as_str())
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
     Ok(())
 }
 
