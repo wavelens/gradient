@@ -63,6 +63,8 @@ pub trait JobReporter: Send + Sync {
 
     async fn pull_paths(&self, paths: Vec<String>) -> Result<()>;
 
+    async fn request_import(&self, drv_paths: Vec<String>) -> Result<crate::types::ImportOutcome>;
+
     async fn report_building(&mut self, build_id: String) -> Result<()>;
     async fn report_build_output(
         &mut self,

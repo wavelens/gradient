@@ -14,6 +14,7 @@ use gradient_wire::messages::{
     CACHE_QUERY_MAX_PATHS, CACHE_QUERY_TIMEOUT, CACHE_QUERY_WINDOW, CachedPath, ClientMessage,
     QueryMode,
 };
+use gradient_wire::types::ImportOutcome;
 use tokio::sync::oneshot;
 
 use crate::connection::ProtoWriter;
@@ -94,6 +95,63 @@ pub fn deliver_known_derivations(
 
 pub fn forget_known_derivation_waiters_for_job(waiters: &KnownDerivationWaiters, job_id: &str) {
     waiters.lock().retain(|_, w| w.job_id != job_id);
+}
+
+pub struct ImportWaiter {
+    job_id: String,
+    reply: oneshot::Sender<ImportOutcome>,
+}
+
+pub type ImportWaiters = Arc<Mutex<HashMap<String, ImportWaiter>>>;
+
+pub fn register_import_waiter(
+    waiters: &ImportWaiters,
+    request_id: String,
+    job_id: String,
+) -> oneshot::Receiver<ImportOutcome> {
+    let (reply, rx) = oneshot::channel();
+    waiters
+        .lock()
+        .insert(request_id, ImportWaiter { job_id, reply });
+    rx
+}
+
+pub fn deliver_import_result(
+    waiters: &ImportWaiters,
+    request_id: &str,
+    outcome: ImportOutcome,
+) -> bool {
+    match waiters.lock().remove(request_id) {
+        Some(w) => {
+            let _ = w.reply.send(outcome);
+            true
+        }
+        None => false,
+    }
+}
+
+pub fn forget_import_waiters_for_job(waiters: &ImportWaiters, job_id: &str) {
+    waiters.lock().retain(|_, w| w.job_id != job_id);
+}
+
+pub async fn request_import(
+    job_id: &str,
+    writer: &ProtoWriter,
+    waiters: &ImportWaiters,
+    drv_paths: Vec<String>,
+) -> Result<ImportOutcome> {
+    let request_id = uuid::Uuid::now_v7().to_string();
+    let rx = register_import_waiter(waiters, request_id.clone(), job_id.to_owned());
+    writer
+        .send(ClientMessage::ImportRequest {
+            job_id: job_id.to_owned(),
+            request_id,
+            drv_paths,
+        })
+        .await?;
+    rx.await.map_err(|_| {
+        anyhow::anyhow!("import waiter dropped - the job ended or the connection closed")
+    })
 }
 
 #[derive(Clone, Debug)]
@@ -288,5 +346,29 @@ mod tests {
             vec!["/nix/store/d.drv".to_string()]
         ));
         assert_eq!(rx_b.try_recv(), Ok(vec!["/nix/store/d.drv".to_string()]));
+    }
+
+    #[test]
+    fn an_import_result_reaches_its_request_and_job_cleanup_drops_the_rest() {
+        use tokio::sync::oneshot::error::TryRecvError;
+        let waiters: ImportWaiters = Arc::new(Mutex::new(HashMap::new()));
+        let mut rx_a = register_import_waiter(&waiters, "r1".to_string(), "job-A".to_string());
+        let mut rx_b = register_import_waiter(&waiters, "r2".to_string(), "job-B".to_string());
+
+        assert!(deliver_import_result(
+            &waiters,
+            "r2",
+            ImportOutcome::Completed
+        ));
+        assert_eq!(rx_b.try_recv(), Ok(ImportOutcome::Completed));
+        assert!(!deliver_import_result(
+            &waiters,
+            "r2",
+            ImportOutcome::Completed
+        ));
+
+        forget_import_waiters_for_job(&waiters, "job-A");
+        assert_eq!(rx_a.try_recv(), Err(TryRecvError::Closed));
+        assert!(waiters.lock().is_empty());
     }
 }

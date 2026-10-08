@@ -230,6 +230,7 @@ mod tests {
             writer,
             cache_waiters,
             Arc::new(Mutex::new(HashMap::new())),
+            Arc::new(Mutex::new(HashMap::new())),
             NarReceiver::new(),
             EvalCacheReceiver::new(),
             None,
