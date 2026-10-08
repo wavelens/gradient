@@ -12,6 +12,7 @@ mod download;
 pub mod eval;
 pub(crate) mod failure;
 pub mod fetch;
+mod import;
 pub mod log_limit;
 mod progress_report;
 mod source;

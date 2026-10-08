@@ -25,7 +25,9 @@ use crate::proto::credentials::CredentialStore;
 use crate::proto::job::JobUpdater;
 use crate::proto::scorer::JobScorer;
 use gradient_worker_client::connection::{ProtoReader, ProtoWriter};
-use gradient_worker_client::correlation::{AssignmentHandle, CacheWaiters, KnownDerivationWaiters};
+use gradient_worker_client::correlation::{
+    AssignmentHandle, CacheWaiters, ImportWaiters, KnownDerivationWaiters,
+};
 
 use super::cluster::{ClusterChannels, ClusterHolds, HeldJob};
 use super::scoring::spawn_scoring_task;
@@ -209,6 +211,7 @@ pub(super) struct MessageLoopState {
     writer: ProtoWriter,
     cache_waiters: CacheWaiters,
     known_derivation_waiters: KnownDerivationWaiters,
+    import_waiters: ImportWaiters,
     nar_recv: gradient_worker_client::nar_recv::NarReceiver,
     eval_cache_recv: crate::proto::eval_cache_recv::EvalCacheReceiver,
     uploads: gradient_worker_client::upload::UploadClient,
@@ -253,6 +256,7 @@ impl MessageLoopState {
             writer,
             cache_waiters: Arc::new(Mutex::new(HashMap::new())),
             known_derivation_waiters: Arc::new(Mutex::new(HashMap::new())),
+            import_waiters: Arc::new(Mutex::new(HashMap::new())),
             nar_recv,
             eval_cache_recv: crate::proto::eval_cache_recv::EvalCacheReceiver::new(),
             jobs: JobRegistry {
@@ -397,8 +401,12 @@ impl MessageLoopState {
             | ServerMessage::NarAbort { .. } => {
                 warn!("a NAR frame reached the control dispatch");
             }
-            ServerMessage::ImportResult { job_id, .. } => {
-                warn!(%job_id, "ImportResult reached a worker without import support");
+            ServerMessage::ImportResult {
+                job_id,
+                request_id,
+                outcome,
+            } => {
+                self.on_import_result(job_id, request_id, outcome);
             }
         }
         Ok(())
@@ -418,6 +426,10 @@ impl MessageLoopState {
         );
         gradient_worker_client::correlation::forget_known_derivation_waiters_for_job(
             &self.known_derivation_waiters,
+            &job_id,
+        );
+        gradient_worker_client::correlation::forget_import_waiters_for_job(
+            &self.import_waiters,
             &job_id,
         );
         self.nar_recv.forget_job(&job_id);
@@ -705,6 +717,7 @@ impl MessageLoopState {
         let job_writer = self.writer.clone();
         let job_cache_waiters = Arc::clone(&self.cache_waiters);
         let job_known_derivation_waiters = Arc::clone(&self.known_derivation_waiters);
+        let job_import_waiters = Arc::clone(&self.import_waiters);
         let job_nar_recv = self.nar_recv.clone();
         let job_eval_cache_recv = self.eval_cache_recv.clone();
         let job_uploads = self.uploads.clone();
@@ -722,6 +735,7 @@ impl MessageLoopState {
                 job_writer,
                 job_cache_waiters,
                 job_known_derivation_waiters,
+                job_import_waiters,
                 job_nar_recv,
                 job_eval_cache_recv,
                 Some(job_store),
@@ -845,6 +859,21 @@ impl MessageLoopState {
             known,
         ) {
             debug!(%query_id, count, "KnownDerivations arrived after waiter cleared");
+        }
+    }
+
+    fn on_import_result(
+        &mut self,
+        job_id: String,
+        request_id: String,
+        outcome: gradient_wire::types::ImportOutcome,
+    ) {
+        if !gradient_worker_client::correlation::deliver_import_result(
+            &self.import_waiters,
+            &request_id,
+            outcome,
+        ) {
+            debug!(%job_id, %request_id, "ImportResult arrived after its waiter cleared");
         }
     }
 

@@ -15,8 +15,8 @@ use gradient_wire::messages::{
 };
 use gradient_wire::session::frame::BULK_CHUNK_SIZE;
 use gradient_worker_client::correlation::{
-    AssignmentHandle, CacheWaiters, KnownDerivationWaiters, cache_query_with_timeout,
-    known_derivations_with_timeout,
+    AssignmentHandle, CacheWaiters, ImportWaiters, KnownDerivationWaiters,
+    cache_query_with_timeout, known_derivations_with_timeout,
 };
 use tracing::debug;
 
@@ -29,7 +29,7 @@ use crate::proto::progress::{
 };
 use gradient_wire::traits::{EvalProgressSink, JobReporter};
 use gradient_wire::types::{
-    BuildProgressPhase, BuildStage, GrantTarget, UploadMetadata, UploadObject,
+    BuildProgressPhase, BuildStage, GrantTarget, ImportOutcome, UploadMetadata, UploadObject,
 };
 use gradient_worker_client::connection::ProtoWriter;
 use gradient_worker_client::nar_recv::{NarPayload, NarReceiver, NarUnavailable};
@@ -41,6 +41,7 @@ pub struct JobUpdater {
     pub(crate) writer: ProtoWriter,
     pub(crate) cache_waiters: CacheWaiters,
     pub(crate) known_derivation_waiters: KnownDerivationWaiters,
+    pub(crate) import_waiters: ImportWaiters,
     pub(crate) nar_recv: NarReceiver,
     pub(crate) eval_cache_recv: EvalCacheReceiver,
     pub(crate) store: Option<Arc<LocalNixStore>>,
@@ -88,6 +89,7 @@ impl JobUpdater {
         writer: ProtoWriter,
         cache_waiters: CacheWaiters,
         known_derivation_waiters: KnownDerivationWaiters,
+        import_waiters: ImportWaiters,
         nar_recv: NarReceiver,
         eval_cache_recv: EvalCacheReceiver,
         store: Option<Arc<LocalNixStore>>,
@@ -100,6 +102,7 @@ impl JobUpdater {
             writer,
             cache_waiters,
             known_derivation_waiters,
+            import_waiters,
             nar_recv,
             eval_cache_recv,
             store,
@@ -534,6 +537,17 @@ impl JobReporter for JobUpdater {
         crate::proto::prefetch::pull_cached(&store, paths, self).await
     }
 
+    #[tracing::instrument(level = "debug", skip_all, fields(job_id = %self.job_id, paths = drv_paths.len()))]
+    async fn request_import(&self, drv_paths: Vec<String>) -> Result<ImportOutcome> {
+        gradient_worker_client::correlation::request_import(
+            &self.job_id,
+            &self.writer,
+            &self.import_waiters,
+            drv_paths,
+        )
+        .await
+    }
+
     async fn report_building(&mut self, build_id: String) -> Result<()> {
         self.send_update(JobUpdateKind::Building { build_id }).await
     }
@@ -621,6 +635,7 @@ mod tests {
         let writer_for_uploads = writer.clone();
         let cache_waiters = Arc::new(Mutex::new(HashMap::new()));
         let known_derivation_waiters = Arc::new(Mutex::new(HashMap::new()));
+        let import_waiters = Arc::new(Mutex::new(HashMap::new()));
         let nar_recv = NarReceiver::new();
         let eval_cache_recv = EvalCacheReceiver::new();
         let updater = JobUpdater::new(
@@ -629,6 +644,7 @@ mod tests {
             writer,
             cache_waiters,
             known_derivation_waiters,
+            import_waiters,
             nar_recv,
             eval_cache_recv,
             None,

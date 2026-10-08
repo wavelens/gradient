@@ -673,19 +673,32 @@ pub async fn pull_cached(
     paths: Vec<String>,
     updater: &JobUpdater,
 ) -> Result<()> {
-    let entries = updater.query_cache(paths.clone(), QueryMode::Pull).await?;
-    let Classified {
-        by_url, by_request, ..
-    } = classify_cached_entries(&paths, entries);
-    if by_url.is_empty() && by_request.is_empty() {
+    let mut prefetcher = InputPrefetcher::for_path(store, "cached paths".to_owned(), updater);
+    let missing = prefetcher
+        .filter_missing(paths.into_iter().collect())
+        .await?;
+    if missing.is_empty() {
         return Ok(());
     }
 
-    let mut prefetcher = InputPrefetcher::for_path(store, "flake inputs".to_owned(), updater);
-    let batch = prefetcher
-        .fetch_round(by_url, by_request, &Tally::default())
+    let entries = updater
+        .query_cache(missing.clone(), QueryMode::Pull)
         .await?;
-    prefetcher.import_all(batch).await?;
+    let Classified {
+        by_url, by_request, ..
+    } = classify_cached_entries(&missing, entries);
+    let cached: Vec<String> = by_url
+        .iter()
+        .chain(&by_request)
+        .map(|cp| cp.path.clone())
+        .collect();
+    if cached.is_empty() {
+        return Ok(());
+    }
+
+    prefetcher
+        .fetch_closure(cached, &mut Progress::silent())
+        .await?;
     Ok(())
 }
 

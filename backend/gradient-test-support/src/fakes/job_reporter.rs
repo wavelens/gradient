@@ -11,7 +11,7 @@ use gradient_wire::messages::{
     BuildMetrics, BuildOutput, CachedPath, DiscoveredDerivation, EvalMessageLevel, QueryMode,
 };
 use gradient_wire::traits::{EvalProgressSink, JobReporter};
-use gradient_wire::types::EvalProgress;
+use gradient_wire::types::{EvalProgress, ImportOutcome};
 use std::sync::Arc;
 
 #[derive(Debug, Clone)]
@@ -32,6 +32,9 @@ pub enum ReportedEvent {
     },
     PathsPulled {
         paths: Vec<String>,
+    },
+    ImportRequested {
+        drv_paths: Vec<String>,
     },
     Building {
         build_id: String,
@@ -60,6 +63,7 @@ pub struct RecordingJobReporter {
     pub cached_paths: Vec<String>,
     pub known_drv_paths: Vec<String>,
     pub upstream: std::collections::HashMap<String, String>,
+    pub import_outcomes: std::collections::HashMap<String, ImportOutcome>,
 }
 
 impl RecordingJobReporter {
@@ -79,6 +83,11 @@ impl RecordingJobReporter {
 
     pub fn with_upstream(mut self, path: &str, url: &str) -> Self {
         self.upstream.insert(path.to_owned(), url.to_owned());
+        self
+    }
+
+    pub fn with_import_outcome(mut self, drv_path: &str, outcome: ImportOutcome) -> Self {
+        self.import_outcomes.insert(drv_path.to_owned(), outcome);
         self
     }
 
@@ -243,6 +252,15 @@ impl JobReporter for RecordingJobReporter {
     async fn pull_paths(&self, paths: Vec<String>) -> Result<()> {
         self.record(ReportedEvent::PathsPulled { paths });
         Ok(())
+    }
+
+    async fn request_import(&self, drv_paths: Vec<String>) -> Result<ImportOutcome> {
+        let outcome = drv_paths
+            .iter()
+            .find_map(|p| self.import_outcomes.get(p).cloned())
+            .unwrap_or(ImportOutcome::Completed);
+        self.record(ReportedEvent::ImportRequested { drv_paths });
+        Ok(outcome)
     }
 
     async fn report_building(&mut self, build_id: String) -> Result<()> {
