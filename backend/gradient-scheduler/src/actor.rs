@@ -262,6 +262,14 @@ pub enum SchedulerMsg {
         stale: Box<dyn Fn(&PendingBuildJob) -> bool + Send>,
         reply: RpcReplyPort<usize>,
     },
+    PendingSharedBuilds {
+        reply: RpcReplyPort<Vec<DerivationBuildId>>,
+    },
+    LiftImports {
+        checked: HashSet<DerivationBuildId>,
+        lifted: HashSet<DerivationBuildId>,
+        reply: RpcReplyPort<()>,
+    },
     HasIdleEvalOnlyWorker {
         reply: RpcReplyPort<bool>,
     },
@@ -929,6 +937,17 @@ impl Actor for CoreActor {
                     .filter(|id| !core.tracker.contains_job(id))
                     .collect();
                 let _ = reply.send(unknown);
+            }
+            SchedulerMsg::PendingSharedBuilds { reply } => {
+                let _ = reply.send(core.tracker.pending_shared_builds());
+            }
+            SchedulerMsg::LiftImports {
+                checked,
+                lifted,
+                reply,
+            } => {
+                core.tracker.lift_imports(&checked, &lifted);
+                let _ = reply.send(());
             }
             SchedulerMsg::PrunePendingBuilds { stale, reply } => {
                 let _ = reply.send(core.tracker.prune_pending_builds(stale));

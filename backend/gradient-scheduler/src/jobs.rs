@@ -1211,6 +1211,33 @@ impl JobTracker {
         }
     }
 
+    pub fn pending_shared_builds(&self) -> Vec<DerivationBuildId> {
+        let members = self.clusters.jobs().map(|(_, job)| job);
+        self.pending
+            .values()
+            .chain(members)
+            .filter_map(|job| match job {
+                PendingJob::Build(b) => Some(b.derivation_build),
+                PendingJob::Eval(_) => None,
+            })
+            .collect()
+    }
+
+    pub fn lift_imports(
+        &mut self,
+        checked: &HashSet<DerivationBuildId>,
+        lifted: &HashSet<DerivationBuildId>,
+    ) {
+        let members = self.clusters.jobs_mut();
+        for job in self.pending.values_mut().chain(members) {
+            if let PendingJob::Build(b) = job
+                && checked.contains(&b.derivation_build)
+            {
+                b.ifd = lifted.contains(&b.derivation_build);
+            }
+        }
+    }
+
     pub fn prune_pending_builds(&mut self, stale: impl Fn(&PendingBuildJob) -> bool) -> usize {
         let pruned: Vec<String> = self
             .pending
@@ -1433,6 +1460,42 @@ mod tests {
             history: Default::default(),
             walk_mode: Default::default(),
         })
+    }
+
+    #[test]
+    fn an_import_lift_reaches_queued_builds_and_leaves_once_the_import_finished() {
+        let peer = ProjectId::now_v7();
+        let (dependency, plain, unchecked) = (
+            build_job(peer, vec![]),
+            build_job(peer, vec![]),
+            build_job(peer, vec![]),
+        );
+        let ids = [&dependency, &plain, &unchecked].map(|j| j.derivation_build().expect("build"));
+        let mut tracker = JobTracker::new();
+        for (key, job) in [("dep", dependency), ("plain", plain), ("new", unchecked)] {
+            tracker.add_pending(key.into(), job);
+        }
+        if let Some(PendingJob::Build(b)) = tracker.pending.get_mut("new") {
+            b.ifd = true;
+        }
+
+        assert_eq!(tracker.pending_shared_builds().len(), 3);
+        let checked = HashSet::from([ids[0], ids[1]]);
+        tracker.lift_imports(&checked, &HashSet::from([ids[0]]));
+        let lifted =
+            |tracker: &JobTracker, key: &str| tracker.pending_job(key).expect("pending").ifd();
+        assert!(
+            lifted(&tracker, "dep"),
+            "a build queued before the import gains the lift"
+        );
+        assert!(!lifted(&tracker, "plain"));
+        assert!(
+            lifted(&tracker, "new"),
+            "a build outside the checked set keeps its flag"
+        );
+
+        tracker.lift_imports(&checked, &HashSet::new());
+        assert!(!lifted(&tracker, "dep"), "the lift ends with the import");
     }
 
     fn build_job(peer: ProjectId, required: Vec<RequiredPath>) -> PendingJob {

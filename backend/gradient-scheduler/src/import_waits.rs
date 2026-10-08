@@ -25,6 +25,7 @@ pub struct ImportWait {
     pub request_id: String,
     pub evaluation: EvaluationId,
     pub builds: Vec<ImportedBuild>,
+    pub since: chrono::NaiveDateTime,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -78,13 +79,53 @@ impl ImportWaits {
             .collect()
     }
 
+    pub fn overdue_builds(&self, before: chrono::NaiveDateTime) -> Vec<DerivationBuildId> {
+        self.waits
+            .iter()
+            .filter(|w| w.since <= before)
+            .flat_map(|w| w.builds.iter().map(|b| b.derivation_build))
+            .collect::<HashSet<_>>()
+            .into_iter()
+            .collect()
+    }
+
     pub fn settle(
         &mut self,
         statuses: &HashMap<DerivationBuildId, BuildStatus>,
     ) -> Vec<ImportAnswer> {
+        self.take_answered(|wait| outcome(wait, statuses))
+    }
+
+    pub fn answer_unbuildable(
+        &mut self,
+        unbuildable: &HashMap<DerivationBuildId, String>,
+        waiting_for_workers: &HashSet<EvaluationId>,
+        before: chrono::NaiveDateTime,
+    ) -> Vec<ImportAnswer> {
+        self.take_answered(|wait| {
+            if wait.since > before || waiting_for_workers.contains(&wait.evaluation) {
+                return None;
+            }
+
+            wait.builds.iter().find_map(|build| {
+                unbuildable
+                    .get(&build.derivation_build)
+                    .map(|reason| ImportOutcome::Failed {
+                        drv_path: build.drv_path.clone(),
+                        build_id: build.build_id.to_string(),
+                        status: reason.clone(),
+                    })
+            })
+        })
+    }
+
+    fn take_answered(
+        &mut self,
+        decide: impl Fn(&ImportWait) -> Option<ImportOutcome>,
+    ) -> Vec<ImportAnswer> {
         let (answered, waiting): (Vec<_>, Vec<_>) = std::mem::take(&mut self.waits)
             .into_iter()
-            .map(|wait| (outcome(&wait, statuses), wait))
+            .map(|wait| (decide(&wait), wait))
             .partition(|(outcome, _)| outcome.is_some());
         self.waits = waiting.into_iter().map(|(_, wait)| wait).collect();
 
@@ -101,10 +142,6 @@ impl ImportWaits {
     }
 }
 
-fn finished(status: BuildStatus) -> bool {
-    BuildStateMachine::is_terminal(&status) || status == BuildStatus::Skipped
-}
-
 fn outcome(
     wait: &ImportWait,
     statuses: &HashMap<DerivationBuildId, BuildStatus>,
@@ -112,7 +149,7 @@ fn outcome(
     let mut failed = None;
     for build in &wait.builds {
         let status = *statuses.get(&build.derivation_build)?;
-        if !finished(status) {
+        if !BuildStateMachine::is_terminal(&status) {
             return None;
         }
 
@@ -147,6 +184,7 @@ mod tests {
             request_id: "r1".into(),
             evaluation,
             builds,
+            since: gradient_types::now(),
         }
     }
 
@@ -193,6 +231,12 @@ mod tests {
         ]);
         assert!(waits.settle(&statuses).is_empty());
 
+        statuses.insert(b.derivation_build, BuildStatus::Skipped);
+        assert!(
+            waits.settle(&statuses).is_empty(),
+            "a skipped build can come back"
+        );
+
         statuses.insert(b.derivation_build, BuildStatus::Completed);
         let answers = waits.settle(&statuses);
         assert_eq!(answers[0].outcome, ImportOutcome::Completed);
@@ -218,5 +262,42 @@ mod tests {
         ]));
         assert_eq!(answers.len(), 1, "no answer reaches the aborted job");
         assert_eq!(waits.waiting_evaluations(), Vec::<EvaluationId>::new());
+    }
+
+    #[test]
+    fn an_overdue_import_no_worker_can_build_fails_with_the_reason() {
+        let (a, b) = (imported("a.drv"), imported("b.drv"));
+        let (patient, impatient) = (EvaluationId::now_v7(), EvaluationId::now_v7());
+        let mut waits = ImportWaits::default();
+        let fresh = wait(impatient, vec![b.clone()]);
+        let old = |evaluation| ImportWait {
+            since: fresh.since - chrono::Duration::minutes(10),
+            ..wait(evaluation, vec![a.clone(), b.clone()])
+        };
+        waits.register(old(patient));
+        waits.register(old(impatient));
+        waits.register(fresh.clone());
+
+        let reason = "no connected worker provides aarch64-darwin".to_owned();
+        let answers = waits.answer_unbuildable(
+            &HashMap::from([(b.derivation_build, reason.clone())]),
+            &HashSet::from([patient]),
+            fresh.since - chrono::Duration::minutes(5),
+        );
+
+        assert_eq!(
+            answers.len(),
+            1,
+            "a task waiting for workers keeps waiting, a fresh wait too"
+        );
+        assert_eq!(
+            answers[0].outcome,
+            ImportOutcome::Failed {
+                drv_path: "b.drv".into(),
+                build_id: b.build_id.to_string(),
+                status: reason,
+            }
+        );
+        assert_eq!(waits.waiting_evaluations().len(), 2);
     }
 }

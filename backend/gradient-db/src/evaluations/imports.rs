@@ -19,38 +19,6 @@ WHERE d.hash = ANY($2::text[])
         params = [EvaluationId, DerivationHashes(64)];
 }
 
-fn pending_imports_sql() -> String {
-    format!(
-        "SELECT db.* FROM derivation d \
-         JOIN build_job bj ON bj.derivation = d.id \
-         JOIN derivation_build db ON db.id = bj.derivation_build \
-         WHERE d.ifd AND bj.evaluation = ANY($1::uuid[]) AND db.status IN ({})",
-        crate::sql::status::build_in(&BuildStatus::PENDING)
-    )
-}
-
-crate::sql_fn! {
-    PENDING_IMPORTS = pending_imports_sql,
-        params = [EvaluationIds(64)];
-}
-
-pub async fn pending_imports<C: ConnectionTrait>(
-    db: &C,
-    evaluations: &[EvaluationId],
-) -> Result<Vec<MDerivationBuild>, DbErr> {
-    use sea_orm::EntityTrait;
-
-    if evaluations.is_empty() {
-        return Ok(Vec::new());
-    }
-
-    let ids: Vec<uuid::Uuid> = evaluations.iter().map(|e| e.into_inner()).collect();
-    EDerivationBuild::find()
-        .from_raw_sql(PENDING_IMPORTS.bind([ids.into()]))
-        .all(db)
-        .await
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ImportBuild {
     pub build_id: BuildJobId,
