@@ -111,6 +111,9 @@ fn serve<W: Write>(
                 trace!("eval worker shutting down on request");
                 return Ok(());
             }
+            EvalRequest::BuildDone { .. } => EvalResponse::Err {
+                message: "a build result arrived outside a build request".to_string(),
+            },
             EvalRequest::Plan {
                 repository,
                 wildcards,
@@ -278,6 +281,9 @@ fn response_kind(resp: &EvalResponse) -> String {
         EvalResponse::CheckpointOk => "CheckpointOk".to_string(),
         EvalResponse::FetchOk { store_path } => format!("FetchOk({store_path})"),
         EvalResponse::Stats { delta } => format!("Stats({} thunks)", delta.nr_thunks),
+        EvalResponse::NeedsBuild { derived_paths } => {
+            format!("NeedsBuild({} paths)", derived_paths.len())
+        }
         EvalResponse::Err { message } => format!("Err({message})"),
     }
 }

@@ -78,6 +78,9 @@ pub async fn run_eval_driver(requests_path: &str, eval_cache_dir: &str) -> Resul
             EvalRequest::FetchInput { .. } => {
                 Err(anyhow::anyhow!("the eval driver does not fetch inputs"))
             }
+            EvalRequest::BuildDone { .. } => Err(anyhow::anyhow!(
+                "the eval driver answers build requests itself"
+            )),
         };
 
         match output {
