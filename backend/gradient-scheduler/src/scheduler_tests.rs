@@ -2273,6 +2273,11 @@ fn import_build_row(
     std::collections::BTreeMap::from([
         ("build_id".to_owned(), build_id.into_inner().into()),
         (
+            "derivation".to_owned(),
+            DerivationId::now_v7().into_inner().into(),
+        ),
+        ("has_entry_point".to_owned(), true.into()),
+        (
             "derivation_build".to_owned(),
             derivation_build.into_inner().into(),
         ),
@@ -2419,6 +2424,99 @@ async fn a_waiting_import_answers_with_its_build_once_the_build_failed() {
             drv_path: IMPORTED.into(),
             build_id: build_id.to_string(),
             status: "FailedPermanent".into(),
+        })
+    );
+    assert!(!scheduler.has_import_waits());
+}
+
+async fn request_the_import(scheduler: &Scheduler) {
+    scheduler
+        .handle_import_request(
+            "w1",
+            "eval:x",
+            EvaluationId::now_v7(),
+            "r1".into(),
+            vec![IMPORTED.into()],
+        )
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn an_import_aborted_in_an_earlier_evaluation_is_queued_again_and_waits() {
+    use gradient_entity::build::BuildStatus;
+    use sea_orm::{DatabaseBackend, MockDatabase};
+
+    let (build_id, derivation_build) = (BuildJobId::now_v7(), DerivationBuildId::now_v7());
+    let db = MockDatabase::new(DatabaseBackend::Postgres)
+        .append_query_results([vec![import_build_row(
+            build_id,
+            derivation_build,
+            BuildStatus::Aborted,
+        )]])
+        .append_query_results([vec![import_build_row(
+            build_id,
+            derivation_build,
+            BuildStatus::Created,
+        )]]);
+    let (scheduler, mut signals) = import_scheduler(db).await;
+
+    request_the_import(&scheduler).await;
+
+    assert!(
+        scheduler.has_import_waits(),
+        "the requeued import builds again instead of failing at once"
+    );
+    assert!(
+        !matches!(signals.try_recv(), Ok(SessionSignal::ImportResult { .. })),
+        "no answer before the build finished"
+    );
+}
+
+#[tokio::test]
+async fn a_reproducible_import_failure_still_answers_failed() {
+    use gradient_entity::build::BuildStatus;
+    use sea_orm::{DatabaseBackend, MockDatabase};
+
+    let (build_id, derivation_build) = (BuildJobId::now_v7(), DerivationBuildId::now_v7());
+    let failed = || import_build_row(build_id, derivation_build, BuildStatus::FailedPermanent);
+    let db = MockDatabase::new(DatabaseBackend::Postgres)
+        .append_query_results([vec![failed()]])
+        .append_query_results([vec![failed()]]);
+    let (scheduler, mut signals) = import_scheduler(db).await;
+
+    request_the_import(&scheduler).await;
+
+    assert_eq!(
+        import_result(&mut signals).await,
+        import_answer(gradient_wire::types::ImportOutcome::Failed {
+            drv_path: IMPORTED.into(),
+            build_id: build_id.to_string(),
+            status: "FailedPermanent".into(),
+        })
+    );
+    assert!(!scheduler.has_import_waits());
+}
+
+#[tokio::test]
+async fn an_import_without_an_entry_point_answers_failed_instead_of_waiting() {
+    use gradient_entity::build::BuildStatus;
+    use sea_orm::{DatabaseBackend, MockDatabase};
+
+    let (build_id, derivation_build) = (BuildJobId::now_v7(), DerivationBuildId::now_v7());
+    let mut row = import_build_row(build_id, derivation_build, BuildStatus::Created);
+    row.insert("has_entry_point".to_owned(), false.into());
+    let db = MockDatabase::new(DatabaseBackend::Postgres).append_query_results([vec![row]]);
+    let (scheduler, mut signals) = import_scheduler(db).await;
+
+    request_the_import(&scheduler).await;
+
+    assert_eq!(
+        import_result(&mut signals).await,
+        import_answer(gradient_wire::types::ImportOutcome::Failed {
+            drv_path: IMPORTED.into(),
+            build_id: build_id.to_string(),
+            status: "no entry point recorded for the import".into(),
         })
     );
     assert!(!scheduler.has_import_waits());

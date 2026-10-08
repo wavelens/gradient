@@ -186,6 +186,10 @@ pub(crate) async fn apply(ctx: &DbContext, transition: Transition) -> Result<Tra
             .await?,
             ..Default::default()
         }),
+        Transition::RequeueImports { derivations } => {
+            requeue_imports(ctx, &derivations).await?;
+            Ok(TransitionReport::default())
+        }
         Transition::PrioritizeBuild { shared_build } => {
             let Some(row) = EDerivationBuild::find_by_id(shared_build)
                 .one(&ctx.worker_db)
@@ -519,6 +523,16 @@ async fn build_completed(
             Ok(None)
         }
     }
+}
+
+async fn requeue_imports(ctx: &DbContext, derivations: &[DerivationId]) -> Result<()> {
+    let changes =
+        gradient_db::graph::promotion::requeue_failed_import_closure(&ctx.worker_db, derivations)
+            .await
+            .context("requeue the failed closure of an import")?;
+    emit_transition_effects(ctx, &changes).await?;
+
+    Ok(())
 }
 
 async fn build_failed(
@@ -1078,6 +1092,49 @@ mod tests {
                 i32::from(AttemptOutcome::Aborted)
             )),
             "{values}"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_import_requeue_thaws_the_failed_closure_of_the_imported_derivations() {
+        let imported = DerivationId::now_v7();
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_exec_results([MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 0,
+            }])
+            .append_query_results([
+                Vec::<std::collections::BTreeMap<String, sea_orm::Value>>::new(),
+            ])
+            .into_connection();
+        let log_db = db.clone();
+        let (ctx, _) = ctx(db).await;
+
+        apply(
+            &ctx,
+            Transition::RequeueImports {
+                derivations: vec![imported],
+            },
+        )
+        .await
+        .unwrap();
+
+        let log = log_db.into_transaction_log();
+        let requeues: Vec<_> = log
+            .iter()
+            .flat_map(|t| t.statements())
+            .filter(|s| s.sql.contains("UPDATE derivation_build db"))
+            .collect();
+        assert_eq!(requeues.len(), 1, "{log:?}");
+        assert!(
+            requeues[0].sql.contains("deterministic_blocked"),
+            "a reproducible builder failure stays failed: {}",
+            requeues[0].sql
+        );
+        assert!(
+            format!("{:?}", requeues[0].values).contains(&imported.to_string()),
+            "{:?}",
+            requeues[0].values
         );
     }
 }

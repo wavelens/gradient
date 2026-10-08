@@ -7,7 +7,10 @@
 use std::collections::{HashMap, HashSet};
 
 use anyhow::{Context, Result};
+use gradient_db::evaluations::imports::ImportBuild;
+use gradient_entity::build::BuildStatus;
 use gradient_entity::evaluation::EvaluationStatus;
+use gradient_graph::Transition;
 use gradient_pool::session_port::SessionSignal;
 use gradient_types::*;
 use gradient_wire::types::ImportOutcome;
@@ -18,6 +21,8 @@ use crate::Scheduler;
 use crate::actor::SchedulerMsg;
 use crate::buildability::BuildabilityChecker;
 use crate::import_waits::{ImportAnswer, ImportWait, ImportedBuild};
+
+const NO_ENTRY_POINT: &str = "no entry point recorded for the import";
 
 impl Scheduler {
     pub async fn handle_import_request(
@@ -34,19 +39,21 @@ impl Scheduler {
             request_id: request_id.clone(),
             outcome,
         };
-        let builds = match self.imported_builds(evaluation, &drv_paths).await? {
+        let builds = match self
+            .requeued_imported_builds(evaluation, &drv_paths)
+            .await?
+        {
             Ok(builds) => builds,
-            Err(drv_path) => {
-                warn!(%job_id, %drv_path, "import request names a derivation the evaluation never recorded");
-                self.answer_imports(vec![answer(ImportOutcome::Unknown { drv_path })])
-                    .await;
+            Err(outcome) => {
+                warn!(%job_id, ?outcome, "import request answered before any wait");
+                self.answer_imports(vec![answer(outcome)]).await;
                 return Ok(());
             }
         };
 
         let statuses = builds
             .iter()
-            .map(|(build, status)| (build.derivation_build, *status))
+            .map(|(build, row)| (build.derivation_build, row.status))
             .collect();
         let wait = ImportWait {
             worker: worker_id.to_owned(),
@@ -70,11 +77,36 @@ impl Scheduler {
         Ok(())
     }
 
+    async fn requeued_imported_builds(
+        &self,
+        evaluation: EvaluationId,
+        drv_paths: &[String],
+    ) -> Result<Result<Vec<(ImportedBuild, ImportBuild)>, ImportOutcome>> {
+        let builds = match self.imported_builds(evaluation, drv_paths).await? {
+            Ok(builds) => builds,
+            Err(outcome) => return Ok(Err(outcome)),
+        };
+        if !builds
+            .iter()
+            .any(|(_, row)| BuildStatus::REQUEUEABLE.contains(&row.status))
+        {
+            return Ok(Ok(builds));
+        }
+
+        let derivations = builds.iter().map(|(_, row)| row.derivation).collect();
+        self.state
+            .graph
+            .transition(Transition::RequeueImports { derivations })
+            .await
+            .context("requeue the failed builds of an import")?;
+        self.imported_builds(evaluation, drv_paths).await
+    }
+
     async fn imported_builds(
         &self,
         evaluation: EvaluationId,
         drv_paths: &[String],
-    ) -> Result<Result<Vec<(ImportedBuild, gradient_entity::build::BuildStatus)>, String>> {
+    ) -> Result<Result<Vec<(ImportedBuild, ImportBuild)>, ImportOutcome>> {
         let hashes: Vec<Option<String>> = drv_paths
             .iter()
             .map(|p| StorePath::parse(p).ok().map(|sp| sp.hash().to_owned()))
@@ -90,15 +122,25 @@ impl Scheduler {
         let mut builds = Vec::with_capacity(drv_paths.len());
         for (drv_path, hash) in drv_paths.iter().zip(&hashes) {
             let Some(row) = hash.as_ref().and_then(|h| rows.get(h)) else {
-                return Ok(Err(drv_path.clone()));
+                return Ok(Err(ImportOutcome::Unknown {
+                    drv_path: drv_path.clone(),
+                }));
             };
+            if !row.has_entry_point {
+                return Ok(Err(ImportOutcome::Failed {
+                    drv_path: drv_path.clone(),
+                    build_id: row.build_id.to_string(),
+                    status: NO_ENTRY_POINT.to_owned(),
+                }));
+            }
+
             builds.push((
                 ImportedBuild {
                     derivation_build: row.derivation_build,
                     build_id: row.build_id,
                     drv_path: drv_path.clone(),
                 },
-                row.status,
+                *row,
             ));
         }
 
@@ -231,9 +273,10 @@ impl Scheduler {
             return Ok(());
         }
 
+        let waited = self.import_waits.lock().waited_builds();
         let lifted = gradient_db::scheduling::priority::import_lifted_shared_builds(
             &self.state.worker_db,
-            &tracked,
+            &waited,
         )
         .await
         .context("read the builds an import lifts")?;
