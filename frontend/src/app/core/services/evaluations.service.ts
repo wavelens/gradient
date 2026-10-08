@@ -76,6 +76,7 @@ export interface BuildWithOutputs {
   dispatched_job: string | null;
   output: Record<string, string>;
   prioritized: boolean;
+  ifd: boolean;
   created_at: string;
   updated_at: string;
   progress: BuildProgress | null;
