@@ -26,6 +26,7 @@ pub struct BuildItem {
     pub dispatched_job: Option<DispatchedJobId>,
     pub depth: u32,
     pub prioritized: bool,
+    pub ifd: bool,
 }
 
 #[derive(Serialize, Debug)]

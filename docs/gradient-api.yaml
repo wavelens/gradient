@@ -12493,9 +12493,10 @@ components:
 
     EntryPointSummary:
       type: object
-      required: [id, build_id, derivation_path, eval, build_status, has_artefacts, outputs, architecture, deps, deps_total, created_at, prioritized]
+      required: [id, build_id, derivation_path, eval, build_status, has_artefacts, outputs, architecture, deps, deps_total, created_at, prioritized, ifd]
       properties:
         prioritized: { type: boolean, description: "The build gets a QoS bonus: a user prioritized it or a build that depends on it, or it belongs to a running evaluation that is prioritized or runs a build request." }
+        ifd: { type: boolean, description: True for a derivation an evaluation imported. }
         id: { type: string, format: uuid }
         build_id: { type: string, format: uuid }
         derivation_path: { type: string, description: "Prefix-free `.drv` store path (`<hash>-<name>.drv`, no `/nix/store/`)" }
@@ -13129,9 +13130,10 @@ components:
 
     BuildItem:
       type: object
-      required: [id, name, status, has_artefacts, updated_at, build_time_ms, dispatched_job, depth, prioritized]
+      required: [id, name, status, has_artefacts, updated_at, build_time_ms, dispatched_job, depth, prioritized, ifd]
       properties:
         prioritized: { type: boolean, description: "The build gets a QoS bonus: a user prioritized it or a build that depends on it, or it belongs to a running evaluation that is prioritized or runs a build request." }
+        ifd: { type: boolean, description: True for a derivation an evaluation imported. }
         id:
           type: string
           format: uuid

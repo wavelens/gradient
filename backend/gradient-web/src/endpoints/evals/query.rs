@@ -354,6 +354,7 @@ pub async fn get_evaluation_builds(
             dispatched_job: attempt.map(|a| a.dispatched_job),
             depth: *layer,
             prioritized: with_qos.contains(&j.derivation_build),
+            ifd: drv.ifd,
         });
     }
 
