@@ -13,10 +13,11 @@ use crate::worker_pool::{WorkerPoolResolver, budgeted_pool_size};
 use anyhow::{Context, Result};
 use futures::stream::{FuturesOrdered, FuturesUnordered, StreamExt as _};
 use gradient_derivation::parse_drv;
-use gradient_sources::{DerivationResolver, FlakeDiscovery};
+use gradient_sources::{AttrError, DerivationResolver, FlakeDiscovery};
 use gradient_wire::messages::{
     DiscoveredDerivation, EvalAttrCost, EvalStatsReport, FlakeJob, FlakeOutputNode, FlakeSource,
 };
+use gradient_wire::types::{EvalMessageLevel, attr_eval_source};
 use tokio::sync::mpsc;
 use tracing::{debug, info, warn};
 
@@ -453,7 +454,6 @@ struct Flush {
     paths: Vec<(String, Option<u64>)>,
     derivations: Vec<DiscoveredDerivation>,
     warnings: Vec<String>,
-    errors: Vec<String>,
 }
 
 async fn publish(reporter: &dyn JobReporter, mut flushes: mpsc::Receiver<Flush>) -> Result<()> {
@@ -491,7 +491,7 @@ fn fresh_paths(pushed: &mut HashSet<String>, flush: &mut Flush) -> Vec<(String, 
 
 async fn report(reporter: &dyn JobReporter, flush: Flush) -> Result<()> {
     reporter
-        .report_eval_result(flush.derivations, flush.warnings, flush.errors)
+        .report_eval_result(flush.derivations, flush.warnings, vec![])
         .await
 }
 
@@ -541,7 +541,6 @@ impl<'a> ClosureWalker<'a> {
         reporter: &dyn JobReporter,
         abort: &mut super::AbortSignal,
         warnings: Vec<String>,
-        errors: Vec<String>,
     ) -> Result<()> {
         while !self.queue.is_empty() {
             if abort.is_aborted() {
@@ -556,10 +555,10 @@ impl<'a> ClosureWalker<'a> {
             "closure walk complete"
         );
 
-        self.flush(warnings, errors).await
+        self.flush(warnings).await
     }
 
-    async fn flush(&mut self, warnings: Vec<String>, errors: Vec<String>) -> Result<()> {
+    async fn flush(&mut self, warnings: Vec<String>) -> Result<()> {
         debug!(
             count = self.batch.len(),
             remaining = self.queue.len(),
@@ -569,7 +568,6 @@ impl<'a> ClosureWalker<'a> {
             paths: std::mem::take(&mut self.paths),
             derivations: std::mem::take(&mut self.batch),
             warnings,
-            errors,
         };
         self.flushes
             .send(flush)
@@ -644,12 +642,25 @@ impl<'a> ClosureWalker<'a> {
             }
 
             if self.batch.len() >= EVAL_BATCH_SIZE {
-                self.flush(vec![], vec![]).await?;
+                self.flush(vec![]).await?;
             }
         }
 
         Ok(())
     }
+}
+
+async fn report_failed_attrs(updater: &mut dyn JobReporter, failed: &[AttrError]) -> Result<()> {
+    for AttrError { attr, message } in failed {
+        updater
+            .send_eval_message(
+                EvalMessageLevel::Error,
+                &attr_eval_source(attr),
+                &format!("failed to evaluate '{attr}': {message}"),
+            )
+            .await?;
+    }
+    Ok(())
 }
 
 #[derive(Debug)]
@@ -741,7 +752,7 @@ pub async fn evaluate_derivations_with(
     let FlakeDiscovery {
         attrs,
         mut warnings,
-        mut errors,
+        errors: mut failed,
     } = match unless_aborted(
         abort,
         resolver.list_flake_derivations(repo.clone(), job.wildcards.clone(), &eval_overrides),
@@ -760,17 +771,17 @@ pub async fn evaluate_derivations_with(
         }
     };
 
-    if let Some(corrupt) = errors.iter().find_map(|e| corrupt_eval_cache(e)) {
+    if let Some(corrupt) = failed.iter().find_map(|e| corrupt_eval_cache(&e.message)) {
         warn!(fingerprint = %corrupt.fingerprint, "eval-cache corrupt during discovery; failing for self-heal");
         return Err(anyhow::Error::new(corrupt));
     }
 
     if attrs.is_empty() {
         warn!("no derivations found for evaluation");
-        errors.extend(unmatched_target_errors(&job.wildcards));
-        errors.sort_unstable();
-        errors.dedup();
-        updater.report_eval_result(vec![], warnings, errors).await?;
+        report_failed_attrs(updater, &failed).await?;
+        updater
+            .report_eval_result(vec![], warnings, unmatched_target_errors(&job.wildcards))
+            .await?;
         return Ok(EvalOutcome {
             flake_nodes: Vec::new(),
             cacheable: false,
@@ -800,20 +811,23 @@ pub async fn evaluate_derivations_with(
     for (attr, result) in resolved {
         match result {
             Ok((drv_path, _refs)) => root_drvs.push((attr, drv_path)),
-            Err(e) => errors.push(format!("failed to resolve {attr}: {e}")),
+            Err(e) => failed.push(AttrError {
+                attr,
+                message: format!("{e:#}"),
+            }),
         }
     }
 
-    if let Some(corrupt) = errors.iter().find_map(|e| corrupt_eval_cache(e)) {
+    if let Some(corrupt) = failed.iter().find_map(|e| corrupt_eval_cache(&e.message)) {
         warn!(fingerprint = %corrupt.fingerprint, "eval-cache corrupt during resolve; failing for self-heal");
         return Err(anyhow::Error::new(corrupt));
     }
 
+    report_failed_attrs(updater, &failed).await?;
+
     if root_drvs.is_empty() {
         warn!("all attr resolutions failed");
-        errors.sort_unstable();
-        errors.dedup();
-        updater.report_eval_result(vec![], warnings, errors).await?;
+        updater.report_eval_result(vec![], warnings, vec![]).await?;
         return Ok(EvalOutcome {
             flake_nodes: Vec::new(),
             cacheable: false,
@@ -825,14 +839,12 @@ pub async fn evaluate_derivations_with(
 
     warnings.sort_unstable();
     warnings.dedup();
-    errors.sort_unstable();
-    errors.dedup();
 
     let (flushes, published) = mpsc::channel(PUBLISH_BACKLOG);
     let walker = ClosureWalker::new(drv_reader, &root_drvs, flushes);
     let reporter: &dyn JobReporter = updater;
     tokio::try_join!(
-        walker.walk(reporter, abort, warnings, errors),
+        walker.walk(reporter, abort, warnings),
         publish(reporter, published),
     )?;
     Ok(EvalOutcome {
@@ -926,10 +938,13 @@ mod tests {
     async fn corrupt_eval_cache_fails_typed_without_reporting() {
         let repo = "https://example.com/repo";
         let fp = "deadbeefcafebabe1234567890abcdef1234567890abcdef1234567890abcdef";
-        let corrupt = format!(
-            "failed to evaluate 'packages': database disk image is malformed \
-             (in '/var/lib/gradient-worker/eval-cache/eval-cache-v6/{fp}.sqlite')"
-        );
+        let corrupt = AttrError {
+            attr: "packages".into(),
+            message: format!(
+                "database disk image is malformed \
+                 (in '/var/lib/gradient-worker/eval-cache/eval-cache-v6/{fp}.sqlite')"
+            ),
+        };
         let resolver = FakeDerivationResolver::new().with_flake_errors(repo, vec![corrupt]);
         let drv_reader = FakeDrvReader::new();
         let job = make_flake_job(repo);
@@ -1154,7 +1169,6 @@ mod tests {
                     paths: vec![(drv.into(), Some(120)), ("builder.sh".into(), None)],
                     derivations: vec![],
                     warnings: vec![warning.into()],
-                    errors: vec![],
                 })
                 .await
                 .unwrap();
@@ -1397,60 +1411,72 @@ mod tests {
         assert!(format!("{err:#}").contains("aborted by server"), "{err:#}");
     }
 
-    #[tokio::test]
-    async fn wildcard_resolve_failure_is_reported() {
+    async fn evaluate_with(resolver: &FakeDerivationResolver) -> RecordingJobReporter {
         let repo = "https://example.com/repo";
-        let resolver = FakeDerivationResolver::new().with_flake_attrs(repo, vec!["broken".into()]);
-        let drv_reader = FakeDrvReader::new();
-        let job = make_flake_job(repo);
         let mut reporter = RecordingJobReporter::new();
-
         evaluate_derivations_with(
-            &resolver,
-            &drv_reader,
-            &job,
+            resolver,
+            &FakeDrvReader::new(),
+            &make_flake_job(repo),
             None,
             &mut reporter,
             &mut never_abort(),
         )
         .await
         .unwrap();
+        reporter
+    }
 
-        let ReportedEvent::EvalResult { errors, .. } = reporter.last_eval_result().unwrap() else {
-            panic!("expected an EvalResult");
-        };
-        assert!(
-            errors.iter().any(|e| e.contains("broken")),
-            "wildcard resolve failure must be surfaced: {errors:?}"
-        );
+    fn failed_attr_messages(reporter: &RecordingJobReporter) -> Vec<(String, String)> {
+        let events = reporter.events();
+        let result_at = events
+            .iter()
+            .rposition(|e| matches!(e, ReportedEvent::EvalResult { .. }))
+            .expect("an EvalResult");
+        events
+            .into_iter()
+            .take(result_at)
+            .filter_map(|e| match e {
+                ReportedEvent::EvalMessage {
+                    level: EvalMessageLevel::Error,
+                    source,
+                    message,
+                } => Some((source, message)),
+                _ => None,
+            })
+            .collect()
     }
 
     #[tokio::test]
-    async fn discovery_errors_reach_eval_result() {
-        let repo = "https://example.com/repo";
+    async fn a_resolve_failure_is_reported_under_its_attribute_before_the_result() {
         let resolver = FakeDerivationResolver::new()
-            .with_flake_errors(repo, vec!["failed to evaluate 'x': boom".into()]);
-        let drv_reader = FakeDrvReader::new();
-        let job = make_flake_job(repo);
-        let mut reporter = RecordingJobReporter::new();
+            .with_flake_attrs("https://example.com/repo", vec!["broken".into()]);
 
-        evaluate_derivations_with(
-            &resolver,
-            &drv_reader,
-            &job,
-            None,
-            &mut reporter,
-            &mut never_abort(),
-        )
-        .await
-        .unwrap();
+        let messages = failed_attr_messages(&evaluate_with(&resolver).await);
 
-        let ReportedEvent::EvalResult { errors, .. } = reporter.last_eval_result().unwrap() else {
-            panic!("expected an EvalResult");
-        };
-        assert!(
-            errors.iter().any(|e| e.contains("boom")),
-            "discovery errors must reach the server: {errors:?}"
+        assert_eq!(messages.len(), 1, "{messages:?}");
+        assert_eq!(messages[0].0, "nix-eval:broken");
+        assert!(messages[0].1.contains("broken"), "{messages:?}");
+    }
+
+    #[tokio::test]
+    async fn a_discovery_failure_is_reported_under_its_attribute_before_the_result() {
+        let resolver = FakeDerivationResolver::new().with_flake_errors(
+            "https://example.com/repo",
+            vec![AttrError {
+                attr: "nixosConfigurations.host".into(),
+                message: "boom".into(),
+            }],
+        );
+
+        let messages = failed_attr_messages(&evaluate_with(&resolver).await);
+
+        assert_eq!(
+            messages,
+            vec![(
+                "nix-eval:nixosConfigurations.host".to_owned(),
+                "failed to evaluate 'nixosConfigurations.host': boom".to_owned()
+            )]
         );
     }
 

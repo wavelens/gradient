@@ -14,7 +14,7 @@ use nix_bindings::flake::{
 };
 use nix_bindings::{Context, EvalState, Store};
 
-use crate::ipc::DiscoveryShard;
+use crate::ipc::{AttrError, DiscoveryShard};
 use crate::strip_nix_store_prefix;
 use crate::wildcard_walk::{self, WalkNode};
 
@@ -63,7 +63,7 @@ impl<'a> FlakeWalker<'a> {
         &self,
         wildcards: &[String],
         only: Option<&[String]>,
-    ) -> Result<(Vec<String>, Vec<String>)> {
+    ) -> Result<(Vec<String>, Vec<AttrError>)> {
         let root = self.root()?;
         let (includes, excludes) = wildcard_walk::parse_patterns(wildcards);
 
@@ -77,7 +77,7 @@ impl<'a> FlakeWalker<'a> {
         &self,
         wildcards: &[String],
         only: Option<&[String]>,
-    ) -> Result<(Vec<String>, Vec<DiscoveryShard>, Vec<String>)> {
+    ) -> Result<(Vec<String>, Vec<DiscoveryShard>, Vec<AttrError>)> {
         let root = self.root()?;
         let (includes, excludes) = wildcard_walk::parse_patterns(wildcards);
         let (attrs, deferred, errors) =
@@ -87,7 +87,10 @@ impl<'a> FlakeWalker<'a> {
     }
 
     #[tracing::instrument(level = "debug", skip_all)]
-    pub fn plan_shards(&self, wildcards: &[String]) -> Result<(Vec<DiscoveryShard>, Vec<String>)> {
+    pub fn plan_shards(
+        &self,
+        wildcards: &[String],
+    ) -> Result<(Vec<DiscoveryShard>, Vec<AttrError>)> {
         let root = self.root()?;
         let (includes, _) = wildcard_walk::parse_patterns(wildcards);
         let (shards, errors) = wildcard_walk::plan_shards(&root, &includes);

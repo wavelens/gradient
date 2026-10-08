@@ -10,7 +10,7 @@ use futures::future::BoxFuture;
 use futures::stream::{FuturesUnordered, StreamExt};
 use gradient_derivation::{Derivation, parse_drv};
 use gradient_eval::ipc::{DiscoveryShard, ResolvedItem};
-use gradient_sources::{DerivationResolver, FlakeDiscovery, ResolvedDerivation};
+use gradient_sources::{AttrError, DerivationResolver, FlakeDiscovery, ResolvedDerivation};
 use gradient_util::store_path::nix_store_path;
 use gradient_util::sync::Mutex;
 use std::collections::VecDeque;
@@ -499,7 +499,14 @@ impl DerivationResolver for WorkerPoolResolver {
         let mut warnings = warnings.into_inner();
         warnings.sort_unstable();
         warnings.dedup();
-        let mut errors = errors.into_inner();
+        let mut errors: Vec<AttrError> = errors
+            .into_inner()
+            .into_iter()
+            .map(|e| AttrError {
+                attr: e.attr,
+                message: e.message,
+            })
+            .collect();
         errors.sort_unstable();
         errors.dedup();
 

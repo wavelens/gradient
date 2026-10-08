@@ -115,6 +115,16 @@ pub enum EvalMessageLevel {
     Notice,
 }
 
+pub const ATTR_EVAL_SOURCE_PREFIX: &str = "nix-eval:";
+
+pub fn attr_eval_source(attr: &str) -> String {
+    format!("{ATTR_EVAL_SOURCE_PREFIX}{attr}")
+}
+
+pub fn attr_of_eval_source(source: &str) -> Option<&str> {
+    source.strip_prefix(ATTR_EVAL_SOURCE_PREFIX)
+}
+
 #[derive(Proto, Debug, Clone, PartialEq)]
 pub enum JobUpdateKind {
     Fetching,

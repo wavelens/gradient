@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use crate::ipc::AttrError;
 use anyhow::Result;
 
 pub trait WalkNode: Sized {
@@ -121,7 +122,7 @@ fn wildcard_children<N: WalkNode>(
     node: &N,
     path: &[String],
     only: Option<&[String]>,
-    diags: &mut Vec<String>,
+    diags: &mut Vec<AttrError>,
 ) -> Vec<String> {
     let names = tolerate(node.child_names(), path, diags);
     match only {
@@ -130,11 +131,14 @@ fn wildcard_children<N: WalkNode>(
     }
 }
 
-fn tolerate<T: Default>(res: Result<T>, path: &[String], diags: &mut Vec<String>) -> T {
+fn tolerate<T: Default>(res: Result<T>, path: &[String], diags: &mut Vec<AttrError>) -> T {
     match res {
         Ok(v) => v,
         Err(e) => {
-            diags.push(format!("failed to evaluate '{}': {:#}", path.join("."), e));
+            diags.push(AttrError {
+                attr: path.join("."),
+                message: format!("{e:#}"),
+            });
             T::default()
         }
     }
@@ -146,7 +150,7 @@ fn traverse<N: WalkNode>(
     segs: &[String],
     only: Option<&[String]>,
     sink: &mut Sink<'_>,
-    diags: &mut Vec<String>,
+    diags: &mut Vec<AttrError>,
 ) {
     match segs.split_first() {
         None => match sink {
@@ -236,7 +240,7 @@ fn descend<N: WalkNode>(
     mut path: Vec<String>,
     rest: &[String],
     sink: &mut Sink<'_>,
-    diags: &mut Vec<String>,
+    diags: &mut Vec<AttrError>,
 ) {
     match sink {
         Sink::Shards(out) => {
@@ -254,7 +258,7 @@ pub fn discover<N: WalkNode>(
     root: &N,
     includes: &[Vec<String>],
     excludes: &[Vec<String>],
-) -> (Vec<String>, Vec<String>) {
+) -> (Vec<String>, Vec<AttrError>) {
     discover_within(root, includes, excludes, None)
 }
 
@@ -263,7 +267,7 @@ pub fn discover_within<N: WalkNode>(
     includes: &[Vec<String>],
     excludes: &[Vec<String>],
     only: Option<&[String]>,
-) -> (Vec<String>, Vec<String>) {
+) -> (Vec<String>, Vec<AttrError>) {
     collect_derivations(root, includes, excludes, only, None)
 }
 
@@ -272,7 +276,7 @@ pub fn discover_split<N: WalkNode>(
     includes: &[Vec<String>],
     excludes: &[Vec<String>],
     only: Option<&[String]>,
-) -> (Vec<String>, Vec<Shard>, Vec<String>) {
+) -> (Vec<String>, Vec<Shard>, Vec<AttrError>) {
     let mut deferred = Vec::new();
     let (out, diags) = collect_derivations(root, includes, excludes, only, Some(&mut deferred));
 
@@ -285,7 +289,7 @@ fn collect_derivations<N: WalkNode>(
     excludes: &[Vec<String>],
     only: Option<&[String]>,
     mut deferred: Option<&mut Vec<Shard>>,
-) -> (Vec<String>, Vec<String>) {
+) -> (Vec<String>, Vec<AttrError>) {
     let mut out = Vec::new();
     let mut diags = Vec::new();
     for inc in includes {
@@ -332,7 +336,10 @@ pub fn parse_patterns(wildcards: &[String]) -> (Vec<Vec<String>>, Vec<Vec<String
     (includes, excludes)
 }
 
-pub fn plan_shards<N: WalkNode>(root: &N, includes: &[Vec<String>]) -> (Vec<Shard>, Vec<String>) {
+pub fn plan_shards<N: WalkNode>(
+    root: &N,
+    includes: &[Vec<String>],
+) -> (Vec<Shard>, Vec<AttrError>) {
     let mut shards = Vec::new();
     let mut diags = Vec::new();
     for inc in includes {
@@ -630,10 +637,8 @@ mod tests {
         let (got, errors) = discover(&&root, &[segs(&["*"])], &[]);
         assert_eq!(got, vec!["ok"], "sibling still discovered");
         assert_eq!(errors.len(), 1, "one dedup'd diagnostic: {errors:?}");
-        assert!(
-            errors[0].contains("bad") && errors[0].contains("boom"),
-            "diagnostic names the attr and the nix error: {errors:?}"
-        );
+        assert_eq!(errors[0].attr, "bad");
+        assert!(errors[0].message.contains("boom"), "{errors:?}");
     }
 
     #[test]
@@ -653,7 +658,7 @@ mod tests {
         assert!(
             errors
                 .iter()
-                .any(|e| e.contains("packages.x86_64-linux.broken")),
+                .any(|e| e.attr == "packages.x86_64-linux.broken"),
             "path is the full dotted attr path: {errors:?}"
         );
     }
