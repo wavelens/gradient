@@ -63,8 +63,6 @@
           {"op": "list", "repository": REPO, "wildcards": ["packages.x86_64-linux.#"]},
           {"op": "list", "repository": REPO,
            "wildcards": ["packages.x86_64-linux.*", "!packages.x86_64-linux.cowsay"]},
-          {"op": "resolve", "repository": REPO,
-           "attrs": ["packages.x86_64-linux.hello", "packages.x86_64-linux.boom"]},
           {"op": "fingerprint", "repository": REPO},
           {"op": "shutdown"},
       ]
@@ -90,7 +88,7 @@
 
           out = machine.succeed(f"cat /root/out-{tag}.jsonl").splitlines()
           responses = [json.loads(l) for l in out if l.strip()]
-          assert len(responses) == 5, f"expected 5 responses, got {len(responses)}: {responses}"
+          assert len(responses) == 4, f"expected 4 responses, got {len(responses)}: {responses}"
           return responses, int(machine.succeed(f"cat /root/ms-{tag}").strip())
 
       responses, cold_ms = drive("cold")
@@ -102,30 +100,29 @@
       nested = [{"pattern": "packages.x86_64-linux.nested.#", "only": ["inner"]}]
 
       assert responses[0]["kind"] == "list_ok", responses[0]
-      star = set(responses[0]["attrs"])
+      star = {it["attr"] for it in responses[0]["items"]}
       assert star == {hello, cowsay}, f"trailing-* mismatch: {star}"
       assert responses[0]["deferred"] == nested, f"nested set not deferred: {responses[0]}"
 
-      hash_ = set(responses[1]["attrs"])
+      hash_ = {it["attr"] for it in responses[1]["items"]}
       assert hash_ == {hello, cowsay}, f"# should be non-recursive: {hash_}"
 
-      excluded = set(responses[2]["attrs"])
+      excluded = {it["attr"] for it in responses[2]["items"]}
       assert excluded == {hello}, f"exclusion mismatch: {excluded}"
       assert responses[2]["deferred"] == nested, f"nested set not deferred: {responses[2]}"
 
-      banner("Assert resolve + per-attr isolation")
-      assert responses[3]["kind"] == "resolve_ok", responses[3]
-      items = {it["attr"]: it for it in responses[3]["items"]}
+      banner("Assert resolved paths + per-attr isolation")
+      items = {it["attr"]: it for it in responses[0]["items"]}
 
       h = items[hello]
       assert h.get("error") is None and h.get("drv_path", "").endswith(".drv"), h
 
-      b = items["packages.x86_64-linux.boom"]
-      assert b.get("drv_path") is None and b.get("error"), f"boom must isolate as a per-item error: {b}"
+      boom_errors = [e for e in responses[0]["errors"] if e["attr"] == "packages.x86_64-linux.boom"]
+      assert boom_errors and boom_errors[0]["message"], f"boom must isolate as a per-attr error: {responses[0]['errors']}"
 
       banner("Assert fingerprint matches the eval-cache filename")
-      assert responses[4]["kind"] == "fingerprint_ok", responses[4]
-      fp = responses[4].get("fingerprint")
+      assert responses[3]["kind"] == "fingerprint_ok", responses[3]
+      fp = responses[3].get("fingerprint")
       assert fp, f"expected a fingerprint for the committed flake, got {fp}"
       machine.succeed(f"test -f /root/eval-cache/eval-cache-v6/{fp}.sqlite")
 
@@ -133,9 +130,9 @@
       # The fingerprint must match too. A different key would be a cold blob the timing cannot reveal.
       banner("Assert the second eval starts warm off the eval cache")
       warm, warm_ms = drive("warm")
-      assert warm[4].get("fingerprint") == fp, f"fingerprint moved: {fp} -> {warm[4].get('fingerprint')}"
+      assert warm[3].get("fingerprint") == fp, f"fingerprint moved: {fp} -> {warm[3].get('fingerprint')}"
 
-      warm_items = {it["attr"]: it for it in warm[3]["items"]}
+      warm_items = {it["attr"]: it for it in warm[0]["items"]}
       assert warm_items[hello].get("drv_path") == h["drv_path"], f"warm resolve disagrees: {warm_items[hello]}"
 
       print(f"cold={cold_ms}ms warm={warm_ms}ms")

@@ -133,15 +133,23 @@ fn serve<W: Write>(
                 input_overrides,
             } => with_evaluator(evaluator, |ev| {
                 frames.begin();
+                // The derivation path is resolved where the attribute was forced, so a member
+                // is evaluated in the same subprocess.
                 let (result, warnings) = capture_warnings_during(|| {
                     walkers.with(ev, &repository, &input_overrides, |walker| {
-                        walker.discover_split(&wildcards, only.as_deref())
+                        let (attrs, deferred, errors) =
+                            walker.discover_split(&wildcards, only.as_deref())?;
+                        let items = attrs
+                            .into_iter()
+                            .map(|attr| resolve_item(walker, attr))
+                            .collect();
+                        Ok((items, deferred, errors))
                     })
                 });
                 let stats = frames.end(read_stats(ev, collect_stats));
                 or_err(
-                    result.map(|(attrs, deferred, errors)| EvalResponse::ListOk {
-                        attrs,
+                    result.map(|(items, deferred, errors)| EvalResponse::ListOk {
+                        items,
                         deferred,
                         warnings,
                         errors,
@@ -149,33 +157,6 @@ fn serve<W: Write>(
                     }),
                 )
             }),
-            EvalRequest::Resolve {
-                repository,
-                attrs,
-                input_overrides,
-            } => {
-                let resp = match evaluator.as_ref() {
-                    None => EvalResponse::Err {
-                        message: "evaluator not initialized".to_string(),
-                    },
-                    Some(ev) => {
-                        frames.begin();
-                        let (warnings, io) = stream_resolve(
-                            frames,
-                            ev,
-                            &mut walkers,
-                            &repository,
-                            &input_overrides,
-                            attrs,
-                        );
-                        let stats = frames.end(read_stats(ev, collect_stats));
-                        io?;
-                        EvalResponse::ResolveEnd { warnings, stats }
-                    }
-                };
-                frames.send(&resp)?;
-                continue;
-            }
             EvalRequest::FetchInput {
                 locked,
                 git_ssh_command,
@@ -270,76 +251,27 @@ impl<'ev> WalkerCache<'ev> {
     }
 }
 
-fn stream_resolve<'ev, W: Write>(
-    frames: &Frames<W>,
-    ev: &'ev NixEvaluator,
-    walkers: &mut WalkerCache<'ev>,
-    repository: &str,
-    overrides: &[(String, String)],
-    attrs: Vec<String>,
-) -> (Vec<String>, std::io::Result<()>) {
-    let mut all_warnings = Vec::new();
-    let mut io = Ok(());
-    let emit = |io: &mut std::io::Result<()>, item: ResolvedItem| {
-        if io.is_ok() {
-            *io = frames.send(&EvalResponse::ResolveItem { item });
-        }
-    };
-
-    let (walker_result, build_warnings) =
-        capture_warnings_during(|| walkers.open(ev, repository, overrides));
-    all_warnings.extend(build_warnings);
-
-    match walker_result {
-        Ok(walker) => {
-            for attr in attrs {
-                let (result, warnings) = capture_warnings_during(|| walker.resolve(&attr));
-                all_warnings.extend(warnings);
-                let item = match result {
-                    Ok((drv, references)) => ResolvedItem {
-                        attr,
-                        drv_path: Some(drv),
-                        references,
-                        error: None,
-                    },
-                    Err(e) => ResolvedItem {
-                        attr,
-                        drv_path: None,
-                        references: vec![],
-                        error: Some(format!("{e:#}")),
-                    },
-                };
-                emit(&mut io, item);
-            }
-        }
-        Err(e) => {
-            let msg = format!("{e:#}");
-            for attr in attrs {
-                emit(
-                    &mut io,
-                    ResolvedItem {
-                        attr,
-                        drv_path: None,
-                        references: vec![],
-                        error: Some(msg.clone()),
-                    },
-                );
-            }
-        }
+fn resolve_item(walker: &FlakeWalker<'_>, attr: String) -> ResolvedItem {
+    match walker.resolve(&attr) {
+        Ok((drv, references)) => ResolvedItem {
+            attr,
+            drv_path: Some(drv),
+            references,
+            error: None,
+        },
+        Err(e) => ResolvedItem {
+            attr,
+            drv_path: None,
+            references: vec![],
+            error: Some(format!("{e:#}")),
+        },
     }
-
-    all_warnings.dedup();
-    (all_warnings, io)
 }
 
 fn response_kind(resp: &EvalResponse) -> String {
     match resp {
         EvalResponse::PlanOk { shards, .. } => format!("PlanOk({} shards)", shards.len()),
-        EvalResponse::ListOk { attrs, .. } => format!("ListOk({} attrs)", attrs.len()),
-        EvalResponse::ResolveItem { item } => format!("ResolveItem({})", item.attr),
-        EvalResponse::ResolveEnd { warnings, .. } => {
-            format!("ResolveEnd({} warnings)", warnings.len())
-        }
+        EvalResponse::ListOk { items, .. } => format!("ListOk({} items)", items.len()),
         EvalResponse::FingerprintOk { fingerprint } => {
             format!("FingerprintOk({})", fingerprint.is_some())
         }

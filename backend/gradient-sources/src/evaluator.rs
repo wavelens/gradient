@@ -15,9 +15,9 @@ pub struct AttrError {
     pub message: String,
 }
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default)]
 pub struct FlakeDiscovery {
-    pub attrs: Vec<String>,
+    pub derivations: Vec<ResolvedDerivation>,
     pub warnings: Vec<String>,
     pub errors: Vec<AttrError>,
 }
@@ -32,13 +32,6 @@ pub trait DerivationResolver: Send + Sync + std::fmt::Debug + 'static {
         wildcards: Vec<String>,
         overrides: &[(String, String)],
     ) -> Result<FlakeDiscovery>;
-
-    async fn resolve_derivation_paths(
-        &self,
-        repository: String,
-        attrs: Vec<String>,
-        overrides: &[(String, String)],
-    ) -> Result<(Vec<ResolvedDerivation>, Vec<String>)>;
 
     async fn release_evaluators(&self);
 

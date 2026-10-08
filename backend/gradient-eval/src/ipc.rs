@@ -14,7 +14,7 @@ use crate::stats::StatsDelta;
 
 /// The version must be bumped whenever the frame layout or a type's rkyv shape changes.
 /// A mismatch can only happen when the binary is replaced mid-run.
-pub const EVAL_IPC_VERSION: u8 = 8;
+pub const EVAL_IPC_VERSION: u8 = 9;
 
 pub const MAX_FRAME_BYTES: u32 = 64 * 1024 * 1024;
 
@@ -65,12 +65,6 @@ pub enum EvalRequest {
         #[serde(default)]
         input_overrides: Vec<(String, String)>,
     },
-    Resolve {
-        repository: String,
-        attrs: Vec<String>,
-        #[serde(default)]
-        input_overrides: Vec<(String, String)>,
-    },
     Fingerprint {
         repository: String,
         #[serde(default)]
@@ -98,18 +92,11 @@ pub enum EvalResponse {
         errors: Vec<AttrError>,
     },
     ListOk {
-        attrs: Vec<String>,
+        items: Vec<ResolvedItem>,
         #[serde(default)]
         deferred: Vec<DiscoveryShard>,
         warnings: Vec<String>,
         errors: Vec<AttrError>,
-        stats: Option<StatsDelta>,
-    },
-    ResolveItem {
-        item: ResolvedItem,
-    },
-    ResolveEnd {
-        warnings: Vec<String>,
         stats: Option<StatsDelta>,
     },
     FingerprintOk {
@@ -155,8 +142,6 @@ pub fn decode_response(bytes: &[u8]) -> Result<EvalResponse, RkyvError> {
     rkyv::from_bytes::<EvalResponse, RkyvError>(bytes)
 }
 
-/// The flush is keeping a streamed item visible to the parent.
-/// The subprocess can die on the very next attr.
 pub fn write_frame<W: Write>(w: &mut W, payload: &[u8]) -> std::io::Result<()> {
     let len = u32::try_from(payload.len())
         .ok()

@@ -353,32 +353,6 @@ pub(super) mod tests {
     }
 
     #[tokio::test]
-    async fn completed_resolve_stream_worker_returns_to_idle() {
-        use gradient_eval::ipc::EvalResponse;
-
-        let pool = EvalWorkerPool::new(1, 2 * GIB, String::new(), Arc::default());
-        pool.push_for_test(replying_worker(
-            &EvalResponse::ResolveEnd {
-                warnings: vec![],
-                stats: None,
-            },
-            "resolveend",
-        ));
-
-        let mut worker = pool.acquire().await.expect("acquire");
-        let (items, end) = worker.resolve("repo".into(), vec![], vec![]).await;
-        end.expect("resolve end");
-        assert!(items.is_empty());
-        drop(worker);
-
-        assert_eq!(
-            pool.idle_count(),
-            1,
-            "a worker whose resolve stream reached ResolveEnd is reusable"
-        );
-    }
-
-    #[tokio::test]
     async fn acquire_skips_dead_idle_worker() {
         let pool = EvalWorkerPool::new(4, 2 * GIB, String::new(), Arc::default());
         let live = fake_worker();

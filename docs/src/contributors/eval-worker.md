@@ -14,9 +14,8 @@ flowchart LR
 ## Subprocess IPC
 
 - **Frames:** a `u32` little-endian length prefix plus an rkyv payload (`gradient-eval/src/ipc.rs`).
-- **Version byte:** the subprocess will write `EVAL_IPC_VERSION` (currently 6) before the first frame. A binary swapped mid-evaluation will fail the handshake instead of sending undecodable frames.
-- **Streamed resolve:** `Resolve` will answer with one `ResolveItem` per attribute as soon as the attribute is resolved. A final `ResolveEnd` will carry the batch's warnings and stats delta.
-- **Single responses:** every other request is one request, one response.
+- **Version byte:** subprocesses write `EVAL_IPC_VERSION` (currently 9) before the first frame. A binary swapped mid-evaluation can no longer pass the handshake and send undecodable frames.
+- **Responses:** request and response pair up. The `List` response holds the derivation path of each attribute found, resolved in the subprocess that forced the attribute.
 - **Shards:** `Plan` will split each include at its first wildcard.
     - A wildcard followed by more segments will yield one sub-pattern per child (`packages.*.hello` -> `packages.x86_64-linux.hello`).
     - A trailing wildcard will yield the unchanged pattern plus its child names (`only`), read without forcing any child.
@@ -26,7 +25,7 @@ flowchart LR
     - The set will come back in `deferred` as a `#` shard over its children.
     - The parent can queue those names in batches.
     - One heavy set will spread across the pool instead of keeping one subprocess busy while the rest sit idle.
-- **Warm walker:** A subprocess can keep one walker (locked flake plus open eval cache) across consecutive requests for the same repository. A Plan / List / Resolve sequence will pay for the lock and the cache open only once.
+- **Warm walker:** A subprocess can keep one walker (locked flake plus open eval cache) across consecutive requests for the same repository. A Plan / List sequence can pay for the lock and the cache open only once.
 
 ## Parent Side
 
@@ -70,7 +69,7 @@ Two layers bound evaluation memory.
 | Concurrent writers | Shards writing a shared cache, each write in an immediate transaction of its own, and a checkpoint at the end | Not applicable |
 | Memory | Automatic pool sizing. A many-system flake can degrade to one shard and still complete | Manual `--workers` and `--max-memory-size` |
 | Pipeline | Discovery writes rows, and build assignment starts mid-evaluation. The closure walk skips server-known derivations | JSON job stream for the consumer (Hydra and similar) |
-| Failure isolation | A bad attribute will become an error, and the evaluation will go on. A crash will keep everything streamed and retry the in-flight attribute | Per-job errors through the fork boundary |
+| Failure isolation | A bad attribute will become an error, and the evaluation will go on. A crashed batch comes back attribute by attribute, down to the attribute that sank the subprocess | Per-job errors through the fork boundary |
 | Compute across machines | Single-host pool today | Single host |
 
 ## Related

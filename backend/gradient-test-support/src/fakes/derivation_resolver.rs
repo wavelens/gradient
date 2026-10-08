@@ -86,14 +86,27 @@ impl DerivationResolver for FakeDerivationResolver {
         _wildcards: Vec<String>,
         _overrides: &[(String, String)],
     ) -> Result<FlakeDiscovery> {
+        let attrs = self
+            .flake_attrs
+            .lock()
+            .unwrap()
+            .get(&repository)
+            .cloned()
+            .unwrap_or_default();
+        let drv_paths = self.drv_paths.lock().unwrap();
+        let derivations: Vec<ResolvedDerivation> = attrs
+            .into_iter()
+            .map(|attr| {
+                let resolved = drv_paths
+                    .get(&(repository.clone(), attr.clone()))
+                    .cloned()
+                    .map(|p| (p, vec![]))
+                    .ok_or_else(|| anyhow!("no fake drv path for {}#{}", repository, attr));
+                (attr, resolved)
+            })
+            .collect();
         Ok(FlakeDiscovery {
-            attrs: self
-                .flake_attrs
-                .lock()
-                .unwrap()
-                .get(&repository)
-                .cloned()
-                .unwrap_or_default(),
+            derivations,
             warnings: vec![],
             errors: self
                 .flake_errors
@@ -103,29 +116,6 @@ impl DerivationResolver for FakeDerivationResolver {
                 .cloned()
                 .unwrap_or_default(),
         })
-    }
-
-    async fn resolve_derivation_paths(
-        &self,
-        repository: String,
-        attrs: Vec<String>,
-        _overrides: &[(String, String)],
-    ) -> Result<(Vec<ResolvedDerivation>, Vec<String>)> {
-        let drv_paths = self.drv_paths.lock().unwrap();
-        Ok((
-            attrs
-                .into_iter()
-                .map(|attr| {
-                    let resolved = drv_paths
-                        .get(&(repository.clone(), attr.clone()))
-                        .cloned()
-                        .map(|p| (p, vec![]))
-                        .ok_or_else(|| anyhow!("no fake drv path for {}#{}", repository, attr));
-                    (attr, resolved)
-                })
-                .collect(),
-            vec![],
-        ))
     }
 
     async fn release_evaluators(&self) {
