@@ -13419,9 +13419,10 @@ components:
 
     BuildWithOutputs:
       type: object
-      required: [id, evaluation, status, derivation_path, architecture, output, created_at, updated_at, prioritized]
+      required: [id, evaluation, status, derivation_path, architecture, output, created_at, updated_at, prioritized, ifd]
       properties:
         prioritized: { type: boolean, description: "The build gets a QoS bonus: a user prioritized it or a build that depends on it, or it belongs to a running evaluation that is prioritized or runs a build request." }
+        ifd: { type: boolean, description: True for a derivation an evaluation imported. }
         id:
           type: string
           format: uuid

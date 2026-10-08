@@ -537,7 +537,7 @@ describe('EvaluationLogComponent', () => {
     it('fetches the linked build before the build list', () => {
       const getBuild = vi.fn(() => of({
         id: 'b1', evaluation: 'eval-1', status: 'Completed', derivation_path: 'hash-hello.drv',
-        architecture: 'x86_64-linux', worker: null, dispatched_job: null, output: {}, prioritized: true, created_at: '', updated_at: '',
+        architecture: 'x86_64-linux', worker: null, dispatched_job: null, output: {}, prioritized: true, ifd: true, created_at: '', updated_at: '',
       }));
       const getBuilds = vi.fn(() => of({ builds: [], total: 0, active_count: 0 }));
       TestBed.configureTestingModule({
@@ -565,6 +565,7 @@ describe('EvaluationLogComponent', () => {
       expect(getBuild).toHaveBeenCalled();
       expect(getBuild.mock.invocationCallOrder[0]).toBeLessThan(getBuilds.mock.invocationCallOrder[0]);
       expect(fixture.componentInstance.builds().find(b => b.id === 'b1')?.prioritized).toBe(true);
+      expect(fixture.componentInstance.builds().find(b => b.id === 'b1')?.ifd).toBe(true);
       fixture.destroy();
     });
   });

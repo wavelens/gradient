@@ -33,6 +33,7 @@ pub struct BuildWithOutputs {
     pub dispatched_job: Option<DispatchedJobId>,
     pub output: HashMap<String, String>,
     pub prioritized: bool,
+    pub ifd: bool,
     pub created_at: chrono::NaiveDateTime,
     pub updated_at: chrono::NaiveDateTime,
     pub progress: Option<BuildProgress>,
@@ -112,6 +113,7 @@ pub async fn get_build(
         dispatched_job: attempt.map(|a| a.dispatched_job),
         output: outputs,
         prioritized,
+        ifd: derivation.ifd,
         created_at: build_job.created_at,
         updated_at: shared_build.updated_at,
         progress: running_progress(
