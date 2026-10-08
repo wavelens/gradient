@@ -377,14 +377,21 @@ where
     unsafe { libc::dup2(pipefd[1], 2) };
     unsafe { libc::close(pipefd[1]) };
 
+    // The pipe is drained while `f` runs. Output beyond the pipe buffer would otherwise block
+    // the evaluating thread for good, with nobody left to read it.
+    let mut reader = unsafe { std::fs::File::from_raw_fd(pipefd[0]) };
+    let drain = std::thread::spawn(move || {
+        let mut captured = String::new();
+        let _ = reader.read_to_string(&mut captured);
+        captured
+    });
+
     let result = f();
 
     unsafe { libc::dup2(saved, 2) };
     unsafe { libc::close(saved) };
 
-    let mut captured = String::new();
-    let mut reader = unsafe { std::fs::File::from_raw_fd(pipefd[0]) };
-    let _ = reader.read_to_string(&mut captured);
+    let captured = drain.join().unwrap_or_default();
 
     (result, parse_warnings(&captured))
 }
@@ -452,5 +459,23 @@ mod tests {
                 "warning: second"
             ]
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn capture_keeps_draining_past_the_pipe_buffer() {
+        use std::io::Write;
+
+        let line = format!("warning: {}\n", "x".repeat(1023));
+        let (result, warnings) = capture_warnings_during(|| {
+            let mut stderr = std::io::stderr().lock();
+            for _ in 0..256 {
+                stderr.write_all(line.as_bytes()).expect("stderr write");
+            }
+            7
+        });
+
+        assert_eq!(result, 7);
+        assert_eq!(warnings.len(), 256);
     }
 }
