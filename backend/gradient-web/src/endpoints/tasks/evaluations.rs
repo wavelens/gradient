@@ -858,6 +858,7 @@ impl EntryPointRelatedData {
                     .shared_builds
                     .get(&ep.derivation)
                     .is_some_and(|a| self.with_qos.contains(&a.id)),
+                ifd: drv.ifd,
                 created_at: ep.created_at,
             });
         }

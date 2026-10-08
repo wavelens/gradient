@@ -71,6 +71,7 @@ pub struct EntryPointSummary {
     pub deps: BuildStatusCounts,
     pub deps_total: i64,
     pub prioritized: bool,
+    pub ifd: bool,
     pub created_at: chrono::NaiveDateTime,
 }
 
