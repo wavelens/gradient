@@ -141,13 +141,10 @@ impl BuildabilityChecker {
         &self,
         imports: &[MDerivationBuild],
         worker_caps: &[(Vec<String>, Vec<String>)],
-        now: chrono::NaiveDateTime,
     ) -> Vec<(DerivationBuildId, UnmetRequirement)> {
         imports
             .iter()
-            .filter(|b| {
-                (now - b.updated_at).num_seconds() >= crate::unbuildable::UNBUILDABLE_GRACE_SECS
-            })
+            .filter(|b| BuildStatus::PENDING.contains(&b.status))
             .filter_map(|b| {
                 let drv = self.drv_by_id.get(&b.derivation)?;
                 (!self.runnable(b, drv, worker_caps)).then(|| {
@@ -459,28 +456,25 @@ mod tests {
     }
 
     #[test]
-    fn an_import_no_worker_can_build_is_unbuildable_once_the_grace_passed() {
-        let now = gradient_types::now();
-        let aged = |drv_id, secs| MDerivationBuild {
-            updated_at: now - chrono::Duration::seconds(secs),
-            status: BuildStatus::Created,
+    fn a_pending_import_without_a_worker_for_its_system_is_unbuildable() {
+        let pending = |drv_id, status| MDerivationBuild {
+            status,
             ..build_for(drv_id, EvaluationId::now_v7())
         };
         let darwin = drv(DerivationId::now_v7(), "aarch64-darwin");
         let linux = drv(DerivationId::now_v7(), "x86_64-linux");
-        let grace = crate::unbuildable::UNBUILDABLE_GRACE_SECS;
-        let (old, fresh, buildable) = (
-            aged(darwin.id, grace),
-            aged(darwin.id, grace - 1),
-            aged(linux.id, grace),
+        let (stuck, building, buildable) = (
+            pending(darwin.id, BuildStatus::Created),
+            pending(darwin.id, BuildStatus::Building),
+            pending(linux.id, BuildStatus::Queued),
         );
         let checker = checker_with(vec![darwin, linux], vec![]);
         let caps = vec![(vec!["x86_64-linux".to_string()], vec![])];
 
-        let unbuildable = checker.unbuildable_imports(&[old.clone(), fresh, buildable], &caps, now);
+        let unbuildable = checker.unbuildable_imports(&[stuck.clone(), building, buildable], &caps);
 
         assert_eq!(unbuildable.len(), 1, "{unbuildable:?}");
-        assert_eq!(unbuildable[0].0, old.id);
+        assert_eq!(unbuildable[0].0, stuck.id);
         assert_eq!(unbuildable[0].1.architecture, "aarch64-darwin");
     }
 }
