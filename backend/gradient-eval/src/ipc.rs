@@ -14,7 +14,7 @@ use crate::stats::StatsDelta;
 
 /// The version must be bumped whenever the frame layout or a type's rkyv shape changes.
 /// A mismatch can only happen when the binary is replaced mid-run.
-pub const EVAL_IPC_VERSION: u8 = 9;
+pub const EVAL_IPC_VERSION: u8 = 10;
 
 pub const MAX_FRAME_BYTES: u32 = 64 * 1024 * 1024;
 
@@ -80,6 +80,10 @@ pub enum EvalRequest {
         #[serde(default)]
         git_ssh_command: Option<String>,
     },
+    BuildDone {
+        #[serde(default)]
+        error: Option<String>,
+    },
     Shutdown,
 }
 
@@ -108,6 +112,9 @@ pub enum EvalResponse {
     },
     Stats {
         delta: StatsDelta,
+    },
+    NeedsBuild {
+        derived_paths: Vec<String>,
     },
     Err {
         message: String,
@@ -233,6 +240,31 @@ mod tests {
         };
         let back = decode_response(&encode_response(&stats).unwrap()).unwrap();
         assert!(matches!(back, EvalResponse::Stats { delta } if delta.nr_thunks == 7));
+    }
+
+    #[test]
+    fn needs_build_and_build_done_round_trip() {
+        let paths = vec!["/nix/store/aaaa-src.drv^out".to_string()];
+        let needs = EvalResponse::NeedsBuild {
+            derived_paths: paths.clone(),
+        };
+        let back = decode_response(&encode_response(&needs).unwrap()).unwrap();
+        assert!(
+            matches!(back, EvalResponse::NeedsBuild { derived_paths } if derived_paths == paths)
+        );
+
+        let done = EvalRequest::BuildDone {
+            error: Some("build b1 failed".into()),
+        };
+        let back = decode_request(&encode_request(&done).unwrap()).unwrap();
+        assert!(
+            matches!(back, EvalRequest::BuildDone { error } if error.as_deref() == Some("build b1 failed"))
+        );
+
+        let json = serde_json::to_value(EvalRequest::BuildDone { error: None }).unwrap();
+        assert_eq!(json["op"], "build_done");
+        let json = serde_json::to_value(&needs).unwrap();
+        assert_eq!(json["kind"], "needs_build");
     }
 
     #[test]
