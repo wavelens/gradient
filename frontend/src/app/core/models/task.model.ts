@@ -82,6 +82,7 @@ export interface EntryPointSummary {
   deps: BuildStatusCounts;
   deps_total: number;
   prioritized: boolean;
+  ifd: boolean;
   created_at: string;
 }
 

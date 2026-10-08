@@ -63,6 +63,7 @@ export interface BuildItem {
   dispatched_job: string | null;  // Job Board entry of the latest attempt, null until assigned to a worker
   depth: number;         // dependency layer, 0 = nothing in the list depends on it
   prioritized: boolean;
+  ifd: boolean;
 }
 
 export interface BuildWithOutputs {
