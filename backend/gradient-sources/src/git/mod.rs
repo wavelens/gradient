@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+mod checkout;
 mod commit_info;
 mod context;
 mod pktline;
@@ -18,6 +19,7 @@ use gradient_types::input::vec_to_hex;
 use gradient_types::*;
 use tracing::instrument;
 
+pub use checkout::checkout_commit;
 pub use commit_info::HeadCommit;
 pub use remote::{accept_cert, fetch_options_with_ssh};
 

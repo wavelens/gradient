@@ -6,7 +6,7 @@
 
 use super::context::TaskGitContext;
 use super::remote::accept_cert;
-use super::url::git_transport_url;
+use super::url::{git_transport_url, set_shallow_unless_local};
 use crate::SourceError;
 use git2::RemoteCallbacks;
 use gradient_types::input::vec_to_hex;
@@ -20,7 +20,6 @@ pub struct HeadCommit {
     pub author_name: String,
 }
 
-/// The local transport cannot fetch shallow. A local repository is cheap to read whole.
 pub(crate) fn fetch_commit(
     url: &str,
     ssh_creds: Option<(String, String)>,
@@ -36,9 +35,7 @@ pub(crate) fn fetch_commit(
 
     let mut fo = git2::FetchOptions::new();
     fo.remote_callbacks(callbacks(ssh_creds));
-    if !url.starts_with("file://") && !url.starts_with('/') {
-        fo.depth(1);
-    }
+    set_shallow_unless_local(&mut fo, url);
 
     repo.remote_anonymous(url)
         .map_err(git_error)?

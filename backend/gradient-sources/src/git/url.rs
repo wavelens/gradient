@@ -22,3 +22,10 @@ pub(super) fn parse_git_protocol_url(url: &str) -> Result<(&str, u16, &str), Sou
 pub(super) fn git_transport_url(url: &str) -> &str {
     url.strip_prefix("git+").unwrap_or(url)
 }
+
+/// The local transport cannot fetch shallow. A local repository is cheap to read whole.
+pub(super) fn set_shallow_unless_local(fetch: &mut git2::FetchOptions<'_>, url: &str) {
+    if !url.starts_with("file://") && !url.starts_with('/') {
+        fetch.depth(1);
+    }
+}
