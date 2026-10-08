@@ -14,8 +14,8 @@ flowchart LR
 ## Subprocess IPC
 
 - **Frames:** a `u32` little-endian length prefix plus an rkyv payload (`gradient-eval/src/ipc.rs`).
-- **Version byte:** subprocesses write `EVAL_IPC_VERSION` (currently 9) before the first frame. A binary swapped mid-evaluation can no longer pass the handshake and send undecodable frames.
-- **Responses:** request and response pair up. The `List` response holds the derivation path of each attribute found, resolved in the subprocess that forced the attribute.
+- **Version byte:** subprocesses write `EVAL_IPC_VERSION` (currently 10) before the first frame. A binary swapped mid-evaluation can no longer pass the handshake and send undecodable frames.
+- **Responses:** request and response pair up. `Stats` ticks and [build requests](#import-from-derivation) can arrive before the response. `List` responses hold the derivation path of each attribute found, resolved in the subprocess that forced the attribute.
 - **Shards:** `Plan` will split each include at its first wildcard.
     - A wildcard followed by more segments will yield one sub-pattern per child (`packages.*.hello` -> `packages.x86_64-linux.hello`).
     - A trailing wildcard will yield the unchanged pattern plus its child names (`only`), read without forcing any child.
@@ -26,6 +26,30 @@ flowchart LR
     - The parent can queue those names in batches.
     - One heavy set will spread across the pool instead of keeping one subprocess busy while the rest sit idle.
 - **Warm walker:** A subprocess can keep one walker (locked flake plus open eval cache) across consecutive requests for the same repository. A Plan / List sequence can pay for the lock and the cache open only once.
+
+## Import From Derivation
+
+An import from a derivation (IFD) needs a build in the middle of an evaluation. Subprocesses never build through the local daemon. The parent must request a Gradient build from the server instead.
+
+| Frame | Direction | Content |
+|---|---|---|
+| `NeedsBuild` | subprocess -> parent | `derived_paths`: `.drv` paths with their outputs (`/nix/store/<hash>-x.drv^out`) |
+| `BuildDone` | parent -> subprocess | `error`: empty after a successful build |
+
+- The patched Nix of Gradient can hand an import to a realise hook instead of the local daemon.
+- The hook in the subprocess must send `NeedsBuild` and block until `BuildDone` arrives.
+- A different request during the wait is a protocol error. Subprocesses then stop reading and exit.
+- Nix can raise the `error` of `BuildDone` as the error of the import. Later attributes with the same import receive the same error.
+
+### Import Builder (`gradient-worker/src/executor/import.rs`)
+
+1. Record the closure, with the imported derivation as the entry point `other.<system>.<name>` and `ifd` set. Repeated names within a job end with `-<first 8 hash characters>`.
+2. Send [`ImportRequest`](proto/messages.md) and wait for `ImportResult`.
+3. Pull the outputs and their closure from the Gradient cache.
+4. Answer `BuildDone`, with `import from derivation '<name>' failed: build <id> <status>` after a failure.
+
+- Requests for the same `.drv` from different subprocesses share the wait and the answer.
+- Fingerprint, checkpoint, input fetch and the `--eval-driver` harness refuse imports with `import from derivation is not available during <call>`.
 
 ## Parent Side
 
