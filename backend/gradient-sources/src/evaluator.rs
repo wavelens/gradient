@@ -9,11 +9,17 @@ use async_trait::async_trait;
 use gradient_derivation::Derivation;
 pub type ResolvedDerivation = (String, Result<(String, Vec<String>)>);
 
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct AttrError {
+    pub attr: String,
+    pub message: String,
+}
+
 #[derive(Debug, Default, Clone)]
 pub struct FlakeDiscovery {
     pub attrs: Vec<String>,
     pub warnings: Vec<String>,
-    pub errors: Vec<String>,
+    pub errors: Vec<AttrError>,
 }
 
 /// Production impls must run inside `tokio::task::spawn_blocking`. The embedded Nix C API with

@@ -7,14 +7,14 @@
 use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use gradient_derivation::Derivation;
-use gradient_sources::{DerivationResolver, FlakeDiscovery, ResolvedDerivation};
+use gradient_sources::{AttrError, DerivationResolver, FlakeDiscovery, ResolvedDerivation};
 use std::collections::HashMap;
 use std::sync::Mutex;
 
 #[derive(Debug, Default)]
 pub struct FakeDerivationResolver {
     flake_attrs: Mutex<HashMap<String, Vec<String>>>,
-    flake_errors: Mutex<HashMap<String, Vec<String>>>,
+    flake_errors: Mutex<HashMap<String, Vec<AttrError>>>,
     drv_paths: Mutex<HashMap<(String, String), String>>,
     derivations: Mutex<HashMap<String, Derivation>>,
     features: Mutex<HashMap<String, (String, Vec<String>)>>,
@@ -31,7 +31,7 @@ impl FakeDerivationResolver {
         self
     }
 
-    pub fn with_flake_errors(self, flake: impl Into<String>, errors: Vec<String>) -> Self {
+    pub fn with_flake_errors(self, flake: impl Into<String>, errors: Vec<AttrError>) -> Self {
         self.flake_errors
             .lock()
             .unwrap()

@@ -15,8 +15,8 @@ use tokio::process::{Child, ChildStderr, ChildStdin, ChildStdout, Command};
 use tracing::{debug, trace, warn};
 
 use gradient_eval::ipc::{
-    DiscoveryShard, EVAL_IPC_VERSION, EvalRequest, EvalResponse, MAX_FRAME_BYTES, ResolvedItem,
-    decode_response, encode_request,
+    AttrError, DiscoveryShard, EVAL_IPC_VERSION, EvalRequest, EvalResponse, MAX_FRAME_BYTES,
+    ResolvedItem, decode_response, encode_request,
 };
 use gradient_eval::stats::StatsDelta;
 
@@ -51,7 +51,7 @@ pub(super) struct Listing {
     pub(super) attrs: Vec<String>,
     pub(super) deferred: Vec<DiscoveryShard>,
     pub(super) warnings: Vec<String>,
-    pub(super) errors: Vec<String>,
+    pub(super) errors: Vec<AttrError>,
     pub(super) stats: Option<StatsDelta>,
 }
 
@@ -295,7 +295,7 @@ impl EvalWorker {
         repository: String,
         wildcards: Vec<String>,
         input_overrides: Vec<(String, String)>,
-    ) -> Result<(Vec<DiscoveryShard>, Vec<String>)> {
+    ) -> Result<(Vec<DiscoveryShard>, Vec<AttrError>)> {
         self.call(
             EvalRequest::Plan {
                 repository,
