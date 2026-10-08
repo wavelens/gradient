@@ -21,7 +21,7 @@ use super::types::{
     BuildItem, BuildsQuery, EntryPointBrief, EvaluationMessageResponse, EvaluationResponse,
     EvaluationTriggerSummary, PaginatedBuilds,
 };
-use super::{EvalAccessContext, live_progress};
+use super::{EvalAccessContext, live_progress, live_progress_status};
 use gradient_entity::build::BuildStatus;
 
 pub async fn get_evaluation(
@@ -140,6 +140,15 @@ pub async fn get_evaluation(
         evaluation.status,
         Instant::now(),
     );
+    let expected_thunks = match evaluation
+        .task
+        .filter(|_| live_progress_status(evaluation.status))
+    {
+        Some(task) => {
+            gradient_db::evaluations::expected_thunks::expected_thunks(&state.web_db, task).await?
+        }
+        None => None,
+    };
     let res = BaseResponse {
         error: false,
         message: EvaluationResponse {
@@ -166,6 +175,7 @@ pub async fn get_evaluation(
             triggered_by,
             waiting_reason,
             progress,
+            expected_thunks,
         },
     };
 

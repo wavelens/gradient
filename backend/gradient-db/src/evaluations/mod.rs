@@ -6,6 +6,7 @@
 
 pub mod counters;
 pub mod draining;
+pub mod expected_thunks;
 pub mod failed_attributes;
 pub mod imports;
 pub mod watchdog;

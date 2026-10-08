@@ -15,7 +15,7 @@ pub mod types;
 pub use self::actions::*;
 pub use self::artefacts::*;
 pub use self::log::*;
-pub(crate) use self::progress::live_progress;
+pub(crate) use self::progress::{live_progress, live_progress_status};
 pub use self::query::*;
 pub use self::report::*;
 pub use self::types::*;

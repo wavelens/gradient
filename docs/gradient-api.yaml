@@ -12643,6 +12643,10 @@ components:
           description: Present only while the evaluation is fetching or evaluating.
           allOf:
             - $ref: '#/components/schemas/EvaluationProgress'
+        expected_thunks:
+          type: integer
+          format: int64
+          description: Thunks the last completed evaluation of the task needed. Present only while the evaluation is fetching or evaluating and the task has a completed evaluation with metrics.
 
     TaskDetailsResponse:
       type: object
@@ -12914,6 +12918,10 @@ components:
           description: Present only while the evaluation is fetching or evaluating.
           allOf:
             - $ref: '#/components/schemas/EvaluationProgress'
+        expected_thunks:
+          type: integer
+          format: int64
+          description: Thunks the last completed evaluation of the task needed. Present only while the evaluation is fetching or evaluating and the task has a completed evaluation with metrics.
 
     WaitingReason:
       description: |

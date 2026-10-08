@@ -70,6 +70,8 @@ pub struct EvaluationResponse {
     pub waiting_reason: Option<WaitingReason>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub progress: Option<EvaluationProgress>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expected_thunks: Option<u64>,
 }
 
 #[derive(Serialize, Debug)]
@@ -124,6 +126,7 @@ mod tests {
             trigger: None,
             triggered_by: None,
             waiting_reason: None,
+            expected_thunks: progress.as_ref().map(|_| 450),
             progress,
         })
         .unwrap()
@@ -136,6 +139,9 @@ mod tests {
             body["progress"],
             serde_json::json!({ "kind": "evaluating", "thunks": 7 })
         );
-        assert!(response(None).get("progress").is_none());
+        assert_eq!(body["expected_thunks"], 450);
+        let idle = response(None);
+        assert!(idle.get("progress").is_none());
+        assert!(idle.get("expected_thunks").is_none());
     }
 }
