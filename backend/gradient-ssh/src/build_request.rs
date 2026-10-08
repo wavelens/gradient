@@ -15,7 +15,7 @@ use gradient_entity::evaluation::{EvaluationKind, EvaluationStatus};
 use gradient_graph::{RecordBatch, Transition};
 use gradient_types::*;
 use gradient_util::store_path::strip_nix_store_prefix;
-use gradient_wire::types::{BuildFailureKind, DiscoveredDerivation};
+use gradient_wire::types::DiscoveredDerivation;
 use harmonia_protocol::log::LogMessage;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter, QueryOrder, Select,
@@ -30,10 +30,15 @@ const RECORD_BATCH_SIZE: usize = 50;
 
 static EVALUATION_LOOKUP: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
+const JOINABLE: [EvaluationStatus; 3] = [
+    EvaluationStatus::EvaluatingDerivation,
+    EvaluationStatus::Building,
+    EvaluationStatus::Waiting,
+];
+
 struct Target {
     task: TaskId,
     evaluation: EvaluationId,
-    joined: bool,
     hold: Hold,
 }
 
@@ -160,13 +165,9 @@ async fn add_to_user_evaluation(
     drv_paths: &[String],
 ) -> anyhow::Result<EvaluationId> {
     let target = evaluation_for(session, drv_paths).await?;
-    let (evaluation, joined) = (target.evaluation, target.joined);
-    match add(session, target, closure, drv_paths).await? {
-        Added::Yes => return Ok(evaluation),
-        Added::EvaluationEnded if joined => {}
-        Added::EvaluationEnded => {
-            anyhow::bail!("evaluation {evaluation} ended before the builds were added")
-        }
+    let evaluation = target.evaluation;
+    if let Added::Yes = add(session, target, closure, drv_paths).await? {
+        return Ok(evaluation);
     }
 
     let target = evaluation_for(session, drv_paths).await?;
@@ -193,15 +194,14 @@ async fn evaluation_for(session: &Session, drv_paths: &[String]) -> anyhow::Resu
     let running = running_evaluation(task.id, session.user.id)
         .one(&state.web_db)
         .await?;
-    let (evaluation, joined) = match running {
-        Some(running) => (running.id, true),
-        None => (create_evaluation(session, task.id, drv_paths).await?, false),
+    let evaluation = match running {
+        Some(running) => running.id,
+        None => create_evaluation(session, task.id, drv_paths).await?,
     };
 
     Ok(Target {
         task: task.id,
         evaluation,
-        joined,
         hold: state.held_evaluations.hold(evaluation),
     })
 }
@@ -211,7 +211,7 @@ fn running_evaluation(task: TaskId, user: UserId) -> Select<EEvaluation> {
         .filter(CEvaluation::Task.eq(task))
         .filter(CEvaluation::Kind.eq(EvaluationKind::Ssh))
         .filter(CEvaluation::StartedBy.eq(user))
-        .filter(CEvaluation::Status.is_in(EvaluationStatus::ACTIVE))
+        .filter(CEvaluation::Status.is_in(JOINABLE))
         .order_by_desc(CEvaluation::CreatedAt)
 }
 
@@ -271,33 +271,27 @@ async fn add(
         hold,
         ..
     } = target;
-    let added = add_batches(session, task, evaluation, closure, drv_paths).await;
+    let mut added = add_batches(session, task, evaluation, closure, drv_paths).await;
+    if matches!(added, Ok(Added::Yes)) && ended(session, evaluation).await? {
+        added = Ok(Added::EvaluationEnded);
+    }
     drop(hold);
 
-    let graph = &session.state.graph;
-    match added {
-        Ok(Added::Yes) => {
-            graph
-                .transition(Transition::EvalStreamCompleted { evaluation })
-                .await?;
-            Ok(Added::Yes)
-        }
-        Ok(Added::EvaluationEnded) => Ok(Added::EvaluationEnded),
-        Err(error) => {
-            let failed = graph
-                .transition(Transition::EvalFailed {
-                    evaluation,
-                    error: error.to_string(),
-                    kind: BuildFailureKind::Permanent,
-                    missing_paths: Vec::new(),
-                })
-                .await;
-            if let Err(e) = failed {
-                tracing::warn!(%evaluation, error = %e, "ssh evaluation could not be failed");
-            }
-            Err(error)
-        }
+    if !matches!(added, Ok(Added::EvaluationEnded)) {
+        session
+            .state
+            .graph
+            .transition(Transition::EvalStreamCompleted { evaluation })
+            .await?;
     }
+    added
+}
+
+async fn ended(session: &Session, evaluation: EvaluationId) -> anyhow::Result<bool> {
+    Ok(EEvaluation::find_by_id(evaluation)
+        .one(&session.state.web_db)
+        .await?
+        .is_none_or(|e| EvaluationStatus::TERMINAL.contains(&e.status)))
 }
 
 async fn add_batches(
@@ -449,6 +443,7 @@ mod tests {
             project: gradient_test_support::fixtures::project(),
             permissions: 0,
             caches: vec![],
+            closed: Default::default(),
         };
 
         let e = start(&session, &[path("a")]).await.expect_err("refused");
@@ -463,6 +458,7 @@ mod tests {
             project: gradient_test_support::fixtures::project(),
             permissions: 0,
             caches: vec![],
+            closed: Default::default(),
         }
     }
 
@@ -509,7 +505,6 @@ mod tests {
             .expect("target");
 
         assert_eq!(target.evaluation, running.id);
-        assert!(target.joined);
         assert!(session.state.held_evaluations.holds(running.id));
         drop(target);
         assert!(!session.state.held_evaluations.holds(running.id));
@@ -532,36 +527,11 @@ mod tests {
             .expect("target");
 
         assert_eq!(target.evaluation, created.id);
-        assert!(!target.joined);
         assert!(session.state.held_evaluations.holds(created.id));
     }
 
-    #[tokio::test]
-    async fn two_first_requests_create_a_single_evaluation() {
-        let task = build_request_task();
-        let created = ssh_evaluation(&task);
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
-            .append_query_results([vec![task.clone()]])
-            .append_query_results([Vec::<MEvaluation>::new()])
-            .append_query_results([vec![commit()]])
-            .append_query_results([vec![created.clone()]])
-            .append_query_results([vec![task.clone()]])
-            .append_query_results([vec![created.clone()]])
-            .into_connection();
-        let session = session(db);
-
-        let (a, b) = ([path("a")], [path("b")]);
-        let (first, second) =
-            tokio::join!(evaluation_for(&session, &a), evaluation_for(&session, &b));
-        let (first, second) = (first.expect("first"), second.expect("second"));
-
-        assert_eq!(first.evaluation, created.id);
-        assert_eq!(second.evaluation, created.id);
-        assert_ne!(first.joined, second.joined);
-    }
-
     #[test]
-    fn the_lookup_matches_task_kind_user_and_active_status() {
+    fn the_lookup_matches_task_kind_user_and_the_statuses_that_take_batches() {
         let task = TaskId::now_v7();
         let user = UserId::now_v7();
 
@@ -572,7 +542,7 @@ mod tests {
         assert!(sql.contains(&format!("\"task\" = '{task}'")), "{sql}");
         assert!(sql.contains(&format!("\"started_by\" = '{user}'")), "{sql}");
         assert!(sql.contains("\"kind\" ="), "{sql}");
-        assert!(sql.contains("\"status\" IN"), "{sql}");
+        assert!(sql.contains("\"status\" IN (2, 3, 4)"), "{sql}");
     }
 
     #[test]

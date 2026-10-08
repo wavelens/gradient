@@ -7,6 +7,7 @@
 use gradient_core::ServerState;
 use gradient_db::permissions::{Permission, PermissionMask, mask_grants};
 use gradient_types::*;
+use gradient_util::shutdown::CancellationToken;
 use std::sync::Arc;
 
 pub struct Session {
@@ -15,6 +16,7 @@ pub struct Session {
     pub project: MProject,
     pub permissions: PermissionMask,
     pub caches: Vec<CacheId>,
+    pub closed: CancellationToken,
 }
 
 impl Session {

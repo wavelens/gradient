@@ -148,7 +148,10 @@ pub async fn wait(
             break evaluation;
         }
 
-        tokio::time::sleep(POLL).await;
+        tokio::select! {
+            () = tokio::time::sleep(POLL) => {}
+            () = session.closed.cancelled() => anyhow::bail!("the SSH connection closed"),
+        }
     };
     logs.finish(&log);
 

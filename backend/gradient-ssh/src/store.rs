@@ -424,6 +424,7 @@ mod tests {
             project: gradient_test_support::fixtures::project(),
             permissions: 0,
             caches: vec![CacheId::now_v7()],
+            closed: Default::default(),
         })
     }
 
