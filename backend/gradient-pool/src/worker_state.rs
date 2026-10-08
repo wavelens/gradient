@@ -76,6 +76,13 @@ pub struct WorkerShared {
 }
 
 impl WorkerShared {
+    pub fn build_jobs(&self) -> u32 {
+        self.assigned_jobs
+            .values()
+            .filter(|job| job.kind == JobKind::Build)
+            .count() as u32
+    }
+
     pub fn jobs_in(&self, stage: BuildStage) -> u32 {
         self.assigned_jobs
             .values()
@@ -173,12 +180,7 @@ impl TypedWorker<Active> {
     }
 
     pub fn has_build_capacity(&self) -> bool {
-        let builds = self
-            .assigned_jobs
-            .values()
-            .filter(|job| job.kind == JobKind::Build)
-            .count() as u32;
-        builds < self.max_concurrent_builds
+        self.build_jobs() < self.max_concurrent_builds
     }
 
     pub fn into_draining(self) -> TypedWorker<Draining> {
