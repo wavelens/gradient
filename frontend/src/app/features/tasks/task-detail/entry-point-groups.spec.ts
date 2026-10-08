@@ -35,6 +35,12 @@ describe('groupEntryPoints', () => {
       ]);
   });
 
+  it('puts the other set last after the sets it sorts among', () => {
+    expect(shape([ep('checks.x86_64-linux.fmt'), ep('other.x86_64-linux.tool'), ep('others.x86_64-linux.misc'), ep('packages.x86_64-linux.hello')])
+      .map(([title]) => title))
+      .toEqual(['Checks', 'Packages', 'Other', 'Others']);
+  });
+
   /// A NixOS flake's entry points all end `.config.system.build.toplevel`, so the
   /// last segment labelled every row of a 74-host list `toplevel`.
   it('drops the trailing segments every row of a set shares', () => {

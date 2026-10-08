@@ -35,6 +35,10 @@ function headingOf(set: string): string {
   return words.charAt(0).toUpperCase() + words.slice(1);
 }
 
+function isOtherSet(set: string): boolean {
+  return /^others?$/i.test(set);
+}
+
 function pathWithinSet(attr: string, architecture?: string): { set: string; path: string[] } {
   const [set, ...rest] = attrSegments(attr);
   if (!rest.length) return { set, path: [set] };
@@ -61,7 +65,7 @@ export function groupEntryPoints(
   for (const entry of entryPoints) add(entry.eval, entry.architecture, { kind: 'build', key: entry.id, entry });
   for (const failure of failed) add(failure.eval, undefined, { kind: 'failed', key: `failed:${failure.eval}`, failure });
 
-  return [...sets].map(([set, members]) => {
+  return [...sets].sort(([a], [b]) => Number(isOtherSet(a)) - Number(isOtherSet(b))).map(([set, members]) => {
     if (failed.length) members.sort((a, b) => (a.attr < b.attr ? -1 : a.attr > b.attr ? 1 : 0));
     const tail = sharedTail(members);
     return {
