@@ -1,0 +1,69 @@
+From 5d034b3d48e2eead0519042b291f39597140a39f Mon Sep 17 00:00:00 2001
+From: Dennis Wuitz <dennish@wuitz.de>
+Date: Thu, 8 Oct 2026 03:51:37 +0200
+Subject: [PATCH] perf(libexpr): replay a failed realisation instead of
+ building it again
+
+A thunk that threw is forced again on its next use and asked the store to build the same failing derivation again, so a broken import-from-derivation shared by many attributes was attempted per attribute and per force, and the attempts of concurrent evaluators serialized on the store's output lock. The failure is kept per EvalState and rethrown.
+---
+ src/libexpr/include/nix/expr/eval.hh |  8 +++++++-
+ src/libexpr/primops.cc               | 20 +++++++++++++++++++-
+ 2 files changed, 26 insertions(+), 2 deletions(-)
+
+diff --git a/src/libexpr/include/nix/expr/eval.hh b/src/libexpr/include/nix/expr/eval.hh
+index d6083ae9f..893b2010b 100644
+--- a/src/libexpr/include/nix/expr/eval.hh
++++ b/src/libexpr/include/nix/expr/eval.hh
+@@ -22,7 +22,7 @@
+ #include "nix/expr/config.hh"
+ 
+ #include <boost/unordered/unordered_flat_map.hpp>
+-#include <boost/unordered/concurrent_flat_map_fwd.hpp>
++#include <boost/unordered/concurrent_flat_map.hpp>
+ #include <boost/unordered/concurrent_flat_set.hpp>
+ 
+ #include <nlohmann/json_fwd.hpp>
+@@ -468,6 +468,12 @@ public:
+      */
+     boost::concurrent_flat_set<StorePath> rootedValidPaths;
+ 
++    /**
++     * Derivations whose realisation threw during this evaluation, with the
++     * exception, replayed by `realiseContext()` instead of building again.
++     */
++    boost::concurrent_flat_map<StorePath, std::exception_ptr> failedRealisations;
++
+ private:
+ 
+     /**
+diff --git a/src/libexpr/primops.cc b/src/libexpr/primops.cc
+index 7def898c0..f8c309fc8 100644
+--- a/src/libexpr/primops.cc
++++ b/src/libexpr/primops.cc
+@@ -126,7 +126,25 @@ StringMap EvalState::realiseContext(const NixStringContext & context, StorePathS
+     buildReqs.reserve(drvs.size());
+     for (auto & d : drvs)
+         buildReqs.emplace_back(DerivedPath{d});
+-    buildStore->buildPaths(buildReqs, bmNormal, store);
++
++    /* A thunk that threw is forced again on its next use, and would ask the
++       store to build the same failing derivation again. Within this evaluation
++       the failure is replayed instead, so a broken import-from-derivation costs
++       its build attempt once per process rather than once per importer. */
++    for (auto & d : drvs) {
++        std::exception_ptr failed;
++        failedRealisations.cvisit(d.drvPath->getBaseStorePath(), [&](const auto & kv) { failed = kv.second; });
++        if (failed)
++            std::rethrow_exception(failed);
++    }
++
++    try {
++        buildStore->buildPaths(buildReqs, bmNormal, store);
++    } catch (Error &) {
++        if (drvs.size() == 1)
++            failedRealisations.insert_or_assign(drvs.front().drvPath->getBaseStorePath(), std::current_exception());
++        throw;
++    }
+ 
+     StorePathSet outputsToCopyAndAllow;
+ 
