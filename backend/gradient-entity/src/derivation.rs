@@ -29,6 +29,7 @@ pub struct Model {
     /// `gradient_db::graph::walk_completeness`.
     pub unwalked_inputs: i32,
     pub closure_size: Option<i64>,
+    pub ifd: bool,
     pub created_at: NaiveDateTime,
 }
 
