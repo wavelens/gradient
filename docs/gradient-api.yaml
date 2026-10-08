@@ -12465,7 +12465,7 @@ components:
 
     PaginatedEntryPoints:
       type: object
-      required: [entry_points, total]
+      required: [entry_points, total, failed_attributes]
       properties:
         entry_points:
           type: array
@@ -12476,6 +12476,20 @@ components:
           description: >-
             Number of entry points the evaluation can report, i.e. those with a
             build in it. Page through with offset until entry_points reaches it.
+        failed_attributes:
+          type: array
+          description: >-
+            Attributes that failed to evaluate. They have no build and are not
+            counted in total. All pages return the full list.
+          items:
+            $ref: '#/components/schemas/FailedAttributeSummary'
+
+    FailedAttributeSummary:
+      type: object
+      required: [eval, message]
+      properties:
+        eval: { type: string, description: "Attribute path, in the same form as `EntryPointSummary.eval`." }
+        message: { type: string, description: "The evaluation error." }
 
     EntryPointSummary:
       type: object

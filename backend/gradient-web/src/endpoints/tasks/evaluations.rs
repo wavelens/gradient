@@ -6,7 +6,7 @@
 
 use super::{
     BuildStatusCounts, EntryPointSummary, EvaluationSummary, EvaluationTriggerSummary,
-    PaginatedEntryPoints, QueueSummary, TaskDetailsResponse,
+    FailedAttributeSummary, PaginatedEntryPoints, QueueSummary, TaskDetailsResponse,
 };
 use crate::access::{Caller, TaskAccess, has_permission, is_project_member, load_task};
 use crate::authorization::{MaybeApiKey, MaybeUser};
@@ -617,6 +617,15 @@ pub async fn get_task_entry_points(
         .from(gradient_entity::build_job::Entity)
         .and_where(CBuildJob::Evaluation.eq(eval_id))
         .to_owned();
+    let failed_attributes: Vec<FailedAttributeSummary> =
+        gradient_db::evaluations::failed_attributes::failed_attributes(&state.web_db, eval_id)
+            .await?
+            .into_iter()
+            .map(|f| FailedAttributeSummary {
+                eval: f.attr,
+                message: f.message,
+            })
+            .collect();
     let (limit, offset) = page_bounds(params.limit, params.offset);
     let scope = EEntryPoint::find()
         .filter(CEntryPoint::Evaluation.eq(eval_id))
@@ -633,6 +642,7 @@ pub async fn get_task_entry_points(
         return Ok(ok_json(PaginatedEntryPoints {
             entry_points: Vec::new(),
             total,
+            failed_attributes,
         }));
     }
 
@@ -641,6 +651,7 @@ pub async fn get_task_entry_points(
     Ok(ok_json(PaginatedEntryPoints {
         entry_points: data.build_summaries(&entry_points),
         total,
+        failed_attributes,
     }))
 }
 

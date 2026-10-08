@@ -34,7 +34,7 @@ import { EvalStatusBadgeComponent, inputFetchRow, SegmentedBarComponent, StarBut
 import { AccessService, WritableDirective } from '@shared/access';
 import { injectTaskAccess, injectTaskAccessData } from '@core/resolvers/inject-access';
 import { groupEntryPoints } from './entry-point-groups';
-import { StarTarget, TaskDetail, EvaluationSummary, EvaluationProgress, EvaluationStatus, EntryPointSummary, BuildStatusCounts, WalkMode } from '@core/models';
+import { StarTarget, TaskDetail, EvaluationSummary, EvaluationProgress, EvaluationStatus, EntryPointSummary, FailedAttributeSummary, BuildStatusCounts, WalkMode } from '@core/models';
 import { buildDuration, commitLabel, entryPointPhase, evaluationDuration, evaluationPhase, evaluationProgressText, evaluationTitle, formatEvaluationDuration, inputFetchPhase, isPendingBuildStatus, isRunningEvaluationStatus, phaseProgress } from '@shared/evaluation';
 
 @Component({
@@ -76,6 +76,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
   task = signal<TaskDetail | null>(null);
   entryPoints = signal<EntryPointSummary[]>([]);
   entryPointsTotal = signal(0);
+  failedAttributes = signal<FailedAttributeSummary[]>([]);
   entryPointsLoading = signal(false);
   // Mirrors the server's own page size and its hard cap, so "show more" pages with
   // an offset instead of asking for a limit the server would clamp.
@@ -254,6 +255,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
       // loading state, not stale data, during the (slow) entry-point fetch.
       this.entryPoints.set([]);
       this.entryPointsTotal.set(0);
+      this.failedAttributes.set([]);
       this.entryPointsEvalId = undefined;
       this.entryPointsSig = '';
     }
@@ -269,6 +271,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
     if (!evaluationId) {
       this.entryPoints.set([]);
       this.entryPointsTotal.set(0);
+      this.failedAttributes.set([]);
       this.entryPointsEvalId = undefined;
       this.entryPointsSig = '';
       this.entryPointsLoading.set(false);
@@ -290,6 +293,9 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
         if (this.selectedId() !== evaluationId) return;
         this.entryPointsLoading.set(false);
         this.entryPointsTotal.set(page.total);
+        if (JSON.stringify(page.failed_attributes) !== JSON.stringify(this.failedAttributes())) {
+          this.failedAttributes.set(page.failed_attributes);
+        }
         const next = this.spliceEntryPoints(
           page.entry_points,
           switching ? [] : this.entryPoints(),
@@ -476,7 +482,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
     return match ? match[1] : parts;
   }
 
-  entryPointGroups = computed(() => groupEntryPoints(this.entryPoints()));
+  entryPointGroups = computed(() => groupEntryPoints(this.entryPoints(), this.failedAttributes()));
 
   protected readonly evaluationPhase = evaluationPhase;
   protected readonly entryPointPhase = entryPointPhase;

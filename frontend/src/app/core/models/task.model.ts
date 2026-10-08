@@ -85,9 +85,15 @@ export interface EntryPointSummary {
   created_at: string;
 }
 
+export interface FailedAttributeSummary {
+  eval: string;
+  message: string;
+}
+
 export interface PaginatedEntryPoints {
   entry_points: EntryPointSummary[];
   total: number;
+  failed_attributes: FailedAttributeSummary[];
 }
 
 export interface TaskDetail {

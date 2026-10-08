@@ -74,10 +74,17 @@ pub struct EntryPointSummary {
     pub created_at: chrono::NaiveDateTime,
 }
 
+#[derive(Serialize, Deserialize, Debug, PartialEq, Eq)]
+pub struct FailedAttributeSummary {
+    pub eval: String,
+    pub message: String,
+}
+
 #[derive(Serialize, Deserialize, Debug, Default)]
 pub struct PaginatedEntryPoints {
     pub entry_points: Vec<EntryPointSummary>,
     pub total: u64,
+    pub failed_attributes: Vec<FailedAttributeSummary>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
