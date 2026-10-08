@@ -39,6 +39,7 @@ function epSummary(id: string, attr = `packages."x86_64-linux".${id}`): EntryPoi
     deps: zeroCounts(),
     deps_total: 0,
     prioritized: false,
+    ifd: false,
     created_at: '2026-01-01T00:00:00',
   } as EntryPointSummary;
 }
@@ -584,6 +585,26 @@ describe('TaskDetailComponent - evaluation selection', () => {
     const text = (sel: string) => Array.from(root.querySelectorAll(sel)).map((e) => e.textContent?.trim());
     expect(text('.pkg-label h3')).toEqual(['Packages', 'Checks']);
     expect(text('.pkg-name')).toEqual(['hello', 'fmt']);
+  });
+
+  it('tags the row of a derivation an evaluation imported', () => {
+    const { fixture } = setup(
+      { managed: false, canEdit: true, canTrigger: true },
+      {
+        primaryStatus: 'Completed',
+        getEntryPoints: () => of({
+          entry_points: [
+            epSummary('a', 'packages."x86_64-linux".hello'),
+            { ...epSummary('i', 'other.x86_64-linux.source'), ifd: true },
+          ],
+          total: 2,
+          failed_attributes: [],
+        }),
+      },
+    );
+    const root = fixture.nativeElement as HTMLElement;
+    const tags = Array.from(root.querySelectorAll('.pkg-name gr-badge')).map((e) => e.textContent?.trim());
+    expect(tags).toEqual(['IFD']);
   });
 
   it('lists an attribute that failed to evaluate as a failed row of its set', () => {

@@ -17,6 +17,7 @@ import { ProjectsService } from '@core/services/projects.service';
 import { TasksService, ReportOptions } from '@core/services/tasks.service';
 import { EvaluationsService } from '@core/services/evaluations.service';
 import {
+  BadgeComponent,
   ButtonComponent,
   CheckboxComponent,
   DialogComponent,
@@ -41,7 +42,7 @@ import { buildDuration, commitLabel, entryPointPhase, evaluationDuration, evalua
   selector: 'app-task-detail',
   standalone: true,
   imports: [
-    CommonModule, FormsModule, RouterModule, ButtonComponent, CheckboxComponent, DialogComponent, MenuComponent, TooltipDirective,
+    CommonModule, FormsModule, RouterModule, BadgeComponent, ButtonComponent, CheckboxComponent, DialogComponent, MenuComponent, TooltipDirective,
     SkeletonComponent, EmptyStateComponent, WritableDirective,
     SegmentedBarComponent, EvalStatusBadgeComponent,
     IconComponent, InViewDirective, StatusIconComponent, ToastComponent, StarButtonComponent,

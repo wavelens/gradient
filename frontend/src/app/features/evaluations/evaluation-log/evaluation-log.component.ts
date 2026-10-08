@@ -663,6 +663,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
           build_started_at: null,
           dispatched_job: b.dispatched_job,
           prioritized: b.prioritized,
+          ifd: false,
           // `?build=` also scopes the list to this build's closure, so it is the
           // root of everything the API returns.
           depth: 0,
