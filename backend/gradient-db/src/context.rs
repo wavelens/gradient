@@ -4,7 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use std::collections::HashSet;
+use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 use std::sync::Arc;
 use std::sync::Mutex;
 
@@ -52,22 +53,44 @@ impl ProbeRequests {
 }
 
 #[derive(Clone, Debug, Default)]
-pub struct HeldEvaluations(Arc<Mutex<HashSet<EvaluationId>>>);
+pub struct HeldEvaluations(Arc<Mutex<HashMap<EvaluationId, usize>>>);
+
+#[must_use]
+#[derive(Debug)]
+pub struct Hold {
+    held: HeldEvaluations,
+    evaluation: EvaluationId,
+}
+
+impl Drop for Hold {
+    fn drop(&mut self) {
+        self.held.release(self.evaluation);
+    }
+}
 
 impl HeldEvaluations {
-    pub fn hold(&self, evaluation: EvaluationId) {
-        self.held().insert(evaluation);
-    }
-
-    pub fn release(&self, evaluation: EvaluationId) {
-        self.held().remove(&evaluation);
+    pub fn hold(&self, evaluation: EvaluationId) -> Hold {
+        *self.held().entry(evaluation).or_default() += 1;
+        Hold {
+            held: self.clone(),
+            evaluation,
+        }
     }
 
     pub fn holds(&self, evaluation: EvaluationId) -> bool {
-        self.held().contains(&evaluation)
+        self.held().contains_key(&evaluation)
     }
 
-    fn held(&self) -> std::sync::MutexGuard<'_, HashSet<EvaluationId>> {
+    fn release(&self, evaluation: EvaluationId) {
+        if let Entry::Occupied(mut count) = self.held().entry(evaluation) {
+            *count.get_mut() -= 1;
+            if *count.get() == 0 {
+                count.remove();
+            }
+        }
+    }
+
+    fn held(&self) -> std::sync::MutexGuard<'_, HashMap<EvaluationId, usize>> {
         self.0
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -103,5 +126,24 @@ impl DbContext {
             startable_set: self.startable_set.unstaged(),
             ..self.clone()
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_evaluation_stays_held_until_its_last_hold_drops() {
+        let held = HeldEvaluations::default();
+        let evaluation = EvaluationId::now_v7();
+
+        let first = held.hold(evaluation);
+        let second = held.hold(evaluation);
+        drop(first);
+        assert!(held.holds(evaluation));
+
+        drop(second);
+        assert!(!held.holds(evaluation));
     }
 }

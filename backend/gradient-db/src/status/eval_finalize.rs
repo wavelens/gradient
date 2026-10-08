@@ -176,7 +176,7 @@ mod tests {
         let db = MockDatabase::new(DatabaseBackend::Postgres).into_connection();
 
         let (ctx, pool) = crate::test_ctx::ctx(db).await;
-        ctx.held_evaluations.hold(eval.id);
+        let _hold = ctx.held_evaluations.hold(eval.id);
         check_evaluation_done(&ctx, eval.id).await.unwrap();
         drop(ctx);
 
