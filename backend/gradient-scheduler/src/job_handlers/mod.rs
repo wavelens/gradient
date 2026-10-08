@@ -9,6 +9,7 @@ mod assignment;
 mod build_status;
 mod cluster;
 mod eval_status;
+mod import;
 mod priority;
 mod queue;
 pub(crate) mod timeline;

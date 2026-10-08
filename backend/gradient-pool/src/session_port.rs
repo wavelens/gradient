@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use gradient_wire::types::{ClusterAddress, ClusterPeer};
+use gradient_wire::types::{ClusterAddress, ClusterPeer, ImportOutcome};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SessionSignal {
@@ -34,6 +34,11 @@ pub enum SessionSignal {
     AbortCluster {
         attempt: String,
         reason: String,
+    },
+    ImportResult {
+        job_id: String,
+        request_id: String,
+        outcome: ImportOutcome,
     },
 }
 

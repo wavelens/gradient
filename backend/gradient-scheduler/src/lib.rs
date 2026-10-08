@@ -12,6 +12,7 @@ pub mod cluster;
 pub mod connection_failures;
 pub mod eval;
 pub mod history;
+pub mod import_waits;
 pub mod instance;
 pub mod jobs;
 pub mod log_substitution;
@@ -65,6 +66,7 @@ pub struct Scheduler {
         Arc<gradient_util::sync::Mutex<std::collections::HashMap<String, cluster::PreparedMember>>>,
     pub(crate) attempts: Arc<gradient_util::sync::Mutex<cluster::AttemptBook>>,
     pub connection_failures: Arc<connection_failures::ConnectionFailures>,
+    pub(crate) import_waits: Arc<gradient_util::sync::Mutex<import_waits::ImportWaits>>,
 }
 
 impl std::fmt::Debug for Scheduler {
@@ -94,6 +96,7 @@ impl Scheduler {
             prepared: Arc::default(),
             attempts: Arc::default(),
             connection_failures: Arc::default(),
+            import_waits: Arc::default(),
         }
     }
 

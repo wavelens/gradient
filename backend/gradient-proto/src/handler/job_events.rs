@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 
 use gradient_entity::dispatched_job::DispatchedJobOutcome;
 use gradient_scheduler::{ReportedTimeline, Scheduler};
-use gradient_types::ids::DispatchedJobId;
+use gradient_types::ids::{DispatchedJobId, EvaluationId};
 use gradient_util::shutdown::Shutdown;
 use gradient_wire::types::{BuildFailureKind, BuildMetrics};
 use tokio::sync::mpsc;
@@ -43,6 +43,12 @@ pub(super) enum JobEvent {
         missing_paths: Vec<String>,
         metrics: Option<BuildMetrics>,
     },
+    ImportRequest {
+        job_id: String,
+        evaluation: EvaluationId,
+        request_id: String,
+        drv_paths: Vec<String>,
+    },
 }
 
 impl JobEvent {
@@ -50,7 +56,8 @@ impl JobEvent {
         match self {
             JobEvent::Update { job_id, .. }
             | JobEvent::Completed { job_id, .. }
-            | JobEvent::Failed { job_id, .. } => job_id,
+            | JobEvent::Failed { job_id, .. }
+            | JobEvent::ImportRequest { job_id, .. } => job_id,
         }
     }
 
@@ -63,6 +70,7 @@ impl JobEvent {
             JobEvent::Update { .. } => "update",
             JobEvent::Completed { .. } => "completed",
             JobEvent::Failed { .. } => "failed",
+            JobEvent::ImportRequest { .. } => "import_request",
         }
     }
 }
@@ -155,6 +163,15 @@ impl ApplyJobEvent for SchedulerJobEvents {
                 metrics,
             } => {
                 self.failed(job_id, error, kind, missing_paths, metrics)
+                    .await
+            }
+            JobEvent::ImportRequest {
+                job_id,
+                evaluation,
+                request_id,
+                drv_paths,
+            } => {
+                self.import_request(job_id, evaluation, request_id, drv_paths)
                     .await
             }
         }
@@ -255,6 +272,24 @@ impl SchedulerJobEvents {
             .await;
         if let Err(e) = self.scheduler.handle_job_completed(peer_id, &job_id).await {
             error!(%peer_id, %job_id, error = %e, "handle_job_completed failed");
+        }
+        push_pending_candidates(&self.writer, &self.scheduler, peer_id).await;
+    }
+
+    async fn import_request(
+        &self,
+        job_id: String,
+        evaluation: EvaluationId,
+        request_id: String,
+        drv_paths: Vec<String>,
+    ) {
+        let peer_id = self.peer_id.as_str();
+        if let Err(e) = self
+            .scheduler
+            .handle_import_request(peer_id, &job_id, evaluation, request_id, drv_paths)
+            .await
+        {
+            error!(%peer_id, %job_id, error = %e, "handle_import_request failed");
         }
         push_pending_candidates(&self.writer, &self.scheduler, peer_id).await;
     }

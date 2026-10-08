@@ -354,8 +354,26 @@ impl<'a> InboundContext<'a> {
                 self.rpc().serve(msg);
                 true
             }
-            ClientMessage::ImportRequest { job_id, .. } => {
-                warn!(peer_id = %self.peer_id, %job_id, "ImportRequest reached a server without import support");
+            ClientMessage::ImportRequest {
+                job_id,
+                request_id,
+                drv_paths,
+            } => {
+                match self.active.eval(&job_id) {
+                    Some((evaluation, _)) => {
+                        self.job_events
+                            .push(JobEvent::ImportRequest {
+                                job_id,
+                                evaluation,
+                                request_id,
+                                drv_paths,
+                            })
+                            .await;
+                    }
+                    None => {
+                        warn!(peer_id = %self.peer_id, %job_id, "import request for an evaluation this session does not run");
+                    }
+                }
                 true
             }
             ClientMessage::EvalMessage {

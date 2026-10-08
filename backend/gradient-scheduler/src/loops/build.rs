@@ -57,6 +57,9 @@ pub(crate) async fn build_assign_pass(scheduler: &Scheduler, timer_tick: bool, r
     if let Err(e) = scheduler.refresh_waiting_state().await {
         error!(error = %e, "refresh_waiting_state in dispatch loop failed");
     }
+    if let Err(e) = scheduler.settle_import_waits().await {
+        error!(error = %e, "settling import waits in dispatch loop failed");
+    }
     if let Err(e) = crate::waiting_state::recover_drv_stuck_evals(&scheduler.state).await {
         error!(error = %e, "recover_drv_stuck_evals in dispatch loop failed");
     }

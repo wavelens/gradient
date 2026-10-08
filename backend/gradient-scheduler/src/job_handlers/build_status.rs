@@ -185,7 +185,7 @@ impl Scheduler {
                         }
                     });
                 }
-                if worker_idle {
+                if worker_idle || self.has_import_waits() {
                     self.kick_assigner();
                 }
 
@@ -251,19 +251,26 @@ impl Scheduler {
                 self.kick_assigner();
                 r
             }
-            PendingJob::Build(j) => self
-                .state
-                .graph
-                .transition(Transition::BuildFailed {
-                    shared_build: j.derivation_build,
-                    error: failure.error.clone(),
-                    log_banner: gradient_sources::strip_nix_log_tail(&failure.error),
-                    kind: failure.kind,
-                    missing_paths: failure.missing_paths.clone(),
-                    metrics,
-                })
-                .await
-                .map(|_| ()),
+            PendingJob::Build(j) => {
+                let r = self
+                    .state
+                    .graph
+                    .transition(Transition::BuildFailed {
+                        shared_build: j.derivation_build,
+                        error: failure.error.clone(),
+                        log_banner: gradient_sources::strip_nix_log_tail(&failure.error),
+                        kind: failure.kind,
+                        missing_paths: failure.missing_paths.clone(),
+                        metrics,
+                    })
+                    .await
+                    .map(|_| ());
+                if self.has_import_waits() {
+                    self.kick_assigner();
+                }
+
+                r
+            }
         }
     }
 }

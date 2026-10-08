@@ -147,6 +147,7 @@ impl Scheduler {
         evaluation_id: EvaluationId,
         aborted_shared_builds: Vec<DerivationBuildId>,
     ) -> Vec<(String, String)> {
+        self.drop_import_waits(evaluation_id);
         self.call(|reply| SchedulerMsg::AbortEvaluation {
             evaluation_id,
             aborted_shared_builds,
