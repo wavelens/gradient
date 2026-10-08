@@ -6,3 +6,4 @@
 
 pub mod frame;
 pub mod handshake;
+pub mod job_offer;
