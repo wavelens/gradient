@@ -332,6 +332,10 @@ impl BuildAssignMaps {
         let dep_edges = gradient_db::fetch_in_chunks(&drv_ids, |chunk| async move {
             EDerivationDependency::find()
                 .filter(CDerivationDependency::Derivation.is_in(chunk))
+                .filter(
+                    CDerivationDependency::Kind
+                        .ne(gradient_entity::derivation_dependency::EdgeKind::Runtime),
+                )
                 .all(db)
                 .await
         })

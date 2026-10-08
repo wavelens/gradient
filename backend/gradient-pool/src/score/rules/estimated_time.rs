@@ -255,7 +255,8 @@ fn build_secs(
     instance: &InstanceContext,
     fallbacks: &mut Vec<Fallback>,
 ) -> f64 {
-    let window = instance.build_time_ms.w1h.or(instance.build_time_ms.w24h);
+    let median = instance.build_time_median_ms;
+    let window = median.w1h.or(median.w24h);
     run_secs(history, worker, instance, window, fallbacks)
 }
 
@@ -528,9 +529,13 @@ mod tests {
     }
 
     #[test]
-    fn without_history_the_instance_build_time_is_the_estimate() {
+    fn without_history_the_instance_median_build_time_is_the_estimate() {
         let inst = InstanceContext {
             build_time_ms: Windowed {
+                w24h: Some(900_000.0),
+                ..Default::default()
+            },
+            build_time_median_ms: Windowed {
                 w24h: Some(60_000.0),
                 ..Default::default()
             },
@@ -760,7 +765,7 @@ mod tests {
         };
         let w = WorkerContext::default();
         let inst = InstanceContext {
-            build_time_ms: Windowed {
+            build_time_median_ms: Windowed {
                 w24h: Some(60_000.0),
                 ..Default::default()
             },
@@ -866,7 +871,7 @@ mod tests {
             ScoredJob::new_eval("e", ProjectId::now_v7(), true, HistoryPrediction::default());
         let inst = InstanceContext {
             per_path_secs: Some(1.0),
-            build_time_ms: Windowed {
+            build_time_median_ms: Windowed {
                 w1h: Some(999_000.0),
                 ..Default::default()
             },

@@ -57,12 +57,13 @@ The saturation check can use live worker load and the predicted peak memory. The
 - A job with all outputs in an upstream cache can skip the build. Its download is a time per output plus a time per megabyte.
 - A least-squares fit of the substitutions in the last 24 hours can yield both times. The download speed will stand in before 20 substitutions exist.
 - The job's own outputs can give the output size once all of them have a size. An upstream narinfo can fill the size before any build. Earlier builds of the package can give the size otherwise.
-- An evaluation can take the mean run time of its task over the last 7 days, or of every task. Downloads and paths stay out.
+- An evaluation can take the mean fetch time and the mean evaluation time of its task over the last 7 days. A job adds only the parts it runs. Downloads and paths stay out.
+- A task without runs of a part can use the mean of all tasks.
 - The chance of an out-of-memory kill is the package's kill rate plus the share of predicted peak memory above free memory. The chance can reach at most 1.
 - The storage share is the best total throughput of the last hour, split across the transfers in flight plus this one.
 - The storage throughput will be 150 MB/s for reads and 140 MB/s for writes before the first measurement.
 - A least-squares fit of the prefetch time over its megabytes and paths in the last 24 hours can yield the per-path time. Every path can cost 0.18 s before 100 prefetches exist.
-- A package without history can use the instance's mean build time.
+- A package without history can use the instance's median build time. Most builds take under a second. A few long builds pull the mean far above a typical build.
 - The CPU score ratio must stay between 0.5 and 2.
 - Workers measure upload, download and disk speed from their own NAR transfers, substitutions and builds. Transfers under 1 MiB stay out.
 
