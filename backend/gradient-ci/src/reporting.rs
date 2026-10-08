@@ -62,10 +62,24 @@ pub fn check_context_kind_for_event(event: &str) -> Option<CheckContextKind> {
     }
 }
 
-/// The Evaluation check is concluding successfully once the evaluation is `Building`. A later
-/// `Failure` or `Error` is a per-Build concern and must not redden a green Evaluation check.
+/// The Evaluation check is concluding once the evaluation is `Building`, red when an attribute
+/// failed to evaluate. A later `Failure` or `Error` is a per-Build concern.
 pub fn suppress_evaluation_failure(status: &CiStatus, reached_building: bool) -> bool {
     reached_building && matches!(status, CiStatus::Failure | CiStatus::Error)
+}
+
+pub fn evaluation_check_status(status: CiStatus, any_attribute_failed: bool) -> CiStatus {
+    match status {
+        CiStatus::Success if any_attribute_failed => CiStatus::Failure,
+        other => other,
+    }
+}
+
+pub fn failed_attributes_description(count: usize) -> String {
+    match count {
+        1 => "1 attribute failed to evaluate".to_owned(),
+        n => format!("{n} attributes failed to evaluate"),
+    }
 }
 
 pub fn ci_status_for_evaluation(status: &EvaluationStatus) -> Option<CiStatus> {
@@ -140,6 +154,22 @@ mod tests {
         assert!(!suppress_evaluation_failure(&CiStatus::Failure, false));
         assert!(!suppress_evaluation_failure(&CiStatus::Success, true));
         assert!(!suppress_evaluation_failure(&CiStatus::Pending, true));
+    }
+
+    #[test]
+    fn a_failed_attribute_turns_the_evaluation_check_red() {
+        assert_eq!(
+            evaluation_check_status(CiStatus::Success, true),
+            CiStatus::Failure
+        );
+        assert_eq!(
+            evaluation_check_status(CiStatus::Success, false),
+            CiStatus::Success
+        );
+        assert_eq!(
+            evaluation_check_status(CiStatus::Running, true),
+            CiStatus::Running
+        );
     }
 
     #[test]

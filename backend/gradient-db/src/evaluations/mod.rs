@@ -6,4 +6,5 @@
 
 pub mod counters;
 pub mod draining;
+pub mod failed_attributes;
 pub mod watchdog;
