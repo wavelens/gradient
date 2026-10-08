@@ -166,7 +166,7 @@ impl UpstreamIo for JobUpdaterIo<'_> {
         upstream: &CachedPath,
         progress: &mut Progress<impl ProgressSink>,
     ) -> Result<Option<Vec<u8>>> {
-        let _fetch = self.0.phase(JobPhase::SubstituteFetch);
+        let mut fetch = self.0.phase(JobPhase::SubstituteFetch);
         let started = std::time::Instant::now();
         let (_, body) = download_one_presigned(
             gradient_worker_client::http::download_client(),
@@ -177,6 +177,7 @@ impl UpstreamIo for JobUpdaterIo<'_> {
         if body.is_some()
             && let Some(nar_size) = upstream.nar_size
         {
+            fetch.record(1, nar_size);
             gradient_worker_client::throughput::DOWNLOAD
                 .observe_transfer(nar_size, started.elapsed());
         }

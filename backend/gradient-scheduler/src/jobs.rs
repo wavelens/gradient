@@ -231,6 +231,15 @@ impl PendingJob {
         matches!(self, PendingJob::Build(j) if j.ifd)
     }
 
+    pub fn substitute_outputs(&self) -> Option<u32> {
+        match self {
+            PendingJob::Build(j) if j.substitute => {
+                Some(j.job.builds.iter().map(|b| b.outputs.len() as u32).sum())
+            }
+            _ => None,
+        }
+    }
+
     pub fn set_rescore_count(&mut self, n: u32) {
         match self {
             PendingJob::Build(j) => j.rescore_count = n,
@@ -753,6 +762,7 @@ impl JobTracker {
             missing_count: score.map(|s| s.missing_count),
             missing_nar_size: score.map(|s| s.missing_nar_size),
             outputs_present: score.is_some_and(|s| s.outputs_present),
+            substitute_outputs: job.substitute_outputs(),
             dependency_count: job.dependency_count(),
             queued_at: job.queued_at(),
             ready_at: job.ready_at(),

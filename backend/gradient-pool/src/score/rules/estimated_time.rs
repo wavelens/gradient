@@ -6,11 +6,14 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::score::context::{HistoryPrediction, InstanceContext, WorkerMetricsView};
+use crate::score::context::{
+    HistoryPrediction, InstanceContext, SubstituteCost, WorkerMetricsView,
+};
 use crate::score::rule::{JobContext, ScoreRule, WorkerContext};
 use crate::score::weights;
 
 const BYTES_PER_MIB: f64 = 1_048_576.0;
+const BYTES_PER_MB: f64 = 1_000_000.0;
 const BITS_PER_BYTE: f64 = 8.0;
 const BITS_PER_MEGABIT: f64 = 1_000_000.0;
 
@@ -28,6 +31,7 @@ pub enum Fallback {
     CompressionRatio,
     PerPathSecs,
     OutputNarSize,
+    SubstituteCost,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -299,6 +303,43 @@ fn upload_estimate(
     }
 }
 
+fn substitute_secs(
+    outputs: u32,
+    output_nar_bytes: f64,
+    worker: Option<&WorkerMetricsView>,
+    instance: &InstanceContext,
+    fallbacks: &mut Vec<Fallback>,
+) -> f64 {
+    match known(
+        instance.substitute_cost,
+        Fallback::SubstituteCost,
+        fallbacks,
+    ) {
+        Some(SubstituteCost {
+            per_path_secs,
+            secs_per_mb,
+        }) => f64::from(outputs) * per_path_secs + output_nar_bytes / BYTES_PER_MB * secs_per_mb,
+        None => download_secs(output_nar_bytes, worker, instance, fallbacks),
+    }
+}
+
+fn substitute_estimate(
+    history: &HistoryPrediction,
+    outputs: u32,
+    worker: Option<&WorkerMetricsView>,
+    instance: &InstanceContext,
+    fallbacks: &mut Vec<Fallback>,
+) -> TimeEstimate {
+    let output_nar_bytes = output_nar_bytes(history, fallbacks);
+    TimeEstimate {
+        download_secs: substitute_secs(outputs, output_nar_bytes, worker, instance, fallbacks),
+        upload_secs: upload_secs(output_nar_bytes, worker, instance, fallbacks),
+        nar_bytes: output_nar_bytes,
+        output_nar_bytes,
+        ..Default::default()
+    }
+}
+
 fn build_estimate(
     job: &JobContext<'_>,
     worker: Option<&WorkerMetricsView>,
@@ -336,6 +377,14 @@ pub fn estimate(
         eval_estimate(&job.job.history(), metrics, instance, &mut fallbacks)
     } else if job.outputs_present {
         upload_estimate(&job.job.history(), metrics, instance, &mut fallbacks)
+    } else if let Some(outputs) = job.substitute_outputs {
+        substitute_estimate(
+            &job.job.history(),
+            outputs,
+            metrics,
+            instance,
+            &mut fallbacks,
+        )
     } else {
         build_estimate(job, metrics, instance, &mut fallbacks)
     };
@@ -645,6 +694,61 @@ mod tests {
         assert!((e.total() - 60.0).abs() < 1e-9, "{e:?}");
         assert_eq!(e.nar_bytes, GIGABYTE);
         assert_eq!(e.output_nar_bytes, GIGABYTE);
+    }
+
+    fn substituting(output_nar_size: u64) -> ScoredJob<'static> {
+        build_job(HistoryPrediction {
+            output_nar_size: Some(output_nar_size),
+            ..built(766_000, None)
+        })
+    }
+
+    fn substitute_ctx<'a>(job: &'a ScoredJob<'a>, outputs: u32) -> JobContext<'a> {
+        JobContext {
+            substitute_outputs: Some(outputs),
+            ..ctx(job, None, false)
+        }
+    }
+
+    #[test]
+    fn a_substitute_pays_the_learned_cost_per_path_and_megabyte_without_building() {
+        let job = substituting(100_000_000);
+        let inst = InstanceContext {
+            storage_write_mbps: Some(1_000_000.0),
+            substitute_cost: Some(SubstituteCost {
+                per_path_secs: 5.0,
+                secs_per_mb: 0.2,
+            }),
+            ..Default::default()
+        };
+        let w = worker(WorkerMetricsView {
+            upload_speed_mbps: Some(400.0),
+            ..Default::default()
+        });
+
+        let e = estimate(&substitute_ctx(&job, 2), &w, &inst);
+        assert!((e.download_secs - 30.0).abs() < 1e-9, "{e:?}");
+        assert!((e.upload_secs - 2.0).abs() < 1e-9, "{e:?}");
+        assert_eq!(e.build_secs, 0.0);
+        assert_eq!(e.nar_bytes, 100_000_000.0);
+        assert!(!e.fallbacks.contains(&Fallback::SubstituteCost), "{e:?}");
+    }
+
+    #[test]
+    fn an_unlearned_substitute_cost_falls_back_to_the_download_speed() {
+        let job = substituting(GIGABYTE as u64);
+        let inst = InstanceContext {
+            storage_read_mbps: Some(1_000_000.0),
+            ..Default::default()
+        };
+        let w = worker(WorkerMetricsView {
+            download_speed_mbps: Some(800.0),
+            ..Default::default()
+        });
+
+        let e = estimate(&substitute_ctx(&job, 1), &w, &inst);
+        assert!((e.download_secs - 10.0).abs() < 1e-9, "{e:?}");
+        assert!(e.fallbacks.contains(&Fallback::SubstituteCost), "{e:?}");
     }
 
     #[test]

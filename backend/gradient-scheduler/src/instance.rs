@@ -226,6 +226,50 @@ gradient_db::sql! {
 const PER_PATH_WINDOW_HOURS: i64 = 24;
 const PER_PATH_MIN_SPANS: f64 = 100.0;
 
+#[derive(Debug, Default, FromQueryResult)]
+struct SubstituteFitRow {
+    n: f64,
+    sb: Option<f64>,
+    sy: Option<f64>,
+    sbb: Option<f64>,
+    sby: Option<f64>,
+}
+
+gradient_db::sql! {
+    SUBSTITUTE_TIME_FIT = r#"
+        SELECT COUNT(*)::float8 AS n,
+               SUM(b)::float8 AS sb, SUM(y)::float8 AS sy,
+               SUM(b * b)::float8 AS sbb, SUM(b * y)::float8 AS sby
+        FROM (
+          SELECT (end_ms - start_ms) / 1000.0 AS y, bytes / 1000000.0 AS b
+          FROM dispatched_job_phase
+          WHERE phase = $2 AND created_at >= $1 AND bytes > 0
+        ) span
+    "#,
+        params = [Now, Int(14)];
+}
+
+const SUBSTITUTE_MIN_SPANS: f64 = 20.0;
+
+fn substitute_cost(row: &SubstituteFitRow) -> Option<gradient_pool::score::SubstituteCost> {
+    if row.n < SUBSTITUTE_MIN_SPANS {
+        return None;
+    }
+
+    let (sb, sy, sbb, sby) = (row.sb?, row.sy?, row.sbb?, row.sby?);
+    let det = row.n * sbb - sb * sb;
+    if det.abs() < f64::EPSILON {
+        return None;
+    }
+
+    let secs_per_mb = (row.n * sby - sb * sy) / det;
+    let per_path_secs = (sy - secs_per_mb * sb) / row.n;
+    (secs_per_mb.is_finite() && secs_per_mb > 0.0).then_some(gradient_pool::score::SubstituteCost {
+        per_path_secs: per_path_secs.max(0.0),
+        secs_per_mb,
+    })
+}
+
 fn det3(m: [[f64; 3]; 3]) -> f64 {
     m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1])
         - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0])
@@ -273,6 +317,26 @@ async fn learned_per_path_secs(
     })?;
 
     per_path_secs(&row)
+}
+
+async fn learned_substitute_cost(
+    db: &impl ConnectionTrait,
+    now: chrono::NaiveDateTime,
+) -> Option<gradient_pool::score::SubstituteCost> {
+    use gradient_wire::types::JobPhase;
+
+    let since = now - chrono::Duration::hours(PER_PATH_WINDOW_HOURS);
+    let row = SubstituteFitRow::find_by_statement(
+        SUBSTITUTE_TIME_FIT.bind([since.into(), JobPhase::SubstituteFetch.as_i16().into()]),
+    )
+    .one(db)
+    .await
+    .unwrap_or_else(|e| {
+        error!(error = %e, "instance metrics: substitute fit query failed");
+        None
+    })?;
+
+    substitute_cost(&row)
 }
 
 async fn storage_throughput(
@@ -353,6 +417,7 @@ pub async fn compute_instance_context(
 
     let (storage, compression_ratio) = storage_throughput(db, now).await;
     let per_path_secs = learned_per_path_secs(db, now).await;
+    let substitute_cost = learned_substitute_cost(db, now).await;
 
     gradient_pool::score::InstanceContext {
         wait_secs: windowed(
@@ -402,6 +467,7 @@ pub async fn compute_instance_context(
         storage_write_mbps: storage.write_mbps,
         compression_ratio,
         per_path_secs,
+        substitute_cost,
         download_slots: counts.download_slots,
         upload_slots: counts.upload_slots,
         ..Default::default()
@@ -594,6 +660,7 @@ mod tests {
             .append_query_results([vec![storage]])
             .append_query_results([vec![compression]])
             .append_query_results([vec![BTreeMap::from([f("n", 0.0)])]])
+            .append_query_results([vec![BTreeMap::from([f("n", 0.0)])]])
             .into_connection();
 
         let counts = InstanceCounts {
@@ -653,6 +720,32 @@ mod tests {
         assert!((per_path_secs(&row).unwrap() - 0.25).abs() < 1e-9);
         assert_eq!(
             per_path_secs(&PathFitRow { n: 10.0, ..row }),
+            None,
+            "too few spans"
+        );
+    }
+
+    #[test]
+    fn the_substitute_cost_splits_a_path_overhead_from_the_megabytes() {
+        let mut row = SubstituteFitRow {
+            n: 50.0,
+            ..Default::default()
+        };
+        let add = |sum: &mut Option<f64>, value: f64| *sum = Some(sum.unwrap_or(0.0) + value);
+        for i in 0..50 {
+            let b = f64::from(i % 13) * 40.0;
+            let y = 5.0 + 0.2 * b;
+            add(&mut row.sb, b);
+            add(&mut row.sy, y);
+            add(&mut row.sbb, b * b);
+            add(&mut row.sby, b * y);
+        }
+
+        let cost = substitute_cost(&row).unwrap();
+        assert!((cost.per_path_secs - 5.0).abs() < 1e-9, "{cost:?}");
+        assert!((cost.secs_per_mb - 0.2).abs() < 1e-9, "{cost:?}");
+        assert_eq!(
+            substitute_cost(&SubstituteFitRow { n: 10.0, ..row }),
             None,
             "too few spans"
         );

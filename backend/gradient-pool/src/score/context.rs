@@ -23,6 +23,12 @@ impl Windowed {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct SubstituteCost {
+    pub per_path_secs: f64,
+    pub secs_per_mb: f64,
+}
+
 #[derive(Clone, Copy, Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct InstanceContext {
     pub wait_secs: Windowed,
@@ -52,6 +58,7 @@ pub struct InstanceContext {
     pub storage_write_mbps: Option<f64>,
     pub compression_ratio: Option<f64>,
     pub per_path_secs: Option<f64>,
+    pub substitute_cost: Option<SubstituteCost>,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]

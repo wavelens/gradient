@@ -174,6 +174,9 @@ interface RuleRow {
             <tr><td class="label">Missing count</td><td class="mono">{{ j.job_context.missing_count ?? '-' }}</td></tr>
             <tr><td class="label">Missing NAR size</td><td class="mono">{{ formatBytes(j.job_context.missing_nar_size) }}</td></tr>
             <tr><td class="label">Outputs in store</td><td class="mono">{{ j.job_context.outputs_present ? 'yes' : 'no' }}</td></tr>
+            @if (j.job_context.substitute_outputs != null) {
+              <tr><td class="label">Substituted outputs</td><td class="mono">{{ j.job_context.substitute_outputs }}</td></tr>
+            }
             <tr><td class="label">Project work share</td><td class="mono">{{ j.job_context.project_work_share != null ? (j.job_context.project_work_share | number: '1.0-3') : '-' }}</td></tr>
             <tr><td class="label">Rescore count</td><td class="mono">{{ j.job_context.rescore_count }}</td></tr>
             <tr><td class="label">Queued</td><td class="mono">{{ j.job_context.queued_at | date: 'medium' }}</td></tr>

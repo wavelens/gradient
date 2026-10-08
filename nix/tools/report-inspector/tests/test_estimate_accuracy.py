@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
 # SPDX-License-Identifier: AGPL-3.0-only
-"""j1, j2 and j8 are builds, j3 an evaluation, j4 to j7 must not be compared. j7 ran out of memory."""
+"""j1, j2, j8 and j9 are builds, j3 an evaluation, j4 to j7 must not be compared. j7 ran out of memory."""
 
 from __future__ import annotations
 
@@ -58,6 +58,7 @@ def report(tmp_path):
         ("j6", 1, "w1", 1, breakdown(build_secs=1.0), 1_000),
         ("j7", 1, "w1", 1, breakdown(build_secs=40.0, oom_chance=1.0), 1_000),
         ("j8", 1, "w1", 0, breakdown(build_secs=50.0), None),
+        ("j9", 1, "w1", 0, breakdown(download_secs=8.0, nar_bytes=1000.0), None),
     ]
     for job, kind, worker, outcome, score, elapsed in jobs:
         conn.execute(
@@ -73,6 +74,7 @@ def report(tmp_path):
         ("j6", BUILD, 0, 99_000, 0, 0),
         ("j7", BUILD, 0, 70_000, 0, 0),
         ("j8", SUBSTITUTE_FETCH, 0, 5_000, 0, 0),
+        ("j9", SUBSTITUTE_FETCH, 0, 4_000, 0, 0),
     ]
     conn.executemany("INSERT INTO dispatched_job_phase VALUES (?, ?, ?, ?, ?, ?)", phases)
     conn.executemany("INSERT INTO derivation VALUES (?, ?)", [("d1", "openssl-3.7.2"), ("d2", "zlib-1.3.2"), ("d3", "llvm-21.1.0")])
@@ -120,7 +122,7 @@ def test_total_needs_the_worker_elapsed_time(report):
 
 def test_jobs_before_estimates_and_unfinished_jobs_are_left_out(report):
     out = estimate_accuracy(report)
-    assert "estimate accuracy over 4 completed jobs" in out
+    assert "estimate accuracy over 5 completed jobs" in out
     assert "2 jobs recorded before estimates were stored" in out
 
 
@@ -135,13 +137,14 @@ def test_recorded_inputs_are_compared(report):
 
 
 def test_out_of_memory_kills_count_the_failed_jobs_they_ended(report):
-    assert "out of memory: expected 1.50 kills over 5 build jobs, 2 recorded" in estimate_accuracy(report)
+    assert "out of memory: expected 1.50 kills over 6 build jobs, 2 recorded" in estimate_accuracy(report)
 
 
-def test_a_substituted_job_is_kept_out_of_the_build_row(report):
+def test_a_substituted_job_is_kept_out_of_the_build_and_download_rows(report):
     out = estimate_accuracy(report)
-    assert row(out, "substitute") == ["substitute", "1", "50.0s", "5.0s", "x0.10", "x0.10", "x0.10", "0"]
+    assert row(out, "substitute") == ["substitute", "2", "58.0s", "9.0s", "x0.30", "x0.10", "x0.50", "0"]
     assert row(out, "build")[1] == "2"
+    assert row(out, "download")[1] == "2"
 
 
 def test_a_fallback_is_set_against_the_jobs_without_it(report):
