@@ -120,6 +120,11 @@
       boom_errors = [e for e in responses[0]["errors"] if e["attr"] == "packages.x86_64-linux.boom"]
       assert boom_errors and boom_errors[0]["message"], f"boom must isolate as a per-attr error: {responses[0]['errors']}"
 
+      banner("Assert an import from derivation reaches the parent")
+      ifd_errors = [e for e in responses[0]["errors"] if e["attr"] == "packages.x86_64-linux.imported"]
+      refusal = "import from derivation is not available during the eval driver"
+      assert ifd_errors and refusal in ifd_errors[0]["message"], f"the driver must refuse the import: {responses[0]['errors']}"
+
       banner("Assert fingerprint matches the eval-cache filename")
       assert responses[3]["kind"] == "fingerprint_ok", responses[3]
       fp = responses[3].get("fingerprint")
