@@ -17,4 +17,5 @@ export * from './segmented-bar/ratio-segments';
 export * from './segmented-bar/segmented-bar.component';
 export * from './star-button/star-button.component';
 export * from './status-icon/status-icon.component';
+export * from './thunk-progress/thunk-progress.component';
 export * from './permission-picker/permission-picker.component';

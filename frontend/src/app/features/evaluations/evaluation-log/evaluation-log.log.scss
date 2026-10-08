@@ -100,14 +100,6 @@
     font-size: $font-size-sm;
     color: var(--gr-text-muted);
   }
-
-  .thunk-progress {
-    display: flex;
-    align-items: center;
-    gap: $spacing-sm;
-  }
-
-  .thunk-bar { width: 240px; --segbar-h: 7px; }
 }
 
 @keyframes pulse {
