@@ -31,21 +31,34 @@ cat ~/.ssh/gradient.pub
 - Keys belong to their owner only.
 - The SSH user name is the project name. The key can open all projects of its user.
 
-## 3. Point SSH at the Server
+## 3. Add the Client Module
+
+The `client` module can point SSH at the server and register Gradient as a Nix remote builder. The CI workers then take over builds for the listed systems.
 
 ```nix
-# configuration.nix of the client
-programs.ssh.extraConfig = ''
-  Host ci.example.com
-    Port 2222
-    User myproject # (1)!
-    IdentityFile /root/.ssh/gradient
-'';
+# flake.nix
+nixosConfigurations.laptop = nixpkgs.lib.nixosSystem {
+  modules = [
+    ./configuration.nix
+    gradient.nixosModules.client
+  ];
+};
 ```
 
-1.  The project name, used by store URLs without `myproject@`.
+```nix
+# configuration.nix
+nix.gradient-ssh = {
+  enable = true;
+  host = "ci.example.com";
+  project = "myproject"; # (1)!
+  identityFile = "/root/.ssh/gradient"; # (2)!
+  systems = [ "x86_64-linux" "aarch64-linux" ];
+  supportedFeatures = [ "big-parallel" "kvm" "nixos-test" ];
+};
+```
 
-Substituters connect through the Nix daemon as `root`. Plain `nix copy` and `nixos-rebuild` are using the calling user's SSH setup.
+1.  The project name is the SSH user. Store URLs work without `myproject@`.
+2.  The Nix daemon can read the key as `root`. Plain `nix copy` and `nixos-rebuild` are using the calling user's access to the key.
 
 ## 4. Use the Store
 
@@ -66,34 +79,6 @@ Substituters connect through the Nix daemon as `root`. Plain `nix copy` and `nix
 - Missing systems appear in the Nix output while no connected worker can build them.
 - Aborts of the evaluation stop all unfinished builds with an error, e.g. after [5 minutes without a matching worker](../concepts/evaluations-and-builds.md).
 - Build logs stream back like logs of local builds. Log lines of `nix build -L` start with the package name.
-
-## 5. Add a Remote Builder
-
-The `client` module can register Gradient as a Nix remote builder. The CI workers then take over builds for the listed systems.
-
-```nix
-# flake.nix
-nixosConfigurations.laptop = nixpkgs.lib.nixosSystem {
-  modules = [
-    ./configuration.nix
-    gradient.nixosModules.client
-  ];
-};
-```
-
-```nix
-# configuration.nix
-nix.gradient-ssh = {
-  enable = true;
-  host = "ci.example.com";
-  project = "myproject";
-  identityFile = "/root/.ssh/gradient"; # (1)!
-  systems = [ "x86_64-linux" "aarch64-linux" ];
-  supportedFeatures = [ "big-parallel" "kvm" "nixos-test" ];
-};
-```
-
-1.  The module can write the SSH settings of step 3 for this host. The Nix daemon can read the key as `root`.
 
 ## Verify Deployment
 
