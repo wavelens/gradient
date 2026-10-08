@@ -201,6 +201,7 @@ impl BuildAssignMaps {
         state: &Arc<ServerState>,
         shared_builds: &[MDerivationBuild],
         uses_history: bool,
+        waited_imports: &[DerivationBuildId],
     ) -> anyhow::Result<Self> {
         // Every load below must propagate its error and abort the pass. Reading a failed query as
         // no rows was dispatching builds against phantom-empty inputs.
@@ -292,9 +293,8 @@ impl BuildAssignMaps {
                 ev.task.is_some_and(|t| build_request_tasks.contains(&t))
             });
 
-        let shared_build_ids: Vec<DerivationBuildId> = shared_builds.iter().map(|b| b.id).collect();
         let ifd_lifted =
-            gradient_db::scheduling::priority::import_lifted_shared_builds(db, &shared_build_ids)
+            gradient_db::scheduling::priority::import_lifted_shared_builds(db, waited_imports)
                 .await?;
 
         let feature_edges = gradient_db::fetch_in_chunks(&drv_ids, |chunk| async move {
@@ -750,8 +750,14 @@ async fn enqueue_startable_shared_builds(
     let enqueued_ids: Vec<_> = new_shared_builds.iter().map(|a| a.id).collect();
     let membership = crate::cluster::Membership::load(&state.worker_db, &[], &enqueued_ids).await?;
 
-    let maps =
-        BuildAssignMaps::load(state, &new_shared_builds, scheduler.policy.uses_history()).await?;
+    let waited_imports = scheduler.import_waits.lock().waited_builds();
+    let maps = BuildAssignMaps::load(
+        state,
+        &new_shared_builds,
+        scheduler.policy.uses_history(),
+        &waited_imports,
+    )
+    .await?;
 
     let mut enqueued = 0usize;
     for shared_build in new_shared_builds {

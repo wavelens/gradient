@@ -39,7 +39,7 @@ flowchart LR
 - `missing_count`, `missing_nar_size` and `outputs_present` are per worker. The worker must score each offered candidate against its store and send a `CandidateScore` (see [Offers](../proto/capabilities-and-dispatch.md#offers)). The values are `None` until that worker reported.
 - `dependency_count` is the number of direct input derivations (`derivation_dependency` rows), not the number of builds needing the derivation.
 - `ready_at` is the moment the dependencies finished. `WaitTimeRule` will measure from that moment, not from the `queued_at` time.
-- `ifd` is true for a build of an imported derivation and for its unfinished dependencies, while an evaluation needing the import is still running. A recursive walk in `import_lifted_shared_builds` can find that set.
+- `ifd` is true for a build of an imported derivation and for its unfinished dependencies while evaluations wait on the import. `import_lifted_shared_builds` can walk that set from the builds of the open import requests.
 - `rescore_count` will grow by one per 5 s assignment timer tick (`BumpRescore`). Reactive kicks leave the count unchanged.
 - The caller must pass `now` in. Rules never read the wall clock.
 - `JobContext::build_history` will return an empty prediction when `outputs_present` is set. A worker holding every output will build nothing.

@@ -110,13 +110,9 @@ crate::sql_fn! {
 fn import_lifted_shared_builds_sql() -> String {
     let open = |alias| crate::graph::predicates::open_predicate(alias);
     let seed = format!(
-        "SELECT d.id FROM derivation d \
-         JOIN derivation_build root ON root.derivation = d.id \
-         WHERE d.ifd AND {root_open} AND EXISTS (\
-         SELECT 1 FROM build_job bj JOIN evaluation ev ON ev.id = bj.evaluation \
-         WHERE bj.derivation = d.id AND ev.status NOT IN ({finished}))",
-        root_open = open("root"),
-        finished = crate::sql::status::eval_in(&EvaluationStatus::TERMINAL),
+        "SELECT root.derivation FROM derivation_build root \
+         WHERE root.id = ANY($1::uuid[]) AND {}",
+        open("root"),
     );
     let closure = crate::graph::walks::bounded_dependency_closure_cte_body(
         "imported",
@@ -132,8 +128,7 @@ fn import_lifted_shared_builds_sql() -> String {
     format!(
         "WITH RECURSIVE {closure} \
          SELECT db.id AS id FROM derivation_build db \
-         JOIN imported i ON i.derivation = db.derivation \
-         WHERE db.id = ANY($1)"
+         JOIN imported i ON i.derivation = db.derivation"
     )
 }
 
@@ -145,9 +140,9 @@ crate::sql_fn! {
 
 pub async fn import_lifted_shared_builds<C: ConnectionTrait>(
     db: &C,
-    shared_builds: &[DerivationBuildId],
+    waited: &[DerivationBuildId],
 ) -> Result<HashSet<DerivationBuildId>, DbErr> {
-    let rows = fetch_in_chunks(shared_builds, |chunk| async move {
+    let rows = fetch_in_chunks(waited, |chunk| async move {
         let ids: Vec<uuid::Uuid> = chunk.iter().map(|id| id.into_inner()).collect();
         IdRow::find_by_statement(IMPORT_LIFTED_SHARED_BUILDS.bind([ids.into()]))
             .all(db)
@@ -263,20 +258,19 @@ mod tests {
     }
 
     #[test]
-    fn the_import_lift_walks_open_dependencies_of_live_imports_only() {
+    fn the_import_lift_walks_the_open_closure_of_the_waited_builds_only() {
         let sql = import_lifted_shared_builds_sql();
         let (seed, step) = sql
             .split_once(" UNION ")
             .expect("the closure is a recursive union");
         assert!(
-            seed.contains("WHERE d.ifd AND (NOT root.fetchable"),
-            "{sql}"
+            seed.contains("WHERE root.id = ANY($1::uuid[]) AND (NOT root.fetchable"),
+            "the walk starts at the builds an evaluation waits on: {sql}"
         );
-        assert!(seed.contains("AND ev.status NOT IN ("), "{sql}");
+        assert!(!sql.contains("ifd"), "{sql}");
         assert!(
             step.contains("dep.derivation = e.dependency AND (NOT dep.fetchable"),
             "a finished dependency ends the walk: {sql}"
         );
-        assert!(sql.ends_with("WHERE db.id = ANY($1)"), "{sql}");
     }
 }
