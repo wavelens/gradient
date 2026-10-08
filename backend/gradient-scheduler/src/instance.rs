@@ -7,6 +7,7 @@
 use std::collections::HashMap;
 
 use gradient_types::ids::TaskId;
+use gradient_wire::types::FlakeStep;
 use sea_orm::{ConnectionTrait, FromQueryResult};
 use tracing::error;
 
@@ -48,6 +49,9 @@ struct MetricRow {
     build_time_5m: Option<f64>,
     build_time_1h: Option<f64>,
     build_time_24h: Option<f64>,
+    build_median_5m: Option<f64>,
+    build_median_1h: Option<f64>,
+    build_median_24h: Option<f64>,
     closure_5m: Option<f64>,
     closure_1h: Option<f64>,
     closure_24h: Option<f64>,
@@ -93,6 +97,9 @@ gradient_db::sql! {
           (AVG(build_time_ms)  FILTER (WHERE created_at >= $1))::float8 AS build_time_5m,
           (AVG(build_time_ms)  FILTER (WHERE created_at >= $2))::float8 AS build_time_1h,
           (AVG(build_time_ms)  FILTER (WHERE created_at >= $3))::float8 AS build_time_24h,
+          (percentile_cont(0.5) WITHIN GROUP (ORDER BY build_time_ms) FILTER (WHERE created_at >= $1))::float8 AS build_median_5m,
+          (percentile_cont(0.5) WITHIN GROUP (ORDER BY build_time_ms) FILTER (WHERE created_at >= $2))::float8 AS build_median_1h,
+          (percentile_cont(0.5) WITHIN GROUP (ORDER BY build_time_ms) FILTER (WHERE created_at >= $3))::float8 AS build_median_24h,
           (AVG(closure_size)   FILTER (WHERE created_at >= $1))::float8 AS closure_5m,
           (AVG(closure_size)   FILTER (WHERE created_at >= $2))::float8 AS closure_1h,
           (AVG(closure_size)   FILTER (WHERE created_at >= $3))::float8 AS closure_24h,
@@ -430,6 +437,11 @@ pub async fn compute_instance_context(
             metric.build_time_1h,
             metric.build_time_24h,
         ),
+        build_time_median_ms: windowed(
+            metric.build_median_5m,
+            metric.build_median_1h,
+            metric.build_median_24h,
+        ),
         peak_ram_mb: windowed(metric.peak_ram_5m, metric.peak_ram_1h, metric.peak_ram_24h),
         cpu_time_ms: windowed(metric.cpu_time_5m, metric.cpu_time_1h, metric.cpu_time_24h),
         avg_cpu_pct: windowed(metric.cpu_pct_5m, metric.cpu_pct_1h, metric.cpu_pct_24h),
@@ -497,44 +509,88 @@ gradient_db::sql! {
 #[derive(Debug, Default, FromQueryResult)]
 struct EvalDurationRow {
     task: TaskId,
-    elapsed_ms: f64,
-    samples: i64,
+    fetch_ms: Option<f64>,
+    fetch_samples: i64,
+    evaluate_ms: Option<f64>,
+    evaluate_samples: i64,
 }
 
 gradient_db::sql! {
     EVAL_HISTORY_DURATION = r#"
+        WITH job AS (
+          SELECT d.task, d.worker_elapsed_ms AS elapsed,
+                 SUM(p.end_ms - p.start_ms) FILTER (WHERE p.phase = $4 AND p.parent_seq IS NULL) AS fetch_ms,
+                 BOOL_OR(p.phase IN ($5, $6)) AS evaluated
+          FROM dispatched_job d
+          JOIN dispatched_job_phase p ON p.dispatched_job = d.id
+          WHERE d.kind = $2 AND d.outcome = $3 AND d.dispatched_at >= $1
+            AND d.task IS NOT NULL AND d.worker_elapsed_ms IS NOT NULL
+          GROUP BY d.id, d.task, d.worker_elapsed_ms
+        )
         SELECT task,
-               AVG(worker_elapsed_ms)::float8 AS elapsed_ms,
-               COUNT(*)::bigint AS samples
-        FROM dispatched_job
-        WHERE kind = $2 AND outcome = $3 AND dispatched_at >= $1
-          AND task IS NOT NULL AND worker_elapsed_ms IS NOT NULL
+               AVG(fetch_ms)::float8 AS fetch_ms,
+               COUNT(fetch_ms)::bigint AS fetch_samples,
+               (AVG(elapsed - COALESCE(fetch_ms, 0)) FILTER (WHERE evaluated))::float8 AS evaluate_ms,
+               (COUNT(*) FILTER (WHERE evaluated))::bigint AS evaluate_samples
+        FROM job
         GROUP BY task
     "#,
-        params = [Now, Int(0), Int(0)];
+        params = [Now, Int(0), Int(0), Int(0), Int(2), Int(3)];
 }
 
 const EVAL_DURATION_WINDOW_DAYS: i64 = 7;
 
+#[derive(Debug, Default, Clone, Copy)]
+struct EvalDurations {
+    fetch_ms: Option<u64>,
+    evaluate_ms: Option<u64>,
+}
+
 #[derive(Debug, Default)]
 pub struct EvalHistory {
     tasks: HashMap<TaskId, gradient_pool::score::HistoryPrediction>,
-    fleet_elapsed_ms: Option<u64>,
+    durations: HashMap<TaskId, EvalDurations>,
+    fleet: EvalDurations,
 }
 
 impl EvalHistory {
-    pub fn for_task(&self, task: TaskId) -> gradient_pool::score::HistoryPrediction {
+    pub fn for_job(
+        &self,
+        task: TaskId,
+        steps: &[FlakeStep],
+    ) -> gradient_pool::score::HistoryPrediction {
         let mut history = self.tasks.get(&task).copied().unwrap_or_default();
-        if history.uncontended_build_time_ms.is_none() {
-            history.uncontended_build_time_ms = self.fleet_elapsed_ms;
-            history.from_fleet_mean = self.fleet_elapsed_ms.is_some();
-        }
+        let own = self.durations.get(&task).copied().unwrap_or_default();
+        let mut from_fleet_mean = false;
+        let mut part = |runs: bool, own: Option<u64>, fleet: Option<u64>| {
+            if !runs {
+                return Some(0);
+            }
+            own.or_else(|| {
+                from_fleet_mean = true;
+                fleet
+            })
+        };
+        let fetch_ms = part(
+            steps.contains(&FlakeStep::FetchFlake),
+            own.fetch_ms,
+            self.fleet.fetch_ms,
+        );
+        let evaluate_ms = part(
+            steps.iter().any(|s| *s != FlakeStep::FetchFlake),
+            own.evaluate_ms,
+            self.fleet.evaluate_ms,
+        );
 
+        let expected_ms = fetch_ms.zip(evaluate_ms).map(|(f, e)| f + e);
+        history.uncontended_build_time_ms = expected_ms;
+        history.build_time_ms = expected_ms.filter(|_| !from_fleet_mean);
+        history.from_fleet_mean = from_fleet_mean && expected_ms.is_some();
         history
     }
 
-    fn from_rows(ram: Vec<EvalHistoryRow>, durations: Vec<EvalDurationRow>) -> Self {
-        let mut tasks: HashMap<TaskId, gradient_pool::score::HistoryPrediction> = ram
+    fn from_rows(ram: Vec<EvalHistoryRow>, rows: Vec<EvalDurationRow>) -> Self {
+        let tasks = ram
             .into_iter()
             .map(|r| {
                 (
@@ -548,19 +604,37 @@ impl EvalHistory {
             })
             .collect();
 
-        let (mut weighted_ms, mut runs) = (0.0, 0.0);
-        for row in durations {
-            let elapsed_ms = row.elapsed_ms.max(0.0) as u64;
-            let history = tasks.entry(row.task).or_default();
-            history.build_time_ms = Some(elapsed_ms);
-            history.uncontended_build_time_ms = Some(elapsed_ms);
-            weighted_ms += row.elapsed_ms.max(0.0) * row.samples as f64;
-            runs += row.samples as f64;
-        }
+        let mean = |pick: fn(&EvalDurationRow) -> (Option<f64>, i64)| {
+            let (sum, runs) = rows
+                .iter()
+                .map(pick)
+                .fold((0.0, 0.0), |(sum, runs), (ms, n)| {
+                    (sum + ms.unwrap_or(0.0).max(0.0) * n as f64, runs + n as f64)
+                });
+            (runs > 0.0).then(|| (sum / runs) as u64)
+        };
+        let fleet = EvalDurations {
+            fetch_ms: mean(|r| (r.fetch_ms, r.fetch_samples)),
+            evaluate_ms: mean(|r| (r.evaluate_ms, r.evaluate_samples)),
+        };
+        let durations = rows
+            .iter()
+            .map(|r| {
+                let ms = |v: Option<f64>| v.map(|ms| ms.max(0.0) as u64);
+                (
+                    r.task,
+                    EvalDurations {
+                        fetch_ms: ms(r.fetch_ms),
+                        evaluate_ms: ms(r.evaluate_ms),
+                    },
+                )
+            })
+            .collect();
 
         Self {
             tasks,
-            fleet_elapsed_ms: (runs > 0.0).then(|| (weighted_ms / runs) as u64),
+            durations,
+            fleet,
         }
     }
 }
@@ -570,6 +644,7 @@ pub async fn compute_eval_history(
     now: chrono::NaiveDateTime,
 ) -> EvalHistory {
     use gradient_entity::dispatched_job::{DispatchedJobKind, DispatchedJobOutcome};
+    use gradient_wire::types::JobPhase;
 
     let since = now - chrono::Duration::hours(24);
     let ram = EvalHistoryRow::find_by_statement(EVAL_HISTORY_P95_RAM.bind([since.into()]))
@@ -584,6 +659,9 @@ pub async fn compute_eval_history(
         (now - chrono::Duration::days(EVAL_DURATION_WINDOW_DAYS)).into(),
         i16::from(DispatchedJobKind::Eval).into(),
         i16::from(DispatchedJobOutcome::Completed).into(),
+        JobPhase::Fetch.as_i16().into(),
+        JobPhase::EvalFlake.as_i16().into(),
+        JobPhase::EvalDerivations.as_i16().into(),
     ]))
     .all(db)
     .await
@@ -620,6 +698,9 @@ mod tests {
             f("build_time_5m", 11.0),
             f("build_time_1h", 12.0),
             f("build_time_24h", 13.0),
+            f("build_median_5m", 0.1),
+            f("build_median_1h", 0.2),
+            f("build_median_24h", 0.3),
             f("closure_5m", 14.0),
             f("closure_1h", 15.0),
             f("closure_24h", 16.0),
@@ -681,6 +762,7 @@ mod tests {
             windowed(Some(100.0), Some(200.0), Some(300.0))
         );
         assert_eq!(ic.build_time_ms.w1h, Some(12.0));
+        assert_eq!(ic.build_time_median_ms.w1h, Some(0.2));
         assert_eq!(ic.completed.w24h, Some(400.0));
         assert_eq!(ic.wait_secs, windowed(Some(1.5), Some(2.5), Some(3.5)));
         assert_eq!(ic.nar_size_mb.w24h, Some(19.0));
@@ -769,39 +851,73 @@ mod tests {
 
         let h = compute_eval_history(&db, gradient_types::now())
             .await
-            .for_task(pid);
+            .for_job(pid, BOTH);
         assert_eq!(h.predicted_peak_ram_mb, Some(42_000));
         assert_eq!(h.samples, 7);
     }
 
+    const FETCH: &[FlakeStep] = &[FlakeStep::FetchFlake];
+    const EVALUATE: &[FlakeStep] = &[FlakeStep::EvaluateFlake, FlakeStep::EvaluateDerivations];
+    const BOTH: &[FlakeStep] = &[
+        FlakeStep::FetchFlake,
+        FlakeStep::EvaluateFlake,
+        FlakeStep::EvaluateDerivations,
+    ];
+
+    fn durations(task: TaskId, fetch_ms: Option<f64>, evaluate_ms: Option<f64>) -> EvalDurationRow {
+        EvalDurationRow {
+            task,
+            fetch_ms,
+            fetch_samples: i64::from(fetch_ms.is_some()) * 2,
+            evaluate_ms,
+            evaluate_samples: i64::from(evaluate_ms.is_some()) * 2,
+        }
+    }
+
+    fn expected_ms(history: &EvalHistory, task: TaskId, steps: &[FlakeStep]) -> Option<u64> {
+        history.for_job(task, steps).uncontended_build_time_ms
+    }
+
     #[test]
-    fn a_task_without_eval_runs_takes_the_mean_of_every_run() {
-        let (seen, unseen) = (TaskId::now_v7(), TaskId::now_v7());
+    fn a_job_is_estimated_by_the_fetch_and_evaluation_it_runs() {
+        let task = TaskId::now_v7();
+        let history = EvalHistory::from_rows(
+            Vec::new(),
+            vec![durations(task, Some(20_000.0), Some(300_000.0))],
+        );
+
+        assert_eq!(expected_ms(&history, task, FETCH), Some(20_000));
+        assert_eq!(expected_ms(&history, task, EVALUATE), Some(300_000));
+        assert_eq!(expected_ms(&history, task, BOTH), Some(320_000));
+        assert!(!history.for_job(task, BOTH).from_fleet_mean);
+    }
+
+    #[test]
+    fn a_task_without_runs_of_a_step_takes_the_mean_of_every_task() {
+        let (seen, fetched_only, unseen) = (TaskId::now_v7(), TaskId::now_v7(), TaskId::now_v7());
         let history = EvalHistory::from_rows(
             Vec::new(),
             vec![
-                EvalDurationRow {
-                    task: seen,
-                    elapsed_ms: 10_000.0,
-                    samples: 3,
-                },
-                EvalDurationRow {
-                    task: TaskId::now_v7(),
-                    elapsed_ms: 50_000.0,
-                    samples: 1,
-                },
+                durations(seen, Some(10_000.0), Some(100_000.0)),
+                durations(TaskId::now_v7(), Some(30_000.0), Some(300_000.0)),
+                durations(fetched_only, Some(40_000.0), None),
             ],
         );
 
-        assert_eq!(
-            history.for_task(seen).uncontended_build_time_ms,
-            Some(10_000)
-        );
-        assert_eq!(
-            history.for_task(unseen).uncontended_build_time_ms,
-            Some(20_000)
-        );
-        assert!(!history.for_task(seen).from_fleet_mean);
-        assert!(history.for_task(unseen).from_fleet_mean);
+        assert_eq!(expected_ms(&history, unseen, FETCH), Some(26_666));
+        assert_eq!(expected_ms(&history, unseen, EVALUATE), Some(200_000));
+        assert_eq!(expected_ms(&history, fetched_only, BOTH), Some(240_000));
+        assert!(history.for_job(fetched_only, BOTH).from_fleet_mean);
+        assert!(!history.for_job(fetched_only, FETCH).from_fleet_mean);
+    }
+
+    #[test]
+    fn a_step_nobody_measured_leaves_the_job_unestimated() {
+        let task = TaskId::now_v7();
+        let history =
+            EvalHistory::from_rows(Vec::new(), vec![durations(task, Some(5_000.0), None)]);
+
+        assert_eq!(expected_ms(&history, task, BOTH), None);
+        assert_eq!(expected_ms(&history, task, FETCH), Some(5_000));
     }
 }

@@ -117,7 +117,7 @@ pub(crate) async fn assign_queued_evals(scheduler: &Scheduler) -> anyhow::Result
             continue;
         };
 
-        let history = eval_history.for_task(task_id);
+        let history = eval_history.for_job(task_id, &flake_job.steps);
 
         let pending = PendingEvalJob {
             evaluation_id: eval.id,

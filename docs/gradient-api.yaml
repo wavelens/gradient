@@ -15042,6 +15042,7 @@ components:
       properties:
         wait_secs: { $ref: '#/components/schemas/Windowed' }
         build_time_ms: { $ref: '#/components/schemas/Windowed' }
+        build_time_median_ms: { $ref: '#/components/schemas/Windowed' }
         peak_ram_mb: { $ref: '#/components/schemas/Windowed' }
         cpu_time_ms: { $ref: '#/components/schemas/Windowed' }
         avg_cpu_pct: { $ref: '#/components/schemas/Windowed' }

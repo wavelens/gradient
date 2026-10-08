@@ -34,10 +34,10 @@ flowchart LR
 | `JobContext` | `ScoredJob` (kind, architecture, `prefer_local_build`, `is_fixed_output`, `pname`, closure size, history), `missing_count`, `missing_nar_size`, `outputs_present`, `substitute_outputs`, `dependency_count`, `queued_at`, `ready_at`, `project_work_share`, `prioritized`, `build_request`, `ifd`, `rescore_count`, `now` | `JobTracker::score_candidates` in `gradient-scheduler/src/jobs.rs` |
 | `WorkerContext` | `architectures`, `system_features`, `fetch`, `metrics` | `worker_context_of` from the worker's `WorkerCaps` |
 | `WorkerMetricsView` | `cpu_count`, `cpu_core_score`, `ram_total_mb`, `ram_free_mb`, `cpu_usage_pct`, `disk_speed_mbps`, `upload_speed_mbps`, `download_speed_mbps`, `running_builds` | `WorkerCapabilities` (static), the 10 s `WorkerMetrics` heartbeat and the build stages (live) |
-| `InstanceContext` | 12 `Windowed` averages, `active_builds`, `pending_builds`, `total_workers`, `idle_workers`, `cpu_core_score_mean`, `upload_speed_mean_mbps`, `download_speed_mean_mbps`, `storage_read_mbps`, `storage_write_mbps`, `compression_ratio`, `per_path_secs`, `substitute_cost`, `download_slots`, `upload_slots`, `downloads_in_flight`, `uploads_in_flight` | `instance_metrics_pass`, see below. The two in-flight counts come from the build stages at assignment time |
+| `InstanceContext` | 13 `Windowed` averages, `active_builds`, `pending_builds`, `total_workers`, `idle_workers`, `cpu_core_score_mean`, `upload_speed_mean_mbps`, `download_speed_mean_mbps`, `storage_read_mbps`, `storage_write_mbps`, `compression_ratio`, `per_path_secs`, `substitute_cost`, `download_slots`, `upload_slots`, `downloads_in_flight`, `uploads_in_flight` | `instance_metrics_pass`, see below. The two in-flight counts come from the build stages at assignment time |
 
 - `missing_count`, `missing_nar_size` and `outputs_present` are per worker. The worker must score each offered candidate against its store and send a `CandidateScore` (see [Offers](../proto/capabilities-and-dispatch.md#offers)). The values are `None` until that worker reported.
-- `dependency_count` is the number of direct input derivations (`derivation_dependency` rows), not the number of builds needing the derivation.
+- `dependency_count` is the number of direct input derivations (`derivation_dependency` rows without runtime-only edges), not the number of builds needing the derivation.
 - `ready_at` is the moment the dependencies finished. `WaitTimeRule` will measure from that moment, not from the `queued_at` time.
 - `ifd` is true for a build of an imported derivation and for its unfinished dependencies while evaluations wait on the import. `import_lifted_shared_builds` can walk that set from the builds of the open import requests.
 - `rescore_count` will grow by one per 5 s assignment timer tick (`BumpRescore`). Reactive kicks leave the count unchanged.
@@ -81,14 +81,14 @@ A released job will drop out of the counts with its slot.
 
 | Source table | Windows |
 |---|---|
-| `derivation_metric` | `peak_ram_mb`, `cpu_time_ms`, `avg_cpu_pct`, `disk_bytes`, `build_time_ms`, `closure_size`, `oom_rate`, `completed` |
+| `derivation_metric` | `peak_ram_mb`, `cpu_time_ms`, `avg_cpu_pct`, `disk_bytes`, `build_time_ms`, `build_time_median_ms`, `closure_size`, `oom_rate`, `completed` |
 | `dispatched_job` (builds with `ready_at`) | `wait_secs`, `nar_size_mb`, `missing_paths`, `dependency_cnt` |
 
 - `STORAGE_PEAK_THROUGHPUT` can read the `NarFetch` and `NarPush` spans of the last hour. Spans contribute their rate between their start and end on the server clock. The highest sum of rates will be `storage_read_mbps` or `storage_write_mbps`.
 - `PREFETCH_TIME_FIT` can fit the `Prefetch` seconds of the last 24 hours over a constant, megabytes and paths. Least squares on these sums yield `per_path_secs` from 100 spans on.
 - The same fit on C3D2 gave the fallback of 0.18 s per path. The data were 16938 prefetches in 3 days, with 3.6 s fixed and 29 MB/s.
 - `SUBSTITUTE_TIME_FIT` can fit the `SubstituteFetch` seconds of the last 24 hours over a constant and megabytes. Spans hold the NAR bytes of their output. Least squares yield `substitute_cost` from 20 spans on.
-- `EVAL_HISTORY_DURATION` can average `worker_elapsed_ms` of completed eval jobs per task over 7 days. Tasks without runs use the mean of every run.
+- `EVAL_HISTORY_DURATION` can average the top-level `Fetch` span and the remaining time of completed eval jobs per task over 7 days. The rest counts only for jobs with an evaluation span. Tasks without runs of a part use the mean of all runs.
 - `STORED_TO_NAR_RATIO` can divide the `NarPush` bytes by the NAR bytes of their parent `Compress` span. Spans record stored bytes. The ratio can convert the throughput into NAR bytes.
 - Each `Windowed` value can hold 5 min, 1 h and 24 h averages. `None` will stand for no samples. A measured zero will stay zero.
 - Rules read `w1h_or(fallback)` or `w24h_or(fallback)` for instance-relative thresholds.

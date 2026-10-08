@@ -122,10 +122,12 @@ impl Scheduler {
                     return match store_path {
                         Some(path) => {
                             let follow_id = crate::jobs::eval_job_key(j.evaluation_id);
-                            if let Err(e) = self
-                                .enqueue_eval_job(follow_id, j.cached_followup(path))
-                                .await
-                            {
+                            let mut follow = j.cached_followup(path);
+                            if let Some(task) = follow.task_id {
+                                follow.history =
+                                    self.eval_history.load().for_job(task, &follow.job.steps);
+                            }
+                            if let Err(e) = self.enqueue_eval_job(follow_id, follow).await {
                                 warn!(error = %e, evaluation_id = %j.evaluation_id, "enqueue_eval_job failed for cached follow-up");
                             }
                             info!(evaluation_id = %j.evaluation_id, "fetch complete; enqueued cached eval follow-up");

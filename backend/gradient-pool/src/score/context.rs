@@ -33,6 +33,7 @@ pub struct SubstituteCost {
 pub struct InstanceContext {
     pub wait_secs: Windowed,
     pub build_time_ms: Windowed,
+    pub build_time_median_ms: Windowed,
     pub peak_ram_mb: Windowed,
     pub cpu_time_ms: Windowed,
     pub avg_cpu_pct: Windowed,
