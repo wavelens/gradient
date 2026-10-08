@@ -11,9 +11,9 @@ mod summary;
 use super::matchers::{git_host_status_for_event, matches_event};
 use super::matching_actions;
 use super::payload::git_host_status_payload;
-use super::report::build_ci_report_from_payload;
+use super::report::build_ci_reports_from_payload;
 use super::truncate;
-use fixtures::{action_with, make_ctx, run};
+use fixtures::{action_with, make_ctx, make_ctx_with, run};
 use gradient_git_host::reporter::CiStatus;
 use gradient_types::ActionType;
 use serde_json::json;
@@ -170,11 +170,13 @@ fn build_ci_report_fast_path_uses_payload_fields() {
             "details_url": "https://example.com/log/1",
             "check_run_id": 99,
         });
-        let report =
-            build_ci_report_from_payload(&ctx, "build.started", &payload, CiStatus::Running)
+        let reports =
+            build_ci_reports_from_payload(&ctx, "build.started", &payload, CiStatus::Running)
                 .await
-                .expect("fast path should succeed")
-                .expect("fast path always emits a report");
+                .expect("fast path should succeed");
+        let [report] = reports.as_slice() else {
+            panic!("fast path emits exactly the payload's report: {reports:?}");
+        };
         assert_eq!(report.owner, "acme");
         assert_eq!(report.repo, "widgets");
         assert_eq!(report.sha, "deadbeef");
@@ -189,7 +191,7 @@ fn build_ci_report_errors_when_payload_empty() {
     run(async {
         let ctx = make_ctx();
         let err =
-            build_ci_report_from_payload(&ctx, "build.started", &json!({}), CiStatus::Running)
+            build_ci_reports_from_payload(&ctx, "build.started", &json!({}), CiStatus::Running)
                 .await
                 .unwrap_err();
         assert!(err.to_string().contains("build_id"), "error: {err}");
@@ -201,10 +203,69 @@ fn build_ci_report_errors_on_invalid_build_id() {
     run(async {
         let ctx = make_ctx();
         let payload = json!({ "build_id": "not-a-uuid" });
-        let err = build_ci_report_from_payload(&ctx, "build.started", &payload, CiStatus::Running)
+        let err = build_ci_reports_from_payload(&ctx, "build.started", &payload, CiStatus::Running)
             .await
             .unwrap_err();
         assert!(err.to_string().contains("invalid build_id"), "error: {err}");
+    });
+}
+
+#[test]
+fn a_failed_attribute_reddens_the_evaluation_check_and_gets_its_own_build_check() {
+    use gradient_entity::evaluation_message::MessageLevel;
+    use gradient_types::{EvaluationId, MCommit, MEvaluation, MEvaluationMessage, MTask, TaskId};
+    use sea_orm::{DatabaseBackend, MockDatabase};
+
+    run(async {
+        let evaluation_id = EvaluationId::now_v7();
+        let task = TaskId::now_v7();
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([vec![MEvaluation {
+                id: evaluation_id,
+                task: Some(task),
+                building_started_at: Some(gradient_types::now()),
+                ..Default::default()
+            }]])
+            .append_query_results([vec![MTask {
+                id: task,
+                name: "hosts".into(),
+                repository: "https://git.example.com/acme/infra".into(),
+                ..Default::default()
+            }]])
+            .append_query_results([vec![MCommit {
+                hash: vec![0xab, 0xcd],
+                ..Default::default()
+            }]])
+            .append_query_results([Vec::<gradient_types::MProject>::new()])
+            .append_query_results([vec![MEvaluationMessage {
+                evaluation: evaluation_id,
+                level: MessageLevel::Error,
+                source: Some("nix-eval:nixosConfigurations.c".into()),
+                message: "failed to evaluate 'nixosConfigurations.c': boom".into(),
+                ..Default::default()
+            }]]);
+        let ctx = make_ctx_with(db);
+        let payload = json!({ "evaluation_id": evaluation_id.to_string() });
+
+        let reports =
+            build_ci_reports_from_payload(&ctx, "evaluation.building", &payload, CiStatus::Success)
+                .await
+                .unwrap();
+
+        let checks: Vec<(&str, &CiStatus)> = reports
+            .iter()
+            .map(|r| (r.context.as_str(), &r.status))
+            .collect();
+        assert_eq!(
+            checks,
+            vec![
+                ("gradient/hosts: Evaluation", &CiStatus::Failure),
+                (
+                    "gradient/hosts: Build nixosConfigurations.c",
+                    &CiStatus::Failure
+                ),
+            ]
+        );
     });
 }
 

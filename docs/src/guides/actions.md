@@ -147,8 +147,8 @@ The **Git Status** action can post one check per step on each commit and pull re
 | Check | State |
 |---|---|
 | `gradient/<task>: Approval` | Only for pull requests from forks, pending until maintainer approval |
-| `gradient/<task>: Evaluation` | Pending while the evaluation is active, then success or failure |
-| `gradient/<task>: Build <entry point>` | One per entry point: pending, running, then success or failure |
+| `gradient/<task>: Evaluation` | Pending while the evaluation is active, then success or failure. Failure once any entry point failed to evaluate, while the other builds continue |
+| `gradient/<task>: Build <entry point>` | One per entry point: pending, running, then success or failure. Entry points that failed to evaluate show failure without a build |
 
 Evaluations started with `/gradient run <wildcard>` report as `gradient/<task>: Evaluation: <wildcard>` next to the default checks.
 

@@ -7,7 +7,7 @@
 use crate::actions::ExecutorOk;
 use crate::actions::crypto::decrypt_secret_with_file;
 use crate::actions::matchers::git_host_status_for_event;
-use crate::actions::report::{build_ci_report_from_payload, persist_evaluation_check_id};
+use crate::actions::report::{build_ci_reports_from_payload, persist_evaluation_check_id};
 use crate::context::CiContext;
 use crate::integration_lookup::IntegrationKind;
 use anyhow::{Context, Result, anyhow};
@@ -29,26 +29,30 @@ pub(crate) async fn execute_git_host_status_report(
     let ci_status = git_host_status_for_event(event)
         .ok_or_else(|| anyhow!("event '{}' has no Git host status mapping", event))?;
 
-    let Some(report) = build_ci_report_from_payload(ctx, event, payload, ci_status).await? else {
+    let reports = build_ci_reports_from_payload(ctx, event, payload, ci_status).await?;
+    if reports.is_empty() {
         return Ok(ExecutorOk {
             status_code: Some(204),
             response_body: None,
         });
-    };
-    let context_key = report.context.clone();
-    let reporter = build_reporter_for_integration(ctx, integration_id).await?;
-    let new_id = reporter
-        .report(&report)
-        .await
-        .context("Git host status report failed")?;
-    if let (Some(new_id), Some(eid)) = (
-        new_id,
-        payload.get("evaluation_id").and_then(|v| v.as_str()),
-    ) && let Ok(evaluation_id) = eid.parse::<EvaluationId>()
-    {
-        persist_evaluation_check_id(ctx, evaluation_id, &context_key, new_id).await;
     }
-    let body = new_id.map(|id| format!("{{\"check_run_id\":{}}}", id));
+    let reporter = build_reporter_for_integration(ctx, integration_id).await?;
+    let evaluation_id = payload
+        .get("evaluation_id")
+        .and_then(|v| v.as_str())
+        .and_then(|eid| eid.parse::<EvaluationId>().ok());
+    let mut first_id = None;
+    for report in &reports {
+        let new_id = reporter
+            .report(report)
+            .await
+            .context("Git host status report failed")?;
+        if let (Some(new_id), Some(evaluation_id)) = (new_id, evaluation_id) {
+            persist_evaluation_check_id(ctx, evaluation_id, &report.context, new_id).await;
+        }
+        first_id = first_id.or(new_id);
+    }
+    let body = first_id.map(|id| format!("{{\"check_run_id\":{}}}", id));
     Ok(ExecutorOk {
         status_code: Some(200),
         response_body: body,
