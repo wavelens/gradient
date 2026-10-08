@@ -106,7 +106,7 @@ async fn run() -> std::io::Result<()> {
 
     if state.config.ssh.enable {
         info!("Starting SSH service");
-        gradient_ssh::start(Arc::clone(&state), Arc::clone(&scheduler)).await?;
+        gradient_ssh::start(Arc::clone(&state)).await?;
     }
 
     info!("Starting web service");

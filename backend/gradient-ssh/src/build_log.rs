@@ -319,7 +319,6 @@ mod tests {
             project: gradient_test_support::fixtures::project(),
             permissions: 0,
             caches: vec![],
-            evaluation: Default::default(),
         };
         let mut logs = BuildLogs {
             drv_paths: HashMap::from([(build.id, DRV.to_owned())]),
