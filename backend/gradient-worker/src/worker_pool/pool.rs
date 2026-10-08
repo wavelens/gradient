@@ -310,7 +310,12 @@ pub(super) mod tests {
         pool.push_for_test(silent_worker());
 
         let mut worker = pool.acquire().await.expect("acquire");
-        let call = worker.plan("repo".into(), vec![], vec![]);
+        let call = worker.plan(
+            "repo".into(),
+            vec![],
+            vec![],
+            &gradient_sources::RefuseImports("a test"),
+        );
         tokio::time::timeout(Duration::from_millis(200), call)
             .await
             .expect_err("a silent child must keep the call pending");
@@ -339,7 +344,12 @@ pub(super) mod tests {
 
         let mut worker = pool.acquire().await.expect("acquire");
         let (shards, errors) = worker
-            .plan("repo".into(), vec![], vec![])
+            .plan(
+                "repo".into(),
+                vec![],
+                vec![],
+                &gradient_sources::RefuseImports("a test"),
+            )
             .await
             .expect("plan");
         assert!(shards.is_empty() && errors.is_empty());
