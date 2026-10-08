@@ -7,7 +7,7 @@ import shlex
 
 
 def api(machine, base, method, path, token=None, body=None):
-    cmd = f"curl -sS -X {method} {base}/api/v1/{path}"
+    cmd = f"curl -sS -X {method} {shlex.quote(f'{base}/api/v1/{path}')}"
     if token:
         cmd += f" -H 'Authorization: Bearer {token}'"
     if body is not None:
