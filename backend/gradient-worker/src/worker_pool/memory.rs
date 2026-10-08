@@ -72,10 +72,6 @@ pub(super) fn rss_of_pid(_pid: u32) -> Option<u64> {
 }
 
 pub(super) async fn memory_reaper_loop(pool: Weak<EvalWorkerPool>, min_free_bytes: u64) {
-    if min_free_bytes == 0 {
-        return;
-    }
-
     use sysinfo::{MemoryRefreshKind, RefreshKind, System};
     let mut sys = System::new_with_specifics(
         RefreshKind::nothing().with_memory(MemoryRefreshKind::nothing().with_ram()),
@@ -88,6 +84,11 @@ pub(super) async fn memory_reaper_loop(pool: Weak<EvalWorkerPool>, min_free_byte
         let Some(pool) = pool.upgrade() else {
             return;
         };
+
+        kill_over_cap(&pool);
+        if min_free_bytes == 0 {
+            continue;
+        }
 
         sys.refresh_memory();
         let available = sys.available_memory();
@@ -134,6 +135,26 @@ pub(super) async fn memory_reaper_loop(pool: Weak<EvalWorkerPool>, min_free_byte
         }
         last_reap = Some(Instant::now());
         reported_no_victim = false;
+    }
+}
+
+/// The cap holds while a call is running, not only between calls.
+/// A subprocess that keeps growing inside a List or Resolve call is what pushed a host into the kernel OOM killer.
+fn kill_over_cap(pool: &EvalWorkerPool) {
+    let cap = pool.max_eval_rss();
+    for pid in pool.live_pids() {
+        let Some(rss) = rss_of_pid(pid).filter(|rss| *rss > cap) else {
+            continue;
+        };
+        warn!(
+            pid,
+            rss_mb = rss / (1024 * 1024),
+            cap_mb = cap / (1024 * 1024),
+            "eval subprocess exceeded its memory cap; killing it"
+        );
+        if let Err(err) = kill(Pid::from_raw(pid as i32), Signal::SIGKILL) {
+            debug!(pid, %err, "eval subprocess already gone before the kill");
+        }
     }
 }
 

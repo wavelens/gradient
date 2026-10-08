@@ -46,7 +46,7 @@ impl std::fmt::Display for EvalErrorResponse {
 
 impl std::error::Error for EvalErrorResponse {}
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub(super) struct Listing {
     pub(super) attrs: Vec<String>,
     pub(super) deferred: Vec<DiscoveryShard>,

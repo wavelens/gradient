@@ -350,7 +350,7 @@ Declarative entities under `services.gradient.state` are in the [state reference
 | `worker.eval.cache.share` | bool | `true` | `GRADIENT_WORKER_EVAL_CACHE_SHARE` | Whether to share eval cache blobs with other workers through the server. |
 | `worker.eval.forkWorkers` | null or (int) | `null` | `GRADIENT_WORKER_EVAL_FORK_WORKERS` | Evaluation subprocesses in the pool, equal to the evaluation concurrency. `null` is sizing the pool to the host's core count, capped at 16. The pool is shrinking further until its size times `worker.eval.maxRss` is fitting in 75% of the host's RAM. |
 | `worker.eval.maxConcurrent` | int | `1` | `GRADIENT_WORKER_EVAL_MAX_CONCURRENT` | Maximum simultaneous evaluations. |
-| `worker.eval.maxRss` | int | `2147483648` | `GRADIENT_WORKER_EVAL_MAX_RSS` | Memory in bytes above which the worker is recycling an evaluation subprocess after its current call. The limit is not hard. A subprocess may exceed the limit during a call. |
+| `worker.eval.maxRss` | int | `2147483648` | `GRADIENT_WORKER_EVAL_MAX_RSS` | Memory in bytes per evaluation subprocess, in force during a call too. Batches whose listing crossed the limit run again attribute by attribute, and attributes crossing it alone count as failed. Keep it above a typical evaluation's heap. |
 | `worker.eval.metrics` | bool | `true` | `GRADIENT_WORKER_EVAL_METRICS` | Whether to collect per-evaluation Nix statistics (thunks, heap, peak memory, hotspots, flake graph). |
 
 ## `worker.log`

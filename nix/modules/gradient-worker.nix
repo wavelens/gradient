@@ -278,9 +278,9 @@ in {
         type = lib.types.ints.positive;
         default = 2 * 1024 * 1024 * 1024;
         description = ''
-          Memory in bytes above which the worker recycles an evaluation subprocess after its
-          current call. The limit is not hard. A subprocess can exceed the limit during a call. Keep
-          it above a typical evaluation's heap to avoid recycling warm subprocesses mid-evaluation.
+          Memory in bytes per evaluation subprocess, in force during a call too. Batches whose
+          listing crossed the limit run again attribute by attribute, and attributes crossing it
+          alone count as failed. Keep it above a typical evaluation's heap.
         '';
       };
 

@@ -90,7 +90,10 @@ impl EvalWorkerPool {
         }
 
         let worker = loop {
-            let candidate = self.idle.lock().pop();
+            let candidate = {
+                let mut idle = self.idle.lock();
+                leanest(&idle).map(|at| idle.swap_remove(at))
+            };
             match candidate {
                 Some(mut w) => {
                     let pid = w.pid();
@@ -156,6 +159,15 @@ impl EvalWorkerPool {
     pub(super) fn push_for_test(&self, worker: EvalWorker) {
         self.idle.lock().push(worker);
     }
+}
+
+/// The idle subprocess holding the least memory goes first.
+/// Growth then spreads over the pool instead of piling up in the subprocess returned last.
+fn leanest(idle: &[EvalWorker]) -> Option<usize> {
+    idle.iter()
+        .enumerate()
+        .min_by_key(|(_, worker)| worker.rss_bytes())
+        .map(|(at, _)| at)
 }
 
 #[derive(Debug, PartialEq, Eq)]

@@ -293,8 +293,7 @@ pub struct EvalArgs {
     #[arg(long = "eval-fork-workers", env = "GRADIENT_WORKER_EVAL_FORK_WORKERS", default_value_t = default_fork_workers())]
     pub fork_workers: usize,
 
-    /// Resident memory cap in bytes for one eval subprocess.
-    /// A subprocess above this cap is recycled, and the next acquire is spawning a fresh one.
+    /// Resident memory cap in bytes per eval subprocess, enforced also during a call.
     /// The cap must stay above a typical eval's Boehm-GC heap to keep warm workers.
     #[arg(long = "eval-max-rss", env = "GRADIENT_WORKER_EVAL_MAX_RSS", default_value_t = 8 * 1024 * 1024 * 1024)]
     pub max_rss: u64,
