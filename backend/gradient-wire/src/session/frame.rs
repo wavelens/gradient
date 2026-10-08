@@ -40,7 +40,6 @@ pub enum SendError {
 
 type WriterTask = std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>;
 
-pub const JOB_OFFER_CHUNK_SIZE: usize = 1_000;
 pub use crate::constants::BULK_CHUNK_SIZE;
 
 pub const MAX_PROTO_MESSAGE_SIZE: usize = 8 * 1024 * 1024;

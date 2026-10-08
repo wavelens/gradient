@@ -36,7 +36,7 @@ use super::job_events::{JobEvent, JobEvents};
 use super::log_lane::LogLane;
 use super::nar_serve::{ServeSlot, serve_nar_request};
 use super::socket::{
-    JOB_OFFER_CHUNK_SIZE, ProtoWriter, send_credentials_for_job, send_error, send_server_msg,
+    ProtoWriter, job_offer_chunks, send_credentials_for_job, send_error, send_server_msg,
 };
 use super::upload::UploadSession;
 
@@ -535,7 +535,7 @@ impl<'a> InboundContext<'a> {
         candidates: Vec<gradient_wire::messages::JobCandidate>,
     ) -> bool {
         use gradient_wire::messages::ServerMessage;
-        let chunks: Vec<_> = candidates.chunks(JOB_OFFER_CHUNK_SIZE).collect();
+        let chunks = job_offer_chunks(&candidates);
         let total = chunks.len();
         for (i, chunk) in chunks.into_iter().enumerate() {
             if send_server_msg(

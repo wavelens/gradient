@@ -27,9 +27,7 @@ use super::inbound::{ActiveJobs, InboundContext, RpcContext};
 use super::job_events::{JobEvents, SchedulerJobEvents};
 use super::log_lane::LogLane;
 use super::session::on_reauth_notify;
-use super::socket::{
-    JOB_OFFER_CHUNK_SIZE, ProtoSocket, ProtoWriter, recv_client_msg, send_server_msg,
-};
+use super::socket::{ProtoSocket, ProtoWriter, job_offer_chunks, recv_client_msg, send_server_msg};
 use super::upload::{UploadSession, UploadTable, abandon_transfer};
 use gradient_wire::messages::{ClientMessage, GradientCapabilities, ServerMessage};
 use gradient_wire::session::frame::ProtoReader;
@@ -355,7 +353,7 @@ async fn offer_jobs(st: &mut SessionState) -> bool {
     }
 
     debug!(peer_id = %st.peer_id, count = offer.candidates.len(), "pushing job offer (delta)");
-    for chunk in offer.candidates.chunks(JOB_OFFER_CHUNK_SIZE) {
+    for chunk in job_offer_chunks(&offer.candidates) {
         if send_server_msg(
             &st.writer,
             &ServerMessage::JobOffer {

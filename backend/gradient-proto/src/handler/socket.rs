@@ -14,9 +14,10 @@ use gradient_scheduler::Scheduler;
 use gradient_wire::messages::ServerMessage;
 
 pub use gradient_wire::session::frame::{
-    BULK_CHUNK_SIZE, HANDSHAKE_TIMEOUT, JOB_OFFER_CHUNK_SIZE, ProtoSocket, ProtoWriter,
-    recv_client_msg, send_error, send_server_msg,
+    BULK_CHUNK_SIZE, HANDSHAKE_TIMEOUT, ProtoSocket, ProtoWriter, recv_client_msg, send_error,
+    send_server_msg,
 };
+pub use gradient_wire::session::job_offer::job_offer_chunks;
 
 pub(super) async fn push_pending_candidates(
     writer: &ProtoWriter,
@@ -28,7 +29,7 @@ pub(super) async fn push_pending_candidates(
         return;
     }
     debug!(%peer_id, count = offer.candidates.len(), "pushing job offer (delta) after message processing");
-    for chunk in offer.candidates.chunks(JOB_OFFER_CHUNK_SIZE) {
+    for chunk in job_offer_chunks(&offer.candidates) {
         let _ = send_server_msg(
             writer,
             &ServerMessage::JobOffer {
