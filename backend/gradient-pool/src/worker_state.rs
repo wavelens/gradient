@@ -11,7 +11,7 @@ use std::sync::atomic::AtomicI64;
 
 use gradient_types::ids::ProjectId;
 
-use gradient_wire::types::{BuildStage, GradientCapabilities};
+use gradient_wire::types::{BuildStage, GradientCapabilities, JobKind};
 
 use crate::peer_auth::PeerAuth;
 use crate::session_port::SessionPort;
@@ -32,6 +32,12 @@ pub struct Draining;
 
 impl WorkerMarker for Active {}
 impl WorkerMarker for Draining {}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct AssignedJob {
+    pub kind: JobKind,
+    pub stage: Option<BuildStage>,
+}
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct WorkerProfile {
@@ -60,7 +66,7 @@ pub struct WorkerShared {
     pub disk_speed_mbps: Option<f32>,
     pub upload_speed_mbps: Option<f32>,
     pub download_speed_mbps: Option<f32>,
-    pub assigned_jobs: HashMap<String, Option<BuildStage>>,
+    pub assigned_jobs: HashMap<String, AssignedJob>,
     pub peer_auth: PeerAuth,
     pub sent_candidates: HashSet<String>,
     pub session: Arc<dyn SessionPort>,
@@ -73,7 +79,7 @@ impl WorkerShared {
     pub fn jobs_in(&self, stage: BuildStage) -> u32 {
         self.assigned_jobs
             .values()
-            .filter(|s| **s == Some(stage))
+            .filter(|job| job.stage == Some(stage))
             .count() as u32
     }
 
@@ -167,7 +173,12 @@ impl TypedWorker<Active> {
     }
 
     pub fn has_build_capacity(&self) -> bool {
-        (self.assigned_jobs.len() as u32) < self.max_concurrent_builds
+        let builds = self
+            .assigned_jobs
+            .values()
+            .filter(|job| job.kind == JobKind::Build)
+            .count() as u32;
+        builds < self.max_concurrent_builds
     }
 
     pub fn into_draining(self) -> TypedWorker<Draining> {

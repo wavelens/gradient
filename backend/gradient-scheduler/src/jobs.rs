@@ -220,6 +220,13 @@ impl PendingJob {
         }
     }
 
+    pub fn job_kind(&self) -> JobKind {
+        match self {
+            PendingJob::Eval(_) => JobKind::Flake,
+            PendingJob::Build(_) => JobKind::Build,
+        }
+    }
+
     pub fn ifd(&self) -> bool {
         matches!(self, PendingJob::Build(j) if j.ifd)
     }
