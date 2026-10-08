@@ -2262,3 +2262,164 @@ async fn a_disconnected_seat_drops_the_reservation() {
 
     assert!(scheduler.reservation().await.is_none());
 }
+
+const IMPORTED: &str = "/nix/store/sx7hz3rsl1skmmv2y0a2mhymcqkllw8k-ifd.drv";
+
+fn import_build_row(
+    build_id: BuildJobId,
+    derivation_build: DerivationBuildId,
+    status: gradient_entity::build::BuildStatus,
+) -> std::collections::BTreeMap<String, sea_orm::Value> {
+    std::collections::BTreeMap::from([
+        ("build_id".to_owned(), build_id.into_inner().into()),
+        (
+            "derivation_build".to_owned(),
+            derivation_build.into_inner().into(),
+        ),
+        ("status".to_owned(), i32::from(status).into()),
+        (
+            "hash".to_owned(),
+            "sx7hz3rsl1skmmv2y0a2mhymcqkllw8k".to_owned().into(),
+        ),
+    ])
+}
+
+async fn import_scheduler(
+    db: sea_orm::MockDatabase,
+) -> (Arc<Scheduler>, mpsc::UnboundedReceiver<SessionSignal>) {
+    let scheduler = test_scheduler_with(db.into_connection()).await;
+    let (session, signals) = port();
+    scheduler
+        .reattach_worker(
+            "w1",
+            eval_worker_caps(),
+            HashSet::new(),
+            session,
+            Vec::new(),
+        )
+        .await
+        .expect("register");
+    (scheduler, signals)
+}
+
+async fn import_result(signals: &mut mpsc::UnboundedReceiver<SessionSignal>) -> SessionSignal {
+    loop {
+        match signals.recv().await.expect("a signal") {
+            SessionSignal::Offers(_) => continue,
+            other => return other,
+        }
+    }
+}
+
+fn import_answer(outcome: gradient_wire::types::ImportOutcome) -> SessionSignal {
+    SessionSignal::ImportResult {
+        job_id: "eval:x".into(),
+        request_id: "r1".into(),
+        outcome,
+    }
+}
+
+#[tokio::test]
+async fn an_already_built_import_answers_at_once() {
+    use gradient_entity::build::BuildStatus;
+    use sea_orm::{DatabaseBackend, MockDatabase};
+
+    let db = MockDatabase::new(DatabaseBackend::Postgres).append_query_results([vec![
+        import_build_row(
+            BuildJobId::now_v7(),
+            DerivationBuildId::now_v7(),
+            BuildStatus::Substituted,
+        ),
+    ]]);
+    let (scheduler, mut signals) = import_scheduler(db).await;
+
+    scheduler
+        .handle_import_request(
+            "w1",
+            "eval:x",
+            EvaluationId::now_v7(),
+            "r1".into(),
+            vec![IMPORTED.into()],
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        import_result(&mut signals).await,
+        import_answer(gradient_wire::types::ImportOutcome::Completed)
+    );
+    assert!(!scheduler.has_import_waits());
+}
+
+#[tokio::test]
+async fn an_unknown_import_answers_unknown() {
+    use sea_orm::{DatabaseBackend, MockDatabase};
+
+    let db = MockDatabase::new(DatabaseBackend::Postgres)
+        .append_query_results([Vec::<std::collections::BTreeMap<String, sea_orm::Value>>::new()]);
+    let (scheduler, mut signals) = import_scheduler(db).await;
+
+    scheduler
+        .handle_import_request(
+            "w1",
+            "eval:x",
+            EvaluationId::now_v7(),
+            "r1".into(),
+            vec![IMPORTED.into()],
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        import_result(&mut signals).await,
+        import_answer(gradient_wire::types::ImportOutcome::Unknown {
+            drv_path: IMPORTED.into()
+        })
+    );
+    assert!(!scheduler.has_import_waits());
+}
+
+#[tokio::test]
+async fn a_waiting_import_answers_with_its_build_once_the_build_failed() {
+    use gradient_entity::build::BuildStatus;
+    use sea_orm::{DatabaseBackend, MockDatabase};
+
+    let (build_id, derivation_build) = (BuildJobId::now_v7(), DerivationBuildId::now_v7());
+    let db = MockDatabase::new(DatabaseBackend::Postgres)
+        .append_query_results([vec![import_build_row(
+            build_id,
+            derivation_build,
+            BuildStatus::Building,
+        )]])
+        .append_query_results([vec![gradient_entity::derivation_build::Model {
+            id: derivation_build,
+            status: BuildStatus::FailedPermanent,
+            ..Default::default()
+        }]])
+        .append_query_results([Vec::<gradient_entity::evaluation::Model>::new()]);
+    let (scheduler, mut signals) = import_scheduler(db).await;
+
+    scheduler
+        .handle_import_request(
+            "w1",
+            "eval:x",
+            EvaluationId::now_v7(),
+            "r1".into(),
+            vec![IMPORTED.into()],
+        )
+        .await
+        .unwrap();
+    assert!(scheduler.has_import_waits(), "the import still builds");
+
+    scheduler.settle_import_waits().await.unwrap();
+
+    assert_eq!(
+        import_result(&mut signals).await,
+        import_answer(gradient_wire::types::ImportOutcome::Failed {
+            drv_path: IMPORTED.into(),
+            build_id: build_id.to_string(),
+            status: "FailedPermanent".into(),
+        })
+    );
+    assert!(!scheduler.has_import_waits());
+}

@@ -250,6 +250,25 @@ impl Actor for SessionActor {
                     myself.stop(Some("write failed".into()));
                 }
             }
+            SessionMsg::Signal(SessionSignal::ImportResult {
+                job_id,
+                request_id,
+                outcome,
+            }) => {
+                if !st.active.contains(&job_id) {
+                    debug!(peer_id = %st.peer_id, %job_id, "import result for a job this session no longer runs");
+                    return Ok(());
+                }
+
+                let msg = ServerMessage::ImportResult {
+                    job_id,
+                    request_id,
+                    outcome,
+                };
+                if send_server_msg(&st.writer, &msg).await.is_err() {
+                    myself.stop(Some("write failed".into()));
+                }
+            }
             SessionMsg::Signal(SessionSignal::StartCluster { attempt, roster }) => {
                 let msg = ServerMessage::StartCluster { attempt, roster };
                 if send_server_msg(&st.writer, &msg).await.is_err() {
