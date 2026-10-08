@@ -115,12 +115,6 @@ impl<'a> FlakeWalker<'a> {
         Ok((strip_nix_store_prefix(&drv), vec![]))
     }
 
-    /// Commits are going to the WAL without a checkpoint. Concurrent shard workers would otherwise
-    /// deadlock on the WAL read-slot locks.
-    pub fn commit_cache(&self) -> Result<()> {
-        self.cache.commit().context("committing eval cache")
-    }
-
     pub fn checkpoint_cache(&self) -> Result<()> {
         self.cache.checkpoint().context("checkpointing eval cache")
     }

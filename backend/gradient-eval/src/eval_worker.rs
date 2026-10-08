@@ -121,9 +121,7 @@ fn serve<W: Write>(
                 // is leaving no shard for a later `List` to re-hit.
                 frames.begin();
                 let planned = walkers.with(ev, &repository, &input_overrides, |walker| {
-                    let (shards, errors) = walker.plan_shards(&wildcards)?;
-                    let _ = walker.commit_cache();
-                    Ok((shards, errors))
+                    walker.plan_shards(&wildcards)
                 });
                 frames.end(None);
                 or_err(planned.map(|(shards, errors)| EvalResponse::PlanOk { shards, errors }))
@@ -137,9 +135,7 @@ fn serve<W: Write>(
                 frames.begin();
                 let (result, warnings) = capture_warnings_during(|| {
                     walkers.with(ev, &repository, &input_overrides, |walker| {
-                        let listing = walker.discover_split(&wildcards, only.as_deref())?;
-                        let _ = walker.commit_cache();
-                        Ok(listing)
+                        walker.discover_split(&wildcards, only.as_deref())
                     })
                 });
                 let stats = frames.end(read_stats(ev, collect_stats));
@@ -315,8 +311,6 @@ fn stream_resolve<'ev, W: Write>(
                 };
                 emit(&mut io, item);
             }
-
-            let _ = walker.commit_cache();
         }
         Err(e) => {
             let msg = format!("{e:#}");
@@ -427,10 +421,7 @@ fn parse_warnings(captured: &str) -> Vec<String> {
             i += 1;
         }
 
-        let joined = block.join("\n").trim().to_string();
-        if !(joined.contains("SQLite database") && joined.contains("is busy")) {
-            warnings.push(joined);
-        }
+        warnings.push(block.join("\n").trim().to_string());
     }
     warnings
 }
@@ -451,11 +442,15 @@ mod tests {
     }
 
     #[test]
-    fn parse_warnings_splits_distinct_and_drops_sqlite_busy() {
-        let captured = "warning: first\nwarning: SQLite database is busy\nwarning: second\n";
+    fn parse_warnings_splits_distinct_warnings() {
+        let captured =
+            "warning: first\nerror (ignored): SQLite database is busy\nwarning: second\n";
         assert_eq!(
             parse_warnings(captured),
-            vec!["warning: first", "warning: second"]
+            vec![
+                "warning: first\nerror (ignored): SQLite database is busy",
+                "warning: second"
+            ]
         );
     }
 }

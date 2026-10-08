@@ -1,0 +1,413 @@
+From bdb565e89d01ff0cb7788aa52db779c8d2920ae7 Mon Sep 17 00:00:00 2001
+From: Dennis Wuitz <dennish@wuitz.de>
+Date: Thu, 8 Oct 2026 03:49:34 +0200
+Subject: [PATCH] fix(eval-cache): share a cache file between concurrent
+ evaluators
+
+Each write runs in an immediate transaction of its own. A transaction held open across reads pinned a snapshot, and in WAL mode a write from a stale snapshot fails at once, after which AttrDb gave up on the cache for the rest of the process: of 32 evaluators sharing a cache, the last writer standing was its only contributor. Listing an attrset and placing a placeholder reuse an existing row, since a row id is the parent link of everything cached beneath it. nix_eval_cache_checkpoint folds the WAL into the main file before the file is shipped.
+---
+ src/libexpr/eval-cache.cc                  | 172 ++++++++++++---------
+ src/libexpr/include/nix/expr/eval-cache.hh |   8 +
+ src/libflake-c/nix_api_eval_cache.cc       |   9 ++
+ src/libflake-c/nix_api_eval_cache.h        |  11 ++
+ 4 files changed, 131 insertions(+), 69 deletions(-)
+
+diff --git a/src/libexpr/eval-cache.cc b/src/libexpr/eval-cache.cc
+index 179d55387..a9ebb5c2a 100644
+--- a/src/libexpr/eval-cache.cc
++++ b/src/libexpr/eval-cache.cc
+@@ -55,10 +55,11 @@ struct AttrDb
+     {
+         SQLite db;
+         SQLiteStmt insertAttribute;
++        SQLiteStmt insertAttributeIfAbsent;
+         SQLiteStmt insertAttributeWithContext;
++        SQLiteStmt promoteToAttrs;
+         SQLiteStmt queryAttribute;
+         SQLiteStmt queryAttributes;
+-        std::unique_ptr<SQLiteTxn> txn;
+     };
+ 
+     std::unique_ptr<Sync<State>> _state;
+@@ -84,36 +85,50 @@ struct AttrDb
+         state->insertAttribute.create(
+             state->db, "insert or replace into Attributes(parent, name, type, value) values (?, ?, ?, ?)");
+ 
++        state->insertAttributeIfAbsent.create(
++            state->db, "insert or ignore into Attributes(parent, name, type, value) values (?, ?, ?, ?)");
++
+         state->insertAttributeWithContext.create(
+             state->db, "insert or replace into Attributes(parent, name, type, value, context) values (?, ?, ?, ?, ?)");
+ 
++        state->promoteToAttrs.create(
++            state->db, "update Attributes set type = ?, value = null, context = null where rowid = ?");
++
+         state->queryAttribute.create(
+             state->db, "select rowid, type, value, context from Attributes where parent = ? and name = ?");
+ 
+-        state->queryAttributes.create(state->db, "select name from Attributes where parent = ?");
+-
+-        state->txn = std::make_unique<SQLiteTxn>(state->db);
+-    }
+-
+-    ~AttrDb()
+-    {
+-        try {
+-            auto state(_state->lock());
+-            if (!failed && state->txn->active)
+-                state->txn->commit();
+-            state->txn.reset();
+-        } catch (...) {
+-            ignoreExceptionInDestructor();
+-        }
++        /* A probe for an absent attribute leaves a Missing row behind, and the
++           row it hangs off outlives the probe now that a listing reuses it, so
++           the members of an attrset are its children minus those. */
++        state->queryAttributes.create(state->db, "select name from Attributes where parent = ? and type != ?");
+     }
+ 
++    /* Each write is a transaction of its own, taken with the write lock up
++       front. Evaluators of the same flake share the cache file, and a
++       transaction kept open across their reads would pin a snapshot: in WAL
++       mode a write from a stale snapshot fails at once, without the busy
++       handler, and upstream then gave up on the cache for the rest of the
++       process. An immediate transaction instead waits for the other writer. */
+     template<typename F>
+     AttrId doSQLite(const F & fun)
+     {
+         if (failed)
+             return 0;
+         try {
+-            return fun();
++            auto state(_state->lock());
++            state->db.exec("begin immediate;");
++            try {
++                auto rowId = fun(*state);
++                state->db.exec("commit;");
++                return rowId;
++            } catch (...) {
++                try {
++                    state->db.exec("rollback;");
++                } catch (...) {
++                    ignoreExceptionExceptInterrupt();
++                }
++                throw;
++            }
+         } catch (SQLiteError &) {
+             ignoreExceptionExceptInterrupt();
+             failed = true;
+@@ -123,21 +138,36 @@ struct AttrDb
+ 
+     AttrId setAttrs(AttrKey key, const std::vector<Symbol> & attrs)
+     {
+-        return doSQLite([&]() {
+-            auto state(_state->lock());
++        return doSQLite([&](State & state) {
++            /* A row's id is the parent link of everything cached beneath it, so
++               reuse it: `insert or replace` would allocate a new one and orphan
++               that whole subtree. Listing an attrset must not discard what the
++               cache already knows about its members - the db is keyed by the
++               flake's fingerprint, so a re-listed attrset holds the same
++               attributes it held before. */
++            AttrId rowId = 0;
++            {
++                auto queryAttribute(state.queryAttribute.use().apply(key.first).apply(symbols[key.second]));
++                if (queryAttribute.next())
++                    rowId = (AttrId) queryAttribute.getInt(0);
++            }
+ 
+-            state->insertAttribute.use()
+-                .apply(key.first)
+-                .apply(symbols[key.second])
+-                .apply(AttrType::FullAttrs)
+-                .apply(0, false)
+-                .exec();
++            if (rowId)
++                state.promoteToAttrs.use().apply(AttrType::FullAttrs).apply(rowId).exec();
++            else {
++                state.insertAttribute.use()
++                    .apply(key.first)
++                    .apply(symbols[key.second])
++                    .apply(AttrType::FullAttrs)
++                    .apply(0, false)
++                    .exec();
++                rowId = state.db.getLastInsertedRowId();
++            }
+ 
+-            AttrId rowId = state->db.getLastInsertedRowId();
+             assert(rowId);
+ 
+             for (auto & attr : attrs)
+-                state->insertAttribute.use()
++                state.insertAttributeIfAbsent.use()
+                     .apply(rowId)
+                     .apply(symbols[attr])
+                     .apply(AttrType::Placeholder)
+@@ -150,9 +180,7 @@ struct AttrDb
+ 
+     AttrId setString(AttrKey key, std::string_view s, const Value::StringWithContext::Context * context = nullptr)
+     {
+-        return doSQLite([&]() {
+-            auto state(_state->lock());
+-
++        return doSQLite([&](State & state) {
+             if (context) {
+                 std::string ctx;
+                 bool first = true;
+@@ -162,7 +190,7 @@ struct AttrDb
+                     ctx.append(elem->view());
+                     first = false;
+                 }
+-                state->insertAttributeWithContext.use()
++                state.insertAttributeWithContext.use()
+                     .apply(key.first)
+                     .apply(symbols[key.second])
+                     .apply(AttrType::String)
+@@ -170,7 +198,7 @@ struct AttrDb
+                     .apply(ctx)
+                     .exec();
+             } else {
+-                state->insertAttribute.use()
++                state.insertAttribute.use()
+                     .apply(key.first)
+                     .apply(symbols[key.second])
+                     .apply(AttrType::String)
+@@ -178,119 +206,111 @@ struct AttrDb
+                     .exec();
+             }
+ 
+-            return state->db.getLastInsertedRowId();
++            return state.db.getLastInsertedRowId();
+         });
+     }
+ 
+     AttrId setBool(AttrKey key, bool b)
+     {
+-        return doSQLite([&]() {
+-            auto state(_state->lock());
+-
+-            state->insertAttribute.use()
++        return doSQLite([&](State & state) {
++            state.insertAttribute.use()
+                 .apply(key.first)
+                 .apply(symbols[key.second])
+                 .apply(AttrType::Bool)
+                 .apply(b ? 1 : 0)
+                 .exec();
+ 
+-            return state->db.getLastInsertedRowId();
++            return state.db.getLastInsertedRowId();
+         });
+     }
+ 
+     AttrId setInt(AttrKey key, int n)
+     {
+-        return doSQLite([&]() {
+-            auto state(_state->lock());
+-
+-            state->insertAttribute.use()
++        return doSQLite([&](State & state) {
++            state.insertAttribute.use()
+                 .apply(key.first)
+                 .apply(symbols[key.second])
+                 .apply(AttrType::Int)
+                 .apply(n)
+                 .exec();
+ 
+-            return state->db.getLastInsertedRowId();
++            return state.db.getLastInsertedRowId();
+         });
+     }
+ 
+     AttrId setListOfStrings(AttrKey key, const std::vector<std::string> & l)
+     {
+-        return doSQLite([&]() {
+-            auto state(_state->lock());
+-
+-            state->insertAttribute.use()
++        return doSQLite([&](State & state) {
++            state.insertAttribute.use()
+                 .apply(key.first)
+                 .apply(symbols[key.second])
+                 .apply(AttrType::ListOfStrings)
+                 .apply(dropEmptyInitThenConcatStringsSep("\t", l))
+                 .exec();
+ 
+-            return state->db.getLastInsertedRowId();
++            return state.db.getLastInsertedRowId();
+         });
+     }
+ 
+     AttrId setPlaceholder(AttrKey key)
+     {
+-        return doSQLite([&]() {
+-            auto state(_state->lock());
+-
+-            state->insertAttribute.use()
++        return doSQLite([&](State & state) {
++            /* Another evaluator may have inserted the row and cached members
++               beneath it since this cursor looked it up. Those members hang off
++               the row id, so the row is kept rather than replaced. */
++            state.insertAttributeIfAbsent.use()
+                 .apply(key.first)
+                 .apply(symbols[key.second])
+                 .apply(AttrType::Placeholder)
+                 .apply(0, false)
+                 .exec();
+ 
+-            return state->db.getLastInsertedRowId();
++            auto queryAttribute(state.queryAttribute.use().apply(key.first).apply(symbols[key.second]));
++            if (!queryAttribute.next())
++                throw Error("placeholder for '%s' vanished from the evaluation cache", symbols[key.second]);
++            return (AttrId) queryAttribute.getInt(0);
+         });
+     }
+ 
+     AttrId setMissing(AttrKey key)
+     {
+-        return doSQLite([&]() {
+-            auto state(_state->lock());
+-
+-            state->insertAttribute.use()
++        return doSQLite([&](State & state) {
++            state.insertAttribute.use()
+                 .apply(key.first)
+                 .apply(symbols[key.second])
+                 .apply(AttrType::Missing)
+                 .apply(0, false)
+                 .exec();
+ 
+-            return state->db.getLastInsertedRowId();
++            return state.db.getLastInsertedRowId();
+         });
+     }
+ 
+     AttrId setMisc(AttrKey key)
+     {
+-        return doSQLite([&]() {
+-            auto state(_state->lock());
+-
+-            state->insertAttribute.use()
++        return doSQLite([&](State & state) {
++            state.insertAttribute.use()
+                 .apply(key.first)
+                 .apply(symbols[key.second])
+                 .apply(AttrType::Misc)
+                 .apply(0, false)
+                 .exec();
+ 
+-            return state->db.getLastInsertedRowId();
++            return state.db.getLastInsertedRowId();
+         });
+     }
+ 
+     AttrId setFailed(AttrKey key)
+     {
+-        return doSQLite([&]() {
+-            auto state(_state->lock());
+-
+-            state->insertAttribute.use()
++        return doSQLite([&](State & state) {
++            state.insertAttribute.use()
+                 .apply(key.first)
+                 .apply(symbols[key.second])
+                 .apply(AttrType::Failed)
+                 .apply(0, false)
+                 .exec();
+ 
+-            return state->db.getLastInsertedRowId();
++            return state.db.getLastInsertedRowId();
+         });
+     }
+ 
+@@ -311,7 +331,7 @@ struct AttrDb
+         case AttrType::FullAttrs: {
+             // FIXME: expensive, should separate this out.
+             std::vector<Symbol> attrs;
+-            auto queryAttributes(state->queryAttributes.use().apply(rowId));
++            auto queryAttributes(state->queryAttributes.use().apply(rowId).apply(AttrType::Missing));
+             while (queryAttributes.next())
+                 attrs.emplace_back(symbols.create(queryAttributes.getStr(0)));
+             return {{rowId, attrs}};
+@@ -373,6 +393,20 @@ ref<AttrCursor> EvalCache::getRoot()
+     return make_ref<AttrCursor>(ref(shared_from_this()), std::nullopt);
+ }
+ 
++void EvalCache::checkpoint()
++{
++    if (!db || db->failed)
++        return;
++    auto state(db->_state->lock());
++    try {
++        /* PASSIVE folds what it can without the exclusive read-slot lock, so a
++           concurrent evaluator of the same flake does not block it. */
++        state->db.exec("pragma wal_checkpoint(passive);");
++    } catch (...) {
++        ignoreExceptionExceptInterrupt();
++    }
++}
++
+ AttrCursor::AttrCursor(
+     ref<EvalCache> root, Parent parent, Value * value, std::optional<std::pair<AttrId, AttrValue>> && cachedValue)
+     : root(root)
+diff --git a/src/libexpr/include/nix/expr/eval-cache.hh b/src/libexpr/include/nix/expr/eval-cache.hh
+index 0feb7d564..8f7042c83 100644
+--- a/src/libexpr/include/nix/expr/eval-cache.hh
++++ b/src/libexpr/include/nix/expr/eval-cache.hh
+@@ -50,6 +50,14 @@ public:
+     EvalCache(std::optional<std::reference_wrapper<const Hash>> useCache, EvalState & state, RootLoader rootLoader);
+ 
+     ref<AttrCursor> getRoot();
++
++    /**
++     * Fold the WAL into the main `.sqlite` file with a PASSIVE checkpoint, so
++     * a reader of the database file alone (without its `-wal` sidecar) sees
++     * the writes so far. Does not block on concurrent connections. No-op
++     * without a cache.
++     */
++    void checkpoint();
+ };
+ 
+ enum AttrType {
+diff --git a/src/libflake-c/nix_api_eval_cache.cc b/src/libflake-c/nix_api_eval_cache.cc
+index d77cb3c64..5bb9936af 100644
+--- a/src/libflake-c/nix_api_eval_cache.cc
++++ b/src/libflake-c/nix_api_eval_cache.cc
+@@ -37,6 +37,15 @@ nix_attr_cursor * nix_eval_cache_get_root(nix_c_context * context, nix_eval_cach
+     NIXC_CATCH_ERRS_NULL
+ }
+ 
++nix_err nix_eval_cache_checkpoint(nix_c_context * context, nix_eval_cache * cache)
++{
++    nix_clear_err(context);
++    try {
++        cache->cache->checkpoint();
++    }
++    NIXC_CATCH_ERRS
++}
++
+ nix_attr_cursor * nix_attr_cursor_maybe_get_attr(nix_c_context * context, nix_attr_cursor * cursor, const char * name)
+ {
+     nix_clear_err(context);
+diff --git a/src/libflake-c/nix_api_eval_cache.h b/src/libflake-c/nix_api_eval_cache.h
+index ce8369306..47da15b12 100644
+--- a/src/libflake-c/nix_api_eval_cache.h
++++ b/src/libflake-c/nix_api_eval_cache.h
+@@ -56,6 +56,17 @@ void nix_eval_cache_free(nix_eval_cache * cache);
+  */
+ nix_attr_cursor * nix_eval_cache_get_root(nix_c_context * context, nix_eval_cache * cache);
+ 
++/**
++ * @brief Fold the cache's WAL into the main `.sqlite` file (PASSIVE checkpoint).
++ *
++ * Makes the writes so far visible to a reader of the database file alone
++ * (without its `-wal` sidecar). Does not block on concurrent connections.
++ * @param[out] context Optional, stores error information
++ * @param[in] cache The evaluation cache
++ * @return NIX_OK on success.
++ */
++nix_err nix_eval_cache_checkpoint(nix_c_context * context, nix_eval_cache * cache);
++
+ /**
+  * @brief Descend into a child attribute by name.
+  * @param[out] context Optional, stores error information
