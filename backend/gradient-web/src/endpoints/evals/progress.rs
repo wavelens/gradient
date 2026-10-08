@@ -11,14 +11,18 @@ use gradient_types::EvaluationProgress;
 use gradient_types::ids::EvaluationId;
 use gradient_util::latest::Latest;
 
+pub(crate) fn live_progress_status(status: EvaluationStatus) -> bool {
+    use EvaluationStatus::{EvaluatingDerivation, EvaluatingFlake, Fetching};
+    matches!(status, Fetching | EvaluatingFlake | EvaluatingDerivation)
+}
+
 pub(crate) fn live_progress(
     store: &Latest<EvaluationId, EvaluationProgress>,
     evaluation: EvaluationId,
     status: EvaluationStatus,
     now: Instant,
 ) -> Option<EvaluationProgress> {
-    use EvaluationStatus::{EvaluatingDerivation, EvaluatingFlake, Fetching};
-    matches!(status, Fetching | EvaluatingFlake | EvaluatingDerivation)
+    live_progress_status(status)
         .then(|| store.get(&evaluation, now))
         .flatten()
 }

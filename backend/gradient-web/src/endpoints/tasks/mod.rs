@@ -117,6 +117,8 @@ pub struct EvaluationSummary {
     pub updated_at: chrono::NaiveDateTime,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub progress: Option<EvaluationProgress>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expected_thunks: Option<u64>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -265,6 +267,7 @@ mod summary_tests {
             started_at: None,
             finished_at: None,
             updated_at: chrono::NaiveDateTime::default(),
+            expected_thunks: progress.as_ref().map(|_| 450),
             progress,
         })
         .unwrap()
@@ -277,6 +280,9 @@ mod summary_tests {
             body["progress"],
             serde_json::json!({ "kind": "evaluating", "thunks": 7 })
         );
-        assert!(summary(None).get("progress").is_none());
+        assert_eq!(body["expected_thunks"], 450);
+        let idle = summary(None);
+        assert!(idle.get("progress").is_none());
+        assert!(idle.get("expected_thunks").is_none());
     }
 }

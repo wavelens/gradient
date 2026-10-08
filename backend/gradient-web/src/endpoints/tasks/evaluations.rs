@@ -10,7 +10,7 @@ use super::{
 };
 use crate::access::{Caller, TaskAccess, has_permission, is_project_member, load_task};
 use crate::authorization::{MaybeApiKey, MaybeUser};
-use crate::endpoints::evals::live_progress;
+use crate::endpoints::evals::{live_progress, live_progress_status};
 use crate::endpoints::{archive_headers, build_product_headers};
 use crate::error::{ErrorCode, WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json};
@@ -113,6 +113,14 @@ pub(super) async fn evaluations_to_summaries(
     let eval_jobs =
         gradient_db::scheduling::assignment_record::latest_eval_jobs(db, &eval_ids).await?;
     let with_qos = gradient_db::scheduling::priority::evaluations_with_qos(db, &eval_ids).await?;
+    let expected_thunks = match evaluations
+        .iter()
+        .find(|e| live_progress_status(e.status))
+        .and_then(|e| e.task)
+    {
+        Some(task) => gradient_db::evaluations::expected_thunks::expected_thunks(db, task).await?,
+        None => None,
+    };
 
     let mut out = Vec::with_capacity(evaluations.len());
     for evaluation in evaluations {
@@ -184,6 +192,7 @@ pub(super) async fn evaluations_to_summaries(
                 evaluation.status,
                 Instant::now(),
             ),
+            expected_thunks: expected_thunks.filter(|_| live_progress_status(evaluation.status)),
         });
     }
     Ok(out)
