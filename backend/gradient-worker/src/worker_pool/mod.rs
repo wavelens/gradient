@@ -14,5 +14,5 @@ mod resolver;
 mod transport;
 
 pub(crate) use self::input_fetch::{DownloadTarget, InputBoard, InputFetcher};
-pub use self::memory::{budgeted_pool_size, memory_guard_bytes};
+pub use self::memory::memory_guard_bytes;
 pub use self::resolver::WorkerPoolResolver;

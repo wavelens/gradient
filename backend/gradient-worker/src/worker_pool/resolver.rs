@@ -100,24 +100,27 @@ fn entry_point_of(attr: &str, patterns: &[String]) -> String {
         .unwrap_or_else(|| attr_segs.first().copied().unwrap_or("").to_string())
 }
 
-/// A crashed batch of members is deferred as a shard again, which comes back in smaller batches,
-/// down to the member that sinks the evaluator. A lone member is retried once and then recorded as failed.
+/// Split crashed batches until single members remain, then retry a lone member or whole attribute once before failing only that attribute.
 fn crashed_listing(call: &DiscoveryCall, attempt: u32, crash: &anyhow::Error) -> Option<Listing> {
-    let names = call.only.as_deref()?;
     let pattern = call.wildcards.first()?;
     let mut listing = Listing::default();
-    match names {
-        [] => return None,
-        [_] if attempt < MAX_CRASH_ATTEMPTS => return None,
-        [name] => listing.errors.push(gradient_eval::ipc::AttrError {
-            attr: member_attr(pattern, name),
-            message: format!("evaluator crashed while listing this attribute: {crash:#}"),
-        }),
-        _ => listing.deferred.push(DiscoveryShard {
-            pattern: pattern.clone(),
-            only: Some(names.to_vec()),
-        }),
-    }
+    let attr = match call.only.as_deref() {
+        Some([]) => return None,
+        Some(names @ [_, _, ..]) => {
+            listing.deferred.push(DiscoveryShard {
+                pattern: pattern.clone(),
+                only: Some(names.to_vec()),
+            });
+            return Some(listing);
+        }
+        _ if attempt < MAX_CRASH_ATTEMPTS => return None,
+        Some([name]) => member_attr(pattern, name),
+        None => pattern.clone(),
+    };
+    listing.errors.push(gradient_eval::ipc::AttrError {
+        attr,
+        message: format!("evaluator crashed while listing this attribute: {crash:#}"),
+    });
     Some(listing)
 }
 
@@ -491,7 +494,7 @@ mod tests {
     }
 
     #[test]
-    fn a_crashed_batch_is_split_and_a_lone_member_fails_after_a_retry() {
+    fn a_crashed_batch_is_split_and_a_lone_member_or_whole_attribute_fails_after_a_retry() {
         let crash = anyhow::anyhow!("eval worker closed pipe: signal: 9 (SIGKILL)");
         let batch = DiscoveryCall {
             wildcards: vec!["hydraJobs.*".into(), "!hydraJobs.ap1".into()],
@@ -502,7 +505,10 @@ mod tests {
             only: Some(vec!["ap10".into()]),
         };
         let whole = DiscoveryCall {
-            wildcards: vec!["packages.x86_64-linux.hello".into()],
+            wildcards: vec![
+                "nixosConfigurations.host.config.system.build.toplevel".into(),
+                "!hydraJobs.ap1".into(),
+            ],
             only: None,
         };
 
@@ -517,12 +523,19 @@ mod tests {
         assert!(split.errors.is_empty());
 
         assert!(crashed_listing(&lone, 1, &crash).is_none(), "retried once");
-        let failed = crashed_listing(&lone, MAX_CRASH_ATTEMPTS, &crash).expect("then recorded");
+        let failed = crashed_listing(&lone, MAX_CRASH_ATTEMPTS, &crash).expect("then fails");
         assert_eq!(failed.errors.len(), 1);
         assert_eq!(failed.errors[0].attr, "hydraJobs.ap10");
         assert!(failed.errors[0].message.contains("SIGKILL"), "{failed:?}");
 
-        assert!(crashed_listing(&whole, MAX_CRASH_ATTEMPTS, &crash).is_none());
+        assert!(crashed_listing(&whole, 1, &crash).is_none(), "retried once");
+        let failed = crashed_listing(&whole, MAX_CRASH_ATTEMPTS, &crash).expect("then fails");
+        assert_eq!(failed.errors.len(), 1);
+        assert_eq!(
+            failed.errors[0].attr,
+            "nixosConfigurations.host.config.system.build.toplevel"
+        );
+        assert!(failed.deferred.is_empty());
     }
 
     #[test]

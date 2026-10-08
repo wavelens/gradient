@@ -269,8 +269,7 @@ in {
         default = null;
         description = ''
           Evaluation subprocesses in the pool, equal to the evaluation concurrency. `null` sizes
-          the pool to the host's core count, capped at 16. The pool shrinks further until its size
-          times {option}`services.gradient.worker.eval.maxRss` fits in 75% of the host's RAM.
+          the pool to the host's core count, capped at 16.
         '';
       };
 
@@ -278,9 +277,10 @@ in {
         type = lib.types.ints.positive;
         default = 2 * 1024 * 1024 * 1024;
         description = ''
-          Memory in bytes per evaluation subprocess, in force during a call too. Batches whose
-          listing crossed the limit run again attribute by attribute, and attributes crossing it
-          alone count as failed. Keep it above a typical evaluation's heap.
+          Resident memory in bytes for an idle evaluation subprocess. Subprocesses above the limit
+          restart after their call and free the Nix heap. A call may grow past the limit, with
+          {option}`services.gradient.worker.system.minFreeRamMb` as the host's guard.
+          Keep it above a typical evaluation's heap.
         '';
       };
 
