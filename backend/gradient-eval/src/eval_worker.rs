@@ -5,6 +5,8 @@
  */
 
 use std::io::{Read, Write};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, PoisonError};
 use tracing::{error, trace};
 
 use crate::flake_walk::FlakeWalker;
@@ -12,14 +14,65 @@ use crate::frames::Frames;
 use crate::ipc::{
     EVAL_IPC_VERSION, EvalRequest, EvalResponse, ResolvedItem, decode_request, read_frame,
 };
-use crate::nix_eval::{NixEvaluator, StatsReader};
+use crate::nix_eval::{NixEvaluator, RealiseHook, StatsReader};
+
+pub(crate) struct Link<R, W> {
+    reader: Mutex<R>,
+    frames: Frames<W>,
+    broken: AtomicBool,
+}
+
+impl<R: Read, W: Write> Link<R, W> {
+    pub(crate) fn new(reader: R, frames: Frames<W>) -> Self {
+        Self {
+            reader: Mutex::new(reader),
+            frames,
+            broken: AtomicBool::new(false),
+        }
+    }
+
+    pub(crate) fn read_frame(&self) -> std::io::Result<Option<Vec<u8>>> {
+        if self.broken.load(Ordering::Acquire) {
+            return Err(std::io::Error::other(
+                "eval link broke during a build request",
+            ));
+        }
+        read_frame(&mut *self.reader.lock().unwrap_or_else(PoisonError::into_inner))
+    }
+
+    pub(crate) fn request_build(&self, derived_paths: &[String]) -> Result<(), String> {
+        self.frames
+            .send(&EvalResponse::NeedsBuild {
+                derived_paths: derived_paths.to_vec(),
+            })
+            .map_err(|e| format!("eval link closed while asking for a build: {e}"))?;
+
+        let answer = match self.read_frame() {
+            Ok(Some(payload)) => decode_request(&payload).ok(),
+            Ok(None) | Err(_) => None,
+        };
+        match answer {
+            Some(EvalRequest::BuildDone { error: None }) => Ok(()),
+            Some(EvalRequest::BuildDone { error: Some(error) }) => Err(error),
+            other => {
+                self.broken.store(true, Ordering::Release);
+                error!(?other, "eval worker: expected a build result");
+                Err("eval link closed while waiting for a build".to_string())
+            }
+        }
+    }
+}
 
 pub fn run_eval_worker() -> std::io::Result<()> {
     let mut stdout = std::io::stdout();
     stdout.write_all(&[EVAL_IPC_VERSION])?;
     stdout.flush()?;
 
-    let evaluator = match NixEvaluator::new() {
+    let link = Arc::new(Link::new(
+        std::io::stdin(),
+        Frames::new(stdout, nix_bindings::EvalStats::default()),
+    ));
+    let evaluator = match NixEvaluator::new(Some(realise_through(Arc::clone(&link)))) {
         Ok(e) => Some(e),
         Err(e) => {
             error!(
@@ -30,11 +83,13 @@ pub fn run_eval_worker() -> std::io::Result<()> {
         }
     };
     let collect_stats = crate::stats::metrics_enabled();
-    let last = evaluator
+    if let Some(last) = evaluator
         .as_ref()
         .and_then(|ev| read_stats(ev, collect_stats))
-        .unwrap_or_default();
-    let frames = &Frames::new(stdout, last);
+    {
+        link.frames.set_baseline(last);
+    }
+    let link = &*link;
     let (stop, stopped) = std::sync::mpsc::channel::<()>();
 
     std::thread::scope(|scope| {
@@ -43,17 +98,20 @@ pub fn run_eval_worker() -> std::io::Result<()> {
             .filter(|_| collect_stats)
             .map(NixEvaluator::stats_reader)
         {
-            scope.spawn(move || tick_stats(frames, reader, &stopped));
+            scope.spawn(move || tick_stats(&link.frames, reader, &stopped));
         }
-        let served = serve(
-            &mut std::io::stdin().lock(),
-            frames,
-            &evaluator,
-            collect_stats,
-        );
+        let answered = answer_requests(link, &evaluator, collect_stats);
         drop(stop);
-        served
+        answered
     })
+}
+
+fn realise_through<R, W>(link: Arc<Link<R, W>>) -> RealiseHook
+where
+    R: Read + Send + 'static,
+    W: Write + Send + 'static,
+{
+    Box::new(move |derived_paths| link.request_build(derived_paths))
 }
 
 const STATS_TICK: std::time::Duration = std::time::Duration::from_secs(1);
@@ -79,16 +137,16 @@ fn read_stats(ev: &NixEvaluator, collect_stats: bool) -> Option<nix_bindings::Ev
     collect_stats.then(|| ev.stats().ok()).flatten()
 }
 
-fn serve<W: Write>(
-    reader: &mut impl Read,
-    frames: &Frames<W>,
+fn answer_requests<R: Read, W: Write>(
+    link: &Link<R, W>,
     evaluator: &Option<NixEvaluator>,
     collect_stats: bool,
 ) -> std::io::Result<()> {
+    let frames = &link.frames;
     let mut walkers = WalkerCache { entry: None };
 
     loop {
-        let Some(payload) = read_frame(reader).inspect_err(|e| {
+        let Some(payload) = link.read_frame().inspect_err(|e| {
             error!(error = %e, "eval worker: stdin read error");
         })?
         else {
@@ -216,7 +274,7 @@ fn or_err(result: anyhow::Result<EvalResponse>) -> EvalResponse {
 }
 
 /// The cache key is including the input overrides.
-/// A pooled worker must never serve a stale locked flake for a new override set.
+/// A pooled worker must never hand out a stale locked flake for a new override set.
 type CachedWalker<'ev> = (String, Vec<(String, String)>, FlakeWalker<'ev>);
 
 struct WalkerCache<'ev> {
@@ -374,6 +432,89 @@ fn parse_warnings(captured: &str) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ipc::{decode_response, encode_request, write_frame};
+    use std::io::Cursor;
+
+    fn queued(requests: &[EvalRequest]) -> Cursor<Vec<u8>> {
+        let mut bytes = Vec::new();
+        for req in requests {
+            write_frame(&mut bytes, &encode_request(req).unwrap()).unwrap();
+        }
+        Cursor::new(bytes)
+    }
+
+    fn link_over(requests: &[EvalRequest]) -> Link<Cursor<Vec<u8>>, Vec<u8>> {
+        Link::new(
+            queued(requests),
+            Frames::new(Vec::new(), nix_bindings::EvalStats::default()),
+        )
+    }
+
+    fn sent(link: Link<Cursor<Vec<u8>>, Vec<u8>>) -> Vec<EvalResponse> {
+        let mut cursor = Cursor::new(link.frames.into_output());
+        std::iter::from_fn(|| read_frame(&mut cursor).unwrap())
+            .map(|f| decode_response(&f).unwrap())
+            .collect()
+    }
+
+    #[test]
+    fn a_build_request_round_trips_through_the_link() {
+        let link = link_over(&[EvalRequest::BuildDone {
+            error: Some("boom".into()),
+        }]);
+
+        let built = link.request_build(&["/nix/store/aaaa-src.drv^out".to_string()]);
+
+        assert_eq!(built, Err("boom".to_string()));
+        let sent = sent(link);
+        assert_eq!(sent.len(), 1, "{sent:?}");
+        assert!(
+            matches!(&sent[0], EvalResponse::NeedsBuild { derived_paths }
+                if derived_paths == &["/nix/store/aaaa-src.drv^out".to_string()]),
+            "{sent:?}"
+        );
+    }
+
+    #[test]
+    fn a_finished_build_lets_the_evaluation_go_on() {
+        let link = link_over(&[
+            EvalRequest::BuildDone { error: None },
+            EvalRequest::Shutdown,
+        ]);
+
+        assert_eq!(
+            link.request_build(&["/nix/store/aaaa-src.drv^out".into()]),
+            Ok(())
+        );
+        let next = link.read_frame().unwrap().expect("the next request");
+        assert!(matches!(
+            decode_request(&next).unwrap(),
+            EvalRequest::Shutdown
+        ));
+    }
+
+    #[test]
+    fn an_unexpected_frame_during_a_build_wait_is_an_error() {
+        let link = link_over(&[EvalRequest::Shutdown, EvalRequest::Shutdown]);
+
+        let built = link.request_build(&["/nix/store/aaaa-src.drv^out".into()]);
+
+        assert!(built.is_err(), "{built:?}");
+        assert!(
+            link.read_frame().is_err(),
+            "a broken link ends the request loop"
+        );
+    }
+
+    #[test]
+    fn a_closed_link_during_a_build_wait_is_an_error() {
+        let link = link_over(&[]);
+
+        assert_eq!(
+            link.request_build(&["/nix/store/aaaa-src.drv^out".into()]),
+            Err("eval link closed while waiting for a build".to_string())
+        );
+    }
 
     #[test]
     fn parse_warnings_keeps_multiline_warning() {

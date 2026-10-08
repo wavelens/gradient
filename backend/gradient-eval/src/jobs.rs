@@ -49,7 +49,7 @@ impl Job {
 /// magnitude more for a flake with NixOS VM test `checks`. The function is Boehm-GC bound and must
 /// run outside a Tokio runtime.
 pub fn eval_jobs(flake_ref: &str, wildcards: &[String], mut sink: impl FnMut(Job)) -> Result<()> {
-    let evaluator = NixEvaluator::new()?;
+    let evaluator = NixEvaluator::new(None)?;
     let walker = evaluator.walker(flake_ref, &[])?;
 
     let attrs = if wildcards.iter().all(|w| is_concrete_attr(w)) {

@@ -10,12 +10,16 @@ use anyhow::{Context as _, Result};
 use nix_bindings::flake::{FetchersSettings, FlakeSettings};
 use nix_bindings::{Context, EvalState, EvalStateBuilder, Store};
 
+pub type RealiseHook = Box<dyn Fn(&[String]) -> Result<(), String> + Send + Sync>;
+
 pub struct NixEvaluator {
     ctx: Arc<Context>,
     store: Arc<Store>,
     flake_settings: Arc<FlakeSettings>,
     fetch_settings: FetchersSettings,
     state: EvalState,
+    #[expect(dead_code)]
+    realise_hook: Option<RealiseHook>,
 }
 
 pub struct StatsReader<'ev>(&'ev EvalState);
@@ -82,7 +86,7 @@ fn ensure_store_writable() {}
 
 impl NixEvaluator {
     #[allow(clippy::arc_with_non_send_sync)]
-    pub fn new() -> Result<Self> {
+    pub fn new(realise_hook: Option<RealiseHook>) -> Result<Self> {
         ensure_store_writable();
         let ctx = Arc::new(Context::new().context("nix context init")?);
         ctx.set_setting("show-trace", "true")?;
@@ -105,6 +109,7 @@ impl NixEvaluator {
             flake_settings,
             fetch_settings,
             state,
+            realise_hook,
         })
     }
 
