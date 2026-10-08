@@ -31,7 +31,7 @@ flowchart LR
 
 | Context | Fields | Filled by |
 |---|---|---|
-| `JobContext` | `ScoredJob` (kind, architecture, `prefer_local_build`, `is_fixed_output`, `pname`, closure size, history), `missing_count`, `missing_nar_size`, `outputs_present`, `dependency_count`, `queued_at`, `ready_at`, `project_work_share`, `prioritized`, `rescore_count`, `now` | `JobTracker::score_candidates` in `gradient-scheduler/src/jobs.rs` |
+| `JobContext` | `ScoredJob` (kind, architecture, `prefer_local_build`, `is_fixed_output`, `pname`, closure size, history), `missing_count`, `missing_nar_size`, `outputs_present`, `dependency_count`, `queued_at`, `ready_at`, `project_work_share`, `prioritized`, `build_request`, `ifd`, `rescore_count`, `now` | `JobTracker::score_candidates` in `gradient-scheduler/src/jobs.rs` |
 | `WorkerContext` | `architectures`, `system_features`, `fetch`, `metrics` | `worker_context_of` from the worker's `WorkerCaps` |
 | `WorkerMetricsView` | `cpu_count`, `cpu_core_score`, `ram_total_mb`, `ram_free_mb`, `cpu_usage_pct`, `disk_speed_mbps`, `upload_speed_mbps`, `download_speed_mbps`, `running_builds` | `WorkerCapabilities` (static), the 10 s `WorkerMetrics` heartbeat and the build stages (live) |
 | `InstanceContext` | 12 `Windowed` averages, `active_builds`, `pending_builds`, `total_workers`, `idle_workers`, `cpu_core_score_mean`, `upload_speed_mean_mbps`, `download_speed_mean_mbps`, `storage_read_mbps`, `storage_write_mbps`, `compression_ratio`, `per_path_secs`, `download_slots`, `upload_slots`, `downloads_in_flight`, `uploads_in_flight` | `instance_metrics_pass`, see below. The two in-flight counts come from the build stages at assignment time |
@@ -39,6 +39,7 @@ flowchart LR
 - `missing_count`, `missing_nar_size` and `outputs_present` are per worker. The worker must score each offered candidate against its store and send a `CandidateScore` (see [Offers](../proto/capabilities-and-dispatch.md#offers)). The values are `None` until that worker reported.
 - `dependency_count` is the number of direct input derivations (`derivation_dependency` rows), not the number of builds needing the derivation.
 - `ready_at` is the moment the dependencies finished. `WaitTimeRule` will measure from that moment, not from the `queued_at` time.
+- `ifd` is true for a build of an imported derivation and for its unfinished dependencies, while an evaluation needing the import is still running. A recursive walk in `import_lifted_shared_builds` can find that set.
 - `rescore_count` will grow by one per 5 s assignment timer tick (`BumpRescore`). Reactive kicks leave the count unchanged.
 - The caller must pass `now` in. Rules never read the wall clock.
 - `JobContext::build_history` will return an empty prediction when `outputs_present` is set. A worker holding every output will build nothing.

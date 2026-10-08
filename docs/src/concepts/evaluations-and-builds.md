@@ -42,6 +42,17 @@ A build is tied to the derivation, not to the evaluation. All evaluations needin
 | Aborted | Cancelled together with the evaluation |
 | Skipped | An unneeded build-time dependency, with the outputs above already cached |
 
+## Imported Derivations
+
+A flake can read the output of a derivation during evaluation. This is import from derivation (IFD).
+
+- The imported derivation turns into a normal build on any worker with its system.
+- The evaluating worker can wait for that build and then pull the outputs from the cache.
+- The task page can list the build as the entry point `other.<system>.<name>` with an **IFD** tag.
+- Imported builds and their unfinished dependencies get a priority lift, see [Scheduler Policies](../reference/scheduler-policies.md).
+- The attributes reading a failed import fail as well, with `import from derivation '<name>' failed: build <build id> <status>` as their error.
+- Imports for a system missing from all connected workers fail after 5 minutes. A task can opt into waiting for workers instead.
+
 ## Related
 
 - [Projects and Tasks](projects-and-tasks.md): where evaluations come from

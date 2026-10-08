@@ -25,7 +25,7 @@ The worker will get its highest-scoring job with a total of at least 0 and no ve
 |---|---|---|
 | `EstimatedTimeRule` | Bonus, up to 3600 | Jobs expected to finish soonest on this worker, see [Estimated Time](#estimated-time) |
 | `WaitTimeRule` | Bonus, up to 4000 | Long-waiting jobs rising, against starvation. Counted from the moment dependencies finished |
-| `QosRule` | Bonus, 5000 and 1000 | Prioritized jobs beating every other job. Jobs of a build request ([`gradient build`](../guides/build-before-push.md) or [SSH](../guides/build-over-ssh.md)) gaining another 1000 |
+| `QosRule` | Bonus, 5000, 1000 and 1000 | Prioritized jobs beating every other job. Jobs of a build request ([`gradient build`](../guides/build-before-push.md) or [SSH](../guides/build-over-ssh.md)) gaining another 1000. Builds of an imported derivation and their unfinished dependencies gaining 1000 as well |
 | `RescoreWaitRule` | Veto | Holding a build until a worker reported its missing data size. Lifted after 4 rounds |
 | `ReserveFetchWorkersRule` | Penalty, up to 300 | Keeping fetch-capable workers free for fetching while capacity is short |
 | `TransferLimitRule` | Penalty, 4000 | Holding large transfers while the transfer slots are full, see [Transfer Limits](#transfer-limits) |
