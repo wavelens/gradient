@@ -48,6 +48,7 @@
   }
 
   .pkg-deps { color: var(--gr-text-muted); font-size: $font-size-xs; white-space: nowrap; flex-shrink: 0; }
+  .pkg-error { color: var(--err); font-size: $font-size-xs; white-space: nowrap; }
   .pkg-bar { width: 360px; --segbar-h: 7px; }
 
   .pkg-time {
@@ -94,6 +95,7 @@
     .si { grid-area: icon; }
     .chip-arch { grid-area: arch; justify-self: end; }
     .pkg-deps { grid-area: deps; }
+    .pkg-error { grid-area: bar; }
     .pkg-time { grid-area: time; }
     .kebab { grid-area: kebab; align-self: stretch; }
 

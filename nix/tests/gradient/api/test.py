@@ -249,7 +249,7 @@ api("GET", "tasks/myproject/available", token=token)
 api("GET", "tasks/myproject/mytask/details", token=token)
 api("PATCH", "tasks/myproject/mytask", token=token, body=json.dumps({"display_name": "MP2"}))
 page = api("GET", "tasks/myproject/mytask/entry-points", token=token)
-assert page == {"entry_points": [], "total": 0}, f"fresh task should page no entry points: {page}"
+assert page == {"entry_points": [], "total": 0, "failed_attributes": []}, f"fresh task should page no entry points: {page}"
 api("GET", "tasks/myproject/mytask/metrics", token=token)
 assert api("GET", "tasks/myproject/mytask/evaluations", token=token) == [], \
     "fresh task should have no evaluations"

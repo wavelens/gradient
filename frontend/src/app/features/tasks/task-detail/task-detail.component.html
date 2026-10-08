@@ -134,31 +134,41 @@
           @for (group of entryPointGroups(); track group.title) {
             <div class="pkg-label"><h3>{{ group.title }}</h3></div>
             <div class="pkg-list">
-              @for (row of group.rows; track row.entry.id) {
-                @let ep = row.entry;
-                <div class="pkg" [attr.data-phase]="entryPointPhase(ep)" [style.animation-delay.ms]="$index * 18"
-                     (contextmenu)="openPkgContextMenu($event, ep, sel.id, pkgMenu)">
-                  <a class="pkg-link" [routerLink]="['/project', projectName, 'log', sel.id]" [queryParams]="{ build: ep.build_id }"
-                     [title]="ep.eval + ' - ' + ep.derivation_path" [attr.aria-label]="row.label"></a>
-                  <gr-status-icon class="si" [phase]="entryPointPhase(ep)" [prioritized]="ep.prioritized" size="sm" />
-                  <span class="pkg-name">{{ row.label }}</span>
-                  <span class="chip-arch mono">{{ ep.architecture }}</span>
-                  <gr-segmented-bar class="pkg-bar" [counts]="barCounts(ep)" />
-                  <span class="pkg-deps">{{ doneCount(barCounts(ep)) }} / {{ totalCount(barCounts(ep)) }} deps</span>
-                  <span class="pkg-time">
-                    {{ pkgDuration(ep) }}
-                    @if (ep.has_artefacts) { <gr-icon name="inventory_2" size="sm" /> }
-                  </span>
-                  <button type="button" class="kebab"
-                          (click)="openPkgMenu($event, ep, sel.id, pkgMenu)"
-                          aria-label="Package actions"><gr-icon name="more_vert" /></button>
-                </div>
+              @for (row of group.rows; track row.key) {
+                @if (row.kind === 'build') {
+                  @let ep = row.entry;
+                  <div class="pkg" [attr.data-phase]="entryPointPhase(ep)" [style.animation-delay.ms]="$index * 18"
+                       (contextmenu)="openPkgContextMenu($event, ep, sel.id, pkgMenu)">
+                    <a class="pkg-link" [routerLink]="['/project', projectName, 'log', sel.id]" [queryParams]="{ build: ep.build_id }"
+                       [title]="ep.eval + ' - ' + ep.derivation_path" [attr.aria-label]="row.label"></a>
+                    <gr-status-icon class="si" [phase]="entryPointPhase(ep)" [prioritized]="ep.prioritized" size="sm" />
+                    <span class="pkg-name">{{ row.label }}</span>
+                    <span class="chip-arch mono">{{ ep.architecture }}</span>
+                    <gr-segmented-bar class="pkg-bar" [counts]="barCounts(ep)" />
+                    <span class="pkg-deps">{{ doneCount(barCounts(ep)) }} / {{ totalCount(barCounts(ep)) }} deps</span>
+                    <span class="pkg-time">
+                      {{ pkgDuration(ep) }}
+                      @if (ep.has_artefacts) { <gr-icon name="inventory_2" size="sm" /> }
+                    </span>
+                    <button type="button" class="kebab"
+                            (click)="openPkgMenu($event, ep, sel.id, pkgMenu)"
+                            aria-label="Package actions"><gr-icon name="more_vert" /></button>
+                  </div>
+                } @else {
+                  <div class="pkg" data-phase="failure" [style.animation-delay.ms]="$index * 18">
+                    <a class="pkg-link" [routerLink]="['/project', projectName, 'log', sel.id]"
+                       [title]="row.failure.eval + ' - ' + row.failure.message" [attr.aria-label]="row.label + ', failed to evaluate'"></a>
+                    <gr-status-icon class="si" [phase]="'failure'" size="sm" />
+                    <span class="pkg-name">{{ row.label }}</span>
+                    <span class="pkg-error">Failed to evaluate</span>
+                  </div>
+                }
               }
             </div>
           } @empty {
             <div class="pkg-label"><h3>Packages</h3></div>
           }
-          @if (entryPoints().length > 0) {
+          @if (entryPoints().length > 0 || failedAttributes().length > 0) {
             @if (entryPoints().length < entryPointsTotal()) {
               <div class="pkg pkg-more" aria-busy="true" [attr.aria-label]="'Loading packages, ' + entryPoints().length + ' of ' + entryPointsTotal()"
                    (grInView)="loadMoreEntryPoints()" [grInViewKey]="entryPoints().length" grInViewMargin="100%">

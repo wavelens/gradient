@@ -4,14 +4,14 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import type { EntryPointSummary } from '@core/models/task.model';
+import type { EntryPointSummary, FailedAttributeSummary } from '@core/models/task.model';
 import { groupEntryPoints } from './entry-point-groups';
 
 const ep = (attr: string, architecture = 'x86_64-linux') =>
   ({ id: attr, eval: attr, architecture }) as EntryPointSummary;
 
-const shape = (eps: EntryPointSummary[]) =>
-  groupEntryPoints(eps).map((g) => [g.title, g.rows.map((r) => r.label)]);
+const shape = (eps: EntryPointSummary[], failed: FailedAttributeSummary[] = []) =>
+  groupEntryPoints(eps, failed).map((g) => [g.title, g.rows.map((r) => r.label)]);
 
 describe('groupEntryPoints', () => {
   it('heads the rows with their attribute set and drops it and the architecture from the labels', () => {
@@ -48,5 +48,21 @@ describe('groupEntryPoints', () => {
         ['Hello', ['hello']],
         ['Packages', ['default']],
       ]);
+  });
+
+  it('places an attribute that failed to evaluate among its built siblings', () => {
+    const host = (n: string) => `nixosConfigurations.${n}.config.system.build.toplevel`;
+    const groups = groupEntryPoints([ep(host('a')), ep(host('c'))], [{ eval: host('b'), message: 'boom' }]);
+
+    expect(groups.map((g) => [g.title, g.rows.map((r) => [r.label, r.kind])])).toEqual([
+      ['Nixos Configurations', [['a', 'build'], ['b', 'failed'], ['c', 'build']]],
+    ]);
+  });
+
+  it('labels a failure that stopped partway down the path by the part it reached', () => {
+    const host = (n: string) => ep(`nixosConfigurations.${n}.config.system.build.toplevel`);
+    const groups = groupEntryPoints([host('a'), host('c')], [{ eval: 'nixosConfigurations.b.config', message: 'boom' }]);
+
+    expect(groups.map((g) => g.rows.map((r) => r.label))).toEqual([['a', 'b.config', 'c']]);
   });
 });

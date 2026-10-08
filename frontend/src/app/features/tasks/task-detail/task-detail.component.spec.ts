@@ -136,7 +136,7 @@ function resolvedTask(access: AccessState, overrides: SetupOverrides) {
 function makeTasksService(access: AccessState, overrides: SetupOverrides = {}): TasksService {
   return {
     getTask: overrides.getTask ?? (() => of(resolvedTask(access, overrides))),
-    getEntryPoints: overrides.getEntryPoints ?? (() => of({ entry_points: [], total: 0 })),
+    getEntryPoints: overrides.getEntryPoints ?? (() => of({ entry_points: [], total: 0, failed_attributes: [] })),
     getEvaluations: overrides.getEvaluations ?? (() => of([])),
     startEvaluation: overrides.startEvaluation ?? (() => of('ok')),
     restartFailedBuilds: overrides.restartFailedBuilds ?? (() => of('ok')),
@@ -356,7 +356,7 @@ describe('TaskDetailComponent evaluation menu', () => {
       vi.spyOn(tasksService, 'getTask').mockImplementation(() => of({ ...taskFor(trigger), last_evaluations: evals }));
       const comp = fixture.componentInstance;
       comp.startEvaluation();
-      const entryPoints = vi.spyOn(tasksService, 'getEntryPoints').mockReturnValue(of({ entry_points: [], total: 0 }));
+      const entryPoints = vi.spyOn(tasksService, 'getEntryPoints').mockReturnValue(of({ entry_points: [], total: 0, failed_attributes: [] }));
       evals = [evalSummary('e2', 'Queued'), ...evals];
 
       comp.loadTaskData();
@@ -456,7 +456,7 @@ describe('TaskDetailComponent - evaluation progress', () => {
   it('hides the thunk count once the evaluation has packages', () => {
     const { fixture, frames } = setup({ managed: false, canEdit: true, canTrigger: true }, {
       primaryStatus: 'EvaluatingDerivation',
-      getEntryPoints: () => of({ entry_points: [epSummary('hello')], total: 1 }),
+      getEntryPoints: () => of({ entry_points: [epSummary('hello')], total: 1, failed_attributes: [] }),
     });
     frames.next({ event: 'evaluation.activity', at: '', content: { evaluation_id: 'e1', progress: { kind: 'evaluating', thunks: 7 } } });
     fixture.detectChanges();
@@ -538,7 +538,7 @@ describe('TaskDetailComponent - evaluation selection', () => {
       { managed: false, canEdit: true, canTrigger: true },
       { extraEvals: [e2] },
     );
-    const spy = vi.spyOn(tasksService, 'getEntryPoints').mockReturnValue(of({ entry_points: [], total: 0 }));
+    const spy = vi.spyOn(tasksService, 'getEntryPoints').mockReturnValue(of({ entry_points: [], total: 0, failed_attributes: [] }));
     const component = fixture.componentInstance;
     component.select(component.evaluations()[1]);
     expect(spy).toHaveBeenCalledWith(component.projectName, component.taskName, component.evaluations()[1].id, 25, 0);
@@ -551,12 +551,12 @@ describe('TaskDetailComponent - evaluation selection', () => {
     const second = epSummary('b');
     const { fixture, tasksService } = setup(
       { managed: false, canEdit: true, canTrigger: true },
-      { getEntryPoints: () => of({ entry_points: [first], total: 2 }) },
+      { getEntryPoints: () => of({ entry_points: [first], total: 2, failed_attributes: [] }) },
     );
     const component = fixture.componentInstance;
     expect(component.entryPoints().map(e => e.id)).toEqual(['a']);
 
-    const spy = vi.spyOn(tasksService, 'getEntryPoints').mockReturnValue(of({ entry_points: [second], total: 2 }));
+    const spy = vi.spyOn(tasksService, 'getEntryPoints').mockReturnValue(of({ entry_points: [second], total: 2, failed_attributes: [] }));
     component.loadMoreEntryPoints();
     const [, , , limit, offset] = spy.mock.calls.at(-1)!;
 
@@ -576,6 +576,7 @@ describe('TaskDetailComponent - evaluation selection', () => {
         getEntryPoints: () => of({
           entry_points: [epSummary('a', 'packages."x86_64-linux".hello'), epSummary('b', 'checks."x86_64-linux".fmt')],
           total: 2,
+          failed_attributes: [],
         }),
       },
     );
@@ -585,19 +586,37 @@ describe('TaskDetailComponent - evaluation selection', () => {
     expect(text('.pkg-name')).toEqual(['hello', 'fmt']);
   });
 
+  it('lists an attribute that failed to evaluate as a failed row of its set', () => {
+    const { fixture } = setup(
+      { managed: false, canEdit: true, canTrigger: true },
+      {
+        primaryStatus: 'Failed',
+        getEntryPoints: () => of({
+          entry_points: [epSummary('a', 'nixosConfigurations.a.config.system.build.toplevel')],
+          total: 1,
+          failed_attributes: [{ eval: 'nixosConfigurations.b.config.system.build.toplevel', message: 'boom' }],
+        }),
+      },
+    );
+    const root = fixture.nativeElement as HTMLElement;
+    const failed = root.querySelector('.pkg[data-phase="failure"]');
+    expect(failed?.querySelector('.pkg-name')?.textContent?.trim()).toBe('b');
+    expect(failed?.querySelector('.pkg-error')?.textContent?.trim()).toBe('Failed to evaluate');
+  });
+
   /// The server walks one dependency closure per entry point it returns, so a
   /// live poll asks for the first page and never the whole scrolled window. The
   /// rows past it are spliced back on rather than re-read.
   it('refreshes exactly one page however many rows are shown', () => {
     const { fixture, tasksService } = setup(
       { managed: false, canEdit: true, canTrigger: true },
-      { getEntryPoints: () => of({ entry_points: [epSummary('a')], total: 300 }) },
+      { getEntryPoints: () => of({ entry_points: [epSummary('a')], total: 300, failed_attributes: [] }) },
     );
     const component = fixture.componentInstance;
     expect(component.entryPoints().length).toBe(1);
 
     const spy = vi.spyOn(tasksService, 'getEntryPoints')
-      .mockReturnValue(of({ entry_points: [epSummary('a'), epSummary('b')], total: 300 }));
+      .mockReturnValue(of({ entry_points: [epSummary('a'), epSummary('b')], total: 300, failed_attributes: [] }));
     component.loadTaskData();
     const [, , , limit, offset] = spy.mock.calls.at(-1)!;
 
@@ -613,11 +632,11 @@ describe('TaskDetailComponent - evaluation selection', () => {
     const second = epSummary('b');
     const { fixture, tasksService } = setup(
       { managed: false, canEdit: true, canTrigger: true },
-      { getEntryPoints: () => of({ entry_points: [first], total: 2 }) },
+      { getEntryPoints: () => of({ entry_points: [first], total: 2, failed_attributes: [] }) },
     );
     const component = fixture.componentInstance;
     vi.spyOn(tasksService, 'getEntryPoints')
-      .mockReturnValue(of({ entry_points: [first, second], total: 2 }));
+      .mockReturnValue(of({ entry_points: [first, second], total: 2, failed_attributes: [] }));
     component.loadMoreEntryPoints();
 
     expect(component.entryPoints().map(e => e.id)).toEqual(['a', 'b']);
@@ -632,14 +651,14 @@ describe('TaskDetailComponent - evaluation selection', () => {
     const paged = epSummary('b', 'packages."x86_64-linux".Zlib');
     const { fixture, tasksService } = setup(
       { managed: false, canEdit: true, canTrigger: true },
-      { getEntryPoints: () => of({ entry_points: [inPage], total: 2 }) },
+      { getEntryPoints: () => of({ entry_points: [inPage], total: 2, failed_attributes: [] }) },
     );
     const component = fixture.componentInstance;
-    vi.spyOn(tasksService, 'getEntryPoints').mockReturnValue(of({ entry_points: [paged], total: 2 }));
+    vi.spyOn(tasksService, 'getEntryPoints').mockReturnValue(of({ entry_points: [paged], total: 2, failed_attributes: [] }));
     component.loadMoreEntryPoints();
     expect(component.entryPoints().map(e => e.id)).toEqual(['a', 'b']);
 
-    vi.spyOn(tasksService, 'getEntryPoints').mockReturnValue(of({ entry_points: [inPage], total: 2 }));
+    vi.spyOn(tasksService, 'getEntryPoints').mockReturnValue(of({ entry_points: [inPage], total: 2, failed_attributes: [] }));
     component.loadTaskData();
 
     expect(component.entryPoints().map(e => e.id)).toEqual(['a', 'b']);
@@ -652,14 +671,14 @@ describe('TaskDetailComponent - evaluation selection', () => {
     const second = epSummary('b');
     const { fixture, tasksService } = setup(
       { managed: false, canEdit: true, canTrigger: true },
-      { getEntryPoints: () => of({ entry_points: [first], total: 2 }) },
+      { getEntryPoints: () => of({ entry_points: [first], total: 2, failed_attributes: [] }) },
     );
     const component = fixture.componentInstance;
-    vi.spyOn(tasksService, 'getEntryPoints').mockReturnValue(of({ entry_points: [second], total: 2 }));
+    vi.spyOn(tasksService, 'getEntryPoints').mockReturnValue(of({ entry_points: [second], total: 2, failed_attributes: [] }));
     component.loadMoreEntryPoints();
     expect(component.entryPoints().map(e => e.id)).toEqual(['a', 'b']);
 
-    vi.spyOn(tasksService, 'getEntryPoints').mockReturnValue(of({ entry_points: [first], total: 2 }));
+    vi.spyOn(tasksService, 'getEntryPoints').mockReturnValue(of({ entry_points: [first], total: 2, failed_attributes: [] }));
     component.loadTaskData();
 
     expect(component.entryPoints().map(e => e.id)).toEqual(['a', 'b']);
@@ -888,7 +907,7 @@ describe('TaskDetailComponent - #636 eval page', () => {
 
   it('offers the closure of a built entry point', () => {
     const { fixture } = setup(access, {
-      getEntryPoints: () => of({ entry_points: [epSummary('hello')], total: 1 }),
+      getEntryPoints: () => of({ entry_points: [epSummary('hello')], total: 1, failed_attributes: [] }),
     });
     const comp = fixture.componentInstance;
     comp.openPkgContextMenu(new MouseEvent('contextmenu'), epSummary('hello'), 'e1', { openAt: () => {} });
@@ -899,7 +918,7 @@ describe('TaskDetailComponent - #636 eval page', () => {
 
   it('links each package with a real href, so a middle click opens a new tab', () => {
     const { fixture } = setup(access, {
-      getEntryPoints: () => of({ entry_points: [epSummary('hello')], total: 1 }),
+      getEntryPoints: () => of({ entry_points: [epSummary('hello')], total: 1, failed_attributes: [] }),
     });
     fixture.detectChanges();
     const link = fixture.nativeElement.querySelector('.pkg a.pkg-link') as HTMLAnchorElement;
@@ -908,10 +927,10 @@ describe('TaskDetailComponent - #636 eval page', () => {
 
   it('loads the next page when the end of the list scrolls into view', () => {
     const { fixture, tasksService } = setup(access, {
-      getEntryPoints: () => of({ entry_points: [epSummary('a')], total: 2 }),
+      getEntryPoints: () => of({ entry_points: [epSummary('a')], total: 2, failed_attributes: [] }),
     });
     fixture.detectChanges();
-    const spy = vi.spyOn(tasksService, 'getEntryPoints').mockReturnValue(of({ entry_points: [epSummary('b')], total: 2 }));
+    const spy = vi.spyOn(tasksService, 'getEntryPoints').mockReturnValue(of({ entry_points: [epSummary('b')], total: 2, failed_attributes: [] }));
     const sentinel = fixture.debugElement.query(By.css('.pkg-more'));
     expect(sentinel.nativeElement.querySelectorAll('gr-skeleton').length).toBeGreaterThan(0);
     expect(sentinel.nativeElement.textContent.trim()).toBe('');
@@ -923,7 +942,7 @@ describe('TaskDetailComponent - #636 eval page', () => {
 
   it('opens the package menu on right-click', () => {
     const { fixture } = setup(access, {
-      getEntryPoints: () => of({ entry_points: [epSummary('hello')], total: 1 }),
+      getEntryPoints: () => of({ entry_points: [epSummary('hello')], total: 1, failed_attributes: [] }),
     });
     fixture.detectChanges();
     const comp = fixture.componentInstance;
@@ -946,7 +965,7 @@ describe('TaskDetailComponent - status phases', () => {
 
   it('marks a package row and its icon with the build phase', () => {
     const skipped = { ...epSummary('a'), build_status: 'Skipped' as const };
-    const { fixture } = setup(access, { getEntryPoints: () => of({ entry_points: [skipped], total: 1 }) });
+    const { fixture } = setup(access, { getEntryPoints: () => of({ entry_points: [skipped], total: 1, failed_attributes: [] }) });
     fixture.detectChanges();
     const pkg: HTMLElement = fixture.nativeElement.querySelector('.pkg');
     expect(pkg.dataset['phase']).toBe('aborted');
