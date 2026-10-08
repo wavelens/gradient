@@ -444,14 +444,14 @@ describe('TaskDetailComponent - evaluation progress', () => {
     expect(row?.textContent).toContain('nixpkgs');
   });
 
-  it('shows the thunk count as plain text instead of a spinner while evaluating', () => {
+  it('shows the thunk bar instead of a spinner while evaluating', () => {
     const { fixture, frames } = setup({ managed: false, canEdit: true, canTrigger: true }, { primaryStatus: 'EvaluatingFlake' });
     frames.next({ event: 'evaluation.activity', at: '', content: { evaluation_id: 'e1', progress: { kind: 'evaluating', thunks: 1234567 } } });
     fixture.detectChanges();
     expect(fixture.nativeElement.querySelector('.panel gr-loading-spinner')).toBeNull();
-    const wait = fixture.nativeElement.querySelector('.panel .pkg-wait');
-    expect(wait?.querySelector('gr-icon')).toBeTruthy();
-    expect(wait?.textContent).toContain('1,234,567 thunks evaluated');
+    const row = fixture.nativeElement.querySelector('.panel .pkg');
+    expect(row?.querySelector('gr-segmented-bar')).toBeTruthy();
+    expect(row?.textContent).toContain('1.23M thunks');
   });
 
   it('hides the thunk count once the evaluation has packages', () => {

@@ -7,7 +7,7 @@
 import { ChangeDetectionStrategy, Component, computed, input } from '@angular/core';
 import type { InputFetch } from '@core/models';
 import { inputFetchLabel, inputFetchRatio } from '@shared/evaluation';
-import { byteSegments } from '../segmented-bar/byte-segments';
+import { ratioSegments } from '../segmented-bar/ratio-segments';
 import { type BarSegment, SegmentedBarComponent } from '../segmented-bar/segmented-bar.component';
 
 export interface InputFetchRow {
@@ -21,7 +21,7 @@ export interface InputFetchRow {
 function segments(row: InputFetch): BarSegment[] {
   switch (row.state) {
     case 'Queued': return [{ tone: 'queued', pct: 100 }];
-    case 'Fetching': return byteSegments(row.downloaded_bytes, row.expected_bytes);
+    case 'Fetching': return ratioSegments(row.downloaded_bytes, row.expected_bytes);
     case 'Done': return [{ tone: 'completed', pct: 100 }];
     case 'Failed': return [{ tone: 'failed', pct: 100 }];
   }

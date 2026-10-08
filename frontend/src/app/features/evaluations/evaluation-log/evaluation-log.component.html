@@ -250,9 +250,17 @@
             <div class="evaluating-hint">
               <gr-icon name="manage_search" class="evaluating-icon" size="xl" />
               <span class="evaluating-title">Evaluating</span>
-              <span class="evaluating-sub">
-                @if (progressText(); as text) { {{ text }} } @else { Discovering builds from the Nix flake&hellip; }
-              </span>
+              @if (thunkRow(); as row) {
+                <span class="evaluating-sub thunk-progress">
+                  <gr-segmented-bar class="thunk-bar" [segments]="row.segments"
+                                    role="progressbar" aria-valuemin="0" aria-valuemax="100"
+                                    aria-label="Thunks evaluated" [attr.aria-valuenow]="row.percent"
+                                    [attr.aria-valuetext]="row.label" />
+                  <span aria-hidden="true">{{ row.label }}</span>
+                </span>
+              } @else {
+                <span class="evaluating-sub">Discovering builds from the Nix flake&hellip;</span>
+              }
             </div>
           } @else if (ev.status === 'Waiting') {
             <div class="queued-hint">

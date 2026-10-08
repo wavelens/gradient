@@ -65,6 +65,7 @@ export interface EvaluationSummary {
   finished_at: string | null;
   updated_at: string;
   progress?: EvaluationProgress;
+  expected_thunks?: number;
 }
 
 export interface EntryPointSummary {
@@ -145,6 +146,7 @@ export interface Evaluation {
   trigger: { id: string; type: TriggerType } | null;
   prioritized: boolean;
   progress?: EvaluationProgress;
+  expected_thunks?: number;
 }
 
 export type WaitingReason =

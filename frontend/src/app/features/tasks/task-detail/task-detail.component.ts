@@ -36,7 +36,7 @@ import { AccessService, WritableDirective } from '@shared/access';
 import { injectTaskAccess, injectTaskAccessData } from '@core/resolvers/inject-access';
 import { groupEntryPoints } from './entry-point-groups';
 import { StarTarget, TaskDetail, EvaluationSummary, EvaluationProgress, EvaluationStatus, EntryPointSummary, FailedAttributeSummary, BuildStatusCounts, WalkMode } from '@core/models';
-import { buildDuration, commitLabel, entryPointPhase, evaluationDuration, evaluationPhase, evaluationProgressText, evaluationTitle, formatEvaluationDuration, inputFetchPhase, isPendingBuildStatus, isRunningEvaluationStatus, phaseProgress } from '@shared/evaluation';
+import { buildDuration, commitLabel, entryPointPhase, evaluationDuration, evaluationPhase, evaluationTitle, formatEvaluationDuration, inputFetchPhase, isPendingBuildStatus, isRunningEvaluationStatus, phaseProgress, thunkProgress } from '@shared/evaluation';
 
 @Component({
   selector: 'app-task-detail',
@@ -140,7 +140,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
     const p = this.selectedProgress();
     return p?.kind === 'fetching' ? p.inputs.map(inputFetchRow) : [];
   });
-  selectedProgressText = computed(() => evaluationProgressText(this.selectedProgress()));
+  selectedThunkRow = computed(() => thunkProgress(this.selectedProgress(), this.selected()?.expected_thunks));
 
   latestEvaluation = computed<EvaluationSummary | null>(() => this.evaluations()[0] ?? null);
   evaluationInProgress = computed(() => {
