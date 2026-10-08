@@ -65,7 +65,6 @@ pub fn eval_jobs(flake_ref: &str, wildcards: &[String], mut sink: impl FnMut(Job
         };
         sink(job);
     }
-    let _ = walker.commit_cache();
     Ok(())
 }
 

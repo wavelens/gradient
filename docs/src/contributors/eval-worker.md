@@ -67,7 +67,7 @@ Two layers bound evaluation memory.
 | Parallelism | Long-lived pool. One evaluation sharded across the pool | Short-lived children forked from a warm parent |
 | Warmth across evaluations | Persistent eval cache per flake fingerprint | None. Copy-on-write warmth lasting one evaluation |
 | Across machines | Fleet-shared `<fp>.sqlite` cache (pull and push). Staging a pulled blob will drop the previous local `-wal` / `-shm` sidecars | None |
-| Concurrent writers | Shards writing one cache without deadlock: WAL-append commits, one checkpoint at the end | Not applicable |
+| Concurrent writers | Shards writing a shared cache, each write in an immediate transaction of its own, and a checkpoint at the end | Not applicable |
 | Memory | Automatic pool sizing. A many-system flake can degrade to one shard and still complete | Manual `--workers` and `--max-memory-size` |
 | Pipeline | Discovery writes rows, and build assignment starts mid-evaluation. The closure walk skips server-known derivations | JSON job stream for the consumer (Hydra and similar) |
 | Failure isolation | A bad attribute will become an error, and the evaluation will go on. A crash will keep everything streamed and retry the in-flight attribute | Per-job errors through the fork boundary |
