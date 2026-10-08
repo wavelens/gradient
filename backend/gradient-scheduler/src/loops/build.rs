@@ -172,6 +172,7 @@ struct BuildAssignMaps {
     dep_counts: HashMap<DerivationId, u32>,
     direct_inputs: HashMap<DerivationId, Vec<RequiredPath>>,
     self_outputs: HashMap<DerivationId, Vec<DerivationOutput>>,
+    output_nar_sizes: HashMap<DerivationId, Option<u64>>,
     closure_sizes: HashMap<DerivationId, Option<i64>>,
     computed_sizes: HashMap<DerivationId, i64>,
     histories: HashMap<DerivationId, gradient_pool::score::HistoryPrediction>,
@@ -421,6 +422,7 @@ impl BuildAssignMaps {
         }
 
         let mut self_outputs: HashMap<DerivationId, Vec<DerivationOutput>> = HashMap::new();
+        let mut output_nar_sizes: HashMap<DerivationId, Option<u64>> = HashMap::new();
         for o in gradient_db::fetch_in_chunks(&drv_ids, |chunk| async move {
             EDerivationOutput::find()
                 .filter(CDerivationOutput::Derivation.is_in(chunk))
@@ -430,6 +432,8 @@ impl BuildAssignMaps {
         .await?
         {
             let path = get_path_from_derivation_output(o.clone()).full();
+            let size = output_nar_sizes.entry(o.derivation).or_insert(Some(0));
+            *size = size.zip(o.nar_size).map(|(sum, n)| sum + n.max(0) as u64);
             self_outputs
                 .entry(o.derivation)
                 .or_default()
@@ -448,6 +452,7 @@ impl BuildAssignMaps {
             dep_counts,
             direct_inputs,
             self_outputs,
+            output_nar_sizes,
             closure_sizes,
             computed_sizes,
             histories,
@@ -461,6 +466,14 @@ impl BuildAssignMaps {
 
     fn resolve_project_id(&self, eval: &MEvaluation) -> Option<ProjectId> {
         eval.task.and_then(|pid| self.tasks.get(&pid).copied())
+    }
+
+    fn history_of(&self, derivation: DerivationId) -> gradient_pool::score::HistoryPrediction {
+        let mut history = self.histories.get(&derivation).copied().unwrap_or_default();
+        if let Some(Some(size)) = self.output_nar_sizes.get(&derivation) {
+            history.output_nar_size = Some(*size);
+        }
+        history
     }
 
     fn required_features(&self, derivation_id: DerivationId) -> Vec<String> {
@@ -573,11 +586,7 @@ impl BuildAssignMaps {
                 .flatten(),
             prefer_local_build: derivation.prefer_local_build,
             is_fixed_output: derivation.is_fixed_output,
-            history: self
-                .histories
-                .get(&shared_build.derivation)
-                .copied()
-                .unwrap_or_default(),
+            history: self.history_of(shared_build.derivation),
             queued_at: shared_build.updated_at,
             ready_at: now(),
             rescore_count: 0,

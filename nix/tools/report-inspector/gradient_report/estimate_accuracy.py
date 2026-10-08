@@ -19,14 +19,6 @@ COMPLETED = 0
 
 ELEMENTS = ("download", "paths", "build", "substitute", "upload", "eval", "total")
 INPUTS = ("paths", "nar_bytes", "output_nar_bytes")
-ESTIMATE_FIELD = {
-    "download": "download_secs",
-    "paths": "path_secs",
-    "build": "build_secs",
-    "substitute": "build_secs",
-    "upload": "upload_secs",
-    "eval": "eval_secs",
-}
 SECS_FIELDS = (
     "download_secs", "path_secs", "build_secs", "oom_retry_secs", "upload_secs", "eval_secs"
 )
@@ -35,13 +27,14 @@ FEEDS = {
     "missing_count": ("paths",),
     "build_history": ("build", "substitute", "eval"),
     "core_score": ("build", "substitute", "eval"),
-    "download_speed": ("download",),
+    "download_speed": ("download", "substitute"),
     "upload_speed": ("upload",),
-    "storage_read_speed": ("download",),
+    "storage_read_speed": ("download", "substitute"),
     "storage_write_speed": ("upload",),
-    "compression_ratio": ("download", "upload"),
+    "compression_ratio": ("download", "substitute", "upload"),
     "per_path_secs": ("paths",),
-    "output_nar_size": ("upload",),
+    "output_nar_size": ("substitute", "upload"),
+    "substitute_cost": ("substitute",),
 }
 
 SUBJECTS_SQL = (
@@ -124,7 +117,7 @@ def _load(conn: sqlite3.Connection) -> tuple[list[Job], int]:
                 worker=names.get(r["worker_id"], r["worker_id"]),
                 fallbacks=estimate.get("fallbacks", []),
                 elements=_elements(build, estimate, s, elapsed) if completed else {},
-                inputs=_inputs(estimate, s) if build and completed else {},
+                inputs=_inputs(estimate, s, _substituted(s)) if build and completed else {},
                 build=build,
                 completed=completed,
                 oom_chance=estimate.get("oom_chance", 0.0),
@@ -175,21 +168,35 @@ def _elements(build: bool, estimate: dict, s: Spans, elapsed: float | None) -> d
     return _build_elements(estimate, s, elapsed) if build else _eval_elements(estimate, elapsed)
 
 
+def _substituted(s: Spans) -> bool:
+    return s.secs.get(BUILD, 0.0) <= 0 and _substitute_secs(s) > 0
+
+
+def _substitute_secs(s: Spans) -> float:
+    return s.secs.get(SUBSTITUTE_FETCH, 0.0) + s.secs.get(DOWNLOAD, 0.0)
+
+
 def _build_elements(estimate: dict, s: Spans, elapsed: float | None) -> dict[str, Pair]:
-    fetch = s.secs.get(NAR_FETCH, 0.0)
-    built = s.secs.get(BUILD, 0.0)
-    substituted = s.secs.get(SUBSTITUTE_FETCH, 0.0) + s.secs.get(DOWNLOAD, 0.0)
-    run = "build" if built > 0 or substituted <= 0 else "substitute"
-    actual = {
-        "download": fetch,
-        "paths": max(s.secs.get(PREFETCH, 0.0) - fetch, 0.0),
-        run: built if run == "build" else substituted,
-        "upload": s.secs.get(COMPRESS, 0.0),
-    }
-    pairs = {name: (estimate.get(ESTIMATE_FIELD[name], 0.0), secs) for name, secs in actual.items()}
+    pairs = _substitute_pairs(estimate, s) if _substituted(s) else _built_pairs(estimate, s)
+    pairs["upload"] = (estimate.get("upload_secs", 0.0), s.secs.get(COMPRESS, 0.0))
     if elapsed is not None:
         pairs["total"] = (_total(estimate), elapsed)
     return _compared(pairs)
+
+
+def _substitute_pairs(estimate: dict, s: Spans) -> dict[str, Pair]:
+    # Older reports carried a substitute's estimate in build_secs instead of download_secs.
+    estimated = estimate.get("download_secs", 0.0) + estimate.get("build_secs", 0.0)
+    return {"substitute": (estimated, _substitute_secs(s))}
+
+
+def _built_pairs(estimate: dict, s: Spans) -> dict[str, Pair]:
+    fetch = s.secs.get(NAR_FETCH, 0.0)
+    return {
+        "download": (estimate.get("download_secs", 0.0), fetch),
+        "paths": (estimate.get("path_secs", 0.0), max(s.secs.get(PREFETCH, 0.0) - fetch, 0.0)),
+        "build": (estimate.get("build_secs", 0.0), s.secs.get(BUILD, 0.0)),
+    }
 
 
 def _eval_elements(estimate: dict, elapsed: float | None) -> dict[str, Pair]:
@@ -198,14 +205,12 @@ def _eval_elements(estimate: dict, elapsed: float | None) -> dict[str, Pair]:
     return _compared({"eval": (estimate.get("eval_secs", 0.0), elapsed), "total": (_total(estimate), elapsed)})
 
 
-def _inputs(estimate: dict, s: Spans) -> dict[str, Pair]:
-    return _compared(
-        {
-            "paths": (estimate.get("paths", 0.0), s.paths.get(PREFETCH, 0)),
-            "nar_bytes": (estimate.get("nar_bytes", 0.0), s.bytes.get(PREFETCH, 0)),
-            "output_nar_bytes": (estimate.get("output_nar_bytes", 0.0), s.bytes.get(COMPRESS, 0)),
-        }
-    )
+def _inputs(estimate: dict, s: Spans, substituted: bool) -> dict[str, Pair]:
+    pairs = {"output_nar_bytes": (estimate.get("output_nar_bytes", 0.0), s.bytes.get(COMPRESS, 0))}
+    if not substituted:
+        pairs["paths"] = (estimate.get("paths", 0.0), s.paths.get(PREFETCH, 0))
+        pairs["nar_bytes"] = (estimate.get("nar_bytes", 0.0), s.bytes.get(PREFETCH, 0))
+    return _compared(pairs)
 
 
 def _oom_kills(conn: sqlite3.Connection, r: sqlite3.Row) -> int:

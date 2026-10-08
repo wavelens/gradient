@@ -96,6 +96,7 @@ export interface JobContextView {
   missing_count: number | null;
   missing_nar_size: number | null;
   outputs_present: boolean;
+  substitute_outputs?: number;
   project_work_share: number | null;
   rescore_count: number;
   queued_at: string;

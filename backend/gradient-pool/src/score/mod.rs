@@ -14,7 +14,7 @@ pub mod weights;
 pub use breakdown::ScoreBreakdown;
 pub use context::{
     BuildContext, DerivationRef, EvalContext, HistoryPrediction, InstanceContext, JobKindContext,
-    ScoredBuild, ScoredJob, Windowed, WorkerMetricsView,
+    ScoredBuild, ScoredJob, SubstituteCost, Windowed, WorkerMetricsView,
 };
 pub use policy::{RulePolicy, ScoringPolicy, policy_by_name, rule_catalog};
 pub use rule::{JobContext, ScoreRule, WorkerContext};

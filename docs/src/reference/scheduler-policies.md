@@ -51,9 +51,12 @@ The saturation check can use live worker load and the predicted peak memory. The
 | Paths | Missing paths times the per-path time of recent prefetches |
 | Build | Build time of earlier builds of the package, scaled by their CPU score over the worker's, plus 4% per build already running there |
 | Out of memory | Build time again, weighted by the chance of an out-of-memory kill |
-| Upload | Output size of earlier builds over the slower of the worker's upload speed and its share of the storage write throughput |
+| Upload | Output size over the slower of the worker's upload speed and its share of the storage write throughput |
 
 - A worker already holding every output only needs the upload.
+- A job with all outputs in an upstream cache can skip the build. Its download is a time per output plus a time per megabyte.
+- A least-squares fit of the substitutions in the last 24 hours can yield both times. The download speed will stand in before 20 substitutions exist.
+- The job's own outputs can give the output size once all of them have a size. An upstream narinfo can fill the size before any build. Earlier builds of the package can give the size otherwise.
 - An evaluation can take the mean run time of its task over the last 7 days, or of every task. Downloads and paths stay out.
 - The chance of an out-of-memory kill is the package's kill rate plus the share of predicted peak memory above free memory. The chance can reach at most 1.
 - The storage share is the best total throughput of the last hour, split across the transfers in flight plus this one.
