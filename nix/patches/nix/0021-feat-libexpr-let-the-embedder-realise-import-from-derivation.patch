@@ -1,16 +1,16 @@
-From 964bc2f9cdf4b87e8a4de7f740ecb0174f0246d5 Mon Sep 17 00:00:00 2001
+From a98b0e3cb35cf77d3c553faaaaaffb55c4bd3f69 Mon Sep 17 00:00:00 2001
 From: Dennis Wuitz <dennish@wuitz.de>
 Date: Thu, 8 Oct 2026 11:03:35 +0200
 Subject: [PATCH] feat(libexpr): let the embedder realise import from
  derivation
 
-EvalSettings::realiseHook replaces the buildPaths call of realiseContext when set, and nix_eval_state_builder_set_realise_hook installs a C callback as that hook. An embedder can then build an imported derivation elsewhere and only needs its outputs valid in the evaluation store on return.
+EvalSettings::realiseHook replaces the buildPaths call of realiseContext when set, and nix_eval_state_builder_set_realise_hook installs a C callback as that hook. An embedder can then build an imported derivation elsewhere and only needs its outputs valid in the evaluation store on return. With a hook set, the failure memo stays off: the embedder decides how long a failure holds, since its evaluator process can outlive the evaluation.
 ---
  src/libexpr-c/nix_api_expr.cc                 | 24 +++++++++++++++
  src/libexpr-c/nix_api_expr.h                  | 29 +++++++++++++++++++
  src/libexpr/include/nix/expr/eval-settings.hh | 10 +++++++
- src/libexpr/primops.cc                        |  5 +++-
- 4 files changed, 67 insertions(+), 1 deletion(-)
+ src/libexpr/primops.cc                        |  7 +++--
+ 4 files changed, 68 insertions(+), 2 deletions(-)
 
 diff --git a/src/libexpr-c/nix_api_expr.cc b/src/libexpr-c/nix_api_expr.cc
 index eb73eea51..612cc3c84 100644
@@ -116,10 +116,10 @@ index d8a1fb973..f9ae78427 100644
          Enable built-in functions that allow executing native code.
  
 diff --git a/src/libexpr/primops.cc b/src/libexpr/primops.cc
-index f8c309fc8..4b6649b7d 100644
+index f8c309fc8..3d4bf6240 100644
 --- a/src/libexpr/primops.cc
 +++ b/src/libexpr/primops.cc
-@@ -139,7 +139,10 @@ StringMap EvalState::realiseContext(const NixStringContext & context, StorePathS
+@@ -139,9 +139,12 @@ StringMap EvalState::realiseContext(const NixStringContext & context, StorePathS
      }
  
      try {
@@ -129,8 +129,11 @@ index f8c309fc8..4b6649b7d 100644
 +        else
 +            buildStore->buildPaths(buildReqs, bmNormal, store);
      } catch (Error &) {
-         if (drvs.size() == 1)
+-        if (drvs.size() == 1)
++        if (drvs.size() == 1 && !settings.realiseHook)
              failedRealisations.insert_or_assign(drvs.front().drvPath->getBaseStorePath(), std::current_exception());
+         throw;
+     }
 -- 
 2.55.0
 
