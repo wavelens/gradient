@@ -32,5 +32,5 @@ pub mod teams;
 pub(crate) mod test_ctx;
 
 pub use self::chunked::{IN_CHUNK_SIZE, fetch_in_chunks, for_each_chunk};
-pub use self::context::{DbContext, HeldEvaluations, ProbeRequests};
+pub use self::context::{DbContext, HeldEvaluations, Hold, ProbeRequests};
 pub use self::pool::{CacheDb, WebDb, WorkerDb};
