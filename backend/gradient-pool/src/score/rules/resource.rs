@@ -104,27 +104,14 @@ mod tests {
     fn ctx<'a>(job: &'a ScoredJob<'a>) -> JobContext<'a> {
         JobContext {
             job,
-            missing_count: None,
-            missing_nar_size: None,
-            outputs_present: false,
-            dependency_count: 0,
-            queued_at: gradient_types::now(),
-            ready_at: gradient_types::now(),
-            project_work_share: None,
-            prioritized: false,
-            build_request: false,
-            ifd: false,
-            rescore_count: 0,
-            now: gradient_types::now(),
+            ..Default::default()
         }
     }
 
     fn worker_with(metrics: WorkerMetricsView) -> WorkerContext<'static> {
         WorkerContext {
-            architectures: &[],
-            system_features: &[],
-            fetch: false,
             metrics: Some(metrics),
+            ..Default::default()
         }
     }
 
@@ -215,12 +202,7 @@ mod tests {
             0.0
         );
 
-        let no_metrics = WorkerContext {
-            architectures: &[],
-            system_features: &[],
-            fetch: false,
-            metrics: None,
-        };
+        let no_metrics = WorkerContext::default();
         assert_eq!(
             rule.score(&ctx(&real), &no_metrics, &InstanceContext::default()),
             0.0

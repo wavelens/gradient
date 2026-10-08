@@ -127,10 +127,8 @@ mod tests {
         let store = Arc::new(FakeWorkerStore::new());
         let candidate = JobCandidate {
             job_id: "build:1".to_owned(),
-            required_paths: vec![],
             drv_paths: vec!["/nix/store/zzzz-target.drv".to_owned()],
-            output_paths: vec![],
-            requirement: None,
+            ..Default::default()
         };
 
         for offer in ["first", "repeated"] {

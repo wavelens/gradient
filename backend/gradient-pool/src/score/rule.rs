@@ -4,7 +4,18 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use std::sync::LazyLock;
+
 use crate::score::context::{HistoryPrediction, InstanceContext, ScoredJob, WorkerMetricsView};
+
+static DEFAULT_JOB: LazyLock<ScoredJob<'static>> = LazyLock::new(|| {
+    ScoredJob::new_eval(
+        "",
+        gradient_types::ids::ProjectId::nil(),
+        false,
+        HistoryPrediction::default(),
+    )
+});
 
 #[derive(Clone, Copy)]
 pub struct JobContext<'a> {
@@ -23,6 +34,27 @@ pub struct JobContext<'a> {
     pub now: chrono::NaiveDateTime,
 }
 
+impl Default for JobContext<'_> {
+    fn default() -> Self {
+        let now = gradient_types::now();
+        Self {
+            job: &DEFAULT_JOB,
+            missing_count: None,
+            missing_nar_size: None,
+            outputs_present: false,
+            dependency_count: 0,
+            queued_at: now,
+            ready_at: now,
+            project_work_share: None,
+            prioritized: false,
+            build_request: false,
+            ifd: false,
+            rescore_count: 0,
+            now,
+        }
+    }
+}
+
 impl JobContext<'_> {
     pub fn build_history(&self) -> HistoryPrediction {
         if self.outputs_present {
@@ -33,7 +65,7 @@ impl JobContext<'_> {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Default)]
 pub struct WorkerContext<'a> {
     pub architectures: &'a [String],
     pub system_features: &'a [String],

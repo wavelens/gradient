@@ -100,26 +100,12 @@ mod tests {
             job,
             missing_count: Some(0),
             missing_nar_size: Some(missing_nar_size),
-            outputs_present: false,
-            dependency_count: 0,
-            queued_at: gradient_types::now(),
-            ready_at: gradient_types::now(),
-            project_work_share: None,
-            prioritized: false,
-            build_request: false,
-            ifd: false,
-            rescore_count: 0,
-            now: gradient_types::now(),
+            ..Default::default()
         }
     }
 
     fn worker() -> WorkerContext<'static> {
-        WorkerContext {
-            architectures: &[],
-            system_features: &[],
-            fetch: false,
-            metrics: None,
-        }
+        WorkerContext::default()
     }
 
     fn downloads(in_flight: u32) -> InstanceContext {

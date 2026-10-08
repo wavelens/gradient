@@ -1360,20 +1360,11 @@ mod tests {
 
     fn drv(path: &str, deps: &[&str]) -> DiscoveredDerivation {
         DiscoveredDerivation {
-            attr: String::new(),
             drv_path: path.to_owned(),
-            outputs: vec![],
             dependencies: deps.iter().map(|d| (*d).to_owned()).collect(),
-            input_sources: vec![],
             architecture: "x86_64-linux".to_owned(),
-            required_features: vec![],
-            timeout_secs: None,
-            max_silent_secs: None,
-            prefer_local_build: false,
-            is_fixed_output: false,
             allow_substitutes: true,
-            pname: None,
-            ifd: false,
+            ..Default::default()
         }
     }
 

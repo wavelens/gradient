@@ -76,28 +76,13 @@ mod tests {
     fn ctx<'a>(job: &'a ScoredJob<'a>, project_work_share: Option<f32>) -> JobContext<'a> {
         JobContext {
             job,
-            missing_count: None,
-            missing_nar_size: None,
-            outputs_present: false,
-            dependency_count: 0,
-            queued_at: now(),
-            ready_at: now(),
             project_work_share,
-            prioritized: false,
-            build_request: false,
-            ifd: false,
-            rescore_count: 0,
-            now: gradient_types::now(),
+            ..Default::default()
         }
     }
 
     fn worker() -> WorkerContext<'static> {
-        WorkerContext {
-            architectures: &[],
-            system_features: &[],
-            fetch: false,
-            metrics: None,
-        }
+        WorkerContext::default()
     }
 
     #[test]
