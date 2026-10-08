@@ -6,6 +6,7 @@
 
 mod fixtures;
 
+use super::checkout::checkout_commit;
 use super::commit_info::{fetch_commit, head_refspec};
 use super::pktline::read_ref_from_pktlines;
 use super::url::{git_transport_url, parse_git_protocol_url};
@@ -216,4 +217,46 @@ fn a_pinned_commit_below_the_tip_is_fetched_by_its_hash() {
     let commit = fetch_commit(&url, None, &pinned.to_string()).unwrap();
     assert_eq!(commit.hash, pinned.as_bytes());
     assert_eq!(commit.message, "pinned");
+}
+
+fn commit_file(repo: &git2::Repository, refname: &str, contents: &str) -> git2::Oid {
+    let sig = git2::Signature::now("Ada", "ada@example.com").unwrap();
+    let mut tree = repo.treebuilder(None).unwrap();
+    tree.insert("file", repo.blob(contents.as_bytes()).unwrap(), 0o100644)
+        .unwrap();
+    let tree = repo.find_tree(tree.write().unwrap()).unwrap();
+    let parent = repo
+        .find_reference(refname)
+        .ok()
+        .and_then(|r| r.peel_to_commit().ok());
+    let parents: Vec<&git2::Commit> = parent.iter().collect();
+    repo.commit(Some(refname), &sig, &sig, contents, &tree, &parents)
+        .unwrap()
+}
+
+fn checked_out_file(url: &str, commit: git2::Oid) -> String {
+    let checkout = checkout_commit(url, &commit.to_string(), None).unwrap();
+    std::fs::read_to_string(checkout.path().join("file")).unwrap()
+}
+
+#[test]
+fn a_commit_below_the_tip_is_checked_out_at_its_own_tree() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let repo = git2::Repository::init(dir.path()).unwrap();
+    let pinned = commit_file(&repo, "refs/heads/main", "pinned");
+    commit_file(&repo, "refs/heads/main", "tip");
+    let url = format!("file://{}", dir.path().display());
+
+    assert_eq!(checked_out_file(&url, pinned), "pinned");
+}
+
+#[test]
+fn a_commit_only_on_a_pull_request_ref_is_checked_out() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let repo = git2::Repository::init(dir.path()).unwrap();
+    commit_file(&repo, "refs/heads/main", "main");
+    let pull = commit_file(&repo, "refs/pull/1/head", "fork");
+    let url = format!("file://{}", dir.path().display());
+
+    assert_eq!(checked_out_file(&url, pull), "fork");
 }

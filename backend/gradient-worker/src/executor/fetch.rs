@@ -52,7 +52,7 @@ pub async fn fetch_repository(
         .ssh_key()
         .map(|k| String::from_utf8_lossy(k.expose()).to_string());
 
-    let (source_path, flake_root) = match &job.source {
+    let (source_path, flake_root, _checkout) = match &job.source {
         FlakeSource::Repository { url, commit } => {
             let (url, commit) = (url.clone(), commit.clone());
             debug!(%url, %commit, has_ssh_key = ssh_key.is_some(), "fetching repository");
@@ -60,10 +60,14 @@ pub async fn fetch_repository(
             let ssh_key_for_clone = ssh_key.clone();
             let commit_for_clone = commit.clone();
             let clone_task = tokio::task::spawn_blocking(move || {
-                clone_and_checkout(&url, &commit_for_clone, ssh_key_for_clone.as_deref())
+                gradient_sources::checkout_commit(
+                    &url,
+                    &commit_for_clone,
+                    ssh_key_for_clone.as_deref(),
+                )
             });
 
-            let tmp_path = tokio::select! {
+            let checkout = tokio::select! {
                 biased;
                 () = abort.aborted() => {
                     anyhow::bail!("job aborted during git clone");
@@ -72,17 +76,18 @@ pub async fn fetch_repository(
                     result.context("fetch task panicked")??
                 }
             };
+            let checkout_path = checkout.path().to_string_lossy().into_owned();
 
             if let Some(spec) = &job.input_update {
-                run_input_update(spec, &tmp_path, ssh_key.as_deref(), updater).await?;
+                run_input_update(spec, &checkout_path, ssh_key.as_deref(), updater).await?;
             }
 
-            let source_path = super::source::add_git_tree(store, &tmp_path, &commit).await?;
-            (source_path, tmp_path)
+            let source_path = super::source::add_git_tree(store, &checkout_path, &commit).await?;
+            (source_path, checkout_path, Some(checkout))
         }
         FlakeSource::Cached { store_path } => {
             debug!(%store_path, has_ssh_key = ssh_key.is_some(), "using the cached build source");
-            (store_path.clone(), store_path.clone())
+            (store_path.clone(), store_path.clone(), None)
         }
     };
 
@@ -512,54 +517,6 @@ async fn missing_paths(store: &dyn WorkerStore, paths: &[String]) -> Result<Vec<
         .filter(|(_, valid)| !valid)
         .map(|(path, _)| path.clone())
         .collect())
-}
-
-#[tracing::instrument(level = "debug", skip_all)]
-fn clone_and_checkout(url: &str, commit: &str, ssh_key: Option<&str>) -> Result<String> {
-    let temp_dir = std::env::temp_dir().join(format!("gradient-fetch-{}", uuid::Uuid::now_v7()));
-
-    let repo = git2::build::RepoBuilder::new()
-        .fetch_options(gradient_sources::fetch_options_with_ssh(ssh_key))
-        .clone(url, &temp_dir)
-        .with_context(|| format!("failed to clone {url}"))?;
-
-    let oid =
-        git2::Oid::from_str(commit).with_context(|| format!("invalid commit SHA: {commit}"))?;
-
-    let git_commit = match repo.find_commit(oid) {
-        Ok(c) => c,
-        Err(_) => {
-            repo.find_remote("origin")
-                .context("failed to find origin remote")?
-                .fetch(
-                    &[commit],
-                    Some(&mut gradient_sources::fetch_options_with_ssh(ssh_key)),
-                    None,
-                )
-                .with_context(|| {
-                    format!(
-                        "commit {commit} not reachable in {url} (force-pushed, GC'd, or a fork PR ref)"
-                    )
-                })?;
-
-            repo.find_commit(oid).with_context(|| {
-                format!("commit {commit} still not found in {url} after fetching it directly")
-            })?
-        }
-    };
-
-    let tree = git_commit.tree().context("failed to get commit tree")?;
-
-    let mut co = git2::build::CheckoutBuilder::new();
-    co.force();
-
-    repo.checkout_tree(tree.as_object(), Some(&mut co))
-        .context("checkout failed")?;
-
-    // HEAD is staying on the default branch from the clone. Nix is reading files at the pinned
-    // `?rev=` and is warning "could not read HEAD ref" on a detached HEAD.
-    info!(path = %temp_dir.display(), %commit, "repository cloned");
-    Ok(temp_dir.to_string_lossy().into_owned())
 }
 
 fn flake_ref_from_lock_original(original: &serde_json::Value) -> anyhow::Result<String> {
