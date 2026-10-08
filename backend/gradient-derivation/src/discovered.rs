@@ -50,6 +50,7 @@ pub fn discovered_derivation(
         is_fixed_output: meta.is_fixed_output,
         allow_substitutes: drv.allow_substitutes(),
         pname,
+        ifd: false,
     }
 }
 

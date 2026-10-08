@@ -186,6 +186,13 @@ pub enum ClientMessage {
     UploadCancel {
         request_id: u64,
     },
+
+    #[proto(32)]
+    ImportRequest {
+        job_id: String,
+        request_id: String,
+        drv_paths: Vec<String>,
+    },
 }
 
 impl ClientMessage {
@@ -204,7 +211,8 @@ impl ClientMessage {
             | ClientMessage::CacheQuery { job_id, .. }
             | ClientMessage::EvalMessage { job_id, .. }
             | ClientMessage::QueryKnownDerivations { job_id, .. }
-            | ClientMessage::UploadRequest { job_id, .. } => Some(job_id),
+            | ClientMessage::UploadRequest { job_id, .. }
+            | ClientMessage::ImportRequest { job_id, .. } => Some(job_id),
             _ => None,
         }
     }
@@ -239,6 +247,7 @@ impl ClientMessage {
             ClientMessage::UploadChunk { .. } => "UploadChunk",
             ClientMessage::UploadFinished { .. } => "UploadFinished",
             ClientMessage::UploadCancel { .. } => "UploadCancel",
+            ClientMessage::ImportRequest { .. } => "ImportRequest",
         }
     }
 
@@ -280,5 +289,13 @@ mod job_id_tests {
         };
         assert_eq!(upload.job_id(), Some("j"));
         assert_eq!(upload.variant_name(), "BuildProgress");
+
+        let import = ClientMessage::ImportRequest {
+            job_id: "j".into(),
+            request_id: "r".into(),
+            drv_paths: vec![],
+        };
+        assert_eq!(import.job_id(), Some("j"));
+        assert_eq!(import.variant_name(), "ImportRequest");
     }
 }

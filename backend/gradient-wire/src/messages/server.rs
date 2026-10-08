@@ -9,7 +9,8 @@ use bytes::Bytes;
 use crate::codec::Proto;
 use crate::types::{
     CachedPath, ClusterAddress, ClusterMembership, ClusterPeer, CredentialKind,
-    EvalCachePullOutcome, GradientCapabilities, GrantTarget, Job, JobCandidate, UploadOutcome,
+    EvalCachePullOutcome, GradientCapabilities, GrantTarget, ImportOutcome, Job, JobCandidate,
+    UploadOutcome,
 };
 
 #[derive(Proto, Debug, Clone, PartialEq)]
@@ -160,6 +161,13 @@ pub enum ServerMessage {
         worker_id: String,
         tokens: Vec<(String, String)>,
     },
+
+    #[proto(32)]
+    ImportResult {
+        job_id: String,
+        request_id: String,
+        outcome: ImportOutcome,
+    },
 }
 
 impl ServerMessage {
@@ -172,7 +180,8 @@ impl ServerMessage {
             | ServerMessage::NarAbort { job_id, .. }
             | ServerMessage::NarStreamHeader { job_id, .. }
             | ServerMessage::EvalCachePullResult { job_id, .. }
-            | ServerMessage::EvalCacheChunk { job_id, .. } => Some(job_id),
+            | ServerMessage::EvalCacheChunk { job_id, .. }
+            | ServerMessage::ImportResult { job_id, .. } => Some(job_id),
             _ => None,
         }
     }
@@ -205,6 +214,7 @@ impl ServerMessage {
             ServerMessage::UploadGrant { .. } => "UploadGrant",
             ServerMessage::UploadCommitted { .. } => "UploadCommitted",
             ServerMessage::Authenticate { .. } => "Authenticate",
+            ServerMessage::ImportResult { .. } => "ImportResult",
         }
     }
 
@@ -213,5 +223,21 @@ impl ServerMessage {
             self,
             ServerMessage::Authenticate { .. } | ServerMessage::Credential { .. }
         )
+    }
+}
+
+#[cfg(test)]
+mod job_id_tests {
+    use super::*;
+
+    #[test]
+    fn an_import_result_names_its_job() {
+        let m = ServerMessage::ImportResult {
+            job_id: "j".into(),
+            request_id: "r".into(),
+            outcome: ImportOutcome::Completed,
+        };
+        assert_eq!(m.job_id(), Some("j"));
+        assert_eq!(m.variant_name(), "ImportResult");
     }
 }

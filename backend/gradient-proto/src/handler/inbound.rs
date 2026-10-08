@@ -354,6 +354,10 @@ impl<'a> InboundContext<'a> {
                 self.rpc().serve(msg);
                 true
             }
+            ClientMessage::ImportRequest { job_id, .. } => {
+                warn!(peer_id = %self.peer_id, %job_id, "ImportRequest reached a server without import support");
+                true
+            }
             ClientMessage::EvalMessage {
                 job_id,
                 level,

@@ -32,6 +32,7 @@ Every message on `/proto`, from `backend/gradient-wire/src/messages`. IDs (`job_
 | `CacheError` | Cache state unknown. The worker is retrying | `query_id`, `message` |
 | `UploadGrant` | Upload admission: skip, passthrough (with resume offset), presigned PUT or multipart | `request_id`, `target` |
 | `UploadCommitted` | Upload outcome: ok, retry or rejected | `request_id`, `outcome` |
+| `ImportResult` | Answer to `ImportRequest` once the imported derivations finished: completed, failed with the build, or unknown | `job_id`, `request_id`, `outcome` |
 
 ## Worker -> Server
 
@@ -65,6 +66,7 @@ Every message on `/proto`, from `backend/gradient-wire/src/messages`. IDs (`job_
 | `UploadChunk` (bulk) | Passthrough upload bytes | `request_id`, `data`, `offset`, `is_final` |
 | `UploadFinished` | Upload done, with NAR metadata | `request_id`, `metadata` |
 | `UploadCancel` | Cancelling an upload | `request_id` |
+| `ImportRequest` | Build these derivations now, the evaluation imports them | `job_id`, `request_id`, `drv_paths` |
 
 ## Cache Query Modes
 
