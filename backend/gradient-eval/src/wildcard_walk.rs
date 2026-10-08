@@ -132,16 +132,18 @@ fn wildcard_children<N: WalkNode>(
 }
 
 fn tolerate<T: Default>(res: Result<T>, path: &[String], diags: &mut Vec<AttrError>) -> T {
-    match res {
-        Ok(v) => v,
-        Err(e) => {
-            diags.push(AttrError {
-                attr: path.join("."),
-                message: format!("{e:#}"),
-            });
-            T::default()
-        }
-    }
+    attempt(res, path, diags).unwrap_or_default()
+}
+
+/// Nix re-runs a thunk that threw, so a member whose evaluation failed is not asked again.
+fn attempt<T>(res: Result<T>, path: &[String], diags: &mut Vec<AttrError>) -> Option<T> {
+    res.map_err(|e| {
+        diags.push(AttrError {
+            attr: path.join("."),
+            message: format!("{e:#}"),
+        })
+    })
+    .ok()
 }
 
 fn traverse<N: WalkNode>(
@@ -175,12 +177,17 @@ fn traverse<N: WalkNode>(
                 };
 
                 if rest.is_empty() {
-                    if tolerate(child.is_derivation(), &p, diags) {
+                    let Some(is_derivation) = attempt(child.is_derivation(), &p, diags) else {
+                        continue;
+                    };
+                    if is_derivation {
                         sink.emit_leaf(p);
                     } else if tolerate(child.is_opaque(), &p, diags) {
                         continue;
                     } else {
-                        let subs = tolerate(child.child_names(), &p, diags);
+                        let Some(subs) = attempt(child.child_names(), &p, diags) else {
+                            continue;
+                        };
                         if sink.defer_children(&p, &subs) {
                             continue;
                         }
@@ -196,7 +203,7 @@ fn traverse<N: WalkNode>(
                             }
                         }
                     }
-                } else if tolerate(child.is_opaque(), &p, diags) {
+                } else if attempt(child.is_opaque(), &p, diags).is_none_or(|opaque| opaque) {
                     continue;
                 } else {
                     descend(&child, p, rest, sink, diags);
@@ -377,32 +384,30 @@ mod tests {
     use super::*;
     use std::collections::BTreeMap;
 
+    #[derive(Default)]
     struct StubNode {
         derivation: bool,
         opaque: bool,
         throws: bool,
         children: BTreeMap<String, StubNode>,
+        forced: std::cell::Cell<usize>,
     }
 
     impl StubNode {
         fn drv() -> Self {
             StubNode {
                 derivation: true,
-                opaque: false,
-                throws: false,
-                children: BTreeMap::new(),
+                ..Default::default()
             }
         }
 
         fn set(children: Vec<(&str, StubNode)>) -> Self {
             StubNode {
-                derivation: false,
-                opaque: false,
-                throws: false,
                 children: children
                     .into_iter()
                     .map(|(k, v)| (k.to_string(), v))
                     .collect(),
+                ..Default::default()
             }
         }
 
@@ -415,16 +420,23 @@ mod tests {
 
         fn throwing() -> Self {
             StubNode {
-                derivation: false,
-                opaque: false,
                 throws: true,
-                children: BTreeMap::new(),
+                ..Default::default()
             }
+        }
+
+        fn force(&self) -> Result<()> {
+            if self.throws {
+                self.forced.set(self.forced.get() + 1);
+                anyhow::bail!("boom");
+            }
+            Ok(())
         }
     }
 
     impl WalkNode for &StubNode {
         fn child_names(&self) -> Result<Vec<String>> {
+            self.force()?;
             Ok(self.children.keys().cloned().collect())
         }
 
@@ -433,13 +445,12 @@ mod tests {
         }
 
         fn is_derivation(&self) -> Result<bool> {
-            if self.throws {
-                anyhow::bail!("boom");
-            }
+            self.force()?;
             Ok(self.derivation)
         }
 
         fn is_opaque(&self) -> Result<bool> {
+            self.force()?;
             Ok(self.opaque)
         }
     }
@@ -639,6 +650,18 @@ mod tests {
         assert_eq!(errors.len(), 1, "one dedup'd diagnostic: {errors:?}");
         assert_eq!(errors[0].attr, "bad");
         assert!(errors[0].message.contains("boom"), "{errors:?}");
+    }
+
+    #[test]
+    fn a_failing_member_is_forced_once() {
+        for pattern in [vec!["*"], vec!["*", "config"]] {
+            let root = StubNode::set(vec![("ok", StubNode::drv()), ("bad", StubNode::throwing())]);
+
+            let (_, errors) = discover(&&root, &[segs(&pattern)], &[]);
+
+            assert_eq!(root.children["bad"].forced.get(), 1, "{pattern:?}");
+            assert_eq!(errors.len(), 1, "{pattern:?}: {errors:?}");
+        }
     }
 
     #[test]
