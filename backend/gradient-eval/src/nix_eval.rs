@@ -10,7 +10,7 @@ use anyhow::{Context as _, Result};
 use nix_bindings::flake::{FetchersSettings, FlakeSettings};
 use nix_bindings::{Context, EvalState, EvalStateBuilder, Store};
 
-pub type RealiseHook = Box<dyn Fn(&[String]) -> Result<(), String> + Send + Sync>;
+pub use nix_bindings::RealiseHook;
 
 pub struct NixEvaluator {
     ctx: Arc<Context>,
@@ -18,8 +18,6 @@ pub struct NixEvaluator {
     flake_settings: Arc<FlakeSettings>,
     fetch_settings: FetchersSettings,
     state: EvalState,
-    #[expect(dead_code)]
-    realise_hook: Option<RealiseHook>,
 }
 
 pub struct StatsReader<'ev>(&'ev EvalState);
@@ -96,12 +94,14 @@ impl NixEvaluator {
         let flake_settings = Arc::new(FlakeSettings::new(&ctx)?);
         let fetch_settings = FetchersSettings::new(&ctx)?;
 
-        let state = EvalStateBuilder::new(&store)?
+        let mut builder = EvalStateBuilder::new(&store)?
             .with_flake_settings(&flake_settings)?
             .set_setting("eval-cache", "true")?
-            .set_setting("pure-eval", "true")?
-            .build()
-            .context("nix eval state build")?;
+            .set_setting("pure-eval", "true")?;
+        if let Some(hook) = realise_hook {
+            builder = builder.set_realise_hook(hook)?;
+        }
+        let state = builder.build().context("nix eval state build")?;
 
         Ok(NixEvaluator {
             ctx,
@@ -109,7 +109,6 @@ impl NixEvaluator {
             flake_settings,
             fetch_settings,
             state,
-            realise_hook,
         })
     }
 
