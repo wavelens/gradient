@@ -59,7 +59,7 @@ Files under `gradient-worker/src/worker_pool/`.
 |---|---|
 | `transport.rs` | Subprocess handle, frame wire, typed requests. Setting `oom_score_adj` |
 | `pool.rs` | Checkout and return with test-on-borrow |
-| `memory.rs` | Pool-size budget, free-RAM guard, reaper |
+| `memory.rs` | Free-RAM guard, reaper |
 | `resolver.rs` | Pooled fan-out and crash isolation |
 | `eval_stats.rs` | Per-attribute evaluation statistics |
 | `driver.rs` | The hidden `--eval-driver <file>` harness: JSONL requests through the real transport, JSON responses out. The NixOS VM test can drive both sides of the wire through the harness from Python |
@@ -70,13 +70,13 @@ Two layers bound evaluation memory.
 
 | Layer | Option | Behavior |
 |---|---|---|
-| Pool sizing | `worker.eval.maxRss` (2 GiB) | `pool_size * maxRss` must stay within a host-RAM share. A subprocess over the cap is recycled **between** calls |
+| Recycling | `worker.eval.maxRss` (2 GiB) | Subprocesses over the limit will restart **between** calls. Pool size: `worker.eval.forkWorkers`, independent of the limit |
 | Free-RAM reaper | `worker.system.minFreeRamMb` (`0` = 10% of RAM, clamped to 128 MiB - 1 GiB) | Sampling `MemAvailable` every 500 ms. A shortfall below the margin will trigger a SIGKILL of the largest evaluation subprocess with resident memory covering the whole shortfall. A 5 s wait will follow |
 
 - The recycle check will happen after a call. One unit (a large aggregate, IFD chains, runaway recursion) can grow the Boehm heap past the cap within a call. The reaper is the guard against that peak.
 - Nothing is killed when no evaluation is large enough to cover the shortfall. The pressure is then coming from elsewhere.
 - A fixed 1 GiB floor on a 2 GiB host killed evaluations that were never the cause (#579).
-- A killed subprocess will close its pipe, and the evaluation will fail.
+- A killed subprocess will close its pipe. The parent will retry the call once, then fail only that attribute.
 - One bounded failure will replace a host OOM that could kill the worker and strand the job. The server will only register a clean disconnect.
 - The idle subprocesses shut down once an evaluation has resolved its attributes. Their heaps are not sitting through the closure walk.
 - The next evaluation will start fresh subprocesses.

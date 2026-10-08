@@ -16,12 +16,6 @@ const REAPER_INTERVAL: Duration = Duration::from_millis(500);
 
 const REAP_COOLDOWN: Duration = Duration::from_secs(5);
 
-pub fn budgeted_pool_size(fork_workers: usize, max_eval_rss: u64, ram_budget: u64) -> usize {
-    let mem_bound = (ram_budget / max_eval_rss.max(1)).max(1) as usize;
-
-    fork_workers.min(mem_bound).max(1)
-}
-
 /// The 1 GiB is a ceiling, not a floor.
 /// As a floor it kept the guard armed on a 2 GiB host under ordinary build load (#579).
 /// The margin only has to be deep enough to react before the kernel OOM killer.
@@ -85,7 +79,6 @@ pub(super) async fn memory_reaper_loop(pool: Weak<EvalWorkerPool>, min_free_byte
             return;
         };
 
-        kill_over_cap(&pool);
         if min_free_bytes == 0 {
             continue;
         }
@@ -138,40 +131,12 @@ pub(super) async fn memory_reaper_loop(pool: Weak<EvalWorkerPool>, min_free_byte
     }
 }
 
-/// The cap holds while a call is running, not only between calls.
-/// A subprocess that keeps growing inside a List or Resolve call is what pushed a host into the kernel OOM killer.
-fn kill_over_cap(pool: &EvalWorkerPool) {
-    let cap = pool.max_eval_rss();
-    for pid in pool.live_pids() {
-        let Some(rss) = rss_of_pid(pid).filter(|rss| *rss > cap) else {
-            continue;
-        };
-        warn!(
-            pid,
-            rss_mb = rss / (1024 * 1024),
-            cap_mb = cap / (1024 * 1024),
-            "eval subprocess exceeded its memory cap; killing it"
-        );
-        if let Err(err) = kill(Pid::from_raw(pid as i32), Signal::SIGKILL) {
-            debug!(pid, %err, "eval subprocess already gone before the kill");
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     const GIB: u64 = 1024 * 1024 * 1024;
     const MIB: u64 = 1024 * 1024;
-
-    #[test]
-    fn budgeted_pool_size_caps_by_memory() {
-        assert_eq!(budgeted_pool_size(16, 2 * GIB, 6 * GIB), 3);
-        assert_eq!(budgeted_pool_size(8, 2 * GIB, 256 * GIB), 8);
-        assert_eq!(budgeted_pool_size(16, 8 * GIB, 6 * GIB), 1);
-        assert_eq!(budgeted_pool_size(4, 0, 6 * GIB), 4);
-    }
 
     #[test]
     fn memory_guard_bytes_configured_and_adaptive() {

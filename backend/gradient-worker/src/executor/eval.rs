@@ -10,7 +10,7 @@ use std::time::Instant;
 
 use super::import::EvalImportBuilder;
 use super::progress_report::{ChangeReporter, thunk_progress};
-use crate::worker_pool::{WorkerPoolResolver, budgeted_pool_size};
+use crate::worker_pool::WorkerPoolResolver;
 use anyhow::{Context, Result};
 use futures::stream::{FuturesOrdered, FuturesUnordered, StreamExt as _};
 use gradient_derivation::parse_drv;
@@ -126,8 +126,6 @@ fn unmatched_target_errors(wildcards: &[String]) -> Vec<String> {
 
 const DRV_READ_CONCURRENCY: usize = 256;
 
-const EVAL_RAM_SHARE: f64 = 0.75;
-
 const TOTAL_RAM_FALLBACK_BYTES: u64 = 4 * 1024 * 1024 * 1024;
 
 fn total_memory_bytes() -> u64 {
@@ -163,22 +161,10 @@ impl WorkerEvaluator {
         eval_cache_dir: String,
         eval_cache_share: bool,
     ) -> Self {
-        let total_ram = total_memory_bytes();
-        let ram_budget = (total_ram as f64 * EVAL_RAM_SHARE) as u64;
-        let pool_size = budgeted_pool_size(fork_workers, max_eval_rss, ram_budget);
-        if pool_size < fork_workers {
-            info!(
-                fork_workers,
-                pool_size,
-                max_eval_rss,
-                ram_budget,
-                "eval pool sized down to fit the memory budget"
-            );
-        }
-
-        let min_free_bytes = crate::worker_pool::memory_guard_bytes(min_free_ram_mb, total_ram);
+        let min_free_bytes =
+            crate::worker_pool::memory_guard_bytes(min_free_ram_mb, total_memory_bytes());
         let resolver = Arc::new(WorkerPoolResolver::new(
-            pool_size,
+            fork_workers.max(1),
             max_eval_rss,
             eval_cache_dir,
         ));
