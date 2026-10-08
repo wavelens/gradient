@@ -34,6 +34,10 @@ impl<W: Write> Frames<W> {
         }
     }
 
+    pub(crate) fn set_baseline(&self, last: EvalStats) {
+        self.lock().last = last;
+    }
+
     pub(crate) fn begin(&self) {
         self.lock().in_request = true;
     }
@@ -61,7 +65,7 @@ impl<W: Write> Frames<W> {
     }
 
     #[cfg(test)]
-    fn into_output(self) -> W {
+    pub(crate) fn into_output(self) -> W {
         self.state
             .into_inner()
             .unwrap_or_else(PoisonError::into_inner)
