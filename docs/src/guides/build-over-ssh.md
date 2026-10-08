@@ -1,6 +1,6 @@
 # Build over SSH
 
-The Gradient cache as an `ssh-ng://` store. Paths are copied in and out with `nix copy`. Builds from `nixos-rebuild --build-host` take place on the CI workers.
+The Gradient cache as an `ssh-ng://` store. Paths go in and out with `nix copy`. Builds from `nixos-rebuild --build-host` take place on the CI workers.
 
 **Requirements:**
 
@@ -21,15 +21,15 @@ services.gradient.ssh = {
 
 ## 2. Add a Key
 
-**Settings** -> **SSH Keys** -> **Add SSH Key** can take one OpenSSH public key line.
+**Settings** -> **SSH Keys** -> **Add SSH Key** can take an OpenSSH public key line.
 
 ```sh
 ssh-keygen -t ed25519 -f ~/.ssh/gradient -C laptop
 cat ~/.ssh/gradient.pub
 ```
 
-- Keys belong to one user only.
-- The SSH user name is the project name. The key can open every project the user is a member of.
+- Keys belong to their owner only.
+- The SSH user name is the project name. The key can open all projects of its user.
 
 ## 3. Point SSH at the Server
 
@@ -45,7 +45,7 @@ programs.ssh.extraConfig = ''
 
 1.  The project name, used by store URLs without `myproject@`.
 
-The Nix daemon will open the connection as `root` for substituters. Plain `nix copy` and `nixos-rebuild` are using the calling user's SSH setup.
+Substituters connect through the Nix daemon as `root`. Plain `nix copy` and `nixos-rebuild` are using the calling user's SSH setup.
 
 ## 4. Use the Store
 
@@ -58,17 +58,18 @@ The Nix daemon will open the connection as `root` for substituters. Plain `nix c
 | Remote store | `nix build --eval-store auto --store ssh-ng://myproject@ci.example.com .#hello` |
 
 - Gradient can answer reads from the project's subscribed caches.
-- Gradient will sign copied paths into the project's caches, like build outputs.
-- One SSH connection will become one evaluation under the project's **Build Requests** task.
-- Further build requests on the same connection add entry points to that evaluation.
-- The evaluation will stay in building while the connection is open.
-- Nix will print the missing systems while no connected worker can build them.
-- An abort of the evaluation will stop every unfinished build with an error, e.g. after [5 minutes without a matching worker](../concepts/evaluations-and-builds.md).
-- Build logs are streaming back like logs of local builds. `nix build -L` will print every line with the package name in front.
+- Copied paths land in the project's caches with a signature, like build outputs.
+- Build requests from a user share an evaluation in the project's **Build Requests** task, across SSH connections.
+- New requests add their entry points to the running evaluation of their user.
+- Requests after the evaluation finished start a new evaluation.
+- Builds keep running after a disconnect. Evaluations end with their last build.
+- Missing systems appear in the Nix output while no connected worker can build them.
+- Aborts of the evaluation stop all unfinished builds with an error, e.g. after [5 minutes without a matching worker](../concepts/evaluations-and-builds.md).
+- Build logs stream back like logs of local builds. Log lines of `nix build -L` start with the package name.
 
 ## 5. Add a Remote Builder
 
-The `client` module can register Gradient as a Nix remote builder. Nix is then sending builds for the listed systems to the CI workers.
+The `client` module can register Gradient as a Nix remote builder. The CI workers then take over builds for the listed systems.
 
 ```nix
 # flake.nix
@@ -92,7 +93,7 @@ nix.gradient-ssh = {
 };
 ```
 
-1.  The module will write the SSH settings of step 3 for this host. The Nix daemon will read the key as `root`.
+1.  The module can write the SSH settings of step 3 for this host. The Nix daemon can read the key as `root`.
 
 ## Verify Deployment
 
@@ -100,17 +101,16 @@ nix.gradient-ssh = {
 nix store ping --store ssh-ng://myproject@ci.example.com
 ```
 
-The command will print the store URL and `Trusted: 0`. A build request is visible in the UI under **Build Requests**.
+Expected output: the store URL and `Trusted: 0`. Build requests appear in the UI under **Build Requests**.
 
 ## Limits
 
-- Gradient is not supporting `ssh://` (`nix-store --serve`). `--build-host` must use the `ssh-ng://` prefix.
-- Gradient will reject content-addressed derivations.
-- `nix build --store` must have `--eval-store auto`. Gradient is not taking evaluation writes.
-- A closed connection will abort its unfinished builds.
+- Gradient is not supporting `ssh://`. Use the `ssh-ng://` prefix with `--build-host`.
+- Gradient is not accepting content-addressed derivations.
+- Pass `--eval-store auto` to `nix build --store`. Gradient is not taking evaluation writes.
 
 ## Next Steps
 
 - [Share a Cache](share-a-cache.md): substituter URL and public key
 - [Build Before Pushing](build-before-push.md): building uncommitted changes with `gradient build`
-- [Configuration](../reference/configuration.md#ssh): every `ssh` option
+- [Configuration](../reference/configuration.md#ssh): all `ssh` options
