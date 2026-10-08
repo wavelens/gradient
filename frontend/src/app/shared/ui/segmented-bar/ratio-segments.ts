@@ -6,8 +6,8 @@
 
 import type { BarSegment } from './segmented-bar.component';
 
-export function byteSegments(downloaded: number, total: number | null): BarSegment[] {
+export function ratioSegments(done: number, total: number | null): BarSegment[] {
   if (!total) return [{ tone: 'building', pct: 100 }];
-  const pct = Math.min(1, downloaded / total) * 100;
+  const pct = Math.min(1, done / total) * 100;
   return [{ tone: 'building', pct }, { tone: 'queued', pct: 100 - pct }];
 }

@@ -10,7 +10,7 @@ import type { BuildProgress, BuildProgressPhase } from '@core/models';
 import {
   buildProgressBytes, buildProgressPaths, buildProgressRatio, buildProgressTitle,
 } from '@shared/evaluation';
-import { byteSegments } from '../segmented-bar/byte-segments';
+import { ratioSegments } from '../segmented-bar/ratio-segments';
 import { SegmentedBarComponent } from '../segmented-bar/segmented-bar.component';
 
 const ICONS: Record<BuildProgressPhase, string> = {
@@ -56,7 +56,7 @@ export class BuildProgressComponent {
       icon: ICONS[p.phase],
       title: buildProgressTitle(p),
       percent: ratio === null ? null : Math.floor(ratio * 100),
-      segments: ratio === null ? byteSegments(0, null) : byteSegments(ratio, 1),
+      segments: ratio === null ? ratioSegments(0, null) : ratioSegments(ratio, 1),
       bytes: buildProgressBytes(p),
       paths: buildProgressPaths(p),
     };

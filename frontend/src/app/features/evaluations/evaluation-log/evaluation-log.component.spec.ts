@@ -616,16 +616,18 @@ describe('EvaluationLogComponent', () => {
       fixture.destroy();
     });
 
-    it('shows the thunk count only until the first build appears', () => {
+    it('shows the thunk bar only until the first build appears', () => {
       const thunks = { kind: 'evaluating' as const, thunks: 1234567 };
       const before = setupLive(thunks, 'EvaluatingFlake');
-      expect(before.fixture.componentInstance.progressText()).toBe('1,234,567 thunks evaluated');
+      before.fixture.detectChanges();
+      expect(before.fixture.componentInstance.thunkRow()?.label).toBe('1.23M thunks');
+      expect(before.fixture.nativeElement.querySelector('.thunk-progress gr-segmented-bar')).not.toBeNull();
       before.fixture.destroy();
       TestBed.resetTestingModule();
 
       const after = setupLive(thunks, 'EvaluatingDerivation', [build('b1', 'hello.drv', 'Queued')]);
       after.fixture.detectChanges();
-      expect(after.fixture.componentInstance.progressText()).toBeNull();
+      expect(after.fixture.componentInstance.thunkRow()).toBeNull();
       expect(after.fixture.nativeElement.textContent).not.toContain('thunks');
       after.fixture.destroy();
     });

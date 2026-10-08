@@ -5,7 +5,15 @@
  */
 
 import type { EvaluationProgress, EvaluationStatus, InputFetch } from '@core/models';
-import { formatBytes } from '@shared/text';
+import { formatBytes, formatCount } from '@shared/text';
+import type { BarSegment } from '../ui/segmented-bar/segmented-bar.component';
+import { ratioSegments } from '../ui/segmented-bar/ratio-segments';
+
+export interface ThunkProgress {
+  segments: BarSegment[];
+  percent: number | null;
+  label: string;
+}
 
 const PHASE_KIND: Partial<Record<EvaluationStatus, EvaluationProgress['kind']>> = {
   Fetching: 'fetching',
@@ -22,9 +30,21 @@ export function phaseProgress(
   return candidates.find(p => p?.kind === kind) ?? null;
 }
 
-export function evaluationProgressText(progress: EvaluationProgress | null | undefined): string | null {
+export function thunkProgress(
+  progress: EvaluationProgress | null | undefined,
+  expected: number | null | undefined,
+): ThunkProgress | null {
   if (progress?.kind !== 'evaluating') return null;
-  return `${progress.thunks.toLocaleString('en-US')} thunks evaluated`;
+  const total = expected && progress.thunks <= expected ? expected : null;
+  return {
+    segments: ratioSegments(progress.thunks, total),
+    percent: total ? Math.round((progress.thunks / total) * 100) : null,
+    label: thunkAmount(progress.thunks, total),
+  };
+}
+
+export function thunkAmount(done: number, total: number | null): string {
+  return total ? `${formatCount(done)} / ${formatCount(total)} thunks` : `${formatCount(done)} thunks`;
 }
 
 export function inputFetchRatio(input: InputFetch): number | null {

@@ -5,19 +5,31 @@
  */
 
 import type { InputFetch, InputFetchState } from '@core/models';
-import { evaluationProgressText, inputFetchLabel, inputFetchRatio, phaseProgress } from './progress';
+import { inputFetchLabel, inputFetchRatio, phaseProgress, thunkProgress } from './progress';
 
 const row = (state: InputFetchState, downloaded_bytes: number, expected_bytes: number): InputFetch =>
   ({ name: 'nixpkgs', state, downloaded_bytes, expected_bytes });
 
-describe('evaluationProgressText', () => {
-  it('formats thunks with separators', () => {
-    expect(evaluationProgressText({ kind: 'evaluating', thunks: 1234567 })).toBe('1,234,567 thunks evaluated');
+describe('thunkProgress', () => {
+  it('measures the live count against the thunks of the last completed evaluation', () => {
+    const row = thunkProgress({ kind: 'evaluating', thunks: 128_032_032 }, 450_000_000);
+    expect(row?.label).toBe('128M / 450M thunks');
+    expect(row?.percent).toBe(28);
+    expect(row?.segments.map(s => s.tone)).toEqual(['building', 'queued']);
   });
 
-  it('has no text for fetching or missing progress', () => {
-    expect(evaluationProgressText({ kind: 'fetching', inputs: [] })).toBeNull();
-    expect(evaluationProgressText(undefined)).toBeNull();
+  it('pulses at full width without a history or past the last total', () => {
+    for (const expected of [null, undefined, 0, 100_000_000]) {
+      const row = thunkProgress({ kind: 'evaluating', thunks: 128_032_032 }, expected);
+      expect(row?.label).toBe('128M thunks');
+      expect(row?.percent).toBeNull();
+      expect(row?.segments).toEqual([{ tone: 'building', pct: 100 }]);
+    }
+  });
+
+  it('has no row for fetching or missing progress', () => {
+    expect(thunkProgress({ kind: 'fetching', inputs: [] }, 5)).toBeNull();
+    expect(thunkProgress(undefined, 5)).toBeNull();
   });
 });
 

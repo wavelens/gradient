@@ -6,7 +6,7 @@
 
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { SegmentedBarComponent } from './segmented-bar.component';
-import { byteSegments } from './byte-segments';
+import { ratioSegments } from './ratio-segments';
 import { BuildStatusCounts } from '@core/models';
 
 function counts(p: Partial<BuildStatusCounts>): BuildStatusCounts {
@@ -60,7 +60,7 @@ describe('SegmentedBarComponent', () => {
   });
 
   it('draws a byte download as a building part and an idle remainder without hover', () => {
-    fixture.componentRef.setInput('segments', byteSegments(512, 2048));
+    fixture.componentRef.setInput('segments', ratioSegments(512, 2048));
     fixture.detectChanges();
     expect(widths()).toEqual([['seg seg-building', '25%'], ['seg seg-queued', '75%']]);
     expect(fixture.nativeElement.querySelector('.segbar').classList).not.toContain('segbar--hover');
@@ -70,7 +70,7 @@ describe('SegmentedBarComponent', () => {
   });
 
   it('fills a download of unknown size with one building segment', () => {
-    fixture.componentRef.setInput('segments', byteSegments(512, null));
+    fixture.componentRef.setInput('segments', ratioSegments(512, null));
     fixture.detectChanges();
     expect(widths()).toEqual([['seg seg-building', '100%']]);
   });

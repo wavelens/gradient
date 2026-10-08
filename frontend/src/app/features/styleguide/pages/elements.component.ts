@@ -38,7 +38,7 @@ import {
   SegmentedBarComponent,
   StarButtonComponent,
   StatusIconComponent,
-  byteSegments,
+  ratioSegments,
 } from '@shared/ui';
 import type { AllowedCapabilities, BuildStatusCounts } from '@core/models';
 import type { StatusPhase } from '@shared/evaluation';
@@ -87,8 +87,10 @@ export class ElementsComponent {
     { caption: 'Build counts: completed, failed, building, queued', counts: counts({ completed: 12, failed: 2, building: 3, queued: 8 }) },
     { caption: 'Every build substituted from a cache', counts: counts({ substituted: 40 }) },
     { caption: 'No builds yet', counts: counts({}) },
-    { caption: 'Download of a known size, 17.5 / 43.9 MiB', segments: byteSegments(18_400_000, 46_000_000) },
-    { caption: 'Download of an unknown size, pulsing at full width', segments: byteSegments(2_100_000, null) },
+    { caption: 'Download of a known size, 17.5 / 43.9 MiB', segments: ratioSegments(18_400_000, 46_000_000) },
+    { caption: 'Download of an unknown size, pulsing at full width', segments: ratioSegments(2_100_000, null) },
+    { caption: 'Evaluation against the thunks of the last completed evaluation, 128M / 450M thunks', segments: ratioSegments(128_032_032, 450_000_000) },
+    { caption: 'Evaluation without a history, or past the last total, pulsing at full width', segments: ratioSegments(128_032_032, null) },
     { caption: 'Finished download', segments: [{ tone: 'completed', pct: 100 }] },
     { caption: 'Failed download', segments: [{ tone: 'failed', pct: 100 }] },
   ];

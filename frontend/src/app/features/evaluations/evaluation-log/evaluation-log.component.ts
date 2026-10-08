@@ -49,14 +49,14 @@ import {
   MessageService,
   ToastComponent,
 } from '@gradient/ui/ui';
-import { BuildProgressComponent, EvalStatusBadgeComponent, InputFetchListComponent } from '@shared/ui';
-import { buildDuration, buildPhaseFinished, commitLabel, evaluationDuration, evaluationProgressText, formatEvaluationDuration, isPendingBuildStatus, isRunningEvaluationStatus, phaseProgress } from '@shared/evaluation';
+import { BuildProgressComponent, EvalStatusBadgeComponent, InputFetchListComponent, SegmentedBarComponent } from '@shared/ui';
+import { buildDuration, buildPhaseFinished, commitLabel, evaluationDuration, formatEvaluationDuration, isPendingBuildStatus, isRunningEvaluationStatus, phaseProgress, thunkProgress } from '@shared/evaluation';
 import { environment } from '@environments/environment';
 
 @Component({
   selector: 'app-evaluation-log',
   standalone: true,
-  imports: [CommonModule, RouterModule, LoadingSpinnerComponent, ButtonComponent, DialogComponent, IconComponent, BadgeComponent, BuildProgressComponent, EvalStatusBadgeComponent, InputDirective, InputFetchListComponent, MenuComponent, MessageBannerComponent, ToastComponent, WritableDirective],
+  imports: [CommonModule, RouterModule, LoadingSpinnerComponent, ButtonComponent, DialogComponent, IconComponent, BadgeComponent, BuildProgressComponent, EvalStatusBadgeComponent, InputDirective, InputFetchListComponent, MenuComponent, MessageBannerComponent, SegmentedBarComponent, ToastComponent, WritableDirective],
   providers: [MessageService],
   templateUrl: './evaluation-log.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
@@ -90,7 +90,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     const ev = this.evaluation();
     return ev ? phaseProgress(ev.status, this.liveProgress(), ev.progress) : null;
   });
-  progressText = computed(() => this.builds().length ? null : evaluationProgressText(this.progress()));
+  thunkRow = computed(() => this.builds().length ? null : thunkProgress(this.progress(), this.evaluation()?.expected_thunks));
   fetchRows = computed(() => {
     const p = this.progress();
     return p?.kind === 'fetching' ? p.inputs : [];
