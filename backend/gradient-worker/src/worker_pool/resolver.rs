@@ -103,6 +103,34 @@ fn entry_point_of(attr: &str, patterns: &[String]) -> String {
         .unwrap_or_else(|| attr_segs.first().copied().unwrap_or("").to_string())
 }
 
+/// A crashed batch of members is deferred as a shard again, which comes back in smaller batches,
+/// down to the member that sinks the evaluator. A lone member is retried once and then recorded as failed.
+fn crashed_listing(call: &DiscoveryCall, attempt: u32, crash: &anyhow::Error) -> Option<Listing> {
+    let names = call.only.as_deref()?;
+    let pattern = call.wildcards.first()?;
+    let mut listing = Listing::default();
+    match names {
+        [] => return None,
+        [_] if attempt < MAX_CRASH_ATTEMPTS => return None,
+        [name] => listing.errors.push(gradient_eval::ipc::AttrError {
+            attr: member_attr(pattern, name),
+            message: format!("evaluator crashed while listing this attribute: {crash:#}"),
+        }),
+        _ => listing.deferred.push(DiscoveryShard {
+            pattern: pattern.clone(),
+            only: Some(names.to_vec()),
+        }),
+    }
+    Some(listing)
+}
+
+fn member_attr(pattern: &str, name: &str) -> String {
+    match pattern.rsplit_once('.') {
+        Some((prefix, _)) => format!("{prefix}.{name}"),
+        None => name.to_string(),
+    }
+}
+
 fn item_to_resolved(item: ResolvedItem) -> ResolvedDerivation {
     let result = match (item.drv_path, item.error) {
         (Some(drv), _) => Ok((drv, item.references)),
@@ -249,7 +277,7 @@ impl WorkerPoolResolver {
 
     pub fn start_memory_reaper(&self, min_free_bytes: u64) {
         self.pool.configure_memory_guard(min_free_bytes);
-        if min_free_bytes == 0 || tokio::runtime::Handle::try_current().is_err() {
+        if tokio::runtime::Handle::try_current().is_err() {
             return;
         }
 
@@ -338,6 +366,9 @@ impl WorkerPoolResolver {
                 Ok(v) => return Ok(v),
                 Err(crash) => {
                     attempt += 1;
+                    if let Some(listing) = crashed_listing(&call, attempt, &crash) {
+                        return Ok(listing);
+                    }
                     if attempt >= MAX_CRASH_ATTEMPTS {
                         return Err(crash);
                     }
@@ -622,6 +653,41 @@ mod tests {
             ],
             only: None,
         }));
+    }
+
+    #[test]
+    fn a_crashed_batch_is_split_and_a_lone_member_fails_after_a_retry() {
+        let crash = anyhow::anyhow!("eval worker closed pipe: signal: 9 (SIGKILL)");
+        let batch = DiscoveryCall {
+            wildcards: vec!["hydraJobs.*".into(), "!hydraJobs.ap1".into()],
+            only: Some(vec!["ap10".into(), "ap11".into()]),
+        };
+        let lone = DiscoveryCall {
+            wildcards: vec!["hydraJobs.*".into()],
+            only: Some(vec!["ap10".into()]),
+        };
+        let whole = DiscoveryCall {
+            wildcards: vec!["packages.x86_64-linux.hello".into()],
+            only: None,
+        };
+
+        let split = crashed_listing(&batch, 1, &crash).expect("a batch splits at once");
+        assert_eq!(
+            split.deferred,
+            vec![DiscoveryShard {
+                pattern: "hydraJobs.*".into(),
+                only: Some(vec!["ap10".into(), "ap11".into()]),
+            }]
+        );
+        assert!(split.errors.is_empty());
+
+        assert!(crashed_listing(&lone, 1, &crash).is_none(), "retried once");
+        let failed = crashed_listing(&lone, MAX_CRASH_ATTEMPTS, &crash).expect("then recorded");
+        assert_eq!(failed.errors.len(), 1);
+        assert_eq!(failed.errors[0].attr, "hydraJobs.ap10");
+        assert!(failed.errors[0].message.contains("SIGKILL"), "{failed:?}");
+
+        assert!(crashed_listing(&whole, MAX_CRASH_ATTEMPTS, &crash).is_none());
     }
 
     #[test]
