@@ -449,9 +449,11 @@ describe('TaskDetailComponent - evaluation progress', () => {
     frames.next({ event: 'evaluation.activity', at: '', content: { evaluation_id: 'e1', progress: { kind: 'evaluating', thunks: 1234567 } } });
     fixture.detectChanges();
     expect(fixture.nativeElement.querySelector('.panel gr-loading-spinner')).toBeNull();
-    const row = fixture.nativeElement.querySelector('.panel .pkg');
-    expect(row?.querySelector('gr-segmented-bar')).toBeTruthy();
-    expect(row?.textContent).toContain('1.23M thunks');
+    const wait = fixture.nativeElement.querySelector('.panel .pkg-wait');
+    expect(wait?.textContent).toContain('Evaluating');
+    expect(wait?.querySelector('gr-thunk-progress gr-segmented-bar')).toBeTruthy();
+    expect(wait?.textContent).toContain('1.23M thunks');
+    expect(fixture.nativeElement.querySelector('.panel .pkg')).toBeNull();
   });
 
   it('hides the thunk count once the evaluation has packages', () => {

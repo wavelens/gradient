@@ -116,6 +116,15 @@
   }
 </div>
 
+<h2>Thunk progress</h2>
+<p>A running evaluation shows its thunk count under the Evaluating title, on the task page and the evaluation log.</p>
+<div class="sg-bars">
+  @for (sample of thunkSamples; track sample.caption) {
+    <gr-thunk-progress [progress]="sample.progress" />
+    <span class="sg-bar-caption">{{ sample.caption }}</span>
+  }
+</div>
+
 <h2>Star button</h2>
 <p>Optimistic toggle; a failed request rolls the star back. Page headers use the labeled variant.</p>
 <gr-star-button [target]="{ kind: 'project', project: 'gradient' }" />

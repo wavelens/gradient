@@ -49,14 +49,14 @@ import {
   MessageService,
   ToastComponent,
 } from '@gradient/ui/ui';
-import { BuildProgressComponent, EvalStatusBadgeComponent, InputFetchListComponent, SegmentedBarComponent } from '@shared/ui';
+import { BuildProgressComponent, EvalStatusBadgeComponent, InputFetchListComponent, ThunkProgressComponent } from '@shared/ui';
 import { buildDuration, buildPhaseFinished, commitLabel, evaluationDuration, formatEvaluationDuration, isPendingBuildStatus, isRunningEvaluationStatus, phaseProgress, thunkProgress } from '@shared/evaluation';
 import { environment } from '@environments/environment';
 
 @Component({
   selector: 'app-evaluation-log',
   standalone: true,
-  imports: [CommonModule, RouterModule, LoadingSpinnerComponent, ButtonComponent, DialogComponent, IconComponent, BadgeComponent, BuildProgressComponent, EvalStatusBadgeComponent, InputDirective, InputFetchListComponent, MenuComponent, MessageBannerComponent, SegmentedBarComponent, ToastComponent, WritableDirective],
+  imports: [CommonModule, RouterModule, LoadingSpinnerComponent, ButtonComponent, DialogComponent, IconComponent, BadgeComponent, BuildProgressComponent, EvalStatusBadgeComponent, InputDirective, InputFetchListComponent, MenuComponent, MessageBannerComponent, ThunkProgressComponent, ToastComponent, WritableDirective],
   providers: [MessageService],
   templateUrl: './evaluation-log.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,

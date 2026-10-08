@@ -194,17 +194,9 @@
                 }
               </div>
             } @else if (selectedThunkRow(); as row) {
-              <div class="pkg-list">
-                <div class="pkg" data-phase="running">
-                  <gr-status-icon class="si" phase="running" size="sm" />
-                  <span class="pkg-name">Evaluating</span>
-                  <gr-segmented-bar class="pkg-bar" [segments]="row.segments"
-                                    role="progressbar" aria-valuemin="0" aria-valuemax="100"
-                                    aria-label="Thunks evaluated" [attr.aria-valuenow]="row.percent"
-                                    [attr.aria-valuetext]="row.label" />
-                  <span class="pkg-deps">{{ row.label }}</span>
-                </div>
-              </div>
+              <gr-empty-state class="pkg-wait" flat icon="manage_search" title="Evaluating">
+                <gr-thunk-progress [progress]="row" />
+              </gr-empty-state>
             } @else {
               <gr-empty-state class="pkg-wait" flat icon="hourglass_empty" title="Waiting for packages"
                 message="Packages appear as their entry points are found." />

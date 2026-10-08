@@ -621,7 +621,7 @@ describe('EvaluationLogComponent', () => {
       const before = setupLive(thunks, 'EvaluatingFlake');
       before.fixture.detectChanges();
       expect(before.fixture.componentInstance.thunkRow()?.label).toBe('1.23M thunks');
-      expect(before.fixture.nativeElement.querySelector('.thunk-progress gr-segmented-bar')).not.toBeNull();
+      expect(before.fixture.nativeElement.querySelector('.evaluating-hint gr-thunk-progress gr-segmented-bar')).not.toBeNull();
       before.fixture.destroy();
       TestBed.resetTestingModule();
 

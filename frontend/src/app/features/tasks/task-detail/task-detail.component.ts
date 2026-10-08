@@ -31,7 +31,7 @@ import {
   ToastComponent,
   TooltipDirective,
 } from '@gradient/ui/ui';
-import { EvalStatusBadgeComponent, inputFetchRow, SegmentedBarComponent, StarButtonComponent, StatusIconComponent } from '@shared/ui';
+import { EvalStatusBadgeComponent, inputFetchRow, SegmentedBarComponent, StarButtonComponent, StatusIconComponent, ThunkProgressComponent } from '@shared/ui';
 import { AccessService, WritableDirective } from '@shared/access';
 import { injectTaskAccess, injectTaskAccessData } from '@core/resolvers/inject-access';
 import { groupEntryPoints } from './entry-point-groups';
@@ -44,7 +44,7 @@ import { buildDuration, commitLabel, entryPointPhase, evaluationDuration, evalua
   imports: [
     CommonModule, FormsModule, RouterModule, BadgeComponent, ButtonComponent, CheckboxComponent, DialogComponent, MenuComponent, TooltipDirective,
     SkeletonComponent, EmptyStateComponent, WritableDirective,
-    SegmentedBarComponent, EvalStatusBadgeComponent,
+    SegmentedBarComponent, ThunkProgressComponent, EvalStatusBadgeComponent,
     IconComponent, InViewDirective, StatusIconComponent, ToastComponent, StarButtonComponent,
   ],
   providers: [MessageService],
