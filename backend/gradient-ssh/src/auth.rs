@@ -79,7 +79,6 @@ async fn load_session(
         project,
         permissions,
         caches,
-        evaluation: Default::default(),
     }))
 }
 

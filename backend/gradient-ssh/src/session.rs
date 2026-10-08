@@ -8,21 +8,6 @@ use gradient_core::ServerState;
 use gradient_db::permissions::{Permission, PermissionMask, mask_grants};
 use gradient_types::*;
 use std::sync::Arc;
-use tokio::sync::Mutex;
-
-#[derive(Clone, Copy, Debug)]
-pub struct HeldEvaluation {
-    pub task: TaskId,
-    pub evaluation: EvaluationId,
-}
-
-#[derive(Clone, Copy, Debug, Default)]
-pub enum ConnectionEvaluation {
-    #[default]
-    None,
-    Open(HeldEvaluation),
-    Closed,
-}
 
 pub struct Session {
     pub state: Arc<ServerState>,
@@ -30,7 +15,6 @@ pub struct Session {
     pub project: MProject,
     pub permissions: PermissionMask,
     pub caches: Vec<CacheId>,
-    pub evaluation: Mutex<ConnectionEvaluation>,
 }
 
 impl Session {

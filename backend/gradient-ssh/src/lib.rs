@@ -29,10 +29,7 @@ use std::time::Duration;
 
 const ROOTS_TTL: Duration = Duration::from_secs(3600);
 
-pub async fn start(
-    state: Arc<ServerState>,
-    scheduler: Arc<gradient_scheduler::Scheduler>,
-) -> std::io::Result<()> {
+pub async fn start(state: Arc<ServerState>) -> std::io::Result<()> {
     let ssh = &state.config.ssh;
     let host = ssh
         .listen_address
@@ -49,7 +46,7 @@ pub async fn start(
 
     let config = Arc::new(server::config(key));
     let roots = Arc::new(roots::Roots::new(ROOTS_TTL));
-    let mut server = server::SshServer::new(state.clone(), roots, scheduler);
+    let mut server = server::SshServer::new(state.clone(), roots);
     let token = state.shutdown.token();
     state.shutdown.spawn(async move {
         let running = server.run_on_socket(config, &listener);
