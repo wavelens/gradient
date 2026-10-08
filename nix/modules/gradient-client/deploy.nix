@@ -146,7 +146,7 @@ in {
           TimeoutStartSec = lib.mkIf cfg.waitForBuild "infinity";
         };
 
-        script = ''
+        script = /* bash */ ''
           if ! curl --silent --fail --max-time 5 --output /dev/null "${apiUrl}/health"; then
             echo "Error: Cannot reach ${apiUrl}/health"
             exit 1
@@ -200,7 +200,7 @@ in {
 
             case "$evaluation_status" in
               Completed|Failed|Aborted)
-                echo "done evaluation $evaluation_id finished $evaluation_status without a deployment for ${cfg.deployFor}"
+                echo "done evaluation $evaluation_id finished: $evaluation_status without a deployment for ${cfg.deployFor}"
                 ;;
               *)
                 echo "wait"
