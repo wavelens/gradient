@@ -88,6 +88,9 @@ WHERE derivation = ANY($1::uuid[]) AND NOT probed
 RETURNING derivation
 "#,
         params = [DerivationIds(64)];
+
+    MARK_IFD = "UPDATE derivation SET ifd = true WHERE hash = ANY($1::text[]) AND NOT ifd",
+        params = [DerivationHashes(64)];
 }
 
 gradient_db::sql_fn! {
@@ -186,6 +189,25 @@ impl BatchWriter<'_> {
             .into_iter()
             .filter_map(|r| r.try_get::<String>("", "hash").ok())
             .collect())
+    }
+
+    #[tracing::instrument(level = "debug", skip_all)]
+    async fn mark_imported(&self, derivations: &[DiscoveredDerivation]) -> Result<()> {
+        let hashes: Vec<String> = derivations
+            .iter()
+            .filter(|d| d.ifd)
+            .filter_map(|d| drv_hash_name(&d.drv_path).map(|(hash, _)| hash))
+            .collect();
+        if hashes.is_empty() {
+            return Ok(());
+        }
+
+        self.db()
+            .execute_raw(MARK_IFD.bind([hashes.into()]))
+            .await
+            .context("mark imported derivations")?;
+
+        Ok(())
     }
 
     #[tracing::instrument(level = "debug", skip_all)]
@@ -897,6 +919,7 @@ pub(crate) async fn apply_batch(ctx: &DbContext, batch: &RecordBatch) -> Result<
     };
     if !batch.derivations.is_empty() {
         let newly_walked = writer.upsert_walked(&batch.derivations).await?;
+        writer.mark_imported(&batch.derivations).await?;
         writer.insert_stubs(&batch.derivations).await?;
         let resolved = writer.resolve_ids(&batch.derivations).await?;
         let ids = &resolved.by_path;
@@ -1839,7 +1862,7 @@ mod tests {
         let log = gradient_db::pool::raw_statements(pool.into_transaction_log());
         let upsert = log
             .iter()
-            .position(|s| s.sql.contains("INSERT INTO derivation\n"))
+            .position(|s| s.sql == WALKED_UPSERT.text())
             .expect("the walked upsert runs");
         assert!(
             log[upsert]
@@ -2324,6 +2347,74 @@ mod tests {
             format!("{:?}", log[limits].values).contains("BigInt(Some(3600))"),
             "the update carries the record's limits: {:?}",
             log[limits]
+        );
+    }
+
+    async fn statements_of_a_walk_of(record: DiscoveredDerivation) -> Vec<Statement> {
+        let evaluation = EvaluationId::now_v7();
+        let (eval, a, _) = scripted(evaluation);
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([vec![eval]])
+            .append_query_results([vec![hash_row(&a.hash)]])
+            .append_query_results([vec![a.clone()]])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([vec![completeness_row(a.id, false, false)]])
+            .append_query_results([Vec::<MDerivationBuild>::new()])
+            .append_query_results([vec![shared_build_row(a.id)]])
+            .append_query_results([Vec::<MBuildJob>::new()])
+            .append_query_results(vec![Vec::<BTreeMap<String, Value>>::new(); 6])
+            .append_exec_results(vec![ok(1); 7])
+            .into_connection();
+        let (ctx, pool) = ctx(db).await;
+
+        apply(
+            &ctx,
+            &RecordBatch {
+                evaluation,
+                derivations: vec![record],
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+
+        drop(ctx);
+        pool.into_transaction_log()
+            .iter()
+            .flat_map(|t| t.statements().to_vec())
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn an_imported_record_marks_its_derivation_and_a_plain_record_does_not() {
+        let mark = MARK_IFD.text();
+        let mut imported = drv(A, &[]);
+        imported.ifd = true;
+
+        let log = statements_of_a_walk_of(imported).await;
+        let upsert = log
+            .iter()
+            .position(|s| s.sql.contains("INSERT INTO derivation\n"))
+            .expect("the walked upsert runs");
+        let marked = log
+            .iter()
+            .position(|s| s.sql == mark)
+            .unwrap_or_else(|| panic!("an imported record marks its derivation: {log:?}"));
+        let (hash, _) = drv_hash_name(A).unwrap();
+        assert!(
+            upsert < marked,
+            "the mark lands on the upserted row: {log:?}"
+        );
+        assert!(
+            format!("{:?}", log[marked].values).contains(&hash),
+            "{:?}",
+            log[marked]
+        );
+
+        let plain = statements_of_a_walk_of(drv(A, &[])).await;
+        assert!(
+            !plain.iter().any(|s| s.sql == mark),
+            "a plain record leaves the flag alone: {plain:?}"
         );
     }
 }
