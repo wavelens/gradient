@@ -142,7 +142,7 @@
                     <a class="pkg-link" [routerLink]="['/project', projectName, 'log', sel.id]" [queryParams]="{ build: ep.build_id }"
                        [title]="ep.eval + ' - ' + ep.derivation_path" [attr.aria-label]="row.label"></a>
                     <gr-status-icon class="si" [phase]="entryPointPhase(ep)" [prioritized]="ep.prioritized" size="sm" />
-                    <span class="pkg-name">@if (ep.ifd) { <gr-badge severity="info">IFD</gr-badge> }{{ row.label }}</span>
+                    <span class="pkg-name">@if (ep.ifd) { <gr-badge class="pkg-ifd" severity="info">IFD</gr-badge> }{{ row.label }}</span>
                     <span class="chip-arch mono">{{ ep.architecture }}</span>
                     <gr-segmented-bar class="pkg-bar" [counts]="barCounts(ep)" />
                     <span class="pkg-deps">{{ doneCount(barCounts(ep)) }} / {{ totalCount(barCounts(ep)) }} deps</span>

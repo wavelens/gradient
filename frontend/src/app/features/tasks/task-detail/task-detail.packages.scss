@@ -38,6 +38,8 @@
     white-space: nowrap;
   }
 
+  .pkg-ifd { margin-right: $spacing-xs; }
+
   .chip-arch {
     border: 1px solid var(--gr-border);
     border-radius: $border-radius-sm;
