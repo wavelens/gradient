@@ -755,7 +755,12 @@ pub async fn evaluate_derivations_with(
         errors: mut failed,
     } = match unless_aborted(
         abort,
-        resolver.list_flake_derivations(repo.clone(), job.wildcards.clone(), &eval_overrides),
+        resolver.list_flake_derivations(
+            repo.clone(),
+            job.wildcards.clone(),
+            &eval_overrides,
+            &gradient_sources::RefuseImports("the evaluation"),
+        ),
     )
     .await
     {
@@ -1334,6 +1339,7 @@ mod tests {
             _: String,
             _: Vec<String>,
             _: &[(String, String)],
+            _: &dyn gradient_sources::ImportBuilder,
         ) -> Result<FlakeDiscovery> {
             std::future::pending().await
         }

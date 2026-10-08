@@ -144,7 +144,7 @@ impl JobReporter for RecordingJobReporter {
         Arc::new(RecordingProgress(Arc::clone(&self.events)))
     }
 
-    async fn query_upstream(&mut self, path: String) -> Result<Option<CachedPath>> {
+    async fn query_upstream(&self, path: String) -> Result<Option<CachedPath>> {
         Ok(self.upstream.get(&path).map(|url| CachedPath {
             path: path.clone(),
             cached: true,
@@ -169,11 +169,7 @@ impl JobReporter for RecordingJobReporter {
             .collect())
     }
 
-    async fn query_cache(
-        &mut self,
-        paths: Vec<String>,
-        mode: QueryMode,
-    ) -> Result<Vec<CachedPath>> {
+    async fn query_cache(&self, paths: Vec<String>, mode: QueryMode) -> Result<Vec<CachedPath>> {
         let cached_set: std::collections::HashSet<&str> =
             self.cached_paths.iter().map(|s| s.as_str()).collect();
         Ok(paths
@@ -244,7 +240,7 @@ impl JobReporter for RecordingJobReporter {
         Ok(())
     }
 
-    async fn pull_paths(&mut self, paths: Vec<String>) -> Result<()> {
+    async fn pull_paths(&self, paths: Vec<String>) -> Result<()> {
         self.record(ReportedEvent::PathsPulled { paths });
         Ok(())
     }

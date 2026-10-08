@@ -188,7 +188,7 @@ impl JobUpdater {
     }
 
     pub async fn query_cache(
-        &mut self,
+        &self,
         paths: Vec<String>,
         mode: QueryMode,
     ) -> Result<Vec<CachedPath>> {
@@ -206,7 +206,7 @@ impl JobUpdater {
         .await
     }
 
-    pub async fn query_upstream(&mut self, path: String) -> Result<Option<CachedPath>> {
+    pub async fn query_upstream(&self, path: String) -> Result<Option<CachedPath>> {
         let mut guard = self.phase(JobPhase::CacheQueryWait);
         guard.record(1, 0);
         let answers = cache_query_with_timeout(
@@ -439,15 +439,11 @@ impl JobReporter for JobUpdater {
         })
     }
 
-    async fn query_upstream(&mut self, path: String) -> Result<Option<CachedPath>> {
+    async fn query_upstream(&self, path: String) -> Result<Option<CachedPath>> {
         JobUpdater::query_upstream(self, path).await
     }
 
-    async fn query_cache(
-        &mut self,
-        paths: Vec<String>,
-        mode: QueryMode,
-    ) -> Result<Vec<CachedPath>> {
+    async fn query_cache(&self, paths: Vec<String>, mode: QueryMode) -> Result<Vec<CachedPath>> {
         cache_query_with_timeout(
             &self.job_id,
             &self.writer,
@@ -530,7 +526,7 @@ impl JobReporter for JobUpdater {
         crate::executor::push_paths(paths, self, &store).await
     }
 
-    async fn pull_paths(&mut self, paths: Vec<String>) -> Result<()> {
+    async fn pull_paths(&self, paths: Vec<String>) -> Result<()> {
         let Some(store) = self.store.clone() else {
             return Ok(());
         };
@@ -725,7 +721,7 @@ mod tests {
             widest
         });
 
-        let (mut updater, reader) = make_updater(job_id, conn);
+        let (updater, reader) = make_updater(job_id, conn);
         let pump = pump_replies(
             reader,
             updater.cache_waiters.clone(),
@@ -809,7 +805,7 @@ mod tests {
                 .unwrap();
         });
 
-        let (mut updater, reader) = make_updater(job_id, conn);
+        let (updater, reader) = make_updater(job_id, conn);
         let pump = pump_replies(
             reader,
             updater.cache_waiters.clone(),

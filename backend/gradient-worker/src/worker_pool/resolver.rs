@@ -9,7 +9,9 @@ use async_trait::async_trait;
 use futures::stream::{FuturesUnordered, StreamExt};
 use gradient_derivation::{Derivation, parse_drv};
 use gradient_eval::ipc::{DiscoveryShard, ResolvedItem};
-use gradient_sources::{AttrError, DerivationResolver, FlakeDiscovery, ResolvedDerivation};
+use gradient_sources::{
+    AttrError, DerivationResolver, FlakeDiscovery, ImportBuilder, ResolvedDerivation,
+};
 use gradient_util::store_path::nix_store_path;
 use gradient_util::sync::Mutex;
 use std::collections::VecDeque;
@@ -336,6 +338,7 @@ impl DerivationResolver for WorkerPoolResolver {
         repository: String,
         wildcards: Vec<String>,
         overrides: &[(String, String)],
+        _imports: &dyn ImportBuilder,
     ) -> Result<FlakeDiscovery> {
         *self.patterns.lock() = wildcards
             .iter()
