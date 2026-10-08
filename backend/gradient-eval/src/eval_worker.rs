@@ -16,13 +16,13 @@ use crate::ipc::{
 };
 use crate::nix_eval::{NixEvaluator, RealiseHook, StatsReader};
 
-pub(crate) struct Link<R, W> {
+pub(crate) struct ParentPipe<R, W> {
     reader: Mutex<R>,
     frames: Frames<W>,
     broken: AtomicBool,
 }
 
-impl<R: Read, W: Write> Link<R, W> {
+impl<R: Read, W: Write> ParentPipe<R, W> {
     pub(crate) fn new(reader: R, frames: Frames<W>) -> Self {
         Self {
             reader: Mutex::new(reader),
@@ -34,7 +34,7 @@ impl<R: Read, W: Write> Link<R, W> {
     pub(crate) fn read_frame(&self) -> std::io::Result<Option<Vec<u8>>> {
         if self.broken.load(Ordering::Acquire) {
             return Err(std::io::Error::other(
-                "eval link broke during a build request",
+                "eval pipe broke during a build request",
             ));
         }
         read_frame(&mut *self.reader.lock().unwrap_or_else(PoisonError::into_inner))
@@ -45,7 +45,7 @@ impl<R: Read, W: Write> Link<R, W> {
             .send(&EvalResponse::NeedsBuild {
                 derived_paths: derived_paths.to_vec(),
             })
-            .map_err(|e| format!("eval link closed while asking for a build: {e}"))?;
+            .map_err(|e| format!("eval pipe closed while asking for a build: {e}"))?;
 
         let answer = match self.read_frame() {
             Ok(Some(payload)) => decode_request(&payload).ok(),
@@ -57,7 +57,7 @@ impl<R: Read, W: Write> Link<R, W> {
             other => {
                 self.broken.store(true, Ordering::Release);
                 error!(?other, "eval worker: expected a build result");
-                Err("eval link closed while waiting for a build".to_string())
+                Err("eval pipe closed while waiting for a build".to_string())
             }
         }
     }
@@ -68,11 +68,11 @@ pub fn run_eval_worker() -> std::io::Result<()> {
     stdout.write_all(&[EVAL_IPC_VERSION])?;
     stdout.flush()?;
 
-    let link = Arc::new(Link::new(
+    let pipe = Arc::new(ParentPipe::new(
         std::io::stdin(),
         Frames::new(stdout, nix_bindings::EvalStats::default()),
     ));
-    let evaluator = match NixEvaluator::new(Some(realise_through(Arc::clone(&link)))) {
+    let evaluator = match NixEvaluator::new(Some(realise_through(Arc::clone(&pipe)))) {
         Ok(e) => Some(e),
         Err(e) => {
             error!(
@@ -87,9 +87,9 @@ pub fn run_eval_worker() -> std::io::Result<()> {
         .as_ref()
         .and_then(|ev| read_stats(ev, collect_stats))
     {
-        link.frames.set_baseline(last);
+        pipe.frames.set_baseline(last);
     }
-    let link = &*link;
+    let pipe = &*pipe;
     let (stop, stopped) = std::sync::mpsc::channel::<()>();
 
     std::thread::scope(|scope| {
@@ -98,20 +98,20 @@ pub fn run_eval_worker() -> std::io::Result<()> {
             .filter(|_| collect_stats)
             .map(NixEvaluator::stats_reader)
         {
-            scope.spawn(move || tick_stats(&link.frames, reader, &stopped));
+            scope.spawn(move || tick_stats(&pipe.frames, reader, &stopped));
         }
-        let answered = answer_requests(link, &evaluator, collect_stats);
+        let answered = answer_requests(pipe, &evaluator, collect_stats);
         drop(stop);
         answered
     })
 }
 
-fn realise_through<R, W>(link: Arc<Link<R, W>>) -> RealiseHook
+fn realise_through<R, W>(pipe: Arc<ParentPipe<R, W>>) -> RealiseHook
 where
     R: Read + Send + 'static,
     W: Write + Send + 'static,
 {
-    Box::new(move |derived_paths| link.request_build(derived_paths))
+    Box::new(move |derived_paths| pipe.request_build(derived_paths))
 }
 
 const STATS_TICK: std::time::Duration = std::time::Duration::from_secs(1);
@@ -138,15 +138,15 @@ fn read_stats(ev: &NixEvaluator, collect_stats: bool) -> Option<nix_bindings::Ev
 }
 
 fn answer_requests<R: Read, W: Write>(
-    link: &Link<R, W>,
+    pipe: &ParentPipe<R, W>,
     evaluator: &Option<NixEvaluator>,
     collect_stats: bool,
 ) -> std::io::Result<()> {
-    let frames = &link.frames;
+    let frames = &pipe.frames;
     let mut walkers = WalkerCache { entry: None };
 
     loop {
-        let Some(payload) = link.read_frame().inspect_err(|e| {
+        let Some(payload) = pipe.read_frame().inspect_err(|e| {
             error!(error = %e, "eval worker: stdin read error");
         })?
         else {
@@ -443,15 +443,15 @@ mod tests {
         Cursor::new(bytes)
     }
 
-    fn link_over(requests: &[EvalRequest]) -> Link<Cursor<Vec<u8>>, Vec<u8>> {
-        Link::new(
+    fn pipe_over(requests: &[EvalRequest]) -> ParentPipe<Cursor<Vec<u8>>, Vec<u8>> {
+        ParentPipe::new(
             queued(requests),
             Frames::new(Vec::new(), nix_bindings::EvalStats::default()),
         )
     }
 
-    fn sent(link: Link<Cursor<Vec<u8>>, Vec<u8>>) -> Vec<EvalResponse> {
-        let mut cursor = Cursor::new(link.frames.into_output());
+    fn sent(pipe: ParentPipe<Cursor<Vec<u8>>, Vec<u8>>) -> Vec<EvalResponse> {
+        let mut cursor = Cursor::new(pipe.frames.into_output());
         std::iter::from_fn(|| read_frame(&mut cursor).unwrap())
             .map(|f| decode_response(&f).unwrap())
             .collect()
@@ -459,14 +459,14 @@ mod tests {
 
     #[test]
     fn a_build_request_round_trips_through_the_link() {
-        let link = link_over(&[EvalRequest::BuildDone {
+        let pipe = pipe_over(&[EvalRequest::BuildDone {
             error: Some("boom".into()),
         }]);
 
-        let built = link.request_build(&["/nix/store/aaaa-src.drv^out".to_string()]);
+        let built = pipe.request_build(&["/nix/store/aaaa-src.drv^out".to_string()]);
 
         assert_eq!(built, Err("boom".to_string()));
-        let sent = sent(link);
+        let sent = sent(pipe);
         assert_eq!(sent.len(), 1, "{sent:?}");
         assert!(
             matches!(&sent[0], EvalResponse::NeedsBuild { derived_paths }
@@ -477,16 +477,16 @@ mod tests {
 
     #[test]
     fn a_finished_build_lets_the_evaluation_go_on() {
-        let link = link_over(&[
+        let pipe = pipe_over(&[
             EvalRequest::BuildDone { error: None },
             EvalRequest::Shutdown,
         ]);
 
         assert_eq!(
-            link.request_build(&["/nix/store/aaaa-src.drv^out".into()]),
+            pipe.request_build(&["/nix/store/aaaa-src.drv^out".into()]),
             Ok(())
         );
-        let next = link.read_frame().unwrap().expect("the next request");
+        let next = pipe.read_frame().unwrap().expect("the next request");
         assert!(matches!(
             decode_request(&next).unwrap(),
             EvalRequest::Shutdown
@@ -495,24 +495,24 @@ mod tests {
 
     #[test]
     fn an_unexpected_frame_during_a_build_wait_is_an_error() {
-        let link = link_over(&[EvalRequest::Shutdown, EvalRequest::Shutdown]);
+        let pipe = pipe_over(&[EvalRequest::Shutdown, EvalRequest::Shutdown]);
 
-        let built = link.request_build(&["/nix/store/aaaa-src.drv^out".into()]);
+        let built = pipe.request_build(&["/nix/store/aaaa-src.drv^out".into()]);
 
         assert!(built.is_err(), "{built:?}");
         assert!(
-            link.read_frame().is_err(),
-            "a broken link ends the request loop"
+            pipe.read_frame().is_err(),
+            "a broken pipe ends the request loop"
         );
     }
 
     #[test]
     fn a_closed_link_during_a_build_wait_is_an_error() {
-        let link = link_over(&[]);
+        let pipe = pipe_over(&[]);
 
         assert_eq!(
-            link.request_build(&["/nix/store/aaaa-src.drv^out".into()]),
-            Err("eval link closed while waiting for a build".to_string())
+            pipe.request_build(&["/nix/store/aaaa-src.drv^out".into()]),
+            Err("eval pipe closed while waiting for a build".to_string())
         );
     }
 
