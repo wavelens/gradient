@@ -103,11 +103,11 @@ in {
   };
 
   config = lib.mkIf cfg.enable {
-    environment.systemPackages = let
-      triggerUpdate = pkgs.writeScriptBin "gradient-update" ''
-        systemctl start gradient-deploy.service
-      '';
-    in [ triggerUpdate ];
+    environment.systemPackages = [
+      (pkgs.writeScriptBin "gradient-update" ''
+        systemctl start -v gradient-deploy.service
+      '')
+    ];
 
     systemd = {
       services.gradient-deploy = {
