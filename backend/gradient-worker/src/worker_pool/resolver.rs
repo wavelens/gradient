@@ -263,10 +263,14 @@ impl WorkerPoolResolver {
         repository: &str,
         call: DiscoveryCall,
         overrides: &[(String, String)],
+        imports: &dyn ImportBuilder,
     ) -> Result<Listing> {
         let mut attempt = 0;
         loop {
-            match self.list_once(repository, call.clone(), overrides).await {
+            match self
+                .list_once(repository, call.clone(), overrides, imports)
+                .await
+            {
                 Ok(v) => return Ok(v),
                 Err(crash) => {
                     attempt += 1;
@@ -286,6 +290,7 @@ impl WorkerPoolResolver {
         repository: &str,
         call: DiscoveryCall,
         overrides: &[(String, String)],
+        imports: &dyn ImportBuilder,
     ) -> Result<Listing> {
         let bucket = self.bucket_of(call.wildcards.first());
         let mut worker = self.pool.acquire().await?;
@@ -295,6 +300,7 @@ impl WorkerPoolResolver {
                 call.wildcards,
                 call.only,
                 overrides.to_vec(),
+                imports,
             )
             .await
         {
@@ -338,7 +344,7 @@ impl DerivationResolver for WorkerPoolResolver {
         repository: String,
         wildcards: Vec<String>,
         overrides: &[(String, String)],
-        _imports: &dyn ImportBuilder,
+        imports: &dyn ImportBuilder,
     ) -> Result<FlakeDiscovery> {
         *self.patterns.lock() = wildcards
             .iter()
@@ -352,7 +358,12 @@ impl DerivationResolver for WorkerPoolResolver {
         let (shards, plan_errors) = {
             let mut worker = self.pool.acquire().await?;
             match worker
-                .plan(repository.clone(), wildcards.clone(), overrides.to_vec())
+                .plan(
+                    repository.clone(),
+                    wildcards.clone(),
+                    overrides.to_vec(),
+                    imports,
+                )
                 .await
             {
                 Ok(v) => v,
@@ -384,7 +395,7 @@ impl DerivationResolver for WorkerPoolResolver {
             let (items, warnings, errors) = (&items, &warnings, &errors);
             let excludes = excludes.as_slice();
             pooled_fan_out(self.pool.max(), calls, |call| async move {
-                let listing = self.list_shard(repo, call, overrides).await?;
+                let listing = self.list_shard(repo, call, overrides, imports).await?;
                 items.lock().extend(listing.items);
                 warnings.lock().extend(listing.warnings);
                 errors.lock().extend(listing.errors);

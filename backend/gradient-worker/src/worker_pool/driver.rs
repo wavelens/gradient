@@ -16,6 +16,7 @@ use std::sync::Arc;
 
 use super::transport::EvalWorker;
 use gradient_eval::ipc::EvalRequest;
+use gradient_sources::RefuseImports;
 
 pub async fn run_eval_driver(requests_path: &str, eval_cache_dir: &str) -> Result<i32> {
     let text = tokio::fs::read_to_string(requests_path)
@@ -27,6 +28,7 @@ pub async fn run_eval_driver(requests_path: &str, eval_cache_dir: &str) -> Resul
         .await
         .context("spawning eval worker for driver")?;
 
+    let imports = RefuseImports("the eval driver");
     for line in text.lines().filter(|l| !l.trim().is_empty()) {
         let req: EvalRequest =
             serde_json::from_str(line).with_context(|| format!("parsing request: {line}"))?;
@@ -41,7 +43,7 @@ pub async fn run_eval_driver(requests_path: &str, eval_cache_dir: &str) -> Resul
                 wildcards,
                 input_overrides,
             } => worker
-                .plan(repository, wildcards, input_overrides)
+                .plan(repository, wildcards, input_overrides, &imports)
                 .await
                 .map(|(shards, errors)| json!({"kind": "plan_ok", "shards": shards, "errors": errors})),
             EvalRequest::List {
@@ -50,7 +52,7 @@ pub async fn run_eval_driver(requests_path: &str, eval_cache_dir: &str) -> Resul
                 only,
                 input_overrides,
             } => worker
-                .list(repository, wildcards, only, input_overrides)
+                .list(repository, wildcards, only, input_overrides, &imports)
                 .await
                 .map(|l| {
                     json!({

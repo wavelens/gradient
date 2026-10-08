@@ -19,6 +19,7 @@ use gradient_eval::ipc::{
     ResolvedItem, decode_response, encode_request,
 };
 use gradient_eval::stats::StatsDelta;
+use gradient_sources::{ImportBuilder, RefuseImports};
 
 use super::input_fetch::{DownloadSlot, DownloadTarget, forward_nix_log};
 use super::live_thunks::LiveThunks;
@@ -209,11 +210,15 @@ impl EvalWorker {
             .context("flushing eval worker stdin")
     }
 
-    async fn recv(&mut self) -> Result<EvalResponse> {
+    async fn recv(&mut self, imports: &dyn ImportBuilder) -> Result<EvalResponse> {
         loop {
             match self.recv_frame().await? {
                 EvalResponse::Stats { delta } => {
                     self.thunks.tick(self.spawned_pid(), delta.nr_thunks)
+                }
+                EvalResponse::NeedsBuild { derived_paths } => {
+                    let error = imports.build_imports(derived_paths).await.err();
+                    self.send(&EvalRequest::BuildDone { error }).await?;
                 }
                 other => return Ok(other),
             }
@@ -276,10 +281,11 @@ impl EvalWorker {
         &mut self,
         req: EvalRequest,
         what: &'static str,
+        imports: &dyn ImportBuilder,
         extract: impl FnOnce(EvalResponse) -> std::result::Result<T, Box<EvalResponse>>,
     ) -> Result<T> {
         self.send(&req).await?;
-        let resp = self.recv().await?;
+        let resp = self.recv(imports).await?;
         self.in_flight = false;
         match extract(resp) {
             Ok(v) => Ok(v),
@@ -295,6 +301,7 @@ impl EvalWorker {
         repository: String,
         wildcards: Vec<String>,
         input_overrides: Vec<(String, String)>,
+        imports: &dyn ImportBuilder,
     ) -> Result<(Vec<DiscoveryShard>, Vec<AttrError>)> {
         self.call(
             EvalRequest::Plan {
@@ -303,6 +310,7 @@ impl EvalWorker {
                 input_overrides,
             },
             "Plan",
+            imports,
             |resp| match resp {
                 EvalResponse::PlanOk { shards, errors } => Ok((shards, errors)),
                 other => Err(Box::new(other)),
@@ -317,6 +325,7 @@ impl EvalWorker {
         wildcards: Vec<String>,
         only: Option<Vec<String>>,
         input_overrides: Vec<(String, String)>,
+        imports: &dyn ImportBuilder,
     ) -> Result<Listing> {
         self.call(
             EvalRequest::List {
@@ -326,6 +335,7 @@ impl EvalWorker {
                 input_overrides,
             },
             "List",
+            imports,
             |resp| match resp {
                 EvalResponse::ListOk {
                     items,
@@ -357,6 +367,7 @@ impl EvalWorker {
                 input_overrides,
             },
             "Fingerprint",
+            &RefuseImports("the fingerprint"),
             |resp| match resp {
                 EvalResponse::FingerprintOk { fingerprint } => Ok(fingerprint),
                 other => Err(Box::new(other)),
@@ -376,6 +387,7 @@ impl EvalWorker {
                 input_overrides,
             },
             "Checkpoint",
+            &RefuseImports("the eval-cache checkpoint"),
             |resp| match resp {
                 EvalResponse::CheckpointOk => Ok(()),
                 other => Err(Box::new(other)),
@@ -398,6 +410,7 @@ impl EvalWorker {
                     git_ssh_command,
                 },
                 "FetchInput",
+                &RefuseImports("an input fetch"),
                 |resp| match resp {
                     EvalResponse::FetchOk { store_path } => Ok(store_path),
                     other => Err(Box::new(other)),
@@ -455,5 +468,102 @@ impl std::fmt::Debug for EvalWorker {
         f.debug_struct("EvalWorker")
             .field("pid", &self.child.id())
             .finish()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gradient_eval::ipc::{decode_request, encode_response};
+    use gradient_sources::ImportBuilder;
+
+    struct RecordingImports(Mutex<Vec<Vec<String>>>);
+
+    #[async_trait::async_trait]
+    impl ImportBuilder for RecordingImports {
+        async fn build_imports(&self, derived_paths: Vec<String>) -> Result<(), String> {
+            self.0.lock().push(derived_paths);
+            Err("no builder here".into())
+        }
+    }
+
+    fn framed(payload: &[u8]) -> Vec<u8> {
+        let mut frame = (payload.len() as u32).to_le_bytes().to_vec();
+        frame.extend_from_slice(payload);
+        frame
+    }
+
+    fn temp_file(tag: &str, bytes: &[u8]) -> std::path::PathBuf {
+        let path = std::env::temp_dir().join(format!(
+            "gradient-transport-test-{}-{tag}",
+            std::process::id()
+        ));
+        std::fs::write(&path, bytes).expect("write temp file");
+        path
+    }
+
+    #[tokio::test]
+    async fn recv_answers_a_build_request_and_returns_the_final_frame() {
+        let plan = EvalRequest::Plan {
+            repository: "repo".into(),
+            wildcards: vec![],
+            input_overrides: vec![],
+        };
+        let expected_answer = EvalRequest::BuildDone {
+            error: Some("no builder here".into()),
+        };
+        let plan_len = framed(&encode_request(&plan).unwrap()).len();
+        let answer_len = framed(&encode_request(&expected_answer).unwrap()).len();
+        let needs = temp_file(
+            "needs",
+            &framed(
+                &encode_response(&EvalResponse::NeedsBuild {
+                    derived_paths: vec!["/nix/store/aaaa-src.drv^out".into()],
+                })
+                .unwrap(),
+            ),
+        );
+        let done = temp_file(
+            "done",
+            &framed(
+                &encode_response(&EvalResponse::PlanOk {
+                    shards: vec![],
+                    errors: vec![],
+                })
+                .unwrap(),
+            ),
+        );
+        let answer = std::env::temp_dir().join(format!(
+            "gradient-transport-test-{}-answer",
+            std::process::id()
+        ));
+
+        let mut cmd = Command::new("sh");
+        cmd.arg("-c").arg(format!(
+            "head -c {plan_len} >/dev/null; cat '{}'; head -c {answer_len} >'{}'; cat '{}'; cat >/dev/null",
+            needs.display(),
+            answer.display(),
+            done.display()
+        ));
+        let mut worker = EvalWorker::from_command(cmd, Arc::default()).expect("spawn sh");
+        let imports = RecordingImports(Mutex::new(Vec::new()));
+
+        let (shards, errors) = worker
+            .plan("repo".into(), vec![], vec![], &imports)
+            .await
+            .expect("the final frame after the build request");
+
+        assert!(shards.is_empty() && errors.is_empty());
+        assert_eq!(
+            imports.0.into_inner(),
+            vec![vec!["/nix/store/aaaa-src.drv^out".to_string()]]
+        );
+        let written = std::fs::read(&answer).expect("the answer frame");
+        let back = decode_request(&written[4..]).expect("a request frame");
+        assert!(
+            matches!(&back, EvalRequest::BuildDone { error } if error.as_deref() == Some("no builder here")),
+            "{back:?}"
+        );
+        assert!(!worker.in_flight(), "the call ended in lockstep");
     }
 }
