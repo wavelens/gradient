@@ -147,7 +147,43 @@ pub(super) fn requeue_failed_closure_blocked_sql() -> String {
     )
 }
 
+pub(super) fn requeue_failed_import_closure_sql() -> String {
+    format!(
+        "{}\n{}",
+        requeue_ctes("SELECT unnest($1::uuid[])"),
+        requeue_closure_update(
+            "\n          AND db.derivation NOT IN (SELECT derivation FROM deterministic_blocked)"
+        ),
+    )
+}
+
+pub async fn requeue_failed_import_closure<C>(
+    db: &C,
+    derivations: &[DerivationId],
+) -> Result<Vec<TransitionChange>, DbErr>
+where
+    C: ConnectionTrait + TransactionTrait<Transaction = DatabaseTransaction>,
+{
+    let mut changes = Vec::new();
+    for chunk in derivations.chunks(crate::IN_CHUNK_SIZE) {
+        let ids: Vec<uuid::Uuid> = chunk.iter().map(|d| d.into_inner()).collect();
+        let walk = crate::graph::walks::begin_walk(db).await?;
+        let rows = walk
+            .query_all_raw(REQUEUE_FAILED_IMPORT_CLOSURE.bind([ids.into()]))
+            .await?;
+        walk.commit().await?;
+        changes.extend(returned_transitions(rows));
+    }
+
+    Ok(changes)
+}
+
 crate::sql_fn! {
+    REQUEUE_FAILED_IMPORT_CLOSURE = requeue_failed_import_closure_sql,
+        params = [DerivationIds(64)],
+        tier = Walk,
+        flags = [Walk];
+
     REQUEUE_FAILED_CLOSURE_FRESH = requeue_failed_closure_fresh_sql,
         params = [EvaluationId],
         tier = Walk,
@@ -208,6 +244,7 @@ mod tests {
         for sql in [
             norm(requeue_failed_shared_builds_sql()),
             norm(requeue_failed_closure_blocked_sql()),
+            norm(requeue_failed_import_closure_sql()),
         ] {
             assert!(
                 sql.contains("deterministic_blocked(derivation) AS"),

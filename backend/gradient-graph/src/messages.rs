@@ -160,6 +160,9 @@ pub enum Transition {
     PrioritizeBuild {
         shared_build: DerivationBuildId,
     },
+    RequeueImports {
+        derivations: Vec<DerivationId>,
+    },
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
