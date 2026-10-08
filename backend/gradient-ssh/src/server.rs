@@ -57,6 +57,14 @@ pub struct Connection {
     channels: HashMap<ChannelId, Channel<Msg>>,
 }
 
+impl Drop for Connection {
+    fn drop(&mut self) {
+        if let Some(session) = &self.session {
+            session.closed.cancel();
+        }
+    }
+}
+
 impl russh::server::Handler for Connection {
     type Error = russh::Error;
 

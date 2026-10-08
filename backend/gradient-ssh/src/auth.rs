@@ -79,6 +79,7 @@ async fn load_session(
         project,
         permissions,
         caches,
+        closed: state.shutdown.child_token(),
     }))
 }
 
