@@ -7,7 +7,9 @@
 use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use gradient_derivation::Derivation;
-use gradient_sources::{AttrError, DerivationResolver, FlakeDiscovery, ResolvedDerivation};
+use gradient_sources::{
+    AttrError, DerivationResolver, FlakeDiscovery, ImportBuilder, ResolvedDerivation,
+};
 use std::collections::HashMap;
 use std::sync::Mutex;
 
@@ -85,6 +87,7 @@ impl DerivationResolver for FakeDerivationResolver {
         repository: String,
         _wildcards: Vec<String>,
         _overrides: &[(String, String)],
+        _imports: &dyn ImportBuilder,
     ) -> Result<FlakeDiscovery> {
         let attrs = self
             .flake_attrs

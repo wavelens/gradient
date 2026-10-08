@@ -195,11 +195,11 @@ struct InputPrefetcher<'a> {
     store: &'a LocalNixStore,
     drv_path: String,
     build_id: String,
-    updater: &'a mut JobUpdater,
+    updater: &'a JobUpdater,
 }
 
 impl<'a> InputPrefetcher<'a> {
-    fn new(store: &'a LocalNixStore, task: &'a BuildSpec, updater: &'a mut JobUpdater) -> Self {
+    fn new(store: &'a LocalNixStore, task: &'a BuildSpec, updater: &'a JobUpdater) -> Self {
         Self {
             store,
             drv_path: task.drv_path.clone(),
@@ -208,7 +208,7 @@ impl<'a> InputPrefetcher<'a> {
         }
     }
 
-    fn for_path(store: &'a LocalNixStore, label: String, updater: &'a mut JobUpdater) -> Self {
+    fn for_path(store: &'a LocalNixStore, label: String, updater: &'a JobUpdater) -> Self {
         Self {
             store,
             drv_path: label.clone(),
@@ -671,7 +671,7 @@ pub async fn ensure_path(
 pub async fn pull_cached(
     store: &LocalNixStore,
     paths: Vec<String>,
-    updater: &mut JobUpdater,
+    updater: &JobUpdater,
 ) -> Result<()> {
     let entries = updater.query_cache(paths.clone(), QueryMode::Pull).await?;
     let Classified {

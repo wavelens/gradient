@@ -26,10 +26,9 @@ pub trait DrvReader: Send + Sync {
 
 #[async_trait]
 pub trait JobReporter: Send + Sync {
-    async fn query_cache(&mut self, paths: Vec<String>, mode: QueryMode)
-    -> Result<Vec<CachedPath>>;
+    async fn query_cache(&self, paths: Vec<String>, mode: QueryMode) -> Result<Vec<CachedPath>>;
 
-    async fn query_upstream(&mut self, path: String) -> Result<Option<CachedPath>>;
+    async fn query_upstream(&self, path: String) -> Result<Option<CachedPath>>;
 
     async fn query_known_derivations(&self, drv_paths: Vec<String>) -> Result<Vec<String>>;
     async fn report_fetching(&mut self) -> Result<()>;
@@ -62,7 +61,7 @@ pub trait JobReporter: Send + Sync {
     /// upload is failing the evaluation instead of a later build.
     async fn push_paths(&self, paths: &[(String, Option<u64>)]) -> Result<()>;
 
-    async fn pull_paths(&mut self, paths: Vec<String>) -> Result<()>;
+    async fn pull_paths(&self, paths: Vec<String>) -> Result<()>;
 
     async fn report_building(&mut self, build_id: String) -> Result<()>;
     async fn report_build_output(

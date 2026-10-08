@@ -22,6 +22,23 @@ pub struct FlakeDiscovery {
     pub errors: Vec<AttrError>,
 }
 
+#[async_trait]
+pub trait ImportBuilder: Send + Sync {
+    async fn build_imports(&self, derived_paths: Vec<String>) -> Result<(), String>;
+}
+
+pub struct RefuseImports(pub &'static str);
+
+#[async_trait]
+impl ImportBuilder for RefuseImports {
+    async fn build_imports(&self, _derived_paths: Vec<String>) -> Result<(), String> {
+        Err(format!(
+            "import from derivation is not available during {}",
+            self.0
+        ))
+    }
+}
+
 /// Production impls must run inside `tokio::task::spawn_blocking`. The embedded Nix C API with
 /// Boehm GC cannot run on signal-blocked Tokio workers.
 #[async_trait]
@@ -31,6 +48,7 @@ pub trait DerivationResolver: Send + Sync + std::fmt::Debug + 'static {
         repository: String,
         wildcards: Vec<String>,
         overrides: &[(String, String)],
+        imports: &dyn ImportBuilder,
     ) -> Result<FlakeDiscovery>;
 
     async fn release_evaluators(&self);
