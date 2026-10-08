@@ -1,0 +1,65 @@
+From 3cc9055d34e96819553db2ed008518a76e4b43a8 Mon Sep 17 00:00:00 2001
+From: Dennis Wuitz <dennish@wuitz.de>
+Date: Thu, 8 Oct 2026 20:42:33 +0200
+Subject: [PATCH] fix(eval-cache): evaluate a failed attribute again instead of
+ caching its failure
+
+A cached failure hides the error message behind 'cached failure of attribute' and keeps a transient failure, such as a retry after a crashed evaluator, for all later evaluations of the flake.
+---
+ src/libexpr/eval-cache.cc | 26 +++-----------------------
+ 1 file changed, 3 insertions(+), 23 deletions(-)
+
+diff --git a/src/libexpr/eval-cache.cc b/src/libexpr/eval-cache.cc
+index a9ebb5c..668c47c 100644
+--- a/src/libexpr/eval-cache.cc
++++ b/src/libexpr/eval-cache.cc
+@@ -300,20 +300,6 @@ struct AttrDb
+         });
+     }
+ 
+-    AttrId setFailed(AttrKey key)
+-    {
+-        return doSQLite([&](State & state) {
+-            state.insertAttribute.use()
+-                .apply(key.first)
+-                .apply(symbols[key.second])
+-                .apply(AttrType::Failed)
+-                .apply(0, false)
+-                .exec();
+-
+-            return state.db.getLastInsertedRowId();
+-        });
+-    }
+-
+     std::optional<std::pair<AttrId, AttrValue>> getAttr(AttrKey key)
+     {
+         auto state(_state->lock());
+@@ -354,7 +340,8 @@ struct AttrDb
+         case AttrType::Misc:
+             return {{rowId, misc_t()}};
+         case AttrType::Failed:
+-            return {{rowId, failed_t()}};
++            /* Rows written by earlier versions hide the error and keep a transient failure forever, so evaluate again. */
++            return {};
+         default:
+             throw Error("unexpected type in evaluation cache");
+         }
+@@ -485,14 +472,7 @@ Value & AttrCursor::forceValue()
+ 
+     auto & v = getValue();
+ 
+-    try {
+-        root->state.forceValue(v, noPos);
+-    } catch (EvalError &) {
+-        debug("setting '%s' to failed", getAttrPathStr());
+-        if (root->db)
+-            cachedValue = {root->db->setFailed(getKey()), failed_t()};
+-        throw;
+-    }
++    root->state.forceValue(v, noPos);
+ 
+     if (root->db && (!cachedValue || std::get_if<placeholder_t>(&cachedValue->second))) {
+         if (v.type() == nString)
+-- 
+2.55.0
+
