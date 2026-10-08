@@ -53,7 +53,12 @@ async fn visible_slots(scheduler: &Scheduler, scope: &MetricsScope) -> Vec<(i64,
         .await
         .into_iter()
         .filter(|w| scope.worker_projects(w.authorized_peers.as_ref()).is_some())
-        .map(|w| (w.assigned_job_count as i64, w.max_concurrent_builds as i64))
+        .map(|w| {
+            (
+                w.assigned_build_count as i64,
+                w.max_concurrent_builds as i64,
+            )
+        })
         .collect()
 }
 

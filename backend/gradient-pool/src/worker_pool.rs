@@ -351,6 +351,7 @@ impl WorkerPool {
             system_features: s.system_features.clone(),
             max_concurrent_builds: s.max_concurrent_builds,
             assigned_job_count: s.assigned_jobs.len(),
+            assigned_build_count: s.build_jobs() as usize,
             draining: slot.is_draining(),
             authorized_peers: s.peer_auth.as_filter().cloned(),
             cpu_usage_pct: s.cpu_usage_pct,
@@ -388,6 +389,8 @@ pub struct WorkerInfo {
     pub system_features: Vec<String>,
     pub max_concurrent_builds: u32,
     pub assigned_job_count: usize,
+    #[serde(skip)]
+    pub assigned_build_count: usize,
     pub draining: bool,
     pub authorized_peers: Option<HashSet<ProjectId>>,
     #[serde(skip)]
@@ -782,6 +785,18 @@ mod tests {
         );
         pool.assign_job("w1", "import", JobKind::Build);
         assert!(!pool.has_capacity("w1", &JobKind::Build));
+    }
+
+    #[test]
+    fn the_worker_info_counts_build_jobs_apart_from_eval_jobs() {
+        let mut pool = WorkerPool::new();
+        pool.register("w1".into(), caps(), HashSet::new(), port().0);
+        pool.assign_job("w1", "eval", JobKind::Flake);
+        pool.assign_job("w1", "build", JobKind::Build);
+
+        let info = &pool.all_workers()[0];
+        assert_eq!(info.assigned_job_count, 2);
+        assert_eq!(info.assigned_build_count, 1);
     }
 
     #[test]

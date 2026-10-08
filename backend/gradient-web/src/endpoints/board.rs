@@ -1635,6 +1635,7 @@ mod tests {
             system_features: features.iter().map(|s| s.to_string()).collect(),
             max_concurrent_builds: slots,
             assigned_job_count: 0,
+            assigned_build_count: 0,
             draining: false,
             authorized_peers: None,
             cpu_usage_pct: None,

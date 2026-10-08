@@ -648,6 +648,7 @@ mod tests {
             system_features: vec![],
             max_concurrent_builds: 1,
             assigned_job_count: 0,
+            assigned_build_count: 0,
             draining: false,
             authorized_peers: authorized.map(|v| v.into_iter().collect::<HashSet<_>>()),
             cpu_usage_pct: None,
