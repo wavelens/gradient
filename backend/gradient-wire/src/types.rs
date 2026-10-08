@@ -265,7 +265,7 @@ pub struct RequiredPath {
     pub cache_info: Option<CacheInfo>,
 }
 
-#[derive(Proto, Debug, Clone, PartialEq)]
+#[derive(Proto, Debug, Clone, PartialEq, Default)]
 pub struct JobCandidate {
     pub job_id: String,
     pub required_paths: Vec<RequiredPath>,
@@ -282,7 +282,7 @@ pub struct CandidateScore {
     pub outputs_present: bool,
 }
 
-#[derive(Proto, Debug, Clone, PartialEq)]
+#[derive(Proto, Debug, Clone, PartialEq, Default)]
 pub struct DiscoveredDerivation {
     pub attr: String,
     pub drv_path: String,

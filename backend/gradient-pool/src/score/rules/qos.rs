@@ -70,28 +70,13 @@ mod tests {
     fn ctx<'a>(job: &'a ScoredJob<'a>, prioritized: bool) -> JobContext<'a> {
         JobContext {
             job,
-            missing_count: None,
-            missing_nar_size: None,
-            outputs_present: false,
-            dependency_count: 0,
-            queued_at: now(),
-            ready_at: now(),
-            project_work_share: None,
             prioritized,
-            build_request: false,
-            ifd: false,
-            rescore_count: 0,
-            now: now(),
+            ..Default::default()
         }
     }
 
     fn worker() -> WorkerContext<'static> {
-        WorkerContext {
-            architectures: &[],
-            system_features: &[],
-            fetch: false,
-            metrics: None,
-        }
+        WorkerContext::default()
     }
 
     #[test]

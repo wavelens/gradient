@@ -526,24 +526,14 @@ mod tests {
             missing_count: Some(0),
             missing_nar_size,
             outputs_present,
-            dependency_count: 0,
-            queued_at: gradient_types::now(),
-            ready_at: gradient_types::now(),
-            project_work_share: None,
-            prioritized: false,
-            build_request: false,
-            ifd: false,
-            rescore_count: 0,
-            now: gradient_types::now(),
+            ..Default::default()
         }
     }
 
     fn worker(metrics: WorkerMetricsView) -> WorkerContext<'static> {
         WorkerContext {
-            architectures: &[],
-            system_features: &[],
-            fetch: false,
             metrics: Some(metrics),
+            ..Default::default()
         }
     }
 
@@ -664,12 +654,7 @@ mod tests {
             missing_count: None,
             ..ctx(&job, None, false)
         };
-        let w = WorkerContext {
-            architectures: &[],
-            system_features: &[],
-            fetch: false,
-            metrics: None,
-        };
+        let w = WorkerContext::default();
         let inst = InstanceContext {
             build_time_ms: Windowed {
                 w24h: Some(60_000.0),

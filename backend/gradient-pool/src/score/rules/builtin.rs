@@ -161,9 +161,8 @@ mod tests {
     fn worker<'a>(archs: &'a [String], fetch: bool) -> WorkerContext<'a> {
         WorkerContext {
             architectures: archs,
-            system_features: &[],
             fetch,
-            metrics: None,
+            ..Default::default()
         }
     }
 
@@ -177,48 +176,24 @@ mod tests {
 
         let ctx_fresh = JobContext {
             job: &job,
-            missing_count: None,
-            missing_nar_size: None,
-            outputs_present: false,
-            dependency_count: 0,
             queued_at: now,
             ready_at: now,
-            project_work_share: None,
-            prioritized: false,
-            build_request: false,
-            ifd: false,
-            rescore_count: 0,
             now,
+            ..Default::default()
         };
         let ctx_mid = JobContext {
             job: &job,
-            missing_count: None,
-            missing_nar_size: None,
-            outputs_present: false,
-            dependency_count: 0,
             queued_at: now - chrono::Duration::seconds(60),
             ready_at: now - chrono::Duration::seconds(60),
-            project_work_share: None,
-            prioritized: false,
-            build_request: false,
-            ifd: false,
-            rescore_count: 0,
             now,
+            ..Default::default()
         };
         let ctx_ancient = JobContext {
             job: &job,
-            missing_count: None,
-            missing_nar_size: None,
-            outputs_present: false,
-            dependency_count: 0,
             queued_at: now - chrono::Duration::seconds(10_000),
             ready_at: now - chrono::Duration::seconds(10_000),
-            project_work_share: None,
-            prioritized: false,
-            build_request: false,
-            ifd: false,
-            rescore_count: 0,
             now,
+            ..Default::default()
         };
 
         let fresh = rule.score(&ctx_fresh, &w, &InstanceContext::default());
@@ -253,63 +228,33 @@ mod tests {
 
         let c_build_none_0 = JobContext {
             job: &build,
-            missing_count: None,
-            missing_nar_size: None,
-            outputs_present: false,
-            dependency_count: 0,
             queued_at: now,
             ready_at: now,
-            project_work_share: None,
-            prioritized: false,
-            build_request: false,
-            ifd: false,
-            rescore_count: 0,
             now,
+            ..Default::default()
         };
         let c_build_none_4 = JobContext {
             job: &build,
-            missing_count: None,
-            missing_nar_size: None,
-            outputs_present: false,
-            dependency_count: 0,
             queued_at: now,
             ready_at: now,
-            project_work_share: None,
-            prioritized: false,
-            build_request: false,
-            ifd: false,
             rescore_count: 4,
             now,
+            ..Default::default()
         };
         let c_build_some_0 = JobContext {
             job: &build,
-            missing_count: None,
             missing_nar_size: Some(10),
-            outputs_present: false,
-            dependency_count: 0,
             queued_at: now,
             ready_at: now,
-            project_work_share: None,
-            prioritized: false,
-            build_request: false,
-            ifd: false,
-            rescore_count: 0,
             now,
+            ..Default::default()
         };
         let c_eval_none_0 = JobContext {
             job: &eval,
-            missing_count: None,
-            missing_nar_size: None,
-            outputs_present: false,
-            dependency_count: 0,
             queued_at: now,
             ready_at: now,
-            project_work_share: None,
-            prioritized: false,
-            build_request: false,
-            ifd: false,
-            rescore_count: 0,
             now,
+            ..Default::default()
         };
 
         assert!(
@@ -360,48 +305,24 @@ mod tests {
 
         let ctx_cached = JobContext {
             job: &cached_eval,
-            missing_count: None,
-            missing_nar_size: None,
-            outputs_present: false,
-            dependency_count: 0,
             queued_at: now,
             ready_at: now,
-            project_work_share: None,
-            prioritized: false,
-            build_request: false,
-            ifd: false,
-            rescore_count: 0,
             now,
+            ..Default::default()
         };
         let ctx_fetch = JobContext {
             job: &fetch_eval,
-            missing_count: None,
-            missing_nar_size: None,
-            outputs_present: false,
-            dependency_count: 0,
             queued_at: now,
             ready_at: now,
-            project_work_share: None,
-            prioritized: false,
-            build_request: false,
-            ifd: false,
-            rescore_count: 0,
             now,
+            ..Default::default()
         };
         let ctx_build = JobContext {
             job: &build,
-            missing_count: None,
-            missing_nar_size: None,
-            outputs_present: false,
-            dependency_count: 0,
             queued_at: now,
             ready_at: now,
-            project_work_share: None,
-            prioritized: false,
-            build_request: false,
-            ifd: false,
-            rescore_count: 0,
             now,
+            ..Default::default()
         };
 
         assert!(

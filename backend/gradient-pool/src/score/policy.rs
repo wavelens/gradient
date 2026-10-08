@@ -214,8 +214,7 @@ mod tests {
         WorkerContext {
             architectures: archs,
             system_features: feats,
-            fetch: false,
-            metrics: None,
+            ..Default::default()
         }
     }
 
@@ -261,33 +260,15 @@ mod tests {
             job: &j_fresh,
             missing_count: Some(0),
             missing_nar_size: Some(0),
-            outputs_present: false,
-            dependency_count: 0,
-            queued_at: now(),
-            ready_at: now(),
-            project_work_share: None,
-            prioritized: false,
-            build_request: false,
-            ifd: false,
-            rescore_count: 0,
-            now: now(),
+            ..Default::default()
         };
 
         let j_old = scored_job("x86_64-linux");
         let c_old = JobContext {
             job: &j_old,
-            missing_count: None,
-            missing_nar_size: None,
-            outputs_present: false,
-            dependency_count: 0,
             queued_at: now() - chrono::Duration::seconds(3600),
             ready_at: now() - chrono::Duration::seconds(3600),
-            project_work_share: None,
-            prioritized: false,
-            build_request: false,
-            ifd: false,
-            rescore_count: 0,
-            now: now(),
+            ..Default::default()
         };
 
         let s_old = policy.score(&c_old, &w, &InstanceContext::default());
@@ -325,16 +306,7 @@ mod tests {
             job: &j,
             missing_count: Some(missing_count),
             missing_nar_size: Some(missing_nar_size),
-            outputs_present: false,
-            dependency_count: 0,
-            queued_at: now(),
-            ready_at: now(),
-            project_work_share: None,
-            prioritized: false,
-            build_request: false,
-            ifd: false,
-            rescore_count: 0,
-            now: now(),
+            ..Default::default()
         };
         let with_cores = |cpu_core_score| WorkerContext {
             architectures: &archs,
@@ -385,15 +357,7 @@ mod tests {
             missing_count: Some(missing_count),
             missing_nar_size: Some(missing_nar_size),
             outputs_present,
-            dependency_count: 0,
-            queued_at: now(),
-            ready_at: now(),
-            project_work_share: None,
-            prioritized: false,
-            build_request: false,
-            ifd: false,
-            rescore_count: 0,
-            now: now(),
+            ..Default::default()
         };
         let with_cores = |cpu_core_score, ram_free_mb| WorkerContext {
             architectures: &archs,
@@ -432,16 +396,9 @@ mod tests {
             job: &j_ready,
             missing_count: Some(0),
             missing_nar_size: Some(0),
-            outputs_present: false,
-            dependency_count: 0,
             queued_at: n,
             ready_at: n,
-            project_work_share: None,
-            prioritized: false,
-            build_request: false,
-            ifd: false,
-            rescore_count: 0,
-            now: now(),
+            ..Default::default()
         };
 
         let j_costly = scored_job("builtin");
@@ -449,16 +406,9 @@ mod tests {
             job: &j_costly,
             missing_count: Some(5),
             missing_nar_size: Some(50_000_000),
-            outputs_present: false,
-            dependency_count: 0,
             queued_at: n,
             ready_at: n,
-            project_work_share: None,
-            prioritized: false,
-            build_request: false,
-            ifd: false,
-            rescore_count: 0,
-            now: now(),
+            ..Default::default()
         };
 
         assert!(
@@ -478,16 +428,8 @@ mod tests {
             job: &j,
             missing_count: Some(0),
             missing_nar_size: Some(0),
-            outputs_present: false,
             dependency_count: 2,
-            queued_at: now(),
-            ready_at: now(),
-            project_work_share: None,
-            prioritized: false,
-            build_request: false,
-            ifd: false,
-            rescore_count: 0,
-            now: now(),
+            ..Default::default()
         };
 
         let breakdown = policy.score_detailed(&c, &w, &InstanceContext::default());
@@ -549,16 +491,9 @@ mod tests {
             job: &j,
             missing_count: Some(0),
             missing_nar_size: Some(4 << 30),
-            outputs_present: false,
-            dependency_count: 0,
             queued_at: now() - chrono::Duration::seconds(secs),
             ready_at: now() - chrono::Duration::seconds(secs),
-            project_work_share: None,
-            prioritized: false,
-            build_request: false,
-            ifd: false,
-            rescore_count: 0,
-            now: now(),
+            ..Default::default()
         };
         let full = InstanceContext {
             downloads_in_flight: 16,
@@ -579,18 +514,7 @@ mod tests {
         let j = scored_job("x86_64-linux");
         let held = JobContext {
             job: &j,
-            missing_count: None,
-            missing_nar_size: None,
-            outputs_present: false,
-            dependency_count: 0,
-            queued_at: now(),
-            ready_at: now(),
-            project_work_share: None,
-            prioritized: false,
-            build_request: false,
-            ifd: false,
-            rescore_count: 0,
-            now: now(),
+            ..Default::default()
         };
 
         let breakdown = policy.score_detailed(&held, &w, &InstanceContext::default());
