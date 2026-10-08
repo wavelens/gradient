@@ -109,7 +109,7 @@ assert deploy_state(machine) == "activating", "must still be waiting on the live
 
 set_state(machine, "Failed", [entry_point(DEPLOY_SYSTEM, "Building")], evaluation_id="e2")
 log = await_deploy(machine)
-assert "finished Failed" in log, log
+assert "finished: Failed" in log, log
 assert current_system(machine) == BASE_SYSTEM, "a failed evaluation must not switch the system"
 
 # ── Waits through evaluation and build, then deploys ──────────────────────────
