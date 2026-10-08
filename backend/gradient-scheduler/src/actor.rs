@@ -406,7 +406,8 @@ impl SchedulerCore {
         ) {
             Some(assignment) => {
                 self.idle.clear(worker, slot);
-                self.pool.assign_job(worker, assignment.job_id());
+                self.pool
+                    .assign_job(worker, assignment.job_id(), assignment.pending.job_kind());
                 AssignOutcome::Assigned(assignment)
             }
             None => self.idle(worker, slot, caps.as_ref()),
@@ -498,7 +499,7 @@ impl SchedulerCore {
             .collect();
         self.tracker.activate_members(attempt, active);
         for s in &seats {
-            self.pool.assign_job(&s.worker, &s.key);
+            self.pool.assign_job(&s.worker, &s.key, s.job.job_kind());
         }
 
         Some(crate::cluster::Committing { cluster, seats })
@@ -617,7 +618,11 @@ impl Actor for CoreActor {
                     reg.session,
                 );
                 for reattached in reg.active {
-                    core.pool.assign_job(&reg.worker, &reattached.job_id);
+                    core.pool.assign_job(
+                        &reg.worker,
+                        &reattached.job_id,
+                        reattached.job.job_kind(),
+                    );
                     core.tracker.restore_active(&reg.worker, reattached);
                 }
                 info!(worker = %reg.worker, "worker registered");
