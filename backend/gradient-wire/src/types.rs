@@ -297,6 +297,21 @@ pub struct DiscoveredDerivation {
     pub is_fixed_output: bool,
     pub allow_substitutes: bool,
     pub pname: Option<String>,
+    #[proto(32, default)]
+    pub ifd: bool,
+}
+
+#[derive(Proto, Debug, Clone, PartialEq, Eq)]
+pub enum ImportOutcome {
+    Completed,
+    Failed {
+        drv_path: String,
+        build_id: String,
+        status: String,
+    },
+    Unknown {
+        drv_path: String,
+    },
 }
 
 #[derive(Proto, Debug, Clone, PartialEq)]

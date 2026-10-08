@@ -397,6 +397,9 @@ impl MessageLoopState {
             | ServerMessage::NarAbort { .. } => {
                 warn!("a NAR frame reached the control dispatch");
             }
+            ServerMessage::ImportResult { job_id, .. } => {
+                warn!(%job_id, "ImportResult reached a worker without import support");
+            }
         }
         Ok(())
     }

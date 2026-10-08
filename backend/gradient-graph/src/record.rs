@@ -1350,6 +1350,7 @@ mod tests {
             is_fixed_output: false,
             allow_substitutes: true,
             pname: None,
+            ifd: false,
         }
     }
 
