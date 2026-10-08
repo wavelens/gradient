@@ -62,6 +62,7 @@ All commands: [CLI Reference](https://wavelens.github.io/gradient/reference/cli/
 |---|---|---|---|
 | Build start | After the whole evaluation finishes | After the job has evaluated the flake | While the evaluation is still running |
 | Evaluation | On the server, limited by one machine | Inside each job, limited by the runner | On workers, scales with them |
+| Import from derivation (IFD) | Not supported | Built by the runner inside the job | Built on the workers as shared builds, cached and logged like any build |
 | Nix store | Kept on the server and builders | Empty on every job; each job downloads its closure again | Kept on the workers between builds |
 | Shared work | One build per derivation | Parallel jobs can build the same derivation twice | Every derivation built once, shared across projects |
 | Build outputs | Pass through the server | Pushed from the runner to Cachix | Large outputs go from worker straight to S3 |
