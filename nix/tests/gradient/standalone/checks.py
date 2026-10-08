@@ -51,3 +51,14 @@ def wait_for_green_evaluation(machine, base, token, eval_id, timeout=900):
 
     with machine.nested(f"waiting for evaluation {eval_id}"):
         retry(completed, timeout_seconds=timeout)
+
+
+def assert_imported_derivation_built(machine, base, token, eval_id):
+    page = api(machine, base, "GET",
+               f"tasks/personal/packages/entry-points?evaluation_id={eval_id}&limit=100", token)
+    by_attr = {ep["eval"]: ep for ep in page["entry_points"]}
+    imports = [ep for attr, ep in by_attr.items() if attr.startswith("other.") and attr.endswith(".ifd")]
+    assert len(imports) == 1, f"expected exactly 1 imported derivation entry point: {sorted(by_attr)}"
+    assert imports[0]["ifd"] and imports[0]["build_status"] == "Completed", imports[0]
+    imported = next(ep for attr, ep in by_attr.items() if attr.endswith(".imported"))
+    assert not imported["ifd"] and imported["build_status"] == "Completed", imported

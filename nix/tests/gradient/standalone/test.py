@@ -22,6 +22,7 @@ token = login(machine, BASE, password)
 
 eval_id = create_personal_project(machine, BASE, token, "git://localhost/personal")
 wait_for_green_evaluation(machine, BASE, token, eval_id)
+assert_imported_derivation_built(machine, BASE, token, eval_id)
 
 machine.succeed("systemctl restart gradient-standalone-secrets.service")
 assert machine.succeed("cat /var/lib/gradient-standalone/admin-password").strip() == password, \

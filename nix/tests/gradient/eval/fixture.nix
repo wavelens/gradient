@@ -31,6 +31,12 @@
         # Discovery must skip this evaluation error.
         # Resolve must report it per item without aborting the rest of the batch (#139).
         boom = throw "boom: this attribute must fail in isolation";
+
+        imported = import (derivation {
+          name = "ifd";
+          system = "x86_64-linux";
+          builder = "/bin/sh";
+        });
       };
     };
 }
