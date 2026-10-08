@@ -26,6 +26,12 @@ pub fn accept_cert(cert: &git2::cert::Cert<'_>) -> git2::CertificateCheckStatus 
 }
 
 pub fn fetch_options_with_ssh(ssh_key: Option<&str>) -> git2::FetchOptions<'static> {
+    let mut fo = git2::FetchOptions::new();
+    fo.remote_callbacks(callbacks_with_ssh(ssh_key));
+    fo
+}
+
+pub(in crate::git) fn callbacks_with_ssh(ssh_key: Option<&str>) -> RemoteCallbacks<'static> {
     let mut callbacks = RemoteCallbacks::new();
     callbacks.certificate_check(|cert, _valid| Ok(accept_cert(cert)));
 
@@ -36,9 +42,7 @@ pub fn fetch_options_with_ssh(ssh_key: Option<&str>) -> git2::FetchOptions<'stat
         });
     }
 
-    let mut fo = git2::FetchOptions::new();
-    fo.remote_callbacks(callbacks);
-    fo
+    callbacks
 }
 
 pub(in crate::git) fn ls_remote_head(

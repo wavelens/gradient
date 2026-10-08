@@ -260,3 +260,73 @@ fn a_commit_only_on_a_pull_request_ref_is_checked_out() {
 
     assert_eq!(checked_out_file(&url, pull), "fork");
 }
+
+struct GitDaemon(std::process::Child);
+
+impl Drop for GitDaemon {
+    fn drop(&mut self) {
+        self.0.kill().ok();
+        self.0.wait().ok();
+    }
+}
+
+fn start_git_daemon(base: &std::path::Path) -> (GitDaemon, String) {
+    let port = std::net::TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+    let exec_path = std::process::Command::new("git")
+        .arg("--exec-path")
+        .output()
+        .unwrap()
+        .stdout;
+    let exec_path = std::path::PathBuf::from(String::from_utf8(exec_path).unwrap().trim());
+    let daemon = std::process::Command::new(exec_path.join("git-daemon"))
+        .args(["--export-all", "--reuseaddr", "--listen=127.0.0.1"])
+        .arg(format!("--port={port}"))
+        .arg(format!("--base-path={}", base.display()))
+        .spawn()
+        .unwrap();
+    let daemon = GitDaemon(daemon);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while std::net::TcpStream::connect(("127.0.0.1", port)).is_err() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "git daemon did not start"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    (daemon, format!("git://127.0.0.1:{port}/repo"))
+}
+
+#[test]
+fn a_branch_tip_is_fetched_shallow_from_a_server_refusing_fetches_by_hash() {
+    let base = tempfile::TempDir::new().unwrap();
+    let repo = git2::Repository::init(base.path().join("repo")).unwrap();
+    commit_file(&repo, "refs/heads/main", "first");
+    let tip = commit_file(&repo, "refs/heads/main", "tip");
+    let (_daemon, url) = start_git_daemon(base.path());
+
+    let checkout = checkout_commit(&url, &tip.to_string(), None).unwrap();
+    assert_eq!(
+        std::fs::read_to_string(checkout.path().join("file")).unwrap(),
+        "tip"
+    );
+    assert!(
+        git2::Repository::open(checkout.path())
+            .unwrap()
+            .is_shallow()
+    );
+}
+
+#[test]
+fn a_commit_below_the_tip_is_checked_out_from_a_server_refusing_fetches_by_hash() {
+    let base = tempfile::TempDir::new().unwrap();
+    let repo = git2::Repository::init(base.path().join("repo")).unwrap();
+    let pinned = commit_file(&repo, "refs/heads/main", "pinned");
+    commit_file(&repo, "refs/heads/main", "tip");
+    let (_daemon, url) = start_git_daemon(base.path());
+
+    assert_eq!(checked_out_file(&url, pinned), "pinned");
+}
