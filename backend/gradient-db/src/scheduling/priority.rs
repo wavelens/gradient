@@ -107,6 +107,59 @@ crate::sql_fn! {
         tier = Bulk;
 }
 
+fn import_lifted_shared_builds_sql() -> String {
+    let open = |alias| crate::graph::predicates::open_predicate(alias);
+    let seed = format!(
+        "SELECT d.id FROM derivation d \
+         JOIN derivation_build root ON root.derivation = d.id \
+         WHERE d.ifd AND {root_open} AND EXISTS (\
+         SELECT 1 FROM build_job bj JOIN evaluation ev ON ev.id = bj.evaluation \
+         WHERE bj.derivation = d.id AND ev.status NOT IN ({finished}))",
+        root_open = open("root"),
+        finished = crate::sql::status::eval_in(&EvaluationStatus::TERMINAL),
+    );
+    let closure = crate::graph::walks::bounded_dependency_closure_cte_body(
+        "imported",
+        &seed,
+        crate::graph::walks::ClosureDirection::Dependencies,
+        &format!(
+            "EXISTS (SELECT 1 FROM derivation_build dep \
+             WHERE dep.derivation = e.dependency AND {})",
+            open("dep")
+        ),
+        None,
+    );
+    format!(
+        "WITH RECURSIVE {closure} \
+         SELECT db.id AS id FROM derivation_build db \
+         JOIN imported i ON i.derivation = db.derivation \
+         WHERE db.id = ANY($1)"
+    )
+}
+
+crate::sql_fn! {
+    IMPORT_LIFTED_SHARED_BUILDS = import_lifted_shared_builds_sql,
+        params = [SharedBuildIds(64)],
+        tier = Bulk;
+}
+
+pub async fn import_lifted_shared_builds<C: ConnectionTrait>(
+    db: &C,
+    shared_builds: &[DerivationBuildId],
+) -> Result<HashSet<DerivationBuildId>, DbErr> {
+    let rows = fetch_in_chunks(shared_builds, |chunk| async move {
+        let ids: Vec<uuid::Uuid> = chunk.iter().map(|id| id.into_inner()).collect();
+        IdRow::find_by_statement(IMPORT_LIFTED_SHARED_BUILDS.bind([ids.into()]))
+            .all(db)
+            .await
+    })
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(|r| DerivationBuildId::from(r.id))
+        .collect())
+}
+
 pub async fn prioritize_evaluation(
     ctx: &DbContext,
     evaluation: EvaluationId,
@@ -207,5 +260,23 @@ mod tests {
         );
         assert!(sql.contains("AND NOT db.prioritized"), "{sql}");
         assert!(sql.contains("status IN (0, 1, 2, 8)"), "{sql}");
+    }
+
+    #[test]
+    fn the_import_lift_walks_open_dependencies_of_live_imports_only() {
+        let sql = import_lifted_shared_builds_sql();
+        let (seed, step) = sql
+            .split_once(" UNION ")
+            .expect("the closure is a recursive union");
+        assert!(
+            seed.contains("WHERE d.ifd AND (NOT root.fetchable"),
+            "{sql}"
+        );
+        assert!(seed.contains("AND ev.status NOT IN ("), "{sql}");
+        assert!(
+            step.contains("dep.derivation = e.dependency AND (NOT dep.fetchable"),
+            "a finished dependency ends the walk: {sql}"
+        );
+        assert!(sql.ends_with("WHERE db.id = ANY($1)"), "{sql}");
     }
 }

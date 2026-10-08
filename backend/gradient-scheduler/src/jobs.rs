@@ -73,6 +73,7 @@ pub struct PendingBuildJob {
     pub rescore_count: u32,
     pub prioritized: bool,
     pub build_request: bool,
+    pub ifd: bool,
     pub pname: Option<String>,
     pub substitute: bool,
 }
@@ -217,6 +218,10 @@ impl PendingJob {
             PendingJob::Build(j) => j.build_request,
             PendingJob::Eval(j) => j.build_request,
         }
+    }
+
+    pub fn ifd(&self) -> bool {
+        matches!(self, PendingJob::Build(j) if j.ifd)
     }
 
     pub fn set_rescore_count(&mut self, n: u32) {
@@ -747,6 +752,7 @@ impl JobTracker {
             project_work_share: shares.share(job.project_id()),
             prioritized: job.prioritized(),
             build_request: job.build_request(),
+            ifd: job.ifd(),
             rescore_count: job.rescore_count(),
             now,
         };
@@ -1482,6 +1488,7 @@ mod tests {
             rescore_count: 0,
             prioritized: false,
             build_request: false,
+            ifd: false,
             pname: None,
             substitute: false,
         })
