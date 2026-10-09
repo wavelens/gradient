@@ -4,9 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use super::approval::{
-    PullRequestApprovalContext, on_approval_granted, sender_is_trusted, submit_pr_approval_review,
-};
+use super::approval::{PullRequestApprovalContext, on_approval_granted, sender_is_trusted};
 use super::fanout::trigger_pr_for_integration;
 use super::installation::resolve_github_app_targets;
 use super::payloads::CommentPayload;
@@ -305,16 +303,6 @@ async fn unpark_existing_approvals(ctx: &CommentRoute<'_>, task_ids: &[TaskId]) 
                     }
                 }
                 on_approval_granted(ctx.state, &unparked).await;
-                if matches!(ctx.cmd, GradientCommand::Approve) {
-                    submit_pr_approval_review(
-                        ctx.state,
-                        *task_id,
-                        ctx.owner,
-                        ctx.repo,
-                        ctx.pr_number,
-                    )
-                    .await;
-                }
                 unparked_any = true;
             }
             Ok(None) => {}
