@@ -24,12 +24,13 @@ pub struct PassthroughTimeouts {
 pub struct PassthroughRequest<'a> {
     pub job_id: &'a str,
     pub store_path: &'a str,
+    pub key: &'a str,
     pub resume_from: u64,
     pub client_token: Option<&'a str>,
 }
 
 #[derive(Debug, thiserror::Error)]
-pub enum ServeError {
+pub enum PassthroughError {
     #[error("{0}")]
     NotFound(String),
     #[error("{0}")]
@@ -66,7 +67,7 @@ async fn fail_transfer(
     store_path: &str,
     failure: Failure,
     reason: String,
-) -> ServeError {
+) -> PassthroughError {
     STATS.record(metric::NAR_SERVE_FAILURES, failure.label(), 1.0);
 
     if failure.is_missing() {
@@ -80,7 +81,7 @@ async fn fail_transfer(
         )
         .await;
 
-        return ServeError::NotFound(reason);
+        return PassthroughError::NotFound(reason);
     }
 
     let _ = send_server_msg(
@@ -93,34 +94,27 @@ async fn fail_transfer(
     )
     .await;
 
-    ServeError::Aborted(reason)
+    PassthroughError::Aborted(reason)
 }
 
-pub async fn serve_nar(
+pub async fn send_nar(
     store: &NarStore,
     writer: &ProtoWriter,
     req: PassthroughRequest<'_>,
     timeouts: PassthroughTimeouts,
-) -> Result<u64, ServeError> {
+) -> Result<u64, PassthroughError> {
     let PassthroughRequest {
         job_id,
         store_path,
+        key,
         resume_from,
         client_token,
     } = req;
     let storage_open_timeout = timeouts.open;
     let chunk_read_timeout = timeouts.chunk_read;
 
-    let Some(hash) = store_path
-        .strip_prefix("/nix/store/")
-        .and_then(|s| s.split('-').next())
-    else {
-        let reason = format!("invalid store path: {store_path}");
-        return Err(fail_transfer(writer, job_id, store_path, Failure::NotFound, reason).await);
-    };
-
     let open = |offset: u64| async move {
-        tokio::time::timeout(storage_open_timeout, store.open(hash, offset)).await
+        tokio::time::timeout(storage_open_timeout, store.open(key, offset)).await
     };
 
     let mut source = match open(resume_from).await {
@@ -130,7 +124,7 @@ pub async fn serve_nar(
             return Err(fail_transfer(writer, job_id, store_path, Failure::NotFound, reason).await);
         }
         Ok(Err(e)) => {
-            let reason = format!("nar_storage.open({hash}) failed: {e}");
+            let reason = format!("nar_storage.open({key}) failed: {e}");
             error!(%store_path, error = %e, "NAR storage read error");
             return Err(
                 fail_transfer(writer, job_id, store_path, Failure::StorageError, reason).await,
@@ -138,7 +132,7 @@ pub async fn serve_nar(
         }
         Err(_) => {
             let reason = format!(
-                "nar_storage.open({hash}) timed out after {}s",
+                "nar_storage.open({key}) timed out after {}s",
                 storage_open_timeout.as_secs()
             );
             warn!(%store_path, "NAR storage open timed out");
@@ -150,9 +144,9 @@ pub async fn serve_nar(
 
     let size = source.size();
 
-    // The stored `.nar.zst` is immutable per hash, and its size is serving as the pull token. A
-    // worker with a stale token is restarting from 0.
-    let server_token = format!("len-{size}");
+    // The stored object is immutable per key, so key and size make the pull token. A worker
+    // holding an outdated token restarts from 0.
+    let server_token = format!("{key}-{size}");
     let token_mismatch = client_token.is_some_and(|t| t != server_token);
     let mut start = resume_from;
     if resume_from > size || token_mismatch {
@@ -336,7 +330,7 @@ mod tests {
         store_path: &str,
         resume_from: u64,
         client_token: Option<&str>,
-    ) -> (Result<u64, ServeError>, Vec<ServerMessage>) {
+    ) -> (Result<u64, PassthroughError>, Vec<ServerMessage>) {
         serve_within(store, store_path, resume_from, client_token, timeouts()).await
     }
 
@@ -346,21 +340,46 @@ mod tests {
         resume_from: u64,
         client_token: Option<&str>,
         timeouts: PassthroughTimeouts,
-    ) -> (Result<u64, ServeError>, Vec<ServerMessage>) {
+    ) -> (Result<u64, PassthroughError>, Vec<ServerMessage>) {
         let (writer, mut sent) = ProtoWriter::spy(Duration::from_secs(5));
         let req = PassthroughRequest {
             job_id: "build:1",
             store_path,
+            key: HASH,
             resume_from,
             client_token,
         };
-        let result = serve_nar(store, &writer, req, timeouts).await;
+        let result = send_nar(store, &writer, req, timeouts).await;
         drop(writer);
         let mut frames = Vec::new();
         while let Some(bytes) = sent.recv().await {
             frames.push(from_bytes(bytes, *PROTO_VERSIONS.end()).expect("decode"));
         }
         (result, frames)
+    }
+
+    #[tokio::test]
+    async fn the_key_names_the_object_and_the_store_path_only_the_messages() {
+        let (_dir, store) = empty_store();
+        store.put("0abcnarhash", vec![9; 10]).await.expect("put");
+        let (writer, mut sent) = ProtoWriter::spy(Duration::from_secs(5));
+        let req = PassthroughRequest {
+            job_id: "build:1",
+            store_path: PATH,
+            key: "0abcnarhash",
+            resume_from: 0,
+            client_token: None,
+        };
+        let result = send_nar(&store, &writer, req, timeouts()).await;
+        drop(writer);
+        assert_eq!(result.expect("sent"), 10);
+        let header =
+            from_bytes(sent.recv().await.expect("header"), *PROTO_VERSIONS.end()).expect("decode");
+        assert!(matches!(
+            header,
+            ServerMessage::NarStreamHeader { store_path, stream_token, .. }
+                if store_path == PATH && stream_token == "0abcnarhash-10"
+        ));
     }
 
     fn first_push_offset(frames: &[ServerMessage]) -> u64 {
@@ -388,7 +407,7 @@ mod tests {
             panic!("header first, got {frames:?}");
         };
         assert_eq!(*total_bytes, len as u64);
-        assert_eq!(stream_token.as_str(), format!("len-{len}"));
+        assert_eq!(stream_token.as_str(), format!("{HASH}-{len}"));
         assert!(matches!(
             &frames[1],
             ServerMessage::NarPush { offset: 0, is_final: false, data, .. } if data.len() == BULK_CHUNK_SIZE
@@ -402,14 +421,14 @@ mod tests {
     #[tokio::test]
     async fn a_matching_token_resumes_from_the_offset() {
         let (_dir, store) = stored(1000).await;
-        let (_, frames) = serve(&store, PATH, 100, Some("len-1000")).await;
+        let (_, frames) = serve(&store, PATH, 100, Some(&format!("{HASH}-1000"))).await;
         assert_eq!(first_push_offset(&frames), 100);
     }
 
     #[tokio::test]
     async fn a_stale_token_or_an_offset_past_the_end_restarts_from_zero() {
         let (_dir, store) = stored(1000).await;
-        let (_, stale) = serve(&store, PATH, 100, Some("len-1")).await;
+        let (_, stale) = serve(&store, PATH, 100, Some(&format!("{HASH}-1"))).await;
         assert_eq!(first_push_offset(&stale), 0);
 
         let (_, past_end) = serve(&store, PATH, 1001, None).await;
@@ -420,18 +439,7 @@ mod tests {
     async fn a_missing_object_sends_nar_unavailable_and_reports_not_found() {
         let (_dir, store) = empty_store();
         let (result, frames) = serve(&store, PATH, 0, None).await;
-        assert!(matches!(result, Err(ServeError::NotFound(_))));
-        assert!(matches!(
-            frames.as_slice(),
-            [ServerMessage::NarUnavailable { .. }]
-        ));
-    }
-
-    #[tokio::test]
-    async fn an_invalid_store_path_is_unavailable() {
-        let (_dir, store) = stored(10).await;
-        let (result, frames) = serve(&store, "not-a-store-path", 0, None).await;
-        assert!(matches!(result, Err(ServeError::NotFound(_))));
+        assert!(matches!(result, Err(PassthroughError::NotFound(_))));
         assert!(matches!(
             frames.as_slice(),
             [ServerMessage::NarUnavailable { .. }]
@@ -453,7 +461,10 @@ mod tests {
             chunk_read: Duration::from_secs(5),
         };
         let (result, frames) = serve_within(&store, PATH, 0, None, short).await;
-        assert!(matches!(result, Err(ServeError::Aborted(_))), "{result:?}");
+        assert!(
+            matches!(result, Err(PassthroughError::Aborted(_))),
+            "{result:?}"
+        );
         assert!(
             matches!(frames.as_slice(), [ServerMessage::NarAbort { .. }]),
             "{frames:?}"
