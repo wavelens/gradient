@@ -159,6 +159,10 @@ impl Scheduler {
                 .iter()
                 .map(|id| crate::jobs::build_job_key(*id)),
         );
+        self.cancel_jobs(eval_id, job_ids).await;
+    }
+
+    pub(crate) async fn cancel_jobs(&self, eval_id: EvaluationId, job_ids: Vec<String>) {
         match self
             .call(|reply| SchedulerMsg::CancelJobs { job_ids, reply })
             .await
@@ -169,7 +173,7 @@ impl Scheduler {
                 }
             }
             Err(e) => {
-                tracing::warn!(error = %e, %eval_id, "cancel_evaluation_jobs did not reach the scheduler");
+                tracing::warn!(error = %e, %eval_id, "cancelling jobs did not reach the scheduler");
             }
         }
     }

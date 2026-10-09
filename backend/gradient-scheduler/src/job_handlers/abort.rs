@@ -7,7 +7,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use gradient_db::status::update_evaluation_status;
+use gradient_db::status::{BuildRefusal, update_evaluation_status};
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_entity::evaluation_message::MessageLevel;
 use gradient_graph::Transition;
@@ -53,6 +53,57 @@ impl Scheduler {
                     .await;
             }
         });
+    }
+
+    /// Stop the worker only after the graph writer moved the shared build.
+    pub async fn abort_build(
+        &self,
+        evaluation: EvaluationId,
+        shared_build: DerivationBuildId,
+    ) -> anyhow::Result<Result<(), BuildRefusal>> {
+        let report = self
+            .state
+            .graph
+            .transition(Transition::AbortBuild {
+                evaluation,
+                shared_build,
+            })
+            .await?;
+        if let Some(refusal) = report.refusal {
+            return Ok(Err(refusal));
+        }
+
+        let job_ids = report
+            .aborted_shared_builds
+            .into_iter()
+            .map(crate::jobs::build_job_key)
+            .collect();
+        self.cancel_jobs(evaluation, job_ids).await;
+        Ok(Ok(()))
+    }
+
+    pub async fn retry_build(
+        &self,
+        evaluation: EvaluationId,
+        shared_build: DerivationBuildId,
+    ) -> anyhow::Result<Result<(), BuildRefusal>> {
+        if self
+            .active_job(&crate::jobs::build_job_key(shared_build))
+            .await
+            .is_some()
+        {
+            return Ok(Err(BuildRefusal::WorkerStillStopping));
+        }
+
+        let report = self
+            .state
+            .graph
+            .transition(Transition::RetryBuild {
+                evaluation,
+                shared_build,
+            })
+            .await?;
+        Ok(report.refusal.map_or(Ok(()), Err))
     }
 
     pub(crate) async fn abort_unbuildable_evaluation(&self, unbuildable: Unbuildable) {

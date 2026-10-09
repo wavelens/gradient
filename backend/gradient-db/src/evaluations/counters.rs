@@ -216,7 +216,7 @@ mod tests {
 
     #[test]
     fn membership_matches_the_graph_predicates() {
-        let f = gradient_migration::m20261001_000001_plain_concept_names::SHARED_BUILD_COUNTS_FN;
+        let f = gradient_migration::m20261009_000000_build_job_aborted::SHARED_BUILD_COUNTS_FN;
         let alias = "evaluation_shared_build_counts";
         assert!(
             f.contains(&crate::graph::predicates::blocks_evaluation_predicate(

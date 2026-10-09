@@ -190,6 +190,41 @@ pub(crate) async fn apply(ctx: &DbContext, transition: Transition) -> Result<Tra
             requeue_imports(ctx, &derivations).await?;
             Ok(TransitionReport::default())
         }
+        Transition::AbortBuild {
+            evaluation,
+            shared_build,
+        } => {
+            let Some((eval, row)) = load_evaluation_build(ctx, evaluation, shared_build).await?
+            else {
+                return Ok(TransitionReport::default());
+            };
+
+            Ok(
+                match gradient_db::status::abort_evaluation_build(ctx, &eval, &row).await? {
+                    Ok(()) => TransitionReport {
+                        aborted_shared_builds: vec![row.id],
+                        ..Default::default()
+                    },
+                    Err(refusal) => refused(refusal),
+                },
+            )
+        }
+        Transition::RetryBuild {
+            evaluation,
+            shared_build,
+        } => {
+            let Some((eval, row)) = load_evaluation_build(ctx, evaluation, shared_build).await?
+            else {
+                return Ok(TransitionReport::default());
+            };
+
+            Ok(
+                match gradient_db::status::retry_evaluation_build(ctx, &eval, &row).await? {
+                    Ok(()) => TransitionReport::default(),
+                    Err(refusal) => refused(refusal),
+                },
+            )
+        }
         Transition::PrioritizeBuild { shared_build } => {
             let Some(row) = EDerivationBuild::find_by_id(shared_build)
                 .one(&ctx.worker_db)
@@ -205,6 +240,31 @@ pub(crate) async fn apply(ctx: &DbContext, transition: Transition) -> Result<Tra
             })
         }
     }
+}
+
+fn refused(refusal: gradient_db::status::BuildRefusal) -> TransitionReport {
+    TransitionReport {
+        refusal: Some(refusal),
+        ..Default::default()
+    }
+}
+
+async fn load_evaluation_build(
+    ctx: &DbContext,
+    evaluation: EvaluationId,
+    shared_build: DerivationBuildId,
+) -> Result<Option<(MEvaluation, MDerivationBuild)>> {
+    let Some(eval) = EEvaluation::find_by_id(evaluation)
+        .one(&ctx.worker_db)
+        .await?
+    else {
+        return Ok(None);
+    };
+
+    Ok(EDerivationBuild::find_by_id(shared_build)
+        .one(&ctx.worker_db)
+        .await?
+        .map(|row| (eval, row)))
 }
 
 #[tracing::instrument(level = "debug", skip_all, fields(eval_id = %evaluation_id))]
@@ -921,9 +981,8 @@ async fn find_or_create_build_job(
         evaluation,
         derivation: shared_build.derivation,
         derivation_build,
-        score: 0.0,
-        score_breakdown: serde_json::Value::Null,
         created_at: now(),
+        ..Default::default()
     }
     .into_active_model();
     if let Err(e) = EBuildJob::insert(row)

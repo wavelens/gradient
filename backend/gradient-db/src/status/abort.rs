@@ -32,11 +32,7 @@ pub async fn abort_eval_shared_builds(
     let active = fetch_in_chunks(&shared_build_ids, |chunk| async move {
         EDerivationBuild::find()
             .filter(CDerivationBuild::Id.is_in(chunk))
-            .filter(CDerivationBuild::Status.is_in([
-                BuildStatus::Created,
-                BuildStatus::Queued,
-                BuildStatus::Building,
-            ]))
+            .filter(CDerivationBuild::Status.is_in(BuildStatus::ABORTABLE))
             .all(&ctx.worker_db)
             .await
     })
@@ -54,6 +50,14 @@ pub async fn abort_eval_shared_builds(
         return Ok(Vec::new());
     }
 
+    abort_shared_builds(ctx, evaluation, &to_abort).await
+}
+
+pub(super) async fn abort_shared_builds(
+    ctx: &DbContext,
+    evaluation: &MEvaluation,
+    to_abort: &[&MDerivationBuild],
+) -> Result<Vec<DerivationBuildId>, sea_orm::DbErr> {
     let abort_ids: Vec<DerivationBuildId> = to_abort.iter().map(|a| a.id).collect();
     let building_ids: Vec<DerivationBuildId> = to_abort
         .iter()
@@ -116,7 +120,7 @@ pub async fn abort_eval_shared_builds(
     Ok(abort_ids)
 }
 
-async fn ids_shared_with_other_evaluations(
+pub(super) async fn ids_shared_with_other_evaluations(
     ctx: &DbContext,
     this_eval: EvaluationId,
     shared_build_ids: &[DerivationBuildId],

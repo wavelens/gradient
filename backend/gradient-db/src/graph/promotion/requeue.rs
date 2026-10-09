@@ -6,10 +6,10 @@
 
 use crate::graph::repair::RepairScope;
 use crate::graph::{
-    predicates::non_passthrough_predicate,
+    predicates::{aborted_in_evaluation, non_passthrough_predicate},
     walks::{
         ClosureDirection, bounded_dependency_closure_cte_body, dependency_closure_cte_body,
-        eval_closure_cte,
+        eval_closure_cte, eval_closure_cte_body,
     },
 };
 use crate::status::TransitionChange;
@@ -17,7 +17,7 @@ use crate::status::TransitionChange;
 use super::transitions::returned_transitions;
 use gradient_entity::build::BuildStatus;
 use gradient_entity::build_attempt::{AttemptFailureReason, AttemptOutcome};
-use gradient_types::DerivationId;
+use gradient_types::{DerivationId, EvaluationId};
 use sea_orm::{ConnectionTrait, DatabaseTransaction, DbErr, TransactionTrait, Value};
 
 /// A reproducible builder exit must not be thawed by a fresh evaluation.
@@ -133,18 +133,89 @@ fn requeue_closure_update(blocked: &str) -> String {
     )
 }
 
+fn aborted_blocked_cte_body() -> String {
+    bounded_dependency_closure_cte_body(
+        "aborted_blocked",
+        &aborted_in_evaluation("$1"),
+        ClosureDirection::WantedBy,
+        &non_passthrough_predicate("e.derivation"),
+        Some("closure"),
+    )
+}
+
+const SKIP_ABORTED: &str =
+    "\n          AND db.derivation NOT IN (SELECT derivation FROM aborted_blocked)";
+
 fn requeue_failed_closure_fresh_sql() -> String {
-    format!("{}\n{}", eval_closure_cte(), requeue_closure_update(""))
+    format!(
+        "{},\n    {}\n{}",
+        eval_closure_cte(),
+        aborted_blocked_cte_body(),
+        requeue_closure_update(SKIP_ABORTED),
+    )
 }
 
 pub(super) fn requeue_failed_closure_blocked_sql() -> String {
     format!(
-        "{}\n{}",
+        "{},\n    {}\n{}",
         requeue_ctes("SELECT bj.derivation FROM build_job bj WHERE bj.evaluation = $1"),
-        requeue_closure_update(
-            "\n          AND db.derivation NOT IN (SELECT derivation FROM deterministic_blocked)"
-        ),
+        aborted_blocked_cte_body(),
+        requeue_closure_update(&format!(
+            "\n          AND db.derivation NOT IN (SELECT derivation FROM deterministic_blocked){SKIP_ABORTED}"
+        )),
     )
+}
+
+/// Bypass the deterministic-failure block: the user asked for the rebuild.
+fn retry_build_closure_sql() -> String {
+    let dependency_failed = crate::sql::status::build(BuildStatus::DependencyFailed);
+    let dependents = bounded_dependency_closure_cte_body(
+        "dependents",
+        "SELECT $2::uuid",
+        ClosureDirection::WantedBy,
+        &format!(
+            "{} AND EXISTS (SELECT 1 FROM derivation_build p \
+             WHERE p.derivation = e.derivation AND p.status = {dependency_failed})",
+            non_passthrough_predicate("e.derivation"),
+        ),
+        Some("closure"),
+    );
+    format!(
+        r#"
+        WITH RECURSIVE {closure},
+        {dependents}
+        UPDATE derivation_build db
+        SET status = {created}, attempt = 0,
+            updated_at = (now() AT TIME ZONE 'UTC')
+        WHERE db.derivation IN (SELECT derivation FROM dependents)
+          AND CASE WHEN db.derivation = $2 THEN db.status IN ({retryable})
+                   ELSE db.status = {dependency_failed} END
+        RETURNING db.derivation, old.status AS from_status, db.status AS to_status
+        "#,
+        closure = eval_closure_cte_body(),
+        created = crate::sql::status::build(BuildStatus::Created),
+        retryable = crate::sql::status::build_in(&BuildStatus::RETRYABLE),
+    )
+}
+
+pub async fn retry_build_closure<C>(
+    db: &C,
+    evaluation: EvaluationId,
+    derivation: DerivationId,
+) -> Result<Vec<TransitionChange>, DbErr>
+where
+    C: ConnectionTrait + TransactionTrait<Transaction = DatabaseTransaction>,
+{
+    let walk = crate::graph::walks::begin_walk(db).await?;
+    let rows = walk
+        .query_all_raw(RETRY_BUILD_CLOSURE.bind([
+            Value::Uuid(Some(evaluation.into_inner())),
+            Value::Uuid(Some(derivation.into_inner())),
+        ]))
+        .await?;
+    walk.commit().await?;
+
+    Ok(returned_transitions(rows))
 }
 
 pub(super) fn requeue_failed_import_closure_sql() -> String {
@@ -193,6 +264,11 @@ crate::sql_fn! {
         params = [EvaluationId],
         tier = Walk,
         flags = [Walk];
+
+    RETRY_BUILD_CLOSURE = retry_build_closure_sql,
+        params = [EvaluationId, DerivationId],
+        tier = Walk,
+        flags = [Walk];
 }
 
 #[cfg(test)]
@@ -226,7 +302,7 @@ mod tests {
         );
         assert!(
             sql.contains(&format!(
-                "db.status IN ({}) RETURNING",
+                "db.status IN ({}) AND db.derivation NOT IN (SELECT derivation FROM aborted_blocked) RETURNING",
                 crate::sql::status::build_in(&BuildStatus::REQUEUEABLE)
             )),
             "{sql}"
@@ -234,6 +310,63 @@ mod tests {
         assert!(
             !sql.contains("deterministic_blocked") && !sql.contains("build_attempt"),
             "a reproducible failure is retried once per evaluation: {sql}"
+        );
+    }
+
+    #[test]
+    fn no_heal_of_an_evaluation_thaws_what_its_user_aborted() {
+        let norm = |s: String| s.split_whitespace().collect::<Vec<_>>().join(" ");
+        let aborted = norm(aborted_in_evaluation("$1"));
+        for sql in [
+            norm(requeue_failed_closure_fresh_sql()),
+            norm(requeue_failed_closure_blocked_sql()),
+        ] {
+            assert!(
+                sql.contains(&format!("aborted_blocked(derivation) AS ({aborted} UNION")),
+                "{sql}"
+            );
+            assert!(
+                sql.contains(
+                    "SELECT e.derivation AS next FROM derivation_dependency e WHERE e.dependency = c.derivation"
+                ),
+                "the dependents of the aborted build stay failed: {sql}"
+            );
+            assert!(
+                sql.contains("db.derivation NOT IN (SELECT derivation FROM aborted_blocked)"),
+                "{sql}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_retry_thaws_the_build_and_only_the_dependents_it_failed() {
+        let norm = |s: String| s.split_whitespace().collect::<Vec<_>>().join(" ");
+        let sql = norm(retry_build_closure_sql());
+        let dependency_failed = crate::sql::status::build(BuildStatus::DependencyFailed);
+        assert!(
+            sql.starts_with("WITH RECURSIVE closure(derivation) AS"),
+            "the walk stays inside the evaluation: {sql}"
+        );
+        assert!(
+            sql.contains("dependents(derivation) AS (SELECT $2::uuid UNION"),
+            "{sql}"
+        );
+        assert!(
+            sql.contains(&format!(
+                "WHERE p.derivation = e.derivation AND p.status = {dependency_failed}"
+            )),
+            "the walk stops at a parent that failed on its own: {sql}"
+        );
+        assert!(
+            sql.contains(&format!(
+                "CASE WHEN db.derivation = $2 THEN db.status IN ({}) ELSE db.status = {dependency_failed} END",
+                crate::sql::status::build_in(&BuildStatus::RETRYABLE)
+            )),
+            "{sql}"
+        );
+        assert!(
+            !sql.contains("deterministic_blocked") && !sql.contains("build_attempt"),
+            "a retry rebuilds a reproducible failure on purpose: {sql}"
         );
     }
 

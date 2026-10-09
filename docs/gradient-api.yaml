@@ -4851,6 +4851,58 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
+  /builds/{build}/abort:
+    parameters:
+      - $ref: '#/components/parameters/BuildId'
+    post:
+      tags: [builds]
+      summary: Abort build
+      description: |-
+        Stops a created, queued or running build of a running evaluation. The build becomes `Aborted` and its dependents in the evaluation become `DependencyFailed`. The evaluation no longer waits for them, and no heal of the evaluation queues them again. A later evaluation builds them again. Requires project membership. Answers 409 when the evaluation has finished, the build has another status, or another running evaluation still needs the build.
+      operationId: abortBuild
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StringResponse'
+              example:
+                error: false
+                message: "Success"
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /builds/{build}/retry:
+    parameters:
+      - $ref: '#/components/parameters/BuildId'
+    post:
+      tags: [builds]
+      summary: Retry build
+      description: |-
+        Queues a `FailedPermanent`, `FailedTimeout` or `Aborted` build of a running evaluation again, together with its dependents in the evaluation that failed only through it. A reproducible builder failure is retried too. Requires project membership. Answers 409 when the evaluation has finished, the build has another status, or its worker has not confirmed an earlier abort yet.
+      operationId: retryBuild
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StringResponse'
+              example:
+                error: false
+                message: "Success"
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
   /builds/{build}/log:
     parameters:
       - $ref: '#/components/parameters/BuildId'

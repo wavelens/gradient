@@ -12,7 +12,7 @@ pub mod log;
 pub mod log_chunks;
 pub mod query;
 
-pub use self::actions::post_build_prioritize;
+pub use self::actions::{post_build_abort, post_build_prioritize, post_build_retry};
 pub use self::closure::{
     ClosureEdge, ClosureGraph, ClosureNode, build_closure_graph, build_runtime_closure_graph,
     derivation_closure_reachable, get_build_closure, get_build_runtime_closure, get_eval_closure,
