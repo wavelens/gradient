@@ -190,7 +190,7 @@ pkgs.testers.runNixOSTest ({ lib, ... }: {
             "pg_stat_statements.track_planning" = true;
             "auto_explain.log_min_duration" = -1;
             "auto_explain.log_nested_statements" = true;
-            # The acpi_pm clock is trapping on every per-node clock read. Rows and loops are enough.
+            # Per-node clock reads trap on the acpi_pm clock. Rows and loops are enough.
             "auto_explain.log_timing" = false;
             # Plans on the serial console are costing a millisecond per line inside the logging transaction.
             logging_collector = true;

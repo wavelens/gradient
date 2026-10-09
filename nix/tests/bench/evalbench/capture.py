@@ -13,7 +13,7 @@ def start_capture(node, unit, command, output):
     node.succeed(
         f"systemd-run --unit={unit} --collect --property=KillSignal=SIGINT -- {command}"
     )
-    node.wait_until_succeeds(f"test -e {output}", timeout=30)
+    node.wait_until_succeeds(f"test -e {output}", timeout=180)
 
 
 def stop_capture(node, unit):
@@ -111,6 +111,18 @@ def stop_profilers(run):
             f"perf script -i {out}/perf.data 2>/dev/null | stackcollapse-perf.pl"
             f" | flamegraph.pl --title '{node.name} {run}' > {out}/flame.svg"
         )
+    out = run_dir(server, run)
+    server.succeed(
+        f"perf script -i {out}/perf.data 2>/dev/null | stackcollapse-perf.pl > {out}/stacks.folded || true"
+    )
+    server.succeed(
+        f"grep -E '^[.]?postgres' {out}/stacks.folded | flamegraph.pl --title 'postgres {run}'"
+        f" > {out}/flame-postgres.svg || true"
+    )
+    server.succeed(
+        f"perf report -i {out}/perf.data --sort comm,dso,sym --stdio --no-children -g none --percent-limit 0.3"
+        f" > {out}/perf-report.txt 2>/dev/null || true"
+    )
 
 
 def postgres_log():
