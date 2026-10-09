@@ -15,9 +15,10 @@ pub struct AttrError {
     pub message: String,
 }
 
+pub type FoundDerivations<'a> = &'a (dyn Fn(Vec<ResolvedDerivation>) + Send + Sync);
+
 #[derive(Debug, Default)]
 pub struct FlakeDiscovery {
-    pub derivations: Vec<ResolvedDerivation>,
     pub warnings: Vec<String>,
     pub errors: Vec<AttrError>,
 }
@@ -49,6 +50,7 @@ pub trait DerivationResolver: Send + Sync + std::fmt::Debug + 'static {
         wildcards: Vec<String>,
         overrides: &[(String, String)],
         imports: &dyn ImportBuilder,
+        found: FoundDerivations<'_>,
     ) -> Result<FlakeDiscovery>;
 
     async fn release_evaluators(&self);

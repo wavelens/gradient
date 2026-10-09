@@ -50,9 +50,10 @@ Flake jobs fetch and evaluate a flake. The server can pick the steps at queue ti
 | `EvaluateDerivations` | Eval cache pull, attribute discovery, closure walk, eval cache push |
 
 - **Eval Cache:** Workers pull the evaluation cache before discovery and push the cache after a walk with derivations. Empty or schemaless caches stay local.
-- **Attribute Failures:** Workers send them as `EvalMessage { level: Error, source: "nix-eval:<attr>" }` before the walk.
+- **Attribute Failures:** Workers send them as `EvalMessage { level: Error, source: "nix-eval:<attr>" }` before the last `EvalResult`.
 - **Import From Derivation:** Workers send `ImportRequest { drv_paths }` during discovery and wait for `ImportResult`.
-- **Walk:** Workers walk the derivations breadth-first in waves of up to 256.
+- **Walk:** Workers walk an entry point as soon as discovery returned it.
+- **Waves:** Waves hold up to 256 of the most recently found derivations. Leaf derivations then come early in the walk, and their builds can start mid-evaluation.
 
 ```mermaid
 sequenceDiagram
