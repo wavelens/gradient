@@ -506,7 +506,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
              command: () => this.runAction(this.evaluationsService.prioritizeEvaluation(selected.id),
                'Evaluation prioritized', 'Failed to prioritize evaluation.') }]
         : []),
-      ...(this.authService.isAuthenticated() && this.triggerAccess().canEdit
+      ...(this.canTrigger()
         ? [{ label: 'Full rewalk', icon: 'account_tree',
              disabled: this.starting() || this.evaluationInProgress(),
              command: () => this.startEvaluation('full') }]
@@ -518,20 +518,24 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
     ];
   });
 
-  private canPrioritize(): boolean {
+  private canTrigger(): boolean {
     return this.authService.isAuthenticated() && this.triggerAccess().canEdit;
   }
 
+  private isSuperuser(): boolean {
+    return this.authService.user()?.superuser === true;
+  }
+
   private canPrioritizeEvaluation(evaluation: EvaluationSummary): boolean {
-    return this.canPrioritize() && !evaluation.prioritized && this.isRunning(evaluation.status);
+    return this.isSuperuser() && !evaluation.prioritized && this.isRunning(evaluation.status);
   }
 
   private canPrioritizeEntryPoint(ep: EntryPointSummary): boolean {
-    return this.canPrioritize() && !ep.prioritized && isPendingBuildStatus(ep.build_status);
+    return this.isSuperuser() && !ep.prioritized && isPendingBuildStatus(ep.build_status);
   }
 
   private canRetryEvaluation(evaluation: EvaluationSummary): boolean {
-    return this.canPrioritize()
+    return this.canTrigger()
       && !this.isRunning(evaluation.status)
       && evaluation.builds.failed + evaluation.builds.aborted > 0;
   }

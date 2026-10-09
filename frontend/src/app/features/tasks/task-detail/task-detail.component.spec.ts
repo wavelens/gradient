@@ -146,7 +146,7 @@ function makeTasksService(access: AccessState, overrides: SetupOverrides = {}): 
 function setup(
   access: AccessState,
   serviceOverrides: Parameters<typeof makeTasksService>[1] = {},
-  authenticated = true,
+  visitor: 'anonymous' | 'member' | 'superuser' = 'member',
 ): {
   fixture: ComponentFixture<TaskDetailComponent>;
   tasksService: TasksService;
@@ -172,7 +172,10 @@ function setup(
       { provide: TasksService, useValue: tasksService },
       { provide: EvaluationsService, useValue: evaluationsService },
       { provide: ProjectsService, useValue: { getProject: serviceOverrides.getProject ?? (() => of({ display_name: 'Acme' })) } },
-      { provide: AuthService, useValue: { isAuthenticated: () => authenticated } },
+      { provide: AuthService, useValue: {
+        isAuthenticated: () => visitor !== 'anonymous',
+        user: () => (visitor === 'anonymous' ? null : { superuser: visitor === 'superuser' }),
+      } },
       { provide: StarsService, useValue: { starred: vi.fn(() => of(true)), set: () => of(true) } },
       { provide: LiveService, useValue: { connect: () => frames } },
     ],
@@ -315,7 +318,7 @@ describe('TaskDetailComponent evaluation menu', () => {
   });
 
   it('offers no retry to an anonymous visitor', () => {
-    const { fixture } = setup(trigger, { primaryStatus: 'Completed', primary: failedBuilds }, false);
+    const { fixture } = setup(trigger, { primaryStatus: 'Completed', primary: failedBuilds }, 'anonymous');
     expect(menuLabels(fixture)).not.toContain('Retry');
   });
 
@@ -850,7 +853,8 @@ describe('TaskDetailComponent diagnostic report', () => {
   }
 
   it('offers the logs first, then metrics and the diagnostic report', () => {
-    const labels = component().panelMenuModel().map(i => i.label);
+    const { fixture } = setup({ managed: false, canEdit: true, canTrigger: true }, {}, 'superuser');
+    const labels = fixture.componentInstance.panelMenuModel().map(i => i.label);
     expect(labels).toEqual(['Logs', 'Show job', 'Metrics', 'Prioritize', 'Full rewalk', 'Diagnostic report']);
   });
 
@@ -862,7 +866,7 @@ describe('TaskDetailComponent diagnostic report', () => {
   /// Generating a report is an authenticated endpoint, so the entry point is
   /// gone rather than present and guaranteed to fail.
   it('hides the diagnostic report from anonymous visitors', () => {
-    const { fixture } = setup({ managed: false, canEdit: true, canTrigger: true }, {}, false);
+    const { fixture } = setup({ managed: false, canEdit: true, canTrigger: true }, {}, 'anonymous');
     const labels = fixture.componentInstance.panelMenuModel().map(i => i.label);
     expect(labels).toEqual(['Logs', 'Show job', 'Metrics']);
   });
@@ -1028,14 +1032,13 @@ describe('TaskDetailComponent - status phases', () => {
 
 describe('TaskDetailComponent prioritize', () => {
   const trigger = { managed: false, canEdit: true, canTrigger: true };
-  const viewer = { managed: false, canEdit: false, canTrigger: false };
   const pkgLabels = (fixture: ComponentFixture<TaskDetailComponent>, ep: EntryPointSummary) => {
     fixture.componentInstance.openPkgMenu(new Event('click'), ep, 'e1', { toggle: () => {} });
     return fixture.componentInstance.pkgMenuModel().map(i => i.label);
   };
 
   it('prioritizes a running evaluation from the panel menu, then refreshes', () => {
-    const { fixture, tasksService, evaluationsService } = setup(trigger, { primaryStatus: 'Building' });
+    const { fixture, tasksService, evaluationsService } = setup(trigger, { primaryStatus: 'Building' }, 'superuser');
     const spy = vi.spyOn(evaluationsService, 'prioritizeEvaluation');
     const reload = vi.spyOn(tasksService, 'getTask');
     fixture.componentInstance.panelMenuModel().find(i => i.label === 'Prioritize')!.command!();
@@ -1044,34 +1047,34 @@ describe('TaskDetailComponent prioritize', () => {
   });
 
   it('offers no evaluation prioritize once the evaluation finished', () => {
-    const { fixture } = setup(trigger, { primaryStatus: 'Completed' });
+    const { fixture } = setup(trigger, { primaryStatus: 'Completed' }, 'superuser');
     expect(menuLabels(fixture)).not.toContain('Prioritize');
   });
 
   it('offers no evaluation prioritize once it is prioritized', () => {
-    const { fixture } = setup(trigger, { primaryStatus: 'Building', primary: { prioritized: true } });
+    const { fixture } = setup(trigger, { primaryStatus: 'Building', primary: { prioritized: true } }, 'superuser');
     expect(menuLabels(fixture)).not.toContain('Prioritize');
   });
 
-  it('offers no evaluation prioritize without trigger access', () => {
-    const { fixture } = setup(viewer, { primaryStatus: 'Building' });
+  it('offers no evaluation prioritize to a member with edit access who is not a superuser', () => {
+    const { fixture } = setup(trigger, { primaryStatus: 'Building' });
     expect(menuLabels(fixture)).not.toContain('Prioritize');
   });
 
   it('offers no evaluation prioritize to an anonymous visitor', () => {
-    const { fixture } = setup(trigger, { primaryStatus: 'Building' }, false);
+    const { fixture } = setup(trigger, { primaryStatus: 'Building' }, 'anonymous');
     expect(menuLabels(fixture)).not.toContain('Prioritize');
   });
 
   it('reports a failed prioritize', () => {
-    const { fixture, evaluationsService } = setup(trigger, { primaryStatus: 'Building' });
+    const { fixture, evaluationsService } = setup(trigger, { primaryStatus: 'Building' }, 'superuser');
     vi.spyOn(evaluationsService, 'prioritizeEvaluation').mockReturnValue(throwError(() => new Error('Evaluation already finished')));
     fixture.componentInstance.panelMenuModel().find(i => i.label === 'Prioritize')!.command!();
     expect(fixture.componentInstance.errorMessage()).toBe('Evaluation already finished');
   });
 
   it('prioritizes a pending entry point by its build id', () => {
-    const { fixture, evaluationsService } = setup(trigger);
+    const { fixture, evaluationsService } = setup(trigger, {}, 'superuser');
     const spy = vi.spyOn(evaluationsService, 'prioritizeBuild');
     const ep = { ...epSummary('hello'), build_status: 'Queued' } as EntryPointSummary;
     expect(pkgLabels(fixture, ep)).toContain('Prioritize');
@@ -1080,18 +1083,18 @@ describe('TaskDetailComponent prioritize', () => {
   });
 
   it('offers no entry point prioritize once its build finished', () => {
-    const { fixture } = setup(trigger);
+    const { fixture } = setup(trigger, {}, 'superuser');
     expect(pkgLabels(fixture, epSummary('hello'))).not.toContain('Prioritize');
   });
 
   it('offers no entry point prioritize once it is prioritized', () => {
-    const { fixture } = setup(trigger);
+    const { fixture } = setup(trigger, {}, 'superuser');
     const ep = { ...epSummary('hello'), build_status: 'Queued', prioritized: true } as EntryPointSummary;
     expect(pkgLabels(fixture, ep)).not.toContain('Prioritize');
   });
 
-  it('offers no entry point prioritize without trigger access', () => {
-    const { fixture } = setup(viewer);
+  it('offers no entry point prioritize to a member with edit access who is not a superuser', () => {
+    const { fixture } = setup(trigger);
     const ep = { ...epSummary('hello'), build_status: 'Building' } as EntryPointSummary;
     expect(pkgLabels(fixture, ep)).not.toContain('Prioritize');
   });
@@ -1109,7 +1112,7 @@ describe('TaskDetailComponent header star', () => {
   });
 
   it('shows no star to a guest', () => {
-    const { fixture } = setup(access, {}, false);
+    const { fixture } = setup(access, {}, 'anonymous');
     expect((fixture.nativeElement as HTMLElement).querySelector('gr-star-button')).toBeNull();
   });
 });

@@ -6,7 +6,7 @@
 
 use crate::access::is_project_member;
 use crate::authorization::MaybeApiKey;
-use crate::error::{WebError, WebResult};
+use crate::error::{WebError, WebResult, require_superuser};
 use crate::helpers::ok_json;
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
@@ -86,11 +86,11 @@ pub async fn post_build_retry(
 pub async fn post_build_prioritize(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
     Extension(scheduler): Extension<Arc<gradient_scheduler::Scheduler>>,
     Path(build_id): Path<BuildJobId>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let ctx = load_member_build(&state, &user, &api_key, build_id).await?;
+    require_superuser(&user)?;
+    let ctx = BuildAccessContext::load_unguarded(&state, build_id).await?;
 
     scheduler
         .prioritize_build(ctx.shared_build.id)

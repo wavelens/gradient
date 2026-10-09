@@ -6,8 +6,8 @@
 
 use crate::access::is_project_member;
 use crate::authorization::MaybeApiKey;
-use crate::error::{WebError, WebResult};
-use crate::helpers::ok_json;
+use crate::error::{WebError, WebResult, require_superuser};
+use crate::helpers::{OptionExt, ok_json};
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
 use gradient_core::ServerState;
@@ -90,19 +90,17 @@ pub async fn post_evaluation_retry(
 pub async fn post_evaluation_prioritize(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
     Extension(scheduler): Extension<Arc<gradient_scheduler::Scheduler>>,
     Path(evaluation_id): Path<EvaluationId>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let api_key_ref = api_key.as_ref();
-    let ctx =
-        EvalAccessContext::load(&state, evaluation_id, &Some(user.clone()), api_key_ref).await?;
-    if !is_project_member(&state, user.id, ctx.project_id, api_key_ref).await? {
-        return Err(WebError::not_found("Evaluation"));
-    }
+    require_superuser(&user)?;
+    let evaluation = EEvaluation::find_by_id(evaluation_id)
+        .one(&state.web_db)
+        .await?
+        .or_not_found("Evaluation")?;
 
     scheduler
-        .prioritize_evaluation(ctx.evaluation.id)
+        .prioritize_evaluation(evaluation.id)
         .await
         .map_err(|e| WebError::internal(e.to_string()))?;
 

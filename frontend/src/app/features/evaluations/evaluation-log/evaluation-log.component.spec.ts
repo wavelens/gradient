@@ -12,7 +12,8 @@ import { EvaluationLogComponent } from './evaluation-log.component';
 import { BuildItem, EvaluationsService } from '@core/services/evaluations.service';
 import { LiveEvent, LiveService } from '@core/services/live.service';
 import { Subject, of } from 'rxjs';
-import { Evaluation, EvaluationStatus } from '@core/models';
+import { Evaluation, EvaluationStatus, User } from '@core/models';
+import { AuthService } from '@core/services/auth.service';
 
 function build(id: string, name: string, status = 'Completed', depth = 0): BuildItem {
   return { id, name, status, has_artefacts: false, updated_at: '', build_time_ms: null, build_started_at: null, dispatched_job: null, depth, prioritized: false, ifd: false };
@@ -414,9 +415,19 @@ describe('EvaluationLogComponent', () => {
         return cmp;
       }
 
-      it('offers prioritize for a pending build to a member who may trigger', () => {
+      function asSuperuser(cmp: EvaluationLogComponent): EvaluationLogComponent {
+        vi.spyOn(TestBed.inject(AuthService), 'user').mockReturnValue({ superuser: true } as User);
+        return cmp;
+      }
+
+      it('offers prioritize for a pending build to a superuser', () => {
         const { cmp } = setup();
-        expect(open(withTrigger(cmp), target({ status: 'Queued' })).has('Prioritize')).toBe(true);
+        expect(open(asSuperuser(cmp), target({ status: 'Queued' })).has('Prioritize')).toBe(true);
+      });
+
+      it('hides prioritize from a member who may trigger but is not a superuser', () => {
+        const { cmp } = setup();
+        expect(open(withTrigger(cmp), target({ status: 'Queued' })).has('Prioritize')).toBe(false);
       });
 
       it('hides prioritize from a view-only visitor', () => {
@@ -426,13 +437,13 @@ describe('EvaluationLogComponent', () => {
 
       it('hides prioritize once the build is already prioritized', () => {
         const { cmp } = setup();
-        expect(open(withTrigger(cmp), target({ status: 'Queued', prioritized: true })).has('Prioritize')).toBe(false);
+        expect(open(asSuperuser(cmp), target({ status: 'Queued', prioritized: true })).has('Prioritize')).toBe(false);
       });
 
       it('hides prioritize for a finished build', () => {
         const { cmp } = setup();
         for (const status of ['Completed', 'Substituted', 'FailedPermanent', 'DependencyFailed', 'Skipped']) {
-          expect(open(withTrigger(cmp), target({ status })).has('Prioritize')).toBe(false);
+          expect(open(asSuperuser(cmp), target({ status })).has('Prioritize')).toBe(false);
         }
       });
 
@@ -440,7 +451,7 @@ describe('EvaluationLogComponent', () => {
         const { cmp } = setup();
         const prioritize = vi.spyOn(TestBed.inject(EvaluationsService), 'prioritizeBuild').mockReturnValue(of('Success'));
         const reload = vi.spyOn(cmp, 'loadBuilds').mockImplementation(() => {});
-        open(withTrigger(cmp), target({ status: 'Building' })).get('Prioritize')!.command!();
+        open(asSuperuser(cmp), target({ status: 'Building' })).get('Prioritize')!.command!();
         expect(prioritize).toHaveBeenCalledWith('b1');
         expect(reload).toHaveBeenCalled();
       });

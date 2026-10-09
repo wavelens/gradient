@@ -4043,7 +4043,7 @@ paths:
       tags: [evals]
       summary: Prioritize evaluation
       description: |-
-        Hands out every build of an active evaluation, including builds it has not resolved yet, ahead of unprioritized work. Requires project membership. A finished evaluation is left unchanged; a failed or aborted one loses its priority.
+        Hands out every build of an active evaluation, including builds it has not resolved yet, ahead of unprioritized work. Requires a superuser (`403` with `code: "superuser_required"` otherwise). A finished evaluation is left unchanged; a failed or aborted one loses its priority.
       operationId: prioritizeEvaluation
       responses:
         '200':
@@ -4848,7 +4848,7 @@ paths:
       tags: [builds]
       summary: Prioritize build
       description: |-
-        Hands out the build and every open build of its dependency closure ahead of unprioritized work. Requires project membership. A build loses its priority when it fails permanently, dependency-fails, times out, is aborted or is skipped.
+        Hands out the build and every open build of its dependency closure ahead of unprioritized work. Requires a superuser (`403` with `code: "superuser_required"` otherwise). A build loses its priority when it fails permanently, dependency-fails, times out, is aborted or is skipped.
       operationId: prioritizeBuild
       responses:
         '200':
