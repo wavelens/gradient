@@ -94,9 +94,6 @@ pub(super) async fn handle_github_check_run(
                 "PR approval gate cleared via GitHub action"
             );
             on_approval_granted(state, &unparked).await;
-            if let Some(pr_number) = approval_pr_number(&eval) {
-                submit_pr_approval_review(state, task_id, owner, repo, pr_number).await;
-            }
         }
         Ok(None) => {
             warn!(
@@ -204,46 +201,6 @@ async fn unpark_pr_approval_eval(
             warn!(error = %e, evaluation_id = %eval.id, "Failed to unpark approval gate via review");
             None
         }
-    }
-}
-
-fn approval_pr_number(eval: &MEvaluation) -> Option<u64> {
-    match eval
-        .waiting_reason
-        .as_ref()
-        .and_then(WaitingReason::from_json)?
-    {
-        WaitingReason::Approval { pr_number, .. } => Some(pr_number),
-        _ => None,
-    }
-}
-
-pub(super) async fn submit_pr_approval_review(
-    state: &Arc<ServerState>,
-    task_id: TaskId,
-    owner: &str,
-    repo: &str,
-    pr_number: u64,
-) {
-    let reporter = match gradient_ci::actions::reporter_for_task(&state.ci(), task_id).await {
-        Ok(Some(r)) => r,
-        Ok(None) => return,
-        Err(e) => {
-            warn!(error = %e, %task_id, "resolving reporter for PR approval review");
-            return;
-        }
-    };
-
-    if let Err(e) = reporter
-        .approve_pull_request(
-            owner,
-            repo,
-            pr_number,
-            "Approved via Gradient maintainer approval gate.",
-        )
-        .await
-    {
-        warn!(error = %e, %task_id, pr_number, "submitting Git host PR approval review failed");
     }
 }
 
