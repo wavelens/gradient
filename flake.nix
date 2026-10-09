@@ -137,6 +137,7 @@
 
       shellHook = ''
         ln -sfn ${self.packages.${system}.gradient-logo}/logo-transparent.svg frontend/public/images/logo.svg
+        ln -sfn ${self.packages.${system}.gradient-logo}/logo-outlined.svg frontend/public/images/favicon.svg
       '';
     };
   }) // {
