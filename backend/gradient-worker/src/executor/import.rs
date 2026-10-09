@@ -113,7 +113,7 @@ async fn import_derivation(
         attr,
         ifd: true,
     };
-    walk_and_publish(drv_reader, reporter, vec![root], &mut abort, Vec::new())
+    walk_and_publish(drv_reader, reporter, vec![root], &mut abort)
         .await
         .map_err(|e| format!("recording import '{drv_path}' failed: {e:#}"))?;
 

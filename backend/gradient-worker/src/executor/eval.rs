@@ -14,7 +14,7 @@ use crate::worker_pool::WorkerPoolResolver;
 use anyhow::{Context, Result};
 use futures::stream::{FuturesOrdered, FuturesUnordered, StreamExt as _};
 use gradient_derivation::parse_drv;
-use gradient_sources::{AttrError, DerivationResolver, FlakeDiscovery};
+use gradient_sources::{AttrError, DerivationResolver, FlakeDiscovery, ResolvedDerivation};
 use gradient_wire::messages::{
     DiscoveredDerivation, EvalAttrCost, EvalStatsReport, FlakeJob, FlakeOutputNode, FlakeSource,
 };
@@ -440,10 +440,12 @@ const PUBLISH_BACKLOG: usize = 64;
 struct Flush {
     paths: Vec<(String, Option<u64>)>,
     derivations: Vec<DiscoveredDerivation>,
-    warnings: Vec<String>,
 }
 
-async fn publish(reporter: &dyn JobReporter, mut flushes: mpsc::Receiver<Flush>) -> Result<()> {
+async fn publish(
+    reporter: &dyn JobReporter,
+    mut flushes: mpsc::Receiver<Flush>,
+) -> Result<HashSet<String>> {
     let mut pushed = HashSet::new();
     let mut pushes = FuturesOrdered::new();
     loop {
@@ -466,7 +468,7 @@ async fn publish(reporter: &dyn JobReporter, mut flushes: mpsc::Receiver<Flush>)
         report(reporter, cached?).await?;
     }
 
-    Ok(())
+    Ok(pushed)
 }
 
 fn fresh_paths(pushed: &mut HashSet<String>, flush: &mut Flush) -> Vec<(String, Option<u64>)> {
@@ -478,7 +480,7 @@ fn fresh_paths(pushed: &mut HashSet<String>, flush: &mut Flush) -> Vec<(String, 
 
 async fn report(reporter: &dyn JobReporter, flush: Flush) -> Result<()> {
     reporter
-        .report_eval_result(flush.derivations, flush.warnings, vec![])
+        .report_eval_result(flush.derivations, vec![], vec![])
         .await
 }
 
@@ -528,22 +530,58 @@ pub(super) async fn walk_and_publish(
     reporter: &dyn JobReporter,
     roots: Vec<Root>,
     abort: &mut super::AbortSignal,
-    warnings: Vec<String>,
 ) -> Result<()> {
     let (flushes, published) = mpsc::channel(PUBLISH_BACKLOG);
-    let walker = ClosureWalker::new(drv_reader, roots, flushes);
-    tokio::try_join!(
-        walker.walk(reporter, abort, warnings),
-        publish(reporter, published),
-    )?;
+    let walk = async {
+        let mut walker = ClosureWalker::new(drv_reader, flushes);
+        roots.into_iter().for_each(|root| walker.add_root(root));
+        while !walker.pending.is_empty() {
+            walker.walk_wave(reporter, abort).await?;
+        }
+        walker.completed();
+        walker.flush().await
+    };
+    tokio::try_join!(walk, publish(reporter, published))?;
     Ok(())
+}
+
+#[derive(Default)]
+struct FoundAttrs {
+    attrs: usize,
+    roots: Vec<Root>,
+    failed: Vec<AttrError>,
+}
+
+impl FoundAttrs {
+    fn take(&mut self, (attr, resolved): ResolvedDerivation) -> Option<Root> {
+        self.attrs += 1;
+        match resolved {
+            Ok((drv_path, _refs)) => {
+                let root = Root {
+                    drv_path,
+                    attr,
+                    ifd: false,
+                };
+                self.roots.push(root.clone());
+                Some(root)
+            }
+            Err(e) => {
+                self.failed.push(AttrError {
+                    attr,
+                    message: format!("{e:#}"),
+                });
+                None
+            }
+        }
+    }
 }
 
 struct ClosureWalker<'a> {
     drv_reader: &'a dyn DrvReader,
     batch: Vec<DiscoveredDerivation>,
     visited: HashSet<String>,
-    queue: VecDeque<Queued>,
+    rooted: HashSet<String>,
+    pending: VecDeque<Queued>,
     walked: usize,
     start: Instant,
     paths: Vec<(String, Option<u64>)>,
@@ -551,20 +589,13 @@ struct ClosureWalker<'a> {
 }
 
 impl<'a> ClosureWalker<'a> {
-    fn new(drv_reader: &'a dyn DrvReader, roots: Vec<Root>, flushes: mpsc::Sender<Flush>) -> Self {
-        info!(roots = roots.len(), "starting closure walk");
-        let mut visited = HashSet::new();
-        let mut queue = VecDeque::new();
-        for root in roots {
-            if visited.insert(root.drv_path.clone()) {
-                queue.push_back(Queued::Root(root));
-            }
-        }
+    fn new(drv_reader: &'a dyn DrvReader, flushes: mpsc::Sender<Flush>) -> Self {
         Self {
             drv_reader,
             batch: Vec::new(),
-            visited,
-            queue,
+            visited: HashSet::new(),
+            rooted: HashSet::new(),
+            pending: VecDeque::new(),
             walked: 0,
             start: Instant::now(),
             paths: Vec::new(),
@@ -572,38 +603,73 @@ impl<'a> ClosureWalker<'a> {
         }
     }
 
-    async fn walk(
+    fn add_root(&mut self, root: Root) {
+        if self.rooted.insert(root.drv_path.clone()) {
+            self.visited.insert(root.drv_path.clone());
+            self.pending.push_front(Queued::Root(root));
+        }
+    }
+
+    async fn walk_found(
         mut self,
         reporter: &dyn JobReporter,
-        abort: &mut super::AbortSignal,
-        warnings: Vec<String>,
-    ) -> Result<()> {
-        while !self.queue.is_empty() {
-            if abort.is_aborted() {
-                return Err(abort_err());
+        attrs: &mut mpsc::UnboundedReceiver<ResolvedDerivation>,
+        abort: &super::AbortSignal,
+    ) -> Result<(FoundAttrs, Flush)> {
+        let mut found = FoundAttrs::default();
+        loop {
+            let next = if self.pending.is_empty() {
+                attrs.recv().await
+            } else {
+                attrs.try_recv().ok()
+            };
+            match next {
+                Some(attr) => {
+                    if let Some(root) = found.take(attr) {
+                        self.add_root(root);
+                    }
+                }
+                None if self.pending.is_empty() => break,
+                None => self.walk_wave(reporter, abort).await?,
             }
-            self.process_wave(reporter).await?;
         }
+        self.completed();
 
+        let rest = Flush {
+            paths: std::mem::take(&mut self.paths),
+            derivations: std::mem::take(&mut self.batch),
+        };
+        Ok((found, rest))
+    }
+
+    async fn walk_wave(
+        &mut self,
+        reporter: &dyn JobReporter,
+        abort: &super::AbortSignal,
+    ) -> Result<()> {
+        if abort.is_aborted() {
+            return Err(abort_err());
+        }
+        self.process_wave(reporter).await
+    }
+
+    fn completed(&self) {
         info!(
             walked = self.walked,
             elapsed_secs = self.start.elapsed().as_secs(),
             "closure walk complete"
         );
-
-        self.flush(warnings).await
     }
 
-    async fn flush(&mut self, warnings: Vec<String>) -> Result<()> {
+    async fn flush(&mut self) -> Result<()> {
         debug!(
             count = self.batch.len(),
-            remaining = self.queue.len(),
+            remaining = self.pending.len(),
             "flushing eval batch"
         );
         let flush = Flush {
             paths: std::mem::take(&mut self.paths),
             derivations: std::mem::take(&mut self.batch),
-            warnings,
         };
         self.flushes
             .send(flush)
@@ -611,13 +677,22 @@ impl<'a> ClosureWalker<'a> {
             .map_err(|_| anyhow::anyhow!("the eval publisher stopped before the walk"))
     }
 
-    #[tracing::instrument(name = "wave", level = "debug", skip_all, fields(queued = self.queue.len()))]
-    async fn process_wave(&mut self, reporter: &dyn JobReporter) -> Result<()> {
-        let wave_size = self.queue.len().min(DRV_READ_CONCURRENCY);
-        let wave: Vec<_> = (0..wave_size)
-            .map(|_| self.queue.pop_front().expect("wave_size <= queue.len()"))
-            .collect();
+    fn next_wave(&mut self) -> Vec<Queued> {
+        let mut wave = Vec::with_capacity(self.pending.len().min(DRV_READ_CONCURRENCY));
+        while wave.len() < DRV_READ_CONCURRENCY
+            && let Some(queued) = self.pending.pop_back()
+        {
+            match &queued {
+                Queued::Dependency(drv_path) if self.rooted.contains(drv_path) => {}
+                _ => wave.push(queued),
+            }
+        }
+        wave
+    }
 
+    #[tracing::instrument(name = "wave", level = "debug", skip_all, fields(pending = self.pending.len()))]
+    async fn process_wave(&mut self, reporter: &dyn JobReporter) -> Result<()> {
+        let wave = self.next_wave();
         let parsed_drvs = parse_drv_wave(self.drv_reader, &wave).await?;
 
         let mut new_deps: Vec<String> = Vec::new();
@@ -650,12 +725,15 @@ impl<'a> ClosureWalker<'a> {
         };
 
         if !known_set.is_empty() {
-            debug!(pruned = known_set.len(), "BFS: pruning known subtrees");
+            debug!(
+                pruned = known_set.len(),
+                "closure walk: pruning known subtrees"
+            );
         }
 
         for dep in new_deps {
             if !known_set.contains(&dep) {
-                self.queue.push_back(Queued::Dependency(dep));
+                self.pending.push_back(Queued::Dependency(dep));
             }
         }
 
@@ -670,14 +748,14 @@ impl<'a> ClosureWalker<'a> {
             if self.walked.is_multiple_of(500) {
                 info!(
                     walked = self.walked,
-                    queued = self.queue.len(),
+                    pending = self.pending.len(),
                     elapsed_secs = self.start.elapsed().as_secs(),
                     "closure walk progress"
                 );
             }
 
             if self.batch.len() >= EVAL_BATCH_SIZE {
-                self.flush(vec![]).await?;
+                self.flush().await?;
             }
         }
 
@@ -780,30 +858,18 @@ pub async fn evaluate_derivations_with(
     }
     updater.report_evaluating_derivations().await?;
 
-    let repo = build_flake_url(job, local_flake_path);
-    let eval_overrides = eval_input_overrides(job, local_flake_path);
-
-    debug!(repo = %repo, "listing flake derivations");
-    let listed = {
-        let imports = EvalImportBuilder::new(&*updater, drv_reader, abort.clone());
-        unless_aborted(
-            abort,
-            resolver.list_flake_derivations(
-                repo.clone(),
-                job.wildcards.clone(),
-                &eval_overrides,
-                &imports,
-            ),
-        )
-        .await
-    };
-    let FlakeDiscovery {
-        derivations,
-        mut warnings,
-        errors: mut failed,
-    } = match listed {
+    let streamed = discover_and_walk(
+        resolver,
+        drv_reader,
+        job,
+        local_flake_path,
+        &*updater,
+        abort,
+    )
+    .await?;
+    let listed = match streamed.listed {
+        Ok(listed) => listed,
         Err(e) if e.is::<crate::executor::failure::JobAborted>() => return Err(e),
-        Ok(v) => v,
         Err(e) => {
             let err_msg = format!("list_flake_derivations failed: {:#}", e);
             warn!(error = %err_msg, "reporting eval error to server");
@@ -814,64 +880,130 @@ pub async fn evaluate_derivations_with(
         }
     };
 
-    if let Some(corrupt) = failed.iter().find_map(|e| corrupt_eval_cache(&e.message)) {
-        warn!(fingerprint = %corrupt.fingerprint, "eval-cache corrupt during discovery; failing for self-heal");
-        return Err(anyhow::Error::new(corrupt));
-    }
+    finish_evaluation(updater, job, listed, streamed.found, streamed.rest).await
+}
 
-    if derivations.is_empty() {
-        warn!("no derivations found for evaluation");
-        report_failed_attrs(updater, &failed).await?;
-        updater
-            .report_eval_result(vec![], warnings, unmatched_target_errors(&job.wildcards))
-            .await?;
-        return Ok(EvalOutcome {
-            flake_nodes: Vec::new(),
-            cacheable: false,
-        });
-    }
+struct Streamed {
+    listed: Result<FlakeDiscovery>,
+    found: FoundAttrs,
+    rest: Flush,
+}
 
-    let mut roots: Vec<Root> = Vec::new();
-    for (attr, result) in derivations {
-        match result {
-            Ok((drv_path, _refs)) => roots.push(Root {
-                drv_path,
-                attr,
-                ifd: false,
-            }),
-            Err(e) => failed.push(AttrError {
-                attr,
-                message: format!("{e:#}"),
-            }),
+async fn discover_and_walk(
+    resolver: &dyn DerivationResolver,
+    drv_reader: &dyn DrvReader,
+    job: &FlakeJob,
+    local_flake_path: Option<&str>,
+    reporter: &dyn JobReporter,
+    abort: &super::AbortSignal,
+) -> Result<Streamed> {
+    let (found_tx, mut found_rx) = mpsc::unbounded_channel();
+    let (flushes, published) = mpsc::channel(PUBLISH_BACKLOG);
+    let discovery = async {
+        Ok(discover(
+            resolver,
+            drv_reader,
+            job,
+            local_flake_path,
+            reporter,
+            abort.clone(),
+            found_tx,
+        )
+        .await)
+    };
+    let walk = ClosureWalker::new(drv_reader, flushes).walk_found(reporter, &mut found_rx, abort);
+    let ((listed, (found, mut rest)), mut pushed) = tokio::try_join!(
+        async { tokio::try_join!(discovery, walk) },
+        publish(reporter, published),
+    )?;
+
+    rest.paths = fresh_paths(&mut pushed, &mut rest);
+    Ok(Streamed {
+        listed,
+        found,
+        rest,
+    })
+}
+
+async fn discover(
+    resolver: &dyn DerivationResolver,
+    drv_reader: &dyn DrvReader,
+    job: &FlakeJob,
+    local_flake_path: Option<&str>,
+    reporter: &dyn JobReporter,
+    mut abort: super::AbortSignal,
+    found: mpsc::UnboundedSender<ResolvedDerivation>,
+) -> Result<FlakeDiscovery> {
+    let repo = build_flake_url(job, local_flake_path);
+    let eval_overrides = eval_input_overrides(job, local_flake_path);
+    debug!(repo = %repo, "listing flake derivations");
+
+    let imports = EvalImportBuilder::new(reporter, drv_reader, abort.clone());
+    let send = move |resolved: Vec<ResolvedDerivation>| {
+        for derivation in resolved {
+            let _ = found.send(derivation);
         }
-    }
+    };
+    let listed = unless_aborted(
+        &mut abort,
+        resolver.list_flake_derivations(
+            repo,
+            job.wildcards.clone(),
+            &eval_overrides,
+            &imports,
+            &send,
+        ),
+    )
+    .await;
+    drop(send);
 
+    if listed.is_ok() {
+        resolver.release_evaluators().await;
+    }
+    listed
+}
+
+async fn finish_evaluation(
+    updater: &mut dyn JobReporter,
+    job: &FlakeJob,
+    listed: FlakeDiscovery,
+    found: FoundAttrs,
+    rest: Flush,
+) -> Result<EvalOutcome> {
+    let FlakeDiscovery {
+        mut warnings,
+        errors: mut failed,
+    } = listed;
+    failed.extend(found.failed);
     if let Some(corrupt) = failed.iter().find_map(|e| corrupt_eval_cache(&e.message)) {
-        warn!(fingerprint = %corrupt.fingerprint, "eval-cache corrupt during resolve; failing for self-heal");
+        warn!(fingerprint = %corrupt.fingerprint, "eval-cache corrupt; failing for self-heal");
         return Err(anyhow::Error::new(corrupt));
     }
 
     report_failed_attrs(updater, &failed).await?;
 
-    if roots.is_empty() {
-        warn!("all attr resolutions failed");
-        updater.report_eval_result(vec![], warnings, vec![]).await?;
-        return Ok(EvalOutcome {
-            flake_nodes: Vec::new(),
-            cacheable: false,
-        });
-    }
-
-    let flake_nodes = flake_nodes_from_roots(&roots);
-    resolver.release_evaluators().await;
-
+    let errors = if found.attrs == 0 {
+        warn!("no derivations found for evaluation");
+        unmatched_target_errors(&job.wildcards)
+    } else {
+        if found.roots.is_empty() {
+            warn!("all attr resolutions failed");
+        }
+        Vec::new()
+    };
     warnings.sort_unstable();
     warnings.dedup();
 
-    walk_and_publish(drv_reader, &*updater, roots, abort, warnings).await?;
+    if !rest.paths.is_empty() {
+        updater.push_paths(&rest.paths).await?;
+    }
+    updater
+        .report_eval_result(rest.derivations, warnings, errors)
+        .await?;
+
     Ok(EvalOutcome {
-        flake_nodes,
-        cacheable: true,
+        flake_nodes: flake_nodes_from_roots(&found.roots),
+        cacheable: !found.roots.is_empty(),
     })
 }
 
@@ -1111,7 +1243,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn the_evaluators_are_released_before_the_closure_walk() {
+    async fn the_evaluators_are_released_once_discovery_ends() {
         let fixture = load_store(&fixture_dir());
         let repo = "https://example.com/repo";
         let (resolver, drv_reader) = setup_from_fixture(&fixture, repo, "hello");
@@ -1185,12 +1317,11 @@ mod tests {
     async fn each_batch_is_pushed_before_its_report_and_a_shared_source_once() {
         let reporter = RecordingJobReporter::new();
         let (flushes, published) = mpsc::channel(PUBLISH_BACKLOG);
-        for (drv, warning) in [("a.drv", "first"), ("b.drv", "second")] {
+        for drv in ["a.drv", "b.drv"] {
             flushes
                 .send(Flush {
                     paths: vec![(drv.into(), Some(120)), ("builder.sh".into(), None)],
                     derivations: vec![],
-                    warnings: vec![warning.into()],
                 })
                 .await
                 .unwrap();
@@ -1202,9 +1333,9 @@ mod tests {
         let events = reporter.events();
         let [
             ReportedEvent::PathsPushed { paths: p1 },
-            ReportedEvent::EvalResult { warnings: w1, .. },
+            ReportedEvent::EvalResult { .. },
             ReportedEvent::PathsPushed { paths: p2 },
-            ReportedEvent::EvalResult { warnings: w2, .. },
+            ReportedEvent::EvalResult { .. },
         ] = events.as_slice()
         else {
             panic!("a push before each report: {events:?}");
@@ -1217,7 +1348,6 @@ mod tests {
             ]
         );
         assert_eq!(p2, &[("b.drv".to_owned(), Some(120))]);
-        assert_eq!([w1, w2].map(|w| w[0].as_str()), ["first", "second"]);
     }
 
     #[test]
@@ -1376,6 +1506,7 @@ mod tests {
             _: Vec<String>,
             _: &[(String, String)],
             _: &dyn gradient_sources::ImportBuilder,
+            _: gradient_sources::FoundDerivations<'_>,
         ) -> Result<FlakeDiscovery> {
             std::future::pending().await
         }
@@ -1544,5 +1675,148 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[derive(Debug)]
+    struct WaitsForTheWalk {
+        drv_path: String,
+        walked: Arc<tokio::sync::Notify>,
+    }
+
+    #[async_trait::async_trait]
+    impl DerivationResolver for WaitsForTheWalk {
+        async fn list_flake_derivations(
+            &self,
+            _: String,
+            _: Vec<String>,
+            _: &[(String, String)],
+            _: &dyn gradient_sources::ImportBuilder,
+            found: gradient_sources::FoundDerivations<'_>,
+        ) -> Result<FlakeDiscovery> {
+            found(vec![("hello".into(), Ok((self.drv_path.clone(), vec![])))]);
+            self.walked.notified().await;
+            Ok(FlakeDiscovery::default())
+        }
+
+        async fn release_evaluators(&self) {}
+
+        async fn get_derivation(&self, _: String) -> Result<gradient_derivation::Derivation> {
+            std::future::pending().await
+        }
+
+        async fn get_features(&self, _: String) -> Result<(String, Vec<String>)> {
+            std::future::pending().await
+        }
+    }
+
+    struct SignalsReads {
+        drvs: FakeDrvReader,
+        walked: Arc<tokio::sync::Notify>,
+    }
+
+    #[async_trait::async_trait]
+    impl DrvReader for SignalsReads {
+        async fn read_drv(&self, store_path: &str) -> Result<Vec<u8>> {
+            self.walked.notify_one();
+            self.drvs.read_drv(store_path).await
+        }
+    }
+
+    #[tokio::test]
+    async fn a_root_is_walked_while_discovery_still_runs() {
+        let fixture = load_store(&fixture_dir());
+        let walked = Arc::new(tokio::sync::Notify::new());
+        let resolver = WaitsForTheWalk {
+            drv_path: fixture.entry_point.clone(),
+            walked: Arc::clone(&walked),
+        };
+        let drv_reader = SignalsReads {
+            drvs: FakeDrvReader::from_raw_drvs(fixture.raw_drvs.clone()),
+            walked,
+        };
+        let mut reporter = RecordingJobReporter::new();
+
+        tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            evaluate_derivations_with(
+                &resolver,
+                &drv_reader,
+                &make_flake_job("https://example.com/repo"),
+                None,
+                &mut reporter,
+                &mut never_abort(),
+            ),
+        )
+        .await
+        .expect("discovery waits for a walk that only a streamed root can start")
+        .unwrap();
+
+        assert_eq!(
+            reporter.all_eval_derivations().len(),
+            fixture.derivations.len()
+        );
+    }
+
+    fn numbered_drv(n: usize) -> String {
+        format!("/nix/store/{n:032}-n{n}.drv")
+    }
+
+    fn drv_needing(inputs: &[String]) -> Vec<u8> {
+        let inputs: Vec<String> = inputs
+            .iter()
+            .map(|path| format!(r#"("{path}",["out"])"#))
+            .collect();
+        format!(
+            r#"Derive([("out","/nix/store/{:032}-out","","")],[{}],[],"x86_64-linux","/bin/sh",[],[("name","n")])"#,
+            0,
+            inputs.join(",")
+        )
+        .into_bytes()
+    }
+
+    #[tokio::test]
+    async fn the_walk_goes_deep_before_finishing_a_wide_level() {
+        let repo = "https://example.com/repo";
+        let wide: Vec<String> = (1..=2000).map(numbered_drv).collect();
+        let chain: Vec<String> = (9001..=9004).map(numbered_drv).collect();
+        let root = numbered_drv(1_000_000);
+        let mut drvs: std::collections::HashMap<String, Vec<u8>> = wide
+            .iter()
+            .map(|path| (path.clone(), drv_needing(&[])))
+            .collect();
+        for link in chain.windows(2) {
+            drvs.insert(link[0].clone(), drv_needing(&link[1..]));
+        }
+        drvs.insert(chain[3].clone(), drv_needing(&[]));
+        let mut needed = wide.clone();
+        needed.push(chain[0].clone());
+        drvs.insert(root.clone(), drv_needing(&needed));
+        let resolver = FakeDerivationResolver::new()
+            .with_flake_attrs(repo, vec!["root".into()])
+            .with_drv_path(repo, "root", root);
+        let mut reporter = RecordingJobReporter::new();
+
+        evaluate_derivations_with(
+            &resolver,
+            &FakeDrvReader::from_raw_drvs(drvs),
+            &make_flake_job(repo),
+            None,
+            &mut reporter,
+            &mut never_abort(),
+        )
+        .await
+        .unwrap();
+
+        let order: Vec<String> = reporter
+            .all_eval_derivations()
+            .iter()
+            .map(|d| d.drv_path.clone())
+            .collect();
+        let at = |path: &String| order.iter().position(|o| o == path).unwrap();
+        assert_eq!(order.len(), 2005);
+        assert!(
+            at(&chain[3]) < at(&wide[0]),
+            "the end of the chain waits behind the whole wide level"
+        );
     }
 }

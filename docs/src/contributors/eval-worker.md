@@ -78,7 +78,7 @@ Two layers bound evaluation memory.
 - A fixed 1 GiB floor on a 2 GiB host killed evaluations that were never the cause (#579).
 - A killed subprocess will close its pipe. The parent will retry the call once, then fail only that attribute.
 - One bounded failure will replace a host OOM that could kill the worker and strand the job. The server will only register a clean disconnect.
-- The idle subprocesses shut down once an evaluation has resolved its attributes. Their heaps are not sitting through the closure walk.
+- The idle subprocesses shut down once discovery is over. Their heaps are not sitting through the rest of the closure walk.
 - The next evaluation will start fresh subprocesses.
 - `acquire` will serialise evaluations under sustained pressure, always letting one proceed.
 - Evaluation subprocesses are running with `oom_score_adj = 600` as the kernel's last resort.

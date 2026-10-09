@@ -10,11 +10,12 @@ use futures::stream::{FuturesUnordered, StreamExt};
 use gradient_derivation::{Derivation, parse_drv};
 use gradient_eval::ipc::{DiscoveryShard, ResolvedItem};
 use gradient_sources::{
-    AttrError, DerivationResolver, FlakeDiscovery, ImportBuilder, ResolvedDerivation,
+    AttrError, DerivationResolver, FlakeDiscovery, FoundDerivations, ImportBuilder,
+    ResolvedDerivation,
 };
 use gradient_util::store_path::nix_store_path;
 use gradient_util::sync::Mutex;
-use std::collections::VecDeque;
+use std::collections::{HashSet, VecDeque};
 use std::future::Future;
 use std::sync::Arc;
 
@@ -348,6 +349,7 @@ impl DerivationResolver for WorkerPoolResolver {
         wildcards: Vec<String>,
         overrides: &[(String, String)],
         imports: &dyn ImportBuilder,
+        found: FoundDerivations<'_>,
     ) -> Result<FlakeDiscovery> {
         *self.patterns.lock() = wildcards
             .iter()
@@ -390,16 +392,25 @@ impl DerivationResolver for WorkerPoolResolver {
             "discovery split into shard batches"
         );
 
-        let items = Mutex::new(Vec::<ResolvedItem>::new());
+        let listed_attrs = Mutex::new(HashSet::<String>::new());
         let warnings = Mutex::new(Vec::<String>::new());
         let errors = Mutex::new(plan_errors);
         {
             let repo = repository.as_str();
-            let (items, warnings, errors) = (&items, &warnings, &errors);
+            let (listed_attrs, warnings, errors) = (&listed_attrs, &warnings, &errors);
             let excludes = excludes.as_slice();
             pooled_fan_out(self.pool.max(), calls, |call| async move {
                 let listing = self.list_shard(repo, call, overrides, imports).await?;
-                items.lock().extend(listing.items);
+                let fresh: Vec<ResolvedDerivation> = {
+                    let mut listed = listed_attrs.lock();
+                    listing
+                        .items
+                        .into_iter()
+                        .filter(|item| listed.insert(item.attr.clone()))
+                        .map(item_to_resolved)
+                        .collect()
+                };
+                found(fresh);
                 warnings.lock().extend(listing.warnings);
                 errors.lock().extend(listing.errors);
                 Ok(discovery_calls(listing.deferred, excludes, self.pool.max()))
@@ -407,10 +418,6 @@ impl DerivationResolver for WorkerPoolResolver {
             .await?;
         }
 
-        let mut items = items.into_inner();
-        items.sort_by(|a, b| a.attr.cmp(&b.attr));
-        items.dedup_by(|a, b| a.attr == b.attr);
-        let derivations = items.into_iter().map(item_to_resolved).collect();
         let mut warnings = warnings.into_inner();
         warnings.sort_unstable();
         warnings.dedup();
@@ -425,11 +432,7 @@ impl DerivationResolver for WorkerPoolResolver {
         errors.sort_unstable();
         errors.dedup();
 
-        Ok(FlakeDiscovery {
-            derivations,
-            warnings,
-            errors,
-        })
+        Ok(FlakeDiscovery { warnings, errors })
     }
 
     async fn release_evaluators(&self) {
