@@ -85,12 +85,7 @@ pub(super) async fn serve_nar_request(
     };
     let Some(key) = store_hash(store_path) else {
         let reason = format!("invalid store path: {store_path}");
-        let unavailable = ServerMessage::NarUnavailable {
-            job_id: job_id.to_owned(),
-            store_path: store_path.to_owned(),
-            reason: reason.clone(),
-        };
-        let _ = send_server_msg(writer, &unavailable).await;
+        unavailable(writer, job_id, store_path, &reason).await;
         return Err(anyhow::anyhow!(reason));
     };
     let req = PassthroughRequest {
@@ -103,11 +98,21 @@ pub(super) async fn serve_nar_request(
     match send_nar(&state.nar_storage, writer, req, timeouts).await {
         Ok(_) => Ok(()),
         Err(PassthroughError::NotFound(reason)) => {
+            unavailable(writer, job_id, store_path, &reason).await;
             invalidate_cached_path(state, key, store_path).await;
             Err(anyhow::anyhow!(reason))
         }
         Err(e) => Err(e.into()),
     }
+}
+
+async fn unavailable(writer: &ProtoWriter, job_id: &str, store_path: &str, reason: &str) {
+    let msg = ServerMessage::NarUnavailable {
+        job_id: job_id.to_owned(),
+        store_path: store_path.to_owned(),
+        reason: reason.to_owned(),
+    };
+    let _ = send_server_msg(writer, &msg).await;
 }
 
 async fn invalidate_cached_path(state: &Arc<ServerState>, hash: &str, store_path: &str) {
