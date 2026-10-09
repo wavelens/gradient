@@ -63,6 +63,7 @@ nav:
       - Build over SSH: guides/build-over-ssh.md
       - Share a Cache: guides/share-a-cache.md
       - Upload NARs: guides/upload-nars.md
+      - Artefacts: guides/artefacts.md
       - Pull Deployment: guides/pull-deployment.md
       - Notify with Actions: guides/actions.md
       - Update Flake Inputs: guides/flake-updates.md
