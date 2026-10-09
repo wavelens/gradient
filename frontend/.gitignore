@@ -39,8 +39,6 @@ testem.log
 /typings
 __screenshots__/
 
-/public/images/logo.svg
-
 # System files
 .DS_Store
 Thumbs.db
