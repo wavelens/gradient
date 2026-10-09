@@ -53,6 +53,7 @@ sequenceDiagram
 - The uploads of consecutive batches overlap. Each `EvalResult` will follow its own batch's uploads, in walk order.
 - The worker will neither query nor upload a path again once an earlier batch of the same evaluation pushed that path.
 - The server will record each batch and move every build that can start to `Queued` right away.
+- Batches of a job waiting behind an earlier batch reach the graph writer together, up to 5000 derivations.
 - The evaluation will turn `Building` on the `JobCompleted` message.
 - Evaluation errors become error messages, failing the evaluation at the end.
 

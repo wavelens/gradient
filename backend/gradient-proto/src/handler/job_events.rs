@@ -11,6 +11,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use gradient_entity::dispatched_job::DispatchedJobOutcome;
+use gradient_graph::writer::RECORD_ROW_BUDGET;
 use gradient_scheduler::{ReportedTimeline, Scheduler};
 use gradient_types::ids::{DispatchedJobId, EvaluationId};
 use gradient_util::shutdown::Shutdown;
@@ -73,6 +74,40 @@ impl JobEvent {
             JobEvent::ImportRequest { .. } => "import_request",
         }
     }
+
+    fn absorb(&mut self, other: JobEvent) -> Option<JobEvent> {
+        let JobEvent::Update {
+            job_id,
+            update:
+                JobUpdateKind::EvalResult {
+                    derivations,
+                    warnings,
+                    errors,
+                },
+        } = self
+        else {
+            return Some(other);
+        };
+        match other {
+            JobEvent::Update {
+                job_id: other_job_id,
+                update:
+                    JobUpdateKind::EvalResult {
+                        derivations: more_derivations,
+                        warnings: more_warnings,
+                        errors: more_errors,
+                    },
+            } if other_job_id == *job_id
+                && derivations.len() + more_derivations.len() <= RECORD_ROW_BUDGET =>
+            {
+                derivations.extend(more_derivations);
+                warnings.extend(more_warnings);
+                errors.extend(more_errors);
+                None
+            }
+            other => Some(other),
+        }
+    }
 }
 
 pub(super) trait ApplyJobEvent: Send + Sync + 'static {
@@ -123,7 +158,22 @@ async fn drain(
     peer_id: String,
     handler: impl ApplyJobEvent,
 ) {
-    while let Some((received, event)) = rx.recv().await {
+    let mut held = None;
+    loop {
+        let next = match held.take() {
+            Some(next) => Some(next),
+            None => rx.recv().await,
+        };
+        let Some((received, mut event)) = next else {
+            break;
+        };
+        while let Ok((arrived, following)) = rx.try_recv() {
+            if let Some(following) = event.absorb(following) {
+                held = Some((arrived, following));
+                break;
+            }
+        }
+
         let job_id = event.job_id().to_owned();
         let span = debug_span!(
             "job_event",
@@ -366,6 +416,81 @@ mod tests {
         };
         assert_eq!(eval_result.kind(), "eval_result");
         assert_eq!(update("j").kind(), "update");
+    }
+
+    struct Labels(UnboundedSender<String>);
+
+    impl ApplyJobEvent for Labels {
+        async fn apply(&self, event: JobEvent) {
+            let label = match &event {
+                JobEvent::Update {
+                    update: JobUpdateKind::EvalResult { derivations, .. },
+                    ..
+                } => format!("{}:{}", event.job_id(), derivations.len()),
+                _ => event.job_id().to_owned(),
+            };
+            let _ = self.0.send(label);
+        }
+    }
+
+    fn eval_result(job_id: &str, derivations: usize) -> JobEvent {
+        JobEvent::Update {
+            job_id: job_id.to_owned(),
+            update: JobUpdateKind::EvalResult {
+                derivations: vec![Default::default(); derivations],
+                warnings: vec![],
+                errors: vec![],
+            },
+        }
+    }
+
+    async fn drained(events: Vec<JobEvent>) -> Vec<String> {
+        let (tx, rx) = mpsc::channel(JOB_EVENT_QUEUE);
+        for event in events {
+            tx.send((Instant::now(), event)).await.unwrap();
+        }
+        drop(tx);
+        let (labels, mut applied) = mpsc::unbounded_channel();
+        drain(rx, "w1".into(), Labels(labels)).await;
+
+        let mut order = Vec::new();
+        while let Ok(label) = applied.try_recv() {
+            order.push(label);
+        }
+        order
+    }
+
+    #[tokio::test]
+    async fn queued_eval_results_of_a_job_apply_together() {
+        let order = drained(vec![
+            eval_result("j", 50),
+            eval_result("j", 50),
+            eval_result("j", 7),
+            update("j"),
+        ])
+        .await;
+
+        assert_eq!(order, ["j:107", "j"]);
+    }
+
+    #[tokio::test]
+    async fn eval_results_of_other_jobs_keep_their_place() {
+        let order = drained(vec![
+            eval_result("a", 1),
+            eval_result("b", 1),
+            eval_result("a", 1),
+        ])
+        .await;
+
+        assert_eq!(order, ["a:1", "b:1", "a:1"]);
+    }
+
+    #[tokio::test]
+    async fn a_merged_batch_stays_within_the_graph_row_budget() {
+        let half = RECORD_ROW_BUDGET / 2 + 1;
+        let order = drained(vec![eval_result("j", half), eval_result("j", half)]).await;
+
+        assert_eq!(order, [format!("j:{half}"), format!("j:{half}")]);
     }
 
     #[tokio::test]
