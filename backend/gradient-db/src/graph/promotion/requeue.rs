@@ -187,32 +187,49 @@ pub(super) fn requeue_failed_closure_blocked_sql() -> String {
 /// Bypass the deterministic-failure block: the user asked for the rebuild.
 fn retry_build_closure_sql() -> String {
     let dependency_failed = crate::sql::status::build(BuildStatus::DependencyFailed);
+    let retryable = crate::sql::status::build_in(&BuildStatus::RETRYABLE);
+    let failed_step = |side: &str, statuses: &str| {
+        format!(
+            "{} AND EXISTS (SELECT 1 FROM derivation_build p \
+             WHERE p.derivation = {side} AND p.status IN ({statuses}))",
+            non_passthrough_predicate(side),
+        )
+    };
+    let causes = bounded_dependency_closure_cte_body(
+        "causes",
+        "SELECT $2::uuid",
+        ClosureDirection::Dependencies,
+        &failed_step("e.dependency", &format!("{dependency_failed}, {retryable}")),
+        Some("closure"),
+    );
     let dependents = bounded_dependency_closure_cte_body(
         "dependents",
-        "SELECT $2::uuid",
+        "SELECT derivation FROM retried",
         ClosureDirection::WantedBy,
-        &format!(
-            "{} AND EXISTS (SELECT 1 FROM derivation_build p \
-             WHERE p.derivation = e.derivation AND p.status = {dependency_failed})",
-            non_passthrough_predicate("e.derivation"),
-        ),
+        &failed_step("e.derivation", &dependency_failed.to_string()),
         Some("closure"),
     );
     format!(
         r#"
         WITH RECURSIVE {closure},
+        {causes},
+        retried AS (
+            SELECT c.derivation FROM causes c
+            JOIN derivation_build f ON f.derivation = c.derivation
+            WHERE f.status IN ({retryable})
+        ),
         {dependents}
         UPDATE derivation_build db
         SET status = {created}, attempt = 0,
             updated_at = (now() AT TIME ZONE 'UTC')
         WHERE db.derivation IN (SELECT derivation FROM dependents)
-          AND CASE WHEN db.derivation = $2 THEN db.status IN ({retryable})
-                   ELSE db.status = {dependency_failed} END
+          AND (db.status = {dependency_failed}
+               OR (db.status IN ({retryable})
+                   AND db.derivation IN (SELECT derivation FROM retried)))
         RETURNING db.derivation, old.status AS from_status, db.status AS to_status
         "#,
         closure = eval_closure_cte_body(),
         created = crate::sql::status::build(BuildStatus::Created),
-        retryable = crate::sql::status::build_in(&BuildStatus::RETRYABLE),
     )
 }
 
@@ -399,28 +416,47 @@ mod tests {
     }
 
     #[test]
-    fn a_retry_thaws_the_build_and_only_the_dependents_it_failed() {
+    fn a_retry_thaws_the_failed_causes_and_only_the_dependents_they_failed() {
         let norm = |s: String| s.split_whitespace().collect::<Vec<_>>().join(" ");
         let sql = norm(retry_build_closure_sql());
         let dependency_failed = crate::sql::status::build(BuildStatus::DependencyFailed);
+        let retryable = crate::sql::status::build_in(&BuildStatus::RETRYABLE);
         assert!(
             sql.starts_with("WITH RECURSIVE closure(derivation) AS"),
             "the walk stays inside the evaluation: {sql}"
         );
         assert!(
-            sql.contains("dependents(derivation) AS (SELECT $2::uuid UNION"),
+            sql.contains("causes(derivation) AS (SELECT $2::uuid UNION"),
             "{sql}"
         );
         assert!(
             sql.contains(&format!(
-                "WHERE p.derivation = e.derivation AND p.status = {dependency_failed}"
+                "WHERE p.derivation = e.dependency AND p.status IN ({dependency_failed}, {retryable})"
             )),
-            "the walk stops at a parent that failed on its own: {sql}"
+            "the walk down passes failed dependencies only: {sql}"
         );
         assert!(
             sql.contains(&format!(
-                "CASE WHEN db.derivation = $2 THEN db.status IN ({}) ELSE db.status = {dependency_failed} END",
-                crate::sql::status::build_in(&BuildStatus::RETRYABLE)
+                "retried AS ( SELECT c.derivation FROM causes c \
+                 JOIN derivation_build f ON f.derivation = c.derivation \
+                 WHERE f.status IN ({retryable}) )"
+            )),
+            "{sql}"
+        );
+        assert!(
+            sql.contains("dependents(derivation) AS (SELECT derivation FROM retried UNION"),
+            "{sql}"
+        );
+        assert!(
+            sql.contains(&format!(
+                "WHERE p.derivation = e.derivation AND p.status IN ({dependency_failed})"
+            )),
+            "the walk up stops at a parent that failed on its own: {sql}"
+        );
+        assert!(
+            sql.contains(&format!(
+                "AND (db.status = {dependency_failed} OR (db.status IN ({retryable}) \
+                 AND db.derivation IN (SELECT derivation FROM retried)))"
             )),
             "{sql}"
         );

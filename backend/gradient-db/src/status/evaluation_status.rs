@@ -7,9 +7,12 @@
 use super::logging::{PhaseSubjectKind, record_phase_event};
 use crate::DbContext;
 use crate::state_machine::EvalStateMachine;
+use chrono::NaiveDateTime;
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_types::*;
-use sea_orm::{ColumnTrait, Condition, DbErr, EntityTrait, IntoActiveModel, QueryFilter};
+use sea_orm::{
+    ColumnTrait, Condition, ConnectionTrait, DbErr, EntityTrait, IntoActiveModel, QueryFilter,
+};
 use tracing::{debug, warn};
 
 pub async fn update_evaluation_status(
@@ -69,7 +72,7 @@ pub async fn update_evaluation_status(
         .await?;
 
     if updated.rows_affected == 0 {
-        // A concurrent writer moved the row to a terminal state, and its value must win.
+        // A concurrent writer moved the row to a terminal state; keep its value.
         return Ok(EEvaluation::find_by_id(evaluation.id)
             .one(&ctx.worker_db)
             .await?
@@ -86,14 +89,64 @@ pub async fn update_evaluation_status(
             e
         });
 
+    report_evaluation_status(ctx, &updated_eval, event_status, now).await?;
+    Ok(updated_eval)
+}
+
+fn reopen_evaluation_sql() -> String {
+    format!(
+        "UPDATE evaluation e \
+         SET status = {building}, finished_at = NULL, waiting_reason = NULL, \
+             updated_at = (now() AT TIME ZONE 'UTC') \
+         WHERE e.id = $1 AND e.status IN ({reopenable}) \
+           AND NOT EXISTS (\
+             SELECT 1 FROM evaluation o \
+             WHERE o.task = e.task AND o.id <> e.id \
+               AND (o.created_at > e.created_at OR o.status NOT IN ({terminal})))",
+        building = crate::sql::status::eval(EvaluationStatus::Building),
+        reopenable = crate::sql::status::eval_in(&EvaluationStatus::REOPENABLE),
+        terminal = crate::sql::status::eval_in(&EvaluationStatus::TERMINAL),
+    )
+}
+
+crate::sql_fn! {
+    REOPEN_EVALUATION = reopen_evaluation_sql,
+        params = [EvaluationId];
+}
+
+pub async fn reopen_evaluation(ctx: &DbContext, evaluation: &MEvaluation) -> Result<bool, DbErr> {
+    let reopened = ctx
+        .worker_db
+        .execute_raw(REOPEN_EVALUATION.bind([evaluation.id.into_inner().into()]))
+        .await?;
+    if reopened.rows_affected() == 0 {
+        return Ok(false);
+    }
+
+    report_evaluation_status(
+        ctx,
+        evaluation,
+        EvaluationStatus::Building,
+        gradient_types::now(),
+    )
+    .await?;
+    Ok(true)
+}
+
+async fn report_evaluation_status(
+    ctx: &DbContext,
+    evaluation: &MEvaluation,
+    status: EvaluationStatus,
+    now: NaiveDateTime,
+) -> Result<(), DbErr> {
     crate::deliveries::events::record(
         &ctx.worker_db,
         &ctx.events,
         gradient_types::events::evaluation::Reported {
-            evaluation_id: updated_eval.id,
-            phase: gradient_types::events::evaluation::Phase::of_status(event_status),
-            status: i32::from(event_status) as i16,
-            task: updated_eval.task,
+            evaluation_id: evaluation.id,
+            phase: gradient_types::events::evaluation::Phase::of_status(status),
+            status: i32::from(status) as i16,
+            task: evaluation.task,
             ..Default::default()
         },
     )
@@ -103,14 +156,12 @@ pub async fn update_evaluation_status(
     record_phase_event(
         &ctx.worker_db,
         PhaseSubjectKind::Evaluation,
-        updated_eval.id.into_inner(),
-        i32::from(event_status) as i16,
+        evaluation.id.into_inner(),
+        i32::from(status) as i16,
         None,
         now,
     )
-    .await?;
-
-    Ok(updated_eval)
+    .await
 }
 
 pub async fn update_evaluation_status_with_error(
