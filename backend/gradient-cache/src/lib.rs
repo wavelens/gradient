@@ -4,23 +4,31 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+pub mod nar;
+
+#[cfg(feature = "server")]
 mod blobs;
+#[cfg(feature = "server")]
 mod debug_index;
+#[cfg(feature = "server")]
 mod deep_gc;
+#[cfg(feature = "server")]
 mod eval_cache;
+#[cfg(feature = "server")]
 mod evaluations;
-mod nar;
+#[cfg(feature = "server")]
 mod schedule;
+#[cfg(feature = "server")]
 mod signatures;
+#[cfg(feature = "server")]
 mod storage_migrations;
-#[cfg(test)]
+#[cfg(all(test, feature = "server"))]
 mod test_support;
+#[cfg(feature = "server")]
 mod units;
 
-use gradient_core::ServerState;
-use std::sync::Arc;
-
-pub async fn start_cache(state: Arc<ServerState>) -> std::io::Result<()> {
+#[cfg(feature = "server")]
+pub async fn start_cache(state: std::sync::Arc<gradient_core::ServerState>) -> std::io::Result<()> {
     for spec in schedule::child_specs(&state) {
         state
             .shutdown
@@ -32,4 +40,5 @@ pub async fn start_cache(state: Arc<ServerState>) -> std::io::Result<()> {
 }
 
 // Keep this rlib linked into binaries that use nothing else from it, so its sql! entries reach the SQL plan check.
+#[cfg(feature = "server")]
 pub const fn link() {}
