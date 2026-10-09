@@ -26,8 +26,8 @@ cat result/summary.txt
 
 | Pass | State before | Captured data |
 |---|---|---|
-| `cold-clean` | Fresh `gradient` database, empty worker eval cache | Spans, pcaps, Postgres statistics |
-| `warm-clean` | Same commit evaluated again | Spans, pcaps, Postgres statistics |
+| `cold-clean` | Fresh `gradient` database, empty worker eval cache | Spans, pcaps, Postgres statistics, wait samples |
+| `warm-clean` | Same commit evaluated again | Spans, pcaps, Postgres statistics, wait samples |
 | `cold-instrumented` | Reset as for `cold-clean` | Spans, perf, strace, `auto_explain` |
 | `warm-instrumented` | Same commit evaluated again | Spans, perf, strace, `auto_explain` |
 
@@ -66,6 +66,7 @@ xdg-open report/index.html
 | `<run>/proto.pcap` | Wireshark | Worker to server `/proto` traffic: round trips, frame sizes |
 | `<run>/pg.pcap` | Wireshark (`pgsql` dissector) | Every statement of the server and its latency |
 | `<run>/pg/pg_stat_statements.json` | `jq` | Top 100 statements of the `gradient` role by total time, with their planning time |
+| `<run>/pg/wait_samples.json` | `jq` | State and wait event of the busy `gradient` backends at 100 ms intervals (clean passes) |
 | `<run>/pg/job_phases.json` | `jq` | The worker's reported job phases (`dispatched_job_phase`) |
 | `<run>/pg/auto_explain.log` | Any editor | Plans with `ANALYZE` of every statement, without per-node timing (instrumented passes) |
 | `<run>/perf.data`, `<run>/flame.svg` | `perf report`, a browser | Server VM CPU profile (instrumented passes) |

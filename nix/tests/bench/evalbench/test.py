@@ -33,8 +33,10 @@ def psql(query, database="gradient"):
     return server.succeed(psql_command(query, database)).strip()
 
 
-def dump_json(query, path):
-    server.succeed(psql_command(f"SELECT coalesce(json_agg(t), '[]') FROM ({query}) t;") + f" > {path}")
+def dump_json(query, path, database="gradient"):
+    server.succeed(
+        psql_command(f"SELECT coalesce(json_agg(t), '[]') FROM ({query}) t;", database) + f" > {path}"
+    )
 
 
 def api(method, path, token=None, body=None):
@@ -127,6 +129,7 @@ def evaluate(run, cold, instrumented):
         start_profilers(run)
     else:
         start_pcaps(run)
+        start_wait_sampler()
 
     started = time.monotonic()
     eval_id = api("POST", "tasks/project/task/evaluate", token, body={})
@@ -137,6 +140,7 @@ def evaluate(run, cold, instrumented):
         stop_profilers(run)
     else:
         stop_pcaps()
+        stop_wait_sampler(run)
 
     set_auto_explain(False)
     dump_postgres(run, eval_id)
