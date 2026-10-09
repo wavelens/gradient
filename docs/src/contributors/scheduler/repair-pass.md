@@ -161,8 +161,8 @@ Gradient must prevent an unbacked terminal-success output instead of repairing o
 | Pass | Reclaimed |
 |---|---|
 | Evaluation GC (`gc_task_evaluations`, per task, keeping `keep_evaluations`) | Old evaluations. Live evaluations adopt pending shared builds first (`adopt_pending_closures`) |
-| Derivation GC (`run_derivation_gc`) | Derivations outside the dependency closure of every `entry_point` and `build_job`, after `gc.orphanDerivationHours` (24). The same pass will delete their attempt logs from log storage |
-| Stale-path eviction (`evict_stale_cached_paths`) | Unreachable paths unfetched for `gc.narTtlHours` (336) |
+| Derivation GC (`collect_orphan_derivations`) | Derivations outside the dependency closure of every `entry_point` and `build_job`, after `gc.orphanDerivationHours` (24). The same pass will delete their attempt logs from log storage |
+| Stale-path eviction (`evict_expired_cached_paths`) | Unreachable paths unfetched for `gc.narTtlHours` (336) |
 | Orphan NAR files | Stored NARs kept by no row, probed in batches of 5000, older than `gc.narUploadGraceHours` (24) |
 
 - GC will keep `.drv` and input-source NARs of any derivation with a shared build regardless of status. Nothing but an evaluation can re-push them.

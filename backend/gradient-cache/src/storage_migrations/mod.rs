@@ -10,7 +10,7 @@
 
 mod m20261001_000000_shard_build_logs;
 
-use super::units::{Step, next_unit};
+use crate::units::{Step, next_unit};
 use anyhow::{Context, Result};
 use futures::future::BoxFuture;
 use gradient_core::ServerState;
@@ -72,7 +72,7 @@ pub(super) async fn step(state: &Arc<ServerState>) -> Result<Step> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cacher::test_support::test_server_state;
+    use crate::test_support::test_server_state;
     use gradient_storage::NarStore;
     use gradient_types::*;
     use sea_orm::{DatabaseBackend, MockDatabase};

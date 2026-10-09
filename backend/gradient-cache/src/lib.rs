@@ -4,13 +4,24 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-pub mod cacher;
+mod blobs;
+mod debug_index;
+mod deep_gc;
+mod eval_cache;
+mod evaluations;
+mod nar;
+mod schedule;
+mod signatures;
+mod storage_migrations;
+#[cfg(test)]
+mod test_support;
+mod units;
 
 use gradient_core::ServerState;
 use std::sync::Arc;
 
 pub async fn start_cache(state: Arc<ServerState>) -> std::io::Result<()> {
-    for spec in cacher::child_specs(&state) {
+    for spec in schedule::child_specs(&state) {
         state
             .shutdown
             .supervise_now(spec)
@@ -20,7 +31,5 @@ pub async fn start_cache(state: Arc<ServerState>) -> std::io::Result<()> {
     Ok(())
 }
 
-/// This function is pulling the crate into binaries that reference nothing else from it. A linker
-/// is dropping an unmentioned rlib, and with it the `gradient_db::sql!` entries the plan gate is
-/// reading.
+// Keep this rlib linked into binaries that use nothing else from it, so its sql! entries reach the SQL plan check.
 pub const fn link() {}
