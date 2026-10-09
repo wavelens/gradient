@@ -39,8 +39,14 @@ A build is tied to the derivation, not to the evaluation. All evaluations needin
 | Substituted | Not built. The outputs already existed in a cache or an upstream cache |
 | Failed | The builder failed or timed out. Infrastructure errors (out of memory, disk full, network) get retried first |
 | Dependency Failed | Not started, because a dependency failed |
-| Aborted | Cancelled together with the evaluation |
+| Aborted | Cancelled by hand or together with the evaluation |
 | Skipped | An unneeded build-time dependency, with the outputs above already cached |
+
+## Abort and Retry
+
+- **Abort** on a running build can stop the build for its evaluation. Dependents in that evaluation fail, and a later evaluation can build the build again.
+- **Retry** on a failed or aborted build can queue the build and the dependents failing through the build again, inside the running evaluation.
+- A new evaluation can queue the failed builds it names again. The task option **Retry failed builds on new evaluation** (`retry_failed_builds`, on by default) can keep permanent failures failed until a retry instead.
 
 ## Imported Derivations
 

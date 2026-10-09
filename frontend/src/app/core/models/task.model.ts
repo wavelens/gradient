@@ -24,6 +24,7 @@ export interface Task {
   concurrency: ConcurrencyPolicy;
   sign_cache: boolean;
   wait_for_workers: boolean;
+  retry_failed_builds: boolean;
   created_by?: string;
   created_at?: string;
   managed: boolean;

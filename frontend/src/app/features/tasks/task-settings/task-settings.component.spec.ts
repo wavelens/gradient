@@ -36,6 +36,7 @@ function taskFor(c: AccessCase) {
     concurrency: 'soft_abort' as const,
     sign_cache: true,
     wait_for_workers: false,
+    retry_failed_builds: true,
     managed: c.managed,
     can_edit: c.canEdit,
     can_trigger: c.canTrigger ?? c.canEdit,
@@ -160,6 +161,23 @@ describe('TaskSettingsComponent - waiting for workers', () => {
       'acme',
       'demo',
       expect.objectContaining({ wait_for_workers: true }),
+    );
+  });
+});
+
+describe('TaskSettingsComponent - retrying failed builds', () => {
+  it('saves the opt-out of retrying failed builds on a new evaluation', () => {
+    const updateTask = vi.fn(() => of('ok'));
+    const fixture = setup({ managed: false, canEdit: true }, undefined, updateTask);
+    expect(fixture.componentInstance.formData.retry_failed_builds).toBe(true);
+
+    fixture.componentInstance.formData.retry_failed_builds = false;
+    fixture.componentInstance.saveSettings();
+
+    expect(updateTask).toHaveBeenCalledWith(
+      'acme',
+      'demo',
+      expect.objectContaining({ retry_failed_builds: false }),
     );
   });
 });

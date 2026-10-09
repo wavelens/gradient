@@ -12430,6 +12430,13 @@ components:
             system features no connected worker provides waits in `Waiting`
             for such a worker. When false, the evaluation is aborted with a
             warning naming the missing architecture and features.
+        retry_failed_builds:
+          type: boolean
+          default: true
+          description: |
+            When true, a new evaluation of this task queues its permanently
+            failed builds and their dependents again. When false, they stay
+            failed until `POST /builds/{build}/retry`.
 
     PatchTaskRequest:
       type: object
@@ -12461,6 +12468,10 @@ components:
           type: boolean
           description: |
             See `MakeTaskRequest.wait_for_workers`. Omit to leave unchanged.
+        retry_failed_builds:
+          type: boolean
+          description: |
+            See `MakeTaskRequest.retry_failed_builds`. Omit to leave unchanged.
 
     Task:
       type: object
@@ -12499,6 +12510,9 @@ components:
         wait_for_workers:
           type: boolean
           description: See `MakeTaskRequest.wait_for_workers`.
+        retry_failed_builds:
+          type: boolean
+          description: See `MakeTaskRequest.retry_failed_builds`.
         created_by:
           type: string
           format: uuid

@@ -79,6 +79,8 @@ pub struct StateTask {
     pub sign_cache: bool,
     #[serde(default)]
     pub wait_for_workers: bool,
+    #[serde(default = "default_true")]
+    pub retry_failed_builds: bool,
     #[serde(default)]
     pub flake_input_overrides: HashMap<String, StateFlakeInputOverride>,
     #[serde(default)]
