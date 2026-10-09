@@ -6,7 +6,7 @@
 
 mod passes;
 
-use super::units::{Step, next_unit};
+use crate::units::{Step, next_unit};
 use anyhow::Result;
 use chrono::NaiveDateTime;
 use gradient_core::ServerState;
@@ -148,7 +148,7 @@ async fn finish(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cacher::test_support::test_server_state;
+    use crate::test_support::test_server_state;
     use gradient_entity::ids::UserId;
     use gradient_storage::NarStore;
     use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};

@@ -31,7 +31,7 @@ crate::sql_fn! {
         flags = [Walk];
 }
 
-fn stale_cached_paths_sql() -> String {
+fn expired_cached_paths_sql() -> String {
     format!(
         "{live}
          SELECT cp.hash FROM cached_path cp
@@ -44,7 +44,7 @@ fn stale_cached_paths_sql() -> String {
 }
 
 crate::sql_fn! {
-    STALE_CACHED_PATHS = stale_cached_paths_sql,
+    EXPIRED_CACHED_PATHS = expired_cached_paths_sql,
         params = [Int(336)],
         tier = Sweep,
         budget = crate::sql::Budget::sweep().buffers(1_500_000)
@@ -52,7 +52,7 @@ crate::sql_fn! {
         flags = [Walk];
 }
 
-pub async fn stale_cached_paths<C>(db: &C, keep_hours: i64) -> Result<Vec<String>, sea_orm::DbErr>
+pub async fn expired_cached_paths<C>(db: &C, keep_hours: i64) -> Result<Vec<String>, sea_orm::DbErr>
 where
     C: ConnectionTrait
         + sea_orm::TransactionTrait<Transaction = sea_orm::DatabaseTransaction>
@@ -60,7 +60,7 @@ where
 {
     let walk = crate::graph::walks::begin_walk(db).await?;
     let rows = walk
-        .query_all_raw(STALE_CACHED_PATHS.bind([sea_orm::Value::Int(Some(
+        .query_all_raw(EXPIRED_CACHED_PATHS.bind([sea_orm::Value::Int(Some(
             i32::try_from(keep_hours).unwrap_or(i32::MAX),
         ))]))
         .await?;
@@ -280,7 +280,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn stale_cached_paths_selects_outside_the_live_set_past_the_bound() {
+    async fn expired_cached_paths_selects_outside_the_live_set_past_the_bound() {
         use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult, Value};
         use std::collections::BTreeMap;
 
@@ -295,7 +295,7 @@ mod tests {
             )])]])
             .into_connection();
 
-        let stale = stale_cached_paths(&db, 336).await.unwrap();
+        let stale = expired_cached_paths(&db, 336).await.unwrap();
 
         assert_eq!(stale, vec!["abc".to_owned()]);
         let log = db.into_transaction_log();
