@@ -392,6 +392,10 @@ pub fn create_router_with_scheduler(
             post(evals::post_evaluation_prioritize),
         )
         .route(
+            "/evals/{evaluation}/retry",
+            post(evals::post_evaluation_retry),
+        )
+        .route(
             "/builds/{build}/prioritize",
             post(builds::post_build_prioritize),
         )

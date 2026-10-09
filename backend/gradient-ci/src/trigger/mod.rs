@@ -15,14 +15,12 @@ use thiserror::Error;
 pub use drv_recovery::trigger_drv_recovery;
 pub use input_update::{fan_out_expansion, maybe_trigger_input_update};
 pub use new_evaluation::trigger_evaluation;
-pub use restart::trigger_restart_builds;
+pub use restart::trigger_evaluation_retry;
 
 #[derive(Debug, Error)]
 pub enum TriggerError {
     #[error("evaluation already in progress for this task")]
     AlreadyInProgress,
-    #[error("no previous evaluation found to restart from")]
-    NoPreviousEvaluation,
     #[error("database error: {0}")]
     Db(#[from] sea_orm::DbErr),
 }

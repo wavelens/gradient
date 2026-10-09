@@ -2958,8 +2958,8 @@ paths:
       description: |-
         Queues a new evaluation for the task and returns its UUID in `message`,
         so a caller can follow the run it just started (`GET /evals/{id}`, or the
-        `GET /evals/{id}/live` stream). `mode: "restart_failed"` returns the UUID
-        of the evaluation created to re-run the previous one's failed builds.
+        `GET /evals/{id}/live` stream). `POST /evals/{evaluation}/retry` re-runs
+        the failed builds of a finished evaluation.
 
         Returns `400` with `code: "repository_unreachable"` when the repository
         cannot be fetched (DNS failure, authentication failure, unreachable host,
@@ -2972,14 +2972,6 @@ paths:
             schema:
               type: object
               properties:
-                mode:
-                  type: string
-                  enum: [restart_failed]
-                  description: >-
-                    Skip fetch and evaluation and re-queue the failed builds of
-                    the most recent evaluation, a reproducible failure included:
-                    a failure is valid for the evaluation that recorded it. Omit
-                    for a normal evaluation.
                 commit:
                   type: string
                   pattern: '^[0-9a-fA-F]{40}$'
@@ -3008,8 +3000,7 @@ paths:
                   description: >-
                     `pruned` skips every dependency subtree whose record is
                     complete. `full` walks the whole closure again, the manual
-                    recovery for a graph whose record went wrong. Refused with
-                    `mode: "restart_failed"`, which walks nothing.
+                    recovery for a graph whose record went wrong.
       responses:
         '200':
           description: Evaluation UUID
@@ -4021,6 +4012,29 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
+
+  /evals/{evaluation}/retry:
+    parameters:
+      - $ref: '#/components/parameters/EvaluationId'
+    post:
+      tags: [evaluations]
+      summary: Retry evaluation
+      description: |-
+        Starts a new evaluation of the same commit without fetching or evaluating again, and returns its UUID in `message`. The new evaluation queues every failed, timed-out, aborted and dependency-failed build of the finished evaluation again, a reproducible builder failure included, whatever the task's `retry_failed_builds`. Requires project membership. Answers 409 while the evaluation or another evaluation of its task is running.
+      operationId: retryEvaluation
+      responses:
+        '200':
+          description: UUID of the new evaluation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StringResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
 
   /evals/{evaluation}/prioritize:
     parameters:
@@ -12436,7 +12450,8 @@ components:
           description: |
             When true, a new evaluation of this task queues its permanently
             failed builds and their dependents again. When false, they stay
-            failed until `POST /builds/{build}/retry`.
+            failed until `POST /builds/{build}/retry` or
+            `POST /evals/{evaluation}/retry`.
 
     PatchTaskRequest:
       type: object

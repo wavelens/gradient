@@ -77,10 +77,6 @@ export class TasksService {
     return this.api.post<string>(`tasks/${project}/${task}/evaluate`, body);
   }
 
-  restartFailedBuilds(project: string, task: string): Observable<string> {
-    return this.api.post<string>(`tasks/${project}/${task}/evaluate`, { mode: 'restart_failed' });
-  }
-
   abortEvaluation(project: string, task: string, evaluationId: string): Observable<string> {
     return this.api.post<string>(`evals/${evaluationId}`, { method: 'abort' });
   }

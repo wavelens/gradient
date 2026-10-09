@@ -375,18 +375,6 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
     this.document.removeEventListener('keydown', this.cancelNewEvaluationSelect, true);
   };
 
-  restartFailedBuilds(): void {
-    this.starting.set(true);
-    this.errorMessage.set(null);
-    this.tasksService.restartFailedBuilds(this.projectName, this.taskName).subscribe({
-      next: () => this.loadTaskData(),
-      error: (error) => {
-        this.errorMessage.set(error?.message || 'Failed to restart failed builds.');
-        this.starting.set(false);
-      },
-    });
-  }
-
   confirmAbort(): void {
     const id = this.abortTarget();
     if (!id || this.aborting()) return;
@@ -507,13 +495,16 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
         routerLink: job ? ['/board', 'jobs', job] : undefined },
       { label: 'Metrics', icon: 'show_chart',
         routerLink: ['/project', this.projectName, 'task', this.taskName, 'metrics'] },
-      ...(selected && this.canRestartFailed(selected)
-        ? [{ label: 'Restart failed builds', icon: 'refresh', disabled: this.starting(),
-             command: () => this.restartFailedBuilds() }]
+      ...(selected && this.canRetryEvaluation(selected)
+        ? [{ label: 'Retry', icon: 'replay',
+             disabled: this.starting() || this.evaluationInProgress(),
+             command: () => this.runAction(this.evaluationsService.retryEvaluation(selected.id),
+               'Evaluation retried', 'Failed to retry evaluation.') }]
         : []),
       ...(selected && this.canPrioritizeEvaluation(selected)
         ? [{ label: 'Prioritize', icon: 'keyboard_double_arrow_up',
-             command: () => this.prioritize(this.evaluationsService.prioritizeEvaluation(selected.id), 'Evaluation') }]
+             command: () => this.runAction(this.evaluationsService.prioritizeEvaluation(selected.id),
+               'Evaluation prioritized', 'Failed to prioritize evaluation.') }]
         : []),
       ...(this.authService.isAuthenticated() && this.triggerAccess().canEdit
         ? [{ label: 'Full rewalk', icon: 'account_tree',
@@ -539,22 +530,20 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
     return this.canPrioritize() && !ep.prioritized && isPendingBuildStatus(ep.build_status);
   }
 
-  private prioritize(request: Observable<string>, target: 'Evaluation' | 'Build'): void {
-    request.subscribe({
-      next: () => {
-        this.messageService.add({ severity: 'success', summary: `${target} prioritized` });
-        this.loadTaskData();
-      },
-      error: (error: Error) => this.errorMessage.set(error?.message || `Failed to prioritize ${target.toLowerCase()}.`),
-    });
-  }
-
-  /// The server restarts the task's newest evaluation, so only that one offers it.
-  private canRestartFailed(evaluation: EvaluationSummary): boolean {
-    return this.triggerAccess().canEdit
-      && evaluation.id === this.evaluations()[0]?.id
+  private canRetryEvaluation(evaluation: EvaluationSummary): boolean {
+    return this.canPrioritize()
       && !this.isRunning(evaluation.status)
       && evaluation.builds.failed + evaluation.builds.aborted > 0;
+  }
+
+  private runAction(request: Observable<string>, success: string, failure: string): void {
+    request.subscribe({
+      next: () => {
+        this.messageService.add({ severity: 'success', summary: success });
+        this.loadTaskData();
+      },
+      error: (error: Error) => this.errorMessage.set(error?.message || failure),
+    });
   }
 
   reportDialogOpen = signal(false);
@@ -631,7 +620,8 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
       },
       ...(this.canPrioritizeEntryPoint(ep)
         ? [{ label: 'Prioritize', icon: 'keyboard_double_arrow_up',
-             command: () => this.prioritize(this.evaluationsService.prioritizeBuild(ep.build_id), 'Build') }]
+             command: () => this.runAction(this.evaluationsService.prioritizeBuild(ep.build_id),
+               'Build prioritized', 'Failed to prioritize build.') }]
         : []),
     ];
   }

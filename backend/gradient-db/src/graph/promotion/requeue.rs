@@ -108,6 +108,7 @@ where
     let query = match scope {
         RepairScope::Eval(_) => &REQUEUE_FAILED_CLOSURE_FRESH,
         RepairScope::Unstick(_) => &REQUEUE_FAILED_CLOSURE_BLOCKED,
+        RepairScope::Retry(_) => &REQUEUE_FAILED_CLOSURE_ALL,
     };
     let walk = crate::graph::walks::begin_walk(db).await?;
     let rows = walk
@@ -163,6 +164,10 @@ fn requeue_failed_closure_fresh_sql() -> String {
         kept_failed_cte_body(),
         requeue_closure_update(SKIP_KEPT),
     )
+}
+
+fn requeue_failed_closure_all_sql() -> String {
+    format!("{}\n{}", eval_closure_cte(), requeue_closure_update(""))
 }
 
 pub(super) fn requeue_failed_closure_blocked_sql() -> String {
@@ -275,6 +280,11 @@ crate::sql_fn! {
         tier = Walk,
         flags = [Walk];
 
+    REQUEUE_FAILED_CLOSURE_ALL = requeue_failed_closure_all_sql,
+        params = [EvaluationId],
+        tier = Walk,
+        flags = [Walk];
+
     RETRY_BUILD_CLOSURE = retry_build_closure_sql,
         params = [EvaluationId, DerivationId],
         tier = Walk,
@@ -352,6 +362,23 @@ mod tests {
                 "{sql}"
             );
         }
+    }
+
+    #[test]
+    fn a_user_retry_of_an_evaluation_thaws_all_failures_in_its_closure() {
+        let norm = |s: String| s.split_whitespace().collect::<Vec<_>>().join(" ");
+        let sql = norm(requeue_failed_closure_all_sql());
+        assert!(
+            sql.contains(&format!(
+                "db.status IN ({}) RETURNING",
+                crate::sql::status::build_in(&BuildStatus::REQUEUEABLE)
+            )),
+            "{sql}"
+        );
+        assert!(
+            !sql.contains("kept_failed") && !sql.contains("deterministic_blocked"),
+            "{sql}"
+        );
     }
 
     #[test]

@@ -17,12 +17,13 @@ use tracing::debug;
 pub enum RepairScope {
     Eval(EvaluationId),
     Unstick(EvaluationId),
+    Retry(EvaluationId),
 }
 
 impl RepairScope {
     pub fn evaluation(&self) -> EvaluationId {
         match self {
-            RepairScope::Eval(id) | RepairScope::Unstick(id) => *id,
+            RepairScope::Eval(id) | RepairScope::Unstick(id) | RepairScope::Retry(id) => *id,
         }
     }
 }
