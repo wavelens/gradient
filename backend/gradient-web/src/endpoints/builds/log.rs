@@ -112,7 +112,9 @@ pub async fn post_build_log(
         }
     };
 
-    let mut response = StreamBodyAs::json_nl(stream).into_response();
+    let mut response =
+        StreamBodyAs::json_nl(crate::endpoints::log_stream::keepalive_chunks(stream))
+            .into_response();
     response
         .headers_mut()
         .insert("X-Accel-Buffering", HeaderValue::from_static("no"));
