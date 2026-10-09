@@ -6,6 +6,7 @@
 
 { lib
 , fetchPnpmDeps
+, gradient-logo
 , nodejs
 , pnpm
 , pnpmConfigHook
@@ -35,6 +36,10 @@
   # The prebuilt `sass-embedded` Dart binary cannot run in the sandbox.
   # The pure-JS compiler is replacing it.
   env.NG_BUILD_SASS_EMBEDDED = "0";
+
+  postPatch = ''
+    install -Dm444 ${gradient-logo}/logo-transparent.svg public/images/logo.svg
+  '';
 
   buildPhase = ''
     runHook preBuild

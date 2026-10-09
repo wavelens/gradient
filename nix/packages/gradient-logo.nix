@@ -1,13 +1,15 @@
 { stdenv
 , typst
 , ffmpeg-headless
+, python3
 }: stdenv.mkDerivation {
   pname = "gradient-logo";
   version = "1.0.0";
   src = ../../logo;
 
-  buildInputs = [
+  nativeBuildInputs = [
     ffmpeg-headless
+    (python3.withPackages (ps: with ps; [ picosvg skia-pathops ]))
     (typst.withPackages (ps:
       with ps; [
         cetz_0_5_2
@@ -18,6 +20,7 @@
   buildPhase = ''
     mkdir "$out"
     typst compile logo.typ $out/logo.svg
+    python3 transparent.py $out/logo.svg $out/logo-transparent.svg
 
     for i in {0..60}; do
       printf -v numberstring '%02d' "$i"

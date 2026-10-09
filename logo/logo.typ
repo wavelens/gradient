@@ -58,7 +58,7 @@
           thickness: r,
         ))
         lambda()
-        stroke(0pt)
+        stroke(none)
         fill(white)
         lambda()
       })

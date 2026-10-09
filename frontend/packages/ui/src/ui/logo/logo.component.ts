@@ -6,7 +6,7 @@
 
 import { Component, ChangeDetectionStrategy, input } from '@angular/core';
 
-/// The wordmark. One file for both themes, masked so it takes the current text
+/// The lambda mark. One file for both themes, masked so it takes the current text
 /// colour: two drawings drift apart in weight and size, one cannot.
 @Component({
   selector: 'gr-logo',
