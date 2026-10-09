@@ -5,7 +5,6 @@
  */
 
 mod entry_points;
-mod previous_lookup;
 
 use super::TriggerError;
 use super::flake_snapshot::snapshot_flake_input_overrides;
@@ -20,14 +19,17 @@ use sea_orm::{
 
 /// A restart never walks. The new evaluation is taking over the previous one's names because the
 /// graph heal is seeding its thaw from them.
-pub async fn trigger_restart_builds<C: ConnectionTrait>(
+pub async fn trigger_evaluation_retry<C: ConnectionTrait>(
     db: &C,
     task: &MTask,
+    prev_eval: &MEvaluation,
 ) -> Result<MEvaluation, TriggerError> {
     ensure_no_active_evaluation(db, task.id).await?;
 
-    let (prev_eval, prev_entry_points) =
-        previous_lookup::previous_evaluation_with_entry_points(db, task.id).await?;
+    let prev_entry_points = EEntryPoint::find()
+        .filter(CEntryPoint::Evaluation.eq(prev_eval.id))
+        .all(db)
+        .await?;
 
     let now = gradient_types::now();
     let initial_status = restart_initial_status(db, &prev_entry_points).await?;

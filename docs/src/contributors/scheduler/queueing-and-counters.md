@@ -157,7 +157,7 @@ Five columns on `evaluation`, over the shared builds named by its `build_job` ro
 
 - Abort must refuse a shared build that other live evaluations still name.
 - Retry must wait until the worker confirmed the earlier abort. A late abort report can move the retried build back to `Aborted`.
-- Both thaws of the [repair pass](repair-pass.md) skip the aborted build and everything above the build in the closure.
+- The `Eval` and `Unstick` thaws of the [repair pass](repair-pass.md) skip the aborted build and everything above the build in the closure.
 - A retry thaw must not apply the deterministic-failure block. The user asked for the rebuild.
 
 ## Consistency Check

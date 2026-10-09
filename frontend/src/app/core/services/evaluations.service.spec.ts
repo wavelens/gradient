@@ -34,6 +34,16 @@ describe('EvaluationsService actions', () => {
     expect(result).toBe('Success');
   });
 
+  it('retries an evaluation with a bodyless POST and returns the new evaluation id', () => {
+    let result: string | undefined;
+    service.retryEvaluation('970223d8-4c52-46d7-b8fd-0d0a900facb3').subscribe((r) => (result = r));
+    const request = httpMock.expectOne(`${environment.apiUrl}/evals/970223d8-4c52-46d7-b8fd-0d0a900facb3/retry`);
+    expect(request.request.method).toBe('POST');
+    expect(request.request.body).toBeNull();
+    request.flush({ error: false, message: '[uuid11]' });
+    expect(result).toBe('[uuid11]');
+  });
+
   it('prioritizes a build with a bodyless POST', () => {
     let result: string | undefined;
     service.prioritizeBuild('01a05a38-3276-7252-bc05-c139d9c8a015').subscribe((r) => (result = r));

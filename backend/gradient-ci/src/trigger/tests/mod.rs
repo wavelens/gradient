@@ -172,7 +172,6 @@ async fn restart_with_all_cached_inserts_completed_eval() {
 
     let db = MockDatabase::new(DatabaseBackend::Postgres)
         .append_query_results([Vec::<evaluation::Model>::new()])
-        .append_query_results([vec![prev_eval]])
         .append_query_results([prev_entry_points])
         .append_query_results([shared_builds])
         .append_query_results([vec![inserted_eval]])
@@ -186,7 +185,7 @@ async fn restart_with_all_cached_inserts_completed_eval() {
         }])
         .into_connection();
 
-    let result = trigger_restart_builds(&db, &task).await;
+    let result = trigger_evaluation_retry(&db, &task, &prev_eval).await;
     assert!(result.is_ok(), "expected Ok, got: {:?}", result.err());
     assert_eq!(
         result.unwrap().status,
@@ -221,7 +220,6 @@ async fn restart_with_one_failed_inserts_building_eval_and_inherits_the_names() 
 
     let db = MockDatabase::new(DatabaseBackend::Postgres)
         .append_query_results([Vec::<evaluation::Model>::new()])
-        .append_query_results([vec![prev_eval]])
         .append_query_results([prev_entry_points])
         .append_query_results([shared_builds])
         .append_query_results([vec![inserted_eval]])
@@ -239,7 +237,7 @@ async fn restart_with_one_failed_inserts_building_eval_and_inherits_the_names() 
         }])
         .into_connection();
 
-    let result = trigger_restart_builds(&db, &task).await;
+    let result = trigger_evaluation_retry(&db, &task, &prev_eval).await;
     assert!(result.is_ok(), "expected Ok, got: {:?}", result.err());
     assert_eq!(result.unwrap().status, EvaluationStatus::Building);
     let log = gradient_db::pool::statements(db.into_transaction_log());

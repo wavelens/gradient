@@ -15,16 +15,17 @@ flowchart LR
 
 ## Repair Scopes
 
-`gradient_db::graph::repair::repair_build_graph(ctx, scope)` (`backend/gradient-db/src/graph/repair.rs`) must run as `Transition::Repair` in the graph writer. A repair pass can never interleave with a batch import. Both scopes name an evaluation. Every statement is bounded to that evaluation's dependency closure.
+`gradient_db::graph::repair::repair_build_graph(ctx, scope)` (`backend/gradient-db/src/graph/repair.rs`) must run as `Transition::Repair` in the graph writer. A repair pass can never interleave with a batch import. All scopes name an evaluation. Every statement is bounded to that evaluation's dependency closure.
 
 | Scope | Sent by | Thaw |
 |---|---|---|
-| `Eval(id)` | `EvalStreamCompleted`, or a `restart_failed` evaluation starting `Building` (`POST .../evaluate`) | Every `REQUEUEABLE` shared build in the closure, a reproducible builder exit included, minus the `kept_failed` subtree |
+| `Eval(id)` | `EvalStreamCompleted` | Every `REQUEUEABLE` shared build in the closure, a reproducible builder exit included, minus the `kept_failed` subtree |
 | `Unstick(id)` | A `Building` evaluation judged graph-stuck (`waiting_state::attempt_graph_unstick`), and the `graph-stuck-reheal` pass | Same, minus the `deterministic_build_failure` subtree too |
+| `Retry(id)` | An evaluation retry starting `Building` (`POST /evals/{id}/retry`) | Every `REQUEUEABLE` shared build in the closure, without exception |
 
 - A failure is valid for the evaluation that recorded the failure. A fresh evaluation will rebuild the shared build once. An unstick of the same evaluation will leave the shared build alone.
 - `kept_failed` starts from the shared builds a user aborted in the evaluation (`build_job.aborted`). With the task's `retry_failed_builds` off, the `FailedPermanent` shared builds of the closure join the start set.
-- `restart_failed` will never walk. `inherit_names` must copy the `build_job` rows of the previous evaluation, and the `Eval` heal will operate on those rows.
+- An evaluation retry will never walk. `inherit_names` must copy the `build_job` rows of the retried evaluation, and the `Retry` heal will operate on those rows.
 - No tick will start a repair pass, and no step will iterate to a fixpoint.
 
 ## Repair Steps

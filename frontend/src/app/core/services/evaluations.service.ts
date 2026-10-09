@@ -124,6 +124,10 @@ export class EvaluationsService {
     return this.api.post<string>(`evals/${id}/prioritize`);
   }
 
+  retryEvaluation(id: string): Observable<string> {
+    return this.api.post<string>(`evals/${id}/retry`);
+  }
+
   getBuilds(evaluationId: string, limit?: number, offset?: number, scope?: string): Observable<PaginatedBuilds> {
     const params: string[] = [];
     if (limit !== undefined) params.push(`limit=${limit}`);

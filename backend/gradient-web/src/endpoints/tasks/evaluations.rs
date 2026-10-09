@@ -43,21 +43,9 @@ use std::time::Instant;
 
 #[derive(Deserialize, Default)]
 pub struct EvaluateRequest {
-    pub mode: Option<String>,
     pub commit: Option<String>,
     pub attr: Option<String>,
     pub walk: Option<WalkMode>,
-}
-
-impl EvaluateRequest {
-    fn walk_mode(&self) -> WebResult<WalkMode> {
-        match (self.mode.as_deref(), self.walk) {
-            (Some("restart_failed"), Some(_)) => Err(WebError::bad_request(
-                "`walk` has no effect on `restart_failed`, which re-queues builds without walking",
-            )),
-            (_, walk) => Ok(walk.unwrap_or_default()),
-        }
-    }
 }
 
 pub(super) async fn evaluations_to_summaries(
@@ -227,39 +215,7 @@ pub async fn post_task_evaluate(
     )
     .await?;
 
-    let mode = body.as_ref().and_then(|b| b.mode.as_deref());
-    let walk_mode = body
-        .as_ref()
-        .map(|b| b.walk_mode())
-        .transpose()?
-        .unwrap_or_default();
-
-    if mode == Some("restart_failed") {
-        let eval = gradient_ci::trigger_restart_builds(&state.web_db, &task)
-            .await
-            .map_err(|e| match e {
-                gradient_ci::TriggerError::AlreadyInProgress => {
-                    WebError::bad_request("Evaluation already in progress")
-                }
-                gradient_ci::TriggerError::NoPreviousEvaluation => {
-                    WebError::bad_request("No previous evaluation to restart from")
-                }
-                gradient_ci::TriggerError::Db(db_err) => WebError::from(db_err),
-            })?;
-        if eval.status == EvaluationStatus::Building {
-            state
-                .graph
-                .transition(gradient_graph::Transition::Repair {
-                    scope: gradient_db::graph::repair::RepairScope::Eval(eval.id),
-                })
-                .await
-                .map_err(|e| {
-                    WebError::internal(format!("the restart's heal did not reach the graph: {e}"))
-                })?;
-        }
-
-        return Ok(ok_json(eval.id.to_string()));
-    }
+    let walk_mode = body.as_ref().and_then(|b| b.walk).unwrap_or_default();
 
     let pinned = body
         .as_ref()
@@ -343,7 +299,6 @@ pub async fn post_task_evaluate(
         gradient_ci::TriggerError::AlreadyInProgress => {
             WebError::bad_request("Evaluation already in progress")
         }
-        gradient_ci::TriggerError::NoPreviousEvaluation => WebError::internal("Unexpected error"),
         gradient_ci::TriggerError::Db(db_err) => WebError::from(db_err),
     })?;
 
@@ -1097,40 +1052,6 @@ mod tests {
                 .count(),
             100
         );
-    }
-}
-
-#[cfg(test)]
-mod walk_mode_tests {
-    use super::EvaluateRequest;
-    use gradient_entity::evaluation::WalkMode;
-
-    fn request(body: serde_json::Value) -> EvaluateRequest {
-        serde_json::from_value(body).unwrap()
-    }
-
-    #[test]
-    fn an_omitted_walk_prunes() {
-        assert_eq!(
-            request(serde_json::json!({})).walk_mode().ok(),
-            Some(WalkMode::Pruned)
-        );
-    }
-
-    #[test]
-    fn a_full_walk_is_taken_as_asked() {
-        assert_eq!(
-            request(serde_json::json!({ "walk": "full" }))
-                .walk_mode()
-                .ok(),
-            Some(WalkMode::Full)
-        );
-    }
-
-    #[test]
-    fn a_restart_walks_nothing_so_it_refuses_a_walk() {
-        let body = request(serde_json::json!({ "mode": "restart_failed", "walk": "full" }));
-        assert!(body.walk_mode().is_err());
     }
 }
 

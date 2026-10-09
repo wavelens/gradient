@@ -120,7 +120,6 @@ type SetupOverrides = Partial<{
   getTask: () => ReturnType<TasksService['getTask']>;
   getProject: () => ReturnType<ProjectsService['getProject']>;
   startEvaluation: () => ReturnType<TasksService['startEvaluation']>;
-  restartFailedBuilds: () => ReturnType<TasksService['restartFailedBuilds']>;
   abortEvaluation: (project: string, proj: string, id: string) => ReturnType<TasksService['abortEvaluation']>;
   getEntryPoints: () => ReturnType<TasksService['getEntryPoints']>;
   getEvaluations: TasksService['getEvaluations'];
@@ -140,7 +139,6 @@ function makeTasksService(access: AccessState, overrides: SetupOverrides = {}): 
     getEntryPoints: overrides.getEntryPoints ?? (() => of({ entry_points: [], total: 0, failed_attributes: [] })),
     getEvaluations: overrides.getEvaluations ?? (() => of([])),
     startEvaluation: overrides.startEvaluation ?? (() => of('ok')),
-    restartFailedBuilds: overrides.restartFailedBuilds ?? (() => of('ok')),
     abortEvaluation: overrides.abortEvaluation ?? (() => of('ok')),
   } as unknown as TasksService;
 }
@@ -161,6 +159,7 @@ function setup(
   const tasksService = makeTasksService(access, serviceOverrides);
   const evaluationsService = {
     prioritizeEvaluation: () => of('Success'),
+    retryEvaluation: () => of('c68e2ded-bd0c-4c4e-82fd-ec8f86f50df2'),
     prioritizeBuild: () => of('Success'),
   } as unknown as EvaluationsService;
   TestBed.configureTestingModule({
@@ -251,17 +250,17 @@ describe('TaskDetailComponent - loading', () => {
 });
 
 describe('TaskDetailComponent - access gating', () => {
-  it('hides Start Evaluation / Restart / Abort when canTrigger is false', () => {
+  it('hides Start Evaluation / Retry / Abort when canTrigger is false', () => {
     const { fixture } = setup(
       { managed: false, canEdit: false, canTrigger: false },
       { primaryStatus: 'Completed', primary: failedBuilds },
     );
     expect(findByText(fixture.nativeElement, 'start evaluation')).toBeNull();
-    expect(menuLabels(fixture)).not.toContain('Restart failed builds');
+    expect(menuLabels(fixture)).not.toContain('Retry');
     expect(findByText(fixture.nativeElement, 'abort')).toBeNull();
   });
 
-  it('keeps Start Evaluation / Restart enabled on state-managed tasks', () => {
+  it('keeps Start Evaluation / Retry enabled on state-managed tasks', () => {
     const { fixture } = setup(
       { managed: true, canEdit: true, canTrigger: true },
       { primaryStatus: 'Completed', primary: failedBuilds },
@@ -269,10 +268,10 @@ describe('TaskDetailComponent - access gating', () => {
     const startBtn = findByText(fixture.nativeElement, 'start evaluation') as HTMLButtonElement | null;
     expect(startBtn).not.toBeNull();
     expect(startBtn!.disabled).toBe(false);
-    expect(menuLabels(fixture)).toContain('Restart failed builds');
+    expect(menuLabels(fixture)).toContain('Retry');
   });
 
-  it('shows Start / Restart to a caller with TriggerEvaluation but not EditTask', () => {
+  it('shows Start / Retry to a caller with TriggerEvaluation but not EditTask', () => {
     const { fixture } = setup(
       { managed: false, canEdit: false, canTrigger: true },
       { primaryStatus: 'Completed', primary: failedBuilds },
@@ -280,39 +279,71 @@ describe('TaskDetailComponent - access gating', () => {
     const startBtn = findByText(fixture.nativeElement, 'start evaluation') as HTMLButtonElement | null;
     expect(startBtn).not.toBeNull();
     expect(startBtn!.disabled).toBe(false);
-    expect(menuLabels(fixture)).toContain('Restart failed builds');
+    expect(menuLabels(fixture)).toContain('Retry');
   });
 });
 
 describe('TaskDetailComponent evaluation menu', () => {
   const trigger = { managed: false, canEdit: true, canTrigger: true };
 
-  it('restarts from the menu, not from a header button', () => {
-    const { fixture, tasksService } = setup(trigger, { primaryStatus: 'Completed', primary: failedBuilds });
-    const spy = vi.spyOn(tasksService, 'restartFailedBuilds');
-    expect(findByText(fixture.nativeElement, 'restart failed')).toBeNull();
-    fixture.componentInstance.panelMenuModel().find(i => i.label === 'Restart failed builds')!.command!();
-    expect(spy).toHaveBeenCalledWith('acme', 'demo');
+  const retryItem = (fixture: ComponentFixture<TaskDetailComponent>) =>
+    fixture.componentInstance.panelMenuModel().find(i => i.label === 'Retry');
+
+  it('retries the selected evaluation from the menu, then refreshes', () => {
+    const { fixture, tasksService, evaluationsService } = setup(trigger, { primaryStatus: 'Completed', primary: failedBuilds });
+    const spy = vi.spyOn(evaluationsService, 'retryEvaluation');
+    const reload = vi.spyOn(tasksService, 'getTask');
+    expect(findByText(fixture.nativeElement, 'retry')).toBeNull();
+    retryItem(fixture)!.command!();
+    expect(spy).toHaveBeenCalledWith('e1');
+    expect(reload).toHaveBeenCalled();
   });
 
-  it('offers no restart while the evaluation is still active', () => {
+  it('retries an evaluation whose builds were only aborted', () => {
+    const { fixture } = setup(trigger, { primaryStatus: 'Aborted', primary: { builds: { ...zeroCounts(), aborted: 1 } } });
+    expect(retryItem(fixture)?.disabled).toBe(false);
+  });
+
+  it('offers no retry while the evaluation is still active', () => {
     const { fixture } = setup(trigger, { primaryStatus: 'Building', primary: failedBuilds });
-    expect(menuLabels(fixture)).not.toContain('Restart failed builds');
+    expect(menuLabels(fixture)).not.toContain('Retry');
   });
 
-  it('offers no restart when nothing failed', () => {
+  it('offers no retry when nothing failed', () => {
     const { fixture } = setup(trigger, { primaryStatus: 'Completed' });
-    expect(menuLabels(fixture)).not.toContain('Restart failed builds');
+    expect(menuLabels(fixture)).not.toContain('Retry');
   });
 
-  /// The server restarts the task's newest evaluation, whichever one is selected.
-  it('offers no restart on an older evaluation', () => {
-    const { fixture } = setup(trigger, {
+  it('offers no retry to an anonymous visitor', () => {
+    const { fixture } = setup(trigger, { primaryStatus: 'Completed', primary: failedBuilds }, false);
+    expect(menuLabels(fixture)).not.toContain('Retry');
+  });
+
+  it('retries an older finished evaluation by its id', () => {
+    const { fixture, evaluationsService } = setup(trigger, {
       primaryStatus: 'Completed',
       extraEvals: [evalSummary('e0', 'Failed', failedBuilds)],
     });
+    const spy = vi.spyOn(evaluationsService, 'retryEvaluation');
     fixture.componentInstance.select(fixture.componentInstance.evaluations()[1]);
-    expect(menuLabels(fixture)).not.toContain('Restart failed builds');
+    retryItem(fixture)!.command!();
+    expect(spy).toHaveBeenCalledWith('e0');
+  });
+
+  it('holds the retry while a newer evaluation is in progress', () => {
+    const { fixture } = setup(trigger, {
+      primaryStatus: 'Building',
+      extraEvals: [evalSummary('e0', 'Failed', failedBuilds)],
+    });
+    fixture.componentInstance.select(fixture.componentInstance.evaluations()[1]);
+    expect(retryItem(fixture)?.disabled).toBe(true);
+  });
+
+  it('reports a failed retry', () => {
+    const { fixture, evaluationsService } = setup(trigger, { primaryStatus: 'Completed', primary: failedBuilds });
+    vi.spyOn(evaluationsService, 'retryEvaluation').mockReturnValue(throwError(() => ({})));
+    retryItem(fixture)!.command!();
+    expect(fixture.componentInstance.errorMessage()).toBe('Failed to retry evaluation.');
   });
 
   it('starts a full rewalk from the menu', () => {
@@ -520,7 +551,6 @@ describe('TaskDetailComponent - error surfacing (issue #280)', () => {
     const msg = 'Failed to fetch repository state: connection refused';
     const { fixture } = setup({ managed: false, canEdit: true, canTrigger: true }, {
       startEvaluation: () => throwError(() => new Error(msg)),
-      restartFailedBuilds: () => throwError(() => new Error(msg)),
     });
     const component = fixture.componentInstance;
     component.startEvaluation();

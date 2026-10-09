@@ -46,6 +46,7 @@ A build is tied to the derivation, not to the evaluation. All evaluations needin
 
 - **Abort** on a running build can stop the build for its evaluation. Dependents in that evaluation fail, and a later evaluation can build the build again.
 - **Retry** on a failed or aborted build can queue the build and the dependents failing through the build again, inside the running evaluation.
+- **Retry** on a finished evaluation can start a new evaluation of the same commit, with all failed builds queued again.
 - A new evaluation can queue the failed builds it names again. The task option **Retry failed builds on new evaluation** (`retry_failed_builds`, on by default) can keep permanent failures failed until a retry instead.
 
 ## Imported Derivations

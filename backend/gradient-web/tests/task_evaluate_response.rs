@@ -9,13 +9,12 @@
     reason = "test scaffolding: a fixture helper that cannot build its value should fail the test loudly"
 )]
 
-use gradient_entity::evaluation::EvaluationStatus;
-use gradient_entity::{entry_point, evaluation, ids::*, project, project_user, role, task};
-use gradient_test_support::fixtures::{commit_id, project_id, task_id, test_date, user, user_id};
+use gradient_entity::{ids::*, project, project_user, role, task};
+use gradient_test_support::fixtures::{project_id, task_id, test_date, user, user_id};
 use gradient_test_support::web::{live_session, make_test_server, make_token};
 use gradient_types::consts::BASE_ROLE_ADMIN_ID;
 use gradient_types::{ConcurrencyPolicy, SessionId};
-use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
+use sea_orm::{DatabaseBackend, MockDatabase};
 use serde_json::{Value, json};
 use uuid::Uuid;
 
@@ -53,78 +52,6 @@ fn admin_role() -> role::Model {
         permission: gradient_db::permissions::admin_mask(),
         ..Default::default()
     }
-}
-
-fn eval_row(id: EvaluationId, status: EvaluationStatus) -> evaluation::Model {
-    evaluation::Model {
-        id,
-        task: Some(task_id()),
-        repository: "https://github.com/test/repo".into(),
-        commit: commit_id(),
-        wildcard: "*".into(),
-        status,
-        created_at: test_date(),
-        updated_at: test_date(),
-        ..Default::default()
-    }
-}
-
-#[tokio::test]
-async fn restart_failed_answers_with_the_new_evaluation_id() {
-    let session_id = SessionId::now_v7();
-    let session = live_session(session_id);
-    let previous = eval_row(EvaluationId::now_v7(), EvaluationStatus::Failed);
-    let restarted = eval_row(EvaluationId::now_v7(), EvaluationStatus::Completed);
-
-    let db = MockDatabase::new(DatabaseBackend::Postgres)
-        .append_query_results([vec![session.clone()]])
-        .append_query_results([vec![session]])
-        .append_query_results([vec![user()]])
-        .append_query_results([vec![project::Model {
-            id: project_id(),
-            name: "test-project".into(),
-            display_name: "Test Project".into(),
-            public_key: "ssh-ed25519 AAAA test".into(),
-            private_key: "encrypted".into(),
-            created_by: user_id(),
-            created_at: test_date(),
-            ..Default::default()
-        }]])
-        .append_query_results([vec![task_row()]])
-        .append_query_results([vec![admin_membership()]])
-        .append_query_results([vec![admin_role()]])
-        .append_query_results([Vec::<evaluation::Model>::new()])
-        .append_query_results([vec![previous]])
-        .append_query_results([Vec::<entry_point::Model>::new()])
-        .append_query_results([vec![restarted.clone()]])
-        .append_query_results([Vec::<gradient_entity::task_flake_input_override::Model>::new()])
-        .append_exec_results([MockExecResult {
-            last_insert_id: 0,
-            rows_affected: 1,
-        }])
-        .append_query_results([vec![task_row()]]);
-
-    let server = make_test_server(db.into_connection());
-
-    let res = server
-        .post("/api/v1/tasks/test-project/test-task/evaluate")
-        .add_header(
-            "Authorization",
-            format!("Bearer {}", make_token(session_id)),
-        )
-        .json(&json!({ "mode": "restart_failed" }))
-        .await;
-
-    res.assert_status_ok();
-    let body: Value = res.json();
-    assert_eq!(body["error"], false);
-    assert_eq!(
-        body["message"],
-        restarted.id.to_string(),
-        "expected the new evaluation id, got {}",
-        body["message"]
-    );
-    Uuid::parse_str(body["message"].as_str().unwrap()).expect("message must be a UUID");
 }
 
 fn authorized_db(session_id: SessionId) -> MockDatabase {
