@@ -25,7 +25,7 @@ import { isTypingTarget } from './keyboard';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { DomSanitizer, SafeHtml } from '@angular/platform-browser';
-import { Subscription, merge } from 'rxjs';
+import { Observable, Subscription, merge } from 'rxjs';
 import { auditTime, filter, map, share, switchMap } from 'rxjs/operators';
 import { EvaluationsService, BuildItem, BuildWithOutputs } from '@core/services/evaluations.service';
 import { LiveEvent, LiveService } from '@core/services/live.service';
@@ -180,6 +180,12 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
       },
       ...(this.canPrioritize(build)
         ? [{ label: 'Prioritize', icon: 'keyboard_double_arrow_up', command: () => this.prioritizeBuild(build) }]
+        : []),
+      ...(this.canAbort(build)
+        ? [{ label: 'Abort', icon: 'stop_circle', command: () => this.abortBuild(build) }]
+        : []),
+      ...(this.canRetry(build)
+        ? [{ label: 'Retry', icon: 'replay', command: () => this.retryBuild(build) }]
         : []),
     ];
   });
@@ -1463,16 +1469,41 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     return this.triggerAccess().canEdit && !build.prioritized && isPendingBuildStatus(build.status);
   }
 
+  canAbort(build: BuildItem): boolean {
+    return this.canChangeRunningBuild() && build.status === 'Building';
+  }
+
+  canRetry(build: BuildItem): boolean {
+    return this.canChangeRunningBuild() && ['FailedPermanent', 'Aborted'].includes(build.status);
+  }
+
+  private canChangeRunningBuild(): boolean {
+    const evaluation = this.evaluation();
+    return this.triggerAccess().canEdit && !!evaluation && isRunningEvaluationStatus(evaluation.status);
+  }
+
   prioritizeBuild(build: BuildItem): void {
-    this.evalService.prioritizeBuild(build.id).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
+    this.runBuildAction(this.evalService.prioritizeBuild(build.id), build, 'Build prioritized', 'Prioritize failed', 'Failed to prioritize build.');
+  }
+
+  abortBuild(build: BuildItem): void {
+    this.runBuildAction(this.evalService.abortBuild(build.id), build, 'Build aborted', 'Abort failed', 'Failed to abort build.');
+  }
+
+  retryBuild(build: BuildItem): void {
+    this.runBuildAction(this.evalService.retryBuild(build.id), build, 'Build retried', 'Retry failed', 'Failed to retry build.');
+  }
+
+  private runBuildAction(request: Observable<string>, build: BuildItem, successSummary: string, failureSummary: string, failureDetail: string): void {
+    request.pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: () => {
-        this.messageService.add({ severity: 'success', summary: 'Build prioritized', detail: this.buildDisplayName(build.name) });
+        this.messageService.add({ severity: 'success', summary: successSummary, detail: this.buildDisplayName(build.name) });
         this.loadBuilds();
       },
       error: (error: Error) => this.messageService.add({
         severity: 'error',
-        summary: 'Prioritize failed',
-        detail: error?.message || 'Failed to prioritize build.',
+        summary: failureSummary,
+        detail: error?.message || failureDetail,
       }),
     });
   }

@@ -12,7 +12,7 @@ import { EvaluationLogComponent } from './evaluation-log.component';
 import { BuildItem, EvaluationsService } from '@core/services/evaluations.service';
 import { LiveEvent, LiveService } from '@core/services/live.service';
 import { Subject, of } from 'rxjs';
-import { Evaluation } from '@core/models';
+import { Evaluation, EvaluationStatus } from '@core/models';
 
 function build(id: string, name: string, status = 'Completed', depth = 0): BuildItem {
   return { id, name, status, has_artefacts: false, updated_at: '', build_time_ms: null, build_started_at: null, dispatched_job: null, depth, prioritized: false, ifd: false };
@@ -442,6 +442,66 @@ describe('EvaluationLogComponent', () => {
         const reload = vi.spyOn(cmp, 'loadBuilds').mockImplementation(() => {});
         open(withTrigger(cmp), target({ status: 'Building' })).get('Prioritize')!.command!();
         expect(prioritize).toHaveBeenCalledWith('b1');
+        expect(reload).toHaveBeenCalled();
+      });
+    });
+
+    describe('abort and retry', () => {
+      function inEvaluation(cmp: EvaluationLogComponent, status: EvaluationStatus, canTrigger = true): EvaluationLogComponent {
+        cmp.access.set({ managed: false, canEdit: false, canTrigger });
+        cmp.evaluation.set({ id: 'eval-1', status, created_at: '2026-01-01T00:00:00', trigger: null } as Evaluation);
+        return cmp;
+      }
+
+      it('offers abort only for a building build', () => {
+        const { cmp } = setup();
+        inEvaluation(cmp, 'Building');
+        expect(open(cmp, target({ status: 'Building' })).has('Abort')).toBe(true);
+        for (const status of ['Queued', 'Completed', 'FailedPermanent', 'Aborted']) {
+          expect(open(cmp, target({ status })).has('Abort')).toBe(false);
+        }
+      });
+
+      it('offers retry only for a failed or aborted build', () => {
+        const { cmp } = setup();
+        inEvaluation(cmp, 'Building');
+        for (const status of ['FailedPermanent', 'Aborted']) {
+          expect(open(cmp, target({ status })).has('Retry')).toBe(true);
+        }
+        for (const status of ['Queued', 'Building', 'Completed', 'DependencyFailed']) {
+          expect(open(cmp, target({ status })).has('Retry')).toBe(false);
+        }
+      });
+
+      it('hides abort and retry from a view-only visitor', () => {
+        const { cmp } = setup();
+        inEvaluation(cmp, 'Building', false);
+        expect(open(cmp, target({ status: 'Building' })).has('Abort')).toBe(false);
+        expect(open(cmp, target({ status: 'FailedPermanent' })).has('Retry')).toBe(false);
+      });
+
+      it('hides abort and retry once the evaluation finished', () => {
+        const { cmp } = setup();
+        inEvaluation(cmp, 'Failed');
+        expect(open(cmp, target({ status: 'Building' })).has('Abort')).toBe(false);
+        expect(open(cmp, target({ status: 'FailedPermanent' })).has('Retry')).toBe(false);
+      });
+
+      it('aborts the build, then reloads the build list', () => {
+        const { cmp } = setup();
+        const abort = vi.spyOn(TestBed.inject(EvaluationsService), 'abortBuild').mockReturnValue(of('Success'));
+        const reload = vi.spyOn(cmp, 'loadBuilds').mockImplementation(() => {});
+        open(inEvaluation(cmp, 'Building'), target({ status: 'Building' })).get('Abort')!.command!();
+        expect(abort).toHaveBeenCalledWith('b1');
+        expect(reload).toHaveBeenCalled();
+      });
+
+      it('retries the build, then reloads the build list', () => {
+        const { cmp } = setup();
+        const retry = vi.spyOn(TestBed.inject(EvaluationsService), 'retryBuild').mockReturnValue(of('Success'));
+        const reload = vi.spyOn(cmp, 'loadBuilds').mockImplementation(() => {});
+        open(inEvaluation(cmp, 'Building'), target({ status: 'Aborted' })).get('Retry')!.command!();
+        expect(retry).toHaveBeenCalledWith('b1');
         expect(reload).toHaveBeenCalled();
       });
     });
