@@ -198,6 +198,19 @@ async fn upload_unless_aborted(
     result
 }
 
+async fn push_inputs(
+    updater: JobUpdater,
+    store: Arc<LocalNixStore>,
+    input_paths: Vec<String>,
+) -> Result<()> {
+    let sizes = vec![None; input_paths.len()];
+    let cache_entries = query_fetched_paths(&updater, input_paths, sizes).await?;
+    let mut push = updater.phase(JobPhase::PushInputs);
+    push.record(cache_entries.len() as u32, 0);
+    upload_all(&updater, pair_with_store(cache_entries, &store), None).await?;
+    Ok(())
+}
+
 fn named_outputs(task: &BuildSpec) -> Vec<(String, String)> {
     task.outputs
         .iter()
@@ -296,39 +309,51 @@ impl JobExecutor {
         credentials: &CredentialStore,
         abort: AbortSignal,
     ) -> Result<()> {
-        let mut local_flake_path: Option<String> = None;
+        let fetches = job
+            .steps
+            .iter()
+            .any(|step| matches!(step, FlakeStep::FetchFlake));
+        if !fetches {
+            return self.evaluate_steps(&job, None, updater, &abort).await;
+        }
 
+        let fetched = self.fetch_flake(&job, updater, credentials, &abort).await?;
+        updater
+            .report_fetch_result(Some(fetched.source_path.clone()))
+            .await?;
+        let push = push_inputs(
+            updater.concurrent(),
+            Arc::clone(&self.store),
+            fetched.input_paths,
+        );
+
+        let evaluates = job
+            .steps
+            .iter()
+            .any(|step| !matches!(step, FlakeStep::FetchFlake));
+        if evaluates {
+            let evaluate = self.evaluate_steps(&job, Some(&fetched.source_path), updater, &abort);
+            tokio::try_join!(push, evaluate)?;
+            return Ok(());
+        }
+
+        let sink = gradient_wire::traits::JobReporter::eval_progress_sink(&*updater);
+        progress_report::resend_during(&*sink, fetched.progress, push).await
+    }
+
+    async fn evaluate_steps(
+        &self,
+        job: &FlakeJob,
+        local_flake_path: Option<&str>,
+        updater: &mut JobUpdater,
+        abort: &AbortSignal,
+    ) -> Result<()> {
         for step in &job.steps {
             match step {
-                FlakeStep::FetchFlake => {
-                    let _fetch = updater.phase(JobPhase::Fetch);
-                    if let Some(src) = eval::required_local_source(&job.source) {
-                        crate::proto::prefetch::ensure_path(&self.store, src, updater).await?;
-                    }
-
-                    let outcome = fetch::fetch_repository(
-                        &job,
-                        updater as &mut dyn gradient_wire::traits::JobReporter,
-                        credentials,
-                        &*self.store,
-                        &**self.evaluator.resolver(),
-                        &self.binpath_ssh,
-                        abort.clone(),
-                    )
-                    .await?;
-
-                    let sink = gradient_wire::traits::JobReporter::eval_progress_sink(&*updater);
-                    progress_report::resend_during(
-                        &*sink,
-                        outcome.progress,
-                        self.push_inputs(updater, &outcome.input_paths, &outcome.source_path),
-                    )
-                    .await?;
-                    local_flake_path = Some(outcome.source_path);
-                }
+                FlakeStep::FetchFlake => {}
                 FlakeStep::EvaluateFlake => {
                     let _g = updater.phase(JobPhase::EvalFlake);
-                    eval::evaluate_flake(&job, updater).await?
+                    eval::evaluate_flake(job, updater).await?
                 }
                 FlakeStep::EvaluateDerivations => {
                     if local_flake_path.is_none()
@@ -340,8 +365,8 @@ impl JobExecutor {
                     let _g = updater.phase(JobPhase::EvalDerivations);
                     eval::evaluate_derivations(
                         &self.evaluator,
-                        &job,
-                        local_flake_path.as_deref(),
+                        job,
+                        local_flake_path,
                         updater,
                         &mut abort.clone(),
                     )
@@ -352,23 +377,28 @@ impl JobExecutor {
         Ok(())
     }
 
-    async fn push_inputs(
+    async fn fetch_flake(
         &self,
-        updater: &JobUpdater,
-        input_paths: &[String],
-        source_path: &str,
-    ) -> Result<()> {
-        let sizes = vec![None; input_paths.len()];
-        let cache_entries = query_fetched_paths(updater, input_paths.to_vec(), sizes).await?;
-        {
-            let mut push = updater.phase(JobPhase::PushInputs);
-            push.record(cache_entries.len() as u32, 0);
-            upload_all(updater, pair_with_store(cache_entries, &self.store), None).await?;
+        job: &FlakeJob,
+        updater: &mut JobUpdater,
+        credentials: &CredentialStore,
+        abort: &AbortSignal,
+    ) -> Result<fetch::FetchOutcome> {
+        let _fetch = updater.phase(JobPhase::Fetch);
+        if let Some(src) = eval::required_local_source(&job.source) {
+            crate::proto::prefetch::ensure_path(&self.store, src, updater).await?;
         }
 
-        updater
-            .report_fetch_result(Some(source_path.to_owned()))
-            .await
+        fetch::fetch_repository(
+            job,
+            updater as &mut dyn gradient_wire::traits::JobReporter,
+            credentials,
+            &*self.store,
+            &**self.evaluator.resolver(),
+            &self.binpath_ssh,
+            abort.clone(),
+        )
+        .await
     }
 
     async fn adopt_realised<'a>(

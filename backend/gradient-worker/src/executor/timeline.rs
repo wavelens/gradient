@@ -15,6 +15,11 @@ use gradient_wire::types::{JobPhase, JobPhaseSpan};
 const MAX_SPANS: usize = 2_000;
 
 pub struct JobTimeline {
+    shared: Arc<SharedSpans>,
+    nesting: Mutex<Vec<u32>>,
+}
+
+struct SharedSpans {
     start: Instant,
     spans: Mutex<Vec<JobPhaseSpan>>,
     open: Mutex<Vec<u32>>,
@@ -24,20 +29,30 @@ pub struct JobTimeline {
 impl JobTimeline {
     pub fn new() -> Arc<Self> {
         Arc::new(Self {
-            start: Instant::now(),
-            spans: Mutex::new(Vec::new()),
-            open: Mutex::new(Vec::new()),
-            dropped: Mutex::new(0),
+            shared: Arc::new(SharedSpans {
+                start: Instant::now(),
+                spans: Mutex::new(Vec::new()),
+                open: Mutex::new(Vec::new()),
+                dropped: Mutex::new(0),
+            }),
+            nesting: Mutex::new(Vec::new()),
+        })
+    }
+
+    pub fn concurrent(&self) -> Arc<Self> {
+        Arc::new(Self {
+            shared: Arc::clone(&self.shared),
+            nesting: Mutex::new(self.nesting.lock().clone()),
         })
     }
 
     pub fn enter(self: &Arc<Self>, phase: JobPhase) -> PhaseGuard {
         let start_ms = self.elapsed_ms();
-        let parent = self.open.lock().last().copied();
+        let parent = self.nesting.lock().last().copied();
         let index = {
-            let mut spans = self.spans.lock();
+            let mut spans = self.shared.spans.lock();
             if spans.len() >= MAX_SPANS {
-                *self.dropped.lock() += 1;
+                *self.shared.dropped.lock() += 1;
                 None
             } else {
                 spans.push(JobPhaseSpan {
@@ -51,7 +66,8 @@ impl JobTimeline {
             }
         };
         if let Some(index) = index {
-            self.open.lock().push(index);
+            self.shared.open.lock().push(index);
+            self.nesting.lock().push(index);
         }
 
         PhaseGuard {
@@ -63,13 +79,13 @@ impl JobTimeline {
     }
 
     pub fn dropped(&self) -> u64 {
-        *self.dropped.lock()
+        *self.shared.dropped.lock()
     }
 
     pub fn snapshot(&self) -> TimelineSnapshot {
         let elapsed_ms = self.elapsed_ms();
-        let open = self.open.lock().clone();
-        let mut spans = self.spans.lock().clone();
+        let open = self.shared.open.lock().clone();
+        let mut spans = self.shared.spans.lock().clone();
         for index in open {
             if let Some(span) = spans.get_mut(index as usize) {
                 span.end_ms = elapsed_ms;
@@ -80,7 +96,7 @@ impl JobTimeline {
     }
 
     fn elapsed_ms(&self) -> u64 {
-        self.start.elapsed().as_millis() as u64
+        self.shared.start.elapsed().as_millis() as u64
     }
 }
 
@@ -110,7 +126,7 @@ impl Drop for PhaseGuard {
         };
 
         let end_ms = self.timeline.elapsed_ms();
-        if let Some(span) = self.timeline.spans.lock().get_mut(index as usize) {
+        if let Some(span) = self.timeline.shared.spans.lock().get_mut(index as usize) {
             span.end_ms = end_ms;
             span.paths = self.paths;
             span.bytes = self.bytes;
@@ -118,7 +134,8 @@ impl Drop for PhaseGuard {
 
         // Spans are removed by identity rather than popped. Concurrent phases inside one job would
         // otherwise close each other's spans.
-        self.timeline.open.lock().retain(|i| *i != index);
+        self.timeline.shared.open.lock().retain(|i| *i != index);
+        self.timeline.nesting.lock().retain(|i| *i != index);
     }
 }
 
@@ -152,6 +169,34 @@ mod tests {
         let spans = t.snapshot().spans;
         assert_eq!(spans[1].parent, Some(0));
         assert_eq!(spans[2].parent, Some(0));
+    }
+
+    #[test]
+    fn concurrent_work_nests_its_phases_apart_from_the_caller() {
+        let t = JobTimeline::new();
+        let push = t.concurrent();
+        let _upload = push.enter(JobPhase::PushInputs);
+        let _eval = t.enter(JobPhase::EvalDerivations);
+        let _nar = push.enter(JobPhase::NarPush);
+        let _drv = t.enter(JobPhase::DrvClosurePush);
+
+        let spans = t.snapshot().spans;
+        assert_eq!(spans.len(), 4);
+        assert_eq!(spans[0].parent, None);
+        assert_eq!(spans[1].parent, None);
+        assert_eq!(spans[2].parent, Some(0));
+        assert_eq!(spans[3].parent, Some(1));
+    }
+
+    #[test]
+    fn the_snapshot_closes_open_spans_of_concurrent_work() {
+        let t = JobTimeline::new();
+        let push = t.concurrent();
+        let _upload = push.enter(JobPhase::PushInputs);
+        std::thread::sleep(std::time::Duration::from_millis(2));
+
+        let snapshot = t.snapshot();
+        assert_eq!(snapshot.spans[0].end_ms, snapshot.elapsed_ms);
     }
 
     #[test]
