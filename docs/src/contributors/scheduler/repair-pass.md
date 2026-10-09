@@ -1,3 +1,8 @@
+<!--
+SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+SPDX-License-Identifier: AGPL-3.0-only
+-->
+
 # Repair Pass
 
 The repair pass can heal graph state beyond the reach of any event. One emitter must carry the consequences of every status move of a shared build. Both live inside the graph writer. Background loops in the scheduler re-drive whatever a lost message left behind.

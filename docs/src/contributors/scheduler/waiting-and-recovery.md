@@ -1,3 +1,8 @@
+<!--
+SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+SPDX-License-Identifier: AGPL-3.0-only
+-->
+
 # Waiting and Recovery
 
 The scheduler splitting a flake job across workers, parking an evaluation without progress, re-offering a returned job and cleaning up after a server restart.

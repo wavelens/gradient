@@ -1,3 +1,8 @@
+<!--
+SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+SPDX-License-Identifier: AGPL-3.0-only
+-->
+
 # Build Before Pushing
 
 Uncommitted changes built on the CI workers with `gradient build`. A `result` link at the end, like `nix build`. No builders and no Nix evaluation on the laptop.

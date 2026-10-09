@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+// SPDX-License-Identifier: AGPL-3.0-only
+
 use connector::Client;
 use serde_json::json;
 use wiremock::matchers::{body_json, header, method, path};

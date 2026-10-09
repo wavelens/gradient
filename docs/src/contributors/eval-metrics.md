@@ -1,3 +1,8 @@
+<!--
+SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+SPDX-License-Identifier: AGPL-3.0-only
+-->
+
 # Evaluation Metrics
 
 Evaluation workers record Nix metrics per evaluation, the same way build jobs record resource metrics. The numbers are feeding the Job Board's **Evals** tab. They are also routing RAM-heavy evaluations to big machines.

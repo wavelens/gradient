@@ -1,3 +1,8 @@
+<!--
+SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+SPDX-License-Identifier: AGPL-3.0-only
+-->
+
 # Privacy
 
 Gradient instances send no data to Wavelens GmbH or any third party. There is no telemetry, no usage tracking and no phone-home.

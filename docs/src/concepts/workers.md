@@ -1,3 +1,8 @@
+<!--
+SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+SPDX-License-Identifier: AGPL-3.0-only
+-->
+
 # Workers
 
 A **worker** is a machine running `gradient-worker`. Workers connect to the server and take jobs queued by projects with the worker enabled. Results go back to the server. The server itself has no Nix. Every clone, evaluation and build is the job of a worker.

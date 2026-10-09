@@ -1,3 +1,8 @@
+<!--
+SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+SPDX-License-Identifier: AGPL-3.0-only
+-->
+
 # Transfer
 
 NARs, logs, build progress and credentials moving between worker and server. Workers always compress NARs with zstd. The server will never re-compress them.

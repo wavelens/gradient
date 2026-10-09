@@ -1,3 +1,8 @@
+<!--
+SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+SPDX-License-Identifier: AGPL-3.0-only
+-->
+
 # Connect GitHub
 
 Evaluations on every push and pull request, with a status on each commit, through one GitHub App per Gradient instance.

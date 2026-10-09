@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+// SPDX-License-Identifier: AGPL-3.0-only
+
 use crate::{Client, ConnectorError, ListResponse, PaginatedListResponse, http};
 use reqwest::Method;
 use serde::{Deserialize, Serialize};

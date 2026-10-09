@@ -1,3 +1,8 @@
+<!--
+SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+SPDX-License-Identifier: AGPL-3.0-only
+-->
+
 <h1 align="center">Gradient</h1>
 
 <p align="center"><b>Nix-CI for Teams.</b> Every flake built once, on any machine, cached for everyone.</p>

@@ -1,3 +1,8 @@
+<!--
+SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+SPDX-License-Identifier: AGPL-3.0-only
+-->
+
 # Set Up Single Sign-On
 
 Sign-in through the company identity provider (Keycloak, Kanidm, Authentik, Okta, Entra ID), with team memberships from the provider's groups.

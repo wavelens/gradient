@@ -1,3 +1,8 @@
+<!--
+SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+SPDX-License-Identifier: AGPL-3.0-only
+-->
+
 # Notify with Actions
 
 Mails, web requests and Matrix or Slack messages on evaluation and build events, e.g. a mail to the team on every failed build.

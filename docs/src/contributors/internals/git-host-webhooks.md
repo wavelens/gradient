@@ -1,3 +1,8 @@
+<!--
+SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+SPDX-License-Identifier: AGPL-3.0-only
+-->
+
 # Git Host Webhooks
 
 The endpoints in `gradient-web/src/endpoints/git_host_hooks/` receive Git host events. The routes carry no session. Every delivery must prove its origin with the Git host's signature. A push will end as a `Queued` evaluation.

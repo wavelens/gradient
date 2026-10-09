@@ -1,3 +1,8 @@
+<!--
+SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+SPDX-License-Identifier: AGPL-3.0-only
+-->
+
 # Projects and Tasks
 
 A **project** is a group of people, machines and caches. A **task** inside a project is one repository plus the flake outputs to build from that repository.

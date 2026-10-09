@@ -1,3 +1,8 @@
+<!--
+SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+SPDX-License-Identifier: AGPL-3.0-only
+-->
+
 # Connect Gradient.CI Servers
 
 Build capacity from servers.gradient.ci, connected with one pasted token. One connection can build for a project or a whole team.

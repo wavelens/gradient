@@ -1,3 +1,8 @@
+<!--
+SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+SPDX-License-Identifier: AGPL-3.0-only
+-->
+
 # Build over SSH
 
 The Gradient cache as an `ssh-ng://` store. Paths go in and out with `nix copy`. Builds from `nixos-rebuild --build-host` take place on the CI workers.

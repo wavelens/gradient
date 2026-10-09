@@ -1,3 +1,8 @@
+<!--
+SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+SPDX-License-Identifier: AGPL-3.0-only
+-->
+
 # Accessibility
 
 Every page of the Gradient frontend should work with a keyboard and a screen reader, without relying on color or motion.

@@ -1,3 +1,8 @@
+<!--
+SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+SPDX-License-Identifier: AGPL-3.0-only
+-->
+
 # CLI
 
 Every `gradient` command, generated from the CLI's `--help`. Commands act on the selected project and task. An argument (or `--project` on `gradient build`) can name another one.

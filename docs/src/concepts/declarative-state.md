@@ -1,3 +1,8 @@
+<!--
+SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+SPDX-License-Identifier: AGPL-3.0-only
+-->
+
 # Declarative State
 
 Everything created in the UI can also be declared in Nix under `services.gradient.state`. Every start of Gradient will apply the declared state. Declared entities become read-only in the UI. The Nix configuration is the source of truth.

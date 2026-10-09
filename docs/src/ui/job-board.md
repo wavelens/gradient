@@ -1,3 +1,8 @@
+<!--
+SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+SPDX-License-Identifier: AGPL-3.0-only
+-->
+
 # Job Board
 
 Activity of the scheduler and the workers, right now and over time. Live jobs, the reason behind each worker choice, fleet load and the most expensive builds all appear on the board. **Job Board** in the header.
