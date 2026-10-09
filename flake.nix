@@ -54,6 +54,7 @@
       inherit gradient-report gradient-evalbench-inspector;
       store = pkgs.callPackage ./nix/scripts/store.nix { };
       gradient = pkgs.callPackage ./nix/packages/gradient.nix { inherit craneLib; };
+      gradient-logo = pkgs.callPackage ./nix/packages/gradient-logo.nix { };
       gradient-frontend = pkgs.callPackage ./nix/packages/gradient-frontend.nix { };
       gradient-cli = pkgs.callPackage ./nix/packages/gradient-cli.nix {
         inherit craneLib;
