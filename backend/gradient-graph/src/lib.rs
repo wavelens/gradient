@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+#![recursion_limit = "256"]
+
 pub mod messages;
 pub mod writer;
 
