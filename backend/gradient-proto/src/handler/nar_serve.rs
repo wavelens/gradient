@@ -10,9 +10,11 @@ use std::time::Duration;
 use gradient_core::ServerState;
 use gradient_graph::Demotion;
 use gradient_storage::passthrough::{
-    PassthroughRequest, PassthroughTimeouts, ServeError, serve_nar,
+    PassthroughError, PassthroughRequest, PassthroughTimeouts, send_nar,
 };
 use gradient_util::telemetry::{GAUGES, Gauges};
+use gradient_wire::messages::ServerMessage;
+use gradient_wire::session::frame::send_server_msg;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tracing::warn;
 
@@ -81,19 +83,27 @@ pub(super) async fn serve_nar_request(
         open: Duration::from_secs(nar_cfg.storage_open_timeout_secs),
         chunk_read: Duration::from_secs(nar_cfg.send_chunk_timeout_secs),
     };
+    let Some(key) = store_hash(store_path) else {
+        let reason = format!("invalid store path: {store_path}");
+        let unavailable = ServerMessage::NarUnavailable {
+            job_id: job_id.to_owned(),
+            store_path: store_path.to_owned(),
+            reason: reason.clone(),
+        };
+        let _ = send_server_msg(writer, &unavailable).await;
+        return Err(anyhow::anyhow!(reason));
+    };
     let req = PassthroughRequest {
         job_id,
         store_path,
+        key,
         resume_from,
         client_token,
     };
-    match serve_nar(&state.nar_storage, writer, req, timeouts).await {
+    match send_nar(&state.nar_storage, writer, req, timeouts).await {
         Ok(_) => Ok(()),
-        Err(ServeError::NotFound(reason)) => {
-            if let Some(hash) = store_hash(store_path) {
-                invalidate_cached_path(state, hash, store_path).await;
-            }
-
+        Err(PassthroughError::NotFound(reason)) => {
+            invalidate_cached_path(state, key, store_path).await;
             Err(anyhow::anyhow!(reason))
         }
         Err(e) => Err(e.into()),
@@ -291,6 +301,20 @@ mod serve_nar_tests {
             "1 MiB in 512 KiB chunks is at least three frames"
         );
         assert_eq!(state.nar_storage.hot().stats().hits, 1);
+    }
+
+    #[tokio::test]
+    async fn an_invalid_store_path_is_unavailable() {
+        let db = MockDatabase::new(DatabaseBackend::Postgres).into_connection();
+        let state = test_state(db);
+        let (writer, mut rx) = spy_writer(Duration::from_secs(5));
+
+        let res = serve_nar_request(&state, &writer, "job-1", "not-a-store-path", 0, None).await;
+
+        assert!(res.is_err());
+        let msg = decode(rx.try_recv().expect("one frame"));
+        assert_eq!(msg.variant_name(), "NarUnavailable");
+        assert!(rx.try_recv().is_err());
     }
 
     #[tokio::test]
