@@ -45,6 +45,47 @@ def stop_pcaps():
     stop_capture(server, "cap-pg")
 
 
+# Rounds commit separately, and a cancelled sampler keeps the rounds taken so far.
+WAIT_SAMPLER = """
+CREATE UNLOGGED TABLE IF NOT EXISTS wait_sample (
+  at timestamptz, pid int, state text, wait_event_type text, wait_event text, query text);
+TRUNCATE wait_sample;
+CREATE OR REPLACE PROCEDURE sample_waits() LANGUAGE plpgsql AS $$
+BEGIN
+  LOOP
+    INSERT INTO wait_sample
+      SELECT clock_timestamp(), pid, state, wait_event_type, wait_event, left(query, 160)
+      FROM pg_stat_activity WHERE usename = 'gradient' AND state <> 'idle';
+    COMMIT;
+    PERFORM pg_sleep(0.1);
+  END LOOP;
+END $$;
+"""
+
+
+def start_wait_sampler():
+    psql(WAIT_SAMPLER, database="postgres")
+    server.succeed(
+        "systemd-run --unit=cap-pgwait --collect --property=KillSignal=SIGINT --"
+        " su postgres -c 'psql -d postgres -c \"CALL sample_waits()\"'"
+    )
+    server.wait_until_succeeds(
+        psql_command("SELECT 1 FROM pg_stat_activity WHERE query LIKE 'CALL sample_waits%'",
+                     database="postgres") + " | grep -q 1",
+        timeout=30,
+    )
+
+
+def stop_wait_sampler(run):
+    stop_capture(server, "cap-pgwait")
+    dump_json(
+        "SELECT round(extract(epoch FROM at) * 1000000)::bigint AS ts_us, pid, state,"
+        " wait_event_type, wait_event, query FROM wait_sample ORDER BY at",
+        f"{BENCH}/{run}/pg/wait_samples.json",
+        database="postgres",
+    )
+
+
 def start_profilers(run):
     for node in (server, worker):
         out = run_dir(node, run)
