@@ -183,5 +183,7 @@ pub async fn post_evaluation_builds(
         }
     };
 
-    Ok(StreamBodyAs::json_nl(stream))
+    Ok(StreamBodyAs::json_nl(
+        crate::endpoints::log_stream::keepalive_chunks(stream),
+    ))
 }

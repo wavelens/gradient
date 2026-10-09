@@ -4139,13 +4139,16 @@ paths:
       tags: [evals]
       summary: Stream evaluation logs
       description: |-
-        Opens a streaming NDJSON response that first replays every build's stored
-        log, then follows the actively building derivations. Each line is prefixed
-        with the derivation name. The stream stays open until the evaluation
-        itself reaches a terminal state (Completed/Failed/Aborted) - not merely
-        until no build is pending - so it does not end before the evaluation has
-        created any builds. Evaluation-level messages are not included here; fetch
-        them from `GET /evals/{evaluation}/messages`.
+        Open a streaming NDJSON response: replay the stored logs of all builds
+        first, then follow the derivations still building. A derivation-name
+        prefix opens each line. Keep the stream open until the evaluation itself
+        has reached Completed, Failed or Aborted, not merely until no build is
+        pending, so an evaluation without builds yet still has its stream.
+        Evaluation-level messages are not part of this stream. Fetch them from
+        `GET /evals/{evaluation}/messages`.
+
+        Chunks hold no more than 256 KiB each, split at a line end. Empty strings
+        arrive as keepalives after 15 seconds without output. Ignore them.
       operationId: streamEvaluationLogs
       responses:
         '200':
@@ -4947,9 +4950,11 @@ paths:
       tags: [builds]
       summary: Stream build log
       description: |-
-        Opens a streaming NDJSON response that first emits the full existing log,
-        then incrementally streams new chunks as they arrive. The stream ends when
-        the build leaves the `Building` state.
+        Open a streaming NDJSON response: emit the full existing log first, then
+        stream new chunks as they arrive. Close the stream once the build has left
+        the `Building` state. Chunks hold no more than 256 KiB each, split at a
+        line end. Empty strings arrive as keepalives after 15 seconds without
+        output. Ignore them.
       operationId: streamBuildLog
       responses:
         '200':

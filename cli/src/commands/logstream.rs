@@ -44,6 +44,9 @@ pub async fn stream_eval_logs(client: &connector::Client, evaluation: &str, out:
 }
 
 fn print_log(line: &str, out: Output) {
+    if line.is_empty() {
+        return;
+    }
     if out.is_json() {
         println!("{}", serde_json::json!({"error": false, "message": line}));
     } else {

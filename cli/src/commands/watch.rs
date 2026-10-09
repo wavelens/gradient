@@ -84,6 +84,7 @@ async fn stream_plain(client: &Client, eval_id: &str, out: Output) {
     pin_mut!(stream);
     while let Some(item) = stream.next().await {
         match item {
+            Ok(line) if line.is_empty() => {}
             Ok(line) => println!("{}", serde_json::json!({"error": false, "message": line})),
             Err(e) => out.err(to_exit_kind(&e), e),
         }
