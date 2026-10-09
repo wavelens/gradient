@@ -1312,6 +1312,39 @@ async fn admission_reads_only_the_shared_builds_that_moved() {
 }
 
 #[tokio::test]
+async fn the_build_assign_pass_offers_without_waiting_on_the_graph_writer() {
+    use gradient_test_support::prelude::*;
+    use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
+
+    let ok = MockExecResult {
+        last_insert_id: 0,
+        rows_affected: 1,
+    };
+    let db = MockDatabase::new(DatabaseBackend::Postgres)
+        .append_exec_results(vec![ok; 32])
+        .into_connection();
+    let mut state = test_state(db);
+    Arc::get_mut(&mut state).expect("fresh state").graph = gradient_core::Graph::new();
+    let scheduler = Arc::new(Scheduler::new(state));
+    scheduler.spawn_core(None).await.expect("core actor");
+    let mut signals = register(&scheduler, "w1", eval_worker_caps(), HashSet::new()).await;
+    scheduler
+        .enqueue_eval_job("j1".into(), eval_job(ProjectId::now_v7()))
+        .await
+        .unwrap();
+    assert_eq!(signals.recv().await, Some(SessionSignal::Offers(1)));
+
+    tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        crate::loops::build_assign_pass(&scheduler, true, false),
+    )
+    .await
+    .expect("a graph writer that never answers holds back no offer");
+
+    assert_eq!(signals.recv().await, Some(SessionSignal::Offers(2)));
+}
+
+#[tokio::test]
 async fn the_resync_prunes_pending_builds_no_longer_startable() {
     use sea_orm::{DatabaseBackend, MockDatabase};
 

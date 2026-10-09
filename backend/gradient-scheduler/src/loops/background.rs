@@ -11,7 +11,7 @@ use std::time::Duration;
 
 use gradient_db::evaluations::watchdog::LostCompletion;
 use gradient_entity::dispatched_job::DispatchedJobOutcome;
-use gradient_graph::Transition;
+use gradient_graph::{RequeueScope, Transition};
 use gradient_types::ids::DispatchedJobId;
 use gradient_types::{DerivationBuildId, EvaluationId};
 use gradient_wire::types::BuildFailureKind;
@@ -59,6 +59,15 @@ pub(super) async fn consistency_check_pass(scheduler: Arc<Scheduler>) -> anyhow:
         info!(scope = report.repair_scope, "graph consistency check clean");
     }
 
+    Ok(())
+}
+
+pub(super) async fn transient_retry_pass(scheduler: Arc<Scheduler>) -> anyhow::Result<()> {
+    scheduler
+        .state
+        .graph
+        .requeue(RequeueScope::TransientRetries)
+        .await?;
     Ok(())
 }
 

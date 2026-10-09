@@ -13,7 +13,7 @@ use crate::assign_mode::decide_build_spec_kind;
 use gradient_core::ServerState;
 use gradient_db::scheduling::startable_set::StartableMoves;
 use gradient_entity::evaluation::EvaluationStatus;
-use gradient_graph::{RequeueScope, Transition};
+use gradient_graph::Transition;
 use gradient_sources::get_path_from_derivation_output;
 use gradient_types::*;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
@@ -40,14 +40,6 @@ pub(crate) async fn build_assign_pass(scheduler: &Scheduler, timer_tick: bool, r
             .await;
     }
 
-    if let Err(e) = scheduler
-        .state
-        .graph
-        .requeue(RequeueScope::TransientRetries)
-        .await
-    {
-        error!(error = %e, "transient retry requeue did not reach the graph writer");
-    }
     if let Err(e) = admit_startable_moves(scheduler).await {
         error!(error = %e, "startable-set admission error");
     }
@@ -792,16 +784,7 @@ async fn enqueue_startable_shared_builds(
         }
     }
 
-    if let Err(e) = state
-        .graph
-        .transition(Transition::Ready {
-            shared_builds: enqueued_ids,
-            closure_sizes: maps.computed_sizes.iter().map(|(k, v)| (*k, *v)).collect(),
-        })
-        .await
-    {
-        error!(error = %e, "ready_at stamp did not reach the graph writer");
-    }
+    stamp_ready(state, enqueued_ids, maps.computed_sizes);
 
     debug!(
         enqueued,
@@ -810,6 +793,23 @@ async fn enqueue_startable_shared_builds(
     );
 
     Ok(())
+}
+
+fn stamp_ready(
+    state: &Arc<ServerState>,
+    shared_builds: Vec<DerivationBuildId>,
+    closure_sizes: HashMap<DerivationId, i64>,
+) {
+    let graph = Arc::clone(&state.graph);
+    state.shutdown.spawn(async move {
+        let ready = Transition::Ready {
+            shared_builds,
+            closure_sizes: closure_sizes.into_iter().collect(),
+        };
+        if let Err(e) = graph.transition(ready).await {
+            error!(error = %e, "ready_at stamp did not reach the graph writer");
+        }
+    });
 }
 
 fn nonzero(v: u64) -> Option<u64> {
