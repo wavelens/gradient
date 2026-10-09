@@ -82,7 +82,7 @@ def wait_for_status(token, eval_id, wanted, timeout):
     rc, status = server.execute(
         f"timeout {timeout} sh -c 'while :; do"
         f" s=$(curl -sf {API}/evals/{eval_id} -H \"Authorization: Bearer {token}\" | jq -r .message.status);"
-        f" echo \"$s\" | grep -qxE \"{stop}\" && {{ echo \"$s\"; exit 0; }}; sleep 0.05; done'"
+        f" echo \"$s\" | grep -qxE \"{stop}\" && {{ echo \"$s\"; exit 0; }}; sleep 0.2; done'"
     )
     status = status.strip()
     if rc != 0:
