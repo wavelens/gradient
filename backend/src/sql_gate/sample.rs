@@ -134,6 +134,10 @@ pub struct Sampler {
 }
 
 impl Sampler {
+    pub fn pin(&mut self, param: &Param, value: Value) {
+        self.drawn.insert(format!("{param:?}"), Some(value));
+    }
+
     pub async fn value(&mut self, db: &DatabaseConnection, param: &Param) -> Result<Option<Value>> {
         if let Some(literal) = literal(param) {
             return Ok(Some(literal));

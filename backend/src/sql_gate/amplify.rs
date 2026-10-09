@@ -201,7 +201,7 @@ pub async fn run(db: &DatabaseConnection, scale: u32) -> Result<()> {
     Ok(())
 }
 
-fn quoted(column: &str) -> String {
+pub fn quoted(column: &str) -> String {
     format!("\"{}\"", column.replace('"', "\"\""))
 }
 
@@ -262,7 +262,7 @@ async fn analyze(db: &DatabaseConnection, table: &str) -> Result<()> {
     Ok(())
 }
 
-async fn columns(db: &DatabaseConnection, table: &str) -> Result<Vec<String>> {
+pub async fn columns(db: &DatabaseConnection, table: &str) -> Result<Vec<String>> {
     const SQL: &str = "SELECT column_name AS name FROM information_schema.columns \
          WHERE table_schema = 'public' AND table_name = $1 \
          ORDER BY ordinal_position";

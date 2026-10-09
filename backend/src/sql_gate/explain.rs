@@ -29,9 +29,11 @@ use crate::sample::Sampler;
 
 const WALK_WORK_MEM: &str = "SET LOCAL work_mem = '64MB'";
 
-pub async fn run_all(db: &DatabaseConnection) -> Result<Vec<(&'static Query, Outcome)>> {
+pub async fn run_all(
+    db: &DatabaseConnection,
+    mut sampler: Sampler,
+) -> Result<Vec<(&'static Query, Outcome)>> {
     let relation_rows = relation_rows(db).await?;
-    let mut sampler = Sampler::default();
     let mut queries: Vec<&'static Query> = registry().collect();
     queries.sort_by_key(|query| (query.file, query.line));
 
