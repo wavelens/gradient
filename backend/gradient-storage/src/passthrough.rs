@@ -37,7 +37,7 @@ pub enum PassthroughError {
     Aborted(String),
 }
 
-/// Only `NotFound` is becoming `NarUnavailable`, and the worker is demoting the cached path on it.
+/// A `NotFound` sends nothing: the caller decides between `NarUnavailable` and another source.
 /// Every other failure is a `NarAbort`, retried without touching the cache.
 enum Failure {
     NotFound,
@@ -71,16 +71,6 @@ async fn fail_transfer(
     STATS.record(metric::NAR_SERVE_FAILURES, failure.label(), 1.0);
 
     if failure.is_missing() {
-        let _ = send_server_msg(
-            writer,
-            &ServerMessage::NarUnavailable {
-                job_id: job_id.to_owned(),
-                store_path: store_path.to_owned(),
-                reason: reason.clone(),
-            },
-        )
-        .await;
-
         return PassthroughError::NotFound(reason);
     }
 
@@ -436,14 +426,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_missing_object_sends_nar_unavailable_and_reports_not_found() {
+    async fn a_missing_object_reports_not_found_and_leaves_the_answer_to_the_caller() {
         let (_dir, store) = empty_store();
         let (result, frames) = serve(&store, PATH, 0, None).await;
         assert!(matches!(result, Err(PassthroughError::NotFound(_))));
-        assert!(matches!(
-            frames.as_slice(),
-            [ServerMessage::NarUnavailable { .. }]
-        ));
+        assert!(frames.is_empty(), "{frames:?}");
     }
 
     #[tokio::test]
