@@ -36,7 +36,7 @@ import { AccessService, WritableDirective } from '@shared/access';
 import { injectTaskAccess, injectTaskAccessData } from '@core/resolvers/inject-access';
 import { groupEntryPoints } from './entry-point-groups';
 import { StarTarget, TaskDetail, EvaluationSummary, EvaluationProgress, EvaluationStatus, EntryPointSummary, FailedAttributeSummary, BuildStatusCounts, WalkMode } from '@core/models';
-import { buildDuration, commitLabel, entryPointPhase, evaluationDuration, evaluationPhase, evaluationTitle, formatEvaluationDuration, inputFetchPhase, isPendingBuildStatus, isRunningEvaluationStatus, phaseProgress, thunkProgress } from '@shared/evaluation';
+import { buildDuration, commitLabel, commitWebUrl, entryPointPhase, evaluationDuration, evaluationPhase, evaluationTitle, formatEvaluationDuration, inputFetchPhase, isPendingBuildStatus, isRunningEvaluationStatus, phaseProgress, repositoryWebUrl, thunkProgress } from '@shared/evaluation';
 
 @Component({
   selector: 'app-task-detail',
@@ -461,6 +461,8 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
   }
 
   readonly commitLabel = commitLabel;
+  readonly commitWebUrl = commitWebUrl;
+  readonly repositoryWebUrl = repositoryWebUrl;
 
   evalTitle(e: EvaluationSummary): string {
     return evaluationTitle(e);

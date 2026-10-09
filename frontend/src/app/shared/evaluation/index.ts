@@ -8,4 +8,5 @@ export * from './build-progress';
 export * from './commit';
 export * from './duration';
 export * from './progress';
+export * from './repository';
 export * from './status-phase';
