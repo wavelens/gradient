@@ -35,6 +35,7 @@ pub(super) struct Commit {
 
 /// The byte budget is returned once the object is stored. The path stays claimed until the graph
 /// recorded it, and a second upload of the path is waiting instead of overwriting the object.
+#[tracing::instrument(name = "upload_commit", level = "debug", skip_all)]
 pub(super) async fn run(c: Commit) {
     let outcome = match place(&c.state, &c.object, c.transfer, &c.metadata).await {
         Ok(()) => {
@@ -76,6 +77,7 @@ fn rejected(reason: String) -> UploadOutcome {
     UploadOutcome::Rejected { reason }
 }
 
+#[tracing::instrument(name = "place_upload", level = "debug", skip_all)]
 async fn place(
     state: &Arc<ServerState>,
     object: &UploadObject,
@@ -103,6 +105,7 @@ async fn place(
     }
 }
 
+#[tracing::instrument(name = "upload_graph_commit", level = "debug", skip_all)]
 async fn record(
     state: &Arc<ServerState>,
     project_id: Option<ProjectId>,

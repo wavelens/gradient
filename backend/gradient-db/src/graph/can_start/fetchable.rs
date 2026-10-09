@@ -112,6 +112,7 @@ crate::sql_lazy! {
         tier = Bulk;
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub async fn seed_blocking_deps(lock: &SeedLock<'_>) -> Result<u64, DbErr> {
     if lock.derivations.is_empty() {
         return Ok(0);
@@ -200,6 +201,7 @@ pub(super) async fn mark_unfetchable(
     Ok(MarkedUnfetchable { marked, unqueued })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub async fn became_fetchable(lock: &SharedBuildLock<'_>) -> Result<Vec<TransitionChange>, DbErr> {
     let marked = mark_fetchable(lock).await?;
     promote(lock.txn, &marked.startable).await

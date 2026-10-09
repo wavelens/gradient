@@ -113,6 +113,7 @@ crate::sql_lazy! {
         params = [DerivationIds(64)];
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub async fn promote<C: ConnectionTrait>(
     db: &C,
     candidates: &[DerivationId],
@@ -168,6 +169,7 @@ pub async fn unpromote_drv_owners<C: ConnectionTrait>(
 
 /// The gate is embedded, and the candidate list is a bound, never a claim.
 /// A shared build re-walked by a concurrent evaluation is keeping its place in the queue.
+#[tracing::instrument(level = "debug", skip_all)]
 pub async fn unpromote_ungated<C: ConnectionTrait>(
     db: &C,
     candidates: &[DerivationId],

@@ -83,7 +83,7 @@ The benchmark will set `services.gradient.log.traceDir` and `services.gradient.w
 
 | Process | Spans |
 |---|---|
-| `server` | `assign_queued_evals`, `offer_jobs`, `on_request_job_chunk`, `record_scores`, `on_request_job`, `request_job`, `claim_dispatch`, `send_credentials`, `assign_job`, `job_event` (`kind`, `queue_wait_us`), `handle_eval_result`, `assess_cached`, `record`, `flush`, `record_one`, `commit_one`, `transact_once`, `apply_batch` and one span per batch step, `after_commit`, `known_derivations`, `eval_stream_completed` |
+| `server` | `assign_queued_evals`, `offer_jobs`, `on_request_job_chunk`, `record_scores`, `on_request_job`, `request_job`, `claim_dispatch`, `send_credentials`, `assign_job`, `job_event` (`kind`, `queue_wait_us`), `handle_eval_result`, `assess_cached`, `record`, `flush`, `record_one`, `commit_one`, `transact_once`, `apply_batch` and one span per batch step, the `advance_can_start` steps (`lock_seed_shared_builds`, `became_fetchable`, `seed_blocking_deps`, `promote`, `unpromote_ungated`, `emit_transition_effects`, `move_batch_need`), `after_commit`, `known_derivations`, `eval_stream_completed`, `on_upload_request`, `on_upload_admitted` (`already_stored`, `open_transfer`), `on_upload_chunk`, `on_upload_finished`, `upload_commit` (`place_upload`, `upload_graph_commit`) |
 | `worker` | `on_job_offer`, `score_candidates`, `send_scores`, `request_job`, `job`, `fetch_repository` (`clone_and_checkout`, `run_input_update`, `fetch_inputs`, `missing_paths`), `evaluate_flake`, `evaluate_derivations`, `wave`, `parse_drv_wave`, `query_known_derivations`, `report_eval_result` |
 | `eval` | `open`, `lock_flake`, `discover`, `plan_shards`, `resolve` (`attr`) |
 
