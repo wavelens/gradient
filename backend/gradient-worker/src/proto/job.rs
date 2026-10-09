@@ -115,6 +115,22 @@ impl JobUpdater {
         self.timeline.enter(phase)
     }
 
+    pub fn concurrent(&self) -> Self {
+        Self {
+            job_id: self.job_id.clone(),
+            assignment_id: self.assignment_id.clone(),
+            writer: self.writer.clone(),
+            cache_waiters: Arc::clone(&self.cache_waiters),
+            known_derivation_waiters: Arc::clone(&self.known_derivation_waiters),
+            import_waiters: Arc::clone(&self.import_waiters),
+            nar_recv: self.nar_recv.clone(),
+            eval_cache_recv: self.eval_cache_recv.clone(),
+            store: self.store.clone(),
+            timeline: self.timeline.concurrent(),
+            uploads: self.uploads.clone(),
+        }
+    }
+
     pub async fn pull_eval_cache(&self, fingerprint: &str) -> Result<Option<Vec<u8>>> {
         let mut guard = self.phase(JobPhase::EvalCachePull);
         let mut pending = self.eval_cache_recv.register_pull(&self.job_id);
