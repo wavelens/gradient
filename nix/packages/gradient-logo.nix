@@ -20,7 +20,7 @@
   buildPhase = ''
     mkdir "$out"
     typst compile logo.typ $out/logo.svg
-    python3 transparent.py $out/logo.svg $out/logo-transparent.svg
+    python3 transparent.py $out/logo.svg $out/logo-transparent.svg $out/logo-outlined.svg
 
     for i in {0..60}; do
       printf -v numberstring '%02d' "$i"
