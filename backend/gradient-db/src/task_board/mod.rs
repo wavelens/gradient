@@ -159,13 +159,12 @@ struct DepCountRow {
     cnt: i64,
 }
 
-/// `MATERIALIZED` is load-bearing and is stopping the planner from inlining the edge set.
-/// The `LATERAL ... OFFSET 0` fence is deliberately absent.
-/// A hash join over this small materialised set is the right plan.
+/// `MATERIALIZED` is stopping the planner from inlining the edge set. The edge set reads the
+/// evaluation's jobs only once: a new evaluation is missing from the statistics, and a second read
+/// of its jobs planned as a nested loop over both reads.
 const DEP_COUNTS_SQL: &str = "WITH RECURSIVE seeds(ep, root_drv) AS (SELECT * FROM unnest($1::uuid[], $2::uuid[])), \
     edges AS MATERIALIZED ( \
        SELECT dd.derivation, dd.dependency FROM derivation_dependency dd \
-       JOIN build_job dst ON dst.derivation = dd.dependency AND dst.evaluation = $3 \
        WHERE dd.derivation IN (SELECT derivation FROM build_job WHERE evaluation = $3 \
                                UNION SELECT root_drv FROM seeds) \
     ), \
@@ -263,21 +262,13 @@ mod tests {
     }
 
     #[test]
-    fn the_edge_set_covers_exactly_what_the_frontier_can_ask_for() {
+    fn the_edge_set_reads_the_evaluations_jobs_only_once() {
         let sql = norm(DEP_COUNTS_SQL);
+        let edges = sql
+            .split("closure(ep, drv) AS (")
+            .next()
+            .expect("the edge set");
 
-        assert!(
-            sql.contains(
-                "WHERE dd.derivation IN (SELECT derivation FROM build_job WHERE evaluation = $3 \
-                 UNION SELECT root_drv FROM seeds)"
-            ),
-            "{sql}"
-        );
-        assert!(
-            sql.contains(
-                "JOIN build_job dst ON dst.derivation = dd.dependency AND dst.evaluation = $3"
-            ),
-            "the walk stays inside this evaluation's build graph: {sql}"
-        );
+        assert_eq!(edges.matches("build_job").count(), 1, "{edges}");
     }
 }
