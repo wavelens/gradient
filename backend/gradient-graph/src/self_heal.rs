@@ -29,21 +29,21 @@ async fn any_reachable<C: sea_orm::ConnectionTrait>(db: &C, derivations: &[Deriv
     false
 }
 
-/// The failed build is `FailedTransient` and is retried by `requeue::transient_retries`.
-/// That requeue's settle is holding it out of the queue until the input is back.
-/// `demote_cached_output` is keeping a still-present input that has no producer.
-/// Nothing can rebuild it, and deleting the only copy would fail every parent forever.
+/// Transient retries requeue the failed build and keep it out of the queue until the input is
+/// back. Present inputs stay, whoever reported them missing. Worker views of the cache can lag
+/// behind storage, and deleting a present object dead-ends the parents.
 pub(crate) async fn repair_missing_inputs(
     ctx: &DbContext,
     failed_derivation: DerivationId,
     missing_paths: &[String],
 ) -> Result<()> {
+    use gradient_db::caches::demotion::{DemoteWhen, demote_cached_output, unwalk_parents_of};
+
     let db = &ctx.worker_db;
     let mut purged = 0usize;
-    let mut wanted_by_demoted = 0usize;
-    let mut sources_purged: Vec<&str> = Vec::new();
+    let mut parents_unwalked = 0usize;
+    let mut kept: Vec<&str> = Vec::new();
     let mut demoted_producers: Vec<DerivationId> = Vec::new();
-    let mut needs_dep_rewalk = false;
     for path in missing_paths {
         let Some(hash) = store_path_hash(path) else {
             continue;
@@ -69,72 +69,37 @@ pub(crate) async fn repair_missing_inputs(
             Err(e) => warn!(%path, error = %e, "missing input: diagnosis query failed"),
         }
 
-        match gradient_db::caches::demotion::demote_cached_output(ctx, hash).await {
+        match demote_cached_output(ctx, hash, DemoteWhen::ObjectMissing).await {
             Ok(drvs) if !drvs.is_empty() => {
                 purged += 1;
-                let orphan = !any_reachable(db, &drvs).await;
-                demoted_producers.extend(drvs);
-                if orphan {
-                    match gradient_db::caches::demotion::demote_parents_of(ctx, hash).await {
-                        Ok(refs) if !refs.is_empty() => {
-                            wanted_by_demoted += refs.len();
-                            match gradient_db::graph::can_start::unwalk_derivations(ctx, &refs)
-                                .await
-                            {
-                                Ok(changes) => {
-                                    gradient_db::status::emit_transition_effects(ctx, &changes)
-                                        .await?
-                                }
-                                Err(e) => {
-                                    warn!(%path, error = %e, "repair: re-walk parents (orphan producer) failed")
-                                }
-                            }
-
-                            demoted_producers.extend(refs);
-                        }
-                        Ok(_) => needs_dep_rewalk = true,
+                if !any_reachable(db, &drvs).await {
+                    match unwalk_parents_of(ctx, hash).await {
+                        Ok(parents) => parents_unwalked += parents.len(),
                         Err(e) => {
-                            warn!(%path, error = %e, "repair: demote parents (orphan producer) failed")
+                            warn!(%path, error = %e, "repair: re-walk of the orphan producer's parents failed")
                         }
                     }
                 }
+                demoted_producers.extend(drvs);
             }
-            Ok(_) => {
-                sources_purged.push(path);
-                match gradient_db::caches::demotion::demote_parents_of(ctx, hash).await {
-                    Ok(drvs) if !drvs.is_empty() => {
-                        wanted_by_demoted += drvs.len();
-                        demoted_producers.extend(drvs);
-                    }
-                    Ok(_) => needs_dep_rewalk = true,
-                    Err(e) => warn!(%path, error = %e, "repair: demote parents failed"),
-                }
-            }
+            Ok(_) => kept.push(path),
             Err(e) => warn!(%path, error = %e, "repair: purge cached output failed"),
         }
     }
 
-    if needs_dep_rewalk {
-        match gradient_db::caches::demotion::demote_output_only_cached_deps(ctx, failed_derivation)
-            .await
-        {
-            Ok(drvs) => {
-                wanted_by_demoted += drvs.len();
-                demoted_producers.extend(&drvs);
-                info!(
-                    %failed_derivation,
-                    count = drvs.len(),
-                    "repair: demoted output-only-cached direct deps to re-walk an absent orphan input"
-                );
-            }
+    // The derivation naming a source, a .drv or a present object walks again, and that walk
+    // pushes them.
+    if !kept.is_empty() {
+        match gradient_db::graph::can_start::unwalk_derivations(ctx, &[failed_derivation]).await {
+            Ok(changes) => gradient_db::status::emit_transition_effects(ctx, &changes).await?,
             Err(e) => {
-                warn!(%failed_derivation, error = %e, "repair: demote output-only-cached deps failed")
+                warn!(%failed_derivation, error = %e, "repair: re-walk of the failed derivation failed")
             }
         }
     }
 
-    // A wanted output with a terminal-failed producer must retry right away.
-    // Waiting for an eval to requeue it can dead-end whenever evals are aborted.
+    // A wanted output with a terminal-failed producer retries right away. Waiting for an eval to
+    // requeue it can dead-end whenever evals are aborted.
     let requeued = if demoted_producers.is_empty() {
         0
     } else {
@@ -153,24 +118,15 @@ pub(crate) async fn repair_missing_inputs(
         }
     };
 
-    if !sources_purged.is_empty() {
-        info!(
-            %failed_derivation,
-            count = sources_purged.len(),
-            sample = ?sources_purged.iter().take(5).collect::<Vec<_>>(),
-            "repair: purged stale cache rows + objects for inputs with no producing \
-             derivation (.drv / source); the next evaluation re-instantiates and re-pushes them"
-        );
-    }
-
     info!(
         %failed_derivation,
         purged,
-        sources_purged = sources_purged.len(),
-        wanted_by_demoted,
+        kept = kept.len(),
+        sample = ?kept.iter().take(5).collect::<Vec<_>>(),
+        parents_unwalked,
         requeued,
         paths = missing_paths.len(),
-        "repaired missing inputs; stale cache rows + objects purged for next-eval rebuild"
+        "repaired missing inputs: gone objects purged, present and producerless paths kept, the failed derivation walks again"
     );
     Ok(())
 }
