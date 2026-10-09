@@ -12,20 +12,21 @@
 //! grow exponential in depth on these diamond-heavy graphs.
 
 use super::predicates::{builder_predicate, open_predicate};
-use crate::sql::{Query, Tier};
+use crate::sql::{Flag, Query};
 use sea_orm::{ConnectionTrait, DatabaseTransaction, DbErr, TransactionTrait};
 
-pub const WALK_WORK_MEM: &str = "SET LOCAL work_mem = '4MB'";
-pub const SWEEP_WORK_MEM: &str = "SET LOCAL work_mem = '64MB'";
+pub const WALK_WORK_MEM: &str = "SET LOCAL work_mem = '64MB'";
+pub const DEFAULT_WORK_MEM: &str = "SET LOCAL work_mem = '4MB'";
 
 /// `SET LOCAL` is the sole safe form, reverting with the transaction. Bare `SET`s outlive the
 /// walk on a pooled connection. Dedup tables of recursive `UNION`s take their size from the
-/// planner's estimate, capped by hash_mem. They cost a zero-fill and an unmap per execution, so
-/// root-seeded walks keep the default work_mem. Sweeps raise the ceiling above the floor.
-pub fn work_mem(tier: Tier) -> &'static str {
-    match tier {
-        Tier::Sweep => SWEEP_WORK_MEM,
-        Tier::Hot | Tier::Bulk | Tier::Walk => WALK_WORK_MEM,
+/// planner's estimate, capped by hash_mem, and cost a zero-fill and an unmap per execution.
+/// A walk seeded by a root array declares `DefaultWorkMem` to keep that cap small.
+pub fn work_mem(statement: &Query) -> &'static str {
+    if statement.flags.contains(&Flag::DefaultWorkMem) {
+        DEFAULT_WORK_MEM
+    } else {
+        WALK_WORK_MEM
     }
 }
 
@@ -34,7 +35,7 @@ where
     C: TransactionTrait<Transaction = DatabaseTransaction>,
 {
     let txn = db.begin().await?;
-    txn.execute_unprepared(work_mem(statement.tier)).await?;
+    txn.execute_unprepared(work_mem(statement)).await?;
     Ok(txn)
 }
 
@@ -227,8 +228,8 @@ mod tests {
     }
 
     crate::sql! {
-        SWEEP_PROBE = "SELECT 1 FROM derivation", params = [], tier = Sweep, flags = [Walk];
-        WALK_PROBE = "SELECT 2 FROM derivation", params = [], tier = Walk, flags = [Walk];
+        RAISED_PROBE = "SELECT 1 FROM derivation", params = [], tier = Walk, flags = [Walk];
+        DEFAULT_PROBE = "SELECT 2 FROM derivation", params = [], tier = Walk, flags = [Walk, DefaultWorkMem];
     }
 
     async fn walk_statements(statement: &Query) -> Vec<String> {
@@ -249,8 +250,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_sweep_raises_work_mem_with_set_local_inside_its_own_transaction() {
-        let log = walk_statements(&SWEEP_PROBE).await;
+    async fn a_walk_raises_work_mem_with_set_local_inside_its_own_transaction() {
+        let log = walk_statements(&RAISED_PROBE).await;
         assert_eq!(
             log.len(),
             1,
@@ -261,8 +262,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_root_seeded_walk_keeps_the_default_work_mem_so_its_dedup_tables_stay_small() {
-        let log = walk_statements(&WALK_PROBE).await;
+    async fn a_root_array_walk_keeps_the_default_work_mem_so_its_dedup_tables_stay_small() {
+        let log = walk_statements(&DEFAULT_PROBE).await;
         assert!(log[0].contains("SET LOCAL work_mem"), "{log:?}");
         assert!(
             !log[0].contains("64MB"),

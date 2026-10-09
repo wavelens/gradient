@@ -105,7 +105,7 @@ async fn measure_in(
     values: Vec<Value>,
 ) -> Result<serde_json::Value> {
     if query.flags.contains(&Flag::Walk) {
-        txn.execute_unprepared(gradient_db::graph::walks::work_mem(query.tier))
+        txn.execute_unprepared(gradient_db::graph::walks::work_mem(query))
             .await?;
     }
 
