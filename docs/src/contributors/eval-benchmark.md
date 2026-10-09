@@ -33,6 +33,7 @@ cat result/summary.txt
 
 - A cold reset will drop and recreate the database. The server will then re-provision the database from `services.gradient.state` again.
 - The worker's Nix store will keep fetched sources.
+- The worker VM can boot with the nixpkgs source already in its store. Cold passes then measure Gradient, not a copy of nixpkgs into the VM.
 - Captures are active from the manual evaluation until the evaluation has left the `EvaluatingDerivation` status.
 - The pass will then wait for `Completed` before the next pass can start.
 - `summary.txt` will only report on the `cold-clean` and `warm-clean` pass. Perf, strace and `auto_explain` distort timings.
