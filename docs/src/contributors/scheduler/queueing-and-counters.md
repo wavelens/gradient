@@ -141,28 +141,32 @@ Five columns on `evaluation`, over the shared builds named by its `build_job` ro
 
 ## Dependency Failure
 
-- `promotion::cascade_dependency_failed` must mark every `Created`/`Queued`/`FailedTransient` build needing the failed one as `DependencyFailed`. The mark will follow a fresh terminal-failure transition.
-- `promotion::repair_dependency_failed` can repeat the walk within one evaluation's closure at stream completion and on the graph-stuck heal. The repeat will catch shared builds thawed after their dependency failed.
-- The repeat can also start from the shared builds the evaluation aborted (`build_job.aborted`). Their dependents end `DependencyFailed`.
-- Neither walk will enter a shared build available in a cache (`graph_sql::non_passthrough_predicate`).
+- `cascade_dependency_failed` can mark all `Created`/`Queued`/`FailedTransient` derivations wanting a failed build as `DependencyFailed`. Fresh terminal-failure transitions trigger the mark.
+- `repair_dependency_failed` can repeat the walk within the closure of an evaluation, at stream completion and on the graph-stuck heal. The repeat can catch a shared build thawed after its dependency failed.
+- The repeat can also start from each shared build the evaluation aborted (`build_job.aborted`). Derivations wanting an aborted build end `DependencyFailed`.
+- Neither walk can enter a shared build available in a cache (`graph_sql::non_passthrough_predicate`).
 
 ## Build Abort and Retry
 
-`POST /builds/{id}/abort` and `POST /builds/{id}/retry` act on a build of a running evaluation, inside the graph writer (`status::evaluation_build`).
+`POST /builds/{id}/abort` and `POST /builds/{id}/retry` act on a build of an evaluation, inside the graph writer (`status::evaluation_build`).
 
 | Action | Allowed Status | Effect |
 |---|---|---|
 | Abort | `Created`, `Queued`, `Building` | `build_job.aborted` set, shared build to `Aborted`, dependents in the closure to `DependencyFailed`, `AbortJob` to the worker |
-| Retry | `FailedPermanent`, `FailedTimeout`, `Aborted` | `build_job.aborted` cleared, the build and the dependents failed through the build back to `Created` (`RETRY_BUILD_CLOSURE`), dependency-failure walk repeated, closure queued |
+| Retry | `FailedPermanent`, `FailedTimeout`, `Aborted`, `DependencyFailed` | failed builds back to `Created` with their `build_job.aborted` cleared, dependents failed through them back to `Created` (`RETRY_BUILD_CLOSURE`), dependency-failure walk repeated, closure queued |
 
-- Abort must refuse a shared build that other live evaluations still name.
-- Retry must wait until the worker confirmed the earlier abort. A late abort report can move the retried build back to `Aborted`.
+- Aborts need a running evaluation.
+- Aborts refuse a shared build that other live evaluations still name.
+- A retry of a `DependencyFailed` build can also retry each failed dependency below the build. The walk can only pass `DependencyFailed` dependencies.
+- A retry can reopen a `Failed` or `Aborted` evaluation past its evaluation phase. The evaluation moved back to `Building` (`REOPEN_EVALUATION`) and can finish again.
+- Newer or still active evaluations of the same task keep the evaluation closed.
+- Retries wait until the worker confirmed the earlier abort. Late abort reports can move a retried build back to `Aborted`.
 - The `Eval` and `Unstick` thaws of the [repair pass](repair-pass.md) skip the aborted build and everything above the build in the closure.
-- A retry thaw must not apply the deterministic-failure block. The user asked for the rebuild.
+- Retry thaws skip the deterministic-failure block. The user asked for the rebuild.
 
 ## Consistency Check
 
-`consistency::graph_consistency_report` must recount in dependency order.
+Recounts of `consistency::graph_consistency_report` follow dependency order.
 
 | Step | Reports |
 |---|---|

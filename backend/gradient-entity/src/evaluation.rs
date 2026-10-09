@@ -73,6 +73,8 @@ impl EvaluationStatus {
 
     pub const TERMINAL: [Self; 3] = [Self::Completed, Self::Failed, Self::Aborted];
 
+    pub const REOPENABLE: [Self; 2] = [Self::Failed, Self::Aborted];
+
     pub const EVALUATING: [Self; 2] = [Self::EvaluatingFlake, Self::EvaluatingDerivation];
 }
 
@@ -81,8 +83,8 @@ mod status_tests {
     use super::*;
     use sea_orm::Iterable;
 
-    /// Raw SQL is composing fragments from these numbers. A renumber must fail CI because the
-    /// m20260407 in-place renumber was exactly this hazard.
+    /// Raw SQL statements embed these numbers. Renumbers fail CI here, since the m20260407
+    /// in-place renumber broke those statements.
     #[test]
     fn numbering_is_pinned() {
         for (status, n) in [

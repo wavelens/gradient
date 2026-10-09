@@ -4901,7 +4901,7 @@ paths:
       tags: [builds]
       summary: Retry build
       description: |-
-        Queues a `FailedPermanent`, `FailedTimeout` or `Aborted` build of a running evaluation again, together with its dependents in the evaluation that failed only through it. A reproducible builder failure is retried too. Requires project membership. Answers 409 when the evaluation has finished, the build has another status, or its worker has not confirmed an earlier abort yet.
+        Queues a `FailedPermanent`, `FailedTimeout`, `Aborted` or `DependencyFailed` build again, together with its dependents in the evaluation that failed only through it. A `DependencyFailed` build retries the failed builds below it. A reproducible builder failure is retried too. A retry reopens a `Failed` or `Aborted` evaluation that reached its build phase. Requires project membership. Answers 409 when the evaluation has completed or never reached its build phase, a newer or running evaluation of the task exists, the build has another status, no failed dependency is retryable, or its worker has not confirmed an earlier abort yet.
       operationId: retryBuild
       responses:
         '200':

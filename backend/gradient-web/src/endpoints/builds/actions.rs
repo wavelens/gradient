@@ -44,6 +44,12 @@ fn refusal_error(refusal: BuildRefusal) -> WebError {
         BuildRefusal::WorkerStillStopping => {
             WebError::conflict("The worker has not confirmed the abort yet, try again shortly")
         }
+        BuildRefusal::NewerEvaluation => {
+            WebError::conflict("A newer evaluation of the task replaced this evaluation")
+        }
+        BuildRefusal::NoFailedDependency => {
+            WebError::conflict("No failed dependency of this build is retryable")
+        }
     }
 }
 

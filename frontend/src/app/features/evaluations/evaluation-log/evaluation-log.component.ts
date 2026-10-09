@@ -33,7 +33,7 @@ import { ProjectsService } from '@core/services/projects.service';
 import { TasksService } from '@core/services/tasks.service';
 import { AccessService, WritableDirective } from '@shared/access';
 import { AccessState, accessFromEntity } from '@core/models/access.model';
-import { BuildProgress, Evaluation, EvaluationMessage, EvaluationProgress, EvaluationStatus, WaitingReason, TriggerType } from '@core/models';
+import { BuildProgress, BuildStatus, Evaluation, EvaluationMessage, EvaluationProgress, EvaluationStatus, WaitingReason, TriggerType } from '@core/models';
 import { AuthService } from '@core/services/auth.service';
 import {
   BadgeComponent,
@@ -52,6 +52,10 @@ import {
 import { BuildProgressComponent, EvalStatusBadgeComponent, InputFetchListComponent, ThunkProgressComponent } from '@shared/ui';
 import { buildDuration, buildPhaseFinished, commitLabel, evaluationDuration, formatEvaluationDuration, isPendingBuildStatus, isRunningEvaluationStatus, phaseProgress, thunkProgress } from '@shared/evaluation';
 import { environment } from '@environments/environment';
+
+const ABORTABLE_BUILD_STATUSES: readonly string[] = ['Created', 'Queued', 'Building'] satisfies BuildStatus[];
+const RETRYABLE_BUILD_STATUSES: readonly string[] = ['FailedPermanent', 'FailedTimeout', 'Aborted', 'DependencyFailed'] satisfies BuildStatus[];
+const REOPENABLE_EVALUATION_STATUSES: readonly EvaluationStatus[] = ['Failed', 'Aborted'];
 
 @Component({
   selector: 'app-evaluation-log',
@@ -295,6 +299,17 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
         this.startLiveUpdates(evaluation.status);
       },
       error: () => this.loading.set(false),
+    });
+  }
+
+  private refreshEvaluation(): void {
+    this.evalService.getEvaluation(this.evaluationId).pipe(takeUntilDestroyed(this.destroyRef)).subscribe(evaluation => {
+      this.evaluation.set(evaluation);
+      this.loadBuilds();
+      if (this.isRunningStatus(evaluation.status) && !this.liveSub) {
+        this.startDurationTimer(evaluation);
+        this.startLiveUpdates(evaluation.status);
+      }
     });
   }
 
@@ -1470,16 +1485,16 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   }
 
   canAbort(build: BuildItem): boolean {
-    return this.canChangeRunningBuild() && build.status === 'Building';
+    const evaluation = this.evaluation();
+    return this.triggerAccess().canEdit && !!evaluation && isRunningEvaluationStatus(evaluation.status)
+      && ABORTABLE_BUILD_STATUSES.includes(build.status);
   }
 
   canRetry(build: BuildItem): boolean {
-    return this.canChangeRunningBuild() && ['FailedPermanent', 'Aborted'].includes(build.status);
-  }
-
-  private canChangeRunningBuild(): boolean {
     const evaluation = this.evaluation();
-    return this.triggerAccess().canEdit && !!evaluation && isRunningEvaluationStatus(evaluation.status);
+    return this.triggerAccess().canEdit && !!evaluation
+      && (isRunningEvaluationStatus(evaluation.status) || REOPENABLE_EVALUATION_STATUSES.includes(evaluation.status))
+      && RETRYABLE_BUILD_STATUSES.includes(build.status);
   }
 
   prioritizeBuild(build: BuildItem): void {
@@ -1498,7 +1513,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     request.pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: () => {
         this.messageService.add({ severity: 'success', summary: successSummary, detail: this.buildDisplayName(build.name) });
-        this.loadBuilds();
+        this.refreshEvaluation();
       },
       error: (error: Error) => this.messageService.add({
         severity: 'error',
