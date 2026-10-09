@@ -288,8 +288,8 @@ in {
           example = "32MB";
           description = ''
             `work_mem` of the cluster set up by {option}`services.gradient.postgres.enable`. It is
-            the floor for every query. Sweeps over the whole graph raise their own ceiling for a
-            statement. Root-seeded walks keep the PostgreSQL default.
+            the floor for every query. Graph walks raise their own ceiling for a statement, except
+            the walks seeded by a root array, which keep the PostgreSQL default.
             Every sort or hash node in a query can claim this much. Use `"32MB"` on a host sized for
             the three server pools. It is too much for a small host. Set it to `null` to keep the
             PostgreSQL default.

@@ -13,7 +13,7 @@ flowchart LR
 
 ## Walks
 
-The shared walks come from `gradient-db/src/graph/walks.rs` in the backend. Callers pass a seed and a direction and receive a `WITH RECURSIVE` prelude. Walks are running under `begin_walk`. Sweeps raise `work_mem` to `64MB` for the statement. Root-seeded walks keep the PostgreSQL default of `4MB`, a cap on the dedup tables of their recursive `UNION`s.
+The shared walks come from `gradient-db/src/graph/walks.rs` in the backend. Callers pass a seed and a direction and receive a `WITH RECURSIVE` prelude. Walks are running under `begin_walk`, with `work_mem` raised to `64MB` for the statement. A walk seeded by a root array, such as the need update, declares `DefaultWorkMem` and keeps the PostgreSQL default of `4MB`, a cap on the dedup tables of its recursive `UNION`s.
 
 | Walk | Generator | Fenced |
 |---|---|---|

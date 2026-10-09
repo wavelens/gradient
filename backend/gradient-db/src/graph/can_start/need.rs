@@ -167,7 +167,7 @@ crate::sql_lazy! {
     UPDATE_NEED = || UPDATE_NEED_SQL.as_str(),
         params = [DerivationIds(64)],
         tier = Walk,
-        flags = [Walk];
+        flags = [Walk, DefaultWorkMem];
 }
 
 crate::sql! {

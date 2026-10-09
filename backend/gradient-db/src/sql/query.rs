@@ -43,6 +43,7 @@ impl Tier {
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum Flag {
     Walk,
+    DefaultWorkMem,
 }
 
 pub struct Query {
