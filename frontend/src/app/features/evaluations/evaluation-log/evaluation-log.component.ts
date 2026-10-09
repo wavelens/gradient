@@ -1466,7 +1466,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   }
 
   canPrioritize(build: BuildItem): boolean {
-    return this.triggerAccess().canEdit && !build.prioritized && isPendingBuildStatus(build.status);
+    return this.authService.user()?.superuser === true && !build.prioritized && isPendingBuildStatus(build.status);
   }
 
   canAbort(build: BuildItem): boolean {

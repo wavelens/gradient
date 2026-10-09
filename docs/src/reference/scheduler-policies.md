@@ -30,7 +30,7 @@ The worker will get its highest-scoring job with a total of at least 0 and no ve
 | `ReserveFetchWorkersRule` | Penalty, up to 300 | Keeping fetch-capable workers free for fetching while capacity is short |
 | `TransferLimitRule` | Penalty, 4000 | Holding large transfers while the transfer slots are full, see [Transfer Limits](#transfer-limits) |
 
-The **Prioritize** entry in the task or evaluation menu can set the `QosRule` flag on a build and its dependencies, or on a whole evaluation. The flag will clear on a failed or aborted build or evaluation.
+The **Prioritize** entry in the task or evaluation menu can set the `QosRule` flag on a build and its dependencies, or on a whole evaluation. The flag will clear on a failed or aborted build or evaluation. Only superusers can prioritize.
 
 ## Rules in `resource-aware` Only
 
