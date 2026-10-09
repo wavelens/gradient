@@ -40,8 +40,9 @@ root
 │   ├── trigger-dispatch                 every 5 s
 │   ├── eval-dispatch                    5 s tick, woken by every created evaluation
 │   ├── build-dispatch                   actor: 5 s tick, kicks, startable-set resync every 60 s
+│   ├── transient-retry-requeue          every 5 s: transient failures past their backoff back to the queue
 │   ├── cluster-dispatch                 5 s tick, woken when a worker finds no single job
-│   └── upstream-probe                   every 1 s: asks upstream caches about shared builds newly wanted
+│   └── upstream-probe                   1 s tick, woken by each probe request: upstream cache lookups for newly wanted shared builds and their dependencies
 ├── sessions                             supervisor: one actor per worker connection
 ├── worker-sample, instance-metrics      metrics passes
 ├── worker-liveness, graph-consistency,

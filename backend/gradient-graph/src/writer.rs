@@ -428,6 +428,7 @@ where
         .context("statement timeout")?;
     let scoped = ctx.in_transaction(Arc::clone(&tx));
     let startable_set = scoped.startable_set.clone();
+    let probe_requests = scoped.probe_requests.clone();
     let outcome = tokio::time::timeout(budget, work(scoped)).await;
     let tx =
         Arc::try_unwrap(tx).map_err(|_| anyhow!("a transaction handle escaped its message"))?;
@@ -441,6 +442,7 @@ where
             tx.commit().await.context("commit")?;
             ctx.delivery_wake.notify_one();
             startable_set.publish();
+            probe_requests.publish();
             Ok(value)
         }
         Ok(Err(e)) => {
