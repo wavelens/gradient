@@ -75,6 +75,8 @@ Both mutation models report `(derivation, from, to)` moves to `emit_transition_e
 
 - `task_board::entry_point_dep_counts` can walk one page of entry points. Rows land in `entry_point_dep_count` with the `dep_counts_computed_at` timestamp and the `entry_point.dep_counts_version` value.
 - A read will refresh an entry point only when the version moved and the rows are older than `DEP_COUNTS_REFRESH_SECS` (120 s).
+- A read will claim the refresh before the walk. Concurrent reads keep the stored rows until the walk has finished.
+- A walk that never stored its rows will leave the claim to expire after `DEP_COUNTS_REFRESH_SECS`.
 - Rows older than `DEP_COUNTS_MAX_AGE_SECS` (600 s) refresh regardless. The forced refresh can heal a bump the emitter logged and swallowed.
 
 ## Consistency Check
