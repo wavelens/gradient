@@ -47,6 +47,7 @@
       store-spec = import ./nix/tests/store-spec/check.nix { inherit pkgs; inherit (pkgs) lib; };
       test-topologies = import ./nix/tests/harness/check.nix { inherit pkgs; inherit (pkgs) lib; };
       evalbench-summarize = import ./nix/tests/bench/evalbench/check.nix { inherit pkgs; };
+      reuse = import ./nix/tests/reuse.nix { inherit pkgs; inherit (pkgs) lib; };
     };
 
     packages = rec {

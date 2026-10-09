@@ -1,0 +1,23 @@
+# SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+# SPDX-License-Identifier: AGPL-3.0-only
+
+version = 1
+
+[[annotations]]
+path = [
+    "nix/tests/gradient/scheduler/specs/replay.nix",
+    "nix/patches/**/*.patch",
+    "nix/tests/store-spec/keys/*",
+    "nix/tests/gradient/e2e/flake_repository.lock",
+    "frontend/**",
+    "docs/**/*.png",
+    "**/Cargo.lock",
+    "**/*.json",
+    "flake.lock",
+    "backend/gradient-ssh/testdata/**",
+    "backend/gradient-wire/schema/*.txt",
+    "nix/tests/bench/evalbench/fixtures/**/*.jsonl",
+]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 Wavelens GmbH <info@wavelens.io>"
+SPDX-License-Identifier = "AGPL-3.0-only"
