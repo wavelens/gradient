@@ -1097,11 +1097,22 @@ describe('TaskDetailComponent repository chip', () => {
     expect(chip.querySelector('gr-icon')).not.toBeNull();
   });
 
-  it('keeps a non-web repository a plain chip', () => {
-    const { fixture } = setup(access, { repository: 'git@github.com:acme/demo.git' });
+  it('links an ssh repository to its https page', () => {
+    const { fixture } = setup(access, { repository: 'ssh://git@github.com/acme/demo.git' });
+    expect(repositoryChip(fixture).getAttribute('href')).toBe('https://github.com/acme/demo');
+  });
+
+  it('keeps a local repository a plain chip', () => {
+    const { fixture } = setup(access, { repository: '/srv/git/demo' });
     const chip = repositoryChip(fixture);
     expect(chip.tagName).toBe('SPAN');
     expect(chip.querySelector('a')).toBeNull();
+  });
+
+  it('links the selected commit hash to the commit page', () => {
+    const { fixture } = setup(access, { repository: 'git@github.com:acme/demo.git' });
+    const link = (fixture.nativeElement as HTMLElement).querySelector('.panel-title .sub a.commit-link');
+    expect(link!.getAttribute('href')).toBe('https://github.com/acme/demo/commit/abc1234def5678');
   });
 });
 

@@ -216,6 +216,12 @@ h1 { font-size: $font-size-xxl; margin: 0; }
   white-space: nowrap;
 }
 .panel-title .sub { color: var(--gr-text-muted); font-size: $font-size-xs; margin-top: 2px; }
+.commit-link {
+  color: inherit;
+  text-decoration: none;
+
+  &:hover, &:focus-visible { text-decoration: underline; }
+}
 .panel-actions { display: flex; gap: $space-pair; align-items: center; }
 
 .bar-line {

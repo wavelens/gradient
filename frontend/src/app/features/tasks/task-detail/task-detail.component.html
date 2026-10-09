@@ -50,8 +50,8 @@
   <div class="pad task-info">
     <p class="desc">{{ proj.description || 'No description' }}</p>
     <div class="meta-chips">
-      @if (proj.repository.startsWith('http')) {
-        <a class="chip chip--link" [href]="proj.repository" target="_blank" rel="noopener noreferrer">
+      @if (repositoryWebUrl(proj.repository); as repoUrl) {
+        <a class="chip chip--link" [href]="repoUrl" target="_blank" rel="noopener noreferrer">
           <gr-icon name="link" size="sm" />{{ proj.repository }}
         </a>
       } @else {
@@ -100,7 +100,11 @@
                     }
                   </div>
                   <div class="sub">
-                    <span class="mono" [title]="sel.commit">{{ commitLabel(sel.commit) }}</span> ·
+                    @if (commitWebUrl(proj.repository, sel.commit); as commitUrl) {
+                      <a class="mono commit-link" [href]="commitUrl" [title]="sel.commit" target="_blank" rel="noopener noreferrer">{{ commitLabel(sel.commit) }}</a> ·
+                    } @else {
+                      <span class="mono" [title]="sel.commit">{{ commitLabel(sel.commit) }}</span> ·
+                    }
                     {{ triggerLabel(sel) }} · started {{ sel.created_at + 'Z' | date: 'MMM d, HH:mm' }}
                   </div>
                 </div>
