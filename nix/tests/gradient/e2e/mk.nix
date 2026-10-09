@@ -276,6 +276,7 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
         "L+ /var/lib/git/flake.lock 0755 git git - ${./flake_repository.lock}"
         "L+ /var/lib/git/flake-busywrap.nix 0755 git git - ${./flake_repository_busywrap.nix}"
         "L+ /var/lib/git/flake-spin.nix 0755 git git - ${./flake_repository_spin.nix}"
+        "L+ /var/lib/git/flake-slow.nix 0755 git git - ${./flake_repository_slow.nix}"
       ];
     };
 
@@ -2210,6 +2211,80 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
         f"journalctl -u gradient-server --no-pager --since='{abort_since}' "
         "| grep -q 'worker never confirmed the abort'"
     )
+
+    banner("Phase 10m: a build aborted and retried in a running evaluation (#673)")
+
+    def build_action(build_job, action):
+        return server.succeed(
+            f'{CURL} -s -o /dev/null -w "%{{http_code}}" -X POST '
+            f'-H "Authorization: Bearer {token}" {API}/builds/{build_job}/{action}'
+        ).strip()
+
+    known = sql("SELECT string_agg(id::text, ',') FROM evaluation;")
+    slow_evals = f"SELECT id FROM evaluation WHERE NOT (id = ANY(string_to_array('{known}', ',')::uuid[]))"
+    server.succeed("cp /var/lib/git/flake-slow.nix /var/lib/git/test/flake.nix")
+    server.succeed("sed -i 's#\\[nixpkgs\\]#${self.inputs.nixpkgs}#g' /var/lib/git/test/flake.nix")
+    server.succeed(f"{GIT} -C /var/lib/git/test commit -am 'slow'")
+    server.succeed("chown git:git -R /var/lib/git/test")
+
+    def named(name, evaluations):
+        return (
+            "FROM build_job bj JOIN derivation d ON d.id = bj.derivation "
+            "JOIN derivation_build db ON db.id = bj.derivation_build "
+            f"WHERE d.name = '{name}' AND bj.evaluation IN ({evaluations})"
+        )
+
+    poll(f"SELECT count(*) {named('slow-leaf', slow_evals)};", "2",
+         "both tasks did not name slow-leaf", timeout=600)
+    poll(f"SELECT (db.status IN (1, 2))::text {named('slow-leaf', slow_evals)} LIMIT 1;", "true",
+         "slow-leaf was never queued", timeout=600)
+
+    first, second = sql(
+        f"SELECT bj.evaluation || ' ' || bj.id {named('slow-leaf', slow_evals)} ORDER BY bj.evaluation;"
+    ).splitlines()
+    kept_eval, leaf_job = first.split()
+    dropped_eval = second.split()[0]
+    assert build_action(leaf_job, "abort") == "409", (
+        "slow-leaf was aborted while the other task's evaluation still needs it"
+    )
+
+    server.succeed(
+        f'{CURL} -sf -X POST -H "Authorization: Bearer {token}" '
+        f'-H "Content-Type: application/json" -d \'{{"method": "abort"}}\' '
+        f'{API}/evals/{dropped_eval}'
+    )
+    poll(f"SELECT status::text FROM evaluation WHERE id = '{dropped_eval}';", "7",
+         "the other evaluation did not abort")
+    assert build_action(leaf_job, "abort") == "200", "the build abort was refused"
+
+    kept = f"'{kept_eval}'"
+
+    def kept_status(name):
+        return sql(f"SELECT db.status {named(name, kept)};")
+
+    assert kept_status("slow-leaf") == "5", f"slow-leaf is {kept_status('slow-leaf')}, not Aborted"
+    assert kept_status("slow-wrap") == "6", "the aborted build's dependent still waits"
+    assert sql(f"SELECT (status NOT IN (5, 6, 7))::text FROM evaluation WHERE id = '{kept_eval}';") == "true", (
+        "the evaluation ended while slow-keep still builds"
+    )
+
+    for _ in range(60):
+        retried = build_action(leaf_job, "retry")
+        if retried != "409":
+            break
+        server.sleep(1)
+    assert retried == "200", f"the retry answered {retried}"
+    assert kept_status("slow-leaf") in ("0", "1", "2"), f"slow-leaf is {kept_status('slow-leaf')} after the retry"
+    assert kept_status("slow-wrap") in ("0", "1"), f"slow-wrap is {kept_status('slow-wrap')} after the retry"
+    assert shared_build_drift() == 0, "shared build counters disagree with their recount after the retry"
+
+    server.succeed(
+        f'{CURL} -sf -X POST -H "Authorization: Bearer {token}" '
+        f'-H "Content-Type: application/json" -d \'{{"method": "abort"}}\' '
+        f'{API}/evals/{kept_eval}'
+    )
+    poll(f"SELECT status::text FROM evaluation WHERE id = '{kept_eval}';", "7",
+         "the retried evaluation did not abort")
 
     banner("Phase 10i: live-closure retention (#594)")
 
