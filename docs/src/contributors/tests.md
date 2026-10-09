@@ -105,7 +105,9 @@ Every hand-written statement must be declared through `gradient_db::sql!` with i
 - **No wall-clock budgets:** The runner is shared and slow.
 - **Unmeasured statements** (empty relations) are reported, not passed. More than 40 will fail the phase.
 - **Tables filled only by users** (stars) are filled through the real API before the check. Values differing per round (commit hash prefixes) are drawn parameter kinds.
-- **Draws are ordered**, never heap order. The single evaluation is the one naming the most shared builds, the worst case its statements must fit. Every other kind will take the oldest rows by id.
+- **Draws are ordered**, never heap order. Every kind except the evaluation will take the oldest rows by id.
+- **The evaluation is a copy** of the evaluation naming the most shared builds, the worst case its statements must fit.
+- **The copy is newer than the statistics.** The check will write the copy after the last ANALYZE, like a new evaluation in production. The planner will estimate the copy from the evaluations outside the most common values.
 
 ### CLI and Lints
 

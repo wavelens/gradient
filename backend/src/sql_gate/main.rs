@@ -8,11 +8,13 @@ mod amplify;
 mod explain;
 mod report;
 mod sample;
+mod unanalyzed;
 
 use anyhow::{Context, Result};
 use clap::Parser;
-use gradient_db::sql::registry;
-use sea_orm::{ConnectOptions, ConnectionTrait, Database, DatabaseConnection};
+use gradient_db::sql::{Param, registry};
+use sample::Sampler;
+use sea_orm::{ConnectOptions, ConnectionTrait, Database, DatabaseConnection, Value};
 
 /// A linker is dropping an rlib the binary never mentions. The crate's registry entries would be
 /// silently absent without these calls, and the gate would measure a subset.
@@ -91,7 +93,12 @@ async fn main() -> Result<()> {
         .await
         .context("VACUUM (ANALYZE) before measuring")?;
 
-    let rows = explain::run_all(&bounded(&url).await?).await?;
+    let mut sampler = Sampler::default();
+    if let Some(evaluation) = unanalyzed::copy_largest_evaluation(&db).await? {
+        sampler.pin(&Param::EvaluationId, Value::from(evaluation));
+    }
+
+    let rows = explain::run_all(&bounded(&url).await?, sampler).await?;
     print!("{}", report::render(&rows));
 
     std::process::exit(report::exit_code(&rows, cli.max_unmeasured));
