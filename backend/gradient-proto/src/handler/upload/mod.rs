@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 use gradient_core::ServerState;
 use gradient_storage::admission::{AdmissionSession, Admitted, ObjectKey};
 use gradient_storage::{PartialStore, StorageTarget, upload_lease};
-use gradient_wire::messages::ServerMessage;
+use gradient_wire::messages::{ServerMessage, is_small_upload};
 use gradient_wire::types::{GrantTarget, UploadMetadata, UploadObject, UploadOutcome};
 use tracing::warn;
 
@@ -114,7 +114,7 @@ impl InboundContext<'_> {
                 let Some(queued) = uploads.table.take_queued(id) else {
                     return;
                 };
-                match self.already_stored(&key).await {
+                match self.already_stored(&key, queued.size).await {
                     Ok(false) => {}
                     Ok(true) => {
                         permit.committed();
@@ -166,10 +166,14 @@ impl InboundContext<'_> {
     }
 
     #[tracing::instrument(level = "debug", skip_all)]
-    async fn already_stored(&self, key: &ObjectKey) -> Result<bool, sea_orm::DbErr> {
+    async fn already_stored(&self, key: &ObjectKey, size: u64) -> Result<bool, sea_orm::DbErr> {
         let ObjectKey::Nar(hash) = key else {
             return Ok(false);
         };
+        // The commit is dropping a duplicate. A small transfer is costing less than this lookup.
+        if is_small_upload(size) {
+            return Ok(false);
+        }
 
         Ok(crate::import::stored_path(&self.state.worker_db, hash)
             .await?
@@ -399,7 +403,7 @@ mod tests {
     use crate::handler::inbound::fixture::{JOB, TestSession, decode};
     use gradient_test_support::state::test_state;
     use gradient_types::MCachedPath;
-    use gradient_wire::messages::ClientMessage;
+    use gradient_wire::messages::{ClientMessage, SMALL_UPLOAD_BYTES};
     use sea_orm::{DatabaseBackend, MockDatabase};
 
     fn nar(c: char) -> UploadObject {
@@ -429,7 +433,7 @@ mod tests {
         );
         let (mut session, mut sent, mut admitted) = TestSession::new(&state).await;
         let (mut ctx, uploads) = session.split();
-        ctx.on_upload_request(JOB.into(), 1, nar('h'), 1024, uploads)
+        ctx.on_upload_request(JOB.into(), 1, nar('h'), SMALL_UPLOAD_BYTES + 1, uploads)
             .await;
         ctx.on_upload_admitted(admitted.recv().await.unwrap(), uploads)
             .await;
@@ -441,6 +445,24 @@ mod tests {
             }
         ));
         assert_eq!(state.upload_admission.in_flight(), 0);
+    }
+
+    #[tokio::test]
+    async fn a_small_request_is_granted_without_a_cache_index_lookup() {
+        let state = test_state(MockDatabase::new(DatabaseBackend::Postgres).into_connection());
+        let (mut session, mut sent, mut admitted) = TestSession::new(&state).await;
+        let (mut ctx, uploads) = session.split();
+        ctx.on_upload_request(JOB.into(), 1, nar('s'), SMALL_UPLOAD_BYTES, uploads)
+            .await;
+        ctx.on_upload_admitted(admitted.recv().await.unwrap(), uploads)
+            .await;
+        assert!(matches!(
+            decode(sent.try_recv().unwrap()),
+            ServerMessage::UploadGrant {
+                request_id: 1,
+                target: GrantTarget::Passthrough { resume_offset: 0 }
+            }
+        ));
     }
 
     #[tokio::test]
