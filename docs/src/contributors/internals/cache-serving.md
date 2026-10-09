@@ -33,7 +33,7 @@ sequenceDiagram
     - Each NAR commit can sign into the caches of the upload (`sign_into_caches` in `gradient-graph/src/nar.rs`).
     - Projects with a job on a committed path then receive its signature in their caches (`gradient-graph/src/claims.rs`).
     - Recorded batches sign the already cached outputs of their jobs into the caches of their project. Builds finished earlier for another project qualify too.
-    - The sign sweep (`sign_missing_signatures` in `gradient-cache/src/cacher/sign_sweep.rs`) will fill rows inserted with a later subscription.
+    - The sign sweep (`sign_missing_signatures` in `gradient-cache/src/signatures.rs`) will fill rows inserted with a later subscription.
     - The sweep will also fill rows a commit left unsigned.
 
 ## Narinfo

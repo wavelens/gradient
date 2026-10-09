@@ -10,9 +10,7 @@ use gradient_entity::build::BuildStatus;
 use gradient_graph::GcRequest;
 use gradient_types::events::gc::{Pass, Swept};
 use gradient_types::*;
-use sea_orm::{
-    ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, IntoActiveModel, QueryFilter,
-};
+use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter};
 use serde::Serialize;
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -23,136 +21,6 @@ pub struct CleanupReport {
     pub orphan_nars_scanned: u64,
     pub orphan_nars_removed: u64,
     pub zombie_cached_paths_purged: u64,
-}
-
-pub async fn cleanup_stale_build_request_blobs(state: Arc<ServerState>) -> Result<()> {
-    let ttl_hours = state.config.gc.nar_ttl_hours;
-    if ttl_hours == 0 {
-        return Ok(());
-    }
-
-    let cutoff = now() - chrono::Duration::hours(ttl_hours as i64);
-    let stale = EBuildRequestBlob::find()
-        .filter(CBuildRequestBlob::LastUsedAt.lt(cutoff))
-        .all(&state.worker_db)
-        .await
-        .context("Failed to query stale build_request_blob rows")?;
-
-    let mut removed = 0u64;
-    for blob in stale {
-        if blob.hash.len() != 32 {
-            warn!(blob_id = %blob.id, "skipping build_request_blob with malformed hash");
-            continue;
-        }
-        let mut hash = [0u8; 32];
-        hash.copy_from_slice(&blob.hash);
-        let blob_id = blob.id;
-        let project_id = blob.project;
-        if let Err(e) = blob.into_active_model().delete(&state.worker_db).await {
-            warn!(error = %e, %blob_id, "failed to delete build_request_blob row");
-            continue;
-        }
-        if let Err(e) = state
-            .nar_storage
-            .delete_blob(project_id.into_inner(), &hash)
-            .await
-        {
-            warn!(error = %e, %blob_id, "failed to delete build-request blob payload");
-        }
-        removed += 1;
-    }
-
-    if removed > 0 {
-        info!(count = removed, "Removed stale build-request blobs");
-        state
-            .record(Swept {
-                pass: Pass::BuildRequestBlobs,
-                removed,
-            })
-            .await;
-    }
-    Ok(())
-}
-
-pub async fn cleanup_expired_upload_sessions(state: Arc<ServerState>) -> Result<()> {
-    let res = EUploadSession::delete_many()
-        .filter(CUploadSession::ExpiresAt.lt(now()))
-        .filter(CUploadSession::DispatchedAt.is_null())
-        .exec(&state.worker_db)
-        .await
-        .context("Failed to delete expired upload_session rows")?;
-
-    if res.rows_affected > 0 {
-        info!(count = res.rows_affected, "Removed expired upload sessions");
-        state
-            .record(Swept {
-                pass: Pass::UploadSessions,
-                removed: res.rows_affected,
-            })
-            .await;
-    }
-    Ok(())
-}
-
-pub async fn cleanup_old_evaluations(state: Arc<ServerState>) -> Result<()> {
-    let tasks = ETask::find()
-        .all(&state.worker_db)
-        .await
-        .context("Failed to query tasks for evaluation GC")?;
-
-    let ctx = state.db();
-    let mut removed = 0u64;
-    for task in tasks {
-        let keep = task.keep_evaluations as usize;
-        if keep == 0 {
-            continue;
-        }
-
-        let plan = match gradient_db::maintenance::gc::evaluation_gc_plan(&ctx, task.id, keep).await
-        {
-            Ok(plan) if plan.is_empty() => continue,
-            Ok(plan) => plan,
-            Err(e) => {
-                warn!(error = %e, task_id = %task.id, "Evaluation GC selection failed for task");
-                continue;
-            }
-        };
-
-        for chunk in plan.chunks(gradient_db::IN_CHUNK_SIZE) {
-            let request = GcRequest::Evaluations {
-                ids: chunk.iter().map(|e| e.id).collect(),
-            };
-            let report = match state.graph.gc(request).await {
-                Ok(report) => report,
-                Err(e) => {
-                    warn!(error = %e, task_id = %task.id, "Evaluation GC failed for task");
-                    break;
-                }
-            };
-
-            removed += report.deleted_evaluations.len() as u64;
-            let deleted: Vec<MEvaluation> = chunk
-                .iter()
-                .filter(|e| report.deleted_evaluations.contains(&e.id))
-                .cloned()
-                .collect();
-            if let Err(e) =
-                gradient_db::maintenance::gc::after_evaluation_delete(&ctx, &deleted).await
-            {
-                warn!(error = %e, task_id = %task.id, "Evaluation GC cleanup failed for task");
-            }
-        }
-    }
-
-    if removed > 0 {
-        state
-            .record(Swept {
-                pass: Pass::Evaluations,
-                removed,
-            })
-            .await;
-    }
-    Ok(())
 }
 
 gradient_db::sql! {
@@ -177,56 +45,6 @@ gradient_db::sql! {
 "#,
         params = [CachedPathHashes(UNREFERENCED_PROBE_BATCH), Int(4), Int(5), Int(6), Int(9)],
         tier = Sweep;
-}
-
-fn keep_hours(ttl_hours: u64, grace_hours: i64) -> i64 {
-    (ttl_hours as i64).max(grace_hours)
-}
-
-pub async fn evict_stale_cached_paths(state: Arc<ServerState>) -> Result<u64> {
-    let keep = keep_hours(
-        state.config.gc.nar_ttl_hours,
-        state.config.gc.nar_upload_grace_hours,
-    );
-    let scanned_at = now();
-    let stale = gradient_db::maintenance::gc::stale_cached_paths(&state.worker_db, keep)
-        .await
-        .context("stale cached-path selection failed")?;
-    if stale.is_empty() {
-        return Ok(0);
-    }
-
-    let mut evicted = 0u64;
-    for chunk in stale.chunks(gradient_db::IN_CHUNK_SIZE) {
-        let report = state
-            .graph
-            .gc(GcRequest::Paths {
-                hashes: chunk.to_vec(),
-                scanned_at,
-            })
-            .await
-            .context("retire stale paths")?;
-
-        for hash in &report.retired {
-            if let Err(e) = state.nar_storage.delete(hash).await {
-                warn!(error = %e, %hash, "failed to remove stale NAR");
-            }
-        }
-        evicted += report.retired.len() as u64;
-    }
-
-    state
-        .events
-        .publish(gradient_types::events::cache::Changed {});
-    if evicted > 0 {
-        state
-            .record(Swept {
-                pass: Pass::StaleCachedPaths,
-                removed: evicted,
-            })
-            .await;
-    }
-    Ok(evicted)
 }
 
 pub async fn repair_nar_shard(state: Arc<ServerState>, shard: &str) -> Result<CleanupReport> {
@@ -401,7 +219,7 @@ async fn remove_orphan_nar(state: &ServerState, hash: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cacher::test_support::test_server_state;
+    use crate::test_support::test_server_state;
     use gradient_storage::NarStore;
     use sea_orm::{DatabaseBackend, MockDatabase, Value};
     use std::collections::BTreeMap;
@@ -496,12 +314,6 @@ mod tests {
         repair_nar_shard(state, "dd").await.unwrap();
 
         assert!(nar_file_exists(tmp.path(), drv));
-    }
-
-    #[test]
-    fn eviction_bound_never_undercuts_the_upload_grace() {
-        assert_eq!(keep_hours(0, 24), 24);
-        assert_eq!(keep_hours(336, 24), 336);
     }
 
     #[tokio::test]
@@ -619,106 +431,6 @@ mod tests {
 
         assert_eq!(zombies, vec![zombie_hash.to_owned()]);
         assert!(nar_file_exists(tmp.path(), live), "live NAR must survive");
-    }
-
-    fn state_with_worker_db(base: &Path, db: sea_orm::DatabaseConnection) -> Arc<ServerState> {
-        let nar_storage = NarStore::local(base.to_str().unwrap()).unwrap();
-        test_server_state(nar_storage, db, |config| {
-            config.gc.nar_ttl_hours = 24;
-        })
-    }
-
-    #[tokio::test]
-    async fn build_request_blob_sweep_evicts_stale() {
-        use gradient_entity::ids::{BuildRequestBlobId, ProjectId};
-
-        let tmp = tempfile::tempdir().unwrap();
-        let project = ProjectId::now_v7();
-        let hash = [0xABu8; 32];
-        let stale = gradient_entity::build_request_blob::Model {
-            id: BuildRequestBlobId::now_v7(),
-            project,
-            hash: hash.to_vec(),
-            size: 1,
-            created_at: now() - chrono::Duration::days(30),
-            last_used_at: now() - chrono::Duration::days(30),
-        };
-
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
-            .append_query_results([vec![stale.clone()]])
-            .append_exec_results([sea_orm::MockExecResult {
-                last_insert_id: 0,
-                rows_affected: 1,
-            }])
-            .into_connection();
-        let state = state_with_worker_db(tmp.path(), db);
-
-        state
-            .nar_storage
-            .put_blob(project.into_inner(), &hash, b"payload".to_vec())
-            .await
-            .unwrap();
-
-        cleanup_stale_build_request_blobs(Arc::clone(&state))
-            .await
-            .unwrap();
-
-        assert!(
-            state
-                .nar_storage
-                .get_blob(project.into_inner(), &hash)
-                .await
-                .unwrap()
-                .is_none(),
-            "stale blob payload must be removed from storage"
-        );
-    }
-
-    #[tokio::test]
-    async fn build_request_blob_sweep_disabled_when_ttl_zero() {
-        let tmp = tempfile::tempdir().unwrap();
-        let nar_storage = NarStore::local(tmp.path().to_str().unwrap()).unwrap();
-        let db = MockDatabase::new(DatabaseBackend::Postgres).into_connection();
-        let state = test_server_state(nar_storage, db, |config| {
-            config.gc.nar_ttl_hours = 0;
-        });
-
-        cleanup_stale_build_request_blobs(state).await.unwrap();
-    }
-
-    #[tokio::test]
-    async fn build_request_blob_sweep_skips_malformed_hash() {
-        use gradient_entity::ids::{BuildRequestBlobId, ProjectId};
-
-        let tmp = tempfile::tempdir().unwrap();
-        let bad = gradient_entity::build_request_blob::Model {
-            id: BuildRequestBlobId::now_v7(),
-            project: ProjectId::now_v7(),
-            hash: vec![1, 2, 3],
-            size: 1,
-            created_at: now() - chrono::Duration::days(30),
-            last_used_at: now() - chrono::Duration::days(30),
-        };
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
-            .append_query_results([vec![bad]])
-            .into_connection();
-        let state = state_with_worker_db(tmp.path(), db);
-
-        cleanup_stale_build_request_blobs(state).await.unwrap();
-    }
-
-    #[tokio::test]
-    async fn upload_session_sweep_deletes_expired_undispatched() {
-        let tmp = tempfile::tempdir().unwrap();
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
-            .append_exec_results([sea_orm::MockExecResult {
-                last_insert_id: 0,
-                rows_affected: 3,
-            }])
-            .into_connection();
-        let state = state_with_worker_db(tmp.path(), db);
-
-        cleanup_expired_upload_sessions(state).await.unwrap();
     }
 
     #[test]

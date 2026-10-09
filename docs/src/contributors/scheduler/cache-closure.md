@@ -87,7 +87,7 @@ A build failing with `InputsUnavailable` must name its missing paths. `repair_mi
 
 ## Garbage Collection
 
-The `cache-maintenance` pass (`gradient-cache/src/cacher/mod.rs`) can start every `gc.intervalSecs` (3600 s). The keep-set is the closure of every `entry_point` and `build_job` derivation over `derivation_dependency` (`reachable_derivations_cte`), not the rows with a `build_job` of their own.
+The `cache-maintenance` pass (`gradient-cache/src/schedule.rs`) can start every `gc.intervalSecs` (3600 s). The keep-set is the closure of every `entry_point` and `build_job` derivation over `derivation_dependency` (`reachable_derivations_cte`), not the rows with a `build_job` of their own.
 
 | Pass | Reclaimed | Bound |
 |---|---|---|

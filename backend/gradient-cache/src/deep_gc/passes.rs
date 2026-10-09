@@ -81,7 +81,7 @@ pub(super) async fn run(
 }
 
 async fn pass_nars(state: Arc<ServerState>, shard: &str, report: &mut DeepGcReport) -> Result<()> {
-    let r = crate::cacher::repair_nar_shard(state, shard).await?;
+    let r = crate::nar::shard_repair::repair_nar_shard(state, shard).await?;
     report.nars_scanned += r.orphan_nars_scanned;
     report.orphan_nars_removed += r.orphan_nars_removed;
     report.zombie_cached_paths_purged += r.zombie_cached_paths_purged;
@@ -201,7 +201,7 @@ async fn pass_partials(state: &ServerState, report: &mut DeepGcReport) -> Result
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cacher::test_support::test_server_state_with_log;
+    use crate::test_support::test_server_state_with_log;
     use gradient_entity::ids::{BuildRequestBlobId, ProjectId};
     use gradient_storage::{FileLogStorage, LogStorage, NarStore, log_shard};
     use gradient_test_support::log_storage::NoopLogStorage;
