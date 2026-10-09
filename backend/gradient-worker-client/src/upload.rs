@@ -12,6 +12,7 @@ use gradient_util::sync::Mutex;
 use gradient_wire::messages::{
     ClientMessage, SMALL_UPLOADS_IN_FLIGHT, ServerMessage, is_small_upload,
 };
+use gradient_wire::session::frame::BULK_CHUNK_SIZE;
 use gradient_wire::types::{GrantTarget, UploadMetadata, UploadObject, UploadOutcome};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore, oneshot};
 
@@ -41,6 +42,7 @@ pub struct UploadClient {
     small: Arc<Semaphore>,
     large: Arc<Semaphore>,
     per_job: usize,
+    chunk_bytes: usize,
 }
 
 impl UploadClient {
@@ -51,11 +53,21 @@ impl UploadClient {
             small: Arc::new(Semaphore::new(SMALL_UPLOADS_IN_FLIGHT)),
             large: Arc::new(Semaphore::new(max_outstanding.max(1))),
             per_job: (max_outstanding / 2).max(1),
+            chunk_bytes: BULK_CHUNK_SIZE,
         }
+    }
+
+    pub fn with_chunk_bytes(mut self, chunk_bytes: usize) -> Self {
+        self.chunk_bytes = chunk_bytes;
+        self
     }
 
     pub fn writer(&self) -> &ProtoWriter {
         &self.writer
+    }
+
+    pub fn chunk_bytes(&self) -> usize {
+        self.chunk_bytes
     }
 
     pub fn deliver(&self, msg: ServerMessage) {

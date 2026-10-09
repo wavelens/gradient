@@ -22,7 +22,7 @@ Every message on `/proto`, from `backend/gradient-wire/src/messages`. IDs (`job_
 | `AbortCluster` | Dropping or aborting every job of the attempt | `attempt`, `reason` |
 | `Credential` | Short-lived credential, e.g. an SSH key | `kind`, `data` |
 | `NarStreamHeader` | Opening a NAR pull stream | `job_id`, `store_path`, `total_bytes`, `stream_token` |
-| `NarPush` (bulk) | NAR pull chunk, 512 KiB zstd | `job_id`, `store_path`, `data`, `offset`, `is_final` |
+| `NarPush` (bulk) | NAR pull chunk of `nar.chunkBytes` zstd | `job_id`, `store_path`, `data`, `offset`, `is_final` |
 | `NarUnavailable` | No object in storage for the path. No chunks follow | `job_id`, `store_path`, `reason` |
 | `NarAbort` | Pull failed on a storage error or timeout, before or during the stream. Retryable | `job_id`, `store_path`, `reason` |
 | `EvalCachePullResult` | Answer to `EvalCachePull`: miss, presigned URL or inline stream | `job_id`, `outcome` |

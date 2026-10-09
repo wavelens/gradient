@@ -11,7 +11,6 @@ use bytes::Bytes;
 use futures::StreamExt;
 use gradient_util::nix_hash::nix32_encode;
 use gradient_wire::messages::{ClientMessage, NAR_ZSTD_LEVEL};
-use gradient_wire::session::frame::BULK_CHUNK_SIZE;
 use sha2::{Digest, Sha256};
 use tracing::debug;
 
@@ -149,7 +148,7 @@ pub async fn upload_nar(
             while let Some((request_id, target)) = upload.next_grant().await? {
                 events(UploadEvent::Granted);
                 let sent = send_path(
-                    uploads.writer(),
+                    uploads,
                     request_id,
                     &store_path,
                     threads,
@@ -181,7 +180,7 @@ pub async fn upload_nar(
             let mut upload = uploads.start(job_id, object, nar_size).await?;
             while let Some((request_id, target)) = upload.next_grant().await? {
                 events(UploadEvent::Granted);
-                let sent = send_raw(uploads.writer(), request_id, &nar, target).await;
+                let sent = send_raw(uploads, request_id, &nar, target).await;
                 if sent.is_ok() {
                     events(UploadEvent::Read(nar_size));
                 }
@@ -196,7 +195,7 @@ pub async fn upload_nar(
 }
 
 async fn send_raw(
-    writer: &ProtoWriter,
+    uploads: &UploadClient,
     request_id: u64,
     nar: &std::sync::Arc<Vec<u8>>,
     target: GrantTarget,
@@ -205,12 +204,12 @@ async fn send_raw(
     let (compressed, meta) = tokio::task::spawn_blocking(move || compress_nar(&nar))
         .await
         .context("compress task panicked")??;
-    let multipart = send_compressed(writer, request_id, compressed, target).await?;
+    let multipart = send_compressed(uploads, request_id, compressed, target).await?;
     Ok((meta, multipart))
 }
 
 async fn send_path(
-    writer: &ProtoWriter,
+    uploads: &UploadClient,
     request_id: u64,
     store_path: &str,
     threads: u32,
@@ -220,11 +219,12 @@ async fn send_path(
     match target {
         GrantTarget::Passthrough { resume_offset } => {
             debug!(store_path, resume_offset, "passthrough NAR upload");
-            let mut passthrough = PassthroughStream::new(request_id, writer, resume_offset);
+            let mut passthrough =
+                PassthroughStream::new(request_id, uploads.writer(), resume_offset);
             let meta = pack_path_in_parts(
                 store_path,
                 threads,
-                BULK_CHUNK_SIZE,
+                uploads.chunk_bytes(),
                 &mut passthrough,
                 nar_read,
             )
@@ -255,15 +255,16 @@ async fn send_path(
 }
 
 async fn send_compressed(
-    writer: &ProtoWriter,
+    uploads: &UploadClient,
     request_id: u64,
     compressed: Vec<u8>,
     target: GrantTarget,
 ) -> Result<Option<CompletedMultipart>> {
     match target {
         GrantTarget::Passthrough { resume_offset } => {
-            let mut passthrough = PassthroughStream::new(request_id, writer, resume_offset);
-            for part in compressed.chunks(BULK_CHUNK_SIZE) {
+            let mut passthrough =
+                PassthroughStream::new(request_id, uploads.writer(), resume_offset);
+            for part in compressed.chunks(uploads.chunk_bytes()) {
                 passthrough.send_part(part.to_vec()).await?;
             }
             passthrough.finish().await?;
@@ -519,6 +520,7 @@ mod tests {
     )]
 
     use super::*;
+    use gradient_wire::session::frame::BULK_CHUNK_SIZE;
     use gradient_wire::testing::MockProtoServer;
     use gradient_wire::testing::ServedUpload;
     use std::time::Duration;
@@ -562,6 +564,14 @@ mod tests {
         target: GrantTarget,
         upload: impl AsyncFnOnce(&UploadClient) -> Result<T>,
     ) -> ServedUpload {
+        served_in_chunks(BULK_CHUNK_SIZE, target, upload).await
+    }
+
+    async fn served_in_chunks<T>(
+        chunk_bytes: usize,
+        target: GrantTarget,
+        upload: impl AsyncFnOnce(&UploadClient) -> Result<T>,
+    ) -> ServedUpload {
         let server = MockProtoServer::bind().await;
         let url = server.url().to_owned();
         let script = tokio::spawn(async move {
@@ -569,9 +579,57 @@ mod tests {
             sc.serve_upload(target).await.unwrap()
         });
         let (uploads, pump) = client(&url).await;
+        let uploads = uploads.with_chunk_bytes(chunk_bytes);
         upload(&uploads).await.unwrap();
         pump.abort();
         script.await.unwrap()
+    }
+
+    fn noise(len: usize) -> Vec<u8> {
+        let mut state: u64 = 0x9e37_79b9_7f4a_7c15;
+        (0..len)
+            .map(|_| {
+                state ^= state << 13;
+                state ^= state >> 7;
+                state ^= state << 17;
+                state as u8
+            })
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn passthrough_frames_follow_the_configured_chunk_bytes() {
+        let dir = make_temp_store_path();
+        std::fs::write(dir.join("noise"), noise(64 * 1024)).unwrap();
+        let path = dir.to_str().unwrap().to_owned();
+
+        let upload = served_in_chunks(
+            4096,
+            GrantTarget::Passthrough { resume_offset: 0 },
+            async |uploads| {
+                upload_nar(
+                    uploads,
+                    "job-small-chunks",
+                    &path,
+                    NarSource::Path { meta: None },
+                    &mut |_| {},
+                )
+                .await
+            },
+        )
+        .await;
+
+        let full = upload
+            .chunks
+            .iter()
+            .filter(|(data, ..)| data.len() == 4096)
+            .count();
+        assert!(upload.chunks.iter().all(|(data, ..)| data.len() <= 4096));
+        assert!(
+            full >= 16,
+            "64 KiB of noise is at least 16 full chunks, got {full}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     fn make_temp_store_path() -> std::path::PathBuf {
@@ -691,15 +749,7 @@ mod tests {
     #[tokio::test]
     async fn a_large_final_flush_is_split_into_bulk_chunks() {
         let dir = make_temp_store_path();
-        let mut noise = vec![0u8; 12 * 1024 * 1024];
-        let mut state: u64 = 0x9e37_79b9_7f4a_7c15;
-        for byte in noise.iter_mut() {
-            state ^= state << 13;
-            state ^= state >> 7;
-            state ^= state << 17;
-            *byte = state as u8;
-        }
-        std::fs::write(dir.join("noise"), &noise).unwrap();
+        std::fs::write(dir.join("noise"), noise(12 * 1024 * 1024)).unwrap();
         let path = dir.to_str().unwrap().to_owned();
 
         let served = served(

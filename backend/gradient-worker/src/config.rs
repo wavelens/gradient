@@ -366,6 +366,16 @@ pub struct NarArgs {
         default_value_t = 86400
     )]
     pub partial_ttl_secs: u64,
+
+    /// Size in bytes of each outbound NAR upload chunk, from 4 KiB to 4 MiB.
+    /// Smaller chunks are helping slow or high-latency links like Tailscale over DERP.
+    #[arg(
+        long = "nar-chunk-bytes",
+        env = "GRADIENT_WORKER_NAR_CHUNK_BYTES",
+        value_parser = clap::value_parser!(u64).range(gradient_types::NAR_CHUNK_BYTES_RANGE),
+        default_value_t = 512 * 1024
+    )]
+    pub chunk_bytes: u64,
 }
 
 impl Default for NarArgs {
@@ -373,6 +383,7 @@ impl Default for NarArgs {
         Self {
             max_concurrent_uploads: 16,
             partial_ttl_secs: 86400,
+            chunk_bytes: 512 * 1024,
         }
     }
 }

@@ -638,6 +638,15 @@ in {
           '';
         };
 
+        chunkBytes = lib.mkOption {
+          type = lib.types.ints.between 4096 4194304;
+          default = 524288;
+          description = ''
+            Size in bytes of each outbound `NarPush` chunk, from 4 KiB to 4 MiB.
+            Smaller chunks can help slow or high-latency links like Tailscale over DERP.
+          '';
+        };
+
         maxConcurrentServes = lib.mkOption {
           type = lib.types.ints.positive;
           default = 8;
@@ -1465,6 +1474,7 @@ in {
         GRADIENT_NAR_VERIFY_DIGEST = lib.boolToString cfg.nar.verifyDigest;
         GRADIENT_NAR_STORAGE_OPEN_TIMEOUT_SECS = toString cfg.nar.storageOpenTimeoutSecs;
         GRADIENT_NAR_SEND_CHUNK_TIMEOUT_SECS = toString cfg.nar.sendChunkTimeoutSecs;
+        GRADIENT_NAR_CHUNK_BYTES = toString cfg.nar.chunkBytes;
         GRADIENT_NAR_MAX_CONCURRENT_SERVES = toString cfg.nar.maxConcurrentServes;
         GRADIENT_NAR_MAX_CONCURRENT_DOWNLOADS = toString cfg.nar.maxConcurrentDownloads;
         GRADIENT_NAR_PARTIAL_TTL_SECS = toString cfg.nar.partialTtlSecs;

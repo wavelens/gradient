@@ -12,6 +12,8 @@ use uuid::uuid;
 
 pub const PORT_RANGE: RangeInclusive<usize> = 1..=65535;
 
+pub const NAR_CHUNK_BYTES_RANGE: RangeInclusive<u64> = 4 * 1024..=4 * 1024 * 1024;
+
 /// `builtin:*` derivations like `builtin:fetchurl` are fetching rather than building. Any
 /// worker can run them.
 pub const BUILTIN_ARCH: &str = "builtin";

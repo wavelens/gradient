@@ -10,7 +10,7 @@ use std::time::Duration;
 use gradient_core::ServerState;
 use gradient_graph::Demotion;
 use gradient_storage::passthrough::{
-    PassthroughError, PassthroughRequest, PassthroughTimeouts, send_nar,
+    PassthroughError, PassthroughLimits, PassthroughRequest, send_nar,
 };
 use gradient_util::telemetry::{GAUGES, Gauges};
 use gradient_wire::messages::ServerMessage;
@@ -79,9 +79,10 @@ pub(super) async fn serve_nar_request(
     client_token: Option<&str>,
 ) -> anyhow::Result<()> {
     let nar_cfg = &state.config.nar;
-    let timeouts = PassthroughTimeouts {
+    let limits = PassthroughLimits {
         open: Duration::from_secs(nar_cfg.storage_open_timeout_secs),
         chunk_read: Duration::from_secs(nar_cfg.send_chunk_timeout_secs),
+        chunk_bytes: nar_cfg.chunk_bytes as usize,
     };
     let Some(key) = store_hash(store_path) else {
         let reason = format!("invalid store path: {store_path}");
@@ -95,7 +96,7 @@ pub(super) async fn serve_nar_request(
         resume_from,
         client_token,
     };
-    match send_nar(&state.nar_storage, writer, req, timeouts).await {
+    match send_nar(&state.nar_storage, writer, req, limits).await {
         Ok(_) => Ok(()),
         Err(PassthroughError::NotFound(reason)) => {
             unavailable(writer, job_id, store_path, &reason).await;
