@@ -14,34 +14,61 @@ path = "src/lib.rs"
 [lints]
 workspace = true
 
+[features]
+default = ["server"]
+server = [
+    "dep:gradient-core",
+    "dep:gradient-ci",
+    "dep:gradient-sources",
+    "dep:gradient-git-host",
+    "dep:gradient-db",
+    "dep:gradient-graph",
+    "dep:gradient-util",
+    "dep:gradient-types",
+    "dep:gradient-entity",
+    "dep:base64",
+    "dep:chrono",
+    "dep:futures",
+    "dep:object_store",
+    "dep:ractor",
+    "dep:ring",
+    "dep:sea-orm",
+    "dep:serde",
+    "dep:serde_json",
+    "dep:thiserror",
+    "dep:tokio",
+    "dep:uuid",
+    "dep:zstd",
+]
+
 [dependencies]
-gradient-core       = { workspace = true }
-gradient-ci = { workspace = true }
-gradient-sources = { workspace = true }
-gradient-git-host = { workspace = true }
-gradient-db = { workspace = true }
-gradient-graph = { workspace = true }
+gradient-core       = { workspace = true, optional = true }
+gradient-ci = { workspace = true, optional = true }
+gradient-sources = { workspace = true, optional = true }
+gradient-git-host = { workspace = true, optional = true }
+gradient-db = { workspace = true, optional = true }
+gradient-graph = { workspace = true, optional = true }
 gradient-storage = { workspace = true }
-gradient-util = { workspace = true }
-gradient-types = { workspace = true }
-gradient-entity = { workspace = true }
+gradient-util = { workspace = true, optional = true }
+gradient-types = { workspace = true, optional = true }
+gradient-entity = { workspace = true, optional = true }
 
 anyhow              = { workspace = true }
 async-trait         = { workspace = true }
-base64              = { workspace = true }
-chrono              = { workspace = true }
-futures             = { workspace = true }
-object_store        = { workspace = true }
-ractor              = { workspace = true }
-ring                = { workspace = true }
-sea-orm             = { workspace = true }
-serde               = { workspace = true }
-serde_json          = { workspace = true }
-thiserror           = { workspace = true }
-tokio               = { workspace = true, features = ["process", "macros"] }
+base64              = { workspace = true, optional = true }
+chrono              = { workspace = true, optional = true }
+futures             = { workspace = true, optional = true }
+object_store        = { workspace = true, optional = true }
+ractor              = { workspace = true, optional = true }
+ring                = { workspace = true, optional = true }
+sea-orm             = { workspace = true, optional = true }
+serde               = { workspace = true, optional = true }
+serde_json          = { workspace = true, optional = true }
+thiserror           = { workspace = true, optional = true }
+tokio               = { workspace = true, features = ["process", "macros"], optional = true }
 tracing             = { workspace = true }
-uuid                = { workspace = true }
-zstd                = { workspace = true }
+uuid                = { workspace = true, optional = true }
+zstd                = { workspace = true, optional = true }
 
 [dev-dependencies]
 mockall      = { workspace = true }
