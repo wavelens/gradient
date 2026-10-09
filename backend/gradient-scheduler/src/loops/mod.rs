@@ -23,7 +23,7 @@ mod eval;
 
 pub(crate) use build::BuildMsg;
 #[cfg(test)]
-pub(crate) use build::{admit_startable_moves, resync_startable_set};
+pub(crate) use build::{admit_startable_moves, build_assign_pass, resync_startable_set};
 #[cfg(test)]
 pub(crate) use eval::assign_queued_evals;
 pub(crate) use eval::project_id_for_eval;
@@ -70,6 +70,13 @@ fn child_specs(scheduler: &Arc<Scheduler>) -> Vec<ChildSpec> {
                 ),
                 eval_assign_spec(scheduler),
                 build::child_spec(scheduler),
+                periodic(
+                    scheduler,
+                    "transient-retry-requeue",
+                    ASSIGN_TICK,
+                    ASSIGN_BUDGET,
+                    background::transient_retry_pass,
+                ),
                 cluster_assign_spec(scheduler),
                 crate::probe::child_spec(&scheduler.state),
             ],
