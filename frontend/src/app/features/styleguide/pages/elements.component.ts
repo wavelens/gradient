@@ -85,7 +85,7 @@ export class ElementsComponent {
   statusPhase = signal<StatusPhase>('queued');
   allowed: AllowedCapabilities = { enable_fetch: true, enable_eval: true, enable_build: false };
   thunkSamples: { caption: string; progress: ThunkProgress }[] = [
-    { caption: 'Against the thunks of the last completed evaluation', progress: thunkProgress({ kind: 'evaluating', thunks: 128_032_032 }, 450_000_000)! },
+    { caption: 'Against the median thunks of the recent evaluations', progress: thunkProgress({ kind: 'evaluating', thunks: 128_032_032 }, 450_000_000)! },
     { caption: 'Without a history, or past the last total, pulsing at full width', progress: thunkProgress({ kind: 'evaluating', thunks: 128_032_032 }, null)! },
   ];
   progressBars: { caption: string; counts?: BuildStatusCounts; segments?: BarSegment[] }[] = [
