@@ -47,6 +47,7 @@ fn key_name(key: &ObjectKey) -> &str {
 }
 
 impl InboundContext<'_> {
+    #[tracing::instrument(level = "debug", skip_all)]
     pub(super) async fn on_upload_request(
         &mut self,
         job_id: String,
@@ -94,6 +95,7 @@ impl InboundContext<'_> {
         uploads.admission.request(request_id, key, size, priority);
     }
 
+    #[tracing::instrument(level = "debug", skip_all)]
     pub(super) async fn on_upload_admitted(
         &mut self,
         admitted: Admitted,
@@ -163,6 +165,7 @@ impl InboundContext<'_> {
         }
     }
 
+    #[tracing::instrument(level = "debug", skip_all)]
     async fn already_stored(&self, key: &ObjectKey) -> Result<bool, sea_orm::DbErr> {
         let ObjectKey::Nar(hash) = key else {
             return Ok(false);
@@ -173,6 +176,7 @@ impl InboundContext<'_> {
             .is_some())
     }
 
+    #[tracing::instrument(level = "debug", skip_all)]
     async fn open_transfer(
         &self,
         key: &ObjectKey,
@@ -217,6 +221,7 @@ impl InboundContext<'_> {
         })
     }
 
+    #[tracing::instrument(level = "debug", skip_all)]
     pub(super) async fn on_upload_chunk(
         &mut self,
         request_id: u64,
@@ -268,6 +273,7 @@ impl InboundContext<'_> {
         }
     }
 
+    #[tracing::instrument(level = "debug", skip_all)]
     pub(super) async fn on_upload_finished(
         &mut self,
         request_id: u64,

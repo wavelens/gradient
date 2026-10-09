@@ -679,6 +679,7 @@ impl BatchWriter<'_> {
         Ok(wanted_by)
     }
 
+    #[tracing::instrument(level = "debug", skip_all)]
     async fn move_batch_need(
         &self,
         builders: &[DerivationId],

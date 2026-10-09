@@ -69,6 +69,7 @@ impl<'txn> std::ops::Deref for SeedLock<'txn> {
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub async fn lock_seed_shared_builds<'txn>(
     txn: &'txn DatabaseTransaction,
     derivations: &[DerivationId],

@@ -56,6 +56,7 @@ fn ci_reports(status: BuildStatus) -> bool {
 
 /// The second round cannot need a third.
 /// It is only moving rows between `Created` and `Queued`, both inside [`BUILDER_STATUSES`].
+#[tracing::instrument(level = "debug", skip_all)]
 pub async fn emit_transition_effects(
     ctx: &DbContext,
     changes: &[TransitionChange],
