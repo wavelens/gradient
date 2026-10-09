@@ -187,6 +187,7 @@ pkgs.testers.runNixOSTest ({ lib, ... }: {
           settings = {
             shared_preload_libraries = "pg_stat_statements,auto_explain";
             "pg_stat_statements.max" = 10000;
+            "pg_stat_statements.track_planning" = true;
             "auto_explain.log_min_duration" = -1;
             "auto_explain.log_nested_statements" = true;
             # The acpi_pm clock is trapping on every per-node clock read. Rows and loops are enough.

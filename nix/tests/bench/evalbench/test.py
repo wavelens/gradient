@@ -97,7 +97,8 @@ def dump_postgres(run, eval_id):
     pg = f"{BENCH}/{run}/pg"
     dump_json(
         "SELECT s.calls, round(s.total_exec_time::numeric, 3) AS total_ms,"
-        " round(s.mean_exec_time::numeric, 3) AS mean_ms, s.rows,"
+        " round(s.mean_exec_time::numeric, 3) AS mean_ms,"
+        " round(s.total_plan_time::numeric, 3) AS plan_ms, s.rows,"
         " s.shared_blks_hit, s.shared_blks_read, s.query"
         " FROM pg_stat_statements s JOIN pg_roles r ON r.oid = s.userid"
         " WHERE r.rolname = 'gradient' ORDER BY s.total_exec_time DESC LIMIT 100",
