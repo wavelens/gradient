@@ -26,7 +26,7 @@
   builderModule = { lib, ... }: {
     imports = [ ../../../modules/gradient-worker.nix captureModule ];
 
-    virtualisation.additionalPaths = [ testStore self.inputs.nixpkgs ];
+    virtualisation.additionalPaths = [ testStore ];
 
     nix.settings = {
       trusted-users = [ "root" "@wheel" ];
