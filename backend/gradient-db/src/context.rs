@@ -23,6 +23,8 @@ use gradient_util::shutdown::Shutdown;
 pub struct ProbeRequests {
     sender: Option<mpsc::UnboundedSender<Vec<DerivationId>>>,
     inbox: Arc<Mutex<Option<mpsc::UnboundedReceiver<Vec<DerivationId>>>>>,
+    staged: Option<Arc<Mutex<Vec<DerivationId>>>>,
+    wake: Arc<Notify>,
 }
 
 impl ProbeRequests {
@@ -31,6 +33,7 @@ impl ProbeRequests {
         Self {
             sender: Some(sender),
             inbox: Arc::new(Mutex::new(Some(inbox))),
+            ..Self::default()
         }
     }
 
@@ -42,14 +45,55 @@ impl ProbeRequests {
             return;
         }
 
-        if let Some(sender) = &self.sender {
-            let _ = sender.send(derivations);
+        match &self.staged {
+            Some(staged) => lock(staged).extend(derivations),
+            None => self.deliver(derivations),
         }
+    }
+
+    pub fn staged(&self) -> Self {
+        Self {
+            staged: Some(self.staged.clone().unwrap_or_default()),
+            ..self.clone()
+        }
+    }
+
+    pub fn unstaged(&self) -> Self {
+        Self {
+            staged: None,
+            ..self.clone()
+        }
+    }
+
+    pub fn publish(&self) {
+        if let Some(staged) = &self.staged {
+            let derivations = std::mem::take(&mut *lock(staged));
+            if !derivations.is_empty() {
+                self.deliver(derivations);
+            }
+        }
+    }
+
+    pub fn wake(&self) -> Arc<Notify> {
+        Arc::clone(&self.wake)
     }
 
     pub fn take_inbox(&self) -> Option<mpsc::UnboundedReceiver<Vec<DerivationId>>> {
         self.inbox.lock().ok()?.take()
     }
+
+    fn deliver(&self, derivations: Vec<DerivationId>) {
+        if let Some(sender) = &self.sender {
+            let _ = sender.send(derivations);
+            self.wake.notify_one();
+        }
+    }
+}
+
+fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    mutex
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 #[derive(Clone, Debug, Default)]
@@ -116,6 +160,7 @@ impl DbContext {
         DbContext {
             worker_db: self.worker_db.in_transaction(tx),
             startable_set: self.startable_set.staged(),
+            probe_requests: self.probe_requests.staged(),
             ..self.clone()
         }
     }
@@ -124,6 +169,7 @@ impl DbContext {
         DbContext {
             worker_db: self.worker_db.detached(),
             startable_set: self.startable_set.unstaged(),
+            probe_requests: self.probe_requests.unstaged(),
             ..self.clone()
         }
     }
@@ -145,5 +191,37 @@ mod tests {
 
         drop(second);
         assert!(!held.holds(evaluation));
+    }
+
+    #[tokio::test]
+    async fn a_probe_request_inside_a_transaction_waits_for_the_commit() {
+        let requests = ProbeRequests::channel();
+        let mut inbox = requests.take_inbox().expect("a fresh channel has one");
+        let wake = requests.wake();
+        let derivation = DerivationId::now_v7();
+
+        let transaction = requests.staged();
+        transaction.send(vec![derivation]);
+        assert!(
+            inbox.try_recv().is_err(),
+            "the probe must not read uncommitted rows"
+        );
+
+        transaction.publish();
+        assert_eq!(inbox.try_recv().expect("published"), vec![derivation]);
+        tokio::time::timeout(std::time::Duration::from_secs(1), wake.notified())
+            .await
+            .expect("the commit wakes the probe");
+    }
+
+    #[test]
+    fn a_rolled_back_transaction_asks_the_probe_nothing() {
+        let requests = ProbeRequests::channel();
+        let mut inbox = requests.take_inbox().expect("a fresh channel has one");
+
+        requests.staged().send(vec![DerivationId::now_v7()]);
+        requests.staged().publish();
+
+        assert!(inbox.try_recv().is_err());
     }
 }

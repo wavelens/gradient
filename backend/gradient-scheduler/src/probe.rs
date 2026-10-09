@@ -4,9 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! An output is probed once its shared build is needed, never on its batch landing. Probing is HTTP
-//! and must stay off every graph path. A network round trip would otherwise hold the single graph
-//! writer's transaction.
+//! An output is probed once its shared build or the shared build above it is needed, never on
+//! its batch landing. Probing is HTTP and must stay off every graph path. A network round trip
+//! would otherwise hold the single graph writer's transaction.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -35,8 +35,9 @@ pub fn child_spec(state: &Arc<ServerState>) -> ChildSpec {
     let inbox = Arc::new(Mutex::new(state.probe_requests.take_inbox()));
     let seen: Arc<Mutex<HashMap<DerivationId, Instant>>> = Arc::new(Mutex::new(HashMap::new()));
     let swept = Arc::new(Mutex::new(Instant::now()));
+    let wake = state.probe_requests.wake();
     let state = Arc::clone(state);
-    ChildSpec::periodic(HEALTH_NAME, PROBE_TICK, PROBE_BUDGET, move || {
+    ChildSpec::periodic_woken(HEALTH_NAME, PROBE_TICK, PROBE_BUDGET, wake, move || {
         let state = Arc::clone(&state);
         let inbox = Arc::clone(&inbox);
         let seen = Arc::clone(&seen);
@@ -82,7 +83,9 @@ async fn probe_round(
         return Ok(Vec::new());
     }
 
-    let plan = plan_probes(state, &shared_builds).await?;
+    let mut targets = unprobed_wanted(state, &shared_builds).await?;
+    targets.extend(unprobed_dependencies(state, &targets).await?);
+    let plan = plan_probes(state, &targets).await?;
     let mut unanswered_outputs: HashSet<String> = HashSet::new();
     for (evaluation, targets) in &plan.rounds {
         for chunk in targets.chunks(PROBE_BATCH) {
@@ -228,16 +231,17 @@ impl ProbePlan {
     }
 }
 
-pub(crate) async fn plan_probes(
+async fn unprobed_wanted(
     state: &Arc<ServerState>,
     shared_builds: &[DerivationId],
-) -> Result<ProbePlan> {
+) -> Result<Vec<DerivationId>> {
     let db = &state.worker_db;
-    let wanted: Vec<DerivationId> =
+    Ok(
         gradient_db::fetch_in_chunks(shared_builds, |chunk| async move {
             EDerivationBuild::find()
                 .filter(CDerivationBuild::Derivation.is_in(chunk))
                 .filter(CDerivationBuild::Wanted.eq(true))
+                .filter(CDerivationBuild::Probed.eq(false))
                 .all(db)
                 .await
         })
@@ -245,12 +249,60 @@ pub(crate) async fn plan_probes(
         .context("load which requested shared builds are wanted")?
         .into_iter()
         .map(|a| a.derivation)
+        .collect(),
+    )
+}
+
+/// A miss makes all dependencies of the shared build needed. Asking for them in the same round
+/// saves the probe a round per closure level, and only the dependencies of a hit go unused.
+async fn unprobed_dependencies(
+    state: &Arc<ServerState>,
+    shared_builds: &[DerivationId],
+) -> Result<Vec<DerivationId>> {
+    let db = &state.worker_db;
+    let mut dependencies: Vec<DerivationId> =
+        gradient_db::fetch_in_chunks(shared_builds, |chunk| async move {
+            EDerivationDependency::find()
+                .filter(CDerivationDependency::Derivation.is_in(chunk))
+                .all(db)
+                .await
+        })
+        .await
+        .context("load the dependencies of the probed shared builds")?
+        .into_iter()
+        .map(|e| e.dependency)
         .collect();
-    if wanted.is_empty() {
+    dependencies.sort_unstable();
+    dependencies.dedup();
+
+    Ok(
+        gradient_db::fetch_in_chunks(&dependencies, |chunk| async move {
+            EDerivationBuild::find()
+                .filter(CDerivationBuild::Derivation.is_in(chunk))
+                .filter(CDerivationBuild::Probed.eq(false))
+                .filter(CDerivationBuild::CacheAvailable.eq(false))
+                .all(db)
+                .await
+        })
+        .await
+        .context("load which dependencies the upstream probe has not answered")?
+        .into_iter()
+        .map(|a| a.derivation)
+        .filter(|d| !shared_builds.contains(d))
+        .collect(),
+    )
+}
+
+pub(crate) async fn plan_probes(
+    state: &Arc<ServerState>,
+    shared_builds: &[DerivationId],
+) -> Result<ProbePlan> {
+    if shared_builds.is_empty() {
         return Ok(ProbePlan::default());
     }
 
-    let outputs = gradient_db::fetch_in_chunks(&wanted, |chunk| async move {
+    let db = &state.worker_db;
+    let outputs = gradient_db::fetch_in_chunks(shared_builds, |chunk| async move {
         EDerivationOutput::find()
             .filter(CDerivationOutput::Derivation.is_in(chunk))
             .all(db)
@@ -259,8 +311,9 @@ pub(crate) async fn plan_probes(
     .await
     .context("load the outputs of the shared builds that became wanted")?;
     let recorded: HashSet<DerivationId> = outputs.iter().map(|o| o.derivation).collect();
-    let answered: Vec<DerivationId> = wanted
-        .into_iter()
+    let answered: Vec<DerivationId> = shared_builds
+        .iter()
+        .copied()
         .filter(|d| recorded.contains(d))
         .collect();
 
@@ -360,7 +413,6 @@ mod tests {
         let derivation = DerivationId::now_v7();
         let evaluation = EvaluationId::now_v7();
         let db = MockDatabase::new(DatabaseBackend::Postgres)
-            .append_query_results([vec![wanted(derivation)]])
             .append_query_results([vec![
                 output(derivation, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", false),
                 output(derivation, "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", true),
@@ -403,7 +455,6 @@ mod tests {
             ..Default::default()
         };
         let db = MockDatabase::new(DatabaseBackend::Postgres)
-            .append_query_results([vec![wanted(silent), wanted(missed)]])
             .append_query_results([vec![
                 output(silent, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", false),
                 output(missed, "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", false),
@@ -452,7 +503,6 @@ mod tests {
     async fn an_unnamed_shared_build_is_not_probed() {
         let derivation = DerivationId::now_v7();
         let db = MockDatabase::new(DatabaseBackend::Postgres)
-            .append_query_results([vec![wanted(derivation)]])
             .append_query_results([vec![output(
                 derivation,
                 "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -476,7 +526,6 @@ mod tests {
         let stub = DerivationId::now_v7();
         let evaluation = EvaluationId::now_v7();
         let db = MockDatabase::new(DatabaseBackend::Postgres)
-            .append_query_results([vec![wanted(walked), wanted(stub)]])
             .append_query_results([vec![output(
                 walked,
                 "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -502,18 +551,61 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn an_unwanted_shared_build_is_left_unanswered() {
+    async fn only_a_wanted_shared_build_the_probe_has_not_answered_is_asked() {
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             .append_query_results([Vec::<MDerivationBuild>::new()])
             .into_connection();
+        let log = db.clone();
 
-        let plan = plan_probes(&test_state(db), &[DerivationId::now_v7()])
+        let asked = unprobed_wanted(&test_state(db), &[DerivationId::now_v7()])
             .await
-            .expect("the plan is read");
+            .expect("the wanted shared builds are read");
 
+        assert!(asked.is_empty());
+        let sql = log.into_transaction_log()[0].statements()[0].to_string();
         assert!(
-            plan.rounds.is_empty() && plan.answered.is_empty(),
-            "{plan:?}"
+            sql.contains(r#""derivation_build"."wanted" = TRUE"#),
+            "{sql}"
+        );
+        assert!(
+            sql.contains(r#""derivation_build"."probed" = FALSE"#),
+            "{sql}"
+        );
+    }
+
+    #[tokio::test]
+    async fn the_unanswered_dependencies_of_a_probed_shared_build_join_its_round() {
+        use gradient_entity::derivation_dependency::Model as MDerivationDependency;
+
+        let (parent, missed, answered) = (
+            DerivationId::now_v7(),
+            DerivationId::now_v7(),
+            DerivationId::now_v7(),
+        );
+        let edge = |dependency| MDerivationDependency {
+            derivation: parent,
+            dependency,
+            ..Default::default()
+        };
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([vec![edge(missed), edge(answered), edge(parent)]])
+            .append_query_results([vec![wanted(missed), wanted(parent)]])
+            .into_connection();
+        let log = db.clone();
+
+        let ahead = unprobed_dependencies(&test_state(db), &[parent])
+            .await
+            .expect("the dependencies are read");
+
+        assert_eq!(ahead, vec![missed]);
+        let sql = log.into_transaction_log()[1].statements()[0].to_string();
+        assert!(
+            sql.contains(r#""derivation_build"."probed" = FALSE"#),
+            "{sql}"
+        );
+        assert!(
+            sql.contains(r#""derivation_build"."cache_available" = FALSE"#),
+            "{sql}"
         );
     }
 

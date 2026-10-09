@@ -18,7 +18,7 @@ flowchart LR
 
 | Constant | Value | Role |
 |---|---|---|
-| `PROBE_TICK` | 1 s | Pass interval |
+| `PROBE_TICK` | 1 s | Pass interval while no request arrived |
 | `PROBE_BUDGET` | 120 s | Supervision budget of one pass |
 | `PROBE_DESCENT` | 60 s | A pass will stop descending after this. The rest must wait for the next tick |
 | `PROBE_MEMORY` | 300 s | No repeat question for an answered shared build within this window |
@@ -26,14 +26,16 @@ flowchart LR
 | `PROBE_SWEEP` | 60 s | Recovery check interval, only on an idle tick |
 
 - **Requests:** an in-memory channel (`ProbeRequests`). Batch recording must feed the channel with every shared build the batch walked, plus the needs-build marks the batch moved. The transition emitter (`gradient-db/src/status/effects.rs`) and the graph writer after `UpstreamHits` / `UpstreamProbed` feed the channel too.
+- **Wake-Up:** requests inside a graph transaction stay staged until the commit. The commit can then wake the loop without waiting for the tick.
 - **Descent:** the answer of each round will move the needs-build marks and hand the next level straight back. One pass can follow the closure down instead of one level per tick.
+- **Look-Ahead:** a round can also ask about the unanswered dependencies of the wanted shared builds. A miss makes these dependencies needed, and the next level then costs no extra round. Only the dependencies of an upstream hit go unused.
 - **Recovery check:** every walked shared build needing a build, with `probed = false` set. The check must cover a process stopped between a commit and the channel send.
 
 ## One Round
 
 `plan_probes` can build the round. `probe_round` can apply the round.
 
-1. Drop shared builds wanted by nothing (`wanted = false`).
+1. Keep wanted shared builds without an answer (`wanted`, `probed = false`). Add their dependencies without an answer and not available in a cache.
 2. Drop each shared build without `derivation_output` rows (unwalked stubs). A stub will stay unanswered until the batch walking the stub can send the stub again.
 3. Skip outputs already cached anywhere (`is_cached` or `external_url`).
 4. Group the rest by an evaluation naming the shared build (`build_job`). The project of the evaluation will pick the upstream caches.
