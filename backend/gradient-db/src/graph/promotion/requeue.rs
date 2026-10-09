@@ -119,14 +119,17 @@ where
     Ok(returned_transitions(rows))
 }
 
+/// The failed shared builds drive the write. A probe per closure member is a second walk.
 fn requeue_closure_update(blocked: &str) -> String {
     format!(
         r#"
         UPDATE derivation_build db
         SET status = {created}, attempt = 0,
             updated_at = (now() AT TIME ZONE 'UTC')
-        WHERE db.derivation IN (SELECT derivation FROM closure)
-          AND db.status IN ({requeueable}){blocked}
+        FROM (SELECT f.derivation FROM derivation_build f
+              WHERE f.status IN ({requeueable})
+                AND f.derivation IN (SELECT derivation FROM closure)) failed
+        WHERE db.derivation = failed.derivation AND db.status IN ({requeueable}){blocked}
         RETURNING db.derivation, old.status AS from_status, db.status AS to_status
         "#,
         created = crate::sql::status::build(BuildStatus::Created),
@@ -273,16 +276,25 @@ crate::sql_fn! {
     REQUEUE_FAILED_CLOSURE_FRESH = requeue_failed_closure_fresh_sql,
         params = [EvaluationId],
         tier = Walk,
+        budget = crate::sql::Budget::walk().buffers(500_000)
+            .because("the same whole-closure walk PROMOTE_CLOSURE_QUERY pays for, taken only \
+                      while the closure holds a failed shared build"),
         flags = [Walk];
 
     REQUEUE_FAILED_CLOSURE_BLOCKED = requeue_failed_closure_blocked_sql,
         params = [EvaluationId],
         tier = Walk,
+        budget = crate::sql::Budget::walk().buffers(500_000)
+            .because("the same whole-closure walk PROMOTE_CLOSURE_QUERY pays for, taken only \
+                      while the closure holds a failed shared build"),
         flags = [Walk];
 
     REQUEUE_FAILED_CLOSURE_ALL = requeue_failed_closure_all_sql,
         params = [EvaluationId],
         tier = Walk,
+        budget = crate::sql::Budget::walk().buffers(500_000)
+            .because("the same whole-closure walk PROMOTE_CLOSURE_QUERY pays for, taken only \
+                      while the closure holds a failed shared build"),
         flags = [Walk];
 
     RETRY_BUILD_CLOSURE = retry_build_closure_sql,
@@ -368,12 +380,17 @@ mod tests {
     fn a_user_retry_of_an_evaluation_thaws_all_failures_in_its_closure() {
         let norm = |s: String| s.split_whitespace().collect::<Vec<_>>().join(" ");
         let sql = norm(requeue_failed_closure_all_sql());
+        let requeueable = crate::sql::status::build_in(&BuildStatus::REQUEUEABLE);
+        assert!(
+            sql.contains(&format!("db.status IN ({requeueable}) RETURNING")),
+            "{sql}"
+        );
         assert!(
             sql.contains(&format!(
-                "db.status IN ({}) RETURNING",
-                crate::sql::status::build_in(&BuildStatus::REQUEUEABLE)
+                "FROM (SELECT f.derivation FROM derivation_build f WHERE f.status IN ({requeueable}) \
+                 AND f.derivation IN (SELECT derivation FROM closure)) failed"
             )),
-            "{sql}"
+            "the failed shared builds drive the write, not the closure: {sql}"
         );
         assert!(
             !sql.contains("kept_failed") && !sql.contains("deterministic_blocked"),
