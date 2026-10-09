@@ -12646,7 +12646,7 @@ components:
         expected_thunks:
           type: integer
           format: int64
-          description: Thunks the last completed evaluation of the task needed. Present only while the evaluation is fetching or evaluating and the task has a completed evaluation with metrics.
+          description: Median thunk count of the last 10 evaluations of the task with metrics. Present only while the evaluation is fetching or evaluating and the task has an evaluation with metrics.
 
     TaskDetailsResponse:
       type: object
@@ -12921,7 +12921,7 @@ components:
         expected_thunks:
           type: integer
           format: int64
-          description: Thunks the last completed evaluation of the task needed. Present only while the evaluation is fetching or evaluating and the task has a completed evaluation with metrics.
+          description: Median thunk count of the last 10 evaluations of the task with metrics. Present only while the evaluation is fetching or evaluating and the task has an evaluation with metrics.
 
     WaitingReason:
       description: |
