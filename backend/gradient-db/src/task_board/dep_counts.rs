@@ -10,10 +10,10 @@ use gradient_entity::build::BuildStatus;
 use gradient_entity::ids::{DerivationId, EntryPointId, EvaluationId};
 use gradient_types::*;
 use sea_orm::{
-    ColumnTrait, ConnectionTrait, DatabaseTransaction, DbErr, EntityTrait, QueryFilter,
-    TransactionTrait,
+    ColumnTrait, ConnectionTrait, DatabaseTransaction, DbErr, EntityTrait, FromQueryResult,
+    QueryFilter, TransactionTrait,
 };
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 pub type DepCounts = HashMap<EntryPointId, HashMap<BuildStatus, i64>>;
 
@@ -94,31 +94,72 @@ where
 {
     let version = evaluation.graph_version;
     let now = gradient_types::now();
-    let (stale, fresh): (Vec<&MEntryPoint>, Vec<&MEntryPoint>) = entry_points
+    let stale: Vec<EntryPointId> = entry_points
         .iter()
-        .partition(|ep| needs_update(ep, version, now));
+        .filter(|ep| needs_update(ep, version, now))
+        .map(|ep| ep.id)
+        .collect();
+    let claimed = claim_refresh(db, now, &stale).await?;
+    let (walked, stored): (Vec<&MEntryPoint>, Vec<&MEntryPoint>) =
+        entry_points.iter().partition(|ep| claimed.contains(&ep.id));
 
-    let fresh_ids: Vec<EntryPointId> = fresh.iter().map(|ep| ep.id).collect();
-    let mut out = if fresh_ids.is_empty() {
+    let stored_ids: Vec<EntryPointId> = stored.iter().map(|ep| ep.id).collect();
+    let mut out = if stored_ids.is_empty() {
         DepCounts::new()
     } else {
-        load_entry_point_dep_counts(db, &fresh_ids).await?
+        load_entry_point_dep_counts(db, &stored_ids).await?
     };
 
-    if stale.is_empty() {
+    if walked.is_empty() {
         return Ok(out);
     }
 
-    let seeds: Vec<(EntryPointId, uuid::Uuid)> = stale
+    let seeds: Vec<(EntryPointId, uuid::Uuid)> = walked
         .iter()
         .map(|ep| (ep.id, ep.derivation.into_inner()))
         .collect();
     let computed = crate::task_board::entry_point_dep_counts(db, evaluation.id, &seeds).await?;
-    let stale_ids: Vec<EntryPointId> = stale.iter().map(|ep| ep.id).collect();
-    store_entry_point_dep_counts(db, version, now, &stale_ids, &computed).await?;
+    let walked_ids: Vec<EntryPointId> = walked.iter().map(|ep| ep.id).collect();
+    store_entry_point_dep_counts(db, version, now, &walked_ids, &computed).await?;
     out.extend(computed);
 
     Ok(out)
+}
+
+#[derive(Debug, FromQueryResult)]
+struct ClaimedRow {
+    id: uuid::Uuid,
+}
+
+crate::sql! {
+    CLAIM_DEP_COUNTS_REFRESH = "UPDATE entry_point SET dep_counts_computed_at = $1 \
+         WHERE id = ANY($3::uuid[]) \
+           AND (dep_counts_computed_at IS NULL OR dep_counts_computed_at <= $2) \
+         RETURNING id",
+        params = [Now, Now, EntryPointIds(64)];
+}
+
+/// A walk that never stores is leaving its claim to expire after the refresh interval.
+async fn claim_refresh<C: ConnectionTrait>(
+    db: &C,
+    now: NaiveDateTime,
+    stale: &[EntryPointId],
+) -> Result<HashSet<EntryPointId>, DbErr> {
+    if stale.is_empty() {
+        return Ok(HashSet::new());
+    }
+
+    let refreshed_before = now - chrono::Duration::seconds(DEP_COUNTS_REFRESH_SECS);
+    let ids: Vec<uuid::Uuid> = stale.iter().map(|ep| ep.into_inner()).collect();
+    let rows = ClaimedRow::find_by_statement(CLAIM_DEP_COUNTS_REFRESH.bind([
+        now.into(),
+        refreshed_before.into(),
+        ids.into(),
+    ]))
+    .all(db)
+    .await?;
+
+    Ok(rows.into_iter().map(|row| EntryPointId(row.id)).collect())
 }
 
 crate::sql! {
@@ -256,6 +297,13 @@ mod tests {
         ])
     }
 
+    fn claimed(entry_points: &[EntryPointId]) -> Vec<BTreeMap<String, Value>> {
+        entry_points
+            .iter()
+            .map(|ep| BTreeMap::from([("id".to_owned(), Value::from(ep.into_inner()))]))
+            .collect()
+    }
+
     fn entry_point(evaluation: EvaluationId, stamp: Option<i64>, age_secs: i64) -> MEntryPoint {
         MEntryPoint {
             id: EntryPointId::now_v7(),
@@ -299,6 +347,7 @@ mod tests {
         let fresh = entry_point(eval.id, Some(3), 1);
         let stale = entry_point(eval.id, Some(2), DEP_COUNTS_REFRESH_SECS + 1);
         let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([claimed(&[stale.id])])
             .append_query_results([vec![count_row(fresh.id, BuildStatus::Completed, 3)]])
             .append_exec_results([ok(0)])
             .append_query_results([vec![walk_row(stale.id, BuildStatus::Building, 1)]])
@@ -355,6 +404,7 @@ mod tests {
         let eval = evaluation(1);
         let leaf = never_computed(eval.id);
         let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([claimed(&[leaf.id])])
             .append_exec_results([ok(0)])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_exec_results([ok(0), ok(1)])
@@ -400,6 +450,7 @@ mod tests {
         let eval = evaluation(5);
         let ep = entry_point(eval.id, Some(5), DEP_COUNTS_MAX_AGE_SECS + 1);
         let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([claimed(&[ep.id])])
             .append_exec_results([ok(0)])
             .append_query_results([vec![walk_row(ep.id, BuildStatus::Completed, 4)]])
             .append_exec_results([ok(1), ok(1), ok(1)])
@@ -419,11 +470,38 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_refresh_claimed_by_a_concurrent_page_load_reads_the_stored_counts() {
+        let eval = evaluation(8);
+        let ep = entry_point(eval.id, Some(7), DEP_COUNTS_REFRESH_SECS + 1);
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([claimed(&[])])
+            .append_query_results([vec![count_row(ep.id, BuildStatus::Queued, 6)]])
+            .into_connection();
+
+        let out = cached_entry_point_dep_counts(&db, &eval, std::slice::from_ref(&ep))
+            .await
+            .unwrap();
+
+        assert_eq!(out[&ep.id][&BuildStatus::Queued], 6);
+        let log = sqls(db);
+
+        assert!(
+            log[0].contains("dep_counts_computed_at <= $2"),
+            "the claim runs first: {log:?}"
+        );
+        assert!(
+            !log.iter().any(|s| s.contains("WITH RECURSIVE seeds")),
+            "{log:?}"
+        );
+    }
+
+    #[tokio::test]
     async fn the_store_binds_its_ids_in_sorted_order() {
         let eval = evaluation(2);
         let a = never_computed(eval.id);
         let b = never_computed(eval.id);
         let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([claimed(&[a.id, b.id])])
             .append_exec_results([ok(0)])
             .append_query_results([vec![
                 walk_row(a.id, BuildStatus::Queued, 1),
