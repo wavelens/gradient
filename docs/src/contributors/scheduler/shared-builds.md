@@ -1,3 +1,8 @@
+<!--
+SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+SPDX-License-Identifier: AGPL-3.0-only
+-->
+
 # Shared Builds
 
 A derivation is built once, globally. The build state of the derivation is on one `derivation_build` row, the *shared build*. All evaluations of that derivation point at this row. Each write to shared builds and the surrounding graph must go through one graph writer (`backend/gradient-graph`).

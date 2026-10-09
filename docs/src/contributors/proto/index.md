@@ -1,3 +1,8 @@
+<!--
+SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+SPDX-License-Identifier: AGPL-3.0-only
+-->
+
 # Proto
 
 The protocol between server and workers: one WebSocket at `/proto` with binary frames from the `Proto` derive. Sessions pass through version agreement, handshake, authorization, capabilities, then the job loop.

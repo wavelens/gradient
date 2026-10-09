@@ -1,3 +1,8 @@
+<!--
+SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+SPDX-License-Identifier: AGPL-3.0-only
+-->
+
 # Graph Queries
 
 SQL access to the dependency graph, covering recursive walks, the fence keeping them fast, their indexes, counter updates, instance metrics and the graph API.

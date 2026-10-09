@@ -1,3 +1,8 @@
+<!--
+SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+SPDX-License-Identifier: AGPL-3.0-only
+-->
+
 # Cluster Jobs
 
 Cluster jobs group existing jobs (evaluation jobs, build jobs) for a joint start on distinct workers, all or nothing. Members remain ordinary jobs with a cluster reference. Each try of the group is a cluster *attempt*.

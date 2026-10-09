@@ -1,3 +1,8 @@
+<!--
+SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+SPDX-License-Identifier: AGPL-3.0-only
+-->
+
 # Scheduler Policies
 
 The scheduler will score every queued job a worker can take on each request for work. The highest-scoring job will go to the worker. The score is the sum of the policy's rules. The [Job Board](../ui/job-board.md#job-inspection) can show each rule's share for every assigned job.

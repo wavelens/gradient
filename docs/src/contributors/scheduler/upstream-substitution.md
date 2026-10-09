@@ -1,3 +1,8 @@
+<!--
+SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+SPDX-License-Identifier: AGPL-3.0-only
+-->
+
 # Upstream Substitution
 
 A build with outputs already available in an upstream cache is fetched, not built. The `upstream-probe` loop will ask upstream caches only about [shared builds](shared-builds.md) wanted by another build or an evaluation. The answer must decide between a passthrough (fetched from upstream, `cache_available`) and a real build.

@@ -1,3 +1,8 @@
+<!--
+SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+SPDX-License-Identifier: AGPL-3.0-only
+-->
+
 # Manage Gradient with Nix
 
 Users, projects, tasks and caches declared under `services.gradient.state`, starting from a setup built in the UI. [Declarative State](../concepts/declarative-state.md) can explain how declared and UI-created entities live side by side.

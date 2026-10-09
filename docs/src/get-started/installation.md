@@ -1,3 +1,8 @@
+<!--
+SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+SPDX-License-Identifier: AGPL-3.0-only
+-->
+
 # Installation
 
 A production instance with managed secrets, a chosen database, and TLS matching the network in front of the server. The steps below extend the [Quick Start](quick-start.md) configuration.

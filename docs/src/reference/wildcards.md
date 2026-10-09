@@ -1,3 +1,8 @@
+<!--
+SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+SPDX-License-Identifier: AGPL-3.0-only
+-->
+
 # Evaluation Wildcards
 
 A task's wildcard will select the flake outputs for Gradient to build. The wildcard is a comma-separated list of attribute paths. `*` and `#` are matching any name at their level. The default is `packages.x86_64-linux.*`.

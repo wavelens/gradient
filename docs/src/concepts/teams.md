@@ -1,3 +1,8 @@
+<!--
+SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+SPDX-License-Identifier: AGPL-3.0-only
+-->
+
 # Teams
 
 A **team** is a group of users and workers. One grant on a project or cache can cover every person and machine of a team. Teams never own projects or caches.

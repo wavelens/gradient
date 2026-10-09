@@ -1,3 +1,8 @@
+<!--
+SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+SPDX-License-Identifier: AGPL-3.0-only
+-->
+
 # NAR Storage
 
 NAR object locations, the write path into storage and the sync between storage and database. Delivery of NARs to clients is on [Cache Serving](cache-serving.md) instead.

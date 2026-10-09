@@ -1,3 +1,8 @@
+<!--
+SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+SPDX-License-Identifier: AGPL-3.0-only
+-->
+
 # Caches
 
 A **cache** is a Nix binary cache built into Gradient. Projects subscribe to caches. Build outputs of a project land in every cache the project subscribed to. `nix` on any machine can substitute from those caches.

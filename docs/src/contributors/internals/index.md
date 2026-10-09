@@ -1,3 +1,8 @@
+<!--
+SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+SPDX-License-Identifier: AGPL-3.0-only
+-->
+
 # Internals
 
 Implementation details outside the scheduler and the protocol. The pages are covering Git host events, NAR storage and serving, SQL graph queries and request authentication. Paths are relative to `backend/`.

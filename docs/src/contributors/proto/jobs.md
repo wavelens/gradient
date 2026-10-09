@@ -1,3 +1,8 @@
+<!--
+SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+SPDX-License-Identifier: AGPL-3.0-only
+-->
+
 # Jobs
 
 Workers handle two job kinds: flake jobs and build jobs. The sections below list their messages and reports, and the handling of failed, aborted and lost jobs.

@@ -1,3 +1,8 @@
+<!--
+SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+SPDX-License-Identifier: AGPL-3.0-only
+-->
+
 # Frontend Style Guide
 
 The frontend has its own design system page at `/styleguide`. The page can show every shared primitive, colour role and layout pattern live. New features must reuse a primitive before building a new one.

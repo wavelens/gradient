@@ -1,3 +1,8 @@
+<!--
+SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+SPDX-License-Identifier: AGPL-3.0-only
+-->
+
 # Authentication
 
 HTTP requests prove their identity with session JWTs, API keys, download tokens or OIDC sign-in. Worker authentication on `/proto` is covered on [Connection](../proto/connection.md).

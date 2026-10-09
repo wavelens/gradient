@@ -1,3 +1,8 @@
+<!--
+SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+SPDX-License-Identifier: AGPL-3.0-only
+-->
+
 # Declarative State
 
 Every option under `services.gradient.state`, generated from `nix/modules`. [Manage Gradient with Nix](../guides/manage-with-nix.md) can guide through the workflow. [Declarative State](../concepts/declarative-state.md) can explain the model.

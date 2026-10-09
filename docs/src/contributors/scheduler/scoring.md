@@ -1,3 +1,8 @@
+<!--
+SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+SPDX-License-Identifier: AGPL-3.0-only
+-->
+
 # Scoring
 
 The scheduler can rank every eligible pending job for the requesting worker with a `ScoringPolicy` implementation. The scheduler will then assign the top candidate. The scoring code is in the `backend/gradient-pool/src/score` module. The scheduler in `backend/gradient-scheduler` must fill the inputs. The rule list and magnitudes are in [Scheduler Policies](../../reference/scheduler-policies.md).

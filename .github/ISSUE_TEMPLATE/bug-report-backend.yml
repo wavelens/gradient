@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+# SPDX-License-Identifier: AGPL-3.0-only
+
 name: Bug report (backend)
 description: A stuck or failed evaluation, build or worker, with a diagnostic report attached.
 labels: ["bug"]

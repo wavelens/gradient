@@ -1,3 +1,8 @@
+<!--
+SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+SPDX-License-Identifier: AGPL-3.0-only
+-->
+
 # Events and Webhooks
 
 Every state change in Gradient is a typed event with a dotted name (`build.completed`, `task.star`, `proto.client.nar_push`).

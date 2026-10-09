@@ -1,3 +1,8 @@
+<!--
+SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+SPDX-License-Identifier: AGPL-3.0-only
+-->
+
 # Report a Bug with a Diagnostic Report
 
 One SQLite file explaining a stuck or failed evaluation, for attaching to a [bug report](https://github.com/wavelens/gradient/issues). Maintainers answer from the file, without access to the instance.

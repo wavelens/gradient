@@ -1,3 +1,8 @@
+<!--
+SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+SPDX-License-Identifier: AGPL-3.0-only
+-->
+
 # Members and Roles
 
 Who can do what in a project or a cache. Projects and caches each have their own members and roles. **Settings -> Members & Roles** on a project and **Members & Roles** on a cache lead there.
@@ -60,7 +65,7 @@ Who can do what in a project or a cache. Projects and caches each have their own
 - Built-in roles cannot be edited or deleted.
 - A custom role still assigned to a member cannot be deleted.
 - The last Admin of a cache cannot be removed.
-- Roles can come from identity provider groups, described in [Set Up Single Sign-On](../guides/sso.md#3-map-groups-to-roles).
+- Roles can come from identity provider groups, described in [Set Up Single Sign-On](../guides/sso.md#3-map-groups-to-teams).
 
 ## Related
 

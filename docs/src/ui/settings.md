@@ -1,3 +1,8 @@
+<!--
+SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+SPDX-License-Identifier: AGPL-3.0-only
+-->
+
 # Settings
 
 Three settings pages: the user's own, a project's and a cache's. Fields of entities [declared in Nix](../guides/manage-with-nix.md) show disabled, with the hint **Managed by Nix**.

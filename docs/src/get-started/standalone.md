@@ -1,3 +1,8 @@
+<!--
+SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+SPDX-License-Identifier: AGPL-3.0-only
+-->
+
 # Standalone
 
 A complete Gradient on one machine for trying Gradient on a personal repository. Server, web UI, PostgreSQL and a worker share one container or VM.
