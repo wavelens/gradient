@@ -1,4 +1,4 @@
-<h1 align="center">Gradient</h1>
+<h1 align="center"><img src="https://public.gradient.ci/images/logo.svg" alt="" height="40" align="top"> Gradient</h1>
 
 <p align="center"><b>Nix-CI for Teams.</b> Every flake built once, on any machine, cached for everyone.</p>
 

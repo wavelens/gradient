@@ -55,7 +55,7 @@
       store = pkgs.callPackage ./nix/scripts/store.nix { };
       gradient = pkgs.callPackage ./nix/packages/gradient.nix { inherit craneLib; };
       gradient-logo = pkgs.callPackage ./nix/packages/gradient-logo.nix { };
-      gradient-frontend = pkgs.callPackage ./nix/packages/gradient-frontend.nix { };
+      gradient-frontend = pkgs.callPackage ./nix/packages/gradient-frontend.nix { inherit gradient-logo; };
       gradient-cli = pkgs.callPackage ./nix/packages/gradient-cli.nix {
         inherit craneLib;
         cargoFeatures = [ "nix" ];
@@ -134,6 +134,10 @@
       GRADIENT_SECRETS_CRYPT_FILE = pkgs.writeText "crypt_secret_file" "aW52YWxpZC1pbnZhbGlkLWludmFsaWQK";
       GRADIENT_SECRETS_JWT_FILE = pkgs.writeText "jwt_secret_file" "8a2eb7ba959570ff8842f148207524c7b8d731d7a1998584105e951599221f9d";
       GRADIENT_SENTRY_ENABLE = "false";
+
+      shellHook = ''
+        ln -sfn ${self.packages.${system}.gradient-logo}/logo-transparent.svg frontend/public/images/logo.svg
+      '';
     };
   }) // {
     lib.tests = {
