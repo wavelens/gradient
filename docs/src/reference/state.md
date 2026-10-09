@@ -81,6 +81,7 @@ services.gradient.state = {
 | `name` | string | attribute name | Unique task name. |
 | `project` | string | - | Name of the project owning the task. |
 | `repository` | string | - | Git repository URL of the task. |
+| `retry_failed_builds` | bool | `true` | Whether a new evaluation of this task queues its permanently failed builds and their dependents again. With `false`, they stay failed until a user retries the build or the evaluation. |
 | `sign_cache` | bool | `true` | Whether to sign the narinfo of outputs pushed by this task. |
 | `wait_for_workers` | bool | `false` | Whether an evaluation is waiting for a worker when its builds need an architecture or system features no connected worker is providing. The server is otherwise aborting such an evaluation with a warning naming what is missing. |
 | `triggers` | null or list of submodule | `null` | Evaluation triggers of the task: polling, Git host push, Git host pull request or cron schedule. |

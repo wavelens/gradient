@@ -87,6 +87,16 @@
       />
     </gr-form-field>
 
+    <gr-form-field hint="A new evaluation queues permanently failed builds and their dependents again. With this off, they stay failed until someone selects Retry.">
+      <gr-checkbox
+        inputId="task-retry-failed-builds"
+        [(ngModel)]="formData.retry_failed_builds"
+        [binary]="true"
+        [appManagedDisable]="access()"
+        label="Retry failed builds on new evaluation"
+      />
+    </gr-form-field>
+
     <div class="form-actions">
       <button
         *appWritable="access()"

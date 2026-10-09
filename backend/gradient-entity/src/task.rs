@@ -64,6 +64,7 @@ pub struct Model {
     pub concurrency: ConcurrencyPolicy,
     pub sign_cache: bool,
     pub wait_for_workers: bool,
+    pub retry_failed_builds: bool,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

@@ -133,25 +133,35 @@ fn requeue_closure_update(blocked: &str) -> String {
     )
 }
 
-fn aborted_blocked_cte_body() -> String {
+/// A task with `retry_failed_builds` off keeps its permanent failures until a user retries them.
+fn kept_failed_cte_body() -> String {
+    let kept_permanent = format!(
+        "SELECT kf.derivation FROM derivation_build kf \
+         WHERE kf.status = {failed_permanent} AND kf.derivation IN (SELECT derivation FROM closure) \
+           AND EXISTS (SELECT 1 FROM evaluation e JOIN task t ON t.id = e.task \
+                       WHERE e.id = $1 AND NOT t.retry_failed_builds)",
+        failed_permanent = crate::sql::status::build(BuildStatus::FailedPermanent),
+    );
     bounded_dependency_closure_cte_body(
-        "aborted_blocked",
-        &aborted_in_evaluation("$1"),
+        "kept_failed",
+        &format!(
+            "SELECT derivation FROM ({aborted} UNION {kept_permanent}) seed",
+            aborted = aborted_in_evaluation("$1"),
+        ),
         ClosureDirection::WantedBy,
         &non_passthrough_predicate("e.derivation"),
         Some("closure"),
     )
 }
 
-const SKIP_ABORTED: &str =
-    "\n          AND db.derivation NOT IN (SELECT derivation FROM aborted_blocked)";
+const SKIP_KEPT: &str = "\n          AND db.derivation NOT IN (SELECT derivation FROM kept_failed)";
 
 fn requeue_failed_closure_fresh_sql() -> String {
     format!(
         "{},\n    {}\n{}",
         eval_closure_cte(),
-        aborted_blocked_cte_body(),
-        requeue_closure_update(SKIP_ABORTED),
+        kept_failed_cte_body(),
+        requeue_closure_update(SKIP_KEPT),
     )
 }
 
@@ -159,9 +169,9 @@ pub(super) fn requeue_failed_closure_blocked_sql() -> String {
     format!(
         "{},\n    {}\n{}",
         requeue_ctes("SELECT bj.derivation FROM build_job bj WHERE bj.evaluation = $1"),
-        aborted_blocked_cte_body(),
+        kept_failed_cte_body(),
         requeue_closure_update(&format!(
-            "\n          AND db.derivation NOT IN (SELECT derivation FROM deterministic_blocked){SKIP_ABORTED}"
+            "\n          AND db.derivation NOT IN (SELECT derivation FROM deterministic_blocked){SKIP_KEPT}"
         )),
     )
 }
@@ -302,7 +312,7 @@ mod tests {
         );
         assert!(
             sql.contains(&format!(
-                "db.status IN ({}) AND db.derivation NOT IN (SELECT derivation FROM aborted_blocked) RETURNING",
+                "db.status IN ({}) AND db.derivation NOT IN (SELECT derivation FROM kept_failed) RETURNING",
                 crate::sql::status::build_in(&BuildStatus::REQUEUEABLE)
             )),
             "{sql}"
@@ -314,7 +324,7 @@ mod tests {
     }
 
     #[test]
-    fn no_heal_of_an_evaluation_thaws_what_its_user_aborted() {
+    fn no_heal_of_an_evaluation_thaws_what_its_user_aborted_or_its_task_keeps() {
         let norm = |s: String| s.split_whitespace().collect::<Vec<_>>().join(" ");
         let aborted = norm(aborted_in_evaluation("$1"));
         for sql in [
@@ -322,7 +332,13 @@ mod tests {
             norm(requeue_failed_closure_blocked_sql()),
         ] {
             assert!(
-                sql.contains(&format!("aborted_blocked(derivation) AS ({aborted} UNION")),
+                sql.contains(&format!(
+                    "kept_failed(derivation) AS (SELECT derivation FROM ({aborted} UNION"
+                )),
+                "{sql}"
+            );
+            assert!(
+                sql.contains("WHERE e.id = $1 AND NOT t.retry_failed_builds"),
                 "{sql}"
             );
             assert!(
@@ -332,7 +348,7 @@ mod tests {
                 "the dependents of the aborted build stay failed: {sql}"
             );
             assert!(
-                sql.contains("db.derivation NOT IN (SELECT derivation FROM aborted_blocked)"),
+                sql.contains("db.derivation NOT IN (SELECT derivation FROM kept_failed)"),
                 "{sql}"
             );
         }

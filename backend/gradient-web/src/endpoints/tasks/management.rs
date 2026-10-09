@@ -46,6 +46,8 @@ pub struct MakeTaskRequest {
     pub sign_cache: Option<bool>,
     #[serde(default)]
     pub wait_for_workers: Option<bool>,
+    #[serde(default)]
+    pub retry_failed_builds: Option<bool>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -59,6 +61,7 @@ pub struct PatchTaskRequest {
     pub concurrency: Option<ConcurrencyPolicy>,
     pub sign_cache: Option<bool>,
     pub wait_for_workers: Option<bool>,
+    pub retry_failed_builds: Option<bool>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -177,6 +180,7 @@ pub async fn get(
             managed: p.managed,
             sign_cache: p.sign_cache,
             wait_for_workers: p.wait_for_workers,
+            retry_failed_builds: p.retry_failed_builds,
             can_edit,
             can_trigger,
         }
@@ -256,6 +260,7 @@ pub async fn put(
         concurrency: body.concurrency.unwrap_or(ConcurrencyPolicy::SoftAbort),
         sign_cache: body.sign_cache.unwrap_or(true),
         wait_for_workers: body.wait_for_workers.unwrap_or(false),
+        retry_failed_builds: body.retry_failed_builds.unwrap_or(true),
         ..Default::default()
     }
     .into_active_model();
@@ -385,6 +390,7 @@ pub async fn get_task(
         concurrency: task.concurrency,
         sign_cache: task.sign_cache,
         wait_for_workers: task.wait_for_workers,
+        retry_failed_builds: task.retry_failed_builds,
         can_edit,
         can_trigger,
     }))
@@ -425,6 +431,7 @@ pub async fn patch_task(
         ("concurrency", body.concurrency.is_some()),
         ("sign_cache", body.sign_cache.is_some()),
         ("wait_for_workers", body.wait_for_workers.is_some()),
+        ("retry_failed_builds", body.retry_failed_builds.is_some()),
     ]);
     let mut atask: ATask = task.into();
     let mut patcher = TaskPatcher::new(&state, &mut atask);
@@ -455,6 +462,9 @@ pub async fn patch_task(
     }
     if let Some(wait_for_workers) = body.wait_for_workers {
         patcher.atask.wait_for_workers = Set(wait_for_workers);
+    }
+    if let Some(retry_failed_builds) = body.retry_failed_builds {
+        patcher.atask.retry_failed_builds = Set(retry_failed_builds);
     }
 
     atask.force_evaluation = Set(true);

@@ -310,6 +310,16 @@
         '';
       };
 
+      retry_failed_builds = mkOption {
+        type = types.bool;
+        default = true;
+        description = ''
+          Whether a new evaluation of this task queues its permanently failed builds and their
+          dependents again. Otherwise they stay failed until a user retries the build or the
+          evaluation.
+        '';
+      };
+
       concurrency = mkOption {
         type = types.enum [ "hard_abort" "soft_abort" "skip" "all" ];
         default = "soft_abort";
