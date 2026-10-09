@@ -27,8 +27,6 @@ use sea_orm::{
 use crate::report::Outcome;
 use crate::sample::Sampler;
 
-const WALK_WORK_MEM: &str = "SET LOCAL work_mem = '64MB'";
-
 pub async fn run_all(
     db: &DatabaseConnection,
     mut sampler: Sampler,
@@ -107,7 +105,8 @@ async fn measure_in(
     values: Vec<Value>,
 ) -> Result<serde_json::Value> {
     if query.flags.contains(&Flag::Walk) {
-        txn.execute_unprepared(WALK_WORK_MEM).await?;
+        txn.execute_unprepared(gradient_db::graph::walks::work_mem(query.tier))
+            .await?;
     }
 
     let stmt = Statement::from_sql_and_values(

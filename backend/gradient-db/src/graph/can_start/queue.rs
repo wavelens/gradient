@@ -140,7 +140,7 @@ pub async fn promote_closure<C>(
 where
     C: ConnectionTrait + TransactionTrait<Transaction = DatabaseTransaction>,
 {
-    let walk = crate::graph::walks::begin_walk(db).await?;
+    let walk = crate::graph::walks::begin_walk(db, &PROMOTE_CLOSURE_QUERY).await?;
     let rows = walk
         .query_all_raw(PROMOTE_CLOSURE_QUERY.bind([Value::Uuid(Some(evaluation.into_inner()))]))
         .await?;

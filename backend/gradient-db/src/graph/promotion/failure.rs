@@ -62,7 +62,7 @@ where
 {
     // The unbounded upward walk is the widest frontier in the system.
     // It is getting the raised `work_mem`.
-    let walk = crate::graph::walks::begin_walk(db).await?;
+    let walk = crate::graph::walks::begin_walk(db, &CASCADE_DEPENDENCY_FAILED).await?;
     let rows = walk
         .query_all_raw(
             CASCADE_DEPENDENCY_FAILED.bind([Value::Uuid(Some(failed_derivation.into_inner()))]),
@@ -83,7 +83,7 @@ pub async fn repair_dependency_failed<C>(
 where
     C: ConnectionTrait + TransactionTrait<Transaction = DatabaseTransaction>,
 {
-    let walk = crate::graph::walks::begin_walk(db).await?;
+    let walk = crate::graph::walks::begin_walk(db, &DEPENDENCY_FAILED_REPAIR).await?;
     let rows = walk
         .query_all_raw(DEPENDENCY_FAILED_REPAIR.bind([Value::Uuid(Some(evaluation.into_inner()))]))
         .await?;

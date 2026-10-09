@@ -44,7 +44,7 @@ where
     let mut changes = Vec::new();
     for chunk in derivations.chunks(crate::IN_CHUNK_SIZE) {
         let ids: Vec<uuid::Uuid> = chunk.iter().map(|d| d.into_inner()).collect();
-        let walk = crate::graph::walks::begin_walk(db).await?;
+        let walk = crate::graph::walks::begin_walk(db, &REQUEUE_FAILED_SHARED_BUILDS).await?;
         let rows = walk
             .query_all_raw(REQUEUE_FAILED_SHARED_BUILDS.bind([ids.into()]))
             .await?;
@@ -110,7 +110,7 @@ where
         RepairScope::Unstick(_) => &REQUEUE_FAILED_CLOSURE_BLOCKED,
         RepairScope::Retry(_) => &REQUEUE_FAILED_CLOSURE_ALL,
     };
-    let walk = crate::graph::walks::begin_walk(db).await?;
+    let walk = crate::graph::walks::begin_walk(db, query).await?;
     let rows = walk
         .query_all_raw(query.bind([Value::Uuid(Some(scope.evaluation().into_inner()))]))
         .await?;
@@ -224,7 +224,7 @@ pub async fn retry_build_closure<C>(
 where
     C: ConnectionTrait + TransactionTrait<Transaction = DatabaseTransaction>,
 {
-    let walk = crate::graph::walks::begin_walk(db).await?;
+    let walk = crate::graph::walks::begin_walk(db, &RETRY_BUILD_CLOSURE).await?;
     let rows = walk
         .query_all_raw(RETRY_BUILD_CLOSURE.bind([
             Value::Uuid(Some(evaluation.into_inner())),
@@ -256,7 +256,7 @@ where
     let mut changes = Vec::new();
     for chunk in derivations.chunks(crate::IN_CHUNK_SIZE) {
         let ids: Vec<uuid::Uuid> = chunk.iter().map(|d| d.into_inner()).collect();
-        let walk = crate::graph::walks::begin_walk(db).await?;
+        let walk = crate::graph::walks::begin_walk(db, &REQUEUE_FAILED_IMPORT_CLOSURE).await?;
         let rows = walk
             .query_all_raw(REQUEUE_FAILED_IMPORT_CLOSURE.bind([ids.into()]))
             .await?;

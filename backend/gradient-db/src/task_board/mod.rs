@@ -211,7 +211,7 @@ where
         .iter()
         .map(|(ep, drv)| (ep.into_inner(), *drv))
         .unzip();
-    let walk = crate::graph::walks::begin_walk(db).await?;
+    let walk = crate::graph::walks::begin_walk(db, &DEP_COUNTS_SQL_QUERY).await?;
     let rows = DepCountRow::find_by_statement(DEP_COUNTS_SQL_QUERY.bind([
         eps.into(),
         drvs.into(),

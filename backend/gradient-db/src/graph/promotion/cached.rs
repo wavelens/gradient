@@ -50,7 +50,7 @@ pub async fn repair_cached_shared_builds_for_eval<C>(
 where
     C: ConnectionTrait + TransactionTrait<Transaction = DatabaseTransaction>,
 {
-    let walk = crate::graph::walks::begin_walk(db).await?;
+    let walk = crate::graph::walks::begin_walk(db, &REPAIR_CACHED_SHARED_BUILDS_FOR_EVAL).await?;
     let rows = walk
         .query_all_raw(
             REPAIR_CACHED_SHARED_BUILDS_FOR_EVAL.bind([Value::Uuid(Some(evaluation.into_inner()))]),

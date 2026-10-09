@@ -124,7 +124,7 @@ where
         return Ok(HashMap::new());
     }
 
-    let walk = crate::graph::walks::begin_walk(db).await?;
+    let walk = crate::graph::walks::begin_walk(db, &RUNTIME_CLOSURE_REACHABLE).await?;
     let reached: HashMap<String, gradient_entity::cached_path::Model> = ECachedPath::find()
         .from_raw_sql(RUNTIME_CLOSURE_REACHABLE.bind([seed_hashes.to_vec().into()]))
         .all(&walk)
