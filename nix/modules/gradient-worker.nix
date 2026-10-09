@@ -358,6 +358,15 @@ in {
           {file}`<services.gradient.worker.baseDir>/nar-partial`. `0` disables the cleanup.
         '';
       };
+
+      chunkBytes = lib.mkOption {
+        type = lib.types.ints.between 4096 4194304;
+        default = 524288;
+        description = ''
+          Size in bytes of each outbound NAR upload chunk, from 4 KiB to 4 MiB.
+          Smaller chunks can help slow or high-latency links like Tailscale over DERP.
+        '';
+      };
     };
 
     log = {
@@ -534,6 +543,7 @@ in {
           GRADIENT_WORKER_BUILD_MAX_CONCURRENT = toString cfg.build.maxConcurrent;
           GRADIENT_WORKER_NAR_MAX_CONCURRENT_UPLOADS = toString cfg.nar.maxConcurrentUploads;
           GRADIENT_WORKER_NAR_PARTIAL_TTL_SECS = toString cfg.nar.partialTtlSecs;
+          GRADIENT_WORKER_NAR_CHUNK_BYTES = toString cfg.nar.chunkBytes;
           GRADIENT_WORKER_LOG_LEVEL_DEFAULT = cfg.log.level.default;
           GRADIENT_WORKER_LOG_BURST_BYTES_PER_MIN = toString cfg.log.burstBytesPerMin;
           GRADIENT_WORKER_LOG_SUSTAINED_BYTES_PER_HOUR = toString cfg.log.sustainedBytesPerHour;

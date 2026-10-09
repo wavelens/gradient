@@ -8,17 +8,20 @@ use std::time::Duration;
 
 use bytes::Bytes;
 use futures::StreamExt;
+use gradient_types::NAR_CHUNK_BYTES_RANGE;
 use gradient_util::telemetry::{STATS, metric};
-use gradient_wire::constants::BULK_CHUNK_SIZE;
 use gradient_wire::messages::ServerMessage;
-use gradient_wire::session::frame::{ProtoWriter, send_server_msg};
+use gradient_wire::session::frame::{MAX_PROTO_MESSAGE_SIZE, ProtoWriter, send_server_msg};
 use tracing::{error, trace, warn};
 
 use crate::{NarSource, NarStore};
 
-pub struct PassthroughTimeouts {
+const _: () = assert!(*NAR_CHUNK_BYTES_RANGE.end() as usize * 2 <= MAX_PROTO_MESSAGE_SIZE);
+
+pub struct PassthroughLimits {
     pub open: Duration,
     pub chunk_read: Duration,
+    pub chunk_bytes: usize,
 }
 
 pub struct PassthroughRequest<'a> {
@@ -91,7 +94,7 @@ pub async fn send_nar(
     store: &NarStore,
     writer: &ProtoWriter,
     req: PassthroughRequest<'_>,
-    timeouts: PassthroughTimeouts,
+    limits: PassthroughLimits,
 ) -> Result<u64, PassthroughError> {
     let PassthroughRequest {
         job_id,
@@ -100,8 +103,11 @@ pub async fn send_nar(
         resume_from,
         client_token,
     } = req;
-    let storage_open_timeout = timeouts.open;
-    let chunk_read_timeout = timeouts.chunk_read;
+    let PassthroughLimits {
+        open: storage_open_timeout,
+        chunk_read: chunk_read_timeout,
+        chunk_bytes,
+    } = limits;
 
     let open = |offset: u64| async move {
         tokio::time::timeout(storage_open_timeout, store.open(key, offset)).await
@@ -176,7 +182,7 @@ pub async fn send_nar(
         NarSource::Stream { stream, .. } => stream,
     };
 
-    let mut buf: Vec<u8> = Vec::with_capacity(BULK_CHUNK_SIZE);
+    let mut buf: Vec<u8> = Vec::with_capacity(chunk_bytes);
     let mut offset: u64 = start;
     let mut total: u64 = 0;
     let mut chunks_sent: u64 = 0;
@@ -220,12 +226,12 @@ pub async fn send_nar(
 
         let mut slice = &bytes[..];
         while !slice.is_empty() {
-            let want = BULK_CHUNK_SIZE - buf.len();
+            let want = chunk_bytes - buf.len();
             let take = slice.len().min(want);
             buf.extend_from_slice(&slice[..take]);
             slice = &slice[take..];
-            if buf.len() == BULK_CHUNK_SIZE {
-                let chunk = std::mem::replace(&mut buf, Vec::with_capacity(BULK_CHUNK_SIZE));
+            if buf.len() == chunk_bytes {
+                let chunk = std::mem::replace(&mut buf, Vec::with_capacity(chunk_bytes));
                 let chunk_len = chunk.len() as u64;
                 if send_server_msg(
                     writer,
@@ -296,10 +302,11 @@ mod tests {
     const HASH: &str = "0c5bbq5r7gbpcbym1ilmd0r3mcjq7dfy";
     const PATH: &str = "/nix/store/0c5bbq5r7gbpcbym1ilmd0r3mcjq7dfy-hello";
 
-    fn timeouts() -> PassthroughTimeouts {
-        PassthroughTimeouts {
+    fn limits() -> PassthroughLimits {
+        PassthroughLimits {
             open: Duration::from_secs(5),
             chunk_read: Duration::from_secs(5),
+            chunk_bytes: BULK_CHUNK_SIZE,
         }
     }
 
@@ -321,7 +328,7 @@ mod tests {
         resume_from: u64,
         client_token: Option<&str>,
     ) -> (Result<u64, PassthroughError>, Vec<ServerMessage>) {
-        serve_within(store, store_path, resume_from, client_token, timeouts()).await
+        serve_within(store, store_path, resume_from, client_token, limits()).await
     }
 
     async fn serve_within(
@@ -329,7 +336,7 @@ mod tests {
         store_path: &str,
         resume_from: u64,
         client_token: Option<&str>,
-        timeouts: PassthroughTimeouts,
+        limits: PassthroughLimits,
     ) -> (Result<u64, PassthroughError>, Vec<ServerMessage>) {
         let (writer, mut sent) = ProtoWriter::spy(Duration::from_secs(5));
         let req = PassthroughRequest {
@@ -339,7 +346,7 @@ mod tests {
             resume_from,
             client_token,
         };
-        let result = send_nar(store, &writer, req, timeouts).await;
+        let result = send_nar(store, &writer, req, limits).await;
         drop(writer);
         let mut frames = Vec::new();
         while let Some(bytes) = sent.recv().await {
@@ -360,7 +367,7 @@ mod tests {
             resume_from: 0,
             client_token: None,
         };
-        let result = send_nar(&store, &writer, req, timeouts()).await;
+        let result = send_nar(&store, &writer, req, limits()).await;
         drop(writer);
         assert_eq!(result.expect("sent"), 10);
         let header =
@@ -409,6 +416,24 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn pushes_follow_the_configured_chunk_bytes() {
+        let (_dir, store) = stored(2500).await;
+        let small = PassthroughLimits {
+            chunk_bytes: 1000,
+            ..limits()
+        };
+        let (_, frames) = serve_within(&store, PATH, 0, None, small).await;
+        let pushes: Vec<(usize, bool)> = frames
+            .iter()
+            .filter_map(|m| match m {
+                ServerMessage::NarPush { data, is_final, .. } => Some((data.len(), *is_final)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(pushes, [(1000, false), (1000, false), (500, true)]);
+    }
+
+    #[tokio::test]
     async fn a_matching_token_resumes_from_the_offset() {
         let (_dir, store) = stored(1000).await;
         let (_, frames) = serve(&store, PATH, 100, Some(&format!("{HASH}-1000"))).await;
@@ -443,9 +468,9 @@ mod tests {
             },
         );
         let store = NarStore::over(std::sync::Arc::new(hung));
-        let short = PassthroughTimeouts {
+        let short = PassthroughLimits {
             open: Duration::from_millis(50),
-            chunk_read: Duration::from_secs(5),
+            ..limits()
         };
         let (result, frames) = serve_within(&store, PATH, 0, None, short).await;
         assert!(

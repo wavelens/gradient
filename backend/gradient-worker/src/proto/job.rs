@@ -13,7 +13,6 @@ use gradient_wire::messages::{
     BuildMetrics, BuildOutput, CachedPath, ClientMessage, DiscoveredDerivation,
     EvalCachePullOutcome, EvalMessageLevel, EvalStatsReport, JobPhase, JobUpdateKind, QueryMode,
 };
-use gradient_wire::session::frame::BULK_CHUNK_SIZE;
 use gradient_worker_client::correlation::{
     AssignmentHandle, CacheWaiters, ImportWaiters, KnownDerivationWaiters,
     cache_query_with_timeout, known_derivations_with_timeout,
@@ -50,14 +49,15 @@ pub struct JobUpdater {
 }
 
 async fn passthrough_blob(
-    writer: &ProtoWriter,
+    uploads: &UploadClient,
     request_id: u64,
     bytes: &[u8],
     resume_offset: u64,
 ) -> Result<()> {
+    let writer = uploads.writer();
     let start = (resume_offset as usize).min(bytes.len());
     let mut offset = start as u64;
-    for chunk in bytes[start..].chunks(BULK_CHUNK_SIZE) {
+    for chunk in bytes[start..].chunks(uploads.chunk_bytes()) {
         writer
             .send(ClientMessage::UploadChunk {
                 request_id,
@@ -194,7 +194,7 @@ impl JobUpdater {
     ) -> Result<()> {
         match target {
             GrantTarget::Passthrough { resume_offset } => {
-                passthrough_blob(self.uploads.writer(), request_id, bytes, resume_offset).await
+                passthrough_blob(&self.uploads, request_id, bytes, resume_offset).await
             }
             GrantTarget::Put { url } => {
                 gradient_worker_client::object_put::put_object(&url, bytes.to_vec().into(), None)

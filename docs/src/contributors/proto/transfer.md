@@ -20,7 +20,7 @@ sequenceDiagram
 | Grant | When | Transfer |
 |---|---|---|
 | `Skip` | The path is already stored, or the server does not want the evaluation cache blob | Nothing |
-| `Passthrough { resume_offset }` | Local NAR storage | 512 KiB `UploadChunk` frames into `<baseDir>/nar-partial`, resuming after a break |
+| `Passthrough { resume_offset }` | Local NAR storage | `UploadChunk` frames of `worker.nar.chunkBytes` into `<baseDir>/nar-partial`, resuming after a break |
 | `Put { url }` | S3, NAR up to 1 GiB | One presigned PUT, valid 1 h |
 | `Multipart` | S3, NAR over 1 GiB | Presigned parts of at least 64 MiB |
 
@@ -51,7 +51,7 @@ Workers prefetch every input missing from the local store ahead of the build.
 
 1. `CacheQuery { mode: Pull }` for the missing paths. An uncached path will fail the build with the failure kind `InputsUnavailable` set.
 2. Paths with a presigned `url` download directly, 8 in parallel, with 4 attempts. A download will fail after 30 s without a byte, never on total length.
-3. The rest go through `NarRequest`. The server will answer each path with `NarStreamHeader`, then 512 KiB `NarPush` frames, or with a `NarUnavailable` / `NarAbort` message.
+3. The rest go through `NarRequest`. The server will answer each path with `NarStreamHeader`, then `NarPush` frames of `nar.chunkBytes`, or with a `NarUnavailable` / `NarAbort` message.
 4. A broken stream will resume with `NarRequestResume { received_bytes, stream_token }` from the `<baseDir>/nar-partial` directory.
 5. Workers import the NARs into the Nix store in dependency order.
 

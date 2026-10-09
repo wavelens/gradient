@@ -158,6 +158,7 @@ Declarative entities under `services.gradient.state` are in the [state reference
 
 | Option | Type | Default | Env | Description |
 |---|---|---|---|---|
+| `nar.chunkBytes` | int | `524288` | `GRADIENT_NAR_CHUNK_BYTES` | Size in bytes of each outbound `NarPush` chunk, from 4 KiB to 4 MiB. Smaller chunks can help slow or high-latency links like Tailscale over DERP. |
 | `nar.hotCacheBytes` | int | `536870912` | `GRADIENT_NAR_HOT_CACHE_BYTES` | Capacity in bytes of the in-memory NAR cache. |
 | `nar.maxConcurrentDownloads` | int | `16` | `GRADIENT_NAR_MAX_CONCURRENT_DOWNLOADS` | NAR downloads from storage that may run at once across all connections, keeping the storage near its best total throughput. |
 | `nar.maxConcurrentServes` | int | `8` | `GRADIENT_NAR_MAX_CONCURRENT_SERVES` | NAR serving tasks that may run at once per worker connection, bounding memory and storage fan-out for large batches. |
@@ -370,6 +371,7 @@ Declarative entities under `services.gradient.state` are in the [state reference
 
 | Option | Type | Default | Env | Description |
 |---|---|---|---|---|
+| `worker.nar.chunkBytes` | int | `524288` | `GRADIENT_WORKER_NAR_CHUNK_BYTES` | Size in bytes of each outbound NAR upload chunk, from 4 KiB to 4 MiB. Smaller chunks can help slow or high-latency links like Tailscale over DERP. |
 | `worker.nar.maxConcurrentUploads` | int | `16` | `GRADIENT_WORKER_NAR_MAX_CONCURRENT_UPLOADS` | Upload requests over 1 MiB the worker is keeping open at once, waiting for a server grant or transferring. One job is holding at most half. Smaller uploads have a window of 128 of their own. |
 | `worker.nar.partialTtlSecs` | int | `86400` | `GRADIENT_WORKER_NAR_PARTIAL_TTL_SECS` | Seconds after its last write before the deletion of an unfinished NAR download under `<worker.baseDir>/nar-partial`. |
 

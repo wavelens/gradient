@@ -64,6 +64,16 @@ pub struct NarArgs {
     )]
     pub send_chunk_timeout_secs: u64,
 
+    /// Size in bytes of each outbound `NarPush` chunk, from 4 KiB to 4 MiB. Smaller chunks are
+    /// helping slow or high-latency links like Tailscale over DERP.
+    #[arg(
+        long = "nar-chunk-bytes",
+        env = "GRADIENT_NAR_CHUNK_BYTES",
+        value_parser = clap::value_parser!(u64).range(crate::NAR_CHUNK_BYTES_RANGE),
+        default_value_t = 512 * 1024
+    )]
+    pub chunk_bytes: u64,
+
     /// Maximum number of NAR-serving tasks that may run concurrently per worker connection. The
     /// limit is bounding memory and storage-backend fan-out for a worker requesting many paths in a
     /// single batch.
@@ -103,6 +113,7 @@ impl Default for NarArgs {
             verify_digest: false,
             storage_open_timeout_secs: 60,
             send_chunk_timeout_secs: 30,
+            chunk_bytes: 512 * 1024,
             max_concurrent_serves: 8,
             max_concurrent_downloads: 16,
             partial_ttl_secs: 86400,

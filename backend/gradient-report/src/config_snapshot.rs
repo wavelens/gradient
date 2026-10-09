@@ -36,6 +36,7 @@ pub fn write_config_snapshot(conn: &Connection, config: &RuntimeConfig) -> Resul
             "nar_send_chunk_timeout_secs",
             config.nar.send_chunk_timeout_secs.to_string(),
         ),
+        ("nar_chunk_bytes", config.nar.chunk_bytes.to_string()),
         (
             "max_concurrent_nar_serves",
             config.nar.max_concurrent_serves.to_string(),

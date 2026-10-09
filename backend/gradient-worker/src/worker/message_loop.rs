@@ -250,7 +250,8 @@ impl MessageLoopState {
         let uploads = gradient_worker_client::upload::UploadClient::new(
             writer.clone(),
             config.nar.max_concurrent_uploads as usize,
-        );
+        )
+        .with_chunk_bytes(config.nar.chunk_bytes as usize);
         Self {
             uploads,
             writer,
