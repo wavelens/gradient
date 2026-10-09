@@ -61,13 +61,14 @@ pub async fn producers_of_hashes<C: ConnectionTrait>(
 crate::sql! {
     /// The reserved `build-request` task is always signable, whatever its `sign_cache` flag.
     /// The submitting client must substitute its outputs.
-    PRIVATE_OUTPUT_HASHES = "SELECT do_.hash FROM derivation_output do_ \
-             JOIN derivation d ON d.id = do_.derivation \
-             JOIN build_job b ON b.derivation = d.id \
-             JOIN evaluation e ON e.id = b.evaluation \
-             JOIN task p ON p.id = e.task \
-             WHERE do_.hash = ANY($1) \
-             GROUP BY do_.hash HAVING NOT bool_or(p.sign_cache OR p.name = 'build-request')",
+    PRIVATE_OUTPUT_HASHES = "SELECT DISTINCT o.hash FROM derivation_output o \
+             WHERE o.hash = ANY($1) \
+               AND EXISTS (SELECT 1 FROM build_job b WHERE b.derivation = o.derivation) \
+               AND NOT EXISTS (SELECT 1 FROM derivation_output s \
+                   JOIN build_job b ON b.derivation = s.derivation \
+                   JOIN evaluation e ON e.id = b.evaluation \
+                   JOIN task t ON t.id = e.task \
+                   WHERE s.hash = o.hash AND (t.sign_cache OR t.name = 'build-request'))",
         params = [CachedPathHashes(64)];
 }
 
