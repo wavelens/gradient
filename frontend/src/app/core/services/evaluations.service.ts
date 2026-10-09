@@ -141,6 +141,14 @@ export class EvaluationsService {
     return this.api.post<string>(`builds/${buildId}/prioritize`);
   }
 
+  abortBuild(buildId: string): Observable<string> {
+    return this.api.post<string>(`builds/${buildId}/abort`);
+  }
+
+  retryBuild(buildId: string): Observable<string> {
+    return this.api.post<string>(`builds/${buildId}/retry`);
+  }
+
   getBuildLog(buildId: string): Observable<string> {
     return this.api.get<string>(`builds/${buildId}/log`);
   }

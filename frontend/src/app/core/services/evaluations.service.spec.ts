@@ -10,7 +10,7 @@ import { HttpTestingController, provideHttpClientTesting } from '@angular/common
 import { EvaluationsService } from './evaluations.service';
 import { environment } from '@environments/environment';
 
-describe('EvaluationsService prioritize', () => {
+describe('EvaluationsService actions', () => {
   let service: EvaluationsService;
   let httpMock: HttpTestingController;
 
@@ -38,6 +38,26 @@ describe('EvaluationsService prioritize', () => {
     let result: string | undefined;
     service.prioritizeBuild('01a05a38-3276-7252-bc05-c139d9c8a015').subscribe((r) => (result = r));
     const request = httpMock.expectOne(`${environment.apiUrl}/builds/01a05a38-3276-7252-bc05-c139d9c8a015/prioritize`);
+    expect(request.request.method).toBe('POST');
+    expect(request.request.body).toBeNull();
+    request.flush({ error: false, message: 'Success' });
+    expect(result).toBe('Success');
+  });
+
+  it('aborts a build with a bodyless POST', () => {
+    let result: string | undefined;
+    service.abortBuild('01a05a38-3276-7252-bc05-c139d9c8a015').subscribe((r) => (result = r));
+    const request = httpMock.expectOne(`${environment.apiUrl}/builds/01a05a38-3276-7252-bc05-c139d9c8a015/abort`);
+    expect(request.request.method).toBe('POST');
+    expect(request.request.body).toBeNull();
+    request.flush({ error: false, message: 'Success' });
+    expect(result).toBe('Success');
+  });
+
+  it('retries a build with a bodyless POST', () => {
+    let result: string | undefined;
+    service.retryBuild('01a05a38-3276-7252-bc05-c139d9c8a015').subscribe((r) => (result = r));
+    const request = httpMock.expectOne(`${environment.apiUrl}/builds/01a05a38-3276-7252-bc05-c139d9c8a015/retry`);
     expect(request.request.method).toBe('POST');
     expect(request.request.body).toBeNull();
     request.flush({ error: false, message: 'Success' });
