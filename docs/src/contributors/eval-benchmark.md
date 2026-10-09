@@ -65,7 +65,7 @@ xdg-open report/index.html
 | `<run>/trace/*.jsonl` | `jq` | Raw spans, one file per process |
 | `<run>/proto.pcap` | Wireshark | Worker to server `/proto` traffic: round trips, frame sizes |
 | `<run>/pg.pcap` | Wireshark (`pgsql` dissector) | Every statement of the server and its latency |
-| `<run>/pg/pg_stat_statements.json` | `jq` | Top 100 statements of the `gradient` role by total time |
+| `<run>/pg/pg_stat_statements.json` | `jq` | Top 100 statements of the `gradient` role by total time, with their planning time |
 | `<run>/pg/job_phases.json` | `jq` | The worker's reported job phases (`dispatched_job_phase`) |
 | `<run>/pg/auto_explain.log` | Any editor | Plans with `ANALYZE` of every statement, without per-node timing (instrumented passes) |
 | `<run>/perf.data`, `<run>/flame.svg` | `perf report`, a browser | Server VM CPU profile (instrumented passes) |
