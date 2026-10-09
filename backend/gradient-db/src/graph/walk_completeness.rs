@@ -148,7 +148,7 @@ pub async fn recount_walk_completeness<C>(db: &C) -> Result<u64, DbErr>
 where
     C: TransactionTrait<Transaction = DatabaseTransaction>,
 {
-    let walk = crate::graph::walks::begin_walk(db).await?;
+    let walk = crate::graph::walks::begin_walk(db, &RECOUNT_WALK_COMPLETENESS).await?;
     let changed = walk
         .execute_raw(RECOUNT_WALK_COMPLETENESS.stmt())
         .await?

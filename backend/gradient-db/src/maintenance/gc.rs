@@ -58,7 +58,7 @@ where
         + sea_orm::TransactionTrait<Transaction = sea_orm::DatabaseTransaction>
         + Sync,
 {
-    let walk = crate::graph::walks::begin_walk(db).await?;
+    let walk = crate::graph::walks::begin_walk(db, &EXPIRED_CACHED_PATHS).await?;
     let rows = walk
         .query_all_raw(EXPIRED_CACHED_PATHS.bind([sea_orm::Value::Int(Some(
             i32::try_from(keep_hours).unwrap_or(i32::MAX),
@@ -253,7 +253,7 @@ where
     let scanned_at = gradient_types::now();
     let cutoff = scanned_at - ChronoDuration::hours(grace_hours.max(0));
 
-    let walk = crate::graph::walks::begin_walk(db).await?;
+    let walk = crate::graph::walks::begin_walk(db, &GC_ORPHAN_CANDIDATES).await?;
     let rows = walk
         .query_all_raw(GC_ORPHAN_CANDIDATES.bind([sea_orm::Value::ChronoDateTime(Some(cutoff))]))
         .await?;

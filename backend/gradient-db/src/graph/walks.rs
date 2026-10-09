@@ -4,28 +4,37 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Postgres is estimating a recursive CTE at ten times the seed.
-//! That estimate is two orders of magnitude too high for these walks.
-//! Every recursive term is a `LATERAL` subquery behind an `OFFSET 0` fence for that reason.
-//! The fence is leaving a nested loop with a per-row index lookup as the only legal plan.
+//! Planner estimates put a recursive CTE at ten times its seed, two orders of magnitude over
+//! for these walks. Recursive terms therefore sit in `LATERAL` subqueries behind `OFFSET 0`
+//! fences, which leave a nested loop with a per-row index lookup as the sole legal plan.
 //!
-//! The set operator must stay `UNION`, which is deduplicating the frontier per iteration.
-//! `UNION ALL` would make the walk exponential in depth on these diamond-heavy graphs.
+//! Keep the set operator at `UNION`, the per-iteration dedup of the frontier. `UNION ALL` walks
+//! grow exponential in depth on these diamond-heavy graphs.
 
 use super::predicates::{builder_predicate, open_predicate};
+use crate::sql::{Query, Tier};
 use sea_orm::{ConnectionTrait, DatabaseTransaction, DbErr, TransactionTrait};
 
-/// `SET LOCAL` is the only safe form, reverting with the transaction.
-/// A bare `SET` would outlive the walk on a pooled connection.
-/// The value must stay above the cluster's own `work_mem`, or the raise is a no-op.
-pub const WALK_WORK_MEM: &str = "SET LOCAL work_mem = '64MB'";
+pub const WALK_WORK_MEM: &str = "SET LOCAL work_mem = '4MB'";
+pub const SWEEP_WORK_MEM: &str = "SET LOCAL work_mem = '64MB'";
 
-pub async fn begin_walk<C>(db: &C) -> Result<DatabaseTransaction, DbErr>
+/// `SET LOCAL` is the sole safe form, reverting with the transaction. Bare `SET`s outlive the
+/// walk on a pooled connection. Dedup tables of recursive `UNION`s take their size from the
+/// planner's estimate, capped by hash_mem. They cost a zero-fill and an unmap per execution, so
+/// root-seeded walks keep the default work_mem. Sweeps raise the ceiling above the floor.
+pub fn work_mem(tier: Tier) -> &'static str {
+    match tier {
+        Tier::Sweep => SWEEP_WORK_MEM,
+        Tier::Hot | Tier::Bulk | Tier::Walk => WALK_WORK_MEM,
+    }
+}
+
+pub async fn begin_walk<C>(db: &C, statement: &Query) -> Result<DatabaseTransaction, DbErr>
 where
     C: TransactionTrait<Transaction = DatabaseTransaction>,
 {
     let txn = db.begin().await?;
-    txn.execute_unprepared(WALK_WORK_MEM).await?;
+    txn.execute_unprepared(work_mem(statement.tier)).await?;
     Ok(txn)
 }
 
@@ -217,30 +226,48 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn the_walk_raises_work_mem_with_set_local_inside_its_own_transaction() {
-        assert!(WALK_WORK_MEM.starts_with("SET LOCAL "), "{WALK_WORK_MEM}");
+    crate::sql! {
+        SWEEP_PROBE = "SELECT 1 FROM derivation", params = [], tier = Sweep, flags = [Walk];
+        WALK_PROBE = "SELECT 2 FROM derivation", params = [], tier = Walk, flags = [Walk];
+    }
 
+    async fn walk_statements(statement: &Query) -> Vec<String> {
         let db = sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres)
             .append_exec_results([sea_orm::MockExecResult {
                 last_insert_id: 0,
                 rows_affected: 0,
             }])
             .into_connection();
-        begin_walk(&db)
+        begin_walk(&db, statement)
             .await
             .expect("the walk opens")
             .commit()
             .await
             .expect("the walk closes");
 
-        let log = crate::pool::statements(db.into_transaction_log());
+        crate::pool::statements(db.into_transaction_log())
+    }
+
+    #[tokio::test]
+    async fn a_sweep_raises_work_mem_with_set_local_inside_its_own_transaction() {
+        let log = walk_statements(&SWEEP_PROBE).await;
         assert_eq!(
             log.len(),
             1,
-            "one statement, bracketed by the walk: {log:?}"
+            "just the raise, bracketed by the walk: {log:?}"
         );
-        assert!(log[0].contains(WALK_WORK_MEM), "{log:?}");
+        assert!(log[0].contains("SET LOCAL work_mem"), "{log:?}");
+        assert!(log[0].contains("64MB"), "{log:?}");
+    }
+
+    #[tokio::test]
+    async fn a_root_seeded_walk_keeps_the_default_work_mem_so_its_dedup_tables_stay_small() {
+        let log = walk_statements(&WALK_PROBE).await;
+        assert!(log[0].contains("SET LOCAL work_mem"), "{log:?}");
+        assert!(
+            !log[0].contains("64MB"),
+            "the recursive UNION dedup tables are sized up to hash_mem per execution: {log:?}"
+        );
     }
 
     #[test]

@@ -73,7 +73,7 @@ where
         return Ok(HashSet::new());
     }
 
-    let walk = crate::graph::walks::begin_walk(db).await?;
+    let walk = crate::graph::walks::begin_walk(db, &TRANSITIVE_CLOSURE_REACHABLE).await?;
     let reached = transitive_closure_reachable_in(&walk, roots).await?;
     walk.commit().await?;
 
@@ -168,7 +168,7 @@ where
     }
 
     let ids: Vec<uuid::Uuid> = roots.iter().map(|d| d.into_inner()).collect();
-    let walk = crate::graph::walks::begin_walk(db).await?;
+    let walk = crate::graph::walks::begin_walk(db, &TRANSITIVE_CLOSURE_EDGES).await?;
     let edges = EdgeRow::find_by_statement(TRANSITIVE_CLOSURE_EDGES.bind([ids.into()]))
         .all(&walk)
         .await?;
@@ -306,7 +306,9 @@ mod tests {
             .append_query_results([vec![node(b)]])
             .into_connection();
 
-        let walk = crate::graph::walks::begin_walk(&db).await.unwrap();
+        let walk = crate::graph::walks::begin_walk(&db, &TRANSITIVE_CLOSURE_REACHABLE)
+            .await
+            .unwrap();
         let first = transitive_closure_reachable_in(&walk, &[a]).await.unwrap();
         let second = transitive_closure_reachable_in(&walk, &[b]).await.unwrap();
         walk.commit().await.unwrap();

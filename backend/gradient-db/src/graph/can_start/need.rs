@@ -112,7 +112,7 @@ pub async fn recount_wanted<C>(db: &C) -> Result<u64, DbErr>
 where
     C: TransactionTrait<Transaction = DatabaseTransaction>,
 {
-    let walk = crate::graph::walks::begin_walk(db).await?;
+    let walk = crate::graph::walks::begin_walk(db, &RECOUNT_WANTED).await?;
     let rows = walk.query_all_raw(RECOUNT_WANTED.stmt()).await?;
     walk.commit().await?;
 
@@ -219,7 +219,7 @@ where
         return Ok(NeedMoved::default());
     }
 
-    let txn = crate::graph::walks::begin_walk(db).await?;
+    let txn = crate::graph::walks::begin_walk(db, &UPDATE_NEED).await?;
     let _lock = lock_shared_builds(&txn, roots).await?;
     let region = txn.query_all_raw(UPDATE_NEED.bind([ids(roots)])).await?;
     let rows = write_need(&txn, &region).await?;

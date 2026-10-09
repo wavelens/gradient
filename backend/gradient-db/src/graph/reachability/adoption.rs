@@ -169,7 +169,7 @@ where
     C: ConnectionTrait + TransactionTrait<Transaction = DatabaseTransaction>,
     V: IntoIterator<Item = Value>,
 {
-    let walk = crate::graph::walks::begin_walk(db).await?;
+    let walk = crate::graph::walks::begin_walk(db, query).await?;
     let rows = walk.query_all_raw(query.bind(values)).await?;
     walk.commit().await?;
 

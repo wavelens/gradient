@@ -353,7 +353,7 @@ pub async fn recount_missing_runtime_deps<C>(db: &C) -> Result<u64, DbErr>
 where
     C: TransactionTrait<Transaction = DatabaseTransaction>,
 {
-    let walk = crate::graph::walks::begin_walk(db).await?;
+    let walk = crate::graph::walks::begin_walk(db, &RECOUNT_MISSING_RUNTIME_DEPS).await?;
     let changed = walk
         .execute_raw(RECOUNT_MISSING_RUNTIME_DEPS.stmt())
         .await?
