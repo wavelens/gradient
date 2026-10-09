@@ -6,6 +6,7 @@
 
 use anyhow::Result;
 use gradient_db::DbContext;
+use gradient_db::caches::demotion::{DemoteWhen, demote_cached_output};
 use gradient_types::events::cache;
 use gradient_types::*;
 use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter};
@@ -16,7 +17,7 @@ use crate::messages::{DemoteReport, Demotion};
 pub(crate) async fn apply(ctx: &DbContext, demotion: Demotion) -> Result<DemoteReport> {
     match demotion {
         Demotion::MissingNar { hash } => {
-            let producers = gradient_db::caches::demotion::demote_cached_output(ctx, &hash).await?;
+            let producers = demote_cached_output(ctx, &hash, DemoteWhen::ObjectMissing).await?;
             warn!(%hash, producers = producers.len(), "self-heal: NAR missing from storage; cached path demoted");
             Ok(DemoteReport {
                 producers,
@@ -24,7 +25,7 @@ pub(crate) async fn apply(ctx: &DbContext, demotion: Demotion) -> Result<DemoteR
             })
         }
         Demotion::Path { hash } => {
-            let producers = gradient_db::caches::demotion::demote_cached_output(ctx, &hash).await?;
+            let producers = demote_cached_output(ctx, &hash, DemoteWhen::Always).await?;
             info!(%hash, producers = producers.len(), "invalidated cache for path");
             Ok(DemoteReport {
                 producers,
@@ -65,7 +66,7 @@ async fn cache_claim(ctx: &DbContext, cache: CacheId, hash: &str) -> Result<Demo
     // The shared helper is resetting the producer, gate flags and parent counters together.
     // A bare `is_cached` clear would leave a `Completed` producer with no NAR behind it.
     if !others_remain {
-        gradient_db::caches::demotion::demote_cached_output(ctx, hash).await?;
+        demote_cached_output(ctx, hash, DemoteWhen::Always).await?;
     }
 
     ctx.events.publish(cache::Changed {});

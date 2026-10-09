@@ -70,8 +70,16 @@ fn demoted_output(
     active
 }
 
-fn preserve_missing_artifact(has_producer: bool, object_present: bool) -> bool {
-    !has_producer && object_present
+/// `ObjectMissing` demotes a reported path only after a storage probe found the object gone.
+/// `Always` is for an invalidation, which wants the object gone.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DemoteWhen {
+    ObjectMissing,
+    Always,
+}
+
+fn probe_before_demoting(when: DemoteWhen, has_producer: bool) -> bool {
+    when == DemoteWhen::ObjectMissing || !has_producer
 }
 
 crate::sql! {
@@ -80,13 +88,14 @@ crate::sql! {
         params = [DerivationIds(64)];
 }
 
-/// This path is clearing `cache_available` before the retire is reading it.
-/// It must take [`crate::graph::runtime_can_start::lock_cached_paths`] first.
-/// Every writer is following the class order `cached_path`, then `derivation_build`.
-/// A concurrent retire would deadlock against this path otherwise.
+/// Clear `cache_available` before the retire reads it, under
+/// [`crate::graph::runtime_can_start::lock_cached_paths`] taken first. All writers follow the
+/// class order `cached_path`, then `derivation_build`, or a concurrent retire deadlocks against
+/// this path.
 pub async fn demote_cached_output(
     ctx: &crate::DbContext,
     hash: &str,
+    when: DemoteWhen,
 ) -> Result<Vec<DerivationId>, sea_orm::DbErr> {
     use gradient_entity::derivation_output::{Column as CDO, Entity as EDO};
     use sea_orm::{ActiveModelTrait, TransactionTrait};
@@ -94,19 +103,18 @@ pub async fn demote_cached_output(
     let db = &ctx.worker_db;
     let nar_storage = &ctx.storage.nar_storage;
     let outputs = EDO::find().filter(CDO::Hash.eq(hash)).all(db).await?;
+    let has_producer = !outputs.is_empty();
+
+    // Nothing is deleted on uncertainty. A present object stays, a probe error keeps it, and a
+    // producerless input has nothing to rebuild it.
+    if probe_before_demoting(when, has_producer) && nar_storage.exists(hash).await.unwrap_or(true) {
+        return Ok(Vec::new());
+    }
+
     let mut producers = Vec::with_capacity(outputs.len());
     for o in outputs {
         producers.push(o.derivation);
         demoted_output(o).update(db).await?;
-    }
-
-    // A producerless input has nothing to rebuild it.
-    // Deleting a still-present NAR would destroy the only copy and dead-end every parent.
-    // A probe error is preserving the input, because nothing is destroyed on uncertainty.
-    let has_producer = !producers.is_empty();
-    let object_present = !has_producer && nar_storage.exists(hash).await.unwrap_or(true);
-    if preserve_missing_artifact(has_producer, object_present) {
-        return Ok(producers);
     }
 
     let txn = db.begin().await?;
@@ -136,58 +144,17 @@ pub async fn demote_cached_output(
     Ok(producers)
 }
 
-pub async fn demote_parents_of(
+/// The parents keep their cached outputs. Their next walk names the orphan producer below
+/// them again.
+pub async fn unwalk_parents_of(
     ctx: &crate::DbContext,
     missing_hash: &str,
 ) -> Result<Vec<DerivationId>, sea_orm::DbErr> {
-    let mut producers = Vec::new();
-    for parent_hash in output_parents_of_hash(&ctx.worker_db, missing_hash).await? {
-        producers.extend(demote_cached_output(ctx, &parent_hash).await?);
-    }
-
-    Ok(producers)
-}
-
-crate::sql! {
-    OUTPUT_ONLY_CACHED_DEP_HASHES = r#"
-        SELECT DISTINCT o.hash
-        FROM derivation_dependency e
-        JOIN derivation_output o ON o.derivation = e.dependency
-        JOIN cached_path cp ON cp.hash = o.hash AND cp.file_hash IS NOT NULL
-        WHERE e.derivation = $1 AND o.external_url IS NULL
-        "#,
-        params = [DerivationId];
-}
-
-pub async fn demote_output_only_cached_deps(
-    ctx: &crate::DbContext,
-    derivation: DerivationId,
-) -> Result<Vec<DerivationId>, sea_orm::DbErr> {
-    use sea_orm::FromQueryResult;
-
-    #[derive(sea_orm::FromQueryResult)]
-    struct OutputHash {
-        hash: String,
-    }
-
-    let db = &ctx.worker_db;
-    let hashes = OutputHash::find_by_statement(
-        OUTPUT_ONLY_CACHED_DEP_HASHES.bind([derivation.into_inner().into()]),
-    )
-    .all(db)
-    .await?;
-
-    let mut producers = Vec::new();
-    for h in hashes {
-        producers.extend(demote_cached_output(ctx, &h.hash).await?);
-    }
-    producers.sort_unstable();
-    producers.dedup();
-
-    let changes = crate::graph::can_start::unwalk_derivations(ctx, &producers).await?;
+    let parents = parents_of_hash(&ctx.worker_db, missing_hash).await?;
+    let changes = crate::graph::can_start::unwalk_derivations(ctx, &parents).await?;
     crate::status::emit_transition_effects(ctx, &changes).await?;
 
-    Ok(producers)
+    Ok(parents)
 }
 
 pub(crate) fn unbacked_trusted_outputs_select() -> String {
@@ -207,23 +174,22 @@ pub(crate) fn unbacked_trusted_outputs_select() -> String {
 }
 
 crate::sql! {
-    OUTPUT_PARENTS_SELECT = "SELECT DISTINCT o.hash AS parent \
+    OUTPUT_PARENTS_SELECT = "SELECT DISTINCT e.derivation AS parent \
      FROM derivation_dependency e \
-     JOIN derivation_output o ON o.derivation = e.derivation \
      WHERE e.kind IN (1, 2) \
        AND e.dependency IN (SELECT p.derivation FROM derivation_output p WHERE p.hash = $1)",
         params = [CachedPathHash];
 }
 
-async fn output_parents_of_hash<C: ConnectionTrait>(
+async fn parents_of_hash<C: ConnectionTrait>(
     db: &C,
     hash: &str,
-) -> Result<Vec<String>, sea_orm::DbErr> {
+) -> Result<Vec<DerivationId>, sea_orm::DbErr> {
     use sea_orm::FromQueryResult;
 
     #[derive(sea_orm::FromQueryResult)]
     struct ParentRow {
-        parent: String,
+        parent: uuid::Uuid,
     }
 
     Ok(
@@ -231,7 +197,7 @@ async fn output_parents_of_hash<C: ConnectionTrait>(
             .all(db)
             .await?
             .into_iter()
-            .map(|r| r.parent)
+            .map(|r| DerivationId::new(r.parent))
             .collect(),
     )
 }
@@ -261,7 +227,9 @@ mod tests {
             .into_connection();
         let (ctx, _pool) = crate::test_ctx::ctx_at(db, tmp.path()).await;
 
-        let producers = demote_cached_output(&ctx, hash).await.unwrap();
+        let producers = demote_cached_output(&ctx, hash, DemoteWhen::ObjectMissing)
+            .await
+            .unwrap();
 
         assert!(producers.is_empty(), "a producerless input has no producer");
         assert!(
@@ -271,7 +239,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn demote_deletes_a_present_output_object() {
+    async fn an_invalidation_deletes_a_present_output_object() {
         use gradient_types::ids::{DerivationId, DerivationOutputId};
         use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult, Value};
         use std::collections::BTreeMap;
@@ -313,7 +281,9 @@ mod tests {
             .into_connection();
         let (ctx, pool) = crate::test_ctx::ctx_at(db, tmp.path()).await;
 
-        let producers = demote_cached_output(&ctx, hash).await.unwrap();
+        let producers = demote_cached_output(&ctx, hash, DemoteWhen::Always)
+            .await
+            .unwrap();
 
         assert_eq!(producers.len(), 1, "the output's producer is returned");
         assert!(!file.exists(), "demote must delete the output's NAR object");
@@ -386,6 +356,46 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_reported_missing_output_stays_while_its_object_is_present() {
+        use gradient_types::ids::{DerivationId, DerivationOutputId};
+        use sea_orm::{DatabaseBackend, MockDatabase};
+
+        let hash = "bn1sgl0pn88d9dkc10jp0i1a77iadh8w";
+        let (tmp, file) = present_nar(hash);
+        let output = gradient_entity::derivation_output::Model {
+            id: DerivationOutputId::now_v7(),
+            derivation: DerivationId::now_v7(),
+            hash: hash.to_string(),
+            is_cached: true,
+            ..Default::default()
+        };
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([vec![output]])
+            .into_connection();
+        let (ctx, pool) = crate::test_ctx::ctx_at(db, tmp.path()).await;
+
+        let producers = demote_cached_output(&ctx, hash, DemoteWhen::ObjectMissing)
+            .await
+            .unwrap();
+
+        assert!(
+            producers.is_empty(),
+            "nothing was demoted, so nothing is requeued"
+        );
+        assert!(
+            file.exists(),
+            "a worker's outdated view of the cache deletes no object"
+        );
+        drop(ctx);
+        let log = crate::pool::statements(pool.into_transaction_log());
+        assert_eq!(
+            log.len(),
+            1,
+            "the outputs are read and the probe ends it, before any output is touched: {log:?}"
+        );
+    }
+
+    #[tokio::test]
     async fn demote_of_a_hash_with_no_row_still_resets_its_producer() {
         use gradient_types::ids::{DerivationId, DerivationOutputId};
         use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult, Value};
@@ -429,7 +439,9 @@ mod tests {
             .into_connection();
         let (ctx, pool) = crate::test_ctx::ctx_at(db, tmp.path()).await;
 
-        demote_cached_output(&ctx, hash).await.unwrap();
+        demote_cached_output(&ctx, hash, DemoteWhen::Always)
+            .await
+            .unwrap();
 
         drop(ctx);
         let log = crate::pool::statements(pool.into_transaction_log());
@@ -515,20 +527,17 @@ mod tests {
     }
 
     #[test]
-    fn preserve_only_a_present_producerless_artifact() {
+    fn a_reported_missing_path_is_probed_and_an_invalidation_probes_only_producerless_paths() {
+        assert!(probe_before_demoting(DemoteWhen::ObjectMissing, true));
+        assert!(probe_before_demoting(DemoteWhen::ObjectMissing, false));
         assert!(
-            preserve_missing_artifact(false, true),
-            "producerless + present must be kept (transient fetch miss, not a zombie)"
+            !probe_before_demoting(DemoteWhen::Always, true),
+            "an invalidated output is demoted so its producer rebuilds it"
         );
         assert!(
-            !preserve_missing_artifact(false, false),
-            "producerless + gone is a zombie to purge"
+            probe_before_demoting(DemoteWhen::Always, false),
+            "a producerless input has nothing to rebuild it, so a present copy is kept"
         );
-        assert!(
-            !preserve_missing_artifact(true, true),
-            "an output is demoted so its producer rebuilds it"
-        );
-        assert!(!preserve_missing_artifact(true, false));
     }
 
     #[test]
@@ -543,8 +552,8 @@ mod tests {
             "must resolve the runtime parents of the missing hash: {sql}"
         );
         assert!(
-            sql.contains("JOIN derivation_output o ON o.derivation = e.derivation"),
-            "must project a producing output, which excludes every .drv and source: {sql}"
+            sql.contains("SELECT DISTINCT e.derivation AS parent"),
+            "the parents are derivations to walk again, not outputs to demote: {sql}"
         );
     }
 }

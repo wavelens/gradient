@@ -75,10 +75,10 @@ A build failing with `InputsUnavailable` must name its missing paths. `repair_mi
 
 | Case | Action |
 |---|---|
-| Missing path with a producer | `demote_cached_output`: retire the row, delete the object, clear `cache_available`. Builds needing the path are blocking again until the producer can push again |
-| Producer without a `build_job` (orphan) | Also `demote_parents_of` and `unwalk_derivations`. The next evaluation will walk the referencing paths again and schedule the orphan |
-| No producer (`.drv` or source) | Purged only when the object is really gone. `demote_parents_of` will then demote the outputs referencing the path. Their rebuild will push the path again |
-| No producer and nothing referencing the path (absent orphan) | `demote_output_only_cached_deps`: demote the failed build's cached dependencies without `external_url`, forcing a re-walk |
+| Reported missing, object gone | `demote_cached_output`: retire the row, delete the object, clear `cache_available`. Builds needing the path are blocking again until the producer can push again |
+| Reported missing, object present | Kept. Storage is the judge, and a worker's outdated view of the cache deletes nothing. The failed build retries |
+| Producer without a `build_job` (orphan) | Also `unwalk_parents_of`: the parents keep their cached outputs, and the next evaluation walks them again and names the orphan |
+| No producer (`.drv` or source) | Purged only when the object is really gone. The failed derivation is unwalked, so the next evaluation walks it again and pushes its sources |
 
 - **Corrupt NAR:** the worker must check every fetched input against its `nar_size` and `nar_hash` (`verify_nar`, `gradient-worker/src/proto/nar_daemon_import.rs`). A mismatch is a `CorruptCachedNar`, classified `InputsUnavailable` in prefetch and Substitute alike. The same self-heal can rebuild the producer with consistent metadata.
 - **Requeue:** `requeue_failed_shared_builds` can thaw demoted producers in a terminal failure at once.
