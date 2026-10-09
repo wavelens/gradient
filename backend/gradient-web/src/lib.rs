@@ -395,6 +395,8 @@ pub fn create_router_with_scheduler(
             "/builds/{build}/prioritize",
             post(builds::post_build_prioritize),
         )
+        .route("/builds/{build}/abort", post(builds::post_build_abort))
+        .route("/builds/{build}/retry", post(builds::post_build_retry))
         .route("/builds/{build}/log", post(builds::post_build_log))
         .route(
             "/builds/{build}/download-token",

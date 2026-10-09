@@ -20,6 +20,7 @@ pub struct Model {
     pub derivation_build: DerivationBuildId,
     pub score: f64,
     pub score_breakdown: Json,
+    pub aborted: bool,
     pub created_at: NaiveDateTime,
 }
 

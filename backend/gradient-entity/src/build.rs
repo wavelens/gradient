@@ -99,6 +99,10 @@ impl BuildStatus {
         Self::FailedTimeout,
     ];
 
+    pub const ABORTABLE: [Self; 3] = [Self::Created, Self::Queued, Self::Building];
+
+    pub const RETRYABLE: [Self; 3] = [Self::FailedPermanent, Self::FailedTimeout, Self::Aborted];
+
     pub const REQUEUEABLE: [Self; 4] = [
         Self::FailedPermanent,
         Self::Aborted,

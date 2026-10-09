@@ -114,6 +114,7 @@ mod m20261004_000004_recount_blocking_deps;
 mod m20261004_000005_team_member_source;
 mod m20261007_000000_integration_managed;
 mod m20261008_000000_derivation_ifd;
+pub mod m20261009_000000_build_job_aborted;
 
 pub struct Migrator;
 
@@ -224,6 +225,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261004_000005_team_member_source::Migration),
             Box::new(m20261007_000000_integration_managed::Migration),
             Box::new(m20261008_000000_derivation_ifd::Migration),
+            Box::new(m20261009_000000_build_job_aborted::Migration),
         ]
     }
 }

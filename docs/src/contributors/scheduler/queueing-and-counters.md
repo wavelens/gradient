@@ -103,6 +103,7 @@ A `settle_need` call must follow each call.
 
 - `graph_sql::blocks_evaluation`: the status is in `NEED_BUILD_STATUSES` and the shared build is `wanted`, or the status is `Queued`/`Building` (the assigner will hand those out regardless).
 - A pending shared build wanted by nothing will never block. Nothing will ever queue such a build.
+- `Aborted` is not in `NEED_BUILD_STATUSES`. No evaluation can wait for an aborted shared build, and a later need can still thaw the build.
 - `check_evaluation_done` can write a verdict once no blocking shared build is left. The verdict is `Failed` when any named shared build is in `BuildStatus::REQUEUEABLE` (`Aborted` included) or an error message is present. The verdict is `Completed` otherwise.
 - Losing the needs-build mark will move no status. The emitter must finalize the evaluations naming the shared builds that lost the mark.
 
@@ -120,7 +121,7 @@ Five columns on `evaluation`, over the shared builds named by its `build_job` ro
 
 - **Triggers** (current bodies in `m20261001_000001_plain_concept_names.rs`): `evaluation_shared_build_moved` (per row, `AFTER UPDATE OF status, wanted`), `evaluation_shared_build_named` / `evaluation_shared_build_unnamed` (per statement on `build_job` insert/delete). The triggers cover raw SQL and ORM changes alike.
 - Triggers append signed rows to `evaluation_shared_build_delta`, for live evaluations only, and take no lock.
-- **Membership:** the SQL function `evaluation_shared_build_counts(status, wanted)`. Its body must match `graph/predicates.rs`, checked through a unit test in `evaluations/counters.rs`. A predicate change will require a migration.
+- **Membership:** the SQL function `evaluation_shared_build_counts(status, wanted)` (current body in `m20261009_000000_build_job_aborted.rs`). Its body must match `graph/predicates.rs`, checked through a unit test in `evaluations/counters.rs`. A predicate change will require a migration.
 - **Fold:** `fold_shared_build_deltas` can start at the beginning of every waiting-state pass. Each fold is one `DELETE ... RETURNING` under advisory lock `640`, and an instance finding the lock taken will skip the fold. The fold will also skip every evaluation row held by another transaction (`SKIP LOCKED`), and those deltas wait for the next pass. The fold will never wait on an evaluation row and cannot deadlock with the graph writer.
 - **Read:** `eval_counters` must return folded columns plus unfolded deltas.
 - **Counters answer only "not yet":** a naming and a transition in flight together can miss each other. `reachability::eval_blocked` must confirm a zero. `recount_evaluations` can recount a contradicted value under the fold lock. The recount will skip an evaluation held by another transaction, like the fold. The next contradicting read will recount that evaluation.
@@ -142,7 +143,22 @@ Five columns on `evaluation`, over the shared builds named by its `build_job` ro
 
 - `promotion::cascade_dependency_failed` must mark every `Created`/`Queued`/`FailedTransient` build needing the failed one as `DependencyFailed`. The mark will follow a fresh terminal-failure transition.
 - `promotion::repair_dependency_failed` can repeat the walk within one evaluation's closure at stream completion and on the graph-stuck heal. The repeat will catch shared builds thawed after their dependency failed.
+- The repeat can also start from the shared builds the evaluation aborted (`build_job.aborted`). Their dependents end `DependencyFailed`.
 - Neither walk will enter a shared build available in a cache (`graph_sql::non_passthrough_predicate`).
+
+## Build Abort and Retry
+
+`POST /builds/{id}/abort` and `POST /builds/{id}/retry` act on a build of a running evaluation, inside the graph writer (`status::evaluation_build`).
+
+| Action | Allowed Status | Effect |
+|---|---|---|
+| Abort | `Created`, `Queued`, `Building` | `build_job.aborted` set, shared build to `Aborted`, dependents in the closure to `DependencyFailed`, `AbortJob` to the worker |
+| Retry | `FailedPermanent`, `FailedTimeout`, `Aborted` | `build_job.aborted` cleared, the build and the dependents failed through the build back to `Created` (`RETRY_BUILD_CLOSURE`), dependency-failure walk repeated, closure queued |
+
+- Abort must refuse a shared build that other live evaluations still name.
+- Retry must wait until the worker confirmed the earlier abort. A late abort report can move the retried build back to `Aborted`.
+- Both thaws of the [repair pass](repair-pass.md) skip the aborted build and everything above the build in the closure.
+- A retry thaw must not apply the deterministic-failure block. The user asked for the rebuild.
 
 ## Consistency Check
 

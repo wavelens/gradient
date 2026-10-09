@@ -28,13 +28,12 @@ pub const BUILDER_STATUSES: [BuildStatus; 4] = [
     BuildStatus::FailedTransient,
 ];
 
-pub const NEED_BUILD_STATUSES: [BuildStatus; 6] = [
+pub const NEED_BUILD_STATUSES: [BuildStatus; 5] = [
     BuildStatus::Created,
     BuildStatus::Queued,
     BuildStatus::Building,
     BuildStatus::FailedTransient,
     BuildStatus::Skipped,
-    BuildStatus::Aborted,
 ];
 
 pub fn blocks_evaluation(status: BuildStatus, wanted: bool) -> bool {
@@ -50,6 +49,14 @@ pub fn blocks_evaluation_predicate(alias: &str) -> String {
         "({alias}.status IN ({pending}) AND ({alias}.wanted OR {alias}.status IN ({in_flight})))",
         pending = crate::sql::status::build_in(&NEED_BUILD_STATUSES),
         in_flight = crate::sql::status::build_in(&[BuildStatus::Queued, BuildStatus::Building]),
+    )
+}
+
+pub fn aborted_in_evaluation(evaluation: &str) -> String {
+    format!(
+        "SELECT bj.derivation FROM build_job bj JOIN derivation_build ab ON ab.id = bj.derivation_build \
+         WHERE bj.evaluation = {evaluation} AND bj.aborted AND ab.status = {aborted}",
+        aborted = crate::sql::status::build(BuildStatus::Aborted),
     )
 }
 
@@ -169,7 +176,13 @@ mod tests {
              written before the thaw, and an evaluation settled in that gap is \
              settled over a subtree it is about to queue"
         );
-        for status in [Completed, Substituted, FailedPermanent, DependencyFailed] {
+        for status in [
+            Completed,
+            Substituted,
+            FailedPermanent,
+            DependencyFailed,
+            Aborted,
+        ] {
             assert!(!blocks_evaluation(status, true), "{status:?} is settled");
         }
     }
@@ -351,12 +364,10 @@ mod tests {
     }
 
     #[test]
-    fn an_aborted_shared_build_is_open_and_thawed_by_need() {
-        assert!(NEED_BUILD_STATUSES.contains(&BuildStatus::Aborted));
+    fn an_aborted_shared_build_is_open_and_thawed_by_need_but_holds_no_evaluation() {
         assert!(BuildStatus::REQUEUEABLE.contains(&BuildStatus::Aborted));
         assert!(!BuildStatus::TERMINAL_FAILURE.contains(&BuildStatus::Aborted));
-        assert!(blocks_evaluation(BuildStatus::Aborted, true));
-        assert!(!blocks_evaluation(BuildStatus::Aborted, false));
+        assert!(!blocks_evaluation(BuildStatus::Aborted, true));
     }
 
     #[test]

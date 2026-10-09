@@ -8,6 +8,7 @@ use std::collections::HashSet;
 
 use chrono::NaiveDateTime;
 use gradient_db::graph::repair::RepairScope;
+use gradient_db::status::BuildRefusal;
 use gradient_types::MCachedPath;
 use gradient_types::ids::{
     BuildAttemptId, CacheId, CachedPathId, DerivationBuildId, DerivationId, DispatchedJobId,
@@ -160,6 +161,14 @@ pub enum Transition {
     PrioritizeBuild {
         shared_build: DerivationBuildId,
     },
+    AbortBuild {
+        evaluation: EvaluationId,
+        shared_build: DerivationBuildId,
+    },
+    RetryBuild {
+        evaluation: EvaluationId,
+        shared_build: DerivationBuildId,
+    },
     RequeueImports {
         derivations: Vec<DerivationId>,
     },
@@ -171,6 +180,7 @@ pub struct TransitionReport {
     pub prioritized_shared_builds: Vec<DerivationBuildId>,
     pub already_aborted: bool,
     pub substitute_log: Option<SubstituteLog>,
+    pub refusal: Option<BuildRefusal>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

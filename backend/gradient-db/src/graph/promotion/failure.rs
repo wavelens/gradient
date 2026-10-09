@@ -5,7 +5,7 @@
  */
 
 use crate::graph::{
-    predicates::non_passthrough_predicate,
+    predicates::{aborted_in_evaluation, non_passthrough_predicate},
     walks::{ClosureDirection, bounded_dependency_closure_cte_body, eval_closure_cte_body},
 };
 use crate::status::TransitionChange;
@@ -102,9 +102,11 @@ fn dependency_failed_repair_sql() -> String {
         wanted_by = bounded_dependency_closure_cte_body(
             "wanted_by",
             &format!(
-                "SELECT derivation FROM derivation_build \
+                "SELECT derivation FROM (SELECT derivation FROM derivation_build \
                  WHERE status IN ({terminal_failure}) \
-                   AND derivation IN (SELECT derivation FROM closure)"
+                   AND derivation IN (SELECT derivation FROM closure) \
+                 UNION {aborted}) seed",
+                aborted = aborted_in_evaluation("$1"),
             ),
             ClosureDirection::WantedBy,
             &non_passthrough_predicate("e.derivation"),
@@ -203,6 +205,19 @@ mod tests {
         assert!(
             sql.contains("RETURNING db.derivation"),
             "must return failed derivations so the caller can finalize their evals: {sql}"
+        );
+    }
+
+    #[test]
+    fn a_build_the_evaluation_aborted_fails_its_dependents_like_a_failure() {
+        let norm = |s: String| s.split_whitespace().collect::<Vec<_>>().join(" ");
+        let sql = norm(dependency_failed_repair_sql());
+        assert!(
+            sql.contains(&format!(
+                "UNION {}) seed",
+                norm(aborted_in_evaluation("$1"))
+            )),
+            "{sql}"
         );
     }
 

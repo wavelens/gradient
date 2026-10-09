@@ -813,6 +813,34 @@ async fn cancelling_an_evaluation_aborts_its_running_jobs_instead_of_forgetting_
 }
 
 #[tokio::test]
+async fn a_retry_waits_until_the_worker_confirmed_the_abort() {
+    let scheduler = test_scheduler().await;
+    let eval_id = EvaluationId::now_v7();
+    let shared = DerivationBuildId::now_v7();
+
+    let (session, _signals) = port();
+    scheduler
+        .reattach_worker(
+            "w1",
+            build_worker_caps(),
+            HashSet::new(),
+            session,
+            vec![crate::jobs::Reattached::single(
+                crate::jobs::build_job_key(shared),
+                crate::jobs::PendingJob::Build(build_job(eval_id, ProjectId::now_v7(), shared)),
+            )],
+        )
+        .await
+        .expect("reattach");
+
+    assert_eq!(
+        scheduler.retry_build(eval_id, shared).await.expect("retry"),
+        Err(gradient_db::status::BuildRefusal::WorkerStillStopping),
+        "a late abort report would undo a retry that started before it"
+    );
+}
+
+#[tokio::test]
 async fn record_eval_message_drops_when_job_unknown() {
     let scheduler = test_scheduler().await;
     let r = scheduler

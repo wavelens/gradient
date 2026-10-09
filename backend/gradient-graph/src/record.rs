@@ -539,9 +539,9 @@ impl BatchWriter<'_> {
                         evaluation: self.evaluation_id,
                         derivation: *drv_id,
                         derivation_build: shared_build_id,
-                        score: 0.0,
                         score_breakdown: serde_json::json!({}),
                         created_at: now,
+                        ..Default::default()
                     }
                     .into_active_model()
                 })
