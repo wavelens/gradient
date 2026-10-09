@@ -106,10 +106,12 @@ craneLib.buildPackage (commonArgs // rec {
   passthru.clippy = craneLib.cargoClippy (commonArgs // {
     inherit cargoArtifacts;
     cargoClippyExtraArgs = "--workspace --all-targets -- -D warnings";
+    doInstallCargoArtifacts = false;
   });
 
   passthru.tests = craneLib.cargoNextest (commonArgs // {
     inherit cargoArtifacts version;
+    doInstallCargoArtifacts = false;
   });
 
   postInstall = lib.optionalString (stdenv.buildPlatform.canExecute stdenv.hostPlatform) ''

@@ -124,12 +124,14 @@ craneLib.buildPackage (commonArgs // rec {
   passthru.clippy = craneLib.cargoClippy (commonArgs // {
     inherit cargoArtifacts;
     cargoClippyExtraArgs = "--workspace --all-targets -- -D warnings";
+    doInstallCargoArtifacts = false;
   });
 
   passthru.tests = craneLib.cargoNextest (commonArgs // {
     inherit version;
     cargoArtifacts = testArtifacts;
     CARGO_PROFILE = "test";
+    doInstallCargoArtifacts = false;
 
     nativeCheckInputs = [ git ];
     preCheck = ''
