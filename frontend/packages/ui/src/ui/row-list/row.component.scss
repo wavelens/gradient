@@ -95,6 +95,7 @@
   gap: $spacing-xs $spacing-sm;
   color: var(--gr-text-primary);
   font-size: $font-size-md;
+  overflow-wrap: anywhere;
 }
 
 .row-meta {
@@ -104,6 +105,7 @@
   margin-top: $spacing-xs;
   color: var(--gr-text-secondary);
   font-size: $font-size-sm;
+  overflow-wrap: anywhere;
 
   &:empty { display: none; }
 }
@@ -166,7 +168,7 @@
     grid-template-areas: 'icon name actions chevron';
   }
 
-  .row:not(:has(.row-meta:empty)):has(.row-actions :is(.gr-button:not(.gr-button--icon-only), gr-select-button)) {
+  .row:not(:has(.row-meta:empty)):has(.row-actions :is(.gr-button:not(.gr-button--icon-only), gr-select-button, gr-badge ~ gr-badge)) {
     grid-template-areas:
       'icon name name chevron'
       'icon meta meta chevron'
