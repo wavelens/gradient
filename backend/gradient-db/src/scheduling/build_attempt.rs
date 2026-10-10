@@ -26,6 +26,17 @@ crate::sql! {
                    GROUP BY ba.derivation_build, bj.evaluation"#,
         params = [SharedBuildIds(64), Int(0)];
 
+    WORKER_LOSS_STREAKS = r#"SELECT ba.derivation_build AS shared_build, count(*) AS losses
+                   FROM build_attempt ba
+                   WHERE ba.derivation_build = ANY($1) AND ba.outcome = $2 AND ba.reason = $3
+                     AND NOT EXISTS (
+                         SELECT 1 FROM build_attempt later
+                         WHERE later.derivation_build = ba.derivation_build
+                           AND later.created_at > ba.created_at
+                           AND (later.outcome <> $2 OR later.reason IS DISTINCT FROM $3))
+                   GROUP BY ba.derivation_build"#,
+        params = [SharedBuildIds(64), Int(4), Int(9)];
+
     LATEST_ATTEMPT_EVALUATION = "SELECT bj.evaluation FROM build_attempt ba \
              JOIN build_job bj ON bj.id = ba.build_job \
              WHERE ba.derivation_build = $1 \
@@ -258,12 +269,14 @@ pub async fn succeed_latest_attempt<C: ConnectionTrait>(
 pub async fn abort_running_attempts<C: ConnectionTrait>(
     db: &C,
     shared_builds: &[DerivationBuildId],
+    reason: Option<AttemptFailureReason>,
     failure_message: &str,
 ) -> Result<(), DbErr> {
     let now = gradient_types::now();
     crate::for_each_chunk(shared_builds, |chunk| async move {
         Entity::update_many()
             .col_expr(Column::Outcome, Expr::value(AttemptOutcome::Aborted))
+            .col_expr(Column::Reason, Expr::value(reason))
             .col_expr(Column::FailureMessage, Expr::value(failure_message))
             .col_expr(Column::BuildFinishedAt, Expr::value(now))
             .filter(Column::DerivationBuild.is_in(chunk))
@@ -272,6 +285,35 @@ pub async fn abort_running_attempts<C: ConnectionTrait>(
             .await
     })
     .await
+}
+
+/// A streak ends at the first attempt that closed any other way. An older worker loss must not
+/// count against a build that has built or failed on its own since.
+pub async fn worker_loss_streaks<C: ConnectionTrait>(
+    db: &C,
+    shared_builds: &[DerivationBuildId],
+) -> Result<std::collections::HashMap<DerivationBuildId, i64>, DbErr> {
+    let rows = crate::fetch_in_chunks(shared_builds, |chunk| {
+        let ids: Vec<Uuid> = chunk.iter().map(|a| a.into_inner()).collect();
+        async move {
+            db.query_all_raw(WORKER_LOSS_STREAKS.bind([
+                ids.into(),
+                (AttemptOutcome::Aborted as i32).into(),
+                (AttemptFailureReason::WorkerLost as i32).into(),
+            ]))
+            .await
+        }
+    })
+    .await?;
+
+    rows.into_iter()
+        .map(|r| {
+            Ok((
+                DerivationBuildId::new(r.try_get::<Uuid>("", "shared_build")?),
+                r.try_get::<i64>("", "losses")?,
+            ))
+        })
+        .collect()
 }
 
 pub async fn inputs_unavailable_attempt_count<C: ConnectionTrait>(

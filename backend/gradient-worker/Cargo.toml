@@ -57,7 +57,7 @@ sysinfo               = { workspace = true }
 tempfile              = { workspace = true }
 tokio                 = { workspace = true, features = ["macros", "process", "fs", "io-util", "signal"] }
 tokio-tungstenite     = { workspace = true }
-tokio-util            = { workspace = true, features = ["rt"] }
+tokio-util            = { workspace = true, features = ["rt", "io-util"] }
 tracing               = { workspace = true }
 uuid                  = { workspace = true }
 xz2                   = { workspace = true }

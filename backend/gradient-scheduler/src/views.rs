@@ -24,6 +24,9 @@ pub struct WorkerContextView {
     pub upload_speed_mbps: Option<f32>,
     pub download_speed_mbps: Option<f32>,
     pub running_builds: u32,
+    pub ram_reserved_mb: u64,
+    pub ram_reserved_unused_mb: Option<u64>,
+    pub ram_reserved_for_waiting_build_mb: u64,
 }
 
 impl WorkerContextView {
@@ -42,6 +45,9 @@ impl WorkerContextView {
             upload_speed_mbps: m.upload_speed_mbps,
             download_speed_mbps: m.download_speed_mbps,
             running_builds: m.running_builds,
+            ram_reserved_mb: m.ram_reserved_mb,
+            ram_reserved_unused_mb: m.ram_reserved_unused_mb,
+            ram_reserved_for_waiting_build_mb: m.ram_reserved_for_waiting_build_mb,
         }
     }
 }

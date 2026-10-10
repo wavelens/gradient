@@ -13,6 +13,14 @@ pub struct Windowed {
     pub w24h: Option<f64>,
 }
 
+impl InstanceContext {
+    /// A build without history is expected to peak like the mean build of the instance.
+    pub fn unmeasured_build_ram_mb(&self) -> u64 {
+        let mean = self.peak_ram_mb.w24h.or(self.peak_ram_mb.w1h);
+        mean.map_or(0, |mb| mb.max(0.0) as u64)
+    }
+}
+
 impl Windowed {
     pub fn w1h_or(self, fallback: f64) -> f64 {
         self.w1h.unwrap_or(fallback)
@@ -87,6 +95,67 @@ pub struct WorkerMetricsView {
     pub upload_speed_mbps: Option<f32>,
     pub download_speed_mbps: Option<f32>,
     pub running_builds: u32,
+    pub ram_reserved_mb: u64,
+    pub ram_reserved_unused_mb: Option<u64>,
+    pub ram_reserved_for_waiting_build_mb: u64,
+}
+
+/// The RAM a job is expected to hold on its worker, reserved from the assignment to the release.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum RamNeed {
+    #[default]
+    Negligible,
+    Predicted(u64),
+    Unmeasured,
+}
+
+impl RamNeed {
+    pub fn of_build(predicted_peak_ram_mb: Option<u64>, substitution: bool, fetch: bool) -> Self {
+        match predicted_peak_ram_mb {
+            _ if substitution => Self::Negligible,
+            Some(peak) => Self::Predicted(peak),
+            None if fetch => Self::Negligible,
+            None => Self::Unmeasured,
+        }
+    }
+
+    pub fn reserved_mb(self, unmeasured_build_ram_mb: u64) -> u64 {
+        match self {
+            Self::Negligible => 0,
+            Self::Predicted(peak) => peak,
+            Self::Unmeasured => unmeasured_build_ram_mb,
+        }
+    }
+
+    pub fn needed_to_start_mb(self, unmeasured_build_ram_mb: u64) -> u64 {
+        let reserved = self.reserved_mb(unmeasured_build_ram_mb) as f64;
+        (reserved * crate::score::weights::RAM_FIT_HEADROOM).round() as u64
+    }
+}
+
+impl WorkerMetricsView {
+    pub fn ram_unreserved_mb(&self) -> Option<u64> {
+        (self.ram_total_mb > 0).then(|| self.ram_total_mb.saturating_sub(self.ram_reserved_mb))
+    }
+
+    /// A build reaches its peak minutes after its assignment. The measured free RAM alone would
+    /// let a burst of assignments overcommit the worker, so the predicted peaks of the jobs
+    /// already assigned are bounding it too.
+    pub fn ram_available_mb(&self) -> Option<u64> {
+        let free = match (self.ram_free_mb, self.ram_reserved_unused_mb) {
+            (Some(free), Some(unused)) => Some(free.saturating_sub(unused)),
+            (free, _) => free,
+        };
+        let available = match (free, self.ram_unreserved_mb()) {
+            (Some(free), Some(unreserved)) => Some(free.min(unreserved)),
+            (free, unreserved) => free.or(unreserved),
+        };
+        available.map(|mb| mb.saturating_sub(self.ram_reserved_for_waiting_build_mb))
+    }
+
+    pub fn will_release_ram(&self) -> bool {
+        self.ram_reserved_mb + self.ram_reserved_for_waiting_build_mb > 0
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -162,6 +231,10 @@ pub struct ScoredBuild<'a> {
 }
 
 impl ScoredBuild<'_> {
+    pub fn is_fetch(&self) -> bool {
+        self.is_fixed_output || self.architecture == gradient_types::BUILTIN_ARCH
+    }
+
     pub fn closure_size(&self) -> Option<i64> {
         self.closure_size
     }

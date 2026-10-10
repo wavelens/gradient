@@ -162,7 +162,7 @@ impl Scheduler {
             MemberReport::Completed { job } => self.settle_completed(job, false).await,
             MemberReport::Failed { job, failure } => self.settle_failed(job, &failure, None).await,
             MemberReport::Lost { job } => {
-                crate::build::requeue_orphaned_jobs(&self.state, &[job]).await;
+                crate::build::requeue_orphaned_jobs(&self.state, &[job], &Default::default()).await;
                 Ok(())
             }
             MemberReport::Aborted { .. } => Ok(()),

@@ -43,6 +43,7 @@ use gradient_worker_client::nar;
 
 pub use abort::AbortSignal;
 pub use build_metrics::BuildHost;
+pub(crate) use build_metrics::peak_ram_of_running_builds;
 pub use eval::WorkerEvaluator;
 
 async fn query_fetched_paths(
@@ -489,8 +490,8 @@ impl JobExecutor {
                         hash: gradient_sources::get_hash_from_path(f.store_path.clone())
                             .map(|(h, _)| h)
                             .unwrap_or_default(),
-                        nar_size: f.nar.as_ref().map(|n| n.nar.len() as i64),
-                        nar_hash: f.nar.as_ref().map(|n| nar::sha256_nix32(&n.nar)),
+                        nar_size: f.nar.as_ref().map(|n| n.nar_size as i64),
+                        nar_hash: f.nar.as_ref().map(|n| n.nar_hash.clone()),
                         products: Vec::new(),
                     }
                 }));
@@ -513,8 +514,9 @@ impl JobExecutor {
                     f.nar.map(|raw| compress::OutputNar {
                         build_id: build_task.build_id.clone(),
                         store_path: f.store_path,
-                        source: nar::NarSource::Raw {
+                        source: nar::NarSource::Stream {
                             nar: raw.nar,
+                            nar_size: raw.nar_size,
                             references: raw.references,
                             deriver: raw.deriver,
                             ca: raw.ca,
@@ -543,8 +545,8 @@ impl JobExecutor {
                     hash: gradient_sources::get_hash_from_path(store_path.clone())
                         .map(|(h, _)| h)
                         .unwrap_or_default(),
-                    nar_size: Some(raw.nar.len() as i64),
-                    nar_hash: Some(nar::sha256_nix32(&raw.nar)),
+                    nar_size: Some(raw.nar_size as i64),
+                    nar_hash: Some(raw.nar_hash.clone()),
                     products: Vec::new(),
                 }];
                 updater
@@ -553,8 +555,9 @@ impl JobExecutor {
                 outputs.push(compress::OutputNar {
                     build_id: build_task.build_id.clone(),
                     store_path,
-                    source: nar::NarSource::Raw {
+                    source: nar::NarSource::Stream {
                         nar: raw.nar,
+                        nar_size: raw.nar_size,
                         references: raw.references,
                         deriver: raw.deriver,
                         ca: raw.ca,

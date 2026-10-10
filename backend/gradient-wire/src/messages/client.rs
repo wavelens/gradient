@@ -49,6 +49,8 @@ pub enum ClientMessage {
         disk_speed_mbps: Option<f32>,
         upload_speed_mbps: Option<f32>,
         download_speed_mbps: Option<f32>,
+        #[proto(33, default)]
+        build_peak_ram_mb: Option<Vec<(String, u64)>>,
     },
 
     RequestJobList,

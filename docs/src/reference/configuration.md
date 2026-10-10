@@ -330,9 +330,11 @@ Declarative entities under `services.gradient.state` are in the [state reference
 
 | Option | Type | Default | Env | Description |
 |---|---|---|---|---|
+| `worker.build.cgroup` | null or string | `/sys/fs/cgroup/system.slice/nix-daemon.service` with `worker.build.metrics`, else `null` | `GRADIENT_WORKER_BUILD_CGROUP` | Cgroup directory of `nix-daemon.service`, the parent of the build cgroups. Source of the peak memory of running builds in the worker heartbeat. `null` reports nothing. |
 | `worker.build.maxConcurrent` | int | `32` | `GRADIENT_WORKER_BUILD_MAX_CONCURRENT` | Maximum simultaneous builds. |
 | `worker.build.maxCores` | null or (int) | `null` | `GRADIENT_WORKER_BUILD_MAX_CORES` | CPU cores a single build may use, passed as `--cores`. |
 | `worker.build.metrics` | bool | `false` | - | Whether to record per-build peak memory, CPU time, disk I/O and out-of-memory kills. |
+| `worker.build.oomScoreAdjust` | null or (int) | `500` | - | Out-of-memory score adjustment for `nix-daemon.service`, inherited by every build process. `null` leaves the daemon unchanged. |
 
 ## `worker.capabilities`
 

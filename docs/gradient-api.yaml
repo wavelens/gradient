@@ -15215,6 +15215,9 @@ components:
         upload_speed_mbps: { type: number, nullable: true, description: Output NAR megabits per second of upload batches from the first grant on. }
         download_speed_mbps: { type: number, nullable: true, description: NAR megabits per second of input download batches and substitutions. }
         running_builds: { type: integer, description: Jobs of this worker in the build stage. }
+        ram_reserved_mb: { type: integer, description: RAM reserved for the jobs assigned to this worker at the assignment. The larger of predicted and reported peak per job, and the instance mean peak per build without history. }
+        ram_reserved_unused_mb: { type: integer, nullable: true, description: Reserved RAM the assigned jobs had not used yet at the assignment. Null for a worker that reports no build memory. }
+        ram_reserved_for_waiting_build_mb: { type: integer, description: RAM this worker kept free at the assignment for a held build waiting to start on it. }
 
     JobContext:
       type: object

@@ -185,6 +185,7 @@ impl<'a> InboundContext<'a> {
                 disk_speed_mbps,
                 upload_speed_mbps,
                 download_speed_mbps,
+                build_peak_ram_mb,
             } => {
                 self.spawn_worker_metrics(WorkerMetrics {
                     cpu_usage_pct,
@@ -192,6 +193,7 @@ impl<'a> InboundContext<'a> {
                     disk_speed_mbps,
                     upload_speed_mbps,
                     download_speed_mbps,
+                    build_peak_ram_mb,
                 });
                 true
             }

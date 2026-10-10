@@ -10,24 +10,38 @@
 
 use std::collections::HashSet;
 
+use std::sync::Arc;
+
 use anyhow::{Context, Result};
 use gradient_util::nix_hash::normalize_nar_hash;
 use gradient_wire::messages::{CachedPath, JobPhase};
 
 use crate::proto::job::JobUpdater;
+use crate::proto::nar_daemon_import::{FetchedNar, digest_of};
 use crate::proto::prefetch::{
-    CorruptCachedNar, MissingInputs, SubstituteNotOnUpstream, download_one_presigned, download_size,
+    CorruptCachedNar, MissingInputs, Staging, SubstituteNotOnUpstream, download_size,
+    stage_one_presigned,
 };
 use crate::proto::progress::{Progress, ProgressSink};
-use gradient_worker_client::compression::{decompress, resolve_compression};
-use gradient_worker_client::nar::sha256_nix32;
+use gradient_worker_client::nar::NarReader;
+use gradient_worker_client::nar_recv::NarPayload;
 
-#[derive(Debug)]
 pub(crate) struct RawNar {
-    pub nar: Vec<u8>,
+    pub nar: Arc<dyn NarReader>,
+    pub nar_size: u64,
+    pub nar_hash: String,
     pub references: Vec<String>,
     pub deriver: Option<String>,
     pub ca: Option<String>,
+}
+
+impl std::fmt::Debug for RawNar {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RawNar")
+            .field("nar_size", &self.nar_size)
+            .field("nar_hash", &self.nar_hash)
+            .finish_non_exhaustive()
+    }
 }
 
 #[derive(Debug)]
@@ -44,7 +58,7 @@ pub(crate) trait UpstreamIo {
         &mut self,
         upstream: &CachedPath,
         progress: &mut Progress<impl ProgressSink>,
-    ) -> Result<Option<Vec<u8>>>;
+    ) -> Result<Option<NarPayload>>;
 }
 
 pub(crate) async fn fetch_outputs(
@@ -113,15 +127,15 @@ async fn fetch_one(
         .await?
         .ok_or_else(|| anyhow::Error::new(MissingInputs(vec![path.clone()])))?;
     progress.transfer_done();
-    let nar = decompress(
-        &compressed,
-        resolve_compression(&compressed, upstream.url.as_deref()),
-    )
-    .with_context(|| format!("decompress the upstream NAR of {path}"))?;
+    let nar: Arc<dyn NarReader> = Arc::new(FetchedNar::new(compressed, upstream.url.clone()));
+    let digest = digest_of(Arc::clone(&nar))
+        .await
+        .with_context(|| format!("decompress the upstream NAR of {path}"))?;
+    let nar_hash = digest.nix32();
     if upstream
         .nar_hash
         .as_deref()
-        .is_some_and(|claimed| normalize_nar_hash(claimed) != sha256_nix32(&nar))
+        .is_some_and(|claimed| normalize_nar_hash(claimed) != nar_hash)
     {
         return Err(anyhow::Error::new(CorruptCachedNar(path.clone())));
     }
@@ -136,6 +150,8 @@ async fn fetch_one(
 
     Ok(RawNar {
         nar,
+        nar_size: digest.size,
+        nar_hash,
         references,
         deriver: upstream.deriver.clone(),
         ca: upstream.ca.clone(),
@@ -165,12 +181,13 @@ impl UpstreamIo for JobUpdaterIo<'_> {
         &mut self,
         upstream: &CachedPath,
         progress: &mut Progress<impl ProgressSink>,
-    ) -> Result<Option<Vec<u8>>> {
+    ) -> Result<Option<NarPayload>> {
         let mut fetch = self.0.phase(JobPhase::SubstituteFetch);
         let started = std::time::Instant::now();
-        let (_, body) = download_one_presigned(
+        let (_, body) = stage_one_presigned(
             gradient_worker_client::http::download_client(),
             upstream.clone(),
+            Staging::of_job(self.0),
             progress,
         )
         .await?;
@@ -182,7 +199,7 @@ impl UpstreamIo for JobUpdaterIo<'_> {
                 .observe_transfer(nar_size, started.elapsed());
         }
 
-        Ok(body.map(|(bytes, _)| bytes))
+        Ok(body.map(|(staged, _)| staged))
     }
 }
 
@@ -190,6 +207,7 @@ impl UpstreamIo for JobUpdaterIo<'_> {
 mod tests {
     use super::*;
     use crate::proto::progress::{Recorded, transferred};
+    use gradient_worker_client::nar::sha256_nix32;
     use std::collections::BTreeMap;
 
     struct Fake {
@@ -215,13 +233,13 @@ mod tests {
             &mut self,
             upstream: &CachedPath,
             progress: &mut Progress<impl ProgressSink>,
-        ) -> Result<Option<Vec<u8>>> {
+        ) -> Result<Option<NarPayload>> {
             self.downloads.push(upstream.path.clone());
             let body = self.bodies.get(&upstream.path).cloned();
             if let Some(body) = &body {
                 progress.at(body.len() as u64);
             }
-            Ok(body)
+            Ok(body.map(NarPayload::from))
         }
     }
 
@@ -395,7 +413,11 @@ mod tests {
                 "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee-bare".to_owned()
             ]
         );
-        assert_eq!(raw.nar, nar());
+        let mut streamed = Vec::new();
+        std::io::Read::read_to_end(&mut raw.nar.open().unwrap(), &mut streamed).unwrap();
+        assert_eq!(streamed, nar());
+        assert_eq!(raw.nar_size, nar().len() as u64);
+        assert_eq!(raw.nar_hash, sha256_nix32(&nar()));
         assert_eq!(io.downloads, vec![OUT.to_owned()]);
     }
 }

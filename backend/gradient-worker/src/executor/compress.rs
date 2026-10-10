@@ -40,13 +40,7 @@ pub async fn push_outputs(
         .iter()
         .map(|o| nix_store_path(&o.store_path))
         .collect();
-    let sizes: Vec<Option<u64>> = outputs
-        .iter()
-        .map(|o| match &o.source {
-            NarSource::Raw { nar, .. } => Some(nar.len() as u64),
-            NarSource::Path { .. } => None,
-        })
-        .collect();
+    let sizes: Vec<Option<u64>> = outputs.iter().map(|o| o.source.nar_size()).collect();
     let entries = super::query_fetched_paths(updater, paths, sizes).await?;
     let mut sources: HashMap<String, OutputNar<'_>> = outputs
         .into_iter()
@@ -90,10 +84,10 @@ fn upload_progress(
 ) -> (Vec<Progress<BuildProgressSink>>, HashMap<String, Tally>) {
     let mut totals: BTreeMap<&str, (Option<u64>, u32)> = BTreeMap::new();
     for (cached, output) in pending {
-        let size = match &output.source {
-            NarSource::Raw { nar, .. } => Some(nar.len() as u64),
-            NarSource::Path { .. } => resolved.nar_size(&cached.path),
-        };
+        let size = output
+            .source
+            .nar_size()
+            .or_else(|| resolved.nar_size(&cached.path));
         let (bytes, paths) = totals.entry(&output.build_id).or_insert((Some(0), 0));
         *bytes = bytes.zip(size).map(|(had, more)| had + more);
         *paths += 1;

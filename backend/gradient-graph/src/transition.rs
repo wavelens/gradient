@@ -9,7 +9,7 @@ use gradient_db::{
     DbContext,
     graph::{can_start::unpromote_ungated, promotion::cascade_dependency_failed},
     scheduling::build_attempt::{
-        abort_running_attempts, fail_latest_attempt, succeed_latest_attempt,
+        abort_running_attempts, fail_latest_attempt, succeed_latest_attempt, worker_loss_streaks,
     },
     status::{
         emit_transition_effects, update_derivation_build_status, update_evaluation_status,
@@ -17,6 +17,7 @@ use gradient_db::{
     },
 };
 use gradient_entity::build::BuildStatus;
+use gradient_entity::build_attempt::{AttemptFailureReason, AttemptOutcome};
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_types::*;
 use gradient_wire::BuildOutputMetadata;
@@ -28,8 +29,8 @@ use sea_orm::{
 };
 use tracing::{error, info, warn};
 
-use crate::messages::{SubstituteLog, Transition, TransitionReport};
-use crate::policy::{self, FailureOutcome};
+use crate::messages::{OrphanCause, SubstituteLog, Transition, TransitionReport};
+use crate::policy::{self, FailureOutcome, OrphanedBuild};
 
 pub(crate) async fn apply(ctx: &DbContext, transition: Transition) -> Result<TransitionReport> {
     match transition {
@@ -116,41 +117,12 @@ pub(crate) async fn apply(ctx: &DbContext, transition: Transition) -> Result<Tra
             .await;
             Ok(TransitionReport::default())
         }
-        Transition::OrphanedBuilds { shared_builds } => {
-            let rows = match EDerivationBuild::find()
-                .filter(gradient_entity::derivation_build::Column::Id.is_in(shared_builds))
-                .all(&ctx.worker_db)
-                .await
-            {
-                Ok(rows) => rows,
-                Err(e) => {
-                    warn!(error = %e, "requeue orphaned builds: load failed");
-                    return Ok(TransitionReport::default());
-                }
-            };
-
-            let building: Vec<_> = rows
-                .into_iter()
-                .filter(|r| r.status == BuildStatus::Building)
-                .collect();
-            let ids: Vec<DerivationBuildId> = building.iter().map(|r| r.id).collect();
-            abort_running_attempts(
-                &ctx.worker_db,
-                &ids,
-                "the worker disconnected before the build finished",
-            )
-            .await?;
-
-            let mut requeued = Vec::new();
-            for row in building {
-                let derivation = row.derivation;
-                update_derivation_build_status(ctx, row, BuildStatus::Queued).await?;
-                requeued.push(derivation);
-            }
-
-            let settled = unpromote_ungated(&ctx.worker_db, &requeued).await?;
-            emit_transition_effects(ctx, &settled).await?;
-
+        Transition::OrphanedBuilds {
+            shared_builds,
+            cause,
+            observed_peak_ram_mb,
+        } => {
+            orphaned_builds(ctx, shared_builds, cause, &observed_peak_ram_mb).await?;
             Ok(TransitionReport::default())
         }
         Transition::Ready {
@@ -735,6 +707,123 @@ async fn build_failed(
     check_referencing_evals_done(ctx, derivation_id).await
 }
 
+async fn orphaned_builds(
+    ctx: &DbContext,
+    shared_builds: Vec<DerivationBuildId>,
+    cause: OrphanCause,
+    observed_peak_ram_mb: &std::collections::HashMap<DerivationBuildId, u64>,
+) -> Result<()> {
+    let rows = match EDerivationBuild::find()
+        .filter(gradient_entity::derivation_build::Column::Id.is_in(shared_builds))
+        .all(&ctx.worker_db)
+        .await
+    {
+        Ok(rows) => rows,
+        Err(e) => {
+            warn!(error = %e, "requeue orphaned builds: load failed");
+            return Ok(());
+        }
+    };
+
+    let building: Vec<_> = rows
+        .into_iter()
+        .filter(|r| r.status == BuildStatus::Building)
+        .collect();
+    let ids: Vec<DerivationBuildId> = building.iter().map(|r| r.id).collect();
+    let losses = match cause {
+        OrphanCause::WorkerLost => {
+            abort_running_attempts(
+                &ctx.worker_db,
+                &ids,
+                Some(AttemptFailureReason::WorkerLost),
+                "the worker disconnected before the build finished",
+            )
+            .await?;
+            for row in &building {
+                if let Some(peak) = observed_peak_ram_mb.get(&row.id) {
+                    let observed = BuildMetrics {
+                        peak_ram_mb: Some(*peak),
+                        ..Default::default()
+                    };
+                    record_metrics(ctx, row, row.derivation, &observed).await;
+                }
+            }
+            worker_loss_streaks(&ctx.worker_db, &ids).await?
+        }
+        OrphanCause::ClusterAttemptEnded => {
+            abort_running_attempts(
+                &ctx.worker_db,
+                &ids,
+                None,
+                "the cluster attempt ended before the build finished",
+            )
+            .await?;
+            Default::default()
+        }
+    };
+
+    let mut requeued = Vec::new();
+    for row in building {
+        let lost = losses.get(&row.id).copied().unwrap_or(0);
+        match policy::orphaned_build_outcome(lost, policy::MAX_WORKER_LOSSES) {
+            OrphanedBuild::Requeue => {
+                let derivation = row.derivation;
+                update_derivation_build_status(ctx, row, BuildStatus::Queued).await?;
+                requeued.push(derivation);
+            }
+            OrphanedBuild::Exhausted => fail_build_lost_with_every_worker(ctx, row, lost).await?,
+        }
+    }
+
+    let settled = unpromote_ungated(&ctx.worker_db, &requeued).await?;
+    emit_transition_effects(ctx, &settled).await?;
+    Ok(())
+}
+
+async fn fail_build_lost_with_every_worker(
+    ctx: &DbContext,
+    shared_build: MDerivationBuild,
+    losses: i64,
+) -> Result<()> {
+    let derivation_build = shared_build.id;
+    let derivation = shared_build.derivation;
+    let error = format!(
+        "the build was dispatched {losses} times in a row and each worker disconnected before \
+         reporting a result; giving up"
+    );
+    warn!(%derivation_build, losses, "build lost with every worker; failing instead of re-queuing");
+
+    if let Some(attempt_id) =
+        gradient_db::scheduling::build_attempt::latest_attempt_id(&ctx.worker_db, derivation_build)
+            .await
+            .ok()
+            .flatten()
+        && let Err(e) = ctx
+            .storage
+            .log_storage
+            .append(attempt_id, &policy::failure_log_entry(&error))
+            .await
+    {
+        warn!(%derivation_build, error = %e, "failed to append the worker loss to the build log");
+    }
+
+    if let Err(e) = fail_latest_attempt(
+        &ctx.worker_db,
+        derivation_build,
+        AttemptOutcome::Failed,
+        Some(AttemptFailureReason::WorkerLost),
+        Some(error),
+    )
+    .await
+    {
+        warn!(%derivation_build, error = %e, "failed to close the last attempt of a lost build");
+    }
+
+    update_derivation_build_status(ctx, shared_build, BuildStatus::FailedPermanent).await?;
+    cascade_dependency_failed(&ctx.worker_db, derivation).await?;
+    check_referencing_evals_done(ctx, derivation).await
+}
+
 async fn substitute_misses(
     ctx: &DbContext,
     derivation_build: DerivationBuildId,
@@ -1053,7 +1142,6 @@ async fn ready(
 mod tests {
     use super::*;
     use crate::test_ctx::ctx;
-    use gradient_entity::build_attempt::AttemptOutcome;
     use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
 
     #[tokio::test]
@@ -1110,6 +1198,9 @@ mod tests {
         };
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             .append_query_results([vec![building.clone()]])
+            .append_query_results([
+                Vec::<std::collections::BTreeMap<String, sea_orm::Value>>::new(),
+            ])
             .append_exec_results([MockExecResult {
                 last_insert_id: 0,
                 rows_affected: 1,
@@ -1122,6 +1213,8 @@ mod tests {
             &ctx,
             Transition::OrphanedBuilds {
                 shared_builds: vec![building.id],
+                cause: OrphanCause::WorkerLost,
+                observed_peak_ram_mb: Default::default(),
             },
         )
         .await;

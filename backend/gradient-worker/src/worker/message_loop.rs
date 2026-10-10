@@ -520,7 +520,7 @@ impl MessageLoopState {
     /// A peer that stalled without closing is never ending the read half.
     /// Warning and carrying on left the worker building jobs it could no longer report.
     async fn on_heartbeat(&mut self) -> Result<()> {
-        send_live_metrics(&self.writer);
+        send_live_metrics(&self.writer, self.config.build.cgroup.clone());
         let expired = self.holds.expired(std::time::Instant::now());
         self.report_released(expired, "cluster start timed out")
             .await?;
@@ -910,15 +910,21 @@ impl MessageLoopState {
     }
 }
 
-fn send_live_metrics(writer: &ProtoWriter) {
+fn send_live_metrics(writer: &ProtoWriter, daemon_cgroup: Option<std::path::PathBuf>) {
     let writer = writer.clone();
     #[expect(
         clippy::disallowed_methods,
         reason = "one sample per heartbeat, never awaited"
     )]
     tokio::spawn(async move {
-        let m = match tokio::task::spawn_blocking(crate::metrics::host_dynamic).await {
-            Ok(m) => m,
+        let sampled = tokio::task::spawn_blocking(move || {
+            (
+                crate::metrics::host_dynamic(),
+                crate::executor::peak_ram_of_running_builds(daemon_cgroup.as_deref()),
+            )
+        });
+        let (m, build_peak_ram_mb) = match sampled.await {
+            Ok(sampled) => sampled,
             Err(e) => {
                 debug!(error = %e, "host_dynamic sampling task failed");
                 return;
@@ -931,6 +937,7 @@ fn send_live_metrics(writer: &ProtoWriter) {
                 disk_speed_mbps: gradient_worker_client::throughput::DISK.current(),
                 upload_speed_mbps: gradient_worker_client::throughput::UPLOAD.current(),
                 download_speed_mbps: gradient_worker_client::throughput::DOWNLOAD.current(),
+                build_peak_ram_mb,
             })
             .await
         {

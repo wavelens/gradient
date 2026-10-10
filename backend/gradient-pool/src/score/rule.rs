@@ -58,6 +58,17 @@ impl Default for JobContext<'_> {
 }
 
 impl JobContext<'_> {
+    pub fn ram_need(&self) -> crate::score::RamNeed {
+        match self.job.build() {
+            Some(b) => crate::score::RamNeed::of_build(
+                b.history().predicted_peak_ram_mb,
+                self.outputs_present || self.substitute_outputs.is_some(),
+                b.is_fetch(),
+            ),
+            None => crate::score::RamNeed::Negligible,
+        }
+    }
+
     pub fn build_history(&self) -> HistoryPrediction {
         if self.outputs_present {
             HistoryPrediction::default()

@@ -144,6 +144,8 @@ pub enum Transition {
     },
     OrphanedBuilds {
         shared_builds: Vec<DerivationBuildId>,
+        cause: OrphanCause,
+        observed_peak_ram_mb: std::collections::HashMap<DerivationBuildId, u64>,
     },
     Ready {
         shared_builds: Vec<DerivationBuildId>,
@@ -233,4 +235,10 @@ pub struct GcReport {
     pub attempt_logs: Vec<BuildAttemptId>,
     pub retired: Vec<String>,
     pub deleted_evaluations: Vec<EvaluationId>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OrphanCause {
+    WorkerLost,
+    ClusterAttemptEnded,
 }

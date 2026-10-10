@@ -231,6 +231,20 @@ impl PendingJob {
         matches!(self, PendingJob::Build(j) if j.ifd)
     }
 
+    /// Evaluations reserve nothing. They can wait on a build of an imported derivation while
+    /// holding the worker, and a reservation would hold that build off the worker for good.
+    pub fn ram_need(&self, outputs_present: bool) -> gradient_pool::score::RamNeed {
+        use gradient_pool::score::RamNeed;
+        match self {
+            PendingJob::Build(j) => RamNeed::of_build(
+                j.history.predicted_peak_ram_mb,
+                j.substitute || outputs_present,
+                j.is_fixed_output || j.job.requirement.architecture == gradient_types::BUILTIN_ARCH,
+            ),
+            PendingJob::Eval(_) => RamNeed::Negligible,
+        }
+    }
+
     pub fn substitute_outputs(&self) -> Option<u32> {
         match self {
             PendingJob::Build(j) if j.substitute => {
@@ -250,6 +264,7 @@ impl PendingJob {
 
 pub struct Assignment {
     pub job: Job,
+    pub ram_need: gradient_pool::score::RamNeed,
     pub project_id: ProjectId,
     pub assignment_record: AssignmentRecord,
     pub pending: PendingJob,
@@ -288,6 +303,7 @@ pub struct AssignmentRecord {
 struct ScoredCandidate {
     total: f64,
     vetoed: bool,
+    held_for_ram: bool,
     score_breakdown: serde_json::Value,
     job_context: serde_json::Value,
 }
@@ -314,6 +330,18 @@ pub(crate) fn visible_to(
 
 fn wins(sc: &ScoredCandidate) -> bool {
     !sc.vetoed && sc.total >= gradient_pool::score::weights::ASSIGN_FLOOR
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct WaitingBuild {
+    job_id: String,
+    ram_mb: u64,
+}
+
+fn reserves_ram_while_held(job: &PendingJob, now: chrono::NaiveDateTime) -> bool {
+    let held_secs = (now - job.ready_at()).num_seconds();
+    job.prioritized()
+        || held_secs >= gradient_pool::score::weights::HELD_BUILD_RESERVES_RAM_AFTER_SECS
 }
 
 fn worker_context_of(caps: Option<&WorkerCaps>) -> WorkerContext<'_> {
@@ -521,6 +549,7 @@ pub struct LostMember {
 pub struct Disconnected {
     pub requeued: Vec<PendingJob>,
     pub cluster_members: Vec<LostMember>,
+    pub observed_peak_ram_mb: HashMap<String, u64>,
 }
 
 #[derive(Debug, Default)]
@@ -530,6 +559,7 @@ pub struct JobTracker {
     active: HashMap<String, ActiveJob>,
     decisions: VecDeque<AssignDecision>,
     clusters: ClusterBook,
+    waiting_builds: HashMap<String, WaitingBuild>,
 }
 
 impl JobTracker {
@@ -539,8 +569,8 @@ impl JobTracker {
 
     pub fn add_pending(&mut self, job_id: String, job: PendingJob) -> JobCandidate {
         let candidate = job.as_candidate(&job_id);
-        // Two dispatch passes can both clear the `contains_job` filter before either one is
-        // enqueuing. A job already pending or active is kept as is under the tracker write lock.
+        // Two dispatch passes both clear the `contains_job` filter ahead of the enqueue. Jobs
+        // already pending or active stay as they are under the tracker write lock.
         if self.pending.contains_key(&job_id) || self.active.contains_key(&job_id) {
             return candidate;
         }
@@ -634,8 +664,15 @@ impl JobTracker {
         policy: &dyn ScoringPolicy,
         instance: &gradient_pool::score::InstanceContext,
     ) -> Option<Assignment> {
-        let worker_ctx = worker_context_of(caps);
-        let scored = self.score_candidates(
+        let builds = matches!(kind, JobKind::Build);
+        let alone = worker_context_of(caps);
+        let waiting = builds
+            .then(|| {
+                self.recheck_waiting_build(worker_id, authorized, caps, policy, instance, &alone)
+            })
+            .flatten();
+        let worker_ctx = self.beside_waiting_build(worker_id, alone);
+        let mut scored = self.score_candidates(
             worker_id,
             authorized,
             caps,
@@ -644,10 +681,24 @@ impl JobTracker {
             instance,
             &worker_ctx,
         );
-        let winner_id = scored
-            .iter()
-            .find(|(_, sc)| wins(sc))
+        let waiting_wins = waiting
+            .as_ref()
+            .filter(|(_, sc)| wins(sc))
             .map(|(id, _)| id.clone());
+        if let Some((id, alone)) = waiting
+            && let Some((_, beside)) = scored.iter_mut().find(|(scored_id, _)| *scored_id == id)
+        {
+            *beside = alone;
+        }
+        let winner_id = waiting_wins.or_else(|| {
+            scored
+                .iter()
+                .find(|(_, sc)| wins(sc))
+                .map(|(id, _)| id.clone())
+        });
+        if builds {
+            self.choose_waiting_build(worker_id, &scored, instance);
+        }
 
         let worker_context = serde_json::to_value(crate::views::WorkerContextView::new(
             &worker_ctx,
@@ -680,6 +731,86 @@ impl JobTracker {
         );
 
         self.assign_pending(worker_id, &job_id, record)
+    }
+
+    fn recheck_waiting_build(
+        &mut self,
+        worker_id: &str,
+        authorized: Option<&HashSet<ProjectId>>,
+        caps: Option<&WorkerCaps>,
+        policy: &dyn ScoringPolicy,
+        instance: &gradient_pool::score::InstanceContext,
+        alone: &WorkerContext<'_>,
+    ) -> Option<(String, ScoredCandidate)> {
+        let job_id = self.waiting_builds.get(worker_id)?.job_id.clone();
+        let rescored = self
+            .pending
+            .get(&job_id)
+            .filter(|job| visible_to(job, authorized, caps))
+            .map(|job| {
+                let score = self.scores.get(worker_id).and_then(|ws| ws.get(&job_id));
+                let shares = self.project_work_shares(policy, instance);
+                let now = gradient_types::now();
+                self.score_job(&job_id, job, score, &shares, policy, instance, alone, now)
+            })
+            .filter(|sc| sc.held_for_ram || wins(sc));
+        if rescored.is_none() {
+            self.waiting_builds.remove(worker_id);
+        }
+
+        rescored.map(|sc| (job_id, sc))
+    }
+
+    fn beside_waiting_build<'a>(
+        &self,
+        worker_id: &str,
+        mut worker_ctx: WorkerContext<'a>,
+    ) -> WorkerContext<'a> {
+        if let (Some(metrics), Some(waiting)) = (
+            worker_ctx.metrics.as_mut(),
+            self.waiting_builds.get(worker_id),
+        ) {
+            metrics.ram_reserved_for_waiting_build_mb = waiting.ram_mb;
+        }
+
+        worker_ctx
+    }
+
+    fn choose_waiting_build(
+        &mut self,
+        worker_id: &str,
+        scored: &[(String, ScoredCandidate)],
+        instance: &gradient_pool::score::InstanceContext,
+    ) {
+        if self.waiting_builds.contains_key(worker_id) {
+            return;
+        }
+
+        let now = gradient_types::now();
+        let elsewhere: HashSet<&str> = self
+            .waiting_builds
+            .values()
+            .map(|waiting| waiting.job_id.as_str())
+            .collect();
+        let longest_held = scored
+            .iter()
+            .filter(|(id, sc)| sc.held_for_ram && !elsewhere.contains(id.as_str()))
+            .filter_map(|(id, _)| Some((id, self.pending.get(id)?)))
+            .filter(|(_, job)| reserves_ram_while_held(job, now))
+            .min_by_key(|(id, job)| (!job.prioritized(), job.ready_at(), *id))
+            .map(|(id, job)| WaitingBuild {
+                job_id: id.clone(),
+                ram_mb: job
+                    .ram_need(false)
+                    .needed_to_start_mb(instance.unmeasured_build_ram_mb()),
+            });
+        if let Some(waiting) = longest_held {
+            self.waiting_builds.insert(worker_id.to_owned(), waiting);
+        }
+    }
+
+    pub fn forget_waiting_build(&mut self, worker_id: &str) {
+        self.waiting_builds.remove(worker_id);
     }
 
     #[allow(
@@ -777,6 +908,8 @@ impl JobTracker {
         ScoredCandidate {
             total: breakdown.total,
             vetoed: !breakdown.vetoes.is_empty(),
+            held_for_ram: breakdown.vetoes
+                == [gradient_pool::score::rules::ResourceSaturationRule::NAME],
             score_breakdown: serde_json::to_value(&breakdown).unwrap_or(serde_json::Value::Null),
             job_context: serde_json::to_value(crate::views::JobContextView::new(&ctx, job))
                 .unwrap_or(serde_json::Value::Null),
@@ -901,12 +1034,17 @@ impl JobTracker {
         record: AssignmentRecord,
     ) -> Option<Assignment> {
         let job = self.pending.remove(job_id)?;
-        if let Some(ws) = self.scores.get_mut(worker_id) {
-            ws.remove(job_id);
-        }
+        self.waiting_builds
+            .retain(|_, waiting| waiting.job_id != job_id);
+        let outputs_present = self
+            .scores
+            .get_mut(worker_id)
+            .and_then(|ws| ws.remove(job_id))
+            .is_some_and(|score| score.outputs_present);
 
         let assignment = Assignment {
             job: job.clone().into_job(),
+            ram_need: job.ram_need(outputs_present),
             project_id: job.project_id(),
             assignment_record: record,
             pending: job.clone(),
@@ -1074,8 +1212,22 @@ impl JobTracker {
         to_requeue
     }
 
+    pub fn raise_predicted_ram(&mut self, observed_peak_ram_mb: &HashMap<String, u64>) {
+        for (job_id, observed) in observed_peak_ram_mb {
+            if let Some(ActiveJob {
+                job: PendingJob::Build(build),
+                ..
+            }) = self.active.get_mut(job_id)
+            {
+                let predicted = &mut build.history.predicted_peak_ram_mb;
+                *predicted = Some(predicted.unwrap_or(0).max(*observed));
+            }
+        }
+    }
+
     pub fn worker_disconnected(&mut self, worker_id: &str) -> Disconnected {
         self.scores.remove(worker_id);
+        self.waiting_builds.remove(worker_id);
         let orphaned: Vec<String> = self
             .active
             .iter()
@@ -1516,6 +1668,7 @@ mod tests {
         let sc = ScoredCandidate {
             total: 1.0,
             vetoed: false,
+            held_for_ram: false,
             score_breakdown: serde_json::json!({}),
             job_context: serde_json::json!({}),
         };

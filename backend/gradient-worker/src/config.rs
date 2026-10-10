@@ -339,6 +339,11 @@ pub struct BuildArgs {
     /// The default is all available cores.
     #[arg(long = "build-max-cores", env = "GRADIENT_WORKER_BUILD_MAX_CORES")]
     pub max_cores: Option<u32>,
+
+    /// Cgroup directory of the Nix daemon, the parent of the build cgroups. The worker reports
+    /// the peak memory of running builds from it.
+    #[arg(long = "build-cgroup", env = "GRADIENT_WORKER_BUILD_CGROUP")]
+    pub cgroup: Option<std::path::PathBuf>,
 }
 
 impl Default for BuildArgs {
@@ -346,6 +351,7 @@ impl Default for BuildArgs {
         Self {
             max_concurrent: 1,
             max_cores: None,
+            cgroup: None,
         }
     }
 }

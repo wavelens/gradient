@@ -4,7 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use std::io::{Read as _, Seek as _};
+use std::io::Read as _;
+use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use gradient_wire::messages::CachedPath;
@@ -17,8 +18,9 @@ use crate::nix::store::LocalNixStore;
 use crate::proto::compression::build_unkeyed_path_info;
 use crate::proto::prefetch::CorruptCachedNar;
 use gradient_worker_client::compression::{
-    SNIFF_BYTES, decompress, decompress_reader, parse_nar_hash_to_bytes, resolve_compression,
+    SNIFF_BYTES, decoder, parse_nar_hash_to_bytes, resolve_compression,
 };
+use gradient_worker_client::nar::NarReader;
 use gradient_worker_client::nar_recv::NarPayload;
 
 struct NarImporter<'a> {
@@ -50,57 +52,187 @@ impl<'a> NarImporter<'a> {
     }
 
     async fn import(&self, payload: NarPayload) -> Result<()> {
-        // Compression is detected from the payload magic bytes, then the narinfo `URL:` field, then
-        // zstd. A `NarRequest` over the WebSocket is only carrying zstd.
-        let store_path = self.store_path.to_owned();
-        let expected_size = self.meta.nar_size;
-        let claimed_hash = self.meta.nar_hash.clone();
-        let url = self.meta.url.clone();
-        let (decompressed, compressed_len) = tokio::task::spawn_blocking(move || {
-            let (raw, compressed_len) = match payload {
-                NarPayload::Bytes(compressed) => {
-                    let kind = resolve_compression(&compressed, url.as_deref());
-                    let raw = decompress(&compressed, kind)
-                        .with_context(|| format!("{kind:?} decompress failed for {store_path}"))?;
-                    (raw, compressed.len() as u64)
-                }
-                NarPayload::File(path) => {
-                    let mut file = std::fs::File::open(&path)
-                        .with_context(|| format!("open staged NAR {}", path.display()))?;
-                    let mut magic = Vec::with_capacity(SNIFF_BYTES);
-                    file.by_ref()
-                        .take(SNIFF_BYTES as u64)
-                        .read_to_end(&mut magic)
-                        .with_context(|| format!("read staged NAR {}", path.display()))?;
-                    let kind = resolve_compression(&magic, url.as_deref());
-                    file.rewind().context("rewind staged NAR")?;
-                    let compressed_len = file.metadata().context("stat staged NAR")?.len();
-                    let raw = decompress_reader(&mut file, kind)
-                        .with_context(|| format!("{kind:?} decompress failed for {store_path}"))?;
-                    drop(file);
-                    if let Err(e) = std::fs::remove_file(&path) {
-                        warn!(path = %path.display(), error = %e, "could not remove staged NAR");
-                    }
-                    (raw, compressed_len)
-                }
-            };
-            verify_nar(&store_path, &raw, expected_size, claimed_hash.as_deref())?;
-            Ok::<_, anyhow::Error>((raw, compressed_len))
-        })
-        .await
-        .context("decompress task panicked")??;
-        let meta = with_nar_hash(self.meta, &decompressed);
-        let valid_info = self.build_path_info(&meta, decompressed.len() as u64)?;
-        self.store.import_nar(&valid_info, &decompressed).await?;
+        let compressed_len = payload.byte_len().await;
+        let nar = Arc::new(FetchedNar::new(payload, self.meta.url.clone()));
+        self.verify_and_import(&nar).await?;
         debug!(%self.store_path, bytes = compressed_len, "imported NAR into local store");
         Ok(())
     }
+
+    async fn verify_and_import(&self, nar: &Arc<FetchedNar>) -> Result<()> {
+        let store_path = self.store_path.to_owned();
+        let digesting = Arc::clone(nar);
+        let digest = tokio::task::spawn_blocking(move || {
+            digesting
+                .digest()
+                .with_context(|| format!("decompress failed for {store_path}"))
+        })
+        .await
+        .context("decompress task panicked")??;
+        verify_nar(
+            self.store_path,
+            &digest,
+            self.meta.nar_size,
+            self.meta.nar_hash.as_deref(),
+        )?;
+        let meta = with_nar_hash(self.meta, &digest);
+        let valid_info = self.build_path_info(&meta, digest.size)?;
+
+        let (reader, writer) = tokio::io::duplex(PIPE_BYTES);
+        let source = Arc::clone(nar);
+        let decompressing = tokio::task::spawn_blocking(move || {
+            let mut bridge = tokio_util::io::SyncIoBridge::new(writer);
+            std::io::copy(&mut source.decoder()?, &mut bridge).context("stream verified NAR")?;
+            Ok::<_, anyhow::Error>(())
+        });
+        let imported = self
+            .store
+            .import_nar(&valid_info, tokio::io::BufReader::new(reader))
+            .await;
+        let decompressed = decompressing.await.context("decompress task panicked")?;
+
+        if let (Err(_), Err(e)) = (&imported, &decompressed) {
+            warn!(%self.store_path, error = format!("{e:#}"), "NAR stream ended with the import");
+        }
+        imported.and(decompressed)
+    }
 }
 
-fn with_nar_hash(meta: &CachedPath, nar: &[u8]) -> CachedPath {
+const PIPE_BYTES: usize = 1 << 20;
+const READ_BYTES: usize = 1 << 16;
+
+/// A fetched NAR is decompressed once per reader from its compressed form: to verify it, then
+/// into the daemon or an upload. Decompressing it into memory held every NAR of every running job
+/// in RAM at once.
+pub(crate) struct FetchedNar {
+    compressed: NarPayload,
+    url: Option<String>,
+}
+
+impl FetchedNar {
+    pub(crate) fn new(compressed: NarPayload, url: Option<String>) -> Self {
+        Self { compressed, url }
+    }
+
+    /// Compression is detected from the payload magic bytes, then the narinfo `URL:` field, then
+    /// zstd. A `NarRequest` over the WebSocket is only carrying zstd.
+    fn decoder(&self) -> Result<Box<dyn std::io::Read + Send + '_>> {
+        let mut body = self.compressed.reader().context("open staged NAR")?;
+        let mut magic = Vec::with_capacity(SNIFF_BYTES);
+        body.by_ref()
+            .take(SNIFF_BYTES as u64)
+            .read_to_end(&mut magic)
+            .context("read staged NAR")?;
+        let kind = resolve_compression(&magic, self.url.as_deref());
+        decoder(std::io::Cursor::new(magic).chain(body), kind)
+    }
+
+    fn digest(&self) -> Result<NarDigest> {
+        NarDigest::of(self.decoder()?).context("read compressed NAR")
+    }
+}
+
+impl NarReader for FetchedNar {
+    fn open(&self) -> Result<Box<dyn std::io::Read + Send + '_>> {
+        self.decoder()
+    }
+}
+
+/// A downloaded file as the NAR of that single regular file.
+pub(crate) struct FlatFileNar {
+    file: NarPayload,
+    len: u64,
+    executable: bool,
+}
+
+impl FlatFileNar {
+    pub(crate) async fn new(file: NarPayload, executable: bool) -> Self {
+        Self {
+            len: file.byte_len().await,
+            file,
+            executable,
+        }
+    }
+
+    pub(crate) async fn file_digest(self: &Arc<Self>) -> Result<NarDigest> {
+        let flat = Arc::clone(self);
+        tokio::task::spawn_blocking(move || {
+            NarDigest::of(flat.file.reader()?).context("read downloaded file")
+        })
+        .await
+        .context("digest task panicked")?
+    }
+}
+
+impl NarReader for FlatFileNar {
+    fn open(&self) -> Result<Box<dyn std::io::Read + Send + '_>> {
+        let (head, tail) = gradient_util::nar::single_file_nar_frame(self.len, self.executable);
+        Ok(Box::new(
+            std::io::Cursor::new(head)
+                .chain(self.file.reader()?)
+                .chain(std::io::Cursor::new(tail)),
+        ))
+    }
+}
+
+pub(crate) async fn digest_of(nar: Arc<dyn NarReader>) -> Result<NarDigest> {
+    tokio::task::spawn_blocking(move || NarDigest::of(nar.open()?).context("read NAR"))
+        .await
+        .context("digest task panicked")?
+}
+
+pub(crate) async fn holds_claimed_nar(compressed: &NarPayload, cp: &CachedPath) -> bool {
+    let nar = FetchedNar::new(compressed.clone(), cp.url.clone());
+    let nar_size = cp.nar_size;
+    let claimed = cp
+        .nar_hash
+        .as_deref()
+        .and_then(|hash| parse_nar_hash_to_bytes(hash).ok());
+    tokio::task::spawn_blocking(move || {
+        nar.digest().is_ok_and(|digest| {
+            nar_size.is_none_or(|size| size == digest.size) && claimed == Some(digest.sha256)
+        })
+    })
+    .await
+    .unwrap_or(false)
+}
+
+pub(crate) struct NarDigest {
+    pub(crate) size: u64,
+    pub(crate) sha256: [u8; 32],
+}
+
+impl NarDigest {
+    fn of(mut nar: impl std::io::Read) -> std::io::Result<Self> {
+        let mut hasher = Sha256::new();
+        let mut size = 0u64;
+        let mut buf = vec![0u8; READ_BYTES];
+        loop {
+            match nar.read(&mut buf) {
+                Ok(0) => break,
+                Ok(n) => {
+                    hasher.update(&buf[..n]);
+                    size += n as u64;
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
+                Err(e) => return Err(e),
+            }
+        }
+
+        Ok(Self {
+            size,
+            sha256: hasher.finalize().into(),
+        })
+    }
+
+    pub(crate) fn nix32(&self) -> String {
+        gradient_worker_client::nar::sha256_digest_nix32(&self.sha256)
+    }
+}
+
+fn with_nar_hash(meta: &CachedPath, nar: &NarDigest) -> CachedPath {
     let mut meta = meta.clone();
-    meta.nar_hash
-        .get_or_insert_with(|| gradient_worker_client::nar::sha256_nix32(nar));
+    meta.nar_hash.get_or_insert_with(|| nar.nix32());
     meta
 }
 
@@ -108,35 +240,32 @@ fn with_nar_hash(meta: &CachedPath, nar: &[u8]) -> CachedPath {
 /// instead of a retry loop.
 fn verify_nar(
     store_path: &str,
-    decompressed: &[u8],
+    nar: &NarDigest,
     expected_size: Option<u64>,
     claimed_nar_hash: Option<&str>,
 ) -> Result<()> {
     if let Some(expected) = expected_size
-        && decompressed.len() as u64 != expected
+        && nar.size != expected
     {
         return Err(
             anyhow::Error::new(CorruptCachedNar(store_path.to_owned())).context(format!(
                 "NAR size mismatch for {}: expected {}, got {}",
-                store_path,
-                expected,
-                decompressed.len()
+                store_path, expected, nar.size
             )),
         );
     }
 
     if let Some(claimed_nar_hash) = claimed_nar_hash {
-        let actual_nar_hash: [u8; 32] = Sha256::digest(decompressed).into();
         let claimed = parse_nar_hash_to_bytes(claimed_nar_hash)
             .with_context(|| format!("invalid nar_hash for {store_path}"))?;
 
-        if actual_nar_hash != claimed {
+        if nar.sha256 != claimed {
             return Err(
                 anyhow::Error::new(CorruptCachedNar(store_path.to_owned())).context(format!(
                     "NAR hash mismatch for {}: server said {}, computed {}",
                     store_path,
                     claimed_nar_hash,
-                    gradient_worker_client::nar::sha256_nix32(decompressed)
+                    nar.nix32()
                 )),
             );
         }
@@ -166,7 +295,7 @@ mod tests {
             path: "/nix/store/aaaa-hello".into(),
             ..CachedPath::default()
         };
-        let filled = with_nar_hash(&meta, b"nar bytes");
+        let filled = with_nar_hash(&meta, &NarDigest::of(&b"nar bytes"[..]).unwrap());
         assert_eq!(
             filled.nar_hash.as_deref(),
             Some(gradient_worker_client::nar::sha256_nix32(b"nar bytes").as_str())
@@ -180,8 +309,91 @@ mod tests {
             ..CachedPath::default()
         };
         assert_eq!(
-            with_nar_hash(&meta, b"nar bytes").nar_hash.as_deref(),
+            with_nar_hash(&meta, &NarDigest::of(&b"nar bytes"[..]).unwrap())
+                .nar_hash
+                .as_deref(),
             Some("sha256:claimed")
         );
+    }
+
+    fn fetched(raw: &[u8]) -> (FetchedNar, NarDigest) {
+        let nar = FetchedNar::new(NarPayload::from(zstd::encode_all(raw, 0).unwrap()), None);
+        let digest = nar.digest().unwrap();
+        (nar, digest)
+    }
+
+    #[tokio::test]
+    async fn a_flat_file_reads_as_the_nar_of_that_file() {
+        for (contents, executable) in [
+            (&b"hi\n"[..], false),
+            (&b"12345678"[..], true),
+            (&b""[..], false),
+        ] {
+            let flat = FlatFileNar::new(NarPayload::from(contents.to_vec()), executable).await;
+            let mut nar = Vec::new();
+            flat.open().unwrap().read_to_end(&mut nar).unwrap();
+            assert_eq!(
+                nar,
+                gradient_util::nar::single_file_nar(contents, executable)
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn a_body_is_vouched_for_by_the_claimed_hash_and_size_of_its_nar() {
+        let raw = b"nix-archive-1 body".to_vec();
+        let body = || NarPayload::from(zstd::encode_all(raw.as_slice(), 0).unwrap());
+        let claimed = CachedPath {
+            nar_size: Some(raw.len() as u64),
+            nar_hash: Some(gradient_worker_client::nar::sha256_nix32(&raw)),
+            ..CachedPath::default()
+        };
+        assert!(holds_claimed_nar(&body(), &claimed).await);
+
+        let other = CachedPath {
+            nar_hash: Some(gradient_worker_client::nar::sha256_nix32(b"other")),
+            ..claimed.clone()
+        };
+        assert!(!holds_claimed_nar(&body(), &other).await);
+
+        let unclaimed = CachedPath {
+            nar_hash: None,
+            ..claimed
+        };
+        assert!(!holds_claimed_nar(&body(), &unclaimed).await);
+    }
+
+    #[test]
+    fn a_compressed_nar_is_verified_against_the_size_and_hash_of_its_content() {
+        let raw = vec![7u8; 3 * READ_BYTES + 5];
+        let (_, digest) = fetched(&raw);
+        let claimed = gradient_worker_client::nar::sha256_nix32(&raw);
+
+        verify_nar(
+            "/nix/store/aaaa-hello",
+            &digest,
+            Some(raw.len() as u64),
+            Some(&claimed),
+        )
+        .unwrap();
+
+        let short = verify_nar("/nix/store/aaaa-hello", &digest, Some(1), Some(&claimed));
+        assert!(short.unwrap_err().is::<CorruptCachedNar>());
+
+        let other = gradient_worker_client::nar::sha256_nix32(b"other");
+        let swapped = verify_nar("/nix/store/aaaa-hello", &digest, None, Some(&other));
+        assert!(swapped.unwrap_err().is::<CorruptCachedNar>());
+    }
+
+    #[test]
+    fn a_fetched_nar_decompresses_to_the_same_content_on_every_pass() {
+        let raw: Vec<u8> = (0..200_000u32).flat_map(u32::to_le_bytes).collect();
+        let (nar, digest) = fetched(&raw);
+
+        let mut streamed = Vec::new();
+        nar.decoder().unwrap().read_to_end(&mut streamed).unwrap();
+        assert_eq!(streamed, raw);
+        assert_eq!(digest.size, raw.len() as u64);
+        assert_eq!(nar.digest().unwrap().sha256, digest.sha256);
     }
 }

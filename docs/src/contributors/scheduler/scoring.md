@@ -33,7 +33,7 @@ flowchart LR
 |---|---|---|
 | `JobContext` | `ScoredJob` (kind, architecture, `prefer_local_build`, `is_fixed_output`, `pname`, closure size, history), `missing_count`, `missing_nar_size`, `outputs_present`, `substitute_outputs`, `dependency_count`, `queued_at`, `ready_at`, `project_work_share`, `prioritized`, `build_request`, `ifd`, `rescore_count`, `now` | `JobTracker::score_candidates` in `gradient-scheduler/src/jobs.rs` |
 | `WorkerContext` | `architectures`, `system_features`, `fetch`, `metrics` | `worker_context_of` from the worker's `WorkerCaps` |
-| `WorkerMetricsView` | `cpu_count`, `cpu_core_score`, `ram_total_mb`, `ram_free_mb`, `cpu_usage_pct`, `disk_speed_mbps`, `upload_speed_mbps`, `download_speed_mbps`, `running_builds` | `WorkerCapabilities` (static), the 10 s `WorkerMetrics` heartbeat and the build stages (live) |
+| `WorkerMetricsView` | `cpu_count`, `cpu_core_score`, `ram_total_mb`, `ram_free_mb`, `cpu_usage_pct`, `disk_speed_mbps`, `upload_speed_mbps`, `download_speed_mbps`, `running_builds`, `ram_reserved_mb`, `ram_reserved_unused_mb`, `ram_reserved_for_waiting_build_mb` | `WorkerCapabilities` (static), the 10 s `WorkerMetrics` heartbeat, the build stages, the assigned jobs and the waiting build (live) |
 | `InstanceContext` | 13 `Windowed` averages, `active_builds`, `pending_builds`, `total_workers`, `idle_workers`, `cpu_core_score_mean`, `upload_speed_mean_mbps`, `download_speed_mean_mbps`, `storage_read_mbps`, `storage_write_mbps`, `compression_ratio`, `per_path_secs`, `substitute_cost`, `download_slots`, `upload_slots`, `downloads_in_flight`, `uploads_in_flight` | `instance_metrics_pass`, see below. The two in-flight counts come from the build stages at assignment time |
 
 - `missing_count`, `missing_nar_size` and `outputs_present` are per worker. The worker must score each offered candidate against its store and send a `CandidateScore` (see [Offers](../proto/capabilities-and-dispatch.md#offers)). The values are `None` until that worker reported.
@@ -43,6 +43,20 @@ flowchart LR
 - `rescore_count` will grow by one per 5 s assignment timer tick (`BumpRescore`). Reactive kicks leave the count unchanged.
 - The caller must pass `now` in. Rules never read the wall clock.
 - `JobContext::build_history` will return an empty prediction when `outputs_present` is set. A worker holding every output will build nothing.
+- `ram_reserved_mb` is the sum over the jobs assigned to the worker. Each job counts the larger of `RamNeed::reserved_mb` and its observed peak.
+- `WorkerMetrics::build_peak_ram_mb` holds the `memory.peak` of each running build, read from the cgroup `nix-build@<derivation hash>-<build user>`. `None` is a worker without `worker.build.cgroup`.
+- `ram_reserved_unused_mb` is the sum of reserved minus observed memory per job, on a worker reporting build memory. A build missing from the report has not started and counts as 0.
+- `SchedulerCore::unregister` will raise the prediction of a lost build to its observed peak. The graph writer will store the peak as a `derivation_metric` row.
+    - `Predicted` is the predicted peak RAM of a build.
+    - `Unmeasured` is a build without a prediction, held at `InstanceContext::unmeasured_build_ram_mb`. That value is the 24 h mean of `peak_ram_mb`, or the 1 h mean.
+    - `Negligible` is a substitution, a fetch without a prediction or an evaluation. An evaluation can wait on a build of an imported derivation while it holds the worker.
+- `WorkerMetricsView::ram_available_mb` is the lower of `ram_free_mb - ram_reserved_unused_mb` and `ram_total_mb - ram_reserved_mb`, less `ram_reserved_for_waiting_build_mb`. The measured value alone would lag behind a burst of assignments.
+- `ResourceSaturationRule` can veto a build that fits `ram_total_mb` but not `ram_available_mb`, while `WorkerMetricsView::will_release_ram` is true.
+- `JobTracker` can keep `RamNeed::needed_to_start_mb` of a held build free on a worker, as `ram_reserved_for_waiting_build_mb`.
+    - Prioritized builds qualify at once, other builds `HELD_BUILD_RESERVES_RAM_AFTER_SECS` (60 s) after `ready_at`.
+    - Each worker can wait for a single build, and each build on a single worker. Prioritized builds go first, then the oldest `ready_at`.
+    - Scoring of the waiting build will leave its own kept memory out. The build will win the round as soon as it fits.
+    - An assignment anywhere, a lost or draining worker, or a round without a RAM veto for the build will end the wait.
 
 ## Build Stages
 
@@ -98,7 +112,7 @@ A released job will drop out of the counts with its slot.
 
 - The scheduler can sort candidates by `total` value, and the smaller job id will break ties.
 - The scheduler will assign the first candidate passing `wins` as its check. A passing candidate is unvetoed, with `total >= ASSIGN_FLOOR` (0.0). A vetoed higher candidate will stay pending. The worker will idle this round without a passing candidate.
-- A veto is a hold independent of the sum. Large bonuses cannot outvote the veto. `RescoreWaitRule` is the only vetoing rule. The rule will score 0 and hold a build while `missing_nar_size` is `None` and `rescore_count < 4` holds.
+- A veto is a hold independent of the sum. Large bonuses cannot outvote the veto. `RescoreWaitRule` and `ResourceSaturationRule` are the vetoing rules. `RescoreWaitRule` will score 0 and hold a build while `missing_nar_size` is `None` and `rescore_count < 4` holds.
 - Every decision, rejected candidates included, will go into a 200-entry ring for the [Job Board](../../ui/job-board.md#job-inspection).
 
 ## Worker Speed Signals

@@ -175,7 +175,8 @@ Build jobs hold exactly 1 `BuildSpec`, meaning a shared build (`derivation_build
 - Workers stop the daemon build at once and answer `JobFailed { Aborted }`.
 - Assignments of an unconfirmed abort close as abandoned after 5 min.
 - **Lost Worker:** Open assignments close as abandoned.
-    - Back to `Queued` for each build in `Building`, with its running attempt closed as `Aborted`.
+    - Back to `Queued` for each build in `Building`, with its running attempt closed as `Aborted` with the reason `WorkerLost`.
+    - Builds with 10 lost workers in a row end `FailedPermanent`. An attempt closed any other way will start the row again. A requeue after an ended cluster attempt is no lost worker.
     - Running evaluations go to `Waiting` and back into the queue.
     - Evaluations with 10 eval dispatches fail on the next lost worker. Dispatches of all outcomes count, fetch-only and canceled jobs too.
 

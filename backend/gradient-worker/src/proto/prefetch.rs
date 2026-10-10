@@ -19,12 +19,11 @@ use tracing::{debug, error, warn};
 use crate::nix::store::LocalNixStore;
 use crate::proto::compression::drv_closure_seeds_from_compressed_nar;
 use crate::proto::job::JobUpdater;
-use crate::proto::nar_daemon_import::import_received_nar;
-use crate::proto::progress::{Progress, ProgressSink, Tally, read_body};
-use gradient_util::nix_hash::normalize_nar_hash;
-use gradient_worker_client::compression::{decompress, resolve_compression};
-use gradient_worker_client::nar::sha256_nix32;
-use gradient_worker_client::nar_recv::NarPayload;
+use crate::proto::nar_daemon_import::{holds_claimed_nar, import_received_nar};
+use crate::proto::progress::{Progress, ProgressSink, Tally, stage_body};
+use gradient_worker_client::compression::resolve_compression;
+use gradient_worker_client::nar_recv::{DownloadSink, NarPayload, NarReceiver};
+use gradient_worker_client::shared_download::SharedDownloads;
 
 const PREFETCH_CONCURRENCY: usize = 8;
 
@@ -92,31 +91,39 @@ fn presigned_status_is_retryable(status: u16) -> bool {
     matches!(status, 408 | 429) || status >= 500
 }
 
-fn presigned_body_is_short(declared: Option<u64>, received: usize) -> bool {
-    declared.is_some_and(|want| want != received as u64)
+fn presigned_body_is_short(declared: Option<u64>, received: u64) -> bool {
+    declared.is_some_and(|want| want != received)
 }
 
-async fn body_holds_the_nar(body: Vec<u8>, cp: &CachedPath) -> (Vec<u8>, bool) {
-    if !presigned_body_is_short(cp.file_size, body.len()) {
-        return (body, true);
+async fn body_holds_the_nar(body: &NarPayload, cp: &CachedPath) -> bool {
+    !presigned_body_is_short(cp.file_size, body.byte_len().await)
+        || holds_claimed_nar(body, cp).await
+}
+
+/// A download is staged where pushed NARs of the job are. A receiver without a staging store is
+/// keeping the body in memory.
+#[derive(Clone, Copy)]
+pub(crate) struct Staging<'a> {
+    nars: &'a NarReceiver,
+    job_id: &'a str,
+}
+
+impl<'a> Staging<'a> {
+    pub(crate) fn of_job(updater: &'a JobUpdater) -> Self {
+        Self {
+            nars: &updater.nar_recv,
+            job_id: &updater.job_id,
+        }
     }
 
-    let (Some(claimed), url, nar_size) = (cp.nar_hash.clone(), cp.url.clone(), cp.nar_size) else {
-        return (body, false);
-    };
-    tokio::task::spawn_blocking(move || {
-        let matches =
-            decompress(&body, resolve_compression(&body, url.as_deref())).is_ok_and(|nar| {
-                nar_size.is_none_or(|size| size == nar.len() as u64)
-                    && normalize_nar_hash(&claimed) == sha256_nix32(&nar)
-            });
-        (body, matches)
-    })
-    .await
-    .unwrap_or_else(|_| (Vec::new(), false))
+    async fn open(&self, store_path: &str) -> Result<DownloadSink> {
+        self.nars.stage_download(self.job_id, store_path).await
+    }
 }
 
 type PresignedFetch = (String, Option<(Vec<u8>, CachedPath)>);
+type StagedFetch = (String, Option<(NarPayload, CachedPath)>);
+type SharedFetch = (CachedPath, Option<NarPayload>);
 
 pub(crate) fn download_size<'a>(entries: impl Iterator<Item = &'a CachedPath>) -> Option<u64> {
     entries.map(|c| c.file_size).sum()
@@ -127,6 +134,27 @@ pub(crate) async fn download_one_presigned(
     cp: CachedPath,
     progress: &mut Progress<impl ProgressSink>,
 ) -> Result<PresignedFetch> {
+    let in_memory = NarReceiver::new();
+    let staging = Staging {
+        nars: &in_memory,
+        job_id: "",
+    };
+    let (path, fetched) = stage_one_presigned(http, cp, staging, progress).await?;
+    Ok((
+        path,
+        match fetched {
+            Some((body, cp)) => Some((body.into_bytes().await?, cp)),
+            None => None,
+        },
+    ))
+}
+
+pub(crate) async fn stage_one_presigned(
+    http: &reqwest::Client,
+    cp: CachedPath,
+    staging: Staging<'_>,
+    progress: &mut Progress<impl ProgressSink>,
+) -> Result<StagedFetch> {
     let url = cp.url.clone().expect("by_url entries have a URL");
     let path = cp.path.clone();
     let mut backoff = PRESIGNED_RETRY_BASE;
@@ -151,22 +179,27 @@ pub(crate) async fn download_one_presigned(
                         "HTTP {status} from {url} (path {path}) is not a usable NAR response"
                     ));
                 } else {
-                    let bytes = read_body(resp, cp.file_size, progress)
+                    let mut sink = staging.open(&path).await?;
+                    stage_body(resp, &mut sink, progress)
                         .await
                         .with_context(|| format!("read body of {url}"))?;
-                    let (bytes, intact) = body_holds_the_nar(bytes, &cp).await;
-                    if !intact {
+                    let received = sink.len();
+                    let body = sink
+                        .finish()
+                        .await
+                        .with_context(|| format!("stage body of {url}"))?;
+                    if !body_holds_the_nar(&body, &cp).await {
                         warn!(
                             %path,
                             declared = ?cp.file_size,
-                            received = bytes.len(),
+                            received,
                             "presigned NAR body does not match the declared file_size or nar_hash; \
                              treating as a missing input (self-heal demotes it)"
                         );
                         return Ok((path, None));
                     }
 
-                    return Ok((path, Some((bytes, cp))));
+                    return Ok((path, Some((body, cp))));
                 }
             }
             Err(e) => anyhow::Error::new(e).context(format!("HTTP GET {url} (path {path})")),
@@ -335,6 +368,7 @@ impl<'a> InputPrefetcher<'a> {
 
     async fn import_all(&self, results: Vec<(String, NarPayload, CachedPath)>) -> Result<usize> {
         let store = self.store;
+        let downloads = self.updater.nar_recv.shared_downloads();
         let total = results.len();
         if total == 0 {
             return Ok(0);
@@ -377,7 +411,7 @@ impl<'a> InputPrefetcher<'a> {
                     .expect("payload present for ready path");
                 pending_deps.remove(&path);
                 imports.push(async move {
-                    let result = import_received_nar(store, &path, nar, &meta)
+                    let result = import_missing_nar(store, downloads, &path, nar, &meta)
                         .await
                         .with_context(|| format!("import {} into local store", path));
                     (path, result)
@@ -571,7 +605,8 @@ impl<'a> InputPrefetcher<'a> {
         let mut fetch = self.updater.phase(JobPhase::NarFetch);
         let started = std::time::Instant::now();
         let mut batch = self.fetch_by_request(by_request, tally).await?;
-        batch.extend(download_by_url(by_url, tally).await?);
+        let staging = Staging::of_job(self.updater);
+        batch.extend(download_by_url(by_url, staging, tally).await?);
         let nar_bytes = batch.iter().filter_map(|(_, _, cp)| cp.nar_size).sum();
         gradient_worker_client::throughput::DOWNLOAD.observe_transfer(nar_bytes, started.elapsed());
         fetch.record(batch.len() as u32, payload_bytes(&batch).await);
@@ -581,6 +616,7 @@ impl<'a> InputPrefetcher<'a> {
 
 async fn download_by_url(
     by_url: Vec<CachedPath>,
+    staging: Staging<'_>,
     tally: &Tally,
 ) -> Result<Vec<(String, NarPayload, CachedPath)>> {
     if by_url.is_empty() {
@@ -589,29 +625,44 @@ async fn download_by_url(
 
     let http = gradient_worker_client::http::download_client();
 
-    let outcomes: Vec<Result<PresignedFetch>> =
-        futures::stream::iter(by_url.into_iter().map(|cp| {
-            let http = http.clone();
-            let mut counted = Progress::counting(tally.clone());
-            async move {
-                let fetched = download_one_presigned(&http, cp, &mut counted).await;
-                if matches!(fetched, Ok((_, Some(_)))) {
-                    counted.transfer_done();
-                }
-                fetched
+    let outcomes: Vec<Result<SharedFetch>> = futures::stream::iter(by_url.into_iter().map(|cp| {
+        let http = http.clone();
+        let mut counted = Progress::counting(tally.clone());
+        async move {
+            let mut downloaded = false;
+            let download = async {
+                downloaded = true;
+                let (_, fetched) =
+                    stage_one_presigned(&http, cp.clone(), staging, &mut counted).await?;
+                Ok(fetched.map(|(body, _)| body))
+            };
+            let fetched = staging
+                .nars
+                .shared_downloads()
+                .fetch(&cp.path, || download)
+                .await?;
+            let Some(body) = fetched else {
+                return Ok((cp, None));
+            };
+
+            if !downloaded {
+                counted.at(body.byte_len().await);
             }
-        }))
-        .buffer_unordered(PREFETCH_CONCURRENCY)
-        .collect()
-        .await;
+            counted.transfer_done();
+            Ok((cp, Some(body)))
+        }
+    }))
+    .buffer_unordered(PREFETCH_CONCURRENCY)
+    .collect()
+    .await;
 
     let mut results = Vec::new();
     let mut missing = Vec::new();
     for outcome in outcomes {
-        let (path, fetched) = outcome.context("presigned NAR download failed")?;
+        let (cp, fetched) = outcome.context("presigned NAR download failed")?;
         match fetched {
-            Some((bytes, cp)) => results.push((path, NarPayload::Bytes(bytes), cp)),
-            None => missing.push(path),
+            Some(body) => results.push((cp.path.clone(), body, cp)),
+            None => missing.push(cp.path),
         }
     }
 
@@ -620,6 +671,27 @@ async fn download_by_url(
     }
 
     Ok(results)
+}
+
+async fn import_missing_nar(
+    store: &LocalNixStore,
+    downloads: &SharedDownloads,
+    path: &str,
+    nar: NarPayload,
+    meta: &CachedPath,
+) -> Result<()> {
+    if store.has_path(path).await? {
+        debug!(%path, "another job imported the path meanwhile");
+        return Ok(());
+    }
+
+    import_received_nar(store, path, nar, meta)
+        .await
+        .inspect_err(|e| {
+            if e.downcast_ref::<CorruptCachedNar>().is_some() {
+                downloads.evict(path);
+            }
+        })
 }
 
 async fn payload_bytes(batch: &[(String, NarPayload, CachedPath)]) -> u64 {
@@ -995,7 +1067,7 @@ mod tests {
         );
         cp.file_size = Some(body.len() as u64 + 8421);
         cp.nar_size = Some(nar.len() as u64);
-        cp.nar_hash = Some(sha256_nix32(&nar));
+        cp.nar_hash = Some(gradient_worker_client::nar::sha256_nix32(&nar));
 
         let http = gradient_util::http::build_download_client().expect("download client");
         let (_, fetched) = download_one_presigned(&http, cp, &mut Progress::silent())
@@ -1034,7 +1106,14 @@ mod tests {
         let mut progress = Progress::new(&mut sent);
         progress.expect(download_size(entries.iter()), entries.len() as u32);
 
-        let fetched = download_by_url(entries, &progress.tally()).await.unwrap();
+        let nars = NarReceiver::new();
+        let staging = Staging {
+            nars: &nars,
+            job_id: "job",
+        };
+        let fetched = download_by_url(entries, staging, &progress.tally())
+            .await
+            .unwrap();
         progress.finish().await;
 
         assert_eq!(fetched.len(), 2);

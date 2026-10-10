@@ -156,6 +156,9 @@ interface RuleRow {
             <tr><td class="label">CPU usage</td><td class="mono">{{ j.worker_context.cpu_usage_pct != null ? (j.worker_context.cpu_usage_pct | number: '1.0-1') + ' %' : '-' }}</td></tr>
             <tr><td class="label">RAM total</td><td class="mono">{{ formatMegabytes(j.worker_context.ram_total_mb) }}</td></tr>
             <tr><td class="label">RAM free</td><td class="mono">{{ formatMegabytes(j.worker_context.ram_free_mb) }}</td></tr>
+            <tr><td class="label">RAM reserved</td><td class="mono">{{ formatMegabytes(j.worker_context.ram_reserved_mb) }}</td></tr>
+            <tr><td class="label">RAM reserved, unused</td><td class="mono">{{ formatMegabytes(j.worker_context.ram_reserved_unused_mb) }}</td></tr>
+            <tr><td class="label">RAM kept for held build</td><td class="mono">{{ formatMegabytes(j.worker_context.ram_reserved_for_waiting_build_mb) }}</td></tr>
             <tr><td class="label">Disk speed</td><td class="mono">{{ j.worker_context.disk_speed_mbps != null ? (j.worker_context.disk_speed_mbps | number) + ' MB/s' : '-' }}</td></tr>
             <tr><td class="label">Upload speed</td><td class="mono">{{ j.worker_context.upload_speed_mbps != null ? (j.worker_context.upload_speed_mbps | number) + ' Mbps' : '-' }}</td></tr>
             <tr><td class="label">Download speed</td><td class="mono">{{ j.worker_context.download_speed_mbps != null ? (j.worker_context.download_speed_mbps | number) + ' Mbps' : '-' }}</td></tr>

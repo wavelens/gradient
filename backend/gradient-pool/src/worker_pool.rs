@@ -178,6 +178,31 @@ impl WorkerPool {
         }
     }
 
+    /// `None` is a worker without access to the build cgroups. Builds missing from the list have
+    /// not started, and count as using nothing.
+    pub fn observe_build_ram(&mut self, id: &str, peak_ram_mb: Option<Vec<(String, u64)>>) {
+        let Some(slot) = self.workers.get_mut(id) else {
+            return;
+        };
+        let s = slot.shared_mut();
+        s.observes_build_ram = peak_ram_mb.is_some();
+        for (job_id, peak) in peak_ram_mb.into_iter().flatten() {
+            if let Some(job) = s.assigned_jobs.get_mut(&job_id) {
+                job.observed_ram_mb = job.observed_ram_mb.max(peak);
+            }
+        }
+    }
+
+    pub fn observed_build_ram(&self, id: &str) -> HashMap<String, u64> {
+        self.workers
+            .get(id)
+            .into_iter()
+            .flat_map(|slot| &slot.shared().assigned_jobs)
+            .filter(|(_, job)| job.observed_ram_mb > 0)
+            .map(|(job_id, job)| (job_id.clone(), job.observed_ram_mb))
+            .collect()
+    }
+
     pub fn metrics_for(&self, id: &str) -> Option<crate::score::WorkerMetricsView> {
         self.workers.get(id).map(|slot| {
             let s = slot.shared();
@@ -191,6 +216,9 @@ impl WorkerPool {
                 upload_speed_mbps: s.upload_speed_mbps,
                 download_speed_mbps: s.download_speed_mbps,
                 running_builds: s.jobs_in(BuildStage::Build),
+                ram_reserved_mb: s.ram_reserved_mb(),
+                ram_reserved_unused_mb: s.ram_reserved_unused_mb(),
+                ram_reserved_for_waiting_build_mb: 0,
             }
         })
     }
@@ -267,11 +295,23 @@ impl WorkerPool {
         })
     }
 
-    pub fn assign_job(&mut self, worker_id: &str, job_id: &str, kind: JobKind) {
+    pub fn assign_job(
+        &mut self,
+        worker_id: &str,
+        job_id: &str,
+        kind: JobKind,
+        reserved_ram_mb: u64,
+    ) {
         if let Some(slot) = self.workers.get_mut(worker_id) {
-            slot.shared_mut()
-                .assigned_jobs
-                .insert(job_id.to_owned(), AssignedJob { kind, stage: None });
+            slot.shared_mut().assigned_jobs.insert(
+                job_id.to_owned(),
+                AssignedJob {
+                    kind,
+                    stage: None,
+                    reserved_ram_mb,
+                    observed_ram_mb: 0,
+                },
+            );
         }
     }
 
@@ -447,7 +487,7 @@ mod tests {
             "idle eval-only worker present"
         );
 
-        pool.assign_job("e1", "j1", JobKind::Flake);
+        pool.assign_job("e1", "j1", JobKind::Flake, 0);
         assert!(
             !pool.has_idle_eval_only_worker(),
             "eval-only worker is busy"
@@ -478,8 +518,8 @@ mod tests {
     fn test_unregister_returns_assigned_jobs() {
         let mut pool = WorkerPool::new();
         pool.register("w1".into(), caps(), HashSet::new(), port().0);
-        pool.assign_job("w1", "j1", JobKind::Build);
-        pool.assign_job("w1", "j2", JobKind::Build);
+        pool.assign_job("w1", "j1", JobKind::Build, 0);
+        pool.assign_job("w1", "j2", JobKind::Build, 0);
 
         let mut jobs = pool.unregister("w1");
         jobs.sort();
@@ -754,9 +794,9 @@ mod tests {
         );
 
         assert!(pool.has_capacity("w1", &JobKind::Build), "0/2 has capacity");
-        pool.assign_job("w1", "j1", JobKind::Build);
+        pool.assign_job("w1", "j1", JobKind::Build, 0);
         assert!(pool.has_capacity("w1", &JobKind::Build), "1/2 has capacity");
-        pool.assign_job("w1", "j2", JobKind::Build);
+        pool.assign_job("w1", "j2", JobKind::Build, 0);
         assert!(
             !pool.has_capacity("w1", &JobKind::Build),
             "2/2 is at limit - must reject"
@@ -778,12 +818,12 @@ mod tests {
             },
         );
 
-        pool.assign_job("w1", "eval", JobKind::Flake);
+        pool.assign_job("w1", "eval", JobKind::Flake, 0);
         assert!(
             pool.has_capacity("w1", &JobKind::Build),
             "an evaluation waiting on its import still lets the import build here"
         );
-        pool.assign_job("w1", "import", JobKind::Build);
+        pool.assign_job("w1", "import", JobKind::Build, 0);
         assert!(!pool.has_capacity("w1", &JobKind::Build));
     }
 
@@ -791,8 +831,8 @@ mod tests {
     fn the_worker_info_counts_build_jobs_apart_from_eval_jobs() {
         let mut pool = WorkerPool::new();
         pool.register("w1".into(), caps(), HashSet::new(), port().0);
-        pool.assign_job("w1", "eval", JobKind::Flake);
-        pool.assign_job("w1", "build", JobKind::Build);
+        pool.assign_job("w1", "eval", JobKind::Flake, 0);
+        pool.assign_job("w1", "build", JobKind::Build, 0);
 
         let info = &pool.all_workers()[0];
         assert_eq!(info.assigned_job_count, 2);
@@ -804,10 +844,10 @@ mod tests {
         let mut pool = WorkerPool::new();
         pool.register("w1".into(), caps(), HashSet::new(), port().0);
 
-        pool.assign_job("w1", "j1", JobKind::Build);
+        pool.assign_job("w1", "j1", JobKind::Build, 0);
         assert_eq!(pool.all_workers()[0].assigned_job_count, 1);
 
-        pool.assign_job("w1", "j2", JobKind::Build);
+        pool.assign_job("w1", "j2", JobKind::Build, 0);
         assert_eq!(pool.all_workers()[0].assigned_job_count, 2);
 
         assert!(!pool.release_job("w1", "j1"));
@@ -823,9 +863,9 @@ mod tests {
         for id in ["w1", "w2"] {
             pool.register(id.into(), caps(), HashSet::new(), port().0);
         }
-        pool.assign_job("w1", "a", JobKind::Build);
-        pool.assign_job("w1", "b", JobKind::Build);
-        pool.assign_job("w2", "c", JobKind::Build);
+        pool.assign_job("w1", "a", JobKind::Build, 0);
+        pool.assign_job("w1", "b", JobKind::Build, 0);
+        pool.assign_job("w2", "c", JobKind::Build, 0);
         pool.enter_stage("w1", "a", BuildStage::Build);
         pool.enter_stage("w1", "b", BuildStage::Prefetch);
         pool.enter_stage("w2", "c", BuildStage::Prefetch);
@@ -842,6 +882,52 @@ mod tests {
     }
 
     #[test]
+    fn a_build_outgrowing_its_prediction_reserves_its_observed_peak() {
+        let mut pool = WorkerPool::new();
+        pool.register("w1".into(), caps(), HashSet::new(), port().0);
+        pool.assign_job("w1", "young", JobKind::Build, 50_000);
+        pool.assign_job("w1", "runaway", JobKind::Build, 2_000);
+        assert_eq!(pool.metrics_for("w1").unwrap().ram_reserved_unused_mb, None);
+
+        pool.observe_build_ram("w1", Some(vec![("runaway".into(), 30_000)]));
+        pool.observe_build_ram("w1", Some(vec![("runaway".into(), 20_000)]));
+
+        let metrics = pool.metrics_for("w1").unwrap();
+        assert_eq!(metrics.ram_reserved_mb, 80_000);
+        assert_eq!(metrics.ram_reserved_unused_mb, Some(50_000));
+        assert_eq!(
+            pool.observed_build_ram("w1"),
+            HashMap::from([("runaway".to_owned(), 30_000)])
+        );
+    }
+
+    #[test]
+    fn an_assigned_job_reserves_its_predicted_peak_ram_until_released() {
+        let mut pool = WorkerPool::new();
+        pool.register("w1".into(), caps(), HashSet::new(), port().0);
+        pool.update_capabilities(
+            "w1",
+            crate::WorkerProfile {
+                ram_total_mb: 128_000,
+                ..Default::default()
+            },
+        );
+        pool.update_metrics("w1", 0.0, 118_000, None, None, None);
+
+        pool.assign_job("w1", "clang", JobKind::Build, 54_000);
+        pool.assign_job("w1", "pinocchio", JobKind::Build, 67_000);
+        pool.assign_job("w1", "substitution", JobKind::Build, 0);
+        let view = pool.metrics_for("w1").unwrap();
+        assert_eq!(view.ram_reserved_mb, 121_000);
+        assert_eq!(view.ram_available_mb(), Some(7_000));
+
+        pool.release_job("w1", "pinocchio");
+        let view = pool.metrics_for("w1").unwrap();
+        assert_eq!(view.ram_reserved_mb, 54_000);
+        assert_eq!(view.ram_available_mb(), Some(74_000));
+    }
+
+    #[test]
     fn test_all_workers_info() {
         let mut pool = WorkerPool::new();
         pool.register("w1".into(), caps(), HashSet::new(), port().0);
@@ -854,7 +940,7 @@ mod tests {
                 ..Default::default()
             },
         );
-        pool.assign_job("w1", "j1", JobKind::Build);
+        pool.assign_job("w1", "j1", JobKind::Build, 0);
         pool.mark_draining("w2");
 
         let mut workers = pool.all_workers();

@@ -75,6 +75,8 @@ pub enum AttemptFailureReason {
     SilentTimeout = 7,
     #[sea_orm(num_value = 8)]
     InputsUnavailable = 8,
+    #[sea_orm(num_value = 9)]
+    WorkerLost = 9,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
