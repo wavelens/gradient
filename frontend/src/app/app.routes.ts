@@ -7,6 +7,7 @@
 import { Routes } from '@angular/router';
 import { authGuard } from '@core/guards/auth.guard';
 import { adminGuard } from '@core/guards/admin.guard';
+import { visibleProjectGuard } from '@core/guards/visible-project.guard';
 import { unsavedChangesGuard } from '@core/guards/unsaved-changes.guard';
 import { taskAccessResolver } from '@core/resolvers/task-access.resolver';
 import { cacheAccessResolver } from '@core/resolvers/cache-access.resolver';
@@ -47,143 +48,150 @@ export const routes: Routes = [
     ],
   },
 
-  // Project detail (public)
+  // Project pages open to anonymous visitors of a public project
   {
     path: 'project/:project',
-    title: 'Project',
-    resolve: { projectAccess: projectAccessResolver },
-    loadComponent: () =>
-      import('./features/projects/project-detail/project-detail.component').then(
-        (m) => m.ProjectDetailComponent
-      ),
-  },
-
-  // Task tree with parent layout + access resolver
-  {
-    path: 'project/:project/task/:task',
-    loadComponent: () =>
-      import('./features/tasks/task-layout/task-layout.component').then(
-        (m) => m.TaskLayoutComponent,
-      ),
-    resolve: { taskAccess: taskAccessResolver },
-    runGuardsAndResolvers: 'paramsChange',
+    canActivate: [visibleProjectGuard],
     children: [
+      // Project detail (public)
       {
         path: '',
-        title: 'Task',
+        title: 'Project',
+        resolve: { projectAccess: projectAccessResolver },
         loadComponent: () =>
-          import('./features/tasks/task-detail/task-detail.component').then(
-            (m) => m.TaskDetailComponent,
+          import('./features/projects/project-detail/project-detail.component').then(
+            (m) => m.ProjectDetailComponent
+          ),
+      },
+
+      // Task tree with parent layout + access resolver
+      {
+        path: 'task/:task',
+        loadComponent: () =>
+          import('./features/tasks/task-layout/task-layout.component').then(
+            (m) => m.TaskLayoutComponent,
+          ),
+        resolve: { taskAccess: taskAccessResolver },
+        runGuardsAndResolvers: 'paramsChange',
+        children: [
+          {
+            path: '',
+            title: 'Task',
+            loadComponent: () =>
+              import('./features/tasks/task-detail/task-detail.component').then(
+                (m) => m.TaskDetailComponent,
+              ),
+          },
+          {
+            path: 'metrics',
+            title: 'Task Metrics',
+            loadComponent: () =>
+              import('./features/tasks/task-metrics/task-metrics.component').then(
+                (m) => m.TaskMetricsComponent,
+              ),
+          },
+          {
+            path: 'entry-point-metrics',
+            title: 'Entry Point Metrics',
+            loadComponent: () =>
+              import('./features/tasks/entry-point-metrics/entry-point-metrics.component').then(
+                (m) => m.EntryPointMetricsComponent,
+              ),
+          },
+          {
+            path: 'settings',
+            title: 'Task Settings',
+            canActivate: [authGuard],
+            loadComponent: () =>
+              import('./features/tasks/task-settings/task-settings.component').then(
+                (m) => m.TaskSettingsComponent,
+              ),
+          },
+          {
+            path: 'triggers',
+            title: 'Task Triggers',
+            canActivate: [authGuard],
+            loadComponent: () =>
+              import('./features/tasks/task-triggers/task-triggers.component').then(
+                (m) => m.TaskTriggersComponent,
+              ),
+          },
+          {
+            path: 'actions',
+            title: 'Task Actions',
+            canActivate: [authGuard],
+            loadComponent: () =>
+              import('./features/tasks/task-actions/task-actions.component').then(
+                (m) => m.TaskActionsComponent,
+              ),
+          },
+          {
+            path: 'flake-inputs',
+            title: 'Task Flake Inputs',
+            canActivate: [authGuard],
+            loadComponent: () =>
+              import('./features/tasks/task-flake-inputs/task-flake-inputs.component').then(
+                (m) => m.TaskFlakeInputsComponent,
+              ),
+          },
+        ],
+      },
+
+      // Build / evaluation utility routes (no layout)
+      {
+        path: 'artefacts/:buildId',
+        title: 'Build Artefacts',
+        data: { hideFooter: true },
+        loadComponent: () =>
+          import('./features/evaluations/build-artefacts/build-artefacts.component').then(
+            (m) => m.BuildArtefactsComponent
           ),
       },
       {
-        path: 'metrics',
-        title: 'Task Metrics',
+        path: 'graph/:buildId',
+        title: 'Dependency Graph',
+        data: { hideFooter: true },
         loadComponent: () =>
-          import('./features/tasks/task-metrics/task-metrics.component').then(
-            (m) => m.TaskMetricsComponent,
+          import('./features/evaluations/dependency-graph/dependency-graph.component').then(
+            (m) => m.DependencyGraphComponent
           ),
       },
       {
-        path: 'entry-point-metrics',
-        title: 'Entry Point Metrics',
+        path: 'closure/:kind/:id',
+        title: 'Closure',
+        data: { hideFooter: true },
         loadComponent: () =>
-          import('./features/tasks/entry-point-metrics/entry-point-metrics.component').then(
-            (m) => m.EntryPointMetricsComponent,
+          import('./features/evaluations/closure-graph/closure-graph.component').then(
+            (m) => m.ClosureGraphComponent
           ),
       },
       {
-        path: 'settings',
-        title: 'Task Settings',
-        canActivate: [authGuard],
+        path: 'log/:evaluationId',
+        title: 'Evaluation Log',
+        data: { hideFooter: true },
         loadComponent: () =>
-          import('./features/tasks/task-settings/task-settings.component').then(
-            (m) => m.TaskSettingsComponent,
+          import('./features/evaluations/evaluation-log/evaluation-log.component').then(
+            (m) => m.EvaluationLogComponent
           ),
       },
       {
-        path: 'triggers',
-        title: 'Task Triggers',
-        canActivate: [authGuard],
+        path: 'summary/:evaluationId',
+        title: 'Evaluation Summary',
         loadComponent: () =>
-          import('./features/tasks/task-triggers/task-triggers.component').then(
-            (m) => m.TaskTriggersComponent,
+          import('./features/evaluations/evaluation-summary/evaluation-summary.component').then(
+            (m) => m.EvaluationSummaryComponent
           ),
       },
       {
-        path: 'actions',
-        title: 'Task Actions',
-        canActivate: [authGuard],
+        path: 'log',
+        title: 'Evaluation Log',
+        data: { hideFooter: true },
         loadComponent: () =>
-          import('./features/tasks/task-actions/task-actions.component').then(
-            (m) => m.TaskActionsComponent,
-          ),
-      },
-      {
-        path: 'flake-inputs',
-        title: 'Task Flake Inputs',
-        canActivate: [authGuard],
-        loadComponent: () =>
-          import('./features/tasks/task-flake-inputs/task-flake-inputs.component').then(
-            (m) => m.TaskFlakeInputsComponent,
+          import('./features/evaluations/evaluation-log/evaluation-log.component').then(
+            (m) => m.EvaluationLogComponent
           ),
       },
     ],
-  },
-
-  // Build / evaluation utility routes (no layout)
-  {
-    path: 'project/:project/artefacts/:buildId',
-    title: 'Build Artefacts',
-    data: { hideFooter: true },
-    loadComponent: () =>
-      import('./features/evaluations/build-artefacts/build-artefacts.component').then(
-        (m) => m.BuildArtefactsComponent
-      ),
-  },
-  {
-    path: 'project/:project/graph/:buildId',
-    title: 'Dependency Graph',
-    data: { hideFooter: true },
-    loadComponent: () =>
-      import('./features/evaluations/dependency-graph/dependency-graph.component').then(
-        (m) => m.DependencyGraphComponent
-      ),
-  },
-  {
-    path: 'project/:project/closure/:kind/:id',
-    title: 'Closure',
-    data: { hideFooter: true },
-    loadComponent: () =>
-      import('./features/evaluations/closure-graph/closure-graph.component').then(
-        (m) => m.ClosureGraphComponent
-      ),
-  },
-  {
-    path: 'project/:project/log/:evaluationId',
-    title: 'Evaluation Log',
-    data: { hideFooter: true },
-    loadComponent: () =>
-      import('./features/evaluations/evaluation-log/evaluation-log.component').then(
-        (m) => m.EvaluationLogComponent
-      ),
-  },
-  {
-    path: 'project/:project/summary/:evaluationId',
-    title: 'Evaluation Summary',
-    loadComponent: () =>
-      import('./features/evaluations/evaluation-summary/evaluation-summary.component').then(
-        (m) => m.EvaluationSummaryComponent
-      ),
-  },
-  {
-    path: 'project/:project/log',
-    title: 'Evaluation Log',
-    data: { hideFooter: true },
-    loadComponent: () =>
-      import('./features/evaluations/evaluation-log/evaluation-log.component').then(
-        (m) => m.EvaluationLogComponent
-      ),
   },
 
   // Cache tree with parent layout + access resolver
