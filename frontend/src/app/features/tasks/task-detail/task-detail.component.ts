@@ -37,7 +37,7 @@ import { AccessService, WritableDirective } from '@shared/access';
 import { injectTaskAccess, injectTaskAccessData } from '@core/resolvers/inject-access';
 import { failuresWithinLoadedRows, groupEntryPoints } from './entry-point-groups';
 import { StarTarget, TaskDetail, EvaluationSummary, EvaluationProgress, EvaluationStatus, EntryPointSummary, FailedAttributeSummary, BuildStatusCounts, WalkMode } from '@core/models';
-import { buildDuration, commitLabel, commitWebUrl, entryPointPhase, evaluationDuration, evaluationPhase, evaluationTitle, formatEvaluationDuration, inputFetchPhase, isPendingBuildStatus, isRunningEvaluationStatus, phaseProgress, repositoryWebUrl, thunkProgress } from '@shared/evaluation';
+import { buildDuration, canAbortBuild, canPrioritizeBuild, canRetryBuild, commitLabel, commitWebUrl, entryPointPhase, evaluationDuration, evaluationPhase, evaluationTitle, formatEvaluationDuration, inputFetchPhase, isRunningEvaluationStatus, phaseProgress, repositoryWebUrl, thunkProgress } from '@shared/evaluation';
 
 @Component({
   selector: 'app-task-detail',
@@ -602,7 +602,16 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
   }
 
   private canPrioritizeEntryPoint(ep: EntryPointSummary): boolean {
-    return this.isSuperuser() && !ep.prioritized && isPendingBuildStatus(ep.build_status);
+    return this.isSuperuser() && canPrioritizeBuild({ status: ep.build_status, prioritized: ep.prioritized });
+  }
+
+  private canAbortEntryPoint(ep: EntryPointSummary, evaluation: EvaluationSummary): boolean {
+    return this.canTrigger() && canAbortBuild(evaluation.status, ep.build_status);
+  }
+
+  private canRetryEntryPoint(ep: EntryPointSummary, evaluation: EvaluationSummary): boolean {
+    const replaced = this.latestEvaluation()?.id !== evaluation.id;
+    return this.canTrigger() && canRetryBuild({ status: evaluation.status, replaced }, ep.build_status);
   }
 
   private canRetryEvaluation(evaluation: EvaluationSummary): boolean {
@@ -671,6 +680,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
   }
 
   private buildPkgMenu(ep: EntryPointSummary, evalId: string): MenuItem[] {
+    const evaluation = this.evaluations().find(e => e.id === evalId);
     const built = ep.build_status === 'Completed' || ep.build_status === 'Substituted';
     const canArtefacts = built && ep.has_artefacts;
     return [
@@ -697,6 +707,16 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
         ? [{ label: 'Prioritize', icon: 'keyboard_double_arrow_up',
              command: () => this.runAction(this.evaluationsService.prioritizeBuild(ep.build_id),
                'Build prioritized', 'Failed to prioritize build.') }]
+        : []),
+      ...(evaluation && this.canAbortEntryPoint(ep, evaluation)
+        ? [{ label: 'Abort', icon: 'stop_circle',
+             command: () => this.runAction(this.evaluationsService.abortBuild(ep.build_id),
+               'Build aborted', 'Failed to abort build.') }]
+        : []),
+      ...(evaluation && this.canRetryEntryPoint(ep, evaluation)
+        ? [{ label: 'Retry', icon: 'replay',
+             command: () => this.runAction(this.evaluationsService.retryBuild(ep.build_id),
+               'Build retried', 'Failed to retry build.') }]
         : []),
     ];
   }
