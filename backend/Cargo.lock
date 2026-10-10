@@ -3128,6 +3128,7 @@ dependencies = [
  "rustls",
  "rustls-native-certs",
  "serde_json",
+ "socket2",
  "tempfile",
  "thiserror 2.0.21",
  "tokio",

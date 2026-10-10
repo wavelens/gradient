@@ -106,10 +106,13 @@ A **peer** is anything registering a worker, such as a project, a cache or a pro
 - The reply is `495` when no peer remained.
 - **Reauth** can add peers without reconnecting.
 - The server will send `AuthChallenge` to a worker-dialed session when a peer registered the worker.
+- A project subscribing to a cache will reauth the project's workers.
 - The worker will send `ReauthRequest` when its peers file changed.
 - Both will end in `AuthUpdate`, and reauth will never revoke granted peers.
 - One connection per worker ID. The server will reject a second connection with `496`.
 - The server will drop a connection silent for `proto.workerHeartbeatTimeoutSecs` (120 s).
+- The worker will drop a connection with data unacknowledged for 120 s and reconnect.
+- The worker will abandon a connect after 10 s and a handshake after 15 s without an answer.
 - A project's worker list will show a worker as live only when the worker authenticated for that project.
 
 ## Build Timeouts
