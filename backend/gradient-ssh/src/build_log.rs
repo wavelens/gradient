@@ -7,6 +7,7 @@
 use crate::build_request::drv_name;
 use crate::build_wait::settles_the_request;
 use crate::session::Session;
+use gradient_db::status::log_tail::LogTail;
 use gradient_entity::build::BuildStatus;
 use gradient_types::*;
 use harmonia_protocol::log::{
@@ -25,7 +26,7 @@ fn activity_id() -> u64 {
 pub struct BuildActivity {
     id: u64,
     attempt: Option<BuildAttemptId>,
-    offset: usize,
+    tail: LogTail,
     pending: String,
 }
 
@@ -48,25 +49,20 @@ impl BuildActivity {
         let activity = Self {
             id,
             attempt: None,
-            offset: 0,
+            tail: LogTail::default(),
             pending: String::new(),
         };
         (activity, start)
     }
 
-    pub fn read(&mut self, attempt: BuildAttemptId, log: &str) -> Vec<LogMessage> {
+    pub fn read(&mut self, attempt: BuildAttemptId, appended: &str) -> Vec<LogMessage> {
         let mut lines = Vec::new();
         if self.attempt != Some(attempt) {
             lines.extend(self.rest());
             self.attempt = Some(attempt);
-            self.offset = 0;
         }
 
-        if let Some(new) = log.get(self.offset..) {
-            self.offset = log.len();
-            self.pending.push_str(new);
-        }
-
+        self.pending.push_str(appended);
         if let Some(end) = self.pending.rfind('\n') {
             let complete: String = self.pending.drain(..=end).collect();
             lines.extend(complete.lines().map(|line| self.line(line)));
@@ -168,8 +164,20 @@ impl BuildLogs {
             log(start);
             activity
         });
-        let text = state.log_storage.read(attempt).await.unwrap_or_default();
-        activity.read(attempt, &text).into_iter().for_each(log);
+
+        let appended = match activity
+            .tail
+            .appended(&state.web_db, state.log_storage.as_ref(), attempt)
+            .await
+        {
+            Ok(appended) => appended,
+            Err(e) => {
+                tracing::warn!(%build, error = %e, "build log could not be read");
+                String::new()
+            }
+        };
+
+        activity.read(attempt, &appended).into_iter().for_each(log);
         Ok(())
     }
 }
@@ -266,10 +274,7 @@ mod tests {
             log_lines(started.id, &activity.read(first, "one\ntw")),
             ["one"]
         );
-        assert_eq!(
-            log_lines(started.id, &activity.read(first, "one\ntwo\n")),
-            ["two"]
-        );
+        assert_eq!(log_lines(started.id, &activity.read(first, "o\n")), ["two"]);
         let retry = BuildAttemptId::now_v7();
         assert!(activity.read(retry, "again").is_empty());
 
@@ -312,6 +317,7 @@ mod tests {
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             .append_query_results([vec![build.clone()]])
             .append_query_results([vec![attempt]])
+            .append_query_results([Vec::<gradient_entity::build_log_chunk::Model>::new()])
             .into_connection();
         let session = Session {
             state: gradient_test_support::state::test_state_web(db),

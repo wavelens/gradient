@@ -15,61 +15,15 @@ use axum::{Extension, Json};
 use axum_streams::StreamBodyAs;
 use gradient_core::ServerState;
 use gradient_db::scheduling::build_attempt::latest_attempt_id;
+use gradient_db::status::log_tail::LogTail;
 use gradient_types::*;
 use sea_orm::EntityTrait;
 use std::sync::Arc;
 use tokio::time::Duration;
 
 use super::BuildAccessContext;
-use super::log_chunks::{chunked_text_from, load_chunk_rows};
 
 const POLL_INTERVAL: Duration = Duration::from_millis(500);
-
-struct LogTail {
-    attempt: Option<BuildAttemptId>,
-    offset: u64,
-}
-
-impl LogTail {
-    async fn appended(
-        &mut self,
-        state: &ServerState,
-        attempt: BuildAttemptId,
-    ) -> WebResult<String> {
-        if self.attempt != Some(attempt) {
-            *self = Self {
-                attempt: Some(attempt),
-                offset: 0,
-            };
-        }
-
-        let logs = state.log_storage.as_ref();
-        let Some(inline) = logs.read_inline_from(attempt, self.offset).await? else {
-            let rows = load_chunk_rows(state, attempt).await?;
-            let (text, end) = chunked_text_from(logs, attempt, &rows, self.offset).await?;
-            self.offset = end;
-
-            return Ok(text);
-        };
-
-        let (text, consumed) = complete_utf8(&inline);
-        self.offset += consumed as u64;
-
-        Ok(text)
-    }
-}
-
-fn complete_utf8(bytes: &[u8]) -> (String, usize) {
-    let complete = match std::str::from_utf8(bytes) {
-        Err(e) if e.error_len().is_none() => e.valid_up_to(),
-        _ => bytes.len(),
-    };
-
-    (
-        String::from_utf8_lossy(&bytes[..complete]).into_owned(),
-        complete,
-    )
-}
 
 pub async fn get_build_log(
     state: State<Arc<ServerState>>,
@@ -110,10 +64,7 @@ pub async fn post_build_log(
         use gradient_entity::build::BuildStatus;
 
         let mut sent_any = false;
-        let mut tail = LogTail {
-            attempt: initial_attempt,
-            offset: initial_offset,
-        };
+        let mut tail = LogTail::after(initial_attempt, initial_offset);
 
         loop {
             tokio::time::sleep(POLL_INTERVAL).await;
@@ -135,7 +86,7 @@ pub async fn post_build_log(
                 break;
             };
 
-            match tail.appended(&state, attempt).await {
+            match tail.appended(&state.web_db, state.log_storage.as_ref(), attempt).await {
                 Ok(text) if text.is_empty() => {}
                 Ok(text) => {
                     sent_any = true;
@@ -170,23 +121,4 @@ pub async fn post_build_log(
         .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-cache"));
 
     Ok(response)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::complete_utf8;
-
-    #[test]
-    fn complete_utf8_holds_back_a_split_character() {
-        let cases: [(&str, &[u8], (&str, usize)); 4] = [
-            ("whole text", "ok\n".as_bytes(), ("ok\n", 3)),
-            ("split last character", &[b'a', 0xC3], ("a", 1)),
-            ("invalid byte", &[b'a', 0xFF, b'b'], ("a\u{FFFD}b", 3)),
-            ("nothing", &[], ("", 0)),
-        ];
-
-        for (case, bytes, (text, consumed)) in cases {
-            assert_eq!(complete_utf8(bytes), (text.to_owned(), consumed), "{case}");
-        }
-    }
 }

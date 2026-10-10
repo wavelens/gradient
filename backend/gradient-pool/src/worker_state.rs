@@ -102,6 +102,13 @@ impl WorkerShared {
         })
     }
 
+    pub fn observed_build_ram(&self) -> impl Iterator<Item = (String, u64)> + '_ {
+        self.assigned_jobs
+            .iter()
+            .filter(|(_, job)| job.observed_ram_mb > 0)
+            .map(|(job_id, job)| (job_id.clone(), job.observed_ram_mb))
+    }
+
     pub fn jobs_in(&self, stage: BuildStage) -> u32 {
         self.assigned_jobs
             .values()
