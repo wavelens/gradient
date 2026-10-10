@@ -4,7 +4,8 @@ Gradient migrations are [SeaORM migrations](https://www.sea-ql.org/SeaORM/docs/m
 
 ```mermaid
 flowchart LR
-    start[Server start] --> prune[prune_removed_migrations]
+    start[Server start] --> floor[require_upgrade_floor]
+    floor --> prune[prune_removed_migrations]
     prune --> up["Migrator::up"]
     up --> baseline{Database state}
     baseline -->|fresh| schema[Baseline emitting the schema]
@@ -28,7 +29,7 @@ flowchart LR
 | Fresh | Emitting the schema left by that chain: a cleaned `pg_dump` of the real chain, verified by dump diff, plus the constant `cache_role` seed rows |
 | Already provisioned | Detecting the schema and doing nothing. `prune_removed_migrations` will drop the deleted files' `seaql_migrations` rows |
 
-**Upgrade floor:** a database must be at or past `m20260619_010000_globalize_derivation` before upgrading to a release with the baseline. A database stuck earlier must upgrade through an older release first.
+A database stuck earlier in that chain is behind the [Upgrade Floor](#upgrade-floor).
 
 ### Regenerating After a Future Squash
 
@@ -36,6 +37,29 @@ flowchart LR
 2. `pg_dump --schema-only --no-owner --no-privileges --exclude-table=seaql_migrations`.
 3. Strip the psql `\restrict` and `SET` prelude and re-append constant seed rows.
 4. Verify with a schema and data dump diff between a full-chain database and a baseline database.
+5. Rename the baseline file and set `UPGRADE_FLOOR` to the last release holding the full chain, see [Upgrade Floor](#upgrade-floor).
+
+## Upgrade Floor
+
+A database behind a squash into the baseline has no migration files left to apply. `require_upgrade_floor` (`backend/gradient-db/src/connection/upgrade_floor.rs`) can read `seaql_migrations` on each server start, ahead of `prune_removed_migrations`. Servers refuse to start on a database behind the floor. Errors in the log name the missing migration and the release to start first.
+
+| `seaql_migrations` | Server start |
+|---|---|
+| Empty | Fresh install, allowed |
+| Holding the baseline of the running release | Same baseline, allowed |
+| Holding `last_migration`, with all `storage_migrations` applied | Upgrade across the squash, allowed |
+| Anything else | Refused |
+
+`UPGRADE_FLOOR` in `backend/gradient-migration/src/lib.rs` is the floor.
+
+| Field | Meaning | Value |
+|---|---|---|
+| `release` | Release to start first on a refused database | `commit 0c1e8cc07` |
+| `last_migration` | Last database migration of that release | `m20260619_010000_globalize_derivation` |
+| `storage_migrations` | [Storage migrations](internals/nar-storage.md#storage-migrations) of that release, each with `applied_at` in the `storage_migration` table | Empty |
+
+- **Storage:** The `storage_migration` table is the same for an S3 and a local NAR store, and both are part of the check.
+- **Baseline Name:** A squash must rename the baseline file. Databases of an earlier baseline lack the new name and must reach the floor.
 
 ## Cancelling Pairs
 
