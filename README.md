@@ -1,4 +1,4 @@
-<p align="center"><img src="logo/logo-outlined.svg" alt="" width="320"></p>
+<p align="center"><img src="logo/logo-outlined.svg" alt="" width="160"></p>
 <h1 align="center">Gradient</h1>
 
 <p align="center"><b>Nix-CI for Teams.</b> Every flake built once, on any machine, cached for everyone.</p>
