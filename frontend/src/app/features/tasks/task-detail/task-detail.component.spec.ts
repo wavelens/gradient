@@ -1399,4 +1399,20 @@ describe('TaskDetailComponent - package search', () => {
     expect(spy).toHaveBeenLastCalledWith('acme', fixture.componentInstance.taskName, 'e1', 25, 0, '');
     expect(names(fixture.nativeElement)).toEqual(['hello', 'world']);
   });
+
+  it('clears and leaves the search field on Escape while the list spans pages and keeps the field shown', () => {
+    const { fixture } = setup(access, {
+      getEntryPoints: () => of({ entry_points: [epSummary('hello')], total: 26, failed_attributes: [] }),
+    });
+    const input = searchField(fixture)!;
+    input.focus();
+    type(fixture, input, 'hel');
+
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    fixture.detectChanges();
+
+    expect(searchField(fixture)).toBe(input);
+    expect(input.value).toBe('');
+    expect(document.activeElement).not.toBe(input);
+  });
 });
