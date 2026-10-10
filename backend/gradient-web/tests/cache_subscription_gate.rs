@@ -220,6 +220,8 @@ async fn subscribe_succeeds_when_both_granted() {
             last_insert_id: 0,
             rows_affected: 1,
         }])
+        .append_query_results([Vec::<gradient_entity::worker_registration::Model>::new()])
+        .append_query_results([Vec::<gradient_entity::team_project::Model>::new()])
         .append_query_results([Vec::<gradient_entity::task::Model>::new()])
         .append_query_results([Vec::<gradient_entity::derivation::Model>::new()]);
 
