@@ -134,11 +134,6 @@
       GRADIENT_SECRETS_CRYPT_FILE = pkgs.writeText "crypt_secret_file" "aW52YWxpZC1pbnZhbGlkLWludmFsaWQK";
       GRADIENT_SECRETS_JWT_FILE = pkgs.writeText "jwt_secret_file" "8a2eb7ba959570ff8842f148207524c7b8d731d7a1998584105e951599221f9d";
       GRADIENT_SENTRY_ENABLE = "false";
-
-      shellHook = ''
-        ln -sfn ${self.packages.${system}.gradient-logo}/logo-transparent.svg frontend/public/images/logo.svg
-        ln -sfn ${self.packages.${system}.gradient-logo}/logo-outlined.svg frontend/public/images/favicon.svg
-      '';
     };
   }) // {
     lib.tests = {
