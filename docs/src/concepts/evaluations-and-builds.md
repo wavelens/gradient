@@ -61,21 +61,22 @@ A build is tied to the derivation, not to the evaluation. All evaluations needin
 - **Abort** on a running build can stop the build for its evaluation. Dependents in that evaluation fail, and a later evaluation can build the build again.
 - **Retry** on a failed or aborted build can queue the build and the dependents failing through the build again, inside the running evaluation.
 - **Retry** on a finished evaluation can start a new evaluation of the same commit, with all failed builds queued again.
-- A new evaluation can queue the failed builds it names again. The task option **Retry failed builds on new evaluation** (`retry_failed_builds`, on by default) can keep permanent failures failed until a retry instead.
+- Both kinds of retry ask the [upstream caches](caches.md#upstream-types) again. A worker can then substitute a build found there.
+- A new evaluation can queue every failed build it needs again. The task option **Retry failed builds on new evaluation** (`retry_failed_builds`, on by default) can keep permanent failures failed until a retry instead.
 
 ## Imported Derivations
 
 A flake can read the output of a derivation during evaluation. This is import from derivation (IFD).
 
-- The imported derivation turns into a normal build on any worker with its system.
+- Any worker with its system can build the imported derivation as a normal build.
 - The evaluating worker can wait for that build and then pull the outputs from the cache.
 - The task page can list the build as the entry point `other.<system>.<name>` with an **IFD** tag.
-- Imported builds and their unfinished dependencies get a priority lift, see [Scheduler Policies](../reference/scheduler-policies.md).
-- The attributes reading a failed import fail as well, with `import from derivation '<name>' failed: build <build id> <status>` as their error.
+- An imported build and every unfinished dependency below get a priority lift, see [Scheduler Policies](../reference/scheduler-policies.md).
+- The attributes reading a failed import fail as well, with `import from derivation '<name>' failed: build <build id> <status>` as the error.
 - Imports for a system missing from all connected workers fail after 5 minutes. A task can opt into waiting for workers instead.
 
 ## Related
 
-- [Projects and Tasks](projects-and-tasks.md): where evaluations come from
+- [Projects and Tasks](projects-and-tasks.md): the source of evaluations
 - [Overview](overview.md): workers and caches
 - [First Project](../get-started/first-project.md): start an evaluation

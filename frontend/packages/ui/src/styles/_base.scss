@@ -80,6 +80,7 @@ a {
 // with the separator and current-page spans beside them.
 .breadcrumb {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: $spacing-xs;
   margin-bottom: $spacing-sm;

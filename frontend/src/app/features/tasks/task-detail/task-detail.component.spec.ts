@@ -161,6 +161,8 @@ function setup(
     prioritizeEvaluation: () => of('Success'),
     retryEvaluation: () => of('c68e2ded-bd0c-4c4e-82fd-ec8f86f50df2'),
     prioritizeBuild: () => of('Success'),
+    abortBuild: () => of('Success'),
+    retryBuild: () => of('Success'),
   } as unknown as EvaluationsService;
   TestBed.configureTestingModule({
     imports: [TaskDetailComponent],
@@ -1179,6 +1181,54 @@ describe('TaskDetailComponent prioritize', () => {
   });
 });
 
+describe('TaskDetailComponent entry point abort and retry', () => {
+  const edit = { managed: false, canEdit: true, canTrigger: true };
+  const readOnly = { managed: false, canEdit: false, canTrigger: false };
+  const entryPoint = (build_status: EntryPointSummary['build_status']) => ({ ...epSummary('hello'), build_status });
+  const pkgLabels = (fixture: ComponentFixture<TaskDetailComponent>, ep: EntryPointSummary, evaluation = 'e1') => {
+    fixture.componentInstance.openPkgMenu(new Event('click'), ep, evaluation, { toggle: () => {} });
+    return fixture.componentInstance.pkgMenuModel().map(i => i.label);
+  };
+  const run = (fixture: ComponentFixture<TaskDetailComponent>, label: string) =>
+    fixture.componentInstance.pkgMenuModel().find(i => i.label === label)!.command!();
+
+  it('aborts a pending entry point of a running evaluation by its build id', () => {
+    const { fixture, evaluationsService } = setup(edit);
+    const spy = vi.spyOn(evaluationsService, 'abortBuild');
+    const labels = pkgLabels(fixture, entryPoint('Building'));
+    expect(labels).toContain('Abort');
+    expect(labels).not.toContain('Retry');
+    run(fixture, 'Abort');
+    expect(spy).toHaveBeenCalledWith('b-hello');
+  });
+
+  it('retries a failed entry point by its build id', () => {
+    const { fixture, evaluationsService } = setup(edit);
+    const spy = vi.spyOn(evaluationsService, 'retryBuild');
+    const labels = pkgLabels(fixture, entryPoint('DependencyFailed'));
+    expect(labels).toContain('Retry');
+    expect(labels).not.toContain('Abort');
+    run(fixture, 'Retry');
+    expect(spy).toHaveBeenCalledWith('b-hello');
+  });
+
+  it('retries a failed entry point of the latest evaluation after it finished', () => {
+    const { fixture } = setup(edit, { primaryStatus: 'Failed' });
+    expect(pkgLabels(fixture, entryPoint('FailedPermanent'))).toContain('Retry');
+  });
+
+  it('offers no retry in a finished evaluation replaced by a newer evaluation', () => {
+    const { fixture } = setup(edit, { extraEvals: [evalSummary('e2', 'Failed')] });
+    expect(pkgLabels(fixture, entryPoint('FailedPermanent'), 'e2')).not.toContain('Retry');
+  });
+
+  it('offers neither abort nor retry without edit access', () => {
+    const { fixture } = setup(readOnly);
+    expect(pkgLabels(fixture, entryPoint('Building'))).not.toContain('Abort');
+    expect(pkgLabels(fixture, entryPoint('Aborted'))).not.toContain('Retry');
+  });
+});
+
 describe('TaskDetailComponent header star', () => {
   const access = { managed: false, canEdit: false, canTrigger: false };
 
@@ -1291,6 +1341,23 @@ describe('TaskDetailComponent - package search', () => {
     expect(searchField(fixture)).not.toBeNull();
   });
 
+  it('keeps the same search field while the panel switches to another evaluation', () => {
+    const { fixture, query } = setup(access, {
+      extraEvals: [evalSummary('e2', 'Completed')],
+      getEntryPoints: () => of({ entry_points: [epSummary('hello')], total: 26, failed_attributes: [] }),
+    });
+    const shown = searchField(fixture);
+    const title = () => fixture.nativeElement.querySelector('.panel-title');
+    const firstTitle = title();
+
+    query.next(convertToParamMap({ eval: 'e2' }));
+    fixture.detectChanges();
+
+    expect(title()).not.toBe(firstTitle);
+    expect(shown).not.toBeNull();
+    expect(searchField(fixture)).toBe(shown);
+  });
+
   it('asks the server for the typed term and lists the matches only', () => {
     const { fixture, tasksService } = setup(access, { getEntryPoints: () => page(['hello', 'world']) });
     const spy = vi.spyOn(tasksService, 'getEntryPoints').mockReturnValue(page(['hello']));
@@ -1331,5 +1398,21 @@ describe('TaskDetailComponent - package search', () => {
     expect(searchField(fixture)).toBeNull();
     expect(spy).toHaveBeenLastCalledWith('acme', fixture.componentInstance.taskName, 'e1', 25, 0, '');
     expect(names(fixture.nativeElement)).toEqual(['hello', 'world']);
+  });
+
+  it('clears and leaves the search field on Escape while the list spans pages and keeps the field shown', () => {
+    const { fixture } = setup(access, {
+      getEntryPoints: () => of({ entry_points: [epSummary('hello')], total: 26, failed_attributes: [] }),
+    });
+    const input = searchField(fixture)!;
+    input.focus();
+    type(fixture, input, 'hel');
+
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    fixture.detectChanges();
+
+    expect(searchField(fixture)).toBe(input);
+    expect(input.value).toBe('');
+    expect(document.activeElement).not.toBe(input);
   });
 });

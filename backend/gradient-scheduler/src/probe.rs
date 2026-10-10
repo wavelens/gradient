@@ -25,7 +25,6 @@ use tracing::debug;
 pub const HEALTH_NAME: &str = "upstream-probe";
 const PROBE_TICK: Duration = Duration::from_secs(1);
 const PROBE_BUDGET: Duration = Duration::from_secs(120);
-const PROBE_MEMORY: Duration = Duration::from_secs(300);
 const PROBE_BATCH: usize = 256;
 
 const PROBE_SWEEP: Duration = Duration::from_secs(60);
@@ -33,17 +32,15 @@ const PROBE_DESCENT: Duration = Duration::from_secs(60);
 
 pub fn child_spec(state: &Arc<ServerState>) -> ChildSpec {
     let inbox = Arc::new(Mutex::new(state.probe_requests.take_inbox()));
-    let seen: Arc<Mutex<HashMap<DerivationId, Instant>>> = Arc::new(Mutex::new(HashMap::new()));
     let swept = Arc::new(Mutex::new(Instant::now()));
     let wake = state.probe_requests.wake();
     let state = Arc::clone(state);
     ChildSpec::periodic_woken(HEALTH_NAME, PROBE_TICK, PROBE_BUDGET, wake, move || {
         let state = Arc::clone(&state);
         let inbox = Arc::clone(&inbox);
-        let seen = Arc::clone(&seen);
         let swept = Arc::clone(&swept);
         async move {
-            probe_pass(&state, &inbox, &seen, &swept)
+            probe_pass(&state, &inbox, &swept)
                 .await
                 .map_err(|e| gradient_util::supervision::PassError::from(e.to_string()))
         }
@@ -53,7 +50,6 @@ pub fn child_spec(state: &Arc<ServerState>) -> ChildSpec {
 async fn probe_pass(
     state: &Arc<ServerState>,
     inbox: &Mutex<Option<UnboundedReceiver<Vec<DerivationId>>>>,
-    seen: &Mutex<HashMap<DerivationId, Instant>>,
     swept: &Mutex<Instant>,
 ) -> Result<()> {
     let started = Instant::now();
@@ -63,8 +59,9 @@ async fn probe_pass(
     }
 
     while !requested.is_empty() {
-        let unanswered = probe_round(state, fresh(requested, seen).await).await?;
-        forget(seen, &unanswered).await;
+        let mut shared_builds: Vec<DerivationId> = requested.into_iter().collect();
+        shared_builds.sort_unstable();
+        probe_round(state, shared_builds).await?;
         if started.elapsed() > PROBE_DESCENT {
             break;
         }
@@ -75,14 +72,7 @@ async fn probe_pass(
     Ok(())
 }
 
-async fn probe_round(
-    state: &Arc<ServerState>,
-    shared_builds: Vec<DerivationId>,
-) -> Result<Vec<DerivationId>> {
-    if shared_builds.is_empty() {
-        return Ok(Vec::new());
-    }
-
+async fn probe_round(state: &Arc<ServerState>, shared_builds: Vec<DerivationId>) -> Result<()> {
     let mut targets = unprobed_wanted(state, &shared_builds).await?;
     targets.extend(unprobed_dependencies(state, &targets).await?);
     let plan = plan_probes(state, &targets).await?;
@@ -108,18 +98,11 @@ async fn probe_round(
         }
     }
 
-    let answered = plan.answered_except(&unanswered_outputs);
     state
         .graph
-        .upstream_probed(answered.clone())
+        .upstream_probed(plan.answered_except(&unanswered_outputs))
         .await
-        .context("record the shared builds this round answered for")?;
-
-    let answered: HashSet<DerivationId> = answered.into_iter().collect();
-    Ok(shared_builds
-        .into_iter()
-        .filter(|a| !answered.contains(a))
-        .collect())
+        .context("record the shared builds this round answered for")
 }
 
 async fn drain_requests(
@@ -168,41 +151,6 @@ fn unanswered_need_query() -> sea_orm::Select<EDerivationBuild> {
         .filter(CDerivationBuild::Wanted.eq(true))
         .filter(CDerivation::Walked.eq(true))
         .limit(PROBE_BATCH as u64)
-}
-
-async fn fresh(
-    requested: HashSet<DerivationId>,
-    seen: &Mutex<HashMap<DerivationId, Instant>>,
-) -> Vec<DerivationId> {
-    if requested.is_empty() {
-        return Vec::new();
-    }
-
-    let now = Instant::now();
-    let mut seen = seen.lock().await;
-    seen.retain(|_, at| now.duration_since(*at) < PROBE_MEMORY);
-
-    let mut fresh: Vec<DerivationId> = requested
-        .into_iter()
-        .filter(|d| !seen.contains_key(d))
-        .collect();
-    fresh.sort_unstable();
-    for d in &fresh {
-        seen.insert(*d, now);
-    }
-
-    fresh
-}
-
-async fn forget(seen: &Mutex<HashMap<DerivationId, Instant>>, unanswered: &[DerivationId]) {
-    if unanswered.is_empty() {
-        return;
-    }
-
-    let mut seen = seen.lock().await;
-    for d in unanswered {
-        seen.remove(d);
-    }
 }
 
 #[derive(Debug, Default)]
@@ -489,14 +437,9 @@ mod tests {
     async fn an_idle_pass_reads_nothing() {
         let state = test_state(MockDatabase::new(DatabaseBackend::Postgres).into_connection());
 
-        probe_pass(
-            &state,
-            &Mutex::new(None),
-            &Mutex::new(HashMap::new()),
-            &Mutex::new(Instant::now()),
-        )
-        .await
-        .expect("an idle tick is a no-op");
+        probe_pass(&state, &Mutex::new(None), &Mutex::new(Instant::now()))
+            .await
+            .expect("an idle tick is a no-op");
     }
 
     #[tokio::test]
@@ -606,23 +549,6 @@ mod tests {
         assert!(
             sql.contains(r#""derivation_build"."cache_available" = FALSE"#),
             "{sql}"
-        );
-    }
-
-    #[tokio::test]
-    async fn an_unanswered_shared_build_is_asked_again() {
-        let seen = Mutex::new(HashMap::new());
-        let shared_build = DerivationId::now_v7();
-        assert_eq!(
-            fresh(HashSet::from([shared_build]), &seen).await,
-            vec![shared_build]
-        );
-
-        forget(&seen, &[shared_build]).await;
-
-        assert_eq!(
-            fresh(HashSet::from([shared_build]), &seen).await,
-            vec![shared_build]
         );
     }
 

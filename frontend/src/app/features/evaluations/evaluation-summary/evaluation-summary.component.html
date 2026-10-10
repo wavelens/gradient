@@ -101,7 +101,9 @@
       </gr-page-layout>
     }
   } @else {
-    <gr-empty-state icon="search_off" title="Summary not available"
-                    message="The evaluation does not exist or is not visible to this account." />
+    <gr-page-layout [breadcrumb]="breadcrumb()" [title]="headline()">
+      <gr-empty-state icon="search_off" title="Summary not available"
+                      message="The evaluation does not exist or is not visible to this account." />
+    </gr-page-layout>
   }
 }

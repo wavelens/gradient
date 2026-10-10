@@ -95,63 +95,65 @@
 
     <div class="panel pad">
       @for (sel of selectedList(); track sel.id) {
-        <div class="panel-body">
-          <div class="panel-head">
-            <div>
-              <div class="panel-title">
-                <gr-status-icon class="s-ico" [phase]="evaluationPhase(sel.status)" [prioritized]="sel.prioritized" />
-                <div>
-                  <div class="title-line">
-                    <h2 [title]="evalTitle(sel)">{{ evalTitle(sel) }}</h2>
-                    @if (isRunning(sel.status)) {
-                      <gr-eval-status-badge [status]="sel.status" [prioritized]="sel.prioritized" />
-                    }
-                  </div>
-                  <div class="sub">
-                    @if (commitWebUrl(proj.repository, sel.commit); as commitUrl) {
-                      <a class="mono commit-link" [href]="commitUrl" [title]="sel.commit" target="_blank" rel="noopener noreferrer">{{ commitLabel(sel.commit) }}</a> ·
-                    } @else {
-                      <span class="mono" [title]="sel.commit">{{ commitLabel(sel.commit) }}</span> ·
-                    }
-                    {{ triggerLabel(sel) }} · started {{ sel.created_at + 'Z' | date: 'MMM d, HH:mm' }}
-                  </div>
+        <div class="panel-head">
+          <div>
+            <div class="panel-title">
+              <gr-status-icon class="s-ico" [phase]="evaluationPhase(sel.status)" [prioritized]="sel.prioritized" />
+              <div>
+                <div class="title-line">
+                  <h2 [title]="evalTitle(sel)">{{ evalTitle(sel) }}</h2>
+                  @if (isRunning(sel.status)) {
+                    <gr-eval-status-badge [status]="sel.status" [prioritized]="sel.prioritized" />
+                  }
+                </div>
+                <div class="sub">
+                  @if (commitWebUrl(proj.repository, sel.commit); as commitUrl) {
+                    <a class="mono commit-link" [href]="commitUrl" [title]="sel.commit" target="_blank" rel="noopener noreferrer">{{ commitLabel(sel.commit) }}</a> ·
+                  } @else {
+                    <span class="mono" [title]="sel.commit">{{ commitLabel(sel.commit) }}</span> ·
+                  }
+                  {{ triggerLabel(sel) }} · started {{ sel.created_at + 'Z' | date: 'MMM d, HH:mm' }}
                 </div>
               </div>
-              <div class="bar-line">
-                <gr-segmented-bar class="eval-bar" [counts]="sel.builds" />
-                <span><b>{{ doneCount(sel.builds) }} / {{ totalCount(sel.builds) }}</b> builds</span>
-                <span class="dur"><gr-icon name="timer" size="sm" /> <b>{{ evalDuration(sel) }}</b></span>
-                @if (sel.errors > 0) {
-                  <a class="msg-chip error" [routerLink]="['/project', projectName, 'log', sel.id]" [queryParams]="{ eval: 1 }">
-                    {{ sel.errors }} {{ sel.errors === 1 ? 'error' : 'errors' }}
-                  </a>
-                }
-                @if (sel.warnings > 0) {
-                  <a class="msg-chip warn" [routerLink]="['/project', projectName, 'log', sel.id]" [queryParams]="{ eval: 1 }">
-                    {{ sel.warnings }} {{ sel.warnings === 1 ? 'warning' : 'warnings' }}
-                  </a>
-                }
-              </div>
             </div>
-            <div class="panel-actions">
-              <button grButton size="small" icon="more_vert" severity="secondary"
-                      (click)="panelMenu.toggle($event)" aria-label="More"></button>
-              <gr-menu #panelMenu [model]="panelMenuModel()" />
-              @if (isRunning(sel.status)) {
-                <button *appWritable="triggerAccess()" grButton size="small" label="Abort" icon="close"
-                        severity="danger" [loading]="aborting()" [disabled]="aborting()"
-                        (click)="requestAbort($event, sel.id)"></button>
+            <div class="bar-line">
+              <gr-segmented-bar class="eval-bar" [counts]="sel.builds" />
+              <span><b>{{ doneCount(sel.builds) }} / {{ totalCount(sel.builds) }}</b> builds</span>
+              <span class="dur"><gr-icon name="timer" size="sm" /> <b>{{ evalDuration(sel) }}</b></span>
+              @if (sel.errors > 0) {
+                <a class="msg-chip error" [routerLink]="['/project', projectName, 'log', sel.id]" [queryParams]="{ eval: 1 }">
+                  {{ sel.errors }} {{ sel.errors === 1 ? 'error' : 'errors' }}
+                </a>
+              }
+              @if (sel.warnings > 0) {
+                <a class="msg-chip warn" [routerLink]="['/project', projectName, 'log', sel.id]" [queryParams]="{ eval: 1 }">
+                  {{ sel.warnings }} {{ sel.warnings === 1 ? 'warning' : 'warnings' }}
+                </a>
               }
             </div>
           </div>
-          @if (searchShown()) {
-            <label class="search-box pkg-search" animate.leave="leaving">
-              <gr-icon name="search" size="sm" />
-              <input #packageSearch type="text" placeholder="Search packages" aria-label="Search packages"
-                     [value]="searchTerm()" (input)="search($any($event.target).value)"
-                     (keydown.escape)="closeSearch()" (blur)="closeEmptySearch()" />
-            </label>
-          }
+          <div class="panel-actions">
+            <button grButton size="small" icon="more_vert" severity="secondary"
+                    (click)="panelMenu.toggle($event)" aria-label="More"></button>
+            <gr-menu #panelMenu [model]="panelMenuModel()" />
+            @if (isRunning(sel.status)) {
+              <button *appWritable="triggerAccess()" grButton size="small" label="Abort" icon="close"
+                      severity="danger" [loading]="aborting()" [disabled]="aborting()"
+                      (click)="requestAbort($event, sel.id)"></button>
+            }
+          </div>
+        </div>
+      }
+      @if (searchShown()) {
+        <label class="search-box pkg-search" animate.leave="leaving">
+          <gr-icon name="search" size="sm" />
+          <input #packageSearch type="text" placeholder="Search packages" aria-label="Search packages"
+                 [value]="searchTerm()" (input)="search($any($event.target).value)"
+                 (keydown.escape)="closeSearch(); packageSearch.blur()" (blur)="closeEmptySearch()" />
+        </label>
+      }
+      @for (sel of selectedList(); track sel.id) {
+        <div class="panel-body">
           @for (group of entryPointGroups(); track group.title) {
             <div class="pkg-label"><h3>{{ group.title }}</h3></div>
             <div class="pkg-list">
