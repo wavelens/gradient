@@ -1521,6 +1521,9 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
         return int(sql(
             "WITH RECURSIVE wanted(derivation, builder) AS ("
             f"  SELECT db.derivation, ({is_builder('db')}) FROM entry_point ep "
+            "  JOIN evaluation ev ON ev.id = ep.evaluation AND ev.status <> 7 "
+            "  AND NOT EXISTS (SELECT 1 FROM build_job bj WHERE bj.evaluation = ep.evaluation "
+            "                  AND bj.derivation = ep.derivation AND bj.aborted) "
             "  JOIN derivation_build db ON db.derivation = ep.derivation "
             f"  JOIN derivation w ON w.id = db.derivation WHERE {is_open('db')} "
             "  UNION "
@@ -2011,13 +2014,13 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
     )
     poll(f"SELECT count(*) FROM cached_path WHERE hash = '{bb_hash}';", "0",
          "the zombie purge kept busybox's row after its NAR was deleted")
-    poll(shared_build_column(busybox, "db.status::text"), "0",
-         "the retire left busybox terminal-success with nothing to serve")
-
-    server.sleep(45)
-    assert shared_build_of(busybox) == "0 1 1", (
-        f"an unwanted passthrough was dispatched again: {shared_build_of(busybox)}"
-    )
+    poll(passthrough_attempts(busybox), "2",
+         "a passthrough busywrap is missing at runtime was not fetched again after its NAR was retired",
+         timeout=600)
+    poll(f"SELECT count(*) FROM cached_path WHERE hash = '{bb_hash}' AND file_hash IS NOT NULL;", "1",
+         "busybox's output was not passed through to the cache again")
+    poll(shared_build_column(busywrap, "db.missing_runtime_deps::text"), "0",
+         "busywrap's closure stayed incomplete after the passthrough")
 
     bw_hash = output_hash(busywrap)
     assert bw_hash, "busywrap has no cached output row to retire"
@@ -2028,11 +2031,11 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
     )
     poll(f"SELECT count(*) FROM cached_path WHERE hash = '{bw_hash}';", "0",
          "the zombie purge kept busywrap's row after its NAR was deleted")
-    poll(passthrough_attempts(busybox), "2",
-         "a wanted passthrough was not re-dispatched after its NAR was retired",
-         timeout=600)
     poll(shared_build_column(busywrap, "(db.status IN (3, 7))::text"), "true",
-         "busywrap did not come back once its input was passed through again", timeout=600)
+         "busywrap was not built again after its NAR was retired", timeout=600)
+    assert shared_build_of(busybox) == "7 1 2", (
+        f"the rebuild of busywrap passed a present input through again: {shared_build_of(busybox)}"
+    )
     poll(f"SELECT count(*) FROM cached_path WHERE hash = '{bw_hash}' AND file_hash IS NOT NULL;", "1",
          "busywrap's output was not pushed back to the cache")
     assert output_missing(busybox) == "0", (
