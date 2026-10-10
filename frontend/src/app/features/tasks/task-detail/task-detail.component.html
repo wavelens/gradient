@@ -149,7 +149,7 @@
           <gr-icon name="search" size="sm" />
           <input #packageSearch type="text" placeholder="Search packages" aria-label="Search packages"
                  [value]="searchTerm()" (input)="search($any($event.target).value)"
-                 (keydown.escape)="closeSearch()" (blur)="closeEmptySearch()" />
+                 (keydown.escape)="closeSearch(); packageSearch.blur()" (blur)="closeEmptySearch()" />
         </label>
       }
       @for (sel of selectedList(); track sel.id) {
