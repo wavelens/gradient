@@ -53,6 +53,28 @@ pub async fn abort_eval_shared_builds(
     abort_shared_builds(ctx, evaluation, &to_abort).await
 }
 
+/// The abort only moves abortable shared builds. A failed attempt waiting for its retry stays as
+/// it is, and its need has to go with the evaluation.
+pub async fn release_evaluation_need(
+    ctx: &DbContext,
+    evaluation: EvaluationId,
+) -> Result<(), sea_orm::DbErr> {
+    let entry_points: Vec<DerivationId> = EEntryPoint::find()
+        .select_only()
+        .column(CEntryPoint::Derivation)
+        .filter(CEntryPoint::Evaluation.eq(evaluation))
+        .into_tuple::<DerivationId>()
+        .all(&ctx.worker_db)
+        .await?;
+    for chunk in entry_points.chunks(crate::IN_CHUNK_SIZE) {
+        let settled =
+            crate::graph::can_start::update_and_settle_need(&ctx.worker_db, chunk).await?;
+        super::emit_transition_effects(ctx, &settled.changes).await?;
+    }
+
+    Ok(())
+}
+
 pub(super) async fn abort_shared_builds(
     ctx: &DbContext,
     evaluation: &MEvaluation,

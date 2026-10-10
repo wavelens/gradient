@@ -21,7 +21,7 @@ All on `derivation_build`, moved by transitions and never derived by a per-row w
 | `missing_runtime_deps` | Runtime dependencies (`kind IN (1, 2)`) leading to a shared build without a complete closure | `runtime_can_start`: seeded on a NAR landing, spread up and down through the SQL function `ripple_missing_runtime_deps` |
 | `fetchable` | Terminal success (`Completed`, `Substituted`) with a complete closure | `can_start::became_fetchable`, `can_start::lost_fetchability` |
 | `blocking_deps` | Direct dependencies (every edge in `derivation_dependency`) that are not `fetchable` | One-hop spread from the shared builds a `fetchable` change returned |
-| `wanted` | Shared build still wanted by some open entry point | `can_start::update_need` |
+| `wanted` | Shared build still wanted by some open entry point of a live evaluation | `can_start::update_need` |
 
 - **Complete closure** (`graph_sql::shared_build_complete_predicate`): every output with a NAR in the cache, and `missing_runtime_deps = 0`. The `EXISTS` over `derivation_output` must keep a shared build without output rows from reading complete.
 - An upstream copy is never `fetchable`. A build needing a shared build available in an upstream cache must wait for its passthrough. Every build must pull its inputs from the Gradient cache.
@@ -97,6 +97,8 @@ A `settle_need` call must follow each call.
 - `Skipped` is settled work. Queue conditions have no effect on a skipped build, and no evaluation will wait for one.
 - A thaw can lead to `Created`, never to `Queued`. The following `promote` call must read the queue conditions.
 - An `Aborted` shared build can thaw the same way. An abort is no verdict.
+- Entry points of a `Completed`, `Failed` or `Aborted` evaluation want nothing. An aborted evaluation would otherwise keep its own builds wanted, and the next check would thaw them.
+- `status::release_evaluation_need` will update the need below the entry points of an aborted evaluation, inside the abort transition.
 - `update_need` and `settle_need` are crate-private. Other crates call `update_and_settle_need`, and every needs-build move can skip and thaw inline. The consistency check's `settle_skipped` is the table-wide backstop, reporting `skipped_moves`.
 
 ## Evaluation Verdict
