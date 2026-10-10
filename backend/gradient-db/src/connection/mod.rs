@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+mod upgrade_floor;
+
 use crate::permissions::{
     admin_mask, cache_admin_mask, cache_view_mask, cache_write_mask, view_mask, write_mask,
 };
@@ -133,6 +135,7 @@ pub async fn connect_db(cli: &Cli) -> Result<DatabaseConnection> {
     Migrator::install(&db)
         .await
         .context("Failed to install seaql_migrations table")?;
+    upgrade_floor::require_upgrade_floor(&db).await?;
     prune_removed_migrations(&db)
         .await
         .context("Failed to prune removed-migration entries from seaql_migrations")?;

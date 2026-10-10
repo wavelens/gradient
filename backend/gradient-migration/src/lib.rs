@@ -120,6 +120,18 @@ mod m20261009_000002_evaluation_statistics_target;
 mod m20261010_000000_evaluation_next_backfill;
 mod m20261010_000001_cache_pull_through;
 
+pub struct UpgradeFloor {
+    pub release: &'static str,
+    pub last_migration: &'static str,
+    pub storage_migrations: &'static [&'static str],
+}
+
+pub const UPGRADE_FLOOR: UpgradeFloor = UpgradeFloor {
+    release: "commit 0c1e8cc07",
+    last_migration: "m20260619_010000_globalize_derivation",
+    storage_migrations: &[],
+};
+
 pub struct Migrator;
 
 #[async_trait::async_trait]
