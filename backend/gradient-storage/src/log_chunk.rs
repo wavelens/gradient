@@ -93,6 +93,51 @@ pub async fn read_chunks(
     Ok(out)
 }
 
+pub struct ChunkSpan {
+    pub index: u32,
+    pub byte_start: u64,
+    pub byte_len: u32,
+    pub line_count: u32,
+}
+
+pub async fn read_chunk_text(
+    storage: &dyn LogStorage,
+    log_key: BuildAttemptId,
+    index: u32,
+    line_count: u32,
+) -> Result<String> {
+    match storage.read_chunk(log_key, index).await {
+        Ok(raw) => Ok(String::from_utf8_lossy(&zstd::stream::decode_all(&raw[..])?).into_owned()),
+        Err(e) if crate::log::is_not_found(&e) => {
+            Ok(MISSING_CHUNK_LINE.repeat(line_count as usize))
+        }
+        Err(e) => Err(e),
+    }
+}
+
+pub async fn read_chunks_from(
+    storage: &dyn LogStorage,
+    log_key: BuildAttemptId,
+    chunks: &[ChunkSpan],
+    offset: u64,
+) -> Result<(String, u64)> {
+    let mut text = String::new();
+    let mut end = offset;
+    for chunk in chunks {
+        let chunk_end = chunk.byte_start + chunk.byte_len as u64;
+        if chunk_end <= offset {
+            continue;
+        }
+
+        let chunk_text = read_chunk_text(storage, log_key, chunk.index, chunk.line_count).await?;
+        let skip = offset.saturating_sub(chunk.byte_start) as usize;
+        text.push_str(chunk_text.get(skip..).unwrap_or_default());
+        end = chunk_end;
+    }
+
+    Ok((text, end))
+}
+
 pub async fn compress_and_store_chunks(
     storage: &dyn LogStorage,
     log_key: BuildAttemptId,
@@ -191,5 +236,43 @@ mod tests {
         let raw = storage.read_chunk(id, 0).await.unwrap();
         let decompressed = zstd::stream::decode_all(&raw[..]).unwrap();
         assert_eq!(String::from_utf8(decompressed).unwrap(), descs[0].text);
+    }
+
+    #[tokio::test]
+    async fn read_chunks_from_reads_only_what_follows_the_offset() {
+        use crate::log::{FileLogStorage, LogStorage};
+        use gradient_types::ids::BuildAttemptId;
+        let dir = tempfile::tempdir().unwrap();
+        let storage = FileLogStorage::new(dir.path()).await.unwrap();
+        let id = BuildAttemptId::now_v7();
+        let mut chunks = Vec::new();
+        let mut byte_start = 0;
+        for (index, text) in ["first\n", "second\n"].iter().enumerate() {
+            let raw = zstd::stream::encode_all(text.as_bytes(), 1).unwrap();
+            storage.write_chunk(id, index as u32, &raw).await.unwrap();
+            chunks.push(super::ChunkSpan {
+                index: index as u32,
+                byte_start,
+                byte_len: text.len() as u32,
+                line_count: 1,
+            });
+
+            byte_start += text.len() as u64;
+        }
+
+        let cases = [
+            (0, "first\nsecond\n"),
+            (3, "st\nsecond\n"),
+            (6, "second\n"),
+            (13, ""),
+        ];
+
+        for (offset, expected) in cases {
+            let (text, end) = super::read_chunks_from(&storage, id, &chunks, offset)
+                .await
+                .unwrap();
+
+            assert_eq!((text.as_str(), end), (expected, 13), "offset {offset}");
+        }
     }
 }

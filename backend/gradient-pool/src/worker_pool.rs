@@ -197,10 +197,17 @@ impl WorkerPool {
         self.workers
             .get(id)
             .into_iter()
-            .flat_map(|slot| &slot.shared().assigned_jobs)
-            .filter(|(_, job)| job.observed_ram_mb > 0)
-            .map(|(job_id, job)| (job_id.clone(), job.observed_ram_mb))
+            .flat_map(|slot| slot.shared().observed_build_ram())
             .collect()
+    }
+
+    pub fn fleet_observed_build_ram(&self) -> Option<Vec<(String, u64)>> {
+        let workers = || self.workers.values().map(WorkerSlot::shared);
+        workers().all(|w| w.observes_build_ram).then(|| {
+            workers()
+                .flat_map(WorkerShared::observed_build_ram)
+                .collect()
+        })
     }
 
     pub fn metrics_for(&self, id: &str) -> Option<crate::score::WorkerMetricsView> {
@@ -898,6 +905,30 @@ mod tests {
         assert_eq!(
             pool.observed_build_ram("w1"),
             HashMap::from([("runaway".to_owned(), 30_000)])
+        );
+    }
+
+    #[test]
+    fn the_fleet_reports_observed_build_ram_only_once_every_worker_observes_it() {
+        let mut pool = WorkerPool::new();
+        pool.register("w1".into(), caps(), HashSet::new(), port().0);
+        pool.register("w2".into(), caps(), HashSet::new(), port().0);
+        pool.assign_job("w1", "a", JobKind::Build, 0);
+        pool.assign_job("w2", "b", JobKind::Build, 0);
+        pool.assign_job("w2", "not-started", JobKind::Build, 0);
+
+        pool.observe_build_ram("w1", Some(vec![("a".into(), 4_000)]));
+        assert_eq!(pool.fleet_observed_build_ram(), None);
+
+        pool.observe_build_ram("w2", Some(vec![("b".into(), 9_000)]));
+        let observed: HashMap<String, u64> = pool
+            .fleet_observed_build_ram()
+            .unwrap()
+            .into_iter()
+            .collect();
+        assert_eq!(
+            observed,
+            HashMap::from([("a".to_owned(), 4_000), ("b".to_owned(), 9_000)])
         );
     }
 

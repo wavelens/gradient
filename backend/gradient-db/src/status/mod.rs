@@ -10,6 +10,7 @@ mod effects;
 mod eval_finalize;
 mod evaluation_build;
 mod evaluation_status;
+pub mod log_tail;
 pub mod logging;
 
 pub use abort::{abort_eval_shared_builds, release_evaluation_need};

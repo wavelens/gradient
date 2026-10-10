@@ -24,10 +24,7 @@ use super::BuildAccessContext;
 
 type ChunkRow = gradient_entity::build_log_chunk::Model;
 
-pub(super) async fn load_chunk_rows(
-    state: &ServerState,
-    log_key: BuildAttemptId,
-) -> WebResult<Vec<ChunkRow>> {
+async fn load_chunk_rows(state: &ServerState, log_key: BuildAttemptId) -> WebResult<Vec<ChunkRow>> {
     Ok(gradient_entity::build_log_chunk::Entity::find()
         .filter(gradient_entity::build_log_chunk::Column::BuildAttempt.eq(log_key))
         .order_by_asc(gradient_entity::build_log_chunk::Column::ChunkIndex)
@@ -46,38 +43,13 @@ async fn chunk_lines_text(
     log_key: BuildAttemptId,
     row: &ChunkRow,
 ) -> WebResult<String> {
-    match logs.read_chunk(log_key, row.chunk_index as u32).await {
-        Ok(raw) => decode_chunk(&raw),
-        Err(e) if gradient_storage::is_not_found(&e) => {
-            Ok(gradient_storage::log_chunk::MISSING_CHUNK_LINE
-                .repeat(row.line_count.max(0) as usize))
-        }
-        Err(e) => Err(WebError::Internal(e)),
-    }
-}
-
-pub(super) async fn chunked_text_from(
-    logs: &dyn gradient_storage::LogStorage,
-    log_key: BuildAttemptId,
-    rows: &[ChunkRow],
-    offset: u64,
-) -> WebResult<(String, u64)> {
-    let mut text = String::new();
-    let mut end = offset;
-    for row in rows {
-        let start = row.byte_start as u64;
-        let row_end = start + row.byte_len as u64;
-        if row_end <= offset {
-            continue;
-        }
-
-        let chunk = chunk_lines_text(logs, log_key, row).await?;
-        let skip = offset.saturating_sub(start) as usize;
-        text.push_str(chunk.get(skip..).unwrap_or_default());
-        end = row_end;
-    }
-
-    Ok((text, end))
+    Ok(gradient_storage::log_chunk::read_chunk_text(
+        logs,
+        log_key,
+        row.chunk_index as u32,
+        row.line_count.max(0) as u32,
+    )
+    .await?)
 }
 
 pub async fn get_build_log_chunks(
@@ -323,7 +295,7 @@ pub async fn get_build_log_search(
 
 #[cfg(test)]
 mod tests {
-    use super::{ChunkRow, LineRangeQuery, chunk_lines_text, chunked_text_from, parse_line_range};
+    use super::{ChunkRow, LineRangeQuery, chunk_lines_text, parse_line_range};
     use gradient_storage::{FileLogStorage, LogStorage};
     use gradient_types::BuildAttemptId;
 
@@ -386,40 +358,6 @@ mod tests {
             chunk_index,
             line_count,
             ..Default::default()
-        }
-    }
-
-    #[tokio::test]
-    async fn chunked_text_from_reads_only_what_follows_the_offset() {
-        let dir = tempfile::tempdir().unwrap();
-        let logs = FileLogStorage::new(dir.path()).await.unwrap();
-        let key = BuildAttemptId::now_v7();
-        let mut rows = Vec::new();
-        let mut byte_start = 0;
-        for (index, text) in ["first\n", "second\n"].iter().enumerate() {
-            let raw = zstd::stream::encode_all(text.as_bytes(), 1).unwrap();
-            logs.write_chunk(key, index as u32, &raw).await.unwrap();
-            rows.push(ChunkRow {
-                chunk_index: index as i32,
-                byte_start,
-                byte_len: text.len() as i32,
-                ..Default::default()
-            });
-
-            byte_start += text.len() as i64;
-        }
-
-        let cases = [
-            (0, "first\nsecond\n"),
-            (3, "st\nsecond\n"),
-            (6, "second\n"),
-            (13, ""),
-        ];
-
-        for (offset, expected) in cases {
-            let (text, end) = chunked_text_from(&logs, key, &rows, offset).await.unwrap();
-
-            assert_eq!((text.as_str(), end), (expected, 13), "offset {offset}");
         }
     }
 
