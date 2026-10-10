@@ -13,7 +13,7 @@
   &__header {
     margin-bottom: $spacing-xxl;
     display: grid;
-    grid-template-columns: 1fr auto;
+    grid-template-columns: minmax(0, 1fr) auto;
     grid-template-areas:
       'crumbs actions'
       'title actions'
@@ -25,6 +25,7 @@
       grid-area: title;
       font-size: $font-size-xxl;
       margin: 0;
+      overflow-wrap: anywhere;
     }
   }
 
@@ -32,10 +33,12 @@
     grid-area: subtitle;
     color: var(--gr-text-secondary);
     margin: 0;
+    overflow-wrap: anywhere;
   }
 
   &__meta {
     grid-area: meta;
+    overflow-wrap: anywhere;
 
     &:empty { display: none; }
   }
@@ -66,7 +69,17 @@
   }
 }
 
-// The recipe is global (styles.scss); only its place in the header grid is local.
+// Place the global breadcrumb recipe in the header grid.
 .breadcrumb {
   grid-area: crumbs;
+}
+
+@media (max-width: $breakpoint-sm) {
+  .page-layout__header {
+    grid-template-areas:
+      'crumbs crumbs'
+      'title actions'
+      'subtitle subtitle'
+      'meta meta';
+  }
 }
