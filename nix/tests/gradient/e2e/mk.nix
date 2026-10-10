@@ -2019,14 +2019,18 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
         timeout=600,
     )
 
+    def cached_row(output):
+        return sql(f"SELECT id FROM cached_path WHERE hash = '{output}';")
+
     bb_hash = output_hash(busybox)
-    assert bb_hash, "busybox has no cached output row to retire"
+    bb_row = cached_row(bb_hash)
+    assert bb_row, "busybox has no cached output row to retire"
     server.succeed(f"rm -f {nar_object(bb_hash)}")
     server.succeed(
         f"{CURL} -sf -X POST -H 'Authorization: Bearer {token}' "
         f"{API}/admin/maintenance/deep-gc"
     )
-    poll(f"SELECT count(*) FROM cached_path WHERE hash = '{bb_hash}';", "0",
+    poll(f"SELECT count(*) FROM cached_path WHERE id = '{bb_row}';", "0",
          "the zombie purge kept busybox's row after its NAR was deleted")
     poll(passthrough_attempts(busybox), "2",
          "a passthrough busywrap is missing at runtime was not fetched again after its NAR was retired",
@@ -2037,13 +2041,14 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
          "busywrap's closure stayed incomplete after the passthrough")
 
     bw_hash = output_hash(busywrap)
-    assert bw_hash, "busywrap has no cached output row to retire"
+    bw_row = cached_row(bw_hash)
+    assert bw_row, "busywrap has no cached output row to retire"
     server.succeed(f"rm -f {nar_object(bw_hash)}")
     server.succeed(
         f"{CURL} -sf -X POST -H 'Authorization: Bearer {token}' "
         f"{API}/admin/maintenance/deep-gc"
     )
-    poll(f"SELECT count(*) FROM cached_path WHERE hash = '{bw_hash}';", "0",
+    poll(f"SELECT count(*) FROM cached_path WHERE id = '{bw_row}';", "0",
          "the zombie purge kept busywrap's row after its NAR was deleted")
     poll(shared_build_column(busywrap, "(db.status IN (3, 7))::text"), "true",
          "busywrap was not built again after its NAR was retired", timeout=600)
