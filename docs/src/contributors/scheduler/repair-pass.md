@@ -152,7 +152,6 @@ A build failing `InputsUnavailable` must call `self_heal::repair_missing_inputs`
 - Raising `missing_runtime_deps` of every shared build that trusted the rows. The spread will take the complete closure and `fetchable` from the builds referencing those rows.
 - Resetting to `Created` only producers whose artifact is actually gone. A referencing build that only lost its complete closure will keep its terminal status.
 - Un-queueing the owners of a retired `.drv` file.
-- Queueing a reset producer that is still wanted, in `retire_stale_paths` after the retire. A finished entry point missing the output at runtime can want the producer without any move of the need.
 
 | Caller | Path |
 |---|---|
