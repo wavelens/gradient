@@ -1291,6 +1291,23 @@ describe('TaskDetailComponent - package search', () => {
     expect(searchField(fixture)).not.toBeNull();
   });
 
+  it('keeps the same search field while the panel switches to another evaluation', () => {
+    const { fixture, query } = setup(access, {
+      extraEvals: [evalSummary('e2', 'Completed')],
+      getEntryPoints: () => of({ entry_points: [epSummary('hello')], total: 26, failed_attributes: [] }),
+    });
+    const shown = searchField(fixture);
+    const title = () => fixture.nativeElement.querySelector('.panel-title');
+    const firstTitle = title();
+
+    query.next(convertToParamMap({ eval: 'e2' }));
+    fixture.detectChanges();
+
+    expect(title()).not.toBe(firstTitle);
+    expect(shown).not.toBeNull();
+    expect(searchField(fixture)).toBe(shown);
+  });
+
   it('asks the server for the typed term and lists the matches only', () => {
     const { fixture, tasksService } = setup(access, { getEntryPoints: () => page(['hello', 'world']) });
     const spy = vi.spyOn(tasksService, 'getEntryPoints').mockReturnValue(page(['hello']));
