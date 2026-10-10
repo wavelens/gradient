@@ -7,6 +7,7 @@
 import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } from '@angular/core';
 import { DatePipe } from '@angular/common';
 import { ActivatedRoute, RouterModule } from '@angular/router';
+import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { TeamsService } from '@core/services/teams.service';
 import { AuthService } from '@core/services/auth.service';
 import { Team, TeamEvaluation, TeamGrants, TeamMember, TeamRequest, TeamWorker } from '@core/models';
@@ -47,9 +48,11 @@ import {
 export class TeamOverviewComponent implements OnInit {
   private route = inject(ActivatedRoute);
   private teams = inject(TeamsService);
+  private crumbs = inject(BreadcrumbsService);
   private authService = inject(AuthService);
 
   teamName = '';
+  breadcrumb = computed(() => this.crumbs.team(this.teamName));
   team = signal<Team | null>(null);
   members = signal<TeamMember[]>([]);
   workers = signal<TeamWorker[]>([]);
@@ -69,6 +72,7 @@ export class TeamOverviewComponent implements OnInit {
     this.teams.get(this.teamName).subscribe({
       next: (team) => {
         this.team.set(team);
+        this.crumbs.rememberTeam(this.teamName, team.display_name);
         this.loading.set(false);
         if (this.isAdmin()) this.loadRequests();
       },

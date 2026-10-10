@@ -76,7 +76,7 @@ describe('WorkerMetricsComponent', () => {
   it('walks back through breadcrumbs rather than a lone back arrow', async () => {
     const fixture = setup('builder-1');
     await settled(fixture);
-    expect(crumbs(fixture)).toEqual(['Test Project', 'Workers', 'builder-1']);
+    expect(crumbs(fixture)).toEqual(['Projects', 'Test Project', 'Settings', 'Workers', 'builder-1']);
     expect(fixture.nativeElement.querySelector('.back')).toBeNull();
   });
 });

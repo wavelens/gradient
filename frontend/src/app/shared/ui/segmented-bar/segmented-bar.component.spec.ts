@@ -21,7 +21,7 @@ describe('SegmentedBarComponent', () => {
     fixture = TestBed.createComponent(SegmentedBarComponent);
   });
 
-  const widths = () => [...fixture.nativeElement.querySelectorAll('.seg')].map((s: HTMLElement) => [s.className, s.style.width]);
+  const widths = () => [...fixture.nativeElement.querySelectorAll('.seg')].map((s: HTMLElement) => [s.className.replace(' seg-pulsing', ''), s.style.width]);
 
   it('renders all four segments proportionally excluding substituted/aborted, zero counts at 0% width', () => {
     fixture.componentRef.setInput('counts', counts({ completed: 3, failed: 1, substituted: 9000, aborted: 5 }));
@@ -32,6 +32,19 @@ describe('SegmentedBarComponent', () => {
       ['seg seg-building', '0%'],
       ['seg seg-queued', '0%'],
     ]);
+  });
+
+  /// An endless animation on a segment without width cannot leave the main thread,
+  /// and then repaints the page on every frame.
+  it('pulses the building segment only while it has width', () => {
+    const pulsing = () => fixture.nativeElement.querySelectorAll('.seg-pulsing').length;
+    fixture.componentRef.setInput('counts', counts({ completed: 3 }));
+    fixture.detectChanges();
+    expect(pulsing()).toBe(0);
+
+    fixture.componentRef.setInput('counts', counts({ completed: 3, building: 1 }));
+    fixture.detectChanges();
+    expect(pulsing()).toBe(1);
   });
 
   it('renders a single full green segment when work finished entirely via substitution', () => {

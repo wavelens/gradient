@@ -169,6 +169,14 @@ export const routes: Routes = [
       ),
   },
   {
+    path: 'project/:project/summary/:evaluationId',
+    title: 'Evaluation Summary',
+    loadComponent: () =>
+      import('./features/evaluations/evaluation-summary/evaluation-summary.component').then(
+        (m) => m.EvaluationSummaryComponent
+      ),
+  },
+  {
     path: 'project/:project/log',
     title: 'Evaluation Log',
     data: { hideFooter: true },

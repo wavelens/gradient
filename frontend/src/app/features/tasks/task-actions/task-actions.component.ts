@@ -11,7 +11,7 @@ import { ActivatedRoute, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { ActionsService } from '@core/services/actions.service';
 import { IntegrationsService } from '@core/services/integrations.service';
-import { ProjectsService } from '@core/services/projects.service';
+import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import {
   BadgeComponent,
   ButtonComponent,
@@ -68,7 +68,7 @@ export class TaskActionsComponent implements OnInit {
   private route = inject(ActivatedRoute);
   private actionsService = inject(ActionsService);
   private integrationsService = inject(IntegrationsService);
-  private projectsService = inject(ProjectsService);
+  private crumbs = inject(BreadcrumbsService);
   private accessSvc = inject(AccessService);
   private teamsService = inject(TeamsService);
 
@@ -98,8 +98,8 @@ export class TaskActionsComponent implements OnInit {
   testFailureId = signal<string | null>(null);
 
   projectName = '';
-  projectDisplayName = signal('');
   taskName = '';
+  breadcrumb = computed(() => this.crumbs.taskSettings(this.projectName, this.taskName, { label: 'Actions' }));
 
   actions = signal<Action[]>([]);
   outboundIntegrations = signal<IntegrationOption[]>([]);
@@ -119,10 +119,6 @@ export class TaskActionsComponent implements OnInit {
   ngOnInit(): void {
     this.projectName = this.route.snapshot.paramMap.get('project') || '';
     this.taskName = this.route.snapshot.paramMap.get('task') || '';
-    this.projectsService.getProject(this.projectName).subscribe({
-      next: (project) => this.projectDisplayName.set(project.display_name),
-      error: () => {},
-    });
     this.loadActions();
     this.loadIntegrations();
     this.teamsService.projectGrants(this.projectName).subscribe({

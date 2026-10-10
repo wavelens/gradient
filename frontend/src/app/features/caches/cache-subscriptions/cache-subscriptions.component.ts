@@ -4,9 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, OnInit, inject, signal, ChangeDetectionStrategy } from '@angular/core';
+import { Component, OnInit, computed, inject, signal, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute } from '@angular/router';
+import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { CachesService } from '@core/services/caches.service';
 import { SubscriptionRequest } from '@core/models';
 import {
@@ -39,8 +40,10 @@ import {
 export class CacheSubscriptionRequestsComponent implements OnInit {
   private route = inject(ActivatedRoute);
   private cachesService = inject(CachesService);
+  private crumbs = inject(BreadcrumbsService);
 
   cacheName = '';
+  breadcrumb = computed(() => this.crumbs.cacheSettings(this.cacheName, { label: 'Subscriptions' }));
   loading = signal(true);
   deciding = signal<string | null>(null);
   requests = signal<SubscriptionRequest[]>([]);

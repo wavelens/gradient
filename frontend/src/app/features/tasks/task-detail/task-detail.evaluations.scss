@@ -9,10 +9,10 @@
 // Status hues are named locally so the tab rail, the status chip and the
 // package rows can all read one value per state.
 :host {
-  --ok: var(--gr-status-success);
-  --err: var(--gr-status-danger);
+  --ok: var(--gr-indicator-success);
+  --err: var(--gr-indicator-danger);
   --warn: var(--gr-status-warning);
-  --run: var(--gr-status-info);
+  --run: var(--gr-indicator-info);
   --idle: var(--gr-border-subtle);
   display: flex;
   flex-direction: column;

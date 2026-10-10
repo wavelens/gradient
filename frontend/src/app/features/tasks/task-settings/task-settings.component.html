@@ -7,7 +7,7 @@
 @if (loading()) {
   <gr-loading-spinner message="Loading task settings..." />
 } @else if (task(); as proj) {
-  <gr-page-layout [breadcrumb]="[{ label: projectDisplayName() || projectName, link: ['/project', projectName] }, { label: proj.display_name, link: ['/project', projectName, 'task', taskName] }, { label: 'Settings' }]" title="Task Settings">
+  <gr-page-layout [breadcrumb]="breadcrumb()" title="Task Settings">
   <a slot="actions" grButton label="Project Settings" icon="apartment" severity="secondary" [routerLink]="['/project', projectName, 'settings']"></a>
   @if (errorMessage()) {
     <gr-message-banner type="error">{{ errorMessage() }}</gr-message-banner>
@@ -18,7 +18,7 @@
 
   <!-- General Settings -->
   <gr-settings-section title="General">
-    <gr-form-field label="Name" for="proj-name" hint="Task name cannot be changed">
+    <gr-form-field label="Name" for="proj-name">
       <input grInput id="proj-name" [value]="proj.name" disabled />
     </gr-form-field>
 
@@ -44,18 +44,18 @@
       }
     </gr-form-field>
 
-    <gr-form-field label="Evaluation Wildcard" for="proj-wildcard" hint="Pattern for selecting which outputs to evaluate">
-      <gr-label-help slot="label" doc="reference/wildcards/" title="Learn about evaluation wildcards" />
+    <gr-form-field label="Evaluation Wildcard" for="proj-wildcard">
+      <gr-label-help slot="label" doc="reference/wildcards/" title="Pattern for selecting which outputs to evaluate" />
       <input grInput id="proj-wildcard" [(ngModel)]="formData.wildcard" [appManagedDisable]="access()" />
     </gr-form-field>
 
-    <gr-form-field label="Keep Evaluations" for="proj-keep" hint="Number of completed evaluations to retain for metrics and history">
-      <gr-label-help slot="label" doc="concepts/projects-and-tasks/#task" title="Task settings" />
+    <gr-form-field label="Keep Evaluations" for="proj-keep">
+      <gr-label-help slot="label" doc="concepts/projects-and-tasks/#task" title="Number of completed evaluations to retain for metrics and history" />
       <input grInput id="proj-keep" type="number" min="1" [(ngModel)]="formData.keep_evaluations" [appManagedDisable]="access()" />
     </gr-form-field>
 
-    <gr-form-field label="Trigger Concurrency" for="proj-concurrency" hint="Determines how this task handles a new trigger event when an evaluation is already running.">
-      <gr-label-help slot="label" doc="concepts/projects-and-tasks/#concurrency" title="Concurrency policies" />
+    <gr-form-field label="Trigger Concurrency" for="proj-concurrency">
+      <gr-label-help slot="label" doc="concepts/projects-and-tasks/#concurrency" title="Determines how this task handles a new trigger event when an evaluation is already running." />
       <gr-select
         inputId="proj-concurrency"
         [(ngModel)]="formData.concurrency"
@@ -67,7 +67,7 @@
       />
     </gr-form-field>
 
-    <gr-form-field hint="When off, build outputs are still cached for Gradient itself but narinfos remain unsigned, keeping the task's paths private to external Nix clients even when the cache is public.">
+    <gr-form-field>
       <gr-checkbox
         inputId="proj-sign-cache"
         [(ngModel)]="formData.sign_cache"
@@ -77,7 +77,7 @@
       />
     </gr-form-field>
 
-    <gr-form-field hint="When off, an evaluation whose builds need an architecture or system features no connected worker provides is aborted with a warning instead of waiting.">
+    <gr-form-field>
       <gr-checkbox
         inputId="task-wait-for-workers"
         [(ngModel)]="formData.wait_for_workers"
@@ -87,7 +87,7 @@
       />
     </gr-form-field>
 
-    <gr-form-field hint="A new evaluation queues permanently failed builds and their dependents again. With this off, they stay failed until someone selects Retry.">
+    <gr-form-field>
       <gr-checkbox
         inputId="task-retry-failed-builds"
         [(ngModel)]="formData.retry_failed_builds"

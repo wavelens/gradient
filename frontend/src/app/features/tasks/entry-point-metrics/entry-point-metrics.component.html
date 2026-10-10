@@ -4,7 +4,7 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<gr-page-layout [breadcrumb]="[{ label: projectDisplayName() || projectName, link: ['/project', projectName] }, { label: taskDisplayName() || taskName, link: ['/project', projectName, 'task', taskName] }, { label: 'Entry Point Metrics' }]" [title]="evalAttr()" [subtitle]="'Build history over the last ' + (keepEvaluations()) + ' completed evaluations.'">
+<gr-page-layout [breadcrumb]="breadcrumb()" [title]="evalAttr()" [subtitle]="'Build history over the last ' + (keepEvaluations()) + ' completed evaluations.'">
   @if (latestBuildId()) {
     <a slot="actions" grButton label="View Closure" icon="account_tree" severity="secondary"
       [routerLink]="['/project', projectName, 'closure', 'build', latestBuildId()]"></a>

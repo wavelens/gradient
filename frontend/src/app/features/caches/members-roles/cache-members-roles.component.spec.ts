@@ -44,6 +44,7 @@ function setup(canEdit = false): ComponentFixture<CacheMembersRolesComponent> {
       {
         provide: CachesService,
         useValue: {
+          getCache: () => of({ display_name: 'Prod' }),
           getMembers: () => of([{ id: 'alice', name: 'Admin' }]),
           getRoles: () =>
             of({

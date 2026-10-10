@@ -28,9 +28,10 @@
 .segbar--hover .seg:hover { filter: brightness(1.25); }
 
 .seg-empty { width: 100%; background: var(--gr-surface-hover); }
-.seg-completed { background: var(--ok, var(--gr-status-success)); }
-.seg-failed { background: var(--err, var(--gr-status-danger)); }
-.seg-building { background: var(--run, var(--gr-status-info)); animation: seg-pulse 1.8s ease-in-out infinite; }
+.seg-completed { background: var(--gr-indicator-success); }
+.seg-failed { background: var(--gr-indicator-danger); }
+.seg-building { background: var(--gr-indicator-info); }
+.seg-pulsing { animation: seg-pulse 1.8s ease-in-out infinite; }
 .seg-queued { background: var(--idle, var(--gr-border-subtle)); }
 
 .tipbox {
@@ -51,7 +52,7 @@
 }
 
 @keyframes tip-in { from { opacity: 0; } }
-@keyframes seg-pulse { 50% { filter: brightness(1.35); } }
+@keyframes seg-pulse { 50% { opacity: 0.6; } }
 
 @media (prefers-reduced-motion: reduce) {
   .segbar,

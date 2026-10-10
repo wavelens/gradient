@@ -4,7 +4,7 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<gr-page-layout [breadcrumb]="[{ label: projectDisplayName() || projectName, link: ['/project', projectName] }, { label: 'Settings', link: ['/project', projectName, 'settings'] }, { label: 'Cache Subscriptions' }]" title="Cache Subscriptions" subtitle="Nix binary caches this project pushes builds to">
+<gr-page-layout [breadcrumb]="breadcrumb()" title="Cache Subscriptions" subtitle="Nix binary caches this project pushes builds to">
   <button slot="actions"
       *appWritable="access()"
       grButton

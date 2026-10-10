@@ -9,20 +9,20 @@
 }
 
 <header class="main-header" [class.menu-open]="menuOpen()">
-  <div class="header-content">
-    <div class="header-logo">
-      <a [routerLink]="brand().href" [attr.aria-label]="brand().label">
-        <gr-logo />
-        @if (brand().tagline; as tagline) {
-          <span class="header-tagline">{{ tagline }}</span>
-        }
-      </a>
-    </div>
+  <div class="header-logo">
+    <a [routerLink]="brand().href" [attr.aria-label]="brand().label">
+      <gr-logo />
+      @if (brand().tagline; as tagline) {
+        <span class="header-tagline">{{ tagline }}</span>
+      }
+    </a>
+  </div>
 
+  <div class="header-content">
     <div id="header-menu" class="header-menu">
       <nav class="header-nav">
         @for (link of nav(); track link.href) {
-          <a [routerLink]="link.href" routerLinkActive="active" [routerLinkActiveOptions]="{ exact: link.exact ?? false }">
+          <a [routerLink]="link.href" routerLinkActive="active" [routerLinkActiveOptions]="activeLinkMatch(link.exact ?? false)">
             {{ link.label }}
           </a>
         }

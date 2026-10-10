@@ -4,13 +4,14 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, OnDestroy, OnInit, inject, signal, ChangeDetectionStrategy } from '@angular/core';
+import { Component, OnDestroy, OnInit, computed, inject, signal, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { Subject, forkJoin, EMPTY } from 'rxjs';
 import { debounceTime, switchMap } from 'rxjs/operators';
 import { AuthService } from '@core/services/auth.service';
+import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { ProjectsService } from '@core/services/projects.service';
 import { TasksService } from '@core/services/tasks.service';
 import { StarsService } from '@core/services/stars.service';
@@ -66,6 +67,7 @@ export class ProjectDetailComponent implements OnInit, OnDestroy {
   private projectsService = inject(ProjectsService);
   private tasksService = inject(TasksService);
   private stars = inject(StarsService);
+  private crumbs = inject(BreadcrumbsService);
   private nameCheck$ = new Subject<string>();
 
   loading = signal(true);
@@ -80,6 +82,7 @@ export class ProjectDetailComponent implements OnInit, OnDestroy {
   nameCheckState = signal<'idle' | 'invalid' | 'reserved' | 'checking' | 'available' | 'taken'>('idle');
 
   projectName = '';
+  breadcrumb = computed(() => this.crumbs.project(this.projectName));
   starTarget: StarTarget = { kind: 'project', project: '' };
 
   newTask = {
@@ -118,6 +121,7 @@ export class ProjectDetailComponent implements OnInit, OnDestroy {
     }).subscribe({
       next: ({ project, tasks }) => {
         this.project.set(project);
+        this.crumbs.rememberProject(this.projectName, project.display_name);
         this.tasks.set(tasks.items);
         this.tasksTotal.set(tasks.total);
         this.tasksPage.set(tasks.page);

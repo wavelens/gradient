@@ -7,10 +7,10 @@
 @if (loading()) {
   <gr-loading-spinner message="Loading project settings..." />
 } @else if (project(); as project) {
-  <gr-page-layout [breadcrumb]="[{ label: project.display_name, link: ['/project', projectName] }, { label: 'Settings' }]" title="Project Settings">
+  <gr-page-layout [breadcrumb]="breadcrumb()" title="Project Settings">
       <!-- General Settings -->
   <gr-settings-section title="General">
-    <gr-form-field label="Name" for="project-name" hint="Project name cannot be changed">
+    <gr-form-field label="Name" for="project-name">
       <input
         grInput
         id="project-name"
@@ -38,7 +38,7 @@
       ></textarea>
     </gr-form-field>
 
-    <gr-form-field label="Visibility" for="visibility" hint="Public projects are visible and readable by all users">
+    <gr-form-field label="Visibility" for="visibility">
       <gr-select
         inputId="visibility"
         [options]="visibilityOptions"
@@ -50,7 +50,6 @@
     </gr-form-field>
 
     <gr-form-field>
-      <span slot="hint">When enabled, the auto-managed <code>build-request</code> task that receives CLI build artefacts is hidden from task listings.</span>
       <gr-checkbox
         inputId="hide-build-requests"
         [(ngModel)]="formData.hide_build_requests"

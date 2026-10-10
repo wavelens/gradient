@@ -26,8 +26,6 @@
   border: 1px solid color-mix(in srgb, var(--gr-status-danger) 40%, transparent);
   background: color-mix(in srgb, var(--gr-status-danger) 8%, transparent);
   color: var(--gr-text-secondary);
-  text-decoration: line-through;
-  text-decoration-color: color-mix(in srgb, var(--gr-status-danger) 50%, transparent);
   transition: $transition-base;
 
   &:hover { border-color: var(--gr-text-secondary); }
@@ -36,7 +34,6 @@
     background: color-mix(in srgb, var(--gr-status-success) 15%, transparent);
     border-color: var(--gr-status-success);
     color: var(--gr-status-success);
-    text-decoration: none;
   }
 }
 
@@ -55,11 +52,9 @@
   font-weight: 500;
   background: color-mix(in srgb, var(--gr-status-danger) 10%, transparent);
   color: var(--gr-status-danger);
-  text-decoration: line-through;
 
   &--on {
     background: color-mix(in srgb, var(--gr-status-success) 15%, transparent);
     color: var(--gr-status-success);
-    text-decoration: none;
   }
 }

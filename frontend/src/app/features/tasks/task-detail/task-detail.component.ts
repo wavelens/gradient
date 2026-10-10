@@ -4,16 +4,17 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, OnInit, OnDestroy, ElementRef, HostListener, computed, inject, signal, ChangeDetectionStrategy } from '@angular/core';
+import { Component, OnInit, OnDestroy, ElementRef, HostListener, Injector, afterNextRender, computed, inject, signal, viewChild, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule, DOCUMENT } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
-import { finalize, interval, Observable, Subscription } from 'rxjs';
-import { auditTime, filter, share } from 'rxjs/operators';
+import { finalize, interval, Observable, Subject, Subscription } from 'rxjs';
+import { auditTime, debounceTime, filter, share } from 'rxjs/operators';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { LiveEvent, LiveService } from '@core/services/live.service';
 import { AuthService } from '@core/services/auth.service';
 import { StarsService } from '@core/services/stars.service';
-import { ProjectsService } from '@core/services/projects.service';
+import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { TasksService, ReportOptions } from '@core/services/tasks.service';
 import { EvaluationsService } from '@core/services/evaluations.service';
 import {
@@ -31,10 +32,10 @@ import {
   ToastComponent,
   TooltipDirective,
 } from '@gradient/ui/ui';
-import { EvalStatusBadgeComponent, inputFetchRow, SegmentedBarComponent, StarButtonComponent, StatusIconComponent, ThunkProgressComponent } from '@shared/ui';
+import { EvalStatusBadgeComponent, inputFetchRows, SegmentedBarComponent, StarButtonComponent, StatusIconComponent, ThunkProgressComponent } from '@shared/ui';
 import { AccessService, WritableDirective } from '@shared/access';
 import { injectTaskAccess, injectTaskAccessData } from '@core/resolvers/inject-access';
-import { groupEntryPoints } from './entry-point-groups';
+import { failuresWithinLoadedRows, groupEntryPoints } from './entry-point-groups';
 import { StarTarget, TaskDetail, EvaluationSummary, EvaluationProgress, EvaluationStatus, EntryPointSummary, FailedAttributeSummary, BuildStatusCounts, WalkMode } from '@core/models';
 import { buildDuration, commitLabel, commitWebUrl, entryPointPhase, evaluationDuration, evaluationPhase, evaluationTitle, formatEvaluationDuration, inputFetchPhase, isPendingBuildStatus, isRunningEvaluationStatus, phaseProgress, repositoryWebUrl, thunkProgress } from '@shared/evaluation';
 
@@ -61,7 +62,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
   private router = inject(Router);
   private host = inject(ElementRef);
   protected authService = inject(AuthService);
-  private projectsService = inject(ProjectsService);
+  private crumbs = inject(BreadcrumbsService);
   private tasksService = inject(TasksService);
   private evaluationsService = inject(EvaluationsService);
   private messageService = inject(MessageService);
@@ -69,6 +70,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
   private live = inject(LiveService);
   private document = inject(DOCUMENT);
   private stars = inject(StarsService);
+  private injector = inject(Injector);
 
   access = injectTaskAccess();
   triggerAccess = computed(() => this.accessService.triggerAccess(this.access()));
@@ -82,7 +84,9 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
   // Mirrors the server's own page size and its hard cap, so "show more" pages with
   // an offset instead of asking for a limit the server would clamp.
   private static readonly ENTRY_POINTS_PAGE = 25;
-  private static readonly ENTRY_POINTS_PAGE_MAX = 500;
+  private static readonly SEARCH_DEBOUNCE_MS = 200;
+  protected readonly staggeredRows = TaskDetailComponent.ENTRY_POINTS_PAGE;
+  private barCountsByEntryPoint = new WeakMap<EntryPointSummary, BuildStatusCounts>();
   private entryPointsAppending = false;
   selectedId = signal<string | null>(null);
   starting = signal(false);
@@ -94,8 +98,8 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
   tick = signal(Date.now());
 
   projectName = '';
-  projectDisplayName = signal<string | null>(null);
   taskName = '';
+  breadcrumb = computed(() => this.crumbs.task(this.projectName, this.taskName));
   starTarget: StarTarget = { kind: 'task', project: '', task: '' };
 
   private liveSub?: Subscription;
@@ -138,7 +142,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
   });
   selectedFetchRows = computed(() => {
     const p = this.selectedProgress();
-    return p?.kind === 'fetching' ? p.inputs.map(inputFetchRow) : [];
+    return p?.kind === 'fetching' ? inputFetchRows(p.inputs) : [];
   });
   selectedThunkRow = computed(() => thunkProgress(this.selectedProgress(), this.selected()?.expected_thunks));
 
@@ -154,10 +158,6 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
     this.starTarget = { kind: 'task', project: this.projectName, task: this.taskName };
     this.stars.starred(this.starTarget).subscribe((starred) => this.starred.set(starred));
     this.querySub = this.route.queryParamMap.subscribe((q) => this.followEvalParam(q.get('eval')));
-    this.projectsService.getProject(this.projectName).subscribe({
-      next: (project) => this.projectDisplayName.set(project.display_name),
-      error: () => this.projectDisplayName.set(this.projectName),
-    });
     const resolved = this.resolved()?.task;
     if (resolved) this.applyTask(resolved, false);
     this.loadTaskData(!!resolved);
@@ -205,6 +205,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
     if (sig !== this.taskSig) {
       this.taskSig = sig;
       this.task.set(task);
+      this.crumbs.rememberTask(this.projectName, this.taskName, task.display_name);
     }
     if (this.starting() && task.last_evaluations.some(e => this.isRunning(e.status))) {
       this.starting.set(false);
@@ -287,13 +288,15 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
     // head costs. Rows past the head keep their last values and are spliced
     // behind the refreshed page.
     const limit = TaskDetailComponent.ENTRY_POINTS_PAGE;
-    this.tasksService.getEntryPoints(this.projectName, this.taskName, evaluationId, limit, 0).subscribe({
+    const term = this.searchTerm();
+    this.tasksService.getEntryPoints(this.projectName, this.taskName, evaluationId, limit, 0, term).subscribe({
       next: (page) => {
         // Drop out-of-order responses: only apply the fetch for the still-selected
-        // evaluation, so a slow earlier request can't clobber a newer selection.
-        if (this.selectedId() !== evaluationId) return;
+        // evaluation and search term, so a slow earlier request can't clobber a newer one.
+        if (this.selectedId() !== evaluationId || this.searchTerm() !== term) return;
         this.entryPointsLoading.set(false);
         this.entryPointsTotal.set(page.total);
+        if (!term) this.listSpansPages.set(page.total > TaskDetailComponent.ENTRY_POINTS_PAGE);
         if (JSON.stringify(page.failed_attributes) !== JSON.stringify(this.failedAttributes())) {
           this.failedAttributes.set(page.failed_attributes);
         }
@@ -330,10 +333,11 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
     if (!evaluationId || this.entryPointsAppending) return;
     this.entryPointsAppending = true;
     const offset = this.entryPoints().length;
-    this.tasksService.getEntryPoints(this.projectName, this.taskName, evaluationId, TaskDetailComponent.ENTRY_POINTS_PAGE, offset).subscribe({
+    const term = this.searchTerm();
+    this.tasksService.getEntryPoints(this.projectName, this.taskName, evaluationId, TaskDetailComponent.ENTRY_POINTS_PAGE, offset, term).subscribe({
       next: (page) => {
         this.entryPointsAppending = false;
-        if (this.selectedId() !== evaluationId) return;
+        if (this.selectedId() !== evaluationId || this.searchTerm() !== term) return;
         this.entryPointsTotal.set(page.total);
         const shown = this.entryPoints();
         const seen = new Set(shown.map(e => e.id));
@@ -375,9 +379,18 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
     this.document.removeEventListener('keydown', this.cancelNewEvaluationSelect, true);
   };
 
+  requestAbort(event: MouseEvent, id: string): void {
+    if (event.ctrlKey || event.metaKey) this.abort(id);
+    else this.abortTarget.set(id);
+  }
+
   confirmAbort(): void {
     const id = this.abortTarget();
-    if (!id || this.aborting()) return;
+    if (id) this.abort(id);
+  }
+
+  private abort(id: string): void {
+    if (this.aborting()) return;
     this.aborting.set(true);
     this.tasksService.abortEvaluation(this.projectName, this.taskName, id).subscribe({
       next: () => {
@@ -412,9 +425,47 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
     );
   }
 
-  /// Left/right arrows step through the evaluation strip.
+  /// Packages load a page at a time, so the browser find would miss the rest.
+  openSearch(): void {
+    this.searchOpened.set(true);
+    afterNextRender(() => {
+      const field = this.searchField()?.nativeElement;
+      field?.focus();
+      field?.select();
+    }, { injector: this.injector });
+  }
+
+  search(term: string): void {
+    this.typedTerms.next(term.trim());
+  }
+
+  closeSearch(): void {
+    const field = this.searchField()?.nativeElement;
+    if (field) field.value = '';
+    this.searchOpened.set(false);
+    this.typedTerms.next('');
+    this.applySearch('');
+  }
+
+  closeEmptySearch(): void {
+    if (!this.searchField()?.nativeElement.value.trim()) this.closeSearch();
+  }
+
+  private applySearch(term: string): void {
+    if (term === this.searchTerm()) return;
+    this.searchTerm.set(term);
+    this.entryPointsEvalId = undefined;
+    this.loadEntryPoints(this.selectedId() ?? undefined);
+  }
+
+  /// Ctrl/Cmd+F searches the packages; left/right arrows step through the evaluation strip.
   @HostListener('document:keydown', ['$event'])
   onKeydown(e: KeyboardEvent): void {
+    if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 'f' && this.selected()) {
+      e.preventDefault();
+      this.openSearch();
+      return;
+    }
     if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
     if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
     const target = e.target as HTMLElement | null;
@@ -440,11 +491,11 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
   }
 
   evalDuration(evaluation: EvaluationSummary): string {
-    return formatEvaluationDuration(evaluationDuration(evaluation, this.tick()));
+    return formatEvaluationDuration(evaluationDuration(evaluation, isRunningEvaluationStatus(evaluation.status) ? this.tick() : 0));
   }
 
   pkgDuration(ep: EntryPointSummary): string {
-    const ms = buildDuration({ status: ep.build_status, ...ep }, this.tick());
+    const ms = buildDuration({ status: ep.build_status, ...ep }, ep.build_status === 'Building' ? this.tick() : 0);
     return ms == null ? '' : formatEvaluationDuration(ms);
   }
 
@@ -473,7 +524,23 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
     return match ? match[1] : parts;
   }
 
-  entryPointGroups = computed(() => groupEntryPoints(this.entryPoints(), this.failedAttributes()));
+  searchTerm = signal('');
+  private searchOpened = signal(false);
+  private listSpansPages = signal(false);
+  searchShown = computed(() => this.searchOpened() || this.listSpansPages() || this.searchTerm() !== '');
+  private searchField = viewChild<ElementRef<HTMLInputElement>>('packageSearch');
+  private typedTerms = new Subject<string>();
+  private appliedTerms = this.typedTerms
+    .pipe(debounceTime(TaskDetailComponent.SEARCH_DEBOUNCE_MS), takeUntilDestroyed())
+    .subscribe(term => this.applySearch(term));
+  matchingFailedAttributes = computed(() => {
+    const term = this.searchTerm().toLowerCase();
+    return this.failedAttributes().filter(f => f.eval.toLowerCase().includes(term));
+  });
+  entryPointGroups = computed(() => groupEntryPoints(
+    this.entryPoints(),
+    failuresWithinLoadedRows(this.matchingFailedAttributes(), this.entryPoints(), this.entryPointsTotal()),
+  ));
 
   protected readonly evaluationPhase = evaluationPhase;
   protected readonly entryPointPhase = entryPointPhase;
@@ -490,6 +557,10 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
       { label: 'Logs', icon: 'article', disabled: !selected,
         routerLink: selected
           ? ['/project', this.projectName, 'log', selected.id]
+          : undefined },
+      { label: 'Summary', icon: 'summarize', disabled: !selected,
+        routerLink: selected
+          ? ['/project', this.projectName, 'summary', selected.id]
           : undefined },
       { label: 'Show job', icon: 'work', disabled: !job,
         routerLink: job ? ['/board', 'jobs', job] : undefined },
@@ -652,6 +723,8 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
   /// Dep-closure counts plus the entry point's own build, so a package with
   /// few or no deps still shows its own progress in the bar.
   barCounts(ep: EntryPointSummary): BuildStatusCounts {
+    const known = this.barCountsByEntryPoint.get(ep);
+    if (known) return known;
     const c = { ...ep.deps };
     switch (ep.build_status) {
       case 'Completed': c.completed++; break;
@@ -663,6 +736,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
       case 'Skipped': break;
       default: c.queued++;
     }
+    this.barCountsByEntryPoint.set(ep, c);
     return c;
   }
 }

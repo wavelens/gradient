@@ -4,10 +4,11 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, OnInit, inject, signal, ChangeDetectionStrategy } from '@angular/core';
+import { Component, OnInit, computed, inject, signal, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
+import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { ProjectsService } from '@core/services/projects.service';
 import { CachesService } from '@core/services/caches.service';
 import { ProjectAccessService } from '@core/services/project-access.service';
@@ -61,6 +62,7 @@ export class CacheSubscriptionsComponent implements OnInit {
   private projectsService = inject(ProjectsService);
   private cachesService = inject(CachesService);
   private projectAccess = inject(ProjectAccessService);
+  private crumbs = inject(BreadcrumbsService);
 
   access = signal<AccessState>({ managed: false, canEdit: false, canTrigger: false });
 
@@ -71,7 +73,7 @@ export class CacheSubscriptionsComponent implements OnInit {
   errorMessage = signal<string | null>(null);
 
   projectName = '';
-  projectDisplayName = signal('');
+  breadcrumb = computed(() => this.crumbs.projectSettings(this.projectName, { label: 'Cache Subscriptions' }));
   caches = signal<CacheSubscription[]>([]);
   newCacheName = '';
   cacheSuggestions = signal<string[]>([]);
@@ -80,10 +82,6 @@ export class CacheSubscriptionsComponent implements OnInit {
   ngOnInit(): void {
     this.projectName = this.route.snapshot.paramMap.get('project') || '';
     this.projectAccess.forProject(this.projectName).then((s) => this.access.set(s));
-    this.projectsService.getProject(this.projectName).subscribe({
-      next: (project) => this.projectDisplayName.set(project.display_name),
-      error: () => {},
-    });
     this.loadCaches();
   }
 

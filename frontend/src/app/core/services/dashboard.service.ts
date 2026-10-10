@@ -17,10 +17,9 @@ export class DashboardService {
     return this.api.get<DashboardStats>('dashboard/stats');
   }
 
-  tasks(filter: DashboardFilter, page: number, perPage: number, history: number): Observable<TasksPage> {
-    return this.api.get<TasksPage>(
-      `dashboard/tasks?filter=${filter}&page=${page}&per_page=${perPage}&history=${history}`,
-    );
+  tasks(filter: DashboardFilter | null, page: number, perPage: number, history: number): Observable<TasksPage> {
+    const chosen = filter ? `filter=${filter}&` : '';
+    return this.api.get<TasksPage>(`dashboard/tasks?${chosen}page=${page}&per_page=${perPage}&history=${history}`);
   }
 
   activity(): Observable<{ days: ActivityDay[] }> {

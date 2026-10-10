@@ -12,6 +12,7 @@ import { BoardLiveService } from '@core/services/board-live.service';
 import { CardGridComponent, LoadingSpinnerComponent, StatCardComponent } from '@gradient/ui/ui';
 import { MetricChartComponent } from '@shared/ui';
 import { firstLoad } from '../first-load';
+import { clockTime } from '@shared/text';
 
 @Component({
   selector: 'app-board-overview',
@@ -83,7 +84,7 @@ export class BoardOverviewComponent implements OnInit, OnDestroy {
   }
 
   private applyCompleted(points: MetricPoint[]): void {
-    this.categories.set(points.map((p) => p.bucket_start.slice(11, 16)));
+    this.categories.set(points.map((p) => clockTime(p.bucket_start)));
     this.completedSeries.set([{ name: 'completed', data: points.map((p) => p.count) }]);
   }
 }

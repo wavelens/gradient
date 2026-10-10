@@ -15,7 +15,7 @@ import {
 } from '@gradient/ui/ui';
 import { MetricChartComponent } from '@shared/ui';
 import { TasksService, EntryPointMetricPoint, EntryPointMetricsResponse } from '@core/services/tasks.service';
-import { ProjectsService } from '@core/services/projects.service';
+import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { formatBytes, formatCount, formatDuration } from '@shared/text';
 
 const CHART_COLORS = {
@@ -37,30 +37,26 @@ const CHART_COLORS = {
 export class EntryPointMetricsComponent implements OnInit {
   private route = inject(ActivatedRoute);
   private tasksService = inject(TasksService);
-  private projectsService = inject(ProjectsService);
+  private crumbs = inject(BreadcrumbsService);
 
   loading = signal(true);
   points = signal<EntryPointMetricPoint[]>([]);
   evalAttr = signal('');
   keepEvaluations = signal(30);
   projectName = '';
-  projectDisplayName = signal('');
   taskName = '';
-  taskDisplayName = signal('');
+  breadcrumb = computed(() => this.crumbs.task(
+    this.projectName,
+    this.taskName,
+    { label: 'Metrics', link: ['/project', this.projectName, 'task', this.taskName, 'metrics'] },
+    { label: 'Entry Point Metrics' },
+  ));
 
   ngOnInit(): void {
     this.projectName = this.route.snapshot.paramMap.get('project') || '';
     this.taskName = this.route.snapshot.paramMap.get('task') || '';
     const evalParam = this.route.snapshot.queryParamMap.get('eval') || '';
     this.evalAttr.set(evalParam);
-    this.projectsService.getProject(this.projectName).subscribe({
-      next: (project) => this.projectDisplayName.set(project.display_name),
-      error: () => {},
-    });
-    this.tasksService.getTaskInfo(this.projectName, this.taskName).subscribe({
-      next: (proj) => this.taskDisplayName.set(proj.display_name),
-      error: () => {},
-    });
 
     this.tasksService.getEntryPointMetrics(this.projectName, this.taskName, evalParam).subscribe({
       next: (data: EntryPointMetricsResponse) => {

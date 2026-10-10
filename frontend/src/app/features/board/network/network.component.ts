@@ -12,7 +12,7 @@ import { LoadingSpinnerComponent, TableComponent } from '@gradient/ui/ui';
 import { MetricChartComponent } from '@shared/ui';
 import { firstLoad } from '../first-load';
 import { workerAxisLabel } from '../worker-label';
-import { formatBytes, formatCount, formatDuration, formatQuantity } from '@shared/text';
+import { clockTime, formatBytes, formatCount, formatDuration, formatQuantity } from '@shared/text';
 
 type HttpSortKey = keyof Pick<HttpRouteStat, 'method' | 'route' | 'count' | 'avg_ms' | 'errors'>;
 
@@ -136,7 +136,7 @@ export class BoardNetworkComponent implements OnInit {
     return this.sortAsc() ? 'ascending' : 'descending';
   }
 
-  egressCats = computed(() => (this.stats()?.nar_egress ?? []).map((p) => p.bucket_start.slice(11, 16)));
+  egressCats = computed(() => (this.stats()?.nar_egress ?? []).map((p) => clockTime(p.bucket_start)));
   egressSeries = computed(() => [
     { name: 'egress', data: (this.stats()?.nar_egress ?? []).map((p) => p.sum) },
   ]);

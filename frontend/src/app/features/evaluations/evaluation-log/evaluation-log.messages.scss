@@ -25,12 +25,12 @@
   }
 
   &:hover {
-    background: color-mix(in srgb, var(--gr-white) 4%, transparent);
-    border-left-color: color-mix(in srgb, var(--gr-white) 12%, transparent);
+    background: var(--gr-surface-hover);
+    border-left-color: var(--gr-border);
   }
 
   &.selected {
-    background: color-mix(in srgb, var(--gr-white) 6%, transparent);
+    background: var(--gr-surface-active);
     border-left-color: var(--gr-status-danger);
   }
 }// ── Messages panel ──────────────────────────────────────────────────────────

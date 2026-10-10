@@ -7,6 +7,7 @@
 import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
+import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { TeamsService } from '@core/services/teams.service';
 import { AuthService } from '@core/services/auth.service';
 import { AccessState, PatchTeam, Team } from '@core/models';
@@ -61,6 +62,7 @@ export class TeamSettingsComponent implements OnInit {
   private route = inject(ActivatedRoute);
   private router = inject(Router);
   private teams = inject(TeamsService);
+  private crumbs = inject(BreadcrumbsService);
   private authService = inject(AuthService);
 
   readonly roleOptions = [
@@ -71,6 +73,7 @@ export class TeamSettingsComponent implements OnInit {
   ];
 
   teamName = '';
+  breadcrumb = computed(() => this.crumbs.team(this.teamName, { label: 'Settings' }));
   team = signal<Team | null>(null);
   loading = signal(true);
   saving = signal(false);
@@ -93,6 +96,7 @@ export class TeamSettingsComponent implements OnInit {
     this.teams.get(this.teamName).subscribe({
       next: (team) => {
         this.team.set(team);
+        this.crumbs.rememberTeam(this.teamName, team.display_name);
         this.form = this.formOf(team);
         this.loading.set(false);
       },

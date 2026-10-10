@@ -23,6 +23,15 @@
 <gr-copy-field [value]="storePath" [inline]="true" />
 <gr-copy-field [value]="publicKey" [multiline]="true" [rows]="4" />
 
+<h2>Search box</h2>
+<p>The <code>search-box</code> class: icon inside, key hint at the end. The header trigger and
+   the package search on the task page share it.</p>
+<label class="search-box">
+  <gr-icon name="search" size="sm" />
+  <input type="text" placeholder="Search" aria-label="Search" />
+  <kbd>/</kbd>
+</label>
+
 <h2>Read-only rows</h2>
 <gr-field-row label="Endpoint URL" value="https://git.example/api/v1" />
 <gr-field-row label="Secret"><gr-badge severity="success">Configured</gr-badge></gr-field-row>

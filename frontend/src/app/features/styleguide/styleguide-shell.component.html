@@ -5,7 +5,7 @@
       <a
         [routerLink]="section.path ? ['/styleguide', section.path] : ['/styleguide']"
         routerLinkActive="is-active"
-        [routerLinkActiveOptions]="{ exact: section.path === '' }"
+        [routerLinkActiveOptions]="activeLinkMatch(section.path === '')"
         >{{ section.label }}</a
       >
     }

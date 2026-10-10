@@ -4,16 +4,18 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { ChangeDetectionStrategy, Component, OnInit, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute } from '@angular/router';
 import { Webhook, WebhookDelivery, WebhookScopeRef } from '@core/models';
+import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { WebhooksService } from '@core/services/webhooks.service';
 import {
   BadgeComponent,
   ButtonComponent,
   CheckboxComponent,
+  type Crumb,
   DialogComponent,
   EmptyStateComponent,
   FormFieldComponent,
@@ -54,9 +56,11 @@ import { ActionEventsComponent } from '../tasks/task-actions/action-events.compo
 export class WebhooksComponent implements OnInit {
   private route = inject(ActivatedRoute);
   private service = inject(WebhooksService);
+  private crumbs = inject(BreadcrumbsService);
 
   scope!: WebhookScopeRef;
   title = '';
+  breadcrumb = computed(() => this.trail());
 
   loading = signal(true);
   saving = signal(false);
@@ -95,6 +99,18 @@ export class WebhooksComponent implements OnInit {
         this.title = 'Instance Webhooks';
     }
     this.load();
+  }
+
+  private trail(): Crumb[] {
+    const page = { label: 'Webhooks' };
+    switch (this.scope.kind) {
+      case 'project':
+        return this.crumbs.projectSettings(this.scope.name, page);
+      case 'cache':
+        return this.crumbs.cacheSettings(this.scope.name, page);
+      case 'instance':
+        return [{ label: 'Job Board', link: ['/board', 'health'] }, page];
+    }
   }
 
   load(): void {

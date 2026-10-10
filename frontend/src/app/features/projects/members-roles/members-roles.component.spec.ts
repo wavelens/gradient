@@ -40,6 +40,7 @@ function setup(access: AccessState): ComponentFixture<MembersRolesComponent> {
       {
         provide: ProjectsService,
         useValue: {
+          getProject: () => of({ display_name: 'Acme' }),
           getMembers: () => of([{ id: 'alice', name: 'Admin' }]),
           getRoles: () =>
             of({

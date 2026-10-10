@@ -10,7 +10,7 @@ import { BoardService, MetricPoint, RuleDescription, ScoringSummary } from '@cor
 import { CardGridComponent, LoadingSpinnerComponent, PopoverComponent, TableComponent, StatCardComponent } from '@gradient/ui/ui';
 import { LabelHelpComponent, MetricChartComponent } from '@shared/ui';
 import { firstLoad } from '../first-load';
-import { formatDuration } from '@shared/text';
+import { clockTime, formatDuration } from '@shared/text';
 
 @Component({
   selector: 'app-board-scheduler',
@@ -90,7 +90,7 @@ export class BoardSchedulerComponent implements OnInit {
 
   readonly duration = formatDuration;
 
-  waitCategories = computed(() => this.wait().map((p) => p.bucket_start.slice(11, 16)));
+  waitCategories = computed(() => this.wait().map((p) => clockTime(p.bucket_start)));
   waitSeries = computed(() => {
     const depMap = new Map(this.deps().map((p) => [p.bucket_start, Math.round(p.avg)]));
     return [

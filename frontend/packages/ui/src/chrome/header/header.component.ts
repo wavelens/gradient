@@ -8,6 +8,7 @@ import { Component, inject, input, signal, ChangeDetectionStrategy } from '@angu
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { NavigationEnd, Router, RouterLink, RouterLinkActive } from '@angular/router';
 import { filter } from 'rxjs';
+import { activeLinkMatch } from '../active-link-match';
 import { IconComponent } from '../../ui/icon/icon.component';
 import { LogoComponent } from '../../ui/logo/logo.component';
 import { Brand, NavLink } from '../types';
@@ -26,6 +27,7 @@ export class HeaderComponent {
   nav = input<NavLink[]>([]);
 
   protected readonly menuOpen = signal(false);
+  protected readonly activeLinkMatch = activeLinkMatch;
 
   constructor() {
     inject(Router)

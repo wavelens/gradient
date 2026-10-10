@@ -10,7 +10,7 @@ import { BoardService, MetricPoint, DurationsHeatmap } from '@core/services/boar
 import { LoadingSpinnerComponent } from '@gradient/ui/ui';
 import { MetricChartComponent } from '@shared/ui';
 import { firstLoad } from '../first-load';
-import { formatDuration } from '@shared/text';
+import { clockTime, formatDuration } from '@shared/text';
 
 @Component({
   selector: 'app-board-durations',
@@ -67,20 +67,20 @@ export class BoardDurationsComponent implements OnInit {
   heatmapSeries = computed(() => {
     const h = this.heatmap();
     if (!h) return [];
-    const times = h.times.map((t) => t.slice(11, 16));
+    const times = h.times.map((t) => clockTime(t));
     return h.bands.map((b) => ({
       name: b.band,
       data: b.counts.map((c, i) => ({ x: times[i] ?? '', y: c })),
     }));
   });
 
-  buildCategories = computed(() => this.build().map((p) => p.bucket_start.slice(11, 16)));
+  buildCategories = computed(() => this.build().map((p) => clockTime(p.bucket_start)));
   buildSeries = computed(() => [
     { name: 'avg', data: this.build().map((p) => p.avg) },
     { name: 'max', data: this.build().map((p) => p.max) },
   ]);
 
-  waitCategories = computed(() => this.wait().map((p) => p.bucket_start.slice(11, 16)));
+  waitCategories = computed(() => this.wait().map((p) => clockTime(p.bucket_start)));
   waitSeries = computed(() => {
     const depMap = new Map(this.deps().map((p) => [p.bucket_start, p.avg]));
     return [

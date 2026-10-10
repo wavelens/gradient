@@ -6,7 +6,7 @@
 
 <gr-toast />
 
-<gr-page-layout [breadcrumb]="[{ label: projectDisplayName() || projectName, link: ['/project', projectName] }, { label: 'Settings', link: ['/project', projectName, 'settings'] }, { label: 'Workers' }]" title="Workers" subtitle="Registered build workers for this project">
+<gr-page-layout [breadcrumb]="breadcrumb()" title="Workers" subtitle="Registered build workers for this project">
   <button slot="actions"
       *appWritable="access()"
       grButton

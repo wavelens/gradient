@@ -13,6 +13,7 @@ import { TaskActionsComponent } from './task-actions.component';
 import { ActionsService } from '@core/services/actions.service';
 import { IntegrationsService } from '@core/services/integrations.service';
 import { ProjectsService } from '@core/services/projects.service';
+import { TasksService } from '@core/services/tasks.service';
 import { TeamsService } from '@core/services/teams.service';
 import { ConfigService } from '@core/services/config.service';
 import { AccessState } from '@core/models/access.model';
@@ -69,6 +70,7 @@ function setup(
       },
       { provide: IntegrationsService, useValue: { listProjectIntegrations: () => of([]) } },
       { provide: ProjectsService, useValue: { getProject: () => of({ display_name: 'Acme' }) } },
+      { provide: TasksService, useValue: { getTaskInfo: () => of({ display_name: 'Demo Task' }) } },
       { provide: TeamsService, useValue: { projectGrants: () => of([]) } },
       { provide: ConfigService, useValue: { smtpEnabled: true } },
     ],
@@ -104,13 +106,13 @@ describe('TaskActionsComponent', () => {
     expect(testBtn!.disabled).toBe(false);
   });
 
-  it('includes a Settings link in the breadcrumb', () => {
+  it('leads back through the project, the task and its settings by display name', () => {
     const fixture = setup({ managed: false, canEdit: true, canTrigger: true });
-    const link = Array.from(
-      fixture.nativeElement.querySelectorAll('.breadcrumb a.breadcrumb-link'),
-    ).find((a) => (a as HTMLElement).textContent?.trim() === 'Settings') as HTMLAnchorElement | undefined;
-    expect(link).toBeTruthy();
-    expect(link!.getAttribute('href')).toContain('/settings');
+    const crumbs = Array.from(
+      fixture.nativeElement.querySelectorAll('.breadcrumb-link, .breadcrumb-current'),
+    ) as HTMLElement[];
+    expect(crumbs.map((crumb) => crumb.textContent?.trim())).toEqual(['Projects', 'Acme', 'Demo Task', 'Settings', 'Actions']);
+    expect(crumbs[3].getAttribute('href')).toBe('/project/acme/task/demo/settings');
   });
 
   it('renders action name and event chips', () => {

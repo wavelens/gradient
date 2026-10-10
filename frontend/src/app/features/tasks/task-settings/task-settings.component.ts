@@ -4,11 +4,12 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, OnInit, inject, signal, ChangeDetectionStrategy } from '@angular/core';
+import { Component, OnInit, computed, inject, signal, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { TasksService } from '@core/services/tasks.service';
+import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { ProjectsService } from '@core/services/projects.service';
 import {
   AutoCompleteComponent,
@@ -65,6 +66,7 @@ export class TaskSettingsComponent implements OnInit {
   private router = inject(Router);
   private tasksService = inject(TasksService);
   private projectsService = inject(ProjectsService);
+  private crumbs = inject(BreadcrumbsService);
 
   access = injectTaskAccess();
 
@@ -85,8 +87,8 @@ export class TaskSettingsComponent implements OnInit {
   transferProjectSuggestions = signal<string[]>([]);
 
   projectName = '';
-  projectDisplayName = signal('');
   taskName = '';
+  breadcrumb = computed(() => this.crumbs.task(this.projectName, this.taskName, { label: 'Settings' }));
 
   formData: {
     display_name: string;
@@ -120,10 +122,6 @@ export class TaskSettingsComponent implements OnInit {
   ngOnInit(): void {
     this.projectName = this.route.snapshot.paramMap.get('project') || '';
     this.taskName = this.route.snapshot.paramMap.get('task') || '';
-    this.projectsService.getProject(this.projectName).subscribe({
-      next: (project) => this.projectDisplayName.set(project.display_name),
-      error: () => {},
-    });
     this.loadTask();
   }
 
@@ -136,6 +134,7 @@ export class TaskSettingsComponent implements OnInit {
           return;
         }
         this.task.set(task);
+        this.crumbs.rememberTask(this.projectName, this.taskName, task.display_name);
         this.formData = {
           display_name: task.display_name,
           description: task.description,

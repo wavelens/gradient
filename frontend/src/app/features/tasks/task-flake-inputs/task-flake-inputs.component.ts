@@ -9,7 +9,7 @@ import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { FlakeInputOverridesService } from '@core/services/flake-input-overrides.service';
-import { ProjectsService } from '@core/services/projects.service';
+import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import {
   BadgeComponent,
   ButtonComponent,
@@ -71,7 +71,7 @@ const DEFAULT_FORM: FlakeInputFormState = {
 export class TaskFlakeInputsComponent implements OnInit {
   private route = inject(ActivatedRoute);
   private overridesService = inject(FlakeInputOverridesService);
-  private projectsService = inject(ProjectsService);
+  private crumbs = inject(BreadcrumbsService);
   private messageService = inject(MessageService);
   private accessSvc = inject(AccessService);
 
@@ -88,8 +88,8 @@ export class TaskFlakeInputsComponent implements OnInit {
   deletingId = signal<string | null>(null);
 
   projectName = '';
-  projectDisplayName = signal('');
   taskName = '';
+  breadcrumb = computed(() => this.crumbs.taskSettings(this.projectName, this.taskName, { label: 'Flake Inputs' }));
 
   overrides = signal<FlakeInputOverride[]>([]);
   editingId = signal<string | null>(null);
@@ -102,10 +102,6 @@ export class TaskFlakeInputsComponent implements OnInit {
   ngOnInit(): void {
     this.projectName = this.route.snapshot.paramMap.get('project') || '';
     this.taskName = this.route.snapshot.paramMap.get('task') || '';
-    this.projectsService.getProject(this.projectName).subscribe({
-      next: (project) => this.projectDisplayName.set(project.display_name),
-      error: () => {},
-    });
     this.loadOverrides();
   }
 

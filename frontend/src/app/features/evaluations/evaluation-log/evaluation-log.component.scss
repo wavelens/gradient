@@ -108,10 +108,7 @@
 
   &:first-child { padding-left: 0; }
 
-  &.nav-btns {
-    gap: $spacing-xs;
-    border-right: none;
-  }
+  &:last-child { border-right: none; }
 }
 
 .metric-label {

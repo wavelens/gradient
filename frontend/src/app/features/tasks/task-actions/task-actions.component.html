@@ -4,7 +4,7 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<gr-page-layout [breadcrumb]="[{ label: projectDisplayName() || projectName, link: ['/project', projectName] }, { label: taskName, link: ['/project', projectName, 'task', taskName] }, { label: 'Settings', link: ['/project', projectName, 'task', taskName, 'settings'] }, { label: 'Actions' }]" title="Actions" subtitle="Side effects triggered by evaluation and build events">
+<gr-page-layout [breadcrumb]="breadcrumb()" title="Actions" subtitle="Side effects triggered by evaluation and build events">
   <button slot="actions"
       *appWritable="access()"
       grButton

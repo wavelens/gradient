@@ -4,10 +4,11 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, OnInit, inject, signal, ChangeDetectionStrategy } from '@angular/core';
+import { Component, OnInit, computed, inject, signal, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
+import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { CachesService } from '@core/services/caches.service';
 import {
   ButtonComponent,
@@ -55,6 +56,7 @@ export class CacheSettingsComponent implements OnInit {
   private route = inject(ActivatedRoute);
   private router = inject(Router);
   private cachesService = inject(CachesService);
+  private crumbs = inject(BreadcrumbsService);
 
   access = injectCacheAccess();
 
@@ -69,6 +71,7 @@ export class CacheSettingsComponent implements OnInit {
   saveSuccess = signal(false);
 
   cacheName = '';
+  breadcrumb = computed(() => this.crumbs.cache(this.cacheName, { label: 'Settings' }));
 
   readonly visibilityOptions = [
     { label: 'Private', value: false },
@@ -94,6 +97,7 @@ export class CacheSettingsComponent implements OnInit {
     this.cachesService.getCache(this.cacheName).subscribe({
       next: (cache) => {
         this.cache.set(cache);
+        this.crumbs.rememberCache(this.cacheName, cache.display_name);
         this.formData = {
           display_name: cache.display_name,
           description: cache.description,

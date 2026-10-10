@@ -4,7 +4,7 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<gr-page-layout [breadcrumb]="[{ label: projectName, link: ['/project', projectName] }, { label: 'Settings', link: ['/project', projectName, 'settings'] }, { label: 'Members & Roles' }]" title="Members & Roles">
+<gr-page-layout [breadcrumb]="breadcrumb()" title="Members & Roles">
   <!-- Members -->
   <gr-settings-section title="Members" [card]="false" maxWidth="none">
     <button

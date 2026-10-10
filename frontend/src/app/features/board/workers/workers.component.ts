@@ -15,7 +15,7 @@ import {
   WorkerLoad,
 } from '@core/services/board.service';
 import { firstLoad } from '../first-load';
-import { formatMegabytes, formatPercent } from '@shared/text';
+import { clockTime, formatMegabytes, formatPercent } from '@shared/text';
 import { LoadingSpinnerComponent, TableComponent } from '@gradient/ui/ui';
 import { MetricChartComponent } from '@shared/ui';
 import { workerAxisLabel } from '../worker-label';
@@ -130,7 +130,7 @@ export class BoardWorkersComponent implements OnInit {
   readonly megabytes = formatMegabytes;
   readonly percent = (value: number) => formatPercent(value / 100);
 
-  fleetCats = computed(() => this.fleet().map((p) => p.bucket_start.slice(11, 16)));
+  fleetCats = computed(() => this.fleet().map((p) => clockTime(p.bucket_start)));
   fleetSeries = computed(() => [
     { name: 'connected', data: this.fleet().map((p) => p.connected) },
     { name: 'draining', data: this.fleet().map((p) => p.draining) },

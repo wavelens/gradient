@@ -7,6 +7,7 @@
 import { Component, OnInit, inject, signal, computed, linkedSignal, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterModule } from '@angular/router';
+import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { CachesService, CacheStats, CacheMetricPoint, StorageMetricPoint } from '@core/services/caches.service';
 import { AuthService } from '@core/services/auth.service';
 import { StarsService } from '@core/services/stars.service';
@@ -72,6 +73,7 @@ export class CacheDetailComponent implements OnInit {
   protected readonly netrcDocsUrl = docsUrl('guides/share-a-cache/#1-use-the-cache-on-a-machine');
   private route = inject(ActivatedRoute);
   private cachesService = inject(CachesService);
+  private crumbs = inject(BreadcrumbsService);
   private stars = inject(StarsService);
   protected authService = inject(AuthService);
 
@@ -95,6 +97,7 @@ export class CacheDetailComponent implements OnInit {
   });
 
   cacheName = '';
+  breadcrumb = computed(() => this.crumbs.cache(this.cacheName));
   starTarget: StarTarget = { kind: 'cache', cache: '' };
   cacheUrl = '';
   serverUrl = '';
@@ -163,7 +166,10 @@ export class CacheDetailComponent implements OnInit {
   }
 
   loadCache(): void {
-    this.cachesService.getCache(this.cacheName).subscribe((cache) => this.cache.set(cache));
+    this.cachesService.getCache(this.cacheName).subscribe((cache) => {
+      this.cache.set(cache);
+      this.crumbs.rememberCache(this.cacheName, cache.display_name);
+    });
   }
 
   loadStats(): void {

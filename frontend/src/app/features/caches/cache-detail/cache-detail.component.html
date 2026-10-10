@@ -6,7 +6,7 @@
 
 @if (cache(); as c) {
   <gr-page-layout
-    [breadcrumb]="[{ label: 'Caches', link: ['/caches'] }, { label: c.display_name }]"
+    [breadcrumb]="breadcrumb()"
     [title]="c.display_name"
     [subtitle]="c.description || 'No description'"
   >

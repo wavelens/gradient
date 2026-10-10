@@ -10,9 +10,17 @@
   <div class="pp-head pad">
     <div>
       <nav class="breadcrumb" aria-label="Breadcrumb">
-        <a class="breadcrumb-link" [routerLink]="['/project', projectName]">@if (projectDisplayName(); as name) {{{ name }}} @else {<gr-skeleton width="8ch" />}</a>
-        <span class="breadcrumb-separator" aria-hidden="true">/</span>
-        <span class="breadcrumb-current" aria-current="page">{{ proj.display_name }}</span>
+        @for (crumb of breadcrumb(); track $index; let last = $last) {
+          @if (last) {
+            <span class="breadcrumb-current" aria-current="page"><ng-container *ngTemplateOutlet="crumbLabel; context: { $implicit: crumb.label }" /></span>
+          } @else {
+            <a class="breadcrumb-link" [routerLink]="crumb.link"><ng-container *ngTemplateOutlet="crumbLabel; context: { $implicit: crumb.label }" /></a>
+            <span class="breadcrumb-separator" aria-hidden="true">/</span>
+          }
+        }
+        <ng-template #crumbLabel let-label>
+          @if (label === null) { <gr-skeleton width="8ch" /> } @else { {{ label }} }
+        </ng-template>
       </nav>
       <div class="title-row">
         <h1>{{ proj.display_name }}</h1>
@@ -131,25 +139,35 @@
               <gr-menu #panelMenu [model]="panelMenuModel()" />
               @if (isRunning(sel.status)) {
                 <button *appWritable="triggerAccess()" grButton size="small" label="Abort" icon="close"
-                        severity="danger" (click)="abortTarget.set(sel.id)"></button>
+                        severity="danger" [loading]="aborting()" [disabled]="aborting()"
+                        (click)="requestAbort($event, sel.id)"></button>
               }
             </div>
           </div>
+          @if (searchShown()) {
+            <label class="search-box pkg-search" animate.leave="leaving">
+              <gr-icon name="search" size="sm" />
+              <input #packageSearch type="text" placeholder="Search packages" aria-label="Search packages"
+                     [value]="searchTerm()" (input)="search($any($event.target).value)"
+                     (keydown.escape)="closeSearch()" (blur)="closeEmptySearch()" />
+            </label>
+          }
           @for (group of entryPointGroups(); track group.title) {
             <div class="pkg-label"><h3>{{ group.title }}</h3></div>
             <div class="pkg-list">
               @for (row of group.rows; track row.key) {
                 @if (row.kind === 'build') {
                   @let ep = row.entry;
-                  <div class="pkg" [attr.data-phase]="entryPointPhase(ep)" [style.animation-delay.ms]="$index * 18"
+                  @let counts = barCounts(ep);
+                  <div class="pkg" [attr.data-phase]="entryPointPhase(ep)" [style.animation-delay.ms]="($index % staggeredRows) * 18"
                        (contextmenu)="openPkgContextMenu($event, ep, sel.id, pkgMenu)">
                     <a class="pkg-link" [routerLink]="['/project', projectName, 'log', sel.id]" [queryParams]="{ build: ep.build_id }"
                        [title]="ep.eval + ' - ' + ep.derivation_path" [attr.aria-label]="row.label"></a>
                     <gr-status-icon class="si" [phase]="entryPointPhase(ep)" [prioritized]="ep.prioritized" size="sm" />
                     <span class="pkg-name">@if (ep.ifd) { <gr-badge class="pkg-ifd" severity="info">IFD</gr-badge> }{{ row.label }}</span>
                     <span class="chip-arch mono">{{ ep.architecture }}</span>
-                    <gr-segmented-bar class="pkg-bar" [counts]="barCounts(ep)" />
-                    <span class="pkg-deps">{{ doneCount(barCounts(ep)) }} / {{ totalCount(barCounts(ep)) }} deps</span>
+                    <gr-segmented-bar class="pkg-bar" [counts]="counts" />
+                    <span class="pkg-deps">{{ doneCount(counts) }} / {{ totalCount(counts) }} deps</span>
                     <span class="pkg-time">
                       {{ pkgDuration(ep) }}
                       @if (ep.has_artefacts) { <gr-icon name="inventory_2" size="sm" /> }
@@ -159,7 +177,7 @@
                             aria-label="Package actions"><gr-icon name="more_vert" /></button>
                   </div>
                 } @else {
-                  <div class="pkg" data-phase="failure" [style.animation-delay.ms]="$index * 18">
+                  <div class="pkg" data-phase="failure" [style.animation-delay.ms]="($index % staggeredRows) * 18">
                     <a class="pkg-link" [routerLink]="['/project', projectName, 'log', sel.id]"
                        [title]="row.failure.eval + ' - ' + row.failure.message" [attr.aria-label]="row.label + ', failed to evaluate'"></a>
                     <gr-status-icon class="si" [phase]="'failure'" size="sm" />
@@ -170,9 +188,9 @@
               }
             </div>
           } @empty {
-            <div class="pkg-label"><h3>Packages</h3></div>
+            <div class="pkg-label"><h3>{{ selectedFetchRows().length && !searchTerm() ? 'Flake Inputs' : 'Packages' }}</h3></div>
           }
-          @if (entryPoints().length > 0 || failedAttributes().length > 0) {
+          @if (entryPoints().length > 0 || matchingFailedAttributes().length > 0) {
             @if (entryPoints().length < entryPointsTotal()) {
               <div class="pkg pkg-more" aria-busy="true" [attr.aria-label]="'Loading packages, ' + entryPoints().length + ' of ' + entryPointsTotal()"
                    (grInView)="loadMoreEntryPoints()" [grInViewKey]="entryPoints().length" grInViewMargin="100%">
@@ -182,6 +200,9 @@
                 <gr-skeleton class="pkg-deps" width="5rem" />
               </div>
             }
+          } @else if (!entryPointsLoading() && searchTerm()) {
+            <gr-empty-state flat icon="search_off" title="No matching packages"
+              [message]="'No package of this evaluation contains &quot;' + searchTerm() + '&quot;.'" />
           } @else if (!entryPointsLoading() && isRunning(sel.status)) {
             @if (selectedFetchRows().length) {
               <div class="pkg-list">

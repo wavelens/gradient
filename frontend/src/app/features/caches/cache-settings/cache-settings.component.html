@@ -8,11 +8,7 @@
   <gr-loading-spinner message="Loading cache settings..." />
 } @else if (cache(); as c) {
   <gr-page-layout
-    [breadcrumb]="[
-      { label: 'Caches', link: ['/caches'] },
-      { label: c.display_name, link: ['/caches', cacheName] },
-      { label: 'Settings' }
-    ]"
+    [breadcrumb]="breadcrumb()"
     title="Cache Settings"
   >
     <gr-settings-section title="General">

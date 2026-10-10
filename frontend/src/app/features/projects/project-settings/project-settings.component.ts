@@ -4,10 +4,11 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, OnInit, inject, signal, ChangeDetectionStrategy } from '@angular/core';
+import { Component, OnInit, computed, inject, signal, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
+import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { ProjectsService } from '@core/services/projects.service';
 import { ProjectAccessService } from '@core/services/project-access.service';
 import {
@@ -67,6 +68,7 @@ export class ProjectSettingsComponent implements OnInit {
   private router = inject(Router);
   private projectsService = inject(ProjectsService);
   private projectAccess = inject(ProjectAccessService);
+  private crumbs = inject(BreadcrumbsService);
 
   access = signal<AccessState>({ managed: false, canEdit: false, canTrigger: false });
 
@@ -85,6 +87,7 @@ export class ProjectSettingsComponent implements OnInit {
   saveSuccess = signal(false);
 
   projectName = '';
+  breadcrumb = computed(() => this.crumbs.project(this.projectName, { label: 'Settings' }));
 
   formData = {
     display_name: '',
@@ -105,6 +108,7 @@ export class ProjectSettingsComponent implements OnInit {
     this.projectsService.getProject(this.projectName).subscribe({
       next: (project) => {
         this.project.set(project);
+        this.crumbs.rememberProject(this.projectName, project.display_name);
         this.formData = {
           display_name: project.display_name,
           description: project.description,

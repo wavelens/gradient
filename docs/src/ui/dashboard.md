@@ -7,7 +7,7 @@ The start page after sign-in, listing every task needing attention across all pr
 | Area | Content | Actions |
 |---|---|---|
 | Stats | CPU time, builds, cache size, busy workers and queue wait across the visible projects | |
-| Filter | **All**, **Failing** and **Starred**, each with a count | Switch the task list. The choice stays in the URL |
+| Filter | **Starred**, **All** and **Failing**, each with a count. **Starred** is the default, and hidden while no task is starred | Switch the task list. The choice stays in the URL |
 | Task list | The top 10 tasks: latest commit, recent evaluations as bars, entry points ok/total, change in failures, speed | Open a task from the row, an evaluation from a bar. Page through every task with **Show all** |
 | Activity | A calendar of the last year | Switch between evaluations and failures |
 | Rail | Projects by rank, caches with starred first | Star a project or cache. Open its tasks |

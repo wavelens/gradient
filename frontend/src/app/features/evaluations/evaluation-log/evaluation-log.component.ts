@@ -21,7 +21,6 @@ import {
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { LogChunkIndex, LogSearchHit, parseLineFragment, searchLines, windowAround } from './log-window';
 import { matchesBuildSearch } from './build-search';
-import { isTypingTarget } from './keyboard';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { DomSanitizer, SafeHtml } from '@angular/platform-browser';
@@ -29,7 +28,7 @@ import { Observable, Subscription, merge } from 'rxjs';
 import { auditTime, filter, map, share, switchMap } from 'rxjs/operators';
 import { EvaluationsService, BuildItem, BuildWithOutputs } from '@core/services/evaluations.service';
 import { LiveEvent, LiveService } from '@core/services/live.service';
-import { ProjectsService } from '@core/services/projects.service';
+import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { TasksService } from '@core/services/tasks.service';
 import { AccessService, WritableDirective } from '@shared/access';
 import { AccessState, accessFromEntity } from '@core/models/access.model';
@@ -47,6 +46,7 @@ import {
   MenuItem,
   MessageBannerComponent,
   MessageService,
+  SkeletonComponent,
   ToastComponent,
 } from '@gradient/ui/ui';
 import { BuildProgressComponent, EvalStatusBadgeComponent, InputFetchListComponent, ThunkProgressComponent } from '@shared/ui';
@@ -60,7 +60,7 @@ const REOPENABLE_EVALUATION_STATUSES: readonly EvaluationStatus[] = ['Failed', '
 @Component({
   selector: 'app-evaluation-log',
   standalone: true,
-  imports: [CommonModule, RouterModule, LoadingSpinnerComponent, ButtonComponent, DialogComponent, IconComponent, BadgeComponent, BuildProgressComponent, EvalStatusBadgeComponent, InputDirective, InputFetchListComponent, MenuComponent, MessageBannerComponent, ThunkProgressComponent, ToastComponent, WritableDirective],
+  imports: [CommonModule, RouterModule, LoadingSpinnerComponent, ButtonComponent, DialogComponent, IconComponent, BadgeComponent, SkeletonComponent, BuildProgressComponent, EvalStatusBadgeComponent, InputDirective, InputFetchListComponent, MenuComponent, MessageBannerComponent, ThunkProgressComponent, ToastComponent, WritableDirective],
   providers: [MessageService],
   templateUrl: './evaluation-log.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
@@ -76,7 +76,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   private router = inject(Router);
   private evalService = inject(EvaluationsService);
   private live = inject(LiveService);
-  private projectsService = inject(ProjectsService);
+  private crumbs = inject(BreadcrumbsService);
   private tasksService = inject(TasksService);
   private accessService = inject(AccessService);
   private messageService = inject(MessageService);
@@ -120,7 +120,12 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   private tick = signal(0);
 
   projectName = '';
-  projectDisplayName = signal('');
+  projectAndTaskCrumbs = computed(() => {
+    const task = this.evaluation()?.task_name;
+    const trail = task ? this.crumbs.task(this.projectName, task) : this.crumbs.project(this.projectName);
+
+    return trail.slice(1);
+  });
   evaluationId = '';
   private initialBuildId: string | null = null;
   // #489: when set, the build list is scoped to this build's package closure.
@@ -233,6 +238,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   sidebarSearchOpen = signal(false);
   sidebarSearchQuery = signal('');
   private sidebarFocused = false;
+  private pointerOver: 'builds' | 'log' | null = null;
   searchHits = signal<LogSearchHit[]>([]);
   searchTotal = signal(0);
   currentHit = signal(-1);
@@ -265,10 +271,6 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
       this.loading.set(false);
       return;
     }
-    this.projectsService.getProject(this.projectName).subscribe({
-      next: (project) => this.projectDisplayName.set(project.display_name),
-      error: () => {},
-    });
     this.loadEvaluation();
   }
 
@@ -286,6 +288,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     this.loading.set(true);
     this.evalService.getEvaluation(this.evaluationId).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (evaluation) => {
+        this.rememberTaskName(evaluation);
         this.evaluation.set(evaluation);
         this.loading.set(false);
         this.loadAccess(evaluation.task_name);
@@ -311,6 +314,11 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
         this.startLiveUpdates(evaluation.status);
       }
     });
+  }
+
+  private rememberTaskName(evaluation: Evaluation): void {
+    if (!evaluation.task_name || !evaluation.task_display_name) return;
+    this.crumbs.rememberTask(this.projectName, evaluation.task_name, evaluation.task_display_name);
   }
 
   private loadAccess(taskName?: string): void {
@@ -638,6 +646,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   }
 
   setSidebarFocus(v: boolean): void { this.sidebarFocused = v; }
+  setPointerOver(region: 'builds' | 'log' | null): void { this.pointerOver = region; }
 
   // ── Build selection & log loading ──────────────────────────────────────────
 
@@ -998,10 +1007,10 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   onKeydown(event: KeyboardEvent): void {
     const isFind = (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'f';
 
-    // Ctrl/Cmd+F never reaches the browser here: it searches the open log, or
-    // the builds when no log is open or the sidebar holds focus.
+    // Ctrl/Cmd+F never reaches the browser here: it searches the builds or the
+    // open log, whichever the pointer is over.
     const logOpen = !!this.selectedBuildId() && this.selectedSection() !== 'messages';
-    if ((event.key === '/' && !isTypingTarget(event.target)) || (isFind && (this.sidebarFocused || !logOpen))) {
+    if (isFind && this.findSearchesBuilds(logOpen)) {
       event.preventDefault();
       this.openSidebarSearch();
       return;
@@ -1020,6 +1029,12 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     } else if (event.key === 'Escape' && this.searchOpen()) {
       this.closeSearch();
     }
+  }
+
+  /// The pointer decides; keyboard focus only counts while the pointer is over neither region.
+  private findSearchesBuilds(logOpen: boolean): boolean {
+    if (!logOpen) return true;
+    return this.pointerOver ? this.pointerOver === 'builds' : this.sidebarFocused;
   }
 
   openSidebarSearch(): void {
@@ -1526,6 +1541,11 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
 
   // ── Abort ───────────────────────────────────────────────────────────────────
 
+  requestAbort(event: MouseEvent): void {
+    if (event.ctrlKey || event.metaKey) this.abortEvaluation();
+    else this.abortConfirmOpen.set(true);
+  }
+
   abortEvaluation(): void {
     this.aborting.set(true);
     this.evalService.abortEvaluation(this.evaluationId).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
@@ -1652,40 +1672,5 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     if (status === 'Fetching') return 'Fetching';
     if (status === 'EvaluatingFlake' || status === 'EvaluatingDerivation') return 'Evaluating';
     return status;
-  }
-
-  navigateToEvaluation(id: string): void {
-    this.stopLiveUpdates();
-    this.liveProgress.set(null);
-    this.stopDurationTimer();
-    this.stopActiveStream();
-    this.selectedBuildId.set(null);
-    this.selectedSection.set(null);
-    this.messages.set([]);
-    this.resetLogState();
-    this.isInitialBuildsLoad = true;
-    this.totalBuilds = 0;
-    this.loadingMore = false;
-    this.evaluationId = id;
-    this.router.navigate(['/project', this.projectName, 'log', id]);
-    this.loadEvaluation();
-  }
-
-  // #489: drop the package scope and reload the full evaluation build list.
-  clearScope(): void {
-    if (!this.scopeBuildId()) return;
-    this.scopeBuildId.set(null);
-    this.router.navigate([], {
-      relativeTo: this.route,
-      queryParams: { build: null },
-      queryParamsHandling: 'merge',
-      replaceUrl: true,
-    });
-    this.builds.set([]);
-    this.visibleBuilds.set([]);
-    this.pendingBuilds = [];
-    this.isInitialBuildsLoad = true;
-    this.totalBuilds = 0;
-    this.loadBuilds();
   }
 }

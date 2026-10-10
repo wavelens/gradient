@@ -8,6 +8,7 @@ import { Component, OnInit, computed, inject, signal, ChangeDetectionStrategy } 
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
+import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { CachesService } from '@core/services/caches.service';
 import { CacheMemberItem, CacheRole, CachePermissionDescriptor } from '@core/models/cache-permission.model';
 import { UserService } from '@core/services/user.service';
@@ -72,11 +73,13 @@ interface RoleFormState {
 export class CacheMembersRolesComponent implements OnInit {
   private route = inject(ActivatedRoute);
   private cachesService = inject(CachesService);
+  private crumbs = inject(BreadcrumbsService);
   private userService = inject(UserService);
 
   access = injectCacheAccess();
 
   cacheName = '';
+  breadcrumb = computed(() => this.crumbs.cacheSettings(this.cacheName, { label: 'Members & Roles' }));
 
   membersLoading = signal(true);
   rolesLoading = signal(true);

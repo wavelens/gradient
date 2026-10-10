@@ -46,9 +46,19 @@ describe('InputFetchListComponent', () => {
       { name: 'nixpkgs', state: 'Done', downloaded_bytes: 1024, expected_bytes: 0 },
       { name: 'nixpkgs', state: 'Fetching', downloaded_bytes: 0, expected_bytes: 0 },
     ]);
-    expect(rows.map(r => r.getAttribute('data-state'))).toEqual(['Done', 'Fetching']);
+    expect(rows.map(r => r.getAttribute('data-state'))).toEqual(['Fetching', 'Done']);
     expect(warn.mock.calls.flat().join(' ')).not.toContain('NG0955');
     warn.mockRestore();
+  });
+
+  it('orders the inputs by name and keeps the downloading inputs on top', () => {
+    const rows = render([
+      { name: 'zlib', state: 'Done', downloaded_bytes: 1, expected_bytes: 0 },
+      { name: 'nixpkgs', state: 'Fetching', downloaded_bytes: 1, expected_bytes: 4 },
+      { name: 'crane', state: 'Queued', downloaded_bytes: 0, expected_bytes: 0 },
+      { name: 'home-manager', state: 'Fetching', downloaded_bytes: 1, expected_bytes: 0 },
+    ]);
+    expect(rows.map(r => r.querySelector('.input-name')?.textContent?.trim())).toEqual(['home-manager', 'nixpkgs', 'crane', 'zlib']);
   });
 
   it('shows the queued, done and failed state through the bar tone', () => {

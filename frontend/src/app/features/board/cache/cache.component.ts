@@ -17,7 +17,7 @@ import {
 import { LiveService } from '@core/services/live.service';
 import { CardGridComponent, LoadingSpinnerComponent, StatCardComponent } from '@gradient/ui/ui';
 import { LabelHelpComponent, MetricChartComponent } from '@shared/ui';
-import { formatBytes, formatCount, formatDuration, formatPercent } from '@shared/text';
+import { clockTime, formatBytes, formatCount, formatDuration, formatPercent } from '@shared/text';
 import { firstLoad } from '../first-load';
 
 @Component({
@@ -72,7 +72,7 @@ import { firstLoad } from '../first-load';
           [title]="upstreamTitle(u)"
           type="line"
           [series]="[{ name: 'latency', data: u.latency.map((p) => p.sum) }]"
-          [categories]="u.latency.map((p) => p.bucket_start.slice(11, 16))"
+          [categories]="u.latency.map((p) => clockTime(p.bucket_start))"
           [colors]="['#fd7e14']"
           [valueFormatter]="duration"
         ></gr-metric-chart>
@@ -90,19 +90,20 @@ export class BoardCacheComponent implements OnInit, OnDestroy {
   stats = signal<BoardCacheStats | null>(null);
   upstreamCacheStats = signal<BoardUpstreamCacheStats | null>(null);
 
-  trafficCats = computed(() => (this.stats()?.traffic ?? []).map((p) => p.bucket_start.slice(11, 16)));
+  trafficCats = computed(() => (this.stats()?.traffic ?? []).map((p) => clockTime(p.bucket_start)));
   trafficSeries = computed(() => [
     { name: 'served', data: (this.stats()?.traffic ?? []).map((p) => p.sum) },
   ]);
   requestSeries = computed(() => [
     { name: 'requests', data: (this.stats()?.traffic ?? []).map((p) => p.count) },
   ]);
-  storageCats = computed(() => (this.stats()?.storage ?? []).map((p) => p.bucket_start.slice(11, 16)));
+  storageCats = computed(() => (this.stats()?.storage ?? []).map((p) => clockTime(p.bucket_start)));
   storageSeries = computed(() => [
     { name: 'added', data: (this.stats()?.storage ?? []).map((p) => p.sum) },
   ]);
 
   readonly bytes = formatBytes;
+  readonly clockTime = clockTime;
   readonly count = formatCount;
   readonly duration = formatDuration;
 

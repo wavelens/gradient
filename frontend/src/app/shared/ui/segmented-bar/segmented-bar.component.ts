@@ -6,6 +6,7 @@
 
 import { ChangeDetectionStrategy, Component, computed, input, signal } from '@angular/core';
 import { BuildStatusCounts } from '@core/models';
+import { injectOnScreen } from '@gradient/ui/ui';
 
 export type SegmentTone = 'completed' | 'failed' | 'building' | 'queued';
 export interface BarSegment { tone: SegmentTone; pct: number; }
@@ -29,7 +30,8 @@ function countSegments(c: BuildStatusCounts): CountSegment[] {
   template: `
     <span class="segbar" [class.segbar--hover]="!segments()" (mouseleave)="tip.set(null)">
       @for (s of shown(); track s.tone) {
-        <i class="seg seg-{{ s.tone }}" [style.width.%]="s.pct" (mouseenter)="showTip($event, s.label)"></i>
+        <i class="seg seg-{{ s.tone }}" [class.seg-pulsing]="onScreen() && s.tone === 'building' && s.pct > 0"
+           [style.width.%]="s.pct" (mouseenter)="showTip($event, s.label)"></i>
       } @empty {
         <i class="seg seg-empty"></i>
       }
@@ -45,6 +47,7 @@ export class SegmentedBarComponent {
   segments = input<BarSegment[]>();
 
   tip = signal<Tip | null>(null);
+  protected readonly onScreen = injectOnScreen();
 
   shown = computed<(BarSegment & Partial<CountSegment>)[]>(() => {
     const counts = this.counts();

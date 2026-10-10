@@ -6,17 +6,22 @@
 
 @use '../../styles/variables' as *;
 
+$header-height: 4.5rem;
+
 .main-header {
+  display: grid;
+  grid-template-columns: minmax(max-content, 1fr) minmax(0, 1400px) minmax(0, 1fr);
+  column-gap: $spacing-xl;
+  align-items: center;
   background-color: var(--gr-surface-sunken);
   border-bottom: 1px solid var(--gr-border);
-  padding: $spacing-md $spacing-lg;
+  padding: 0 $spacing-lg;
   position: relative;
   z-index: $z-sticky;
 }
 
 .header-content {
-  max-width: 1400px;
-  margin: 0 auto;
+  height: $header-height;
   display: flex;
   align-items: center;
   gap: $spacing-xl;
@@ -24,7 +29,7 @@
 
 .header-logo {
   gr-logo {
-    height: 32px;
+    height: $header-height * 0.8;
   }
 
   a {
@@ -105,12 +110,14 @@
 }
 
 @media (max-width: $breakpoint-lg) {
-  .header-content {
-    gap: $spacing-sm;
+  .main-header {
+    grid-template-columns: max-content minmax(0, 1fr);
+    column-gap: $spacing-sm;
   }
 
-  .header-logo {
-    margin-right: auto;
+  .header-content {
+    justify-content: flex-end;
+    gap: $spacing-sm;
   }
 
   .menu-toggle {

@@ -5,10 +5,12 @@
  */
 
 import { TestBed } from '@angular/core/testing';
-import { ActivatedRoute, convertToParamMap } from '@angular/router';
+import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/router';
 import { of } from 'rxjs';
 import { WebhooksComponent } from './webhooks.component';
 import { WebhooksService } from '@core/services/webhooks.service';
+import { CachesService } from '@core/services/caches.service';
+import { ProjectsService } from '@core/services/projects.service';
 import { EventsService } from '@core/services/events.service';
 import type { Webhook } from '@core/models';
 
@@ -38,17 +40,30 @@ function setup(data: Record<string, unknown>, params: Record<string, string>) {
   TestBed.configureTestingModule({
     imports: [WebhooksComponent],
     providers: [
+      provideRouter([]),
       { provide: WebhooksService, useValue: service },
+      { provide: ProjectsService, useValue: { getProject: () => of({ display_name: 'Acme' }) } },
+      { provide: CachesService, useValue: { getCache: () => of({ display_name: 'Main' }) } },
       { provide: EventsService, useValue: { catalog$: of([]) } },
       { provide: ActivatedRoute, useValue: { snapshot: { data, paramMap: convertToParamMap(params) } } },
     ],
   });
   const fixture = TestBed.createComponent(WebhooksComponent);
   fixture.detectChanges();
-  return { component: fixture.componentInstance, service };
+  return { component: fixture.componentInstance, service, root: fixture.nativeElement as HTMLElement };
 }
 
 describe('WebhooksComponent', () => {
+  it.each([
+    { scope: 'project', trail: ['Projects', 'Acme', 'Settings', 'Webhooks'] },
+    { scope: 'cache', trail: ['Caches', 'Main', 'Settings', 'Webhooks'] },
+    { scope: 'instance', trail: ['Job Board', 'Webhooks'] },
+  ])('leads the $scope scope back to the page its webhooks are reached from', ({ scope, trail }) => {
+    const { root } = setup({ webhookScope: scope }, { [scope]: 'main' });
+    const crumbs = Array.from(root.querySelectorAll('.breadcrumb-link, .breadcrumb-current'));
+    expect(crumbs.map((crumb) => crumb.textContent?.trim())).toEqual(trail);
+  });
+
   it('reads its scope from the route', () => {
     const { component, service } = setup({ webhookScope: 'cache' }, { cache: 'main' });
     expect(component.scope).toEqual({ kind: 'cache', name: 'main' });
