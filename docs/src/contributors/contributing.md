@@ -39,7 +39,7 @@ Gradient is **AGPL-3.0-only**. Contributions are released under the same license
     cd frontend && pnpm install && pnpm start
     ```
 
-    1.  A VM with a superuser `admin` (password `admin_password`), a project, a task and a worker from declarative state. Evaluations and build jobs can run end to end against `pnpm start`.
+    1.  A VM with a superuser `admin` (password `admin_password`), a team, a project, a task and a worker from declarative state. Evaluations and build jobs can run end to end against `pnpm start`.
 
 `backend/.cargo/config.toml` will cap parallel `rustc` jobs at 1 (`[build] jobs = 1`) to bound peak memory. `cargo build -j N` can override the cap.
 

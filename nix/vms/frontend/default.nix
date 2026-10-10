@@ -124,18 +124,29 @@ in {
             superuser = true;
           };
 
+          teams.testteam = {
+            display_name = "MyTeam";
+            members = [ { user = "admin"; role = "Admin"; } ];
+            new_projects = {
+              users = true;
+              workers = true;
+              role = "Admin";
+            };
+          };
+
           projects.testproject = {
             display_name = "MyProject";
             description = "My Test Project";
             private_key_file = toString projectSshKey;
             public = true;
             created_by = "admin";
+            teams = [ { team = "testteam"; role = "Admin"; } ];
           };
 
           tasks.testtask = {
             project = "testproject";
             display_name = "MyTask";
-            description = "Just a test";
+            description = "My Test Task";
             repository = "git://server/test";
             wildcard = "packages.*.buildWait5Sec,packages.*.deployment";
             keep_evaluations = 10;
@@ -158,7 +169,7 @@ in {
 
           workers.devworker = {
             worker_id = "a0000000-0000-0000-0000-000000000001";
-            projects = [ "testproject" ];
+            team = "testteam";
             token_file = toString workerToken;
             display_name = "Dev Worker";
             created_by = "admin";
