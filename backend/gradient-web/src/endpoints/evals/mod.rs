@@ -10,6 +10,7 @@ pub mod log;
 mod progress;
 pub mod query;
 pub mod report;
+pub mod summary;
 pub mod types;
 
 pub use self::actions::*;
@@ -18,6 +19,7 @@ pub use self::log::*;
 pub(crate) use self::progress::{live_progress, live_progress_status};
 pub use self::query::*;
 pub use self::report::*;
+pub use self::summary::*;
 pub use self::types::*;
 
 use crate::access::is_project_member;

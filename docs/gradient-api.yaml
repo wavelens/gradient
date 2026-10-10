@@ -1325,8 +1325,9 @@ paths:
           schema:
             type: string
             enum: [all, failing, starred]
-            default: all
-          description: '`failing`: latest evaluation failed or has failing entry points.'
+          description: >-
+            Omitted: `starred` when the viewer starred a task, `all` otherwise.
+            `failing`: latest evaluation failed or has failing entry points.
         - name: page
           in: query
           required: false
@@ -1365,8 +1366,12 @@ paths:
                     properties:
                       message:
                         type: object
-                        required: [counts, total, tasks]
+                        required: [filter, counts, total, tasks]
                         properties:
+                          filter:
+                            type: string
+                            enum: [all, failing, starred]
+                            description: Filter applied to `tasks` and `total`.
                           counts:
                             type: object
                             required: [all, failing, starred]
@@ -2894,6 +2899,12 @@ paths:
           description: Number of entry points to skip.
           schema:
             type: integer
+        - name: search
+          in: query
+          required: false
+          description: Case-insensitive text the attribute path must contain. `total` then counts the matching entry points.
+          schema:
+            type: string
       responses:
         '200':
           description: Entry points
@@ -4055,6 +4066,40 @@ paths:
               example:
                 error: false
                 message: "Success"
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /evals/{evaluation}/summary:
+    parameters:
+      - $ref: '#/components/parameters/EvaluationId'
+    get:
+      tags: [evals]
+      summary: Summarise what went wrong in an evaluation
+      description: |-
+        Returns the builds that failed themselves, each with the packages it
+        blocks, the attributes that failed to evaluate, and the packages fixed
+        since the previous evaluation. A build that only failed because a
+        dependency failed is not listed; it is counted under the build that
+        caused it.
+
+        `newly_failing` and `fixed` compare against the evaluation in
+        `compared_with`. Without a previous evaluation `compared_with` is
+        `null`, every `newly_failing` is `false` and `fixed` is empty.
+      operationId: getEvaluationSummary
+      responses:
+        '200':
+          description: Failure summary of the evaluation.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        $ref: '#/components/schemas/EvaluationFailureSummary'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
@@ -12569,6 +12614,87 @@ components:
             counted in total. All pages return the full list.
           items:
             $ref: '#/components/schemas/FailedAttributeSummary'
+
+    EvaluationFailureSummary:
+      type: object
+      properties:
+        compared_with:
+          type: object
+          nullable: true
+          description: The previous evaluation the summary compares against.
+          properties:
+            id:
+              type: string
+              format: uuid
+            commit:
+              type: string
+        packages:
+          type: object
+          description: Entry points counted by the outcome of the package build.
+          properties:
+            total:
+              type: integer
+            built:
+              type: integer
+            failed:
+              type: integer
+            blocked:
+              type: integer
+              description: Packages whose build did not start because a dependency failed.
+            unfinished:
+              type: integer
+              description: Packages still queued or building, aborted or skipped.
+        failures:
+          type: array
+          description: Builds that failed themselves, newly failing first, then by blocked packages. Capped at 100.
+          items:
+            type: object
+            properties:
+              build_id:
+                type: string
+                format: uuid
+              name:
+                type: string
+              derivation_path:
+                type: string
+              architecture:
+                $ref: '#/components/schemas/Architecture'
+              status:
+                $ref: '#/components/schemas/BuildStatus'
+              attributes:
+                type: array
+                description: Entry point attributes this build is itself.
+                items:
+                  type: string
+              blocked:
+                type: array
+                description: Attributes of the packages that depend on this build and did not build. Capped at 20.
+                items:
+                  type: string
+              blocked_total:
+                type: integer
+              newly_failing:
+                type: boolean
+        failures_total:
+          type: integer
+        failed_attributes:
+          type: array
+          items:
+            type: object
+            properties:
+              attr:
+                type: string
+              message:
+                type: string
+              newly_failing:
+                type: boolean
+        fixed:
+          type: array
+          description: Attributes broken in the compared evaluation and built in this evaluation. Capped at 100.
+          items:
+            type: string
+        fixed_total:
+          type: integer
 
     FailedAttributeSummary:
       type: object

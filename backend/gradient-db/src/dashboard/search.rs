@@ -70,7 +70,7 @@ pub struct NameHitRow {
     pub starred: bool,
 }
 
-fn ilike_contains(text: &str) -> String {
+pub fn ilike_contains(text: &str) -> String {
     let escaped = text
         .replace('\\', "\\\\")
         .replace('%', "\\%")

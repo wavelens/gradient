@@ -33,10 +33,9 @@ impl Tier {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Filter {
-    #[default]
     All,
     Failing,
     Starred,
@@ -135,6 +134,16 @@ pub struct Counts {
     pub all: usize,
     pub failing: usize,
     pub starred: usize,
+}
+
+impl Counts {
+    pub fn default_filter(&self) -> Filter {
+        if self.starred > 0 {
+            Filter::Starred
+        } else {
+            Filter::All
+        }
+    }
 }
 
 pub fn counts(rows: &[TaskRow]) -> Counts {
