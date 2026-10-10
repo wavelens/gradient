@@ -138,6 +138,23 @@ pub(crate) fn encrypt_for_dialing(
         .transpose()
 }
 
+pub(crate) async fn reauth_project_workers(
+    state: &ServerState,
+    scheduler: &Scheduler,
+    project: ProjectId,
+) {
+    match gradient_db::projects::workers::worker_ids_for_project(&state.web_db, project).await {
+        Ok(workers) => {
+            for worker_id in &workers {
+                scheduler.request_reauth(worker_id).await;
+            }
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, project_id = %project, "failed to reauth the project's workers");
+        }
+    }
+}
+
 pub async fn post_project_worker(
     state: State<Arc<ServerState>>,
     Path(project): Path<String>,

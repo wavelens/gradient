@@ -9,6 +9,7 @@ use crate::access::{
     load_project,
 };
 use crate::authorization::MaybeApiKey;
+use crate::endpoints::projects::workers::reauth_project_workers;
 use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
 use crate::permissions::Permission;
@@ -18,6 +19,7 @@ use gradient_core::ServerState;
 use gradient_db::permissions::CachePermission;
 use gradient_entity::project_cache::CacheSubscriptionMode;
 use gradient_notify::{SubscriptionEvent, SubscriptionMail};
+use gradient_scheduler::Scheduler;
 use gradient_types::*;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
@@ -167,6 +169,7 @@ pub async fn post_project_subscribe_cache(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
     Extension(api_key): Extension<MaybeApiKey>,
+    Extension(scheduler): Extension<Arc<Scheduler>>,
     Path((project, cache)): Path<(String, String)>,
     body: Option<Json<SubscribeCacheRequest>>,
 ) -> WebResult<Json<BaseResponse<String>>> {
@@ -265,6 +268,8 @@ pub async fn post_project_subscribe_cache(
     .into_active_model()
     .insert(&state.web_db)
     .await?;
+
+    reauth_project_workers(&state, &scheduler, project.id).await;
 
     // Evaluations parked with `WaitingReason::NoCache` are re-queued here. Only ReadWrite and
     // WriteOnly subscriptions are unblocking builds. A ReadOnly subscription is leaving the project

@@ -29,6 +29,24 @@ pub async fn project_has_eval_capable_worker_registration<C: ConnectionTrait>(
         .any(|(_, worker)| worker.active && worker.enable_eval))
 }
 
+pub async fn worker_ids_for_project<C: ConnectionTrait>(
+    db: &C,
+    project: ProjectId,
+) -> Result<Vec<String>, sea_orm::DbErr> {
+    use gradient_entity::worker_registration::{Column as CWR, Entity as EWR};
+
+    let mut workers: Vec<String> = EWR::find()
+        .filter(CWR::PeerId.eq(project))
+        .all(db)
+        .await?
+        .into_iter()
+        .map(|registration| registration.worker_id)
+        .collect();
+    workers.extend(crate::teams::workers::team_worker_ids_for_project(db, project).await?);
+
+    Ok(workers)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -75,5 +93,37 @@ mod tests {
             .await
             .unwrap();
         assert!(!out);
+    }
+
+    #[tokio::test]
+    async fn a_project_lists_its_registered_and_its_team_workers() {
+        use gradient_entity::{team, team_project, team_worker};
+
+        let team = gradient_types::ids::TeamId::now_v7();
+        let registered = registration_row(true, true);
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([vec![registered.clone()]])
+            .append_query_results([vec![team_project::Model {
+                team,
+                includes_workers: true,
+                ..Default::default()
+            }]])
+            .append_query_results([vec![team::Model {
+                id: team,
+                ..Default::default()
+            }]])
+            .append_query_results([vec![team_worker::Model {
+                team,
+                worker_id: "team-worker".into(),
+                ..Default::default()
+            }]])
+            .into_connection();
+
+        let workers = worker_ids_for_project(&db, ProjectId::nil()).await.unwrap();
+
+        assert_eq!(
+            workers,
+            vec![registered.worker_id, "team-worker".to_string()]
+        );
     }
 }

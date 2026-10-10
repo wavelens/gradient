@@ -8,6 +8,7 @@ use crate::access::{CacheAccess, Caller, load_cache, project_admin_emails};
 use crate::audit::{RequestInfo, record as audit_record};
 use crate::authorization::MaybeApiKey;
 use crate::endpoints::projects::settings::mode_label;
+use crate::endpoints::projects::workers::reauth_project_workers;
 use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
 use crate::permissions::CachePermission;
@@ -17,6 +18,7 @@ use chrono::NaiveDateTime;
 use gradient_core::ServerState;
 use gradient_entity::project_cache::CacheSubscriptionMode;
 use gradient_notify::{SubscriptionEvent, SubscriptionMail};
+use gradient_scheduler::Scheduler;
 use gradient_types::events::EventOwner;
 use gradient_types::events::audit::Action;
 use gradient_types::*;
@@ -166,6 +168,7 @@ pub async fn post_approve_subscription_request(
     info: RequestInfo,
     Extension(user): Extension<MUser>,
     Extension(api_key): Extension<MaybeApiKey>,
+    Extension(scheduler): Extension<Arc<Scheduler>>,
     Path((cache, project)): Path<(String, String)>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let cache = load_cache(
@@ -195,6 +198,8 @@ pub async fn post_approve_subscription_request(
     .insert(&tx)
     .await?;
     tx.commit().await?;
+
+    reauth_project_workers(&state, &scheduler, project.id).await;
 
     let unparks_builds = matches!(
         mode,
