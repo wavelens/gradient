@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use axum::http::{Method, StatusCode};
 use gradient_test_support::fixtures::user;
 use gradient_test_support::web::{live_session, make_test_server, make_token};
 use gradient_types::SessionId;
@@ -54,22 +55,37 @@ fn with_empty_export(db: MockDatabase) -> MockDatabase {
 }
 
 #[tokio::test]
-async fn export_state_rejects_non_superuser() {
-    let session_id = SessionId::now_v7();
-    let token = make_token(session_id);
-    let db = with_user(
-        MockDatabase::new(DatabaseBackend::Postgres),
-        session_id,
-        user(),
-    );
+async fn admin_routes_reject_non_superuser() {
+    let routes = [
+        (Method::GET, "/state"),
+        (Method::POST, "/github-app/manifest"),
+        (Method::GET, "/github-app/credentials"),
+        (Method::POST, "/maintenance/deep-gc"),
+        (Method::POST, "/draining"),
+        (Method::GET, "/tasks"),
+        (Method::GET, "/tasks/00000000-0000-0000-0000-000000000000"),
+        (Method::GET, "/webhooks"),
+    ];
 
-    let server = make_test_server(db.into_connection());
-    let res = server
-        .get("/api/v1/admin/state")
-        .add_header("authorization", format!("Bearer {}", token))
-        .await;
+    for (method, route) in routes {
+        let session_id = SessionId::now_v7();
+        let db = with_user(
+            MockDatabase::new(DatabaseBackend::Postgres),
+            session_id,
+            user(),
+        );
 
-    res.assert_status_forbidden();
+        let server = make_test_server(db.into_connection());
+        let res = server
+            .method(method, &format!("/api/v1/admin{route}"))
+            .add_header(
+                "authorization",
+                format!("Bearer {}", make_token(session_id)),
+            )
+            .await;
+
+        assert_eq!(res.status_code(), StatusCode::FORBIDDEN, "{route}");
+    }
 }
 
 #[tokio::test]

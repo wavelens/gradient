@@ -4,14 +4,13 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::error::{WebError, WebResult, require_superuser};
+use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
 use axum::extract::{Query, State};
+use axum::http::header;
 use axum::response::{IntoResponse, Response};
-use axum::{Extension, http::header};
 use gradient_core::ServerState;
 use gradient_state::export;
-use gradient_types::MUser;
 use serde::Deserialize;
 use std::sync::Arc;
 
@@ -23,11 +22,8 @@ pub struct ExportQuery {
 
 pub async fn export_state(
     State(state): State<Arc<ServerState>>,
-    Extension(user): Extension<MUser>,
     Query(query): Query<ExportQuery>,
 ) -> WebResult<Response> {
-    require_superuser(&user)?;
-
     let format = query.format.as_deref().unwrap_or("nix");
     if !matches!(format, "nix" | "json") {
         return Err(WebError::bad_request(format!(

@@ -4,16 +4,16 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::error::{WebError, WebResult, require_superuser};
+use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
 use axum::{
-    Extension, Json,
+    Json,
     extract::{Path, State},
 };
 use gradient_core::ServerState;
 use gradient_db::maintenance::admin_tasks;
 use gradient_entity::ids::{AdminTaskId, UserId};
-use gradient_types::{BaseResponse, MAdminTask, MUser};
+use gradient_types::{BaseResponse, MAdminTask};
 use serde::Serialize;
 use std::sync::Arc;
 
@@ -50,9 +50,7 @@ impl From<MAdminTask> for AdminTaskDto {
 
 pub async fn list_tasks(
     State(state): State<Arc<ServerState>>,
-    Extension(user): Extension<MUser>,
 ) -> WebResult<Json<BaseResponse<Vec<AdminTaskDto>>>> {
-    require_superuser(&user)?;
     let rows = admin_tasks::list_recent(&state.worker_db, 50)
         .await
         .map_err(|e| WebError::internal(format!("list_recent: {e}")))?;
@@ -61,10 +59,8 @@ pub async fn list_tasks(
 
 pub async fn get_task(
     State(state): State<Arc<ServerState>>,
-    Extension(user): Extension<MUser>,
     Path(task_id): Path<AdminTaskId>,
 ) -> WebResult<Json<BaseResponse<AdminTaskDto>>> {
-    require_superuser(&user)?;
     let row = admin_tasks::get(&state.worker_db, task_id)
         .await
         .map_err(|e| WebError::internal(format!("get_task: {e}")))?

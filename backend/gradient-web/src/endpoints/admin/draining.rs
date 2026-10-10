@@ -10,11 +10,11 @@ use std::sync::atomic::Ordering;
 use axum::{Extension, Json, extract::State};
 use gradient_core::ServerState;
 use gradient_scheduler::Scheduler;
-use gradient_types::{BaseResponse, MUser};
+use gradient_types::BaseResponse;
 use serde::{Deserialize, Serialize};
 use tracing::info;
 
-use crate::error::{WebError, WebResult, require_superuser};
+use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
 
 #[derive(Deserialize)]
@@ -27,15 +27,11 @@ pub struct DrainingResponse {
     pub draining: bool,
 }
 
-/// Draining is in-memory only and is cleared on the next server startup.
 pub async fn set_draining(
     State(state): State<Arc<ServerState>>,
     Extension(scheduler): Extension<Arc<Scheduler>>,
-    Extension(user): Extension<MUser>,
     Json(req): Json<SetDrainingRequest>,
 ) -> WebResult<Json<BaseResponse<DrainingResponse>>> {
-    require_superuser(&user)?;
-
     scheduler.draining.store(req.enabled, Ordering::Relaxed);
 
     let evaluations = if req.enabled {

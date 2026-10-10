@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::error::{WebError, WebResult, require_superuser};
+use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
 use axum::http::StatusCode;
 use axum::{Extension, Json, extract::State};
@@ -22,13 +22,10 @@ pub struct StartDeepGcResponse {
     pub status: &'static str,
 }
 
-/// A round already running is restarted from its first unit at full speed. It is then covering
-/// whatever changed before this request.
 pub async fn start_deep_gc(
     State(state): State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
 ) -> WebResult<(StatusCode, Json<BaseResponse<StartDeepGcResponse>>)> {
-    require_superuser(&user)?;
     let db = &state.worker_db;
     let task_id = match admin_tasks::insert_pending(db, AdminTaskKind::DeepGc, Some(user.id)).await
     {
