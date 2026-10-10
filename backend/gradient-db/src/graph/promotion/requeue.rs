@@ -119,12 +119,15 @@ where
     Ok(returned_transitions(rows))
 }
 
-/// The failed shared builds drive the write. A probe per closure member is a second walk.
-fn requeue_closure_update(blocked: &str) -> String {
+const KEEP_UPSTREAM_ANSWER: &str = "";
+const FORGET_UPSTREAM_MISS: &str = ", probed = (db.probed AND db.cache_available)";
+
+/// Drive the write from every failed shared build. A probe per closure member is a second walk.
+fn requeue_closure_update(blocked: &str, upstream_answer: &str) -> String {
     format!(
         r#"
         UPDATE derivation_build db
-        SET status = {created}, attempt = 0,
+        SET status = {created}, attempt = 0{upstream_answer},
             updated_at = (now() AT TIME ZONE 'UTC')
         FROM (SELECT f.derivation FROM derivation_build f
               WHERE f.status IN ({requeueable})
@@ -165,12 +168,16 @@ fn requeue_failed_closure_fresh_sql() -> String {
         "{},\n    {}\n{}",
         eval_closure_cte(),
         kept_failed_cte_body(),
-        requeue_closure_update(SKIP_KEPT),
+        requeue_closure_update(SKIP_KEPT, KEEP_UPSTREAM_ANSWER),
     )
 }
 
 fn requeue_failed_closure_all_sql() -> String {
-    format!("{}\n{}", eval_closure_cte(), requeue_closure_update(""))
+    format!(
+        "{}\n{}",
+        eval_closure_cte(),
+        requeue_closure_update("", FORGET_UPSTREAM_MISS)
+    )
 }
 
 pub(super) fn requeue_failed_closure_blocked_sql() -> String {
@@ -178,9 +185,12 @@ pub(super) fn requeue_failed_closure_blocked_sql() -> String {
         "{},\n    {}\n{}",
         requeue_ctes("SELECT bj.derivation FROM build_job bj WHERE bj.evaluation = $1"),
         kept_failed_cte_body(),
-        requeue_closure_update(&format!(
-            "\n          AND db.derivation NOT IN (SELECT derivation FROM deterministic_blocked){SKIP_KEPT}"
-        )),
+        requeue_closure_update(
+            &format!(
+                "\n          AND db.derivation NOT IN (SELECT derivation FROM deterministic_blocked){SKIP_KEPT}"
+            ),
+            KEEP_UPSTREAM_ANSWER,
+        ),
     )
 }
 
@@ -220,7 +230,7 @@ fn retry_build_closure_sql() -> String {
         ),
         {dependents}
         UPDATE derivation_build db
-        SET status = {created}, attempt = 0,
+        SET status = {created}, attempt = 0{FORGET_UPSTREAM_MISS},
             updated_at = (now() AT TIME ZONE 'UTC')
         WHERE db.derivation IN (SELECT derivation FROM dependents)
           AND (db.status = {dependency_failed}
@@ -258,7 +268,8 @@ pub(super) fn requeue_failed_import_closure_sql() -> String {
         "{}\n{}",
         requeue_ctes("SELECT unnest($1::uuid[])"),
         requeue_closure_update(
-            "\n          AND db.derivation NOT IN (SELECT derivation FROM deterministic_blocked)"
+            "\n          AND db.derivation NOT IN (SELECT derivation FROM deterministic_blocked)",
+            KEEP_UPSTREAM_ANSWER,
         ),
     )
 }
@@ -413,6 +424,24 @@ mod tests {
             !sql.contains("kept_failed") && !sql.contains("deterministic_blocked"),
             "{sql}"
         );
+    }
+
+    #[test]
+    fn only_a_user_retry_asks_the_upstream_caches_again() {
+        let forgets_the_miss = "attempt = 0, probed = (db.probed AND db.cache_available),";
+        for sql in [requeue_failed_closure_all_sql(), retry_build_closure_sql()] {
+            let sql = sql.split_whitespace().collect::<Vec<_>>().join(" ");
+            assert!(sql.contains(forgets_the_miss), "{sql}");
+        }
+
+        for sql in [
+            requeue_failed_closure_fresh_sql(),
+            requeue_failed_closure_blocked_sql(),
+            requeue_failed_shared_builds_sql(),
+            requeue_failed_import_closure_sql(),
+        ] {
+            assert!(!sql.contains("probed"), "{sql}");
+        }
     }
 
     #[test]
