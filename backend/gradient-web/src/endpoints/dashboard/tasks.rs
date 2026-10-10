@@ -24,8 +24,7 @@ use std::sync::Arc;
 
 #[derive(Debug, Deserialize)]
 pub struct TasksQuery {
-    #[serde(default)]
-    pub filter: Filter,
+    pub filter: Option<Filter>,
     pub page: Option<u64>,
     pub per_page: Option<u64>,
     pub history: Option<u64>,
@@ -33,6 +32,7 @@ pub struct TasksQuery {
 
 #[derive(Debug, Serialize)]
 pub struct TasksPage {
+    pub filter: Filter,
     pub counts: Counts,
     pub total: usize,
     pub tasks: Vec<TaskRow>,
@@ -122,7 +122,7 @@ async fn attach_history<C: ConnectionTrait>(
 pub async fn load_page<C: ConnectionTrait>(
     db: &C,
     user: UserId,
-    filter: Filter,
+    filter: Option<Filter>,
     paging: Paging,
     history: u64,
 ) -> Result<TasksPage, DbErr> {
@@ -138,6 +138,7 @@ pub async fn load_page<C: ConnectionTrait>(
         .collect();
     rank(&mut rows);
     let counts = counts(&rows);
+    let filter = filter.unwrap_or_else(|| counts.default_filter());
     let matching: Vec<TaskRow> = rows.into_iter().filter(|r| r.matches(filter)).collect();
     let total = matching.len();
     let mut page: Vec<TaskRow> = matching
@@ -147,6 +148,7 @@ pub async fn load_page<C: ConnectionTrait>(
         .collect();
     attach_history(db, &mut page, history).await?;
     Ok(TasksPage {
+        filter,
         counts,
         total,
         tasks: page,
@@ -215,13 +217,14 @@ mod tests {
         let page = load_page(
             &db,
             UserId::now_v7(),
-            Filter::All,
+            None,
             Paging::from_query(None, None),
             30,
         )
         .await
         .unwrap();
 
+        assert_eq!(page.filter, Filter::All);
         assert_eq!(page.total, 0);
         assert_eq!(page.counts, Counts::default());
         assert!(page.tasks.is_empty());
@@ -237,7 +240,7 @@ mod tests {
         let page = load_page(
             &db,
             UserId::now_v7(),
-            Filter::All,
+            Some(Filter::All),
             Paging::from_query(Some(9), None),
             30,
         )
@@ -248,6 +251,26 @@ mod tests {
         assert_eq!(page.counts.starred, 1);
         assert!(page.tasks.is_empty());
         assert_eq!(db.into_transaction_log().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn no_filter_picks_starred_once_a_task_is_starred() {
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([vec![task_row(None, None)]])
+            .into_connection();
+
+        let page = load_page(
+            &db,
+            UserId::now_v7(),
+            None,
+            Paging::from_query(None, None),
+            30,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(page.filter, Filter::Starred);
+        assert_eq!(page.total, 1);
     }
 
     #[tokio::test]
@@ -268,7 +291,7 @@ mod tests {
         let page = load_page(
             &db,
             UserId::now_v7(),
-            Filter::All,
+            Some(Filter::All),
             Paging::from_query(None, None),
             30,
         )

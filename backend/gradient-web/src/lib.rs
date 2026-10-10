@@ -614,6 +614,10 @@ pub fn create_router_with_scheduler(
             "/evals/{evaluation}/builds",
             get(evals::get_evaluation_builds),
         )
+        .route(
+            "/evals/{evaluation}/summary",
+            get(evals::get_evaluation_summary),
+        )
         .route("/evals/{evaluation}/artefacts", get(evals::get_artefacts))
         .route("/evals/{evaluation}/closure", get(builds::get_eval_closure))
         .route(

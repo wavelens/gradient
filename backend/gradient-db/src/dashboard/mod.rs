@@ -31,7 +31,8 @@ mod totals;
 
 pub use rail::{RailCacheRow, RailProjectRow, RailTaskRow, rail_caches, rail_projects, rail_tasks};
 pub use search::{
-    CommitHitRow, NameHitRow, NameKind, NarHitRow, search_commits, search_names, search_nars,
+    CommitHitRow, NameHitRow, NameKind, NarHitRow, ilike_contains, search_commits, search_names,
+    search_nars,
 };
 pub use stars::{StarKind, StarredNames, StarredTask, star, starred, starred_names, unstar};
 pub use tasks::{HistoryRow, TaskFactsRow, entry_point_outcomes, histories, task_facts};

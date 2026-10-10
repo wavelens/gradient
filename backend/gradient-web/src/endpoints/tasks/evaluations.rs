@@ -31,10 +31,11 @@ use gradient_storage::nar_extract::{
 };
 use gradient_types::input::{hex_to_vec, vec_to_hex};
 use gradient_types::*;
-use sea_orm::sea_query::Query as SeaQuery;
+use sea_orm::sea_query::extension::postgres::PgExpr;
+use sea_orm::sea_query::{Expr, Query as SeaQuery};
 use sea_orm::{
     ColumnTrait, Condition, EntityTrait, Iterable, PaginatorTrait, QueryFilter, QueryOrder,
-    QuerySelect,
+    QuerySelect, Select,
 };
 use serde::Deserialize;
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -534,6 +535,25 @@ pub struct EntryPointsQuery {
     pub evaluation_id: Option<EvaluationId>,
     pub limit: Option<u64>,
     pub offset: Option<u64>,
+    pub search: Option<String>,
+}
+
+fn built_entry_points(evaluation: EvaluationId, search: Option<&str>) -> Select<EEntryPoint> {
+    let has_build_job = SeaQuery::select()
+        .column(CBuildJob::Derivation)
+        .from(gradient_entity::build_job::Entity)
+        .and_where(CBuildJob::Evaluation.eq(evaluation))
+        .to_owned();
+    let scope = EEntryPoint::find()
+        .filter(CEntryPoint::Evaluation.eq(evaluation))
+        .filter(CEntryPoint::Derivation.in_subquery(has_build_job));
+
+    match search.map(str::trim).filter(|term| !term.is_empty()) {
+        Some(term) => scope.filter(
+            Expr::col(CEntryPoint::Eval).ilike(gradient_db::dashboard::ilike_contains(term)),
+        ),
+        None => scope,
+    }
 }
 
 fn page_bounds(limit: Option<u64>, offset: Option<u64>) -> (u64, u64) {
@@ -576,11 +596,6 @@ pub async fn get_task_entry_points(
         return Err(WebError::not_found("Evaluation"));
     }
 
-    let has_build_job = SeaQuery::select()
-        .column(CBuildJob::Derivation)
-        .from(gradient_entity::build_job::Entity)
-        .and_where(CBuildJob::Evaluation.eq(eval_id))
-        .to_owned();
     let failed_attributes: Vec<FailedAttributeSummary> =
         gradient_db::evaluations::failed_attributes::failed_attributes(&state.web_db, eval_id)
             .await?
@@ -591,9 +606,7 @@ pub async fn get_task_entry_points(
             })
             .collect();
     let (limit, offset) = page_bounds(params.limit, params.offset);
-    let scope = EEntryPoint::find()
-        .filter(CEntryPoint::Evaluation.eq(eval_id))
-        .filter(CEntryPoint::Derivation.in_subquery(has_build_job));
+    let scope = built_entry_points(eval_id, params.search.as_deref());
     let total = scope.clone().count(&state.web_db).await?;
     let entry_points = scope
         .order_by_asc(CEntryPoint::Eval)
@@ -1075,6 +1088,25 @@ mod page_tests {
 mod search_tests {
     use super::*;
     use gradient_entity::ids::DerivationOutputId;
+    use sea_orm::{DatabaseBackend, QueryTrait};
+
+    fn entry_point_sql(search: Option<&str>) -> String {
+        built_entry_points(EvaluationId::now_v7(), search)
+            .build(DatabaseBackend::Postgres)
+            .to_string()
+    }
+
+    #[test]
+    fn a_search_term_narrows_entry_points_to_matching_attributes() {
+        let sql = entry_point_sql(Some(" Hello "));
+        assert!(str::contains(&sql, r#""eval" ILIKE '%Hello%'"#), "{sql}");
+    }
+
+    #[test]
+    fn a_blank_search_term_keeps_every_entry_point() {
+        assert!(!str::contains(&entry_point_sql(Some("  ")), "ILIKE"));
+        assert!(!str::contains(&entry_point_sql(None), "ILIKE"));
+    }
 
     fn output_row(drv: DerivationId, name: &str, hash: &str, package: &str) -> MDerivationOutput {
         MDerivationOutput {
