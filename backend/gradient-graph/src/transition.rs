@@ -174,6 +174,7 @@ pub(crate) async fn apply(ctx: &DbContext, transition: Transition) -> Result<Tra
 
             let aborted_shared_builds =
                 gradient_db::status::abort_eval_shared_builds(ctx, &eval).await?;
+            gradient_db::status::release_evaluation_need(ctx, eval.id).await?;
             Ok(TransitionReport {
                 aborted_shared_builds,
                 ..Default::default()

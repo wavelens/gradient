@@ -10,6 +10,7 @@ use crate::status::TransitionChange;
 
 use super::lock::{ids, lock_shared_builds};
 use super::queue::{promote, unpromote_ungated};
+use gradient_entity::evaluation::EvaluationStatus;
 use gradient_types::DerivationId;
 use sea_orm::{ConnectionTrait, DatabaseTransaction, DbErr, QueryResult, TransactionTrait};
 use std::sync::LazyLock;
@@ -91,11 +92,21 @@ pub(crate) static RECOUNT_WANTED_SQL: LazyLock<String> = LazyLock::new(|| {
     )
 });
 
+/// Entry points of a finished evaluation want nothing. An aborted shared build is open, and
+/// the entry points of an aborted evaluation kept every build of it wanted and thawed.
+fn of_a_live_evaluation(entry_point: &str) -> String {
+    format!(
+        "JOIN evaluation ev ON ev.id = {entry_point}.evaluation AND ev.status NOT IN ({finished})",
+        finished = crate::sql::status::eval_in(&EvaluationStatus::TERMINAL),
+    )
+}
+
 fn open_entry_points() -> String {
     format!(
-        "SELECT NULL::uuid, db.derivation, ({builder}) FROM entry_point ep \
+        "SELECT NULL::uuid, db.derivation, ({builder}) FROM entry_point ep {live} \
          JOIN derivation_build db ON db.derivation = ep.derivation \
          JOIN derivation w ON w.id = db.derivation WHERE {open}",
+        live = of_a_live_evaluation("ep"),
         builder = builder_predicate("db", "w"),
         open = open_predicate("db"),
     )
@@ -148,8 +159,9 @@ static UPDATE_NEED_SQL: LazyLock<String> = LazyLock::new(|| {
          JOIN derivation_build rb ON rb.derivation = r.derivation \
          JOIN derivation w ON w.id = rb.derivation \
          WHERE {open} \
-           AND r.derivation IN (SELECT ep.derivation FROM entry_point ep \
+           AND r.derivation IN (SELECT ep.derivation FROM entry_point ep {live} \
                                 UNION ALL SELECT derivation FROM entered)",
+        live = of_a_live_evaluation("ep"),
         builder = builder_predicate("rb", "w"),
         open = open_predicate("rb"),
     );
@@ -339,6 +351,21 @@ mod tests {
     }
 
     #[test]
+    fn an_entry_point_of_a_finished_evaluation_wants_nothing() {
+        let live = "FROM entry_point ep JOIN evaluation ev \
+                    ON ev.id = ep.evaluation AND ev.status NOT IN (5, 6, 7)";
+        for sql in [RECOUNT_WANTED_SQL.as_str(), UPDATE_NEED_SQL.as_str()] {
+            let sql = norm(sql);
+            assert_eq!(
+                sql.matches("FROM entry_point ep").count(),
+                sql.matches(live).count(),
+                "an aborted evaluation must not keep its own builds wanted: {sql}"
+            );
+            assert!(sql.contains(live), "{sql}");
+        }
+    }
+
+    #[test]
     fn the_backstop_rewrites_every_open_shared_build() {
         let sql = norm(RECOUNT_WANTED_SQL.as_str());
         assert!(
@@ -467,6 +494,7 @@ mod tests {
                  JOIN derivation w ON w.id = rb.derivation \
                  WHERE (NOT rb.fetchable AND rb.status NOT IN (4, 6, 9)) \
                  AND r.derivation IN (SELECT ep.derivation FROM entry_point ep \
+                 JOIN evaluation ev ON ev.id = ep.evaluation AND ev.status NOT IN (5, 6, 7) \
                  UNION ALL SELECT derivation FROM entered)"
             ),
             "a settled root seeds nothing, and a seed carries its own builder bit: {walk}"
