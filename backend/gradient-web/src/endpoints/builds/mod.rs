@@ -38,8 +38,6 @@ use gradient_types::*;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use std::sync::Arc;
 
-/// Every failure is answered with `not_found("Build")`. Callers cannot distinguish missing from
-/// forbidden.
 pub(super) struct BuildAccessContext {
     pub build_job: MBuildJob,
     pub shared_build: MDerivationBuild,
@@ -84,6 +82,7 @@ impl BuildAccessContext {
             tracing::warn!(evaluation_id = %evaluation.id, "evaluation has no task");
             WebError::data_inconsistency("Evaluation")
         })?;
+
         let project_id = ETask::find_by_id(task_id)
             .one(&state.web_db)
             .await?
@@ -128,6 +127,7 @@ impl BuildAccessContext {
                 None => false,
             }
         };
+
         if direct_access {
             return Ok(ctx);
         }
@@ -142,7 +142,6 @@ impl BuildAccessContext {
     }
 }
 
-/// The derivation is global and content-addressed. Any project that built it may read its log.
 async fn reachable_projects_accessible(
     state: &Arc<ServerState>,
     user: &MUser,

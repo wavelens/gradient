@@ -223,17 +223,7 @@ impl BuildAssignMaps {
             .into_iter()
             .collect();
 
-        let derivations: HashMap<DerivationId, MDerivation> =
-            gradient_db::fetch_in_chunks(&drv_ids, |chunk| async move {
-                EDerivation::find()
-                    .filter(CDerivation::Id.is_in(chunk))
-                    .all(db)
-                    .await
-            })
-            .await?
-            .into_iter()
-            .map(|d| (d.id, d))
-            .collect();
+        let derivations = gradient_db::graph::reachability::derivations_by_id(db, &drv_ids).await?;
 
         let evaluations: HashMap<EvaluationId, MEvaluation> =
             gradient_db::fetch_in_chunks(&eval_ids, |chunk| async move {

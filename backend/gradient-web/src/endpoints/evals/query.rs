@@ -255,16 +255,8 @@ pub async fn get_evaluation_builds(
         .collect::<HashSet<_>>()
         .into_iter()
         .collect();
-    let mut derivations: HashMap<DerivationId, MDerivation> = HashMap::new();
-    for chunk in drv_ids.chunks(IS_IN_CHUNK) {
-        for row in EDerivation::find()
-            .filter(CDerivation::Id.is_in(chunk.to_vec()))
-            .all(&state.web_db)
-            .await?
-        {
-            derivations.insert(row.id, row);
-        }
-    }
+    let derivations =
+        gradient_db::graph::reachability::derivations_by_id(&state.web_db, &drv_ids).await?;
 
     let layers = gradient_db::graph::layers::dependency_layers(
         &drv_ids.iter().copied().collect(),

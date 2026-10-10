@@ -677,12 +677,8 @@ mod tests {
             file_size: 5,
             nar_size: 5,
             nar_hash: "sha256:def".to_owned(),
-            references: Vec::new(),
-            deriver: None,
-            ca: None,
-            targets: SignTargets::None,
             confirmed: true,
-            built_by_worker: false,
+            ..Default::default()
         }
     }
 

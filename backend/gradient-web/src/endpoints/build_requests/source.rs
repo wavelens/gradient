@@ -99,7 +99,6 @@ pub struct SourceFinalize {
     pub input_overrides: Vec<InputOverrideBody>,
 }
 
-/// A separate root is keeping per-user upload keys away from the cache NAR partials.
 fn source_partial_store(state: &ServerState) -> WebResult<PartialStore> {
     Ok(PartialStore::new(
         state.config.server.source_upload_partial_dir(),
@@ -170,6 +169,7 @@ pub async fn source_finalize(
         .read_all(&key)
         .await
         .map_err(|e| WebError::bad_request(format!("no staged source upload: {e}")))?;
+
     if nar_bytes.is_empty() {
         let _ = store.discard(&key).await;
         return Err(WebError::bad_request("empty source upload"));
@@ -195,6 +195,7 @@ pub async fn source_finalize(
         input_overrides,
     )
     .await?;
+
     let _ = store.discard(&key).await;
 
     Ok(ok_json(response))

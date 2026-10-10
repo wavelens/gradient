@@ -672,29 +672,9 @@ impl EntryPointRelatedData {
         let eval_id = evaluation.id;
         let drv_ids: Vec<DerivationId> = entry_points.iter().map(|ep| ep.derivation).collect();
 
-        let derivations: HashMap<DerivationId, MDerivation> =
-            gradient_db::fetch_in_chunks(&drv_ids, |chunk| async move {
-                EDerivation::find()
-                    .filter(CDerivation::Id.is_in(chunk))
-                    .all(db)
-                    .await
-            })
-            .await?
-            .into_iter()
-            .map(|d| (d.id, d))
-            .collect();
-
-        let shared_builds: HashMap<DerivationId, MDerivationBuild> =
-            gradient_db::fetch_in_chunks(&drv_ids, |chunk| async move {
-                EDerivationBuild::find()
-                    .filter(CDerivationBuild::Derivation.is_in(chunk))
-                    .all(db)
-                    .await
-            })
-            .await?
-            .into_iter()
-            .map(|a| (a.derivation, a))
-            .collect();
+        let derivations = gradient_db::graph::reachability::derivations_by_id(db, &drv_ids).await?;
+        let shared_builds =
+            gradient_db::graph::reachability::shared_builds_by_derivation(db, &drv_ids).await?;
 
         let build_jobs: HashMap<DerivationId, BuildJobId> =
             gradient_db::fetch_in_chunks(&drv_ids, |chunk| async move {

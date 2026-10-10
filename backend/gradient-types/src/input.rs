@@ -56,6 +56,25 @@ pub enum InputError {
     NameInvalidStartEnd,
     #[error("This task name is reserved and cannot be used")]
     TaskNameReserved,
+    #[error("Empty path in manifest")]
+    ManifestPathEmpty,
+    #[error("Invalid path (null byte): {0}")]
+    ManifestPathNullByte(String),
+    #[error("Absolute path: {0}")]
+    ManifestPathAbsolute(String),
+    #[error("Invalid path component in: {0}")]
+    ManifestPathInvalidComponent(String),
+    #[error("Hash must be 64-char lowercase hex: {0}")]
+    Blake3HashInvalid(String),
+    #[error("input_name must match ^[A-Za-z_][A-Za-z0-9_-]*$")]
+    FlakeInputNameInvalid,
+    #[error(
+        "override-input '{input_name}': '{flake_ref}' is not a remote flake ref; use github:/gitlab:/git+ssh://flake:/path:/nix/store/... ."
+    )]
+    FlakeRefNotRemote {
+        input_name: String,
+        flake_ref: String,
+    },
     #[error("Username cannot be empty")]
     UsernameEmpty,
     #[error("Username must be at least 3 characters long")]
@@ -409,4 +428,154 @@ pub fn validate_password(password: &str) -> Result<(), InputError> {
     }
 
     Ok(())
+}
+
+const REMOTE_FLAKE_REF_PREFIXES: &[&str] = &[
+    "github:",
+    "gitlab:",
+    "sourcehut:",
+    "git+ssh://",
+    "git+https://",
+    "git+http://",
+    "git://",
+    "https://",
+    "http://",
+    "flake:",
+    "path:/nix/store/",
+];
+
+pub fn check_flake_input_override(input_name: &str, flake_ref: &str) -> Result<(), InputError> {
+    let mut chars = input_name.chars();
+    let name_ok = matches!(chars.next(), Some(c) if c.is_ascii_alphabetic() || c == '_')
+        && chars.all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-');
+
+    if !name_ok {
+        return Err(InputError::FlakeInputNameInvalid);
+    }
+
+    let is_remote = REMOTE_FLAKE_REF_PREFIXES
+        .iter()
+        .any(|prefix| flake_ref.starts_with(prefix));
+
+    if !is_remote {
+        return Err(InputError::FlakeRefNotRemote {
+            input_name: input_name.to_string(),
+            flake_ref: flake_ref.to_string(),
+        });
+    }
+
+    Ok(())
+}
+
+pub fn check_manifest_path(path: &str) -> Result<(), InputError> {
+    if path.is_empty() {
+        return Err(InputError::ManifestPathEmpty);
+    }
+
+    if path.contains('\0') {
+        return Err(InputError::ManifestPathNullByte(path.to_string()));
+    }
+
+    if path.starts_with('/') {
+        return Err(InputError::ManifestPathAbsolute(path.to_string()));
+    }
+
+    let has_invalid_component = path
+        .split('/')
+        .any(|segment| matches!(segment, "" | "." | ".."));
+
+    if has_invalid_component {
+        return Err(InputError::ManifestPathInvalidComponent(path.to_string()));
+    }
+
+    Ok(())
+}
+
+pub fn decode_blake3_hex(hash: &str) -> Result<Vec<u8>, InputError> {
+    let is_lowercase_hex = hash
+        .chars()
+        .all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c));
+
+    if hash.len() != 64 || !is_lowercase_hex {
+        return Err(InputError::Blake3HashInvalid(hash.to_string()));
+    }
+
+    hex_to_vec(hash)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn accepts_remote_flake_refs() {
+        for url in [
+            "github:NixOS/nixpkgs",
+            "gitlab:group/task",
+            "sourcehut:~user/task",
+            "git+ssh://git@h/x.git",
+            "git+https://h/x.git",
+            "git+http://h/x.git",
+            "git://h/x.git",
+            "https://h/x.tar.gz",
+            "http://h/x.tar.gz",
+            "flake:nixpkgs",
+            "path:/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-src",
+        ] {
+            assert!(check_flake_input_override("nixpkgs", url).is_ok(), "{url}");
+        }
+    }
+
+    #[test]
+    fn rejects_local_and_non_remote_refs() {
+        for url in ["/abs", "./rel", "~/x", "name", "path:/home/u/x"] {
+            assert!(check_flake_input_override("nixpkgs", url).is_err(), "{url}");
+        }
+    }
+
+    #[test]
+    fn rejects_invalid_input_name() {
+        assert!(check_flake_input_override("1bad", "github:a/b").is_err());
+        assert!(check_flake_input_override("has space", "github:a/b").is_err());
+        assert!(check_flake_input_override("", "github:a/b").is_err());
+        assert!(check_flake_input_override("ok_name-1", "github:a/b").is_ok());
+    }
+
+    #[test]
+    fn rejects_path_traversal() {
+        assert!(check_manifest_path("../escape").is_err());
+        assert!(check_manifest_path("foo/../bar").is_err());
+        assert!(check_manifest_path("a/./b").is_err());
+    }
+
+    #[test]
+    fn rejects_absolute_and_empty_paths() {
+        assert!(check_manifest_path("/absolute").is_err());
+        assert!(check_manifest_path("").is_err());
+        assert!(check_manifest_path(".").is_err());
+    }
+
+    #[test]
+    fn rejects_null_bytes() {
+        assert!(check_manifest_path("with\0null").is_err());
+    }
+
+    #[test]
+    fn accepts_normal_nested_paths() {
+        assert!(check_manifest_path("flake.nix").is_ok());
+        assert!(check_manifest_path("src/main.rs").is_ok());
+        assert!(check_manifest_path("a/b/c/d.txt").is_ok());
+    }
+
+    #[test]
+    fn hash_must_be_64_lowercase_hex() {
+        let ok = "a".repeat(64);
+        assert!(decode_blake3_hex(&ok).is_ok());
+        let too_short = "a".repeat(63);
+        assert!(decode_blake3_hex(&too_short).is_err());
+        let uppercase = "A".repeat(64);
+        assert!(decode_blake3_hex(&uppercase).is_err());
+        let non_hex = "g".repeat(64);
+        assert!(decode_blake3_hex(&non_hex).is_err());
+    }
 }

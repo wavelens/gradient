@@ -178,6 +178,12 @@ impl From<gradient_types::input::InputError> for WebError {
     }
 }
 
+impl From<gradient_db::status::BuildRefusal> for WebError {
+    fn from(refusal: gradient_db::status::BuildRefusal) -> Self {
+        Self::conflict(refusal.to_string())
+    }
+}
+
 impl From<JsonRejection> for WebError {
     fn from(err: JsonRejection) -> Self {
         Self::BadRequest(ErrorCode::JSON_PARSING, format!("Invalid JSON: {}", err))

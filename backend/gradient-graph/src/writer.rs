@@ -537,12 +537,8 @@ mod tests {
             file_size: 5,
             nar_size: 5,
             nar_hash: "sha256:def".into(),
-            references: Vec::new(),
-            deriver: None,
-            ca: None,
-            targets: crate::messages::SignTargets::None,
             confirmed: true,
-            built_by_worker: false,
+            ..Default::default()
         }
     }
 
