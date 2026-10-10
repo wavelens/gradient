@@ -257,11 +257,31 @@ async fn retire_stale_paths(
         .await
         .context("GC: failed to release the retire savepoint")?;
     gradient_db::status::emit_transition_effects(ctx, &retired.transitions).await?;
+    queue_wanted_producers(ctx, &retired.transitions).await?;
 
     Ok(GcReport {
         retired: retired.deleted,
         ..Default::default()
     })
+}
+
+/// A producer reset by the retire can still be wanted, by a finished entry point missing it
+/// at runtime. The need did not move, and only the consistency check queued it.
+async fn queue_wanted_producers(
+    ctx: &DbContext,
+    retired: &[gradient_db::status::TransitionChange],
+) -> Result<()> {
+    let reset: Vec<DerivationId> = retired
+        .iter()
+        .filter(|change| change.to == gradient_entity::build::BuildStatus::Created)
+        .map(|change| change.derivation)
+        .collect();
+    for chunk in reset.chunks(gradient_db::IN_CHUNK_SIZE) {
+        let queued = gradient_db::graph::can_start::promote(&ctx.worker_db, chunk).await?;
+        gradient_db::status::emit_transition_effects(ctx, &queued).await?;
+    }
+
+    Ok(())
 }
 
 async fn delete_evaluations(ctx: &DbContext, evaluations: &[EvaluationId]) -> Result<GcReport> {
