@@ -92,11 +92,13 @@ pub(crate) static RECOUNT_WANTED_SQL: LazyLock<String> = LazyLock::new(|| {
     )
 });
 
-/// Entry points of a finished evaluation want nothing. An aborted shared build is open, and
-/// the entry points of an aborted evaluation kept every build of it wanted and thawed.
-fn of_a_live_evaluation(entry_point: &str) -> String {
+/// A finished evaluation and an aborted entry point want nothing. Aborted shared builds are
+/// open, and such entry points kept them wanted and thawed.
+fn wanted_by_its_evaluation(entry_point: &str) -> String {
     format!(
-        "JOIN evaluation ev ON ev.id = {entry_point}.evaluation AND ev.status NOT IN ({finished})",
+        "JOIN evaluation ev ON ev.id = {entry_point}.evaluation AND ev.status NOT IN ({finished}) \
+         AND NOT EXISTS (SELECT 1 FROM build_job bj WHERE bj.evaluation = {entry_point}.evaluation \
+                         AND bj.derivation = {entry_point}.derivation AND bj.aborted)",
         finished = crate::sql::status::eval_in(&EvaluationStatus::TERMINAL),
     )
 }
@@ -106,7 +108,7 @@ fn open_entry_points() -> String {
         "SELECT NULL::uuid, db.derivation, ({builder}) FROM entry_point ep {live} \
          JOIN derivation_build db ON db.derivation = ep.derivation \
          JOIN derivation w ON w.id = db.derivation WHERE {open}",
-        live = of_a_live_evaluation("ep"),
+        live = wanted_by_its_evaluation("ep"),
         builder = builder_predicate("db", "w"),
         open = open_predicate("db"),
     )
@@ -161,7 +163,7 @@ static UPDATE_NEED_SQL: LazyLock<String> = LazyLock::new(|| {
          WHERE {open} \
            AND r.derivation IN (SELECT ep.derivation FROM entry_point ep {live} \
                                 UNION ALL SELECT derivation FROM entered)",
-        live = of_a_live_evaluation("ep"),
+        live = wanted_by_its_evaluation("ep"),
         builder = builder_predicate("rb", "w"),
         open = open_predicate("rb"),
     );
@@ -362,6 +364,13 @@ mod tests {
                 "an aborted evaluation must not keep its own builds wanted: {sql}"
             );
             assert!(sql.contains(live), "{sql}");
+            assert!(
+                sql.contains(
+                    "AND NOT EXISTS (SELECT 1 FROM build_job bj WHERE bj.evaluation = ep.evaluation \
+                     AND bj.derivation = ep.derivation AND bj.aborted)"
+                ),
+                "an entry point its evaluation aborted must not thaw: {sql}"
+            );
         }
     }
 
@@ -495,13 +504,17 @@ mod tests {
                  WHERE (NOT rb.fetchable AND rb.status NOT IN (4, 6, 9)) \
                  AND r.derivation IN (SELECT ep.derivation FROM entry_point ep \
                  JOIN evaluation ev ON ev.id = ep.evaluation AND ev.status NOT IN (5, 6, 7) \
+                 AND NOT EXISTS (SELECT 1 FROM build_job bj WHERE bj.evaluation = ep.evaluation \
+                 AND bj.derivation = ep.derivation AND bj.aborted) \
                  UNION ALL SELECT derivation FROM entered)"
             ),
             "a settled root seeds nothing, and a seed carries its own builder bit: {walk}"
         );
-        assert!(
-            !walk.contains("build_job"),
-            "a name is what adoption writes for what the walk reaches: {walk}"
+        assert_eq!(
+            walk.matches("build_job").count(),
+            1,
+            "a name is what adoption writes for what the walk reaches, and the walk reads \
+             only the abort of an entry point from it: {walk}"
         );
         assert!(
             walk.contains(
