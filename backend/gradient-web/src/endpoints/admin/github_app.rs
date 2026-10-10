@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::error::{WebError, WebResult, require_superuser};
+use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
 use axum::extract::{Query, State};
 use axum::response::Redirect;
@@ -42,14 +42,17 @@ pub fn validate_host(host: &str) -> Result<(), WebError> {
     if host.is_empty() {
         return Err(WebError::bad_request("host must not be empty"));
     }
+
     let ok = host
         .chars()
         .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-');
+
     if !ok {
         return Err(WebError::bad_request(
             "host must contain only alphanumerics, '.' and '-'",
         ));
     }
+
     Ok(())
 }
 
@@ -58,8 +61,6 @@ pub async fn request_manifest(
     Extension(user): Extension<MUser>,
     Json(body): Json<ManifestRequest>,
 ) -> WebResult<Json<BaseResponse<ManifestResponse>>> {
-    require_superuser(&user)?;
-
     let host = body.host.unwrap_or_else(default_host);
     validate_host(&host)?;
 
@@ -74,9 +75,6 @@ pub async fn request_manifest(
     }))
 }
 
-/// GitHub's cross-site redirect is carrying no bearer header. The route cannot sit behind the auth
-/// middleware. CSRF and identity are recovered from the one-shot `state` token bound to a superuser
-/// at `/admin/github-app/manifest`.
 pub async fn callback(
     State(state): State<Arc<ServerState>>,
     Query(q): Query<CallbackQuery>,
@@ -106,8 +104,6 @@ pub async fn credentials(
     State(state): State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
 ) -> WebResult<Json<BaseResponse<gradient_ci::github_app_manifest::ManifestResult>>> {
-    require_superuser(&user)?;
-
     let creds = gradient_ci::manifest_state::take_credentials(&state.pending_credentials, user.id)
         .ok_or_else(|| WebError::not_found_msg("Pending credentials"))?;
 

@@ -77,7 +77,6 @@ async fn get_oidc_metadata(
         )
     };
 
-    // string errors
     let metadata = http_client
         .get(url)
         .send()

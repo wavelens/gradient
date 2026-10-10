@@ -28,7 +28,6 @@ pub async fn authorize_scim(
         return Err(ScimError::unauthorized("SCIM is not enabled"));
     };
 
-    // string errors
     let presented = bearer_token(req.headers())
         .ok_or_else(|| ScimError::unauthorized("missing SCIM bearer token"))?;
 
