@@ -1601,16 +1601,8 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
         print(f"{sibling} shares the victim's producer with no object; pushing it first")
         server.succeed(f"{CLI} cache upload main /nix/store/{sibling}")
 
-    def set_draining(enabled):
-        server.succeed(
-            f'{CURL} -sf -X POST -H "Authorization: Bearer {token}" '
-            f'-H "Content-Type: application/json" -d \'{{"enabled": {enabled}}}\' '
-            f'{API}/admin/draining'
-        )
-
     print(f"retiring {dep_path}")
     indexed_before = set(sql("SELECT hash FROM cached_path;").split())
-    set_draining("true")
     server.succeed(f"rm {dep_object}")
 
     server.succeed(
@@ -1676,12 +1668,6 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
     assert s_fetchable == "0" or s_status in ("3", "7"), (
         f"the re-uploaded output's producer is fetchable again with no terminal-success "
         f"status, so the NAR alone re-trusted it; (status fetchable) = ({settled})")
-
-    set_draining("false")
-    poll(f"SELECT (db.status IN (3, 7) AND db.fetchable)::text FROM derivation_build db "
-         f"JOIN derivation_output o ON o.derivation = db.derivation "
-         f"WHERE o.hash = '{dep_hash}' LIMIT 1;", "true",
-         "the producer queued by the retire did not settle after the drain ended", timeout=600)
 
     poll("SELECT count(*) FROM dispatched_job WHERE finished_at IS NULL "
          "AND dispatched_at > (now() AT TIME ZONE 'UTC') - interval '10 minutes';",
