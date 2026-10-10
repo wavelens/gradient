@@ -15,6 +15,11 @@
   font-size: $font-size-sm;
 }
 
+.facts a,
+.compared a {
+  padding: 0;
+}
+
 .compared {
   margin: $spacing-md 0 0;
   color: var(--gr-text-secondary);
@@ -32,6 +37,7 @@
   list-style: none;
   color: var(--gr-status-success-text);
   font-size: $font-size-sm;
+  overflow-wrap: anywhere;
 }
 
 h2 {

@@ -124,7 +124,10 @@ describe('EvaluationSummaryComponent', () => {
     expect(crumbs(fixture)).toEqual(['Projects', 'MyProject', 'Summary']);
   });
 
-  it('explains a summary that cannot be loaded', () => {
-    expect(text(setup(null))).toContain('Summary not available');
+  it('explains a summary that cannot be loaded and still leads back to the project', () => {
+    const fixture = setup(null);
+
+    expect(text(fixture)).toContain('Summary not available');
+    expect(crumbs(fixture)).toEqual(['Projects', 'MyProject', 'Summary']);
   });
 });
