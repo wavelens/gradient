@@ -150,6 +150,38 @@ pub async fn build_jobs_for_derivations<C: ConnectionTrait>(
     }))
 }
 
+pub async fn derivations_by_id<C: ConnectionTrait>(
+    db: &C,
+    ids: &[DerivationId],
+) -> Result<std::collections::HashMap<DerivationId, MDerivation>, DbErr> {
+    Ok(crate::fetch_in_chunks(ids, |chunk| async move {
+        EDerivation::find()
+            .filter(CDerivation::Id.is_in(chunk))
+            .all(db)
+            .await
+    })
+    .await?
+    .into_iter()
+    .map(|derivation| (derivation.id, derivation))
+    .collect())
+}
+
+pub async fn shared_builds_by_derivation<C: ConnectionTrait>(
+    db: &C,
+    derivations: &[DerivationId],
+) -> Result<std::collections::HashMap<DerivationId, MDerivationBuild>, DbErr> {
+    Ok(crate::fetch_in_chunks(derivations, |chunk| async move {
+        EDerivationBuild::find()
+            .filter(CDerivationBuild::Derivation.is_in(chunk))
+            .all(db)
+            .await
+    })
+    .await?
+    .into_iter()
+    .map(|shared_build| (shared_build.derivation, shared_build))
+    .collect())
+}
+
 pub async fn derivation_is_reachable<C: ConnectionTrait>(
     db: &C,
     derivation: DerivationId,

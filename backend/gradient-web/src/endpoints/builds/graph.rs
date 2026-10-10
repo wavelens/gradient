@@ -59,8 +59,6 @@ pub async fn dependency_graph<C: ConnectionTrait>(
     })
 }
 
-/// The walk follows recorded edges, not this evaluation's builds: an evaluation only names what it
-/// walked itself and the direct inputs of that.
 async fn walk_dependencies<C: ConnectionTrait>(
     db: &C,
     root: DerivationId,
@@ -76,11 +74,13 @@ async fn walk_dependencies<C: ConnectionTrait>(
             .filter(CDerivationDependency::Kind.is_in([EdgeKind::Buildtime, EdgeKind::Both]))
             .all(db)
             .await?;
+
         for row in rows {
             if reached.len() < GRAPH_NODE_CAP && seen.insert(row.dependency) {
                 reached.push(row.dependency);
                 frontier.push(row.dependency);
             }
+
             if seen.contains(&row.dependency) {
                 edges.push(DependencyEdge {
                     source: row.dependency,
@@ -106,20 +106,10 @@ async fn graph_nodes<C: ConnectionTrait>(
         .into_iter()
         .map(|j| (j.derivation, j.id))
         .collect();
-    let shared_builds: HashMap<DerivationId, MDerivationBuild> = EDerivationBuild::find()
-        .filter(CDerivationBuild::Derivation.is_in(derivations.to_vec()))
-        .all(db)
-        .await?
-        .into_iter()
-        .map(|b| (b.derivation, b))
-        .collect();
-    let drv_by_id: HashMap<DerivationId, MDerivation> = EDerivation::find()
-        .filter(CDerivation::Id.is_in(derivations.to_vec()))
-        .all(db)
-        .await?
-        .into_iter()
-        .map(|d| (d.id, d))
-        .collect();
+
+    let shared_builds =
+        gradient_db::graph::reachability::shared_builds_by_derivation(db, derivations).await?;
+    let drv_by_id = gradient_db::graph::reachability::derivations_by_id(db, derivations).await?;
 
     Ok(derivations
         .iter()
@@ -196,6 +186,7 @@ mod tests {
             DerivationId::now_v7(),
             DerivationId::now_v7(),
         );
+
         let root_build = shared_build(root, BuildStatus::Completed);
         let root_job = build_job::Model {
             id: BuildJobId::now_v7(),
@@ -205,6 +196,7 @@ mod tests {
             created_at: gradient_types::now(),
             ..Default::default()
         };
+
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             .append_query_results([vec![dep(root, input)]])
             .append_query_results([vec![dep(input, interior)]])
@@ -236,6 +228,7 @@ mod tests {
                 (interior, None, None),
             ]
         );
+
         assert_eq!(
             graph.edges,
             [
@@ -258,6 +251,7 @@ mod tests {
             derivation: DerivationId::now_v7(),
             ..Default::default()
         };
+
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             .append_query_results([Vec::<derivation_dependency::Model>::new()])
             .append_query_results([Vec::<build_job::Model>::new()])

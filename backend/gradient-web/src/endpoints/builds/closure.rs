@@ -19,7 +19,6 @@ use std::sync::Arc;
 
 use super::BuildAccessContext;
 
-/// `total_size_bytes` is always computed over the full closure and is exact.
 const CLOSURE_NODE_CAP: usize = 1000;
 
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
@@ -141,7 +140,6 @@ fn closure_graph(
     }
 }
 
-/// A node is never kept without the node that reached it, so every kept node still leads to a root.
 fn heaviest_rooted(
     roots: &[String],
     nodes: &[ClosureNode],
@@ -197,8 +195,10 @@ fn spanning_order<'a>(
         .filter(|r| known.contains(r) && seen.insert(r))
         .map(|r| (r, None))
         .collect();
+
     let mut unreached = nodes.iter().map(|n| n.id.as_str());
     let mut order = Vec::with_capacity(nodes.len());
+
     loop {
         while let Some((node, parent)) = queue.pop_front() {
             order.push((node, parent));
@@ -309,6 +309,7 @@ pub async fn get_build_runtime_closure(
         &[ctx.build_job.derivation],
     )
     .await?;
+
     let graph = build_runtime_closure_graph(&state.web_db, seeds).await?;
     Ok(ok_json(graph))
 }
@@ -441,6 +442,7 @@ mod tests {
             sized("heavy", 100),
             sized("deep", 50),
         ];
+
         let edges = vec![
             needs("root", "light"),
             needs("root", "heavy"),

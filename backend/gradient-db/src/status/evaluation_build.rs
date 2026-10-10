@@ -16,13 +16,19 @@ use gradient_types::*;
 use sea_orm::sea_query::Expr;
 use sea_orm::{ColumnTrait, DbErr, EntityTrait, QueryFilter};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum BuildRefusal {
+    #[error("The evaluation of this build has already finished")]
     EvaluationFinished,
+    #[error("The build is {0:?}")]
     WrongStatus(BuildStatus),
+    #[error("Another running evaluation still needs this build")]
     NeededByOtherEvaluation,
+    #[error("The worker has not confirmed the abort yet, try again shortly")]
     WorkerStillStopping,
+    #[error("A newer evaluation of the task replaced this evaluation")]
     NewerEvaluation,
+    #[error("No failed dependency of this build is retryable")]
     NoFailedDependency,
 }
 

@@ -24,7 +24,10 @@ use super::BuildAccessContext;
 
 type ChunkRow = gradient_entity::build_log_chunk::Model;
 
-async fn load_chunk_rows(state: &ServerState, log_key: BuildAttemptId) -> WebResult<Vec<ChunkRow>> {
+pub(super) async fn load_chunk_rows(
+    state: &ServerState,
+    log_key: BuildAttemptId,
+) -> WebResult<Vec<ChunkRow>> {
     Ok(gradient_entity::build_log_chunk::Entity::find()
         .filter(gradient_entity::build_log_chunk::Column::BuildAttempt.eq(log_key))
         .order_by_asc(gradient_entity::build_log_chunk::Column::ChunkIndex)
@@ -38,8 +41,6 @@ fn decode_chunk(raw: &[u8]) -> WebResult<String> {
     Ok(String::from_utf8_lossy(&bytes).into_owned())
 }
 
-/// A chunk whose object is gone is rendered as placeholder lines. The line numbers of every later
-/// chunk are kept in place.
 async fn chunk_lines_text(
     logs: &dyn gradient_storage::LogStorage,
     log_key: BuildAttemptId,
@@ -53,6 +54,30 @@ async fn chunk_lines_text(
         }
         Err(e) => Err(WebError::Internal(e)),
     }
+}
+
+pub(super) async fn chunked_text_from(
+    logs: &dyn gradient_storage::LogStorage,
+    log_key: BuildAttemptId,
+    rows: &[ChunkRow],
+    offset: u64,
+) -> WebResult<(String, u64)> {
+    let mut text = String::new();
+    let mut end = offset;
+    for row in rows {
+        let start = row.byte_start as u64;
+        let row_end = start + row.byte_len as u64;
+        if row_end <= offset {
+            continue;
+        }
+
+        let chunk = chunk_lines_text(logs, log_key, row).await?;
+        let skip = offset.saturating_sub(start) as usize;
+        text.push_str(chunk.get(skip..).unwrap_or_default());
+        end = row_end;
+    }
+
+    Ok((text, end))
 }
 
 pub async fn get_build_log_chunks(
@@ -77,10 +102,12 @@ pub async fn get_build_log_chunks(
             byte_len: r.byte_len as u32,
         })
         .collect();
+
     let total_lines = rows
         .last()
         .map(|r| r.line_start as u64 + r.line_count as u64)
         .unwrap_or(0);
+
     let total_bytes = rows
         .last()
         .map(|r| r.byte_start as u64 + r.byte_len as u64)
@@ -117,6 +144,7 @@ pub async fn get_build_log_chunk(
         .read_chunk(log_key, index)
         .await
         .map_err(|_| WebError::not_found("LogChunk"))?;
+
     let text = format!("{}{}", row.color_prefix, decode_chunk(&raw)?);
 
     Ok(([(header::CONTENT_TYPE, "text/plain; charset=utf-8")], text).into_response())
@@ -135,14 +163,17 @@ fn parse_line_range(q: &LineRangeQuery) -> Result<(u64, Option<u64>), WebError> 
         let (lo, hi) = cleaned
             .split_once('-')
             .ok_or_else(|| WebError::bad_request("range must look like L120-L130"))?;
+
         let start: u64 = lo
             .trim()
             .parse()
             .map_err(|_| WebError::bad_request("invalid range start"))?;
+
         let end: u64 = hi
             .trim()
             .parse()
             .map_err(|_| WebError::bad_request("invalid range end"))?;
+
         return Ok((start.max(1), Some(end)));
     }
     Ok((q.start.unwrap_or(1).max(1), q.end))
@@ -163,6 +194,7 @@ pub async fn get_build_log_lines(
         )
             .into_response());
     };
+
     let rows = load_chunk_rows(&state, log_key).await?;
 
     let (start, end_opt) = parse_line_range(&q)?;
@@ -176,6 +208,7 @@ pub async fn get_build_log_lines(
     if total_lines == 0 || start > end {
         return Ok(([(header::CONTENT_TYPE, "text/plain; charset=utf-8")], out).into_response());
     }
+
     let want_first = start - 1;
     let want_last = end - 1;
     let mut emitted_first = false;
@@ -186,6 +219,7 @@ pub async fn get_build_log_lines(
         if chunk_last < want_first || chunk_first > want_last {
             continue;
         }
+
         let text = chunk_lines_text(state.log_storage.as_ref(), log_key, row).await?;
         let lines: Vec<&str> = text.split_inclusive('\n').collect();
 
@@ -202,6 +236,7 @@ pub async fn get_build_log_lines(
             out.push_str(&st.to_prefix());
             emitted_first = true;
         }
+
         for line in &lines[lo.min(lines.len())..=hi] {
             out.push_str(line);
         }
@@ -234,6 +269,7 @@ pub async fn get_build_log_search(
             );
         }
     };
+
     let state = Arc::clone(&state);
 
     let case = query.case;
@@ -251,10 +287,12 @@ pub async fn get_build_log_search(
                     Ok(r) => r,
                     Err(_) => continue,
                 };
+
                 let bytes = match zstd::stream::decode_all(&raw[..]) {
                     Ok(b) => b,
                     Err(_) => continue,
                 };
+
                 let text = String::from_utf8_lossy(&bytes);
                 let mut byte_off = row.byte_start as u64;
                 for (line_no, line) in (row.line_start as u64..).zip(text.split_inclusive('\n')) {
@@ -267,12 +305,15 @@ pub async fn get_build_log_search(
                             byte_offset: byte_off,
                             preview: line.trim_end_matches('\n').chars().take(200).collect(),
                         };
+
                         yield serde_json::to_value(&hit).unwrap_or(serde_json::Value::Null);
                     }
+
                     byte_off += line.len() as u64;
                 }
             }
         }
+
         let done = LogSearchDone { done: true, total_matches: total };
         yield serde_json::to_value(&done).unwrap_or(serde_json::Value::Null);
     };
@@ -282,7 +323,7 @@ pub async fn get_build_log_search(
 
 #[cfg(test)]
 mod tests {
-    use super::{ChunkRow, LineRangeQuery, chunk_lines_text, parse_line_range};
+    use super::{ChunkRow, LineRangeQuery, chunk_lines_text, chunked_text_from, parse_line_range};
     use gradient_storage::{FileLogStorage, LogStorage};
     use gradient_types::BuildAttemptId;
 
@@ -295,37 +336,49 @@ mod tests {
     }
 
     #[test]
-    fn parses_start_end() {
-        assert_eq!(
-            parse_line_range(&q(Some(5), Some(9), None)).unwrap(),
-            (5, Some(9))
-        );
-    }
+    fn parse_line_range_reads_start_end_and_range() {
+        let cases = [
+            (
+                "start and end",
+                q(Some(5), Some(9), None),
+                Some((5, Some(9))),
+            ),
+            (
+                "nothing given starts at line 1",
+                q(None, None, None),
+                Some((1, None)),
+            ),
+            (
+                "start below 1 is raised to 1",
+                q(Some(0), None, None),
+                Some((1, None)),
+            ),
+            (
+                "range with L prefixes",
+                q(None, None, Some("L120-L130")),
+                Some((120, Some(130))),
+            ),
+            ("bare range", q(None, None, Some("3-8")), Some((3, Some(8)))),
+            (
+                "range wins over start and end",
+                q(Some(1), Some(2), Some("3-8")),
+                Some((3, Some(8))),
+            ),
+            (
+                "range without a dash",
+                q(None, None, Some("nonsense")),
+                None,
+            ),
+            (
+                "range with a non-number",
+                q(None, None, Some("L1-Lx")),
+                None,
+            ),
+        ];
 
-    #[test]
-    fn defaults_start_to_one() {
-        assert_eq!(parse_line_range(&q(None, None, None)).unwrap(), (1, None));
-    }
-
-    #[test]
-    fn parses_l_range() {
-        assert_eq!(
-            parse_line_range(&q(None, None, Some("L120-L130"))).unwrap(),
-            (120, Some(130))
-        );
-    }
-
-    #[test]
-    fn parses_bare_range() {
-        assert_eq!(
-            parse_line_range(&q(None, None, Some("3-8"))).unwrap(),
-            (3, Some(8))
-        );
-    }
-
-    #[test]
-    fn rejects_malformed_range() {
-        assert!(parse_line_range(&q(None, None, Some("nonsense"))).is_err());
+        for (case, query, expected) in cases {
+            assert_eq!(parse_line_range(&query).ok(), expected, "{case}");
+        }
     }
 
     fn row(chunk_index: i32, line_count: i32) -> ChunkRow {
@@ -333,6 +386,40 @@ mod tests {
             chunk_index,
             line_count,
             ..Default::default()
+        }
+    }
+
+    #[tokio::test]
+    async fn chunked_text_from_reads_only_what_follows_the_offset() {
+        let dir = tempfile::tempdir().unwrap();
+        let logs = FileLogStorage::new(dir.path()).await.unwrap();
+        let key = BuildAttemptId::now_v7();
+        let mut rows = Vec::new();
+        let mut byte_start = 0;
+        for (index, text) in ["first\n", "second\n"].iter().enumerate() {
+            let raw = zstd::stream::encode_all(text.as_bytes(), 1).unwrap();
+            logs.write_chunk(key, index as u32, &raw).await.unwrap();
+            rows.push(ChunkRow {
+                chunk_index: index as i32,
+                byte_start,
+                byte_len: text.len() as i32,
+                ..Default::default()
+            });
+
+            byte_start += text.len() as i64;
+        }
+
+        let cases = [
+            (0, "first\nsecond\n"),
+            (3, "st\nsecond\n"),
+            (6, "second\n"),
+            (13, ""),
+        ];
+
+        for (offset, expected) in cases {
+            let (text, end) = chunked_text_from(&logs, key, &rows, offset).await.unwrap();
+
+            assert_eq!((text.as_str(), end), (expected, 13), "offset {offset}");
         }
     }
 

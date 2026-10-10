@@ -39,7 +39,6 @@ pub struct BuildWithOutputs {
     pub progress: Option<BuildProgress>,
 }
 
-/// A finished shared build's last report is outliving it by up to the TTL. It is not shown.
 fn running_progress(
     progress: &Latest<DerivationBuildId, BuildProgress>,
     shared_build: DerivationBuildId,
@@ -88,6 +87,7 @@ pub async fn get_build(
         .await
         .ok()
         .flatten();
+
     let dispatched_job = attempt.and_then(|a| a.dispatched_job);
     let worker = match dispatched_job {
         Some(job) => gradient_entity::dispatched_job::Entity::find_by_id(job)
@@ -145,12 +145,14 @@ mod tests {
             paths_done: 0,
             paths_total: Some(1),
         };
+
         latest.set(shared_build, progress, now);
 
         assert_eq!(
             running_progress(&latest, shared_build, BuildStatus::Building, now),
             Some(progress)
         );
+
         assert_eq!(
             running_progress(&latest, shared_build, BuildStatus::Completed, now),
             None

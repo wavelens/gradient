@@ -4,17 +4,19 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use super::validation::decode_blake3_hex;
 use crate::access::has_permission;
 use crate::authorization::MaybeApiKey;
 use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
 use crate::permissions::Permission;
+use anyhow::Context;
 use axum::Extension;
 use axum::Json;
+use axum::extract::multipart::Field;
 use axum::extract::{Multipart, Path, State};
 use gradient_core::ServerState;
-use gradient_types::ids::{BuildRequestBlobId, UploadSessionId};
+use gradient_types::ids::{BuildRequestBlobId, ProjectId, UploadSessionId};
+use gradient_types::input::decode_blake3_hex;
 use gradient_types::{AUploadSession, BaseResponse, EUploadSession, MBuildRequestBlob, MUser, now};
 use sea_orm::ActiveValue::Set;
 use sea_orm::{ActiveModelTrait, DbErr, EntityTrait, IntoActiveModel, RuntimeErr, sqlx};
@@ -26,6 +28,12 @@ use std::sync::Arc;
 pub struct BlobsResponse {
     pub uploaded: usize,
     pub remaining: usize,
+}
+
+struct VerifiedBlob {
+    name: String,
+    hash: [u8; 32],
+    data: Vec<u8>,
 }
 
 pub async fn post_blobs(
@@ -61,88 +69,90 @@ pub async fn post_blobs(
         return Err(WebError::not_found("Upload session"));
     }
 
-    let missing_vec: Vec<String> = serde_json::from_value(session.missing.clone())
-        .map_err(|e| WebError::internal(format!("Corrupt session.missing JSON: {}", e)))?;
-    let mut missing_set: HashSet<String> = missing_vec.into_iter().collect();
+    let mut missing: HashSet<String> =
+        serde_json::from_value(session.missing.clone()).context("Corrupt session.missing JSON")?;
 
-    let project_uuid = session.project.into_inner();
-    let mut uploaded: usize = 0;
-
+    let missing_before = missing.len();
     while let Some(field) = multipart
         .next_field()
         .await
         .map_err(|e| WebError::bad_request(format!("Invalid multipart payload: {}", e)))?
     {
-        let name = field
-            .name()
-            .ok_or_else(|| WebError::bad_request("Missing field name"))?
-            .to_string();
-
-        let hash_bytes = decode_blake3_hex(&name)?;
-        if !missing_set.contains(&name) {
-            return Err(WebError::bad_request(format!(
-                "hash not in session.missing: {}",
-                name
-            )));
-        }
-
-        let data = field
-            .bytes()
-            .await
-            .map_err(|e| WebError::bad_request(format!("Failed to read field bytes: {}", e)))?;
-
-        let actual = blake3::hash(&data);
-        if actual.as_bytes() != hash_bytes.as_slice() {
-            return Err(WebError::bad_request(format!("hash mismatch for {}", name)));
-        }
-
-        let mut hash_array = [0u8; 32];
-        hash_array.copy_from_slice(&hash_bytes);
-        let size = data.len() as i64;
-        let bytes_vec = data.to_vec();
-
-        state
-            .nar_storage
-            .put_blob(project_uuid, &hash_array, bytes_vec)
-            .await
-            .map_err(|e| WebError::internal(format!("Failed to persist blob: {}", e)))?;
-
-        let now_ts = now();
-        let insert_result = MBuildRequestBlob {
-            id: BuildRequestBlobId::now_v7(),
-            project: session.project,
-            hash: hash_bytes.clone(),
-            size,
-            created_at: now_ts,
-            last_used_at: now_ts,
-        }
-        .into_active_model()
-        .insert(&state.web_db)
-        .await;
-
-        match insert_result {
-            Ok(_) => {}
-            Err(err) if is_unique_violation(&err) => {}
-            Err(err) => return Err(err.into()),
-        }
-
-        missing_set.remove(&name);
-        uploaded += 1;
+        let blob = verified_blob(field, &missing).await?;
+        missing.remove(&blob.name);
+        store_blob(&state, session.project, blob).await?;
     }
 
-    let remaining_vec: Vec<String> = missing_set.into_iter().collect();
-    let remaining = remaining_vec.len();
-    let missing_value = serde_json::to_value(&remaining_vec)
-        .map_err(|e| WebError::internal(format!("Failed to serialise missing list: {}", e)))?;
+    let remaining = missing.len();
+    let missing_value = serde_json::to_value(missing.into_iter().collect::<Vec<String>>())
+        .context("Failed to serialise missing list")?;
 
     let mut active: AUploadSession = session.into();
     active.missing = Set(missing_value);
     active.update(&state.web_db).await?;
 
     Ok(ok_json(BlobsResponse {
-        uploaded,
+        uploaded: missing_before - remaining,
         remaining,
     }))
+}
+
+async fn verified_blob(field: Field<'_>, missing: &HashSet<String>) -> WebResult<VerifiedBlob> {
+    let name = field
+        .name()
+        .ok_or_else(|| WebError::bad_request("Missing field name"))?
+        .to_string();
+
+    let mut hash = [0u8; 32];
+    hash.copy_from_slice(&decode_blake3_hex(&name)?);
+    if !missing.contains(&name) {
+        return Err(WebError::bad_request(format!(
+            "hash not in session.missing: {}",
+            name
+        )));
+    }
+
+    let data = field
+        .bytes()
+        .await
+        .map_err(|e| WebError::bad_request(format!("Failed to read field bytes: {}", e)))?;
+
+    if blake3::hash(&data).as_bytes() != &hash {
+        return Err(WebError::bad_request(format!("hash mismatch for {}", name)));
+    }
+
+    Ok(VerifiedBlob {
+        name,
+        hash,
+        data: data.to_vec(),
+    })
+}
+
+async fn store_blob(state: &ServerState, project: ProjectId, blob: VerifiedBlob) -> WebResult<()> {
+    let size = blob.data.len() as i64;
+    state
+        .nar_storage
+        .put_blob(project.into_inner(), &blob.hash, blob.data)
+        .await
+        .context("Failed to persist blob")?;
+
+    let stored_at = now();
+    let inserted = MBuildRequestBlob {
+        id: BuildRequestBlobId::now_v7(),
+        project,
+        hash: blob.hash.to_vec(),
+        size,
+        created_at: stored_at,
+        last_used_at: stored_at,
+    }
+    .into_active_model()
+    .insert(&state.web_db)
+    .await;
+
+    match inserted {
+        Err(err) if !is_unique_violation(&err) => Err(err.into()),
+        _ => Ok(()),
+    }
 }
 
 fn is_unique_violation(err: &DbErr) -> bool {
@@ -152,6 +162,7 @@ fn is_unique_violation(err: &DbErr) -> bool {
         }
         _ => return false,
     };
+
     matches!(
         sqlx_err,
         sqlx::Error::Database(db_err) if db_err.is_unique_violation()

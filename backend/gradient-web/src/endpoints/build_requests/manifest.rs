@@ -5,18 +5,19 @@
  */
 
 use super::types::ManifestEntry;
-use super::validation::{decode_blake3_hex, validate_manifest_path};
 use crate::access::{Caller, ProjectAccess, load_project};
 use crate::authorization::MaybeApiKey;
 use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
 use crate::permissions::Permission;
+use anyhow::Context;
 use axum::Extension;
 use axum::extract::{Json, State};
 use chrono::Duration;
 use gradient_core::ServerState;
 use gradient_types::constants::UPLOAD_SESSION_TTL;
 use gradient_types::ids::UploadSessionId;
+use gradient_types::input::{check_manifest_path, decode_blake3_hex};
 use gradient_types::{
     ABuildRequestBlob, BaseResponse, CBuildRequestBlob, EBuildRequestBlob, MUploadSession, MUser,
     now,
@@ -71,27 +72,31 @@ pub async fn post_manifest(
     let mut hashes: Vec<Vec<u8>> = Vec::with_capacity(body.files.len());
 
     for entry in &body.files {
-        validate_manifest_path(&entry.path)?;
+        check_manifest_path(&entry.path)?;
         if !seen_paths.insert(entry.path.as_str()) {
             return Err(WebError::bad_request(format!(
                 "Duplicate path in manifest: {}",
                 entry.path
             )));
         }
+
         if entry.size < 0 {
             return Err(WebError::bad_request(format!(
                 "Negative size for {}",
                 entry.path
             )));
         }
+
         total = total.checked_add(entry.size).ok_or_else(|| {
             WebError::payload_too_large("Manifest total size overflows i64".to_string())
         })?;
+
         if (total as u128) > max_source_upload_size as u128 {
             return Err(WebError::payload_too_large(format!(
                 "Manifest total size exceeds limit of {max_source_upload_size} bytes"
             )));
         }
+
         hashes.push(decode_blake3_hex(&entry.hash)?);
     }
 
@@ -128,15 +133,15 @@ pub async fn post_manifest(
         .map(hex::encode)
         .collect();
 
-    let manifest_value = serde_json::to_value(&body.files)
-        .map_err(|e| WebError::internal(format!("Failed to serialise manifest: {}", e)))?;
-    let missing_value = serde_json::to_value(&missing_hex)
-        .map_err(|e| WebError::internal(format!("Failed to serialise missing list: {}", e)))?;
+    let manifest_value =
+        serde_json::to_value(&body.files).context("Failed to serialise manifest")?;
+
+    let missing_value =
+        serde_json::to_value(&missing_hex).context("Failed to serialise missing list")?;
 
     let session_id = UploadSessionId::now_v7();
-    let expires_at = now_ts
-        + Duration::from_std(UPLOAD_SESSION_TTL)
-            .map_err(|e| WebError::internal(format!("Invalid UPLOAD_SESSION_TTL: {}", e)))?;
+    let expires_at =
+        now_ts + Duration::from_std(UPLOAD_SESSION_TTL).context("Invalid UPLOAD_SESSION_TTL")?;
 
     MUploadSession {
         id: session_id,

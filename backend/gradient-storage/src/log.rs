@@ -9,10 +9,11 @@ use futures::future::BoxFuture;
 use gradient_types::ids::BuildAttemptId;
 use object_store::{ObjectStore, ObjectStoreExt as _, PutPayload, path::Path as ObjectPath};
 use std::collections::BTreeSet;
+use std::io::SeekFrom;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::fs::{self, OpenOptions};
-use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 
 pub trait LogStorage: Send + Sync + std::fmt::Debug {
     fn append<'a>(&'a self, attempt_id: BuildAttemptId, text: &'a str)
@@ -22,6 +23,23 @@ pub trait LogStorage: Send + Sync + std::fmt::Debug {
 
     fn read_inline<'a>(&'a self, attempt_id: BuildAttemptId) -> BoxFuture<'a, Result<String>> {
         self.read(attempt_id)
+    }
+
+    fn read_inline_from<'a>(
+        &'a self,
+        attempt_id: BuildAttemptId,
+        offset: u64,
+    ) -> BoxFuture<'a, Result<Option<Vec<u8>>>> {
+        Box::pin(async move {
+            let inline = self.read_inline(attempt_id).await?.into_bytes();
+            if inline.is_empty() {
+                return Ok(None);
+            }
+
+            Ok(Some(
+                inline.get(offset as usize..).unwrap_or_default().to_vec(),
+            ))
+        })
     }
 
     fn delete<'a>(&'a self, attempt_id: BuildAttemptId) -> BoxFuture<'a, Result<()>>;
@@ -184,6 +202,30 @@ impl LogStorage for FileLogStorage {
         })
     }
 
+    fn read_inline_from<'a>(
+        &'a self,
+        attempt_id: BuildAttemptId,
+        offset: u64,
+    ) -> BoxFuture<'a, Result<Option<Vec<u8>>>> {
+        Box::pin(async move {
+            let mut file = match fs::File::open(self.log_path(attempt_id)).await {
+                Ok(file) => file,
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+                Err(e) => return Err(e.into()),
+            };
+
+            if file.metadata().await?.len() == 0 {
+                return Ok(None);
+            }
+
+            let mut appended = Vec::new();
+            file.seek(SeekFrom::Start(offset)).await?;
+            file.read_to_end(&mut appended).await?;
+
+            Ok(Some(appended))
+        })
+    }
+
     fn delete<'a>(&'a self, attempt_id: BuildAttemptId) -> BoxFuture<'a, Result<()>> {
         Box::pin(async move {
             let chunks = self.delete_chunks(attempt_id).await;
@@ -296,6 +338,14 @@ impl LogStorage for S3LogStorage {
 
     fn read_inline<'a>(&'a self, attempt_id: BuildAttemptId) -> BoxFuture<'a, Result<String>> {
         self.local.read_inline(attempt_id)
+    }
+
+    fn read_inline_from<'a>(
+        &'a self,
+        attempt_id: BuildAttemptId,
+        offset: u64,
+    ) -> BoxFuture<'a, Result<Option<Vec<u8>>>> {
+        self.local.read_inline_from(attempt_id, offset)
     }
 
     fn delete<'a>(&'a self, attempt_id: BuildAttemptId) -> BoxFuture<'a, Result<()>> {
@@ -428,6 +478,27 @@ mod tests {
         assert!(shard.join(format!("{SAMPLE}.log")).exists());
         assert!(shard.join(SAMPLE).join("chunk_00000000.zst").exists());
         assert_eq!(storage.read(id).await.unwrap(), "hello");
+    }
+
+    #[tokio::test]
+    async fn read_inline_from_returns_only_what_follows_the_offset() {
+        let dir = tempfile::tempdir().unwrap();
+        let storage = FileLogStorage::new(dir.path()).await.unwrap();
+        let id = sample_id();
+        assert_eq!(storage.read_inline_from(id, 0).await.unwrap(), None);
+
+        storage.append(id, "first\n").await.unwrap();
+        storage.append(id, "second\n").await.unwrap();
+
+        let cases = [(0, "first\nsecond\n"), (6, "second\n"), (13, ""), (99, "")];
+
+        for (offset, expected) in cases {
+            assert_eq!(
+                storage.read_inline_from(id, offset).await.unwrap(),
+                Some(expected.as_bytes().to_vec()),
+                "offset {offset}"
+            );
+        }
     }
 
     async fn list_all(storage: &dyn LogStorage) -> Vec<BuildAttemptId> {

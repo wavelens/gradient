@@ -11,7 +11,6 @@ use crate::helpers::ok_json;
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
 use gradient_core::ServerState;
-use gradient_db::status::BuildRefusal;
 use gradient_types::*;
 use std::sync::Arc;
 
@@ -32,27 +31,6 @@ async fn load_member_build(
     Ok(ctx)
 }
 
-fn refusal_error(refusal: BuildRefusal) -> WebError {
-    match refusal {
-        BuildRefusal::EvaluationFinished => {
-            WebError::conflict("The evaluation of this build has already finished")
-        }
-        BuildRefusal::WrongStatus(status) => WebError::conflict(format!("The build is {status:?}")),
-        BuildRefusal::NeededByOtherEvaluation => {
-            WebError::conflict("Another running evaluation still needs this build")
-        }
-        BuildRefusal::WorkerStillStopping => {
-            WebError::conflict("The worker has not confirmed the abort yet, try again shortly")
-        }
-        BuildRefusal::NewerEvaluation => {
-            WebError::conflict("A newer evaluation of the task replaced this evaluation")
-        }
-        BuildRefusal::NoFailedDependency => {
-            WebError::conflict("No failed dependency of this build is retryable")
-        }
-    }
-}
-
 pub async fn post_build_abort(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
@@ -64,9 +42,7 @@ pub async fn post_build_abort(
 
     scheduler
         .abort_build(ctx.build_job.evaluation, ctx.shared_build.id)
-        .await
-        .map_err(|e| WebError::internal(e.to_string()))?
-        .map_err(refusal_error)?;
+        .await??;
 
     Ok(ok_json("Success".to_string()))
 }
@@ -82,9 +58,7 @@ pub async fn post_build_retry(
 
     scheduler
         .retry_build(ctx.build_job.evaluation, ctx.shared_build.id)
-        .await
-        .map_err(|e| WebError::internal(e.to_string()))?
-        .map_err(refusal_error)?;
+        .await??;
 
     Ok(ok_json("Success".to_string()))
 }
@@ -98,10 +72,7 @@ pub async fn post_build_prioritize(
     require_superuser(&user)?;
     let ctx = BuildAccessContext::load_unguarded(&state, build_id).await?;
 
-    scheduler
-        .prioritize_build(ctx.shared_build.id)
-        .await
-        .map_err(|e| WebError::internal(e.to_string()))?;
+    scheduler.prioritize_build(ctx.shared_build.id).await?;
 
     Ok(ok_json("Success".to_string()))
 }

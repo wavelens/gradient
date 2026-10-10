@@ -5,7 +5,6 @@
  */
 
 use super::types::ManifestEntry;
-use super::validation::{decode_blake3_hex, validate_manifest_path};
 use crate::access::has_permission;
 use crate::authorization::MaybeApiKey;
 use crate::error::{WebError, WebResult};
@@ -20,6 +19,7 @@ use gradient_storage::source_nar::{SourceNar, materialise_source_nar};
 use gradient_types::ids::{
     CommitId, EvaluationFlakeInputOverrideId, EvaluationId, TaskId, UploadSessionId,
 };
+use gradient_types::input::{check_flake_input_override, check_manifest_path, decode_blake3_hex};
 use gradient_types::{
     AEvaluationFlakeInputOverride, AUploadSession, BaseResponse, CProjectCache, ECache,
     EEvaluationFlakeInputOverride, EProjectCache, EUploadSession, MCommit, MEvaluation,
@@ -49,42 +49,6 @@ pub struct DispatchRequest {
     pub system: Option<String>,
     #[serde(default)]
     pub input_overrides: Vec<InputOverrideBody>,
-}
-
-const REMOTE_OVERRIDE_SCHEMES: &[&str] = &[
-    "github:",
-    "gitlab:",
-    "sourcehut:",
-    "git+ssh://",
-    "git+https://",
-    "git+http://",
-    "git://",
-    "https://",
-    "http://",
-    "flake:",
-];
-
-/// The CLI is validating too, but the REST API is directly callable. Only remote flake refs and
-/// fetchable `/nix/store` paths are accepted because evaluation is happening on the server.
-pub(super) fn validate_remote_override(input_name: &str, url: &str) -> WebResult<()> {
-    let mut chars = input_name.chars();
-    let name_ok = matches!(chars.next(), Some(c) if c.is_ascii_alphabetic() || c == '_')
-        && chars.all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-');
-    if !name_ok {
-        return Err(WebError::bad_request(
-            "input_name must match ^[A-Za-z_][A-Za-z0-9_-]*$",
-        ));
-    }
-
-    let ref_ok = REMOTE_OVERRIDE_SCHEMES.iter().any(|s| url.starts_with(s))
-        || url.starts_with("path:/nix/store/");
-    if !ref_ok {
-        return Err(WebError::bad_request(format!(
-            "override-input '{input_name}': '{url}' is not a remote flake ref; \
-             use github:/gitlab:/git+ssh://flake:/path:/nix/store/... ."
-        )));
-    }
-    Ok(())
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -122,6 +86,7 @@ pub async fn post_dispatch(
     if session.dispatched_at.is_some() {
         return Err(WebError::conflict("Upload session already dispatched"));
     }
+
     if now() > session.expires_at {
         return Err(WebError::gone("Upload session expired"));
     }
@@ -140,6 +105,7 @@ pub async fn post_dispatch(
 
     let staging = TempDir::new()
         .map_err(|e| WebError::internal(format!("Failed to create staging dir: {}", e)))?;
+
     materialise_staging(
         &state,
         &session.project.into_inner(),
@@ -188,7 +154,7 @@ pub(super) async fn finalize_build_request(
     let _ = system;
 
     for (input_name, url) in &input_overrides {
-        validate_remote_override(input_name, url)?;
+        check_flake_input_override(input_name, url)?;
     }
 
     state
@@ -205,12 +171,9 @@ pub(super) async fn finalize_build_request(
             file_size: nar.file_size as i64,
             nar_size: nar.nar_size as i64,
             nar_hash: nar.nar_hash_sri.clone(),
-            references: Vec::new(),
-            deriver: None,
-            ca: None,
             targets: SignTargets::ProjectCaches(project),
             confirmed: true,
-            built_by_worker: false,
+            ..Default::default()
         })
         .await
         .map_err(|e| WebError::internal(format!("failed to record source NAR: {e}")))?;
@@ -244,8 +207,6 @@ pub(super) struct BuildRequestSource {
     pub input_overrides: Vec<(String, String)>,
 }
 
-/// Build-request evaluations are marked `concurrent`. Independent one-shot jobs must not serialise
-/// behind each other on `uq_evaluation_one_active_per_task` or abort one another.
 pub(super) async fn queue_build_request<C: ConnectionTrait>(
     tx: &C,
     state: &ServerState,
@@ -350,7 +311,7 @@ async fn materialise_staging(
     root: &std::path::Path,
 ) -> WebResult<()> {
     for entry in manifest {
-        validate_manifest_path(&entry.path)?;
+        check_manifest_path(&entry.path)?;
         let hash_bytes = decode_blake3_hex(&entry.hash)?;
         let mut hash_array = [0u8; 32];
         hash_array.copy_from_slice(&hash_bytes);
@@ -370,48 +331,10 @@ async fn materialise_staging(
                 .await
                 .map_err(|e| WebError::internal(format!("Failed to create dir: {}", e)))?;
         }
+
         fs::write(&target, data)
             .await
             .map_err(|e| WebError::internal(format!("Failed to write {}: {}", entry.path, e)))?;
     }
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::validate_remote_override;
-
-    #[test]
-    fn accepts_remote_flake_refs() {
-        for url in [
-            "github:NixOS/nixpkgs",
-            "gitlab:group/task",
-            "sourcehut:~user/task",
-            "git+ssh://git@h/x.git",
-            "git+https://h/x.git",
-            "git+http://h/x.git",
-            "git://h/x.git",
-            "https://h/x.tar.gz",
-            "http://h/x.tar.gz",
-            "flake:nixpkgs",
-            "path:/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-src",
-        ] {
-            assert!(validate_remote_override("nixpkgs", url).is_ok(), "{url}");
-        }
-    }
-
-    #[test]
-    fn rejects_local_and_non_remote_refs() {
-        for url in ["/abs", "./rel", "~/x", "name", "path:/home/u/x"] {
-            assert!(validate_remote_override("nixpkgs", url).is_err(), "{url}");
-        }
-    }
-
-    #[test]
-    fn rejects_invalid_input_name() {
-        assert!(validate_remote_override("1bad", "github:a/b").is_err());
-        assert!(validate_remote_override("has space", "github:a/b").is_err());
-        assert!(validate_remote_override("", "github:a/b").is_err());
-        assert!(validate_remote_override("ok_name-1", "github:a/b").is_ok());
-    }
 }

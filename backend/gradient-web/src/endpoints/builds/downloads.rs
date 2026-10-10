@@ -24,15 +24,6 @@ use std::sync::Arc;
 use super::BuildAccessContext;
 use crate::endpoints::{archive_headers, build_product_headers};
 
-fn store_path_hash(output: &str) -> &str {
-    output
-        .strip_prefix("/nix/store/")
-        .unwrap_or(output)
-        .split('-')
-        .next()
-        .unwrap_or("")
-}
-
 fn relative_in_output(full: &str, output_root: &str) -> String {
     let prefix = format!("{}/", output_root);
     full.strip_prefix(&prefix)
@@ -49,6 +40,7 @@ async fn collect_build_products(
     if output_ids.is_empty() {
         return Vec::new();
     }
+
     let rows = match EBuildProduct::find()
         .filter(CBuildProduct::DerivationOutput.is_in(output_ids))
         .all(&state.web_db)
@@ -60,6 +52,7 @@ async fn collect_build_products(
             return Vec::new();
         }
     };
+
     rows.into_iter()
         .map(|r| BuildProduct {
             file_type: r.file_type,
@@ -94,76 +87,83 @@ async fn find_and_serve_file(
         }
     };
 
-    for product in rows {
-        let product_name = &product.name;
-        let path_basename = std::path::Path::new(&product.path)
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("");
-        if product_name != filename && path_basename != filename {
-            continue;
-        }
-
-        tracing::debug!(%build_id, %filename, product_path = %product.path, "Found matching build_product, fetching from NAR");
-
-        let output = build_outputs
+    for product in rows
+        .into_iter()
+        .filter(|product| is_named(product, filename))
+    {
+        let Some(output) = build_outputs
             .iter()
-            .find(|o| o.id == product.derivation_output);
-        let output_root = match output {
-            Some(o) => get_path_from_derivation_output(o.clone()).full(),
-            None => {
-                tracing::warn!(%build_id, %filename, "build_product references unknown output");
-                continue;
-            }
+            .find(|o| o.id == product.derivation_output)
+        else {
+            tracing::warn!(%build_id, %filename, "build_product references unknown output");
+            continue;
         };
 
-        let hash = store_path_hash(&output_root);
-        let rel = relative_in_output(&product.path, &output_root);
-
-        let (_size, stream) = match state.nar_storage.get_stream(hash).await {
-            Ok(Some(s)) => s,
-            Ok(None) => {
-                tracing::warn!(%build_id, %filename, hash, "NAR not found in nar_storage");
-                continue;
-            }
-            Err(e) => {
-                tracing::error!(%build_id, %filename, hash, error = %e, "Failed to fetch NAR");
-                return Err(WebError::internal("Failed to fetch NAR".to_string()));
-            }
-        };
-
-        match extract_path_from_reader(nar_reader_from_stream(stream), &rel).await {
-            Ok(Extracted::File { contents, .. }) => {
-                tracing::info!(%build_id, %filename, file_size = contents.len(), "Successfully extracted file for download");
-                return Ok(Some(
-                    (
-                        StatusCode::OK,
-                        build_product_headers(filename, &product.subtype),
-                        contents,
-                    )
-                        .into_response(),
-                ));
-            }
-            Ok(Extracted::Directory { tar_zst }) => {
-                tracing::info!(%build_id, %filename, archive_size = tar_zst.len(), "Successfully archived directory for download");
-                let archive_name = format!("{}.tar.zst", filename);
-                return Ok(Some(
-                    (StatusCode::OK, archive_headers(&archive_name), tar_zst).into_response(),
-                ));
-            }
-            Err(ExtractError::NotFound) => {
-                tracing::debug!(%build_id, %filename, %rel, "Path not found in NAR, trying next product");
-                continue;
-            }
-            Err(e) => {
-                tracing::error!(%build_id, %filename, %rel, error = %e, "Failed to extract path from NAR");
-                return Err(WebError::internal(
-                    "Failed to extract path from NAR".to_string(),
-                ));
-            }
+        let response = product_response(state, build_id, &product, output, filename).await?;
+        if response.is_some() {
+            return Ok(response);
         }
     }
+
     Ok(None)
+}
+
+fn is_named(product: &MBuildProduct, filename: &str) -> bool {
+    let path_basename = std::path::Path::new(&product.path)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("");
+
+    product.name == filename || path_basename == filename
+}
+
+async fn product_response(
+    state: &Arc<ServerState>,
+    build_id: BuildJobId,
+    product: &MBuildProduct,
+    output: &MDerivationOutput,
+    filename: &str,
+) -> WebResult<Option<Response>> {
+    tracing::debug!(%build_id, %filename, product_path = %product.path, "Found matching build_product, fetching from NAR");
+
+    let hash = output.hash.as_str();
+    let output_root = get_path_from_derivation_output(output.clone()).full();
+    let rel = relative_in_output(&product.path, &output_root);
+
+    let stream = match state.nar_storage.get_stream(hash).await {
+        Ok(Some((_size, stream))) => stream,
+        Ok(None) => {
+            tracing::warn!(%build_id, %filename, hash, "NAR not found in nar_storage");
+            return Ok(None);
+        }
+        Err(e) => {
+            tracing::error!(%build_id, %filename, hash, error = %e, "Failed to fetch NAR");
+            return Err(WebError::internal("Failed to fetch NAR"));
+        }
+    };
+
+    match extract_path_from_reader(nar_reader_from_stream(stream), &rel).await {
+        Ok(Extracted::File { contents, .. }) => {
+            tracing::info!(%build_id, %filename, file_size = contents.len(), "Successfully extracted file for download");
+            let headers = build_product_headers(filename, &product.subtype);
+
+            Ok(Some((StatusCode::OK, headers, contents).into_response()))
+        }
+        Ok(Extracted::Directory { tar_zst }) => {
+            tracing::info!(%build_id, %filename, archive_size = tar_zst.len(), "Successfully archived directory for download");
+            let headers = archive_headers(&format!("{}.tar.zst", filename));
+
+            Ok(Some((StatusCode::OK, headers, tar_zst).into_response()))
+        }
+        Err(ExtractError::NotFound) => {
+            tracing::debug!(%build_id, %filename, %rel, "Path not found in NAR, trying next product");
+            Ok(None)
+        }
+        Err(e) => {
+            tracing::error!(%build_id, %filename, %rel, error = %e, "Failed to extract path from NAR");
+            Err(WebError::internal("Failed to extract path from NAR"))
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -216,8 +216,6 @@ pub async fn get_build_download_token(
     Ok(ok_json(token))
 }
 
-/// A download token is standing in for the caller. It was issued to someone
-/// [`BuildAccessContext::load`] admitted for a build of the same derivation.
 async fn load_with_download_token(
     state: &Arc<ServerState>,
     build_id: BuildJobId,
@@ -265,24 +263,6 @@ pub async fn get_build_download(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn store_path_hash_extracts_hash() {
-        assert_eq!(
-            store_path_hash("/nix/store/abc123def456-hello-2.12"),
-            "abc123def456"
-        );
-    }
-
-    #[test]
-    fn store_path_hash_without_prefix() {
-        assert_eq!(store_path_hash("abc123-name"), "abc123");
-    }
-
-    #[test]
-    fn store_path_hash_empty_on_malformed() {
-        assert_eq!(store_path_hash(""), "");
-    }
 
     #[test]
     fn relative_in_output_strips_prefix() {

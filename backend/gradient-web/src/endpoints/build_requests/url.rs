@@ -6,7 +6,6 @@
 
 use super::dispatch::{
     BuildRequestSource, DispatchResponse, InputOverrideBody, queue_build_request,
-    validate_remote_override,
 };
 use crate::access::{Caller, ProjectAccess, load_project};
 use crate::authorization::MaybeApiKey;
@@ -17,7 +16,9 @@ use axum::extract::State;
 use axum::{Extension, Json};
 use gradient_core::ServerState;
 use gradient_sources::resolve_remote_ref;
-use gradient_types::input::{hex_to_vec, repository_url_to_nix, vec_to_hex};
+use gradient_types::input::{
+    check_flake_input_override, hex_to_vec, repository_url_to_nix, vec_to_hex,
+};
 use gradient_types::{BaseResponse, MUser};
 use sea_orm::TransactionTrait;
 use serde::Deserialize;
@@ -74,7 +75,7 @@ pub async fn post_url(
         .map(|o| (o.input_name, o.url))
         .collect();
     for (input_name, override_url) in &input_overrides {
-        validate_remote_override(input_name, override_url)?;
+        check_flake_input_override(input_name, override_url)?;
     }
 
     let (commit_hash, label) = match body.rev.as_deref() {

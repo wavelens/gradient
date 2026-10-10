@@ -95,16 +95,8 @@ pub async fn get_artefacts(
         }
     }
 
-    let mut derivations: HashMap<DerivationId, MDerivation> = HashMap::new();
-    for chunk in drv_ids.chunks(IS_IN_CHUNK) {
-        for row in EDerivation::find()
-            .filter(CDerivation::Id.is_in(chunk.to_vec()))
-            .all(&state.web_db)
-            .await?
-        {
-            derivations.insert(row.id, row);
-        }
-    }
+    let derivations =
+        gradient_db::graph::reachability::derivations_by_id(&state.web_db, &drv_ids).await?;
 
     let mut outputs_by_drv: HashMap<DerivationId, Vec<MDerivationOutput>> = HashMap::new();
     if !drv_ids.is_empty() {

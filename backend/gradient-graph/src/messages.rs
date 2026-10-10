@@ -50,14 +50,15 @@ pub struct RecordReport {
     pub to_probe: Vec<DerivationId>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub enum SignTargets {
     ProjectCaches(ProjectId),
     Cache(CacheId),
+    #[default]
     None,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct NarCommit {
     pub store_path: String,
     pub file_hash: String,
