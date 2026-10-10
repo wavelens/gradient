@@ -10,11 +10,12 @@ use anyhow::Result;
 use async_trait::async_trait;
 use gradient_wire::auth::verify_dialer_tokens;
 use gradient_wire::messages::GradientCapabilities;
+use gradient_wire::session::frame::HANDSHAKE_TIMEOUT;
 use gradient_wire::session::handshake::{HandshakeResult, as_dialed, as_peer};
 use gradient_wire::traits::{CapabilitiesProvider, DialerVerifier, PeerIdentity};
 use tracing::info;
 
-use super::ProtoConnection;
+use super::{ProtoConnection, Unresponsive};
 
 pub fn resolve_tokens_for_challenge(
     peer_tokens: &[(String, String)],
@@ -81,7 +82,7 @@ pub async fn perform_handshake(
         peer_tokens,
     };
     let capabilities = StaticCapabilities(capabilities);
-    let result = as_peer(conn.socket_mut(), &identity, &capabilities).await?;
+    let result = answered_in_time(as_peer(conn.socket_mut(), &identity, &capabilities)).await?;
     info!(
         version = result.version,
         authorized = result.authorized_peers.len(),
@@ -92,6 +93,14 @@ pub async fn perform_handshake(
         tracing::warn!(peer_id = %fp.peer_id, reason = %fp.reason, "peer auth failed");
     }
     Ok(result)
+}
+
+async fn answered_in_time(
+    handshake: impl Future<Output = Result<HandshakeResult>>,
+) -> Result<HandshakeResult> {
+    tokio::time::timeout(HANDSHAKE_TIMEOUT, handshake)
+        .await
+        .map_err(|_| Unresponsive)?
 }
 
 struct AcceptedServers(Option<Arc<Vec<(String, String)>>>);
@@ -122,7 +131,13 @@ pub async fn perform_dialed_handshake(
     };
     let capabilities = StaticCapabilities(capabilities);
     let verifier = AcceptedServers(accepted_server_tokens.map(Arc::new));
-    let result = as_dialed(conn.socket_mut(), &identity, &capabilities, &verifier).await?;
+    let result = answered_in_time(as_dialed(
+        conn.socket_mut(),
+        &identity,
+        &capabilities,
+        &verifier,
+    ))
+    .await?;
     info!(
         version = result.version,
         authorized = result.authorized_peers.len(),
@@ -212,6 +227,26 @@ mod tests {
         assert!(result.negotiated.build);
 
         server_task.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_server_silent_after_the_version_agreement_fails_the_handshake() {
+        let server = MockProtoServer::bind().await;
+        let (_silent, conn) = tokio::join!(
+            server.accept(),
+            crate::connection::ProtoConnection::open(server.url())
+        );
+        let mut conn = conn.unwrap();
+        tokio::time::pause();
+
+        let error = perform_handshake(&mut conn, "wid".to_owned(), vec![], no_caps())
+            .await
+            .unwrap_err();
+
+        assert!(
+            error.downcast_ref::<Unresponsive>().is_some(),
+            "unexpected error: {error:#}"
+        );
     }
 
     #[tokio::test]

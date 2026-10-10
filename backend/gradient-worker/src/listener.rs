@@ -59,6 +59,7 @@ async fn accept_tuned(
 ) -> std::io::Result<(tokio::net::TcpStream, std::net::SocketAddr)> {
     let (stream, addr) = listener.accept().await?;
     gradient_util::net::disable_nagle(&stream);
+    gradient_util::net::limit_unacknowledged_data(&stream);
     Ok((stream, addr))
 }
 

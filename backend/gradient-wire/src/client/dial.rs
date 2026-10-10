@@ -51,6 +51,8 @@ async fn connect(request: http::Request<()>, url: &str) -> Result<ProtoSocket> {
         .await
         .with_context(|| format!("dial WebSocket {url}"))?;
 
+    gradient_util::net::limit_unacknowledged_data(ws.get_ref().get_ref());
+
     Ok(ProtoSocket::tungstenite(ws))
 }
 

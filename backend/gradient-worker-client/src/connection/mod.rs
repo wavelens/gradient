@@ -16,6 +16,8 @@ use tracing::instrument;
 
 const SEND_TIMEOUT: Duration = Duration::from_secs(30);
 
+const OPEN_TIMEOUT: Duration = Duration::from_secs(10);
+
 pub struct ProtoConnection {
     socket: ProtoSocket,
 }
@@ -23,6 +25,13 @@ pub struct ProtoConnection {
 impl ProtoConnection {
     #[instrument(skip_all, fields(%url))]
     pub async fn open(url: &str) -> Result<Self> {
+        tokio::time::timeout(OPEN_TIMEOUT, Self::connect_and_agree(url))
+            .await
+            .map_err(|_| Unresponsive)
+            .with_context(|| format!("failed to connect to {url}"))?
+    }
+
+    async fn connect_and_agree(url: &str) -> Result<Self> {
         let mut socket = gradient_wire::client::dial(url)
             .await
             .with_context(|| format!("failed to connect to {url}"))?;
@@ -137,6 +146,22 @@ impl ProtoReader {
 mod tests {
     use super::*;
     use gradient_wire::testing::MockProtoServer;
+
+    #[tokio::test(start_paused = true)]
+    async fn a_server_that_never_answers_fails_the_open() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("ws://{}", listener.local_addr().unwrap());
+
+        let error = ProtoConnection::open(&url)
+            .await
+            .err()
+            .expect("an unanswered upgrade must fail the open");
+
+        assert!(
+            error.downcast_ref::<Unresponsive>().is_some(),
+            "unexpected error: {error:#}"
+        );
+    }
 
     #[tokio::test]
     async fn closing_the_writer_drops_the_socket_while_a_background_clone_lives() {
