@@ -36,6 +36,7 @@ describe('cacheAccessResolver', () => {
     priority: 10,
     local_priority: null,
     max_storage_gb: 0,
+    pull_through: true,
     public: false,
     managed: false,
     can_edit: true,

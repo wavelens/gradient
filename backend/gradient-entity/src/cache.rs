@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::ids::{CacheId, UserId};
 
-#[derive(Clone, Default, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
+#[derive(Clone, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
 #[sea_orm(table_name = "cache")]
 pub struct Model {
     #[sea_orm(primary_key)]
@@ -32,6 +32,29 @@ pub struct Model {
     pub managed: bool,
     #[sea_orm(default_value = "0")]
     pub max_storage_gb: i32,
+    pub pull_through: bool,
+}
+
+impl Default for Model {
+    fn default() -> Self {
+        Self {
+            id: Default::default(),
+            name: Default::default(),
+            display_name: Default::default(),
+            description: Default::default(),
+            active: false,
+            priority: 0,
+            local_priority: None,
+            public_key: Default::default(),
+            private_key: Default::default(),
+            public: false,
+            created_by: Default::default(),
+            created_at: Default::default(),
+            managed: false,
+            max_storage_gb: 0,
+            pull_through: true,
+        }
+    }
 }
 
 impl std::fmt::Debug for Model {
@@ -51,6 +74,7 @@ impl std::fmt::Debug for Model {
             .field("created_at", &self.created_at)
             .field("managed", &self.managed)
             .field("max_storage_gb", &self.max_storage_gb)
+            .field("pull_through", &self.pull_through)
             .finish()
     }
 }

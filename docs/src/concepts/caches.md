@@ -39,6 +39,8 @@ Declared caches in [`services.gradient.state`](../reference/state.md#cachesname)
 
 Caches deliver paths from their upstream caches as if the cache held them. A client asking for a missing path will receive the upstream copy through the cache. The cache will re-sign that copy with its own key. Clients configure one URL and one key, wherever a path came from.
 
+**Pull-Through** under **Settings** on the cache page can turn pull-through off. Caches without pull-through only deliver the paths they hold. Builds still [substitute](#substitution) from the upstream caches.
+
 ## Substitution
 
 Gradient will decide per derivation whether a build is needed at all, before building anything.

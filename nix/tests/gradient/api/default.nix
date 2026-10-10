@@ -110,6 +110,7 @@ in {
                 priority = 20;
                 local_priority = 5;
                 max_storage_gb = 5;
+                pull_through = false;
                 created_by = "stateadmin";
                 members = [ { user = "statemember"; role = "View"; } ];
                 roles = [ { name = "cachereaders"; permissions = [ "viewCache" ]; } ];

@@ -163,6 +163,8 @@ pub struct StateCache {
     pub local_priority: Option<i32>,
     #[serde(default)]
     pub max_storage_gb: i32,
+    #[serde(default = "default_true")]
+    pub pull_through: bool,
     pub signing_key_file: String,
     #[serde(default)]
     pub projects: Vec<String>,

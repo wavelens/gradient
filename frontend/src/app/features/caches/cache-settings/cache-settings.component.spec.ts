@@ -22,6 +22,7 @@ function cacheFor(access: AccessState) {
     active: true,
     priority: 50,
     max_storage_gb: 0,
+    pull_through: true,
     public: false,
     managed: access.managed,
     can_edit: access.canEdit,

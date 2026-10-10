@@ -818,6 +818,7 @@ mod tests {
             created_at: now(),
             managed: false,
             max_storage_gb: 0,
+            pull_through: true,
         }
     }
 

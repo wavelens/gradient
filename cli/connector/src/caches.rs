@@ -34,6 +34,7 @@ pub struct PatchCacheRequest {
     pub description: Option<String>,
     pub priority: Option<i32>,
     pub max_storage_gb: Option<i32>,
+    pub pull_through: Option<bool>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

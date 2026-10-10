@@ -15,8 +15,9 @@ use axum::http::{HeaderMap, HeaderValue, header};
 use axum::response::{IntoResponse, Response};
 use gradient_core::ServerState;
 use gradient_core::upstream_source::UpstreamSource;
-use gradient_db::caches::upstream::active_upstream_caches;
-use gradient_types::ids::{CacheId, CacheUpstreamId};
+use gradient_db::caches::upstream::pull_through_upstream_caches;
+use gradient_types::MCache;
+use gradient_types::ids::CacheUpstreamId;
 use gradient_util::nix_hash::{normalize_nar_hash, strip_hash_algo};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -52,7 +53,7 @@ pub async fn debuginfo(
         ));
     }
 
-    let upstream_caches = upstream_caches_for(&state, ctx.cache.id).await;
+    let upstream_caches = upstream_caches_for(&state, &ctx.cache).await;
     match fetch_from_upstream_caches(&upstream_caches, &build_id).await {
         Some(doc) => Ok(redirect_response(doc, "MISS")),
         None => Err(WebError::not_found("DebugInfo")),
@@ -70,8 +71,8 @@ fn redirect_response(doc: DebugInfoRedirect, cache_status: &'static str) -> Resp
     response
 }
 
-async fn upstream_caches_for(state: &Arc<ServerState>, cache: CacheId) -> Vec<UpstreamSource> {
-    active_upstream_caches(&state.web_db, cache)
+async fn upstream_caches_for(state: &Arc<ServerState>, cache: &MCache) -> Vec<UpstreamSource> {
+    pull_through_upstream_caches(&state.web_db, cache)
         .await
         .unwrap_or_default()
         .into_iter()
