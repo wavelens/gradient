@@ -77,6 +77,19 @@ pub async fn copy_largest_evaluation(db: &DatabaseConnection) -> Result<Option<U
         .with_context(|| format!("statement failed:\n{sql}"))?;
     }
 
+    // A plain VACUUM can mark the copied pages all-visible for the index-only scans without
+    // touching the statistics.
+    db.execute_unprepared(&format!(
+        "VACUUM {}",
+        COPIES
+            .iter()
+            .map(|copy| copy.table)
+            .collect::<Vec<_>>()
+            .join(", ")
+    ))
+    .await
+    .context("VACUUM of the copied evaluation")?;
+
     println!("unanalyzed: evaluation {copy_id} copies {largest}");
     Ok(Some(copy_id))
 }
