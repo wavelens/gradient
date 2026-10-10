@@ -6,7 +6,7 @@
 
 use crate::access::{CacheAccess, Caller, effective_cache_mask, load_cache};
 use crate::audit::{RequestInfo, record as audit_record};
-use crate::authorization::{MaybeApiKey, generate_api_key, hash_api_key};
+use crate::authorization::{MaybeApiKey, generate_api_key, hash_api_key, session_claims};
 use crate::error::{WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json, paginate};
 use crate::permissions::{
@@ -669,7 +669,7 @@ pub async fn get_sessions(
     headers: HeaderMap,
     Extension(user): Extension<MUser>,
 ) -> WebResult<Json<BaseResponse<Vec<SessionInfo>>>> {
-    let current_session_id = current_session_id_from_headers(&state, &headers);
+    let current_session_id = session_claims(&state, &headers).map(|claims| claims.jti);
 
     let sessions = ESession::find()
         .filter(CSession::UserId.eq(user.id))
@@ -755,23 +755,6 @@ pub async fn get_audit_log(
     });
 
     Ok(ok_json(listing))
-}
-
-fn current_session_id_from_headers(
-    state: &Arc<ServerState>,
-    headers: &HeaderMap,
-) -> Option<SessionId> {
-    let token = crate::authorization::extract_bearer_or_cookie(headers)?;
-    if token.starts_with("GRAD") {
-        return None;
-    }
-    let data = jsonwebtoken::decode::<crate::authorization::Cliams>(
-        &token,
-        &jsonwebtoken::DecodingKey::from_secret(state.jwt_secret.expose().as_bytes()),
-        &jsonwebtoken::Validation::default(),
-    )
-    .ok()?;
-    Some(data.claims.jti)
 }
 
 pub async fn get_settings(

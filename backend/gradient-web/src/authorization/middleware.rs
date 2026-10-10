@@ -7,6 +7,8 @@
 use anyhow::{Context, Result};
 use axum::body::Body;
 use axum::extract::{ConnectInfo, Request, State};
+use axum::http::HeaderMap;
+use axum::http::header::AUTHORIZATION;
 use axum::middleware::Next;
 use axum::response::Response;
 
@@ -16,8 +18,8 @@ use sea_orm::{ActiveModelTrait, ActiveValue::Set, EntityTrait};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::Arc;
 
-use super::api_key::MaybeApiKey;
-use super::jwt::{decode_jwt, extract_bearer_or_cookie, token_from_cookie};
+use super::api_key::{DecodedRequest, MaybeApiKey};
+use super::jwt::{bearer_token, decode_jwt, extract_bearer_or_cookie, session_cookie_token};
 use crate::audit::{RequestInfo, record as audit_record};
 use crate::client_ip::{ClientIp, resolve_client_ip};
 use crate::error::{ErrorCode, WebError, WebResult};
@@ -28,14 +30,53 @@ use gradient_types::events::audit::Action;
 #[derive(Clone)]
 pub struct MaybeUser(pub Option<MUser>);
 
-async fn audit_deny(
+#[derive(Clone, Copy, Debug, thiserror::Error)]
+enum Denial {
+    #[error("Invalid Authorization header")]
+    MalformedAuthorizationHeader,
+    #[error("Authorization header not found")]
+    NoCredentials,
+    #[error("Unable to decode token")]
+    UndecodableToken,
+    #[error("API key not allowed from this source IP")]
+    SourceIpNotAllowed,
+    #[error("User not found")]
+    UnknownUser,
+    #[error("account is deactivated")]
+    DeactivatedAccount,
+}
+
+impl From<Denial> for WebError {
+    fn from(denial: Denial) -> Self {
+        let message = denial.to_string();
+        match denial {
+            Denial::UndecodableToken | Denial::UnknownUser => Self::unauthorized(message),
+            Denial::SourceIpNotAllowed => {
+                Self::forbidden_with(ErrorCode::FORBIDDEN_SOURCE_IP, message)
+            }
+            Denial::MalformedAuthorizationHeader
+            | Denial::NoCredentials
+            | Denial::DeactivatedAccount => Self::forbidden(message),
+        }
+    }
+}
+
+fn presented_token(headers: &HeaderMap) -> Result<&str, Denial> {
+    if headers.contains_key(AUTHORIZATION) {
+        bearer_token(headers).ok_or(Denial::MalformedAuthorizationHeader)
+    } else {
+        session_cookie_token(headers).ok_or(Denial::NoCredentials)
+    }
+}
+
+async fn deny(
     state: &Arc<ServerState>,
     user_id: Option<UserId>,
     info: RequestInfo,
     method: String,
     path: String,
-    reason: &'static str,
-) {
+    denial: Denial,
+) -> WebError {
     audit_record(
         state,
         user_id,
@@ -43,12 +84,14 @@ async fn audit_deny(
         EventOwner::default(),
         &info,
         Some(serde_json::json!({
-            "reason": reason,
+            "reason": denial.to_string(),
             "method": method,
             "path": path,
         })),
     )
     .await;
+
+    denial.into()
 }
 
 pub async fn authorize(
@@ -61,113 +104,40 @@ pub async fn authorize(
         .get::<ConnectInfo<SocketAddr>>()
         .map(|c| c.0.ip())
         .unwrap_or_else(|| IpAddr::V4(Ipv4Addr::UNSPECIFIED));
+
     let info =
         RequestInfo::from_request(req.headers(), peer, &state.config.network.trusted_proxies);
+
     let method = req.method().as_str().to_string();
     let path = req.uri().path().to_string();
 
-    let auth_header = req
-        .headers()
-        .get(axum::http::header::AUTHORIZATION)
-        .cloned();
-
-    let token_str: String = if let Some(header) = auth_header {
-        let val = match header.to_str() {
-            Ok(v) => v.to_string(),
-            Err(_) => {
-                audit_deny(
-                    &state,
-                    None,
-                    info,
-                    method,
-                    path,
-                    "Authorization header empty",
-                )
-                .await;
-                return Err(WebError::forbidden("Authorization header empty"));
-            }
-        };
-        let mut parts = val.split_whitespace();
-        let (bearer, token) = (parts.next(), parts.next());
-        let Some(token) = token.filter(|_| bearer == Some("Bearer")) else {
-            audit_deny(
-                &state,
-                None,
-                info,
-                method,
-                path,
-                "Invalid Authorization header",
-            )
-            .await;
-            return Err(WebError::forbidden("Invalid Authorization header"));
-        };
-        token.to_string()
-    } else if let Some(t) = token_from_cookie(&req) {
-        t
-    } else {
-        audit_deny(
-            &state,
-            None,
-            info,
-            method,
-            path,
-            "Authorization header not found",
-        )
-        .await;
-        return Err(WebError::forbidden("Authorization header not found"));
+    let presented = presented_token(req.headers()).map(str::to_owned);
+    let token_str = match presented {
+        Ok(token) => token,
+        Err(denial) => return Err(deny(&state, None, info, method, path, denial).await),
     };
 
-    let decoded = match decode_jwt(state.clone(), token_str).await {
-        Ok(t) => t,
-        Err(_) => {
-            audit_deny(&state, None, info, method, path, "Unable to decode token").await;
-            return Err(WebError::unauthorized("Unable to decode token"));
-        }
+    let Ok(decoded) = decode_jwt(state.clone(), token_str).await else {
+        return Err(deny(&state, None, info, method, path, Denial::UndecodableToken).await);
     };
 
     let user_id = decoded.user_id();
     let client_ip = resolve_client_ip(req.headers(), peer, &state.config.network.trusted_proxies);
-    let api_key_extension = match decoded.api_key_context() {
-        Some(ctx) => {
-            if !ip_allowed(client_ip, &ctx.allowed_ips) {
-                audit_deny(
-                    &state,
-                    Some(user_id),
-                    info,
-                    method,
-                    path,
-                    "API key source IP not allowed",
-                )
-                .await;
-                return Err(WebError::forbidden_with(
-                    ErrorCode::FORBIDDEN_SOURCE_IP,
-                    "API key not allowed from this source IP",
-                ));
-            }
-            MaybeApiKey::from_key(ctx.clone())
-        }
-        None => MaybeApiKey::none(),
-    };
+    let api_key_context = decoded.api_key_context();
+    if api_key_context.is_some_and(|context| !ip_allowed(client_ip, &context.allowed_ips)) {
+        let denial = Denial::SourceIpNotAllowed;
+        return Err(deny(&state, Some(user_id), info, method, path, denial).await);
+    }
 
-    let current_user = match EUser::find_by_id(user_id).one(&state.web_db).await? {
-        Some(u) => u,
-        None => {
-            audit_deny(&state, Some(user_id), info, method, path, "User not found").await;
-            return Err(WebError::unauthorized("User not found"));
-        }
+    let api_key_extension = presented_api_key(&decoded);
+    let Some(current_user) = EUser::find_by_id(user_id).one(&state.web_db).await? else {
+        let denial = Denial::UnknownUser;
+        return Err(deny(&state, Some(user_id), info, method, path, denial).await);
     };
 
     if !current_user.active {
-        audit_deny(
-            &state,
-            Some(user_id),
-            info,
-            method,
-            path,
-            "Account deactivated",
-        )
-        .await;
-        return Err(WebError::forbidden("account is deactivated"));
+        let denial = Denial::DeactivatedAccount;
+        return Err(deny(&state, Some(user_id), info, method, path, denial).await);
     }
 
     req.extensions_mut().insert(current_user);
@@ -176,39 +146,52 @@ pub async fn authorize(
     Ok(next.run(req).await)
 }
 
+fn presented_api_key(decoded: &DecodedRequest) -> MaybeApiKey {
+    decoded
+        .api_key_context()
+        .cloned()
+        .map_or_else(MaybeApiKey::none, MaybeApiKey::from_key)
+}
+
+async fn optional_caller(
+    state: &Arc<ServerState>,
+    headers: &HeaderMap,
+    client_ip: IpAddr,
+) -> Option<(Option<MUser>, MaybeApiKey)> {
+    let token = extract_bearer_or_cookie(headers)?.to_owned();
+    let decoded = decode_jwt(State(Arc::clone(state)), token).await.ok()?;
+    let allowed_from_here = decoded
+        .api_key_context()
+        .is_none_or(|context| ip_allowed(client_ip, &context.allowed_ips));
+
+    if !allowed_from_here {
+        return None;
+    }
+
+    let user = EUser::find_by_id(decoded.user_id())
+        .one(&state.web_db)
+        .await
+        .ok()
+        .flatten();
+
+    Some((user, presented_api_key(&decoded)))
+}
+
 pub async fn authorize_optional(
     state: State<Arc<ServerState>>,
     mut req: Request,
     next: Next,
 ) -> Response<Body> {
-    let mut maybe_user: Option<MUser> = None;
-    let mut maybe_api_key = MaybeApiKey::none();
-
     let peer = req
         .extensions()
         .get::<ConnectInfo<SocketAddr>>()
         .map(|c| c.0.ip())
         .unwrap_or_else(|| IpAddr::V4(Ipv4Addr::UNSPECIFIED));
-    let client_ip = resolve_client_ip(req.headers(), peer, &state.config.network.trusted_proxies);
 
-    if let Some(token_str) = extract_bearer_or_cookie(req.headers())
-        && let Ok(decoded) = decode_jwt(State(Arc::clone(&state)), token_str).await
-    {
-        let ip_ok = match decoded.api_key_context() {
-            Some(ctx) => ip_allowed(client_ip, &ctx.allowed_ips),
-            None => true,
-        };
-        if ip_ok {
-            if let Some(ctx) = decoded.api_key_context() {
-                maybe_api_key = MaybeApiKey::from_key(ctx.clone());
-            }
-            maybe_user = EUser::find_by_id(decoded.user_id())
-                .one(&state.web_db)
-                .await
-                .ok()
-                .flatten();
-        }
-    }
+    let client_ip = resolve_client_ip(req.headers(), peer, &state.config.network.trusted_proxies);
+    let (maybe_user, maybe_api_key) = optional_caller(&state, req.headers(), client_ip)
+        .await
+        .unwrap_or((None, MaybeApiKey::none()));
 
     req.extensions_mut().insert(MaybeUser(maybe_user));
     req.extensions_mut().insert(maybe_api_key);

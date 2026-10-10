@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use super::jwt::{sign_claims, verify_claims};
 use anyhow::{Context, Result, bail};
 use axum::extract::State;
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
@@ -11,10 +12,7 @@ use chrono::{Duration, Utc};
 use gradient_core::ServerState;
 use gradient_types::input::load_secret;
 use gradient_types::*;
-use jsonwebtoken::{
-    Algorithm, DecodingKey, EncodingKey, Header, Validation, decode, decode_header, encode,
-    jwk::JwkSet,
-};
+use jsonwebtoken::{DecodingKey, Validation, decode, decode_header, jwk::JwkSet};
 use rand::RngExt as _;
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter,
@@ -56,8 +54,6 @@ struct IdTokenClaims {
     groups: Vec<String>,
 }
 
-/// A provisioned placeholder is claimable by the first matching OIDC login. It must have no local
-/// password and no bound OIDC identity yet.
 fn is_claimable(password: &Option<String>, oidc_subject: &Option<String>) -> bool {
     password.is_none() && oidc_subject.is_none()
 }
@@ -81,6 +77,7 @@ async fn get_oidc_metadata(
         )
     };
 
+    // string errors
     let metadata = http_client
         .get(url)
         .send()
@@ -142,12 +139,7 @@ pub async fn oidc_login_create(state: State<Arc<ServerState>>) -> Result<OidcAut
         nonce: nonce.clone(),
         pkce_verifier,
     };
-    let cookie_value = encode(
-        &Header::default(),
-        &claims,
-        &EncodingKey::from_secret(state.jwt_secret.expose().as_bytes()),
-    )
-    .context("Failed to sign OIDC CSRF cookie")?;
+    let cookie_value = sign_claims(&state, &claims).context("Failed to sign OIDC CSRF cookie")?;
 
     let params = vec![
         ("response_type", "code"),
@@ -181,15 +173,10 @@ pub async fn oidc_login_verify(
         .clone()
         .context("OIDC is not enabled or not fully configured")?;
 
-    let csrf_data = decode::<CsrfClaims>(
-        &csrf_cookie,
-        &DecodingKey::from_secret(state.jwt_secret.expose().as_bytes()),
-        &Validation::new(Algorithm::HS256),
-    )
-    .context("Invalid or expired OIDC CSRF cookie")?;
+    let csrf: CsrfClaims =
+        verify_claims(&state, &csrf_cookie).context("Invalid or expired OIDC CSRF cookie")?;
 
-    if csrf_data
-        .claims
+    if csrf
         .state
         .as_bytes()
         .ct_eq(state_query.as_bytes())
@@ -199,8 +186,8 @@ pub async fn oidc_login_verify(
         bail!("OIDC state mismatch");
     }
 
-    let expected_nonce = csrf_data.claims.nonce;
-    let pkce_verifier = csrf_data.claims.pkce_verifier;
+    let expected_nonce = csrf.nonce;
+    let pkce_verifier = csrf.pkce_verifier;
 
     let metadata = get_oidc_metadata(&state.http, &oidc.discovery_url).await?;
 
@@ -327,16 +314,19 @@ async fn create_or_update_user(
 
         let mut auser: AUser = user.into();
         auser.last_login_at = Set(gradient_types::now());
+
         if let Some(ref new_email) = claims.email
             && email_changed
         {
             auser.email = Set(new_email.clone());
         }
+
         if let Some(ref new_name) = claims.name
             && name_changed
         {
             auser.name = Set(new_name.clone());
         }
+
         let user = auser
             .update(&tx)
             .await
@@ -379,12 +369,15 @@ async fn create_or_update_user(
         auser.oidc_issuer = Set(Some(claims.iss));
         auser.oidc_subject = Set(Some(claims.sub));
         auser.last_login_at = Set(gradient_types::now());
+
         if let Some(ref new_email) = claims.email {
             auser.email = Set(new_email.clone());
         }
+
         if let Some(ref new_name) = claims.name {
             auser.name = Set(new_name.clone());
         }
+
         let user = auser
             .update(&tx)
             .await
@@ -467,16 +460,6 @@ async fn create_or_update_user(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn random_url_safe_is_unique_and_url_safe() {
-        let a = random_url_safe(32);
-        let b = random_url_safe(32);
-        assert_ne!(a, b);
-        for c in a.chars() {
-            assert!(c.is_ascii_alphanumeric() || c == '-' || c == '_');
-        }
-    }
 
     #[test]
     fn claimable_only_when_passwordless_and_unbound() {
