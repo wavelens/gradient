@@ -322,7 +322,11 @@ pub(super) async fn stranded_build_pass(scheduler: Arc<Scheduler>) -> anyhow::Re
     scheduler
         .state
         .graph
-        .transition(Transition::OrphanedBuilds { shared_builds })
+        .transition(Transition::OrphanedBuilds {
+            shared_builds,
+            cause: gradient_graph::OrphanCause::WorkerLost,
+            observed_peak_ram_mb: Default::default(),
+        })
         .await?;
     scheduler.kick_assigner();
     Ok(())

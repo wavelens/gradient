@@ -42,13 +42,14 @@ pub struct Registered {
 
 pub type WorkerCapabilities = gradient_pool::WorkerProfile;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct WorkerMetrics {
     pub cpu_usage_pct: f32,
     pub ram_free_mb: u64,
     pub disk_speed_mbps: Option<f32>,
     pub upload_speed_mbps: Option<f32>,
     pub download_speed_mbps: Option<f32>,
+    pub build_peak_ram_mb: Option<Vec<(String, u64)>>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -325,6 +326,7 @@ pub struct SchedulerCore {
     policy: Arc<dyn ScoringPolicy>,
     idle: crate::cluster::IdleSlots,
     reservation: Option<crate::cluster::Reservation>,
+    unmeasured_build_ram_mb: u64,
 }
 
 impl SchedulerCore {
@@ -347,6 +349,42 @@ impl SchedulerCore {
             self.tracker.mark_aborting(job_id, now);
         }
         running
+    }
+
+    fn occupy(
+        &mut self,
+        worker: &str,
+        job_id: &str,
+        kind: JobKind,
+        ram_need: gradient_pool::score::RamNeed,
+    ) {
+        let reserved_ram_mb = ram_need.reserved_mb(self.unmeasured_build_ram_mb);
+        self.pool.assign_job(worker, job_id, kind, reserved_ram_mb);
+    }
+
+    /// A build lost with its worker keeps the peak RAM the worker last reported for it. The
+    /// next attempt reserves at least that much.
+    fn unregister(&mut self, worker: &str) -> crate::jobs::Disconnected {
+        let observed_peak_ram_mb = self.pool.observed_build_ram(worker);
+        let orphaned = self.pool.unregister(worker);
+        self.idle.forget_worker(worker);
+        if self
+            .reservation
+            .as_ref()
+            .is_some_and(|r| r.seats_worker(worker))
+        {
+            self.reservation = None;
+        }
+        self.tracker.raise_predicted_ram(&observed_peak_ram_mb);
+        let gone = self.tracker.worker_disconnected(worker);
+        let total = orphaned.len() + gone.requeued.len() + gone.cluster_members.len();
+        if total > 0 {
+            info!(%worker, orphaned_jobs = total, "worker disconnected; jobs re-queued");
+        }
+        crate::jobs::Disconnected {
+            observed_peak_ram_mb,
+            ..gone
+        }
     }
 
     fn with_live_transfers(&self, instance: &InstanceContext) -> InstanceContext {
@@ -404,6 +442,7 @@ impl SchedulerCore {
         }
         let policy = Arc::clone(&self.policy);
         let instance = self.with_live_transfers(instance);
+        self.unmeasured_build_ram_mb = instance.unmeasured_build_ram_mb();
         match self.tracker.take_best_of_kind(
             worker,
             authorized.as_ref(),
@@ -414,8 +453,12 @@ impl SchedulerCore {
         ) {
             Some(assignment) => {
                 self.idle.clear(worker, slot);
-                self.pool
-                    .assign_job(worker, assignment.job_id(), assignment.pending.job_kind());
+                self.occupy(
+                    worker,
+                    assignment.job_id(),
+                    assignment.pending.job_kind(),
+                    assignment.ram_need,
+                );
                 AssignOutcome::Assigned(assignment)
             }
             None => self.idle(worker, slot, caps.as_ref()),
@@ -472,6 +515,7 @@ impl SchedulerCore {
 
         let policy = Arc::clone(&self.policy);
         let instance = self.with_live_transfers(instance);
+        self.unmeasured_build_ram_mb = instance.unmeasured_build_ram_mb();
         let seats: Vec<CommittedSeat> = placement
             .seats
             .iter()
@@ -507,7 +551,7 @@ impl SchedulerCore {
             .collect();
         self.tracker.activate_members(attempt, active);
         for s in &seats {
-            self.pool.assign_job(&s.worker, &s.key, s.job.job_kind());
+            self.occupy(&s.worker, &s.key, s.job.job_kind(), s.job.ram_need(false));
         }
 
         Some(crate::cluster::Committing { cluster, seats })
@@ -608,6 +652,7 @@ impl Actor for CoreActor {
             policy: args.policy,
             idle: Default::default(),
             reservation: None,
+            unmeasured_build_ram_mb: 0,
         })
     }
 
@@ -626,10 +671,11 @@ impl Actor for CoreActor {
                     reg.session,
                 );
                 for reattached in reg.active {
-                    core.pool.assign_job(
+                    core.occupy(
                         &reg.worker,
                         &reattached.job_id,
                         reattached.job.job_kind(),
+                        reattached.job.ram_need(false),
                     );
                     core.tracker.restore_active(&reg.worker, reattached);
                 }
@@ -637,21 +683,7 @@ impl Actor for CoreActor {
                 let _ = reply.send(Registered { last_seen });
             }
             SchedulerMsg::Unregister { worker, reply } => {
-                let orphaned = core.pool.unregister(&worker);
-                core.idle.forget_worker(&worker);
-                if core
-                    .reservation
-                    .as_ref()
-                    .is_some_and(|r| r.seats_worker(&worker))
-                {
-                    core.reservation = None;
-                }
-                let gone = core.tracker.worker_disconnected(&worker);
-                let total = orphaned.len() + gone.requeued.len() + gone.cluster_members.len();
-                if total > 0 {
-                    info!(%worker, orphaned_jobs = total, "worker disconnected; jobs re-queued");
-                }
-                let _ = reply.send(gone);
+                let _ = reply.send(core.unregister(&worker));
             }
             SchedulerMsg::IsConnected { worker, reply } => {
                 let _ = reply.send(core.pool.is_connected(&worker));
@@ -716,11 +748,14 @@ impl Actor for CoreActor {
                     metrics.upload_speed_mbps,
                     metrics.download_speed_mbps,
                 );
+                core.pool
+                    .observe_build_ram(&worker, metrics.build_peak_ram_mb);
                 let _ = reply.send(());
             }
             SchedulerMsg::MarkDraining { worker, reply } => {
                 core.pool.mark_draining(&worker);
                 core.idle.forget_worker(&worker);
+                core.tracker.forget_waiting_build(&worker);
                 let _ = reply.send(());
             }
             SchedulerMsg::EnterStage {
@@ -1012,7 +1047,156 @@ impl Actor for CoreActor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::scheduler_tests::{eval_job, eval_worker_caps, port};
+    use crate::scheduler_tests::{build_job, eval_job, eval_worker_caps, port};
+
+    fn pending_heavy_build(core: &mut SchedulerCore, predicted_peak_ram_mb: u64) -> String {
+        pending_build(core, predicted_peak_ram_mb, |_| {})
+    }
+
+    fn pending_build(
+        core: &mut SchedulerCore,
+        predicted_peak_ram_mb: u64,
+        adjust: impl FnOnce(&mut crate::jobs::PendingBuildJob),
+    ) -> String {
+        let shared_build = DerivationBuildId::now_v7();
+        let mut job = build_job(EvaluationId::now_v7(), ProjectId::now_v7(), shared_build);
+        job.history.predicted_peak_ram_mb = Some(predicted_peak_ram_mb);
+        job.rescore_count = gradient_pool::score::weights::RESCORE_MAX_ROUNDS;
+        adjust(&mut job);
+        let job_id = crate::jobs::build_job_key(shared_build);
+        core.tracker
+            .add_pending(job_id.clone(), PendingJob::Build(job));
+        job_id
+    }
+
+    fn core_with_a_128_gb_worker() -> SchedulerCore {
+        let mut core = SchedulerCore {
+            pool: WorkerPool::new(),
+            tracker: JobTracker::new(),
+            offers: 0,
+            policy: gradient_pool::score::policy_by_name("resource-aware"),
+            idle: Default::default(),
+            reservation: None,
+            unmeasured_build_ram_mb: 0,
+        };
+        let caps = GradientCapabilities {
+            build: true,
+            ..GradientCapabilities::default()
+        };
+        core.pool
+            .register("w1".into(), caps, HashSet::new(), port().0);
+        core.pool.update_capabilities(
+            "w1",
+            gradient_pool::WorkerProfile {
+                architectures: vec!["x86_64-linux".into()],
+                max_concurrent_builds: 32,
+                ram_total_mb: 128_000,
+                ..Default::default()
+            },
+        );
+        core.pool
+            .update_metrics("w1", 0.0, 118_000, None, None, None);
+        core
+    }
+
+    fn assigned_build(core: &mut SchedulerCore, worker: &str) -> Option<String> {
+        match core.assign(worker, &JobKind::Build, &InstanceContext::default()) {
+            AssignOutcome::Assigned(a) => Some(a.job_id().to_owned()),
+            _ => None,
+        }
+    }
+
+    #[test]
+    fn a_burst_of_heavy_builds_stops_at_the_ram_of_the_worker() {
+        let mut core = core_with_a_128_gb_worker();
+        for _ in 0..3 {
+            pending_heavy_build(&mut core, 50_000);
+        }
+
+        let first = assigned_build(&mut core, "w1").expect("an idle worker takes a build");
+        assert!(assigned_build(&mut core, "w1").is_some());
+        assert!(
+            assigned_build(&mut core, "w1").is_none(),
+            "a third build would overcommit the worker before its free RAM shows any load"
+        );
+
+        core.pool.release_job("w1", &first);
+        assert!(assigned_build(&mut core, "w1").is_some());
+    }
+
+    #[test]
+    fn a_held_heavy_build_keeps_its_ram_free_of_later_small_builds() {
+        let mut core = core_with_a_128_gb_worker();
+        pending_heavy_build(&mut core, 50_000);
+        pending_heavy_build(&mut core, 50_000);
+        let running = assigned_build(&mut core, "w1").expect("an idle worker takes a build");
+        assert!(assigned_build(&mut core, "w1").is_some());
+
+        let heavy = pending_build(&mut core, 60_000, |job| job.prioritized = true);
+        let small = pending_heavy_build(&mut core, 10_000);
+        assert_eq!(assigned_build(&mut core, "w1"), Some(small));
+
+        pending_heavy_build(&mut core, 10_000);
+        assert!(
+            assigned_build(&mut core, "w1").is_none(),
+            "a small build fitting the unreserved RAM must leave the RAM of the held build free"
+        );
+
+        core.pool.release_job("w1", &running);
+        assert_eq!(assigned_build(&mut core, "w1"), Some(heavy));
+    }
+
+    #[test]
+    fn a_briefly_held_build_leaves_the_ram_to_small_builds() {
+        let mut core = core_with_a_128_gb_worker();
+        pending_heavy_build(&mut core, 50_000);
+        pending_heavy_build(&mut core, 50_000);
+        assert!(assigned_build(&mut core, "w1").is_some());
+        assert!(assigned_build(&mut core, "w1").is_some());
+
+        pending_heavy_build(&mut core, 60_000);
+        for _ in 0..2 {
+            let small = pending_heavy_build(&mut core, 10_000);
+            assert_eq!(assigned_build(&mut core, "w1"), Some(small));
+        }
+    }
+
+    #[test]
+    fn a_build_held_past_the_wait_keeps_its_ram_free() {
+        let mut core = core_with_a_128_gb_worker();
+        pending_heavy_build(&mut core, 50_000);
+        pending_heavy_build(&mut core, 50_000);
+        assert!(assigned_build(&mut core, "w1").is_some());
+        assert!(assigned_build(&mut core, "w1").is_some());
+
+        let wait = gradient_pool::score::weights::HELD_BUILD_RESERVES_RAM_AFTER_SECS;
+        pending_build(&mut core, 60_000, |job| {
+            job.ready_at -= chrono::Duration::seconds(wait);
+        });
+        let small = pending_heavy_build(&mut core, 10_000);
+        assert_eq!(assigned_build(&mut core, "w1"), Some(small));
+
+        pending_heavy_build(&mut core, 10_000);
+        assert!(assigned_build(&mut core, "w1").is_none());
+    }
+
+    #[test]
+    fn a_build_lost_with_its_worker_is_requeued_with_its_observed_peak() {
+        let mut core = core_with_a_128_gb_worker();
+        let build = pending_heavy_build(&mut core, 2_000);
+        assert_eq!(assigned_build(&mut core, "w1"), Some(build.clone()));
+        core.pool
+            .observe_build_ram("w1", Some(vec![(build.clone(), 70_000)]));
+
+        let gone = core.unregister("w1");
+
+        assert_eq!(gone.observed_peak_ram_mb.get(&build), Some(&70_000));
+        let requeued = core.tracker.pending_job(&build).expect("requeued");
+        assert_eq!(
+            requeued.ram_need(false),
+            gradient_pool::score::RamNeed::Predicted(70_000)
+        );
+    }
 
     #[test]
     fn a_job_that_left_the_pending_set_leaves_every_sent_set() {
@@ -1023,6 +1207,7 @@ mod tests {
             policy: gradient_pool::score::policy_by_name("simple"),
             idle: Default::default(),
             reservation: None,
+            unmeasured_build_ram_mb: 0,
         };
         core.pool
             .register("w1".into(), eval_worker_caps(), HashSet::new(), port().0);

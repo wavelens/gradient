@@ -11,18 +11,20 @@ use std::fmt;
 
 use anyhow::{Context, Result, bail};
 use gradient_derivation::DrvOutputSpec;
-use gradient_util::nar::single_file_nar;
 use gradient_util::nix_hash::nix32_encode;
 use gradient_wire::messages::{BuildSpec, QueryMode};
-use sha2::{Digest, Sha256};
+use std::sync::Arc;
 
 use super::substitute::RawNar;
 use crate::proto::job::JobUpdater;
+use crate::proto::nar_daemon_import::{FetchedNar, FlatFileNar, digest_of};
 use crate::proto::prefetch::{MissingInputs, download_one_presigned};
-use crate::proto::progress::{Progress, ProgressSink, Tally, read_body};
+use crate::proto::progress::{Progress, ProgressSink, Tally, stage_body};
 use gradient_worker_client::compression::{
     decompress, extract_single_file_from_nar, resolve_compression,
 };
+use gradient_worker_client::nar::NarReader;
+use gradient_worker_client::nar_recv::NarPayload;
 
 #[derive(Debug)]
 pub(crate) struct FixedOutputMismatch(pub String);
@@ -100,8 +102,9 @@ pub(crate) trait DownloadIo {
     async fn get(
         &mut self,
         url: &str,
+        output_path: &str,
         progress: &mut Progress<impl ProgressSink>,
-    ) -> Result<Option<Vec<u8>>>;
+    ) -> Result<Option<NarPayload>>;
 }
 
 pub(crate) async fn download_output(
@@ -121,22 +124,24 @@ async fn download_with(
 ) -> Result<(String, RawNar)> {
     let spec = fetch_spec(drv, &task.drv_path)?;
     let body = io
-        .get(&spec.url, progress)
+        .get(&spec.url, &spec.output_path, progress)
         .await?
         .ok_or_else(|| anyhow::Error::new(UnsupportedFetch(format!("{} is gone", spec.url))))?;
-    let (nar, flat) = if spec.unpack {
+    let (nar, flat): (Arc<dyn NarReader>, Option<Arc<FlatFileNar>>) = if spec.unpack {
         (
-            decompress(&body, resolve_compression(&body, Some(&spec.url)))?,
+            Arc::new(FetchedNar::new(body, Some(spec.url.clone()))),
             None,
         )
     } else {
-        (single_file_nar(&body, spec.executable), Some(body))
+        let flat = Arc::new(FlatFileNar::new(body, spec.executable).await);
+        (flat.clone(), Some(flat))
     };
-    let (hashed, recursive, expected) = match &spec.hash {
-        FixedHash::Flat(d) => (flat.as_deref().unwrap_or(&nar), false, d),
-        FixedHash::Recursive(d) => (nar.as_slice(), true, d),
+    let packed = digest_of(Arc::clone(&nar)).await?;
+    let (digest, recursive, expected) = match (&spec.hash, &flat) {
+        (FixedHash::Flat(d), Some(flat)) => (flat.file_digest().await?.sha256, false, d),
+        (FixedHash::Flat(d), None) => (packed.sha256, false, d),
+        (FixedHash::Recursive(d), _) => (packed.sha256, true, d),
     };
-    let digest = Sha256::digest(hashed);
     if digest.as_slice() != expected.as_slice() {
         return Err(anyhow::Error::new(FixedOutputMismatch(
             spec.output_path.clone(),
@@ -152,6 +157,8 @@ async fn download_with(
         spec.output_path,
         RawNar {
             nar,
+            nar_size: packed.size,
+            nar_hash: packed.nix32(),
             references: Vec::new(),
             deriver: Some(spec.drv_base),
             ca: Some(ca),
@@ -187,7 +194,7 @@ impl DownloadIo for JobUpdaterIo<'_> {
                 .into_iter()
                 .next()
             {
-                Some((_, payload)) => Some(payload.read_bytes().await?.into_owned()),
+                Some((_, payload)) => Some(payload.into_bytes().await?),
                 None => None,
             }
         }
@@ -202,8 +209,9 @@ impl DownloadIo for JobUpdaterIo<'_> {
     async fn get(
         &mut self,
         url: &str,
+        output_path: &str,
         progress: &mut Progress<impl ProgressSink>,
-    ) -> Result<Option<Vec<u8>>> {
+    ) -> Result<Option<NarPayload>> {
         let response = gradient_worker_client::http::download_client()
             .get(url)
             .send()
@@ -214,16 +222,22 @@ impl DownloadIo for JobUpdaterIo<'_> {
         let response = response.error_for_status()?;
         let size = response.content_length();
         progress.set_total(size, 1);
-        let body = read_body(response, size, progress).await?;
+        let mut sink = self
+            .0
+            .nar_recv
+            .stage_download(&self.0.job_id, output_path)
+            .await?;
+        stage_body(response, &mut sink, progress).await?;
         progress.transfer_done();
         progress.finish().await;
-        Ok(Some(body))
+        Ok(Some(sink.finish().await?))
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gradient_util::nar::single_file_nar;
     use gradient_wire::messages::BuildSpecKind;
     use std::collections::{BTreeMap, HashMap};
 
@@ -280,10 +294,17 @@ mod tests {
         async fn get(
             &mut self,
             url: &str,
+            _: &str,
             _: &mut Progress<impl ProgressSink>,
-        ) -> Result<Option<Vec<u8>>> {
-            Ok(self.bodies.get(url).cloned())
+        ) -> Result<Option<NarPayload>> {
+            Ok(self.bodies.get(url).cloned().map(NarPayload::from))
         }
+    }
+
+    fn streamed(raw: &RawNar) -> Vec<u8> {
+        let mut nar = Vec::new();
+        std::io::Read::read_to_end(&mut raw.nar.open().unwrap(), &mut nar).unwrap();
+        nar
     }
 
     fn body(url: &str, bytes: &[u8]) -> Fake {
@@ -402,7 +423,8 @@ mod tests {
             .unwrap();
 
         assert_eq!(path, OUT);
-        assert_eq!(raw.nar, single_file_nar(b"hi\n", false));
+        assert_eq!(streamed(&raw), single_file_nar(b"hi\n", false));
+        assert_eq!(raw.nar_size, single_file_nar(b"hi\n", false).len() as u64);
         assert_eq!(
             raw.deriver.as_deref(),
             Some("dddddddddddddddddddddddddddddddd-hello.txt.drv")
@@ -441,7 +463,7 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(raw.nar, nar);
+        assert_eq!(streamed(&raw), nar);
         assert!(raw.ca.as_deref().unwrap().starts_with("fixed:r:sha256:"));
     }
 }

@@ -337,6 +337,34 @@ in {
           and {option}`nix.package` is defaulting to its package. Wall-clock time is always recorded.
         '';
       };
+
+      cgroup = lib.mkOption {
+        type = lib.types.nullOr lib.types.str;
+        default = if cfg.build.metrics then "/sys/fs/cgroup/system.slice/nix-daemon.service" else null;
+        defaultText = lib.literalExpression ''
+          if config.services.gradient.worker.build.metrics
+          then "/sys/fs/cgroup/system.slice/nix-daemon.service"
+          else null
+        '';
+        description = ''
+          Cgroup directory of {file}`nix-daemon.service`, the parent of the build cgroups. The worker
+          is reading the peak memory of each running build from it and sending the values with its
+          heartbeat. The scheduler is reserving the larger of the predicted and the reported peak.
+          The build cgroups need {option}`services.gradient.worker.build.metrics` and Gradient's
+          Nix fork on the daemon. `null` reports nothing.
+        '';
+      };
+
+      oomScoreAdjust = lib.mkOption {
+        type = lib.types.nullOr (lib.types.ints.between (-1000) 1000);
+        default = 500;
+        description = ''
+          Out-of-memory score adjustment for {file}`nix-daemon.service`, inherited by every build
+          process. With a positive value the kernel is killing a build process before the worker
+          on a host out of memory, failing that build alone. Evaluation subprocesses use 600 and
+          go first. `null` leaves the daemon unchanged.
+        '';
+      };
     };
 
     nar = {
@@ -474,8 +502,11 @@ in {
         };
       };
 
-      services.nix-daemon = lib.mkIf cfg.build.metrics {
-        serviceConfig.Delegate = true;
+      services.nix-daemon.serviceConfig = {
+        Delegate = lib.mkIf cfg.build.metrics true;
+        OOMScoreAdjust = lib.mkIf (cfg.build.oomScoreAdjust != null) (
+          lib.mkDefault cfg.build.oomScoreAdjust
+        );
       };
 
       services.gradient-worker = {
@@ -568,6 +599,8 @@ in {
           GRADIENT_WORKER_SYSTEM_CPU_CORE_SCORE = toString cfg.system.cpuCoreScore;
         } // lib.optionalAttrs (cfg.build.maxCores != null) {
           GRADIENT_WORKER_BUILD_MAX_CORES = toString cfg.build.maxCores;
+        } // lib.optionalAttrs (cfg.build.cgroup != null) {
+          GRADIENT_WORKER_BUILD_CGROUP = cfg.build.cgroup;
         } // lib.optionalAttrs (cfg.eval.cache.dir != null) {
           GRADIENT_WORKER_EVAL_CACHE_DIR = cfg.eval.cache.dir;
         } // lib.optionalAttrs (cfg.eval.forkWorkers != null) {

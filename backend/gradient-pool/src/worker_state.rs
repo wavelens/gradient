@@ -37,6 +37,8 @@ impl WorkerMarker for Draining {}
 pub struct AssignedJob {
     pub kind: JobKind,
     pub stage: Option<BuildStage>,
+    pub reserved_ram_mb: u64,
+    pub observed_ram_mb: u64,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -67,6 +69,7 @@ pub struct WorkerShared {
     pub upload_speed_mbps: Option<f32>,
     pub download_speed_mbps: Option<f32>,
     pub assigned_jobs: HashMap<String, AssignedJob>,
+    pub observes_build_ram: bool,
     pub peer_auth: PeerAuth,
     pub sent_candidates: HashSet<String>,
     pub session: Arc<dyn SessionPort>,
@@ -81,6 +84,22 @@ impl WorkerShared {
             .values()
             .filter(|job| job.kind == JobKind::Build)
             .count() as u32
+    }
+
+    pub fn ram_reserved_mb(&self) -> u64 {
+        self.assigned_jobs
+            .values()
+            .map(|job| job.reserved_ram_mb.max(job.observed_ram_mb))
+            .sum()
+    }
+
+    pub fn ram_reserved_unused_mb(&self) -> Option<u64> {
+        self.observes_build_ram.then(|| {
+            self.assigned_jobs
+                .values()
+                .map(|job| job.reserved_ram_mb.saturating_sub(job.observed_ram_mb))
+                .sum()
+        })
     }
 
     pub fn jobs_in(&self, stage: BuildStage) -> u32 {
@@ -168,6 +187,7 @@ impl TypedWorker<Active> {
                 upload_speed_mbps: None,
                 download_speed_mbps: None,
                 assigned_jobs: HashMap::new(),
+                observes_build_ram: false,
                 peer_auth: PeerAuth::from_peers(authorized_peers),
                 sent_candidates: HashSet::new(),
                 session,

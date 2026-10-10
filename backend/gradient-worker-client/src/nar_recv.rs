@@ -6,7 +6,7 @@
 
 use gradient_util::sync::Mutex;
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Weak};
 
 use anyhow::Result;
@@ -27,28 +27,94 @@ struct NarChunk {
     is_final: bool,
 }
 
+pub struct StagedBody(PathBuf);
+
+impl StagedBody {
+    pub fn path(&self) -> &Path {
+        &self.0
+    }
+}
+
+impl Drop for StagedBody {
+    fn drop(&mut self) {
+        let path = std::mem::take(&mut self.0);
+        let remove = move || {
+            if let Err(e) = std::fs::remove_file(&path) {
+                warn!(path = %path.display(), error = %e, "could not remove a staged NAR");
+            }
+        };
+        match tokio::runtime::Handle::try_current() {
+            Ok(runtime) => drop(runtime.spawn_blocking(remove)),
+            Err(_) => remove(),
+        }
+    }
+}
+
+/// Clones share a staged body, and the last clone removes its file. Failed and aborted jobs
+/// leave nothing behind that way.
+#[derive(Clone)]
 pub enum NarPayload {
-    File(PathBuf),
-    Bytes(Vec<u8>),
+    File(Arc<StagedBody>),
+    Bytes(Arc<Vec<u8>>),
+}
+
+impl From<Vec<u8>> for NarPayload {
+    fn from(bytes: Vec<u8>) -> Self {
+        Self::Bytes(Arc::new(bytes))
+    }
+}
+
+impl From<PathBuf> for NarPayload {
+    fn from(staged: PathBuf) -> Self {
+        Self::File(Arc::new(StagedBody(staged)))
+    }
 }
 
 impl std::fmt::Debug for NarPayload {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            NarPayload::File(path) => write!(f, "NarPayload::File({})", path.display()),
+            NarPayload::File(body) => write!(f, "NarPayload::File({})", body.path().display()),
             NarPayload::Bytes(bytes) => write!(f, "NarPayload::Bytes({} bytes)", bytes.len()),
         }
     }
 }
 
+pub(crate) enum WeakNarPayload {
+    File(Weak<StagedBody>),
+    Bytes(Weak<Vec<u8>>),
+}
+
+impl WeakNarPayload {
+    pub(crate) fn upgrade(&self) -> Option<NarPayload> {
+        match self {
+            Self::File(body) => body.upgrade().map(NarPayload::File),
+            Self::Bytes(bytes) => bytes.upgrade().map(NarPayload::Bytes),
+        }
+    }
+}
+
 impl NarPayload {
+    pub(crate) fn downgrade(&self) -> WeakNarPayload {
+        match self {
+            NarPayload::File(body) => WeakNarPayload::File(Arc::downgrade(body)),
+            NarPayload::Bytes(bytes) => WeakNarPayload::Bytes(Arc::downgrade(bytes)),
+        }
+    }
+
+    pub fn reader(&self) -> std::io::Result<Box<dyn std::io::Read + Send + '_>> {
+        match self {
+            NarPayload::Bytes(bytes) => Ok(Box::new(std::io::Cursor::new(bytes.as_slice()))),
+            NarPayload::File(body) => Ok(Box::new(std::fs::File::open(body.path())?)),
+        }
+    }
+
     pub async fn read_bytes(&self) -> Result<std::borrow::Cow<'_, [u8]>> {
         match self {
-            NarPayload::Bytes(bytes) => Ok(std::borrow::Cow::Borrowed(bytes)),
-            NarPayload::File(path) => Ok(std::borrow::Cow::Owned(
-                tokio::fs::read(path)
-                    .await
-                    .map_err(|e| anyhow::anyhow!("read staged NAR {}: {e}", path.display()))?,
+            NarPayload::Bytes(bytes) => Ok(std::borrow::Cow::Borrowed(bytes.as_slice())),
+            NarPayload::File(body) => Ok(std::borrow::Cow::Owned(
+                tokio::fs::read(body.path()).await.map_err(|e| {
+                    anyhow::anyhow!("read staged NAR {}: {e}", body.path().display())
+                })?,
             )),
         }
     }
@@ -56,7 +122,16 @@ impl NarPayload {
     pub async fn byte_len(&self) -> u64 {
         match self {
             NarPayload::Bytes(bytes) => bytes.len() as u64,
-            NarPayload::File(path) => tokio::fs::metadata(path).await.map_or(0, |m| m.len()),
+            NarPayload::File(body) => tokio::fs::metadata(body.path())
+                .await
+                .map_or(0, |m| m.len()),
+        }
+    }
+
+    pub async fn into_bytes(self) -> Result<Vec<u8>> {
+        match self {
+            NarPayload::Bytes(bytes) => Ok(Arc::unwrap_or_clone(bytes)),
+            file => Ok(file.read_bytes().await?.into_owned()),
         }
     }
 }
@@ -90,14 +165,66 @@ impl Sink {
 
     async fn finish(self) -> Result<NarPayload> {
         match self {
-            Sink::Memory(buf) => Ok(NarPayload::Bytes(buf)),
+            Sink::Memory(buf) => Ok(buf.into()),
             Sink::Disk { writer, store, key } => {
                 let staged = writer.finish().await?;
                 match store.detach(&key).await? {
-                    Some(claim) => Ok(NarPayload::File(store.path(&claim))),
-                    None => Ok(NarPayload::File(staged.path)),
+                    Some(claim) => Ok(store.path(&claim).into()),
+                    None => Ok(staged.path.into()),
                 }
             }
+        }
+    }
+
+    async fn discard(self) {
+        if let Sink::Disk { writer, store, key } = self {
+            drop(writer);
+            if let Err(e) = store.discard(&key).await {
+                warn!(%key, error = %e, "could not discard a failed NAR partial");
+            }
+        }
+    }
+}
+
+/// A presigned download takes the same staging as a pushed NAR and ends as the same payload.
+/// An unfinished download has no resume, and its partial goes with the sink.
+pub struct DownloadSink(Option<Sink>);
+
+impl DownloadSink {
+    pub fn memory() -> Self {
+        Self(Some(Sink::Memory(Vec::new())))
+    }
+
+    pub fn len(&self) -> u64 {
+        self.0.as_ref().map_or(0, Sink::len)
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    pub async fn append(&mut self, data: &[u8]) -> Result<()> {
+        let offset = self.len();
+        match self.0.as_mut() {
+            Some(sink) => sink.append(offset, data).await,
+            None => Ok(()),
+        }
+    }
+
+    pub async fn finish(mut self) -> Result<NarPayload> {
+        match self.0.take() {
+            Some(sink) => sink.finish().await,
+            None => Ok(Vec::new().into()),
+        }
+    }
+}
+
+impl Drop for DownloadSink {
+    fn drop(&mut self) {
+        if let Some(sink) = self.0.take()
+            && let Ok(runtime) = tokio::runtime::Handle::try_current()
+        {
+            runtime.spawn(sink.discard());
         }
     }
 }
@@ -137,6 +264,7 @@ pub struct NarReceiver {
     inner: Arc<Mutex<Inner>>,
     partial: Option<PartialStore>,
     stagers: TaskTracker,
+    downloads: crate::shared_download::SharedDownloads,
 }
 
 struct Waiter {
@@ -199,27 +327,22 @@ struct Stager {
 
 impl Stager {
     async fn deliver(&self, key: &Key, result: Result<NarPayload, TransferFailure>) {
-        let undelivered = match self.inner.upgrade() {
-            None => Some(result),
+        match self.inner.upgrade() {
+            None => {}
             Some(inner) => {
                 let mut g = inner.lock();
                 g.streams.remove(key);
                 match g.waiters.remove(key) {
-                    Some(waiter) => waiter.tx.send(result).err().inspect(|_| {
-                        debug!(job_id = %key.0, store_path = %key.1, "NAR waiter went away before delivery");
-                    }),
+                    Some(waiter) => {
+                        if waiter.tx.send(result).is_err() {
+                            debug!(job_id = %key.0, store_path = %key.1, "NAR waiter went away before delivery");
+                        }
+                    }
                     None => {
                         warn!(job_id = %key.0, store_path = %key.1, "NAR delivery with no waiter - discarding");
-                        Some(result)
                     }
                 }
             }
-        };
-
-        if let Some(Ok(NarPayload::File(path))) = undelivered
-            && let Err(e) = tokio::fs::remove_file(&path).await
-        {
-            warn!(path = %path.display(), error = %e, "could not remove an undeliverable staged NAR");
         }
     }
 
@@ -358,6 +481,31 @@ impl NarReceiver {
             return (0, None);
         };
         (store.staged_len(&key).await, store.token(&key).await)
+    }
+
+    pub fn shared_downloads(&self) -> &crate::shared_download::SharedDownloads {
+        &self.downloads
+    }
+
+    pub async fn stage_download(&self, job_id: &str, store_path: &str) -> Result<DownloadSink> {
+        let (Some(store), Some(key)) = (self.partial.as_ref(), partial_key(job_id, store_path))
+        else {
+            return Ok(DownloadSink::memory());
+        };
+        let writer = store.open_writer(&key, "", 0, 0).await?;
+        Ok(DownloadSink(Some(Sink::Disk {
+            writer: Box::new(writer),
+            store: store.clone(),
+            key,
+        })))
+    }
+
+    pub async fn discard_partial(&self, job_id: &str, store_path: &str) {
+        if let (Some(store), Some(key)) = (self.partial.as_ref(), partial_key(job_id, store_path))
+            && let Err(e) = store.discard(&key).await
+        {
+            warn!(%job_id, %store_path, error = %e, "could not discard an unused NAR partial");
+        }
     }
 
     pub fn register(&self, job_id: &str, store_path: &str) -> PendingNar {
@@ -601,8 +749,8 @@ mod tests {
 
     fn bytes(payload: NarPayload) -> Vec<u8> {
         match payload {
-            NarPayload::Bytes(b) => b,
-            NarPayload::File(p) => panic!("memory mode yields bytes, got {}", p.display()),
+            NarPayload::Bytes(b) => Arc::unwrap_or_clone(b),
+            NarPayload::File(p) => panic!("memory mode yields bytes, got {}", p.path().display()),
         }
     }
 
@@ -613,9 +761,68 @@ mod tests {
 
     async fn file_bytes(payload: NarPayload) -> Vec<u8> {
         match payload {
-            NarPayload::File(p) => tokio::fs::read(&p).await.unwrap(),
+            NarPayload::File(p) => tokio::fs::read(p.path()).await.unwrap(),
             NarPayload::Bytes(_) => panic!("disk mode yields a file"),
         }
+    }
+
+    async fn eventually(mut done: impl AsyncFnMut() -> bool, what: &str) {
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while !done().await {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .expect(what);
+    }
+
+    #[tokio::test]
+    async fn a_staged_file_is_removed_with_its_last_clone() {
+        let dir = TempDir::new().unwrap();
+        let staged = dir.path().join("nar");
+        tokio::fs::write(&staged, b"compressed nar").await.unwrap();
+        let payload = NarPayload::from(staged.clone());
+        let of_another_job = payload.clone();
+
+        drop(payload);
+        assert_eq!(
+            of_another_job.into_bytes().await.unwrap(),
+            b"compressed nar"
+        );
+        eventually(async || !staged.exists(), "the last clone removes the file").await;
+    }
+
+    #[tokio::test]
+    async fn a_download_is_staged_like_a_pushed_nar() {
+        let dir = TempDir::new().unwrap();
+        let receiver = NarReceiver::with_partial_store(PartialStore::new(dir.path()).unwrap());
+        let path = format!("/nix/store/{}-hello", "a".repeat(32));
+
+        let mut sink = receiver.stage_download("job", &path).await.unwrap();
+        sink.append(b"compressed ").await.unwrap();
+        sink.append(b"nar").await.unwrap();
+        assert_eq!(sink.len(), 14);
+        assert_eq!(
+            file_bytes(sink.finish().await.unwrap()).await,
+            b"compressed nar"
+        );
+
+        let mut failed = receiver.stage_download("job", &path).await.unwrap();
+        failed.append(b"half").await.unwrap();
+        drop(failed);
+        eventually(
+            async || receiver.resumable("job", &path).await == (0, None),
+            "an unfinished download leaves no partial",
+        )
+        .await;
+
+        let mut memory = NarReceiver::new()
+            .stage_download("job", &path)
+            .await
+            .unwrap();
+        memory.append(b"nar").await.unwrap();
+        let payload = memory.finish().await.unwrap();
+        assert_eq!(payload.into_bytes().await.unwrap(), b"nar");
     }
 
     #[tokio::test]
@@ -624,8 +831,8 @@ mod tests {
         let staged = dir.path().join("nar");
         tokio::fs::write(&staged, b"compressed nar").await.unwrap();
 
-        assert_eq!(NarPayload::File(staged).byte_len().await, 14);
-        assert_eq!(NarPayload::Bytes(vec![0; 3]).byte_len().await, 3);
+        assert_eq!(NarPayload::from(staged).byte_len().await, 14);
+        assert_eq!(NarPayload::from(vec![0; 3]).byte_len().await, 3);
     }
 
     #[tokio::test]
@@ -699,8 +906,8 @@ mod tests {
             panic!("disk mode yields a file");
         };
         assert_ne!(
-            delivered,
-            &store_for_key.path(&format!("j/{}", "a".repeat(32)))
+            delivered.path(),
+            store_for_key.path(&format!("j/{}", "a".repeat(32)))
         );
         assert_eq!(r.resumable("j", &path).await.0, 0);
         assert_eq!(file_bytes(payload).await, b"abcdef");

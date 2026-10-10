@@ -306,6 +306,7 @@ pub async fn build_derivation(
         .await
         .map_err(BuildError::transient)?;
 
+    let running = RUNNING_BUILDS.start(&updater.job_id, &task.drv_path);
     let realize = parsed.realize(
         store,
         task_index,
@@ -317,7 +318,6 @@ pub async fn build_derivation(
         host.build_cores,
     );
 
-    let running = RUNNING_BUILDS.start();
     let started = std::time::Instant::now();
     let realized = match task.timeout_secs.map(std::time::Duration::from_secs) {
         Some(d) => tokio::time::timeout(d, realize).await.unwrap_or_else(|_| {

@@ -263,7 +263,7 @@ fn build_secs(
 fn oom_chance(history: &HistoryPrediction, worker: Option<&WorkerMetricsView>) -> f64 {
     let overshoot = match (
         history.predicted_peak_ram_mb,
-        worker.and_then(|m| m.ram_free_mb),
+        worker.and_then(|m| m.ram_available_mb()),
     ) {
         (Some(peak), Some(free)) if free > 0 && peak > free => {
             ((peak - free) as f64 / free as f64).min(1.0)

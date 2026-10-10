@@ -72,17 +72,32 @@ async fn abandon_dispatched_jobs(state: &Arc<ServerState>, orphaned: &[PendingJo
 
 /// The state machine is letting evaluations reach `Queued` only via `Waiting`. Orphaned evaluations
 /// park to `Waiting`, and the repair pass right after is recovering them to `Queued`.
-pub async fn requeue_orphaned_jobs(state: &Arc<ServerState>, orphaned: &[PendingJob]) {
+pub async fn requeue_orphaned_jobs(
+    state: &Arc<ServerState>,
+    orphaned: &[PendingJob],
+    observed_peak_ram_mb: &std::collections::HashMap<String, u64>,
+) {
     abandon_dispatched_jobs(state, orphaned).await;
 
     let shared_builds: Vec<DerivationBuildId> = orphaned
         .iter()
         .filter_map(|j| j.derivation_build())
         .collect();
+    let observed_peak_ram_mb = shared_builds
+        .iter()
+        .filter_map(|id| {
+            let peak = observed_peak_ram_mb.get(&crate::jobs::build_job_key(*id))?;
+            Some((*id, *peak))
+        })
+        .collect();
     if !shared_builds.is_empty()
         && let Err(e) = state
             .graph
-            .transition(Transition::OrphanedBuilds { shared_builds })
+            .transition(Transition::OrphanedBuilds {
+                shared_builds,
+                cause: gradient_graph::OrphanCause::WorkerLost,
+                observed_peak_ram_mb,
+            })
             .await
     {
         warn!(error = %e, "requeue orphaned builds did not reach the graph writer");
@@ -156,7 +171,11 @@ pub(crate) async fn requeue_cluster_members(state: &Arc<ServerState>, jobs: &[Pe
     if !shared_builds.is_empty()
         && let Err(e) = state
             .graph
-            .transition(Transition::OrphanedBuilds { shared_builds })
+            .transition(Transition::OrphanedBuilds {
+                shared_builds,
+                cause: gradient_graph::OrphanCause::ClusterAttemptEnded,
+                observed_peak_ram_mb: Default::default(),
+            })
             .await
     {
         warn!(error = %e, "requeue of cluster member builds did not reach the graph writer");

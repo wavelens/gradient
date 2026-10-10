@@ -36,6 +36,7 @@ pub const CPU_SATURATED_PCT: f64 = 80.0;
 pub const CPU_SATURATED_PCT_BUILTIN: f64 = 90.0;
 pub const RAM_SATURATED_FREE_FRAC: f64 = 0.10;
 pub const RAM_FIT_HEADROOM: f64 = 1.1;
+pub const HELD_BUILD_RESERVES_RAM_AFTER_SECS: i64 = 60;
 
 pub const FAIR_SHARE_WEIGHT: f64 = 500.0;
 

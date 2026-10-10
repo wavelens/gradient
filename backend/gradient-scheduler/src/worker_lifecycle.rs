@@ -270,7 +270,7 @@ impl Scheduler {
             .call(|reply| SchedulerMsg::Unregister { worker, reply })
             .await
             .unwrap_or_default();
-        build::requeue_orphaned_jobs(&self.state, &gone.requeued).await;
+        build::requeue_orphaned_jobs(&self.state, &gone.requeued, &gone.observed_peak_ram_mb).await;
         for lost in gone.cluster_members {
             let report = crate::cluster::MemberReport::Lost { job: lost.job };
             if let Err(e) = self.on_cluster_member_closed(&lost.key, report).await {

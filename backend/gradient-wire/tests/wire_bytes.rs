@@ -43,6 +43,7 @@ fn worker_metrics_keep_their_baseline_bytes() {
             disk_speed_mbps: Some(-2.0),
             upload_speed_mbps: None,
             download_speed_mbps: None,
+            build_peak_ram_mb: None,
         },
         "050000c03f800101000000c00000",
     );

@@ -43,7 +43,7 @@ Every message on `/proto`, from `backend/gradient-wire/src/messages`. IDs (`job_
 | `ReauthRequest` | Asking for a new `AuthChallenge` | - |
 | `Reject` | Declining a server-dialed session before `InitConnection` (`400`, `401`) | `code`, `reason` |
 | `WorkerCapabilities` | Systems, features, slots, CPU, RAM, core score, zone, endpoint | `architectures`, `system_features`, `max_concurrent_builds`, `zone`, `endpoint`, ... |
-| `WorkerMetrics` | Load heartbeat | `cpu_usage_pct`, `ram_free_mb`, `disk_speed_mbps`, `upload_speed_mbps`, `download_speed_mbps` |
+| `WorkerMetrics` | Load heartbeat | `cpu_usage_pct`, `ram_free_mb`, `disk_speed_mbps`, `upload_speed_mbps`, `download_speed_mbps`, `build_peak_ram_mb` (since 33) |
 | `RequestJobList` | Asking for the full candidate list | - |
 | `RequestJobChunk` | Score deltas | `scores`, `is_final` |
 | `RequestJob` | One free slot of a kind. Repeated every 10 s while idle | `kind` (`Flake` or `Build`) |

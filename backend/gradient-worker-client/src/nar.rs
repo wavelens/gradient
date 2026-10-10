@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use std::io::Write as _;
+use std::io::{Read as _, Write as _};
 
 use anyhow::{Context, Result, bail};
 use bytes::Bytes;
@@ -24,11 +24,15 @@ use gradient_wire::types::{
 };
 
 pub fn sha256_nix32(data: &[u8]) -> String {
-    format!("sha256:{}", nix32_encode(&Sha256::digest(data)))
+    sha256_digest_nix32(&Sha256::digest(data))
+}
+
+pub fn sha256_digest_nix32(digest: &[u8]) -> String {
+    format!("sha256:{}", nix32_encode(digest))
 }
 
 fn finalize_nix32(hasher: Sha256) -> String {
-    format!("sha256:{}", nix32_encode(&hasher.finalize()))
+    sha256_digest_nix32(&hasher.finalize())
 }
 
 fn max_compression_threads() -> u32 {
@@ -86,6 +90,16 @@ fn part_to_send(part: Vec<u8>, produced: u64, resume_from: u64) -> Option<(u64, 
     }
 }
 
+pub trait NarReader: Send + Sync {
+    fn open(&self) -> Result<Box<dyn std::io::Read + Send + '_>>;
+}
+
+impl NarReader for Vec<u8> {
+    fn open(&self) -> Result<Box<dyn std::io::Read + Send + '_>> {
+        Ok(Box::new(std::io::Cursor::new(self.as_slice())))
+    }
+}
+
 pub enum NarSource<'a> {
     Path {
         meta: Option<&'a dyn PathMetaSource>,
@@ -96,6 +110,91 @@ pub enum NarSource<'a> {
         deriver: Option<String>,
         ca: Option<String>,
     },
+    Stream {
+        nar: std::sync::Arc<dyn NarReader>,
+        nar_size: u64,
+        references: Vec<String>,
+        deriver: Option<String>,
+        ca: Option<String>,
+    },
+}
+
+impl NarSource<'_> {
+    pub fn nar_size(&self) -> Option<u64> {
+        match self {
+            NarSource::Path { .. } => None,
+            NarSource::Raw { nar, .. } => Some(nar.len() as u64),
+            NarSource::Stream { nar_size, .. } => Some(*nar_size),
+        }
+    }
+}
+
+const RAW_CHUNK_BYTES: usize = 1 << 20;
+
+enum NarChunks {
+    Path(Box<harmonia_file_nar::NarByteStream>),
+    Reader {
+        chunks: tokio::sync::mpsc::Receiver<Result<Vec<u8>>>,
+        reading: Option<tokio::task::JoinHandle<()>>,
+    },
+}
+
+impl NarChunks {
+    fn of_path(store_path: &str) -> Self {
+        Self::Path(Box::new(harmonia_file_nar::NarByteStream::new(
+            store_path.to_owned().into(),
+        )))
+    }
+
+    fn of_reader(nar: std::sync::Arc<dyn NarReader>) -> Self {
+        let (tx, chunks) = tokio::sync::mpsc::channel(2);
+        let reading = tokio::task::spawn_blocking(move || {
+            let mut reader = match nar.open() {
+                Ok(reader) => reader,
+                Err(e) => {
+                    let _ = tx.blocking_send(Err(e));
+                    return;
+                }
+            };
+            loop {
+                let mut chunk = Vec::with_capacity(RAW_CHUNK_BYTES);
+                let read = (&mut reader)
+                    .take(RAW_CHUNK_BYTES as u64)
+                    .read_to_end(&mut chunk)
+                    .context("read raw NAR");
+                let last = !matches!(read, Ok(n) if n > 0);
+                let sent = match read {
+                    Ok(0) => return,
+                    Ok(_) => tx.blocking_send(Ok(chunk)),
+                    Err(e) => tx.blocking_send(Err(e)),
+                };
+                if last || sent.is_err() {
+                    return;
+                }
+            }
+        });
+        Self::Reader {
+            chunks,
+            reading: Some(reading),
+        }
+    }
+
+    async fn next(&mut self) -> Option<Result<Bytes>> {
+        match self {
+            Self::Path(nar) => nar
+                .next()
+                .await
+                .map(|chunk| chunk.context("NAR stream error")),
+            Self::Reader { chunks, reading } => match chunks.recv().await {
+                Some(chunk) => Some(chunk.map(Bytes::from)),
+                None => reading
+                    .take()?
+                    .await
+                    .err()
+                    .map(|e| Err(anyhow::anyhow!("reading the NAR ended early: {e}"))),
+            },
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -147,10 +246,11 @@ pub async fn upload_nar(
             let mut upload = uploads.start(job_id, object, nar_size).await?;
             while let Some((request_id, target)) = upload.next_grant().await? {
                 events(UploadEvent::Granted);
-                let sent = send_path(
+                let sent = send_nar(
                     uploads,
                     request_id,
                     &store_path,
+                    NarChunks::of_path(&store_path),
                     threads,
                     target,
                     &mut |n| events(UploadEvent::Read(n)),
@@ -169,21 +269,42 @@ pub async fn upload_nar(
             deriver,
             ca,
         } => {
-            let nar_size = nar.len() as u64;
-            let nar = std::sync::Arc::new(nar);
+            let source = NarSource::Stream {
+                nar_size: nar.len() as u64,
+                nar: std::sync::Arc::new(nar),
+                references,
+                deriver,
+                ca,
+            };
+            Box::pin(upload_nar(uploads, job_id, &store_path, source, events)).await
+        }
+        NarSource::Stream {
+            nar,
+            nar_size,
+            references,
+            deriver,
+            ca,
+        } => {
             let path_meta = PathMeta {
                 nar_size: Some(nar_size),
                 references,
                 deriver,
                 ca,
             };
+            let threads = compression_threads(Some(nar_size));
             let mut upload = uploads.start(job_id, object, nar_size).await?;
             while let Some((request_id, target)) = upload.next_grant().await? {
                 events(UploadEvent::Granted);
-                let sent = send_raw(uploads, request_id, &nar, target).await;
-                if sent.is_ok() {
-                    events(UploadEvent::Read(nar_size));
-                }
+                let sent = send_nar(
+                    uploads,
+                    request_id,
+                    &store_path,
+                    NarChunks::of_reader(std::sync::Arc::clone(&nar)),
+                    threads,
+                    target,
+                    &mut |n| events(UploadEvent::Read(n)),
+                )
+                .await;
                 if let Some(uploaded) = settle(&mut upload, sent, &path_meta).await? {
                     return Ok(uploaded);
                 }
@@ -194,24 +315,11 @@ pub async fn upload_nar(
     }
 }
 
-async fn send_raw(
-    uploads: &UploadClient,
-    request_id: u64,
-    nar: &std::sync::Arc<Vec<u8>>,
-    target: GrantTarget,
-) -> Result<(CompressedNarMeta, Option<CompletedMultipart>)> {
-    let nar = std::sync::Arc::clone(nar);
-    let (compressed, meta) = tokio::task::spawn_blocking(move || compress_nar(&nar))
-        .await
-        .context("compress task panicked")??;
-    let multipart = send_compressed(uploads, request_id, compressed, target).await?;
-    Ok((meta, multipart))
-}
-
-async fn send_path(
+async fn send_nar(
     uploads: &UploadClient,
     request_id: u64,
     store_path: &str,
+    nar: NarChunks,
     threads: u32,
     target: GrantTarget,
     nar_read: &mut (dyn FnMut(u64) + Send),
@@ -221,8 +329,8 @@ async fn send_path(
             debug!(store_path, resume_offset, "passthrough NAR upload");
             let mut passthrough =
                 PassthroughStream::new(request_id, uploads.writer(), resume_offset);
-            let meta = pack_path_in_parts(
-                store_path,
+            let meta = pack_in_parts(
+                nar,
                 threads,
                 uploads.chunk_bytes(),
                 &mut passthrough,
@@ -234,7 +342,7 @@ async fn send_path(
         }
         GrantTarget::Put { url } => {
             debug!(store_path, "presigned NAR upload");
-            let (compressed, meta) = pack_compress_path(store_path, threads, nar_read).await?;
+            let (compressed, meta) = pack_compress(nar, threads, nar_read).await?;
             http_put(&url, compressed).await?;
             Ok((meta, None))
         }
@@ -246,40 +354,8 @@ async fn send_path(
             );
             let mut uploader = PartUploader::new(&grant);
             let part_size = uploader.part_size();
-            let meta =
-                pack_path_in_parts(store_path, threads, part_size, &mut uploader, nar_read).await?;
+            let meta = pack_in_parts(nar, threads, part_size, &mut uploader, nar_read).await?;
             Ok((meta, Some(uploader.finish().await?)))
-        }
-        GrantTarget::Skip => bail!("a skipped upload has no transfer"),
-    }
-}
-
-async fn send_compressed(
-    uploads: &UploadClient,
-    request_id: u64,
-    compressed: Vec<u8>,
-    target: GrantTarget,
-) -> Result<Option<CompletedMultipart>> {
-    match target {
-        GrantTarget::Passthrough { resume_offset } => {
-            let mut passthrough =
-                PassthroughStream::new(request_id, uploads.writer(), resume_offset);
-            for part in compressed.chunks(uploads.chunk_bytes()) {
-                passthrough.send_part(part.to_vec()).await?;
-            }
-            passthrough.finish().await?;
-            Ok(None)
-        }
-        GrantTarget::Put { url } => {
-            http_put(&url, compressed).await?;
-            Ok(None)
-        }
-        GrantTarget::Multipart(grant) => {
-            let mut uploader = PartUploader::new(&grant);
-            for part in compressed.chunks(uploader.part_size()) {
-                uploader.send_part(part.to_vec()).await?;
-            }
-            Ok(Some(uploader.finish().await?))
         }
         GrantTarget::Skip => bail!("a skipped upload has no transfer"),
     }
@@ -378,22 +454,21 @@ impl PartSink for PassthroughStream<'_> {
 /// A multithreaded encoder is holding whole jobs back until `finish`, and that tail can grow to
 /// tens of MiB. One passthrough frame over `MAX_PROTO_MESSAGE_SIZE` would close the session and
 /// fail the job.
-async fn pack_path_in_parts(
-    store_path: &str,
+async fn pack_in_parts(
+    mut nar: NarChunks,
     threads: u32,
     part_size: usize,
     sink: &mut impl PartSink,
     nar_read: &mut (dyn FnMut(u64) + Send),
 ) -> Result<CompressedNarMeta> {
-    let mut nar_stream = harmonia_file_nar::NarByteStream::new(store_path.to_owned().into());
     let mut encoder = nar_encoder(Vec::with_capacity(part_size * 2), threads)?;
     let mut file_hasher = Sha256::new();
     let mut nar_hasher = Sha256::new();
     let mut nar_size: u64 = 0;
     let mut file_size: u64 = 0;
 
-    while let Some(chunk_result) = nar_stream.next().await {
-        let chunk = chunk_result.context("NAR stream error")?;
+    while let Some(chunk) = nar.next().await {
+        let chunk = chunk?;
         nar_hasher.update(&chunk);
         nar_size += chunk.len() as u64;
         encoder
@@ -425,18 +500,17 @@ async fn pack_path_in_parts(
     })
 }
 
-async fn pack_compress_path(
-    store_path: &str,
+async fn pack_compress(
+    mut nar: NarChunks,
     threads: u32,
     nar_read: &mut (dyn FnMut(u64) + Send),
 ) -> Result<(Vec<u8>, CompressedNarMeta)> {
-    let mut nar_stream = harmonia_file_nar::NarByteStream::new(store_path.to_owned().into());
     let mut encoder = nar_encoder(Vec::new(), threads)?;
     let mut nar_hasher = Sha256::new();
     let mut nar_size: u64 = 0;
 
-    while let Some(chunk_result) = nar_stream.next().await {
-        let chunk = chunk_result.context("NAR stream error")?;
+    while let Some(chunk) = nar.next().await {
+        let chunk = chunk?;
         nar_hasher.update(&chunk);
         nar_size += chunk.len() as u64;
         encoder

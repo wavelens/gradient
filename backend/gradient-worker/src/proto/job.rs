@@ -281,82 +281,76 @@ impl JobUpdater {
         paths: Vec<String>,
         tally: &Tally,
     ) -> Result<Vec<(String, NarPayload)>> {
-        use futures::future::join_all;
-
-        if paths.is_empty() {
-            return Ok(Vec::new());
-        }
-
-        // Waiters are registered before the request goes on the wire.
-        // A server response racing ahead of the next path's await must still find its waiter.
-        let pendings: Vec<_> = paths
-            .iter()
-            .map(|p| self.nar_recv.register(&self.job_id, p))
-            .collect();
-
-        let mut fresh = Vec::new();
-        for p in &paths {
-            match self.nar_recv.resumable(&self.job_id, p).await {
-                (received, Some(token)) if received > 0 => {
-                    self.writer
-                        .send(ClientMessage::NarRequestResume {
-                            job_id: self.job_id.clone(),
-                            store_path: p.clone(),
-                            received_bytes: received,
-                            stream_token: token,
-                        })
-                        .await?;
-                }
-                _ => fresh.push(p.clone()),
-            }
-        }
-        if !fresh.is_empty() {
-            self.writer
-                .send(ClientMessage::NarRequest {
-                    job_id: self.job_id.clone(),
-                    paths: fresh,
-                })
-                .await?;
-        }
-
-        let waits = pendings.into_iter().map(|pending| {
-            let recv = self.nar_recv.clone();
-            let tally = tally.clone();
-            async move {
-                let path = pending.store_path().to_owned();
-                let received = pending.received();
-                let res = count_delivery(tally, received, recv.await_pending(pending)).await;
-                (path, res)
-            }
+        let transfers = paths.into_iter().map(|path| async move {
+            let nar = self.shared_nar(&path, tally).await;
+            (path, nar)
         });
 
-        let results = join_all(waits).await;
-        let mut out = Vec::with_capacity(results.len());
+        let mut out = Vec::new();
         let mut unavailable = Vec::new();
         let mut first_err: Option<anyhow::Error> = None;
-        for (path, res) in results {
-            match res {
-                Ok(payload) => out.push((path, payload)),
-                Err(e) => {
-                    if e.downcast_ref::<NarUnavailable>().is_some() {
-                        unavailable.push(path);
-                    }
-                    if first_err.is_none() {
-                        first_err = Some(e);
-                    }
-                }
+        for (path, nar) in futures::future::join_all(transfers).await {
+            match nar {
+                Ok(Some(body)) => out.push((path, body)),
+                Ok(None) => unavailable.push(path),
+                Err(e) => first_err = first_err.or(Some(e)),
             }
         }
-        // A path the cache cannot serve is a missing input, not a transport failure.
-        // The server is demoting it and re-queuing its producer.
+        // A path missing from the cache is a missing input, not a transport failure.
         // A transient error would only spend another attempt on a NAR no retry can produce.
         if !unavailable.is_empty() {
             return Err(anyhow::Error::new(MissingInputs(unavailable)));
         }
-        if let Some(e) = first_err {
-            return Err(e);
+        match first_err {
+            Some(e) => Err(e),
+            None => Ok(out),
         }
-        Ok(out)
+    }
+
+    async fn shared_nar(&self, store_path: &str, tally: &Tally) -> Result<Option<NarPayload>> {
+        let mut requested = false;
+        let request = async {
+            requested = true;
+            self.request_nar(store_path, tally.clone()).await
+        };
+        let downloads = self.nar_recv.shared_downloads();
+        let Some(body) = downloads.fetch(store_path, || request).await? else {
+            return Ok(None);
+        };
+
+        if !requested {
+            self.nar_recv
+                .discard_partial(&self.job_id, store_path)
+                .await;
+            tally.count_transfer(body.byte_len().await);
+        }
+        Ok(Some(body))
+    }
+
+    async fn request_nar(&self, store_path: &str, tally: Tally) -> Result<Option<NarPayload>> {
+        let pending = self.nar_recv.register(&self.job_id, store_path);
+        let request = match self.nar_recv.resumable(&self.job_id, store_path).await {
+            (received_bytes, Some(stream_token)) if received_bytes > 0 => {
+                ClientMessage::NarRequestResume {
+                    job_id: self.job_id.clone(),
+                    store_path: store_path.to_owned(),
+                    received_bytes,
+                    stream_token,
+                }
+            }
+            _ => ClientMessage::NarRequest {
+                job_id: self.job_id.clone(),
+                paths: vec![store_path.to_owned()],
+            },
+        };
+        self.writer.send(request).await?;
+
+        let received = pending.received();
+        match count_delivery(tally, received, self.nar_recv.await_pending(pending)).await {
+            Ok(body) => Ok(Some(body)),
+            Err(e) if e.is::<NarUnavailable>() => Ok(None),
+            Err(e) => Err(e),
+        }
     }
 
     pub async fn report_fetch_result(&self, flake_source: Option<String>) -> Result<()> {
@@ -707,6 +701,56 @@ mod tests {
                 }
             }
         })
+    }
+
+    #[tokio::test]
+    async fn jobs_requesting_the_same_path_together_transfer_it_once() {
+        use gradient_wire::messages::ServerMessage;
+        const PATH: &str = "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-shared";
+        let (conn, server_task, job_id) = server_then_client!("job-a", |sc| {
+            let ClientMessage::NarRequest { job_id, paths } = sc.recv().await.unwrap() else {
+                panic!("expected a NarRequest");
+            };
+            assert_eq!(paths, vec![PATH.to_owned()]);
+            sc.send(ServerMessage::NarPush {
+                job_id,
+                store_path: PATH.to_owned(),
+                data: Bytes::from_static(b"nar"),
+                offset: 0,
+                is_final: true,
+            })
+            .await
+            .unwrap();
+            tokio::time::timeout(std::time::Duration::from_millis(200), sc.recv())
+                .await
+                .is_err()
+        });
+
+        let (first, mut reader) = make_updater(job_id, conn);
+        let mut second = first.concurrent();
+        second.job_id = "job-b".to_owned();
+        let nars = first.nar_recv.clone();
+        let pump = tokio::spawn(async move {
+            while let Some(msg) = reader.recv().await {
+                nars.absorb(msg).await;
+            }
+        });
+
+        let tally = Tally::default();
+        let (a, b) = tokio::join!(
+            first.request_nars(vec![PATH.to_owned()], &tally),
+            second.request_nars(vec![PATH.to_owned()], &tally)
+        );
+
+        for fetched in [a, b] {
+            let (_, body) = fetched.unwrap().pop().unwrap();
+            assert_eq!(body.into_bytes().await.unwrap(), b"nar");
+        }
+        assert!(
+            server_task.await.unwrap(),
+            "the second job must take the transfer of the first"
+        );
+        pump.abort();
     }
 
     #[tokio::test]

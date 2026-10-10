@@ -100,6 +100,12 @@ struct Counts {
 }
 
 impl Tally {
+    pub(crate) fn count_transfer(&self, bytes: u64) {
+        let mut transfer = self.transfer();
+        transfer.at(bytes);
+        transfer.done();
+    }
+
     fn transfer(&self) -> TransferBytes {
         TransferBytes {
             tally: self.clone(),
@@ -292,23 +298,28 @@ pub(crate) async fn count_delivery(
     Ok(payload)
 }
 
-/// A size a remote declared is a hint, never a reason to reserve unbounded memory.
-const MAX_PREALLOCATION: u64 = 64 << 20;
+const STAGE_CHUNK_BYTES: usize = 1 << 20;
 
-pub(crate) async fn read_body(
+pub(crate) async fn stage_body(
     mut response: reqwest::Response,
-    size_hint: Option<u64>,
+    sink: &mut gradient_worker_client::nar_recv::DownloadSink,
     progress: &mut Progress<impl ProgressSink>,
-) -> reqwest::Result<Vec<u8>> {
-    let mut body = Vec::with_capacity(size_hint.unwrap_or(0).min(MAX_PREALLOCATION) as usize);
+) -> anyhow::Result<()> {
+    let mut buffered = Vec::with_capacity(STAGE_CHUNK_BYTES);
+    let mut received = 0u64;
     loop {
         tokio::select! {
             chunk = response.chunk() => match chunk? {
                 Some(chunk) => {
-                    body.extend_from_slice(&chunk);
-                    progress.at(body.len() as u64);
+                    received += chunk.len() as u64;
+                    buffered.extend_from_slice(&chunk);
+                    if buffered.len() >= STAGE_CHUNK_BYTES {
+                        sink.append(&buffered).await?;
+                        buffered.clear();
+                    }
+                    progress.at(received);
                 }
-                None => return Ok(body),
+                None => return sink.append(&buffered).await,
             },
             _ = tokio::time::sleep_until(progress.deadline()) => progress.tick().await,
         }
@@ -501,7 +512,7 @@ mod tests {
         assert!(futures::poll!(&mut landing).is_pending());
         assert_eq!((tally.bytes(), tally.paths()), (40, 0));
 
-        deliver.send(Ok(NarPayload::Bytes(vec![0; 50]))).unwrap();
+        deliver.send(Ok(NarPayload::from(vec![0; 50]))).unwrap();
         landing.await.unwrap();
         assert_eq!((tally.bytes(), tally.paths()), (50, 1));
 
@@ -534,7 +545,8 @@ mod tests {
         let mut sent = Recorded::default();
         let mut progress = Progress::new(&mut sent);
 
-        let body = read_body(response, Some(u64::MAX), &mut progress)
+        let mut body = gradient_worker_client::nar_recv::DownloadSink::memory();
+        stage_body(response, &mut body, &mut progress)
             .await
             .unwrap();
         progress.finish().await;

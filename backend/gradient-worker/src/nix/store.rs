@@ -114,7 +114,11 @@ impl LocalNixStore {
         Ok(info.nar_size)
     }
 
-    pub async fn import_nar(&self, info: &ValidPathInfo, nar: &[u8]) -> Result<()> {
+    pub async fn import_nar(
+        &self,
+        info: &ValidPathInfo,
+        nar: impl tokio::io::AsyncBufRead + Send + Unpin,
+    ) -> Result<()> {
         let mut guard = self.acquire().await?;
         guard
             .execute(|client| async move {
@@ -182,7 +186,7 @@ impl WorkerStore for LocalNixStore {
         let info = Self::content_addressed(name, &nar)?;
         let path = info.info.store_dir.display(&info.path).to_string();
         if !self.has_path(&path).await? {
-            self.import_nar(&info, &nar).await?;
+            self.import_nar(&info, nar.as_slice()).await?;
             debug!(%path, bytes = nar.len(), "added NAR to local store");
         }
 

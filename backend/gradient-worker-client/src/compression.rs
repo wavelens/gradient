@@ -64,26 +64,25 @@ pub fn decompress(compressed: &[u8], kind: Compression) -> Result<Vec<u8>> {
     decompress_reader(std::io::Cursor::new(compressed), kind)
 }
 
-pub fn decompress_reader<R: std::io::Read>(reader: R, kind: Compression) -> Result<Vec<u8>> {
-    let mut out = Vec::new();
-    match kind {
-        Compression::None => {
-            let mut reader = reader;
-            reader.read_to_end(&mut out).context("read raw NAR")?;
-        }
+pub fn decoder<'r, R: std::io::Read + Send + 'r>(
+    reader: R,
+    kind: Compression,
+) -> Result<Box<dyn std::io::Read + Send + 'r>> {
+    Ok(match kind {
+        Compression::None => Box::new(reader),
         Compression::Zstd => {
-            let mut decoder = zstd::stream::Decoder::new(reader).context("init zstd decoder")?;
-            decoder.read_to_end(&mut out).context("read zstd stream")?;
+            Box::new(zstd::stream::Decoder::new(reader).context("init zstd decoder")?)
         }
-        Compression::Xz => {
-            let mut decoder = xz2::read::XzDecoder::new(reader);
-            decoder.read_to_end(&mut out).context("read xz stream")?;
-        }
-        Compression::Bzip2 => {
-            let mut decoder = bzip2::read::BzDecoder::new(reader);
-            decoder.read_to_end(&mut out).context("read bzip2 stream")?;
-        }
-    }
+        Compression::Xz => Box::new(xz2::read::XzDecoder::new(reader)),
+        Compression::Bzip2 => Box::new(bzip2::read::BzDecoder::new(reader)),
+    })
+}
+
+pub fn decompress_reader<R: std::io::Read + Send>(reader: R, kind: Compression) -> Result<Vec<u8>> {
+    let mut out = Vec::new();
+    decoder(reader, kind)?
+        .read_to_end(&mut out)
+        .with_context(|| format!("read {kind:?} stream"))?;
     Ok(out)
 }
 

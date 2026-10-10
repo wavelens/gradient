@@ -38,8 +38,20 @@ The saturation check can use live worker load and the predicted peak memory. The
 
 | Rule | Kind | Effect |
 |---|---|---|
-| `ResourceSaturationRule` | Penalty, up to -17200 | Worker above 80% CPU (90% for `builtin` jobs) or below 10% free memory, or a likely out-of-memory build |
+| `ResourceSaturationRule` | Penalty, up to -17200, and veto | Worker above 80% CPU (90% for `builtin` jobs) or below 10% free memory, or a build above the free memory |
 | `FairShareRule` | Penalty, disabled | Would slow projects holding a large share of running work |
+
+- Free memory of a worker is the measured value, less the memory reserved for the jobs already assigned to that worker.
+- Each assigned job can reserve its predicted peak memory until its end.
+- Workers with `worker.build.cgroup` report the peak memory of each running build every 10 seconds. A build above its prediction will reserve the reported peak.
+- Reserved memory no build has used yet will also count against the measured free memory of such a worker.
+- A build lost with its worker will keep its last reported peak as a history sample.
+- A build without history can reserve the mean peak memory of the instance's builds over the last 24 hours.
+- Substitutions, fetches and evaluations reserve nothing.
+- A build above the free memory will get a veto and wait for the memory reserved by the jobs assigned to the worker.
+- A build above the worker's total memory, or short of memory on a worker without reservations, will get the penalty alone.
+- A build held for 60 seconds, or a prioritized build, can keep its memory free on a single worker.
+- Other builds must fit beside that memory. The held build will start on that worker as soon as it fits.
 
 ## Estimated Time
 

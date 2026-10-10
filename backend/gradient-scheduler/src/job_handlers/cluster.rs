@@ -286,6 +286,7 @@ impl Scheduler {
             };
             let assignment = Assignment {
                 job: seat.job.clone().into_job(),
+                ram_need: seat.job.ram_need(false),
                 project_id: seat.job.project_id(),
                 assignment_record: seat.record,
                 pending: seat.job,

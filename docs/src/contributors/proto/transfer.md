@@ -55,6 +55,14 @@ Workers prefetch every input missing from the local store ahead of the build.
 4. A broken stream will resume with `NarRequestResume { received_bytes, stream_token }` from the `<baseDir>/nar-partial` directory.
 5. Workers import the NARs into the Nix store in dependency order.
 
+- Presigned downloads and `NarPush` streams both stage the compressed NAR under `<baseDir>/nar-partial`.
+- Jobs on the same worker share the transfer of a path, presigned or streamed. Later jobs read the same staged file.
+- The staged file will go away with its last job, also after a failed or aborted job.
+- Jobs waiting on a failed transfer will fail with it.
+- A NAR failing the size and hash check will leave the shared transfers. The next job will download it again.
+- Workers decompress each NAR from its staged file as a stream, first for the size and hash check, then into the Nix daemon.
+- Workers skip the import of a path another job imported meanwhile.
+
 | Condition | Delivered As |
 |---|---|
 | S3 store, confirmed NAR above `nar.smallBytes` (1 MiB) | Presigned GET URL |

@@ -98,6 +98,7 @@ impl Scheduler {
             && let Err(e) = gradient_db::scheduling::build_attempt::abort_running_attempts(
                 &self.state.worker_db,
                 &[shared_build],
+                None,
                 "the worker rejected the job",
             )
             .await

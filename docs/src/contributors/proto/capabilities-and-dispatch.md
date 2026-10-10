@@ -37,7 +37,7 @@ Workers with the `build` capability send `WorkerCapabilities` after the handshak
 
 ## Metrics and Liveness
 
-- The `WorkerMetrics` fields (`cpu_usage_pct`, `ram_free_mb`, `disk_speed_mbps`, `upload_speed_mbps`, `download_speed_mbps`) travel with the 10 s heartbeat.
+- The `WorkerMetrics` fields (`cpu_usage_pct`, `ram_free_mb`, `disk_speed_mbps`, `upload_speed_mbps`, `download_speed_mbps`, `build_peak_ram_mb`) travel with the 10 s heartbeat.
 - Workers without metrics get unknown values in scoring.
 - The server will mark a worker as seen on every message.
 - The `worker_liveness_pass` will drop workers silent for `proto.workerHeartbeatTimeoutSecs` (120 s, `0` disabling the check).

@@ -142,6 +142,24 @@ pub(crate) fn history_sample(metrics: Option<BuildMetrics>, end: BuildEnd) -> Op
     })
 }
 
+pub(crate) const MAX_WORKER_LOSSES: i64 = 10;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum OrphanedBuild {
+    Requeue,
+    Exhausted,
+}
+
+/// A build is losing its worker without any fault of its own, so the budget is wider than the
+/// attempt budget. It still ends a build that takes every worker down with it.
+pub(crate) const fn orphaned_build_outcome(losses: i64, budget: i64) -> OrphanedBuild {
+    if losses >= budget {
+        OrphanedBuild::Exhausted
+    } else {
+        OrphanedBuild::Requeue
+    }
+}
+
 pub(crate) fn inputs_unavailable_circuit_open(prior_failures: i64, max_loops: u32) -> bool {
     prior_failures >= max_loops as i64
 }
@@ -458,6 +476,15 @@ mod tests {
             decide_failure_outcome(BuildFailureKind::InputsUnavailable, 2, 3, sub(false, 0)),
             FailureOutcome::Permanent
         );
+    }
+
+    #[test]
+    fn a_build_is_failed_once_it_lost_as_many_workers_in_a_row_as_the_budget() {
+        use super::{OrphanedBuild, orphaned_build_outcome};
+        assert_eq!(orphaned_build_outcome(0, 3), OrphanedBuild::Requeue);
+        assert_eq!(orphaned_build_outcome(2, 3), OrphanedBuild::Requeue);
+        assert_eq!(orphaned_build_outcome(3, 3), OrphanedBuild::Exhausted);
+        assert_eq!(orphaned_build_outcome(40, 3), OrphanedBuild::Exhausted);
     }
 
     #[test]
