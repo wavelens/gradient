@@ -32,7 +32,7 @@ import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { TasksService } from '@core/services/tasks.service';
 import { AccessService, WritableDirective } from '@shared/access';
 import { AccessState, accessFromEntity } from '@core/models/access.model';
-import { BuildProgress, BuildStatus, Evaluation, EvaluationMessage, EvaluationProgress, EvaluationStatus, WaitingReason, TriggerType } from '@core/models';
+import { BuildProgress, Evaluation, EvaluationMessage, EvaluationProgress, EvaluationStatus, WaitingReason, TriggerType } from '@core/models';
 import { AuthService } from '@core/services/auth.service';
 import {
   BadgeComponent,
@@ -50,12 +50,9 @@ import {
   ToastComponent,
 } from '@gradient/ui/ui';
 import { BuildProgressComponent, EvalStatusBadgeComponent, InputFetchListComponent, ThunkProgressComponent } from '@shared/ui';
-import { buildDuration, buildPhaseFinished, commitLabel, evaluationDuration, formatEvaluationDuration, isPendingBuildStatus, isRunningEvaluationStatus, phaseProgress, thunkProgress } from '@shared/evaluation';
+import { buildDuration, buildPhaseFinished, canAbortBuild, canPrioritizeBuild, canRetryBuild, commitLabel, evaluationDuration, formatEvaluationDuration, isRunningEvaluationStatus, phaseProgress, thunkProgress } from '@shared/evaluation';
 import { environment } from '@environments/environment';
 
-const ABORTABLE_BUILD_STATUSES: readonly string[] = ['Created', 'Queued', 'Building'] satisfies BuildStatus[];
-const RETRYABLE_BUILD_STATUSES: readonly string[] = ['FailedPermanent', 'FailedTimeout', 'Aborted', 'DependencyFailed'] satisfies BuildStatus[];
-const REOPENABLE_EVALUATION_STATUSES: readonly EvaluationStatus[] = ['Failed', 'Aborted'];
 
 @Component({
   selector: 'app-evaluation-log',
@@ -1496,21 +1493,18 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   }
 
   canPrioritize(build: BuildItem): boolean {
-    return this.authService.user()?.superuser === true && !build.prioritized && isPendingBuildStatus(build.status);
+    return this.authService.user()?.superuser === true && canPrioritizeBuild(build);
   }
 
   canAbort(build: BuildItem): boolean {
     const evaluation = this.evaluation();
-    return this.triggerAccess().canEdit && !!evaluation && isRunningEvaluationStatus(evaluation.status)
-      && ABORTABLE_BUILD_STATUSES.includes(build.status);
+    return this.triggerAccess().canEdit && !!evaluation && canAbortBuild(evaluation.status, build.status);
   }
 
   canRetry(build: BuildItem): boolean {
     const evaluation = this.evaluation();
     return this.triggerAccess().canEdit && !!evaluation
-      && (isRunningEvaluationStatus(evaluation.status)
-        || (REOPENABLE_EVALUATION_STATUSES.includes(evaluation.status) && !evaluation.next))
-      && RETRYABLE_BUILD_STATUSES.includes(build.status);
+      && canRetryBuild({ status: evaluation.status, replaced: !!evaluation.next }, build.status);
   }
 
   prioritizeBuild(build: BuildItem): void {
