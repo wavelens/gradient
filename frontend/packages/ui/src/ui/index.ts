@@ -19,6 +19,7 @@ export * from './field-row/field-row.component';
 export * from './form-field/form-field.component';
 export * from './icon/icon.component';
 export * from './in-view/in-view.directive';
+export * from './on-screen/on-screen';
 export * from './input/input.directive';
 export * from './loading-spinner/loading-spinner.component';
 export * from './logo/logo.component';

@@ -4,10 +4,11 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, OnInit, computed, inject, linkedSignal, signal, ChangeDetectionStrategy } from '@angular/core';
+import { Component, OnInit, computed, inject, signal, ChangeDetectionStrategy } from '@angular/core';
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
+import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import {
   CachesService,
   NarListResponse,
@@ -27,7 +28,7 @@ import {
   TableComponent,
 } from '@gradient/ui/ui';
 import { WritableDirective } from '@shared/access';
-import { injectCacheAccess, injectCacheAccessData } from '@core/resolvers/inject-access';
+import { injectCacheAccess } from '@core/resolvers/inject-access';
 import { CacheNarsDetailDrawerComponent } from './cache-nars-detail-drawer.component';
 import { formatBytes, formatCount, relativeTime } from '@shared/text';
 import { narSearchText, parseNarSearch } from './nar-search';
@@ -63,14 +64,14 @@ export class CacheNarsComponent implements OnInit {
   private route = inject(ActivatedRoute);
   private router = inject(Router);
   private cachesService = inject(CachesService);
+  private crumbs = inject(BreadcrumbsService);
 
   access = injectCacheAccess();
 
   rowDisabled = computed(() => this.deletingHash() !== null);
 
-  private resolved = injectCacheAccessData();
-  cache = linkedSignal(() => this.resolved()?.cache ?? null);
   cacheName = '';
+  breadcrumb = computed(() => this.crumbs.cache(this.cacheName, { label: 'NARs' }));
 
   search = signal('');
   private filter = computed(() => parseNarSearch(this.search()));
@@ -99,10 +100,6 @@ export class CacheNarsComponent implements OnInit {
 
   ngOnInit(): void {
     this.cacheName = this.route.snapshot.paramMap.get('cache') || '';
-    this.cachesService.getCache(this.cacheName).subscribe({
-      next: (c) => this.cache.set(c),
-      error: () => {},
-    });
     this.route.queryParamMap.subscribe((q) => {
       this.search.set(narSearchText({ hash: q.get('hash') ?? undefined, package: q.get('package') ?? undefined }));
       this.sort.set((q.get('sort') as SortKey) ?? 'created_at');

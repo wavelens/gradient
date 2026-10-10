@@ -9,6 +9,27 @@
 .pkg-label { margin: $space-section 0 $spacing-sm; h3 { font-size: $font-size-md; } }
 .pkg-list { display: flex; flex-direction: column; gap: $space-pair; }
 
+.pkg-search {
+  box-sizing: border-box;
+  width: 100%;
+  height: $control-height;
+  margin-top: $spacing-md;
+  padding: 0 $spacing-md;
+  overflow: hidden;
+  font-size: $font-size-md;
+  animation: pkg-search-in $transition-base;
+
+  &.leaving { animation: pkg-search-out $transition-base forwards; }
+}
+
+@keyframes pkg-search-in {
+  from { height: 0; margin-top: 0; border-width: 0; opacity: 0; }
+}
+
+@keyframes pkg-search-out {
+  to { height: 0; margin-top: 0; border-width: 0; opacity: 0; }
+}
+
 .pkg-more {
   margin-top: $space-pair;
 }
@@ -20,19 +41,29 @@
   border-left: 4px solid var(--rail-c, var(--idle));
   padding: $spacing-sm $spacing-md;
   position: relative;
-  display: flex;
+  display: grid;
+  // The architecture tag has its own slot, right-aligned against the bar, so the
+  // bar starts at the same place in every row, with or without a tag.
+  grid-template-columns: 24px minmax(0, 400px) 8rem minmax(0, 360px) auto 1fr auto;
   align-items: center;
   gap: $spacing-sm;
   animation: pkg-in $transition-base ease backwards;
+  content-visibility: auto;
+  contain-intrinsic-size: auto 42px;
 
   &:hover { border-color: var(--gr-text-muted); border-left-color: var(--rail-c, var(--idle)); }
 
-  .si { width: 24px; height: 24px; }
+  // Skipping off-screen rows also clips whatever leaves the row, so the row under the pointer
+  // or the keyboard is rendered in full and its bar tooltip can rise above it.
+  &:hover,
+  &:focus-within { content-visibility: visible; }
+
+  .si { grid-column: 1; width: 24px; height: 24px; }
 
   .pkg-name {
+    grid-column: 2;
     font-weight: 600;
     font-size: $font-size-sm;
-    width: 250px;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -41,6 +72,8 @@
   .pkg-ifd { margin-right: $spacing-xs; }
 
   .chip-arch {
+    grid-column: 3;
+    justify-self: end;
     border: 1px solid var(--gr-border);
     border-radius: $border-radius-sm;
     padding: 0 $spacing-sm;
@@ -49,14 +82,15 @@
     flex-shrink: 0;
   }
 
-  .pkg-deps { color: var(--gr-text-muted); font-size: $font-size-xs; white-space: nowrap; flex-shrink: 0; }
-  .pkg-error { color: var(--err); font-size: $font-size-xs; white-space: nowrap; }
-  .pkg-bar { width: 360px; --segbar-h: 7px; }
+  .pkg-deps { grid-column: 5; color: var(--gr-text-muted); font-size: $font-size-xs; white-space: nowrap; }
+  .pkg-error { grid-column: 3 / 7; color: var(--err); font-size: $font-size-xs; white-space: nowrap; }
+  .pkg-bar { grid-column: 4; --segbar-h: 7px; }
 
   .pkg-time {
+    grid-column: 6;
+    justify-self: end;
     color: var(--gr-text-muted);
     font-size: $font-size-xs;
-    margin-left: auto;
     white-space: nowrap;
     display: inline-flex;
     align-items: center;
@@ -75,6 +109,7 @@
   }
 
   .kebab {
+    grid-column: 7;
     position: relative;
     color: var(--gr-text-muted);
     padding-left: $spacing-sm;
@@ -87,7 +122,6 @@
 
 @media (max-width: $breakpoint-sm) {
   .pkg {
-    display: grid;
     grid-template-areas:
       'icon name arch arch kebab'
       'icon bar deps time kebab';
@@ -103,14 +137,12 @@
 
     .pkg-name {
       grid-area: name;
-      width: auto;
       white-space: normal;
       overflow-wrap: anywhere;
     }
 
     .pkg-bar {
       grid-area: bar;
-      width: auto;
       align-self: center;
     }
   }

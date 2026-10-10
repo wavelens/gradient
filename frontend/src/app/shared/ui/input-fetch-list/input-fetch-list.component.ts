@@ -34,7 +34,7 @@ function percent(row: InputFetch): number | null {
   return ratio === null ? null : Math.round(ratio * 100);
 }
 
-export function inputFetchRow(row: InputFetch): InputFetchRow {
+function inputFetchRow(row: InputFetch): InputFetchRow {
   return {
     name: row.name,
     state: row.state,
@@ -42,6 +42,15 @@ export function inputFetchRow(row: InputFetch): InputFetchRow {
     percent: percent(row),
     label: inputFetchLabel(row),
   };
+}
+
+function downloadingFirstThenByName(a: InputFetch, b: InputFetch): number {
+  const downloading = Number(b.state === 'Fetching') - Number(a.state === 'Fetching');
+  return downloading || a.name.localeCompare(b.name);
+}
+
+export function inputFetchRows(inputs: InputFetch[]): InputFetchRow[] {
+  return [...inputs].sort(downloadingFirstThenByName).map(inputFetchRow);
 }
 
 @Component({
@@ -68,5 +77,5 @@ export function inputFetchRow(row: InputFetch): InputFetchRow {
 export class InputFetchListComponent {
   inputs = input.required<InputFetch[]>();
 
-  protected readonly rows = computed(() => this.inputs().map(inputFetchRow));
+  protected readonly rows = computed(() => inputFetchRows(this.inputs()));
 }

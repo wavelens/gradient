@@ -28,18 +28,19 @@ const team: Team = {
 
 function setup(superuser: boolean, managed = false) {
   const update = vi.fn().mockReturnValue(of('Team updated'));
+  const get = vi.fn(() => of({ ...team, managed, oidc_group: managed ? 'ci-admins' : null }));
   TestBed.configureTestingModule({
     imports: [TeamSettingsComponent],
     providers: [
       provideRouter([]),
       { provide: ActivatedRoute, useValue: { snapshot: { paramMap: convertToParamMap({ team: 'platform' }) } } },
-      { provide: TeamsService, useValue: { get: () => of({ ...team, managed, oidc_group: managed ? 'ci-admins' : null }), update, remove: vi.fn() } },
+      { provide: TeamsService, useValue: { get, update, remove: vi.fn() } },
       { provide: AuthService, useValue: { user: signal({ superuser }) } },
     ],
   });
   const fixture = TestBed.createComponent(TeamSettingsComponent);
   fixture.detectChanges();
-  return { fixture, update };
+  return { fixture, update, get };
 }
 
 function input(fixture: { nativeElement: HTMLElement }, id: string): HTMLInputElement {
@@ -47,6 +48,21 @@ function input(fixture: { nativeElement: HTMLElement }, id: string): HTMLInputEl
 }
 
 describe('TeamSettingsComponent', () => {
+  it('names the team in the breadcrumb by its new display name after a rename', () => {
+    const { fixture, get } = setup(true);
+    const component = fixture.componentInstance;
+    const crumbs = () =>
+      Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('.breadcrumb-link, .breadcrumb-current'))
+        .map((crumb) => crumb.textContent?.trim());
+    expect(crumbs()).toEqual(['Teams', 'Platform', 'Settings']);
+
+    get.mockReturnValue(of({ ...team, display_name: 'Platform Team' }));
+    component.form = { ...component.form, display_name: 'Platform Team' };
+    component.save();
+    fixture.detectChanges();
+    expect(crumbs()).toEqual(['Teams', 'Platform Team', 'Settings']);
+  });
+
   it('shows the settings of a state-managed team read-only', async () => {
     const { fixture } = setup(true, true);
     await fixture.whenStable();

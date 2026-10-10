@@ -23,15 +23,14 @@
       <div class="builds-backdrop gr-dialog-backdrop" aria-hidden="true" (click)="buildsOpen.set(false)"></div>
     }
     <aside id="builds-drawer" class="builds-sidebar" [class.open]="buildsOpen()"
-           (focusin)="setSidebarFocus(true)" (focusout)="setSidebarFocus(false)" (keydown.escape)="buildsOpen.set(false)">
+           (focusin)="setSidebarFocus(true)" (focusout)="setSidebarFocus(false)"
+           (mouseenter)="setPointerOver('builds')" (mouseleave)="setPointerOver(null)" (keydown.escape)="buildsOpen.set(false)">
 
       <div class="sidebar-breadcrumb">
-        <a [routerLink]="['/project', projectName]" class="breadcrumb-link">{{ projectDisplayName() || projectName }}</a>
-        @if (ev.task_name) {
+        @for (crumb of projectAndTaskCrumbs(); track $index) {
+          <a [routerLink]="crumb.link" class="breadcrumb-link">@if (crumb.label === null) {<gr-skeleton width="8ch" />} @else {{{ crumb.label }}}</a>
           <span class="breadcrumb-sep">/</span>
-          <a [routerLink]="['/project', projectName, 'task', ev.task_name]" class="breadcrumb-link">{{ ev.task_display_name || ev.task_name }}</a>
         }
-        <span class="breadcrumb-sep">/</span>
         @if (ev.task_name) {
           <a [routerLink]="['/project', projectName, 'task', ev.task_name]" [queryParams]="{ eval: ev.id }"
              class="breadcrumb-link breadcrumb-current">Evaluation</a>
@@ -65,16 +64,7 @@
         }
       </div>
 
-      <div class="builds-list-header">Builds</div>
-
       <gr-menu #buildMenu [model]="buildMenuModel()" />
-
-      @if (scopeBuildId()) {
-        <div class="builds-scope-note">
-          <span>Only this package's builds</span>
-          <button type="button" class="builds-scope-clear" (click)="clearScope()">Show all</button>
-        </div>
-      }
 
       @if (sidebarSearchOpen()) {
         <div class="sidebar-search">
@@ -145,7 +135,7 @@
     </aside>
 
     <!-- ── Main ─────────────────────────────────────────────────── -->
-    <main class="log-main">
+    <main class="log-main" (mouseenter)="setPointerOver('log')" (mouseleave)="setPointerOver(null)">
 
       <!-- Info bar -->
       <div class="info-bar">
@@ -186,20 +176,12 @@
             <span class="metric-label">Commit</span>
             <code class="commit-hash" [title]="ev.commit || ''">{{ commitLabel(ev.commit) }}</code>
           </div>
-          <div class="info-metric nav-btns">
-            <button grButton icon="arrow_back" severity="secondary" size="small"
-              [disabled]="!ev.previous"
-              (click)="ev.previous && navigateToEvaluation(ev.previous)"></button>
-            <button grButton icon="arrow_forward" severity="secondary" size="small"
-              [disabled]="!ev.next"
-              (click)="ev.next && navigateToEvaluation(ev.next)"></button>
-          </div>
         </div>
         <div class="info-bar-right">
           @if (isRunning()) {
             <button *appWritable="triggerAccess()" grButton label="Abort" icon="close"
               severity="danger" size="small"
-              (click)="abortConfirmOpen.set(true)" [loading]="aborting()" [disabled]="aborting()"></button>
+              (click)="requestAbort($event)" [loading]="aborting()" [disabled]="aborting()"></button>
           }
         </div>
       </div>

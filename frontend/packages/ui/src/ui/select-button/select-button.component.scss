@@ -34,13 +34,13 @@
   &:disabled { cursor: not-allowed; opacity: 0.5; }
 
   &--selected {
-    background: var(--gr-accent);
+    background: var(--gr-accent-fill);
     color: var(--gr-accent-fg);
 
     // Nested so it outranks the plain :hover above, which would otherwise
     // repaint the selected segment grey.
     &:hover:not(:disabled) {
-      background: var(--gr-accent-hover);
+      background: var(--gr-accent-fill-hover);
       color: var(--gr-accent-fg);
     }
   }

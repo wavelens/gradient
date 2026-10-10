@@ -6,8 +6,8 @@
 
 import { Component, ChangeDetectionStrategy, input } from '@angular/core';
 
-/// The lambda mark. One file for both themes, masked so it takes the current text
-/// colour: two drawings drift apart in weight and size, one cannot.
+/// The lambda mark, masked so it takes the logo colour of the theme. The dark
+/// theme adds the white border of the outlined drawing behind it.
 @Component({
   selector: 'gr-logo',
   standalone: true,

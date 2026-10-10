@@ -23,7 +23,15 @@ const row = (task: string): TaskRow => ({
   history: [],
 });
 
-const PAGE: TasksPage = { counts: { all: 12, failing: 3, starred: 0 }, total: 12, tasks: [row('hosts')] };
+const PAGE: TasksPage = {
+  filter: 'all',
+  counts: { all: 12, failing: 3, starred: 0 },
+  total: 12,
+  tasks: [row('hosts')],
+};
+const STARRED: TasksPage = { ...PAGE, filter: 'starred', counts: { all: 12, failing: 3, starred: 2 } };
+const chipLabels = (root: HTMLElement) =>
+  Array.from(root.querySelectorAll('gr-tab-switch button')).map((c) => c.textContent?.replace(/\s+/g, ' ').trim());
 
 function render(filter: string | null, page: () => Observable<TasksPage>) {
   const tasks = vi.fn(page);
@@ -54,21 +62,35 @@ describe('DashboardTaskTableComponent', () => {
     const { f, tasks, root } = render('failing', () => of(PAGE));
     await settle(f);
     expect(tasks).toHaveBeenCalledWith('failing', 1, 10, 30);
-    const chips = Array.from(root.querySelectorAll('gr-tab-switch button')).map((c) => c.textContent?.replace(/\s+/g, ' ').trim());
-    expect(chips).toEqual(['All 12', 'Failing 3', 'Starred 0']);
+    expect(chipLabels(root)).toEqual(['All 12', 'Failing 3']);
     expect(root.querySelector('gr-tab-switch button.is-selected')?.textContent).toContain('Failing');
+  });
+
+  it('leaves the filter to the server when the url has no filter and puts Starred first for a user with starred tasks', async () => {
+    const { f, tasks, root } = render(null, () => of(STARRED));
+    await settle(f);
+    expect(tasks).toHaveBeenCalledWith(null, 1, 10, 30);
+    expect(chipLabels(root)).toEqual(['Starred 2', 'All 12', 'Failing 3']);
+    expect(root.querySelector('gr-tab-switch button.is-selected')?.textContent).toContain('Starred');
+  });
+
+  it('drops a starred filter from the url when nothing is starred', async () => {
+    const navigate = vi.spyOn(Router.prototype, 'navigate').mockResolvedValue(true);
+    const { f } = render('starred', () => of({ ...PAGE, filter: 'starred', total: 0, tasks: [] }));
+    await settle(f);
+    expect(navigate).toHaveBeenCalledWith([], expect.objectContaining({ queryParams: { filter: null }, replaceUrl: true }));
   });
 
   it('writes the chip into the url and leaves loading to the url', () => {
     const { tasks, root } = render(null, () => of(PAGE));
     const navigate = vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
-    (root.querySelectorAll('gr-tab-switch button')[2] as HTMLElement).click();
-    expect(navigate).toHaveBeenCalledWith([], expect.objectContaining({ queryParams: { filter: 'starred' } }));
+    (root.querySelectorAll('gr-tab-switch button')[0] as HTMLElement).click();
+    expect(navigate).toHaveBeenCalledWith([], expect.objectContaining({ queryParams: { filter: 'all' } }));
     expect(tasks).toHaveBeenCalledTimes(1);
   });
 
   it('reloads when the filter in the url changes', async () => {
-    const { f, tasks, params, root } = render(null, () => of(PAGE));
+    const { f, tasks, params, root } = render(null, () => of(STARRED));
     params.next(convertToParamMap({ filter: 'starred' }));
     await settle(f);
     expect(tasks).toHaveBeenLastCalledWith('starred', 1, 10, 30);
@@ -114,7 +136,7 @@ describe('DashboardTaskTableComponent', () => {
     const { f, tasks, root } = render(null, () => of(PAGE));
     (root.querySelector('.show-all') as HTMLElement).click();
     f.detectChanges();
-    expect(tasks).toHaveBeenLastCalledWith('all', 1, 25, 30);
+    expect(tasks).toHaveBeenLastCalledWith(null, 1, 25, 30);
     TestBed.resetTestingModule();
     expect(render(null, () => of({ ...PAGE, total: 1 })).root.querySelector('.show-all')).toBeNull();
   });
@@ -125,7 +147,7 @@ describe('DashboardTaskTableComponent', () => {
     f.detectChanges();
     f.detectChanges();
     expect(tasks).toHaveBeenCalledTimes(2);
-    expect(tasks).toHaveBeenLastCalledWith('all', 1, 10, 20);
+    expect(tasks).toHaveBeenLastCalledWith(null, 1, 10, 20);
   });
 
   it('holds the list with placeholder rows until the tasks arrive', async () => {

@@ -11,6 +11,7 @@ import { FormsModule } from '@angular/forms';
 import { Observable, map } from 'rxjs';
 import { ConfigService } from '@core/services/config.service';
 import { WorkersService } from '@core/services/workers.service';
+import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { ProjectsService } from '@core/services/projects.service';
 import { ProjectAccessService } from '@core/services/project-access.service';
 import { TeamsService } from '@core/services/teams.service';
@@ -97,6 +98,7 @@ export class WorkersComponent implements OnInit {
   private workersService = inject(WorkersService);
   private projectsService = inject(ProjectsService);
   private projectAccess = inject(ProjectAccessService);
+  private crumbs = inject(BreadcrumbsService);
   private messageService = inject(MessageService);
   private teamsService = inject(TeamsService);
   private authService = inject(AuthService);
@@ -143,7 +145,7 @@ export class WorkersComponent implements OnInit {
   hasNoCacheSubscribed = signal(false);
 
   projectName = '';
-  projectDisplayName = signal('');
+  breadcrumb = computed(() => this.crumbs.projectSettings(this.projectName, { label: 'Workers' }));
   /** The project UUID - shown as peer_id in the register dialog. */
   projectId = signal<string>('');
   workers = signal<Worker[]>([]);
@@ -223,7 +225,7 @@ export class WorkersComponent implements OnInit {
     this.projectsService.getProject(this.projectName).subscribe({
       next: (project) => {
         this.projectId.set(project.id);
-        this.projectDisplayName.set(project.display_name);
+        this.crumbs.rememberProject(this.projectName, project.display_name);
       },
       error: () => {},
     });

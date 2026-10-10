@@ -4,7 +4,7 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<gr-page-layout [breadcrumb]="[{ label: 'Caches', link: ['/caches'] }, { label: cache()?.display_name || cacheName, link: ['/caches', cacheName] }, { label: 'NARs' }]" title="NARs" subtitle="Browse and manage Nix archives stored in this cache.">
+<gr-page-layout [breadcrumb]="breadcrumb()" title="NARs" subtitle="Browse and manage Nix archives stored in this cache.">
   @if (!statsFailed()) {
     @let s = stats();
     <gr-card-grid class="nar-stats" min="150px" [attr.aria-busy]="!s || null">

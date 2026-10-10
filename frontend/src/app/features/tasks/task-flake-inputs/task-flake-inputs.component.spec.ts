@@ -12,6 +12,7 @@ import { of } from 'rxjs';
 import { TaskFlakeInputsComponent } from './task-flake-inputs.component';
 import { FlakeInputOverridesService } from '@core/services/flake-input-overrides.service';
 import { ProjectsService } from '@core/services/projects.service';
+import { TasksService } from '@core/services/tasks.service';
 import { AccessState } from '@core/models/access.model';
 import { FlakeInputOverride } from '@core/models';
 
@@ -72,6 +73,7 @@ function setup(
       { provide: ActivatedRoute, useValue: activatedRouteStub(access) },
       { provide: FlakeInputOverridesService, useValue: defaultService },
       { provide: ProjectsService, useValue: { getProject: () => of({ display_name: 'Acme' }) } },
+      { provide: TasksService, useValue: { getTaskInfo: () => of({ display_name: 'Demo Task' }) } },
     ],
   });
   const fixture = TestBed.createComponent(TaskFlakeInputsComponent);

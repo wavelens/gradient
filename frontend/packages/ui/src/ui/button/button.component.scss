@@ -7,8 +7,8 @@
 @use '../../styles/variables' as *;
 
 :host {
-  --gr-btn-bg: var(--gr-accent);
-  --gr-btn-bg-hover: var(--gr-accent-hover);
+  --gr-btn-bg: var(--gr-accent-fill);
+  --gr-btn-bg-hover: var(--gr-accent-fill-hover);
   --gr-btn-fg: var(--gr-accent-fg);
   --gr-btn-accent: var(--gr-accent);
 
@@ -51,8 +51,8 @@
 }
 
 :host(.gr-button--primary) {
-  --gr-btn-bg: var(--gr-accent);
-  --gr-btn-bg-hover: var(--gr-accent-hover);
+  --gr-btn-bg: var(--gr-accent-fill);
+  --gr-btn-bg-hover: var(--gr-accent-fill-hover);
   --gr-btn-fg: var(--gr-accent-fg);
   --gr-btn-accent: var(--gr-accent);
 }
@@ -68,8 +68,8 @@
 }
 
 :host(.gr-button--success) {
-  --gr-btn-bg: var(--gr-accent);
-  --gr-btn-bg-hover: var(--gr-accent-hover);
+  --gr-btn-bg: var(--gr-accent-fill);
+  --gr-btn-bg-hover: var(--gr-accent-fill-hover);
   --gr-btn-fg: var(--gr-accent-fg);
   --gr-btn-accent: var(--gr-accent);
 }

@@ -55,11 +55,12 @@ export class TasksService {
     return this.api.delete<string>(`tasks/${project}/${task}`);
   }
 
-  getEntryPoints(project: string, task: string, evaluationId?: string, limit?: number, offset?: number): Observable<PaginatedEntryPoints> {
+  getEntryPoints(project: string, task: string, evaluationId?: string, limit?: number, offset?: number, search?: string): Observable<PaginatedEntryPoints> {
     const params: string[] = [];
     if (evaluationId) params.push(`evaluation_id=${evaluationId}`);
     if (limit !== undefined) params.push(`limit=${limit}`);
     if (offset !== undefined) params.push(`offset=${offset}`);
+    if (search) params.push(`search=${encodeURIComponent(search)}`);
     const query = params.length ? `?${params.join('&')}` : '';
     return this.api.get<PaginatedEntryPoints>(`tasks/${project}/${task}/entry-points${query}`);
   }

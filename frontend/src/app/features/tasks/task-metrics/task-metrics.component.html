@@ -4,7 +4,7 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<gr-page-layout [breadcrumb]="[{ label: projectDisplayName() || projectName, link: ['/project', projectName] }, { label: taskDisplayName() || taskName, link: ['/project', projectName, 'task', taskName] }, { label: 'Metrics' }]" title="Task Metrics" [subtitle]="'Build and evaluation statistics over the last ' + (keepEvaluations()) + ' completed evaluations.'">
+<gr-page-layout [breadcrumb]="breadcrumb()" title="Task Metrics" [subtitle]="'Build and evaluation statistics over the last ' + (keepEvaluations()) + ' completed evaluations.'">
   @if (loading()) {
     <gr-loading-spinner message="Loading metrics..." />
   } @else if (metrics().length === 0) {

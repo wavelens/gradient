@@ -13,6 +13,7 @@ import { TaskTriggersComponent } from './task-triggers.component';
 import { TriggersService } from '@core/services/triggers.service';
 import { IntegrationsService } from '@core/services/integrations.service';
 import { ProjectsService } from '@core/services/projects.service';
+import { TasksService } from '@core/services/tasks.service';
 import { AccessState } from '@core/models/access.model';
 
 function activatedRouteStub(access: AccessState): ActivatedRoute {
@@ -53,6 +54,7 @@ function setup(
       { provide: TriggersService, useValue: { list: () => of(triggers) } },
       { provide: IntegrationsService, useValue: { listProjectIntegrationSummaries: () => of([]) } },
       { provide: ProjectsService, useValue: { getProject: () => of({ display_name: 'Acme' }) } },
+      { provide: TasksService, useValue: { getTaskInfo: () => of({ display_name: 'Demo Task' }) } },
     ],
   });
   const fixture = TestBed.createComponent(TaskTriggersComponent);

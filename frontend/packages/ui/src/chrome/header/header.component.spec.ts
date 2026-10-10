@@ -15,9 +15,14 @@ class Page {}
 @Component({
   standalone: true,
   imports: [HeaderComponent],
-  template: `<gr-header [brand]="{ label: 'Gradient', href: '/' }" [nav]="[{ label: 'Projects', href: '/projects' }]" />`,
+  template: `<gr-header [brand]="{ label: 'Gradient', href: '/' }" [nav]="nav" />`,
 })
-class Host {}
+class Host {
+  nav = [
+    { label: 'Dashboard', href: '/', exact: true },
+    { label: 'Projects', href: '/projects' },
+  ];
+}
 
 describe('gr-header menu', () => {
   let fixture: ComponentFixture<Host>;
@@ -65,5 +70,18 @@ describe('gr-header menu', () => {
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
     fixture.detectChanges();
     expect(isOpen()).toBe(false);
+  });
+
+  it('keeps a link active across query parameters and marks an exact link on its own path only', async () => {
+    const active = () => Array.from(root().querySelectorAll('.header-nav a.active'), (link) => link.textContent?.trim());
+    const router = TestBed.inject(Router);
+
+    await router.navigateByUrl('/?filter=failing');
+    fixture.detectChanges();
+    expect(active()).toEqual(['Dashboard']);
+
+    await router.navigateByUrl('/projects/demo?page=2');
+    fixture.detectChanges();
+    expect(active()).toEqual(['Projects']);
   });
 });

@@ -22,6 +22,8 @@
   animation: shimmer 1.4s ease-in-out infinite;
 }
 
+:host(.still) { animation-play-state: paused; }
+
 @keyframes shimmer {
   from {
     background-position: 100% 0;

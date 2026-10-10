@@ -6,7 +6,7 @@
 
 <gr-header [brand]="brand" [nav]="nav()">
   @if (authService.isAuthenticated()) {
-    <button slot="search" type="button" class="search-trigger" aria-label="Search" (click)="palette.open()">
+    <button slot="search" type="button" class="search-box search-trigger" aria-label="Search" (click)="palette.open()">
       <gr-icon name="search" size="sm" />
       <span>Search</span>
       <kbd>/</kbd>

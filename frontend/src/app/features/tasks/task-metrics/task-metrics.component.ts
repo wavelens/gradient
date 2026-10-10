@@ -10,7 +10,7 @@ import { ActivatedRoute, RouterModule } from '@angular/router';
 import { EmptyStateComponent, LoadingSpinnerComponent, PageLayoutComponent } from '@gradient/ui/ui';
 import { MetricChartComponent } from '@shared/ui';
 import { TasksService, TaskMetricPoint, TaskMetricsResponse } from '@core/services/tasks.service';
-import { ProjectsService } from '@core/services/projects.service';
+import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { formatBytes, formatCount, formatDuration } from '@shared/text';
 
 const CHART_COLORS = {
@@ -33,27 +33,18 @@ const CHART_COLORS = {
 export class TaskMetricsComponent implements OnInit {
   private route = inject(ActivatedRoute);
   private tasksService = inject(TasksService);
-  private projectsService = inject(ProjectsService);
+  private crumbs = inject(BreadcrumbsService);
 
   loading = signal(true);
   metrics = signal<TaskMetricPoint[]>([]);
   keepEvaluations = signal(30);
   projectName = '';
-  projectDisplayName = signal('');
   taskName = '';
-  taskDisplayName = signal('');
+  breadcrumb = computed(() => this.crumbs.task(this.projectName, this.taskName, { label: 'Metrics' }));
 
   ngOnInit(): void {
     this.projectName = this.route.snapshot.paramMap.get('project') || '';
     this.taskName = this.route.snapshot.paramMap.get('task') || '';
-    this.projectsService.getProject(this.projectName).subscribe({
-      next: (project) => this.projectDisplayName.set(project.display_name),
-      error: () => {},
-    });
-    this.tasksService.getTaskInfo(this.projectName, this.taskName).subscribe({
-      next: (proj) => this.taskDisplayName.set(proj.display_name),
-      error: () => {},
-    });
     this.tasksService.getTaskMetrics(this.projectName, this.taskName).subscribe({
       next: (data: TaskMetricsResponse) => {
         this.metrics.set(data.points);

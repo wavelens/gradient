@@ -30,8 +30,8 @@ const PAIRS: Array<[string, string, number]> = [
   ['--gr-status-warning', '--gr-surface-base', 3],
   ['--gr-status-info', '--gr-surface-base', 3],
   ['--gr-accent', '--gr-surface-base', 3],
-  ['--gr-accent-fg', '--gr-accent', 4.5],
-  ['--gr-accent-fg', '--gr-accent-hover', 4.5],
+  ['--gr-accent-fg', '--gr-accent-fill', 4.5],
+  ['--gr-accent-fg', '--gr-accent-fill-hover', 4.5],
   ['--gr-status-danger-fg', '--gr-status-danger', 4.5],
   ['--gr-status-warning-fg', '--gr-status-warning', 4.5],
   // Muted is real text, and every status colour is also used on a raised surface.
@@ -42,7 +42,6 @@ const PAIRS: Array<[string, string, number]> = [
   ['--gr-status-warning', '--gr-surface-raised', 3],
   ['--gr-status-info', '--gr-surface-raised', 3],
   ['--gr-accent', '--gr-surface-raised', 3],
-  ['--gr-status-success-fg', '--gr-status-success', 4.5],
 ];
 
 /// Elevation is only readable if adjacent surfaces actually differ.

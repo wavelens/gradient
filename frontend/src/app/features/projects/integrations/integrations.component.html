@@ -4,7 +4,7 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<gr-page-layout [breadcrumb]="[{ label: projectDisplayName() || projectName, link: ['/project', projectName] }, { label: 'Settings', link: ['/project', projectName, 'settings'] }, { label: 'Integrations' }]" title="Integrations" subtitle="Git host webhooks and status reporters for this project">
+<gr-page-layout [breadcrumb]="breadcrumb()" title="Integrations" subtitle="Git host webhooks and status reporters for this project">
   <button slot="actions"
       *appWritable="access()"
       grButton

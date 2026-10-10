@@ -9,6 +9,7 @@ import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { IntegrationsService } from '@core/services/integrations.service';
+import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { ProjectsService } from '@core/services/projects.service';
 import { ProjectAccessService } from '@core/services/project-access.service';
 import {
@@ -80,6 +81,7 @@ export class IntegrationsComponent implements OnInit {
   private integrationsService = inject(IntegrationsService);
   private projectsService = inject(ProjectsService);
   private projectAccess = inject(ProjectAccessService);
+  private crumbs = inject(BreadcrumbsService);
 
   access = signal<AccessState>({ managed: false, canEdit: false, canTrigger: false });
 
@@ -88,7 +90,7 @@ export class IntegrationsComponent implements OnInit {
   deletingId = signal<string | null>(null);
 
   projectName = '';
-  projectDisplayName = signal('');
+  breadcrumb = computed(() => this.crumbs.projectSettings(this.projectName, { label: 'Integrations' }));
   project = signal<Project | null>(null);
   integrations = signal<Integration[]>([]);
   integrationAccess = computed(
@@ -175,7 +177,7 @@ export class IntegrationsComponent implements OnInit {
     this.projectsService.getProject(this.projectName).subscribe({
       next: (project) => {
         this.project.set(project);
-        this.projectDisplayName.set(project.display_name);
+        this.crumbs.rememberProject(this.projectName, project.display_name);
       },
       error: () => {},
     });

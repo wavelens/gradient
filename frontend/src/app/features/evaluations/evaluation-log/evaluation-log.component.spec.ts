@@ -5,12 +5,13 @@
  */
 
 import { ComponentFixture, TestBed } from '@angular/core/testing';
-import { ActivatedRoute, Router, convertToParamMap, provideRouter } from '@angular/router';
+import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/router';
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { EvaluationLogComponent } from './evaluation-log.component';
 import { BuildItem, EvaluationsService } from '@core/services/evaluations.service';
 import { LiveEvent, LiveService } from '@core/services/live.service';
+import { ProjectsService } from '@core/services/projects.service';
 import { Subject, of } from 'rxjs';
 import { Evaluation, EvaluationStatus, User } from '@core/models';
 import { AuthService } from '@core/services/auth.service';
@@ -223,8 +224,8 @@ describe('EvaluationLogComponent', () => {
     });
   });
 
-  // The builds search bar is hidden until revealed via Ctrl/Cmd+F while the
-  // sidebar holds focus, then dismissed with Escape (which also resets the filter).
+  // Ctrl/Cmd+F opens the search of the region under the pointer, falling back to
+  // keyboard focus; Escape dismisses the bar and resets the filter.
   describe('sidebar search visibility', () => {
     const key = (init: KeyboardEventInit) => new KeyboardEvent('keydown', { cancelable: true, ...init });
 
@@ -269,18 +270,31 @@ describe('EvaluationLogComponent', () => {
       expect(cmp.searchOpen()).toBe(false);
     });
 
-    it('opens on "/" when not typing in a field', () => {
+    it('opens the builds search while the pointer is over the sidebar, even with a log open', () => {
       const { cmp } = setup();
-      cmp.onKeydown(key({ key: '/' }));
+      cmp.selectedBuildId.set('b1');
+      cmp.setPointerOver('builds');
+      cmp.onKeydown(key({ key: 'f', ctrlKey: true }));
       expect(cmp.sidebarSearchOpen()).toBe(true);
+      expect(cmp.searchOpen()).toBe(false);
     });
 
-    it('ignores "/" typed inside an input', () => {
+    it('opens the log search while the pointer is over the log, even with focus left in the sidebar', () => {
+      const { cmp } = setup();
+      cmp.selectedBuildId.set('b1');
+      cmp.setSidebarFocus(true);
+      cmp.setPointerOver('log');
+      cmp.onKeydown(key({ key: 'f', ctrlKey: true }));
+      expect(cmp.searchOpen()).toBe(true);
+      expect(cmp.sidebarSearchOpen()).toBe(false);
+    });
+
+    it('leaves "/" to the header search', () => {
       const { cmp } = setup();
       const ev = key({ key: '/' });
-      Object.defineProperty(ev, 'target', { value: document.createElement('input') });
       cmp.onKeydown(ev);
       expect(cmp.sidebarSearchOpen()).toBe(false);
+      expect(ev.defaultPrevented).toBe(false);
     });
 
     it('Escape closes the bar and clears the query', () => {
@@ -744,21 +758,6 @@ describe('EvaluationLogComponent', () => {
       expect(fixture.componentInstance.progress()).toEqual({ kind: 'fetching', inputs: rows('live') });
       fixture.destroy();
     });
-
-    it('drops the previous evaluation live frame when moving to another evaluation', () => {
-      const { fixture, frames, getEvaluation } = setupLive({ kind: 'fetching', inputs: rows('first') });
-      frames.next({ event: 'evaluation.activity', at: '', content: { evaluation_id: 'eval-1', progress: { kind: 'fetching', inputs: rows('first-live') } } });
-      vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
-      getEvaluation.mockReturnValue(of({
-        id: 'eval-2', status: 'Fetching', created_at: '2026-01-01T00:00:00', updated_at: '2026-01-01T00:00:00',
-        started_at: '2026-01-01T00:00:00', finished_at: null, trigger: null, progress: { kind: 'fetching', inputs: rows('second') },
-      }));
-
-      fixture.componentInstance.navigateToEvaluation('eval-2');
-
-      expect(fixture.componentInstance.progress()).toEqual({ kind: 'fetching', inputs: rows('second') });
-      fixture.destroy();
-    });
   });
 
   describe('build progress', () => {
@@ -919,6 +918,59 @@ describe('EvaluationLogComponent', () => {
       cmp.abortEvaluation();
       expect(abort).toHaveBeenCalledOnce();
       expect(cmp.abortConfirmOpen()).toBe(false);
+    });
+
+    it('asks first on a plain click of Abort, aborts at once on a Ctrl click', () => {
+      const { cmp } = setup();
+      const abort = vi.spyOn(TestBed.inject(EvaluationsService), 'abortEvaluation').mockReturnValue(of('ok') as never);
+      vi.spyOn(cmp, 'loadEvaluation').mockImplementation(() => {});
+      cmp.requestAbort(new MouseEvent('click'));
+      expect(cmp.abortConfirmOpen()).toBe(true);
+      expect(abort).not.toHaveBeenCalled();
+      cmp.abortConfirmOpen.set(false);
+      cmp.requestAbort(new MouseEvent('click', { ctrlKey: true }));
+      expect(abort).toHaveBeenCalledOnce();
+      expect(cmp.abortConfirmOpen()).toBe(false);
+    });
+  });
+
+  describe('sidebar breadcrumb', () => {
+    it('leads from the project to the task by display name', () => {
+      TestBed.configureTestingModule({
+        imports: [EvaluationLogComponent],
+        providers: [
+          provideRouter([]), provideHttpClient(), provideHttpClientTesting(),
+          { provide: ActivatedRoute, useValue: {
+            snapshot: {
+              paramMap: convertToParamMap({ project: 'proj', evaluationId: 'eval-1' }),
+              queryParamMap: convertToParamMap({}),
+              fragment: null,
+            },
+          } },
+          { provide: ProjectsService, useValue: { getProject: () => of({ display_name: 'MyProject' }) } },
+          { provide: EvaluationsService, useValue: {
+            getEvaluation: () => of({
+              id: 'eval-1', status: 'Completed', created_at: '2026-01-01T00:00:00', updated_at: '2026-01-01T00:00:00',
+              started_at: null, finished_at: null, trigger: null, task_name: 'nightly', task_display_name: 'Nightly',
+            }),
+            getBuilds: () => of({ builds: [], total: 0, active_count: 0 }),
+            getEvaluationMessages: () => of([]),
+          } },
+        ],
+      });
+      const fixture = TestBed.createComponent(EvaluationLogComponent);
+      fixture.detectChanges();
+
+      const crumbs = Array.from(
+        (fixture.nativeElement as HTMLElement).querySelectorAll('.sidebar-breadcrumb .breadcrumb-link, .sidebar-breadcrumb .breadcrumb-current'),
+      );
+      expect(crumbs.map((crumb) => crumb.textContent?.trim())).toEqual(['MyProject', 'Nightly', 'Evaluation']);
+      expect(crumbs.map((crumb) => crumb.getAttribute('href'))).toEqual([
+        '/project/proj',
+        '/project/proj/task/nightly',
+        '/project/proj/task/nightly?eval=eval-1',
+      ]);
+      fixture.destroy();
     });
   });
 });

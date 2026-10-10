@@ -8,6 +8,7 @@ import { Component, computed, inject, ChangeDetectionStrategy } from '@angular/c
 import { toSignal } from '@angular/core/rxjs-interop';
 import { NavigationEnd, Router, RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
 import { filter, map } from 'rxjs';
+import { activeLinkMatch } from '@gradient/ui/chrome';
 import { Crumb, PageLayoutComponent } from '@gradient/ui/ui';
 import { ThemeService, ThemePreference } from '@core/services/theme.service';
 
@@ -48,6 +49,7 @@ export class StyleguideShellComponent {
   );
 
   nav = STYLEGUIDE_NAV;
+  activeLinkMatch = activeLinkMatch;
   theme = this.themeService.preference;
   themes: ThemePreference[] = ['system', 'light', 'dark'];
 

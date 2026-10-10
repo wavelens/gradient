@@ -184,6 +184,11 @@ describe('buildMetricChartOption heatmap', () => {
     expect((opt.visualMap as any).max).toBe(6);
   });
 
+  it('labels the ends of the scale with the formatted range', () => {
+    const opt = buildMetricChartOption({ type: 'heatmap', series: bands, valueFormatter: (v) => `${v} builds` }, THEME);
+    expect((opt.visualMap as any).text).toEqual(['6 builds', '0 builds']);
+  });
+
   it('survives an empty series list', () => {
     const opt = buildMetricChartOption({ type: 'heatmap', series: [] }, THEME);
     expect((opt.series as any[])[0].data).toEqual([]);

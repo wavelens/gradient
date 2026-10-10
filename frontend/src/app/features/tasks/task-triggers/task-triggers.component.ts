@@ -10,7 +10,7 @@ import { ActivatedRoute, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { TriggersService } from '@core/services/triggers.service';
 import { IntegrationsService } from '@core/services/integrations.service';
-import { ProjectsService } from '@core/services/projects.service';
+import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import {
   BadgeComponent,
   BadgeSeverity,
@@ -102,7 +102,7 @@ export class TaskTriggersComponent implements OnInit {
   private route = inject(ActivatedRoute);
   private triggersService = inject(TriggersService);
   private integrationsService = inject(IntegrationsService);
-  private projectsService = inject(ProjectsService);
+  private crumbs = inject(BreadcrumbsService);
   private accessSvc = inject(AccessService);
 
   access = injectTaskAccess();
@@ -130,8 +130,8 @@ export class TaskTriggersComponent implements OnInit {
   fireSuccessId = signal<string | null>(null);
 
   projectName = '';
-  projectDisplayName = signal('');
   taskName = '';
+  breadcrumb = computed(() => this.crumbs.taskSettings(this.projectName, this.taskName, { label: 'Triggers' }));
 
   triggers = signal<TaskTrigger[]>([]);
   editingTrigger = signal<TaskTrigger | null>(null);
@@ -161,10 +161,6 @@ export class TaskTriggersComponent implements OnInit {
   ngOnInit(): void {
     this.projectName = this.route.snapshot.paramMap.get('project') || '';
     this.taskName = this.route.snapshot.paramMap.get('task') || '';
-    this.projectsService.getProject(this.projectName).subscribe({
-      next: (project) => this.projectDisplayName.set(project.display_name),
-      error: () => {},
-    });
     this.loadTriggers();
     this.loadIntegrations();
   }

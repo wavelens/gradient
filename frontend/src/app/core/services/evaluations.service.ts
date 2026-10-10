@@ -7,7 +7,7 @@
 import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
 import { ApiService } from './api.service';
-import { BuildProgress, Evaluation, EvaluationMessage } from '@core/models';
+import { BuildProgress, BuildStatus, Evaluation, EvaluationMessage } from '@core/models';
 
 export interface DependencyGraphNode {
   id: string;
@@ -104,12 +104,44 @@ export function isHtmlArtefact(p: BuildProduct): boolean {
   return p.subtype === 'html' || p.file_type === 'html';
 }
 
+export interface FailedBuildSummary {
+  build_id: string;
+  name: string;
+  derivation_path: string;
+  architecture: string;
+  status: BuildStatus;
+  attributes: string[];
+  blocked: string[];
+  blocked_total: number;
+  newly_failing: boolean;
+}
+
+export interface FailedAttributeReport {
+  attr: string;
+  message: string;
+  newly_failing: boolean;
+}
+
+export interface EvaluationFailureSummary {
+  compared_with: { id: string; commit: string } | null;
+  packages: { total: number; built: number; failed: number; blocked: number; unfinished: number };
+  failures: FailedBuildSummary[];
+  failures_total: number;
+  failed_attributes: FailedAttributeReport[];
+  fixed: string[];
+  fixed_total: number;
+}
+
 @Injectable({ providedIn: 'root' })
 export class EvaluationsService {
   private api = inject(ApiService);
 
   getEvaluation(id: string): Observable<Evaluation> {
     return this.api.get<Evaluation>(`evals/${id}`);
+  }
+
+  getEvaluationSummary(id: string): Observable<EvaluationFailureSummary> {
+    return this.api.get<EvaluationFailureSummary>(`evals/${id}/summary`);
   }
 
   getEvaluationMessages(evalId: string): Observable<EvaluationMessage[]> {

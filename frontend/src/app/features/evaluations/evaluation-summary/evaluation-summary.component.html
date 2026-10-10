@@ -1,0 +1,107 @@
+<!--
+  SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+
+  SPDX-License-Identifier: AGPL-3.0-only
+-->
+
+@if (loading()) {
+  <gr-loading-spinner message="Loading summary..." />
+} @else {
+  @if (evaluation(); as ev) {
+    @if (summary(); as s) {
+      <gr-page-layout [breadcrumb]="breadcrumb()" [title]="headline()">
+        <div slot="meta" class="facts">
+          <gr-eval-status-badge [status]="ev.status" />
+          @if (repositoryWebUrl(ev.repository); as repositoryUrl) {
+            <a [href]="repositoryUrl" target="_blank" rel="noopener noreferrer">{{ ev.repository }}</a>
+          } @else {
+            <span>{{ ev.repository }}</span>
+          }
+          @if (commitWebUrl(ev.repository, ev.commit); as commitUrl) {
+            <a class="mono" [href]="commitUrl" [title]="ev.commit" target="_blank" rel="noopener noreferrer">{{ commitLabel(ev.commit) }}</a>
+          } @else {
+            <span class="mono" [title]="ev.commit">{{ commitLabel(ev.commit) }}</span>
+          }
+          <span>{{ serverTime(ev.created_at) | date: 'MMM d, y, HH:mm' }}</span>
+          <span>{{ duration() }}</span>
+        </div>
+        <a slot="actions" grButton label="Full log" icon="article" severity="secondary"
+           [routerLink]="['/project', project, 'log', ev.id]"></a>
+
+        <gr-card-grid min="150px">
+          <gr-stat-card label="Built" [value]="s.packages.built" />
+          <gr-stat-card label="Failed" [value]="s.packages.failed" />
+          <gr-stat-card label="Failed to evaluate" [value]="s.failed_attributes.length" />
+          @if (s.compared_with) {
+            <gr-stat-card label="Fixed" [value]="s.fixed_total" />
+          }
+        </gr-card-grid>
+
+        @if (s.compared_with; as before) {
+          <p class="compared">
+            {{ newlyFailing() }} newly failing and {{ s.fixed_total }} fixed since
+            <a class="mono" [routerLink]="['/project', project, 'summary', before.id]">{{ commitLabel(before.commit) }}</a>
+          </p>
+        }
+
+        @for (group of failureGroups(); track group.title) {
+          <h2>{{ group.title }} <span class="count">{{ group.failures.length }}</span></h2>
+          <gr-row-list>
+            @for (failure of group.failures; track failure.build_id) {
+              <gr-row [link]="['/project', project, 'log', ev.id]" [queryParams]="{ build: failure.build_id }"
+                      [linkLabel]="'Log of ' + failureTitle(failure)">
+                <gr-status-icon slot="icon" phase="failure" size="sm" />
+                <span class="mono">{{ failureTitle(failure) }}</span>
+                <span slot="meta">{{ failureMeta(failure) }}</span>
+                <span slot="actions" class="tags">
+                  <gr-badge>{{ failure.architecture }}</gr-badge>
+                  <gr-badge [severity]="failureKind(failure.status).severity">{{ failureKind(failure.status).label }}</gr-badge>
+                </span>
+              </gr-row>
+            }
+          </gr-row-list>
+        }
+        @if (s.failures_total > s.failures.length) {
+          <p class="compared">
+            The {{ s.failures.length }} most blocking of {{ s.failures_total }} failed builds are listed.
+            The <a [routerLink]="['/project', project, 'log', ev.id]">full log</a> has every build.
+          </p>
+        }
+
+        @if (s.failed_attributes.length) {
+          <h2>Failed to evaluate <span class="count">{{ s.failed_attributes.length }}</span></h2>
+          <gr-row-list>
+            @for (failed of s.failed_attributes; track failed.attr) {
+              <gr-row [link]="['/project', project, 'log', ev.id]" [queryParams]="{ eval: 1 }"
+                      [linkLabel]="'Evaluation log of ' + failed.attr">
+                <gr-status-icon slot="icon" phase="failure" size="sm" />
+                <span class="mono">{{ failed.attr }}</span>
+                <span slot="meta">{{ firstLine(failed.message) }}</span>
+                @if (failed.newly_failing) {
+                  <gr-badge slot="actions" severity="danger">New</gr-badge>
+                }
+              </gr-row>
+            }
+          </gr-row-list>
+        }
+
+        @if (s.fixed.length) {
+          <h2>Fixed <span class="count">{{ s.fixed_total }}</span></h2>
+          <ul class="fixed mono">
+            @for (attr of s.fixed; track attr) {
+              <li>{{ attr }}</li>
+            }
+          </ul>
+        }
+
+        @if (!running() && !failureGroups().length && !s.failed_attributes.length) {
+          <gr-empty-state flat icon="check_circle" title="Nothing went wrong"
+                          message="No build failed and every attribute evaluated." />
+        }
+      </gr-page-layout>
+    }
+  } @else {
+    <gr-empty-state icon="search_off" title="Summary not available"
+                    message="The evaluation does not exist or is not visible to this account." />
+  }
+}

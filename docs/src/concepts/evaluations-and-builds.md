@@ -27,6 +27,20 @@ Evaluations skip every dependency subtree that earlier evaluations already recor
 
 The evaluation page shows the builds grouped by status, each entry point above its dependencies. The page also has the merged live log and **Abort**. A right-click on a build will open **Graph**, **Show Job** (the [Job Board](../ui/job-board.md) assignment), **Artefacts** and **Download Log**.
 
+## Summary
+
+**Summary** in the evaluation menu can open a report page for package maintainers. The link is shareable. Public projects need no login.
+
+| Part | Content |
+|---|---|
+| Headline | Number of packages that did not build |
+| **Newly failing** | Failed builds breaking a package that built in the previous evaluation |
+| **Still failing** | Failed builds with every affected package already broken in the previous evaluation |
+| **Failed to evaluate** | Attributes without a derivation, with the first line of the error |
+| **Fixed** | Packages broken in the previous evaluation and built now |
+
+Rows list only builds that failed themselves. Packages blocked by a failed dependency appear under that build. A row can open the build on the evaluation page. **Timed out** and **Worker fault** mark failures not caused by the package.
+
 ## Build
 
 A build is tied to the derivation, not to the evaluation. All evaluations needing the same derivation share the one build and its log, across all projects.

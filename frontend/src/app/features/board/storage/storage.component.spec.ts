@@ -59,6 +59,7 @@ describe('BoardStorageComponent', () => {
   });
 
   it('labels buckets by granularity', () => {
+    vi.stubEnv('TZ', 'UTC');
     const c = fixture.componentInstance;
     const at = Date.parse('2026-09-29T15:04:00Z');
     const labelAs = (granularity: BoardStorage['granularity']) => {
@@ -70,6 +71,7 @@ describe('BoardStorageComponent', () => {
     expect(labelAs('minute')).toEqual(['15:04']);
     expect(labelAs('hour')).toEqual(['09-29 15:04']);
     expect(labelAs('day')).toEqual(['09-29']);
+    vi.unstubAllEnvs();
   });
 
   it('keeps polling after a failed fetch', () => {

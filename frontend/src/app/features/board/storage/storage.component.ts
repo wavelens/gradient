@@ -9,7 +9,7 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { EMPTY, Observable, Subject, catchError, interval, map, startWith, switchMap } from 'rxjs';
 import { BoardService, BoardStorage } from '@core/services/board.service';
 import { MetricChartComponent } from '@shared/ui';
-import { formatCount, formatDuration } from '@shared/text';
+import { clockTime, monthDay, formatCount, formatDuration } from '@shared/text';
 import { alignSeries, windowBuckets } from './storage-chart';
 
 const WINDOWS = [1, 6, 24, 168];
@@ -99,13 +99,13 @@ export class BoardStorageComponent implements OnInit {
 
   categories = computed(() => {
     const granularity = this.stats()?.granularity;
-    const format = (iso: string) => {
-      if (granularity === 'day') return iso.slice(5, 10);
-      if (granularity === 'hour') return `${iso.slice(5, 10)} ${iso.slice(11, 16)}`;
-      return iso.slice(11, 16);
+    const format = (at: number) => {
+      if (granularity === 'day') return monthDay(at);
+      if (granularity === 'hour') return `${monthDay(at)} ${clockTime(at)}`;
+      return clockTime(at);
     };
 
-    return this.buckets().map((b) => format(new Date(b).toISOString()));
+    return this.buckets().map(format);
   });
 
   latency = computed(() => {

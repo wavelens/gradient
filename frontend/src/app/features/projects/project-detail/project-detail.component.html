@@ -7,7 +7,7 @@
 @if (loading()) {
   <gr-loading-spinner message="Loading project..." />
 } @else if (project(); as project) {
-  <gr-page-layout [title]="project.display_name" [subtitle]="project.description || 'No description'">
+  <gr-page-layout [breadcrumb]="breadcrumb()" [title]="project.display_name" [subtitle]="project.description || 'No description'">
   <div slot="actions">
     @if (project.role) {
       <button grButton label="Create Task" icon="add" (click)="openCreateDialog()"></button>

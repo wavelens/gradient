@@ -10,6 +10,7 @@ import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { BehaviorSubject, NEVER, Observable, of, throwError } from 'rxjs';
 import { CacheNarsComponent } from './cache-nars.component';
+import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { CachesService, NarListResponse, NarStats } from '@core/services/caches.service';
 
 const NAR = {
@@ -25,6 +26,7 @@ const PAGE: NarListResponse = { items: [NAR], total: 1, page: 1, per_page: 50 };
 
 function render(nars: () => Observable<NarListResponse>, stats: () => Observable<NarStats> = () => NEVER) {
   const query = new BehaviorSubject(convertToParamMap({}));
+  const getCache = vi.fn(() => NEVER);
   TestBed.configureTestingModule({
     imports: [CacheNarsComponent],
     providers: [
@@ -33,27 +35,30 @@ function render(nars: () => Observable<NarListResponse>, stats: () => Observable
       provideHttpClientTesting(),
       {
         provide: CachesService,
-        useValue: { getCache: () => NEVER, getCacheNars: vi.fn(nars), getCacheNarStats: stats },
+        useValue: { getCache, getCacheNars: vi.fn(nars), getCacheNarStats: stats },
       },
       {
         provide: ActivatedRoute,
         useValue: {
           snapshot: { paramMap: convertToParamMap({ cache: 'main' }) },
           queryParamMap: query,
-          parent: { data: of({ cacheAccess: { cache: { name: 'main', display_name: 'Main' } } }) },
+          parent: { data: of({}) },
         },
       },
     ],
   });
+  TestBed.inject(BreadcrumbsService).rememberCache('main', 'Main');
   const fixture = TestBed.createComponent(CacheNarsComponent);
   fixture.detectChanges();
-  return { fixture, query, root: fixture.nativeElement as HTMLElement };
+  return { fixture, query, getCache, root: fixture.nativeElement as HTMLElement };
 }
 
 describe('CacheNarsComponent loading', () => {
-  it('names the cache in the breadcrumb from the resolved cache at once', () => {
-    const { root } = render(() => NEVER);
-    expect(root.querySelector('.breadcrumb')?.textContent).toContain('Main');
+  it('names the cache in the breadcrumb at once from the name the resolver remembered', () => {
+    const { root, getCache } = render(() => NEVER);
+    const crumbs = Array.from(root.querySelectorAll('.breadcrumb-link, .breadcrumb-current'));
+    expect(crumbs.map((crumb) => crumb.textContent?.trim())).toEqual(['Caches', 'Main', 'NARs']);
+    expect(getCache).not.toHaveBeenCalled();
   });
 
   it('lays out the stat cards and the table with placeholders until the data arrives', () => {

@@ -12,6 +12,7 @@ import { LoadingSpinnerComponent } from '@gradient/ui/ui';
 import { MetricChartComponent } from '@shared/ui';
 import { firstLoad } from '../first-load';
 import { workerAxisLabel } from '../worker-label';
+import { clockTime } from '@shared/text';
 
 @Component({
   selector: 'app-board-throughput',
@@ -118,5 +119,5 @@ function align(
     const byBucket = new Map(points.map((p) => [p.bucket_start, p.count]));
     return { name, data: ordered.map((b) => byBucket.get(b) ?? 0) };
   });
-  return { categories: ordered.map((b) => b.slice(11, 16)), series };
+  return { categories: ordered.map((b) => clockTime(b)), series };
 }

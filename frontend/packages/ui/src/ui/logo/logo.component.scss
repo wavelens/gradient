@@ -9,15 +9,34 @@
   display: inline-flex;
   align-items: center;
   height: 32px;
-  color: var(--gr-text-primary);
+  color: var(--gr-logo);
 }
 
 .mark {
+  position: relative;
   display: block;
   height: 100%;
   aspect-ratio: 22.935 / 29.549;
-  background: currentcolor;
-  mask: url('/images/logo.svg') no-repeat center / contain;
+
+  &::before,
+  &::after {
+    content: '';
+    position: absolute;
+    mask: no-repeat center / contain;
+  }
+
+  // The outlined drawing is larger than the mark by its border on every side.
+  &::before {
+    inset: -5.09% -6.56%;
+    background: light-dark(transparent, var(--gr-white));
+    mask-image: url('/images/favicon.svg');
+  }
+
+  &::after {
+    inset: 0;
+    background: currentcolor;
+    mask-image: url('/images/logo.svg');
+  }
 }
 
 .custom {

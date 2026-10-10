@@ -5,13 +5,28 @@
  */
 
 import type { EntryPointSummary, FailedAttributeSummary } from '@core/models/task.model';
-import { groupEntryPoints } from './entry-point-groups';
+import { failuresWithinLoadedRows, groupEntryPoints } from './entry-point-groups';
 
 const ep = (attr: string, architecture = 'x86_64-linux') =>
   ({ id: attr, eval: attr, architecture }) as EntryPointSummary;
 
 const shape = (eps: EntryPointSummary[], failed: FailedAttributeSummary[] = []) =>
   groupEntryPoints(eps, failed).map((g) => [g.title, g.rows.map((r) => r.label)]);
+
+describe('failuresWithinLoadedRows', () => {
+  const failure = (attr: string) => ({ eval: attr, message: 'boom' });
+  const failed = [failure('packages.x86_64-linux.b'), failure('packages.x86_64-linux.y')];
+  const loaded = [ep('packages.x86_64-linux.a'), ep('packages.x86_64-linux.m')];
+
+  it('holds back a failure that sorts behind the last loaded row', () => {
+    expect(failuresWithinLoadedRows(failed, loaded, 40).map((f) => f.eval)).toEqual(['packages.x86_64-linux.b']);
+  });
+
+  it('lists every failure with the last page loaded', () => {
+    expect(failuresWithinLoadedRows(failed, loaded, 2)).toEqual(failed);
+    expect(failuresWithinLoadedRows(failed, [], 0)).toEqual(failed);
+  });
+});
 
 describe('groupEntryPoints', () => {
   it('heads the rows with their attribute set and drops it and the architecture from the labels', () => {

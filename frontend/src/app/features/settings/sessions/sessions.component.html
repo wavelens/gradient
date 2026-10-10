@@ -4,7 +4,7 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<gr-page-layout title="Active Sessions" subtitle="Devices currently signed in to your account">
+<gr-page-layout [breadcrumb]="[{ label: 'Settings', link: ['/settings', 'profile'] }, { label: 'Sessions' }]" title="Active Sessions" subtitle="Devices currently signed in to your account">
   @if (errorMessage()) {
     <gr-message-banner slot="banner" type="error">{{ errorMessage() }}</gr-message-banner>
   }

@@ -8,6 +8,7 @@ import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } 
 import { DatePipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, RouterModule } from '@angular/router';
+import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { TeamsService } from '@core/services/teams.service';
 import { UserService } from '@core/services/user.service';
 import { PendingInvitation, Team, TeamMember, TeamMemberSource, TeamRole } from '@core/models';
@@ -54,6 +55,7 @@ import {
 export class TeamMembersComponent implements OnInit {
   private route = inject(ActivatedRoute);
   private teams = inject(TeamsService);
+  private crumbs = inject(BreadcrumbsService);
   private users = inject(UserService);
 
   readonly roles: { label: string; value: TeamRole }[] = [
@@ -62,6 +64,7 @@ export class TeamMembersComponent implements OnInit {
   ];
 
   teamName = '';
+  breadcrumb = computed(() => this.crumbs.team(this.teamName, { label: 'Members' }));
   team = signal<Team | null>(null);
   loading = signal(true);
   members = signal<TeamMember[]>([]);
@@ -79,7 +82,10 @@ export class TeamMembersComponent implements OnInit {
 
   ngOnInit(): void {
     this.teamName = this.route.snapshot.paramMap.get('team') || '';
-    this.teams.get(this.teamName).subscribe((team) => this.team.set(team));
+    this.teams.get(this.teamName).subscribe((team) => {
+      this.team.set(team);
+      this.crumbs.rememberTeam(this.teamName, team.display_name);
+    });
     this.load();
   }
 

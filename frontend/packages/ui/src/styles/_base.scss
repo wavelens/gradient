@@ -42,6 +42,21 @@ body {
   line-height: $line-height-base;
   margin: 0;
   padding: 0;
+  isolation: isolate;
+}
+
+// The mark as a watermark behind every page, a shade off the page colour.
+body::before {
+  content: '';
+  position: fixed;
+  z-index: -1;
+  left: 3vw;
+  bottom: -10vh;
+  height: 95vh;
+  aspect-ratio: 22.935 / 29.549;
+  background: color-mix(in srgb, var(--gr-text-primary) 3%, transparent);
+  mask: url('/images/logo.svg') no-repeat center / contain;
+  pointer-events: none;
 }
 
 * {
@@ -110,6 +125,59 @@ a {
   gap: $spacing-sm;
 
   > :first-child { flex: 1; min-width: 0; }
+}
+
+// A search control with its icon inside and a key hint at the end: the header
+// trigger and every in-page search field.
+.search-box {
+  display: flex;
+  align-items: center;
+  gap: $spacing-sm;
+  width: 240px;
+  min-width: 0;
+  padding: $spacing-xs $spacing-sm;
+  border: 1px solid var(--gr-border);
+  border-radius: $border-radius-sm;
+  background: transparent;
+  color: var(--gr-text-muted);
+  font: inherit;
+  font-size: $font-size-sm;
+  cursor: text;
+  transition: border-color $transition-fast;
+
+  &:hover {
+    border-color: var(--gr-text-muted);
+  }
+
+  &:focus-within {
+    border-color: var(--gr-accent);
+    outline: $focus-ring-width solid color-mix(in srgb, var(--gr-accent) 40%, transparent);
+  }
+
+  input {
+    flex: 1;
+    min-width: 0;
+    padding: 0;
+    border: 0;
+    outline: 0;
+    background: transparent;
+    color: var(--gr-text-primary);
+    font: inherit;
+
+    &::placeholder {
+      color: var(--gr-text-muted);
+    }
+  }
+
+  kbd {
+    margin-left: auto;
+    padding: 0 $spacing-xs;
+    border: 1px solid var(--gr-border);
+    border-radius: $border-radius-sm;
+    font-family: inherit;
+    font-size: $font-size-xs;
+    white-space: nowrap;
+  }
 }
 
 // Names a control for assistive tech without showing the label.

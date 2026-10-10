@@ -4,7 +4,7 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<gr-page-layout [title]="title" subtitle="Signed POSTs of durable events to your endpoints">
+<gr-page-layout [breadcrumb]="breadcrumb()" [title]="title" subtitle="Signed POSTs of durable events to your endpoints">
   <button slot="actions" grButton label="New Webhook" icon="add" (click)="startCreate()"></button>
 
   @if (error()) {

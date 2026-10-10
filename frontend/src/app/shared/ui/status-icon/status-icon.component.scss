@@ -16,10 +16,10 @@
 }
 
 :host([data-phase='queued']),
-:host([data-phase='running']) { --phase-color: var(--gr-status-info); }
+:host([data-phase='running']) { --phase-color: var(--gr-indicator-info); }
 :host([data-phase='waiting']) { --phase-color: var(--gr-status-warning); }
-:host([data-phase='success']) { --phase-color: var(--gr-status-success); }
-:host([data-phase='failure']) { --phase-color: var(--gr-status-danger); }
+:host([data-phase='success']) { --phase-color: var(--gr-indicator-success); }
+:host([data-phase='failure']) { --phase-color: var(--gr-indicator-danger); }
 :host([data-phase='aborted']) { --phase-color: var(--gr-text-secondary); }
 
 svg { overflow: visible; }
@@ -34,8 +34,18 @@ svg * {
   stroke-linejoin: round;
 }
 
+.body {
+  position: relative;
+  display: inline-flex;
+}
+
 .spin,
-.body { transform-origin: 12px 12px; }
+.glyphs { display: inline-flex; }
+
+.glyphs {
+  position: absolute;
+  inset: 0;
+}
 
 .ring { stroke-dasharray: 100 0; }
 :host([data-phase='queued']) .ring { stroke-dasharray: 5 7.5; }
@@ -49,7 +59,7 @@ svg * {
 :host([data-phase='aborted']) .slash,
 :host([data-phase='waiting']) .bar { stroke-dashoffset: 0; opacity: 1; }
 
-:host([data-phase='waiting']) .pause { animation: status-pulse 1.6s ease-in-out 600ms infinite; }
+:host([data-phase='waiting']:not([data-offscreen])) .glyphs { animation: status-pulse 1.6s ease-in-out 600ms infinite; }
 
 :host([data-animate]) {
   svg { transition: color 200ms; }
@@ -80,5 +90,7 @@ svg * {
 
 @media (prefers-reduced-motion: reduce) {
   :host,
+  .body,
+  .glyphs,
   svg * { transition: none !important; animation: none !important; }
 }

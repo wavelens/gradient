@@ -44,6 +44,7 @@ function setup(requests: SubscriptionRequest[]) {
       {
         provide: CachesService,
         useValue: {
+          getCache: () => of({ display_name: 'Prod' }),
           getSubscriptionRequests: () => of(requests),
           approveSubscriptionRequest: approve,
           denySubscriptionRequest: deny,

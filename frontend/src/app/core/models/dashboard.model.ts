@@ -29,6 +29,7 @@ export interface TaskRow {
 }
 
 export interface TasksPage {
+  filter: DashboardFilter;
   counts: Record<DashboardFilter, number>;
   total: number;
   tasks: TaskRow[];

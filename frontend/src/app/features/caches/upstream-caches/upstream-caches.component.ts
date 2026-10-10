@@ -8,6 +8,7 @@ import { Component, OnInit, inject, signal, computed, ChangeDetectionStrategy } 
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
+import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { CachesService, UpstreamCache, CacheSubscriptionMode, ProtocolProbe } from '@core/services/caches.service';
 import {
   BadgeComponent,
@@ -63,6 +64,7 @@ import { normalizeProbeUrl, isGradientCacheInfo } from './cache-upstream-probe';
 export class UpstreamCachesComponent implements OnInit {
   private route = inject(ActivatedRoute);
   private cachesService = inject(CachesService);
+  private crumbs = inject(BreadcrumbsService);
   private accessSvc = inject(AccessService);
   private messageService = inject(MessageService);
 
@@ -93,7 +95,7 @@ export class UpstreamCachesComponent implements OnInit {
   editError = signal<string | null>(null);
 
   cacheName = '';
-  cacheDisplayName = '';
+  breadcrumb = computed(() => this.crumbs.cacheSettings(this.cacheName, { label: 'Upstream Caches' }));
 
   upstreamType: 'internal' | 'gradient_proto' | 'http' = 'internal';
   upstreamForm = {
@@ -121,15 +123,7 @@ export class UpstreamCachesComponent implements OnInit {
 
   ngOnInit(): void {
     this.cacheName = this.route.snapshot.paramMap.get('cache') || '';
-    this.loadCache();
     this.loadUpstreamCaches();
-  }
-
-  private loadCache(): void {
-    this.cachesService.getCache(this.cacheName).subscribe({
-      next: (c) => { this.cacheDisplayName = c.display_name; },
-      error: () => {},
-    });
   }
 
   loadUpstreamCaches(): void {

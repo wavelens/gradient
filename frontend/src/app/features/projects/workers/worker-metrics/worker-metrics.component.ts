@@ -8,7 +8,7 @@ import { Component, OnInit, inject, signal, computed, ChangeDetectionStrategy } 
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterModule } from '@angular/router';
 import { WorkersService, WorkerSamplePoint, WorkerConnectionEntry } from '@core/services/workers.service';
-import { ProjectsService } from '@core/services/projects.service';
+import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import {
   CardGridComponent,
   PageLayoutComponent,
@@ -16,7 +16,7 @@ import {
   TableComponent,
 } from '@gradient/ui/ui';
 import { MetricChartComponent } from '@shared/ui';
-import { formatMegabytes, formatPercent, formatQuantity } from '@shared/text';
+import { clockTime, serverTime, formatMegabytes, formatPercent, formatQuantity } from '@shared/text';
 
 @Component({
   selector: 'app-worker-metrics',
@@ -32,11 +32,7 @@ import { formatMegabytes, formatPercent, formatQuantity } from '@shared/text';
   ],
   template: `
     <gr-page-layout
-      [breadcrumb]="[
-        { label: projectDisplayName() || project, link: ['/project', project] },
-        { label: 'Workers', link: ['/project', project, 'workers'] },
-        { label: workerName() }
-      ]"
+      [breadcrumb]="breadcrumb()"
       [title]="workerName()"
       subtitle="Live metrics, connection history and assigned jobs for this worker"
     >
@@ -61,7 +57,7 @@ import { formatMegabytes, formatPercent, formatQuantity } from '@shared/text';
         <thead><tr><th>Connected</th><th>Disconnected</th></tr></thead>
         <tbody>
           @for (c of connections(); track $index) {
-            <tr><td>{{ c.connected_at | date: 'short' }}</td><td>{{ c.disconnected_at ? (c.disconnected_at | date: 'short') : 'connected' }}</td></tr>
+            <tr><td>{{ serverTime(c.connected_at) | date: 'short' }}</td><td>{{ c.disconnected_at ? (serverTime(c.disconnected_at) | date: 'short') : 'connected' }}</td></tr>
           } @empty {
             <tr><td colspan="2" class="muted">No sessions recorded.</td></tr>
           }
@@ -75,11 +71,10 @@ import { formatMegabytes, formatPercent, formatQuantity } from '@shared/text';
 export class WorkerMetricsComponent implements OnInit {
   private route = inject(ActivatedRoute);
   private workers = inject(WorkersService);
-  private projects = inject(ProjectsService);
+  private crumbs = inject(BreadcrumbsService);
 
   project = '';
   workerId = '';
-  projectDisplayName = signal('');
   displayName = signal<string | null>(null);
   samples = signal<WorkerSamplePoint[]>([]);
   connections = signal<WorkerConnectionEntry[]>([]);
@@ -87,12 +82,18 @@ export class WorkerMetricsComponent implements OnInit {
 
   /// The id is the last resort: history outlives the registration that named it.
   workerName = computed(() => this.displayName() || this.workerId);
+  breadcrumb = computed(() => this.crumbs.projectSettings(
+    this.project,
+    { label: 'Workers', link: ['/project', this.project, 'workers'] },
+    { label: this.workerName() },
+  ));
 
   readonly percent = (value: number) => formatPercent(value / 100);
   readonly megabytes = formatMegabytes;
+  readonly serverTime = serverTime;
   readonly mbps = (value: number) => formatQuantity(value, 'Mbps');
 
-  times = computed(() => this.samples().map((s) => s.at.slice(11, 16)));
+  times = computed(() => this.samples().map((s) => clockTime(s.at)));
   cpuSeries = computed(() => [{ name: 'cpu', data: this.samples().map((s) => s.cpu_usage_pct ?? 0) }]);
   ramSeries = computed(() => [{ name: 'ram free', data: this.samples().map((s) => s.ram_free_mb ?? 0) }]);
   transferSeries = computed(() => [
@@ -105,10 +106,6 @@ export class WorkerMetricsComponent implements OnInit {
   ngOnInit(): void {
     this.project = this.route.snapshot.paramMap.get('project') ?? '';
     this.workerId = this.route.snapshot.paramMap.get('workerId') ?? '';
-    this.projects.getProject(this.project).subscribe({
-      next: (project) => this.projectDisplayName.set(project.display_name),
-      error: () => {},
-    });
     this.workers.getWorkerMetrics(this.project, this.workerId).subscribe((stats) => {
       this.displayName.set(stats.display_name);
       this.samples.set(stats.samples);

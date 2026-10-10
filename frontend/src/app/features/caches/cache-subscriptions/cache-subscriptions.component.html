@@ -5,7 +5,7 @@
 -->
 
 <gr-page-layout
-  [breadcrumb]="[{ label: 'Caches', link: ['/caches'] }, { label: cacheName, link: ['/caches', cacheName] }, { label: 'Subscriptions' }]"
+  [breadcrumb]="breadcrumb()"
   title="Subscriptions"
   subtitle="Projects asking to use this cache"
 >

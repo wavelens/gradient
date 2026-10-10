@@ -37,17 +37,17 @@ import { EvaluationHistoryComponent } from '../evaluation-history/evaluation-his
 import { barsThatFit } from '../format';
 
 const FILTERS: { key: DashboardFilter; label: string }[] = [
+  { key: 'starred', label: 'Starred' },
   { key: 'all', label: 'All' },
   { key: 'failing', label: 'Failing' },
-  { key: 'starred', label: 'Starred' },
 ];
 const HISTORY_COLUMN_PX = 210;
 const TOP = 10;
 const PAGE_SIZE = 25;
 const RESIZE_DEBOUNCE_MS = 150;
 
-function parseFilter(value: string | null): DashboardFilter {
-  return FILTERS.find((x) => x.key === value)?.key ?? 'all';
+function parseFilter(value: string | null): DashboardFilter | null {
+  return FILTERS.find((x) => x.key === value)?.key ?? null;
 }
 
 @Component({
@@ -77,16 +77,22 @@ export class DashboardTaskTableComponent implements OnInit {
   private destroyRef = inject(DestroyRef);
   private requests = new Subject<void>();
 
-  filter = signal<DashboardFilter>('all');
+  // null leaves the choice to the server: starred once the user starred a task, all otherwise.
+  filter = signal<DashboardFilter | null>(null);
   page = signal(1);
   expanded = signal(false);
   history = signal(barsThatFit(HISTORY_COLUMN_PX));
   data = signal<TasksPage | null>(null);
   failed = signal(false);
   hidden = signal(false);
-  chips = computed(() =>
-    FILTERS.map((f) => ({ label: `${f.label} ${this.data()?.counts?.[f.key] ?? 0}`, value: f.key })),
-  );
+  selected = computed(() => this.filter() ?? this.data()?.filter ?? null);
+  chips = computed(() => {
+    const counts = this.data()?.counts;
+    return FILTERS.filter((f) => f.key !== 'starred' || counts?.starred).map((f) => ({
+      label: `${f.label} ${counts?.[f.key] ?? 0}`,
+      value: f.key,
+    }));
+  });
 
   readonly placeholders = Array.from({ length: TOP });
   readonly duration = formatDuration;
@@ -101,6 +107,7 @@ export class DashboardTaskTableComponent implements OnInit {
       )
       .subscribe((d) => {
         this.data.set(d);
+        this.leaveFilterWithoutChip(d);
         afterNextRender(() => this.fitHistory(), { injector: this.injector });
       });
     this.route.queryParamMap
@@ -120,11 +127,7 @@ export class DashboardTaskTableComponent implements OnInit {
   }
 
   select(f: DashboardFilter): void {
-    this.router.navigate([], {
-      relativeTo: this.route,
-      queryParams: { filter: f === 'all' ? null : f },
-      queryParamsHandling: 'merge',
-    });
+    this.router.navigate([], { relativeTo: this.route, queryParams: { filter: f }, queryParamsHandling: 'merge' });
   }
 
   showAll(): void {
@@ -150,6 +153,16 @@ export class DashboardTaskTableComponent implements OnInit {
 
   load(): void {
     this.requests.next();
+  }
+
+  private leaveFilterWithoutChip(d: TasksPage): void {
+    if (d.filter !== 'starred' || d.counts.starred) return;
+    this.router.navigate([], {
+      relativeTo: this.route,
+      queryParams: { filter: null },
+      queryParamsHandling: 'merge',
+      replaceUrl: true,
+    });
   }
 
   private fetch(): Observable<TasksPage> {

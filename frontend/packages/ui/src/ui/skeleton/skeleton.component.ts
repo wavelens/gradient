@@ -5,6 +5,7 @@
  */
 
 import { ChangeDetectionStrategy, Component, input } from '@angular/core';
+import { injectOnScreen } from '../on-screen/on-screen';
 
 // Stands in for content that has not arrived; the loading container carries aria-busy, so this stays hidden.
 @Component({
@@ -13,6 +14,7 @@ import { ChangeDetectionStrategy, Component, input } from '@angular/core';
   template: '',
   host: {
     'aria-hidden': 'true',
+    '[class.still]': '!onScreen()',
     '[style.width]': 'width()',
     '[style.height]': 'height()',
   },
@@ -22,4 +24,5 @@ import { ChangeDetectionStrategy, Component, input } from '@angular/core';
 export class SkeletonComponent {
   width = input<string>();
   height = input<string>();
+  protected readonly onScreen = injectOnScreen();
 }

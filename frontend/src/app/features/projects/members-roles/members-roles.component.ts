@@ -8,6 +8,7 @@ import { Component, OnInit, computed, inject, signal, ChangeDetectionStrategy } 
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
+import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import {
   ProjectsService,
   ProjectMember,
@@ -78,10 +79,12 @@ export class MembersRolesComponent implements OnInit {
   private projectsService = inject(ProjectsService);
   private userService = inject(UserService);
   private projectAccess = inject(ProjectAccessService);
+  private crumbs = inject(BreadcrumbsService);
 
   access = signal<AccessState>({ managed: false, canEdit: false, canTrigger: false });
 
   projectName = '';
+  breadcrumb = computed(() => this.crumbs.projectSettings(this.projectName, { label: 'Members & Roles' }));
 
   membersLoading = signal(true);
   rolesLoading = signal(true);

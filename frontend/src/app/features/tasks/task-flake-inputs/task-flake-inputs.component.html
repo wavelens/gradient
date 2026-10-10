@@ -6,7 +6,7 @@
 
 <gr-toast />
 
-<gr-page-layout [breadcrumb]="[{ label: projectDisplayName() || projectName, link: ['/project', projectName] }, { label: taskName, link: ['/project', projectName, 'task', taskName] }, { label: 'Flake Input Overrides' }]" title="Flake Input Overrides" subtitle="Override flake inputs to pin or redirect dependencies for the next evaluation">
+<gr-page-layout [breadcrumb]="breadcrumb()" title="Flake Input Overrides" subtitle="Override flake inputs to pin or redirect dependencies for the next evaluation">
   <button slot="actions"
       *appWritable="access()"
       grButton

@@ -4,7 +4,7 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<gr-page-layout [breadcrumb]="[{ label: projectDisplayName() || projectName, link: ['/project', projectName] }, { label: taskName, link: ['/project', projectName, 'task', taskName] }, { label: 'Triggers' }]" title="Triggers" subtitle="Conditions that automatically start an evaluation">
+<gr-page-layout [breadcrumb]="breadcrumb()" title="Triggers" subtitle="Conditions that automatically start an evaluation">
   <button slot="actions"
       *appWritable="access()"
       grButton

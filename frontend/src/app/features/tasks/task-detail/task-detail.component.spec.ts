@@ -242,6 +242,13 @@ describe('TaskDetailComponent - loading', () => {
     expect((fixture.nativeElement as HTMLElement).querySelector('.breadcrumb-link gr-skeleton')).not.toBeNull();
   });
 
+  it('leads from the project list to the task by display name', () => {
+    const { fixture } = setup(access);
+    const crumbs = Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('.breadcrumb-link, .breadcrumb-current'));
+    expect(crumbs.map((crumb) => crumb.textContent?.trim())).toEqual(['Projects', 'Acme', 'Demo']);
+    expect(crumbs.map((crumb) => crumb.getAttribute('href'))).toEqual(['/projects', '/project/acme', null]);
+  });
+
   it('leaves the packages empty under their heading until the entry points arrive', () => {
     const { fixture } = setup(access, { primaryStatus: 'Completed', getEntryPoints: () => NEVER });
     const root = fixture.nativeElement as HTMLElement;
@@ -478,6 +485,22 @@ describe('TaskDetailComponent - evaluation progress', () => {
     expect(row?.textContent).toContain('nixpkgs');
   });
 
+  it('titles the fetching inputs "Flake Inputs" and lists them by name below the downloading inputs', () => {
+    const inputs = [
+      { name: 'zlib', state: 'Done' as const, downloaded_bytes: 1, expected_bytes: 0 },
+      { name: 'nixpkgs', state: 'Fetching' as const, downloaded_bytes: 10, expected_bytes: 40 },
+      { name: 'crane', state: 'Queued' as const, downloaded_bytes: 0, expected_bytes: 0 },
+    ];
+    const { fixture } = setup({ managed: false, canEdit: true, canTrigger: true }, {
+      primaryStatus: 'Fetching',
+      primary: { progress: { kind: 'fetching', inputs } },
+    });
+    fixture.detectChanges();
+    const panel = fixture.nativeElement.querySelector('.panel') as HTMLElement;
+    expect(panel.querySelector('.pkg-label h3')?.textContent).toBe('Flake Inputs');
+    expect(Array.from(panel.querySelectorAll('.pkg .pkg-name'), n => n.textContent?.trim())).toEqual(['nixpkgs', 'crane', 'zlib']);
+  });
+
   it('shows the thunk bar instead of a spinner while evaluating', () => {
     const { fixture, frames } = setup({ managed: false, canEdit: true, canTrigger: true }, { primaryStatus: 'EvaluatingFlake' });
     frames.next({ event: 'evaluation.activity', at: '', content: { evaluation_id: 'e1', progress: { kind: 'evaluating', thunks: 1234567 } } });
@@ -577,7 +600,7 @@ describe('TaskDetailComponent - evaluation selection', () => {
     const spy = vi.spyOn(tasksService, 'getEntryPoints').mockReturnValue(of({ entry_points: [], total: 0, failed_attributes: [] }));
     const component = fixture.componentInstance;
     component.select(component.evaluations()[1]);
-    expect(spy).toHaveBeenCalledWith(component.projectName, component.taskName, component.evaluations()[1].id, 25, 0);
+    expect(spy).toHaveBeenCalledWith(component.projectName, component.taskName, component.evaluations()[1].id, 25, 0, '');
   });
 
   /// The server clamps `limit` at 500, so growing one request cannot reach past it;
@@ -658,6 +681,33 @@ describe('TaskDetailComponent - evaluation selection', () => {
     const failed = root.querySelector('.pkg[data-phase="failure"]');
     expect(failed?.querySelector('.pkg-name')?.textContent?.trim()).toBe('b');
     expect(failed?.querySelector('.pkg-error')?.textContent?.trim()).toBe('Failed to evaluate');
+  });
+
+  it('holds a failed attribute back until the rows before it are loaded', () => {
+    const host = (n: string) => `nixosConfigurations.${n}.config.system.build.toplevel`;
+    const { fixture, tasksService } = setup(
+      { managed: false, canEdit: true, canTrigger: true },
+      {
+        primaryStatus: 'Failed',
+        getEntryPoints: () => of({
+          entry_points: [epSummary('a', host('a'))],
+          total: 2,
+          failed_attributes: [{ eval: host('b'), message: 'boom' }],
+        }),
+      },
+    );
+    const root = fixture.nativeElement as HTMLElement;
+    expect(root.querySelector('.pkg[data-phase="failure"]')).toBeNull();
+
+    vi.spyOn(tasksService, 'getEntryPoints').mockReturnValue(of({
+      entry_points: [epSummary('c', host('c'))],
+      total: 2,
+      failed_attributes: [{ eval: host('b'), message: 'boom' }],
+    }));
+    fixture.componentInstance.loadMoreEntryPoints();
+    fixture.detectChanges();
+
+    expect(root.querySelector('.pkg[data-phase="failure"] .pkg-name')?.textContent?.trim()).toBe('b');
   });
 
   /// The server walks one dependency closure per entry point it returns, so a
@@ -802,6 +852,24 @@ describe('TaskDetailComponent - abort modal', () => {
     expect(spy).not.toHaveBeenCalled();
   });
 
+  it('asks first on a plain click of Abort', () => {
+    const { fixture, tasksService } = setup({ managed: false, canEdit: true, canTrigger: true });
+    const spy = vi.spyOn(tasksService, 'abortEvaluation');
+    const component = fixture.componentInstance;
+    component.requestAbort(new MouseEvent('click'), 'e1');
+    expect(component.abortTarget()).toBe('e1');
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it('aborts at once on a Ctrl click, with no confirm modal', () => {
+    const { fixture, tasksService } = setup({ managed: false, canEdit: true, canTrigger: true });
+    const spy = vi.spyOn(tasksService, 'abortEvaluation').mockReturnValue(NEVER);
+    const component = fixture.componentInstance;
+    component.requestAbort(new MouseEvent('click', { ctrlKey: true }), 'e1');
+    expect(spy).toHaveBeenCalledWith(component.projectName, component.taskName, 'e1');
+    expect(component.abortTarget()).toBeNull();
+  });
+
   it('confirmAbort calls the service with the targeted evaluation id', () => {
     const { fixture, tasksService } = setup({ managed: false, canEdit: true, canTrigger: true });
     const spy = vi.spyOn(tasksService, 'abortEvaluation').mockReturnValue(of('Success'));
@@ -855,7 +923,7 @@ describe('TaskDetailComponent diagnostic report', () => {
   it('offers the logs first, then metrics and the diagnostic report', () => {
     const { fixture } = setup({ managed: false, canEdit: true, canTrigger: true }, {}, 'superuser');
     const labels = fixture.componentInstance.panelMenuModel().map(i => i.label);
-    expect(labels).toEqual(['Logs', 'Show job', 'Metrics', 'Prioritize', 'Full rewalk', 'Diagnostic report']);
+    expect(labels).toEqual(['Logs', 'Summary', 'Show job', 'Metrics', 'Prioritize', 'Full rewalk', 'Diagnostic report']);
   });
 
   it('points the logs entry at the selected evaluation', () => {
@@ -863,12 +931,23 @@ describe('TaskDetailComponent diagnostic report', () => {
     expect(item?.routerLink).toEqual(['/project', 'acme', 'log', 'e1']);
   });
 
+  it('hands the bar the same counts for an unchanged package, so the bar is not redrawn', () => {
+    const c = component();
+    const ep = epSummary('a');
+    expect(c.barCounts(ep)).toBe(c.barCounts(ep));
+  });
+
+  it('points the summary entry at the selected evaluation', () => {
+    const item = component().panelMenuModel().find(i => i.label === 'Summary');
+    expect(item?.routerLink).toEqual(['/project', 'acme', 'summary', 'e1']);
+  });
+
   /// Generating a report is an authenticated endpoint, so the entry point is
   /// gone rather than present and guaranteed to fail.
   it('hides the diagnostic report from anonymous visitors', () => {
     const { fixture } = setup({ managed: false, canEdit: true, canTrigger: true }, {}, 'anonymous');
     const labels = fixture.componentInstance.panelMenuModel().map(i => i.label);
-    expect(labels).toEqual(['Logs', 'Show job', 'Metrics']);
+    expect(labels).toEqual(['Logs', 'Summary', 'Show job', 'Metrics']);
   });
 
   it('opens the dialog from the menu command', () => {
@@ -992,7 +1071,7 @@ describe('TaskDetailComponent - #636 eval page', () => {
     expect(sentinel.nativeElement.querySelectorAll('gr-skeleton').length).toBeGreaterThan(0);
     expect(sentinel.nativeElement.textContent.trim()).toBe('');
     sentinel.triggerEventHandler('grInView');
-    expect(spy).toHaveBeenCalledWith('acme', 'demo', 'e1', 25, 1);
+    expect(spy).toHaveBeenCalledWith('acme', 'demo', 'e1', 25, 1, '');
     fixture.detectChanges();
     expect(fixture.nativeElement.querySelector('.pkg-more')).toBeNull();
   });
@@ -1162,6 +1241,95 @@ describe('TaskDetailComponent - eval query param', () => {
     fixture.detectChanges();
 
     expect(fixture.componentInstance.selected()?.id).toBe('e2');
-    expect(spy).toHaveBeenCalledWith('acme', 'demo', 'e2', 25, 0);
+    expect(spy).toHaveBeenCalledWith('acme', 'demo', 'e2', 25, 0, '');
+  });
+});
+
+describe('TaskDetailComponent - package search', () => {
+  const access = { managed: false, canEdit: true, canTrigger: true };
+  const failed = (name: string) => ({ eval: `packages."x86_64-linux".${name}`, message: 'boom' });
+  const page = (names: string[], failures: string[] = []) =>
+    of({ entry_points: names.map((n) => epSummary(n)), total: names.length, failed_attributes: failures.map(failed) });
+  const names = (root: HTMLElement) => Array.from(root.querySelectorAll('.pkg .pkg-name'), (n) => n.textContent?.trim());
+
+  const searchField = (fixture: ComponentFixture<TaskDetailComponent>) =>
+    fixture.nativeElement.querySelector('.pkg-search input') as HTMLInputElement | null;
+
+  function openSearch(fixture: ComponentFixture<TaskDetailComponent>): { find: KeyboardEvent; input: HTMLInputElement } {
+    const find = new KeyboardEvent('keydown', { key: 'f', ctrlKey: true, cancelable: true });
+    fixture.componentInstance.onKeydown(find);
+    fixture.detectChanges();
+    TestBed.tick();
+    return { find, input: searchField(fixture)! };
+  }
+
+  function type(fixture: ComponentFixture<TaskDetailComponent>, input: HTMLInputElement, term: string): void {
+    input.value = term;
+    input.dispatchEvent(new Event('input'));
+    vi.advanceTimersByTime(200);
+    fixture.detectChanges();
+  }
+
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  it('keeps the search hidden for a list that fits a page until Ctrl+F opens it focused', () => {
+    const { fixture } = setup(access, { getEntryPoints: () => page(['hello']) });
+    expect(searchField(fixture)).toBeNull();
+
+    const { find, input } = openSearch(fixture);
+
+    expect(find.defaultPrevented).toBe(true);
+    expect(document.activeElement).toBe(input);
+  });
+
+  it('shows the search without the shortcut for a list spanning more than a page', () => {
+    const { fixture } = setup(access, {
+      getEntryPoints: () => of({ entry_points: [epSummary('hello')], total: 26, failed_attributes: [] }),
+    });
+
+    expect(searchField(fixture)).not.toBeNull();
+  });
+
+  it('asks the server for the typed term and lists the matches only', () => {
+    const { fixture, tasksService } = setup(access, { getEntryPoints: () => page(['hello', 'world']) });
+    const spy = vi.spyOn(tasksService, 'getEntryPoints').mockReturnValue(page(['hello']));
+
+    type(fixture, openSearch(fixture).input, 'hel');
+
+    expect(spy).toHaveBeenLastCalledWith('acme', fixture.componentInstance.taskName, 'e1', 25, 0, 'hel');
+    expect(names(fixture.nativeElement)).toEqual(['hello']);
+  });
+
+  it('narrows the attributes that failed to evaluate by the same term', () => {
+    const { fixture } = setup(access, { getEntryPoints: () => page([], ['broken', 'other']) });
+
+    type(fixture, openSearch(fixture).input, 'BROK');
+
+    expect(names(fixture.nativeElement)).toEqual(['x86_64-linux.broken']);
+  });
+
+  it('says that nothing matches instead of "No packages"', () => {
+    const { fixture, tasksService } = setup(access, { getEntryPoints: () => page(['hello']) });
+    vi.spyOn(tasksService, 'getEntryPoints').mockReturnValue(page([]));
+
+    type(fixture, openSearch(fixture).input, 'zzz');
+
+    expect(fixture.nativeElement.textContent).toContain('No matching packages');
+  });
+
+  it('closes on Escape and brings the full list back', () => {
+    const { fixture, tasksService } = setup(access, { getEntryPoints: () => page(['hello', 'world']) });
+    const spy = vi.spyOn(tasksService, 'getEntryPoints').mockReturnValue(page(['hello']));
+    const { input } = openSearch(fixture);
+    type(fixture, input, 'hel');
+    spy.mockReturnValue(page(['hello', 'world']));
+
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    fixture.detectChanges();
+
+    expect(searchField(fixture)).toBeNull();
+    expect(spy).toHaveBeenLastCalledWith('acme', fixture.componentInstance.taskName, 'e1', 25, 0, '');
+    expect(names(fixture.nativeElement)).toEqual(['hello', 'world']);
   });
 });

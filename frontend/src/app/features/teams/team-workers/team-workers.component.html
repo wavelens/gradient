@@ -4,7 +4,7 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<gr-page-layout [breadcrumb]="[{ label: 'Teams', link: ['/teams'] }, { label: team()?.display_name || teamName, link: ['/team', teamName] }, { label: 'Workers' }]" title="Workers">
+<gr-page-layout [breadcrumb]="breadcrumb()" title="Workers">
   @if (isAdmin()) {
     <div slot="actions">
       @if (canConnectGradientCi()) {

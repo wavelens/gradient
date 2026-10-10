@@ -4,7 +4,7 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<gr-page-layout [breadcrumb]="[{ label: 'Teams', link: ['/teams'] }, { label: team()?.display_name || teamName }]" [title]="team()?.display_name || teamName" subtitle="Team">
+<gr-page-layout [breadcrumb]="breadcrumb()" [title]="team()?.display_name || teamName" subtitle="Team">
   @if (isAdmin()) {
     <div slot="actions">
       <button grButton label="Members" icon="group" severity="secondary" [routerLink]="['/team', teamName, 'members']"></button>

@@ -34,14 +34,14 @@
   }
 
   &.is-selected {
-    background: var(--gr-accent);
-    border-color: var(--gr-accent);
+    background: var(--gr-accent-fill);
+    border-color: var(--gr-accent-fill);
     color: var(--gr-accent-fg);
   }
 
   &.is-selected:hover:not(:disabled) {
-    background: var(--gr-accent-hover);
-    border-color: var(--gr-accent-hover);
+    background: var(--gr-accent-fill-hover);
+    border-color: var(--gr-accent-fill-hover);
   }
 
   &:disabled {

@@ -205,18 +205,21 @@ function heatmapOption(
     if (!isXY(s.data)) return;
     s.data.forEach((p, x) => data.push([x, y, p.y]));
   });
+  const max = data.reduce((m, [, , v]) => Math.max(m, v), 0);
 
   return {
-    grid: { left: 8, right: 12, top: 28, bottom: 44, containLabel: true },
+    grid: { left: 8, right: 12, top: 28, bottom: 36, containLabel: true },
     xAxis: { type: 'category', data: xs, axisLabel: axisLabel(theme), axisLine: axisLine(theme), splitArea: { show: true } },
     yAxis: { type: 'category', data: cfg.series.map((s) => s.name), axisLabel: axisLabel(theme), axisLine: axisLine(theme), splitArea: { show: true } },
     visualMap: {
       min: 0,
-      max: data.reduce((m, [, , v]) => Math.max(m, v), 0),
-      calculable: true,
+      max,
       orient: 'horizontal',
       left: 'center',
       bottom: 0,
+      itemWidth: 10,
+      itemHeight: 160,
+      text: [format(max), format(0)],
       textStyle: { color: theme.text },
       inRange: { color: [theme.surface, cfg.colors?.[0] ?? theme.palette[0]] },
       formatter: (v) => format(Number(v)),

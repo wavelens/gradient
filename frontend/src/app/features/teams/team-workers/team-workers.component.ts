@@ -7,6 +7,7 @@
 import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, RouterModule } from '@angular/router';
+import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { TeamsService } from '@core/services/teams.service';
 import { AuthService } from '@core/services/auth.service';
 import { ConfigService } from '@core/services/config.service';
@@ -64,10 +65,12 @@ import {
 export class TeamWorkersComponent implements OnInit {
   private route = inject(ActivatedRoute);
   private teams = inject(TeamsService);
+  private crumbs = inject(BreadcrumbsService);
   private authService = inject(AuthService);
   config = inject(ConfigService);
 
   teamName = '';
+  breadcrumb = computed(() => this.crumbs.team(this.teamName, { label: 'Workers' }));
   team = signal<Team | null>(null);
   workers = signal<TeamWorker[]>([]);
   loading = signal(true);
@@ -99,7 +102,12 @@ export class TeamWorkersComponent implements OnInit {
 
   ngOnInit(): void {
     this.teamName = this.route.snapshot.paramMap.get('team') || '';
-    this.teams.get(this.teamName).subscribe({ next: (team) => this.team.set(team) });
+    this.teams.get(this.teamName).subscribe({
+      next: (team) => {
+        this.team.set(team);
+        this.crumbs.rememberTeam(this.teamName, team.display_name);
+      },
+    });
     this.load();
   }
 
