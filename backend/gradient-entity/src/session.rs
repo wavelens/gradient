@@ -35,6 +35,12 @@ pub enum Relation {
     User,
 }
 
+impl Model {
+    pub fn is_usable_at(&self, now: NaiveDateTime) -> bool {
+        self.revoked_at.is_none() && self.expires_at >= now
+    }
+}
+
 impl std::fmt::Debug for Model {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Session")

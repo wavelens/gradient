@@ -6,7 +6,7 @@
 
 use super::api_key::{ApiKeyContext, DecodedRequest};
 use axum::extract::State;
-use axum::http::StatusCode;
+use axum::http::{HeaderMap, StatusCode, header};
 use chrono::{Duration, Utc};
 use gradient_core::ServerState;
 use gradient_types::*;
@@ -15,6 +15,7 @@ use rand::distr::{Alphanumeric, SampleString};
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter,
 };
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::sync::Arc;
@@ -37,31 +38,60 @@ pub struct DownloadClaims {
     pub evaluation: EvaluationId,
 }
 
-pub(super) fn token_from_cookie(req: &axum::extract::Request) -> Option<String> {
-    let cookie_header = req
-        .headers()
-        .get(axum::http::header::COOKIE)?
+pub fn cookie_value<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
+    headers
+        .get(header::COOKIE)?
         .to_str()
-        .ok()?;
-    cookie_header
+        .ok()?
         .split(';')
         .map(str::trim)
-        .find_map(|part| part.strip_prefix("jwt_token=").map(str::to_owned))
+        .find_map(|part| part.strip_prefix(name)?.strip_prefix('='))
 }
 
-pub fn extract_bearer_or_cookie(headers: &axum::http::HeaderMap) -> Option<String> {
-    if let Some(auth) = headers.get(axum::http::header::AUTHORIZATION) {
-        let val = auth.to_str().ok()?;
-        let mut parts = val.split_whitespace();
-        if parts.next() == Some("Bearer") {
-            return parts.next().map(str::to_owned);
-        }
-    }
-    let cookie_header = headers.get(axum::http::header::COOKIE)?.to_str().ok()?;
-    cookie_header
-        .split(';')
-        .map(str::trim)
-        .find_map(|part| part.strip_prefix("jwt_token=").map(str::to_owned))
+pub(super) fn bearer_token(headers: &HeaderMap) -> Option<&str> {
+    let mut parts = headers
+        .get(header::AUTHORIZATION)?
+        .to_str()
+        .ok()?
+        .split_whitespace();
+
+    parts.next().filter(|scheme| *scheme == "Bearer")?;
+    parts.next()
+}
+
+pub(super) fn session_cookie_token(headers: &HeaderMap) -> Option<&str> {
+    cookie_value(headers, "jwt_token")
+}
+
+pub fn extract_bearer_or_cookie(headers: &HeaderMap) -> Option<&str> {
+    bearer_token(headers).or_else(|| session_cookie_token(headers))
+}
+
+pub(super) fn sign_claims<T: Serialize>(
+    state: &ServerState,
+    claims: &T,
+) -> jsonwebtoken::errors::Result<String> {
+    encode(
+        &Header::default(),
+        claims,
+        &EncodingKey::from_secret(state.jwt_secret.expose().as_bytes()),
+    )
+}
+
+pub(super) fn verify_claims<T: DeserializeOwned>(
+    state: &ServerState,
+    token: &str,
+) -> jsonwebtoken::errors::Result<T> {
+    decode::<T>(
+        token,
+        &DecodingKey::from_secret(state.jwt_secret.expose().as_bytes()),
+        &Validation::default(),
+    )
+    .map(|data| data.claims)
+}
+
+pub fn session_claims(state: &ServerState, headers: &HeaderMap) -> Option<Cliams> {
+    verify_claims(state, extract_bearer_or_cookie(headers)?).ok()
 }
 
 pub async fn create_session_and_token(
@@ -77,8 +107,8 @@ pub async fn create_session_and_token(
     } else {
         Duration::hours(24)
     };
-    let expires_at = now + lifetime;
 
+    let expires_at = now + lifetime;
     let session_id = SessionId::now_v7();
     let session = MSession {
         id: session_id,
@@ -104,12 +134,8 @@ pub async fn create_session_and_token(
         id: user_id,
         jti: session_id,
     };
-    let token = encode(
-        &Header::default(),
-        &claim,
-        &EncodingKey::from_secret(state.jwt_secret.expose().as_bytes()),
-    )
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let token = sign_claims(&state, &claim).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     Ok((session_id, token))
 }
@@ -122,24 +148,15 @@ pub async fn decode_jwt(
         return decode_api_key(state, raw).await;
     }
 
-    let token_data = decode::<Cliams>(
-        &jwt,
-        &DecodingKey::from_secret(state.jwt_secret.expose().as_bytes()),
-        &Validation::default(),
-    )
-    .map_err(|_| StatusCode::UNAUTHORIZED)?;
-
-    let session = ESession::find_by_id(token_data.claims.jti)
+    let claims: Cliams = verify_claims(&state, &jwt).map_err(|_| StatusCode::UNAUTHORIZED)?;
+    let session = ESession::find_by_id(claims.jti)
         .one(&state.web_db)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
         .ok_or(StatusCode::UNAUTHORIZED)?;
 
     let now = gradient_types::now();
-    if session.revoked_at.is_some()
-        || session.expires_at < now
-        || session.user_id != token_data.claims.id
-    {
+    if !session.is_usable_at(now) || session.user_id != claims.id {
         return Err(StatusCode::UNAUTHORIZED);
     }
 
@@ -155,9 +172,7 @@ pub async fn decode_jwt(
         }
     }
 
-    Ok(DecodedRequest::Session {
-        user_id: token_data.claims.id,
-    })
+    Ok(DecodedRequest::Session { user_id: claims.id })
 }
 
 async fn decode_api_key(
@@ -173,12 +188,7 @@ async fn decode_api_key(
         .ok_or(StatusCode::UNAUTHORIZED)?;
 
     let now = gradient_types::now();
-    if api_key.revoked_at.is_some() {
-        return Err(StatusCode::UNAUTHORIZED);
-    }
-    if let Some(exp) = api_key.expires_at
-        && exp < now
-    {
+    if !api_key.is_usable_at(now) {
         return Err(StatusCode::UNAUTHORIZED);
     }
 
@@ -194,6 +204,7 @@ async fn decode_api_key(
         },
         allowed_ips: api_key.allowed_ips.clone().unwrap_or_default(),
     };
+
     let user_id = api_key.owned_by;
 
     if state
@@ -225,32 +236,21 @@ pub fn encode_download_token(
         derivation,
         evaluation,
     };
-    encode(
-        &Header::default(),
-        &claim,
-        &EncodingKey::from_secret(state.jwt_secret.expose().as_bytes()),
-    )
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
+
+    sign_claims(&state, &claim).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
 }
 
 pub async fn decode_download_token(
     state: State<Arc<ServerState>>,
     token: String,
 ) -> Result<DownloadClaims, StatusCode> {
-    decode::<DownloadClaims>(
-        &token,
-        &DecodingKey::from_secret(state.jwt_secret.expose().as_bytes()),
-        &Validation::default(),
-    )
-    .map(|d| d.claims)
-    .map_err(|_| StatusCode::UNAUTHORIZED)
+    verify_claims(&state, &token).map_err(|_| StatusCode::UNAUTHORIZED)
 }
 
 pub fn generate_api_key() -> String {
     Alphanumeric.sample_string(&mut rand::rng(), 64)
 }
 
-/// API keys are stored hashed. `state.api_keys[*].key_file` must contain this value.
 pub fn hash_api_key(raw: &str) -> String {
     let mut h = Sha256::new();
     h.update(raw.as_bytes());
@@ -260,52 +260,58 @@ pub fn hash_api_key(raw: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axum::http::{HeaderMap, HeaderValue, header};
-
-    fn headers_with(name: header::HeaderName, value: &str) -> HeaderMap {
-        let mut h = HeaderMap::new();
-        h.insert(name, HeaderValue::from_str(value).unwrap());
-        h
-    }
+    use axum::http::HeaderValue;
+    use axum::http::header::{AUTHORIZATION, COOKIE, HeaderName};
 
     #[test]
-    fn extract_bearer_from_authorization_header() {
-        let h = headers_with(header::AUTHORIZATION, "Bearer abc.def.ghi");
-        assert_eq!(extract_bearer_or_cookie(&h).as_deref(), Some("abc.def.ghi"));
-    }
+    fn extract_bearer_or_cookie_reads_the_presented_token() {
+        let cases: [(&str, &[(HeaderName, &str)], Option<&str>); 9] = [
+            (
+                "bearer token",
+                &[(AUTHORIZATION, "Bearer abc.def.ghi")],
+                Some("abc.def.ghi"),
+            ),
+            (
+                "scheme is case sensitive",
+                &[(AUTHORIZATION, "bearer abc")],
+                None,
+            ),
+            (
+                "basic scheme is ignored",
+                &[(AUTHORIZATION, "Basic dXNlcjpwYXNz")],
+                None,
+            ),
+            ("bearer without a token", &[(AUTHORIZATION, "Bearer")], None),
+            (
+                "session cookie among others",
+                &[(COOKIE, "other=1; jwt_token=xyz; last=2")],
+                Some("xyz"),
+            ),
+            (
+                "cookie whose name only starts alike",
+                &[(COOKIE, "jwt_token_old=1")],
+                None,
+            ),
+            (
+                "cookies without the session cookie",
+                &[(COOKIE, "other=1; session=2")],
+                None,
+            ),
+            (
+                "bearer wins over the session cookie",
+                &[(AUTHORIZATION, "Bearer abc"), (COOKIE, "jwt_token=xyz")],
+                Some("abc"),
+            ),
+            ("no headers", &[], None),
+        ];
 
-    #[test]
-    fn extract_bearer_scheme_is_case_sensitive() {
-        let h = headers_with(header::AUTHORIZATION, "bearer abc");
-        assert_eq!(extract_bearer_or_cookie(&h), None);
-    }
+        for (case, entries, expected) in cases {
+            let headers: HeaderMap = entries
+                .iter()
+                .map(|(name, value)| (name.clone(), HeaderValue::from_str(value).unwrap()))
+                .collect();
 
-    #[test]
-    fn extract_basic_auth_is_ignored() {
-        let h = headers_with(header::AUTHORIZATION, "Basic dXNlcjpwYXNz");
-        assert_eq!(extract_bearer_or_cookie(&h), None);
-    }
-
-    #[test]
-    fn extract_falls_back_to_cookie_when_no_auth_header() {
-        let h = headers_with(header::COOKIE, "other=1; jwt_token=xyz; last=2");
-        assert_eq!(extract_bearer_or_cookie(&h).as_deref(), Some("xyz"));
-    }
-
-    #[test]
-    fn extract_cookie_without_jwt_token_returns_none() {
-        let h = headers_with(header::COOKIE, "other=1; session=2");
-        assert_eq!(extract_bearer_or_cookie(&h), None);
-    }
-
-    #[test]
-    fn extract_empty_headers_returns_none() {
-        assert_eq!(extract_bearer_or_cookie(&HeaderMap::new()), None);
-    }
-
-    #[test]
-    fn extract_bearer_with_no_token_part_returns_none() {
-        let h = headers_with(header::AUTHORIZATION, "Bearer");
-        assert_eq!(extract_bearer_or_cookie(&h), None);
+            assert_eq!(extract_bearer_or_cookie(&headers), expected, "{case}");
+        }
     }
 }

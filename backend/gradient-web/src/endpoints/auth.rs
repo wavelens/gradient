@@ -6,7 +6,8 @@
 
 use crate::audit::{RequestInfo, record as audit_record};
 use crate::authorization::{
-    create_session_and_token, oidc_login_create, oidc_login_verify, update_last_login,
+    cookie_value, create_session_and_token, oidc_login_create, oidc_login_verify, session_claims,
+    update_last_login,
 };
 use crate::error::{ErrorCode, WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json};
@@ -318,14 +319,6 @@ fn oidc_csrf_clear_cookie(use_tls: bool) -> String {
     )
 }
 
-fn read_cookie(headers: &axum::http::HeaderMap, name: &str) -> Option<String> {
-    let header = headers.get(axum::http::header::COOKIE)?.to_str().ok()?;
-    header
-        .split(';')
-        .map(str::trim)
-        .find_map(|p| p.strip_prefix(&format!("{}=", name)).map(str::to_owned))
-}
-
 /// The upstream IdP detail is only logged. A client probing the endpoint is seeing a generic 401.
 fn oidc_failure(stage: &'static str) -> impl FnOnce(anyhow::Error) -> WebError {
     move |e| {
@@ -348,8 +341,9 @@ pub async fn get_oauth_authorize(
     let state_query = query
         .get("state")
         .ok_or_else(|| WebError::unauthorized("Missing OIDC state"))?;
-    let csrf = read_cookie(&headers, OIDC_CSRF_COOKIE)
-        .ok_or_else(|| WebError::unauthorized("Missing OIDC CSRF cookie"))?;
+    let csrf = cookie_value(&headers, OIDC_CSRF_COOKIE)
+        .ok_or_else(|| WebError::unauthorized("Missing OIDC CSRF cookie"))?
+        .to_owned();
 
     let use_tls = state.config.server.use_tls;
     let user: MUser = oidc_login_verify(
@@ -455,8 +449,9 @@ pub async fn get_oidc_callback(
     let state_query = query
         .get("state")
         .ok_or_else(|| WebError::unauthorized("Missing OIDC state"))?;
-    let csrf = read_cookie(&headers, OIDC_CSRF_COOKIE)
-        .ok_or_else(|| WebError::unauthorized("Missing OIDC CSRF cookie"))?;
+    let csrf = cookie_value(&headers, OIDC_CSRF_COOKIE)
+        .ok_or_else(|| WebError::unauthorized("Missing OIDC CSRF cookie"))?
+        .to_owned();
 
     let use_tls = state.config.server.use_tls;
     let user: MUser = oidc_login_verify(
@@ -518,16 +513,9 @@ pub async fn post_logout(
         secure
     );
 
-    if let Some(token) = crate::authorization::extract_bearer_or_cookie(&headers)
-        && !token.starts_with("GRAD")
-        && let Ok(data) = jsonwebtoken::decode::<crate::authorization::Cliams>(
-            &token,
-            &jsonwebtoken::DecodingKey::from_secret(state.jwt_secret.expose().as_bytes()),
-            &jsonwebtoken::Validation::default(),
-        )
-    {
-        let session_id = data.claims.jti;
-        let user_id = data.claims.id;
+    if let Some(claims) = session_claims(&state, &headers) {
+        let session_id = claims.jti;
+        let user_id = claims.id;
         if let Ok(Some(session)) = ESession::find_by_id(session_id).one(&state.web_db).await {
             let mut active: ASession = session.into_active_model();
             active.revoked_at = Set(Some(gradient_types::now()));

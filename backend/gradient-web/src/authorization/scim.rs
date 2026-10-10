@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use axum::body::Body;
 use axum::extract::State;
-use axum::http::{Request, header};
+use axum::http::Request;
 use axum::middleware::Next;
 use axum::response::Response;
 use sha2::{Digest, Sha256};
@@ -16,9 +16,9 @@ use sha2::{Digest, Sha256};
 use gradient_core::ServerState;
 use gradient_types::input::load_secret;
 
+use super::jwt::bearer_token;
 use crate::scim::ScimError;
 
-/// The route is mounted only when SCIM is configured. `state.config.scim` is therefore `Some` here.
 pub async fn authorize_scim(
     State(state): State<Arc<ServerState>>,
     req: Request<Body>,
@@ -28,12 +28,8 @@ pub async fn authorize_scim(
         return Err(ScimError::unauthorized("SCIM is not enabled"));
     };
 
-    let presented = req
-        .headers()
-        .get(header::AUTHORIZATION)
-        .and_then(|h| h.to_str().ok())
-        .and_then(|v| v.strip_prefix("Bearer "))
-        .map(str::trim)
+    // string errors
+    let presented = bearer_token(req.headers())
         .ok_or_else(|| ScimError::unauthorized("missing SCIM bearer token"))?;
 
     let expected = load_secret(&scim.token_file)
