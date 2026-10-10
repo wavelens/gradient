@@ -21,7 +21,6 @@ flowchart LR
 | `PROBE_TICK` | 1 s | Pass interval while no request arrived |
 | `PROBE_BUDGET` | 120 s | Supervision budget of one pass |
 | `PROBE_DESCENT` | 60 s | A pass will stop descending after this. The rest must wait for the next tick |
-| `PROBE_MEMORY` | 300 s | No repeat question for an answered shared build within this window |
 | `PROBE_BATCH` | 256 | Outputs per request round, and rows per recovery check |
 | `PROBE_SWEEP` | 60 s | Recovery check interval, only on an idle tick |
 
@@ -30,6 +29,7 @@ flowchart LR
 - **Descent:** the answer of each round will move the needs-build marks and hand the next level straight back. One pass can follow the closure down instead of one level per tick.
 - **Look-Ahead:** a round can also ask about the unanswered dependencies of the wanted shared builds. A miss makes these dependencies needed, and the next level then costs no extra round. Only the dependencies of an upstream hit go unused.
 - **Recovery check:** every walked shared build needing a build, with `probed = false` set. The check must cover a process stopped between a commit and the channel send.
+- **Retry:** `probed` is the only memory of an answer. User retries of an evaluation or a build clear the flag on every requeued shared build missing from the caches. The probe can then ask again.
 
 ## One Round
 
