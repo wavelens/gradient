@@ -92,14 +92,15 @@ pub(crate) static RECOUNT_WANTED_SQL: LazyLock<String> = LazyLock::new(|| {
     )
 });
 
-/// A finished evaluation and an aborted entry point want nothing. Aborted shared builds are
-/// open, and such entry points kept them wanted and thawed.
+/// An aborted evaluation and an aborted entry point want nothing. Aborted shared builds are
+/// open, and such entry points kept them wanted and thawed. Completed and failed evaluations
+/// still want a retired output built again.
 fn wanted_by_its_evaluation(entry_point: &str) -> String {
     format!(
-        "JOIN evaluation ev ON ev.id = {entry_point}.evaluation AND ev.status NOT IN ({finished}) \
+        "JOIN evaluation ev ON ev.id = {entry_point}.evaluation AND ev.status <> {aborted} \
          AND NOT EXISTS (SELECT 1 FROM build_job bj WHERE bj.evaluation = {entry_point}.evaluation \
                          AND bj.derivation = {entry_point}.derivation AND bj.aborted)",
-        finished = crate::sql::status::eval_in(&EvaluationStatus::TERMINAL),
+        aborted = crate::sql::status::eval(EvaluationStatus::Aborted),
     )
 }
 
@@ -353,9 +354,9 @@ mod tests {
     }
 
     #[test]
-    fn an_entry_point_of_a_finished_evaluation_wants_nothing() {
+    fn an_entry_point_of_an_aborted_evaluation_wants_nothing() {
         let live = "FROM entry_point ep JOIN evaluation ev \
-                    ON ev.id = ep.evaluation AND ev.status NOT IN (5, 6, 7)";
+                    ON ev.id = ep.evaluation AND ev.status <> 7";
         for sql in [RECOUNT_WANTED_SQL.as_str(), UPDATE_NEED_SQL.as_str()] {
             let sql = norm(sql);
             assert_eq!(
@@ -503,7 +504,7 @@ mod tests {
                  JOIN derivation w ON w.id = rb.derivation \
                  WHERE (NOT rb.fetchable AND rb.status NOT IN (4, 6, 9)) \
                  AND r.derivation IN (SELECT ep.derivation FROM entry_point ep \
-                 JOIN evaluation ev ON ev.id = ep.evaluation AND ev.status NOT IN (5, 6, 7) \
+                 JOIN evaluation ev ON ev.id = ep.evaluation AND ev.status <> 7 \
                  AND NOT EXISTS (SELECT 1 FROM build_job bj WHERE bj.evaluation = ep.evaluation \
                  AND bj.derivation = ep.derivation AND bj.aborted) \
                  UNION ALL SELECT derivation FROM entered)"
