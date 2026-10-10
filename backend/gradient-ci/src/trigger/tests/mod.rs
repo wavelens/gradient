@@ -175,6 +175,10 @@ async fn restart_with_all_cached_inserts_completed_eval() {
         .append_query_results([prev_entry_points])
         .append_query_results([shared_builds])
         .append_query_results([vec![inserted_eval]])
+        .append_exec_results([MockExecResult {
+            last_insert_id: 0,
+            rows_affected: 1,
+        }])
         .append_query_results([Vec::<gradient_entity::task_flake_input_override::Model>::new()])
         .append_query_results([vec![make_entry_point(new_eval_id, drv_a)]])
         .append_query_results([vec![make_entry_point(new_eval_id, drv_b)]])
@@ -223,6 +227,10 @@ async fn restart_with_one_failed_inserts_building_eval_and_inherits_the_names() 
         .append_query_results([prev_entry_points])
         .append_query_results([shared_builds])
         .append_query_results([vec![inserted_eval]])
+        .append_exec_results([MockExecResult {
+            last_insert_id: 0,
+            rows_affected: 1,
+        }])
         .append_query_results([Vec::<gradient_entity::task_flake_input_override::Model>::new()])
         .append_query_results([vec![make_entry_point(new_eval_id, drv_a)]])
         .append_query_results([vec![make_entry_point(new_eval_id, drv_b)]])
@@ -240,11 +248,22 @@ async fn restart_with_one_failed_inserts_building_eval_and_inherits_the_names() 
     let result = trigger_evaluation_retry(&db, &task, &prev_eval).await;
     assert!(result.is_ok(), "expected Ok, got: {:?}", result.err());
     assert_eq!(result.unwrap().status, EvaluationStatus::Building);
-    let log = gradient_db::pool::statements(db.into_transaction_log());
+    let log = gradient_db::pool::raw_statements(db.into_transaction_log());
     assert!(
-        log.iter().any(|s| s.contains("INSERT INTO build_job")
-            && s.contains("FROM build_job bj WHERE bj.evaluation = $1")),
+        log.iter().any(|s| s.sql.contains("INSERT INTO build_job")
+            && s.sql.contains("FROM build_job bj WHERE bj.evaluation = $1")),
         "the restart takes the previous evaluation's names over: {log:?}"
+    );
+    let link = log
+        .iter()
+        .find(|s| s.sql.starts_with(r#"UPDATE "evaluation" SET "next""#))
+        .expect("the previous evaluation points at the restart");
+    assert_eq!(
+        link.values.as_ref().unwrap().0,
+        vec![
+            sea_orm::Value::Uuid(Some(new_eval_id.into_inner())),
+            sea_orm::Value::Uuid(Some(prev_eval_id.into_inner())),
+        ]
     );
 }
 

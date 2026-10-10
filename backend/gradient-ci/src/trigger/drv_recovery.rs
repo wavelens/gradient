@@ -6,6 +6,7 @@
 
 use super::TriggerError;
 use super::flake_snapshot::snapshot_flake_input_overrides;
+use super::new_evaluation::link_to_previous;
 use crate::abort::{AbortKind, abort_evaluation};
 use gradient_entity::evaluation::{EvaluationKind, EvaluationStatus};
 use gradient_types::*;
@@ -45,6 +46,7 @@ pub async fn trigger_drv_recovery<C: ConnectionTrait>(
     .into_active_model();
 
     let new_eval = aevaluation.insert(db).await?;
+    link_to_previous(db, &new_eval).await?;
 
     snapshot_flake_input_overrides(db, task.id, new_eval.id).await?;
 

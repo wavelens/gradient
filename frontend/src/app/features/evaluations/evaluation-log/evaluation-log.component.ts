@@ -1493,7 +1493,8 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   canRetry(build: BuildItem): boolean {
     const evaluation = this.evaluation();
     return this.triggerAccess().canEdit && !!evaluation
-      && (isRunningEvaluationStatus(evaluation.status) || REOPENABLE_EVALUATION_STATUSES.includes(evaluation.status))
+      && (isRunningEvaluationStatus(evaluation.status)
+        || (REOPENABLE_EVALUATION_STATUSES.includes(evaluation.status) && !evaluation.next))
       && RETRYABLE_BUILD_STATUSES.includes(build.status);
   }
 
