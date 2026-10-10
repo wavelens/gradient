@@ -10,8 +10,9 @@ use gradient_entity::evaluation::{EvaluationStatus, WalkMode};
 use gradient_types::consts::NULL_TIME;
 use gradient_types::*;
 use sea_orm::ActiveValue::Set;
+use sea_orm::sea_query::Expr;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, Condition, ConnectionTrait, EntityTrait, IntoActiveModel,
+    ActiveModelTrait, ColumnTrait, Condition, ConnectionTrait, DbErr, EntityTrait, IntoActiveModel,
     QueryFilter,
 };
 
@@ -36,6 +37,23 @@ pub(super) async fn ensure_no_active_evaluation<C: ConnectionTrait>(
     if in_progress.is_some() {
         return Err(TriggerError::AlreadyInProgress);
     }
+
+    Ok(())
+}
+
+pub(super) async fn link_to_previous<C: ConnectionTrait>(
+    db: &C,
+    evaluation: &MEvaluation,
+) -> Result<(), DbErr> {
+    let Some(previous) = evaluation.previous else {
+        return Ok(());
+    };
+
+    EEvaluation::update_many()
+        .col_expr(CEvaluation::Next, Expr::value(evaluation.id))
+        .filter(CEvaluation::Id.eq(previous))
+        .exec(db)
+        .await?;
 
     Ok(())
 }
@@ -106,6 +124,7 @@ pub async fn trigger_evaluation<C: ConnectionTrait>(
     .into_active_model();
 
     let evaluation = aevaluation.insert(db).await?;
+    link_to_previous(db, &evaluation).await?;
 
     snapshot_flake_input_overrides(db, task.id, evaluation.id).await?;
 

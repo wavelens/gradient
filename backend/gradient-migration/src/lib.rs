@@ -117,6 +117,7 @@ mod m20261008_000000_derivation_ifd;
 pub mod m20261009_000000_build_job_aborted;
 mod m20261009_000001_task_retry_failed_builds;
 mod m20261009_000002_evaluation_statistics_target;
+mod m20261010_000000_evaluation_next_backfill;
 
 pub struct Migrator;
 
@@ -230,6 +231,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261009_000000_build_job_aborted::Migration),
             Box::new(m20261009_000001_task_retry_failed_builds::Migration),
             Box::new(m20261009_000002_evaluation_statistics_target::Migration),
+            Box::new(m20261010_000000_evaluation_next_backfill::Migration),
         ]
     }
 }

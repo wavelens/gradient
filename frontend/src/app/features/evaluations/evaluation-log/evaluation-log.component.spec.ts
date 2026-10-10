@@ -510,6 +510,13 @@ describe('EvaluationLogComponent', () => {
         }
       });
 
+      it('hides retry in a failed evaluation a newer evaluation replaced', () => {
+        const { cmp } = setup();
+        inEvaluation(cmp, 'Failed');
+        cmp.evaluation.update(evaluation => ({ ...evaluation!, next: 'eval-2' }));
+        expect(open(cmp, target({ status: 'FailedPermanent' })).has('Retry')).toBe(false);
+      });
+
       it('hides retry in a completed evaluation', () => {
         const { cmp } = setup();
         inEvaluation(cmp, 'Completed');
