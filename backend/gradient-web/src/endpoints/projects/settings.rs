@@ -271,9 +271,8 @@ pub async fn post_project_subscribe_cache(
 
     reauth_project_workers(&state, &scheduler, project.id).await;
 
-    // Evaluations parked with `WaitingReason::NoCache` are re-queued here. Only ReadWrite and
-    // WriteOnly subscriptions are unblocking builds. A ReadOnly subscription is leaving the project
-    // without a push target.
+    // Re-queue the evaluations parked with `WaitingReason::NoCache`. Only ReadWrite and WriteOnly
+    // subscriptions unblock builds. ReadOnly subscriptions leave the project without a push target.
     if unparks_builds
         && let Err(e) = gradient_ci::unpark_no_cache_for_project(&state.web_db, project.id).await
     {
