@@ -78,12 +78,18 @@ export class CacheSettingsComponent implements OnInit {
     { label: 'Public', value: true },
   ];
 
+  readonly pullThroughOptions = [
+    { label: 'Enabled', value: true },
+    { label: 'Disabled', value: false },
+  ];
+
   formData = {
     display_name: '',
     description: '',
     priority: 50,
     local_priority: null as number | null,
     max_storage_gb: 0,
+    pull_through: true,
     public: false,
   };
 
@@ -104,6 +110,7 @@ export class CacheSettingsComponent implements OnInit {
           priority: cache.priority,
           local_priority: cache.local_priority,
           max_storage_gb: cache.max_storage_gb ?? 0,
+          pull_through: cache.pull_through ?? true,
           public: cache.public,
         };
         this.loading.set(false);
@@ -141,6 +148,7 @@ export class CacheSettingsComponent implements OnInit {
       priority: this.formData.priority,
       local_priority: this.formData.local_priority,
       max_storage_gb: this.formData.max_storage_gb,
+      pull_through: this.formData.pull_through,
     }).subscribe({
       next: () => {
         visibilityCall.subscribe({

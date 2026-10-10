@@ -123,6 +123,7 @@ services.gradient.state = {
 | `name` | string | attribute name | Unique cache name. |
 | `priority` | int | `10` | Priority advertised in `nix-cache-info`. Nix is querying caches with a lower value first. |
 | `projects` | list of string | `[ ]` | Names of the projects using this cache. |
+| `pull_through` | bool | `true` | Whether Nix clients receive paths from the upstream caches through this cache. |
 | `public` | bool | `false` | Whether the cache is available to all projects. |
 | `teams` | list of submodule | `[ ]` | Teams granted on this cache. Grants declared here before and no longer listed leave on the next state apply. Grants from the API stay. |
 | `teams.*.role` | string | - | Role of the team's users: `Admin`, `Write`, `View` or a custom role of the cache. |

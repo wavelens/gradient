@@ -12,7 +12,7 @@ use axum::http::{HeaderMap, HeaderValue, header};
 use axum::response::Response;
 use gradient_core::ServerState;
 use gradient_core::upstream_source::{fetch_upstream_log, substitution_sources};
-use gradient_db::caches::upstream::active_upstream_caches;
+use gradient_db::caches::upstream::pull_through_upstream_caches;
 use gradient_sources::parse_drv_hash_name;
 use gradient_types::*;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
@@ -33,7 +33,7 @@ pub async fn log(
         return log_response(body, "HIT");
     }
 
-    let upstream_caches = active_upstream_caches(&state.web_db, ctx.cache.id).await?;
+    let upstream_caches = pull_through_upstream_caches(&state.web_db, &ctx.cache).await?;
     match fetch_upstream_log(&substitution_sources(&upstream_caches), &drv).await {
         Some(body) => log_response(body, "MISS"),
         None => Err(WebError::not_found("Log")),

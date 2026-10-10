@@ -80,6 +80,21 @@
       </gr-form-field>
 
       <gr-form-field
+        label="Pull-Through"
+        for="pull-through"
+        hint="Nix clients receive paths from the upstream caches through this cache. Disabled: only paths the cache holds. Builds still substitute from the upstream caches."
+      >
+        <gr-select
+          inputId="pull-through"
+          [options]="pullThroughOptions"
+          optionLabel="label"
+          optionValue="value"
+          [(ngModel)]="formData.pull_through"
+          [appManagedDisable]="access()"
+        />
+      </gr-form-field>
+
+      <gr-form-field
         label="Visibility"
         for="visibility"
         hint="Public caches are visible and readable by all users"

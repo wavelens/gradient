@@ -53,6 +53,9 @@ pub enum Commands {
         /// Max cache storage in GB. 0 = unlimited, otherwise at least 1.
         #[arg(short = 'm', long)]
         max_storage_gb: Option<i32>,
+        /// Answer Nix clients with paths from the upstream caches
+        #[arg(long)]
+        pull_through: Option<bool>,
     },
     /// Delete a cache
     Delete {
@@ -165,6 +168,7 @@ pub async fn handle(cmd: Commands, out: Output) {
             description,
             priority,
             max_storage_gb,
+            pull_through,
         } => {
             let client = client_from_config(out);
             let current = match client.caches().get(&name).await {
@@ -213,6 +217,7 @@ pub async fn handle(cmd: Commands, out: Output) {
                             &input.get("Max Storage (GB)"),
                             out,
                         )),
+                        pull_through,
                         ..Default::default()
                     },
                 )

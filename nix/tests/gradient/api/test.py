@@ -566,6 +566,7 @@ assert {"polling", "time"} <= trig_types, trig_types
 # Cache applied with members, custom role and upstream.
 cache = api("GET", "caches/statecache", token=sa_token)
 assert cache["public"] is True and cache["priority"] == 20 and cache["max_storage_gb"] == 5, cache
+assert cache["pull_through"] is False, cache
 assert any(m["id"] == "statemember" for m in api("GET", "caches/statecache/members", token=sa_token))
 assert any(r["name"] == "cachereaders"
            for r in api("GET", "caches/statecache/roles", token=sa_token)["roles"])

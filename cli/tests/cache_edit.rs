@@ -78,7 +78,8 @@ async fn an_untouched_edit_patches_the_cache_with_its_own_values() {
             "display_name": "Prod",
             "description": "the production cache",
             "priority": 40,
-            "max_storage_gb": 100
+            "max_storage_gb": 100,
+            "pull_through": null
         })))
         .respond_with(
             ResponseTemplate::new(200)
@@ -104,7 +105,8 @@ async fn a_flag_overrides_one_field_and_leaves_the_rest() {
             "display_name": "Production",
             "description": "the production cache",
             "priority": 40,
-            "max_storage_gb": 100
+            "max_storage_gb": 100,
+            "pull_through": null
         })))
         .respond_with(
             ResponseTemplate::new(200)
@@ -120,4 +122,31 @@ async fn a_flag_overrides_one_field_and_leaves_the_rest() {
         &["cache", "edit", "prod", "--display-name", "Production"],
     )
     .success();
+}
+
+#[tokio::test]
+async fn the_pull_through_flag_is_patched() {
+    let server = MockServer::start().await;
+    prod_cache(&server).await;
+
+    Mock::given(method("PATCH"))
+        .and(path("/api/v1/caches/prod"))
+        .and(body_json(serde_json::json!({
+            "name": null,
+            "display_name": "Prod",
+            "description": "the production cache",
+            "priority": 40,
+            "max_storage_gb": 100,
+            "pull_through": false
+        })))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(serde_json::json!({"error": false, "message": "updated"})),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let home = home_with(&server);
+    edit(&home, &["cache", "edit", "prod", "--pull-through", "false"]).success();
 }

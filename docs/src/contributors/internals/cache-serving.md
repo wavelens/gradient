@@ -51,6 +51,7 @@ The server will build `GET /cache/{cache}/<hash>.narinfo` from the database only
 - The server will rewrite the `URL:` of an upstream narinfo to `nar/upstream/{id}/...` paths.
 - The server will re-sign an upstream narinfo only after verifying the upstream signature.
 - The `X-Cache` header will answer `HIT` for a local narinfo and `MISS` for an upstream one.
+- Caches with `pull_through` off skip the upstream lookup (`pull_through_upstream_caches` in `gradient-db/src/caches/upstream.rs`). Narinfo, upstream NAR, debug info and build log requests then answer `404` on a miss.
 
 ## Debug Info
 

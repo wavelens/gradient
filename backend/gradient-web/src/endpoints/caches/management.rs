@@ -42,6 +42,8 @@ pub struct MakeCacheRequest {
     pub local_priority: Option<i32>,
     #[serde(default)]
     pub max_storage_gb: Option<i32>,
+    #[serde(default)]
+    pub pull_through: Option<bool>,
 }
 
 #[derive(Serialize)]
@@ -54,6 +56,7 @@ pub struct CacheResponse {
     pub priority: i32,
     pub local_priority: Option<i32>,
     pub max_storage_gb: i32,
+    pub pull_through: bool,
     pub public_key: String,
     pub public: bool,
     pub created_by: UserId,
@@ -70,6 +73,7 @@ pub struct PatchCacheRequest {
     pub priority: Option<i32>,
     pub local_priority: Option<i32>,
     pub max_storage_gb: Option<i32>,
+    pub pull_through: Option<bool>,
 }
 
 fn validate_max_storage_gb(value: i32) -> WebResult<()> {
@@ -169,6 +173,7 @@ pub async fn put(
         created_by: user.id,
         created_at: gradient_types::now(),
         max_storage_gb,
+        pull_through: body.pull_through.unwrap_or(true),
         ..Default::default()
     }
     .into_active_model()
@@ -277,6 +282,7 @@ pub async fn get_cache(
         priority: cache.priority,
         local_priority: cache.local_priority,
         max_storage_gb: cache.max_storage_gb,
+        pull_through: cache.pull_through,
         public_key,
         public: cache.public,
         created_by: cache.created_by,
@@ -314,6 +320,7 @@ pub async fn patch_cache(
         ("priority", body.priority.is_some()),
         ("local_priority", body.local_priority.is_some()),
         ("max_storage_gb", body.max_storage_gb.is_some()),
+        ("pull_through", body.pull_through.is_some()),
     ]);
     let mut acache: ACache = cache.into();
 
@@ -353,6 +360,10 @@ pub async fn patch_cache(
 
     if let Some(local_priority) = body.local_priority {
         acache.local_priority = Set(Some(local_priority));
+    }
+
+    if let Some(pull_through) = body.pull_through {
+        acache.pull_through = Set(pull_through);
     }
 
     let mut raised_limit = false;

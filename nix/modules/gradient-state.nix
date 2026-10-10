@@ -895,6 +895,16 @@
         '';
       };
 
+      pull_through = mkOption {
+        type = types.bool;
+        default = true;
+        description = ''
+          Whether Nix clients receive paths from the upstream caches through this cache. Caches
+          without pull-through only deliver the paths they hold. Builds still substitute from
+          the upstream caches.
+        '';
+      };
+
       signing_key_file = mkOption {
         type = types.str;
         description = "File containing the Nix cache signing key.";

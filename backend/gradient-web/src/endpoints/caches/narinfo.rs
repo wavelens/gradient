@@ -13,7 +13,7 @@ use axum::response::{IntoResponse, Response};
 use gradient_core::ServerState;
 use gradient_core::upstream::UpstreamProbe;
 use gradient_core::upstream_source::substitutes_from;
-use gradient_db::caches::upstream::active_upstream_caches;
+use gradient_db::caches::upstream::pull_through_upstream_caches;
 use gradient_sources::{CacheSigner, get_hash_from_url};
 use gradient_types::events::cache::NarinfoServed;
 use gradient_types::*;
@@ -222,7 +222,7 @@ async fn fetch_from_upstream(
     cache: &MCache,
     path_hash: &str,
 ) -> Option<String> {
-    let upstream_caches: Vec<UpstreamProbe> = active_upstream_caches(&state.web_db, cache.id)
+    let upstream_caches: Vec<UpstreamProbe> = pull_through_upstream_caches(&state.web_db, cache)
         .await
         .unwrap_or_default()
         .into_iter()

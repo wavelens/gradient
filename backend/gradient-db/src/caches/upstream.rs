@@ -5,6 +5,7 @@
  */
 
 use anyhow::Result;
+use gradient_entity::cache::Model as MCache;
 use gradient_entity::cache_upstream::{
     CacheUpstreamKind, Column as CCacheUpstream, Entity as ECacheUpstream, Model as MCacheUpstream,
 };
@@ -67,12 +68,16 @@ pub struct GradientProtoUpstream {
     pub api_key_enc: Option<String>,
 }
 
-pub async fn active_upstream_caches<C: ConnectionTrait>(
+pub async fn pull_through_upstream_caches<C: ConnectionTrait>(
     db: &C,
-    cache: CacheId,
+    cache: &MCache,
 ) -> Result<Vec<MCacheUpstream>, DbErr> {
+    if !cache.pull_through {
+        return Ok(Vec::new());
+    }
+
     ECacheUpstream::find()
-        .filter(CCacheUpstream::Cache.eq(cache))
+        .filter(CCacheUpstream::Cache.eq(cache.id))
         .filter(CCacheUpstream::Active.eq(true))
         .all(db)
         .await
@@ -251,4 +256,50 @@ pub async fn upstream_urls_for_projects<C: ConnectionTrait>(
         .into_iter()
         .filter_map(|r| r.try_get::<String>("", "url").ok())
         .collect())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sea_orm::{DatabaseBackend, DatabaseConnection, MockDatabase};
+
+    fn upstream_row() -> MCacheUpstream {
+        MCacheUpstream {
+            url: Some("https://cache.nixos.org".into()),
+            ..Default::default()
+        }
+    }
+
+    fn db_with_an_active_upstream_cache() -> DatabaseConnection {
+        MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([vec![upstream_row()]])
+            .into_connection()
+    }
+
+    #[tokio::test]
+    async fn a_pull_through_cache_asks_its_active_upstream_caches() {
+        let cache = MCache::default();
+
+        let upstream_caches =
+            pull_through_upstream_caches(&db_with_an_active_upstream_cache(), &cache)
+                .await
+                .unwrap();
+
+        assert_eq!(upstream_caches, vec![upstream_row()]);
+    }
+
+    #[tokio::test]
+    async fn a_cache_with_pull_through_off_asks_no_upstream_cache() {
+        let cache = MCache {
+            pull_through: false,
+            ..Default::default()
+        };
+
+        let upstream_caches =
+            pull_through_upstream_caches(&db_with_an_active_upstream_cache(), &cache)
+                .await
+                .unwrap();
+
+        assert!(upstream_caches.is_empty());
+    }
 }

@@ -75,6 +75,7 @@ impl<'a> StateApplicator<'a> {
                 cache_model.priority = Set(state_cache.priority);
                 cache_model.local_priority = Set(state_cache.local_priority);
                 cache_model.max_storage_gb = Set(state_cache.max_storage_gb);
+                cache_model.pull_through = Set(state_cache.pull_through);
                 cache_model.public_key = Set(public_key.clone());
                 cache_model.private_key = Set(encrypted_signing_key.clone());
                 cache_model.created_by = Set(created_by_id);
@@ -100,6 +101,7 @@ impl<'a> StateApplicator<'a> {
                     created_at: now,
                     managed: true,
                     max_storage_gb: state_cache.max_storage_gb,
+                    pull_through: state_cache.pull_through,
                 }
                 .into_active_model();
 

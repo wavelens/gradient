@@ -14073,6 +14073,14 @@ components:
           default: 0
           minimum: 0
           description: Max cache storage in GB. 0 (default) = unlimited; otherwise at least 1.
+        pull_through:
+          type: boolean
+          default: true
+          description: |
+            Whether the cache answers `/cache/{cache}/` misses from its upstream
+            caches. Off: narinfo, upstream NAR, debuginfo and log requests
+            only answer from the cache's own paths. Builds still substitute
+            from the upstream caches.
 
     PatchCacheRequest:
       type: object
@@ -14098,6 +14106,13 @@ components:
           format: int32
           minimum: 0
           description: Max cache storage in GB. 0 = unlimited; otherwise at least 1.
+        pull_through:
+          type: boolean
+          description: |
+            Whether the cache answers `/cache/{cache}/` misses from its upstream
+            caches. Off: narinfo, upstream NAR, debuginfo and log requests
+            only answer from the cache's own paths. Builds still substitute
+            from the upstream caches.
 
     Cache:
       type: object
@@ -14126,6 +14141,13 @@ components:
           type: integer
           format: int32
           description: Max cache storage in GB. 0 = unlimited; otherwise at least 1.
+        pull_through:
+          type: boolean
+          description: |
+            Whether the cache answers `/cache/{cache}/` misses from its upstream
+            caches. Off: narinfo, upstream NAR, debuginfo and log requests
+            only answer from the cache's own paths. Builds still substitute
+            from the upstream caches.
         active:
           type: boolean
           description: Whether the cache is publicly accessible

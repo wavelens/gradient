@@ -33,6 +33,7 @@ pub fn make_cache(name: &str, public_key: &str, private_key: &str) -> MCache {
         created_at: NaiveDateTime::default(),
         managed: false,
         max_storage_gb: 0,
+        pull_through: true,
     }
 }
 
