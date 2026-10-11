@@ -159,8 +159,9 @@ mod tests {
     use gradient_entity::project::Model as ProjectModel;
     use gradient_entity::project_cache::{CacheSubscriptionMode, Model as ProjectCacheModel};
     use gradient_entity::{team_project, team_worker, worker_registration};
+    use gradient_fixtures::mock::mock_db;
     use gradient_types::ids::{CacheId, ProjectCacheId, TeamId};
-    use sea_orm::{DatabaseBackend, MockDatabase};
+    use sea_orm::MockDatabase;
     use std::time::Duration;
 
     const URL: &str = "wss://w1.example/proto";
@@ -194,7 +195,7 @@ mod tests {
     }
 
     fn registered(rows: Vec<worker_registration::Model>) -> MockDatabase {
-        MockDatabase::new(DatabaseBackend::Postgres)
+        mock_db()
             .append_query_results([rows])
             .append_query_results([Vec::<team_worker::Model>::new()])
     }
@@ -303,7 +304,7 @@ mod tests {
             cache: CacheId::now_v7(),
             mode: CacheSubscriptionMode::ReadWrite,
         };
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([Vec::<worker_registration::Model>::new()])
             .append_query_results([vec![team_worker::Model {
                 team,
@@ -349,7 +350,7 @@ mod tests {
     #[tokio::test]
     async fn a_team_session_whose_grants_are_gone_ends() {
         let team = TeamId::now_v7();
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([Vec::<worker_registration::Model>::new()])
             .append_query_results([vec![team_worker::Model {
                 team,

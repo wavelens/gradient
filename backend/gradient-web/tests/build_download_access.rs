@@ -11,10 +11,13 @@
 
 use chrono::{Duration, Utc};
 use gradient_entity::ids::*;
-use gradient_test_support::fixtures::{eval_at, project, project_id, task_id, user, user_id};
-use gradient_test_support::web::{TEST_JWT_SECRET, live_session, make_test_server, make_token};
+use gradient_fixtures::ids::{project_id, task_id, user_id};
+use gradient_fixtures::mock::mock_db;
+use gradient_fixtures::rows::{eval_at, live_session, project, user};
+use gradient_test_support::state::TEST_JWT_SECRET;
+use gradient_test_support::web::{make_test_server, make_token};
 use jsonwebtoken::{EncodingKey, Header, encode};
-use sea_orm::{DatabaseBackend, MockDatabase};
+use sea_orm::MockDatabase;
 use serde_json::Value;
 use uuid::Uuid;
 
@@ -119,23 +122,20 @@ fn message(res: &axum_test::TestResponse) -> String {
 #[tokio::test]
 async fn a_member_of_a_project_that_built_the_derivation_downloads_without_a_token() {
     let session = SessionId::now_v7();
-    let db = with_private_build(with_session(
-        MockDatabase::new(DatabaseBackend::Postgres),
-        session,
-    ))
-    .append_query_results([Vec::<gradient_entity::project_user::Model>::new()])
-    .append_query_results([vec![build_job(other_build_job_id(), other_eval_id())]])
-    .append_query_results([vec![gradient_entity::evaluation::Model {
-        task: Some(other_task_id()),
-        ..eval_at(other_eval_id(), 0)
-    }]])
-    .append_query_results([vec![task(other_task_id(), other_project_id())]])
-    .append_query_results([vec![gradient_entity::project_user::Model {
-        id: ProjectUserId::new(Uuid::from_u128(0x51)),
-        project: other_project_id(),
-        user: user_id(),
-        role: gradient_types::consts::BASE_ROLE_VIEW_ID,
-    }]]);
+    let db = with_private_build(with_session(mock_db(), session))
+        .append_query_results([Vec::<gradient_entity::project_user::Model>::new()])
+        .append_query_results([vec![build_job(other_build_job_id(), other_eval_id())]])
+        .append_query_results([vec![gradient_entity::evaluation::Model {
+            task: Some(other_task_id()),
+            ..eval_at(other_eval_id(), 0)
+        }]])
+        .append_query_results([vec![task(other_task_id(), other_project_id())]])
+        .append_query_results([vec![gradient_entity::project_user::Model {
+            id: ProjectUserId::new(Uuid::from_u128(0x51)),
+            project: other_project_id(),
+            user: user_id(),
+            role: gradient_types::consts::BASE_ROLE_VIEW_ID,
+        }]]);
     let server = make_test_server(no_outputs(db).into_connection());
 
     let res = server
@@ -149,7 +149,7 @@ async fn a_member_of_a_project_that_built_the_derivation_downloads_without_a_tok
 
 #[tokio::test]
 async fn an_anonymous_caller_without_a_token_is_refused_on_a_private_project() {
-    let db = with_private_build(MockDatabase::new(DatabaseBackend::Postgres));
+    let db = with_private_build(mock_db());
     let server = make_test_server(db.into_connection());
 
     let res = server.get(&download_url(None)).await;
@@ -160,9 +160,7 @@ async fn an_anonymous_caller_without_a_token_is_refused_on_a_private_project() {
 
 #[tokio::test]
 async fn a_token_for_the_derivation_admits_an_anonymous_caller() {
-    let db = no_outputs(with_private_build(MockDatabase::new(
-        DatabaseBackend::Postgres,
-    )));
+    let db = no_outputs(with_private_build(mock_db()));
     let server = make_test_server(db.into_connection());
 
     let res = server
@@ -175,7 +173,7 @@ async fn a_token_for_the_derivation_admits_an_anonymous_caller() {
 
 #[tokio::test]
 async fn a_token_for_another_derivation_is_refused() {
-    let db = with_private_build(MockDatabase::new(DatabaseBackend::Postgres));
+    let db = with_private_build(mock_db());
     let server = make_test_server(db.into_connection());
     let other = DerivationId::new(Uuid::from_u128(0xd9));
 

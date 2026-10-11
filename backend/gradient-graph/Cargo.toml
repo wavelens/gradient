@@ -41,6 +41,7 @@ tracing    = { workspace = true }
 uuid       = { workspace = true }
 
 [dev-dependencies]
+gradient-fixtures = { workspace = true }
 clap     = { workspace = true }
 tempfile = { workspace = true }
 tokio    = { workspace = true, features = ["macros", "sync", "time", "rt-multi-thread", "test-util"] }

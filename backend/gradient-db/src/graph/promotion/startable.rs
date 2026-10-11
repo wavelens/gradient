@@ -80,6 +80,7 @@ crate::sql_fn! {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gradient_fixtures::mock::empty_db;
 
     #[test]
     fn assign_reads_the_queued_invariant_only() {
@@ -127,7 +128,7 @@ mod tests {
 
     #[tokio::test]
     async fn no_moves_means_no_statement() {
-        let db = sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres).into_connection();
+        let db = empty_db();
 
         let shared_builds = find_startable_shared_builds_among(&db, &[])
             .await

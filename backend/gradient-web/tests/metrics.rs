@@ -6,17 +6,13 @@
 
 use axum_test::TestServer;
 use gradient_core::ServerState;
-use gradient_db::{WebDb, WorkerDb};
 use gradient_entity::build::BuildStatus;
 use gradient_entity::evaluation::EvaluationStatus;
-use gradient_notify::EmailSender;
-use gradient_storage::NarStore;
-use gradient_test_support::cli::test_cli;
-use gradient_test_support::fakes::email::InMemoryEmailSender;
-use gradient_test_support::log_storage::NoopLogStorage;
-use gradient_types::{MetricsConfig, RuntimeConfig, SecretString};
+use gradient_fixtures::mock::mock_db;
+use gradient_test_support::state::TestState;
+use gradient_types::MetricsConfig;
 use gradient_web::create_router;
-use sea_orm::{DatabaseBackend, DatabaseConnection, MockDatabase, Value};
+use sea_orm::{DatabaseConnection, Value};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -32,55 +28,18 @@ fn count_row(kind: &str, status: Option<i32>, value: i64) -> BTreeMap<&'static s
 }
 
 fn state_with_metrics(enabled: bool, db: DatabaseConnection) -> Arc<ServerState> {
-    let cli = test_cli();
-    let mut runtime = RuntimeConfig::from_cli(&cli).expect("valid test config");
-    runtime.metrics = enabled.then(|| MetricsConfig {
-        token: TOKEN.to_string(),
-    });
-    let nar_storage = NarStore::local(&runtime.server.base_dir).expect("nar store");
-    Arc::new(ServerState {
-        web_db: WebDb::new(db),
-        cache_db: gradient_db::CacheDb::new(
-            sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres).into_connection(),
-        ),
-        worker_db: WorkerDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
-        config: Arc::new(runtime),
-        log_storage: Arc::new(NoopLogStorage),
-        email: Arc::new(InMemoryEmailSender::new()) as Arc<dyn EmailSender>,
-        nar_storage,
-        manifest_state: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
-        pending_credentials: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
-        http: gradient_util::http::build_client().expect("http"),
-        shutdown: gradient_util::shutdown::Shutdown::new(),
-        last_used_stamps: gradient_core::last_used_stamps(),
-        build_progress: gradient_core::build_progress(),
-        eval_progress: gradient_core::eval_progress(),
-        cache_traffic: gradient_db::metrics::cache_traffic::CacheTraffic::shared(),
-        jwt_secret: SecretString::new("test-jwt-secret".into()),
-        started_at: chrono::Utc::now(),
-        pending_project_memberships: std::sync::Arc::new(std::collections::HashMap::new()),
-        events: gradient_types::EventBus::default(),
-        git_host: gradient_git_host::GitHostRegistry::with_builtin(),
-        github_app_install_url: Default::default(),
-        upstream_query: std::sync::Arc::new(tokio::sync::Semaphore::new(32)),
-        nar_downloads: std::sync::Arc::new(tokio::sync::Semaphore::new(16)),
-        upload_admission: gradient_storage::admission::UploadAdmission::new(
-            gradient_storage::admission::Limits {
-                concurrency: 16,
-                bytes: u64::MAX,
-            },
-        ),
-        delivery_wake: Default::default(),
-        eval_assign_wake: Default::default(),
-        probe_requests: Default::default(),
-        held_evaluations: Default::default(),
-        startable_set: Default::default(),
-        graph: gradient_core::Graph::stub(),
-    })
+    TestState::new()
+        .web_db(db)
+        .config(move |config| {
+            config.metrics = enabled.then(|| MetricsConfig {
+                token: TOKEN.to_string(),
+            });
+        })
+        .build()
 }
 
 fn empty_db() -> DatabaseConnection {
-    MockDatabase::new(DatabaseBackend::Postgres)
+    mock_db()
         .append_query_results([Vec::<BTreeMap<&str, Value>>::new()])
         .into_connection()
 }
@@ -155,9 +114,7 @@ async fn endpoint_reflects_seeded_counts() {
         count_row("cache_bytes", None, 1024),
         count_row("cache_packages", None, 9),
     ];
-    let db = MockDatabase::new(DatabaseBackend::Postgres)
-        .append_query_results([rows])
-        .into_connection();
+    let db = mock_db().append_query_results([rows]).into_connection();
 
     let state = state_with_metrics(true, db);
     let server = TestServer::new(create_router(state).expect("router"));
@@ -184,7 +141,7 @@ async fn endpoint_reflects_seeded_counts() {
 async fn endpoint_rate_limited() {
     // Each successful request is issuing one DB read. The 6th request is throttled before the
     // handler starts.
-    let mut mock = MockDatabase::new(DatabaseBackend::Postgres);
+    let mut mock = mock_db();
     for _ in 0..5 {
         mock = mock.append_query_results([Vec::<BTreeMap<&str, Value>>::new()]);
     }
@@ -212,7 +169,7 @@ async fn endpoint_rate_limited() {
 
 #[tokio::test]
 async fn endpoint_refills_within_a_second() {
-    let mut mock = MockDatabase::new(DatabaseBackend::Postgres);
+    let mut mock = mock_db();
     for _ in 0..6 {
         mock = mock.append_query_results([Vec::<BTreeMap<&str, Value>>::new()]);
     }

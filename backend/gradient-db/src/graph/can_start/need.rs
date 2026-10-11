@@ -299,9 +299,9 @@ where
 mod tests {
     use super::*;
     use crate::graph::can_start::test_rows::{drv, exec, norm, transition_row};
-    use crate::pool::statements;
     use gradient_entity::build::BuildStatus;
-    use sea_orm::{DatabaseBackend, MockDatabase, Value};
+    use gradient_fixtures::mock::{mock_db, statements};
+    use sea_orm::Value;
     use std::collections::BTreeMap;
 
     fn need_row(id: DerivationId, wanted: bool) -> BTreeMap<String, Value> {
@@ -400,7 +400,7 @@ mod tests {
         let on = DerivationId::now_v7();
         let off = DerivationId::now_v7();
         let empty = Vec::<BTreeMap<String, Value>>::new();
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_exec_results([exec(0), exec(1)])
             .append_query_results([vec![need_row(on, true), need_row(off, false)]])
             .append_query_results([vec![need_row(on, true), need_row(off, false)]])
@@ -442,7 +442,7 @@ mod tests {
         let root = DerivationId::now_v7();
         let on = DerivationId::now_v7();
         let off = DerivationId::now_v7();
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_exec_results([exec(0), exec(1)])
             .append_query_results([vec![need_row(on, true), need_row(off, false)]])
             .append_query_results([vec![need_row(on, true), need_row(off, false)]])

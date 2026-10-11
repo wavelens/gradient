@@ -83,32 +83,6 @@ impl WorkerDb {
     }
 }
 
-/// A `MockDatabase` is recording a whole transaction as one entry.
-/// sea-orm is bracketing that entry with a synthetic `BEGIN` and `COMMIT`.
-/// This list is dropping them, unlike a test asserting on transaction control.
-pub fn statements(log: Vec<sea_orm::Transaction>) -> Vec<String> {
-    raw_statements(log)
-        .iter()
-        .map(|s| format!("{s:?}"))
-        .collect()
-}
-
-pub fn raw_statements(log: Vec<sea_orm::Transaction>) -> Vec<sea_orm::Statement> {
-    log.iter()
-        .flat_map(|t| t.statements().iter())
-        .filter(|s| !is_transaction_control(&s.sql))
-        .cloned()
-        .collect()
-}
-
-fn is_transaction_control(sql: &str) -> bool {
-    let sql = sql.trim().to_uppercase();
-    matches!(sql.as_str(), "BEGIN" | "COMMIT" | "ROLLBACK")
-        || sql.starts_with("SAVEPOINT ")
-        || sql.starts_with("RELEASE SAVEPOINT ")
-        || sql.starts_with("ROLLBACK TO SAVEPOINT ")
-}
-
 impl CacheDb {
     pub fn new(conn: DatabaseConnection) -> Self {
         Self(Arc::new(conn))
@@ -345,7 +319,8 @@ impl TransactionTrait for WorkerDb {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sea_orm::{MockDatabase, MockExecResult};
+    use gradient_fixtures::mock::{empty_db, mock_db, statements};
+    use sea_orm::MockExecResult;
 
     crate::sql! {
         TEST_TRANSACTIONAL_UPDATE = "UPDATE derivation_build SET status = 1",
@@ -354,7 +329,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_transactional_handle_runs_inside_the_transaction_and_detaches_to_the_pool() {
-        let mock = MockDatabase::new(DbBackend::Postgres)
+        let mock = mock_db()
             .append_exec_results([MockExecResult {
                 last_insert_id: 0,
                 rows_affected: 1,
@@ -388,7 +363,7 @@ mod tests {
 
     #[tokio::test]
     async fn begin_on_a_transactional_handle_is_a_savepoint() {
-        let pool = WorkerDb::new(MockDatabase::new(DbBackend::Postgres).into_connection());
+        let pool = WorkerDb::new(empty_db());
         let outer = Arc::new(pool.begin().await.expect("begin"));
         let scoped = pool.in_transaction(Arc::clone(&outer));
         let inner = scoped.begin().await.expect("savepoint");

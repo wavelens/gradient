@@ -366,7 +366,8 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sea_orm::{DatabaseBackend, MockDatabase, Value};
+    use gradient_fixtures::mock::{mock_db, raw_statements};
+    use sea_orm::Value;
 
     fn seed_row(id: DerivationId, was_complete: bool, complete: bool) -> BTreeMap<String, Value> {
         BTreeMap::from([
@@ -414,7 +415,7 @@ mod tests {
         let settled = DerivationId::now_v7();
         let flipped = DerivationId::now_v7();
         let parent = DerivationId::now_v7();
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_exec_results([sea_orm::MockExecResult {
                 last_insert_id: 0,
                 rows_affected: 0,
@@ -434,7 +435,7 @@ mod tests {
 
         assert_eq!(moved.complete, vec![flipped, parent]);
         assert!(moved.incomplete.is_empty());
-        let log = crate::pool::raw_statements(db.into_transaction_log());
+        let log = raw_statements(db.into_transaction_log());
         let ripples: Vec<String> = log
             .iter()
             .filter(|s| {
@@ -468,7 +469,7 @@ mod tests {
     #[tokio::test]
     async fn a_freshly_present_shared_build_ripples_though_the_row_reads_complete_throughout() {
         let landed = DerivationId::now_v7();
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_exec_results([sea_orm::MockExecResult {
                 last_insert_id: 0,
                 rows_affected: 0,
@@ -482,7 +483,7 @@ mod tests {
         txn.commit().await.unwrap();
 
         assert_eq!(moved.complete, vec![landed]);
-        let log = crate::pool::raw_statements(db.into_transaction_log());
+        let log = raw_statements(db.into_transaction_log());
         let seed = log
             .iter()
             .find(|s| s.sql.contains("SET missing_runtime_deps = x.n"))
@@ -535,7 +536,7 @@ mod tests {
     async fn a_retire_ripples_incompleteness_up_from_what_was_complete() {
         let gone = DerivationId::now_v7();
         let parent = DerivationId::now_v7();
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([vec![flag_row(parent, "was_complete", true)]])
             .into_connection();
 
@@ -546,7 +547,7 @@ mod tests {
         txn.commit().await.unwrap();
 
         assert_eq!(reached, vec![parent]);
-        let log = crate::pool::raw_statements(db.into_transaction_log());
+        let log = raw_statements(db.into_transaction_log());
         let up = log
             .iter()
             .find(|s| s.sql.contains("FROM ripple_missing_runtime_deps("))

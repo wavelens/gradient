@@ -161,7 +161,8 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult, Value};
+    use gradient_fixtures::mock::{mock_db, raw_statements};
+    use sea_orm::{MockExecResult, Value};
 
     #[test]
     fn a_fresh_input_is_counted_as_incomplete_by_its_parent() {
@@ -241,7 +242,7 @@ mod tests {
         let settled = DerivationId::now_v7();
         let flipped = DerivationId::now_v7();
         let parent = DerivationId::now_v7();
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([none()])
             .append_query_results([vec![
                 id_row(settled, &[("was_complete", true), ("complete", true)]),
@@ -257,7 +258,7 @@ mod tests {
         txn.commit().await.unwrap();
 
         assert_eq!(reached, vec![flipped, parent]);
-        let log = crate::pool::raw_statements(db.into_transaction_log());
+        let log = raw_statements(db.into_transaction_log());
         let ripples: Vec<String> = log
             .iter()
             .filter(|s| {
@@ -279,7 +280,7 @@ mod tests {
     #[tokio::test]
     async fn a_freshly_walked_leaf_ripples_though_the_row_reads_complete_throughout() {
         let leaf = DerivationId::now_v7();
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([none()])
             .append_query_results([vec![id_row(
                 leaf,
@@ -293,7 +294,7 @@ mod tests {
         txn.commit().await.unwrap();
 
         assert_eq!(reached, vec![leaf]);
-        let log = crate::pool::raw_statements(db.into_transaction_log());
+        let log = raw_statements(db.into_transaction_log());
         let seed = log
             .iter()
             .find(|s| s.sql.contains("SET unwalked_inputs = x.n"))
@@ -313,7 +314,7 @@ mod tests {
     #[tokio::test]
     async fn every_update_follows_an_ordered_lock_on_derivation_rows_only() {
         let a = DerivationId::now_v7();
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([none()])
             .append_query_results([vec![id_row(
                 a,
@@ -325,7 +326,7 @@ mod tests {
         seed_walk_completeness(&txn, &[a], &[]).await.unwrap();
         txn.commit().await.unwrap();
 
-        let log = crate::pool::raw_statements(db.into_transaction_log());
+        let log = raw_statements(db.into_transaction_log());
         assert!(
             log[0].sql.contains(
                 "FROM derivation WHERE id = ANY($1::uuid[]) ORDER BY id FOR NO KEY UPDATE"
@@ -348,7 +349,7 @@ mod tests {
     async fn an_unwalk_ripples_incompleteness_up_from_what_was_complete() {
         let gone = DerivationId::now_v7();
         let parent = DerivationId::now_v7();
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([vec![id_row(gone, &[])]])
             .append_exec_results([MockExecResult {
                 last_insert_id: 0,
@@ -361,7 +362,7 @@ mod tests {
         unwalk(&txn, &[gone]).await.unwrap();
         txn.commit().await.unwrap();
 
-        let log = crate::pool::raw_statements(db.into_transaction_log());
+        let log = raw_statements(db.into_transaction_log());
         let up = log
             .iter()
             .find(|s| s.sql.contains("FROM ripple_unwalked_inputs("))

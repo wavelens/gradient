@@ -12,14 +12,15 @@
 use axum::http::StatusCode;
 use gradient_entity::ids::*;
 use gradient_entity::role;
-use gradient_test_support::fixtures::{project, user, user_id};
-use gradient_test_support::web::{
-    live_session, make_test_server, make_test_server_configured, make_token,
-};
+use gradient_fixtures::ids::user_id;
+use gradient_fixtures::mock::mock_db;
+use gradient_fixtures::rows::project;
+use gradient_test_support::state::TestState;
+use gradient_test_support::web::{make_test_server, make_token, with_auth};
 use gradient_types::SessionId;
 use gradient_types::consts::BASE_ROLE_WRITE_ID;
 use gradient_types::permissions::PermissionMask;
-use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
+use sea_orm::{MockDatabase, MockExecResult};
 use serde_json::{Value, json};
 use uuid::Uuid;
 
@@ -37,17 +38,10 @@ fn write_role_row() -> role::Model {
 fn membership() -> gradient_entity::project_user::Model {
     gradient_entity::project_user::Model {
         id: ProjectUserId::new(Uuid::parse_str("00000000-0000-0000-0000-0000000000bb").unwrap()),
-        project: gradient_test_support::fixtures::project_id(),
+        project: gradient_fixtures::ids::project_id(),
         user: user_id(),
         role: BASE_ROLE_WRITE_ID,
     }
-}
-
-fn with_auth(db: MockDatabase, session_id: SessionId) -> MockDatabase {
-    let session = live_session(session_id);
-    db.append_query_results([vec![session.clone()]])
-        .append_query_results([vec![session]])
-        .append_query_results([vec![user()]])
 }
 
 fn with_project_access(db: MockDatabase) -> MockDatabase {
@@ -69,14 +63,14 @@ async fn rejects_oversized_total() {
     let session_id = SessionId::now_v7();
     let token = make_token(session_id);
 
-    let db = with_project_access(with_auth(
-        MockDatabase::new(DatabaseBackend::Postgres),
-        session_id,
-    ));
-    let server = make_test_server_configured(db.into_connection(), |cli| {
-        cli.http.max_source_upload_size =
-            std::num::NonZeroUsize::new(20 * 1024 * 1024).expect("non-zero");
-    });
+    let db = with_project_access(with_auth(mock_db(), session_id));
+    let server = TestState::new()
+        .web_db(db.into_connection())
+        .cli(|cli| {
+            cli.http.max_source_upload_size =
+                std::num::NonZeroUsize::new(20 * 1024 * 1024).expect("non-zero");
+        })
+        .server();
 
     let body = json!({
         "project": "test-project",
@@ -113,10 +107,7 @@ async fn rejects_bad_paths() {
         let session_id = SessionId::now_v7();
         let token = make_token(session_id);
 
-        let db = with_project_access(with_auth(
-            MockDatabase::new(DatabaseBackend::Postgres),
-            session_id,
-        ));
+        let db = with_project_access(with_auth(mock_db(), session_id));
         let server = make_test_server(db.into_connection());
 
         let body = json!({
@@ -153,10 +144,7 @@ async fn rejects_bad_hashes() {
         let session_id = SessionId::now_v7();
         let token = make_token(session_id);
 
-        let db = with_project_access(with_auth(
-            MockDatabase::new(DatabaseBackend::Postgres),
-            session_id,
-        ));
+        let db = with_project_access(with_auth(mock_db(), session_id));
         let server = make_test_server(db.into_connection());
 
         let body = json!({
@@ -183,10 +171,7 @@ async fn rejects_duplicate_paths() {
     let session_id = SessionId::now_v7();
     let token = make_token(session_id);
 
-    let db = with_project_access(with_auth(
-        MockDatabase::new(DatabaseBackend::Postgres),
-        session_id,
-    ));
+    let db = with_project_access(with_auth(mock_db(), session_id));
     let server = make_test_server(db.into_connection());
 
     let body = json!({
@@ -214,7 +199,7 @@ async fn happy_path_returns_session_and_missing() {
     let now_ts = chrono::Utc::now().naive_utc();
     let inserted_session = gradient_entity::upload_session::Model {
         id: UploadSessionId::now_v7(),
-        project: gradient_test_support::fixtures::project_id(),
+        project: gradient_fixtures::ids::project_id(),
         manifest: json!([]),
         missing: json!([]),
         total_size: 300,
@@ -223,16 +208,13 @@ async fn happy_path_returns_session_and_missing() {
         ..Default::default()
     };
 
-    let db = with_project_access(with_auth(
-        MockDatabase::new(DatabaseBackend::Postgres),
-        session_id,
-    ))
-    .append_query_results([Vec::<gradient_entity::build_request_blob::Model>::new()])
-    .append_query_results([vec![inserted_session]])
-    .append_exec_results([MockExecResult {
-        last_insert_id: 0,
-        rows_affected: 1,
-    }]);
+    let db = with_project_access(with_auth(mock_db(), session_id))
+        .append_query_results([Vec::<gradient_entity::build_request_blob::Model>::new()])
+        .append_query_results([vec![inserted_session]])
+        .append_exec_results([MockExecResult {
+            last_insert_id: 0,
+            rows_affected: 1,
+        }]);
 
     let server = make_test_server(db.into_connection());
 

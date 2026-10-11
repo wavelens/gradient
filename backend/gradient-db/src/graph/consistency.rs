@@ -142,7 +142,8 @@ pub async fn graph_consistency_report(ctx: &DbContext) -> Result<ConsistencyRepo
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult, Value};
+    use gradient_fixtures::mock::{mock_db, statements};
+    use sea_orm::{MockExecResult, Value};
     use std::collections::BTreeMap;
 
     fn exec(rows_affected: u64) -> MockExecResult {
@@ -163,7 +164,7 @@ mod tests {
                 ])
             })
             .collect();
-        let mut db = MockDatabase::new(DatabaseBackend::Postgres)
+        let mut db = mock_db()
             .append_exec_results([exec(0), exec(7), exec(0), exec(6)])
             .append_query_results([vec![BTreeMap::from([(
                 "derivation".to_owned(),
@@ -241,7 +242,7 @@ mod tests {
             "the evaluation counters are recounted and their drift reported"
         );
 
-        let log = crate::pool::statements(pool.into_transaction_log());
+        let log = statements(pool.into_transaction_log());
         assert!(
             log[0].contains("SET LOCAL work_mem")
                 && log[1].contains("SET unwalked_inputs = coalesce(c.n, 0)"),
@@ -313,7 +314,7 @@ mod tests {
         drop(ctx);
 
         assert_eq!(report.adopted, 1);
-        let log = crate::pool::statements(pool.into_transaction_log());
+        let log = statements(pool.into_transaction_log());
         assert!(
             log[17].contains("LIMIT 1")
                 && log[18].contains("SET LOCAL work_mem")

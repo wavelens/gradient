@@ -2465,6 +2465,7 @@ dependencies = [
  "gradient-core",
  "gradient-db",
  "gradient-entity",
+ "gradient-fixtures",
  "gradient-git-host",
  "gradient-graph",
  "gradient-notify",
@@ -2502,6 +2503,7 @@ dependencies = [
  "futures",
  "gradient-db",
  "gradient-entity",
+ "gradient-fixtures",
  "gradient-git-host",
  "gradient-notify",
  "gradient-storage",
@@ -2545,6 +2547,7 @@ dependencies = [
  "gradient-ci",
  "gradient-db",
  "gradient-entity",
+ "gradient-fixtures",
  "gradient-git-host",
  "gradient-graph",
  "gradient-migration",
@@ -2637,6 +2640,7 @@ dependencies = [
  "clap",
  "futures",
  "gradient-entity",
+ "gradient-fixtures",
  "gradient-migration",
  "gradient-storage",
  "gradient-types",
@@ -2681,6 +2685,7 @@ dependencies = [
  "gradient-core",
  "gradient-db",
  "gradient-entity",
+ "gradient-fixtures",
  "gradient-types",
  "gradient-util",
  "ractor",
@@ -2719,6 +2724,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "gradient-fixtures"
+version = "2.0.0-rc.1"
+dependencies = [
+ "chrono",
+ "gradient-entity",
+ "gradient-types",
+ "password-auth",
+ "sea-orm",
+ "serde_json",
+ "uuid",
+]
+
+[[package]]
 name = "gradient-git-host"
 version = "2.0.0-rc.1"
 dependencies = [
@@ -2752,6 +2770,7 @@ dependencies = [
  "clap",
  "gradient-db",
  "gradient-entity",
+ "gradient-fixtures",
  "gradient-sources",
  "gradient-storage",
  "gradient-types",
@@ -2819,6 +2838,7 @@ dependencies = [
  "gradient-core",
  "gradient-db",
  "gradient-entity",
+ "gradient-fixtures",
  "gradient-graph",
  "gradient-pool",
  "gradient-scheduler",
@@ -2874,6 +2894,7 @@ dependencies = [
  "gradient-core",
  "gradient-db",
  "gradient-entity",
+ "gradient-fixtures",
  "gradient-graph",
  "gradient-pool",
  "gradient-sources",
@@ -2974,6 +2995,7 @@ dependencies = [
  "gradient-db",
  "gradient-derivation",
  "gradient-entity",
+ "gradient-fixtures",
  "gradient-graph",
  "gradient-proto",
  "gradient-scheduler",
@@ -3017,6 +3039,7 @@ dependencies = [
  "gradient-ci",
  "gradient-db",
  "gradient-entity",
+ "gradient-fixtures",
  "gradient-types",
  "gradient-util",
  "password-auth",
@@ -3076,6 +3099,7 @@ dependencies = [
  "gradient-db",
  "gradient-derivation",
  "gradient-entity",
+ "gradient-fixtures",
  "gradient-git-host",
  "gradient-graph",
  "gradient-notify",
@@ -3090,7 +3114,6 @@ dependencies = [
  "harmonia-file-nar",
  "harmonia-store-derivation",
  "jsonwebtoken",
- "password-auth",
  "sea-orm",
  "serde",
  "tempfile",
@@ -3175,6 +3198,7 @@ dependencies = [
  "gradient-core",
  "gradient-db",
  "gradient-entity",
+ "gradient-fixtures",
  "gradient-git-host",
  "gradient-graph",
  "gradient-notify",

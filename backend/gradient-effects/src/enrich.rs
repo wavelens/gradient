@@ -93,11 +93,11 @@ async fn enrich_evaluation<C: ConnectionTrait>(
 mod tests {
     use super::*;
     use gradient_entity::build::BuildStatus;
-    use sea_orm::{DatabaseBackend, MockDatabase};
+    use gradient_fixtures::mock::{empty_db, mock_db};
 
     #[tokio::test]
     async fn a_build_whose_evaluation_was_collected_reports_nothing() {
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([Vec::<MEvaluation>::new()])
             .into_connection();
         let event: Event = build::Reported {
@@ -111,7 +111,7 @@ mod tests {
 
     #[tokio::test]
     async fn events_without_enrichment_pass_through_untouched() {
-        let db = MockDatabase::new(DatabaseBackend::Postgres).into_connection();
+        let db = empty_db();
         let event: Event = gradient_types::events::gc::Swept {
             pass: gradient_types::events::gc::Pass::OrphanNars,
             removed: 2,

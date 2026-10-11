@@ -211,7 +211,8 @@ where
 mod tests {
     use super::*;
     use gradient_entity::build::BuildStatus;
-    use sea_orm::{DatabaseBackend, MockDatabase, Value};
+    use gradient_fixtures::mock::mock_db;
+    use sea_orm::Value;
     use std::collections::BTreeMap;
 
     #[test]
@@ -284,7 +285,7 @@ mod tests {
             ("queued".to_owned(), Value::BigInt(Some(1))),
             ("building".to_owned(), Value::BigInt(Some(0))),
         ]);
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([vec![row]])
             .into_connection();
 

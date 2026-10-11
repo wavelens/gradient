@@ -50,8 +50,9 @@ pub fn evaluation_created(eval: &MEvaluation) -> Option<evaluation::Reported> {
 mod tests {
     use super::*;
     use gradient_entity::build::BuildStatus;
+    use gradient_fixtures::mock::mock_db;
     use gradient_types::events::{EventBus, build, gc};
-    use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
+    use sea_orm::MockExecResult;
 
     fn one_row() -> MockExecResult {
         MockExecResult {
@@ -62,9 +63,7 @@ mod tests {
 
     #[tokio::test]
     async fn record_enqueues_one_event_row_and_publishes() {
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
-            .append_exec_results([one_row()])
-            .into_connection();
+        let db = mock_db().append_exec_results([one_row()]).into_connection();
         let bus = EventBus::new(4);
         let mut rx = bus.subscribe();
 
@@ -88,7 +87,7 @@ mod tests {
 
     #[tokio::test]
     async fn an_event_without_a_key_gets_a_unique_one() {
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_exec_results([one_row(), one_row()])
             .into_connection();
         let bus = EventBus::new(4);

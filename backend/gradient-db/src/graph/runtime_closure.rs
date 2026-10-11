@@ -170,7 +170,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sea_orm::{DatabaseBackend, MockDatabase};
+    use gradient_fixtures::mock::{empty_db, mock_db, statements};
 
     #[test]
     fn reference_hash_strips_name() {
@@ -184,7 +184,7 @@ mod tests {
 
     #[tokio::test]
     async fn empty_seeds_is_zero() {
-        let db = MockDatabase::new(DatabaseBackend::Postgres).into_connection();
+        let db = empty_db();
         assert_eq!(runtime_closure_size(&db, &[]).await.unwrap(), 0);
     }
 
@@ -202,7 +202,7 @@ mod tests {
 
     #[tokio::test]
     async fn the_reference_walk_runs_inside_the_raised_work_mem_transaction() {
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_exec_results([sea_orm::MockExecResult {
                 last_insert_id: 0,
                 rows_affected: 0,
@@ -216,7 +216,7 @@ mod tests {
                 .is_empty()
         );
 
-        let log = crate::pool::statements(db.into_transaction_log());
+        let log = statements(db.into_transaction_log());
         assert_eq!(
             log.len(),
             2,
@@ -241,7 +241,7 @@ mod tests {
 
     #[tokio::test]
     async fn an_output_nothing_references_is_outside_the_runtime_closure() {
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_exec_results([sea_orm::MockExecResult {
                 last_insert_id: 0,
                 rows_affected: 0,

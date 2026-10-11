@@ -261,7 +261,8 @@ pub async fn upstream_urls_for_projects<C: ConnectionTrait>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sea_orm::{DatabaseBackend, DatabaseConnection, MockDatabase};
+    use gradient_fixtures::mock::mock_db;
+    use sea_orm::DatabaseConnection;
 
     fn upstream_row() -> MCacheUpstream {
         MCacheUpstream {
@@ -271,7 +272,7 @@ mod tests {
     }
 
     fn db_with_an_active_upstream_cache() -> DatabaseConnection {
-        MockDatabase::new(DatabaseBackend::Postgres)
+        mock_db()
             .append_query_results([vec![upstream_row()]])
             .into_connection()
     }

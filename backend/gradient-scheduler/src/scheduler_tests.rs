@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use gradient_fixtures::mock::{empty_db, mock_db};
 use std::collections::HashSet;
 use std::sync::Arc;
 
@@ -21,13 +22,13 @@ use gradient_pool::session_port::{SessionPort, SessionSignal};
 use tokio::sync::mpsc;
 
 async fn test_scheduler() -> Arc<Scheduler> {
-    use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
+    use sea_orm::MockExecResult;
 
     let ok = MockExecResult {
         last_insert_id: 0,
         rows_affected: 1,
     };
-    let db = MockDatabase::new(DatabaseBackend::Postgres)
+    let db = mock_db()
         .append_exec_results(vec![ok; 32])
         .into_connection();
     test_scheduler_with(db).await
@@ -356,13 +357,13 @@ async fn test_job_rejected_requeues() {
 #[tokio::test]
 async fn a_rejected_build_closes_the_attempt_its_assignment_opened() {
     use crate::jobs::{PendingJob, build_job_key};
-    use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
+    use sea_orm::MockExecResult;
 
     let ok = MockExecResult {
         last_insert_id: 0,
         rows_affected: 1,
     };
-    let db = MockDatabase::new(DatabaseBackend::Postgres)
+    let db = mock_db()
         .append_exec_results(vec![ok; 32])
         .into_connection();
     let log_db = db.clone();
@@ -534,7 +535,7 @@ async fn abort_evaluation_signals_the_worker_running_its_job() {
 #[tokio::test]
 async fn aborting_an_evaluation_marks_it_and_stops_its_eval_job_itself() {
     use gradient_entity::evaluation::EvaluationStatus;
-    use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
+    use sea_orm::MockExecResult;
 
     let ok = MockExecResult {
         last_insert_id: 0,
@@ -550,7 +551,7 @@ async fn aborting_an_evaluation_marks_it_and_stops_its_eval_job_itself() {
         status: EvaluationStatus::Aborted,
         ..evaluation.clone()
     };
-    let db = MockDatabase::new(DatabaseBackend::Postgres)
+    let db = mock_db()
         .append_exec_results(vec![ok; 16])
         .append_query_results(vec![vec![marked]; 8])
         .into_connection();
@@ -617,15 +618,13 @@ async fn aborting_a_finished_evaluation_stops_nothing() {
 
 #[tokio::test]
 async fn an_abort_the_worker_never_confirms_is_reaped_after_the_grace() {
-    use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
+    use sea_orm::MockExecResult;
 
     let ok = MockExecResult {
         last_insert_id: 0,
         rows_affected: 1,
     };
-    let db = MockDatabase::new(DatabaseBackend::Postgres)
-        .append_exec_results(vec![ok; 3])
-        .into_connection();
+    let db = mock_db().append_exec_results(vec![ok; 3]).into_connection();
     let log_db = db.clone();
     let scheduler = test_scheduler_with(db).await;
     let peer = ProjectId::now_v7();
@@ -857,13 +856,13 @@ async fn record_eval_message_drops_when_job_unknown() {
 #[tokio::test]
 async fn record_eval_message_inserts_for_active_build_job() {
     use gradient_test_support::prelude::*;
-    use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
+    use sea_orm::MockExecResult;
 
     let eval_id = EvaluationId::now_v7();
     let peer = ProjectId::now_v7();
     let build_id = DerivationBuildId::now_v7();
 
-    let db = MockDatabase::new(DatabaseBackend::Postgres)
+    let db = mock_db()
         .append_exec_results([MockExecResult {
             last_insert_id: 0,
             rows_affected: 1,
@@ -906,7 +905,6 @@ async fn record_eval_message_inserts_for_active_build_job() {
 async fn fetch_only_completion_enqueues_cached_eval_followup() {
     use gradient_entity::evaluation::EvaluationStatus;
     use gradient_test_support::prelude::*;
-    use sea_orm::{DatabaseBackend, MockDatabase};
 
     let eval_id = EvaluationId::now_v7();
     let peer = ProjectId::now_v7();
@@ -924,7 +922,7 @@ async fn fetch_only_completion_enqueues_cached_eval_followup() {
         ..Default::default()
     };
 
-    let db = MockDatabase::new(DatabaseBackend::Postgres)
+    let db = mock_db()
         .append_query_results([vec![archived_eval]])
         .into_connection();
     let scheduler = Arc::new(Scheduler::new(test_state(db)));
@@ -1105,9 +1103,9 @@ async fn a_respawned_core_is_rebuilt_from_reattached_sessions() {
 
 #[tokio::test]
 async fn registering_a_worker_closes_only_the_rows_it_never_assigned() {
-    use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
+    use sea_orm::MockExecResult;
 
-    let db = MockDatabase::new(DatabaseBackend::Postgres)
+    let db = mock_db()
         .append_exec_results([MockExecResult {
             last_insert_id: 0,
             rows_affected: 2,
@@ -1144,15 +1142,13 @@ async fn registering_a_worker_closes_only_the_rows_it_never_assigned() {
 
 #[tokio::test]
 async fn the_assignment_record_is_written_before_the_assignment_returns() {
-    use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
+    use sea_orm::MockExecResult;
 
     let ok = MockExecResult {
         last_insert_id: 0,
         rows_affected: 1,
     };
-    let db = MockDatabase::new(DatabaseBackend::Postgres)
-        .append_exec_results(vec![ok; 2])
-        .into_connection();
+    let db = mock_db().append_exec_results(vec![ok; 2]).into_connection();
     let log_db = db.clone();
     let scheduler = test_scheduler_with(db).await;
     let peer = ProjectId::now_v7();
@@ -1182,7 +1178,7 @@ async fn the_assignment_record_is_written_before_the_assignment_returns() {
 }
 
 fn claim_results(won: &[bool]) -> sea_orm::DatabaseConnection {
-    use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
+    use sea_orm::MockExecResult;
 
     let registration = MockExecResult {
         last_insert_id: 0,
@@ -1192,7 +1188,7 @@ fn claim_results(won: &[bool]) -> sea_orm::DatabaseConnection {
         last_insert_id: 0,
         rows_affected: u64::from(*won),
     });
-    MockDatabase::new(DatabaseBackend::Postgres)
+    mock_db()
         .append_exec_results(std::iter::once(registration).chain(claims))
         .into_connection()
 }
@@ -1269,9 +1265,8 @@ async fn a_lost_build_claim_hands_its_shared_build_back_to_the_startable_set() {
 #[tokio::test]
 async fn a_build_that_left_queued_leaves_the_tracker() {
     use gradient_entity::build::BuildStatus;
-    use sea_orm::{DatabaseBackend, MockDatabase};
 
-    let db = MockDatabase::new(DatabaseBackend::Postgres).into_connection();
+    let db = empty_db();
     let log_db = db.clone();
     let scheduler = test_scheduler_with(db).await;
     let job = build_job(
@@ -1304,9 +1299,8 @@ async fn a_build_that_left_queued_leaves_the_tracker() {
 #[tokio::test]
 async fn admission_reads_only_the_shared_builds_that_moved() {
     use gradient_entity::build::BuildStatus;
-    use sea_orm::{DatabaseBackend, MockDatabase};
 
-    let db = MockDatabase::new(DatabaseBackend::Postgres)
+    let db = mock_db()
         .append_query_results([Vec::<gradient_entity::derivation_build::Model>::new()])
         .into_connection();
     let log_db = db.clone();
@@ -1342,13 +1336,13 @@ async fn admission_reads_only_the_shared_builds_that_moved() {
 #[tokio::test]
 async fn the_build_assign_pass_offers_without_waiting_on_the_graph_writer() {
     use gradient_test_support::prelude::*;
-    use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
+    use sea_orm::MockExecResult;
 
     let ok = MockExecResult {
         last_insert_id: 0,
         rows_affected: 1,
     };
-    let db = MockDatabase::new(DatabaseBackend::Postgres)
+    let db = mock_db()
         .append_exec_results(vec![ok; 32])
         .into_connection();
     let mut state = test_state(db);
@@ -1374,9 +1368,7 @@ async fn the_build_assign_pass_offers_without_waiting_on_the_graph_writer() {
 
 #[tokio::test]
 async fn the_resync_prunes_pending_builds_no_longer_startable() {
-    use sea_orm::{DatabaseBackend, MockDatabase};
-
-    let db = MockDatabase::new(DatabaseBackend::Postgres)
+    let db = mock_db()
         .append_query_results([Vec::<gradient_entity::derivation_build::Model>::new()])
         .into_connection();
     let scheduler = test_scheduler_with(db).await;
@@ -1409,9 +1401,9 @@ async fn the_resync_prunes_pending_builds_no_longer_startable() {
 
 #[tokio::test]
 async fn a_failed_assignment_record_withdraws_the_assignment() {
-    use sea_orm::{DatabaseBackend, DbErr, MockDatabase, MockExecResult};
+    use sea_orm::{DbErr, MockExecResult};
 
-    let db = MockDatabase::new(DatabaseBackend::Postgres)
+    let db = mock_db()
         .append_exec_results([MockExecResult {
             last_insert_id: 0,
             rows_affected: 0,
@@ -1461,9 +1453,8 @@ fn closed_dispatched_row(id: DispatchedJobId) -> gradient_entity::dispatched_job
 async fn a_report_without_an_assignment_row_is_dropped_loudly() {
     use crate::job_handlers::timeline::TimelineLanding;
     use gradient_entity::dispatched_job::DispatchedJobOutcome;
-    use sea_orm::{DatabaseBackend, MockDatabase};
 
-    let db = MockDatabase::new(DatabaseBackend::Postgres)
+    let db = mock_db()
         .append_query_results([Vec::<gradient_entity::dispatched_job::Model>::new()])
         .into_connection();
     let scheduler = test_scheduler_with(db).await;
@@ -1483,9 +1474,9 @@ async fn a_report_without_an_assignment_row_is_dropped_loudly() {
 async fn a_failed_lookup_is_not_reported_as_a_missing_row() {
     use crate::job_handlers::timeline::TimelineLanding;
     use gradient_entity::dispatched_job::DispatchedJobOutcome;
-    use sea_orm::{DatabaseBackend, DbErr, MockDatabase};
+    use sea_orm::DbErr;
 
-    let db = MockDatabase::new(DatabaseBackend::Postgres)
+    let db = mock_db()
         .append_query_errors([DbErr::Custom("lookup refused".into())])
         .into_connection();
     let scheduler = test_scheduler_with(db).await;
@@ -1505,11 +1496,10 @@ async fn a_failed_lookup_is_not_reported_as_a_missing_row() {
 async fn a_report_with_an_open_row_closes_it() {
     use crate::job_handlers::timeline::TimelineLanding;
     use gradient_entity::dispatched_job::DispatchedJobOutcome;
-    use sea_orm::{DatabaseBackend, MockDatabase};
 
     let assignment_id = DispatchedJobId::now_v7();
     let row = dispatched_row(assignment_id);
-    let db = MockDatabase::new(DatabaseBackend::Postgres)
+    let db = mock_db()
         .append_query_results([vec![row.clone()], vec![row]])
         .into_connection();
     let log_db = db.clone();
@@ -1546,11 +1536,11 @@ async fn a_report_with_an_open_row_closes_it() {
 #[tokio::test]
 async fn a_closing_report_stores_its_arrival_and_the_worker_clock() {
     use gradient_entity::dispatched_job::DispatchedJobOutcome;
-    use sea_orm::{DatabaseBackend, MockDatabase, Value};
+    use sea_orm::Value;
 
     let assignment_id = DispatchedJobId::now_v7();
     let row = dispatched_row(assignment_id);
-    let db = MockDatabase::new(DatabaseBackend::Postgres)
+    let db = mock_db()
         .append_query_results([vec![row.clone()], vec![row]])
         .into_connection();
     let log_db = db.clone();
@@ -1592,10 +1582,10 @@ async fn a_closing_report_stores_its_arrival_and_the_worker_clock() {
 async fn a_close_that_fails_is_reported_as_a_failed_close() {
     use crate::job_handlers::timeline::TimelineLanding;
     use gradient_entity::dispatched_job::DispatchedJobOutcome;
-    use sea_orm::{DatabaseBackend, DbErr, MockDatabase};
+    use sea_orm::DbErr;
 
     let assignment_id = DispatchedJobId::now_v7();
-    let db = MockDatabase::new(DatabaseBackend::Postgres)
+    let db = mock_db()
         .append_query_results([vec![dispatched_row(assignment_id)]])
         .append_query_errors([DbErr::Custom("close refused".into())])
         .into_connection();
@@ -1617,10 +1607,9 @@ async fn a_report_for_an_already_closed_row_keeps_the_recorded_outcome() {
     use crate::job_handlers::timeline::TimelineLanding;
     use gradient_entity::dispatched_job::DispatchedJobOutcome;
     use gradient_wire::types::{JobPhase, JobPhaseSpan};
-    use sea_orm::{DatabaseBackend, MockDatabase};
 
     let assignment_id = DispatchedJobId::now_v7();
-    let db = MockDatabase::new(DatabaseBackend::Postgres)
+    let db = mock_db()
         .append_query_results([vec![closed_dispatched_row(assignment_id)]])
         .append_query_results([vec![gradient_entity::dispatched_job_phase::Model {
             id: DispatchedJobPhaseId::now_v7(),
@@ -1689,9 +1678,9 @@ fn statements(log: &[sea_orm::Transaction]) -> Vec<String> {
 
 #[tokio::test]
 async fn registering_opens_a_connection_row_without_a_worker_registration() {
-    use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
+    use sea_orm::MockExecResult;
 
-    let db = MockDatabase::new(DatabaseBackend::Postgres)
+    let db = mock_db()
         .append_exec_results([MockExecResult {
             last_insert_id: 0,
             rows_affected: 0,
@@ -1726,12 +1715,10 @@ async fn registering_opens_a_connection_row_without_a_worker_registration() {
 
 #[tokio::test]
 async fn every_connected_worker_is_sampled() {
-    use sea_orm::{DatabaseBackend, MockDatabase};
-
     let scheduler = test_scheduler().await;
     register(&scheduler, "w1", eval_worker_caps(), HashSet::new()).await;
     let workers = scheduler.board_workers().await;
-    let db = MockDatabase::new(DatabaseBackend::Postgres).into_connection();
+    let db = empty_db();
     let log_db = db.clone();
 
     for info in &workers {
@@ -1982,7 +1969,7 @@ async fn a_restored_placement_waits_again() {
 }
 
 fn cluster_claims(results: &[u64]) -> sea_orm::DatabaseConnection {
-    sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres)
+    mock_db()
         .append_query_results(
             (0..16).map(|_| Vec::<std::collections::BTreeMap<&str, sea_orm::Value>>::new()),
         )
@@ -2389,15 +2376,12 @@ fn import_answer(outcome: gradient_wire::types::ImportOutcome) -> SessionSignal 
 #[tokio::test]
 async fn an_already_built_import_answers_at_once() {
     use gradient_entity::build::BuildStatus;
-    use sea_orm::{DatabaseBackend, MockDatabase};
 
-    let db = MockDatabase::new(DatabaseBackend::Postgres).append_query_results([vec![
-        import_build_row(
-            BuildJobId::now_v7(),
-            DerivationBuildId::now_v7(),
-            BuildStatus::Substituted,
-        ),
-    ]]);
+    let db = mock_db().append_query_results([vec![import_build_row(
+        BuildJobId::now_v7(),
+        DerivationBuildId::now_v7(),
+        BuildStatus::Substituted,
+    )]]);
     let (scheduler, mut signals) = import_scheduler(db).await;
 
     scheduler
@@ -2420,9 +2404,7 @@ async fn an_already_built_import_answers_at_once() {
 
 #[tokio::test]
 async fn an_unknown_import_answers_unknown() {
-    use sea_orm::{DatabaseBackend, MockDatabase};
-
-    let db = MockDatabase::new(DatabaseBackend::Postgres)
+    let db = mock_db()
         .append_query_results([Vec::<std::collections::BTreeMap<String, sea_orm::Value>>::new()]);
     let (scheduler, mut signals) = import_scheduler(db).await;
 
@@ -2449,10 +2431,9 @@ async fn an_unknown_import_answers_unknown() {
 #[tokio::test]
 async fn a_waiting_import_answers_with_its_build_once_the_build_failed() {
     use gradient_entity::build::BuildStatus;
-    use sea_orm::{DatabaseBackend, MockDatabase};
 
     let (build_id, derivation_build) = (BuildJobId::now_v7(), DerivationBuildId::now_v7());
-    let db = MockDatabase::new(DatabaseBackend::Postgres)
+    let db = mock_db()
         .append_query_results([vec![import_build_row(
             build_id,
             derivation_build,
@@ -2507,10 +2488,9 @@ async fn request_the_import(scheduler: &Scheduler) {
 #[tokio::test]
 async fn an_import_aborted_in_an_earlier_evaluation_is_queued_again_and_waits() {
     use gradient_entity::build::BuildStatus;
-    use sea_orm::{DatabaseBackend, MockDatabase};
 
     let (build_id, derivation_build) = (BuildJobId::now_v7(), DerivationBuildId::now_v7());
-    let db = MockDatabase::new(DatabaseBackend::Postgres)
+    let db = mock_db()
         .append_query_results([vec![import_build_row(
             build_id,
             derivation_build,
@@ -2538,11 +2518,10 @@ async fn an_import_aborted_in_an_earlier_evaluation_is_queued_again_and_waits() 
 #[tokio::test]
 async fn a_reproducible_import_failure_still_answers_failed() {
     use gradient_entity::build::BuildStatus;
-    use sea_orm::{DatabaseBackend, MockDatabase};
 
     let (build_id, derivation_build) = (BuildJobId::now_v7(), DerivationBuildId::now_v7());
     let failed = || import_build_row(build_id, derivation_build, BuildStatus::FailedPermanent);
-    let db = MockDatabase::new(DatabaseBackend::Postgres)
+    let db = mock_db()
         .append_query_results([vec![failed()]])
         .append_query_results([vec![failed()]]);
     let (scheduler, mut signals) = import_scheduler(db).await;
@@ -2563,12 +2542,11 @@ async fn a_reproducible_import_failure_still_answers_failed() {
 #[tokio::test]
 async fn an_import_without_an_entry_point_answers_failed_instead_of_waiting() {
     use gradient_entity::build::BuildStatus;
-    use sea_orm::{DatabaseBackend, MockDatabase};
 
     let (build_id, derivation_build) = (BuildJobId::now_v7(), DerivationBuildId::now_v7());
     let mut row = import_build_row(build_id, derivation_build, BuildStatus::Created);
     row.insert("has_entry_point".to_owned(), false.into());
-    let db = MockDatabase::new(DatabaseBackend::Postgres).append_query_results([vec![row]]);
+    let db = mock_db().append_query_results([vec![row]]);
     let (scheduler, mut signals) = import_scheduler(db).await;
 
     request_the_import(&scheduler).await;

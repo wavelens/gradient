@@ -146,7 +146,8 @@ pub async fn get_tasks(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sea_orm::{DatabaseBackend, MockDatabase, Value};
+    use gradient_fixtures::mock::mock_db;
+    use sea_orm::Value;
     use std::collections::BTreeMap;
 
     fn task_row(
@@ -180,7 +181,7 @@ mod tests {
 
     #[tokio::test]
     async fn no_tasks_asks_nothing_more() {
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([Vec::<BTreeMap<&str, Value>>::new()])
             .into_connection();
 
@@ -203,7 +204,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_page_past_the_end_keeps_the_counts() {
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([vec![task_row(None, None)]])
             .into_connection();
 
@@ -225,7 +226,7 @@ mod tests {
 
     #[tokio::test]
     async fn no_filter_picks_starred_once_a_task_is_starred() {
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([vec![task_row(None, None)]])
             .into_connection();
 
@@ -250,7 +251,7 @@ mod tests {
             Some((uuid::Uuid::now_v7(), completed)),
             Some(uuid::Uuid::now_v7()),
         );
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([
                 vec![task],
                 Vec::<BTreeMap<&str, Value>>::new(),

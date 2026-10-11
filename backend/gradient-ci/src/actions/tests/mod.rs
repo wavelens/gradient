@@ -14,6 +14,7 @@ use super::payload::git_host_status_payload;
 use super::report::build_ci_reports_from_payload;
 use super::truncate;
 use fixtures::{action_with, make_ctx, make_ctx_with, run};
+use gradient_fixtures::mock::mock_db;
 use gradient_git_host::reporter::CiStatus;
 use gradient_types::ActionType;
 use serde_json::json;
@@ -214,12 +215,11 @@ fn build_ci_report_errors_on_invalid_build_id() {
 fn a_failed_attribute_reddens_the_evaluation_check_and_gets_its_own_build_check() {
     use gradient_entity::evaluation_message::MessageLevel;
     use gradient_types::{EvaluationId, MCommit, MEvaluation, MEvaluationMessage, MTask, TaskId};
-    use sea_orm::{DatabaseBackend, MockDatabase};
 
     run(async {
         let evaluation_id = EvaluationId::now_v7();
         let task = TaskId::now_v7();
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([vec![MEvaluation {
                 id: evaluation_id,
                 task: Some(task),

@@ -467,8 +467,9 @@ mod tests {
     use gradient_db::MissingRow;
     use gradient_entity::StorePathError;
     use gradient_entity::evaluation::EvaluationStatus;
+    use gradient_fixtures::mock::{mock_db, raw_statements};
     use gradient_types::*;
-    use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
+    use sea_orm::MockExecResult;
 
     fn transactions(n: usize) -> Vec<MockExecResult> {
         vec![MockExecResult::default(); 2 * n]
@@ -493,7 +494,7 @@ mod tests {
     async fn queued_batches_share_one_transaction() {
         let e1 = EvaluationId::now_v7();
         let e2 = EvaluationId::now_v7();
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_exec_results(transactions(1))
             .append_query_results([vec![evaluation(e1)], vec![evaluation(e2)]])
             .into_connection();
@@ -561,7 +562,7 @@ mod tests {
             "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
         );
         let none = Vec::<std::collections::BTreeMap<String, sea_orm::Value>>::new;
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_exec_results(transactions(1))
             .append_query_results([Vec::<MCachedPath>::new()])
             .append_query_results([none(), none()])
@@ -586,7 +587,7 @@ mod tests {
 
         writer.stop_and_wait(None, None).await.unwrap();
         drop((writer, graph));
-        let statements = gradient_db::pool::raw_statements(pool.into_transaction_log());
+        let statements = raw_statements(pool.into_transaction_log());
         let inserts: Vec<String> = statements
             .iter()
             .filter(|s| s.sql.contains(r#"INSERT INTO "cached_path""#))
@@ -606,7 +607,7 @@ mod tests {
             "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
         );
         let none = Vec::<std::collections::BTreeMap<String, sea_orm::Value>>::new;
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_exec_results(transactions(1))
             .append_query_results([Vec::<MCachedPath>::new()])
             .append_query_results([none(), none()])
@@ -631,7 +632,7 @@ mod tests {
 
         writer.stop_and_wait(None, None).await.unwrap();
         drop((writer, graph));
-        let statements = gradient_db::pool::raw_statements(pool.into_transaction_log());
+        let statements = raw_statements(pool.into_transaction_log());
         let at = |needle: &str| {
             statements
                 .iter()
@@ -655,7 +656,7 @@ mod tests {
     async fn a_failed_batch_commits_its_nars_one_by_one() {
         let good = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
         let none = Vec::<std::collections::BTreeMap<String, sea_orm::Value>>::new;
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_exec_results(transactions(1))
             .append_query_results([Vec::<MCachedPath>::new()])
             .append_query_results([vec![cached_path(good)]])
@@ -696,7 +697,7 @@ mod tests {
     async fn a_batch_without_its_evaluation_fails_only_its_caller() {
         let e1 = EvaluationId::now_v7();
         let e2 = EvaluationId::now_v7();
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_exec_results(transactions(1))
             .append_query_results([vec![evaluation(e1)], Vec::<MEvaluation>::new()])
             .into_connection();
@@ -723,7 +724,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_transaction_past_its_budget_is_rolled_back() {
-        let (ctx, pool) = ctx(MockDatabase::new(DatabaseBackend::Postgres)
+        let (ctx, pool) = ctx(mock_db()
             .append_exec_results(transactions(1))
             .into_connection())
         .await;
@@ -748,7 +749,7 @@ mod tests {
 
     #[tokio::test]
     async fn an_aborted_transaction_is_rolled_back_instead_of_committed() {
-        let (ctx, pool) = ctx(MockDatabase::new(DatabaseBackend::Postgres)
+        let (ctx, pool) = ctx(mock_db()
             .append_exec_results([MockExecResult::default()])
             .into_connection())
         .await;
@@ -770,7 +771,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_transaction_hands_its_budget_to_postgres_first() {
-        let (ctx, pool) = ctx(MockDatabase::new(DatabaseBackend::Postgres)
+        let (ctx, pool) = ctx(mock_db()
             .append_exec_results(transactions(1))
             .into_connection())
         .await;
@@ -847,7 +848,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_deadlocked_transaction_is_retried_and_its_second_attempt_commits() {
-        let (ctx, pool) = ctx(MockDatabase::new(DatabaseBackend::Postgres)
+        let (ctx, pool) = ctx(mock_db()
             .append_exec_results(transactions(2))
             .into_connection())
         .await;
@@ -892,7 +893,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_unique_violation_is_not_retried() {
-        let (ctx, _pool) = ctx(MockDatabase::new(DatabaseBackend::Postgres)
+        let (ctx, _pool) = ctx(mock_db()
             .append_exec_results(transactions(1))
             .into_connection())
         .await;
@@ -908,7 +909,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_respawned_actor_answers_the_call_that_waited_for_it() {
-        let (ctx, _) = ctx(MockDatabase::new(DatabaseBackend::Postgres)
+        let (ctx, _) = ctx(mock_db()
             .append_exec_results(transactions(1))
             .into_connection())
         .await;

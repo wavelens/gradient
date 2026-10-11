@@ -7,130 +7,144 @@
 use crate::cli::test_cli;
 use crate::fakes::email::InMemoryEmailSender;
 use crate::log_storage::NoopLogStorage;
+use axum_test::TestServer;
 use gradient_core::ServerState;
 use gradient_db::{CacheDb, WebDb, WorkerDb};
+use gradient_fixtures::mock::empty_db;
 use gradient_notify::EmailSender;
-use gradient_storage::LogStorage;
-use gradient_storage::NarStore;
-use gradient_types::{RuntimeConfig, SecretString};
-use sea_orm::{DatabaseBackend, DatabaseConnection, MockDatabase};
+use gradient_storage::{LogStorage, NarStore};
+use gradient_types::{Cli, RuntimeConfig, SecretString};
+use sea_orm::DatabaseConnection;
 use std::sync::Arc;
 
-fn empty_mock() -> DatabaseConnection {
-    MockDatabase::new(DatabaseBackend::Postgres).into_connection()
-}
+pub const TEST_JWT_SECRET: &str = "test-jwt-secret";
 
-pub fn test_state(db: DatabaseConnection) -> Arc<ServerState> {
-    let nar_storage = NarStore::local(&config().server.base_dir).expect("create test NarStore");
-    test_state_with_storage(db, nar_storage)
-}
+type ConfigChange = Box<dyn FnOnce(&mut RuntimeConfig)>;
 
-pub fn test_state_with_storage(db: DatabaseConnection, nar_storage: NarStore) -> Arc<ServerState> {
-    assemble(
-        Pools {
-            worker: db,
-            ..Pools::empty()
-        },
-        nar_storage,
-        Arc::new(NoopLogStorage),
-    )
-}
-
-/// The `CacheQuery` handler is reading the dedicated `cache_db` pool, not `db`.
-pub fn test_state_cache(db: DatabaseConnection) -> Arc<ServerState> {
-    with_pools(Pools {
-        cache: db,
-        ..Pools::empty()
-    })
-}
-
-pub fn test_state_web(db: DatabaseConnection) -> Arc<ServerState> {
-    with_pools(Pools {
-        web: db,
-        ..Pools::empty()
-    })
-}
-
-pub fn test_state_with_log_storage(
-    db: DatabaseConnection,
+pub struct TestState {
+    cli: Cli,
+    config_changes: Vec<ConfigChange>,
+    web_db: DatabaseConnection,
+    cache_db: DatabaseConnection,
+    worker_db: DatabaseConnection,
+    nar_storage: Option<NarStore>,
     log_storage: Arc<dyn LogStorage>,
-) -> Arc<ServerState> {
-    let nar_storage = NarStore::local(&config().server.base_dir).expect("create test NarStore");
-    assemble(
-        Pools {
-            worker: db,
-            ..Pools::empty()
-        },
-        nar_storage,
-        log_storage,
-    )
+    email: Arc<dyn EmailSender>,
 }
 
-struct Pools {
-    web: DatabaseConnection,
-    cache: DatabaseConnection,
-    worker: DatabaseConnection,
-}
-
-impl Pools {
-    fn empty() -> Self {
+impl Default for TestState {
+    fn default() -> Self {
         Self {
-            web: empty_mock(),
-            cache: empty_mock(),
-            worker: empty_mock(),
+            cli: test_cli(),
+            config_changes: Vec::new(),
+            web_db: empty_db(),
+            cache_db: empty_db(),
+            worker_db: empty_db(),
+            nar_storage: None,
+            log_storage: Arc::new(NoopLogStorage),
+            email: Arc::new(InMemoryEmailSender::new()),
         }
     }
 }
 
-fn config() -> RuntimeConfig {
-    RuntimeConfig::from_cli(&test_cli()).expect("valid test config")
+impl TestState {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn web_db(mut self, db: DatabaseConnection) -> Self {
+        self.web_db = db;
+        self
+    }
+
+    pub fn cache_db(mut self, db: DatabaseConnection) -> Self {
+        self.cache_db = db;
+        self
+    }
+
+    pub fn worker_db(mut self, db: DatabaseConnection) -> Self {
+        self.worker_db = db;
+        self
+    }
+
+    pub fn cli(mut self, change: impl FnOnce(&mut Cli)) -> Self {
+        change(&mut self.cli);
+        self
+    }
+
+    pub fn config(mut self, change: impl FnOnce(&mut RuntimeConfig) + 'static) -> Self {
+        self.config_changes.push(Box::new(change));
+        self
+    }
+
+    pub fn nar_storage(mut self, nar_storage: NarStore) -> Self {
+        self.nar_storage = Some(nar_storage);
+        self
+    }
+
+    pub fn log_storage(mut self, log_storage: Arc<dyn LogStorage>) -> Self {
+        self.log_storage = log_storage;
+        self
+    }
+
+    pub fn email(mut self, email: Arc<dyn EmailSender>) -> Self {
+        self.email = email;
+        self
+    }
+
+    pub fn build(self) -> Arc<ServerState> {
+        let mut config = RuntimeConfig::from_cli(&self.cli).expect("valid test config");
+        for change in self.config_changes {
+            change(&mut config);
+        }
+        let nar_storage = self.nar_storage.unwrap_or_else(|| {
+            NarStore::local(&config.server.base_dir).expect("create test NarStore")
+        });
+
+        Arc::new(ServerState {
+            web_db: WebDb::new(self.web_db),
+            cache_db: CacheDb::new(self.cache_db),
+            worker_db: WorkerDb::new(self.worker_db),
+            config: Arc::new(config),
+            log_storage: self.log_storage,
+            email: self.email,
+            nar_storage,
+            manifest_state: Default::default(),
+            pending_credentials: Default::default(),
+            http: gradient_util::http::build_client().expect("build test HTTP client"),
+            git_host: gradient_git_host::GitHostRegistry::with_builtin(),
+            github_app_install_url: Default::default(),
+            shutdown: gradient_util::shutdown::Shutdown::new(),
+            last_used_stamps: gradient_core::last_used_stamps(),
+            build_progress: gradient_core::build_progress(),
+            eval_progress: gradient_core::eval_progress(),
+            cache_traffic: gradient_db::metrics::cache_traffic::CacheTraffic::shared(),
+            jwt_secret: SecretString::new(TEST_JWT_SECRET.to_string()),
+            started_at: chrono::Utc::now(),
+            pending_project_memberships: Default::default(),
+            events: gradient_types::EventBus::default(),
+            delivery_wake: Default::default(),
+            eval_assign_wake: Default::default(),
+            probe_requests: Default::default(),
+            held_evaluations: Default::default(),
+            startable_set: Default::default(),
+            graph: gradient_core::Graph::stub(),
+            upstream_query: Arc::new(tokio::sync::Semaphore::new(32)),
+            nar_downloads: Arc::new(tokio::sync::Semaphore::new(16)),
+            upload_admission: gradient_storage::admission::UploadAdmission::new(
+                gradient_storage::admission::Limits {
+                    concurrency: 16,
+                    bytes: u64::MAX,
+                },
+            ),
+        })
+    }
+
+    pub fn server(self) -> TestServer {
+        TestServer::new(gradient_web::create_router(self.build()).expect("router"))
+    }
 }
 
-fn with_pools(pools: Pools) -> Arc<ServerState> {
-    let nar_storage = NarStore::local(&config().server.base_dir).expect("create test NarStore");
-    assemble(pools, nar_storage, Arc::new(NoopLogStorage))
-}
-
-fn assemble(
-    pools: Pools,
-    nar_storage: NarStore,
-    log_storage: Arc<dyn LogStorage>,
-) -> Arc<ServerState> {
-    Arc::new(ServerState {
-        web_db: WebDb::new(pools.web),
-        cache_db: CacheDb::new(pools.cache),
-        worker_db: WorkerDb::new(pools.worker),
-        config: Arc::new(config()),
-        log_storage,
-        email: Arc::new(InMemoryEmailSender::new()) as Arc<dyn EmailSender>,
-        nar_storage,
-        manifest_state: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
-        pending_credentials: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
-        http: gradient_util::http::build_client().expect("build test HTTP client"),
-        git_host: gradient_git_host::GitHostRegistry::with_builtin(),
-        github_app_install_url: Default::default(),
-        shutdown: gradient_util::shutdown::Shutdown::new(),
-        last_used_stamps: gradient_core::last_used_stamps(),
-        build_progress: gradient_core::build_progress(),
-        eval_progress: gradient_core::eval_progress(),
-        cache_traffic: gradient_db::metrics::cache_traffic::CacheTraffic::shared(),
-        jwt_secret: SecretString::new("test-jwt-secret".to_string()),
-        started_at: chrono::Utc::now(),
-        pending_project_memberships: Arc::new(std::collections::HashMap::new()),
-        events: gradient_types::EventBus::default(),
-        delivery_wake: Default::default(),
-        eval_assign_wake: Default::default(),
-        probe_requests: Default::default(),
-        held_evaluations: Default::default(),
-        startable_set: Default::default(),
-        graph: gradient_core::Graph::stub(),
-        upstream_query: std::sync::Arc::new(tokio::sync::Semaphore::new(32)),
-        nar_downloads: std::sync::Arc::new(tokio::sync::Semaphore::new(16)),
-        upload_admission: gradient_storage::admission::UploadAdmission::new(
-            gradient_storage::admission::Limits {
-                concurrency: 16,
-                bytes: u64::MAX,
-            },
-        ),
-    })
+pub fn test_state(worker_db: DatabaseConnection) -> Arc<ServerState> {
+    TestState::new().worker_db(worker_db).build()
 }

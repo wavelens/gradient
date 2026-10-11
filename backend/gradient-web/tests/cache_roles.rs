@@ -4,24 +4,13 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-#![expect(
-    clippy::unwrap_used,
-    reason = "test scaffolding: a fixture helper that cannot build its value should fail the test loudly"
-)]
-
 use gradient_entity::{cache, cache_role, cache_user, ids::*};
-use gradient_test_support::fixtures::{test_date, user, user_id};
-use gradient_test_support::web::{live_session, make_test_server, make_token};
-use gradient_types::SessionId;
+use gradient_fixtures::ids::{cache_id, user_id};
+use gradient_fixtures::test_date;
+use gradient_test_support::web::{make_test_server, signed_in};
 use gradient_types::consts::{BASE_CACHE_ROLE_ADMIN_ID, BASE_CACHE_ROLE_VIEW_ID};
 use gradient_types::permissions::{cache_admin_mask, cache_view_mask};
-use sea_orm::{DatabaseBackend, MockDatabase};
 use serde_json::{Value, json};
-use uuid::Uuid;
-
-fn cache_id() -> CacheId {
-    CacheId::new(Uuid::parse_str("d0000000-0000-0000-0000-000000000001").unwrap())
-}
 
 fn cache_row() -> cache::Model {
     cache::Model {
@@ -77,20 +66,12 @@ fn custom_role_row(id: RoleId, name: &str, permission: i64) -> cache_role::Model
     }
 }
 
-fn with_auth(db: MockDatabase, session_id: SessionId) -> MockDatabase {
-    let session = live_session(session_id);
-    db.append_query_results([vec![session.clone()]])
-        .append_query_results([vec![session]])
-        .append_query_results([vec![user()]])
-}
-
 #[tokio::test]
 async fn list_returns_builtins_and_available_permissions() {
-    let session_id = SessionId::now_v7();
-    let token = make_token(session_id);
+    let (db, auth) = signed_in();
     let custom_id = RoleId::now_v7();
 
-    let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
+    let db = db
         .append_query_results([vec![cache_row()]])
         .append_query_results([vec![admin_member()]])
         .append_query_results([vec![
@@ -102,7 +83,7 @@ async fn list_returns_builtins_and_available_permissions() {
     let server = make_test_server(db.into_connection());
     let res = server
         .get("/api/v1/caches/test-cache/roles")
-        .add_header("authorization", format!("Bearer {}", token))
+        .add_header("authorization", auth)
         .await;
 
     res.assert_status_ok();
@@ -128,11 +109,10 @@ async fn list_returns_builtins_and_available_permissions() {
 
 #[tokio::test]
 async fn create_role_rejects_duplicate_name() {
-    let session_id = SessionId::now_v7();
-    let token = make_token(session_id);
+    let (db, auth) = signed_in();
     let existing = custom_role_row(RoleId::now_v7(), "pusher", 0);
 
-    let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
+    let db = db
         .append_query_results([vec![cache_row()]])
         .append_query_results([vec![admin_member()]])
         .append_query_results([vec![admin_role_row()]])
@@ -141,7 +121,7 @@ async fn create_role_rejects_duplicate_name() {
     let server = make_test_server(db.into_connection());
     let res = server
         .post("/api/v1/caches/test-cache/roles")
-        .add_header("authorization", format!("Bearer {}", token))
+        .add_header("authorization", auth)
         .json(&json!({"name": "pusher", "permissions": []}))
         .await;
 
@@ -150,10 +130,9 @@ async fn create_role_rejects_duplicate_name() {
 
 #[tokio::test]
 async fn create_role_rejects_unknown_permission() {
-    let session_id = SessionId::now_v7();
-    let token = make_token(session_id);
+    let (db, auth) = signed_in();
 
-    let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
+    let db = db
         .append_query_results([vec![cache_row()]])
         .append_query_results([vec![admin_member()]])
         .append_query_results([vec![admin_role_row()]]);
@@ -161,7 +140,7 @@ async fn create_role_rejects_unknown_permission() {
     let server = make_test_server(db.into_connection());
     let res = server
         .post("/api/v1/caches/test-cache/roles")
-        .add_header("authorization", format!("Bearer {}", token))
+        .add_header("authorization", auth)
         .json(&json!({"name": "pusher", "permissions": ["notARealPermission"]}))
         .await;
 
@@ -177,10 +156,9 @@ async fn create_role_rejects_unknown_permission() {
 
 #[tokio::test]
 async fn patch_role_rejects_builtin() {
-    let session_id = SessionId::now_v7();
-    let token = make_token(session_id);
+    let (db, auth) = signed_in();
 
-    let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
+    let db = db
         .append_query_results([vec![cache_row()]])
         .append_query_results([vec![admin_member()]])
         .append_query_results([vec![admin_role_row()]])
@@ -192,7 +170,7 @@ async fn patch_role_rejects_builtin() {
             "/api/v1/caches/test-cache/roles/{}",
             BASE_CACHE_ROLE_ADMIN_ID
         ))
-        .add_header("authorization", format!("Bearer {}", token))
+        .add_header("authorization", auth)
         .json(&json!({"permissions": []}))
         .await;
 
@@ -201,15 +179,14 @@ async fn patch_role_rejects_builtin() {
 
 #[tokio::test]
 async fn patch_role_rejects_managed() {
-    let session_id = SessionId::now_v7();
-    let token = make_token(session_id);
+    let (db, auth) = signed_in();
     let custom_id = RoleId::now_v7();
     let managed_custom = cache_role::Model {
         managed: true,
         ..custom_role_row(custom_id, "pusher", 0)
     };
 
-    let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
+    let db = db
         .append_query_results([vec![cache_row()]])
         .append_query_results([vec![admin_member()]])
         .append_query_results([vec![admin_role_row()]])
@@ -218,7 +195,7 @@ async fn patch_role_rejects_managed() {
     let server = make_test_server(db.into_connection());
     let res = server
         .patch(&format!("/api/v1/caches/test-cache/roles/{}", custom_id))
-        .add_header("authorization", format!("Bearer {}", token))
+        .add_header("authorization", auth)
         .json(&json!({"permissions": []}))
         .await;
 
@@ -227,12 +204,11 @@ async fn patch_role_rejects_managed() {
 
 #[tokio::test]
 async fn delete_role_rejects_a_role_granted_to_a_team() {
-    let session_id = SessionId::now_v7();
-    let token = make_token(session_id);
+    let (db, auth) = signed_in();
     let custom_id = RoleId::now_v7();
     let custom = custom_role_row(custom_id, "pusher", 0);
 
-    let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
+    let db = db
         .append_query_results([vec![cache_row()]])
         .append_query_results([vec![admin_member()]])
         .append_query_results([vec![admin_role_row()]])
@@ -250,7 +226,7 @@ async fn delete_role_rejects_a_role_granted_to_a_team() {
     let server = make_test_server(db.into_connection());
     let res = server
         .delete(&format!("/api/v1/caches/test-cache/roles/{}", custom_id))
-        .add_header("authorization", format!("Bearer {}", token))
+        .add_header("authorization", auth)
         .await;
 
     res.assert_status(axum::http::StatusCode::BAD_REQUEST);
@@ -258,8 +234,7 @@ async fn delete_role_rejects_a_role_granted_to_a_team() {
 
 #[tokio::test]
 async fn delete_role_rejects_role_in_use() {
-    let session_id = SessionId::now_v7();
-    let token = make_token(session_id);
+    let (db, auth) = signed_in();
     let custom_id = RoleId::now_v7();
     let custom = custom_role_row(custom_id, "pusher", 0);
 
@@ -270,7 +245,7 @@ async fn delete_role_rejects_role_in_use() {
         role: custom_id,
     };
 
-    let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
+    let db = db
         .append_query_results([vec![cache_row()]])
         .append_query_results([vec![admin_member()]])
         .append_query_results([vec![admin_role_row()]])
@@ -280,7 +255,7 @@ async fn delete_role_rejects_role_in_use() {
     let server = make_test_server(db.into_connection());
     let res = server
         .delete(&format!("/api/v1/caches/test-cache/roles/{}", custom_id))
-        .add_header("authorization", format!("Bearer {}", token))
+        .add_header("authorization", auth)
         .await;
 
     res.assert_status(axum::http::StatusCode::BAD_REQUEST);

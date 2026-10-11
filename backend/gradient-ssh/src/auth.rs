@@ -86,7 +86,8 @@ async fn load_session(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sea_orm::{DatabaseBackend, MockDatabase};
+    use gradient_fixtures::mock::mock_db;
+    use gradient_test_support::state::TestState;
 
     const KEY: &str =
         "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHfwJ61+Nu5yJhfB3PfAyywWMtpJcwybHAVPzGWnPQ6v test";
@@ -102,10 +103,10 @@ mod tests {
 
     #[tokio::test]
     async fn an_unknown_key_is_rejected() {
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([Vec::<MUserSshKey>::new()])
             .into_connection();
-        let state = gradient_test_support::state::test_state_web(db);
+        let state = TestState::new().web_db(db).build();
 
         let rejected = authorize(&state, "project", "SHA256:unknown").await;
         assert!(rejected.is_err());
@@ -113,17 +114,17 @@ mod tests {
 
     #[tokio::test]
     async fn a_project_the_user_is_not_in_is_rejected_like_an_unknown_key() {
-        let user = gradient_test_support::fixtures::user();
+        let user = gradient_fixtures::rows::user();
         let key = MUserSshKey {
             user: user.id,
             ..Default::default()
         };
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([vec![key]])
             .append_query_results([vec![user]])
             .append_query_results([Vec::<MProject>::new()])
             .into_connection();
-        let state = gradient_test_support::state::test_state_web(db);
+        let state = TestState::new().web_db(db).build();
 
         let rejected = authorize(&state, "someone-elses", "SHA256:known").await;
         assert_eq!(
@@ -136,17 +137,17 @@ mod tests {
     async fn a_deactivated_user_is_rejected() {
         let user = MUser {
             active: false,
-            ..gradient_test_support::fixtures::user()
+            ..gradient_fixtures::rows::user()
         };
         let key = MUserSshKey {
             user: user.id,
             ..Default::default()
         };
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([vec![key]])
             .append_query_results([vec![user]])
             .into_connection();
-        let state = gradient_test_support::state::test_state_web(db.clone());
+        let state = TestState::new().web_db(db.clone()).build();
 
         assert!(authorize(&state, "project", "SHA256:known").await.is_err());
         let log = format!("{:?}", db.into_transaction_log());

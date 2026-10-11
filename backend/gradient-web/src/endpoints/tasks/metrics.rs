@@ -326,7 +326,7 @@ pub async fn get_entry_point_metrics(
 mod tests {
     use super::*;
     use gradient_entity::{cached_path, derivation_output};
-    use sea_orm::{DatabaseBackend, MockDatabase};
+    use gradient_fixtures::mock::mock_db;
 
     fn now() -> chrono::NaiveDateTime {
         chrono::Utc::now().naive_utc()
@@ -369,7 +369,7 @@ mod tests {
     async fn sum_output_sizes_falls_back_to_cached_path_for_substituted() {
         let drv_id = DerivationId::now_v7();
         let cached_id = CachedPathId::now_v7();
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([vec![drv_output(drv_id, "abc", None, Some(cached_id))]])
             .append_query_results([vec![cached_row(cached_id, "abc", 1024)]])
             .into_connection();
@@ -383,7 +383,7 @@ mod tests {
         let drv_built = DerivationId::now_v7();
         let drv_sub = DerivationId::now_v7();
         let cached_id = CachedPathId::now_v7();
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([vec![
                 drv_output(drv_built, "built", Some(2048), None),
                 drv_output(drv_sub, "subst", None, Some(cached_id)),
@@ -400,7 +400,7 @@ mod tests {
     #[tokio::test]
     async fn sum_output_sizes_returns_none_when_nothing_known() {
         let drv_id = DerivationId::now_v7();
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([vec![drv_output(drv_id, "unknown", None, None)]])
             .append_query_results([Vec::<cached_path::Model>::new()])
             .into_connection();

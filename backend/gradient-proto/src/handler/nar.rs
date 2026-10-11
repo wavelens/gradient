@@ -119,7 +119,8 @@ pub(super) async fn project_for_dispatched_job<C: ConnectionTrait>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sea_orm::{DatabaseBackend, MockDatabase, QueryTrait};
+    use gradient_fixtures::mock::mock_db;
+    use sea_orm::{DatabaseBackend, QueryTrait};
     use uuid::Uuid;
 
     const JOB: &str = "build:01a07af6-9d9f-7300-8aa1-fb82b0c18446";
@@ -143,7 +144,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_late_nar_still_resolves_its_project_from_the_assignment_row() {
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([vec![row()]])
             .into_connection();
 
@@ -155,7 +156,7 @@ mod tests {
 
     #[tokio::test]
     async fn no_assignment_row_yields_no_project() {
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([Vec::<gradient_entity::dispatched_job::Model>::new()])
             .into_connection();
 

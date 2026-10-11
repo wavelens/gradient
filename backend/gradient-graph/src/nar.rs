@@ -627,11 +627,9 @@ pub(crate) async fn insert_signatures(db: &WorkerDb, rows: Vec<ACachedPathSignat
 mod tests {
     use super::*;
     use crate::test_ctx::ctx;
+    use gradient_fixtures::mock::{empty_db, mock_db};
     use gradient_types::ids::ProjectId;
-    use sea_orm::{
-        DatabaseBackend, DatabaseConnection, MockDatabase, MockExecResult, Statement,
-        TransactionTrait, Value,
-    };
+    use sea_orm::{DatabaseConnection, MockExecResult, Statement, TransactionTrait, Value};
     use std::collections::BTreeMap;
     use std::sync::Arc;
     use uuid::Uuid;
@@ -701,11 +699,11 @@ mod tests {
     }
 
     fn statements(db: WorkerDb) -> Vec<String> {
-        gradient_db::pool::statements(db.into_transaction_log())
+        gradient_fixtures::mock::statements(db.into_transaction_log())
     }
 
     fn raw_statements(db: WorkerDb) -> Vec<Statement> {
-        gradient_db::pool::raw_statements(db.into_transaction_log())
+        gradient_fixtures::mock::raw_statements(db.into_transaction_log())
     }
 
     fn bound(stmt: &Statement, column: &str) -> Value {
@@ -766,7 +764,7 @@ mod tests {
     }
 
     async fn recommit_log(references: Vec<String>) -> Vec<String> {
-        let mut mock = MockDatabase::new(DatabaseBackend::Postgres)
+        let mut mock = mock_db()
             .append_query_results([
                 vec![returned_cached_path(HASH)],
                 vec![returned_cached_path(HASH)],
@@ -819,7 +817,7 @@ mod tests {
     }
 
     fn project_commit_db(cache: MCache) -> DatabaseConnection {
-        MockDatabase::new(DatabaseBackend::Postgres)
+        mock_db()
             .append_query_results([Vec::<MCachedPath>::new()])
             .append_query_results([vec![returned_cached_path(HASH)]])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
@@ -892,7 +890,7 @@ mod tests {
     #[tokio::test]
     async fn recording_keeps_the_content_address() {
         let ca = "text:sha256:006vc8gixyrcynsx4lz1qxingl0mdja3l0xw1nl0j73isg37x944";
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([Vec::<MCachedPath>::new()])
             .append_query_results([vec![returned_cached_path(HASH)]])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
@@ -917,7 +915,7 @@ mod tests {
 
     #[tokio::test]
     async fn none_target_enqueues_no_signature() {
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([Vec::<MCachedPath>::new()])
             .append_query_results([vec![returned_cached_path(HASH)]])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
@@ -935,7 +933,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_commit_writes_the_runtime_dependencies_its_references_name() {
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([Vec::<MCachedPath>::new()])
             .append_query_results([vec![returned_cached_path(HASH)]])
             .append_query_results([vec![producer_row()]])
@@ -975,7 +973,7 @@ mod tests {
     #[tokio::test]
     async fn a_complete_commit_advances_the_shared_builds_behind_the_paths_it_completed() {
         let producer = Uuid::now_v7();
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([Vec::<MCachedPath>::new()])
             .append_query_results([vec![returned_cached_path(HASH)]])
             .append_query_results([vec![BTreeMap::from([(
@@ -1029,7 +1027,7 @@ mod tests {
     #[tokio::test]
     async fn a_commit_writes_the_reported_references_onto_the_row() {
         let dep = format!("{DEP_HASH}-dep");
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([Vec::<MCachedPath>::new()])
             .append_query_results([vec![returned_cached_path(HASH)]])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
@@ -1060,8 +1058,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_pooled_commit_is_rejected_instead_of_racing_the_retires() {
-        let (pooled, _pool) =
-            ctx(MockDatabase::new(DatabaseBackend::Postgres).into_connection()).await;
+        let (pooled, _pool) = ctx(empty_db()).await;
 
         let err = commit(&pooled, &commit_for(SP))
             .await
@@ -1076,7 +1073,7 @@ mod tests {
     #[tokio::test]
     async fn a_commit_that_loses_completeness_ripples_backward() {
         let producer = Uuid::now_v7();
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([
                 vec![returned_cached_path(HASH)],
                 vec![returned_cached_path(HASH)],
@@ -1120,7 +1117,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_committed_path_backs_every_output_with_its_hash() {
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([Vec::<MCachedPath>::new()])
             .append_query_results([vec![returned_cached_path(HASH)]])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
@@ -1136,7 +1133,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_passed_through_commit_on_s3_inserts_the_row_unconfirmed() {
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([Vec::<MCachedPath>::new()])
             .append_query_results([vec![returned_cached_path(HASH)]])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
@@ -1171,7 +1168,7 @@ mod tests {
             file_hash: Some("sha256:old".to_owned()),
             ..returned_cached_path(HASH)
         };
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([vec![existing.clone()], vec![existing]])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_exec_results([exec(1)])
@@ -1205,7 +1202,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_recommit_with_other_content_leaves_the_stored_row_untouched() {
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([vec![stored_row()]])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_exec_results([exec(1)])
@@ -1221,7 +1218,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_batch_recommit_with_other_content_leaves_the_stored_row_untouched() {
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([vec![stored_row()]])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([Vec::<MDerivationOutput>::new()])
@@ -1253,7 +1250,7 @@ mod tests {
         let (private_key, _) =
             gradient_sources::generate_signing_key(&secret).expect("signing key");
         let cache = cache_row(private_key);
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([vec![stored_row()]])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
@@ -1297,7 +1294,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_client_recommit_with_other_content_signs_nothing() {
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([vec![stored_row()]])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_exec_results([exec(1)])

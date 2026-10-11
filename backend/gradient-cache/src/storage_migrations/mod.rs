@@ -73,9 +73,9 @@ pub(super) async fn step(state: &Arc<ServerState>) -> Result<Step> {
 mod tests {
     use super::*;
     use crate::test_support::test_server_state;
+    use gradient_fixtures::mock::mock_db;
     use gradient_storage::NarStore;
     use gradient_types::*;
-    use sea_orm::{DatabaseBackend, MockDatabase};
 
     #[tokio::test]
     async fn applied_migrations_leave_the_step_to_the_deep_gc() {
@@ -87,9 +87,7 @@ mod tests {
                 ..Default::default()
             })
             .collect();
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
-            .append_query_results([applied])
-            .into_connection();
+        let db = mock_db().append_query_results([applied]).into_connection();
         let tmp = tempfile::tempdir().unwrap();
         let nar = NarStore::local(tmp.path()).unwrap();
 

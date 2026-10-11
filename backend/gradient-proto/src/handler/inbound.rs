@@ -1146,9 +1146,10 @@ mod assignment_response_tests {
     use super::fixture::pending_eval;
     use super::*;
     use crate::handler::job_events::SchedulerJobEvents;
+    use gradient_fixtures::mock::{empty_db, mock_db};
     use gradient_test_support::prelude::*;
     use gradient_types::events::Event;
-    use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
+    use sea_orm::MockExecResult;
     use std::time::Duration;
 
     fn detached_writer() -> ProtoWriter {
@@ -1157,7 +1158,7 @@ mod assignment_response_tests {
 
     #[tokio::test]
     async fn a_rejected_assignment_closes_its_assignment_row() {
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_exec_results([MockExecResult {
                 last_insert_id: 0,
                 rows_affected: 1,
@@ -1223,7 +1224,7 @@ mod assignment_response_tests {
 
     #[tokio::test]
     async fn an_accepted_assignment_keeps_its_row_open() {
-        let db = MockDatabase::new(DatabaseBackend::Postgres).into_connection();
+        let db = empty_db();
         let log_db = db.clone();
         let state = test_state(db);
         let scheduler = Arc::new(Scheduler::new(Arc::clone(&state)));
@@ -1267,7 +1268,7 @@ mod assignment_response_tests {
 
     #[tokio::test]
     async fn a_progress_report_is_held_in_memory_and_broadcast() {
-        let db = MockDatabase::new(DatabaseBackend::Postgres).into_connection();
+        let db = empty_db();
         let log_db = db.clone();
         let state = test_state(db);
         let scheduler = Arc::new(Scheduler::new(Arc::clone(&state)));
@@ -1324,7 +1325,7 @@ mod assignment_response_tests {
 
     #[tokio::test]
     async fn an_eval_progress_report_is_held_in_memory_and_broadcast() {
-        let db = MockDatabase::new(DatabaseBackend::Postgres).into_connection();
+        let db = empty_db();
         let state = test_state(db);
         let scheduler = Arc::new(Scheduler::new(Arc::clone(&state)));
         let writer = detached_writer();
@@ -1386,7 +1387,7 @@ mod assignment_response_tests {
 
     #[tokio::test]
     async fn a_cache_query_for_an_owned_job_is_answered_without_the_scheduler() {
-        let state = test_state(MockDatabase::new(DatabaseBackend::Postgres).into_connection());
+        let state = test_state(empty_db());
         let scheduler = Arc::new(Scheduler::new(Arc::clone(&state)));
         let (writer, mut sent) = ProtoWriter::spy(Duration::from_secs(1));
         let semaphore = Arc::new(Semaphore::new(1));

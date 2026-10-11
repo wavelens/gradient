@@ -145,8 +145,8 @@ where
 mod tests {
     use super::*;
     use crate::graph::can_start::test_rows::{drv, exec, norm, transition_row};
-    use crate::pool::statements;
-    use sea_orm::{DatabaseBackend, MockDatabase, Value};
+    use gradient_fixtures::mock::{mock_db, statements};
+    use sea_orm::Value;
     use std::collections::BTreeMap;
 
     fn startable_row(id: DerivationId) -> BTreeMap<String, Value> {
@@ -205,7 +205,7 @@ mod tests {
         let unblocked_parent = DerivationId::now_v7();
         let no_longer_fetchable = DerivationId::now_v7();
         let unqueued_parent = DerivationId::now_v7();
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_exec_results([exec(0)])
             .append_query_results([vec![drv(now_fetchable)]])
             .append_query_results([vec![startable_row(unblocked_parent)]])
@@ -255,7 +255,7 @@ mod tests {
         let demoted = DerivationId::now_v7();
         let promoted = DerivationId::now_v7();
         let empty = Vec::<BTreeMap<String, Value>>::new;
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([vec![drv(a)]])
             .append_exec_results([exec(0), exec(0), exec(3)])
             .append_query_results([empty(), empty()])
@@ -304,7 +304,7 @@ mod tests {
             .map(|_| drv(DerivationId::now_v7()))
             .collect();
         let empty = Vec::<BTreeMap<String, Value>>::new;
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([scope])
             .append_exec_results(vec![exec(1); 6])
             .append_query_results([empty(), empty(), empty(), empty(), empty(), empty()])

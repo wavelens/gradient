@@ -229,6 +229,7 @@ async fn deliver_action(ctx: &EffectsCtx, row: &PendingDelivery) -> Result<()> {
 mod tests {
     use super::*;
     use gradient_db::deliveries::pending::PendingDelivery;
+    use gradient_fixtures::mock::mock_db;
     use gradient_types::ids::PendingDeliveryId;
 
     fn row(payload: JsonValue) -> PendingDelivery {
@@ -261,7 +262,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_delivery_for_a_deleted_webhook_settles() {
-        let db = sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([Vec::<MWebhook>::new()])
             .into_connection();
         let r = row(serde_json::json!({
@@ -274,7 +275,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_delivery_for_a_deactivated_webhook_settles() {
-        let db = sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([vec![MWebhook {
                 active: false,
                 ..Default::default()

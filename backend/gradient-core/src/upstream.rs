@@ -568,6 +568,7 @@ pub fn parse_upstream_narinfo(base_url: &str, store_path: &str, body: &str) -> O
 #[cfg(test)]
 mod tests {
     use super::{BREAKER_COOLDOWN, SampleKind, TRIP_AFTER, UpstreamBreakers, breakers};
+    use gradient_fixtures::mock::empty_db;
     use gradient_types::ids::CacheUpstreamId;
     use std::time::{Duration, Instant};
 
@@ -578,9 +579,7 @@ mod tests {
     #[tokio::test]
     async fn pin_writer_drains_on_shutdown() {
         let shutdown = gradient_util::shutdown::Shutdown::new();
-        let db = gradient_db::WebDb::new(
-            sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres).into_connection(),
-        );
+        let db = gradient_db::WebDb::new(empty_db());
         shutdown.spawn(super::persist_http1_pins(db, shutdown.token()));
         tokio::task::yield_now().await;
 

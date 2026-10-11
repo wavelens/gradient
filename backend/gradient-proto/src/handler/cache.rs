@@ -768,17 +768,19 @@ fn expand_references(raw: Option<&str>) -> Option<Vec<String>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gradient_fixtures::mock::mock_db;
+    use gradient_test_support::state::TestState;
     use gradient_wire::types::QueryMode;
     use std::sync::Arc;
 
     fn make_state() -> ServerState {
-        let db = sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results(vec![
                 Vec::<gradient_entity::derivation_output::Model>::new();
                 8
             ])
             .into_connection();
-        Arc::try_unwrap(gradient_test_support::prelude::test_state_cache(db)).unwrap()
+        Arc::try_unwrap(TestState::new().cache_db(db).build()).unwrap()
     }
 
     #[tokio::test]
@@ -827,12 +829,12 @@ mod tests {
     #[tokio::test]
     async fn cache_query_propagates_db_error_as_err() {
         use sea_orm::{DbErr, RuntimeErr};
-        let db = sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_errors(vec![DbErr::Conn(RuntimeErr::Internal(
                 "Connection pool timed out".to_string(),
             ))])
             .into_connection();
-        let state = Arc::try_unwrap(gradient_test_support::prelude::test_state_cache(db)).unwrap();
+        let state = Arc::try_unwrap(TestState::new().cache_db(db).build()).unwrap();
         let paths = vec!["/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-foo".to_string()];
         assert!(
             query(&state, None, &paths, &[], QueryMode::Pull, false)

@@ -102,7 +102,8 @@ pub async fn finalize_evals_for_derivations(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult, Value};
+    use gradient_fixtures::mock::{empty_db, mock_db, statements};
+    use sea_orm::{MockExecResult, Value};
     use std::collections::BTreeMap;
 
     fn counters(active: i64, failed: i64) -> Vec<BTreeMap<String, Value>> {
@@ -140,7 +141,7 @@ mod tests {
     #[tokio::test]
     async fn an_evaluation_nothing_blocks_settles() {
         let eval = building();
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([counters(0, 0)])
             .append_query_results([flag("blocked", false)])
             .append_query_results([vec![eval.clone()]])
@@ -163,7 +164,7 @@ mod tests {
         // A plain drop would leave the pool handle shared and the log unreadable.
         crate::test_ctx::settle(ctx).await;
 
-        let log = crate::pool::statements(pool.into_transaction_log());
+        let log = statements(pool.into_transaction_log());
         assert!(
             log.iter().any(|s| s.contains(r#"UPDATE \"evaluation\""#)),
             "the evaluation settles once nothing blocks it: {log:?}"
@@ -173,21 +174,21 @@ mod tests {
     #[tokio::test]
     async fn a_held_evaluation_stays_open() {
         let eval = building();
-        let db = MockDatabase::new(DatabaseBackend::Postgres).into_connection();
+        let db = empty_db();
 
         let (ctx, pool) = crate::test_ctx::ctx(db).await;
         let _hold = ctx.held_evaluations.hold(eval.id);
         check_evaluation_done(&ctx, eval.id).await.unwrap();
         drop(ctx);
 
-        let log = crate::pool::statements(pool.into_transaction_log());
+        let log = statements(pool.into_transaction_log());
         assert!(log.is_empty(), "{log:?}");
     }
 
     #[tokio::test]
     async fn a_blocked_evaluation_costs_one_read() {
         let eval = building();
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([counters(1, 0)])
             .into_connection();
 
@@ -195,7 +196,7 @@ mod tests {
         check_evaluation_done(&ctx, eval.id).await.unwrap();
         drop(ctx);
 
-        let log = crate::pool::statements(pool.into_transaction_log());
+        let log = statements(pool.into_transaction_log());
         assert_eq!(log.len(), 1, "one counters read and nothing else: {log:?}");
         assert!(log[0].contains("evaluation_shared_build_delta"), "{log:?}");
     }
@@ -203,7 +204,7 @@ mod tests {
     #[tokio::test]
     async fn a_failed_shared_build_fails_the_evaluation() {
         let eval = building();
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([counters(0, 0)])
             .append_query_results([flag("blocked", false)])
             .append_query_results([vec![eval.clone()]])
@@ -240,7 +241,7 @@ mod tests {
     #[tokio::test]
     async fn counters_the_exact_read_contradicts_are_recounted() {
         let eval = building();
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([counters(0, 0)])
             .append_query_results([flag("blocked", true)])
             .append_exec_results([exec(1), exec(1)])
@@ -250,7 +251,7 @@ mod tests {
         check_evaluation_done(&ctx, eval.id).await.unwrap();
         drop(ctx);
 
-        let log = crate::pool::statements(pool.into_transaction_log());
+        let log = statements(pool.into_transaction_log());
         assert!(
             log[2].contains("pg_advisory_xact_lock")
                 && log[3].contains("DELETE FROM evaluation_shared_build_delta"),
@@ -265,7 +266,7 @@ mod tests {
     #[tokio::test]
     async fn a_deleted_evaluation_is_nothing_to_settle() {
         let eval = building();
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .into_connection();
 

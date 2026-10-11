@@ -4,27 +4,18 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-#![expect(
-    clippy::unwrap_used,
-    reason = "test scaffolding: a fixture helper that cannot build its value should fail the test loudly"
-)]
-
 use axum::http::StatusCode;
 use gradient_entity::ids::*;
 use gradient_entity::team_user::TeamRole;
 use gradient_entity::{
     project_user, team, team_project, team_user, team_worker, worker_registration,
 };
-use gradient_test_support::fixtures::{project, project_id, test_date, user, user_id};
-use gradient_test_support::web::{live_session, make_test_server, make_token};
-use gradient_types::SessionId;
-use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
+use gradient_fixtures::ids::{project_id, team_id, user_id};
+use gradient_fixtures::mock::exec_ok;
+use gradient_fixtures::rows::project;
+use gradient_fixtures::test_date;
+use gradient_test_support::web::{make_test_server, signed_in};
 use serde_json::{Value, json};
-use uuid::Uuid;
-
-fn team_id() -> TeamId {
-    TeamId::new(Uuid::parse_str("7e000000-0000-0000-0000-000000000001").unwrap())
-}
 
 fn team_row() -> team::Model {
     team::Model {
@@ -44,24 +35,6 @@ fn membership(role: TeamRole) -> team_user::Model {
         user: user_id(),
         role,
         ..Default::default()
-    }
-}
-
-fn with_auth(db: MockDatabase, session_id: SessionId) -> MockDatabase {
-    let session = live_session(session_id);
-    db.append_query_results([vec![session.clone()]])
-        .append_query_results([vec![session]])
-        .append_query_results([vec![user()]])
-}
-
-fn bearer(session_id: SessionId) -> String {
-    format!("Bearer {}", make_token(session_id))
-}
-
-fn exec_ok() -> MockExecResult {
-    MockExecResult {
-        last_insert_id: 0,
-        rows_affected: 1,
     }
 }
 
@@ -87,12 +60,12 @@ fn team_worker_row() -> team_worker::Model {
 
 #[tokio::test]
 async fn an_admin_of_a_state_managed_team_registers_a_worker_and_sees_its_token_once() {
-    let session_id = SessionId::now_v7();
+    let (db, auth) = signed_in();
     let managed_team = team::Model {
         managed: true,
         ..team_row()
     };
-    let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
+    let db = db
         .append_query_results([vec![managed_team]])
         .append_query_results([vec![membership(TeamRole::Admin)]])
         .append_query_results([Vec::<worker_registration::Model>::new()])
@@ -104,7 +77,7 @@ async fn an_admin_of_a_state_managed_team_registers_a_worker_and_sees_its_token_
 
     let res = server
         .post("/api/v1/teams/platform/workers")
-        .add_header("authorization", bearer(session_id))
+        .add_header("authorization", auth)
         .json(&json!({ "worker_id": worker_id(), "display_name": "Builder" }))
         .await;
 
@@ -115,8 +88,8 @@ async fn an_admin_of_a_state_managed_team_registers_a_worker_and_sees_its_token_
 
 #[tokio::test]
 async fn a_project_cannot_change_a_team_worker() {
-    let session_id = SessionId::now_v7();
-    let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
+    let (db, auth) = signed_in();
+    let db = db
         .append_query_results([vec![project()]])
         .append_query_results([vec![project_user::Model {
             id: ProjectUserId::now_v7(),
@@ -132,7 +105,7 @@ async fn a_project_cannot_change_a_team_worker() {
             "/api/v1/projects/test-project/workers/{}",
             worker_id()
         ))
-        .add_header("authorization", bearer(session_id))
+        .add_header("authorization", auth)
         .json(&json!({ "active": false }))
         .await;
 

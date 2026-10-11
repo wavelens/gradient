@@ -202,12 +202,13 @@ async fn apply_team_worker<C: ConnectionTrait>(
 #[cfg(test)]
 mod team_worker_tests {
     use super::*;
-    use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
+    use gradient_fixtures::mock::{all_statements, mock_db};
+    use sea_orm::MockExecResult;
 
     #[tokio::test]
     async fn a_declared_team_worker_is_inserted_as_managed() {
         let team = TeamId::now_v7();
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([Vec::<team_worker::Model>::new()])
             .append_query_results([vec![team_worker::Model {
                 team,
@@ -237,10 +238,8 @@ mod team_worker_tests {
             .await
             .unwrap();
 
-        let inserted = db
-            .into_transaction_log()
-            .iter()
-            .flat_map(|t| t.statements().to_vec())
+        let inserted = all_statements(db.into_transaction_log())
+            .into_iter()
             .find(|s| s.sql.starts_with("INSERT INTO \"team_worker\""))
             .expect("an INSERT INTO team_worker");
         assert!(inserted.sql.contains("\"managed\""));

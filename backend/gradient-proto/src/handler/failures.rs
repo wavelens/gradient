@@ -54,7 +54,8 @@ async fn is_registered(state: &ServerState, worker_id: &str) -> bool {
 mod tests {
     use super::*;
     use gradient_entity::{team_worker, worker_registration};
-    use sea_orm::{DatabaseBackend, MockDatabase};
+    use gradient_fixtures::mock::mock_db;
+    use sea_orm::MockDatabase;
 
     fn rejected(claimed: &str) -> Rejected {
         Rejected {
@@ -65,17 +66,15 @@ mod tests {
     }
 
     fn registered_worker() -> MockDatabase {
-        MockDatabase::new(DatabaseBackend::Postgres).append_query_results([vec![
-            worker_registration::Model {
-                worker_id: "w1".into(),
-                ..Default::default()
-            },
-        ]])
+        mock_db().append_query_results([vec![worker_registration::Model {
+            worker_id: "w1".into(),
+            ..Default::default()
+        }]])
     }
 
     #[tokio::test]
     async fn an_unregistered_claim_leaves_no_trace() {
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([Vec::<worker_registration::Model>::new()])
             .append_query_results([Vec::<team_worker::Model>::new()])
             .into_connection();

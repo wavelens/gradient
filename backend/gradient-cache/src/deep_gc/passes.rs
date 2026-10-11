@@ -203,9 +203,9 @@ mod tests {
     use super::*;
     use crate::test_support::test_server_state_with_log;
     use gradient_entity::ids::{BuildRequestBlobId, ProjectId};
+    use gradient_fixtures::mock::mock_db;
     use gradient_storage::{FileLogStorage, LogStorage, NarStore, log_shard};
     use gradient_test_support::log_storage::NoopLogStorage;
-    use sea_orm::{DatabaseBackend, MockDatabase};
     use std::sync::Arc;
 
     fn make_state(
@@ -226,7 +226,7 @@ mod tests {
             .await
             .unwrap();
 
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results::<gradient_entity::build_request_blob::Model, _, _>([Vec::<
                 gradient_entity::build_request_blob::Model,
             >::new(
@@ -262,7 +262,7 @@ mod tests {
             created_at: now(),
             last_used_at: now(),
         };
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([vec![zombie.clone()]])
             .append_exec_results([sea_orm::MockExecResult {
                 last_insert_id: 0,
@@ -285,7 +285,7 @@ mod tests {
         let attempt_id = BuildAttemptId::now_v7();
         log.append(attempt_id, "orphan").await.unwrap();
 
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results::<gradient_entity::build_attempt::Model, _, _>([Vec::<
                 gradient_entity::build_attempt::Model,
             >::new(
@@ -316,7 +316,7 @@ mod tests {
         log.write_chunk(orphan, 0, b"z").await.unwrap();
         log.write_chunk(kept, 0, b"z").await.unwrap();
 
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([vec![std::collections::BTreeMap::from([(
                 "id",
                 sea_orm::Value::from(kept.into_inner()),

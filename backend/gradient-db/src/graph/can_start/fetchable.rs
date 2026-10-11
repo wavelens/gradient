@@ -248,8 +248,8 @@ mod tests {
     use crate::graph::can_start::queue::{unpromote_drv_owners, unpromote_ungated};
     use crate::graph::can_start::repair::RECOUNT_BLOCKING_DEPS;
     use crate::graph::can_start::test_rows::{drv, exec, norm, transition_row};
-    use crate::pool::statements;
-    use sea_orm::{DatabaseBackend, MockDatabase, Value};
+    use gradient_fixtures::mock::{empty_db, mock_db, statements};
+    use sea_orm::Value;
     use std::collections::BTreeMap;
 
     fn ripple_row(id: DerivationId, startable: bool) -> BTreeMap<String, Value> {
@@ -317,7 +317,7 @@ mod tests {
 
     #[tokio::test]
     async fn an_empty_batch_touches_the_database_not_at_all() {
-        let db = MockDatabase::new(DatabaseBackend::Postgres).into_connection();
+        let db = empty_db();
         let txn = db.begin().await.unwrap();
         let lock = lock_seed_shared_builds(&txn, &[]).await.unwrap();
 
@@ -336,7 +336,7 @@ mod tests {
     async fn a_flip_and_its_ripple_share_the_locking_transaction() {
         let x = DerivationId::now_v7();
         let d = DerivationId::now_v7();
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_exec_results([exec(1)])
             .append_query_results([vec![drv(x)]])
             .append_query_results([vec![ripple_row(d, false)]])
@@ -370,7 +370,7 @@ mod tests {
         let untouched = DerivationId::now_v7();
         let d1 = DerivationId::now_v7();
         let d2 = DerivationId::now_v7();
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_exec_results([exec(2)])
             .append_query_results([vec![drv(flipped)]])
             .append_query_results([vec![ripple_row(d1, true), ripple_row(d2, false)]])
@@ -410,7 +410,7 @@ mod tests {
     #[tokio::test]
     async fn a_shared_build_already_fetchable_moves_nobody() {
         let x = DerivationId::now_v7();
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_exec_results([exec(1)])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .into_connection();
@@ -429,7 +429,7 @@ mod tests {
         let x = DerivationId::now_v7();
         let d1 = DerivationId::now_v7();
         let d2 = DerivationId::now_v7();
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_exec_results([exec(1), exec(0), exec(0)])
             .append_query_results([vec![drv(x)]])
             .append_query_results([vec![transition_row(d1, 1, 0), transition_row(d2, 0, 0)]])

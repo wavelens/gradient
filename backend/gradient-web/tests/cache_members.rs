@@ -10,12 +10,15 @@
 )]
 
 use gradient_entity::{cache, cache_invitation, cache_role, cache_user, ids::*, user};
-use gradient_test_support::fixtures::{superuser_user, test_date, user, user_id};
-use gradient_test_support::web::{live_session, make_test_server, make_token};
+use gradient_fixtures::ids::user_id;
+use gradient_fixtures::mock::mock_db;
+use gradient_fixtures::rows::{live_session, superuser, user};
+use gradient_fixtures::test_date;
+use gradient_test_support::web::{make_test_server, make_token, signed_in};
 use gradient_types::SessionId;
 use gradient_types::consts::{BASE_CACHE_ROLE_ADMIN_ID, BASE_CACHE_ROLE_VIEW_ID};
 use gradient_types::permissions::{cache_admin_mask, cache_view_mask};
-use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
+use sea_orm::{MockDatabase, MockExecResult};
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
 use uuid::Uuid;
@@ -101,18 +104,11 @@ fn other_user_row() -> user::Model {
     }
 }
 
-fn with_auth(db: MockDatabase, session_id: SessionId) -> MockDatabase {
-    let session = live_session(session_id);
-    db.append_query_results([vec![session.clone()]])
-        .append_query_results([vec![session]])
-        .append_query_results([vec![user()]])
-}
-
 fn with_superuser_auth(db: MockDatabase, session_id: SessionId) -> MockDatabase {
     let session = live_session(session_id);
     db.append_query_results([vec![session.clone()]])
         .append_query_results([vec![session]])
-        .append_query_results([vec![superuser_user()]])
+        .append_query_results([vec![superuser()]])
 }
 
 fn pending_invitation() -> cache_invitation::Model {
@@ -130,10 +126,9 @@ fn pending_invitation() -> cache_invitation::Model {
 
 #[tokio::test]
 async fn list_members_requires_view_cache() {
-    let session_id = SessionId::now_v7();
-    let token = make_token(session_id);
+    let (db, auth) = signed_in();
 
-    let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
+    let db = db
         .append_query_results([vec![cache_row(false)]])
         .append_query_results([vec![admin_member()]])
         .append_query_results([vec![admin_role_row()]])
@@ -143,7 +138,7 @@ async fn list_members_requires_view_cache() {
     let server = make_test_server(db.into_connection());
     let res = server
         .get("/api/v1/caches/test-cache/members")
-        .add_header("authorization", format!("Bearer {}", token))
+        .add_header("authorization", auth)
         .await;
 
     res.assert_status_ok();
@@ -157,17 +152,16 @@ async fn list_members_requires_view_cache() {
 
 #[tokio::test]
 async fn list_members_non_member_gets_not_found() {
-    let session_id = SessionId::now_v7();
-    let token = make_token(session_id);
+    let (db, auth) = signed_in();
 
-    let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
+    let db = db
         .append_query_results([vec![cache_row(false)]])
         .append_query_results([Vec::<cache_user::Model>::new()]);
 
     let server = make_test_server(db.into_connection());
     let res = server
         .get("/api/v1/caches/test-cache/members")
-        .add_header("authorization", format!("Bearer {}", token))
+        .add_header("authorization", auth)
         .await;
 
     res.assert_status(axum::http::StatusCode::NOT_FOUND);
@@ -175,10 +169,9 @@ async fn list_members_non_member_gets_not_found() {
 
 #[tokio::test]
 async fn add_member_requires_manage_cache_members() {
-    let session_id = SessionId::now_v7();
-    let token = make_token(session_id);
+    let (db, auth) = signed_in();
 
-    let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
+    let db = db
         .append_query_results([vec![cache_row(false)]])
         .append_query_results([vec![view_member()]])
         .append_query_results([vec![view_role_row()]]);
@@ -186,7 +179,7 @@ async fn add_member_requires_manage_cache_members() {
     let server = make_test_server(db.into_connection());
     let res = server
         .post("/api/v1/caches/test-cache/members")
-        .add_header("authorization", format!("Bearer {}", token))
+        .add_header("authorization", auth)
         .json(&json!({"user": "otheruser", "role": "View"}))
         .await;
 
@@ -195,10 +188,9 @@ async fn add_member_requires_manage_cache_members() {
 
 #[tokio::test]
 async fn add_member_admin_creates_a_pending_invitation() {
-    let session_id = SessionId::now_v7();
-    let token = make_token(session_id);
+    let (db, auth) = signed_in();
 
-    let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
+    let db = db
         .append_query_results([vec![cache_row(false)]])
         .append_query_results([vec![admin_member()]])
         .append_query_results([vec![admin_role_row()]])
@@ -215,7 +207,7 @@ async fn add_member_admin_creates_a_pending_invitation() {
     let server = make_test_server(db.into_connection());
     let res = server
         .post("/api/v1/caches/test-cache/members")
-        .add_header("authorization", format!("Bearer {}", token))
+        .add_header("authorization", auth)
         .json(&json!({"user": "otheruser", "role": "View"}))
         .await;
 
@@ -239,7 +231,7 @@ async fn add_member_superuser_skips_the_invitation() {
         role: BASE_CACHE_ROLE_VIEW_ID,
     };
 
-    let db = with_superuser_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
+    let db = with_superuser_auth(mock_db(), session_id)
         .append_query_results([vec![cache_row(false)]])
         .append_query_results([vec![admin_member()]])
         .append_query_results([vec![admin_role_row()]])
@@ -267,8 +259,7 @@ async fn add_member_superuser_skips_the_invitation() {
 
 #[tokio::test]
 async fn update_member_changes_role() {
-    let session_id = SessionId::now_v7();
-    let token = make_token(session_id);
+    let (db, auth) = signed_in();
 
     let target_member = cache_user::Model {
         id: CacheUserId::now_v7(),
@@ -281,7 +272,7 @@ async fn update_member_changes_role() {
         ..target_member.clone()
     };
 
-    let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
+    let db = db
         .append_query_results([vec![cache_row(false)]])
         .append_query_results([vec![admin_member()]])
         .append_query_results([vec![admin_role_row()]])
@@ -297,7 +288,7 @@ async fn update_member_changes_role() {
     let server = make_test_server(db.into_connection());
     let res = server
         .patch("/api/v1/caches/test-cache/members")
-        .add_header("authorization", format!("Bearer {}", token))
+        .add_header("authorization", auth)
         .json(&json!({"user": "otheruser", "role": "Admin"}))
         .await;
 
@@ -306,10 +297,9 @@ async fn update_member_changes_role() {
 
 #[tokio::test]
 async fn remove_member_blocks_last_admin() {
-    let session_id = SessionId::now_v7();
-    let token = make_token(session_id);
+    let (db, auth) = signed_in();
 
-    let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
+    let db = db
         .append_query_results([vec![cache_row(false)]])
         .append_query_results([vec![admin_member()]])
         .append_query_results([vec![admin_role_row()]])
@@ -320,7 +310,7 @@ async fn remove_member_blocks_last_admin() {
     let server = make_test_server(db.into_connection());
     let res = server
         .delete("/api/v1/caches/test-cache/members")
-        .add_header("authorization", format!("Bearer {}", token))
+        .add_header("authorization", auth)
         .json(&json!({"user": "testuser"}))
         .await;
 
@@ -329,8 +319,7 @@ async fn remove_member_blocks_last_admin() {
 
 #[tokio::test]
 async fn remove_member_view_role_succeeds() {
-    let session_id = SessionId::now_v7();
-    let token = make_token(session_id);
+    let (db, auth) = signed_in();
 
     let target_member = cache_user::Model {
         id: CacheUserId::now_v7(),
@@ -339,7 +328,7 @@ async fn remove_member_view_role_succeeds() {
         role: BASE_CACHE_ROLE_VIEW_ID,
     };
 
-    let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
+    let db = db
         .append_query_results([vec![cache_row(false)]])
         .append_query_results([vec![admin_member()]])
         .append_query_results([vec![admin_role_row()]])
@@ -353,7 +342,7 @@ async fn remove_member_view_role_succeeds() {
     let server = make_test_server(db.into_connection());
     let res = server
         .delete("/api/v1/caches/test-cache/members")
-        .add_header("authorization", format!("Bearer {}", token))
+        .add_header("authorization", auth)
         .json(&json!({"user": "otheruser"}))
         .await;
 
@@ -362,10 +351,9 @@ async fn remove_member_view_role_succeeds() {
 
 #[tokio::test]
 async fn managed_cache_blocks_member_mutations() {
-    let session_id = SessionId::now_v7();
-    let token = make_token(session_id);
+    let (db, auth) = signed_in();
 
-    let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
+    let db = db
         .append_query_results([vec![cache_row(true)]])
         .append_query_results([vec![admin_member()]])
         .append_query_results([vec![admin_role_row()]]);
@@ -373,7 +361,7 @@ async fn managed_cache_blocks_member_mutations() {
     let server = make_test_server(db.into_connection());
     let res = server
         .patch("/api/v1/caches/test-cache/members")
-        .add_header("authorization", format!("Bearer {}", token))
+        .add_header("authorization", auth)
         .json(&json!({"user": "otheruser", "role": "View"}))
         .await;
 

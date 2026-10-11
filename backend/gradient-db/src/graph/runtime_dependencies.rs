@@ -123,6 +123,7 @@ pub async fn adopt_referenced_outputs<C: ConnectionTrait>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gradient_fixtures::mock::{empty_db, mock_db};
 
     #[test]
     fn the_insert_upgrades_a_build_edge_to_both_and_skips_self() {
@@ -200,14 +201,13 @@ mod tests {
 
     #[tokio::test]
     async fn adoption_reports_each_grown_parent_once() {
-        use sea_orm::{DatabaseBackend, MockDatabase};
         use std::collections::BTreeMap;
 
         let parent = DerivationId::now_v7();
         let row = |id: DerivationId| {
             BTreeMap::from([("derivation".to_owned(), Value::from(id.into_inner()))])
         };
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([vec![row(parent), row(parent)]])
             .into_connection();
 
@@ -220,7 +220,7 @@ mod tests {
 
     #[tokio::test]
     async fn adopting_nothing_touches_the_database() {
-        let db = sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres).into_connection();
+        let db = empty_db();
 
         assert!(adopt_referenced_outputs(&db, &[]).await.unwrap().is_empty());
         assert!(db.into_transaction_log().is_empty());

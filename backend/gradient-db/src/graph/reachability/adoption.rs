@@ -190,8 +190,8 @@ where
 mod tests {
     use super::*;
     use crate::graph::walks::WALK_WORK_MEM;
-    use crate::pool::statements;
-    use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult, Value};
+    use gradient_fixtures::mock::{mock_db, statements};
+    use sea_orm::{MockExecResult, Value};
     use std::collections::BTreeMap;
 
     fn norm(s: &str) -> String {
@@ -216,7 +216,7 @@ mod tests {
     async fn adoption_names_every_open_shared_build_a_live_evaluation_reaches() {
         let e = EvaluationId::now_v7();
         let d = DerivationId::now_v7();
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_exec_results([exec()])
             .append_query_results([vec![pair(e, d)]])
             .into_connection();
@@ -263,7 +263,7 @@ mod tests {
     #[tokio::test]
     async fn one_evaluation_adopts_from_its_own_names() {
         let e = EvaluationId::now_v7();
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_exec_results([exec()])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .into_connection();
@@ -291,7 +291,7 @@ mod tests {
     #[tokio::test]
     async fn the_orphan_probes_read_one_row_and_bind_their_scope() {
         let d = DerivationId::now_v7();
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([vec![BTreeMap::from([(
                 "?column?".to_owned(),
                 Value::Int(Some(1)),

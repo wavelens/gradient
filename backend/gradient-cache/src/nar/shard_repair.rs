@@ -220,8 +220,9 @@ async fn remove_orphan_nar(state: &ServerState, hash: &str) -> bool {
 mod tests {
     use super::*;
     use crate::test_support::test_server_state;
+    use gradient_fixtures::mock::mock_db;
     use gradient_storage::NarStore;
-    use sea_orm::{DatabaseBackend, MockDatabase, Value};
+    use sea_orm::{DatabaseBackend, Value};
     use std::collections::BTreeMap;
     use std::path::Path;
 
@@ -246,7 +247,7 @@ mod tests {
 
     fn make_state(base: &Path, unreferenced: Vec<&str>) -> Arc<ServerState> {
         let nar_storage = NarStore::local(base).unwrap();
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([unreferenced.into_iter().map(hash_row).collect::<Vec<_>>()])
             .append_query_results([Vec::<gradient_entity::cached_path::Model>::new()])
             .into_connection();
@@ -354,7 +355,7 @@ mod tests {
         write_nar_file(tmp.path(), orphan);
 
         let nar_storage = NarStore::local(tmp.path()).unwrap();
-        let only_the_zombie_load = MockDatabase::new(DatabaseBackend::Postgres)
+        let only_the_zombie_load = mock_db()
             .append_query_results([Vec::<gradient_entity::cached_path::Model>::new()])
             .into_connection();
         let state = test_server_state(nar_storage, only_the_zombie_load, |config| {
@@ -383,7 +384,7 @@ mod tests {
             file_hash: Some("sha256:beef".into()),
             ..Default::default()
         };
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([vec![row]])
             .into_connection();
 
@@ -421,9 +422,7 @@ mod tests {
                 ..Default::default()
             },
         ];
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
-            .append_query_results([rows])
-            .into_connection();
+        let db = mock_db().append_query_results([rows]).into_connection();
 
         let state = test_server_state(nar_storage, db, |_| {});
 

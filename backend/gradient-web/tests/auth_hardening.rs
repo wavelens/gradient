@@ -11,26 +11,18 @@
 
 use axum_test::TestServer;
 use chrono::{Duration, Utc};
-use gradient_core::ServerState;
-use gradient_db::{WebDb, WorkerDb};
 use gradient_entity::{api, session};
-use gradient_notify::EmailSender;
-use gradient_storage::NarStore;
-use gradient_test_support::cli::test_cli;
-use gradient_test_support::fakes::email::InMemoryEmailSender;
-use gradient_test_support::fixtures::{user, user_id};
-use gradient_test_support::log_storage::NoopLogStorage;
-use gradient_types::{ApiId, ConcurrencyPolicy, RuntimeConfig, SecretString, SessionId, UserId};
-use gradient_web::create_router;
+use gradient_fixtures::ids::user_id;
+use gradient_fixtures::mock::mock_db;
+use gradient_fixtures::rows::{live_session, user};
+use gradient_test_support::state::{TEST_JWT_SECRET, TestState};
+use gradient_types::{ApiId, ConcurrencyPolicy, SessionId, UserId};
 use jsonwebtoken::{EncodingKey, Header, encode};
-use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
+use sea_orm::{MockDatabase, MockExecResult};
 use serde::Serialize;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
-use std::sync::Arc;
 use uuid::Uuid;
-
-const JWT_SECRET: &str = "test-jwt-secret";
 
 #[derive(Serialize)]
 struct Claims {
@@ -51,7 +43,7 @@ fn sign_session_jwt(user_id: UserId, session_id: SessionId, lifetime: Duration) 
     encode(
         &Header::default(),
         &claims,
-        &EncodingKey::from_secret(JWT_SECRET.as_bytes()),
+        &EncodingKey::from_secret(TEST_JWT_SECRET.as_bytes()),
     )
     .expect("sign jwt")
 }
@@ -68,50 +60,9 @@ fn hash_api_key(raw: &str) -> String {
 }
 
 fn server_with(web_db_setup: impl FnOnce(MockDatabase) -> MockDatabase) -> TestServer {
-    let cli = test_cli();
-    let config = Arc::new(RuntimeConfig::from_cli(&cli).expect("valid test config"));
-    let nar_storage = NarStore::local(&config.server.base_dir).expect("create test NarStore");
-    let db = web_db_setup(MockDatabase::new(DatabaseBackend::Postgres));
-    let state = Arc::new(ServerState {
-        web_db: WebDb::new(db.into_connection()),
-        cache_db: gradient_db::CacheDb::new(
-            sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres).into_connection(),
-        ),
-        worker_db: WorkerDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
-        config,
-        log_storage: Arc::new(NoopLogStorage),
-        email: Arc::new(InMemoryEmailSender::new()) as Arc<dyn EmailSender>,
-        nar_storage,
-        manifest_state: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
-        pending_credentials: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
-        http: gradient_util::http::build_client().expect("http client"),
-        shutdown: gradient_util::shutdown::Shutdown::new(),
-        last_used_stamps: gradient_core::last_used_stamps(),
-        build_progress: gradient_core::build_progress(),
-        eval_progress: gradient_core::eval_progress(),
-        cache_traffic: gradient_db::metrics::cache_traffic::CacheTraffic::shared(),
-        jwt_secret: SecretString::new(JWT_SECRET.to_string()),
-        started_at: chrono::Utc::now(),
-        pending_project_memberships: std::sync::Arc::new(std::collections::HashMap::new()),
-        events: gradient_types::EventBus::default(),
-        git_host: gradient_git_host::GitHostRegistry::with_builtin(),
-        github_app_install_url: Default::default(),
-        upstream_query: std::sync::Arc::new(tokio::sync::Semaphore::new(32)),
-        nar_downloads: std::sync::Arc::new(tokio::sync::Semaphore::new(16)),
-        upload_admission: gradient_storage::admission::UploadAdmission::new(
-            gradient_storage::admission::Limits {
-                concurrency: 16,
-                bytes: u64::MAX,
-            },
-        ),
-        delivery_wake: Default::default(),
-        eval_assign_wake: Default::default(),
-        probe_requests: Default::default(),
-        held_evaluations: Default::default(),
-        startable_set: Default::default(),
-        graph: gradient_core::Graph::stub(),
-    });
-    TestServer::new(create_router(state).expect("router"))
+    TestState::new()
+        .web_db(web_db_setup(mock_db()).into_connection())
+        .server()
 }
 
 fn revoked_session() -> session::Model {
@@ -123,18 +74,6 @@ fn revoked_session() -> session::Model {
         expires_at: now + chrono::Duration::hours(1),
         last_used_at: now,
         revoked_at: Some(now),
-        ..Default::default()
-    }
-}
-
-fn live_session(id: SessionId) -> session::Model {
-    let now = Utc::now().naive_utc();
-    session::Model {
-        id,
-        user_id: user_id(),
-        created_at: now,
-        expires_at: now + chrono::Duration::hours(1),
-        last_used_at: now,
         ..Default::default()
     }
 }
@@ -276,7 +215,8 @@ async fn delete_user_with_wrong_password_is_forbidden() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn api_key_with_only_view_cannot_trigger_evaluation() {
-    use gradient_test_support::fixtures::{project, project_id};
+    use gradient_fixtures::ids::project_id;
+    use gradient_fixtures::rows::project;
     use gradient_types::permissions::{Permission, mask_from};
     let raw = "x".repeat(64);
     let now = Utc::now().naive_utc();
@@ -313,7 +253,7 @@ async fn api_key_with_only_view_cannot_trigger_evaluation() {
             .append_query_results([vec![user()]])
             .append_query_results([vec![project()]])
             .append_query_results([vec![gradient_entity::task::Model {
-                id: gradient_test_support::fixtures::task_id(),
+                id: gradient_fixtures::ids::task_id(),
                 project: project_id(),
                 name: "test-task".into(),
                 display_name: "Test".into(),
@@ -347,7 +287,7 @@ async fn api_key_with_only_view_cannot_trigger_evaluation() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn api_key_pinned_to_other_project_is_invisible() {
-    use gradient_test_support::fixtures::project;
+    use gradient_fixtures::rows::project;
     use gradient_types::permissions::{Permission, mask_from};
     let raw = "y".repeat(64);
     let now = Utc::now().naive_utc();

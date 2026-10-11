@@ -12,9 +12,10 @@ use fixtures::{
     one_active_per_task_violation, with_eval_worker, with_storage_not_full, with_writable_cache,
 };
 use gradient_entity::evaluation::EvaluationStatus;
+use gradient_fixtures::mock::{empty_db, mock_db};
 use gradient_types::triggers::TriggerType;
 use gradient_types::*;
-use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
+use sea_orm::MockExecResult;
 
 #[tokio::test]
 async fn storage_gate_ignores_non_queued_eval() {
@@ -24,7 +25,7 @@ async fn storage_gate_ignores_non_queued_eval() {
         CommitId::now_v7(),
         EvaluationStatus::Waiting,
     );
-    let db = MockDatabase::new(DatabaseBackend::Postgres).into_connection();
+    let db = empty_db();
     let out = park_if_storage_full(&db, already_waiting.clone(), ProjectId::nil(), 0)
         .await
         .unwrap();
@@ -39,7 +40,7 @@ async fn skips_when_same_commit_as_last_eval() {
     let task = make_task_with_last_eval(Some(prev_eval_id));
     let same_hash = vec![1u8; 20];
 
-    let db = MockDatabase::new(DatabaseBackend::Postgres)
+    let db = mock_db()
         .append_query_results([vec![make_eval(
             prev_eval_id,
             task.id,
@@ -69,7 +70,7 @@ async fn time_trigger_bypasses_same_commit_check() {
     let new_commit_id = CommitId::now_v7();
     let trig = TaskTriggerId::now_v7();
 
-    let db = MockDatabase::new(DatabaseBackend::Postgres)
+    let db = mock_db()
         .append_query_results([Vec::<gradient_entity::evaluation::Model>::new()])
         .append_query_results([Vec::<gradient_entity::evaluation::Model>::new()])
         .append_query_results([vec![make_eval(
@@ -114,7 +115,7 @@ async fn skip_concurrency_with_running_eval() {
         EvaluationStatus::Building,
     );
 
-    let db = MockDatabase::new(DatabaseBackend::Postgres)
+    let db = mock_db()
         .append_query_results([vec![running_eval.clone()]])
         .append_query_results([Vec::<gradient_entity::commit::Model>::new()])
         .into_connection();
@@ -146,7 +147,7 @@ async fn polling_with_in_flight_same_commit_skips_without_aborting() {
         EvaluationStatus::Building,
     );
 
-    let db = MockDatabase::new(DatabaseBackend::Postgres)
+    let db = mock_db()
         .append_query_results([vec![running_eval.clone()]])
         .append_query_results([vec![make_commit(running_commit_id, same_hash.clone())]])
         .into_connection();
@@ -173,7 +174,7 @@ async fn all_concurrency_creates_evaluation_alongside_running() {
     let trig = TaskTriggerId::now_v7();
     let new_hash = vec![9u8; 20];
 
-    let db = MockDatabase::new(DatabaseBackend::Postgres)
+    let db = mock_db()
         .append_query_results([Vec::<gradient_entity::evaluation::Model>::new()])
         .append_query_results([vec![make_commit(new_commit_id, new_hash.clone())]])
         .append_query_results([vec![{
@@ -223,7 +224,7 @@ async fn unique_constraint_violation_returns_skipped_concurrency() {
     let new_commit_id = CommitId::now_v7();
     let trig = TaskTriggerId::now_v7();
 
-    let db = MockDatabase::new(DatabaseBackend::Postgres)
+    let db = mock_db()
         .append_query_results([Vec::<gradient_entity::evaluation::Model>::new()])
         .append_query_results([Vec::<gradient_entity::evaluation::Model>::new()])
         .append_query_results([vec![make_commit(new_commit_id, vec![1u8; 20])]])
@@ -252,7 +253,7 @@ async fn manual_bypasses_same_commit_check() {
     let new_commit_id = CommitId::now_v7();
     let trig = TaskTriggerId::now_v7();
 
-    let db = MockDatabase::new(DatabaseBackend::Postgres)
+    let db = mock_db()
         .append_query_results([Vec::<gradient_entity::evaluation::Model>::new()])
         .append_query_results([Vec::<gradient_entity::evaluation::Model>::new()])
         .append_query_results([vec![make_eval(
@@ -301,7 +302,7 @@ async fn hard_abort_populates_aborted_fields() {
     let trig = TaskTriggerId::now_v7();
     let new_hash = vec![7u8; 20];
 
-    let db = MockDatabase::new(DatabaseBackend::Postgres)
+    let db = mock_db()
         .append_query_results([vec![running_eval.clone()]])
         .append_query_results([Vec::<gradient_entity::commit::Model>::new()])
         .append_query_results([vec![running_eval.clone()]])
@@ -372,7 +373,7 @@ async fn gate_approval_parks_pr_evaluation_in_waiting_approval() {
         m
     };
 
-    let db = MockDatabase::new(DatabaseBackend::Postgres)
+    let db = mock_db()
         .append_query_results([Vec::<gradient_entity::evaluation::Model>::new()])
         .append_query_results([Vec::<gradient_entity::evaluation::Model>::new()])
         .append_query_results([vec![make_commit(new_commit_id, new_hash.clone())]])
@@ -459,7 +460,7 @@ async fn no_writable_cache_parks_evaluation_in_waiting_no_cache() {
         m
     };
 
-    let db = MockDatabase::new(DatabaseBackend::Postgres)
+    let db = mock_db()
         .append_query_results([Vec::<gradient_entity::evaluation::Model>::new()])
         .append_query_results([Vec::<gradient_entity::evaluation::Model>::new()])
         .append_query_results([vec![make_commit(new_commit_id, new_hash.clone())]])
@@ -531,7 +532,7 @@ async fn no_eval_capable_worker_parks_evaluation_in_waiting_workers() {
         m
     };
 
-    let db = MockDatabase::new(DatabaseBackend::Postgres)
+    let db = mock_db()
         .append_query_results([Vec::<gradient_entity::evaluation::Model>::new()])
         .append_query_results([Vec::<gradient_entity::evaluation::Model>::new()])
         .append_query_results([vec![make_commit(new_commit_id, new_hash.clone())]])

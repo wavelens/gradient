@@ -12,20 +12,15 @@
 use axum_test::TestServer;
 use gradient_ci::actions::encrypt_secret_with_file as encrypt_webhook_secret;
 use gradient_core::ServerState;
-use gradient_db::{WebDb, WorkerDb};
 use gradient_entity::evaluation::EvaluationStatus;
-use gradient_notify::EmailSender;
-use gradient_storage::NarStore;
-use gradient_test_support::cli::test_cli_with_crypt;
-use gradient_test_support::fakes::email::InMemoryEmailSender;
-use gradient_test_support::log_storage::NoopLogStorage;
-use gradient_test_support::prelude::test_cli;
+use gradient_fixtures::mock::{empty_db, mock_db};
+use gradient_test_support::state::TestState;
 use gradient_types::GitHostType;
 use gradient_types::ids::*;
 use gradient_types::triggers::{ConcurrencyPolicy, TriggerConfig};
 use gradient_web::create_router;
 use hmac::{Hmac, KeyInit, Mac};
-use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
+use sea_orm::{MockDatabase, MockExecResult};
 use serde_json::Value;
 use sha2::Sha256;
 use std::sync::Arc;
@@ -53,57 +48,19 @@ fn make_state(
     crypt_path: Option<String>,
     gh_secret_path: Option<String>,
 ) -> Arc<ServerState> {
-    let mut cli = match crypt_path {
-        Some(ref p) => test_cli_with_crypt(p.clone()),
-        None => test_cli(),
-    };
-    if let Some(ref p) = gh_secret_path {
-        cli.github_app.id = std::num::NonZeroU64::new(1234);
-        cli.github_app.private_key_file = Some("/dev/null".into());
-        cli.github_app.webhook_secret_file = Some(p.clone());
-    }
-    let nar_storage = NarStore::local(&cli.server.base_dir).expect("create test NarStore");
-    Arc::new(ServerState {
-        web_db: WebDb::new(db),
-        cache_db: gradient_db::CacheDb::new(
-            sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres).into_connection(),
-        ),
-        worker_db: WorkerDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
-        config: std::sync::Arc::new(
-            gradient_types::RuntimeConfig::from_cli(&cli).expect("valid test config"),
-        ),
-        log_storage: Arc::new(NoopLogStorage),
-        email: Arc::new(InMemoryEmailSender::new()) as Arc<dyn EmailSender>,
-        nar_storage,
-        manifest_state: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
-        pending_credentials: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
-        http: gradient_util::http::build_client().expect("http client"),
-        shutdown: gradient_util::shutdown::Shutdown::new(),
-        last_used_stamps: gradient_core::last_used_stamps(),
-        build_progress: gradient_core::build_progress(),
-        eval_progress: gradient_core::eval_progress(),
-        cache_traffic: gradient_db::metrics::cache_traffic::CacheTraffic::shared(),
-        jwt_secret: gradient_types::SecretString::new("test-jwt-secret".to_string()),
-        started_at: chrono::Utc::now(),
-        pending_project_memberships: std::sync::Arc::new(std::collections::HashMap::new()),
-        events: gradient_types::EventBus::default(),
-        git_host: gradient_git_host::GitHostRegistry::with_builtin(),
-        github_app_install_url: Default::default(),
-        upstream_query: std::sync::Arc::new(tokio::sync::Semaphore::new(32)),
-        nar_downloads: std::sync::Arc::new(tokio::sync::Semaphore::new(16)),
-        upload_admission: gradient_storage::admission::UploadAdmission::new(
-            gradient_storage::admission::Limits {
-                concurrency: 16,
-                bytes: u64::MAX,
-            },
-        ),
-        delivery_wake: Default::default(),
-        eval_assign_wake: Default::default(),
-        probe_requests: Default::default(),
-        held_evaluations: Default::default(),
-        startable_set: Default::default(),
-        graph: gradient_core::Graph::stub(),
-    })
+    TestState::new()
+        .web_db(db)
+        .cli(|cli| {
+            if let Some(path) = crypt_path {
+                cli.secrets.crypt_file = path;
+            }
+            if let Some(path) = gh_secret_path {
+                cli.github_app.id = std::num::NonZeroU64::new(1234);
+                cli.github_app.private_key_file = Some("/dev/null".into());
+                cli.github_app.webhook_secret_file = Some(path);
+            }
+        })
+        .build()
 }
 
 fn fixture_date() -> chrono::NaiveDateTime {
@@ -412,7 +369,7 @@ async fn git_host_webhook_no_matching_trigger() {
     let crypt_path = temp_secret_file("this-is-a-32-byte-crypt-key!!!!");
     let ciphertext = encrypt_webhook_secret(&crypt_path, plaintext_secret).expect("encrypt");
 
-    let db = MockDatabase::new(DatabaseBackend::Postgres)
+    let db = mock_db()
         .append_query_results([vec![project_row("test-project")]])
         .append_query_results([vec![integration_row(&ciphertext)]])
         .append_query_results([Vec::<gradient_entity::task_trigger::Model>::new()])
@@ -448,7 +405,7 @@ async fn git_host_webhook_push_fires_trigger() {
     let crypt_path = temp_secret_file("this-is-a-32-byte-crypt-key!!!!");
     let ciphertext = encrypt_webhook_secret(&crypt_path, plaintext_secret).expect("encrypt");
 
-    let db = MockDatabase::new(DatabaseBackend::Postgres)
+    let db = mock_db()
         .append_query_results([vec![project_row("test-project")]])
         .append_query_results([vec![integration_row(&ciphertext)]])
         .append_query_results([vec![trigger_row(reporter_push_trigger(vec![]))]])
@@ -490,7 +447,7 @@ async fn git_host_webhook_test_ping_zero_sha_is_ok_noop() {
     let crypt_path = temp_secret_file("this-is-a-32-byte-crypt-key!!!!");
     let ciphertext = encrypt_webhook_secret(&crypt_path, plaintext_secret).expect("encrypt");
 
-    let db = MockDatabase::new(DatabaseBackend::Postgres)
+    let db = mock_db()
         .append_query_results([vec![project_row("test-project")]])
         .append_query_results([vec![integration_row(&ciphertext)]])
         .into_connection();
@@ -524,7 +481,7 @@ async fn git_host_webhook_invalid_signature() {
     let crypt_path = temp_secret_file("this-is-a-32-byte-crypt-key!!!!");
     let ciphertext = encrypt_webhook_secret(&crypt_path, "correct-secret").expect("encrypt");
 
-    let db = MockDatabase::new(DatabaseBackend::Postgres)
+    let db = mock_db()
         .append_query_results([vec![project_row("test-project")]])
         .append_query_results([vec![integration_row(&ciphertext)]])
         .into_connection();
@@ -551,7 +508,7 @@ async fn git_host_webhook_invalid_signature() {
 
 #[tokio::test]
 async fn git_host_webhook_integration_not_found() {
-    let db = MockDatabase::new(DatabaseBackend::Postgres)
+    let db = mock_db()
         .append_query_results([vec![project_row("test-project")]])
         .append_query_results([Vec::<gradient_entity::integration::Model>::new()])
         .into_connection();
@@ -583,7 +540,7 @@ async fn git_host_webhook_branch_glob_no_match_skipped() {
     let crypt_path = temp_secret_file("this-is-a-32-byte-crypt-key!!!!");
     let ciphertext = encrypt_webhook_secret(&crypt_path, plaintext_secret).expect("encrypt");
 
-    let db = MockDatabase::new(DatabaseBackend::Postgres)
+    let db = mock_db()
         .append_query_results([vec![project_row("test-project")]])
         .append_query_results([vec![integration_row(&ciphertext)]])
         .append_query_results([vec![trigger_row(reporter_push_trigger(vec!["release/*"]))]])
@@ -641,7 +598,7 @@ async fn git_host_webhook_pr_fires_trigger() {
         }}"#
     );
 
-    let db = MockDatabase::new(DatabaseBackend::Postgres)
+    let db = mock_db()
         .append_query_results([vec![project_row("test-project")]])
         .append_query_results([vec![integration_row(&ciphertext)]])
         .append_query_results([vec![trigger_row(reporter_pr_trigger(vec![
@@ -702,7 +659,7 @@ async fn git_host_webhook_pr_action_mismatch_skipped() {
         }}"#
     );
 
-    let db = MockDatabase::new(DatabaseBackend::Postgres)
+    let db = mock_db()
         .append_query_results([vec![project_row("test-project")]])
         .append_query_results([vec![integration_row(&ciphertext)]])
         .append_query_results([vec![trigger_row(reporter_pr_trigger(vec!["opened"]))]])
@@ -758,7 +715,7 @@ async fn git_host_webhook_release_fires_releases_only_trigger() {
         }}"#
     );
 
-    let db = MockDatabase::new(DatabaseBackend::Postgres)
+    let db = mock_db()
         .append_query_results([vec![project_row("test-project")]])
         .append_query_results([vec![integration_row(&ciphertext)]])
         .append_query_results([vec![trigger_row(reporter_push_releases_only_trigger())]])
@@ -799,7 +756,7 @@ async fn git_host_webhook_push_does_not_fire_releases_only_trigger() {
     let crypt_path = temp_secret_file("this-is-a-32-byte-crypt-key!!!!");
     let ciphertext = encrypt_webhook_secret(&crypt_path, plaintext_secret).expect("encrypt");
 
-    let db = MockDatabase::new(DatabaseBackend::Postgres)
+    let db = mock_db()
         .append_query_results([vec![project_row("test-project")]])
         .append_query_results([vec![integration_row(&ciphertext)]])
         .append_query_results([vec![trigger_row(reporter_push_releases_only_trigger())]])
@@ -833,7 +790,7 @@ async fn github_app_webhook_push_fires_trigger() {
     let gh_secret = "github-webhook-secret";
     let gh_secret_path = temp_secret_file(gh_secret);
 
-    let db = MockDatabase::new(DatabaseBackend::Postgres)
+    let db = mock_db()
         .append_query_results([vec![github_installation_row(project_id(), 9999)]])
         .append_query_results([vec![github_task_row()]])
         .append_query_results([vec![github_integration_row()]])
@@ -875,7 +832,7 @@ async fn github_app_webhook_ping() {
     let gh_secret = "github-webhook-secret";
     let gh_secret_path = temp_secret_file(gh_secret);
 
-    let db = MockDatabase::new(DatabaseBackend::Postgres).into_connection();
+    let db = empty_db();
 
     let state = make_state(db, None, Some(gh_secret_path));
     let router = create_router(state).expect("router");
@@ -906,7 +863,7 @@ async fn github_app_webhook_installation() {
     let gh_secret = "github-webhook-secret";
     let gh_secret_path = temp_secret_file(gh_secret);
 
-    let db = MockDatabase::new(DatabaseBackend::Postgres).into_connection();
+    let db = empty_db();
 
     let state = make_state(db, None, Some(gh_secret_path));
     let router = create_router(state).expect("router");
@@ -942,7 +899,7 @@ async fn github_app_webhook_installation() {
 
 #[tokio::test]
 async fn github_app_webhook_not_configured() {
-    let db = MockDatabase::new(DatabaseBackend::Postgres).into_connection();
+    let db = empty_db();
 
     let state = make_state(db, None, None);
     let router = create_router(state).expect("router");
@@ -989,7 +946,7 @@ async fn github_app_webhook_multi_project_routes_to_matching_project() {
     );
     let project_b_task = github_task_row();
 
-    let db = MockDatabase::new(DatabaseBackend::Postgres)
+    let db = mock_db()
         .append_query_results([vec![inst_a, inst_b]])
         .append_query_results([vec![project_a_task, project_b_task.clone()]])
         .append_query_results([vec![github_integration_row()]])
@@ -1033,7 +990,7 @@ async fn github_app_webhook_no_matching_repo_returns_zero() {
         "https://github.com/somewhere/else",
     );
 
-    let db = MockDatabase::new(DatabaseBackend::Postgres)
+    let db = mock_db()
         .append_query_results([vec![github_installation_row(project_id(), 9999)]])
         .append_query_results([vec![unrelated]])
         .into_connection();

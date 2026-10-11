@@ -1257,6 +1257,7 @@ mod tests {
     use super::*;
     use crate::test_ctx::ctx;
     use gradient_entity::evaluation::EvaluationStatus;
+    use gradient_fixtures::mock::{all_statements, empty_db, mock_db, raw_statements, statements};
     use sea_orm::{
         DatabaseBackend, DatabaseConnection, MockDatabase, MockExecResult, Statement,
         TransactionTrait, Value,
@@ -1323,10 +1324,7 @@ mod tests {
     #[tokio::test]
     async fn what_the_batch_needs_reaches_the_upstream_probe() {
         let gained = DerivationId::now_v7();
-        let (ctx, _pool, mut probes) = crate::test_ctx::ctx_with_probes(
-            MockDatabase::new(DatabaseBackend::Postgres).into_connection(),
-        )
-        .await;
+        let (ctx, _pool, mut probes) = crate::test_ctx::ctx_with_probes(empty_db()).await;
         let writer = crate::Graph::new()
             .spawn(ctx.clone(), None, None)
             .await
@@ -1464,7 +1462,7 @@ mod tests {
     }
 
     fn scripted_walk_of_a(eval: MEvaluation, a: &MDerivation, b: &MDerivation) -> MockDatabase {
-        MockDatabase::new(DatabaseBackend::Postgres)
+        mock_db()
             .append_query_results([vec![eval]])
             .append_query_results([vec![hash_row(&a.hash)]])
             .append_query_results([vec![a.clone(), b.clone()]])
@@ -1530,7 +1528,7 @@ mod tests {
         .unwrap();
         drop(ctx);
 
-        let log = gradient_db::pool::raw_statements(pool.into_transaction_log());
+        let log = raw_statements(pool.into_transaction_log());
         let at = |needle: &str| {
             log.iter()
                 .position(|s| s.sql.contains(needle))
@@ -1595,7 +1593,7 @@ mod tests {
 
         assert_eq!(report.walked, 1);
         drop(ctx);
-        let log = gradient_db::pool::statements(pool.into_transaction_log());
+        let log = statements(pool.into_transaction_log());
         assert_eq!(
             log.len(),
             21,
@@ -1664,7 +1662,7 @@ mod tests {
             hash: "cccccccccccccccccccccccccccccccc".to_owned(),
             ..Default::default()
         };
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([vec![out.clone()]])
             .append_query_results([vec![out.clone()]])
             .append_query_results([vec![drv_row(DerivationId::now_v7())]])
@@ -1698,7 +1696,7 @@ mod tests {
             .expect("commit");
         drop(ctx);
 
-        let log = gradient_db::pool::statements(pool.into_transaction_log());
+        let log = statements(pool.into_transaction_log());
         for fragment in [
             "INSERT INTO derivation_dependency (derivation, dependency, kind)",
             "SET cache_available = true",
@@ -1716,7 +1714,7 @@ mod tests {
     async fn answering_a_shared_build_needs_what_it_will_be_built_from() {
         let shared_build = DerivationId::now_v7();
         let input = DerivationId::now_v7();
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([vec![drv_row(shared_build)]])
             .append_query_results([vec![need_row(input, true)]])
             .append_query_results([vec![need_row(input, true)]])
@@ -1733,7 +1731,7 @@ mod tests {
         assert_eq!(gained, vec![input], "the input the miss needs built");
 
         drop(ctx);
-        let raw = gradient_db::pool::raw_statements(pool.into_transaction_log());
+        let raw = raw_statements(pool.into_transaction_log());
         let last = raw.last().expect("statements ran");
         assert!(
             last.sql.contains("SET status =")
@@ -1754,7 +1752,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_shared_build_already_answered_costs_one_statement() {
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .into_connection();
         let (ctx, pool) = ctx(db).await;
@@ -1767,7 +1765,7 @@ mod tests {
         );
 
         drop(ctx);
-        let log = gradient_db::pool::statements(pool.into_transaction_log());
+        let log = statements(pool.into_transaction_log());
         assert_eq!(log.len(), 1, "one write and nothing else: {log:?}");
     }
 
@@ -1775,7 +1773,7 @@ mod tests {
     async fn a_batch_marks_nothing_cache_available_on_its_own() {
         let evaluation = EvaluationId::now_v7();
         let (eval, a, b) = scripted(evaluation);
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([vec![eval]])
             .append_query_results([vec![hash_row(&a.hash)]])
             .append_query_results([vec![a.clone(), b.clone()]])
@@ -1807,7 +1805,7 @@ mod tests {
         .unwrap();
 
         drop(ctx);
-        let log = gradient_db::pool::statements(pool.into_transaction_log());
+        let log = statements(pool.into_transaction_log());
         assert!(
             !log.iter().any(|s| s.contains("SET cache_available = true")),
             "{log:?}"
@@ -1818,7 +1816,7 @@ mod tests {
     async fn a_walk_settles_the_subtree_bit_before_it_touches_a_shared_build() {
         let evaluation = EvaluationId::now_v7();
         let (eval, a, b) = scripted(evaluation);
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([vec![eval]])
             .append_query_results([vec![hash_row(&a.hash)]])
             .append_query_results([vec![a.clone(), b.clone()]])
@@ -1850,7 +1848,7 @@ mod tests {
         .unwrap();
         drop(ctx);
 
-        let log = gradient_db::pool::raw_statements(pool.into_transaction_log());
+        let log = raw_statements(pool.into_transaction_log());
         let upsert = log
             .iter()
             .position(|s| s.sql == WALKED_UPSERT.text())
@@ -1894,7 +1892,7 @@ mod tests {
     async fn the_cross_evaluation_bump_names_each_derivation_once() {
         let evaluation = EvaluationId::now_v7();
         let (eval, a, b) = scripted(evaluation);
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([vec![eval]])
             .append_query_results([vec![hash_row(&a.hash)]])
             .append_query_results([vec![a.clone(), b.clone()]])
@@ -1926,11 +1924,7 @@ mod tests {
         .unwrap();
 
         drop(ctx);
-        let log: Vec<Statement> = pool
-            .into_transaction_log()
-            .iter()
-            .flat_map(|t| t.statements().to_vec())
-            .collect();
+        let log: Vec<Statement> = all_statements(pool.into_transaction_log());
         let bump = log
             .iter()
             .find(|s| {
@@ -1964,7 +1958,7 @@ mod tests {
     async fn the_start_pass_marks_ripples_promotes_seeds_then_settles_the_queue() {
         let evaluation = EvaluationId::now_v7();
         let (eval, a, b) = scripted(evaluation);
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([vec![eval]])
             .append_query_results([vec![hash_row(&a.hash)]])
             .append_query_results([vec![a.clone(), b.clone()]])
@@ -2000,7 +1994,7 @@ mod tests {
         .unwrap();
 
         drop(ctx);
-        let log = gradient_db::pool::statements(pool.into_transaction_log());
+        let log = statements(pool.into_transaction_log());
         let at = |needle: &str| {
             log.iter()
                 .position(|s| s.contains(needle))
@@ -2037,7 +2031,7 @@ mod tests {
         let evaluation = EvaluationId::now_v7();
         let parent = DerivationId::now_v7();
         let (eval, a, b) = scripted(evaluation);
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([vec![eval]])
             .append_query_results([vec![hash_row(&a.hash)]])
             .append_query_results([vec![a.clone(), b.clone()]])
@@ -2075,7 +2069,7 @@ mod tests {
         .unwrap();
 
         drop(ctx);
-        let log = gradient_db::pool::statements(pool.into_transaction_log());
+        let log = statements(pool.into_transaction_log());
         let mark = log
             .iter()
             .position(|s| s.contains("SET fetchable = true"))
@@ -2099,7 +2093,7 @@ mod tests {
     async fn a_batch_promotes_what_its_new_builders_need() {
         let evaluation = EvaluationId::now_v7();
         let (eval, a, b) = scripted(evaluation);
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([vec![eval]])
             .append_query_results([vec![hash_row(&a.hash)]])
             .append_query_results([vec![a.clone(), b.clone()]])
@@ -2135,7 +2129,7 @@ mod tests {
         .unwrap();
 
         drop(ctx);
-        let log = gradient_db::pool::statements(pool.into_transaction_log());
+        let log = statements(pool.into_transaction_log());
         let walk = log
             .iter()
             .position(|s| s.contains("ON d.derivation = r.derivation ORDER BY r.derivation"))
@@ -2174,7 +2168,7 @@ mod tests {
     async fn a_redelivered_batch_flips_nothing_and_only_repeats_guarded_writes() {
         let evaluation = EvaluationId::now_v7();
         let (eval, a, b) = scripted(evaluation);
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([vec![eval]])
             .append_query_results([Vec::<MDerivation>::new()])
             .append_query_results([vec![a.clone(), b.clone()]])
@@ -2203,7 +2197,7 @@ mod tests {
             "an already walked derivation is not a flip"
         );
         drop(ctx);
-        let log = gradient_db::pool::statements(pool.into_transaction_log());
+        let log = statements(pool.into_transaction_log());
         let writes: Vec<&String> = log
             .iter()
             .filter(|s| s.contains("INSERT INTO derivation"))
@@ -2228,7 +2222,7 @@ mod tests {
     async fn an_unparseable_dependency_fails_the_batch() {
         let evaluation = EvaluationId::now_v7();
         let (eval, a, _) = scripted(evaluation);
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([vec![eval]])
             .append_query_results([vec![hash_row(&a.hash)]])
             .into_connection();
@@ -2256,7 +2250,7 @@ mod tests {
     async fn an_empty_batch_touches_only_the_evaluation() {
         let evaluation = EvaluationId::now_v7();
         let (eval, _, _) = scripted(evaluation);
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([vec![eval]])
             .into_connection();
         let (ctx, pool) = ctx(db).await;
@@ -2280,7 +2274,7 @@ mod tests {
     async fn a_walked_record_writes_its_limits_onto_an_existing_shared_build() {
         let evaluation = EvaluationId::now_v7();
         let (eval, a, _) = scripted(evaluation);
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([vec![eval]])
             .append_query_results([vec![hash_row(&a.hash)]])
             .append_query_results([vec![a.clone()]])
@@ -2313,11 +2307,7 @@ mod tests {
         .unwrap();
 
         drop(ctx);
-        let log: Vec<Statement> = pool
-            .into_transaction_log()
-            .iter()
-            .flat_map(|t| t.statements().to_vec())
-            .collect();
+        let log: Vec<Statement> = all_statements(pool.into_transaction_log());
         let shared_builds = log
             .iter()
             .position(|s| s.sql.contains("INSERT INTO \"derivation_build\""))
@@ -2344,7 +2334,7 @@ mod tests {
     async fn statements_of_a_walk_of(record: DiscoveredDerivation) -> Vec<Statement> {
         let evaluation = EvaluationId::now_v7();
         let (eval, a, _) = scripted(evaluation);
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([vec![eval]])
             .append_query_results([vec![hash_row(&a.hash)]])
             .append_query_results([vec![a.clone()]])
@@ -2370,10 +2360,7 @@ mod tests {
         .unwrap();
 
         drop(ctx);
-        pool.into_transaction_log()
-            .iter()
-            .flat_map(|t| t.statements().to_vec())
-            .collect()
+        all_statements(pool.into_transaction_log())
     }
 
     #[tokio::test]

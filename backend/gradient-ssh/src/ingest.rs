@@ -235,21 +235,23 @@ async fn compress_into(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gradient_fixtures::mock::{empty_db, mock_db};
     use gradient_storage::admission::Admitted;
+    use gradient_test_support::state::TestState;
     use gradient_types::permissions::{Permission, mask_from};
     use gradient_types::{CacheId, MCachedPath};
     use harmonia_protocol::valid_path_info::UnkeyedValidPathInfo;
     use harmonia_store_path::{StoreDir, StorePath};
-    use sea_orm::{DatabaseBackend, DatabaseConnection, MockDatabase};
+    use sea_orm::DatabaseConnection;
     use std::sync::Arc;
 
     const NAR: &[u8] = b"nix-archive-1 stand-in bytes";
 
     fn session(db: DatabaseConnection, permissions: i64) -> Arc<Session> {
         Arc::new(Session {
-            state: gradient_test_support::state::test_state_web(db),
-            user: gradient_test_support::fixtures::user(),
-            project: gradient_test_support::fixtures::project(),
+            state: TestState::new().web_db(db).build(),
+            user: gradient_fixtures::rows::user(),
+            project: gradient_fixtures::rows::project(),
             permissions,
             caches: vec![CacheId::now_v7()],
             closed: Default::default(),
@@ -276,7 +278,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_nar_with_a_wrong_hash_is_rejected_before_any_row() {
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([Vec::<MCachedPath>::new()])
             .into_connection();
         let session = session(db.clone(), mask_from(&[Permission::TriggerEvaluation]));
@@ -293,7 +295,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_nar_shorter_than_announced_is_rejected() {
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([Vec::<MCachedPath>::new()])
             .into_connection();
         let session = session(db, mask_from(&[Permission::TriggerEvaluation]));
@@ -308,7 +310,7 @@ mod tests {
 
     #[tokio::test]
     async fn copying_in_without_trigger_evaluation_is_refused() {
-        let db = MockDatabase::new(DatabaseBackend::Postgres).into_connection();
+        let db = empty_db();
         let session = session(db, 0);
 
         let e = import(&session, &info(NAR), NAR)
@@ -319,7 +321,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_stream_longer_than_announced_stops_early() {
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([Vec::<MCachedPath>::new()])
             .into_connection();
         let session = session(db, mask_from(&[Permission::TriggerEvaluation]));
@@ -340,7 +342,7 @@ mod tests {
             confirmed: true,
             ..Default::default()
         };
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([vec![existing]])
             .into_connection();
         let session = session(db.clone(), mask_from(&[Permission::TriggerEvaluation]));
@@ -365,7 +367,7 @@ mod tests {
             confirmed: true,
             ..Default::default()
         };
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([vec![existing]])
             .into_connection();
         let session = session(db, mask_from(&[Permission::TriggerEvaluation]));

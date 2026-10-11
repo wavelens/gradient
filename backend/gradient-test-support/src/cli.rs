@@ -8,10 +8,6 @@ use gradient_types::Cli;
 use gradient_types::cli::*;
 
 pub fn test_cli() -> Cli {
-    test_cli_with_crypt("test-secret".into())
-}
-
-pub fn test_cli_with_crypt(crypt_file: String) -> Cli {
     Cli {
         log: LogArgs {
             level_default: "error".into(),
@@ -33,7 +29,7 @@ pub fn test_cli_with_crypt(crypt_file: String) -> Cli {
             ..Default::default()
         },
         secrets: SecretsArgs {
-            crypt_file,
+            crypt_file: "test-secret".into(),
             jwt_file: "test-jwt".into(),
         },
         registration: RegistrationArgs { enable: false },

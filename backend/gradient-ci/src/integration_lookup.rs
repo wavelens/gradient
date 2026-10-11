@@ -133,7 +133,7 @@ mod name_tests {
 #[cfg(test)]
 mod ensure_tests {
     use super::*;
-    use sea_orm::{DatabaseBackend, MockDatabase};
+    use gradient_fixtures::mock::mock_db;
     use uuid::Uuid;
 
     fn project() -> ProjectId {
@@ -162,7 +162,7 @@ mod ensure_tests {
 
     #[tokio::test]
     async fn creates_both_rows_when_none_exist() {
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([Vec::<gradient_entity::integration::Model>::new()])
             .append_query_results([Vec::<gradient_entity::integration::Model>::new()])
             .append_query_results([vec![github_row(IntegrationKind::Inbound)]])
@@ -185,7 +185,7 @@ mod ensure_tests {
 
     #[tokio::test]
     async fn skips_kinds_that_already_exist() {
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([vec![github_row(IntegrationKind::Inbound)]])
             .append_query_results([vec![github_row(IntegrationKind::Outbound)]])
             .into_connection();

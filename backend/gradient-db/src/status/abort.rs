@@ -191,7 +191,8 @@ mod tests {
     use crate::WorkerDb;
     use crate::test_ctx::ctx;
     use gradient_entity::evaluation::EvaluationStatus;
-    use sea_orm::{DatabaseBackend, DatabaseConnection, MockDatabase, MockExecResult, Value};
+    use gradient_fixtures::mock::mock_db;
+    use sea_orm::{DatabaseConnection, MockExecResult, Value};
     use std::collections::BTreeMap;
 
     fn eval_row(status: EvaluationStatus) -> MEvaluation {
@@ -235,7 +236,7 @@ mod tests {
         other_jobs: Vec<MBuildJob>,
         other_evals: Vec<MEvaluation>,
     ) -> DatabaseConnection {
-        MockDatabase::new(DatabaseBackend::Postgres)
+        mock_db()
             .append_query_results([shared_builds])
             .append_query_results([active])
             .append_query_results([other_jobs])

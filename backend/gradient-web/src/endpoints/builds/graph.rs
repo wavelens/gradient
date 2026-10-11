@@ -146,7 +146,7 @@ mod tests {
     use super::*;
     use gradient_entity::build::BuildStatus;
     use gradient_entity::{build_job, derivation, derivation_build, derivation_dependency};
-    use sea_orm::{DatabaseBackend, MockDatabase};
+    use gradient_fixtures::mock::mock_db;
 
     fn drv(id: DerivationId, name: &str) -> derivation::Model {
         derivation::Model {
@@ -197,7 +197,7 @@ mod tests {
             ..Default::default()
         };
 
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([vec![dep(root, input)]])
             .append_query_results([vec![dep(input, interior)]])
             .append_query_results([Vec::<derivation_dependency::Model>::new()])
@@ -252,7 +252,7 @@ mod tests {
             ..Default::default()
         };
 
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([Vec::<derivation_dependency::Model>::new()])
             .append_query_results([Vec::<build_job::Model>::new()])
             .append_query_results([Vec::<derivation_build::Model>::new()])

@@ -240,6 +240,7 @@ async fn announce(ctx: &DbContext, changes: &[TransitionChange]) -> Result<(), D
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gradient_fixtures::mock::{mock_db, statements};
 
     #[test]
     fn ci_reports_matches_the_git_host_check_lifecycle() {
@@ -359,7 +360,7 @@ mod tests {
             derivation: d,
             ..Default::default()
         };
-        let db = sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([vec![job.clone()]])
             .append_query_results([vec![MEntryPoint {
                 evaluation,
@@ -386,7 +387,7 @@ mod tests {
         .expect("effects");
         crate::test_ctx::settle(ctx).await;
 
-        let log = crate::pool::statements(pool.into_transaction_log());
+        let log = statements(pool.into_transaction_log());
         let reports: Vec<&String> = log
             .iter()
             .filter(|s| s.contains("INSERT INTO pending_delivery"))
@@ -407,7 +408,7 @@ mod tests {
     #[tokio::test]
     async fn a_re_announce_never_asks_to_finalize_a_log_again() {
         let d = DerivationId::now_v7();
-        let db = sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([Vec::<MBuildJob>::new()])
             .append_query_results([Vec::<MEntryPoint>::new()])
             .into_connection();
@@ -421,7 +422,7 @@ mod tests {
         .expect("effects");
         crate::test_ctx::settle(ctx).await;
 
-        let log = crate::pool::statements(pool.into_transaction_log());
+        let log = statements(pool.into_transaction_log());
         assert!(
             !log.iter()
                 .any(|s| s.contains("JOIN derivation_build b ON b.id = a.derivation_build")),
@@ -433,7 +434,7 @@ mod tests {
     async fn what_gains_need_is_handed_to_the_upstream_probe() {
         let crossed = DerivationId::now_v7();
         let gained = DerivationId::now_v7();
-        let db = sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_exec_results([
                 sea_orm::MockExecResult {
                     last_insert_id: 0,
@@ -484,7 +485,7 @@ mod tests {
     async fn a_boundary_crossing_updates_the_closure_and_settles_the_queue() {
         let crossed = DerivationId::now_v7();
         let lost = DerivationId::now_v7();
-        let db = sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_exec_results([
                 sea_orm::MockExecResult {
                     last_insert_id: 0,
@@ -530,7 +531,7 @@ mod tests {
             "what lost its need is reported, so the evaluations waiting on it can settle"
         );
 
-        let log = crate::pool::statements(pool.into_transaction_log()).join(" ");
+        let log = statements(pool.into_transaction_log()).join(" ");
         assert!(log.contains("SET LOCAL work_mem"), "{log}");
         assert!(log.contains("SET wanted ="), "{log}");
         assert!(

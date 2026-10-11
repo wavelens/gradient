@@ -438,14 +438,14 @@ mod authority_tests {
     use super::*;
     use gradient_entity::project::Model as ProjectModel;
     use gradient_entity::project_cache::Model as ProjectCacheModel;
-    use sea_orm::{DatabaseBackend, MockDatabase};
+    use gradient_fixtures::mock::mock_db;
 
     const SHA256_OF_T1: &str = "628b49d96dcde97a430dd4f597705899e09a968f793491e4b704cae33a40dc02";
 
     #[tokio::test]
     async fn a_rejection_after_a_valid_token_counts_as_proven() {
         let project = ProjectId::now_v7();
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([vec![ProjectModel {
                 id: project,
                 ..Default::default()

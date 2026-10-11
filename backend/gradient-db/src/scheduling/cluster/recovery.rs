@@ -133,22 +133,19 @@ async fn close_open_attempts<C: ConnectionTrait>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::scheduling::cluster::test_rows::{exec, logged};
-
-    use sea_orm::{DatabaseBackend, MockDatabase};
+    use crate::scheduling::cluster::test_rows::exec;
+    use gradient_fixtures::mock::{all_statements, mock_db};
 
     #[tokio::test]
     async fn a_cluster_requeues_only_within_its_budget_with_live_members() {
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
-            .append_exec_results([exec(1)])
-            .into_connection();
+        let db = mock_db().append_exec_results([exec(1)]).into_connection();
 
         let requeued = requeue_cluster_job(&db, ClusterJobId::now_v7())
             .await
             .expect("requeue");
 
         assert!(requeued);
-        let statements = logged(db);
+        let statements = all_statements(db.into_transaction_log());
         let sql = &statements[0].sql;
         assert!(
             sql.starts_with("UPDATE \"cluster_job\" SET \"status\" = $1"),
@@ -172,16 +169,14 @@ mod tests {
 
     #[tokio::test]
     async fn finishing_moves_only_a_live_cluster() {
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
-            .append_exec_results([exec(0)])
-            .into_connection();
+        let db = mock_db().append_exec_results([exec(0)]).into_connection();
 
         let finished = finish_cluster_job(&db, ClusterJobId::now_v7(), ClusterJobStatus::Failed)
             .await
             .expect("finish");
 
         assert!(!finished);
-        let statements = logged(db);
+        let statements = all_statements(db.into_transaction_log());
         let sql = &statements[0].sql;
         assert!(
             sql.starts_with("UPDATE \"cluster_job\" SET \"status\" = $1"),
@@ -192,7 +187,7 @@ mod tests {
 
     #[tokio::test]
     async fn startup_closes_every_open_attempt_then_requeues_live_clusters() {
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_exec_results([exec(2), exec(1), exec(1), exec(1), exec(3)])
             .append_query_results([Vec::<std::collections::BTreeMap<&str, sea_orm::Value>>::new()])
             .into_connection();
@@ -208,7 +203,7 @@ mod tests {
                 clusters_failed: 1,
             }
         );
-        let statements = logged(db);
+        let statements = all_statements(db.into_transaction_log());
         let sql: Vec<&str> = statements.iter().map(|s| s.sql.as_str()).collect();
         assert!(
             sql[0].starts_with("UPDATE \"cluster_attempt\"")

@@ -9,11 +9,15 @@
     reason = "test scaffolding: a fixture helper that cannot build its value should fail the test loudly"
 )]
 
-use gradient_entity::{ids::*, integration, project_user, task, task_trigger};
-use gradient_test_support::fixtures::{project, project_id, task_id, test_date, user, user_id};
-use gradient_test_support::web::{live_session, make_test_server, make_token};
+use gradient_entity::{ids::*, integration, task, task_trigger};
+use gradient_fixtures::ids::{project_id, task_id, user_id};
+use gradient_fixtures::mock::mock_db;
+use gradient_fixtures::rows::{project, project_member};
+use gradient_fixtures::test_date;
+use gradient_test_support::web::{make_test_server, make_token, signed_in, with_auth};
+use gradient_types::consts::BASE_ROLE_ADMIN_ID;
 use gradient_types::{ConcurrencyPolicy, GitHostType, SessionId, TriggerType};
-use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
+use sea_orm::{MockDatabase, MockExecResult};
 use serde_json::Value;
 use uuid::Uuid;
 
@@ -37,15 +41,6 @@ fn task_row() -> gradient_entity::task::Model {
         concurrency: ConcurrencyPolicy::Skip,
         sign_cache: true,
         ..Default::default()
-    }
-}
-
-fn admin_membership() -> project_user::Model {
-    project_user::Model {
-        id: ProjectUserId::new(Uuid::parse_str("00000000-0000-0000-0000-0000000000aa").unwrap()),
-        project: project_id(),
-        user: user_id(),
-        role: gradient_types::consts::BASE_ROLE_ADMIN_ID,
     }
 }
 
@@ -105,23 +100,16 @@ fn reporter_push_trigger_row() -> task_trigger::Model {
     }
 }
 
-fn with_auth(db: MockDatabase, session_id: SessionId) -> MockDatabase {
-    let session = live_session(session_id);
-    db.append_query_results([vec![session.clone()]])
-        .append_query_results([vec![session]])
-        .append_query_results([vec![user()]])
-}
-
 fn with_task_member(db: MockDatabase) -> MockDatabase {
     db.append_query_results([vec![project()]])
         .append_query_results([vec![task_row()]])
-        .append_query_results([vec![admin_membership()]])
+        .append_query_results([vec![project_member(BASE_ROLE_ADMIN_ID)]])
 }
 
 fn with_task_edit(db: MockDatabase) -> MockDatabase {
     db.append_query_results([vec![project()]])
         .append_query_results([vec![task_row()]])
-        .append_query_results([vec![admin_membership()]])
+        .append_query_results([vec![project_member(BASE_ROLE_ADMIN_ID)]])
         .append_query_results([vec![admin_role_row()]])
 }
 
@@ -132,11 +120,8 @@ async fn list_triggers_returns_rows() {
     let session_id = SessionId::now_v7();
     let token = make_token(session_id);
 
-    let db = with_task_member(with_auth(
-        MockDatabase::new(DatabaseBackend::Postgres),
-        session_id,
-    ))
-    .append_query_results([vec![polling_trigger_row()]]);
+    let db = with_task_member(with_auth(mock_db(), session_id))
+        .append_query_results([vec![polling_trigger_row()]]);
 
     let server = make_test_server(db.into_connection());
     let res = server
@@ -159,11 +144,8 @@ async fn get_trigger_returns_row() {
     let token = make_token(session_id);
     let tid = trigger_id();
 
-    let db = with_task_member(with_auth(
-        MockDatabase::new(DatabaseBackend::Postgres),
-        session_id,
-    ))
-    .append_query_results([vec![polling_trigger_row()]]);
+    let db = with_task_member(with_auth(mock_db(), session_id))
+        .append_query_results([vec![polling_trigger_row()]]);
 
     let server = make_test_server(db.into_connection());
     let res = server
@@ -184,11 +166,8 @@ async fn get_trigger_not_found_returns_404() {
     let token = make_token(session_id);
     let tid = TaskTriggerId::now_v7();
 
-    let db = with_task_member(with_auth(
-        MockDatabase::new(DatabaseBackend::Postgres),
-        session_id,
-    ))
-    .append_query_results([Vec::<task_trigger::Model>::new()]);
+    let db = with_task_member(with_auth(mock_db(), session_id))
+        .append_query_results([Vec::<task_trigger::Model>::new()]);
 
     let server = make_test_server(db.into_connection());
     let res = server
@@ -204,11 +183,8 @@ async fn create_polling_trigger_valid() {
     let session_id = SessionId::now_v7();
     let token = make_token(session_id);
 
-    let db = with_task_edit(with_auth(
-        MockDatabase::new(DatabaseBackend::Postgres),
-        session_id,
-    ))
-    .append_query_results([vec![polling_trigger_row()]]);
+    let db = with_task_edit(with_auth(mock_db(), session_id))
+        .append_query_results([vec![polling_trigger_row()]]);
 
     let server = make_test_server(db.into_connection());
     let res = server
@@ -230,10 +206,7 @@ async fn create_polling_trigger_interval_too_small_returns_400() {
     let session_id = SessionId::now_v7();
     let token = make_token(session_id);
 
-    let db = with_task_edit(with_auth(
-        MockDatabase::new(DatabaseBackend::Postgres),
-        session_id,
-    ));
+    let db = with_task_edit(with_auth(mock_db(), session_id));
 
     let server = make_test_server(db.into_connection());
     let res = server
@@ -259,10 +232,7 @@ async fn create_invalid_cron_returns_400() {
     let session_id = SessionId::now_v7();
     let token = make_token(session_id);
 
-    let db = with_task_edit(with_auth(
-        MockDatabase::new(DatabaseBackend::Postgres),
-        session_id,
-    ));
+    let db = with_task_edit(with_auth(mock_db(), session_id));
 
     let server = make_test_server(db.into_connection());
     let res = server
@@ -286,12 +256,9 @@ async fn patch_trigger_updates_fields() {
 
     let updated = polling_trigger_row();
 
-    let db = with_task_edit(with_auth(
-        MockDatabase::new(DatabaseBackend::Postgres),
-        session_id,
-    ))
-    .append_query_results([vec![polling_trigger_row()]])
-    .append_query_results([vec![updated]]);
+    let db = with_task_edit(with_auth(mock_db(), session_id))
+        .append_query_results([vec![polling_trigger_row()]])
+        .append_query_results([vec![updated]]);
 
     let server = make_test_server(db.into_connection());
     let res = server
@@ -318,12 +285,9 @@ async fn patch_trigger_config_type_change() {
         ..polling_trigger_row()
     };
 
-    let db = with_task_edit(with_auth(
-        MockDatabase::new(DatabaseBackend::Postgres),
-        session_id,
-    ))
-    .append_query_results([vec![polling_trigger_row()]])
-    .append_query_results([vec![updated]]);
+    let db = with_task_edit(with_auth(mock_db(), session_id))
+        .append_query_results([vec![polling_trigger_row()]])
+        .append_query_results([vec![updated]]);
 
     let server = make_test_server(db.into_connection());
     let res = server
@@ -346,15 +310,12 @@ async fn delete_trigger_removes_row() {
     let token = make_token(session_id);
     let tid = trigger_id();
 
-    let db = with_task_edit(with_auth(
-        MockDatabase::new(DatabaseBackend::Postgres),
-        session_id,
-    ))
-    .append_query_results([vec![polling_trigger_row()]])
-    .append_exec_results([MockExecResult {
-        last_insert_id: 0,
-        rows_affected: 1,
-    }]);
+    let db = with_task_edit(with_auth(mock_db(), session_id))
+        .append_query_results([vec![polling_trigger_row()]])
+        .append_exec_results([MockExecResult {
+            last_insert_id: 0,
+            rows_affected: 1,
+        }]);
 
     let server = make_test_server(db.into_connection());
     let res = server
@@ -374,11 +335,8 @@ async fn delete_trigger_not_found_returns_404() {
     let token = make_token(session_id);
     let tid = TaskTriggerId::now_v7();
 
-    let db = with_task_edit(with_auth(
-        MockDatabase::new(DatabaseBackend::Postgres),
-        session_id,
-    ))
-    .append_query_results([Vec::<task_trigger::Model>::new()]);
+    let db = with_task_edit(with_auth(mock_db(), session_id))
+        .append_query_results([Vec::<task_trigger::Model>::new()]);
 
     let server = make_test_server(db.into_connection());
     let res = server
@@ -400,11 +358,8 @@ async fn fire_now_on_inactive_trigger_returns_400() {
         ..polling_trigger_row()
     };
 
-    let db = with_task_edit(with_auth(
-        MockDatabase::new(DatabaseBackend::Postgres),
-        session_id,
-    ))
-    .append_query_results([vec![inactive_trigger]]);
+    let db = with_task_edit(with_auth(mock_db(), session_id))
+        .append_query_results([vec![inactive_trigger]]);
 
     let server = make_test_server(db.into_connection());
     let res = server
@@ -427,8 +382,7 @@ async fn fire_now_on_inactive_trigger_returns_400() {
 
 #[tokio::test]
 async fn create_task_seeds_default_polling_trigger() {
-    let session_id = SessionId::now_v7();
-    let token = make_token(session_id);
+    let (db, auth) = signed_in();
 
     let created_task = task::Model {
         id: task_id(),
@@ -457,9 +411,9 @@ async fn create_task_seeds_default_polling_trigger() {
         ..Default::default()
     };
 
-    let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
+    let db = db
         .append_query_results([vec![project()]])
-        .append_query_results([vec![admin_membership()]])
+        .append_query_results([vec![project_member(BASE_ROLE_ADMIN_ID)]])
         .append_query_results([vec![admin_role_row()]])
         .append_query_results([Vec::<task::Model>::new()])
         .append_query_results([vec![created_task]])
@@ -468,7 +422,7 @@ async fn create_task_seeds_default_polling_trigger() {
     let server = make_test_server(db.into_connection());
     let res = server
         .put("/api/v1/tasks/test-project")
-        .add_header("authorization", format!("Bearer {}", token))
+        .add_header("authorization", auth)
         .json(&serde_json::json!({
             "name": "new-task",
             "display_name": "New Task",
@@ -489,15 +443,12 @@ async fn patch_task_concurrency_to_skip() {
     let session_id = SessionId::now_v7();
     let token = make_token(session_id);
 
-    let db = with_task_edit(with_auth(
-        MockDatabase::new(DatabaseBackend::Postgres),
-        session_id,
-    ))
-    .append_query_results([vec![task_row()]])
-    .append_exec_results([MockExecResult {
-        last_insert_id: 0,
-        rows_affected: 1,
-    }]);
+    let db = with_task_edit(with_auth(mock_db(), session_id))
+        .append_query_results([vec![task_row()]])
+        .append_exec_results([MockExecResult {
+            last_insert_id: 0,
+            rows_affected: 1,
+        }]);
 
     let server = make_test_server(db.into_connection());
     let res = server
@@ -516,12 +467,9 @@ async fn list_reporter_trigger_includes_integration_metadata() {
     let session_id = SessionId::now_v7();
     let token = make_token(session_id);
 
-    let db = with_task_member(with_auth(
-        MockDatabase::new(DatabaseBackend::Postgres),
-        session_id,
-    ))
-    .append_query_results([vec![reporter_push_trigger_row()]])
-    .append_query_results([vec![github_inbound_integration_row()]]);
+    let db = with_task_member(with_auth(mock_db(), session_id))
+        .append_query_results([vec![reporter_push_trigger_row()]])
+        .append_query_results([vec![github_inbound_integration_row()]]);
 
     let server = make_test_server(db.into_connection());
     let res = server
@@ -547,12 +495,9 @@ async fn list_reporter_trigger_with_missing_integration_returns_null() {
     let session_id = SessionId::now_v7();
     let token = make_token(session_id);
 
-    let db = with_task_member(with_auth(
-        MockDatabase::new(DatabaseBackend::Postgres),
-        session_id,
-    ))
-    .append_query_results([vec![reporter_push_trigger_row()]])
-    .append_query_results([Vec::<integration::Model>::new()]);
+    let db = with_task_member(with_auth(mock_db(), session_id))
+        .append_query_results([vec![reporter_push_trigger_row()]])
+        .append_query_results([Vec::<integration::Model>::new()]);
 
     let server = make_test_server(db.into_connection());
     let res = server
@@ -573,11 +518,8 @@ async fn list_polling_trigger_has_null_integration_and_skips_lookup() {
     let session_id = SessionId::now_v7();
     let token = make_token(session_id);
 
-    let db = with_task_member(with_auth(
-        MockDatabase::new(DatabaseBackend::Postgres),
-        session_id,
-    ))
-    .append_query_results([vec![polling_trigger_row()]]);
+    let db = with_task_member(with_auth(mock_db(), session_id))
+        .append_query_results([vec![polling_trigger_row()]]);
 
     let server = make_test_server(db.into_connection());
     let res = server
@@ -597,12 +539,9 @@ async fn get_reporter_trigger_includes_integration_metadata() {
     let token = make_token(session_id);
     let tid = trigger_id();
 
-    let db = with_task_member(with_auth(
-        MockDatabase::new(DatabaseBackend::Postgres),
-        session_id,
-    ))
-    .append_query_results([vec![reporter_push_trigger_row()]])
-    .append_query_results([vec![github_inbound_integration_row()]]);
+    let db = with_task_member(with_auth(mock_db(), session_id))
+        .append_query_results([vec![reporter_push_trigger_row()]])
+        .append_query_results([vec![github_inbound_integration_row()]]);
 
     let server = make_test_server(db.into_connection());
     let res = server

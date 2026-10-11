@@ -357,14 +357,13 @@ async fn remove_undeclared_cache_grants<C: ConnectionTrait>(
 #[cfg(test)]
 mod grant_tests {
     use super::*;
-    use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
+    use gradient_fixtures::mock::{all_statements, mock_db};
+    use sea_orm::{MockDatabase, MockExecResult};
 
     fn deletes_only_state_rows(db: sea_orm::DatabaseConnection, table: &str, marker: &str) {
         let delete = format!("DELETE FROM \"{table}\"");
-        let statements: Vec<String> = db
-            .into_transaction_log()
-            .iter()
-            .flat_map(|t| t.statements().to_vec())
+        let statements: Vec<String> = all_statements(db.into_transaction_log())
+            .into_iter()
             .map(|s| s.sql)
             .filter(|sql| sql.starts_with(&delete))
             .collect();
@@ -374,7 +373,7 @@ mod grant_tests {
     }
 
     fn executed() -> MockDatabase {
-        MockDatabase::new(DatabaseBackend::Postgres).append_exec_results([MockExecResult {
+        mock_db().append_exec_results([MockExecResult {
             last_insert_id: 0,
             rows_affected: 1,
         }])

@@ -159,7 +159,8 @@ pub async fn get_search(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sea_orm::{DatabaseBackend, MockDatabase, Value};
+    use gradient_fixtures::mock::mock_db;
+    use sea_orm::Value;
     use std::collections::BTreeMap;
 
     type Row = BTreeMap<&'static str, Value>;
@@ -181,9 +182,7 @@ mod tests {
     }
 
     async fn run(results: Vec<Vec<Row>>, q: &str) -> (Vec<SearchHit>, usize) {
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
-            .append_query_results(results)
-            .into_connection();
+        let db = mock_db().append_query_results(results).into_connection();
         let hits = search(&db, UserId::now_v7(), classify(q), 5).await.unwrap();
         (hits, db.into_transaction_log().len())
     }
@@ -223,7 +222,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_task_hit_without_a_project_is_an_error() {
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([vec![name_row("task", None, "hosts", false)]])
             .into_connection();
         let result = search(&db, UserId::now_v7(), classify("hosts"), 5).await;

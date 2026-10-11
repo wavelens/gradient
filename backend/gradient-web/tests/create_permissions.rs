@@ -7,22 +7,14 @@
 use axum::http::StatusCode;
 use gradient_entity::ids::*;
 use gradient_entity::{cache, project};
-use gradient_test_support::fixtures::{superuser_user, test_date, user, user_id};
-use gradient_test_support::web::{live_session, make_test_server_configured, make_token};
+use gradient_fixtures::ids::user_id;
+use gradient_fixtures::mock::mock_db;
+use gradient_fixtures::rows::{superuser, user};
+use gradient_fixtures::test_date;
+use gradient_test_support::state::TestState;
+use gradient_test_support::web::{make_token, signed_in, signed_in_as, with_auth_as};
 use gradient_types::{CreatePermission, SessionId};
-use sea_orm::{DatabaseBackend, MockDatabase};
 use serde_json::{Value, json};
-
-fn with_auth(
-    db: MockDatabase,
-    session_id: SessionId,
-    actor: gradient_entity::user::Model,
-) -> MockDatabase {
-    let session = live_session(session_id);
-    db.append_query_results([vec![session.clone()]])
-        .append_query_results([vec![session]])
-        .append_query_results([vec![actor]])
-}
 
 fn project_row(name: &str) -> project::Model {
     project::Model {
@@ -59,20 +51,17 @@ fn cache_body() -> Value {
 
 #[tokio::test]
 async fn create_project_superusers_rejects_regular_user() {
-    let session_id = SessionId::now_v7();
-    let token = make_token(session_id);
-    let db = with_auth(
-        MockDatabase::new(DatabaseBackend::Postgres),
-        session_id,
-        user(),
-    );
-    let server = make_test_server_configured(db.into_connection(), |cli| {
-        cli.permissions.create_project = CreatePermission::Superusers;
-    });
+    let (db, auth) = signed_in();
+    let server = TestState::new()
+        .web_db(db.into_connection())
+        .cli(|cli| {
+            cli.permissions.create_project = CreatePermission::Superusers;
+        })
+        .server();
 
     let res = server
         .put("/api/v1/projects")
-        .add_header("authorization", format!("Bearer {}", token))
+        .add_header("authorization", auth)
         .json(&project_body())
         .await;
 
@@ -83,20 +72,17 @@ async fn create_project_superusers_rejects_regular_user() {
 
 #[tokio::test]
 async fn create_project_none_rejects_superuser() {
-    let session_id = SessionId::now_v7();
-    let token = make_token(session_id);
-    let db = with_auth(
-        MockDatabase::new(DatabaseBackend::Postgres),
-        session_id,
-        superuser_user(),
-    );
-    let server = make_test_server_configured(db.into_connection(), |cli| {
-        cli.permissions.create_project = CreatePermission::None;
-    });
+    let (db, auth) = signed_in_as(superuser());
+    let server = TestState::new()
+        .web_db(db.into_connection())
+        .cli(|cli| {
+            cli.permissions.create_project = CreatePermission::None;
+        })
+        .server();
 
     let res = server
         .put("/api/v1/projects")
-        .add_header("authorization", format!("Bearer {}", token))
+        .add_header("authorization", auth)
         .json(&project_body())
         .await;
 
@@ -107,21 +93,18 @@ async fn create_project_none_rejects_superuser() {
 
 #[tokio::test]
 async fn create_project_superusers_allows_superuser_past_gate() {
-    let session_id = SessionId::now_v7();
-    let token = make_token(session_id);
-    let db = with_auth(
-        MockDatabase::new(DatabaseBackend::Postgres),
-        session_id,
-        superuser_user(),
-    )
-    .append_query_results([vec![project_row("acme")]]);
-    let server = make_test_server_configured(db.into_connection(), |cli| {
-        cli.permissions.create_project = CreatePermission::Superusers;
-    });
+    let (db, auth) = signed_in_as(superuser());
+    let db = db.append_query_results([vec![project_row("acme")]]);
+    let server = TestState::new()
+        .web_db(db.into_connection())
+        .cli(|cli| {
+            cli.permissions.create_project = CreatePermission::Superusers;
+        })
+        .server();
 
     let res = server
         .put("/api/v1/projects")
-        .add_header("authorization", format!("Bearer {}", token))
+        .add_header("authorization", auth)
         .json(&project_body())
         .await;
 
@@ -132,20 +115,17 @@ async fn create_project_superusers_allows_superuser_past_gate() {
 
 #[tokio::test]
 async fn create_cache_superusers_rejects_regular_user() {
-    let session_id = SessionId::now_v7();
-    let token = make_token(session_id);
-    let db = with_auth(
-        MockDatabase::new(DatabaseBackend::Postgres),
-        session_id,
-        user(),
-    );
-    let server = make_test_server_configured(db.into_connection(), |cli| {
-        cli.permissions.create_cache = CreatePermission::Superusers;
-    });
+    let (db, auth) = signed_in();
+    let server = TestState::new()
+        .web_db(db.into_connection())
+        .cli(|cli| {
+            cli.permissions.create_cache = CreatePermission::Superusers;
+        })
+        .server();
 
     let res = server
         .put("/api/v1/caches")
-        .add_header("authorization", format!("Bearer {}", token))
+        .add_header("authorization", auth)
         .json(&cache_body())
         .await;
 
@@ -156,20 +136,17 @@ async fn create_cache_superusers_rejects_regular_user() {
 
 #[tokio::test]
 async fn create_cache_none_rejects_superuser() {
-    let session_id = SessionId::now_v7();
-    let token = make_token(session_id);
-    let db = with_auth(
-        MockDatabase::new(DatabaseBackend::Postgres),
-        session_id,
-        superuser_user(),
-    );
-    let server = make_test_server_configured(db.into_connection(), |cli| {
-        cli.permissions.create_cache = CreatePermission::None;
-    });
+    let (db, auth) = signed_in_as(superuser());
+    let server = TestState::new()
+        .web_db(db.into_connection())
+        .cli(|cli| {
+            cli.permissions.create_cache = CreatePermission::None;
+        })
+        .server();
 
     let res = server
         .put("/api/v1/caches")
-        .add_header("authorization", format!("Bearer {}", token))
+        .add_header("authorization", auth)
         .json(&cache_body())
         .await;
 
@@ -182,15 +159,14 @@ async fn create_cache_none_rejects_superuser() {
 async fn create_cache_everyone_allows_regular_user_past_gate() {
     let session_id = SessionId::now_v7();
     let token = make_token(session_id);
-    let db = with_auth(
-        MockDatabase::new(DatabaseBackend::Postgres),
-        session_id,
-        user(),
-    )
-    .append_query_results([vec![cache_row("acme")]]);
-    let server = make_test_server_configured(db.into_connection(), |cli| {
-        cli.permissions.create_cache = CreatePermission::Everyone;
-    });
+    let db =
+        with_auth_as(mock_db(), session_id, user()).append_query_results([vec![cache_row("acme")]]);
+    let server = TestState::new()
+        .web_db(db.into_connection())
+        .cli(|cli| {
+            cli.permissions.create_cache = CreatePermission::Everyone;
+        })
+        .server();
 
     let res = server
         .put("/api/v1/caches")

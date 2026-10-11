@@ -14,14 +14,13 @@ use axum_test::multipart::{MultipartForm, Part};
 use chrono::{Duration, Utc};
 use gradient_entity::ids::*;
 use gradient_entity::role;
-use gradient_test_support::fixtures::{project_id, user, user_id};
-use gradient_test_support::web::{live_session, make_test_server, make_token};
-use gradient_types::SessionId;
+use gradient_fixtures::ids::project_id;
+use gradient_fixtures::rows::project_member;
+use gradient_test_support::web::{make_test_server, signed_in};
 use gradient_types::consts::BASE_ROLE_WRITE_ID;
 use gradient_types::permissions::PermissionMask;
-use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
+use sea_orm::MockExecResult;
 use serde_json::{Value, json};
-use uuid::Uuid;
 
 fn write_role_row() -> role::Model {
     role::Model {
@@ -30,22 +29,6 @@ fn write_role_row() -> role::Model {
         permission: gradient_types::permissions::write_mask() as PermissionMask,
         ..Default::default()
     }
-}
-
-fn membership() -> gradient_entity::project_user::Model {
-    gradient_entity::project_user::Model {
-        id: ProjectUserId::new(Uuid::parse_str("00000000-0000-0000-0000-0000000000bb").unwrap()),
-        project: project_id(),
-        user: user_id(),
-        role: BASE_ROLE_WRITE_ID,
-    }
-}
-
-fn with_auth(db: MockDatabase, session_id: SessionId) -> MockDatabase {
-    let session = live_session(session_id);
-    db.append_query_results([vec![session.clone()]])
-        .append_query_results([vec![session]])
-        .append_query_results([vec![user()]])
 }
 
 fn live_upload_session(
@@ -82,21 +65,20 @@ fn blobs_url(session: UploadSessionId) -> String {
 
 #[tokio::test]
 async fn rejects_hash_mismatch() {
-    let session_id = SessionId::now_v7();
-    let token = make_token(session_id);
+    let (db, auth) = signed_in();
     let upload = UploadSessionId::now_v7();
 
     let payload = b"actual file contents".to_vec();
     let claimed_hex = hex_hash_of(b"different bytes");
 
-    let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
+    let db = db
         .append_query_results([vec![live_upload_session(
             upload,
             vec![claimed_hex.clone()],
             false,
             false,
         )]])
-        .append_query_results([vec![membership()]])
+        .append_query_results([vec![project_member(BASE_ROLE_WRITE_ID)]])
         .append_query_results([vec![write_role_row()]]);
 
     let server = make_test_server(db.into_connection());
@@ -105,7 +87,7 @@ async fn rejects_hash_mismatch() {
 
     let res = server
         .post(&blobs_url(upload))
-        .add_header("authorization", format!("Bearer {}", token))
+        .add_header("authorization", auth)
         .multipart(form)
         .await;
 
@@ -114,22 +96,21 @@ async fn rejects_hash_mismatch() {
 
 #[tokio::test]
 async fn rejects_foreign_hash() {
-    let session_id = SessionId::now_v7();
-    let token = make_token(session_id);
+    let (db, auth) = signed_in();
     let upload = UploadSessionId::now_v7();
 
     let payload = b"hello".to_vec();
     let payload_hex = hex_hash_of(&payload);
     let other_hex = hex_hash_of(b"other content");
 
-    let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
+    let db = db
         .append_query_results([vec![live_upload_session(
             upload,
             vec![other_hex],
             false,
             false,
         )]])
-        .append_query_results([vec![membership()]])
+        .append_query_results([vec![project_member(BASE_ROLE_WRITE_ID)]])
         .append_query_results([vec![write_role_row()]]);
 
     let server = make_test_server(db.into_connection());
@@ -138,7 +119,7 @@ async fn rejects_foreign_hash() {
 
     let res = server
         .post(&blobs_url(upload))
-        .add_header("authorization", format!("Bearer {}", token))
+        .add_header("authorization", auth)
         .multipart(form)
         .await;
 
@@ -147,8 +128,7 @@ async fn rejects_foreign_hash() {
 
 #[tokio::test]
 async fn happy_path_uploads_blob_and_shrinks_missing() {
-    let session_id = SessionId::now_v7();
-    let token = make_token(session_id);
+    let (db, auth) = signed_in();
     let upload = UploadSessionId::now_v7();
 
     let payload = b"a real source file".to_vec();
@@ -169,9 +149,9 @@ async fn happy_path_uploads_blob_and_shrinks_missing() {
         ..session_row.clone()
     };
 
-    let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
+    let db = db
         .append_query_results([vec![session_row]])
-        .append_query_results([vec![membership()]])
+        .append_query_results([vec![project_member(BASE_ROLE_WRITE_ID)]])
         .append_query_results([vec![write_role_row()]])
         .append_query_results([vec![inserted_blob]])
         .append_exec_results([MockExecResult {
@@ -190,7 +170,7 @@ async fn happy_path_uploads_blob_and_shrinks_missing() {
 
     let res = server
         .post(&blobs_url(upload))
-        .add_header("authorization", format!("Bearer {}", token))
+        .add_header("authorization", auth)
         .multipart(form)
         .await;
 
@@ -203,20 +183,18 @@ async fn happy_path_uploads_blob_and_shrinks_missing() {
 
 #[tokio::test]
 async fn rejects_already_dispatched_session() {
-    let session_id = SessionId::now_v7();
-    let token = make_token(session_id);
+    let (db, auth) = signed_in();
     let upload = UploadSessionId::now_v7();
 
     let payload = b"hello".to_vec();
     let payload_hex = hex_hash_of(&payload);
 
-    let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
-        .append_query_results([vec![live_upload_session(
-            upload,
-            vec![payload_hex.clone()],
-            true,
-            false,
-        )]]);
+    let db = db.append_query_results([vec![live_upload_session(
+        upload,
+        vec![payload_hex.clone()],
+        true,
+        false,
+    )]]);
 
     let server = make_test_server(db.into_connection());
 
@@ -224,7 +202,7 @@ async fn rejects_already_dispatched_session() {
 
     let res = server
         .post(&blobs_url(upload))
-        .add_header("authorization", format!("Bearer {}", token))
+        .add_header("authorization", auth)
         .multipart(form)
         .await;
 
@@ -233,20 +211,18 @@ async fn rejects_already_dispatched_session() {
 
 #[tokio::test]
 async fn rejects_expired_session() {
-    let session_id = SessionId::now_v7();
-    let token = make_token(session_id);
+    let (db, auth) = signed_in();
     let upload = UploadSessionId::now_v7();
 
     let payload = b"hello".to_vec();
     let payload_hex = hex_hash_of(&payload);
 
-    let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
-        .append_query_results([vec![live_upload_session(
-            upload,
-            vec![payload_hex.clone()],
-            false,
-            true,
-        )]]);
+    let db = db.append_query_results([vec![live_upload_session(
+        upload,
+        vec![payload_hex.clone()],
+        false,
+        true,
+    )]]);
 
     let server = make_test_server(db.into_connection());
 
@@ -254,7 +230,7 @@ async fn rejects_expired_session() {
 
     let res = server
         .post(&blobs_url(upload))
-        .add_header("authorization", format!("Bearer {}", token))
+        .add_header("authorization", auth)
         .multipart(form)
         .await;
 
@@ -263,12 +239,10 @@ async fn rejects_expired_session() {
 
 #[tokio::test]
 async fn rejects_session_not_found() {
-    let session_id = SessionId::now_v7();
-    let token = make_token(session_id);
+    let (db, auth) = signed_in();
     let upload = UploadSessionId::now_v7();
 
-    let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
-        .append_query_results([Vec::<gradient_entity::upload_session::Model>::new()]);
+    let db = db.append_query_results([Vec::<gradient_entity::upload_session::Model>::new()]);
 
     let server = make_test_server(db.into_connection());
 
@@ -276,7 +250,7 @@ async fn rejects_session_not_found() {
 
     let res = server
         .post(&blobs_url(upload))
-        .add_header("authorization", format!("Bearer {}", token))
+        .add_header("authorization", auth)
         .multipart(form)
         .await;
 

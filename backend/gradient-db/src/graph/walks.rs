@@ -196,6 +196,7 @@ pub fn open_closure_cte_body(name: &str, seed_select: &str, within: Option<&str>
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gradient_fixtures::mock::{mock_db, statements};
 
     fn norm(s: &str) -> String {
         s.split_whitespace().collect::<Vec<_>>().join(" ")
@@ -233,7 +234,7 @@ mod tests {
     }
 
     async fn walk_statements(statement: &Query) -> Vec<String> {
-        let db = sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_exec_results([sea_orm::MockExecResult {
                 last_insert_id: 0,
                 rows_affected: 0,
@@ -246,7 +247,7 @@ mod tests {
             .await
             .expect("the walk closes");
 
-        crate::pool::statements(db.into_transaction_log())
+        statements(db.into_transaction_log())
     }
 
     #[tokio::test]

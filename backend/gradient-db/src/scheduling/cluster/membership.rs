@@ -169,10 +169,9 @@ pub(crate) fn dead_member_of_cluster() -> SelectStatement {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::scheduling::cluster::test_rows::logged;
+    use gradient_fixtures::mock::{all_statements, empty_db, mock_db};
 
     use gradient_entity::ids::{ClusterMemberId, EvaluationId};
-    use sea_orm::{DatabaseBackend, MockDatabase};
 
     fn membership_row(
         member: ClusterMemberId,
@@ -206,7 +205,7 @@ mod tests {
             ClusterJobId::now_v7(),
             EvaluationId::now_v7(),
         );
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([vec![membership_row(member, cluster, evaluation, 3)]])
             .into_connection();
 
@@ -220,7 +219,7 @@ mod tests {
         assert_eq!(found[0].cluster.id, cluster);
         assert!(found[0].cluster.same_zone);
         assert_eq!(found[0].member_count, 3);
-        let sql = &logged(db)[0].sql;
+        let sql = &all_statements(db.into_transaction_log())[0].sql;
         assert!(sql.contains("\"evaluation\" = ANY($1::uuid[])"), "{sql}");
         assert!(
             sql.contains("\"derivation_build\" = ANY($2::uuid[])"),
@@ -230,11 +229,11 @@ mod tests {
 
     #[tokio::test]
     async fn membership_of_nothing_asks_nothing() {
-        let db = MockDatabase::new(DatabaseBackend::Postgres).into_connection();
+        let db = empty_db();
 
         let found = cluster_membership(&db, &[], &[]).await.expect("membership");
 
         assert!(found.is_empty());
-        assert!(logged(db).is_empty());
+        assert!(all_statements(db.into_transaction_log()).is_empty());
     }
 }

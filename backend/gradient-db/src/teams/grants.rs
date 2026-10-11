@@ -82,8 +82,9 @@ pub async fn apply_new_project_grants<C: ConnectionTrait>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gradient_fixtures::mock::mock_db;
     use gradient_types::consts::BASE_ROLE_WRITE_ID;
-    use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
+    use sea_orm::MockExecResult;
 
     #[tokio::test]
     async fn new_projects_get_the_grants_their_teams_ask_for() {
@@ -99,7 +100,7 @@ mod tests {
             new_project_users: true,
             ..Default::default()
         };
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([vec![granting.clone(), users_without_role]])
             .append_query_results([vec![MTeamProject {
                 team: granting.id,

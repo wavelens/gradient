@@ -10,11 +10,14 @@
 )]
 
 use gradient_entity::{api, cache, cache_role, cache_user, ids::*};
-use gradient_test_support::fixtures::{test_date, user, user_id};
+use gradient_fixtures::ids::user_id;
+use gradient_fixtures::mock::mock_db;
+use gradient_fixtures::rows::user;
+use gradient_fixtures::test_date;
 use gradient_test_support::web::make_test_server;
 use gradient_types::consts::BASE_CACHE_ROLE_VIEW_ID;
 use gradient_types::permissions::{cache_admin_mask, cache_view_mask};
-use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
+use sea_orm::{MockDatabase, MockExecResult};
 use sha2::{Digest, Sha256};
 
 fn hash_api_key(raw: &str) -> String {
@@ -108,7 +111,7 @@ async fn cache_pinned_key_works_on_pinned_cache() {
     let raw = "a".repeat(64);
     let key = pinned_api_key(&raw, cache_id(), cache_admin_mask());
 
-    let db = api_key_db(MockDatabase::new(DatabaseBackend::Postgres), &key)
+    let db = api_key_db(mock_db(), &key)
         .append_query_results([vec![cache_row()]])
         .append_query_results([Vec::<gradient_entity::cache_user::Model>::new()]);
 
@@ -128,8 +131,7 @@ async fn cache_pinned_key_rejected_on_other_cache() {
     let raw = "b".repeat(64);
     let key = pinned_api_key(&raw, other_cache_id(), cache_admin_mask());
 
-    let db = api_key_db(MockDatabase::new(DatabaseBackend::Postgres), &key)
-        .append_query_results([vec![cache_row()]]);
+    let db = api_key_db(mock_db(), &key).append_query_results([vec![cache_row()]]);
 
     let server = make_test_server(db.into_connection());
     let res = server
@@ -145,8 +147,8 @@ async fn cache_pinned_key_rejected_on_project_endpoint() {
     let raw = "c".repeat(64);
     let key = pinned_api_key(&raw, cache_id(), cache_admin_mask());
 
-    let db = api_key_db(MockDatabase::new(DatabaseBackend::Postgres), &key)
-        .append_query_results([vec![gradient_test_support::fixtures::project()]]);
+    let db = api_key_db(mock_db(), &key)
+        .append_query_results([vec![gradient_fixtures::rows::project()]]);
 
     let server = make_test_server(db.into_connection());
     let res = server
@@ -162,9 +164,9 @@ async fn create_key_rejects_both_project_and_cache_pin() {
     // A session JWT is used because API keys cannot create API keys.
     let session_id = gradient_types::SessionId::now_v7();
     let token = gradient_test_support::web::make_token(session_id);
-    let session = gradient_test_support::web::live_session(session_id);
+    let session = gradient_fixtures::rows::live_session(session_id);
 
-    let db = MockDatabase::new(DatabaseBackend::Postgres)
+    let db = mock_db()
         .append_query_results([vec![session.clone()]])
         .append_query_results([vec![session]])
         .append_query_results([vec![user()]]);
@@ -190,9 +192,9 @@ async fn create_key_rejects_both_project_and_cache_pin() {
 async fn create_cache_pinned_key_cannot_exceed_member_mask() {
     let session_id = gradient_types::SessionId::now_v7();
     let token = gradient_test_support::web::make_token(session_id);
-    let session = gradient_test_support::web::live_session(session_id);
+    let session = gradient_fixtures::rows::live_session(session_id);
 
-    let db = MockDatabase::new(DatabaseBackend::Postgres)
+    let db = mock_db()
         .append_query_results([vec![session.clone()]])
         .append_query_results([vec![session]])
         .append_query_results([vec![user()]])

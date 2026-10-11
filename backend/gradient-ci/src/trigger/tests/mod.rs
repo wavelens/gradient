@@ -10,13 +10,14 @@ use super::*;
 use fixtures::{make_entry_point, make_eval, make_shared_build, make_task};
 use gradient_entity::build::BuildStatus;
 use gradient_entity::evaluation::{self, EvaluationStatus, WalkMode};
+use gradient_fixtures::mock::{mock_db, raw_statements};
 use gradient_types::*;
-use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
+use sea_orm::MockExecResult;
 
 #[tokio::test]
 async fn trigger_records_the_requested_walk_mode() {
     let task = make_task();
-    let db = MockDatabase::new(DatabaseBackend::Postgres)
+    let db = mock_db()
         .append_query_results([Vec::<evaluation::Model>::new()])
         .append_query_results([vec![gradient_entity::commit::Model {
             id: CommitId::now_v7(),
@@ -52,7 +53,7 @@ async fn trigger_records_the_requested_walk_mode() {
     .await
     .unwrap();
 
-    let log = gradient_db::pool::raw_statements(db.into_transaction_log());
+    let log = raw_statements(db.into_transaction_log());
     let insert = log
         .iter()
         .find(|s| s.sql.starts_with(r#"INSERT INTO "evaluation""#))
@@ -81,7 +82,7 @@ async fn trigger_drops_dangling_last_evaluation_pointer() {
 
     let new_eval_id = EvaluationId::now_v7();
     let commit_id = CommitId::now_v7();
-    let db = MockDatabase::new(DatabaseBackend::Postgres)
+    let db = mock_db()
         .append_query_results([Vec::<evaluation::Model>::new()])
         .append_query_results([Vec::<evaluation::Model>::new()])
         .append_query_results([vec![gradient_entity::commit::Model {
@@ -121,7 +122,7 @@ async fn trigger_already_in_progress() {
     let task = make_task();
     let existing_eval = make_eval(EvaluationId::now_v7(), EvaluationStatus::Queued);
 
-    let db = MockDatabase::new(DatabaseBackend::Postgres)
+    let db = mock_db()
         .append_query_results([vec![existing_eval]])
         .into_connection();
 
@@ -170,7 +171,7 @@ async fn restart_with_all_cached_inserts_completed_eval() {
         e
     };
 
-    let db = MockDatabase::new(DatabaseBackend::Postgres)
+    let db = mock_db()
         .append_query_results([Vec::<evaluation::Model>::new()])
         .append_query_results([prev_entry_points])
         .append_query_results([shared_builds])
@@ -222,7 +223,7 @@ async fn restart_with_one_failed_inserts_building_eval_and_inherits_the_names() 
         e
     };
 
-    let db = MockDatabase::new(DatabaseBackend::Postgres)
+    let db = mock_db()
         .append_query_results([Vec::<evaluation::Model>::new()])
         .append_query_results([prev_entry_points])
         .append_query_results([shared_builds])
@@ -248,7 +249,7 @@ async fn restart_with_one_failed_inserts_building_eval_and_inherits_the_names() 
     let result = trigger_evaluation_retry(&db, &task, &prev_eval).await;
     assert!(result.is_ok(), "expected Ok, got: {:?}", result.err());
     assert_eq!(result.unwrap().status, EvaluationStatus::Building);
-    let log = gradient_db::pool::raw_statements(db.into_transaction_log());
+    let log = raw_statements(db.into_transaction_log());
     assert!(
         log.iter().any(|s| s.sql.contains("INSERT INTO build_job")
             && s.sql.contains("FROM build_job bj WHERE bj.evaluation = $1")),
@@ -303,7 +304,7 @@ fn tracked_override(task_id: TaskId, name: &str, url: Option<String>) -> MTaskFl
 #[tokio::test]
 async fn input_update_noop_without_open_pr_action() {
     let task = make_task();
-    let db = MockDatabase::new(DatabaseBackend::Postgres)
+    let db = mock_db()
         .append_query_results([Vec::<gradient_entity::task_action::Model>::new()])
         .into_connection();
 
@@ -316,7 +317,7 @@ async fn input_update_noop_without_open_pr_action() {
 #[tokio::test]
 async fn input_update_noop_without_tracked_inputs() {
     let task = make_task();
-    let db = MockDatabase::new(DatabaseBackend::Postgres)
+    let db = mock_db()
         .append_query_results([vec![open_pr_action(task.id)]])
         .append_query_results([Vec::<gradient_entity::task_flake_input_override::Model>::new()])
         .into_connection();
@@ -330,7 +331,7 @@ async fn input_update_noop_without_tracked_inputs() {
 #[tokio::test]
 async fn input_update_pinned_override_blocks_run() {
     let task = make_task();
-    let db = MockDatabase::new(DatabaseBackend::Postgres)
+    let db = mock_db()
         .append_query_results([vec![open_pr_action(task.id)]])
         .append_query_results([vec![tracked_override(
             task.id,
@@ -350,7 +351,7 @@ async fn input_update_creates_eval_for_tracked_input() {
     let task = make_task();
     let eval_id = EvaluationId::now_v7();
     let commit_id = CommitId::now_v7();
-    let db = MockDatabase::new(DatabaseBackend::Postgres)
+    let db = mock_db()
         .append_query_results([vec![open_pr_action(task.id)]])
         .append_query_results([vec![tracked_override(task.id, "nixpkgs", None)]])
         .append_query_results([Vec::<evaluation::Model>::new()])

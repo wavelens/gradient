@@ -11,25 +11,19 @@
 
 pub mod cache_fixture;
 pub mod cli;
-pub mod db;
 pub mod fakes;
-pub mod fixtures;
 pub mod log_storage;
 pub mod state;
 pub mod web;
 
 pub mod prelude {
     pub use crate::cli::test_cli;
-    pub use crate::db::db_with;
     pub use crate::fakes::drv_reader::FakeDrvReader;
     pub use crate::fakes::job_reporter::{RecordingJobReporter, ReportedEvent};
     pub use crate::fakes::store_fixture::{StoreFixture, load_store};
     pub use crate::fakes::worker_store::FakeWorkerStore;
-    pub use crate::fixtures::*;
     pub use crate::log_storage::{NoopLogStorage, RecordingLogStorage};
-    pub use crate::state::{
-        test_state, test_state_cache, test_state_with_log_storage, test_state_with_storage,
-    };
+    pub use crate::state::{TestState, test_state};
     pub use gradient_wire::testing::{MockProtoServer, MockServerConn};
     pub use gradient_worker_client::testing::{Assignment, PeerSpec, ProtoPeer};
 }

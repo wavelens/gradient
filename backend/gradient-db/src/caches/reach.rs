@@ -71,7 +71,7 @@ mod tests {
     use gradient_entity::cache_upstream::{CacheUpstreamKind, Model as MCacheUpstream};
     use gradient_entity::ids::{CacheId, CacheUpstreamId, ProjectCacheId, ProjectId};
     use gradient_entity::project_cache::Model as MProjectCache;
-    use sea_orm::{DatabaseBackend, MockDatabase};
+    use gradient_fixtures::mock::mock_db;
     use uuid::Uuid;
 
     fn project(n: u8) -> ProjectId {
@@ -122,7 +122,7 @@ mod tests {
                 project_cache(project(2), cache_x, CacheSubscriptionMode::ReadOnly),
             ];
 
-            let db = MockDatabase::new(DatabaseBackend::Postgres)
+            let db = mock_db()
                 .append_query_results([reader_rows])
                 .append_query_results([upstream_rows])
                 .append_query_results([writer_rows])
@@ -184,7 +184,7 @@ mod tests {
                 CacheSubscriptionMode::ReadWrite,
             )];
 
-            let db = MockDatabase::new(DatabaseBackend::Postgres)
+            let db = mock_db()
                 .append_query_results([reader_rows])
                 .append_query_results([upstream_rows])
                 .append_query_results([writer_rows])
@@ -243,7 +243,7 @@ mod tests {
                 project_cache(project(2), a, CacheSubscriptionMode::ReadOnly),
             ];
 
-            let db = MockDatabase::new(DatabaseBackend::Postgres)
+            let db = mock_db()
                 .append_query_results([reader_rows])
                 .append_query_results([upstream_rows])
                 .append_query_results([writer_rows])

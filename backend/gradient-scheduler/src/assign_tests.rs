@@ -4,12 +4,12 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use gradient_fixtures::mock::mock_db;
 use std::sync::Arc;
 
 use chrono::NaiveDateTime;
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_types::*;
-use sea_orm::{DatabaseBackend, MockDatabase};
 
 use crate::{Scheduler, loops, trigger_firing};
 
@@ -74,7 +74,7 @@ async fn assign_queued_eval_enqueues_job() {
     let task_id = TaskId::now_v7();
     let project_id = ProjectId::now_v7();
 
-    let db = MockDatabase::new(DatabaseBackend::Postgres)
+    let db = mock_db()
         .append_query_results([vec![make_eval_queued(eval_id, commit_id, Some(task_id))]])
         .append_query_results([no_membership()])
         .append_query_results([vec![make_commit(commit_id)]])
@@ -103,7 +103,7 @@ async fn assign_queued_eval_skips_already_enqueued() {
     let task_id = TaskId::now_v7();
     let project_id = ProjectId::now_v7();
 
-    let db = MockDatabase::new(DatabaseBackend::Postgres)
+    let db = mock_db()
         .append_query_results([vec![make_eval_queued(eval_id, commit_id, Some(task_id))]])
         .append_query_results([no_membership()])
         .append_query_results([vec![make_commit(commit_id)]])
@@ -135,7 +135,7 @@ async fn assign_queued_eval_skips_missing_commit() {
     let commit_id = CommitId::now_v7();
     let task_id = TaskId::now_v7();
 
-    let db = MockDatabase::new(DatabaseBackend::Postgres)
+    let db = mock_db()
         .append_query_results([vec![make_eval_queued(eval_id, commit_id, Some(task_id))]])
         .append_query_results([no_membership()])
         .append_query_results([Vec::<gradient_entity::commit::Model>::new()])
@@ -162,7 +162,7 @@ async fn assign_queued_eval_without_task_is_skipped() {
     let eval_id = EvaluationId::now_v7();
     let commit_id = CommitId::now_v7();
 
-    let db = MockDatabase::new(DatabaseBackend::Postgres)
+    let db = mock_db()
         .append_query_results([vec![make_eval_queued(eval_id, commit_id, None)]])
         .append_query_results([no_membership()])
         .append_query_results([vec![make_commit(commit_id)]])
@@ -187,7 +187,7 @@ async fn assign_queued_eval_without_task_is_skipped() {
 /// slow worker must not get the same evaluation twice.
 #[tokio::test]
 async fn assign_queued_evals_refuses_an_evaluation_whose_assignment_row_is_open() {
-    let db = MockDatabase::new(DatabaseBackend::Postgres)
+    let db = mock_db()
         .append_query_results([Vec::<MEvaluation>::new()])
         .into_connection();
     let log_db = db.clone();
@@ -235,7 +235,7 @@ async fn fire_once_skips_trigger_within_interval() {
 
     let recent = gradient_types::now();
 
-    let db = MockDatabase::new(DatabaseBackend::Postgres)
+    let db = mock_db()
         .append_query_results([vec![make_polling_trigger(
             trigger_id,
             task_id,
@@ -288,7 +288,7 @@ async fn assign_one_member(
     let eval_id = EvaluationId::now_v7();
     let commit_id = CommitId::now_v7();
     let task_id = TaskId::now_v7();
-    let mut db = MockDatabase::new(DatabaseBackend::Postgres);
+    let mut db = mock_db();
     if eval_only_worker {
         db = db.append_query_results([no_membership()]);
     }

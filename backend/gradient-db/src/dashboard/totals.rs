@@ -152,7 +152,7 @@ pub async fn activity<C: ConnectionTrait>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sea_orm::{DatabaseBackend, MockDatabase};
+    use gradient_fixtures::mock::empty_db;
 
     #[test]
     fn the_cache_size_tile_reads_the_recounted_usage() {
@@ -163,7 +163,7 @@ mod tests {
 
     #[tokio::test]
     async fn an_empty_project_scope_skips_the_queries() {
-        let db = MockDatabase::new(DatabaseBackend::Postgres).into_connection();
+        let db = empty_db();
         assert_eq!(
             scoped_totals(&db, Some("")).await.unwrap(),
             Totals::default()

@@ -51,7 +51,8 @@ pub async fn recount_cache_usage<C: ConnectionTrait>(db: &C) -> Result<u64, DbEr
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
+    use gradient_fixtures::mock::mock_db;
+    use sea_orm::MockExecResult;
     use std::collections::BTreeMap;
 
     fn total(cache: CacheId, bytes: i64) -> BTreeMap<String, Value> {
@@ -64,7 +65,7 @@ mod tests {
     #[tokio::test]
     async fn the_totals_read_is_written_back_as_parallel_arrays() {
         let (a, b) = (CacheId::now_v7(), CacheId::now_v7());
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+        let db = mock_db()
             .append_query_results([vec![total(a, 10), total(b, 20)]])
             .append_exec_results([MockExecResult {
                 last_insert_id: 0,

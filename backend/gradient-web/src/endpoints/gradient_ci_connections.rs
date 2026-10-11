@@ -430,8 +430,8 @@ mod tests {
     fn a_project_connection_evaluates_and_builds_as_gradient_ci_servers() {
         let token = ConnectionToken::parse(&format!("gci1_{ID}_s")).expect("valid");
         let row = registration_row(
-            &gradient_test_support::fixtures::project(),
-            &gradient_test_support::fixtures::user(),
+            &gradient_fixtures::rows::project(),
+            &gradient_fixtures::rows::user(),
             &token,
             "wss://servers.gradient.ci/proto".into(),
             StoredToken {

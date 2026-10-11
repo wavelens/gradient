@@ -13,14 +13,15 @@ use gradient_entity::{
     cache, cache_role, cache_subscription_request, cache_user, ids::*, project_cache, project_user,
     role,
 };
-use gradient_test_support::fixtures::{project, project_id, test_date, user, user_id};
-use gradient_test_support::web::{live_session, make_test_server, make_token};
-use gradient_types::SessionId;
+use gradient_fixtures::ids::{project_id, user_id};
+use gradient_fixtures::rows::project;
+use gradient_fixtures::test_date;
+use gradient_test_support::web::{make_test_server, signed_in};
 use gradient_types::consts::{
     BASE_CACHE_ROLE_ADMIN_ID, BASE_CACHE_ROLE_VIEW_ID, BASE_ROLE_ADMIN_ID,
 };
 use gradient_types::permissions::{admin_mask, cache_admin_mask, cache_view_mask, mask_from};
-use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
+use sea_orm::MockExecResult;
 use uuid::Uuid;
 
 fn cache_id() -> CacheId {
@@ -122,19 +123,11 @@ fn view_cache_role() -> cache_role::Model {
     }
 }
 
-fn with_auth(db: MockDatabase, session_id: SessionId) -> MockDatabase {
-    let session = live_session(session_id);
-    db.append_query_results([vec![session.clone()]])
-        .append_query_results([vec![session]])
-        .append_query_results([vec![user()]])
-}
-
 #[tokio::test]
 async fn subscribe_requires_project_manage_subscriptions() {
-    let session_id = SessionId::now_v7();
-    let token = make_token(session_id);
+    let (db, auth) = signed_in();
 
-    let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
+    let db = db
         .append_query_results([vec![project()]])
         .append_query_results([vec![view_only_project_membership()]])
         .append_query_results([vec![view_only_project_role()]]);
@@ -142,7 +135,7 @@ async fn subscribe_requires_project_manage_subscriptions() {
     let server = make_test_server(db.into_connection());
     let res = server
         .post("/api/v1/projects/test-project/subscribe/test-cache")
-        .add_header("authorization", format!("Bearer {}", token))
+        .add_header("authorization", auth)
         .await;
 
     res.assert_status(axum::http::StatusCode::FORBIDDEN);
@@ -150,8 +143,7 @@ async fn subscribe_requires_project_manage_subscriptions() {
 
 #[tokio::test]
 async fn subscribe_without_cache_permission_records_a_request() {
-    let session_id = SessionId::now_v7();
-    let token = make_token(session_id);
+    let (db, auth) = signed_in();
 
     let pending = cache_subscription_request::Model {
         id: CacheSubscriptionRequestId::now_v7(),
@@ -162,7 +154,7 @@ async fn subscribe_without_cache_permission_records_a_request() {
         created_at: test_date(),
     };
 
-    let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
+    let db = db
         .append_query_results([vec![project()]])
         .append_query_results([vec![admin_project_membership()]])
         .append_query_results([vec![admin_project_role()]])
@@ -182,7 +174,7 @@ async fn subscribe_without_cache_permission_records_a_request() {
     let server = make_test_server(db.into_connection());
     let res = server
         .post("/api/v1/projects/test-project/subscribe/test-cache")
-        .add_header("authorization", format!("Bearer {}", token))
+        .add_header("authorization", auth)
         .await;
 
     res.assert_status_ok();
@@ -195,8 +187,7 @@ async fn subscribe_without_cache_permission_records_a_request() {
 
 #[tokio::test]
 async fn subscribe_succeeds_when_both_granted() {
-    let session_id = SessionId::now_v7();
-    let token = make_token(session_id);
+    let (db, auth) = signed_in();
 
     let inserted_link = project_cache::Model {
         id: ProjectCacheId::now_v7(),
@@ -205,7 +196,7 @@ async fn subscribe_succeeds_when_both_granted() {
         mode: project_cache::CacheSubscriptionMode::ReadWrite,
     };
 
-    let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
+    let db = db
         .append_query_results([vec![project()]])
         .append_query_results([vec![admin_project_membership()]])
         .append_query_results([vec![admin_project_role()]])
@@ -228,7 +219,7 @@ async fn subscribe_succeeds_when_both_granted() {
     let server = make_test_server(db.into_connection());
     let res = server
         .post("/api/v1/projects/test-project/subscribe/test-cache")
-        .add_header("authorization", format!("Bearer {}", token))
+        .add_header("authorization", auth)
         .await;
 
     res.assert_status_ok();
@@ -238,8 +229,7 @@ async fn subscribe_succeeds_when_both_granted() {
 
 #[tokio::test]
 async fn subscribe_to_a_public_cache_records_a_request_for_a_non_member() {
-    let session_id = SessionId::now_v7();
-    let token = make_token(session_id);
+    let (db, auth) = signed_in();
 
     let pending = cache_subscription_request::Model {
         id: CacheSubscriptionRequestId::now_v7(),
@@ -250,7 +240,7 @@ async fn subscribe_to_a_public_cache_records_a_request_for_a_non_member() {
         created_at: test_date(),
     };
 
-    let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
+    let db = db
         .append_query_results([vec![project()]])
         .append_query_results([vec![admin_project_membership()]])
         .append_query_results([vec![admin_project_role()]])
@@ -268,7 +258,7 @@ async fn subscribe_to_a_public_cache_records_a_request_for_a_non_member() {
     let server = make_test_server(db.into_connection());
     let res = server
         .post("/api/v1/projects/test-project/subscribe/test-cache")
-        .add_header("authorization", format!("Bearer {}", token))
+        .add_header("authorization", auth)
         .await;
 
     res.assert_status_ok();
