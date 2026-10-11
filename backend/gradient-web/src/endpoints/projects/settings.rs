@@ -22,10 +22,7 @@ use gradient_notify::{SubscriptionEvent, SubscriptionMail};
 use gradient_scheduler::Scheduler;
 use gradient_types::permissions::CachePermission;
 use gradient_types::*;
-use sea_orm::ActiveValue::Set;
-use sea_orm::{
-    ActiveModelTrait, ColumnTrait, Condition, EntityTrait, IntoActiveModel, QueryFilter,
-};
+use sea_orm::IntoActiveModel;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -55,9 +52,7 @@ pub struct CacheSubscriptionItem {
 pub async fn post_project_public(
     ProjectScope { project, db, .. }: ProjectScope<RequiresUnmanaged<can::ManageProjectSettings>>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let mut active: AProject = project.into();
-    active.public = Set(true);
-    active.update(&db.web_db).await?;
+    gradient_db::projects::set_public(&db.web_db, project, true).await?;
 
     Ok(ok_json("Project is now public".to_string()))
 }
@@ -65,9 +60,7 @@ pub async fn post_project_public(
 pub async fn delete_project_public(
     ProjectScope { project, db, .. }: ProjectScope<RequiresUnmanaged<can::ManageProjectSettings>>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let mut active: AProject = project.into();
-    active.public = Set(false);
-    active.update(&db.web_db).await?;
+    gradient_db::projects::set_public(&db.web_db, project, false).await?;
 
     Ok(ok_json("Project is now private".to_string()))
 }
@@ -75,15 +68,11 @@ pub async fn delete_project_public(
 pub async fn get_project_subscribe(
     ProjectScope { project, db, .. }: ProjectScope<Member>,
 ) -> WebResult<Json<BaseResponse<Vec<CacheSubscriptionItem>>>> {
-    let project_caches = EProjectCache::find()
-        .filter(CProjectCache::Project.eq(project.id))
-        .all(&db.web_db)
-        .await?;
+    let project_caches =
+        gradient_db::projects::caches::subscriptions_of(&db.web_db, project.id).await?;
 
-    let pending = ECacheSubscriptionRequest::find()
-        .filter(CCacheSubscriptionRequest::Project.eq(project.id))
-        .all(&db.web_db)
-        .await?;
+    let pending =
+        gradient_db::cache_subscription_requests::of_project(&db.web_db, project.id).await?;
 
     let cache_ids: Vec<CacheId> = project_caches
         .iter()
@@ -146,27 +135,19 @@ pub async fn post_project_subscribe_cache(
     )
     .await?;
 
-    let already = EProjectCache::find()
-        .filter(
-            Condition::all()
-                .add(CProjectCache::Project.eq(project.id))
-                .add(CProjectCache::Cache.eq(cache.id)),
-        )
-        .one(&state.web_db)
-        .await?;
+    let already =
+        gradient_db::projects::caches::subscription(&state.web_db, project.id, cache.id).await?;
 
     if already.is_some() {
         return Err(WebError::already_exists(Resource::CacheSubscription));
     }
 
-    let pending = ECacheSubscriptionRequest::find()
-        .filter(
-            Condition::all()
-                .add(CCacheSubscriptionRequest::Project.eq(project.id))
-                .add(CCacheSubscriptionRequest::Cache.eq(cache.id)),
-        )
-        .one(&state.web_db)
-        .await?;
+    let pending = gradient_db::cache_subscription_requests::by_project_and_cache(
+        &state.web_db,
+        project.id,
+        cache.id,
+    )
+    .await?;
 
     if pending.is_some() {
         return Err(WebError::already_exists(Resource::SubscriptionRequest));
@@ -187,16 +168,17 @@ pub async fn post_project_subscribe_cache(
         .await?;
 
     if !may_approve {
-        MCacheSubscriptionRequest {
-            id: CacheSubscriptionRequestId::now_v7(),
-            project: project.id,
-            cache: cache.id,
-            mode: mode.clone(),
-            requested_by: user.id,
-            created_at: gradient_types::now(),
-        }
-        .into_active_model()
-        .insert(&state.web_db)
+        gradient_db::rows::insert::<ECacheSubscriptionRequest, _>(
+            &state.web_db,
+            MCacheSubscriptionRequest {
+                id: CacheSubscriptionRequestId::now_v7(),
+                project: project.id,
+                cache: cache.id,
+                mode: mode.clone(),
+                requested_by: user.id,
+                created_at: gradient_types::now(),
+            },
+        )
         .await?;
 
         notify_cache_admins(&state.ci(), &project, &cache, &user, &mode).await;
@@ -209,14 +191,15 @@ pub async fn post_project_subscribe_cache(
         CacheSubscriptionMode::ReadWrite | CacheSubscriptionMode::WriteOnly
     );
 
-    MProjectCache {
-        id: ProjectCacheId::now_v7(),
-        project: project.id,
-        cache: cache.id,
-        mode,
-    }
-    .into_active_model()
-    .insert(&state.web_db)
+    gradient_db::rows::insert::<EProjectCache, _>(
+        &state.web_db,
+        MProjectCache {
+            id: ProjectCacheId::now_v7(),
+            project: project.id,
+            cache: cache.id,
+            mode,
+        },
+    )
     .await?;
 
     reauth_project_workers(&state.web_db, &scheduler, project.id).await;
@@ -304,12 +287,7 @@ async fn enqueue_backfill_signatures(db: &WebDb, project_id: ProjectId, cache_id
         return;
     }
 
-    let outputs = match EDerivationOutput::find()
-        .filter(CDerivationOutput::Derivation.is_in(drv_ids))
-        .filter(CDerivationOutput::CachedPath.is_not_null())
-        .all(db)
-        .await
-    {
+    let outputs = match gradient_db::derivation_outputs::cached_of_derivations(db, drv_ids).await {
         Ok(v) => v,
         Err(e) => {
             tracing::warn!(%project_id, error = %e, "backfill: failed to load derivation_outputs");
@@ -338,17 +316,7 @@ async fn enqueue_backfill_signatures(db: &WebDb, project_id: ProjectId, cache_id
         .collect();
 
     for chunk in rows.chunks(SIGNATURE_INSERT_CHUNK) {
-        let res = ECachedPathSignature::insert_many(chunk.to_vec())
-            .on_conflict(
-                sea_orm::sea_query::OnConflict::columns([
-                    CCachedPathSignature::CachedPath,
-                    CCachedPathSignature::Cache,
-                ])
-                .do_nothing()
-                .to_owned(),
-            )
-            .exec(db)
-            .await;
+        let res = gradient_db::cached_paths::add_missing_signatures(db, chunk.to_vec()).await;
         if let Err(e) = res
             && !matches!(e, sea_orm::DbErr::RecordNotInserted)
         {
@@ -378,33 +346,22 @@ pub async fn delete_project_subscribe_cache(
     )
     .await?;
 
-    let record = EProjectCache::find()
-        .filter(
-            Condition::all()
-                .add(CProjectCache::Project.eq(project.id))
-                .add(CProjectCache::Cache.eq(cache.id)),
+    let subscription =
+        gradient_db::projects::caches::subscription(&db.web_db, project.id, cache.id).await?;
+
+    let Some(subscription) = subscription else {
+        let request = gradient_db::cache_subscription_requests::by_project_and_cache(
+            &db.web_db, project.id, cache.id,
         )
-        .one(&db.web_db)
-        .await?;
+        .await?
+        .ok_or(ProjectRefusal::NotSubscribedToCache)?;
 
-    let Some(record) = record else {
-        let request = ECacheSubscriptionRequest::find()
-            .filter(
-                Condition::all()
-                    .add(CCacheSubscriptionRequest::Project.eq(project.id))
-                    .add(CCacheSubscriptionRequest::Cache.eq(cache.id)),
-            )
-            .one(&db.web_db)
-            .await?
-            .ok_or(ProjectRefusal::NotSubscribedToCache)?;
-
-        request.into_active_model().delete(&db.web_db).await?;
+        gradient_db::rows::delete::<ECacheSubscriptionRequest, _>(&db.web_db, request).await?;
 
         return Ok(ok_json("Subscription request cancelled".to_string()));
     };
 
-    let active: AProjectCache = record.into();
-    active.delete(&db.web_db).await?;
+    gradient_db::rows::delete::<EProjectCache, _>(&db.web_db, subscription).await?;
 
     Ok(ok_json("Cache unsubscribed".to_string()))
 }

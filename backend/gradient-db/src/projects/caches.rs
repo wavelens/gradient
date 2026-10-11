@@ -5,15 +5,15 @@
  */
 
 use gradient_entity::project_cache::CacheSubscriptionMode;
-use gradient_types::ids::ProjectId;
-use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter};
+use gradient_types::ids::{CacheId, ProjectId};
+use gradient_types::{CProjectCache, EProjectCache, MProjectCache};
+use sea_orm::{ColumnTrait, Condition, ConnectionTrait, DbErr, EntityTrait, QueryFilter};
 
 pub async fn project_has_writable_cache<C: ConnectionTrait>(
     db: &C,
     project: ProjectId,
 ) -> Result<bool, sea_orm::DbErr> {
     use gradient_entity::cache::{Column as CCache, Entity as ECache};
-    use gradient_entity::ids::CacheId;
     use gradient_entity::project_cache::{Column as COC, Entity as EOC};
 
     let cache_ids: Vec<CacheId> = EOC::find()
@@ -38,4 +38,51 @@ pub async fn project_has_writable_cache<C: ConnectionTrait>(
         .one(db)
         .await?;
     Ok(row.is_some())
+}
+
+pub async fn subscriptions_of<C: ConnectionTrait>(
+    db: &C,
+    project: ProjectId,
+) -> Result<Vec<MProjectCache>, DbErr> {
+    EProjectCache::find()
+        .filter(CProjectCache::Project.eq(project))
+        .all(db)
+        .await
+}
+
+pub async fn subscription<C: ConnectionTrait>(
+    db: &C,
+    project: ProjectId,
+    cache: CacheId,
+) -> Result<Option<MProjectCache>, DbErr> {
+    EProjectCache::find()
+        .filter(
+            Condition::all()
+                .add(CProjectCache::Project.eq(project))
+                .add(CProjectCache::Cache.eq(cache)),
+        )
+        .one(db)
+        .await
+}
+
+pub async fn subscriptions_to<C: ConnectionTrait>(
+    db: &C,
+    cache: CacheId,
+) -> Result<Vec<MProjectCache>, DbErr> {
+    EProjectCache::find()
+        .filter(CProjectCache::Cache.eq(cache))
+        .all(db)
+        .await
+}
+
+pub async fn subscription_of_any<C: ConnectionTrait>(
+    db: &C,
+    cache: CacheId,
+    projects: Vec<ProjectId>,
+) -> Result<Option<MProjectCache>, DbErr> {
+    EProjectCache::find()
+        .filter(CProjectCache::Cache.eq(cache))
+        .filter(CProjectCache::Project.is_in(projects))
+        .one(db)
+        .await
 }

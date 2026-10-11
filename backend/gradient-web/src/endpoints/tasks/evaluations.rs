@@ -26,6 +26,7 @@ use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
 use gradient_core::ServerState;
 use gradient_db::WebDb;
+use gradient_db::evaluations::TaskEvaluationFilter;
 use gradient_db::lookup::{by_id, by_ids, get_any_project_by_name};
 use gradient_entity::build::BuildStatus;
 use gradient_entity::derivation_output::UNKNOWN_OUTPUT_HASH;
@@ -39,12 +40,7 @@ use gradient_storage::nar_extract::{
 use gradient_types::input::{hex_to_vec, vec_to_hex};
 use gradient_types::*;
 use gradient_util::latest::Latest;
-use sea_orm::sea_query::extension::postgres::PgExpr;
-use sea_orm::sea_query::{Expr, Query as SeaQuery};
-use sea_orm::{
-    ColumnTrait, Condition, EntityTrait, Iterable, PaginatorTrait, QueryFilter, QueryOrder,
-    QuerySelect, Select,
-};
+use sea_orm::Iterable;
 use serde::Deserialize;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
@@ -298,15 +294,13 @@ pub async fn get_task_evaluations(
     let limit = params.limit.unwrap_or(task.keep_evaluations as u64);
     let attr = params.attr.as_deref().map(parse_attr_filter).transpose()?;
 
-    let mut query = EEvaluation::find().filter(CEvaluation::Task.eq(task.id));
+    let mut filter = TaskEvaluationFilter::default();
 
     if let Some(before) = params.before {
-        let cursor = EEvaluation::find_by_id(before)
-            .filter(CEvaluation::Task.eq(task.id))
-            .one(&state.web_db)
+        let cursor = gradient_db::evaluations::by_id_in_task(&state.web_db, task.id, before)
             .await?
             .or_not_found(Resource::Evaluation)?;
-        query = query.filter(older_than(&cursor));
+        filter.older_than = Some(cursor);
     }
 
     if let Some(commit) = params.commit.as_deref() {
@@ -315,9 +309,7 @@ pub async fn get_task_evaluations(
             .filter(|h| h.len() == COMMIT_HASH_BYTES)
             .ok_or(TaskRefusal::InvalidCommitHash)?;
 
-        let commit_ids: Vec<CommitId> = ECommit::find()
-            .filter(CCommit::Hash.eq(hash))
-            .all(&state.web_db)
+        let commit_ids: Vec<CommitId> = gradient_db::commits::with_hash(&state.web_db, hash)
             .await?
             .into_iter()
             .map(|c| c.id)
@@ -327,31 +319,29 @@ pub async fn get_task_evaluations(
             return Ok(ok_json(vec![]));
         }
 
-        query = query.filter(CEvaluation::Commit.is_in(commit_ids));
+        filter.commits = Some(commit_ids);
     }
 
     if let Some(status) = params.status.as_deref() {
-        query = query.filter(CEvaluation::Status.is_in(parse_status_filter(status)?));
+        filter.statuses = Some(parse_status_filter(status)?);
     }
 
-    let query = query
-        .order_by_desc(CEvaluation::CreatedAt)
-        .order_by_desc(CEvaluation::Id);
-
     let evaluations = match attr {
-        Some(attr) => query
-            .limit(ATTR_SCAN_LIMIT)
-            .all(&state.web_db)
-            .await?
-            .into_iter()
-            .filter(|e| {
-                e.wildcard
-                    .parse::<Wildcard>()
-                    .is_ok_and(|w| w.matches(attr))
-            })
-            .take(limit as usize)
-            .collect(),
-        None => query.limit(limit).all(&state.web_db).await?,
+        Some(attr) => {
+            gradient_db::evaluations::page_of_task(&state.web_db, task.id, filter, ATTR_SCAN_LIMIT)
+                .await?
+                .into_iter()
+                .filter(|e| {
+                    e.wildcard
+                        .parse::<Wildcard>()
+                        .is_ok_and(|w| w.matches(attr))
+                })
+                .take(limit as usize)
+                .collect()
+        }
+        None => {
+            gradient_db::evaluations::page_of_task(&state.web_db, task.id, filter, limit).await?
+        }
     };
 
     let summaries =
@@ -373,12 +363,7 @@ pub async fn get_task_details(
 ) -> WebResult<Json<BaseResponse<TaskDetailsResponse>>> {
     let api_key_ref = api_key.as_ref();
 
-    let evaluations = EEvaluation::find()
-        .filter(CEvaluation::Task.eq(task.id))
-        .order_by_desc(CEvaluation::CreatedAt)
-        .limit(10)
-        .all(&state.web_db)
-        .await?;
+    let evaluations = gradient_db::evaluations::latest_of_task(&state.web_db, task.id, 10).await?;
 
     let evaluation_summaries =
         evaluations_to_summaries(&state.0.web_db, &state.0.memory.eval_progress, evaluations)
@@ -446,16 +431,6 @@ pub struct EvaluationsQuery {
 
 const COMMIT_HASH_BYTES: usize = 20;
 
-fn older_than(cursor: &MEvaluation) -> Condition {
-    Condition::any()
-        .add(CEvaluation::CreatedAt.lt(cursor.created_at))
-        .add(
-            Condition::all()
-                .add(CEvaluation::CreatedAt.eq(cursor.created_at))
-                .add(CEvaluation::Id.lt(cursor.id)),
-        )
-}
-
 const ATTR_SCAN_LIMIT: u64 = 1000;
 
 fn parse_attr_filter(attr: &str) -> WebResult<&str> {
@@ -496,24 +471,6 @@ pub struct EntryPointsQuery {
     pub search: Option<String>,
 }
 
-fn built_entry_points(evaluation: EvaluationId, search: Option<&str>) -> Select<EEntryPoint> {
-    let has_build_job = SeaQuery::select()
-        .column(CBuildJob::Derivation)
-        .from(gradient_entity::build_job::Entity)
-        .and_where(CBuildJob::Evaluation.eq(evaluation))
-        .to_owned();
-    let scope = EEntryPoint::find()
-        .filter(CEntryPoint::Evaluation.eq(evaluation))
-        .filter(CEntryPoint::Derivation.in_subquery(has_build_job));
-
-    match search.map(str::trim).filter(|term| !term.is_empty()) {
-        Some(term) => scope.filter(
-            Expr::col(CEntryPoint::Eval).ilike(gradient_db::dashboard::ilike_contains(term)),
-        ),
-        None => scope,
-    }
-}
-
 fn page_bounds(limit: Option<u64>, offset: Option<u64>) -> (u64, u64) {
     let limit = match limit {
         Some(0) | None => ENTRY_POINTS_PAGE,
@@ -548,14 +505,10 @@ pub async fn get_task_entry_points(
             })
             .collect();
     let (limit, offset) = page_bounds(params.limit, params.offset);
-    let scope = built_entry_points(eval_id, params.search.as_deref());
-    let total = scope.clone().count(&db.web_db).await?;
-    let entry_points = scope
-        .order_by_asc(CEntryPoint::Eval)
-        .offset(offset)
-        .limit(limit)
-        .all(&db.web_db)
-        .await?;
+    let search = params.search.as_deref();
+    let total = gradient_db::entry_points::count_built(&db.web_db, eval_id, search).await?;
+    let entry_points =
+        gradient_db::entry_points::built_page(&db.web_db, eval_id, search, offset, limit).await?;
 
     if entry_points.is_empty() {
         return Ok(ok_json(PaginatedEntryPoints {
@@ -618,17 +571,11 @@ impl EntryPointRelatedData {
             gradient_db::graph::reachability::shared_builds_by_derivation(db, &drv_ids).await?;
 
         let build_jobs: HashMap<DerivationId, BuildJobId> =
-            gradient_db::fetch_in_chunks(&drv_ids, |chunk| async move {
-                EBuildJob::find()
-                    .filter(CBuildJob::Evaluation.eq(eval_id))
-                    .filter(CBuildJob::Derivation.is_in(chunk))
-                    .all(db)
-                    .await
-            })
-            .await?
-            .into_iter()
-            .map(|j| (j.derivation, j.id))
-            .collect();
+            gradient_db::build_jobs::of_derivations_in_evaluation(db, eval_id, &drv_ids)
+                .await?
+                .into_iter()
+                .map(|j| (j.derivation, j.id))
+                .collect();
 
         let completed_drv_ids: HashSet<DerivationId> = shared_builds
             .values()
@@ -636,13 +583,7 @@ impl EntryPointRelatedData {
             .map(|a| a.derivation)
             .collect();
 
-        let output_rows = gradient_db::fetch_in_chunks(&drv_ids, |chunk| async move {
-            EDerivationOutput::find()
-                .filter(CDerivationOutput::Derivation.is_in(chunk))
-                .all(db)
-                .await
-        })
-        .await?;
+        let output_rows = gradient_db::derivation_outputs::of_derivations(db, &drv_ids).await?;
 
         let outputs = output_paths_by_derivation(&output_rows);
 
@@ -654,13 +595,7 @@ impl EntryPointRelatedData {
             let output_ids: Vec<DerivationOutputId> = built.iter().map(|o| o.id).collect();
             let mut m: HashMap<DerivationId, bool> = HashMap::new();
             if !output_ids.is_empty() {
-                let products = gradient_db::fetch_in_chunks(&output_ids, |chunk| async move {
-                    EBuildProduct::find()
-                        .filter(CBuildProduct::DerivationOutput.is_in(chunk))
-                        .all(db)
-                        .await
-                })
-                .await?;
+                let products = gradient_db::build_products::of_outputs(db, &output_ids).await?;
                 for bp in products {
                     if let Some(output) = built.iter().find(|o| o.id == bp.derivation_output) {
                         m.insert(output.derivation, true);
@@ -782,15 +717,7 @@ async fn serve_hydra_artifact(
         return Ok(None);
     }
 
-    let db = web_db;
-    let rows = match gradient_db::fetch_in_chunks(&output_ids, |chunk| async move {
-        EBuildProduct::find()
-            .filter(CBuildProduct::DerivationOutput.is_in(chunk))
-            .all(db)
-            .await
-    })
-    .await
-    {
+    let rows = match gradient_db::build_products::of_outputs(web_db, &output_ids).await {
         Ok(r) => r,
         Err(e) => {
             tracing::warn!(error = %e, "failed to query build_product rows for artifact serve");
@@ -880,10 +807,7 @@ pub async fn get_entry_point_download(
         .await?
         .or_not_found(Resource::Project)?;
 
-    let task = ETask::find()
-        .filter(CTask::Project.eq(project.id))
-        .filter(CTask::Name.eq(&task))
-        .one(&state.web_db)
+    let task = gradient_db::tasks::by_name(&state.web_db, project.id, &task)
         .await?
         .or_not_found(Resource::Task)?;
 
@@ -923,16 +847,11 @@ pub async fn get_entry_point_download(
     let evaluation_id = task.last_evaluation.or_not_found(Resource::Evaluation)?;
     let evaluation = require::<EEvaluation>(&state.web_db, evaluation_id).await?;
 
-    let ep = EEntryPoint::find()
-        .filter(CEntryPoint::Evaluation.eq(evaluation.id))
-        .filter(CEntryPoint::Eval.eq(&params.eval))
-        .one(&state.web_db)
+    let ep = gradient_db::entry_points::by_attribute(&state.web_db, evaluation.id, &params.eval)
         .await?
         .or_not_found(Resource::EntryPoint)?;
 
-    let shared_build = EDerivationBuild::find()
-        .filter(CDerivationBuild::Derivation.eq(ep.derivation))
-        .one(&state.web_db)
+    let shared_build = gradient_db::derivation_builds::of_derivation(&state.web_db, ep.derivation)
         .await?
         .or_not_found(Resource::Build)?;
 
@@ -942,10 +861,8 @@ pub async fn get_entry_point_download(
         return Err(WebError::not_found(Resource::File));
     }
 
-    let build_outputs = EDerivationOutput::find()
-        .filter(CDerivationOutput::Derivation.eq(ep.derivation))
-        .all(&state.web_db)
-        .await?;
+    let build_outputs =
+        gradient_db::derivation_outputs::of_derivation(&state.web_db, ep.derivation).await?;
 
     match serve_hydra_artifact(
         &state.web_db,
@@ -1014,25 +931,6 @@ mod page_tests {
 mod search_tests {
     use super::*;
     use gradient_entity::ids::DerivationOutputId;
-    use sea_orm::{DatabaseBackend, QueryTrait};
-
-    fn entry_point_sql(search: Option<&str>) -> String {
-        built_entry_points(EvaluationId::now_v7(), search)
-            .build(DatabaseBackend::Postgres)
-            .to_string()
-    }
-
-    #[test]
-    fn a_search_term_narrows_entry_points_to_matching_attributes() {
-        let sql = entry_point_sql(Some(" Hello "));
-        assert!(str::contains(&sql, r#""eval" ILIKE '%Hello%'"#), "{sql}");
-    }
-
-    #[test]
-    fn a_blank_search_term_keeps_every_entry_point() {
-        assert!(!str::contains(&entry_point_sql(Some("  ")), "ILIKE"));
-        assert!(!str::contains(&entry_point_sql(None), "ILIKE"));
-    }
 
     fn output_row(drv: DerivationId, name: &str, hash: &str, package: &str) -> MDerivationOutput {
         MDerivationOutput {

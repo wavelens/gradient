@@ -25,10 +25,7 @@ use gradient_scheduler::Scheduler;
 use gradient_types::events::EventOwner;
 use gradient_types::events::audit::Action;
 use gradient_types::*;
-use sea_orm::{
-    ActiveModelTrait, ColumnTrait, Condition, EntityTrait, IntoActiveModel, QueryFilter,
-    TransactionTrait,
-};
+use sea_orm::TransactionTrait;
 use serde::Serialize;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -45,10 +42,8 @@ pub struct SubscriptionRequestItem {
 pub async fn get_cache_subscription_requests(
     CacheScope { cache, db, .. }: CacheScope<Requires<can::ManageCacheSubscriptions>>,
 ) -> WebResult<Json<BaseResponse<Vec<SubscriptionRequestItem>>>> {
-    let mut requests = ECacheSubscriptionRequest::find()
-        .filter(CCacheSubscriptionRequest::Cache.eq(cache.id))
-        .all(&db.web_db)
-        .await?;
+    let mut requests =
+        gradient_db::cache_subscription_requests::of_cache(&db.web_db, cache.id).await?;
     requests.sort_by_key(|r| std::cmp::Reverse(r.created_at));
 
     let projects: HashMap<ProjectId, MProject> = by_ids::<EProject, _>(
@@ -95,15 +90,11 @@ async fn load_request(
         .await?
         .ok_or_else(|| WebError::not_found(Resource::SubscriptionRequest))?;
 
-    let request = ECacheSubscriptionRequest::find()
-        .filter(
-            Condition::all()
-                .add(CCacheSubscriptionRequest::Cache.eq(cache_id))
-                .add(CCacheSubscriptionRequest::Project.eq(project.id)),
-        )
-        .one(&db.web_db)
-        .await?
-        .ok_or_else(|| WebError::not_found(Resource::SubscriptionRequest))?;
+    let request = gradient_db::cache_subscription_requests::by_project_and_cache(
+        &db.web_db, project.id, cache_id,
+    )
+    .await?
+    .ok_or_else(|| WebError::not_found(Resource::SubscriptionRequest))?;
 
     Ok((project, request))
 }
@@ -168,15 +159,16 @@ pub async fn post_approve_subscription_request(
     let mode = request.mode.clone();
 
     let tx = state.web_db.inner().begin().await?;
-    request.into_active_model().delete(&tx).await?;
-    MProjectCache {
-        id: ProjectCacheId::now_v7(),
-        project: project.id,
-        cache: cache.id,
-        mode: mode.clone(),
-    }
-    .into_active_model()
-    .insert(&tx)
+    gradient_db::rows::delete::<ECacheSubscriptionRequest, _>(&tx, request).await?;
+    gradient_db::rows::insert::<EProjectCache, _>(
+        &tx,
+        MProjectCache {
+            id: ProjectCacheId::now_v7(),
+            project: project.id,
+            cache: cache.id,
+            mode: mode.clone(),
+        },
+    )
     .await?;
     tx.commit().await?;
 
@@ -228,7 +220,7 @@ pub async fn delete_subscription_request(
 
     let (project, request) = load_request(&db, cache.id, project).await?;
     let mode = request.mode.clone();
-    request.into_active_model().delete(&state.web_db).await?;
+    gradient_db::rows::delete::<ECacheSubscriptionRequest, _>(&state.web_db, request).await?;
 
     audit.write(Action::CacheSubscriptionDeny, EventOwner::project_cache(project.id, cache.id), serde_json::json!({ "cache_id": cache.id.to_string(), "project_id": project.id.to_string(), }))
     .await;

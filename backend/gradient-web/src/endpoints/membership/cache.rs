@@ -23,7 +23,7 @@ use gradient_types::events::EventOwner;
 use gradient_types::events::audit::Action;
 use gradient_types::*;
 use sea_orm::ActiveValue::Set;
-use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, RelationDef, RelationTrait};
+use sea_orm::{RelationDef, RelationTrait};
 use serde::Serialize;
 
 pub struct CacheOwner;
@@ -235,11 +235,9 @@ impl Owner for CacheOwner {
         member: &MCacheUser,
     ) -> WebResult<()> {
         if member.role == BASE_CACHE_ROLE_ADMIN_ID {
-            let admin_count = ECacheUser::find()
-                .filter(CCacheUser::Cache.eq(owner))
-                .filter(CCacheUser::Role.eq(BASE_CACHE_ROLE_ADMIN_ID))
-                .count(db)
-                .await?;
+            let admin_count =
+                gradient_db::caches::members::count_with_role(db, owner, BASE_CACHE_ROLE_ADMIN_ID)
+                    .await?;
             if admin_count <= 1 {
                 return Err(SharedRefusal::LastAdmin(Resource::Cache).into());
             }

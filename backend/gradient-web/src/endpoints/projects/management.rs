@@ -14,7 +14,6 @@ use crate::scope::{ProjectScope, Readable, RequiresUnmanaged, can};
 use anyhow::Context;
 use axum::extract::{Query, State};
 use axum::{Extension, Json};
-use gradient_db::WebDb;
 use gradient_types::events::EventOwner;
 use gradient_types::events::audit::Action;
 
@@ -24,10 +23,7 @@ use gradient_sources::generate_ssh_key;
 use gradient_types::consts::BASE_ROLE_ADMIN_ID;
 use gradient_types::*;
 use sea_orm::ActiveValue::Set;
-use sea_orm::{
-    ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter, QueryOrder,
-    TransactionTrait,
-};
+use sea_orm::TransactionTrait;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -91,50 +87,10 @@ pub async fn get_project_name_available(
     let Ok(name) = ProjectName::try_from(name) else {
         return Ok(ok_json(false));
     };
-    let exists = EProject::find()
-        .filter(CProject::Name.eq(name.as_str()))
-        .one(&state.web_db)
+    let exists = gradient_db::projects::by_name(&state.web_db, name.as_str())
         .await?
         .is_some();
     Ok(ok_json(!exists))
-}
-
-async fn count_running_evaluations(
-    db: &WebDb,
-    project_ids: &[ProjectId],
-) -> WebResult<HashMap<ProjectId, i64>> {
-    use gradient_entity::evaluation::EvaluationStatus;
-
-    if project_ids.is_empty() {
-        return Ok(HashMap::new());
-    }
-
-    let tasks = ETask::find()
-        .filter(CTask::Project.is_in(project_ids.to_vec()))
-        .all(db)
-        .await?;
-
-    let task_ids: Vec<TaskId> = tasks.iter().map(|p| p.id).collect();
-    let task_to_project: HashMap<TaskId, ProjectId> =
-        tasks.into_iter().map(|p| (p.id, p.project)).collect();
-
-    let mut running_per_project: HashMap<ProjectId, i64> = HashMap::new();
-    if !task_ids.is_empty() {
-        let running = EEvaluation::find()
-            .filter(CEvaluation::Task.is_in(task_ids))
-            .filter(CEvaluation::Status.is_in(EvaluationStatus::ACTIVE))
-            .all(db)
-            .await?;
-        for eval in running {
-            if let Some(task_id) = eval.task
-                && let Some(&project_id) = task_to_project.get(&task_id)
-            {
-                *running_per_project.entry(project_id).or_insert(0) += 1;
-            }
-        }
-    }
-
-    Ok(running_per_project)
 }
 
 pub async fn get(
@@ -142,23 +98,16 @@ pub async fn get(
     Extension(user): Extension<MUser>,
     Query(params): Query<PaginationParams>,
 ) -> WebResult<Json<BaseResponse<Paginated<Vec<ProjectSummary>>>>> {
-    let reachable = sea_orm::sea_query::Query::select()
-        .column(CProjectAccess::Project)
-        .from(gradient_entity::project_access::Entity)
-        .and_where(CProjectAccess::User.eq(user.id))
-        .to_owned();
     let listing = paginate(
-        EProject::find()
-            .filter(CProject::Id.in_subquery(reachable))
-            .order_by_asc(CProject::Name)
-            .order_by_asc(CProject::Id),
+        gradient_db::projects::reachable_by_user(user.id),
         &state.web_db,
         &params,
     )
     .await?;
 
     let project_ids: Vec<ProjectId> = listing.items.iter().map(|o| o.id).collect();
-    let running_per_project = count_running_evaluations(&state.web_db, &project_ids).await?;
+    let running_per_project =
+        gradient_db::projects::running_evaluations_per_project(&state.web_db, &project_ids).await?;
 
     let project_role_map =
         gradient_db::access::project_role_names(&state.web_db, user.id, project_ids).await?;
@@ -190,10 +139,8 @@ pub async fn put(
 ) -> WebResult<Json<BaseResponse<String>>> {
     require_create_permission(state.config.permissions.create_project, &user)?;
 
-    let existing_project = EProject::find()
-        .filter(CProject::Name.eq(body.name.as_str()))
-        .one(&state.web_db)
-        .await?;
+    let existing_project =
+        gradient_db::projects::by_name(&state.web_db, body.name.as_str()).await?;
 
     if existing_project.is_some() {
         return Err(WebError::already_exists(Resource::ProjectName));
@@ -207,32 +154,34 @@ pub async fn put(
 
     let tx = state.web_db.inner().begin().await?;
 
-    let project = MProject {
-        id: ProjectId::now_v7(),
-        name: body.name.to_string(),
-        display_name: body.display_name.trim().to_string(),
-        description: body.description.trim().to_string(),
-        public_key,
-        private_key,
-        public: body.public.unwrap_or(false),
-        hide_build_requests: body.hide_build_requests.unwrap_or(false),
-        created_by: user.id,
-        created_at: gradient_types::now(),
-        ..Default::default()
-    }
-    .into_active_model()
-    .insert(&tx)
+    let project = gradient_db::rows::insert::<EProject, _>(
+        &tx,
+        MProject {
+            id: ProjectId::now_v7(),
+            name: body.name.to_string(),
+            display_name: body.display_name.trim().to_string(),
+            description: body.description.trim().to_string(),
+            public_key,
+            private_key,
+            public: body.public.unwrap_or(false),
+            hide_build_requests: body.hide_build_requests.unwrap_or(false),
+            created_by: user.id,
+            created_at: gradient_types::now(),
+            ..Default::default()
+        },
+    )
     .await
     .map_err(|e| WebError::from_db_err(e, Resource::ProjectName))?;
 
-    MProjectUser {
-        id: ProjectUserId::now_v7(),
-        project: project.id,
-        user: user.id,
-        role: BASE_ROLE_ADMIN_ID,
-    }
-    .into_active_model()
-    .insert(&tx)
+    gradient_db::rows::insert::<EProjectUser, _>(
+        &tx,
+        MProjectUser {
+            id: ProjectUserId::now_v7(),
+            project: project.id,
+            user: user.id,
+            role: BASE_ROLE_ADMIN_ID,
+        },
+    )
     .await?;
 
     let granted_teams =
@@ -264,15 +213,7 @@ pub async fn get_public_projects(
     state: State<Arc<ServerState>>,
     Query(params): Query<PaginationParams>,
 ) -> WebResult<Json<BaseResponse<Paginated<Vec<MProject>>>>> {
-    let listing = paginate(
-        EProject::find()
-            .filter(CProject::Public.eq(true))
-            .order_by_asc(CProject::Name)
-            .order_by_asc(CProject::Id),
-        &state.web_db,
-        &params,
-    )
-    .await?;
+    let listing = paginate(gradient_db::projects::all_public(), &state.web_db, &params).await?;
 
     Ok(ok_json(listing))
 }
@@ -356,10 +297,7 @@ pub async fn patch_project(
     let mut aproject: AProject = project.into();
 
     if let Some(name) = body.name {
-        let existing_project = EProject::find()
-            .filter(CProject::Name.eq(name.as_str()))
-            .one(&db.web_db)
-            .await?;
+        let existing_project = gradient_db::projects::by_name(&db.web_db, name.as_str()).await?;
 
         if existing_project.is_some() {
             return Err(WebError::already_exists(Resource::ProjectName));
@@ -379,8 +317,7 @@ pub async fn patch_project(
 
     crate::patch_field!(aproject, body, hide_build_requests);
 
-    let project = aproject
-        .update(&db.web_db)
+    let project = gradient_db::rows::update::<EProject, _>(&db.web_db, aproject)
         .await
         .map_err(|e| WebError::from_db_err(e, Resource::ProjectName))?;
 
@@ -406,8 +343,7 @@ pub async fn delete_project(
 ) -> WebResult<Json<BaseResponse<String>>> {
     let project_id = project.id;
     let project_name = project.name.clone();
-    let aproject: AProject = project.into();
-    aproject.delete(&db.web_db).await?;
+    gradient_db::rows::delete::<EProject, _>(&db.web_db, project).await?;
 
     audit.write(Action::ProjectDelete, EventOwner::project(project_id), serde_json::json!({ "project_id": project_id.to_string(), "project_name": project_name, }))
     .await;

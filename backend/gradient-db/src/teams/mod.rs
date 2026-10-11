@@ -6,12 +6,17 @@
 
 pub mod evaluations;
 pub mod grants;
+pub mod invitations;
 pub mod mail;
 pub mod members;
+pub mod requests;
 pub mod workers;
 
 use gradient_types::*;
-use sea_orm::{ColumnTrait, ConnectionTrait, DbErr, EntityTrait, QueryFilter};
+use sea_orm::{
+    ActiveModelTrait, ColumnTrait, ConnectionTrait, DbErr, EntityTrait, IntoActiveModel,
+    QueryFilter,
+};
 
 pub async fn team_role_of<C: ConnectionTrait>(
     db: &C,
@@ -37,4 +42,21 @@ pub async fn team_worker_ids<C: ConnectionTrait>(
         .into_iter()
         .map(|worker| worker.worker_id)
         .collect())
+}
+
+pub async fn by_name<C: ConnectionTrait>(db: &C, name: &str) -> Result<Option<MTeam>, DbErr> {
+    ETeam::find().filter(CTeam::Name.eq(name)).one(db).await
+}
+
+pub async fn create<C: ConnectionTrait>(db: &C, team: MTeam) -> Result<MTeam, DbErr> {
+    team.into_active_model().insert(db).await
+}
+
+pub async fn update<C: ConnectionTrait>(db: &C, team: ATeam) -> Result<MTeam, DbErr> {
+    team.update(db).await
+}
+
+pub async fn delete<C: ConnectionTrait>(db: &C, team: MTeam) -> Result<(), DbErr> {
+    team.into_active_model().delete(db).await?;
+    Ok(())
 }

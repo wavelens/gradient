@@ -107,8 +107,8 @@ The `cache-maintenance` pass (`gradient-cache/src/schedule.rs`) can start every 
 |---|---|
 | `GET /builds/{build}`, `/log`, `/graph`, `/closure`, `/downloads` | Public project, a member of the build's project, or a member of any project with a `build_job` for the same derivation (`BuildAccessContext::load`, `gradient-web/src/endpoints/builds/mod.rs`) |
 | `GET /builds/{build}/download/{filename}` | The same rule, or a download token for the derivation |
-| Narinfo, NAR, `ls` and `serve` on `/cache/{cache}` | A signed `cached_path_signature` row for that cache and a `file_hash` on the path (`cache_serves_path`, `gradient-web/src/endpoints/caches/helpers.rs`) |
-| `GET /cache/{cache}/log/{drv}` | Own log only when the cache can hand out an output of the derivation by the same rule (`cache_served_derivation`). Otherwise the upstream caches (`caches/build_log.rs`) |
+| Narinfo, NAR, `ls` and `serve` on `/cache/{cache}` | A signed `cached_path_signature` row for that cache and a `file_hash` on the path (`signed_in_cache`, `gradient-db/src/cached_paths.rs`) |
+| `GET /cache/{cache}/log/{drv}` | Own log only when the cache can hand out an output of the derivation by the same rule (`derivation_signed_in_cache`). Otherwise the upstream caches (`caches/build_log.rs`) |
 
 ## Related
 

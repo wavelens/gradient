@@ -20,7 +20,6 @@ use gradient_db::graph::{
 };
 use gradient_db::lookup::by_ids;
 use gradient_types::*;
-use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -60,29 +59,21 @@ pub async fn get_task_metrics(
     )
     .await?;
 
-    let task = ETask::find()
-        .filter(CTask::Project.eq(project.id))
-        .filter(CTask::Name.eq(task))
-        .one(&state.web_db)
+    let task = gradient_db::tasks::by_name(&state.web_db, project.id, &task)
         .await?
         .or_not_found(Resource::Task)?;
 
-    let evaluations = EEvaluation::find()
-        .filter(CEvaluation::Task.eq(task.id))
-        .filter(CEvaluation::Status.eq(gradient_entity::evaluation::EvaluationStatus::Completed))
-        .order_by_desc(CEvaluation::CreatedAt)
-        .limit(task.keep_evaluations as u64)
-        .all(&state.web_db)
-        .await?;
+    let evaluations = gradient_db::evaluations::latest_completed_of_task(
+        &state.web_db,
+        task.id,
+        task.keep_evaluations as u64,
+    )
+    .await?;
 
     let eval_ids: Vec<EvaluationId> = evaluations.iter().map(|e| e.id).collect();
 
     let mut shared_builds_by_eval: HashMap<EvaluationId, Vec<DerivationBuildId>> = HashMap::new();
-    for job in EBuildJob::find()
-        .filter(CBuildJob::Evaluation.is_in(eval_ids.clone()))
-        .all(&state.web_db)
-        .await?
-    {
+    for job in gradient_db::build_jobs::of_evaluations(&state.web_db, &eval_ids).await? {
         shared_builds_by_eval
             .entry(job.evaluation)
             .or_default()
@@ -96,11 +87,7 @@ pub async fn get_task_metrics(
             .await?;
 
     let mut entry_points_by_eval: HashMap<EvaluationId, Vec<DerivationId>> = HashMap::new();
-    for ep in EEntryPoint::find()
-        .filter(CEntryPoint::Evaluation.is_in(eval_ids))
-        .all(&state.web_db)
-        .await?
-    {
+    for ep in gradient_db::entry_points::of_evaluations(&state.web_db, &eval_ids).await? {
         entry_points_by_eval
             .entry(ep.evaluation)
             .or_default()
@@ -228,43 +215,37 @@ pub async fn get_entry_point_metrics(
     )
     .await?;
 
-    let task = ETask::find()
-        .filter(CTask::Project.eq(project.id))
-        .filter(CTask::Name.eq(task))
-        .one(&state.web_db)
+    let task = gradient_db::tasks::by_name(&state.web_db, project.id, &task)
         .await?
         .or_not_found(Resource::Task)?;
 
-    let entry_points = EEntryPoint::find()
-        .filter(CEntryPoint::Task.eq(task.id))
-        .filter(CEntryPoint::Eval.eq(&params.eval))
-        .order_by_desc(CEntryPoint::CreatedAt)
-        .limit(task.keep_evaluations as u64)
-        .all(&state.web_db)
-        .await?;
+    let entry_points = gradient_db::entry_points::latest_of_attribute(
+        &state.web_db,
+        task.id,
+        &params.eval,
+        task.keep_evaluations as u64,
+    )
+    .await?;
 
     let eval_ids: Vec<EvaluationId> = entry_points.iter().map(|ep| ep.evaluation).collect();
     let drv_ids: Vec<DerivationId> = entry_points.iter().map(|ep| ep.derivation).collect();
 
     let evaluations: HashMap<EvaluationId, MEvaluation> =
-        by_ids::<EEvaluation, _>(&state.web_db, &eval_ids.clone()).await?;
+        by_ids::<EEvaluation, _>(&state.web_db, &eval_ids).await?;
 
-    let shared_builds: HashMap<DerivationId, MDerivationBuild> = EDerivationBuild::find()
-        .filter(CDerivationBuild::Derivation.is_in(drv_ids.clone()))
-        .all(&state.web_db)
-        .await?
-        .into_iter()
-        .map(|a| (a.derivation, a))
-        .collect();
+    let shared_builds: HashMap<DerivationId, MDerivationBuild> =
+        gradient_db::derivation_builds::of_derivations(&state.web_db, &drv_ids)
+            .await?
+            .into_iter()
+            .map(|a| (a.derivation, a))
+            .collect();
 
-    let build_jobs: HashMap<(EvaluationId, DerivationId), MBuildJob> = EBuildJob::find()
-        .filter(CBuildJob::Evaluation.is_in(eval_ids))
-        .filter(CBuildJob::Derivation.is_in(drv_ids))
-        .all(&state.web_db)
-        .await?
-        .into_iter()
-        .map(|j| ((j.evaluation, j.derivation), j))
-        .collect();
+    let build_jobs: HashMap<(EvaluationId, DerivationId), MBuildJob> =
+        gradient_db::build_jobs::of_derivations_in_evaluations(&state.web_db, &eval_ids, &drv_ids)
+            .await?
+            .into_iter()
+            .map(|j| ((j.evaluation, j.derivation), j))
+            .collect();
 
     let shared_build_ids: Vec<DerivationBuildId> = shared_builds.values().map(|a| a.id).collect();
     let attempts =

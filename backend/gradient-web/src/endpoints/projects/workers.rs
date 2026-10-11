@@ -13,8 +13,7 @@ use chrono::NaiveDateTime;
 use gradient_core::ServerState;
 use gradient_db::WebDb;
 use gradient_entity::worker_registration::{
-    self, ActiveModel as AWorkerRegistration, Entity as EWorkerRegistration,
-    Model as MWorkerRegistration,
+    ActiveModel as AWorkerRegistration, Entity as EWorkerRegistration, Model as MWorkerRegistration,
 };
 use gradient_pool::WorkerInfo;
 use gradient_scheduler::Scheduler;
@@ -24,10 +23,6 @@ use gradient_types::ids::*;
 use gradient_types::permissions::Permission;
 use gradient_wire::types::GradientCapabilities;
 use sea_orm::ActiveValue::Set;
-use sea_orm::{
-    ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, PaginatorTrait, QueryFilter,
-    QueryOrder, QuerySelect,
-};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use uuid::Uuid;
@@ -195,25 +190,26 @@ pub async fn post_project_worker(
         &token,
     )?;
 
-    let row = MWorkerRegistration {
-        id: WorkerRegistrationId::now_v7(),
-        peer_id: project.id,
-        worker_id: worker_id_str.clone(),
-        token_hash,
-        token_encrypted,
-        url: body.url,
-        display_name: body.display_name.trim().to_string(),
-        active: true,
-        enable_fetch: body.enable_fetch,
-        enable_eval: body.enable_eval,
-        enable_build: body.enable_build,
-        created_by: Some(user.id),
-        created_at: gradient_types::now(),
-        ..Default::default()
-    }
-    .into_active_model();
-
-    row.insert(&state.web_db).await?;
+    gradient_db::rows::insert::<EWorkerRegistration, _>(
+        &state.web_db,
+        MWorkerRegistration {
+            id: WorkerRegistrationId::now_v7(),
+            peer_id: project.id,
+            worker_id: worker_id_str.clone(),
+            token_hash,
+            token_encrypted,
+            url: body.url,
+            display_name: body.display_name.trim().to_string(),
+            active: true,
+            enable_fetch: body.enable_fetch,
+            enable_eval: body.enable_eval,
+            enable_build: body.enable_build,
+            created_by: Some(user.id),
+            created_at: gradient_types::now(),
+            ..Default::default()
+        },
+    )
+    .await?;
 
     scheduler.request_reauth(&worker_id_str).await;
 
@@ -234,12 +230,8 @@ pub async fn post_project_worker(
 async fn ensure_dialable_worker_id(db: &WebDb, worker_id: &str) -> WebResult<()> {
     let team_worker = gradient_db::teams::workers::is_team_worker(db, worker_id).await?;
 
-    let gradient_ci = EWorkerRegistration::find()
-        .filter(worker_registration::Column::WorkerId.eq(worker_id))
-        .filter(worker_registration::Column::GradientCi.eq(true))
-        .one(db)
-        .await?
-        .is_some();
+    let gradient_ci =
+        gradient_db::worker_registrations::is_gradient_ci_worker(db, worker_id).await?;
     if team_worker || gradient_ci {
         return Err(ProjectRefusal::WorkerIdBelongsToOtherConnection.into());
     }
@@ -283,10 +275,8 @@ pub async fn get_project_workers(
 
     let failures = manages_workers.then_some(&*scheduler.connection_failures);
 
-    let registrations = EWorkerRegistration::find()
-        .filter(worker_registration::Column::PeerId.eq(project.id))
-        .all(&db.web_db)
-        .await?;
+    let registrations =
+        gradient_db::worker_registrations::of_project(&db.web_db, project.id).await?;
 
     let live_workers = live_workers(scheduler.workers_info().await);
 
@@ -382,12 +372,13 @@ pub async fn get_project_worker_metrics(
 ) -> WebResult<Json<BaseResponse<WorkerMetricsResponse>>> {
     let worker_id: String = params.param("worker_id")?;
 
-    let registration_name = EWorkerRegistration::find()
-        .filter(worker_registration::Column::PeerId.eq(project.id))
-        .filter(worker_registration::Column::WorkerId.eq(&worker_id))
-        .one(&state.web_db)
-        .await?
-        .map(|r| r.display_name);
+    let registration_name = gradient_db::worker_registrations::by_project_and_worker_id(
+        &state.web_db,
+        project.id,
+        &worker_id,
+    )
+    .await?
+    .map(|r| r.display_name);
     let team_name = match registration_name {
         Some(_) => None,
         None => gradient_db::teams::workers::team_workers_for_project(&state.web_db, project.id)
@@ -400,45 +391,40 @@ pub async fn get_project_worker_metrics(
         .or(team_name)
         .ok_or_else(|| WebError::not_found(Resource::Worker))?;
 
-    let samples = gradient_entity::worker_sample::Entity::find()
-        .filter(gradient_entity::worker_sample::Column::WorkerId.eq(&worker_id))
-        .order_by_asc(gradient_entity::worker_sample::Column::At)
-        .limit(2000)
-        .all(&state.web_db)
-        .await?
-        .into_iter()
-        .map(|s| WorkerSamplePoint {
-            at: s.at,
-            cpu_usage_pct: s.cpu_usage_pct,
-            ram_free_mb: s.ram_free_mb,
-            ram_total_mb: s.ram_total_mb,
-            disk_speed_mbps: s.disk_speed_mbps,
-            upload_speed_mbps: s.upload_speed_mbps,
-            download_speed_mbps: s.download_speed_mbps,
-            assigned_jobs: s.assigned_jobs,
-            max_concurrent_builds: s.max_concurrent_builds,
-            state: i16::from(s.state),
-        })
-        .collect();
+    let samples =
+        gradient_db::worker_registrations::oldest_samples(&state.web_db, &worker_id, 2000)
+            .await?
+            .into_iter()
+            .map(|s| WorkerSamplePoint {
+                at: s.at,
+                cpu_usage_pct: s.cpu_usage_pct,
+                ram_free_mb: s.ram_free_mb,
+                ram_total_mb: s.ram_total_mb,
+                disk_speed_mbps: s.disk_speed_mbps,
+                upload_speed_mbps: s.upload_speed_mbps,
+                download_speed_mbps: s.download_speed_mbps,
+                assigned_jobs: s.assigned_jobs,
+                max_concurrent_builds: s.max_concurrent_builds,
+                state: i16::from(s.state),
+            })
+            .collect();
 
-    let connections = gradient_entity::worker_connection::Entity::find()
-        .filter(gradient_entity::worker_connection::Column::WorkerId.eq(&worker_id))
-        .order_by_desc(gradient_entity::worker_connection::Column::ConnectedAt)
-        .limit(100)
-        .all(&state.web_db)
-        .await?
-        .into_iter()
-        .map(|c| WorkerConnectionEntry {
-            connected_at: c.connected_at,
-            disconnected_at: c.disconnected_at,
-        })
-        .collect();
+    let connections =
+        gradient_db::worker_registrations::latest_connections(&state.web_db, &worker_id, 100)
+            .await?
+            .into_iter()
+            .map(|c| WorkerConnectionEntry {
+                connected_at: c.connected_at,
+                disconnected_at: c.disconnected_at,
+            })
+            .collect();
 
-    let jobs_dispatched = gradient_entity::dispatched_job::Entity::find()
-        .filter(gradient_entity::dispatched_job::Column::WorkerId.eq(&worker_id))
-        .filter(gradient_entity::dispatched_job::Column::Project.eq(project.id))
-        .count(&state.web_db)
-        .await?;
+    let jobs_dispatched = gradient_db::worker_registrations::dispatched_job_count(
+        &state.web_db,
+        &worker_id,
+        project.id,
+    )
+    .await?;
 
     Ok(ok_json(WorkerMetricsResponse {
         display_name,
@@ -508,12 +494,11 @@ pub async fn patch_project_worker(
         return Err(ProjectRefusal::TeamWorkerManagedOnTeamPage.into());
     }
 
-    let reg = EWorkerRegistration::find()
-        .filter(worker_registration::Column::PeerId.eq(project.id))
-        .filter(worker_registration::Column::WorkerId.eq(&worker_id))
-        .one(&db.web_db)
-        .await?
-        .or_not_found(Resource::WorkerRegistration)?;
+    let reg = gradient_db::worker_registrations::by_project_and_worker_id(
+        &db.web_db, project.id, &worker_id,
+    )
+    .await?
+    .or_not_found(Resource::WorkerRegistration)?;
 
     if reg.managed && patch_edits_managed_fields(&body) {
         return Err(SharedRefusal::WorkerManagedByState.into());
@@ -538,7 +523,7 @@ pub async fn patch_project_worker(
     if let Some(v) = body.enable_build {
         active_model.enable_build = Set(v);
     }
-    active_model.update(&db.web_db).await?;
+    gradient_db::rows::update::<EWorkerRegistration, _>(&db.web_db, active_model).await?;
 
     if let Some(false) = body.active {
         let project_set = std::collections::HashSet::from([project.id]);
@@ -575,13 +560,12 @@ pub async fn delete_project_worker(
 ) -> WebResult<Json<BaseResponse<String>>> {
     let worker_id: String = params.param("worker_id")?;
 
-    let result = EWorkerRegistration::delete_many()
-        .filter(worker_registration::Column::PeerId.eq(project.id))
-        .filter(worker_registration::Column::WorkerId.eq(&worker_id))
-        .exec(&db.web_db)
-        .await?;
+    let deleted = gradient_db::worker_registrations::delete_by_project_and_worker_id(
+        &db.web_db, project.id, &worker_id,
+    )
+    .await?;
 
-    if result.rows_affected == 0 {
+    if deleted == 0 {
         if gradient_db::teams::workers::is_team_worker(&db.web_db, &worker_id).await? {
             return Err(ProjectRefusal::TeamWorkerManagedOnTeamPage.into());
         }

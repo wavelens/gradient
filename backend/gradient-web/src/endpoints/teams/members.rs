@@ -22,10 +22,6 @@ use gradient_types::events::EventOwner;
 use gradient_types::events::audit::Action;
 use gradient_types::*;
 use sea_orm::ActiveValue::Set;
-use sea_orm::{
-    ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, JoinType, PaginatorTrait,
-    QueryFilter, QuerySelect, RelationTrait,
-};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -55,14 +51,6 @@ pub(crate) fn role_label(role: TeamRole) -> &'static str {
     }
 }
 
-async fn find_membership(db: &WebDb, team: TeamId, user: UserId) -> WebResult<Option<MTeamUser>> {
-    Ok(ETeamUser::find()
-        .filter(CTeamUser::Team.eq(team))
-        .filter(CTeamUser::User.eq(user))
-        .one(db)
-        .await?)
-}
-
 fn ensure_not_state_managed(membership: &MTeamUser) -> WebResult<()> {
     if membership.source == TeamMemberSource::State {
         return Err(TeamRefusal::MemberManagedByState.into());
@@ -75,11 +63,7 @@ async fn ensure_not_last_admin(db: &WebDb, team: TeamId, membership: &MTeamUser)
     if membership.role != TeamRole::Admin {
         return Ok(());
     }
-    let admins = ETeamUser::find()
-        .filter(CTeamUser::Team.eq(team))
-        .filter(CTeamUser::Role.eq(TeamRole::Admin))
-        .count(db)
-        .await?;
+    let admins = gradient_db::teams::members::admin_count(db, team).await?;
     if admins <= 1 {
         return Err(SharedRefusal::LastAdmin(Resource::Team).into());
     }
@@ -89,15 +73,7 @@ async fn ensure_not_last_admin(db: &WebDb, team: TeamId, membership: &MTeamUser)
 pub async fn get_team_members(
     TeamScope { team, db, .. }: TeamScope<Member>,
 ) -> WebResult<Json<BaseResponse<Vec<TeamMemberItem>>>> {
-    let rows = ETeamUser::find()
-        .join(
-            JoinType::InnerJoin,
-            gradient_entity::team_user::Relation::User.def(),
-        )
-        .select_also(gradient_entity::user::Entity)
-        .filter(CTeamUser::Team.eq(team.id))
-        .all(&db.web_db)
-        .await?;
+    let rows = gradient_db::teams::members::members_of(&db.web_db, team.id).await?;
 
     Ok(ok_json(
         rows.into_iter()
@@ -121,16 +97,13 @@ pub async fn post_team_members(
 ) -> WebResult<Json<BaseResponse<String>>> {
     let target = find_user_by_username(&state.web_db, &body.user).await?;
 
-    if find_membership(&state.web_db, team.id, target.id)
+    if gradient_db::teams::members::membership(&state.web_db, team.id, target.id)
         .await?
         .is_some()
     {
         return Err(WebError::already_exists(Resource::TeamMembership));
     }
-    if ETeamInvitation::find()
-        .filter(CTeamInvitation::Team.eq(team.id))
-        .filter(CTeamInvitation::User.eq(target.id))
-        .one(&state.web_db)
+    if gradient_db::teams::invitations::by_team_and_user(&state.web_db, team.id, target.id)
         .await?
         .is_some()
     {
@@ -144,15 +117,16 @@ pub async fn post_team_members(
     });
 
     if user.superuser {
-        MTeamUser {
-            id: TeamUserId::now_v7(),
-            team: team.id,
-            user: target.id,
-            role: body.role,
-            source: TeamMemberSource::Api,
-        }
-        .into_active_model()
-        .insert(&state.web_db)
+        gradient_db::teams::members::add_member(
+            &state.web_db,
+            MTeamUser {
+                id: TeamUserId::now_v7(),
+                team: team.id,
+                user: target.id,
+                role: body.role,
+                source: TeamMemberSource::Api,
+            },
+        )
         .await?;
         audit
             .write(Action::TeamMemberAdd, EventOwner::default(), payload)
@@ -162,18 +136,19 @@ pub async fn post_team_members(
 
     let now = gradient_types::now();
     let token = generate_token();
-    MTeamInvitation {
-        id: TeamInvitationId::now_v7(),
-        team: team.id,
-        user: target.id,
-        role: body.role,
-        invited_by: user.id,
-        token: token.clone(),
-        created_at: now,
-        expires_at: invitation_expiry(now),
-    }
-    .into_active_model()
-    .insert(&state.web_db)
+    gradient_db::teams::invitations::create(
+        &state.web_db,
+        MTeamInvitation {
+            id: TeamInvitationId::now_v7(),
+            team: team.id,
+            user: target.id,
+            role: body.role,
+            invited_by: user.id,
+            token: token.clone(),
+            created_at: now,
+            expires_at: invitation_expiry(now),
+        },
+    )
     .await?;
 
     if state.email.is_enabled()
@@ -210,7 +185,7 @@ pub async fn patch_team_members(
     Json(body): Json<TeamMemberRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let target = find_user_by_username(&db.web_db, &body.user).await?;
-    let membership = find_membership(&db.web_db, team.id, target.id)
+    let membership = gradient_db::teams::members::membership(&db.web_db, team.id, target.id)
         .await?
         .ok_or(SharedRefusal::NotAMember(Resource::Team))?;
     ensure_not_state_managed(&membership)?;
@@ -224,7 +199,7 @@ pub async fn patch_team_members(
     if body.role == TeamRole::Admin {
         active.source = Set(TeamMemberSource::Api);
     }
-    active.update(&db.web_db).await?;
+    gradient_db::teams::members::update_member(&db.web_db, active).await?;
 
     audit.write(Action::TeamMemberRoleChange, EventOwner::default(), serde_json::json!({ "team_id": team.id.to_string(), "target_user_id": target.id.to_string(), "role": role_label(body.role), }))
     .await;
@@ -238,13 +213,13 @@ pub async fn delete_team_members(
     Json(body): Json<RemoveTeamMemberRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let target = find_user_by_username(&db.web_db, &body.user).await?;
-    let membership = find_membership(&db.web_db, team.id, target.id)
+    let membership = gradient_db::teams::members::membership(&db.web_db, team.id, target.id)
         .await?
         .ok_or(SharedRefusal::NotAMember(Resource::Team))?;
     ensure_not_state_managed(&membership)?;
 
     ensure_not_last_admin(&db.web_db, team.id, &membership).await?;
-    membership.into_active_model().delete(&db.web_db).await?;
+    gradient_db::teams::members::remove_member(&db.web_db, membership).await?;
 
     audit.write(Action::TeamMemberRemove, EventOwner::default(), serde_json::json!({ "team_id": team.id.to_string(), "target_user_id": target.id.to_string(), }))
     .await;

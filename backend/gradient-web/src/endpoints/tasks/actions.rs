@@ -26,10 +26,6 @@ use gradient_types::input::load_secret_bytes;
 use gradient_types::*;
 use gradient_util::http_validation::{WebhookUrlError, validate_webhook_url};
 use sea_orm::ActiveValue::Set;
-use sea_orm::{
-    ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, Order, QueryFilter, QueryOrder,
-    QuerySelect,
-};
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use std::sync::Arc;
@@ -179,10 +175,7 @@ fn validate_destination(cfg: &ActionConfig) -> WebResult<()> {
 pub async fn list_actions(
     TaskScope { task: proj, db, .. }: TaskScope<Member>,
 ) -> WebResult<Json<BaseResponse<Vec<ActionResponse>>>> {
-    let rows = ETaskAction::find()
-        .filter(CTaskAction::Task.eq(proj.id))
-        .all(&db.web_db)
-        .await?;
+    let rows = gradient_db::actions::of_task(&db.web_db, proj.id).await?;
 
     Ok(ok_json(rows.into_iter().map(Into::into).collect()))
 }
@@ -237,11 +230,9 @@ pub async fn create_action(
         _ => None,
     };
     if let Some(integration_id) = integration_id {
-        let integration = EIntegration::find()
-            .filter(CIntegration::Id.eq(integration_id))
-            .filter(CIntegration::Project.eq(project.id))
-            .one(&state.web_db)
-            .await?;
+        let integration =
+            gradient_db::integrations::by_id_in_project(&state.web_db, project.id, integration_id)
+                .await?;
         match integration {
             Some(row) if row.kind == IntegrationKind::Outbound => {}
             Some(_) => {
@@ -253,11 +244,7 @@ pub async fn create_action(
         }
     }
 
-    let existing = ETaskAction::find()
-        .filter(CTaskAction::Task.eq(proj.id))
-        .filter(CTaskAction::Name.eq(body.name.clone()))
-        .one(&state.web_db)
-        .await?;
+    let existing = gradient_db::actions::by_name(&state.web_db, proj.id, &body.name).await?;
     if existing.is_some() {
         return Err(TaskRefusal::ActionNameTaken.into());
     }
@@ -274,7 +261,7 @@ pub async fn create_action(
     }
 
     let now = Utc::now().naive_utc();
-    let am = MTaskAction {
+    let action = MTaskAction {
         id: TaskActionId::now_v7(),
         task: proj.id,
         name: body.name,
@@ -286,11 +273,9 @@ pub async fn create_action(
         created_at: now,
         updated_at: now,
         ..Default::default()
-    }
-    .into_active_model();
+    };
 
-    let m = am
-        .insert(&state.web_db)
+    let m = gradient_db::actions::insert(&state.web_db, action)
         .await
         .map_err(|e| WebError::from_db_err(e, Resource::Action))?;
 
@@ -320,10 +305,7 @@ pub async fn read_action(
 ) -> WebResult<Json<BaseResponse<ActionResponse>>> {
     let id: TaskActionId = params.param("id")?;
 
-    let row = ETaskAction::find()
-        .filter(CTaskAction::Id.eq(id))
-        .filter(CTaskAction::Task.eq(proj.id))
-        .one(&db.web_db)
+    let row = gradient_db::actions::by_id_in_task(&db.web_db, proj.id, id)
         .await?
         .or_not_found(Resource::Action)?;
 
@@ -343,10 +325,7 @@ pub async fn update_action(
 ) -> WebResult<Json<BaseResponse<ActionResponse>>> {
     let id: TaskActionId = params.param("id")?;
 
-    let row = ETaskAction::find()
-        .filter(CTaskAction::Id.eq(id))
-        .filter(CTaskAction::Task.eq(proj.id))
-        .one(&state.web_db)
+    let row = gradient_db::actions::by_id_in_task(&state.web_db, proj.id, id)
         .await?
         .or_not_found(Resource::Action)?;
 
@@ -365,11 +344,12 @@ pub async fn update_action(
             }
             ActionConfig::GitHostStatusReport { integration_id }
             | ActionConfig::OpenPr { integration_id, .. } => {
-                let integration = EIntegration::find()
-                    .filter(CIntegration::Id.eq(*integration_id))
-                    .filter(CIntegration::Project.eq(project.id))
-                    .one(&state.web_db)
-                    .await?;
+                let integration = gradient_db::integrations::by_id_in_project(
+                    &state.web_db,
+                    project.id,
+                    *integration_id,
+                )
+                .await?;
                 match integration {
                     Some(r) if r.kind == IntegrationKind::Outbound => {}
                     Some(_) => {
@@ -423,8 +403,7 @@ pub async fn update_action(
     }
     active.updated_at = Set(Utc::now().naive_utc());
 
-    let updated = active
-        .update(&state.web_db)
+    let updated = gradient_db::actions::update(&state.web_db, active)
         .await
         .map_err(|e| WebError::from_db_err(e, Resource::Action))?;
 
@@ -460,15 +439,11 @@ pub async fn delete_action(
 ) -> WebResult<Json<BaseResponse<DeletedResponse>>> {
     let id: TaskActionId = params.param("id")?;
 
-    let row = ETaskAction::find()
-        .filter(CTaskAction::Id.eq(id))
-        .filter(CTaskAction::Task.eq(proj.id))
-        .one(&db.web_db)
+    let row = gradient_db::actions::by_id_in_task(&db.web_db, proj.id, id)
         .await?
         .or_not_found(Resource::Action)?;
 
-    let active: ATaskAction = row.clone().into();
-    active.delete(&db.web_db).await?;
+    gradient_db::actions::delete(&db.web_db, row.clone()).await?;
 
     record_action_event(&audit, Action::TaskActionDelete, project.id, &row).await;
 
@@ -486,10 +461,7 @@ pub async fn test_action(
     let project: String = params.param("project")?;
     let task: String = params.param("task")?;
 
-    let action = ETaskAction::find()
-        .filter(CTaskAction::Id.eq(id))
-        .filter(CTaskAction::Task.eq(proj.id))
-        .one(&state.web_db)
+    let action = gradient_db::actions::by_id_in_task(&state.web_db, proj.id, id)
         .await?
         .or_not_found(Resource::Action)?;
 
@@ -554,10 +526,7 @@ pub async fn regenerate_token(
     use rand::RngExt as _;
     let id: TaskActionId = params.param("id")?;
 
-    let existing = ETaskAction::find()
-        .filter(CTaskAction::Id.eq(id))
-        .filter(CTaskAction::Task.eq(proj.id))
-        .one(&state.web_db)
+    let existing = gradient_db::actions::by_id_in_task(&state.web_db, proj.id, id)
         .await?
         .or_not_found(Resource::Action)?;
 
@@ -580,7 +549,7 @@ pub async fn regenerate_token(
     let mut am: ATaskAction = existing.into();
     am.config = Set(serde_json::to_value(&cfg).context("serialize the action config")?);
     am.updated_at = Set(Utc::now().naive_utc());
-    am.update(&state.web_db)
+    gradient_db::actions::update(&state.web_db, am)
         .await
         .map_err(|e| WebError::from_db_err(e, Resource::Action))?;
 
@@ -637,23 +606,14 @@ pub async fn list_deliveries(
 ) -> WebResult<Json<BaseResponse<Vec<DeliveryListItem>>>> {
     let id: TaskActionId = params.param("id")?;
 
-    ETaskAction::find()
-        .filter(CTaskAction::Id.eq(id))
-        .filter(CTaskAction::Task.eq(proj.id))
-        .one(&db.web_db)
+    gradient_db::actions::by_id_in_task(&db.web_db, proj.id, id)
         .await?
         .or_not_found(Resource::Action)?;
 
     let limit = q.limit.unwrap_or(50).min(200);
     let offset = q.offset.unwrap_or(0);
 
-    let rows = ETaskActionDelivery::find()
-        .filter(CTaskActionDelivery::ActionId.eq(id))
-        .order_by(CTaskActionDelivery::DeliveredAt, Order::Desc)
-        .limit(limit)
-        .offset(offset)
-        .all(&db.web_db)
-        .await?;
+    let rows = gradient_db::actions::deliveries_of(&db.web_db, id, limit, offset).await?;
 
     Ok(ok_json(
         rows.into_iter().map(DeliveryListItem::from).collect(),
@@ -671,16 +631,11 @@ pub async fn get_delivery(
     let action_id: TaskActionId = params.param("id")?;
     let delivery_id: TaskActionDeliveryId = params.param("delivery_id")?;
 
-    ETaskAction::find()
-        .filter(CTaskAction::Id.eq(action_id))
-        .filter(CTaskAction::Task.eq(proj.id))
-        .one(&db.web_db)
+    gradient_db::actions::by_id_in_task(&db.web_db, proj.id, action_id)
         .await?
         .or_not_found(Resource::Action)?;
 
-    let r = ETaskActionDelivery::find_by_id(delivery_id)
-        .filter(CTaskActionDelivery::ActionId.eq(action_id))
-        .one(&db.web_db)
+    let r = gradient_db::actions::delivery_of(&db.web_db, action_id, delivery_id)
         .await?
         .or_not_found(Resource::Delivery)?;
 

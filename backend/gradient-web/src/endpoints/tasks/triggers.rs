@@ -24,9 +24,7 @@ use gradient_sources::resolve_head;
 use gradient_types::triggers::{TriggerConfig, TriggerType};
 use gradient_types::*;
 use sea_orm::ActiveValue::Set;
-use sea_orm::{
-    ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, IntoActiveModel, QueryFilter,
-};
+use sea_orm::ConnectionTrait;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -139,10 +137,7 @@ pub struct DeletedResponse {
 pub async fn list(
     TaskScope { task: proj, db, .. }: TaskScope<Member>,
 ) -> WebResult<Json<BaseResponse<Vec<TriggerOut>>>> {
-    let rows = ETaskTrigger::find()
-        .filter(CTaskTrigger::Task.eq(proj.id))
-        .all(&db.web_db)
-        .await?;
+    let rows = gradient_db::triggers::of_task(&db.web_db, proj.id).await?;
 
     let integrations = load_integrations_for_triggers(&db.web_db, &rows).await?;
 
@@ -165,7 +160,7 @@ pub async fn create(
     let trigger_type = body.config.trigger_type();
     let config_json = body.config.to_db_json();
 
-    let row = MTaskTrigger {
+    let trigger = MTaskTrigger {
         id: TaskTriggerId::now_v7(),
         task: proj.id,
         trigger_type,
@@ -174,10 +169,8 @@ pub async fn create(
         created_at: now,
         updated_at: now,
         ..Default::default()
-    }
-    .into_active_model()
-    .insert(&db.web_db)
-    .await?;
+    };
+    let row = gradient_db::triggers::insert(&db.web_db, trigger).await?;
 
     let integrations =
         load_integrations_for_triggers(&db.web_db, std::slice::from_ref(&row)).await?;
@@ -194,10 +187,7 @@ pub async fn read(
 ) -> WebResult<Json<BaseResponse<TriggerOut>>> {
     let id: TaskTriggerId = params.param("id")?;
 
-    let row = ETaskTrigger::find()
-        .filter(CTaskTrigger::Id.eq(id))
-        .filter(CTaskTrigger::Task.eq(proj.id))
-        .one(&db.web_db)
+    let row = gradient_db::triggers::by_id_in_task(&db.web_db, proj.id, id)
         .await?
         .or_not_found(Resource::Trigger)?;
 
@@ -217,10 +207,7 @@ pub async fn update(
 ) -> WebResult<Json<BaseResponse<TriggerOut>>> {
     let id: TaskTriggerId = params.param("id")?;
 
-    let row = ETaskTrigger::find()
-        .filter(CTaskTrigger::Id.eq(id))
-        .filter(CTaskTrigger::Task.eq(proj.id))
-        .one(&db.web_db)
+    let row = gradient_db::triggers::by_id_in_task(&db.web_db, proj.id, id)
         .await?
         .or_not_found(Resource::Trigger)?;
 
@@ -240,7 +227,7 @@ pub async fn update(
     }
     active.updated_at = Set(Utc::now().naive_utc());
 
-    let updated = active.update(&db.web_db).await?;
+    let updated = gradient_db::triggers::update(&db.web_db, active).await?;
 
     let integrations =
         load_integrations_for_triggers(&db.web_db, std::slice::from_ref(&updated)).await?;
@@ -257,15 +244,11 @@ pub async fn delete_one(
 ) -> WebResult<Json<BaseResponse<DeletedResponse>>> {
     let id: TaskTriggerId = params.param("id")?;
 
-    let row = ETaskTrigger::find()
-        .filter(CTaskTrigger::Id.eq(id))
-        .filter(CTaskTrigger::Task.eq(proj.id))
-        .one(&db.web_db)
+    let row = gradient_db::triggers::by_id_in_task(&db.web_db, proj.id, id)
         .await?
         .or_not_found(Resource::Trigger)?;
 
-    let active: ATaskTrigger = row.into();
-    active.delete(&db.web_db).await?;
+    gradient_db::triggers::delete(&db.web_db, row).await?;
 
     Ok(ok_json(DeletedResponse { deleted: true }))
 }
@@ -282,10 +265,7 @@ pub async fn fire_now(
 ) -> WebResult<Json<BaseResponse<serde_json::Value>>> {
     let id: TaskTriggerId = params.param("id")?;
 
-    let row = ETaskTrigger::find()
-        .filter(CTaskTrigger::Id.eq(id))
-        .filter(CTaskTrigger::Task.eq(proj.id))
-        .one(&state.web_db)
+    let row = gradient_db::triggers::by_id_in_task(&state.web_db, proj.id, id)
         .await?
         .or_not_found(Resource::Trigger)?;
 
@@ -341,7 +321,7 @@ pub async fn fire_now(
         let mut active: gradient_entity::task_trigger::ActiveModel = row.clone().into();
         active.last_fired_at = Set(Some(now));
         active.updated_at = Set(now);
-        if let Err(e) = active.update(&state.web_db).await {
+        if let Err(e) = gradient_db::triggers::update(&state.web_db, active).await {
             tracing::warn!(error = %e, trigger_id = %row.id, "failed to stamp trigger last_fired_at");
         }
     }

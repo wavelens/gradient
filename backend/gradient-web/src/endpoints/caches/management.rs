@@ -26,10 +26,7 @@ use gradient_types::events::EventOwner;
 use gradient_types::events::audit::Action;
 use gradient_types::*;
 use sea_orm::ActiveValue::Set;
-use sea_orm::{
-    ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter, QueryOrder,
-    TransactionTrait,
-};
+use sea_orm::TransactionTrait;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -94,9 +91,7 @@ pub async fn get_cache_name_available(
     let Ok(name) = CacheName::try_from(name) else {
         return Ok(ok_json(false));
     };
-    let exists = ECache::find()
-        .filter(CCache::Name.eq(name.as_str()))
-        .one(&state.web_db)
+    let exists = gradient_db::caches::by_name(&state.web_db, name.as_str())
         .await?
         .is_some();
     Ok(ok_json(!exists))
@@ -109,10 +104,7 @@ pub async fn get(
 ) -> WebResult<Json<BaseResponse<Paginated<Vec<MCache>>>>> {
     let condition = crate::access::visible_cache_condition(&state.web_db, user.id).await?;
     let listing = crate::helpers::paginate(
-        ECache::find()
-            .filter(condition)
-            .order_by_asc(CCache::Name)
-            .order_by_asc(CCache::Id),
+        gradient_db::caches::ordered_by_name(condition),
         &state.web_db,
         &params,
     )
@@ -132,10 +124,7 @@ pub async fn put(
     let max_storage_gb = body.max_storage_gb.unwrap_or(0);
     validate_max_storage_gb(max_storage_gb)?;
 
-    let existing_cache = ECache::find()
-        .filter(CCache::Name.eq(body.name.as_str()))
-        .one(&state.web_db)
-        .await?;
+    let existing_cache = gradient_db::caches::by_name(&state.web_db, body.name.as_str()).await?;
 
     if existing_cache.is_some() {
         return Err(WebError::already_exists(Resource::CacheName));
@@ -146,50 +135,53 @@ pub async fn put(
 
     let tx = state.web_db.inner().begin().await?;
 
-    let cache = MCache {
-        id: CacheId::now_v7(),
-        name: body.name.to_string(),
-        active: true,
-        display_name: body.display_name.trim().to_string(),
-        description: body.description.trim().to_string(),
-        priority: body.priority,
-        local_priority: body.local_priority,
-        public_key,
-        private_key,
-        public: body.public.unwrap_or(false),
-        created_by: user.id,
-        created_at: gradient_types::now(),
-        max_storage_gb,
-        pull_through: body.pull_through.unwrap_or(true),
-        ..Default::default()
-    }
-    .into_active_model()
-    .insert(&tx)
+    let cache = gradient_db::rows::insert::<ECache, _>(
+        &tx,
+        MCache {
+            id: CacheId::now_v7(),
+            name: body.name.to_string(),
+            active: true,
+            display_name: body.display_name.trim().to_string(),
+            description: body.description.trim().to_string(),
+            priority: body.priority,
+            local_priority: body.local_priority,
+            public_key,
+            private_key,
+            public: body.public.unwrap_or(false),
+            created_by: user.id,
+            created_at: gradient_types::now(),
+            max_storage_gb,
+            pull_through: body.pull_through.unwrap_or(true),
+            ..Default::default()
+        },
+    )
     .await
     .map_err(|e| WebError::from_db_err(e, Resource::CacheName))?;
 
-    MCacheUpstream {
-        id: CacheUpstreamId::now_v7(),
-        cache: cache.id,
-        display_name: NIXOS_CACHE_NAME.to_string(),
-        mode: CacheSubscriptionMode::ReadOnly,
-        kind: CacheUpstreamKind::Http,
-        url: Some(NIXOS_CACHE_URL.to_string()),
-        public_key: Some(NIXOS_CACHE_PUBLIC_KEY.to_string()),
-        ..Default::default()
-    }
-    .into_active_model()
-    .insert(&tx)
+    gradient_db::rows::insert::<ECacheUpstream, _>(
+        &tx,
+        MCacheUpstream {
+            id: CacheUpstreamId::now_v7(),
+            cache: cache.id,
+            display_name: NIXOS_CACHE_NAME.to_string(),
+            mode: CacheSubscriptionMode::ReadOnly,
+            kind: CacheUpstreamKind::Http,
+            url: Some(NIXOS_CACHE_URL.to_string()),
+            public_key: Some(NIXOS_CACHE_PUBLIC_KEY.to_string()),
+            ..Default::default()
+        },
+    )
     .await?;
 
-    MCacheUser {
-        id: CacheUserId::now_v7(),
-        cache: cache.id,
-        user: user.id,
-        role: BASE_CACHE_ROLE_ADMIN_ID,
-    }
-    .into_active_model()
-    .insert(&tx)
+    gradient_db::rows::insert::<ECacheUser, _>(
+        &tx,
+        MCacheUser {
+            id: CacheUserId::now_v7(),
+            cache: cache.id,
+            user: user.id,
+            role: BASE_CACHE_ROLE_ADMIN_ID,
+        },
+    )
     .await?;
 
     tx.commit().await?;
@@ -208,10 +200,7 @@ pub async fn put(
 pub async fn get_public_caches(
     state: State<Arc<ServerState>>,
 ) -> WebResult<Json<BaseResponse<Vec<MCache>>>> {
-    let caches = ECache::find()
-        .filter(CCache::Public.eq(true))
-        .all(&state.web_db)
-        .await?;
+    let caches = gradient_db::caches::all_public(&state.web_db).await?;
 
     Ok(ok_json(caches))
 }
@@ -281,9 +270,7 @@ pub async fn patch_cache(
     let mut acache: ACache = cache.into();
 
     if let Some(name) = body.name {
-        if ECache::find()
-            .filter(CCache::Name.eq(name.as_str()))
-            .one(&state.web_db)
+        if gradient_db::caches::by_name(&state.web_db, name.as_str())
             .await?
             .is_some()
         {
@@ -320,19 +307,17 @@ pub async fn patch_cache(
         acache.max_storage_gb = Set(max_storage_gb);
     }
 
-    acache
-        .update(&state.web_db)
+    gradient_db::rows::update::<ECache, _>(&state.web_db, acache)
         .await
         .map_err(|e| WebError::from_db_err(e, Resource::CacheName))?;
 
     if raised_limit {
-        let project_ids: Vec<ProjectId> = EProjectCache::find()
-            .filter(CProjectCache::Cache.eq(cache_id))
-            .all(&state.web_db)
-            .await?
-            .into_iter()
-            .map(|oc| oc.project)
-            .collect();
+        let project_ids: Vec<ProjectId> =
+            gradient_db::projects::caches::subscriptions_to(&state.web_db, cache_id)
+                .await?
+                .into_iter()
+                .map(|oc| oc.project)
+                .collect();
         for project in project_ids {
             if let Err(e) = gradient_ci::unpark_storage_full_for_project(
                 &state.web_db,
@@ -360,17 +345,15 @@ pub async fn delete_cache(
     let cache_id = cache.id;
     let cache_name = cache.name.clone();
 
-    let subscribing_projects: Vec<ProjectId> = EProjectCache::find()
-        .filter(CProjectCache::Cache.eq(cache.id))
-        .all(&db.web_db)
-        .await
-        .unwrap_or_default()
-        .into_iter()
-        .map(|oc| oc.project)
-        .collect();
+    let subscribing_projects: Vec<ProjectId> =
+        gradient_db::projects::caches::subscriptions_to(&db.web_db, cache.id)
+            .await
+            .unwrap_or_default()
+            .into_iter()
+            .map(|oc| oc.project)
+            .collect();
 
-    let acache: ACache = cache.into();
-    acache.delete(&db.web_db).await?;
+    gradient_db::rows::delete::<ECache, _>(&db.web_db, cache).await?;
 
     audit.write(Action::CacheDelete, EventOwner::cache(cache_id), serde_json::json!({ "cache_id": cache_id.to_string(), "cache_name": cache_name, "subscribing_projects": subscribing_projects.iter().map(|o| o.to_string()).collect::<Vec<_>>(), })).await;
 
@@ -380,9 +363,7 @@ pub async fn delete_cache(
 pub async fn post_cache_active(
     CacheScope { cache, db, .. }: CacheScope<Requires<can::ManageCacheSettings>>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let mut acache: ACache = cache.into();
-    acache.active = Set(true);
-    acache.update(&db.web_db).await?;
+    gradient_db::caches::set_active(&db.web_db, cache, true).await?;
 
     Ok(ok_json("Cache enabled".to_string()))
 }
@@ -390,9 +371,7 @@ pub async fn post_cache_active(
 pub async fn delete_cache_active(
     CacheScope { cache, db, .. }: CacheScope<Requires<can::ManageCacheSettings>>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let mut acache: ACache = cache.into();
-    acache.active = Set(false);
-    acache.update(&db.web_db).await?;
+    gradient_db::caches::set_active(&db.web_db, cache, false).await?;
 
     Ok(ok_json("Cache disabled".to_string()))
 }
@@ -400,9 +379,7 @@ pub async fn delete_cache_active(
 pub async fn post_cache_public(
     CacheScope { cache, db, .. }: CacheScope<RequiresUnmanaged<can::ManageCacheSettings>>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let mut acache: ACache = cache.into();
-    acache.public = Set(true);
-    acache.update(&db.web_db).await?;
+    gradient_db::caches::set_public(&db.web_db, cache, true).await?;
 
     Ok(ok_json("Cache is now public".to_string()))
 }
@@ -410,9 +387,7 @@ pub async fn post_cache_public(
 pub async fn delete_cache_public(
     CacheScope { cache, db, .. }: CacheScope<RequiresUnmanaged<can::ManageCacheSettings>>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let mut acache: ACache = cache.into();
-    acache.public = Set(false);
-    acache.update(&db.web_db).await?;
+    gradient_db::caches::set_public(&db.web_db, cache, false).await?;
 
     Ok(ok_json("Cache is now private".to_string()))
 }

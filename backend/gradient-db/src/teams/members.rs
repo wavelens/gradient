@@ -7,8 +7,8 @@
 use gradient_types::*;
 
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, ConnectionTrait, DbErr, EntityTrait, IntoActiveModel,
-    QueryFilter,
+    ActiveModelTrait, ColumnTrait, ConnectionTrait, DbErr, EntityTrait, IntoActiveModel, JoinType,
+    PaginatorTrait, QueryFilter, QuerySelect, RelationTrait,
 };
 use std::collections::HashSet;
 
@@ -60,6 +60,75 @@ pub async fn sync_group_memberships<C: ConnectionTrait>(
         .await?;
     }
 
+    Ok(())
+}
+
+pub async fn membership<C: ConnectionTrait>(
+    db: &C,
+    team: TeamId,
+    user: UserId,
+) -> Result<Option<MTeamUser>, DbErr> {
+    ETeamUser::find()
+        .filter(CTeamUser::Team.eq(team))
+        .filter(CTeamUser::User.eq(user))
+        .one(db)
+        .await
+}
+
+pub async fn admin_count<C: ConnectionTrait>(db: &C, team: TeamId) -> Result<u64, DbErr> {
+    ETeamUser::find()
+        .filter(CTeamUser::Team.eq(team))
+        .filter(CTeamUser::Role.eq(TeamRole::Admin))
+        .count(db)
+        .await
+}
+
+pub async fn members_of<C: ConnectionTrait>(
+    db: &C,
+    team: TeamId,
+) -> Result<Vec<(MTeamUser, Option<MUser>)>, DbErr> {
+    ETeamUser::find()
+        .join(
+            JoinType::InnerJoin,
+            gradient_entity::team_user::Relation::User.def(),
+        )
+        .select_also(gradient_entity::user::Entity)
+        .filter(CTeamUser::Team.eq(team))
+        .all(db)
+        .await
+}
+
+pub async fn teams_of_user<C: ConnectionTrait>(
+    db: &C,
+    user: UserId,
+) -> Result<Vec<(MTeamUser, Option<MTeam>)>, DbErr> {
+    ETeamUser::find()
+        .join(
+            JoinType::InnerJoin,
+            gradient_entity::team_user::Relation::Team.def(),
+        )
+        .select_also(gradient_entity::team::Entity)
+        .filter(CTeamUser::User.eq(user))
+        .all(db)
+        .await
+}
+
+pub async fn add_member<C: ConnectionTrait>(
+    db: &C,
+    membership: MTeamUser,
+) -> Result<MTeamUser, DbErr> {
+    membership.into_active_model().insert(db).await
+}
+
+pub async fn update_member<C: ConnectionTrait>(
+    db: &C,
+    membership: ATeamUser,
+) -> Result<MTeamUser, DbErr> {
+    membership.update(db).await
+}
+
+pub async fn remove_member<C: ConnectionTrait>(db: &C, membership: MTeamUser) -> Result<(), DbErr> {
+    membership.into_active_model().delete(db).await?;
     Ok(())
 }
 

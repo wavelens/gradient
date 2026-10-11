@@ -21,7 +21,7 @@ use gradient_entity::project_cache::CacheSubscriptionMode;
 use gradient_types::*;
 use gradient_util::http::HttpVersion;
 use sea_orm::ActiveValue::Set;
-use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter};
+use sea_orm::IntoActiveModel;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -128,9 +128,7 @@ async fn load_upstream(
     cache_id: CacheId,
     upstream_id: CacheUpstreamId,
 ) -> WebResult<MCacheUpstream> {
-    ECacheUpstream::find_by_id(upstream_id)
-        .filter(CCacheUpstream::Cache.eq(cache_id))
-        .one(db)
+    gradient_db::caches::upstream::in_cache(db, cache_id, upstream_id)
         .await?
         .or_not_found(Resource::UpstreamCache)
 }
@@ -138,9 +136,7 @@ async fn load_upstream(
 pub async fn get_upstream_caches(
     CacheScope { cache, db, .. }: CacheScope<Readable>,
 ) -> WebResult<Json<BaseResponse<Vec<UpstreamCacheItem>>>> {
-    let upstream_caches = ECacheUpstream::find()
-        .filter(CCacheUpstream::Cache.eq(cache.id))
-        .all(&db.web_db)
+    let upstream_caches = gradient_db::caches::upstream::of_cache(&db.web_db, cache.id)
         .await?
         .into_iter()
         .map(|u| UpstreamCacheItem {
@@ -198,7 +194,6 @@ pub async fn put_cache_upstream(
                 upstream_cache: Some(upstream.id),
                 ..Default::default()
             }
-            .into_active_model()
         }
         AddUpstreamRequest::Http {
             display_name,
@@ -216,7 +211,6 @@ pub async fn put_cache_upstream(
                 public_key: Some(public_key),
                 ..Default::default()
             }
-            .into_active_model()
         }
         AddUpstreamRequest::GradientProto {
             url,
@@ -244,11 +238,10 @@ pub async fn put_cache_upstream(
                 api_key: api_key_enc,
                 ..Default::default()
             }
-            .into_active_model()
         }
     };
 
-    let inserted = record.insert(&state.web_db).await?;
+    let inserted = gradient_db::rows::insert::<ECacheUpstream, _>(&state.web_db, record).await?;
     Ok(ok_json(inserted.id))
 }
 
@@ -286,7 +279,7 @@ pub async fn patch_cache_upstream(
         row.mode = Set(mode);
     }
 
-    row.update(&db.web_db).await?;
+    gradient_db::rows::update::<ECacheUpstream, _>(&db.web_db, row).await?;
 
     Ok(ok_json("Upstream updated".to_string()))
 }
@@ -345,8 +338,7 @@ pub async fn delete_cache_upstream(
 
     let record = load_upstream(&db.web_db, cache.id, upstream_id).await?;
 
-    let active: ACacheUpstream = record.into();
-    active.delete(&db.web_db).await?;
+    gradient_db::rows::delete::<ECacheUpstream, _>(&db.web_db, record).await?;
 
     Ok(ok_json("Upstream removed".to_string()))
 }

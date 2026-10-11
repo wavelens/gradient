@@ -16,9 +16,6 @@ use chrono::Utc;
 use gradient_core::ServerState;
 use gradient_types::*;
 use sea_orm::ActiveValue::Set;
-use sea_orm::{
-    ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter, QueryOrder,
-};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -108,11 +105,7 @@ fn validate_url(url: &Option<String>) -> WebResult<()> {
 pub async fn list(
     TaskScope { task: proj, db, .. }: TaskScope<Member>,
 ) -> WebResult<Json<BaseResponse<Vec<FlakeInputOverrideOut>>>> {
-    let rows = ETaskFlakeInputOverride::find()
-        .filter(CTaskFlakeInputOverride::Task.eq(proj.id))
-        .order_by_asc(CTaskFlakeInputOverride::InputName)
-        .all(&db.web_db)
-        .await?;
+    let rows = gradient_db::flake_input_overrides::of_task(&db.web_db, proj.id).await?;
 
     Ok(ok_json(rows.into_iter().map(Into::into).collect()))
 }
@@ -124,11 +117,9 @@ pub async fn create(
     validate_input_name(&body.input_name)?;
     validate_url(&body.url)?;
 
-    let existing = ETaskFlakeInputOverride::find()
-        .filter(CTaskFlakeInputOverride::Task.eq(proj.id))
-        .filter(CTaskFlakeInputOverride::InputName.eq(&body.input_name))
-        .one(&db.web_db)
-        .await?;
+    let existing =
+        gradient_db::flake_input_overrides::by_input_name(&db.web_db, proj.id, &body.input_name)
+            .await?;
     if existing.is_some() {
         return Err(TaskRefusal::OverrideExists {
             input_name: body.input_name.clone(),
@@ -137,17 +128,15 @@ pub async fn create(
     }
 
     let now = Utc::now().naive_utc();
-    let row = MTaskFlakeInputOverride {
+    let input_override = MTaskFlakeInputOverride {
         id: FlakeInputOverrideId::now_v7(),
         task: proj.id,
         input_name: body.input_name,
         url: body.url,
         created_at: now,
         updated_at: now,
-    }
-    .into_active_model()
-    .insert(&db.web_db)
-    .await?;
+    };
+    let row = gradient_db::flake_input_overrides::insert(&db.web_db, input_override).await?;
 
     Ok(ok_json(row.into()))
 }
@@ -162,10 +151,7 @@ pub async fn read(
 ) -> WebResult<Json<BaseResponse<FlakeInputOverrideOut>>> {
     let id: FlakeInputOverrideId = params.param("id")?;
 
-    let row = ETaskFlakeInputOverride::find()
-        .filter(CTaskFlakeInputOverride::Id.eq(id))
-        .filter(CTaskFlakeInputOverride::Task.eq(proj.id))
-        .one(&db.web_db)
+    let row = gradient_db::flake_input_overrides::by_id_in_task(&db.web_db, proj.id, id)
         .await?
         .or_not_found(Resource::FlakeInputOverride)?;
 
@@ -190,20 +176,14 @@ pub async fn update(
         validate_url(&Some(u.clone()))?;
     }
 
-    let row = ETaskFlakeInputOverride::find()
-        .filter(CTaskFlakeInputOverride::Id.eq(id))
-        .filter(CTaskFlakeInputOverride::Task.eq(proj.id))
-        .one(&db.web_db)
+    let row = gradient_db::flake_input_overrides::by_id_in_task(&db.web_db, proj.id, id)
         .await?
         .or_not_found(Resource::FlakeInputOverride)?;
 
     if let Some(new_name) = &body.input_name
         && new_name != &row.input_name
     {
-        let dup = ETaskFlakeInputOverride::find()
-            .filter(CTaskFlakeInputOverride::Task.eq(proj.id))
-            .filter(CTaskFlakeInputOverride::InputName.eq(new_name))
-            .one(&db.web_db)
+        let dup = gradient_db::flake_input_overrides::by_input_name(&db.web_db, proj.id, new_name)
             .await?;
         if dup.is_some() {
             return Err(TaskRefusal::OverrideExists {
@@ -222,7 +202,7 @@ pub async fn update(
     }
     active.updated_at = Set(Utc::now().naive_utc());
 
-    let updated = active.update(&db.web_db).await?;
+    let updated = gradient_db::flake_input_overrides::update(&db.web_db, active).await?;
     Ok(ok_json(updated.into()))
 }
 
@@ -236,15 +216,11 @@ pub async fn delete_one(
 ) -> WebResult<Json<BaseResponse<DeletedResponse>>> {
     let id: FlakeInputOverrideId = params.param("id")?;
 
-    let row = ETaskFlakeInputOverride::find()
-        .filter(CTaskFlakeInputOverride::Id.eq(id))
-        .filter(CTaskFlakeInputOverride::Task.eq(proj.id))
-        .one(&db.web_db)
+    let row = gradient_db::flake_input_overrides::by_id_in_task(&db.web_db, proj.id, id)
         .await?
         .or_not_found(Resource::FlakeInputOverride)?;
 
-    let active: ATaskFlakeInputOverride = row.into();
-    active.delete(&db.web_db).await?;
+    gradient_db::flake_input_overrides::delete(&db.web_db, row).await?;
 
     Ok(ok_json(DeletedResponse { deleted: true }))
 }

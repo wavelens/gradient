@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use super::helpers::{CacheContext, cache_client_ip, cache_served_derivation};
+use super::helpers::{CacheContext, cache_client_ip};
 use crate::client_ip::OptionalPeer;
 use crate::error::{WebError, WebResult};
 use crate::resource::Resource;
@@ -18,8 +18,6 @@ use gradient_db::WebDb;
 use gradient_db::caches::upstream::pull_through_upstream_caches;
 use gradient_sources::parse_drv_hash_name;
 use gradient_storage::LogStorage;
-use gradient_types::*;
-use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use std::sync::Arc;
 
 /// A pull-through cache is substituting paths it never built (#547). The upstream caches are asked
@@ -64,15 +62,18 @@ async fn local_log(
         return Ok(None);
     };
 
-    let Some(derivation) = cache_served_derivation(db, ctx.cache.id, &drv_hash, &drv_name).await?
+    let Some(derivation) = gradient_db::cached_paths::derivation_signed_in_cache(
+        db,
+        ctx.cache.id,
+        &drv_hash,
+        &drv_name,
+    )
+    .await?
     else {
         return Ok(None);
     };
 
-    let Some(shared_build) = EDerivationBuild::find()
-        .filter(CDerivationBuild::Derivation.eq(derivation))
-        .one(db)
-        .await?
+    let Some(shared_build) = gradient_db::derivation_builds::by_derivation(db, derivation).await?
     else {
         return Ok(None);
     };

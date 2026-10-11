@@ -16,23 +16,11 @@ use axum::Json;
 use gradient_types::events::EventOwner;
 use gradient_types::events::audit::Action;
 use gradient_types::*;
-use sea_orm::{
-    ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, JoinType, QueryFilter,
-    QuerySelect, RelationTrait,
-};
 
 pub async fn get_team_invitations(
     TeamScope { team, db, .. }: TeamScope<Admin>,
 ) -> WebResult<Json<BaseResponse<Vec<PendingInvitationItem>>>> {
-    let rows = ETeamInvitation::find()
-        .join(
-            JoinType::InnerJoin,
-            gradient_entity::team_invitation::Relation::User.def(),
-        )
-        .select_also(gradient_entity::user::Entity)
-        .filter(CTeamInvitation::Team.eq(team.id))
-        .all(&db.web_db)
-        .await?;
+    let rows = gradient_db::teams::invitations::of_team(&db.web_db, team.id).await?;
 
     let items: Vec<PendingInvitationItem> = rows
         .iter()
@@ -58,14 +46,12 @@ pub async fn delete_team_invitation(
 ) -> WebResult<Json<BaseResponse<String>>> {
     let target_user = find_user_by_username(&db.web_db, &body.user).await?;
 
-    let invitation = ETeamInvitation::find()
-        .filter(CTeamInvitation::Team.eq(team.id))
-        .filter(CTeamInvitation::User.eq(target_user.id))
-        .one(&db.web_db)
-        .await?
-        .ok_or(SharedRefusal::NoPendingInvitation)?;
+    let invitation =
+        gradient_db::teams::invitations::by_team_and_user(&db.web_db, team.id, target_user.id)
+            .await?
+            .ok_or(SharedRefusal::NoPendingInvitation)?;
 
-    invitation.into_active_model().delete(&db.web_db).await?;
+    gradient_db::teams::invitations::delete(&db.web_db, invitation).await?;
 
     audit.write(Action::TeamInvitationRevoke, EventOwner::default(), serde_json::json!({ "team_id": team.id.to_string(), "target_user_id": target_user.id.to_string(), }))
     .await;

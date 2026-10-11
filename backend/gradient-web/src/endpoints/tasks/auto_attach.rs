@@ -10,7 +10,7 @@ use gradient_types::triggers::{TriggerConfig, TriggerType};
 use gradient_types::{
     GitHostType, MIntegration, MTask, MTaskAction, MTaskTrigger, TaskActionId, TaskTriggerId,
 };
-use sea_orm::{ActiveModelTrait, ConnectionTrait, IntoActiveModel};
+use sea_orm::ConnectionTrait;
 
 #[derive(Debug, Default, PartialEq)]
 pub(super) struct AutoAttach {
@@ -101,7 +101,7 @@ pub(super) async fn apply<C: ConnectionTrait>(
             tags: vec![],
             releases_only: false,
         };
-        MTaskTrigger {
+        let trigger = MTaskTrigger {
             id: TaskTriggerId::now_v7(),
             task: task.id,
             trigger_type: TriggerType::ReporterPush,
@@ -110,17 +110,15 @@ pub(super) async fn apply<C: ConnectionTrait>(
             created_at: now,
             updated_at: now,
             ..Default::default()
-        }
-        .into_active_model()
-        .insert(db)
-        .await?;
+        };
+        gradient_db::triggers::insert(db, trigger).await?;
     }
 
     if let Some(outbound) = attach.outbound {
         let cfg = ActionConfig::GitHostStatusReport {
             integration_id: outbound.id,
         };
-        MTaskAction {
+        let action = MTaskAction {
             id: TaskActionId::now_v7(),
             task: task.id,
             name: "Report status to Git host".into(),
@@ -132,10 +130,8 @@ pub(super) async fn apply<C: ConnectionTrait>(
             created_at: now,
             updated_at: now,
             ..Default::default()
-        }
-        .into_active_model()
-        .insert(db)
-        .await?;
+        };
+        gradient_db::actions::insert(db, action).await?;
     }
 
     Ok(())

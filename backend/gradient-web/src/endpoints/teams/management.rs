@@ -22,10 +22,7 @@ use gradient_types::events::EventOwner;
 use gradient_types::events::audit::Action;
 use gradient_types::*;
 use sea_orm::ActiveValue::Set;
-use sea_orm::{
-    ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, JoinType, QueryFilter,
-    QuerySelect, RelationTrait, TransactionTrait,
-};
+use sea_orm::TransactionTrait;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -109,15 +106,7 @@ pub async fn get_teams(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
 ) -> WebResult<Json<BaseResponse<Vec<TeamSummary>>>> {
-    let rows = ETeamUser::find()
-        .join(
-            JoinType::InnerJoin,
-            gradient_entity::team_user::Relation::Team.def(),
-        )
-        .select_also(gradient_entity::team::Entity)
-        .filter(CTeamUser::User.eq(user.id))
-        .all(&state.web_db)
-        .await?;
+    let rows = gradient_db::teams::members::teams_of_user(&state.web_db, user.id).await?;
 
     let mut items: Vec<TeamSummary> = rows
         .into_iter()
@@ -142,9 +131,7 @@ pub async fn get_team_name_available(
     let Ok(name) = TeamName::try_from(name) else {
         return Ok(ok_json(false));
     };
-    let taken = ETeam::find()
-        .filter(CTeam::Name.eq(name.as_str()))
-        .one(&state.web_db)
+    let taken = gradient_db::teams::by_name(&state.web_db, name.as_str())
         .await?
         .is_some();
     Ok(ok_json(!taken))
@@ -158,9 +145,7 @@ pub async fn put_team(
 ) -> WebResult<Json<BaseResponse<String>>> {
     require_create_permission(state.config.permissions.create_team, &user)?;
 
-    if ETeam::find()
-        .filter(CTeam::Name.eq(body.name.as_str()))
-        .one(&state.web_db)
+    if gradient_db::teams::by_name(&state.web_db, body.name.as_str())
         .await?
         .is_some()
     {
@@ -168,28 +153,30 @@ pub async fn put_team(
     }
 
     let tx = state.web_db.inner().begin().await?;
-    let team = MTeam {
-        id: TeamId::now_v7(),
-        name: body.name.to_string(),
-        display_name: body.display_name.trim().to_string(),
-        created_by: Some(user.id),
-        created_at: gradient_types::now(),
-        ..Default::default()
-    }
-    .into_active_model()
-    .insert(&tx)
+    let team = gradient_db::teams::create(
+        &tx,
+        MTeam {
+            id: TeamId::now_v7(),
+            name: body.name.to_string(),
+            display_name: body.display_name.trim().to_string(),
+            created_by: Some(user.id),
+            created_at: gradient_types::now(),
+            ..Default::default()
+        },
+    )
     .await
     .map_err(|e| WebError::from_db_err(e, Resource::TeamName))?;
 
-    MTeamUser {
-        id: TeamUserId::now_v7(),
-        team: team.id,
-        user: user.id,
-        role: TeamRole::Admin,
-        source: TeamMemberSource::Api,
-    }
-    .into_active_model()
-    .insert(&tx)
+    gradient_db::teams::members::add_member(
+        &tx,
+        MTeamUser {
+            id: TeamUserId::now_v7(),
+            team: team.id,
+            user: user.id,
+            role: TeamRole::Admin,
+            source: TeamMemberSource::Api,
+        },
+    )
     .await?;
     tx.commit().await?;
 
@@ -255,8 +242,7 @@ pub async fn patch_team(
     if let Some(group) = body.scim_group {
         active.scim_group = Set(blank_to_none(group));
     }
-    active
-        .update(&db.web_db)
+    gradient_db::teams::update(&db.web_db, active)
         .await
         .map_err(|e| WebError::from_db_err(e, Resource::ScimGroup))?;
 
@@ -283,7 +269,7 @@ pub async fn delete_team(
             .into_iter()
             .collect();
     let team_id = team.id;
-    team.into_active_model().delete(&db.web_db).await?;
+    gradient_db::teams::delete(&db.web_db, team).await?;
     withdraw_team_workers(&scheduler, &workers, &projects).await;
 
     audit

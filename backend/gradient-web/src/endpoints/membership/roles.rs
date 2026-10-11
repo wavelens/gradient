@@ -19,7 +19,6 @@ use crate::resource::Resource;
 use axum::Json;
 use gradient_db::WebDb;
 use gradient_types::*;
-use sea_orm::{ColumnTrait, Condition, EntityTrait, QueryFilter};
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Debug)]
@@ -54,18 +53,6 @@ pub struct PatchRoleRequest {
 type OwnerField<O> = <<O as Owner>::Roles as RoleTable>::OwnerField;
 type Role<O> = RoleResponse<OwnerField<O>>;
 
-pub fn builtin_or_owned<T: RoleTable>(owner: T::Id) -> Condition {
-    Condition::any()
-        .add(T::owner_column().is_null())
-        .add(T::owner_column().eq(owner))
-}
-
-pub fn owned_or_builtin<T: RoleTable>(owner: T::Id) -> Condition {
-    Condition::any()
-        .add(T::owner_column().eq(owner))
-        .add(T::owner_column().is_null())
-}
-
 fn response<O: Owner>(row: &RoleRow<O>) -> Role<O> {
     let fields = <O::Roles as RoleTable>::fields(row);
     RoleResponse {
@@ -97,12 +84,17 @@ async fn name_clash<T: RoleTable>(
     name: &str,
     except: Option<RoleId>,
 ) -> WebResult<()> {
-    let mut query = T::find().filter(T::name_column().eq(name));
-    if let Some(role_id) = except {
-        query = query.filter(T::id_column().ne(role_id));
-    }
-    let clash = query.filter(owned_or_builtin::<T>(owner)).one(db).await?;
-    if clash.is_some() {
+    let taken = gradient_db::roles::name_taken::<T, _>(
+        db,
+        T::name_column(),
+        name,
+        T::id_column(),
+        except,
+        T::owner_column(),
+        owner,
+    )
+    .await?;
+    if taken {
         return Err(WebError::already_exists(Resource::RoleName));
     }
     Ok(())
@@ -113,21 +105,25 @@ async fn assigned_to_members<T: MemberTable>(
     owner: T::Id,
     role_id: RoleId,
 ) -> WebResult<bool> {
-    Ok(T::find()
-        .filter(T::role_column().eq(role_id))
-        .filter(T::owner_column().eq(owner))
-        .one(db)
-        .await?
-        .is_some())
+    Ok(gradient_db::memberships::role_assigned::<T, _>(
+        db,
+        T::role_column(),
+        role_id,
+        T::owner_column(),
+        owner,
+    )
+    .await?)
 }
 
 pub async fn list<O: Owner>(
     scope: O::ReadRolesScope,
 ) -> WebResult<Json<BaseResponse<RoleListResponse<OwnerField<O>>>>> {
-    let roles = <O::Roles as EntityTrait>::find()
-        .filter(builtin_or_owned::<O::Roles>(scope.id()))
-        .all(&scope.db().web_db)
-        .await?;
+    let roles = gradient_db::roles::builtin_or_owned::<O::Roles, _>(
+        &scope.db().web_db,
+        <O::Roles as RoleTable>::owner_column(),
+        scope.id(),
+    )
+    .await?;
 
     Ok(ok_json(RoleListResponse {
         roles: roles.iter().map(response::<O>).collect(),
