@@ -71,6 +71,21 @@ jobs:
             exit 1
           fi
 
+      - name: "Forbid the whole server state outside the entry points"
+        run: |
+          if grep -rnE --include='*.rs' --exclude-dir=target \
+               -e '&(Arc<)?(ServerState|AppState)\b' \
+               -e '[a-z_]+: Arc<(ServerState|AppState)>' . \
+               | grep -v -E -e '^\./gradient-(core|test-support)/' \
+                   -e '^\./gradient-web/src/(lib|otlp|audit|authorization/oidc|endpoints/webhooks/scope)\.rs' \
+                   -e '^\./gradient-(effects|ssh|scheduler)/src/lib\.rs' \
+                   -e '^\./gradient-ssh/src/session\.rs' \
+                   -e '^\./gradient-proto/src/(outbound|handler/handles|handler/inbound|handler/upload/commit)\.rs' \
+                   -e '^\./gradient-cache/src/(schedule|deep_gc/mod)\.rs'; then
+            echo "::error::take the handles in use (a pool, DbContext, CiContext, the config) instead of ServerState"
+            exit 1
+          fi
+
       - name: "cargo-deny (licenses, bans, sources)"
         uses: EmbarkStudios/cargo-deny-action@v2
         with:
