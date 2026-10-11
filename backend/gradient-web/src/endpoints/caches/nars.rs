@@ -5,17 +5,14 @@
 
 use super::helpers::delete_nar_from_cache;
 use super::refusal::CacheRefusal;
-use crate::access::{CacheAccess, Caller, load_cache};
 use crate::audit::{RequestInfo, record as audit_record};
-use crate::authorization::{MaybeApiKey, MaybeUser};
 use crate::error::WebResult;
 use crate::helpers::{OptionExt, ok_json};
-use crate::permissions::CachePermission;
 use crate::resource::Resource;
+use crate::scope::{CacheScope, Readable, Requires, can};
 use anyhow::Context;
-use axum::Extension;
 use axum::Json;
-use axum::extract::{Path, Query, State};
+use axum::extract::{Query, State};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use chrono::NaiveDateTime;
@@ -133,21 +130,10 @@ gradient_db::sql_fn! {
 }
 
 pub async fn list(
-    state: State<Arc<ServerState>>,
-    Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
-    Path(cache_name): Path<String>,
+    CacheScope { cache, db, .. }: CacheScope<Readable>,
     Query(q): Query<ListQuery>,
     Query(pagination): Query<PaginationParams>,
 ) -> WebResult<Json<BaseResponse<Paginated<Vec<NarSummary>>>>> {
-    let cache = load_cache(
-        &state.db(),
-        Caller::from(&maybe_user),
-        api_key.as_ref(),
-        cache_name,
-        CacheAccess::Readable,
-    )
-    .await?;
     let per_page = pagination
         .per_page
         .unwrap_or(DEFAULT_PER_PAGE)
@@ -186,7 +172,7 @@ pub async fn list(
     let total = CountRow::find_by_statement(
         NARS_LIST_COUNT.bind_built(nars_count_sql(&where_sql), values.clone()),
     )
-    .one(&state.web_db)
+    .one(&db.web_db)
     .await?
     .map(|r| r.total.max(0) as u64)
     .unwrap_or(0);
@@ -198,7 +184,7 @@ pub async fn list(
     values.push(sea_orm::Value::BigInt(Some(offset as i64)));
 
     let items = NarSummary::find_by_statement(NARS_LIST_SELECT.bind_built(select_sql, values))
-        .all(&state.web_db)
+        .all(&db.web_db)
         .await?;
 
     Ok(ok_json(Paginated {
@@ -210,33 +196,26 @@ pub async fn list(
 }
 
 pub async fn show(
-    state: State<Arc<ServerState>>,
-    Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
-    Path((cache_name, hash)): Path<(String, String)>,
+    CacheScope {
+        cache, db, params, ..
+    }: CacheScope<Readable>,
 ) -> WebResult<Json<BaseResponse<NarDetail>>> {
-    let cache = load_cache(
-        &state.db(),
-        Caller::from(&maybe_user),
-        api_key.as_ref(),
-        cache_name,
-        CacheAccess::Readable,
-    )
-    .await?;
+    let hash: String = params.param("hash")?;
+
     let cp = ECachedPath::find()
         .filter(CCachedPath::Hash.eq(&hash))
-        .one(&state.web_db)
+        .one(&db.web_db)
         .await?
         .or_not_found(Resource::Path)?;
     let sig = ECachedPathSignature::find()
         .filter(CCachedPathSignature::Cache.eq(cache.id))
         .filter(CCachedPathSignature::CachedPath.eq(cp.id))
-        .one(&state.web_db)
+        .one(&db.web_db)
         .await?
         .or_not_found(Resource::Signature)?;
     let store_path = cp.as_store_path().base();
     let references =
-        gradient_db::graph::runtime_closure::references_for_hash(&state.web_db, &hash).await?;
+        gradient_db::graph::runtime_closure::references_for_hash(&db.web_db, &hash).await?;
     Ok(ok_json(NarDetail {
         hash: cp.hash,
         store_path,
@@ -269,20 +248,9 @@ gradient_db::sql! {
 }
 
 pub async fn stats(
-    state: State<Arc<ServerState>>,
-    Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
-    Path(cache_name): Path<String>,
+    CacheScope { cache, db, .. }: CacheScope<Readable>,
 ) -> WebResult<Json<BaseResponse<NarStats>>> {
     use sea_orm::FromQueryResult;
-    let cache = load_cache(
-        &state.db(),
-        Caller::from(&maybe_user),
-        api_key.as_ref(),
-        cache_name,
-        CacheAccess::Readable,
-    )
-    .await?;
 
     #[derive(FromQueryResult)]
     struct Row {
@@ -295,7 +263,7 @@ pub async fn stats(
 
     let row =
         Row::find_by_statement(NAR_STATS.bind([sea_orm::Value::Uuid(Some(cache.id.into_inner()))]))
-            .one(&state.web_db)
+            .one(&db.web_db)
             .await?
             .context("stats query returned no row")?;
 
@@ -309,33 +277,22 @@ pub async fn stats(
 }
 
 pub async fn available(
-    state: State<Arc<ServerState>>,
-    Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
-    Path(cache_name): Path<String>,
+    CacheScope { cache, db, .. }: CacheScope<Readable>,
     Query(q): Query<std::collections::HashMap<String, String>>,
 ) -> WebResult<Json<BaseResponse<NarAvailable>>> {
-    let cache = load_cache(
-        &state.db(),
-        Caller::from(&maybe_user),
-        api_key.as_ref(),
-        cache_name,
-        CacheAccess::Readable,
-    )
-    .await?;
     let hash = q.get("hash").cloned().unwrap_or_default();
     if hash.is_empty() {
         return Err(CacheRefusal::MissingHashQuery.into());
     }
     let cp = ECachedPath::find()
         .filter(CCachedPath::Hash.eq(&hash))
-        .one(&state.web_db)
+        .one(&db.web_db)
         .await?;
     let exists = if let Some(cp) = cp {
         ECachedPathSignature::find()
             .filter(CCachedPathSignature::CachedPath.eq(cp.id))
             .filter(CCachedPathSignature::Cache.eq(cache.id))
-            .one(&state.web_db)
+            .one(&db.web_db)
             .await?
             .is_some()
     } else {
@@ -345,24 +302,18 @@ pub async fn available(
 }
 
 pub async fn delete(
+    CacheScope {
+        cache,
+        user,
+        db,
+        params,
+        ..
+    }: CacheScope<Requires<can::WriteStore>>,
     state: State<Arc<ServerState>>,
     info: RequestInfo,
-    Extension(user): Extension<MUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
-    Path((cache_name, hash)): Path<(String, String)>,
 ) -> WebResult<impl IntoResponse> {
-    let db = state.db();
-    let cache = load_cache(
-        &db,
-        Caller::User(&user),
-        api_key.as_ref(),
-        cache_name.clone(),
-        CacheAccess::Require {
-            permission: CachePermission::WriteStore,
-            reject_managed: false,
-        },
-    )
-    .await?;
+    let hash: String = params.param("hash")?;
+
     let (cp, outcome) =
         delete_nar_from_cache(&state.nar_storage, &state.graph, cache.id, &hash).await?;
     audit_record(

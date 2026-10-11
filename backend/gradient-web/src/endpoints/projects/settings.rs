@@ -5,17 +5,13 @@
  */
 
 use super::refusal::ProjectRefusal;
-use crate::access::{
-    CacheAccess, Caller, ProjectAccess, cache_admin_emails, has_cache_permission, load_cache,
-    load_project,
-};
-use crate::authorization::MaybeApiKey;
+use crate::access::{CacheAccess, Caller, cache_admin_emails, has_cache_permission, load_cache};
 use crate::endpoints::projects::workers::reauth_project_workers;
 use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
-use crate::permissions::Permission;
 use crate::resource::Resource;
-use axum::extract::{Path, State};
+use crate::scope::{Member, ProjectScope, Requires, RequiresUnmanaged, can};
+use axum::extract::State;
 use axum::{Extension, Json};
 use gradient_ci::CiContext;
 use gradient_core::ServerState;
@@ -57,78 +53,36 @@ pub struct CacheSubscriptionItem {
 }
 
 pub async fn post_project_public(
-    state: State<Arc<ServerState>>,
-    Extension(user): Extension<MUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
-    Path(project): Path<String>,
+    ProjectScope { project, db, .. }: ProjectScope<RequiresUnmanaged<can::ManageProjectSettings>>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let project = load_project(
-        &state.db(),
-        Caller::User(&user),
-        api_key.as_ref(),
-        project,
-        ProjectAccess::Require {
-            permission: Permission::ManageProjectSettings,
-            reject_managed: true,
-        },
-    )
-    .await?;
     let mut active: AProject = project.into();
     active.public = Set(true);
-    active.update(&state.web_db).await?;
+    active.update(&db.web_db).await?;
 
     Ok(ok_json("Project is now public".to_string()))
 }
 
 pub async fn delete_project_public(
-    state: State<Arc<ServerState>>,
-    Extension(user): Extension<MUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
-    Path(project): Path<String>,
+    ProjectScope { project, db, .. }: ProjectScope<RequiresUnmanaged<can::ManageProjectSettings>>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let project = load_project(
-        &state.db(),
-        Caller::User(&user),
-        api_key.as_ref(),
-        project,
-        ProjectAccess::Require {
-            permission: Permission::ManageProjectSettings,
-            reject_managed: true,
-        },
-    )
-    .await?;
     let mut active: AProject = project.into();
     active.public = Set(false);
-    active.update(&state.web_db).await?;
+    active.update(&db.web_db).await?;
 
     Ok(ok_json("Project is now private".to_string()))
 }
 
 pub async fn get_project_subscribe(
-    state: State<Arc<ServerState>>,
-    Extension(user): Extension<MUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
-    Path(project): Path<String>,
+    ProjectScope { project, db, .. }: ProjectScope<Member>,
 ) -> WebResult<Json<BaseResponse<Vec<CacheSubscriptionItem>>>> {
-    let project = load_project(
-        &state.db(),
-        Caller::User(&user),
-        api_key.as_ref(),
-        project,
-        ProjectAccess::Member {
-            reject_managed: false,
-        },
-    )
-    .await?;
-
     let project_caches = EProjectCache::find()
         .filter(CProjectCache::Project.eq(project.id))
-        .all(&state.web_db)
+        .all(&db.web_db)
         .await?;
 
     let pending = ECacheSubscriptionRequest::find()
         .filter(CCacheSubscriptionRequest::Project.eq(project.id))
-        .all(&state.web_db)
+        .all(&db.web_db)
         .await?;
 
     let cache_ids: Vec<CacheId> = project_caches
@@ -136,7 +90,7 @@ pub async fn get_project_subscribe(
         .map(|oc| oc.cache)
         .chain(pending.iter().map(|r| r.cache))
         .collect();
-    let names: HashMap<CacheId, String> = by_ids::<ECache, _>(&state.web_db, &cache_ids)
+    let names: HashMap<CacheId, String> = by_ids::<ECache, _>(&db.web_db, &cache_ids)
         .await?
         .into_iter()
         .map(|(id, c)| (id, c.name))
@@ -169,25 +123,19 @@ pub async fn get_project_subscribe(
 }
 
 pub async fn post_project_subscribe_cache(
+    ProjectScope {
+        project,
+        user,
+        api_key,
+        db,
+        params,
+        ..
+    }: ProjectScope<Requires<can::ManageSubscriptions>>,
     state: State<Arc<ServerState>>,
-    Extension(user): Extension<MUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
     Extension(scheduler): Extension<Arc<Scheduler>>,
-    Path((project, cache)): Path<(String, String)>,
     body: Option<Json<SubscribeCacheRequest>>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let db = state.db();
-    let project = load_project(
-        &db,
-        Caller::User(&user),
-        api_key.as_ref(),
-        project,
-        ProjectAccess::Require {
-            permission: Permission::ManageSubscriptions,
-            reject_managed: false,
-        },
-    )
-    .await?;
+    let cache: String = params.param("cache")?;
 
     let cache = load_cache(
         &db,
@@ -410,23 +358,16 @@ async fn enqueue_backfill_signatures(db: &WebDb, project_id: ProjectId, cache_id
 }
 
 pub async fn delete_project_subscribe_cache(
-    state: State<Arc<ServerState>>,
-    Extension(user): Extension<MUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
-    Path((project, cache)): Path<(String, String)>,
-) -> WebResult<Json<BaseResponse<String>>> {
-    let db = state.db();
-    let project = load_project(
-        &db,
-        Caller::User(&user),
-        api_key.as_ref(),
+    ProjectScope {
         project,
-        ProjectAccess::Require {
-            permission: Permission::ManageSubscriptions,
-            reject_managed: false,
-        },
-    )
-    .await?;
+        user,
+        api_key,
+        db,
+        params,
+        ..
+    }: ProjectScope<Requires<can::ManageSubscriptions>>,
+) -> WebResult<Json<BaseResponse<String>>> {
+    let cache: String = params.param("cache")?;
 
     let cache = load_cache(
         &db,
@@ -443,7 +384,7 @@ pub async fn delete_project_subscribe_cache(
                 .add(CProjectCache::Project.eq(project.id))
                 .add(CProjectCache::Cache.eq(cache.id)),
         )
-        .one(&state.web_db)
+        .one(&db.web_db)
         .await?;
 
     let Some(record) = record else {
@@ -453,17 +394,17 @@ pub async fn delete_project_subscribe_cache(
                     .add(CCacheSubscriptionRequest::Project.eq(project.id))
                     .add(CCacheSubscriptionRequest::Cache.eq(cache.id)),
             )
-            .one(&state.web_db)
+            .one(&db.web_db)
             .await?
             .ok_or(ProjectRefusal::NotSubscribedToCache)?;
 
-        request.into_active_model().delete(&state.web_db).await?;
+        request.into_active_model().delete(&db.web_db).await?;
 
         return Ok(ok_json("Subscription request cancelled".to_string()));
     };
 
     let active: AProjectCache = record.into();
-    active.delete(&state.web_db).await?;
+    active.delete(&db.web_db).await?;
 
     Ok(ok_json("Cache unsubscribed".to_string()))
 }

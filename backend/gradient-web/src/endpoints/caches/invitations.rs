@@ -4,18 +4,14 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::access::{CacheAccess, Caller, load_cache};
 use crate::audit::{RequestInfo, record as audit_record};
-use crate::authorization::MaybeApiKey;
 use crate::error::WebResult;
 use crate::helpers::{OptionExt, ok_json};
-use crate::permissions::CachePermission;
 use crate::refusal::SharedRefusal;
 use crate::resource::Resource;
-use axum::extract::{Path, State};
-use axum::{Extension, Json};
+use crate::scope::{CacheScope, Requires, RequiresUnmanaged, can};
+use axum::Json;
 use chrono::NaiveDateTime;
-use gradient_core::ServerState;
 use gradient_db::lookup::by_ids;
 use gradient_types::events::EventOwner;
 use gradient_types::events::audit::Action;
@@ -25,7 +21,6 @@ use sea_orm::{
     QuerySelect, RelationTrait,
 };
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PendingCacheInvitationItem {
@@ -42,23 +37,8 @@ pub struct RevokeCacheInvitationRequest {
 }
 
 pub async fn get_cache_invitations(
-    state: State<Arc<ServerState>>,
-    Extension(user): Extension<MUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
-    Path(cache): Path<String>,
+    CacheScope { cache, db, .. }: CacheScope<Requires<can::ManageCacheMembers>>,
 ) -> WebResult<Json<BaseResponse<Vec<PendingCacheInvitationItem>>>> {
-    let cache = load_cache(
-        &state.db(),
-        Caller::User(&user),
-        api_key.as_ref(),
-        cache,
-        CacheAccess::Require {
-            permission: CachePermission::ManageCacheMembers,
-            reject_managed: false,
-        },
-    )
-    .await?;
-
     let rows = ECacheInvitation::find()
         .join(
             JoinType::InnerJoin,
@@ -66,12 +46,12 @@ pub async fn get_cache_invitations(
         )
         .select_also(gradient_entity::user::Entity)
         .filter(CCacheInvitation::Cache.eq(cache.id))
-        .all(&state.web_db)
+        .all(&db.web_db)
         .await?;
 
     let role_ids: Vec<RoleId> = rows.iter().map(|(inv, _)| inv.role).collect();
     let role_map: std::collections::HashMap<RoleId, String> =
-        by_ids::<ECacheRole, _>(&state.web_db, &role_ids)
+        by_ids::<ECacheRole, _>(&db.web_db, &role_ids)
             .await?
             .into_iter()
             .map(|(id, r)| (id, r.name))
@@ -98,29 +78,15 @@ pub async fn get_cache_invitations(
 }
 
 pub async fn delete_cache_invitation(
-    state: State<Arc<ServerState>>,
+    CacheScope {
+        cache, user, db, ..
+    }: CacheScope<RequiresUnmanaged<can::ManageCacheMembers>>,
     info: RequestInfo,
-    Extension(user): Extension<MUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
-    Path(cache): Path<String>,
     Json(body): Json<RevokeCacheInvitationRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let db = state.db();
-    let cache = load_cache(
-        &db,
-        Caller::User(&user),
-        api_key.as_ref(),
-        cache,
-        CacheAccess::Require {
-            permission: CachePermission::ManageCacheMembers,
-            reject_managed: true,
-        },
-    )
-    .await?;
-
     let target_user = EUser::find()
         .filter(CUser::Username.eq(body.user.clone()))
-        .one(&state.web_db)
+        .one(&db.web_db)
         .await?
         .or_not_found(Resource::User)?;
 
@@ -130,11 +96,11 @@ pub async fn delete_cache_invitation(
                 .add(CCacheInvitation::Cache.eq(cache.id))
                 .add(CCacheInvitation::User.eq(target_user.id)),
         )
-        .one(&state.web_db)
+        .one(&db.web_db)
         .await?
         .ok_or(SharedRefusal::NoPendingInvitation)?;
 
-    invitation.into_active_model().delete(&state.web_db).await?;
+    invitation.into_active_model().delete(&db.web_db).await?;
 
     audit_record(
         &db,

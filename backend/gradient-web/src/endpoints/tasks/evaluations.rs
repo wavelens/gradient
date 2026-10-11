@@ -9,7 +9,7 @@ use super::{
     BuildStatusCounts, EntryPointSummary, EvaluationSummary, EvaluationTriggerSummary,
     FailedAttributeSummary, PaginatedEntryPoints, QueueSummary, TaskDetailsResponse,
 };
-use crate::access::{Caller, TaskAccess, has_permission, is_project_member, load_task};
+use crate::access::{has_permission, is_project_member};
 use crate::authorization::{MaybeApiKey, MaybeUser};
 use crate::endpoints::evals::{live_progress, live_progress_status};
 use crate::endpoints::{archive_headers, build_product_headers};
@@ -19,6 +19,7 @@ use crate::lookup::require;
 use crate::permissions::Permission;
 use crate::refusal::SharedRefusal;
 use crate::resource::Resource;
+use crate::scope::{Readable, Requires, TaskScope, can};
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
@@ -186,26 +187,10 @@ fn first_line_truncated(s: &str, max: usize) -> Option<String> {
 }
 
 pub async fn post_task_evaluate(
+    TaskScope { task, user, db, .. }: TaskScope<Requires<can::TriggerEvaluation>>,
     state: State<Arc<ServerState>>,
-    Extension(user): Extension<MUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
-    Path((project, task)): Path<(String, String)>,
     body: Option<Json<EvaluateRequest>>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let db = state.db();
-    let (_project, task) = load_task(
-        &db,
-        Caller::User(&user),
-        api_key.as_ref(),
-        project,
-        task,
-        TaskAccess::Require {
-            permission: Permission::TriggerEvaluation,
-            reject_managed: false,
-        },
-    )
-    .await?;
-
     let walk_mode = body.as_ref().and_then(|b| b.walk).unwrap_or_default();
 
     let pinned = body
@@ -306,22 +291,10 @@ pub async fn post_task_evaluate(
 }
 
 pub async fn get_task_evaluations(
+    TaskScope { task, .. }: TaskScope<Readable>,
     state: State<Arc<ServerState>>,
-    Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
-    Path((project, task)): Path<(String, String)>,
     Query(params): Query<EvaluationsQuery>,
 ) -> WebResult<Json<BaseResponse<Vec<EvaluationSummary>>>> {
-    let (_project, task) = load_task(
-        &state.db(),
-        Caller::from(&maybe_user),
-        api_key.as_ref(),
-        project,
-        task,
-        TaskAccess::Readable,
-    )
-    .await?;
-
     let limit = params.limit.unwrap_or(task.keep_evaluations as u64);
     let attr = params.attr.as_deref().map(parse_attr_filter).transpose()?;
 
@@ -389,21 +362,16 @@ pub async fn get_task_evaluations(
 }
 
 pub async fn get_task_details(
-    state: State<Arc<ServerState>>,
-    Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
-    Path((project, task)): Path<(String, String)>,
-) -> WebResult<Json<BaseResponse<TaskDetailsResponse>>> {
-    let api_key_ref = api_key.as_ref();
-    let (project, task) = load_task(
-        &state.db(),
-        Caller::from(&maybe_user),
-        api_key_ref,
+    TaskScope {
         project,
         task,
-        TaskAccess::Readable,
-    )
-    .await?;
+        user: maybe_user,
+        api_key,
+        ..
+    }: TaskScope<Readable>,
+    state: State<Arc<ServerState>>,
+) -> WebResult<Json<BaseResponse<TaskDetailsResponse>>> {
+    let api_key_ref = api_key.as_ref();
 
     let evaluations = EEvaluation::find()
         .filter(CEvaluation::Task.eq(task.id))
@@ -556,35 +524,22 @@ fn page_bounds(limit: Option<u64>, offset: Option<u64>) -> (u64, u64) {
 }
 
 pub async fn get_task_entry_points(
-    state: State<Arc<ServerState>>,
-    Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
-    Path((project, task)): Path<(String, String)>,
+    TaskScope { task, db, .. }: TaskScope<Readable>,
     Query(params): Query<EntryPointsQuery>,
 ) -> WebResult<Json<BaseResponse<PaginatedEntryPoints>>> {
-    let (_project, task) = load_task(
-        &state.db(),
-        Caller::from(&maybe_user),
-        api_key.as_ref(),
-        project,
-        task,
-        TaskAccess::Readable,
-    )
-    .await?;
-
     let eval_id = match params.evaluation_id.or(task.last_evaluation) {
         Some(id) => id,
         None => return Ok(ok_json(PaginatedEntryPoints::default())),
     };
 
-    let evaluation = require::<EEvaluation>(&state.web_db, eval_id).await?;
+    let evaluation = require::<EEvaluation>(&db.web_db, eval_id).await?;
 
     if evaluation.task != Some(task.id) {
         return Err(WebError::not_found(Resource::Evaluation));
     }
 
     let failed_attributes: Vec<FailedAttributeSummary> =
-        gradient_db::evaluations::failed_attributes::failed_attributes(&state.web_db, eval_id)
+        gradient_db::evaluations::failed_attributes::failed_attributes(&db.web_db, eval_id)
             .await?
             .into_iter()
             .map(|f| FailedAttributeSummary {
@@ -594,12 +549,12 @@ pub async fn get_task_entry_points(
             .collect();
     let (limit, offset) = page_bounds(params.limit, params.offset);
     let scope = built_entry_points(eval_id, params.search.as_deref());
-    let total = scope.clone().count(&state.web_db).await?;
+    let total = scope.clone().count(&db.web_db).await?;
     let entry_points = scope
         .order_by_asc(CEntryPoint::Eval)
         .offset(offset)
         .limit(limit)
-        .all(&state.web_db)
+        .all(&db.web_db)
         .await?;
 
     if entry_points.is_empty() {
@@ -610,7 +565,7 @@ pub async fn get_task_entry_points(
         }));
     }
 
-    let data = EntryPointRelatedData::load(&state.web_db, &evaluation, &entry_points).await?;
+    let data = EntryPointRelatedData::load(&db.web_db, &evaluation, &entry_points).await?;
 
     Ok(ok_json(PaginatedEntryPoints {
         entry_points: data.build_summaries(&entry_points),

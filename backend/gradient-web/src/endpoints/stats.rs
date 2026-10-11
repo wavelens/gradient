@@ -4,12 +4,11 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::access::{CacheAccess, Caller, load_cache};
-use crate::authorization::{MaybeApiKey, MaybeUser};
 use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
-use axum::extract::{Path, State};
-use axum::{Extension, Json};
+use crate::scope::{CacheScope, Readable};
+use axum::Json;
+use axum::extract::State;
 use chrono::NaiveDateTime;
 use gradient_core::ServerState;
 use gradient_db::metrics::cache_traffic;
@@ -177,20 +176,9 @@ gradient_db::sql! {
 }
 
 pub async fn get_cache_stats(
+    CacheScope { cache, .. }: CacheScope<Readable>,
     state: State<Arc<ServerState>>,
-    Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
-    Path(cache): Path<String>,
 ) -> WebResult<Json<BaseResponse<CacheStatsResponse>>> {
-    let cache = load_cache(
-        &state.db(),
-        Caller::from(&maybe_user),
-        api_key.as_ref(),
-        cache,
-        CacheAccess::Readable,
-    )
-    .await?;
-
     let total_row = state
         .web_db
         .query_one_raw(CACHE_TOTALS.bind([sea_orm::Value::Uuid(Some(cache.id.into_inner()))]))

@@ -77,7 +77,7 @@ jobs:
                -e '&(Arc<)?(ServerState|AppState)\b' \
                -e '[a-z_]+: Arc<(ServerState|AppState)>' . \
                | grep -v -E -e '^\./gradient-(core|test-support)/' \
-                   -e '^\./gradient-web/src/(lib|otlp|audit|authorization/oidc|endpoints/webhooks/scope)\.rs' \
+                   -e '^\./gradient-web/src/(lib|otlp|audit|scope|authorization/oidc|endpoints/webhooks/scope)\.rs' \
                    -e '^\./gradient-(effects|ssh|scheduler)/src/lib\.rs' \
                    -e '^\./gradient-ssh/src/session\.rs' \
                    -e '^\./gradient-proto/src/(outbound|handler/handles|handler/inbound|handler/upload/commit)\.rs' \

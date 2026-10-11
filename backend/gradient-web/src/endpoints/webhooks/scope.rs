@@ -9,7 +9,8 @@ use crate::access::{CacheAccess, Caller, ProjectAccess, load_cache, load_project
 use crate::authorization::MaybeApiKey;
 use crate::error::{WebError, require_superuser};
 use crate::permissions::{CachePermission, Permission};
-use axum::extract::{FromRequestParts, Path};
+use crate::scope::PathParams;
+use axum::extract::FromRequestParts;
 use axum::http::request::Parts;
 use gradient_core::ServerState;
 use gradient_entity::webhook::WebhookScope;
@@ -17,7 +18,6 @@ use gradient_types::events::EventOwner;
 use gradient_types::events::audit::Action;
 use gradient_types::*;
 use sea_orm::{ColumnTrait, Condition};
-use std::collections::HashMap;
 use std::sync::Arc;
 
 #[derive(Clone, Debug)]
@@ -26,7 +26,7 @@ pub struct WebhookOwner {
     pub project: Option<ProjectId>,
     pub cache: Option<CacheId>,
     pub user: MUser,
-    pub params: HashMap<String, String>,
+    pub params: PathParams,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -73,14 +73,7 @@ impl WebhookOwner {
     }
 
     pub fn param<T: std::str::FromStr>(&self, name: &str) -> Result<T, WebError> {
-        self.params
-            .get(name)
-            .and_then(|v| v.parse().ok())
-            .ok_or_else(|| {
-                WebError::from(WebhookRefusal::InvalidParameter {
-                    name: name.to_string(),
-                })
-            })
+        self.params.param(name)
     }
 }
 
@@ -101,16 +94,14 @@ impl FromRequestParts<Arc<ServerState>> for WebhookOwner {
             .extensions
             .get::<MaybeApiKey>()
             .and_then(|k| k.0.clone());
-        let Path(params) = Path::<HashMap<String, String>>::from_request_parts(parts, state)
-            .await
-            .map_err(|e| WebhookRefusal::InvalidPathParameters(e.to_string()))?;
+        let params = PathParams::from_parts(parts, state).await?;
 
-        if let Some(project) = params.get("project") {
+        if params.contains("project") {
             let project = load_project(
                 &db,
                 Caller::User(&user),
                 api_key.as_ref(),
-                project.clone(),
+                params.param("project")?,
                 ProjectAccess::Require {
                     permission: Permission::ManageWebhooks,
                     reject_managed: false,
@@ -125,12 +116,12 @@ impl FromRequestParts<Arc<ServerState>> for WebhookOwner {
                 params,
             });
         }
-        if let Some(cache) = params.get("cache") {
+        if params.contains("cache") {
             let cache = load_cache(
                 &db,
                 Caller::User(&user),
                 api_key.as_ref(),
-                cache.clone(),
+                params.param("cache")?,
                 CacheAccess::Require {
                     permission: CachePermission::ManageCacheWebhooks,
                     reject_managed: false,

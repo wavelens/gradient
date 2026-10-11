@@ -5,16 +5,13 @@
 
 use super::admit::{admit, admit_nar};
 use super::refusal::CacheRefusal;
-use crate::access::{CacheAccess, Caller, load_cache};
 use crate::audit::{RequestInfo, record as audit_record};
-use crate::authorization::MaybeApiKey;
 use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
-use crate::permissions::CachePermission;
+use crate::scope::{CacheScope, Requires, can};
 use anyhow::Context;
-use axum::Extension;
 use axum::body::Bytes;
-use axum::extract::{Multipart, Path, Query, State};
+use axum::extract::{Multipart, Query, State};
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::IntoResponse;
 use gradient_core::ServerState;
@@ -42,27 +39,14 @@ pub struct NarinfoPart {
 }
 
 pub async fn nars_upload(
+    CacheScope {
+        cache, user, db, ..
+    }: CacheScope<Requires<can::WriteStore>>,
     state: State<Arc<ServerState>>,
     info: RequestInfo,
-    Extension(user): Extension<MUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
-    Path(cache_name): Path<String>,
     headers: HeaderMap,
     mut multipart: Multipart,
 ) -> WebResult<impl IntoResponse> {
-    let db = state.db();
-    let cache = load_cache(
-        &db,
-        Caller::User(&user),
-        api_key.as_ref(),
-        cache_name,
-        CacheAccess::Require {
-            permission: CachePermission::WriteStore,
-            reject_managed: false,
-        },
-    )
-    .await?;
-
     let max = u64::try_from(state.config.nar.max_upload_size.get()).unwrap_or(u64::MAX);
     let declared = headers
         .get(header::CONTENT_LENGTH)
@@ -266,24 +250,13 @@ fn require_safe_hash(store_hash: &str) -> WebResult<()> {
 }
 
 pub async fn nar_chunk(
+    CacheScope { cache, params, .. }: CacheScope<Requires<can::WriteStore>>,
     state: State<Arc<ServerState>>,
-    Extension(user): Extension<MUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
-    Path((cache_name, store_hash)): Path<(String, String)>,
     Query(ChunkQuery { offset }): Query<ChunkQuery>,
     body: Bytes,
 ) -> WebResult<impl IntoResponse> {
-    let cache = load_cache(
-        &state.db(),
-        Caller::User(&user),
-        api_key.as_ref(),
-        cache_name,
-        CacheAccess::Require {
-            permission: CachePermission::WriteStore,
-            reject_managed: false,
-        },
-    )
-    .await?;
+    let store_hash: String = params.param("hash")?;
+
     require_safe_hash(&store_hash)?;
 
     let max = u64::try_from(state.config.nar.max_upload_size.get()).unwrap_or(u64::MAX);
@@ -317,25 +290,19 @@ pub async fn nar_chunk(
 }
 
 pub async fn nar_finalize(
+    CacheScope {
+        cache,
+        user,
+        db,
+        params,
+        ..
+    }: CacheScope<Requires<can::WriteStore>>,
     state: State<Arc<ServerState>>,
     info: RequestInfo,
-    Extension(user): Extension<MUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
-    Path((cache_name, store_hash)): Path<(String, String)>,
     axum::Json(narinfo): axum::Json<NarinfoPart>,
 ) -> WebResult<impl IntoResponse> {
-    let db = state.db();
-    let cache = load_cache(
-        &db,
-        Caller::User(&user),
-        api_key.as_ref(),
-        cache_name,
-        CacheAccess::Require {
-            permission: CachePermission::WriteStore,
-            reject_managed: false,
-        },
-    )
-    .await?;
+    let store_hash: String = params.param("hash")?;
+
     require_safe_hash(&store_hash)?;
 
     let store = upload_partial_store(&state.config)?;

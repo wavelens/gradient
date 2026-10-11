@@ -5,16 +5,15 @@
  */
 
 use super::refusal::TeamRefusal;
-use crate::access::{TeamAccess, load_team};
 use crate::audit::{RequestInfo, record as audit_record};
-use crate::authorization::MaybeApiKey;
 use crate::error::{WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json};
 use crate::invite_policy::invitation_expiry;
 use crate::refusal::SharedRefusal;
 use crate::resource::Resource;
-use axum::extract::{Path, State};
-use axum::{Extension, Json};
+use crate::scope::{Admin, Member, TeamScope};
+use axum::Json;
+use axum::extract::State;
 use gradient_core::ServerState;
 use gradient_db::WebDb;
 use gradient_notify::{InvitationMail, InviteScope, generate_token};
@@ -95,20 +94,8 @@ async fn ensure_not_last_admin(db: &WebDb, team: TeamId, membership: &MTeamUser)
 }
 
 pub async fn get_team_members(
-    state: State<Arc<ServerState>>,
-    Extension(user): Extension<MUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
-    Path(team): Path<String>,
+    TeamScope { team, db, .. }: TeamScope<Member>,
 ) -> WebResult<Json<BaseResponse<Vec<TeamMemberItem>>>> {
-    let (team, _) = load_team(
-        &state.web_db,
-        &user,
-        api_key.as_ref(),
-        team,
-        TeamAccess::Member,
-    )
-    .await?;
-
     let rows = ETeamUser::find()
         .join(
             JoinType::InnerJoin,
@@ -116,7 +103,7 @@ pub async fn get_team_members(
         )
         .select_also(gradient_entity::user::Entity)
         .filter(CTeamUser::Team.eq(team.id))
-        .all(&state.web_db)
+        .all(&db.web_db)
         .await?;
 
     Ok(ok_json(
@@ -134,24 +121,11 @@ pub async fn get_team_members(
 }
 
 pub async fn post_team_members(
+    TeamScope { team, user, db, .. }: TeamScope<Admin>,
     state: State<Arc<ServerState>>,
     info: RequestInfo,
-    Extension(user): Extension<MUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
-    Path(team): Path<String>,
     Json(body): Json<TeamMemberRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let db = state.db();
-    let (team, _) = load_team(
-        &state.web_db,
-        &user,
-        api_key.as_ref(),
-        team,
-        TeamAccess::Admin {
-            reject_managed: false,
-        },
-    )
-    .await?;
     let target = find_user(&state.web_db, &body.user).await?;
 
     if find_membership(&state.web_db, team.id, target.id)
@@ -250,31 +224,18 @@ pub async fn post_team_members(
 }
 
 pub async fn patch_team_members(
-    state: State<Arc<ServerState>>,
+    TeamScope { team, user, db, .. }: TeamScope<Admin>,
     info: RequestInfo,
-    Extension(user): Extension<MUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
-    Path(team): Path<String>,
     Json(body): Json<TeamMemberRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let (team, _) = load_team(
-        &state.web_db,
-        &user,
-        api_key.as_ref(),
-        team,
-        TeamAccess::Admin {
-            reject_managed: false,
-        },
-    )
-    .await?;
-    let target = find_user(&state.web_db, &body.user).await?;
-    let membership = find_membership(&state.web_db, team.id, target.id)
+    let target = find_user(&db.web_db, &body.user).await?;
+    let membership = find_membership(&db.web_db, team.id, target.id)
         .await?
         .ok_or(SharedRefusal::NotAMember(Resource::Team))?;
     ensure_not_state_managed(&membership)?;
 
     if body.role != TeamRole::Admin {
-        ensure_not_last_admin(&state.web_db, team.id, &membership).await?;
+        ensure_not_last_admin(&db.web_db, team.id, &membership).await?;
     }
 
     let mut active: ATeamUser = membership.into();
@@ -282,10 +243,10 @@ pub async fn patch_team_members(
     if body.role == TeamRole::Admin {
         active.source = Set(TeamMemberSource::Api);
     }
-    active.update(&state.web_db).await?;
+    active.update(&db.web_db).await?;
 
     audit_record(
-        &state.db(),
+        &db,
         Some(user.id),
         Action::TeamMemberRoleChange,
         EventOwner::default(),
@@ -302,34 +263,21 @@ pub async fn patch_team_members(
 }
 
 pub async fn delete_team_members(
-    state: State<Arc<ServerState>>,
+    TeamScope { team, user, db, .. }: TeamScope<Admin>,
     info: RequestInfo,
-    Extension(user): Extension<MUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
-    Path(team): Path<String>,
     Json(body): Json<RemoveTeamMemberRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let (team, _) = load_team(
-        &state.web_db,
-        &user,
-        api_key.as_ref(),
-        team,
-        TeamAccess::Admin {
-            reject_managed: false,
-        },
-    )
-    .await?;
-    let target = find_user(&state.web_db, &body.user).await?;
-    let membership = find_membership(&state.web_db, team.id, target.id)
+    let target = find_user(&db.web_db, &body.user).await?;
+    let membership = find_membership(&db.web_db, team.id, target.id)
         .await?
         .ok_or(SharedRefusal::NotAMember(Resource::Team))?;
     ensure_not_state_managed(&membership)?;
 
-    ensure_not_last_admin(&state.web_db, team.id, &membership).await?;
-    membership.into_active_model().delete(&state.web_db).await?;
+    ensure_not_last_admin(&db.web_db, team.id, &membership).await?;
+    membership.into_active_model().delete(&db.web_db).await?;
 
     audit_record(
-        &state.db(),
+        &db,
         Some(user.id),
         Action::TeamMemberRemove,
         EventOwner::default(),

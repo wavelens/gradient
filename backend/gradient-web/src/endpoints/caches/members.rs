@@ -4,17 +4,15 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::access::{CacheAccess, Caller, load_cache};
 use crate::audit::{RequestInfo, record as audit_record};
-use crate::authorization::MaybeApiKey;
 use crate::error::{WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json};
 use crate::invite_policy::invitation_expiry;
-use crate::permissions::CachePermission;
 use crate::refusal::SharedRefusal;
 use crate::resource::Resource;
-use axum::extract::{Path, State};
-use axum::{Extension, Json};
+use crate::scope::{CacheScope, Requires, RequiresUnmanaged, can};
+use axum::Json;
+use axum::extract::State;
 use gradient_core::ServerState;
 use gradient_db::WebDb;
 use gradient_db::lookup::by_ids;
@@ -87,23 +85,8 @@ async fn find_cache_invitation(
 }
 
 pub async fn get_cache_members(
-    state: State<Arc<ServerState>>,
-    Extension(user): Extension<MUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
-    Path(cache): Path<String>,
+    CacheScope { cache, db, .. }: CacheScope<Requires<can::ViewCache>>,
 ) -> WebResult<Json<BaseResponse<Vec<CacheMemberItem>>>> {
-    let cache = load_cache(
-        &state.db(),
-        Caller::User(&user),
-        api_key.as_ref(),
-        cache,
-        CacheAccess::Require {
-            permission: CachePermission::ViewCache,
-            reject_managed: false,
-        },
-    )
-    .await?;
-
     let cache_users = ECacheUser::find()
         .join(
             JoinType::InnerJoin,
@@ -111,12 +94,12 @@ pub async fn get_cache_members(
         )
         .select_also(gradient_entity::user::Entity)
         .filter(CCacheUser::Cache.eq(cache.id))
-        .all(&state.web_db)
+        .all(&db.web_db)
         .await?;
 
     let role_ids: Vec<RoleId> = cache_users.iter().map(|(cu, _)| cu.role).collect();
     let role_map: std::collections::HashMap<RoleId, String> =
-        by_ids::<ECacheRole, _>(&state.web_db, &role_ids)
+        by_ids::<ECacheRole, _>(&db.web_db, &role_ids)
             .await?
             .into_iter()
             .map(|(id, r)| (id, r.name))
@@ -140,25 +123,13 @@ pub async fn get_cache_members(
 }
 
 pub async fn post_cache_member(
+    CacheScope {
+        cache, user, db, ..
+    }: CacheScope<RequiresUnmanaged<can::ManageCacheMembers>>,
     state: State<Arc<ServerState>>,
     info: RequestInfo,
-    Extension(user): Extension<MUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
-    Path(cache): Path<String>,
     Json(body): Json<AddCacheMemberRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let db = state.db();
-    let cache = load_cache(
-        &db,
-        Caller::User(&user),
-        api_key.as_ref(),
-        cache,
-        CacheAccess::Require {
-            permission: CachePermission::ManageCacheMembers,
-            reject_managed: true,
-        },
-    )
-    .await?;
     let target_user = find_user_by_username(&state.web_db, &body.user).await?;
 
     if find_cache_membership(&state.web_db, cache.id, target_user.id)
@@ -280,28 +251,15 @@ pub async fn post_cache_member(
 }
 
 pub async fn patch_cache_member(
-    state: State<Arc<ServerState>>,
+    CacheScope {
+        cache, user, db, ..
+    }: CacheScope<RequiresUnmanaged<can::ManageCacheMembers>>,
     info: RequestInfo,
-    Extension(user): Extension<MUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
-    Path(cache): Path<String>,
     Json(body): Json<AddCacheMemberRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let db = state.db();
-    let cache = load_cache(
-        &db,
-        Caller::User(&user),
-        api_key.as_ref(),
-        cache,
-        CacheAccess::Require {
-            permission: CachePermission::ManageCacheMembers,
-            reject_managed: true,
-        },
-    )
-    .await?;
-    let target_user = find_user_by_username(&state.web_db, &body.user).await?;
+    let target_user = find_user_by_username(&db.web_db, &body.user).await?;
 
-    let membership = find_cache_membership(&state.web_db, cache.id, target_user.id)
+    let membership = find_cache_membership(&db.web_db, cache.id, target_user.id)
         .await?
         .ok_or(SharedRefusal::NotAMember(Resource::Cache))?;
 
@@ -316,13 +274,13 @@ pub async fn patch_cache_member(
                         .add(CCacheRole::Cache.is_null()),
                 ),
         )
-        .one(&state.web_db)
+        .one(&db.web_db)
         .await?
         .or_not_found(Resource::Role)?;
 
     let mut active: ACacheUser = membership.into();
     active.role = Set(role.id);
-    active.update(&state.web_db).await?;
+    active.update(&db.web_db).await?;
 
     audit_record(
         &db,
@@ -346,28 +304,15 @@ pub async fn patch_cache_member(
 }
 
 pub async fn delete_cache_member(
-    state: State<Arc<ServerState>>,
+    CacheScope {
+        cache, user, db, ..
+    }: CacheScope<RequiresUnmanaged<can::ManageCacheMembers>>,
     info: RequestInfo,
-    Extension(user): Extension<MUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
-    Path(cache): Path<String>,
     Json(body): Json<RemoveCacheMemberRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let db = state.db();
-    let cache = load_cache(
-        &db,
-        Caller::User(&user),
-        api_key.as_ref(),
-        cache,
-        CacheAccess::Require {
-            permission: CachePermission::ManageCacheMembers,
-            reject_managed: true,
-        },
-    )
-    .await?;
-    let target_user = find_user_by_username(&state.web_db, &body.user).await?;
+    let target_user = find_user_by_username(&db.web_db, &body.user).await?;
 
-    let membership = find_cache_membership(&state.web_db, cache.id, target_user.id)
+    let membership = find_cache_membership(&db.web_db, cache.id, target_user.id)
         .await?
         .ok_or(SharedRefusal::NotAMember(Resource::Cache))?;
 
@@ -375,7 +320,7 @@ pub async fn delete_cache_member(
         let admin_count = ECacheUser::find()
             .filter(CCacheUser::Cache.eq(cache.id))
             .filter(CCacheUser::Role.eq(BASE_CACHE_ROLE_ADMIN_ID))
-            .count(&state.web_db)
+            .count(&db.web_db)
             .await?;
         if admin_count <= 1 {
             return Err(SharedRefusal::LastAdmin(Resource::Cache).into());
@@ -383,7 +328,7 @@ pub async fn delete_cache_member(
     }
 
     let active: ACacheUser = membership.into();
-    active.delete(&state.web_db).await?;
+    active.delete(&db.web_db).await?;
 
     audit_record(
         &db,

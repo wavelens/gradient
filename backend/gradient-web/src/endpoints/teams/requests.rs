@@ -4,17 +4,14 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::access::{TeamAccess, load_team};
 use crate::audit::{RequestInfo, record as audit_record};
-use crate::authorization::MaybeApiKey;
 use crate::endpoints::teams::grants::grant_workers;
 use crate::error::{WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json, role_names};
 use crate::resource::Resource;
-use axum::extract::{Path, State};
+use crate::scope::{Admin, Member, TeamScope};
 use axum::{Extension, Json};
 use chrono::NaiveDateTime;
-use gradient_core::ServerState;
 use gradient_db::WebDb;
 use gradient_db::lookup::by_ids;
 use gradient_scheduler::Scheduler;
@@ -80,46 +77,34 @@ async fn cache_role_names(db: &WebDb, ids: Vec<RoleId>) -> WebResult<HashMap<Rol
 }
 
 pub async fn get_team_grants(
-    state: State<Arc<ServerState>>,
-    Extension(user): Extension<MUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
-    Path(team): Path<String>,
+    TeamScope { team, db, .. }: TeamScope<Member>,
 ) -> WebResult<Json<BaseResponse<TeamGrants>>> {
-    let (team, _) = load_team(
-        &state.web_db,
-        &user,
-        api_key.as_ref(),
-        team,
-        TeamAccess::Member,
-    )
-    .await?;
-
     let project_grants = ETeamProject::find()
         .filter(CTeamProject::Team.eq(team.id))
-        .all(&state.web_db)
+        .all(&db.web_db)
         .await?;
     let cache_grants = ETeamCache::find()
         .filter(CTeamCache::Team.eq(team.id))
-        .all(&state.web_db)
+        .all(&db.web_db)
         .await?;
 
     let projects = by_ids::<EProject, _>(
-        &state.web_db,
+        &db.web_db,
         &project_grants.iter().map(|g| g.project).collect::<Vec<_>>(),
     )
     .await?;
     let caches = by_ids::<ECache, _>(
-        &state.web_db,
+        &db.web_db,
         &cache_grants.iter().map(|g| g.cache).collect::<Vec<_>>(),
     )
     .await?;
     let project_roles = role_names(
-        &state.web_db,
+        &db.web_db,
         project_grants.iter().filter_map(|g| g.role).collect(),
     )
     .await?;
     let cache_roles =
-        cache_role_names(&state.web_db, cache_grants.iter().map(|g| g.role).collect()).await?;
+        cache_role_names(&db.web_db, cache_grants.iter().map(|g| g.role).collect()).await?;
 
     let mut project_items: Vec<TeamProjectGrant> = project_grants
         .iter()
@@ -156,33 +141,19 @@ pub async fn get_team_grants(
 }
 
 pub async fn get_team_requests(
-    state: State<Arc<ServerState>>,
-    Extension(user): Extension<MUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
-    Path(team): Path<String>,
+    TeamScope { team, db, .. }: TeamScope<Admin>,
 ) -> WebResult<Json<BaseResponse<Vec<TeamRequestItem>>>> {
-    let (team, _) = load_team(
-        &state.web_db,
-        &user,
-        api_key.as_ref(),
-        team,
-        TeamAccess::Admin {
-            reject_managed: false,
-        },
-    )
-    .await?;
-
     let project_requests = ETeamProjectRequest::find()
         .filter(CTeamProjectRequest::Team.eq(team.id))
-        .all(&state.web_db)
+        .all(&db.web_db)
         .await?;
     let cache_requests = ETeamCacheRequest::find()
         .filter(CTeamCacheRequest::Team.eq(team.id))
-        .all(&state.web_db)
+        .all(&db.web_db)
         .await?;
 
     let projects = by_ids::<EProject, _>(
-        &state.web_db,
+        &db.web_db,
         &project_requests
             .iter()
             .map(|r| r.project)
@@ -190,26 +161,23 @@ pub async fn get_team_requests(
     )
     .await?;
     let caches = by_ids::<ECache, _>(
-        &state.web_db,
+        &db.web_db,
         &cache_requests.iter().map(|r| r.cache).collect::<Vec<_>>(),
     )
     .await?;
     let project_roles = role_names(
-        &state.web_db,
+        &db.web_db,
         project_requests.iter().filter_map(|r| r.role).collect(),
     )
     .await?;
-    let cache_roles = cache_role_names(
-        &state.web_db,
-        cache_requests.iter().map(|r| r.role).collect(),
-    )
-    .await?;
+    let cache_roles =
+        cache_role_names(&db.web_db, cache_requests.iter().map(|r| r.role).collect()).await?;
     let requester_ids: Vec<UserId> = project_requests
         .iter()
         .filter_map(|r| r.requested_by)
         .chain(cache_requests.iter().filter_map(|r| r.requested_by))
         .collect();
-    let requesters: HashMap<UserId, String> = by_ids::<EUser, _>(&state.web_db, &requester_ids)
+    let requesters: HashMap<UserId, String> = by_ids::<EUser, _>(&db.web_db, &requester_ids)
         .await?
         .into_iter()
         .map(|(id, u)| (id, u.username))
@@ -253,32 +221,25 @@ pub async fn get_team_requests(
 }
 
 pub async fn post_approve_team_request(
-    state: State<Arc<ServerState>>,
-    info: RequestInfo,
-    Extension(user): Extension<MUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
-    Extension(scheduler): Extension<Arc<Scheduler>>,
-    Path((team, request_id)): Path<(String, Uuid)>,
-) -> WebResult<Json<BaseResponse<String>>> {
-    let db = state.db();
-    let (team, _) = load_team(
-        &state.web_db,
-        &user,
-        api_key.as_ref(),
+    TeamScope {
         team,
-        TeamAccess::Admin {
-            reject_managed: false,
-        },
-    )
-    .await?;
+        user,
+        db,
+        params,
+        ..
+    }: TeamScope<Admin>,
+    info: RequestInfo,
+    Extension(scheduler): Extension<Arc<Scheduler>>,
+) -> WebResult<Json<BaseResponse<String>>> {
+    let request_id: Uuid = params.param("request_id")?;
 
     if let Some(request) = ETeamProjectRequest::find_by_id(TeamProjectRequestId::new(request_id))
         .filter(CTeamProjectRequest::Team.eq(team.id))
-        .one(&state.web_db)
+        .one(&db.web_db)
         .await?
     {
         let (project, workers) = (request.project, request.includes_workers);
-        let tx = state.web_db.inner().begin().await?;
+        let tx = db.web_db.inner().begin().await?;
         MTeamProject {
             id: TeamProjectId::now_v7(),
             team: team.id,
@@ -297,7 +258,7 @@ pub async fn post_approve_team_request(
         tx.commit().await?;
 
         if workers {
-            grant_workers(&state.web_db, &scheduler, team.id, project).await?;
+            grant_workers(&db.web_db, &scheduler, team.id, project).await?;
         }
         audit_record(&db,
             Some(user.id),
@@ -312,11 +273,11 @@ pub async fn post_approve_team_request(
 
     let request = ETeamCacheRequest::find_by_id(TeamCacheRequestId::new(request_id))
         .filter(CTeamCacheRequest::Team.eq(team.id))
-        .one(&state.web_db)
+        .one(&db.web_db)
         .await?
         .or_not_found(Resource::Request)?;
     let cache = request.cache;
-    let tx = state.web_db.inner().begin().await?;
+    let tx = db.web_db.inner().begin().await?;
     MTeamCache {
         id: TeamCacheId::now_v7(),
         team: team.id,
@@ -348,31 +309,25 @@ pub async fn post_approve_team_request(
 }
 
 pub async fn delete_team_request(
-    state: State<Arc<ServerState>>,
-    info: RequestInfo,
-    Extension(user): Extension<MUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
-    Path((team, request_id)): Path<(String, Uuid)>,
-) -> WebResult<Json<BaseResponse<String>>> {
-    let (team, _) = load_team(
-        &state.web_db,
-        &user,
-        api_key.as_ref(),
+    TeamScope {
         team,
-        TeamAccess::Admin {
-            reject_managed: false,
-        },
-    )
-    .await?;
+        user,
+        db,
+        params,
+        ..
+    }: TeamScope<Admin>,
+    info: RequestInfo,
+) -> WebResult<Json<BaseResponse<String>>> {
+    let request_id: Uuid = params.param("request_id")?;
 
     let owner = if let Some(request) =
         ETeamProjectRequest::find_by_id(TeamProjectRequestId::new(request_id))
             .filter(CTeamProjectRequest::Team.eq(team.id))
-            .one(&state.web_db)
+            .one(&db.web_db)
             .await?
     {
         let project = request.project;
-        request.into_active_model().delete(&state.web_db).await?;
+        request.into_active_model().delete(&db.web_db).await?;
         EventOwner {
             project: Some(project),
             ..Default::default()
@@ -380,18 +335,18 @@ pub async fn delete_team_request(
     } else {
         let request = ETeamCacheRequest::find_by_id(TeamCacheRequestId::new(request_id))
             .filter(CTeamCacheRequest::Team.eq(team.id))
-            .one(&state.web_db)
+            .one(&db.web_db)
             .await?
             .or_not_found(Resource::Request)?;
         let cache = request.cache;
-        request.into_active_model().delete(&state.web_db).await?;
+        request.into_active_model().delete(&db.web_db).await?;
         EventOwner {
             cache: Some(cache),
             ..Default::default()
         }
     };
 
-    audit_record(&state.db(),
+    audit_record(&db,
         Some(user.id),
         Action::TeamRequestDeny,
         owner,

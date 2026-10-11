@@ -4,16 +4,15 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::access::{CacheAccess, Caller, load_cache, project_admin_emails};
+use crate::access::project_admin_emails;
 use crate::audit::{RequestInfo, record as audit_record};
-use crate::authorization::MaybeApiKey;
 use crate::endpoints::projects::settings::mode_label;
 use crate::endpoints::projects::workers::reauth_project_workers;
 use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
-use crate::permissions::CachePermission;
 use crate::resource::Resource;
-use axum::extract::{Path, State};
+use crate::scope::{CacheScope, Requires, RequiresUnmanaged, can};
+use axum::extract::State;
 use axum::{Extension, Json};
 use chrono::NaiveDateTime;
 use gradient_ci::CiContext;
@@ -44,37 +43,22 @@ pub struct SubscriptionRequestItem {
 }
 
 pub async fn get_cache_subscription_requests(
-    state: State<Arc<ServerState>>,
-    Extension(user): Extension<MUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
-    Path(cache): Path<String>,
+    CacheScope { cache, db, .. }: CacheScope<Requires<can::ManageCacheSubscriptions>>,
 ) -> WebResult<Json<BaseResponse<Vec<SubscriptionRequestItem>>>> {
-    let cache = load_cache(
-        &state.db(),
-        Caller::User(&user),
-        api_key.as_ref(),
-        cache,
-        CacheAccess::Require {
-            permission: CachePermission::ManageCacheSubscriptions,
-            reject_managed: false,
-        },
-    )
-    .await?;
-
     let mut requests = ECacheSubscriptionRequest::find()
         .filter(CCacheSubscriptionRequest::Cache.eq(cache.id))
-        .all(&state.web_db)
+        .all(&db.web_db)
         .await?;
     requests.sort_by_key(|r| std::cmp::Reverse(r.created_at));
 
     let projects: HashMap<ProjectId, MProject> = by_ids::<EProject, _>(
-        &state.web_db,
+        &db.web_db,
         &requests.iter().map(|r| r.project).collect::<Vec<_>>(),
     )
     .await?;
 
     let requesters: HashMap<UserId, String> = by_ids::<EUser, _>(
-        &state.web_db,
+        &db.web_db,
         &requests.iter().map(|r| r.requested_by).collect::<Vec<_>>(),
     )
     .await?
@@ -167,25 +151,18 @@ async fn notify_project_admins(
 }
 
 pub async fn post_approve_subscription_request(
+    CacheScope {
+        cache,
+        user,
+        db,
+        params,
+        ..
+    }: CacheScope<RequiresUnmanaged<can::ManageCacheSubscriptions>>,
     state: State<Arc<ServerState>>,
     info: RequestInfo,
-    Extension(user): Extension<MUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
     Extension(scheduler): Extension<Arc<Scheduler>>,
-    Path((cache, project)): Path<(String, String)>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let db = state.db();
-    let cache = load_cache(
-        &db,
-        Caller::User(&user),
-        api_key.as_ref(),
-        cache,
-        CacheAccess::Require {
-            permission: CachePermission::ManageCacheSubscriptions,
-            reject_managed: true,
-        },
-    )
-    .await?;
+    let project: String = params.param("project")?;
 
     let (project, request) = load_request(&db, cache.id, project).await?;
     let mode = request.mode.clone();
@@ -251,24 +228,17 @@ pub async fn post_approve_subscription_request(
 }
 
 pub async fn delete_subscription_request(
+    CacheScope {
+        cache,
+        user,
+        db,
+        params,
+        ..
+    }: CacheScope<RequiresUnmanaged<can::ManageCacheSubscriptions>>,
     state: State<Arc<ServerState>>,
     info: RequestInfo,
-    Extension(user): Extension<MUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
-    Path((cache, project)): Path<(String, String)>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let db = state.db();
-    let cache = load_cache(
-        &db,
-        Caller::User(&user),
-        api_key.as_ref(),
-        cache,
-        CacheAccess::Require {
-            permission: CachePermission::ManageCacheSubscriptions,
-            reject_managed: true,
-        },
-    )
-    .await?;
+    let project: String = params.param("project")?;
 
     let (project, request) = load_request(&db, cache.id, project).await?;
     let mode = request.mode.clone();
