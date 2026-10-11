@@ -82,14 +82,16 @@ pub enum Caller<'a> {
     User(&'a MUser),
 }
 
-impl<'a> Caller<'a> {
-    pub fn from_option(maybe: &'a Option<MUser>) -> Self {
+impl<'a> From<&'a Option<MUser>> for Caller<'a> {
+    fn from(maybe: &'a Option<MUser>) -> Self {
         match maybe {
             Some(u) => Caller::User(u),
             None => Caller::Anon,
         }
     }
+}
 
+impl<'a> Caller<'a> {
     pub fn user_id(&self) -> Option<UserId> {
         match self {
             Caller::User(u) => Some(u.id),

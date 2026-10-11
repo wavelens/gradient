@@ -10,7 +10,6 @@ use crate::helpers::ok_json;
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
 use gradient_core::ServerState;
-use gradient_sources::get_path_from_derivation_output;
 use gradient_types::*;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use serde::{Deserialize, Serialize};
@@ -52,6 +51,19 @@ pub struct ProductArtefact {
     pub name: String,
     pub path: String,
     pub size: Option<i64>,
+}
+
+impl From<MBuildProduct> for ProductArtefact {
+    fn from(p: MBuildProduct) -> Self {
+        Self {
+            id: p.id,
+            file_type: p.file_type,
+            subtype: p.subtype,
+            name: p.name,
+            path: p.path,
+            size: p.size,
+        }
+    }
 }
 
 pub async fn get_artefacts(
@@ -148,17 +160,10 @@ pub async fn get_artefacts(
                         .cloned()
                         .unwrap_or_default()
                         .into_iter()
-                        .map(|p| ProductArtefact {
-                            id: p.id,
-                            file_type: p.file_type,
-                            subtype: p.subtype,
-                            name: p.name,
-                            path: p.path,
-                            size: p.size,
-                        })
+                        .map(ProductArtefact::from)
                         .collect();
                     OutputArtefacts {
-                        store_path: get_path_from_derivation_output(o.clone()).base(),
+                        store_path: StorePath::from(o.clone()).base(),
                         name: o.name,
                         products,
                     }

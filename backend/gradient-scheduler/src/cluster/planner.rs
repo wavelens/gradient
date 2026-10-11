@@ -9,7 +9,7 @@ use std::collections::{BTreeMap, HashMap};
 use gradient_types::ids::ClusterJobId;
 
 use super::matching::kuhn;
-use super::{ClusterMember, PendingCluster, Slot};
+use super::{ClusterMember, PendingCluster, Slot, SlotKind};
 use crate::jobs::{WorkerJobScore, visible_to};
 
 pub type ScoreLookup = HashMap<(String, String), WorkerJobScore>;
@@ -95,7 +95,7 @@ fn candidates(
     let Some(job) = &member.job else {
         return Vec::new();
     };
-    let kind = PendingCluster::slot_kind(member);
+    let kind = SlotKind::from(member);
     let mut fit: Vec<usize> = workers
         .iter()
         .enumerate()

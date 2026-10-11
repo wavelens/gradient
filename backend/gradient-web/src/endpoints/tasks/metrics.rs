@@ -49,7 +49,7 @@ pub async fn get_task_metrics(
 ) -> WebResult<Json<BaseResponse<TaskMetricsResponse>>> {
     let project = load_project(
         &state.0,
-        Caller::from_option(&maybe_user),
+        Caller::from(&maybe_user),
         api_key.as_ref(),
         project,
         ProjectAccess::Readable {
@@ -220,7 +220,7 @@ pub async fn get_entry_point_metrics(
 ) -> WebResult<Json<BaseResponse<EntryPointMetricsResponse>>> {
     let project = load_project(
         &state.0,
-        Caller::from_option(&maybe_user),
+        Caller::from(&maybe_user),
         api_key.as_ref(),
         project,
         ProjectAccess::Readable {

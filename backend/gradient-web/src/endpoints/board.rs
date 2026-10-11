@@ -26,7 +26,9 @@ use gradient_types::events::{Envelope, Event, EventRx, names, worker};
 use gradient_types::ids::DispatchedJobId;
 use gradient_types::*;
 use gradient_util::shutdown::CancellationToken;
-use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect};
+use sea_orm::{
+    ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QueryOrder, QueryResult, QuerySelect,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -859,6 +861,19 @@ pub struct ExpensiveBuild {
     pub worker_name: Option<String>,
 }
 
+impl From<QueryResult> for ExpensiveBuild {
+    fn from(r: QueryResult) -> Self {
+        Self {
+            build_id: r.try_get("", "id").unwrap_or_default(),
+            project: r.try_get("", "project").unwrap_or_default(),
+            name: r.try_get("", "name").unwrap_or_default(),
+            build_time_ms: r.try_get("", "build_time_ms").unwrap_or(0),
+            worker: r.try_get("", "worker").ok(),
+            worker_name: r.try_get("", "worker_name").ok(),
+        }
+    }
+}
+
 pub(crate) fn worker_name_sql(worker_col: &str, project_filter: Option<&str>) -> String {
     let (registration_scope, team_scope) = project_filter
         .map(|list| {
@@ -993,17 +1008,7 @@ pub async fn get_expensive_jobs(
         )
         .await?;
 
-    let out = rows
-        .into_iter()
-        .map(|r| ExpensiveBuild {
-            build_id: r.try_get("", "id").unwrap_or_default(),
-            project: r.try_get("", "project").unwrap_or_default(),
-            name: r.try_get("", "name").unwrap_or_default(),
-            build_time_ms: r.try_get("", "build_time_ms").unwrap_or(0),
-            worker: r.try_get("", "worker").ok(),
-            worker_name: r.try_get("", "worker_name").ok(),
-        })
-        .collect();
+    let out = rows.into_iter().map(ExpensiveBuild::from).collect();
 
     Ok(ok_json(out))
 }
@@ -1192,6 +1197,18 @@ pub struct TopProjectBuildTime {
     pub build_count: i64,
 }
 
+impl From<QueryResult> for TopProjectBuildTime {
+    fn from(r: QueryResult) -> Self {
+        Self {
+            project: r.try_get("", "project").unwrap_or_default(),
+            project_name: r.try_get("", "project_name").unwrap_or_default(),
+            project_display_name: r.try_get("", "project_display_name").unwrap_or_default(),
+            total_build_ms: r.try_get("", "total").unwrap_or(0),
+            build_count: r.try_get("", "cnt").unwrap_or(0),
+        }
+    }
+}
+
 fn top_projects_by_buildtime_sql(window_days: i64) -> String {
     format!(
         "WITH {metric}, shared_build AS ( \
@@ -1238,16 +1255,7 @@ pub async fn get_top_projects_by_buildtime(
         )
         .await?;
 
-    let out = rows
-        .into_iter()
-        .map(|r| TopProjectBuildTime {
-            project: r.try_get("", "project").unwrap_or_default(),
-            project_name: r.try_get("", "project_name").unwrap_or_default(),
-            project_display_name: r.try_get("", "project_display_name").unwrap_or_default(),
-            total_build_ms: r.try_get("", "total").unwrap_or(0),
-            build_count: r.try_get("", "cnt").unwrap_or(0),
-        })
-        .collect();
+    let out = rows.into_iter().map(TopProjectBuildTime::from).collect();
 
     Ok(ok_json(out))
 }
@@ -1575,18 +1583,20 @@ pub struct FlakeGraphNode {
     pub drv_path: Option<String>,
 }
 
-fn to_graph_node(n: flake_output_node::Model) -> FlakeGraphNode {
-    FlakeGraphNode {
-        path: n.path,
-        parent: n.parent,
-        name: n.name,
-        kind: n.kind,
-        is_derivation: n.is_derivation,
-        drv_path: n.drv_path.map(|p| {
-            gradient_entity::StorePath::parse(&p)
-                .map(|sp| sp.base())
-                .unwrap_or(p)
-        }),
+impl From<flake_output_node::Model> for FlakeGraphNode {
+    fn from(n: flake_output_node::Model) -> Self {
+        Self {
+            path: n.path,
+            parent: n.parent,
+            name: n.name,
+            kind: n.kind,
+            is_derivation: n.is_derivation,
+            drv_path: n.drv_path.map(|p| {
+                gradient_entity::StorePath::parse(&p)
+                    .map(|sp| sp.base())
+                    .unwrap_or(p)
+            }),
+        }
     }
 }
 
@@ -1603,7 +1613,7 @@ pub async fn get_eval_flake_graph(
         .all(&state.web_db)
         .await?;
 
-    let out = rows.into_iter().map(to_graph_node).collect();
+    let out = rows.into_iter().map(FlakeGraphNode::from).collect();
     Ok(ok_json(out))
 }
 
@@ -1883,7 +1893,7 @@ mod tests {
             is_derivation: true,
             drv_path: Some("/nix/store/abc-hello.drv".into()),
         };
-        let node = to_graph_node(model);
+        let node = FlakeGraphNode::from(model);
         assert_eq!(node.path, "packages.x86_64-linux.hello");
         assert_eq!(node.parent.as_deref(), Some("packages.x86_64-linux"));
         assert_eq!(node.name, "hello");

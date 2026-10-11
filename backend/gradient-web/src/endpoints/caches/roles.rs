@@ -39,8 +39,8 @@ pub struct CacheRoleResponse {
     pub permissions: Vec<&'static str>,
 }
 
-impl CacheRoleResponse {
-    fn from_model(role: MCacheRole) -> Self {
+impl From<MCacheRole> for CacheRoleResponse {
+    fn from(role: MCacheRole) -> Self {
         let builtin = is_builtin_cache_role(role.id);
         let permissions = cache_mask_to_vec(role.permission)
             .into_iter()
@@ -119,10 +119,7 @@ pub async fn get_cache_roles(
         .await?;
 
     Ok(ok_json(CacheRoleListResponse {
-        roles: roles
-            .into_iter()
-            .map(CacheRoleResponse::from_model)
-            .collect(),
+        roles: roles.into_iter().map(CacheRoleResponse::from).collect(),
         available_permissions: available_cache_permissions(),
     }))
 }
@@ -195,7 +192,7 @@ pub async fn post_cache_role(
     )
     .await;
 
-    Ok(ok_json(CacheRoleResponse::from_model(role)))
+    Ok(ok_json(CacheRoleResponse::from(role)))
 }
 
 pub async fn get_cache_role(
@@ -215,7 +212,7 @@ pub async fn get_cache_role(
     )
     .await?;
     let role = load_cache_role(&state, cache.id, role_id).await?;
-    Ok(ok_json(CacheRoleResponse::from_model(role)))
+    Ok(ok_json(CacheRoleResponse::from(role)))
 }
 
 pub async fn patch_cache_role(
@@ -301,7 +298,7 @@ pub async fn patch_cache_role(
     )
     .await;
 
-    Ok(ok_json(CacheRoleResponse::from_model(updated)))
+    Ok(ok_json(CacheRoleResponse::from(updated)))
 }
 
 pub async fn delete_cache_role(

@@ -117,7 +117,7 @@ mod tests {
 
     fn reported(status: BuildStatus) -> Reported {
         Reported {
-            status: i32::from(status) as i16,
+            status: i16::from(status),
             ..Default::default()
         }
     }

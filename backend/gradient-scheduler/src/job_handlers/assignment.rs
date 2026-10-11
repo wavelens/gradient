@@ -12,7 +12,6 @@ use anyhow::Context as _;
 use tracing::{Instrument as _, info, warn};
 
 use gradient_core::ServerState;
-use gradient_db::scheduling::assignment_record::ClaimGate;
 use gradient_graph::Transition;
 use gradient_types::*;
 use gradient_wire::types::{CandidateScore, JobKind};
@@ -249,7 +248,7 @@ async fn claim(
     let won = gradient_db::scheduling::assignment_record::claim_assignment(
         &state.worker_db,
         assignment_row(rec, worker_id, now()),
-        claim_gate(rec),
+        rec.into(),
     )
     .await
     .context("dispatched_job claim")?;
@@ -269,20 +268,6 @@ async fn claim(
     }
 
     moved.map(|_| true)
-}
-
-/// An upstream probe landing in between can turn a build into a passthrough. A stale build would
-/// then rebuild bytes already available upstream (#593).
-pub(crate) fn claim_gate(rec: &AssignmentRecord) -> ClaimGate {
-    match rec.derivation_build {
-        Some(shared_build) => ClaimGate::Build {
-            shared_build,
-            substitute: rec.substitute,
-        },
-        None => ClaimGate::Eval {
-            evaluation: rec.evaluation_id,
-        },
-    }
 }
 
 #[cfg(test)]

@@ -183,7 +183,7 @@ pub async fn get_cache_stats(
 ) -> WebResult<Json<BaseResponse<CacheStatsResponse>>> {
     let cache = load_cache(
         &state,
-        Caller::from_option(&maybe_user),
+        Caller::from(&maybe_user),
         api_key.as_ref(),
         cache,
         CacheAccess::Readable,

@@ -101,7 +101,7 @@ pub async fn update_derivation_build_status(
         &ctx.worker_db,
         PhaseSubjectKind::Build,
         updated.id.into_inner(),
-        i32::from(status) as i16,
+        i16::from(status),
         worker,
         now,
     )
@@ -200,7 +200,7 @@ pub async fn announce_entry_point_statuses(
                 derivation_build: job.derivation_build,
                 evaluation_id: job.evaluation,
                 derivation: job.derivation,
-                status: i32::from(status) as i16,
+                status: i16::from(status),
                 ..Default::default()
             },
         )

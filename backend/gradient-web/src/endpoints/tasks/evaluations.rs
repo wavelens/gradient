@@ -27,7 +27,7 @@ use gradient_entity::build::BuildStatus;
 use gradient_entity::derivation_output::UNKNOWN_OUTPUT_HASH;
 use gradient_entity::evaluation::{EvaluationStatus, WalkMode};
 use gradient_entity::evaluation_message::MessageLevel;
-use gradient_sources::{get_commit_info, get_path_from_derivation_output, head_commit};
+use gradient_sources::{get_commit_info, head_commit};
 use gradient_storage::nar_extract::{
     ExtractError, Extracted, extract_path_from_reader, nar_reader_from_stream,
 };
@@ -326,7 +326,7 @@ pub async fn get_task_evaluations(
 ) -> WebResult<Json<BaseResponse<Vec<EvaluationSummary>>>> {
     let (_project, task) = load_task(
         &state,
-        Caller::from_option(&maybe_user),
+        Caller::from(&maybe_user),
         api_key.as_ref(),
         project,
         task,
@@ -407,7 +407,7 @@ pub async fn get_task_details(
     let api_key_ref = api_key.as_ref();
     let (project, task) = load_task(
         &state,
-        Caller::from_option(&maybe_user),
+        Caller::from(&maybe_user),
         api_key_ref,
         project,
         task,
@@ -572,7 +572,7 @@ pub async fn get_task_entry_points(
 ) -> WebResult<Json<BaseResponse<PaginatedEntryPoints>>> {
     let (_project, task) = load_task(
         &state,
-        Caller::from_option(&maybe_user),
+        Caller::from(&maybe_user),
         api_key.as_ref(),
         project,
         task,
@@ -651,10 +651,9 @@ fn output_paths_by_derivation(
         if row.hash == UNKNOWN_OUTPUT_HASH {
             continue;
         }
-        out.entry(row.derivation).or_default().insert(
-            row.name.clone(),
-            get_path_from_derivation_output(row.clone()).full(),
-        );
+        out.entry(row.derivation)
+            .or_default()
+            .insert(row.name.clone(), StorePath::from(row.clone()).full());
     }
 
     out
@@ -868,7 +867,7 @@ async fn serve_hydra_artifact(
             .iter()
             .find(|o| o.id == product.derivation_output);
         let output_root = match output {
-            Some(o) => get_path_from_derivation_output(o.clone()).full(),
+            Some(o) => StorePath::from(o.clone()).full(),
             None => {
                 tracing::warn!(%filename, "build_product references unknown output");
                 continue;

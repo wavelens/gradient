@@ -132,7 +132,7 @@ async fn requeue_interrupted_evals<C: ConnectionTrait>(conn: &C) -> Result<u64, 
         conn,
         crate::status::PhaseSubjectKind::Evaluation,
         &subjects,
-        i32::from(EvaluationStatus::Queued) as i16,
+        i16::from(EvaluationStatus::Queued),
         now,
     )
     .await?;

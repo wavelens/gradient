@@ -116,6 +116,18 @@ pub struct UserInfoResponse {
     pub superuser: bool,
 }
 
+impl From<&MUser> for UserInfoResponse {
+    fn from(user: &MUser) -> Self {
+        Self {
+            id: user.id.to_string(),
+            username: user.username.clone(),
+            name: user.name.clone(),
+            email: user.email.clone(),
+            superuser: user.superuser,
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, Debug)]
 pub struct ApiKeyRequest {
     pub name: String,
@@ -222,6 +234,18 @@ pub struct GetUserSettingsResponse {
     pub managed: bool,
 }
 
+impl From<&MUser> for GetUserSettingsResponse {
+    fn from(user: &MUser) -> Self {
+        Self {
+            is_oidc: user.password.is_none(),
+            managed: user.managed,
+            username: user.username.clone(),
+            name: user.name.clone(),
+            email: user.email.clone(),
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, Debug)]
 pub struct UserSearchResult {
     pub id: String,
@@ -256,13 +280,7 @@ pub async fn get_search(
 pub async fn get(
     Extension(user): Extension<MUser>,
 ) -> WebResult<Json<BaseResponse<UserInfoResponse>>> {
-    let user_info = UserInfoResponse {
-        id: user.id.to_string(),
-        username: user.username.clone(),
-        name: user.name.clone(),
-        email: user.email.clone(),
-        superuser: user.superuser,
-    };
+    let user_info = UserInfoResponse::from(&user);
 
     let res = BaseResponse {
         error: false,
@@ -816,13 +834,7 @@ pub async fn get_settings(
 ) -> WebResult<Json<BaseResponse<GetUserSettingsResponse>>> {
     let res = BaseResponse {
         error: false,
-        message: GetUserSettingsResponse {
-            is_oidc: user.password.is_none(),
-            managed: user.managed,
-            username: user.username.clone(),
-            name: user.name.clone(),
-            email: user.email.clone(),
-        },
+        message: GetUserSettingsResponse::from(&user),
     };
 
     Ok(Json(res))

@@ -99,30 +99,34 @@ fn default_true() -> bool {
     true
 }
 
-fn to_response(m: MWebhook) -> WebhookResponse {
-    WebhookResponse {
-        id: m.id,
-        scope: m.scope,
-        name: m.name,
-        url: m.url,
-        events: serde_json::from_value(m.events).unwrap_or_default(),
-        active: m.active,
-        last_fired_at: m.last_fired_at,
-        created_by: m.created_by,
-        created_at: m.created_at,
-        updated_at: m.updated_at,
+impl From<MWebhook> for WebhookResponse {
+    fn from(m: MWebhook) -> Self {
+        Self {
+            id: m.id,
+            scope: m.scope,
+            name: m.name,
+            url: m.url,
+            events: serde_json::from_value(m.events).unwrap_or_default(),
+            active: m.active,
+            last_fired_at: m.last_fired_at,
+            created_by: m.created_by,
+            created_at: m.created_at,
+            updated_at: m.updated_at,
+        }
     }
 }
 
-fn to_delivery_item(r: MWebhookDelivery) -> DeliveryListItem {
-    DeliveryListItem {
-        id: r.id,
-        event: r.event,
-        success: r.success,
-        response_status: r.response_status,
-        error_message: r.error_message,
-        duration_ms: r.duration_ms,
-        delivered_at: r.delivered_at,
+impl From<MWebhookDelivery> for DeliveryListItem {
+    fn from(r: MWebhookDelivery) -> Self {
+        Self {
+            id: r.id,
+            event: r.event,
+            success: r.success,
+            response_status: r.response_status,
+            error_message: r.error_message,
+            duration_ms: r.duration_ms,
+            delivered_at: r.delivered_at,
+        }
     }
 }
 
@@ -186,7 +190,7 @@ pub async fn list_webhooks(
         .order_by_asc(CWebhook::Name)
         .all(&state.web_db)
         .await?;
-    Ok(ok_json(rows.into_iter().map(to_response).collect()))
+    Ok(ok_json(rows.into_iter().map(Into::into).collect()))
 }
 
 pub async fn create_webhook(
@@ -237,7 +241,7 @@ pub async fn create_webhook(
     )
     .await;
     Ok(ok_json(CreateWebhookResponse {
-        webhook: to_response(row),
+        webhook: row.into(),
         secret,
     }))
 }
@@ -246,7 +250,9 @@ pub async fn read_webhook(
     State(state): ApiState,
     owner: WebhookOwner,
 ) -> WebResult<Json<BaseResponse<WebhookResponse>>> {
-    Ok(ok_json(to_response(owned_webhook(&state, &owner).await?)))
+    Ok(ok_json(WebhookResponse::from(
+        owned_webhook(&state, &owner).await?,
+    )))
 }
 
 pub async fn update_webhook(
@@ -300,7 +306,7 @@ pub async fn update_webhook(
         json!({ "webhook_id": row.id, "fields": fields }),
     )
     .await;
-    Ok(ok_json(to_response(row)))
+    Ok(ok_json(WebhookResponse::from(row)))
 }
 
 pub async fn delete_webhook(
@@ -359,7 +365,7 @@ pub async fn test_webhook(
     )
     .await
     .context("test fire failed")?;
-    Ok(ok_json(to_delivery_item(delivery)))
+    Ok(ok_json(DeliveryListItem::from(delivery)))
 }
 
 pub async fn list_deliveries(
@@ -375,7 +381,7 @@ pub async fn list_deliveries(
         .offset(q.offset.unwrap_or(0))
         .all(&state.web_db)
         .await?;
-    Ok(ok_json(rows.into_iter().map(to_delivery_item).collect()))
+    Ok(ok_json(rows.into_iter().map(Into::into).collect()))
 }
 
 pub async fn get_delivery(
@@ -392,6 +398,6 @@ pub async fn get_delivery(
     Ok(ok_json(DeliveryDetail {
         request_body: r.request_body.clone(),
         response_body: r.response_body.clone(),
-        item: to_delivery_item(r),
+        item: r.into(),
     }))
 }

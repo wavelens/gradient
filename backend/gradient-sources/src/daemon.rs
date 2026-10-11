@@ -125,7 +125,7 @@ pub async fn get_pathinfo(
         .execute(|client| async move { client.query_path_info(&store_path).await })
         .await
         .map_err(|e| anyhow::anyhow!("query_path_info failed: {}", e))?;
-    Ok(info.map(|vi| convert_valid_path_info(&vi)))
+    Ok(info.map(|vi| PathInfo::from(&vi)))
 }
 
 pub async fn get_build_outputs_from_derivation(
@@ -175,14 +175,16 @@ pub struct PathInfo {
     pub ca: Option<String>,
 }
 
-pub fn convert_valid_path_info(vi: &harmonia_store_remote::UnkeyedValidPathInfo) -> PathInfo {
-    PathInfo {
-        deriver: vi.deriver.as_ref().map(|d| d.to_string()),
-        references: vi.references.iter().map(|r| r.to_string()).collect(),
-        nar_hash: format!("{}", vi.nar_hash.sri()),
-        nar_size: vi.nar_size,
-        ultimate: vi.ultimate,
-        signatures: vi.signatures.iter().map(|s| s.to_string()).collect(),
-        ca: vi.ca.as_ref().map(|ca| ca.to_string()),
+impl From<&harmonia_store_remote::UnkeyedValidPathInfo> for PathInfo {
+    fn from(vi: &harmonia_store_remote::UnkeyedValidPathInfo) -> Self {
+        Self {
+            deriver: vi.deriver.as_ref().map(|d| d.to_string()),
+            references: vi.references.iter().map(|r| r.to_string()).collect(),
+            nar_hash: format!("{}", vi.nar_hash.sri()),
+            nar_size: vi.nar_size,
+            ultimate: vi.ultimate,
+            signatures: vi.signatures.iter().map(|s| s.to_string()).collect(),
+            ca: vi.ca.as_ref().map(|ca| ca.to_string()),
+        }
     }
 }

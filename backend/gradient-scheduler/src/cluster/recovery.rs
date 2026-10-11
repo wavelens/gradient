@@ -64,9 +64,9 @@ impl Scheduler {
             &self.state.worker_db,
             cluster,
             attempt,
-            attempt_outcome(fate),
+            fate.into(),
             fate == Fate::Retry,
-            final_status(fate),
+            fate.into(),
         )
         .await;
         let requeued = match resolved {

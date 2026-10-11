@@ -34,6 +34,15 @@ pub struct Registered {
     pub negotiated: GradientCapabilities,
 }
 
+impl From<Authenticated> for Registered {
+    fn from(auth: Authenticated) -> Self {
+        Self {
+            peer_id: auth.peer_id,
+            negotiated: auth.negotiated,
+        }
+    }
+}
+
 #[derive(Debug, PartialEq, Clone)]
 pub enum Intent {
     Send(Box<ServerMessage>),
@@ -66,13 +75,6 @@ pub fn on_auth_response(
         peer_id: greeted.peer_id,
         negotiated,
     })
-}
-
-pub fn to_registered(auth: Authenticated) -> Registered {
-    Registered {
-        peer_id: auth.peer_id,
-        negotiated: auth.negotiated,
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -280,7 +282,7 @@ where
         .await
         .map_err(|_| anyhow::anyhow!("send InitAck"))?;
 
-    let registered = to_registered(authenticated);
+    let registered = Registered::from(authenticated);
     Ok(HandshakeResult {
         peer_id: registered.peer_id,
         negotiated: registered.negotiated,

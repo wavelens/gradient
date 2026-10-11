@@ -128,7 +128,7 @@ pub(super) async fn abort_shared_builds(
         &ctx.worker_db,
         PhaseSubjectKind::Build,
         &pe_ids,
-        i32::from(BuildStatus::Aborted) as i16,
+        i16::from(BuildStatus::Aborted),
         now,
     )
     .await?;

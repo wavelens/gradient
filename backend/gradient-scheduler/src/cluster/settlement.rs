@@ -63,6 +63,26 @@ pub enum Fate {
     Abort,
 }
 
+impl From<Fate> for ClusterJobStatus {
+    fn from(fate: Fate) -> Self {
+        match fate {
+            Fate::Complete => ClusterJobStatus::Completed,
+            Fate::Retry => ClusterJobStatus::Failed,
+            Fate::Abort => ClusterJobStatus::Aborted,
+        }
+    }
+}
+
+impl From<Fate> for ClusterAttemptOutcome {
+    fn from(fate: Fate) -> Self {
+        match fate {
+            Fate::Complete => ClusterAttemptOutcome::Succeeded,
+            Fate::Retry => ClusterAttemptOutcome::Failed,
+            Fate::Abort => ClusterAttemptOutcome::Aborted,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Resolution {
     pub fate: Fate,
@@ -175,22 +195,6 @@ fn terminal(failure: Failure) -> Failure {
             ..failure
         },
         _ => failure,
-    }
-}
-
-pub fn attempt_outcome(fate: Fate) -> ClusterAttemptOutcome {
-    match fate {
-        Fate::Complete => ClusterAttemptOutcome::Succeeded,
-        Fate::Retry => ClusterAttemptOutcome::Failed,
-        Fate::Abort => ClusterAttemptOutcome::Aborted,
-    }
-}
-
-pub fn final_status(fate: Fate) -> ClusterJobStatus {
-    match fate {
-        Fate::Complete => ClusterJobStatus::Completed,
-        Fate::Retry => ClusterJobStatus::Failed,
-        Fate::Abort => ClusterJobStatus::Aborted,
     }
 }
 

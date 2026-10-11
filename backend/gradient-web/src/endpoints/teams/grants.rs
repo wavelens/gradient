@@ -187,7 +187,7 @@ pub async fn get_project_teams(
 ) -> WebResult<Json<BaseResponse<Vec<TeamGrantEntry>>>> {
     let project = load_project(
         &state,
-        Caller::from_option(&maybe_user),
+        Caller::from(&maybe_user),
         api_key.as_ref(),
         project,
         ProjectAccess::Readable {

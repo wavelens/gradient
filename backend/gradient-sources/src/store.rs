@@ -50,10 +50,6 @@ pub fn get_hash_from_path(path: String) -> Result<(String, String), SourceError>
     Ok((hash, package))
 }
 
-pub fn get_path_from_derivation_output(output: MDerivationOutput) -> StorePath {
-    StorePath::from_parts(output.hash, output.package)
-}
-
 pub fn parse_drv_hash_name(drv_path: &str) -> Result<(String, String), SourceError> {
     let (hash, rest) = drv_path.split_once('-').ok_or(SourceError::InvalidPath)?;
     let name = rest.strip_suffix(".drv").ok_or(SourceError::InvalidPath)?;

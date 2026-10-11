@@ -7,6 +7,7 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::time::{Duration, Instant};
 
+use gradient_db::scheduling::assignment_record::ClaimGate;
 use gradient_entity::dispatched_job::DispatchedJobKind;
 use gradient_entity::evaluation::WalkMode;
 use gradient_types::ids::{
@@ -299,6 +300,22 @@ pub struct AssignmentRecord {
     pub instance_context: serde_json::Value,
     pub substitute: bool,
     pub build_context: serde_json::Value,
+}
+
+/// An upstream probe landing in between can turn a build into a passthrough. A stale build would
+/// then rebuild bytes already available upstream (#593).
+impl From<&AssignmentRecord> for ClaimGate {
+    fn from(rec: &AssignmentRecord) -> Self {
+        match rec.derivation_build {
+            Some(shared_build) => ClaimGate::Build {
+                shared_build,
+                substitute: rec.substitute,
+            },
+            None => ClaimGate::Eval {
+                evaluation: rec.evaluation_id,
+            },
+        }
+    }
 }
 
 struct ScoredCandidate {

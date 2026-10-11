@@ -21,12 +21,24 @@ pub struct ApiKeyContext {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MaybeApiKey(pub Option<ApiKeyContext>);
 
+impl From<&DecodedRequest> for MaybeApiKey {
+    fn from(decoded: &DecodedRequest) -> Self {
+        decoded
+            .api_key_context()
+            .cloned()
+            .map_or_else(MaybeApiKey::none, MaybeApiKey::from)
+    }
+}
+
+impl From<ApiKeyContext> for MaybeApiKey {
+    fn from(ctx: ApiKeyContext) -> Self {
+        Self(Some(ctx))
+    }
+}
+
 impl MaybeApiKey {
     pub fn none() -> Self {
         Self(None)
-    }
-    pub fn from_key(ctx: ApiKeyContext) -> Self {
-        Self(Some(ctx))
     }
     pub fn as_ref(&self) -> Option<&ApiKeyContext> {
         self.0.as_ref()

@@ -195,7 +195,7 @@ impl TypedWorker<Active> {
                 download_speed_mbps: None,
                 assigned_jobs: HashMap::new(),
                 observes_build_ram: false,
-                peer_auth: PeerAuth::from_peers(authorized_peers),
+                peer_auth: PeerAuth::from(authorized_peers),
                 sent_candidates: HashSet::new(),
                 session,
                 last_seen: Arc::new(AtomicI64::new(

@@ -101,7 +101,7 @@ mod tests {
             .append_query_results([Vec::<MEvaluation>::new()])
             .into_connection();
         let event: Event = build::Reported {
-            status: i32::from(BuildStatus::Completed) as i16,
+            status: i16::from(BuildStatus::Completed),
             ..Default::default()
         }
         .into();

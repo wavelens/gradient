@@ -70,6 +70,39 @@ pub struct ActionResponse {
     pub updated_at: chrono::NaiveDateTime,
 }
 
+impl From<MTaskAction> for ActionResponse {
+    fn from(m: MTaskAction) -> Self {
+        let at = m.action_type;
+        let mut config = m.config;
+        if let Some(field) = at.secret_field()
+            && let Some(obj) = config.as_object_mut()
+        {
+            obj.remove(field);
+        }
+        let events = m
+            .events
+            .as_array()
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(str::to_owned))
+                    .collect()
+            })
+            .unwrap_or_default();
+        Self {
+            id: m.id,
+            name: m.name,
+            action_type: at.as_str().into(),
+            config,
+            events,
+            active: m.active,
+            last_fired_at: m.last_fired_at,
+            created_by: m.created_by,
+            created_at: m.created_at,
+            updated_at: m.updated_at,
+        }
+    }
+}
+
 #[derive(Serialize, Debug)]
 pub struct CreateActionResponse {
     pub action: ActionResponse,
@@ -151,37 +184,6 @@ fn validate_destination(cfg: &ActionConfig) -> WebResult<()> {
     Ok(())
 }
 
-fn to_response(m: MTaskAction) -> ActionResponse {
-    let at = m.action_type;
-    let mut config = m.config;
-    if let Some(field) = at.secret_field()
-        && let Some(obj) = config.as_object_mut()
-    {
-        obj.remove(field);
-    }
-    let events = m
-        .events
-        .as_array()
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|v| v.as_str().map(str::to_owned))
-                .collect()
-        })
-        .unwrap_or_default();
-    ActionResponse {
-        id: m.id,
-        name: m.name,
-        action_type: at.as_str().into(),
-        config,
-        events,
-        active: m.active,
-        last_fired_at: m.last_fired_at,
-        created_by: m.created_by,
-        created_at: m.created_at,
-        updated_at: m.updated_at,
-    }
-}
-
 pub async fn list_actions(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
@@ -203,7 +205,7 @@ pub async fn list_actions(
         .all(&state.web_db)
         .await?;
 
-    Ok(ok_json(rows.into_iter().map(to_response).collect()))
+    Ok(ok_json(rows.into_iter().map(Into::into).collect()))
 }
 
 pub async fn create_action(
@@ -334,7 +336,7 @@ pub async fn create_action(
     .await;
 
     Ok(ok_json(CreateActionResponse {
-        action: to_response(m),
+        action: m.into(),
         token: plaintext_token,
     }))
 }
@@ -370,7 +372,7 @@ pub async fn read_action(
         .await?
         .or_not_found(Resource::Action)?;
 
-    Ok(ok_json(to_response(row)))
+    Ok(ok_json(ActionResponse::from(row)))
 }
 
 pub async fn update_action(
@@ -489,7 +491,7 @@ pub async fn update_action(
     )
     .await;
 
-    Ok(ok_json(to_response(updated)))
+    Ok(ok_json(ActionResponse::from(updated)))
 }
 
 async fn record_action_event(
@@ -710,24 +712,26 @@ pub struct DeliveryListItem {
     pub delivered_at: chrono::NaiveDateTime,
 }
 
+impl From<MTaskActionDelivery> for DeliveryListItem {
+    fn from(r: MTaskActionDelivery) -> Self {
+        Self {
+            id: r.id,
+            event: r.event,
+            success: r.success,
+            response_status: r.response_status,
+            error_message: r.error_message,
+            duration_ms: r.duration_ms,
+            delivered_at: r.delivered_at,
+        }
+    }
+}
+
 #[derive(Serialize, Debug)]
 pub struct DeliveryDetail {
     #[serde(flatten)]
     pub item: DeliveryListItem,
     pub request_body: String,
     pub response_body: Option<String>,
-}
-
-fn to_delivery_list_item(r: MTaskActionDelivery) -> DeliveryListItem {
-    DeliveryListItem {
-        id: r.id,
-        event: r.event,
-        success: r.success,
-        response_status: r.response_status,
-        error_message: r.error_message,
-        duration_ms: r.duration_ms,
-        delivered_at: r.delivered_at,
-    }
 }
 
 pub async fn list_deliveries(
@@ -766,7 +770,7 @@ pub async fn list_deliveries(
         .await?;
 
     Ok(ok_json(
-        rows.into_iter().map(to_delivery_list_item).collect(),
+        rows.into_iter().map(DeliveryListItem::from).collect(),
     ))
 }
 
@@ -807,6 +811,6 @@ pub async fn get_delivery(
     Ok(ok_json(DeliveryDetail {
         request_body: r.request_body.clone(),
         response_body: r.response_body.clone(),
-        item: to_delivery_list_item(r),
+        item: r.into(),
     }))
 }

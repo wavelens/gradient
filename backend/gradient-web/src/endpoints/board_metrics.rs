@@ -7,7 +7,7 @@
 use crate::authorization::MaybeUser;
 use crate::endpoints::board::worker_name_sql;
 use crate::endpoints::metrics::{
-    HttpRouteStat, ProcessStat, collect, http_snapshot, process_snapshot,
+    HttpRouteStat, Observations, ProcessStat, collect, http_snapshot, process_snapshot,
 };
 use crate::error::{WebResult, require_superuser};
 use crate::helpers::ok_json;
@@ -19,7 +19,7 @@ use gradient_entity::metric_rollup::RollupGranularity;
 use gradient_scheduler::Scheduler;
 use gradient_types::*;
 use gradient_util::telemetry::metric;
-use sea_orm::ConnectionTrait;
+use sea_orm::{ConnectionTrait, QueryResult};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -85,6 +85,18 @@ pub struct CacheTotals {
     pub requests_total: i64,
 }
 
+impl From<&Observations> for CacheTotals {
+    fn from(obs: &Observations) -> Self {
+        Self {
+            bytes: obs.cache_bytes,
+            nar_bytes: obs.cache_nar_bytes,
+            packages: obs.cache_packages,
+            bytes_sent_total: obs.cache_nar_bytes_sent_total,
+            requests_total: obs.cache_nar_requests_total,
+        }
+    }
+}
+
 #[derive(Serialize)]
 pub struct BoardCacheStats {
     pub totals: CacheTotals,
@@ -119,13 +131,7 @@ pub async fn get_board_cache(
     let traffic = infra_series(&state.web_db, metric::CACHE_BYTES_SENT, window).await?;
     let storage = infra_series(&state.web_db, metric::CACHE_BYTES_ADDED, window).await?;
     Ok(ok_json(BoardCacheStats {
-        totals: CacheTotals {
-            bytes: obs.cache_bytes,
-            nar_bytes: obs.cache_nar_bytes,
-            packages: obs.cache_packages,
-            bytes_sent_total: obs.cache_nar_bytes_sent_total,
-            requests_total: obs.cache_nar_requests_total,
-        },
+        totals: CacheTotals::from(&obs),
         traffic,
         storage,
     }))
@@ -301,6 +307,18 @@ pub struct WorkerNet {
     pub disk_speed_mbps: Option<f32>,
 }
 
+impl From<QueryResult> for WorkerNet {
+    fn from(r: QueryResult) -> Self {
+        Self {
+            worker_id: r.try_get("", "worker_id").ok(),
+            worker_name: r.try_get("", "worker_name").ok(),
+            upload_speed_mbps: r.try_get("", "upload_speed_mbps").ok().flatten(),
+            download_speed_mbps: r.try_get("", "download_speed_mbps").ok().flatten(),
+            disk_speed_mbps: r.try_get("", "disk_speed_mbps").ok().flatten(),
+        }
+    }
+}
+
 #[derive(Serialize)]
 pub struct BoardNetworkStats {
     pub nar_egress: Vec<SeriesPoint>,
@@ -364,16 +382,7 @@ pub async fn get_board_network(
         .query_all_raw(BOARD_NETWORK.bind_built(board_network_sql(project_filter.as_deref()), []))
         .await?;
 
-    let workers = rows
-        .into_iter()
-        .map(|r| WorkerNet {
-            worker_id: r.try_get("", "worker_id").ok(),
-            worker_name: r.try_get("", "worker_name").ok(),
-            upload_speed_mbps: r.try_get("", "upload_speed_mbps").ok().flatten(),
-            download_speed_mbps: r.try_get("", "download_speed_mbps").ok().flatten(),
-            disk_speed_mbps: r.try_get("", "disk_speed_mbps").ok().flatten(),
-        })
-        .collect();
+    let workers = rows.into_iter().map(WorkerNet::from).collect();
 
     let http = if scope.is_all() {
         http_snapshot()

@@ -39,8 +39,8 @@ pub struct RoleResponse {
     pub permissions: Vec<&'static str>,
 }
 
-impl RoleResponse {
-    fn from_model(role: MRole) -> Self {
+impl From<MRole> for RoleResponse {
+    fn from(role: MRole) -> Self {
         let builtin = is_builtin_role(role.id);
         let permissions = mask_to_vec(role.permission)
             .into_iter()
@@ -122,7 +122,7 @@ pub async fn get_project_roles(
         .await?;
 
     Ok(ok_json(RoleListResponse {
-        roles: roles.into_iter().map(RoleResponse::from_model).collect(),
+        roles: roles.into_iter().map(RoleResponse::from).collect(),
         available_permissions: available_permissions(),
     }))
 }
@@ -197,7 +197,7 @@ pub async fn post_project_role(
     )
     .await;
 
-    Ok(ok_json(RoleResponse::from_model(role)))
+    Ok(ok_json(RoleResponse::from(role)))
 }
 
 pub async fn get_project_role(
@@ -217,7 +217,7 @@ pub async fn get_project_role(
     )
     .await?;
     let role = load_project_role(&state, project.id, role_id).await?;
-    Ok(ok_json(RoleResponse::from_model(role)))
+    Ok(ok_json(RoleResponse::from(role)))
 }
 
 pub async fn patch_project_role(
@@ -303,7 +303,7 @@ pub async fn patch_project_role(
     )
     .await;
 
-    Ok(ok_json(RoleResponse::from_model(updated)))
+    Ok(ok_json(RoleResponse::from(updated)))
 }
 
 pub async fn delete_project_role(

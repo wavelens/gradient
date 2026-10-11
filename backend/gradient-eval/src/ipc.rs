@@ -47,6 +47,15 @@ pub struct DiscoveryShard {
     pub only: Option<Vec<String>>,
 }
 
+impl From<crate::wildcard_walk::Shard> for DiscoveryShard {
+    fn from(shard: crate::wildcard_walk::Shard) -> Self {
+        Self {
+            pattern: crate::wildcard_walk::segments_to_pattern(&shard.segments),
+            only: shard.only,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Archive, RkyvSerialize, RkyvDeserialize, Serialize, Deserialize)]
 #[rkyv(derive(Debug))]
 #[serde(tag = "op", rename_all = "snake_case")]

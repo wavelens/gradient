@@ -76,7 +76,7 @@ pub async fn task_live_ws(
 ) -> WebResult<Response> {
     let (_project, task) = load_task(
         &state,
-        Caller::from_option(&maybe_user),
+        Caller::from(&maybe_user),
         api_key.as_ref(),
         project,
         task,

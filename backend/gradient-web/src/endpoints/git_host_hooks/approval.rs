@@ -12,7 +12,7 @@ use super::installation::resolve_github_app_targets;
 use super::payloads::GithubCheckRunRequestedAction;
 use gradient_ci::{APPROVAL_ACTION_ID, find_approval_gated_eval, unpark_approval};
 use gradient_core::ServerState;
-use gradient_git_host::ParsedPullRequestReviewEvent;
+use gradient_git_host::{ParsedPullRequestEvent, ParsedPullRequestReviewEvent};
 use gradient_scheduler::Scheduler;
 use gradient_types::events::evaluation;
 use gradient_types::*;
@@ -26,6 +26,17 @@ pub(super) struct PullRequestApprovalContext {
     pub pr_author: Option<String>,
     pub is_fork: Option<bool>,
     pub sender: Option<String>,
+}
+
+impl From<&ParsedPullRequestEvent> for PullRequestApprovalContext {
+    fn from(parsed: &ParsedPullRequestEvent) -> Self {
+        Self {
+            pr_number: parsed.pr_number,
+            pr_author: parsed.pr_author.clone(),
+            is_fork: parsed.is_fork,
+            sender: parsed.sender.clone(),
+        }
+    }
 }
 
 pub(super) async fn handle_github_check_run(
@@ -113,7 +124,7 @@ pub(super) async fn on_approval_granted(state: &Arc<ServerState>, eval: &MEvalua
         .record(evaluation::Reported {
             evaluation_id: eval.id,
             phase: evaluation::Phase::ApprovalGranted,
-            status: i32::from(eval.status) as i16,
+            status: i16::from(eval.status),
             task: Some(task_id),
             ..Default::default()
         })

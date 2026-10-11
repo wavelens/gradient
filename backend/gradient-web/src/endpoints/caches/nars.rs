@@ -142,7 +142,7 @@ pub async fn list(
 ) -> WebResult<Json<BaseResponse<Paginated<Vec<NarSummary>>>>> {
     let cache = load_cache(
         &state,
-        Caller::from_option(&maybe_user),
+        Caller::from(&maybe_user),
         api_key.as_ref(),
         cache_name,
         CacheAccess::Readable,
@@ -217,7 +217,7 @@ pub async fn show(
 ) -> WebResult<Json<BaseResponse<NarDetail>>> {
     let cache = load_cache(
         &state,
-        Caller::from_option(&maybe_user),
+        Caller::from(&maybe_user),
         api_key.as_ref(),
         cache_name,
         CacheAccess::Readable,
@@ -277,7 +277,7 @@ pub async fn stats(
     use sea_orm::FromQueryResult;
     let cache = load_cache(
         &state,
-        Caller::from_option(&maybe_user),
+        Caller::from(&maybe_user),
         api_key.as_ref(),
         cache_name,
         CacheAccess::Readable,
@@ -317,7 +317,7 @@ pub async fn available(
 ) -> WebResult<Json<BaseResponse<NarAvailable>>> {
     let cache = load_cache(
         &state,
-        Caller::from_option(&maybe_user),
+        Caller::from(&maybe_user),
         api_key.as_ref(),
         cache_name,
         CacheAccess::Readable,

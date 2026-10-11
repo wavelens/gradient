@@ -7,6 +7,7 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use gradient_db::scheduling::assignment_record::ClaimGate;
 use gradient_db::scheduling::cluster::ClusterClaim;
 use gradient_pool::session_port::SessionSignal;
 use gradient_types::ids::ClusterAttemptId;
@@ -15,7 +16,7 @@ use tracing::{debug, info, warn};
 
 const RESOLVED_ATTEMPT_TTL: Duration = Duration::from_secs(600);
 
-use super::assignment::{assigned_transition, assignment_row, claim_gate};
+use super::assignment::{assigned_transition, assignment_row};
 use crate::Scheduler;
 use crate::actor::SchedulerMsg;
 use crate::cluster::{
@@ -152,7 +153,7 @@ impl Scheduler {
                 .map(|s| {
                     (
                         assignment_row(&s.record, &s.worker, now),
-                        claim_gate(&s.record),
+                        ClaimGate::from(&s.record),
                     )
                 })
                 .collect(),

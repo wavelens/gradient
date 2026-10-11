@@ -14,7 +14,6 @@ use gradient_core::ServerState;
 use gradient_db::scheduling::startable_set::StartableMoves;
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_graph::Transition;
-use gradient_sources::get_path_from_derivation_output;
 use gradient_types::*;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 
@@ -399,7 +398,7 @@ impl BuildAssignMaps {
                 for o in outputs {
                     let cache_info = cache_info_by_hash.get(&o.hash).cloned();
                     paths.push(RequiredPath {
-                        path: get_path_from_derivation_output(o.clone()).full(),
+                        path: StorePath::from(o.clone()).full(),
                         cache_info,
                     });
                 }
@@ -417,7 +416,7 @@ impl BuildAssignMaps {
         })
         .await?
         {
-            let path = get_path_from_derivation_output(o.clone()).full();
+            let path = StorePath::from(o.clone()).full();
             let size = output_nar_sizes.entry(o.derivation).or_insert(Some(0));
             *size = size.zip(o.nar_size).map(|(sum, n)| sum + n.max(0) as u64);
             self_outputs

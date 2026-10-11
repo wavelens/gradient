@@ -37,7 +37,7 @@ pub async fn cache_proto(
         return Err(CacheRefusal::AnonymousAccessDisabled.into());
     }
 
-    let caller = Caller::from_option(&maybe_user);
+    let caller = Caller::from(&maybe_user);
     let cache = load_cache(
         &state,
         caller,

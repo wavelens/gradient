@@ -46,8 +46,8 @@ pub struct TriggerIntegrationSummary {
     pub git_host_type: String,
 }
 
-impl TriggerIntegrationSummary {
-    fn from_model(m: &MIntegration) -> Self {
+impl From<&MIntegration> for TriggerIntegrationSummary {
+    fn from(m: &MIntegration) -> Self {
         Self {
             id: m.id,
             name: m.name.clone(),
@@ -75,7 +75,7 @@ impl TriggerOut {
     fn build(m: MTaskTrigger, integrations: &HashMap<IntegrationId, MIntegration>) -> Self {
         let integration = trigger_integration_id(m.trigger_type, &m.config)
             .and_then(|id| integrations.get(&id))
-            .map(TriggerIntegrationSummary::from_model);
+            .map(TriggerIntegrationSummary::from);
         Self {
             id: m.id,
             task: m.task,

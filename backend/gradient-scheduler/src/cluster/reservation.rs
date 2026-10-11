@@ -125,7 +125,7 @@ fn reserve_step(
             kinds: placement
                 .seats
                 .iter()
-                .map(|seat| PendingCluster::slot_kind(&cluster.members[seat.member]))
+                .map(|seat| SlotKind::from(&cluster.members[seat.member]))
                 .collect(),
             placement,
             since: at,

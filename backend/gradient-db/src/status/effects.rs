@@ -180,7 +180,7 @@ async fn announce(ctx: &DbContext, changes: &[TransitionChange]) -> Result<(), D
                     build_id: job.id,
                     derivation_build: job.derivation_build,
                     evaluation_id: job.evaluation,
-                    status: i32::from(c.to) as i16,
+                    status: i16::from(c.to),
                 });
 
             if ci_reports(c.to) && entry_keys.contains(&(job.evaluation, job.derivation)) {
@@ -192,7 +192,7 @@ async fn announce(ctx: &DbContext, changes: &[TransitionChange]) -> Result<(), D
                         derivation_build: job.derivation_build,
                         evaluation_id: job.evaluation,
                         derivation: job.derivation,
-                        status: i32::from(c.to) as i16,
+                        status: i16::from(c.to),
                         ..Default::default()
                     },
                 )
