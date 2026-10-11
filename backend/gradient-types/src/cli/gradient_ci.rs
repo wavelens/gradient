@@ -5,28 +5,14 @@
  */
 
 use clap::Args;
+use gradient_derive::config_group;
 
+#[config_group("gradient_ci")]
 #[derive(Args, Debug, Clone)]
 pub struct GradientCiArgs {
-    #[arg(
-        id = "gradient-ci-enable",
-        long = "gradient-ci-enable",
-        env = "GRADIENT_GRADIENT_CI_ENABLE",
-        default_value = "true"
-    )]
+    #[arg(id = "gradient-ci-enable", default_value = "true")]
     pub enable: bool,
 
-    #[arg(
-        id = "gradient-ci-url",
-        long = "gradient-ci-url",
-        env = "GRADIENT_GRADIENT_CI_URL",
-        default_value = "https://servers.gradient.ci"
-    )]
+    #[arg(id = "gradient-ci-url", default_value = "https://servers.gradient.ci")]
     pub url: String,
-}
-
-impl Default for GradientCiArgs {
-    fn default() -> Self {
-        super::clap_defaults()
-    }
 }

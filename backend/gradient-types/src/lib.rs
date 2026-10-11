@@ -6,6 +6,8 @@
 
 pub mod actions;
 
+extern crate self as gradient_types;
+
 pub mod cli;
 pub mod config;
 pub mod constants;
@@ -56,6 +58,7 @@ pub use self::wildcard::*;
 
 use chrono::NaiveDateTime;
 use clap::Parser;
+use gradient_derive::config_group;
 use serde::{Deserialize, Serialize};
 
 #[inline]
@@ -63,6 +66,7 @@ pub fn now() -> NaiveDateTime {
     chrono::Utc::now().naive_utc()
 }
 
+#[config_group(no_default)]
 #[derive(Parser, Debug, Clone, Default)]
 #[command(name = "Gradient", display_name = "Gradient", bin_name = "gradient-server", author = "Wavelens", version, about, long_about = None)]
 pub struct Cli {
