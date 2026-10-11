@@ -50,8 +50,7 @@ pub fn collapse_transitions(changes: Vec<TransitionChange>) -> Vec<TransitionCha
 }
 
 fn ci_reports(status: BuildStatus) -> bool {
-    matches!(status, BuildStatus::Queued | BuildStatus::Building)
-        || crate::state_machine::BuildStateMachine::is_terminal(&status)
+    matches!(status, BuildStatus::Queued | BuildStatus::Building) || status.is_terminal()
 }
 
 /// The second round cannot need a third.
@@ -210,7 +209,7 @@ async fn announce(ctx: &DbContext, changes: &[TransitionChange]) -> Result<(), D
 
     let terminal_evals: HashSet<EvaluationId> = changes
         .iter()
-        .filter(|c| crate::state_machine::BuildStateMachine::is_terminal(&c.to))
+        .filter(|c| c.to.is_terminal())
         .flat_map(|c| {
             jobs_by_drv
                 .get(&c.derivation)
@@ -225,7 +224,7 @@ async fn announce(ctx: &DbContext, changes: &[TransitionChange]) -> Result<(), D
 
     let finished: Vec<DerivationId> = changes
         .iter()
-        .filter(|c| c.from != c.to && crate::state_machine::BuildStateMachine::is_terminal(&c.to))
+        .filter(|c| c.from != c.to && c.to.is_terminal())
         .map(|c| c.derivation)
         .collect();
     if !finished.is_empty() {

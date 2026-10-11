@@ -12,6 +12,7 @@ use crate::graph::{
         eval_closure_cte, eval_closure_cte_body,
     },
 };
+use crate::sql::StatusWrite;
 use crate::status::TransitionChange;
 
 use super::transitions::returned_transitions;
@@ -86,8 +87,8 @@ pub(super) fn requeue_failed_shared_builds_sql() -> String {
           AND db.derivation NOT IN (SELECT derivation FROM deterministic_blocked)
         RETURNING db.derivation, old.status AS from_status, db.status AS to_status
         "#,
-        created = crate::sql::status::build(BuildStatus::Created),
-        requeueable = crate::sql::status::build_in(&BuildStatus::REQUEUEABLE),
+        created = crate::sql::status::to(BuildStatus::REQUEUE),
+        requeueable = crate::sql::status::from(BuildStatus::REQUEUE),
     )
 }
 
@@ -95,7 +96,8 @@ crate::sql_fn! {
     REQUEUE_FAILED_SHARED_BUILDS = requeue_failed_shared_builds_sql,
         params = [DerivationIds(64)],
         tier = Walk,
-        flags = [Walk];
+        flags = [Walk],
+        status_write = StatusWrite::build(BuildStatus::REQUEUE);
 }
 
 pub async fn requeue_failed_closure<C>(
@@ -135,8 +137,8 @@ fn requeue_closure_update(blocked: &str, upstream_answer: &str) -> String {
         WHERE db.derivation = failed.derivation AND db.status IN ({requeueable}){blocked}
         RETURNING db.derivation, old.status AS from_status, db.status AS to_status
         "#,
-        created = crate::sql::status::build(BuildStatus::Created),
-        requeueable = crate::sql::status::build_in(&BuildStatus::REQUEUEABLE),
+        created = crate::sql::status::to(BuildStatus::REQUEUE),
+        requeueable = crate::sql::status::from(BuildStatus::REQUEUE),
     )
 }
 
@@ -240,7 +242,7 @@ fn retry_build_closure_sql() -> String {
         RETURNING db.derivation, old.status AS from_status, db.status AS to_status
         "#,
         closure = eval_closure_cte_body(),
-        created = crate::sql::status::build(BuildStatus::Created),
+        created = crate::sql::status::to(BuildStatus::REQUEUE),
     )
 }
 
@@ -300,7 +302,8 @@ crate::sql_fn! {
     REQUEUE_FAILED_IMPORT_CLOSURE = requeue_failed_import_closure_sql,
         params = [DerivationIds(64)],
         tier = Walk,
-        flags = [Walk];
+        flags = [Walk],
+        status_write = StatusWrite::build(BuildStatus::REQUEUE);
 
     REQUEUE_FAILED_CLOSURE_FRESH = requeue_failed_closure_fresh_sql,
         params = [EvaluationId],
@@ -308,7 +311,8 @@ crate::sql_fn! {
         budget = crate::sql::Budget::walk().buffers(500_000)
             .because("the same whole-closure walk PROMOTE_CLOSURE_QUERY pays for, taken only \
                       while the closure holds a failed shared build"),
-        flags = [Walk];
+        flags = [Walk],
+        status_write = StatusWrite::build(BuildStatus::REQUEUE);
 
     REQUEUE_FAILED_CLOSURE_BLOCKED = requeue_failed_closure_blocked_sql,
         params = [EvaluationId],
@@ -316,7 +320,8 @@ crate::sql_fn! {
         budget = crate::sql::Budget::walk().buffers(500_000)
             .because("the same whole-closure walk PROMOTE_CLOSURE_QUERY pays for, taken only \
                       while the closure holds a failed shared build"),
-        flags = [Walk];
+        flags = [Walk],
+        status_write = StatusWrite::build(BuildStatus::REQUEUE);
 
     REQUEUE_FAILED_CLOSURE_ALL = requeue_failed_closure_all_sql,
         params = [EvaluationId],
@@ -324,12 +329,14 @@ crate::sql_fn! {
         budget = crate::sql::Budget::walk().buffers(500_000)
             .because("the same whole-closure walk PROMOTE_CLOSURE_QUERY pays for, taken only \
                       while the closure holds a failed shared build"),
-        flags = [Walk];
+        flags = [Walk],
+        status_write = StatusWrite::build(BuildStatus::REQUEUE);
 
     RETRY_BUILD_CLOSURE = retry_build_closure_sql,
         params = [EvaluationId, DerivationId],
         tier = Walk,
-        flags = [Walk];
+        flags = [Walk],
+        status_write = StatusWrite::build(BuildStatus::REQUEUE);
 }
 
 #[cfg(test)]

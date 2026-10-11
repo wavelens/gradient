@@ -298,10 +298,7 @@ async fn eval_failed(
     if let Some(eval) = EEvaluation::find_by_id(evaluation_id)
         .one(&ctx.worker_db)
         .await?
-        && !matches!(
-            eval.status,
-            EvaluationStatus::Completed | EvaluationStatus::Failed | EvaluationStatus::Aborted
-        )
+        && !eval.status.is_terminal()
     {
         if kind == BuildFailureKind::Aborted {
             update_evaluation_status(ctx, eval, EvaluationStatus::Aborted).await?;
@@ -351,10 +348,7 @@ async fn requeue_evaluation(ctx: &DbContext, evaluation_id: EvaluationId) -> Res
     if let Some(eval) = EEvaluation::find_by_id(evaluation_id)
         .one(&ctx.worker_db)
         .await?
-        && !matches!(
-            eval.status,
-            EvaluationStatus::Completed | EvaluationStatus::Failed | EvaluationStatus::Aborted
-        )
+        && !eval.status.is_terminal()
     {
         update_evaluation_status(ctx, eval, EvaluationStatus::Queued).await?;
     }
@@ -937,11 +931,22 @@ async fn substitute_misses(
     .unwrap_or(0)
 }
 
-gradient_db::sql! {
-    CLEAR_SHARED_BUILD_SUBSTITUTION = "UPDATE derivation_build SET cache_available = false, status = $2, attempt = 0, \
-         updated_at = (now() AT TIME ZONE 'UTC') WHERE id = $1",
-        params = [SharedBuildId, Int(0)];
+fn clear_shared_build_substitution_sql() -> String {
+    format!(
+        "UPDATE derivation_build SET cache_available = false, status = {created}, attempt = 0, \
+         updated_at = (now() AT TIME ZONE 'UTC') WHERE id = $1 AND status IN ({unfinished})",
+        created = gradient_db::sql::status::to(BuildStatus::BUILD_AFTER_SUBSTITUTE_MISSES),
+        unfinished = gradient_db::sql::status::from(BuildStatus::BUILD_AFTER_SUBSTITUTE_MISSES),
+    )
+}
 
+gradient_db::sql_fn! {
+    CLEAR_SHARED_BUILD_SUBSTITUTION = clear_shared_build_substitution_sql,
+        params = [SharedBuildId],
+        status_write = gradient_db::sql::StatusWrite::build(BuildStatus::BUILD_AFTER_SUBSTITUTE_MISSES);
+}
+
+gradient_db::sql! {
     CLEAR_OUTPUTS_UPSTREAM_RECORD = "UPDATE derivation_output SET external_url = NULL, nar_hash = NULL, file_hash = NULL, \
          file_size = NULL, nar_size = NULL, references_list = NULL, deriver = NULL \
          WHERE derivation = $1",
@@ -954,12 +959,14 @@ async fn exhaust_substitution(
     misses: i64,
 ) -> Result<()> {
     let db = &ctx.worker_db;
-    db.execute_raw(CLEAR_SHARED_BUILD_SUBSTITUTION.bind([
-        shared_build.id.into_inner().into(),
-        i32::from(BuildStatus::Created).into(),
-    ]))
-    .await
-    .context("clear the shared build's substitution")?;
+    let cleared = db
+        .execute_raw(CLEAR_SHARED_BUILD_SUBSTITUTION.bind([shared_build.id.into_inner().into()]))
+        .await
+        .context("clear the shared build's substitution")?;
+    if cleared.rows_affected() == 0 {
+        info!(derivation_build = %shared_build.id, "the shared build finished before its substitute misses were exhausted");
+        return Ok(());
+    }
     db.execute_raw(
         CLEAR_OUTPUTS_UPSTREAM_RECORD.bind([shared_build.derivation.into_inner().into()]),
     )
@@ -1223,6 +1230,12 @@ mod tests {
     use crate::test_ctx::ctx;
     use gradient_fixtures::mock::mock_db;
     use sea_orm::MockExecResult;
+
+    #[test]
+    fn every_status_write_declares_its_transition() {
+        let violations = gradient_db::sql::status_write::violations();
+        assert!(violations.is_empty(), "{}", violations.join("\n"));
+    }
 
     #[tokio::test]
     async fn a_canceled_eval_job_puts_its_evaluation_back_in_the_queue() {

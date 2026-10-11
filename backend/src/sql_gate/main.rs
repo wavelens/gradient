@@ -12,7 +12,7 @@ mod unanalyzed;
 
 use anyhow::{Context, Result};
 use clap::Parser;
-use gradient_db::sql::{Param, registry};
+use gradient_db::sql::{Param, registry, status_write};
 use sample::Sampler;
 use sea_orm::{ConnectOptions, ConnectionTrait, Database, DatabaseConnection, Value};
 
@@ -64,6 +64,13 @@ async fn main() -> Result<()> {
         .is_empty()
         .then_some(())
         .context("a crate's statements did not reach the registry")?;
+
+    let violations = status_write::violations();
+    anyhow::ensure!(
+        violations.is_empty(),
+        "status writes without a matching `status_write`:\n{}",
+        violations.join("\n")
+    );
 
     if cli.list {
         list();

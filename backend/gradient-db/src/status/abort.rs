@@ -5,7 +5,6 @@
  */
 
 use super::logging::{PhaseSubjectKind, record_phase_events};
-use crate::state_machine::EvalStateMachine;
 use crate::{DbContext, fetch_in_chunks, for_each_chunk};
 use gradient_entity::build::BuildStatus;
 use gradient_entity::build_attempt::{AttemptOutcome, Column as CAttempt, Entity as EAttempt};
@@ -174,7 +173,7 @@ pub(super) async fn ids_shared_with_other_evaluations(
     .await?;
     let live: HashSet<EvaluationId> = evals
         .into_iter()
-        .filter(|e| !EvalStateMachine::is_terminal(&e.status))
+        .filter(|e| !e.status.is_terminal())
         .map(|e| e.id)
         .collect();
 

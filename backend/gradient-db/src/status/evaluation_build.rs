@@ -9,7 +9,6 @@ use super::emit_transition_effects;
 use super::eval_finalize::check_evaluation_done;
 use super::evaluation_status::reopen_evaluation;
 use crate::DbContext;
-use crate::state_machine::EvalStateMachine;
 use gradient_entity::build::BuildStatus;
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_types::*;
@@ -37,7 +36,7 @@ pub async fn abort_evaluation_build(
     evaluation: &MEvaluation,
     shared_build: &MDerivationBuild,
 ) -> Result<Result<(), BuildRefusal>, DbErr> {
-    let open = !EvalStateMachine::is_terminal(&evaluation.status);
+    let open = !evaluation.status.is_terminal();
     if let Err(refusal) = check(open, shared_build, &BuildStatus::ABORTABLE) {
         return Ok(Err(refusal));
     }
@@ -63,7 +62,7 @@ pub async fn retry_evaluation_build(
     evaluation: &MEvaluation,
     shared_build: &MDerivationBuild,
 ) -> Result<Result<(), BuildRefusal>, DbErr> {
-    let reopens = EvalStateMachine::is_terminal(&evaluation.status);
+    let reopens = evaluation.status.is_terminal();
     let open = !reopens || reopenable(evaluation);
     if let Err(refusal) = check(open, shared_build, &BuildStatus::REQUEUEABLE) {
         return Ok(Err(refusal));

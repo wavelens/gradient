@@ -7,6 +7,7 @@
 use super::evaluation_message::EvaluationFailure;
 use super::logging::{PhaseSubjectKind, record_phase_event};
 use crate::DbContext;
+use crate::sql::StatusWrite;
 use chrono::NaiveDateTime;
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_entity::transition::Transition;
@@ -122,15 +123,16 @@ fn reopen_evaluation_sql() -> String {
              SELECT 1 FROM evaluation o \
              WHERE o.task = e.task AND o.id <> e.id \
                AND (o.created_at > e.created_at OR o.status NOT IN ({terminal})))",
-        building = crate::sql::status::eval(EvaluationStatus::Building),
-        reopenable = crate::sql::status::eval_in(&EvaluationStatus::REOPENABLE),
+        building = crate::sql::status::to(EvaluationStatus::REOPEN),
+        reopenable = crate::sql::status::from(EvaluationStatus::REOPEN),
         terminal = crate::sql::status::eval_in(&EvaluationStatus::TERMINAL),
     )
 }
 
 crate::sql_fn! {
     REOPEN_EVALUATION = reopen_evaluation_sql,
-        params = [EvaluationId];
+        params = [EvaluationId],
+        status_write = StatusWrite::evaluation(EvaluationStatus::REOPEN);
 }
 
 pub async fn reopen_evaluation(ctx: &DbContext, evaluation: &MEvaluation) -> Result<bool, DbErr> {
@@ -189,10 +191,7 @@ pub async fn update_evaluation_status_with_error(
     status: EvaluationStatus,
     failure: &EvaluationFailure<'_>,
 ) -> Result<MEvaluation, DbErr> {
-    if matches!(
-        evaluation.status,
-        EvaluationStatus::Aborted | EvaluationStatus::Failed | EvaluationStatus::Completed
-    ) {
+    if evaluation.status.is_terminal() {
         return Ok(evaluation);
     }
 

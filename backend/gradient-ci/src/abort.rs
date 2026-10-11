@@ -8,10 +8,10 @@
 //! shared builds through the graph writer and call `Scheduler::cancel_evaluation_jobs` after
 //! `AbortKind::Hard`. The in-flight builds keep running and fill the cache after `AbortKind::Soft`.
 
+use gradient_db::status::change_evaluation_status;
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_types::*;
-use sea_orm::ActiveValue::Set;
-use sea_orm::{ActiveModelTrait, ConnectionTrait, EntityTrait};
+use sea_orm::{ConnectionTrait, EntityTrait};
 use tracing::debug;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -32,10 +32,12 @@ pub async fn abort_evaluation<C: ConnectionTrait>(
         return Ok(false);
     }
 
-    let mut active: AEvaluation = eval.into();
-    active.status = Set(EvaluationStatus::Aborted);
-    active.updated_at = Set(gradient_types::now());
-    active.update(db).await?;
+    if change_evaluation_status(db, eval_id, EvaluationStatus::ABORT, |update| update)
+        .await?
+        .is_none()
+    {
+        return Ok(false);
+    }
 
     debug!(evaluation_id = %eval_id, ?kind, "evaluation marked aborted");
     Ok(true)

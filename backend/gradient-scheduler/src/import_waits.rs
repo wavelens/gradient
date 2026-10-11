@@ -6,7 +6,6 @@
 
 use std::collections::{HashMap, HashSet};
 
-use gradient_db::state_machine::BuildStateMachine;
 use gradient_entity::build::BuildStatus;
 use gradient_types::*;
 use gradient_wire::types::ImportOutcome;
@@ -149,7 +148,7 @@ fn outcome(
     let mut failed = None;
     for build in &wait.builds {
         let status = *statuses.get(&build.derivation_build)?;
-        if !BuildStateMachine::is_terminal(&status) {
+        if !status.is_terminal() {
             return None;
         }
 
