@@ -13,23 +13,28 @@ use crate::ip_allowlist::is_allowed as ip_allowed;
 use crate::refusal::SharedRefusal;
 use crate::resource::Resource;
 use anyhow::Context;
-use axum::extract::State;
 use axum::http::HeaderMap;
 use base64::Engine;
 use bytes::Bytes;
 use futures::StreamExt as _;
 use futures::stream::BoxStream;
-use gradient_core::ServerState;
+use gradient_db::WebDb;
 use gradient_graph::Demotion;
+use gradient_graph::Graph;
 use gradient_storage::NarSource;
+use gradient_storage::NarStore;
 use gradient_types::*;
+use gradient_util::debounce::Debounce;
 use gradient_util::nix_hash::{normalize_nar_hash, strip_hash_algo};
 use sea_orm::{ColumnTrait, Condition, ConnectionTrait, EntityTrait, QueryFilter};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::Arc;
+use uuid::Uuid;
 
 async fn try_authenticate_basic(
-    state: &Arc<ServerState>,
+    db: &WebDb,
+    jwt_secret: &SecretString,
+    last_used_stamps: &Debounce<Uuid>,
     headers: &HeaderMap,
     client_ip: IpAddr,
 ) -> WebResult<Option<MUser>> {
@@ -51,7 +56,7 @@ async fn try_authenticate_basic(
     let Some(password) = creds.split_once(':').map(|(_, p)| p.to_string()) else {
         return Ok(None);
     };
-    let Ok(decoded) = decode_jwt(State(Arc::clone(state)), password).await else {
+    let Ok(decoded) = decode_jwt(db, jwt_secret, last_used_stamps, password).await else {
         return Ok(None);
     };
     if let Some(ctx) = decoded.api_key_context()
@@ -60,13 +65,13 @@ async fn try_authenticate_basic(
         return Err(SharedRefusal::SourceIpNotAllowed.into());
     }
     Ok(EUser::find_by_id(decoded.user_id())
-        .one(&state.web_db)
+        .one(db)
         .await
         .ok()
         .flatten())
 }
 
-async fn user_can_access_cache(state: &Arc<ServerState>, cache: &MCache, user: &MUser) -> bool {
+async fn user_can_access_cache(db: &WebDb, cache: &MCache, user: &MUser) -> bool {
     if cache.created_by == user.id {
         return true;
     }
@@ -74,7 +79,7 @@ async fn user_can_access_cache(state: &Arc<ServerState>, cache: &MCache, user: &
     let direct = ECacheAccess::find()
         .filter(CCacheAccess::Cache.eq(cache.id))
         .filter(CCacheAccess::User.eq(user.id))
-        .one(&state.web_db)
+        .one(db)
         .await
         .unwrap_or(None);
     if direct.is_some() {
@@ -83,7 +88,7 @@ async fn user_can_access_cache(state: &Arc<ServerState>, cache: &MCache, user: &
 
     let project_ids: Vec<ProjectId> = EProjectAccess::find()
         .filter(CProjectAccess::User.eq(user.id))
-        .all(&state.web_db)
+        .all(db)
         .await
         .unwrap_or_default()
         .into_iter()
@@ -97,14 +102,16 @@ async fn user_can_access_cache(state: &Arc<ServerState>, cache: &MCache, user: &
     EProjectCache::find()
         .filter(CProjectCache::Cache.eq(cache.id))
         .filter(CProjectCache::Project.is_in(project_ids))
-        .one(&state.web_db)
+        .one(db)
         .await
         .unwrap_or(None)
         .is_some()
 }
 
 async fn require_cache_auth(
-    state: &Arc<ServerState>,
+    db: &WebDb,
+    jwt_secret: &SecretString,
+    last_used_stamps: &Debounce<Uuid>,
     headers: &HeaderMap,
     client_ip: IpAddr,
     cache: &MCache,
@@ -113,23 +120,17 @@ async fn require_cache_auth(
         return Ok(());
     }
 
-    let maybe_user = try_authenticate_basic(state, headers, client_ip).await?;
+    let maybe_user =
+        try_authenticate_basic(db, jwt_secret, last_used_stamps, headers, client_ip).await?;
     match maybe_user {
-        Some(user) if user_can_access_cache(state, cache, &user).await => Ok(()),
+        Some(user) if user_can_access_cache(db, cache, &user).await => Ok(()),
         _ => Err(CacheRefusal::AuthenticationRequired.into()),
     }
 }
 
 pub(super) async fn get_nar_by_hash(
-    state: Arc<ServerState>,
-    cache: MCache,
-    hash: String,
-) -> Result<NixPathInfo, WebError> {
-    get_nar_by_hash_inner(&state, cache, hash).await
-}
-
-async fn get_nar_by_hash_inner(
-    state: &Arc<ServerState>,
+    db: &WebDb,
+    config: &RuntimeConfig,
     cache: MCache,
     hash: String,
 ) -> Result<NixPathInfo, WebError> {
@@ -139,18 +140,18 @@ async fn get_nar_by_hash_inner(
                 .add(CDerivationOutput::IsCached.eq(true))
                 .add(CDerivationOutput::Hash.eq(hash.clone())),
         )
-        .one(&state.web_db)
+        .one(db)
         .await
         .map_err(WebError::from)?;
 
     let build_output = match build_output {
         Some(o) => o,
-        None => return get_nar_by_cached_path(state, cache, hash).await,
+        None => return get_nar_by_cached_path(db, config, cache, hash).await,
     };
 
     let cached_path_row = ECachedPath::find()
         .filter(CCachedPath::Hash.eq(hash.clone()))
-        .one(&state.web_db)
+        .one(db)
         .await
         .map_err(WebError::from)?
         .or_not_found(Resource::CachedPath)?;
@@ -161,7 +162,7 @@ async fn get_nar_by_hash_inner(
                 .add(CCachedPathSignature::CachedPath.eq(cached_path_row.id))
                 .add(CCachedPathSignature::Cache.eq(cache.id)),
         )
-        .one(&state.web_db)
+        .one(db)
         .await
         .map_err(WebError::from)?
         .or_not_found(Resource::Signature)?;
@@ -180,19 +181,13 @@ async fn get_nar_by_hash_inner(
     let nar_size = cached_path_row
         .nar_size
         .ok_or(CacheRefusal::NotRecorded("NarSize"))? as u64;
-    let references = gradient_db::graph::runtime_closure::references_for_hash(
-        &state.web_db,
-        &cached_path_row.hash,
-    )
-    .await?;
+    let references =
+        gradient_db::graph::runtime_closure::references_for_hash(db, &cached_path_row.hash).await?;
     let deriver = cached_path_row.deriver.clone();
     let ca = cached_path_row.ca.clone();
 
-    let sig = gradient_sources::full_signature_token(
-        &signature,
-        &state.config.server.serve_url,
-        &cache.name,
-    );
+    let sig =
+        gradient_sources::full_signature_token(&signature, &config.server.serve_url, &cache.name);
 
     // `file_hash` and `file_size` are living on `cached_path`. The legacy mirror on
     // `derivation_output` is not always populated.
@@ -222,13 +217,14 @@ async fn get_nar_by_hash_inner(
 }
 
 async fn get_nar_by_cached_path(
-    state: &Arc<ServerState>,
+    db: &WebDb,
+    config: &RuntimeConfig,
     cache: MCache,
     hash: String,
 ) -> Result<NixPathInfo, WebError> {
     let cached_path_row = ECachedPath::find()
         .filter(CCachedPath::Hash.eq(hash.clone()))
-        .one(&state.web_db)
+        .one(db)
         .await
         .map_err(WebError::from)?
         .or_not_found(Resource::Path)?;
@@ -243,7 +239,7 @@ async fn get_nar_by_cached_path(
                 .add(CCachedPathSignature::CachedPath.eq(cached_path_row.id))
                 .add(CCachedPathSignature::Cache.eq(cache.id)),
         )
-        .one(&state.web_db)
+        .one(db)
         .await
         .map_err(WebError::from)?
         .or_not_found(Resource::Signature)?;
@@ -252,11 +248,8 @@ async fn get_nar_by_cached_path(
         .signature
         .ok_or(CacheRefusal::SignaturePending)?;
 
-    let sig = gradient_sources::full_signature_token(
-        &signature,
-        &state.config.server.serve_url,
-        &cache.name,
-    );
+    let sig =
+        gradient_sources::full_signature_token(&signature, &config.server.serve_url, &cache.name);
 
     let file_hash = cached_path_row
         .file_hash
@@ -273,11 +266,8 @@ async fn get_nar_by_cached_path(
     let nar_size = cached_path_row
         .nar_size
         .ok_or(CacheRefusal::NotRecorded("NarSize"))? as u64;
-    let references = gradient_db::graph::runtime_closure::references_for_hash(
-        &state.web_db,
-        &cached_path_row.hash,
-    )
-    .await?;
+    let references =
+        gradient_db::graph::runtime_closure::references_for_hash(db, &cached_path_row.hash).await?;
     let file_hash_nix32 = strip_hash_algo(&normalize_nar_hash(&file_hash)).to_string();
 
     Ok(NixPathInfo {
@@ -301,14 +291,16 @@ pub(super) struct CacheContext {
 
 impl CacheContext {
     pub(super) async fn load(
-        state: &Arc<ServerState>,
+        db: &WebDb,
+        jwt_secret: &SecretString,
+        last_used_stamps: &Debounce<Uuid>,
         headers: &HeaderMap,
         client_ip: IpAddr,
         cache_name: String,
     ) -> WebResult<Self> {
         let cache = ECache::find()
             .filter(CCache::Name.eq(cache_name))
-            .one(&state.web_db)
+            .one(db)
             .await?
             .or_not_found(Resource::Cache)?;
 
@@ -316,21 +308,21 @@ impl CacheContext {
             return Err(CacheRefusal::CacheDisabled.into());
         }
 
-        require_cache_auth(state, headers, client_ip, &cache).await?;
+        require_cache_auth(db, jwt_secret, last_used_stamps, headers, client_ip, &cache).await?;
 
         Ok(Self { cache })
     }
 }
 
 pub(super) fn cache_client_ip(
-    state: &Arc<ServerState>,
+    config: &RuntimeConfig,
     headers: &HeaderMap,
     peer: Option<SocketAddr>,
 ) -> IpAddr {
     let peer_ip = peer
         .map(|p| p.ip())
         .unwrap_or_else(|| IpAddr::V4(Ipv4Addr::UNSPECIFIED));
-    resolve_client_ip(headers, peer_ip, &state.config.network.trusted_proxies)
+    resolve_client_ip(headers, peer_ip, &config.network.trusted_proxies)
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -366,25 +358,23 @@ gradient_db::sql! {
 /// Blobs are living in one store for every cache. This signed claim is all that is keeping one
 /// cache's paths out of another's.
 pub(super) async fn cache_serves_path(
-    state: &Arc<ServerState>,
+    db: &WebDb,
     cache: CacheId,
     store_hash: &str,
 ) -> WebResult<bool> {
-    Ok(state
-        .web_db
+    Ok(db
         .query_one_raw(CACHE_SERVES_PATH.bind([store_hash.into(), cache.into_inner().into()]))
         .await?
         .is_some())
 }
 
 pub(super) async fn cache_served_derivation(
-    state: &Arc<ServerState>,
+    db: &WebDb,
     cache: CacheId,
     drv_hash: &str,
     drv_name: &str,
 ) -> WebResult<Option<DerivationId>> {
-    let row = state
-        .web_db
+    let row = db
         .query_one_raw(CACHE_SERVED_DERIVATION.bind([
             drv_hash.into(),
             drv_name.into(),
@@ -397,17 +387,17 @@ pub(super) async fn cache_served_derivation(
 }
 
 pub async fn fetch_nar_stream(
-    state: &Arc<ServerState>,
+    db: &WebDb,
+    nar_storage: &NarStore,
     cache: CacheId,
     path_hash: &str,
 ) -> WebResult<(String, u64, BoxStream<'static, anyhow::Result<Bytes>>)> {
     let effective_hash =
-        crate::endpoints::caches::nar::resolve_effective_hash_db(&state.web_db, path_hash).await?;
-    if !cache_serves_path(state, cache, &effective_hash).await? {
+        crate::endpoints::caches::nar::resolve_effective_hash_db(db, path_hash).await?;
+    if !cache_serves_path(db, cache, &effective_hash).await? {
         return Err(WebError::not_found(Resource::Path));
     }
-    let source = state
-        .nar_storage
+    let source = nar_storage
         .open(&effective_hash, 0)
         .await
         .context("read NAR")?
@@ -431,12 +421,12 @@ pub(super) struct DeleteOutcome {
 }
 
 pub(super) async fn delete_nar_from_cache(
-    state: &Arc<ServerState>,
+    nar_storage: &NarStore,
+    graph: &Arc<Graph>,
     cache_id: CacheId,
     hash: &str,
 ) -> WebResult<(MCachedPath, DeleteOutcome)> {
-    let report = state
-        .graph
+    let report = graph
         .demote(Demotion::CacheClaim {
             cache: cache_id,
             hash: hash.to_owned(),
@@ -444,7 +434,7 @@ pub(super) async fn delete_nar_from_cache(
         .await
         .context("demote the cache claim")?;
     let cached_path = report.cached_path.or_not_found(Resource::Nar)?;
-    state.nar_storage.hot().invalidate(hash);
+    nar_storage.hot().invalidate(hash);
 
     Ok((
         cached_path,

@@ -47,7 +47,7 @@ pub async fn get_project_invitations(
     Path(project): Path<String>,
 ) -> WebResult<Json<BaseResponse<Vec<PendingInvitationItem>>>> {
     let project = load_project(
-        &state,
+        &state.db(),
         Caller::User(&user),
         api_key.as_ref(),
         project,
@@ -99,8 +99,9 @@ pub async fn delete_project_invitation(
     Path(project): Path<String>,
     Json(body): Json<RevokeInvitationRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
+    let db = state.db();
     let project = load_project(
-        &state,
+        &db,
         Caller::User(&user),
         api_key.as_ref(),
         project,
@@ -130,7 +131,7 @@ pub async fn delete_project_invitation(
     invitation.into_active_model().delete(&state.web_db).await?;
 
     audit_record(
-        &state,
+        &db,
         Some(user.id),
         Action::ProjectInvitationRevoke,
         EventOwner {

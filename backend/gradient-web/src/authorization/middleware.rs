@@ -11,6 +11,9 @@ use axum::http::HeaderMap;
 use axum::http::header::AUTHORIZATION;
 use axum::middleware::Next;
 use axum::response::Response;
+use gradient_db::{DbContext, WebDb};
+use gradient_util::debounce::Debounce;
+use uuid::Uuid;
 
 use gradient_core::ServerState;
 use gradient_types::*;
@@ -61,7 +64,7 @@ fn presented_token(headers: &HeaderMap) -> Result<&str, Denial> {
 }
 
 async fn deny(
-    state: &Arc<ServerState>,
+    db: &DbContext,
     user_id: Option<UserId>,
     info: RequestInfo,
     method: String,
@@ -69,7 +72,7 @@ async fn deny(
     denial: impl Refusal,
 ) -> WebError {
     audit_record(
-        state,
+        db,
         user_id,
         Action::AuthDeny,
         EventOwner::default(),
@@ -90,6 +93,7 @@ pub async fn authorize(
     mut req: Request,
     next: Next,
 ) -> WebResult<Response<Body>> {
+    let db = state.db();
     let peer = req
         .extensions()
         .get::<ConnectInfo<SocketAddr>>()
@@ -105,11 +109,18 @@ pub async fn authorize(
     let presented = presented_token(req.headers()).map(str::to_owned);
     let token_str = match presented {
         Ok(token) => token,
-        Err(denial) => return Err(deny(&state, None, info, method, path, denial).await),
+        Err(denial) => return Err(deny(&db, None, info, method, path, denial).await),
     };
 
-    let Ok(decoded) = decode_jwt(state.clone(), token_str).await else {
-        return Err(deny(&state, None, info, method, path, Denial::UndecodableToken).await);
+    let Ok(decoded) = decode_jwt(
+        &state.web_db,
+        &state.jwt_secret,
+        &state.memory.last_used_stamps,
+        token_str,
+    )
+    .await
+    else {
+        return Err(deny(&db, None, info, method, path, Denial::UndecodableToken).await);
     };
 
     let user_id = decoded.user_id();
@@ -117,18 +128,18 @@ pub async fn authorize(
     let api_key_context = decoded.api_key_context();
     if api_key_context.is_some_and(|context| !ip_allowed(client_ip, &context.allowed_ips)) {
         let denial = SharedRefusal::SourceIpNotAllowed;
-        return Err(deny(&state, Some(user_id), info, method, path, denial).await);
+        return Err(deny(&db, Some(user_id), info, method, path, denial).await);
     }
 
     let api_key_extension = MaybeApiKey::from(&decoded);
     let Some(current_user) = EUser::find_by_id(user_id).one(&state.web_db).await? else {
         let denial = Denial::UnknownUser;
-        return Err(deny(&state, Some(user_id), info, method, path, denial).await);
+        return Err(deny(&db, Some(user_id), info, method, path, denial).await);
     };
 
     if !current_user.active {
         let denial = SharedRefusal::AccountDeactivated;
-        return Err(deny(&state, Some(user_id), info, method, path, denial).await);
+        return Err(deny(&db, Some(user_id), info, method, path, denial).await);
     }
 
     req.extensions_mut().insert(current_user);
@@ -138,12 +149,16 @@ pub async fn authorize(
 }
 
 async fn optional_caller(
-    state: &Arc<ServerState>,
+    db: &WebDb,
+    jwt_secret: &SecretString,
+    last_used_stamps: &Debounce<Uuid>,
     headers: &HeaderMap,
     client_ip: IpAddr,
 ) -> Option<(MUser, MaybeApiKey)> {
     let token = extract_bearer_or_cookie(headers)?.to_owned();
-    let decoded = decode_jwt(State(Arc::clone(state)), token).await.ok()?;
+    let decoded = decode_jwt(db, jwt_secret, last_used_stamps, token)
+        .await
+        .ok()?;
     let allowed_from_here = decoded
         .api_key_context()
         .is_none_or(|context| ip_allowed(client_ip, &context.allowed_ips));
@@ -153,7 +168,7 @@ async fn optional_caller(
     }
 
     let user = EUser::find_by_id(decoded.user_id())
-        .one(&state.web_db)
+        .one(db)
         .await
         .ok()
         .flatten()
@@ -174,11 +189,17 @@ pub async fn authorize_optional(
         .unwrap_or_else(|| IpAddr::V4(Ipv4Addr::UNSPECIFIED));
 
     let client_ip = resolve_client_ip(req.headers(), peer, &state.config.network.trusted_proxies);
-    let (maybe_user, maybe_api_key) = optional_caller(&state, req.headers(), client_ip)
-        .await
-        .map_or((None, MaybeApiKey::none()), |(user, api_key)| {
-            (Some(user), api_key)
-        });
+    let (maybe_user, maybe_api_key) = optional_caller(
+        &state.web_db,
+        &state.jwt_secret,
+        &state.memory.last_used_stamps,
+        req.headers(),
+        client_ip,
+    )
+    .await
+    .map_or((None, MaybeApiKey::none()), |(user, api_key)| {
+        (Some(user), api_key)
+    });
 
     req.extensions_mut().insert(MaybeUser(maybe_user));
     req.extensions_mut().insert(maybe_api_key);
@@ -186,12 +207,9 @@ pub async fn authorize_optional(
     next.run(req).await
 }
 
-pub async fn update_last_login(state: State<Arc<ServerState>>, user: MUser) -> Result<MUser> {
+pub async fn update_last_login(db: &WebDb, user: MUser) -> Result<MUser> {
     let mut auser: AUser = user.into();
 
     auser.last_login_at = Set(gradient_types::now());
-    auser
-        .update(&state.web_db)
-        .await
-        .context("update user last login")
+    auser.update(db).await.context("update user last login")
 }

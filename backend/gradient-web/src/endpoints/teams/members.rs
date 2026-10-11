@@ -16,6 +16,7 @@ use crate::resource::Resource;
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
 use gradient_core::ServerState;
+use gradient_db::WebDb;
 use gradient_notify::{InvitationMail, InviteScope, generate_token};
 use gradient_types::events::EventOwner;
 use gradient_types::events::audit::Action;
@@ -54,23 +55,19 @@ pub(crate) fn role_label(role: TeamRole) -> &'static str {
     }
 }
 
-async fn find_user(state: &Arc<ServerState>, username: &str) -> WebResult<MUser> {
+async fn find_user(db: &WebDb, username: &str) -> WebResult<MUser> {
     EUser::find()
         .filter(CUser::Username.eq(username))
-        .one(&state.web_db)
+        .one(db)
         .await?
         .or_not_found(Resource::User)
 }
 
-async fn find_membership(
-    state: &Arc<ServerState>,
-    team: TeamId,
-    user: UserId,
-) -> WebResult<Option<MTeamUser>> {
+async fn find_membership(db: &WebDb, team: TeamId, user: UserId) -> WebResult<Option<MTeamUser>> {
     Ok(ETeamUser::find()
         .filter(CTeamUser::Team.eq(team))
         .filter(CTeamUser::User.eq(user))
-        .one(&state.web_db)
+        .one(db)
         .await?)
 }
 
@@ -82,18 +79,14 @@ fn ensure_not_state_managed(membership: &MTeamUser) -> WebResult<()> {
     Ok(())
 }
 
-async fn ensure_not_last_admin(
-    state: &Arc<ServerState>,
-    team: TeamId,
-    membership: &MTeamUser,
-) -> WebResult<()> {
+async fn ensure_not_last_admin(db: &WebDb, team: TeamId, membership: &MTeamUser) -> WebResult<()> {
     if membership.role != TeamRole::Admin {
         return Ok(());
     }
     let admins = ETeamUser::find()
         .filter(CTeamUser::Team.eq(team))
         .filter(CTeamUser::Role.eq(TeamRole::Admin))
-        .count(&state.web_db)
+        .count(db)
         .await?;
     if admins <= 1 {
         return Err(SharedRefusal::LastAdmin(Resource::Team).into());
@@ -107,7 +100,14 @@ pub async fn get_team_members(
     Extension(api_key): Extension<MaybeApiKey>,
     Path(team): Path<String>,
 ) -> WebResult<Json<BaseResponse<Vec<TeamMemberItem>>>> {
-    let (team, _) = load_team(&state, &user, api_key.as_ref(), team, TeamAccess::Member).await?;
+    let (team, _) = load_team(
+        &state.web_db,
+        &user,
+        api_key.as_ref(),
+        team,
+        TeamAccess::Member,
+    )
+    .await?;
 
     let rows = ETeamUser::find()
         .join(
@@ -141,8 +141,9 @@ pub async fn post_team_members(
     Path(team): Path<String>,
     Json(body): Json<TeamMemberRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
+    let db = state.db();
     let (team, _) = load_team(
-        &state,
+        &state.web_db,
         &user,
         api_key.as_ref(),
         team,
@@ -151,9 +152,12 @@ pub async fn post_team_members(
         },
     )
     .await?;
-    let target = find_user(&state, &body.user).await?;
+    let target = find_user(&state.web_db, &body.user).await?;
 
-    if find_membership(&state, team.id, target.id).await?.is_some() {
+    if find_membership(&state.web_db, team.id, target.id)
+        .await?
+        .is_some()
+    {
         return Err(WebError::already_exists(Resource::TeamMembership));
     }
     if ETeamInvitation::find()
@@ -184,7 +188,7 @@ pub async fn post_team_members(
         .insert(&state.web_db)
         .await?;
         audit_record(
-            &state,
+            &db,
             Some(user.id),
             Action::TeamMemberAdd,
             EventOwner::default(),
@@ -234,7 +238,7 @@ pub async fn post_team_members(
     }
 
     audit_record(
-        &state,
+        &db,
         Some(user.id),
         Action::TeamInvitationCreate,
         EventOwner::default(),
@@ -254,7 +258,7 @@ pub async fn patch_team_members(
     Json(body): Json<TeamMemberRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let (team, _) = load_team(
-        &state,
+        &state.web_db,
         &user,
         api_key.as_ref(),
         team,
@@ -263,14 +267,14 @@ pub async fn patch_team_members(
         },
     )
     .await?;
-    let target = find_user(&state, &body.user).await?;
-    let membership = find_membership(&state, team.id, target.id)
+    let target = find_user(&state.web_db, &body.user).await?;
+    let membership = find_membership(&state.web_db, team.id, target.id)
         .await?
         .ok_or(SharedRefusal::NotAMember(Resource::Team))?;
     ensure_not_state_managed(&membership)?;
 
     if body.role != TeamRole::Admin {
-        ensure_not_last_admin(&state, team.id, &membership).await?;
+        ensure_not_last_admin(&state.web_db, team.id, &membership).await?;
     }
 
     let mut active: ATeamUser = membership.into();
@@ -281,7 +285,7 @@ pub async fn patch_team_members(
     active.update(&state.web_db).await?;
 
     audit_record(
-        &state,
+        &state.db(),
         Some(user.id),
         Action::TeamMemberRoleChange,
         EventOwner::default(),
@@ -306,7 +310,7 @@ pub async fn delete_team_members(
     Json(body): Json<RemoveTeamMemberRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let (team, _) = load_team(
-        &state,
+        &state.web_db,
         &user,
         api_key.as_ref(),
         team,
@@ -315,17 +319,17 @@ pub async fn delete_team_members(
         },
     )
     .await?;
-    let target = find_user(&state, &body.user).await?;
-    let membership = find_membership(&state, team.id, target.id)
+    let target = find_user(&state.web_db, &body.user).await?;
+    let membership = find_membership(&state.web_db, team.id, target.id)
         .await?
         .ok_or(SharedRefusal::NotAMember(Resource::Team))?;
     ensure_not_state_managed(&membership)?;
 
-    ensure_not_last_admin(&state, team.id, &membership).await?;
+    ensure_not_last_admin(&state.web_db, team.id, &membership).await?;
     membership.into_active_model().delete(&state.web_db).await?;
 
     audit_record(
-        &state,
+        &state.db(),
         Some(user.id),
         Action::TeamMemberRemove,
         EventOwner::default(),

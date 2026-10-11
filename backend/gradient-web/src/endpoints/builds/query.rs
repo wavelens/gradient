@@ -56,7 +56,8 @@ pub async fn get_build(
     Extension(api_key): Extension<MaybeApiKey>,
     Path(build_id): Path<BuildJobId>,
 ) -> WebResult<Json<BaseResponse<BuildWithOutputs>>> {
-    let ctx = BuildAccessContext::load(&state, build_id, &maybe_user, api_key.as_ref()).await?;
+    let ctx =
+        BuildAccessContext::load(&state.web_db, build_id, &maybe_user, api_key.as_ref()).await?;
     let build_job = ctx.build_job;
     let shared_build = ctx.shared_build;
 

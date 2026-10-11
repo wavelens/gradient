@@ -17,8 +17,12 @@ use axum::Extension;
 use axum::Json;
 use axum::extract::{Path, State};
 use gradient_core::ServerState;
+use gradient_db::DbContext;
+use gradient_graph::Graph;
 use gradient_proto::import::{NarCommit, SignTargets};
+use gradient_storage::NarStore;
 use gradient_storage::source_nar::{SourceNar, materialise_source_nar};
+use gradient_types::RuntimeConfig;
 use gradient_types::ids::{
     CommitId, EvaluationFlakeInputOverrideId, EvaluationId, TaskId, UploadSessionId,
 };
@@ -75,7 +79,7 @@ pub async fn post_dispatch(
         .ok_or_else(|| WebError::not_found(Resource::UploadSession))?;
 
     if !has_permission(
-        &state,
+        &state.web_db,
         user.id,
         session.project,
         Permission::TriggerEvaluation,
@@ -109,7 +113,7 @@ pub async fn post_dispatch(
     let staging = TempDir::new().context("create staging dir")?;
 
     materialise_staging(
-        &state,
+        &state.nar_storage,
         &session.project.into_inner(),
         &manifest,
         staging.path(),
@@ -127,12 +131,12 @@ pub async fn post_dispatch(
         .collect();
 
     let response = finalize_build_request(
-        &state,
+        &state.db(),
+        &state.graph,
         session.project,
         &user,
         &nar,
         body.target,
-        body.system,
         input_overrides,
     )
     .await?;
@@ -145,28 +149,25 @@ pub async fn post_dispatch(
 }
 
 pub(super) async fn finalize_build_request(
-    state: &ServerState,
+    db: &DbContext,
+    graph: &Arc<Graph>,
     project: gradient_types::ids::ProjectId,
     user: &MUser,
     nar: &SourceNar,
     target: Option<String>,
-    system: Option<String>,
     input_overrides: Vec<(String, String)>,
 ) -> WebResult<DispatchResponse> {
-    let _ = system;
-
     for (input_name, url) in &input_overrides {
         check_flake_input_override(input_name, url)?;
     }
 
-    state
+    db.storage
         .nar_storage
         .put(&nar.store_hash, nar.compressed_bytes.clone())
         .await
         .context("store source NAR")?;
 
-    state
-        .graph
+    graph
         .commit_nar(NarCommit {
             store_path: format!("{}-source", nar.store_hash),
             file_hash: nar.file_hash_sri.clone(),
@@ -180,10 +181,10 @@ pub(super) async fn finalize_build_request(
         .await
         .context("record source NAR")?;
 
-    let tx = state.web_db.inner().begin().await?;
+    let tx = db.web_db.inner().begin().await?;
     let response = queue_build_request(
         &tx,
-        state,
+        &db.config,
         project,
         user,
         BuildRequestSource {
@@ -211,7 +212,7 @@ pub(super) struct BuildRequestSource {
 
 pub(super) async fn queue_build_request<C: ConnectionTrait>(
     tx: &C,
-    state: &ServerState,
+    config: &RuntimeConfig,
     project: gradient_types::ids::ProjectId,
     user: &MUser,
     source: BuildRequestSource,
@@ -220,7 +221,7 @@ pub(super) async fn queue_build_request<C: ConnectionTrait>(
         tx,
         project,
         user.id,
-        state.config.eval.default_keep_evaluations(),
+        config.eval.default_keep_evaluations(),
     )
     .await?;
 
@@ -307,7 +308,7 @@ async fn resolve_project_cache_name<C: ConnectionTrait>(
 }
 
 async fn materialise_staging(
-    state: &ServerState,
+    nar_storage: &NarStore,
     project_uuid: &uuid::Uuid,
     manifest: &[ManifestEntry],
     root: &std::path::Path,
@@ -318,8 +319,7 @@ async fn materialise_staging(
         let mut hash_array = [0u8; 32];
         hash_array.copy_from_slice(&hash_bytes);
 
-        let data = state
-            .nar_storage
+        let data = nar_storage
             .get_blob(*project_uuid, &hash_array)
             .await
             .context("fetch blob")?

@@ -16,6 +16,7 @@ use axum::http::{HeaderMap, HeaderValue, header};
 use axum::response::{IntoResponse, Response};
 use gradient_core::ServerState;
 use gradient_core::upstream_source::UpstreamSource;
+use gradient_db::WebDb;
 use gradient_db::caches::upstream::pull_through_upstream_caches;
 use gradient_types::MCache;
 use gradient_types::ids::CacheUpstreamId;
@@ -38,8 +39,16 @@ pub async fn debuginfo(
     let build_id =
         parse_build_id(&build_id).ok_or_else(|| WebError::not_found(Resource::DebugInfo))?;
 
-    let client_ip = cache_client_ip(&state, &headers, peer);
-    let ctx = CacheContext::load(&state, &headers, client_ip, cache).await?;
+    let client_ip = cache_client_ip(&state.config, &headers, peer);
+    let ctx = CacheContext::load(
+        &state.web_db,
+        &state.jwt_secret,
+        &state.memory.last_used_stamps,
+        &headers,
+        client_ip,
+        cache,
+    )
+    .await?;
 
     if let Some(target) =
         gradient_db::caches::debug_info::lookup_for_cache(&state.web_db, ctx.cache.id, &build_id)
@@ -55,7 +64,7 @@ pub async fn debuginfo(
         ));
     }
 
-    let upstream_caches = upstream_caches_for(&state, &ctx.cache).await;
+    let upstream_caches = upstream_caches_for(&state.web_db, &ctx.cache).await;
     match fetch_from_upstream_caches(&upstream_caches, &build_id).await {
         Some(doc) => Ok(redirect_response(doc, "MISS")),
         None => Err(WebError::not_found(Resource::DebugInfo)),
@@ -73,8 +82,8 @@ fn redirect_response(doc: DebugInfoRedirect, cache_status: &'static str) -> Resp
     response
 }
 
-async fn upstream_caches_for(state: &Arc<ServerState>, cache: &MCache) -> Vec<UpstreamSource> {
-    pull_through_upstream_caches(&state.web_db, cache)
+async fn upstream_caches_for(db: &WebDb, cache: &MCache) -> Vec<UpstreamSource> {
+    pull_through_upstream_caches(db, cache)
         .await
         .unwrap_or_default()
         .into_iter()

@@ -13,6 +13,7 @@ use axum::{Extension, Json};
 use chrono::NaiveDateTime;
 use gradient_core::ServerState;
 use gradient_db::metrics::cache_traffic;
+use gradient_db::metrics::cache_traffic::CacheTraffic;
 use gradient_entity::metric_rollup::RollupGranularity;
 use gradient_types::*;
 use gradient_util::telemetry::metric;
@@ -51,9 +52,9 @@ pub struct CacheStatsResponse {
 
 /// The request path must never touch the `cache_metric` row (#644).
 /// `gradient_db::metrics::cache_traffic` is writing the accumulator.
-pub fn record_nar_traffic(state: &ServerState, cache_id: CacheId, bytes: i64) {
+pub fn record_nar_traffic(cache_traffic: &CacheTraffic, cache_id: CacheId, bytes: i64) {
     let bucket = cache_traffic::minute_bucket(gradient_types::now());
-    state.memory.cache_traffic.record(cache_id, bucket, bytes);
+    cache_traffic.record(cache_id, bucket, bytes);
 }
 
 fn cache_series_sql(unit: &str, back: &str, gran: i16) -> String {
@@ -182,7 +183,7 @@ pub async fn get_cache_stats(
     Path(cache): Path<String>,
 ) -> WebResult<Json<BaseResponse<CacheStatsResponse>>> {
     let cache = load_cache(
-        &state,
+        &state.db(),
         Caller::from(&maybe_user),
         api_key.as_ref(),
         cache,
@@ -259,8 +260,8 @@ mod tests {
         let db = empty_db();
         let state = gradient_test_support::state::test_state(db);
 
-        record_nar_traffic(&state, CacheId::nil(), 4096);
-        record_nar_traffic(&state, CacheId::nil(), 1024);
+        record_nar_traffic(&state.memory.cache_traffic, CacheId::nil(), 4096);
+        record_nar_traffic(&state.memory.cache_traffic, CacheId::nil(), 1024);
 
         let taken = state.memory.cache_traffic.take();
         let bytes: i64 = taken.iter().map(|(_, _, t)| t.bytes).sum();

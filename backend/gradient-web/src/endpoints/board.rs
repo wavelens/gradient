@@ -1606,8 +1606,8 @@ pub async fn get_eval_flake_graph(
     Extension(api_key): Extension<MaybeApiKey>,
     Path(evaluation_id): Path<EvaluationId>,
 ) -> WebResult<Json<BaseResponse<Vec<FlakeGraphNode>>>> {
-    let _ctx =
-        EvalAccessContext::load(&state, evaluation_id, &maybe_user, api_key.as_ref()).await?;
+    let _ctx = EvalAccessContext::load(&state.web_db, evaluation_id, &maybe_user, api_key.as_ref())
+        .await?;
     let rows = flake_output_node::Entity::find()
         .filter(flake_output_node::Column::Evaluation.eq(evaluation_id))
         .all(&state.web_db)

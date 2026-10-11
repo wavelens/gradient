@@ -91,6 +91,7 @@ impl FromRequestParts<Arc<ServerState>> for WebhookOwner {
         parts: &mut Parts,
         state: &Arc<ServerState>,
     ) -> Result<Self, WebError> {
+        let db = state.db();
         let user = parts
             .extensions
             .get::<MUser>()
@@ -106,7 +107,7 @@ impl FromRequestParts<Arc<ServerState>> for WebhookOwner {
 
         if let Some(project) = params.get("project") {
             let project = load_project(
-                state,
+                &db,
                 Caller::User(&user),
                 api_key.as_ref(),
                 project.clone(),
@@ -126,7 +127,7 @@ impl FromRequestParts<Arc<ServerState>> for WebhookOwner {
         }
         if let Some(cache) = params.get("cache") {
             let cache = load_cache(
-                state,
+                &db,
                 Caller::User(&user),
                 api_key.as_ref(),
                 cache.clone(),

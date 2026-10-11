@@ -20,6 +20,7 @@ use axum::body::Body;
 use axum::extract::{Query, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
+use gradient_db::WebDb;
 use gradient_types::events::EventOwner;
 use gradient_types::events::audit::Action;
 
@@ -223,7 +224,7 @@ pub async fn post_basic_register(
     }
 
     audit_record(
-        &state,
+        &state.db(),
         Some(user.id),
         Action::Register,
         EventOwner::default(),
@@ -278,6 +279,7 @@ pub async fn post_basic_login(
     info: RequestInfo,
     Json(body): Json<MakeLoginRequest>,
 ) -> WebResult<Response> {
+    let db = state.db();
     if state.config.oidc.as_ref().is_some_and(|o| o.required) {
         return Err(WebError::oauth_required());
     }
@@ -294,7 +296,7 @@ pub async fn post_basic_login(
         Some(u) => u,
         None => {
             audit_record(
-                &state,
+                &db,
                 None,
                 Action::LoginFailure,
                 EventOwner::default(),
@@ -310,7 +312,7 @@ pub async fn post_basic_login(
 
     if verify_password(body.password, &user_password).is_err() {
         audit_record(
-            &state,
+            &db,
             Some(user.id),
             Action::LoginFailure,
             EventOwner::default(),
@@ -337,7 +339,8 @@ pub async fn post_basic_login(
 
     let use_tls = state.config.server.use_tls;
     let (_session_id, token) = create_session_and_token(
-        state.clone(),
+        &state.web_db,
+        &state.jwt_secret,
         user.id,
         body.remember_me,
         info.user_agent.clone(),
@@ -347,12 +350,12 @@ pub async fn post_basic_login(
     .map_err(|_| WebError::failed_to_generate_token())?;
 
     let user_id = user.id;
-    update_last_login(state.clone(), user)
+    update_last_login(&state.web_db, user)
         .await
         .map_err(|_| WebError::failed_to_update_user())?;
 
     audit_record(
-        &state,
+        &db,
         Some(user_id),
         Action::LoginSuccess,
         EventOwner::default(),
@@ -417,17 +420,13 @@ pub async fn get_oauth_authorize(
         .to_owned();
 
     let use_tls = state.config.server.use_tls;
-    let user: MUser = oidc_login_verify(
-        state.clone(),
-        code.to_string(),
-        state_query.to_string(),
-        csrf,
-    )
-    .await
-    .map_err(oidc_failure("oauth_authorize_callback"))?;
+    let user: MUser = oidc_login_verify(&state, code.to_string(), state_query.to_string(), csrf)
+        .await
+        .map_err(oidc_failure("oauth_authorize_callback"))?;
 
     let (_session_id, token) = create_session_and_token(
-        state.clone(),
+        &state.web_db,
+        &state.jwt_secret,
         user.id,
         false,
         info.user_agent.clone(),
@@ -437,7 +436,7 @@ pub async fn get_oauth_authorize(
     .map_err(|_| WebError::failed_to_generate_token())?;
 
     audit_record(
-        &state,
+        &state.db(),
         Some(user.id),
         Action::LoginSuccess,
         EventOwner::default(),
@@ -465,7 +464,7 @@ pub async fn post_oauth_authorize(state: State<Arc<ServerState>>) -> WebResult<R
     }
 
     let use_tls = state.config.server.use_tls;
-    let req = oidc_login_create(state)
+    let req = oidc_login_create(&state.config, &state.http, &state.jwt_secret)
         .await
         .map_err(oidc_failure("oauth_authorize_start"))?;
 
@@ -491,7 +490,7 @@ pub async fn get_oidc_login(
     }
 
     let use_tls = state.config.server.use_tls;
-    let req = oidc_login_create(state)
+    let req = oidc_login_create(&state.config, &state.http, &state.jwt_secret)
         .await
         .map_err(oidc_failure("oidc_login_start"))?;
 
@@ -520,17 +519,13 @@ pub async fn get_oidc_callback(
         .to_owned();
 
     let use_tls = state.config.server.use_tls;
-    let user: MUser = oidc_login_verify(
-        state.clone(),
-        code.to_string(),
-        state_query.to_string(),
-        csrf,
-    )
-    .await
-    .map_err(oidc_failure("oidc_callback"))?;
+    let user: MUser = oidc_login_verify(&state, code.to_string(), state_query.to_string(), csrf)
+        .await
+        .map_err(oidc_failure("oidc_callback"))?;
 
     let (_session_id, token) = create_session_and_token(
-        state.clone(),
+        &state.web_db,
+        &state.jwt_secret,
         user.id,
         false,
         info.user_agent.clone(),
@@ -540,7 +535,7 @@ pub async fn get_oidc_callback(
     .map_err(|_| WebError::failed_to_generate_token())?;
 
     audit_record(
-        &state,
+        &state.db(),
         Some(user.id),
         Action::LoginSuccess,
         EventOwner::default(),
@@ -577,7 +572,7 @@ pub async fn post_logout(
         secure
     );
 
-    if let Some(claims) = session_claims(&state, &headers) {
+    if let Some(claims) = session_claims(&state.jwt_secret, &headers) {
         let session_id = claims.jti;
         let user_id = claims.id;
         if let Ok(Some(session)) = ESession::find_by_id(session_id).one(&state.web_db).await {
@@ -587,7 +582,7 @@ pub async fn post_logout(
         }
 
         audit_record(
-            &state,
+            &state.db(),
             Some(user_id),
             Action::Logout,
             EventOwner::default(),
@@ -847,7 +842,7 @@ pub async fn post_cli_device_start(
     row.insert(&state.web_db).await?;
 
     audit_record(
-        &state,
+        &state.db(),
         None,
         Action::CliDeviceStart,
         EventOwner::default(),
@@ -897,13 +892,10 @@ pub async fn post_cli_device_poll(
     Err(AuthRefusal::DeviceAuthorizationPending.into())
 }
 
-async fn find_active_user_code(
-    state: &Arc<ServerState>,
-    user_code: &str,
-) -> WebResult<MCliDeviceAuthorization> {
+async fn find_active_user_code(db: &WebDb, user_code: &str) -> WebResult<MCliDeviceAuthorization> {
     let row = ECliDeviceAuthorization::find()
         .filter(CCliDeviceAuthorization::UserCode.eq(user_code.to_string()))
-        .one(&state.web_db)
+        .one(db)
         .await?
         .ok_or_else(|| WebError::not_found(Resource::DeviceAuthorization))?;
 
@@ -924,7 +916,7 @@ pub async fn get_cli_device_info(
     state: State<Arc<ServerState>>,
     Query(query): Query<CliDeviceUserCodeQuery>,
 ) -> WebResult<Json<BaseResponse<CliDeviceInfoResponse>>> {
-    let row = find_active_user_code(&state, &query.user_code).await?;
+    let row = find_active_user_code(&state.web_db, &query.user_code).await?;
     Ok(ok_json(CliDeviceInfoResponse {
         user_code: row.user_code,
         expires_at: row.expires_at,
@@ -939,10 +931,11 @@ pub async fn post_cli_device_authorize(
     Extension(user): Extension<MUser>,
     Json(body): Json<CliDeviceAuthorizeRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let row = find_active_user_code(&state, &body.user_code).await?;
+    let row = find_active_user_code(&state.web_db, &body.user_code).await?;
 
     let (_session_id, token) = create_session_and_token(
-        state.clone(),
+        &state.web_db,
+        &state.jwt_secret,
         user.id,
         true,
         row.user_agent.clone(),
@@ -959,7 +952,7 @@ pub async fn post_cli_device_authorize(
     active.update(&state.web_db).await?;
 
     audit_record(
-        &state,
+        &state.db(),
         Some(user.id),
         Action::CliDeviceAuthorize,
         EventOwner::default(),
@@ -977,7 +970,7 @@ pub async fn post_cli_device_deny(
     Extension(user): Extension<MUser>,
     Json(body): Json<CliDeviceAuthorizeRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let row = find_active_user_code(&state, &body.user_code).await?;
+    let row = find_active_user_code(&state.web_db, &body.user_code).await?;
 
     let now = gradient_types::now();
     let mut active: ACliDeviceAuthorization = row.into();
@@ -985,7 +978,7 @@ pub async fn post_cli_device_deny(
     active.update(&state.web_db).await?;
 
     audit_record(
-        &state,
+        &state.db(),
         Some(user.id),
         Action::CliDeviceDeny,
         EventOwner::default(),

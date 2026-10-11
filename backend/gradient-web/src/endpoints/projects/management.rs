@@ -15,6 +15,7 @@ use crate::resource::Resource;
 use anyhow::Context;
 use axum::extract::{Path, Query, State};
 use axum::{Extension, Json};
+use gradient_db::WebDb;
 use gradient_types::events::EventOwner;
 use gradient_types::events::audit::Action;
 
@@ -101,7 +102,7 @@ pub async fn get_project_name_available(
 }
 
 async fn count_running_evaluations(
-    state: &Arc<ServerState>,
+    db: &WebDb,
     project_ids: &[ProjectId],
 ) -> WebResult<HashMap<ProjectId, i64>> {
     use gradient_entity::evaluation::EvaluationStatus;
@@ -112,7 +113,7 @@ async fn count_running_evaluations(
 
     let tasks = ETask::find()
         .filter(CTask::Project.is_in(project_ids.to_vec()))
-        .all(&state.web_db)
+        .all(db)
         .await?;
 
     let task_ids: Vec<TaskId> = tasks.iter().map(|p| p.id).collect();
@@ -124,7 +125,7 @@ async fn count_running_evaluations(
         let running = EEvaluation::find()
             .filter(CEvaluation::Task.is_in(task_ids))
             .filter(CEvaluation::Status.is_in(EvaluationStatus::ACTIVE))
-            .all(&state.web_db)
+            .all(db)
             .await?;
         for eval in running {
             if let Some(task_id) = eval.task
@@ -159,7 +160,7 @@ pub async fn get(
     .await?;
 
     let project_ids: Vec<ProjectId> = listing.items.iter().map(|o| o.id).collect();
-    let running_per_project = count_running_evaluations(&state, &project_ids).await?;
+    let running_per_project = count_running_evaluations(&state.web_db, &project_ids).await?;
 
     let project_role_map =
         gradient_db::access::project_role_names(&state.web_db, user.id, project_ids).await?;
@@ -253,7 +254,7 @@ pub async fn put(
     tx.commit().await?;
 
     audit_record(
-        &state,
+        &state.db(),
         Some(user.id),
         Action::ProjectCreate,
         EventOwner {
@@ -304,7 +305,7 @@ pub async fn get_project(
     Path(project): Path<String>,
 ) -> WebResult<Json<BaseResponse<ProjectResponse>>> {
     let project = load_project(
-        &state.0,
+        &state.0.db(),
         Caller::from(&maybe_user),
         api_key.as_ref(),
         project,
@@ -335,24 +336,31 @@ pub async fn get_project(
         created_by: project.created_by,
         created_at: project.created_at,
         github_app_available: state.config.github_app.is_some(),
-        github_app_install_url: github_app_install_url(&state).await,
+        github_app_install_url: github_app_install_url(
+            &state.config,
+            &state.http,
+            &state.memory.github_app_install_url,
+        )
+        .await,
         role,
     }))
 }
 
 const GITHUB_APP_LOOKUP_TIMEOUT: Duration = Duration::from_secs(3);
 
-async fn github_app_install_url(state: &ServerState) -> Option<String> {
-    let app = state.config.github_app.as_ref()?;
+async fn github_app_install_url(
+    config: &RuntimeConfig,
+    http: &reqwest::Client,
+    github_app_install_url: &tokio::sync::OnceCell<String>,
+) -> Option<String> {
+    let app = config.github_app.as_ref()?;
     let lookup = async {
         let pem = tokio::fs::read_to_string(&app.private_key_file)
             .await
             .context("read GitHub App private key")?;
-        gradient_git_host::github_app::get_install_url(&state.http, app.app_id, &pem).await
+        gradient_git_host::github_app::get_install_url(http, app.app_id, &pem).await
     };
-    state
-        .memory
-        .github_app_install_url
+    github_app_install_url
         .get_or_try_init(|| async {
             tokio::time::timeout(GITHUB_APP_LOOKUP_TIMEOUT, lookup)
                 .await
@@ -372,8 +380,9 @@ pub async fn patch_project(
     Path(project): Path<String>,
     Json(body): Json<PatchProjectRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
+    let db = state.db();
     let project = load_project(
-        &state,
+        &db,
         Caller::User(&user),
         api_key.as_ref(),
         project,
@@ -431,7 +440,7 @@ pub async fn patch_project(
         .map_err(|e| WebError::from_db_err(e, Resource::ProjectName))?;
 
     audit_record(
-        &state,
+        &db,
         Some(user.id),
         Action::ProjectUpdate,
         EventOwner {
@@ -458,8 +467,9 @@ pub async fn delete_project(
     Extension(api_key): Extension<MaybeApiKey>,
     Path(project): Path<String>,
 ) -> WebResult<Json<BaseResponse<String>>> {
+    let db = state.db();
     let project = load_project(
-        &state,
+        &db,
         Caller::User(&user),
         api_key.as_ref(),
         project,
@@ -475,7 +485,7 @@ pub async fn delete_project(
     aproject.delete(&state.web_db).await?;
 
     audit_record(
-        &state,
+        &db,
         Some(user.id),
         Action::ProjectDelete,
         EventOwner {

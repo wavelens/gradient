@@ -20,6 +20,7 @@ use chrono::Utc;
 use gradient_ci::IntegrationKind;
 use gradient_ci::actions::encrypt_action_secret;
 use gradient_core::ServerState;
+use gradient_db::{DbContext, WebDb};
 use gradient_types::actions::{ActionConfig, ActionType, is_matrix_room_id};
 use gradient_types::events::audit::Action;
 use gradient_types::events::{EventOwner, names};
@@ -124,26 +125,19 @@ fn default_true() -> bool {
     true
 }
 
-fn encrypt_secret(state: &ServerState, plain: &str) -> WebResult<String> {
-    let key =
-        load_secret_bytes(&state.config.secrets.crypt_file).context("load the encryption key")?;
+fn encrypt_secret(config: &RuntimeConfig, plain: &str) -> WebResult<String> {
+    let key = load_secret_bytes(&config.secrets.crypt_file).context("load the encryption key")?;
     encrypt_action_secret(plain, key.expose())
         .context("encrypt the action secret")
         .map_err(Into::into)
 }
 
-async fn validate_mail_teams(
-    state: &Arc<ServerState>,
-    project: ProjectId,
-    cfg: &ActionConfig,
-) -> WebResult<()> {
+async fn validate_mail_teams(db: &WebDb, project: ProjectId, cfg: &ActionConfig) -> WebResult<()> {
     let ActionConfig::SendMail { recipients, .. } = cfg else {
         return Ok(());
     };
     for name in recipients.iter().filter_map(|r| r.strip_prefix("team:")) {
-        if !gradient_db::teams::mail::team_reaches_project_users(&state.web_db, project, name)
-            .await?
-        {
+        if !gradient_db::teams::mail::team_reaches_project_users(db, project, name).await? {
             return Err(TaskRefusal::TeamWithoutProjectAccess {
                 team: name.to_string(),
             }
@@ -191,7 +185,7 @@ pub async fn list_actions(
     Path((project, task)): Path<(String, String)>,
 ) -> WebResult<Json<BaseResponse<Vec<ActionResponse>>>> {
     let (_project, proj) = load_task(
-        &state,
+        &state.db(),
         Caller::User(&user),
         api_key.as_ref(),
         project,
@@ -216,8 +210,9 @@ pub async fn create_action(
     Path((project, task)): Path<(String, String)>,
     Json(body): Json<CreateActionRequest>,
 ) -> WebResult<Json<BaseResponse<CreateActionResponse>>> {
+    let db = state.db();
     let (project, proj) = load_task(
-        &state,
+        &db,
         Caller::User(&user),
         api_key.as_ref(),
         project,
@@ -240,7 +235,7 @@ pub async fn create_action(
     }
 
     validate_destination(&body.config)?;
-    validate_mail_teams(&state, project.id, &body.config).await?;
+    validate_mail_teams(&state.web_db, project.id, &body.config).await?;
     if matches!(
         body.config,
         ActionConfig::SendMatrixMessage {
@@ -301,7 +296,7 @@ pub async fn create_action(
     if let Some(slot) = stored_config.secret_mut()
         && let Some(plain) = slot.take()
     {
-        *slot = Some(encrypt_secret(&state, &plain)?);
+        *slot = Some(encrypt_secret(&state.config, &plain)?);
     }
 
     let now = Utc::now().naive_utc();
@@ -325,15 +320,7 @@ pub async fn create_action(
         .await
         .map_err(|e| WebError::from_db_err(e, Resource::Action))?;
 
-    record_action_event(
-        &state,
-        &user,
-        &info,
-        Action::TaskActionCreate,
-        project.id,
-        &m,
-    )
-    .await;
+    record_action_event(&db, &user, &info, Action::TaskActionCreate, project.id, &m).await;
 
     Ok(ok_json(CreateActionResponse {
         action: m.into(),
@@ -356,7 +343,7 @@ pub async fn read_action(
     Path((project, task, id)): Path<(String, String, TaskActionId)>,
 ) -> WebResult<Json<BaseResponse<ActionResponse>>> {
     let (_project, proj) = load_task(
-        &state,
+        &state.db(),
         Caller::User(&user),
         api_key.as_ref(),
         project,
@@ -383,8 +370,9 @@ pub async fn update_action(
     Path((project, task, id)): Path<(String, String, TaskActionId)>,
     Json(body): Json<UpdateActionRequest>,
 ) -> WebResult<Json<BaseResponse<ActionResponse>>> {
+    let db = state.db();
     let (project, proj) = load_task(
-        &state,
+        &db,
         Caller::User(&user),
         api_key.as_ref(),
         project,
@@ -411,7 +399,7 @@ pub async fn update_action(
         }
 
         validate_destination(new_cfg)?;
-        validate_mail_teams(&state, project.id, new_cfg).await?;
+        validate_mail_teams(&state.web_db, project.id, new_cfg).await?;
         match new_cfg {
             ActionConfig::SendMail { recipients, .. } if recipients.is_empty() => {
                 return Err(TaskRefusal::NoMailRecipients.into());
@@ -456,7 +444,7 @@ pub async fn update_action(
         if let Some(slot) = stored_cfg.secret_mut()
             && let Some(plain) = slot.take()
         {
-            *slot = Some(encrypt_secret(&state, &plain)?);
+            *slot = Some(encrypt_secret(&state.config, &plain)?);
         } else {
             stored_cfg.keep_secret_from(stored);
         }
@@ -482,7 +470,7 @@ pub async fn update_action(
         .map_err(|e| WebError::from_db_err(e, Resource::Action))?;
 
     record_action_event(
-        &state,
+        &db,
         &user,
         &info,
         Action::TaskActionUpdate,
@@ -495,7 +483,7 @@ pub async fn update_action(
 }
 
 async fn record_action_event(
-    state: &ServerState,
+    db: &DbContext,
     user: &MUser,
     info: &RequestInfo,
     action: Action,
@@ -512,7 +500,7 @@ async fn record_action_event(
         "name": row.name,
         "action_type": row.action_type,
     });
-    audit_record(state, Some(user.id), action, owner, info, Some(metadata)).await;
+    audit_record(db, Some(user.id), action, owner, info, Some(metadata)).await;
 }
 
 #[derive(Serialize, Debug)]
@@ -527,8 +515,9 @@ pub async fn delete_action(
     Extension(api_key): Extension<MaybeApiKey>,
     Path((project, task, id)): Path<(String, String, TaskActionId)>,
 ) -> WebResult<Json<BaseResponse<DeletedResponse>>> {
+    let db = state.db();
     let (project, proj) = load_task(
-        &state,
+        &db,
         Caller::User(&user),
         api_key.as_ref(),
         project,
@@ -551,7 +540,7 @@ pub async fn delete_action(
     active.delete(&state.web_db).await?;
 
     record_action_event(
-        &state,
+        &db,
         &user,
         &info,
         Action::TaskActionDelete,
@@ -569,8 +558,9 @@ pub async fn test_action(
     Extension(api_key): Extension<MaybeApiKey>,
     Path((project, task, id)): Path<(String, String, TaskActionId)>,
 ) -> WebResult<Json<BaseResponse<serde_json::Value>>> {
+    let ci = state.ci();
     let (_project, proj) = load_task(
-        &state,
+        &state.db(),
         Caller::User(&user),
         api_key.as_ref(),
         project.clone(),
@@ -597,7 +587,7 @@ pub async fn test_action(
         action_type,
         ActionType::GitHostStatusReport | ActionType::OpenPr
     ) {
-        gradient_ci::actions::verify_git_host_action(&state.ci(), &action, &proj.repository)
+        gradient_ci::actions::verify_git_host_action(&ci, &action, &proj.repository)
             .await
             .context("run the test fire")?;
 
@@ -633,7 +623,7 @@ pub async fn test_action(
         "at": now.to_rfc3339(),
         "content": content,
     });
-    gradient_ci::actions::execute_action(&state.ci(), action, &event, envelope)
+    gradient_ci::actions::execute_action(&ci, action, &event, envelope)
         .await
         .context("run the test fire")?;
 
@@ -650,7 +640,7 @@ pub async fn regenerate_token(
     use rand::RngExt as _;
 
     let (_project, proj) = load_task(
-        &state,
+        &state.db(),
         Caller::User(&user),
         api_key.as_ref(),
         project,
@@ -677,7 +667,7 @@ pub async fn regenerate_token(
     rand::rng().fill(&mut raw);
     let plaintext_token = format!("gat_{}", URL_SAFE_NO_PAD.encode(raw));
 
-    let encrypted = encrypt_secret(&state, &plaintext_token)?;
+    let encrypted = encrypt_secret(&state.config, &plaintext_token)?;
 
     let mut cfg: ActionConfig = serde_json::from_value(existing.config.clone())
         .context("parse the stored action config")?;
@@ -742,7 +732,7 @@ pub async fn list_deliveries(
     Query(q): Query<DeliveryListQuery>,
 ) -> WebResult<Json<BaseResponse<Vec<DeliveryListItem>>>> {
     let (_project, proj) = load_task(
-        &state,
+        &state.db(),
         Caller::User(&user),
         api_key.as_ref(),
         project,
@@ -786,7 +776,7 @@ pub async fn get_delivery(
     )>,
 ) -> WebResult<Json<BaseResponse<DeliveryDetail>>> {
     let (_project, proj) = load_task(
-        &state,
+        &state.db(),
         Caller::User(&user),
         api_key.as_ref(),
         project,

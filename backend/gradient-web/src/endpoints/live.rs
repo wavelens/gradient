@@ -75,7 +75,7 @@ pub async fn task_live_ws(
     ws: WebSocketUpgrade,
 ) -> WebResult<Response> {
     let (_project, task) = load_task(
-        &state,
+        &state.db(),
         Caller::from(&maybe_user),
         api_key.as_ref(),
         project,
@@ -147,7 +147,8 @@ pub async fn evaluation_live_ws(
     Path(evaluation_id): Path<EvaluationId>,
     ws: WebSocketUpgrade,
 ) -> WebResult<Response> {
-    let ctx = EvalAccessContext::load(&state, evaluation_id, &maybe_user, api_key.as_ref()).await?;
+    let ctx = EvalAccessContext::load(&state.web_db, evaluation_id, &maybe_user, api_key.as_ref())
+        .await?;
     let eval_id = ctx.evaluation.id;
     let rx = state.events.subscribe();
     let cancel = state.shutdown.token();
@@ -172,7 +173,8 @@ pub async fn build_live_ws(
     Path(build_id): Path<BuildJobId>,
     ws: WebSocketUpgrade,
 ) -> WebResult<Response> {
-    let ctx = BuildAccessContext::load(&state, build_id, &maybe_user, api_key.as_ref()).await?;
+    let ctx =
+        BuildAccessContext::load(&state.web_db, build_id, &maybe_user, api_key.as_ref()).await?;
     let eval_id = ctx.build_job.evaluation;
     let shared_build = ctx.shared_build.id;
     let rx = state.events.subscribe();

@@ -17,6 +17,7 @@ use axum::Json;
 use axum::extract::{Path, State};
 use gradient_core::ServerState;
 use gradient_core::upstream_source::{ProtocolProbe, probe_protocol};
+use gradient_db::WebDb;
 use gradient_entity::cache_upstream::{CacheUpstreamKind, CacheUpstreamSource};
 use gradient_entity::project_cache::CacheSubscriptionMode;
 use gradient_types::*;
@@ -125,13 +126,13 @@ fn validate_gradient_proto(
 }
 
 async fn load_upstream(
-    state: &Arc<ServerState>,
+    db: &WebDb,
     cache_id: CacheId,
     upstream_id: CacheUpstreamId,
 ) -> WebResult<MCacheUpstream> {
     ECacheUpstream::find_by_id(upstream_id)
         .filter(CCacheUpstream::Cache.eq(cache_id))
-        .one(&state.web_db)
+        .one(db)
         .await?
         .or_not_found(Resource::UpstreamCache)
 }
@@ -143,7 +144,7 @@ pub async fn get_upstream_caches(
     Path(cache): Path<String>,
 ) -> WebResult<Json<BaseResponse<Vec<UpstreamCacheItem>>>> {
     let cache = load_cache(
-        &state,
+        &state.db(),
         Caller::from(&maybe_user),
         api_key.as_ref(),
         cache,
@@ -180,8 +181,9 @@ pub async fn put_cache_upstream(
     Path(cache): Path<String>,
     Json(body): Json<AddUpstreamRequest>,
 ) -> WebResult<Json<BaseResponse<CacheUpstreamId>>> {
+    let db = state.db();
     let cache = load_cache(
-        &state,
+        &db,
         Caller::User(&user),
         api_key.as_ref(),
         cache,
@@ -199,7 +201,7 @@ pub async fn put_cache_upstream(
             mode,
         } => {
             let upstream = load_cache(
-                &state,
+                &db,
                 Caller::User(&user),
                 api_key.as_ref(),
                 cache_name,
@@ -281,7 +283,7 @@ pub async fn patch_cache_upstream(
     Json(body): Json<PatchUpstreamRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let cache = load_cache(
-        &state,
+        &state.db(),
         Caller::User(&user),
         api_key.as_ref(),
         cache,
@@ -294,7 +296,7 @@ pub async fn patch_cache_upstream(
     if patch_edits_managed_fields(&body) {
         reject_managed_cache(&cache)?;
     }
-    let record = load_upstream(&state, cache.id, upstream_id).await?;
+    let record = load_upstream(&state.web_db, cache.id, upstream_id).await?;
 
     let is_external = matches!(record.as_source(), Some(CacheUpstreamSource::Http { .. }));
     let mut row = record.into_active_model();
@@ -354,7 +356,7 @@ pub async fn post_cache_upstream_test(
     Path((cache, upstream_id)): Path<(String, CacheUpstreamId)>,
 ) -> WebResult<Json<BaseResponse<UpstreamTestResponse>>> {
     let cache = load_cache(
-        &state,
+        &state.db(),
         Caller::User(&user),
         api_key.as_ref(),
         cache,
@@ -364,7 +366,7 @@ pub async fn post_cache_upstream_test(
         },
     )
     .await?;
-    let record = load_upstream(&state, cache.id, upstream_id).await?;
+    let record = load_upstream(&state.web_db, cache.id, upstream_id).await?;
     let Some(CacheUpstreamSource::Http { url, .. }) = record.as_source() else {
         return Err(CacheRefusal::UpstreamNotHttp.into());
     };
@@ -384,7 +386,7 @@ pub async fn delete_cache_upstream(
     Path((cache, upstream_id)): Path<(String, CacheUpstreamId)>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let cache = load_cache(
-        &state,
+        &state.db(),
         Caller::User(&user),
         api_key.as_ref(),
         cache,
@@ -394,7 +396,7 @@ pub async fn delete_cache_upstream(
         },
     )
     .await?;
-    let record = load_upstream(&state, cache.id, upstream_id).await?;
+    let record = load_upstream(&state.web_db, cache.id, upstream_id).await?;
 
     let active: ACacheUpstream = record.into();
     active.delete(&state.web_db).await?;

@@ -14,6 +14,8 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
 use gradient_core::ServerState;
+use gradient_db::WebDb;
+use gradient_storage::NarStore;
 use gradient_storage::nar_extract::{
     ExtractError, Extracted, extract_path_from_reader, nar_reader_from_stream,
 };
@@ -33,7 +35,7 @@ fn relative_in_output(full: &str, output_root: &str) -> String {
 }
 
 async fn collect_build_products(
-    state: &Arc<ServerState>,
+    db: &WebDb,
     _build_id: BuildJobId,
     build_outputs: Vec<MDerivationOutput>,
 ) -> Vec<BuildProduct> {
@@ -44,7 +46,7 @@ async fn collect_build_products(
 
     let rows = match EBuildProduct::find()
         .filter(CBuildProduct::DerivationOutput.is_in(output_ids))
-        .all(&state.web_db)
+        .all(db)
         .await
     {
         Ok(r) => r,
@@ -66,7 +68,8 @@ async fn collect_build_products(
 }
 
 async fn find_and_serve_file(
-    state: &Arc<ServerState>,
+    db: &WebDb,
+    nar_storage: &NarStore,
     build_id: BuildJobId,
     build_outputs: Vec<MDerivationOutput>,
     filename: &str,
@@ -78,7 +81,7 @@ async fn find_and_serve_file(
 
     let rows = match EBuildProduct::find()
         .filter(CBuildProduct::DerivationOutput.is_in(output_ids))
-        .all(&state.web_db)
+        .all(db)
         .await
     {
         Ok(r) => r,
@@ -100,7 +103,7 @@ async fn find_and_serve_file(
             continue;
         };
 
-        let response = product_response(state, build_id, &product, output, filename).await?;
+        let response = product_response(nar_storage, build_id, &product, output, filename).await?;
         if response.is_some() {
             return Ok(response);
         }
@@ -119,7 +122,7 @@ fn is_named(product: &MBuildProduct, filename: &str) -> bool {
 }
 
 async fn product_response(
-    state: &Arc<ServerState>,
+    nar_storage: &NarStore,
     build_id: BuildJobId,
     product: &MBuildProduct,
     output: &MDerivationOutput,
@@ -131,7 +134,7 @@ async fn product_response(
     let output_root = StorePath::from(output.clone()).full();
     let rel = relative_in_output(&product.path, &output_root);
 
-    let stream = match state.nar_storage.get_stream(hash).await {
+    let stream = match nar_storage.get_stream(hash).await {
         Ok(Some((_size, stream))) => stream,
         Ok(None) => {
             tracing::warn!(%build_id, %filename, hash, "NAR not found in nar_storage");
@@ -187,14 +190,15 @@ pub async fn get_build_downloads(
     Extension(api_key): Extension<MaybeApiKey>,
     Path(build_id): Path<BuildJobId>,
 ) -> WebResult<Json<BaseResponse<Vec<BuildProduct>>>> {
-    let ctx = BuildAccessContext::load(&state, build_id, &maybe_user, api_key.as_ref()).await?;
+    let ctx =
+        BuildAccessContext::load(&state.web_db, build_id, &maybe_user, api_key.as_ref()).await?;
 
     let build_outputs = EDerivationOutput::find()
         .filter(CDerivationOutput::Derivation.eq(ctx.build_job.derivation))
         .all(&state.web_db)
         .await?;
 
-    let products = collect_build_products(&state, build_id, build_outputs).await;
+    let products = collect_build_products(&state.web_db, build_id, build_outputs).await;
 
     Ok(ok_json(products))
 }
@@ -205,10 +209,11 @@ pub async fn get_build_download_token(
     Extension(api_key): Extension<MaybeApiKey>,
     Path(build_id): Path<BuildJobId>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let ctx = BuildAccessContext::load(&state, build_id, &Some(user), api_key.as_ref()).await?;
+    let ctx =
+        BuildAccessContext::load(&state.web_db, build_id, &Some(user), api_key.as_ref()).await?;
 
     let token = encode_download_token(
-        State(Arc::clone(&state)),
+        &state.jwt_secret,
         ctx.build_job.derivation,
         ctx.build_job.evaluation,
     )
@@ -218,12 +223,13 @@ pub async fn get_build_download_token(
 }
 
 async fn load_with_download_token(
-    state: &Arc<ServerState>,
+    db: &WebDb,
+    jwt_secret: &SecretString,
     build_id: BuildJobId,
     token: String,
 ) -> WebResult<BuildAccessContext> {
-    let ctx = BuildAccessContext::load_unguarded(state, build_id).await?;
-    let claims = decode_download_token(State(Arc::clone(state)), token)
+    let ctx = BuildAccessContext::load_unguarded(db, build_id).await?;
+    let claims = decode_download_token(jwt_secret, token)
         .await
         .map_err(|_| BuildReadRefusal::InvalidDownloadToken)?;
     if claims.derivation != ctx.build_job.derivation {
@@ -240,8 +246,12 @@ pub async fn get_build_download(
     Query(query): Query<DownloadQuery>,
 ) -> Result<Response, WebError> {
     let ctx = match query.token {
-        Some(token) => load_with_download_token(&state, build_id, token).await?,
-        None => BuildAccessContext::load(&state, build_id, &maybe_user, api_key.as_ref()).await?,
+        Some(token) => {
+            load_with_download_token(&state.web_db, &state.jwt_secret, build_id, token).await?
+        }
+        None => {
+            BuildAccessContext::load(&state.web_db, build_id, &maybe_user, api_key.as_ref()).await?
+        }
     };
 
     let build_outputs = EDerivationOutput::find()
@@ -255,7 +265,15 @@ pub async fn get_build_download(
         "Found build outputs for download"
     );
 
-    match find_and_serve_file(&state, build_id, build_outputs, &filename).await? {
+    match find_and_serve_file(
+        &state.web_db,
+        &state.nar_storage,
+        build_id,
+        build_outputs,
+        &filename,
+    )
+    .await?
+    {
         Some(response) => Ok(response),
         None => Err(WebError::not_found(Resource::File)),
     }

@@ -18,6 +18,7 @@ use crate::resource::Resource;
 use axum::extract::{Path, Query, State};
 use axum::http::HeaderMap;
 use axum::{Extension, Json};
+use gradient_db::{DbContext, WebDb};
 use gradient_types::events::EventOwner;
 use gradient_types::events::audit::Action;
 
@@ -293,7 +294,7 @@ pub async fn delete(
     auser.delete(&state.web_db).await?;
 
     audit_record(
-        &state,
+        &state.db(),
         Some(user_id),
         Action::UserDelete,
         EventOwner::default(),
@@ -327,7 +328,7 @@ fn last_used_or_none(dt: chrono::NaiveDateTime) -> Option<String> {
 }
 
 async fn resolve_project_pin(
-    state: &Arc<ServerState>,
+    db: &DbContext,
     user_id: UserId,
     name: Option<String>,
 ) -> WebResult<Option<ProjectId>> {
@@ -341,10 +342,10 @@ async fn resolve_project_pin(
     let unknown = || UserRefusal::UnknownProjectOrNotMember {
         project: trimmed.to_string(),
     };
-    let project = get_any_project_by_name(&state.db(), trimmed.into())
+    let project = get_any_project_by_name(db, trimmed.into())
         .await?
         .ok_or_else(unknown)?;
-    let is_member = crate::access::is_project_member(state, user_id, project.id, None).await?;
+    let is_member = crate::access::is_project_member(&db.web_db, user_id, project.id, None).await?;
     if !is_member {
         return Err(unknown().into());
     }
@@ -359,7 +360,7 @@ pub(crate) fn forbid_via_api_key(api_key: &MaybeApiKey) -> WebResult<()> {
 }
 
 async fn project_name_lookup(
-    state: &Arc<ServerState>,
+    db: &WebDb,
     project_ids: &[ProjectId],
 ) -> WebResult<std::collections::HashMap<ProjectId, String>> {
     if project_ids.is_empty() {
@@ -367,7 +368,7 @@ async fn project_name_lookup(
     }
     let rows = EProject::find()
         .filter(CProject::Id.is_in(project_ids.to_vec()))
-        .all(&state.web_db)
+        .all(db)
         .await?;
     Ok(rows.into_iter().map(|o| (o.id, o.name)).collect())
 }
@@ -429,7 +430,7 @@ pub async fn get_keys(
         .await?;
 
     let pinned: Vec<ProjectId> = api_keys.iter().filter_map(|k| k.project).collect();
-    let project_names = project_name_lookup(&state, &pinned).await?;
+    let project_names = project_name_lookup(&state.web_db, &pinned).await?;
 
     let infos: Vec<ApiKeyInfo> = api_keys
         .into_iter()
@@ -446,6 +447,7 @@ pub async fn post_keys(
     Extension(api_key_caller): Extension<MaybeApiKey>,
     Json(body): Json<CreateApiKeyRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
+    let db = state.db();
     forbid_via_api_key(&api_key_caller)?;
 
     if body.cache.is_some() && body.project.is_some() {
@@ -470,7 +472,7 @@ pub async fn post_keys(
 
     let (mask, project_pin, cache_pin) = if let Some(cache_name) = body.cache.clone() {
         let cache = load_cache(
-            &state,
+            &db,
             Caller::User(&user),
             None,
             cache_name,
@@ -481,7 +483,7 @@ pub async fn post_keys(
         if m == 0 {
             return Err(UserRefusal::NoPermissionsSelected.into());
         }
-        let granted = effective_cache_mask(&state, user.id, cache.id, None)
+        let granted = effective_cache_mask(&state.web_db, user.id, cache.id, None)
             .await?
             .ok_or_else(|| WebError::not_found(Resource::Cache))?;
         if m & !granted != 0 {
@@ -493,7 +495,7 @@ pub async fn post_keys(
         if m == 0 {
             return Err(UserRefusal::NoPermissionsSelected.into());
         }
-        let project = resolve_project_pin(&state, user.id, body.project.clone()).await?;
+        let project = resolve_project_pin(&db, user.id, body.project.clone()).await?;
         (m, project, None)
     };
 
@@ -518,7 +520,7 @@ pub async fn post_keys(
     let inserted = api_key.insert(&state.web_db).await?;
 
     audit_record(
-        &state,
+        &db,
         Some(user.id),
         Action::ApiKeyCreate,
         EventOwner::default(),
@@ -548,6 +550,7 @@ pub async fn patch_key(
     Path(api_id): Path<ApiId>,
     Json(body): Json<PatchApiKeyRequest>,
 ) -> WebResult<Json<BaseResponse<ApiKeyInfo>>> {
+    let db = state.db();
     forbid_via_api_key(&api_key_caller)?;
 
     let api_key = EApi::find_by_id(api_id)
@@ -593,7 +596,7 @@ pub async fn patch_key(
     }
     let mut new_project = previous_project;
     if let Some(maybe_name) = body.project {
-        new_project = resolve_project_pin(&state, user.id, maybe_name).await?;
+        new_project = resolve_project_pin(&db, user.id, maybe_name).await?;
         active.project = Set(new_project);
     }
     if let Some(canon) = normalize_allowed_ips(body.allowed_ips)? {
@@ -603,7 +606,7 @@ pub async fn patch_key(
     let updated = active.update(&state.web_db).await?;
 
     audit_record(
-        &state,
+        &db,
         Some(user.id),
         Action::ApiKeyUpdate,
         EventOwner::default(),
@@ -621,7 +624,7 @@ pub async fn patch_key(
     .await;
 
     let pinned: Vec<ProjectId> = updated.project.iter().copied().collect();
-    let project_names = project_name_lookup(&state, &pinned).await?;
+    let project_names = project_name_lookup(&state.web_db, &pinned).await?;
     Ok(ok_json(api_key_info(updated, &project_names)))
 }
 
@@ -652,7 +655,7 @@ pub async fn delete_keys(
     aapi_key.delete(&state.web_db).await?;
 
     audit_record(
-        &state,
+        &state.db(),
         Some(user.id),
         Action::ApiKeyDelete,
         EventOwner::default(),
@@ -700,7 +703,7 @@ pub async fn post_key_revoke(
     active.update(&state.web_db).await?;
 
     audit_record(
-        &state,
+        &state.db(),
         Some(user.id),
         Action::ApiKeyRevoke,
         EventOwner::default(),
@@ -717,7 +720,7 @@ pub async fn get_sessions(
     headers: HeaderMap,
     Extension(user): Extension<MUser>,
 ) -> WebResult<Json<BaseResponse<Vec<SessionInfo>>>> {
-    let current_session_id = session_claims(&state, &headers).map(|claims| claims.jti);
+    let current_session_id = session_claims(&state.jwt_secret, &headers).map(|claims| claims.jti);
 
     let sessions = ESession::find()
         .filter(CSession::UserId.eq(user.id))
@@ -768,7 +771,7 @@ pub async fn delete_session(
     active.update(&state.web_db).await?;
 
     audit_record(
-        &state,
+        &state.db(),
         Some(user.id),
         Action::SessionRevoke,
         EventOwner::default(),

@@ -102,7 +102,7 @@ pub async fn get(
 ) -> WebResult<Json<BaseResponse<Paginated<Vec<TaskResponse>>>>> {
     let api_key_ref = api_key.as_ref();
     let project = load_project(
-        &state.0,
+        &state.0.db(),
         Caller::from(&maybe_user),
         api_key_ref,
         project,
@@ -115,7 +115,7 @@ pub async fn get(
     let (can_edit, can_trigger) = match &maybe_user {
         Some(user) => (
             has_permission(
-                &state,
+                &state.web_db,
                 user.id,
                 project.id,
                 Permission::EditTask,
@@ -123,7 +123,7 @@ pub async fn get(
             )
             .await?,
             has_permission(
-                &state,
+                &state.web_db,
                 user.id,
                 project.id,
                 Permission::TriggerEvaluation,
@@ -218,7 +218,7 @@ pub async fn put(
         .map_err(|e| TaskRefusal::InvalidRepositoryUrl(e.to_string()))?;
 
     let project = load_project(
-        &state.0,
+        &state.0.db(),
         Caller::User(&user),
         api_key.as_ref(),
         project,
@@ -304,7 +304,7 @@ pub async fn put(
     }
 
     audit_record(
-        &state,
+        &state.db(),
         Some(user.id),
         Action::TaskCreate,
         EventOwner {
@@ -336,7 +336,7 @@ pub async fn get_task(
 ) -> WebResult<Json<BaseResponse<TaskResponse>>> {
     let api_key_ref = api_key.as_ref();
     let (project, task) = load_task(
-        &state.0,
+        &state.0.db(),
         Caller::from(&maybe_user),
         api_key_ref,
         project,
@@ -348,7 +348,7 @@ pub async fn get_task(
     let (can_edit, can_trigger) = match &maybe_user {
         Some(user) => (
             has_permission(
-                &state,
+                &state.web_db,
                 user.id,
                 project.id,
                 Permission::EditTask,
@@ -356,7 +356,7 @@ pub async fn get_task(
             )
             .await?,
             has_permission(
-                &state,
+                &state.web_db,
                 user.id,
                 project.id,
                 Permission::TriggerEvaluation,
@@ -409,8 +409,9 @@ pub async fn patch_task(
     Path((project, task)): Path<(String, String)>,
     Json(body): Json<PatchTaskRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
+    let db = state.db();
     let (project, task) = load_task(
-        &state,
+        &db,
         Caller::User(&user),
         api_key.as_ref(),
         project,
@@ -476,7 +477,7 @@ pub async fn patch_task(
     atask.update(&state.web_db).await?;
 
     audit_record(
-        &state,
+        &db,
         Some(user.id),
         Action::TaskUpdate,
         owner,
@@ -580,8 +581,9 @@ pub async fn delete_task(
     Extension(api_key): Extension<MaybeApiKey>,
     Path((project, task)): Path<(String, String)>,
 ) -> WebResult<Json<BaseResponse<String>>> {
+    let db = state.db();
     let (project_row, task) = load_task(
-        &state,
+        &db,
         Caller::User(&user),
         api_key.as_ref(),
         project,
@@ -598,7 +600,7 @@ pub async fn delete_task(
     atask.delete(&state.web_db).await?;
 
     audit_record(
-        &state,
+        &db,
         Some(user.id),
         Action::TaskDelete,
         EventOwner {
@@ -630,7 +632,7 @@ pub async fn post_task_active(
     Path((project, task)): Path<(String, String)>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let (_project, task) = load_task(
-        &state,
+        &state.db(),
         Caller::User(&user),
         api_key.as_ref(),
         project,
@@ -660,7 +662,7 @@ pub async fn delete_task_active(
     Path((project, task)): Path<(String, String)>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let (_project, task) = load_task(
-        &state,
+        &state.db(),
         Caller::User(&user),
         api_key.as_ref(),
         project,
@@ -689,8 +691,9 @@ pub async fn post_task_check_repository(
     Extension(api_key): Extension<MaybeApiKey>,
     Path((project, task)): Path<(String, String)>,
 ) -> WebResult<Json<BaseResponse<String>>> {
+    let db = state.db();
     let (_project, task) = load_task(
-        &state,
+        &db,
         Caller::User(&user),
         api_key.as_ref(),
         project,
@@ -702,12 +705,11 @@ pub async fn post_task_check_repository(
     )
     .await?;
 
-    let (_has_updates, remote_hash) =
-        check_task_updates(&state.db(), &task, None)
-            .await
-            .map_err(|e| TaskRefusal::RepositoryCheckFailed {
-                reason: e.to_string(),
-            })?;
+    let (_has_updates, remote_hash) = check_task_updates(&db, &task, None).await.map_err(|e| {
+        TaskRefusal::RepositoryCheckFailed {
+            reason: e.to_string(),
+        }
+    })?;
 
     let res = BaseResponse {
         error: false,
@@ -726,7 +728,7 @@ pub async fn post_task_transfer(
 ) -> WebResult<Json<BaseResponse<String>>> {
     let api_key_ref = api_key.as_ref();
     let (project, task) = load_task(
-        &state,
+        &state.db(),
         Caller::User(&user),
         api_key_ref,
         project,
@@ -736,7 +738,7 @@ pub async fn post_task_transfer(
     .await?;
 
     let is_admin = has_permission(
-        &state,
+        &state.web_db,
         user.id,
         project.id,
         Permission::EditTask,
@@ -753,7 +755,7 @@ pub async fn post_task_transfer(
     }
 
     let new_project = load_project(
-        &state.0,
+        &state.0.db(),
         Caller::User(&user),
         api_key_ref,
         body.project.clone(),

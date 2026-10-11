@@ -7,9 +7,11 @@
 use super::approval::{PullRequestApprovalContext, sender_is_trusted};
 use super::installation::event_repo_matches_task;
 use super::response::{QueuedEvaluation, SkippedTask, WebhookTriggerOutcome};
+use gradient_ci::CiContext;
 use gradient_ci::{ApplyInput, ApplyOutcome, ApprovalInfo, apply_trigger, parse_owner_repo};
-use gradient_core::ServerState;
+use gradient_db::{DbContext, WebDb};
 use gradient_entity::task_trigger as ept;
+use gradient_graph::Graph;
 use gradient_graph::Transition;
 use gradient_scheduler::Scheduler;
 use gradient_types::triggers::{TriggerConfig, TriggerType};
@@ -30,7 +32,7 @@ pub(super) enum PushRefKind<'a> {
     reason = "arg-heavy; refactor tracked in #503"
 )]
 pub(super) async fn trigger_push_for_integration(
-    state: &Arc<ServerState>,
+    ci: &CiContext,
     scheduler: &Arc<Scheduler>,
     integration_id: IntegrationId,
     event_repo_urls: &[String],
@@ -40,7 +42,7 @@ pub(super) async fn trigger_push_for_integration(
     author_name: Option<String>,
 ) -> WebhookTriggerOutcome {
     fan_out_triggers(
-        state,
+        ci,
         scheduler,
         integration_id,
         event_repo_urls,
@@ -84,7 +86,7 @@ pub(super) async fn trigger_push_for_integration(
     reason = "arg-heavy; refactor tracked in #503"
 )]
 pub(super) async fn trigger_pr_for_integration(
-    state: &Arc<ServerState>,
+    ci: &CiContext,
     scheduler: &Arc<Scheduler>,
     integration_id: IntegrationId,
     event_repo_urls: &[String],
@@ -102,7 +104,7 @@ pub(super) async fn trigger_pr_for_integration(
     let action_owned = action.to_string();
     let branch_owned = branch.map(str::to_string);
     fan_out_triggers(
-        state,
+        ci,
         scheduler,
         integration_id,
         event_repo_urls,
@@ -147,7 +149,7 @@ pub(super) async fn trigger_pr_for_integration(
     reason = "arg-heavy; refactor tracked in #503"
 )]
 pub(super) async fn trigger_release_for_integration(
-    state: &Arc<ServerState>,
+    ci: &CiContext,
     scheduler: &Arc<Scheduler>,
     integration_id: IntegrationId,
     event_repo_urls: &[String],
@@ -157,7 +159,7 @@ pub(super) async fn trigger_release_for_integration(
     author_name: Option<String>,
 ) -> WebhookTriggerOutcome {
     fan_out_triggers(
-        state,
+        ci,
         scheduler,
         integration_id,
         event_repo_urls,
@@ -207,7 +209,7 @@ enum FilterResult {
     reason = "arg-heavy; refactor tracked in #503"
 )]
 async fn fan_out_triggers<F>(
-    state: &Arc<ServerState>,
+    ci: &CiContext,
     scheduler: &Arc<Scheduler>,
     integration_id: IntegrationId,
     event_repo_urls: &[String],
@@ -226,7 +228,9 @@ where
     F: Fn(&TriggerConfig) -> FilterResult,
 {
     let triggers =
-        match load_active_triggers_for_integration(state, integration_id, trigger_type).await {
+        match load_active_triggers_for_integration(&ci.db.web_db, integration_id, trigger_type)
+            .await
+        {
             Ok(rows) => rows,
             Err(e) => {
                 warn!(error = %e, "load triggers for integration");
@@ -246,7 +250,7 @@ where
         let Some(cfg) = parse_trigger_config(&trig) else {
             continue;
         };
-        let Some(task) = load_trigger_task(state, &trig).await else {
+        let Some(task) = load_trigger_task(&ci.db.web_db, &trig).await else {
             continue;
         };
 
@@ -259,7 +263,7 @@ where
             continue;
         }
 
-        let project_name = project_name_for(state, task.project)
+        let project_name = project_name_for(&ci.db.web_db, task.project)
             .await
             .unwrap_or_default();
 
@@ -275,7 +279,7 @@ where
         outcome.tasks_scanned += 1;
 
         let gate_approval = if pr_require_approval {
-            decide_pr_gate(state, &task, approval_ctx.as_ref()).await
+            decide_pr_gate(ci, &task, approval_ctx.as_ref()).await
         } else {
             None
         };
@@ -291,11 +295,11 @@ where
             repository_override: repository_override.clone(),
             wildcard_override: wildcard_override.clone(),
             source_comment: source_comment.clone(),
-            instance_max_storage_gb: state.config.cache.max_storage_gb,
+            instance_max_storage_gb: ci.db.config.cache.max_storage_gb,
         };
 
         apply_and_record(
-            state,
+            &ci.db,
             scheduler,
             &task,
             &trig,
@@ -318,8 +322,8 @@ fn parse_trigger_config(trig: &ept::Model) -> Option<TriggerConfig> {
     }
 }
 
-async fn load_trigger_task(state: &Arc<ServerState>, trig: &ept::Model) -> Option<MTask> {
-    match ETask::find_by_id(trig.task).one(&state.web_db).await {
+async fn load_trigger_task(db: &WebDb, trig: &ept::Model) -> Option<MTask> {
+    match ETask::find_by_id(trig.task).one(db).await {
         Ok(Some(p)) => Some(p),
         Ok(None) => {
             warn!(trigger_id = %trig.id, task_id = %trig.task, "task not found for trigger");
@@ -333,7 +337,7 @@ async fn load_trigger_task(state: &Arc<ServerState>, trig: &ept::Model) -> Optio
 }
 
 async fn apply_and_record(
-    state: &Arc<ServerState>,
+    db: &DbContext,
     scheduler: &Arc<Scheduler>,
     task: &MTask,
     trig: &ept::Model,
@@ -341,8 +345,8 @@ async fn apply_and_record(
     project_name: String,
     outcome: &mut WebhookTriggerOutcome,
 ) {
-    let apply_result = apply_trigger(&state.web_db, task, input).await;
-    touch_trigger_last_fired(state, trig).await;
+    let apply_result = apply_trigger(&db.web_db, task, input).await;
+    touch_trigger_last_fired(&db.web_db, trig).await;
     match apply_result {
         Ok(ApplyOutcome::Created {
             evaluation: eval,
@@ -351,7 +355,7 @@ async fn apply_and_record(
         }) => {
             if let Some(aborted_id) = aborted_evaluation {
                 let shared_builds = if hard_abort {
-                    abort_eval_shared_builds(state, aborted_id).await
+                    abort_eval_shared_builds(&scheduler.graph, aborted_id).await
                 } else {
                     Vec::new()
                 };
@@ -365,7 +369,7 @@ async fn apply_and_record(
                 evaluation_id = %eval.id,
                 "Git host webhook trigger fired"
             );
-            state.record_evaluation_created(&eval).await;
+            db.record_evaluation_created(&eval).await;
             outcome.queued.push(QueuedEvaluation {
                 task_id: task.id,
                 task_name: task.name.clone(),
@@ -387,11 +391,10 @@ async fn apply_and_record(
 }
 
 async fn abort_eval_shared_builds(
-    state: &Arc<ServerState>,
+    graph: &Arc<Graph>,
     evaluation: EvaluationId,
 ) -> Vec<DerivationBuildId> {
-    match state
-        .graph
+    match graph
         .transition(Transition::AbortEvaluationSharedBuilds { evaluation })
         .await
     {
@@ -420,7 +423,7 @@ fn push_skipped(
 /// The gate is failing closed. A possibly-fork PR is gated unless it is same-repo or the actor is a
 /// trusted repo writer.
 async fn decide_pr_gate(
-    state: &Arc<ServerState>,
+    ci: &CiContext,
     task: &MTask,
     ctx: Option<&PullRequestApprovalContext>,
 ) -> Option<ApprovalInfo> {
@@ -428,9 +431,7 @@ async fn decide_pr_gate(
     let sender_trusted = match ctx.sender.as_deref() {
         Some(sender) if !matches!(ctx.is_fork, Some(false)) => {
             match parse_owner_repo(&task.repository) {
-                Some((owner, repo)) => {
-                    sender_is_trusted(state, task.id, &owner, &repo, sender).await
-                }
+                Some((owner, repo)) => sender_is_trusted(ci, task.id, &owner, &repo, sender).await,
                 None => false,
             }
         }
@@ -449,12 +450,12 @@ fn gate_decision(ctx: &PullRequestApprovalContext, sender_trusted: bool) -> Opti
     })
 }
 
-async fn touch_trigger_last_fired(state: &Arc<ServerState>, trig: &ept::Model) {
+async fn touch_trigger_last_fired(db: &WebDb, trig: &ept::Model) {
     let now = gradient_types::now();
     let mut active: ept::ActiveModel = trig.clone().into();
     active.last_fired_at = Set(Some(now));
     active.updated_at = Set(now);
-    if let Err(e) = active.update(&state.web_db).await {
+    if let Err(e) = active.update(db).await {
         warn!(error = %e, trigger_id = %trig.id, "failed to stamp trigger last_fired_at");
     }
 }
@@ -477,7 +478,7 @@ gradient_db::sql_fn! {
 }
 
 async fn load_active_triggers_for_integration(
-    state: &Arc<ServerState>,
+    db: &WebDb,
     integration_id: IntegrationId,
     trigger_type: TriggerType,
 ) -> Result<Vec<ept::Model>, sea_orm::DbErr> {
@@ -488,10 +489,7 @@ async fn load_active_triggers_for_integration(
         active_triggers_sql(trigger_type),
         [Value::Uuid(Some(integration_id.into_inner()))],
     );
-    ETaskTrigger::find()
-        .from_raw_sql(stmt)
-        .all(&state.web_db)
-        .await
+    ETaskTrigger::find().from_raw_sql(stmt).all(db).await
 }
 
 fn glob_matches(globs: &[String], name: &str) -> bool {
@@ -540,9 +538,9 @@ fn glob_match_recursive(p: &[char], t: &[char], pi: usize, ti: usize) -> bool {
     }
 }
 
-async fn project_name_for(state: &Arc<ServerState>, project_id: ProjectId) -> Option<String> {
+async fn project_name_for(db: &WebDb, project_id: ProjectId) -> Option<String> {
     EProject::find_by_id(project_id)
-        .one(&state.web_db)
+        .one(db)
         .await
         .ok()
         .flatten()

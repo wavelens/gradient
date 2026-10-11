@@ -15,6 +15,7 @@ use axum::extract::{Path, State};
 use axum::{Extension, Json};
 use chrono::NaiveDateTime;
 use gradient_core::ServerState;
+use gradient_db::WebDb;
 use gradient_scheduler::Scheduler;
 use gradient_types::events::EventOwner;
 use gradient_types::events::audit::Action;
@@ -69,13 +70,10 @@ pub struct TeamRequestItem {
     pub created_at: NaiveDateTime,
 }
 
-async fn cache_role_names(
-    state: &Arc<ServerState>,
-    ids: Vec<RoleId>,
-) -> WebResult<HashMap<RoleId, String>> {
+async fn cache_role_names(db: &WebDb, ids: Vec<RoleId>) -> WebResult<HashMap<RoleId, String>> {
     Ok(ECacheRole::find()
         .filter(CCacheRole::Id.is_in(ids))
-        .all(&state.web_db)
+        .all(db)
         .await?
         .into_iter()
         .map(|role| (role.id, role.name))
@@ -83,25 +81,22 @@ async fn cache_role_names(
 }
 
 async fn projects_by_id(
-    state: &Arc<ServerState>,
+    db: &WebDb,
     ids: Vec<ProjectId>,
 ) -> WebResult<HashMap<ProjectId, MProject>> {
     Ok(EProject::find()
         .filter(CProject::Id.is_in(ids))
-        .all(&state.web_db)
+        .all(db)
         .await?
         .into_iter()
         .map(|project| (project.id, project))
         .collect())
 }
 
-async fn caches_by_id(
-    state: &Arc<ServerState>,
-    ids: Vec<CacheId>,
-) -> WebResult<HashMap<CacheId, MCache>> {
+async fn caches_by_id(db: &WebDb, ids: Vec<CacheId>) -> WebResult<HashMap<CacheId, MCache>> {
     Ok(ECache::find()
         .filter(CCache::Id.is_in(ids))
-        .all(&state.web_db)
+        .all(db)
         .await?
         .into_iter()
         .map(|cache| (cache.id, cache))
@@ -114,7 +109,14 @@ pub async fn get_team_grants(
     Extension(api_key): Extension<MaybeApiKey>,
     Path(team): Path<String>,
 ) -> WebResult<Json<BaseResponse<TeamGrants>>> {
-    let (team, _) = load_team(&state, &user, api_key.as_ref(), team, TeamAccess::Member).await?;
+    let (team, _) = load_team(
+        &state.web_db,
+        &user,
+        api_key.as_ref(),
+        team,
+        TeamAccess::Member,
+    )
+    .await?;
 
     let project_grants = ETeamProject::find()
         .filter(CTeamProject::Team.eq(team.id))
@@ -125,16 +127,23 @@ pub async fn get_team_grants(
         .all(&state.web_db)
         .await?;
 
-    let projects =
-        projects_by_id(&state, project_grants.iter().map(|g| g.project).collect()).await?;
-    let caches = caches_by_id(&state, cache_grants.iter().map(|g| g.cache).collect()).await?;
+    let projects = projects_by_id(
+        &state.web_db,
+        project_grants.iter().map(|g| g.project).collect(),
+    )
+    .await?;
+    let caches = caches_by_id(
+        &state.web_db,
+        cache_grants.iter().map(|g| g.cache).collect(),
+    )
+    .await?;
     let project_roles = role_names(
         &state.web_db,
         project_grants.iter().filter_map(|g| g.role).collect(),
     )
     .await?;
     let cache_roles =
-        cache_role_names(&state, cache_grants.iter().map(|g| g.role).collect()).await?;
+        cache_role_names(&state.web_db, cache_grants.iter().map(|g| g.role).collect()).await?;
 
     let mut project_items: Vec<TeamProjectGrant> = project_grants
         .iter()
@@ -177,7 +186,7 @@ pub async fn get_team_requests(
     Path(team): Path<String>,
 ) -> WebResult<Json<BaseResponse<Vec<TeamRequestItem>>>> {
     let (team, _) = load_team(
-        &state,
+        &state.web_db,
         &user,
         api_key.as_ref(),
         team,
@@ -196,16 +205,26 @@ pub async fn get_team_requests(
         .all(&state.web_db)
         .await?;
 
-    let projects =
-        projects_by_id(&state, project_requests.iter().map(|r| r.project).collect()).await?;
-    let caches = caches_by_id(&state, cache_requests.iter().map(|r| r.cache).collect()).await?;
+    let projects = projects_by_id(
+        &state.web_db,
+        project_requests.iter().map(|r| r.project).collect(),
+    )
+    .await?;
+    let caches = caches_by_id(
+        &state.web_db,
+        cache_requests.iter().map(|r| r.cache).collect(),
+    )
+    .await?;
     let project_roles = role_names(
         &state.web_db,
         project_requests.iter().filter_map(|r| r.role).collect(),
     )
     .await?;
-    let cache_roles =
-        cache_role_names(&state, cache_requests.iter().map(|r| r.role).collect()).await?;
+    let cache_roles = cache_role_names(
+        &state.web_db,
+        cache_requests.iter().map(|r| r.role).collect(),
+    )
+    .await?;
     let requester_ids: Vec<UserId> = project_requests
         .iter()
         .filter_map(|r| r.requested_by)
@@ -264,8 +283,9 @@ pub async fn post_approve_team_request(
     Extension(scheduler): Extension<Arc<Scheduler>>,
     Path((team, request_id)): Path<(String, Uuid)>,
 ) -> WebResult<Json<BaseResponse<String>>> {
+    let db = state.db();
     let (team, _) = load_team(
-        &state,
+        &state.web_db,
         &user,
         api_key.as_ref(),
         team,
@@ -300,10 +320,9 @@ pub async fn post_approve_team_request(
         tx.commit().await?;
 
         if workers {
-            grant_workers(&state, &scheduler, team.id, project).await?;
+            grant_workers(&state.web_db, &scheduler, team.id, project).await?;
         }
-        audit_record(
-            &state,
+        audit_record(&db,
             Some(user.id),
             Action::TeamRequestApprove,
             EventOwner { project: Some(project), ..Default::default() },
@@ -337,7 +356,7 @@ pub async fn post_approve_team_request(
     tx.commit().await?;
 
     audit_record(
-        &state,
+        &db,
         Some(user.id),
         Action::TeamRequestApprove,
         EventOwner {
@@ -359,7 +378,7 @@ pub async fn delete_team_request(
     Path((team, request_id)): Path<(String, Uuid)>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let (team, _) = load_team(
-        &state,
+        &state.web_db,
         &user,
         api_key.as_ref(),
         team,
@@ -395,8 +414,7 @@ pub async fn delete_team_request(
         }
     };
 
-    audit_record(
-        &state,
+    audit_record(&state.db(),
         Some(user.id),
         Action::TeamRequestDeny,
         owner,

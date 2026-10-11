@@ -31,8 +31,9 @@ pub async fn get_build_log(
     Extension(api_key): Extension<MaybeApiKey>,
     Path(build_id): Path<BuildJobId>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let ctx = BuildAccessContext::load(&state, build_id, &maybe_user, api_key.as_ref()).await?;
-    let log = match super::effective_log_id(&state, &ctx.shared_build).await {
+    let ctx =
+        BuildAccessContext::load(&state.web_db, build_id, &maybe_user, api_key.as_ref()).await?;
+    let log = match super::effective_log_id(&state.web_db, &ctx.shared_build).await {
         Some(key) => state.log_storage.read(key).await.unwrap_or_default(),
         None => String::new(),
     };
@@ -46,7 +47,8 @@ pub async fn post_build_log(
     Extension(api_key): Extension<MaybeApiKey>,
     Path(build_id): Path<BuildJobId>,
 ) -> Result<Response, WebError> {
-    let ctx = BuildAccessContext::load(&state, build_id, &Some(user), api_key.as_ref()).await?;
+    let ctx =
+        BuildAccessContext::load(&state.web_db, build_id, &Some(user), api_key.as_ref()).await?;
     let shared_build_id = ctx.shared_build.id;
 
     let initial_attempt = latest_attempt_id(&state.web_db, shared_build_id).await?;

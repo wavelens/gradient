@@ -202,7 +202,7 @@ pub async fn put_team(
     tx.commit().await?;
 
     audit_record(
-        &state,
+        &state.db(),
         Some(user.id),
         Action::TeamCreate,
         EventOwner::default(),
@@ -220,7 +220,14 @@ pub async fn get_team(
     Extension(api_key): Extension<MaybeApiKey>,
     Path(team): Path<String>,
 ) -> WebResult<Json<BaseResponse<TeamResponse>>> {
-    let (team, role) = load_team(&state, &user, api_key.as_ref(), team, TeamAccess::Member).await?;
+    let (team, role) = load_team(
+        &state.web_db,
+        &user,
+        api_key.as_ref(),
+        team,
+        TeamAccess::Member,
+    )
+    .await?;
     Ok(ok_json(team_response(team, role)))
 }
 
@@ -230,7 +237,14 @@ pub async fn get_team_evaluations(
     Extension(api_key): Extension<MaybeApiKey>,
     Path(team): Path<String>,
 ) -> WebResult<Json<BaseResponse<Vec<gradient_db::teams::evaluations::TeamEvaluation>>>> {
-    let (team, _) = load_team(&state, &user, api_key.as_ref(), team, TeamAccess::Member).await?;
+    let (team, _) = load_team(
+        &state.web_db,
+        &user,
+        api_key.as_ref(),
+        team,
+        TeamAccess::Member,
+    )
+    .await?;
     Ok(ok_json(
         gradient_db::teams::evaluations::recent_evaluations(&state.web_db, team.id, 10).await?,
     ))
@@ -245,7 +259,7 @@ pub async fn patch_team(
     Json(body): Json<PatchTeamRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let (team, _) = load_team(
-        &state,
+        &state.web_db,
         &user,
         api_key.as_ref(),
         team,
@@ -296,7 +310,7 @@ pub async fn patch_team(
         .map_err(|e| WebError::from_db_err(e, Resource::ScimGroup))?;
 
     audit_record(
-        &state,
+        &state.db(),
         Some(user.id),
         Action::TeamUpdate,
         EventOwner::default(),
@@ -317,7 +331,7 @@ pub async fn delete_team(
     Path(team): Path<String>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let (team, _) = load_team(
-        &state,
+        &state.web_db,
         &user,
         api_key.as_ref(),
         team,
@@ -338,7 +352,7 @@ pub async fn delete_team(
     withdraw_team_workers(&scheduler, &workers, &projects).await;
 
     audit_record(
-        &state,
+        &state.db(),
         Some(user.id),
         Action::TeamDelete,
         EventOwner::default(),

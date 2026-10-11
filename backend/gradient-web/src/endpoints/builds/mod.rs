@@ -34,11 +34,10 @@ use crate::authorization::ApiKeyContext;
 use crate::error::{WebError, WebResult};
 use crate::helpers::OptionExt;
 use crate::resource::Resource;
-use gradient_core::ServerState;
+use gradient_db::WebDb;
 use gradient_db::scheduling::build_attempt::latest_attempt_id;
 use gradient_types::*;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
-use std::sync::Arc;
 
 pub(super) struct BuildAccessContext {
     pub build_job: MBuildJob,
@@ -47,17 +46,14 @@ pub(super) struct BuildAccessContext {
 }
 
 impl BuildAccessContext {
-    pub(super) async fn load_unguarded(
-        state: &Arc<ServerState>,
-        build_job_id: BuildJobId,
-    ) -> WebResult<Self> {
+    pub(super) async fn load_unguarded(db: &WebDb, build_job_id: BuildJobId) -> WebResult<Self> {
         let build_job = EBuildJob::find_by_id(build_job_id)
-            .one(&state.web_db)
+            .one(db)
             .await?
             .or_not_found(Resource::Build)?;
 
         let shared_build = EDerivationBuild::find_by_id(build_job.derivation_build)
-            .one(&state.web_db)
+            .one(db)
             .await?
             .ok_or_else(|| {
                 tracing::warn!(
@@ -69,7 +65,7 @@ impl BuildAccessContext {
             })?;
 
         let evaluation = EEvaluation::find_by_id(build_job.evaluation)
-            .one(&state.web_db)
+            .one(db)
             .await?
             .ok_or_else(|| {
                 tracing::warn!(
@@ -86,7 +82,7 @@ impl BuildAccessContext {
         })?;
 
         let project_id = ETask::find_by_id(task_id)
-            .one(&state.web_db)
+            .one(db)
             .await?
             .ok_or_else(|| {
                 tracing::warn!(
@@ -99,7 +95,7 @@ impl BuildAccessContext {
             .project;
 
         let project = EProject::find_by_id(project_id)
-            .one(&state.web_db)
+            .one(db)
             .await?
             .ok_or_else(|| {
                 tracing::warn!(%project_id, "Project not found");
@@ -114,18 +110,18 @@ impl BuildAccessContext {
     }
 
     pub(super) async fn load(
-        state: &Arc<ServerState>,
+        db: &WebDb,
         build_job_id: BuildJobId,
         maybe_user: &Option<MUser>,
         api_key: Option<&ApiKeyContext>,
     ) -> WebResult<Self> {
-        let ctx = Self::load_unguarded(state, build_job_id).await?;
+        let ctx = Self::load_unguarded(db, build_job_id).await?;
 
         let direct_access = if ctx.project.public {
             true
         } else {
             match maybe_user {
-                Some(user) => is_project_member(state, user.id, ctx.project.id, api_key).await?,
+                Some(user) => is_project_member(db, user.id, ctx.project.id, api_key).await?,
                 None => false,
             }
         };
@@ -135,7 +131,7 @@ impl BuildAccessContext {
         }
 
         if let Some(user) = maybe_user
-            && reachable_projects_accessible(state, user, api_key, ctx.build_job.derivation).await?
+            && reachable_projects_accessible(db, user, api_key, ctx.build_job.derivation).await?
         {
             return Ok(ctx);
         }
@@ -145,14 +141,12 @@ impl BuildAccessContext {
 }
 
 async fn reachable_projects_accessible(
-    state: &Arc<ServerState>,
+    db: &WebDb,
     user: &MUser,
     api_key: Option<&ApiKeyContext>,
     derivation: DerivationId,
 ) -> WebResult<bool> {
-    let jobs =
-        gradient_db::graph::reachability::build_jobs_for_derivation(&state.web_db, derivation)
-            .await?;
+    let jobs = gradient_db::graph::reachability::build_jobs_for_derivation(db, derivation).await?;
     if jobs.is_empty() {
         return Ok(false);
     }
@@ -160,20 +154,20 @@ async fn reachable_projects_accessible(
     let eval_ids: Vec<EvaluationId> = jobs.into_iter().map(|j| j.evaluation).collect();
     let evals = EEvaluation::find()
         .filter(CEvaluation::Id.is_in(eval_ids))
-        .all(&state.web_db)
+        .all(db)
         .await?;
 
     let task_ids: Vec<TaskId> = evals.iter().filter_map(|ev| ev.task).collect();
     let project_ids: std::collections::HashSet<ProjectId> = ETask::find()
         .filter(CTask::Id.is_in(task_ids))
-        .all(&state.web_db)
+        .all(db)
         .await?
         .into_iter()
         .map(|t| t.project)
         .collect();
 
     for project_id in project_ids {
-        if is_project_member(state, user.id, project_id, api_key).await? {
+        if is_project_member(db, user.id, project_id, api_key).await? {
             return Ok(true);
         }
     }
@@ -181,11 +175,8 @@ async fn reachable_projects_accessible(
 }
 
 pub(super) async fn effective_log_id(
-    state: &Arc<ServerState>,
+    db: &WebDb,
     shared_build: &MDerivationBuild,
 ) -> Option<BuildAttemptId> {
-    latest_attempt_id(&state.web_db, shared_build.id)
-        .await
-        .ok()
-        .flatten()
+    latest_attempt_id(db, shared_build.id).await.ok().flatten()
 }

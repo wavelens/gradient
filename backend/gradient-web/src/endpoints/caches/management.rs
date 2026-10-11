@@ -108,7 +108,7 @@ pub async fn get(
     Extension(user): Extension<MUser>,
     Query(params): Query<PaginationParams>,
 ) -> WebResult<Json<BaseResponse<Paginated<Vec<MCache>>>>> {
-    let condition = crate::access::visible_cache_condition(&state, user.id).await?;
+    let condition = crate::access::visible_cache_condition(&state.web_db, user.id).await?;
     let listing = crate::helpers::paginate(
         ECache::find()
             .filter(condition)
@@ -207,7 +207,7 @@ pub async fn put(
     tx.commit().await?;
 
     audit_record(
-        &state,
+        &state.db(),
         Some(user.id),
         Action::CacheCreate,
         EventOwner {
@@ -243,7 +243,7 @@ pub async fn get_cache(
     Path(cache): Path<String>,
 ) -> WebResult<Json<BaseResponse<CacheResponse>>> {
     let cache = load_cache(
-        &state,
+        &state.db(),
         Caller::from(&maybe_user),
         api_key.as_ref(),
         cache,
@@ -296,8 +296,9 @@ pub async fn patch_cache(
     Path(cache): Path<String>,
     Json(body): Json<PatchCacheRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
+    let db = state.db();
     let cache = load_cache(
-        &state,
+        &db,
         Caller::User(&user),
         api_key.as_ref(),
         cache,
@@ -396,7 +397,7 @@ pub async fn patch_cache(
     }
 
     audit_record(
-        &state,
+        &db,
         Some(user.id),
         Action::CacheUpdate,
         EventOwner {
@@ -418,8 +419,9 @@ pub async fn delete_cache(
     Extension(api_key): Extension<MaybeApiKey>,
     Path(cache): Path<String>,
 ) -> WebResult<Json<BaseResponse<String>>> {
+    let db = state.db();
     let cache = load_cache(
-        &state,
+        &db,
         Caller::User(&user),
         api_key.as_ref(),
         cache,
@@ -444,7 +446,7 @@ pub async fn delete_cache(
     let acache: ACache = cache.into();
     acache.delete(&state.web_db).await?;
 
-    audit_record(&state, Some(user.id), Action::CacheDelete, EventOwner { cache: Some(cache_id), ..Default::default() },
+    audit_record(&db, Some(user.id), Action::CacheDelete, EventOwner { cache: Some(cache_id), ..Default::default() },
         &info,
         Some(serde_json::json!({
             "cache_id": cache_id.to_string(),
@@ -463,7 +465,7 @@ pub async fn post_cache_active(
     Path(cache): Path<String>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let cache = load_cache(
-        &state,
+        &state.db(),
         Caller::User(&user),
         api_key.as_ref(),
         cache,
@@ -487,7 +489,7 @@ pub async fn delete_cache_active(
     Path(cache): Path<String>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let cache = load_cache(
-        &state,
+        &state.db(),
         Caller::User(&user),
         api_key.as_ref(),
         cache,
@@ -511,7 +513,7 @@ pub async fn post_cache_public(
     Path(cache): Path<String>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let cache = load_cache(
-        &state,
+        &state.db(),
         Caller::User(&user),
         api_key.as_ref(),
         cache,
@@ -535,7 +537,7 @@ pub async fn delete_cache_public(
     Path(cache): Path<String>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let cache = load_cache(
-        &state,
+        &state.db(),
         Caller::User(&user),
         api_key.as_ref(),
         cache,

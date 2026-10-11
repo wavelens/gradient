@@ -7,12 +7,15 @@
 use axum::extract::{Path, Query, State};
 use axum::response::{IntoResponse, Response};
 use badgelib::{Badge, Color, Style};
+use gradient_db::WebDb;
 use gradient_entity::build::BuildStatus;
 use gradient_entity::evaluation::EvaluationStatus;
+use gradient_util::debounce::Debounce;
 use http::{StatusCode, header};
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
 use serde::Deserialize;
 use std::sync::Arc;
+use uuid::Uuid;
 
 use crate::access::is_project_member;
 use crate::authorization::{ApiKeyContext, MaybeApiKey, MaybeUser};
@@ -122,7 +125,9 @@ fn badge_for_status(status: Option<EvaluationStatus>, has_failed_builds: bool) -
 }
 
 async fn resolve_badge_user(
-    state: &Arc<ServerState>,
+    db: &WebDb,
+    jwt_secret: &SecretString,
+    last_used_stamps: &Debounce<Uuid>,
     maybe_user: Option<MUser>,
     api_key: MaybeApiKey,
     token: Option<String>,
@@ -130,7 +135,7 @@ async fn resolve_badge_user(
 ) -> Result<(Option<MUser>, Option<ApiKeyContext>), WebError> {
     match token {
         Some(tok) => {
-            let decoded = crate::authorization::decode_jwt(State(Arc::clone(state)), tok)
+            let decoded = crate::authorization::decode_jwt(db, jwt_secret, last_used_stamps, tok)
                 .await
                 .map_err(|_| SharedRefusal::InvalidToken)?;
             if let Some(ctx) = decoded.api_key_context()
@@ -138,9 +143,7 @@ async fn resolve_badge_user(
             {
                 return Err(SharedRefusal::SourceIpNotAllowed.into());
             }
-            let user = EUser::find_by_id(decoded.user_id())
-                .one(&state.web_db)
-                .await?;
+            let user = EUser::find_by_id(decoded.user_id()).one(db).await?;
             Ok((user, decoded.api_key_context().cloned()))
         }
         None => Ok((maybe_user, api_key.as_ref().cloned())),
@@ -148,7 +151,7 @@ async fn resolve_badge_user(
 }
 
 async fn check_badge_project_access(
-    state: &Arc<ServerState>,
+    db: &WebDb,
     project: &MProject,
     resolved_user: &Option<MUser>,
     api_key: Option<&ApiKeyContext>,
@@ -158,7 +161,7 @@ async fn check_badge_project_access(
     }
     match resolved_user {
         Some(user) => {
-            if !is_project_member(state, user.id, project.id, api_key).await? {
+            if !is_project_member(db, user.id, project.id, api_key).await? {
                 return Err(WebError::not_found(Resource::Project));
             }
         }
@@ -168,7 +171,7 @@ async fn check_badge_project_access(
 }
 
 async fn badge_status_for_entry_point(
-    state: &Arc<ServerState>,
+    db: &WebDb,
     task_id: TaskId,
     eval_attr: &str,
 ) -> Result<(Option<EvaluationStatus>, bool), WebError> {
@@ -176,7 +179,7 @@ async fn badge_status_for_entry_point(
         .filter(CEvaluation::Task.eq(task_id))
         .filter(CEvaluation::Status.eq(EvaluationStatus::Completed))
         .order_by_desc(CEvaluation::CreatedAt)
-        .one(&state.web_db)
+        .one(db)
         .await?;
 
     let Some(ev) = evaluation else {
@@ -186,7 +189,7 @@ async fn badge_status_for_entry_point(
     let Some(ep) = EEntryPoint::find()
         .filter(CEntryPoint::Evaluation.eq(ev.id))
         .filter(CEntryPoint::Eval.eq(eval_attr))
-        .one(&state.web_db)
+        .one(db)
         .await?
     else {
         return Ok((None, false));
@@ -194,7 +197,7 @@ async fn badge_status_for_entry_point(
 
     let build_status = EDerivationBuild::find()
         .filter(CDerivationBuild::Derivation.eq(ep.derivation))
-        .one(&state.web_db)
+        .one(db)
         .await?
         .map(|a| a.status);
 
@@ -218,20 +221,20 @@ async fn badge_status_for_entry_point(
 }
 
 async fn badge_status_for_latest_eval(
-    state: &Arc<ServerState>,
+    db: &WebDb,
     task: &MTask,
 ) -> Result<(Option<EvaluationStatus>, bool), WebError> {
     let Some(eval_id) = task.last_evaluation else {
         return Ok((None, false));
     };
 
-    let eval = EEvaluation::find_by_id(eval_id).one(&state.web_db).await?;
+    let eval = EEvaluation::find_by_id(eval_id).one(db).await?;
 
     let has_failed = match &eval {
         Some(e) if e.status == EvaluationStatus::Completed => {
             let ep_drv_ids: Vec<DerivationId> = EEntryPoint::find()
                 .filter(CEntryPoint::Evaluation.eq(e.id))
-                .all(&state.web_db)
+                .all(db)
                 .await?
                 .into_iter()
                 .map(|ep| ep.derivation)
@@ -244,7 +247,7 @@ async fn badge_status_for_latest_eval(
                         BuildStatus::FailedPermanent,
                         BuildStatus::FailedTimeout,
                     ]))
-                    .one(&state.web_db)
+                    .one(db)
                     .await?
                     .is_some()
         }
@@ -268,9 +271,23 @@ pub async fn get_task_badge(
         .await?
         .or_not_found(Resource::Project)?;
 
-    let (resolved_user, resolved_key) =
-        resolve_badge_user(&state, maybe_user, api_key, params.token, client_ip).await?;
-    check_badge_project_access(&state, &project, &resolved_user, resolved_key.as_ref()).await?;
+    let (resolved_user, resolved_key) = resolve_badge_user(
+        &state.web_db,
+        &state.jwt_secret,
+        &state.memory.last_used_stamps,
+        maybe_user,
+        api_key,
+        params.token,
+        client_ip,
+    )
+    .await?;
+    check_badge_project_access(
+        &state.web_db,
+        &project,
+        &resolved_user,
+        resolved_key.as_ref(),
+    )
+    .await?;
 
     let task = ETask::find()
         .filter(CTask::Project.eq(project.id))
@@ -280,9 +297,9 @@ pub async fn get_task_badge(
         .or_not_found(Resource::Task)?;
 
     let (status, has_failed_builds) = if let Some(ref eval_attr) = params.eval {
-        badge_status_for_entry_point(&state, task.id, eval_attr).await?
+        badge_status_for_entry_point(&state.web_db, task.id, eval_attr).await?
     } else {
-        badge_status_for_latest_eval(&state, &task).await?
+        badge_status_for_latest_eval(&state.web_db, &task).await?
     };
 
     let content = badge_for_status(status, has_failed_builds);

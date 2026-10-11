@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use gradient_db::WebDb;
 use std::sync::Arc;
 
 use axum::Json;
@@ -92,7 +93,7 @@ pub async fn get(
     State(state): State<Arc<ServerState>>,
     Path(id): Path<String>,
 ) -> ScimResult<impl IntoResponse> {
-    let u = find_user(&state, &id).await?;
+    let u = find_user(&state.web_db, &id).await?;
     Ok(scim_json(StatusCode::OK, UserResource::from(&u)))
 }
 
@@ -145,7 +146,7 @@ pub async fn replace(
     Path(id): Path<String>,
     Json(body): Json<UserRequest>,
 ) -> ScimResult<impl IntoResponse> {
-    let u = find_user(&state, &id).await?;
+    let u = find_user(&state.web_db, &id).await?;
     let mut active: UserActive = u.into();
     active.name = Set(body
         .display_name
@@ -171,7 +172,7 @@ pub async fn patch(
     Path(id): Path<String>,
     Json(body): Json<PatchRequest>,
 ) -> ScimResult<impl IntoResponse> {
-    let u = find_user(&state, &id).await?;
+    let u = find_user(&state.web_db, &id).await?;
     let mut active: UserActive = u.into();
     for op in &body.operations {
         if !matches!(op.op.to_ascii_lowercase().as_str(), "replace" | "add") {
@@ -189,7 +190,7 @@ pub async fn delete(
     State(state): State<Arc<ServerState>>,
     Path(id): Path<String>,
 ) -> ScimResult<impl IntoResponse> {
-    let u = find_user(&state, &id).await?;
+    let u = find_user(&state.web_db, &id).await?;
     let hard = state
         .config
         .scim
@@ -209,13 +210,13 @@ pub async fn delete(
     Ok(StatusCode::NO_CONTENT)
 }
 
-async fn find_user(state: &Arc<ServerState>, id: &str) -> ScimResult<UserModel> {
+async fn find_user(db: &WebDb, id: &str) -> ScimResult<UserModel> {
     let user_id = id
         .parse::<UserId>()
         .map_err(|_| ScimError::not_found("user not found"))?;
     UserEntity::find_by_id(user_id)
         .filter(UserColumn::Managed.eq(true))
-        .one(state.web_db.inner())
+        .one(db.inner())
         .await?
         .ok_or_else(|| ScimError::not_found("user not found"))
 }

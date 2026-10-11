@@ -47,7 +47,7 @@ pub async fn get_cache_invitations(
     Path(cache): Path<String>,
 ) -> WebResult<Json<BaseResponse<Vec<PendingCacheInvitationItem>>>> {
     let cache = load_cache(
-        &state,
+        &state.db(),
         Caller::User(&user),
         api_key.as_ref(),
         cache,
@@ -105,8 +105,9 @@ pub async fn delete_cache_invitation(
     Path(cache): Path<String>,
     Json(body): Json<RevokeCacheInvitationRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
+    let db = state.db();
     let cache = load_cache(
-        &state,
+        &db,
         Caller::User(&user),
         api_key.as_ref(),
         cache,
@@ -136,7 +137,7 @@ pub async fn delete_cache_invitation(
     invitation.into_active_model().delete(&state.web_db).await?;
 
     audit_record(
-        &state,
+        &db,
         Some(user.id),
         Action::CacheInvitationRevoke,
         EventOwner {

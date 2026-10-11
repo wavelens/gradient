@@ -24,6 +24,7 @@ use axum::Json;
 use axum::body::Bytes;
 use axum::extract::{Path, State};
 use axum::http::HeaderMap;
+use gradient_ci::CiContext;
 use gradient_ci::actions::decrypt_secret_with_file;
 use gradient_ci::{IntegrationKind, verify_github_signature};
 use gradient_core::ServerState;
@@ -56,6 +57,7 @@ pub async fn github_app_webhook(
     headers: HeaderMap,
     body: Bytes,
 ) -> WebResult<Json<BaseResponse<WebhookResponse>>> {
+    let ci = state.ci();
     let Some(github_app) = state.config.github_app.clone() else {
         warn!(
             "GitHub App webhook received but GitHub App is not fully configured \
@@ -102,7 +104,7 @@ pub async fn github_app_webhook(
             Some(PushOutcome::Build(parsed)) => {
                 let urls = parsed.repository_urls.clone();
                 let outcome =
-                    route_github_app_push(&state, &scheduler, parsed, &body, client_ip).await;
+                    route_github_app_push(&ci, &scheduler, parsed, &body, client_ip).await;
                 WebhookResponse {
                     event: "push".to_string(),
                     repository_urls: urls,
@@ -117,7 +119,7 @@ pub async fn github_app_webhook(
                 return Err(GitHostHookRefusal::MalformedPayload.into());
             };
             let urls = parsed.repository_urls.clone();
-            let outcome = route_github_app_pr(&state, &scheduler, parsed, &body, client_ip).await;
+            let outcome = route_github_app_pr(&ci, &scheduler, parsed, &body, client_ip).await;
             WebhookResponse {
                 event: "pull_request".to_string(),
                 repository_urls: urls,
@@ -131,8 +133,7 @@ pub async fn github_app_webhook(
                 return Err(GitHostHookRefusal::MalformedPayload.into());
             };
             let urls = parsed.repository_urls.clone();
-            let outcome =
-                route_github_app_release(&state, &scheduler, parsed, &body, client_ip).await;
+            let outcome = route_github_app_release(&ci, &scheduler, parsed, &body, client_ip).await;
             WebhookResponse {
                 event: "release".to_string(),
                 repository_urls: urls,
@@ -142,16 +143,16 @@ pub async fn github_app_webhook(
             }
         }
         "installation" | "installation_repositories" => {
-            handle_github_installation(&state, &body).await;
+            handle_github_installation(&state.web_db, &body).await;
             WebhookResponse::empty(&event)
         }
         "check_run" => {
-            approval::handle_github_check_run(&state, &scheduler, &body).await;
+            approval::handle_github_check_run(&ci, &scheduler, &body).await;
             WebhookResponse::empty(&event)
         }
         "issue_comment" => {
             commands::handle_issue_comment(
-                &state,
+                &ci,
                 &scheduler,
                 GitHostType::GitHub,
                 None,
@@ -162,14 +163,8 @@ pub async fn github_app_webhook(
             WebhookResponse::empty(&event)
         }
         "pull_request_review" => {
-            approval::handle_pull_request_review(
-                &state,
-                GitHostType::GitHub,
-                None,
-                &body,
-                client_ip,
-            )
-            .await;
+            approval::handle_pull_request_review(&ci, GitHostType::GitHub, None, &body, client_ip)
+                .await;
             WebhookResponse::empty(&event)
         }
         other => WebhookResponse::empty(other),
@@ -194,7 +189,7 @@ fn github_installation_id_from_body(body: &[u8]) -> Option<i64> {
 }
 
 async fn route_github_app_push(
-    state: &Arc<ServerState>,
+    ci: &CiContext,
     scheduler: &Arc<Scheduler>,
     parsed: ParsedPushEvent,
     body: &[u8],
@@ -204,9 +199,13 @@ async fn route_github_app_push(
         warn!("GitHub App push: missing installation_id");
         return WebhookTriggerOutcome::default();
     };
-    let targets =
-        resolve_github_app_targets(state, installation_id, &parsed.repository_urls, client_ip)
-            .await;
+    let targets = resolve_github_app_targets(
+        &ci.db.web_db,
+        installation_id,
+        &parsed.repository_urls,
+        client_ip,
+    )
+    .await;
     if targets.is_empty() {
         warn!(
             installation_id,
@@ -225,7 +224,7 @@ async fn route_github_app_push(
     let mut combined = WebhookTriggerOutcome::default();
     for integration_id in targets {
         let outcome = trigger_push_for_integration(
-            state,
+            ci,
             scheduler,
             integration_id,
             &parsed.repository_urls,
@@ -243,7 +242,7 @@ async fn route_github_app_push(
 }
 
 async fn route_github_app_pr(
-    state: &Arc<ServerState>,
+    ci: &CiContext,
     scheduler: &Arc<Scheduler>,
     parsed: ParsedPullRequestEvent,
     body: &[u8],
@@ -253,9 +252,13 @@ async fn route_github_app_pr(
         warn!("GitHub App pull_request: missing installation_id");
         return WebhookTriggerOutcome::default();
     };
-    let targets =
-        resolve_github_app_targets(state, installation_id, &parsed.repository_urls, client_ip)
-            .await;
+    let targets = resolve_github_app_targets(
+        &ci.db.web_db,
+        installation_id,
+        &parsed.repository_urls,
+        client_ip,
+    )
+    .await;
     if targets.is_empty() {
         warn!(
             installation_id,
@@ -269,7 +272,7 @@ async fn route_github_app_pr(
     let mut combined = WebhookTriggerOutcome::default();
     for integration_id in targets {
         let outcome = trigger_pr_for_integration(
-            state,
+            ci,
             scheduler,
             integration_id,
             &parsed.repository_urls,
@@ -293,7 +296,7 @@ async fn route_github_app_pr(
 }
 
 async fn route_github_app_release(
-    state: &Arc<ServerState>,
+    ci: &CiContext,
     scheduler: &Arc<Scheduler>,
     parsed: ParsedReleaseEvent,
     body: &[u8],
@@ -303,9 +306,13 @@ async fn route_github_app_release(
         warn!("GitHub App release: missing installation_id");
         return WebhookTriggerOutcome::default();
     };
-    let targets =
-        resolve_github_app_targets(state, installation_id, &parsed.repository_urls, client_ip)
-            .await;
+    let targets = resolve_github_app_targets(
+        &ci.db.web_db,
+        installation_id,
+        &parsed.repository_urls,
+        client_ip,
+    )
+    .await;
     if targets.is_empty() {
         warn!(
             installation_id,
@@ -317,7 +324,7 @@ async fn route_github_app_release(
     let mut combined = WebhookTriggerOutcome::default();
     for integration_id in targets {
         let outcome = trigger_release_for_integration(
-            state,
+            ci,
             scheduler,
             integration_id,
             &parsed.repository_urls,
@@ -342,6 +349,7 @@ pub async fn git_host_webhook(
     headers: HeaderMap,
     body: Bytes,
 ) -> WebResult<Json<BaseResponse<WebhookResponse>>> {
+    let ci = state.ci();
     let Some(git_host_type) = GitHostType::from_path_segment(&git_host) else {
         warn!(git_host = %git_host, "Unknown Git host path segment");
         return Err(GitHostHookRefusal::IntegrationNotFound.into());
@@ -434,7 +442,7 @@ pub async fn git_host_webhook(
                     PushRefKind::Branch(&ref_name)
                 };
                 let outcome = trigger_push_for_integration(
-                    &state,
+                    &ci,
                     &scheduler,
                     integration_id,
                     &urls,
@@ -461,7 +469,7 @@ pub async fn git_host_webhook(
             let approval_ctx = approval::PullRequestApprovalContext::from(&parsed);
             let head_clone = parsed.head_repo_clone_url.clone();
             let outcome = trigger_pr_for_integration(
-                &state,
+                &ci,
                 &scheduler,
                 integration_id,
                 &urls,
@@ -491,7 +499,7 @@ pub async fn git_host_webhook(
             };
             let urls = parsed.repository_urls.clone();
             let outcome = trigger_release_for_integration(
-                &state,
+                &ci,
                 &scheduler,
                 integration_id,
                 &urls,
@@ -516,7 +524,7 @@ pub async fn git_host_webhook(
             let client_ip =
                 resolve_client_ip(&headers, peer_ip, &state.config.network.trusted_proxies);
             commands::handle_issue_comment(
-                &state,
+                &ci,
                 &scheduler,
                 git_host_type,
                 Some(integration_id),
@@ -533,7 +541,7 @@ pub async fn git_host_webhook(
             let client_ip =
                 resolve_client_ip(&headers, peer_ip, &state.config.network.trusted_proxies);
             approval::handle_pull_request_review(
-                &state,
+                &ci,
                 git_host_type,
                 Some(integration_id),
                 &body,

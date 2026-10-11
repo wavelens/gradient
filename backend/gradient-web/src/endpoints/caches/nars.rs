@@ -141,7 +141,7 @@ pub async fn list(
     Query(pagination): Query<PaginationParams>,
 ) -> WebResult<Json<BaseResponse<Paginated<Vec<NarSummary>>>>> {
     let cache = load_cache(
-        &state,
+        &state.db(),
         Caller::from(&maybe_user),
         api_key.as_ref(),
         cache_name,
@@ -216,7 +216,7 @@ pub async fn show(
     Path((cache_name, hash)): Path<(String, String)>,
 ) -> WebResult<Json<BaseResponse<NarDetail>>> {
     let cache = load_cache(
-        &state,
+        &state.db(),
         Caller::from(&maybe_user),
         api_key.as_ref(),
         cache_name,
@@ -276,7 +276,7 @@ pub async fn stats(
 ) -> WebResult<Json<BaseResponse<NarStats>>> {
     use sea_orm::FromQueryResult;
     let cache = load_cache(
-        &state,
+        &state.db(),
         Caller::from(&maybe_user),
         api_key.as_ref(),
         cache_name,
@@ -316,7 +316,7 @@ pub async fn available(
     Query(q): Query<std::collections::HashMap<String, String>>,
 ) -> WebResult<Json<BaseResponse<NarAvailable>>> {
     let cache = load_cache(
-        &state,
+        &state.db(),
         Caller::from(&maybe_user),
         api_key.as_ref(),
         cache_name,
@@ -351,8 +351,9 @@ pub async fn delete(
     Extension(api_key): Extension<MaybeApiKey>,
     Path((cache_name, hash)): Path<(String, String)>,
 ) -> WebResult<impl IntoResponse> {
+    let db = state.db();
     let cache = load_cache(
-        &state,
+        &db,
         Caller::User(&user),
         api_key.as_ref(),
         cache_name.clone(),
@@ -362,9 +363,10 @@ pub async fn delete(
         },
     )
     .await?;
-    let (cp, outcome) = delete_nar_from_cache(&state, cache.id, &hash).await?;
+    let (cp, outcome) =
+        delete_nar_from_cache(&state.nar_storage, &state.graph, cache.id, &hash).await?;
     audit_record(
-        &state,
+        &db,
         Some(user.id),
         Action::CacheNarDelete,
         EventOwner {

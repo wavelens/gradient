@@ -6,14 +6,13 @@
 
 use super::payloads::GitHubInstallationPayload;
 use gradient_ci::parse_owner_repo;
-use gradient_core::ServerState;
+use gradient_db::WebDb;
 use gradient_types::*;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use std::collections::HashMap;
-use std::sync::Arc;
 use tracing::{debug, info, warn};
 
-pub(super) async fn handle_github_installation(state: &Arc<ServerState>, body: &[u8]) {
+pub(super) async fn handle_github_installation(db: &WebDb, body: &[u8]) {
     let payload: GitHubInstallationPayload = match serde_json::from_slice(body) {
         Ok(p) => p,
         Err(e) => {
@@ -23,25 +22,25 @@ pub(super) async fn handle_github_installation(state: &Arc<ServerState>, body: &
     };
 
     if payload.action == "deleted" {
-        clear_installation_id(state, payload.installation.id).await;
+        clear_installation_id(db, payload.installation.id).await;
         return;
     }
 
-    store_installation_id(state, &payload).await;
+    store_installation_id(db, &payload).await;
 }
 
-async fn clear_installation_id(state: &Arc<ServerState>, installation_id: i64) {
+async fn clear_installation_id(db: &WebDb, installation_id: i64) {
     use gradient_entity::github_installation::{Column as Col, Entity as E};
     if let Err(e) = E::delete_many()
         .filter(Col::InstallationId.eq(installation_id))
-        .exec(&state.web_db)
+        .exec(db)
         .await
     {
         warn!(error = %e, installation_id, "Failed to delete github_installation rows");
     }
 }
 
-async fn store_installation_id(state: &Arc<ServerState>, payload: &GitHubInstallationPayload) {
+async fn store_installation_id(db: &WebDb, payload: &GitHubInstallationPayload) {
     use std::collections::HashSet;
 
     let github_login = payload.installation.account.login.as_str();
@@ -60,7 +59,7 @@ async fn store_installation_id(state: &Arc<ServerState>, payload: &GitHubInstall
     // Flake shorthand and every clone-URL form are matching alike.
     let owner_project_ids: HashSet<ProjectId> = ETask::find()
         .filter(CTask::Repository.contains("github"))
-        .all(&state.web_db)
+        .all(db)
         .await
         .unwrap_or_default()
         .into_iter()
@@ -86,7 +85,7 @@ async fn store_installation_id(state: &Arc<ServerState>, payload: &GitHubInstall
 
     let projects = EProject::find()
         .filter(CProject::Id.is_in(owner_project_ids))
-        .all(&state.web_db)
+        .all(db)
         .await
         .unwrap_or_default();
 
@@ -94,7 +93,7 @@ async fn store_installation_id(state: &Arc<ServerState>, payload: &GitHubInstall
         let project_id = project.id;
         let creator = project.created_by;
         let inst = match gradient_ci::upsert_github_installation(
-            &state.web_db,
+            db,
             project_id,
             installation_id,
             Some(github_login),
@@ -112,12 +111,7 @@ async fn store_installation_id(state: &Arc<ServerState>, payload: &GitHubInstall
         info!(installation_id, %project_id, github_login = %github_login, "GitHub App installed on project");
         let name = gradient_ci::github_integration_name(Some(github_login), installation_id);
         if let Err(e) = gradient_ci::ensure_github_app_integrations(
-            &state.web_db,
-            project_id,
-            inst,
-            &name,
-            "GitHub",
-            creator,
+            db, project_id, inst, &name, "GitHub", creator,
         )
         .await
         {
@@ -171,7 +165,7 @@ pub(super) fn event_repo_matches_task(event_repo_urls: &[String], task_repositor
 }
 
 pub(super) async fn resolve_github_app_targets(
-    state: &Arc<ServerState>,
+    db: &WebDb,
     installation_id: i64,
     repository_urls: &[String],
     client_ip: std::net::IpAddr,
@@ -184,7 +178,7 @@ pub(super) async fn resolve_github_app_targets(
 
     let installs = EGi::find()
         .filter(GiCol::InstallationId.eq(installation_id))
-        .all(&state.web_db)
+        .all(db)
         .await
         .unwrap_or_default();
 
@@ -203,7 +197,7 @@ pub(super) async fn resolve_github_app_targets(
     let mut tasks_by_project: HashMap<ProjectId, Vec<MTask>> = HashMap::new();
     match ETask::find()
         .filter(CTask::Project.is_in(project_ids.clone()))
-        .all(&state.web_db)
+        .all(db)
         .await
     {
         Ok(rows) => {
@@ -222,7 +216,7 @@ pub(super) async fn resolve_github_app_targets(
         .filter(CIntegration::Kind.eq(i16::from(IntegrationKind::Inbound)))
         .filter(CIntegration::GitHostType.eq(i16::from(gradient_types::GitHostType::GitHub)))
         .filter(CIntegration::GithubInstallation.is_in(install_ids))
-        .all(&state.web_db)
+        .all(db)
         .await
         .unwrap_or_default()
         .into_iter()

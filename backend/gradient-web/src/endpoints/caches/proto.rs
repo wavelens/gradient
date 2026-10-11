@@ -39,7 +39,7 @@ pub async fn cache_proto(
 
     let caller = Caller::from(&maybe_user);
     let cache = load_cache(
-        &state,
+        &state.db(),
         caller,
         api_key.as_ref(),
         cache,

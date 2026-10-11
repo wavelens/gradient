@@ -7,8 +7,11 @@
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use chrono::{DateTime, Utc};
 use gradient_core::ServerState;
+use gradient_db::WebDb;
 use gradient_scheduler::Scheduler;
+use gradient_storage::admission::UploadAdmission;
 use gradient_util::supervision::{ChildSpec, Pass, PassError, RunsOn};
 use opentelemetry::metrics::MeterProvider as _;
 use opentelemetry_otlp::WithExportConfig as _;
@@ -25,7 +28,9 @@ struct Snapshot {
 }
 
 struct OtlpSnapshot {
-    state: Arc<ServerState>,
+    web_db: WebDb,
+    started_at: DateTime<Utc>,
+    upload_admission: Arc<UploadAdmission>,
     scheduler: Arc<Scheduler>,
     snapshot: Arc<Mutex<Snapshot>>,
     period: Duration,
@@ -41,7 +46,13 @@ impl Pass for OtlpSnapshot {
     }
 
     async fn run(&self) -> Result<(), PassError> {
-        if let Ok(obs) = crate::endpoints::metrics::collect(&self.state, &self.scheduler).await
+        if let Ok(obs) = crate::endpoints::metrics::collect(
+            &self.web_db,
+            self.started_at,
+            &self.upload_admission,
+            &self.scheduler,
+        )
+        .await
             && let Ok(mut s) = self.snapshot.lock()
         {
             s.workers = obs.workers_connected;
@@ -109,7 +120,9 @@ pub fn start_otlp(state: Arc<ServerState>, scheduler: Arc<Scheduler>) {
 
     let shutdown = state.shutdown.clone();
     shutdown.supervise(ChildSpec::pass(OtlpSnapshot {
-        state,
+        web_db: state.web_db.clone(),
+        started_at: state.started_at,
+        upload_admission: Arc::clone(&state.memory.upload_admission),
         scheduler,
         snapshot: snap,
         period: interval,

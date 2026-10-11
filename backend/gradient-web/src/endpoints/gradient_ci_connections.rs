@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use gradient_db::{DbContext, WebDb};
 use std::sync::Arc;
 
 use axum::extract::State;
@@ -142,16 +143,18 @@ pub async fn post_connection(
         return Err(GradientCiConnectionRefusal::GradientCiDisabled.into());
     }
 
-    let target = authorize_target(&state, &user, &api_key, &body).await?;
+    let target = authorize_target(&state.db(), &user, &api_key, &body).await?;
     let token = ConnectionToken::parse(&body.token)
         .map_err(|e| GradientCiConnectionRefusal::InvalidConnectionToken(e.to_string()))?;
     let url = gradient_types::consts::GRADIENT_CI_PROTO_URL.to_owned();
-    ensure_unclaimed(&state, &target, &token.worker_id).await?;
+    ensure_unclaimed(&state.web_db, &target, &token.worker_id).await?;
     let stored = StoredToken::new(&state.config.secrets.crypt_file, &token.secret)?;
     match target {
-        Target::Team(team) => insert_team_worker(&state, &user, &team, &token, url, stored).await?,
+        Target::Team(team) => {
+            insert_team_worker(&state.web_db, &user, &team, &token, url, stored).await?
+        }
         Target::Project(project) => {
-            insert_registration(&state, &user, &project, &token, url, stored).await?
+            insert_registration(&state.web_db, &user, &project, &token, url, stored).await?
         }
     }
 
@@ -161,7 +164,7 @@ pub async fn post_connection(
 }
 
 async fn authorize_target(
-    state: &Arc<ServerState>,
+    db: &DbContext,
     user: &MUser,
     api_key: &MaybeApiKey,
     body: &ConnectionRequest,
@@ -173,7 +176,7 @@ async fn authorize_target(
                 .clone()
                 .ok_or(GradientCiConnectionRefusal::MissingTeam)?;
             let (team, _) = load_team(
-                state,
+                &db.web_db,
                 user,
                 api_key.as_ref(),
                 name,
@@ -190,7 +193,7 @@ async fn authorize_target(
                 .clone()
                 .ok_or(GradientCiConnectionRefusal::MissingProject)?;
             let project = load_project(
-                state,
+                db,
                 Caller::User(user),
                 api_key.as_ref(),
                 name,
@@ -204,7 +207,7 @@ async fn authorize_target(
     }
 }
 
-async fn ensure_unclaimed(state: &ServerState, target: &Target, worker_id: &str) -> WebResult<()> {
+async fn ensure_unclaimed(db: &WebDb, target: &Target, worker_id: &str) -> WebResult<()> {
     let same_worker = Condition::any().add(worker_registration::Column::WorkerId.eq(worker_id));
     let registrations = match target {
         Target::Team(_) => same_worker,
@@ -217,7 +220,7 @@ async fn ensure_unclaimed(state: &ServerState, target: &Target, worker_id: &str)
 
     let registration = EWorkerRegistration::find()
         .filter(registrations)
-        .one(&state.web_db)
+        .one(db)
         .await?;
 
     let mut team_workers = Condition::any().add(team_worker::Column::WorkerId.eq(worker_id));
@@ -229,10 +232,7 @@ async fn ensure_unclaimed(state: &ServerState, target: &Target, worker_id: &str)
         );
     }
 
-    let team_worker = ETeamWorker::find()
-        .filter(team_workers)
-        .one(&state.web_db)
-        .await?;
+    let team_worker = ETeamWorker::find().filter(team_workers).one(db).await?;
 
     match claim_conflict(
         target,
@@ -269,7 +269,7 @@ fn claim_conflict(
 }
 
 async fn insert_registration(
-    state: &ServerState,
+    db: &WebDb,
     user: &MUser,
     project: &MProject,
     token: &ConnectionToken,
@@ -278,10 +278,10 @@ async fn insert_registration(
 ) -> WebResult<()> {
     registration_row(project, user, token, url, stored)
         .into_active_model()
-        .insert(&state.web_db)
+        .insert(db)
         .await
         .map_err(|e| WebError::from_db_err(e, Resource::GradientCiConnection))?;
-    if let Err(e) = gradient_ci::unpark_no_workers_for_project(&state.web_db, project.id).await {
+    if let Err(e) = gradient_ci::unpark_no_workers_for_project(db, project.id).await {
         tracing::warn!(
             error = %e,
             project_id = %project.id,
@@ -293,7 +293,7 @@ async fn insert_registration(
 }
 
 async fn insert_team_worker(
-    state: &ServerState,
+    db: &WebDb,
     user: &MUser,
     team: &MTeam,
     token: &ConnectionToken,
@@ -302,14 +302,13 @@ async fn insert_team_worker(
 ) -> WebResult<()> {
     team_worker_row(team.id, token.worker_id.clone(), url, stored, user.id)
         .into_active_model()
-        .insert(&state.web_db)
+        .insert(db)
         .await
         .map_err(|e| WebError::from_db_err(e, Resource::GradientCiConnection))?;
 
-    let projects =
-        gradient_db::teams::workers::projects_granted_with_workers(&state.web_db, team.id).await?;
+    let projects = gradient_db::teams::workers::projects_granted_with_workers(db, team.id).await?;
     for project in projects {
-        if let Err(e) = gradient_ci::unpark_no_workers_for_project(&state.web_db, project).await {
+        if let Err(e) = gradient_ci::unpark_no_workers_for_project(db, project).await {
             tracing::warn!(
                 error = %e,
                 project_id = %project,

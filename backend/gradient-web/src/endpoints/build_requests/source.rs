@@ -19,6 +19,7 @@ use axum::extract::{Multipart, Path, Query, State};
 use gradient_core::ServerState;
 use gradient_storage::PartialStore;
 use gradient_storage::source_nar::source_nar_from_bytes;
+use gradient_types::RuntimeConfig;
 use gradient_types::{BaseResponse, MUser};
 use serde::Deserialize;
 use serde_json::json;
@@ -37,7 +38,7 @@ pub async fn post_source(
     mut multipart: Multipart,
 ) -> WebResult<Json<BaseResponse<DispatchResponse>>> {
     let project = load_project(
-        &state.0,
+        &state.0.db(),
         Caller::User(&user),
         api_key.as_ref(),
         query.project,
@@ -50,7 +51,6 @@ pub async fn post_source(
 
     let mut nar_bytes: Option<Vec<u8>> = None;
     let mut target: Option<String> = None;
-    let mut system: Option<String> = None;
 
     while let Some(field) =
         multipart
@@ -71,7 +71,6 @@ pub async fn post_source(
                 nar_bytes = Some(data.to_vec());
             }
             Some("target") => target = field.text().await.ok(),
-            Some("system") => system = field.text().await.ok(),
             _ => {}
         }
     }
@@ -85,8 +84,16 @@ pub async fn post_source(
         .await
         .context("read source NAR")?;
 
-    let response =
-        finalize_build_request(&state, project.id, &user, &nar, target, system, Vec::new()).await?;
+    let response = finalize_build_request(
+        &state.db(),
+        &state.graph,
+        project.id,
+        &user,
+        &nar,
+        target,
+        Vec::new(),
+    )
+    .await?;
 
     Ok(ok_json(response))
 }
@@ -106,9 +113,9 @@ pub struct SourceFinalize {
     pub input_overrides: Vec<InputOverrideBody>,
 }
 
-fn source_partial_store(state: &ServerState) -> WebResult<PartialStore> {
+fn source_partial_store(config: &RuntimeConfig) -> WebResult<PartialStore> {
     Ok(PartialStore::new(
-        state.config.server.source_upload_partial_dir(),
+        config.server.source_upload_partial_dir(),
     )?)
 }
 
@@ -133,7 +140,7 @@ pub async fn source_chunk(
         return Err(BuildRequestRefusal::SourceUploadTooLarge { max }.into());
     }
 
-    let store = source_partial_store(&state)?;
+    let store = source_partial_store(&state.config)?;
     let key = format!("{}/{upload}", user.id);
     let staged = store.received_len(&key, &upload).await?;
     let received = if offset == 0 || offset == staged {
@@ -157,7 +164,7 @@ pub async fn source_finalize(
     require_safe_upload_id(&upload)?;
 
     let project = load_project(
-        &state.0,
+        &state.0.db(),
         Caller::User(&user),
         api_key.as_ref(),
         query.project,
@@ -168,7 +175,7 @@ pub async fn source_finalize(
     )
     .await?;
 
-    let store = source_partial_store(&state)?;
+    let store = source_partial_store(&state.config)?;
     let key = format!("{}/{upload}", user.id);
     let nar_bytes =
         store
@@ -194,12 +201,12 @@ pub async fn source_finalize(
         .collect();
 
     let response = finalize_build_request(
-        &state,
+        &state.db(),
+        &state.graph,
         project.id,
         &user,
         &nar,
         body.target,
-        body.system,
         input_overrides,
     )
     .await?;

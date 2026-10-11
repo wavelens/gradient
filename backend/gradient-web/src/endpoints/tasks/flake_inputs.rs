@@ -115,7 +115,7 @@ pub async fn list(
     Path((project, task)): Path<(String, String)>,
 ) -> WebResult<Json<BaseResponse<Vec<FlakeInputOverrideOut>>>> {
     let (_project, proj) = load_task(
-        &state,
+        &state.db(),
         Caller::User(&user),
         api_key.as_ref(),
         project,
@@ -141,7 +141,7 @@ pub async fn create(
     Json(body): Json<CreateBody>,
 ) -> WebResult<Json<BaseResponse<FlakeInputOverrideOut>>> {
     let (_project, proj) = load_task(
-        &state,
+        &state.db(),
         Caller::User(&user),
         api_key.as_ref(),
         project,
@@ -191,7 +191,7 @@ pub async fn read(
     Path((project, task, id)): Path<(String, String, FlakeInputOverrideId)>,
 ) -> WebResult<Json<BaseResponse<FlakeInputOverrideOut>>> {
     let (_project, proj) = load_task(
-        &state,
+        &state.db(),
         Caller::User(&user),
         api_key.as_ref(),
         project,
@@ -218,7 +218,7 @@ pub async fn update(
     Json(body): Json<UpdateBody>,
 ) -> WebResult<Json<BaseResponse<FlakeInputOverrideOut>>> {
     let (_project, proj) = load_task(
-        &state,
+        &state.db(),
         Caller::User(&user),
         api_key.as_ref(),
         project,
@@ -280,7 +280,7 @@ pub async fn delete_one(
     Path((project, task, id)): Path<(String, String, FlakeInputOverrideId)>,
 ) -> WebResult<Json<BaseResponse<DeletedResponse>>> {
     let (_project, proj) = load_task(
-        &state,
+        &state.db(),
         Caller::User(&user),
         api_key.as_ref(),
         project,

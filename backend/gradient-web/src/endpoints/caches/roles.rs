@@ -18,6 +18,7 @@ use crate::resource::Resource;
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
 use gradient_core::ServerState;
+use gradient_db::WebDb;
 use gradient_types::events::EventOwner;
 use gradient_types::events::audit::Action;
 use gradient_types::input::check_index_name;
@@ -75,13 +76,9 @@ pub struct PatchCacheRoleRequest {
     pub permissions: Option<Vec<String>>,
 }
 
-async fn load_cache_role(
-    state: &Arc<ServerState>,
-    cache_id: CacheId,
-    role_id: RoleId,
-) -> WebResult<MCacheRole> {
+async fn load_cache_role(db: &WebDb, cache_id: CacheId, role_id: RoleId) -> WebResult<MCacheRole> {
     let role = ECacheRole::find_by_id(role_id)
-        .one(&state.web_db)
+        .one(db)
         .await?
         .or_not_found(Resource::Role)?;
     if let Some(owner) = role.cache
@@ -99,7 +96,7 @@ pub async fn get_cache_roles(
     Path(cache): Path<String>,
 ) -> WebResult<Json<BaseResponse<CacheRoleListResponse>>> {
     let cache = load_cache(
-        &state,
+        &state.db(),
         Caller::User(&user),
         api_key.as_ref(),
         cache,
@@ -132,8 +129,9 @@ pub async fn post_cache_role(
     Path(cache): Path<String>,
     Json(body): Json<CreateCacheRoleRequest>,
 ) -> WebResult<Json<BaseResponse<CacheRoleResponse>>> {
+    let db = state.db();
     let cache = load_cache(
-        &state,
+        &db,
         Caller::User(&user),
         api_key.as_ref(),
         cache,
@@ -175,7 +173,7 @@ pub async fn post_cache_role(
     .await?;
 
     audit_record(
-        &state,
+        &db,
         Some(user.id),
         Action::CacheRoleCreate,
         EventOwner {
@@ -202,7 +200,7 @@ pub async fn get_cache_role(
     Path((cache, role_id)): Path<(String, RoleId)>,
 ) -> WebResult<Json<BaseResponse<CacheRoleResponse>>> {
     let cache = load_cache(
-        &state,
+        &state.db(),
         Caller::User(&user),
         api_key.as_ref(),
         cache,
@@ -211,7 +209,7 @@ pub async fn get_cache_role(
         },
     )
     .await?;
-    let role = load_cache_role(&state, cache.id, role_id).await?;
+    let role = load_cache_role(&state.web_db, cache.id, role_id).await?;
     Ok(ok_json(CacheRoleResponse::from(role)))
 }
 
@@ -223,8 +221,9 @@ pub async fn patch_cache_role(
     Path((cache, role_id)): Path<(String, RoleId)>,
     Json(body): Json<PatchCacheRoleRequest>,
 ) -> WebResult<Json<BaseResponse<CacheRoleResponse>>> {
+    let db = state.db();
     let cache = load_cache(
-        &state,
+        &db,
         Caller::User(&user),
         api_key.as_ref(),
         cache,
@@ -235,7 +234,7 @@ pub async fn patch_cache_role(
     )
     .await?;
 
-    let role = load_cache_role(&state, cache.id, role_id).await?;
+    let role = load_cache_role(&state.web_db, cache.id, role_id).await?;
 
     if is_builtin_cache_role(role.id) {
         return Err(SharedRefusal::BuiltinRole(Change::Modify).into());
@@ -279,7 +278,7 @@ pub async fn patch_cache_role(
     let updated = active.update(&state.web_db).await?;
 
     audit_record(
-        &state,
+        &db,
         Some(user.id),
         Action::CacheRoleUpdate,
         EventOwner {
@@ -308,8 +307,9 @@ pub async fn delete_cache_role(
     Extension(api_key): Extension<MaybeApiKey>,
     Path((cache, role_id)): Path<(String, RoleId)>,
 ) -> WebResult<Json<BaseResponse<bool>>> {
+    let db = state.db();
     let cache = load_cache(
-        &state,
+        &db,
         Caller::User(&user),
         api_key.as_ref(),
         cache,
@@ -320,7 +320,7 @@ pub async fn delete_cache_role(
     )
     .await?;
 
-    let role = load_cache_role(&state, cache.id, role_id).await?;
+    let role = load_cache_role(&state.web_db, cache.id, role_id).await?;
 
     if is_builtin_cache_role(role.id) {
         return Err(SharedRefusal::BuiltinRole(Change::Delete).into());
@@ -347,7 +347,7 @@ pub async fn delete_cache_role(
     role.into_active_model().delete(&state.web_db).await?;
 
     audit_record(
-        &state,
+        &db,
         Some(user.id),
         Action::CacheRoleDelete,
         EventOwner {

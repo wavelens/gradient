@@ -127,7 +127,13 @@ pub async fn get_board_cache(
     Query(params): Query<WindowParams>,
 ) -> WebResult<Json<BaseResponse<BoardCacheStats>>> {
     let window = window_clause(&params);
-    let obs = collect(&state, &scheduler).await?;
+    let obs = collect(
+        &state.web_db,
+        state.started_at,
+        &state.memory.upload_admission,
+        &scheduler,
+    )
+    .await?;
     let traffic = infra_series(&state.web_db, metric::CACHE_BYTES_SENT, window).await?;
     let storage = infra_series(&state.web_db, metric::CACHE_BYTES_ADDED, window).await?;
     Ok(ok_json(BoardCacheStats {
@@ -684,7 +690,13 @@ pub async fn get_board_health(
     Extension(limiter): Extension<Arc<gradient_wire::ProtoLimiter>>,
 ) -> WebResult<Json<BaseResponse<BoardHealth>>> {
     require_superuser(&user)?;
-    let obs = collect(&state, &scheduler).await?;
+    let obs = collect(
+        &state.web_db,
+        state.started_at,
+        &state.memory.upload_admission,
+        &scheduler,
+    )
+    .await?;
 
     let latest: Option<chrono::NaiveDateTime> = state
         .web_db

@@ -18,10 +18,12 @@ use gradient_core::ServerState;
 use gradient_core::upstream_source::{
     UpstreamSource, fetch_from_upstream_caches, substitution_sources,
 };
+use gradient_db::WorkerDb;
 use gradient_db::caches::upstream::pull_through_upstream_caches;
 use gradient_sources::get_hash_from_url;
 use gradient_types::events::cache::NarFetched;
 use gradient_types::*;
+use gradient_util::shutdown::Shutdown;
 use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter};
 use std::sync::Arc;
 use uuid::Uuid;
@@ -39,19 +41,37 @@ pub async fn nar(
         return Err(WebError::not_found(Resource::Path));
     }
 
-    let client_ip = cache_client_ip(&state, &headers, peer);
-    let ctx = CacheContext::load(&state, &headers, client_ip, cache).await?;
+    let client_ip = cache_client_ip(&state.config, &headers, peer);
+    let ctx = CacheContext::load(
+        &state.web_db,
+        &state.jwt_secret,
+        &state.memory.last_used_stamps,
+        &headers,
+        client_ip,
+        cache,
+    )
+    .await?;
 
-    let (effective_hash, size, stream) =
-        super::helpers::fetch_nar_stream(&state, ctx.cache.id, &path_hash).await?;
+    let (effective_hash, size, stream) = super::helpers::fetch_nar_stream(
+        &state.web_db,
+        &state.nar_storage,
+        ctx.cache.id,
+        &path_hash,
+    )
+    .await?;
 
-    super::super::stats::record_nar_traffic(&state, ctx.cache.id, size as i64);
+    super::super::stats::record_nar_traffic(&state.memory.cache_traffic, ctx.cache.id, size as i64);
     state.events.publish(NarFetched {
         cache: ctx.cache.id,
         hash: effective_hash.clone(),
         size,
     });
-    spawn_fetch_stamp(Arc::clone(&state), ctx.cache.id, effective_hash);
+    spawn_fetch_stamp(
+        &state.shutdown,
+        &state.worker_db,
+        ctx.cache.id,
+        effective_hash,
+    );
 
     Response::builder()
         .header(
@@ -71,8 +91,16 @@ pub async fn upstream_nar(
     Path((cache_name, upstream_id, path)): Path<(String, Uuid, String)>,
     RawQuery(query): RawQuery,
 ) -> WebResult<Response> {
-    let client_ip = cache_client_ip(&state, &headers, peer);
-    let ctx = CacheContext::load(&state, &headers, client_ip, cache_name).await?;
+    let client_ip = cache_client_ip(&state.config, &headers, peer);
+    let ctx = CacheContext::load(
+        &state.web_db,
+        &state.jwt_secret,
+        &state.memory.last_used_stamps,
+        &headers,
+        client_ip,
+        cache_name,
+    )
+    .await?;
 
     let upstream_caches = pull_through_upstream_caches(&state.web_db, &ctx.cache).await?;
 
@@ -142,9 +170,9 @@ gradient_db::sql! {
         params = [Now, CacheId, CachedPathHash];
 }
 
-fn spawn_fetch_stamp(state: Arc<ServerState>, cache_id: CacheId, hash: String) {
-    let s = Arc::clone(&state);
-    state.shutdown.spawn(async move {
+fn spawn_fetch_stamp(shutdown: &Shutdown, worker_db: &WorkerDb, cache_id: CacheId, hash: String) {
+    let worker_db = worker_db.clone();
+    shutdown.spawn(async move {
         use sea_orm::ConnectionTrait;
         let now = gradient_types::now();
         let now_val = sea_orm::Value::ChronoDateTimeUtc(Some(
@@ -153,8 +181,7 @@ fn spawn_fetch_stamp(state: Arc<ServerState>, cache_id: CacheId, hash: String) {
         let cache_val = sea_orm::Value::Uuid(Some(cache_id.into_inner()));
         let hash_val = sea_orm::Value::String(Some(hash.clone()));
 
-        let _ = s
-            .worker_db
+        let _ = worker_db
             .execute_raw(TOUCH_CACHED_PATH_SIGNATURE_FETCH.bind([now_val, cache_val, hash_val]))
             .await;
     });
