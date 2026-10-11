@@ -4,7 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use super::dispatch::{DispatchResponse, InputOverrideBody, finalize_build_request};
+use super::dispatch::{
+    BuildRequestOptions, DispatchResponse, InputOverrideBody, finalize_build_request,
+};
 use super::refusal::BuildRequestRefusal;
 use crate::access::{Caller, ProjectAccess, load_project};
 use crate::authorization::MaybeApiKey;
@@ -90,8 +92,11 @@ pub async fn post_source(
         project.id,
         &user,
         &nar,
-        target,
-        Vec::new(),
+        BuildRequestOptions {
+            target,
+            input_overrides: Vec::new(),
+            session: None,
+        },
     )
     .await?;
 
@@ -206,8 +211,11 @@ pub async fn source_finalize(
         project.id,
         &user,
         &nar,
-        body.target,
-        input_overrides,
+        BuildRequestOptions {
+            target: body.target,
+            input_overrides,
+            session: None,
+        },
     )
     .await?;
 

@@ -16,14 +16,13 @@ use crate::permissions::{
 use crate::refusal::SharedRefusal;
 use crate::resource::Resource;
 use crate::scope::{CacheScope, Member, Requires, RequiresUnmanaged, can};
-use gradient_db::WebDb;
 use gradient_notify::InviteScope;
 use gradient_types::consts::BASE_CACHE_ROLE_ADMIN_ID;
 use gradient_types::events::EventOwner;
 use gradient_types::events::audit::Action;
 use gradient_types::*;
 use sea_orm::ActiveValue::Set;
-use sea_orm::{RelationDef, RelationTrait};
+use sea_orm::{ConnectionTrait, RelationDef, RelationTrait};
 use serde::Serialize;
 
 pub struct CacheOwner;
@@ -225,12 +224,17 @@ impl Owner for CacheOwner {
         parse_cache_permission_list(wire, "GET /caches/{cache}/roles")
     }
 
-    async fn role_granted_to_a_team(db: &WebDb, role: RoleId) -> WebResult<bool> {
+    async fn role_granted_to_a_team(db: &impl ConnectionTrait, role: RoleId) -> WebResult<bool> {
         Ok(gradient_db::teams::grants::cache_role_granted_to_a_team(db, role).await?)
     }
 
+    async fn lock_for_admin_change(db: &impl ConnectionTrait, owner: CacheId) -> WebResult<()> {
+        gradient_db::caches::lock_for_admin_change(db, owner).await?;
+        Ok(())
+    }
+
     async fn ensure_member_removable(
-        db: &WebDb,
+        db: &impl ConnectionTrait,
         owner: CacheId,
         member: &MCacheUser,
     ) -> WebResult<()> {

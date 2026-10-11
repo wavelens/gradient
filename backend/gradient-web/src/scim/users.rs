@@ -22,6 +22,7 @@ use gradient_types::{UserId, now};
 use super::dto::*;
 use super::error::{SCIM_CONTENT_TYPE, ScimError, ScimResult};
 use super::filter::parse_eq_filter;
+use crate::error::is_unique_violation;
 
 fn scim_json(status: StatusCode, body: impl serde::Serialize) -> Response {
     match serde_json::to_value(body) {
@@ -126,7 +127,13 @@ pub async fn create(
         scim_external_id: Set(body.external_id.clone()),
         ..Default::default()
     };
-    let u = gradient_db::users::insert(db, model).await?;
+    let u = gradient_db::users::insert(db, model).await.map_err(|e| {
+        if is_unique_violation(&e) {
+            ScimError::conflict("userName already exists")
+        } else {
+            e.into()
+        }
+    })?;
     Ok(scim_json(StatusCode::CREATED, UserResource::from(&u)))
 }
 

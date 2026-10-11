@@ -14,13 +14,24 @@ pub mod usage;
 
 use gradient_types::*;
 use sea_orm::ActiveValue::Set;
+use sea_orm::sea_query::LockType;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, Condition, ConnectionTrait, DbErr, EntityTrait, QueryFilter,
-    QueryOrder, Select,
+    QueryOrder, QuerySelect, Select,
 };
 
 pub async fn by_name<C: ConnectionTrait>(db: &C, name: &str) -> Result<Option<MCache>, DbErr> {
     ECache::find().filter(CCache::Name.eq(name)).one(db).await
+}
+
+pub async fn lock_for_admin_change<C: ConnectionTrait>(
+    db: &C,
+    cache: CacheId,
+) -> Result<Option<MCache>, DbErr> {
+    ECache::find_by_id(cache)
+        .lock(LockType::NoKeyUpdate)
+        .one(db)
+        .await
 }
 
 pub fn ordered_by_name(condition: Condition) -> Select<ECache> {

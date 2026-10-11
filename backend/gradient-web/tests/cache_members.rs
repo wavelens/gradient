@@ -270,6 +270,7 @@ async fn remove_member_blocks_last_admin() {
         .append_query_results([vec![cache_member_in(cache_id(), BASE_CACHE_ROLE_ADMIN_ID)]])
         .append_query_results([vec![cache_admin_role()]])
         .append_query_results([vec![user()]])
+        .append_query_results([vec![cache_row(false)]])
         .append_query_results([vec![cache_member_in(cache_id(), BASE_CACHE_ROLE_ADMIN_ID)]])
         .append_query_results([vec![count_row(1)]]);
 
@@ -299,6 +300,7 @@ async fn remove_member_view_role_succeeds() {
         .append_query_results([vec![cache_member_in(cache_id(), BASE_CACHE_ROLE_ADMIN_ID)]])
         .append_query_results([vec![cache_admin_role()]])
         .append_query_results([vec![other_user_row()]])
+        .append_query_results([vec![cache_row(false)]])
         .append_query_results([vec![target_member]])
         .append_exec_results([MockExecResult {
             last_insert_id: 0,

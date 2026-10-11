@@ -4,10 +4,11 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use chrono::NaiveDateTime;
 use gradient_types::*;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, ConnectionTrait, DbErr, EntityTrait, IntoActiveModel, Order,
-    QueryFilter, QueryOrder, QuerySelect,
+    ActiveModelTrait, ColumnTrait, Condition, ConnectionTrait, DbErr, EntityTrait, IntoActiveModel,
+    Order, QueryFilter, QueryOrder, QuerySelect,
 };
 
 pub async fn of_task<C: ConnectionTrait>(db: &C, task: TaskId) -> Result<Vec<MTaskAction>, DbErr> {
@@ -45,8 +46,17 @@ pub async fn insert<C: ConnectionTrait>(db: &C, action: MTaskAction) -> Result<M
     action.into_active_model().insert(db).await
 }
 
-pub async fn update<C: ConnectionTrait>(db: &C, action: ATaskAction) -> Result<MTaskAction, DbErr> {
-    action.update(db).await
+pub async fn update<C: ConnectionTrait>(
+    db: &C,
+    action: ATaskAction,
+    read_at: NaiveDateTime,
+) -> Result<Option<MTaskAction>, DbErr> {
+    crate::rows::update_where::<ETaskAction, _>(
+        db,
+        action,
+        Condition::all().add(CTaskAction::UpdatedAt.eq(read_at)),
+    )
+    .await
 }
 
 pub async fn delete<C: ConnectionTrait>(db: &C, action: MTaskAction) -> Result<(), DbErr> {

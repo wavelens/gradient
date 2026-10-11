@@ -81,12 +81,11 @@ fn state_member() -> team_user::Model {
     }
 }
 
-fn with_state_member(session_id: SessionId) -> MockDatabase {
+fn before_state_member(session_id: SessionId) -> MockDatabase {
     with_auth(mock_db(), session_id)
         .append_query_results([vec![managed_team_row()]])
         .append_query_results([vec![member_row(user_id(), TeamRole::Admin)]])
         .append_query_results([vec![other_user()]])
-        .append_query_results([vec![state_member()]])
 }
 
 #[tokio::test]
@@ -119,7 +118,8 @@ async fn an_admin_invites_a_user_into_a_state_managed_team() {
 #[tokio::test]
 async fn a_member_declared_by_the_state_cannot_change_role() {
     let session_id = SessionId::now_v7();
-    let server = make_test_server(with_state_member(session_id).into_connection());
+    let db = before_state_member(session_id).append_query_results([vec![state_member()]]);
+    let server = make_test_server(db.into_connection());
 
     let res = server
         .patch("/api/v1/teams/platform/members")
@@ -133,7 +133,10 @@ async fn a_member_declared_by_the_state_cannot_change_role() {
 #[tokio::test]
 async fn a_member_declared_by_the_state_cannot_be_removed() {
     let session_id = SessionId::now_v7();
-    let server = make_test_server(with_state_member(session_id).into_connection());
+    let db = before_state_member(session_id)
+        .append_query_results([vec![team()]])
+        .append_query_results([vec![state_member()]]);
+    let server = make_test_server(db.into_connection());
 
     let res = server
         .delete("/api/v1/teams/platform/members")
@@ -168,6 +171,7 @@ async fn the_last_admin_cannot_be_removed() {
         .append_query_results([vec![team()]])
         .append_query_results([vec![member_row(user_id(), TeamRole::Admin)]])
         .append_query_results([vec![user()]])
+        .append_query_results([vec![team()]])
         .append_query_results([vec![member_row(user_id(), TeamRole::Admin)]])
         .append_query_results([vec![count_row(1)]]);
     let server = make_test_server(db.into_connection());
@@ -188,6 +192,7 @@ async fn the_last_admin_cannot_be_demoted() {
         .append_query_results([vec![team()]])
         .append_query_results([vec![member_row(user_id(), TeamRole::Admin)]])
         .append_query_results([vec![user()]])
+        .append_query_results([vec![team()]])
         .append_query_results([vec![member_row(user_id(), TeamRole::Admin)]])
         .append_query_results([vec![count_row(1)]]);
     let server = make_test_server(db.into_connection());

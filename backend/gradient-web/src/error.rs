@@ -161,17 +161,23 @@ impl From<DbErr> for WebError {
     }
 }
 
-fn is_unique_violation(err: &DbErr) -> bool {
+pub(crate) fn unique_violation(err: &DbErr) -> Option<&str> {
     let sqlx_err = match err {
         DbErr::Query(RuntimeErr::SqlxError(e)) | DbErr::Exec(RuntimeErr::SqlxError(e)) => {
             e.as_ref()
         }
-        _ => return false,
+        _ => return None,
     };
-    matches!(
-        sqlx_err,
-        sqlx::Error::Database(db_err) if db_err.is_unique_violation()
-    )
+    match sqlx_err {
+        sqlx::Error::Database(db_err) if db_err.is_unique_violation() => {
+            Some(db_err.constraint().unwrap_or_default())
+        }
+        _ => None,
+    }
+}
+
+pub(crate) fn is_unique_violation(err: &DbErr) -> bool {
+    unique_violation(err).is_some()
 }
 
 impl From<gradient_types::input::InputError> for WebError {
@@ -330,11 +336,15 @@ impl WebError {
         )
     }
 
-    pub(crate) fn from_db_err(err: DbErr, label: Resource) -> Self {
+    pub(crate) fn from_unique_violation(err: DbErr, conflict: impl Into<Self>) -> Self {
         if is_unique_violation(&err) {
-            return Self::already_exists(label);
+            return conflict.into();
         }
         Self::from(err)
+    }
+
+    pub(crate) fn from_db_err(err: DbErr, label: Resource) -> Self {
+        Self::from_unique_violation(err, Self::already_exists(label))
     }
 }
 

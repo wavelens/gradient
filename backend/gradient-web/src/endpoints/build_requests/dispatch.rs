@@ -31,7 +31,7 @@ use gradient_types::ids::{
 use gradient_types::input::{check_flake_input_override, check_manifest_path, decode_blake3_hex};
 use gradient_types::{
     BaseResponse, ECache, EUploadSession, MCommit, MEvaluation, MEvaluationFlakeInputOverride,
-    MUser, now,
+    MUploadSession, MUser, now,
 };
 use sea_orm::{ConnectionTrait, TransactionTrait};
 use serde::{Deserialize, Serialize};
@@ -124,20 +124,28 @@ pub async fn post_dispatch(
         .map(|o| (o.input_name, o.url))
         .collect();
 
+    let project = session.project;
     let response = finalize_build_request(
         &state.db(),
         &state.graph,
-        session.project,
+        project,
         &user,
         &nar,
-        body.target,
-        input_overrides,
+        BuildRequestOptions {
+            target: body.target,
+            input_overrides,
+            session: Some(session),
+        },
     )
     .await?;
 
-    gradient_db::upload_sessions::mark_dispatched(&state.web_db, session, now()).await?;
-
     Ok(ok_json(response))
+}
+
+pub(super) struct BuildRequestOptions {
+    pub target: Option<String>,
+    pub input_overrides: Vec<(String, String)>,
+    pub session: Option<MUploadSession>,
 }
 
 pub(super) async fn finalize_build_request(
@@ -146,10 +154,9 @@ pub(super) async fn finalize_build_request(
     project: gradient_types::ids::ProjectId,
     user: &MUser,
     nar: &SourceNar,
-    target: Option<String>,
-    input_overrides: Vec<(String, String)>,
+    options: BuildRequestOptions,
 ) -> WebResult<DispatchResponse> {
-    for (input_name, url) in &input_overrides {
+    for (input_name, url) in &options.input_overrides {
         check_flake_input_override(input_name, url)?;
     }
 
@@ -183,11 +190,19 @@ pub(super) async fn finalize_build_request(
             repository: nar.store_path.clone(),
             commit_hash: vec![0; 20],
             commit_message: format!("Build request {}", nar.store_hash),
-            target,
-            input_overrides,
+            target: options.target,
+            input_overrides: options.input_overrides,
         },
     )
     .await?;
+
+    if let Some(session) = options.session
+        && gradient_db::upload_sessions::mark_dispatched(&tx, session, now())
+            .await?
+            .is_none()
+    {
+        return Err(BuildRequestRefusal::UploadSessionAlreadyDispatched.into());
+    }
 
     tx.commit().await?;
 

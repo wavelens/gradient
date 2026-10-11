@@ -762,7 +762,9 @@ pub async fn patch_settings(
         auser.email = Set(email);
     }
 
-    gradient_db::rows::update::<EUser, _>(&state.web_db, auser).await?;
+    gradient_db::rows::update::<EUser, _>(&state.web_db, auser)
+        .await
+        .map_err(|e| WebError::from_db_err(e, Resource::Username))?;
 
     let res = BaseResponse {
         error: false,

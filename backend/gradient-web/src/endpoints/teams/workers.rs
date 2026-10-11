@@ -10,7 +10,7 @@ use crate::endpoints::projects::workers::{
     PatchWorkerRequest, RegisterWorkerRequest, WorkerConnection, encrypt_for_dialing, live_workers,
     patch_edits_managed_fields, worker_connection,
 };
-use crate::error::WebResult;
+use crate::error::{WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json};
 use crate::refusal::SharedRefusal;
 use crate::resource::Resource;
@@ -168,7 +168,8 @@ pub async fn post_team_worker(
             created_at: gradient_types::now(),
         },
     )
-    .await?;
+    .await
+    .map_err(|e| WebError::from_unique_violation(e, TeamRefusal::WorkerIdRegistered))?;
 
     scheduler.request_reauth(&worker_id).await;
     for project in granted_projects(&state.web_db, team.id).await? {

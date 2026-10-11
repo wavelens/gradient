@@ -179,7 +179,8 @@ pub async fn post_project_subscribe_cache(
                 created_at: gradient_types::now(),
             },
         )
-        .await?;
+        .await
+        .map_err(|e| WebError::from_db_err(e, Resource::SubscriptionRequest))?;
 
         notify_cache_admins(&state.ci(), &project, &cache, &user, &mode).await;
 

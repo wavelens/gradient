@@ -283,7 +283,8 @@ pub async fn post_project_team(
             created_at: gradient_types::now(),
         },
     )
-    .await?;
+    .await
+    .map_err(|e| WebError::from_db_err(e, Resource::TeamGrant))?;
     if body.workers {
         grant_workers(&state.web_db, &scheduler, team.id, project.id).await?;
     }
@@ -341,11 +342,14 @@ pub async fn patch_project_team(
     };
 
     let had_workers = grant.includes_workers;
+    let read = grant.clone();
     let mut active: ATeamProject = grant.into();
     active.includes_users = Set(users);
     active.includes_workers = Set(workers);
     active.role = Set(role);
-    gradient_db::teams::grants::update_project_grant(&state.web_db, active).await?;
+    gradient_db::teams::grants::update_project_grant(&state.web_db, active, &read)
+        .await?
+        .or_not_found(Resource::TeamGrant)?;
 
     match (had_workers, workers) {
         (false, true) => grant_workers(&state.web_db, &scheduler, team.id, project.id).await?,
@@ -513,7 +517,8 @@ pub async fn post_cache_team(
             created_at: gradient_types::now(),
         },
     )
-    .await?;
+    .await
+    .map_err(|e| WebError::from_db_err(e, Resource::TeamGrant))?;
 
     audit.write(Action::TeamGrantCreate, owner, payload).await;
     Ok(ok_json("Team granted".to_string()))

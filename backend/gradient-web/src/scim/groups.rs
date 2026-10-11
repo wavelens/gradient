@@ -18,6 +18,7 @@ use gradient_types::*;
 use super::dto::*;
 use super::error::{SCIM_CONTENT_TYPE, ScimError, ScimResult};
 use super::filter::parse_eq_filter;
+use crate::error::is_unique_violation;
 
 fn scim_json(status: StatusCode, body: impl serde::Serialize) -> Response {
     match serde_json::to_value(body) {
@@ -171,8 +172,8 @@ async fn add_member(web_db: &WebDb, team: TeamId, uid: &str) -> ScimResult<()> {
     let user = parse_uid(uid)?;
     let db = web_db.inner();
     let existing = gradient_db::teams::members::membership(db, team, user).await?;
-    if existing.is_none() {
-        gradient_db::teams::members::add_member(
+    if existing.is_none()
+        && let Err(e) = gradient_db::teams::members::add_member(
             db,
             MTeamUser {
                 id: TeamUserId::now_v7(),
@@ -182,7 +183,10 @@ async fn add_member(web_db: &WebDb, team: TeamId, uid: &str) -> ScimResult<()> {
                 source: TeamMemberSource::Group,
             },
         )
-        .await?;
+        .await
+        && !is_unique_violation(&e)
+    {
+        return Err(e.into());
     }
     Ok(())
 }

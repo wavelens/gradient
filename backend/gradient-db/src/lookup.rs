@@ -26,6 +26,14 @@ where
     E::find_by_id(id).one(db).await
 }
 
+pub async fn by_id_for_delete<E, C>(db: &C, id: Key<E>) -> Result<Option<E::Model>, DbErr>
+where
+    E: EntityTrait,
+    C: ConnectionTrait,
+{
+    E::find_by_id(id).lock_exclusive().one(db).await
+}
+
 pub async fn by_ids<E, C>(db: &C, ids: &[Key<E>]) -> Result<HashMap<Key<E>, E::Model>, DbErr>
 where
     E: EntityTrait,

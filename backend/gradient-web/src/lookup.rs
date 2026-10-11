@@ -35,6 +35,18 @@ has_resource! {
     gradient_entity::dispatched_job::Entity => Job,
 }
 
+pub async fn require_for_delete<E>(
+    db: &impl ConnectionTrait,
+    id: <E::PrimaryKey as PrimaryKeyTrait>::ValueType,
+) -> WebResult<E::Model>
+where
+    E: HasResource,
+{
+    gradient_db::lookup::by_id_for_delete::<E, _>(db, id)
+        .await?
+        .ok_or_else(|| WebError::not_found(E::RESOURCE))
+}
+
 pub async fn require<E>(
     db: &impl ConnectionTrait,
     id: <E::PrimaryKey as PrimaryKeyTrait>::ValueType,

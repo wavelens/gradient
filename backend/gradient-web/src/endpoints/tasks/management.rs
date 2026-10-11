@@ -234,7 +234,9 @@ pub async fn put(
         ..Default::default()
     };
 
-    let task = gradient_db::tasks::insert(&state.web_db, task).await?;
+    let task = gradient_db::tasks::insert(&state.web_db, task)
+        .await
+        .map_err(|e| WebError::from_db_err(e, Resource::TaskName))?;
 
     let now = gradient_types::now();
     let default_cfg = TriggerConfig::Polling {
@@ -400,7 +402,9 @@ pub async fn patch_task(
     }
 
     atask.force_evaluation = Set(true);
-    gradient_db::tasks::update(&state.web_db, atask).await?;
+    gradient_db::tasks::update(&state.web_db, atask)
+        .await
+        .map_err(|e| WebError::from_db_err(e, Resource::TaskName))?;
 
     audit.write(Action::TaskUpdate, owner, fields).await;
 
@@ -594,9 +598,9 @@ pub async fn post_task_transfer(
         return Err(TaskRefusal::AlreadyInProject.into());
     }
 
-    let mut atask: ATask = task.into();
-    atask.project = Set(new_project.id);
-    gradient_db::tasks::update(&db.web_db, atask).await?;
+    gradient_db::tasks::move_to_project(&db.web_db, task, new_project.id)
+        .await?
+        .or_not_found(Resource::Task)?;
 
     let res = BaseResponse {
         error: false,

@@ -5,8 +5,9 @@
  */
 
 use gradient_types::*;
+use sea_orm::ActiveValue::Set;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, ConnectionTrait, DbErr, EntityTrait, IntoActiveModel,
+    ActiveModelTrait, ColumnTrait, Condition, ConnectionTrait, DbErr, EntityTrait, IntoActiveModel,
     QueryFilter, QueryOrder, Select,
 };
 
@@ -35,6 +36,22 @@ pub async fn insert<C: ConnectionTrait>(db: &C, task: MTask) -> Result<MTask, Db
 
 pub async fn update<C: ConnectionTrait>(db: &C, task: ATask) -> Result<MTask, DbErr> {
     task.update(db).await
+}
+
+pub async fn move_to_project<C: ConnectionTrait>(
+    db: &C,
+    task: MTask,
+    project: ProjectId,
+) -> Result<Option<MTask>, DbErr> {
+    let read_project = task.project;
+    let mut task: ATask = task.into();
+    task.project = Set(project);
+    crate::rows::update_where::<ETask, _>(
+        db,
+        task,
+        Condition::all().add(CTask::Project.eq(read_project)),
+    )
+    .await
 }
 
 pub async fn delete<C: ConnectionTrait>(db: &C, task: MTask) -> Result<(), DbErr> {
