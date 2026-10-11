@@ -4,21 +4,18 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::access::{CacheAccess, Caller, load_cache};
 use crate::audit::{RequestInfo, record as audit_record};
-use crate::authorization::MaybeApiKey;
 use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
 use crate::lookup::require;
 use crate::permissions::{
-    CachePermission, PermissionEntry, available_cache_permissions, cache_mask_to_vec,
-    is_builtin_cache_role, parse_cache_permission_list,
+    PermissionEntry, available_cache_permissions, cache_mask_to_vec, is_builtin_cache_role,
+    parse_cache_permission_list,
 };
 use crate::refusal::{Change, SharedRefusal};
 use crate::resource::Resource;
-use axum::extract::{Path, State};
-use axum::{Extension, Json};
-use gradient_core::ServerState;
+use crate::scope::{CacheScope, Member, RequiresUnmanaged, can};
+use axum::Json;
 use gradient_db::WebDb;
 use gradient_types::events::EventOwner;
 use gradient_types::events::audit::Action;
@@ -29,7 +26,6 @@ use sea_orm::{
     ActiveModelTrait, ColumnTrait, Condition, EntityTrait, IntoActiveModel, QueryFilter,
 };
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
 
 #[derive(Serialize, Debug)]
 pub struct CacheRoleResponse {
@@ -88,29 +84,15 @@ async fn load_cache_role(db: &WebDb, cache_id: CacheId, role_id: RoleId) -> WebR
 }
 
 pub async fn get_cache_roles(
-    state: State<Arc<ServerState>>,
-    Extension(user): Extension<MUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
-    Path(cache): Path<String>,
+    CacheScope { cache, db, .. }: CacheScope<Member>,
 ) -> WebResult<Json<BaseResponse<CacheRoleListResponse>>> {
-    let cache = load_cache(
-        &state.db(),
-        Caller::User(&user),
-        api_key.as_ref(),
-        cache,
-        CacheAccess::Member {
-            reject_managed: false,
-        },
-    )
-    .await?;
-
     let roles = ECacheRole::find()
         .filter(
             Condition::any()
                 .add(CCacheRole::Cache.is_null())
                 .add(CCacheRole::Cache.eq(cache.id)),
         )
-        .all(&state.web_db)
+        .all(&db.web_db)
         .await?;
 
     Ok(ok_json(CacheRoleListResponse {
@@ -120,26 +102,12 @@ pub async fn get_cache_roles(
 }
 
 pub async fn post_cache_role(
-    state: State<Arc<ServerState>>,
+    CacheScope {
+        cache, user, db, ..
+    }: CacheScope<RequiresUnmanaged<can::ManageCacheRoles>>,
     info: RequestInfo,
-    Extension(user): Extension<MUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
-    Path(cache): Path<String>,
     Json(body): Json<CreateCacheRoleRequest>,
 ) -> WebResult<Json<BaseResponse<CacheRoleResponse>>> {
-    let db = state.db();
-    let cache = load_cache(
-        &db,
-        Caller::User(&user),
-        api_key.as_ref(),
-        cache,
-        CacheAccess::Require {
-            permission: CachePermission::ManageCacheRoles,
-            reject_managed: true,
-        },
-    )
-    .await?;
-
     if check_index_name(&body.name).is_err() {
         return Err(WebError::invalid_name(Resource::RoleName));
     }
@@ -153,7 +121,7 @@ pub async fn post_cache_role(
                 .add(CCacheRole::Cache.eq(cache.id))
                 .add(CCacheRole::Cache.is_null()),
         )
-        .one(&state.web_db)
+        .one(&db.web_db)
         .await?;
     if clash.is_some() {
         return Err(WebError::already_exists(Resource::RoleName));
@@ -167,7 +135,7 @@ pub async fn post_cache_role(
         ..Default::default()
     }
     .into_active_model()
-    .insert(&state.web_db)
+    .insert(&db.web_db)
     .await?;
 
     audit_record(
@@ -192,47 +160,30 @@ pub async fn post_cache_role(
 }
 
 pub async fn get_cache_role(
-    state: State<Arc<ServerState>>,
-    Extension(user): Extension<MUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
-    Path((cache, role_id)): Path<(String, RoleId)>,
+    CacheScope {
+        cache, db, params, ..
+    }: CacheScope<Member>,
 ) -> WebResult<Json<BaseResponse<CacheRoleResponse>>> {
-    let cache = load_cache(
-        &state.db(),
-        Caller::User(&user),
-        api_key.as_ref(),
-        cache,
-        CacheAccess::Member {
-            reject_managed: false,
-        },
-    )
-    .await?;
-    let role = load_cache_role(&state.web_db, cache.id, role_id).await?;
+    let role_id: RoleId = params.param("role_id")?;
+
+    let role = load_cache_role(&db.web_db, cache.id, role_id).await?;
     Ok(ok_json(CacheRoleResponse::from(role)))
 }
 
 pub async fn patch_cache_role(
-    state: State<Arc<ServerState>>,
+    CacheScope {
+        cache,
+        user,
+        db,
+        params,
+        ..
+    }: CacheScope<RequiresUnmanaged<can::ManageCacheRoles>>,
     info: RequestInfo,
-    Extension(user): Extension<MUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
-    Path((cache, role_id)): Path<(String, RoleId)>,
     Json(body): Json<PatchCacheRoleRequest>,
 ) -> WebResult<Json<BaseResponse<CacheRoleResponse>>> {
-    let db = state.db();
-    let cache = load_cache(
-        &db,
-        Caller::User(&user),
-        api_key.as_ref(),
-        cache,
-        CacheAccess::Require {
-            permission: CachePermission::ManageCacheRoles,
-            reject_managed: true,
-        },
-    )
-    .await?;
+    let role_id: RoleId = params.param("role_id")?;
 
-    let role = load_cache_role(&state.web_db, cache.id, role_id).await?;
+    let role = load_cache_role(&db.web_db, cache.id, role_id).await?;
 
     if is_builtin_cache_role(role.id) {
         return Err(SharedRefusal::BuiltinRole(Change::Modify).into());
@@ -258,7 +209,7 @@ pub async fn patch_cache_role(
                     .add(CCacheRole::Cache.eq(cache.id))
                     .add(CCacheRole::Cache.is_null()),
             )
-            .one(&state.web_db)
+            .one(&db.web_db)
             .await?;
         if clash.is_some() {
             return Err(WebError::already_exists(Resource::RoleName));
@@ -273,7 +224,7 @@ pub async fn patch_cache_role(
         )?);
     }
 
-    let updated = active.update(&state.web_db).await?;
+    let updated = active.update(&db.web_db).await?;
 
     audit_record(
         &db,
@@ -299,26 +250,18 @@ pub async fn patch_cache_role(
 }
 
 pub async fn delete_cache_role(
-    state: State<Arc<ServerState>>,
-    info: RequestInfo,
-    Extension(user): Extension<MUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
-    Path((cache, role_id)): Path<(String, RoleId)>,
-) -> WebResult<Json<BaseResponse<bool>>> {
-    let db = state.db();
-    let cache = load_cache(
-        &db,
-        Caller::User(&user),
-        api_key.as_ref(),
+    CacheScope {
         cache,
-        CacheAccess::Require {
-            permission: CachePermission::ManageCacheRoles,
-            reject_managed: true,
-        },
-    )
-    .await?;
+        user,
+        db,
+        params,
+        ..
+    }: CacheScope<RequiresUnmanaged<can::ManageCacheRoles>>,
+    info: RequestInfo,
+) -> WebResult<Json<BaseResponse<bool>>> {
+    let role_id: RoleId = params.param("role_id")?;
 
-    let role = load_cache_role(&state.web_db, cache.id, role_id).await?;
+    let role = load_cache_role(&db.web_db, cache.id, role_id).await?;
 
     if is_builtin_cache_role(role.id) {
         return Err(SharedRefusal::BuiltinRole(Change::Delete).into());
@@ -331,18 +274,18 @@ pub async fn delete_cache_role(
     let in_use = ECacheUser::find()
         .filter(CCacheUser::Role.eq(role_id))
         .filter(CCacheUser::Cache.eq(cache.id))
-        .one(&state.web_db)
+        .one(&db.web_db)
         .await?
         .is_some();
     if in_use {
         return Err(SharedRefusal::RoleAssignedToMembers.into());
     }
-    if gradient_db::teams::grants::cache_role_granted_to_a_team(&state.web_db, role_id).await? {
+    if gradient_db::teams::grants::cache_role_granted_to_a_team(&db.web_db, role_id).await? {
         return Err(SharedRefusal::RoleGrantedToTeam.into());
     }
 
     let role_name = role.name.clone();
-    role.into_active_model().delete(&state.web_db).await?;
+    role.into_active_model().delete(&db.web_db).await?;
 
     audit_record(
         &db,

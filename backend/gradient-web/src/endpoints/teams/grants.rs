@@ -5,18 +5,16 @@
  */
 
 use super::refusal::TeamRefusal;
-use crate::access::{
-    CacheAccess, Caller, ProjectAccess, has_cache_permission, has_permission, load_cache,
-    load_project,
-};
+use crate::access::{Caller, ProjectAccess, has_cache_permission, has_permission, load_project};
 use crate::audit::{RequestInfo, record as audit_record};
-use crate::authorization::{MaybeApiKey, MaybeUser};
+use crate::authorization::MaybeApiKey;
 use crate::endpoints::teams::workers::{reauth_team_workers, withdraw_team_workers};
 use crate::error::{WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json};
 use crate::permissions::{CachePermission, Permission};
 use crate::refusal::{Change, SharedRefusal};
 use crate::resource::Resource;
+use crate::scope::{CacheScope, ProjectScope, Readable, Requires, RequiresUnmanaged, can};
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
 use gradient_core::ServerState;
@@ -177,29 +175,15 @@ fn project_role_name(roles: &HashMap<RoleId, String>, role: Option<RoleId>) -> O
 }
 
 pub async fn get_project_teams(
-    state: State<Arc<ServerState>>,
-    Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
-    Path(project): Path<String>,
+    ProjectScope { project, db, .. }: ProjectScope<Readable>,
 ) -> WebResult<Json<BaseResponse<Vec<TeamGrantEntry>>>> {
-    let project = load_project(
-        &state.db(),
-        Caller::from(&maybe_user),
-        api_key.as_ref(),
-        project,
-        ProjectAccess::Readable {
-            label: Resource::Project,
-        },
-    )
-    .await?;
-
     let grants = ETeamProject::find()
         .filter(CTeamProject::Project.eq(project.id))
-        .all(&state.web_db)
+        .all(&db.web_db)
         .await?;
     let requests = ETeamProjectRequest::find()
         .filter(CTeamProjectRequest::Project.eq(project.id))
-        .all(&state.web_db)
+        .all(&db.web_db)
         .await?;
 
     let team_ids: Vec<TeamId> = grants
@@ -207,13 +191,13 @@ pub async fn get_project_teams(
         .map(|g| g.team)
         .chain(requests.iter().map(|r| r.team))
         .collect();
-    let teams: HashMap<TeamId, MTeam> = by_ids::<ETeam, _>(&state.web_db, &team_ids).await?;
+    let teams: HashMap<TeamId, MTeam> = by_ids::<ETeam, _>(&db.web_db, &team_ids).await?;
     let role_ids: Vec<RoleId> = grants
         .iter()
         .filter_map(|g| g.role)
         .chain(requests.iter().filter_map(|r| r.role))
         .collect();
-    let roles = crate::helpers::role_names(&state.web_db, role_ids).await?;
+    let roles = crate::helpers::role_names(&db.web_db, role_ids).await?;
 
     let entry = |team: TeamId, role, users, workers, pending| {
         teams.get(&team).map(|team| TeamGrantEntry {
@@ -507,30 +491,15 @@ async fn cache_grant(db: &WebDb, team: TeamId, cache: CacheId) -> WebResult<Opti
 }
 
 pub async fn get_cache_teams(
-    state: State<Arc<ServerState>>,
-    Extension(user): Extension<MUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
-    Path(cache): Path<String>,
+    CacheScope { cache, db, .. }: CacheScope<Requires<can::ViewCache>>,
 ) -> WebResult<Json<BaseResponse<Vec<TeamGrantEntry>>>> {
-    let cache = load_cache(
-        &state.db(),
-        Caller::User(&user),
-        api_key.as_ref(),
-        cache,
-        CacheAccess::Require {
-            permission: CachePermission::ViewCache,
-            reject_managed: false,
-        },
-    )
-    .await?;
-
     let grants = ETeamCache::find()
         .filter(CTeamCache::Cache.eq(cache.id))
-        .all(&state.web_db)
+        .all(&db.web_db)
         .await?;
     let requests = ETeamCacheRequest::find()
         .filter(CTeamCacheRequest::Cache.eq(cache.id))
-        .all(&state.web_db)
+        .all(&db.web_db)
         .await?;
 
     let team_ids: Vec<TeamId> = grants
@@ -538,13 +507,13 @@ pub async fn get_cache_teams(
         .map(|g| g.team)
         .chain(requests.iter().map(|r| r.team))
         .collect();
-    let teams: HashMap<TeamId, MTeam> = by_ids::<ETeam, _>(&state.web_db, &team_ids).await?;
+    let teams: HashMap<TeamId, MTeam> = by_ids::<ETeam, _>(&db.web_db, &team_ids).await?;
     let role_ids: Vec<RoleId> = grants
         .iter()
         .map(|g| g.role)
         .chain(requests.iter().map(|r| r.role))
         .collect();
-    let roles: HashMap<RoleId, String> = by_ids::<ECacheRole, _>(&state.web_db, &role_ids)
+    let roles: HashMap<RoleId, String> = by_ids::<ECacheRole, _>(&db.web_db, &role_ids)
         .await?
         .into_iter()
         .map(|(id, role)| (id, role.name))
@@ -570,31 +539,15 @@ pub async fn get_cache_teams(
 }
 
 pub async fn post_cache_team(
-    state: State<Arc<ServerState>>,
+    CacheScope {
+        cache, user, db, ..
+    }: CacheScope<RequiresUnmanaged<can::ManageCacheMembers>>,
     info: RequestInfo,
-    Extension(user): Extension<MUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
-    Path(cache): Path<String>,
     Json(body): Json<GrantCacheRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let db = state.db();
-    let cache = load_cache(
-        &db,
-        Caller::User(&user),
-        api_key.as_ref(),
-        cache,
-        CacheAccess::Require {
-            permission: CachePermission::ManageCacheMembers,
-            reject_managed: true,
-        },
-    )
-    .await?;
-    let team = find_team(&state.web_db, &body.team).await?;
-    let role = cache_role(&state.web_db, cache.id, &body.role).await?;
-    if cache_grant(&state.web_db, team.id, cache.id)
-        .await?
-        .is_some()
-    {
+    let team = find_team(&db.web_db, &body.team).await?;
+    let role = cache_role(&db.web_db, cache.id, &body.role).await?;
+    if cache_grant(&db.web_db, team.id, cache.id).await?.is_some() {
         return Err(WebError::already_exists(Resource::TeamGrant));
     }
 
@@ -605,7 +558,7 @@ pub async fn post_cache_team(
         ..Default::default()
     };
 
-    if !is_team_admin(&state.web_db, &user, team.id).await? {
+    if !is_team_admin(&db.web_db, &user, team.id).await? {
         MTeamCacheRequest {
             id: TeamCacheRequestId::now_v7(),
             team: team.id,
@@ -615,7 +568,7 @@ pub async fn post_cache_team(
             created_at: gradient_types::now(),
         }
         .into_active_model()
-        .insert(&state.web_db)
+        .insert(&db.web_db)
         .await
         .map_err(|e| WebError::from_db_err(e, Resource::TeamRequest))?;
         audit_record(
@@ -639,7 +592,7 @@ pub async fn post_cache_team(
         created_at: gradient_types::now(),
     }
     .into_active_model()
-    .insert(&state.web_db)
+    .insert(&db.web_db)
     .await?;
 
     audit_record(
@@ -655,34 +608,27 @@ pub async fn post_cache_team(
 }
 
 pub async fn patch_cache_team(
-    state: State<Arc<ServerState>>,
+    CacheScope {
+        cache,
+        user,
+        db,
+        params,
+        ..
+    }: CacheScope<RequiresUnmanaged<can::ManageCacheMembers>>,
     info: RequestInfo,
-    Extension(user): Extension<MUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
-    Path((cache, team)): Path<(String, String)>,
     Json(body): Json<PatchCacheGrantRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let db = state.db();
-    let cache = load_cache(
-        &db,
-        Caller::User(&user),
-        api_key.as_ref(),
-        cache,
-        CacheAccess::Require {
-            permission: CachePermission::ManageCacheMembers,
-            reject_managed: true,
-        },
-    )
-    .await?;
-    let team = find_team(&state.web_db, &team).await?;
-    let grant = cache_grant(&state.web_db, team.id, cache.id)
+    let team: String = params.param("team")?;
+
+    let team = find_team(&db.web_db, &team).await?;
+    let grant = cache_grant(&db.web_db, team.id, cache.id)
         .await?
         .or_not_found(Resource::TeamGrant)?;
-    let role = cache_role(&state.web_db, cache.id, &body.role).await?;
+    let role = cache_role(&db.web_db, cache.id, &body.role).await?;
 
     let mut active: ATeamCache = grant.into();
     active.role = Set(role);
-    active.update(&state.web_db).await?;
+    active.update(&db.web_db).await?;
 
     audit_record(
         &db,

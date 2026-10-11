@@ -8,18 +8,15 @@
 //! exposing only the `has_secret` and `has_access_token` flags.
 
 use super::refusal::ProjectRefusal;
-use crate::access::{
-    Caller, ProjectAccess, load_integration_in_project, load_project, reject_managed_integration,
-};
-use crate::authorization::MaybeApiKey;
+use crate::access::{load_integration_in_project, reject_managed_integration};
 use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
-use crate::permissions::Permission;
 use crate::refusal::SharedRefusal;
 use crate::resource::Resource;
+use crate::scope::{Member, ProjectScope, Requires, RequiresUnmanaged, can};
 use anyhow::Context;
-use axum::extract::{Path, State};
-use axum::{Extension, Json};
+use axum::Json;
+use axum::extract::State;
 use gradient_db::lookup::by_id;
 
 use gradient_ci::IntegrationKind;
@@ -183,56 +180,27 @@ fn kind_to_str(k: IntegrationKind) -> &'static str {
 }
 
 pub async fn get_integrations(
-    state: State<Arc<ServerState>>,
-    Extension(user): Extension<MUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
-    Path(project): Path<String>,
+    ProjectScope { project, db, .. }: ProjectScope<Requires<can::ManageIntegrations>>,
 ) -> WebResult<Json<BaseResponse<Vec<IntegrationResponse>>>> {
-    let project = load_project(
-        &state.db(),
-        Caller::User(&user),
-        api_key.as_ref(),
-        project,
-        ProjectAccess::Require {
-            permission: Permission::ManageIntegrations,
-            reject_managed: false,
-        },
-    )
-    .await?;
-
     let rows = EIntegration::find()
         .filter(CIntegration::Project.eq(project.id))
-        .all(&state.web_db)
+        .all(&db.web_db)
         .await?;
 
     let mut out = Vec::with_capacity(rows.len());
     for row in rows {
-        out.push(integration_response(&state.web_db, row).await?);
+        out.push(integration_response(&db.web_db, row).await?);
     }
 
     Ok(ok_json(out))
 }
 
 pub async fn get_integration_summaries(
-    state: State<Arc<ServerState>>,
-    Extension(user): Extension<MUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
-    Path(project): Path<String>,
+    ProjectScope { project, db, .. }: ProjectScope<Member>,
 ) -> WebResult<Json<BaseResponse<Vec<IntegrationSummaryResponse>>>> {
-    let project = load_project(
-        &state.db(),
-        Caller::User(&user),
-        api_key.as_ref(),
-        project,
-        ProjectAccess::Member {
-            reject_managed: false,
-        },
-    )
-    .await?;
-
     let rows = EIntegration::find()
         .filter(CIntegration::Project.eq(project.id))
-        .all(&state.web_db)
+        .all(&db.web_db)
         .await?;
 
     Ok(ok_json(
@@ -243,24 +211,10 @@ pub async fn get_integration_summaries(
 }
 
 pub async fn put_integration(
+    ProjectScope { project, user, .. }: ProjectScope<RequiresUnmanaged<can::ManageIntegrations>>,
     state: State<Arc<ServerState>>,
-    Extension(user): Extension<MUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
-    Path(project): Path<String>,
     Json(body): Json<CreateIntegrationRequest>,
 ) -> WebResult<Json<BaseResponse<IntegrationResponse>>> {
-    let project = load_project(
-        &state.db(),
-        Caller::User(&user),
-        api_key.as_ref(),
-        project,
-        ProjectAccess::Require {
-            permission: Permission::ManageIntegrations,
-            reject_managed: true,
-        },
-    )
-    .await?;
-
     if check_index_name(&body.name).is_err() {
         return Err(WebError::invalid_name(Resource::IntegrationName));
     }
@@ -385,47 +339,30 @@ pub async fn put_integration(
 }
 
 pub async fn get_integration(
-    state: State<Arc<ServerState>>,
-    Extension(user): Extension<MUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
-    Path((project, integration_id)): Path<(String, IntegrationId)>,
-) -> WebResult<Json<BaseResponse<IntegrationResponse>>> {
-    let project = load_project(
-        &state.db(),
-        Caller::User(&user),
-        api_key.as_ref(),
+    ProjectScope {
         project,
-        ProjectAccess::Require {
-            permission: Permission::ManageIntegrations,
-            reject_managed: false,
-        },
-    )
-    .await?;
-    let integration =
-        load_integration_in_project(&state.web_db, project.id, integration_id).await?;
+        db,
+        params,
+        ..
+    }: ProjectScope<Requires<can::ManageIntegrations>>,
+) -> WebResult<Json<BaseResponse<IntegrationResponse>>> {
+    let integration_id: IntegrationId = params.param("id")?;
+
+    let integration = load_integration_in_project(&db.web_db, project.id, integration_id).await?;
     Ok(ok_json(
-        integration_response(&state.web_db, integration).await?,
+        integration_response(&db.web_db, integration).await?,
     ))
 }
 
 pub async fn patch_integration(
+    ProjectScope {
+        project, params, ..
+    }: ProjectScope<Requires<can::ManageIntegrations>>,
     state: State<Arc<ServerState>>,
-    Extension(user): Extension<MUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
-    Path((project, integration_id)): Path<(String, IntegrationId)>,
     Json(body): Json<PatchIntegrationRequest>,
 ) -> WebResult<Json<BaseResponse<IntegrationResponse>>> {
-    let project = load_project(
-        &state.db(),
-        Caller::User(&user),
-        api_key.as_ref(),
-        project,
-        ProjectAccess::Require {
-            permission: Permission::ManageIntegrations,
-            reject_managed: false,
-        },
-    )
-    .await?;
+    let integration_id: IntegrationId = params.param("id")?;
+
     let integration =
         load_integration_in_project(&state.web_db, project.id, integration_id).await?;
     reject_managed_integration(&integration)?;
@@ -510,27 +447,19 @@ pub async fn patch_integration(
 }
 
 pub async fn delete_integration(
-    state: State<Arc<ServerState>>,
-    Extension(user): Extension<MUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
-    Path((project, integration_id)): Path<(String, IntegrationId)>,
-) -> WebResult<Json<BaseResponse<bool>>> {
-    let project = load_project(
-        &state.db(),
-        Caller::User(&user),
-        api_key.as_ref(),
+    ProjectScope {
         project,
-        ProjectAccess::Require {
-            permission: Permission::ManageIntegrations,
-            reject_managed: false,
-        },
-    )
-    .await?;
-    let integration =
-        load_integration_in_project(&state.web_db, project.id, integration_id).await?;
+        db,
+        params,
+        ..
+    }: ProjectScope<Requires<can::ManageIntegrations>>,
+) -> WebResult<Json<BaseResponse<bool>>> {
+    let integration_id: IntegrationId = params.param("id")?;
+
+    let integration = load_integration_in_project(&db.web_db, project.id, integration_id).await?;
     reject_managed_integration(&integration)?;
     if integration.git_host_type == GitHostType::GitHub {
-        let txn = state.web_db.inner().begin().await?;
+        let txn = db.web_db.inner().begin().await?;
         match integration.github_installation {
             Some(fk) => {
                 EIntegration::delete_many()
@@ -548,9 +477,6 @@ pub async fn delete_integration(
         txn.commit().await?;
         return Ok(ok_json(true));
     }
-    integration
-        .into_active_model()
-        .delete(&state.web_db)
-        .await?;
+    integration.into_active_model().delete(&db.web_db).await?;
     Ok(ok_json(true))
 }

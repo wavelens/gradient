@@ -5,16 +5,13 @@
  */
 
 use super::refusal::TaskRefusal;
-use crate::access::{Caller, TaskAccess, load_task};
-use crate::authorization::MaybeApiKey;
 use crate::error::WebResult;
 use crate::helpers::{OptionExt, ok_json};
-use crate::permissions::Permission;
 use crate::refusal::SharedRefusal;
 use crate::resource::Resource;
-use axum::extract::{Path, State};
+use crate::scope::{Member, RequiresUnmanaged, TaskScope, can};
 use axum::routing::get;
-use axum::{Extension, Json, Router};
+use axum::{Json, Router};
 use chrono::Utc;
 use gradient_core::ServerState;
 use gradient_types::*;
@@ -109,57 +106,28 @@ fn validate_url(url: &Option<String>) -> WebResult<()> {
 }
 
 pub async fn list(
-    state: State<Arc<ServerState>>,
-    Extension(user): Extension<MUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
-    Path((project, task)): Path<(String, String)>,
+    TaskScope { task: proj, db, .. }: TaskScope<Member>,
 ) -> WebResult<Json<BaseResponse<Vec<FlakeInputOverrideOut>>>> {
-    let (_project, proj) = load_task(
-        &state.db(),
-        Caller::User(&user),
-        api_key.as_ref(),
-        project,
-        task,
-        TaskAccess::Member,
-    )
-    .await?;
-
     let rows = ETaskFlakeInputOverride::find()
         .filter(CTaskFlakeInputOverride::Task.eq(proj.id))
         .order_by_asc(CTaskFlakeInputOverride::InputName)
-        .all(&state.web_db)
+        .all(&db.web_db)
         .await?;
 
     Ok(ok_json(rows.into_iter().map(Into::into).collect()))
 }
 
 pub async fn create(
-    state: State<Arc<ServerState>>,
-    Extension(user): Extension<MUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
-    Path((project, task)): Path<(String, String)>,
+    TaskScope { task: proj, db, .. }: TaskScope<RequiresUnmanaged<can::EditTask>>,
     Json(body): Json<CreateBody>,
 ) -> WebResult<Json<BaseResponse<FlakeInputOverrideOut>>> {
-    let (_project, proj) = load_task(
-        &state.db(),
-        Caller::User(&user),
-        api_key.as_ref(),
-        project,
-        task,
-        TaskAccess::Require {
-            permission: Permission::EditTask,
-            reject_managed: true,
-        },
-    )
-    .await?;
-
     validate_input_name(&body.input_name)?;
     validate_url(&body.url)?;
 
     let existing = ETaskFlakeInputOverride::find()
         .filter(CTaskFlakeInputOverride::Task.eq(proj.id))
         .filter(CTaskFlakeInputOverride::InputName.eq(&body.input_name))
-        .one(&state.web_db)
+        .one(&db.web_db)
         .await?;
     if existing.is_some() {
         return Err(TaskRefusal::OverrideExists {
@@ -178,32 +146,26 @@ pub async fn create(
         updated_at: now,
     }
     .into_active_model()
-    .insert(&state.web_db)
+    .insert(&db.web_db)
     .await?;
 
     Ok(ok_json(row.into()))
 }
 
 pub async fn read(
-    state: State<Arc<ServerState>>,
-    Extension(user): Extension<MUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
-    Path((project, task, id)): Path<(String, String, FlakeInputOverrideId)>,
+    TaskScope {
+        task: proj,
+        db,
+        params,
+        ..
+    }: TaskScope<Member>,
 ) -> WebResult<Json<BaseResponse<FlakeInputOverrideOut>>> {
-    let (_project, proj) = load_task(
-        &state.db(),
-        Caller::User(&user),
-        api_key.as_ref(),
-        project,
-        task,
-        TaskAccess::Member,
-    )
-    .await?;
+    let id: FlakeInputOverrideId = params.param("id")?;
 
     let row = ETaskFlakeInputOverride::find()
         .filter(CTaskFlakeInputOverride::Id.eq(id))
         .filter(CTaskFlakeInputOverride::Task.eq(proj.id))
-        .one(&state.web_db)
+        .one(&db.web_db)
         .await?
         .or_not_found(Resource::FlakeInputOverride)?;
 
@@ -211,24 +173,15 @@ pub async fn read(
 }
 
 pub async fn update(
-    state: State<Arc<ServerState>>,
-    Extension(user): Extension<MUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
-    Path((project, task, id)): Path<(String, String, FlakeInputOverrideId)>,
+    TaskScope {
+        task: proj,
+        db,
+        params,
+        ..
+    }: TaskScope<RequiresUnmanaged<can::EditTask>>,
     Json(body): Json<UpdateBody>,
 ) -> WebResult<Json<BaseResponse<FlakeInputOverrideOut>>> {
-    let (_project, proj) = load_task(
-        &state.db(),
-        Caller::User(&user),
-        api_key.as_ref(),
-        project,
-        task,
-        TaskAccess::Require {
-            permission: Permission::EditTask,
-            reject_managed: true,
-        },
-    )
-    .await?;
+    let id: FlakeInputOverrideId = params.param("id")?;
 
     if let Some(n) = &body.input_name {
         validate_input_name(n)?;
@@ -240,7 +193,7 @@ pub async fn update(
     let row = ETaskFlakeInputOverride::find()
         .filter(CTaskFlakeInputOverride::Id.eq(id))
         .filter(CTaskFlakeInputOverride::Task.eq(proj.id))
-        .one(&state.web_db)
+        .one(&db.web_db)
         .await?
         .or_not_found(Resource::FlakeInputOverride)?;
 
@@ -250,7 +203,7 @@ pub async fn update(
         let dup = ETaskFlakeInputOverride::find()
             .filter(CTaskFlakeInputOverride::Task.eq(proj.id))
             .filter(CTaskFlakeInputOverride::InputName.eq(new_name))
-            .one(&state.web_db)
+            .one(&db.web_db)
             .await?;
         if dup.is_some() {
             return Err(TaskRefusal::OverrideExists {
@@ -269,38 +222,29 @@ pub async fn update(
     }
     active.updated_at = Set(Utc::now().naive_utc());
 
-    let updated = active.update(&state.web_db).await?;
+    let updated = active.update(&db.web_db).await?;
     Ok(ok_json(updated.into()))
 }
 
 pub async fn delete_one(
-    state: State<Arc<ServerState>>,
-    Extension(user): Extension<MUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
-    Path((project, task, id)): Path<(String, String, FlakeInputOverrideId)>,
+    TaskScope {
+        task: proj,
+        db,
+        params,
+        ..
+    }: TaskScope<RequiresUnmanaged<can::EditTask>>,
 ) -> WebResult<Json<BaseResponse<DeletedResponse>>> {
-    let (_project, proj) = load_task(
-        &state.db(),
-        Caller::User(&user),
-        api_key.as_ref(),
-        project,
-        task,
-        TaskAccess::Require {
-            permission: Permission::EditTask,
-            reject_managed: true,
-        },
-    )
-    .await?;
+    let id: FlakeInputOverrideId = params.param("id")?;
 
     let row = ETaskFlakeInputOverride::find()
         .filter(CTaskFlakeInputOverride::Id.eq(id))
         .filter(CTaskFlakeInputOverride::Task.eq(proj.id))
-        .one(&state.web_db)
+        .one(&db.web_db)
         .await?
         .or_not_found(Resource::FlakeInputOverride)?;
 
     let active: ATaskFlakeInputOverride = row.into();
-    active.delete(&state.web_db).await?;
+    active.delete(&db.web_db).await?;
 
     Ok(ok_json(DeletedResponse { deleted: true }))
 }

@@ -6,15 +6,13 @@
 
 use super::refusal::CacheRefusal;
 use crate::access::{CacheAccess, Caller, load_cache, reject_managed_cache};
-use crate::authorization::{MaybeApiKey, MaybeUser};
 use crate::error::{WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json};
-use crate::permissions::CachePermission;
 use crate::resource::Resource;
+use crate::scope::{CacheScope, Readable, Requires, RequiresUnmanaged, can};
 use anyhow::Context;
-use axum::Extension;
 use axum::Json;
-use axum::extract::{Path, State};
+use axum::extract::State;
 use gradient_core::ServerState;
 use gradient_core::upstream_source::{ProtocolProbe, probe_protocol};
 use gradient_db::WebDb;
@@ -138,23 +136,11 @@ async fn load_upstream(
 }
 
 pub async fn get_upstream_caches(
-    state: State<Arc<ServerState>>,
-    Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
-    Path(cache): Path<String>,
+    CacheScope { cache, db, .. }: CacheScope<Readable>,
 ) -> WebResult<Json<BaseResponse<Vec<UpstreamCacheItem>>>> {
-    let cache = load_cache(
-        &state.db(),
-        Caller::from(&maybe_user),
-        api_key.as_ref(),
-        cache,
-        CacheAccess::Readable,
-    )
-    .await?;
-
     let upstream_caches = ECacheUpstream::find()
         .filter(CCacheUpstream::Cache.eq(cache.id))
-        .all(&state.web_db)
+        .all(&db.web_db)
         .await?
         .into_iter()
         .map(|u| UpstreamCacheItem {
@@ -175,25 +161,16 @@ pub async fn get_upstream_caches(
 }
 
 pub async fn put_cache_upstream(
+    CacheScope {
+        cache,
+        user,
+        api_key,
+        db,
+        ..
+    }: CacheScope<RequiresUnmanaged<can::ManageUpstreamCaches>>,
     state: State<Arc<ServerState>>,
-    Extension(user): Extension<MUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
-    Path(cache): Path<String>,
     Json(body): Json<AddUpstreamRequest>,
 ) -> WebResult<Json<BaseResponse<CacheUpstreamId>>> {
-    let db = state.db();
-    let cache = load_cache(
-        &db,
-        Caller::User(&user),
-        api_key.as_ref(),
-        cache,
-        CacheAccess::Require {
-            permission: CachePermission::ManageUpstreamCaches,
-            reject_managed: true,
-        },
-    )
-    .await?;
-
     let record = match body {
         AddUpstreamRequest::Internal {
             cache_name,
@@ -276,27 +253,17 @@ pub async fn put_cache_upstream(
 }
 
 pub async fn patch_cache_upstream(
-    state: State<Arc<ServerState>>,
-    Extension(user): Extension<MUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
-    Path((cache, upstream_id)): Path<(String, CacheUpstreamId)>,
+    CacheScope {
+        cache, db, params, ..
+    }: CacheScope<Requires<can::ManageUpstreamCaches>>,
     Json(body): Json<PatchUpstreamRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let cache = load_cache(
-        &state.db(),
-        Caller::User(&user),
-        api_key.as_ref(),
-        cache,
-        CacheAccess::Require {
-            permission: CachePermission::ManageUpstreamCaches,
-            reject_managed: false,
-        },
-    )
-    .await?;
+    let upstream_id: CacheUpstreamId = params.param("id")?;
+
     if patch_edits_managed_fields(&body) {
         reject_managed_cache(&cache)?;
     }
-    let record = load_upstream(&state.web_db, cache.id, upstream_id).await?;
+    let record = load_upstream(&db.web_db, cache.id, upstream_id).await?;
 
     let is_external = matches!(record.as_source(), Some(CacheUpstreamSource::Http { .. }));
     let mut row = record.into_active_model();
@@ -319,7 +286,7 @@ pub async fn patch_cache_upstream(
         row.mode = Set(mode);
     }
 
-    row.update(&state.web_db).await?;
+    row.update(&db.web_db).await?;
 
     Ok(ok_json("Upstream updated".to_string()))
 }
@@ -350,23 +317,13 @@ impl UpstreamTestResponse {
 }
 
 pub async fn post_cache_upstream_test(
-    state: State<Arc<ServerState>>,
-    Extension(user): Extension<MUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
-    Path((cache, upstream_id)): Path<(String, CacheUpstreamId)>,
+    CacheScope {
+        cache, db, params, ..
+    }: CacheScope<Requires<can::ManageUpstreamCaches>>,
 ) -> WebResult<Json<BaseResponse<UpstreamTestResponse>>> {
-    let cache = load_cache(
-        &state.db(),
-        Caller::User(&user),
-        api_key.as_ref(),
-        cache,
-        CacheAccess::Require {
-            permission: CachePermission::ManageUpstreamCaches,
-            reject_managed: false,
-        },
-    )
-    .await?;
-    let record = load_upstream(&state.web_db, cache.id, upstream_id).await?;
+    let upstream_id: CacheUpstreamId = params.param("id")?;
+
+    let record = load_upstream(&db.web_db, cache.id, upstream_id).await?;
     let Some(CacheUpstreamSource::Http { url, .. }) = record.as_source() else {
         return Err(CacheRefusal::UpstreamNotHttp.into());
     };
@@ -380,26 +337,16 @@ pub async fn post_cache_upstream_test(
 }
 
 pub async fn delete_cache_upstream(
-    state: State<Arc<ServerState>>,
-    Extension(user): Extension<MUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
-    Path((cache, upstream_id)): Path<(String, CacheUpstreamId)>,
+    CacheScope {
+        cache, db, params, ..
+    }: CacheScope<RequiresUnmanaged<can::ManageUpstreamCaches>>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let cache = load_cache(
-        &state.db(),
-        Caller::User(&user),
-        api_key.as_ref(),
-        cache,
-        CacheAccess::Require {
-            permission: CachePermission::ManageUpstreamCaches,
-            reject_managed: true,
-        },
-    )
-    .await?;
-    let record = load_upstream(&state.web_db, cache.id, upstream_id).await?;
+    let upstream_id: CacheUpstreamId = params.param("id")?;
+
+    let record = load_upstream(&db.web_db, cache.id, upstream_id).await?;
 
     let active: ACacheUpstream = record.into();
-    active.delete(&state.web_db).await?;
+    active.delete(&db.web_db).await?;
 
     Ok(ok_json("Upstream removed".to_string()))
 }

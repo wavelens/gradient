@@ -7,14 +7,15 @@
 use super::TaskResponse;
 use super::auto_attach;
 use super::refusal::TaskRefusal;
-use crate::access::{Caller, ProjectAccess, TaskAccess, has_permission, load_project, load_task};
+use crate::access::{Caller, ProjectAccess, has_permission, load_project};
 use crate::audit::{RequestInfo, changed_fields, record as audit_record};
-use crate::authorization::{MaybeApiKey, MaybeUser};
+use crate::authorization::MaybeApiKey;
 use crate::error::{WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json, paginate};
 use crate::permissions::Permission;
 use crate::refusal::{Change, SharedRefusal};
 use crate::resource::Resource;
+use crate::scope::{Member, ProjectScope, Readable, RequiresUnmanaged, TaskScope, can};
 use axum::extract::{Path, Query, State};
 use axum::{Extension, Json};
 use gradient_db::lookup::{by_id, by_ids, get_any_project_by_name};
@@ -94,28 +95,21 @@ pub async fn get_task_name_available(
 }
 
 pub async fn get(
-    state: State<Arc<ServerState>>,
-    Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
-    Path(project): Path<String>,
+    ProjectScope {
+        project,
+        user: maybe_user,
+        api_key,
+        db,
+        ..
+    }: ProjectScope<Readable>,
     Query(params): Query<PaginationParams>,
 ) -> WebResult<Json<BaseResponse<Paginated<Vec<TaskResponse>>>>> {
     let api_key_ref = api_key.as_ref();
-    let project = load_project(
-        &state.0.db(),
-        Caller::from(&maybe_user),
-        api_key_ref,
-        project,
-        ProjectAccess::Readable {
-            label: Resource::Project,
-        },
-    )
-    .await?;
 
     let (can_edit, can_trigger) = match &maybe_user {
         Some(user) => (
             has_permission(
-                &state.web_db,
+                &db.web_db,
                 user.id,
                 project.id,
                 Permission::EditTask,
@@ -123,7 +117,7 @@ pub async fn get(
             )
             .await?,
             has_permission(
-                &state.web_db,
+                &db.web_db,
                 user.id,
                 project.id,
                 Permission::TriggerEvaluation,
@@ -139,7 +133,7 @@ pub async fn get(
             .filter(CTask::Project.eq(project.id))
             .order_by_asc(CTask::Name)
             .order_by_asc(CTask::Id),
-        &state.web_db,
+        &db.web_db,
         &params,
     )
     .await?;
@@ -149,7 +143,7 @@ pub async fn get(
         .iter()
         .filter_map(|p| p.last_evaluation)
         .collect();
-    let db = &state.web_db;
+    let db = &db.web_db;
     let eval_status_map: HashMap<EvaluationId, gradient_entity::evaluation::EvaluationStatus> =
         by_ids::<EEvaluation, _>(db, &eval_ids)
             .await?
@@ -324,26 +318,21 @@ pub async fn put(
 }
 
 pub async fn get_task(
-    state: State<Arc<ServerState>>,
-    Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
-    Path((project, task)): Path<(String, String)>,
-) -> WebResult<Json<BaseResponse<TaskResponse>>> {
-    let api_key_ref = api_key.as_ref();
-    let (project, task) = load_task(
-        &state.0.db(),
-        Caller::from(&maybe_user),
-        api_key_ref,
+    TaskScope {
         project,
         task,
-        TaskAccess::Readable,
-    )
-    .await?;
+        user: maybe_user,
+        api_key,
+        db,
+        ..
+    }: TaskScope<Readable>,
+) -> WebResult<Json<BaseResponse<TaskResponse>>> {
+    let api_key_ref = api_key.as_ref();
 
     let (can_edit, can_trigger) = match &maybe_user {
         Some(user) => (
             has_permission(
-                &state.web_db,
+                &db.web_db,
                 user.id,
                 project.id,
                 Permission::EditTask,
@@ -351,7 +340,7 @@ pub async fn get_task(
             )
             .await?,
             has_permission(
-                &state.web_db,
+                &db.web_db,
                 user.id,
                 project.id,
                 Permission::TriggerEvaluation,
@@ -363,7 +352,7 @@ pub async fn get_task(
     };
 
     let last_evaluation_status = if let Some(eval_id) = task.last_evaluation {
-        by_id::<EEvaluation, _>(&state.web_db, eval_id)
+        by_id::<EEvaluation, _>(&db.web_db, eval_id)
             .await?
             .map(|e| e.status)
     } else {
@@ -396,26 +385,17 @@ pub async fn get_task(
 }
 
 pub async fn patch_task(
-    state: State<Arc<ServerState>>,
-    info: RequestInfo,
-    Extension(user): Extension<MUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
-    Path((project, task)): Path<(String, String)>,
-    Json(body): Json<PatchTaskRequest>,
-) -> WebResult<Json<BaseResponse<String>>> {
-    let db = state.db();
-    let (project, task) = load_task(
-        &db,
-        Caller::User(&user),
-        api_key.as_ref(),
+    TaskScope {
         project,
         task,
-        TaskAccess::Require {
-            permission: Permission::EditTask,
-            reject_managed: true,
-        },
-    )
-    .await?;
+        user,
+        db,
+        ..
+    }: TaskScope<RequiresUnmanaged<can::EditTask>>,
+    state: State<Arc<ServerState>>,
+    info: RequestInfo,
+    Json(body): Json<PatchTaskRequest>,
+) -> WebResult<Json<BaseResponse<String>>> {
     let owner = EventOwner {
         project: Some(project.id),
         task: Some(task.id),
@@ -569,29 +549,19 @@ impl<'a> TaskPatcher<'a> {
 }
 
 pub async fn delete_task(
-    state: State<Arc<ServerState>>,
-    info: RequestInfo,
-    Extension(user): Extension<MUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
-    Path((project, task)): Path<(String, String)>,
-) -> WebResult<Json<BaseResponse<String>>> {
-    let db = state.db();
-    let (project_row, task) = load_task(
-        &db,
-        Caller::User(&user),
-        api_key.as_ref(),
-        project,
+    TaskScope {
+        project: project_row,
         task,
-        TaskAccess::Require {
-            permission: Permission::EditTask,
-            reject_managed: true,
-        },
-    )
-    .await?;
+        user,
+        db,
+        ..
+    }: TaskScope<RequiresUnmanaged<can::EditTask>>,
+    info: RequestInfo,
+) -> WebResult<Json<BaseResponse<String>>> {
     let task_id = task.id;
     let task_name = task.name.clone();
     let atask: ATask = task.into();
-    atask.delete(&state.web_db).await?;
+    atask.delete(&db.web_db).await?;
 
     audit_record(
         &db,
@@ -620,26 +590,11 @@ pub async fn delete_task(
 }
 
 pub async fn post_task_active(
-    state: State<Arc<ServerState>>,
-    Extension(user): Extension<MUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
-    Path((project, task)): Path<(String, String)>,
+    TaskScope { task, db, .. }: TaskScope<RequiresUnmanaged<can::EditTask>>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let (_project, task) = load_task(
-        &state.db(),
-        Caller::User(&user),
-        api_key.as_ref(),
-        project,
-        task,
-        TaskAccess::Require {
-            permission: Permission::EditTask,
-            reject_managed: true,
-        },
-    )
-    .await?;
     let mut atask: ATask = task.into();
     atask.active = Set(true);
-    atask.update(&state.web_db).await?;
+    atask.update(&db.web_db).await?;
 
     let res = BaseResponse {
         error: false,
@@ -650,26 +605,11 @@ pub async fn post_task_active(
 }
 
 pub async fn delete_task_active(
-    state: State<Arc<ServerState>>,
-    Extension(user): Extension<MUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
-    Path((project, task)): Path<(String, String)>,
+    TaskScope { task, db, .. }: TaskScope<RequiresUnmanaged<can::EditTask>>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let (_project, task) = load_task(
-        &state.db(),
-        Caller::User(&user),
-        api_key.as_ref(),
-        project,
-        task,
-        TaskAccess::Require {
-            permission: Permission::EditTask,
-            reject_managed: true,
-        },
-    )
-    .await?;
     let mut atask: ATask = task.into();
     atask.active = Set(false);
-    atask.update(&state.web_db).await?;
+    atask.update(&db.web_db).await?;
 
     let res = BaseResponse {
         error: false,
@@ -680,25 +620,8 @@ pub async fn delete_task_active(
 }
 
 pub async fn post_task_check_repository(
-    state: State<Arc<ServerState>>,
-    Extension(user): Extension<MUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
-    Path((project, task)): Path<(String, String)>,
+    TaskScope { task, db, .. }: TaskScope<RequiresUnmanaged<can::EditTask>>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let db = state.db();
-    let (_project, task) = load_task(
-        &db,
-        Caller::User(&user),
-        api_key.as_ref(),
-        project,
-        task,
-        TaskAccess::Require {
-            permission: Permission::EditTask,
-            reject_managed: true,
-        },
-    )
-    .await?;
-
     let (_has_updates, remote_hash) = check_task_updates(&db, &task, None).await.map_err(|e| {
         TaskRefusal::RepositoryCheckFailed {
             reason: e.to_string(),
@@ -714,25 +637,20 @@ pub async fn post_task_check_repository(
 }
 
 pub async fn post_task_transfer(
-    state: State<Arc<ServerState>>,
-    Extension(user): Extension<MUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
-    Path((project, task)): Path<(String, String)>,
+    TaskScope {
+        project,
+        task,
+        user,
+        api_key,
+        db,
+        ..
+    }: TaskScope<Member>,
     Json(body): Json<TransferOwnershipRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let api_key_ref = api_key.as_ref();
-    let (project, task) = load_task(
-        &state.db(),
-        Caller::User(&user),
-        api_key_ref,
-        project,
-        task,
-        TaskAccess::Member,
-    )
-    .await?;
 
     let is_admin = has_permission(
-        &state.web_db,
+        &db.web_db,
         user.id,
         project.id,
         Permission::EditTask,
@@ -749,7 +667,7 @@ pub async fn post_task_transfer(
     }
 
     let new_project = load_project(
-        &state.0.db(),
+        &db,
         Caller::User(&user),
         api_key_ref,
         body.project.clone(),
@@ -766,7 +684,7 @@ pub async fn post_task_transfer(
 
     let mut atask: ATask = task.into();
     atask.project = Set(new_project.id);
-    atask.update(&state.web_db).await?;
+    atask.update(&db.web_db).await?;
 
     let res = BaseResponse {
         error: false,

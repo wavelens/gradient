@@ -6,14 +6,13 @@
 
 use super::refusal::TeamRefusal;
 use super::workers::withdraw_team_workers;
-use crate::access::{TeamAccess, load_team};
 use crate::audit::{RequestInfo, record as audit_record};
-use crate::authorization::MaybeApiKey;
 use crate::error::{WebError, WebResult, require_create_permission, require_superuser};
 use crate::helpers::ok_json;
 use crate::refusal::SharedRefusal;
 use crate::resource::Resource;
-use axum::extract::{Path, Query, State};
+use crate::scope::{AdminUnmanaged, Member, TeamScope};
+use axum::extract::{Query, State};
 use axum::{Extension, Json};
 use gradient_core::ServerState;
 use gradient_scheduler::Scheduler;
@@ -215,60 +214,24 @@ pub async fn put_team(
 }
 
 pub async fn get_team(
-    state: State<Arc<ServerState>>,
-    Extension(user): Extension<MUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
-    Path(team): Path<String>,
+    TeamScope { team, role, .. }: TeamScope<Member>,
 ) -> WebResult<Json<BaseResponse<TeamResponse>>> {
-    let (team, role) = load_team(
-        &state.web_db,
-        &user,
-        api_key.as_ref(),
-        team,
-        TeamAccess::Member,
-    )
-    .await?;
     Ok(ok_json(team_response(team, role)))
 }
 
 pub async fn get_team_evaluations(
-    state: State<Arc<ServerState>>,
-    Extension(user): Extension<MUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
-    Path(team): Path<String>,
+    TeamScope { team, db, .. }: TeamScope<Member>,
 ) -> WebResult<Json<BaseResponse<Vec<gradient_db::teams::evaluations::TeamEvaluation>>>> {
-    let (team, _) = load_team(
-        &state.web_db,
-        &user,
-        api_key.as_ref(),
-        team,
-        TeamAccess::Member,
-    )
-    .await?;
     Ok(ok_json(
-        gradient_db::teams::evaluations::recent_evaluations(&state.web_db, team.id, 10).await?,
+        gradient_db::teams::evaluations::recent_evaluations(&db.web_db, team.id, 10).await?,
     ))
 }
 
 pub async fn patch_team(
-    state: State<Arc<ServerState>>,
+    TeamScope { team, user, db, .. }: TeamScope<AdminUnmanaged>,
     info: RequestInfo,
-    Extension(user): Extension<MUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
-    Path(team): Path<String>,
     Json(body): Json<PatchTeamRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let (team, _) = load_team(
-        &state.web_db,
-        &user,
-        api_key.as_ref(),
-        team,
-        TeamAccess::Admin {
-            reject_managed: true,
-        },
-    )
-    .await?;
-
     if body.oidc_group.is_some()
         || body.scim_group.is_some()
         || body.new_project_users.is_some()
@@ -305,12 +268,12 @@ pub async fn patch_team(
         active.scim_group = Set(blank_to_none(group));
     }
     active
-        .update(&state.web_db)
+        .update(&db.web_db)
         .await
         .map_err(|e| WebError::from_db_err(e, Resource::ScimGroup))?;
 
     audit_record(
-        &state.db(),
+        &db,
         Some(user.id),
         Action::TeamUpdate,
         EventOwner::default(),
@@ -323,36 +286,22 @@ pub async fn patch_team(
 }
 
 pub async fn delete_team(
-    state: State<Arc<ServerState>>,
+    TeamScope { team, user, db, .. }: TeamScope<AdminUnmanaged>,
     info: RequestInfo,
-    Extension(user): Extension<MUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
     Extension(scheduler): Extension<Arc<Scheduler>>,
-    Path(team): Path<String>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let (team, _) = load_team(
-        &state.web_db,
-        &user,
-        api_key.as_ref(),
-        team,
-        TeamAccess::Admin {
-            reject_managed: true,
-        },
-    )
-    .await?;
-
-    let workers = gradient_db::teams::team_worker_ids(&state.web_db, team.id).await?;
+    let workers = gradient_db::teams::team_worker_ids(&db.web_db, team.id).await?;
     let projects: HashSet<ProjectId> =
-        gradient_db::teams::workers::projects_granted_with_workers(&state.web_db, team.id)
+        gradient_db::teams::workers::projects_granted_with_workers(&db.web_db, team.id)
             .await?
             .into_iter()
             .collect();
     let team_id = team.id;
-    team.into_active_model().delete(&state.web_db).await?;
+    team.into_active_model().delete(&db.web_db).await?;
     withdraw_team_workers(&scheduler, &workers, &projects).await;
 
     audit_record(
-        &state.db(),
+        &db,
         Some(user.id),
         Action::TeamDelete,
         EventOwner::default(),

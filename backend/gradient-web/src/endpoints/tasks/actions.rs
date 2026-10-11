@@ -5,17 +5,15 @@
  */
 
 use super::refusal::TaskRefusal;
-use crate::access::{Caller, TaskAccess, load_task};
 use crate::audit::{RequestInfo, record as audit_record};
-use crate::authorization::MaybeApiKey;
 use crate::error::{WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json};
-use crate::permissions::Permission;
 use crate::resource::Resource;
+use crate::scope::{Member, Requires, TaskScope, can};
 use anyhow::Context;
 use axum::extract::Query;
-use axum::extract::{Path, State};
-use axum::{Extension, Json, Router};
+use axum::extract::State;
+use axum::{Json, Router};
 use chrono::Utc;
 use gradient_ci::IntegrationKind;
 use gradient_ci::actions::encrypt_action_secret;
@@ -179,51 +177,28 @@ fn validate_destination(cfg: &ActionConfig) -> WebResult<()> {
 }
 
 pub async fn list_actions(
-    state: State<Arc<ServerState>>,
-    Extension(user): Extension<MUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
-    Path((project, task)): Path<(String, String)>,
+    TaskScope { task: proj, db, .. }: TaskScope<Member>,
 ) -> WebResult<Json<BaseResponse<Vec<ActionResponse>>>> {
-    let (_project, proj) = load_task(
-        &state.db(),
-        Caller::User(&user),
-        api_key.as_ref(),
-        project,
-        task,
-        TaskAccess::Member,
-    )
-    .await?;
-
     let rows = ETaskAction::find()
         .filter(CTaskAction::Task.eq(proj.id))
-        .all(&state.web_db)
+        .all(&db.web_db)
         .await?;
 
     Ok(ok_json(rows.into_iter().map(Into::into).collect()))
 }
 
 pub async fn create_action(
+    TaskScope {
+        project,
+        task: proj,
+        user,
+        db,
+        ..
+    }: TaskScope<Requires<can::ManageActions>>,
     state: State<Arc<ServerState>>,
     info: RequestInfo,
-    Extension(user): Extension<MUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
-    Path((project, task)): Path<(String, String)>,
     Json(body): Json<CreateActionRequest>,
 ) -> WebResult<Json<BaseResponse<CreateActionResponse>>> {
-    let db = state.db();
-    let (project, proj) = load_task(
-        &db,
-        Caller::User(&user),
-        api_key.as_ref(),
-        project,
-        task,
-        TaskAccess::Require {
-            permission: Permission::ManageActions,
-            reject_managed: false,
-        },
-    )
-    .await?;
-
     match &body.config {
         ActionConfig::SendMail { .. } if !state.email.is_enabled() => {
             return Err(TaskRefusal::SmtpNotConfigured.into());
@@ -337,25 +312,19 @@ pub struct UpdateActionRequest {
 }
 
 pub async fn read_action(
-    state: State<Arc<ServerState>>,
-    Extension(user): Extension<MUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
-    Path((project, task, id)): Path<(String, String, TaskActionId)>,
+    TaskScope {
+        task: proj,
+        db,
+        params,
+        ..
+    }: TaskScope<Member>,
 ) -> WebResult<Json<BaseResponse<ActionResponse>>> {
-    let (_project, proj) = load_task(
-        &state.db(),
-        Caller::User(&user),
-        api_key.as_ref(),
-        project,
-        task,
-        TaskAccess::Member,
-    )
-    .await?;
+    let id: TaskActionId = params.param("id")?;
 
     let row = ETaskAction::find()
         .filter(CTaskAction::Id.eq(id))
         .filter(CTaskAction::Task.eq(proj.id))
-        .one(&state.web_db)
+        .one(&db.web_db)
         .await?
         .or_not_found(Resource::Action)?;
 
@@ -363,26 +332,19 @@ pub async fn read_action(
 }
 
 pub async fn update_action(
+    TaskScope {
+        project,
+        task: proj,
+        user,
+        db,
+        params,
+        ..
+    }: TaskScope<Requires<can::ManageActions>>,
     state: State<Arc<ServerState>>,
     info: RequestInfo,
-    Extension(user): Extension<MUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
-    Path((project, task, id)): Path<(String, String, TaskActionId)>,
     Json(body): Json<UpdateActionRequest>,
 ) -> WebResult<Json<BaseResponse<ActionResponse>>> {
-    let db = state.db();
-    let (project, proj) = load_task(
-        &db,
-        Caller::User(&user),
-        api_key.as_ref(),
-        project,
-        task,
-        TaskAccess::Require {
-            permission: Permission::ManageActions,
-            reject_managed: false,
-        },
-    )
-    .await?;
+    let id: TaskActionId = params.param("id")?;
 
     let row = ETaskAction::find()
         .filter(CTaskAction::Id.eq(id))
@@ -509,35 +471,27 @@ pub struct DeletedResponse {
 }
 
 pub async fn delete_action(
-    state: State<Arc<ServerState>>,
-    info: RequestInfo,
-    Extension(user): Extension<MUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
-    Path((project, task, id)): Path<(String, String, TaskActionId)>,
-) -> WebResult<Json<BaseResponse<DeletedResponse>>> {
-    let db = state.db();
-    let (project, proj) = load_task(
-        &db,
-        Caller::User(&user),
-        api_key.as_ref(),
+    TaskScope {
         project,
-        task,
-        TaskAccess::Require {
-            permission: Permission::ManageActions,
-            reject_managed: false,
-        },
-    )
-    .await?;
+        task: proj,
+        user,
+        db,
+        params,
+        ..
+    }: TaskScope<Requires<can::ManageActions>>,
+    info: RequestInfo,
+) -> WebResult<Json<BaseResponse<DeletedResponse>>> {
+    let id: TaskActionId = params.param("id")?;
 
     let row = ETaskAction::find()
         .filter(CTaskAction::Id.eq(id))
         .filter(CTaskAction::Task.eq(proj.id))
-        .one(&state.web_db)
+        .one(&db.web_db)
         .await?
         .or_not_found(Resource::Action)?;
 
     let active: ATaskAction = row.clone().into();
-    active.delete(&state.web_db).await?;
+    active.delete(&db.web_db).await?;
 
     record_action_event(
         &db,
@@ -553,24 +507,15 @@ pub async fn delete_action(
 }
 
 pub async fn test_action(
+    TaskScope {
+        task: proj, params, ..
+    }: TaskScope<Requires<can::ManageActions>>,
     state: State<Arc<ServerState>>,
-    Extension(user): Extension<MUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
-    Path((project, task, id)): Path<(String, String, TaskActionId)>,
 ) -> WebResult<Json<BaseResponse<serde_json::Value>>> {
     let ci = state.ci();
-    let (_project, proj) = load_task(
-        &state.db(),
-        Caller::User(&user),
-        api_key.as_ref(),
-        project.clone(),
-        task.clone(),
-        TaskAccess::Require {
-            permission: Permission::ManageActions,
-            reject_managed: false,
-        },
-    )
-    .await?;
+    let id: TaskActionId = params.param("id")?;
+    let project: String = params.param("project")?;
+    let task: String = params.param("task")?;
 
     let action = ETaskAction::find()
         .filter(CTaskAction::Id.eq(id))
@@ -631,26 +576,14 @@ pub async fn test_action(
 }
 
 pub async fn regenerate_token(
+    TaskScope {
+        task: proj, params, ..
+    }: TaskScope<Requires<can::ManageActions>>,
     state: State<Arc<ServerState>>,
-    Extension(user): Extension<MUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
-    Path((project, task, id)): Path<(String, String, TaskActionId)>,
 ) -> WebResult<Json<BaseResponse<serde_json::Value>>> {
     use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
     use rand::RngExt as _;
-
-    let (_project, proj) = load_task(
-        &state.db(),
-        Caller::User(&user),
-        api_key.as_ref(),
-        project,
-        task,
-        TaskAccess::Require {
-            permission: Permission::ManageActions,
-            reject_managed: false,
-        },
-    )
-    .await?;
+    let id: TaskActionId = params.param("id")?;
 
     let existing = ETaskAction::find()
         .filter(CTaskAction::Id.eq(id))
@@ -725,26 +658,20 @@ pub struct DeliveryDetail {
 }
 
 pub async fn list_deliveries(
-    state: State<Arc<ServerState>>,
-    Extension(user): Extension<MUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
-    Path((project, task, id)): Path<(String, String, TaskActionId)>,
+    TaskScope {
+        task: proj,
+        db,
+        params,
+        ..
+    }: TaskScope<Member>,
     Query(q): Query<DeliveryListQuery>,
 ) -> WebResult<Json<BaseResponse<Vec<DeliveryListItem>>>> {
-    let (_project, proj) = load_task(
-        &state.db(),
-        Caller::User(&user),
-        api_key.as_ref(),
-        project,
-        task,
-        TaskAccess::Member,
-    )
-    .await?;
+    let id: TaskActionId = params.param("id")?;
 
     ETaskAction::find()
         .filter(CTaskAction::Id.eq(id))
         .filter(CTaskAction::Task.eq(proj.id))
-        .one(&state.web_db)
+        .one(&db.web_db)
         .await?
         .or_not_found(Resource::Action)?;
 
@@ -756,7 +683,7 @@ pub async fn list_deliveries(
         .order_by(CTaskActionDelivery::DeliveredAt, Order::Desc)
         .limit(limit)
         .offset(offset)
-        .all(&state.web_db)
+        .all(&db.web_db)
         .await?;
 
     Ok(ok_json(
@@ -765,36 +692,26 @@ pub async fn list_deliveries(
 }
 
 pub async fn get_delivery(
-    state: State<Arc<ServerState>>,
-    Extension(user): Extension<MUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
-    Path((project, task, action_id, delivery_id)): Path<(
-        String,
-        String,
-        TaskActionId,
-        TaskActionDeliveryId,
-    )>,
+    TaskScope {
+        task: proj,
+        db,
+        params,
+        ..
+    }: TaskScope<Member>,
 ) -> WebResult<Json<BaseResponse<DeliveryDetail>>> {
-    let (_project, proj) = load_task(
-        &state.db(),
-        Caller::User(&user),
-        api_key.as_ref(),
-        project,
-        task,
-        TaskAccess::Member,
-    )
-    .await?;
+    let action_id: TaskActionId = params.param("id")?;
+    let delivery_id: TaskActionDeliveryId = params.param("delivery_id")?;
 
     ETaskAction::find()
         .filter(CTaskAction::Id.eq(action_id))
         .filter(CTaskAction::Task.eq(proj.id))
-        .one(&state.web_db)
+        .one(&db.web_db)
         .await?
         .or_not_found(Resource::Action)?;
 
     let r = ETaskActionDelivery::find_by_id(delivery_id)
         .filter(CTaskActionDelivery::ActionId.eq(action_id))
-        .one(&state.web_db)
+        .one(&db.web_db)
         .await?
         .or_not_found(Resource::Delivery)?;
 

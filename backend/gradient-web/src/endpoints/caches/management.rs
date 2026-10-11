@@ -5,18 +5,17 @@
  */
 
 use super::refusal::CacheRefusal;
-use crate::access::{CacheAccess, Caller, load_cache};
 use crate::audit::{RequestInfo, changed_fields, record as audit_record};
-use crate::authorization::{MaybeApiKey, MaybeUser};
 use crate::error::{WebError, WebResult, require_create_permission};
 use crate::helpers::ok_json;
 use crate::permissions::CachePermission;
 use crate::refusal::SharedRefusal;
 use crate::resource::Resource;
+use crate::scope::{CacheScope, Readable, Requires, RequiresUnmanaged, can};
 use anyhow::Context;
 use axum::Extension;
 use axum::Json;
-use axum::extract::{Path, Query, State};
+use axum::extract::{Query, State};
 use chrono::NaiveDateTime;
 use gradient_core::ServerState;
 use gradient_entity::cache_upstream::CacheUpstreamKind;
@@ -237,20 +236,13 @@ pub async fn get_public_caches(
 }
 
 pub async fn get_cache(
-    state: State<Arc<ServerState>>,
-    Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
-    Path(cache): Path<String>,
-) -> WebResult<Json<BaseResponse<CacheResponse>>> {
-    let cache = load_cache(
-        &state.db(),
-        Caller::from(&maybe_user),
-        api_key.as_ref(),
+    CacheScope {
         cache,
-        CacheAccess::Readable,
-    )
-    .await?;
-
+        user: maybe_user,
+        ..
+    }: CacheScope<Readable>,
+    state: State<Arc<ServerState>>,
+) -> WebResult<Json<BaseResponse<CacheResponse>>> {
     let public_key = format_cache_public_key(
         &state.config.secrets.crypt_file,
         cache.clone(),
@@ -289,25 +281,13 @@ pub async fn get_cache(
 }
 
 pub async fn patch_cache(
+    CacheScope {
+        cache, user, db, ..
+    }: CacheScope<RequiresUnmanaged<can::ManageCacheSettings>>,
     state: State<Arc<ServerState>>,
     info: RequestInfo,
-    Extension(user): Extension<MUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
-    Path(cache): Path<String>,
     Json(body): Json<PatchCacheRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let db = state.db();
-    let cache = load_cache(
-        &db,
-        Caller::User(&user),
-        api_key.as_ref(),
-        cache,
-        CacheAccess::Require {
-            permission: CachePermission::ManageCacheSettings,
-            reject_managed: true,
-        },
-    )
-    .await?;
     let cache_id = cache.id;
     let prev_max_storage_gb = cache.max_storage_gb;
     let fields = changed_fields([
@@ -413,30 +393,17 @@ pub async fn patch_cache(
 }
 
 pub async fn delete_cache(
-    state: State<Arc<ServerState>>,
+    CacheScope {
+        cache, user, db, ..
+    }: CacheScope<RequiresUnmanaged<can::DeleteCache>>,
     info: RequestInfo,
-    Extension(user): Extension<MUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
-    Path(cache): Path<String>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let db = state.db();
-    let cache = load_cache(
-        &db,
-        Caller::User(&user),
-        api_key.as_ref(),
-        cache,
-        CacheAccess::Require {
-            permission: CachePermission::DeleteCache,
-            reject_managed: true,
-        },
-    )
-    .await?;
     let cache_id = cache.id;
     let cache_name = cache.name.clone();
 
     let subscribing_projects: Vec<ProjectId> = EProjectCache::find()
         .filter(CProjectCache::Cache.eq(cache.id))
-        .all(&state.web_db)
+        .all(&db.web_db)
         .await
         .unwrap_or_default()
         .into_iter()
@@ -444,7 +411,7 @@ pub async fn delete_cache(
         .collect();
 
     let acache: ACache = cache.into();
-    acache.delete(&state.web_db).await?;
+    acache.delete(&db.web_db).await?;
 
     audit_record(&db, Some(user.id), Action::CacheDelete, EventOwner { cache: Some(cache_id), ..Default::default() },
         &info,
@@ -459,97 +426,41 @@ pub async fn delete_cache(
 }
 
 pub async fn post_cache_active(
-    state: State<Arc<ServerState>>,
-    Extension(user): Extension<MUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
-    Path(cache): Path<String>,
+    CacheScope { cache, db, .. }: CacheScope<Requires<can::ManageCacheSettings>>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let cache = load_cache(
-        &state.db(),
-        Caller::User(&user),
-        api_key.as_ref(),
-        cache,
-        CacheAccess::Require {
-            permission: CachePermission::ManageCacheSettings,
-            reject_managed: false,
-        },
-    )
-    .await?;
     let mut acache: ACache = cache.into();
     acache.active = Set(true);
-    acache.update(&state.web_db).await?;
+    acache.update(&db.web_db).await?;
 
     Ok(ok_json("Cache enabled".to_string()))
 }
 
 pub async fn delete_cache_active(
-    state: State<Arc<ServerState>>,
-    Extension(user): Extension<MUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
-    Path(cache): Path<String>,
+    CacheScope { cache, db, .. }: CacheScope<Requires<can::ManageCacheSettings>>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let cache = load_cache(
-        &state.db(),
-        Caller::User(&user),
-        api_key.as_ref(),
-        cache,
-        CacheAccess::Require {
-            permission: CachePermission::ManageCacheSettings,
-            reject_managed: false,
-        },
-    )
-    .await?;
     let mut acache: ACache = cache.into();
     acache.active = Set(false);
-    acache.update(&state.web_db).await?;
+    acache.update(&db.web_db).await?;
 
     Ok(ok_json("Cache disabled".to_string()))
 }
 
 pub async fn post_cache_public(
-    state: State<Arc<ServerState>>,
-    Extension(user): Extension<MUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
-    Path(cache): Path<String>,
+    CacheScope { cache, db, .. }: CacheScope<RequiresUnmanaged<can::ManageCacheSettings>>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let cache = load_cache(
-        &state.db(),
-        Caller::User(&user),
-        api_key.as_ref(),
-        cache,
-        CacheAccess::Require {
-            permission: CachePermission::ManageCacheSettings,
-            reject_managed: true,
-        },
-    )
-    .await?;
     let mut acache: ACache = cache.into();
     acache.public = Set(true);
-    acache.update(&state.web_db).await?;
+    acache.update(&db.web_db).await?;
 
     Ok(ok_json("Cache is now public".to_string()))
 }
 
 pub async fn delete_cache_public(
-    state: State<Arc<ServerState>>,
-    Extension(user): Extension<MUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
-    Path(cache): Path<String>,
+    CacheScope { cache, db, .. }: CacheScope<RequiresUnmanaged<can::ManageCacheSettings>>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let cache = load_cache(
-        &state.db(),
-        Caller::User(&user),
-        api_key.as_ref(),
-        cache,
-        CacheAccess::Require {
-            permission: CachePermission::ManageCacheSettings,
-            reject_managed: true,
-        },
-    )
-    .await?;
     let mut acache: ACache = cache.into();
     acache.public = Set(false);
-    acache.update(&state.web_db).await?;
+    acache.update(&db.web_db).await?;
 
     Ok(ok_json("Cache is now private".to_string()))
 }

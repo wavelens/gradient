@@ -4,9 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::access::{Caller, TaskAccess, load_task};
 use crate::authorization::{MaybeApiKey, MaybeUser};
 use crate::error::WebResult;
+use crate::scope::{Readable, TaskScope};
 use axum::Extension;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Path, State};
@@ -68,22 +68,10 @@ fn frame(env: &Envelope) -> Option<String> {
 }
 
 pub async fn task_live_ws(
+    TaskScope { task, .. }: TaskScope<Readable>,
     State(state): State<Arc<ServerState>>,
-    Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
-    Path((project, task)): Path<(String, String)>,
     ws: WebSocketUpgrade,
 ) -> WebResult<Response> {
-    let (_project, task) = load_task(
-        &state.db(),
-        Caller::from(&maybe_user),
-        api_key.as_ref(),
-        project,
-        task,
-        TaskAccess::Readable,
-    )
-    .await?;
-
     let task_id = task.id;
     // The task's recent evaluations are seeded first. Build events must fire while the evaluation
     // itself is still in `Building`.

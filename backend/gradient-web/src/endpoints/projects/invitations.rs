@@ -4,18 +4,14 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::access::{Caller, ProjectAccess, load_project};
 use crate::audit::{RequestInfo, record as audit_record};
-use crate::authorization::MaybeApiKey;
 use crate::error::WebResult;
 use crate::helpers::{OptionExt, ok_json, role_names};
-use crate::permissions::Permission;
 use crate::refusal::SharedRefusal;
 use crate::resource::Resource;
-use axum::extract::{Path, State};
-use axum::{Extension, Json};
+use crate::scope::{ProjectScope, Requires, RequiresUnmanaged, can};
+use axum::Json;
 use chrono::NaiveDateTime;
-use gradient_core::ServerState;
 use gradient_types::events::EventOwner;
 use gradient_types::events::audit::Action;
 use gradient_types::*;
@@ -24,7 +20,6 @@ use sea_orm::{
     QuerySelect, RelationTrait,
 };
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PendingInvitationItem {
@@ -41,23 +36,8 @@ pub struct RevokeInvitationRequest {
 }
 
 pub async fn get_project_invitations(
-    state: State<Arc<ServerState>>,
-    Extension(user): Extension<MUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
-    Path(project): Path<String>,
+    ProjectScope { project, db, .. }: ProjectScope<Requires<can::ManageMembers>>,
 ) -> WebResult<Json<BaseResponse<Vec<PendingInvitationItem>>>> {
-    let project = load_project(
-        &state.db(),
-        Caller::User(&user),
-        api_key.as_ref(),
-        project,
-        ProjectAccess::Require {
-            permission: Permission::ManageMembers,
-            reject_managed: false,
-        },
-    )
-    .await?;
-
     let rows = EProjectInvitation::find()
         .join(
             JoinType::InnerJoin,
@@ -65,11 +45,11 @@ pub async fn get_project_invitations(
         )
         .select_also(gradient_entity::user::Entity)
         .filter(CProjectInvitation::Project.eq(project.id))
-        .all(&state.web_db)
+        .all(&db.web_db)
         .await?;
 
     let role_ids: Vec<RoleId> = rows.iter().map(|(inv, _)| inv.role).collect();
-    let role_map = role_names(&state.web_db, role_ids).await?;
+    let role_map = role_names(&db.web_db, role_ids).await?;
 
     let items: Vec<PendingInvitationItem> = rows
         .iter()
@@ -92,29 +72,15 @@ pub async fn get_project_invitations(
 }
 
 pub async fn delete_project_invitation(
-    state: State<Arc<ServerState>>,
+    ProjectScope {
+        project, user, db, ..
+    }: ProjectScope<RequiresUnmanaged<can::ManageMembers>>,
     info: RequestInfo,
-    Extension(user): Extension<MUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
-    Path(project): Path<String>,
     Json(body): Json<RevokeInvitationRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let db = state.db();
-    let project = load_project(
-        &db,
-        Caller::User(&user),
-        api_key.as_ref(),
-        project,
-        ProjectAccess::Require {
-            permission: Permission::ManageMembers,
-            reject_managed: true,
-        },
-    )
-    .await?;
-
     let target_user = EUser::find()
         .filter(CUser::Username.eq(body.user.clone()))
-        .one(&state.web_db)
+        .one(&db.web_db)
         .await?
         .or_not_found(Resource::User)?;
 
@@ -124,11 +90,11 @@ pub async fn delete_project_invitation(
                 .add(CProjectInvitation::Project.eq(project.id))
                 .add(CProjectInvitation::User.eq(target_user.id)),
         )
-        .one(&state.web_db)
+        .one(&db.web_db)
         .await?
         .ok_or(SharedRefusal::NoPendingInvitation)?;
 
-    invitation.into_active_model().delete(&state.web_db).await?;
+    invitation.into_active_model().delete(&db.web_db).await?;
 
     audit_record(
         &db,

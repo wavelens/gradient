@@ -4,38 +4,21 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::access::{CacheAccess, Caller, load_cache};
-use crate::authorization::{MaybeApiKey, MaybeUser};
 use crate::error::WebResult;
 use crate::helpers::ok_json;
-use crate::permissions::CachePermission;
+use crate::scope::{CacheScope, Readable, Requires, can};
 use anyhow::Context;
-use axum::Extension;
 use axum::Json;
-use axum::extract::{Path, State};
+use axum::extract::State;
 use gradient_core::ServerState;
 use gradient_sources::{format_cache_key, format_cache_public_key};
 use gradient_types::*;
 use std::sync::Arc;
 
 pub async fn get_cache_key(
+    CacheScope { cache, .. }: CacheScope<Requires<can::ManageCacheKeys>>,
     state: State<Arc<ServerState>>,
-    Extension(user): Extension<MUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
-    Path(cache): Path<String>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let cache = load_cache(
-        &state.db(),
-        Caller::User(&user),
-        api_key.as_ref(),
-        cache,
-        CacheAccess::Require {
-            permission: CachePermission::ManageCacheKeys,
-            reject_managed: false,
-        },
-    )
-    .await?;
-
     let cache_key = format_cache_key(
         &state.config.secrets.crypt_file,
         cache,
@@ -47,20 +30,9 @@ pub async fn get_cache_key(
 }
 
 pub async fn get_cache_public_key(
+    CacheScope { cache, .. }: CacheScope<Readable>,
     state: State<Arc<ServerState>>,
-    Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
-    Path(cache): Path<String>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let cache = load_cache(
-        &state.db(),
-        Caller::from(&maybe_user),
-        api_key.as_ref(),
-        cache,
-        CacheAccess::Readable,
-    )
-    .await?;
-
     let public_key = format_cache_public_key(
         &state.config.secrets.crypt_file,
         cache,

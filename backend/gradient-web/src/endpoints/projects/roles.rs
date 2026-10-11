@@ -4,21 +4,17 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::access::{Caller, ProjectAccess, load_project};
 use crate::audit::{RequestInfo, record as audit_record};
-use crate::authorization::MaybeApiKey;
 use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
 use crate::lookup::require;
 use crate::permissions::{
-    Permission, PermissionEntry, available_permissions, is_builtin_role, mask_to_vec,
-    parse_permission_list,
+    PermissionEntry, available_permissions, is_builtin_role, mask_to_vec, parse_permission_list,
 };
 use crate::refusal::{Change, SharedRefusal};
 use crate::resource::Resource;
-use axum::extract::{Path, State};
-use axum::{Extension, Json};
-use gradient_core::ServerState;
+use crate::scope::{Member, ProjectScope, RequiresUnmanaged, can};
+use axum::Json;
 use gradient_db::WebDb;
 use gradient_types::events::EventOwner;
 use gradient_types::events::audit::Action;
@@ -29,7 +25,6 @@ use sea_orm::{
     ActiveModelTrait, ColumnTrait, Condition, EntityTrait, IntoActiveModel, QueryFilter,
 };
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
 
 #[derive(Serialize, Debug)]
 pub struct RoleResponse {
@@ -91,29 +86,15 @@ async fn load_project_role(db: &WebDb, project_id: ProjectId, role_id: RoleId) -
 }
 
 pub async fn get_project_roles(
-    state: State<Arc<ServerState>>,
-    Extension(user): Extension<MUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
-    Path(project): Path<String>,
+    ProjectScope { project, db, .. }: ProjectScope<Member>,
 ) -> WebResult<Json<BaseResponse<RoleListResponse>>> {
-    let project = load_project(
-        &state.db(),
-        Caller::User(&user),
-        api_key.as_ref(),
-        project,
-        ProjectAccess::Member {
-            reject_managed: false,
-        },
-    )
-    .await?;
-
     let roles = ERole::find()
         .filter(
             Condition::any()
                 .add(CRole::Project.is_null())
                 .add(CRole::Project.eq(project.id)),
         )
-        .all(&state.web_db)
+        .all(&db.web_db)
         .await?;
 
     Ok(ok_json(RoleListResponse {
@@ -123,26 +104,12 @@ pub async fn get_project_roles(
 }
 
 pub async fn post_project_role(
-    state: State<Arc<ServerState>>,
+    ProjectScope {
+        project, user, db, ..
+    }: ProjectScope<RequiresUnmanaged<can::ManageRoles>>,
     info: RequestInfo,
-    Extension(user): Extension<MUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
-    Path(project): Path<String>,
     Json(body): Json<CreateRoleRequest>,
 ) -> WebResult<Json<BaseResponse<RoleResponse>>> {
-    let db = state.db();
-    let project = load_project(
-        &db,
-        Caller::User(&user),
-        api_key.as_ref(),
-        project,
-        ProjectAccess::Require {
-            permission: Permission::ManageRoles,
-            reject_managed: true,
-        },
-    )
-    .await?;
-
     if check_index_name(&body.name).is_err() {
         return Err(WebError::invalid_name(Resource::RoleName));
     }
@@ -158,7 +125,7 @@ pub async fn post_project_role(
                 .add(CRole::Project.eq(project.id))
                 .add(CRole::Project.is_null()),
         )
-        .one(&state.web_db)
+        .one(&db.web_db)
         .await?;
     if clash.is_some() {
         return Err(WebError::already_exists(Resource::RoleName));
@@ -172,7 +139,7 @@ pub async fn post_project_role(
         ..Default::default()
     }
     .into_active_model()
-    .insert(&state.web_db)
+    .insert(&db.web_db)
     .await?;
 
     audit_record(
@@ -197,47 +164,33 @@ pub async fn post_project_role(
 }
 
 pub async fn get_project_role(
-    state: State<Arc<ServerState>>,
-    Extension(user): Extension<MUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
-    Path((project, role_id)): Path<(String, RoleId)>,
-) -> WebResult<Json<BaseResponse<RoleResponse>>> {
-    let project = load_project(
-        &state.db(),
-        Caller::User(&user),
-        api_key.as_ref(),
+    ProjectScope {
         project,
-        ProjectAccess::Member {
-            reject_managed: false,
-        },
-    )
-    .await?;
-    let role = load_project_role(&state.web_db, project.id, role_id).await?;
+        db,
+        params,
+        ..
+    }: ProjectScope<Member>,
+) -> WebResult<Json<BaseResponse<RoleResponse>>> {
+    let role_id: RoleId = params.param("role_id")?;
+
+    let role = load_project_role(&db.web_db, project.id, role_id).await?;
     Ok(ok_json(RoleResponse::from(role)))
 }
 
 pub async fn patch_project_role(
-    state: State<Arc<ServerState>>,
+    ProjectScope {
+        project,
+        user,
+        db,
+        params,
+        ..
+    }: ProjectScope<RequiresUnmanaged<can::ManageRoles>>,
     info: RequestInfo,
-    Extension(user): Extension<MUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
-    Path((project, role_id)): Path<(String, RoleId)>,
     Json(body): Json<PatchRoleRequest>,
 ) -> WebResult<Json<BaseResponse<RoleResponse>>> {
-    let db = state.db();
-    let project = load_project(
-        &db,
-        Caller::User(&user),
-        api_key.as_ref(),
-        project,
-        ProjectAccess::Require {
-            permission: Permission::ManageRoles,
-            reject_managed: true,
-        },
-    )
-    .await?;
+    let role_id: RoleId = params.param("role_id")?;
 
-    let role = load_project_role(&state.web_db, project.id, role_id).await?;
+    let role = load_project_role(&db.web_db, project.id, role_id).await?;
 
     if is_builtin_role(role.id) {
         return Err(SharedRefusal::BuiltinRole(Change::Modify).into());
@@ -263,7 +216,7 @@ pub async fn patch_project_role(
                     .add(CRole::Project.eq(project.id))
                     .add(CRole::Project.is_null()),
             )
-            .one(&state.web_db)
+            .one(&db.web_db)
             .await?;
         if clash.is_some() {
             return Err(WebError::already_exists(Resource::RoleName));
@@ -278,7 +231,7 @@ pub async fn patch_project_role(
         )?);
     }
 
-    let updated = active.update(&state.web_db).await?;
+    let updated = active.update(&db.web_db).await?;
 
     audit_record(
         &db,
@@ -304,26 +257,18 @@ pub async fn patch_project_role(
 }
 
 pub async fn delete_project_role(
-    state: State<Arc<ServerState>>,
-    info: RequestInfo,
-    Extension(user): Extension<MUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
-    Path((project, role_id)): Path<(String, RoleId)>,
-) -> WebResult<Json<BaseResponse<bool>>> {
-    let db = state.db();
-    let project = load_project(
-        &db,
-        Caller::User(&user),
-        api_key.as_ref(),
+    ProjectScope {
         project,
-        ProjectAccess::Require {
-            permission: Permission::ManageRoles,
-            reject_managed: true,
-        },
-    )
-    .await?;
+        user,
+        db,
+        params,
+        ..
+    }: ProjectScope<RequiresUnmanaged<can::ManageRoles>>,
+    info: RequestInfo,
+) -> WebResult<Json<BaseResponse<bool>>> {
+    let role_id: RoleId = params.param("role_id")?;
 
-    let role = load_project_role(&state.web_db, project.id, role_id).await?;
+    let role = load_project_role(&db.web_db, project.id, role_id).await?;
 
     if is_builtin_role(role.id) {
         return Err(SharedRefusal::BuiltinRole(Change::Delete).into());
@@ -336,18 +281,18 @@ pub async fn delete_project_role(
     let in_use = EProjectUser::find()
         .filter(CProjectUser::Role.eq(role_id))
         .filter(CProjectUser::Project.eq(project.id))
-        .one(&state.web_db)
+        .one(&db.web_db)
         .await?
         .is_some();
     if in_use {
         return Err(SharedRefusal::RoleAssignedToMembers.into());
     }
-    if gradient_db::teams::grants::project_role_granted_to_a_team(&state.web_db, role_id).await? {
+    if gradient_db::teams::grants::project_role_granted_to_a_team(&db.web_db, role_id).await? {
         return Err(SharedRefusal::RoleGrantedToTeam.into());
     }
 
     let role_name = role.name.clone();
-    role.into_active_model().delete(&state.web_db).await?;
+    role.into_active_model().delete(&db.web_db).await?;
 
     audit_record(
         &db,

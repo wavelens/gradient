@@ -5,9 +5,7 @@
  */
 
 use super::refusal::TeamRefusal;
-use crate::access::{TeamAccess, load_team};
 use crate::audit::{RequestInfo, record as audit_record};
-use crate::authorization::MaybeApiKey;
 use crate::endpoints::projects::workers::{
     PatchWorkerRequest, RegisterWorkerRequest, WorkerConnection, encrypt_for_dialing, live_workers,
     patch_edits_managed_fields, worker_connection,
@@ -16,7 +14,8 @@ use crate::error::WebResult;
 use crate::helpers::{OptionExt, ok_json};
 use crate::refusal::SharedRefusal;
 use crate::resource::Resource;
-use axum::extract::{Path, State};
+use crate::scope::{Admin, Member, TeamScope};
+use axum::extract::State;
 use axum::{Extension, Json};
 use chrono::NaiveDateTime;
 use gradient_core::ServerState;
@@ -94,26 +93,21 @@ async fn find_team_worker(db: &WebDb, team: TeamId, worker_id: &str) -> WebResul
 }
 
 pub async fn get_team_workers(
-    state: State<Arc<ServerState>>,
-    Extension(user): Extension<MUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
-    Extension(scheduler): Extension<Arc<Scheduler>>,
-    Path(team): Path<String>,
-) -> WebResult<Json<BaseResponse<Vec<TeamWorkerEntry>>>> {
-    let (team, role) = load_team(
-        &state.web_db,
-        &user,
-        api_key.as_ref(),
+    TeamScope {
         team,
-        TeamAccess::Member,
-    )
-    .await?;
+        role,
+        user,
+        db,
+        ..
+    }: TeamScope<Member>,
+    Extension(scheduler): Extension<Arc<Scheduler>>,
+) -> WebResult<Json<BaseResponse<Vec<TeamWorkerEntry>>>> {
     let failures = (user.superuser || role == Some(TeamRole::Admin))
         .then_some(&*scheduler.connection_failures);
     let live_workers = live_workers(scheduler.workers_info().await);
     let rows = ETeamWorker::find()
         .filter(CTeamWorker::Team.eq(team.id))
-        .all(&state.web_db)
+        .all(&db.web_db)
         .await?;
 
     let mut entries = Vec::with_capacity(rows.len());
@@ -138,25 +132,12 @@ pub async fn get_team_workers(
 }
 
 pub async fn post_team_worker(
+    TeamScope { team, user, .. }: TeamScope<Admin>,
     state: State<Arc<ServerState>>,
     info: RequestInfo,
-    Extension(user): Extension<MUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
     Extension(scheduler): Extension<Arc<Scheduler>>,
-    Path(team): Path<String>,
     Json(body): Json<RegisterWorkerRequest>,
 ) -> WebResult<Json<BaseResponse<RegisteredTeamWorker>>> {
-    let (team, _) = load_team(
-        &state.web_db,
-        &user,
-        api_key.as_ref(),
-        team,
-        TeamAccess::Admin {
-            reject_managed: false,
-        },
-    )
-    .await?;
-
     let worker_id = Uuid::parse_str(&body.worker_id)
         .map_err(|_| SharedRefusal::InvalidWorkerId)?
         .to_string();
@@ -221,25 +202,20 @@ pub async fn post_team_worker(
 }
 
 pub async fn patch_team_worker(
-    state: State<Arc<ServerState>>,
+    TeamScope {
+        team,
+        user,
+        db,
+        params,
+        ..
+    }: TeamScope<Admin>,
     info: RequestInfo,
-    Extension(user): Extension<MUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
     Extension(scheduler): Extension<Arc<Scheduler>>,
-    Path((team, worker_id)): Path<(String, String)>,
     Json(body): Json<PatchWorkerRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let (team, _) = load_team(
-        &state.web_db,
-        &user,
-        api_key.as_ref(),
-        team,
-        TeamAccess::Admin {
-            reject_managed: false,
-        },
-    )
-    .await?;
-    let worker = find_team_worker(&state.web_db, team.id, &worker_id).await?;
+    let worker_id: String = params.param("worker_id")?;
+
+    let worker = find_team_worker(&db.web_db, team.id, &worker_id).await?;
     if worker.managed && patch_edits_managed_fields(&body) {
         return Err(SharedRefusal::WorkerManagedByState.into());
     }
@@ -260,14 +236,14 @@ pub async fn patch_team_worker(
     if let Some(value) = body.enable_build {
         active.enable_build = Set(value);
     }
-    active.update(&state.web_db).await?;
+    active.update(&db.web_db).await?;
 
     let workers = [worker_id.clone()];
     if body.active == Some(false) {
         withdraw_team_workers(
             &scheduler,
             &workers,
-            &granted_projects(&state.web_db, team.id).await?,
+            &granted_projects(&db.web_db, team.id).await?,
         )
         .await;
     } else {
@@ -275,7 +251,7 @@ pub async fn patch_team_worker(
     }
 
     audit_record(
-        &state.db(),
+        &db,
         Some(user.id),
         Action::TeamWorkerUpdate,
         EventOwner::default(),
@@ -288,35 +264,30 @@ pub async fn patch_team_worker(
 }
 
 pub async fn delete_team_worker(
-    state: State<Arc<ServerState>>,
-    info: RequestInfo,
-    Extension(user): Extension<MUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
-    Extension(scheduler): Extension<Arc<Scheduler>>,
-    Path((team, worker_id)): Path<(String, String)>,
-) -> WebResult<Json<BaseResponse<String>>> {
-    let (team, _) = load_team(
-        &state.web_db,
-        &user,
-        api_key.as_ref(),
+    TeamScope {
         team,
-        TeamAccess::Admin {
-            reject_managed: false,
-        },
-    )
-    .await?;
-    let worker = find_team_worker(&state.web_db, team.id, &worker_id).await?;
+        user,
+        db,
+        params,
+        ..
+    }: TeamScope<Admin>,
+    info: RequestInfo,
+    Extension(scheduler): Extension<Arc<Scheduler>>,
+) -> WebResult<Json<BaseResponse<String>>> {
+    let worker_id: String = params.param("worker_id")?;
+
+    let worker = find_team_worker(&db.web_db, team.id, &worker_id).await?;
     if worker.managed {
         return Err(SharedRefusal::WorkerManagedByState.into());
     }
 
-    let projects = granted_projects(&state.web_db, team.id).await?;
-    worker.into_active_model().delete(&state.web_db).await?;
+    let projects = granted_projects(&db.web_db, team.id).await?;
+    worker.into_active_model().delete(&db.web_db).await?;
     withdraw_team_workers(&scheduler, std::slice::from_ref(&worker_id), &projects).await;
     scheduler.connection_failures.clear(&worker_id);
 
     audit_record(
-        &state.db(),
+        &db,
         Some(user.id),
         Action::TeamWorkerDelete,
         EventOwner::default(),

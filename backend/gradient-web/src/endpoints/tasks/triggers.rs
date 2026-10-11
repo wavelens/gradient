@@ -5,14 +5,12 @@
  */
 
 use super::refusal::TaskRefusal;
-use crate::access::{Caller, TaskAccess, load_task};
-use crate::authorization::MaybeApiKey;
 use crate::error::WebResult;
 use crate::helpers::{OptionExt, ok_json};
-use crate::permissions::Permission;
 use crate::resource::Resource;
+use crate::scope::{Member, Requires, TaskScope, can};
 use anyhow::Context;
-use axum::extract::{Path, State};
+use axum::extract::State;
 use axum::routing::{get, post};
 use axum::{Extension, Json, Router};
 use chrono::Utc;
@@ -139,27 +137,14 @@ pub struct DeletedResponse {
 }
 
 pub async fn list(
-    state: State<Arc<ServerState>>,
-    Extension(user): Extension<MUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
-    Path((project, task)): Path<(String, String)>,
+    TaskScope { task: proj, db, .. }: TaskScope<Member>,
 ) -> WebResult<Json<BaseResponse<Vec<TriggerOut>>>> {
-    let (_project, proj) = load_task(
-        &state.db(),
-        Caller::User(&user),
-        api_key.as_ref(),
-        project,
-        task,
-        TaskAccess::Member,
-    )
-    .await?;
-
     let rows = ETaskTrigger::find()
         .filter(CTaskTrigger::Task.eq(proj.id))
-        .all(&state.web_db)
+        .all(&db.web_db)
         .await?;
 
-    let integrations = load_integrations_for_triggers(&state.web_db, &rows).await?;
+    let integrations = load_integrations_for_triggers(&db.web_db, &rows).await?;
 
     Ok(ok_json(
         rows.into_iter()
@@ -169,25 +154,9 @@ pub async fn list(
 }
 
 pub async fn create(
-    state: State<Arc<ServerState>>,
-    Extension(user): Extension<MUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
-    Path((project, task)): Path<(String, String)>,
+    TaskScope { task: proj, db, .. }: TaskScope<Requires<can::ManageTriggers>>,
     Json(body): Json<CreateBody>,
 ) -> WebResult<Json<BaseResponse<TriggerOut>>> {
-    let (_project, proj) = load_task(
-        &state.db(),
-        Caller::User(&user),
-        api_key.as_ref(),
-        project,
-        task,
-        TaskAccess::Require {
-            permission: Permission::ManageTriggers,
-            reject_managed: false,
-        },
-    )
-    .await?;
-
     body.config
         .validate()
         .map_err(|e| TaskRefusal::InvalidTriggerConfig(e.to_string()))?;
@@ -207,66 +176,51 @@ pub async fn create(
         ..Default::default()
     }
     .into_active_model()
-    .insert(&state.web_db)
+    .insert(&db.web_db)
     .await?;
 
     let integrations =
-        load_integrations_for_triggers(&state.web_db, std::slice::from_ref(&row)).await?;
+        load_integrations_for_triggers(&db.web_db, std::slice::from_ref(&row)).await?;
     Ok(ok_json(TriggerOut::build(row, &integrations)))
 }
 
 pub async fn read(
-    state: State<Arc<ServerState>>,
-    Extension(user): Extension<MUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
-    Path((project, task, id)): Path<(String, String, TaskTriggerId)>,
+    TaskScope {
+        task: proj,
+        db,
+        params,
+        ..
+    }: TaskScope<Member>,
 ) -> WebResult<Json<BaseResponse<TriggerOut>>> {
-    let (_project, proj) = load_task(
-        &state.db(),
-        Caller::User(&user),
-        api_key.as_ref(),
-        project,
-        task,
-        TaskAccess::Member,
-    )
-    .await?;
+    let id: TaskTriggerId = params.param("id")?;
 
     let row = ETaskTrigger::find()
         .filter(CTaskTrigger::Id.eq(id))
         .filter(CTaskTrigger::Task.eq(proj.id))
-        .one(&state.web_db)
+        .one(&db.web_db)
         .await?
         .or_not_found(Resource::Trigger)?;
 
     let integrations =
-        load_integrations_for_triggers(&state.web_db, std::slice::from_ref(&row)).await?;
+        load_integrations_for_triggers(&db.web_db, std::slice::from_ref(&row)).await?;
     Ok(ok_json(TriggerOut::build(row, &integrations)))
 }
 
 pub async fn update(
-    state: State<Arc<ServerState>>,
-    Extension(user): Extension<MUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
-    Path((project, task, id)): Path<(String, String, TaskTriggerId)>,
+    TaskScope {
+        task: proj,
+        db,
+        params,
+        ..
+    }: TaskScope<Requires<can::ManageTriggers>>,
     Json(body): Json<UpdateBody>,
 ) -> WebResult<Json<BaseResponse<TriggerOut>>> {
-    let (_project, proj) = load_task(
-        &state.db(),
-        Caller::User(&user),
-        api_key.as_ref(),
-        project,
-        task,
-        TaskAccess::Require {
-            permission: Permission::ManageTriggers,
-            reject_managed: false,
-        },
-    )
-    .await?;
+    let id: TaskTriggerId = params.param("id")?;
 
     let row = ETaskTrigger::find()
         .filter(CTaskTrigger::Id.eq(id))
         .filter(CTaskTrigger::Task.eq(proj.id))
-        .one(&state.web_db)
+        .one(&db.web_db)
         .await?
         .or_not_found(Resource::Trigger)?;
 
@@ -286,65 +240,47 @@ pub async fn update(
     }
     active.updated_at = Set(Utc::now().naive_utc());
 
-    let updated = active.update(&state.web_db).await?;
+    let updated = active.update(&db.web_db).await?;
 
     let integrations =
-        load_integrations_for_triggers(&state.web_db, std::slice::from_ref(&updated)).await?;
+        load_integrations_for_triggers(&db.web_db, std::slice::from_ref(&updated)).await?;
     Ok(ok_json(TriggerOut::build(updated, &integrations)))
 }
 
 pub async fn delete_one(
-    state: State<Arc<ServerState>>,
-    Extension(user): Extension<MUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
-    Path((project, task, id)): Path<(String, String, TaskTriggerId)>,
+    TaskScope {
+        task: proj,
+        db,
+        params,
+        ..
+    }: TaskScope<Requires<can::ManageTriggers>>,
 ) -> WebResult<Json<BaseResponse<DeletedResponse>>> {
-    let (_project, proj) = load_task(
-        &state.db(),
-        Caller::User(&user),
-        api_key.as_ref(),
-        project,
-        task,
-        TaskAccess::Require {
-            permission: Permission::ManageTriggers,
-            reject_managed: false,
-        },
-    )
-    .await?;
+    let id: TaskTriggerId = params.param("id")?;
 
     let row = ETaskTrigger::find()
         .filter(CTaskTrigger::Id.eq(id))
         .filter(CTaskTrigger::Task.eq(proj.id))
-        .one(&state.web_db)
+        .one(&db.web_db)
         .await?
         .or_not_found(Resource::Trigger)?;
 
     let active: ATaskTrigger = row.into();
-    active.delete(&state.web_db).await?;
+    active.delete(&db.web_db).await?;
 
     Ok(ok_json(DeletedResponse { deleted: true }))
 }
 
 pub async fn fire_now(
+    TaskScope {
+        task: proj,
+        db,
+        params,
+        ..
+    }: TaskScope<Requires<can::TriggerEvaluation>>,
     state: State<Arc<ServerState>>,
-    Extension(user): Extension<MUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
     Extension(scheduler): Extension<Arc<Scheduler>>,
-    Path((project, task, id)): Path<(String, String, TaskTriggerId)>,
 ) -> WebResult<Json<BaseResponse<serde_json::Value>>> {
-    let db = state.db();
-    let (_project, proj) = load_task(
-        &db,
-        Caller::User(&user),
-        api_key.as_ref(),
-        project,
-        task,
-        TaskAccess::Require {
-            permission: Permission::TriggerEvaluation,
-            reject_managed: false,
-        },
-    )
-    .await?;
+    let id: TaskTriggerId = params.param("id")?;
 
     let row = ETaskTrigger::find()
         .filter(CTaskTrigger::Id.eq(id))

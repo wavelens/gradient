@@ -23,6 +23,7 @@ pub mod permissions;
 pub mod refusal;
 pub mod resource;
 pub mod scim;
+pub mod scope;
 
 use axum::body::Body;
 use axum::extract::{DefaultBodyLimit, MatchedPath};

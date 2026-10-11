@@ -4,13 +4,11 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::access::{Caller, ProjectAccess, load_project};
-use crate::authorization::MaybeApiKey;
 use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
-use crate::permissions::Permission;
-use axum::extract::{Path, State};
-use axum::{Extension, Json};
+use crate::scope::{Member, ProjectScope, RequiresUnmanaged, can};
+use axum::Json;
+use axum::extract::State;
 use gradient_core::ServerState;
 use gradient_sources::{format_public_key, generate_ssh_key};
 use gradient_types::*;
@@ -19,22 +17,9 @@ use sea_orm::ActiveValue::Set;
 use std::sync::Arc;
 
 pub async fn get_project_ssh(
+    ProjectScope { project, .. }: ProjectScope<Member>,
     state: State<Arc<ServerState>>,
-    Extension(user): Extension<MUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
-    Path(project): Path<String>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let project = load_project(
-        &state.db(),
-        Caller::User(&user),
-        api_key.as_ref(),
-        project,
-        ProjectAccess::Member {
-            reject_managed: false,
-        },
-    )
-    .await?;
-
     Ok(ok_json(format_public_key(
         project,
         &state.config.server.serve_url,
@@ -42,23 +27,9 @@ pub async fn get_project_ssh(
 }
 
 pub async fn post_project_ssh(
+    ProjectScope { project, .. }: ProjectScope<RequiresUnmanaged<can::ManageSshKey>>,
     state: State<Arc<ServerState>>,
-    Extension(user): Extension<MUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
-    Path(project): Path<String>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let project = load_project(
-        &state.db(),
-        Caller::User(&user),
-        api_key.as_ref(),
-        project,
-        ProjectAccess::Require {
-            permission: Permission::ManageSshKey,
-            reject_managed: true,
-        },
-    )
-    .await?;
-
     let (private_key, public_key) =
         generate_ssh_key(&state.config.secrets.crypt_file).map_err(|e| {
             tracing::error!(error = %e, "Failed to generate SSH key");

@@ -4,17 +4,15 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::access::{Caller, ProjectAccess, load_project};
 use crate::audit::{RequestInfo, record as audit_record};
-use crate::authorization::{MaybeApiKey, MaybeUser};
 use crate::error::{WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json, role_names};
 use crate::invite_policy::invitation_expiry;
-use crate::permissions::Permission;
 use crate::refusal::SharedRefusal;
 use crate::resource::Resource;
-use axum::extract::{Path, State};
-use axum::{Extension, Json};
+use crate::scope::{ProjectScope, Readable, RequiresUnmanaged, can};
+use axum::Json;
+use axum::extract::State;
 use gradient_core::ServerState;
 use gradient_db::WebDb;
 use gradient_notify::{InvitationMail, InviteScope, generate_token};
@@ -85,22 +83,8 @@ async fn find_project_invitation(
 }
 
 pub async fn get_project_users(
-    state: State<Arc<ServerState>>,
-    Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
-    Path(project): Path<String>,
+    ProjectScope { project, db, .. }: ProjectScope<Readable>,
 ) -> WebResult<Json<BaseResponse<Vec<StringListItem>>>> {
-    let project = load_project(
-        &state.0.db(),
-        Caller::from(&maybe_user),
-        api_key.as_ref(),
-        project,
-        ProjectAccess::Readable {
-            label: Resource::Project,
-        },
-    )
-    .await?;
-
     let project_users = EProjectUser::find()
         .join(
             JoinType::InnerJoin,
@@ -108,11 +92,11 @@ pub async fn get_project_users(
         )
         .select_also(gradient_entity::user::Entity)
         .filter(CProjectUser::Project.eq(project.id))
-        .all(&state.web_db)
+        .all(&db.web_db)
         .await?;
 
     let role_ids: Vec<RoleId> = project_users.iter().map(|(ou, _)| ou.role).collect();
-    let role_map = role_names(&state.web_db, role_ids).await?;
+    let role_map = role_names(&db.web_db, role_ids).await?;
 
     let items: Vec<StringListItem> = project_users
         .iter()
@@ -132,25 +116,13 @@ pub async fn get_project_users(
 }
 
 pub async fn post_project_users(
+    ProjectScope {
+        project, user, db, ..
+    }: ProjectScope<RequiresUnmanaged<can::ManageMembers>>,
     state: State<Arc<ServerState>>,
     info: RequestInfo,
-    Extension(user): Extension<MUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
-    Path(project): Path<String>,
     Json(body): Json<AddUserRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let db = state.db();
-    let project = load_project(
-        &db,
-        Caller::User(&user),
-        api_key.as_ref(),
-        project,
-        ProjectAccess::Require {
-            permission: Permission::ManageMembers,
-            reject_managed: true,
-        },
-    )
-    .await?;
     let target_user = find_user_by_username(&state.web_db, &body.user).await?;
 
     if find_project_membership(&state.web_db, project.id, target_user.id)
@@ -270,28 +242,15 @@ pub async fn post_project_users(
 }
 
 pub async fn patch_project_users(
-    state: State<Arc<ServerState>>,
+    ProjectScope {
+        project, user, db, ..
+    }: ProjectScope<RequiresUnmanaged<can::ManageMembers>>,
     info: RequestInfo,
-    Extension(user): Extension<MUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
-    Path(project): Path<String>,
     Json(body): Json<AddUserRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let db = state.db();
-    let project = load_project(
-        &db,
-        Caller::User(&user),
-        api_key.as_ref(),
-        project,
-        ProjectAccess::Require {
-            permission: Permission::ManageMembers,
-            reject_managed: true,
-        },
-    )
-    .await?;
-    let target_user = find_user_by_username(&state.web_db, &body.user).await?;
+    let target_user = find_user_by_username(&db.web_db, &body.user).await?;
 
-    let membership = find_project_membership(&state.web_db, project.id, target_user.id)
+    let membership = find_project_membership(&db.web_db, project.id, target_user.id)
         .await?
         .ok_or(SharedRefusal::NotAMember(Resource::Project))?;
 
@@ -304,13 +263,13 @@ pub async fn patch_project_users(
                     .add(CRole::Project.is_null()),
             ),
         )
-        .one(&state.web_db)
+        .one(&db.web_db)
         .await?
         .or_not_found(Resource::Role)?;
 
     let mut active: AProjectUser = membership.into();
     active.role = Set(role.id);
-    active.update(&state.web_db).await?;
+    active.update(&db.web_db).await?;
 
     audit_record(
         &db,
@@ -334,33 +293,20 @@ pub async fn patch_project_users(
 }
 
 pub async fn delete_project_users(
-    state: State<Arc<ServerState>>,
+    ProjectScope {
+        project, user, db, ..
+    }: ProjectScope<RequiresUnmanaged<can::ManageMembers>>,
     info: RequestInfo,
-    Extension(user): Extension<MUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
-    Path(project): Path<String>,
     Json(body): Json<RemoveUserRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let db = state.db();
-    let project = load_project(
-        &db,
-        Caller::User(&user),
-        api_key.as_ref(),
-        project,
-        ProjectAccess::Require {
-            permission: Permission::ManageMembers,
-            reject_managed: true,
-        },
-    )
-    .await?;
-    let target_user = find_user_by_username(&state.web_db, &body.user).await?;
+    let target_user = find_user_by_username(&db.web_db, &body.user).await?;
 
-    let membership = find_project_membership(&state.web_db, project.id, target_user.id)
+    let membership = find_project_membership(&db.web_db, project.id, target_user.id)
         .await?
         .ok_or(SharedRefusal::NotAMember(Resource::Project))?;
 
     let active: AProjectUser = membership.into();
-    active.delete(&state.web_db).await?;
+    active.delete(&db.web_db).await?;
 
     audit_record(
         &db,

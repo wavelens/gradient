@@ -4,16 +4,14 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::access::{Caller, ProjectAccess, load_project};
 use crate::audit::{RequestInfo, changed_fields, record as audit_record};
-use crate::authorization::{MaybeApiKey, MaybeUser};
 use crate::error::{WebError, WebResult, require_create_permission};
 use crate::helpers::{ok_json, paginate};
-use crate::permissions::Permission;
 use crate::refusal::SharedRefusal;
 use crate::resource::Resource;
+use crate::scope::{ProjectScope, Readable, RequiresUnmanaged, can};
 use anyhow::Context;
-use axum::extract::{Path, Query, State};
+use axum::extract::{Query, State};
 use axum::{Extension, Json};
 use gradient_db::WebDb;
 use gradient_types::events::EventOwner;
@@ -299,22 +297,13 @@ pub async fn get_public_projects(
 }
 
 pub async fn get_project(
-    state: State<Arc<ServerState>>,
-    Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
-    Path(project): Path<String>,
-) -> WebResult<Json<BaseResponse<ProjectResponse>>> {
-    let project = load_project(
-        &state.0.db(),
-        Caller::from(&maybe_user),
-        api_key.as_ref(),
+    ProjectScope {
         project,
-        ProjectAccess::Readable {
-            label: Resource::Project,
-        },
-    )
-    .await?;
-
+        user: maybe_user,
+        ..
+    }: ProjectScope<Readable>,
+    state: State<Arc<ServerState>>,
+) -> WebResult<Json<BaseResponse<ProjectResponse>>> {
     let role = match maybe_user {
         Some(ref user) => {
             gradient_db::access::project_role_names(&state.web_db, user.id, vec![project.id])
@@ -373,25 +362,12 @@ async fn github_app_install_url(
 }
 
 pub async fn patch_project(
-    state: State<Arc<ServerState>>,
+    ProjectScope {
+        project, user, db, ..
+    }: ProjectScope<RequiresUnmanaged<can::ManageProjectSettings>>,
     info: RequestInfo,
-    Extension(user): Extension<MUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
-    Path(project): Path<String>,
     Json(body): Json<PatchProjectRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let db = state.db();
-    let project = load_project(
-        &db,
-        Caller::User(&user),
-        api_key.as_ref(),
-        project,
-        ProjectAccess::Require {
-            permission: Permission::ManageProjectSettings,
-            reject_managed: true,
-        },
-    )
-    .await?;
     let fields = changed_fields([
         ("name", body.name.is_some()),
         ("display_name", body.display_name.is_some()),
@@ -407,7 +383,7 @@ pub async fn patch_project(
 
         let existing_project = EProject::find()
             .filter(CProject::Name.eq(name.clone()))
-            .one(&state.web_db)
+            .one(&db.web_db)
             .await?;
 
         if existing_project.is_some() {
@@ -435,7 +411,7 @@ pub async fn patch_project(
     crate::patch_field!(aproject, body, hide_build_requests);
 
     let project = aproject
-        .update(&state.web_db)
+        .update(&db.web_db)
         .await
         .map_err(|e| WebError::from_db_err(e, Resource::ProjectName))?;
 
@@ -461,28 +437,15 @@ pub async fn patch_project(
 }
 
 pub async fn delete_project(
-    state: State<Arc<ServerState>>,
+    ProjectScope {
+        project, user, db, ..
+    }: ProjectScope<RequiresUnmanaged<can::DeleteProject>>,
     info: RequestInfo,
-    Extension(user): Extension<MUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
-    Path(project): Path<String>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let db = state.db();
-    let project = load_project(
-        &db,
-        Caller::User(&user),
-        api_key.as_ref(),
-        project,
-        ProjectAccess::Require {
-            permission: Permission::DeleteProject,
-            reject_managed: true,
-        },
-    )
-    .await?;
     let project_id = project.id;
     let project_name = project.name.clone();
     let aproject: AProject = project.into();
-    aproject.delete(&state.web_db).await?;
+    aproject.delete(&db.web_db).await?;
 
     audit_record(
         &db,

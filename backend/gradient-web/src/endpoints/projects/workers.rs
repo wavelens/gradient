@@ -4,11 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::access::{Caller, ProjectAccess, has_permission, load_project};
-use crate::authorization::MaybeApiKey;
+use crate::access::has_permission;
 use crate::resource::Resource;
 use anyhow::Context;
-use axum::extract::{Path, State};
+use axum::extract::State;
 use axum::{Extension, Json};
 use chrono::NaiveDateTime;
 use gradient_core::ServerState;
@@ -20,9 +19,9 @@ use gradient_entity::worker_registration::{
 use gradient_pool::WorkerInfo;
 use gradient_scheduler::Scheduler;
 use gradient_scheduler::connection_failures::{ConnectionFailure, ConnectionFailures};
+use gradient_types::BaseResponse;
 use gradient_types::ids::*;
 use gradient_types::permissions::Permission;
-use gradient_types::{BaseResponse, MUser};
 use gradient_wire::types::GradientCapabilities;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
@@ -37,6 +36,7 @@ use super::refusal::ProjectRefusal;
 use crate::error::{WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json};
 use crate::refusal::SharedRefusal;
+use crate::scope::{Member, ProjectScope};
 
 fn default_true() -> bool {
     true
@@ -171,24 +171,11 @@ pub(crate) async fn reauth_project_workers(db: &WebDb, scheduler: &Scheduler, pr
 }
 
 pub async fn post_project_worker(
+    ProjectScope { project, user, .. }: ProjectScope<Member>,
     state: State<Arc<ServerState>>,
-    Path(project): Path<String>,
-    Extension(user): Extension<MUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
     Extension(scheduler): Extension<Arc<Scheduler>>,
     Json(body): Json<RegisterWorkerRequest>,
 ) -> WebResult<Json<BaseResponse<RegisterWorkerResponse>>> {
-    let project = load_project(
-        &state.db(),
-        Caller::User(&user),
-        api_key.as_ref(),
-        project,
-        ProjectAccess::Member {
-            reject_managed: false,
-        },
-    )
-    .await?;
-
     let worker_uuid =
         Uuid::parse_str(&body.worker_id).map_err(|_| SharedRefusal::InvalidWorkerId)?;
     let worker_id_str = worker_uuid.to_string();
@@ -275,25 +262,18 @@ pub(crate) fn live_workers(
 }
 
 pub async fn get_project_workers(
-    state: State<Arc<ServerState>>,
-    Path(project): Path<String>,
-    Extension(user): Extension<MUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
+    ProjectScope {
+        project,
+        user,
+        api_key,
+        db,
+        ..
+    }: ProjectScope<Member>,
     Extension(scheduler): Extension<Arc<Scheduler>>,
 ) -> WebResult<Json<BaseResponse<Vec<ProjectWorkerEntry>>>> {
-    let project = load_project(
-        &state.db(),
-        Caller::User(&user),
-        api_key.as_ref(),
-        project,
-        ProjectAccess::Member {
-            reject_managed: false,
-        },
-    )
-    .await?;
     let manages_workers = user.superuser
         || has_permission(
-            &state.web_db,
+            &db.web_db,
             user.id,
             project.id,
             Permission::ManageWorkers,
@@ -305,7 +285,7 @@ pub async fn get_project_workers(
 
     let registrations = EWorkerRegistration::find()
         .filter(worker_registration::Column::PeerId.eq(project.id))
-        .all(&state.web_db)
+        .all(&db.web_db)
         .await?;
 
     let live_workers = live_workers(scheduler.workers_info().await);
@@ -341,7 +321,7 @@ pub async fn get_project_workers(
         .collect();
 
     let team_workers =
-        gradient_db::teams::workers::team_workers_for_project(&state.web_db, project.id).await?;
+        gradient_db::teams::workers::team_workers_for_project(&db.web_db, project.id).await?;
     entries.extend(team_workers.into_iter().map(|(team, worker)| {
         let live = live_for(&worker.worker_id);
         let connection = worker_connection(&live_workers, failures, &worker.worker_id);
@@ -395,21 +375,12 @@ pub struct WorkerMetricsResponse {
 }
 
 pub async fn get_project_worker_metrics(
+    ProjectScope {
+        project, params, ..
+    }: ProjectScope<Member>,
     state: State<Arc<ServerState>>,
-    Path((project, worker_id)): Path<(String, String)>,
-    Extension(user): Extension<MUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
 ) -> WebResult<Json<BaseResponse<WorkerMetricsResponse>>> {
-    let project = load_project(
-        &state.db(),
-        Caller::User(&user),
-        api_key.as_ref(),
-        project,
-        ProjectAccess::Member {
-            reject_managed: false,
-        },
-    )
-    .await?;
+    let worker_id: String = params.param("worker_id")?;
 
     let registration_name = EWorkerRegistration::find()
         .filter(worker_registration::Column::PeerId.eq(project.id))
@@ -500,22 +471,12 @@ fn worker_test_result(connected: bool, authorized_for_project: bool) -> (bool, S
 }
 
 pub async fn post_project_worker_test(
-    state: State<Arc<ServerState>>,
-    Path((project, worker_id)): Path<(String, String)>,
-    Extension(user): Extension<MUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
+    ProjectScope {
+        project, params, ..
+    }: ProjectScope<Member>,
     Extension(scheduler): Extension<Arc<Scheduler>>,
 ) -> WebResult<Json<BaseResponse<WorkerTestResponse>>> {
-    let project = load_project(
-        &state.db(),
-        Caller::User(&user),
-        api_key.as_ref(),
-        project,
-        ProjectAccess::Member {
-            reject_managed: false,
-        },
-    )
-    .await?;
+    let worker_id: String = params.param("worker_id")?;
 
     let connected = scheduler.is_worker_connected(&worker_id).await;
     let authorized_for_project = scheduler
@@ -532,32 +493,25 @@ pub async fn post_project_worker_test(
 }
 
 pub async fn patch_project_worker(
-    state: State<Arc<ServerState>>,
-    Path((project, worker_id)): Path<(String, String)>,
-    Extension(user): Extension<MUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
+    ProjectScope {
+        project,
+        db,
+        params,
+        ..
+    }: ProjectScope<Member>,
     Extension(scheduler): Extension<Arc<Scheduler>>,
     Json(body): Json<PatchWorkerRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let project = load_project(
-        &state.db(),
-        Caller::User(&user),
-        api_key.as_ref(),
-        project,
-        ProjectAccess::Member {
-            reject_managed: false,
-        },
-    )
-    .await?;
+    let worker_id: String = params.param("worker_id")?;
 
-    if gradient_db::teams::workers::is_team_worker(&state.web_db, &worker_id).await? {
+    if gradient_db::teams::workers::is_team_worker(&db.web_db, &worker_id).await? {
         return Err(ProjectRefusal::TeamWorkerManagedOnTeamPage.into());
     }
 
     let reg = EWorkerRegistration::find()
         .filter(worker_registration::Column::PeerId.eq(project.id))
         .filter(worker_registration::Column::WorkerId.eq(&worker_id))
-        .one(&state.web_db)
+        .one(&db.web_db)
         .await?
         .or_not_found(Resource::WorkerRegistration)?;
 
@@ -584,7 +538,7 @@ pub async fn patch_project_worker(
     if let Some(v) = body.enable_build {
         active_model.enable_build = Set(v);
     }
-    active_model.update(&state.web_db).await?;
+    active_model.update(&db.web_db).await?;
 
     if let Some(false) = body.active {
         let project_set = std::collections::HashSet::from([project.id]);
@@ -598,7 +552,7 @@ pub async fn patch_project_worker(
     }
 
     if (matches!(body.active, Some(true)) || matches!(body.enable_eval, Some(true)))
-        && let Err(e) = gradient_ci::unpark_no_workers_for_project(&state.web_db, project.id).await
+        && let Err(e) = gradient_ci::unpark_no_workers_for_project(&db.web_db, project.id).await
     {
         tracing::warn!(
             error = %e,
@@ -611,31 +565,24 @@ pub async fn patch_project_worker(
 }
 
 pub async fn delete_project_worker(
-    state: State<Arc<ServerState>>,
-    Path((project, worker_id)): Path<(String, String)>,
-    Extension(user): Extension<MUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
+    ProjectScope {
+        project,
+        db,
+        params,
+        ..
+    }: ProjectScope<Member>,
     Extension(scheduler): Extension<Arc<Scheduler>>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let project = load_project(
-        &state.db(),
-        Caller::User(&user),
-        api_key.as_ref(),
-        project,
-        ProjectAccess::Member {
-            reject_managed: false,
-        },
-    )
-    .await?;
+    let worker_id: String = params.param("worker_id")?;
 
     let result = EWorkerRegistration::delete_many()
         .filter(worker_registration::Column::PeerId.eq(project.id))
         .filter(worker_registration::Column::WorkerId.eq(&worker_id))
-        .exec(&state.web_db)
+        .exec(&db.web_db)
         .await?;
 
     if result.rows_affected == 0 {
-        if gradient_db::teams::workers::is_team_worker(&state.web_db, &worker_id).await? {
+        if gradient_db::teams::workers::is_team_worker(&db.web_db, &worker_id).await? {
             return Err(ProjectRefusal::TeamWorkerManagedOnTeamPage.into());
         }
 
