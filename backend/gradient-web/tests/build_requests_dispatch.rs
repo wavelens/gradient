@@ -11,12 +11,12 @@
 
 use axum::http::StatusCode;
 use chrono::{Duration, Utc};
-use gradient_db::permissions::PermissionMask;
 use gradient_entity::ids::*;
 use gradient_entity::role;
 use gradient_test_support::fixtures::{project_id, user, user_id};
 use gradient_test_support::web::{live_session, make_test_server, make_token};
 use gradient_types::consts::BASE_ROLE_WRITE_ID;
+use gradient_types::permissions::PermissionMask;
 use gradient_types::{ConcurrencyPolicy, SessionId};
 use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
 use serde_json::{Value, json};
@@ -26,7 +26,7 @@ fn write_role_row() -> role::Model {
     role::Model {
         id: BASE_ROLE_WRITE_ID,
         name: "write".into(),
-        permission: gradient_db::permissions::write_mask() as PermissionMask,
+        permission: gradient_types::permissions::write_mask() as PermissionMask,
         ..Default::default()
     }
 }

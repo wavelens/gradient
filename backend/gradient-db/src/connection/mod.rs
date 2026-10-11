@@ -6,14 +6,14 @@
 
 mod upgrade_floor;
 
-use crate::permissions::{
-    admin_mask, cache_admin_mask, cache_view_mask, cache_write_mask, view_mask, write_mask,
-};
 use anyhow::{Context, Result};
 use gradient_migration::Migrator;
 use gradient_types::consts::{
     BASE_CACHE_ROLE_ADMIN_ID, BASE_CACHE_ROLE_VIEW_ID, BASE_CACHE_ROLE_WRITE_ID,
     BASE_ROLE_ADMIN_ID, BASE_ROLE_VIEW_ID, BASE_ROLE_WRITE_ID,
+};
+use gradient_types::permissions::{
+    admin_mask, cache_admin_mask, cache_view_mask, cache_write_mask, view_mask, write_mask,
 };
 use gradient_types::*;
 use sea_orm::{

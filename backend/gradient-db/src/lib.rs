@@ -19,7 +19,6 @@ pub mod graph;
 pub mod lookup;
 pub mod maintenance;
 pub mod metrics;
-pub mod permissions;
 pub mod pool;
 pub mod projects;
 pub mod scheduling;

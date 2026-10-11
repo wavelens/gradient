@@ -36,7 +36,7 @@ impl<'a> StateApplicator<'a> {
 
             let mut perms = Vec::with_capacity(state_api_key.permissions.len());
             for wire in &state_api_key.permissions {
-                let p = gradient_db::permissions::Permission::from_wire_name(wire).ok_or_else(
+                let p = gradient_types::permissions::Permission::from_wire_name(wire).ok_or_else(
                     || {
                         format!(
                             "API key '{}' references unknown permission '{}'",
@@ -53,7 +53,7 @@ impl<'a> StateApplicator<'a> {
                 )
                 .into());
             }
-            let mask = gradient_db::permissions::mask_from(&perms);
+            let mask = gradient_types::permissions::mask_from(&perms);
 
             let pinned_project = match &state_api_key.project {
                 None => None,

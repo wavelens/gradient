@@ -5,7 +5,7 @@
  */
 
 use super::helpers::{EntityLookup, ErrorCollector};
-use gradient_db::permissions::CachePermission;
+use gradient_types::permissions::CachePermission;
 use std::collections::HashSet;
 
 pub(super) fn validate(lookup: &EntityLookup, errors: &mut ErrorCollector) {

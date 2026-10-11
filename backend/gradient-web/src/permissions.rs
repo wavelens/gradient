@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-pub use gradient_db::permissions::*;
+pub use gradient_types::permissions::*;
 
 use crate::error::WebResult;
 use crate::refusal::{Refusal, RefusalStatus};

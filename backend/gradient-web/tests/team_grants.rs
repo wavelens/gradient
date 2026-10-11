@@ -10,7 +10,6 @@
 )]
 
 use axum::http::StatusCode;
-use gradient_db::permissions::{Permission, mask_from};
 use gradient_entity::ids::*;
 use gradient_entity::team_user::TeamRole;
 use gradient_entity::{
@@ -20,6 +19,7 @@ use gradient_test_support::fixtures::{project, project_id, test_date, user, user
 use gradient_test_support::web::{live_session, make_test_server, make_token};
 use gradient_types::SessionId;
 use gradient_types::consts::{BASE_ROLE_ADMIN_ID, BASE_ROLE_WRITE_ID};
+use gradient_types::permissions::{Permission, mask_from};
 use sea_orm::{DatabaseBackend, DatabaseConnection, MockDatabase, MockExecResult};
 use serde_json::{Value, json};
 use uuid::Uuid;
@@ -87,7 +87,7 @@ fn admin_role() -> role::Model {
     role::Model {
         id: BASE_ROLE_ADMIN_ID,
         name: "Admin".into(),
-        permission: gradient_db::permissions::admin_mask(),
+        permission: gradient_types::permissions::admin_mask(),
         ..Default::default()
     }
 }
@@ -96,7 +96,7 @@ fn write_role() -> role::Model {
     role::Model {
         id: BASE_ROLE_WRITE_ID,
         name: "Write".into(),
-        permission: gradient_db::permissions::write_mask(),
+        permission: gradient_types::permissions::write_mask(),
         ..Default::default()
     }
 }

@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::permissions::PermissionMask;
 use gradient_types::consts::{BASE_ROLE_ADMIN_ID, BASE_ROLE_VIEW_ID, BASE_ROLE_WRITE_ID};
+use gradient_types::permissions::PermissionMask;
 use gradient_types::*;
 use sea_orm::{ColumnTrait, ConnectionTrait, DbErr, EntityTrait, QueryFilter};
 use std::collections::HashMap;
@@ -128,7 +128,7 @@ async fn project_roles<C: ConnectionTrait>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::permissions::{
+    use gradient_types::permissions::{
         CachePermission, Permission, cache_mask_from, cache_mask_grants, mask_from, mask_grants,
     };
     use sea_orm::{DatabaseBackend, MockDatabase};

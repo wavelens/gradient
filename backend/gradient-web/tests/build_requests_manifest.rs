@@ -10,7 +10,6 @@
 )]
 
 use axum::http::StatusCode;
-use gradient_db::permissions::PermissionMask;
 use gradient_entity::ids::*;
 use gradient_entity::role;
 use gradient_test_support::fixtures::{project, user, user_id};
@@ -19,6 +18,7 @@ use gradient_test_support::web::{
 };
 use gradient_types::SessionId;
 use gradient_types::consts::BASE_ROLE_WRITE_ID;
+use gradient_types::permissions::PermissionMask;
 use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
 use serde_json::{Value, json};
 use uuid::Uuid;
@@ -29,7 +29,7 @@ fn write_role_row() -> role::Model {
     role::Model {
         id: BASE_ROLE_WRITE_ID,
         name: "write".into(),
-        permission: gradient_db::permissions::write_mask() as PermissionMask,
+        permission: gradient_types::permissions::write_mask() as PermissionMask,
         ..Default::default()
     }
 }

@@ -18,10 +18,10 @@ use crate::resource::Resource;
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
 use gradient_core::ServerState;
-use gradient_db::permissions::CachePermission;
 use gradient_entity::project_cache::CacheSubscriptionMode;
 use gradient_notify::{SubscriptionEvent, SubscriptionMail};
 use gradient_scheduler::Scheduler;
+use gradient_types::permissions::CachePermission;
 use gradient_types::*;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{

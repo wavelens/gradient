@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use gradient_types::consts::{BASE_ROLE_ADMIN_ID, BASE_ROLE_VIEW_ID, BASE_ROLE_WRITE_ID};
-use gradient_types::ids::RoleId;
+use crate::consts::{BASE_ROLE_ADMIN_ID, BASE_ROLE_VIEW_ID, BASE_ROLE_WRITE_ID};
+use crate::ids::RoleId;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
 pub enum Permission {
@@ -158,9 +158,7 @@ pub fn is_builtin_role(role_id: RoleId) -> bool {
     role_id == BASE_ROLE_ADMIN_ID || role_id == BASE_ROLE_WRITE_ID || role_id == BASE_ROLE_VIEW_ID
 }
 
-use gradient_types::consts::{
-    BASE_CACHE_ROLE_ADMIN_ID, BASE_CACHE_ROLE_VIEW_ID, BASE_CACHE_ROLE_WRITE_ID,
-};
+use crate::consts::{BASE_CACHE_ROLE_ADMIN_ID, BASE_CACHE_ROLE_VIEW_ID, BASE_CACHE_ROLE_WRITE_ID};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
 pub enum CachePermission {
