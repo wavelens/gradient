@@ -11,6 +11,7 @@ use crate::authorization::MaybeApiKey;
 use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
 use crate::permissions::CachePermission;
+use anyhow::Context;
 use axum::Extension;
 use axum::body::Bytes;
 use axum::extract::{Multipart, Path, Query, State};
@@ -119,7 +120,7 @@ pub async fn nars_upload(
     let verify_reader = upload_store
         .open_read(&stage_key)
         .await
-        .map_err(|e| WebError::internal(format!("failed to read staged NAR: {e}")))?;
+        .context("failed to read staged NAR")?;
     if let Err(e) = gradient_storage::verify_nar_reader(
         verify_reader,
         &narinfo.file_hash,
@@ -144,7 +145,7 @@ pub async fn nars_upload(
     let nar_reader = upload_store
         .open_read(&stage_key)
         .await
-        .map_err(|e| WebError::internal(format!("failed to read staged NAR: {e}")))?;
+        .context("failed to read staged NAR")?;
     let outcome = import_nar_reader(
         &state.web_db,
         &state.nar_storage,
@@ -245,7 +246,7 @@ async fn stage_nar_field(
         store
             .append(key, token, offset, &chunk)
             .await
-            .map_err(|e| WebError::internal(format!("failed to stage NAR: {e}")))?;
+            .context("failed to stage NAR")?;
         offset += chunk.len() as u64;
     }
     Ok(offset)
@@ -346,7 +347,7 @@ pub async fn nar_finalize(
     let verify_reader = store
         .open_read(&key)
         .await
-        .map_err(|e| WebError::internal(format!("failed to read staged NAR: {e}")))?;
+        .context("failed to read staged NAR")?;
     if let Err(e) = gradient_storage::verify_nar_reader(
         verify_reader,
         &narinfo.file_hash,
@@ -362,7 +363,7 @@ pub async fn nar_finalize(
     let nar_reader = store
         .open_read(&key)
         .await
-        .map_err(|e| WebError::internal(format!("failed to read staged NAR: {e}")))?;
+        .context("failed to read staged NAR")?;
     let outcome = import_nar_reader(
         &state.web_db,
         &state.nar_storage,

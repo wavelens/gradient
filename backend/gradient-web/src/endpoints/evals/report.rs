@@ -7,6 +7,7 @@
 //! Building a report is reading every failed build's log. It is requiring a logged-in caller even
 //! where anonymous browsing is allowed.
 
+use anyhow::Context;
 use std::sync::Arc;
 
 use axum::extract::{Path, Query, State};
@@ -23,7 +24,7 @@ use serde::Deserialize;
 use super::EvalAccessContext;
 use super::refusal::EvaluationRefusal;
 use crate::authorization::MaybeApiKey;
-use crate::error::{WebError, WebResult};
+use crate::error::WebResult;
 
 #[derive(Deserialize)]
 pub struct ReportQuery {
@@ -77,8 +78,7 @@ pub async fn get_evaluation_report(
         }
     }
 
-    let file = tempfile::NamedTempFile::new()
-        .map_err(|e| WebError::internal(format!("Failed to create report file: {e}")))?;
+    let file = tempfile::NamedTempFile::new().context("Failed to create report file")?;
 
     let report_ctx = ReportContext {
         logs: state.log_storage.as_ref(),
@@ -94,10 +94,9 @@ pub async fn get_evaluation_report(
         file.path(),
     )
     .await
-    .map_err(|e| WebError::internal(format!("Failed to generate report: {e:#}")))?;
+    .context("Failed to generate report")?;
 
-    let bytes = std::fs::read(file.path())
-        .map_err(|e| WebError::internal(format!("Failed to read report file: {e}")))?;
+    let bytes = std::fs::read(file.path()).context("Failed to read report file")?;
 
     let filename = report_filename(evaluation_id);
     Response::builder()
@@ -109,7 +108,8 @@ pub async fn get_evaluation_report(
         )
         .header(header::X_CONTENT_TYPE_OPTIONS, "nosniff")
         .body(Body::from(bytes))
-        .map_err(|e| WebError::internal(format!("Failed to build response: {e}")))
+        .context("Failed to build response")
+        .map_err(Into::into)
 }
 
 fn report_filename(evaluation: EvaluationId) -> String {

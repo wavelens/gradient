@@ -6,9 +6,10 @@
 
 use crate::access::{CacheAccess, Caller, load_cache};
 use crate::authorization::{MaybeApiKey, MaybeUser};
-use crate::error::{WebError, WebResult};
+use crate::error::WebResult;
 use crate::helpers::ok_json;
 use crate::permissions::CachePermission;
+use anyhow::Context;
 use axum::Extension;
 use axum::Json;
 use axum::extract::{Path, State};
@@ -40,10 +41,7 @@ pub async fn get_cache_key(
         cache,
         state.config.server.serve_url.clone(),
     )
-    .map_err(|e| {
-        tracing::error!(error = %e, "Failed to generate cache key");
-        WebError::internal("Failed to generate cache key")
-    })?;
+    .context("Failed to generate cache key")?;
 
     Ok(ok_json(cache_key))
 }
@@ -68,10 +66,7 @@ pub async fn get_cache_public_key(
         cache,
         state.config.server.serve_url.clone(),
     )
-    .map_err(|e| {
-        tracing::error!(error = %e, "Failed to derive public key");
-        WebError::internal("Failed to derive public key")
-    })?;
+    .context("Failed to derive public key")?;
 
     Ok(ok_json(public_key))
 }

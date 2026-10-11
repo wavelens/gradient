@@ -12,6 +12,7 @@ use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
 use crate::permissions::Permission;
 use crate::resource::Resource;
+use anyhow::Context;
 use axum::Extension;
 use axum::Json;
 use axum::extract::{Path, State};
@@ -93,8 +94,8 @@ pub async fn post_dispatch(
         return Err(BuildRequestRefusal::UploadSessionExpired.into());
     }
 
-    let missing: Vec<String> = serde_json::from_value(session.missing.clone())
-        .map_err(|e| WebError::internal(format!("Corrupt session.missing JSON: {}", e)))?;
+    let missing: Vec<String> =
+        serde_json::from_value(session.missing.clone()).context("Corrupt session.missing JSON")?;
     if !missing.is_empty() {
         return Err(BuildRequestRefusal::BlobsStillMissing {
             count: missing.len(),
@@ -103,10 +104,9 @@ pub async fn post_dispatch(
     }
 
     let manifest: Vec<ManifestEntry> = serde_json::from_value(session.manifest.clone())
-        .map_err(|e| WebError::internal(format!("Corrupt session.manifest JSON: {}", e)))?;
+        .context("Corrupt session.manifest JSON")?;
 
-    let staging = TempDir::new()
-        .map_err(|e| WebError::internal(format!("Failed to create staging dir: {}", e)))?;
+    let staging = TempDir::new().context("Failed to create staging dir")?;
 
     materialise_staging(
         &state,
@@ -118,7 +118,7 @@ pub async fn post_dispatch(
 
     let nar = materialise_source_nar(staging.path())
         .await
-        .map_err(|e| WebError::internal(format!("Failed to materialise source NAR: {}", e)))?;
+        .context("Failed to materialise source NAR")?;
 
     let input_overrides = body
         .input_overrides
@@ -163,7 +163,7 @@ pub(super) async fn finalize_build_request(
         .nar_storage
         .put(&nar.store_hash, nar.compressed_bytes.clone())
         .await
-        .map_err(|e| WebError::internal(format!("Failed to store source NAR: {}", e)))?;
+        .context("Failed to store source NAR")?;
 
     state
         .graph
@@ -178,7 +178,7 @@ pub(super) async fn finalize_build_request(
             ..Default::default()
         })
         .await
-        .map_err(|e| WebError::internal(format!("failed to record source NAR: {e}")))?;
+        .context("failed to record source NAR")?;
 
     let tx = state.web_db.inner().begin().await?;
     let response = queue_build_request(
@@ -322,21 +322,19 @@ async fn materialise_staging(
             .nar_storage
             .get_blob(*project_uuid, &hash_array)
             .await
-            .map_err(|e| WebError::internal(format!("Failed to fetch blob: {}", e)))?
-            .ok_or_else(|| {
-                WebError::internal(format!("Blob {} disappeared from storage", entry.hash))
-            })?;
+            .context("Failed to fetch blob")?
+            .with_context(|| format!("Blob {} disappeared from storage", entry.hash))?;
 
         let target = root.join(&entry.path);
         if let Some(parent) = target.parent() {
             fs::create_dir_all(parent)
                 .await
-                .map_err(|e| WebError::internal(format!("Failed to create dir: {}", e)))?;
+                .context("Failed to create dir")?;
         }
 
         fs::write(&target, data)
             .await
-            .map_err(|e| WebError::internal(format!("Failed to write {}: {}", entry.path, e)))?;
+            .with_context(|| format!("Failed to write {}", entry.path))?;
     }
     Ok(())
 }

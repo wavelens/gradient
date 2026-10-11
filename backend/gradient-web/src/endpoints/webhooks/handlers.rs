@@ -10,6 +10,7 @@ use crate::audit::{RequestInfo, record as audit_record};
 use crate::error::{WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json};
 use crate::resource::Resource;
+use anyhow::Context;
 use axum::Json;
 use axum::extract::{Query, State};
 use gradient_ci::actions::encrypt_action_secret;
@@ -142,10 +143,10 @@ fn new_secret(state: &ServerState) -> WebResult<(String, String)> {
     let mut raw = [0u8; 32];
     rand::rng().fill(&mut raw);
     let plaintext = format!("whs_{}", URL_SAFE_NO_PAD.encode(raw));
-    let key = load_secret_bytes(&state.config.secrets.crypt_file)
-        .map_err(|e| WebError::internal(e.to_string()))?;
-    let encrypted = encrypt_action_secret(&plaintext, key.expose())
-        .map_err(|e| WebError::internal(e.to_string()))?;
+    let key =
+        load_secret_bytes(&state.config.secrets.crypt_file).context("load the encryption key")?;
+    let encrypted =
+        encrypt_action_secret(&plaintext, key.expose()).context("encrypt the action secret")?;
     Ok((plaintext, encrypted))
 }
 
@@ -357,7 +358,7 @@ pub async fn test_webhook(
         PendingDeliveryId::now_v7(),
     )
     .await
-    .map_err(|e| WebError::internal(format!("test fire failed: {e:#}")))?;
+    .context("test fire failed")?;
     Ok(ok_json(to_delivery_item(delivery)))
 }
 

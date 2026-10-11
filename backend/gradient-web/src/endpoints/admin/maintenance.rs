@@ -4,8 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::error::{WebError, WebResult};
+use crate::error::WebResult;
 use crate::helpers::ok_json;
+use anyhow::Context;
 use axum::http::StatusCode;
 use axum::{Extension, Json, extract::State};
 use gradient_core::ServerState;
@@ -33,11 +34,11 @@ pub async fn start_deep_gc(
         Err(InsertPendingError::AlreadyActive(id)) => {
             admin_tasks::restart(db, id, Some(user.id))
                 .await
-                .map_err(|e| WebError::internal(format!("admin_task restart failed: {e}")))?;
+                .context("admin_task restart failed")?;
             id
         }
         Err(InsertPendingError::Db(e)) => {
-            return Err(WebError::internal(format!("admin_task insert failed: {e}")));
+            return Err(anyhow::anyhow!("admin_task insert failed: {e}").into());
         }
     };
 

@@ -7,6 +7,7 @@
 use super::refusal::AdminRefusal;
 use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
+use anyhow::Context;
 use axum::extract::{Query, State};
 use axum::response::Redirect;
 use axum::{Extension, Json};
@@ -14,7 +15,6 @@ use gradient_core::ServerState;
 use gradient_types::{BaseResponse, MUser};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use tracing::warn;
 
 #[derive(Deserialize, Default, Debug)]
 pub struct ManifestRequest {
@@ -89,10 +89,7 @@ pub async fn callback(
 
     let creds = gradient_ci::github_app_manifest::exchange_code(&state.http, &host, &q.code)
         .await
-        .map_err(|e| {
-            warn!(error = %e, "github manifest exchange failed");
-            WebError::internal(format!("github exchange failed: {e}"))
-        })?;
+        .context("github exchange failed")?;
 
     gradient_ci::manifest_state::store_credentials(&state.pending_credentials, user_id, creds);
 

@@ -18,6 +18,7 @@ mod response;
 pub use response::{QueuedEvaluation, SkippedTask, WebhookResponse, WebhookTriggerOutcome};
 
 use crate::ip_allowlist::is_allowed as ip_allowed;
+use anyhow::Context;
 use axum::Extension;
 use axum::Json;
 use axum::body::Bytes;
@@ -67,7 +68,7 @@ pub async fn github_app_webhook(
         Ok(s) => s,
         Err(e) => {
             warn!(error = %e, "Failed to load GitHub webhook secret");
-            return Err(WebError::internal("webhook secret unavailable"));
+            return Err(anyhow::anyhow!("webhook secret unavailable").into());
         }
     };
 
@@ -366,10 +367,10 @@ pub async fn git_host_webhook(
         .filter(CProject::Name.eq(project_name.as_str()))
         .one(&state.web_db)
         .await
-        .map_err(|e| {
+        .inspect_err(|e| {
             warn!(error = %e, project = %project_name, "DB error looking up project for Git host webhook");
-            WebError::internal("internal error")
-        })?
+        })
+        .context("internal error")?
         .ok_or(GitHostHookRefusal::IntegrationNotFound)?;
 
     let integration = EIntegration::find()
@@ -378,10 +379,10 @@ pub async fn git_host_webhook(
         .filter(CIntegration::Name.eq(integration_name.as_str()))
         .one(&state.web_db)
         .await
-        .map_err(|e| {
+        .inspect_err(|e| {
             warn!(error = %e, "DB error looking up integration for Git host webhook");
-            WebError::internal("internal error")
-        })?
+        })
+        .context("internal error")?
         .ok_or_else(|| {
             warn!(project = %project_name, git_host = %git_host, integration = %integration_name, "Integration not found");
             WebError::from(GitHostHookRefusal::IntegrationNotFound)
@@ -396,10 +397,10 @@ pub async fn git_host_webhook(
         &state.config.secrets.crypt_file,
         encrypted_secret,
     )
-    .map_err(|e| {
+    .inspect_err(|e| {
         warn!(error = %e, integration_id = %integration.id, "Failed to decrypt integration secret");
-        WebError::internal("internal error")
-    })?;
+    })
+    .context("internal error")?;
 
     let signature = first_header(&headers, provider.signature_headers());
     if !provider.verify_signature(plaintext_secret.expose(), signature, &body) {

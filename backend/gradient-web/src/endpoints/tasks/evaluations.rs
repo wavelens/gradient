@@ -916,9 +916,7 @@ async fn serve_hydra_artifact(
             Err(ExtractError::NotFound) => continue,
             Err(e) => {
                 tracing::error!(output_path = %output_root, %rel, error = %e, "Failed to extract path from NAR");
-                return Err(WebError::internal(
-                    "Failed to extract path from NAR".to_string(),
-                ));
+                return Err(anyhow::anyhow!("Failed to extract path from NAR").into());
             }
         }
     }

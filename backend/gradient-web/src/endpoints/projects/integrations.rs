@@ -16,6 +16,7 @@ use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
 use crate::permissions::Permission;
 use crate::resource::Resource;
+use anyhow::Context;
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
 
@@ -275,7 +276,7 @@ pub async fn put_integration(
         };
         let pem = tokio::fs::read_to_string(&app.private_key_file)
             .await
-            .map_err(|e| WebError::internal(format!("reading github app key: {e}")))?;
+            .context("reading github app key")?;
         let account = gradient_git_host::github_app::get_installation(
             &state.http,
             app.app_id,
@@ -331,7 +332,7 @@ pub async fn put_integration(
     let encrypted_secret = match body.secret.as_deref() {
         Some(s) if !s.is_empty() => Some(
             encrypt_secret_with_file(&state.config.secrets.crypt_file, s)
-                .map_err(|e| WebError::internal(format!("Failed to encrypt secret: {}", e)))?,
+                .context("Failed to encrypt secret")?,
         ),
         _ => None,
     };
@@ -339,7 +340,7 @@ pub async fn put_integration(
     let encrypted_token = match body.access_token.as_deref() {
         Some(t) if !t.is_empty() => Some(
             encrypt_secret_with_file(&state.config.secrets.crypt_file, t)
-                .map_err(|e| WebError::internal(format!("Failed to encrypt token: {}", e)))?,
+                .context("Failed to encrypt token")?,
         ),
         _ => None,
     };
@@ -481,7 +482,7 @@ pub async fn patch_integration(
         } else {
             Some(
                 encrypt_secret_with_file(&state.config.secrets.crypt_file, &secret)
-                    .map_err(|e| WebError::internal(format!("Failed to encrypt secret: {}", e)))?,
+                    .context("Failed to encrypt secret")?,
             )
         });
     }
@@ -492,7 +493,7 @@ pub async fn patch_integration(
         } else {
             Some(
                 encrypt_secret_with_file(&state.config.secrets.crypt_file, &token)
-                    .map_err(|e| WebError::internal(format!("Failed to encrypt token: {}", e)))?,
+                    .context("Failed to encrypt token")?,
             )
         });
     }

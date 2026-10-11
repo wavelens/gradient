@@ -8,6 +8,7 @@ use super::helpers::{CacheContext, JsonFlag, cache_client_ip, get_nar_by_hash};
 use crate::client_ip::OptionalPeer;
 use crate::error::{WebError, WebResult};
 use crate::resource::Resource;
+use anyhow::Context;
 use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
@@ -25,7 +26,8 @@ fn text_response(content_type: &'static str, body: String) -> WebResult<Response
     Response::builder()
         .header(header::CONTENT_TYPE, HeaderValue::from_static(content_type))
         .body(body)
-        .map_err(|e| WebError::internal(format!("Failed to build response: {}", e)))
+        .context("Failed to build response")
+        .map_err(Into::into)
 }
 
 fn with_narinfo_headers(mut response: Response, cache_status: &'static str) -> Response {
@@ -158,7 +160,7 @@ pub async fn path(
         let response = if flag.is_set() {
             match gradient_types::parse_narinfo_body(&body) {
                 Ok(parsed) => axum::Json(parsed).into_response(),
-                Err(_) => return Err(WebError::internal("Upstream narinfo malformed")),
+                Err(_) => return Err(anyhow::anyhow!("Upstream narinfo malformed").into()),
             }
         } else {
             text_response("text/x-nix-narinfo", body)?.into_response()

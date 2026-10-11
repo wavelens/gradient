@@ -8,9 +8,10 @@ use super::dispatch::{DispatchResponse, InputOverrideBody, finalize_build_reques
 use super::refusal::BuildRequestRefusal;
 use crate::access::{Caller, ProjectAccess, load_project};
 use crate::authorization::MaybeApiKey;
-use crate::error::{WebError, WebResult};
+use crate::error::WebResult;
 use crate::helpers::ok_json;
 use crate::permissions::Permission;
+use anyhow::Context;
 use axum::Extension;
 use axum::Json;
 use axum::body::Bytes;
@@ -82,7 +83,7 @@ pub async fn post_source(
 
     let nar = source_nar_from_bytes(nar_bytes)
         .await
-        .map_err(|e| WebError::internal(format!("Failed to read source NAR: {}", e)))?;
+        .context("Failed to read source NAR")?;
 
     let response =
         finalize_build_request(&state, project.id, &user, &nar, target, system, Vec::new()).await?;
@@ -184,7 +185,7 @@ pub async fn source_finalize(
 
     let nar = source_nar_from_bytes(nar_bytes)
         .await
-        .map_err(|e| WebError::internal(format!("Failed to read source NAR: {}", e)))?;
+        .context("Failed to read source NAR")?;
 
     let input_overrides = body
         .input_overrides

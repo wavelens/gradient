@@ -8,10 +8,11 @@ use super::refusal::CacheRefusal;
 use crate::access::{CacheAccess, Caller, load_cache};
 use crate::audit::{RequestInfo, record as audit_record};
 use crate::authorization::{MaybeApiKey, MaybeUser};
-use crate::error::{WebError, WebResult};
+use crate::error::WebResult;
 use crate::helpers::{OptionExt, ok_json};
 use crate::permissions::CachePermission;
 use crate::resource::Resource;
+use anyhow::Context;
 use axum::Extension;
 use axum::Json;
 use axum::extract::{Path, Query, State};
@@ -296,7 +297,7 @@ pub async fn stats(
         Row::find_by_statement(NAR_STATS.bind([sea_orm::Value::Uuid(Some(cache.id.into_inner()))]))
             .one(&state.web_db)
             .await?
-            .ok_or_else(|| WebError::internal("stats query returned no row"))?;
+            .context("stats query returned no row")?;
 
     Ok(ok_json(NarStats {
         total_nars: row.total_nars,

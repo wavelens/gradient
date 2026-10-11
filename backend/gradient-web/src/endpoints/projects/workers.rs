@@ -7,6 +7,7 @@
 use crate::access::{Caller, ProjectAccess, has_permission, load_project};
 use crate::authorization::MaybeApiKey;
 use crate::resource::Resource;
+use anyhow::Context;
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
 use chrono::NaiveDateTime;
@@ -127,7 +128,8 @@ pub struct WorkerLiveInfo {
 
 pub(crate) fn encrypt_token(crypt_file: &str, token: &str) -> WebResult<String> {
     gradient_sources::encrypt_secret(crypt_file, token)
-        .map_err(|e| WebError::internal(format!("encrypting the worker token failed: {e}")))
+        .context("encrypting the worker token failed")
+        .map_err(Into::into)
 }
 
 pub(crate) fn encrypt_for_dialing(
