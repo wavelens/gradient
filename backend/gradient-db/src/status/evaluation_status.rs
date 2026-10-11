@@ -85,24 +85,27 @@ pub async fn update_evaluation_status(
     Ok(updated_eval)
 }
 
+pub fn evaluation_change(transition: Transition<EvaluationStatus>) -> UpdateMany<EEvaluation> {
+    EEvaluation::update_many()
+        .col_expr(
+            CEvaluation::Status,
+            sea_orm::sea_query::Expr::value(transition.to),
+        )
+        .filter(CEvaluation::Status.is_in(transition.from.iter().copied()))
+}
+
 pub async fn change_evaluation_status<C: ConnectionTrait>(
     db: &C,
     evaluation: EvaluationId,
     transition: Transition<EvaluationStatus>,
     columns: impl FnOnce(UpdateMany<EEvaluation>) -> UpdateMany<EEvaluation>,
 ) -> Result<Option<MEvaluation>, DbErr> {
-    let change = EEvaluation::update_many()
-        .col_expr(
-            CEvaluation::Status,
-            sea_orm::sea_query::Expr::value(transition.to),
-        )
-        .col_expr(
-            CEvaluation::UpdatedAt,
-            sea_orm::sea_query::Expr::value(gradient_types::now()),
-        );
+    let change = evaluation_change(transition).col_expr(
+        CEvaluation::UpdatedAt,
+        sea_orm::sea_query::Expr::value(gradient_types::now()),
+    );
     let changed = columns(change)
         .filter(CEvaluation::Id.eq(evaluation))
-        .filter(CEvaluation::Status.is_in(transition.from.iter().copied()))
         .exec_with_returning(db)
         .await?;
     Ok(changed.into_iter().next())

@@ -13,12 +13,6 @@ use sea_orm::{ColumnTrait, ConnectionTrait, DbErr, EntityTrait, QueryFilter};
 
 use gradient_types::*;
 
-const EVAL_JOB_STATUSES: [EvaluationStatus; 3] = [
-    EvaluationStatus::Fetching,
-    EvaluationStatus::EvaluatingFlake,
-    EvaluationStatus::EvaluatingDerivation,
-];
-
 #[derive(Debug, Default)]
 pub struct RecoveryReport {
     pub assignments_closed: u64,
@@ -103,7 +97,9 @@ pub async fn recover_interrupted_work<C: ConnectionTrait>(
 
 async fn requeue_interrupted_evals<C: ConnectionTrait>(conn: &C) -> Result<u64, DbErr> {
     let ids: Vec<EvaluationId> = EEvaluation::find()
-        .filter(CEvaluation::Status.is_in(EVAL_JOB_STATUSES))
+        .filter(
+            CEvaluation::Status.is_in(EvaluationStatus::REQUEUE_INTERRUPTED.from.iter().copied()),
+        )
         .all(conn)
         .await?
         .into_iter()
@@ -114,8 +110,7 @@ async fn requeue_interrupted_evals<C: ConnectionTrait>(conn: &C) -> Result<u64, 
     }
 
     let now = now();
-    let res = EEvaluation::update_many()
-        .col_expr(CEvaluation::Status, Expr::value(EvaluationStatus::Queued))
+    let res = crate::status::evaluation_change(EvaluationStatus::REQUEUE_INTERRUPTED)
         .col_expr(
             CEvaluation::WaitingReason,
             Expr::value(None::<serde_json::Value>),
