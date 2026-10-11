@@ -9,7 +9,8 @@ use gradient_db::{
     DbContext,
     graph::{can_start::unpromote_ungated, promotion::cascade_dependency_failed},
     scheduling::build_attempt::{
-        abort_running_attempts, fail_latest_attempt, succeed_latest_attempt, worker_loss_streaks,
+        abort_running_attempts, fail_latest_attempt, latest_attempt, open_failed_attempt,
+        succeed_latest_attempt, worker_loss_streaks,
     },
     status::{
         emit_transition_effects, update_derivation_build_status, update_evaluation_status,
@@ -29,7 +30,7 @@ use sea_orm::{
 };
 use tracing::{error, info, warn};
 
-use crate::messages::{OrphanCause, SubstituteLog, Transition, TransitionReport};
+use crate::messages::{OrphanCause, RamShortage, SubstituteLog, Transition, TransitionReport};
 use crate::policy::{self, FailureOutcome, OrphanedBuild};
 
 pub(crate) async fn apply(ctx: &DbContext, transition: Transition) -> Result<TransitionReport> {
@@ -197,6 +198,10 @@ pub(crate) async fn apply(ctx: &DbContext, transition: Transition) -> Result<Tra
                     Err(refusal) => refused(refusal),
                 },
             )
+        }
+        Transition::NotEnoughResources { shortages } => {
+            not_enough_resources(ctx, &shortages).await?;
+            Ok(TransitionReport::default())
         }
         Transition::PrioritizeBuild { shared_build } => {
             let Some(row) = EDerivationBuild::find_by_id(shared_build)
@@ -585,6 +590,8 @@ async fn build_failed(
         return Ok(());
     };
 
+    let out_of_memory = policy::out_of_memory(kind, metrics.as_ref());
+    let kind = policy::retried_as(kind, out_of_memory);
     if let Some(metrics) = policy::history_sample(metrics, policy::BuildEnd::Failed) {
         record_metrics(ctx, &shared_build, shared_build.derivation, &metrics).await;
     }
@@ -650,12 +657,12 @@ async fn build_failed(
         &ctx.worker_db,
         derivation_build,
         policy::attempt_outcome(kind),
-        policy::attempt_reason_for(kind, outcome),
+        policy::attempt_reason_for(kind, outcome, out_of_memory),
         Some(policy::truncate_failure_message(error)),
     )
     .await
     {
-        warn!(%derivation_build, error = %e, "failed to record attempt failure reason");
+        warn!(%derivation_build, error = %e, "failed to store the attempt failure reason");
     }
 
     match outcome {
@@ -822,6 +829,97 @@ async fn fail_build_lost_with_every_worker(
     update_derivation_build_status(ctx, shared_build, BuildStatus::FailedPermanent).await?;
     cascade_dependency_failed(&ctx.worker_db, derivation).await?;
     check_referencing_evals_done(ctx, derivation).await
+}
+
+async fn not_enough_resources(ctx: &DbContext, shortages: &[RamShortage]) -> Result<()> {
+    for shortage in shortages {
+        if let Some(shared_build) = queued_without_worker(ctx, shortage.shared_build).await? {
+            fail_build_no_worker_fits(ctx, shared_build, shortage).await?;
+        }
+    }
+
+    Ok(())
+}
+
+async fn queued_without_worker(
+    ctx: &DbContext,
+    derivation_build: DerivationBuildId,
+) -> Result<Option<MDerivationBuild>> {
+    let Some(shared_build) = EDerivationBuild::find_by_id(derivation_build)
+        .one(&ctx.worker_db)
+        .await?
+    else {
+        return Ok(None);
+    };
+    if shared_build.status != BuildStatus::Queued {
+        return Ok(None);
+    }
+
+    let dispatched = latest_attempt(&ctx.worker_db, derivation_build)
+        .await?
+        .is_some_and(|attempt| attempt.outcome == AttemptOutcome::Running);
+
+    Ok((!dispatched).then_some(shared_build))
+}
+
+async fn fail_build_no_worker_fits(
+    ctx: &DbContext,
+    shared_build: MDerivationBuild,
+    shortage: &RamShortage,
+) -> Result<()> {
+    let derivation_build = shared_build.id;
+    let derivation = shared_build.derivation;
+    let error =
+        policy::not_enough_resources_message(shortage.needed_mb, shortage.largest_available_mb);
+    warn!(
+        %derivation_build,
+        needed_mb = shortage.needed_mb,
+        largest_available_mb = shortage.largest_available_mb,
+        "build fits on no connected worker; failing instead of leaving it queued"
+    );
+
+    open_shortage_attempt(ctx, shortage, &error).await;
+    update_derivation_build_status(ctx, shared_build, BuildStatus::FailedPermanent).await?;
+    cascade_dependency_failed(&ctx.worker_db, derivation).await?;
+    check_referencing_evals_done(ctx, derivation).await
+}
+
+async fn open_shortage_attempt(ctx: &DbContext, shortage: &RamShortage, error: &str) {
+    let derivation_build = shortage.shared_build;
+    let Some(build_job) =
+        find_or_create_build_job(ctx, shortage.evaluation, derivation_build).await
+    else {
+        return;
+    };
+
+    let superseded =
+        gradient_db::scheduling::build_attempt::latest_attempt_id(&ctx.worker_db, derivation_build)
+            .await;
+    let attempt = match open_failed_attempt(
+        &ctx.worker_db,
+        build_job,
+        derivation_build,
+        AttemptFailureReason::NotEnoughResources,
+        error.to_owned(),
+    )
+    .await
+    {
+        Ok(attempt) => attempt,
+        Err(e) => {
+            warn!(%derivation_build, error = %e, "failed to open the attempt of a build no worker fits");
+            return;
+        }
+    };
+
+    finalize_superseded_log(ctx, superseded).await;
+    if let Err(e) = ctx
+        .storage
+        .log_storage
+        .append(attempt.id, &policy::failure_log_entry(error))
+        .await
+    {
+        warn!(%derivation_build, error = %e, "failed to append the memory shortage to the build log");
+    }
 }
 
 async fn substitute_misses(
@@ -1245,6 +1343,108 @@ mod tests {
                 i32::from(AttemptOutcome::Aborted)
             )),
             "{values}"
+        );
+    }
+
+    fn shortage(shared_build: &MDerivationBuild, evaluation: EvaluationId) -> RamShortage {
+        RamShortage {
+            shared_build: shared_build.id,
+            evaluation,
+            needed_mb: 124_540,
+            largest_available_mb: 102_754,
+        }
+    }
+
+    #[tokio::test]
+    async fn a_build_no_worker_fits_gets_a_failed_attempt_without_a_dispatched_job() {
+        let queued = MDerivationBuild {
+            id: DerivationBuildId::now_v7(),
+            derivation: DerivationId::now_v7(),
+            status: BuildStatus::Queued,
+            ..Default::default()
+        };
+        let build_job = MBuildJob {
+            id: BuildJobId::now_v7(),
+            evaluation: EvaluationId::now_v7(),
+            derivation: queued.derivation,
+            derivation_build: queued.id,
+            ..Default::default()
+        };
+        let attempt = MBuildAttempt {
+            id: BuildAttemptId::now_v7(),
+            derivation_build: queued.id,
+            ..Default::default()
+        };
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([vec![queued.clone()]])
+            .append_query_results([Vec::<MBuildAttempt>::new()])
+            .append_query_results([vec![queued.clone()]])
+            .append_query_results([vec![build_job.clone()]])
+            .append_query_results([Vec::<MBuildAttempt>::new()])
+            .append_query_results([vec![attempt]])
+            .into_connection();
+        let log_db = db.clone();
+        let (ctx, _) = ctx(db).await;
+
+        let _ = apply(
+            &ctx,
+            Transition::NotEnoughResources {
+                shortages: vec![shortage(&queued, build_job.evaluation)],
+            },
+        )
+        .await;
+
+        let log = log_db.into_transaction_log();
+        let inserts: Vec<_> = log
+            .iter()
+            .flat_map(|t| t.statements())
+            .filter(|s| s.sql.starts_with("INSERT INTO \"build_attempt\""))
+            .collect();
+        assert_eq!(inserts.len(), 1, "{log:?}");
+        let values = format!("{:?}", inserts[0].values);
+        assert!(
+            values.contains(&format!(
+                "Int(Some({}))",
+                i32::from(AttemptFailureReason::NotEnoughResources)
+            )),
+            "{values}"
+        );
+        assert!(values.contains("124540 MB"), "{values}");
+        assert!(
+            values.contains(&format!("Int(Some({}))", i32::from(AttemptOutcome::Failed))),
+            "the attempt is closed when it is opened: {values}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_build_a_worker_took_in_the_meantime_is_not_failed_for_a_shortage() {
+        let building = MDerivationBuild {
+            id: DerivationBuildId::now_v7(),
+            derivation: DerivationId::now_v7(),
+            status: BuildStatus::Building,
+            ..Default::default()
+        };
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([vec![building.clone()]])
+            .into_connection();
+        let log_db = db.clone();
+        let (ctx, _) = ctx(db).await;
+
+        apply(
+            &ctx,
+            Transition::NotEnoughResources {
+                shortages: vec![shortage(&building, EvaluationId::now_v7())],
+            },
+        )
+        .await
+        .unwrap();
+
+        let log = log_db.into_transaction_log();
+        assert!(
+            log.iter()
+                .flat_map(|t| t.statements())
+                .all(|s| s.sql.starts_with("SELECT")),
+            "{log:?}"
         );
     }
 

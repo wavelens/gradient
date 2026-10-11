@@ -19,8 +19,9 @@ use gradient_wire::types::{
 };
 
 use crate::cluster::{ClusterBook, PendingCluster};
+use gradient_graph::RamShortage;
 use gradient_pool::WorkerCaps;
-use gradient_pool::score::{JobContext, ScoredJob, ScoringPolicy, WorkerContext};
+use gradient_pool::score::{JobContext, RamFit, RamNeed, ScoredJob, ScoringPolicy, WorkerContext};
 
 #[derive(Debug, Clone)]
 pub struct PendingEvalJob {
@@ -344,6 +345,35 @@ fn reserves_ram_while_held(job: &PendingJob, now: chrono::NaiveDateTime) -> bool
         || held_secs >= gradient_pool::score::weights::HELD_BUILD_RESERVES_RAM_AFTER_SECS
 }
 
+fn ram_shortage(job: &PendingJob, workers: &[BuildWorker]) -> Option<RamShortage> {
+    let PendingJob::Build(build) = job else {
+        return None;
+    };
+    let need @ RamNeed::Predicted(_) = job.ram_need(false) else {
+        return None;
+    };
+
+    let needed_mb = need.needed_to_start_mb(0);
+    let mut largest_available_mb = None;
+    for worker in workers
+        .iter()
+        .filter(|w| visible_to(job, w.authorized.as_ref(), Some(&w.caps)))
+    {
+        let metrics = worker.caps.metrics?;
+        if metrics.ram_fit(needed_mb) != RamFit::DoesNotFit {
+            return None;
+        }
+        largest_available_mb = largest_available_mb.max(metrics.ram_available_mb());
+    }
+
+    Some(RamShortage {
+        shared_build: build.derivation_build,
+        evaluation: build.evaluation_id,
+        needed_mb,
+        largest_available_mb: largest_available_mb?,
+    })
+}
+
 fn worker_context_of(caps: Option<&WorkerCaps>) -> WorkerContext<'_> {
     match caps {
         Some(c) => WorkerContext {
@@ -550,6 +580,12 @@ pub struct Disconnected {
     pub requeued: Vec<PendingJob>,
     pub cluster_members: Vec<LostMember>,
     pub observed_peak_ram_mb: HashMap<String, u64>,
+}
+
+#[derive(Debug, Clone)]
+pub struct BuildWorker {
+    pub authorized: Option<HashSet<ProjectId>>,
+    pub caps: WorkerCaps,
 }
 
 #[derive(Debug, Default)]
@@ -1373,6 +1409,13 @@ impl JobTracker {
         }
     }
 
+    pub fn builds_no_worker_fits(&self, workers: &[BuildWorker]) -> Vec<RamShortage> {
+        self.pending
+            .values()
+            .filter_map(|job| ram_shortage(job, workers))
+            .collect()
+    }
+
     pub fn pending_shared_builds(&self) -> Vec<DerivationBuildId> {
         let members = self.clusters.jobs().map(|(_, job)| job);
         self.pending
@@ -1658,6 +1701,91 @@ mod tests {
 
         tracker.lift_imports(&checked, &HashSet::new());
         assert!(!lifted(&tracker, "dep"), "the lift ends with the import");
+    }
+
+    fn build_predicted(peak_ram_mb: u64) -> PendingJob {
+        let mut job = build_job(ProjectId::now_v7(), vec![]);
+        if let PendingJob::Build(build) = &mut job {
+            build.history.predicted_peak_ram_mb = Some(peak_ram_mb);
+        }
+        job
+    }
+
+    fn build_worker(total_mb: u64, free_mb: u64, reserved_mb: u64) -> BuildWorker {
+        BuildWorker {
+            authorized: None,
+            caps: WorkerCaps {
+                architectures: vec!["x86_64-linux".into()],
+                metrics: Some(gradient_pool::score::WorkerMetricsView {
+                    ram_total_mb: total_mb,
+                    ram_free_mb: Some(free_mb),
+                    ram_reserved_mb: reserved_mb,
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+        }
+    }
+
+    #[test]
+    fn a_build_above_the_free_ram_of_every_unreserved_worker_fits_no_worker() {
+        let mut tracker = JobTracker::new();
+        let job = build_predicted(113_218);
+        let PendingJob::Build(build) = &job else {
+            unreachable!()
+        };
+        let (shared_build, evaluation) = (build.derivation_build, build.evaluation_id);
+        tracker.add_pending("large".into(), job);
+        tracker.add_pending("small".into(), build_predicted(4_000));
+        tracker.add_pending("unmeasured".into(), build_job(ProjectId::now_v7(), vec![]));
+
+        let workers = [
+            build_worker(128_540, 102_754, 0),
+            build_worker(30_720, 30_720, 0),
+        ];
+
+        assert_eq!(
+            tracker.builds_no_worker_fits(&workers),
+            vec![RamShortage {
+                shared_build,
+                evaluation,
+                needed_mb: 124_540,
+                largest_available_mb: 102_754,
+            }]
+        );
+    }
+
+    #[test]
+    fn a_build_some_worker_can_still_hold_is_not_reported() {
+        let mut tracker = JobTracker::new();
+        tracker.add_pending("large".into(), build_predicted(113_218));
+        let idle = build_worker(128_540, 102_754, 0);
+
+        let releases_ram = build_worker(128_540, 60_000, 40_000);
+        assert!(
+            tracker
+                .builds_no_worker_fits(&[idle.clone(), releases_ram])
+                .is_empty(),
+            "a worker with reserved RAM fits the build once its jobs finish"
+        );
+
+        let mut unmeasured = build_worker(0, 0, 0);
+        unmeasured.caps.metrics = None;
+        assert!(
+            tracker
+                .builds_no_worker_fits(&[idle.clone(), unmeasured])
+                .is_empty(),
+            "a worker without a sample yet is not known to be too small"
+        );
+
+        let mut other_architecture = idle;
+        other_architecture.caps.architectures = vec!["aarch64-linux".into()];
+        assert!(
+            tracker
+                .builds_no_worker_fits(&[other_architecture])
+                .is_empty(),
+            "no worker able to build it is a missing worker, not missing RAM"
+        );
     }
 
     fn build_job(peer: ProjectId, required: Vec<RequiredPath>) -> PendingJob {

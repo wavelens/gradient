@@ -363,6 +363,26 @@ describe('BoardJobDetailComponent - previous build attempts', () => {
     expect(urls).toContain('/board/jobs/dj-a2');
   });
 
+  it('leaves an attempt without a dispatched job unlinked', () => {
+    const undispatched: AssignedJobDetail = {
+      ...WITH_ATTEMPTS,
+      previous_attempts: [
+        ...WITH_ATTEMPTS.previous_attempts,
+        { dispatched_job_id: null, substitute: false, outcome: 3, reason: 10, failure_message: 'no connected worker has enough memory', created_at: '2026-06-08T00:02:00Z' },
+      ],
+    };
+    const fixture = setup({ getJob: () => of(undispatched) });
+    const section = fixture.debugElement.query(By.css('section.attempts'));
+    const rows = section.queryAll(By.css('tbody tr'));
+    const urls = section
+      .queryAll(By.directive(RouterLink))
+      .map((l) => l.injector.get(RouterLink).urlTree?.toString());
+
+    expect(rows.length).toBe(3);
+    expect(rows[2].nativeElement.classList).not.toContain('clickable');
+    expect(urls).not.toContain('/board/jobs/null');
+  });
+
   it('hides the section when there is only one attempt', () => {
     const singleAttempt: AssignedJobDetail = {
       ...DETAIL,

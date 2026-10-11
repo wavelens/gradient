@@ -133,7 +133,24 @@ impl RamNeed {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RamFit {
+    Fits,
+    FitsOnceRamIsReleased,
+    DoesNotFit,
+}
+
 impl WorkerMetricsView {
+    pub fn ram_fit(&self, needed_mb: u64) -> RamFit {
+        if needed_mb == 0 || self.ram_available_mb().is_none_or(|free| needed_mb <= free) {
+            RamFit::Fits
+        } else if self.will_release_ram() && needed_mb <= self.ram_total_mb {
+            RamFit::FitsOnceRamIsReleased
+        } else {
+            RamFit::DoesNotFit
+        }
+    }
+
     pub fn ram_unreserved_mb(&self) -> Option<u64> {
         (self.ram_total_mb > 0).then(|| self.ram_total_mb.saturating_sub(self.ram_reserved_mb))
     }

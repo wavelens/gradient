@@ -361,7 +361,7 @@ pub async fn get_evaluation_builds(
             updated_at: shared_build.updated_at,
             build_time_ms,
             build_started_at: attempt.and_then(|a| a.build_started_at),
-            dispatched_job: attempt.map(|a| a.dispatched_job),
+            dispatched_job: attempt.and_then(|a| a.dispatched_job),
             depth: *layer,
             prioritized: with_qos.contains(&j.derivation_build),
             ifd: drv.ifd,

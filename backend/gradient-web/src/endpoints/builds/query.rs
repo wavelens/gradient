@@ -88,8 +88,9 @@ pub async fn get_build(
         .await
         .ok()
         .flatten();
-    let worker = match &attempt {
-        Some(a) => gradient_entity::dispatched_job::Entity::find_by_id(a.dispatched_job)
+    let dispatched_job = attempt.and_then(|a| a.dispatched_job);
+    let worker = match dispatched_job {
+        Some(job) => gradient_entity::dispatched_job::Entity::find_by_id(job)
             .one(&state.web_db)
             .await?
             .map(|j| j.worker_id),
@@ -110,7 +111,7 @@ pub async fn get_build(
         derivation_path: derivation.drv_path(),
         architecture: derivation.architecture,
         worker,
-        dispatched_job: attempt.map(|a| a.dispatched_job),
+        dispatched_job,
         output: outputs,
         prioritized,
         ifd: derivation.ifd,

@@ -111,6 +111,13 @@ fn child_specs(scheduler: &Arc<Scheduler>) -> Vec<ChildSpec> {
         ),
         periodic(
             scheduler,
+            "ram-shortage-sweep",
+            EVAL_WATCHDOG_TICK,
+            CONSISTENCY_BUDGET,
+            background::ram_shortage_pass,
+        ),
+        periodic(
+            scheduler,
             "abandoned-dispatch-sweep",
             EVAL_WATCHDOG_TICK,
             CONSISTENCY_BUDGET,

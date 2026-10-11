@@ -4,15 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::score::context::{InstanceContext, WorkerMetricsView};
+use crate::score::context::{InstanceContext, RamFit, WorkerMetricsView};
 use crate::score::rule::{JobContext, ScoreRule, WorkerContext};
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum RamFit {
-    Fits,
-    FitsOnceRamIsReleased,
-    DoesNotFit,
-}
 
 /// Substitute-only `builtin` jobs are getting a more lenient CPU threshold. RAM saturation is still
 /// applying because a RAM-starved worker can fail a fetch too.
@@ -39,16 +32,10 @@ impl ResourceSaturationRule {
     pub const NAME: &'static str = "ResourceSaturationRule";
 
     fn ram_fit(job: &JobContext<'_>, m: &WorkerMetricsView, instance: &InstanceContext) -> RamFit {
-        let needed = job
-            .ram_need()
-            .needed_to_start_mb(instance.unmeasured_build_ram_mb());
-        if needed == 0 || m.ram_available_mb().is_none_or(|free| needed <= free) {
-            RamFit::Fits
-        } else if m.will_release_ram() && needed <= m.ram_total_mb {
-            RamFit::FitsOnceRamIsReleased
-        } else {
-            RamFit::DoesNotFit
-        }
+        m.ram_fit(
+            job.ram_need()
+                .needed_to_start_mb(instance.unmeasured_build_ram_mb()),
+        )
     }
 }
 

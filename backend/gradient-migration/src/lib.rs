@@ -119,6 +119,7 @@ mod m20261009_000001_task_retry_failed_builds;
 mod m20261009_000002_evaluation_statistics_target;
 mod m20261010_000000_evaluation_next_backfill;
 mod m20261010_000001_cache_pull_through;
+mod m20261011_000000_build_attempt_without_dispatch;
 
 pub struct UpgradeFloor {
     pub release: &'static str,
@@ -246,6 +247,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261009_000002_evaluation_statistics_target::Migration),
             Box::new(m20261010_000000_evaluation_next_backfill::Migration),
             Box::new(m20261010_000001_cache_pull_through::Migration),
+            Box::new(m20261011_000000_build_attempt_without_dispatch::Migration),
         ]
     }
 }

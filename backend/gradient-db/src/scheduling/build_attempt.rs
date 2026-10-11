@@ -56,11 +56,36 @@ pub async fn open_attempt<C: ConnectionTrait>(
         id: BuildAttemptId::now_v7(),
         build_job: Some(build_job),
         derivation_build,
-        dispatched_job,
+        dispatched_job: Some(dispatched_job),
         substitute,
         outcome: AttemptOutcome::Running,
         build_context,
         created_at: gradient_types::now(),
+        ..Default::default()
+    }
+    .into_active_model()
+    .insert(db)
+    .await
+}
+
+pub async fn open_failed_attempt<C: ConnectionTrait>(
+    db: &C,
+    build_job: BuildJobId,
+    derivation_build: DerivationBuildId,
+    reason: AttemptFailureReason,
+    failure_message: String,
+) -> Result<Model, DbErr> {
+    let now = gradient_types::now();
+    Model {
+        id: BuildAttemptId::now_v7(),
+        build_job: Some(build_job),
+        derivation_build,
+        outcome: AttemptOutcome::Failed,
+        reason: Some(reason),
+        failure_message: Some(failure_message),
+        build_context: serde_json::json!({}),
+        build_finished_at: Some(now),
+        created_at: now,
         ..Default::default()
     }
     .into_active_model()
@@ -199,11 +224,14 @@ pub async fn latest_attempt_worker<C: ConnectionTrait>(
     db: &C,
     derivation_build: DerivationBuildId,
 ) -> Result<Option<String>, DbErr> {
-    let Some(att) = latest_attempt(db, derivation_build).await? else {
+    let Some(dispatched_job) = latest_attempt(db, derivation_build)
+        .await?
+        .and_then(|attempt| attempt.dispatched_job)
+    else {
         return Ok(None);
     };
 
-    let job = gradient_entity::dispatched_job::Entity::find_by_id(att.dispatched_job)
+    let job = gradient_entity::dispatched_job::Entity::find_by_id(dispatched_job)
         .one(db)
         .await?;
 

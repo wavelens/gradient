@@ -174,6 +174,17 @@ pub enum Transition {
     RequeueImports {
         derivations: Vec<DerivationId>,
     },
+    NotEnoughResources {
+        shortages: Vec<RamShortage>,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RamShortage {
+    pub shared_build: DerivationBuildId,
+    pub evaluation: EvaluationId,
+    pub needed_mb: u64,
+    pub largest_available_mb: u64,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
