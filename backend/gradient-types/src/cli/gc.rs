@@ -10,42 +10,41 @@ use gradient_derive::config_group;
 #[config_group("gc")]
 #[derive(Args, Debug, Clone)]
 pub struct GcArgs {
-    /// Interval in seconds between cache maintenance GC passes. The default is 3600.
+    /// Seconds between garbage collection passes.
     #[arg(default_value_t = 3600)]
     pub interval_secs: u64,
 
-    /// Hours to keep a cached path outside the live closure of retained evaluations after its last
-    /// fetch, or its upload if never fetched. `--gc-nar-upload-grace-hours` is always applying on
-    /// top. `0` is keeping nothing beyond that grace.
+    /// Hours to keep a cached path outside the live closure of retained evaluations after its
+    /// last fetch, or its upload if never fetched. These hours always come on top of
+    /// {option}`services.gradient.gc.narUploadGraceHours`. Set it to `0` to keep nothing
+    /// beyond that grace.
     #[arg(default_value_t = 336)]
     pub nar_ttl_hours: u64,
 
-    /// Grace period in hours before the orphan-files pass is reclaiming a NAR object without a
-    /// referencing database row. The grace is covering the upload window where a NAR is on disk
-    /// before its `derivation`/`cached_path` rows commit. Set to 0 to reclaim immediately (tests
-    /// only).
+    /// Hours before the deletion of an unreferenced NAR object, covering the window between its
+    /// upload and the commit of its database rows.
     #[arg(default_value_t = 24)]
     pub nar_upload_grace_hours: i64,
 
-    /// Grace period in hours before the GC pass is deleting a `derivation` row outside the build
-    /// closure of every retained evaluation. Rapid re-evaluations can reuse a freshly orphaned
-    /// derivation within the grace without re-inserting it. Set to 0 to GC immediately.
+    /// Hours before the deletion of a derivation outside the build closure of every retained
+    /// evaluation. Quick re-evaluations can reuse the derivation during this grace. Set it to
+    /// `0` to delete such derivations on the next run.
     #[arg(default_value_t = 24)]
     pub orphan_derivation_hours: i64,
 
-    /// Hours after which an untouched "active" evaluation is presumed wedged and is no longer
-    /// blocking the per-task evaluation GC. The wedged evaluation itself is never deleted. A value
-    /// of 0 is letting a wedged evaluation block GC forever.
+    /// Hours an evaluation can stay in one phase before counting as stuck. Stuck evaluations no
+    /// longer block evaluation garbage collection. Set it to `0` to treat no evaluation as
+    /// stuck.
     #[arg(default_value_t = 24)]
     pub wedged_eval_hours: i64,
 
     /// Seconds from the end of one background deep garbage collection round to the start of the
-    /// next. `0` is running a round only on request.
+    /// next. Set it to `0` to run rounds only on request.
     #[arg(default_value_t = 3600)]
     pub deep_interval_secs: u64,
 
-    /// Milliseconds between two units of a storage migration or a background
-    /// deep garbage collection round. A requested round is running its units without a pause.
+    /// Milliseconds between two units of a storage migration or a background deep garbage
+    /// collection round. Requested rounds run their units without a pause.
     #[arg(default_value_t = 1000)]
     pub deep_pace_ms: u64,
 }

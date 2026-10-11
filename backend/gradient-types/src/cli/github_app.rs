@@ -10,7 +10,7 @@ use gradient_derive::config_group;
 #[config_group("github_app")]
 #[derive(Args, Debug, Clone)]
 pub struct GitHubAppArgs {
-    /// GitHub App ID. Required to enable GitHub App webhook and CI reporting.
+    /// GitHub App ID, shown on the App's settings page.
     pub id: Option<u64>,
     /// Path to the GitHub App RS256 private key PEM file.
     pub private_key_file: Option<String>,

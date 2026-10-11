@@ -10,27 +10,24 @@ use gradient_derive::config_group;
 #[config_group("cache")]
 #[derive(Args, Debug, Clone)]
 pub struct CacheArgs {
-    /// Maximum simultaneous outbound upstream narinfo requests across the whole server. Eval-time
-    /// substitutability probes and worker cache-query probes are sharing this pool. A huge
-    /// evaluation is never fanning out one request per derivation times every upstream at once.
+    /// Maximum simultaneous narinfo requests to upstream caches across the server.
     #[arg(default_value_t = 32)]
     pub upstream_query_concurrency: usize,
 
-    /// Instance-wide cap on total cached NAR bytes, in gigabytes. New evaluations are parking in
-    /// `Waiting` once every writable cache for a project has less than 10 MiB of headroom under it.
-    /// `0` (default) is disabling the instance-wide limit. Per-cache limits are still applying.
+    /// Instance-wide limit on cached NAR storage in GB. New evaluations wait while every
+    /// writable cache of a project has less than 10 MiB left. Set it to `0` to disable the
+    /// limit. Per-cache limits still apply.
     #[arg(default_value_t = 0)]
     pub max_storage_gb: i32,
 
-    /// Interval in seconds between NAR signature backfill sweeps. The upload handler is signing a
-    /// freshly uploaded NAR in place. This tick is only a fallback for subscription placeholders
-    /// and any row left unsigned. The default is 3600.
+    /// Seconds between NAR signature backfill passes. Uploads receive their signature
+    /// immediately. Only subscription placeholders and unsigned leftovers need the pass.
     #[arg(default_value_t = 3600)]
     pub sign_sweep_interval_secs: u64,
 
-    /// Interval in seconds between DWARF build-id index backfill passes. Uploads are indexing their
-    /// own NAR in place. This tick is only catching paths cached before the index existed and walks
-    /// lost to a restart. The default is 300.
+    /// Seconds between passes of the DWARF build ID index backfill. Uploads enter the index
+    /// immediately. Only paths cached before the index existed or interrupted by a restart need
+    /// the pass.
     #[arg(default_value_t = 300)]
     pub debug_index_interval_secs: u64,
 }

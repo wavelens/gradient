@@ -10,43 +10,40 @@ use gradient_derive::config_group;
 #[config_group("s3")]
 #[derive(Args, Debug, Clone)]
 pub struct S3Args {
-    /// S3 bucket name. NARs are stored in S3 instead of local disk with a bucket set.
+    /// Name of the S3 bucket. The bucket must not have versioning, object lock or replication
+    /// enabled. Object overwrites happen in place, and old versions stay in the bucket.
+    /// Versioned buckets thus keep an unreclaimable copy per upload.
     pub bucket: Option<String>,
-    /// AWS region for the S3 bucket.
+    /// Region of the S3 bucket.
     #[arg(default_value = "us-east-1")]
     pub region: String,
-    /// Custom S3-compatible endpoint URL (MinIO, Cloudflare R2, …).
+    /// Endpoint of an S3-compatible service such as MinIO or Cloudflare R2. Set it to `null` to
+    /// use AWS.
     pub endpoint: Option<String>,
-    /// AWS access key ID. An absent ID is falling back to instance credentials.
+    /// AWS access key ID. Set it to `null` to use instance credentials or the environment.
     pub access_key_id: Option<String>,
     /// File containing the AWS secret access key.
     pub secret_access_key_file: Option<String>,
-    /// Key prefix within the S3 bucket (e.g. "gradient/").
+    /// Key prefix inside the bucket, such as `gradient/`. Leave it empty to store at the bucket
+    /// root.
     #[arg(default_value = "")]
     pub prefix: String,
-    /// Use virtual-hosted-style requests (`https://<bucket>.<endpoint>/key`) with a custom
-    /// endpoint. The `false` default is keeping URLs path-style
-    /// (`https://<endpoint>/<bucket>/key`). MinIO, Garage and most self-hosted S3-compatible
-    /// backends are requiring path style. Set it to `true` for providers needing virtual-hosted
-    /// addressing, like Cloudflare R2 with a custom domain or some Backblaze B2 setups. AWS direct
-    /// without an endpoint is ignoring this flag.
+    /// Whether to address a custom {option}`services.gradient.s3.endpoint` virtual-hosted style
+    /// (`https://<bucket>.<endpoint>/key`) instead of path style
+    /// (`https://<endpoint>/<bucket>/key`). MinIO, Garage and most self-hosted services need
+    /// path style. It has no effect without a custom endpoint.
     #[arg(default_value_t = false)]
     pub virtual_hosted_style: bool,
-    /// Seconds a single S3 response may stall before the request is failed. This inactivity timer
-    /// is resetting on every successful read and is not capping the transfer. A multi-GB NAR is
-    /// streaming for as long as it keeps making progress. It is replacing the object-store default
-    /// of a flat 30s total request timeout. That default was cancelling any slower download and
-    /// burning the whole retry budget on doomed re-runs.
+    /// Seconds an S3 response can stall before failing the request. Received chunks reset the
+    /// timer, and large NARs keep streaming as long as they make progress.
     #[arg(default_value_t = 60)]
     pub read_timeout_secs: u64,
-    /// How many times a failed S3 request is retried.
+    /// Retries of a failed S3 request.
     #[arg(default_value_t = 3)]
     pub max_retries: usize,
-    /// Total seconds from the first attempt after which no further S3 retry is started. Keep it
-    /// above `(max_retries + 1) * read_timeout_secs`. Requests dying on the read timeout are
-    /// otherwise never retried because the budget is already spent. Only the error path is
-    /// consulting it. It is never interrupting a progressing download. Stay under 5 minutes because
-    /// retries are reusing the original credentials and payload.
+    /// Seconds after the first attempt past which no S3 retries start. Keep it above
+    /// `(maxRetries + 1) * readTimeoutSecs` to still retry requests that fail on the read
+    /// timeout. Keep it below 5 minutes as well, since retries reuse the original credentials.
     #[arg(default_value_t = 250)]
     pub retry_timeout_secs: u64,
 }

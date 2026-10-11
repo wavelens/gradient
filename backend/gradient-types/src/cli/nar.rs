@@ -11,42 +11,38 @@ use gradient_derive::config_group;
 #[config_group("nar")]
 #[derive(Args, Debug, Clone)]
 pub struct NarArgs {
-    /// Maximum size in bytes of a NAR upload to `POST /caches/{cache}/nars` (default 512 MiB).
+    /// Maximum size in bytes of a NAR uploaded to the cache upload endpoint.
     #[arg(value_parser = greater_than_zero::<usize>, default_value_t = 512 * 1024 * 1024)]
     pub max_upload_size: usize,
 
-    /// Size in bytes up to which the server is serving a NAR download itself instead of a presigned
-    /// S3 URL. NARs up to this size also stay in the in-memory cache. Uploads do not depend on this
-    /// value.
+    /// Size in bytes up to which NAR downloads come from the server itself instead of a
+    /// presigned S3 URL. NARs up to this size also stay in the in-memory cache. Uploads do not
+    /// depend on this value.
     #[arg(default_value_t = 1024 * 1024)]
     pub small_bytes: u64,
 
-    /// Weighted capacity of the in-memory NAR cache in bytes. `0` is disabling it. The default is
-    /// 512 MiB.
+    /// Capacity in bytes of the in-memory NAR cache. Set it to `0` to disable the cache.
     #[arg(default_value_t = 512 * 1024 * 1024)]
     pub hot_cache_bytes: u64,
 
-    /// This flag is making the S3 presigned NAR commit path fetch the uploaded object and hash it
-    /// again before marking it cached. It is catching same-length corruption at the cost of a full
-    /// object read. It is off by default because the presigned path is still checking the size with
-    /// HEAD. Granted worker and REST uploads are always verifying content because they already hold
-    /// the bytes in memory.
+    /// Whether to download NARs committed through presigned S3 uploads and verify their hash,
+    /// catching same-length corruption at the cost of a full object read. Size checks run
+    /// either way. Passthrough and REST uploads always go through verification.
     #[arg(default_value_t = false)]
     pub verify_digest: bool,
 
     /// Seconds to wait for a NAR object stream from storage (for example an S3 GET) before
-    /// answering the worker with `NarAbort`. The worker is retrying after a `NarAbort`.
+    /// answering the worker with `NarAbort`. Workers retry after a `NarAbort`.
     #[arg(default_value_t = 60)]
     pub storage_open_timeout_secs: u64,
 
-    /// Maximum time a single outbound `NarPush` chunk may sit in the writer queue waiting for the
-    /// WebSocket sink to make progress. Hitting this timeout is indicating a stalled peer or TCP
-    /// back-pressure. The transfer is then aborted with `NarAbort`.
+    /// Seconds an outbound `NarPush` chunk can wait for the WebSocket to drain before an abort
+    /// of the transfer with `NarAbort`.
     #[arg(default_value_t = 30)]
     pub send_chunk_timeout_secs: u64,
 
-    /// Size in bytes of each outbound `NarPush` chunk, from 4 KiB to 4 MiB. Smaller chunks are
-    /// helping slow or high-latency links like Tailscale over DERP.
+    /// Size in bytes of each outbound `NarPush` chunk, from 4 KiB to 4 MiB.
+    /// Smaller chunks can help slow or high-latency links like Tailscale over DERP.
     #[arg(
         id = "nar-chunk-bytes",
         value_parser = clap::value_parser!(u64).range(crate::NAR_CHUNK_BYTES_RANGE),
@@ -54,19 +50,19 @@ pub struct NarArgs {
     )]
     pub chunk_bytes: u64,
 
-    /// Maximum number of NAR-serving tasks that may run concurrently per worker connection. The
-    /// limit is bounding memory and storage-backend fan-out for a worker requesting many paths in a
-    /// single batch.
+    /// NAR serving tasks that can run at once per worker connection, bounding memory and
+    /// storage fan-out for large batches.
     #[arg(default_value_t = 8)]
     pub max_concurrent_serves: usize,
 
-    /// NAR downloads from storage that may run at once across all connections, keeping the storage
-    /// near its best total throughput.
+    /// NAR downloads from storage that can run at once across all connections, keeping the
+    /// storage near its best total throughput.
     #[arg(value_parser = greater_than_zero::<usize>, default_value_t = 16)]
     pub max_concurrent_downloads: usize,
 
-    /// Seconds since the last write of an unfinished upload staged under `<base_dir>`, after which
-    /// the next deep GC is removing the upload. `0` is keeping every unfinished upload.
+    /// Maximum age in seconds of an unfinished upload staged under
+    /// {file}`<services.gradient.baseDir>`, counted from its last write. Older uploads disappear
+    /// in the next deep GC. Set it to `0` to keep every unfinished upload.
     #[arg(default_value_t = 86400)]
     pub partial_ttl_secs: u64,
 }

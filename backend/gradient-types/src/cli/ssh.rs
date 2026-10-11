@@ -13,7 +13,10 @@ use gradient_derive::config_group;
 pub struct SshArgs {
     #[arg(id = "ssh-enable", default_value = "false")]
     pub enable: bool,
+    /// IP address for the SSH server to listen on. IPv6 addresses also accept IPv4 clients.
+    /// The default `::` thus means listening on every address of both families.
     pub listen_address: Option<String>,
+    /// Port for the SSH server to listen on.
     #[arg(id = "ssh-port", value_parser = port_in_range, default_value_t = 2222)]
     pub port: u16,
     pub host_key_file: Option<String>,

@@ -25,12 +25,11 @@ pub struct LogArgs {
     pub level_proto: Option<String>,
     /// Log level for the `gradient_scheduler` target. The default is `--log-level-default`.
     pub level_scheduler: Option<String>,
-    /// Target uncompressed size in bytes for each zstd log chunk written on build finalization.
-    /// Chunks are splitting on line boundaries. An over-long line may exceed this. The default is
-    /// 262144 (256 KiB).
+    /// Target uncompressed size in bytes of a stored build log chunk. Chunks split on line
+    /// boundaries, and a long line can exceed the target.
     #[arg(default_value_t = 262144)]
     pub chunk_bytes: usize,
     /// Directory receiving every closed stage span of the server as JSON lines, one file per
-    /// process. An unset value is disabling span tracing.
+    /// process. Set it to `null` to disable span tracing.
     pub trace_dir: Option<PathBuf>,
 }

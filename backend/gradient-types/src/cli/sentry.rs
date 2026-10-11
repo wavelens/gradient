@@ -13,8 +13,11 @@ pub const DEFAULT_SENTRY_DSN: &str =
 #[config_group("sentry")]
 #[derive(Args, Debug, Clone)]
 pub struct SentryArgs {
+    /// Whether to enable error reporting to Sentry.
     #[arg(id = "sentry-enable", default_value = "false")]
     pub enable: bool,
+    /// Sentry DSN to use with {option}`services.gradient.sentry.enable` set. Set it to `null`
+    /// to send reports to the upstream Wavelens instance at `reports.wavelens.io`.
     pub dsn: Option<String>,
 }
 

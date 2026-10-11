@@ -13,31 +13,32 @@ pub struct DatabaseArgs {
     pub url: Option<String>,
     pub url_file: Option<String>,
 
-    /// Maximum connections the scheduler / worker pool may open.
-    /// Total Postgres connections per gradient-server process is
-    /// `max_connections + web_max_connections + cache_max_connections`.
-    #[arg(id = "database-max-connections", default_value_t = 32)]
+    /// Maximum connections of the scheduler and worker pool. Server processes each open up to
+    /// the sum of {option}`services.gradient.database.maxConnections`,
+    /// {option}`services.gradient.database.cache.maxConnections` and
+    /// {option}`services.gradient.database.web.maxConnections`. PostgreSQL's `max_connections`
+    /// must accommodate that sum.
+    #[arg(id = "database-max-connections", default_value_t = 16)]
     pub max_connections: u32,
 
-    /// Minimum connections kept warm in the scheduler / worker pool.
+    /// Minimum connections kept open in the scheduler and worker pool.
     #[arg(default_value_t = 2)]
     pub min_connections: u32,
 
-    /// Maximum connections the cache-query pool may open. A dedicated pool is keeping a large
-    /// eval's worker prefetch storm from starving the scheduler/worker pool and stalling dispatch.
-    /// The storm is one `CacheQuery` per in-flight build.
+    /// Maximum connections of the cache query pool. It is separate from the scheduler pool to
+    /// keep a large evaluation's prefetch traffic from starving job assignment.
     #[arg(default_value_t = 32)]
     pub cache_max_connections: u32,
 
-    /// Minimum connections kept warm in the cache-query pool.
+    /// Minimum connections kept open in the cache query pool.
     #[arg(default_value_t = 2)]
     pub cache_min_connections: u32,
 
-    /// Maximum connections the axum HTTP pool may open.
-    #[arg(default_value_t = 16)]
+    /// Maximum connections of the HTTP API pool.
+    #[arg(default_value_t = 8)]
     pub web_max_connections: u32,
 
-    /// Minimum connections kept warm in the axum HTTP pool.
+    /// Minimum connections kept open in the HTTP API pool.
     #[arg(default_value_t = 1)]
     pub web_min_connections: u32,
 }
