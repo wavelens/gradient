@@ -75,7 +75,9 @@ fn served() -> std::collections::BTreeMap<&'static str, sea_orm::Value> {
 
 /// The blob must span several storage stream chunks to exercise reassembly.
 fn blob() -> Vec<u8> {
-    (0..256 * 1024).map(|i| (i * 31 + 7) as u8).collect()
+    (0..256 * 1024u32)
+        .map(|i| (i * 31 + 7).to_le_bytes()[0])
+        .collect()
 }
 
 #[tokio::test]

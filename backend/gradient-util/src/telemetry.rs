@@ -323,7 +323,7 @@ pub fn fill_permille(free: usize, max: usize) -> u32 {
         return 0;
     }
 
-    (max.saturating_sub(free) * 1000 / max) as u32
+    u32::try_from(max.saturating_sub(free) * 1000 / max).unwrap_or(u32::MAX)
 }
 
 #[cfg(test)]

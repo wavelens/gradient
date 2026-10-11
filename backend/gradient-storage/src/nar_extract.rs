@@ -111,7 +111,9 @@ where
                 let matches_file =
                     !in_collector && path_matches_file(&stack, name.as_ref(), &target);
                 if matches_file {
-                    let cap = std::cmp::min(size, NAR_EXTRACT_MAX_PREALLOC as u64) as usize;
+                    let cap = usize::try_from(size)
+                        .unwrap_or(usize::MAX)
+                        .min(NAR_EXTRACT_MAX_PREALLOC);
                     let mut buf = Vec::with_capacity(cap);
                     reader.read_to_end(&mut buf).await?;
                     return Ok(Extracted::File {
@@ -121,7 +123,9 @@ where
                     });
                 }
                 if in_collector {
-                    let cap = std::cmp::min(size, NAR_EXTRACT_MAX_PREALLOC as u64) as usize;
+                    let cap = usize::try_from(size)
+                        .unwrap_or(usize::MAX)
+                        .min(NAR_EXTRACT_MAX_PREALLOC);
                     let mut buf = Vec::with_capacity(cap);
                     reader.read_to_end(&mut buf).await?;
                     if let Some(c) = collector.as_mut() {

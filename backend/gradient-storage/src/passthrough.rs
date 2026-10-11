@@ -16,7 +16,7 @@ use tracing::{error, trace, warn};
 
 use crate::{NarSource, NarStore};
 
-const _: () = assert!(*NAR_CHUNK_BYTES_RANGE.end() as usize * 2 <= MAX_PROTO_MESSAGE_SIZE);
+const _: () = assert!(*NAR_CHUNK_BYTES_RANGE.end() * 2 <= MAX_PROTO_MESSAGE_SIZE as u64);
 
 pub struct PassthroughLimits {
     pub open: Duration,

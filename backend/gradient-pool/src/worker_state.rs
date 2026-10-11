@@ -83,7 +83,9 @@ impl WorkerShared {
         self.assigned_jobs
             .values()
             .filter(|job| job.kind == JobKind::Build)
-            .count() as u32
+            .count()
+            .try_into()
+            .unwrap_or(u32::MAX)
     }
 
     pub fn ram_reserved_mb(&self) -> u64 {
@@ -113,7 +115,9 @@ impl WorkerShared {
         self.assigned_jobs
             .values()
             .filter(|job| job.stage == Some(stage))
-            .count() as u32
+            .count()
+            .try_into()
+            .unwrap_or(u32::MAX)
     }
 
     pub fn profile(&self) -> WorkerProfile {

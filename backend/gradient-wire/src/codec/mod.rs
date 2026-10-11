@@ -96,11 +96,11 @@ pub fn push_separator(out: &mut String, first: &mut bool) {
 
 pub fn put_varint(out: &mut BytesMut, mut value: u64) {
     while value >= 0x80 {
-        out.put_u8((value as u8) | 0x80);
+        out.put_u8(((value & 0x7f) as u8) | 0x80);
         value >>= 7;
     }
 
-    out.put_u8(value as u8);
+    out.put_u8((value & 0x7f) as u8);
 }
 
 pub fn get_u8(input: &mut Bytes) -> Result<u8, DecodeError> {

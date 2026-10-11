@@ -54,11 +54,11 @@ pub(crate) fn phase_rows(
     let created_at = now();
     spans
         .iter()
-        .enumerate()
-        .map(|(seq, s)| MDispatchedJobPhase {
+        .zip(0i32..)
+        .map(|(s, seq)| MDispatchedJobPhase {
             id: DispatchedJobPhaseId::now_v7(),
             dispatched_job,
-            seq: seq as i32,
+            seq,
             parent_seq: s.parent.map(|p| p as i32),
             phase: s.phase.as_i16(),
             start_ms: s.start_ms as i64,

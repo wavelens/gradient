@@ -42,7 +42,7 @@ pub(super) fn spawn_scoring_task<S: WorkerStore + ?Sized + 'static>(
 
         tracing::debug!(
             scored = count,
-            elapsed_ms = started.elapsed().as_millis() as u64,
+            elapsed_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
             is_final,
             "scoring task complete"
         );

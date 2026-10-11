@@ -147,7 +147,7 @@ pub struct ProtocolProbe {
 pub async fn probe_protocol(base_url: &str, version: HttpVersion) -> ProtocolProbe {
     let started = std::time::Instant::now();
     let outcome = fetch_cache_info(base_url, version).await;
-    let latency_ms = started.elapsed().as_millis() as u64;
+    let latency_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
     match outcome {
         Ok(()) => ProtocolProbe {
             ok: true,

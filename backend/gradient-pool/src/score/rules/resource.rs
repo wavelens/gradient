@@ -21,8 +21,8 @@ impl Default for ResourceSaturationRule {
     fn default() -> Self {
         Self {
             penalty: crate::score::weights::RESOURCE_SATURATION_PENALTY,
-            cpu_saturated_pct: crate::score::weights::CPU_SATURATED_PCT as f32,
-            cpu_saturated_pct_builtin: crate::score::weights::CPU_SATURATED_PCT_BUILTIN as f32,
+            cpu_saturated_pct: crate::score::weights::CPU_SATURATED_PCT,
+            cpu_saturated_pct_builtin: crate::score::weights::CPU_SATURATED_PCT_BUILTIN,
             ram_saturated_free_frac: crate::score::weights::RAM_SATURATED_FREE_FRAC,
         }
     }

@@ -273,7 +273,11 @@ pub(crate) fn http_snapshot() -> Vec<HttpRouteStat> {
             "gradient_http_requests_total" => {
                 for m in mf.get_metric() {
                     let status = label(m, "status");
-                    let v = m.get_counter().get_value() as u64;
+                    #[expect(
+                        clippy::cast_possible_truncation,
+                        reason = "counters are whole numbers"
+                    )]
+                    let v = m.get_counter().get_value().round() as u64;
                     let e = req
                         .entry((label(m, "method"), label(m, "route")))
                         .or_insert((0, 0));

@@ -80,7 +80,7 @@ pub async fn get_build_log_chunks(
         .unwrap_or(0);
 
     Ok(ok_json(LogChunkIndex {
-        total_chunks: chunks.len() as u32,
+        total_chunks: u32::try_from(chunks.len()).unwrap_or(u32::MAX),
         total_lines,
         total_bytes,
         chunks,
@@ -188,8 +188,8 @@ pub async fn get_build_log_lines(
         let text = chunk_lines_text(state.log_storage.as_ref(), log_key, row).await?;
         let lines: Vec<&str> = text.split_inclusive('\n').collect();
 
-        let lo = want_first.saturating_sub(chunk_first) as usize;
-        let hi = (want_last.min(chunk_last) - chunk_first) as usize;
+        let lo = usize::try_from(want_first.saturating_sub(chunk_first)).unwrap_or(usize::MAX);
+        let hi = usize::try_from(want_last.min(chunk_last) - chunk_first).unwrap_or(usize::MAX);
         let hi = hi.min(lines.len().saturating_sub(1));
 
         if !emitted_first {

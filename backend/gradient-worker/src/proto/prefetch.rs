@@ -16,6 +16,7 @@ use gradient_wire::messages::{BuildSpec, CachedPath, EvalMessageLevel, QueryMode
 use gradient_wire::types::{BuildProgressPhase, JobPhase};
 use tracing::{debug, error, warn};
 
+use crate::count::clamp_to_u32;
 use crate::error::WorkerError;
 use crate::nix::store::LocalNixStore;
 use crate::proto::compression::drv_closure_seeds_from_compressed_nar;
@@ -505,7 +506,7 @@ impl<'a> InputPrefetcher<'a> {
             let (by_url, by_request) = self.query_and_split(to_query).await?;
             progress.expect(
                 download_size(by_url.iter().chain(&by_request)),
-                (by_url.len() + by_request.len()) as u32,
+                clamp_to_u32(by_url.len() + by_request.len()),
             );
             let tally = progress.tally();
             let batch = progress
@@ -589,7 +590,7 @@ impl<'a> InputPrefetcher<'a> {
         );
 
         let mut import = self.updater.phase(JobPhase::NarImport);
-        let imported = self.import_all(all_results).await? as u32;
+        let imported = clamp_to_u32(self.import_all(all_results).await?);
         import.record(imported, fetched_bytes);
         debug!(build_id = %self.build_id, imported, "prefetch complete");
 
@@ -612,7 +613,7 @@ impl<'a> InputPrefetcher<'a> {
         batch.extend(download_by_url(by_url, staging, tally).await?);
         let nar_bytes = batch.iter().filter_map(|(_, _, cp)| cp.nar_size).sum();
         gradient_worker_client::throughput::DOWNLOAD.observe_transfer(nar_bytes, started.elapsed());
-        fetch.record(batch.len() as u32, payload_bytes(&batch).await);
+        fetch.record(clamp_to_u32(batch.len()), payload_bytes(&batch).await);
         Ok(batch)
     }
 }
@@ -1107,7 +1108,10 @@ mod tests {
             .collect();
         let mut sent = Recorded::default();
         let mut progress = Progress::new(&mut sent);
-        progress.expect(download_size(entries.iter()), entries.len() as u32);
+        progress.expect(
+            download_size(entries.iter()),
+            u32::try_from(entries.len()).expect("entry count fits"),
+        );
 
         let nars = NarReceiver::new();
         let staging = Staging {

@@ -21,6 +21,7 @@ dbg_macro                       = "warn"
 todo                            = "warn"
 allow_attributes_without_reason = "warn"
 unwrap_used                     = "deny"
+cast_possible_truncation        = "warn"
 
 [workspace.dependencies]
 # Internal crates

@@ -7,6 +7,7 @@
 use std::sync::Arc;
 use std::time::Instant;
 
+use crate::count::clamp_to_u32;
 use gradient_util::sync::Mutex;
 use gradient_wire::types::{JobPhase, JobPhaseSpan};
 
@@ -62,7 +63,7 @@ impl JobTimeline {
                     parent,
                     ..Default::default()
                 });
-                Some((spans.len() - 1) as u32)
+                Some(clamp_to_u32(spans.len() - 1))
             }
         };
         if let Some(index) = index {
@@ -96,7 +97,7 @@ impl JobTimeline {
     }
 
     fn elapsed_ms(&self) -> u64 {
-        self.shared.start.elapsed().as_millis() as u64
+        u64::try_from(self.shared.start.elapsed().as_millis()).unwrap_or(u64::MAX)
     }
 }
 

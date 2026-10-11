@@ -15,6 +15,7 @@ use gradient_types::*;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 
 use crate::assign_mode::decide_build_spec_kind;
+use crate::count::clamp_to_u32;
 use gradient_wire::types::BuildSpecKind;
 
 pub(crate) struct BuildabilityChecker {
@@ -193,7 +194,7 @@ impl BuildabilityChecker {
 
         WaitingReason::Workers {
             unmet,
-            connected_workers: worker_caps.len() as u32,
+            connected_workers: clamp_to_u32(worker_caps.len()),
             available_architectures,
         }
     }

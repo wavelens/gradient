@@ -355,12 +355,14 @@ impl WorkerPool {
     }
 
     pub fn worker_counts(&self) -> (u32, u32) {
-        let total = self.workers.len() as u32;
+        let total = u32::try_from(self.workers.len()).unwrap_or(u32::MAX);
         let idle = self
             .workers
             .values()
             .filter(|slot| slot.shared().assigned_jobs.is_empty())
-            .count() as u32;
+            .count()
+            .try_into()
+            .unwrap_or(u32::MAX);
         (total, idle)
     }
 

@@ -166,7 +166,7 @@ pub fn create_router_with_scheduler(
         })
         .on_response(
             |_response: &Response<Body>, latency: Duration, _span: &Span| {
-                tracing::debug!(latency_ms = latency.as_millis() as u64, "response generated")
+                tracing::debug!(latency_ms = u64::try_from(latency.as_millis()).unwrap_or(u64::MAX), "response generated")
             },
         )
         .on_body_chunk(|chunk: &Bytes, _latency: Duration, _span: &Span| {
@@ -175,7 +175,7 @@ pub fn create_router_with_scheduler(
         .on_eos(
             |_trailers: Option<&HeaderMap>, stream_duration: Duration, _span: &Span| {
                 tracing::debug!(
-                    duration_ms = stream_duration.as_millis() as u64,
+                    duration_ms = u64::try_from(stream_duration.as_millis()).unwrap_or(u64::MAX),
                     "stream closed",
                 )
             },

@@ -57,6 +57,10 @@ impl ThroughputEwma {
         self.observe(bytes as f64 * 8.0 / elapsed.as_secs_f64().max(1e-6) / 1_000_000.0);
     }
 
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "wire speeds are single precision"
+    )]
     pub fn current(&self) -> Option<f32> {
         match self.bits.load(Ordering::Relaxed) {
             0 => None,

@@ -37,9 +37,8 @@ fn finalize_nix32(hasher: Sha256) -> String {
 
 fn max_compression_threads() -> u32 {
     std::thread::available_parallelism()
-        .map(|n| n.get())
-        .unwrap_or(1)
-        .min(4) as u32
+        .map_or(1, |n| u32::try_from(n.get()).unwrap_or(u32::MAX))
+        .min(4)
 }
 
 const MT_MIN_BYTES: u64 = 8 * 1024 * 1024;
@@ -76,7 +75,7 @@ fn trim_for_resume(
     } else if produced >= resume_from {
         Some((produced, 0..part_len))
     } else {
-        let skip = (resume_from - produced) as usize;
+        let skip = usize::try_from(resume_from - produced).unwrap_or(part_len);
         Some((resume_from, skip..part_len))
     }
 }
@@ -660,7 +659,7 @@ mod tests {
                 state ^= state << 13;
                 state ^= state >> 7;
                 state ^= state << 17;
-                state as u8
+                state.to_le_bytes()[0]
             })
             .collect()
     }

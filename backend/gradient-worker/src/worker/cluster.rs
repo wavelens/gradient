@@ -22,6 +22,7 @@ use gradient_wire::messages::{
 };
 use gradient_worker_client::connection::ProtoWriter;
 
+use crate::count::clamp_to_u32;
 use crate::proto::credentials::CredentialStore;
 use tokio::sync::mpsc;
 
@@ -68,7 +69,7 @@ impl ClusterHolds {
     }
 
     pub(super) fn held(&self, kind: &JobKind) -> u32 {
-        self.held.values().filter(|h| &h.job.kind == kind).count() as u32
+        clamp_to_u32(self.held.values().filter(|h| &h.job.kind == kind).count())
     }
 
     pub(super) fn start(&mut self, attempt: &str) -> Option<(ClusterMembership, HeldJob)> {

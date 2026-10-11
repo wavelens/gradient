@@ -16,6 +16,7 @@ use anyhow::{Context, Result};
 use gradient_util::nix_hash::normalize_nar_hash;
 use gradient_wire::messages::{CachedPath, JobPhase};
 
+use crate::count::clamp_to_u32;
 use crate::proto::job::JobUpdater;
 use crate::proto::nar_daemon_import::{FetchedNar, digest_of};
 use crate::proto::prefetch::{
@@ -70,7 +71,7 @@ pub(crate) async fn fetch_outputs(
     let upstream: Vec<&CachedPath> = located.iter().filter_map(|(_, _, u)| u.as_ref()).collect();
     progress.set_total(
         download_size(upstream.iter().copied()),
-        upstream.len() as u32,
+        clamp_to_u32(upstream.len()),
     );
 
     let mut fetched = Vec::with_capacity(located.len());

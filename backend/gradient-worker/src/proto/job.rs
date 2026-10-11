@@ -19,6 +19,7 @@ use gradient_worker_client::correlation::{
 };
 use tracing::debug;
 
+use crate::count::clamp_to_u32;
 use crate::executor::timeline::{JobTimeline, PhaseGuard};
 use crate::nix::store::LocalNixStore;
 use crate::proto::eval_cache_recv::EvalCacheReceiver;
@@ -55,7 +56,9 @@ async fn passthrough_blob(
     resume_offset: u64,
 ) -> Result<()> {
     let writer = uploads.writer();
-    let start = (resume_offset as usize).min(bytes.len());
+    let start = usize::try_from(resume_offset)
+        .unwrap_or(usize::MAX)
+        .min(bytes.len());
     let mut offset = start as u64;
     for chunk in bytes[start..].chunks(uploads.chunk_bytes()) {
         writer
@@ -212,7 +215,7 @@ impl JobUpdater {
         mode: QueryMode,
     ) -> Result<Vec<CachedPath>> {
         let mut guard = self.phase(JobPhase::CacheQueryWait);
-        guard.record(paths.len() as u32, 0);
+        guard.record(clamp_to_u32(paths.len()), 0);
         cache_query_with_timeout(
             &self.job_id,
             &self.writer,
@@ -263,7 +266,7 @@ impl JobUpdater {
         }
 
         let mut guard = self.phase(JobPhase::CacheQueryWait);
-        guard.record(paths.len() as u32, 0);
+        guard.record(clamp_to_u32(paths.len()), 0);
         cache_query_with_timeout(
             &self.job_id,
             &self.writer,
@@ -472,7 +475,7 @@ impl JobReporter for JobUpdater {
     #[tracing::instrument(level = "debug", skip_all, fields(job_id = %self.job_id, paths = drv_paths.len()))]
     async fn query_known_derivations(&self, drv_paths: Vec<String>) -> Result<Vec<String>> {
         let mut guard = self.phase(JobPhase::KnownDerivationsWait);
-        guard.record(drv_paths.len() as u32, 0);
+        guard.record(clamp_to_u32(drv_paths.len()), 0);
         known_derivations_with_timeout(
             &self.job_id,
             &self.writer,

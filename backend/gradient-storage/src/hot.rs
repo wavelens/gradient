@@ -281,7 +281,7 @@ mod tests {
     }
 
     fn blob(size: u64, fill: u8) -> Bytes {
-        Bytes::from(vec![fill; size as usize])
+        Bytes::from(vec![fill; usize::try_from(size).expect("blob size fits")])
     }
 
     #[test]

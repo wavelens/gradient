@@ -55,7 +55,7 @@ async fn put_with(
             Ok(etag) => return Ok(etag),
             Err(PutError::Retryable { error, retry_after }) if attempt < backoff.attempts => {
                 let delay = backoff.delay(attempt, retry_after);
-                tracing::warn!(attempt, delay_ms = delay.as_millis() as u64, error = %error, "object PUT failed; retrying");
+                tracing::warn!(attempt, delay_ms = u64::try_from(delay.as_millis()).unwrap_or(u64::MAX), error = %error, "object PUT failed; retrying");
                 tokio::time::sleep(delay).await;
                 attempt += 1;
             }

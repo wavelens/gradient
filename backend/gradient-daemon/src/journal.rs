@@ -66,7 +66,7 @@ pub struct OpTimer<'a> {
 fn now_us() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_micros() as u64)
+        .map(|d| u64::try_from(d.as_micros()).unwrap_or(u64::MAX))
         .unwrap_or_default()
 }
 
@@ -129,6 +129,10 @@ impl Journal {
             .into_iter()
             .map(|(op, (mut ds, failed))| {
                 ds.sort_unstable();
+                #[expect(
+                    clippy::cast_possible_truncation,
+                    reason = "rounded index is below the length"
+                )]
                 let pick = |q: f64| ds[((ds.len() - 1) as f64 * q).round() as usize];
                 let stats = OpStats {
                     count: ds.len() as u64,
@@ -151,7 +155,7 @@ impl OpTimer<'_> {
         inner.entries.push(JournalEntry {
             seq,
             at_us: self.at_us,
-            duration_us: self.started.elapsed().as_micros() as u64,
+            duration_us: u64::try_from(self.started.elapsed().as_micros()).unwrap_or(u64::MAX),
             conn: self.conn,
             op: self.op,
             paths: self.paths,

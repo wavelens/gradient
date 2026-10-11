@@ -940,7 +940,7 @@ mod tests {
     #[tokio::test]
     async fn open_streams_a_large_object_and_never_caches_it() {
         let (_d, store) = tiered_store(64 * 1024);
-        let payload: Vec<u8> = (0..128 * 1024).map(|i| i as u8).collect();
+        let payload: Vec<u8> = (0..=u8::MAX).cycle().take(128 * 1024).collect();
         store.put("large", payload.clone()).await.expect("put");
 
         let source = store
@@ -956,7 +956,7 @@ mod tests {
     #[tokio::test]
     async fn open_at_an_offset_streams_the_tail_of_a_large_object() {
         let (_d, store) = tiered_store(64 * 1024);
-        let payload: Vec<u8> = (0..128 * 1024).map(|i| i as u8).collect();
+        let payload: Vec<u8> = (0..=u8::MAX).cycle().take(128 * 1024).collect();
         store.put("large", payload.clone()).await.expect("put");
 
         let source = store
@@ -988,7 +988,7 @@ mod tests {
             .await
             .expect("get_stream")
             .expect("Some");
-        assert_eq!(size as usize, payload.len());
+        assert_eq!(usize::try_from(size).expect("size fits"), payload.len());
 
         let mut assembled = Vec::with_capacity(payload.len());
         while let Some(chunk) = stream.next().await {
@@ -1140,7 +1140,11 @@ mod tests {
             .await
             .expect("get_stream_from")
             .expect("Some");
-        assert_eq!(size as usize, payload.len(), "size is the FULL object size");
+        assert_eq!(
+            usize::try_from(size).expect("size fits"),
+            payload.len(),
+            "size is the FULL object size"
+        );
 
         let mut assembled = Vec::new();
         while let Some(chunk) = stream.next().await {
@@ -1177,14 +1181,17 @@ mod tests {
     #[tokio::test]
     async fn local_stream_from_reads_in_bulk_chunks_and_honours_offset() {
         let (_d, store) = local_store();
-        let payload: Vec<u8> = (0..(BULK_CHUNK_SIZE * 2 + 17)).map(|i| i as u8).collect();
+        let payload: Vec<u8> = (0..=u8::MAX)
+            .cycle()
+            .take(BULK_CHUNK_SIZE * 2 + 17)
+            .collect();
         store.put(&"b".repeat(32), payload.clone()).await.unwrap();
         let (size, stream) = store
             .get_stream_from(&"b".repeat(32), 5)
             .await
             .unwrap()
             .unwrap();
-        assert_eq!(size as usize, payload.len());
+        assert_eq!(usize::try_from(size).expect("size fits"), payload.len());
         let chunks: Vec<Bytes> = stream.try_collect().await.unwrap();
         assert!(chunks.iter().all(|c| c.len() <= BULK_CHUNK_SIZE));
         assert_eq!(
@@ -1231,7 +1238,7 @@ mod tests {
     #[test]
     fn retry_budget_outlasts_every_attempt_it_should_cover() {
         let t = S3Timeouts::default();
-        let attempts = (t.max_retries + 1) as u32;
+        let attempts = u32::try_from(t.max_retries + 1).expect("retry count fits");
         assert!(
             t.retry_timeout > t.read_timeout * attempts,
             "retry_timeout {:?} must exceed {attempts} attempts of {:?}",

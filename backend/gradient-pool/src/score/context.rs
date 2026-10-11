@@ -15,9 +15,13 @@ pub struct Windowed {
 
 impl InstanceContext {
     /// A build without history is expected to peak like the mean build of the instance.
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "whole number clamped at zero"
+    )]
     pub fn unmeasured_build_ram_mb(&self) -> u64 {
         let mean = self.peak_ram_mb.w24h.or(self.peak_ram_mb.w1h);
-        mean.map_or(0, |mb| mb.max(0.0) as u64)
+        mean.map_or(0, |mb| mb.max(0.0).trunc() as u64)
     }
 }
 
@@ -127,6 +131,10 @@ impl RamNeed {
         }
     }
 
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "whole number from rounding"
+    )]
     pub fn needed_to_start_mb(self, unmeasured_build_ram_mb: u64) -> u64 {
         let reserved = self.reserved_mb(unmeasured_build_ram_mb) as f64;
         (reserved * crate::score::weights::RAM_FIT_HEADROOM).round() as u64

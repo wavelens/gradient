@@ -20,6 +20,7 @@ use gradient_wire::types::BuildFailureKind;
 use tracing::{debug, info, warn};
 
 use crate::Scheduler;
+use crate::count::clamp_to_u32;
 
 const LIVENESS_POLLS_PER_DEADLINE: u64 = 3;
 
@@ -190,8 +191,8 @@ async fn instance_metrics_pass(scheduler: &Scheduler) -> anyhow::Result<()> {
     let counts = crate::instance::InstanceCounts {
         active_builds: c.active_builds,
         pending_builds: c.pending_builds,
-        total_workers: c.workers as u32,
-        idle_workers: c.idle_workers as u32,
+        total_workers: clamp_to_u32(c.workers),
+        idle_workers: clamp_to_u32(c.idle_workers),
         cpu_core_score_mean: c.cpu_core_score_mean,
         upload_speed_mean_mbps: c.upload_speed_mean_mbps,
         download_speed_mean_mbps: c.download_speed_mean_mbps,

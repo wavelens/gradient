@@ -23,6 +23,7 @@ pub mod views;
 pub mod waiting_state;
 
 mod assign_mode;
+mod count;
 mod eval_metrics;
 mod job_handlers;
 mod ram_shortage;

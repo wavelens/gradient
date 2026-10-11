@@ -331,7 +331,7 @@ pub async fn get_task_evaluations(
                         .parse::<Wildcard>()
                         .is_ok_and(|w| w.matches(attr))
                 })
-                .take(limit as usize)
+                .take(usize::try_from(limit).unwrap_or(usize::MAX))
                 .collect()
         }
         None => {

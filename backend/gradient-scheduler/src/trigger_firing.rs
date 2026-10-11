@@ -45,7 +45,7 @@ fn polling_jitter_secs(
     let mut hasher = DefaultHasher::new();
     trigger_id.hash(&mut hasher);
     last_fired_at.hash(&mut hasher);
-    (hasher.finish() % (max as u64 + 1)) as u32
+    u32::try_from(hasher.finish() % (u64::from(max) + 1)).unwrap_or(max)
 }
 
 pub(crate) fn cron_due(

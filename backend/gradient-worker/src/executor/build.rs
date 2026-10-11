@@ -334,7 +334,12 @@ pub async fn build_derivation(
         .as_ref()
         .map(ResourceUsage::from)
         .unwrap_or_default();
-    let metrics = build_metrics(usage, started.elapsed().as_millis() as u64, host, &running);
+    let metrics = build_metrics(
+        usage,
+        u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
+        host,
+        &running,
+    );
     drop(running);
     let built = match realized {
         Ok(result) => {

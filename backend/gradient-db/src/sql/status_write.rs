@@ -67,7 +67,10 @@ fn set_clause(words: &[&str]) -> String {
         if depth == 0 && CLAUSE_ENDS.iter().any(|end| word.eq_ignore_ascii_case(end)) {
             break;
         }
-        depth += word.matches('(').count() as i32 - word.matches(')').count() as i32;
+        depth += word
+            .chars()
+            .map(|char| i32::from(char == '(') - i32::from(char == ')'))
+            .sum::<i32>();
         clause.push(*word);
     }
     clause.join(" ")

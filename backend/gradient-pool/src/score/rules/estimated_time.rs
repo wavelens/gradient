@@ -436,7 +436,8 @@ mod tests {
     use crate::score::context::{ScoredJob, Windowed};
     use gradient_types::ids::ProjectId;
 
-    const GIGABYTE: f64 = 1_000_000_000.0;
+    const GIGABYTE_BYTES: u64 = 1_000_000_000;
+    const GIGABYTE: f64 = GIGABYTE_BYTES as f64;
 
     fn transfer(worker_mbps: Option<f64>, in_flight: u32, stored_per_nar_byte: f64) -> f64 {
         transfer_secs(Transfer {
@@ -656,7 +657,7 @@ mod tests {
     #[test]
     fn a_worker_holding_the_outputs_only_uploads_them() {
         let job = build_job(HistoryPrediction {
-            output_nar_size: Some(GIGABYTE as u64),
+            output_nar_size: Some(GIGABYTE_BYTES),
             ..built(100_000, None)
         });
         let w = worker(WorkerMetricsView {
@@ -677,7 +678,7 @@ mod tests {
     #[test]
     fn the_estimate_records_download_build_and_upload_apart() {
         let history = HistoryPrediction {
-            output_nar_size: Some(GIGABYTE as u64),
+            output_nar_size: Some(GIGABYTE_BYTES),
             ..built(30_000, None)
         };
         let job = build_job(history);
@@ -692,7 +693,7 @@ mod tests {
             ..Default::default()
         });
 
-        let e = estimate(&ctx(&job, Some(GIGABYTE as u64), false), &w, &inst);
+        let e = estimate(&ctx(&job, Some(GIGABYTE_BYTES), false), &w, &inst);
         assert!((e.download_secs - 10.0).abs() < 1e-9, "{e:?}");
         assert!((e.build_secs - 30.0).abs() < 1e-9, "{e:?}");
         assert!((e.upload_secs - 20.0).abs() < 1e-9, "{e:?}");
@@ -741,7 +742,7 @@ mod tests {
 
     #[test]
     fn an_unlearned_substitute_cost_falls_back_to_the_download_speed() {
-        let job = substituting(GIGABYTE as u64);
+        let job = substituting(GIGABYTE_BYTES);
         let inst = InstanceContext {
             storage_read_mbps: Some(1_000_000.0),
             ..Default::default()
@@ -848,7 +849,7 @@ mod tests {
     fn a_large_download_goes_to_the_faster_downloading_worker() {
         let rule = EstimatedTimeRule::default();
         let job = build_job(HistoryPrediction::default());
-        let c = ctx(&job, Some(4 * GIGABYTE as u64), false);
+        let c = ctx(&job, Some(4 * GIGABYTE_BYTES), false);
         let downloading = |download_speed_mbps| {
             worker(WorkerMetricsView {
                 download_speed_mbps: Some(download_speed_mbps),

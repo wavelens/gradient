@@ -1880,7 +1880,7 @@ async fn ready_cluster(scheduler: &Scheduler, members: &[(&str, &str)]) -> Clust
         let of = gradient_db::scheduling::cluster::MemberOf {
             cluster: cluster.clone(),
             member,
-            member_count: members.len() as u32,
+            member_count: u32::try_from(members.len()).expect("member count fits"),
         };
         scheduler
             .enqueue_cluster_member(

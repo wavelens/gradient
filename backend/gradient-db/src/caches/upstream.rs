@@ -210,6 +210,7 @@ pub async fn upsert_upstream_metrics<C: ConnectionTrait>(
     bucket: chrono::NaiveDateTime,
     accum: &std::collections::HashMap<String, UpstreamAccum>,
 ) -> Result<()> {
+    let to_column = |count: i64| i32::try_from(count).unwrap_or(i32::MAX);
     for (url, a) in accum {
         if a.request_count == 0 {
             continue;
@@ -219,9 +220,9 @@ pub async fn upsert_upstream_metrics<C: ConnectionTrait>(
             url.clone().into(),
             bucket.into(),
             a.latency_ms_sum.into(),
-            (a.request_count as i32).into(),
-            (a.narinfo_hits as i32).into(),
-            (a.narinfo_misses as i32).into(),
+            to_column(a.request_count).into(),
+            to_column(a.narinfo_hits).into(),
+            to_column(a.narinfo_misses).into(),
         ]))
         .await?;
     }

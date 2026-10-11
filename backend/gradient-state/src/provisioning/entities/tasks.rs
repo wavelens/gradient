@@ -383,11 +383,13 @@ pub(crate) fn build_trigger_config(
     use gradient_types::triggers::TriggerType as TT;
     let cfg = match t.trigger_type {
         TT::Polling => {
-            let interval = t
-                .config
-                .get("interval_secs")
-                .and_then(|v| v.as_u64())
-                .unwrap_or(300) as u32;
+            let interval = u32::try_from(
+                t.config
+                    .get("interval_secs")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(300),
+            )
+            .context("convert polling interval_secs")?;
             TriggerConfig::Polling {
                 interval_secs: interval,
                 branch: t

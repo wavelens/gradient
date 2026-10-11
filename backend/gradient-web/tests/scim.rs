@@ -357,8 +357,9 @@ async fn inactive_user_session_returns_403() {
     let s = scim_server(db);
 
     let claims = gradient_web::authorization::Cliams {
-        iat: now.and_utc().timestamp() as usize,
-        exp: (now + chrono::Duration::hours(24)).and_utc().timestamp() as usize,
+        iat: usize::try_from(now.and_utc().timestamp()).expect("timestamp fits"),
+        exp: usize::try_from((now + chrono::Duration::hours(24)).and_utc().timestamp())
+            .expect("timestamp fits"),
         id: user.id,
         jti: session.id,
     };

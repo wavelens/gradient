@@ -161,7 +161,10 @@ impl BatchWriter<'_> {
             prefer_local.push(d.prefer_local_build);
             fixed_output.push(d.is_fixed_output);
             allow_substitutes.push(d.allow_substitutes);
-            input_counts.push(d.dependencies.iter().collect::<HashSet<_>>().len() as i32);
+            input_counts.push(
+                i32::try_from(d.dependencies.iter().collect::<HashSet<_>>().len())
+                    .unwrap_or(i32::MAX),
+            );
         }
 
         if hashes.is_empty() {

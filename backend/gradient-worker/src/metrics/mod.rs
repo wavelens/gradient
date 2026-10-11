@@ -7,6 +7,7 @@
 use std::sync::OnceLock;
 use std::time::Instant;
 
+use crate::count::clamp_to_u32;
 use sysinfo::{CpuRefreshKind, MemoryRefreshKind, RefreshKind, System};
 
 const BYTES_PER_MB: u64 = 1024 * 1024;
@@ -23,7 +24,7 @@ pub fn host_static() -> HostStatic {
             .with_memory(MemoryRefreshKind::nothing().with_ram()),
     );
     HostStatic {
-        cpu_count: sys.cpus().len().max(1) as u32,
+        cpu_count: clamp_to_u32(sys.cpus().len().max(1)),
         ram_total_mb: (sys.total_memory() / BYTES_PER_MB).max(1),
     }
 }
@@ -62,6 +63,10 @@ pub fn cpu_core_score() -> u32 {
     *SCORE.get_or_init(benchmark_cpu_core_score)
 }
 
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "clamped to the score range"
+)]
 fn benchmark_cpu_core_score() -> u32 {
     let start = Instant::now();
     let mut hash: u64 = FNV_OFFSET;
@@ -77,6 +82,7 @@ fn benchmark_cpu_core_score() -> u32 {
         return SCORE_MAX;
     }
     let ops_per_ms = BENCH_ITERATIONS as f64 / elapsed_ms;
-    let score = (ops_per_ms / 100.0).round() as i64;
-    score.clamp(SCORE_MIN as i64, SCORE_MAX as i64) as u32
+    (ops_per_ms / 100.0)
+        .round()
+        .clamp(f64::from(SCORE_MIN), f64::from(SCORE_MAX)) as u32
 }

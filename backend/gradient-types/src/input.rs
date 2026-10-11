@@ -137,10 +137,9 @@ pub fn port_in_range(s: &str) -> Result<u16, InputError> {
         .parse()
         .map_err(|_| InputError::InvalidPortNumber(s.to_string()))?;
 
-    if PORT_RANGE.contains(&port) {
-        Ok(port as u16)
-    } else {
-        Err(InputError::PortNotInRange)
+    match u16::try_from(port) {
+        Ok(port) if PORT_RANGE.contains(&usize::from(port)) => Ok(port),
+        _ => Err(InputError::PortNotInRange),
     }
 }
 

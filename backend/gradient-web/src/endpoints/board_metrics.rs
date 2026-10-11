@@ -194,13 +194,15 @@ pub async fn get_board_upstream_caches(
                 agg.latency_sum += s;
                 agg.latency_count += c;
             }
+            #[expect(clippy::cast_possible_truncation, reason = "counts are whole numbers")]
             metric::UPSTREAM_NARINFO_HITS => {
                 agg.hits.insert(bucket_s, s);
-                agg.hits_total += s as i64;
+                agg.hits_total += s.round() as i64;
             }
+            #[expect(clippy::cast_possible_truncation, reason = "counts are whole numbers")]
             metric::UPSTREAM_NARINFO_MISSES => {
                 agg.misses.insert(bucket_s, s);
-                agg.misses_total += s as i64;
+                agg.misses_total += s.round() as i64;
             }
             _ => {}
         }

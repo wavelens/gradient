@@ -126,7 +126,9 @@ impl EvalCacheReceiver {
                     g.pending.insert(
                         job_id.to_owned(),
                         Pending::PullStream {
-                            buf: Vec::with_capacity(*total_bytes as usize),
+                            buf: Vec::with_capacity(
+                                usize::try_from(*total_bytes).unwrap_or(usize::MAX),
+                            ),
                             bytes_tx,
                         },
                     );

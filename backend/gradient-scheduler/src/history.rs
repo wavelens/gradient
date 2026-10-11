@@ -6,6 +6,7 @@
 
 use std::collections::{HashMap, HashSet};
 
+use crate::count::clamp_to_u32;
 use gradient_types::ids::DerivationId;
 use gradient_types::{
     CDerivationMetric, CDerivationOutput, EDerivationMetric, EDerivationOutput, MDerivationMetric,
@@ -73,7 +74,7 @@ fn summarize(rows: &[MDerivationMetric]) -> gradient_pool::score::HistoryPredict
         return gradient_pool::score::HistoryPrediction::default();
     }
 
-    let samples = rows.len() as u32;
+    let samples = clamp_to_u32(rows.len());
 
     let mut peaks: Vec<i64> = rows.iter().filter_map(|r| r.peak_ram_mb).collect();
     let predicted_peak_ram_mb = percentile_or_max(&mut peaks, 0.95);
@@ -105,7 +106,7 @@ fn summarize(rows: &[MDerivationMetric]) -> gradient_pool::score::HistoryPredict
         avg_cpu_time_ms,
         build_time_ms,
         uncontended_build_time_ms: mean(&uncontended),
-        build_core_score: mean(&built_on).map(|score| score as u32),
+        build_core_score: mean(&built_on).map(|score| u32::try_from(score).unwrap_or(u32::MAX)),
         avg_disk_bytes,
         output_nar_size: None,
         oom_rate,
@@ -114,6 +115,7 @@ fn summarize(rows: &[MDerivationMetric]) -> gradient_pool::score::HistoryPredict
     }
 }
 
+#[expect(clippy::cast_possible_truncation, reason = "rounded and saturating")]
 fn uncontended_build_time_ms(row: &MDerivationMetric) -> Option<i64> {
     let others = row.concurrent_builds.unwrap_or(0).max(0) as u32;
     row.build_time_ms
@@ -128,6 +130,10 @@ fn mean(vals: &[i64]) -> Option<u64> {
     Some((vals.iter().sum::<i64>() / vals.len() as i64).max(0) as u64)
 }
 
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "rounded index below the length"
+)]
 fn percentile_or_max(values: &mut [i64], p: f64) -> Option<u64> {
     values.sort_unstable();
     let idx = if values.len() < 20 {
