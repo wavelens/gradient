@@ -6,6 +6,7 @@
 
 pub mod ids;
 pub mod store_path;
+pub mod transition;
 
 pub use store_path::{STORE_DIR, StorePath, StorePathError};
 

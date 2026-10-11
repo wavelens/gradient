@@ -7,12 +7,12 @@
 use super::evaluation_message::EvaluationFailure;
 use super::logging::{PhaseSubjectKind, record_phase_event};
 use crate::DbContext;
-use crate::state_machine::EvalStateMachine;
 use chrono::NaiveDateTime;
 use gradient_entity::evaluation::EvaluationStatus;
+use gradient_entity::transition::Transition;
 use gradient_types::*;
 use sea_orm::{
-    ColumnTrait, Condition, ConnectionTrait, DbErr, EntityTrait, IntoActiveModel, QueryFilter,
+    ColumnTrait, ConnectionTrait, DbErr, EntityTrait, IntoActiveModel, QueryFilter, UpdateMany,
 };
 use tracing::{debug, warn};
 
@@ -21,14 +21,9 @@ pub async fn update_evaluation_status(
     evaluation: MEvaluation,
     status: EvaluationStatus,
 ) -> Result<MEvaluation, DbErr> {
-    // The filtered `update_many` below is guarding atomically in the database.
-    // A concurrent abort cannot be clobbered by an in-flight evaluator.
-    match EvalStateMachine::validate(evaluation.status, status) {
-        Ok(_) => {}
-        Err(e) => {
-            warn!(evaluation_id = %evaluation.id, error = %e, "Skipping invalid evaluation status transition");
-            return Ok(evaluation);
-        }
+    if evaluation.status != status && !status.sources().contains(&evaluation.status) {
+        warn!(evaluation_id = %evaluation.id, from = ?evaluation.status, to = ?status, "Skipping invalid evaluation status transition");
+        return Ok(evaluation);
     }
 
     debug!(evaluation_id = %evaluation.id, status = ?status, "Updating evaluation status");
@@ -63,12 +58,7 @@ pub async fn update_evaluation_status(
 
     let updated = update
         .filter(CEvaluation::Id.eq(evaluation.id))
-        .filter(
-            Condition::all()
-                .add(CEvaluation::Status.ne(EvaluationStatus::Aborted))
-                .add(CEvaluation::Status.ne(EvaluationStatus::Failed))
-                .add(CEvaluation::Status.ne(EvaluationStatus::Completed)),
-        )
+        .filter(CEvaluation::Status.is_in(sources_in_the_row(status)))
         .exec(&ctx.worker_db)
         .await?;
 
@@ -92,6 +82,34 @@ pub async fn update_evaluation_status(
 
     report_evaluation_status(ctx, &updated_eval, event_status, now).await?;
     Ok(updated_eval)
+}
+
+pub async fn change_evaluation_status<C: ConnectionTrait>(
+    db: &C,
+    evaluation: EvaluationId,
+    transition: Transition<EvaluationStatus>,
+    columns: impl FnOnce(UpdateMany<EEvaluation>) -> UpdateMany<EEvaluation>,
+) -> Result<Option<MEvaluation>, DbErr> {
+    let change = EEvaluation::update_many()
+        .col_expr(
+            CEvaluation::Status,
+            sea_orm::sea_query::Expr::value(transition.to),
+        )
+        .col_expr(
+            CEvaluation::UpdatedAt,
+            sea_orm::sea_query::Expr::value(gradient_types::now()),
+        );
+    let changed = columns(change)
+        .filter(CEvaluation::Id.eq(evaluation))
+        .filter(CEvaluation::Status.is_in(transition.from.iter().copied()))
+        .exec_with_returning(db)
+        .await?;
+    Ok(changed.into_iter().next())
+}
+
+fn sources_in_the_row(status: EvaluationStatus) -> Vec<EvaluationStatus> {
+    let refresh = (!status.is_terminal()).then_some(status);
+    status.sources().iter().copied().chain(refresh).collect()
 }
 
 fn reopen_evaluation_sql() -> String {

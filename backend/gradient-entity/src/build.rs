@@ -53,6 +53,8 @@ pub enum BuildStatus {
     Skipped = 10,
 }
 
+use crate::transition::Transition;
+
 impl From<BuildStatus> for i16 {
     fn from(status: BuildStatus) -> Self {
         status as Self
@@ -86,6 +88,53 @@ impl BuildStatus {
 
     pub const fn is_terminal_success(self) -> bool {
         matches!(self, Self::Completed | Self::Substituted)
+    }
+
+    pub const UNFINISHED: [Self; 5] = [
+        Self::Created,
+        Self::Queued,
+        Self::Building,
+        Self::FailedTransient,
+        Self::Skipped,
+    ];
+
+    pub const TERMINAL: [Self; 6] = [
+        Self::Completed,
+        Self::Substituted,
+        Self::FailedPermanent,
+        Self::FailedTimeout,
+        Self::Aborted,
+        Self::DependencyFailed,
+    ];
+
+    pub const fn is_terminal(self) -> bool {
+        !matches!(
+            self,
+            Self::Created | Self::Queued | Self::Building | Self::FailedTransient | Self::Skipped
+        )
+    }
+
+    pub const fn sources(self) -> &'static [Self] {
+        match self {
+            Self::Created => &[Self::Skipped, Self::Queued, Self::FailedTransient],
+            Self::Queued => &[Self::Created, Self::Building],
+            Self::Building => &[Self::Queued],
+            Self::Skipped => &[Self::Created],
+            Self::Completed
+            | Self::Substituted
+            | Self::FailedPermanent
+            | Self::FailedTransient
+            | Self::FailedTimeout
+            | Self::Aborted
+            | Self::DependencyFailed => &Self::UNFINISHED,
+        }
+    }
+
+    pub const fn report(self) -> Transition<Self> {
+        Transition {
+            from: self.sources(),
+            to: self,
+        }
     }
 
     pub const PENDING: [Self; 2] = [Self::Created, Self::Queued];

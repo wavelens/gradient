@@ -13,6 +13,7 @@ macro_rules! sql {
         $(, tier = $tier:ident)?
         $(, budget = $budget:expr)?
         $(, flags = [$($flag:ident),* $(,)?])?
+        $(, status_write = $write:expr)?
         $(,)? ;
     )+) => {$(
         $(#[$meta])*
@@ -25,6 +26,7 @@ macro_rules! sql {
             tier: $crate::sql_tier!($($tier)?),
             budget: $crate::sql_budget!($($budget)? ; $($tier)?),
             flags: &[$($($crate::sql::Flag::$flag),*)?],
+            status_write: $crate::sql_status_write!($($write)?),
         };
 
         $crate::sql::inventory::submit! { &$name }
@@ -40,6 +42,7 @@ macro_rules! sql_fn {
         $(, tier = $tier:ident)?
         $(, budget = $budget:expr)?
         $(, flags = [$($flag:ident),* $(,)?])?
+        $(, status_write = $write:expr)?
         $(,)? ;
     )+) => {$(
         $(#[$meta])*
@@ -52,6 +55,7 @@ macro_rules! sql_fn {
             tier: $crate::sql_tier!($($tier)?),
             budget: $crate::sql_budget!($($budget)? ; $($tier)?),
             flags: &[$($($crate::sql::Flag::$flag),*)?],
+            status_write: $crate::sql_status_write!($($write)?),
         };
 
         $crate::sql::inventory::submit! { &$name }
@@ -67,6 +71,7 @@ macro_rules! sql_lazy {
         $(, tier = $tier:ident)?
         $(, budget = $budget:expr)?
         $(, flags = [$($flag:ident),* $(,)?])?
+        $(, status_write = $write:expr)?
         $(,)? ;
     )+) => {$(
         $(#[$meta])*
@@ -79,10 +84,22 @@ macro_rules! sql_lazy {
             tier: $crate::sql_tier!($($tier)?),
             budget: $crate::sql_budget!($($budget)? ; $($tier)?),
             flags: &[$($($crate::sql::Flag::$flag),*)?],
+            status_write: $crate::sql_status_write!($($write)?),
         };
 
         $crate::sql::inventory::submit! { &$name }
     )+};
+}
+
+#[doc(hidden)]
+#[macro_export]
+macro_rules! sql_status_write {
+    () => {
+        None
+    };
+    ($write:expr) => {
+        Some($write)
+    };
 }
 
 #[doc(hidden)]

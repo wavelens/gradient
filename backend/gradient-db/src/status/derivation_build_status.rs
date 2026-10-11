@@ -7,11 +7,10 @@
 use super::effects::{TransitionChange, emit_transition_effects};
 use super::logging::{PhaseSubjectKind, record_phase_event};
 use crate::DbContext;
-use crate::state_machine::BuildStateMachine;
 use gradient_entity::build::BuildStatus;
 use gradient_types::*;
-use sea_orm::ActiveValue::Set;
-use sea_orm::{ActiveModelTrait, ColumnTrait, DbErr, EntityTrait, IntoActiveModel, QueryFilter};
+use sea_orm::sea_query::Expr;
+use sea_orm::{ColumnTrait, DbErr, EntityTrait, QueryFilter};
 use std::collections::{HashMap, HashSet};
 use tracing::{error, info};
 
@@ -24,12 +23,11 @@ pub async fn update_derivation_build_status(
         return Ok(shared_build);
     }
 
-    if let Err(e) = BuildStateMachine::validate(shared_build.status, status) {
+    if !status.sources().contains(&shared_build.status) {
         error!(
             derivation_build = %shared_build.id,
             from = ?shared_build.status,
             to = ?status,
-            error = %e,
             "Skipping invalid shared build status transition - status update lost or out of order"
         );
         return Ok(shared_build);
@@ -39,11 +37,11 @@ pub async fn update_derivation_build_status(
 
     let now = gradient_types::now();
     let prev_status = shared_build.status;
-    let mut active: ADerivationBuild = shared_build.clone().into_active_model();
-    active.status = Set(status);
-    active.updated_at = Set(now);
+    let mut change = EDerivationBuild::update_many()
+        .col_expr(CDerivationBuild::Status, Expr::value(status))
+        .col_expr(CDerivationBuild::UpdatedAt, Expr::value(now));
     if status == BuildStatus::Queued && shared_build.queued_at.is_none() {
-        active.queued_at = Set(Some(now));
+        change = change.col_expr(CDerivationBuild::QueuedAt, Expr::value(Some(now)));
     }
 
     if status == BuildStatus::Building {
@@ -55,7 +53,7 @@ pub async fn update_derivation_build_status(
         .await?;
     }
 
-    if BuildStateMachine::is_terminal(&status) {
+    if status.is_terminal() {
         crate::scheduling::build_attempt::stamp_attempt_finished(
             &ctx.worker_db,
             shared_build.id,
@@ -64,7 +62,17 @@ pub async fn update_derivation_build_status(
         .await?;
     }
 
-    let updated = active.update(&ctx.worker_db).await?;
+    let changed = change
+        .filter(CDerivationBuild::Id.eq(shared_build.id))
+        .filter(CDerivationBuild::Status.is_in(status.sources().iter().copied()))
+        .exec_with_returning(&ctx.worker_db)
+        .await?;
+    let Some(updated) = changed.into_iter().next() else {
+        return Ok(EDerivationBuild::find_by_id(shared_build.id)
+            .one(&ctx.worker_db)
+            .await?
+            .unwrap_or(shared_build));
+    };
 
     emit_transition_effects(
         ctx,
