@@ -20,10 +20,6 @@ pub enum InputError {
     InvalidPortNumber(String),
     #[error("Port not in range {start}-{end}", start = PORT_RANGE.start(), end = PORT_RANGE.end())]
     PortNotInRange,
-    #[error("`{0}` is not a valid number")]
-    InvalidNumber(String),
-    #[error("`{0}` is not larger than 0")]
-    NotGreaterThanZero(String),
     #[error("Invalid hex string")]
     InvalidHexString,
     #[error("Commit hash must be 40 characters long")]
@@ -145,22 +141,6 @@ pub fn port_in_range(s: &str) -> Result<u16, InputError> {
         Ok(port as u16)
     } else {
         Err(InputError::PortNotInRange)
-    }
-}
-
-pub fn greater_than_zero<
-    T: std::str::FromStr + std::cmp::PartialOrd + std::fmt::Display + Default,
->(
-    s: &str,
-) -> Result<T, InputError> {
-    let num: T = s
-        .parse()
-        .map_err(|_| InputError::InvalidNumber(s.to_string()))?;
-
-    if num > T::default() {
-        Ok(num)
-    } else {
-        Err(InputError::NotGreaterThanZero(s.to_string()))
     }
 }
 

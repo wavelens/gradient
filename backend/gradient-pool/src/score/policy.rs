@@ -168,25 +168,16 @@ pub fn rule_catalog() -> Vec<(&'static str, &'static str)> {
     catalog
 }
 
-pub fn policy_by_name(name: &str) -> std::sync::Arc<dyn ScoringPolicy> {
-    match name {
-        "simple" => std::sync::Arc::new(RulePolicy::new("simple", simple_rules(), false)),
-        "resource-aware" => std::sync::Arc::new(RulePolicy::new(
+pub fn policy_for(policy: gradient_types::ScoringPolicy) -> std::sync::Arc<dyn ScoringPolicy> {
+    match policy {
+        gradient_types::ScoringPolicy::Simple => {
+            std::sync::Arc::new(RulePolicy::new("simple", simple_rules(), false))
+        }
+        gradient_types::ScoringPolicy::ResourceAware => std::sync::Arc::new(RulePolicy::new(
             "resource-aware",
             resource_aware_rules(),
             true,
         )),
-        other => {
-            tracing::warn!(
-                policy = other,
-                "unknown scoring policy, using \"resource-aware\""
-            );
-            std::sync::Arc::new(RulePolicy::new(
-                "resource-aware",
-                resource_aware_rules(),
-                true,
-            ))
-        }
     }
 }
 
@@ -242,15 +233,20 @@ mod tests {
     }
 
     #[test]
-    fn registry_selects_known_and_falls_back() {
-        assert_eq!(policy_by_name("simple").name(), "simple");
-        assert_eq!(policy_by_name("resource-aware").name(), "resource-aware");
-        assert_eq!(policy_by_name("nonsense").name(), "resource-aware");
+    fn registry_selects_each_policy() {
+        assert_eq!(
+            policy_for(gradient_types::ScoringPolicy::Simple).name(),
+            "simple"
+        );
+        assert_eq!(
+            policy_for(gradient_types::ScoringPolicy::ResourceAware).name(),
+            "resource-aware"
+        );
     }
 
     #[test]
     fn simple_policy_long_waiting_build_overcomes_fresh_cached() {
-        let policy = policy_by_name("simple");
+        let policy = policy_for(gradient_types::ScoringPolicy::Simple);
         let archs = vec!["x86_64-linux".to_string()];
         let feats: Vec<String> = vec![];
         let w = worker_ctx(&archs, &feats);
@@ -283,7 +279,7 @@ mod tests {
     #[test]
     fn resource_aware_sends_heavy_build_to_fast_cold_worker_over_slow_warm_one() {
         use crate::score::context::WorkerMetricsView;
-        let policy = policy_by_name("resource-aware");
+        let policy = policy_for(gradient_types::ScoringPolicy::ResourceAware);
         let archs = vec!["x86_64-linux".to_string()];
         let feats: Vec<String> = vec![];
         let j = ScoredJob::new_build(
@@ -333,7 +329,7 @@ mod tests {
     #[test]
     fn resource_aware_sends_heavy_build_to_the_worker_holding_its_outputs() {
         use crate::score::context::WorkerMetricsView;
-        let policy = policy_by_name("resource-aware");
+        let policy = policy_for(gradient_types::ScoringPolicy::ResourceAware);
         let archs = vec!["x86_64-linux".to_string()];
         let feats: Vec<String> = vec![];
         let j = ScoredJob::new_build(
@@ -385,7 +381,7 @@ mod tests {
 
     #[test]
     fn simple_policy_prefers_ready_over_costly() {
-        let policy = policy_by_name("simple");
+        let policy = policy_for(gradient_types::ScoringPolicy::Simple);
         let archs = vec!["x86_64-linux".to_string()];
         let feats: Vec<String> = vec![];
         let w = worker_ctx(&archs, &feats);
@@ -419,7 +415,7 @@ mod tests {
 
     #[test]
     fn score_detailed_sums_to_total_and_names_rules() {
-        let policy = policy_by_name("simple");
+        let policy = policy_for(gradient_types::ScoringPolicy::Simple);
         let archs = vec!["x86_64-linux".to_string()];
         let feats: Vec<String> = vec![];
         let w = worker_ctx(&archs, &feats);
@@ -482,7 +478,7 @@ mod tests {
 
     #[test]
     fn a_held_transfer_drops_below_the_floor_until_its_wait_releases_it() {
-        let policy = policy_by_name("simple");
+        let policy = policy_for(gradient_types::ScoringPolicy::Simple);
         let archs = vec!["x86_64-linux".to_string()];
         let feats: Vec<String> = vec![];
         let w = worker_ctx(&archs, &feats);
@@ -507,7 +503,7 @@ mod tests {
 
     #[test]
     fn unmeasured_build_is_vetoed_not_penalized() {
-        let policy = policy_by_name("simple");
+        let policy = policy_for(gradient_types::ScoringPolicy::Simple);
         let archs = vec!["x86_64-linux".to_string()];
         let feats: Vec<String> = vec![];
         let w = worker_ctx(&archs, &feats);
@@ -524,8 +520,10 @@ mod tests {
 
     #[test]
     fn project_work_share_is_unconsumed_while_fair_share_is_disabled() {
-        assert!(!policy_by_name("simple").uses_project_work_share());
-        assert!(!policy_by_name("resource-aware").uses_project_work_share());
+        assert!(!policy_for(gradient_types::ScoringPolicy::Simple).uses_project_work_share());
+        assert!(
+            !policy_for(gradient_types::ScoringPolicy::ResourceAware).uses_project_work_share()
+        );
         assert!(FairShareRule::default().uses_project_work_share());
     }
 }

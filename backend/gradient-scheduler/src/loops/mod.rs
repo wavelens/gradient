@@ -84,14 +84,14 @@ fn child_specs(scheduler: &Arc<Scheduler>) -> Vec<ChildSpec> {
         periodic(
             scheduler,
             "worker-sample",
-            Duration::from_secs(metrics.worker_sample_interval_secs.max(1)),
+            Duration::from_secs(metrics.worker_sample_interval_secs.get()),
             METRICS_BUDGET,
             background::worker_sample_pass,
         ),
         periodic(
             scheduler,
             "instance-metrics",
-            Duration::from_secs(metrics.instance_interval_secs.max(1)),
+            Duration::from_secs(metrics.instance_interval_secs.get()),
             METRICS_BUDGET,
             background::instance_metrics_pass,
         ),

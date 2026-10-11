@@ -28,7 +28,7 @@ pub fn start_otlp(state: Arc<ServerState>, scheduler: Arc<Scheduler>) {
     let Some(endpoint) = state.config.metrics_args.otlp_endpoint.clone() else {
         return;
     };
-    let interval = Duration::from_secs(state.config.metrics_args.otlp_push_interval_secs.max(1));
+    let interval = Duration::from_secs(state.config.metrics_args.otlp_push_interval_secs.get());
 
     let exporter = match opentelemetry_otlp::MetricExporter::builder()
         .with_http()

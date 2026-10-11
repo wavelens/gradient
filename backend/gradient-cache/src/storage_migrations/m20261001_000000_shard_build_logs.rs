@@ -33,7 +33,7 @@ impl StorageMigration for Migration {
         Box::pin(async move {
             match unit {
                 "local" => {
-                    let logs = Path::new(&state.config.server.base_dir).join("logs");
+                    let logs = state.config.server.base_dir.join("logs");
                     let relocated = relocate_flat_entries(&logs).await?;
                     info!(relocated, "moved flat build logs into their shard");
                 }

@@ -119,11 +119,7 @@ pub async fn oidc_login_create(state: State<Arc<ServerState>>) -> Result<OidcAut
         "{}/api/v1/auth/oidc/callback",
         state.config.server.serve_url
     );
-    let scope = oidc
-        .scopes
-        .as_deref()
-        .unwrap_or("openid email profile")
-        .to_string();
+    let scope = oidc.scopes.join(" ");
 
     let csrf_state = random_url_safe(32);
     let nonce = random_url_safe(32);

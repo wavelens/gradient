@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use std::num::NonZeroU64;
+
 use clap::Args;
 use gradient_derive::config_group;
 
@@ -27,8 +29,8 @@ pub struct EvalArgs {
     pub cache_max_age_days: u64,
 
     /// Seconds between eval cache eviction passes.
-    #[arg(default_value_t = 3600)]
-    pub cache_sweep_interval_secs: u64,
+    #[arg(default_value = "3600")]
+    pub cache_sweep_interval_secs: NonZeroU64,
 }
 
 impl EvalArgs {

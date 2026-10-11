@@ -91,7 +91,7 @@ mod tests {
             .append_query_results([applied])
             .into_connection();
         let tmp = tempfile::tempdir().unwrap();
-        let nar = NarStore::local(tmp.path().to_str().unwrap()).unwrap();
+        let nar = NarStore::local(tmp.path()).unwrap();
 
         let state = test_server_state(nar, db, |_| {});
         assert_eq!(step(&state).await.unwrap(), Step::Idle);

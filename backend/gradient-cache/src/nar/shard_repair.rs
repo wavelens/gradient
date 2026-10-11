@@ -172,7 +172,7 @@ const UNREFERENCED_PROBE_BATCH: usize = 5000;
 /// Reclaiming it would strand a zombie `cached_path` that the dispatch gate is trusting. A grace of
 /// `<= 0` is for tests only.
 fn past_upload_grace(state: &ServerState, on_disk: &[(String, i64)]) -> Vec<String> {
-    let grace_secs = state.config.gc.nar_upload_grace_hours.max(0) * 3600;
+    let grace_secs = i64::from(state.config.gc.nar_upload_grace_hours) * 3600;
     let cutoff = if grace_secs > 0 {
         now().and_utc().timestamp() - grace_secs
     } else {
@@ -245,7 +245,7 @@ mod tests {
     }
 
     fn make_state(base: &Path, unreferenced: Vec<&str>) -> Arc<ServerState> {
-        let nar_storage = NarStore::local(base.to_str().unwrap()).unwrap();
+        let nar_storage = NarStore::local(base).unwrap();
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             .append_query_results([unreferenced.into_iter().map(hash_row).collect::<Vec<_>>()])
             .append_query_results([Vec::<gradient_entity::cached_path::Model>::new()])
@@ -353,7 +353,7 @@ mod tests {
         let orphan = "ddccbbaa99999999999999999999999999";
         write_nar_file(tmp.path(), orphan);
 
-        let nar_storage = NarStore::local(tmp.path().to_str().unwrap()).unwrap();
+        let nar_storage = NarStore::local(tmp.path()).unwrap();
         let only_the_zombie_load = MockDatabase::new(DatabaseBackend::Postgres)
             .append_query_results([Vec::<gradient_entity::cached_path::Model>::new()])
             .into_connection();
@@ -387,7 +387,7 @@ mod tests {
             .append_query_results([vec![row]])
             .into_connection();
 
-        let nar_storage = NarStore::local(tmp.path().to_str().unwrap()).unwrap();
+        let nar_storage = NarStore::local(tmp.path()).unwrap();
         let state = test_server_state(nar_storage, db, |_| {});
 
         let zombies = zombie_hashes(&state, "cc", &HashSet::new()).await.unwrap();
@@ -404,7 +404,7 @@ mod tests {
 
         write_nar_file(tmp.path(), live);
 
-        let nar_storage = NarStore::local(tmp.path().to_str().unwrap()).unwrap();
+        let nar_storage = NarStore::local(tmp.path()).unwrap();
         let rows = vec![
             gradient_entity::cached_path::Model {
                 id: CachedPathId::now_v7(),

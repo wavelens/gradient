@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use std::num::NonZeroU64;
+
 use clap::Args;
 use gradient_derive::config_group;
 
@@ -11,8 +13,8 @@ use gradient_derive::config_group;
 #[derive(Args, Debug, Clone)]
 pub struct GcArgs {
     /// Seconds between garbage collection passes.
-    #[arg(default_value_t = 3600)]
-    pub interval_secs: u64,
+    #[arg(default_value = "3600")]
+    pub interval_secs: NonZeroU64,
 
     /// Hours to keep a cached path outside the live closure of retained evaluations after its
     /// last fetch, or its upload if never fetched. These hours always come on top of
@@ -24,19 +26,19 @@ pub struct GcArgs {
     /// Hours before the deletion of an unreferenced NAR object, covering the window between its
     /// upload and the commit of its database rows.
     #[arg(default_value_t = 24)]
-    pub nar_upload_grace_hours: i64,
+    pub nar_upload_grace_hours: u32,
 
     /// Hours before the deletion of a derivation outside the build closure of every retained
     /// evaluation. Quick re-evaluations can reuse the derivation during this grace. Set it to
     /// `0` to delete such derivations on the next run.
     #[arg(default_value_t = 24)]
-    pub orphan_derivation_hours: i64,
+    pub orphan_derivation_hours: u32,
 
     /// Hours an evaluation can stay in one phase before counting as stuck. Stuck evaluations no
     /// longer block evaluation garbage collection. Set it to `0` to treat no evaluation as
     /// stuck.
     #[arg(default_value_t = 24)]
-    pub wedged_eval_hours: i64,
+    pub wedged_eval_hours: u32,
 
     /// Seconds from the end of one background deep garbage collection round to the start of the
     /// next. Set it to `0` to run rounds only on request.

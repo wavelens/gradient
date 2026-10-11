@@ -20,7 +20,8 @@ pub struct OidcArgs {
     pub client_id: Option<String>,
     pub client_secret_file: Option<String>,
     /// OIDC scopes to request.
-    pub scopes: Option<String>,
+    #[arg(value_delimiter = ',', default_value = "openid,email,profile")]
+    pub scopes: Vec<String>,
     /// OIDC discovery URL.
     pub discovery_url: Option<String>,
 }

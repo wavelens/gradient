@@ -91,8 +91,8 @@ async fn authorize_redirect_carries_pkce_and_cookie_holds_verifier() {
         required: false,
         client_id: Some("test-client".into()),
         client_secret_file: Some(secret_path.to_string_lossy().into_owned()),
-        scopes: None,
         discovery_url: Some(base.clone()),
+        ..Default::default()
     };
 
     let config = Arc::new(RuntimeConfig::from_cli(&cli).expect("valid test config"));

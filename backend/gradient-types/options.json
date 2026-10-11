@@ -80,7 +80,7 @@
     "field": "base_dir",
     "flag": "base-dir",
     "env": "GRADIENT_BASE_DIR",
-    "type": "String",
+    "type": "PathBuf",
     "description": "Directory holding Gradient's state, NAR files and caches.",
     "default": ".",
     "values": []
@@ -113,7 +113,7 @@
     "field": "retention_days",
     "flag": "retention-days",
     "env": "GRADIENT_RETENTION_DAYS",
-    "type": "i64",
+    "type": "u32",
     "description": "Days to keep job assignment records, finished deliveries, worker connection history,\nwebhook and task action deliveries, expired sessions and CLI logins. Finished admin\ntasks, the audit log, per-build resource samples and finished cluster jobs share the same\nlimit. Removed resource samples no longer feed build predictions. Finished cluster jobs\nwithout remaining members go on the next hourly pass. Active cluster jobs and the newest\nfinished admin task of each kind stay exempt. Open worker connections stay until the\nnext connection of the same worker. Set it to `0` to keep every record forever.",
     "default": "90",
     "values": []
@@ -320,7 +320,7 @@
     "field": "max_connections",
     "flag": "database-max-connections",
     "env": "GRADIENT_DATABASE_MAX_CONNECTIONS",
-    "type": "u32",
+    "type": "NonZeroU32",
     "description": "Maximum connections of the scheduler and worker pool. Server processes each open up to\nthe sum of {option}`services.gradient.database.maxConnections`,\n{option}`services.gradient.database.cache.maxConnections` and\n{option}`services.gradient.database.web.maxConnections`. PostgreSQL's `max_connections`\nmust accommodate that sum.",
     "default": "16",
     "values": []
@@ -340,7 +340,7 @@
     "field": "cache_max_connections",
     "flag": "database-cache-max-connections",
     "env": "GRADIENT_DATABASE_CACHE_MAX_CONNECTIONS",
-    "type": "u32",
+    "type": "NonZeroU32",
     "description": "Maximum connections of the cache query pool. It is separate from the scheduler pool to\nkeep a large evaluation's prefetch traffic from starving job assignment.",
     "default": "32",
     "values": []
@@ -360,7 +360,7 @@
     "field": "web_max_connections",
     "flag": "database-web-max-connections",
     "env": "GRADIENT_DATABASE_WEB_MAX_CONNECTIONS",
-    "type": "u32",
+    "type": "NonZeroU32",
     "description": "Maximum connections of the HTTP API pool.",
     "default": "8",
     "values": []
@@ -380,7 +380,7 @@
     "field": "max_request_size",
     "flag": "http-max-request-size",
     "env": "GRADIENT_HTTP_MAX_REQUEST_SIZE",
-    "type": "usize",
+    "type": "NonZeroUsize",
     "description": "Maximum HTTP request body size in bytes for most endpoints, to keep an unbounded body\nfrom exhausting server memory. Build request blob uploads use a fixed 20 MiB cap.",
     "default": "2097152",
     "values": []
@@ -390,7 +390,7 @@
     "field": "max_source_upload_size",
     "flag": "http-max-source-upload-size",
     "env": "GRADIENT_HTTP_MAX_SOURCE_UPLOAD_SIZE",
-    "type": "usize",
+    "type": "NonZeroUsize",
     "description": "Maximum size in bytes of a source upload to `POST /build-requests/source` (as sent by\n`gradient build`) and of a chunked manifest in total. The built-in reverse proxies raise\ntheir body size limit to fit it.",
     "default": "536870912",
     "values": []
@@ -400,7 +400,7 @@
     "field": "trusted_proxies",
     "flag": "http-trusted-proxies",
     "env": "GRADIENT_HTTP_TRUSTED_PROXIES",
-    "type": "String",
+    "type": "Vec<String>",
     "description": "CIDR ranges of peers allowed to set `X-Forwarded-For`. The defaults trust a reverse\nproxy on the same host.",
     "default": "127.0.0.1/8,::1/128",
     "values": []
@@ -410,7 +410,7 @@
     "field": "local_ips",
     "flag": "http-local-ips",
     "env": "GRADIENT_HTTP_LOCAL_IPS",
-    "type": "String",
+    "type": "Vec<String>",
     "description": "Clients in these CIDR ranges receive a cache's `local_priority`, if set and non-zero.",
     "default": "192.168.0.0/16,172.16.0.0/12,100.64.0.0/10,10.0.0.0/8,fc00::/7",
     "values": []
@@ -446,7 +446,7 @@
     "field": "max_connections",
     "flag": "proto-max-connections",
     "env": "GRADIENT_PROTO_MAX_CONNECTIONS",
-    "type": "usize",
+    "type": "NonZeroUsize",
     "description": "Maximum simultaneous `/proto` WebSocket connections.",
     "default": "256",
     "values": []
@@ -479,7 +479,7 @@
     "field": "anonymous_cache_max_connections_per_ip",
     "flag": "proto-anonymous-cache-max-connections-per-ip",
     "env": "GRADIENT_PROTO_ANONYMOUS_CACHE_MAX_CONNECTIONS_PER_IP",
-    "type": "usize",
+    "type": "NonZeroUsize",
     "description": "Maximum simultaneous anonymous `/cache/proto` connections per client IP.",
     "default": "32",
     "values": []
@@ -489,7 +489,7 @@
     "field": "concurrency",
     "flag": "upload-concurrency",
     "env": "GRADIENT_UPLOAD_CONCURRENCY",
-    "type": "usize",
+    "type": "NonZeroUsize",
     "description": "Number of uploads over 1 MiB (NARs and eval cache blobs) admitted at once across all\nworkers and REST clients. Smaller uploads have a window of 128 of their own. Uploads\nhold their permit until the object is in storage. Other uploads wait for a permit in\nthe meantime.",
     "default": "8",
     "values": []
@@ -499,7 +499,7 @@
     "field": "bytes_budget",
     "flag": "upload-bytes-budget",
     "env": "GRADIENT_UPLOAD_BYTES_BUDGET",
-    "type": "u64",
+    "type": "NonZeroU64",
     "description": "Total size in bytes of admitted uploads. Uploads that exceed the remaining budget wait.\nAn upload larger than the whole budget can run alone once nothing else is in flight.",
     "default": "8589934592",
     "values": []
@@ -509,7 +509,7 @@
     "field": "lease_idle_secs",
     "flag": "upload-lease-idle-secs",
     "env": "GRADIENT_UPLOAD_LEASE_IDLE_SECS",
-    "type": "u64",
+    "type": "NonZeroU64",
     "description": "Seconds granted worker uploads can go without data before they lose their permit and\ntheir workers receive a request to retry.",
     "default": "300",
     "values": []
@@ -519,7 +519,7 @@
     "field": "rest_wait_secs",
     "flag": "upload-rest-wait-secs",
     "env": "GRADIENT_UPLOAD_REST_WAIT_SECS",
-    "type": "u64",
+    "type": "NonZeroU64",
     "description": "Seconds NAR uploads to the cache upload endpoint wait for a permit before getting a 503\nanswer with `Retry-After`.",
     "default": "30",
     "values": []
@@ -529,7 +529,7 @@
     "field": "max_upload_size",
     "flag": "nar-max-upload-size",
     "env": "GRADIENT_NAR_MAX_UPLOAD_SIZE",
-    "type": "usize",
+    "type": "NonZeroUsize",
     "description": "Maximum size in bytes of a NAR uploaded to the cache upload endpoint.",
     "default": "536870912",
     "values": []
@@ -572,7 +572,7 @@
     "field": "storage_open_timeout_secs",
     "flag": "nar-storage-open-timeout-secs",
     "env": "GRADIENT_NAR_STORAGE_OPEN_TIMEOUT_SECS",
-    "type": "u64",
+    "type": "NonZeroU64",
     "description": "Seconds to wait for a NAR object stream from storage (for example an S3 GET) before\nanswering the worker with `NarAbort`. Workers retry after a `NarAbort`.",
     "default": "60",
     "values": []
@@ -582,7 +582,7 @@
     "field": "send_chunk_timeout_secs",
     "flag": "nar-send-chunk-timeout-secs",
     "env": "GRADIENT_NAR_SEND_CHUNK_TIMEOUT_SECS",
-    "type": "u64",
+    "type": "NonZeroU64",
     "description": "Seconds an outbound `NarPush` chunk can wait for the WebSocket to drain before an abort\nof the transfer with `NarAbort`.",
     "default": "30",
     "values": []
@@ -602,7 +602,7 @@
     "field": "max_concurrent_serves",
     "flag": "nar-max-concurrent-serves",
     "env": "GRADIENT_NAR_MAX_CONCURRENT_SERVES",
-    "type": "usize",
+    "type": "NonZeroUsize",
     "description": "NAR serving tasks that can run at once per worker connection, bounding memory and\nstorage fan-out for large batches.",
     "default": "8",
     "values": []
@@ -612,7 +612,7 @@
     "field": "max_concurrent_downloads",
     "flag": "nar-max-concurrent-downloads",
     "env": "GRADIENT_NAR_MAX_CONCURRENT_DOWNLOADS",
-    "type": "usize",
+    "type": "NonZeroUsize",
     "description": "NAR downloads from storage that can run at once across all connections, keeping the\nstorage near its best total throughput.",
     "default": "16",
     "values": []
@@ -632,7 +632,7 @@
     "field": "upstream_query_concurrency",
     "flag": "cache-upstream-query-concurrency",
     "env": "GRADIENT_CACHE_UPSTREAM_QUERY_CONCURRENCY",
-    "type": "usize",
+    "type": "NonZeroUsize",
     "description": "Maximum simultaneous narinfo requests to upstream caches across the server.",
     "default": "32",
     "values": []
@@ -642,7 +642,7 @@
     "field": "max_storage_gb",
     "flag": "cache-max-storage-gb",
     "env": "GRADIENT_CACHE_MAX_STORAGE_GB",
-    "type": "i32",
+    "type": "u32",
     "description": "Instance-wide limit on cached NAR storage in GB. New evaluations wait while every\nwritable cache of a project has less than 10 MiB left. Set it to `0` to disable the\nlimit. Per-cache limits still apply.",
     "default": "0",
     "values": []
@@ -652,7 +652,7 @@
     "field": "sign_sweep_interval_secs",
     "flag": "cache-sign-sweep-interval-secs",
     "env": "GRADIENT_CACHE_SIGN_SWEEP_INTERVAL_SECS",
-    "type": "u64",
+    "type": "NonZeroU64",
     "description": "Seconds between NAR signature backfill passes. Uploads receive their signature\nimmediately. Only subscription placeholders and unsigned leftovers need the pass.",
     "default": "3600",
     "values": []
@@ -662,7 +662,7 @@
     "field": "debug_index_interval_secs",
     "flag": "cache-debug-index-interval-secs",
     "env": "GRADIENT_CACHE_DEBUG_INDEX_INTERVAL_SECS",
-    "type": "u64",
+    "type": "NonZeroU64",
     "description": "Seconds between passes of the DWARF build ID index backfill. Uploads enter the index\nimmediately. Only paths cached before the index existed or interrupted by a restart need\nthe pass.",
     "default": "300",
     "values": []
@@ -672,7 +672,7 @@
     "field": "interval_secs",
     "flag": "gc-interval-secs",
     "env": "GRADIENT_GC_INTERVAL_SECS",
-    "type": "u64",
+    "type": "NonZeroU64",
     "description": "Seconds between garbage collection passes.",
     "default": "3600",
     "values": []
@@ -692,7 +692,7 @@
     "field": "nar_upload_grace_hours",
     "flag": "gc-nar-upload-grace-hours",
     "env": "GRADIENT_GC_NAR_UPLOAD_GRACE_HOURS",
-    "type": "i64",
+    "type": "u32",
     "description": "Hours before the deletion of an unreferenced NAR object, covering the window between its\nupload and the commit of its database rows.",
     "default": "24",
     "values": []
@@ -702,7 +702,7 @@
     "field": "orphan_derivation_hours",
     "flag": "gc-orphan-derivation-hours",
     "env": "GRADIENT_GC_ORPHAN_DERIVATION_HOURS",
-    "type": "i64",
+    "type": "u32",
     "description": "Hours before the deletion of a derivation outside the build closure of every retained\nevaluation. Quick re-evaluations can reuse the derivation during this grace. Set it to\n`0` to delete such derivations on the next run.",
     "default": "24",
     "values": []
@@ -712,7 +712,7 @@
     "field": "wedged_eval_hours",
     "flag": "gc-wedged-eval-hours",
     "env": "GRADIENT_GC_WEDGED_EVAL_HOURS",
-    "type": "i64",
+    "type": "u32",
     "description": "Hours an evaluation can stay in one phase before counting as stuck. Stuck evaluations no\nlonger block evaluation garbage collection. Set it to `0` to treat no evaluation as\nstuck.",
     "default": "24",
     "values": []
@@ -772,7 +772,7 @@
     "field": "cache_sweep_interval_secs",
     "flag": "eval-cache-sweep-interval-secs",
     "env": "GRADIENT_EVAL_CACHE_SWEEP_INTERVAL_SECS",
-    "type": "u64",
+    "type": "NonZeroU64",
     "description": "Seconds between eval cache eviction passes.",
     "default": "3600",
     "values": []
@@ -782,7 +782,7 @@
     "field": "max_attempts",
     "flag": "build-max-attempts",
     "env": "GRADIENT_BUILD_MAX_ATTEMPTS",
-    "type": "u32",
+    "type": "NonZeroU32",
     "description": "Build or eval job attempts before a transient failure is permanent.",
     "default": "3",
     "values": []
@@ -792,7 +792,7 @@
     "field": "substitute_miss_escalation_threshold",
     "flag": "build-substitute-miss-escalation-threshold",
     "env": "GRADIENT_BUILD_SUBSTITUTE_MISS_ESCALATION_THRESHOLD",
-    "type": "u32",
+    "type": "NonZeroU32",
     "description": "Free re-queues of a derivation available in a cache within one evaluation, before\nbuilding the derivation like any other. A re-queue does not count as a build attempt.\nThis threshold is the only bound on that loop.",
     "default": "2",
     "values": []
@@ -802,7 +802,7 @@
     "field": "inputs_unavailable_max_loops",
     "flag": "build-inputs-unavailable-max-loops",
     "env": "GRADIENT_BUILD_INPUTS_UNAVAILABLE_MAX_LOOPS",
-    "type": "u32",
+    "type": "NonZeroU32",
     "description": "Times a build can retry after missing inputs before failing instead of retrying again.",
     "default": "3",
     "values": []
@@ -842,17 +842,20 @@
     "field": "scoring_policy",
     "flag": "scheduler-scoring-policy",
     "env": "GRADIENT_SCHEDULER_SCORING_POLICY",
-    "type": "String",
+    "type": "ScoringPolicy",
     "description": "Policy ranking queued jobs for a requesting worker. Factors of `simple`: path\navailability, NAR size, dependency count, waiting time, builtins and fetch worker\nreservation. Factors of `resource-aware`: the same plus memory fit, worker saturation,\nCPU, disk and network affinity and `preferLocalBuild`.",
     "default": "resource-aware",
-    "values": []
+    "values": [
+      "simple",
+      "resource-aware"
+    ]
   },
   {
     "group": "scheduler",
     "field": "cluster_prepare_timeout_secs",
     "flag": "scheduler-cluster-prepare-timeout-secs",
     "env": "GRADIENT_SCHEDULER_CLUSTER_PREPARE_TIMEOUT_SECS",
-    "type": "u64",
+    "type": "NonZeroU64",
     "description": "Seconds for every member of a cluster job attempt to accept its assignment. Attempts not\naccepted by all members in time abort, and their cluster jobs return to the queue.",
     "default": "30",
     "values": []
@@ -862,7 +865,7 @@
     "field": "cluster_reserve_after_secs",
     "flag": "scheduler-cluster-reserve-after-secs",
     "env": "GRADIENT_SCHEDULER_CLUSTER_RESERVE_AFTER_SECS",
-    "type": "u64",
+    "type": "NonZeroU64",
     "description": "Seconds cluster jobs that can start wait for enough simultaneously idle workers before\nreserving a placement. Reserved workers receive no new single jobs until the cluster\njob's start or the reservation's expiry.",
     "default": "600",
     "values": []
@@ -872,7 +875,7 @@
     "field": "cluster_reserve_timeout_secs",
     "flag": "scheduler-cluster-reserve-timeout-secs",
     "env": "GRADIENT_SCHEDULER_CLUSTER_RESERVE_TIMEOUT_SECS",
-    "type": "u64",
+    "type": "NonZeroU64",
     "description": "Seconds to hold a cluster job reservation before releasing it and planning the cluster\njob again.",
     "default": "1800",
     "values": []
@@ -892,7 +895,7 @@
     "field": "rollup_interval_secs",
     "flag": "metrics-rollup-interval-secs",
     "env": "GRADIENT_METRICS_ROLLUP_INTERVAL_SECS",
-    "type": "u64",
+    "type": "NonZeroU64",
     "description": "Seconds between metric rollup passes.",
     "default": "60",
     "values": []
@@ -902,7 +905,7 @@
     "field": "retention_raw_days",
     "flag": "metrics-retention-raw-days",
     "env": "GRADIENT_METRICS_RETENTION_RAW_DAYS",
-    "type": "i64",
+    "type": "u32",
     "description": "Days to keep raw phase and worker samples and the per-minute cache and upstream traffic\ncounters. Set it to `0` to keep them forever.",
     "default": "14",
     "values": []
@@ -912,7 +915,7 @@
     "field": "retention_rollup_days",
     "flag": "metrics-retention-rollup-days",
     "env": "GRADIENT_METRICS_RETENTION_ROLLUP_DAYS",
-    "type": "i64",
+    "type": "u32",
     "description": "Days to keep minute and hour rollups. Day and week rollups stay forever. Set it to `0`\nto keep every rollup forever.",
     "default": "400",
     "values": []
@@ -932,7 +935,7 @@
     "field": "cache_flush_interval_secs",
     "flag": "metrics-cache-flush-interval-secs",
     "env": "GRADIENT_METRICS_CACHE_FLUSH_INTERVAL_SECS",
-    "type": "u64",
+    "type": "NonZeroU64",
     "description": "Seconds between flushes of cache traffic counters to the database.",
     "default": "10",
     "values": []
@@ -942,7 +945,7 @@
     "field": "worker_sample_interval_secs",
     "flag": "metrics-worker-sample-interval-secs",
     "env": "GRADIENT_METRICS_WORKER_SAMPLE_INTERVAL_SECS",
-    "type": "u64",
+    "type": "NonZeroU64",
     "description": "Seconds between worker metric samples.",
     "default": "15",
     "values": []
@@ -952,7 +955,7 @@
     "field": "instance_interval_secs",
     "flag": "metrics-instance-interval-secs",
     "env": "GRADIENT_METRICS_INSTANCE_INTERVAL_SECS",
-    "type": "u64",
+    "type": "NonZeroU64",
     "description": "Seconds between updates of the instance-wide metric window.",
     "default": "30",
     "values": []
@@ -982,7 +985,7 @@
     "field": "otlp_push_interval_secs",
     "flag": "metrics-otlp-push-interval-secs",
     "env": "GRADIENT_METRICS_OTLP_PUSH_INTERVAL_SECS",
-    "type": "u64",
+    "type": "NonZeroU64",
     "description": "Seconds between OTLP metric pushes.",
     "default": "30",
     "values": []
@@ -1042,7 +1045,7 @@
     "field": "chunk_bytes",
     "flag": "log-chunk-bytes",
     "env": "GRADIENT_LOG_CHUNK_BYTES",
-    "type": "usize",
+    "type": "NonZeroUsize",
     "description": "Target uncompressed size in bytes of a stored build log chunk. Chunks split on line\nboundaries, and a long line can exceed the target.",
     "default": "262144",
     "values": []
@@ -1108,9 +1111,9 @@
     "field": "scopes",
     "flag": "oidc-scopes",
     "env": "GRADIENT_OIDC_SCOPES",
-    "type": "Option<String>",
+    "type": "Vec<String>",
     "description": "OIDC scopes to request.",
-    "default": null,
+    "default": "openid,email,profile",
     "values": []
   },
   {
@@ -1366,7 +1369,7 @@
     "field": "id",
     "flag": "github-app-id",
     "env": "GRADIENT_GITHUB_APP_ID",
-    "type": "Option<u64>",
+    "type": "Option<NonZeroU64>",
     "description": "GitHub App ID, shown on the App's settings page.",
     "default": null,
     "values": []

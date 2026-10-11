@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use std::num::NonZeroUsize;
+
 use clap::Args;
 use gradient_derive::config_group;
 
@@ -20,7 +22,7 @@ pub struct ProtoArgs {
 
     /// Maximum simultaneous `/proto` WebSocket connections.
     #[arg(id = "proto-max-connections", default_value = "256")]
-    pub max_connections: usize,
+    pub max_connections: NonZeroUsize,
 
     /// Seconds a connected worker can stay silent before counting as dead, with its jobs
     /// re-queued. Workers heartbeat every 10 seconds, giving the default a tolerance of twelve
@@ -35,6 +37,6 @@ pub struct ProtoArgs {
     pub anonymous_cache_enable: bool,
 
     /// Maximum simultaneous anonymous `/cache/proto` connections per client IP.
-    #[arg(default_value_t = 32)]
-    pub anonymous_cache_max_connections_per_ip: usize,
+    #[arg(default_value = "32")]
+    pub anonymous_cache_max_connections_per_ip: NonZeroUsize,
 }

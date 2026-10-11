@@ -28,7 +28,7 @@ pub async fn flush(ctx: &DbContext, stats: &MinuteStats, gauges: &Gauges) {
 }
 
 pub fn child_spec(ctx: DbContext) -> ChildSpec {
-    let secs = ctx.config.metrics_args.cache_flush_interval_secs.max(1);
+    let secs = ctx.config.metrics_args.cache_flush_interval_secs.get();
 
     ChildSpec::periodic(
         "infra_metric_flush",

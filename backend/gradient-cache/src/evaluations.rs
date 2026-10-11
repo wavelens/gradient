@@ -77,7 +77,7 @@ pub(crate) async fn cleanup_old_evaluations(state: Arc<ServerState>) -> Result<(
 pub(crate) async fn collect_orphan_derivations(state: &Arc<ServerState>) -> Result<usize> {
     let (candidates, scanned_at) = gradient_db::maintenance::gc::orphan_derivation_candidates(
         &state.worker_db,
-        state.config.gc.orphan_derivation_hours,
+        i64::from(state.config.gc.orphan_derivation_hours),
     )
     .await?;
 

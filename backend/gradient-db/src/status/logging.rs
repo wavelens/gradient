@@ -36,7 +36,7 @@ pub async fn finalize_build_log(
         logs,
         log_id,
         &(earlier + &inline),
-        ctx.config.log.chunk_bytes,
+        ctx.config.log.chunk_bytes.get(),
     )
     .await
     .with_context(|| format!("chunk the build log of attempt {log_id}"))?;

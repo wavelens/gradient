@@ -288,7 +288,7 @@ async fn eval_failed(
             evaluation_id,
         )
         .await?;
-        if crate::policy::retry_failed_eval(kind, attempts, ctx.config.build.max_attempts) {
+        if crate::policy::retry_failed_eval(kind, attempts, ctx.config.build.max_attempts.get()) {
             warn!(%evaluation_id, attempts, %error, "eval job hit an outage; re-queued");
             requeue_evaluation(ctx, evaluation_id).await?;
             return Ok(());
@@ -597,7 +597,7 @@ async fn build_failed(
 
     let derivation_id = shared_build.derivation;
     let attempt = shared_build.attempt;
-    let max_attempts = ctx.config.build.max_attempts;
+    let max_attempts = ctx.config.build.max_attempts.get();
 
     let prior_inputs_unavailable = if matches!(kind, BuildFailureKind::InputsUnavailable) {
         gradient_db::scheduling::build_attempt::inputs_unavailable_attempt_count(
@@ -610,7 +610,7 @@ async fn build_failed(
         0
     };
 
-    let max_loops = ctx.config.build.inputs_unavailable_max_loops;
+    let max_loops = ctx.config.build.inputs_unavailable_max_loops.get();
     let inputs_circuit_open = matches!(kind, BuildFailureKind::InputsUnavailable)
         && policy::inputs_unavailable_circuit_open(prior_inputs_unavailable, max_loops);
     if matches!(kind, BuildFailureKind::InputsUnavailable) && !missing_paths.is_empty() {
@@ -631,7 +631,7 @@ async fn build_failed(
     let substitution = policy::Substitution {
         cache_available: shared_build.cache_available,
         misses: substitute_misses(ctx, derivation_build, kind, shared_build.cache_available).await,
-        threshold: i64::from(ctx.config.build.substitute_miss_escalation_threshold),
+        threshold: i64::from(ctx.config.build.substitute_miss_escalation_threshold.get()),
     };
     let outcome = match policy::decide_failure_outcome(kind, attempt, max_attempts, substitution) {
         FailureOutcome::Retry if inputs_circuit_open => FailureOutcome::Permanent,

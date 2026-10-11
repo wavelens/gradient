@@ -173,7 +173,7 @@ async fn claim_path(
     hash: &str,
     size: u64,
 ) -> anyhow::Result<Option<HeldPermit>> {
-    let wait = Duration::from_secs(state.config.upload.rest_wait_secs);
+    let wait = Duration::from_secs(state.config.upload.rest_wait_secs.get());
     match state
         .upload_admission
         .admit("ssh", ObjectKey::Nar(hash.to_owned()), size, wait)

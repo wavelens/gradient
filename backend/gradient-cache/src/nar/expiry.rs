@@ -50,7 +50,7 @@ pub(crate) async fn evict_expired_cached_paths(state: Arc<ServerState>) -> Resul
     let index = ExpiredCachedPaths {
         keep_hours: keep_hours(
             state.config.gc.nar_ttl_hours,
-            state.config.gc.nar_upload_grace_hours,
+            i64::from(state.config.gc.nar_upload_grace_hours),
         ),
         scanned_at: now(),
         state: Arc::clone(&state),

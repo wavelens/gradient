@@ -78,7 +78,7 @@ impl std::fmt::Debug for Scheduler {
 
 impl Scheduler {
     pub fn new(state: Arc<ServerState>) -> Self {
-        let policy = gradient_pool::score::policy_by_name(&state.config.scheduler.scoring_policy);
+        let policy = gradient_pool::score::policy_for(state.config.scheduler.scoring_policy);
         Self {
             state,
             core: Arc::new(tokio::sync::watch::channel(None).0),

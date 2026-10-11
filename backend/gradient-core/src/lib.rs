@@ -27,7 +27,6 @@ use gradient_util::shutdown::Shutdown;
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter,
 };
-use std::path::Path;
 use std::sync::Arc;
 
 #[derive(Debug, thiserror::Error)]
@@ -117,7 +116,7 @@ pub async fn init_state(cli: Cli) -> Result<Arc<ServerState>, InitError> {
         }
     }
 
-    let local_log_storage = FileLogStorage::new(Path::new(&cli.server.base_dir))
+    let local_log_storage = FileLogStorage::new(&cli.server.base_dir)
         .await
         .map_err(InitError::LogStorage)?;
 
@@ -176,7 +175,7 @@ pub async fn init_state(cli: Cli) -> Result<Arc<ServerState>, InitError> {
     } else {
         let store = NarStore::local(&cli.server.base_dir)
             .map_err(|e| InitError::LocalStorage(e.to_string()))?;
-        tracing::info!(path = %cli.server.base_dir, "NAR storage: local");
+        tracing::info!(path = %cli.server.base_dir.display(), "NAR storage: local");
         store
     };
 
@@ -196,11 +195,11 @@ pub async fn init_state(cli: Cli) -> Result<Arc<ServerState>, InitError> {
         Arc::new(local_log_storage)
     };
 
-    let upstream_query_concurrency = config.cache.upstream_query_concurrency;
-    let nar_downloads = config.nar.max_concurrent_downloads.max(1);
+    let upstream_query_concurrency = config.cache.upstream_query_concurrency.get();
+    let nar_downloads = config.nar.max_concurrent_downloads.get();
     let upload_limits = gradient_storage::admission::Limits {
-        concurrency: config.upload.concurrency.max(1),
-        bytes: config.upload.bytes_budget.max(1),
+        concurrency: config.upload.concurrency.get(),
+        bytes: config.upload.bytes_budget.get(),
     };
 
     Ok(Arc::new(ServerState {
@@ -214,9 +213,7 @@ pub async fn init_state(cli: Cli) -> Result<Arc<ServerState>, InitError> {
         manifest_state: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
         pending_credentials: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
         http,
-        upstream_query: Arc::new(tokio::sync::Semaphore::new(
-            upstream_query_concurrency.max(1),
-        )),
+        upstream_query: Arc::new(tokio::sync::Semaphore::new(upstream_query_concurrency)),
         nar_downloads: Arc::new(tokio::sync::Semaphore::new(nar_downloads)),
         upload_admission: gradient_storage::admission::UploadAdmission::new(upload_limits),
         git_host: gradient_git_host::GitHostRegistry::with_builtin(),

@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use std::num::NonZeroU32;
+
 use clap::Args;
 use gradient_derive::config_group;
 
@@ -18,8 +20,8 @@ pub struct DatabaseArgs {
     /// {option}`services.gradient.database.cache.maxConnections` and
     /// {option}`services.gradient.database.web.maxConnections`. PostgreSQL's `max_connections`
     /// must accommodate that sum.
-    #[arg(id = "database-max-connections", default_value_t = 16)]
-    pub max_connections: u32,
+    #[arg(id = "database-max-connections", default_value = "16")]
+    pub max_connections: NonZeroU32,
 
     /// Minimum connections kept open in the scheduler and worker pool.
     #[arg(default_value_t = 2)]
@@ -27,16 +29,16 @@ pub struct DatabaseArgs {
 
     /// Maximum connections of the cache query pool. It is separate from the scheduler pool to
     /// keep a large evaluation's prefetch traffic from starving job assignment.
-    #[arg(default_value_t = 32)]
-    pub cache_max_connections: u32,
+    #[arg(default_value = "32")]
+    pub cache_max_connections: NonZeroU32,
 
     /// Minimum connections kept open in the cache query pool.
     #[arg(default_value_t = 2)]
     pub cache_min_connections: u32,
 
     /// Maximum connections of the HTTP API pool.
-    #[arg(default_value_t = 8)]
-    pub web_max_connections: u32,
+    #[arg(default_value = "8")]
+    pub web_max_connections: NonZeroU32,
 
     /// Minimum connections kept open in the HTTP API pool.
     #[arg(default_value_t = 1)]

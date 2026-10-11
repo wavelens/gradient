@@ -106,9 +106,9 @@ impl Scheduler {
         let config = &self.state.config.scheduler;
         let policy = AgingPolicy {
             reserve_after: chrono::Duration::seconds(
-                i64::try_from(config.cluster_reserve_after_secs).unwrap_or(i64::MAX),
+                i64::try_from(config.cluster_reserve_after_secs.get()).unwrap_or(i64::MAX),
             ),
-            timeout: Duration::from_secs(config.cluster_reserve_timeout_secs),
+            timeout: Duration::from_secs(config.cluster_reserve_timeout_secs.get()),
         };
         match aging_step(snapshot, gradient_types::now(), Instant::now(), &policy) {
             AgingStep::Keep => {}
@@ -177,7 +177,12 @@ impl Scheduler {
         cluster: PendingCluster,
         seats: &[CommittedSeat],
     ) {
-        let timeout = self.state.config.scheduler.cluster_prepare_timeout_secs;
+        let timeout = self
+            .state
+            .config
+            .scheduler
+            .cluster_prepare_timeout_secs
+            .get();
         let roster = seats
             .iter()
             .map(|s| ClusterPeer {
@@ -264,7 +269,12 @@ impl Scheduler {
     }
 
     async fn prepare(&self, attempt: ClusterAttemptId, seats: Vec<CommittedSeat>) {
-        let timeout = self.state.config.scheduler.cluster_prepare_timeout_secs;
+        let timeout = self
+            .state
+            .config
+            .scheduler
+            .cluster_prepare_timeout_secs
+            .get();
         let hold_secs = u32::try_from(timeout)
             .unwrap_or(u32::MAX)
             .saturating_add(CLUSTER_HOLD_MARGIN_SECS);

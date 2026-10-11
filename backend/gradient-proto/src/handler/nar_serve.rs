@@ -80,8 +80,8 @@ pub(super) async fn serve_nar_request(
 ) -> anyhow::Result<()> {
     let nar_cfg = &state.config.nar;
     let limits = PassthroughLimits {
-        open: Duration::from_secs(nar_cfg.storage_open_timeout_secs),
-        chunk_read: Duration::from_secs(nar_cfg.send_chunk_timeout_secs),
+        open: Duration::from_secs(nar_cfg.storage_open_timeout_secs.get()),
+        chunk_read: Duration::from_secs(nar_cfg.send_chunk_timeout_secs.get()),
         chunk_bytes: nar_cfg.chunk_bytes as usize,
     };
     let Some(key) = store_hash(store_path) else {
@@ -146,7 +146,7 @@ async fn awaiting_upload(state: &Arc<ServerState>, hash: &str) -> bool {
     use gradient_entity::cached_path::{Column as CCachedPath, Entity as ECachedPath};
     use sea_orm::{ColumnTrait as _, EntityTrait as _, QueryFilter as _};
 
-    let grace = chrono::Duration::hours(state.config.gc.nar_upload_grace_hours.max(0));
+    let grace = chrono::Duration::hours(i64::from(state.config.gc.nar_upload_grace_hours));
     match ECachedPath::find()
         .filter(CCachedPath::Hash.eq(hash))
         .one(&state.worker_db)

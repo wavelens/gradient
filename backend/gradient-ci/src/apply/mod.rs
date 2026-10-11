@@ -53,7 +53,7 @@ pub struct ApplyInput {
     pub repository_override: Option<String>,
     pub wildcard_override: Option<String>,
     pub source_comment: Option<serde_json::Value>,
-    pub instance_max_storage_gb: i32,
+    pub instance_max_storage_gb: u32,
 }
 
 #[derive(Debug, Clone)]

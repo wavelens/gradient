@@ -219,7 +219,7 @@ mod tests {
     #[tokio::test]
     async fn pass_blobs_removes_orphan_blob() {
         let tmp = tempfile::tempdir().unwrap();
-        let nar = NarStore::local(tmp.path().to_str().unwrap()).unwrap();
+        let nar = NarStore::local(tmp.path()).unwrap();
         let project = ProjectId::now_v7();
         let hash = [0x11u8; 32];
         nar.put_blob(project.into_inner(), &hash, b"x".to_vec())
@@ -250,7 +250,7 @@ mod tests {
     #[tokio::test]
     async fn pass_blobs_purges_zombie_row() {
         let tmp = tempfile::tempdir().unwrap();
-        let nar = NarStore::local(tmp.path().to_str().unwrap()).unwrap();
+        let nar = NarStore::local(tmp.path()).unwrap();
         let project = ProjectId::now_v7();
         let hash = [0x22u8; 32];
 
@@ -291,7 +291,7 @@ mod tests {
             >::new(
             )])
             .into_connection();
-        let nar = NarStore::local(tmp.path().to_str().unwrap()).unwrap();
+        let nar = NarStore::local(tmp.path()).unwrap();
         let state = make_state(nar, log, db);
 
         let mut report = DeepGcReport::default();
@@ -322,7 +322,7 @@ mod tests {
                 sea_orm::Value::from(kept.into_inner()),
             )])]])
             .into_connection();
-        let nar = NarStore::local(tmp.path().to_str().unwrap()).unwrap();
+        let nar = NarStore::local(tmp.path()).unwrap();
         let state = make_state(nar, Arc::clone(&log), db);
 
         let mut report = DeepGcReport::default();

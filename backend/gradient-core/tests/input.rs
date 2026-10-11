@@ -74,36 +74,6 @@ fn port_in_range_too_large_rejected() {
 }
 
 #[test]
-fn greater_than_zero_valid() {
-    assert_eq!(greater_than_zero::<u32>("1").unwrap(), 1);
-    assert_eq!(greater_than_zero::<f32>("1.0").unwrap(), 1.0);
-}
-
-#[test]
-fn greater_than_zero_zero_rejected() {
-    assert_eq!(
-        greater_than_zero::<usize>("0").unwrap_err().to_string(),
-        "`0` is not larger than 0"
-    );
-}
-
-#[test]
-fn greater_than_zero_negative_rejected() {
-    assert_eq!(
-        greater_than_zero::<i32>("-1").unwrap_err().to_string(),
-        "`-1` is not larger than 0"
-    );
-}
-
-#[test]
-fn greater_than_zero_non_numeric_rejected() {
-    assert_eq!(
-        greater_than_zero::<u32>("a").unwrap_err().to_string(),
-        "`a` is not a valid number"
-    );
-}
-
-#[test]
 fn hex_roundtrip() {
     let original = "a1b2c3d4e5f6789012345678901234567890abcd";
     assert_eq!(vec_to_hex(&hex_to_vec(original).unwrap()), original);

@@ -23,7 +23,7 @@ pub async fn unpark_no_cache_for_project<C: ConnectionTrait>(
 pub async fn unpark_storage_full_for_project<C: ConnectionTrait>(
     db: &C,
     project: ProjectId,
-    instance_max_storage_gb: i32,
+    instance_max_storage_gb: u32,
 ) -> Result<Vec<MEvaluation>, sea_orm::DbErr> {
     if gradient_db::caches::capacity::project_caches_all_full(db, project, instance_max_storage_gb)
         .await?
@@ -38,7 +38,7 @@ pub async fn unpark_storage_full_for_project<C: ConnectionTrait>(
 
 pub async fn unpark_storage_full_all<C: ConnectionTrait>(
     db: &C,
-    instance_max_storage_gb: i32,
+    instance_max_storage_gb: u32,
 ) -> Result<Vec<MEvaluation>, sea_orm::DbErr> {
     let parked = EEvaluation::find()
         .filter(CEvaluation::Status.eq(EvaluationStatus::Waiting))

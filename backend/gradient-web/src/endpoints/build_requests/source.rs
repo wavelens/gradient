@@ -128,7 +128,7 @@ pub async fn source_chunk(
 ) -> WebResult<Json<BaseResponse<serde_json::Value>>> {
     require_safe_upload_id(&upload)?;
 
-    let max = state.config.http.max_source_upload_size as u64;
+    let max = u64::try_from(state.config.http.max_source_upload_size.get()).unwrap_or(u64::MAX);
     if offset + body.len() as u64 > max {
         return Err(BuildRequestRefusal::SourceUploadTooLarge { max }.into());
     }

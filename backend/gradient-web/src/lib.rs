@@ -426,7 +426,7 @@ pub fn create_router_with_scheduler(
         .route(
             "/build-requests/source",
             post(build_requests::source::post_source).layer(DefaultBodyLimit::max(
-                state.config.http.max_source_upload_size,
+                state.config.http.max_source_upload_size.get(),
             )),
         )
         .route(
@@ -803,13 +803,14 @@ pub fn create_router_with_scheduler(
         .supervise(sessions.child_spec(Arc::clone(&scheduler)));
     gradient_proto::outbound::start_outbound_loop(Arc::clone(&scheduler), Arc::clone(&sessions));
 
-    let proto_limiter = Arc::new(ProtoLimiter::new(state.config.proto.max_connections));
+    let proto_limiter = Arc::new(ProtoLimiter::new(state.config.proto.max_connections.get()));
 
     let cache_upload_api = Router::new()
         .route(
             "/caches/{cache}/nars",
-            post(caches::nars_upload)
-                .layer(DefaultBodyLimit::max(state.config.nar.max_upload_size)),
+            post(caches::nars_upload).layer(DefaultBodyLimit::max(
+                state.config.nar.max_upload_size.get(),
+            )),
         )
         .route(
             "/caches/{cache}/nars/{hash}/chunk",
@@ -835,7 +836,9 @@ pub fn create_router_with_scheduler(
         )?))
         .merge(cache_upload_api);
     let api = api.route_layer(axum::middleware::from_fn(metrics::track_http_metrics));
-    let api = api.layer(DefaultBodyLimit::max(state.config.http.max_request_size));
+    let api = api.layer(DefaultBodyLimit::max(
+        state.config.http.max_request_size.get(),
+    ));
 
     let mut app = Router::new()
         .nest("/api/v1", api)
@@ -896,7 +899,11 @@ pub fn create_router_with_scheduler(
         )?));
 
     let cache_per_ip = Arc::new(PerIpLimiter::new(
-        state.config.proto.anonymous_cache_max_connections_per_ip,
+        state
+            .config
+            .proto
+            .anonymous_cache_max_connections_per_ip
+            .get(),
     ));
     let cache_proto_route = Router::new()
         .route("/cache/{cache}/proto", get(caches::cache_proto))

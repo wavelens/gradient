@@ -122,8 +122,8 @@ impl Actor for SessionActor {
         };
 
         let nar_cfg = &state.config.nar;
-        let send_chunk_timeout = Duration::from_secs(nar_cfg.send_chunk_timeout_secs);
-        let max_serves = nar_cfg.max_concurrent_serves;
+        let send_chunk_timeout = Duration::from_secs(nar_cfg.send_chunk_timeout_secs.get());
+        let max_serves = nar_cfg.max_concurrent_serves.get();
         let (reader, writer) = socket.split(send_chunk_timeout, &state.shutdown);
         let tap = Arc::new(super::tap::ProtoTap {
             bus: state.events.clone(),
@@ -444,7 +444,7 @@ fn open_uploads(
         table: UploadTable::default(),
         partials: gradient_storage::PartialStore::new(state.config.server.nar_partial_dir())?,
         retain_up_to: state.config.nar.small_bytes,
-        idle_lease: Duration::from_secs(state.config.upload.lease_idle_secs),
+        idle_lease: Duration::from_secs(state.config.upload.lease_idle_secs.get()),
     };
     let forward = myself.clone();
     state.shutdown.spawn(async move {

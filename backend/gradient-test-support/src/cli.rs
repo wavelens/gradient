@@ -24,9 +24,7 @@ pub fn test_cli_with_crypt(crypt_file: String) -> Cli {
                 .prefix("gradient-test-")
                 .tempdir()
                 .expect("create test base_dir tempdir")
-                .keep()
-                .to_string_lossy()
-                .into_owned(),
+                .keep(),
             ..Default::default()
         },
         build: BuildArgs {
@@ -40,7 +38,7 @@ pub fn test_cli_with_crypt(crypt_file: String) -> Cli {
         },
         registration: RegistrationArgs { enable: false },
         proto: ProtoArgs {
-            max_connections: 16,
+            max_connections: std::num::NonZeroUsize::new(16).expect("non-zero"),
             discoverable: false,
             ..Default::default()
         },
