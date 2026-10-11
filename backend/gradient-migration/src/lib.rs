@@ -120,6 +120,7 @@ mod m20261009_000002_evaluation_statistics_target;
 mod m20261010_000000_evaluation_next_backfill;
 mod m20261010_000001_cache_pull_through;
 mod m20261011_000000_build_attempt_without_dispatch;
+mod m20261012_000000_unique_keys;
 
 pub struct UpgradeFloor {
     pub release: &'static str,
@@ -248,6 +249,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261010_000000_evaluation_next_backfill::Migration),
             Box::new(m20261010_000001_cache_pull_through::Migration),
             Box::new(m20261011_000000_build_attempt_without_dispatch::Migration),
+            Box::new(m20261012_000000_unique_keys::Migration),
         ]
     }
 }

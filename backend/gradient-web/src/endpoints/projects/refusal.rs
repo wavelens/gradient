@@ -34,6 +34,8 @@ pub(crate) enum ProjectRefusal {
     NotSubscribedToCache,
     #[error("the worker id belongs to a team worker")]
     WorkerIdBelongsToTeamWorker,
+    #[error("Worker is already registered in this project")]
+    WorkerIdRegistered,
     #[error("the worker id belongs to a team worker or a Gradient.CI connection")]
     WorkerIdBelongsToOtherConnection,
     #[error("team workers are managed on the team page")]
@@ -53,6 +55,7 @@ impl Refusal for ProjectRefusal {
             | Self::NotSubscribedToCache => RefusalStatus::BadRequest,
             Self::IntegrationNameTaken { .. }
             | Self::WorkerIdBelongsToTeamWorker
+            | Self::WorkerIdRegistered
             | Self::WorkerIdBelongsToOtherConnection
             | Self::TeamWorkerManagedOnTeamPage => RefusalStatus::Conflict,
         }

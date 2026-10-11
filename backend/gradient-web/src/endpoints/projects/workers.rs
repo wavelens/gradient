@@ -256,7 +256,8 @@ pub async fn post_project_worker(
             ..Default::default()
         },
     )
-    .await?;
+    .await
+    .map_err(|e| WebError::from_unique_violation(e, ProjectRefusal::WorkerIdRegistered))?;
 
     scheduler.request_reauth(&worker_id_str).await;
 

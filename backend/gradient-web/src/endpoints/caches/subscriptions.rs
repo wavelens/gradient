@@ -178,7 +178,8 @@ pub async fn post_approve_subscription_request(
             mode: mode.clone(),
         },
     )
-    .await?;
+    .await
+    .map_err(|e| WebError::from_db_err(e, Resource::CacheSubscription))?;
     tx.commit().await?;
 
     reauth_project_workers(&state.web_db, &scheduler, project.id).await;
