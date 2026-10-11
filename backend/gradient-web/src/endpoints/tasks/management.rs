@@ -12,6 +12,8 @@ use crate::audit::{RequestInfo, changed_fields, record as audit_record};
 use crate::authorization::MaybeApiKey;
 use crate::error::{WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json, paginate};
+use crate::json_body::JsonBody;
+use crate::names::{TaskDisplayName, TaskName};
 use crate::permissions::Permission;
 use crate::refusal::{Change, SharedRefusal};
 use crate::resource::Resource;
@@ -25,7 +27,7 @@ use gradient_types::events::audit::Action;
 use gradient_core::ServerState;
 use gradient_sources::check_task_updates;
 use gradient_types::consts::*;
-use gradient_types::input::{check_task_name, validate_display_name, vec_to_hex};
+use gradient_types::input::vec_to_hex;
 use gradient_types::triggers::{ConcurrencyPolicy, TriggerConfig, TriggerType};
 use gradient_types::wildcard::Wildcard;
 use gradient_types::*;
@@ -39,8 +41,8 @@ use std::sync::Arc;
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct MakeTaskRequest {
-    pub name: String,
-    pub display_name: String,
+    pub name: TaskName,
+    pub display_name: TaskDisplayName,
     pub description: String,
     pub repository: String,
     pub wildcard: String,
@@ -56,7 +58,7 @@ pub struct MakeTaskRequest {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct PatchTaskRequest {
-    pub name: Option<String>,
+    pub name: Option<TaskName>,
     pub display_name: Option<String>,
     pub description: Option<String>,
     pub repository: Option<String>,
@@ -189,19 +191,8 @@ pub async fn put(
     Extension(user): Extension<MUser>,
     Extension(api_key): Extension<MaybeApiKey>,
     Path(project): Path<String>,
-    Json(body): Json<MakeTaskRequest>,
+    JsonBody(body): JsonBody<MakeTaskRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    if check_task_name(body.name.clone().as_str()).is_err() {
-        return Err(WebError::invalid_name(Resource::TaskName));
-    }
-
-    if let Err(e) = validate_display_name(&body.display_name) {
-        return Err(SharedRefusal::InvalidDisplayName {
-            reason: e.to_string(),
-        }
-        .into());
-    }
-
     body.repository
         .parse::<RepositoryUrl>()
         .map_err(|e| TaskRefusal::InvalidRepositoryUrl(e.to_string()))?;
@@ -222,7 +213,7 @@ pub async fn put(
         .filter(
             Condition::all()
                 .add(CTask::Project.eq(project.id))
-                .add(CTask::Name.eq(body.name.clone())),
+                .add(CTask::Name.eq(body.name.as_str())),
         )
         .one(&state.web_db)
         .await?;
@@ -241,7 +232,7 @@ pub async fn put(
     let task = MTask {
         id: TaskId::now_v7(),
         project: project.id,
-        name: body.name.clone(),
+        name: body.name.to_string(),
         active: true,
         display_name: body.display_name.trim().to_string(),
         description: body.description.trim().to_string(),
@@ -394,7 +385,7 @@ pub async fn patch_task(
     }: TaskScope<RequiresUnmanaged<can::EditTask>>,
     state: State<Arc<ServerState>>,
     info: RequestInfo,
-    Json(body): Json<PatchTaskRequest>,
+    JsonBody(body): JsonBody<PatchTaskRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let owner = EventOwner {
         project: Some(project.id),
@@ -473,34 +464,25 @@ impl<'a> TaskPatcher<'a> {
         Self { state, atask }
     }
 
-    async fn apply_name(&mut self, project: &MProject, name: String) -> WebResult<()> {
-        if check_task_name(name.as_str()).is_err() {
-            return Err(WebError::invalid_name(Resource::TaskName));
-        }
+    async fn apply_name(&mut self, project: &MProject, name: TaskName) -> WebResult<()> {
         let existing = ETask::find()
             .filter(
                 Condition::all()
                     .add(CTask::Project.eq(project.id))
-                    .add(CTask::Name.eq(name.clone())),
+                    .add(CTask::Name.eq(name.as_str())),
             )
             .one(&self.state.web_db)
             .await?;
         if existing.is_some() {
             return Err(WebError::already_exists(Resource::TaskName));
         }
-        self.atask.name = Set(name);
+        self.atask.name = Set(name.into_inner());
         Ok(())
     }
 
     fn apply_display_name(&mut self, display_name: String) -> WebResult<()> {
-        let display_name = display_name.trim().to_string();
-        if let Err(e) = validate_display_name(&display_name) {
-            return Err(SharedRefusal::InvalidDisplayName {
-                reason: e.to_string(),
-            }
-            .into());
-        }
-        self.atask.display_name = Set(display_name);
+        let display_name = TaskDisplayName::try_from(display_name.trim().to_string())?;
+        self.atask.display_name = Set(display_name.into_inner());
         Ok(())
     }
 

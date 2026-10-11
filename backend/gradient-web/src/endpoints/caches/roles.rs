@@ -7,7 +7,9 @@
 use crate::audit::{RequestInfo, record as audit_record};
 use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
+use crate::json_body::JsonBody;
 use crate::lookup::require;
+use crate::names::RoleName;
 use crate::permissions::{
     PermissionEntry, available_cache_permissions, cache_mask_to_vec, is_builtin_cache_role,
     parse_cache_permission_list,
@@ -19,7 +21,6 @@ use axum::Json;
 use gradient_db::WebDb;
 use gradient_types::events::EventOwner;
 use gradient_types::events::audit::Action;
-use gradient_types::input::check_index_name;
 use gradient_types::*;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
@@ -63,13 +64,13 @@ pub struct CacheRoleListResponse {
 
 #[derive(Deserialize, Debug)]
 pub struct CreateCacheRoleRequest {
-    pub name: String,
+    pub name: RoleName,
     pub permissions: Vec<String>,
 }
 
 #[derive(Deserialize, Debug)]
 pub struct PatchCacheRoleRequest {
-    pub name: Option<String>,
+    pub name: Option<RoleName>,
     pub permissions: Option<Vec<String>>,
 }
 
@@ -106,12 +107,8 @@ pub async fn post_cache_role(
         cache, user, db, ..
     }: CacheScope<RequiresUnmanaged<can::ManageCacheRoles>>,
     info: RequestInfo,
-    Json(body): Json<CreateCacheRoleRequest>,
+    JsonBody(body): JsonBody<CreateCacheRoleRequest>,
 ) -> WebResult<Json<BaseResponse<CacheRoleResponse>>> {
-    if check_index_name(&body.name).is_err() {
-        return Err(WebError::invalid_name(Resource::RoleName));
-    }
-
     let mask = parse_cache_permission_list(&body.permissions, "GET /caches/{cache}/roles")?;
 
     let clash = ECacheRole::find()
@@ -129,7 +126,7 @@ pub async fn post_cache_role(
 
     let role = MCacheRole {
         id: RoleId::now_v7(),
-        name: body.name.clone(),
+        name: body.name.to_string(),
         cache: Some(cache.id),
         permission: mask,
         ..Default::default()
@@ -179,7 +176,7 @@ pub async fn patch_cache_role(
         ..
     }: CacheScope<RequiresUnmanaged<can::ManageCacheRoles>>,
     info: RequestInfo,
-    Json(body): Json<PatchCacheRoleRequest>,
+    JsonBody(body): JsonBody<PatchCacheRoleRequest>,
 ) -> WebResult<Json<BaseResponse<CacheRoleResponse>>> {
     let role_id: RoleId = params.param("role_id")?;
 
@@ -198,9 +195,6 @@ pub async fn patch_cache_role(
     let mut active: ACacheRole = role.into_active_model();
 
     if let Some(name) = body.name {
-        if check_index_name(&name).is_err() {
-            return Err(WebError::invalid_name(Resource::RoleName));
-        }
         let clash = ECacheRole::find()
             .filter(CCacheRole::Name.eq(name.as_str()))
             .filter(CCacheRole::Id.ne(role_id))
@@ -214,7 +208,7 @@ pub async fn patch_cache_role(
         if clash.is_some() {
             return Err(WebError::already_exists(Resource::RoleName));
         }
-        active.name = Set(name);
+        active.name = Set(name.into_inner());
     }
 
     if let Some(perms) = body.permissions {

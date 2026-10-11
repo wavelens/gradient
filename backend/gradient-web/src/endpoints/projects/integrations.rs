@@ -11,6 +11,8 @@ use super::refusal::ProjectRefusal;
 use crate::access::{load_integration_in_project, reject_managed_integration};
 use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
+use crate::json_body::JsonBody;
+use crate::names::IntegrationName;
 use crate::refusal::SharedRefusal;
 use crate::resource::Resource;
 use crate::scope::{Member, ProjectScope, Requires, RequiresUnmanaged, can};
@@ -23,7 +25,6 @@ use gradient_ci::IntegrationKind;
 use gradient_ci::actions::encrypt_secret_with_file;
 use gradient_core::ServerState;
 use gradient_types::GitHostType;
-use gradient_types::input::check_index_name;
 use gradient_types::*;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
@@ -108,7 +109,7 @@ fn normalize_allowed_ips(raw: Option<Vec<String>>) -> Result<Option<Vec<String>>
 
 #[derive(Deserialize, Debug)]
 pub struct CreateIntegrationRequest {
-    pub name: String,
+    pub name: IntegrationName,
     #[serde(default)]
     pub display_name: Option<String>,
     pub kind: String,
@@ -144,7 +145,7 @@ impl From<MIntegration> for IntegrationSummaryResponse {
 
 #[derive(Deserialize, Debug)]
 pub struct PatchIntegrationRequest {
-    pub name: Option<String>,
+    pub name: Option<IntegrationName>,
     pub display_name: Option<String>,
     pub git_host_type: Option<String>,
     pub endpoint_url: Option<String>,
@@ -213,12 +214,8 @@ pub async fn get_integration_summaries(
 pub async fn put_integration(
     ProjectScope { project, user, .. }: ProjectScope<RequiresUnmanaged<can::ManageIntegrations>>,
     state: State<Arc<ServerState>>,
-    Json(body): Json<CreateIntegrationRequest>,
+    JsonBody(body): JsonBody<CreateIntegrationRequest>,
 ) -> WebResult<Json<BaseResponse<IntegrationResponse>>> {
-    if check_index_name(&body.name).is_err() {
-        return Err(WebError::invalid_name(Resource::IntegrationName));
-    }
-
     let git_host = parse_git_host(&body.git_host_type)?;
 
     if matches!(git_host, GitHostType::GitHub) {
@@ -310,13 +307,13 @@ pub async fn put_integration(
         .map(|s| s.trim())
         .filter(|s| !s.is_empty())
         .map(|s| s.to_string())
-        .unwrap_or_else(|| body.name.clone());
+        .unwrap_or_else(|| body.name.to_string());
 
     let allowed_ips = normalize_allowed_ips(body.allowed_ips.clone())?.filter(|v| !v.is_empty());
     let integration = MIntegration {
         id: IntegrationId::now_v7(),
         project: project.id,
-        name: body.name,
+        name: body.name.into_inner(),
         display_name,
         kind,
         git_host_type: git_host,
@@ -359,7 +356,7 @@ pub async fn patch_integration(
         project, params, ..
     }: ProjectScope<Requires<can::ManageIntegrations>>,
     state: State<Arc<ServerState>>,
-    Json(body): Json<PatchIntegrationRequest>,
+    JsonBody(body): JsonBody<PatchIntegrationRequest>,
 ) -> WebResult<Json<BaseResponse<IntegrationResponse>>> {
     let integration_id: IntegrationId = params.param("id")?;
 
@@ -374,9 +371,6 @@ pub async fn patch_integration(
     let mut active: AIntegration = integration.into_active_model();
 
     if let Some(name) = body.name {
-        if check_index_name(&name).is_err() {
-            return Err(WebError::invalid_name(Resource::IntegrationName));
-        }
         let clash = EIntegration::find()
             .filter(CIntegration::Project.eq(project.id))
             .filter(CIntegration::Kind.eq(kind))
@@ -387,7 +381,7 @@ pub async fn patch_integration(
         if clash.is_some() {
             return Err(WebError::already_exists(Resource::IntegrationName));
         }
-        active.name = Set(name);
+        active.name = Set(name.into_inner());
     }
 
     if let Some(display_name) = body.display_name {

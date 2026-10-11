@@ -7,7 +7,8 @@
 use crate::audit::{RequestInfo, changed_fields, record as audit_record};
 use crate::error::{WebError, WebResult, require_create_permission};
 use crate::helpers::{ok_json, paginate};
-use crate::refusal::SharedRefusal;
+use crate::json_body::JsonBody;
+use crate::names::{ProjectDisplayName, ProjectName};
 use crate::resource::Resource;
 use crate::scope::{ProjectScope, Readable, RequiresUnmanaged, can};
 use anyhow::Context;
@@ -21,7 +22,6 @@ use gradient_core::ServerState;
 use gradient_scheduler::Scheduler;
 use gradient_sources::generate_ssh_key;
 use gradient_types::consts::BASE_ROLE_ADMIN_ID;
-use gradient_types::input::{check_index_name, validate_display_name};
 use gradient_types::*;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
@@ -35,8 +35,8 @@ use std::time::Duration;
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct MakeProjectRequest {
-    pub name: String,
-    pub display_name: String,
+    pub name: ProjectName,
+    pub display_name: ProjectDisplayName,
     pub description: String,
     pub public: Option<bool>,
     pub hide_build_requests: Option<bool>,
@@ -44,7 +44,7 @@ pub struct MakeProjectRequest {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct PatchProjectRequest {
-    pub name: Option<String>,
+    pub name: Option<ProjectName>,
     pub display_name: Option<String>,
     pub description: Option<String>,
     pub hide_build_requests: Option<bool>,
@@ -88,9 +88,9 @@ pub async fn get_project_name_available(
     Query(params): Query<HashMap<String, String>>,
 ) -> WebResult<Json<BaseResponse<bool>>> {
     let name = params.get("name").cloned().unwrap_or_default();
-    if check_index_name(&name).is_err() {
+    let Ok(name) = ProjectName::try_from(name) else {
         return Ok(ok_json(false));
-    }
+    };
     let exists = EProject::find()
         .filter(CProject::Name.eq(name.as_str()))
         .one(&state.web_db)
@@ -186,23 +186,12 @@ pub async fn put(
     info: RequestInfo,
     Extension(user): Extension<MUser>,
     Extension(scheduler): Extension<Arc<Scheduler>>,
-    Json(body): Json<MakeProjectRequest>,
+    JsonBody(body): JsonBody<MakeProjectRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     require_create_permission(state.config.permissions.create_project, &user)?;
 
-    if check_index_name(body.name.clone().as_str()).is_err() {
-        return Err(WebError::invalid_name(Resource::ProjectName));
-    }
-
-    if let Err(e) = validate_display_name(&body.display_name) {
-        return Err(SharedRefusal::InvalidDisplayName {
-            reason: e.to_string(),
-        }
-        .into());
-    }
-
     let existing_project = EProject::find()
-        .filter(CProject::Name.eq(body.name.clone()))
+        .filter(CProject::Name.eq(body.name.as_str()))
         .one(&state.web_db)
         .await?;
 
@@ -220,7 +209,7 @@ pub async fn put(
 
     let project = MProject {
         id: ProjectId::now_v7(),
-        name: body.name.clone(),
+        name: body.name.to_string(),
         display_name: body.display_name.trim().to_string(),
         description: body.description.trim().to_string(),
         public_key,
@@ -366,7 +355,7 @@ pub async fn patch_project(
         project, user, db, ..
     }: ProjectScope<RequiresUnmanaged<can::ManageProjectSettings>>,
     info: RequestInfo,
-    Json(body): Json<PatchProjectRequest>,
+    JsonBody(body): JsonBody<PatchProjectRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let fields = changed_fields([
         ("name", body.name.is_some()),
@@ -377,12 +366,8 @@ pub async fn patch_project(
     let mut aproject: AProject = project.into();
 
     if let Some(name) = body.name {
-        if check_index_name(name.as_str()).is_err() {
-            return Err(WebError::invalid_name(Resource::ProjectName));
-        }
-
         let existing_project = EProject::find()
-            .filter(CProject::Name.eq(name.clone()))
+            .filter(CProject::Name.eq(name.as_str()))
             .one(&db.web_db)
             .await?;
 
@@ -390,18 +375,12 @@ pub async fn patch_project(
             return Err(WebError::already_exists(Resource::ProjectName));
         }
 
-        aproject.name = Set(name);
+        aproject.name = Set(name.into_inner());
     }
 
     if let Some(display_name) = body.display_name {
-        let display_name = display_name.trim().to_string();
-        if let Err(e) = validate_display_name(&display_name) {
-            return Err(SharedRefusal::InvalidDisplayName {
-                reason: e.to_string(),
-            }
-            .into());
-        }
-        aproject.display_name = Set(display_name);
+        let display_name = ProjectDisplayName::try_from(display_name.trim().to_string())?;
+        aproject.display_name = Set(display_name.into_inner());
     }
 
     crate::patch_field_with!(aproject, body, description, |s: String| s

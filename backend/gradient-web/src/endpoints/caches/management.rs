@@ -8,8 +8,9 @@ use super::refusal::CacheRefusal;
 use crate::audit::{RequestInfo, changed_fields, record as audit_record};
 use crate::error::{WebError, WebResult, require_create_permission};
 use crate::helpers::ok_json;
+use crate::json_body::JsonBody;
+use crate::names::{CacheDisplayName, CacheName};
 use crate::permissions::CachePermission;
-use crate::refusal::SharedRefusal;
 use crate::resource::Resource;
 use crate::scope::{CacheScope, Readable, Requires, RequiresUnmanaged, can};
 use anyhow::Context;
@@ -23,7 +24,6 @@ use gradient_entity::project_cache::CacheSubscriptionMode;
 use gradient_sources::{format_cache_public_key, generate_signing_key};
 use gradient_types::events::EventOwner;
 use gradient_types::events::audit::Action;
-use gradient_types::input::{check_index_name, validate_display_name};
 use gradient_types::*;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
@@ -36,8 +36,8 @@ use std::sync::Arc;
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct MakeCacheRequest {
-    pub name: String,
-    pub display_name: String,
+    pub name: CacheName,
+    pub display_name: CacheDisplayName,
     pub description: String,
     pub priority: i32,
     pub public: Option<bool>,
@@ -70,7 +70,7 @@ pub struct CacheResponse {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct PatchCacheRequest {
-    pub name: Option<String>,
+    pub name: Option<CacheName>,
     pub display_name: Option<String>,
     pub description: Option<String>,
     pub priority: Option<i32>,
@@ -91,9 +91,9 @@ pub async fn get_cache_name_available(
     Query(params): Query<HashMap<String, String>>,
 ) -> WebResult<Json<BaseResponse<bool>>> {
     let name = params.get("name").cloned().unwrap_or_default();
-    if check_index_name(&name).is_err() {
+    let Ok(name) = CacheName::try_from(name) else {
         return Ok(ok_json(false));
-    }
+    };
     let exists = ECache::find()
         .filter(CCache::Name.eq(name.as_str()))
         .one(&state.web_db)
@@ -125,26 +125,15 @@ pub async fn put(
     state: State<Arc<ServerState>>,
     info: RequestInfo,
     Extension(user): Extension<MUser>,
-    Json(body): Json<MakeCacheRequest>,
+    JsonBody(body): JsonBody<MakeCacheRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     require_create_permission(state.config.permissions.create_cache, &user)?;
-
-    if check_index_name(body.name.clone().as_str()).is_err() {
-        return Err(WebError::invalid_name(Resource::CacheName));
-    }
-
-    if let Err(e) = validate_display_name(&body.display_name) {
-        return Err(SharedRefusal::InvalidDisplayName {
-            reason: e.to_string(),
-        }
-        .into());
-    }
 
     let max_storage_gb = body.max_storage_gb.unwrap_or(0);
     validate_max_storage_gb(max_storage_gb)?;
 
     let existing_cache = ECache::find()
-        .filter(CCache::Name.eq(body.name.clone()))
+        .filter(CCache::Name.eq(body.name.as_str()))
         .one(&state.web_db)
         .await?;
 
@@ -159,7 +148,7 @@ pub async fn put(
 
     let cache = MCache {
         id: CacheId::now_v7(),
-        name: body.name.clone(),
+        name: body.name.to_string(),
         active: true,
         display_name: body.display_name.trim().to_string(),
         description: body.description.trim().to_string(),
@@ -286,7 +275,7 @@ pub async fn patch_cache(
     }: CacheScope<RequiresUnmanaged<can::ManageCacheSettings>>,
     state: State<Arc<ServerState>>,
     info: RequestInfo,
-    Json(body): Json<PatchCacheRequest>,
+    JsonBody(body): JsonBody<PatchCacheRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let cache_id = cache.id;
     let prev_max_storage_gb = cache.max_storage_gb;
@@ -302,29 +291,20 @@ pub async fn patch_cache(
     let mut acache: ACache = cache.into();
 
     if let Some(name) = body.name {
-        if check_index_name(name.as_str()).is_err() {
-            return Err(WebError::invalid_name(Resource::CacheName));
-        }
         if ECache::find()
-            .filter(CCache::Name.eq(name.clone()))
+            .filter(CCache::Name.eq(name.as_str()))
             .one(&state.web_db)
             .await?
             .is_some()
         {
             return Err(WebError::already_exists(Resource::CacheName));
         }
-        acache.name = Set(name);
+        acache.name = Set(name.into_inner());
     }
 
     if let Some(display_name) = body.display_name {
-        let display_name = display_name.trim().to_string();
-        if let Err(e) = validate_display_name(&display_name) {
-            return Err(SharedRefusal::InvalidDisplayName {
-                reason: e.to_string(),
-            }
-            .into());
-        }
-        acache.display_name = Set(display_name);
+        let display_name = CacheDisplayName::try_from(display_name.trim().to_string())?;
+        acache.display_name = Set(display_name.into_inner());
     }
 
     if let Some(description) = body.description {
