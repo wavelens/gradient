@@ -22,7 +22,7 @@ pub async fn finalize_build_log(
     let inline = logs
         .read_inline(log_id)
         .await
-        .with_context(|| format!("reading the inline build log of attempt {log_id}"))?;
+        .with_context(|| format!("read the inline build log of attempt {log_id}"))?;
     if inline.is_empty() {
         return Ok(());
     }
@@ -30,7 +30,7 @@ pub async fn finalize_build_log(
     let indexed = indexed_chunk_count(&ctx.worker_db, log_id).await?;
     let earlier = gradient_storage::log_chunk::read_chunks(logs, log_id, indexed)
         .await
-        .with_context(|| format!("reading the earlier log chunks of attempt {log_id}"))?;
+        .with_context(|| format!("read the earlier log chunks of attempt {log_id}"))?;
 
     let descs = gradient_storage::log_chunk::compress_and_store_chunks(
         logs,
@@ -39,11 +39,11 @@ pub async fn finalize_build_log(
         ctx.config.log.chunk_bytes,
     )
     .await
-    .with_context(|| format!("chunking the build log of attempt {log_id}"))?;
+    .with_context(|| format!("chunk the build log of attempt {log_id}"))?;
 
     replace_log_chunk_index(&ctx.worker_db, log_id, &descs)
         .await
-        .with_context(|| format!("writing the log chunk index of attempt {log_id}"))?;
+        .with_context(|| format!("write the log chunk index of attempt {log_id}"))?;
 
     if let Err(e) = logs.delete_inline_log(log_id).await {
         warn!(error = %e, build_id = %log_id, "Failed to drop inline log after chunking");
@@ -77,7 +77,7 @@ async fn indexed_chunk_count(
         .filter(Column::BuildAttempt.eq(log_id))
         .count(db)
         .await
-        .with_context(|| format!("counting the log chunks of attempt {log_id}"))?;
+        .with_context(|| format!("count the log chunks of attempt {log_id}"))?;
     Ok(count as u32)
 }
 

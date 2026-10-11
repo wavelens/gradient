@@ -63,13 +63,12 @@ pub(crate) fn parse_api_key_hash(contents: &str, path: &str) -> Result<String, D
 }
 
 pub(crate) fn derive_public_key(private_key: &str) -> Result<String> {
-    let private_key =
-        PrivateKey::from_openssh(private_key).context("Failed to parse private key")?;
+    let private_key = PrivateKey::from_openssh(private_key).context("parse private key")?;
 
     let public_key = private_key
         .public_key()
         .to_openssh()
-        .context("Failed to derive public key")?;
+        .context("derive public key")?;
 
     let key_parts: Vec<&str> = public_key.split_whitespace().collect();
     let cleaned_key = if key_parts.len() >= 2 {

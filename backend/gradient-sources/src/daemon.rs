@@ -55,7 +55,7 @@ pub async fn get_missing_builds(pool: &ConnectionPool, paths: Vec<String>) -> Re
                 let full_path = nix_store_path(&path);
                 let output_map = get_output_paths_internal(full_path.clone(), &mut guard)
                     .await
-                    .with_context(|| format!("Failed to get output path for {}", full_path))?;
+                    .with_context(|| format!("get output path for {}", full_path))?;
                 anyhow::Ok((path, output_map))
             })
             .collect();
@@ -156,7 +156,7 @@ pub async fn get_build_outputs_from_derivation(
             .map_err(|cause| StoreDaemonError::PathInfoQueryFailed { cause })?
         {
             let (hash, package) = get_hash_from_path(output_path_str.clone())
-                .with_context(|| format!("Failed to parse path {}", output_path_str))?;
+                .with_context(|| format!("parse path {}", output_path_str))?;
             outputs.push(BuildOutputInfo {
                 name: output_name.to_string(),
                 path: output_path_str,

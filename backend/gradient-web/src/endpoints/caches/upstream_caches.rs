@@ -250,7 +250,7 @@ pub async fn put_cache_upstream(
             let api_key_enc = match key {
                 Some(k) if !k.trim().is_empty() => Some(
                     gradient_sources::encrypt_secret(&state.config.secrets.crypt_file, k.trim())
-                        .context("Failed to encrypt upstream API key")?,
+                        .context("encrypt upstream API key")?,
                 ),
                 _ => None,
             };

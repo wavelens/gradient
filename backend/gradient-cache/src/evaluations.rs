@@ -17,7 +17,7 @@ pub(crate) async fn cleanup_old_evaluations(state: Arc<ServerState>) -> Result<(
     let tasks = ETask::find()
         .all(&state.worker_db)
         .await
-        .context("Failed to query tasks for evaluation GC")?;
+        .context("query tasks for evaluation GC")?;
 
     let ctx = state.db();
     let mut removed = 0u64;

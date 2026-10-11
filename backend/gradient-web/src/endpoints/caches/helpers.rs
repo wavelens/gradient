@@ -409,7 +409,7 @@ pub async fn fetch_nar_stream(
         .nar_storage
         .open(&effective_hash, 0)
         .await
-        .context("Failed to read NAR")?
+        .context("read NAR")?
         .or_not_found(Resource::Path)?;
     let (size, stream) = match source {
         NarSource::Hot(bytes) => {

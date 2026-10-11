@@ -49,7 +49,7 @@ pub async fn serve(
                 )
                 .header(header::CONTENT_LENGTH, size)
                 .body(Body::from(contents))
-                .context("Failed to build response")
+                .context("build response")
                 .map_err(Into::into)
         }
         Ok(Extracted::Directory { tar_zst }) => {
@@ -68,7 +68,7 @@ pub async fn serve(
                     HeaderValue::from_str(&disp).unwrap_or(HeaderValue::from_static("attachment")),
                 )
                 .body(Body::from(tar_zst))
-                .context("Failed to build response")
+                .context("build response")
                 .map_err(Into::into)
         }
         Err(ExtractError::NotFound) => Err(WebError::not_found(Resource::Path)),

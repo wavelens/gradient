@@ -128,7 +128,7 @@ pub(crate) mod github {
                 reqwest::Method::GET,
                 &format!("{api}/repos/{owner}/{repo}/git/ref/heads/{base}"),
             ),
-            "github get base ref",
+            "get github base ref",
         )
         .await?;
         let base_commit: CommitObject = send_json(
@@ -139,7 +139,7 @@ pub(crate) mod github {
                     base_sha.object.sha
                 ),
             ),
-            "github get base commit",
+            "get github base commit",
         )
         .await?;
 
@@ -154,7 +154,7 @@ pub(crate) mod github {
                     content: b64(&file.contents),
                     encoding: "base64",
                 }),
-                "github create blob",
+                "create github blob",
             )
             .await?;
             tree.push(TreeEntry {
@@ -174,7 +174,7 @@ pub(crate) mod github {
                 base_tree: base_commit.tree.sha,
                 tree,
             }),
-            "github create tree",
+            "create github tree",
         )
         .await?;
 
@@ -196,7 +196,7 @@ pub(crate) mod github {
                 author: ident,
                 committer: ident,
             }),
-            "github create commit",
+            "create github commit",
         )
         .await?;
 
@@ -211,7 +211,7 @@ pub(crate) mod github {
             })
             .send()
             .await
-            .context("github update ref")?;
+            .context("update github ref")?;
         if patch.status() == reqwest::StatusCode::NOT_FOUND
             || patch.status() == reqwest::StatusCode::UNPROCESSABLE_ENTITY
         {
@@ -224,7 +224,7 @@ pub(crate) mod github {
                     r#ref: format!("refs/heads/{branch}"),
                     sha: &new_commit.sha,
                 }),
-                "github create ref",
+                "create github ref",
             )
             .await?;
         } else if !patch.status().is_success() {
@@ -254,7 +254,7 @@ pub(crate) mod github {
                 reqwest::Method::GET,
                 &format!("{api}/repos/{owner}/{repo}/pulls?state=open&head={owner}:{head}"),
             ),
-            "github list pulls",
+            "list github pulls",
         )
         .await?;
 
@@ -265,7 +265,7 @@ pub(crate) mod github {
                     &format!("{api}/repos/{owner}/{repo}/pulls/{}", pr.number),
                 )
                 .json(&UpdatePullReq { title, body }),
-                "github update pull",
+                "update github pull",
             )
             .await?;
 
@@ -286,7 +286,7 @@ pub(crate) mod github {
                 base,
                 body,
             }),
-            "github create pull",
+            "create github pull",
         )
         .await?;
 
@@ -306,7 +306,7 @@ pub(crate) mod github {
         let gh = Gh { client, token };
         let repo_info: RepoInfo = send_json(
             gh.req(reqwest::Method::GET, &format!("{api}/repos/{owner}/{repo}")),
-            "github get repo",
+            "get github repo",
         )
         .await?;
 
@@ -416,7 +416,7 @@ pub(crate) mod gitea {
                 )),
                 token,
             ),
-            "gitea list pulls",
+            "list gitea pulls",
         )
         .await?;
 
@@ -433,7 +433,7 @@ pub(crate) mod gitea {
                     token,
                 )
                 .json(&EditPull { title, body }),
-                "gitea update pull",
+                "update gitea pull",
             )
             .await?;
 
@@ -454,7 +454,7 @@ pub(crate) mod gitea {
                 title,
                 body,
             }),
-            "gitea create pull",
+            "create gitea pull",
         )
         .await?;
 
@@ -476,7 +476,7 @@ pub(crate) mod gitea {
                 client.get(format!("{base_url}/api/v1/repos/{owner}/{repo}")),
                 token,
             ),
-            "gitea get repo",
+            "get gitea repo",
         )
         .await?;
 
@@ -490,7 +490,7 @@ pub(crate) mod gitea {
     ) -> Result<super::CommitIdent> {
         let user: User = send_json(
             auth(client.get(format!("{base_url}/api/v1/user")), token),
-            "gitea get user",
+            "get gitea user",
         )
         .await?;
         let name = Some(user.full_name)
@@ -623,7 +623,7 @@ pub(crate) mod gitlab {
     ) -> Result<String> {
         let info: ProjectInfo = send_json(
             auth(client.get(project_api(base_url, owner, repo)), token),
-            "gitlab get project",
+            "get gitlab project",
         )
         .await?;
 
@@ -637,7 +637,7 @@ pub(crate) mod gitlab {
     ) -> Result<super::CommitIdent> {
         let user: User = send_json(
             auth(client.get(format!("{base_url}/api/v4/user")), token),
-            "gitlab get user",
+            "get gitlab user",
         )
         .await?;
         let name = Some(user.name)

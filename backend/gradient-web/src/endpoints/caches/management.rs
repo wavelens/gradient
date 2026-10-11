@@ -152,8 +152,8 @@ pub async fn put(
         return Err(WebError::already_exists(Resource::CacheName));
     }
 
-    let (private_key, public_key) = generate_signing_key(&state.config.secrets.crypt_file)
-        .context("Failed to generate signing key")?;
+    let (private_key, public_key) =
+        generate_signing_key(&state.config.secrets.crypt_file).context("generate signing key")?;
 
     let tx = state.web_db.inner().begin().await?;
 
@@ -255,7 +255,7 @@ pub async fn get_cache(
         cache.clone(),
         state.config.server.serve_url.clone(),
     )
-    .context("Failed to derive public key")?;
+    .context("derive public key")?;
 
     let can_edit = match &maybe_user {
         Some(u) => gradient_db::access::cache_permission_mask(&state.web_db, cache.id, u.id)

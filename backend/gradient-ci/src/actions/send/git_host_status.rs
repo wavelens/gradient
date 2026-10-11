@@ -47,7 +47,7 @@ pub(crate) async fn execute_git_host_status_report(
         let new_id = reporter
             .report(report)
             .await
-            .context("Git host status report failed")?;
+            .context("send Git host status report")?;
         if let (Some(new_id), Some(evaluation_id)) = (new_id, evaluation_id) {
             persist_evaluation_check_id(ctx, evaluation_id, &report.context, new_id).await;
         }
@@ -68,7 +68,7 @@ pub async fn verify_git_host_action(
     repository: &str,
 ) -> Result<()> {
     let integration_id = match serde_json::from_value::<ActionConfig>(action.config.clone())
-        .context("decoding action config")?
+        .context("decode action config")?
     {
         ActionConfig::GitHostStatusReport { integration_id }
         | ActionConfig::OpenPr { integration_id, .. } => integration_id,
@@ -84,7 +84,7 @@ pub async fn verify_git_host_action(
     reporter
         .verify(&owner, &repo)
         .await
-        .context("Git host connectivity check failed")
+        .context("check Git host connectivity")
 }
 
 pub async fn reporter_for_task(
@@ -97,12 +97,12 @@ pub async fn reporter_for_task(
         .filter(CTaskAction::ActionType.eq(ActionType::GitHostStatusReport))
         .one(&ctx.db.worker_db)
         .await
-        .context("loading git_host_status_report action")?;
+        .context("load git_host_status_report action")?;
     let Some(action) = action else {
         return Ok(None);
     };
     let cfg: ActionConfig =
-        serde_json::from_value(action.config.clone()).context("decoding action config")?;
+        serde_json::from_value(action.config.clone()).context("decode action config")?;
     let ActionConfig::GitHostStatusReport { integration_id } = cfg else {
         return Ok(None);
     };
@@ -119,7 +119,7 @@ pub(crate) async fn build_reporter_for_integration(
         .filter(CIntegration::Kind.eq(i16::from(IntegrationKind::Outbound)))
         .one(&ctx.db.worker_db)
         .await
-        .context("loading integration")?
+        .context("load integration")?
         .ok_or_else(|| anyhow!("outbound integration {} not found", integration_id))?;
 
     let git_host = integration.git_host_type;
@@ -162,12 +162,12 @@ async fn build_github_app_reporter(
     let install = gradient_entity::github_installation::Entity::find_by_id(install_fk)
         .one(&ctx.db.worker_db)
         .await
-        .context("loading github installation")?
+        .context("load github installation")?
         .ok_or_else(|| anyhow!("github installation {} not found", install_fk))?;
     let installation_id = install.installation_id;
     let pem = tokio::fs::read_to_string(&github_app.private_key_file)
         .await
-        .context("reading github app private key")?;
+        .context("read github app private key")?;
     let r = GithubAppReporter::new(
         ctx.http.clone(),
         "",

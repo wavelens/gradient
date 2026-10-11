@@ -89,7 +89,7 @@ async fn try_put(
         request = request.header(CONTENT_TYPE, content_type);
     }
     let resp = request.send().await.map_err(|e| PutError::Retryable {
-        error: anyhow::Error::new(e).context("object PUT failed to send"),
+        error: anyhow::Error::new(e).context("send the object PUT"),
         retry_after: None,
     })?;
 

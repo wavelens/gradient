@@ -72,7 +72,7 @@ pub enum LockedRef {
 
 impl FlakeLock {
     pub fn parse(bytes: &[u8]) -> Result<Self> {
-        let lock: FlakeLock = serde_json::from_slice(bytes).context("parsing flake.lock")?;
+        let lock: FlakeLock = serde_json::from_slice(bytes).context("parse flake.lock")?;
         if lock.version != 7 {
             bail!(
                 "unsupported flake.lock version {} (only 7 is supported)",
@@ -84,7 +84,7 @@ impl FlakeLock {
     }
 
     pub fn to_bytes(&self) -> Result<Vec<u8>> {
-        let mut out = serde_json::to_vec_pretty(self).context("serializing flake.lock")?;
+        let mut out = serde_json::to_vec_pretty(self).context("serialize flake.lock")?;
         out.push(b'\n');
 
         Ok(out)

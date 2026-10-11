@@ -187,7 +187,7 @@ pub async fn run(db: &DatabaseConnection, scale: u32) -> Result<()> {
 
         execute(db, &sql, copies)
             .await
-            .with_context(|| format!("amplifying {}", target.table))?;
+            .with_context(|| format!("amplify {}", target.table))?;
 
         analyze(db, target.table).await?;
 

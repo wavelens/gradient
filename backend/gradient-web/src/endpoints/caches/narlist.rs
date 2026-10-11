@@ -57,7 +57,7 @@ pub async fn ls(
     let (_effective_hash, _size, stream) = fetch_nar_stream(&state, ctx.cache.id, &hash).await?;
     let reader = nar_reader_from_stream(stream);
 
-    let root = walk_nar(reader).await.context("NAR walk failed")?;
+    let root = walk_nar(reader).await.context("walk the NAR")?;
 
     Ok(Json(NarList { version: 1, root }).into_response())
 }

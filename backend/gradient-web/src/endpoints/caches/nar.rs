@@ -60,7 +60,7 @@ pub async fn nar(
         )
         .header(header::CONTENT_LENGTH, size)
         .body(Body::from_stream(stream))
-        .context("Failed to build response")
+        .context("build response")
         .map_err(Into::into)
 }
 
@@ -97,7 +97,7 @@ pub async fn upstream_nar(
     }
     builder
         .body(Body::from_stream(object.body))
-        .context("Failed to build response")
+        .context("build response")
         .map_err(Into::into)
 }
 

@@ -29,7 +29,7 @@ impl CachedPathIndex for ExpiredCachedPaths {
     async fn expired(&self) -> Result<Vec<String>> {
         gradient_db::maintenance::gc::expired_cached_paths(&self.state.worker_db, self.keep_hours)
             .await
-            .context("expired cached-path selection failed")
+            .context("select expired cached paths")
     }
 
     async fn retire(&self, keys: &[String]) -> Result<Vec<String>> {

@@ -26,7 +26,7 @@ fn text_response(content_type: &'static str, body: String) -> WebResult<Response
     Response::builder()
         .header(header::CONTENT_TYPE, HeaderValue::from_static(content_type))
         .body(body)
-        .context("Failed to build response")
+        .context("build response")
         .map_err(Into::into)
 }
 

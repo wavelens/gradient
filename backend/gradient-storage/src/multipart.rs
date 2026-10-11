@@ -69,7 +69,7 @@ pub(crate) async fn presign(
 ) -> Result<PresignedMultipart> {
     let upload_id = timed(stats, "multipart_create", s3.create_multipart(path))
         .await
-        .context("failed to create multipart upload")?;
+        .context("create multipart upload")?;
     let layout = layout(nar_size);
     match sign_parts(s3, path, &upload_id, layout.part_count, part_ttl(nar_size)).await {
         Ok(part_urls) => Ok(PresignedMultipart {
@@ -100,7 +100,7 @@ pub(crate) async fn sign_parts(
         let url = signer
             .signed_url_opts(reqwest::Method::PUT, path, ttl, &options)
             .await
-            .context("failed to presign multipart part")?;
+            .context("presign multipart part")?;
         urls.push(url.to_string());
     }
     Ok(urls)

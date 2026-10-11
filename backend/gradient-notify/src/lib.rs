@@ -129,7 +129,7 @@ impl EmailService {
 
         let smtp_password = fs::read_to_string(&config.smtp_password_file)
             .await
-            .context("Failed to read SMTP password file")?
+            .context("read SMTP password file")?
             .trim()
             .to_string();
 
@@ -142,7 +142,7 @@ impl EmailService {
                 .build()
         } else {
             SmtpTransport::relay(&config.smtp_host)
-                .context("Failed to create SMTP transport")?
+                .context("create SMTP transport")?
                 .credentials(credentials)
                 .port(config.smtp_port)
                 .build()
@@ -186,17 +186,17 @@ impl EmailSender for EmailService {
             .from(
                 format!("{} <{}>", self.from_name, self.from_address)
                     .parse()
-                    .context("Invalid from address")?,
+                    .context("invalid from address")?,
             )
             .to(format!("{} <{}>", to_name, to_email)
                 .parse()
-                .context("Invalid to address")?)
+                .context("invalid to address")?)
             .subject("Verify your email address - Gradient")
             .header(ContentType::TEXT_HTML)
             .body(email_body)
-            .context("Failed to build email")?;
+            .context("build email")?;
 
-        transport.send(&email).context("Failed to send email")?;
+        transport.send(&email).context("send email")?;
 
         info!(to = to_email, "Verification email sent");
         Ok(())
@@ -219,17 +219,17 @@ impl EmailSender for EmailService {
             .from(
                 format!("{} <{}>", self.from_name, self.from_address)
                     .parse()
-                    .context("Invalid from address")?,
+                    .context("invalid from address")?,
             )
             .to(format!("{} <{}>", to_name, to_email)
                 .parse()
-                .context("Invalid to address")?)
+                .context("invalid to address")?)
             .subject("Reset your password - Gradient")
             .header(ContentType::TEXT_HTML)
             .body(email_body)
-            .context("Failed to build email")?;
+            .context("build email")?;
 
-        transport.send(&email).context("Failed to send email")?;
+        transport.send(&email).context("send email")?;
 
         info!(to = to_email, "Password reset email sent");
         Ok(())
@@ -256,7 +256,7 @@ impl EmailSender for EmailService {
         let msg = builder
             .header(ContentType::TEXT_PLAIN)
             .body(body.to_string())
-            .context("building email message")?;
+            .context("build email message")?;
         let response = transport.send(&msg).context("smtp send")?;
         Ok(MailDeliveryResult {
             status_code: u16::from(response.code()) as i32,
@@ -281,17 +281,17 @@ impl EmailSender for EmailService {
             .from(
                 format!("{} <{}>", self.from_name, self.from_address)
                     .parse()
-                    .context("Invalid from address")?,
+                    .context("invalid from address")?,
             )
             .to(format!("{} <{}>", to_name, to_email)
                 .parse()
-                .context("Invalid to address")?)
+                .context("invalid to address")?)
             .subject(subject)
             .header(ContentType::TEXT_HTML)
             .body(invitation_email_html(to_name, invite))
-            .context("Failed to build email")?;
+            .context("build email")?;
 
-        transport.send(&email).context("Failed to send email")?;
+        transport.send(&email).context("send email")?;
 
         info!(to = to_email, "Invitation email sent");
         Ok(())
@@ -326,7 +326,7 @@ impl EmailSender for EmailService {
             .from(
                 format!("{} <{}>", self.from_name, self.from_address)
                     .parse()
-                    .context("Invalid from address")?,
+                    .context("invalid from address")?,
             )
             .subject(subject);
         for addr in to {
@@ -336,9 +336,9 @@ impl EmailSender for EmailService {
         let msg = builder
             .header(ContentType::TEXT_HTML)
             .body(subscription_email_html(mail))
-            .context("Failed to build email")?;
+            .context("build email")?;
 
-        transport.send(&msg).context("Failed to send email")?;
+        transport.send(&msg).context("send email")?;
 
         Ok(())
     }

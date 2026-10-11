@@ -94,6 +94,6 @@ fn log_response(body: String, cache_status: &'static str) -> WebResult<Response>
             HeaderValue::from_static("*"),
         )
         .body(Body::from(body))
-        .context("Failed to build response")
+        .context("build response")
         .map_err(Into::into)
 }

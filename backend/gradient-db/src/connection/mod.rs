@@ -26,7 +26,7 @@ use tracing::log::LevelFilter;
 
 fn db_url(cli: &Cli) -> Result<String> {
     if let Some(file) = &cli.database.url_file {
-        Ok(std::fs::read_to_string(file).context("Failed to read database url from file")?)
+        Ok(std::fs::read_to_string(file).context("read database url from file")?)
     } else if let Some(url) = &cli.database.url {
         Ok(url.clone())
     } else {
@@ -116,10 +116,10 @@ async fn check_lock_table(db: &DatabaseConnection) {
 async fn server_version_num(db: &DatabaseConnection) -> Result<i32> {
     db.query_one_raw(SERVER_VERSION_NUM.stmt())
         .await
-        .context("Failed to query PostgreSQL server version")?
+        .context("query PostgreSQL server version")?
         .context("PostgreSQL returned no server_version_num")?
         .try_get::<i32>("", "v")
-        .context("Failed to read server_version_num")
+        .context("read server_version_num")
 }
 
 pub async fn connect_db(cli: &Cli) -> Result<DatabaseConnection> {
@@ -129,25 +129,25 @@ pub async fn connect_db(cli: &Cli) -> Result<DatabaseConnection> {
         cli.database.min_connections,
     )?)
     .await
-    .context("Failed to connect to database")?;
+    .context("connect to database")?;
     require_supported_pg_version(server_version_num(&db).await?)?;
     check_lock_table(&db).await;
     Migrator::install(&db)
         .await
-        .context("Failed to install seaql_migrations table")?;
+        .context("install seaql_migrations table")?;
     upgrade_floor::require_upgrade_floor(&db).await?;
     prune_removed_migrations(&db)
         .await
-        .context("Failed to prune removed-migration entries from seaql_migrations")?;
+        .context("prune removed-migration entries from seaql_migrations")?;
     run_migrations(&db).await?;
-    update_db(&db).await.context("Failed to update database")?;
+    update_db(&db).await.context("update database")?;
     Ok(db)
 }
 
 async fn run_migrations(db: &DatabaseConnection) -> Result<()> {
     let pending = Migrator::get_pending_migrations(db)
         .await
-        .context("Failed to determine pending database migrations")?;
+        .context("determine pending database migrations")?;
     if pending.is_empty() {
         tracing::info!("database schema up to date; no migrations to run");
         return Ok(());
@@ -157,7 +157,7 @@ async fn run_migrations(db: &DatabaseConnection) -> Result<()> {
     tracing::info!(count = pending.len(), migrations = ?names, "running database migrations; this may take a while");
     Migrator::up(db, None)
         .await
-        .context("Failed to run database migrations")?;
+        .context("run database migrations")?;
     tracing::info!(count = pending.len(), "database migrations complete");
 
     Ok(())
@@ -215,7 +215,7 @@ pub async fn connect_web_db(cli: &Cli) -> Result<DatabaseConnection> {
         cli.database.web_min_connections,
     )?)
     .await
-    .context("Failed to connect web database pool")
+    .context("connect web database pool")
 }
 
 pub async fn connect_cache_db(cli: &Cli) -> Result<DatabaseConnection> {
@@ -225,7 +225,7 @@ pub async fn connect_cache_db(cli: &Cli) -> Result<DatabaseConnection> {
         cli.database.cache_min_connections,
     )?)
     .await
-    .context("Failed to connect cache database pool")
+    .context("connect cache database pool")
 }
 
 /// Restart recovery must not run here.

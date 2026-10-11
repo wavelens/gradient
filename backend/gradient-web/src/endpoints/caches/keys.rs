@@ -41,7 +41,7 @@ pub async fn get_cache_key(
         cache,
         state.config.server.serve_url.clone(),
     )
-    .context("Failed to generate cache key")?;
+    .context("generate cache key")?;
 
     Ok(ok_json(cache_key))
 }
@@ -66,7 +66,7 @@ pub async fn get_cache_public_key(
         cache,
         state.config.server.serve_url.clone(),
     )
-    .context("Failed to derive public key")?;
+    .context("derive public key")?;
 
     Ok(ok_json(public_key))
 }

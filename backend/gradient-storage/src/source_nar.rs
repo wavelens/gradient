@@ -28,7 +28,7 @@ async fn nar_bytes_from_dir(staging_dir: &Path) -> Result<Vec<u8>> {
     let mut stream = NarByteStream::new(staging_dir.to_path_buf());
     let mut nar_bytes: Vec<u8> = Vec::new();
     while let Some(chunk) = stream.next().await {
-        let chunk = chunk.context("NAR serialisation error")?;
+        let chunk = chunk.context("serialise the NAR")?;
         nar_bytes.extend_from_slice(&chunk);
     }
 
@@ -62,7 +62,7 @@ pub async fn source_nar_from_bytes(nar_bytes: Vec<u8>) -> Result<SourceNar> {
         std::io::Cursor::new(&nar_bytes),
         gradient_wire::constants::NAR_ZSTD_LEVEL,
     )
-    .context("failed to zstd-compress source NAR")?;
+    .context("zstd-compress source NAR")?;
     let file_size = compressed_bytes.len() as u64;
     let file_hash_sri = Sha256::digest(&compressed_bytes).as_sri().to_string();
 

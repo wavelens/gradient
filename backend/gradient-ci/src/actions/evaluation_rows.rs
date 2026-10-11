@@ -26,13 +26,13 @@ pub(super) async fn load_evaluation_rows(
     let task = ETask::find_by_id(task_id)
         .one(&ctx.db.worker_db)
         .await
-        .context("loading task")?
+        .context("load task")?
         .ok_or(ActionError::TaskNotFound { id: task_id })?;
 
     let commit = ECommit::find_by_id(evaluation.commit)
         .one(&ctx.db.worker_db)
         .await
-        .context("loading commit")?
+        .context("load commit")?
         .ok_or_else(|| anyhow!("commit {} not found", evaluation.commit))?;
 
     Ok(EvaluationRows { task, commit })

@@ -83,7 +83,7 @@ pub async fn post_source(
 
     let nar = source_nar_from_bytes(nar_bytes)
         .await
-        .context("Failed to read source NAR")?;
+        .context("read source NAR")?;
 
     let response =
         finalize_build_request(&state, project.id, &user, &nar, target, system, Vec::new()).await?;
@@ -185,7 +185,7 @@ pub async fn source_finalize(
 
     let nar = source_nar_from_bytes(nar_bytes)
         .await
-        .context("Failed to read source NAR")?;
+        .context("read source NAR")?;
 
     let input_overrides = body
         .input_overrides

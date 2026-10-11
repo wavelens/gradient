@@ -207,5 +207,5 @@ pub async fn update_last_login(state: State<Arc<ServerState>>, user: MUser) -> R
     auser
         .update(&state.web_db)
         .await
-        .context("Failed to update user last login")
+        .context("update user last login")
 }

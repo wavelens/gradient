@@ -20,7 +20,7 @@ pub(crate) async fn execute_send_web_request(
 ) -> Result<ExecutorOk> {
     gradient_util::http_validation::validate_webhook_url(url)
         .map_err(|cause| ActionError::UrlRejected { cause })?;
-    let body = serde_json::to_string(envelope).context("serializing webhook envelope")?;
+    let body = serde_json::to_string(envelope).context("serialize webhook envelope")?;
     let mut req = ctx
         .http
         .post(url)
@@ -34,7 +34,7 @@ pub(crate) async fn execute_send_web_request(
         }
         req = req.bearer_auth(decrypted);
     }
-    let resp = req.send().await.context("HTTP send failed")?;
+    let resp = req.send().await.context("send HTTP request")?;
     let status = resp.status().as_u16() as i32;
     let body = resp.text().await.unwrap_or_default();
     Ok(ExecutorOk {

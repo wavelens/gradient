@@ -23,7 +23,7 @@ pub async fn cleanup_unused_build_request_blobs(state: Arc<ServerState>) -> Resu
         .filter(CBuildRequestBlob::LastUsedAt.lt(cutoff))
         .all(&state.worker_db)
         .await
-        .context("Failed to query stale build_request_blob rows")?;
+        .context("query stale build_request_blob rows")?;
 
     let mut removed = 0u64;
     for blob in stale {
@@ -67,7 +67,7 @@ pub(crate) async fn cleanup_expired_upload_sessions(state: Arc<ServerState>) -> 
         .filter(CUploadSession::DispatchedAt.is_null())
         .exec(&state.worker_db)
         .await
-        .context("Failed to delete expired upload_session rows")?;
+        .context("delete expired upload_session rows")?;
 
     if res.rows_affected > 0 {
         info!(count = res.rows_affected, "Removed expired upload sessions");

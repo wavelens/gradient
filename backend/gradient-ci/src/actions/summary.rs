@@ -74,7 +74,7 @@ impl EventSummary {
         let Some(evaluation) = EEvaluation::find_by_id(id)
             .one(&ctx.db.worker_db)
             .await
-            .context("loading evaluation")?
+            .context("load evaluation")?
         else {
             return Ok(());
         };

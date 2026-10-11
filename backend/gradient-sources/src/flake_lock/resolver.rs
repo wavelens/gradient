@@ -85,10 +85,10 @@ impl HttpRevisionResolver {
             .await
             .context("github commit lookup")?
             .error_for_status()
-            .context("github commit lookup failed")?
+            .context("look up the github commit")?
             .json()
             .await
-            .context("parsing github commit")?;
+            .context("parse github commit")?;
 
         let last_modified = parse_rfc3339(&commit.commit.committer.date)?;
         let tarball = format!("{GITHUB_API}/repos/{owner}/{repo}/tarball/{}", commit.sha);
@@ -117,10 +117,10 @@ impl HttpRevisionResolver {
             .await
             .context("gitlab commit lookup")?
             .error_for_status()
-            .context("gitlab commit lookup failed")?
+            .context("look up the gitlab commit")?
             .json()
             .await
-            .context("parsing gitlab commit")?;
+            .context("parse gitlab commit")?;
 
         let last_modified = parse_rfc3339(&commit.committed_date)?;
         let tarball = format!(
@@ -203,22 +203,22 @@ fn git_checkout(
     ref_: Option<&str>,
     ssh_key: Option<&str>,
 ) -> Result<(String, i64, tempfile::TempDir)> {
-    let tmp = tempfile::tempdir().context("creating git temp dir")?;
+    let tmp = tempfile::tempdir().context("create git temp dir")?;
     let repo = git2::build::RepoBuilder::new()
         .fetch_options(crate::fetch_options_with_ssh(ssh_key))
         .clone(url, tmp.path())
-        .with_context(|| format!("cloning {url}"))?;
+        .with_context(|| format!("clone {url}"))?;
 
     let commit = match ref_ {
         Some(r) => repo
             .revparse_single(&format!("origin/{r}"))
             .or_else(|_| repo.revparse_single(r))
-            .with_context(|| format!("resolving git ref `{r}`"))?
+            .with_context(|| format!("resolve git ref `{r}`"))?
             .peel_to_commit()
             .context("ref does not point at a commit")?,
         None => repo
             .head()
-            .context("reading HEAD")?
+            .context("read HEAD")?
             .peel_to_commit()
             .context("HEAD commit")?,
     };
@@ -237,7 +237,7 @@ fn git_checkout(
 
 fn parse_rfc3339(s: &str) -> Result<i64> {
     Ok(chrono::DateTime::parse_from_rfc3339(s)
-        .with_context(|| format!("parsing commit date `{s}`"))?
+        .with_context(|| format!("parse commit date `{s}`"))?
         .timestamp())
 }
 

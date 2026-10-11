@@ -278,7 +278,7 @@ pub async fn put_integration(
         };
         let pem = tokio::fs::read_to_string(&app.private_key_file)
             .await
-            .context("reading github app key")?;
+            .context("read github app key")?;
         let account = gradient_git_host::github_app::get_installation(
             &state.http,
             app.app_id,
@@ -334,7 +334,7 @@ pub async fn put_integration(
     let encrypted_secret = match body.secret.as_deref() {
         Some(s) if !s.is_empty() => Some(
             encrypt_secret_with_file(&state.config.secrets.crypt_file, s)
-                .context("Failed to encrypt secret")?,
+                .context("encrypt secret")?,
         ),
         _ => None,
     };
@@ -342,7 +342,7 @@ pub async fn put_integration(
     let encrypted_token = match body.access_token.as_deref() {
         Some(t) if !t.is_empty() => Some(
             encrypt_secret_with_file(&state.config.secrets.crypt_file, t)
-                .context("Failed to encrypt token")?,
+                .context("encrypt token")?,
         ),
         _ => None,
     };
@@ -484,7 +484,7 @@ pub async fn patch_integration(
         } else {
             Some(
                 encrypt_secret_with_file(&state.config.secrets.crypt_file, &secret)
-                    .context("Failed to encrypt secret")?,
+                    .context("encrypt secret")?,
             )
         });
     }
@@ -495,7 +495,7 @@ pub async fn patch_integration(
         } else {
             Some(
                 encrypt_secret_with_file(&state.config.secrets.crypt_file, &token)
-                    .context("Failed to encrypt token")?,
+                    .context("encrypt token")?,
             )
         });
     }

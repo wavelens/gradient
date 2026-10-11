@@ -443,8 +443,8 @@ impl DerivationResolver for WorkerPoolResolver {
         let full_path = nix_store_path(&drv_path);
         let bytes = tokio::fs::read(&full_path)
             .await
-            .with_context(|| format!("Failed to read derivation file: {}", full_path))?;
-        parse_drv(&bytes).with_context(|| format!("Failed to parse derivation {}", drv_path))
+            .with_context(|| format!("read derivation file: {}", full_path))?;
+        parse_drv(&bytes).with_context(|| format!("parse derivation {}", drv_path))
     }
 
     async fn get_features(&self, drv_path: String) -> Result<(String, Vec<String>)> {

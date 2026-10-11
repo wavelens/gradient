@@ -35,7 +35,7 @@ pub async fn deliver(
         .and_then(JsonValue::as_str)
         .unwrap_or_default()
         .to_owned();
-    let body = serde_json::to_string(envelope).context("serializing webhook envelope")?;
+    let body = serde_json::to_string(envelope).context("serialize webhook envelope")?;
     let started = Instant::now();
     let result = post(ctx, hook, &event, &body, delivery).await;
     let duration_ms = i32::try_from(started.elapsed().as_millis()).unwrap_or(i32::MAX);
@@ -60,7 +60,7 @@ pub async fn deliver(
     .into_active_model()
     .insert(&ctx.db.worker_db)
     .await
-    .context("recording a webhook delivery")?;
+    .context("record a webhook delivery")?;
 
     if success {
         touch_last_fired(ctx, hook.id).await;
@@ -89,7 +89,7 @@ async fn post(
         .body(body.to_owned())
         .send()
         .await
-        .context("HTTP send failed")?;
+        .context("send HTTP request")?;
     let status = i32::from(resp.status().as_u16());
     Ok((status, resp.text().await.unwrap_or_default()))
 }

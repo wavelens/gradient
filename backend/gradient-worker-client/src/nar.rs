@@ -55,8 +55,8 @@ pub fn nar_encoder<W: std::io::Write>(
     sink: W,
     threads: u32,
 ) -> Result<zstd::stream::Encoder<'static, W>> {
-    let mut encoder = zstd::stream::Encoder::new(sink, NAR_ZSTD_LEVEL)
-        .context("failed to create zstd encoder")?;
+    let mut encoder =
+        zstd::stream::Encoder::new(sink, NAR_ZSTD_LEVEL).context("create zstd encoder")?;
     if threads > 1 {
         encoder
             .multithread(threads)
@@ -471,9 +471,7 @@ async fn pack_in_parts(
         let chunk = chunk?;
         nar_hasher.update(&chunk);
         nar_size += chunk.len() as u64;
-        encoder
-            .write_all(&chunk)
-            .context("zstd compression failed")?;
+        encoder.write_all(&chunk).context("compress with zstd")?;
 
         let buf = encoder.get_mut();
         while buf.len() >= part_size {
@@ -485,7 +483,7 @@ async fn pack_in_parts(
         nar_read(nar_size);
     }
 
-    let remaining = encoder.finish().context("failed to finish zstd encoder")?;
+    let remaining = encoder.finish().context("finish zstd encoder")?;
     for part in remaining.chunks(part_size) {
         file_hasher.update(part);
         file_size += part.len() as u64;
@@ -513,13 +511,11 @@ async fn pack_compress(
         let chunk = chunk?;
         nar_hasher.update(&chunk);
         nar_size += chunk.len() as u64;
-        encoder
-            .write_all(&chunk)
-            .context("zstd compression failed")?;
+        encoder.write_all(&chunk).context("compress with zstd")?;
         nar_read(nar_size);
     }
 
-    let compressed = encoder.finish().context("failed to finish zstd encoder")?;
+    let compressed = encoder.finish().context("finish zstd encoder")?;
     let meta = CompressedNarMeta {
         file_hash: sha256_nix32(&compressed),
         file_size: compressed.len() as u64,
@@ -542,10 +538,8 @@ pub fn compress_nar(raw_nar: &[u8]) -> Result<(Vec<u8>, CompressedNarMeta)> {
         Vec::with_capacity(raw_nar.len() / 2),
         compression_threads(Some(nar_size)),
     )?;
-    encoder
-        .write_all(raw_nar)
-        .context("zstd compression failed")?;
-    let compressed = encoder.finish().context("failed to finish zstd encoder")?;
+    encoder.write_all(raw_nar).context("compress with zstd")?;
+    let compressed = encoder.finish().context("finish zstd encoder")?;
 
     let meta = CompressedNarMeta {
         file_hash: sha256_nix32(&compressed),

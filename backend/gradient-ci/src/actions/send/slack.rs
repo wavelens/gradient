@@ -41,6 +41,6 @@ pub(crate) async fn post_slack_message(
         .send()
         .await
         .map_err(reqwest::Error::without_url)
-        .context("Slack send failed")?;
+        .context("send to Slack")?;
     chat_response("Slack", resp).await
 }

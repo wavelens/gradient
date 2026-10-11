@@ -462,7 +462,7 @@ pub(crate) fn build_trigger_config(
             TriggerConfig::Time { cron }
         }
     };
-    cfg.validate().context("trigger config validation failed")?;
+    cfg.validate().context("validate the trigger config")?;
     Ok(cfg)
 }
 

@@ -86,7 +86,7 @@ pub async fn evaluation_gc_plan(
         .order_by_desc(CEvaluation::CreatedAt)
         .all(&ctx.worker_db)
         .await
-        .context("GC: failed to query evaluations")?;
+        .context("GC: query evaluations")?;
 
     let evals: Vec<(EvaluationStatus, chrono::NaiveDateTime)> = all_evals
         .iter()
@@ -114,7 +114,7 @@ pub async fn after_evaluation_delete(ctx: &DbContext, deleted: &[MEvaluation]) -
         .filter(CEvaluation::Commit.is_in(commit_ids.clone()))
         .all(&ctx.worker_db)
         .await
-        .context("GC: failed to check commit references")?
+        .context("GC: check commit references")?
         .into_iter()
         .map(|e| e.commit)
         .collect();
@@ -143,11 +143,11 @@ pub async fn settle_after_delete(
     let db = &ctx.worker_db;
     let adopted = if crate::graph::reachability::pending_orphans_among(db, lost)
         .await
-        .context("GC: failed to look for pending shared builds the deletion left unnamed")?
+        .context("GC: look for pending shared builds the deletion left unnamed")?
     {
         crate::graph::reachability::adopt_pending_closures(db)
             .await
-            .context("GC: failed to hand the deleted evaluations' names to the live ones")?
+            .context("GC: hand the deleted evaluations' names to the live ones")?
     } else {
         crate::graph::reachability::Adopted::default()
     };
@@ -163,7 +163,7 @@ pub async fn settle_after_delete(
         changes.extend(
             crate::graph::can_start::update_and_settle_need(db, chunk)
                 .await
-                .context("GC: failed to settle need after deleting evaluations")?
+                .context("GC: settle need after deleting evaluations")?
                 .changes,
         );
     }
@@ -172,7 +172,7 @@ pub async fn settle_after_delete(
         changes.extend(
             crate::graph::can_start::unpromote_ungated(db, chunk)
                 .await
-                .context("GC: failed to settle the queue after deleting evaluations")?,
+                .context("GC: settle the queue after deleting evaluations")?,
         );
     }
 
@@ -180,13 +180,13 @@ pub async fn settle_after_delete(
         changes.extend(
             crate::graph::can_start::promote(db, chunk)
                 .await
-                .context("GC: failed to queue what the live evaluations adopted")?,
+                .context("GC: queue what the live evaluations adopted")?,
         );
     }
 
     crate::task_board::dep_counts::bump_graph_version(db, &adopted.evaluations())
         .await
-        .context("GC: failed to bump the graph version of the adopting evaluations")?;
+        .context("GC: bump the graph version of the adopting evaluations")?;
 
     Ok((adopted.pairs.len(), changes))
 }

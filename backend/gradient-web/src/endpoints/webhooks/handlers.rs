@@ -364,7 +364,7 @@ pub async fn test_webhook(
         PendingDeliveryId::now_v7(),
     )
     .await
-    .context("test fire failed")?;
+    .context("run the test fire")?;
     Ok(ok_json(DeliveryListItem::from(delivery)))
 }
 

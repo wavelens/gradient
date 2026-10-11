@@ -21,17 +21,17 @@ use gradient_sources::RefuseImports;
 pub async fn run_eval_driver(requests_path: &str, eval_cache_dir: &str) -> Result<i32> {
     let text = tokio::fs::read_to_string(requests_path)
         .await
-        .with_context(|| format!("reading eval driver requests from {requests_path}"))?;
+        .with_context(|| format!("read eval driver requests from {requests_path}"))?;
 
     let live = Arc::new(Mutex::new(HashSet::new()));
     let mut worker = EvalWorker::spawn(eval_cache_dir, live, Arc::default())
         .await
-        .context("spawning eval worker for driver")?;
+        .context("spawn eval worker for driver")?;
 
     let imports = RefuseImports("the eval driver");
     for line in text.lines().filter(|l| !l.trim().is_empty()) {
         let req: EvalRequest =
-            serde_json::from_str(line).with_context(|| format!("parsing request: {line}"))?;
+            serde_json::from_str(line).with_context(|| format!("parse request: {line}"))?;
 
         let output = match req {
             EvalRequest::Shutdown => {

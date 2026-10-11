@@ -87,8 +87,8 @@ fn server_with_broken_oidc() -> TestServer {
 }
 
 const LEAK_MARKERS: &[&str] = &[
-    "Failed to fetch OIDC metadata",
-    "Failed to parse OIDC metadata",
+    "fetch OIDC metadata",
+    "parse OIDC metadata",
     "tcp connect",
     "connection refused",
     "127.0.0.1:1",

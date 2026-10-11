@@ -95,7 +95,7 @@ pub async fn post_dispatch(
     }
 
     let missing: Vec<String> =
-        serde_json::from_value(session.missing.clone()).context("Corrupt session.missing JSON")?;
+        serde_json::from_value(session.missing.clone()).context("corrupt session.missing JSON")?;
     if !missing.is_empty() {
         return Err(BuildRequestRefusal::BlobsStillMissing {
             count: missing.len(),
@@ -104,9 +104,9 @@ pub async fn post_dispatch(
     }
 
     let manifest: Vec<ManifestEntry> = serde_json::from_value(session.manifest.clone())
-        .context("Corrupt session.manifest JSON")?;
+        .context("corrupt session.manifest JSON")?;
 
-    let staging = TempDir::new().context("Failed to create staging dir")?;
+    let staging = TempDir::new().context("create staging dir")?;
 
     materialise_staging(
         &state,
@@ -118,7 +118,7 @@ pub async fn post_dispatch(
 
     let nar = materialise_source_nar(staging.path())
         .await
-        .context("Failed to materialise source NAR")?;
+        .context("materialise source NAR")?;
 
     let input_overrides = body
         .input_overrides
@@ -163,7 +163,7 @@ pub(super) async fn finalize_build_request(
         .nar_storage
         .put(&nar.store_hash, nar.compressed_bytes.clone())
         .await
-        .context("Failed to store source NAR")?;
+        .context("store source NAR")?;
 
     state
         .graph
@@ -178,7 +178,7 @@ pub(super) async fn finalize_build_request(
             ..Default::default()
         })
         .await
-        .context("failed to record source NAR")?;
+        .context("record source NAR")?;
 
     let tx = state.web_db.inner().begin().await?;
     let response = queue_build_request(
@@ -322,19 +322,17 @@ async fn materialise_staging(
             .nar_storage
             .get_blob(*project_uuid, &hash_array)
             .await
-            .context("Failed to fetch blob")?
-            .with_context(|| format!("Blob {} disappeared from storage", entry.hash))?;
+            .context("fetch blob")?
+            .with_context(|| format!("blob {} disappeared from storage", entry.hash))?;
 
         let target = root.join(&entry.path);
         if let Some(parent) = target.parent() {
-            fs::create_dir_all(parent)
-                .await
-                .context("Failed to create dir")?;
+            fs::create_dir_all(parent).await.context("create dir")?;
         }
 
         fs::write(&target, data)
             .await
-            .with_context(|| format!("Failed to write {}", entry.path))?;
+            .with_context(|| format!("write {}", entry.path))?;
     }
     Ok(())
 }

@@ -17,12 +17,12 @@ pub fn checkout_commit(url: &str, commit: &str, ssh_key: Option<&str>) -> Result
     let checkout = tempfile::Builder::new()
         .prefix("gradient-fetch-")
         .tempdir()
-        .context("failed to create the checkout directory")?;
-    let repo = Repository::init(checkout.path()).context("failed to init the checkout")?;
+        .context("create the checkout directory")?;
+    let repo = Repository::init(checkout.path()).context("init the checkout")?;
 
     Origin::new(&repo, url, ssh_key)?
         .fetch_commit(oid)
-        .with_context(|| format!("failed to fetch commit {commit} from {url}"))?;
+        .with_context(|| format!("fetch commit {commit} from {url}"))?;
 
     let pinned = repo
         .find_commit(oid)
@@ -30,7 +30,7 @@ pub fn checkout_commit(url: &str, commit: &str, ssh_key: Option<&str>) -> Result
     let mut options = git2::build::CheckoutBuilder::new();
     options.force();
     repo.checkout_tree(pinned.as_object(), Some(&mut options))
-        .context("checkout failed")?;
+        .context("check out the tree")?;
 
     Ok(checkout)
 }

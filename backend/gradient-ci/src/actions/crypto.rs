@@ -33,6 +33,6 @@ pub fn decrypt_secret_with_file(
 }
 
 pub(crate) fn decrypt_with_server_key(ctx: &CiContext, ciphertext: &str) -> Result<String> {
-    let key = load_secret_bytes(&ctx.db.config.secrets.crypt_file).context("loading crypt key")?;
+    let key = load_secret_bytes(&ctx.db.config.secrets.crypt_file).context("load crypt key")?;
     decrypt_action_secret(ciphertext, key.expose())
 }

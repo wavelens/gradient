@@ -30,7 +30,7 @@ pub async fn execute_action(
     envelope: JsonValue,
 ) -> Result<()> {
     let cfg: ActionConfig =
-        serde_json::from_value(action.config.clone()).context("decoding action config")?;
+        serde_json::from_value(action.config.clone()).context("decode action config")?;
     let action_id = action.id;
     let task_id = action.task;
     let started = Instant::now();

@@ -599,7 +599,7 @@ pub async fn test_action(
     ) {
         gradient_ci::actions::verify_git_host_action(&state.ci(), &action, &proj.repository)
             .await
-            .context("test fire failed")?;
+            .context("run the test fire")?;
 
         return Ok(ok_json(serde_json::Value::Null));
     }
@@ -635,7 +635,7 @@ pub async fn test_action(
     });
     gradient_ci::actions::execute_action(&state.ci(), action, &event, envelope)
         .await
-        .context("test fire failed")?;
+        .context("run the test fire")?;
 
     Ok(ok_json(serde_json::Value::Null))
 }

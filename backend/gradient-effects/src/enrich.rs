@@ -36,7 +36,7 @@ async fn evaluation_scope<C: ConnectionTrait>(db: &C, id: EvaluationId) -> Resul
     let Some(evaluation) = EEvaluation::find_by_id(id)
         .one(db)
         .await
-        .context("looking up the evaluation of an event")?
+        .context("look up the evaluation of an event")?
     else {
         return Ok(None);
     };
@@ -46,7 +46,7 @@ async fn evaluation_scope<C: ConnectionTrait>(db: &C, id: EvaluationId) -> Resul
     let Some(task_row) = ETask::find_by_id(task)
         .one(db)
         .await
-        .context("looking up the task of an event")?
+        .context("look up the task of an event")?
     else {
         return Ok(None);
     };
@@ -70,7 +70,7 @@ async fn enrich_build<C: ConnectionTrait>(
     b.derivation_path = EDerivation::find_by_id(b.derivation)
         .one(db)
         .await
-        .context("looking up the derivation of a build report")?
+        .context("look up the derivation of a build report")?
         .map(|d| d.store_path());
     Ok(Some(b))
 }

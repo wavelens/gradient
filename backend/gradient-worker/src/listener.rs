@@ -24,7 +24,7 @@ pub async fn start_listener(
     let addr = format!("{}:{}", config.listen_addr, config.port);
     let listener = TcpListener::bind(&addr)
         .await
-        .with_context(|| format!("failed to bind listener on {addr}"))?;
+        .with_context(|| format!("bind listener on {addr}"))?;
     info!(addr = %addr, "listening for incoming server connections");
 
     loop {
@@ -77,7 +77,7 @@ async fn handle_incoming(
         Some(ws_config),
     )
     .await
-    .context("WebSocket upgrade failed")?;
+    .context("upgrade the WebSocket")?;
 
     let worker = Worker::from_accepted(ws, config).await?;
     let executor_handle = worker.executor_handle();
