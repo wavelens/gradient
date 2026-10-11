@@ -200,6 +200,24 @@ impl DbContext {
             ..self.clone()
         }
     }
+
+    pub async fn record(&self, event: impl Into<gradient_types::Event>) {
+        let event = event.into();
+        let name = event.name();
+        if let Err(e) =
+            crate::deliveries::events::record(&self.worker_db, &self.events, event).await
+        {
+            tracing::error!(error = %e, event = %name, "failed to record an event");
+        }
+        self.wake.delivery.notify_one();
+    }
+
+    pub async fn record_evaluation_created(&self, eval: &gradient_types::MEvaluation) {
+        self.wake.eval_assign.notify_one();
+        if let Some(event) = crate::deliveries::events::evaluation_created(eval) {
+            self.record(event).await;
+        }
+    }
 }
 
 #[cfg(test)]

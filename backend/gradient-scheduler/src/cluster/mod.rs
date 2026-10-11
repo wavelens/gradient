@@ -25,6 +25,17 @@ pub use reservation::*;
 pub use settlement::*;
 pub use slots::{ClusterSnapshot, IDLE_SLOT_TTL, IdleSlots, Slot, SlotKind};
 
+use std::sync::Arc;
+
+use tokio::sync::Notify;
+
+#[derive(Clone, Default)]
+pub struct ClusterAttempts {
+    pub(crate) book: AttemptBook,
+    pub prepared: PreparedMembers,
+    pub(crate) wake: Arc<Notify>,
+}
+
 #[derive(Debug, Clone)]
 pub struct CommittedSeat {
     pub worker: String,

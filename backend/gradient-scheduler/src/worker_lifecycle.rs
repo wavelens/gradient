@@ -21,6 +21,7 @@ use gradient_wire::types::{BuildStage, GradientCapabilities};
 use crate::Scheduler;
 use crate::actor::{Registered, Registration, SchedulerMsg, WorkerCapabilities, WorkerMetrics};
 use crate::build;
+use crate::waiting_state::WaitingRefresh;
 use gradient_pool::session_port::SessionPort;
 
 pub(crate) async fn record_worker_sample(
@@ -101,7 +102,7 @@ impl Scheduler {
             .await?;
         self.close_unclaimed_assignments(worker_id).await;
         self.record_worker_connection(worker_id, caps_json).await;
-        self.state.events.publish(worker::Connected {
+        self.db.events.publish(worker::Connected {
             worker_id: worker_id.to_owned(),
             projects,
         });
@@ -113,9 +114,9 @@ impl Scheduler {
     /// would rewrite a `Completed` dispatch as `Abandoned` across a deploy.
     async fn close_unclaimed_assignments(&self, worker_id: &str) {
         match gradient_db::scheduling::assignment_record::abandon_open_assignments_for_worker(
-            &self.state.worker_db,
+            &self.db.worker_db,
             worker_id,
-            self.state.started_at.naive_utc(),
+            self.started_at.naive_utc(),
         )
         .await
         {
@@ -159,7 +160,7 @@ impl Scheduler {
         .into_active_model();
 
         if let Err(e) = gradient_entity::worker_connection::Entity::insert(conn)
-            .exec(&self.state.worker_db)
+            .exec(&self.db.worker_db)
             .await
         {
             warn!(error = %e, %worker_id, "failed to insert worker_connection");
@@ -171,12 +172,12 @@ impl Scheduler {
             .filter(gradient_entity::worker_connection::Column::WorkerId.eq(worker_id))
             .filter(gradient_entity::worker_connection::Column::DisconnectedAt.is_null())
             .order_by_desc(gradient_entity::worker_connection::Column::ConnectedAt)
-            .one(&self.state.worker_db)
+            .one(&self.db.worker_db)
             .await;
         if let Ok(Some(conn)) = conn {
             let mut am = conn.into_active_model();
             am.disconnected_at = Set(Some(gradient_types::now()));
-            if let Err(e) = am.update(&self.state.worker_db).await {
+            if let Err(e) = am.update(&self.db.worker_db).await {
                 warn!(error = %e, %worker_id, "failed to close worker_connection");
             }
         }
@@ -239,7 +240,7 @@ impl Scheduler {
             })
             .await;
         debug!(%worker_id, "worker capabilities updated");
-        self.kick_assigner();
+        self.build_kick.kick();
     }
 
     pub async fn update_worker_metrics(&self, worker_id: &str, metrics: WorkerMetrics) {
@@ -270,25 +271,35 @@ impl Scheduler {
             .call(|reply| SchedulerMsg::Unregister { worker, reply })
             .await
             .unwrap_or_default();
-        build::requeue_orphaned_jobs(&self.state, &gone.requeued, &gone.observed_peak_ram_mb).await;
+        build::requeue_orphaned_jobs(
+            &self.db,
+            &self.graph,
+            &gone.requeued,
+            &gone.observed_peak_ram_mb,
+        )
+        .await;
         for lost in gone.cluster_members {
             let report = crate::cluster::MemberReport::Lost { job: lost.job };
             if let Err(e) = self.on_cluster_member_closed(&lost.key, report).await {
                 warn!(error = %e, %worker_id, key = %lost.key, "settling a lost cluster member failed");
             }
         }
-        self.state.events.publish(worker::Disconnected {
+        self.db.events.publish(worker::Disconnected {
             worker_id: worker_id.to_owned(),
         });
-        self.kick_assigner();
+        self.build_kick.kick();
     }
 
     pub async fn refresh_waiting_state(&self) -> Result<()> {
         let workers = self.board_workers().await;
         let draining = self.draining.is_draining().await;
-        let unbuildables =
-            build::refresh_waiting_state(&self.state, &self.assessments, &workers, draining)
-                .await?;
+        let unbuildables = WaitingRefresh {
+            db: &self.db,
+            graph: &self.graph,
+            memo: &self.scoring.assessments,
+        }
+        .run(&workers, draining)
+        .await?;
         for unbuildable in unbuildables {
             self.abort_unbuildable_evaluation(unbuildable).await;
         }

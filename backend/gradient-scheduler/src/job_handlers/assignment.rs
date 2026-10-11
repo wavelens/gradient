@@ -11,8 +11,8 @@ use std::time::Duration;
 use anyhow::Context as _;
 use tracing::{Instrument as _, info, warn};
 
-use gradient_core::ServerState;
-use gradient_graph::Transition;
+use gradient_db::DbContext;
+use gradient_graph::{Graph, Transition};
 use gradient_types::*;
 use gradient_wire::types::{CandidateScore, JobKind};
 
@@ -25,18 +25,18 @@ const CLAIM_ATTEMPTS: usize = 3;
 impl Scheduler {
     #[tracing::instrument(level = "debug", skip_all, fields(?kind))]
     pub async fn request_job(&self, worker_id: &str, kind: JobKind) -> Option<Assignment> {
-        let instance = self.instance.load_full();
+        let instance = self.scoring.instance.load_full();
         for attempt in 0..CLAIM_ATTEMPTS {
             let a = match self.try_assign(worker_id, &kind, &instance).await {
                 AssignOutcome::Assigned(a) => a,
                 AssignOutcome::AtCapacity => return None,
                 AssignOutcome::Nothing => {
-                    self.cluster_wake.notify_one();
+                    self.cluster.wake.notify_one();
                     return None;
                 }
             };
 
-            match claim(&self.state, worker_id, &a.assignment_record)
+            match claim(&self.db, &self.graph, worker_id, &a.assignment_record)
                 .instrument(tracing::debug_span!("claim_dispatch"))
                 .await
             {
@@ -61,7 +61,7 @@ impl Scheduler {
         info!(%worker_id, job_id = %a.job_id(), "claim lost; dropped from the tracker");
         self.drop_assignment(worker_id, a.job_id()).await;
         if let crate::jobs::PendingJob::Build(b) = &a.pending {
-            self.state.memory.db.startable_set.enter([b.derivation]);
+            self.db.memory.startable_set.enter([b.derivation]);
         }
     }
 
@@ -95,7 +95,7 @@ impl Scheduler {
             .await
             .and_then(|job| job.derivation_build())
             && let Err(e) = gradient_db::scheduling::build_attempt::abort_running_attempts(
-                &self.state.worker_db,
+                &self.db.worker_db,
                 &[shared_build],
                 None,
                 "the worker rejected the job",
@@ -147,7 +147,7 @@ impl Scheduler {
     }
 
     pub(crate) fn announce_assignment(&self, worker_id: &str, record: &AssignmentRecord) {
-        self.state.events.publish(worker::JobDispatched {
+        self.db.events.publish(worker::JobDispatched {
             project: record.project,
             worker_id: worker_id.to_owned(),
             kind: i16::from(record.kind),
@@ -209,16 +209,17 @@ pub(crate) fn assignment_row(
 }
 
 pub(crate) async fn assigned_transition(
-    state: &Arc<ServerState>,
+    config: &RuntimeConfig,
+    graph: &Graph,
     rec: &AssignmentRecord,
 ) -> anyhow::Result<()> {
     let Some(shared_build) = rec.derivation_build else {
         return Ok(());
     };
-    let budget = transition_budget(state.config.proto.worker_heartbeat_timeout_secs);
+    let budget = transition_budget(config.proto.worker_heartbeat_timeout_secs);
     match tokio::time::timeout(
         budget,
-        state.graph.transition(Transition::Assigned {
+        graph.transition(Transition::Assigned {
             evaluation: rec.evaluation_id,
             shared_build,
             dispatched_job: rec.assignment_id,
@@ -241,12 +242,13 @@ pub(crate) async fn assigned_transition(
 /// transition is closing the row it just wrote. A claim dropped on the budget can still leave the
 /// real dispatch untimestamped, since `Assigned` is stamping `dispatched_at` only once.
 async fn claim(
-    state: &Arc<ServerState>,
+    db: &DbContext,
+    graph: &Graph,
     worker_id: &str,
     rec: &AssignmentRecord,
 ) -> anyhow::Result<bool> {
     let won = gradient_db::scheduling::assignment_record::claim_assignment(
-        &state.worker_db,
+        &db.worker_db,
         assignment_row(rec, worker_id, now()),
         rec.into(),
     )
@@ -256,10 +258,10 @@ async fn claim(
         return Ok(won);
     }
 
-    let moved = assigned_transition(state, rec).await;
+    let moved = assigned_transition(&db.config, graph, rec).await;
     if moved.is_err()
         && let Err(e) = gradient_db::scheduling::assignment_record::abandon_open_assignment(
-            &state.worker_db,
+            &db.worker_db,
             rec.assignment_id,
         )
         .await

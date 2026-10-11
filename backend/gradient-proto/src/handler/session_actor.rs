@@ -303,7 +303,7 @@ impl Actor for SessionActor {
                 }
             }
             SessionMsg::Signal(SessionSignal::ClusterAssign { job_id }) => {
-                let Some(prepared) = st.scheduler.take_prepared(&job_id).await else {
+                let Some(prepared) = st.scheduler.cluster.prepared.take(&job_id).await else {
                     return Ok(());
                 };
                 let (mut ctx, _) = split_uploads(st);

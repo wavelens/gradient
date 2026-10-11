@@ -26,18 +26,25 @@ mod assign_mode;
 mod eval_metrics;
 mod job_handlers;
 mod ram_shortage;
+mod scoring;
 pub mod trigger_firing;
 mod unbuildable;
 mod worker_lifecycle;
 
 use std::sync::Arc;
-use std::sync::atomic::AtomicU64;
 
+use chrono::{DateTime, Utc};
 use gradient_core::ServerState;
+use gradient_db::DbContext;
+use gradient_graph::Graph;
 use gradient_types::*;
 use ractor::{Actor, ActorCell, ActorRef, RpcReplyPort, SpawnErr};
+use tokio::sync::Semaphore;
 
 use actor::{CALL_TIMEOUT, CoreActor, CoreArgs, Counts, SchedulerMsg};
+use cluster::ClusterAttempts;
+use loops::BuildKick;
+use scoring::Scoring;
 
 pub use job_handlers::timeline::ReportedTimeline;
 pub use jobs::{AssignDecision, BoardActiveJob, DecisionCandidate, PendingJobInfo};
@@ -54,18 +61,15 @@ mod scheduler_tests;
 
 #[derive(Clone)]
 pub struct Scheduler {
-    pub state: Arc<ServerState>,
+    pub db: DbContext,
+    pub graph: Arc<Graph>,
+    pub started_at: DateTime<Utc>,
+    pub(crate) upstream_query: Arc<Semaphore>,
     core: Arc<tokio::sync::watch::Sender<Option<ActorRef<SchedulerMsg>>>>,
-    pub(crate) build_assigner: Arc<arc_swap::ArcSwapOption<ractor::ActorRef<loops::BuildMsg>>>,
-    pub(crate) kick_gen: Arc<AtomicU64>,
-    pub(crate) policy: Arc<dyn gradient_pool::score::ScoringPolicy>,
-    pub(crate) instance: Arc<arc_swap::ArcSwap<gradient_pool::score::InstanceContext>>,
-    pub(crate) eval_history: Arc<arc_swap::ArcSwap<crate::instance::EvalHistory>>,
+    pub cluster: ClusterAttempts,
+    pub(crate) scoring: Scoring,
+    pub(crate) build_kick: BuildKick,
     pub draining: draining::Draining,
-    pub(crate) assessments: Arc<std::sync::Mutex<assessment_memo::AssessmentMemo>>,
-    pub(crate) cluster_wake: Arc<tokio::sync::Notify>,
-    pub(crate) prepared: cluster::PreparedMembers,
-    pub(crate) attempts: cluster::AttemptBook,
     pub connection_failures: Arc<connection_failures::ConnectionFailures>,
     pub(crate) import_waits: import_waits::ImportWaits,
 }
@@ -80,22 +84,15 @@ impl Scheduler {
     pub fn new(state: Arc<ServerState>) -> Self {
         let policy = gradient_pool::score::policy_for(state.config.scheduler.scoring_policy);
         Self {
-            state,
+            db: state.db(),
+            graph: Arc::clone(&state.graph),
+            started_at: state.started_at,
+            upstream_query: Arc::clone(&state.memory.upstream_query),
             core: Arc::new(tokio::sync::watch::channel(None).0),
-            build_assigner: Arc::new(arc_swap::ArcSwapOption::empty()),
-            kick_gen: Arc::new(AtomicU64::new(0)),
-            policy,
-            instance: Arc::new(arc_swap::ArcSwap::from_pointee(
-                gradient_pool::score::InstanceContext::default(),
-            )),
-            eval_history: Arc::new(arc_swap::ArcSwap::from_pointee(
-                crate::instance::EvalHistory::default(),
-            )),
+            cluster: ClusterAttempts::default(),
+            scoring: Scoring::new(policy),
+            build_kick: BuildKick::default(),
             draining: draining::Draining::default(),
-            assessments: Arc::default(),
-            cluster_wake: Arc::new(tokio::sync::Notify::new()),
-            prepared: cluster::PreparedMembers::default(),
-            attempts: cluster::AttemptBook::default(),
             connection_failures: Arc::default(),
             import_waits: import_waits::ImportWaits::default(),
         }
@@ -106,7 +103,7 @@ impl Scheduler {
         parent: Option<ActorCell>,
     ) -> Result<ActorRef<SchedulerMsg>, SpawnErr> {
         let args = CoreArgs {
-            policy: Arc::clone(&self.policy),
+            policy: Arc::clone(&self.scoring.policy),
         };
         let (actor, _) = match parent {
             Some(parent) => Actor::spawn_linked(None, CoreActor, args, parent).await?,
@@ -181,16 +178,16 @@ impl Scheduler {
 
     pub fn start(self: &Arc<Self>) {
         let scheduler = Arc::downgrade(self);
-        self.state.memory.db.startable_set.on_move(move || {
+        self.db.memory.startable_set.on_move(move || {
             if let Some(scheduler) = scheduler.upgrade() {
-                scheduler.kick_assigner();
+                scheduler.build_kick.kick();
             }
         });
         loops::start_assign_loops(Arc::clone(self));
     }
 
     pub fn loop_health(&self) -> Vec<(&'static str, gradient_util::supervision::LoopHealth)> {
-        self.state
+        self.db
             .shutdown
             .supervision_health()
             .map(|h| h.snapshot())
@@ -263,7 +260,7 @@ impl Scheduler {
 
         let mut unowned = Vec::with_capacity(untracked.len());
         for key in untracked {
-            if self.attempt_of(&key).await.is_none() {
+            if self.cluster.book.attempt_of(&key).await.is_none() {
                 unowned.push(key);
             }
         }

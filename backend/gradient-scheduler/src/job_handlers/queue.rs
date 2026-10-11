@@ -86,14 +86,6 @@ impl Scheduler {
         .await
     }
 
-    pub(crate) fn kick_assigner(&self) {
-        self.kick_gen
-            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        if let Some(actor) = self.build_assigner.load_full() {
-            let _ = actor.send_message(crate::loops::BuildMsg::Kick);
-        }
-    }
-
     pub async fn get_job_candidates(&self, worker_id: &str) -> Vec<JobCandidate> {
         let worker = worker_id.to_owned();
         self.call(|reply| SchedulerMsg::Candidates {

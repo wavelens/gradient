@@ -804,7 +804,11 @@ pub fn create_router_with_scheduler(
     state
         .shutdown
         .supervise(sessions.child_spec(Arc::clone(&scheduler)));
-    gradient_proto::outbound::start_outbound_loop(Arc::clone(&scheduler), Arc::clone(&sessions));
+    gradient_proto::outbound::start_outbound_loop(
+        Arc::clone(&state),
+        Arc::clone(&scheduler),
+        Arc::clone(&sessions),
+    );
 
     let proto_limiter = Arc::new(ProtoLimiter::new(state.config.proto.max_connections.get()));
 

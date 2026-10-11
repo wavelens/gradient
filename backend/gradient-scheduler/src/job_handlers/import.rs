@@ -66,7 +66,7 @@ impl Scheduler {
         let answers = self.import_waits.register_and_settle(wait, &statuses).await;
         if answers.is_empty() {
             debug!(%job_id, %request_id, "import request waits for its builds");
-            self.kick_assigner();
+            self.build_kick.kick();
         }
 
         self.answer_imports(answers).await;
@@ -90,8 +90,7 @@ impl Scheduler {
         }
 
         let derivations = builds.iter().map(|(_, row)| row.derivation).collect();
-        self.state
-            .graph
+        self.graph
             .transition(Transition::RequeueImports { derivations })
             .await
             .context("requeue the failed builds of an import")?;
@@ -108,7 +107,7 @@ impl Scheduler {
             .map(|p| StorePath::parse(p).ok().map(|sp| sp.hash().to_owned()))
             .collect();
         let rows = gradient_db::evaluations::imports::import_builds(
-            &self.state.worker_db,
+            &self.db.worker_db,
             evaluation,
             hashes.iter().flatten().cloned().collect(),
         )
@@ -149,7 +148,7 @@ impl Scheduler {
             return Ok(());
         };
 
-        let db = &self.state.worker_db;
+        let db = &self.db.worker_db;
         let shared_builds = gradient_db::fetch_in_chunks(&builds, |chunk| async move {
             EDerivationBuild::find()
                 .filter(CDerivationBuild::Id.is_in(chunk))
@@ -214,7 +213,7 @@ impl Scheduler {
             .into_iter()
             .map(|w| (w.architectures, w.system_features))
             .collect();
-        let checker = BuildabilityChecker::load(&self.state, &candidates).await?;
+        let checker = BuildabilityChecker::load(&self.db.worker_db, &candidates).await?;
         let unbuildable: HashMap<DerivationBuildId, String> = checker
             .unbuildable_imports(&candidates, &worker_caps)
             .into_iter()
@@ -243,7 +242,7 @@ impl Scheduler {
         let waiting: HashSet<TaskId> = ETask::find()
             .filter(CTask::Id.is_in(tasks))
             .filter(CTask::WaitForWorkers.eq(true))
-            .all(&self.state.worker_db)
+            .all(&self.db.worker_db)
             .await
             .context("read the tasks waiting for workers")?
             .into_iter()
@@ -267,7 +266,7 @@ impl Scheduler {
 
         let waited = self.import_waits.waited_builds().await;
         let lifted = gradient_db::scheduling::priority::import_lifted_shared_builds(
-            &self.state.worker_db,
+            &self.db.worker_db,
             &waited,
         )
         .await

@@ -103,7 +103,7 @@ impl Scheduler {
         report: ReportedTimeline,
     ) {
         let scheduler = Arc::clone(self);
-        self.state.shutdown.spawn(async move {
+        self.db.shutdown.spawn(async move {
             let _ = scheduler
                 .persist_job_timeline(assignment_id, outcome, report)
                 .await;
@@ -134,7 +134,7 @@ impl Scheduler {
         report: ReportedTimeline,
     ) -> TimelineLanding {
         let row = match EDispatchedJob::find_by_id(assignment_id)
-            .one(&self.state.worker_db)
+            .one(&self.db.worker_db)
             .await
         {
             Ok(Some(row)) => row,
@@ -157,7 +157,7 @@ impl Scheduler {
             active.finished_at = Set(Some(report.received_at));
             active.outcome = Set(Some(outcome));
             active.worker_elapsed_ms = Set(Some(report.worker_elapsed_ms as i64));
-            match active.update(&self.state.worker_db).await {
+            match active.update(&self.db.worker_db).await {
                 Ok(_) => TimelineLanding::Closed,
                 Err(e) => {
                     warn!(dispatch = %assignment_id, error = %e, "failed to close the dispatched_job row");
@@ -172,7 +172,7 @@ impl Scheduler {
             && let Err(e) = gradient_entity::dispatched_job_phase::Entity::insert_many(
                 rows.into_iter().map(IntoActiveModel::into_active_model),
             )
-            .exec(&self.state.worker_db)
+            .exec(&self.db.worker_db)
             .await
         {
             warn!(dispatch = %assignment_id, error = %e, "failed to insert dispatched_job_phase rows");
@@ -196,7 +196,7 @@ impl Scheduler {
             .col_expr(CEvaluationMetric::EvalFlakeMs, totals.eval_flake_ms.into())
             .col_expr(CEvaluationMetric::EvalDrvMs, totals.eval_drv_ms.into())
             .filter(CEvaluationMetric::Evaluation.eq(evaluation))
-            .exec(&self.state.worker_db)
+            .exec(&self.db.worker_db)
             .await
         {
             warn!(%evaluation, error = %e, "failed to fill the eval phase columns");

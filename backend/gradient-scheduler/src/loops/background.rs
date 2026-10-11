@@ -10,10 +10,11 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use gradient_db::evaluations::watchdog::LostCompletion;
+use gradient_db::{DbContext, WorkerDb};
 use gradient_entity::dispatched_job::DispatchedJobOutcome;
-use gradient_graph::{RequeueScope, Transition};
+use gradient_graph::{Graph, RequeueScope, Transition};
 use gradient_types::ids::DispatchedJobId;
-use gradient_types::{DerivationBuildId, EvaluationId};
+use gradient_types::{DerivationBuildId, EvaluationId, RuntimeConfig};
 use gradient_util::supervision::{Pass, PassError, RunsOn};
 use gradient_wire::types::BuildFailureKind;
 use tracing::{debug, info, warn};
@@ -32,14 +33,14 @@ const ABANDONED_ASSIGNMENT_SWEEP_LIMIT: u64 = 10_000;
 
 const ABORT_CONFIRM_GRACE: Duration = Duration::from_secs(300);
 
-pub(super) fn liveness_period(scheduler: &Scheduler) -> Option<Duration> {
-    let timeout_secs = scheduler.state.config.proto.worker_heartbeat_timeout_secs;
+pub(super) fn liveness_period(config: &RuntimeConfig) -> Option<Duration> {
+    let timeout_secs = config.proto.worker_heartbeat_timeout_secs;
     (timeout_secs != 0)
         .then(|| Duration::from_secs((timeout_secs / LIVENESS_POLLS_PER_DEADLINE).max(5)))
 }
 
 pub(crate) struct GraphConsistency {
-    pub(crate) scheduler: Arc<Scheduler>,
+    pub(crate) db: DbContext,
     pub(crate) period: Duration,
 }
 
@@ -53,15 +54,12 @@ impl Pass for GraphConsistency {
     }
 
     async fn run(&self) -> Result<(), PassError> {
-        consistency_check_pass(&self.scheduler)
-            .await
-            .map_err(Into::into)
+        consistency_check_pass(&self.db).await.map_err(Into::into)
     }
 }
 
-async fn consistency_check_pass(scheduler: &Scheduler) -> anyhow::Result<()> {
-    let report =
-        gradient_db::graph::consistency::graph_consistency_report(&scheduler.state.db()).await?;
+async fn consistency_check_pass(db: &DbContext) -> anyhow::Result<()> {
+    let report = gradient_db::graph::consistency::graph_consistency_report(db).await?;
     if report.total() > 0 {
         warn!(
             counter_drift = report.counter_drift,
@@ -85,7 +83,7 @@ async fn consistency_check_pass(scheduler: &Scheduler) -> anyhow::Result<()> {
 }
 
 pub(crate) struct TransientRetryRequeue {
-    pub(crate) scheduler: Arc<Scheduler>,
+    pub(crate) graph: Arc<Graph>,
 }
 
 impl Pass for TransientRetryRequeue {
@@ -98,23 +96,18 @@ impl Pass for TransientRetryRequeue {
     }
 
     async fn run(&self) -> Result<(), PassError> {
-        transient_retry_pass(&self.scheduler)
-            .await
-            .map_err(Into::into)
+        transient_retry_pass(&self.graph).await.map_err(Into::into)
     }
 }
 
-async fn transient_retry_pass(scheduler: &Scheduler) -> anyhow::Result<()> {
-    scheduler
-        .state
-        .graph
-        .requeue(RequeueScope::TransientRetries)
-        .await?;
+async fn transient_retry_pass(graph: &Graph) -> anyhow::Result<()> {
+    graph.requeue(RequeueScope::TransientRetries).await?;
     Ok(())
 }
 
 pub(crate) struct GraphStuckReheal {
-    pub(crate) scheduler: Arc<Scheduler>,
+    pub(crate) db: WorkerDb,
+    pub(crate) graph: Arc<Graph>,
     pub(crate) period: Duration,
 }
 
@@ -128,14 +121,10 @@ impl Pass for GraphStuckReheal {
     }
 
     async fn run(&self) -> Result<(), PassError> {
-        graph_stuck_reheal_pass(&self.scheduler)
+        crate::waiting_state::reheal_graph_stuck_evals(&self.db, &self.graph)
             .await
             .map_err(Into::into)
     }
-}
-
-async fn graph_stuck_reheal_pass(scheduler: &Scheduler) -> anyhow::Result<()> {
-    crate::waiting_state::reheal_graph_stuck_evals(&scheduler.state).await
 }
 
 pub(crate) struct WorkerLiveness {
@@ -160,7 +149,7 @@ impl Pass for WorkerLiveness {
 }
 
 async fn worker_liveness_pass(scheduler: &Scheduler) -> anyhow::Result<()> {
-    let timeout_secs = scheduler.state.config.proto.worker_heartbeat_timeout_secs;
+    let timeout_secs = scheduler.db.config.proto.worker_heartbeat_timeout_secs;
     let timeout_ms = (timeout_secs as i64) * 1000;
     let now_ms = gradient_types::now().and_utc().timestamp_millis();
     for worker_id in scheduler.stale_workers(now_ms, timeout_ms).await {
@@ -206,23 +195,22 @@ async fn instance_metrics_pass(scheduler: &Scheduler) -> anyhow::Result<()> {
         cpu_core_score_mean: c.cpu_core_score_mean,
         upload_speed_mean_mbps: c.upload_speed_mean_mbps,
         download_speed_mean_mbps: c.download_speed_mean_mbps,
-        download_slots: u32::try_from(scheduler.state.config.nar.max_concurrent_downloads.get())
+        download_slots: u32::try_from(scheduler.db.config.nar.max_concurrent_downloads.get())
             .unwrap_or(u32::MAX),
-        upload_slots: u32::try_from(scheduler.state.config.upload.concurrency.get())
+        upload_slots: u32::try_from(scheduler.db.config.upload.concurrency.get())
             .unwrap_or(u32::MAX),
     };
     let ctx = crate::instance::compute_instance_context(
-        &scheduler.state.worker_db,
+        &scheduler.db.worker_db,
         counts,
         gradient_types::now(),
     )
     .await;
-    scheduler.instance.store(Arc::new(ctx));
+    scheduler.scoring.instance.store(Arc::new(ctx));
 
     let eval_history =
-        crate::instance::compute_eval_history(&scheduler.state.worker_db, gradient_types::now())
-            .await;
-    scheduler.eval_history.store(Arc::new(eval_history));
+        crate::instance::compute_eval_history(&scheduler.db.worker_db, gradient_types::now()).await;
+    scheduler.scoring.eval_history.store(Arc::new(eval_history));
     Ok(())
 }
 
@@ -250,10 +238,10 @@ impl Pass for WorkerSample {
 async fn worker_sample_pass(scheduler: &Scheduler) -> anyhow::Result<()> {
     let workers = scheduler.board_workers().await;
     for info in &workers {
-        crate::worker_lifecycle::record_worker_sample(&scheduler.state.worker_db, info).await;
+        crate::worker_lifecycle::record_worker_sample(&scheduler.db.worker_db, info).await;
     }
     let (workers, pending, active) = scheduler.metrics_snapshot().await;
-    scheduler.state.events.publish(worker::QueueDepth {
+    scheduler.db.events.publish(worker::QueueDepth {
         workers,
         pending,
         active,
@@ -310,7 +298,7 @@ async fn abandoned_assignment_pass(scheduler: &Scheduler) -> anyhow::Result<()> 
         .column(CDispatchedJob::JobId)
         .limit(ABANDONED_ASSIGNMENT_SWEEP_LIMIT)
         .into_tuple()
-        .all(&scheduler.state.worker_db)
+        .all(&scheduler.db.worker_db)
         .await?;
 
     if stale.is_empty() {
@@ -330,7 +318,7 @@ async fn abandoned_assignment_pass(scheduler: &Scheduler) -> anyhow::Result<()> 
     }
 
     let reaped = gradient_db::scheduling::assignment_record::abandon_open_assignments(
-        &scheduler.state.worker_db,
+        &scheduler.db.worker_db,
         &reap,
     )
     .await?;
@@ -391,7 +379,7 @@ impl Pass for EvalCompletionWatchdog {
 
 async fn eval_completion_watchdog_pass(scheduler: &Scheduler) -> anyhow::Result<()> {
     let lost = gradient_db::evaluations::watchdog::lost_eval_completions(
-        &scheduler.state.worker_db,
+        &scheduler.db.worker_db,
         LOST_COMPLETION_GRACE_SECS,
     )
     .await?;
@@ -431,7 +419,7 @@ async fn eval_completion_watchdog_pass(scheduler: &Scheduler) -> anyhow::Result<
             },
         };
 
-        match scheduler.state.graph.transition(transition).await {
+        match scheduler.graph.transition(transition).await {
             Ok(_) => repaired += 1,
             Err(e) => {
                 warn!(error = %e, evaluation_id = %evaluation, "lost-completion repair failed")
@@ -440,7 +428,7 @@ async fn eval_completion_watchdog_pass(scheduler: &Scheduler) -> anyhow::Result<
     }
 
     if repaired > 0 {
-        scheduler.kick_assigner();
+        scheduler.build_kick.kick();
     }
     Ok(())
 }
@@ -479,11 +467,10 @@ async fn ram_shortage_pass(scheduler: &Scheduler) -> anyhow::Result<()> {
         "queued builds need more RAM than any connected worker has free - failing them"
     );
     scheduler
-        .state
         .graph
         .transition(Transition::NotEnoughResources { shortages })
         .await?;
-    scheduler.kick_assigner();
+    scheduler.build_kick.kick();
     Ok(())
 }
 
@@ -520,7 +507,7 @@ impl Pass for StrandedBuildSweep {
 
 async fn stranded_build_pass(scheduler: &Scheduler) -> anyhow::Result<()> {
     let stranded = gradient_db::scheduling::build_watchdog::stranded_building_shared_builds(
-        &scheduler.state.worker_db,
+        &scheduler.db.worker_db,
         LOST_COMPLETION_GRACE_SECS,
     )
     .await?;
@@ -550,7 +537,6 @@ async fn stranded_build_pass(scheduler: &Scheduler) -> anyhow::Result<()> {
         "shared builds stranded in Building behind an abandoned dispatch - re-queuing"
     );
     scheduler
-        .state
         .graph
         .transition(Transition::OrphanedBuilds {
             shared_builds,
@@ -558,7 +544,7 @@ async fn stranded_build_pass(scheduler: &Scheduler) -> anyhow::Result<()> {
             observed_peak_ram_mb: Default::default(),
         })
         .await?;
-    scheduler.kick_assigner();
+    scheduler.build_kick.kick();
     Ok(())
 }
 

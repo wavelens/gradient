@@ -8,7 +8,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
 
-use gradient_core::ServerState;
+use gradient_db::WorkerDb;
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_types::input::vec_to_hex;
 use gradient_types::wildcard::Wildcard;
@@ -38,7 +38,7 @@ impl Pass for EvalDispatch {
     }
 
     fn wake(&self) -> Option<Arc<Notify>> {
-        Some(Arc::clone(&self.scheduler.state.wake.eval_assign))
+        Some(Arc::clone(&self.scheduler.db.wake.eval_assign))
     }
 
     async fn run(&self) -> Result<(), PassError> {
@@ -54,8 +54,6 @@ pub(crate) async fn assign_queued_evals(scheduler: &Scheduler) -> anyhow::Result
         return Ok(());
     }
 
-    let state = &scheduler.state;
-
     // The open `dispatched_job` row is the durable proof a job is out. The tracker is only the
     // in-memory fast path and is empty after a respawn.
     let not_in_flight = gradient_db::scheduling::assignment_record::no_open_assignment_predicate(
@@ -65,7 +63,7 @@ pub(crate) async fn assign_queued_evals(scheduler: &Scheduler) -> anyhow::Result
     let evals = EEvaluation::find()
         .filter(CEvaluation::Status.eq(EvaluationStatus::Queued))
         .filter(Expr::cust(not_in_flight))
-        .all(&state.worker_db)
+        .all(&scheduler.db.worker_db)
         .await?;
 
     let ids: Vec<String> = evals
@@ -82,10 +80,11 @@ pub(crate) async fn assign_queued_evals(scheduler: &Scheduler) -> anyhow::Result
     }
 
     let eval_ids: Vec<_> = evals.iter().map(|e| e.id).collect();
-    let membership = crate::cluster::Membership::load(&state.worker_db, &eval_ids, &[]).await?;
-    let maps = EvalAssignMaps::load(state, &evals).await?;
+    let membership =
+        crate::cluster::Membership::load(&scheduler.db.worker_db, &eval_ids, &[]).await?;
+    let maps = EvalAssignMaps::load(&scheduler.db.worker_db, &evals).await?;
     let split_fetch = scheduler.has_idle_eval_only_worker().await;
-    let eval_history = scheduler.eval_history.load();
+    let eval_history = scheduler.scoring.eval_history.load();
 
     for eval in evals {
         let job_id = crate::jobs::eval_job_key(eval.id);
@@ -188,7 +187,7 @@ struct EvalAssignMaps {
 }
 
 impl EvalAssignMaps {
-    async fn load(state: &Arc<ServerState>, evals: &[MEvaluation]) -> Result<Self, sea_orm::DbErr> {
+    async fn load(db: &WorkerDb, evals: &[MEvaluation]) -> Result<Self, sea_orm::DbErr> {
         use sea_orm::QueryOrder;
 
         let commit_ids: Vec<CommitId> = evals
@@ -200,7 +199,7 @@ impl EvalAssignMaps {
         let commits = gradient_db::fetch_in_chunks(&commit_ids, |chunk| async move {
             ECommit::find()
                 .filter(CCommit::Id.is_in(chunk))
-                .all(&state.worker_db)
+                .all(db)
                 .await
         })
         .await?
@@ -217,7 +216,7 @@ impl EvalAssignMaps {
         let sidecars = gradient_db::fetch_in_chunks(&update_ids, |chunk| async move {
             eiu::Entity::find()
                 .filter(eiu::Column::Evaluation.is_in(chunk))
-                .all(&state.worker_db)
+                .all(db)
                 .await
         })
         .await?
@@ -233,7 +232,7 @@ impl EvalAssignMaps {
             efio::Entity::find()
                 .filter(efio::Column::Evaluation.is_in(chunk))
                 .order_by_asc(efio::Column::InputName)
-                .all(&state.worker_db)
+                .all(db)
                 .await
         })
         .await?
@@ -253,10 +252,7 @@ impl EvalAssignMaps {
             .into_iter()
             .collect();
         let tasks = gradient_db::fetch_in_chunks(&task_ids, |chunk| async move {
-            ETask::find()
-                .filter(CTask::Id.is_in(chunk))
-                .all(&state.worker_db)
-                .await
+            ETask::find().filter(CTask::Id.is_in(chunk)).all(db).await
         })
         .await?;
         let projects = tasks.iter().map(|t| (t.id, t.project)).collect();
@@ -338,15 +334,12 @@ pub(crate) fn flake_job_for_eval_source(
     (job, Vec::new())
 }
 
-pub(crate) async fn project_id_for_eval(
-    state: &Arc<ServerState>,
-    eval: &MEvaluation,
-) -> Option<ProjectId> {
+pub(crate) async fn project_id_for_eval(db: &WorkerDb, eval: &MEvaluation) -> Option<ProjectId> {
     let task_id = eval.task.or_else(|| {
         error!(evaluation_id = %eval.id, "evaluation has no task");
         None
     })?;
-    match ETask::find_by_id(task_id).one(&state.worker_db).await {
+    match ETask::find_by_id(task_id).one(db).await {
         Ok(Some(p)) => Some(p.project),
         Ok(None) => None,
         Err(e) => {

@@ -5,11 +5,10 @@
  */
 
 use std::collections::{BTreeMap, HashMap};
-use std::sync::Arc;
 
 use anyhow::{Context, Result};
 
-use gradient_core::ServerState;
+use gradient_db::WorkerDb;
 use gradient_entity::build::BuildStatus;
 use gradient_types::*;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
@@ -24,11 +23,7 @@ pub(crate) struct BuildabilityChecker {
 }
 
 impl BuildabilityChecker {
-    pub(crate) async fn load(
-        state: &Arc<ServerState>,
-        shared_builds: &[MDerivationBuild],
-    ) -> Result<Self> {
-        let db = &state.worker_db;
+    pub(crate) async fn load(db: &WorkerDb, shared_builds: &[MDerivationBuild]) -> Result<Self> {
         let drv_ids: Vec<DerivationId> = shared_builds.iter().map(|a| a.derivation).collect();
 
         let drvs = gradient_db::fetch_in_chunks(&drv_ids, |chunk| async move {

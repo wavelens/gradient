@@ -7,21 +7,19 @@
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 
-use gradient_core::ServerState;
+use gradient_db::WorkerDb;
 use gradient_db::status::EvaluationWarning;
 use gradient_entity::StorePath;
 use gradient_graph::UpstreamHit;
 use gradient_types::*;
 use gradient_wire::types::DiscoveredDerivation;
+use tokio::sync::Semaphore;
 use tracing::{error, warn};
 
 const UPSTREAM_WINDOW_MINUTES: i64 = 60;
 
 #[tracing::instrument(level = "debug", skip_all, fields(derivations = derivations.len()))]
-pub async fn assess_cached(
-    state: &Arc<ServerState>,
-    derivations: &[DiscoveredDerivation],
-) -> HashSet<String> {
+pub async fn assess_cached(db: &WorkerDb, derivations: &[DiscoveredDerivation]) -> HashSet<String> {
     let mut truly_substituted = HashSet::new();
     let outputs_by_drv: HashMap<&str, Vec<String>> = derivations
         .iter()
@@ -45,8 +43,6 @@ pub async fn assess_cached(
     if all_hashes.is_empty() {
         return truly_substituted;
     }
-
-    let db = &state.worker_db;
 
     let fully_cached: HashSet<String> =
         gradient_db::fetch_in_chunks(&all_hashes, |chunk| async move {
@@ -77,7 +73,8 @@ pub struct ProbeAnswer {
 /// This is the only function here leaving the process. Probing is running in its own loop for that
 /// reason, never on a graph path.
 pub async fn probe_outputs(
-    state: &Arc<ServerState>,
+    db: &WorkerDb,
+    upstream_query: &Arc<Semaphore>,
     evaluation: &MEvaluation,
     to_probe: Vec<(String, String)>,
 ) -> ProbeAnswer {
@@ -86,8 +83,7 @@ pub async fn probe_outputs(
         return answer;
     }
 
-    let db = &state.worker_db;
-    let Some(project_id) = crate::loops::project_id_for_eval(state, evaluation).await else {
+    let Some(project_id) = crate::loops::project_id_for_eval(db, evaluation).await else {
         return answer;
     };
     let endpoints = match gradient_db::caches::upstream::upstream_endpoints_for_project(
@@ -109,13 +105,9 @@ pub async fn probe_outputs(
     }
 
     let id_to_url: HashMap<_, String> = endpoints.iter().map(|e| (e.id, e.url.clone())).collect();
-    let batch = gradient_core::upstream::probe_batch(
-        endpoints,
-        Arc::clone(&state.memory.upstream_query),
-        to_probe,
-    )
-    .await;
-    warn_unanswered(state, evaluation, &batch.unanswered, &id_to_url).await;
+    let batch =
+        gradient_core::upstream::probe_batch(endpoints, Arc::clone(upstream_query), to_probe).await;
+    warn_unanswered(db, evaluation, &batch.unanswered, &id_to_url).await;
 
     // The same URL under different upstream ids is folding into one metric series (#417).
     let mut by_url: HashMap<String, gradient_db::caches::upstream::UpstreamAccum> = HashMap::new();
@@ -159,7 +151,7 @@ pub async fn probe_outputs(
 }
 
 async fn warn_unanswered(
-    state: &Arc<ServerState>,
+    db: &WorkerDb,
     evaluation: &MEvaluation,
     unanswered: &HashMap<String, Vec<CacheUpstreamId>>,
     id_to_url: &HashMap<CacheUpstreamId, String>,
@@ -173,7 +165,7 @@ async fn warn_unanswered(
 
     for url in urls {
         EvaluationWarning::UpstreamUnanswered { url }
-            .report(&state.worker_db, evaluation.id)
+            .report(db, evaluation.id)
             .await;
     }
 }

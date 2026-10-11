@@ -50,7 +50,7 @@ impl SessionsHandle {
                 let scheduler = Arc::clone(&scheduler);
                 Box::pin(async move {
                     let args = SessionsArgs {
-                        shutdown: scheduler.state.shutdown.clone(),
+                        shutdown: scheduler.db.shutdown.clone(),
                         scheduler,
                     };
                     let (actor, _) = Actor::spawn_linked(None, Sessions, args, ctx.parent).await?;

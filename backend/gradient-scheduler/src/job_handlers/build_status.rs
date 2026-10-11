@@ -4,8 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use std::sync::Arc;
-
 use anyhow::Result;
 use sea_orm::EntityTrait;
 use tracing::{info, warn};
@@ -30,7 +28,6 @@ impl Scheduler {
         };
 
         match self
-            .state
             .graph
             .transition(Transition::BuildStarted {
                 shared_build: derivation_build,
@@ -74,8 +71,7 @@ impl Scheduler {
             }
         }
 
-        self.state
-            .graph
+        self.graph
             .transition(Transition::BuildOutput {
                 shared_build: derivation_build,
                 outputs,
@@ -99,7 +95,9 @@ impl Scheduler {
             warn!(%job_id, "job_completed for unknown job");
             return Ok(());
         };
-        if self.attempt_of(job_id).await.is_some() && !crate::jobs::is_fetch_only_job(&job) {
+        if self.cluster.book.attempt_of(job_id).await.is_some()
+            && !crate::jobs::is_fetch_only_job(&job)
+        {
             return self
                 .on_cluster_member_closed(job_id, MemberReport::Completed { job })
                 .await;
@@ -116,7 +114,7 @@ impl Scheduler {
                 // freed.
                 if crate::jobs::is_fetch_only(&j.job) {
                     let store_path = EEvaluation::find_by_id(j.evaluation_id)
-                        .one(&self.state.worker_db)
+                        .one(&self.db.worker_db)
                         .await?
                         .and_then(|e| e.flake_source);
                     return match store_path {
@@ -124,8 +122,11 @@ impl Scheduler {
                             let follow_id = crate::jobs::eval_job_key(j.evaluation_id);
                             let mut follow = j.cached_followup(path);
                             if let Some(task) = follow.task_id {
-                                follow.history =
-                                    self.eval_history.load().for_job(task, &follow.job.steps);
+                                follow.history = self
+                                    .scoring
+                                    .eval_history
+                                    .load()
+                                    .for_job(task, &follow.job.steps);
                             }
                             if let Err(e) = self.enqueue_eval_job(follow_id, follow).await {
                                 warn!(error = %e, evaluation_id = %j.evaluation_id, "enqueue_eval_job failed for cached follow-up");
@@ -135,8 +136,7 @@ impl Scheduler {
                         }
                         None => {
                             warn!(evaluation_id = %j.evaluation_id, "fetch-only job reported no flake_source; failing eval");
-                            self.state
-                                .graph
+                            self.graph
                                 .transition(Transition::EvalFailed {
                                     evaluation: j.evaluation_id,
                                     error: "fetch completed but no flake source was archived"
@@ -151,7 +151,6 @@ impl Scheduler {
                 }
 
                 let r = self
-                    .state
                     .graph
                     .transition(Transition::EvalStreamCompleted {
                         evaluation: j.evaluation_id,
@@ -159,24 +158,23 @@ impl Scheduler {
                     .await
                     .map(|_| ());
                 if worker_idle {
-                    self.kick_assigner();
+                    self.build_kick.kick();
                 }
 
                 r
             }
             PendingJob::Build(j) => {
                 let report = self
-                    .state
                     .graph
                     .transition(Transition::BuildCompleted {
                         shared_build: j.derivation_build,
                     })
                     .await?;
                 if let Some(log) = report.substitute_log {
-                    let state = Arc::clone(&self.state);
-                    self.state.shutdown.spawn(async move {
+                    let db = self.db.clone();
+                    self.db.shutdown.spawn(async move {
                         if let Err(e) = crate::log_substitution::substitute_log(
-                            state,
+                            db,
                             log.shared_build,
                             log.derivation,
                             log.drv_path,
@@ -188,7 +186,7 @@ impl Scheduler {
                     });
                 }
                 if worker_idle || self.has_import_waits().await {
-                    self.kick_assigner();
+                    self.build_kick.kick();
                 }
 
                 Ok(())
@@ -222,7 +220,7 @@ impl Scheduler {
             kind,
             missing_paths: missing_paths.to_vec(),
         };
-        if self.attempt_of(job_id).await.is_some() {
+        if self.cluster.book.attempt_of(job_id).await.is_some() {
             return self
                 .on_cluster_member_closed(job_id, MemberReport::from_failure(job, failure))
                 .await;
@@ -240,7 +238,6 @@ impl Scheduler {
         match job {
             PendingJob::Eval(j) => {
                 let r = self
-                    .state
                     .graph
                     .transition(Transition::EvalFailed {
                         evaluation: j.evaluation_id,
@@ -250,12 +247,11 @@ impl Scheduler {
                     })
                     .await
                     .map(|_| ());
-                self.kick_assigner();
+                self.build_kick.kick();
                 r
             }
             PendingJob::Build(j) => {
                 let r = self
-                    .state
                     .graph
                     .transition(Transition::BuildFailed {
                         shared_build: j.derivation_build,
@@ -268,7 +264,7 @@ impl Scheduler {
                     .await
                     .map(|_| ());
                 if self.has_import_waits().await {
-                    self.kick_assigner();
+                    self.build_kick.kick();
                 }
 
                 r
