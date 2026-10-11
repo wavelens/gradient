@@ -36,7 +36,7 @@ pub struct ServerArgs {
     #[arg(default_value = "false")]
     pub use_quic: bool,
     /// Directory holding Gradient's state, NAR files and caches.
-    #[arg(default_value = ".")]
+    #[arg(default_value = "/var/lib/gradient")]
     pub base_dir: PathBuf,
     /// Directory holding the credential files of the declarative state.
     #[arg(default_value = "/run/credentials/gradient-server")]

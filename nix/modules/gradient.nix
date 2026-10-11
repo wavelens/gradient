@@ -30,7 +30,6 @@
 
     writtenByHand = [
       [ "serveUrl" ]
-      [ "baseDir" ]
       [ "credentialsDir" ]
       [ "frontend" "url" ]
       [ "database" "url" ]
@@ -165,12 +164,6 @@ in {
           Public URL under which clients reach Gradient. Set this for a URL other than
           {option}`services.gradient.domain`, for example behind a port mapping.
         '';
-      };
-
-      baseDir = lib.mkOption {
-        type = lib.types.path;
-        default = "/var/lib/gradient";
-        description = "Directory holding Gradient's state, NAR files and caches.";
       };
 
       localWorker = lib.mkOption {
