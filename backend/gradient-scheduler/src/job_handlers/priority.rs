@@ -30,7 +30,6 @@ impl Scheduler {
         transition: Transition,
     ) -> anyhow::Result<()> {
         let shared_builds = self
-            .state
             .graph
             .transition(transition)
             .await?

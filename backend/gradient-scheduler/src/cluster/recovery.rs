@@ -15,16 +15,12 @@ use crate::actor::{Released, SchedulerMsg};
 use crate::jobs::PendingJob;
 
 impl Scheduler {
-    pub(crate) async fn attempt_of(&self, job_id: &str) -> Option<ClusterAttemptId> {
-        self.attempts.attempt_of(job_id).await
-    }
-
     pub(crate) async fn on_cluster_member_closed(
         &self,
         job_id: &str,
         report: MemberReport,
     ) -> Result<()> {
-        let recorded = self.attempts.record(job_id, report).await;
+        let recorded = self.cluster.book.record(job_id, report).await;
         match recorded {
             Recorded::Held | Recorded::Deferred => Ok(()),
             Recorded::NotMember(report) => self.settle_single(report).await,
@@ -57,11 +53,11 @@ impl Scheduler {
         attempt: ClusterAttemptId,
         fate: Fate,
     ) -> Result<()> {
-        let Some(cluster) = self.attempts.begin_resolving(attempt).await else {
+        let Some(cluster) = self.cluster.book.begin_resolving(attempt).await else {
             return Ok(());
         };
         let resolved = gradient_db::scheduling::cluster::resolve_cluster_attempt(
-            &self.state.worker_db,
+            &self.db.worker_db,
             cluster,
             attempt,
             fate.into(),
@@ -76,13 +72,13 @@ impl Scheduler {
                 false
             }
             Err(e) => {
-                self.attempts.abort_resolving(attempt).await;
+                self.cluster.book.abort_resolving(attempt).await;
                 return Err(e.into());
             }
         };
 
         let resolution = Resolution { fate, requeued };
-        let (reports, survivors) = self.attempts.drain(attempt, resolution).await;
+        let (reports, survivors) = self.cluster.book.drain(attempt, resolution).await;
         let mut dispositions: Vec<Disposition> = reports
             .into_iter()
             .map(|r| dispose(resolution, r))
@@ -94,7 +90,7 @@ impl Scheduler {
             ));
         }
         self.apply(dispositions).await;
-        self.kick_assigner();
+        self.build_kick.kick();
 
         Ok(())
     }
@@ -130,7 +126,7 @@ impl Scheduler {
                 })
                 .await;
             if let Ok(Released { job: Some(job), .. }) = released {
-                self.attempts.settle(attempt, &survivor.job_id).await;
+                self.cluster.book.settle(attempt, &survivor.job_id).await;
                 jobs.push(job);
             }
         }
@@ -154,7 +150,7 @@ impl Scheduler {
                 warn!(error = %e, "settling a cluster member failed");
             }
         }
-        crate::build::requeue_cluster_members(&self.state, &requeue).await;
+        crate::build::requeue_cluster_members(&self.db, &self.graph, &requeue).await;
     }
 
     async fn settle_single(&self, report: MemberReport) -> Result<()> {
@@ -162,7 +158,13 @@ impl Scheduler {
             MemberReport::Completed { job } => self.settle_completed(job, false).await,
             MemberReport::Failed { job, failure } => self.settle_failed(job, &failure, None).await,
             MemberReport::Lost { job } => {
-                crate::build::requeue_orphaned_jobs(&self.state, &[job], &Default::default()).await;
+                crate::build::requeue_orphaned_jobs(
+                    &self.db,
+                    &self.graph,
+                    &[job],
+                    &Default::default(),
+                )
+                .await;
                 Ok(())
             }
             MemberReport::Aborted { .. } => Ok(()),

@@ -34,7 +34,7 @@ impl Scheduler {
     pub async fn abort_evaluation(self: &Arc<Self>, evaluation: MEvaluation) {
         let evaluation_id = evaluation.id;
         let marked =
-            update_evaluation_status(&self.state.db(), evaluation, EvaluationStatus::Aborted).await;
+            update_evaluation_status(&self.db, evaluation, EvaluationStatus::Aborted).await;
         if !aborted(evaluation_id, marked) {
             return;
         }
@@ -42,7 +42,7 @@ impl Scheduler {
         self.log_aborted_jobs(evaluation_id, Vec::new()).await;
 
         let scheduler = Arc::clone(self);
-        self.state.shutdown.spawn(async move {
+        self.db.shutdown.spawn(async move {
             let shared_builds = scheduler
                 .abort_evaluation_shared_builds(evaluation_id)
                 .await;
@@ -61,7 +61,6 @@ impl Scheduler {
         shared_build: DerivationBuildId,
     ) -> anyhow::Result<Result<(), BuildRefusal>> {
         let report = self
-            .state
             .graph
             .transition(Transition::AbortBuild {
                 evaluation,
@@ -95,7 +94,6 @@ impl Scheduler {
         }
 
         let report = self
-            .state
             .graph
             .transition(Transition::RetryBuild {
                 evaluation,
@@ -107,12 +105,9 @@ impl Scheduler {
 
     pub(crate) async fn abort_unbuildable_evaluation(&self, unbuildable: Unbuildable) {
         let evaluation_id = unbuildable.evaluation.id;
-        let marked = update_evaluation_status(
-            &self.state.db(),
-            unbuildable.evaluation,
-            EvaluationStatus::Aborted,
-        )
-        .await;
+        let marked =
+            update_evaluation_status(&self.db, unbuildable.evaluation, EvaluationStatus::Aborted)
+                .await;
         if !aborted(evaluation_id, marked) {
             return;
         }
@@ -121,7 +116,7 @@ impl Scheduler {
         EvaluationWarning::NoWorker {
             unmet: &unbuildable.unmet,
         }
-        .report(&self.state.worker_db, evaluation_id)
+        .report(&self.db.worker_db, evaluation_id)
         .await;
 
         let shared_builds = self.abort_evaluation_shared_builds(evaluation_id).await;
@@ -133,7 +128,6 @@ impl Scheduler {
         evaluation: EvaluationId,
     ) -> Vec<DerivationBuildId> {
         match self
-            .state
             .graph
             .transition(Transition::AbortEvaluationSharedBuilds { evaluation })
             .await
@@ -171,7 +165,7 @@ impl Scheduler {
 
         if let Err(e) =
             gradient_db::scheduling::assignment_record::abandon_open_assignments_for_jobs(
-                &self.state.worker_db,
+                &self.db.worker_db,
                 &reaped,
             )
             .await
@@ -180,7 +174,7 @@ impl Scheduler {
         }
 
         for job_id in &reaped {
-            if self.attempt_of(job_id).await.is_none() {
+            if self.cluster.book.attempt_of(job_id).await.is_none() {
                 continue;
             }
             let report = crate::cluster::MemberReport::Aborted { job: None };

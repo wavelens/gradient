@@ -13,13 +13,14 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
-use gradient_core::ServerState;
+use gradient_db::{DbContext, WorkerDb};
 use gradient_entity::StorePath;
+use gradient_graph::Graph;
 use gradient_types::*;
 use gradient_util::supervision::{Pass, PassError, RunsOn};
 use sea_orm::{ColumnTrait, EntityTrait, JoinType, QueryFilter, QuerySelect, RelationTrait};
 use tokio::sync::mpsc::UnboundedReceiver;
-use tokio::sync::{Mutex, Notify};
+use tokio::sync::{Mutex, Notify, Semaphore};
 use tracing::debug;
 
 const PROBE_BATCH: usize = 256;
@@ -30,18 +31,82 @@ const PROBE_DESCENT: Duration = Duration::from_secs(60);
 type Inbox = Mutex<Option<UnboundedReceiver<Vec<DerivationId>>>>;
 
 pub(crate) struct UpstreamProbe {
-    state: Arc<ServerState>,
+    db: WorkerDb,
+    graph: Arc<Graph>,
+    upstream_query: Arc<Semaphore>,
+    wake: Arc<Notify>,
     inbox: Inbox,
     swept: Mutex<Instant>,
 }
 
 impl UpstreamProbe {
-    pub(crate) fn new(state: &Arc<ServerState>) -> Self {
+    pub(crate) fn new(db: &DbContext, graph: &Arc<Graph>, upstream_query: &Arc<Semaphore>) -> Self {
         Self {
-            state: Arc::clone(state),
-            inbox: Mutex::new(state.memory.db.probe_requests.take_inbox()),
+            db: db.worker_db.clone(),
+            graph: Arc::clone(graph),
+            upstream_query: Arc::clone(upstream_query),
+            wake: db.memory.probe_requests.wake(),
+            inbox: Mutex::new(db.memory.probe_requests.take_inbox()),
             swept: Mutex::new(Instant::now()),
         }
+    }
+
+    async fn probe_pass(&self) -> Result<()> {
+        let started = Instant::now();
+        let mut requested = drain_requests(&self.inbox).await;
+        if requested.is_empty() && sweep_due(&self.swept).await {
+            requested.extend(unanswered_need(&self.db).await?);
+        }
+
+        while !requested.is_empty() {
+            let mut shared_builds: Vec<DerivationId> = requested.into_iter().collect();
+            shared_builds.sort_unstable();
+            self.probe_round(shared_builds).await?;
+            if started.elapsed() > PROBE_DESCENT {
+                break;
+            }
+
+            requested = drain_requests(&self.inbox).await;
+        }
+
+        Ok(())
+    }
+
+    async fn probe_round(&self, shared_builds: Vec<DerivationId>) -> Result<()> {
+        let mut targets = unprobed_wanted(&self.db, &shared_builds).await?;
+        targets.extend(unprobed_dependencies(&self.db, &targets).await?);
+        let plan = plan_probes(&self.db, &targets).await?;
+        let mut unanswered_outputs: HashSet<String> = HashSet::new();
+        for (evaluation, targets) in &plan.rounds {
+            for chunk in targets.chunks(PROBE_BATCH) {
+                let answer = crate::eval::probe_outputs(
+                    &self.db,
+                    &self.upstream_query,
+                    evaluation,
+                    chunk.to_vec(),
+                )
+                .await;
+                debug!(
+                    hits = answer.hits.len(),
+                    unanswered = answer.unanswered.len(),
+                    asked = chunk.len(),
+                    "upstream probe round"
+                );
+                unanswered_outputs.extend(answer.unanswered);
+                if answer.hits.is_empty() {
+                    continue;
+                }
+                self.graph
+                    .upstream_hits(answer.hits)
+                    .await
+                    .context("apply what the upstream probe found")?;
+            }
+        }
+
+        self.graph
+            .upstream_probed(plan.answered_except(&unanswered_outputs))
+            .await
+            .context("record the shared builds this round answered for")
     }
 }
 
@@ -55,68 +120,14 @@ impl Pass for UpstreamProbe {
     }
 
     fn wake(&self) -> Option<Arc<Notify>> {
-        Some(self.state.memory.db.probe_requests.wake())
+        Some(Arc::clone(&self.wake))
     }
 
     async fn run(&self) -> Result<(), PassError> {
-        probe_pass(&self.state, &self.inbox, &self.swept)
+        self.probe_pass()
             .await
             .map_err(|e| PassError::from(e.to_string()))
     }
-}
-
-async fn probe_pass(state: &Arc<ServerState>, inbox: &Inbox, swept: &Mutex<Instant>) -> Result<()> {
-    let started = Instant::now();
-    let mut requested = drain_requests(inbox).await;
-    if requested.is_empty() && sweep_due(swept).await {
-        requested.extend(unanswered_need(state).await?);
-    }
-
-    while !requested.is_empty() {
-        let mut shared_builds: Vec<DerivationId> = requested.into_iter().collect();
-        shared_builds.sort_unstable();
-        probe_round(state, shared_builds).await?;
-        if started.elapsed() > PROBE_DESCENT {
-            break;
-        }
-
-        requested = drain_requests(inbox).await;
-    }
-
-    Ok(())
-}
-
-async fn probe_round(state: &Arc<ServerState>, shared_builds: Vec<DerivationId>) -> Result<()> {
-    let mut targets = unprobed_wanted(state, &shared_builds).await?;
-    targets.extend(unprobed_dependencies(state, &targets).await?);
-    let plan = plan_probes(state, &targets).await?;
-    let mut unanswered_outputs: HashSet<String> = HashSet::new();
-    for (evaluation, targets) in &plan.rounds {
-        for chunk in targets.chunks(PROBE_BATCH) {
-            let answer = crate::eval::probe_outputs(state, evaluation, chunk.to_vec()).await;
-            debug!(
-                hits = answer.hits.len(),
-                unanswered = answer.unanswered.len(),
-                asked = chunk.len(),
-                "upstream probe round"
-            );
-            unanswered_outputs.extend(answer.unanswered);
-            if answer.hits.is_empty() {
-                continue;
-            }
-            state
-                .graph
-                .upstream_hits(answer.hits)
-                .await
-                .context("apply what the upstream probe found")?;
-        }
-    }
-
-    state
-        .graph
-        .upstream_probed(plan.answered_except(&unanswered_outputs))
-        .await
-        .context("record the shared builds this round answered for")
 }
 
 async fn drain_requests(inbox: &Inbox) -> HashSet<DerivationId> {
@@ -143,9 +154,9 @@ async fn sweep_due(swept: &Mutex<Instant>) -> bool {
 /// The request channel is in memory. A process stopping between the commit and the send is leaving
 /// shared builds nothing will ever ask about. The need is stopping at an unanswered one, and
 /// nothing below it would ever build again.
-async fn unanswered_need(state: &Arc<ServerState>) -> Result<Vec<DerivationId>> {
+async fn unanswered_need(db: &WorkerDb) -> Result<Vec<DerivationId>> {
     Ok(unanswered_need_query()
-        .all(&state.worker_db)
+        .all(db)
         .await
         .context("find needed builds the upstream probe was never asked about")?
         .into_iter()
@@ -192,10 +203,9 @@ impl ProbePlan {
 }
 
 async fn unprobed_wanted(
-    state: &Arc<ServerState>,
+    db: &WorkerDb,
     shared_builds: &[DerivationId],
 ) -> Result<Vec<DerivationId>> {
-    let db = &state.worker_db;
     Ok(
         gradient_db::fetch_in_chunks(shared_builds, |chunk| async move {
             EDerivationBuild::find()
@@ -216,10 +226,9 @@ async fn unprobed_wanted(
 /// A miss makes all dependencies of the shared build needed. Asking for them in the same round
 /// saves the probe a round per closure level, and only the dependencies of a hit go unused.
 async fn unprobed_dependencies(
-    state: &Arc<ServerState>,
+    db: &WorkerDb,
     shared_builds: &[DerivationId],
 ) -> Result<Vec<DerivationId>> {
-    let db = &state.worker_db;
     let mut dependencies: Vec<DerivationId> =
         gradient_db::fetch_in_chunks(shared_builds, |chunk| async move {
             EDerivationDependency::find()
@@ -254,14 +263,13 @@ async fn unprobed_dependencies(
 }
 
 pub(crate) async fn plan_probes(
-    state: &Arc<ServerState>,
+    db: &WorkerDb,
     shared_builds: &[DerivationId],
 ) -> Result<ProbePlan> {
     if shared_builds.is_empty() {
         return Ok(ProbePlan::default());
     }
 
-    let db = &state.worker_db;
     let outputs = gradient_db::fetch_in_chunks(shared_builds, |chunk| async move {
         EDerivationOutput::find()
             .filter(CDerivationOutput::Derivation.is_in(chunk))
@@ -390,7 +398,7 @@ mod tests {
             }]])
             .into_connection();
 
-        let planned = plan_probes(&test_state(db), &[derivation])
+        let planned = plan_probes(&test_state(db).worker_db, &[derivation])
             .await
             .expect("the plan is read")
             .rounds;
@@ -427,7 +435,7 @@ mod tests {
             }]])
             .into_connection();
 
-        let plan = plan_probes(&test_state(db), &[silent, missed])
+        let plan = plan_probes(&test_state(db).worker_db, &[silent, missed])
             .await
             .expect("the plan is read");
 
@@ -450,7 +458,8 @@ mod tests {
     async fn an_idle_pass_reads_nothing() {
         let state = test_state(empty_db());
 
-        probe_pass(&state, &Mutex::new(None), &Mutex::new(Instant::now()))
+        UpstreamProbe::new(&state.db(), &state.graph, &state.memory.upstream_query)
+            .probe_pass()
             .await
             .expect("an idle tick is a no-op");
     }
@@ -468,7 +477,7 @@ mod tests {
             .into_connection();
 
         assert!(
-            plan_probes(&test_state(db), &[derivation])
+            plan_probes(&test_state(db).worker_db, &[derivation])
                 .await
                 .expect("the plan is read")
                 .rounds
@@ -499,7 +508,7 @@ mod tests {
             }]])
             .into_connection();
 
-        let plan = plan_probes(&test_state(db), &[walked, stub])
+        let plan = plan_probes(&test_state(db).worker_db, &[walked, stub])
             .await
             .expect("the plan is read");
 
@@ -513,7 +522,7 @@ mod tests {
             .into_connection();
         let log = db.clone();
 
-        let asked = unprobed_wanted(&test_state(db), &[DerivationId::now_v7()])
+        let asked = unprobed_wanted(&test_state(db).worker_db, &[DerivationId::now_v7()])
             .await
             .expect("the wanted shared builds are read");
 
@@ -549,7 +558,7 @@ mod tests {
             .into_connection();
         let log = db.clone();
 
-        let ahead = unprobed_dependencies(&test_state(db), &[parent])
+        let ahead = unprobed_dependencies(&test_state(db).worker_db, &[parent])
             .await
             .expect("the dependencies are read");
 

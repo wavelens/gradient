@@ -32,7 +32,7 @@ impl Pass for ClusterDispatch {
     }
 
     fn wake(&self) -> Option<Arc<Notify>> {
-        Some(Arc::clone(&self.scheduler.cluster_wake))
+        Some(Arc::clone(&self.scheduler.cluster.wake))
     }
 
     async fn run(&self) -> Result<(), PassError> {
@@ -56,7 +56,7 @@ impl Scheduler {
         placement: Placement,
         attempt: ClusterAttemptId,
     ) -> Option<Committing> {
-        let instance = self.instance.load_full();
+        let instance = self.scoring.instance.load_full();
         self.call(|reply| SchedulerMsg::TakePlacement {
             placement,
             attempt,
@@ -88,17 +88,18 @@ impl Scheduler {
     }
 
     pub async fn plan_clusters(self: &Arc<Self>) -> anyhow::Result<()> {
-        let overdue = self.attempts.overdue(Instant::now()).await;
+        let overdue = self.cluster.book.overdue(Instant::now()).await;
         for attempt in overdue {
             self.fail_prepare(attempt).await;
         }
-        let pending = self.attempts.pending_verdicts().await;
+        let pending = self.cluster.book.pending_verdicts().await;
         for (attempt, fate) in pending {
             if let Err(e) = self.resolve_attempt(attempt, fate).await {
                 warn!(error = %e, %attempt, "resolving a cluster attempt failed; retrying");
             }
         }
-        self.attempts
+        self.cluster
+            .book
             .expire_resolved(Instant::now(), RESOLVED_ATTEMPT_TTL)
             .await;
         self.abort_dead_clusters().await?;
@@ -127,7 +128,7 @@ impl Scheduler {
     }
 
     async fn age(&self, snapshot: &ClusterSnapshot) {
-        let config = &self.state.config.scheduler;
+        let config = &self.db.config.scheduler;
         let policy = AgingPolicy {
             reserve_after: chrono::Duration::seconds(
                 i64::try_from(config.cluster_reserve_after_secs.get()).unwrap_or(i64::MAX),
@@ -183,7 +184,7 @@ impl Scheduler {
                 .collect(),
         };
 
-        match gradient_db::scheduling::cluster::claim_cluster(&self.state.worker_db, claim).await {
+        match gradient_db::scheduling::cluster::claim_cluster(&self.db.worker_db, claim).await {
             Ok(true) => self.prepare(attempt, seats).await,
             Ok(false) => self.hand_back(attempt).await,
             Err(e) => {
@@ -201,12 +202,7 @@ impl Scheduler {
         cluster: PendingCluster,
         seats: &[CommittedSeat],
     ) {
-        let timeout = self
-            .state
-            .config
-            .scheduler
-            .cluster_prepare_timeout_secs
-            .get();
+        let timeout = self.db.config.scheduler.cluster_prepare_timeout_secs.get();
         let roster = seats
             .iter()
             .map(|s| ClusterPeer {
@@ -230,7 +226,8 @@ impl Scheduler {
                 settled: false,
             })
             .collect();
-        self.attempts
+        self.cluster
+            .book
             .open(
                 attempt,
                 AttemptState {
@@ -251,7 +248,7 @@ impl Scheduler {
     }
 
     async fn hand_back(&self, attempt: ClusterAttemptId) {
-        let Some(state) = self.attempts.take(attempt).await else {
+        let Some(state) = self.cluster.book.take(attempt).await else {
             return;
         };
         let seats = state
@@ -268,7 +265,7 @@ impl Scheduler {
     }
 
     async fn back_off(&self, attempt: ClusterAttemptId) {
-        let Some(state) = self.attempts.take(attempt).await else {
+        let Some(state) = self.cluster.book.take(attempt).await else {
             return;
         };
         self.restore_parked(attempt, state).await;
@@ -295,17 +292,12 @@ impl Scheduler {
     }
 
     async fn prepare(&self, attempt: ClusterAttemptId, seats: Vec<CommittedSeat>) {
-        let timeout = self
-            .state
-            .config
-            .scheduler
-            .cluster_prepare_timeout_secs
-            .get();
+        let timeout = self.db.config.scheduler.cluster_prepare_timeout_secs.get();
         let hold_secs = u32::try_from(timeout)
             .unwrap_or(u32::MAX)
             .saturating_add(CLUSTER_HOLD_MARGIN_SECS);
         for seat in &seats {
-            if let Err(e) = assigned_transition(&self.state, &seat.record).await {
+            if let Err(e) = assigned_transition(&self.db.config, &self.graph, &seat.record).await {
                 warn!(error = %e, %attempt, "cluster member transition failed");
                 self.fail_prepare(attempt).await;
                 return;
@@ -328,7 +320,8 @@ impl Scheduler {
                 assignment_record: seat.record,
                 pending: seat.job,
             };
-            self.prepared
+            self.cluster
+                .prepared
                 .insert(
                     seat.key.clone(),
                     PreparedMember {
@@ -345,29 +338,25 @@ impl Scheduler {
         self.signal_workers(signals).await;
     }
 
-    pub async fn take_prepared(&self, job_id: &str) -> Option<PreparedMember> {
-        self.prepared.take(job_id).await
-    }
-
     pub async fn cluster_member_accepted(&self, job_id: &str) {
         let Acceptance::AllAccepted {
             cluster,
             attempt,
             workers,
             roster,
-        } = self.attempts.accept(job_id).await
+        } = self.cluster.book.accept(job_id).await
         else {
             return;
         };
         match gradient_db::scheduling::cluster::start_cluster_attempt(
-            &self.state.worker_db,
+            &self.db.worker_db,
             cluster,
             attempt,
         )
         .await
         {
             Ok(true) => {
-                let Some(decided) = self.attempts.mark_started(attempt).await else {
+                let Some(decided) = self.cluster.book.mark_started(attempt).await else {
                     return;
                 };
                 let signals = workers
@@ -396,7 +385,7 @@ impl Scheduler {
     }
 
     pub async fn cluster_member_released(&self, job_id: &str) -> bool {
-        let Some(attempt) = self.attempts.preparing(job_id).await else {
+        let Some(attempt) = self.cluster.book.preparing(job_id).await else {
             return false;
         };
         if self.is_aborting(job_id).await {
@@ -408,7 +397,7 @@ impl Scheduler {
     }
 
     pub async fn cluster_member_rejected(&self, job_id: &str) -> bool {
-        let Some(attempt) = self.attempts.attempt_of(job_id).await else {
+        let Some(attempt) = self.cluster.book.attempt_of(job_id).await else {
             return false;
         };
         self.fail_prepare(attempt).await;
@@ -417,11 +406,11 @@ impl Scheduler {
     }
 
     pub async fn fail_prepare(&self, attempt: ClusterAttemptId) {
-        let Some(state) = self.attempts.take(attempt).await else {
+        let Some(state) = self.cluster.book.take(attempt).await else {
             return;
         };
         if let Err(e) = gradient_db::scheduling::cluster::fail_prepare_attempt(
-            &self.state.worker_db,
+            &self.db.worker_db,
             state.cluster,
             attempt,
         )
@@ -433,12 +422,12 @@ impl Scheduler {
             let mut state = state;
             state.started = false;
             state.all_accepted = false;
-            self.attempts.open(attempt, state).await;
+            self.cluster.book.open(attempt, state).await;
             return;
         }
 
         let job_ids: Vec<String> = state.members.iter().map(|m| m.job_id.clone()).collect();
-        self.prepared.forget(&job_ids).await;
+        self.cluster.prepared.forget(&job_ids).await;
         let mut signals = Vec::with_capacity(state.members.len());
         for m in &state.members {
             let abort = SessionSignal::AbortCluster {
@@ -462,7 +451,8 @@ impl Scheduler {
             return;
         };
         let Some(route) = self
-            .attempts
+            .cluster
+            .book
             .route(attempt_id, from_worker, to.as_ref())
             .await
         else {
@@ -514,8 +504,7 @@ impl Scheduler {
 
     async fn abort_dead_clusters(&self) -> anyhow::Result<()> {
         for cluster in
-            gradient_db::scheduling::cluster::abort_dead_queued_clusters(&self.state.worker_db)
-                .await?
+            gradient_db::scheduling::cluster::abort_dead_queued_clusters(&self.db.worker_db).await?
         {
             let dropped = self
                 .call(|reply| SchedulerMsg::DropWaiting { cluster, reply })

@@ -4,7 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use std::sync::Arc;
 use std::time::Duration;
 
 use chrono::{NaiveDateTime, Utc};
@@ -83,7 +82,7 @@ use tracing::{debug, error, info, warn};
 use super::Scheduler;
 
 pub(crate) struct TriggerDispatch {
-    pub(crate) scheduler: Arc<Scheduler>,
+    pub(crate) db: DbContext,
 }
 
 impl Pass for TriggerDispatch {
@@ -96,19 +95,18 @@ impl Pass for TriggerDispatch {
     }
 
     async fn run(&self) -> Result<(), PassError> {
-        fire_once(&self.scheduler).await.map_err(Into::into)
+        fire_once(&self.db).await.map_err(Into::into)
     }
 }
 
-pub(crate) async fn fire_once(scheduler: &Scheduler) -> anyhow::Result<()> {
-    let state = &scheduler.state;
+pub(crate) async fn fire_once(db: &DbContext) -> anyhow::Result<()> {
     let now = gradient_types::now();
 
-    let triggers = active_triggers(&state.worker_db).await?;
+    let triggers = active_triggers(&db.worker_db).await?;
     if triggers.is_empty() {
         return Ok(());
     }
-    let tasks = tasks_of(&state.worker_db, &triggers).await?;
+    let tasks = tasks_of(&db.worker_db, &triggers).await?;
 
     let due: Vec<TriggerFire> = triggers
         .iter()
@@ -119,26 +117,25 @@ pub(crate) async fn fire_once(scheduler: &Scheduler) -> anyhow::Result<()> {
         return Ok(());
     }
 
-    enqueue_trigger_fires(&state.worker_db, &due).await?;
-    state.wake.delivery.notify_one();
+    enqueue_trigger_fires(&db.worker_db, &due).await?;
+    db.wake.delivery.notify_one();
     Ok(())
 }
 
 pub async fn fire(scheduler: &Scheduler, fire: &TriggerFire) -> anyhow::Result<()> {
-    let state = &scheduler.state;
-    let Some((trig, task, cfg)) = load_pending_firing(&state.worker_db, fire).await? else {
+    let Some((trig, task, cfg)) = load_pending_firing(&scheduler.db.worker_db, fire).await? else {
         return Ok(());
     };
     let now = gradient_types::now();
 
-    let sources = state.db();
+    let sources = &scheduler.db;
     let branch = polling_branch(&cfg);
-    let resolve = check_task_updates(&sources, &task, branch.as_deref());
+    let resolve = check_task_updates(sources, &task, branch.as_deref());
     if let Some((has_update, commit_hash)) = resolve_head(resolve, &task.name).await {
         apply_resolved_head(scheduler, &trig, &task, &cfg, has_update, commit_hash).await;
     }
 
-    stamp_last_fired(&state.worker_db, &trig, now).await
+    stamp_last_fired(&scheduler.db.worker_db, &trig, now).await
 }
 
 async fn active_triggers(db: &WorkerDb) -> Result<Vec<ept::Model>, sea_orm::DbErr> {
@@ -234,9 +231,13 @@ async fn apply_resolved_head(
     has_update: bool,
     commit_hash: Vec<u8>,
 ) {
-    let state = &scheduler.state;
-    if let Err(e) =
-        maybe_trigger_input_update(&state.worker_db, task, commit_hash.clone(), Some(trig.id)).await
+    if let Err(e) = maybe_trigger_input_update(
+        &scheduler.db.worker_db,
+        task,
+        commit_hash.clone(),
+        Some(trig.id),
+    )
+    .await
     {
         warn!(error = %e, trigger_id = %trig.id, "input_update trigger failed");
     }
@@ -253,10 +254,9 @@ async fn apply_to_task(
     cfg: &TriggerConfig,
     commit_hash: Vec<u8>,
 ) {
-    let state = &scheduler.state;
-    let (msg, author) = commit_metadata(&state.db(), task, &commit_hash).await;
+    let (msg, author) = commit_metadata(&scheduler.db, task, &commit_hash).await;
     let outcome = apply_trigger(
-        &state.worker_db,
+        &scheduler.db.worker_db,
         task,
         ApplyInput {
             trigger_id: trig.id,
@@ -269,7 +269,7 @@ async fn apply_to_task(
             repository_override: None,
             wildcard_override: None,
             source_comment: None,
-            instance_max_storage_gb: state.config.cache.max_storage_gb,
+            instance_max_storage_gb: scheduler.db.config.cache.max_storage_gb,
         },
     )
     .await;
@@ -284,7 +284,7 @@ async fn apply_to_task(
                 cancel_aborted(scheduler, aborted_id, hard_abort).await;
             }
             info!(task = %task.name, trigger_id = %trig.id, evaluation_id = %evaluation.id, "trigger created evaluation");
-            state.record_evaluation_created(&evaluation).await;
+            scheduler.db.record_evaluation_created(&evaluation).await;
         }
         Ok(other) => {
             debug!(task = %task.name, trigger_id = %trig.id, ?other, "trigger applied without creating eval");
@@ -541,7 +541,7 @@ mod tests {
             .into_connection();
         let log = db.clone();
 
-        fire_once(&scheduler_over(db)).await.unwrap();
+        fire_once(&scheduler_over(db).db).await.unwrap();
 
         let sql = executed(log);
         assert!(

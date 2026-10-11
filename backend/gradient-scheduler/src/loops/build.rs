@@ -6,13 +6,13 @@
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 
 use crate::assign_mode::decide_build_spec_kind;
-use gradient_core::ServerState;
 use gradient_db::scheduling::startable_set::StartableMoves;
-use gradient_graph::Transition;
+use gradient_db::{DbContext, WorkerDb};
+use gradient_graph::{Graph, Transition};
 use gradient_types::*;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 
@@ -50,7 +50,7 @@ pub(crate) async fn build_assign_pass(scheduler: &Scheduler, timer_tick: bool, r
     if let Err(e) = scheduler.settle_import_waits().await {
         error!(error = %e, "settling import waits in dispatch loop failed");
     }
-    if let Err(e) = crate::waiting_state::recover_drv_stuck_evals(&scheduler.state).await {
+    if let Err(e) = crate::waiting_state::recover_drv_stuck_evals(&scheduler.db).await {
         error!(error = %e, "recover_drv_stuck_evals in dispatch loop failed");
     }
 
@@ -60,6 +60,21 @@ pub(crate) async fn build_assign_pass(scheduler: &Scheduler, timer_tick: bool, r
 pub(crate) enum BuildMsg {
     Tick,
     Kick,
+}
+
+#[derive(Clone, Default)]
+pub(crate) struct BuildKick {
+    pub(crate) assigner: Arc<arc_swap::ArcSwapOption<ActorRef<BuildMsg>>>,
+    pub(crate) generation: Arc<AtomicU64>,
+}
+
+impl BuildKick {
+    pub(crate) fn kick(&self) {
+        self.generation.fetch_add(1, Ordering::Relaxed);
+        if let Some(actor) = self.assigner.load_full() {
+            let _ = actor.send_message(BuildMsg::Kick);
+        }
+    }
 }
 
 pub(crate) struct BuildAssigner;
@@ -97,7 +112,11 @@ impl Actor for BuildAssigner {
         state: &mut Self::State,
     ) -> Result<(), ActorProcessingErr> {
         let timer_tick = matches!(msg, BuildMsg::Tick);
-        let kick_gen = state.scheduler.kick_gen.load(Ordering::Relaxed);
+        let kick_gen = state
+            .scheduler
+            .build_kick
+            .generation
+            .load(Ordering::Relaxed);
         if !timer_tick && kick_gen == state.kicks_seen {
             return Ok(());
         }
@@ -145,7 +164,8 @@ pub(super) fn child_spec(scheduler: &Arc<Scheduler>) -> ChildSpec {
                     Actor::spawn_linked(None, BuildAssigner, (Arc::clone(&scheduler), ctx), parent)
                         .await?;
                 scheduler
-                    .build_assigner
+                    .build_kick
+                    .assigner
                     .store(Some(Arc::new(actor.clone())));
                 Ok(actor.get_cell())
             })
@@ -179,17 +199,18 @@ struct AssignConfig {
 }
 
 impl AssignConfig {
-    fn from_state(state: &ServerState) -> Self {
+    fn from_config(config: &RuntimeConfig) -> Self {
         Self {
-            default_timeout_secs: nonzero(state.config.build.default_timeout_secs),
-            default_max_silent_secs: nonzero(state.config.build.default_max_silent_secs),
+            default_timeout_secs: nonzero(config.build.default_timeout_secs),
+            default_max_silent_secs: nonzero(config.build.default_max_silent_secs),
         }
     }
 }
 
 impl BuildAssignMaps {
     async fn load(
-        state: &Arc<ServerState>,
+        db: &WorkerDb,
+        config: &RuntimeConfig,
         shared_builds: &[MDerivationBuild],
         uses_history: bool,
         waited_imports: &[DerivationBuildId],
@@ -197,8 +218,6 @@ impl BuildAssignMaps {
         // Every load below must propagate its error and abort the pass. Reading a failed query as
         // no rows was dispatching builds against phantom-empty inputs.
         let drv_ids: Vec<DerivationId> = shared_builds.iter().map(|a| a.derivation).collect();
-
-        let db = &state.worker_db;
 
         let mut driving_eval: HashMap<DerivationBuildId, EvaluationId> = HashMap::new();
         let jobs_by_drv =
@@ -425,7 +444,7 @@ impl BuildAssignMaps {
         }
 
         let (closure_sizes, histories, computed_sizes) =
-            load_sizes_and_histories(state, &derivations, uses_history).await;
+            load_sizes_and_histories(db, &derivations, uses_history).await;
 
         Ok(Self {
             derivations,
@@ -444,7 +463,7 @@ impl BuildAssignMaps {
             prioritized_by_eval,
             build_request_by_eval,
             ifd_lifted,
-            config: AssignConfig::from_state(state),
+            config: AssignConfig::from_config(config),
         })
     }
 
@@ -591,7 +610,7 @@ enum AssignOutcome {
 }
 
 async fn load_sizes_and_histories(
-    state: &Arc<ServerState>,
+    db: &WorkerDb,
     derivations: &HashMap<DerivationId, MDerivation>,
     uses_history: bool,
 ) -> (
@@ -617,7 +636,7 @@ async fn load_sizes_and_histories(
     let computed = if need.is_empty() {
         HashMap::new()
     } else {
-        gradient_db::graph::closure::transitive_closure_sizes(&state.worker_db, &need)
+        gradient_db::graph::closure::transitive_closure_sizes(db, &need)
             .await
             .unwrap_or_else(|e| {
                 error!(error = %e, "failed to compute closure sizes");
@@ -634,7 +653,7 @@ async fn load_sizes_and_histories(
         let prediction = match predictions.get(&key) {
             Some(p) => *p,
             None => {
-                let p = crate::history::predict(&state.worker_db, pname, &drv.architecture).await;
+                let p = crate::history::predict(db, pname, &drv.architecture).await;
                 predictions.insert(key, p);
                 p
             }
@@ -668,7 +687,7 @@ pub(crate) async fn admit_startable_moves(scheduler: &Scheduler) -> anyhow::Resu
         return Ok(());
     }
 
-    let StartableMoves { entered, left } = scheduler.state.memory.db.startable_set.take();
+    let StartableMoves { entered, left } = scheduler.db.memory.startable_set.take();
     if entered.is_empty() && left.is_empty() {
         return Ok(());
     }
@@ -680,7 +699,7 @@ pub(crate) async fn admit_startable_moves(scheduler: &Scheduler) -> anyhow::Resu
         })
         .await;
     let shared_builds = gradient_db::graph::promotion::find_startable_shared_builds_among(
-        &scheduler.state.worker_db,
+        &scheduler.db.worker_db,
         &derivations,
     )
     .await?;
@@ -694,7 +713,7 @@ pub(crate) async fn resync_startable_set(scheduler: &Scheduler) -> anyhow::Resul
     }
 
     let shared_builds =
-        gradient_db::graph::promotion::find_startable_shared_builds(&scheduler.state.worker_db)
+        gradient_db::graph::promotion::find_startable_shared_builds(&scheduler.db.worker_db)
             .await?;
     let startable: HashSet<DerivationBuildId> = shared_builds.iter().map(|a| a.id).collect();
     let pruned = scheduler
@@ -718,7 +737,6 @@ async fn enqueue_startable_shared_builds(
         return Ok(());
     }
 
-    let state = &scheduler.state;
     let started = std::time::Instant::now();
     let ids: Vec<String> = shared_builds
         .iter()
@@ -734,13 +752,15 @@ async fn enqueue_startable_shared_builds(
     }
 
     let enqueued_ids: Vec<_> = new_shared_builds.iter().map(|a| a.id).collect();
-    let membership = crate::cluster::Membership::load(&state.worker_db, &[], &enqueued_ids).await?;
+    let membership =
+        crate::cluster::Membership::load(&scheduler.db.worker_db, &[], &enqueued_ids).await?;
 
     let waited_imports = scheduler.import_waits.waited_builds().await;
     let maps = BuildAssignMaps::load(
-        state,
+        &scheduler.db.worker_db,
+        &scheduler.db.config,
         &new_shared_builds,
-        scheduler.policy.uses_history(),
+        scheduler.scoring.policy.uses_history(),
         &waited_imports,
     )
     .await?;
@@ -765,7 +785,12 @@ async fn enqueue_startable_shared_builds(
         }
     }
 
-    stamp_ready(state, enqueued_ids, maps.computed_sizes);
+    stamp_ready(
+        &scheduler.db,
+        &scheduler.graph,
+        enqueued_ids,
+        maps.computed_sizes,
+    );
 
     debug!(
         enqueued,
@@ -777,12 +802,13 @@ async fn enqueue_startable_shared_builds(
 }
 
 fn stamp_ready(
-    state: &Arc<ServerState>,
+    db: &DbContext,
+    graph: &Arc<Graph>,
     shared_builds: Vec<DerivationBuildId>,
     closure_sizes: HashMap<DerivationId, i64>,
 ) {
-    let graph = Arc::clone(&state.graph);
-    state.shutdown.spawn(async move {
+    let graph = Arc::clone(graph);
+    db.shutdown.spawn(async move {
         let ready = Transition::Ready {
             shared_builds,
             closure_sizes: closure_sizes.into_iter().collect(),

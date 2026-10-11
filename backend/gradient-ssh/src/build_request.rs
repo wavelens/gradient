@@ -319,7 +319,8 @@ async fn add_batches(
         .collect();
 
     for batch in derivations.chunks(RECORD_BATCH_SIZE) {
-        let truly_substituted = gradient_scheduler::eval::assess_cached(state, batch).await;
+        let truly_substituted =
+            gradient_scheduler::eval::assess_cached(&state.worker_db, batch).await;
         let report = state
             .graph
             .record(RecordBatch {

@@ -4,14 +4,12 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use std::sync::Arc;
-
-use gradient_core::ServerState;
 use gradient_db::status::{
     EvaluationFailure, update_evaluation_status, update_evaluation_status_with_error,
 };
+use gradient_db::{DbContext, WorkerDb};
 use gradient_entity::evaluation::EvaluationStatus;
-use gradient_graph::Transition;
+use gradient_graph::{Graph, Transition};
 use gradient_types::*;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use tracing::{info, warn};
@@ -38,7 +36,7 @@ pub(crate) fn orphaned_eval_outcome(assignments: u64, budget: u64) -> OrphanedEv
     }
 }
 
-async fn eval_assign_count(state: &Arc<ServerState>, evaluation_id: EvaluationId) -> u64 {
+async fn eval_assign_count(db: &WorkerDb, evaluation_id: EvaluationId) -> u64 {
     use gradient_entity::dispatched_job::{
         Column as CDispatchedJob, DispatchedJobKind, Entity as EDispatchedJob,
     };
@@ -47,7 +45,7 @@ async fn eval_assign_count(state: &Arc<ServerState>, evaluation_id: EvaluationId
     EDispatchedJob::find()
         .filter(CDispatchedJob::EvaluationId.eq(evaluation_id))
         .filter(CDispatchedJob::Kind.eq(DispatchedJobKind::Eval))
-        .count(&state.worker_db)
+        .count(db)
         .await
         .unwrap_or_else(|e| {
             warn!(%evaluation_id, error = %e, "eval dispatch count failed; treating as first attempt");
@@ -55,14 +53,11 @@ async fn eval_assign_count(state: &Arc<ServerState>, evaluation_id: EvaluationId
         })
 }
 
-async fn abandon_dispatched_jobs(state: &Arc<ServerState>, orphaned: &[PendingJob]) {
+async fn abandon_dispatched_jobs(db: &WorkerDb, orphaned: &[PendingJob]) {
     let keys: Vec<String> = orphaned.iter().map(PendingJob::job_key).collect();
 
-    match gradient_db::scheduling::assignment_record::abandon_open_assignments_for_jobs(
-        &state.worker_db,
-        &keys,
-    )
-    .await
+    match gradient_db::scheduling::assignment_record::abandon_open_assignments_for_jobs(db, &keys)
+        .await
     {
         Ok(rows) if rows > 0 => {
             info!(rows, "closed dispatch telemetry for orphaned jobs");
@@ -75,11 +70,12 @@ async fn abandon_dispatched_jobs(state: &Arc<ServerState>, orphaned: &[PendingJo
 /// The state machine is letting evaluations reach `Queued` only via `Waiting`. Orphaned evaluations
 /// park to `Waiting`, and the repair pass right after is recovering them to `Queued`.
 pub async fn requeue_orphaned_jobs(
-    state: &Arc<ServerState>,
+    db: &DbContext,
+    graph: &Graph,
     orphaned: &[PendingJob],
     observed_peak_ram_mb: &std::collections::HashMap<String, u64>,
 ) {
-    abandon_dispatched_jobs(state, orphaned).await;
+    abandon_dispatched_jobs(&db.worker_db, orphaned).await;
 
     let shared_builds: Vec<DerivationBuildId> = orphaned
         .iter()
@@ -93,8 +89,7 @@ pub async fn requeue_orphaned_jobs(
         })
         .collect();
     if !shared_builds.is_empty()
-        && let Err(e) = state
-            .graph
+        && let Err(e) = graph
             .transition(Transition::OrphanedBuilds {
                 shared_builds,
                 cause: gradient_graph::OrphanCause::WorkerLost,
@@ -108,7 +103,7 @@ pub async fn requeue_orphaned_jobs(
     for job in orphaned.iter().filter(|j| j.derivation_build().is_none()) {
         let evaluation_id = job.evaluation_id();
         match EEvaluation::find_by_id(evaluation_id)
-            .one(&state.worker_db)
+            .one(&db.worker_db)
             .await
         {
             Ok(Some(eval))
@@ -119,9 +114,9 @@ pub async fn requeue_orphaned_jobs(
                         | EvaluationStatus::EvaluatingDerivation
                 ) =>
             {
-                let assignments = eval_assign_count(state, eval.id).await;
+                let assignments = eval_assign_count(&db.worker_db, eval.id).await;
                 match orphaned_eval_outcome(assignments, MAX_EVAL_ASSIGN_ATTEMPTS) {
-                    OrphanedEval::Requeue => park_orphaned_eval(state, eval).await,
+                    OrphanedEval::Requeue => park_orphaned_eval(db, eval).await,
                     OrphanedEval::Exhausted => {
                         warn!(
                             evaluation_id = %eval.id,
@@ -129,7 +124,7 @@ pub async fn requeue_orphaned_jobs(
                             "evaluation orphaned on every dispatch; failing instead of re-queuing"
                         );
                         if let Err(e) = update_evaluation_status_with_error(
-                            &state.db(),
+                            db,
                             eval,
                             EvaluationStatus::Failed,
                             &EvaluationFailure::OrphanedOnEveryDispatch { assignments },
@@ -147,28 +142,27 @@ pub async fn requeue_orphaned_jobs(
     }
 }
 
-pub(crate) async fn park_orphaned_eval(state: &Arc<ServerState>, eval: MEvaluation) {
+pub(crate) async fn park_orphaned_eval(db: &DbContext, eval: MEvaluation) {
     persist_waiting_reason(
-        state,
+        &db.worker_db,
         eval.id,
         &eval.waiting_reason,
         Some(&WaitingReason::eval_workers(EvalCapability::Eval, 0)),
     )
     .await;
     let evaluation_id = eval.id;
-    if let Err(e) = update_evaluation_status(&state.db(), eval, EvaluationStatus::Waiting).await {
+    if let Err(e) = update_evaluation_status(db, eval, EvaluationStatus::Waiting).await {
         warn!(error = %e, %evaluation_id, "failed to park the orphaned evaluation");
     }
 }
 
-pub(crate) async fn requeue_cluster_members(state: &Arc<ServerState>, jobs: &[PendingJob]) {
+pub(crate) async fn requeue_cluster_members(db: &DbContext, graph: &Graph, jobs: &[PendingJob]) {
     let shared_builds: Vec<DerivationBuildId> = jobs
         .iter()
         .filter_map(PendingJob::derivation_build)
         .collect();
     if !shared_builds.is_empty()
-        && let Err(e) = state
-            .graph
+        && let Err(e) = graph
             .transition(Transition::OrphanedBuilds {
                 shared_builds,
                 cause: gradient_graph::OrphanCause::ClusterAttemptEnded,
@@ -178,9 +172,7 @@ pub(crate) async fn requeue_cluster_members(state: &Arc<ServerState>, jobs: &[Pe
     {
         warn!(error = %e, "requeue of cluster member builds did not reach the graph writer");
     }
-    state
-        .memory
-        .db
+    db.memory
         .startable_set
         .enter(jobs.iter().filter_map(|j| match j {
             PendingJob::Build(b) => Some(b.derivation),
@@ -189,7 +181,7 @@ pub(crate) async fn requeue_cluster_members(state: &Arc<ServerState>, jobs: &[Pe
 
     for job in jobs.iter().filter(|j| j.derivation_build().is_none()) {
         match EEvaluation::find_by_id(job.evaluation_id())
-            .one(&state.worker_db)
+            .one(&db.worker_db)
             .await
         {
             Ok(Some(eval))
@@ -200,7 +192,7 @@ pub(crate) async fn requeue_cluster_members(state: &Arc<ServerState>, jobs: &[Pe
                         | EvaluationStatus::EvaluatingDerivation
                 ) =>
             {
-                park_orphaned_eval(state, eval).await
+                park_orphaned_eval(db, eval).await
             }
             Ok(_) => {}
             Err(e) => {

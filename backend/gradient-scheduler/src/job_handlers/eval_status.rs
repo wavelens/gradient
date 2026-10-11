@@ -28,16 +28,12 @@ impl Scheduler {
         };
         let evaluation_id = j.evaluation_id;
         match EEvaluation::find_by_id(evaluation_id)
-            .one(&self.state.worker_db)
+            .one(&self.db.worker_db)
             .await
         {
             Ok(Some(eval)) => {
-                if let Err(e) = gradient_db::status::update_evaluation_status(
-                    &self.state.db(),
-                    eval,
-                    new_status,
-                )
-                .await
+                if let Err(e) =
+                    gradient_db::status::update_evaluation_status(&self.db, eval, new_status).await
                 {
                     warn!(error = %e, %evaluation_id, "failed to update the evaluation status");
                 }
@@ -63,7 +59,7 @@ impl Scheduler {
             flake_source: Set(Some(path)),
             ..Default::default()
         };
-        if let Err(e) = am.update(&self.state.worker_db).await {
+        if let Err(e) = am.update(&self.db.worker_db).await {
             warn!(error = %e, %evaluation_id, "failed to persist flake_source");
         }
     }
@@ -97,7 +93,7 @@ impl Scheduler {
 
         let sidecar = match eiu::Entity::find()
             .filter(eiu::Column::Evaluation.eq(evaluation_id))
-            .one(&self.state.worker_db)
+            .one(&self.db.worker_db)
             .await
         {
             Ok(Some(s)) => s,
@@ -115,7 +111,7 @@ impl Scheduler {
         am.candidate_lock = Set(Some(candidate_lock));
         am.bumped_inputs = Set(Some(bumped_json));
         am.updated_at = Set(gradient_types::now());
-        if let Err(e) = am.update(&self.state.worker_db).await {
+        if let Err(e) = am.update(&self.db.worker_db).await {
             warn!(error = %e, %evaluation_id, "failed to persist input_update result");
         }
     }
@@ -127,7 +123,7 @@ impl Scheduler {
             return;
         };
         let evaluation_id = j.evaluation_id;
-        let db = &self.state.worker_db;
+        let db = &self.db.worker_db;
 
         let eval = match EEvaluation::find_by_id(evaluation_id).one(db).await {
             Ok(Some(e)) => e,
@@ -200,9 +196,8 @@ impl Scheduler {
             }
         }
 
-        let truly_substituted = eval::assess_cached(&self.state, &derivations).await;
-        self.state
-            .graph
+        let truly_substituted = eval::assess_cached(&self.db.worker_db, &derivations).await;
+        self.graph
             .record(RecordBatch {
                 evaluation: job.evaluation_id,
                 task: job.task_id,
@@ -241,7 +236,7 @@ impl Scheduler {
         };
 
         gradient_db::status::insert_worker_message(
-            &self.state.worker_db,
+            &self.db.worker_db,
             evaluation_id,
             entity_level,
             message,

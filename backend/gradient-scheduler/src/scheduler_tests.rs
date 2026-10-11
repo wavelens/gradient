@@ -240,10 +240,10 @@ async fn a_reenqueued_eval_job_is_offered_again_in_the_delta() {
 async fn assigner_kick_is_retained_when_not_awaiting() {
     use std::sync::atomic::Ordering;
     let scheduler = test_scheduler().await;
-    let before = scheduler.kick_gen.load(Ordering::Relaxed);
-    scheduler.kick_assigner();
+    let before = scheduler.build_kick.generation.load(Ordering::Relaxed);
+    scheduler.build_kick.kick();
     assert_eq!(
-        scheduler.kick_gen.load(Ordering::Relaxed),
+        scheduler.build_kick.generation.load(Ordering::Relaxed),
         before + 1,
         "a kick must advance the generation the dispatcher compares against"
     );
@@ -270,7 +270,8 @@ async fn capability_update_kicks_the_assigner_instead_of_repairing_inline() {
         .await;
     assert_eq!(
         scheduler
-            .kick_gen
+            .build_kick
+            .generation
             .load(std::sync::atomic::Ordering::Relaxed),
         1,
         "capability update must kick the dispatch loop, not refresh inline"
@@ -1135,7 +1136,7 @@ async fn registering_a_worker_closes_only_the_rows_it_never_assigned() {
     let values = format!("{:?}", close.values);
     assert!(values.contains("\"w1\""), "{values}");
     assert!(
-        values.contains(&format!("{:?}", scheduler.state.started_at.naive_utc())),
+        values.contains(&format!("{:?}", scheduler.started_at.naive_utc())),
         "{values}"
     );
 }
@@ -1257,7 +1258,7 @@ async fn a_lost_build_claim_hands_its_shared_build_back_to_the_startable_set() {
     assert!(scheduler.active_job("jbuild").await.is_none());
     assert!(scheduler.pending_job("jbuild").await.is_none());
     assert_eq!(
-        scheduler.state.memory.db.startable_set.take().entered,
+        scheduler.db.memory.startable_set.take().entered,
         HashSet::from([derivation])
     );
 }
@@ -1281,9 +1282,8 @@ async fn a_build_that_left_queued_leaves_the_tracker() {
         .unwrap();
 
     scheduler
-        .state
-        .memory
         .db
+        .memory
         .startable_set
         .record(&[gradient_db::status::TransitionChange {
             derivation,
@@ -1310,9 +1310,8 @@ async fn admission_reads_only_the_shared_builds_that_moved() {
     let derivation = DerivationId::now_v7();
 
     scheduler
-        .state
-        .memory
         .db
+        .memory
         .startable_set
         .record(&[gradient_db::status::TransitionChange {
             derivation,
@@ -1692,7 +1691,7 @@ async fn registering_opens_a_connection_row_without_a_worker_registration() {
         .into_connection();
     let log_db = db.clone();
     let scheduler = test_scheduler_with(db).await;
-    let mut events = scheduler.state.events.subscribe();
+    let mut events = scheduler.db.events.subscribe();
     let peers = HashSet::from([ProjectId::now_v7(), ProjectId::now_v7()]);
 
     register(&scheduler, "w1", eval_worker_caps(), peers.clone()).await;
@@ -2015,12 +2014,17 @@ async fn a_ready_cluster_on_idle_workers_is_assigned_then_started() {
 
     let j1 = assigned(&drain(&mut w1)).expect("w1 assigned");
     let j2 = assigned(&drain(&mut w2)).expect("w2 assigned");
-    let first = scheduler.take_prepared(&j1).await.expect("prepared");
+    let first = scheduler
+        .cluster
+        .prepared
+        .take(&j1)
+        .await
+        .expect("prepared");
     assert_eq!(
         first.membership.hold_secs,
         30 + crate::cluster::CLUSTER_HOLD_MARGIN_SECS
     );
-    assert!(scheduler.take_prepared(&j2).await.is_some());
+    assert!(scheduler.cluster.prepared.take(&j2).await.is_some());
 
     scheduler.cluster_member_accepted(&j1).await;
     assert!(
@@ -2147,7 +2151,9 @@ async fn a_signal_reaches_the_other_members_of_a_started_attempt() {
     let j1 = assigned(&drain(&mut w1)).expect("w1");
     let j2 = assigned(&drain(&mut w2)).expect("w2");
     let attempt = scheduler
-        .take_prepared(&j1)
+        .cluster
+        .prepared
+        .take(&j1)
         .await
         .expect("prepared")
         .membership
@@ -2183,7 +2189,8 @@ async fn open_attempt(scheduler: &Scheduler, attempt: ClusterAttemptId, keys: &[
         })
         .collect();
     scheduler
-        .attempts
+        .cluster
+        .book
         .open(
             attempt,
             crate::cluster::AttemptState {

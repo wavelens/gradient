@@ -125,6 +125,7 @@ impl WorkerDial {
 }
 
 struct OutboundConnect {
+    state: Arc<ServerState>,
     scheduler: Arc<Scheduler>,
     sessions: Arc<SessionsHandle>,
     connecting: Connecting,
@@ -140,14 +141,25 @@ impl Pass for OutboundConnect {
     }
 
     async fn run(&self) -> Result<(), PassError> {
-        connect_to_registered_workers(&self.scheduler, &self.sessions, &self.connecting).await;
+        connect_to_registered_workers(
+            &self.state,
+            &self.scheduler,
+            &self.sessions,
+            &self.connecting,
+        )
+        .await;
         Ok(())
     }
 }
 
-pub fn start_outbound_loop(scheduler: Arc<Scheduler>, sessions: Arc<SessionsHandle>) {
-    let shutdown = scheduler.state.shutdown.clone();
+pub fn start_outbound_loop(
+    state: Arc<ServerState>,
+    scheduler: Arc<Scheduler>,
+    sessions: Arc<SessionsHandle>,
+) {
+    let shutdown = state.shutdown.clone();
     shutdown.supervise(ChildSpec::pass(OutboundConnect {
+        state,
         scheduler,
         sessions,
         connecting: Arc::default(),
@@ -167,11 +179,11 @@ pub(crate) async fn dialable(
 }
 
 async fn connect_to_registered_workers(
+    state: &Arc<ServerState>,
     scheduler: &Arc<Scheduler>,
     sessions: &Arc<SessionsHandle>,
     connecting: &Connecting,
 ) {
-    let state = &scheduler.state;
     let rows = match dial_rows(state, None).await {
         Ok(rows) => rows,
         Err(e) => {
@@ -184,7 +196,9 @@ async fn connect_to_registered_workers(
     let decrypt = |encrypted: &str| gradient_sources::decrypt_secret(crypt_file, encrypted).ok();
     for planned in plan_dials(rows, decrypt) {
         match planned {
-            PlannedDial::Dial(target) => start_dial(scheduler, sessions, connecting, target).await,
+            PlannedDial::Dial(target) => {
+                start_dial(state, scheduler, sessions, connecting, target).await
+            }
             PlannedDial::Skip { worker_id, reason } => {
                 record_skip(scheduler, &worker_id, reason).await;
             }
@@ -329,6 +343,7 @@ fn tokens_for_scheme(url: &str, tokens: Vec<(String, String)>) -> Vec<(String, S
 }
 
 async fn start_dial(
+    state: &Arc<ServerState>,
     scheduler: &Arc<Scheduler>,
     sessions: &Arc<SessionsHandle>,
     connecting: &Connecting,
@@ -341,17 +356,23 @@ async fn start_dial(
         return;
     }
 
+    let state = Arc::clone(state);
     let scheduler = Arc::clone(scheduler);
     let sessions = Arc::clone(sessions);
     let connecting = Arc::clone(connecting);
-    let shutdown = scheduler.state.shutdown.clone();
+    let shutdown = state.shutdown.clone();
     shutdown.spawn(async move {
-        dial(&scheduler, &sessions, target).await;
+        dial(&state, &scheduler, &sessions, target).await;
         connecting.lock().await.remove(&worker_id);
     });
 }
 
-async fn dial(scheduler: &Arc<Scheduler>, sessions: &Arc<SessionsHandle>, target: DialTarget) {
+async fn dial(
+    state: &Arc<ServerState>,
+    scheduler: &Arc<Scheduler>,
+    sessions: &Arc<SessionsHandle>,
+    target: DialTarget,
+) {
     let worker_id = target.credentials.worker_id.clone();
     let url = target.url.clone();
     debug!(%worker_id, %url, "connecting outbound to worker");
@@ -361,7 +382,7 @@ async fn dial(scheduler: &Arc<Scheduler>, sessions: &Arc<SessionsHandle>, target
             info!(%worker_id, %url, "outbound connection established");
             handle_socket(
                 socket,
-                Arc::clone(&scheduler.state),
+                Arc::clone(state),
                 Arc::clone(scheduler),
                 Arc::clone(sessions),
                 SessionOrigin::ServerDialed(target),

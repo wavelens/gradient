@@ -5,15 +5,16 @@
  */
 
 use std::collections::{HashMap, HashSet};
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 use std::time::Instant;
 
 use anyhow::{Context, Result};
 
-use gradient_core::ServerState;
 use gradient_db::status::update_evaluation_status;
+use gradient_db::{DbContext, WorkerDb};
 use gradient_entity::build::BuildStatus;
 use gradient_entity::evaluation::{EvaluationKind, EvaluationStatus};
+use gradient_graph::Graph;
 use gradient_pool::WorkerInfo;
 use gradient_types::*;
 use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QuerySelect, Value};
@@ -26,177 +27,181 @@ use crate::buildability::BuildabilityChecker;
 use crate::unbuildable::{Unbuildable, unbuildable};
 use gradient_db::evaluations::counters::EvalCounters;
 
-pub(crate) async fn refresh_waiting_state(
-    state: &Arc<ServerState>,
-    memo: &Mutex<AssessmentMemo>,
-    workers: &[WorkerInfo],
-    draining: bool,
-) -> Result<Vec<Unbuildable>> {
-    gradient_db::evaluations::counters::fold_shared_build_deltas(&state.worker_db)
-        .await
-        .context("fold evaluation shared build deltas")?;
+pub(crate) struct WaitingRefresh<'a> {
+    pub(crate) db: &'a DbContext,
+    pub(crate) graph: &'a Graph,
+    pub(crate) memo: &'a Mutex<AssessmentMemo>,
+}
 
-    let evals = EEvaluation::find()
-        .filter(CEvaluation::Status.is_in(vec![
-            EvaluationStatus::Queued,
-            EvaluationStatus::Fetching,
-            EvaluationStatus::EvaluatingFlake,
-            EvaluationStatus::EvaluatingDerivation,
-            EvaluationStatus::Building,
-            EvaluationStatus::Waiting,
-        ]))
-        .all(&state.worker_db)
-        .await
-        .context("fetch in-flight evaluations")?;
-    if evals.is_empty() {
-        return Ok(Vec::new());
-    }
+impl WaitingRefresh<'_> {
+    pub(crate) async fn run(
+        &self,
+        workers: &[WorkerInfo],
+        draining: bool,
+    ) -> Result<Vec<Unbuildable>> {
+        gradient_db::evaluations::counters::fold_shared_build_deltas(&self.db.worker_db)
+            .await
+            .context("fold evaluation shared build deltas")?;
 
-    if draining {
+        let evals = EEvaluation::find()
+            .filter(CEvaluation::Status.is_in(vec![
+                EvaluationStatus::Queued,
+                EvaluationStatus::Fetching,
+                EvaluationStatus::EvaluatingFlake,
+                EvaluationStatus::EvaluatingDerivation,
+                EvaluationStatus::Building,
+                EvaluationStatus::Waiting,
+            ]))
+            .all(&self.db.worker_db)
+            .await
+            .context("fetch in-flight evaluations")?;
+        if evals.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        if draining {
+            for eval in evals {
+                let reason = eval
+                    .waiting_reason
+                    .as_ref()
+                    .and_then(WaitingReason::from_json);
+                if eval.status == EvaluationStatus::Waiting
+                    && matches!(reason, Some(WaitingReason::Draining))
+                {
+                    continue;
+                }
+
+                let needs_status_change = eval.status != EvaluationStatus::Waiting;
+                persist_waiting_reason(
+                    &self.db.worker_db,
+                    eval.id,
+                    &eval.waiting_reason,
+                    Some(&WaitingReason::Draining),
+                )
+                .await;
+
+                if needs_status_change {
+                    info!(evaluation_id = %eval.id, from = ?eval.status, "parking evaluation: instance draining");
+                    update_evaluation_status(self.db, eval, EvaluationStatus::Waiting).await?;
+                }
+            }
+
+            return Ok(Vec::new());
+        }
+
+        let tasks = EvalTasks::load(&self.db.worker_db, &evals).await?;
+        let worker_caps: Vec<(Vec<String>, Vec<String>)> = workers
+            .iter()
+            .map(|w| (w.architectures.clone(), w.system_features.clone()))
+            .collect();
+        let worker_caps = worker_caps.as_slice();
+        let now = gradient_types::now();
+        let mut unbuildables = Vec::new();
+        let ids: Vec<EvaluationId> = evals.iter().map(|e| e.id).collect();
+        let counters =
+            gradient_db::evaluations::counters::in_flight_counters(&self.db.worker_db, &ids)
+                .await
+                .context("read evaluation shared build counters")?;
+        lock(self.memo).retain(&ids.iter().copied().collect::<HashSet<_>>());
+
         for eval in evals {
+            let eval_counters = counters.get(&eval.id).copied().unwrap_or_default();
             let reason = eval
                 .waiting_reason
                 .as_ref()
                 .and_then(WaitingReason::from_json);
+            let project_workers = ProjectWorkerCounts::of(workers, tasks.project_of(&eval));
+
             if eval.status == EvaluationStatus::Waiting
-                && matches!(reason, Some(WaitingReason::Draining))
+                && reason.as_ref().is_some_and(|r| {
+                    matches!(
+                        r,
+                        WaitingReason::Approval { .. }
+                            | WaitingReason::NoCache
+                            | WaitingReason::CacheStorageFull
+                    )
+                })
             {
                 continue;
             }
 
-            let needs_status_change = eval.status != EvaluationStatus::Waiting;
+            let outcome = match eval.status {
+                EvaluationStatus::Waiting => match reason {
+                    Some(WaitingReason::EvalWorkers { capability, .. }) => {
+                        Some(decide_eval_recovery(capability, project_workers))
+                    }
+                    Some(WaitingReason::Draining) => Some((EvaluationStatus::Queued, None)),
+                    _ => match self
+                        .build_phase_decision(eval.id, eval_counters, worker_caps, reason.as_ref())
+                        .await?
+                    {
+                        BuildPhase::Pending(a) => Some((a.target, a.reason)),
+                        BuildPhase::Settled => continue,
+                        BuildPhase::Unnamed => {
+                            Some(decide_eval_recovery(EvalCapability::Eval, project_workers))
+                        }
+                    },
+                },
+                EvaluationStatus::Queued
+                | EvaluationStatus::Fetching
+                | EvaluationStatus::EvaluatingFlake
+                | EvaluationStatus::EvaluatingDerivation => {
+                    decide_pre_build_target(eval.kind, eval.status, project_workers)
+                }
+                EvaluationStatus::Building => {
+                    match self
+                        .build_phase_decision(eval.id, eval_counters, worker_caps, reason.as_ref())
+                        .await?
+                    {
+                        BuildPhase::Pending(a) => Some((a.target, a.reason)),
+                        BuildPhase::Settled | BuildPhase::Unnamed => None,
+                    }
+                }
+                _ => None,
+            };
+
+            let Some((target, new_reason)) = outcome else {
+                continue;
+            };
+
+            let waits = tasks.wait_for_workers(&eval);
+            if let Some(unmet) =
+                unbuildable(&eval, reason.as_ref(), new_reason.as_ref(), waits, now)
+            {
+                unbuildables.push(Unbuildable {
+                    evaluation: eval,
+                    unmet,
+                });
+                continue;
+            }
+
+            if eval.status != target {
+                info!(
+                    evaluation_id = %eval.id,
+                    from = ?eval.status,
+                    to = ?target,
+                    workers = project_workers.connected,
+                    eval_workers = project_workers.eval,
+                    fetch_workers = project_workers.fetch,
+                    "refreshing evaluation waiting state"
+                );
+            }
+
             persist_waiting_reason(
-                state,
+                &self.db.worker_db,
                 eval.id,
                 &eval.waiting_reason,
-                Some(&WaitingReason::Draining),
+                new_reason.as_ref(),
             )
             .await;
 
-            if needs_status_change {
-                info!(evaluation_id = %eval.id, from = ?eval.status, "parking evaluation: instance draining");
-                update_evaluation_status(&state.db(), eval, EvaluationStatus::Waiting).await?;
+            if eval.status != target {
+                update_evaluation_status(self.db, eval, target).await?;
             }
         }
 
-        return Ok(Vec::new());
+        Ok(unbuildables)
     }
-
-    let tasks = EvalTasks::load(state, &evals).await?;
-    let worker_caps: Vec<(Vec<String>, Vec<String>)> = workers
-        .iter()
-        .map(|w| (w.architectures.clone(), w.system_features.clone()))
-        .collect();
-    let worker_caps = worker_caps.as_slice();
-    let now = gradient_types::now();
-    let mut unbuildables = Vec::new();
-    let ids: Vec<EvaluationId> = evals.iter().map(|e| e.id).collect();
-    let counters = gradient_db::evaluations::counters::in_flight_counters(&state.worker_db, &ids)
-        .await
-        .context("read evaluation shared build counters")?;
-    lock(memo).retain(&ids.iter().copied().collect::<HashSet<_>>());
-
-    for eval in evals {
-        let eval_counters = counters.get(&eval.id).copied().unwrap_or_default();
-        let reason = eval
-            .waiting_reason
-            .as_ref()
-            .and_then(WaitingReason::from_json);
-        let project_workers = ProjectWorkerCounts::of(workers, tasks.project_of(&eval));
-
-        if eval.status == EvaluationStatus::Waiting
-            && reason.as_ref().is_some_and(|r| {
-                matches!(
-                    r,
-                    WaitingReason::Approval { .. }
-                        | WaitingReason::NoCache
-                        | WaitingReason::CacheStorageFull
-                )
-            })
-        {
-            continue;
-        }
-
-        let outcome = match eval.status {
-            EvaluationStatus::Waiting => match reason {
-                Some(WaitingReason::EvalWorkers { capability, .. }) => {
-                    Some(decide_eval_recovery(capability, project_workers))
-                }
-                Some(WaitingReason::Draining) => Some((EvaluationStatus::Queued, None)),
-                _ => match build_phase_decision(
-                    state,
-                    memo,
-                    eval.id,
-                    eval_counters,
-                    worker_caps,
-                    reason.as_ref(),
-                )
-                .await?
-                {
-                    BuildPhase::Pending(a) => Some((a.target, a.reason)),
-                    BuildPhase::Settled => continue,
-                    BuildPhase::Unnamed => {
-                        Some(decide_eval_recovery(EvalCapability::Eval, project_workers))
-                    }
-                },
-            },
-            EvaluationStatus::Queued
-            | EvaluationStatus::Fetching
-            | EvaluationStatus::EvaluatingFlake
-            | EvaluationStatus::EvaluatingDerivation => {
-                decide_pre_build_target(eval.kind, eval.status, project_workers)
-            }
-            EvaluationStatus::Building => {
-                match build_phase_decision(
-                    state,
-                    memo,
-                    eval.id,
-                    eval_counters,
-                    worker_caps,
-                    reason.as_ref(),
-                )
-                .await?
-                {
-                    BuildPhase::Pending(a) => Some((a.target, a.reason)),
-                    BuildPhase::Settled | BuildPhase::Unnamed => None,
-                }
-            }
-            _ => None,
-        };
-
-        let Some((target, new_reason)) = outcome else {
-            continue;
-        };
-
-        let waits = tasks.wait_for_workers(&eval);
-        if let Some(unmet) = unbuildable(&eval, reason.as_ref(), new_reason.as_ref(), waits, now) {
-            unbuildables.push(Unbuildable {
-                evaluation: eval,
-                unmet,
-            });
-            continue;
-        }
-
-        if eval.status != target {
-            info!(
-                evaluation_id = %eval.id,
-                from = ?eval.status,
-                to = ?target,
-                workers = project_workers.connected,
-                eval_workers = project_workers.eval,
-                fetch_workers = project_workers.fetch,
-                "refreshing evaluation waiting state"
-            );
-        }
-
-        persist_waiting_reason(state, eval.id, &eval.waiting_reason, new_reason.as_ref()).await;
-
-        if eval.status != target {
-            update_evaluation_status(&state.db(), eval, target).await?;
-        }
-    }
-
-    Ok(unbuildables)
 }
 
 #[derive(Default)]
@@ -206,7 +211,7 @@ struct EvalTasks {
 }
 
 impl EvalTasks {
-    async fn load(state: &Arc<ServerState>, evals: &[MEvaluation]) -> Result<Self> {
+    async fn load(db: &WorkerDb, evals: &[MEvaluation]) -> Result<Self> {
         let ids: HashSet<TaskId> = evals.iter().filter_map(|e| e.task).collect();
         if ids.is_empty() {
             return Ok(Self::default());
@@ -217,7 +222,7 @@ impl EvalTasks {
             .columns([CTask::Id, CTask::Project, CTask::WaitForWorkers])
             .filter(CTask::Id.is_in(ids))
             .into_tuple()
-            .all(&state.worker_db)
+            .all(db)
             .await
             .context("fetch tasks of in-flight evaluations")?;
 
@@ -243,44 +248,52 @@ impl EvalTasks {
     }
 }
 
-async fn build_phase_decision(
-    state: &Arc<ServerState>,
-    memo: &Mutex<AssessmentMemo>,
-    evaluation_id: EvaluationId,
-    counters: EvalCounters,
-    worker_caps: &[(Vec<String>, Vec<String>)],
-    current: Option<&WaitingReason>,
-) -> Result<BuildPhase> {
-    let a =
-        match assess_buildability(state, Some(memo), evaluation_id, counters, worker_caps).await? {
+impl WaitingRefresh<'_> {
+    async fn build_phase_decision(
+        &self,
+        evaluation_id: EvaluationId,
+        counters: EvalCounters,
+        worker_caps: &[(Vec<String>, Vec<String>)],
+        current: Option<&WaitingReason>,
+    ) -> Result<BuildPhase> {
+        let a = match assess_buildability(
+            &self.db.worker_db,
+            Some(self.memo),
+            evaluation_id,
+            counters,
+            worker_caps,
+        )
+        .await?
+        {
             BuildPhase::Pending(a) => a,
             BuildPhase::Settled => {
-                finalize_settled(state, evaluation_id).await;
+                finalize_settled(self.db, evaluation_id).await;
                 return Ok(BuildPhase::Settled);
             }
             BuildPhase::Unnamed => return Ok(BuildPhase::Unnamed),
         };
 
-    if let (EvaluationStatus::Waiting, Some(WaitingReason::Workers { unmet, .. })) =
-        (a.target, &a.reason)
-        && unmet.is_empty()
-    {
-        if !unstick_due(current, a.pending) {
-            return Ok(BuildPhase::Pending(Assessment {
-                target: EvaluationStatus::Waiting,
-                reason: Some(WaitingReason::graph_stuck(a.pending)),
-                pending: a.pending,
-            }));
+        if let (EvaluationStatus::Waiting, Some(WaitingReason::Workers { unmet, .. })) =
+            (a.target, &a.reason)
+            && unmet.is_empty()
+        {
+            if !unstick_due(current, a.pending) {
+                return Ok(BuildPhase::Pending(Assessment {
+                    target: EvaluationStatus::Waiting,
+                    reason: Some(WaitingReason::graph_stuck(a.pending)),
+                    pending: a.pending,
+                }));
+            }
+
+            return self.attempt_graph_unstick(evaluation_id, worker_caps).await;
         }
 
-        return attempt_graph_unstick(state, evaluation_id, worker_caps).await;
+        Ok(BuildPhase::Pending(a))
     }
-
-    Ok(BuildPhase::Pending(a))
 }
 
-async fn finalize_settled(state: &Arc<ServerState>, evaluation_id: EvaluationId) {
-    if let Err(e) = gradient_db::status::check_evaluation_done(&state.db(), evaluation_id).await {
+async fn finalize_settled(db: &DbContext, evaluation_id: EvaluationId) {
+    if let Err(e) = gradient_db::status::check_evaluation_done(db, evaluation_id).await {
         error!(error = %e, %evaluation_id, "failed to finalize a settled evaluation");
     }
 }
@@ -323,7 +336,7 @@ fn lock(memo: &Mutex<AssessmentMemo>) -> std::sync::MutexGuard<'_, AssessmentMem
 }
 
 async fn assess_buildability(
-    state: &Arc<ServerState>,
+    db: &WorkerDb,
     memo: Option<&Mutex<AssessmentMemo>>,
     evaluation_id: EvaluationId,
     counters: EvalCounters,
@@ -345,15 +358,15 @@ async fn assess_buildability(
         }));
     }
 
-    let pending = eval_blocking_shared_builds(state, evaluation_id).await?;
+    let pending = eval_blocking_shared_builds(db, evaluation_id).await?;
     if pending.is_empty() {
-        gradient_db::evaluations::counters::recount_evaluations(&state.worker_db, &[evaluation_id])
+        gradient_db::evaluations::counters::recount_evaluations(db, &[evaluation_id])
             .await
             .context("recount counters the shared builds contradict")?;
         return Ok(BuildPhase::Settled);
     }
 
-    let checker = BuildabilityChecker::load(state, &pending).await?;
+    let checker = BuildabilityChecker::load(db, &pending).await?;
     let target = if checker.any_buildable(&pending, worker_caps) {
         EvaluationStatus::Building
     } else {
@@ -383,56 +396,65 @@ async fn assess_buildability(
     }))
 }
 
-async fn attempt_graph_unstick(
-    state: &Arc<ServerState>,
-    evaluation_id: EvaluationId,
-    worker_caps: &[(Vec<String>, Vec<String>)],
-) -> Result<BuildPhase> {
-    info!(%evaluation_id, "graph stuck: pool can build every pending shared build but none is dispatchable; self-healing");
+impl WaitingRefresh<'_> {
+    async fn attempt_graph_unstick(
+        &self,
+        evaluation_id: EvaluationId,
+        worker_caps: &[(Vec<String>, Vec<String>)],
+    ) -> Result<BuildPhase> {
+        info!(%evaluation_id, "graph stuck: pool can build every pending shared build but none is dispatchable; self-healing");
 
-    if let Err(e) = state
-        .graph
-        .transition(gradient_graph::Transition::Repair {
-            scope: gradient_db::graph::repair::RepairScope::Unstick(evaluation_id),
-        })
-        .await
-    {
-        error!(error = %e, %evaluation_id, "unstick repair did not reach the graph writer");
-    }
-
-    let counters =
-        gradient_db::evaluations::counters::eval_counters(&state.worker_db, evaluation_id)
+        if let Err(e) = self
+            .graph
+            .transition(gradient_graph::Transition::Repair {
+                scope: gradient_db::graph::repair::RepairScope::Unstick(evaluation_id),
+            })
             .await
-            .context("read evaluation shared build counters after the heal")?
-            .unwrap_or_default();
-    let blocked =
-        match assess_buildability(state, None, evaluation_id, counters, worker_caps).await? {
+        {
+            error!(error = %e, %evaluation_id, "unstick repair did not reach the graph writer");
+        }
+
+        let counters =
+            gradient_db::evaluations::counters::eval_counters(&self.db.worker_db, evaluation_id)
+                .await
+                .context("read evaluation shared build counters after the heal")?
+                .unwrap_or_default();
+        let blocked = match assess_buildability(
+            &self.db.worker_db,
+            None,
+            evaluation_id,
+            counters,
+            worker_caps,
+        )
+        .await?
+        {
             BuildPhase::Pending(a) if a.target == EvaluationStatus::Building => {
                 return Ok(BuildPhase::Pending(a));
             }
             BuildPhase::Pending(a) => a.pending,
             BuildPhase::Settled => {
-                finalize_settled(state, evaluation_id).await;
+                finalize_settled(self.db, evaluation_id).await;
                 return Ok(BuildPhase::Settled);
             }
             BuildPhase::Unnamed => return Ok(BuildPhase::Unnamed),
         };
 
-    Ok(BuildPhase::Pending(Assessment {
-        target: EvaluationStatus::Waiting,
-        reason: Some(WaitingReason::graph_stuck(blocked)),
-        pending: blocked,
-    }))
+        Ok(BuildPhase::Pending(Assessment {
+            target: EvaluationStatus::Waiting,
+            reason: Some(WaitingReason::graph_stuck(blocked)),
+            pending: blocked,
+        }))
+    }
 }
 
 /// [`refresh_waiting_state`] is starting the heal only on entry and on a change of the pending set.
 /// `repair_cached_shared_builds_for_eval` and `repair_dependency_failed` have no other driver for a
 /// stably stuck evaluation. The can-start recount cannot stand in, because `fetchable` is reading
 /// the very status that heal is fixing.
-pub async fn reheal_graph_stuck_evals(state: &Arc<ServerState>) -> Result<()> {
+pub async fn reheal_graph_stuck_evals(db: &WorkerDb, graph: &Graph) -> Result<()> {
     let waiting = EEvaluation::find()
         .filter(CEvaluation::Status.eq(EvaluationStatus::Waiting))
-        .all(&state.worker_db)
+        .all(db)
         .await
         .context("fetch waiting evaluations")?;
 
@@ -449,8 +471,7 @@ pub async fn reheal_graph_stuck_evals(state: &Arc<ServerState>) -> Result<()> {
         }
         stuck += 1;
 
-        if let Err(e) = state
-            .graph
+        if let Err(e) = graph
             .transition(gradient_graph::Transition::Repair {
                 scope: gradient_db::graph::repair::RepairScope::Unstick(eval.id),
             })
@@ -472,10 +493,10 @@ pub async fn reheal_graph_stuck_evals(state: &Arc<ServerState>) -> Result<()> {
 /// A build target's own `.drv` is producerless, and the daemon-free server cannot reproduce one. A
 /// fresh evaluation of the same commit is the sole recovery. A `DrvRecovery` run stalling the same
 /// way is failed, not retried, to avoid a loop.
-pub async fn recover_drv_stuck_evals(state: &Arc<ServerState>) -> Result<()> {
+pub async fn recover_drv_stuck_evals(db: &DbContext) -> Result<()> {
     let waiting = EEvaluation::find()
         .filter(CEvaluation::Status.eq(EvaluationStatus::Waiting))
-        .all(&state.worker_db)
+        .all(&db.worker_db)
         .await
         .context("fetch waiting evaluations")?;
 
@@ -489,20 +510,20 @@ pub async fn recover_drv_stuck_evals(state: &Arc<ServerState>) -> Result<()> {
         if !graph_stuck || (now - eval.updated_at).num_seconds() < DRV_RECOVERY_GRACE_SECS {
             continue;
         }
-        if !eval_blocked_on_unproducible_drv(state, eval.id).await? {
+        if !eval_blocked_on_unproducible_drv(&db.worker_db, eval.id).await? {
             continue;
         }
 
         if eval.kind == EvaluationKind::DrvRecovery {
             warn!(evaluation_id = %eval.id, "drv-recovery re-eval still blocked on its own missing .drv; failing (unrecoverable)");
-            update_evaluation_status(&state.db(), eval, EvaluationStatus::Failed).await?;
+            update_evaluation_status(db, eval, EvaluationStatus::Failed).await?;
             continue;
         }
 
         let Some(task_id) = eval.task else {
             continue;
         };
-        let task = match ETask::find_by_id(task_id).one(&state.worker_db).await {
+        let task = match ETask::find_by_id(task_id).one(&db.worker_db).await {
             Ok(Some(p)) => p,
             Ok(None) => continue,
             Err(e) => {
@@ -511,10 +532,10 @@ pub async fn recover_drv_stuck_evals(state: &Arc<ServerState>) -> Result<()> {
             }
         };
 
-        match gradient_ci::trigger_drv_recovery(&state.worker_db, &task, &eval).await {
+        match gradient_ci::trigger_drv_recovery(&db.worker_db, &task, &eval).await {
             Ok(new_eval) => {
                 info!(stuck = %eval.id, recovery = %new_eval.id, "auto-triggered .drv-recovery re-evaluation");
-                state.record_evaluation_created(&new_eval).await;
+                db.record_evaluation_created(&new_eval).await;
             }
             Err(e) => {
                 warn!(evaluation_id = %eval.id, error = %e, "failed to trigger .drv recovery")
@@ -526,11 +547,10 @@ pub async fn recover_drv_stuck_evals(state: &Arc<ServerState>) -> Result<()> {
 }
 
 async fn eval_blocked_on_unproducible_drv(
-    state: &Arc<ServerState>,
+    db: &WorkerDb,
     evaluation_id: EvaluationId,
 ) -> Result<bool> {
-    let row = state
-        .worker_db
+    let row = db
         .query_one_raw(UNPRODUCIBLE_DRV_BLOCK.bind([Value::Uuid(Some(evaluation_id.into_inner()))]))
         .await
         .context("detect unproducible-drv block")?;
@@ -569,7 +589,7 @@ fn unproducible_drv_block_sql() -> String {
 }
 
 async fn eval_blocking_shared_builds(
-    state: &Arc<ServerState>,
+    db: &WorkerDb,
     evaluation_id: EvaluationId,
 ) -> Result<Vec<MDerivationBuild>> {
     use sea_orm::sea_query::Query;
@@ -581,7 +601,7 @@ async fn eval_blocking_shared_builds(
     let pending = EDerivationBuild::find()
         .filter(CDerivationBuild::Id.in_subquery(named))
         .filter(CDerivationBuild::Status.is_in(gradient_db::graph::predicates::NEED_BUILD_STATUSES))
-        .all(&state.worker_db)
+        .all(db)
         .await
         .context("fetch pending shared builds")?;
 
@@ -667,7 +687,7 @@ fn decide_eval_recovery(
 }
 
 pub(crate) async fn persist_waiting_reason(
-    state: &Arc<ServerState>,
+    db: &WorkerDb,
     evaluation_id: EvaluationId,
     current: &Option<serde_json::Value>,
     new_reason: Option<&WaitingReason>,
@@ -689,7 +709,7 @@ pub(crate) async fn persist_waiting_reason(
             sea_orm::sea_query::Expr::value(new_value),
         )
         .filter(CEvaluation::Id.eq(evaluation_id))
-        .exec(&state.worker_db)
+        .exec(db)
         .await;
 
     if let Err(e) = res {

@@ -35,7 +35,7 @@ impl Scheduler {
             }
             .into_active_model();
 
-            if let Err(e) = row.insert(&self.state.worker_db).await {
+            if let Err(e) = row.insert(&self.db.worker_db).await {
                 warn!(%evaluation_id, error = %e, "failed to record evaluation_attr_cost");
             }
         }
@@ -53,7 +53,7 @@ impl Scheduler {
             }
             .into_active_model();
 
-            if let Err(e) = row.insert(&self.state.worker_db).await {
+            if let Err(e) = row.insert(&self.db.worker_db).await {
                 warn!(%evaluation_id, error = %e, "failed to record flake_output_node");
             }
         }
@@ -78,7 +78,7 @@ impl Scheduler {
         }
         .into_active_model();
 
-        if let Err(e) = metric.insert(&self.state.worker_db).await {
+        if let Err(e) = metric.insert(&self.db.worker_db).await {
             warn!(%evaluation_id, error = %e, "failed to record evaluation_metric");
         }
 

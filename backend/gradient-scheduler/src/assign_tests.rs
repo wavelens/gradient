@@ -246,7 +246,7 @@ async fn fire_once_skips_trigger_within_interval() {
         .into_connection();
 
     let scheduler = make_scheduler(db).await;
-    trigger_firing::fire_once(&scheduler)
+    trigger_firing::fire_once(&scheduler.db)
         .await
         .expect("dispatch_once should not fail");
     assert_eq!(scheduler.pending_job_count().await, 0);

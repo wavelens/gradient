@@ -30,7 +30,7 @@ use background::{
 };
 use eval::EvalDispatch;
 
-pub(crate) use build::BuildMsg;
+pub(crate) use build::BuildKick;
 #[cfg(test)]
 pub(crate) use build::{admit_startable_moves, build_assign_pass, resync_startable_set};
 #[cfg(test)]
@@ -47,7 +47,7 @@ const EVAL_WATCHDOG_TICK: Duration = Duration::from_secs(60);
 
 pub fn start_assign_loops(scheduler: Arc<Scheduler>) {
     for spec in child_specs(&scheduler) {
-        scheduler.state.shutdown.supervise(spec);
+        scheduler.db.shutdown.supervise(spec);
     }
 }
 
@@ -64,26 +64,30 @@ fn core_child_spec(scheduler: &Arc<Scheduler>) -> ChildSpec {
 }
 
 fn child_specs(scheduler: &Arc<Scheduler>) -> Vec<ChildSpec> {
-    let metrics = &scheduler.state.config.metrics_args;
+    let metrics = &scheduler.db.config.metrics_args;
     let mut children = vec![
         ChildSpec::supervisor(
             "scheduler",
             vec![
                 core_child_spec(scheduler),
                 ChildSpec::pass(TriggerDispatch {
-                    scheduler: Arc::clone(scheduler),
+                    db: scheduler.db.clone(),
                 }),
                 ChildSpec::pass(EvalDispatch {
                     scheduler: Arc::clone(scheduler),
                 }),
                 build::child_spec(scheduler),
                 ChildSpec::pass(TransientRetryRequeue {
-                    scheduler: Arc::clone(scheduler),
+                    graph: Arc::clone(&scheduler.graph),
                 }),
                 ChildSpec::pass(ClusterDispatch {
                     scheduler: Arc::clone(scheduler),
                 }),
-                ChildSpec::pass(UpstreamProbe::new(&scheduler.state)),
+                ChildSpec::pass(UpstreamProbe::new(
+                    &scheduler.db,
+                    &scheduler.graph,
+                    &scheduler.upstream_query,
+                )),
             ],
         ),
         ChildSpec::pass(WorkerSample {
@@ -108,7 +112,7 @@ fn child_specs(scheduler: &Arc<Scheduler>) -> Vec<ChildSpec> {
         }),
     ];
 
-    match background::liveness_period(scheduler) {
+    match background::liveness_period(&scheduler.db.config) {
         Some(period) => children.push(ChildSpec::pass(WorkerLiveness {
             scheduler: Arc::clone(scheduler),
             period,
@@ -121,11 +125,12 @@ fn child_specs(scheduler: &Arc<Scheduler>) -> Vec<ChildSpec> {
         secs => {
             let period = Duration::from_secs(secs);
             children.push(ChildSpec::pass(GraphConsistency {
-                scheduler: Arc::clone(scheduler),
+                db: scheduler.db.clone(),
                 period,
             }));
             children.push(ChildSpec::pass(GraphStuckReheal {
-                scheduler: Arc::clone(scheduler),
+                db: scheduler.db.worker_db.clone(),
+                graph: Arc::clone(&scheduler.graph),
                 period,
             }));
         }
