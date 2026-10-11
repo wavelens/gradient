@@ -8,6 +8,10 @@ use sea_orm::{
     DatabaseBackend, DatabaseConnection, MockDatabase, MockExecResult, Statement, Transaction,
 };
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the single place building a mock database"
+)]
 pub fn mock_db() -> MockDatabase {
     MockDatabase::new(DatabaseBackend::Postgres)
 }
