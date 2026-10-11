@@ -173,10 +173,10 @@ impl Worker<Connected> {
     }
 
     async fn build_executor(config: &WorkerConfig) -> Result<(JobExecutor, JobScorer)> {
-        let store = LocalNixStore::connect(config.nix_daemon.max_connections)?;
+        let store = LocalNixStore::connect(config.nix_daemon.max_connections.get())?;
         let evaluator = WorkerEvaluator::new(
-            config.eval.fork_workers,
-            config.eval.max_rss,
+            config.fork_workers(),
+            config.eval.max_rss.get(),
             config.system.min_free_ram_mb,
             config.eval_cache_dir(),
             config.eval.cache_share,
@@ -256,7 +256,7 @@ async fn perform_setup(
         info!(
             ?architectures,
             ?system_features,
-            max_concurrent_builds = config.build.max_concurrent,
+            max_concurrent_builds = config.build.max_concurrent.get(),
             cpu_count = host.cpu_count,
             ram_total_mb = host.ram_total_mb,
             cpu_core_score,
@@ -265,7 +265,7 @@ async fn perform_setup(
         conn.send(ClientMessage::WorkerCapabilities {
             architectures,
             system_features,
-            max_concurrent_builds: config.build.max_concurrent,
+            max_concurrent_builds: config.build.max_concurrent.get(),
             cpu_count: host.cpu_count,
             ram_total_mb: host.ram_total_mb,
             cpu_core_score,

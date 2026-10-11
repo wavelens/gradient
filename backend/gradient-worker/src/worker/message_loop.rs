@@ -249,7 +249,7 @@ impl MessageLoopState {
         let channels = ClusterChannels::new(writer.clone());
         let uploads = gradient_worker_client::upload::UploadClient::new(
             writer.clone(),
-            config.nar.max_concurrent_uploads as usize,
+            usize::try_from(config.nar.max_concurrent_uploads.get()).unwrap_or(usize::MAX),
         )
         .with_chunk_bytes(config.nar.chunk_bytes as usize);
         Self {
@@ -267,8 +267,8 @@ impl MessageLoopState {
             holds: ClusterHolds::default(),
             channels,
             done_rx: Some(done_rx),
-            max_eval: config.eval.max_concurrent,
-            max_build: config.build.max_concurrent,
+            max_eval: config.eval.max_concurrent.get(),
+            max_build: config.build.max_concurrent.get(),
             credentials,
             scorer,
             executor,

@@ -5,6 +5,7 @@
  */
 
 use std::collections::{HashSet, VecDeque};
+use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -155,7 +156,7 @@ impl WorkerEvaluator {
     }
 
     pub fn new(
-        fork_workers: usize,
+        fork_workers: NonZeroUsize,
         max_eval_rss: u64,
         min_free_ram_mb: u64,
         eval_cache_dir: String,
@@ -164,7 +165,7 @@ impl WorkerEvaluator {
         let min_free_bytes =
             crate::worker_pool::memory_guard_bytes(min_free_ram_mb, total_memory_bytes());
         let resolver = Arc::new(WorkerPoolResolver::new(
-            fork_workers.max(1),
+            fork_workers.get(),
             max_eval_rss,
             eval_cache_dir,
         ));

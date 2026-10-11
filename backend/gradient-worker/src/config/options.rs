@@ -4,15 +4,11 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use std::num::{NonZeroU32, NonZeroU64, NonZeroUsize};
+use std::path::PathBuf;
+
 use clap::{Args, Parser};
 use gradient_derive::config_group;
-
-/// The pool is capped at 16 workers because each one may hold `eval.max_rss` resident.
-fn default_fork_workers() -> usize {
-    std::thread::available_parallelism()
-        .map(|n| n.get().min(16))
-        .unwrap_or(4)
-}
 
 /// CLI arguments and environment variables for `gradient-worker`.
 #[config_group(env = "worker", no_default)]
@@ -44,11 +40,11 @@ pub struct WorkerConfig {
     /// {option}`services.gradient.state.projects.<name>.id` to reference it here.
     ///
     /// `null` connects in open mode, where the server accepts the worker without a token.
-    pub peers_file: Option<String>,
+    pub peers_file: Option<PathBuf>,
 
     /// Directory holding the worker's state.
     #[arg(default_value = "/var/lib/gradient-worker")]
-    pub base_dir: String,
+    pub base_dir: PathBuf,
 
     /// Worker UUID. `null` generates one on first start and stores it in
     /// {file}`<services.gradient.worker.baseDir>/worker-id`. Set it when the UUID must be known in
@@ -97,7 +93,7 @@ pub struct WorkerConfig {
     /// is only read with {option}`services.gradient.worker.discoverable`.
     ///
     /// `null` accepts every server, and the worker logs a warning at start.
-    pub accepted_server_tokens_file: Option<String>,
+    pub accepted_server_tokens_file: Option<PathBuf>,
 
     /// Re-exec as a Nix evaluator subprocess (internal - do not set manually).
     #[arg(hide = true)]
@@ -130,7 +126,7 @@ impl Default for WorkerConfig {
             server_url: String::new(),
             peers: None,
             peers_file: None,
-            base_dir: "/var/lib/gradient-worker".to_owned(),
+            base_dir: PathBuf::from("/var/lib/gradient-worker"),
             id: None,
             zone: None,
             endpoint: None,
@@ -188,7 +184,7 @@ pub struct SystemArgs {
 
     /// Single-core speed score advertised to the scheduler, higher is faster. `null`
     /// benchmarks the host at startup.
-    pub cpu_core_score: Option<u32>,
+    pub cpu_core_score: Option<NonZeroU32>,
 
     /// Free memory in MiB below which the worker kills the one evaluation subprocess large
     /// enough to restore the margin. The worker reports that evaluation as failed instead of
@@ -203,28 +199,27 @@ pub struct SystemArgs {
 pub struct NixDaemonArgs {
     /// Maximum connections to the local Nix daemon. Each build holds one for its whole run
     /// plus up to 8 for parallel NAR imports. The rest is headroom for path checks.
-    #[arg(default_value_t = 32)]
-    pub max_connections: usize,
+    #[arg(default_value = "32")]
+    pub max_connections: NonZeroUsize,
 }
 
 #[config_group("eval", env = "worker_eval")]
 #[derive(Args, Debug, Clone)]
 pub struct EvalArgs {
     /// Maximum simultaneous evaluations.
-    #[arg(id = "eval-max-concurrent", default_value_t = 1)]
-    pub max_concurrent: u32,
+    #[arg(id = "eval-max-concurrent", default_value = "1")]
+    pub max_concurrent: NonZeroU32,
 
     /// Evaluation subprocesses in the pool, equal to the evaluation concurrency. `null` sizes
     /// the pool to the host's core count, capped at 16.
-    #[arg(default_value_t = default_fork_workers())]
-    pub fork_workers: usize,
+    pub fork_workers: Option<NonZeroUsize>,
 
     /// Resident memory in bytes for an idle evaluation subprocess. Subprocesses above the limit
     /// restart after their call and free the Nix heap. A call may grow past the limit, with
     /// {option}`services.gradient.worker.system.minFreeRamMb` as the host's guard.
     /// Keep it above a typical evaluation's heap.
-    #[arg(default_value_t = 2 * 1024 * 1024 * 1024)]
-    pub max_rss: u64,
+    #[arg(default_value = "2147483648")]
+    pub max_rss: NonZeroU64,
 
     /// Eval cache directory, exported to evaluation subprocesses as {env}`NIX_CACHE_HOME`.
     /// `null` uses {file}`<services.gradient.worker.baseDir>/eval-cache`.
@@ -239,18 +234,18 @@ pub struct EvalArgs {
 #[derive(Args, Debug, Clone)]
 pub struct BuildArgs {
     /// Maximum simultaneous builds.
-    #[arg(id = "build-max-concurrent", default_value_t = 32)]
-    pub max_concurrent: u32,
+    #[arg(id = "build-max-concurrent", default_value = "32")]
+    pub max_concurrent: NonZeroU32,
 
     /// CPU cores a single build can use, passed as `--cores`. `null` uses all cores.
-    pub max_cores: Option<u32>,
+    pub max_cores: Option<NonZeroU32>,
 
     /// Cgroup directory of {file}`nix-daemon.service`, the parent of the build cgroups. The worker
     /// is reading the peak memory of each running build from it and sending the values with its
     /// heartbeat. The scheduler is reserving the larger of the predicted and the reported peak.
     /// The build cgroups need {option}`services.gradient.worker.build.metrics` and Gradient's
     /// Nix fork on the daemon. `null` reports nothing.
-    pub cgroup: Option<std::path::PathBuf>,
+    pub cgroup: Option<PathBuf>,
 }
 
 #[config_group("nar", env = "worker_nar")]
@@ -259,8 +254,8 @@ pub struct NarArgs {
     /// Upload requests over 1 MiB the worker keeps open at once, waiting for a server grant or
     /// transferring. One job holds at most half. Smaller uploads have a window of 128 of their
     /// own. The server's upload budget decides how many run. This limit bounds worker memory.
-    #[arg(default_value_t = 16, value_parser = clap::value_parser!(u32).range(1..))]
-    pub max_concurrent_uploads: u32,
+    #[arg(default_value = "16")]
+    pub max_concurrent_uploads: NonZeroU32,
 
     /// Seconds after its last write before the deletion of an unfinished NAR download under
     /// {file}`<services.gradient.worker.baseDir>/nar-partial`. `0` disables the cleanup.
@@ -304,5 +299,5 @@ pub struct LogArgs {
 
     /// Directory receiving every closed stage span of the worker and its eval subprocesses as
     /// JSON lines, one file per process. `null` disables span tracing.
-    pub trace_dir: Option<std::path::PathBuf>,
+    pub trace_dir: Option<PathBuf>,
 }
