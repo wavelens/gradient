@@ -15,6 +15,7 @@ in {
     (removed [ "nar" "maxBufferBytes" ] uploadOptions)
     (removed [ "scheduler" "recordCandidates" ] "runner-up candidates were never recorded")
     (removed [ "oidc" "iconUrl" ] "the login page never showed the icon")
+    (removed [ "gradientCi" "url" ] "the address of Gradient.CI Servers is fixed")
     (removed [ "worker" "build" "cgroupRoot" ] "the Nix daemon reports build resource usage in the build result")
     (removed [ "worker" "drainTimeoutSecs" ] "a stop aborts the running jobs and the server queues them again")
     (lib.mkRenamedOptionModule (option [ "scheduler" "dispatchRetentionDays" ]) (option [ "retentionDays" ]))

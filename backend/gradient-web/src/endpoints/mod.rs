@@ -166,7 +166,7 @@ pub async fn get_config(
             ssh_enabled: state.config.ssh.enable,
             ssh_port: state.config.ssh.enable.then_some(state.config.ssh.port),
             gradient_ci_enabled: state.config.gradient_ci.enable,
-            gradient_ci_url: state.config.gradient_ci.url.clone(),
+            gradient_ci_url: gradient_types::consts::GRADIENT_CI_URL.to_owned(),
             logo_url: state.config.server.frontend_logo_url.clone(),
         },
     };
