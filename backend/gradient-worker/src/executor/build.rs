@@ -20,6 +20,7 @@ use harmonia_store_derivation::derived_path::{DerivedPath, OutputSpec, SingleDer
 use harmonia_store_path::StorePath;
 use harmonia_store_remote::DaemonStore as _;
 use std::collections::BTreeMap;
+use std::num::NonZeroU32;
 use std::pin::{Pin, pin};
 use std::sync::Arc;
 use tracing::{debug, info, warn};
@@ -72,7 +73,7 @@ impl ParsedDerivation {
         max_silent_secs: Option<u64>,
         abort: &mut super::AbortSignal,
         log_limits: crate::executor::log_limit::LogRateLimits,
-        build_cores: u32,
+        build_cores: Option<NonZeroU32>,
     ) -> Result<BuildResult, BuildError> {
         let mut guard = store.acquire().await.map_err(BuildError::transient)?;
 
@@ -91,7 +92,7 @@ impl ParsedDerivation {
         opts.verbose_build = Verbosity::Talkative;
         opts.verbosity = Verbosity::Notice;
         opts.use_substitutes = false;
-        opts.build_cores = build_cores;
+        opts.build_cores = build_cores.map_or(0, NonZeroU32::get);
 
         guard
             .execute(|client| async move { client.set_options(&opts).await })

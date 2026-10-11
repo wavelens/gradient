@@ -96,8 +96,8 @@ impl WorkerConfig {
         self.eval.fork_workers.unwrap_or_else(default_fork_workers)
     }
 
-    pub fn build_cores(&self) -> u32 {
-        self.build.max_cores.map_or(0, NonZeroU32::get)
+    pub fn build_cores(&self) -> Option<NonZeroU32> {
+        self.build.max_cores
     }
 
     pub fn cpu_core_score(&self) -> u32 {

@@ -27,6 +27,7 @@ pub(super) struct EvalWorkerPool {
     max: usize,
     max_eval_rss: u64,
     eval_cache_dir: String,
+    eval_metrics: bool,
     shutting_down: Arc<AtomicBool>,
     live: Arc<Mutex<HashSet<u32>>>,
     min_free_bytes: AtomicU64,
@@ -39,6 +40,7 @@ impl EvalWorkerPool {
         max: usize,
         max_eval_rss: u64,
         eval_cache_dir: String,
+        eval_metrics: bool,
         thunks: Arc<LiveThunks>,
     ) -> Self {
         let max = max.max(1);
@@ -48,6 +50,7 @@ impl EvalWorkerPool {
             max,
             max_eval_rss,
             eval_cache_dir,
+            eval_metrics,
             shutting_down: Arc::new(AtomicBool::new(false)),
             live: Arc::new(Mutex::new(HashSet::new())),
             min_free_bytes: AtomicU64::new(0),
@@ -106,6 +109,7 @@ impl EvalWorkerPool {
                 None => {
                     break EvalWorker::spawn(
                         &self.eval_cache_dir,
+                        self.eval_metrics,
                         Arc::clone(&self.live),
                         Arc::clone(&self.thunks),
                     )
@@ -306,7 +310,7 @@ pub(super) mod tests {
 
     #[tokio::test]
     async fn mid_call_cancelled_worker_is_discarded_not_pooled() {
-        let pool = EvalWorkerPool::new(1, 2 * GIB, String::new(), Arc::default());
+        let pool = EvalWorkerPool::new(1, 2 * GIB, String::new(), true, Arc::default());
         pool.push_for_test(silent_worker());
 
         let mut worker = pool.acquire().await.expect("acquire");
@@ -333,7 +337,7 @@ pub(super) mod tests {
     async fn completed_call_worker_returns_to_idle() {
         use gradient_eval::ipc::EvalResponse;
 
-        let pool = EvalWorkerPool::new(1, 2 * GIB, String::new(), Arc::default());
+        let pool = EvalWorkerPool::new(1, 2 * GIB, String::new(), true, Arc::default());
         pool.push_for_test(replying_worker(
             &EvalResponse::PlanOk {
                 shards: vec![],
@@ -364,7 +368,7 @@ pub(super) mod tests {
 
     #[tokio::test]
     async fn acquire_skips_dead_idle_worker() {
-        let pool = EvalWorkerPool::new(4, 2 * GIB, String::new(), Arc::default());
+        let pool = EvalWorkerPool::new(4, 2 * GIB, String::new(), true, Arc::default());
         let live = fake_worker();
         let live_pid = live.pid();
         assert!(live_pid.is_some());
@@ -401,7 +405,7 @@ pub(super) mod tests {
 
     #[tokio::test]
     async fn release_idle_drains_but_keeps_pool_usable() {
-        let pool = EvalWorkerPool::new(2, 2 * GIB, String::new(), Arc::default());
+        let pool = EvalWorkerPool::new(2, 2 * GIB, String::new(), true, Arc::default());
         pool.push_for_test(fake_worker());
         pool.push_for_test(fake_worker());
         assert_eq!(pool.idle_count(), 2);
@@ -422,7 +426,7 @@ pub(super) mod tests {
 
     #[tokio::test]
     async fn shutdown_with_no_idle_workers_returns_immediately() {
-        let pool = EvalWorkerPool::new(2, 2 * GIB, String::new(), Arc::default());
+        let pool = EvalWorkerPool::new(2, 2 * GIB, String::new(), true, Arc::default());
         tokio::time::timeout(Duration::from_secs(1), pool.shutdown())
             .await
             .expect("shutdown should not hang on empty pool");
@@ -432,7 +436,7 @@ pub(super) mod tests {
 
     #[tokio::test]
     async fn shutdown_drains_idle_workers_gracefully() {
-        let pool = EvalWorkerPool::new(2, 2 * GIB, String::new(), Arc::default());
+        let pool = EvalWorkerPool::new(2, 2 * GIB, String::new(), true, Arc::default());
         pool.push_for_test(fake_worker());
         pool.push_for_test(fake_worker());
         assert_eq!(pool.idle_count(), 2);
@@ -447,7 +451,7 @@ pub(super) mod tests {
 
     #[tokio::test]
     async fn acquire_after_shutdown_errors() {
-        let pool = EvalWorkerPool::new(2, 2 * GIB, String::new(), Arc::default());
+        let pool = EvalWorkerPool::new(2, 2 * GIB, String::new(), true, Arc::default());
         pool.shutdown().await;
         match pool.acquire().await {
             Ok(_) => panic!("acquire after shutdown must fail"),
@@ -464,6 +468,7 @@ pub(super) mod tests {
             1,
             2 * GIB,
             String::new(),
+            true,
             Arc::default(),
         ));
         pool.push_for_test(fake_worker());

@@ -161,6 +161,7 @@ impl WorkerEvaluator {
         min_free_ram_mb: u64,
         eval_cache_dir: String,
         eval_cache_share: bool,
+        eval_metrics: bool,
     ) -> Self {
         let min_free_bytes =
             crate::worker_pool::memory_guard_bytes(min_free_ram_mb, total_memory_bytes());
@@ -168,6 +169,7 @@ impl WorkerEvaluator {
             fork_workers.get(),
             max_eval_rss,
             eval_cache_dir,
+            eval_metrics,
         ));
         resolver.start_memory_reaper(min_free_bytes);
 

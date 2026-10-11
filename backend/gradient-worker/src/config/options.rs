@@ -175,12 +175,12 @@ pub struct CapabilitiesArgs {
 pub struct SystemArgs {
     /// Nix system types this worker builds for.
     #[arg(value_delimiter = ',')]
-    pub architectures: Option<Vec<String>>,
+    pub architectures: Vec<String>,
 
     /// Nix system features this worker advertises. An empty list detects them at runtime from
     /// {command}`nix config show system-features`, including CPU-derived `gccarch-*` levels.
     #[arg(value_delimiter = ',')]
-    pub features: Option<Vec<String>>,
+    pub features: Vec<String>,
 
     /// Single-core speed score advertised to the scheduler, higher is faster. `null`
     /// benchmarks the host at startup.
@@ -220,6 +220,11 @@ pub struct EvalArgs {
     /// Keep it above a typical evaluation's heap.
     #[arg(default_value = "2147483648")]
     pub max_rss: NonZeroU64,
+
+    /// Whether to collect per-evaluation Nix statistics (thunks, heap, peak memory, hotspots,
+    /// flake graph). Disabling it removes their overhead.
+    #[arg(default_value = "true")]
+    pub metrics: bool,
 
     /// Eval cache directory, exported to evaluation subprocesses as {env}`NIX_CACHE_HOME`.
     /// `null` uses {file}`<services.gradient.worker.baseDir>/eval-cache`.

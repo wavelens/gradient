@@ -63,7 +63,7 @@ impl<R: Read, W: Write> ParentPipe<R, W> {
     }
 }
 
-pub fn run_eval_worker() -> std::io::Result<()> {
+pub fn run_eval_worker(collect_stats: bool) -> std::io::Result<()> {
     let mut stdout = std::io::stdout();
     stdout.write_all(&[EVAL_IPC_VERSION])?;
     stdout.flush()?;
@@ -82,7 +82,6 @@ pub fn run_eval_worker() -> std::io::Result<()> {
             None
         }
     };
-    let collect_stats = crate::stats::metrics_enabled();
     if let Some(last) = evaluator
         .as_ref()
         .and_then(|ev| read_stats(ev, collect_stats))

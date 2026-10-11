@@ -180,6 +180,7 @@ impl Worker<Connected> {
             config.system.min_free_ram_mb,
             config.eval_cache_dir(),
             config.eval.cache_share,
+            config.eval.metrics,
         );
         let gcroots = crate::nix::gcroots::GcRootKeeper::new(
             &config.gcroots_dir,
@@ -242,14 +243,15 @@ async fn perform_setup(
         "capabilities negotiated"
     );
     if handshake.negotiated.build {
-        let architectures = config
-            .system
-            .architectures
-            .clone()
-            .unwrap_or_else(|| vec![crate::config::host_system()]);
-        let system_features = match config.system.features.clone() {
-            Some(features) => features,
-            None => detect_system_features(&config.nix_bin).await,
+        let architectures = if config.system.architectures.is_empty() {
+            vec![crate::config::host_system()]
+        } else {
+            config.system.architectures.clone()
+        };
+        let system_features = if config.system.features.is_empty() {
+            detect_system_features(&config.nix_bin).await
+        } else {
+            config.system.features.clone()
         };
         let host = crate::metrics::host_static();
         let cpu_core_score = config.cpu_core_score();

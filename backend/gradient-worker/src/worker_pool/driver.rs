@@ -18,13 +18,17 @@ use super::transport::EvalWorker;
 use gradient_eval::ipc::EvalRequest;
 use gradient_sources::RefuseImports;
 
-pub async fn run_eval_driver(requests_path: &str, eval_cache_dir: &str) -> Result<i32> {
+pub async fn run_eval_driver(
+    requests_path: &str,
+    eval_cache_dir: &str,
+    eval_metrics: bool,
+) -> Result<i32> {
     let text = tokio::fs::read_to_string(requests_path)
         .await
         .with_context(|| format!("read eval driver requests from {requests_path}"))?;
 
     let live = Arc::new(Mutex::new(HashSet::new()));
-    let mut worker = EvalWorker::spawn(eval_cache_dir, live, Arc::default())
+    let mut worker = EvalWorker::spawn(eval_cache_dir, eval_metrics, live, Arc::default())
         .await
         .context("spawn eval worker for driver")?;
 
