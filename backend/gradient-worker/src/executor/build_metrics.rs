@@ -5,6 +5,7 @@
  */
 
 use std::collections::{BTreeMap, HashMap};
+use std::num::NonZeroU32;
 use std::path::Path;
 use std::sync::atomic::{AtomicU32, Ordering};
 
@@ -47,7 +48,7 @@ fn cpu_usec(user: Option<Microseconds>, system: Option<Microseconds>) -> Option<
 
 #[derive(Debug, Clone, Copy)]
 pub struct BuildHost {
-    pub build_cores: u32,
+    pub build_cores: Option<NonZeroU32>,
     pub cpu_core_score: u32,
 }
 
@@ -148,11 +149,10 @@ pub(super) fn build_metrics(
     }
 }
 
-fn effective_cores(build_cores: u32, cpu_count: u32) -> u32 {
-    if build_cores == 0 {
-        cpu_count
-    } else {
-        build_cores.min(cpu_count)
+fn effective_cores(build_cores: Option<NonZeroU32>, cpu_count: u32) -> u32 {
+    match build_cores {
+        Some(cores) => cores.get().min(cpu_count),
+        None => cpu_count,
     }
 }
 
@@ -284,10 +284,10 @@ mod tests {
     }
 
     #[test]
-    fn zero_build_cores_is_every_core_and_a_larger_value_is_capped() {
-        assert_eq!(effective_cores(0, 16), 16);
-        assert_eq!(effective_cores(4, 16), 4);
-        assert_eq!(effective_cores(64, 16), 16);
+    fn no_core_limit_is_every_core_and_a_larger_value_is_capped() {
+        assert_eq!(effective_cores(None, 16), 16);
+        assert_eq!(effective_cores(NonZeroU32::new(4), 16), 4);
+        assert_eq!(effective_cores(NonZeroU32::new(64), 16), 16);
     }
 
     #[test]

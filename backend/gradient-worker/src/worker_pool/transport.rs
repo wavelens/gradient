@@ -84,6 +84,7 @@ impl Drop for PidGuard {
 impl EvalWorker {
     pub(super) async fn spawn(
         eval_cache_dir: &str,
+        eval_metrics: bool,
         live: Arc<Mutex<HashSet<u32>>>,
         thunks: Arc<LiveThunks>,
     ) -> Result<Self> {
@@ -91,13 +92,14 @@ impl EvalWorker {
         trace!(exe = %exe.display(), "spawning eval worker subprocess");
         let mut command = Command::new(&exe);
         command.arg("--eval-subprocess");
+        if eval_metrics {
+            command.arg("--eval-metrics");
+        }
         command.env("NIX_CACHE_HOME", eval_cache_dir);
         if let Some(dir) = gradient_util::trace_file::active_dir() {
             command.env("GRADIENT_WORKER_LOG_TRACE_DIR", dir);
         }
-        for &(k, v) in
-            super::eval_stats::eval_worker_stats_env(super::eval_stats::metrics_enabled())
-        {
+        for &(k, v) in super::eval_stats::eval_worker_stats_env(eval_metrics) {
             command.env(k, v);
         }
 

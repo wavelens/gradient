@@ -163,13 +163,19 @@ where
 }
 
 impl WorkerPoolResolver {
-    pub fn new(pool_size: usize, max_eval_rss: u64, eval_cache_dir: String) -> Self {
+    pub fn new(
+        pool_size: usize,
+        max_eval_rss: u64,
+        eval_cache_dir: String,
+        eval_metrics: bool,
+    ) -> Self {
         let thunks = Arc::new(LiveThunks::default());
         Self {
             pool: Arc::new(EvalWorkerPool::new(
                 pool_size,
                 max_eval_rss,
                 eval_cache_dir.clone(),
+                eval_metrics,
                 Arc::clone(&thunks),
             )),
             eval_cache_dir,
@@ -570,7 +576,7 @@ mod tests {
         use gradient_eval::ipc::EvalResponse;
         use gradient_wire::types::InputFetchState;
 
-        let resolver = WorkerPoolResolver::new(1, u64::MAX, String::new());
+        let resolver = WorkerPoolResolver::new(1, u64::MAX, String::new(), true);
         let target = || DownloadTarget {
             board: InputBoard::new(vec![("a".into(), InputFetchState::Fetching)]),
             index: 0,

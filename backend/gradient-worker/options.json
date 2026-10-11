@@ -222,7 +222,7 @@
     "field": "architectures",
     "flag": "system-architectures",
     "env": "GRADIENT_WORKER_SYSTEM_ARCHITECTURES",
-    "type": "Option<Vec<String>>",
+    "type": "Vec<String>",
     "description": "Nix system types this worker builds for.",
     "default": null,
     "values": []
@@ -232,7 +232,7 @@
     "field": "features",
     "flag": "system-features",
     "env": "GRADIENT_WORKER_SYSTEM_FEATURES",
-    "type": "Option<Vec<String>>",
+    "type": "Vec<String>",
     "description": "Nix system features this worker advertises. An empty list detects them at runtime from\n{command}`nix config show system-features`, including CPU-derived `gccarch-*` levels.",
     "default": null,
     "values": []
@@ -296,6 +296,19 @@
     "description": "Resident memory in bytes for an idle evaluation subprocess. Subprocesses above the limit\nrestart after their call and free the Nix heap. A call may grow past the limit, with\n{option}`services.gradient.worker.system.minFreeRamMb` as the host's guard.\nKeep it above a typical evaluation's heap.",
     "default": "2147483648",
     "values": []
+  },
+  {
+    "group": "eval",
+    "field": "metrics",
+    "flag": "eval-metrics",
+    "env": "GRADIENT_WORKER_EVAL_METRICS",
+    "type": "bool",
+    "description": "Whether to collect per-evaluation Nix statistics (thunks, heap, peak memory, hotspots,\nflake graph). Disabling it removes their overhead.",
+    "default": "true",
+    "values": [
+      "true",
+      "false"
+    ]
   },
   {
     "group": "eval",

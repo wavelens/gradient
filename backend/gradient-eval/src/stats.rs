@@ -7,12 +7,6 @@
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use serde::{Deserialize, Serialize};
 
-pub fn metrics_enabled() -> bool {
-    std::env::var("GRADIENT_WORKER_EVAL_METRICS")
-        .map(|v| v != "false" && v != "0")
-        .unwrap_or(true)
-}
-
 /// Counters are diffs since the worker's prior request.
 /// `gc_heap_size` is the current gauge at report time.
 #[derive(

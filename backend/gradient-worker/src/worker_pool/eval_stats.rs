@@ -6,7 +6,7 @@
 
 use std::collections::HashMap;
 
-pub use gradient_eval::stats::{StatsDelta, metrics_enabled};
+pub use gradient_eval::stats::StatsDelta;
 
 /// libnixexpr's `Counter`s are no-ops unless `NIX_SHOW_STATS` is set.
 /// Without it `total_thunks` and `fn_calls` are always reporting 0.
