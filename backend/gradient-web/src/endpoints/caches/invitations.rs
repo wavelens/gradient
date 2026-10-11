@@ -10,6 +10,7 @@ use crate::authorization::MaybeApiKey;
 use crate::error::{WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json};
 use crate::permissions::CachePermission;
+use crate::resource::Resource;
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
 use chrono::NaiveDateTime;
@@ -119,7 +120,7 @@ pub async fn delete_cache_invitation(
         .filter(CUser::Username.eq(body.user.clone()))
         .one(&state.web_db)
         .await?
-        .or_not_found("User")?;
+        .or_not_found(Resource::User)?;
 
     let invitation = ECacheInvitation::find()
         .filter(

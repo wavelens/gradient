@@ -13,6 +13,7 @@ use crate::endpoints::projects::workers::reauth_project_workers;
 use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
 use crate::permissions::Permission;
+use crate::resource::Resource;
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
 use gradient_core::ServerState;
@@ -204,9 +205,7 @@ pub async fn post_project_subscribe_cache(
         .await?;
 
     if already.is_some() {
-        return Err(WebError::already_exists(
-            "Project already subscribed to Cache",
-        ));
+        return Err(WebError::already_exists(Resource::CacheSubscription));
     }
 
     let pending = ECacheSubscriptionRequest::find()
@@ -219,7 +218,7 @@ pub async fn post_project_subscribe_cache(
         .await?;
 
     if pending.is_some() {
-        return Err(WebError::already_exists("Subscription already requested"));
+        return Err(WebError::already_exists(Resource::SubscriptionRequest));
     }
 
     let mode = body

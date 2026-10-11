@@ -11,6 +11,7 @@ use crate::authorization::{
 };
 use crate::error::{ErrorCode, WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json};
+use crate::resource::Resource;
 use axum::Extension;
 use axum::Json;
 use axum::body::Body;
@@ -95,7 +96,7 @@ pub async fn post_basic_register(
         .await?;
 
     if existing_user.is_some() {
-        return Err(WebError::already_exists("User"));
+        return Err(WebError::already_exists(Resource::User));
     }
 
     let (email_verified, verification_token, verification_expires) = if state
@@ -130,7 +131,7 @@ pub async fn post_basic_register(
     let user = user
         .insert(&state.web_db)
         .await
-        .map_err(|e| WebError::from_db_err(e, "User"))?;
+        .map_err(|e| WebError::from_db_err(e, Resource::User))?;
 
     if let Err(e) = gradient_state::apply_pending_project_memberships(
         &state.web_db,
@@ -657,7 +658,7 @@ pub async fn post_resend_verification(
         .filter(CUser::Username.eq(body.username.clone()))
         .one(&state.web_db)
         .await?
-        .or_not_found("User")?;
+        .or_not_found(Resource::User)?;
 
     if user.email_verified {
         return Err(WebError::bad_request(
@@ -823,7 +824,7 @@ pub async fn post_cli_device_poll(
         .filter(CCliDeviceAuthorization::DeviceCodeHash.eq(hash))
         .one(&state.web_db)
         .await?
-        .ok_or_else(|| WebError::not_found("Device authorization"))?;
+        .ok_or_else(|| WebError::not_found(Resource::DeviceAuthorization))?;
 
     let now = gradient_types::now();
     if row.denied_at.is_some() {
@@ -858,7 +859,7 @@ async fn find_active_user_code(
         .filter(CCliDeviceAuthorization::UserCode.eq(user_code.to_string()))
         .one(&state.web_db)
         .await?
-        .ok_or_else(|| WebError::not_found("Device authorization"))?;
+        .ok_or_else(|| WebError::not_found(Resource::DeviceAuthorization))?;
 
     let now = gradient_types::now();
     if row.denied_at.is_some() {

@@ -9,6 +9,7 @@ use crate::authorization::MaybeApiKey;
 use crate::error::{WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json};
 use crate::permissions::Permission;
+use crate::resource::Resource;
 use axum::extract::{Path, State};
 use axum::routing::get;
 use axum::{Extension, Json, Router};
@@ -206,7 +207,7 @@ pub async fn read(
         .filter(CTaskFlakeInputOverride::Task.eq(proj.id))
         .one(&state.web_db)
         .await?
-        .or_not_found("FlakeInputOverride")?;
+        .or_not_found(Resource::FlakeInputOverride)?;
 
     Ok(ok_json(row.into()))
 }
@@ -243,7 +244,7 @@ pub async fn update(
         .filter(CTaskFlakeInputOverride::Task.eq(proj.id))
         .one(&state.web_db)
         .await?
-        .or_not_found("FlakeInputOverride")?;
+        .or_not_found(Resource::FlakeInputOverride)?;
 
     if let Some(new_name) = &body.input_name
         && new_name != &row.input_name
@@ -297,7 +298,7 @@ pub async fn delete_one(
         .filter(CTaskFlakeInputOverride::Task.eq(proj.id))
         .one(&state.web_db)
         .await?
-        .or_not_found("FlakeInputOverride")?;
+        .or_not_found(Resource::FlakeInputOverride)?;
 
     let active: ATaskFlakeInputOverride = row.into();
     active.delete(&state.web_db).await?;

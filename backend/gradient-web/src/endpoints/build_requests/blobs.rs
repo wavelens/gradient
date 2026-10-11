@@ -9,6 +9,7 @@ use crate::authorization::MaybeApiKey;
 use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
 use crate::permissions::Permission;
+use crate::resource::Resource;
 use anyhow::Context;
 use axum::Extension;
 use axum::Json;
@@ -46,7 +47,7 @@ pub async fn post_blobs(
     let session = EUploadSession::find_by_id(session_id)
         .one(&state.web_db)
         .await?
-        .ok_or_else(|| WebError::not_found("Upload session"))?;
+        .ok_or_else(|| WebError::not_found(Resource::UploadSession))?;
 
     if session.dispatched_at.is_some() {
         return Err(WebError::conflict("Upload session already dispatched"));
@@ -66,7 +67,7 @@ pub async fn post_blobs(
     )
     .await?
     {
-        return Err(WebError::not_found("Upload session"));
+        return Err(WebError::not_found(Resource::UploadSession));
     }
 
     let mut missing: HashSet<String> =

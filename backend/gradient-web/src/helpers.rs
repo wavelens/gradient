@@ -5,6 +5,7 @@
  */
 
 use crate::error::{WebError, WebResult};
+use crate::resource::Resource;
 use axum::Json;
 use gradient_types::ids::RoleId;
 use gradient_types::{BaseResponse, CRole, ERole, Paginated, PaginationParams};
@@ -22,11 +23,11 @@ pub fn ok_json<T>(message: T) -> Json<BaseResponse<T>> {
 }
 
 pub trait OptionExt<T> {
-    fn or_not_found(self, resource: &str) -> WebResult<T>;
+    fn or_not_found(self, resource: Resource) -> WebResult<T>;
 }
 
 impl<T> OptionExt<T> for Option<T> {
-    fn or_not_found(self, resource: &str) -> WebResult<T> {
+    fn or_not_found(self, resource: Resource) -> WebResult<T> {
         self.ok_or_else(|| WebError::not_found(resource))
     }
 }

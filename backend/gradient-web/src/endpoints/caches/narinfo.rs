@@ -7,6 +7,7 @@
 use super::helpers::{CacheContext, JsonFlag, cache_client_ip, get_nar_by_hash};
 use crate::client_ip::OptionalPeer;
 use crate::error::{WebError, WebResult};
+use crate::resource::Resource;
 use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
@@ -122,10 +123,11 @@ pub async fn path(
     // nixseparatedebuginfod is aborting the whole request instead of trying the next substituter
     // (#563).
     if !path.ends_with(".narinfo") {
-        return Err(WebError::not_found("Path"));
+        return Err(WebError::not_found(Resource::Path));
     }
 
-    let path_hash = get_hash_from_url(path.clone()).map_err(|_| WebError::not_found("Path"))?;
+    let path_hash =
+        get_hash_from_url(path.clone()).map_err(|_| WebError::not_found(Resource::Path))?;
 
     let client_ip = cache_client_ip(&state, &headers, peer);
     let ctx = CacheContext::load(&state, &headers, client_ip, cache).await?;
@@ -164,7 +166,7 @@ pub async fn path(
         return Ok(with_narinfo_headers(response, "MISS"));
     }
 
-    Err(WebError::not_found("Path"))
+    Err(WebError::not_found(Resource::Path))
 }
 
 fn narinfo_field<'a>(body: &'a str, key: &str) -> Option<&'a str> {

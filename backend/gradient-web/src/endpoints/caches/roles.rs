@@ -13,6 +13,7 @@ use crate::permissions::{
     CachePermission, PermissionEntry, available_cache_permissions, cache_mask_to_vec,
     is_builtin_cache_role, parse_cache_permission_list,
 };
+use crate::resource::Resource;
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
 use gradient_core::ServerState;
@@ -81,11 +82,11 @@ async fn load_cache_role(
     let role = ECacheRole::find_by_id(role_id)
         .one(&state.web_db)
         .await?
-        .or_not_found("Role")?;
+        .or_not_found(Resource::Role)?;
     if let Some(owner) = role.cache
         && owner != cache_id
     {
-        return Err(WebError::not_found("Role"));
+        return Err(WebError::not_found(Resource::Role));
     }
     Ok(role)
 }
@@ -146,7 +147,7 @@ pub async fn post_cache_role(
     .await?;
 
     if check_index_name(&body.name).is_err() {
-        return Err(WebError::invalid_name("Role Name"));
+        return Err(WebError::invalid_name(Resource::RoleName));
     }
 
     let mask = parse_cache_permission_list(&body.permissions, "GET /caches/{cache}/roles")?;
@@ -161,7 +162,7 @@ pub async fn post_cache_role(
         .one(&state.web_db)
         .await?;
     if clash.is_some() {
-        return Err(WebError::already_exists("Role Name"));
+        return Err(WebError::already_exists(Resource::RoleName));
     }
 
     let role = MCacheRole {
@@ -256,7 +257,7 @@ pub async fn patch_cache_role(
 
     if let Some(name) = body.name {
         if check_index_name(&name).is_err() {
-            return Err(WebError::invalid_name("Role Name"));
+            return Err(WebError::invalid_name(Resource::RoleName));
         }
         let clash = ECacheRole::find()
             .filter(CCacheRole::Name.eq(name.as_str()))
@@ -269,7 +270,7 @@ pub async fn patch_cache_role(
             .one(&state.web_db)
             .await?;
         if clash.is_some() {
-            return Err(WebError::already_exists("Role Name"));
+            return Err(WebError::already_exists(Resource::RoleName));
         }
         active.name = Set(name);
     }

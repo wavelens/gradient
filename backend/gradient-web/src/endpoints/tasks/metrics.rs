@@ -9,6 +9,7 @@ use crate::authorization::{MaybeApiKey, MaybeUser};
 use crate::endpoints::builds::closure::sum_output_sizes;
 use crate::error::WebResult;
 use crate::helpers::{OptionExt, ok_json};
+use crate::resource::Resource;
 use axum::extract::{Path, Query, State};
 use axum::{Extension, Json};
 use gradient_core::ServerState;
@@ -51,7 +52,9 @@ pub async fn get_task_metrics(
         Caller::from_option(&maybe_user),
         api_key.as_ref(),
         project,
-        ProjectAccess::Readable { label: "Task" },
+        ProjectAccess::Readable {
+            label: Resource::Task,
+        },
     )
     .await?;
 
@@ -60,7 +63,7 @@ pub async fn get_task_metrics(
         .filter(CTask::Name.eq(task))
         .one(&state.web_db)
         .await?
-        .or_not_found("Task")?;
+        .or_not_found(Resource::Task)?;
 
     let evaluations = EEvaluation::find()
         .filter(CEvaluation::Task.eq(task.id))
@@ -220,7 +223,9 @@ pub async fn get_entry_point_metrics(
         Caller::from_option(&maybe_user),
         api_key.as_ref(),
         project,
-        ProjectAccess::Readable { label: "Task" },
+        ProjectAccess::Readable {
+            label: Resource::Task,
+        },
     )
     .await?;
 
@@ -229,7 +234,7 @@ pub async fn get_entry_point_metrics(
         .filter(CTask::Name.eq(task))
         .one(&state.web_db)
         .await?
-        .or_not_found("Task")?;
+        .or_not_found(Resource::Task)?;
 
     let entry_points = EEntryPoint::find()
         .filter(CEntryPoint::Task.eq(task.id))

@@ -10,6 +10,7 @@ use crate::authorization::{MaybeApiKey, MaybeUser};
 use crate::error::{WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json};
 use crate::permissions::CachePermission;
+use crate::resource::Resource;
 use axum::Extension;
 use axum::Json;
 use axum::extract::{Path, Query, State};
@@ -224,13 +225,13 @@ pub async fn show(
         .filter(CCachedPath::Hash.eq(&hash))
         .one(&state.web_db)
         .await?
-        .or_not_found("Path")?;
+        .or_not_found(Resource::Path)?;
     let sig = ECachedPathSignature::find()
         .filter(CCachedPathSignature::Cache.eq(cache.id))
         .filter(CCachedPathSignature::CachedPath.eq(cp.id))
         .one(&state.web_db)
         .await?
-        .or_not_found("Signature")?;
+        .or_not_found(Resource::Signature)?;
     let store_path = cp.as_store_path().base();
     let references =
         gradient_db::graph::runtime_closure::references_for_hash(&state.web_db, &hash).await?;

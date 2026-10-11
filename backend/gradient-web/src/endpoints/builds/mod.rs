@@ -32,6 +32,7 @@ use crate::access::is_project_member;
 use crate::authorization::ApiKeyContext;
 use crate::error::{WebError, WebResult};
 use crate::helpers::OptionExt;
+use crate::resource::Resource;
 use gradient_core::ServerState;
 use gradient_db::scheduling::build_attempt::latest_attempt_id;
 use gradient_types::*;
@@ -52,7 +53,7 @@ impl BuildAccessContext {
         let build_job = EBuildJob::find_by_id(build_job_id)
             .one(&state.web_db)
             .await?
-            .or_not_found("Build")?;
+            .or_not_found(Resource::Build)?;
 
         let shared_build = EDerivationBuild::find_by_id(build_job.derivation_build)
             .one(&state.web_db)
@@ -63,7 +64,7 @@ impl BuildAccessContext {
                     build_job_id = %build_job_id,
                     "shared build not found for build_job",
                 );
-                WebError::data_inconsistency("Build")
+                WebError::data_inconsistency(Resource::Build)
             })?;
 
         let evaluation = EEvaluation::find_by_id(build_job.evaluation)
@@ -75,12 +76,12 @@ impl BuildAccessContext {
                     build_job_id = %build_job_id,
                     "Evaluation not found for build_job",
                 );
-                WebError::data_inconsistency("Build")
+                WebError::data_inconsistency(Resource::Build)
             })?;
 
         let task_id = evaluation.task.ok_or_else(|| {
             tracing::warn!(evaluation_id = %evaluation.id, "evaluation has no task");
-            WebError::data_inconsistency("Evaluation")
+            WebError::data_inconsistency(Resource::Evaluation)
         })?;
 
         let project_id = ETask::find_by_id(task_id)
@@ -92,7 +93,7 @@ impl BuildAccessContext {
                     evaluation_id = %evaluation.id,
                     "Task not found for evaluation",
                 );
-                WebError::data_inconsistency("Evaluation")
+                WebError::data_inconsistency(Resource::Evaluation)
             })?
             .project;
 
@@ -101,7 +102,7 @@ impl BuildAccessContext {
             .await?
             .ok_or_else(|| {
                 tracing::warn!(%project_id, "Project not found");
-                WebError::data_inconsistency("Project")
+                WebError::data_inconsistency(Resource::Project)
             })?;
 
         Ok(Self {
@@ -138,7 +139,7 @@ impl BuildAccessContext {
             return Ok(ctx);
         }
 
-        Err(WebError::not_found("Build"))
+        Err(WebError::not_found(Resource::Build))
     }
 }
 

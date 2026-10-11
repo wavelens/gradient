@@ -7,6 +7,7 @@
 use crate::authorization::{MaybeApiKey, MaybeUser};
 use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
+use crate::resource::Resource;
 use axum::extract::{Path, Query, State};
 use axum::{Extension, Json};
 use gradient_core::ServerState;
@@ -219,7 +220,7 @@ pub async fn get_evaluation_builds(
             .filter(CBuildJob::Evaluation.eq(evaluation.id))
             .one(&state.web_db)
             .await?
-            .ok_or_else(|| WebError::not_found("build"))?
+            .ok_or_else(|| WebError::not_found(Resource::Build))?
             .derivation;
         let allowed =
             gradient_db::graph::closure::transitive_closure_reachable(&state.web_db, &[root])

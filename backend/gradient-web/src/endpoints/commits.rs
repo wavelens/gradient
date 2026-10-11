@@ -7,6 +7,7 @@
 use crate::authorization::MaybeUser;
 use crate::error::{WebError, WebResult};
 use crate::helpers::OptionExt;
+use crate::resource::Resource;
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
 use gradient_core::ServerState;
@@ -25,7 +26,7 @@ pub async fn get_commit(
     let commit = ECommit::find_by_id(commit_id)
         .one(&state.web_db)
         .await?
-        .or_not_found("Commit")?;
+        .or_not_found(Resource::Commit)?;
 
     let evaluations = EEvaluation::find()
         .filter(CEvaluation::Commit.eq(commit_id))
@@ -33,7 +34,7 @@ pub async fn get_commit(
         .await?;
 
     if evaluations.is_empty() {
-        return Err(WebError::not_found("Commit"));
+        return Err(WebError::not_found(Resource::Commit));
     }
 
     let mut project_ids: HashSet<ProjectId> = HashSet::new();
@@ -49,7 +50,7 @@ pub async fn get_commit(
     }
 
     if project_ids.is_empty() {
-        return Err(WebError::not_found("Commit"));
+        return Err(WebError::not_found(Resource::Commit));
     }
 
     let project_id_vec: Vec<ProjectId> = project_ids.into_iter().collect();
@@ -75,7 +76,7 @@ pub async fn get_commit(
     };
 
     if !accessible {
-        return Err(WebError::not_found("Commit"));
+        return Err(WebError::not_found(Resource::Commit));
     }
 
     Ok(Json(BaseResponse {

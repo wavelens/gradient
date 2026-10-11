@@ -6,6 +6,7 @@
 use super::helpers::{CacheContext, cache_client_ip, cache_served_derivation};
 use crate::client_ip::OptionalPeer;
 use crate::error::{WebError, WebResult};
+use crate::resource::Resource;
 use axum::body::Body;
 use axum::extract::{Path, State};
 use axum::http::{HeaderMap, HeaderValue, header};
@@ -36,7 +37,7 @@ pub async fn log(
     let upstream_caches = pull_through_upstream_caches(&state.web_db, &ctx.cache).await?;
     match fetch_upstream_log(&substitution_sources(&upstream_caches), &drv).await {
         Some(body) => log_response(body, "MISS"),
-        None => Err(WebError::not_found("Log")),
+        None => Err(WebError::not_found(Resource::Log)),
     }
 }
 

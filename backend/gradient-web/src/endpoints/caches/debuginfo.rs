@@ -10,6 +10,7 @@
 use super::helpers::{CacheContext, cache_client_ip};
 use crate::client_ip::OptionalPeer;
 use crate::error::{WebError, WebResult};
+use crate::resource::Resource;
 use axum::extract::{Path, State};
 use axum::http::{HeaderMap, HeaderValue, header};
 use axum::response::{IntoResponse, Response};
@@ -34,7 +35,8 @@ pub async fn debuginfo(
     headers: HeaderMap,
     Path((cache, build_id)): Path<(String, String)>,
 ) -> WebResult<Response> {
-    let build_id = parse_build_id(&build_id).ok_or_else(|| WebError::not_found("DebugInfo"))?;
+    let build_id =
+        parse_build_id(&build_id).ok_or_else(|| WebError::not_found(Resource::DebugInfo))?;
 
     let client_ip = cache_client_ip(&state, &headers, peer);
     let ctx = CacheContext::load(&state, &headers, client_ip, cache).await?;
@@ -56,7 +58,7 @@ pub async fn debuginfo(
     let upstream_caches = upstream_caches_for(&state, &ctx.cache).await;
     match fetch_from_upstream_caches(&upstream_caches, &build_id).await {
         Some(doc) => Ok(redirect_response(doc, "MISS")),
-        None => Err(WebError::not_found("DebugInfo")),
+        None => Err(WebError::not_found(Resource::DebugInfo)),
     }
 }
 

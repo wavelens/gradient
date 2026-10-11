@@ -14,6 +14,7 @@ use crate::endpoints::teams::workers::{reauth_team_workers, withdraw_team_worker
 use crate::error::{WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json};
 use crate::permissions::{CachePermission, Permission};
+use crate::resource::Resource;
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
 use gradient_core::ServerState;
@@ -73,7 +74,7 @@ async fn find_team(state: &Arc<ServerState>, name: &str) -> WebResult<MTeam> {
         .filter(CTeam::Name.eq(name))
         .one(&state.web_db)
         .await?
-        .or_not_found("Team")
+        .or_not_found(Resource::Team)
 }
 
 fn grant_permission(includes_users: bool) -> Permission {
@@ -117,7 +118,7 @@ async fn project_role(
         )
         .one(&state.web_db)
         .await?
-        .or_not_found("Role")?
+        .or_not_found(Resource::Role)?
         .id)
 }
 
@@ -132,7 +133,7 @@ async fn cache_role(state: &Arc<ServerState>, cache: CacheId, name: &str) -> Web
         )
         .one(&state.web_db)
         .await?
-        .or_not_found("Role")?
+        .or_not_found(Resource::Role)?
         .id)
 }
 
@@ -188,7 +189,9 @@ pub async fn get_project_teams(
         Caller::from_option(&maybe_user),
         api_key.as_ref(),
         project,
-        ProjectAccess::Readable { label: "Project" },
+        ProjectAccess::Readable {
+            label: Resource::Project,
+        },
     )
     .await?;
 
@@ -296,7 +299,7 @@ pub async fn post_project_team(
         (false, _) => None,
     };
     if project_grant(&state, team.id, project.id).await?.is_some() {
-        return Err(WebError::already_exists("Team grant"));
+        return Err(WebError::already_exists(Resource::TeamGrant));
     }
 
     let payload =
@@ -320,7 +323,7 @@ pub async fn post_project_team(
         .into_active_model()
         .insert(&state.web_db)
         .await
-        .map_err(|e| WebError::from_db_err(e, "Team request"))?;
+        .map_err(|e| WebError::from_db_err(e, Resource::TeamRequest))?;
         audit_record(
             &state,
             Some(user.id),
@@ -390,7 +393,7 @@ pub async fn patch_project_team(
     let team = find_team(&state, &team).await?;
     let grant = project_grant(&state, team.id, project.id)
         .await?
-        .or_not_found("Team grant")?;
+        .or_not_found(Resource::TeamGrant)?;
 
     let users = body.users.unwrap_or(grant.includes_users);
     let workers = body.workers.unwrap_or(grant.includes_workers);
@@ -450,7 +453,7 @@ pub async fn delete_project_team(
 ) -> WebResult<Json<BaseResponse<String>>> {
     let project = get_any_project_by_name(&state.db(), project)
         .await?
-        .or_not_found("Project")?;
+        .or_not_found(Resource::Project)?;
     let team = find_team(&state, &team).await?;
     let grant = project_grant(&state, team.id, project.id).await?;
     let (request, includes_users) = match &grant {
@@ -461,7 +464,7 @@ pub async fn delete_project_team(
                 .filter(CTeamProjectRequest::Project.eq(project.id))
                 .one(&state.web_db)
                 .await?
-                .or_not_found("Team grant")?;
+                .or_not_found(Resource::TeamGrant)?;
             let includes_users = request.includes_users;
             (Some(request), includes_users)
         }
@@ -477,7 +480,7 @@ pub async fn delete_project_team(
     .await?
         || removes_as_team_admin(&state, &user, &api_key, team.id).await?;
     if !allowed {
-        return Err(WebError::not_found("Team grant"));
+        return Err(WebError::not_found(Resource::TeamGrant));
     }
     if project.managed {
         return Err(WebError::forbidden(
@@ -618,7 +621,7 @@ pub async fn post_cache_team(
     let team = find_team(&state, &body.team).await?;
     let role = cache_role(&state, cache.id, &body.role).await?;
     if cache_grant(&state, team.id, cache.id).await?.is_some() {
-        return Err(WebError::already_exists("Team grant"));
+        return Err(WebError::already_exists(Resource::TeamGrant));
     }
 
     let payload =
@@ -640,7 +643,7 @@ pub async fn post_cache_team(
         .into_active_model()
         .insert(&state.web_db)
         .await
-        .map_err(|e| WebError::from_db_err(e, "Team request"))?;
+        .map_err(|e| WebError::from_db_err(e, Resource::TeamRequest))?;
         audit_record(
             &state,
             Some(user.id),
@@ -699,7 +702,7 @@ pub async fn patch_cache_team(
     let team = find_team(&state, &team).await?;
     let grant = cache_grant(&state, team.id, cache.id)
         .await?
-        .or_not_found("Team grant")?;
+        .or_not_found(Resource::TeamGrant)?;
     let role = cache_role(&state, cache.id, &body.role).await?;
 
     let mut active: ATeamCache = grant.into();
@@ -732,7 +735,7 @@ pub async fn delete_cache_team(
 ) -> WebResult<Json<BaseResponse<String>>> {
     let cache = get_any_cache_by_name(&state.db(), cache)
         .await?
-        .or_not_found("Cache")?;
+        .or_not_found(Resource::Cache)?;
     let team = find_team(&state, &team).await?;
     let grant = cache_grant(&state, team.id, cache.id).await?;
     let request = match grant {
@@ -743,7 +746,7 @@ pub async fn delete_cache_team(
                 .filter(CTeamCacheRequest::Cache.eq(cache.id))
                 .one(&state.web_db)
                 .await?
-                .or_not_found("Team grant")?,
+                .or_not_found(Resource::TeamGrant)?,
         ),
     };
 
@@ -757,7 +760,7 @@ pub async fn delete_cache_team(
     .await?
         || removes_as_team_admin(&state, &user, &api_key, team.id).await?;
     if !allowed {
-        return Err(WebError::not_found("Team grant"));
+        return Err(WebError::not_found(Resource::TeamGrant));
     }
     if cache.managed {
         return Err(WebError::forbidden(

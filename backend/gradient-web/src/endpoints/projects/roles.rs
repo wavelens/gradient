@@ -13,6 +13,7 @@ use crate::permissions::{
     Permission, PermissionEntry, available_permissions, is_builtin_role, mask_to_vec,
     parse_permission_list,
 };
+use crate::resource::Resource;
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
 use gradient_core::ServerState;
@@ -81,13 +82,13 @@ async fn load_project_role(
     let role = ERole::find_by_id(role_id)
         .one(&state.web_db)
         .await?
-        .or_not_found("Role")?;
+        .or_not_found(Resource::Role)?;
 
     if let Some(owner) = role.project
         && owner != project_id
     {
         // Cross-project access is treated as not-found to avoid leaking ids.
-        return Err(WebError::not_found("Role"));
+        return Err(WebError::not_found(Resource::Role));
     }
 
     Ok(role)
@@ -146,7 +147,7 @@ pub async fn post_project_role(
     .await?;
 
     if check_index_name(&body.name).is_err() {
-        return Err(WebError::invalid_name("Role Name"));
+        return Err(WebError::invalid_name(Resource::RoleName));
     }
 
     let mask = parse_permission_list(&body.permissions, "GET /projects/{project}/roles")?;
@@ -163,7 +164,7 @@ pub async fn post_project_role(
         .one(&state.web_db)
         .await?;
     if clash.is_some() {
-        return Err(WebError::already_exists("Role Name"));
+        return Err(WebError::already_exists(Resource::RoleName));
     }
 
     let role = MRole {
@@ -258,7 +259,7 @@ pub async fn patch_project_role(
 
     if let Some(name) = body.name {
         if check_index_name(&name).is_err() {
-            return Err(WebError::invalid_name("Role Name"));
+            return Err(WebError::invalid_name(Resource::RoleName));
         }
         let clash = ERole::find()
             .filter(CRole::Name.eq(name.as_str()))
@@ -271,7 +272,7 @@ pub async fn patch_project_role(
             .one(&state.web_db)
             .await?;
         if clash.is_some() {
-            return Err(WebError::already_exists("Role Name"));
+            return Err(WebError::already_exists(Resource::RoleName));
         }
         active.name = Set(name);
     }

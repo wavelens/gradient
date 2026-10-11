@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use crate::resource::Resource;
 use anyhow::Error as AnyhowError;
 use axum::Json;
 use axum::extract::rejection::JsonRejection;
@@ -283,18 +284,18 @@ impl WebError {
         Self::ServiceUnavailable(ErrorCode::SERVICE_UNAVAILABLE, msg.into())
     }
 
-    pub fn invalid_name(name: &str) -> Self {
+    pub fn invalid_name(name: Resource) -> Self {
         Self::BadRequest(ErrorCode::INVALID_NAME, format!("Invalid {}", name))
     }
 
-    pub fn already_exists(resource: &str) -> Self {
+    pub fn already_exists(resource: Resource) -> Self {
         Self::Conflict(
             ErrorCode::ALREADY_EXISTS,
             format!("{} already exists", resource),
         )
     }
 
-    pub fn not_found(resource: &str) -> Self {
+    pub fn not_found(resource: Resource) -> Self {
         Self::NotFound(ErrorCode::NOT_FOUND, format!("{} not found", resource))
     }
 
@@ -302,7 +303,7 @@ impl WebError {
         Self::NotFound(ErrorCode::NOT_FOUND, msg.into())
     }
 
-    pub fn data_inconsistency(resource: &str) -> Self {
+    pub fn data_inconsistency(resource: Resource) -> Self {
         Self::DataInconsistency(format!("{} data inconsistency", resource))
     }
 
@@ -380,7 +381,7 @@ impl WebError {
         )
     }
 
-    pub(crate) fn from_db_err(err: DbErr, label: &str) -> Self {
+    pub(crate) fn from_db_err(err: DbErr, label: Resource) -> Self {
         if is_unique_violation(&err) {
             return Self::already_exists(label);
         }
@@ -422,7 +423,7 @@ mod tests {
     #[test]
     fn from_db_err_passes_through_non_db_errors() {
         let err = DbErr::Custom("boom".into());
-        let mapped = WebError::from_db_err(err, "Anything");
+        let mapped = WebError::from_db_err(err, Resource::Project);
         assert!(matches!(mapped, WebError::Internal(_)));
     }
 }

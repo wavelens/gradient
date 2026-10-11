@@ -9,6 +9,7 @@ use crate::client_ip::resolve_client_ip;
 use crate::error::{ErrorCode, WebError, WebResult};
 use crate::helpers::OptionExt;
 use crate::ip_allowlist::is_allowed as ip_allowed;
+use crate::resource::Resource;
 use axum::extract::State;
 use axum::http::HeaderMap;
 use base64::Engine;
@@ -155,7 +156,7 @@ async fn get_nar_by_hash_inner(
         .one(&state.web_db)
         .await
         .map_err(WebError::from)?
-        .or_not_found("CachedPath")?;
+        .or_not_found(Resource::CachedPath)?;
 
     let cached_path_sig = ECachedPathSignature::find()
         .filter(
@@ -166,11 +167,11 @@ async fn get_nar_by_hash_inner(
         .one(&state.web_db)
         .await
         .map_err(WebError::from)?
-        .or_not_found("Signature")?;
+        .or_not_found(Resource::Signature)?;
 
     let signature = cached_path_sig
         .signature
-        .or_not_found("Signature not yet computed")?;
+        .ok_or_else(|| WebError::not_found_msg("Signature not yet computed"))?;
 
     let path = get_path_from_derivation_output(build_output.clone()).full();
 
@@ -178,10 +179,10 @@ async fn get_nar_by_hash_inner(
         .nar_hash
         .as_deref()
         .map(normalize_nar_hash)
-        .or_not_found("NarHash not recorded")?;
+        .ok_or_else(|| WebError::not_found_msg("NarHash not recorded"))?;
     let nar_size = cached_path_row
         .nar_size
-        .or_not_found("NarSize not recorded")? as u64;
+        .ok_or_else(|| WebError::not_found_msg("NarSize not recorded"))? as u64;
     let references = gradient_db::graph::runtime_closure::references_for_hash(
         &state.web_db,
         &cached_path_row.hash,
@@ -202,11 +203,12 @@ async fn get_nar_by_hash_inner(
         .file_hash
         .as_deref()
         .map(normalize_nar_hash)
-        .or_not_found("FileHash not recorded")?;
+        .ok_or_else(|| WebError::not_found_msg("FileHash not recorded"))?;
     let file_hash_nix32 = strip_hash_algo(&file_hash).to_string();
     let file_size = cached_path_row
         .file_size
-        .or_not_found("FileSize not recorded")? as u32;
+        .ok_or_else(|| WebError::not_found_msg("FileSize not recorded"))?
+        as u32;
 
     Ok(NixPathInfo {
         store_path: path,
@@ -233,10 +235,10 @@ async fn get_nar_by_cached_path(
         .one(&state.web_db)
         .await
         .map_err(WebError::from)?
-        .or_not_found("Path")?;
+        .or_not_found(Resource::Path)?;
 
     if !cached_path_row.is_fully_cached() {
-        return Err(WebError::not_found("Path"));
+        return Err(WebError::not_found(Resource::Path));
     }
 
     let cached_path_sig = ECachedPathSignature::find()
@@ -248,11 +250,11 @@ async fn get_nar_by_cached_path(
         .one(&state.web_db)
         .await
         .map_err(WebError::from)?
-        .or_not_found("Signature")?;
+        .or_not_found(Resource::Signature)?;
 
     let signature = cached_path_sig
         .signature
-        .or_not_found("Signature not yet computed")?;
+        .ok_or_else(|| WebError::not_found_msg("Signature not yet computed"))?;
 
     let sig = gradient_sources::full_signature_token(
         &signature,
@@ -271,10 +273,10 @@ async fn get_nar_by_cached_path(
         .nar_hash
         .as_deref()
         .map(normalize_nar_hash)
-        .or_not_found("NarHash not recorded")?;
+        .ok_or_else(|| WebError::not_found_msg("NarHash not recorded"))?;
     let nar_size = cached_path_row
         .nar_size
-        .or_not_found("NarSize not recorded")? as u64;
+        .ok_or_else(|| WebError::not_found_msg("NarSize not recorded"))? as u64;
     let references = gradient_db::graph::runtime_closure::references_for_hash(
         &state.web_db,
         &cached_path_row.hash,
@@ -312,7 +314,7 @@ impl CacheContext {
             .filter(CCache::Name.eq(cache_name))
             .one(&state.web_db)
             .await?
-            .or_not_found("Cache")?;
+            .or_not_found(Resource::Cache)?;
 
         if !cache.active {
             return Err(WebError::bad_request("Cache is disabled"));
@@ -406,14 +408,14 @@ pub async fn fetch_nar_stream(
     let effective_hash =
         crate::endpoints::caches::nar::resolve_effective_hash_db(&state.web_db, path_hash).await?;
     if !cache_serves_path(state, cache, &effective_hash).await? {
-        return Err(WebError::not_found("Path"));
+        return Err(WebError::not_found(Resource::Path));
     }
     let source = state
         .nar_storage
         .open(&effective_hash, 0)
         .await
         .map_err(|e| WebError::internal(format!("Failed to read NAR: {}", e)))?
-        .or_not_found("Path")?;
+        .or_not_found(Resource::Path)?;
     let (size, stream) = match source {
         NarSource::Hot(bytes) => {
             let size = bytes.len() as u64;
@@ -445,7 +447,7 @@ pub(super) async fn delete_nar_from_cache(
         })
         .await
         .map_err(|e| WebError::internal(e.to_string()))?;
-    let cached_path = report.cached_path.or_not_found("Nar")?;
+    let cached_path = report.cached_path.or_not_found(Resource::Nar)?;
     state.nar_storage.hot().invalidate(hash);
 
     Ok((

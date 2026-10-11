@@ -10,6 +10,7 @@ use crate::authorization::MaybeApiKey;
 use crate::endpoints::teams::grants::grant_workers;
 use crate::error::{WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json, role_names};
+use crate::resource::Resource;
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
 use chrono::NaiveDateTime;
@@ -294,7 +295,7 @@ pub async fn post_approve_team_request(
         .into_active_model()
         .insert(&tx)
         .await
-        .map_err(|e| WebError::from_db_err(e, "Team grant"))?;
+        .map_err(|e| WebError::from_db_err(e, Resource::TeamGrant))?;
         request.into_active_model().delete(&tx).await?;
         tx.commit().await?;
 
@@ -317,7 +318,7 @@ pub async fn post_approve_team_request(
         .filter(CTeamCacheRequest::Team.eq(team.id))
         .one(&state.web_db)
         .await?
-        .or_not_found("Request")?;
+        .or_not_found(Resource::Request)?;
     let cache = request.cache;
     let tx = state.web_db.inner().begin().await?;
     MTeamCache {
@@ -331,7 +332,7 @@ pub async fn post_approve_team_request(
     .into_active_model()
     .insert(&tx)
     .await
-    .map_err(|e| WebError::from_db_err(e, "Team grant"))?;
+    .map_err(|e| WebError::from_db_err(e, Resource::TeamGrant))?;
     request.into_active_model().delete(&tx).await?;
     tx.commit().await?;
 
@@ -385,7 +386,7 @@ pub async fn delete_team_request(
             .filter(CTeamCacheRequest::Team.eq(team.id))
             .one(&state.web_db)
             .await?
-            .or_not_found("Request")?;
+            .or_not_found(Resource::Request)?;
         let cache = request.cache;
         request.into_active_model().delete(&state.web_db).await?;
         EventOwner {

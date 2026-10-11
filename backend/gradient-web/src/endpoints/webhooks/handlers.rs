@@ -8,6 +8,7 @@ use super::scope::{Verb, WebhookOwner};
 use crate::audit::{RequestInfo, record as audit_record};
 use crate::error::{WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json};
+use crate::resource::Resource;
 use axum::Json;
 use axum::extract::{Query, State};
 use gradient_ci::actions::encrypt_action_secret;
@@ -153,7 +154,7 @@ async fn owned_webhook(state: &ServerState, owner: &WebhookOwner) -> WebResult<M
         .filter(owner.rows())
         .one(&state.web_db)
         .await?
-        .or_not_found("Webhook")
+        .or_not_found(Resource::Webhook)
 }
 
 async fn audit(
@@ -200,7 +201,7 @@ pub async fn create_webhook(
         .one(&state.web_db)
         .await?;
     if existing.is_some() {
-        return Err(WebError::already_exists("Webhook"));
+        return Err(WebError::already_exists(Resource::Webhook));
     }
 
     let (secret, encrypted) = new_secret(&state)?;
@@ -223,7 +224,7 @@ pub async fn create_webhook(
     .into_active_model()
     .insert(&state.web_db)
     .await
-    .map_err(|e| WebError::from_db_err(e, "Webhook"))?;
+    .map_err(|e| WebError::from_db_err(e, Resource::Webhook))?;
 
     audit(
         &state,
@@ -287,7 +288,7 @@ pub async fn update_webhook(
     let row = active
         .update(&state.web_db)
         .await
-        .map_err(|e| WebError::from_db_err(e, "Webhook"))?;
+        .map_err(|e| WebError::from_db_err(e, Resource::Webhook))?;
 
     audit(
         &state,
@@ -385,7 +386,7 @@ pub async fn get_delivery(
         .filter(CWebhookDelivery::WebhookId.eq(hook.id))
         .one(&state.web_db)
         .await?
-        .or_not_found("Delivery")?;
+        .or_not_found(Resource::Delivery)?;
     Ok(ok_json(DeliveryDetail {
         request_body: r.request_body.clone(),
         response_body: r.response_body.clone(),

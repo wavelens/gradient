@@ -6,6 +6,7 @@
 use super::helpers::{CacheContext, cache_client_ip, fetch_nar_stream};
 use crate::client_ip::OptionalPeer;
 use crate::error::{WebError, WebResult};
+use crate::resource::Resource;
 use axum::body::Body;
 use axum::extract::{Path, State};
 use axum::http::{HeaderMap, HeaderValue, header};
@@ -67,7 +68,7 @@ pub async fn serve(
                 .body(Body::from(tar_zst))
                 .map_err(|e| WebError::internal(format!("Failed to build response: {}", e)))
         }
-        Err(ExtractError::NotFound) => Err(WebError::not_found("Path")),
+        Err(ExtractError::NotFound) => Err(WebError::not_found(Resource::Path)),
         Err(ExtractError::Io(e)) => {
             Err(WebError::internal(format!("NAR extraction failed: {}", e)))
         }

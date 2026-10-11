@@ -13,6 +13,7 @@ use crate::permissions::{
     PermissionEntry, available_cache_permissions, available_permissions, mask_to_vec,
     parse_cache_permission_list, parse_permission_list,
 };
+use crate::resource::Resource;
 use axum::extract::{Path, Query, State};
 use axum::http::HeaderMap;
 use axum::{Extension, Json};
@@ -399,7 +400,7 @@ pub async fn post_keys(
         .one(&state.web_db)
         .await?;
     if existing_api_key.is_some() {
-        return Err(WebError::already_exists("API-Key Name"));
+        return Err(WebError::already_exists(Resource::ApiKeyName));
     }
 
     let expires_at = body
@@ -423,7 +424,7 @@ pub async fn post_keys(
         }
         let granted = effective_cache_mask(&state, user.id, cache.id, None)
             .await?
-            .ok_or_else(|| WebError::not_found("Cache"))?;
+            .ok_or_else(|| WebError::not_found(Resource::Cache))?;
         if m & !granted != 0 {
             return Err(WebError::forbidden(
                 "API key cannot grant cache permissions you do not hold.",
@@ -497,9 +498,9 @@ pub async fn patch_key(
     let api_key = EApi::find_by_id(api_id)
         .one(&state.web_db)
         .await?
-        .or_not_found("API-Key")?;
+        .or_not_found(Resource::ApiKey)?;
     if api_key.owned_by != user.id {
-        return Err(WebError::not_found("API-Key"));
+        return Err(WebError::not_found(Resource::ApiKey));
     }
     if api_key.managed {
         return Err(WebError::forbidden(
@@ -524,7 +525,7 @@ pub async fn patch_key(
                 .one(&state.web_db)
                 .await?;
             if clash.is_some() {
-                return Err(WebError::already_exists("API-Key Name"));
+                return Err(WebError::already_exists(Resource::ApiKeyName));
             }
         }
         active.name = Set(name);
@@ -589,7 +590,7 @@ pub async fn delete_keys(
         )
         .one(&state.web_db)
         .await?
-        .or_not_found("API-Key")?;
+        .or_not_found(Resource::ApiKey)?;
 
     if api_key.managed {
         return Err(WebError::forbidden(
@@ -633,10 +634,10 @@ pub async fn post_key_revoke(
     let api_key = EApi::find_by_id(api_id)
         .one(&state.web_db)
         .await?
-        .or_not_found("API-Key")?;
+        .or_not_found(Resource::ApiKey)?;
 
     if api_key.owned_by != user.id {
-        return Err(WebError::not_found("API-Key"));
+        return Err(WebError::not_found(Resource::ApiKey));
     }
     if api_key.managed {
         return Err(WebError::forbidden(
@@ -706,10 +707,10 @@ pub async fn delete_session(
     let session = ESession::find_by_id(session_id)
         .one(&state.web_db)
         .await?
-        .or_not_found("Session")?;
+        .or_not_found(Resource::Session)?;
 
     if session.user_id != user.id {
-        return Err(WebError::not_found("Session"));
+        return Err(WebError::not_found(Resource::Session));
     }
     if session.revoked_at.is_some() {
         return Ok(ok_json("Session already revoked".to_string()));
@@ -804,7 +805,7 @@ pub async fn patch_settings(
             .await?;
 
         if existing_user.is_some() {
-            return Err(WebError::already_exists("Username"));
+            return Err(WebError::already_exists(Resource::Username));
         }
 
         auser.username = Set(username);
@@ -824,7 +825,7 @@ pub async fn patch_settings(
             .await?;
 
         if existing_user.is_some() {
-            return Err(WebError::already_exists("Email"));
+            return Err(WebError::already_exists(Resource::Email));
         }
 
         auser.email = Set(email);

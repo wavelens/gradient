@@ -8,6 +8,7 @@ use crate::access::is_project_member;
 use crate::authorization::MaybeApiKey;
 use crate::error::{WebError, WebResult, require_superuser};
 use crate::helpers::{OptionExt, ok_json};
+use crate::resource::Resource;
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
 use gradient_core::ServerState;
@@ -33,7 +34,7 @@ pub async fn post_evaluation(
 
     // Mutations require explicit project membership even on a public project.
     if !is_project_member(&state, user.id, ctx.project_id, api_key_ref).await? {
-        return Err(WebError::not_found("Evaluation"));
+        return Err(WebError::not_found(Resource::Evaluation));
     }
 
     if body.method == "abort" {
@@ -53,7 +54,7 @@ pub async fn post_evaluation_retry(
     let ctx =
         EvalAccessContext::load(&state, evaluation_id, &Some(user.clone()), api_key_ref).await?;
     if !is_project_member(&state, user.id, ctx.project_id, api_key_ref).await? {
-        return Err(WebError::not_found("Evaluation"));
+        return Err(WebError::not_found(Resource::Evaluation));
     }
 
     if !EvaluationStatus::TERMINAL.contains(&ctx.evaluation.status) {
@@ -97,7 +98,7 @@ pub async fn post_evaluation_prioritize(
     let evaluation = EEvaluation::find_by_id(evaluation_id)
         .one(&state.web_db)
         .await?
-        .or_not_found("Evaluation")?;
+        .or_not_found(Resource::Evaluation)?;
 
     scheduler
         .prioritize_evaluation(evaluation.id)
