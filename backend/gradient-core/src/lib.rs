@@ -83,6 +83,7 @@ pub async fn init_state(cli: Cli) -> Result<Arc<ServerState>, InitError> {
         &db,
         cli.state.file.as_deref(),
         &cli.secrets.crypt_file,
+        &cli.server.credentials_dir,
         cli.state.delete,
         cli.email.enable,
     )

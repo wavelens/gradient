@@ -63,6 +63,10 @@ pub fn effective_directive(setup: &LogSetup<'_>, rust_log: Option<&str>) -> Stri
 }
 
 pub fn init(setup: &LogSetup<'_>) {
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "RUST_LOG is the conventional override of the tracing filter, not an option of Gradient"
+    )]
     let rust_log = std::env::var("RUST_LOG").ok();
     let filter = EnvFilter::new(effective_directive(setup, rust_log.as_deref()));
     let console = fmt::layer().with_target(true).with_thread_ids(true);

@@ -10,7 +10,7 @@
     inherit lib;
     specs = builtins.fromJSON (builtins.readFile ../../backend/gradient-types/options.json);
     enabledGroups = [ "oidc" "scim" "email" "s3" "github_app" "ssh" ];
-    withoutEnvironment = [ [ "database" "url" ] [ "state" "file" ] [ "state" "validate" ] [ "state" "delete" ] ];
+    withoutEnvironment = [ [ "credentialsDir" ] [ "database" "url" ] [ "state" "file" ] [ "state" "validate" ] [ "state" "delete" ] ];
 
     examples = {
       frontend.logoUrl = "https://example.com/logo.svg";
@@ -32,6 +32,7 @@
     writtenByHand = [
       [ "serveUrl" ]
       [ "baseDir" ]
+      [ "credentialsDir" ]
       [ "frontend" "url" ]
       [ "database" "url" ]
       [ "nar" "chunkBytes" ]

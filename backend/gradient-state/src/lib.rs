@@ -18,6 +18,7 @@ pub use provisioning::{
 pub use validation::{ValidationError, ValidationResult};
 
 use sea_orm::DatabaseConnection;
+use std::path::Path;
 
 pub fn validate_state_file(path: &str) -> Result<Vec<String>, Box<dyn std::error::Error>> {
     let config = StateConfiguration::from_file(path)?;
@@ -33,6 +34,7 @@ pub async fn load_and_apply_state(
     db: &DatabaseConnection,
     state_file_path: Option<&str>,
     crypt_secret_file: &str,
+    credentials_dir: &Path,
     delete_state: bool,
     email_enabled: bool,
 ) -> Result<StateApplyResult, Box<dyn std::error::Error>> {
@@ -68,6 +70,7 @@ pub async fn load_and_apply_state(
         db,
         &config,
         crypt_secret_file,
+        credentials_dir,
         delete_state,
         email_enabled,
     )

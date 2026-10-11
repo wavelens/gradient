@@ -26,6 +26,7 @@ impl<'a> StateApplicator<'a> {
 
         for state_project in state_projects.values() {
             let (private_key, _) = read_credential(
+                self.credentials_dir,
                 "project",
                 &state_project.name,
                 "private_key",

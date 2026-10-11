@@ -42,6 +42,10 @@ const LOG_SQL: [(&str, &str); 2] = [
 
 #[test]
 fn every_export_query_runs_against_the_migrated_schema() {
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "the test picks its database from the environment"
+    )]
     let Ok(url) = std::env::var("GRADIENT_REPORT_TEST_DB") else {
         eprintln!("skipped: set GRADIENT_REPORT_TEST_DB to a migrated database");
         return;

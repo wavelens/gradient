@@ -19,6 +19,7 @@ use sea_orm::{
     QueryFilter, Set,
 };
 use std::collections::{HashMap, HashSet};
+use std::path::Path;
 
 impl<'a> StateApplicator<'a> {
     pub(crate) async fn apply_tasks(
@@ -177,6 +178,7 @@ impl<'a> StateApplicator<'a> {
                 &outbound,
                 self.email_enabled,
                 crypt_key.expose(),
+                self.credentials_dir,
             )?;
             let cfg_json =
                 serde_json::to_value(&cfg).map_err(|e| format!("encoding action config: {e}"))?;
@@ -480,6 +482,7 @@ pub(crate) fn build_action_config(
     outbound: &HashMap<String, IntegrationId>,
     email_enabled: bool,
     crypt_key: &[u8],
+    credentials_dir: &Path,
 ) -> Result<ActionConfig, DynError> {
     let want = |k: &str| -> Result<&serde_json::Value, DynError> {
         a.config
@@ -524,7 +527,7 @@ pub(crate) fn build_action_config(
         "send_web_request" => {
             let url = string_field(a, "url")?;
             checked_url(&a.name, &url)?;
-            let token = action_credential(a, "token")?
+            let token = action_credential(credentials_dir, a, "token")?
                 .map(|plain| encrypt(&plain))
                 .transpose()?;
             Ok(ActionConfig::SendWebRequest { url, token })
@@ -541,7 +544,7 @@ pub(crate) fn build_action_config(
                 .into());
             }
 
-            let plain = action_credential(a, "access_token")?
+            let plain = action_credential(credentials_dir, a, "access_token")?
                 .ok_or_else(|| format!("action '{}': access_token_file is required", a.name))?;
             Ok(ActionConfig::SendMatrixMessage {
                 homeserver,
@@ -550,7 +553,7 @@ pub(crate) fn build_action_config(
             })
         }
         "send_slack_message" => {
-            let plain = action_credential(a, "webhook_url")?
+            let plain = action_credential(credentials_dir, a, "webhook_url")?
                 .ok_or_else(|| format!("action '{}': webhook_url_file is required", a.name))?;
             checked_url(&a.name, &plain)?;
             Ok(ActionConfig::SendSlackMessage {
@@ -653,12 +656,22 @@ fn checked_url(action: &str, url: &str) -> Result<(), DynError> {
         .map_err(|e| format!("action '{action}': {e}").into())
 }
 
-fn action_credential(a: &StateAction, field: &str) -> Result<Option<String>, DynError> {
+fn action_credential(
+    credentials_dir: &Path,
+    a: &StateAction,
+    field: &str,
+) -> Result<Option<String>, DynError> {
     if a.config.get(format!("{field}_file")).is_none() {
         return Ok(None);
     }
 
-    let (plain, _) = read_credential("action", &a.name, field, &format!("action {field} file"))?;
+    let (plain, _) = read_credential(
+        credentials_dir,
+        "action",
+        &a.name,
+        field,
+        &format!("action {field} file"),
+    )?;
     Ok(Some(plain.trim().to_owned()))
 }
 
@@ -879,7 +892,15 @@ mod action_helper_tests {
                 "subject_template": "[Gradient] {event}",
             }),
         };
-        let cfg = build_action_config(&a, "web", &HashMap::new(), true, &key()).unwrap();
+        let cfg = build_action_config(
+            &a,
+            "web",
+            &HashMap::new(),
+            true,
+            &key(),
+            Path::new("/nonexistent"),
+        )
+        .unwrap();
         match cfg {
             ActionConfig::SendMail {
                 recipients,
@@ -901,7 +922,15 @@ mod action_helper_tests {
             events: vec![],
             config: serde_json::json!({ "recipients": ["ops@example.com"] }),
         };
-        let err = build_action_config(&a, "web", &HashMap::new(), false, &key()).unwrap_err();
+        let err = build_action_config(
+            &a,
+            "web",
+            &HashMap::new(),
+            false,
+            &key(),
+            Path::new("/nonexistent"),
+        )
+        .unwrap_err();
         assert!(err.to_string().contains("SMTP"), "got: {err}");
     }
 
@@ -914,7 +943,15 @@ mod action_helper_tests {
             events: vec![],
             config: serde_json::json!({ "recipients": [] }),
         };
-        let err = build_action_config(&a, "web", &HashMap::new(), true, &key()).unwrap_err();
+        let err = build_action_config(
+            &a,
+            "web",
+            &HashMap::new(),
+            true,
+            &key(),
+            Path::new("/nonexistent"),
+        )
+        .unwrap_err();
         assert!(err.to_string().contains("recipients"), "got: {err}");
     }
 
@@ -927,7 +964,15 @@ mod action_helper_tests {
             events: vec!["build.completed".into()],
             config: serde_json::json!({ "url": "https://hooks.example.com/x" }),
         };
-        let cfg = build_action_config(&a, "web", &HashMap::new(), true, &key()).unwrap();
+        let cfg = build_action_config(
+            &a,
+            "web",
+            &HashMap::new(),
+            true,
+            &key(),
+            Path::new("/nonexistent"),
+        )
+        .unwrap();
         match cfg {
             ActionConfig::SendWebRequest { url, token } => {
                 assert_eq!(url, "https://hooks.example.com/x");
@@ -949,7 +994,15 @@ mod action_helper_tests {
             events: vec![],
             config: serde_json::json!({ "integration": "gitea-prod" }),
         };
-        let cfg = build_action_config(&a, "web", &outbound, true, &key()).unwrap();
+        let cfg = build_action_config(
+            &a,
+            "web",
+            &outbound,
+            true,
+            &key(),
+            Path::new("/nonexistent"),
+        )
+        .unwrap();
         assert_eq!(
             cfg,
             ActionConfig::GitHostStatusReport {
@@ -967,7 +1020,15 @@ mod action_helper_tests {
             events: vec![],
             config: serde_json::json!({ "integration": "missing" }),
         };
-        let err = build_action_config(&a, "web", &HashMap::new(), true, &key()).unwrap_err();
+        let err = build_action_config(
+            &a,
+            "web",
+            &HashMap::new(),
+            true,
+            &key(),
+            Path::new("/nonexistent"),
+        )
+        .unwrap_err();
         assert!(err.to_string().contains("missing"), "got: {err}");
     }
 
@@ -983,7 +1044,15 @@ mod action_helper_tests {
             events: vec!["build.completed".into()],
             config: serde_json::json!({ "integration": "gh" }),
         };
-        let err = build_action_config(&a, "web", &outbound, true, &key()).unwrap_err();
+        let err = build_action_config(
+            &a,
+            "web",
+            &outbound,
+            true,
+            &key(),
+            Path::new("/nonexistent"),
+        )
+        .unwrap_err();
         assert!(err.to_string().contains("events"), "got: {err}");
     }
 
@@ -996,7 +1065,15 @@ mod action_helper_tests {
             events: vec![],
             config: serde_json::json!({}),
         };
-        let err = build_action_config(&a, "web", &HashMap::new(), true, &key()).unwrap_err();
+        let err = build_action_config(
+            &a,
+            "web",
+            &HashMap::new(),
+            true,
+            &key(),
+            Path::new("/nonexistent"),
+        )
+        .unwrap_err();
         assert!(err.to_string().contains("invalid type"), "got: {err}");
     }
 
@@ -1012,7 +1089,15 @@ mod action_helper_tests {
                 "room_id": "!ops:example.org",
             }),
         };
-        let err = build_action_config(&a, "web", &HashMap::new(), true, &key()).unwrap_err();
+        let err = build_action_config(
+            &a,
+            "web",
+            &HashMap::new(),
+            true,
+            &key(),
+            Path::new("/nonexistent"),
+        )
+        .unwrap_err();
         assert!(err.to_string().contains("access_token_file"), "got: {err}");
     }
 
@@ -1029,7 +1114,15 @@ mod action_helper_tests {
                 "access_token_file": "/run/secrets/t",
             }),
         };
-        let err = build_action_config(&a, "web", &HashMap::new(), true, &key()).unwrap_err();
+        let err = build_action_config(
+            &a,
+            "web",
+            &HashMap::new(),
+            true,
+            &key(),
+            Path::new("/nonexistent"),
+        )
+        .unwrap_err();
         assert!(err.to_string().contains("room_id"), "got: {err}");
     }
 
@@ -1042,7 +1135,15 @@ mod action_helper_tests {
             events: vec!["build.failed".into()],
             config: serde_json::json!({}),
         };
-        let err = build_action_config(&a, "web", &HashMap::new(), true, &key()).unwrap_err();
+        let err = build_action_config(
+            &a,
+            "web",
+            &HashMap::new(),
+            true,
+            &key(),
+            Path::new("/nonexistent"),
+        )
+        .unwrap_err();
         assert!(err.to_string().contains("webhook_url_file"), "got: {err}");
     }
 

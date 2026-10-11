@@ -11,13 +11,10 @@ use base64::{Engine, engine::general_purpose};
 use gradient_types::input::load_secret_bytes;
 use ssh_key::PrivateKey;
 use std::fs;
-
-pub(crate) fn credentials_dir() -> String {
-    std::env::var("GRADIENT_CREDENTIALS_DIR")
-        .unwrap_or_else(|_| "/run/credentials/gradient-server".to_string())
-}
+use std::path::Path;
 
 pub(crate) fn read_credential(
+    credentials_dir: &Path,
     kind: &str,
     name: &str,
     suffix: &str,
@@ -25,7 +22,7 @@ pub(crate) fn read_credential(
 ) -> Result<(String, String), DynError> {
     let path = format!(
         "{}/gradient_{}_{}_{}",
-        credentials_dir(),
+        credentials_dir.display(),
         kind,
         name,
         suffix
@@ -171,6 +168,7 @@ mod helper_tests {
     use super::read_credential;
     use crate::provisioning::lookup_id;
     use std::collections::HashMap;
+    use std::path::Path;
     use uuid::Uuid;
 
     #[test]
@@ -183,11 +181,11 @@ mod helper_tests {
     }
 
     #[test]
-    fn read_credential_default_dir_when_env_unset() {
-        // The env var is not asserted on. Parallel tests can set it concurrently.
-        let err = read_credential("user", "alice", "password", "password file").unwrap_err();
+    fn read_credential_names_the_file_in_the_given_dir() {
+        let dir = Path::new("/nonexistent-credentials");
+        let err = read_credential(dir, "user", "alice", "password", "password file").unwrap_err();
         let s = err.to_string();
         assert!(s.contains("password file"));
-        assert!(s.contains("gradient_user_alice_password"));
+        assert!(s.contains("/nonexistent-credentials/gradient_user_alice_password"));
     }
 }

@@ -101,7 +101,7 @@ mod tests {
             &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/config.json"),
         )
         .expect("config");
-        MockBackend::new(config, dir.path().to_path_buf(), None)
+        MockBackend::new(config, dir.path().to_path_buf(), None, None)
             .await
             .expect("backend")
     }

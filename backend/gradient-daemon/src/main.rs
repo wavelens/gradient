@@ -35,6 +35,8 @@ enum Command {
         root: PathBuf,
         #[arg(long, default_value = "/nix/var/nix/db/db.sqlite")]
         base_db: PathBuf,
+        #[arg(long, env = "GRADIENT_DAEMON_SEED")]
+        seed: Option<u64>,
     },
     Ctl {
         cmd: String,
@@ -66,10 +68,11 @@ async fn serve_mock(
     control_path: PathBuf,
     root: PathBuf,
     base_db: PathBuf,
+    seed: Option<u64>,
 ) -> anyhow::Result<()> {
     let listener = server::systemd_listener()?;
     let config = mock::spec::DaemonConfig::load(&spec)?;
-    let backend = mock::MockBackend::new(config, root, Some(&base_db)).await?;
+    let backend = mock::MockBackend::new(config, root, Some(&base_db), seed).await?;
     let control_listener = server::bind(&control_path).await?;
     sd_notify::notify(&[sd_notify::NotifyState::Ready])?;
     tokio::select! {
@@ -108,7 +111,8 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             control,
             root,
             base_db,
-        } => serve_mock(spec, control, root, base_db).await,
+            seed,
+        } => serve_mock(spec, control, root, base_db, seed).await,
         Command::Ctl { cmd, args, control } => ctl(cmd, args, control).await,
         Command::Mock {
             command:

@@ -155,7 +155,13 @@ impl<'a> StateApplicator<'a> {
             return Ok(None);
         }
         let label = format!("integration {} file", suffix);
-        let (plain, _) = read_credential("integration", int_name, suffix, &label)?;
+        let (plain, _) = read_credential(
+            self.credentials_dir,
+            "integration",
+            int_name,
+            suffix,
+            &label,
+        )?;
         let encrypted =
             encrypt_secret_with_file(self.crypt_secret_file, plain.trim()).map_err(|e| {
                 format!(

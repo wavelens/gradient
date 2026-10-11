@@ -174,6 +174,10 @@ impl NixEvaluator {
 struct SshCommand(bool);
 
 impl SshCommand {
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "libgit2 inside Nix reads GIT_SSH_COMMAND from the process environment"
+    )]
     fn set(command: Option<&str>) -> Self {
         let Some(command) = command else {
             return Self(false);
@@ -186,6 +190,10 @@ impl SshCommand {
 }
 
 impl Drop for SshCommand {
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "libgit2 inside Nix reads GIT_SSH_COMMAND from the process environment"
+    )]
     fn drop(&mut self) {
         if self.0 {
             unsafe { std::env::remove_var("GIT_SSH_COMMAND") };

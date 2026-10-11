@@ -87,6 +87,16 @@
   },
   {
     "group": "",
+    "field": "credentials_dir",
+    "flag": "credentials-dir",
+    "env": "GRADIENT_CREDENTIALS_DIR",
+    "type": "PathBuf",
+    "description": "Directory holding the credential files of the declarative state.",
+    "default": "/run/credentials/gradient-server",
+    "values": []
+  },
+  {
+    "group": "",
     "field": "store_path",
     "flag": "store-path",
     "env": "GRADIENT_STORE_PATH",
