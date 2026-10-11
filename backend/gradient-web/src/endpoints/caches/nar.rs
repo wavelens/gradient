@@ -24,7 +24,7 @@ use gradient_sources::get_hash_from_url;
 use gradient_types::events::cache::NarFetched;
 use gradient_types::*;
 use gradient_util::shutdown::Shutdown;
-use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter};
+use sea_orm::ConnectionTrait;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -148,12 +148,9 @@ pub(crate) async fn resolve_effective_hash_db<C: ConnectionTrait>(
     db: &C,
     path_hash: &str,
 ) -> WebResult<String> {
-    let candidates = [format!("blake3:{path_hash}"), format!("sha256:{path_hash}")];
+    let candidates = vec![format!("blake3:{path_hash}"), format!("sha256:{path_hash}")];
 
-    let by_cached_path = ECachedPath::find()
-        .filter(CCachedPath::FileHash.is_in(candidates))
-        .one(db)
-        .await?;
+    let by_cached_path = gradient_db::cached_paths::by_any_file_hash(db, candidates).await?;
 
     if let Some(row) = by_cached_path {
         return Ok(row.hash);
@@ -162,28 +159,10 @@ pub(crate) async fn resolve_effective_hash_db<C: ConnectionTrait>(
     Ok(path_hash.to_string())
 }
 
-gradient_db::sql! {
-    TOUCH_CACHED_PATH_SIGNATURE_FETCH = "UPDATE cached_path_signature \
-         SET last_fetched_at = $1, fetch_count = fetch_count + 1 \
-         WHERE cache = $2 \
-           AND cached_path = (SELECT id FROM cached_path WHERE hash = $3)",
-        params = [Now, CacheId, CachedPathHash];
-}
-
 fn spawn_fetch_stamp(shutdown: &Shutdown, worker_db: &WorkerDb, cache_id: CacheId, hash: String) {
     let worker_db = worker_db.clone();
     shutdown.spawn(async move {
-        use sea_orm::ConnectionTrait;
-        let now = gradient_types::now();
-        let now_val = sea_orm::Value::ChronoDateTimeUtc(Some(
-            chrono::DateTime::from_naive_utc_and_offset(now, chrono::Utc),
-        ));
-        let cache_val = sea_orm::Value::Uuid(Some(cache_id.into_inner()));
-        let hash_val = sea_orm::Value::String(Some(hash.clone()));
-
-        let _ = worker_db
-            .execute_raw(TOUCH_CACHED_PATH_SIGNATURE_FETCH.bind([now_val, cache_val, hash_val]))
-            .await;
+        let _ = gradient_db::cached_paths::count_fetch(&worker_db, cache_id, &hash).await;
     });
 }
 

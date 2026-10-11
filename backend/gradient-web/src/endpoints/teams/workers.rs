@@ -25,7 +25,6 @@ use gradient_types::events::EventOwner;
 use gradient_types::events::audit::Action;
 use gradient_types::*;
 use sea_orm::ActiveValue::Set;
-use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter};
 use serde::Serialize;
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -84,10 +83,7 @@ async fn granted_projects(db: &WebDb, team: TeamId) -> WebResult<HashSet<Project
 }
 
 async fn find_team_worker(db: &WebDb, team: TeamId, worker_id: &str) -> WebResult<MTeamWorker> {
-    ETeamWorker::find()
-        .filter(CTeamWorker::Team.eq(team))
-        .filter(CTeamWorker::WorkerId.eq(worker_id))
-        .one(db)
+    gradient_db::teams::workers::worker_of_team(db, team, worker_id)
         .await?
         .or_not_found(Resource::TeamWorker)
 }
@@ -105,10 +101,7 @@ pub async fn get_team_workers(
     let failures = (user.superuser || role == Some(TeamRole::Admin))
         .then_some(&*scheduler.connection_failures);
     let live_workers = live_workers(scheduler.workers_info().await);
-    let rows = ETeamWorker::find()
-        .filter(CTeamWorker::Team.eq(team.id))
-        .all(&db.web_db)
-        .await?;
+    let rows = gradient_db::teams::workers::workers_of(&db.web_db, team.id).await?;
 
     let mut entries = Vec::with_capacity(rows.len());
     for worker in rows {
@@ -141,9 +134,7 @@ pub async fn post_team_worker(
     let worker_id = Uuid::parse_str(&body.worker_id)
         .map_err(|_| SharedRefusal::InvalidWorkerId)?
         .to_string();
-    let registered = EWorkerRegistration::find()
-        .filter(CWorkerRegistration::WorkerId.eq(&worker_id))
-        .one(&state.web_db)
+    let registered = gradient_db::worker_registrations::by_worker_id(&state.web_db, &worker_id)
         .await?
         .is_some();
     if registered || gradient_db::teams::workers::is_team_worker(&state.web_db, &worker_id).await? {
@@ -157,25 +148,26 @@ pub async fn post_team_worker(
         &token,
     )?;
 
-    MTeamWorker {
-        id: TeamWorkerId::now_v7(),
-        team: team.id,
-        worker_id: worker_id.clone(),
-        token_hash: password_auth::generate_hash(&token),
-        token_encrypted,
-        url: body.url,
-        display_name: body.display_name.trim().to_string(),
-        gradient_ci: false,
-        enable_fetch: body.enable_fetch,
-        enable_eval: body.enable_eval,
-        enable_build: body.enable_build,
-        active: true,
-        managed: false,
-        created_by: Some(user.id),
-        created_at: gradient_types::now(),
-    }
-    .into_active_model()
-    .insert(&state.web_db)
+    gradient_db::teams::workers::register(
+        &state.web_db,
+        MTeamWorker {
+            id: TeamWorkerId::now_v7(),
+            team: team.id,
+            worker_id: worker_id.clone(),
+            token_hash: password_auth::generate_hash(&token),
+            token_encrypted,
+            url: body.url,
+            display_name: body.display_name.trim().to_string(),
+            gradient_ci: false,
+            enable_fetch: body.enable_fetch,
+            enable_eval: body.enable_eval,
+            enable_build: body.enable_build,
+            active: true,
+            managed: false,
+            created_by: Some(user.id),
+            created_at: gradient_types::now(),
+        },
+    )
     .await?;
 
     scheduler.request_reauth(&worker_id).await;
@@ -230,7 +222,7 @@ pub async fn patch_team_worker(
     if let Some(value) = body.enable_build {
         active.enable_build = Set(value);
     }
-    active.update(&db.web_db).await?;
+    gradient_db::teams::workers::update(&db.web_db, active).await?;
 
     let workers = [worker_id.clone()];
     if body.active == Some(false) {
@@ -270,7 +262,7 @@ pub async fn delete_team_worker(
     }
 
     let projects = granted_projects(&db.web_db, team.id).await?;
-    worker.into_active_model().delete(&db.web_db).await?;
+    gradient_db::teams::workers::unregister(&db.web_db, worker).await?;
     withdraw_team_workers(&scheduler, std::slice::from_ref(&worker_id), &projects).await;
     scheduler.connection_failures.clear(&worker_id);
 

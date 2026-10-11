@@ -12,8 +12,6 @@ use axum::extract::State;
 use gradient_core::ServerState;
 use gradient_sources::{format_public_key, generate_ssh_key};
 use gradient_types::*;
-use sea_orm::ActiveModelTrait;
-use sea_orm::ActiveValue::Set;
 use std::sync::Arc;
 
 pub async fn get_project_ssh(
@@ -36,11 +34,9 @@ pub async fn post_project_ssh(
             WebError::failed_ssh_key_generation()
         })?;
 
-    let mut aproject: AProject = project.into();
-
-    aproject.private_key = Set(private_key.clone());
-    aproject.public_key = Set(public_key.clone());
-    let project = aproject.update(&state.web_db).await?;
+    let project =
+        gradient_db::projects::replace_ssh_key(&state.web_db, project, private_key, public_key)
+            .await?;
 
     let res = BaseResponse {
         error: false,

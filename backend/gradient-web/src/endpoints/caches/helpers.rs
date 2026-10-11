@@ -27,7 +27,6 @@ use gradient_storage::NarStore;
 use gradient_types::*;
 use gradient_util::debounce::Debounce;
 use gradient_util::nix_hash::{normalize_nar_hash, strip_hash_algo};
-use sea_orm::{ColumnTrait, Condition, ConnectionTrait, EntityTrait, QueryFilter};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::Arc;
 use uuid::Uuid;
@@ -76,19 +75,14 @@ async fn user_can_access_cache(db: &WebDb, cache: &MCache, user: &MUser) -> bool
         return true;
     }
 
-    let direct = ECacheAccess::find()
-        .filter(CCacheAccess::Cache.eq(cache.id))
-        .filter(CCacheAccess::User.eq(user.id))
-        .one(db)
+    let direct = gradient_db::caches::access_of_user(db, cache.id, user.id)
         .await
         .unwrap_or(None);
     if direct.is_some() {
         return true;
     }
 
-    let project_ids: Vec<ProjectId> = EProjectAccess::find()
-        .filter(CProjectAccess::User.eq(user.id))
-        .all(db)
+    let project_ids: Vec<ProjectId> = gradient_db::projects::access_of_user(db, user.id)
         .await
         .unwrap_or_default()
         .into_iter()
@@ -99,10 +93,7 @@ async fn user_can_access_cache(db: &WebDb, cache: &MCache, user: &MUser) -> bool
         return false;
     }
 
-    EProjectCache::find()
-        .filter(CProjectCache::Cache.eq(cache.id))
-        .filter(CProjectCache::Project.is_in(project_ids))
-        .one(db)
+    gradient_db::projects::caches::subscription_of_any(db, cache.id, project_ids)
         .await
         .unwrap_or(None)
         .is_some()
@@ -134,13 +125,7 @@ pub(super) async fn get_nar_by_hash(
     cache: MCache,
     hash: String,
 ) -> Result<NixPathInfo, WebError> {
-    let build_output = EDerivationOutput::find()
-        .filter(
-            Condition::all()
-                .add(CDerivationOutput::IsCached.eq(true))
-                .add(CDerivationOutput::Hash.eq(hash.clone())),
-        )
-        .one(db)
+    let build_output = gradient_db::derivation_outputs::cached_by_hash(db, &hash)
         .await
         .map_err(WebError::from)?;
 
@@ -149,23 +134,16 @@ pub(super) async fn get_nar_by_hash(
         None => return get_nar_by_cached_path(db, config, cache, hash).await,
     };
 
-    let cached_path_row = ECachedPath::find()
-        .filter(CCachedPath::Hash.eq(hash.clone()))
-        .one(db)
+    let cached_path_row = gradient_db::cached_paths::by_hash(db, &hash)
         .await
         .map_err(WebError::from)?
         .or_not_found(Resource::CachedPath)?;
 
-    let cached_path_sig = ECachedPathSignature::find()
-        .filter(
-            Condition::all()
-                .add(CCachedPathSignature::CachedPath.eq(cached_path_row.id))
-                .add(CCachedPathSignature::Cache.eq(cache.id)),
-        )
-        .one(db)
-        .await
-        .map_err(WebError::from)?
-        .or_not_found(Resource::Signature)?;
+    let cached_path_sig =
+        gradient_db::cached_paths::signature_in_cache(db, cached_path_row.id, cache.id)
+            .await
+            .map_err(WebError::from)?
+            .or_not_found(Resource::Signature)?;
 
     let signature = cached_path_sig
         .signature
@@ -222,9 +200,7 @@ async fn get_nar_by_cached_path(
     cache: MCache,
     hash: String,
 ) -> Result<NixPathInfo, WebError> {
-    let cached_path_row = ECachedPath::find()
-        .filter(CCachedPath::Hash.eq(hash.clone()))
-        .one(db)
+    let cached_path_row = gradient_db::cached_paths::by_hash(db, &hash)
         .await
         .map_err(WebError::from)?
         .or_not_found(Resource::Path)?;
@@ -233,16 +209,11 @@ async fn get_nar_by_cached_path(
         return Err(WebError::not_found(Resource::Path));
     }
 
-    let cached_path_sig = ECachedPathSignature::find()
-        .filter(
-            Condition::all()
-                .add(CCachedPathSignature::CachedPath.eq(cached_path_row.id))
-                .add(CCachedPathSignature::Cache.eq(cache.id)),
-        )
-        .one(db)
-        .await
-        .map_err(WebError::from)?
-        .or_not_found(Resource::Signature)?;
+    let cached_path_sig =
+        gradient_db::cached_paths::signature_in_cache(db, cached_path_row.id, cache.id)
+            .await
+            .map_err(WebError::from)?
+            .or_not_found(Resource::Signature)?;
 
     let signature = cached_path_sig
         .signature
@@ -298,9 +269,7 @@ impl CacheContext {
         client_ip: IpAddr,
         cache_name: String,
     ) -> WebResult<Self> {
-        let cache = ECache::find()
-            .filter(CCache::Name.eq(cache_name))
-            .one(db)
+        let cache = gradient_db::caches::by_name(db, &cache_name)
             .await?
             .or_not_found(Resource::Cache)?;
 
@@ -336,56 +305,6 @@ impl JsonFlag {
     }
 }
 
-gradient_db::sql! {
-    CACHE_SERVES_PATH = "SELECT 1 AS served \
-         FROM cached_path cp \
-         JOIN cached_path_signature s ON s.cached_path = cp.id \
-         WHERE cp.hash = $1 AND s.cache = $2 \
-           AND s.signature IS NOT NULL AND cp.file_hash IS NOT NULL",
-        params = [CachedPathHash, CacheId];
-
-    CACHE_SERVED_DERIVATION = "SELECT d.id AS id \
-         FROM derivation d \
-         JOIN derivation_output o ON o.derivation = d.id \
-         JOIN cached_path cp ON cp.hash = o.hash \
-         JOIN cached_path_signature s ON s.cached_path = cp.id \
-         WHERE d.hash = $1 AND d.name = $2 AND s.cache = $3 \
-           AND s.signature IS NOT NULL AND cp.file_hash IS NOT NULL \
-         LIMIT 1",
-        params = [DerivationHash, Text("hello"), CacheId];
-}
-
-/// Blobs are living in one store for every cache. This signed claim is all that is keeping one
-/// cache's paths out of another's.
-pub(super) async fn cache_serves_path(
-    db: &WebDb,
-    cache: CacheId,
-    store_hash: &str,
-) -> WebResult<bool> {
-    Ok(db
-        .query_one_raw(CACHE_SERVES_PATH.bind([store_hash.into(), cache.into_inner().into()]))
-        .await?
-        .is_some())
-}
-
-pub(super) async fn cache_served_derivation(
-    db: &WebDb,
-    cache: CacheId,
-    drv_hash: &str,
-    drv_name: &str,
-) -> WebResult<Option<DerivationId>> {
-    let row = db
-        .query_one_raw(CACHE_SERVED_DERIVATION.bind([
-            drv_hash.into(),
-            drv_name.into(),
-            cache.into_inner().into(),
-        ]))
-        .await?;
-    Ok(row
-        .and_then(|r| r.try_get::<uuid::Uuid>("", "id").ok())
-        .map(DerivationId::new))
-}
-
 pub async fn fetch_nar_stream(
     db: &WebDb,
     nar_storage: &NarStore,
@@ -394,7 +313,7 @@ pub async fn fetch_nar_stream(
 ) -> WebResult<(String, u64, BoxStream<'static, anyhow::Result<Bytes>>)> {
     let effective_hash =
         crate::endpoints::caches::nar::resolve_effective_hash_db(db, path_hash).await?;
-    if !cache_serves_path(db, cache, &effective_hash).await? {
+    if !gradient_db::cached_paths::signed_in_cache(db, cache, &effective_hash).await? {
         return Err(WebError::not_found(Resource::Path));
     }
     let source = nar_storage

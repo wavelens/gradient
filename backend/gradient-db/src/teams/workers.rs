@@ -5,7 +5,10 @@
  */
 
 use gradient_types::*;
-use sea_orm::{ColumnTrait, ConnectionTrait, DbErr, EntityTrait, QueryFilter};
+use sea_orm::{
+    ActiveModelTrait, ColumnTrait, ConnectionTrait, DbErr, EntityTrait, IntoActiveModel,
+    QueryFilter,
+};
 use std::collections::HashMap;
 
 pub async fn active_team_worker<C: ConnectionTrait>(
@@ -83,4 +86,42 @@ pub async fn team_worker_ids_for_project<C: ConnectionTrait>(
         .into_iter()
         .map(|(_, worker)| worker.worker_id)
         .collect())
+}
+
+pub async fn worker_of_team<C: ConnectionTrait>(
+    db: &C,
+    team: TeamId,
+    worker_id: &str,
+) -> Result<Option<MTeamWorker>, DbErr> {
+    ETeamWorker::find()
+        .filter(CTeamWorker::Team.eq(team))
+        .filter(CTeamWorker::WorkerId.eq(worker_id))
+        .one(db)
+        .await
+}
+
+pub async fn workers_of<C: ConnectionTrait>(
+    db: &C,
+    team: TeamId,
+) -> Result<Vec<MTeamWorker>, DbErr> {
+    ETeamWorker::find()
+        .filter(CTeamWorker::Team.eq(team))
+        .all(db)
+        .await
+}
+
+pub async fn register<C: ConnectionTrait>(
+    db: &C,
+    worker: MTeamWorker,
+) -> Result<MTeamWorker, DbErr> {
+    worker.into_active_model().insert(db).await
+}
+
+pub async fn update<C: ConnectionTrait>(db: &C, worker: ATeamWorker) -> Result<MTeamWorker, DbErr> {
+    worker.update(db).await
+}
+
+pub async fn unregister<C: ConnectionTrait>(db: &C, worker: MTeamWorker) -> Result<(), DbErr> {
+    worker.into_active_model().delete(db).await?;
+    Ok(())
 }

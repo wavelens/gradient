@@ -17,10 +17,10 @@ use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use chrono::NaiveDateTime;
 use gradient_core::ServerState;
+use gradient_db::cached_paths::{NarFilter, NarOrder, NarSummary};
 use gradient_types::events::EventOwner;
 use gradient_types::events::audit::Action;
 use gradient_types::*;
-use sea_orm::{ColumnTrait, EntityTrait, FromQueryResult, QueryFilter};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -34,17 +34,6 @@ pub struct ListQuery {
     pub sort: Option<String>,
     #[serde(default)]
     pub order: Option<String>,
-}
-
-#[derive(Debug, Serialize, FromQueryResult)]
-pub struct NarSummary {
-    pub hash: String,
-    pub store_path: String,
-    pub package: String,
-    pub nar_size: Option<i64>,
-    pub file_size: Option<i64>,
-    pub created_at: NaiveDateTime,
-    pub last_fetched_at: Option<NaiveDateTime>,
 }
 
 #[derive(Debug, Serialize)]
@@ -82,53 +71,6 @@ pub struct NarAvailable {
 const DEFAULT_PER_PAGE: u64 = 50;
 const MAX_PER_PAGE: u64 = 200;
 
-fn nars_count_sql(where_sql: &str) -> String {
-    format!(
-        "SELECT COUNT(*) AS total \
-         FROM cached_path_signature cps \
-         JOIN cached_path cp ON cp.id = cps.cached_path \
-         WHERE {where_sql}"
-    )
-}
-
-fn nars_select_sql(
-    where_sql: &str,
-    sort_col: &str,
-    order_dir: &str,
-    limit_idx: usize,
-    offset_idx: usize,
-) -> String {
-    format!(
-        "SELECT cp.hash, cp.hash || '-' || cp.package AS store_path, cp.package, \
-                cp.nar_size, cp.file_size, cp.created_at, cps.last_fetched_at \
-         FROM cached_path_signature cps \
-         JOIN cached_path cp ON cp.id = cps.cached_path \
-         WHERE {where_sql} \
-         ORDER BY {sort_col} {order_dir} NULLS LAST, cp.id ASC \
-         LIMIT ${limit_idx} OFFSET ${offset_idx}"
-    )
-}
-
-// The package filter is a substring match that no index can answer. The cache scan is the plan, not
-// a missing index.
-gradient_db::sql_fn! {
-    NARS_LIST_COUNT = || nars_count_sql("cps.cache = $1 AND cp.hash LIKE $2 AND cp.package LIKE $3"),
-        params = [CacheId, Text("abc%"), Text("%hello%")],
-        tier = Bulk,
-        budget = gradient_db::sql::Budget::bulk().seq_scan_allowed();
-
-    NARS_LIST_SELECT = || nars_select_sql(
-        "cps.cache = $1 AND cp.hash LIKE $2 AND cp.package LIKE $3",
-        "cp.created_at",
-        "DESC",
-        4,
-        5,
-    ),
-        params = [CacheId, Text("abc%"), Text("%hello%"), Int(50), Int(0)],
-        tier = Bulk,
-        budget = gradient_db::sql::Budget::bulk().seq_scan_allowed();
-}
-
 pub async fn list(
     CacheScope { cache, db, .. }: CacheScope<Readable>,
     Query(q): Query<ListQuery>,
@@ -142,50 +84,22 @@ pub async fn list(
     let offset = (page - 1) * per_page;
 
     let ascending = matches!(q.order.as_deref(), Some("asc"));
-    let order_dir = if ascending { "ASC" } else { "DESC" };
-    let sort_col = match q.sort.as_deref().unwrap_or("created_at") {
-        "nar_size" => "cp.nar_size",
-        "last_fetched_at" => "cps.last_fetched_at",
-        _ => "cp.created_at",
+    let order = match q.sort.as_deref().unwrap_or("created_at") {
+        "nar_size" => NarOrder::NarSize,
+        "last_fetched_at" => NarOrder::LastFetchedAt,
+        _ => NarOrder::CreatedAt,
+    };
+    let filter = NarFilter {
+        cache: cache.id,
+        hash_prefix: q.hash.as_deref().filter(|s| !s.is_empty()),
+        package: q.package.as_deref().filter(|s| !s.is_empty()),
     };
 
-    let mut where_clauses = vec!["cps.cache = $1".to_string()];
-    let mut values: Vec<sea_orm::Value> = vec![sea_orm::Value::Uuid(Some(cache.id.into_inner()))];
-
-    if let Some(prefix) = q.hash.as_deref().filter(|s| !s.is_empty()) {
-        let n = values.len() + 1;
-        where_clauses.push(format!("cp.hash LIKE ${n}"));
-        values.push(sea_orm::Value::String(Some(format!("{prefix}%"))));
-    }
-    if let Some(needle) = q.package.as_deref().filter(|s| !s.is_empty()) {
-        let n = values.len() + 1;
-        where_clauses.push(format!("cp.package LIKE ${n}"));
-        values.push(sea_orm::Value::String(Some(format!("%{needle}%"))));
-    }
-    let where_sql = where_clauses.join(" AND ");
-
-    #[derive(FromQueryResult)]
-    struct CountRow {
-        total: i64,
-    }
-
-    let total = CountRow::find_by_statement(
-        NARS_LIST_COUNT.bind_built(nars_count_sql(&where_sql), values.clone()),
+    let total = gradient_db::cached_paths::count_in_cache(&db.web_db, filter).await?;
+    let items = gradient_db::cached_paths::page_in_cache(
+        &db.web_db, filter, order, ascending, per_page, offset,
     )
-    .one(&db.web_db)
-    .await?
-    .map(|r| r.total.max(0) as u64)
-    .unwrap_or(0);
-
-    let limit_idx = values.len() + 1;
-    let offset_idx = values.len() + 2;
-    let select_sql = nars_select_sql(&where_sql, sort_col, order_dir, limit_idx, offset_idx);
-    values.push(sea_orm::Value::BigInt(Some(per_page as i64)));
-    values.push(sea_orm::Value::BigInt(Some(offset as i64)));
-
-    let items = NarSummary::find_by_statement(NARS_LIST_SELECT.bind_built(select_sql, values))
-        .all(&db.web_db)
-        .await?;
+    .await?;
 
     Ok(ok_json(Paginated {
         items,
@@ -202,15 +116,10 @@ pub async fn show(
 ) -> WebResult<Json<BaseResponse<NarDetail>>> {
     let hash: String = params.param("hash")?;
 
-    let cp = ECachedPath::find()
-        .filter(CCachedPath::Hash.eq(&hash))
-        .one(&db.web_db)
+    let cp = gradient_db::cached_paths::by_hash(&db.web_db, &hash)
         .await?
         .or_not_found(Resource::Path)?;
-    let sig = ECachedPathSignature::find()
-        .filter(CCachedPathSignature::Cache.eq(cache.id))
-        .filter(CCachedPathSignature::CachedPath.eq(cp.id))
-        .one(&db.web_db)
+    let sig = gradient_db::cached_paths::signature_in_cache(&db.web_db, cp.id, cache.id)
         .await?
         .or_not_found(Resource::Signature)?;
     let store_path = cp.as_store_path().base();
@@ -234,38 +143,12 @@ pub async fn show(
     }))
 }
 
-gradient_db::sql! {
-    NAR_STATS = "SELECT COUNT(*) AS total_nars, \
-                COALESCE(SUM(cp.nar_size),0)::bigint AS total_nar_size, \
-                COALESCE(SUM(cp.file_size),0)::bigint AS total_file_size, \
-                MAX(cp.created_at) AS last_uploaded_at, \
-                MIN(cps.last_fetched_at) AS oldest_fetched_at \
-         FROM cached_path_signature cps \
-         JOIN cached_path cp ON cp.id = cps.cached_path \
-         WHERE cps.cache = $1",
-        params = [CacheId],
-        tier = Bulk;
-}
-
 pub async fn stats(
     CacheScope { cache, db, .. }: CacheScope<Readable>,
 ) -> WebResult<Json<BaseResponse<NarStats>>> {
-    use sea_orm::FromQueryResult;
-
-    #[derive(FromQueryResult)]
-    struct Row {
-        total_nars: i64,
-        total_nar_size: Option<i64>,
-        total_file_size: Option<i64>,
-        last_uploaded_at: Option<NaiveDateTime>,
-        oldest_fetched_at: Option<NaiveDateTime>,
-    }
-
-    let row =
-        Row::find_by_statement(NAR_STATS.bind([sea_orm::Value::Uuid(Some(cache.id.into_inner()))]))
-            .one(&db.web_db)
-            .await?
-            .context("stats query returned no row")?;
+    let row = gradient_db::cached_paths::totals_of_cache(&db.web_db, cache.id)
+        .await?
+        .context("stats query returned no row")?;
 
     Ok(ok_json(NarStats {
         total_nars: row.total_nars,
@@ -284,15 +167,9 @@ pub async fn available(
     if hash.is_empty() {
         return Err(CacheRefusal::MissingHashQuery.into());
     }
-    let cp = ECachedPath::find()
-        .filter(CCachedPath::Hash.eq(&hash))
-        .one(&db.web_db)
-        .await?;
+    let cp = gradient_db::cached_paths::by_hash(&db.web_db, &hash).await?;
     let exists = if let Some(cp) = cp {
-        ECachedPathSignature::find()
-            .filter(CCachedPathSignature::CachedPath.eq(cp.id))
-            .filter(CCachedPathSignature::Cache.eq(cache.id))
-            .one(&db.web_db)
+        gradient_db::cached_paths::signature_in_cache(&db.web_db, cp.id, cache.id)
             .await?
             .is_some()
     } else {

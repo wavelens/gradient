@@ -258,6 +258,27 @@ pub async fn upstream_urls_for_projects<C: ConnectionTrait>(
         .collect())
 }
 
+pub async fn of_cache<C: ConnectionTrait>(
+    db: &C,
+    cache: CacheId,
+) -> Result<Vec<MCacheUpstream>, DbErr> {
+    ECacheUpstream::find()
+        .filter(CCacheUpstream::Cache.eq(cache))
+        .all(db)
+        .await
+}
+
+pub async fn in_cache<C: ConnectionTrait>(
+    db: &C,
+    cache: CacheId,
+    upstream: CacheUpstreamId,
+) -> Result<Option<MCacheUpstream>, DbErr> {
+    ECacheUpstream::find_by_id(upstream)
+        .filter(CCacheUpstream::Cache.eq(cache))
+        .one(db)
+        .await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

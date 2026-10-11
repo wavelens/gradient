@@ -32,9 +32,6 @@ use gradient_types::triggers::{ConcurrencyPolicy, TriggerConfig, TriggerType};
 use gradient_types::wildcard::Wildcard;
 use gradient_types::*;
 use sea_orm::ActiveValue::Set;
-use sea_orm::{
-    ActiveModelTrait, ColumnTrait, Condition, EntityTrait, IntoActiveModel, QueryFilter, QueryOrder,
-};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -87,10 +84,7 @@ pub async fn get_task_name_available(
     let project = get_any_project_by_name(&state.db(), project)
         .await?
         .or_not_found(Resource::Project)?;
-    let exists = ETask::find()
-        .filter(CTask::Name.eq(name.as_str()))
-        .filter(CTask::Project.eq(project.id))
-        .one(&state.web_db)
+    let exists = gradient_db::tasks::by_name(&state.web_db, project.id, &name)
         .await?
         .is_some();
     Ok(ok_json(!exists))
@@ -131,10 +125,7 @@ pub async fn get(
     };
 
     let listing = paginate(
-        ETask::find()
-            .filter(CTask::Project.eq(project.id))
-            .order_by_asc(CTask::Name)
-            .order_by_asc(CTask::Id),
+        gradient_db::tasks::of_project(project.id),
         &db.web_db,
         &params,
     )
@@ -209,14 +200,8 @@ pub async fn put(
     )
     .await?;
 
-    let existing_task = ETask::find()
-        .filter(
-            Condition::all()
-                .add(CTask::Project.eq(project.id))
-                .add(CTask::Name.eq(body.name.as_str())),
-        )
-        .one(&state.web_db)
-        .await?;
+    let existing_task =
+        gradient_db::tasks::by_name(&state.web_db, project.id, body.name.as_str()).await?;
 
     if existing_task.is_some() {
         return Err(WebError::already_exists(Resource::TaskName));
@@ -247,17 +232,16 @@ pub async fn put(
         wait_for_workers: body.wait_for_workers.unwrap_or(false),
         retry_failed_builds: body.retry_failed_builds.unwrap_or(true),
         ..Default::default()
-    }
-    .into_active_model();
+    };
 
-    let task = task.insert(&state.web_db).await?;
+    let task = gradient_db::tasks::insert(&state.web_db, task).await?;
 
     let now = gradient_types::now();
     let default_cfg = TriggerConfig::Polling {
         interval_secs: 300,
         branch: None,
     };
-    MTaskTrigger {
+    let default_trigger = MTaskTrigger {
         id: TaskTriggerId::now_v7(),
         task: task.id,
         trigger_type: TriggerType::Polling,
@@ -266,14 +250,10 @@ pub async fn put(
         created_at: now,
         updated_at: now,
         ..Default::default()
-    }
-    .into_active_model()
-    .insert(&state.web_db)
-    .await?;
+    };
+    gradient_db::triggers::insert(&state.web_db, default_trigger).await?;
 
-    let integrations = EIntegration::find()
-        .filter(CIntegration::Project.eq(project.id))
-        .all(&state.web_db)
+    let integrations = gradient_db::integrations::of_project(&state.web_db, project.id)
         .await
         .unwrap_or_default();
     if let Err(e) = auto_attach::apply(&state.web_db, &task, &integrations).await {
@@ -420,7 +400,7 @@ pub async fn patch_task(
     }
 
     atask.force_evaluation = Set(true);
-    atask.update(&state.web_db).await?;
+    gradient_db::tasks::update(&state.web_db, atask).await?;
 
     audit.write(Action::TaskUpdate, owner, fields).await;
 
@@ -438,14 +418,8 @@ impl<'a> TaskPatcher<'a> {
     }
 
     async fn apply_name(&mut self, project: &MProject, name: TaskName) -> WebResult<()> {
-        let existing = ETask::find()
-            .filter(
-                Condition::all()
-                    .add(CTask::Project.eq(project.id))
-                    .add(CTask::Name.eq(name.as_str())),
-            )
-            .one(&self.state.web_db)
-            .await?;
+        let existing =
+            gradient_db::tasks::by_name(&self.state.web_db, project.id, name.as_str()).await?;
         if existing.is_some() {
             return Err(WebError::already_exists(Resource::TaskName));
         }
@@ -514,8 +488,7 @@ pub async fn delete_task(
 ) -> WebResult<Json<BaseResponse<String>>> {
     let task_id = task.id;
     let task_name = task.name.clone();
-    let atask: ATask = task.into();
-    atask.delete(&db.web_db).await?;
+    gradient_db::tasks::delete(&db.web_db, task).await?;
 
     audit.write(Action::TaskDelete, EventOwner::task(project_row.id, task_id), serde_json::json!({ "project_id": project_row.id.to_string(), "task_id": task_id.to_string(), "task_name": task_name, }))
     .await;
@@ -533,7 +506,7 @@ pub async fn post_task_active(
 ) -> WebResult<Json<BaseResponse<String>>> {
     let mut atask: ATask = task.into();
     atask.active = Set(true);
-    atask.update(&db.web_db).await?;
+    gradient_db::tasks::update(&db.web_db, atask).await?;
 
     let res = BaseResponse {
         error: false,
@@ -548,7 +521,7 @@ pub async fn delete_task_active(
 ) -> WebResult<Json<BaseResponse<String>>> {
     let mut atask: ATask = task.into();
     atask.active = Set(false);
-    atask.update(&db.web_db).await?;
+    gradient_db::tasks::update(&db.web_db, atask).await?;
 
     let res = BaseResponse {
         error: false,
@@ -623,7 +596,7 @@ pub async fn post_task_transfer(
 
     let mut atask: ATask = task.into();
     atask.project = Set(new_project.id);
-    atask.update(&db.web_db).await?;
+    gradient_db::tasks::update(&db.web_db, atask).await?;
 
     let res = BaseResponse {
         error: false,

@@ -25,9 +25,6 @@ use gradient_types::events::EventOwner;
 use gradient_types::events::audit::Action;
 use gradient_types::*;
 use sea_orm::ActiveValue::Set;
-use sea_orm::{
-    ActiveModelTrait, ColumnTrait, Condition, EntityTrait, IntoActiveModel, QueryFilter,
-};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -71,9 +68,7 @@ pub struct PatchCacheGrantRequest {
 }
 
 async fn find_team(db: &WebDb, name: &str) -> WebResult<MTeam> {
-    ETeam::find()
-        .filter(CTeam::Name.eq(name))
-        .one(db)
+    gradient_db::teams::by_name(db, name)
         .await?
         .or_not_found(Resource::Team)
 }
@@ -104,45 +99,25 @@ async fn is_team_admin(db: &WebDb, user: &MUser, team: TeamId) -> WebResult<bool
 }
 
 async fn project_role(db: &WebDb, project: ProjectId, name: &str) -> WebResult<RoleId> {
-    Ok(ERole::find()
-        .filter(
-            Condition::all().add(CRole::Name.eq(name)).add(
-                Condition::any()
-                    .add(CRole::Project.eq(project))
-                    .add(CRole::Project.is_null()),
-            ),
-        )
-        .one(db)
-        .await?
-        .or_not_found(Resource::Role)?
-        .id)
+    Ok(
+        gradient_db::roles::by_name::<ERole, _>(db, CRole::Name, name, CRole::Project, project)
+            .await?
+            .or_not_found(Resource::Role)?
+            .id,
+    )
 }
 
 async fn cache_role(db: &WebDb, cache: CacheId, name: &str) -> WebResult<RoleId> {
-    Ok(ECacheRole::find()
-        .filter(
-            Condition::all().add(CCacheRole::Name.eq(name)).add(
-                Condition::any()
-                    .add(CCacheRole::Cache.eq(cache))
-                    .add(CCacheRole::Cache.is_null()),
-            ),
-        )
-        .one(db)
-        .await?
-        .or_not_found(Resource::Role)?
-        .id)
-}
-
-async fn project_grant(
-    db: &WebDb,
-    team: TeamId,
-    project: ProjectId,
-) -> WebResult<Option<MTeamProject>> {
-    Ok(ETeamProject::find()
-        .filter(CTeamProject::Team.eq(team))
-        .filter(CTeamProject::Project.eq(project))
-        .one(db)
-        .await?)
+    Ok(gradient_db::roles::by_name::<ECacheRole, _>(
+        db,
+        CCacheRole::Name,
+        name,
+        CCacheRole::Cache,
+        cache,
+    )
+    .await?
+    .or_not_found(Resource::Role)?
+    .id)
 }
 
 pub(crate) async fn grant_workers(
@@ -177,14 +152,9 @@ fn project_role_name(roles: &HashMap<RoleId, String>, role: Option<RoleId>) -> O
 pub async fn get_project_teams(
     ProjectScope { project, db, .. }: ProjectScope<Readable>,
 ) -> WebResult<Json<BaseResponse<Vec<TeamGrantEntry>>>> {
-    let grants = ETeamProject::find()
-        .filter(CTeamProject::Project.eq(project.id))
-        .all(&db.web_db)
-        .await?;
-    let requests = ETeamProjectRequest::find()
-        .filter(CTeamProjectRequest::Project.eq(project.id))
-        .all(&db.web_db)
-        .await?;
+    let grants = gradient_db::teams::grants::grants_of_project(&db.web_db, project.id).await?;
+    let requests =
+        gradient_db::teams::requests::requests_of_project(&db.web_db, project.id).await?;
 
     let team_ids: Vec<TeamId> = grants
         .iter()
@@ -269,7 +239,7 @@ pub async fn post_project_team(
         }
         (false, _) => None,
     };
-    if project_grant(&state.web_db, team.id, project.id)
+    if gradient_db::teams::grants::project_grant(&state.web_db, team.id, project.id)
         .await?
         .is_some()
     {
@@ -281,36 +251,38 @@ pub async fn post_project_team(
     let owner = EventOwner::project(project.id);
 
     if !is_team_admin(&state.web_db, &user, team.id).await? {
-        MTeamProjectRequest {
-            id: TeamProjectRequestId::now_v7(),
-            team: team.id,
-            project: project.id,
-            role,
-            includes_users: body.users,
-            includes_workers: body.workers,
-            requested_by: Some(user.id),
-            created_at: gradient_types::now(),
-        }
-        .into_active_model()
-        .insert(&state.web_db)
+        gradient_db::teams::requests::add_project_request(
+            &state.web_db,
+            MTeamProjectRequest {
+                id: TeamProjectRequestId::now_v7(),
+                team: team.id,
+                project: project.id,
+                role,
+                includes_users: body.users,
+                includes_workers: body.workers,
+                requested_by: Some(user.id),
+                created_at: gradient_types::now(),
+            },
+        )
         .await
         .map_err(|e| WebError::from_db_err(e, Resource::TeamRequest))?;
         audit.write(Action::TeamRequestCreate, owner, payload).await;
         return Ok(ok_json("Request sent".to_string()));
     }
 
-    MTeamProject {
-        id: TeamProjectId::now_v7(),
-        team: team.id,
-        project: project.id,
-        role,
-        includes_users: body.users,
-        includes_workers: body.workers,
-        managed: false,
-        created_at: gradient_types::now(),
-    }
-    .into_active_model()
-    .insert(&state.web_db)
+    gradient_db::teams::grants::grant_project(
+        &state.web_db,
+        MTeamProject {
+            id: TeamProjectId::now_v7(),
+            team: team.id,
+            project: project.id,
+            role,
+            includes_users: body.users,
+            includes_workers: body.workers,
+            managed: false,
+            created_at: gradient_types::now(),
+        },
+    )
     .await?;
     if body.workers {
         grant_workers(&state.web_db, &scheduler, team.id, project.id).await?;
@@ -347,7 +319,7 @@ pub async fn patch_project_team(
     )
     .await?;
     let team = find_team(&state.web_db, &team).await?;
-    let grant = project_grant(&state.web_db, team.id, project.id)
+    let grant = gradient_db::teams::grants::project_grant(&state.web_db, team.id, project.id)
         .await?
         .or_not_found(Resource::TeamGrant)?;
 
@@ -373,7 +345,7 @@ pub async fn patch_project_team(
     active.includes_users = Set(users);
     active.includes_workers = Set(workers);
     active.role = Set(role);
-    active.update(&state.web_db).await?;
+    gradient_db::teams::grants::update_project_grant(&state.web_db, active).await?;
 
     match (had_workers, workers) {
         (false, true) => grant_workers(&state.web_db, &scheduler, team.id, project.id).await?,
@@ -399,16 +371,15 @@ pub async fn delete_project_team(
         .await?
         .or_not_found(Resource::Project)?;
     let team = find_team(&state.web_db, &team).await?;
-    let grant = project_grant(&state.web_db, team.id, project.id).await?;
+    let grant =
+        gradient_db::teams::grants::project_grant(&state.web_db, team.id, project.id).await?;
     let (request, includes_users) = match &grant {
         Some(grant) => (None, grant.includes_users),
         None => {
-            let request = ETeamProjectRequest::find()
-                .filter(CTeamProjectRequest::Team.eq(team.id))
-                .filter(CTeamProjectRequest::Project.eq(project.id))
-                .one(&state.web_db)
-                .await?
-                .or_not_found(Resource::TeamGrant)?;
+            let request =
+                gradient_db::teams::requests::project_request(&state.web_db, team.id, project.id)
+                    .await?
+                    .or_not_found(Resource::TeamGrant)?;
             let includes_users = request.includes_users;
             (Some(request), includes_users)
         }
@@ -432,12 +403,12 @@ pub async fn delete_project_team(
 
     let Some(grant) = grant else {
         if let Some(request) = request {
-            request.into_active_model().delete(&state.web_db).await?;
+            gradient_db::teams::requests::remove_project_request(&state.web_db, request).await?;
         }
         return Ok(ok_json("Request withdrawn".to_string()));
     };
     let had_workers = grant.includes_workers;
-    grant.into_active_model().delete(&state.web_db).await?;
+    gradient_db::teams::grants::revoke_project_grant(&state.web_db, grant).await?;
     if had_workers {
         take_workers(&state.web_db, &scheduler, team.id, project.id).await?;
     }
@@ -451,25 +422,11 @@ fn cache_role_name(roles: &HashMap<RoleId, String>, role: RoleId) -> Option<Stri
     roles.get(&role).cloned()
 }
 
-async fn cache_grant(db: &WebDb, team: TeamId, cache: CacheId) -> WebResult<Option<MTeamCache>> {
-    Ok(ETeamCache::find()
-        .filter(CTeamCache::Team.eq(team))
-        .filter(CTeamCache::Cache.eq(cache))
-        .one(db)
-        .await?)
-}
-
 pub async fn get_cache_teams(
     CacheScope { cache, db, .. }: CacheScope<Requires<can::ViewCache>>,
 ) -> WebResult<Json<BaseResponse<Vec<TeamGrantEntry>>>> {
-    let grants = ETeamCache::find()
-        .filter(CTeamCache::Cache.eq(cache.id))
-        .all(&db.web_db)
-        .await?;
-    let requests = ETeamCacheRequest::find()
-        .filter(CTeamCacheRequest::Cache.eq(cache.id))
-        .all(&db.web_db)
-        .await?;
+    let grants = gradient_db::teams::grants::grants_of_cache(&db.web_db, cache.id).await?;
+    let requests = gradient_db::teams::requests::requests_of_cache(&db.web_db, cache.id).await?;
 
     let team_ids: Vec<TeamId> = grants
         .iter()
@@ -516,7 +473,10 @@ pub async fn post_cache_team(
 ) -> WebResult<Json<BaseResponse<String>>> {
     let team = find_team(&db.web_db, &body.team).await?;
     let role = cache_role(&db.web_db, cache.id, &body.role).await?;
-    if cache_grant(&db.web_db, team.id, cache.id).await?.is_some() {
+    if gradient_db::teams::grants::cache_grant(&db.web_db, team.id, cache.id)
+        .await?
+        .is_some()
+    {
         return Err(WebError::already_exists(Resource::TeamGrant));
     }
 
@@ -525,32 +485,34 @@ pub async fn post_cache_team(
     let owner = EventOwner::cache(cache.id);
 
     if !is_team_admin(&db.web_db, &user, team.id).await? {
-        MTeamCacheRequest {
-            id: TeamCacheRequestId::now_v7(),
-            team: team.id,
-            cache: cache.id,
-            role,
-            requested_by: Some(user.id),
-            created_at: gradient_types::now(),
-        }
-        .into_active_model()
-        .insert(&db.web_db)
+        gradient_db::teams::requests::add_cache_request(
+            &db.web_db,
+            MTeamCacheRequest {
+                id: TeamCacheRequestId::now_v7(),
+                team: team.id,
+                cache: cache.id,
+                role,
+                requested_by: Some(user.id),
+                created_at: gradient_types::now(),
+            },
+        )
         .await
         .map_err(|e| WebError::from_db_err(e, Resource::TeamRequest))?;
         audit.write(Action::TeamRequestCreate, owner, payload).await;
         return Ok(ok_json("Request sent".to_string()));
     }
 
-    MTeamCache {
-        id: TeamCacheId::now_v7(),
-        team: team.id,
-        cache: cache.id,
-        role,
-        managed: false,
-        created_at: gradient_types::now(),
-    }
-    .into_active_model()
-    .insert(&db.web_db)
+    gradient_db::teams::grants::grant_cache(
+        &db.web_db,
+        MTeamCache {
+            id: TeamCacheId::now_v7(),
+            team: team.id,
+            cache: cache.id,
+            role,
+            managed: false,
+            created_at: gradient_types::now(),
+        },
+    )
     .await?;
 
     audit.write(Action::TeamGrantCreate, owner, payload).await;
@@ -567,14 +529,14 @@ pub async fn patch_cache_team(
     let team: String = params.param("team")?;
 
     let team = find_team(&db.web_db, &team).await?;
-    let grant = cache_grant(&db.web_db, team.id, cache.id)
+    let grant = gradient_db::teams::grants::cache_grant(&db.web_db, team.id, cache.id)
         .await?
         .or_not_found(Resource::TeamGrant)?;
     let role = cache_role(&db.web_db, cache.id, &body.role).await?;
 
     let mut active: ATeamCache = grant.into();
     active.role = Set(role);
-    active.update(&db.web_db).await?;
+    gradient_db::teams::grants::update_cache_grant(&db.web_db, active).await?;
 
     audit
         .write(
@@ -598,14 +560,11 @@ pub async fn delete_cache_team(
         .await?
         .or_not_found(Resource::Cache)?;
     let team = find_team(&state.web_db, &team).await?;
-    let grant = cache_grant(&state.web_db, team.id, cache.id).await?;
+    let grant = gradient_db::teams::grants::cache_grant(&state.web_db, team.id, cache.id).await?;
     let request = match grant {
         Some(_) => None,
         None => Some(
-            ETeamCacheRequest::find()
-                .filter(CTeamCacheRequest::Team.eq(team.id))
-                .filter(CTeamCacheRequest::Cache.eq(cache.id))
-                .one(&state.web_db)
+            gradient_db::teams::requests::cache_request(&state.web_db, team.id, cache.id)
                 .await?
                 .or_not_found(Resource::TeamGrant)?,
         ),
@@ -629,11 +588,11 @@ pub async fn delete_cache_team(
 
     let Some(grant) = grant else {
         if let Some(request) = request {
-            request.into_active_model().delete(&state.web_db).await?;
+            gradient_db::teams::requests::remove_cache_request(&state.web_db, request).await?;
         }
         return Ok(ok_json("Request withdrawn".to_string()));
     };
-    grant.into_active_model().delete(&state.web_db).await?;
+    gradient_db::teams::grants::revoke_cache_grant(&state.web_db, grant).await?;
 
     audit
         .write(

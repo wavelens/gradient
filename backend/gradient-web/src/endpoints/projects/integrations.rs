@@ -27,9 +27,7 @@ use gradient_core::ServerState;
 use gradient_types::GitHostType;
 use gradient_types::*;
 use sea_orm::ActiveValue::Set;
-use sea_orm::{
-    ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter, TransactionTrait,
-};
+use sea_orm::{IntoActiveModel, TransactionTrait};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -183,10 +181,7 @@ fn kind_to_str(k: IntegrationKind) -> &'static str {
 pub async fn get_integrations(
     ProjectScope { project, db, .. }: ProjectScope<Requires<can::ManageIntegrations>>,
 ) -> WebResult<Json<BaseResponse<Vec<IntegrationResponse>>>> {
-    let rows = EIntegration::find()
-        .filter(CIntegration::Project.eq(project.id))
-        .all(&db.web_db)
-        .await?;
+    let rows = gradient_db::integrations::of_project(&db.web_db, project.id).await?;
 
     let mut out = Vec::with_capacity(rows.len());
     for row in rows {
@@ -199,10 +194,7 @@ pub async fn get_integrations(
 pub async fn get_integration_summaries(
     ProjectScope { project, db, .. }: ProjectScope<Member>,
 ) -> WebResult<Json<BaseResponse<Vec<IntegrationSummaryResponse>>>> {
-    let rows = EIntegration::find()
-        .filter(CIntegration::Project.eq(project.id))
-        .all(&db.web_db)
-        .await?;
+    let rows = gradient_db::integrations::of_project(&db.web_db, project.id).await?;
 
     Ok(ok_json(
         rows.into_iter()
@@ -254,11 +246,7 @@ pub async fn put_integration(
         )
         .await?;
 
-        let created = EIntegration::find()
-            .filter(CIntegration::Project.eq(project.id))
-            .filter(CIntegration::Kind.eq(IntegrationKind::Outbound))
-            .filter(CIntegration::GithubInstallation.eq(inst))
-            .one(&txn)
+        let created = gradient_db::integrations::outbound_of_installation(&txn, project.id, inst)
             .await?
             .ok_or_else(|| ProjectRefusal::IntegrationNameTaken {
                 name: name.to_string(),
@@ -270,12 +258,9 @@ pub async fn put_integration(
 
     let kind = parse_kind(&body.kind)?;
 
-    let existing = EIntegration::find()
-        .filter(CIntegration::Project.eq(project.id))
-        .filter(CIntegration::Kind.eq(kind))
-        .filter(CIntegration::Name.eq(body.name.as_str()))
-        .one(&state.web_db)
-        .await?;
+    let existing =
+        gradient_db::integrations::by_name(&state.web_db, project.id, kind, body.name.as_str())
+            .await?;
     if existing.is_some() {
         return Err(WebError::already_exists(Resource::IntegrationName));
     }
@@ -310,25 +295,26 @@ pub async fn put_integration(
         .unwrap_or_else(|| body.name.to_string());
 
     let allowed_ips = normalize_allowed_ips(body.allowed_ips.clone())?.filter(|v| !v.is_empty());
-    let integration = MIntegration {
-        id: IntegrationId::now_v7(),
-        project: project.id,
-        name: body.name.into_inner(),
-        display_name,
-        kind,
-        git_host_type: git_host,
-        secret: encrypted_secret,
-        endpoint_url,
-        access_token: encrypted_token,
-        allowed_ips,
-        github_installation: None,
-        created_by: user.id,
-        created_at: gradient_types::now(),
-        managed: false,
-    }
-    .into_active_model();
-
-    let integration = integration.insert(&state.web_db).await?;
+    let integration = gradient_db::rows::insert::<EIntegration, _>(
+        &state.web_db,
+        MIntegration {
+            id: IntegrationId::now_v7(),
+            project: project.id,
+            name: body.name.into_inner(),
+            display_name,
+            kind,
+            git_host_type: git_host,
+            secret: encrypted_secret,
+            endpoint_url,
+            access_token: encrypted_token,
+            allowed_ips,
+            github_installation: None,
+            created_by: user.id,
+            created_at: gradient_types::now(),
+            managed: false,
+        },
+    )
+    .await?;
 
     Ok(ok_json(
         integration_response(&state.web_db, integration).await?,
@@ -371,13 +357,14 @@ pub async fn patch_integration(
     let mut active: AIntegration = integration.into_active_model();
 
     if let Some(name) = body.name {
-        let clash = EIntegration::find()
-            .filter(CIntegration::Project.eq(project.id))
-            .filter(CIntegration::Kind.eq(kind))
-            .filter(CIntegration::Name.eq(name.as_str()))
-            .filter(CIntegration::Id.ne(integration_id))
-            .one(&state.web_db)
-            .await?;
+        let clash = gradient_db::integrations::other_by_name(
+            &state.web_db,
+            project.id,
+            kind,
+            name.as_str(),
+            integration_id,
+        )
+        .await?;
         if clash.is_some() {
             return Err(WebError::already_exists(Resource::IntegrationName));
         }
@@ -435,7 +422,7 @@ pub async fn patch_integration(
         active.allowed_ips = Set(if canon.is_empty() { None } else { Some(canon) });
     }
 
-    let updated = active.update(&state.web_db).await?;
+    let updated = gradient_db::rows::update::<EIntegration, _>(&state.web_db, active).await?;
 
     Ok(ok_json(integration_response(&state.web_db, updated).await?))
 }
@@ -456,21 +443,15 @@ pub async fn delete_integration(
         let txn = db.web_db.inner().begin().await?;
         match integration.github_installation {
             Some(fk) => {
-                EIntegration::delete_many()
-                    .filter(CIntegration::GithubInstallation.eq(fk))
-                    .exec(&txn)
-                    .await?;
-                gradient_entity::github_installation::Entity::delete_by_id(fk)
-                    .exec(&txn)
-                    .await?;
+                gradient_db::integrations::delete_installation_with_integrations(&txn, fk).await?;
             }
             None => {
-                integration.into_active_model().delete(&txn).await?;
+                gradient_db::rows::delete::<EIntegration, _>(&txn, integration).await?;
             }
         }
         txn.commit().await?;
         return Ok(ok_json(true));
     }
-    integration.into_active_model().delete(&db.web_db).await?;
+    gradient_db::rows::delete::<EIntegration, _>(&db.web_db, integration).await?;
     Ok(ok_json(true))
 }

@@ -5,7 +5,6 @@
  */
 
 use super::invitations::find_invitation;
-use super::roles::owned_or_builtin;
 use super::{
     ActingScope, InvitationTable, MemberTable, NewInvitation, Owner, OwnerScope, RoleFields,
     RoleTable, delete_row, find_user_by_username, insert_row, role_names, update_row,
@@ -22,7 +21,6 @@ use gradient_core::ServerState;
 use gradient_db::WebDb;
 use gradient_notify::{InvitationMail, generate_token};
 use gradient_types::*;
-use sea_orm::{ColumnTrait, Condition, JoinType, QueryFilter, QuerySelect};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -48,14 +46,14 @@ async fn find_membership<T: MemberTable>(
     owner: T::Id,
     user_id: UserId,
 ) -> WebResult<Option<T::Row>> {
-    Ok(T::find()
-        .filter(
-            Condition::all()
-                .add(T::owner_column().eq(owner))
-                .add(T::user_column().eq(user_id)),
-        )
-        .one(db)
-        .await?)
+    Ok(gradient_db::memberships::by_owner_and_user::<T, _>(
+        db,
+        T::owner_column(),
+        owner,
+        T::user_column(),
+        user_id,
+    )
+    .await?)
 }
 
 async fn find_role<T: RoleTable>(
@@ -63,15 +61,10 @@ async fn find_role<T: RoleTable>(
     owner: T::Id,
     name: &str,
 ) -> WebResult<RoleFields<T::Id>> {
-    let role = T::find()
-        .filter(
-            Condition::all()
-                .add(T::name_column().eq(name))
-                .add(owned_or_builtin::<T>(owner)),
-        )
-        .one(db)
-        .await?
-        .or_not_found(Resource::Role)?;
+    let role =
+        gradient_db::roles::by_name::<T, _>(db, T::name_column(), name, T::owner_column(), owner)
+            .await?
+            .or_not_found(Resource::Role)?;
 
     Ok(T::fields(&role))
 }
@@ -80,12 +73,13 @@ async fn with_users<T: MemberTable>(
     db: &WebDb,
     owner: T::Id,
 ) -> WebResult<Vec<(T::Row, Option<MUser>)>> {
-    Ok(T::find()
-        .join(JoinType::InnerJoin, T::user_relation())
-        .select_also(gradient_entity::user::Entity)
-        .filter(T::owner_column().eq(owner))
-        .all(db)
-        .await?)
+    Ok(gradient_db::memberships::with_users::<T, _>(
+        db,
+        T::user_relation(),
+        T::owner_column(),
+        owner,
+    )
+    .await?)
 }
 
 pub async fn list<O: Owner>(

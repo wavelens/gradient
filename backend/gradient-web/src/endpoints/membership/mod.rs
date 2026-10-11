@@ -29,8 +29,8 @@ use gradient_types::events::EventOwner;
 use gradient_types::events::audit::Action;
 use gradient_types::*;
 use sea_orm::{
-    ActiveModelBehavior, ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel,
-    PrimaryKeyTrait, QueryFilter, RelationDef,
+    ActiveModelBehavior, ActiveModelTrait, EntityTrait, IntoActiveModel, PrimaryKeyTrait,
+    RelationDef,
 };
 use serde::Serialize;
 use std::collections::HashMap;
@@ -237,9 +237,7 @@ pub trait Owner: Send + Sync + 'static {
 }
 
 pub async fn find_user_by_username(db: &WebDb, username: &str) -> WebResult<MUser> {
-    EUser::find()
-        .filter(CUser::Username.eq(username))
-        .one(db)
+    gradient_db::users::by_username(db, username)
         .await?
         .or_not_found(Resource::User)
 }
@@ -249,15 +247,15 @@ pub fn active<T: Table>(row: T::Row) -> T::Active {
 }
 
 pub async fn insert_row<T: Table>(db: &WebDb, row: T::Row) -> WebResult<T::Row> {
-    Ok(active::<T>(row).insert(db).await?)
+    Ok(gradient_db::rows::insert::<T, _>(db, row).await?)
 }
 
 pub async fn update_row<T: Table>(db: &WebDb, row: T::Active) -> WebResult<T::Row> {
-    Ok(row.update(db).await?)
+    Ok(gradient_db::rows::update::<T, _>(db, row).await?)
 }
 
 pub async fn delete_row<T: Table>(db: &WebDb, row: T::Row) -> WebResult<()> {
-    active::<T>(row).delete(db).await?;
+    gradient_db::rows::delete::<T, _>(db, row).await?;
     Ok(())
 }
 

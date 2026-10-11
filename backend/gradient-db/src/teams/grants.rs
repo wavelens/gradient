@@ -7,7 +7,8 @@
 use gradient_types::*;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, Condition, ConnectionTrait, DbErr, EntityTrait, QueryFilter,
+    ActiveModelTrait, ColumnTrait, Condition, ConnectionTrait, DbErr, EntityTrait, IntoActiveModel,
+    QueryFilter,
 };
 
 pub async fn project_role_granted_to_a_team<C: ConnectionTrait>(
@@ -77,6 +78,114 @@ pub async fn apply_new_project_grants<C: ConnectionTrait>(
     }
 
     Ok(granted)
+}
+
+pub async fn project_grant<C: ConnectionTrait>(
+    db: &C,
+    team: TeamId,
+    project: ProjectId,
+) -> Result<Option<MTeamProject>, DbErr> {
+    ETeamProject::find()
+        .filter(CTeamProject::Team.eq(team))
+        .filter(CTeamProject::Project.eq(project))
+        .one(db)
+        .await
+}
+
+pub async fn grants_of_project<C: ConnectionTrait>(
+    db: &C,
+    project: ProjectId,
+) -> Result<Vec<MTeamProject>, DbErr> {
+    ETeamProject::find()
+        .filter(CTeamProject::Project.eq(project))
+        .all(db)
+        .await
+}
+
+pub async fn project_grants_of_team<C: ConnectionTrait>(
+    db: &C,
+    team: TeamId,
+) -> Result<Vec<MTeamProject>, DbErr> {
+    ETeamProject::find()
+        .filter(CTeamProject::Team.eq(team))
+        .all(db)
+        .await
+}
+
+pub async fn grant_project<C: ConnectionTrait>(
+    db: &C,
+    grant: MTeamProject,
+) -> Result<MTeamProject, DbErr> {
+    grant.into_active_model().insert(db).await
+}
+
+pub async fn update_project_grant<C: ConnectionTrait>(
+    db: &C,
+    grant: ATeamProject,
+) -> Result<MTeamProject, DbErr> {
+    grant.update(db).await
+}
+
+pub async fn revoke_project_grant<C: ConnectionTrait>(
+    db: &C,
+    grant: MTeamProject,
+) -> Result<(), DbErr> {
+    grant.into_active_model().delete(db).await?;
+    Ok(())
+}
+
+pub async fn cache_grant<C: ConnectionTrait>(
+    db: &C,
+    team: TeamId,
+    cache: CacheId,
+) -> Result<Option<MTeamCache>, DbErr> {
+    ETeamCache::find()
+        .filter(CTeamCache::Team.eq(team))
+        .filter(CTeamCache::Cache.eq(cache))
+        .one(db)
+        .await
+}
+
+pub async fn grants_of_cache<C: ConnectionTrait>(
+    db: &C,
+    cache: CacheId,
+) -> Result<Vec<MTeamCache>, DbErr> {
+    ETeamCache::find()
+        .filter(CTeamCache::Cache.eq(cache))
+        .all(db)
+        .await
+}
+
+pub async fn cache_grants_of_team<C: ConnectionTrait>(
+    db: &C,
+    team: TeamId,
+) -> Result<Vec<MTeamCache>, DbErr> {
+    ETeamCache::find()
+        .filter(CTeamCache::Team.eq(team))
+        .all(db)
+        .await
+}
+
+pub async fn grant_cache<C: ConnectionTrait>(
+    db: &C,
+    grant: MTeamCache,
+) -> Result<MTeamCache, DbErr> {
+    grant.into_active_model().insert(db).await
+}
+
+pub async fn update_cache_grant<C: ConnectionTrait>(
+    db: &C,
+    grant: ATeamCache,
+) -> Result<MTeamCache, DbErr> {
+    grant.update(db).await
+}
+
+pub async fn revoke_cache_grant<C: ConnectionTrait>(
+    db: &C,
+    grant: MTeamCache,
+) -> Result<(), DbErr> {
+    grant.into_active_model().delete(db).await?;
+    Ok(())
 }
 
 #[cfg(test)]

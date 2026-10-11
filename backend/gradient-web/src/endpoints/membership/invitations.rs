@@ -13,7 +13,6 @@ use axum::Json;
 use chrono::NaiveDateTime;
 use gradient_db::WebDb;
 use gradient_types::*;
-use sea_orm::{ColumnTrait, Condition, EntityTrait, JoinType, QueryFilter, QuerySelect};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -35,29 +34,27 @@ pub async fn find_invitation<T: InvitationTable>(
     owner: T::Id,
     user_id: UserId,
 ) -> WebResult<Option<T::Row>> {
-    Ok(T::find()
-        .filter(
-            Condition::all()
-                .add(T::owner_column().eq(owner))
-                .add(T::user_column().eq(user_id)),
-        )
-        .one(db)
-        .await?)
+    Ok(gradient_db::memberships::by_owner_and_user::<T, _>(
+        db,
+        T::owner_column(),
+        owner,
+        T::user_column(),
+        user_id,
+    )
+    .await?)
 }
 
 pub async fn list<O: Owner>(
     scope: O::ListInvitationsScope,
 ) -> WebResult<Json<BaseResponse<Vec<PendingInvitationItem>>>> {
     let db = &scope.db().web_db;
-    let rows = <O::Invitations as EntityTrait>::find()
-        .join(
-            JoinType::InnerJoin,
-            <O::Invitations as InvitationTable>::user_relation(),
-        )
-        .select_also(gradient_entity::user::Entity)
-        .filter(<O::Invitations as InvitationTable>::owner_column().eq(scope.id()))
-        .all(db)
-        .await?;
+    let rows = gradient_db::memberships::with_users::<O::Invitations, _>(
+        db,
+        <O::Invitations as InvitationTable>::user_relation(),
+        <O::Invitations as InvitationTable>::owner_column(),
+        scope.id(),
+    )
+    .await?;
 
     let role_ids: Vec<RoleId> = rows
         .iter()
