@@ -5,7 +5,7 @@
  */
 
 use anyhow::Result;
-use sea_orm::EntityTrait;
+use gradient_db::lookup::by_id;
 use tracing::{info, warn};
 
 use gradient_graph::Transition;
@@ -113,8 +113,7 @@ impl Scheduler {
                 // follow-up is enqueued under the same `eval:{id}` key that the release above
                 // freed.
                 if crate::jobs::is_fetch_only(&j.job) {
-                    let store_path = EEvaluation::find_by_id(j.evaluation_id)
-                        .one(&self.db.worker_db)
+                    let store_path = by_id::<EEvaluation, _>(&self.db.worker_db, j.evaluation_id)
                         .await?
                         .and_then(|e| e.flake_source);
                     return match store_path {

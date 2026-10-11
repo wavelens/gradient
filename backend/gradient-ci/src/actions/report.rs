@@ -12,6 +12,7 @@ use crate::{parse_owner_repo, reporting};
 use anyhow::{Context, Result, anyhow};
 use gradient_db::MissingRow;
 use gradient_db::evaluations::failed_attributes::failed_attributes;
+use gradient_db::lookup::by_id;
 use gradient_git_host::reporter::{CiReport, CiStatus};
 use gradient_types::input::vec_to_hex;
 use gradient_types::{BuildJobId, CEntryPoint, EBuildJob, EEntryPoint, EEvaluation, EvaluationId};
@@ -174,13 +175,11 @@ async fn load_subject(
 
     if let Some(bid) = s("build_id") {
         let build_job_id: BuildJobId = bid.parse().map_err(|_| anyhow!("invalid build_id"))?;
-        let build_job = EBuildJob::find_by_id(build_job_id)
-            .one(&ctx.db.worker_db)
+        let build_job = by_id::<EBuildJob, _>(&ctx.db.worker_db, build_job_id)
             .await
             .context("load build_job")?
             .ok_or_else(|| anyhow!("build_job {} not found", build_job_id))?;
-        let evaluation = EEvaluation::find_by_id(build_job.evaluation)
-            .one(&ctx.db.worker_db)
+        let evaluation = by_id::<EEvaluation, _>(&ctx.db.worker_db, build_job.evaluation)
             .await
             .context("load evaluation")?
             .ok_or(MissingRow::Evaluation {
@@ -195,8 +194,7 @@ async fn load_subject(
         );
     };
     let evaluation_id: EvaluationId = eid.parse().map_err(|_| ActionError::InvalidEvaluationId)?;
-    let evaluation = EEvaluation::find_by_id(evaluation_id)
-        .one(&ctx.db.worker_db)
+    let evaluation = by_id::<EEvaluation, _>(&ctx.db.worker_db, evaluation_id)
         .await
         .context("load evaluation")?
         .ok_or(MissingRow::Evaluation { id: evaluation_id })?;

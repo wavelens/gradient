@@ -11,6 +11,7 @@ use super::super::{
 };
 use crate::config::*;
 use anyhow::{Context, Result};
+use gradient_db::lookup::by_id;
 use gradient_entity::*;
 use gradient_types::triggers::TriggerConfig;
 use gradient_types::*;
@@ -59,8 +60,7 @@ impl<'a> StateApplicator<'a> {
                 proj.managed = Set(true);
                 proj.update(self.db).await?;
                 tracing::info!(name = %state_task.name, "Updated managed task");
-                task::Entity::find_by_id(task_id)
-                    .one(self.db)
+                by_id::<task::Entity, _>(self.db, task_id)
                     .await?
                     .ok_or_else(|| format!("Task '{}' vanished after update", state_task.name))?
             } else {

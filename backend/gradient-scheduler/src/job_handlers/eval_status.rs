@@ -5,6 +5,7 @@
  */
 
 use anyhow::Result;
+use gradient_db::lookup::by_id;
 use sea_orm::EntityTrait;
 use tracing::{debug, warn};
 
@@ -27,10 +28,7 @@ impl Scheduler {
             return;
         };
         let evaluation_id = j.evaluation_id;
-        match EEvaluation::find_by_id(evaluation_id)
-            .one(&self.db.worker_db)
-            .await
-        {
+        match by_id::<EEvaluation, _>(&self.db.worker_db, evaluation_id).await {
             Ok(Some(eval)) => {
                 if let Err(e) =
                     gradient_db::status::update_evaluation_status(&self.db, eval, new_status).await
@@ -125,7 +123,7 @@ impl Scheduler {
         let evaluation_id = j.evaluation_id;
         let db = &self.db.worker_db;
 
-        let eval = match EEvaluation::find_by_id(evaluation_id).one(db).await {
+        let eval = match by_id::<EEvaluation, _>(db, evaluation_id).await {
             Ok(Some(e)) => e,
             _ => {
                 warn!(%evaluation_id, "input_update expansion: evaluation missing");
@@ -146,7 +144,7 @@ impl Scheduler {
                 return;
             }
         };
-        let task = match ETask::find_by_id(task_id).one(db).await {
+        let task = match by_id::<ETask, _>(db, task_id).await {
             Ok(Some(p)) => p,
             _ => {
                 warn!(%task_id, "input_update expansion: task missing");

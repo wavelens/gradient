@@ -11,6 +11,7 @@ use crate::resource::Resource;
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
 use gradient_core::ServerState;
+use gradient_db::lookup::by_id;
 use gradient_db::scheduling::build_attempt::latest_attempt;
 use gradient_types::*;
 use gradient_util::latest::Latest;
@@ -61,8 +62,7 @@ pub async fn get_build(
     let build_job = ctx.build_job;
     let shared_build = ctx.shared_build;
 
-    let derivation = EDerivation::find_by_id(build_job.derivation)
-        .one(&state.web_db)
+    let derivation = by_id::<EDerivation, _>(&state.web_db, build_job.derivation)
         .await?
         .ok_or_else(|| {
             tracing::warn!(
@@ -91,8 +91,7 @@ pub async fn get_build(
 
     let dispatched_job = attempt.and_then(|a| a.dispatched_job);
     let worker = match dispatched_job {
-        Some(job) => gradient_entity::dispatched_job::Entity::find_by_id(job)
-            .one(&state.web_db)
+        Some(job) => by_id::<gradient_entity::dispatched_job::Entity, _>(&state.web_db, job)
             .await?
             .map(|j| j.worker_id),
         None => None,

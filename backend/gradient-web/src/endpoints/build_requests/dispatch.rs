@@ -10,6 +10,7 @@ use crate::access::has_permission;
 use crate::authorization::MaybeApiKey;
 use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
+use crate::lookup::require;
 use crate::permissions::Permission;
 use crate::resource::Resource;
 use anyhow::Context;
@@ -18,6 +19,7 @@ use axum::Json;
 use axum::extract::{Path, State};
 use gradient_core::ServerState;
 use gradient_db::DbContext;
+use gradient_db::lookup::by_id;
 use gradient_graph::Graph;
 use gradient_proto::import::{NarCommit, SignTargets};
 use gradient_storage::NarStore;
@@ -73,10 +75,7 @@ pub async fn post_dispatch(
     Path(session_id): Path<UploadSessionId>,
     Json(body): Json<DispatchRequest>,
 ) -> WebResult<Json<BaseResponse<DispatchResponse>>> {
-    let session = EUploadSession::find_by_id(session_id)
-        .one(&state.web_db)
-        .await?
-        .ok_or_else(|| WebError::not_found(Resource::UploadSession))?;
+    let session = require::<EUploadSession>(&state.web_db, session_id).await?;
 
     if !has_permission(
         &state.web_db,
@@ -300,8 +299,7 @@ async fn resolve_project_cache_name<C: ConnectionTrait>(
         return Ok(None);
     };
 
-    Ok(ECache::find_by_id(link.cache)
-        .one(tx)
+    Ok(by_id::<ECache, _>(tx, link.cache)
         .await?
         .filter(|c| c.active)
         .map(|c| c.name))

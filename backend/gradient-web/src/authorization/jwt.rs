@@ -8,6 +8,7 @@ use super::api_key::{ApiKeyContext, DecodedRequest};
 use axum::http::{HeaderMap, StatusCode, header};
 use chrono::{Duration, Utc};
 use gradient_db::WebDb;
+use gradient_db::lookup::by_id;
 use gradient_types::*;
 use gradient_util::debounce::Debounce;
 use jsonwebtoken::{DecodingKey, EncodingKey, Header, Validation, decode, encode};
@@ -152,8 +153,7 @@ pub async fn decode_jwt(
     }
 
     let claims: Cliams = verify_claims(jwt_secret, &jwt).map_err(|_| StatusCode::UNAUTHORIZED)?;
-    let session = ESession::find_by_id(claims.jti)
-        .one(db)
+    let session = by_id::<ESession, _>(db, claims.jti)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
         .ok_or(StatusCode::UNAUTHORIZED)?;

@@ -21,6 +21,7 @@ use axum::extract::{Query, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use gradient_db::WebDb;
+use gradient_db::lookup::by_id;
 use gradient_types::events::EventOwner;
 use gradient_types::events::audit::Action;
 
@@ -575,7 +576,7 @@ pub async fn post_logout(
     if let Some(claims) = session_claims(&state.jwt_secret, &headers) {
         let session_id = claims.jti;
         let user_id = claims.id;
-        if let Ok(Some(session)) = ESession::find_by_id(session_id).one(&state.web_db).await {
+        if let Ok(Some(session)) = by_id::<ESession, _>(&state.web_db, session_id).await {
             let mut active: ASession = session.into_active_model();
             active.revoked_at = Set(Some(gradient_types::now()));
             let _ = active.update(&state.web_db).await;

@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use gradient_db::lookup::by_ids;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -243,16 +244,7 @@ impl BuildAssignMaps {
         let derivations = gradient_db::graph::reachability::derivations_by_id(db, &drv_ids).await?;
 
         let evaluations: HashMap<EvaluationId, MEvaluation> =
-            gradient_db::fetch_in_chunks(&eval_ids, |chunk| async move {
-                EEvaluation::find()
-                    .filter(CEvaluation::Id.is_in(chunk))
-                    .all(db)
-                    .await
-            })
-            .await?
-            .into_iter()
-            .map(|e| (e.id, e))
-            .collect();
+            by_ids::<EEvaluation, _>(db, &eval_ids).await?;
 
         for (shared_build_id, eval_list) in &jobs_by_shared_build {
             let chosen = eval_list

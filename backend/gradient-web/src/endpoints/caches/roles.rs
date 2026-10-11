@@ -8,7 +8,8 @@ use crate::access::{CacheAccess, Caller, load_cache};
 use crate::audit::{RequestInfo, record as audit_record};
 use crate::authorization::MaybeApiKey;
 use crate::error::{WebError, WebResult};
-use crate::helpers::{OptionExt, ok_json};
+use crate::helpers::ok_json;
+use crate::lookup::require;
 use crate::permissions::{
     CachePermission, PermissionEntry, available_cache_permissions, cache_mask_to_vec,
     is_builtin_cache_role, parse_cache_permission_list,
@@ -77,10 +78,7 @@ pub struct PatchCacheRoleRequest {
 }
 
 async fn load_cache_role(db: &WebDb, cache_id: CacheId, role_id: RoleId) -> WebResult<MCacheRole> {
-    let role = ECacheRole::find_by_id(role_id)
-        .one(db)
-        .await?
-        .or_not_found(Resource::Role)?;
+    let role = require::<ECacheRole>(db, role_id).await?;
     if let Some(owner) = role.cache
         && owner != cache_id
     {

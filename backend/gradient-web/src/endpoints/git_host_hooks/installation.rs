@@ -83,11 +83,17 @@ async fn store_installation_id(db: &WebDb, payload: &GitHubInstallationPayload) 
         return;
     }
 
-    let projects = EProject::find()
-        .filter(CProject::Id.is_in(owner_project_ids))
-        .all(db)
-        .await
-        .unwrap_or_default();
+    let projects = gradient_db::fetch_in_chunks(
+        &owner_project_ids.into_iter().collect::<Vec<_>>(),
+        |chunk| async move {
+            EProject::find()
+                .filter(CProject::Id.is_in(chunk))
+                .all(db)
+                .await
+        },
+    )
+    .await
+    .unwrap_or_default();
 
     for project in projects {
         let project_id = project.id;

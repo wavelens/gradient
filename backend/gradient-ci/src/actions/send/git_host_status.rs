@@ -12,6 +12,7 @@ use crate::actions::report::{build_ci_reports_from_payload, persist_evaluation_c
 use crate::context::CiContext;
 use crate::integration_lookup::IntegrationKind;
 use anyhow::{Context, Result, anyhow};
+use gradient_db::lookup::by_id;
 use gradient_git_host::reporter::{CiReporter, GithubAppReporter};
 use gradient_types::{
     ActionConfig, ActionType, CIntegration, CTaskAction, EIntegration, ETaskAction, EvaluationId,
@@ -159,11 +160,11 @@ async fn build_github_app_reporter(
     let Some(install_fk) = integration.github_installation else {
         return Ok(None);
     };
-    let install = gradient_entity::github_installation::Entity::find_by_id(install_fk)
-        .one(&ctx.db.worker_db)
-        .await
-        .context("load github installation")?
-        .ok_or_else(|| anyhow!("github installation {} not found", install_fk))?;
+    let install =
+        by_id::<gradient_entity::github_installation::Entity, _>(&ctx.db.worker_db, install_fk)
+            .await
+            .context("load github installation")?
+            .ok_or_else(|| anyhow!("github installation {} not found", install_fk))?;
     let installation_id = install.installation_id;
     let pem = tokio::fs::read_to_string(&github_app.private_key_file)
         .await

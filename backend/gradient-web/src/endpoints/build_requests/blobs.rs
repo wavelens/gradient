@@ -9,6 +9,7 @@ use crate::access::has_permission;
 use crate::authorization::MaybeApiKey;
 use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
+use crate::lookup::require;
 use crate::permissions::Permission;
 use crate::resource::Resource;
 use anyhow::Context;
@@ -23,7 +24,7 @@ use gradient_types::ids::{BuildRequestBlobId, ProjectId, UploadSessionId};
 use gradient_types::input::decode_blake3_hex;
 use gradient_types::{AUploadSession, BaseResponse, EUploadSession, MBuildRequestBlob, MUser, now};
 use sea_orm::ActiveValue::Set;
-use sea_orm::{ActiveModelTrait, DbErr, EntityTrait, IntoActiveModel, RuntimeErr, sqlx};
+use sea_orm::{ActiveModelTrait, DbErr, IntoActiveModel, RuntimeErr, sqlx};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -47,10 +48,7 @@ pub async fn post_blobs(
     Path(session_id): Path<UploadSessionId>,
     mut multipart: Multipart,
 ) -> WebResult<Json<BaseResponse<BlobsResponse>>> {
-    let session = EUploadSession::find_by_id(session_id)
-        .one(&state.web_db)
-        .await?
-        .ok_or_else(|| WebError::not_found(Resource::UploadSession))?;
+    let session = require::<EUploadSession>(&state.web_db, session_id).await?;
 
     if session.dispatched_at.is_some() {
         return Err(BuildRequestRefusal::UploadSessionAlreadyDispatched.into());

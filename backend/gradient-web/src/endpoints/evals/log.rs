@@ -14,6 +14,7 @@ use axum::extract::{Path, State};
 use axum_streams::StreamBodyAs;
 use gradient_core::ServerState;
 use gradient_db::WebDb;
+use gradient_db::lookup::{by_id, by_ids};
 use gradient_entity::build::BuildStatus;
 use gradient_storage::LogStorage;
 use gradient_types::*;
@@ -36,21 +37,14 @@ async fn eval_shared_build_jobs(
 
     let shared_build_ids: Vec<DerivationBuildId> =
         jobs.iter().map(|j| j.derivation_build).collect();
-    let shared_builds: HashMap<DerivationBuildId, MDerivationBuild> = EDerivationBuild::find()
-        .filter(CDerivationBuild::Id.is_in(shared_build_ids))
-        .all(db)
-        .await?
-        .into_iter()
-        .map(|a| (a.id, a))
-        .collect();
+    let shared_builds: HashMap<DerivationBuildId, MDerivationBuild> =
+        by_ids::<EDerivationBuild, _>(db, &shared_build_ids).await?;
 
     let drv_ids: Vec<DerivationId> = jobs.iter().map(|j| j.derivation).collect();
-    let names: HashMap<DerivationId, String> = EDerivation::find()
-        .filter(CDerivation::Id.is_in(drv_ids))
-        .all(db)
+    let names: HashMap<DerivationId, String> = by_ids::<EDerivation, _>(db, &drv_ids)
         .await?
         .into_iter()
-        .map(|d| (d.id, d.name))
+        .map(|(id, d)| (id, d.name))
         .collect();
 
     let mut out = Vec::with_capacity(jobs.len());
@@ -173,9 +167,7 @@ pub async fn post_evaluation_builds(
             // The stream must stay open until the evaluation itself has finished. At the start it
             // is still evaluating and is carrying no build_job yet.
             if !any_pending {
-                let still_active = EEvaluation::find_by_id(evaluation.id)
-                    .one(&state.web_db)
-                    .await
+                let still_active = by_id::<EEvaluation, _>(&state.web_db, evaluation.id).await
                     .ok()
                     .flatten()
                     .is_some_and(|e| e.status.is_active());

@@ -17,6 +17,7 @@ use axum::extract::{Path, State};
 use axum::{Extension, Json};
 use gradient_core::ServerState;
 use gradient_db::WebDb;
+use gradient_db::lookup::by_ids;
 use gradient_notify::{InvitationMail, InviteScope, generate_token};
 use gradient_types::consts::BASE_CACHE_ROLE_ADMIN_ID;
 use gradient_types::events::EventOwner;
@@ -114,13 +115,12 @@ pub async fn get_cache_members(
         .await?;
 
     let role_ids: Vec<RoleId> = cache_users.iter().map(|(cu, _)| cu.role).collect();
-    let role_map: std::collections::HashMap<RoleId, String> = ECacheRole::find()
-        .filter(CCacheRole::Id.is_in(role_ids))
-        .all(&state.web_db)
-        .await?
-        .into_iter()
-        .map(|r| (r.id, r.name))
-        .collect();
+    let role_map: std::collections::HashMap<RoleId, String> =
+        by_ids::<ECacheRole, _>(&state.web_db, &role_ids)
+            .await?
+            .into_iter()
+            .map(|(id, r)| (id, r.name))
+            .collect();
 
     let items: Vec<CacheMemberItem> = cache_users
         .iter()

@@ -9,6 +9,7 @@ use crate::ActionError;
 use crate::actions::ExecutorOk;
 use crate::context::CiContext;
 use anyhow::{Context, Result, anyhow};
+use gradient_db::lookup::by_id;
 use gradient_git_host::reporter::parse_owner_repo;
 use gradient_git_host::{BranchCommit, CommitFile, CommitIdent};
 use gradient_types::{
@@ -74,8 +75,7 @@ pub(crate) async fn execute_open_pr(
         return Ok(no_op());
     }
 
-    let task = ETask::find_by_id(task_id)
-        .one(&ctx.db.worker_db)
+    let task = by_id::<ETask, _>(&ctx.db.worker_db, task_id)
         .await
         .context("load task")?
         .ok_or(ActionError::TaskNotFound { id: task_id })?;
@@ -218,15 +218,13 @@ async fn point_eval_at_pushed_commit(
         return Ok(());
     };
 
-    let Some(eval) = EEvaluation::find_by_id(evaluation_id)
-        .one(&ctx.db.worker_db)
+    let Some(eval) = by_id::<EEvaluation, _>(&ctx.db.worker_db, evaluation_id)
         .await
         .context("load evaluation")?
     else {
         return Ok(());
     };
-    let Some(commit) = ECommit::find_by_id(eval.commit)
-        .one(&ctx.db.worker_db)
+    let Some(commit) = by_id::<ECommit, _>(&ctx.db.worker_db, eval.commit)
         .await
         .context("load evaluation commit")?
     else {

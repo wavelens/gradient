@@ -8,8 +8,8 @@ use crate::actions::ExecutorOk;
 use crate::actions::summary::EventSummary;
 use crate::context::CiContext;
 use anyhow::{Result, anyhow};
+use gradient_db::lookup::by_id;
 use gradient_types::{ETask, TaskId};
-use sea_orm::EntityTrait;
 use serde_json::Value as JsonValue;
 
 pub(crate) async fn execute_send_mail(
@@ -20,8 +20,7 @@ pub(crate) async fn execute_send_mail(
     recipients: &[String],
     subject_template: Option<&str>,
 ) -> Result<ExecutorOk> {
-    let project = ETask::find_by_id(task)
-        .one(&ctx.db.worker_db)
+    let project = by_id::<ETask, _>(&ctx.db.worker_db, task)
         .await?
         .ok_or_else(|| anyhow!("task {task} of a send_mail action no longer exists"))?
         .project;

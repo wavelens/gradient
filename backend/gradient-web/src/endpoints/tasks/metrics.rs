@@ -18,6 +18,7 @@ use gradient_db::graph::{
     closure::transitive_closure_reachable,
     runtime_closure::{output_hashes_for_drvs, runtime_closure_size},
 };
+use gradient_db::lookup::by_ids;
 use gradient_types::*;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect};
 use serde::{Deserialize, Serialize};
@@ -245,13 +246,8 @@ pub async fn get_entry_point_metrics(
     let eval_ids: Vec<EvaluationId> = entry_points.iter().map(|ep| ep.evaluation).collect();
     let drv_ids: Vec<DerivationId> = entry_points.iter().map(|ep| ep.derivation).collect();
 
-    let evaluations: HashMap<EvaluationId, MEvaluation> = EEvaluation::find()
-        .filter(CEvaluation::Id.is_in(eval_ids.clone()))
-        .all(&state.web_db)
-        .await?
-        .into_iter()
-        .map(|e| (e.id, e))
-        .collect();
+    let evaluations: HashMap<EvaluationId, MEvaluation> =
+        by_ids::<EEvaluation, _>(&state.web_db, &eval_ids.clone()).await?;
 
     let shared_builds: HashMap<DerivationId, MDerivationBuild> = EDerivationBuild::find()
         .filter(CDerivationBuild::Derivation.is_in(drv_ids.clone()))

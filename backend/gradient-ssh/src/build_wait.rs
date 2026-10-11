@@ -7,6 +7,7 @@
 use crate::build_log::BuildLogs;
 use crate::build_request::Started;
 use crate::session::Session;
+use gradient_db::lookup::by_id;
 use gradient_derivation::Derivation;
 use gradient_entity::build::BuildStatus;
 use gradient_entity::evaluation::EvaluationStatus;
@@ -133,8 +134,7 @@ pub async fn wait(
     let mut waiting = Waiting::default();
 
     let evaluation = loop {
-        let evaluation = EEvaluation::find_by_id(started.evaluation)
-            .one(&handles.db.web_db)
+        let evaluation = by_id::<EEvaluation, _>(&handles.db.web_db, started.evaluation)
             .await?
             .ok_or_else(|| anyhow::anyhow!("evaluation {} disappeared", started.evaluation))?;
         if let Some(line) = waiting.observe(&evaluation) {
@@ -193,12 +193,16 @@ async fn closure_derivations(
 }
 
 async fn settled(session: &Session, requested: &[DerivationBuildId]) -> anyhow::Result<bool> {
-    Ok(EDerivationBuild::find()
-        .filter(CDerivationBuild::Id.is_in(requested.to_vec()))
-        .all(&session.handles.db.web_db)
-        .await?
-        .iter()
-        .all(|b| settles_the_request(b.status)))
+    let db = &session.handles.db.web_db;
+    Ok(gradient_db::fetch_in_chunks(requested, |chunk| async move {
+        EDerivationBuild::find()
+            .filter(CDerivationBuild::Id.is_in(chunk))
+            .all(db)
+            .await
+    })
+    .await?
+    .iter()
+    .all(|b| settles_the_request(b.status)))
 }
 
 async fn requested_result(
@@ -218,10 +222,7 @@ async fn requested_result(
         return Ok(Ok(outputs));
     };
 
-    let Some(build) = EDerivationBuild::find_by_id(build_id)
-        .one(&handles.db.web_db)
-        .await?
-    else {
+    let Some(build) = by_id::<EDerivationBuild, _>(&handles.db.web_db, build_id).await? else {
         return Ok(Ok(outputs));
     };
 

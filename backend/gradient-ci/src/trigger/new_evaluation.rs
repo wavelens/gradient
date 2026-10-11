@@ -6,6 +6,7 @@
 
 use super::TriggerError;
 use super::flake_snapshot::snapshot_flake_input_overrides;
+use gradient_db::lookup::by_id;
 use gradient_entity::evaluation::{EvaluationStatus, WalkMode};
 use gradient_types::consts::NULL_TIME;
 use gradient_types::*;
@@ -84,10 +85,7 @@ pub async fn trigger_evaluation<C: ConnectionTrait>(
     // A dangling `task.last_evaluation` must resolve to `None` before the insert. The
     // `fk-evaluation-previous` foreign key would trip otherwise.
     let previous = match task.last_evaluation {
-        Some(prev_id) => EEvaluation::find_by_id(prev_id)
-            .one(db)
-            .await?
-            .map(|e| e.id),
+        Some(prev_id) => by_id::<EEvaluation, _>(db, prev_id).await?.map(|e| e.id),
         None => None,
     };
 

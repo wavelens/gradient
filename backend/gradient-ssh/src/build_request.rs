@@ -9,6 +9,7 @@ use crate::session::Session;
 use futures::StreamExt as _;
 use gradient_db::Hold;
 use gradient_db::build_request_task::ensure_build_request_task;
+use gradient_db::lookup::by_id;
 use gradient_derivation::{Derivation, discovered_derivation, parse_drv};
 use gradient_entity::evaluation::{EvaluationKind, EvaluationStatus};
 use gradient_graph::{RecordBatch, Transition};
@@ -289,10 +290,11 @@ async fn add(
 }
 
 async fn ended(session: &Session, evaluation: EvaluationId) -> anyhow::Result<bool> {
-    Ok(EEvaluation::find_by_id(evaluation)
-        .one(&session.handles.db.web_db)
-        .await?
-        .is_none_or(|e| EvaluationStatus::TERMINAL.contains(&e.status)))
+    Ok(
+        by_id::<EEvaluation, _>(&session.handles.db.web_db, evaluation)
+            .await?
+            .is_none_or(|e| EvaluationStatus::TERMINAL.contains(&e.status)),
+    )
 }
 
 async fn add_batches(

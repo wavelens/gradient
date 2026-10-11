@@ -11,13 +11,14 @@ use axum::http::HeaderMap;
 use axum::http::header::AUTHORIZATION;
 use axum::middleware::Next;
 use axum::response::Response;
+use gradient_db::lookup::by_id;
 use gradient_db::{DbContext, WebDb};
 use gradient_util::debounce::Debounce;
 use uuid::Uuid;
 
 use gradient_core::ServerState;
 use gradient_types::*;
-use sea_orm::{ActiveModelTrait, ActiveValue::Set, EntityTrait};
+use sea_orm::{ActiveModelTrait, ActiveValue::Set};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::Arc;
 
@@ -132,7 +133,7 @@ pub async fn authorize(
     }
 
     let api_key_extension = MaybeApiKey::from(&decoded);
-    let Some(current_user) = EUser::find_by_id(user_id).one(&state.web_db).await? else {
+    let Some(current_user) = by_id::<EUser, _>(&state.web_db, user_id).await? else {
         let denial = Denial::UnknownUser;
         return Err(deny(&db, Some(user_id), info, method, path, denial).await);
     };
@@ -167,8 +168,7 @@ async fn optional_caller(
         return None;
     }
 
-    let user = EUser::find_by_id(decoded.user_id())
-        .one(db)
+    let user = by_id::<EUser, _>(db, decoded.user_id())
         .await
         .ok()
         .flatten()

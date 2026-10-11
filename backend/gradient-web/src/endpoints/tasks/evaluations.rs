@@ -15,6 +15,7 @@ use crate::endpoints::evals::{live_progress, live_progress_status};
 use crate::endpoints::{archive_headers, build_product_headers};
 use crate::error::{WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json};
+use crate::lookup::require;
 use crate::permissions::Permission;
 use crate::refusal::SharedRefusal;
 use crate::resource::Resource;
@@ -24,7 +25,7 @@ use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
 use gradient_core::ServerState;
 use gradient_db::WebDb;
-use gradient_db::lookup::get_any_project_by_name;
+use gradient_db::lookup::{by_id, by_ids, get_any_project_by_name};
 use gradient_entity::build::BuildStatus;
 use gradient_entity::derivation_output::UNKNOWN_OUTPUT_HASH;
 use gradient_entity::evaluation::{EvaluationStatus, WalkMode};
@@ -68,39 +69,20 @@ pub(super) async fn evaluations_to_summaries(
     let eval_ids: Vec<EvaluationId> = evaluations.iter().map(|e| e.id).collect();
 
     let trigger_ids: Vec<TaskTriggerId> = evaluations.iter().filter_map(|e| e.trigger).collect();
-    let triggers: HashMap<TaskTriggerId, TriggerType> =
-        gradient_db::fetch_in_chunks(&trigger_ids, |chunk| async move {
-            ETaskTrigger::find()
-                .filter(CTaskTrigger::Id.is_in(chunk))
-                .all(db)
-                .await
-        })
+    let triggers: HashMap<TaskTriggerId, TriggerType> = by_ids::<ETaskTrigger, _>(db, &trigger_ids)
         .await?
         .into_iter()
-        .map(|t| (t.id, t.trigger_type))
+        .map(|(id, t)| (id, t.trigger_type))
         .collect();
 
     let commit_ids: Vec<CommitId> = evaluations.iter().map(|e| e.commit).collect();
-    let commits: HashMap<CommitId, MCommit> =
-        gradient_db::fetch_in_chunks(&commit_ids, |chunk| async move {
-            ECommit::find()
-                .filter(CCommit::Id.is_in(chunk))
-                .all(db)
-                .await
-        })
-        .await?
-        .into_iter()
-        .map(|c| (c.id, c))
-        .collect();
+    let commits: HashMap<CommitId, MCommit> = by_ids::<ECommit, _>(db, &commit_ids).await?;
 
     let user_ids: Vec<UserId> = evaluations.iter().filter_map(|e| e.started_by).collect();
-    let user_names: HashMap<UserId, String> =
-        gradient_db::fetch_in_chunks(&user_ids, |chunk| async move {
-            EUser::find().filter(CUser::Id.is_in(chunk)).all(db).await
-        })
+    let user_names: HashMap<UserId, String> = by_ids::<EUser, _>(db, &user_ids)
         .await?
         .into_iter()
-        .map(|u| (u.id, u.name))
+        .map(|(id, u)| (id, u.name))
         .collect();
 
     let status_counts =
@@ -595,10 +577,7 @@ pub async fn get_task_entry_points(
         None => return Ok(ok_json(PaginatedEntryPoints::default())),
     };
 
-    let evaluation = EEvaluation::find_by_id(eval_id)
-        .one(&state.web_db)
-        .await?
-        .or_not_found(Resource::Evaluation)?;
+    let evaluation = require::<EEvaluation>(&state.web_db, eval_id).await?;
 
     if evaluation.task != Some(task.id) {
         return Err(WebError::not_found(Resource::Evaluation));
@@ -967,9 +946,7 @@ pub async fn get_entry_point_download(
         {
             return Err(SharedRefusal::SourceIpNotAllowed.into());
         }
-        let user = EUser::find_by_id(decoded.user_id())
-            .one(&state.web_db)
-            .await?;
+        let user = by_id::<EUser, _>(&state.web_db, decoded.user_id()).await?;
         (user, decoded.api_key_context().cloned())
     } else {
         (maybe_user, api_key.as_ref().cloned())
@@ -989,10 +966,7 @@ pub async fn get_entry_point_download(
     }
 
     let evaluation_id = task.last_evaluation.or_not_found(Resource::Evaluation)?;
-    let evaluation = EEvaluation::find_by_id(evaluation_id)
-        .one(&state.web_db)
-        .await?
-        .or_not_found(Resource::Evaluation)?;
+    let evaluation = require::<EEvaluation>(&state.web_db, evaluation_id).await?;
 
     let ep = EEntryPoint::find()
         .filter(CEntryPoint::Evaluation.eq(evaluation.id))

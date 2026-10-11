@@ -7,11 +7,10 @@
 use crate::error::{WebError, WebResult};
 use crate::resource::Resource;
 use axum::Json;
+use gradient_db::lookup::by_ids;
 use gradient_types::ids::RoleId;
-use gradient_types::{BaseResponse, CRole, ERole, Paginated, PaginationParams};
-use sea_orm::{
-    ColumnTrait, ConnectionTrait, EntityTrait, PaginatorTrait, QueryFilter, SelectorTrait,
-};
+use gradient_types::{BaseResponse, ERole, Paginated, PaginationParams};
+use sea_orm::{ConnectionTrait, PaginatorTrait, SelectorTrait};
 use std::collections::HashMap;
 
 #[inline]
@@ -59,17 +58,9 @@ pub async fn role_names<C: ConnectionTrait>(
     db: &C,
     role_ids: Vec<RoleId>,
 ) -> WebResult<HashMap<RoleId, String>> {
-    if role_ids.is_empty() {
-        return Ok(HashMap::new());
-    }
-
-    let map = ERole::find()
-        .filter(CRole::Id.is_in(role_ids))
-        .all(db)
+    Ok(by_ids::<ERole, _>(db, &role_ids)
         .await?
         .into_iter()
-        .map(|r| (r.id, r.name))
-        .collect();
-
-    Ok(map)
+        .map(|(id, role)| (id, role.name))
+        .collect())
 }

@@ -7,8 +7,8 @@
 use crate::ActionError;
 use crate::context::CiContext;
 use anyhow::{Context, Result, anyhow};
+use gradient_db::lookup::by_id;
 use gradient_types::{ECommit, EProject, ETask, MCommit, MEvaluation, MTask, ProjectId};
-use sea_orm::EntityTrait;
 
 pub(super) struct EvaluationRows {
     pub task: MTask,
@@ -23,14 +23,12 @@ pub(super) async fn load_evaluation_rows(
         .task
         .ok_or_else(|| anyhow!("evaluation has no task (direct build)"))?;
 
-    let task = ETask::find_by_id(task_id)
-        .one(&ctx.db.worker_db)
+    let task = by_id::<ETask, _>(&ctx.db.worker_db, task_id)
         .await
         .context("load task")?
         .ok_or(ActionError::TaskNotFound { id: task_id })?;
 
-    let commit = ECommit::find_by_id(evaluation.commit)
-        .one(&ctx.db.worker_db)
+    let commit = by_id::<ECommit, _>(&ctx.db.worker_db, evaluation.commit)
         .await
         .context("load commit")?
         .ok_or_else(|| anyhow!("commit {} not found", evaluation.commit))?;
@@ -39,8 +37,7 @@ pub(super) async fn load_evaluation_rows(
 }
 
 pub(super) async fn load_project_name(ctx: &CiContext, project: ProjectId) -> Option<String> {
-    EProject::find_by_id(project)
-        .one(&ctx.db.worker_db)
+    by_id::<EProject, _>(&ctx.db.worker_db, project)
         .await
         .ok()
         .flatten()

@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use gradient_db::lookup::by_id;
 use gradient_db::projects::workers::project_has_eval_capable_worker_registration;
 use gradient_types::ids::ProjectId;
 use gradient_types::waiting_reason::WaitingReason;
@@ -59,10 +60,10 @@ pub async fn unpark_storage_full_all<C: ConnectionTrait>(
         .collect();
 
     let mut projects: Vec<ProjectId> = Vec::new();
-    for task in ETask::find()
-        .filter(CTask::Id.is_in(task_ids))
-        .all(db)
-        .await?
+    for task in gradient_db::fetch_in_chunks(&task_ids, |chunk| async move {
+        ETask::find().filter(CTask::Id.is_in(chunk)).all(db).await
+    })
+    .await?
     {
         if !projects.contains(&task.project) {
             projects.push(task.project);
@@ -164,7 +165,7 @@ pub async fn unpark_approval(
     db: &impl ConnectionTrait,
     evaluation_id: EvaluationId,
 ) -> Result<Option<MEvaluation>, sea_orm::DbErr> {
-    let Some(eval) = EEvaluation::find_by_id(evaluation_id).one(db).await? else {
+    let Some(eval) = by_id::<EEvaluation, _>(db, evaluation_id).await? else {
         return Ok(None);
     };
     if eval.status != EvaluationStatus::Waiting {
@@ -186,7 +187,7 @@ pub async fn unpark_approval_with_wildcard(
     evaluation_id: EvaluationId,
     wildcard: &str,
 ) -> Result<Option<MEvaluation>, sea_orm::DbErr> {
-    let Some(eval) = EEvaluation::find_by_id(evaluation_id).one(db).await? else {
+    let Some(eval) = by_id::<EEvaluation, _>(db, evaluation_id).await? else {
         return Ok(None);
     };
     if eval.status != EvaluationStatus::Waiting {
@@ -210,7 +211,7 @@ pub async fn set_evaluation_source_comment(
     evaluation_id: EvaluationId,
     source_comment: serde_json::Value,
 ) -> Result<(), sea_orm::DbErr> {
-    let Some(eval) = EEvaluation::find_by_id(evaluation_id).one(db).await? else {
+    let Some(eval) = by_id::<EEvaluation, _>(db, evaluation_id).await? else {
         return Ok(());
     };
     let mut ae: AEvaluation = eval.into();

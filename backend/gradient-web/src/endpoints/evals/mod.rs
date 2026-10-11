@@ -26,11 +26,11 @@ pub use self::types::*;
 use crate::access::is_project_member;
 use crate::authorization::ApiKeyContext;
 use crate::error::{WebError, WebResult};
-use crate::helpers::OptionExt;
+use crate::lookup::require;
 use crate::resource::Resource;
 use gradient_db::WebDb;
+use gradient_db::lookup::by_id;
 use gradient_types::*;
-use sea_orm::EntityTrait;
 
 /// Every failure is answered with `not_found(Resource::Evaluation)`. Callers cannot distinguish missing
 /// from forbidden.
@@ -48,16 +48,13 @@ impl EvalAccessContext {
         maybe_user: &Option<MUser>,
         api_key: Option<&ApiKeyContext>,
     ) -> WebResult<Self> {
-        let evaluation = EEvaluation::find_by_id(evaluation_id)
-            .one(db)
-            .await?
-            .or_not_found(Resource::Evaluation)?;
+        let evaluation = require::<EEvaluation>(db, evaluation_id).await?;
 
         let task_id = evaluation.task.ok_or_else(|| {
             tracing::warn!(%evaluation_id, "evaluation has no task");
             WebError::data_inconsistency(Resource::Evaluation)
         })?;
-        let task = ETask::find_by_id(task_id).one(db).await?.ok_or_else(|| {
+        let task = by_id::<ETask, _>(db, task_id).await?.ok_or_else(|| {
             tracing::warn!(
                 %task_id,
                 %evaluation_id,
@@ -69,13 +66,10 @@ impl EvalAccessContext {
         let task_name = Some(task.name);
         let task_display_name = Some(task.display_name);
 
-        let project = EProject::find_by_id(project_id)
-            .one(db)
-            .await?
-            .ok_or_else(|| {
-                tracing::warn!(%project_id, "Project not found");
-                WebError::data_inconsistency(Resource::Project)
-            })?;
+        let project = by_id::<EProject, _>(db, project_id).await?.ok_or_else(|| {
+            tracing::warn!(%project_id, "Project not found");
+            WebError::data_inconsistency(Resource::Project)
+        })?;
 
         let can_access = if project.public {
             true

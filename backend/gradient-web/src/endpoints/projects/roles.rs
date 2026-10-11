@@ -8,7 +8,8 @@ use crate::access::{Caller, ProjectAccess, load_project};
 use crate::audit::{RequestInfo, record as audit_record};
 use crate::authorization::MaybeApiKey;
 use crate::error::{WebError, WebResult};
-use crate::helpers::{OptionExt, ok_json};
+use crate::helpers::ok_json;
+use crate::lookup::require;
 use crate::permissions::{
     Permission, PermissionEntry, available_permissions, is_builtin_role, mask_to_vec,
     parse_permission_list,
@@ -77,10 +78,7 @@ pub struct PatchRoleRequest {
 }
 
 async fn load_project_role(db: &WebDb, project_id: ProjectId, role_id: RoleId) -> WebResult<MRole> {
-    let role = ERole::find_by_id(role_id)
-        .one(db)
-        .await?
-        .or_not_found(Resource::Role)?;
+    let role = require::<ERole>(db, role_id).await?;
 
     if let Some(owner) = role.project
         && owner != project_id

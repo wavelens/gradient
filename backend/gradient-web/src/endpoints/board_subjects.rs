@@ -5,6 +5,7 @@
  */
 
 use crate::metrics_scope::MetricsScope;
+use gradient_db::lookup::by_id;
 use gradient_types::input::vec_to_hex;
 use gradient_types::*;
 use sea_orm::sea_query::Query;
@@ -250,13 +251,13 @@ pub async fn job_evaluation<C: ConnectionTrait>(
     db: &C,
     evaluation: EvaluationId,
 ) -> Result<Option<JobEvaluationView>, DbErr> {
-    let Some(ev) = EEvaluation::find_by_id(evaluation).one(db).await? else {
+    let Some(ev) = by_id::<EEvaluation, _>(db, evaluation).await? else {
         return Ok(None);
     };
 
-    let commit = ECommit::find_by_id(ev.commit).one(db).await?;
+    let commit = by_id::<ECommit, _>(db, ev.commit).await?;
     let task = match ev.task {
-        Some(task) => ETask::find_by_id(task).one(db).await?.map(|t| t.name),
+        Some(task) => by_id::<ETask, _>(db, task).await?.map(|t| t.name),
         None => None,
     };
 

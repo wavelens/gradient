@@ -16,6 +16,7 @@ use axum::{Extension, Json};
 use chrono::NaiveDateTime;
 use gradient_core::ServerState;
 use gradient_db::WebDb;
+use gradient_db::lookup::by_ids;
 use gradient_scheduler::Scheduler;
 use gradient_types::events::EventOwner;
 use gradient_types::events::audit::Action;
@@ -71,35 +72,10 @@ pub struct TeamRequestItem {
 }
 
 async fn cache_role_names(db: &WebDb, ids: Vec<RoleId>) -> WebResult<HashMap<RoleId, String>> {
-    Ok(ECacheRole::find()
-        .filter(CCacheRole::Id.is_in(ids))
-        .all(db)
+    Ok(by_ids::<ECacheRole, _>(db, &ids)
         .await?
         .into_iter()
-        .map(|role| (role.id, role.name))
-        .collect())
-}
-
-async fn projects_by_id(
-    db: &WebDb,
-    ids: Vec<ProjectId>,
-) -> WebResult<HashMap<ProjectId, MProject>> {
-    Ok(EProject::find()
-        .filter(CProject::Id.is_in(ids))
-        .all(db)
-        .await?
-        .into_iter()
-        .map(|project| (project.id, project))
-        .collect())
-}
-
-async fn caches_by_id(db: &WebDb, ids: Vec<CacheId>) -> WebResult<HashMap<CacheId, MCache>> {
-    Ok(ECache::find()
-        .filter(CCache::Id.is_in(ids))
-        .all(db)
-        .await?
-        .into_iter()
-        .map(|cache| (cache.id, cache))
+        .map(|(id, role)| (id, role.name))
         .collect())
 }
 
@@ -127,14 +103,14 @@ pub async fn get_team_grants(
         .all(&state.web_db)
         .await?;
 
-    let projects = projects_by_id(
+    let projects = by_ids::<EProject, _>(
         &state.web_db,
-        project_grants.iter().map(|g| g.project).collect(),
+        &project_grants.iter().map(|g| g.project).collect::<Vec<_>>(),
     )
     .await?;
-    let caches = caches_by_id(
+    let caches = by_ids::<ECache, _>(
         &state.web_db,
-        cache_grants.iter().map(|g| g.cache).collect(),
+        &cache_grants.iter().map(|g| g.cache).collect::<Vec<_>>(),
     )
     .await?;
     let project_roles = role_names(
@@ -205,14 +181,17 @@ pub async fn get_team_requests(
         .all(&state.web_db)
         .await?;
 
-    let projects = projects_by_id(
+    let projects = by_ids::<EProject, _>(
         &state.web_db,
-        project_requests.iter().map(|r| r.project).collect(),
+        &project_requests
+            .iter()
+            .map(|r| r.project)
+            .collect::<Vec<_>>(),
     )
     .await?;
-    let caches = caches_by_id(
+    let caches = by_ids::<ECache, _>(
         &state.web_db,
-        cache_requests.iter().map(|r| r.cache).collect(),
+        &cache_requests.iter().map(|r| r.cache).collect::<Vec<_>>(),
     )
     .await?;
     let project_roles = role_names(
@@ -230,12 +209,10 @@ pub async fn get_team_requests(
         .filter_map(|r| r.requested_by)
         .chain(cache_requests.iter().filter_map(|r| r.requested_by))
         .collect();
-    let requesters: HashMap<UserId, String> = EUser::find()
-        .filter(CUser::Id.is_in(requester_ids))
-        .all(&state.web_db)
+    let requesters: HashMap<UserId, String> = by_ids::<EUser, _>(&state.web_db, &requester_ids)
         .await?
         .into_iter()
-        .map(|u| (u.id, u.username))
+        .map(|(id, u)| (id, u.username))
         .collect();
     let requester = |id: Option<UserId>| id.and_then(|id| requesters.get(&id).cloned());
 

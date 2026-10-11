@@ -10,10 +10,10 @@
 
 use anyhow::Result;
 use gradient_core::upstream_source::{UpstreamSource, fetch_upstream_log};
+use gradient_db::lookup::by_id;
 use gradient_db::{DbContext, WorkerDb};
 use gradient_entity::evaluation::Entity as EEvaluation;
 use gradient_types::ids::{DerivationBuildId, DerivationId, ProjectId};
-use sea_orm::EntityTrait;
 use tracing::{debug, warn};
 
 const UPSTREAM_WINDOW_MINUTES: i64 = 60;
@@ -100,7 +100,7 @@ async fn project_for_derivation(db: &WorkerDb, derivation: DerivationId) -> Opti
         .await
         .ok()?;
     for job in jobs {
-        if let Ok(Some(eval)) = EEvaluation::find_by_id(job.evaluation).one(db).await
+        if let Ok(Some(eval)) = by_id::<EEvaluation, _>(db, job.evaluation).await
             && let Some(project) = crate::loops::project_id_for_eval(db, &eval).await
         {
             return Some(project);

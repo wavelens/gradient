@@ -11,6 +11,7 @@ use crate::resource::Resource;
 use axum::extract::{Path, Query, State};
 use axum::{Extension, Json};
 use gradient_core::ServerState;
+use gradient_db::lookup::{by_id, by_ids};
 use gradient_types::input::vec_to_hex;
 use gradient_types::*;
 use sea_orm::{ColumnTrait, EntityTrait, Order, QueryFilter, QueryOrder};
@@ -35,8 +36,7 @@ pub async fn get_evaluation(
         .await?;
     let evaluation = ctx.evaluation;
 
-    let commit_hash = ECommit::find_by_id(evaluation.commit)
-        .one(&state.web_db)
+    let commit_hash = by_id::<ECommit, _>(&state.web_db, evaluation.commit)
         .await?
         .map(|c| vec_to_hex(&c.hash))
         .unwrap_or_default();
@@ -113,16 +113,12 @@ pub async fn get_evaluation(
     };
 
     let triggered_by = match evaluation.started_by {
-        Some(uid) => EUser::find_by_id(uid)
-            .one(&state.web_db)
-            .await?
-            .map(|u| u.name),
+        Some(uid) => by_id::<EUser, _>(&state.web_db, uid).await?.map(|u| u.name),
         None => None,
     };
 
     let trigger = if let Some(trigger_id) = evaluation.trigger {
-        ETaskTrigger::find_by_id(trigger_id)
-            .one(&state.web_db)
+        by_id::<ETaskTrigger, _>(&state.web_db, trigger_id)
             .await?
             .map(|t| EvaluationTriggerSummary {
                 id: trigger_id,
@@ -241,16 +237,8 @@ pub async fn get_evaluation_builds(
         .collect::<HashSet<_>>()
         .into_iter()
         .collect();
-    let mut shared_builds: HashMap<DerivationBuildId, MDerivationBuild> = HashMap::new();
-    for chunk in shared_build_ids.chunks(IS_IN_CHUNK) {
-        for row in EDerivationBuild::find()
-            .filter(CDerivationBuild::Id.is_in(chunk.to_vec()))
-            .all(&state.web_db)
-            .await?
-        {
-            shared_builds.insert(row.id, row);
-        }
-    }
+    let shared_builds: HashMap<DerivationBuildId, MDerivationBuild> =
+        by_ids::<EDerivationBuild, _>(&state.web_db, &shared_build_ids).await?;
 
     let drv_ids: Vec<DerivationId> = jobs
         .iter()

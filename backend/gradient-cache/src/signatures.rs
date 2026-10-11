@@ -5,6 +5,7 @@
  */
 
 use gradient_db::WorkerDb;
+use gradient_db::lookup::by_ids;
 use gradient_sources::CacheSigner;
 use gradient_types::*;
 use gradient_util::nix_hash::normalize_nar_hash;
@@ -116,21 +117,10 @@ impl SignSweep {
             .into_iter()
             .collect();
 
-        let caches: HashMap<CacheId, MCache> = ECache::find()
-            .filter(CCache::Id.is_in(cache_ids))
-            .all(&self.db)
-            .await?
-            .into_iter()
-            .map(|c| (c.id, c))
-            .collect();
+        let caches: HashMap<CacheId, MCache> = by_ids::<ECache, _>(&self.db, &cache_ids).await?;
 
-        let cached_paths: HashMap<CachedPathId, MCachedPath> = ECachedPath::find()
-            .filter(CCachedPath::Id.is_in(cached_path_ids))
-            .all(&self.db)
-            .await?
-            .into_iter()
-            .map(|c| (c.id, c))
-            .collect();
+        let cached_paths: HashMap<CachedPathId, MCachedPath> =
+            by_ids::<ECachedPath, _>(&self.db, &cached_path_ids).await?;
 
         let hashes: Vec<String> = cached_paths.values().map(|cp| cp.hash.clone()).collect();
         let private =

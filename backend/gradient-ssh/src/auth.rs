@@ -5,6 +5,7 @@
  */
 
 use crate::session::{Session, SshHandles};
+use gradient_db::lookup::by_id;
 use gradient_types::*;
 use russh::keys::{HashAlg, PublicKey};
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter, Set};
@@ -46,8 +47,7 @@ async fn load_session(
         return Ok(None);
     };
 
-    let Some(user) = EUser::find_by_id(key.user)
-        .one(&handles.db.web_db)
+    let Some(user) = by_id::<EUser, _>(&handles.db.web_db, key.user)
         .await?
         .filter(|u| u.active)
     else {

@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use gradient_db::lookup::by_id;
 use std::collections::{HashMap, HashSet};
 use std::sync::Mutex;
 use std::time::Instant;
@@ -523,7 +524,7 @@ pub async fn recover_drv_stuck_evals(db: &DbContext) -> Result<()> {
         let Some(task_id) = eval.task else {
             continue;
         };
-        let task = match ETask::find_by_id(task_id).one(&db.worker_db).await {
+        let task = match by_id::<ETask, _>(&db.worker_db, task_id).await {
             Ok(Some(p)) => p,
             Ok(None) => continue,
             Err(e) => {

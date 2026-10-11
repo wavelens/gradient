@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use gradient_db::lookup::by_id;
 use std::sync::Arc;
 
 use chrono::NaiveDateTime;
@@ -133,10 +134,7 @@ impl Scheduler {
         outcome: DispatchedJobOutcome,
         report: ReportedTimeline,
     ) -> TimelineLanding {
-        let row = match EDispatchedJob::find_by_id(assignment_id)
-            .one(&self.db.worker_db)
-            .await
-        {
+        let row = match by_id::<EDispatchedJob, _>(&self.db.worker_db, assignment_id).await {
             Ok(Some(row)) => row,
             Ok(None) => {
                 warn!(dispatch = %assignment_id, ?outcome, "no dispatched_job row for this report; outcome and phase timeline dropped");
