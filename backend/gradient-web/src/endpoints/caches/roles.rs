@@ -4,7 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use super::refusal::CacheRefusal;
 use crate::access::{CacheAccess, Caller, load_cache};
 use crate::audit::{RequestInfo, record as audit_record};
 use crate::authorization::MaybeApiKey;
@@ -14,6 +13,7 @@ use crate::permissions::{
     CachePermission, PermissionEntry, available_cache_permissions, cache_mask_to_vec,
     is_builtin_cache_role, parse_cache_permission_list,
 };
+use crate::refusal::{Change, SharedRefusal};
 use crate::resource::Resource;
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
@@ -238,11 +238,11 @@ pub async fn patch_cache_role(
     let role = load_cache_role(&state, cache.id, role_id).await?;
 
     if is_builtin_cache_role(role.id) {
-        return Err(CacheRefusal::BuiltinRoleNotModifiable.into());
+        return Err(SharedRefusal::BuiltinRole(Change::Modify).into());
     }
 
     if role.managed {
-        return Err(CacheRefusal::ManagedRoleNotModifiable.into());
+        return Err(SharedRefusal::StateManaged(Change::Modify, Resource::Role).into());
     }
 
     let previous_mask = role.permission;
@@ -323,11 +323,11 @@ pub async fn delete_cache_role(
     let role = load_cache_role(&state, cache.id, role_id).await?;
 
     if is_builtin_cache_role(role.id) {
-        return Err(CacheRefusal::BuiltinRoleNotDeletable.into());
+        return Err(SharedRefusal::BuiltinRole(Change::Delete).into());
     }
 
     if role.managed {
-        return Err(CacheRefusal::ManagedRoleNotDeletable.into());
+        return Err(SharedRefusal::StateManaged(Change::Delete, Resource::Role).into());
     }
 
     let in_use = ECacheUser::find()
@@ -337,10 +337,10 @@ pub async fn delete_cache_role(
         .await?
         .is_some();
     if in_use {
-        return Err(CacheRefusal::RoleAssignedToMembers.into());
+        return Err(SharedRefusal::RoleAssignedToMembers.into());
     }
     if gradient_db::teams::grants::cache_role_granted_to_a_team(&state.web_db, role_id).await? {
-        return Err(CacheRefusal::RoleGrantedToTeam.into());
+        return Err(SharedRefusal::RoleGrantedToTeam.into());
     }
 
     let role_name = role.name.clone();

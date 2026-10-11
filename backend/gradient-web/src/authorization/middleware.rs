@@ -22,9 +22,9 @@ use super::api_key::MaybeApiKey;
 use super::jwt::{bearer_token, decode_jwt, extract_bearer_or_cookie, session_cookie_token};
 use crate::audit::{RequestInfo, record as audit_record};
 use crate::client_ip::{ClientIp, resolve_client_ip};
-use crate::error::{ErrorCode, WebError, WebResult};
+use crate::error::{WebError, WebResult};
 use crate::ip_allowlist::is_allowed as ip_allowed;
-use crate::refusal::{Refusal, RefusalStatus};
+use crate::refusal::{Refusal, RefusalStatus, SharedRefusal};
 use gradient_types::events::EventOwner;
 use gradient_types::events::audit::Action;
 
@@ -39,29 +39,15 @@ enum Denial {
     NoCredentials,
     #[error("Unable to decode token")]
     UndecodableToken,
-    #[error("API key not allowed from this source IP")]
-    SourceIpNotAllowed,
     #[error("User not found")]
     UnknownUser,
-    #[error("account is deactivated")]
-    DeactivatedAccount,
 }
 
 impl Refusal for Denial {
     fn status(&self) -> RefusalStatus {
         match self {
             Self::UndecodableToken | Self::UnknownUser => RefusalStatus::Unauthorized,
-            Self::SourceIpNotAllowed
-            | Self::MalformedAuthorizationHeader
-            | Self::NoCredentials
-            | Self::DeactivatedAccount => RefusalStatus::Forbidden,
-        }
-    }
-
-    fn code(&self) -> ErrorCode {
-        match self {
-            Self::SourceIpNotAllowed => ErrorCode::FORBIDDEN_SOURCE_IP,
-            _ => self.status().default_code(),
+            Self::MalformedAuthorizationHeader | Self::NoCredentials => RefusalStatus::Forbidden,
         }
     }
 }
@@ -80,7 +66,7 @@ async fn deny(
     info: RequestInfo,
     method: String,
     path: String,
-    denial: Denial,
+    denial: impl Refusal,
 ) -> WebError {
     audit_record(
         state,
@@ -130,7 +116,7 @@ pub async fn authorize(
     let client_ip = resolve_client_ip(req.headers(), peer, &state.config.network.trusted_proxies);
     let api_key_context = decoded.api_key_context();
     if api_key_context.is_some_and(|context| !ip_allowed(client_ip, &context.allowed_ips)) {
-        let denial = Denial::SourceIpNotAllowed;
+        let denial = SharedRefusal::SourceIpNotAllowed;
         return Err(deny(&state, Some(user_id), info, method, path, denial).await);
     }
 
@@ -141,7 +127,7 @@ pub async fn authorize(
     };
 
     if !current_user.active {
-        let denial = Denial::DeactivatedAccount;
+        let denial = SharedRefusal::AccountDeactivated;
         return Err(deny(&state, Some(user_id), info, method, path, denial).await);
     }
 

@@ -11,6 +11,7 @@ use crate::authorization::{MaybeApiKey, MaybeUser};
 use crate::error::{WebError, WebResult, require_create_permission};
 use crate::helpers::ok_json;
 use crate::permissions::CachePermission;
+use crate::refusal::SharedRefusal;
 use crate::resource::Resource;
 use anyhow::Context;
 use axum::Extension;
@@ -134,7 +135,7 @@ pub async fn put(
     }
 
     if let Err(e) = validate_display_name(&body.display_name) {
-        return Err(CacheRefusal::InvalidDisplayName {
+        return Err(SharedRefusal::InvalidDisplayName {
             reason: e.to_string(),
         }
         .into());
@@ -337,7 +338,7 @@ pub async fn patch_cache(
     if let Some(display_name) = body.display_name {
         let display_name = display_name.trim().to_string();
         if let Err(e) = validate_display_name(&display_name) {
-            return Err(CacheRefusal::InvalidDisplayName {
+            return Err(SharedRefusal::InvalidDisplayName {
                 reason: e.to_string(),
             }
             .into());

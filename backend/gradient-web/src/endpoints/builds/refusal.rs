@@ -12,19 +12,15 @@ pub(crate) enum BuildReadRefusal {
     InvalidDownloadToken,
     #[error("range must look like L120-L130")]
     MalformedRange,
-    #[error("invalid range start")]
-    InvalidRangeStart,
-    #[error("invalid range end")]
-    InvalidRangeEnd,
+    #[error("invalid range {0}")]
+    InvalidRangeBound(&'static str),
 }
 
 impl Refusal for BuildReadRefusal {
     fn status(&self) -> RefusalStatus {
         match self {
             Self::InvalidDownloadToken => RefusalStatus::Unauthorized,
-            Self::MalformedRange | Self::InvalidRangeStart | Self::InvalidRangeEnd => {
-                RefusalStatus::BadRequest
-            }
+            Self::MalformedRange | Self::InvalidRangeBound(_) => RefusalStatus::BadRequest,
         }
     }
 }

@@ -5,13 +5,13 @@
  */
 
 use super::members::role_label;
-use super::refusal::TeamRefusal;
 use crate::access::{TeamAccess, load_team};
 use crate::audit::{RequestInfo, record as audit_record};
 use crate::authorization::MaybeApiKey;
 use crate::endpoints::projects::invitations::{PendingInvitationItem, RevokeInvitationRequest};
 use crate::error::WebResult;
 use crate::helpers::{OptionExt, ok_json};
+use crate::refusal::SharedRefusal;
 use crate::resource::Resource;
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
@@ -99,7 +99,7 @@ pub async fn delete_team_invitation(
         .filter(CTeamInvitation::User.eq(target_user.id))
         .one(&state.web_db)
         .await?
-        .ok_or(TeamRefusal::NoPendingInvitation)?;
+        .ok_or(SharedRefusal::NoPendingInvitation)?;
 
     invitation.into_active_model().delete(&state.web_db).await?;
 

@@ -13,6 +13,7 @@ use crate::authorization::MaybeApiKey;
 use crate::error::WebResult;
 use crate::helpers::ok_json;
 use crate::permissions::Permission;
+use crate::refusal::SharedRefusal;
 use axum::extract::State;
 use axum::{Extension, Json};
 use gradient_core::ServerState;
@@ -65,7 +66,7 @@ pub async fn post_url(
 
     let url = body.url.trim();
     if url.is_empty() {
-        return Err(BuildRequestRefusal::EmptyUrl.into());
+        return Err(SharedRefusal::EmptyField("url").into());
     }
 
     let input_overrides: Vec<(String, String)> = body
@@ -89,7 +90,7 @@ pub async fn post_url(
             let git_ref = body.git_ref.as_deref();
             let hash = resolve_remote_ref(&state.db(), &project, url, git_ref)
                 .await
-                .map_err(|e| BuildRequestRefusal::RepositoryUnreachable {
+                .map_err(|e| SharedRefusal::RepositoryStateFetchFailed {
                     reason: e.to_string(),
                 })?;
             (hash, git_ref.unwrap_or("HEAD").to_string())

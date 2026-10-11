@@ -9,7 +9,7 @@ use crate::authorization::MaybeApiKey;
 use crate::endpoints::user::forbid_via_api_key;
 use crate::error::{WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json};
-use crate::refusal::{Refusal, RefusalStatus};
+use crate::refusal::{Refusal, RefusalStatus, SharedRefusal};
 use crate::resource::Resource;
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
@@ -29,8 +29,6 @@ use std::sync::Arc;
 enum SshKeyRefusal {
     #[error("SSH not found")]
     SshDisabled,
-    #[error("Name must not be empty.")]
-    EmptyName,
     #[error("Not an OpenSSH public key.")]
     NotAnOpenSshKey,
 }
@@ -39,7 +37,7 @@ impl Refusal for SshKeyRefusal {
     fn status(&self) -> RefusalStatus {
         match self {
             Self::SshDisabled => RefusalStatus::NotFound,
-            Self::EmptyName | Self::NotAnOpenSshKey => RefusalStatus::BadRequest,
+            Self::NotAnOpenSshKey => RefusalStatus::BadRequest,
         }
     }
 }
@@ -109,7 +107,7 @@ pub async fn post_ssh_key(
     require_ssh(&state)?;
     let name = body.name.trim();
     if name.is_empty() {
-        return Err(SshKeyRefusal::EmptyName.into());
+        return Err(SharedRefusal::EmptyField("name").into());
     }
 
     let fingerprint = fingerprint(&body.public_key).map_err(|_| SshKeyRefusal::NotAnOpenSshKey)?;

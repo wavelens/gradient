@@ -7,6 +7,7 @@
 use super::refusal::AdminRefusal;
 use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
+use crate::refusal::SharedRefusal;
 use anyhow::Context;
 use axum::extract::{Query, State};
 use axum::response::Redirect;
@@ -41,7 +42,7 @@ fn default_host() -> String {
 
 pub fn validate_host(host: &str) -> Result<(), WebError> {
     if host.is_empty() {
-        return Err(AdminRefusal::EmptyHost.into());
+        return Err(SharedRefusal::EmptyField("host").into());
     }
 
     let ok = host

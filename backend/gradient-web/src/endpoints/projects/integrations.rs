@@ -15,6 +15,7 @@ use crate::authorization::MaybeApiKey;
 use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
 use crate::permissions::Permission;
+use crate::refusal::SharedRefusal;
 use crate::resource::Resource;
 use anyhow::Context;
 use axum::extract::{Path, State};
@@ -101,7 +102,7 @@ fn normalize_allowed_ips(raw: Option<Vec<String>>) -> Result<Option<Vec<String>>
     let mut out = Vec::with_capacity(entries.len());
     for e in entries {
         let canon = crate::ip_allowlist::normalize_entry(&e).map_err(|err| {
-            ProjectRefusal::InvalidAllowedIp {
+            SharedRefusal::InvalidAllowedIp {
                 entry: e.clone(),
                 reason: err.to_string(),
             }
@@ -456,7 +457,7 @@ pub async fn patch_integration(
     if let Some(display_name) = body.display_name {
         let trimmed = display_name.trim().to_string();
         if trimmed.is_empty() {
-            return Err(ProjectRefusal::EmptyDisplayName.into());
+            return Err(SharedRefusal::EmptyField("display_name").into());
         }
         active.display_name = Set(trimmed);
     }

@@ -15,6 +15,7 @@ use crate::endpoints::teams::workers::{reauth_team_workers, withdraw_team_worker
 use crate::error::{WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json};
 use crate::permissions::{CachePermission, Permission};
+use crate::refusal::{Change, SharedRefusal};
 use crate::resource::Resource;
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
@@ -282,7 +283,7 @@ pub async fn post_project_team(
         )
         .await?
     {
-        return Err(TeamRefusal::GrantNotPermitted.into());
+        return Err(SharedRefusal::MissingPermission.into());
     }
 
     let team = find_team(&state, &body.team).await?;
@@ -472,7 +473,7 @@ pub async fn delete_project_team(
         return Err(WebError::not_found(Resource::TeamGrant));
     }
     if project.managed {
-        return Err(TeamRefusal::ManagedProjectNotEditable.into());
+        return Err(SharedRefusal::StateManaged(Change::Modify, Resource::Project).into());
     }
 
     let Some(grant) = grant else {
@@ -750,7 +751,7 @@ pub async fn delete_cache_team(
         return Err(WebError::not_found(Resource::TeamGrant));
     }
     if cache.managed {
-        return Err(TeamRefusal::ManagedCacheNotEditable.into());
+        return Err(SharedRefusal::StateManaged(Change::Modify, Resource::Cache).into());
     }
 
     let Some(grant) = grant else {

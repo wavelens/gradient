@@ -4,7 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use super::refusal::CacheRefusal;
 use crate::access::{CacheAccess, Caller, load_cache};
 use crate::audit::{RequestInfo, record as audit_record};
 use crate::authorization::MaybeApiKey;
@@ -12,6 +11,7 @@ use crate::error::{WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json};
 use crate::invite_policy::invitation_expiry;
 use crate::permissions::CachePermission;
+use crate::refusal::SharedRefusal;
 use crate::resource::Resource;
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
@@ -300,7 +300,7 @@ pub async fn patch_cache_member(
 
     let membership = find_cache_membership(&state, cache.id, target_user.id)
         .await?
-        .ok_or(CacheRefusal::NotACacheMember)?;
+        .ok_or(SharedRefusal::NotAMember(Resource::Cache))?;
 
     let previous_role_id = membership.role;
     let role = ECacheRole::find()
@@ -365,7 +365,7 @@ pub async fn delete_cache_member(
 
     let membership = find_cache_membership(&state, cache.id, target_user.id)
         .await?
-        .ok_or(CacheRefusal::NotACacheMember)?;
+        .ok_or(SharedRefusal::NotAMember(Resource::Cache))?;
 
     if membership.role == BASE_CACHE_ROLE_ADMIN_ID {
         let admin_count = ECacheUser::find()
@@ -374,7 +374,7 @@ pub async fn delete_cache_member(
             .count(&state.web_db)
             .await?;
         if admin_count <= 1 {
-            return Err(CacheRefusal::LastAdminRemoval.into());
+            return Err(SharedRefusal::LastAdmin(Resource::Cache).into());
         }
     }
 

@@ -4,7 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use super::refusal::ProjectRefusal;
 use crate::access::{Caller, ProjectAccess, load_project};
 use crate::audit::{RequestInfo, record as audit_record};
 use crate::authorization::MaybeApiKey;
@@ -14,6 +13,7 @@ use crate::permissions::{
     Permission, PermissionEntry, available_permissions, is_builtin_role, mask_to_vec,
     parse_permission_list,
 };
+use crate::refusal::{Change, SharedRefusal};
 use crate::resource::Resource;
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
@@ -243,11 +243,11 @@ pub async fn patch_project_role(
     let role = load_project_role(&state, project.id, role_id).await?;
 
     if is_builtin_role(role.id) {
-        return Err(ProjectRefusal::BuiltinRoleNotEditable.into());
+        return Err(SharedRefusal::BuiltinRole(Change::Modify).into());
     }
 
     if role.managed {
-        return Err(ProjectRefusal::ManagedRoleNotEditable.into());
+        return Err(SharedRefusal::StateManaged(Change::Modify, Resource::Role).into());
     }
 
     let previous_mask = role.permission;
@@ -328,11 +328,11 @@ pub async fn delete_project_role(
     let role = load_project_role(&state, project.id, role_id).await?;
 
     if is_builtin_role(role.id) {
-        return Err(ProjectRefusal::BuiltinRoleNotDeletable.into());
+        return Err(SharedRefusal::BuiltinRole(Change::Delete).into());
     }
 
     if role.managed {
-        return Err(ProjectRefusal::ManagedRoleNotDeletable.into());
+        return Err(SharedRefusal::StateManaged(Change::Delete, Resource::Role).into());
     }
 
     let in_use = EProjectUser::find()
@@ -342,10 +342,10 @@ pub async fn delete_project_role(
         .await?
         .is_some();
     if in_use {
-        return Err(ProjectRefusal::RoleAssignedToMembers.into());
+        return Err(SharedRefusal::RoleAssignedToMembers.into());
     }
     if gradient_db::teams::grants::project_role_granted_to_a_team(&state.web_db, role_id).await? {
-        return Err(ProjectRefusal::RoleGrantedToTeam.into());
+        return Err(SharedRefusal::RoleGrantedToTeam.into());
     }
 
     let role_name = role.name.clone();

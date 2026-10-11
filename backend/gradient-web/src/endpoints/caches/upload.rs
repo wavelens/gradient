@@ -103,10 +103,10 @@ pub async fn nars_upload(
         Some(n) => n,
         None => {
             let _ = upload_store.discard(&stage_key).await;
-            return Err(CacheRefusal::MissingNarinfoPart.into());
+            return Err(CacheRefusal::MissingPart("narinfo").into());
         }
     };
-    let staged_size = staged_size.ok_or(CacheRefusal::MissingNarPart)?;
+    let staged_size = staged_size.ok_or(CacheRefusal::MissingPart("nar"))?;
 
     if staged_size as i64 != narinfo.file_size {
         let _ = upload_store.discard(&stage_key).await;

@@ -141,12 +141,12 @@ fn parse_line_range(q: &LineRangeQuery) -> Result<(u64, Option<u64>), WebError> 
         let start: u64 = lo
             .trim()
             .parse()
-            .map_err(|_| BuildReadRefusal::InvalidRangeStart)?;
+            .map_err(|_| BuildReadRefusal::InvalidRangeBound("start"))?;
 
         let end: u64 = hi
             .trim()
             .parse()
-            .map_err(|_| BuildReadRefusal::InvalidRangeEnd)?;
+            .map_err(|_| BuildReadRefusal::InvalidRangeBound("end"))?;
 
         return Ok((start.max(1), Some(end)));
     }

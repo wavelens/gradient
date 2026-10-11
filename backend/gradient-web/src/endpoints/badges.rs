@@ -16,39 +16,13 @@ use std::sync::Arc;
 
 use crate::access::is_project_member;
 use crate::authorization::{ApiKeyContext, MaybeApiKey, MaybeUser};
-use crate::error::{ErrorCode, WebError};
+use crate::error::WebError;
 use crate::helpers::OptionExt;
-use crate::refusal::{Refusal, RefusalStatus};
+use crate::refusal::SharedRefusal;
 use crate::resource::Resource;
 use gradient_core::ServerState;
 use gradient_db::lookup::get_any_project_by_name;
 use gradient_types::*;
-
-#[derive(Debug, thiserror::Error)]
-enum BadgeRefusal {
-    #[error("Invalid token")]
-    InvalidToken,
-    #[error("API key not allowed from this source IP")]
-    SourceIpNotAllowed,
-    #[error("Authorization required")]
-    AuthorizationRequired,
-}
-
-impl Refusal for BadgeRefusal {
-    fn status(&self) -> RefusalStatus {
-        match self {
-            Self::InvalidToken | Self::AuthorizationRequired => RefusalStatus::Unauthorized,
-            Self::SourceIpNotAllowed => RefusalStatus::Forbidden,
-        }
-    }
-
-    fn code(&self) -> ErrorCode {
-        match self {
-            Self::SourceIpNotAllowed => ErrorCode::FORBIDDEN_SOURCE_IP,
-            _ => self.status().default_code(),
-        }
-    }
-}
 
 #[derive(Deserialize, Debug)]
 pub struct BadgeParams {
@@ -158,11 +132,11 @@ async fn resolve_badge_user(
         Some(tok) => {
             let decoded = crate::authorization::decode_jwt(State(Arc::clone(state)), tok)
                 .await
-                .map_err(|_| BadgeRefusal::InvalidToken)?;
+                .map_err(|_| SharedRefusal::InvalidToken)?;
             if let Some(ctx) = decoded.api_key_context()
                 && !crate::ip_allowlist::is_allowed(client_ip, &ctx.allowed_ips)
             {
-                return Err(BadgeRefusal::SourceIpNotAllowed.into());
+                return Err(SharedRefusal::SourceIpNotAllowed.into());
             }
             let user = EUser::find_by_id(decoded.user_id())
                 .one(&state.web_db)
@@ -188,7 +162,7 @@ async fn check_badge_project_access(
                 return Err(WebError::not_found(Resource::Project));
             }
         }
-        None => return Err(BadgeRefusal::AuthorizationRequired.into()),
+        None => return Err(SharedRefusal::AuthorizationRequired.into()),
     }
     Ok(())
 }

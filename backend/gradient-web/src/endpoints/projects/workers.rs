@@ -35,6 +35,7 @@ use uuid::Uuid;
 use super::refusal::ProjectRefusal;
 use crate::error::{WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json};
+use crate::refusal::SharedRefusal;
 
 fn default_true() -> bool {
     true
@@ -192,7 +193,7 @@ pub async fn post_project_worker(
     .await?;
 
     let worker_uuid =
-        Uuid::parse_str(&body.worker_id).map_err(|_| ProjectRefusal::InvalidWorkerId)?;
+        Uuid::parse_str(&body.worker_id).map_err(|_| SharedRefusal::InvalidWorkerId)?;
     let worker_id_str = worker_uuid.to_string();
     if gradient_db::teams::workers::is_team_worker(&state.web_db, &worker_id_str).await? {
         return Err(ProjectRefusal::WorkerIdBelongsToTeamWorker.into());
@@ -564,7 +565,7 @@ pub async fn patch_project_worker(
         .or_not_found(Resource::WorkerRegistration)?;
 
     if reg.managed && patch_edits_managed_fields(&body) {
-        return Err(ProjectRefusal::WorkerManagedByState.into());
+        return Err(SharedRefusal::WorkerManagedByState.into());
     }
 
     let mut active_model: AWorkerRegistration = reg.into();

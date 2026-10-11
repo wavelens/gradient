@@ -13,6 +13,7 @@ use crate::authorization::{MaybeApiKey, MaybeUser};
 use crate::error::{WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json, paginate};
 use crate::permissions::Permission;
+use crate::refusal::{Change, SharedRefusal};
 use crate::resource::Resource;
 use axum::extract::{Path, Query, State};
 use axum::{Extension, Json};
@@ -206,7 +207,7 @@ pub async fn put(
     }
 
     if let Err(e) = validate_display_name(&body.display_name) {
-        return Err(TaskRefusal::InvalidDisplayName {
+        return Err(SharedRefusal::InvalidDisplayName {
             reason: e.to_string(),
         }
         .into());
@@ -519,7 +520,7 @@ impl<'a> TaskPatcher<'a> {
     fn apply_display_name(&mut self, display_name: String) -> WebResult<()> {
         let display_name = display_name.trim().to_string();
         if let Err(e) = validate_display_name(&display_name) {
-            return Err(TaskRefusal::InvalidDisplayName {
+            return Err(SharedRefusal::InvalidDisplayName {
                 reason: e.to_string(),
             }
             .into());
@@ -748,7 +749,7 @@ pub async fn post_task_transfer(
     }
 
     if task.managed {
-        return Err(TaskRefusal::ManagedTaskTransfer.into());
+        return Err(SharedRefusal::StateManaged(Change::TransferOwnership, Resource::Task).into());
     }
 
     let new_project = load_project(

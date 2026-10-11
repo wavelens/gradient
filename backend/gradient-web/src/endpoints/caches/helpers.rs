@@ -10,6 +10,7 @@ use crate::client_ip::resolve_client_ip;
 use crate::error::{WebError, WebResult};
 use crate::helpers::OptionExt;
 use crate::ip_allowlist::is_allowed as ip_allowed;
+use crate::refusal::SharedRefusal;
 use crate::resource::Resource;
 use anyhow::Context;
 use axum::extract::State;
@@ -56,7 +57,7 @@ async fn try_authenticate_basic(
     if let Some(ctx) = decoded.api_key_context()
         && !ip_allowed(client_ip, &ctx.allowed_ips)
     {
-        return Err(CacheRefusal::ApiKeyWrongSourceIp.into());
+        return Err(SharedRefusal::SourceIpNotAllowed.into());
     }
     Ok(EUser::find_by_id(decoded.user_id())
         .one(&state.web_db)
@@ -175,10 +176,10 @@ async fn get_nar_by_hash_inner(
         .nar_hash
         .as_deref()
         .map(normalize_nar_hash)
-        .ok_or(CacheRefusal::NarHashNotStored)?;
+        .ok_or(CacheRefusal::NotRecorded("NarHash"))?;
     let nar_size = cached_path_row
         .nar_size
-        .ok_or(CacheRefusal::NarSizeNotStored)? as u64;
+        .ok_or(CacheRefusal::NotRecorded("NarSize"))? as u64;
     let references = gradient_db::graph::runtime_closure::references_for_hash(
         &state.web_db,
         &cached_path_row.hash,
@@ -199,11 +200,11 @@ async fn get_nar_by_hash_inner(
         .file_hash
         .as_deref()
         .map(normalize_nar_hash)
-        .ok_or(CacheRefusal::FileHashNotStored)?;
+        .ok_or(CacheRefusal::NotRecorded("FileHash"))?;
     let file_hash_nix32 = strip_hash_algo(&file_hash).to_string();
     let file_size = cached_path_row
         .file_size
-        .ok_or(CacheRefusal::FileSizeNotStored)? as u32;
+        .ok_or(CacheRefusal::NotRecorded("FileSize"))? as u32;
 
     Ok(NixPathInfo {
         store_path: path,
@@ -260,18 +261,18 @@ async fn get_nar_by_cached_path(
     let file_hash = cached_path_row
         .file_hash
         .clone()
-        .ok_or(CacheRefusal::MissingFileHash)?;
+        .ok_or(CacheRefusal::MissingFileField("hash"))?;
     let file_size = cached_path_row
         .file_size
-        .ok_or(CacheRefusal::MissingFileSize)? as u32;
+        .ok_or(CacheRefusal::MissingFileField("size"))? as u32;
     let nar_hash = cached_path_row
         .nar_hash
         .as_deref()
         .map(normalize_nar_hash)
-        .ok_or(CacheRefusal::NarHashNotStored)?;
+        .ok_or(CacheRefusal::NotRecorded("NarHash"))?;
     let nar_size = cached_path_row
         .nar_size
-        .ok_or(CacheRefusal::NarSizeNotStored)? as u64;
+        .ok_or(CacheRefusal::NotRecorded("NarSize"))? as u64;
     let references = gradient_db::graph::runtime_closure::references_for_hash(
         &state.web_db,
         &cached_path_row.hash,

@@ -16,6 +16,7 @@ use crate::endpoints::{archive_headers, build_product_headers};
 use crate::error::{WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json};
 use crate::permissions::Permission;
+use crate::refusal::SharedRefusal;
 use crate::resource::Resource;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
@@ -256,7 +257,7 @@ pub async fn post_task_evaluate(
         }
         None => {
             let head = head_commit(&state.db(), &task, None).await.map_err(|e| {
-                TaskRefusal::RepositoryStateFetchFailed {
+                SharedRefusal::RepositoryStateFetchFailed {
                     reason: e.to_string(),
                 }
             })?;
@@ -945,11 +946,11 @@ pub async fn get_entry_point_download(
     let (resolved_user, resolved_key) = if let Some(token_str) = params.token {
         let decoded = crate::authorization::decode_jwt(State(Arc::clone(&state)), token_str)
             .await
-            .map_err(|_| TaskRefusal::InvalidToken)?;
+            .map_err(|_| SharedRefusal::InvalidToken)?;
         if let Some(ctx) = decoded.api_key_context()
             && !crate::ip_allowlist::is_allowed(client_ip, &ctx.allowed_ips)
         {
-            return Err(TaskRefusal::SourceIpNotAllowed.into());
+            return Err(SharedRefusal::SourceIpNotAllowed.into());
         }
         let user = EUser::find_by_id(decoded.user_id())
             .one(&state.web_db)
@@ -966,7 +967,7 @@ pub async fn get_entry_point_download(
                     return Err(WebError::not_found(Resource::Task));
                 }
             }
-            None => return Err(TaskRefusal::AuthorizationRequired.into()),
+            None => return Err(SharedRefusal::AuthorizationRequired.into()),
         }
     }
 
