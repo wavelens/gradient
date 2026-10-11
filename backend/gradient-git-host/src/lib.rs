@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+mod client;
 pub mod git_push;
 pub mod github_app;
 pub mod pr;

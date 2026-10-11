@@ -4,7 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use anyhow::{Context, Result, anyhow, bail};
+use crate::client::{GITHUB_API_URL, HostClient};
+use anyhow::{Context, Result, anyhow};
 use base64::{Engine, engine::general_purpose};
 use hmac::{Hmac, KeyInit, Mac};
 use ring::signature::{self, RsaKeyPair};
@@ -77,28 +78,14 @@ pub async fn get_installation_token(
 ) -> Result<String> {
     let jwt = generate_jwt(app_id, private_key_pem)?;
 
-    let url = format!("https://api.github.com/app/installations/{installation_id}/access_tokens");
     debug!(installation_id, "requesting GitHub App installation token");
 
-    let resp = client
-        .post(&url)
-        .bearer_auth(&jwt)
-        .header("Accept", "application/vnd.github+json")
-        .header("X-GitHub-Api-Version", "2022-11-28")
-        .send()
-        .await
-        .context("send GitHub installation token request")?;
-
-    if !resp.status().is_success() {
-        let status = resp.status();
-        let body = resp.text().await.unwrap_or_default();
-        bail!("GitHub installation token API returned {status}: {body}");
-    }
-
-    let token_resp: InstallationTokenResponse = resp
-        .json()
-        .await
-        .context("parse GitHub installation token response")?;
+    let token_resp: InstallationTokenResponse =
+        HostClient::github(client.clone(), GITHUB_API_URL, jwt)
+            .post_json_empty(&format!(
+                "/app/installations/{installation_id}/access_tokens"
+            ))
+            .await?;
 
     Ok(token_resp.token)
 }
@@ -153,25 +140,11 @@ async fn app_get<T: serde::de::DeserializeOwned>(
     path: &str,
 ) -> Result<T> {
     let jwt = generate_jwt(app_id, private_key_pem)?;
-    let resp = client
-        .get(format!("https://api.github.com/{path}"))
-        .bearer_auth(&jwt)
-        .header("Accept", "application/vnd.github+json")
-        .header("X-GitHub-Api-Version", "2022-11-28")
-        .header("User-Agent", "gradient")
-        .send()
-        .await
-        .with_context(|| format!("send GitHub GET /{path}"))?;
 
-    if !resp.status().is_success() {
-        let status = resp.status();
-        let body = resp.text().await.unwrap_or_default();
-        bail!("GitHub GET /{path} returned {status}: {body}");
-    }
-
-    resp.json()
-        .await
-        .with_context(|| format!("parse GitHub GET /{path} response"))
+    Ok(HostClient::github(client.clone(), GITHUB_API_URL, jwt)
+        .with_user_agent("gradient")
+        .get_json(&format!("/{path}"))
+        .await?)
 }
 
 pub fn verify_github_signature(secret: &str, signature_header: &str, body: &[u8]) -> bool {
