@@ -6,7 +6,47 @@
 
 { lib, pkgs, config, ... }: let
   cfg = config.services.gradient;
-  serverOptions = import ./server-options.nix { inherit lib; };
+  serverOptions = import ./options.nix {
+    inherit lib;
+    specs = builtins.fromJSON (builtins.readFile ../../backend/gradient-types/options.json);
+    enabledGroups = [ "oidc" "scim" "email" "s3" "github_app" "ssh" ];
+    withoutEnvironment = [ [ "database" "url" ] [ "state" "file" ] [ "state" "validate" ] [ "state" "delete" ] ];
+
+    subGroups = {
+      "" = [ "frontend" ];
+      database = [ "cache" "web" ];
+      email = [ "smtp" "from" ];
+      eval = [ "cache" ];
+      log = [ "level" ];
+      metrics = [ "retention" "otlp" ];
+      proto = [ "anonymous_cache" ];
+    };
+
+    writtenByHand = [
+      [ "serveUrl" ]
+      [ "baseDir" ]
+      [ "frontend" "url" ]
+      [ "database" "url" ]
+      [ "nar" "chunkBytes" ]
+      [ "email" "smtp" "host" ]
+      [ "email" "smtp" "username" ]
+      [ "email" "from" "address" ]
+      [ "oidc" "clientId" ]
+      [ "oidc" "discoveryUrl" ]
+      [ "s3" "bucket" ]
+      [ "githubApp" "id" ]
+      [ "log" "level" "default" ]
+      [ "log" "level" "web" ]
+      [ "log" "level" "cache" ]
+      [ "log" "level" "proto" ]
+      [ "log" "level" "scheduler" ]
+      [ "ssh" "enable" ]
+      [ "state" "file" ]
+      [ "state" "validate" ]
+      [ "state" "delete" ]
+    ];
+  };
+
   logLevelType = lib.types.enum [ "trace" "debug" "info" "warn" "error" ];
   environmentValue = value: if lib.isBool value then lib.boolToString value else lib.mapNullable toString value;
 
