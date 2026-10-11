@@ -10,7 +10,7 @@ use crate::helpers::OptionExt;
 use crate::permissions::{
     CachePermission, Permission, PermissionMask, cache_mask_grants, mask_grants,
 };
-use crate::refusal::{Refusal, RefusalStatus};
+use crate::refusal::{Change, Refusal, RefusalStatus, SharedRefusal};
 use crate::resource::Resource;
 use gradient_core::ServerState;
 use gradient_db::lookup::{get_any_cache_by_name, get_any_project_by_name, get_any_task_by_name};
@@ -29,50 +29,17 @@ use std::sync::Arc;
 enum AccessRefusal {
     #[error("Cache-pinned API key cannot be used on this endpoint.")]
     CachePinnedKeyOnEndpoint,
-    #[error(
-        "Cannot modify state-managed task. This task is managed by configuration and cannot be edited through the API."
-    )]
-    ManagedTask,
     #[error("API key is pinned to a different cache.")]
     KeyPinnedToDifferentCache,
-    #[error("You do not have permission to perform this action.")]
-    MissingPermission,
-    #[error(
-        "Cannot modify state-managed project. This project is managed by configuration and cannot be edited through the API."
-    )]
-    ManagedProject,
     #[error("Missing cache permission `{permission}`.")]
     MissingCachePermission { permission: String },
-    #[error(
-        "Cannot modify state-managed integration. This integration is managed by configuration and cannot be edited through the API."
-    )]
-    ManagedIntegration,
-    #[error(
-        "Cannot modify state-managed cache. This cache is managed by configuration and cannot be edited through the API."
-    )]
-    ManagedCache,
     #[error("A pinned API key cannot be used on team endpoints.")]
     PinnedKeyOnTeamEndpoint,
-    #[error(
-        "Cannot modify state-managed team. This team is managed by configuration and cannot be edited through the API."
-    )]
-    ManagedTeam,
 }
 
 impl Refusal for AccessRefusal {
     fn status(&self) -> RefusalStatus {
-        match self {
-            Self::CachePinnedKeyOnEndpoint
-            | Self::ManagedTask
-            | Self::KeyPinnedToDifferentCache
-            | Self::MissingPermission
-            | Self::ManagedProject
-            | Self::MissingCachePermission { .. }
-            | Self::ManagedIntegration
-            | Self::ManagedCache
-            | Self::PinnedKeyOnTeamEndpoint
-            | Self::ManagedTeam => RefusalStatus::Forbidden,
-        }
+        RefusalStatus::Forbidden
     }
 }
 
@@ -239,7 +206,7 @@ pub async fn load_task(
             let uid = caller.user_id().ok_or_else(|| WebError::not_found(label))?;
             require_project_permission(state, uid, project.id, permission, label, api_key).await?;
             if reject_managed && task.managed {
-                return Err(AccessRefusal::ManagedTask.into());
+                return Err(SharedRefusal::StateManaged(Change::Modify, Resource::Task).into());
             }
         }
     }
@@ -428,7 +395,7 @@ async fn require_project_permission(
         .ok_or_else(|| WebError::not_found(not_found_label))?;
 
     if !mask_grants(mask, permission) {
-        return Err(AccessRefusal::MissingPermission.into());
+        return Err(SharedRefusal::MissingPermission.into());
     }
 
     Ok(())
@@ -436,7 +403,7 @@ async fn require_project_permission(
 
 fn reject_managed_project(project: &MProject) -> WebResult<()> {
     if project.managed {
-        return Err(AccessRefusal::ManagedProject.into());
+        return Err(SharedRefusal::StateManaged(Change::Modify, Resource::Project).into());
     }
     Ok(())
 }
@@ -608,14 +575,14 @@ async fn admin_emails(state: &Arc<ServerState>, ids: Vec<UserId>) -> WebResult<V
 
 pub(crate) fn reject_managed_integration(integration: &MIntegration) -> WebResult<()> {
     if integration.managed {
-        return Err(AccessRefusal::ManagedIntegration.into());
+        return Err(SharedRefusal::StateManaged(Change::Modify, Resource::Integration).into());
     }
     Ok(())
 }
 
 pub(crate) fn reject_managed_cache(cache: &MCache) -> WebResult<()> {
     if cache.managed {
-        return Err(AccessRefusal::ManagedCache.into());
+        return Err(SharedRefusal::StateManaged(Change::Modify, Resource::Cache).into());
     }
     Ok(())
 }
@@ -647,7 +614,7 @@ pub async fn load_team(
     match (access, role) {
         (_, None) if !user.superuser => return Err(WebError::not_found(Resource::Team)),
         (TeamAccess::Admin { .. }, Some(TeamRole::Member)) if !user.superuser => {
-            return Err(AccessRefusal::MissingPermission.into());
+            return Err(SharedRefusal::MissingPermission.into());
         }
         _ => {}
     }
@@ -657,7 +624,7 @@ pub async fn load_team(
     } = access
         && team.managed
     {
-        return Err(AccessRefusal::ManagedTeam.into());
+        return Err(SharedRefusal::StateManaged(Change::Modify, Resource::Team).into());
     }
 
     Ok((team, role))

@@ -4,7 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use super::refusal::ProjectRefusal;
 use crate::access::{Caller, ProjectAccess, load_project};
 use crate::audit::{RequestInfo, record as audit_record};
 use crate::authorization::{MaybeApiKey, MaybeUser};
@@ -12,6 +11,7 @@ use crate::error::{WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json, role_names};
 use crate::invite_policy::invitation_expiry;
 use crate::permissions::Permission;
+use crate::refusal::SharedRefusal;
 use crate::resource::Resource;
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
@@ -290,7 +290,7 @@ pub async fn patch_project_users(
 
     let membership = find_project_membership(&state, project.id, target_user.id)
         .await?
-        .ok_or(ProjectRefusal::NotAProjectMember)?;
+        .ok_or(SharedRefusal::NotAMember(Resource::Project))?;
 
     let previous_role_id = membership.role;
     let role = ERole::find()
@@ -353,7 +353,7 @@ pub async fn delete_project_users(
 
     let membership = find_project_membership(&state, project.id, target_user.id)
         .await?
-        .ok_or(ProjectRefusal::NotAProjectMember)?;
+        .ok_or(SharedRefusal::NotAMember(Resource::Project))?;
 
     let active: AProjectUser = membership.into();
     active.delete(&state.web_db).await?;

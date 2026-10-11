@@ -4,7 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::error::ErrorCode;
 use crate::refusal::{Refusal, RefusalStatus};
 
 #[derive(Debug, thiserror::Error)]
@@ -27,12 +26,8 @@ pub(crate) enum BuildRequestRefusal {
     BlobsStillMissing { count: usize },
     #[error("Specify at most one of `ref` and `rev`")]
     RefAndRevTogether,
-    #[error("`url` must not be empty")]
-    EmptyUrl,
     #[error("`rev` must be a 40-character hex hash")]
     InvalidRev,
-    #[error("Failed to resolve repository state: {reason}")]
-    RepositoryUnreachable { reason: String },
     #[error("Invalid repository URL: {reason}")]
     InvalidRepositoryUrl { reason: String },
     #[error("Invalid multipart payload: {reason}")]
@@ -75,9 +70,7 @@ impl Refusal for BuildRequestRefusal {
             | Self::DuplicateManifestPath { .. }
             | Self::NegativeFileSize { .. }
             | Self::RefAndRevTogether
-            | Self::EmptyUrl
             | Self::InvalidRev
-            | Self::RepositoryUnreachable { .. }
             | Self::InvalidRepositoryUrl { .. }
             | Self::InvalidMultipartPayload { .. }
             | Self::MissingFieldName
@@ -90,13 +83,6 @@ impl Refusal for BuildRequestRefusal {
             | Self::InvalidUploadId
             | Self::NoStagedSourceUpload { .. }
             | Self::EmptySourceUpload => RefusalStatus::BadRequest,
-        }
-    }
-
-    fn code(&self) -> ErrorCode {
-        match self {
-            Self::RepositoryUnreachable { .. } => ErrorCode::REPOSITORY_UNREACHABLE,
-            other => other.status().default_code(),
         }
     }
 }

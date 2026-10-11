@@ -7,13 +7,13 @@
 use crate::access::{CacheAccess, Caller, effective_cache_mask, load_cache};
 use crate::audit::{RequestInfo, record as audit_record};
 use crate::authorization::{MaybeApiKey, generate_api_key, hash_api_key, session_claims};
-use crate::error::{ErrorCode, WebError, WebResult};
+use crate::error::{WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json, paginate};
 use crate::permissions::{
     PermissionEntry, available_cache_permissions, available_permissions, mask_to_vec,
     parse_cache_permission_list, parse_permission_list,
 };
-use crate::refusal::{Refusal, RefusalStatus};
+use crate::refusal::{Change, Refusal, RefusalStatus, SharedRefusal};
 use crate::resource::Resource;
 use axum::extract::{Path, Query, State};
 use axum::http::HeaderMap;
@@ -51,24 +51,12 @@ enum UserRefusal {
     UnknownProjectOrNotMember { project: String },
     #[error("API keys cannot manage API keys. Use a session token.")]
     ApiKeyCannotManageApiKeys,
-    #[error("invalid allowed_ips entry '{entry}': {reason}")]
-    InvalidAllowedIpsEntry { entry: String, reason: String },
     #[error("API key cannot pin to both a project and a cache.")]
     PinToProjectAndCache,
     #[error("At least one permission is required for an API key.")]
     NoPermissionsSelected,
     #[error("API key cannot grant cache permissions you do not hold.")]
     GrantUnheldCachePermissions,
-    #[error("Cannot modify a state-managed API key.")]
-    ModifyManagedApiKey,
-    #[error("Cannot delete a state-managed API key.")]
-    DeleteManagedApiKey,
-    #[error("Cannot revoke a state-managed API key.")]
-    RevokeManagedApiKey,
-    #[error(
-        "Cannot modify state-managed user. This user is managed by configuration and cannot be edited through the API."
-    )]
-    ModifyManagedUser,
     #[error(
         "Cannot modify profile of an OIDC user. Your profile is managed by your identity provider."
     )]
@@ -86,23 +74,11 @@ impl Refusal for UserRefusal {
             | Self::UsernameConfirmationMismatch
             | Self::ApiKeyCannotManageApiKeys
             | Self::GrantUnheldCachePermissions
-            | Self::ModifyManagedApiKey
-            | Self::DeleteManagedApiKey
-            | Self::RevokeManagedApiKey
-            | Self::ModifyManagedUser
             | Self::ModifyOidcUserProfile => RefusalStatus::Forbidden,
             Self::UnknownProjectOrNotMember { .. }
-            | Self::InvalidAllowedIpsEntry { .. }
             | Self::PinToProjectAndCache
             | Self::NoPermissionsSelected
             | Self::InvalidName { .. } => RefusalStatus::BadRequest,
-        }
-    }
-
-    fn code(&self) -> ErrorCode {
-        match self {
-            Self::InvalidAllowedIpsEntry { .. } => ErrorCode::INVALID_ALLOWED_IP,
-            _ => self.status().default_code(),
         }
     }
 }
@@ -425,7 +401,7 @@ fn normalize_allowed_ips(raw: Option<Vec<String>>) -> Result<Option<Vec<String>>
     let mut out = Vec::with_capacity(entries.len());
     for e in entries {
         let canon = crate::ip_allowlist::normalize_entry(&e).map_err(|err| {
-            UserRefusal::InvalidAllowedIpsEntry {
+            SharedRefusal::InvalidAllowedIp {
                 entry: e.to_string(),
                 reason: err.to_string(),
             }
@@ -582,7 +558,7 @@ pub async fn patch_key(
         return Err(WebError::not_found(Resource::ApiKey));
     }
     if api_key.managed {
-        return Err(UserRefusal::ModifyManagedApiKey.into());
+        return Err(SharedRefusal::StateManaged(Change::Modify, Resource::ApiKey).into());
     }
 
     let previous_mask = api_key.permission;
@@ -668,7 +644,7 @@ pub async fn delete_keys(
         .or_not_found(Resource::ApiKey)?;
 
     if api_key.managed {
-        return Err(UserRefusal::DeleteManagedApiKey.into());
+        return Err(SharedRefusal::StateManaged(Change::Delete, Resource::ApiKey).into());
     }
 
     let api_key_id = api_key.id;
@@ -713,7 +689,7 @@ pub async fn post_key_revoke(
         return Err(WebError::not_found(Resource::ApiKey));
     }
     if api_key.managed {
-        return Err(UserRefusal::RevokeManagedApiKey.into());
+        return Err(SharedRefusal::StateManaged(Change::Revoke, Resource::ApiKey).into());
     }
     if api_key.revoked_at.is_some() {
         return Ok(ok_json("API-Key already revoked".to_string()));
@@ -846,7 +822,7 @@ pub async fn patch_settings(
     Json(body): Json<PatchUserSettingsRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     if user.managed {
-        return Err(UserRefusal::ModifyManagedUser.into());
+        return Err(SharedRefusal::StateManaged(Change::Modify, Resource::User).into());
     }
 
     if user.password.is_none() {

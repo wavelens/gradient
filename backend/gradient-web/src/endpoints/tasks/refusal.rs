@@ -9,22 +9,16 @@ use crate::refusal::{Refusal, RefusalStatus};
 
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum TaskRefusal {
-    #[error("input_name must not be empty")]
-    EmptyInputName,
     #[error("input_name may contain letters, digits, _ - and glob chars * ? [ ]")]
     InvalidInputNameCharacters,
     #[error("input_name must match ^[A-Za-z_][A-Za-z0-9_-]*$")]
     InvalidInputNameStart,
-    #[error("url must not be empty")]
-    EmptyUrl,
     #[error("override for input '{input_name}' already exists")]
     OverrideExists { input_name: String },
     #[error("{0}")]
     InvalidTriggerConfig(String),
     #[error("trigger is inactive")]
     InactiveTrigger,
-    #[error("Invalid display name: {reason}")]
-    InvalidDisplayName { reason: String },
     #[error("{0}")]
     InvalidRepositoryUrl(String),
     #[error("{0}")]
@@ -37,8 +31,6 @@ pub(crate) enum TaskRefusal {
     RepositoryCheckFailed { reason: String },
     #[error("Only the task owner or a project admin can transfer ownership.")]
     TransferNotPermitted,
-    #[error("Cannot transfer ownership of a state-managed task.")]
-    ManagedTaskTransfer,
     #[error("Task is already in this project.")]
     AlreadyInProject,
     #[error("team '{team}' has no access to this project")]
@@ -78,33 +70,22 @@ pub(crate) enum TaskRefusal {
     InvalidAttr { reason: String },
     #[error("Commit not found in repository: {reason}")]
     CommitLookupFailed { reason: String },
-    #[error("Failed to fetch repository state: {reason}")]
-    RepositoryStateFetchFailed { reason: String },
     #[error("Evaluation already in progress")]
     EvaluationInProgress,
     #[error("`attr` must be a concrete attribute path, without wildcard syntax")]
     AttrNotConcrete,
     #[error("Unknown evaluation status `{name}`; expected `active`, `terminal`, or a status name")]
     UnknownEvaluationStatus { name: String },
-    #[error("Invalid token")]
-    InvalidToken,
-    #[error("API key not allowed from this source IP")]
-    SourceIpNotAllowed,
-    #[error("Authorization required")]
-    AuthorizationRequired,
 }
 
 impl Refusal for TaskRefusal {
     fn status(&self) -> RefusalStatus {
         match self {
-            Self::EmptyInputName
-            | Self::InvalidInputNameCharacters
+            Self::InvalidInputNameCharacters
             | Self::InvalidInputNameStart
-            | Self::EmptyUrl
             | Self::OverrideExists { .. }
             | Self::InvalidTriggerConfig(_)
             | Self::InactiveTrigger
-            | Self::InvalidDisplayName { .. }
             | Self::InvalidRepositoryUrl(_)
             | Self::InvalidWildcard(_)
             | Self::KeepEvaluationsBelowMinimum
@@ -114,14 +95,10 @@ impl Refusal for TaskRefusal {
             | Self::InvalidCommitHash
             | Self::InvalidAttr { .. }
             | Self::CommitLookupFailed { .. }
-            | Self::RepositoryStateFetchFailed { .. }
             | Self::EvaluationInProgress
             | Self::AttrNotConcrete
             | Self::UnknownEvaluationStatus { .. } => RefusalStatus::BadRequest,
-            Self::TransferNotPermitted | Self::ManagedTaskTransfer | Self::SourceIpNotAllowed => {
-                RefusalStatus::Forbidden
-            }
-            Self::InvalidToken | Self::AuthorizationRequired => RefusalStatus::Unauthorized,
+            Self::TransferNotPermitted => RefusalStatus::Forbidden,
             Self::ActionNameTaken => RefusalStatus::Conflict,
             Self::TeamWithoutProjectAccess { .. }
             | Self::InvalidWebhookUrl(_)
@@ -141,10 +118,9 @@ impl Refusal for TaskRefusal {
 
     fn code(&self) -> ErrorCode {
         match self {
-            Self::RepositoryCheckFailed { .. }
-            | Self::CommitLookupFailed { .. }
-            | Self::RepositoryStateFetchFailed { .. } => ErrorCode::REPOSITORY_UNREACHABLE,
-            Self::SourceIpNotAllowed => ErrorCode::FORBIDDEN_SOURCE_IP,
+            Self::RepositoryCheckFailed { .. } | Self::CommitLookupFailed { .. } => {
+                ErrorCode::REPOSITORY_UNREACHABLE
+            }
             Self::ActionNameTaken => ErrorCode::ALREADY_EXISTS,
             _ => self.status().default_code(),
         }

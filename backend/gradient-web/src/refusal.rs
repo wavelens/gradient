@@ -5,7 +5,8 @@
  */
 
 use crate::error::{ErrorCode, WebError};
-use std::fmt::Display;
+use crate::resource::Resource;
+use std::fmt::{self, Display};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RefusalStatus {
@@ -36,13 +37,104 @@ impl RefusalStatus {
     }
 }
 
-/// Implement this for the refusal enum of an endpoint area. Add a variant for every new answer
-/// to a refused request; `?` and `.into()` turn it into a `WebError`.
+/// Implement this for the refusal enum of an endpoint area. Put an answer of several areas into
+/// `SharedRefusal`, with the differing words as fields.
 pub trait Refusal: Display {
     fn status(&self) -> RefusalStatus;
 
     fn code(&self) -> ErrorCode {
         self.status().default_code()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Change {
+    Modify,
+    Delete,
+    Revoke,
+    TransferOwnership,
+}
+
+impl Display for Change {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::Modify => "modify",
+            Self::Delete => "delete",
+            Self::Revoke => "revoke",
+            Self::TransferOwnership => "transfer ownership of",
+        })
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum SharedRefusal {
+    #[error("Cannot {0} a state-managed {1}.")]
+    StateManaged(Change, Resource),
+    #[error("Cannot {0} the built-in roles (Admin, Write, View).")]
+    BuiltinRole(Change),
+    #[error("Role is still assigned to members. Reassign them before deleting the role.")]
+    RoleAssignedToMembers,
+    #[error("Role is still granted to a team. Change the team grant before deleting the role.")]
+    RoleGrantedToTeam,
+    #[error("User not in {0}")]
+    NotAMember(Resource),
+    #[error("No pending invitation for this user")]
+    NoPendingInvitation,
+    #[error("Cannot remove the last Admin from the {0}.")]
+    LastAdmin(Resource),
+    #[error("Invalid display name: {reason}")]
+    InvalidDisplayName { reason: String },
+    #[error("worker_id must be a valid UUID")]
+    InvalidWorkerId,
+    #[error("worker is managed by server state")]
+    WorkerManagedByState,
+    #[error("{0} must not be empty")]
+    EmptyField(&'static str),
+    #[error("API key not allowed from this source IP")]
+    SourceIpNotAllowed,
+    #[error("invalid allowed_ips entry '{entry}': {reason}")]
+    InvalidAllowedIp { entry: String, reason: String },
+    #[error("Invalid token")]
+    InvalidToken,
+    #[error("Authorization required")]
+    AuthorizationRequired,
+    #[error("account is deactivated")]
+    AccountDeactivated,
+    #[error("You do not have permission to perform this action.")]
+    MissingPermission,
+    #[error("Failed to fetch repository state: {reason}")]
+    RepositoryStateFetchFailed { reason: String },
+}
+
+impl Refusal for SharedRefusal {
+    fn status(&self) -> RefusalStatus {
+        match self {
+            Self::StateManaged(..)
+            | Self::BuiltinRole(_)
+            | Self::SourceIpNotAllowed
+            | Self::AccountDeactivated
+            | Self::MissingPermission => RefusalStatus::Forbidden,
+            Self::RoleAssignedToMembers
+            | Self::RoleGrantedToTeam
+            | Self::NotAMember(_)
+            | Self::NoPendingInvitation
+            | Self::InvalidDisplayName { .. }
+            | Self::InvalidWorkerId
+            | Self::EmptyField(_)
+            | Self::InvalidAllowedIp { .. }
+            | Self::RepositoryStateFetchFailed { .. } => RefusalStatus::BadRequest,
+            Self::LastAdmin(_) | Self::WorkerManagedByState => RefusalStatus::Conflict,
+            Self::InvalidToken | Self::AuthorizationRequired => RefusalStatus::Unauthorized,
+        }
+    }
+
+    fn code(&self) -> ErrorCode {
+        match self {
+            Self::SourceIpNotAllowed => ErrorCode::FORBIDDEN_SOURCE_IP,
+            Self::InvalidAllowedIp { .. } => ErrorCode::INVALID_ALLOWED_IP,
+            Self::RepositoryStateFetchFailed { .. } => ErrorCode::REPOSITORY_UNREACHABLE,
+            _ => self.status().default_code(),
+        }
     }
 }
 

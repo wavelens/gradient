@@ -9,58 +9,28 @@ use crate::refusal::{Refusal, RefusalStatus};
 
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum CacheRefusal {
-    #[error("API key not allowed from this source IP")]
-    ApiKeyWrongSourceIp,
     #[error("Authentication required to access this cache")]
     AuthenticationRequired,
     #[error("Signature not yet computed")]
     SignaturePending,
-    #[error("NarHash not recorded")]
-    NarHashNotStored,
-    #[error("NarSize not recorded")]
-    NarSizeNotStored,
-    #[error("FileHash not recorded")]
-    FileHashNotStored,
-    #[error("FileSize not recorded")]
-    FileSizeNotStored,
-    #[error("Missing file hash")]
-    MissingFileHash,
-    #[error("Missing file size")]
-    MissingFileSize,
+    #[error("{0} not recorded")]
+    NotRecorded(&'static str),
+    #[error("Missing file {0}")]
+    MissingFileField(&'static str),
     #[error("Cache is disabled")]
     CacheDisabled,
-    #[error("No pending invitation for this user")]
-    NoPendingInvitation,
     #[error("Anonymous cache access is disabled.")]
     AnonymousAccessDisabled,
     #[error("Server is at connection capacity; retry later.")]
     ConnectionCapacityReached,
     #[error("Too many connections from your IP; retry later.")]
     TooManyConnectionsFromIp,
-    #[error("User not in Cache")]
-    NotACacheMember,
-    #[error("Cannot remove the last Admin from the cache.")]
-    LastAdminRemoval,
     #[error("missing ?hash=")]
     MissingHashQuery,
     #[error("{0}")]
     InvalidHashInUrl(String),
     #[error("max_storage_gb must be 0 (unlimited) or at least 1")]
     NegativeMaxStorage,
-    #[error("Invalid display name: {reason}")]
-    InvalidDisplayName { reason: String },
-    #[error("Built-in roles (Admin, Write, View) cannot be modified.")]
-    BuiltinRoleNotModifiable,
-    #[error("State-managed roles cannot be modified via the API.")]
-    ManagedRoleNotModifiable,
-    #[error("Built-in roles (Admin, Write, View) cannot be deleted.")]
-    BuiltinRoleNotDeletable,
-    #[error("State-managed roles cannot be deleted via the API.")]
-    ManagedRoleNotDeletable,
-    #[error("Role is still assigned to members. Reassign them before deleting the role.")]
-    RoleAssignedToMembers,
-    #[error("Role is still granted to a team. Change the team grant before deleting the role.")]
-    RoleGrantedToTeam,
     #[error("Substituter URL is required.")]
     UpstreamUrlRequired,
     #[error("Substituter URL must start with http:// or https://.")]
@@ -85,10 +55,8 @@ pub(crate) enum CacheRefusal {
     MultipartFieldUnreadable(String),
     #[error("invalid narinfo JSON: {reason}")]
     InvalidNarinfoJson { reason: String },
-    #[error("missing narinfo part")]
-    MissingNarinfoPart,
-    #[error("missing nar part")]
-    MissingNarPart,
+    #[error("missing {0} part")]
+    MissingPart(&'static str),
     #[error("nar size mismatch: declared {declared} bytes, got {got}")]
     UploadedNarSizeMismatch { declared: i64, got: u64 },
     #[error("nar size mismatch: declared {declared} bytes, staged {staged}")]
@@ -105,33 +73,17 @@ impl Refusal for CacheRefusal {
     fn status(&self) -> RefusalStatus {
         match self {
             Self::AuthenticationRequired => RefusalStatus::Unauthorized,
-            Self::ApiKeyWrongSourceIp
-            | Self::AnonymousAccessDisabled
-            | Self::BuiltinRoleNotModifiable
-            | Self::ManagedRoleNotModifiable
-            | Self::BuiltinRoleNotDeletable
-            | Self::ManagedRoleNotDeletable => RefusalStatus::Forbidden,
-            Self::SignaturePending
-            | Self::NarHashNotStored
-            | Self::NarSizeNotStored
-            | Self::FileHashNotStored
-            | Self::FileSizeNotStored => RefusalStatus::NotFound,
-            Self::LastAdminRemoval => RefusalStatus::Conflict,
+            Self::AnonymousAccessDisabled => RefusalStatus::Forbidden,
+            Self::SignaturePending | Self::NotRecorded(_) => RefusalStatus::NotFound,
             Self::NarTooLarge { .. } => RefusalStatus::PayloadTooLarge,
             Self::ConnectionCapacityReached | Self::TooManyConnectionsFromIp => {
                 RefusalStatus::ServiceUnavailable
             }
-            Self::MissingFileHash
-            | Self::MissingFileSize
+            Self::MissingFileField(_)
             | Self::CacheDisabled
-            | Self::NoPendingInvitation
-            | Self::NotACacheMember
             | Self::MissingHashQuery
             | Self::InvalidHashInUrl(_)
             | Self::NegativeMaxStorage
-            | Self::InvalidDisplayName { .. }
-            | Self::RoleAssignedToMembers
-            | Self::RoleGrantedToTeam
             | Self::UpstreamUrlRequired
             | Self::UpstreamUrlWithoutHttpScheme
             | Self::HttpPublicKeyRequired
@@ -143,8 +95,7 @@ impl Refusal for CacheRefusal {
             | Self::UpstreamNotHttp
             | Self::MultipartFieldUnreadable(_)
             | Self::InvalidNarinfoJson { .. }
-            | Self::MissingNarinfoPart
-            | Self::MissingNarPart
+            | Self::MissingPart(_)
             | Self::UploadedNarSizeMismatch { .. }
             | Self::StagedNarSizeMismatch { .. }
             | Self::NarVerificationFailed { .. }
@@ -154,11 +105,9 @@ impl Refusal for CacheRefusal {
 
     fn code(&self) -> ErrorCode {
         match self {
-            Self::ApiKeyWrongSourceIp => ErrorCode::FORBIDDEN_SOURCE_IP,
             Self::MultipartFieldUnreadable(_)
             | Self::InvalidNarinfoJson { .. }
-            | Self::MissingNarinfoPart
-            | Self::MissingNarPart
+            | Self::MissingPart(_)
             | Self::UploadedNarSizeMismatch { .. }
             | Self::StagedNarSizeMismatch { .. }
             | Self::NarVerificationFailed { .. }

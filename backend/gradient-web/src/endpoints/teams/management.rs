@@ -11,6 +11,7 @@ use crate::audit::{RequestInfo, record as audit_record};
 use crate::authorization::MaybeApiKey;
 use crate::error::{WebError, WebResult, require_create_permission, require_superuser};
 use crate::helpers::ok_json;
+use crate::refusal::SharedRefusal;
 use crate::resource::Resource;
 use axum::extract::{Path, Query, State};
 use axum::{Extension, Json};
@@ -161,7 +162,7 @@ pub async fn put_team(
     if check_index_name(&body.name).is_err() {
         return Err(WebError::invalid_name(Resource::TeamName));
     }
-    validate_display_name(&body.display_name).map_err(|e| TeamRefusal::InvalidDisplayName {
+    validate_display_name(&body.display_name).map_err(|e| SharedRefusal::InvalidDisplayName {
         reason: e.to_string(),
     })?;
 
@@ -266,7 +267,7 @@ pub async fn patch_team(
     let team_id = team.id;
     let mut active: ATeam = team.into();
     if let Some(display_name) = body.display_name {
-        validate_display_name(&display_name).map_err(|e| TeamRefusal::InvalidDisplayName {
+        validate_display_name(&display_name).map_err(|e| SharedRefusal::InvalidDisplayName {
             reason: e.to_string(),
         })?;
         active.display_name = Set(display_name.trim().to_string());

@@ -4,13 +4,13 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use super::refusal::ProjectRefusal;
 use crate::access::{Caller, ProjectAccess, load_project};
 use crate::audit::{RequestInfo, record as audit_record};
 use crate::authorization::MaybeApiKey;
 use crate::error::WebResult;
 use crate::helpers::{OptionExt, ok_json, role_names};
 use crate::permissions::Permission;
+use crate::refusal::SharedRefusal;
 use crate::resource::Resource;
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
@@ -125,7 +125,7 @@ pub async fn delete_project_invitation(
         )
         .one(&state.web_db)
         .await?
-        .ok_or(ProjectRefusal::NoPendingInvitation)?;
+        .ok_or(SharedRefusal::NoPendingInvitation)?;
 
     invitation.into_active_model().delete(&state.web_db).await?;
 

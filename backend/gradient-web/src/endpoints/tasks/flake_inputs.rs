@@ -10,6 +10,7 @@ use crate::authorization::MaybeApiKey;
 use crate::error::WebResult;
 use crate::helpers::{OptionExt, ok_json};
 use crate::permissions::Permission;
+use crate::refusal::SharedRefusal;
 use crate::resource::Resource;
 use axum::extract::{Path, State};
 use axum::routing::get;
@@ -80,7 +81,7 @@ pub struct DeletedResponse {
 
 fn validate_input_name(name: &str) -> WebResult<()> {
     if name.is_empty() {
-        return Err(TaskRefusal::EmptyInputName.into());
+        return Err(SharedRefusal::EmptyField("input_name").into());
     }
     let ok = name
         .chars()
@@ -102,7 +103,7 @@ fn validate_url(url: &Option<String>) -> WebResult<()> {
     if let Some(u) = url
         && u.trim().is_empty()
     {
-        return Err(TaskRefusal::EmptyUrl.into());
+        return Err(SharedRefusal::EmptyField("url").into());
     }
     Ok(())
 }

@@ -39,12 +39,10 @@ enum GradientCiConnectionRefusal {
     MissingTeam,
     #[error("a project connection names its project")]
     MissingProject,
-    #[error("the project is already connected to Gradient.CI Servers")]
-    ProjectAlreadyConnected,
+    #[error("the {0} is already connected to Gradient.CI Servers")]
+    AlreadyConnected(Resource),
     #[error("the worker of this connection token is already registered on this instance")]
     WorkerAlreadyRegistered,
-    #[error("the team is already connected to Gradient.CI Servers")]
-    TeamAlreadyConnected,
 }
 
 impl Refusal for GradientCiConnectionRefusal {
@@ -54,9 +52,7 @@ impl Refusal for GradientCiConnectionRefusal {
             Self::InvalidConnectionToken(_) | Self::MissingTeam | Self::MissingProject => {
                 RefusalStatus::BadRequest
             }
-            Self::ProjectAlreadyConnected
-            | Self::WorkerAlreadyRegistered
-            | Self::TeamAlreadyConnected => RefusalStatus::Conflict,
+            Self::AlreadyConnected(_) | Self::WorkerAlreadyRegistered => RefusalStatus::Conflict,
         }
     }
 }
@@ -276,14 +272,16 @@ fn claim_conflict(
         Target::Team(_) => false,
     };
     if own_project {
-        return Some(GradientCiConnectionRefusal::ProjectAlreadyConnected);
+        return Some(GradientCiConnectionRefusal::AlreadyConnected(
+            Resource::Project,
+        ));
     }
 
     if registration.is_some() || team_worker.is_some_and(|w| w.worker_id == worker_id) {
         return Some(GradientCiConnectionRefusal::WorkerAlreadyRegistered);
     }
 
-    team_worker.map(|_| GradientCiConnectionRefusal::TeamAlreadyConnected)
+    team_worker.map(|_| GradientCiConnectionRefusal::AlreadyConnected(Resource::Team))
 }
 
 async fn insert_registration(

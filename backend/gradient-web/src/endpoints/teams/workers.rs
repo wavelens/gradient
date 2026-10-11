@@ -14,6 +14,7 @@ use crate::endpoints::projects::workers::{
 };
 use crate::error::WebResult;
 use crate::helpers::{OptionExt, ok_json};
+use crate::refusal::SharedRefusal;
 use crate::resource::Resource;
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
@@ -153,7 +154,7 @@ pub async fn post_team_worker(
     .await?;
 
     let worker_id = Uuid::parse_str(&body.worker_id)
-        .map_err(|_| TeamRefusal::InvalidWorkerId)?
+        .map_err(|_| SharedRefusal::InvalidWorkerId)?
         .to_string();
     let registered = EWorkerRegistration::find()
         .filter(CWorkerRegistration::WorkerId.eq(&worker_id))
@@ -236,7 +237,7 @@ pub async fn patch_team_worker(
     .await?;
     let worker = find_team_worker(&state, team.id, &worker_id).await?;
     if worker.managed && patch_edits_managed_fields(&body) {
-        return Err(TeamRefusal::WorkerManagedByState.into());
+        return Err(SharedRefusal::WorkerManagedByState.into());
     }
 
     let mut active: ATeamWorker = worker.into();
@@ -302,7 +303,7 @@ pub async fn delete_team_worker(
     .await?;
     let worker = find_team_worker(&state, team.id, &worker_id).await?;
     if worker.managed {
-        return Err(TeamRefusal::WorkerManagedByState.into());
+        return Err(SharedRefusal::WorkerManagedByState.into());
     }
 
     let projects = granted_projects(&state, team.id).await?;

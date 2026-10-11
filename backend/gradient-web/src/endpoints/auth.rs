@@ -11,7 +11,7 @@ use crate::authorization::{
 };
 use crate::error::{ErrorCode, WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json};
-use crate::refusal::{Refusal, RefusalStatus};
+use crate::refusal::{Refusal, RefusalStatus, SharedRefusal};
 use crate::resource::Resource;
 use anyhow::Context;
 use axum::Extension;
@@ -46,8 +46,6 @@ use std::sync::Arc;
 enum AuthRefusal {
     #[error("Invalid name: {reason}")]
     InvalidName { reason: String },
-    #[error("account is deactivated")]
-    AccountDeactivated,
     #[error(
         "Email not verified. Please check your email and verify your account before logging in."
     )]
@@ -95,7 +93,6 @@ impl Refusal for AuthRefusal {
             | Self::DeviceAuthorizationPending
             | Self::DeviceAuthorizationAlreadyDenied
             | Self::DeviceAuthorizationAlreadyCompleted => RefusalStatus::BadRequest,
-            Self::AccountDeactivated => RefusalStatus::Forbidden,
             Self::OidcLoginFailed | Self::MissingOidcState | Self::MissingOidcCsrfCookie => {
                 RefusalStatus::Unauthorized
             }
@@ -325,7 +322,7 @@ pub async fn post_basic_login(
     }
 
     if !user.active {
-        return Err(AuthRefusal::AccountDeactivated.into());
+        return Err(SharedRefusal::AccountDeactivated.into());
     }
 
     if state

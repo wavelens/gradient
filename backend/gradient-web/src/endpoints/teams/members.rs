@@ -11,6 +11,7 @@ use crate::authorization::MaybeApiKey;
 use crate::error::{WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json};
 use crate::invite_policy::invitation_expiry;
+use crate::refusal::SharedRefusal;
 use crate::resource::Resource;
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
@@ -95,7 +96,7 @@ async fn ensure_not_last_admin(
         .count(&state.web_db)
         .await?;
     if admins <= 1 {
-        return Err(TeamRefusal::LastAdmin.into());
+        return Err(SharedRefusal::LastAdmin(Resource::Team).into());
     }
     Ok(())
 }
@@ -265,7 +266,7 @@ pub async fn patch_team_members(
     let target = find_user(&state, &body.user).await?;
     let membership = find_membership(&state, team.id, target.id)
         .await?
-        .ok_or(TeamRefusal::NotATeamMember)?;
+        .ok_or(SharedRefusal::NotAMember(Resource::Team))?;
     ensure_not_state_managed(&membership)?;
 
     if body.role != TeamRole::Admin {
@@ -317,7 +318,7 @@ pub async fn delete_team_members(
     let target = find_user(&state, &body.user).await?;
     let membership = find_membership(&state, team.id, target.id)
         .await?
-        .ok_or(TeamRefusal::NotATeamMember)?;
+        .ok_or(SharedRefusal::NotAMember(Resource::Team))?;
     ensure_not_state_managed(&membership)?;
 
     ensure_not_last_admin(&state, team.id, &membership).await?;
