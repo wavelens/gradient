@@ -157,7 +157,7 @@ async fn optional_caller(
     state: &Arc<ServerState>,
     headers: &HeaderMap,
     client_ip: IpAddr,
-) -> Option<(Option<MUser>, MaybeApiKey)> {
+) -> Option<(MUser, MaybeApiKey)> {
     let token = extract_bearer_or_cookie(headers)?.to_owned();
     let decoded = decode_jwt(State(Arc::clone(state)), token).await.ok()?;
     let allowed_from_here = decoded
@@ -172,7 +172,8 @@ async fn optional_caller(
         .one(&state.web_db)
         .await
         .ok()
-        .flatten();
+        .flatten()
+        .filter(|user| user.active)?;
 
     Some((user, presented_api_key(&decoded)))
 }
@@ -191,7 +192,9 @@ pub async fn authorize_optional(
     let client_ip = resolve_client_ip(req.headers(), peer, &state.config.network.trusted_proxies);
     let (maybe_user, maybe_api_key) = optional_caller(&state, req.headers(), client_ip)
         .await
-        .unwrap_or((None, MaybeApiKey::none()));
+        .map_or((None, MaybeApiKey::none()), |(user, api_key)| {
+            (Some(user), api_key)
+        });
 
     req.extensions_mut().insert(MaybeUser(maybe_user));
     req.extensions_mut().insert(maybe_api_key);

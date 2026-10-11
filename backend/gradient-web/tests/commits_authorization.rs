@@ -173,10 +173,18 @@ fn make_server(db: sea_orm::DatabaseConnection) -> TestServer {
 }
 
 fn with_auth(db: MockDatabase, session_id: SessionId) -> MockDatabase {
+    with_caller(db, session_id, user())
+}
+
+fn with_caller(
+    db: MockDatabase,
+    session_id: SessionId,
+    caller: gradient_entity::user::Model,
+) -> MockDatabase {
     let session = live_session(session_id);
     db.append_query_results([vec![session.clone()]])
         .append_query_results([vec![session]])
-        .append_query_results([vec![user()]])
+        .append_query_results([vec![caller]])
 }
 
 #[tokio::test]
@@ -231,6 +239,34 @@ async fn member_can_read_commit_in_private_project() {
     let body: Value = res.json();
     assert_eq!(body["error"], false);
     assert_eq!(body["message"]["id"], commit_id().to_string());
+}
+
+#[tokio::test]
+async fn deactivated_member_cannot_read_commit_in_private_project() {
+    let session_id = SessionId::now_v7();
+    let token = make_token(session_id);
+    let deactivated = gradient_entity::user::Model {
+        active: false,
+        ..user()
+    };
+
+    let db = with_caller(
+        MockDatabase::new(DatabaseBackend::Postgres),
+        session_id,
+        deactivated,
+    )
+    .append_query_results([vec![commit_row()]])
+    .append_query_results([vec![eval_at(eval_id(), 0)]])
+    .append_query_results([vec![task_row()]])
+    .append_query_results([vec![project()]])
+    .append_query_results([vec![membership_row()]]);
+    let server = make_server(db.into_connection());
+
+    let res = server
+        .get(&commit_url())
+        .add_header("authorization", format!("Bearer {}", token))
+        .await;
+    res.assert_status_not_found();
 }
 
 #[tokio::test]
