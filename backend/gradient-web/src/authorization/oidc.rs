@@ -15,10 +15,7 @@ use gradient_types::input::load_secret;
 use gradient_types::*;
 use jsonwebtoken::{DecodingKey, Validation, decode, decode_header, jwk::JwkSet};
 use rand::RngExt as _;
-use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter,
-    TransactionTrait,
-};
+use sea_orm::{ActiveValue::Set, TransactionTrait};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq;
@@ -295,10 +292,7 @@ async fn create_or_update_user(
         .await
         .context("start OIDC user transaction")?;
 
-    let existing = EUser::find()
-        .filter(CUser::OidcIssuer.eq(&claims.iss))
-        .filter(CUser::OidcSubject.eq(&claims.sub))
-        .one(&tx)
+    let existing = gradient_db::users::by_oidc_identity(&tx, &claims.iss, &claims.sub)
         .await
         .context("find OIDC user")?;
 
@@ -325,7 +319,9 @@ async fn create_or_update_user(
             auser.name = Set(new_name.clone());
         }
 
-        let user = auser.update(&tx).await.context("update OIDC user")?;
+        let user = gradient_db::rows::update::<EUser, _>(&tx, auser)
+            .await
+            .context("update OIDC user")?;
 
         if let Err(e) =
             gradient_db::teams::members::sync_group_memberships(&tx, user.id, &groups).await
@@ -338,13 +334,7 @@ async fn create_or_update_user(
         return Ok(user);
     }
 
-    let collision = EUser::find()
-        .filter(
-            sea_orm::Condition::any()
-                .add(CUser::Username.eq(&login_name))
-                .add(CUser::Email.eq(&email)),
-        )
-        .one(&tx)
+    let collision = gradient_db::users::by_username_or_email(&tx, &login_name, &email)
         .await
         .context("check for OIDC username/email collision")?;
 
@@ -371,7 +361,9 @@ async fn create_or_update_user(
             auser.name = Set(new_name.clone());
         }
 
-        let user = auser.update(&tx).await.context("claim OIDC account")?;
+        let user = gradient_db::rows::update::<EUser, _>(&tx, auser)
+            .await
+            .context("claim OIDC account")?;
 
         if let Err(e) = gradient_state::apply_pending_project_memberships(
             &tx,
@@ -399,21 +391,22 @@ async fn create_or_update_user(
         return Ok(user);
     }
 
-    let user = MUser {
-        id: UserId::now_v7(),
-        username: login_name,
-        name: display_name,
-        email,
-        last_login_at: gradient_types::now(),
-        created_at: gradient_types::now(),
-        email_verified: true,
-        oidc_issuer: Some(claims.iss),
-        oidc_subject: Some(claims.sub),
-        active: true,
-        ..Default::default()
-    }
-    .into_active_model()
-    .insert(&tx)
+    let user = gradient_db::rows::insert::<EUser, _>(
+        &tx,
+        MUser {
+            id: UserId::now_v7(),
+            username: login_name,
+            name: display_name,
+            email,
+            last_login_at: gradient_types::now(),
+            created_at: gradient_types::now(),
+            email_verified: true,
+            oidc_issuer: Some(claims.iss),
+            oidc_subject: Some(claims.sub),
+            active: true,
+            ..Default::default()
+        },
+    )
     .await
     .context("create user")?;
 

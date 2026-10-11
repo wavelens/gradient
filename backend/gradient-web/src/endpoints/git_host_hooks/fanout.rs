@@ -17,8 +17,6 @@ use gradient_graph::Transition;
 use gradient_scheduler::Scheduler;
 use gradient_types::triggers::{TriggerConfig, TriggerType};
 use gradient_types::*;
-use sea_orm::ActiveValue::Set;
-use sea_orm::{ActiveModelTrait, EntityTrait, Value};
 use std::sync::Arc;
 use tracing::{info, warn};
 
@@ -228,16 +226,19 @@ async fn fan_out_triggers<F>(
 where
     F: Fn(&TriggerConfig) -> FilterResult,
 {
-    let triggers =
-        match load_active_triggers_for_integration(&ci.db.web_db, integration_id, trigger_type)
-            .await
-        {
-            Ok(rows) => rows,
-            Err(e) => {
-                warn!(error = %e, "load triggers for integration");
-                return WebhookTriggerOutcome::default();
-            }
-        };
+    let triggers = match gradient_db::triggers::active_of_integration(
+        &ci.db.web_db,
+        integration_id,
+        trigger_type,
+    )
+    .await
+    {
+        Ok(rows) => rows,
+        Err(e) => {
+            warn!(error = %e, "load triggers for integration");
+            return WebhookTriggerOutcome::default();
+        }
+    };
 
     let source_comment = source_comment.or_else(|| {
         approval_ctx.as_ref().and_then(|c| {
@@ -453,44 +454,9 @@ fn gate_decision(ctx: &PullRequestApprovalContext, sender_trusted: bool) -> Opti
 
 async fn touch_trigger_last_fired(db: &WebDb, trig: &ept::Model) {
     let now = gradient_types::now();
-    let mut active: ept::ActiveModel = trig.clone().into();
-    active.last_fired_at = Set(Some(now));
-    active.updated_at = Set(now);
-    if let Err(e) = active.update(db).await {
+    if let Err(e) = gradient_db::triggers::set_last_fired(db, trig.clone(), now).await {
         warn!(error = %e, trigger_id = %trig.id, "failed to stamp trigger last_fired_at");
     }
-}
-
-fn active_triggers_sql(trigger_type: TriggerType) -> String {
-    format!(
-        "SELECT pt.* FROM task_trigger pt \
-         JOIN task p ON pt.task = p.id \
-         JOIN integration i ON i.project = p.project \
-         WHERE pt.active = true \
-           AND pt.trigger_type = {} \
-           AND i.id = $1",
-        i16::from(trigger_type),
-    )
-}
-
-gradient_db::sql_fn! {
-    ACTIVE_TRIGGERS_FOR_INTEGRATION = || active_triggers_sql(TriggerType::ReporterPullRequest),
-        params = [IntegrationId];
-}
-
-async fn load_active_triggers_for_integration(
-    db: &WebDb,
-    integration_id: IntegrationId,
-    trigger_type: TriggerType,
-) -> Result<Vec<ept::Model>, sea_orm::DbErr> {
-    // Triggers are matched by project, not by config `integration_id`. The GitHub App seed
-    // migration rewrote integration rows, and a pre-migration trigger's stale UUID would stop
-    // matching.
-    let stmt = ACTIVE_TRIGGERS_FOR_INTEGRATION.bind_built(
-        active_triggers_sql(trigger_type),
-        [Value::Uuid(Some(integration_id.into_inner()))],
-    );
-    ETaskTrigger::find().from_raw_sql(stmt).all(db).await
 }
 
 fn glob_matches(globs: &[String], name: &str) -> bool {

@@ -17,7 +17,6 @@ use gradient_entity::webhook::WebhookScope;
 use gradient_types::events::EventOwner;
 use gradient_types::events::audit::Action;
 use gradient_types::*;
-use sea_orm::{ColumnTrait, Condition};
 use std::sync::Arc;
 
 #[derive(Clone, Debug)]
@@ -59,21 +58,18 @@ impl WebhookOwner {
         }
     }
 
-    pub fn rows(&self) -> Condition {
-        Condition::all()
-            .add(CWebhook::Scope.eq(self.scope))
-            .add(match self.project {
-                Some(p) => CWebhook::Project.eq(p),
-                None => CWebhook::Project.is_null(),
-            })
-            .add(match self.cache {
-                Some(c) => CWebhook::Cache.eq(c),
-                None => CWebhook::Cache.is_null(),
-            })
-    }
-
     pub fn param<T: std::str::FromStr>(&self, name: &str) -> Result<T, WebError> {
         self.params.param(name)
+    }
+}
+
+impl From<&WebhookOwner> for gradient_db::webhooks::Owner {
+    fn from(owner: &WebhookOwner) -> Self {
+        Self {
+            scope: owner.scope,
+            project: owner.project,
+            cache: owner.cache,
+        }
     }
 }
 

@@ -19,7 +19,6 @@ use gradient_entity::build::BuildStatus;
 use gradient_storage::LogStorage;
 use gradient_types::*;
 use gradient_util::log_lines::PrefixedLines;
-use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tracing::error;
@@ -30,10 +29,7 @@ async fn eval_shared_build_jobs(
     db: &WebDb,
     evaluation: EvaluationId,
 ) -> Result<Vec<(MDerivationBuild, String)>, WebError> {
-    let jobs = EBuildJob::find()
-        .filter(CBuildJob::Evaluation.eq(evaluation))
-        .all(db)
-        .await?;
+    let jobs = gradient_db::build_jobs::of_evaluation(db, evaluation).await?;
 
     let shared_build_ids: Vec<DerivationBuildId> =
         jobs.iter().map(|j| j.derivation_build).collect();

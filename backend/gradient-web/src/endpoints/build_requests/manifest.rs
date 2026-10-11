@@ -19,14 +19,7 @@ use gradient_core::ServerState;
 use gradient_types::constants::UPLOAD_SESSION_TTL;
 use gradient_types::ids::UploadSessionId;
 use gradient_types::input::{check_manifest_path, decode_blake3_hex};
-use gradient_types::{
-    ABuildRequestBlob, BaseResponse, CBuildRequestBlob, EBuildRequestBlob, MUploadSession, MUser,
-    now,
-};
-use sea_orm::ActiveValue::Set;
-use sea_orm::{
-    ActiveModelTrait, ColumnTrait, Condition, EntityTrait, IntoActiveModel, QueryFilter,
-};
+use gradient_types::{BaseResponse, MUploadSession, MUser, now};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -109,22 +102,18 @@ pub async fn post_manifest(
             .collect()
     };
 
-    let existing = EBuildRequestBlob::find()
-        .filter(
-            Condition::all()
-                .add(CBuildRequestBlob::Project.eq(project.id))
-                .add(CBuildRequestBlob::Hash.is_in(unique_hashes.clone())),
-        )
-        .all(&state.web_db)
-        .await?;
+    let existing = gradient_db::build_request_blobs::of_project_with_hashes(
+        &state.web_db,
+        project.id,
+        unique_hashes.clone(),
+    )
+    .await?;
 
     let existing_set: HashSet<Vec<u8>> = existing.iter().map(|b| b.hash.clone()).collect();
 
     let now_ts = now();
     for blob in &existing {
-        let mut active: ABuildRequestBlob = blob.clone().into();
-        active.last_used_at = Set(now_ts);
-        active.update(&state.web_db).await?;
+        gradient_db::build_request_blobs::mark_used(&state.web_db, blob.clone(), now_ts).await?;
     }
 
     let missing_hex: Vec<String> = unique_hashes
@@ -141,18 +130,19 @@ pub async fn post_manifest(
     let expires_at =
         now_ts + Duration::from_std(UPLOAD_SESSION_TTL).context("invalid UPLOAD_SESSION_TTL")?;
 
-    MUploadSession {
-        id: session_id,
-        project: project.id,
-        manifest: manifest_value,
-        missing: missing_value,
-        total_size: total,
-        created_at: now_ts,
-        expires_at,
-        ..Default::default()
-    }
-    .into_active_model()
-    .insert(&state.web_db)
+    gradient_db::upload_sessions::insert(
+        &state.web_db,
+        MUploadSession {
+            id: session_id,
+            project: project.id,
+            manifest: manifest_value,
+            missing: missing_value,
+            total_size: total,
+            created_at: now_ts,
+            expires_at,
+            ..Default::default()
+        },
+    )
     .await?;
 
     Ok(ok_json(ManifestResponse {

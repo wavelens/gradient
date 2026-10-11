@@ -41,3 +41,30 @@ pub async fn delete<C: ConnectionTrait>(db: &C, task: MTask) -> Result<(), DbErr
     task.into_active_model().delete(db).await?;
     Ok(())
 }
+
+pub async fn with_ids<C: ConnectionTrait>(db: &C, ids: &[TaskId]) -> Result<Vec<MTask>, DbErr> {
+    crate::fetch_in_chunks(ids, |chunk| async move {
+        ETask::find().filter(CTask::Id.is_in(chunk)).all(db).await
+    })
+    .await
+}
+
+pub async fn with_repository_containing<C: ConnectionTrait>(
+    db: &C,
+    fragment: &str,
+) -> Result<Vec<MTask>, DbErr> {
+    ETask::find()
+        .filter(CTask::Repository.contains(fragment))
+        .all(db)
+        .await
+}
+
+pub async fn of_projects<C: ConnectionTrait>(
+    db: &C,
+    projects: Vec<ProjectId>,
+) -> Result<Vec<MTask>, DbErr> {
+    ETask::find()
+        .filter(CTask::Project.is_in(projects))
+        .all(db)
+        .await
+}

@@ -132,6 +132,30 @@ pub async fn remove_member<C: ConnectionTrait>(db: &C, membership: MTeamUser) ->
     Ok(())
 }
 
+pub async fn memberships_of<C: ConnectionTrait>(
+    db: &C,
+    team: TeamId,
+) -> Result<Vec<MTeamUser>, DbErr> {
+    ETeamUser::find()
+        .filter(CTeamUser::Team.eq(team))
+        .all(db)
+        .await
+}
+
+pub async fn remove_group_member<C: ConnectionTrait>(
+    db: &C,
+    team: TeamId,
+    user: UserId,
+) -> Result<(), DbErr> {
+    ETeamUser::delete_many()
+        .filter(CTeamUser::Team.eq(team))
+        .filter(CTeamUser::User.eq(user))
+        .filter(CTeamUser::Source.eq(TeamMemberSource::Group))
+        .exec(db)
+        .await?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

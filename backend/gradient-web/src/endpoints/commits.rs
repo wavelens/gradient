@@ -12,7 +12,6 @@ use axum::extract::{Path, State};
 use axum::{Extension, Json};
 use gradient_core::ServerState;
 use gradient_types::*;
-use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use std::collections::HashSet;
 use std::sync::Arc;
 
@@ -25,10 +24,7 @@ pub async fn get_commit(
 ) -> WebResult<Json<BaseResponse<MCommit>>> {
     let commit = require::<ECommit>(&state.web_db, commit_id).await?;
 
-    let evaluations = EEvaluation::find()
-        .filter(CEvaluation::Commit.eq(commit_id))
-        .all(&state.web_db)
-        .await?;
+    let evaluations = gradient_db::evaluations::of_commit(&state.web_db, commit_id).await?;
 
     if evaluations.is_empty() {
         return Err(WebError::not_found(Resource::Commit));
@@ -38,11 +34,7 @@ pub async fn get_commit(
 
     let task_ids: Vec<TaskId> = evaluations.iter().filter_map(|e| e.task).collect();
     if !task_ids.is_empty() {
-        let db = &state.web_db;
-        let tasks = gradient_db::fetch_in_chunks(&task_ids, |chunk| async move {
-            ETask::find().filter(CTask::Id.is_in(chunk)).all(db).await
-        })
-        .await?;
+        let tasks = gradient_db::tasks::with_ids(&state.web_db, &task_ids).await?;
         project_ids.extend(tasks.into_iter().map(|p| p.project));
     }
 
@@ -52,24 +44,14 @@ pub async fn get_commit(
 
     let project_id_vec: Vec<ProjectId> = project_ids.into_iter().collect();
 
-    let db = &state.web_db;
-    let projects = gradient_db::fetch_in_chunks(&project_id_vec, |chunk| async move {
-        EProject::find()
-            .filter(CProject::Id.is_in(chunk))
-            .all(db)
-            .await
-    })
-    .await?;
+    let projects = gradient_db::projects::with_ids(&state.web_db, &project_id_vec).await?;
 
     let any_public = projects.iter().any(|o| o.public);
 
     let accessible = if any_public {
         true
     } else if let Some(user) = &maybe_user {
-        EProjectAccess::find()
-            .filter(CProjectAccess::User.eq(user.id))
-            .filter(CProjectAccess::Project.is_in(project_id_vec))
-            .one(&state.web_db)
+        gradient_db::projects::access_of_user_in(&state.web_db, user.id, project_id_vec)
             .await?
             .is_some()
     } else {

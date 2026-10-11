@@ -7,17 +7,9 @@
 use crate::error::WebError;
 use gradient_types::MUser;
 use gradient_types::ids::ProjectId;
-use sea_orm::{ConnectionTrait, Value};
+use sea_orm::ConnectionTrait;
 use std::collections::HashSet;
 use uuid::Uuid;
-
-gradient_db::sql! {
-    PUBLIC_PROJECTS = "SELECT id FROM project WHERE public = true",
-        params = [];
-
-    PROJECTS_FOR_USER = "SELECT DISTINCT project AS id FROM project_access WHERE \"user\" = $1",
-        params = [UserId];
-}
 
 pub enum MetricsScope {
     All,
@@ -34,15 +26,12 @@ impl MetricsScope {
         }
 
         let mut projects: Vec<String> = Vec::new();
-        for row in db.query_all_raw(PUBLIC_PROJECTS.stmt()).await? {
-            projects.push(row.try_get::<Uuid>("", "id")?.to_string());
+        for id in gradient_db::projects::public_ids(db).await? {
+            projects.push(id.to_string());
         }
         if let Some(u) = user {
-            for row in db
-                .query_all_raw(PROJECTS_FOR_USER.bind([Value::from(Uuid::from(u.id))]))
-                .await?
-            {
-                projects.push(row.try_get::<Uuid>("", "id")?.to_string());
+            for id in gradient_db::projects::ids_reachable_by(db, u.id).await? {
+                projects.push(id.to_string());
             }
         }
 

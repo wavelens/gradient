@@ -87,3 +87,38 @@ pub async fn by_id_in_project<C: ConnectionTrait>(
         .one(db)
         .await
 }
+
+pub async fn installations_by_github_id<C: ConnectionTrait>(
+    db: &C,
+    installation_id: i64,
+) -> Result<Vec<github_installation::Model>, DbErr> {
+    github_installation::Entity::find()
+        .filter(github_installation::Column::InstallationId.eq(installation_id))
+        .all(db)
+        .await
+}
+
+pub async fn delete_installations_by_github_id<C: ConnectionTrait>(
+    db: &C,
+    installation_id: i64,
+) -> Result<(), DbErr> {
+    github_installation::Entity::delete_many()
+        .filter(github_installation::Column::InstallationId.eq(installation_id))
+        .exec(db)
+        .await?;
+    Ok(())
+}
+
+pub async fn inbound_github_of_installations<C: ConnectionTrait>(
+    db: &C,
+    projects: Vec<ProjectId>,
+    installations: Vec<GithubInstallationId>,
+) -> Result<Vec<MIntegration>, DbErr> {
+    EIntegration::find()
+        .filter(CIntegration::Project.is_in(projects))
+        .filter(CIntegration::Kind.eq(i16::from(IntegrationKind::Inbound)))
+        .filter(CIntegration::GitHostType.eq(i16::from(GitHostType::GitHub)))
+        .filter(CIntegration::GithubInstallation.is_in(installations))
+        .all(db)
+        .await
+}

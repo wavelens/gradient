@@ -13,7 +13,6 @@ use gradient_entity::build::BuildStatus;
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_util::debounce::Debounce;
 use http::{StatusCode, header};
-use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
 use serde::Deserialize;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -175,29 +174,20 @@ async fn badge_status_for_entry_point(
     task_id: TaskId,
     eval_attr: &str,
 ) -> Result<(Option<EvaluationStatus>, bool), WebError> {
-    let evaluation = EEvaluation::find()
-        .filter(CEvaluation::Task.eq(task_id))
-        .filter(CEvaluation::Status.eq(EvaluationStatus::Completed))
-        .order_by_desc(CEvaluation::CreatedAt)
-        .one(db)
-        .await?;
+    let evaluation = gradient_db::evaluations::latest_completed_of_task(db, task_id, 1)
+        .await?
+        .into_iter()
+        .next();
 
     let Some(ev) = evaluation else {
         return Ok((None, false));
     };
 
-    let Some(ep) = EEntryPoint::find()
-        .filter(CEntryPoint::Evaluation.eq(ev.id))
-        .filter(CEntryPoint::Eval.eq(eval_attr))
-        .one(db)
-        .await?
-    else {
+    let Some(ep) = gradient_db::entry_points::by_attribute(db, ev.id, eval_attr).await? else {
         return Ok((None, false));
     };
 
-    let build_status = EDerivationBuild::find()
-        .filter(CDerivationBuild::Derivation.eq(ep.derivation))
-        .one(db)
+    let build_status = gradient_db::derivation_builds::of_derivation(db, ep.derivation)
         .await?
         .map(|a| a.status);
 
@@ -232,24 +222,20 @@ async fn badge_status_for_latest_eval(
 
     let has_failed = match &eval {
         Some(e) if e.status == EvaluationStatus::Completed => {
-            let ep_drv_ids: Vec<DerivationId> = EEntryPoint::find()
-                .filter(CEntryPoint::Evaluation.eq(e.id))
-                .all(db)
+            let ep_drv_ids: Vec<DerivationId> = gradient_db::entry_points::of_evaluation(db, e.id)
                 .await?
                 .into_iter()
                 .map(|ep| ep.derivation)
                 .collect();
 
             !ep_drv_ids.is_empty()
-                && EDerivationBuild::find()
-                    .filter(CDerivationBuild::Derivation.is_in(ep_drv_ids))
-                    .filter(CDerivationBuild::Status.is_in(vec![
-                        BuildStatus::FailedPermanent,
-                        BuildStatus::FailedTimeout,
-                    ]))
-                    .one(db)
-                    .await?
-                    .is_some()
+                && gradient_db::derivation_builds::first_with_status_among(
+                    db,
+                    ep_drv_ids,
+                    vec![BuildStatus::FailedPermanent, BuildStatus::FailedTimeout],
+                )
+                .await?
+                .is_some()
         }
         _ => false,
     };
@@ -289,10 +275,7 @@ pub async fn get_task_badge(
     )
     .await?;
 
-    let task = ETask::find()
-        .filter(CTask::Project.eq(project.id))
-        .filter(CTask::Name.eq(&task))
-        .one(&state.web_db)
+    let task = gradient_db::tasks::by_name(&state.web_db, project.id, &task)
         .await?
         .or_not_found(Resource::Task)?;
 

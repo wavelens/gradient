@@ -60,3 +60,24 @@ pub async fn delete<C: ConnectionTrait>(db: &C, team: MTeam) -> Result<(), DbErr
     team.into_active_model().delete(db).await?;
     Ok(())
 }
+
+pub async fn by_scim_group<C: ConnectionTrait>(
+    db: &C,
+    group: &str,
+) -> Result<Option<MTeam>, DbErr> {
+    ETeam::find()
+        .filter(CTeam::ScimGroup.eq(group))
+        .one(db)
+        .await
+}
+
+pub async fn linked_to_scim_group<C: ConnectionTrait>(
+    db: &C,
+    group: Option<&str>,
+) -> Result<Vec<MTeam>, DbErr> {
+    let filter = match group {
+        Some(group) => CTeam::ScimGroup.eq(group),
+        None => CTeam::ScimGroup.is_not_null(),
+    };
+    ETeam::find().filter(filter).all(db).await
+}

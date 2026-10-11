@@ -33,10 +33,7 @@ use gradient_types::input::validate_username;
 use gradient_types::*;
 use password_auth::verify_password;
 use sea_orm::ActiveValue::Set;
-use sea_orm::{
-    ActiveModelTrait, ColumnTrait, Condition, EntityTrait, IntoActiveModel, QueryFilter,
-    QueryOrder, QuerySelect,
-};
+use sea_orm::IntoActiveModel;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -236,11 +233,7 @@ pub async fn get_search(
 ) -> WebResult<Json<BaseResponse<Vec<UserSearchResult>>>> {
     let q = params.get("q").cloned().unwrap_or_default();
 
-    let users = EUser::find()
-        .filter(CUser::Username.contains(q.as_str()))
-        .limit(10)
-        .all(&state.web_db)
-        .await?;
+    let users = gradient_db::users::search_by_username(&state.web_db, &q, 10).await?;
 
     let results = users
         .into_iter()
@@ -289,8 +282,7 @@ pub async fn delete(
         }
     }
 
-    let auser: AUser = user.into();
-    auser.delete(&state.web_db).await?;
+    gradient_db::rows::delete::<EUser, _>(&state.web_db, user).await?;
 
     audit
         .write(Action::UserDelete, EventOwner::default(), None)
@@ -413,11 +405,7 @@ pub async fn get_keys(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
 ) -> WebResult<Json<BaseResponse<Vec<ApiKeyInfo>>>> {
-    let api_keys = EApi::find()
-        .filter(CApi::OwnedBy.eq(user.id))
-        .order_by_desc(CApi::CreatedAt)
-        .all(&state.web_db)
-        .await?;
+    let api_keys = gradient_db::api_keys::of_user(&state.web_db, user.id).await?;
 
     let pinned: Vec<ProjectId> = api_keys.iter().filter_map(|k| k.project).collect();
     let project_names = project_name_lookup(&state.web_db, &pinned).await?;
@@ -444,14 +432,8 @@ pub async fn post_keys(
         return Err(UserRefusal::PinToProjectAndCache.into());
     }
 
-    let existing_api_key = EApi::find()
-        .filter(
-            Condition::all()
-                .add(CApi::OwnedBy.eq(user.id))
-                .add(CApi::Name.eq(body.name.clone())),
-        )
-        .one(&state.web_db)
-        .await?;
+    let existing_api_key =
+        gradient_db::api_keys::by_owner_and_name(&state.web_db, user.id, &body.name).await?;
     if existing_api_key.is_some() {
         return Err(WebError::already_exists(Resource::ApiKeyName));
     }
@@ -504,10 +486,9 @@ pub async fn post_keys(
         cache: cache_pin,
         allowed_ips,
         ..Default::default()
-    }
-    .into_active_model();
+    };
 
-    let inserted = api_key.insert(&state.web_db).await?;
+    let inserted = gradient_db::rows::insert::<EApi, _>(&state.web_db, api_key).await?;
 
     audit.write(Action::ApiKeyCreate, EventOwner::default(), serde_json::json!({ "api_key_id": inserted.id.to_string(), "name": body.name, "expires_in_days": body.expires_in_days, "permissions_mask": mask, "project_id": project_pin.map(|id| id.to_string()), "cache_id": cache_pin.map(|id| id.to_string()), }))
     .await;
@@ -544,15 +525,9 @@ pub async fn patch_key(
 
     if let Some(name) = body.name {
         if name != previous_name {
-            let clash = EApi::find()
-                .filter(
-                    Condition::all()
-                        .add(CApi::OwnedBy.eq(user.id))
-                        .add(CApi::Name.eq(name.clone()))
-                        .add(CApi::Id.ne(api_id)),
-                )
-                .one(&state.web_db)
-                .await?;
+            let clash =
+                gradient_db::api_keys::other_with_name(&state.web_db, user.id, &name, api_id)
+                    .await?;
             if clash.is_some() {
                 return Err(WebError::already_exists(Resource::ApiKeyName));
             }
@@ -576,7 +551,7 @@ pub async fn patch_key(
         active.allowed_ips = Set(if canon.is_empty() { None } else { Some(canon) });
     }
 
-    let updated = active.update(&state.web_db).await?;
+    let updated = gradient_db::rows::update::<EApi, _>(&state.web_db, active).await?;
 
     audit.write(Action::ApiKeyUpdate, EventOwner::default(), serde_json::json!({ "api_key_id": api_id.to_string(), "previous_name": previous_name, "new_name": updated.name, "previous_permissions_mask": previous_mask, "new_permissions_mask": new_mask, "previous_project_id": previous_project.map(|i| i.to_string()), "new_project_id": new_project.map(|i| i.to_string()), }))
     .await;
@@ -594,13 +569,7 @@ pub async fn delete_keys(
     Json(body): Json<ApiKeyRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     forbid_via_api_key(&api_key_caller)?;
-    let api_key = EApi::find()
-        .filter(
-            Condition::all()
-                .add(CApi::OwnedBy.eq(user.id))
-                .add(CApi::Name.eq(body.name.clone())),
-        )
-        .one(&state.web_db)
+    let api_key = gradient_db::api_keys::by_owner_and_name(&state.web_db, user.id, &body.name)
         .await?
         .or_not_found(Resource::ApiKey)?;
 
@@ -609,8 +578,7 @@ pub async fn delete_keys(
     }
 
     let api_key_id = api_key.id;
-    let aapi_key: AApi = api_key.into();
-    aapi_key.delete(&state.web_db).await?;
+    gradient_db::rows::delete::<EApi, _>(&state.web_db, api_key).await?;
 
     audit
         .write(
@@ -648,9 +616,7 @@ pub async fn post_key_revoke(
         return Ok(ok_json("API-Key already revoked".to_string()));
     }
 
-    let mut active: AApi = api_key.into_active_model();
-    active.revoked_at = Set(Some(gradient_types::now()));
-    active.update(&state.web_db).await?;
+    gradient_db::api_keys::revoke(&state.web_db, api_key, gradient_types::now()).await?;
 
     audit
         .write(
@@ -670,12 +636,7 @@ pub async fn get_sessions(
 ) -> WebResult<Json<BaseResponse<Vec<SessionInfo>>>> {
     let current_session_id = session_claims(&state.jwt_secret, &headers).map(|claims| claims.jti);
 
-    let sessions = ESession::find()
-        .filter(CSession::UserId.eq(user.id))
-        .filter(CSession::RevokedAt.is_null())
-        .order_by_desc(CSession::LastUsedAt)
-        .all(&state.web_db)
-        .await?;
+    let sessions = gradient_db::sessions::unrevoked_of_user(&state.web_db, user.id).await?;
 
     let now = gradient_types::now();
     let sessions: Vec<SessionInfo> = sessions
@@ -711,9 +672,7 @@ pub async fn delete_session(
         return Ok(ok_json("Session already revoked".to_string()));
     }
 
-    let mut active: ASession = session.into_active_model();
-    active.revoked_at = Set(Some(gradient_types::now()));
-    active.update(&state.web_db).await?;
+    gradient_db::sessions::revoke(&state.web_db, session, gradient_types::now()).await?;
 
     audit
         .write(
@@ -732,9 +691,7 @@ pub async fn get_audit_log(
     Query(params): Query<PaginationParams>,
 ) -> WebResult<Json<BaseResponse<Paginated<Vec<AuditLogEntry>>>>> {
     let listing = paginate(
-        EAuditLog::find()
-            .filter(CAuditLog::UserId.eq(user.id))
-            .order_by_desc(CAuditLog::CreatedAt),
+        gradient_db::audit_log::of_user(user.id),
         &state.web_db,
         &params,
     )
@@ -782,10 +739,7 @@ pub async fn patch_settings(
             return Err(WebError::invalid_username(e.to_string()));
         }
 
-        let existing_user = EUser::find()
-            .filter(CUser::Username.eq(username.clone()))
-            .one(&state.web_db)
-            .await?;
+        let existing_user = gradient_db::users::by_username(&state.web_db, &username).await?;
 
         if existing_user.is_some() {
             return Err(WebError::already_exists(Resource::Username));
@@ -799,10 +753,7 @@ pub async fn patch_settings(
     }
 
     if let Some(email) = body.email {
-        let existing_user = EUser::find()
-            .filter(CUser::Email.eq(email.clone()))
-            .one(&state.web_db)
-            .await?;
+        let existing_user = gradient_db::users::by_email(&state.web_db, &email).await?;
 
         if existing_user.is_some() {
             return Err(WebError::already_exists(Resource::Email));
@@ -811,7 +762,7 @@ pub async fn patch_settings(
         auser.email = Set(email);
     }
 
-    auser.update(&state.web_db).await?;
+    gradient_db::rows::update::<EUser, _>(&state.web_db, auser).await?;
 
     let res = BaseResponse {
         error: false,

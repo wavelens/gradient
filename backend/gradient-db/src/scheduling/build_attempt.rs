@@ -371,3 +371,34 @@ pub async fn stamp_attempt_finished<C: ConnectionTrait>(
 
     Ok(())
 }
+
+pub async fn of_dispatched_jobs<C: ConnectionTrait>(
+    db: &C,
+    jobs: Vec<DispatchedJobId>,
+) -> Result<Vec<Model>, DbErr> {
+    Entity::find()
+        .filter(Column::DispatchedJob.is_in(jobs))
+        .all(db)
+        .await
+}
+
+pub async fn of_dispatched_job<C: ConnectionTrait>(
+    db: &C,
+    job: DispatchedJobId,
+) -> Result<Option<Model>, DbErr> {
+    Entity::find()
+        .filter(Column::DispatchedJob.eq(job))
+        .one(db)
+        .await
+}
+
+pub async fn attempts_oldest_first<C: ConnectionTrait>(
+    db: &C,
+    derivation_build: DerivationBuildId,
+) -> Result<Vec<Model>, DbErr> {
+    Entity::find()
+        .filter(Column::DerivationBuild.eq(derivation_build))
+        .order_by_asc(Column::CreatedAt)
+        .all(db)
+        .await
+}

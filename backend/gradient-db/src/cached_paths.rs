@@ -307,3 +307,37 @@ pub async fn page_in_cache<C: ConnectionTrait>(
         .all(db)
         .await
 }
+
+crate::sql! {
+    CACHE_TOTALS = r#"SELECT COALESCE(SUM(cp.file_size), 0)::bigint AS total_bytes,
+                      COALESCE(SUM(cp.nar_size),  0)::bigint AS total_nar_bytes,
+                      COUNT(cps.id)::bigint                   AS total_packages
+               FROM cached_path_signature cps
+               JOIN cached_path cp ON cp.id = cps.cached_path
+               WHERE cps.cache = $1"#,
+        params = [CacheId],
+        tier = Bulk;
+}
+
+pub struct CacheSize {
+    pub total_bytes: i64,
+    pub total_nar_bytes: i64,
+    pub total_packages: i64,
+}
+
+pub async fn size_of_cache<C: ConnectionTrait>(db: &C, cache: CacheId) -> Result<CacheSize, DbErr> {
+    let row = db
+        .query_one_raw(CACHE_TOTALS.bind([Value::Uuid(Some(cache.into_inner()))]))
+        .await?;
+    let total = |column: &str| {
+        row.as_ref()
+            .and_then(|row| row.try_get::<i64>("", column).ok())
+            .unwrap_or(0)
+    };
+
+    Ok(CacheSize {
+        total_bytes: total("total_bytes"),
+        total_nar_bytes: total("total_nar_bytes"),
+        total_packages: total("total_packages"),
+    })
+}

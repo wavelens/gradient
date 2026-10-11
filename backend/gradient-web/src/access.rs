@@ -17,12 +17,10 @@ use gradient_db::{DbContext, WebDb};
 use gradient_types::consts::{BASE_CACHE_ROLE_ADMIN_ID, BASE_ROLE_ADMIN_ID};
 use gradient_types::ids::{CacheId, IntegrationId, ProjectId, UserId};
 use gradient_types::{
-    CCache, CCacheAccess, CCacheUser, CIntegration, CProjectAccess, CProjectCache, CProjectUser,
-    CTeam, CUser, ECacheAccess, ECacheUser, EIntegration, EProjectAccess, EProjectCache,
-    EProjectUser, ETeam, EUser, MCache, MIntegration, MProject, MProjectUser, MTask, MTeam, MUser,
+    CProjectUser, EProjectUser, MCache, MIntegration, MProject, MProjectUser, MTask, MTeam, MUser,
     TeamRole,
 };
-use sea_orm::{ColumnTrait, Condition, EntityTrait, QueryFilter};
+use sea_orm::Condition;
 
 #[derive(Debug, thiserror::Error)]
 enum AccessRefusal {
@@ -276,9 +274,7 @@ pub async fn load_cache(
 }
 
 pub async fn visible_cache_condition(db: &WebDb, user_id: UserId) -> WebResult<Condition> {
-    let project_ids: Vec<ProjectId> = EProjectAccess::find()
-        .filter(CProjectAccess::User.eq(user_id))
-        .all(db)
+    let project_ids: Vec<ProjectId> = gradient_db::projects::access_of_user(db, user_id)
         .await?
         .into_iter()
         .map(|m| m.project)
@@ -287,18 +283,17 @@ pub async fn visible_cache_condition(db: &WebDb, user_id: UserId) -> WebResult<C
     let project_cache_ids: Vec<CacheId> = if project_ids.is_empty() {
         Vec::new()
     } else {
-        EProjectCache::find()
-            .filter(CProjectCache::Project.is_in(project_ids))
-            .all(db)
+        gradient_db::projects::caches::subscriptions_of_projects(db, project_ids)
             .await?
             .into_iter()
             .map(|oc| oc.cache)
             .collect()
     };
 
-    Ok(Condition::any()
-        .add(CCache::CreatedBy.eq(user_id))
-        .add(CCache::Id.is_in(project_cache_ids)))
+    Ok(gradient_db::caches::created_by_or_among(
+        user_id,
+        project_cache_ids,
+    ))
 }
 
 pub async fn load_integration_in_project(
@@ -306,10 +301,7 @@ pub async fn load_integration_in_project(
     project_id: ProjectId,
     integration_id: IntegrationId,
 ) -> WebResult<MIntegration> {
-    EIntegration::find()
-        .filter(CIntegration::Id.eq(integration_id))
-        .filter(CIntegration::Project.eq(project_id))
-        .one(db)
+    gradient_db::integrations::by_id_in_project(db, project_id, integration_id)
         .await?
         .or_not_found(Resource::Integration)
 }
@@ -334,14 +326,16 @@ pub async fn load_project_membership(
     user_id: UserId,
     project_id: ProjectId,
 ) -> WebResult<Option<MProjectUser>> {
-    Ok(EProjectUser::find()
-        .filter(
-            Condition::all()
-                .add(CProjectUser::Project.eq(project_id))
-                .add(CProjectUser::User.eq(user_id)),
+    Ok(
+        gradient_db::memberships::by_owner_and_user::<EProjectUser, _>(
+            db,
+            CProjectUser::Project,
+            project_id,
+            CProjectUser::User,
+            user_id,
         )
-        .one(db)
-        .await?)
+        .await?,
+    )
 }
 
 pub async fn has_permission(
@@ -412,10 +406,7 @@ async fn is_cache_member(
     cache_id: CacheId,
     _api_key: Option<&ApiKeyContext>,
 ) -> WebResult<bool> {
-    Ok(ECacheAccess::find()
-        .filter(CCacheAccess::Cache.eq(cache_id))
-        .filter(CCacheAccess::User.eq(user_id))
-        .one(db)
+    Ok(gradient_db::caches::access_of_user(db, cache_id, user_id)
         .await?
         .is_some())
 }
@@ -426,13 +417,12 @@ async fn is_cache_project_subscriber(
     cache_id: CacheId,
     api_key: Option<&ApiKeyContext>,
 ) -> WebResult<bool> {
-    let subscriber_projects: Vec<ProjectId> = EProjectCache::find()
-        .filter(CProjectCache::Cache.eq(cache_id))
-        .all(db)
-        .await?
-        .into_iter()
-        .map(|oc| oc.project)
-        .collect();
+    let subscriber_projects: Vec<ProjectId> =
+        gradient_db::projects::caches::subscriptions_to(db, cache_id)
+            .await?
+            .into_iter()
+            .map(|oc| oc.project)
+            .collect();
 
     let allowed: Vec<ProjectId> = match api_key.and_then(|k| k.project) {
         Some(pinned) => subscriber_projects
@@ -445,11 +435,7 @@ async fn is_cache_project_subscriber(
         return Ok(false);
     }
 
-    let member = EProjectAccess::find()
-        .filter(CProjectAccess::User.eq(user_id))
-        .filter(CProjectAccess::Project.is_in(allowed))
-        .one(db)
-        .await?;
+    let member = gradient_db::projects::access_of_user_in(db, user_id, allowed).await?;
     Ok(member.is_some())
 }
 
@@ -521,27 +507,23 @@ async fn require_cache_permission(
 }
 
 pub async fn project_admin_emails(db: &WebDb, project_id: ProjectId) -> WebResult<Vec<String>> {
-    let admin_ids: Vec<UserId> = EProjectUser::find()
-        .filter(CProjectUser::Project.eq(project_id))
-        .filter(CProjectUser::Role.eq(BASE_ROLE_ADMIN_ID))
-        .all(db)
-        .await?
-        .into_iter()
-        .map(|m| m.user)
-        .collect();
+    let admin_ids: Vec<UserId> =
+        gradient_db::projects::members_with_role(db, project_id, BASE_ROLE_ADMIN_ID)
+            .await?
+            .into_iter()
+            .map(|m| m.user)
+            .collect();
 
     admin_emails(db, admin_ids).await
 }
 
 pub async fn cache_admin_emails(db: &WebDb, cache_id: CacheId) -> WebResult<Vec<String>> {
-    let admin_ids: Vec<UserId> = ECacheUser::find()
-        .filter(CCacheUser::Cache.eq(cache_id))
-        .filter(CCacheUser::Role.eq(BASE_CACHE_ROLE_ADMIN_ID))
-        .all(db)
-        .await?
-        .into_iter()
-        .map(|m| m.user)
-        .collect();
+    let admin_ids: Vec<UserId> =
+        gradient_db::caches::members::with_role(db, cache_id, BASE_CACHE_ROLE_ADMIN_ID)
+            .await?
+            .into_iter()
+            .map(|m| m.user)
+            .collect();
 
     admin_emails(db, admin_ids).await
 }
@@ -551,14 +533,12 @@ async fn admin_emails(db: &WebDb, ids: Vec<UserId>) -> WebResult<Vec<String>> {
         return Ok(Vec::new());
     }
 
-    Ok(gradient_db::fetch_in_chunks(&ids, |chunk| async move {
-        EUser::find().filter(CUser::Id.is_in(chunk)).all(db).await
-    })
-    .await?
-    .into_iter()
-    .filter(|u| u.active && !u.email.is_empty())
-    .map(|u| u.email)
-    .collect())
+    Ok(gradient_db::users::with_ids(db, &ids)
+        .await?
+        .into_iter()
+        .filter(|u| u.active && !u.email.is_empty())
+        .map(|u| u.email)
+        .collect())
 }
 
 pub(crate) fn reject_managed_integration(integration: &MIntegration) -> WebResult<()> {
@@ -592,9 +572,7 @@ pub async fn load_team(
         return Err(AccessRefusal::PinnedKeyOnTeamEndpoint.into());
     }
 
-    let team = ETeam::find()
-        .filter(CTeam::Name.eq(team_name))
-        .one(db)
+    let team = gradient_db::teams::by_name(db, &team_name)
         .await?
         .or_not_found(Resource::Team)?;
     let role = gradient_db::teams::team_role_of(db, team.id, user.id).await?;
@@ -635,7 +613,7 @@ mod tests {
     use gradient_types::ids::{ProjectUserId, RoleId, TaskId};
     use gradient_types::permissions::mask_from;
     use gradient_types::{ECache, MProjectAccess};
-    use sea_orm::{DatabaseBackend, MockDatabase};
+    use sea_orm::{DatabaseBackend, EntityTrait, MockDatabase, QueryFilter};
     use uuid::uuid;
 
     fn fixture_date() -> chrono::NaiveDateTime {

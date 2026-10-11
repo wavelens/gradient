@@ -10,9 +10,8 @@ use crate::helpers::ok_json;
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
 use gradient_core::ServerState;
-use gradient_entity::derivation_dependency::EdgeKind;
 use gradient_types::*;
-use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter};
+use sea_orm::ConnectionTrait;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -69,11 +68,11 @@ async fn walk_dependencies<C: ConnectionTrait>(
     let mut frontier = vec![root];
 
     while !frontier.is_empty() {
-        let rows = EDerivationDependency::find()
-            .filter(CDerivationDependency::Derivation.is_in(std::mem::take(&mut frontier)))
-            .filter(CDerivationDependency::Kind.is_in([EdgeKind::Buildtime, EdgeKind::Both]))
-            .all(db)
-            .await?;
+        let rows = gradient_db::derivation_dependencies::build_inputs_of(
+            db,
+            std::mem::take(&mut frontier),
+        )
+        .await?;
 
         for row in rows {
             if reached.len() < GRAPH_NODE_CAP && seen.insert(row.dependency) {
@@ -98,14 +97,12 @@ async fn graph_nodes<C: ConnectionTrait>(
     evaluation: EvaluationId,
     derivations: &[DerivationId],
 ) -> WebResult<Vec<DependencyGraphNode>> {
-    let builds: HashMap<DerivationId, BuildJobId> = EBuildJob::find()
-        .filter(CBuildJob::Evaluation.eq(evaluation))
-        .filter(CBuildJob::Derivation.is_in(derivations.to_vec()))
-        .all(db)
-        .await?
-        .into_iter()
-        .map(|j| (j.derivation, j.id))
-        .collect();
+    let builds: HashMap<DerivationId, BuildJobId> =
+        gradient_db::build_jobs::of_derivations_in_evaluation(db, evaluation, derivations)
+            .await?
+            .into_iter()
+            .map(|j| (j.derivation, j.id))
+            .collect();
 
     let shared_builds =
         gradient_db::graph::reachability::shared_builds_by_derivation(db, derivations).await?;

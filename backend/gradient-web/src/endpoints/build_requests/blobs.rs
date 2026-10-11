@@ -22,9 +22,8 @@ use gradient_db::WebDb;
 use gradient_storage::NarStore;
 use gradient_types::ids::{BuildRequestBlobId, ProjectId, UploadSessionId};
 use gradient_types::input::decode_blake3_hex;
-use gradient_types::{AUploadSession, BaseResponse, EUploadSession, MBuildRequestBlob, MUser, now};
-use sea_orm::ActiveValue::Set;
-use sea_orm::{ActiveModelTrait, DbErr, IntoActiveModel, RuntimeErr, sqlx};
+use gradient_types::{BaseResponse, EUploadSession, MBuildRequestBlob, MUser, now};
+use sea_orm::{DbErr, RuntimeErr, sqlx};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -92,9 +91,7 @@ pub async fn post_blobs(
     let missing_value = serde_json::to_value(missing.into_iter().collect::<Vec<String>>())
         .context("serialise missing list")?;
 
-    let mut active: AUploadSession = session.into();
-    active.missing = Set(missing_value);
-    active.update(&state.web_db).await?;
+    gradient_db::upload_sessions::set_missing(&state.web_db, session, missing_value).await?;
 
     Ok(ok_json(BlobsResponse {
         uploaded: missing_before - remaining,
@@ -145,16 +142,17 @@ async fn store_blob(
         .context("persist blob")?;
 
     let stored_at = now();
-    let inserted = MBuildRequestBlob {
-        id: BuildRequestBlobId::now_v7(),
-        project,
-        hash: blob.hash.to_vec(),
-        size,
-        created_at: stored_at,
-        last_used_at: stored_at,
-    }
-    .into_active_model()
-    .insert(db)
+    let inserted = gradient_db::build_request_blobs::insert(
+        db,
+        MBuildRequestBlob {
+            id: BuildRequestBlobId::now_v7(),
+            project,
+            hash: blob.hash.to_vec(),
+            size,
+            created_at: stored_at,
+            last_used_at: stored_at,
+        },
+    )
     .await;
 
     match inserted {

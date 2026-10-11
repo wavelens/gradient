@@ -4,10 +4,13 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use chrono::NaiveDateTime;
+use gradient_types::triggers::TriggerType;
 use gradient_types::*;
+use sea_orm::ActiveValue::Set;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, ConnectionTrait, DbErr, EntityTrait, IntoActiveModel,
-    QueryFilter,
+    ActiveModelTrait, ColumnTrait, ConnectionTrait, DbErr, EntityTrait, FromQueryResult,
+    IntoActiveModel, QueryFilter, Value,
 };
 
 pub async fn of_task<C: ConnectionTrait>(db: &C, task: TaskId) -> Result<Vec<MTaskTrigger>, DbErr> {
@@ -46,4 +49,74 @@ pub async fn update<C: ConnectionTrait>(
 pub async fn delete<C: ConnectionTrait>(db: &C, trigger: MTaskTrigger) -> Result<(), DbErr> {
     trigger.into_active_model().delete(db).await?;
     Ok(())
+}
+
+pub async fn set_last_fired<C: ConnectionTrait>(
+    db: &C,
+    trigger: MTaskTrigger,
+    at: NaiveDateTime,
+) -> Result<MTaskTrigger, DbErr> {
+    let mut active: ATaskTrigger = trigger.into();
+    active.last_fired_at = Set(Some(at));
+    active.updated_at = Set(at);
+    active.update(db).await
+}
+
+fn active_triggers_sql(trigger_type: TriggerType) -> String {
+    format!(
+        "SELECT pt.* FROM task_trigger pt \
+         JOIN task p ON pt.task = p.id \
+         JOIN integration i ON i.project = p.project \
+         WHERE pt.active = true \
+           AND pt.trigger_type = {} \
+           AND i.id = $1",
+        i16::from(trigger_type),
+    )
+}
+
+crate::sql_fn! {
+    ACTIVE_TRIGGERS_FOR_INTEGRATION = || active_triggers_sql(TriggerType::ReporterPullRequest),
+        params = [IntegrationId];
+}
+
+pub async fn active_of_integration<C: ConnectionTrait>(
+    db: &C,
+    integration: IntegrationId,
+    trigger_type: TriggerType,
+) -> Result<Vec<MTaskTrigger>, DbErr> {
+    // Triggers are matched by project, not by config `integration_id`. The GitHub App seed
+    // migration rewrote integration rows, and a pre-migration trigger's stale UUID would stop
+    // matching.
+    let stmt = ACTIVE_TRIGGERS_FOR_INTEGRATION.bind_built(
+        active_triggers_sql(trigger_type),
+        [Value::Uuid(Some(integration.into_inner()))],
+    );
+    ETaskTrigger::find().from_raw_sql(stmt).all(db).await
+}
+
+crate::sql! {
+    ACTIVE_TASK_IDS_FOR_INTEGRATION = "SELECT DISTINCT task FROM task_trigger \
+         WHERE active = true \
+           AND trigger_type = $1 \
+           AND (config->>'integration_id')::uuid = $2",
+        params = [Int(2), IntegrationId];
+}
+
+pub async fn active_pull_request_tasks_of_integration<C: ConnectionTrait>(
+    db: &C,
+    integration: IntegrationId,
+) -> Result<Vec<TaskId>, DbErr> {
+    let stmt = ACTIVE_TASK_IDS_FOR_INTEGRATION.bind([
+        Value::SmallInt(Some(i16::from(TriggerType::ReporterPullRequest))),
+        Value::Uuid(Some(integration.into_inner())),
+    ]);
+
+    #[derive(FromQueryResult)]
+    struct TaskRow {
+        task: TaskId,
+    }
+    TaskRow::find_by_statement(stmt)
+        .all(db)
+        .await
+        .map(|rows| rows.into_iter().map(|r| r.task).collect())
 }

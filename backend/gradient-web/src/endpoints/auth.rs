@@ -37,10 +37,6 @@ use gradient_types::*;
 use password_auth::{generate_hash, verify_password};
 use rand::distr::{Alphanumeric, SampleString};
 use rand::seq::IndexedRandom;
-use sea_orm::ActiveValue::Set;
-use sea_orm::{
-    ActiveModelTrait, ColumnTrait, Condition, EntityTrait, IntoActiveModel, QueryFilter,
-};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
@@ -154,14 +150,9 @@ pub async fn post_basic_register(
         return Err(WebError::invalid_password(e.to_string()));
     }
 
-    let existing_user = EUser::find()
-        .filter(
-            Condition::any()
-                .add(CUser::Username.eq(body.username.clone()))
-                .add(CUser::Email.eq(body.email.clone())),
-        )
-        .one(&state.web_db)
-        .await?;
+    let existing_user =
+        gradient_db::users::by_username_or_email(&state.web_db, &body.username, &body.email)
+            .await?;
 
     if existing_user.is_some() {
         return Err(WebError::already_exists(Resource::User));
@@ -193,11 +184,9 @@ pub async fn post_basic_register(
         email_verification_token_expires: verification_expires,
         active: true,
         ..Default::default()
-    }
-    .into_active_model();
+    };
 
-    let user = user
-        .insert(&state.web_db)
+    let user = gradient_db::rows::insert::<EUser, _>(&state.web_db, user)
         .await
         .map_err(|e| WebError::from_db_err(e, Resource::User))?;
 
@@ -275,14 +264,12 @@ pub async fn post_basic_login(
         return Err(WebError::oauth_required());
     }
 
-    let user = match EUser::find()
-        .filter(
-            Condition::any()
-                .add(CUser::Username.eq(body.loginname.clone()))
-                .add(CUser::Email.eq(body.loginname.clone())),
-        )
-        .one(&state.web_db)
-        .await?
+    let user = match gradient_db::users::by_username_or_email(
+        &state.web_db,
+        &body.loginname,
+        &body.loginname,
+    )
+    .await?
     {
         Some(u) => u,
         None => {
@@ -561,9 +548,8 @@ pub async fn post_logout(
         let session_id = claims.jti;
         let user_id = claims.id;
         if let Ok(Some(session)) = by_id::<ESession, _>(&state.web_db, session_id).await {
-            let mut active: ASession = session.into_active_model();
-            active.revoked_at = Set(Some(gradient_types::now()));
-            let _ = active.update(&state.web_db).await;
+            let _ =
+                gradient_db::sessions::revoke(&state.web_db, session, gradient_types::now()).await;
         }
 
         audit
@@ -612,10 +598,7 @@ pub async fn post_check_username(
         }));
     }
 
-    let existing_user = EUser::find()
-        .filter(CUser::Username.eq(body.username.clone()))
-        .one(&state.web_db)
-        .await?;
+    let existing_user = gradient_db::users::by_username(&state.web_db, &body.username).await?;
 
     if existing_user.is_some() {
         return Ok(Json(BaseResponse {
@@ -649,9 +632,7 @@ pub async fn get_verify_email(
         .get("token")
         .ok_or(AuthRefusal::MissingVerificationToken)?;
 
-    let user = EUser::find()
-        .filter(CUser::EmailVerificationToken.eq(token.clone()))
-        .one(&state.web_db)
+    let user = gradient_db::users::by_email_verification_token(&state.web_db, token)
         .await?
         .ok_or(AuthRefusal::InvalidVerificationToken)?;
 
@@ -665,12 +646,7 @@ pub async fn get_verify_email(
         return Ok(ok_json("Email already verified".to_string()));
     }
 
-    let mut user_active: AUser = user.into();
-    user_active.email_verified = Set(true);
-    user_active.email_verification_token = Set(None);
-    user_active.email_verification_token_expires = Set(None);
-
-    user_active.update(&state.web_db).await?;
+    gradient_db::users::mark_email_verified(&state.web_db, user).await?;
 
     Ok(ok_json("Email verified successfully".to_string()))
 }
@@ -690,9 +666,7 @@ pub async fn post_resend_verification(
         return Err(AuthRefusal::EmailVerificationDisabled.into());
     }
 
-    let user = EUser::find()
-        .filter(CUser::Username.eq(body.username.clone()))
-        .one(&state.web_db)
+    let user = gradient_db::users::by_username(&state.web_db, &body.username)
         .await?
         .or_not_found(Resource::User)?;
 
@@ -705,10 +679,13 @@ pub async fn post_resend_verification(
 
     let tx = state.web_db.inner().begin().await?;
 
-    let mut user_active: AUser = user.clone().into();
-    user_active.email_verification_token = Set(Some(verification_token.clone()));
-    user_active.email_verification_token_expires = Set(Some(verification_expires));
-    user_active.update(&tx).await?;
+    gradient_db::users::set_email_verification_token(
+        &tx,
+        user.clone(),
+        verification_token.clone(),
+        verification_expires,
+    )
+    .await?;
 
     state
         .email
@@ -798,11 +775,12 @@ pub async fn post_cli_device_start(
     let device_code = generate_device_code();
     let user_code = loop {
         let candidate = generate_user_code();
-        let exists = ECliDeviceAuthorization::find()
-            .filter(CCliDeviceAuthorization::UserCode.eq(candidate.clone()))
-            .filter(CCliDeviceAuthorization::ExpiresAt.gt(gradient_types::now()))
-            .one(&state.web_db)
-            .await?;
+        let exists = gradient_db::cli_device_authorizations::unexpired_by_user_code(
+            &state.web_db,
+            &candidate,
+            gradient_types::now(),
+        )
+        .await?;
         if exists.is_none() {
             break candidate;
         }
@@ -820,10 +798,9 @@ pub async fn post_cli_device_start(
         user_agent: audit.info().user_agent.clone(),
         ip: audit.info().ip.clone(),
         ..Default::default()
-    }
-    .into_active_model();
+    };
 
-    row.insert(&state.web_db).await?;
+    gradient_db::rows::insert::<ECliDeviceAuthorization, _>(&state.web_db, row).await?;
 
     audit
         .write(
@@ -852,9 +829,7 @@ pub async fn post_cli_device_poll(
     Json(body): Json<CliDevicePollRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let hash = hash_device_code(&body.device_code);
-    let row = ECliDeviceAuthorization::find()
-        .filter(CCliDeviceAuthorization::DeviceCodeHash.eq(hash))
-        .one(&state.web_db)
+    let row = gradient_db::cli_device_authorizations::by_device_code_hash(&state.web_db, &hash)
         .await?
         .ok_or_else(|| WebError::not_found(Resource::DeviceAuthorization))?;
 
@@ -863,9 +838,7 @@ pub async fn post_cli_device_poll(
         return Err(AuthRefusal::DeviceAuthorizationDenied.into());
     }
     if let Some(token) = row.token.clone() {
-        let mut active: ACliDeviceAuthorization = row.into();
-        active.token = Set(None);
-        active.update(&state.web_db).await?;
+        gradient_db::cli_device_authorizations::clear_token(&state.web_db, row).await?;
         return Ok(ok_json(token));
     }
     if row.authorized_at.is_some() || row.expires_at < now {
@@ -875,9 +848,7 @@ pub async fn post_cli_device_poll(
 }
 
 async fn find_active_user_code(db: &WebDb, user_code: &str) -> WebResult<MCliDeviceAuthorization> {
-    let row = ECliDeviceAuthorization::find()
-        .filter(CCliDeviceAuthorization::UserCode.eq(user_code.to_string()))
-        .one(db)
+    let row = gradient_db::cli_device_authorizations::by_user_code(db, user_code)
         .await?
         .ok_or_else(|| WebError::not_found(Resource::DeviceAuthorization))?;
 
@@ -927,11 +898,8 @@ pub async fn post_cli_device_authorize(
     .map_err(|_| WebError::failed_to_generate_token())?;
 
     let now = gradient_types::now();
-    let mut active: ACliDeviceAuthorization = row.into();
-    active.user_id = Set(Some(user.id));
-    active.token = Set(Some(token));
-    active.authorized_at = Set(Some(now));
-    active.update(&state.web_db).await?;
+    gradient_db::cli_device_authorizations::authorize(&state.web_db, row, user.id, token, now)
+        .await?;
 
     audit
         .write(
@@ -952,9 +920,7 @@ pub async fn post_cli_device_deny(
     let row = find_active_user_code(&state.web_db, &body.user_code).await?;
 
     let now = gradient_types::now();
-    let mut active: ACliDeviceAuthorization = row.into();
-    active.denied_at = Set(Some(now));
-    active.update(&state.web_db).await?;
+    gradient_db::cli_device_authorizations::deny(&state.web_db, row, now).await?;
 
     audit
         .write(

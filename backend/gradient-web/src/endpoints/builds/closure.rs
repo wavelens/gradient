@@ -12,7 +12,6 @@ use axum::extract::{Path, State};
 use axum::{Extension, Json};
 use gradient_core::ServerState;
 use gradient_types::*;
-use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
@@ -78,33 +77,26 @@ where
     let total: i64 = size_by_drv.values().sum();
     let total_size_bytes = if total > 0 { Some(total) } else { None };
 
-    let nodes: Vec<ClosureNode> = gradient_db::fetch_in_chunks(&all_ids, |chunk| {
-        EDerivation::find()
-            .filter(CDerivation::Id.is_in(chunk))
-            .all(db)
-    })
-    .await?
-    .into_iter()
-    .map(|d| ClosureNode {
-        nar_size: size_by_drv.get(&d.id).copied(),
-        id: d.id.to_string(),
-        name: d.name.clone(),
-        path: d.drv_path(),
-    })
-    .collect();
+    let nodes: Vec<ClosureNode> = gradient_db::derivations::with_ids(db, &all_ids)
+        .await?
+        .into_iter()
+        .map(|d| ClosureNode {
+            nar_size: size_by_drv.get(&d.id).copied(),
+            id: d.id.to_string(),
+            name: d.name.clone(),
+            path: d.drv_path(),
+        })
+        .collect();
 
-    let edges: Vec<ClosureEdge> = gradient_db::fetch_in_chunks(&all_ids, |chunk| {
-        EDerivationDependency::find()
-            .filter(CDerivationDependency::Derivation.is_in(chunk))
-            .all(db)
-    })
-    .await?
-    .into_iter()
-    .map(|e| ClosureEdge {
-        source: e.dependency.to_string(),
-        target: e.derivation.to_string(),
-    })
-    .collect();
+    let edges: Vec<ClosureEdge> =
+        gradient_db::derivation_dependencies::of_derivations(db, &all_ids)
+            .await?
+            .into_iter()
+            .map(|e| ClosureEdge {
+                source: e.dependency.to_string(),
+                target: e.derivation.to_string(),
+            })
+            .collect();
 
     let roots = roots.iter().map(|r| r.to_string()).collect();
     Ok(closure_graph(roots, total_size_bytes, nodes, edges))
@@ -238,13 +230,12 @@ pub async fn get_eval_closure(
     let _ctx = EvalAccessContext::load(&state.web_db, evaluation_id, &maybe_user, api_key.as_ref())
         .await?;
 
-    let roots: Vec<DerivationId> = EEntryPoint::find()
-        .filter(CEntryPoint::Evaluation.eq(evaluation_id))
-        .all(&state.web_db)
-        .await?
-        .into_iter()
-        .map(|ep| ep.derivation)
-        .collect();
+    let roots: Vec<DerivationId> =
+        gradient_db::entry_points::of_evaluation(&state.web_db, evaluation_id)
+            .await?
+            .into_iter()
+            .map(|ep| ep.derivation)
+            .collect();
 
     let graph = build_closure_graph(&state.web_db, roots).await?;
     Ok(ok_json(graph))
@@ -325,13 +316,12 @@ pub async fn get_eval_runtime_closure(
     let _ctx = EvalAccessContext::load(&state.web_db, evaluation_id, &maybe_user, api_key.as_ref())
         .await?;
 
-    let roots: Vec<DerivationId> = EEntryPoint::find()
-        .filter(CEntryPoint::Evaluation.eq(evaluation_id))
-        .all(&state.web_db)
-        .await?
-        .into_iter()
-        .map(|ep| ep.derivation)
-        .collect();
+    let roots: Vec<DerivationId> =
+        gradient_db::entry_points::of_evaluation(&state.web_db, evaluation_id)
+            .await?
+            .into_iter()
+            .map(|ep| ep.derivation)
+            .collect();
 
     let seeds =
         gradient_db::graph::runtime_closure::output_hashes_for_drvs(&state.web_db, &roots).await?;

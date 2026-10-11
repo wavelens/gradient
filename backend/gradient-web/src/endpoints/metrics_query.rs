@@ -15,7 +15,6 @@ use gradient_core::ServerState;
 use gradient_entity::metric_rollup::RollupGranularity;
 use gradient_types::*;
 use gradient_util::telemetry::metric;
-use sea_orm::{ConnectionTrait, Value};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use uuid::Uuid;
@@ -114,42 +113,6 @@ pub struct MetricPoint {
     pub avg: f64,
 }
 
-fn metrics_query_sql(project_filter: Option<&str>, has_from: bool, has_to: bool) -> String {
-    let mut sql = String::from(
-        "SELECT bucket_start, sum(count)::bigint AS c, sum(sum) AS s, \
-                min(min) AS mn, max(max) AS mx \
-         FROM metric_rollup WHERE metric = $1 AND granularity = $2",
-    );
-
-    if let Some(list) = project_filter {
-        // DB-sourced UUID strings are safe to inline as a quoted IN list.
-        sql.push_str(&format!(" AND (scope->>'project') IN ({list})"));
-    }
-
-    let mut n = 2;
-    if has_from {
-        n += 1;
-        sql.push_str(&format!(" AND bucket_start >= ${n}"));
-    }
-
-    if has_to {
-        n += 1;
-        sql.push_str(&format!(" AND bucket_start <= ${n}"));
-    }
-
-    sql.push_str(" GROUP BY bucket_start ORDER BY bucket_start");
-    sql
-}
-
-gradient_db::sql_fn! {
-    METRICS_QUERY = || metrics_query_sql(
-        Some("'11111111-1111-1111-1111-111111111111'"),
-        true,
-        true,
-    ),
-        params = [Text(metric::BUILDS_CREATED), Int(1), Now, Now];
-}
-
 pub async fn get_metrics_query(
     State(state): State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
@@ -192,40 +155,29 @@ pub async fn get_metrics_query(
     let from = parse_ts(params.from.as_deref());
     let to = parse_ts(params.to.as_deref());
 
-    let mut values: Vec<Value> = vec![
-        Value::from(params.metric.clone()),
-        Value::from(i16::from(gran)),
-    ];
-    if let Some(from) = from {
-        values.push(Value::from(from));
-    }
-
-    if let Some(to) = to {
-        values.push(Value::from(to));
-    }
-
-    let rows = state
-        .web_db
-        .query_all_raw(METRICS_QUERY.bind_built(
-            metrics_query_sql(project_list.as_deref(), from.is_some(), to.is_some()),
-            values,
-        ))
-        .await?;
+    let rows = gradient_db::metrics::series::of_projects(
+        &state.web_db,
+        &params.metric,
+        gran,
+        project_list.as_deref(),
+        from,
+        to,
+    )
+    .await?;
 
     let points = rows
         .into_iter()
-        .map(|r| {
-            let count: i64 = r.try_get("", "c").unwrap_or(0);
-            let sum: f64 = r.try_get("", "s").unwrap_or(0.0);
-            let bucket: chrono::NaiveDateTime = r.try_get("", "bucket_start").unwrap_or_default();
-            MetricPoint {
-                bucket_start: bucket.and_utc().to_rfc3339(),
-                count,
-                sum,
-                min: r.try_get("", "mn").unwrap_or(0.0),
-                max: r.try_get("", "mx").unwrap_or(0.0),
-                avg: if count > 0 { sum / count as f64 } else { 0.0 },
-            }
+        .map(|r| MetricPoint {
+            bucket_start: r.bucket_start.and_utc().to_rfc3339(),
+            count: r.count,
+            sum: r.sum,
+            min: r.min,
+            max: r.max,
+            avg: if r.count > 0 {
+                r.sum / r.count as f64
+            } else {
+                0.0
+            },
         })
         .collect();
 

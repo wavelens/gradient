@@ -12,12 +12,7 @@ use axum::{Extension, Json};
 use gradient_core::ServerState;
 use gradient_entity::{team_worker, worker_registration};
 use gradient_types::ids::{TeamId, TeamWorkerId, UserId, WorkerRegistrationId};
-use gradient_types::{
-    BaseResponse, ETeamWorker, EWorkerRegistration, MProject, MTeam, MTeamWorker, MUser,
-};
-use sea_orm::{
-    ActiveModelTrait, ColumnTrait, Condition, EntityTrait, IntoActiveModel, QueryFilter,
-};
+use gradient_types::{BaseResponse, MProject, MTeam, MTeamWorker, MUser};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -208,31 +203,16 @@ async fn authorize_target(
 }
 
 async fn ensure_unclaimed(db: &WebDb, target: &Target, worker_id: &str) -> WebResult<()> {
-    let same_worker = Condition::any().add(worker_registration::Column::WorkerId.eq(worker_id));
-    let registrations = match target {
-        Target::Team(_) => same_worker,
-        Target::Project(project) => same_worker.add(
-            Condition::all()
-                .add(worker_registration::Column::PeerId.eq(project.id))
-                .add(worker_registration::Column::GradientCi.eq(true)),
-        ),
+    let (project, team) = match target {
+        Target::Team(team) => (None, Some(team.id)),
+        Target::Project(project) => (Some(project.id), None),
     };
-
-    let registration = EWorkerRegistration::find()
-        .filter(registrations)
-        .one(db)
-        .await?;
-
-    let mut team_workers = Condition::any().add(team_worker::Column::WorkerId.eq(worker_id));
-    if let Target::Team(team) = target {
-        team_workers = team_workers.add(
-            Condition::all()
-                .add(team_worker::Column::Team.eq(team.id))
-                .add(team_worker::Column::GradientCi.eq(true)),
-        );
-    }
-
-    let team_worker = ETeamWorker::find().filter(team_workers).one(db).await?;
+    let registration = gradient_db::worker_registrations::by_worker_id_or_gradient_ci_project(
+        db, worker_id, project,
+    )
+    .await?;
+    let team_worker =
+        gradient_db::teams::workers::by_worker_id_or_gradient_ci_team(db, worker_id, team).await?;
 
     match claim_conflict(
         target,
@@ -276,11 +256,12 @@ async fn insert_registration(
     url: String,
     stored: StoredToken,
 ) -> WebResult<()> {
-    registration_row(project, user, token, url, stored)
-        .into_active_model()
-        .insert(db)
-        .await
-        .map_err(|e| WebError::from_db_err(e, Resource::GradientCiConnection))?;
+    gradient_db::worker_registrations::insert(
+        db,
+        registration_row(project, user, token, url, stored),
+    )
+    .await
+    .map_err(|e| WebError::from_db_err(e, Resource::GradientCiConnection))?;
     if let Err(e) = gradient_ci::unpark_no_workers_for_project(db, project.id).await {
         tracing::warn!(
             error = %e,
@@ -300,11 +281,12 @@ async fn insert_team_worker(
     url: String,
     stored: StoredToken,
 ) -> WebResult<()> {
-    team_worker_row(team.id, token.worker_id.clone(), url, stored, user.id)
-        .into_active_model()
-        .insert(db)
-        .await
-        .map_err(|e| WebError::from_db_err(e, Resource::GradientCiConnection))?;
+    gradient_db::teams::workers::register(
+        db,
+        team_worker_row(team.id, token.worker_id.clone(), url, stored, user.id),
+    )
+    .await
+    .map_err(|e| WebError::from_db_err(e, Resource::GradientCiConnection))?;
 
     let projects = gradient_db::teams::workers::projects_granted_with_workers(db, team.id).await?;
     for project in projects {

@@ -11,7 +11,6 @@ use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::http::{StatusCode, header};
 use axum::response::{IntoResponse, Response};
-use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter};
 
 use gradient_core::ServerState;
 use gradient_types::*;
@@ -35,18 +34,14 @@ fn scim_json(status: StatusCode, body: impl serde::Serialize) -> Response {
 }
 
 async fn team_for_group(db: &WebDb, group: &str) -> ScimResult<MTeam> {
-    ETeam::find()
-        .filter(CTeam::ScimGroup.eq(group))
-        .one(db.inner())
+    gradient_db::teams::by_scim_group(db.inner(), group)
         .await?
         .ok_or_else(|| ScimError::not_found("group not found"))
 }
 
 async fn group_resource(db: &WebDb, team: &MTeam) -> ScimResult<GroupResource> {
     let group = team.scim_group.clone().unwrap_or_default();
-    let members = ETeamUser::find()
-        .filter(CTeamUser::Team.eq(team.id))
-        .all(db.inner())
+    let members = gradient_db::teams::members::memberships_of(db.inner(), team.id)
         .await?
         .into_iter()
         .map(|membership| GroupMember {
@@ -75,20 +70,18 @@ pub async fn list(
     State(state): State<Arc<ServerState>>,
     Query(q): Query<ListQuery>,
 ) -> ScimResult<impl IntoResponse> {
-    let filter = match q.filter.as_deref().and_then(parse_eq_filter) {
-        Some((attr, val)) if attr == "displayname" => CTeam::ScimGroup.eq(val),
+    let group = match q.filter.as_deref().and_then(parse_eq_filter) {
+        Some((attr, val)) if attr == "displayname" => Some(val),
         Some(_) => {
             return Err(ScimError::bad_request(
                 "invalidFilter",
                 "unsupported filter",
             ));
         }
-        None => CTeam::ScimGroup.is_not_null(),
+        None => None,
     };
-    let teams = ETeam::find()
-        .filter(filter)
-        .all(state.web_db.inner())
-        .await?;
+    let teams =
+        gradient_db::teams::linked_to_scim_group(state.web_db.inner(), group.as_deref()).await?;
 
     let mut resources = Vec::with_capacity(teams.len());
     for team in &teams {
@@ -177,21 +170,18 @@ fn member_ids_for_remove(op: &PatchOperation, parsed: &[String]) -> Vec<String> 
 async fn add_member(web_db: &WebDb, team: TeamId, uid: &str) -> ScimResult<()> {
     let user = parse_uid(uid)?;
     let db = web_db.inner();
-    let existing = ETeamUser::find()
-        .filter(CTeamUser::Team.eq(team))
-        .filter(CTeamUser::User.eq(user))
-        .one(db)
-        .await?;
+    let existing = gradient_db::teams::members::membership(db, team, user).await?;
     if existing.is_none() {
-        MTeamUser {
-            id: TeamUserId::now_v7(),
-            team,
-            user,
-            role: TeamRole::Member,
-            source: TeamMemberSource::Group,
-        }
-        .into_active_model()
-        .insert(db)
+        gradient_db::teams::members::add_member(
+            db,
+            MTeamUser {
+                id: TeamUserId::now_v7(),
+                team,
+                user,
+                role: TeamRole::Member,
+                source: TeamMemberSource::Group,
+            },
+        )
         .await?;
     }
     Ok(())
@@ -199,12 +189,7 @@ async fn add_member(web_db: &WebDb, team: TeamId, uid: &str) -> ScimResult<()> {
 
 async fn remove_member(db: &WebDb, team: TeamId, uid: &str) -> ScimResult<()> {
     let user = parse_uid(uid)?;
-    ETeamUser::delete_many()
-        .filter(CTeamUser::Team.eq(team))
-        .filter(CTeamUser::User.eq(user))
-        .filter(CTeamUser::Source.eq(TeamMemberSource::Group))
-        .exec(db.inner())
-        .await?;
+    gradient_db::teams::members::remove_group_member(db.inner(), team, user).await?;
     Ok(())
 }
 

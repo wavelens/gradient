@@ -18,7 +18,6 @@ use uuid::Uuid;
 
 use gradient_core::ServerState;
 use gradient_types::*;
-use sea_orm::{ActiveModelTrait, ActiveValue::Set};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::Arc;
 
@@ -206,8 +205,7 @@ pub async fn authorize_optional(
 }
 
 pub async fn update_last_login(db: &WebDb, user: MUser) -> Result<MUser> {
-    let mut auser: AUser = user.into();
-
-    auser.last_login_at = Set(gradient_types::now());
-    auser.update(db).await.context("update user last login")
+    gradient_db::users::stamp_last_login(db, user, gradient_types::now())
+        .await
+        .context("update user last login")
 }

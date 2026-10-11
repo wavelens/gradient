@@ -11,7 +11,6 @@ use axum::extract::{Path, State};
 use axum::{Extension, Json};
 use gradient_core::ServerState;
 use gradient_types::*;
-use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -76,10 +75,8 @@ pub async fn get_artefacts(
         .await?;
     let evaluation = ctx.evaluation;
 
-    let entry_points = EEntryPoint::find()
-        .filter(CEntryPoint::Evaluation.eq(evaluation.id))
-        .all(&state.web_db)
-        .await?;
+    let entry_points =
+        gradient_db::entry_points::of_evaluation(&state.web_db, evaluation.id).await?;
 
     if entry_points.is_empty() {
         return Ok(ok_json(ArtefactTree {
@@ -98,11 +95,12 @@ pub async fn get_artefacts(
 
     let mut build_job_by_drv: HashMap<DerivationId, BuildJobId> = HashMap::new();
     for chunk in drv_ids.chunks(IS_IN_CHUNK) {
-        for row in EBuildJob::find()
-            .filter(CBuildJob::Evaluation.eq(evaluation.id))
-            .filter(CBuildJob::Derivation.is_in(chunk.to_vec()))
-            .all(&state.web_db)
-            .await?
+        for row in gradient_db::build_jobs::of_derivations_in_evaluation(
+            &state.web_db,
+            evaluation.id,
+            chunk,
+        )
+        .await?
         {
             build_job_by_drv.insert(row.derivation, row.id);
         }
@@ -114,10 +112,7 @@ pub async fn get_artefacts(
     let mut outputs_by_drv: HashMap<DerivationId, Vec<MDerivationOutput>> = HashMap::new();
     if !drv_ids.is_empty() {
         for chunk in drv_ids.chunks(IS_IN_CHUNK) {
-            for row in EDerivationOutput::find()
-                .filter(CDerivationOutput::Derivation.is_in(chunk.to_vec()))
-                .all(&state.web_db)
-                .await?
+            for row in gradient_db::derivation_outputs::of_derivations(&state.web_db, chunk).await?
             {
                 outputs_by_drv.entry(row.derivation).or_default().push(row);
             }
@@ -132,11 +127,7 @@ pub async fn get_artefacts(
     let mut products_by_output: HashMap<DerivationOutputId, Vec<MBuildProduct>> = HashMap::new();
     if !output_ids.is_empty() {
         for chunk in output_ids.chunks(IS_IN_CHUNK) {
-            for row in EBuildProduct::find()
-                .filter(CBuildProduct::DerivationOutput.is_in(chunk.to_vec()))
-                .all(&state.web_db)
-                .await?
-            {
+            for row in gradient_db::build_products::of_outputs(&state.web_db, chunk).await? {
                 products_by_output
                     .entry(row.derivation_output)
                     .or_default()

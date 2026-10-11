@@ -14,7 +14,6 @@ use gradient_core::ServerState;
 use gradient_db::lookup::{by_id, by_ids};
 use gradient_types::input::vec_to_hex;
 use gradient_types::*;
-use sea_orm::{ColumnTrait, EntityTrait, Order, QueryFilter, QueryOrder};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Instant;
@@ -41,10 +40,8 @@ pub async fn get_evaluation(
         .map(|c| vec_to_hex(&c.hash))
         .unwrap_or_default();
 
-    let all_messages = EEvaluationMessage::find()
-        .filter(CEvaluationMessage::Evaluation.eq(evaluation.id))
-        .all(&state.web_db)
-        .await?;
+    let all_messages =
+        gradient_db::evaluations::messages::of_evaluation(&state.web_db, evaluation.id).await?;
     let error_count = all_messages
         .iter()
         .filter(|m| m.level == gradient_entity::evaluation_message::MessageLevel::Error)
@@ -67,18 +64,13 @@ pub async fn get_evaluation(
             .join("\n")
     });
 
-    let ep_rows = EEntryPoint::find()
-        .filter(CEntryPoint::Evaluation.eq(evaluation.id))
-        .all(&state.web_db)
-        .await?;
+    let ep_rows = gradient_db::entry_points::of_evaluation(&state.web_db, evaluation.id).await?;
     let entry_points = if ep_rows.is_empty() {
         vec![]
     } else {
         let drv_ids: Vec<DerivationId> = ep_rows.iter().map(|ep| ep.derivation).collect();
         let status_by_drv: HashMap<DerivationId, gradient_entity::build::BuildStatus> =
-            EDerivationBuild::find()
-                .filter(CDerivationBuild::Derivation.is_in(drv_ids))
-                .all(&state.web_db)
+            gradient_db::derivation_builds::of_derivations(&state.web_db, &drv_ids)
                 .await?
                 .into_iter()
                 .map(|a| (a.derivation, a.status))
@@ -208,18 +200,14 @@ pub async fn get_evaluation_builds(
         .await?;
     let evaluation = ctx.evaluation;
 
-    let jobs = EBuildJob::find()
-        .filter(CBuildJob::Evaluation.eq(evaluation.id))
-        .all(&state.web_db)
-        .await?;
+    let jobs = gradient_db::build_jobs::of_evaluation(&state.web_db, evaluation.id).await?;
 
     let jobs = if let Some(scope) = query.scope {
-        let root = EBuildJob::find_by_id(scope)
-            .filter(CBuildJob::Evaluation.eq(evaluation.id))
-            .one(&state.web_db)
-            .await?
-            .ok_or_else(|| WebError::not_found(Resource::Build))?
-            .derivation;
+        let root =
+            gradient_db::build_jobs::by_id_in_evaluation(&state.web_db, evaluation.id, scope)
+                .await?
+                .ok_or_else(|| WebError::not_found(Resource::Build))?
+                .derivation;
         let allowed =
             gradient_db::graph::closure::transitive_closure_reachable(&state.web_db, &[root])
                 .await?;
@@ -288,18 +276,13 @@ pub async fn get_evaluation_builds(
         .collect();
     let mut has_artefacts: HashSet<DerivationId> = HashSet::new();
     if !page_drv_ids.is_empty() {
-        let outputs = EDerivationOutput::find()
-            .filter(CDerivationOutput::Derivation.is_in(page_drv_ids.clone()))
-            .all(&state.web_db)
-            .await?;
+        let outputs =
+            gradient_db::derivation_outputs::of_derivations(&state.web_db, &page_drv_ids).await?;
         let output_to_drv: HashMap<DerivationOutputId, DerivationId> =
             outputs.iter().map(|o| (o.id, o.derivation)).collect();
         let output_ids: Vec<DerivationOutputId> = outputs.iter().map(|o| o.id).collect();
         for chunk in output_ids.chunks(IS_IN_CHUNK) {
-            let products = EBuildProduct::find()
-                .filter(CBuildProduct::DerivationOutput.is_in(chunk.to_vec()))
-                .all(&state.web_db)
-                .await?;
+            let products = gradient_db::build_products::of_outputs(&state.web_db, chunk).await?;
             for bp in products {
                 if let Some(&drv) = output_to_drv.get(&bp.derivation_output) {
                     has_artefacts.insert(drv);
@@ -373,21 +356,18 @@ pub async fn get_evaluation_messages(
         .await?;
     let evaluation = ctx.evaluation;
 
-    let messages = EEvaluationMessage::find()
-        .filter(CEvaluationMessage::Evaluation.eq(evaluation.id))
-        .order_by(CEvaluationMessage::CreatedAt, Order::Asc)
-        .all(&state.web_db)
-        .await?;
+    let messages = gradient_db::evaluations::messages::of_evaluation_oldest_first(
+        &state.web_db,
+        evaluation.id,
+    )
+    .await?;
 
     let msg_ids: Vec<EvaluationMessageId> = messages.iter().map(|m| m.id).collect();
 
     let ep_rows = if msg_ids.is_empty() {
         vec![]
     } else {
-        EEntryPointMessage::find()
-            .filter(CEntryPointMessage::Message.is_in(msg_ids))
-            .all(&state.web_db)
-            .await?
+        gradient_db::evaluations::messages::entry_points_of_messages(&state.web_db, msg_ids).await?
     };
 
     let mut ep_map: std::collections::HashMap<EvaluationMessageId, Vec<EntryPointId>> =
