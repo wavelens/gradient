@@ -37,7 +37,6 @@
 in {
   imports = [
     { options.services.gradient.worker = workerOptions.options; }
-    (lib.mkRemovedOptionModule [ "services" "gradient" "worker" "drainTimeoutSecs" ] "a stop aborts the running jobs and the server queues them again")
   ];
 
   options.services.gradient.worker = {
