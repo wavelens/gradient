@@ -12,7 +12,7 @@ use gradient_core::ServerState;
 use gradient_entity::{team_worker, worker_registration};
 use gradient_types::ids::ProjectId;
 use gradient_types::{ETeamWorker, EWorkerRegistration};
-use gradient_util::supervision::ChildSpec;
+use gradient_util::supervision::{ChildSpec, Pass, PassError, RunsOn};
 use gradient_wire::Rejection;
 use gradient_wire::session::handshake::DialerCredentials;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
@@ -124,23 +124,34 @@ impl WorkerDial {
     }
 }
 
+struct OutboundConnect {
+    scheduler: Arc<Scheduler>,
+    sessions: Arc<SessionsHandle>,
+    connecting: Connecting,
+}
+
+impl Pass for OutboundConnect {
+    const NAME: &'static str = "outbound-connect";
+    const RUNS_ON: RunsOn = RunsOn::EveryInstance;
+    const BUDGET: Duration = Duration::from_secs(60);
+
+    fn period(&self) -> Duration {
+        Duration::from_secs(15)
+    }
+
+    async fn run(&self) -> Result<(), PassError> {
+        connect_to_registered_workers(&self.scheduler, &self.sessions, &self.connecting).await;
+        Ok(())
+    }
+}
+
 pub fn start_outbound_loop(scheduler: Arc<Scheduler>, sessions: Arc<SessionsHandle>) {
-    let connecting: Connecting = Arc::default();
-    let pass_scheduler = Arc::clone(&scheduler);
-    scheduler.state.shutdown.supervise(ChildSpec::periodic(
-        "outbound-connect",
-        Duration::from_secs(15),
-        Duration::from_secs(60),
-        move || {
-            let scheduler = Arc::clone(&pass_scheduler);
-            let sessions = Arc::clone(&sessions);
-            let connecting = Arc::clone(&connecting);
-            async move {
-                connect_to_registered_workers(&scheduler, &sessions, &connecting).await;
-                Ok(())
-            }
-        },
-    ));
+    let shutdown = scheduler.state.shutdown.clone();
+    shutdown.supervise(ChildSpec::pass(OutboundConnect {
+        scheduler,
+        sessions,
+        connecting: Arc::default(),
+    }));
 }
 
 pub(crate) async fn dialable(

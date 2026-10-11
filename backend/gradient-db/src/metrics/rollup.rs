@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use gradient_entity::dispatched_job::DispatchedJobKind;
 use gradient_entity::metric_rollup::RollupGranularity;
-use gradient_util::supervision::ChildSpec;
+use gradient_util::supervision::{Pass, PassError, RunsOn};
 use gradient_util::telemetry::metric;
 use gradient_wire::types::JobPhase;
 use sea_orm::ConnectionTrait;
@@ -197,20 +197,31 @@ fn upstream_misses_sql() -> String {
     )
 }
 
-pub fn child_spec(ctx: DbContext) -> ChildSpec {
-    let secs = ctx.config.metrics_args.rollup_interval_secs.get();
-    ChildSpec::periodic(
-        "rollup",
-        Duration::from_secs(secs),
-        Duration::from_secs(300),
-        move || {
-            let ctx = ctx.clone();
-            async move {
-                run_rollup(&ctx).await;
-                Ok(())
-            }
-        },
-    )
+pub struct Rollup {
+    ctx: DbContext,
+    period: Duration,
+}
+
+impl Rollup {
+    pub fn new(ctx: DbContext) -> Self {
+        let period = Duration::from_secs(ctx.config.metrics_args.rollup_interval_secs.get());
+        Self { ctx, period }
+    }
+}
+
+impl Pass for Rollup {
+    const NAME: &'static str = "rollup";
+    const RUNS_ON: RunsOn = RunsOn::SingleInstance;
+    const BUDGET: Duration = Duration::from_secs(300);
+
+    fn period(&self) -> Duration {
+        self.period
+    }
+
+    async fn run(&self) -> Result<(), PassError> {
+        run_rollup(&self.ctx).await;
+        Ok(())
+    }
 }
 
 async fn run_rollup(ctx: &DbContext) {

@@ -14,7 +14,7 @@ use std::time::Duration;
 
 use chrono::{NaiveDateTime, Timelike};
 use gradient_entity::ids::CacheId;
-use gradient_util::supervision::ChildSpec;
+use gradient_util::supervision::{Pass, PassError, RunsOn};
 use gradient_util::sync::Mutex;
 use sea_orm::{ConnectionTrait, Statement};
 use tracing::warn;
@@ -76,23 +76,36 @@ pub async fn flush(ctx: &DbContext, traffic: &CacheTraffic) {
     }
 }
 
-pub fn child_spec(ctx: DbContext, traffic: Arc<CacheTraffic>) -> ChildSpec {
-    let secs = ctx.config.metrics_args.cache_flush_interval_secs.get();
+pub struct CacheMetricFlush {
+    ctx: DbContext,
+    traffic: Arc<CacheTraffic>,
+    period: Duration,
+}
 
-    ChildSpec::periodic(
-        "cache_metric_flush",
-        Duration::from_secs(secs),
-        Duration::from_secs(60),
-        move || {
-            let ctx = ctx.clone();
-            let traffic = Arc::clone(&traffic);
+impl CacheMetricFlush {
+    pub fn new(ctx: DbContext, traffic: Arc<CacheTraffic>) -> Self {
+        let period = Duration::from_secs(ctx.config.metrics_args.cache_flush_interval_secs.get());
+        Self {
+            ctx,
+            traffic,
+            period,
+        }
+    }
+}
 
-            async move {
-                flush(&ctx, &traffic).await;
-                Ok(())
-            }
-        },
-    )
+impl Pass for CacheMetricFlush {
+    const NAME: &'static str = "cache_metric_flush";
+    const RUNS_ON: RunsOn = RunsOn::EveryInstance;
+    const BUDGET: Duration = Duration::from_secs(60);
+
+    fn period(&self) -> Duration {
+        self.period
+    }
+
+    async fn run(&self) -> Result<(), PassError> {
+        flush(&self.ctx, &self.traffic).await;
+        Ok(())
+    }
 }
 
 /// A supervised pass is cancelled by the shutdown token before it can run.

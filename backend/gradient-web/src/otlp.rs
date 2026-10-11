@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use gradient_core::ServerState;
 use gradient_scheduler::Scheduler;
-use gradient_util::supervision::ChildSpec;
+use gradient_util::supervision::{ChildSpec, Pass, PassError, RunsOn};
 use opentelemetry::metrics::MeterProvider as _;
 use opentelemetry_otlp::WithExportConfig as _;
 use tracing::{error, info};
@@ -22,6 +22,37 @@ struct Snapshot {
     cache_bytes: i64,
     cache_nar_bytes: i64,
     cache_packages: i64,
+}
+
+struct OtlpSnapshot {
+    state: Arc<ServerState>,
+    scheduler: Arc<Scheduler>,
+    snapshot: Arc<Mutex<Snapshot>>,
+    period: Duration,
+}
+
+impl Pass for OtlpSnapshot {
+    const NAME: &'static str = "otlp-snapshot";
+    const RUNS_ON: RunsOn = RunsOn::EveryInstance;
+    const BUDGET: Duration = Duration::from_secs(60);
+
+    fn period(&self) -> Duration {
+        self.period
+    }
+
+    async fn run(&self) -> Result<(), PassError> {
+        if let Ok(obs) = crate::endpoints::metrics::collect(&self.state, &self.scheduler).await
+            && let Ok(mut s) = self.snapshot.lock()
+        {
+            s.workers = obs.workers_connected;
+            s.pending = obs.jobs_pending;
+            s.active = obs.jobs_active;
+            s.cache_bytes = obs.cache_bytes;
+            s.cache_nar_bytes = obs.cache_nar_bytes;
+            s.cache_packages = obs.cache_packages;
+        }
+        Ok(())
+    }
 }
 
 pub fn start_otlp(state: Arc<ServerState>, scheduler: Arc<Scheduler>) {
@@ -77,30 +108,12 @@ pub fn start_otlp(state: Arc<ServerState>, scheduler: Arc<Scheduler>) {
     gauge!("gradient_cache_packages", cache_packages);
 
     let shutdown = state.shutdown.clone();
-    let refresh = Arc::clone(&snap);
-    shutdown.supervise(ChildSpec::periodic(
-        "otlp-snapshot",
-        interval,
-        Duration::from_secs(60),
-        move || {
-            let state = Arc::clone(&state);
-            let scheduler = Arc::clone(&scheduler);
-            let refresh = Arc::clone(&refresh);
-            async move {
-                if let Ok(obs) = crate::endpoints::metrics::collect(&state, &scheduler).await
-                    && let Ok(mut s) = refresh.lock()
-                {
-                    s.workers = obs.workers_connected;
-                    s.pending = obs.jobs_pending;
-                    s.active = obs.jobs_active;
-                    s.cache_bytes = obs.cache_bytes;
-                    s.cache_nar_bytes = obs.cache_nar_bytes;
-                    s.cache_packages = obs.cache_packages;
-                }
-                Ok(())
-            }
-        },
-    ));
+    shutdown.supervise(ChildSpec::pass(OtlpSnapshot {
+        state,
+        scheduler,
+        snapshot: snap,
+        period: interval,
+    }));
 
     // The provider must outlive the process for the periodic reader to keep exporting.
     Box::leak(Box::new(provider));

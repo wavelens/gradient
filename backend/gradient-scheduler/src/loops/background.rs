@@ -14,6 +14,7 @@ use gradient_entity::dispatched_job::DispatchedJobOutcome;
 use gradient_graph::{RequeueScope, Transition};
 use gradient_types::ids::DispatchedJobId;
 use gradient_types::{DerivationBuildId, EvaluationId};
+use gradient_util::supervision::{Pass, PassError, RunsOn};
 use gradient_wire::types::BuildFailureKind;
 use tracing::{debug, info, warn};
 
@@ -37,7 +38,28 @@ pub(super) fn liveness_period(scheduler: &Scheduler) -> Option<Duration> {
         .then(|| Duration::from_secs((timeout_secs / LIVENESS_POLLS_PER_DEADLINE).max(5)))
 }
 
-pub(super) async fn consistency_check_pass(scheduler: Arc<Scheduler>) -> anyhow::Result<()> {
+pub(crate) struct GraphConsistency {
+    pub(crate) scheduler: Arc<Scheduler>,
+    pub(crate) period: Duration,
+}
+
+impl Pass for GraphConsistency {
+    const NAME: &'static str = "graph-consistency";
+    const RUNS_ON: RunsOn = RunsOn::SingleInstance;
+    const BUDGET: Duration = super::CONSISTENCY_BUDGET;
+
+    fn period(&self) -> Duration {
+        self.period
+    }
+
+    async fn run(&self) -> Result<(), PassError> {
+        consistency_check_pass(&self.scheduler)
+            .await
+            .map_err(Into::into)
+    }
+}
+
+async fn consistency_check_pass(scheduler: &Scheduler) -> anyhow::Result<()> {
     let report =
         gradient_db::graph::consistency::graph_consistency_report(&scheduler.state.db()).await?;
     if report.total() > 0 {
@@ -62,7 +84,27 @@ pub(super) async fn consistency_check_pass(scheduler: Arc<Scheduler>) -> anyhow:
     Ok(())
 }
 
-pub(super) async fn transient_retry_pass(scheduler: Arc<Scheduler>) -> anyhow::Result<()> {
+pub(crate) struct TransientRetryRequeue {
+    pub(crate) scheduler: Arc<Scheduler>,
+}
+
+impl Pass for TransientRetryRequeue {
+    const NAME: &'static str = "transient-retry-requeue";
+    const RUNS_ON: RunsOn = RunsOn::SingleInstance;
+    const BUDGET: Duration = super::ASSIGN_BUDGET;
+
+    fn period(&self) -> Duration {
+        super::ASSIGN_TICK
+    }
+
+    async fn run(&self) -> Result<(), PassError> {
+        transient_retry_pass(&self.scheduler)
+            .await
+            .map_err(Into::into)
+    }
+}
+
+async fn transient_retry_pass(scheduler: &Scheduler) -> anyhow::Result<()> {
     scheduler
         .state
         .graph
@@ -71,11 +113,53 @@ pub(super) async fn transient_retry_pass(scheduler: Arc<Scheduler>) -> anyhow::R
     Ok(())
 }
 
-pub(super) async fn graph_stuck_reheal_pass(scheduler: Arc<Scheduler>) -> anyhow::Result<()> {
+pub(crate) struct GraphStuckReheal {
+    pub(crate) scheduler: Arc<Scheduler>,
+    pub(crate) period: Duration,
+}
+
+impl Pass for GraphStuckReheal {
+    const NAME: &'static str = "graph-stuck-reheal";
+    const RUNS_ON: RunsOn = RunsOn::SingleInstance;
+    const BUDGET: Duration = super::CONSISTENCY_BUDGET;
+
+    fn period(&self) -> Duration {
+        self.period
+    }
+
+    async fn run(&self) -> Result<(), PassError> {
+        graph_stuck_reheal_pass(&self.scheduler)
+            .await
+            .map_err(Into::into)
+    }
+}
+
+async fn graph_stuck_reheal_pass(scheduler: &Scheduler) -> anyhow::Result<()> {
     crate::waiting_state::reheal_graph_stuck_evals(&scheduler.state).await
 }
 
-pub(super) async fn worker_liveness_pass(scheduler: Arc<Scheduler>) -> anyhow::Result<()> {
+pub(crate) struct WorkerLiveness {
+    pub(crate) scheduler: Arc<Scheduler>,
+    pub(crate) period: Duration,
+}
+
+impl Pass for WorkerLiveness {
+    const NAME: &'static str = "worker-liveness";
+    const RUNS_ON: RunsOn = RunsOn::EveryInstance;
+    const BUDGET: Duration = super::METRICS_BUDGET;
+
+    fn period(&self) -> Duration {
+        self.period
+    }
+
+    async fn run(&self) -> Result<(), PassError> {
+        worker_liveness_pass(&self.scheduler)
+            .await
+            .map_err(Into::into)
+    }
+}
+
+async fn worker_liveness_pass(scheduler: &Scheduler) -> anyhow::Result<()> {
     let timeout_secs = scheduler.state.config.proto.worker_heartbeat_timeout_secs;
     let timeout_ms = (timeout_secs as i64) * 1000;
     let now_ms = gradient_types::now().and_utc().timestamp_millis();
@@ -91,7 +175,28 @@ pub(super) async fn worker_liveness_pass(scheduler: Arc<Scheduler>) -> anyhow::R
     Ok(())
 }
 
-pub(super) async fn instance_metrics_pass(scheduler: Arc<Scheduler>) -> anyhow::Result<()> {
+pub(crate) struct InstanceMetrics {
+    pub(crate) scheduler: Arc<Scheduler>,
+    pub(crate) period: Duration,
+}
+
+impl Pass for InstanceMetrics {
+    const NAME: &'static str = "instance-metrics";
+    const RUNS_ON: RunsOn = RunsOn::EveryInstance;
+    const BUDGET: Duration = super::METRICS_BUDGET;
+
+    fn period(&self) -> Duration {
+        self.period
+    }
+
+    async fn run(&self) -> Result<(), PassError> {
+        instance_metrics_pass(&self.scheduler)
+            .await
+            .map_err(Into::into)
+    }
+}
+
+async fn instance_metrics_pass(scheduler: &Scheduler) -> anyhow::Result<()> {
     let c = scheduler.counts().await;
     let counts = crate::instance::InstanceCounts {
         active_builds: c.active_builds,
@@ -121,7 +226,28 @@ pub(super) async fn instance_metrics_pass(scheduler: Arc<Scheduler>) -> anyhow::
     Ok(())
 }
 
-pub(super) async fn worker_sample_pass(scheduler: Arc<Scheduler>) -> anyhow::Result<()> {
+pub(crate) struct WorkerSample {
+    pub(crate) scheduler: Arc<Scheduler>,
+    pub(crate) period: Duration,
+}
+
+impl Pass for WorkerSample {
+    const NAME: &'static str = "worker-sample";
+    const RUNS_ON: RunsOn = RunsOn::EveryInstance;
+    const BUDGET: Duration = super::METRICS_BUDGET;
+
+    fn period(&self) -> Duration {
+        self.period
+    }
+
+    async fn run(&self) -> Result<(), PassError> {
+        worker_sample_pass(&self.scheduler)
+            .await
+            .map_err(Into::into)
+    }
+}
+
+async fn worker_sample_pass(scheduler: &Scheduler) -> anyhow::Result<()> {
     let workers = scheduler.board_workers().await;
     for info in &workers {
         crate::worker_lifecycle::record_worker_sample(&scheduler.state.worker_db, info).await;
@@ -149,7 +275,27 @@ fn plan_abandoned_reap(
         .collect()
 }
 
-pub(super) async fn abandoned_assignment_pass(scheduler: Arc<Scheduler>) -> anyhow::Result<()> {
+pub(crate) struct AbandonedDispatchSweep {
+    pub(crate) scheduler: Arc<Scheduler>,
+}
+
+impl Pass for AbandonedDispatchSweep {
+    const NAME: &'static str = "abandoned-dispatch-sweep";
+    const RUNS_ON: RunsOn = RunsOn::SingleInstance;
+    const BUDGET: Duration = super::CONSISTENCY_BUDGET;
+
+    fn period(&self) -> Duration {
+        super::EVAL_WATCHDOG_TICK
+    }
+
+    async fn run(&self) -> Result<(), PassError> {
+        abandoned_assignment_pass(&self.scheduler)
+            .await
+            .map_err(Into::into)
+    }
+}
+
+async fn abandoned_assignment_pass(scheduler: &Scheduler) -> anyhow::Result<()> {
     use gradient_entity::dispatched_job::{Column as CDispatchedJob, Entity as EDispatchedJob};
     use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QuerySelect};
 
@@ -223,7 +369,27 @@ fn plan_eval_repairs(
         .collect()
 }
 
-pub(super) async fn eval_completion_watchdog_pass(scheduler: Arc<Scheduler>) -> anyhow::Result<()> {
+pub(crate) struct EvalCompletionWatchdog {
+    pub(crate) scheduler: Arc<Scheduler>,
+}
+
+impl Pass for EvalCompletionWatchdog {
+    const NAME: &'static str = "eval-completion-watchdog";
+    const RUNS_ON: RunsOn = RunsOn::SingleInstance;
+    const BUDGET: Duration = super::CONSISTENCY_BUDGET;
+
+    fn period(&self) -> Duration {
+        super::EVAL_WATCHDOG_TICK
+    }
+
+    async fn run(&self) -> Result<(), PassError> {
+        eval_completion_watchdog_pass(&self.scheduler)
+            .await
+            .map_err(Into::into)
+    }
+}
+
+async fn eval_completion_watchdog_pass(scheduler: &Scheduler) -> anyhow::Result<()> {
     let lost = gradient_db::evaluations::watchdog::lost_eval_completions(
         &scheduler.state.worker_db,
         LOST_COMPLETION_GRACE_SECS,
@@ -279,7 +445,25 @@ pub(super) async fn eval_completion_watchdog_pass(scheduler: Arc<Scheduler>) -> 
     Ok(())
 }
 
-pub(super) async fn ram_shortage_pass(scheduler: Arc<Scheduler>) -> anyhow::Result<()> {
+pub(crate) struct RamShortageSweep {
+    pub(crate) scheduler: Arc<Scheduler>,
+}
+
+impl Pass for RamShortageSweep {
+    const NAME: &'static str = "ram-shortage-sweep";
+    const RUNS_ON: RunsOn = RunsOn::EveryInstance;
+    const BUDGET: Duration = super::CONSISTENCY_BUDGET;
+
+    fn period(&self) -> Duration {
+        super::EVAL_WATCHDOG_TICK
+    }
+
+    async fn run(&self) -> Result<(), PassError> {
+        ram_shortage_pass(&self.scheduler).await.map_err(Into::into)
+    }
+}
+
+async fn ram_shortage_pass(scheduler: &Scheduler) -> anyhow::Result<()> {
     if scheduler
         .draining
         .load(std::sync::atomic::Ordering::Relaxed)
@@ -317,7 +501,27 @@ fn plan_stranded_requeue(
         .collect()
 }
 
-pub(super) async fn stranded_build_pass(scheduler: Arc<Scheduler>) -> anyhow::Result<()> {
+pub(crate) struct StrandedBuildSweep {
+    pub(crate) scheduler: Arc<Scheduler>,
+}
+
+impl Pass for StrandedBuildSweep {
+    const NAME: &'static str = "stranded-build-sweep";
+    const RUNS_ON: RunsOn = RunsOn::SingleInstance;
+    const BUDGET: Duration = super::CONSISTENCY_BUDGET;
+
+    fn period(&self) -> Duration {
+        super::EVAL_WATCHDOG_TICK
+    }
+
+    async fn run(&self) -> Result<(), PassError> {
+        stranded_build_pass(&self.scheduler)
+            .await
+            .map_err(Into::into)
+    }
+}
+
+async fn stranded_build_pass(scheduler: &Scheduler) -> anyhow::Result<()> {
     let stranded = gradient_db::scheduling::build_watchdog::stranded_building_shared_builds(
         &scheduler.state.worker_db,
         LOST_COMPLETION_GRACE_SECS,

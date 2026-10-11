@@ -50,6 +50,7 @@ use endpoints::{admin, *};
 use gradient_core::{InitError, ServerState};
 use gradient_proto::proto_router;
 use gradient_scheduler::Scheduler;
+use gradient_util::supervision::ChildSpec;
 use gradient_wire::{PerIpLimiter, ProtoLimiter};
 use std::sync::Arc;
 
@@ -770,25 +771,27 @@ pub fn create_router_with_scheduler(
         );
 
     scheduler.start();
+    state.shutdown.supervise(ChildSpec::pass(
+        gradient_db::maintenance::retention::Retention::new(state.db()),
+    ));
     state
         .shutdown
-        .supervise(gradient_db::maintenance::retention::child_spec(state.db()));
-    state
-        .shutdown
-        .supervise(gradient_db::metrics::rollup::child_spec(state.db()));
-    state
-        .shutdown
-        .supervise(gradient_db::metrics::cache_traffic::child_spec(
+        .supervise(ChildSpec::pass(gradient_db::metrics::rollup::Rollup::new(
+            state.db(),
+        )));
+    state.shutdown.supervise(ChildSpec::pass(
+        gradient_db::metrics::cache_traffic::CacheMetricFlush::new(
             state.db(),
             Arc::clone(&state.cache_traffic),
-        ));
+        ),
+    ));
     gradient_db::metrics::cache_traffic::flush_on_shutdown(
         state.db(),
         Arc::clone(&state.cache_traffic),
     );
-    state
-        .shutdown
-        .supervise(gradient_db::metrics::infra::child_spec(state.db()));
+    state.shutdown.supervise(ChildSpec::pass(
+        gradient_db::metrics::infra::InfraMetricFlush::new(state.db()),
+    ));
     gradient_db::metrics::infra::flush_on_shutdown(state.db());
     state
         .shutdown

@@ -11,10 +11,34 @@ use gradient_db::scheduling::assignment_record::ClaimGate;
 use gradient_db::scheduling::cluster::ClusterClaim;
 use gradient_pool::session_port::SessionSignal;
 use gradient_types::ids::ClusterAttemptId;
+use gradient_util::supervision::{Pass, PassError, RunsOn};
 use gradient_wire::types::{ClusterAddress, ClusterMembership, ClusterPeer};
+use tokio::sync::Notify;
 use tracing::{debug, info, warn};
 
 const RESOLVED_ATTEMPT_TTL: Duration = Duration::from_secs(600);
+
+pub(crate) struct ClusterDispatch {
+    pub(crate) scheduler: Arc<Scheduler>,
+}
+
+impl Pass for ClusterDispatch {
+    const NAME: &'static str = "cluster-dispatch";
+    const RUNS_ON: RunsOn = RunsOn::EveryInstance;
+    const BUDGET: Duration = crate::loops::ASSIGN_BUDGET;
+
+    fn period(&self) -> Duration {
+        crate::loops::ASSIGN_TICK
+    }
+
+    fn wake(&self) -> Option<Arc<Notify>> {
+        Some(Arc::clone(&self.scheduler.cluster_wake))
+    }
+
+    async fn run(&self) -> Result<(), PassError> {
+        self.scheduler.plan_clusters().await.map_err(Into::into)
+    }
+}
 
 use super::assignment::{assigned_transition, assignment_row};
 use crate::Scheduler;
