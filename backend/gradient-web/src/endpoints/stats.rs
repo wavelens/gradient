@@ -15,6 +15,7 @@ use gradient_core::ServerState;
 use gradient_db::metrics::cache_traffic;
 use gradient_entity::metric_rollup::RollupGranularity;
 use gradient_types::*;
+use gradient_util::telemetry::metric;
 use sea_orm::ConnectionTrait;
 use serde::Serialize;
 use std::sync::Arc;
@@ -77,7 +78,7 @@ fn cache_series_sql(unit: &str, back: &str, gran: i16) -> String {
 
 gradient_db::sql_fn! {
     CACHE_SERIES = || cache_series_sql("hour", "23 hours", 1),
-        params = [Text("cache.bytes_sent"), Text("11111111-1111-1111-1111-111111111111")];
+        params = [Text(metric::CACHE_BYTES_SENT), Text("11111111-1111-1111-1111-111111111111")];
 }
 
 async fn cache_series<C: sea_orm::ConnectionTrait>(
@@ -121,7 +122,14 @@ async fn aggregate_traffic<C: sea_orm::ConnectionTrait>(
     granularity: RollupGranularity,
     back_interval: &str,
 ) -> Result<Vec<CacheMetricPoint>, WebError> {
-    let series = cache_series(db, cache_id, "cache.bytes_sent", granularity, back_interval).await?;
+    let series = cache_series(
+        db,
+        cache_id,
+        metric::CACHE_BYTES_SENT,
+        granularity,
+        back_interval,
+    )
+    .await?;
     Ok(series
         .into_iter()
         .map(|(time, requests, bytes)| CacheMetricPoint {
@@ -141,7 +149,7 @@ async fn aggregate_storage<C: sea_orm::ConnectionTrait>(
     let series = cache_series(
         db,
         cache_id,
-        "cache.bytes_added",
+        metric::CACHE_BYTES_ADDED,
         granularity,
         back_interval,
     )

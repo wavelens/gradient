@@ -21,8 +21,8 @@ use gradient_ci::IntegrationKind;
 use gradient_ci::actions::encrypt_action_secret;
 use gradient_core::ServerState;
 use gradient_types::actions::{ActionConfig, ActionType, is_matrix_room_id};
-use gradient_types::events::EventOwner;
 use gradient_types::events::audit::Action;
+use gradient_types::events::{EventOwner, names};
 use gradient_types::input::load_secret_bytes;
 use gradient_types::*;
 use gradient_util::http_validation::{WebhookUrlError, validate_webhook_url};
@@ -607,7 +607,7 @@ pub async fn test_action(
         .as_array()
         .and_then(|a| a.first())
         .and_then(|v| v.as_str())
-        .unwrap_or("evaluation.completed")
+        .unwrap_or(names::EVALUATION_COMPLETED)
         .to_string();
 
     let now = chrono::Utc::now();

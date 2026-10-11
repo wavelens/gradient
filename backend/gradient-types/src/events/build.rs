@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use super::{EventKind, EventOwner, firehose};
+use super::{EventKind, EventOwner, firehose, names};
 use crate::ids::{BuildJobId, DerivationBuildId, DerivationId, EvaluationId, ProjectId, TaskId};
 use gradient_entity::build::BuildStatus;
 use serde::{Deserialize, Serialize};
@@ -34,7 +34,7 @@ pub struct StatusChanged {
     pub evaluation_id: EvaluationId,
     pub status: i16,
 }
-firehose!(StatusChanged, "build.status_changed");
+firehose!(StatusChanged, names::BUILD_STATUS_CHANGED);
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Reported {
@@ -53,16 +53,16 @@ impl Reported {
     /// No Git host action is consuming `FailedTransient`. A retrying build's check is staying put.
     pub fn reports(status: BuildStatus) -> Option<&'static str> {
         Some(match status {
-            BuildStatus::Created => "build.created",
-            BuildStatus::Queued => "build.queued",
-            BuildStatus::Building => "build.started",
-            BuildStatus::Completed => "build.completed",
+            BuildStatus::Created => names::BUILD_CREATED,
+            BuildStatus::Queued => names::BUILD_QUEUED,
+            BuildStatus::Building => names::BUILD_STARTED,
+            BuildStatus::Completed => names::BUILD_COMPLETED,
             BuildStatus::FailedPermanent
             | BuildStatus::FailedTimeout
             | BuildStatus::DependencyFailed
-            | BuildStatus::Aborted => "build.failed",
-            BuildStatus::FailedTransient => "build.failed_transient",
-            BuildStatus::Substituted => "build.substituted",
+            | BuildStatus::Aborted => names::BUILD_FAILED,
+            BuildStatus::FailedTransient => names::BUILD_FAILED_TRANSIENT,
+            BuildStatus::Substituted => names::BUILD_SUBSTITUTED,
             BuildStatus::Skipped => return None,
         })
     }
@@ -72,13 +72,13 @@ impl EventKind for Reported {
     const NAME: &'static str = "build.<status>";
     const DURABLE: bool = true;
     const NAMES: &'static [&'static str] = &[
-        "build.created",
-        "build.queued",
-        "build.started",
-        "build.completed",
-        "build.failed",
-        "build.failed_transient",
-        "build.substituted",
+        names::BUILD_CREATED,
+        names::BUILD_QUEUED,
+        names::BUILD_STARTED,
+        names::BUILD_COMPLETED,
+        names::BUILD_FAILED,
+        names::BUILD_FAILED_TRANSIENT,
+        names::BUILD_SUBSTITUTED,
     ];
 
     fn name(&self) -> Cow<'static, str> {
@@ -86,7 +86,7 @@ impl EventKind for Reported {
             BuildStatus::try_from(i32::from(self.status))
                 .ok()
                 .and_then(Self::reports)
-                .unwrap_or("build.unknown"),
+                .unwrap_or(names::BUILD_UNKNOWN),
         )
     }
 
@@ -109,7 +109,7 @@ pub struct Progress {
     #[serde(flatten)]
     pub progress: BuildProgress,
 }
-firehose!(Progress, "build.progress");
+firehose!(Progress, names::BUILD_PROGRESS);
 
 #[cfg(test)]
 mod tests {

@@ -26,6 +26,21 @@ pub mod metric {
     pub const NAR_SERVES_WAITING: &str = "nar.serves_waiting";
     pub const NAR_SERVES_ACTIVE: &str = "nar.serves_active";
     pub const NAR_SERVE_FAILURES: &str = "nar.serve_failures";
+    pub const CACHE_BYTES_SENT: &str = "cache.bytes_sent";
+    pub const CACHE_BYTES_ADDED: &str = "cache.bytes_added";
+    pub const UPSTREAM_LATENCY_MS: &str = "upstream.latency_ms";
+    pub const UPSTREAM_NARINFO_HITS: &str = "upstream.narinfo_hits";
+    pub const UPSTREAM_NARINFO_MISSES: &str = "upstream.narinfo_misses";
+    pub const BUILDS_CREATED: &str = "builds.created";
+    pub const BUILDS_DISPATCHED: &str = "builds.dispatched";
+    pub const BUILDS_COMPLETED: &str = "builds.completed";
+    pub const BUILDS_SUBSTITUTED: &str = "builds.substituted";
+    pub const BUILDS_FAILED: &str = "builds.failed";
+    pub const BUILDS_DURATION_MS: &str = "builds.duration_ms";
+    pub const DISPATCH_WAIT_MS: &str = "dispatch.wait_ms";
+    pub const DEPS_WAIT_MS: &str = "deps.wait_ms";
+    pub const EVALS_COMPLETED: &str = "evals.completed";
+    pub const EVALS_FAILED: &str = "evals.failed";
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]

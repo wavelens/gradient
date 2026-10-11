@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use super::firehose;
+use super::{firehose, names};
 use crate::ids::WebhookId;
 use serde::{Deserialize, Serialize};
 
@@ -12,4 +12,4 @@ use serde::{Deserialize, Serialize};
 pub struct Ping {
     pub webhook: WebhookId,
 }
-firehose!(Ping, "webhook.ping");
+firehose!(Ping, names::WEBHOOK_PING);

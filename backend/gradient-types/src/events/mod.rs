@@ -16,6 +16,7 @@ pub mod evaluation;
 mod filter;
 pub mod gc;
 pub mod graph;
+pub mod names;
 pub mod proto;
 pub mod webhook;
 pub mod worker;
@@ -64,7 +65,7 @@ pub struct CatalogEntry {
 }
 
 macro_rules! firehose {
-    ($ty:ident, $name:literal) => {
+    ($ty:ident, $name:expr) => {
         impl $crate::events::EventKind for $ty {
             const NAME: &'static str = $name;
             const DURABLE: bool = false;

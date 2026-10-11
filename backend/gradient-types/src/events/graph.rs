@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use super::firehose;
+use super::{firehose, names};
 use crate::ids::{CachedPathId, EvaluationId, TaskId};
 use serde::{Deserialize, Serialize};
 
@@ -24,27 +24,27 @@ pub struct NarCommitted {
     pub created: bool,
     pub outputs_marked: u64,
 }
-firehose!(NarCommitted, "graph.nar_committed");
+firehose!(NarCommitted, names::GRAPH_NAR_COMMITTED);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Transitioned {
     pub aborted: usize,
     pub prioritized: usize,
 }
-firehose!(Transitioned, "graph.transitioned");
+firehose!(Transitioned, names::GRAPH_TRANSITIONED);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Requeued {
     pub requeued: u64,
 }
-firehose!(Requeued, "graph.requeued");
+firehose!(Requeued, names::GRAPH_REQUEUED);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Demoted {
     pub producers: usize,
     pub others_remain: bool,
 }
-firehose!(Demoted, "graph.demoted");
+firehose!(Demoted, names::GRAPH_DEMOTED);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Collected {
@@ -52,4 +52,4 @@ pub struct Collected {
     pub evaluations: usize,
     pub retired_paths: usize,
 }
-firehose!(Collected, "graph.collected");
+firehose!(Collected, names::GRAPH_COLLECTED);

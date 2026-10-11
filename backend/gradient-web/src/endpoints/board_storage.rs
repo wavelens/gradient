@@ -106,7 +106,7 @@ fn labelled_series_sql(granularity: RollupGranularity, window_hours: i64) -> Str
 
 gradient_db::sql_fn! {
     LABELLED_SERIES = || labelled_series_sql(RollupGranularity::Minute, 6),
-        params = [Text("storage.op_ms")];
+        params = [Text(metric::STORAGE_OP_MS)];
 }
 
 struct SeriesReader<'a, C> {

@@ -14,6 +14,7 @@ use axum::{Extension, Json};
 use gradient_core::ServerState;
 use gradient_entity::metric_rollup::RollupGranularity;
 use gradient_types::*;
+use gradient_util::telemetry::metric;
 use sea_orm::{ConnectionTrait, Value};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -29,61 +30,61 @@ pub struct MetricMeta {
 
 const CATALOG: &[MetricMeta] = &[
     MetricMeta {
-        key: "builds.created",
+        key: metric::BUILDS_CREATED,
         kind: "counter",
         unit: "builds",
         dimensions: &["project"],
     },
     MetricMeta {
-        key: "builds.dispatched",
+        key: metric::BUILDS_DISPATCHED,
         kind: "counter",
         unit: "builds",
         dimensions: &["project"],
     },
     MetricMeta {
-        key: "builds.completed",
+        key: metric::BUILDS_COMPLETED,
         kind: "counter",
         unit: "builds",
         dimensions: &["project"],
     },
     MetricMeta {
-        key: "builds.substituted",
+        key: metric::BUILDS_SUBSTITUTED,
         kind: "counter",
         unit: "builds",
         dimensions: &["project"],
     },
     MetricMeta {
-        key: "builds.failed",
+        key: metric::BUILDS_FAILED,
         kind: "counter",
         unit: "builds",
         dimensions: &["project"],
     },
     MetricMeta {
-        key: "evals.completed",
+        key: metric::EVALS_COMPLETED,
         kind: "counter",
         unit: "evals",
         dimensions: &["project"],
     },
     MetricMeta {
-        key: "evals.failed",
+        key: metric::EVALS_FAILED,
         kind: "counter",
         unit: "evals",
         dimensions: &["project"],
     },
     MetricMeta {
-        key: "builds.duration_ms",
+        key: metric::BUILDS_DURATION_MS,
         kind: "histogram",
         unit: "ms",
         dimensions: &["project"],
     },
     MetricMeta {
-        key: "dispatch.wait_ms",
+        key: metric::DISPATCH_WAIT_MS,
         kind: "histogram",
         unit: "ms",
         dimensions: &["project"],
     },
     MetricMeta {
-        key: "deps.wait_ms",
+        key: metric::DEPS_WAIT_MS,
         kind: "histogram",
         unit: "ms",
         dimensions: &["project"],
@@ -146,7 +147,7 @@ gradient_db::sql_fn! {
         true,
         true,
     ),
-        params = [Text("builds.created"), Int(1), Now, Now];
+        params = [Text(metric::BUILDS_CREATED), Int(1), Now, Now];
 }
 
 pub async fn get_metrics_query(

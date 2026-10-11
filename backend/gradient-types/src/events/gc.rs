@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use super::EventKind;
+use super::{EventKind, names};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -24,7 +24,7 @@ pub struct Swept {
 }
 
 impl EventKind for Swept {
-    const NAME: &'static str = "gc.swept";
+    const NAME: &'static str = names::GC_SWEPT;
     const DURABLE: bool = true;
 }
 
@@ -34,6 +34,6 @@ pub struct DeepFinished {
 }
 
 impl EventKind for DeepFinished {
-    const NAME: &'static str = "gc.deep_finished";
+    const NAME: &'static str = names::GC_DEEP_FINISHED;
     const DURABLE: bool = true;
 }

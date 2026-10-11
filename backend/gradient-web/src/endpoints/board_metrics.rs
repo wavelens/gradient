@@ -18,6 +18,7 @@ use gradient_core::ServerState;
 use gradient_entity::metric_rollup::RollupGranularity;
 use gradient_scheduler::Scheduler;
 use gradient_types::*;
+use gradient_util::telemetry::metric;
 use sea_orm::ConnectionTrait;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -50,7 +51,7 @@ fn infra_series_sql(window_hours: i64) -> String {
 
 gradient_db::sql_fn! {
     INFRA_SERIES = || infra_series_sql(24),
-        params = [Text("cache.bytes_sent")];
+        params = [Text(metric::CACHE_BYTES_SENT)];
 }
 
 async fn infra_series(
@@ -115,8 +116,8 @@ pub async fn get_board_cache(
 ) -> WebResult<Json<BaseResponse<BoardCacheStats>>> {
     let window = window_clause(&params);
     let obs = collect(&state, &scheduler).await?;
-    let traffic = infra_series(&state.web_db, "cache.bytes_sent", window).await?;
-    let storage = infra_series(&state.web_db, "cache.bytes_added", window).await?;
+    let traffic = infra_series(&state.web_db, metric::CACHE_BYTES_SENT, window).await?;
+    let storage = infra_series(&state.web_db, metric::CACHE_BYTES_ADDED, window).await?;
     Ok(ok_json(BoardCacheStats {
         totals: CacheTotals {
             bytes: obs.cache_bytes,
@@ -206,7 +207,7 @@ pub async fn get_board_upstream_caches(
         });
 
         match metric.as_str() {
-            "upstream.latency_ms" => {
+            metric::UPSTREAM_LATENCY_MS => {
                 let avg = if c > 0 { s / c as f64 } else { 0.0 };
                 agg.latency.push(SeriesPoint {
                     bucket_start: bucket_s.clone(),
@@ -220,11 +221,11 @@ pub async fn get_board_upstream_caches(
                 agg.latency_sum += s;
                 agg.latency_count += c;
             }
-            "upstream.narinfo_hits" => {
+            metric::UPSTREAM_NARINFO_HITS => {
                 agg.hits.insert(bucket_s, s);
                 agg.hits_total += s as i64;
             }
-            "upstream.narinfo_misses" => {
+            metric::UPSTREAM_NARINFO_MISSES => {
                 agg.misses.insert(bucket_s, s);
                 agg.misses_total += s as i64;
             }
@@ -345,7 +346,7 @@ pub async fn get_board_network(
 ) -> WebResult<Json<BaseResponse<BoardNetworkStats>>> {
     let scope = MetricsScope::resolve(&state.web_db, &maybe_user).await?;
     let window = window_clause(&params);
-    let nar_egress = infra_series(&state.web_db, "cache.bytes_sent", window).await?;
+    let nar_egress = infra_series(&state.web_db, metric::CACHE_BYTES_SENT, window).await?;
 
     let project_filter = scope.project_in_list();
     if let Some(list) = &project_filter
