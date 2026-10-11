@@ -88,6 +88,8 @@ in {
     (lib.mkRemovedOptionModule [ "services" "gradient" "oidc" "iconUrl" ] "the login page never showed the icon")
     (lib.mkRemovedOptionModule [ "services" "gradient" "worker" "build" "cgroupRoot" ] "the Nix daemon reports build resource usage in the build result")
     (lib.mkRenamedOptionModule [ "services" "gradient" "scheduler" "dispatchRetentionDays" ] [ "services" "gradient" "retentionDays" ])
+    (lib.mkChangedOptionModule [ "services" "gradient" "ssh" "listenAddress" ] [ "services" "gradient" "ssh" "listenAddresses" ]
+      (config: [ config.services.gradient.ssh.listenAddress ]))
   ];
 
   options = {
@@ -416,8 +418,6 @@ in {
             type = lib.types.path;
             description = "File containing the SMTP password.";
           };
-
-          useTls = lib.mkEnableOption "TLS for SMTP";
         };
 
         from = {
@@ -453,15 +453,6 @@ in {
 
       ssh = {
         enable = lib.mkEnableOption "the Nix daemon over SSH for `ssh-ng://` substituters, `nix copy` and `nixos-rebuild --build-host`";
-
-        listenAddress = lib.mkOption {
-          type = lib.types.str;
-          default = "::";
-          description = ''
-            IP address for the SSH server to listen on. IPv6 addresses also accept IPv4 clients.
-            The default `::` thus means listening on every address of both families.
-          '';
-        };
 
         hostKeyFile = lib.mkOption {
           type = lib.types.nullOr lib.types.path;

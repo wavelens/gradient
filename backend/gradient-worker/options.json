@@ -185,7 +185,7 @@
     "env": "GRADIENT_WORKER_CAPABILITIES_FETCH",
     "type": "bool",
     "description": "Whether to enable prefetching flake inputs and sources.",
-    "default": "false",
+    "default": "true",
     "values": [
       "true",
       "false"
@@ -198,7 +198,7 @@
     "env": "GRADIENT_WORKER_CAPABILITIES_EVAL",
     "type": "bool",
     "description": "Whether to enable Nix flake evaluations.",
-    "default": "false",
+    "default": "true",
     "values": [
       "true",
       "false"
@@ -211,7 +211,7 @@
     "env": "GRADIENT_WORKER_CAPABILITIES_BUILD",
     "type": "bool",
     "description": "Whether to enable Nix builds.",
-    "default": "false",
+    "default": "true",
     "values": [
       "true",
       "false"
@@ -294,7 +294,7 @@
     "env": "GRADIENT_WORKER_EVAL_MAX_RSS",
     "type": "u64",
     "description": "Resident memory in bytes for an idle evaluation subprocess. Subprocesses above the limit\nrestart after their call and free the Nix heap. A call may grow past the limit, with\n{option}`services.gradient.worker.system.minFreeRamMb` as the host's guard.\nKeep it above a typical evaluation's heap.",
-    "default": "8589934592",
+    "default": "2147483648",
     "values": []
   },
   {
@@ -327,7 +327,7 @@
     "env": "GRADIENT_WORKER_BUILD_MAX_CONCURRENT",
     "type": "u32",
     "description": "Maximum simultaneous builds.",
-    "default": "1",
+    "default": "32",
     "values": []
   },
   {
