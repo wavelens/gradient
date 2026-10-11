@@ -37,7 +37,6 @@ pub struct PermissionsArgs {
     #[arg(
         value_enum,
         default_value_t = CreatePermission::Everyone,
-        help = "Who may create teams through the API: `none` (only the declarative state), `superusers`, or `everyone` (any authenticated user).",
     )]
     pub create_team: CreatePermission,
 }
