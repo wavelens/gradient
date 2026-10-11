@@ -4,14 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-#![allow(
-    clippy::too_many_arguments,
-    reason = "arg-heavy; refactor tracked in #503"
-)]
-
-use anyhow::{Context, Result, bail};
+use crate::client::HostClient;
+use anyhow::Result;
 use base64::Engine as _;
-use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CommitFile {
@@ -57,30 +53,6 @@ fn b64(bytes: &[u8]) -> String {
     base64::engine::general_purpose::STANDARD.encode(bytes)
 }
 
-async fn send_json<T: DeserializeOwned>(req: reqwest::RequestBuilder, ctx: &str) -> Result<T> {
-    let resp = req.send().await.with_context(|| ctx.to_owned())?;
-    let status = resp.status();
-    if !status.is_success() {
-        let body = resp.text().await.unwrap_or_default();
-        bail!("{ctx}: {status}: {body}");
-    }
-
-    resp.json::<T>()
-        .await
-        .with_context(|| format!("{ctx}: decoding response"))
-}
-
-async fn send_ok(req: reqwest::RequestBuilder, ctx: &str) -> Result<reqwest::StatusCode> {
-    let resp = req.send().await.with_context(|| ctx.to_owned())?;
-    let status = resp.status();
-    if !status.is_success() {
-        let body = resp.text().await.unwrap_or_default();
-        bail!("{ctx}: {status}: {body}");
-    }
-
-    Ok(status)
-}
-
 #[cfg(test)]
 mod ident_tests {
     use super::CommitIdent;
@@ -95,68 +67,37 @@ mod ident_tests {
 pub(crate) mod github {
     use super::*;
 
-    struct Gh<'a> {
-        client: &'a reqwest::Client,
-        token: &'a str,
-    }
-
-    impl Gh<'_> {
-        fn req(&self, method: reqwest::Method, url: &str) -> reqwest::RequestBuilder {
-            self.client
-                .request(method, url)
-                .header("User-Agent", "gradient")
-                .header("Accept", "application/vnd.github+json")
-                .header("X-GitHub-Api-Version", "2022-11-28")
-                .header("Authorization", format!("Bearer {}", self.token))
-        }
-    }
-
     pub async fn upsert_branch(
-        client: &reqwest::Client,
-        api: &str,
-        token: &str,
+        client: &HostClient,
         owner: &str,
         repo: &str,
         branch: &str,
         base: &str,
         commit: &super::BranchCommit,
     ) -> Result<String> {
-        let gh = Gh { client, token };
+        let gh = client.with_user_agent("gradient");
 
-        let base_sha: RefObject = send_json(
-            gh.req(
-                reqwest::Method::GET,
-                &format!("{api}/repos/{owner}/{repo}/git/ref/heads/{base}"),
-            ),
-            "get github base ref",
-        )
-        .await?;
-        let base_commit: CommitObject = send_json(
-            gh.req(
-                reqwest::Method::GET,
-                &format!(
-                    "{api}/repos/{owner}/{repo}/git/commits/{}",
-                    base_sha.object.sha
-                ),
-            ),
-            "get github base commit",
-        )
-        .await?;
+        let base_sha: RefObject = gh
+            .get_json(&format!("/repos/{owner}/{repo}/git/ref/heads/{base}"))
+            .await?;
+        let base_commit: CommitObject = gh
+            .get_json(&format!(
+                "/repos/{owner}/{repo}/git/commits/{}",
+                base_sha.object.sha
+            ))
+            .await?;
 
         let mut tree = Vec::with_capacity(commit.files.len());
         for file in &commit.files {
-            let blob: Sha = send_json(
-                gh.req(
-                    reqwest::Method::POST,
-                    &format!("{api}/repos/{owner}/{repo}/git/blobs"),
+            let blob: Sha = gh
+                .post_json(
+                    &format!("/repos/{owner}/{repo}/git/blobs"),
+                    &BlobReq {
+                        content: b64(&file.contents),
+                        encoding: "base64",
+                    },
                 )
-                .json(&BlobReq {
-                    content: b64(&file.contents),
-                    encoding: "base64",
-                }),
-                "create github blob",
-            )
-            .await?;
+                .await?;
             tree.push(TreeEntry {
                 path: file.path.clone(),
                 mode: "100644",
@@ -165,18 +106,15 @@ pub(crate) mod github {
             });
         }
 
-        let new_tree: Sha = send_json(
-            gh.req(
-                reqwest::Method::POST,
-                &format!("{api}/repos/{owner}/{repo}/git/trees"),
+        let new_tree: Sha = gh
+            .post_json(
+                &format!("/repos/{owner}/{repo}/git/trees"),
+                &TreeReq {
+                    base_tree: base_commit.tree.sha,
+                    tree,
+                },
             )
-            .json(&TreeReq {
-                base_tree: base_commit.tree.sha,
-                tree,
-            }),
-            "create github tree",
-        )
-        .await?;
+            .await?;
 
         // An omitted author is letting GitHub attribute the commit to the App bot and sign it
         // verified.
@@ -184,62 +122,55 @@ pub(crate) mod github {
             name: &a.name,
             email: &a.email,
         });
-        let new_commit: Sha = send_json(
-            gh.req(
-                reqwest::Method::POST,
-                &format!("{api}/repos/{owner}/{repo}/git/commits"),
-            )
-            .json(&CommitReq {
-                message: &commit.message,
-                tree: new_tree.sha,
-                parents: vec![base_sha.object.sha.clone()],
-                author: ident,
-                committer: ident,
-            }),
-            "create github commit",
-        )
-        .await?;
-
-        let patch = gh
-            .req(
-                reqwest::Method::PATCH,
-                &format!("{api}/repos/{owner}/{repo}/git/refs/heads/{branch}"),
-            )
-            .json(&UpdateRefReq {
-                sha: &new_commit.sha,
-                force: true,
-            })
-            .send()
-            .await
-            .context("update github ref")?;
-        if patch.status() == reqwest::StatusCode::NOT_FOUND
-            || patch.status() == reqwest::StatusCode::UNPROCESSABLE_ENTITY
-        {
-            send_ok(
-                gh.req(
-                    reqwest::Method::POST,
-                    &format!("{api}/repos/{owner}/{repo}/git/refs"),
-                )
-                .json(&CreateRefReq {
-                    r#ref: format!("refs/heads/{branch}"),
-                    sha: &new_commit.sha,
-                }),
-                "create github ref",
+        let new_commit: Sha = gh
+            .post_json(
+                &format!("/repos/{owner}/{repo}/git/commits"),
+                &CommitReq {
+                    message: &commit.message,
+                    tree: new_tree.sha,
+                    parents: vec![base_sha.object.sha.clone()],
+                    author: ident,
+                    committer: ident,
+                },
             )
             .await?;
-        } else if !patch.status().is_success() {
-            let status = patch.status();
-            let body = patch.text().await.unwrap_or_default();
-            bail!("github update ref: {status}: {body}");
+
+        let updated = gh
+            .patch(
+                &format!("/repos/{owner}/{repo}/git/refs/heads/{branch}"),
+                &UpdateRefReq {
+                    sha: &new_commit.sha,
+                    force: true,
+                },
+            )
+            .await;
+        match updated {
+            Ok(()) => {}
+            Err(e)
+                if matches!(
+                    e.status(),
+                    Some(
+                        reqwest::StatusCode::NOT_FOUND | reqwest::StatusCode::UNPROCESSABLE_ENTITY
+                    )
+                ) =>
+            {
+                gh.post(
+                    &format!("/repos/{owner}/{repo}/git/refs"),
+                    &CreateRefReq {
+                        r#ref: format!("refs/heads/{branch}"),
+                        sha: &new_commit.sha,
+                    },
+                )
+                .await?;
+            }
+            Err(e) => return Err(e.into()),
         }
 
         Ok(new_commit.sha)
     }
 
     pub async fn open_or_update_pr(
-        client: &reqwest::Client,
-        api: &str,
-        token: &str,
+        client: &HostClient,
         owner: &str,
         repo: &str,
         head: &str,
@@ -247,25 +178,18 @@ pub(crate) mod github {
         title: &str,
         body: &str,
     ) -> Result<super::PrRef> {
-        let gh = Gh { client, token };
+        let gh = client.with_user_agent("gradient");
 
-        let existing: Vec<PullObject> = send_json(
-            gh.req(
-                reqwest::Method::GET,
-                &format!("{api}/repos/{owner}/{repo}/pulls?state=open&head={owner}:{head}"),
-            ),
-            "list github pulls",
-        )
-        .await?;
+        let existing: Vec<PullObject> = gh
+            .get_json(&format!(
+                "/repos/{owner}/{repo}/pulls?state=open&head={owner}:{head}"
+            ))
+            .await?;
 
         if let Some(pr) = existing.into_iter().next() {
-            send_ok(
-                gh.req(
-                    reqwest::Method::PATCH,
-                    &format!("{api}/repos/{owner}/{repo}/pulls/{}", pr.number),
-                )
-                .json(&UpdatePullReq { title, body }),
-                "update github pull",
+            gh.patch(
+                &format!("/repos/{owner}/{repo}/pulls/{}", pr.number),
+                &UpdatePullReq { title, body },
             )
             .await?;
 
@@ -275,20 +199,17 @@ pub(crate) mod github {
             });
         }
 
-        let created: PullObject = send_json(
-            gh.req(
-                reqwest::Method::POST,
-                &format!("{api}/repos/{owner}/{repo}/pulls"),
+        let created: PullObject = gh
+            .post_json(
+                &format!("/repos/{owner}/{repo}/pulls"),
+                &CreatePullReq {
+                    title,
+                    head,
+                    base,
+                    body,
+                },
             )
-            .json(&CreatePullReq {
-                title,
-                head,
-                base,
-                body,
-            }),
-            "create github pull",
-        )
-        .await?;
+            .await?;
 
         Ok(super::PrRef {
             number: created.number,
@@ -296,19 +217,11 @@ pub(crate) mod github {
         })
     }
 
-    pub async fn default_branch(
-        client: &reqwest::Client,
-        api: &str,
-        token: &str,
-        owner: &str,
-        repo: &str,
-    ) -> Result<String> {
-        let gh = Gh { client, token };
-        let repo_info: RepoInfo = send_json(
-            gh.req(reqwest::Method::GET, &format!("{api}/repos/{owner}/{repo}")),
-            "get github repo",
-        )
-        .await?;
+    pub async fn default_branch(client: &HostClient, owner: &str, repo: &str) -> Result<String> {
+        let repo_info: RepoInfo = client
+            .with_user_agent("gradient")
+            .get_json(&format!("/repos/{owner}/{repo}"))
+            .await?;
 
         Ok(repo_info.default_branch)
     }
@@ -393,15 +306,8 @@ pub(crate) mod github {
 pub(crate) mod gitea {
     use super::*;
 
-    fn auth(req: reqwest::RequestBuilder, token: &str) -> reqwest::RequestBuilder {
-        req.header("Authorization", format!("token {token}"))
-            .header("Content-Type", "application/json")
-    }
-
     pub async fn open_or_update_pr(
-        client: &reqwest::Client,
-        base_url: &str,
-        token: &str,
+        client: &HostClient,
         owner: &str,
         repo: &str,
         head: &str,
@@ -409,33 +315,20 @@ pub(crate) mod gitea {
         title: &str,
         body: &str,
     ) -> Result<super::PrRef> {
-        let open: Vec<Pull> = send_json(
-            auth(
-                client.get(format!(
-                    "{base_url}/api/v1/repos/{owner}/{repo}/pulls?state=open"
-                )),
-                token,
-            ),
-            "list gitea pulls",
-        )
-        .await?;
+        let open: Vec<Pull> = client
+            .get_json(&format!("/repos/{owner}/{repo}/pulls?state=open"))
+            .await?;
 
         if let Some(pr) = open
             .into_iter()
             .find(|p| p.head.as_ref().map(|h| h.r#ref.as_str()) == Some(head))
         {
-            send_ok(
-                auth(
-                    client.patch(format!(
-                        "{base_url}/api/v1/repos/{owner}/{repo}/pulls/{}",
-                        pr.number
-                    )),
-                    token,
+            client
+                .patch(
+                    &format!("/repos/{owner}/{repo}/pulls/{}", pr.number),
+                    &EditPull { title, body },
                 )
-                .json(&EditPull { title, body }),
-                "update gitea pull",
-            )
-            .await?;
+                .await?;
 
             return Ok(super::PrRef {
                 number: pr.number,
@@ -443,20 +336,17 @@ pub(crate) mod gitea {
             });
         }
 
-        let created: Pull = send_json(
-            auth(
-                client.post(format!("{base_url}/api/v1/repos/{owner}/{repo}/pulls")),
-                token,
+        let created: Pull = client
+            .post_json(
+                &format!("/repos/{owner}/{repo}/pulls"),
+                &CreatePull {
+                    head,
+                    base,
+                    title,
+                    body,
+                },
             )
-            .json(&CreatePull {
-                head,
-                base,
-                title,
-                body,
-            }),
-            "create gitea pull",
-        )
-        .await?;
+            .await?;
 
         Ok(super::PrRef {
             number: created.number,
@@ -464,35 +354,14 @@ pub(crate) mod gitea {
         })
     }
 
-    pub async fn default_branch(
-        client: &reqwest::Client,
-        base_url: &str,
-        token: &str,
-        owner: &str,
-        repo: &str,
-    ) -> Result<String> {
-        let info: RepoInfo = send_json(
-            auth(
-                client.get(format!("{base_url}/api/v1/repos/{owner}/{repo}")),
-                token,
-            ),
-            "get gitea repo",
-        )
-        .await?;
+    pub async fn default_branch(client: &HostClient, owner: &str, repo: &str) -> Result<String> {
+        let info: RepoInfo = client.get_json(&format!("/repos/{owner}/{repo}")).await?;
 
         Ok(info.default_branch)
     }
 
-    pub async fn authenticated_user(
-        client: &reqwest::Client,
-        base_url: &str,
-        token: &str,
-    ) -> Result<super::CommitIdent> {
-        let user: User = send_json(
-            auth(client.get(format!("{base_url}/api/v1/user")), token),
-            "get gitea user",
-        )
-        .await?;
+    pub async fn authenticated_user(client: &HostClient) -> Result<super::CommitIdent> {
+        let user: User = client.get_json("/user").await?;
         let name = Some(user.full_name)
             .filter(|n| !n.trim().is_empty())
             .unwrap_or(user.login.clone());
@@ -500,7 +369,11 @@ pub(crate) mod gitea {
             .email
             .filter(|e| !e.trim().is_empty())
             .unwrap_or_else(|| {
-                format!("{}@users.noreply.{}", user.login, super::host_of(base_url))
+                format!(
+                    "{}@users.noreply.{}",
+                    user.login,
+                    super::host_of(client.base_url())
+                )
             });
 
         Ok(super::CommitIdent { name, email })
@@ -544,20 +417,16 @@ pub(crate) mod gitea {
 pub(crate) mod gitlab {
     use super::*;
 
-    fn project_api(base_url: &str, owner: &str, repo: &str) -> String {
-        let id = format!("{owner}/{repo}").replace('/', "%2F");
-        format!("{base_url}/api/v4/projects/{id}")
+    pub fn project_id(owner: &str, repo: &str) -> String {
+        format!("{owner}/{repo}").replace('/', "%2F")
     }
 
-    fn auth(req: reqwest::RequestBuilder, token: &str) -> reqwest::RequestBuilder {
-        req.header("PRIVATE-TOKEN", token)
-            .header("Content-Type", "application/json")
+    pub fn project_path(owner: &str, repo: &str) -> String {
+        format!("/projects/{}", project_id(owner, repo))
     }
 
     pub async fn open_or_update_pr(
-        client: &reqwest::Client,
-        base_url: &str,
-        token: &str,
+        client: &HostClient,
         owner: &str,
         repo: &str,
         head: &str,
@@ -565,31 +434,23 @@ pub(crate) mod gitlab {
         title: &str,
         body: &str,
     ) -> Result<super::PrRef> {
-        let project = project_api(base_url, owner, repo);
-        let open: Vec<Mr> = send_json(
-            auth(
-                client.get(format!(
-                    "{project}/merge_requests?state=opened&source_branch={head}"
-                )),
-                token,
-            ),
-            "gitlab list MRs",
-        )
-        .await?;
+        let project = project_path(owner, repo);
+        let open: Vec<Mr> = client
+            .get_json(&format!(
+                "{project}/merge_requests?state=opened&source_branch={head}"
+            ))
+            .await?;
 
         if let Some(mr) = open.into_iter().next() {
-            send_ok(
-                auth(
-                    client.put(format!("{project}/merge_requests/{}", mr.iid)),
-                    token,
+            client
+                .put(
+                    &format!("{project}/merge_requests/{}", mr.iid),
+                    &EditMr {
+                        title,
+                        description: body,
+                    },
                 )
-                .json(&EditMr {
-                    title,
-                    description: body,
-                }),
-                "gitlab update MR",
-            )
-            .await?;
+                .await?;
 
             return Ok(super::PrRef {
                 number: mr.iid,
@@ -597,16 +458,17 @@ pub(crate) mod gitlab {
             });
         }
 
-        let created: Mr = send_json(
-            auth(client.post(format!("{project}/merge_requests")), token).json(&CreateMr {
-                source_branch: head,
-                target_branch: base,
-                title,
-                description: body,
-            }),
-            "gitlab create MR",
-        )
-        .await?;
+        let created: Mr = client
+            .post_json(
+                &format!("{project}/merge_requests"),
+                &CreateMr {
+                    source_branch: head,
+                    target_branch: base,
+                    title,
+                    description: body,
+                },
+            )
+            .await?;
 
         Ok(super::PrRef {
             number: created.iid,
@@ -614,32 +476,14 @@ pub(crate) mod gitlab {
         })
     }
 
-    pub async fn default_branch(
-        client: &reqwest::Client,
-        base_url: &str,
-        token: &str,
-        owner: &str,
-        repo: &str,
-    ) -> Result<String> {
-        let info: ProjectInfo = send_json(
-            auth(client.get(project_api(base_url, owner, repo)), token),
-            "get gitlab project",
-        )
-        .await?;
+    pub async fn default_branch(client: &HostClient, owner: &str, repo: &str) -> Result<String> {
+        let info: ProjectInfo = client.get_json(&project_path(owner, repo)).await?;
 
         Ok(info.default_branch)
     }
 
-    pub async fn authenticated_user(
-        client: &reqwest::Client,
-        base_url: &str,
-        token: &str,
-    ) -> Result<super::CommitIdent> {
-        let user: User = send_json(
-            auth(client.get(format!("{base_url}/api/v4/user")), token),
-            "get gitlab user",
-        )
-        .await?;
+    pub async fn authenticated_user(client: &HostClient) -> Result<super::CommitIdent> {
+        let user: User = client.get_json("/user").await?;
         let name = Some(user.name)
             .filter(|n| !n.trim().is_empty())
             .unwrap_or(user.username.clone());
@@ -650,7 +494,7 @@ pub(crate) mod gitlab {
                 format!(
                     "{}@users.noreply.{}",
                     user.username,
-                    super::host_of(base_url)
+                    super::host_of(client.base_url())
                 )
             });
 
@@ -688,14 +532,24 @@ pub(crate) mod gitlab {
 
     #[cfg(test)]
     mod tests {
-        use super::project_api;
+        use super::{project_id, project_path};
 
         #[test]
-        fn project_api_addresses_the_projects_endpoint_by_encoded_path() {
+        fn project_path_addresses_the_projects_endpoint_by_encoded_path() {
             assert_eq!(
-                project_api("https://gitlab.example.com", "group/sub", "repo"),
-                "https://gitlab.example.com/api/v4/projects/group%2Fsub%2Frepo"
+                project_path("group/sub", "repo"),
+                "/projects/group%2Fsub%2Frepo"
             );
+        }
+
+        #[test]
+        fn project_id_flat_path() {
+            assert_eq!(project_id("acme", "widgets"), "acme%2Fwidgets");
+        }
+
+        #[test]
+        fn project_id_nested_groups() {
+            assert_eq!(project_id("group", "sub/repo"), "group%2Fsub%2Frepo");
         }
     }
 }
