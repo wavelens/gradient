@@ -773,14 +773,18 @@ mod tests {
     use gradient_wire::types::QueryMode;
     use std::sync::Arc;
 
-    fn make_state() -> ServerState {
+    fn cache_state_builder() -> TestState {
         let db = mock_db()
             .append_query_results(vec![
                 Vec::<gradient_entity::derivation_output::Model>::new();
                 8
             ])
             .into_connection();
-        Arc::try_unwrap(TestState::new().cache_db(db).build()).unwrap()
+        TestState::new().cache_db(db)
+    }
+
+    fn make_state() -> Arc<ServerState> {
+        cache_state_builder().build()
     }
 
     #[tokio::test]
@@ -795,9 +799,8 @@ mod tests {
         );
     }
 
-    fn make_s3_state() -> ServerState {
-        let mut state = make_state();
-        state.nar_storage = gradient_storage::NarStore::s3(
+    fn make_s3_state() -> Arc<ServerState> {
+        let nar_storage = gradient_storage::NarStore::s3(
             "bucket",
             "us-east-1",
             Some("http://127.0.0.1:1"),
@@ -808,7 +811,7 @@ mod tests {
             gradient_storage::S3Timeouts::default(),
         )
         .expect("an S3 client builds and presigns without a network");
-        state
+        cache_state_builder().nar_storage(nar_storage).build()
     }
 
     #[tokio::test]
@@ -834,7 +837,7 @@ mod tests {
                 "Connection pool timed out".to_string(),
             ))])
             .into_connection();
-        let state = Arc::try_unwrap(TestState::new().cache_db(db).build()).unwrap();
+        let state = TestState::new().cache_db(db).build();
         let paths = vec!["/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-foo".to_string()];
         assert!(
             query(&state, None, &paths, &[], QueryMode::Pull, false)

@@ -6,7 +6,8 @@
 
 use super::super::ApplyInput;
 use gradient_entity::evaluation::EvaluationStatus;
-use gradient_types::ids::{CacheId, ProjectCacheId, UserId, WorkerRegistrationId};
+use gradient_fixtures::rows::worker_registration;
+use gradient_types::ids::{CacheId, ProjectCacheId, UserId};
 use gradient_types::triggers::TriggerType;
 use gradient_types::*;
 use sea_orm::{DbErr, MockDatabase, RuntimeErr, sqlx};
@@ -109,25 +110,8 @@ pub fn with_storage_not_full(db: MockDatabase) -> MockDatabase {
     db.append_query_results([Vec::<gradient_entity::project_cache::Model>::new()])
 }
 
-fn worker_registration_row(
-    active: bool,
-    enable_eval: bool,
-) -> gradient_entity::worker_registration::Model {
-    gradient_entity::worker_registration::Model {
-        id: WorkerRegistrationId::now_v7(),
-        peer_id: ProjectId::nil(),
-        worker_id: "00000000-0000-4000-8000-000000000001".into(),
-        active,
-        enable_fetch: true,
-        enable_eval,
-        enable_build: true,
-        created_by: Some(UserId::nil()),
-        ..Default::default()
-    }
-}
-
 pub fn with_eval_worker(db: MockDatabase) -> MockDatabase {
-    db.append_query_results([vec![worker_registration_row(true, true)]])
+    db.append_query_results([vec![worker_registration(true, true)]])
 }
 
 #[derive(Debug)]

@@ -4,102 +4,17 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-#![expect(
-    clippy::unwrap_used,
-    reason = "test scaffolding: a fixture helper that cannot build its value should fail the test loudly"
-)]
-
 use axum::http::StatusCode;
-use chrono::{Duration, Utc};
+use chrono::Utc;
 use gradient_entity::ids::*;
-use gradient_entity::role;
-use gradient_fixtures::ids::{project_id, user_id};
-use gradient_fixtures::rows::project_member;
+use gradient_fixtures::rows::{
+    build_request_commit, build_request_task, project_member, queued_evaluation, upload_session,
+    write_role,
+};
 use gradient_test_support::web::{make_test_server, signed_in};
-use gradient_types::ConcurrencyPolicy;
 use gradient_types::consts::BASE_ROLE_WRITE_ID;
-use gradient_types::permissions::PermissionMask;
 use sea_orm::MockExecResult;
 use serde_json::{Value, json};
-
-fn write_role_row() -> role::Model {
-    role::Model {
-        id: BASE_ROLE_WRITE_ID,
-        name: "write".into(),
-        permission: gradient_types::permissions::write_mask() as PermissionMask,
-        ..Default::default()
-    }
-}
-
-fn upload_session(
-    id: UploadSessionId,
-    missing: Vec<String>,
-    dispatched: bool,
-    expired: bool,
-) -> gradient_entity::upload_session::Model {
-    let now = Utc::now().naive_utc();
-    let expires_at = if expired {
-        now - Duration::seconds(60)
-    } else {
-        now + Duration::hours(1)
-    };
-    gradient_entity::upload_session::Model {
-        id,
-        project: project_id(),
-        manifest: json!([]),
-        missing: serde_json::to_value(missing).unwrap(),
-        created_at: now,
-        expires_at,
-        dispatched_at: if dispatched { Some(now) } else { None },
-        ..Default::default()
-    }
-}
-
-fn task_row(id: TaskId, managed: bool) -> gradient_entity::task::Model {
-    gradient_entity::task::Model {
-        id,
-        project: project_id(),
-        name: "build-request".into(),
-        active: true,
-        display_name: "Build Requests".into(),
-        description: "Server-managed task for `gradient build` submissions.".into(),
-        repository: "build-request".into(),
-        wildcard: "*".into(),
-        last_check_at: chrono::NaiveDateTime::default(),
-        created_by: user_id(),
-        created_at: Utc::now().naive_utc(),
-        managed,
-        keep_evaluations: 30,
-        concurrency: ConcurrencyPolicy::SoftAbort,
-        sign_cache: true,
-        ..Default::default()
-    }
-}
-
-fn commit_row() -> gradient_entity::commit::Model {
-    gradient_entity::commit::Model {
-        id: CommitId::now_v7(),
-        message: "Build request".into(),
-        hash: vec![0; 20],
-        author: Some(user_id()),
-        author_name: "Test User".into(),
-    }
-}
-
-fn eval_row(task: TaskId, commit: CommitId) -> gradient_entity::evaluation::Model {
-    let now = Utc::now().naive_utc();
-    gradient_entity::evaluation::Model {
-        id: EvaluationId::now_v7(),
-        task: Some(task),
-        repository: "/nix/store/abc-source".into(),
-        commit,
-        wildcard: "*".into(),
-        status: gradient_entity::evaluation::EvaluationStatus::Queued,
-        created_at: now,
-        updated_at: now,
-        ..Default::default()
-    }
-}
 
 fn dispatch_url(session: UploadSessionId) -> String {
     format!("/api/v1/build-requests/{}/dispatch", session)
@@ -113,7 +28,7 @@ async fn rejects_already_dispatched_session() {
     let db = db
         .append_query_results([vec![upload_session(upload, vec![], true, false)]])
         .append_query_results([vec![project_member(BASE_ROLE_WRITE_ID)]])
-        .append_query_results([vec![write_role_row()]]);
+        .append_query_results([vec![write_role()]]);
 
     let server = make_test_server(db.into_connection());
     let res = server
@@ -133,7 +48,7 @@ async fn rejects_expired_session() {
     let db = db
         .append_query_results([vec![upload_session(upload, vec![], false, true)]])
         .append_query_results([vec![project_member(BASE_ROLE_WRITE_ID)]])
-        .append_query_results([vec![write_role_row()]]);
+        .append_query_results([vec![write_role()]]);
 
     let server = make_test_server(db.into_connection());
     let res = server
@@ -155,7 +70,7 @@ async fn rejects_session_with_missing_blobs() {
     let db = db
         .append_query_results([vec![upload_session(upload, missing, false, false)]])
         .append_query_results([vec![project_member(BASE_ROLE_WRITE_ID)]])
-        .append_query_results([vec![write_role_row()]]);
+        .append_query_results([vec![write_role()]]);
 
     let server = make_test_server(db.into_connection());
     let res = server
@@ -190,9 +105,9 @@ async fn happy_path_creates_task_commit_and_evaluation() {
     let upload = UploadSessionId::now_v7();
 
     let task_id = TaskId::now_v7();
-    let task_model = task_row(task_id, true);
-    let commit_model = commit_row();
-    let eval_model = eval_row(task_id, commit_model.id);
+    let task_model = build_request_task(task_id);
+    let commit_model = build_request_commit();
+    let eval_model = queued_evaluation(task_id, commit_model.id);
 
     let updated = gradient_entity::upload_session::Model {
         dispatched_at: Some(Utc::now().naive_utc()),
@@ -202,7 +117,7 @@ async fn happy_path_creates_task_commit_and_evaluation() {
     let db = db
         .append_query_results([vec![upload_session(upload, vec![], false, false)]])
         .append_query_results([vec![project_member(BASE_ROLE_WRITE_ID)]])
-        .append_query_results([vec![write_role_row()]])
+        .append_query_results([vec![write_role()]])
         .append_query_results([Vec::<gradient_entity::task::Model>::new()])
         .append_query_results([vec![task_model.clone()]])
         .append_exec_results([MockExecResult {
@@ -263,7 +178,7 @@ async fn rejects_local_input_override() {
     let db = db
         .append_query_results([vec![upload_session(upload, vec![], false, false)]])
         .append_query_results([vec![project_member(BASE_ROLE_WRITE_ID)]])
-        .append_query_results([vec![write_role_row()]]);
+        .append_query_results([vec![write_role()]]);
 
     let server = make_test_server(db.into_connection());
     let res = server
@@ -283,9 +198,9 @@ async fn happy_path_reuses_existing_build_request_task() {
     let upload = UploadSessionId::now_v7();
 
     let task_id = TaskId::now_v7();
-    let task_model = task_row(task_id, true);
-    let commit_model = commit_row();
-    let eval_model = eval_row(task_id, commit_model.id);
+    let task_model = build_request_task(task_id);
+    let commit_model = build_request_commit();
+    let eval_model = queued_evaluation(task_id, commit_model.id);
 
     let updated = gradient_entity::upload_session::Model {
         dispatched_at: Some(Utc::now().naive_utc()),
@@ -295,7 +210,7 @@ async fn happy_path_reuses_existing_build_request_task() {
     let db = db
         .append_query_results([vec![upload_session(upload, vec![], false, false)]])
         .append_query_results([vec![project_member(BASE_ROLE_WRITE_ID)]])
-        .append_query_results([vec![write_role_row()]])
+        .append_query_results([vec![write_role()]])
         .append_query_results([vec![task_model.clone()]])
         .append_query_results([vec![commit_model.clone()]])
         .append_exec_results([MockExecResult {

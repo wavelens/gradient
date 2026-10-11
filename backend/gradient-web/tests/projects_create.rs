@@ -8,8 +8,7 @@
 //! and the INSERT is not provable with mocks.
 
 use gradient_entity::{ids::*, project, project_user};
-use gradient_fixtures::ids::user_id;
-use gradient_fixtures::test_date;
+use gradient_fixtures::rows::{project_member, project_named};
 use gradient_test_support::state::TestState;
 use gradient_test_support::web::{make_test_server, signed_in};
 use gradient_types::consts::BASE_ROLE_ADMIN_ID;
@@ -23,23 +22,10 @@ fn temp_crypt_secret_file() -> String {
     path.to_string_lossy().into_owned()
 }
 
-fn project_row(name: &str) -> project::Model {
-    project::Model {
-        id: ProjectId::now_v7(),
-        name: name.to_string(),
-        display_name: format!("{} display", name),
-        created_by: user_id(),
-        created_at: test_date(),
-        ..Default::default()
-    }
-}
-
 fn project_user_row(project_id: ProjectId) -> project_user::Model {
     project_user::Model {
-        id: ProjectUserId::now_v7(),
         project: project_id,
-        user: user_id(),
-        role: BASE_ROLE_ADMIN_ID,
+        ..project_member(BASE_ROLE_ADMIN_ID)
     }
 }
 
@@ -47,7 +33,7 @@ fn project_user_row(project_id: ProjectId) -> project_user::Model {
 async fn put_project_returns_already_exists_via_pre_check() {
     let (db, auth) = signed_in();
 
-    let db = db.append_query_results([vec![project_row("dup")]]);
+    let db = db.append_query_results([vec![project_named("dup")]]);
 
     let server = make_test_server(db.into_connection());
     let res = server
@@ -70,7 +56,7 @@ async fn put_project_returns_already_exists_via_pre_check() {
 #[tokio::test]
 async fn put_project_creates_project_and_admin_membership() {
     let (db, auth) = signed_in();
-    let inserted = project_row("fresh");
+    let inserted = project_named("fresh");
     let membership = project_user_row(inserted.id);
 
     let db = db

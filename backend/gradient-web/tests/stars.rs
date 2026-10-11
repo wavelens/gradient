@@ -4,23 +4,16 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use gradient_entity::{project, task};
+use gradient_entity::task;
 use gradient_fixtures::ids::{project_id, task_id};
 use gradient_fixtures::mock::{all_statements, exec_ok, mock_db, ran};
-use gradient_fixtures::rows::project;
+use gradient_fixtures::rows::public_project;
 use gradient_test_support::state::TestState;
 use gradient_test_support::web::{make_test_server, signed_in};
 use gradient_types::MProject;
 use sea_orm::{MockExecResult, Value};
 use serde_json::Value as Json;
 use std::collections::BTreeMap;
-
-fn public_project() -> project::Model {
-    project::Model {
-        public: true,
-        ..project()
-    }
-}
 
 #[tokio::test]
 async fn starring_an_unknown_project_is_not_found() {

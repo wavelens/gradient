@@ -6,78 +6,21 @@
 
 use axum::http::StatusCode;
 use axum_test::multipart::{MultipartForm, Part};
-use chrono::Utc;
 use gradient_entity::ids::*;
-use gradient_entity::role;
-use gradient_fixtures::ids::{project_id, user_id};
 use gradient_fixtures::mock::mock_db;
-use gradient_fixtures::rows::project_member;
+use gradient_fixtures::rows::{
+    build_request_commit, build_request_task, project_member, queued_evaluation, write_role,
+};
 use gradient_test_support::web::{make_test_server, make_token, with_auth};
+use gradient_types::SessionId;
 use gradient_types::consts::BASE_ROLE_WRITE_ID;
-use gradient_types::permissions::PermissionMask;
-use gradient_types::{ConcurrencyPolicy, SessionId};
 use sea_orm::{MockDatabase, MockExecResult};
 use serde_json::Value;
-
-fn write_role_row() -> role::Model {
-    role::Model {
-        id: BASE_ROLE_WRITE_ID,
-        name: "write".into(),
-        permission: gradient_types::permissions::write_mask() as PermissionMask,
-        ..Default::default()
-    }
-}
 
 fn with_project_access(db: MockDatabase) -> MockDatabase {
     db.append_query_results([vec![gradient_fixtures::rows::project()]])
         .append_query_results([vec![project_member(BASE_ROLE_WRITE_ID)]])
-        .append_query_results([vec![write_role_row()]])
-}
-
-fn task_row(id: TaskId) -> gradient_entity::task::Model {
-    gradient_entity::task::Model {
-        id,
-        project: project_id(),
-        name: "build-request".into(),
-        active: true,
-        display_name: "Build Requests".into(),
-        description: "Server-managed task for `gradient build` submissions.".into(),
-        repository: "build-request".into(),
-        wildcard: "*".into(),
-        last_check_at: chrono::NaiveDateTime::default(),
-        created_by: user_id(),
-        created_at: Utc::now().naive_utc(),
-        managed: true,
-        keep_evaluations: 30,
-        concurrency: ConcurrencyPolicy::SoftAbort,
-        sign_cache: true,
-        ..Default::default()
-    }
-}
-
-fn commit_row() -> gradient_entity::commit::Model {
-    gradient_entity::commit::Model {
-        id: CommitId::now_v7(),
-        message: "Build request".into(),
-        hash: vec![0; 20],
-        author: Some(user_id()),
-        author_name: "Test User".into(),
-    }
-}
-
-fn eval_row(task: TaskId, commit: CommitId) -> gradient_entity::evaluation::Model {
-    let now = Utc::now().naive_utc();
-    gradient_entity::evaluation::Model {
-        id: EvaluationId::now_v7(),
-        task: Some(task),
-        repository: "/nix/store/abc-source".into(),
-        commit,
-        wildcard: "*".into(),
-        status: gradient_entity::evaluation::EvaluationStatus::Queued,
-        created_at: now,
-        updated_at: now,
-        ..Default::default()
-    }
+        .append_query_results([vec![write_role()]])
 }
 
 fn source_url() -> String {
@@ -90,9 +33,9 @@ async fn source_upload_creates_queued_eval() {
     let token = make_token(session_id);
 
     let task_id = TaskId::now_v7();
-    let task_model = task_row(task_id);
-    let commit_model = commit_row();
-    let eval_model = eval_row(task_id, commit_model.id);
+    let task_model = build_request_task(task_id);
+    let commit_model = build_request_commit();
+    let eval_model = queued_evaluation(task_id, commit_model.id);
 
     let db = with_project_access(with_auth(mock_db(), session_id))
         .append_query_results([Vec::<gradient_entity::task::Model>::new()])

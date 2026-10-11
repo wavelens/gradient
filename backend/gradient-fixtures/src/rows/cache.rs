@@ -65,9 +65,13 @@ fn builtin_cache_role(id: RoleId, name: &str, permission: PermissionMask) -> cac
 }
 
 pub fn cache_member(role: RoleId) -> cache_user::Model {
+    cache_member_in(cache_id(), role)
+}
+
+pub fn cache_member_in(cache: CacheId, role: RoleId) -> cache_user::Model {
     cache_user::Model {
         id: CacheUserId::now_v7(),
-        cache: cache_id(),
+        cache,
         user: user_id(),
         role,
     }

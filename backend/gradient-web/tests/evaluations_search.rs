@@ -5,48 +5,17 @@
  */
 
 use gradient_entity::evaluation::EvaluationStatus;
-use gradient_entity::{commit, evaluation, ids::*, project, task};
-use gradient_fixtures::ids::{commit_id, project_id, task_id, user_id};
+use gradient_entity::{commit, evaluation, ids::*};
+use gradient_fixtures::ids::{commit_id, task_id};
 use gradient_fixtures::mock::{all_statements, mock_db};
+use gradient_fixtures::rows::{public_project, task_without_cache_signing};
 use gradient_fixtures::test_date;
 use gradient_test_support::web::{make_test_server, make_token, with_auth};
-use gradient_types::{ConcurrencyPolicy, SessionId};
+use gradient_types::SessionId;
 use sea_orm::MockDatabase;
 use serde_json::Value;
 
 const COMMIT_HEX: &str = "1111111111111111111111111111111111111111";
-
-fn public_project() -> project::Model {
-    project::Model {
-        id: project_id(),
-        name: "test-project".into(),
-        display_name: "Test Project".into(),
-        public: true,
-        public_key: "ssh-ed25519 AAAA test".into(),
-        private_key: "encrypted".into(),
-        created_by: user_id(),
-        created_at: test_date(),
-        ..Default::default()
-    }
-}
-
-fn task_row() -> task::Model {
-    task::Model {
-        id: task_id(),
-        project: project_id(),
-        name: "test-task".into(),
-        active: true,
-        display_name: "Test Task".into(),
-        repository: "https://github.com/test/repo".into(),
-        wildcard: "*".into(),
-        last_check_at: test_date(),
-        created_by: user_id(),
-        created_at: test_date(),
-        keep_evaluations: 10,
-        concurrency: ConcurrencyPolicy::Skip,
-        ..Default::default()
-    }
-}
 
 fn commit_row() -> commit::Model {
     commit::Model {
@@ -74,7 +43,7 @@ fn eval_row(id: EvaluationId, wildcard: &str, status: EvaluationStatus) -> evalu
 
 fn with_task(db: MockDatabase) -> MockDatabase {
     db.append_query_results([vec![public_project()]])
-        .append_query_results([vec![task_row()]])
+        .append_query_results([vec![task_without_cache_signing()]])
 }
 
 fn with_summary_rollups(db: MockDatabase) -> MockDatabase {

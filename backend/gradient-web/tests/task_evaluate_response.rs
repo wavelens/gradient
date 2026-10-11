@@ -4,43 +4,18 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use gradient_entity::{project, role, task};
-use gradient_fixtures::ids::{project_id, task_id, user_id};
+use gradient_entity::project;
+use gradient_fixtures::ids::{project_id, user_id};
 use gradient_fixtures::mock::mock_db;
-use gradient_fixtures::rows::{live_session, project_member, user};
+use gradient_fixtures::rows::{
+    admin_role, live_session, project_member, task_without_cache_signing, user,
+};
 use gradient_fixtures::test_date;
 use gradient_test_support::web::{make_test_server, make_token};
+use gradient_types::SessionId;
 use gradient_types::consts::BASE_ROLE_ADMIN_ID;
-use gradient_types::{ConcurrencyPolicy, SessionId};
 use sea_orm::MockDatabase;
 use serde_json::{Value, json};
-
-fn task_row() -> task::Model {
-    task::Model {
-        id: task_id(),
-        project: project_id(),
-        name: "test-task".into(),
-        active: true,
-        display_name: "Test Task".into(),
-        repository: "https://github.com/test/repo".into(),
-        wildcard: "*".into(),
-        last_check_at: test_date(),
-        created_by: user_id(),
-        created_at: test_date(),
-        keep_evaluations: 10,
-        concurrency: ConcurrencyPolicy::Skip,
-        ..Default::default()
-    }
-}
-
-fn admin_role() -> role::Model {
-    role::Model {
-        id: BASE_ROLE_ADMIN_ID,
-        name: "Admin".into(),
-        permission: gradient_types::permissions::admin_mask(),
-        ..Default::default()
-    }
-}
 
 fn authorized_db(session_id: SessionId) -> MockDatabase {
     let session = live_session(session_id);
@@ -58,7 +33,7 @@ fn authorized_db(session_id: SessionId) -> MockDatabase {
             created_at: test_date(),
             ..Default::default()
         }]])
-        .append_query_results([vec![task_row()]])
+        .append_query_results([vec![task_without_cache_signing()]])
         .append_query_results([vec![project_member(BASE_ROLE_ADMIN_ID)]])
         .append_query_results([vec![admin_role()]])
 }

@@ -237,6 +237,7 @@ pub async fn find_approval_gated_eval(
 mod tests {
     use super::*;
     use gradient_fixtures::mock::mock_db;
+    use gradient_fixtures::rows::worker_registration;
     use sea_orm::MockExecResult;
 
     fn waiting_eval(reason: WaitingReason) -> MEvaluation {
@@ -338,20 +339,6 @@ mod tests {
         }
     }
 
-    fn eval_capable_registration() -> gradient_entity::worker_registration::Model {
-        gradient_entity::worker_registration::Model {
-            id: gradient_types::ids::WorkerRegistrationId::now_v7(),
-            peer_id: ProjectId::nil(),
-            worker_id: "00000000-0000-4000-8000-000000000001".into(),
-            active: true,
-            enable_fetch: true,
-            enable_eval: true,
-            enable_build: true,
-            created_by: Some(gradient_types::ids::UserId::nil()),
-            ..Default::default()
-        }
-    }
-
     #[tokio::test]
     async fn unpark_no_workers_requeues_zero_workers_park_and_skips_other_workers_parks() {
         let project = ProjectId::now_v7();
@@ -377,7 +364,7 @@ mod tests {
         requeued.waiting_reason = None;
 
         let db = mock_db()
-            .append_query_results([vec![eval_capable_registration()]])
+            .append_query_results([vec![worker_registration(true, true)]])
             .append_query_results([vec![task.clone()]])
             .append_query_results([vec![stranded.clone(), capability_mismatch.clone()]])
             .append_query_results([vec![requeued.clone()]])

@@ -10,9 +10,9 @@ use gradient_types::consts::BASE_ROLE_VIEW_ID;
 use std::sync::Arc;
 
 use gradient_entity::team_user::TeamRole;
-use gradient_entity::{ids::*, project_user, team, team_user, team_worker, worker_registration};
+use gradient_entity::{ids::*, project_user, team_user, team_worker, worker_registration};
 use gradient_fixtures::ids::user_id;
-use gradient_fixtures::rows::{project, project_member};
+use gradient_fixtures::rows::{project, project_member, team};
 use gradient_test_support::web::{make_test_server, make_token, signed_in, with_auth};
 use gradient_types::SessionId;
 use sea_orm::{DbErr, MockDatabase, RuntimeErr, sqlx};
@@ -87,19 +87,6 @@ async fn connect_project(
         .await
 }
 
-fn team_row() -> team::Model {
-    team::Model {
-        id: TeamId::new(
-            uuid::Uuid::parse_str("7e000000-0000-0000-0000-000000000001").expect("uuid"),
-        ),
-        name: "platform".into(),
-        display_name: "Platform".into(),
-        created_by: Some(user_id()),
-        created_at: gradient_fixtures::test_date(),
-        ..Default::default()
-    }
-}
-
 #[tokio::test]
 async fn connecting_is_refused_while_gradient_ci_is_turned_off() {
     let (db, auth) = signed_in();
@@ -121,10 +108,10 @@ async fn connecting_is_refused_while_gradient_ci_is_turned_off() {
 async fn a_team_connection_needs_a_team_admin() {
     let (db, auth) = signed_in();
     let db = db
-        .append_query_results([vec![team_row()]])
+        .append_query_results([vec![team()]])
         .append_query_results([vec![team_user::Model {
             id: TeamUserId::now_v7(),
-            team: team_row().id,
+            team: team().id,
             user: user_id(),
             role: TeamRole::Member,
             ..Default::default()

@@ -4,56 +4,16 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-#![expect(
-    clippy::unwrap_used,
-    reason = "test scaffolding: a fixture helper that cannot build its value should fail the test loudly"
-)]
-
 use axum::http::StatusCode;
 use axum_test::multipart::{MultipartForm, Part};
-use chrono::{Duration, Utc};
+use chrono::Utc;
 use gradient_entity::ids::*;
-use gradient_entity::role;
 use gradient_fixtures::ids::project_id;
-use gradient_fixtures::rows::project_member;
+use gradient_fixtures::rows::{project_member, upload_session, write_role};
 use gradient_test_support::web::{make_test_server, signed_in};
 use gradient_types::consts::BASE_ROLE_WRITE_ID;
-use gradient_types::permissions::PermissionMask;
 use sea_orm::MockExecResult;
 use serde_json::{Value, json};
-
-fn write_role_row() -> role::Model {
-    role::Model {
-        id: BASE_ROLE_WRITE_ID,
-        name: "write".into(),
-        permission: gradient_types::permissions::write_mask() as PermissionMask,
-        ..Default::default()
-    }
-}
-
-fn live_upload_session(
-    id: UploadSessionId,
-    missing: Vec<String>,
-    dispatched: bool,
-    expired: bool,
-) -> gradient_entity::upload_session::Model {
-    let now = Utc::now().naive_utc();
-    let expires_at = if expired {
-        now - Duration::seconds(60)
-    } else {
-        now + Duration::hours(1)
-    };
-    gradient_entity::upload_session::Model {
-        id,
-        project: project_id(),
-        manifest: json!([]),
-        missing: serde_json::to_value(missing).unwrap(),
-        created_at: now,
-        expires_at,
-        dispatched_at: if dispatched { Some(now) } else { None },
-        ..Default::default()
-    }
-}
 
 fn hex_hash_of(bytes: &[u8]) -> String {
     hex::encode(blake3::hash(bytes).as_bytes())
@@ -72,14 +32,14 @@ async fn rejects_hash_mismatch() {
     let claimed_hex = hex_hash_of(b"different bytes");
 
     let db = db
-        .append_query_results([vec![live_upload_session(
+        .append_query_results([vec![upload_session(
             upload,
             vec![claimed_hex.clone()],
             false,
             false,
         )]])
         .append_query_results([vec![project_member(BASE_ROLE_WRITE_ID)]])
-        .append_query_results([vec![write_role_row()]]);
+        .append_query_results([vec![write_role()]]);
 
     let server = make_test_server(db.into_connection());
 
@@ -104,14 +64,9 @@ async fn rejects_foreign_hash() {
     let other_hex = hex_hash_of(b"other content");
 
     let db = db
-        .append_query_results([vec![live_upload_session(
-            upload,
-            vec![other_hex],
-            false,
-            false,
-        )]])
+        .append_query_results([vec![upload_session(upload, vec![other_hex], false, false)]])
         .append_query_results([vec![project_member(BASE_ROLE_WRITE_ID)]])
-        .append_query_results([vec![write_role_row()]]);
+        .append_query_results([vec![write_role()]]);
 
     let server = make_test_server(db.into_connection());
 
@@ -134,7 +89,7 @@ async fn happy_path_uploads_blob_and_shrinks_missing() {
     let payload = b"a real source file".to_vec();
     let payload_hex = hex_hash_of(&payload);
 
-    let session_row = live_upload_session(upload, vec![payload_hex.clone()], false, false);
+    let session_row = upload_session(upload, vec![payload_hex.clone()], false, false);
 
     let inserted_blob = gradient_entity::build_request_blob::Model {
         id: BuildRequestBlobId::now_v7(),
@@ -152,7 +107,7 @@ async fn happy_path_uploads_blob_and_shrinks_missing() {
     let db = db
         .append_query_results([vec![session_row]])
         .append_query_results([vec![project_member(BASE_ROLE_WRITE_ID)]])
-        .append_query_results([vec![write_role_row()]])
+        .append_query_results([vec![write_role()]])
         .append_query_results([vec![inserted_blob]])
         .append_exec_results([MockExecResult {
             last_insert_id: 0,
@@ -189,7 +144,7 @@ async fn rejects_already_dispatched_session() {
     let payload = b"hello".to_vec();
     let payload_hex = hex_hash_of(&payload);
 
-    let db = db.append_query_results([vec![live_upload_session(
+    let db = db.append_query_results([vec![upload_session(
         upload,
         vec![payload_hex.clone()],
         true,
@@ -217,7 +172,7 @@ async fn rejects_expired_session() {
     let payload = b"hello".to_vec();
     let payload_hex = hex_hash_of(&payload);
 
-    let db = db.append_query_results([vec![live_upload_session(
+    let db = db.append_query_results([vec![upload_session(
         upload,
         vec![payload_hex.clone()],
         false,

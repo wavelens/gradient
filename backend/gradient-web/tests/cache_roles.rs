@@ -6,10 +6,10 @@
 
 use gradient_entity::{cache, cache_role, cache_user, ids::*};
 use gradient_fixtures::ids::{cache_id, user_id};
+use gradient_fixtures::rows::{cache_admin_role, cache_member, cache_view_role};
 use gradient_fixtures::test_date;
 use gradient_test_support::web::{make_test_server, signed_in};
-use gradient_types::consts::{BASE_CACHE_ROLE_ADMIN_ID, BASE_CACHE_ROLE_VIEW_ID};
-use gradient_types::permissions::{cache_admin_mask, cache_view_mask};
+use gradient_types::consts::BASE_CACHE_ROLE_ADMIN_ID;
 use serde_json::{Value, json};
 
 fn cache_row() -> cache::Model {
@@ -23,35 +23,6 @@ fn cache_row() -> cache::Model {
         private_key: "sk".into(),
         created_by: user_id(),
         created_at: test_date(),
-        ..Default::default()
-    }
-}
-
-fn admin_member() -> cache_user::Model {
-    cache_user::Model {
-        id: CacheUserId::now_v7(),
-        cache: cache_id(),
-        user: user_id(),
-        role: BASE_CACHE_ROLE_ADMIN_ID,
-    }
-}
-
-fn admin_role_row() -> cache_role::Model {
-    cache_role::Model {
-        id: BASE_CACHE_ROLE_ADMIN_ID,
-        name: "Admin".into(),
-        permission: cache_admin_mask(),
-        managed: true,
-        ..Default::default()
-    }
-}
-
-fn view_role_row() -> cache_role::Model {
-    cache_role::Model {
-        id: BASE_CACHE_ROLE_VIEW_ID,
-        name: "View".into(),
-        permission: cache_view_mask(),
-        managed: true,
         ..Default::default()
     }
 }
@@ -73,10 +44,10 @@ async fn list_returns_builtins_and_available_permissions() {
 
     let db = db
         .append_query_results([vec![cache_row()]])
-        .append_query_results([vec![admin_member()]])
+        .append_query_results([vec![cache_member(BASE_CACHE_ROLE_ADMIN_ID)]])
         .append_query_results([vec![
-            admin_role_row(),
-            view_role_row(),
+            cache_admin_role(),
+            cache_view_role(),
             custom_role_row(custom_id, "pusher", 0),
         ]]);
 
@@ -114,8 +85,8 @@ async fn create_role_rejects_duplicate_name() {
 
     let db = db
         .append_query_results([vec![cache_row()]])
-        .append_query_results([vec![admin_member()]])
-        .append_query_results([vec![admin_role_row()]])
+        .append_query_results([vec![cache_member(BASE_CACHE_ROLE_ADMIN_ID)]])
+        .append_query_results([vec![cache_admin_role()]])
         .append_query_results([vec![existing]]);
 
     let server = make_test_server(db.into_connection());
@@ -134,8 +105,8 @@ async fn create_role_rejects_unknown_permission() {
 
     let db = db
         .append_query_results([vec![cache_row()]])
-        .append_query_results([vec![admin_member()]])
-        .append_query_results([vec![admin_role_row()]]);
+        .append_query_results([vec![cache_member(BASE_CACHE_ROLE_ADMIN_ID)]])
+        .append_query_results([vec![cache_admin_role()]]);
 
     let server = make_test_server(db.into_connection());
     let res = server
@@ -160,9 +131,9 @@ async fn patch_role_rejects_builtin() {
 
     let db = db
         .append_query_results([vec![cache_row()]])
-        .append_query_results([vec![admin_member()]])
-        .append_query_results([vec![admin_role_row()]])
-        .append_query_results([vec![admin_role_row()]]);
+        .append_query_results([vec![cache_member(BASE_CACHE_ROLE_ADMIN_ID)]])
+        .append_query_results([vec![cache_admin_role()]])
+        .append_query_results([vec![cache_admin_role()]]);
 
     let server = make_test_server(db.into_connection());
     let res = server
@@ -188,8 +159,8 @@ async fn patch_role_rejects_managed() {
 
     let db = db
         .append_query_results([vec![cache_row()]])
-        .append_query_results([vec![admin_member()]])
-        .append_query_results([vec![admin_role_row()]])
+        .append_query_results([vec![cache_member(BASE_CACHE_ROLE_ADMIN_ID)]])
+        .append_query_results([vec![cache_admin_role()]])
         .append_query_results([vec![managed_custom]]);
 
     let server = make_test_server(db.into_connection());
@@ -210,8 +181,8 @@ async fn delete_role_rejects_a_role_granted_to_a_team() {
 
     let db = db
         .append_query_results([vec![cache_row()]])
-        .append_query_results([vec![admin_member()]])
-        .append_query_results([vec![admin_role_row()]])
+        .append_query_results([vec![cache_member(BASE_CACHE_ROLE_ADMIN_ID)]])
+        .append_query_results([vec![cache_admin_role()]])
         .append_query_results([vec![custom]])
         .append_query_results([Vec::<cache_user::Model>::new()])
         .append_query_results([vec![gradient_entity::team_cache::Model {
@@ -247,8 +218,8 @@ async fn delete_role_rejects_role_in_use() {
 
     let db = db
         .append_query_results([vec![cache_row()]])
-        .append_query_results([vec![admin_member()]])
-        .append_query_results([vec![admin_role_row()]])
+        .append_query_results([vec![cache_member(BASE_CACHE_ROLE_ADMIN_ID)]])
+        .append_query_results([vec![cache_admin_role()]])
         .append_query_results([vec![custom]])
         .append_query_results([vec![in_use]]);
 

@@ -287,6 +287,7 @@ pub(super) fn negotiate_capabilities(
 mod tests {
     use super::*;
     use gradient_fixtures::mock::{empty_db, mock_db};
+    use gradient_test_support::state::TestState;
     use std::sync::Arc;
 
     fn all_caps(val: bool) -> GradientCapabilities {
@@ -300,11 +301,10 @@ mod tests {
         }
     }
 
-    fn make_state(federate_proto: bool) -> ServerState {
-        let db = empty_db();
-        let mut state = Arc::try_unwrap(gradient_test_support::prelude::test_state(db)).unwrap();
-        Arc::make_mut(&mut state.config).proto.federate = federate_proto;
-        state
+    fn make_state(federate_proto: bool) -> Arc<ServerState> {
+        TestState::new()
+            .config(move |config| config.proto.federate = federate_proto)
+            .build()
     }
 
     #[test]
@@ -412,8 +412,8 @@ mod tests {
         }
     }
 
-    fn state_with_db(db: sea_orm::DatabaseConnection) -> ServerState {
-        Arc::try_unwrap(gradient_test_support::prelude::test_state(db)).unwrap()
+    fn state_with_db(db: sea_orm::DatabaseConnection) -> Arc<ServerState> {
+        TestState::new().worker_db(db).build()
     }
 
     #[tokio::test]

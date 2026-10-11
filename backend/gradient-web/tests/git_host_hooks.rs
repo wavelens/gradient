@@ -14,6 +14,7 @@ use gradient_ci::actions::encrypt_secret_with_file as encrypt_webhook_secret;
 use gradient_core::ServerState;
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_fixtures::mock::{empty_db, mock_db};
+use gradient_fixtures::rows::worker_registration;
 use gradient_test_support::state::TestState;
 use gradient_types::GitHostType;
 use gradient_types::ids::*;
@@ -284,16 +285,9 @@ fn project_cache_row() -> gradient_entity::project_cache::Model {
 
 fn worker_registration_row() -> gradient_entity::worker_registration::Model {
     gradient_entity::worker_registration::Model {
-        id: gradient_types::ids::WorkerRegistrationId::now_v7(),
         peer_id: project_id(),
-        worker_id: "00000000-0000-4000-8000-000000000001".into(),
-        active: true,
-        enable_fetch: true,
-        enable_eval: true,
-        enable_build: true,
-        created_by: Some(gradient_types::ids::UserId::nil()),
         created_at: fixture_date(),
-        ..Default::default()
+        ..worker_registration(true, true)
     }
 }
 

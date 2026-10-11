@@ -10,28 +10,17 @@
 )]
 
 use gradient_entity::integration::IntegrationKind;
-use gradient_entity::{github_installation, ids::*, integration, project_user, role};
+use gradient_entity::{github_installation, ids::*, integration, project_user};
 use gradient_fixtures::ids::{project_id, user_id};
 use gradient_fixtures::mock::mock_db;
-use gradient_fixtures::rows::{project, project_member};
+use gradient_fixtures::rows::{admin_role, project, project_member};
 use gradient_fixtures::test_date;
 use gradient_test_support::web::{make_test_server, make_token, signed_in, with_auth};
-use gradient_types::consts::BASE_ROLE_ADMIN_ID;
+use gradient_types::consts::{BASE_ROLE_ADMIN_ID, BASE_ROLE_VIEW_ID};
 use gradient_types::{GitHostType, SessionId};
 use sea_orm::{MockDatabase, MockExecResult};
 use serde_json::Value;
 use uuid::Uuid;
-
-fn member_only_membership() -> project_user::Model {
-    // `ProjectAccess::Member` is not dereferencing the role. A synthetic role id that is never
-    // loaded is proving the summary endpoint is working without `ManageIntegrations`.
-    project_user::Model {
-        id: ProjectUserId::new(Uuid::parse_str("00000000-0000-0000-0000-0000000000bb").unwrap()),
-        project: project_id(),
-        user: user_id(),
-        role: gradient_types::consts::BASE_ROLE_VIEW_ID,
-    }
-}
 
 fn gitea_inbound_row() -> integration::Model {
     integration::Model {
@@ -96,16 +85,7 @@ fn gitea_outbound_row() -> integration::Model {
 
 fn with_project_member(db: MockDatabase) -> MockDatabase {
     db.append_query_results([vec![project()]])
-        .append_query_results([vec![member_only_membership()]])
-}
-
-fn admin_role() -> role::Model {
-    role::Model {
-        id: gradient_types::consts::BASE_ROLE_ADMIN_ID,
-        name: "Admin".into(),
-        permission: gradient_types::permissions::admin_mask(),
-        ..Default::default()
-    }
+        .append_query_results([vec![project_member(BASE_ROLE_VIEW_ID)]])
 }
 
 fn with_project_manage(db: MockDatabase) -> MockDatabase {

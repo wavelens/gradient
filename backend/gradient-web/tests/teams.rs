@@ -5,38 +5,16 @@
  */
 
 use axum::http::StatusCode;
-use gradient_entity::ids::*;
 use gradient_entity::team_user::TeamRole;
 use gradient_entity::{team, team_user};
-use gradient_fixtures::ids::{team_id, user_id};
 use gradient_fixtures::mock::{all_statements, exec_ok, mock_db, ran};
+use gradient_fixtures::rows::{team, team_member};
 use gradient_fixtures::test_date;
 use gradient_test_support::state::TestState;
 use gradient_test_support::web::{bearer, make_test_server, signed_in, with_auth};
 use gradient_types::{CreatePermission, SessionId};
 use serde_json::{Value, json};
 use uuid::Uuid;
-
-fn team_row() -> team::Model {
-    team::Model {
-        id: team_id(),
-        name: "platform".into(),
-        display_name: "Platform".into(),
-        created_by: Some(user_id()),
-        created_at: test_date(),
-        ..Default::default()
-    }
-}
-
-fn membership(role: TeamRole) -> team_user::Model {
-    team_user::Model {
-        id: TeamUserId::now_v7(),
-        team: team_id(),
-        user: user_id(),
-        role,
-        ..Default::default()
-    }
-}
 
 #[tokio::test]
 async fn creating_a_team_respects_the_create_permission() {
@@ -64,8 +42,8 @@ async fn creating_a_team_makes_the_creator_its_admin() {
     let session_id = SessionId::now_v7();
     let conn = with_auth(mock_db(), session_id)
         .append_query_results([Vec::<team::Model>::new()])
-        .append_query_results([vec![team_row()]])
-        .append_query_results([vec![membership(TeamRole::Admin)]])
+        .append_query_results([vec![team()]])
+        .append_query_results([vec![team_member(TeamRole::Admin)]])
         .append_exec_results([exec_ok(), exec_ok()])
         .into_connection();
     let server = make_test_server(conn.clone());
@@ -85,8 +63,8 @@ async fn creating_a_team_makes_the_creator_its_admin() {
 async fn only_a_superuser_maps_sso_groups_onto_a_team() {
     let (db, auth) = signed_in();
     let db = db
-        .append_query_results([vec![team_row()]])
-        .append_query_results([vec![membership(TeamRole::Admin)]]);
+        .append_query_results([vec![team()]])
+        .append_query_results([vec![team_member(TeamRole::Admin)]]);
     let server = make_test_server(db.into_connection());
 
     let res = server
@@ -108,8 +86,8 @@ async fn only_a_superuser_grants_a_team_on_every_new_project() {
     ] {
         let (db, auth) = signed_in();
         let db = db
-            .append_query_results([vec![team_row()]])
-            .append_query_results([vec![membership(TeamRole::Admin)]]);
+            .append_query_results([vec![team()]])
+            .append_query_results([vec![team_member(TeamRole::Admin)]]);
         let server = make_test_server(db.into_connection());
 
         let res = server
@@ -128,8 +106,8 @@ async fn only_a_superuser_grants_a_team_on_every_new_project() {
 async fn deleting_a_team_withdraws_its_workers_from_the_granted_projects() {
     let session_id = SessionId::now_v7();
     let conn = with_auth(mock_db(), session_id)
-        .append_query_results([vec![team_row()]])
-        .append_query_results([vec![membership(TeamRole::Admin)]])
+        .append_query_results([vec![team()]])
+        .append_query_results([vec![team_member(TeamRole::Admin)]])
         .append_query_results([Vec::<gradient_entity::team_worker::Model>::new()])
         .append_query_results([Vec::<gradient_entity::team_project::Model>::new()])
         .append_exec_results([exec_ok(), exec_ok()])
@@ -156,7 +134,7 @@ async fn deleting_a_team_withdraws_its_workers_from_the_granted_projects() {
 async fn a_team_is_hidden_from_non_members() {
     let (db, auth) = signed_in();
     let db = db
-        .append_query_results([vec![team_row()]])
+        .append_query_results([vec![team()]])
         .append_query_results([Vec::<team_user::Model>::new()]);
     let server = make_test_server(db.into_connection());
 
@@ -181,8 +159,8 @@ async fn the_team_lists_recent_evaluations_of_its_granted_projects() {
         sea_orm::Value::ChronoDateTime(Some(test_date())),
     );
     let conn = with_auth(mock_db(), session_id)
-        .append_query_results([vec![team_row()]])
-        .append_query_results([vec![membership(TeamRole::Member)]])
+        .append_query_results([vec![team()]])
+        .append_query_results([vec![team_member(TeamRole::Member)]])
         .append_query_results([vec![row]])
         .into_connection();
     let server = make_test_server(conn.clone());

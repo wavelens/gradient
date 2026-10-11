@@ -7,8 +7,9 @@
 //! `MockDatabase` cannot model unique-violation rollbacks. The race between the pre-check SELECT
 //! and the INSERT is not provable with mocks.
 
-use gradient_entity::{cache, cache_upstream, cache_user, ids::*};
+use gradient_entity::{cache, cache_upstream, ids::*};
 use gradient_fixtures::ids::user_id;
+use gradient_fixtures::rows::cache_member_in;
 use gradient_fixtures::test_date;
 use gradient_test_support::state::TestState;
 use gradient_test_support::web::{make_test_server, signed_in};
@@ -33,15 +34,6 @@ fn cache_row(name: &str) -> cache::Model {
         created_by: user_id(),
         created_at: test_date(),
         ..Default::default()
-    }
-}
-
-fn cache_user_row(cache_id: CacheId) -> cache_user::Model {
-    cache_user::Model {
-        id: CacheUserId::now_v7(),
-        cache: cache_id,
-        user: user_id(),
-        role: BASE_CACHE_ROLE_ADMIN_ID,
     }
 }
 
@@ -90,7 +82,7 @@ async fn put_cache_creates_cache_and_default_upstream() {
     let (db, auth) = signed_in();
     let inserted = cache_row("fresh");
     let upstream = cache_upstream_row(inserted.id);
-    let creator_admin = cache_user_row(inserted.id);
+    let creator_admin = cache_member_in(inserted.id, BASE_CACHE_ROLE_ADMIN_ID);
 
     let db = db
         .append_query_results::<cache::Model, _, _>([Vec::<cache::Model>::new()])
