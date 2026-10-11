@@ -4,47 +4,15 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-{ lib }: let
-  specs = builtins.fromJSON (builtins.readFile ../../backend/gradient-types/options.json);
-
-  subGroups = {
-    "" = [ "frontend" ];
-    database = [ "cache" "web" ];
-    email = [ "smtp" "from" ];
-    eval = [ "cache" ];
-    log = [ "level" ];
-    metrics = [ "retention" "otlp" ];
-    proto = [ "anonymous_cache" ];
-  };
-
-  enabledGroups = [ "oidc" "scim" "email" "s3" "github_app" "ssh" ];
-
-  writtenByHand = [
-    [ "serveUrl" ]
-    [ "baseDir" ]
-    [ "frontend" "url" ]
-    [ "database" "url" ]
-    [ "nar" "chunkBytes" ]
-    [ "email" "smtp" "host" ]
-    [ "email" "smtp" "username" ]
-    [ "email" "from" "address" ]
-    [ "oidc" "clientId" ]
-    [ "oidc" "discoveryUrl" ]
-    [ "s3" "bucket" ]
-    [ "githubApp" "id" ]
-    [ "log" "level" "default" ]
-    [ "log" "level" "web" ]
-    [ "log" "level" "cache" ]
-    [ "log" "level" "proto" ]
-    [ "log" "level" "scheduler" ]
-    [ "ssh" "enable" ]
-    [ "state" "file" ]
-    [ "state" "validate" ]
-    [ "state" "delete" ]
-  ];
-
-  withoutEnvironment = [ [ "database" "url" ] [ "state" "file" ] [ "state" "validate" ] [ "state" "delete" ] ];
-
+{
+  lib,
+  specs,
+  subGroups ? { },
+  enabledGroups ? [ ],
+  writtenByHand ? [ ],
+  withoutEnvironment ? [ ],
+  emptyListIsUnset ? false,
+}: let
   camel = name: let
     parts = lib.splitString "_" name;
     capital = part: lib.toUpper (lib.substring 0 1 part) + lib.substring 1 (-1) part;
@@ -101,6 +69,8 @@
     !(lib.elem spec.group enabledGroups)
     || spec.field == "enable"
     || lib.getAttrFromPath [ (camel spec.group) "enable" ] cfg;
+
+  isSet = value: value != null && !(emptyListIsUnset && value == [ ]);
 in {
   options = lib.foldl' lib.recursiveUpdate { } (map
     (spec: lib.setAttrByPath (pathOf spec) (optionOf spec))
@@ -108,6 +78,6 @@ in {
 
   environment = cfg: lib.listToAttrs (lib.concatMap (spec: let
     value = lib.getAttrFromPath (pathOf spec) cfg;
-  in lib.optional (isEnabled cfg spec && value != null) (lib.nameValuePair spec.env (environmentValue value)))
+  in lib.optional (isEnabled cfg spec && isSet value) (lib.nameValuePair spec.env (environmentValue value)))
     (lib.filter (spec: spec.env != null && !(isCredential spec) && !(lib.elem (pathOf spec) withoutEnvironment)) specs));
 }
