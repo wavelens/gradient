@@ -75,16 +75,25 @@ pub fn open_predicate(alias: &str) -> String {
     )
 }
 
-pub fn non_passthrough_predicate(derivation: &str) -> String {
+/// Parents built here need every dependency. Parents available in a cache only need the
+/// runtime dependencies.
+pub fn failure_spreads_predicate(edge: &str) -> String {
     format!(
-        "NOT EXISTS (SELECT 1 FROM derivation_build rb \
-         WHERE rb.derivation = {derivation} AND rb.cache_available)"
+        "({edge}.kind IN (1, 2) OR NOT EXISTS (SELECT 1 FROM derivation_build rb \
+         WHERE rb.derivation = {edge}.derivation AND rb.cache_available))"
+    )
+}
+
+pub fn settled_incomplete_predicate(alias: &str) -> String {
+    format!(
+        "({alias}.status IN ({terminal_success}) AND {alias}.missing_runtime_deps > 0)",
+        terminal_success = crate::sql::status::build_in(&BuildStatus::TERMINAL_SUCCESS),
     )
 }
 
 /// The `EXISTS` over `derivation_output` is load-bearing.
 /// The `NOT EXISTS` is vacuously true for a shared build with no output rows.
-/// Its parents would be dispatched against an input nothing can provide without the guard.
+/// Parents without the guard start against an input nothing can provide.
 pub fn fetchable_predicate(alias: &str) -> String {
     format!(
         "({alias}.status IN ({terminal_success}) AND {complete})",
@@ -247,6 +256,23 @@ mod tests {
         assert!(
             !p.contains("derivation_dependency"),
             "no walk over the build graph: {p}"
+        );
+    }
+
+    #[test]
+    fn a_failure_reaches_a_cached_parent_over_a_runtime_dependency_only() {
+        assert_eq!(
+            norm(&failure_spreads_predicate("e")),
+            "(e.kind IN (1, 2) OR NOT EXISTS (SELECT 1 FROM derivation_build rb \
+             WHERE rb.derivation = e.derivation AND rb.cache_available))"
+        );
+    }
+
+    #[test]
+    fn a_settled_build_missing_a_runtime_dependency_is_incomplete() {
+        assert_eq!(
+            settled_incomplete_predicate("p"),
+            "(p.status IN (3, 7) AND p.missing_runtime_deps > 0)"
         );
     }
 

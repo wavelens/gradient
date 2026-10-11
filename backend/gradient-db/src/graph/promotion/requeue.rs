@@ -6,7 +6,7 @@
 
 use crate::graph::repair::RepairScope;
 use crate::graph::{
-    predicates::{aborted_in_evaluation, non_passthrough_predicate},
+    predicates::{aborted_in_evaluation, failure_spreads_predicate, settled_incomplete_predicate},
     walks::{
         ClosureDirection, bounded_dependency_closure_cte_body, dependency_closure_cte_body,
         eval_closure_cte, eval_closure_cte_body,
@@ -68,7 +68,7 @@ fn requeue_ctes(closure_seed: &str) -> String {
                  WHERE dbf.derivation IN (SELECT derivation FROM closure) AND {deterministic}"
             ),
             ClosureDirection::WantedBy,
-            &non_passthrough_predicate("e.derivation"),
+            &failure_spreads_predicate("e"),
             Some("closure"),
         ),
     )
@@ -156,7 +156,7 @@ fn kept_failed_cte_body() -> String {
             aborted = aborted_in_evaluation("$1"),
         ),
         ClosureDirection::WantedBy,
-        &non_passthrough_predicate("e.derivation"),
+        &failure_spreads_predicate("e"),
         Some("closure"),
     )
 }
@@ -200,9 +200,10 @@ fn retry_build_closure_sql() -> String {
     let retryable = crate::sql::status::build_in(&BuildStatus::RETRYABLE);
     let failed_step = |side: &str, statuses: &str| {
         format!(
-            "{} AND EXISTS (SELECT 1 FROM derivation_build p \
-             WHERE p.derivation = {side} AND p.status IN ({statuses}))",
-            non_passthrough_predicate(side),
+            "{spreads} AND EXISTS (SELECT 1 FROM derivation_build p \
+             WHERE p.derivation = {side} AND (p.status IN ({statuses}) OR {incomplete}))",
+            spreads = failure_spreads_predicate("e"),
+            incomplete = settled_incomplete_predicate("p"),
         )
     };
     let causes = bounded_dependency_closure_cte_body(
@@ -450,9 +451,15 @@ mod tests {
         let sql = norm(retry_build_closure_sql());
         let dependency_failed = crate::sql::status::build(BuildStatus::DependencyFailed);
         let retryable = crate::sql::status::build_in(&BuildStatus::RETRYABLE);
+        let incomplete = settled_incomplete_predicate("p");
         assert!(
             sql.starts_with("WITH RECURSIVE closure(derivation) AS"),
             "the walk stays inside the evaluation: {sql}"
+        );
+        assert_eq!(
+            sql.matches(&norm(failure_spreads_predicate("e"))).count(),
+            2,
+            "both walks pass a cached build over a runtime dependency only: {sql}"
         );
         assert!(
             sql.contains("causes(derivation) AS (SELECT $2::uuid UNION"),
@@ -460,9 +467,10 @@ mod tests {
         );
         assert!(
             sql.contains(&format!(
-                "WHERE p.derivation = e.dependency AND p.status IN ({dependency_failed}, {retryable})"
+                "WHERE p.derivation = e.dependency \
+                 AND (p.status IN ({dependency_failed}, {retryable}) OR {incomplete}))"
             )),
-            "the walk down passes failed dependencies only: {sql}"
+            "the walk down passes failed and incomplete dependencies only: {sql}"
         );
         assert!(
             sql.contains(&format!(
@@ -478,7 +486,8 @@ mod tests {
         );
         assert!(
             sql.contains(&format!(
-                "WHERE p.derivation = e.derivation AND p.status IN ({dependency_failed})"
+                "WHERE p.derivation = e.derivation \
+                 AND (p.status IN ({dependency_failed}) OR {incomplete}))"
             )),
             "the walk up stops at a parent that failed on its own: {sql}"
         );
