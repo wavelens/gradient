@@ -5,7 +5,7 @@
  */
 
 use crate::graph::{
-    predicates::{aborted_in_evaluation, non_passthrough_predicate},
+    predicates::{aborted_in_evaluation, failure_spreads_predicate},
     walks::{ClosureDirection, bounded_dependency_closure_cte_body, eval_closure_cte_body},
 };
 use crate::status::TransitionChange;
@@ -28,7 +28,7 @@ fn cascade_dependency_failed_sql() -> String {
             "wanted_by",
             "SELECT $1::uuid",
             ClosureDirection::WantedBy,
-            &non_passthrough_predicate("e.derivation"),
+            &failure_spreads_predicate("e"),
             None,
         )
     );
@@ -109,7 +109,7 @@ fn dependency_failed_repair_sql() -> String {
                 aborted = aborted_in_evaluation("$1"),
             ),
             ClosureDirection::WantedBy,
-            &non_passthrough_predicate("e.derivation"),
+            &failure_spreads_predicate("e"),
             Some("closure"),
         ),
     );
@@ -136,18 +136,19 @@ crate::sql_fn! {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::graph::promotion::requeue::{
+    use super::super::requeue::{
         requeue_failed_closure_blocked_sql, requeue_failed_shared_builds_sql,
     };
+    use super::*;
 
     #[test]
-    fn a_failure_walk_never_enters_a_passthrough() {
+    fn a_failure_walk_enters_a_passthrough_over_a_runtime_dependency_only() {
         let norm = |s: String| s.split_whitespace().collect::<Vec<_>>().join(" ");
-        let fence = norm(non_passthrough_predicate("e.derivation"));
+        let fence = norm(failure_spreads_predicate("e"));
         assert!(
-            fence.contains("rb.cache_available"),
-            "the fence must read the passthrough flag: {fence}"
+            fence.starts_with("(e.kind IN (1, 2) OR NOT EXISTS")
+                && fence.contains("rb.cache_available"),
+            "a build input of a passthrough is no failure of the passthrough: {fence}"
         );
         for sql in [
             norm(cascade_dependency_failed_sql()),
@@ -157,7 +158,7 @@ mod tests {
         ] {
             assert!(
                 sql.contains(&fence),
-                "upward walk crosses a passthrough: {sql}"
+                "the upward walk enters a passthrough over a build input: {sql}"
             );
         }
     }
