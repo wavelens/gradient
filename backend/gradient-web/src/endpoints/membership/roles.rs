@@ -5,7 +5,8 @@
  */
 
 use super::{
-    MemberTable, Owner, OwnerScope, RoleRow, RoleTable, active, delete_row, insert_row, update_row,
+    MemberTable, Owner, OwnerScope, RoleRow, RoleTable, active, delete_row, insert_unique_row,
+    update_unique_row,
 };
 use crate::audit::Audit;
 use crate::error::{WebError, WebResult};
@@ -147,9 +148,10 @@ pub async fn create<O: Owner>(
     // Membership lookup by name would become ambiguous otherwise.
     name_clash::<O::Roles>(db, owner, body.name.as_str(), None).await?;
 
-    let role = insert_row::<O::Roles>(
+    let role = insert_unique_row::<O::Roles>(
         db,
         <O::Roles as RoleTable>::new(RoleId::now_v7(), body.name.to_string(), owner, mask),
+        Resource::RoleName,
     )
     .await?;
     let created = <O::Roles as RoleTable>::fields(&role);
@@ -200,7 +202,7 @@ pub async fn update<O: Owner>(
         <O::Roles as RoleTable>::set_permission(&mut row, O::parse_permissions(&perms)?);
     }
 
-    let updated = update_row::<O::Roles>(db, row).await?;
+    let updated = update_unique_row::<O::Roles>(db, row, Resource::RoleName).await?;
     let fields = <O::Roles as RoleTable>::fields(&updated);
 
     audit.write(O::ACTIONS.role_update, O::event_owner(owner), serde_json::json!({ (O::ID_KEY): owner.to_string(), "role_id": fields.id.to_string(), "previous_name": previous_name, "previous_permission_mask": previous_mask, "new_name": fields.name, "new_permission_mask": fields.permission, }))

@@ -200,7 +200,8 @@ pub async fn post_project_subscribe_cache(
             mode,
         },
     )
-    .await?;
+    .await
+    .map_err(|e| WebError::from_db_err(e, Resource::CacheSubscription))?;
 
     reauth_project_workers(&state.web_db, &scheduler, project.id).await;
 

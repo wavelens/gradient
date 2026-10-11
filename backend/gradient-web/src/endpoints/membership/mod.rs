@@ -246,10 +246,6 @@ pub fn active<T: Table>(row: T::Row) -> T::Active {
     row.into_active_model()
 }
 
-pub async fn insert_row<T: Table>(db: &WebDb, row: T::Row) -> WebResult<T::Row> {
-    Ok(gradient_db::rows::insert::<T, _>(db, row).await?)
-}
-
 pub async fn insert_unique_row<T: Table>(
     db: &WebDb,
     row: T::Row,
@@ -262,6 +258,16 @@ pub async fn insert_unique_row<T: Table>(
 
 pub async fn update_row<T: Table>(db: &WebDb, row: T::Active) -> WebResult<T::Row> {
     Ok(gradient_db::rows::update::<T, _>(db, row).await?)
+}
+
+pub async fn update_unique_row<T: Table>(
+    db: &WebDb,
+    row: T::Active,
+    taken: Resource,
+) -> WebResult<T::Row> {
+    gradient_db::rows::update::<T, _>(db, row)
+        .await
+        .map_err(|e| WebError::from_db_err(e, taken))
 }
 
 pub async fn delete_row<T: Table>(db: &impl ConnectionTrait, row: T::Row) -> WebResult<()> {

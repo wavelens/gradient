@@ -518,7 +518,9 @@ pub async fn post_keys(
         ..Default::default()
     };
 
-    let inserted = gradient_db::rows::insert::<EApi, _>(&state.web_db, api_key).await?;
+    let inserted = gradient_db::rows::insert::<EApi, _>(&state.web_db, api_key)
+        .await
+        .map_err(|e| WebError::from_db_err(e, Resource::ApiKeyName))?;
 
     audit.write(Action::ApiKeyCreate, EventOwner::default(), serde_json::json!({ "api_key_id": inserted.id.to_string(), "name": body.name, "expires_in_days": body.expires_in_days, "permissions_mask": mask, "project_id": project_pin.map(|id| id.to_string()), "cache_id": cache_pin.map(|id| id.to_string()), }))
     .await;
@@ -581,7 +583,9 @@ pub async fn patch_key(
         active.allowed_ips = Set(if canon.is_empty() { None } else { Some(canon) });
     }
 
-    let updated = gradient_db::rows::update::<EApi, _>(&state.web_db, active).await?;
+    let updated = gradient_db::rows::update::<EApi, _>(&state.web_db, active)
+        .await
+        .map_err(|e| WebError::from_db_err(e, Resource::ApiKeyName))?;
 
     audit.write(Action::ApiKeyUpdate, EventOwner::default(), serde_json::json!({ "api_key_id": api_id.to_string(), "previous_name": previous_name, "new_name": updated.name, "previous_permissions_mask": previous_mask, "new_permissions_mask": new_mask, "previous_project_id": previous_project.map(|i| i.to_string()), "new_project_id": new_project.map(|i| i.to_string()), }))
     .await;

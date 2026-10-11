@@ -319,7 +319,8 @@ pub async fn post_accept_invite(
                         role,
                     },
                 )
-                .await?;
+                .await
+                .map_err(|e| WebError::from_db_err(e, Resource::ProjectMembership))?;
             }
 
             (
