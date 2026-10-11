@@ -61,7 +61,7 @@ impl Scheduler {
         info!(%worker_id, job_id = %a.job_id(), "claim lost; dropped from the tracker");
         self.drop_assignment(worker_id, a.job_id()).await;
         if let crate::jobs::PendingJob::Build(b) = &a.pending {
-            self.state.startable_set.enter([b.derivation]);
+            self.state.memory.db.startable_set.enter([b.derivation]);
         }
     }
 

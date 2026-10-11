@@ -39,7 +39,7 @@ impl UpstreamProbe {
     pub(crate) fn new(state: &Arc<ServerState>) -> Self {
         Self {
             state: Arc::clone(state),
-            inbox: Mutex::new(state.probe_requests.take_inbox()),
+            inbox: Mutex::new(state.memory.db.probe_requests.take_inbox()),
             swept: Mutex::new(Instant::now()),
         }
     }
@@ -55,7 +55,7 @@ impl Pass for UpstreamProbe {
     }
 
     fn wake(&self) -> Option<Arc<Notify>> {
-        Some(self.state.probe_requests.wake())
+        Some(self.state.memory.db.probe_requests.wake())
     }
 
     async fn run(&self) -> Result<(), PassError> {

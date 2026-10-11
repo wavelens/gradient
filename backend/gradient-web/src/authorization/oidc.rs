@@ -370,7 +370,7 @@ async fn create_or_update_user(
 
         if let Err(e) = gradient_state::apply_pending_project_memberships(
             &tx,
-            &state.pending_project_memberships,
+            &state.memory.pending_project_memberships,
             &user.username,
             user_id,
         )
@@ -414,7 +414,7 @@ async fn create_or_update_user(
 
     if let Err(e) = gradient_state::apply_pending_project_memberships(
         &tx,
-        &state.pending_project_memberships,
+        &state.memory.pending_project_memberships,
         &user.username,
         user.id,
     )

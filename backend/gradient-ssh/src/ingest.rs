@@ -175,6 +175,7 @@ async fn claim_path(
 ) -> anyhow::Result<Option<HeldPermit>> {
     let wait = Duration::from_secs(state.config.upload.rest_wait_secs.get());
     match state
+        .memory
         .upload_admission
         .admit("ssh", ObjectKey::Nar(hash.to_owned()), size, wait)
         .await
@@ -372,7 +373,7 @@ mod tests {
             .into_connection();
         let session = session(db, mask_from(&[Permission::TriggerEvaluation]));
         let info = info(NAR);
-        let (holder, mut admitted) = session.state.upload_admission.open_session("holder");
+        let (holder, mut admitted) = session.state.memory.upload_admission.open_session("holder");
         holder.request(1, ObjectKey::Nar(info.path.hash().to_string()), 1, false);
         let Some(Admitted::Granted { permit, .. }) = admitted.recv().await else {
             panic!("the holder leads the path");

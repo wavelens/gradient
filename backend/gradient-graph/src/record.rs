@@ -894,12 +894,13 @@ fn accepts_batches(status: EvaluationStatus, held: bool) -> bool {
 #[tracing::instrument(level = "debug", skip_all, fields(eval_id = %batch.evaluation, derivations = batch.derivations.len()))]
 pub(crate) async fn apply_batch(ctx: &DbContext, batch: &RecordBatch) -> Result<RecordReport> {
     let evaluation_id = batch.evaluation;
-    match EEvaluation::find_by_id(evaluation_id)
+    let evaluation = EEvaluation::find_by_id(evaluation_id)
         .one(&ctx.worker_db)
         .await
-        .context("fetch evaluation")?
-    {
-        Some(e) if !accepts_batches(e.status, ctx.held_evaluations.holds(evaluation_id)) => {
+        .context("fetch evaluation")?;
+    let held = ctx.memory.held_evaluations.holds(evaluation_id).await;
+    match evaluation {
+        Some(e) if !accepts_batches(e.status, held) => {
             warn!(%evaluation_id, status = ?e.status, "batch for an evaluation that is not streaming; dropped as stale");
             return Ok(RecordReport {
                 evaluation: evaluation_id,
@@ -1217,7 +1218,7 @@ pub(crate) async fn after_commit(
         }
     }
 
-    ctx.probe_requests.send(report.to_probe.clone());
+    ctx.memory.probe_requests.send(report.to_probe.clone());
 
     ctx.events.publish(evaluation::Progress {
         evaluation_id: report.evaluation,

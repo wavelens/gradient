@@ -113,7 +113,7 @@ impl Drop for Hold {
 }
 
 impl HeldEvaluations {
-    pub fn hold(&self, evaluation: EvaluationId) -> Hold {
+    pub async fn hold(&self, evaluation: EvaluationId) -> Hold {
         *self.held().entry(evaluation).or_default() += 1;
         Hold {
             held: self.clone(),
@@ -121,7 +121,7 @@ impl HeldEvaluations {
         }
     }
 
-    pub fn holds(&self, evaluation: EvaluationId) -> bool {
+    pub async fn holds(&self, evaluation: EvaluationId) -> bool {
         self.held().contains_key(&evaluation)
     }
 
@@ -141,6 +141,37 @@ impl HeldEvaluations {
     }
 }
 
+#[derive(Clone, Debug, Default)]
+pub struct Wakeups {
+    pub delivery: Arc<Notify>,
+    pub eval_assign: Arc<Notify>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct DbMemory {
+    pub probe_requests: ProbeRequests,
+    pub startable_set: StartableSet,
+    pub held_evaluations: HeldEvaluations,
+}
+
+impl DbMemory {
+    pub fn staged(&self) -> Self {
+        Self {
+            startable_set: self.startable_set.staged(),
+            probe_requests: self.probe_requests.staged(),
+            ..self.clone()
+        }
+    }
+
+    pub fn unstaged(&self) -> Self {
+        Self {
+            startable_set: self.startable_set.unstaged(),
+            probe_requests: self.probe_requests.unstaged(),
+            ..self.clone()
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct DbContext {
     pub worker_db: WorkerDb,
@@ -149,18 +180,15 @@ pub struct DbContext {
     pub storage: StorageCtx,
     pub shutdown: Shutdown,
     pub events: gradient_types::EventBus,
-    pub delivery_wake: Arc<Notify>,
-    pub probe_requests: ProbeRequests,
-    pub startable_set: StartableSet,
-    pub held_evaluations: HeldEvaluations,
+    pub wake: Wakeups,
+    pub memory: DbMemory,
 }
 
 impl DbContext {
     pub fn in_transaction(&self, tx: Arc<sea_orm::DatabaseTransaction>) -> DbContext {
         DbContext {
             worker_db: self.worker_db.in_transaction(tx),
-            startable_set: self.startable_set.staged(),
-            probe_requests: self.probe_requests.staged(),
+            memory: self.memory.staged(),
             ..self.clone()
         }
     }
@@ -168,8 +196,7 @@ impl DbContext {
     pub fn detached(&self) -> DbContext {
         DbContext {
             worker_db: self.worker_db.detached(),
-            startable_set: self.startable_set.unstaged(),
-            probe_requests: self.probe_requests.unstaged(),
+            memory: self.memory.unstaged(),
             ..self.clone()
         }
     }
@@ -179,18 +206,18 @@ impl DbContext {
 mod tests {
     use super::*;
 
-    #[test]
-    fn an_evaluation_stays_held_until_its_last_hold_drops() {
+    #[tokio::test]
+    async fn an_evaluation_stays_held_until_its_last_hold_drops() {
         let held = HeldEvaluations::default();
         let evaluation = EvaluationId::now_v7();
 
-        let first = held.hold(evaluation);
-        let second = held.hold(evaluation);
+        let first = held.hold(evaluation).await;
+        let second = held.hold(evaluation).await;
         drop(first);
-        assert!(held.holds(evaluation));
+        assert!(held.holds(evaluation).await);
 
         drop(second);
-        assert!(!held.holds(evaluation));
+        assert!(!held.holds(evaluation).await);
     }
 
     #[tokio::test]

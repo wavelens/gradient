@@ -394,7 +394,7 @@ async fn extend_with_upstream_results(
 
     let batch = gradient_core::upstream::probe_batch(
         endpoints,
-        std::sync::Arc::clone(&state.upstream_query),
+        std::sync::Arc::clone(&state.memory.upstream_query),
         uncached_pairs,
     )
     .await;

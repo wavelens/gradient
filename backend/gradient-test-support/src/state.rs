@@ -8,7 +8,7 @@ use crate::cli::test_cli;
 use crate::fakes::email::InMemoryEmailSender;
 use crate::log_storage::NoopLogStorage;
 use axum_test::TestServer;
-use gradient_core::ServerState;
+use gradient_core::{InstanceMemory, ServerState};
 use gradient_db::{CacheDb, WebDb, WorkerDb};
 use gradient_fixtures::mock::empty_db;
 use gradient_notify::EmailSender;
@@ -109,34 +109,33 @@ impl TestState {
             log_storage: self.log_storage,
             email: self.email,
             nar_storage,
-            manifest_state: Default::default(),
-            pending_credentials: Default::default(),
             http: gradient_util::http::build_client().expect("build test HTTP client"),
             git_host: gradient_git_host::GitHostRegistry::with_builtin(),
-            github_app_install_url: Default::default(),
             shutdown: gradient_util::shutdown::Shutdown::new(),
-            last_used_stamps: gradient_core::last_used_stamps(),
-            build_progress: gradient_core::build_progress(),
-            eval_progress: gradient_core::eval_progress(),
-            cache_traffic: gradient_db::metrics::cache_traffic::CacheTraffic::shared(),
             jwt_secret: SecretString::new(TEST_JWT_SECRET.to_string()),
             started_at: chrono::Utc::now(),
-            pending_project_memberships: Default::default(),
             events: gradient_types::EventBus::default(),
-            delivery_wake: Default::default(),
-            eval_assign_wake: Default::default(),
-            probe_requests: Default::default(),
-            held_evaluations: Default::default(),
-            startable_set: Default::default(),
+            wake: Default::default(),
             graph: gradient_core::Graph::stub(),
-            upstream_query: Arc::new(tokio::sync::Semaphore::new(32)),
-            nar_downloads: Arc::new(tokio::sync::Semaphore::new(16)),
-            upload_admission: gradient_storage::admission::UploadAdmission::new(
-                gradient_storage::admission::Limits {
-                    concurrency: 16,
-                    bytes: u64::MAX,
-                },
-            ),
+            memory: InstanceMemory {
+                db: Default::default(),
+                last_used_stamps: gradient_core::last_used_stamps(),
+                cache_traffic: gradient_db::metrics::cache_traffic::CacheTraffic::shared(),
+                build_progress: gradient_core::build_progress(),
+                eval_progress: gradient_core::eval_progress(),
+                github_app_install_url: Default::default(),
+                manifest_state: Default::default(),
+                pending_credentials: Default::default(),
+                pending_project_memberships: Default::default(),
+                upstream_query: Arc::new(tokio::sync::Semaphore::new(32)),
+                nar_downloads: Arc::new(tokio::sync::Semaphore::new(16)),
+                upload_admission: gradient_storage::admission::UploadAdmission::new(
+                    gradient_storage::admission::Limits {
+                        concurrency: 16,
+                        bytes: u64::MAX,
+                    },
+                ),
+            },
         })
     }
 

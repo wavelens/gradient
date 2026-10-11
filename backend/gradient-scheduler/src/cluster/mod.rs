@@ -9,6 +9,7 @@ mod coordinator;
 mod divert;
 mod matching;
 mod planner;
+mod prepared;
 mod recovery;
 mod reservation;
 mod settlement;
@@ -19,6 +20,7 @@ pub use coordinator::*;
 pub(crate) use divert::{Membership, Route};
 pub use matching::kuhn;
 pub use planner::{Placement, ScoreLookup, Seat, plan};
+pub use prepared::{PreparedMember, PreparedMembers};
 pub use reservation::*;
 pub use settlement::*;
 pub use slots::{ClusterSnapshot, IDLE_SLOT_TTL, IdleSlots, Slot, SlotKind};
@@ -40,9 +42,4 @@ pub struct CommittedSeat {
 pub struct Committing {
     pub cluster: PendingCluster,
     pub seats: Vec<CommittedSeat>,
-}
-
-pub struct PreparedMember {
-    pub assignment: crate::jobs::Assignment,
-    pub membership: gradient_wire::types::ClusterMembership,
 }

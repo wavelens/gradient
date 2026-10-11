@@ -664,11 +664,11 @@ fn lifted_by_live_eval(
 }
 
 pub(crate) async fn admit_startable_moves(scheduler: &Scheduler) -> anyhow::Result<()> {
-    if scheduler.draining.load(Ordering::Relaxed) {
+    if scheduler.draining.is_draining().await {
         return Ok(());
     }
 
-    let StartableMoves { entered, left } = scheduler.state.startable_set.take();
+    let StartableMoves { entered, left } = scheduler.state.memory.db.startable_set.take();
     if entered.is_empty() && left.is_empty() {
         return Ok(());
     }
@@ -689,7 +689,7 @@ pub(crate) async fn admit_startable_moves(scheduler: &Scheduler) -> anyhow::Resu
 }
 
 pub(crate) async fn resync_startable_set(scheduler: &Scheduler) -> anyhow::Result<()> {
-    if scheduler.draining.load(Ordering::Relaxed) {
+    if scheduler.draining.is_draining().await {
         return Ok(());
     }
 
@@ -736,7 +736,7 @@ async fn enqueue_startable_shared_builds(
     let enqueued_ids: Vec<_> = new_shared_builds.iter().map(|a| a.id).collect();
     let membership = crate::cluster::Membership::load(&state.worker_db, &[], &enqueued_ids).await?;
 
-    let waited_imports = scheduler.import_waits.lock().waited_builds();
+    let waited_imports = scheduler.import_waits.waited_builds().await;
     let maps = BuildAssignMaps::load(
         state,
         &new_shared_builds,

@@ -65,7 +65,7 @@ pub async fn request_manifest(
     validate_host(&host)?;
 
     let manifest = gradient_ci::github_app_manifest::build_manifest(&state.config.server.serve_url);
-    let token = gradient_ci::manifest_state::issue_state(&state.manifest_state, user.id);
+    let token = state.memory.manifest_state.issue_state(user.id).await;
     let post_url = gradient_ci::github_app_manifest::manifest_post_url(&host, &token);
 
     Ok(ok_json(ManifestResponse {
@@ -82,8 +82,11 @@ pub async fn callback(
     let host = q.host.unwrap_or_else(default_host);
     validate_host(&host)?;
 
-    let Some(user_id) =
-        gradient_ci::manifest_state::validate_and_consume(&state.manifest_state, &q.state)
+    let Some(user_id) = state
+        .memory
+        .manifest_state
+        .validate_and_consume(&q.state)
+        .await
     else {
         return Err(AdminRefusal::InvalidManifestState.into());
     };
@@ -92,7 +95,11 @@ pub async fn callback(
         .await
         .context("run github exchange")?;
 
-    gradient_ci::manifest_state::store_credentials(&state.pending_credentials, user_id, creds);
+    state
+        .memory
+        .pending_credentials
+        .store_credentials(user_id, creds)
+        .await;
 
     Ok(Redirect::to("/admin/github-app?ready=1"))
 }
@@ -101,7 +108,11 @@ pub async fn credentials(
     State(state): State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
 ) -> WebResult<Json<BaseResponse<gradient_ci::github_app_manifest::ManifestResult>>> {
-    let creds = gradient_ci::manifest_state::take_credentials(&state.pending_credentials, user.id)
+    let creds = state
+        .memory
+        .pending_credentials
+        .take_credentials(user.id)
+        .await
         .ok_or(AdminRefusal::NoPendingCredentials)?;
 
     Ok(ok_json(creds))

@@ -53,7 +53,7 @@ pub struct CacheStatsResponse {
 /// `gradient_db::metrics::cache_traffic` is writing the accumulator.
 pub fn record_nar_traffic(state: &ServerState, cache_id: CacheId, bytes: i64) {
     let bucket = cache_traffic::minute_bucket(gradient_types::now());
-    state.cache_traffic.record(cache_id, bucket, bytes);
+    state.memory.cache_traffic.record(cache_id, bucket, bytes);
 }
 
 fn cache_series_sql(unit: &str, back: &str, gran: i16) -> String {
@@ -262,7 +262,7 @@ mod tests {
         record_nar_traffic(&state, CacheId::nil(), 4096);
         record_nar_traffic(&state, CacheId::nil(), 1024);
 
-        let taken = state.cache_traffic.take();
+        let taken = state.memory.cache_traffic.take();
         let bytes: i64 = taken.iter().map(|(_, _, t)| t.bytes).sum();
         let nars: i64 = taken.iter().map(|(_, _, t)| t.nars).sum();
 
@@ -272,7 +272,7 @@ mod tests {
             "a serve is bucketed by its minute: {taken:?}"
         );
         assert!(
-            state.cache_traffic.take().is_empty(),
+            state.memory.cache_traffic.take().is_empty(),
             "a flush leaves nothing behind"
         );
     }

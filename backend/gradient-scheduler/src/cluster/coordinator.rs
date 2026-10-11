@@ -8,9 +8,11 @@
 //! owning the attempt's close.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use gradient_types::ids::{ClusterAttemptId, ClusterJobId};
+use gradient_util::sync::Mutex;
 use gradient_wire::types::{ClusterAddress, ClusterPeer};
 
 use super::PendingCluster;
@@ -76,12 +78,12 @@ pub struct SignalRoute {
 }
 
 #[derive(Debug, Default)]
-pub struct AttemptBook {
+struct Attempts {
     attempts: HashMap<ClusterAttemptId, AttemptState>,
     by_job: HashMap<String, ClusterAttemptId>,
 }
 
-impl AttemptBook {
+impl Attempts {
     pub fn open(&mut self, attempt: ClusterAttemptId, state: AttemptState) {
         for m in &state.members {
             self.by_job.insert(m.job_id.clone(), attempt);
@@ -304,13 +306,83 @@ impl AttemptBook {
             self.take(attempt);
         }
     }
+}
 
-    pub fn get(&self, attempt: ClusterAttemptId) -> Option<&AttemptState> {
-        self.attempts.get(&attempt)
+#[derive(Clone, Debug, Default)]
+pub struct AttemptBook(Arc<Mutex<Attempts>>);
+
+impl AttemptBook {
+    pub async fn open(&self, attempt: ClusterAttemptId, state: AttemptState) {
+        self.0.lock().open(attempt, state);
     }
 
-    pub fn get_mut(&mut self, attempt: ClusterAttemptId) -> Option<&mut AttemptState> {
-        self.attempts.get_mut(&attempt)
+    pub async fn cluster_of(&self, attempt: ClusterAttemptId) -> Option<ClusterJobId> {
+        self.0.lock().cluster_of(attempt)
+    }
+
+    pub async fn attempt_of(&self, job_id: &str) -> Option<ClusterAttemptId> {
+        self.0.lock().attempt_of(job_id)
+    }
+
+    pub async fn accept(&self, job_id: &str) -> Acceptance {
+        self.0.lock().accept(job_id)
+    }
+
+    pub async fn mark_started(&self, attempt: ClusterAttemptId) -> Option<Option<Fate>> {
+        self.0.lock().mark_started(attempt)
+    }
+
+    pub async fn preparing(&self, job_id: &str) -> Option<ClusterAttemptId> {
+        self.0.lock().preparing(job_id)
+    }
+
+    pub async fn take(&self, attempt: ClusterAttemptId) -> Option<AttemptState> {
+        self.0.lock().take(attempt)
+    }
+
+    pub async fn overdue(&self, now: Instant) -> Vec<ClusterAttemptId> {
+        self.0.lock().overdue(now)
+    }
+
+    pub async fn route(
+        &self,
+        attempt: ClusterAttemptId,
+        sender: &str,
+        to: Option<&ClusterAddress>,
+    ) -> Option<SignalRoute> {
+        self.0.lock().route(attempt, sender, to)
+    }
+
+    pub async fn record(&self, job_id: &str, report: MemberReport) -> Recorded {
+        self.0.lock().record(job_id, report)
+    }
+
+    pub async fn drain(
+        &self,
+        attempt: ClusterAttemptId,
+        resolution: Resolution,
+    ) -> (Vec<MemberReport>, Vec<Survivor>) {
+        self.0.lock().drain(attempt, resolution)
+    }
+
+    pub async fn settle(&self, attempt: ClusterAttemptId, job_id: &str) {
+        self.0.lock().settle(attempt, job_id);
+    }
+
+    pub async fn pending_verdicts(&self) -> Vec<(ClusterAttemptId, Fate)> {
+        self.0.lock().pending_verdicts()
+    }
+
+    pub async fn begin_resolving(&self, attempt: ClusterAttemptId) -> Option<ClusterJobId> {
+        self.0.lock().begin_resolving(attempt)
+    }
+
+    pub async fn abort_resolving(&self, attempt: ClusterAttemptId) {
+        self.0.lock().abort_resolving(attempt);
+    }
+
+    pub async fn expire_resolved(&self, now: Instant, max_age: Duration) {
+        self.0.lock().expire_resolved(now, max_age);
     }
 }
 
@@ -332,10 +404,10 @@ mod tests {
         }
     }
 
-    fn book(deadline: Instant) -> (AttemptBook, ClusterAttemptId) {
+    fn book(deadline: Instant) -> (Attempts, ClusterAttemptId) {
         let cluster = ClusterJobId::now_v7();
         let attempt = ClusterAttemptId::now_v7();
-        let mut book = AttemptBook::default();
+        let mut book = Attempts::default();
         book.open(
             attempt,
             AttemptState {

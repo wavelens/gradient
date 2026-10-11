@@ -355,7 +355,10 @@ pub(crate) mod test_ctx {
         let (ctx, pool) = ctx(db).await;
         (
             DbContext {
-                probe_requests,
+                memory: gradient_db::DbMemory {
+                    probe_requests,
+                    ..ctx.memory.clone()
+                },
                 ..ctx
             },
             pool,
@@ -396,10 +399,8 @@ pub(crate) mod test_ctx {
             },
             shutdown: Shutdown::new(),
             events: gradient_types::EventBus::new(16),
-            delivery_wake: Default::default(),
-            probe_requests: Default::default(),
-            held_evaluations: Default::default(),
-            startable_set: Default::default(),
+            wake: Default::default(),
+            memory: Default::default(),
         };
         (ctx, worker_db)
     }

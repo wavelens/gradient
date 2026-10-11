@@ -64,16 +64,16 @@ pub async fn emit_transition_effects(
         return Ok(());
     }
 
-    ctx.startable_set.record(changes);
+    ctx.memory.startable_set.record(changes);
     announce(ctx, changes).await?;
     let Moved {
         regated,
         unwanted,
         gained,
     } = move_need(ctx, changes).await?;
-    ctx.probe_requests.send(gained);
+    ctx.memory.probe_requests.send(gained);
     if !regated.is_empty() {
-        ctx.startable_set.record(&regated);
+        ctx.memory.startable_set.record(&regated);
         announce(ctx, &regated).await?;
     }
     if !unwanted.is_empty() {
@@ -471,7 +471,7 @@ mod tests {
         )
         .await
         .expect("move need");
-        ctx.probe_requests.send(moved.gained);
+        ctx.memory.probe_requests.send(moved.gained);
         crate::test_ctx::settle(ctx).await;
 
         assert_eq!(

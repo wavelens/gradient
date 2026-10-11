@@ -15,8 +15,8 @@ use crate::actor::{Released, SchedulerMsg};
 use crate::jobs::PendingJob;
 
 impl Scheduler {
-    pub(crate) fn attempt_of(&self, job_id: &str) -> Option<ClusterAttemptId> {
-        self.attempts.lock().attempt_of(job_id)
+    pub(crate) async fn attempt_of(&self, job_id: &str) -> Option<ClusterAttemptId> {
+        self.attempts.attempt_of(job_id).await
     }
 
     pub(crate) async fn on_cluster_member_closed(
@@ -24,7 +24,7 @@ impl Scheduler {
         job_id: &str,
         report: MemberReport,
     ) -> Result<()> {
-        let recorded = self.attempts.lock().record(job_id, report);
+        let recorded = self.attempts.record(job_id, report).await;
         match recorded {
             Recorded::Held | Recorded::Deferred => Ok(()),
             Recorded::NotMember(report) => self.settle_single(report).await,
@@ -57,7 +57,7 @@ impl Scheduler {
         attempt: ClusterAttemptId,
         fate: Fate,
     ) -> Result<()> {
-        let Some(cluster) = self.attempts.lock().begin_resolving(attempt) else {
+        let Some(cluster) = self.attempts.begin_resolving(attempt).await else {
             return Ok(());
         };
         let resolved = gradient_db::scheduling::cluster::resolve_cluster_attempt(
@@ -76,13 +76,13 @@ impl Scheduler {
                 false
             }
             Err(e) => {
-                self.attempts.lock().abort_resolving(attempt);
+                self.attempts.abort_resolving(attempt).await;
                 return Err(e.into());
             }
         };
 
         let resolution = Resolution { fate, requeued };
-        let (reports, survivors) = self.attempts.lock().drain(attempt, resolution);
+        let (reports, survivors) = self.attempts.drain(attempt, resolution).await;
         let mut dispositions: Vec<Disposition> = reports
             .into_iter()
             .map(|r| dispose(resolution, r))
@@ -130,7 +130,7 @@ impl Scheduler {
                 })
                 .await;
             if let Ok(Released { job: Some(job), .. }) = released {
-                self.attempts.lock().settle(attempt, &survivor.job_id);
+                self.attempts.settle(attempt, &survivor.job_id).await;
                 jobs.push(job);
             }
         }

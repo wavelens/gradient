@@ -41,7 +41,7 @@ pub async fn load_and_apply_state(
     let Some(path) = state_file_path else {
         tracing::info!("No state file configured, skipping state management");
         return Ok(StateApplyResult {
-            pending: PendingProjectMemberships::new(),
+            pending: PendingProjectMemberships::default(),
         });
     };
 

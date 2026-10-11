@@ -63,11 +63,7 @@ impl Scheduler {
             builds: builds.into_iter().map(|(build, _)| build).collect(),
             since: gradient_types::now(),
         };
-        let answers = {
-            let mut waits = self.import_waits.lock();
-            waits.register(wait);
-            waits.settle(&statuses)
-        };
+        let answers = self.import_waits.register_and_settle(wait, &statuses).await;
         if answers.is_empty() {
             debug!(%job_id, %request_id, "import request waits for its builds");
             self.kick_assigner();
@@ -148,12 +144,9 @@ impl Scheduler {
     }
 
     pub(crate) async fn settle_import_waits(&self) -> Result<()> {
-        let (builds, evaluations) = {
-            let waits = self.import_waits.lock();
-            if waits.is_empty() {
-                return Ok(());
-            }
-            (waits.waited_builds(), waits.waiting_evaluations())
+        let Some((builds, evaluations)) = self.import_waits.waited_builds_and_evaluations().await
+        else {
+            return Ok(());
         };
 
         let db = &self.state.worker_db;
@@ -181,11 +174,10 @@ impl Scheduler {
             .filter(|e| EvaluationStatus::TERMINAL.contains(&e.status))
             .map(|e| e.id)
             .collect();
-        let mut answers = {
-            let mut waits = self.import_waits.lock();
-            waits.drop_evaluations(&finished);
-            waits.settle(&statuses)
-        };
+        let mut answers = self
+            .import_waits
+            .drop_finished_and_settle(&finished, &statuses)
+            .await;
         answers.extend(
             self.answer_unbuildable_imports(&shared_builds, &evaluations)
                 .await?,
@@ -203,8 +195,8 @@ impl Scheduler {
             - chrono::Duration::seconds(crate::unbuildable::UNBUILDABLE_GRACE_SECS);
         let overdue: HashSet<DerivationBuildId> = self
             .import_waits
-            .lock()
             .overdue_builds(before)
+            .await
             .into_iter()
             .collect();
         let candidates: Vec<MDerivationBuild> = shared_builds
@@ -235,8 +227,8 @@ impl Scheduler {
         let waiting_for_workers = self.evaluations_waiting_for_workers(evaluations).await?;
         Ok(self
             .import_waits
-            .lock()
-            .answer_unbuildable(&unbuildable, &waiting_for_workers, before))
+            .answer_unbuildable(&unbuildable, &waiting_for_workers, before)
+            .await)
     }
 
     async fn evaluations_waiting_for_workers(
@@ -273,7 +265,7 @@ impl Scheduler {
             return Ok(());
         }
 
-        let waited = self.import_waits.lock().waited_builds();
+        let waited = self.import_waits.waited_builds().await;
         let lifted = gradient_db::scheduling::priority::import_lifted_shared_builds(
             &self.state.worker_db,
             &waited,
@@ -290,18 +282,18 @@ impl Scheduler {
         Ok(())
     }
 
-    pub(crate) fn drop_import_waits(&self, evaluation: EvaluationId) {
+    pub(crate) async fn drop_import_waits(&self, evaluation: EvaluationId) {
         let dropped = self
             .import_waits
-            .lock()
-            .drop_evaluations(&HashSet::from([evaluation]));
+            .drop_evaluations(&HashSet::from([evaluation]))
+            .await;
         if dropped > 0 {
             debug!(%evaluation, dropped, "dropped the import waits of an aborted evaluation");
         }
     }
 
-    pub(crate) fn has_import_waits(&self) -> bool {
-        !self.import_waits.lock().is_empty()
+    pub(crate) async fn has_import_waits(&self) -> bool {
+        !self.import_waits.is_empty().await
     }
 
     async fn answer_imports(&self, answers: Vec<ImportAnswer>) {

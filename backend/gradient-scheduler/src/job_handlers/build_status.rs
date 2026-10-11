@@ -99,7 +99,7 @@ impl Scheduler {
             warn!(%job_id, "job_completed for unknown job");
             return Ok(());
         };
-        if self.attempt_of(job_id).is_some() && !crate::jobs::is_fetch_only_job(&job) {
+        if self.attempt_of(job_id).await.is_some() && !crate::jobs::is_fetch_only_job(&job) {
             return self
                 .on_cluster_member_closed(job_id, MemberReport::Completed { job })
                 .await;
@@ -187,7 +187,7 @@ impl Scheduler {
                         }
                     });
                 }
-                if worker_idle || self.has_import_waits() {
+                if worker_idle || self.has_import_waits().await {
                     self.kick_assigner();
                 }
 
@@ -222,7 +222,7 @@ impl Scheduler {
             kind,
             missing_paths: missing_paths.to_vec(),
         };
-        if self.attempt_of(job_id).is_some() {
+        if self.attempt_of(job_id).await.is_some() {
             return self
                 .on_cluster_member_closed(job_id, MemberReport::from_failure(job, failure))
                 .await;
@@ -267,7 +267,7 @@ impl Scheduler {
                     })
                     .await
                     .map(|_| ());
-                if self.has_import_waits() {
+                if self.has_import_waits().await {
                     self.kick_assigner();
                 }
 

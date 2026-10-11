@@ -53,6 +53,7 @@ async fn admit_object(
     wait: Duration,
 ) -> WebResult<Admission> {
     state
+        .memory
         .upload_admission
         .admit("rest", object, size, wait)
         .await
@@ -87,7 +88,7 @@ mod tests {
     async fn a_nar_upload_waits_for_the_upload_holding_its_path() {
         let state = test_state(empty_db());
         let hash = "a".repeat(32);
-        let (holder, mut admitted) = state.upload_admission.open_session("holder");
+        let (holder, mut admitted) = state.memory.upload_admission.open_session("holder");
         holder.request(1, ObjectKey::Nar(hash.clone()), 1, false);
         let Some(Admitted::Granted { permit, .. }) = admitted.recv().await else {
             panic!("the holder leads the path");

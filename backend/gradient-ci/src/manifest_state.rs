@@ -5,116 +5,113 @@
  */
 
 use std::collections::HashMap;
-use std::sync::Mutex;
-use std::time::Instant;
+use std::sync::{Arc, Mutex, MutexGuard};
+use std::time::{Duration, Instant};
 
+use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use gradient_types::ids::UserId;
+use rand::RngExt as _;
 
 use crate::github_app_manifest::ManifestResult;
+
+pub const STATE_TTL: Duration = Duration::from_secs(10 * 60);
+
+fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(|p| p.into_inner())
+}
 
 /// The user id is recorded at issuance because the callback is an unauthenticated browser redirect
 /// from github.com. The callback can then recover the initiating superuser without trusting
 /// query-string input.
-pub type ManifestStateStore = Mutex<HashMap<String, (UserId, Instant)>>;
+#[derive(Clone, Debug, Default)]
+pub struct ManifestStateStore(Arc<Mutex<HashMap<String, (UserId, Instant)>>>);
 
-pub type PendingCredentialsStore = Mutex<HashMap<UserId, (ManifestResult, Instant)>>;
+impl ManifestStateStore {
+    pub async fn issue_state(&self, user_id: UserId) -> String {
+        let mut bytes = [0u8; 24];
+        rand::rng().fill(&mut bytes);
+        let token = URL_SAFE_NO_PAD.encode(bytes);
 
-use rand::RngExt as _;
-use std::time::Duration;
+        let mut guard = lock(&self.0);
+        let cutoff = Instant::now() - STATE_TTL;
+        guard.retain(|_, (_, ts)| *ts > cutoff);
+        guard.insert(token.clone(), (user_id, Instant::now()));
+        token
+    }
 
-pub const STATE_TTL: Duration = Duration::from_secs(10 * 60);
-
-pub fn issue_state(store: &ManifestStateStore, user_id: UserId) -> String {
-    let mut bytes = [0u8; 24];
-    rand::rng().fill(&mut bytes);
-    use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
-    let token = URL_SAFE_NO_PAD.encode(bytes);
-
-    let mut guard = store.lock().unwrap_or_else(|p| p.into_inner());
-    let cutoff = Instant::now() - STATE_TTL;
-    guard.retain(|_, (_, ts)| *ts > cutoff);
-    guard.insert(token.clone(), (user_id, Instant::now()));
-    token
-}
-
-pub fn validate_and_consume(store: &ManifestStateStore, state: &str) -> Option<UserId> {
-    let mut guard = store.lock().unwrap_or_else(|p| p.into_inner());
-    match guard.remove(state) {
-        Some((user_id, ts)) if ts > Instant::now() - STATE_TTL => Some(user_id),
-        _ => None,
+    pub async fn validate_and_consume(&self, state: &str) -> Option<UserId> {
+        match lock(&self.0).remove(state) {
+            Some((user_id, ts)) if ts > Instant::now() - STATE_TTL => Some(user_id),
+            _ => None,
+        }
     }
 }
 
-pub fn store_credentials(store: &PendingCredentialsStore, user_id: UserId, creds: ManifestResult) {
-    let mut guard = store.lock().unwrap_or_else(|p| p.into_inner());
-    let cutoff = Instant::now() - STATE_TTL;
-    guard.retain(|_, (_, ts)| *ts > cutoff);
-    guard.insert(user_id, (creds, Instant::now()));
-}
+#[derive(Clone, Debug, Default)]
+pub struct PendingCredentialsStore(Arc<Mutex<HashMap<UserId, (ManifestResult, Instant)>>>);
 
-pub fn take_credentials(
-    store: &PendingCredentialsStore,
-    user_id: UserId,
-) -> Option<ManifestResult> {
-    let mut guard = store.lock().unwrap_or_else(|p| p.into_inner());
-    match guard.remove(&user_id) {
-        Some((creds, ts)) if ts > Instant::now() - STATE_TTL => Some(creds),
-        _ => None,
+impl PendingCredentialsStore {
+    pub async fn store_credentials(&self, user_id: UserId, creds: ManifestResult) {
+        let mut guard = lock(&self.0);
+        let cutoff = Instant::now() - STATE_TTL;
+        guard.retain(|_, (_, ts)| *ts > cutoff);
+        guard.insert(user_id, (creds, Instant::now()));
+    }
+
+    pub async fn take_credentials(&self, user_id: UserId) -> Option<ManifestResult> {
+        match lock(&self.0).remove(&user_id) {
+            Some((creds, ts)) if ts > Instant::now() - STATE_TTL => Some(creds),
+            _ => None,
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Mutex;
-    use std::time::Duration;
 
-    fn empty_state_store() -> ManifestStateStore {
-        Mutex::new(HashMap::new())
-    }
-
-    #[test]
-    fn issue_state_returns_unique_tokens() {
-        let store = empty_state_store();
-        let a = issue_state(&store, UserId::now_v7());
-        let b = issue_state(&store, UserId::now_v7());
+    #[tokio::test]
+    async fn issue_state_returns_unique_tokens() {
+        let store = ManifestStateStore::default();
+        let a = store.issue_state(UserId::now_v7()).await;
+        let b = store.issue_state(UserId::now_v7()).await;
         assert_ne!(a, b);
         assert!(a.len() >= 32);
     }
 
-    #[test]
-    fn validate_and_consume_returns_user_then_fails_on_replay() {
-        let store = empty_state_store();
+    #[tokio::test]
+    async fn validate_and_consume_returns_user_then_fails_on_replay() {
+        let store = ManifestStateStore::default();
         let user = UserId::now_v7();
-        let s = issue_state(&store, user);
-        assert_eq!(validate_and_consume(&store, &s), Some(user));
-        assert_eq!(validate_and_consume(&store, &s), None);
+        let s = store.issue_state(user).await;
+        assert_eq!(store.validate_and_consume(&s).await, Some(user));
+        assert_eq!(store.validate_and_consume(&s).await, None);
     }
 
-    #[test]
-    fn validate_and_consume_unknown_state_fails() {
-        let store = empty_state_store();
-        assert_eq!(validate_and_consume(&store, "not-a-real-state"), None);
+    #[tokio::test]
+    async fn validate_and_consume_unknown_state_fails() {
+        let store = ManifestStateStore::default();
+        assert_eq!(store.validate_and_consume("not-a-real-state").await, None);
     }
 
-    #[test]
-    fn issue_state_prunes_expired_entries() {
-        let store = empty_state_store();
-        let stale = "stale-token".to_string();
-        store.lock().unwrap().insert(
-            stale.clone(),
+    #[tokio::test]
+    async fn issue_state_prunes_expired_entries() {
+        let store = ManifestStateStore::default();
+        let expired = "expired-token".to_string();
+        lock(&store.0).insert(
+            expired.clone(),
             (
                 UserId::now_v7(),
                 Instant::now() - Duration::from_secs(11 * 60),
             ),
         );
-        let _fresh = issue_state(&store, UserId::now_v7());
-        assert!(!store.lock().unwrap().contains_key(&stale));
+        let _fresh = store.issue_state(UserId::now_v7()).await;
+        assert!(!lock(&store.0).contains_key(&expired));
     }
 
-    #[test]
-    fn store_and_take_credentials_one_shot() {
-        let store: PendingCredentialsStore = Mutex::new(HashMap::new());
+    #[tokio::test]
+    async fn store_and_take_credentials_one_shot() {
+        let store = PendingCredentialsStore::default();
         let user = UserId::now_v7();
         let creds = ManifestResult {
             id: 1,
@@ -125,9 +122,12 @@ mod tests {
             client_id: "cid".into(),
             client_secret: "cs".into(),
         };
-        store_credentials(&store, user, creds);
-        let taken = take_credentials(&store, user).expect("first read returns creds");
+        store.store_credentials(user, creds).await;
+        let taken = store
+            .take_credentials(user)
+            .await
+            .expect("first read returns creds");
         assert_eq!(taken.id, 1);
-        assert!(take_credentials(&store, user).is_none());
+        assert!(store.take_credentials(user).await.is_none());
     }
 }

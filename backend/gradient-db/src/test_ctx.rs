@@ -13,7 +13,7 @@ use gradient_types::{Cli, RuntimeConfig};
 use gradient_util::shutdown::Shutdown;
 use sea_orm::DatabaseConnection;
 
-use crate::{DbContext, ProbeRequests, WebDb, WorkerDb};
+use crate::{DbContext, DbMemory, ProbeRequests, WebDb, WorkerDb};
 
 /// Spawned tasks are holding `DbContext` clones that outlive a plain drop.
 /// `WorkerDb::into_transaction_log` is requiring the builder's handle to be the last one.
@@ -51,7 +51,10 @@ pub(crate) async fn ctx_with_probes(
     let (ctx, pool) = ctx_at(db, &dir).await;
     (
         DbContext {
-            probe_requests,
+            memory: DbMemory {
+                probe_requests,
+                ..ctx.memory.clone()
+            },
             ..ctx
         },
         pool,
@@ -85,10 +88,8 @@ pub(crate) async fn ctx_at(db: DatabaseConnection, dir: &std::path::Path) -> (Db
         },
         shutdown: Shutdown::new(),
         events: gradient_types::EventBus::new(16),
-        delivery_wake: Default::default(),
-        probe_requests: ProbeRequests::default(),
-        held_evaluations: Default::default(),
-        startable_set: Default::default(),
+        wake: Default::default(),
+        memory: Default::default(),
     };
 
     (ctx, worker_db)

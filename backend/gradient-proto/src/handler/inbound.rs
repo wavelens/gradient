@@ -696,6 +696,7 @@ impl<'a> InboundContext<'a> {
             return;
         };
         self.state
+            .memory
             .build_progress
             .set(shared_build, progress, Instant::now());
         self.state.events.publish(build::Progress {
@@ -710,6 +711,7 @@ impl<'a> InboundContext<'a> {
         };
         let progress = evaluation_progress(progress);
         self.state
+            .memory
             .eval_progress
             .set(evaluation_id, progress.clone(), Instant::now());
         self.state.events.publish(evaluation::Activity {
@@ -729,7 +731,7 @@ impl<'a> InboundContext<'a> {
             let peer_id = self.peer_id.to_owned();
             let job_id = job_id.clone();
             shutdown.spawn(async move {
-                let server = Arc::clone(&state.nar_downloads);
+                let server = Arc::clone(&state.memory.nar_downloads);
                 let Some(_slot) = ServeSlot::acquire(permit, server).await else {
                     return;
                 };
@@ -757,7 +759,7 @@ impl<'a> InboundContext<'a> {
         let peer_id = self.peer_id.to_owned();
         let shutdown = self.state.shutdown.clone();
         shutdown.spawn(async move {
-            let server = Arc::clone(&state.nar_downloads);
+            let server = Arc::clone(&state.memory.nar_downloads);
             let Some(_slot) = ServeSlot::acquire(permit, server).await else {
                 return;
             };
@@ -1074,7 +1076,7 @@ pub(in crate::handler) mod fixture {
                     cluster: None,
                 },
             )]));
-            let (admission, admitted) = state.upload_admission.open_session("test");
+            let (admission, admitted) = state.memory.upload_admission.open_session("test");
             let uploads = UploadSession {
                 admission,
                 table: UploadTable::default(),
@@ -1309,7 +1311,10 @@ mod assignment_response_tests {
         ctx.on_build_progress("not-a-uuid", progress);
 
         assert_eq!(
-            state.build_progress.get(&shared_build, Instant::now()),
+            state
+                .memory
+                .build_progress
+                .get(&shared_build, Instant::now()),
             Some(progress)
         );
         match events.try_recv().map(|env| env.event.clone()) {
@@ -1370,7 +1375,10 @@ mod assignment_response_tests {
 
         let expected = EvaluationProgress::Evaluating { thunks: 42 };
         assert_eq!(
-            state.eval_progress.get(&evaluation_id, Instant::now()),
+            state
+                .memory
+                .eval_progress
+                .get(&evaluation_id, Instant::now()),
             Some(expected.clone())
         );
         match events.try_recv().map(|env| env.event.clone()) {

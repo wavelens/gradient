@@ -172,10 +172,8 @@ pub fn make_ctx_with(worker: sea_orm::MockDatabase) -> crate::CiContext {
         },
         shutdown: gradient_util::shutdown::Shutdown::new(),
         events: gradient_types::EventBus::default(),
-        delivery_wake: Default::default(),
-        probe_requests: Default::default(),
-        held_evaluations: Default::default(),
-        startable_set: Default::default(),
+        wake: Default::default(),
+        memory: Default::default(),
     };
     CiContext {
         db,

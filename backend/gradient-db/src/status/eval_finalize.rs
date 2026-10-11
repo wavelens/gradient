@@ -18,7 +18,7 @@ pub async fn check_evaluation_done(
     ctx: &DbContext,
     evaluation_id: EvaluationId,
 ) -> Result<(), DbErr> {
-    if ctx.held_evaluations.holds(evaluation_id) {
+    if ctx.memory.held_evaluations.holds(evaluation_id).await {
         return Ok(());
     }
 
@@ -177,7 +177,7 @@ mod tests {
         let db = empty_db();
 
         let (ctx, pool) = crate::test_ctx::ctx(db).await;
-        let _hold = ctx.held_evaluations.hold(eval.id);
+        let _hold = ctx.memory.held_evaluations.hold(eval.id).await;
         check_evaluation_done(&ctx, eval.id).await.unwrap();
         drop(ctx);
 

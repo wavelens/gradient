@@ -111,7 +111,7 @@ impl<'a> StateApplicator<'a> {
     pub(crate) async fn apply_project_members(
         &self,
         state_projects: &HashMap<String, StateProject>,
-        pending: &mut PendingProjectMemberships,
+        pending: &PendingProjectMemberships,
     ) -> Result<(), DynError> {
         let user_map = self.user_lookup().await?;
         let project_map = self.project_lookup().await?;
@@ -168,7 +168,7 @@ impl<'a> StateApplicator<'a> {
         project_id: ProjectId,
         project_name: &str,
         members: &[StateProjectMemberEntry],
-        pending: &mut PendingProjectMemberships,
+        pending: &PendingProjectMemberships,
     ) -> Result<(), DynError> {
         let user_map = self.user_lookup().await?;
 
@@ -239,12 +239,15 @@ impl<'a> StateApplicator<'a> {
                         user = %member.user,
                         "Declared member not yet registered; deferring until user creation"
                     );
-                    pending.entry(member.user.clone()).or_default().push(
-                        PendingProjectMembership {
-                            project: project_id,
-                            role: role_id,
-                        },
-                    );
+                    pending
+                        .defer(
+                            member.user.clone(),
+                            PendingProjectMembership {
+                                project: project_id,
+                                role: role_id,
+                            },
+                        )
+                        .await;
                 }
             }
         }

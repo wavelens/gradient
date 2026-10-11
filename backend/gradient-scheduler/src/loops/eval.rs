@@ -6,7 +6,6 @@
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
-use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use gradient_core::ServerState;
@@ -39,7 +38,7 @@ impl Pass for EvalDispatch {
     }
 
     fn wake(&self) -> Option<Arc<Notify>> {
-        Some(Arc::clone(&self.scheduler.state.eval_assign_wake))
+        Some(Arc::clone(&self.scheduler.state.wake.eval_assign))
     }
 
     async fn run(&self) -> Result<(), PassError> {
@@ -51,7 +50,7 @@ impl Pass for EvalDispatch {
 
 #[tracing::instrument(level = "debug", skip_all)]
 pub(crate) async fn assign_queued_evals(scheduler: &Scheduler) -> anyhow::Result<()> {
-    if scheduler.draining.load(Ordering::Relaxed) {
+    if scheduler.draining.is_draining().await {
         return Ok(());
     }
 

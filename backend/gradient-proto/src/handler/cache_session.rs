@@ -143,7 +143,7 @@ pub async fn handle_cache_socket(
                     }
                     let Some(slot) = super::nar_serve::ServeSlot::acquire(
                         Arc::clone(&nar_serve_semaphore),
-                        Arc::clone(&state.nar_downloads),
+                        Arc::clone(&state.memory.nar_downloads),
                     )
                     .await
                     else {

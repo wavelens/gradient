@@ -118,7 +118,7 @@ pub async fn get_build(
         created_at: build_job.created_at,
         updated_at: shared_build.updated_at,
         progress: running_progress(
-            &state.build_progress,
+            &state.memory.build_progress,
             shared_build.id,
             shared_build.status,
             Instant::now(),

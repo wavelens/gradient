@@ -708,9 +708,7 @@ pub async fn get_board_health(
         http: http_snapshot(),
         rollup_lag_seconds,
         latest_rollup_bucket: latest.map(|t| t.and_utc().to_rfc3339()),
-        draining: scheduler
-            .draining
-            .load(std::sync::atomic::Ordering::Relaxed),
+        draining: scheduler.draining.is_draining().await,
         supervised: loops_view(scheduler.loop_health(), std::time::Instant::now()),
         proto_sessions: limiter.in_use(),
         unconfirmed_nars: gradient_db::caches::capacity::unconfirmed_cached_path_count(
