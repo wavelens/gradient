@@ -23,27 +23,6 @@ use super::dto::*;
 use super::error::{SCIM_CONTENT_TYPE, ScimError, ScimResult};
 use super::filter::parse_eq_filter;
 
-fn user_resource(u: &UserModel) -> UserResource {
-    UserResource {
-        schemas: [USER_SCHEMA],
-        id: u.id.to_string(),
-        user_name: u.username.clone(),
-        external_id: u.scim_external_id.clone(),
-        name: NameResource {
-            formatted: u.name.clone(),
-        },
-        display_name: u.name.clone(),
-        emails: vec![EmailResource {
-            value: u.email.clone(),
-            primary: true,
-        }],
-        active: u.active,
-        meta: Meta {
-            resource_type: "User",
-        },
-    }
-}
-
 fn scim_json(status: StatusCode, body: impl serde::Serialize) -> Response {
     match serde_json::to_value(body) {
         Ok(value) => (
@@ -102,7 +81,7 @@ pub async fn list(
             .await?
     };
 
-    let resources: Vec<_> = rows.iter().map(user_resource).collect();
+    let resources: Vec<_> = rows.iter().map(UserResource::from).collect();
     Ok(scim_json(
         StatusCode::OK,
         ListResponse::new(resources, total, start as usize),
@@ -114,7 +93,7 @@ pub async fn get(
     Path(id): Path<String>,
 ) -> ScimResult<impl IntoResponse> {
     let u = find_user(&state, &id).await?;
-    Ok(scim_json(StatusCode::OK, user_resource(&u)))
+    Ok(scim_json(StatusCode::OK, UserResource::from(&u)))
 }
 
 pub async fn create(
@@ -158,7 +137,7 @@ pub async fn create(
         ..Default::default()
     };
     let u = model.insert(db).await?;
-    Ok(scim_json(StatusCode::CREATED, user_resource(&u)))
+    Ok(scim_json(StatusCode::CREATED, UserResource::from(&u)))
 }
 
 pub async fn replace(
@@ -184,7 +163,7 @@ pub async fn replace(
 
     active.active = Set(body.active);
     let u = active.update(state.web_db.inner()).await?;
-    Ok(scim_json(StatusCode::OK, user_resource(&u)))
+    Ok(scim_json(StatusCode::OK, UserResource::from(&u)))
 }
 
 pub async fn patch(
@@ -203,7 +182,7 @@ pub async fn patch(
     }
 
     let u = active.update(state.web_db.inner()).await?;
-    Ok(scim_json(StatusCode::OK, user_resource(&u)))
+    Ok(scim_json(StatusCode::OK, UserResource::from(&u)))
 }
 
 pub async fn delete(

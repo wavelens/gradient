@@ -102,7 +102,7 @@ pub async fn get(
     let api_key_ref = api_key.as_ref();
     let project = load_project(
         &state.0,
-        Caller::from_option(&maybe_user),
+        Caller::from(&maybe_user),
         api_key_ref,
         project,
         ProjectAccess::Readable {
@@ -336,7 +336,7 @@ pub async fn get_task(
     let api_key_ref = api_key.as_ref();
     let (project, task) = load_task(
         &state.0,
-        Caller::from_option(&maybe_user),
+        Caller::from(&maybe_user),
         api_key_ref,
         project,
         task,

@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use gradient_entity::user::Model as UserModel;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -56,6 +57,29 @@ pub struct UserResource {
     pub emails: Vec<EmailResource>,
     pub active: bool,
     pub meta: Meta,
+}
+
+impl From<&UserModel> for UserResource {
+    fn from(u: &UserModel) -> Self {
+        Self {
+            schemas: [USER_SCHEMA],
+            id: u.id.to_string(),
+            user_name: u.username.clone(),
+            external_id: u.scim_external_id.clone(),
+            name: NameResource {
+                formatted: u.name.clone(),
+            },
+            display_name: u.name.clone(),
+            emails: vec![EmailResource {
+                value: u.email.clone(),
+                primary: true,
+            }],
+            active: u.active,
+            meta: Meta {
+                resource_type: "User",
+            },
+        }
+    }
 }
 
 #[derive(Serialize, Default)]

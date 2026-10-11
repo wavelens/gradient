@@ -197,6 +197,15 @@ pub struct TransitionReport {
     pub refusal: Option<BuildRefusal>,
 }
 
+impl From<gradient_db::status::BuildRefusal> for TransitionReport {
+    fn from(refusal: gradient_db::status::BuildRefusal) -> Self {
+        Self {
+            refusal: Some(refusal),
+            ..Default::default()
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SubstituteLog {
     pub shared_build: DerivationBuildId,

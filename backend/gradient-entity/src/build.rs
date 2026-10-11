@@ -53,6 +53,12 @@ pub enum BuildStatus {
     Skipped = 10,
 }
 
+impl From<BuildStatus> for i16 {
+    fn from(status: BuildStatus) -> Self {
+        status as Self
+    }
+}
+
 impl BuildStatus {
     pub const fn for_api(self) -> Self {
         match self {

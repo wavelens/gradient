@@ -18,7 +18,7 @@ use sea_orm::{ActiveModelTrait, ActiveValue::Set, EntityTrait};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::Arc;
 
-use super::api_key::{DecodedRequest, MaybeApiKey};
+use super::api_key::MaybeApiKey;
 use super::jwt::{bearer_token, decode_jwt, extract_bearer_or_cookie, session_cookie_token};
 use crate::audit::{RequestInfo, record as audit_record};
 use crate::client_ip::{ClientIp, resolve_client_ip};
@@ -134,7 +134,7 @@ pub async fn authorize(
         return Err(deny(&state, Some(user_id), info, method, path, denial).await);
     }
 
-    let api_key_extension = presented_api_key(&decoded);
+    let api_key_extension = MaybeApiKey::from(&decoded);
     let Some(current_user) = EUser::find_by_id(user_id).one(&state.web_db).await? else {
         let denial = Denial::UnknownUser;
         return Err(deny(&state, Some(user_id), info, method, path, denial).await);
@@ -149,13 +149,6 @@ pub async fn authorize(
     req.extensions_mut().insert(api_key_extension);
     req.extensions_mut().insert(ClientIp(client_ip));
     Ok(next.run(req).await)
-}
-
-fn presented_api_key(decoded: &DecodedRequest) -> MaybeApiKey {
-    decoded
-        .api_key_context()
-        .cloned()
-        .map_or_else(MaybeApiKey::none, MaybeApiKey::from_key)
 }
 
 async fn optional_caller(
@@ -180,7 +173,7 @@ async fn optional_caller(
         .flatten()
         .filter(|user| user.active)?;
 
-    Some((user, presented_api_key(&decoded)))
+    Some((user, MaybeApiKey::from(&decoded)))
 }
 
 pub async fn authorize_optional(

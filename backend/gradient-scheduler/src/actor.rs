@@ -504,7 +504,7 @@ impl SchedulerCore {
         attempt: ClusterAttemptId,
         instance: &InstanceContext,
     ) -> Option<crate::cluster::Committing> {
-        use crate::cluster::{CommittedSeat, PendingCluster};
+        use crate::cluster::{CommittedSeat, SlotKind};
 
         let now = Instant::now();
         let seats_free = {
@@ -513,7 +513,7 @@ impl SchedulerCore {
                 .waiting_cluster(placement.cluster)
                 .filter(|c| c.ready())?;
             placement.seats.iter().all(|s| {
-                let kind = PendingCluster::slot_kind(&cluster.members[s.member]);
+                let kind = SlotKind::from(&cluster.members[s.member]);
                 self.idle.is_idle(&s.worker, kind, now)
                     && self.pool.has_capacity(&s.worker, &kind.job_kind())
             })
@@ -544,7 +544,7 @@ impl SchedulerCore {
                 let m = &cluster.members[s.member];
                 let job = m.job.clone()?;
                 let caps = self.pool.worker_caps(&s.worker);
-                self.idle.clear(&s.worker, PendingCluster::slot_kind(m));
+                self.idle.clear(&s.worker, SlotKind::from(m));
                 Some(CommittedSeat {
                     worker: s.worker.clone(),
                     key: m.key.clone(),

@@ -37,7 +37,7 @@ pub fn evaluation_created(eval: &MEvaluation) -> Option<evaluation::Reported> {
     Some(evaluation::Reported {
         evaluation_id: eval.id,
         phase,
-        status: i32::from(eval.status) as i16,
+        status: i16::from(eval.status),
         task: Some(task),
         repository: Some(eval.repository.clone()),
         description: description.map(str::to_owned),
@@ -72,7 +72,7 @@ mod tests {
             &db,
             &bus,
             build::Reported {
-                status: i32::from(BuildStatus::Completed) as i16,
+                status: i16::from(BuildStatus::Completed),
                 ..Default::default()
             },
         )

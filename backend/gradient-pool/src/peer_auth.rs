@@ -14,15 +14,17 @@ pub enum PeerAuth {
     Restricted(HashSet<ProjectId>),
 }
 
-impl PeerAuth {
-    pub fn from_peers(peers: HashSet<ProjectId>) -> Self {
+impl From<HashSet<ProjectId>> for PeerAuth {
+    fn from(peers: HashSet<ProjectId>) -> Self {
         if peers.is_empty() {
             Self::Open
         } else {
             Self::Restricted(peers)
         }
     }
+}
 
+impl PeerAuth {
     pub fn is_open(&self) -> bool {
         matches!(self, Self::Open)
     }
@@ -48,17 +50,14 @@ mod tests {
 
     #[test]
     fn empty_set_yields_open() {
-        assert!(matches!(
-            PeerAuth::from_peers(HashSet::new()),
-            PeerAuth::Open
-        ));
+        assert!(matches!(PeerAuth::from(HashSet::new()), PeerAuth::Open));
     }
 
     #[test]
     fn non_empty_set_yields_restricted() {
         let peer = ProjectId::now_v7();
         assert!(matches!(
-            PeerAuth::from_peers(HashSet::from([peer])),
+            PeerAuth::from(HashSet::from([peer])),
             PeerAuth::Restricted(_)
         ));
     }

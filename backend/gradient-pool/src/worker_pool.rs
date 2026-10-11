@@ -124,7 +124,7 @@ impl WorkerPool {
 
     pub fn update_authorized_peers(&mut self, id: &str, authorized_peers: HashSet<ProjectId>) {
         if let Some(slot) = self.workers.get_mut(id) {
-            slot.shared_mut().peer_auth = PeerAuth::from_peers(authorized_peers);
+            slot.shared_mut().peer_auth = PeerAuth::from(authorized_peers);
         }
     }
 

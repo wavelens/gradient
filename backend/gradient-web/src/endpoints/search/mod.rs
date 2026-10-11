@@ -47,6 +47,45 @@ pub struct SearchHit {
     pub starred: bool,
 }
 
+impl From<NameHitRow> for SearchHit {
+    fn from(n: NameHitRow) -> Self {
+        let mut hit = match n.kind {
+            NameKind::Project => project_hit(n.name, n.starred),
+            NameKind::Task { project } => task_hit(project, n.name, n.starred),
+            NameKind::Cache => cache_hit(n.name, n.starred),
+        };
+        hit.label = n.display_name;
+        hit
+    }
+}
+
+impl From<CommitHitRow> for SearchHit {
+    fn from(c: CommitHitRow) -> Self {
+        Self {
+            kind: HitKind::Commit,
+            route: format!(
+                "/project/{}/task/{}?eval={}",
+                c.project, c.task, c.evaluation
+            ),
+            label: c.hash.chars().take(7).collect(),
+            sublabel: format!("{} / {}", c.project, c.task),
+            starred: false,
+        }
+    }
+}
+
+impl From<NarHitRow> for SearchHit {
+    fn from(n: NarHitRow) -> Self {
+        Self {
+            kind: HitKind::Nar,
+            route: format!("/caches/{}/nars?hash={}", n.cache, n.hash),
+            label: n.package,
+            sublabel: n.cache,
+            starred: false,
+        }
+    }
+}
+
 fn per_kind(limit: Option<u64>) -> u64 {
     limit.unwrap_or(5).clamp(1, 20)
 }
@@ -81,39 +120,6 @@ fn cache_hit(name: String, starred: bool) -> SearchHit {
     }
 }
 
-fn nar_hit(n: NarHitRow) -> SearchHit {
-    SearchHit {
-        kind: HitKind::Nar,
-        route: format!("/caches/{}/nars?hash={}", n.cache, n.hash),
-        label: n.package,
-        sublabel: n.cache,
-        starred: false,
-    }
-}
-
-fn commit_hit(c: CommitHitRow) -> SearchHit {
-    SearchHit {
-        kind: HitKind::Commit,
-        route: format!(
-            "/project/{}/task/{}?eval={}",
-            c.project, c.task, c.evaluation
-        ),
-        label: c.hash.chars().take(7).collect(),
-        sublabel: format!("{} / {}", c.project, c.task),
-        starred: false,
-    }
-}
-
-fn name_hit(n: NameHitRow) -> SearchHit {
-    let mut hit = match n.kind {
-        NameKind::Project => project_hit(n.name, n.starred),
-        NameKind::Task { project } => task_hit(project, n.name, n.starred),
-        NameKind::Cache => cache_hit(n.name, n.starred),
-    };
-    hit.label = n.display_name;
-    hit
-}
-
 pub async fn search<C: ConnectionTrait>(
     db: &C,
     user: UserId,
@@ -121,19 +127,23 @@ pub async fn search<C: ConnectionTrait>(
     per_kind: u64,
 ) -> Result<Vec<SearchHit>, DbErr> {
     let Some(text) = lookups.text else {
-        return Ok(starred(db, user).await?.into_iter().map(name_hit).collect());
+        return Ok(starred(db, user)
+            .await?
+            .into_iter()
+            .map(SearchHit::from)
+            .collect());
     };
     let mut hits = Vec::new();
     if let Some(hash) = &lookups.nar {
         let nars = search_nars(db, hash, user).await?;
-        hits.extend(nars.into_iter().map(nar_hit));
+        hits.extend(nars.into_iter().map(SearchHit::from));
     }
     if let Some(range) = &lookups.commit {
         let commits = search_commits(db, &range.low, &range.high, user).await?;
-        hits.extend(commits.into_iter().map(commit_hit));
+        hits.extend(commits.into_iter().map(SearchHit::from));
     }
     let names = search_names(db, &text, per_kind, user).await?;
-    hits.extend(names.into_iter().map(name_hit));
+    hits.extend(names.into_iter().map(SearchHit::from));
     Ok(hits)
 }
 

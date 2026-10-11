@@ -126,6 +126,19 @@ pub struct WorkerLiveInfo {
     pub draining: bool,
 }
 
+impl From<&WorkerInfo> for WorkerLiveInfo {
+    fn from(w: &WorkerInfo) -> Self {
+        Self {
+            capabilities: w.capabilities.clone(),
+            architectures: w.architectures.clone(),
+            system_features: w.system_features.clone(),
+            max_concurrent_builds: w.max_concurrent_builds,
+            assigned_job_count: w.assigned_job_count,
+            draining: w.draining,
+        }
+    }
+}
+
 pub(crate) fn encrypt_token(crypt_file: &str, token: &str) -> WebResult<String> {
     gradient_sources::encrypt_secret(crypt_file, token)
         .context("encrypting the worker token failed")
@@ -303,14 +316,7 @@ pub async fn get_project_workers(
         live_workers
             .get(worker_id)
             .filter(|w| worker_live_for_project(w, project.id))
-            .map(|w| WorkerLiveInfo {
-                capabilities: w.capabilities.clone(),
-                architectures: w.architectures.clone(),
-                system_features: w.system_features.clone(),
-                max_concurrent_builds: w.max_concurrent_builds,
-                assigned_job_count: w.assigned_job_count,
-                draining: w.draining,
-            })
+            .map(WorkerLiveInfo::from)
     };
 
     let mut entries: Vec<ProjectWorkerEntry> = registrations

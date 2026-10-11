@@ -25,8 +25,8 @@ pub(super) struct ResourceUsage {
     oom_kills: Option<u64>,
 }
 
-impl ResourceUsage {
-    pub(super) fn of(result: &BuildResult) -> Self {
+impl From<&BuildResult> for ResourceUsage {
+    fn from(result: &BuildResult) -> Self {
         Self {
             cpu_usec: cpu_usec(result.cpu_user, result.cpu_system),
             memory_peak: result.memory_peak,

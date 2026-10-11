@@ -5,17 +5,14 @@
  */
 
 use super::rank::{
-    Counts, Filter, HistoryBar, Latest, Outcomes, Paging, TaskFacts, TaskRow, counts, history_len,
-    rank,
+    Counts, Filter, HistoryBar, Outcomes, Paging, TaskFacts, TaskRow, counts, history_len, rank,
 };
 use crate::error::WebResult;
 use crate::helpers::ok_json;
 use axum::extract::{Query, State};
 use axum::{Extension, Json};
 use gradient_core::ServerState;
-use gradient_db::dashboard::{
-    HistoryRow, TaskFactsRow, entry_point_outcomes, histories, task_facts,
-};
+use gradient_db::dashboard::{entry_point_outcomes, histories, task_facts};
 use gradient_types::*;
 use sea_orm::{ConnectionTrait, DbErr};
 use serde::{Deserialize, Serialize};
@@ -36,33 +33,6 @@ pub struct TasksPage {
     pub counts: Counts,
     pub total: usize,
     pub tasks: Vec<TaskRow>,
-}
-
-fn to_facts(r: TaskFactsRow) -> TaskFacts {
-    TaskFacts {
-        latest: r.latest.map(|(id, status, commit, created_at)| Latest {
-            id,
-            status,
-            commit,
-            created_at,
-        }),
-        project: r.project,
-        task: r.task,
-        starred: r.starred,
-        previous: r.previous,
-        recent_14d: r.recent_14d,
-        team: r.team,
-        speed_ms: r.speed_ms,
-    }
-}
-
-fn to_bar(h: HistoryRow) -> HistoryBar {
-    HistoryBar {
-        id: h.id,
-        status: h.status,
-        duration_ms: h.duration_ms,
-        created_at: h.created_at,
-    }
 }
 
 async fn outcomes_for<C: ConnectionTrait>(
@@ -112,7 +82,7 @@ async fn attach_history<C: ConnectionTrait>(
                 .remove(&l.id)
                 .unwrap_or_default()
                 .into_iter()
-                .map(to_bar)
+                .map(HistoryBar::from)
                 .collect();
         }
     }
@@ -129,7 +99,7 @@ pub async fn load_page<C: ConnectionTrait>(
     let facts: Vec<TaskFacts> = task_facts(db, user)
         .await?
         .into_iter()
-        .map(to_facts)
+        .map(TaskFacts::from)
         .collect();
     let outcomes = outcomes_for(db, &facts).await?;
     let mut rows: Vec<TaskRow> = facts

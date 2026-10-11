@@ -26,6 +26,22 @@ pub enum Phase {
     ApprovalGranted,
 }
 
+impl From<EvaluationStatus> for Phase {
+    fn from(status: EvaluationStatus) -> Self {
+        match status {
+            EvaluationStatus::Queued => Phase::Queued,
+            EvaluationStatus::Fetching
+            | EvaluationStatus::EvaluatingFlake
+            | EvaluationStatus::EvaluatingDerivation => Phase::Started,
+            EvaluationStatus::Building => Phase::Building,
+            EvaluationStatus::Waiting => Phase::Waiting,
+            EvaluationStatus::Completed => Phase::Completed,
+            EvaluationStatus::Failed => Phase::Failed,
+            EvaluationStatus::Aborted => Phase::Aborted,
+        }
+    }
+}
+
 impl Phase {
     pub const fn name(self) -> &'static str {
         match self {
@@ -38,20 +54,6 @@ impl Phase {
             Phase::Aborted => names::EVALUATION_ABORTED,
             Phase::ActionRequired => names::EVALUATION_ACTION_REQUIRED,
             Phase::ApprovalGranted => names::EVALUATION_APPROVAL_GRANTED,
-        }
-    }
-
-    pub fn of_status(status: EvaluationStatus) -> Self {
-        match status {
-            EvaluationStatus::Queued => Phase::Queued,
-            EvaluationStatus::Fetching
-            | EvaluationStatus::EvaluatingFlake
-            | EvaluationStatus::EvaluatingDerivation => Phase::Started,
-            EvaluationStatus::Building => Phase::Building,
-            EvaluationStatus::Waiting => Phase::Waiting,
-            EvaluationStatus::Completed => Phase::Completed,
-            EvaluationStatus::Failed => Phase::Failed,
-            EvaluationStatus::Aborted => Phase::Aborted,
         }
     }
 
@@ -183,11 +185,11 @@ mod tests {
     #[test]
     fn fetch_and_eval_phases_report_started() {
         assert_eq!(
-            Phase::of_status(EvaluationStatus::Fetching).name(),
+            Phase::from(EvaluationStatus::Fetching).name(),
             "evaluation.started"
         );
         assert_eq!(
-            Phase::of_status(EvaluationStatus::EvaluatingDerivation).name(),
+            Phase::from(EvaluationStatus::EvaluatingDerivation).name(),
             "evaluation.started"
         );
     }

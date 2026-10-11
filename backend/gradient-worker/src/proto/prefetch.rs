@@ -108,14 +108,16 @@ pub(crate) struct Staging<'a> {
     job_id: &'a str,
 }
 
-impl<'a> Staging<'a> {
-    pub(crate) fn of_job(updater: &'a JobUpdater) -> Self {
+impl<'a> From<&'a JobUpdater> for Staging<'a> {
+    fn from(updater: &'a JobUpdater) -> Self {
         Self {
             nars: &updater.nar_recv,
             job_id: &updater.job_id,
         }
     }
+}
 
+impl<'a> Staging<'a> {
     async fn open(&self, store_path: &str) -> Result<DownloadSink> {
         self.nars.stage_download(self.job_id, store_path).await
     }
@@ -605,7 +607,7 @@ impl<'a> InputPrefetcher<'a> {
         let mut fetch = self.updater.phase(JobPhase::NarFetch);
         let started = std::time::Instant::now();
         let mut batch = self.fetch_by_request(by_request, tally).await?;
-        let staging = Staging::of_job(self.updater);
+        let staging = Staging::from(self.updater);
         batch.extend(download_by_url(by_url, staging, tally).await?);
         let nar_bytes = batch.iter().filter_map(|(_, _, cp)| cp.nar_size).sum();
         gradient_worker_client::throughput::DOWNLOAD.observe_transfer(nar_bytes, started.elapsed());

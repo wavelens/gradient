@@ -14,7 +14,6 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
 use gradient_core::ServerState;
-use gradient_sources::get_path_from_derivation_output;
 use gradient_storage::nar_extract::{
     ExtractError, Extracted, extract_path_from_reader, nar_reader_from_stream,
 };
@@ -129,7 +128,7 @@ async fn product_response(
     tracing::debug!(%build_id, %filename, product_path = %product.path, "Found matching build_product, fetching from NAR");
 
     let hash = output.hash.as_str();
-    let output_root = get_path_from_derivation_output(output.clone()).full();
+    let output_root = StorePath::from(output.clone()).full();
     let rel = relative_in_output(&product.path, &output_root);
 
     let stream = match state.nar_storage.get_stream(hash).await {

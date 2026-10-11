@@ -180,7 +180,7 @@ pub(crate) async fn apply(ctx: &DbContext, transition: Transition) -> Result<Tra
                         aborted_shared_builds: vec![row.id],
                         ..Default::default()
                     },
-                    Err(refusal) => refused(refusal),
+                    Err(refusal) => TransitionReport::from(refusal),
                 },
             )
         }
@@ -196,7 +196,7 @@ pub(crate) async fn apply(ctx: &DbContext, transition: Transition) -> Result<Tra
             Ok(
                 match gradient_db::status::retry_evaluation_build(ctx, &eval, &row).await? {
                     Ok(()) => TransitionReport::default(),
-                    Err(refusal) => refused(refusal),
+                    Err(refusal) => TransitionReport::from(refusal),
                 },
             )
         }
@@ -218,13 +218,6 @@ pub(crate) async fn apply(ctx: &DbContext, transition: Transition) -> Result<Tra
                 ..Default::default()
             })
         }
-    }
-}
-
-fn refused(refusal: gradient_db::status::BuildRefusal) -> TransitionReport {
-    TransitionReport {
-        refusal: Some(refusal),
-        ..Default::default()
     }
 }
 

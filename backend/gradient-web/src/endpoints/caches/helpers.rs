@@ -20,7 +20,6 @@ use futures::StreamExt as _;
 use futures::stream::BoxStream;
 use gradient_core::ServerState;
 use gradient_graph::Demotion;
-use gradient_sources::get_path_from_derivation_output;
 use gradient_storage::NarSource;
 use gradient_types::*;
 use gradient_util::nix_hash::{normalize_nar_hash, strip_hash_algo};
@@ -170,7 +169,7 @@ async fn get_nar_by_hash_inner(
         .signature
         .ok_or(CacheRefusal::SignaturePending)?;
 
-    let path = get_path_from_derivation_output(build_output.clone()).full();
+    let path = StorePath::from(build_output.clone()).full();
 
     let nar_hash = cached_path_row
         .nar_hash

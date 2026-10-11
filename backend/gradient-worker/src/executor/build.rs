@@ -329,7 +329,10 @@ pub async fn build_derivation(
         None => realize.await,
     };
 
-    let usage = realized.as_ref().map(ResourceUsage::of).unwrap_or_default();
+    let usage = realized
+        .as_ref()
+        .map(ResourceUsage::from)
+        .unwrap_or_default();
     let metrics = build_metrics(usage, started.elapsed().as_millis() as u64, host, &running);
     drop(running);
     let built = match realized {
@@ -447,7 +450,7 @@ where
 {
     use crate::executor::log_limit::LogRateLimiter;
     let mut stats = LogStreamStats::default();
-    let mut limiter = LogRateLimiter::from_limits(log_limits);
+    let mut limiter = LogRateLimiter::from(log_limits);
     let started = std::time::Instant::now();
     let mut limit_hit = false;
     loop {

@@ -89,6 +89,31 @@ pub struct PullRequestSnapshot {
     pub title: Option<String>,
 }
 
+impl From<GithubPrResponse> for PullRequestSnapshot {
+    fn from(pr: GithubPrResponse) -> Self {
+        let head_full = pr.head.repo.as_ref().and_then(|r| r.full_name.clone());
+        let base_full = pr
+            .base
+            .as_ref()
+            .and_then(|b| b.repo.as_ref())
+            .and_then(|r| r.full_name.clone());
+        let is_fork =
+            matches!((head_full.as_deref(), base_full.as_deref()), (Some(h), Some(b)) if h != b);
+        let head_clone_url = if is_fork {
+            pr.head.repo.as_ref().and_then(|r| r.clone_url.clone())
+        } else {
+            None
+        };
+        Self {
+            head_sha: pr.head.sha,
+            head_branch: pr.head.ref_,
+            head_clone_url,
+            is_fork,
+            title: pr.title,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct CiReport {
     pub owner: String,
@@ -1047,7 +1072,7 @@ impl CiReporter for GithubReporter {
             .json()
             .await
             .context("Failed to parse GitHub pull request response")?;
-        Ok(Some(github_pr_response_to_snapshot(pr)))
+        Ok(Some(PullRequestSnapshot::from(pr)))
     }
 
     async fn add_reaction(&self, target: &ReactionTarget, kind: ReactionKind) -> Result<()> {
@@ -1181,29 +1206,6 @@ struct GithubPrRepo {
     full_name: Option<String>,
     #[serde(default)]
     clone_url: Option<String>,
-}
-
-fn github_pr_response_to_snapshot(pr: GithubPrResponse) -> PullRequestSnapshot {
-    let head_full = pr.head.repo.as_ref().and_then(|r| r.full_name.clone());
-    let base_full = pr
-        .base
-        .as_ref()
-        .and_then(|b| b.repo.as_ref())
-        .and_then(|r| r.full_name.clone());
-    let is_fork =
-        matches!((head_full.as_deref(), base_full.as_deref()), (Some(h), Some(b)) if h != b);
-    let head_clone_url = if is_fork {
-        pr.head.repo.as_ref().and_then(|r| r.clone_url.clone())
-    } else {
-        None
-    };
-    PullRequestSnapshot {
-        head_sha: pr.head.sha,
-        head_branch: pr.head.ref_,
-        head_clone_url,
-        is_fork,
-        title: pr.title,
-    }
 }
 
 pub struct GithubAppReporter {
@@ -1554,7 +1556,7 @@ impl CiReporter for GithubAppReporter {
             .json()
             .await
             .context("Failed to parse GitHub pull request response")?;
-        Ok(Some(github_pr_response_to_snapshot(pr)))
+        Ok(Some(PullRequestSnapshot::from(pr)))
     }
 
     async fn add_reaction(&self, target: &ReactionTarget, kind: ReactionKind) -> Result<()> {

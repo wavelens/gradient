@@ -18,13 +18,6 @@ use crate::ipc::{AttrError, DiscoveryShard};
 use crate::strip_nix_store_prefix;
 use crate::wildcard_walk::{self, WalkNode};
 
-fn to_wire(shard: wildcard_walk::Shard) -> DiscoveryShard {
-    DiscoveryShard {
-        pattern: wildcard_walk::segments_to_pattern(&shard.segments),
-        only: shard.only,
-    }
-}
-
 pub struct FlakeWalker<'a> {
     cache: EvalCache,
     _locked: LockedFlake,
@@ -83,7 +76,11 @@ impl<'a> FlakeWalker<'a> {
         let (attrs, deferred, errors) =
             wildcard_walk::discover_split(&root, &includes, &excludes, only);
 
-        Ok((attrs, deferred.into_iter().map(to_wire).collect(), errors))
+        Ok((
+            attrs,
+            deferred.into_iter().map(DiscoveryShard::from).collect(),
+            errors,
+        ))
     }
 
     #[tracing::instrument(level = "debug", skip_all)]
@@ -95,7 +92,10 @@ impl<'a> FlakeWalker<'a> {
         let (includes, _) = wildcard_walk::parse_patterns(wildcards);
         let (shards, errors) = wildcard_walk::plan_shards(&root, &includes);
 
-        Ok((shards.into_iter().map(to_wire).collect(), errors))
+        Ok((
+            shards.into_iter().map(DiscoveryShard::from).collect(),
+            errors,
+        ))
     }
 
     #[tracing::instrument(level = "debug", skip_all, fields(attr = attr_path))]

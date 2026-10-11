@@ -49,6 +49,12 @@ pub enum EvaluationStatus {
     Fetching = 8,
 }
 
+impl From<EvaluationStatus> for i16 {
+    fn from(status: EvaluationStatus) -> Self {
+        status as Self
+    }
+}
+
 impl EvaluationStatus {
     pub fn is_active(&self) -> bool {
         matches!(

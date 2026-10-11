@@ -243,7 +243,7 @@ pub async fn get_cache(
 ) -> WebResult<Json<BaseResponse<CacheResponse>>> {
     let cache = load_cache(
         &state,
-        Caller::from_option(&maybe_user),
+        Caller::from(&maybe_user),
         api_key.as_ref(),
         cache,
         CacheAccess::Readable,

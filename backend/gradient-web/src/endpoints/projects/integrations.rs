@@ -52,23 +52,25 @@ pub struct IntegrationResponse {
     pub managed: bool,
 }
 
-fn base_from(m: MIntegration) -> IntegrationResponse {
-    IntegrationResponse {
-        id: m.id,
-        project: m.project,
-        name: m.name,
-        display_name: m.display_name,
-        kind: kind_to_str(m.kind).to_string(),
-        git_host_type: m.git_host_type.as_path_segment().to_string(),
-        endpoint_url: m.endpoint_url,
-        has_secret: m.secret.is_some(),
-        has_access_token: m.access_token.is_some(),
-        allowed_ips: m.allowed_ips.unwrap_or_default(),
-        installation_id: None,
-        account_login: None,
-        created_by: m.created_by,
-        created_at: m.created_at,
-        managed: m.managed,
+impl From<MIntegration> for IntegrationResponse {
+    fn from(m: MIntegration) -> Self {
+        Self {
+            id: m.id,
+            project: m.project,
+            name: m.name,
+            display_name: m.display_name,
+            kind: kind_to_str(m.kind).to_string(),
+            git_host_type: m.git_host_type.as_path_segment().to_string(),
+            endpoint_url: m.endpoint_url,
+            has_secret: m.secret.is_some(),
+            has_access_token: m.access_token.is_some(),
+            allowed_ips: m.allowed_ips.unwrap_or_default(),
+            installation_id: None,
+            account_login: None,
+            created_by: m.created_by,
+            created_at: m.created_at,
+            managed: m.managed,
+        }
     }
 }
 
@@ -87,7 +89,7 @@ async fn integration_response(
     Ok(IntegrationResponse {
         installation_id: install.as_ref().map(|i| i.installation_id),
         account_login: install.and_then(|i| i.account_login),
-        ..base_from(m)
+        ..IntegrationResponse::from(m)
     })
 }
 

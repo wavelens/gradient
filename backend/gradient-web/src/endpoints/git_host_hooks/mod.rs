@@ -264,7 +264,7 @@ async fn route_github_app_pr(
         );
         return WebhookTriggerOutcome::default();
     }
-    let approval_ctx = approval_context_from(&parsed);
+    let approval_ctx = approval::PullRequestApprovalContext::from(&parsed);
     let head_clone = parsed.head_repo_clone_url.clone();
     let mut combined = WebhookTriggerOutcome::default();
     for integration_id in targets {
@@ -290,15 +290,6 @@ async fn route_github_app_pr(
         combined.skipped.extend(outcome.skipped);
     }
     combined
-}
-
-fn approval_context_from(parsed: &ParsedPullRequestEvent) -> approval::PullRequestApprovalContext {
-    approval::PullRequestApprovalContext {
-        pr_number: parsed.pr_number,
-        pr_author: parsed.pr_author.clone(),
-        is_fork: parsed.is_fork,
-        sender: parsed.sender.clone(),
-    }
 }
 
 async fn route_github_app_release(
@@ -467,7 +458,7 @@ pub async fn git_host_webhook(
                 return Err(GitHostHookRefusal::MalformedPayload.into());
             };
             let urls = parsed.repository_urls.clone();
-            let approval_ctx = approval_context_from(&parsed);
+            let approval_ctx = approval::PullRequestApprovalContext::from(&parsed);
             let head_clone = parsed.head_repo_clone_url.clone();
             let outcome = trigger_pr_for_integration(
                 &state,

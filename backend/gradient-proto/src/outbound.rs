@@ -54,6 +54,21 @@ struct DialRow {
     team_worker: bool,
 }
 
+impl From<worker_registration::Model> for DialRow {
+    fn from(reg: worker_registration::Model) -> Self {
+        let peer = reg.peer_id.to_string();
+        Self {
+            token_peers: vec![peer.clone()],
+            projects: vec![peer],
+            worker_id: reg.worker_id,
+            url: reg.url.unwrap_or_default(),
+            token_encrypted: reg.token_encrypted,
+            idle_reason: None,
+            team_worker: false,
+        }
+    }
+}
+
 enum PlannedDial {
     Dial(DialTarget),
     Skip { worker_id: String, reason: String },
@@ -66,19 +81,6 @@ struct WorkerDial {
 }
 
 impl DialRow {
-    fn from_registration(reg: worker_registration::Model) -> Self {
-        let peer = reg.peer_id.to_string();
-        Self {
-            token_peers: vec![peer.clone()],
-            projects: vec![peer],
-            worker_id: reg.worker_id,
-            url: reg.url.unwrap_or_default(),
-            token_encrypted: reg.token_encrypted,
-            idle_reason: None,
-            team_worker: false,
-        }
-    }
-
     fn from_team_worker(worker: team_worker::Model, projects: Vec<ProjectId>) -> Self {
         let projects: Vec<String> = projects.iter().map(ToString::to_string).collect();
 
@@ -238,7 +240,7 @@ fn merge_rows(
             continue;
         }
 
-        team_rows.push(DialRow::from_registration(reg));
+        team_rows.push(DialRow::from(reg));
     }
 
     team_rows

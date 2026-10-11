@@ -187,7 +187,7 @@ impl UpstreamIo for JobUpdaterIo<'_> {
         let (_, body) = stage_one_presigned(
             gradient_worker_client::http::download_client(),
             upstream.clone(),
-            Staging::of_job(self.0),
+            Staging::from(&*self.0),
             progress,
         )
         .await?;

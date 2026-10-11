@@ -11,7 +11,6 @@ use chrono::NaiveDateTime;
 use gradient_db::scheduling::cluster::MemberOf;
 use gradient_types::ids::{ClusterJobId, ClusterMemberId};
 
-use super::SlotKind;
 use crate::jobs::PendingJob;
 
 #[derive(Debug, Clone)]
@@ -54,16 +53,6 @@ impl PendingCluster {
         self.members
             .iter()
             .any(|m| m.job.as_ref().is_some_and(PendingJob::prioritized))
-    }
-
-    pub fn slot_kind(m: &ClusterMember) -> SlotKind {
-        if m.key
-            .starts_with(gradient_db::scheduling::assignment_record::BUILD_KEY_PREFIX)
-        {
-            SlotKind::Build
-        } else {
-            SlotKind::Eval
-        }
     }
 }
 

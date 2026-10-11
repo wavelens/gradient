@@ -145,8 +145,8 @@ async fn report_evaluation_status(
         &ctx.events,
         gradient_types::events::evaluation::Reported {
             evaluation_id: evaluation.id,
-            phase: gradient_types::events::evaluation::Phase::of_status(status),
-            status: i32::from(status) as i16,
+            phase: gradient_types::events::evaluation::Phase::from(status),
+            status: i16::from(status),
             task: evaluation.task,
             ..Default::default()
         },
@@ -158,7 +158,7 @@ async fn report_evaluation_status(
         &ctx.worker_db,
         PhaseSubjectKind::Evaluation,
         evaluation.id.into_inner(),
-        i32::from(status) as i16,
+        i16::from(status),
         None,
         now,
     )

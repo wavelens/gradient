@@ -11,7 +11,7 @@ use gradient_pool::WorkerCaps;
 use gradient_types::ids::ProjectId;
 use gradient_wire::types::JobKind;
 
-use super::PendingCluster;
+use super::{ClusterMember, PendingCluster};
 use crate::jobs::WorkerJobScore;
 
 /// Two 10 s worker heartbeats plus slack. An idle worker is re-asking within this window.
@@ -21,6 +21,18 @@ pub const IDLE_SLOT_TTL: Duration = Duration::from_secs(25);
 pub enum SlotKind {
     Eval,
     Build,
+}
+
+impl From<&ClusterMember> for SlotKind {
+    fn from(m: &ClusterMember) -> Self {
+        if m.key
+            .starts_with(gradient_db::scheduling::assignment_record::BUILD_KEY_PREFIX)
+        {
+            SlotKind::Build
+        } else {
+            SlotKind::Eval
+        }
+    }
 }
 
 impl SlotKind {

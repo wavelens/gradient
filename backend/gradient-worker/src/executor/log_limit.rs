@@ -47,6 +47,12 @@ pub struct LogRateLimiter {
     tripped: bool,
 }
 
+impl From<LogRateLimits> for LogRateLimiter {
+    fn from(limits: LogRateLimits) -> Self {
+        Self::new(limits.burst_bytes_per_min, limits.sustained_bytes_per_hour)
+    }
+}
+
 impl LogRateLimiter {
     pub fn new(bytes_per_min: u64, bytes_per_hour: u64) -> Self {
         Self {
@@ -54,10 +60,6 @@ impl LogRateLimiter {
             hour: Bucket::new(bytes_per_hour, 3600.0),
             tripped: false,
         }
-    }
-
-    pub fn from_limits(limits: LogRateLimits) -> Self {
-        Self::new(limits.burst_bytes_per_min, limits.sustained_bytes_per_hour)
     }
 
     /// The limiter is tripping permanently on the first denial.

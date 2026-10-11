@@ -44,6 +44,17 @@ pub struct RailCache {
     pub nar_count: i64,
 }
 
+impl From<RailCacheRow> for RailCache {
+    fn from(c: RailCacheRow) -> Self {
+        Self {
+            name: c.name,
+            display_name: c.display_name,
+            starred: c.starred,
+            nar_count: c.nar_count,
+        }
+    }
+}
+
 #[derive(Debug, Serialize)]
 pub struct Rail {
     pub projects: Vec<RailProject>,
@@ -74,15 +85,6 @@ fn rail_project(p: RailProjectRow, tasks: &[RailTaskRow]) -> RailProject {
     }
 }
 
-fn rail_cache(c: RailCacheRow) -> RailCache {
-    RailCache {
-        name: c.name,
-        display_name: c.display_name,
-        starred: c.starred,
-        nar_count: c.nar_count,
-    }
-}
-
 pub fn build_rail(
     projects: Vec<RailProjectRow>,
     tasks: Vec<RailTaskRow>,
@@ -95,7 +97,7 @@ pub fn build_rail(
     projects.sort_by(|a, b| a.tier.cmp(&b.tier).then_with(|| a.name.cmp(&b.name)));
     Rail {
         projects,
-        caches: caches.into_iter().map(rail_cache).collect(),
+        caches: caches.into_iter().map(RailCache::from).collect(),
     }
 }
 

@@ -20,6 +20,12 @@ pub struct StorePath {
     name: String,
 }
 
+impl From<crate::derivation_output::Model> for StorePath {
+    fn from(output: crate::derivation_output::Model) -> Self {
+        StorePath::from_parts(output.hash, output.package)
+    }
+}
+
 impl StorePath {
     pub fn from_parts(hash: impl Into<String>, name: impl Into<String>) -> Self {
         Self {
