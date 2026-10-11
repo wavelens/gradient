@@ -181,7 +181,7 @@ impl From<gradient_types::input::InputError> for WebError {
 
 impl From<gradient_db::status::BuildRefusal> for WebError {
     fn from(refusal: gradient_db::status::BuildRefusal) -> Self {
-        Self::conflict(refusal.to_string())
+        Self::Conflict(ErrorCode::CONFLICT, refusal.to_string())
     }
 }
 
@@ -236,52 +236,8 @@ impl IntoResponse for WebError {
 }
 
 impl WebError {
-    pub fn bad_request(msg: impl Into<String>) -> Self {
-        Self::BadRequest(ErrorCode::BAD_REQUEST, msg.into())
-    }
-
-    pub fn bad_request_with(code: ErrorCode, msg: impl Into<String>) -> Self {
-        Self::BadRequest(code, msg.into())
-    }
-
-    pub fn unauthorized(msg: impl Into<String>) -> Self {
-        Self::Unauthorized(ErrorCode::UNAUTHORIZED, msg.into())
-    }
-
-    pub fn unauthorized_with(code: ErrorCode, msg: impl Into<String>) -> Self {
-        Self::Unauthorized(code, msg.into())
-    }
-
-    pub fn forbidden(msg: impl Into<String>) -> Self {
-        Self::Forbidden(ErrorCode::FORBIDDEN, msg.into())
-    }
-
-    pub fn forbidden_with(code: ErrorCode, msg: impl Into<String>) -> Self {
-        Self::Forbidden(code, msg.into())
-    }
-
-    pub fn conflict(msg: impl Into<String>) -> Self {
-        Self::Conflict(ErrorCode::CONFLICT, msg.into())
-    }
-
-    pub fn gone(msg: impl Into<String>) -> Self {
-        Self::Gone(ErrorCode::GONE, msg.into())
-    }
-
-    pub fn payload_too_large(msg: impl Into<String>) -> Self {
-        Self::PayloadTooLarge(ErrorCode::PAYLOAD_TOO_LARGE, msg.into())
-    }
-
-    pub fn unprocessable_entity(msg: impl Into<String>) -> Self {
-        Self::UnprocessableEntity(ErrorCode::UNPROCESSABLE_ENTITY, msg.into())
-    }
-
     pub fn internal(msg: impl Into<String>) -> Self {
         Self::Internal(AnyhowError::msg(msg.into()))
-    }
-
-    pub fn service_unavailable(msg: impl Into<String>) -> Self {
-        Self::ServiceUnavailable(ErrorCode::SERVICE_UNAVAILABLE, msg.into())
     }
 
     pub fn invalid_name(name: Resource) -> Self {
@@ -297,10 +253,6 @@ impl WebError {
 
     pub fn not_found(resource: Resource) -> Self {
         Self::NotFound(ErrorCode::NOT_FOUND, format!("{} not found", resource))
-    }
-
-    pub fn not_found_msg(msg: impl Into<String>) -> Self {
-        Self::NotFound(ErrorCode::NOT_FOUND, msg.into())
     }
 
     pub fn data_inconsistency(resource: Resource) -> Self {

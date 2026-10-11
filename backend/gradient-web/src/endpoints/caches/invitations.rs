@@ -4,10 +4,11 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use super::refusal::CacheRefusal;
 use crate::access::{CacheAccess, Caller, load_cache};
 use crate::audit::{RequestInfo, record as audit_record};
 use crate::authorization::MaybeApiKey;
-use crate::error::{WebError, WebResult};
+use crate::error::WebResult;
 use crate::helpers::{OptionExt, ok_json};
 use crate::permissions::CachePermission;
 use crate::resource::Resource;
@@ -130,7 +131,7 @@ pub async fn delete_cache_invitation(
         )
         .one(&state.web_db)
         .await?
-        .ok_or_else(|| WebError::bad_request("No pending invitation for this user"))?;
+        .ok_or(CacheRefusal::NoPendingInvitation)?;
 
     invitation.into_active_model().delete(&state.web_db).await?;
 

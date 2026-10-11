@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use super::refusal::AdminRefusal;
 use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
 use axum::extract::{Query, State};
@@ -26,9 +27,10 @@ pub async fn export_state(
 ) -> WebResult<Response> {
     let format = query.format.as_deref().unwrap_or("nix");
     if !matches!(format, "nix" | "json") {
-        return Err(WebError::bad_request(format!(
-            "unknown format '{format}': expected 'nix' or 'json'"
-        )));
+        return Err(AdminRefusal::UnknownFormat {
+            format: format.to_string(),
+        }
+        .into());
     }
 
     let config = export::export_state(&state.web_db)

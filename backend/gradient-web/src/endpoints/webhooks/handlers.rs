@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use super::refusal::WebhookRefusal;
 use super::scope::{Verb, WebhookOwner};
 use crate::audit::{RequestInfo, record as audit_record};
 use crate::error::{WebError, WebResult};
@@ -125,13 +126,13 @@ fn to_delivery_item(r: MWebhookDelivery) -> DeliveryListItem {
 }
 
 fn check_events(events: &[String]) -> WebResult<()> {
-    EventFilter::validate(events).map_err(WebError::unprocessable_entity)
+    EventFilter::validate(events).map_err(WebhookRefusal::InvalidEventFilter)?;
+    Ok(())
 }
 
 fn check_url(url: &str) -> WebResult<()> {
-    validate_webhook_url(url)
-        .map(drop)
-        .map_err(|e| WebError::unprocessable_entity(e.to_string()))
+    validate_webhook_url(url).map_err(|e| WebhookRefusal::InvalidUrl(e.to_string()))?;
+    Ok(())
 }
 
 fn new_secret(state: &ServerState) -> WebResult<(String, String)> {

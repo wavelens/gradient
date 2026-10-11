@@ -12,6 +12,7 @@ mod commands;
 mod fanout;
 mod installation;
 mod payloads;
+mod refusal;
 mod response;
 
 pub use response::{QueuedEvaluation, SkippedTask, WebhookResponse, WebhookTriggerOutcome};
@@ -36,8 +37,9 @@ use std::sync::Arc;
 use tracing::{debug, warn};
 
 use crate::client_ip::{OptionalPeer, resolve_client_ip};
-use crate::error::{ErrorCode, WebError, WebResult};
+use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
+use refusal::GitHostHookRefusal;
 
 use fanout::{
     PushRefKind, trigger_pr_for_integration, trigger_push_for_integration,
@@ -59,9 +61,7 @@ pub async fn github_app_webhook(
              (requires GRADIENT_GITHUB_APP_ID, GRADIENT_GITHUB_APP_PRIVATE_KEY_FILE, \
              and GRADIENT_GITHUB_APP_WEBHOOK_SECRET_FILE)"
         );
-        return Err(WebError::service_unavailable(
-            "github app integration not configured",
-        ));
+        return Err(GitHostHookRefusal::GithubAppNotConfigured.into());
     };
     let secret = match load_secret(&github_app.webhook_secret_file) {
         Ok(s) => s,
@@ -78,7 +78,7 @@ pub async fn github_app_webhook(
 
     if !verify_github_signature(secret.expose(), sig_header, &body) {
         warn!("GitHub App webhook: invalid signature");
-        return Err(WebError::unauthorized("invalid webhook signature"));
+        return Err(GitHostHookRefusal::InvalidSignature.into());
     }
 
     let peer_ip = peer
@@ -96,7 +96,7 @@ pub async fn github_app_webhook(
 
     let response = match event.as_str() {
         "push" => match ParsedPushEvent::from_github(&body) {
-            None => return Err(WebError::bad_request("malformed webhook payload")),
+            None => return Err(GitHostHookRefusal::MalformedPayload.into()),
             Some(PushOutcome::Ignored) => WebhookResponse::empty("push"),
             Some(PushOutcome::Build(parsed)) => {
                 let urls = parsed.repository_urls.clone();
@@ -113,7 +113,7 @@ pub async fn github_app_webhook(
         },
         "pull_request" => {
             let Some(parsed) = ParsedPullRequestEvent::from_github(&body) else {
-                return Err(WebError::bad_request("malformed webhook payload"));
+                return Err(GitHostHookRefusal::MalformedPayload.into());
             };
             let urls = parsed.repository_urls.clone();
             let outcome = route_github_app_pr(&state, &scheduler, parsed, &body, client_ip).await;
@@ -127,7 +127,7 @@ pub async fn github_app_webhook(
         }
         "release" => {
             let Some(parsed) = ParsedReleaseEvent::from_github(&body) else {
-                return Err(WebError::bad_request("malformed webhook payload"));
+                return Err(GitHostHookRefusal::MalformedPayload.into());
             };
             let urls = parsed.repository_urls.clone();
             let outcome =
@@ -352,14 +352,14 @@ pub async fn git_host_webhook(
 ) -> WebResult<Json<BaseResponse<WebhookResponse>>> {
     let Some(git_host_type) = GitHostType::from_path_segment(&git_host) else {
         warn!(git_host = %git_host, "Unknown Git host path segment");
-        return Err(WebError::not_found_msg("integration not found"));
+        return Err(GitHostHookRefusal::IntegrationNotFound.into());
     };
     let Some(provider) = state.git_host.get(git_host_type).cloned() else {
         warn!(git_host = %git_host, "No Git host provider registered");
-        return Err(WebError::not_found_msg("integration not found"));
+        return Err(GitHostHookRefusal::IntegrationNotFound.into());
     };
     if !provider.accepts_per_integration_webhook() {
-        return Err(WebError::bad_request("unsupported Git host"));
+        return Err(GitHostHookRefusal::UnsupportedGitHost.into());
     }
 
     let project = EProject::find()
@@ -370,7 +370,7 @@ pub async fn git_host_webhook(
             warn!(error = %e, project = %project_name, "DB error looking up project for Git host webhook");
             WebError::internal("internal error")
         })?
-        .ok_or_else(|| WebError::not_found_msg("integration not found"))?;
+        .ok_or(GitHostHookRefusal::IntegrationNotFound)?;
 
     let integration = EIntegration::find()
         .filter(CIntegration::Project.eq(project.id))
@@ -384,12 +384,12 @@ pub async fn git_host_webhook(
         })?
         .ok_or_else(|| {
             warn!(project = %project_name, git_host = %git_host, integration = %integration_name, "Integration not found");
-            WebError::not_found_msg("integration not found")
+            WebError::from(GitHostHookRefusal::IntegrationNotFound)
         })?;
 
     let encrypted_secret = integration.secret.as_ref().ok_or_else(|| {
         warn!(integration_id = %integration.id, "Integration has no secret configured");
-        WebError::not_found_msg("integration not found")
+        WebError::from(GitHostHookRefusal::IntegrationNotFound)
     })?;
 
     let plaintext_secret = decrypt_secret_with_file(
@@ -404,7 +404,7 @@ pub async fn git_host_webhook(
     let signature = first_header(&headers, provider.signature_headers());
     if !provider.verify_signature(plaintext_secret.expose(), signature, &body) {
         warn!(project = %project_name, git_host = %git_host, integration = %integration_name, "Git host webhook: invalid signature");
-        return Err(WebError::unauthorized("invalid webhook signature"));
+        return Err(GitHostHookRefusal::InvalidSignature.into());
     }
 
     let allowlist = integration.allowed_ips.clone().unwrap_or_default();
@@ -421,10 +421,7 @@ pub async fn git_host_webhook(
                 %client_ip,
                 "Git host webhook: source IP not allowed",
             );
-            return Err(WebError::forbidden_with(
-                ErrorCode::FORBIDDEN_SOURCE_IP,
-                "Webhook source IP not allowed",
-            ));
+            return Err(GitHostHookRefusal::SourceIpNotAllowed.into());
         }
     }
 
@@ -434,7 +431,7 @@ pub async fn git_host_webhook(
 
     let response = match event_type {
         WebhookEventKind::Push => match provider.parse_push_event(&body) {
-            None => return Err(WebError::bad_request("malformed webhook payload")),
+            None => return Err(GitHostHookRefusal::MalformedPayload.into()),
             Some(PushOutcome::Ignored) => WebhookResponse::empty("push"),
             Some(PushOutcome::Build(parsed)) => {
                 let urls = parsed.repository_urls.clone();
@@ -466,7 +463,7 @@ pub async fn git_host_webhook(
         },
         WebhookEventKind::PullRequest => {
             let Some(parsed) = provider.parse_pull_request_event(&body) else {
-                return Err(WebError::bad_request("malformed webhook payload"));
+                return Err(GitHostHookRefusal::MalformedPayload.into());
             };
             let urls = parsed.repository_urls.clone();
             let approval_ctx = approval_context_from(&parsed);
@@ -498,7 +495,7 @@ pub async fn git_host_webhook(
         }
         WebhookEventKind::Release => {
             let Some(parsed) = provider.parse_release_event(&body) else {
-                return Err(WebError::bad_request("malformed webhook payload"));
+                return Err(GitHostHookRefusal::MalformedPayload.into());
             };
             let urls = parsed.repository_urls.clone();
             let outcome = trigger_release_for_integration(

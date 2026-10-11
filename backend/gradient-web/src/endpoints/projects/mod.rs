@@ -8,6 +8,7 @@ pub mod integrations;
 pub mod invitations;
 pub mod management;
 pub mod members;
+mod refusal;
 pub mod roles;
 pub mod settings;
 pub mod ssh;

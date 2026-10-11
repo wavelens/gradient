@@ -7,9 +7,10 @@
 use super::dispatch::{
     BuildRequestSource, DispatchResponse, InputOverrideBody, queue_build_request,
 };
+use super::refusal::BuildRequestRefusal;
 use crate::access::{Caller, ProjectAccess, load_project};
 use crate::authorization::MaybeApiKey;
-use crate::error::{ErrorCode, WebError, WebResult};
+use crate::error::WebResult;
 use crate::helpers::ok_json;
 use crate::permissions::Permission;
 use axum::extract::State;
@@ -59,14 +60,12 @@ pub async fn post_url(
     .await?;
 
     if body.git_ref.is_some() && body.rev.is_some() {
-        return Err(WebError::bad_request(
-            "Specify at most one of `ref` and `rev`",
-        ));
+        return Err(BuildRequestRefusal::RefAndRevTogether.into());
     }
 
     let url = body.url.trim();
     if url.is_empty() {
-        return Err(WebError::bad_request("`url` must not be empty"));
+        return Err(BuildRequestRefusal::EmptyUrl.into());
     }
 
     let input_overrides: Vec<(String, String)> = body
@@ -83,25 +82,25 @@ pub async fn post_url(
             let hash = hex_to_vec(rev)
                 .ok()
                 .filter(|h| h.len() == COMMIT_HASH_BYTES)
-                .ok_or_else(|| WebError::bad_request("`rev` must be a 40-character hex hash"))?;
+                .ok_or(BuildRequestRefusal::InvalidRev)?;
             (hash, rev.to_string())
         }
         None => {
             let git_ref = body.git_ref.as_deref();
             let hash = resolve_remote_ref(&state.db(), &project, url, git_ref)
                 .await
-                .map_err(|e| {
-                    WebError::bad_request_with(
-                        ErrorCode::REPOSITORY_UNREACHABLE,
-                        format!("Failed to resolve repository state: {}", e),
-                    )
+                .map_err(|e| BuildRequestRefusal::RepositoryUnreachable {
+                    reason: e.to_string(),
                 })?;
             (hash, git_ref.unwrap_or("HEAD").to_string())
         }
     };
 
-    let repository = repository_url_to_nix(url, &vec_to_hex(&commit_hash))
-        .map_err(|e| WebError::bad_request(format!("Invalid repository URL: {}", e)))?;
+    let repository = repository_url_to_nix(url, &vec_to_hex(&commit_hash)).map_err(|e| {
+        BuildRequestRefusal::InvalidRepositoryUrl {
+            reason: e.to_string(),
+        }
+    })?;
 
     let tx = state.web_db.inner().begin().await?;
 

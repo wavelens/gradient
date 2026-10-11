@@ -4,9 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use super::refusal::CacheRefusal;
 use crate::authorization::decode_jwt;
 use crate::client_ip::resolve_client_ip;
-use crate::error::{ErrorCode, WebError, WebResult};
+use crate::error::{WebError, WebResult};
 use crate::helpers::OptionExt;
 use crate::ip_allowlist::is_allowed as ip_allowed;
 use crate::resource::Resource;
@@ -55,10 +56,7 @@ async fn try_authenticate_basic(
     if let Some(ctx) = decoded.api_key_context()
         && !ip_allowed(client_ip, &ctx.allowed_ips)
     {
-        return Err(WebError::forbidden_with(
-            ErrorCode::FORBIDDEN_SOURCE_IP,
-            "API key not allowed from this source IP",
-        ));
+        return Err(CacheRefusal::ApiKeyWrongSourceIp.into());
     }
     Ok(EUser::find_by_id(decoded.user_id())
         .one(&state.web_db)
@@ -117,9 +115,7 @@ async fn require_cache_auth(
     let maybe_user = try_authenticate_basic(state, headers, client_ip).await?;
     match maybe_user {
         Some(user) if user_can_access_cache(state, cache, &user).await => Ok(()),
-        _ => Err(WebError::unauthorized(
-            "Authentication required to access this cache".to_string(),
-        )),
+        _ => Err(CacheRefusal::AuthenticationRequired.into()),
     }
 }
 
@@ -171,7 +167,7 @@ async fn get_nar_by_hash_inner(
 
     let signature = cached_path_sig
         .signature
-        .ok_or_else(|| WebError::not_found_msg("Signature not yet computed"))?;
+        .ok_or(CacheRefusal::SignaturePending)?;
 
     let path = get_path_from_derivation_output(build_output.clone()).full();
 
@@ -179,10 +175,10 @@ async fn get_nar_by_hash_inner(
         .nar_hash
         .as_deref()
         .map(normalize_nar_hash)
-        .ok_or_else(|| WebError::not_found_msg("NarHash not recorded"))?;
+        .ok_or(CacheRefusal::NarHashNotStored)?;
     let nar_size = cached_path_row
         .nar_size
-        .ok_or_else(|| WebError::not_found_msg("NarSize not recorded"))? as u64;
+        .ok_or(CacheRefusal::NarSizeNotStored)? as u64;
     let references = gradient_db::graph::runtime_closure::references_for_hash(
         &state.web_db,
         &cached_path_row.hash,
@@ -203,12 +199,11 @@ async fn get_nar_by_hash_inner(
         .file_hash
         .as_deref()
         .map(normalize_nar_hash)
-        .ok_or_else(|| WebError::not_found_msg("FileHash not recorded"))?;
+        .ok_or(CacheRefusal::FileHashNotStored)?;
     let file_hash_nix32 = strip_hash_algo(&file_hash).to_string();
     let file_size = cached_path_row
         .file_size
-        .ok_or_else(|| WebError::not_found_msg("FileSize not recorded"))?
-        as u32;
+        .ok_or(CacheRefusal::FileSizeNotStored)? as u32;
 
     Ok(NixPathInfo {
         store_path: path,
@@ -254,7 +249,7 @@ async fn get_nar_by_cached_path(
 
     let signature = cached_path_sig
         .signature
-        .ok_or_else(|| WebError::not_found_msg("Signature not yet computed"))?;
+        .ok_or(CacheRefusal::SignaturePending)?;
 
     let sig = gradient_sources::full_signature_token(
         &signature,
@@ -265,18 +260,18 @@ async fn get_nar_by_cached_path(
     let file_hash = cached_path_row
         .file_hash
         .clone()
-        .ok_or_else(|| WebError::bad_request("Missing file hash"))?;
+        .ok_or(CacheRefusal::MissingFileHash)?;
     let file_size = cached_path_row
         .file_size
-        .ok_or_else(|| WebError::bad_request("Missing file size"))? as u32;
+        .ok_or(CacheRefusal::MissingFileSize)? as u32;
     let nar_hash = cached_path_row
         .nar_hash
         .as_deref()
         .map(normalize_nar_hash)
-        .ok_or_else(|| WebError::not_found_msg("NarHash not recorded"))?;
+        .ok_or(CacheRefusal::NarHashNotStored)?;
     let nar_size = cached_path_row
         .nar_size
-        .ok_or_else(|| WebError::not_found_msg("NarSize not recorded"))? as u64;
+        .ok_or(CacheRefusal::NarSizeNotStored)? as u64;
     let references = gradient_db::graph::runtime_closure::references_for_hash(
         &state.web_db,
         &cached_path_row.hash,
@@ -317,7 +312,7 @@ impl CacheContext {
             .or_not_found(Resource::Cache)?;
 
         if !cache.active {
-            return Err(WebError::bad_request("Cache is disabled"));
+            return Err(CacheRefusal::CacheDisabled.into());
         }
 
         require_cache_auth(state, headers, client_ip, &cache).await?;

@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use super::refusal::ProjectRefusal;
 use crate::access::{
     CacheAccess, Caller, ProjectAccess, cache_admin_emails, has_cache_permission, load_cache,
     load_project,
@@ -456,7 +457,7 @@ pub async fn delete_project_subscribe_cache(
             )
             .one(&state.web_db)
             .await?
-            .ok_or_else(|| WebError::bad_request("Project not subscribed to Cache"))?;
+            .ok_or(ProjectRefusal::NotSubscribedToCache)?;
 
         request.into_active_model().delete(&state.web_db).await?;
 

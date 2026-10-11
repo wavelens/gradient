@@ -19,6 +19,7 @@ pub mod ip_allowlist;
 pub mod metrics_scope;
 pub mod otlp;
 pub mod permissions;
+pub mod refusal;
 pub mod resource;
 pub mod scim;
 

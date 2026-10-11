@@ -5,11 +5,12 @@
  */
 
 use super::members::role_label;
+use super::refusal::TeamRefusal;
 use crate::access::{TeamAccess, load_team};
 use crate::audit::{RequestInfo, record as audit_record};
 use crate::authorization::MaybeApiKey;
 use crate::endpoints::projects::invitations::{PendingInvitationItem, RevokeInvitationRequest};
-use crate::error::{WebError, WebResult};
+use crate::error::WebResult;
 use crate::helpers::{OptionExt, ok_json};
 use crate::resource::Resource;
 use axum::extract::{Path, State};
@@ -98,7 +99,7 @@ pub async fn delete_team_invitation(
         .filter(CTeamInvitation::User.eq(target_user.id))
         .one(&state.web_db)
         .await?
-        .ok_or_else(|| WebError::bad_request("No pending invitation for this user"))?;
+        .ok_or(TeamRefusal::NoPendingInvitation)?;
 
     invitation.into_active_model().delete(&state.web_db).await?;
 

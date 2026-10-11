@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use super::refusal::TaskRefusal;
 use crate::access::{Caller, TaskAccess, load_task};
 use crate::audit::{RequestInfo, record as audit_record};
 use crate::authorization::MaybeApiKey;
@@ -107,16 +108,17 @@ async fn validate_mail_teams(
         if !gradient_db::teams::mail::team_reaches_project_users(&state.web_db, project, name)
             .await?
         {
-            return Err(WebError::unprocessable_entity(format!(
-                "team '{name}' has no access to this project"
-            )));
+            return Err(TaskRefusal::TeamWithoutProjectAccess {
+                team: name.to_string(),
+            }
+            .into());
         }
     }
     Ok(())
 }
 
 fn validate_destination(cfg: &ActionConfig) -> WebResult<()> {
-    let url_error = |e: WebhookUrlError| WebError::unprocessable_entity(e.to_string());
+    let url_error = |e: WebhookUrlError| TaskRefusal::InvalidWebhookUrl(e.to_string());
     match cfg {
         ActionConfig::SendWebRequest { url, .. } => {
             validate_webhook_url(url).map_err(url_error)?;
@@ -128,15 +130,11 @@ fn validate_destination(cfg: &ActionConfig) -> WebResult<()> {
         } => {
             validate_webhook_url(homeserver).map_err(url_error)?;
             if access_token.as_deref().is_some_and(|t| t.trim().is_empty()) {
-                return Err(WebError::unprocessable_entity(
-                    "access_token must not be empty",
-                ));
+                return Err(TaskRefusal::EmptyAccessToken.into());
             }
 
             if !is_matrix_room_id(room_id) {
-                return Err(WebError::unprocessable_entity(
-                    "room_id must be a Matrix room ID like !abc123 or !abc:example.org",
-                ));
+                return Err(TaskRefusal::InvalidMatrixRoomId.into());
             }
         }
         ActionConfig::SendSlackMessage {
@@ -228,14 +226,10 @@ pub async fn create_action(
 
     match &body.config {
         ActionConfig::SendMail { .. } if !state.email.is_enabled() => {
-            return Err(WebError::unprocessable_entity(
-                "SMTP is not configured on this server",
-            ));
+            return Err(TaskRefusal::SmtpNotConfigured.into());
         }
         ActionConfig::GitHostStatusReport { .. } if !body.events.is_empty() => {
-            return Err(WebError::unprocessable_entity(
-                "git_host_status_report actions cannot carry custom events",
-            ));
+            return Err(TaskRefusal::StatusReportWithEvents.into());
         }
         _ => {}
     }
@@ -250,19 +244,17 @@ pub async fn create_action(
         } | ActionConfig::SendSlackMessage { webhook_url: None }
     ) {
         let at = body.config.action_type();
-        return Err(WebError::unprocessable_entity(format!(
-            "{} requires {}",
-            at.as_str(),
-            at.secret_field().unwrap_or_default(),
-        )));
+        return Err(TaskRefusal::MissingSecret {
+            action_type: at.as_str().to_string(),
+            secret_field: at.secret_field().unwrap_or_default().to_string(),
+        }
+        .into());
     }
 
     if let ActionConfig::SendMail { recipients, .. } = &body.config
         && recipients.is_empty()
     {
-        return Err(WebError::unprocessable_entity(
-            "send_mail requires at least one recipient",
-        ));
+        return Err(TaskRefusal::NoMailRecipients.into());
     }
 
     let integration_id = match &body.config {
@@ -279,14 +271,10 @@ pub async fn create_action(
         match integration {
             Some(row) if row.kind == IntegrationKind::Outbound => {}
             Some(_) => {
-                return Err(WebError::unprocessable_entity(
-                    "integration is not an outbound integration",
-                ));
+                return Err(TaskRefusal::IntegrationNotOutbound.into());
             }
             None => {
-                return Err(WebError::unprocessable_entity(
-                    "outbound integration not found",
-                ));
+                return Err(TaskRefusal::OutboundIntegrationNotFound.into());
             }
         }
     }
@@ -297,10 +285,7 @@ pub async fn create_action(
         .one(&state.web_db)
         .await?;
     if existing.is_some() {
-        return Err(WebError::Conflict(
-            crate::error::ErrorCode::ALREADY_EXISTS,
-            "action with this name already exists".into(),
-        ));
+        return Err(TaskRefusal::ActionNameTaken.into());
     }
 
     let plaintext_token = match &body.config {
@@ -419,18 +404,14 @@ pub async fn update_action(
 
     if let Some(ref new_cfg) = body.config {
         if new_cfg.action_type() != existing_type {
-            return Err(WebError::unprocessable_entity(
-                "action_type cannot be changed",
-            ));
+            return Err(TaskRefusal::ActionTypeChange.into());
         }
 
         validate_destination(new_cfg)?;
         validate_mail_teams(&state, project.id, new_cfg).await?;
         match new_cfg {
             ActionConfig::SendMail { recipients, .. } if recipients.is_empty() => {
-                return Err(WebError::unprocessable_entity(
-                    "send_mail requires at least one recipient",
-                ));
+                return Err(TaskRefusal::NoMailRecipients.into());
             }
             ActionConfig::GitHostStatusReport { integration_id }
             | ActionConfig::OpenPr { integration_id, .. } => {
@@ -442,14 +423,10 @@ pub async fn update_action(
                 match integration {
                     Some(r) if r.kind == IntegrationKind::Outbound => {}
                     Some(_) => {
-                        return Err(WebError::unprocessable_entity(
-                            "integration is not an outbound integration",
-                        ));
+                        return Err(TaskRefusal::IntegrationNotOutbound.into());
                     }
                     None => {
-                        return Err(WebError::unprocessable_entity(
-                            "outbound integration not found",
-                        ));
+                        return Err(TaskRefusal::OutboundIntegrationNotFound.into());
                     }
                 }
             }
@@ -464,9 +441,7 @@ pub async fn update_action(
         )
         && !evs.is_empty()
     {
-        return Err(WebError::unprocessable_entity(
-            "git_host_status_report and open_pr actions cannot carry custom events",
-        ));
+        return Err(TaskRefusal::CustomEventsNotAllowed.into());
     }
 
     let mut active: ATaskAction = row.into();
@@ -693,9 +668,7 @@ pub async fn regenerate_token(
         .or_not_found(Resource::Action)?;
 
     if existing.action_type != ActionType::SendWebRequest {
-        return Err(WebError::unprocessable_entity(
-            "regenerate-token is only valid for send_web_request actions",
-        ));
+        return Err(TaskRefusal::TokenRegenerationNotSupported.into());
     }
 
     let mut raw = [0u8; 32];

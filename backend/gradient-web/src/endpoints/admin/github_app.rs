@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use super::refusal::AdminRefusal;
 use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
 use axum::extract::{Query, State};
@@ -40,7 +41,7 @@ fn default_host() -> String {
 
 pub fn validate_host(host: &str) -> Result<(), WebError> {
     if host.is_empty() {
-        return Err(WebError::bad_request("host must not be empty"));
+        return Err(AdminRefusal::EmptyHost.into());
     }
 
     let ok = host
@@ -48,9 +49,7 @@ pub fn validate_host(host: &str) -> Result<(), WebError> {
         .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-');
 
     if !ok {
-        return Err(WebError::bad_request(
-            "host must contain only alphanumerics, '.' and '-'",
-        ));
+        return Err(AdminRefusal::InvalidHostCharacters.into());
     }
 
     Ok(())
@@ -85,7 +84,7 @@ pub async fn callback(
     let Some(user_id) =
         gradient_ci::manifest_state::validate_and_consume(&state.manifest_state, &q.state)
     else {
-        return Err(WebError::bad_request("manifest state invalid or expired"));
+        return Err(AdminRefusal::InvalidManifestState.into());
     };
 
     let creds = gradient_ci::github_app_manifest::exchange_code(&state.http, &host, &q.code)
@@ -105,7 +104,7 @@ pub async fn credentials(
     Extension(user): Extension<MUser>,
 ) -> WebResult<Json<BaseResponse<gradient_ci::github_app_manifest::ManifestResult>>> {
     let creds = gradient_ci::manifest_state::take_credentials(&state.pending_credentials, user.id)
-        .ok_or_else(|| WebError::not_found_msg("Pending credentials"))?;
+        .ok_or(AdminRefusal::NoPendingCredentials)?;
 
     Ok(ok_json(creds))
 }

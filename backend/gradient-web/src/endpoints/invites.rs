@@ -11,6 +11,7 @@ use crate::helpers::{ok_json, role_names};
 use crate::invite_policy::{
     InviteDecision, InviteItem, InviteKind, evaluate_invite, merge_invites,
 };
+use crate::refusal::{Refusal, RefusalStatus};
 use crate::resource::Resource;
 use axum::extract::State;
 use axum::{Extension, Json};
@@ -24,6 +25,20 @@ use sea_orm::{
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
+
+#[derive(Debug, thiserror::Error)]
+enum InviteRefusal {
+    #[error("Invitation has expired")]
+    ExpiredInvitation,
+}
+
+impl Refusal for InviteRefusal {
+    fn status(&self) -> RefusalStatus {
+        match self {
+            Self::ExpiredInvitation => RefusalStatus::Gone,
+        }
+    }
+}
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct InviteTokenRequest {
@@ -246,7 +261,7 @@ async fn claim_invitation(
                 }
             }
 
-            Err(WebError::gone("Invitation has expired"))
+            Err(InviteRefusal::ExpiredInvitation.into())
         }
     }
 }

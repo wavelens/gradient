@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use super::refusal::CacheRefusal;
 use crate::access::{CacheAccess, Caller, load_cache};
 use crate::audit::{RequestInfo, record as audit_record};
 use crate::authorization::MaybeApiKey;
@@ -299,7 +300,7 @@ pub async fn patch_cache_member(
 
     let membership = find_cache_membership(&state, cache.id, target_user.id)
         .await?
-        .ok_or_else(|| WebError::bad_request("User not in Cache"))?;
+        .ok_or(CacheRefusal::NotACacheMember)?;
 
     let previous_role_id = membership.role;
     let role = ECacheRole::find()
@@ -364,7 +365,7 @@ pub async fn delete_cache_member(
 
     let membership = find_cache_membership(&state, cache.id, target_user.id)
         .await?
-        .ok_or_else(|| WebError::bad_request("User not in Cache"))?;
+        .ok_or(CacheRefusal::NotACacheMember)?;
 
     if membership.role == BASE_CACHE_ROLE_ADMIN_ID {
         let admin_count = ECacheUser::find()
@@ -373,9 +374,7 @@ pub async fn delete_cache_member(
             .count(&state.web_db)
             .await?;
         if admin_count <= 1 {
-            return Err(WebError::conflict(
-                "Cannot remove the last Admin from the cache.",
-            ));
+            return Err(CacheRefusal::LastAdminRemoval.into());
         }
     }
 

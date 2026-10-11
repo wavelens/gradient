@@ -7,12 +7,13 @@
 use crate::access::{CacheAccess, Caller, effective_cache_mask, load_cache};
 use crate::audit::{RequestInfo, record as audit_record};
 use crate::authorization::{MaybeApiKey, generate_api_key, hash_api_key, session_claims};
-use crate::error::{WebError, WebResult};
+use crate::error::{ErrorCode, WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json, paginate};
 use crate::permissions::{
     PermissionEntry, available_cache_permissions, available_permissions, mask_to_vec,
     parse_cache_permission_list, parse_permission_list,
 };
+use crate::refusal::{Refusal, RefusalStatus};
 use crate::resource::Resource;
 use axum::extract::{Path, Query, State};
 use axum::http::HeaderMap;
@@ -35,6 +36,76 @@ use sea_orm::{
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
+
+#[derive(Debug, thiserror::Error)]
+enum UserRefusal {
+    #[error("Password confirmation required")]
+    PasswordConfirmationRequired,
+    #[error("Password confirmation invalid")]
+    PasswordConfirmationInvalid,
+    #[error("Username confirmation required")]
+    UsernameConfirmationRequired,
+    #[error("Username confirmation does not match")]
+    UsernameConfirmationMismatch,
+    #[error("Unknown project or not a member: '{project}'.")]
+    UnknownProjectOrNotMember { project: String },
+    #[error("API keys cannot manage API keys. Use a session token.")]
+    ApiKeyCannotManageApiKeys,
+    #[error("invalid allowed_ips entry '{entry}': {reason}")]
+    InvalidAllowedIpsEntry { entry: String, reason: String },
+    #[error("API key cannot pin to both a project and a cache.")]
+    PinToProjectAndCache,
+    #[error("At least one permission is required for an API key.")]
+    NoPermissionsSelected,
+    #[error("API key cannot grant cache permissions you do not hold.")]
+    GrantUnheldCachePermissions,
+    #[error("Cannot modify a state-managed API key.")]
+    ModifyManagedApiKey,
+    #[error("Cannot delete a state-managed API key.")]
+    DeleteManagedApiKey,
+    #[error("Cannot revoke a state-managed API key.")]
+    RevokeManagedApiKey,
+    #[error(
+        "Cannot modify state-managed user. This user is managed by configuration and cannot be edited through the API."
+    )]
+    ModifyManagedUser,
+    #[error(
+        "Cannot modify profile of an OIDC user. Your profile is managed by your identity provider."
+    )]
+    ModifyOidcUserProfile,
+    #[error("Invalid name: {reason}")]
+    InvalidName { reason: String },
+}
+
+impl Refusal for UserRefusal {
+    fn status(&self) -> RefusalStatus {
+        match self {
+            Self::PasswordConfirmationRequired
+            | Self::PasswordConfirmationInvalid
+            | Self::UsernameConfirmationRequired
+            | Self::UsernameConfirmationMismatch
+            | Self::ApiKeyCannotManageApiKeys
+            | Self::GrantUnheldCachePermissions
+            | Self::ModifyManagedApiKey
+            | Self::DeleteManagedApiKey
+            | Self::RevokeManagedApiKey
+            | Self::ModifyManagedUser
+            | Self::ModifyOidcUserProfile => RefusalStatus::Forbidden,
+            Self::UnknownProjectOrNotMember { .. }
+            | Self::InvalidAllowedIpsEntry { .. }
+            | Self::PinToProjectAndCache
+            | Self::NoPermissionsSelected
+            | Self::InvalidName { .. } => RefusalStatus::BadRequest,
+        }
+    }
+
+    fn code(&self) -> ErrorCode {
+        match self {
+            Self::InvalidAllowedIpsEntry { .. } => ErrorCode::INVALID_ALLOWED_IP,
+            _ => self.status().default_code(),
+        }
+    }
+}
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct UserInfoResponse {
@@ -211,16 +282,15 @@ pub async fn delete(
         let provided = body
             .password
             .as_ref()
-            .ok_or_else(|| WebError::forbidden("Password confirmation required"))?;
-        verify_password(provided, hashed)
-            .map_err(|_| WebError::forbidden("Password confirmation invalid"))?;
+            .ok_or(UserRefusal::PasswordConfirmationRequired)?;
+        verify_password(provided, hashed).map_err(|_| UserRefusal::PasswordConfirmationInvalid)?;
     } else {
         let confirm = body
             .confirm_username
             .as_ref()
-            .ok_or_else(|| WebError::forbidden("Username confirmation required"))?;
+            .ok_or(UserRefusal::UsernameConfirmationRequired)?;
         if confirm != &user.username {
-            return Err(WebError::forbidden("Username confirmation does not match"));
+            return Err(UserRefusal::UsernameConfirmationMismatch.into());
         }
     }
 
@@ -274,23 +344,22 @@ async fn resolve_project_pin(
     if trimmed.is_empty() {
         return Ok(None);
     }
-    let unknown =
-        || WebError::bad_request(format!("Unknown project or not a member: '{}'.", trimmed));
+    let unknown = || UserRefusal::UnknownProjectOrNotMember {
+        project: trimmed.to_string(),
+    };
     let project = get_any_project_by_name(&state.db(), trimmed.into())
         .await?
         .ok_or_else(unknown)?;
     let is_member = crate::access::is_project_member(state, user_id, project.id, None).await?;
     if !is_member {
-        return Err(unknown());
+        return Err(unknown().into());
     }
     Ok(Some(project.id))
 }
 
 pub(crate) fn forbid_via_api_key(api_key: &MaybeApiKey) -> WebResult<()> {
     if api_key.as_ref().is_some() {
-        return Err(WebError::forbidden(
-            "API keys cannot manage API keys. Use a session token.",
-        ));
+        return Err(UserRefusal::ApiKeyCannotManageApiKeys.into());
     }
     Ok(())
 }
@@ -338,10 +407,10 @@ fn normalize_allowed_ips(raw: Option<Vec<String>>) -> Result<Option<Vec<String>>
     let mut out = Vec::with_capacity(entries.len());
     for e in entries {
         let canon = crate::ip_allowlist::normalize_entry(&e).map_err(|err| {
-            WebError::bad_request_with(
-                crate::error::ErrorCode::INVALID_ALLOWED_IP,
-                format!("invalid allowed_ips entry '{e}': {err}"),
-            )
+            UserRefusal::InvalidAllowedIpsEntry {
+                entry: e.to_string(),
+                reason: err.to_string(),
+            }
         })?;
         out.push(canon);
     }
@@ -386,9 +455,7 @@ pub async fn post_keys(
     forbid_via_api_key(&api_key_caller)?;
 
     if body.cache.is_some() && body.project.is_some() {
-        return Err(WebError::bad_request(
-            "API key cannot pin to both a project and a cache.",
-        ));
+        return Err(UserRefusal::PinToProjectAndCache.into());
     }
 
     let existing_api_key = EApi::find()
@@ -418,25 +485,19 @@ pub async fn post_keys(
         .await?;
         let m = parse_cache_permission_list(&body.permissions, "GET /user/keys/permissions")?;
         if m == 0 {
-            return Err(WebError::bad_request(
-                "At least one permission is required for an API key.",
-            ));
+            return Err(UserRefusal::NoPermissionsSelected.into());
         }
         let granted = effective_cache_mask(&state, user.id, cache.id, None)
             .await?
             .ok_or_else(|| WebError::not_found(Resource::Cache))?;
         if m & !granted != 0 {
-            return Err(WebError::forbidden(
-                "API key cannot grant cache permissions you do not hold.",
-            ));
+            return Err(UserRefusal::GrantUnheldCachePermissions.into());
         }
         (m, None, Some(cache.id))
     } else {
         let m = parse_permission_list(&body.permissions, "GET /user/keys/permissions")?;
         if m == 0 {
-            return Err(WebError::bad_request(
-                "At least one permission is required for an API key.",
-            ));
+            return Err(UserRefusal::NoPermissionsSelected.into());
         }
         let project = resolve_project_pin(&state, user.id, body.project.clone()).await?;
         (m, project, None)
@@ -503,9 +564,7 @@ pub async fn patch_key(
         return Err(WebError::not_found(Resource::ApiKey));
     }
     if api_key.managed {
-        return Err(WebError::forbidden(
-            "Cannot modify a state-managed API key.",
-        ));
+        return Err(UserRefusal::ModifyManagedApiKey.into());
     }
 
     let previous_mask = api_key.permission;
@@ -534,9 +593,7 @@ pub async fn patch_key(
     if let Some(perms) = body.permissions {
         new_mask = parse_permission_list(&perms, "GET /user/keys/permissions")?;
         if new_mask == 0 {
-            return Err(WebError::bad_request(
-                "At least one permission is required for an API key.",
-            ));
+            return Err(UserRefusal::NoPermissionsSelected.into());
         }
         active.permission = Set(new_mask);
     }
@@ -593,9 +650,7 @@ pub async fn delete_keys(
         .or_not_found(Resource::ApiKey)?;
 
     if api_key.managed {
-        return Err(WebError::forbidden(
-            "Cannot delete a state-managed API key.".to_string(),
-        ));
+        return Err(UserRefusal::DeleteManagedApiKey.into());
     }
 
     let api_key_id = api_key.id;
@@ -640,9 +695,7 @@ pub async fn post_key_revoke(
         return Err(WebError::not_found(Resource::ApiKey));
     }
     if api_key.managed {
-        return Err(WebError::forbidden(
-            "Cannot revoke a state-managed API key.".to_string(),
-        ));
+        return Err(UserRefusal::RevokeManagedApiKey.into());
     }
     if api_key.revoked_at.is_some() {
         return Ok(ok_json("API-Key already revoked".to_string()));
@@ -781,15 +834,11 @@ pub async fn patch_settings(
     Json(body): Json<PatchUserSettingsRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     if user.managed {
-        return Err(WebError::forbidden(
-            "Cannot modify state-managed user. This user is managed by configuration and cannot be edited through the API.",
-        ));
+        return Err(UserRefusal::ModifyManagedUser.into());
     }
 
     if user.password.is_none() {
-        return Err(WebError::forbidden(
-            "Cannot modify profile of an OIDC user. Your profile is managed by your identity provider.",
-        ));
+        return Err(UserRefusal::ModifyOidcUserProfile.into());
     }
 
     let mut auser: AUser = user.into();
@@ -813,7 +862,10 @@ pub async fn patch_settings(
 
     if let Some(name) = body.name {
         if let Err(e) = validate_display_name(&name) {
-            return Err(WebError::bad_request(format!("Invalid name: {}", e)));
+            return Err(UserRefusal::InvalidName {
+                reason: e.to_string(),
+            }
+            .into());
         }
         auser.name = Set(name);
     }

@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use super::refusal::BuildReadRefusal;
 use crate::authorization::{MaybeApiKey, MaybeUser, decode_download_token, encode_download_token};
 use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
@@ -225,7 +226,7 @@ async fn load_with_download_token(
     let ctx = BuildAccessContext::load_unguarded(state, build_id).await?;
     let claims = decode_download_token(State(Arc::clone(state)), token)
         .await
-        .map_err(|_| WebError::unauthorized("Invalid download token"))?;
+        .map_err(|_| BuildReadRefusal::InvalidDownloadToken)?;
     if claims.derivation != ctx.build_job.derivation {
         return Err(WebError::not_found(Resource::Build));
     }

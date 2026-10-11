@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use super::refusal::TeamRefusal;
 use crate::access::{TeamAccess, load_team};
 use crate::audit::{RequestInfo, record as audit_record};
 use crate::authorization::MaybeApiKey;
@@ -74,7 +75,7 @@ async fn find_membership(
 
 fn ensure_not_state_managed(membership: &MTeamUser) -> WebResult<()> {
     if membership.source == TeamMemberSource::State {
-        return Err(WebError::conflict("member is managed by server state"));
+        return Err(TeamRefusal::MemberManagedByState.into());
     }
 
     Ok(())
@@ -94,9 +95,7 @@ async fn ensure_not_last_admin(
         .count(&state.web_db)
         .await?;
     if admins <= 1 {
-        return Err(WebError::conflict(
-            "Cannot remove the last Admin from the team.",
-        ));
+        return Err(TeamRefusal::LastAdmin.into());
     }
     Ok(())
 }
@@ -266,7 +265,7 @@ pub async fn patch_team_members(
     let target = find_user(&state, &body.user).await?;
     let membership = find_membership(&state, team.id, target.id)
         .await?
-        .ok_or_else(|| WebError::bad_request("User not in Team"))?;
+        .ok_or(TeamRefusal::NotATeamMember)?;
     ensure_not_state_managed(&membership)?;
 
     if body.role != TeamRole::Admin {
@@ -318,7 +317,7 @@ pub async fn delete_team_members(
     let target = find_user(&state, &body.user).await?;
     let membership = find_membership(&state, team.id, target.id)
         .await?
-        .ok_or_else(|| WebError::bad_request("User not in Team"))?;
+        .ok_or(TeamRefusal::NotATeamMember)?;
     ensure_not_state_managed(&membership)?;
 
     ensure_not_last_admin(&state, team.id, &membership).await?;

@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use super::refusal::TeamRefusal;
 use crate::access::{TeamAccess, load_team};
 use crate::audit::{RequestInfo, record as audit_record};
 use crate::authorization::MaybeApiKey;
@@ -11,7 +12,7 @@ use crate::endpoints::projects::workers::{
     PatchWorkerRequest, RegisterWorkerRequest, WorkerConnection, encrypt_for_dialing, live_workers,
     patch_edits_managed_fields, worker_connection,
 };
-use crate::error::{WebError, WebResult};
+use crate::error::WebResult;
 use crate::helpers::{OptionExt, ok_json};
 use crate::resource::Resource;
 use axum::extract::{Path, State};
@@ -152,7 +153,7 @@ pub async fn post_team_worker(
     .await?;
 
     let worker_id = Uuid::parse_str(&body.worker_id)
-        .map_err(|_| WebError::bad_request("worker_id must be a valid UUID"))?
+        .map_err(|_| TeamRefusal::InvalidWorkerId)?
         .to_string();
     let registered = EWorkerRegistration::find()
         .filter(CWorkerRegistration::WorkerId.eq(&worker_id))
@@ -160,7 +161,7 @@ pub async fn post_team_worker(
         .await?
         .is_some();
     if registered || gradient_db::teams::workers::is_team_worker(&state.web_db, &worker_id).await? {
-        return Err(WebError::conflict("the worker id is already registered"));
+        return Err(TeamRefusal::WorkerIdRegistered.into());
     }
 
     let (token, return_token) = crate::endpoints::worker_tokens::issue(body.token)?;
@@ -235,7 +236,7 @@ pub async fn patch_team_worker(
     .await?;
     let worker = find_team_worker(&state, team.id, &worker_id).await?;
     if worker.managed && patch_edits_managed_fields(&body) {
-        return Err(WebError::conflict("worker is managed by server state"));
+        return Err(TeamRefusal::WorkerManagedByState.into());
     }
 
     let mut active: ATeamWorker = worker.into();
@@ -301,7 +302,7 @@ pub async fn delete_team_worker(
     .await?;
     let worker = find_team_worker(&state, team.id, &worker_id).await?;
     if worker.managed {
-        return Err(WebError::conflict("worker is managed by server state"));
+        return Err(TeamRefusal::WorkerManagedByState.into());
     }
 
     let projects = granted_projects(&state, team.id).await?;

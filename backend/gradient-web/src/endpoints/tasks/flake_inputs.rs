@@ -4,9 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use super::refusal::TaskRefusal;
 use crate::access::{Caller, TaskAccess, load_task};
 use crate::authorization::MaybeApiKey;
-use crate::error::{WebError, WebResult};
+use crate::error::WebResult;
 use crate::helpers::{OptionExt, ok_json};
 use crate::permissions::Permission;
 use crate::resource::Resource;
@@ -79,24 +80,20 @@ pub struct DeletedResponse {
 
 fn validate_input_name(name: &str) -> WebResult<()> {
     if name.is_empty() {
-        return Err(WebError::bad_request("input_name must not be empty"));
+        return Err(TaskRefusal::EmptyInputName.into());
     }
     let ok = name
         .chars()
         .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '*' | '?' | '[' | ']'));
     if !ok {
-        return Err(WebError::bad_request(
-            "input_name may contain letters, digits, _ - and glob chars * ? [ ]",
-        ));
+        return Err(TaskRefusal::InvalidInputNameCharacters.into());
     }
     if !gradient_util::glob::is_pattern(name)
         && let Some(first) = name.chars().next()
         && !first.is_ascii_alphabetic()
         && first != '_'
     {
-        return Err(WebError::bad_request(
-            "input_name must match ^[A-Za-z_][A-Za-z0-9_-]*$",
-        ));
+        return Err(TaskRefusal::InvalidInputNameStart.into());
     }
     Ok(())
 }
@@ -105,7 +102,7 @@ fn validate_url(url: &Option<String>) -> WebResult<()> {
     if let Some(u) = url
         && u.trim().is_empty()
     {
-        return Err(WebError::bad_request("url must not be empty"));
+        return Err(TaskRefusal::EmptyUrl.into());
     }
     Ok(())
 }
@@ -164,10 +161,10 @@ pub async fn create(
         .one(&state.web_db)
         .await?;
     if existing.is_some() {
-        return Err(WebError::bad_request(format!(
-            "override for input '{}' already exists",
-            body.input_name,
-        )));
+        return Err(TaskRefusal::OverrideExists {
+            input_name: body.input_name.clone(),
+        }
+        .into());
     }
 
     let now = Utc::now().naive_utc();
@@ -255,9 +252,10 @@ pub async fn update(
             .one(&state.web_db)
             .await?;
         if dup.is_some() {
-            return Err(WebError::bad_request(format!(
-                "override for input '{new_name}' already exists",
-            )));
+            return Err(TaskRefusal::OverrideExists {
+                input_name: new_name.to_string(),
+            }
+            .into());
         }
     }
 

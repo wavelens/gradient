@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use super::refusal::TaskRefusal;
 use super::{
     BuildStatusCounts, EntryPointSummary, EvaluationSummary, EvaluationTriggerSummary,
     FailedAttributeSummary, PaginatedEntryPoints, QueueSummary, TaskDetailsResponse,
@@ -12,7 +13,7 @@ use crate::access::{Caller, TaskAccess, has_permission, is_project_member, load_
 use crate::authorization::{MaybeApiKey, MaybeUser};
 use crate::endpoints::evals::{live_progress, live_progress_status};
 use crate::endpoints::{archive_headers, build_product_headers};
-use crate::error::{ErrorCode, WebError, WebResult};
+use crate::error::{WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json};
 use crate::permissions::Permission;
 use crate::resource::Resource;
@@ -226,7 +227,7 @@ pub async fn post_task_evaluate(
             hex_to_vec(commit)
                 .ok()
                 .filter(|h| h.len() == COMMIT_HASH_BYTES)
-                .ok_or_else(|| WebError::bad_request("`commit` must be a 40-character hex hash"))
+                .ok_or(TaskRefusal::InvalidCommitHash)
         })
         .transpose()?;
 
@@ -236,7 +237,9 @@ pub async fn post_task_evaluate(
         .map(|a| {
             a.parse::<Wildcard>()
                 .map(|w| w.to_string())
-                .map_err(|e| WebError::bad_request(format!("Invalid `attr`: {}", e)))
+                .map_err(|e| TaskRefusal::InvalidAttr {
+                    reason: e.to_string(),
+                })
         })
         .transpose()?;
 
@@ -246,20 +249,16 @@ pub async fn post_task_evaluate(
         Some(commit_hash) => {
             let commit = get_commit_info(&state.db(), &task, &commit_hash)
                 .await
-                .map_err(|e| {
-                    WebError::bad_request_with(
-                        ErrorCode::REPOSITORY_UNREACHABLE,
-                        format!("Commit not found in repository: {}", e),
-                    )
+                .map_err(|e| TaskRefusal::CommitLookupFailed {
+                    reason: e.to_string(),
                 })?;
             (commit_hash, commit.message, commit.author_name)
         }
         None => {
             let head = head_commit(&state.db(), &task, None).await.map_err(|e| {
-                WebError::bad_request_with(
-                    ErrorCode::REPOSITORY_UNREACHABLE,
-                    format!("Failed to fetch repository state: {}", e),
-                )
+                TaskRefusal::RepositoryStateFetchFailed {
+                    reason: e.to_string(),
+                }
             })?;
             let commit_hash = head.hash;
 
@@ -299,7 +298,7 @@ pub async fn post_task_evaluate(
     .await
     .map_err(|e| match e {
         gradient_ci::TriggerError::AlreadyInProgress => {
-            WebError::bad_request("Evaluation already in progress")
+            WebError::from(TaskRefusal::EvaluationInProgress)
         }
         gradient_ci::TriggerError::Db(db_err) => WebError::from(db_err),
     })?;
@@ -353,7 +352,7 @@ pub async fn get_task_evaluations(
         let hash = hex_to_vec(commit)
             .ok()
             .filter(|h| h.len() == COMMIT_HASH_BYTES)
-            .ok_or_else(|| WebError::bad_request("`commit` must be a 40-character hex hash"))?;
+            .ok_or(TaskRefusal::InvalidCommitHash)?;
 
         let commit_ids: Vec<CommitId> = ECommit::find()
             .filter(CCommit::Hash.eq(hash))
@@ -503,9 +502,7 @@ fn parse_attr_filter(attr: &str) -> WebResult<&str> {
     let unquoted_has = |c: char| attr.split('"').step_by(2).any(|part| part.contains(c));
 
     if attr.is_empty() || attr.contains(',') || unquoted_has('*') || unquoted_has('#') {
-        return Err(WebError::bad_request(
-            "`attr` must be a concrete attribute path, without wildcard syntax",
-        ));
+        return Err(TaskRefusal::AttrNotConcrete.into());
     }
 
     Ok(attr)
@@ -519,9 +516,9 @@ fn parse_status_filter(raw: &str) -> WebResult<Vec<EvaluationStatus>> {
             .find(|s| format!("{s:?}").eq_ignore_ascii_case(name))
             .map(|s| vec![s])
             .ok_or_else(|| {
-                WebError::bad_request(format!(
-                    "Unknown evaluation status `{name}`; expected `active`, `terminal`, or a status name"
-                ))
+                WebError::from(TaskRefusal::UnknownEvaluationStatus {
+                    name: name.to_string(),
+                })
             }),
     }
 }
@@ -951,14 +948,11 @@ pub async fn get_entry_point_download(
     let (resolved_user, resolved_key) = if let Some(token_str) = params.token {
         let decoded = crate::authorization::decode_jwt(State(Arc::clone(&state)), token_str)
             .await
-            .map_err(|_| WebError::unauthorized("Invalid token"))?;
+            .map_err(|_| TaskRefusal::InvalidToken)?;
         if let Some(ctx) = decoded.api_key_context()
             && !crate::ip_allowlist::is_allowed(client_ip, &ctx.allowed_ips)
         {
-            return Err(WebError::forbidden_with(
-                crate::error::ErrorCode::FORBIDDEN_SOURCE_IP,
-                "API key not allowed from this source IP",
-            ));
+            return Err(TaskRefusal::SourceIpNotAllowed.into());
         }
         let user = EUser::find_by_id(decoded.user_id())
             .one(&state.web_db)
@@ -975,7 +969,7 @@ pub async fn get_entry_point_download(
                     return Err(WebError::not_found(Resource::Task));
                 }
             }
-            None => return Err(WebError::unauthorized("Authorization required")),
+            None => return Err(TaskRefusal::AuthorizationRequired.into()),
         }
     }
 

@@ -10,6 +10,7 @@ use crate::helpers::OptionExt;
 use crate::permissions::{
     CachePermission, Permission, PermissionMask, cache_mask_grants, mask_grants,
 };
+use crate::refusal::{Refusal, RefusalStatus};
 use crate::resource::Resource;
 use gradient_core::ServerState;
 use gradient_db::lookup::{get_any_cache_by_name, get_any_project_by_name, get_any_task_by_name};
@@ -23,6 +24,57 @@ use gradient_types::{
 };
 use sea_orm::{ColumnTrait, Condition, EntityTrait, QueryFilter};
 use std::sync::Arc;
+
+#[derive(Debug, thiserror::Error)]
+enum AccessRefusal {
+    #[error("Cache-pinned API key cannot be used on this endpoint.")]
+    CachePinnedKeyOnEndpoint,
+    #[error(
+        "Cannot modify state-managed task. This task is managed by configuration and cannot be edited through the API."
+    )]
+    ManagedTask,
+    #[error("API key is pinned to a different cache.")]
+    KeyPinnedToDifferentCache,
+    #[error("You do not have permission to perform this action.")]
+    MissingPermission,
+    #[error(
+        "Cannot modify state-managed project. This project is managed by configuration and cannot be edited through the API."
+    )]
+    ManagedProject,
+    #[error("Missing cache permission `{permission}`.")]
+    MissingCachePermission { permission: String },
+    #[error(
+        "Cannot modify state-managed integration. This integration is managed by configuration and cannot be edited through the API."
+    )]
+    ManagedIntegration,
+    #[error(
+        "Cannot modify state-managed cache. This cache is managed by configuration and cannot be edited through the API."
+    )]
+    ManagedCache,
+    #[error("A pinned API key cannot be used on team endpoints.")]
+    PinnedKeyOnTeamEndpoint,
+    #[error(
+        "Cannot modify state-managed team. This team is managed by configuration and cannot be edited through the API."
+    )]
+    ManagedTeam,
+}
+
+impl Refusal for AccessRefusal {
+    fn status(&self) -> RefusalStatus {
+        match self {
+            Self::CachePinnedKeyOnEndpoint
+            | Self::ManagedTask
+            | Self::KeyPinnedToDifferentCache
+            | Self::MissingPermission
+            | Self::ManagedProject
+            | Self::MissingCachePermission { .. }
+            | Self::ManagedIntegration
+            | Self::ManagedCache
+            | Self::PinnedKeyOnTeamEndpoint
+            | Self::ManagedTeam => RefusalStatus::Forbidden,
+        }
+    }
+}
 
 #[derive(Clone, Copy)]
 pub enum Caller<'a> {
@@ -94,9 +146,7 @@ pub async fn load_project(
     access: ProjectAccess,
 ) -> WebResult<MProject> {
     if api_key.is_some_and(|k| k.cache_pin.is_some()) {
-        return Err(WebError::forbidden(
-            "Cache-pinned API key cannot be used on this endpoint.",
-        ));
+        return Err(AccessRefusal::CachePinnedKeyOnEndpoint.into());
     }
 
     let label = match access {
@@ -153,9 +203,7 @@ pub async fn load_task(
     access: TaskAccess,
 ) -> WebResult<(MProject, MTask)> {
     if api_key.is_some_and(|k| k.cache_pin.is_some()) {
-        return Err(WebError::forbidden(
-            "Cache-pinned API key cannot be used on this endpoint.",
-        ));
+        return Err(AccessRefusal::CachePinnedKeyOnEndpoint.into());
     }
 
     let label = Resource::Task;
@@ -189,9 +237,7 @@ pub async fn load_task(
             let uid = caller.user_id().ok_or_else(|| WebError::not_found(label))?;
             require_project_permission(state, uid, project.id, permission, label, api_key).await?;
             if reject_managed && task.managed {
-                return Err(WebError::forbidden(
-                    "Cannot modify state-managed task. This task is managed by configuration and cannot be edited through the API.",
-                ));
+                return Err(AccessRefusal::ManagedTask.into());
             }
         }
     }
@@ -216,9 +262,7 @@ pub async fn load_cache(
         && let Some(pin) = key.cache_pin
         && pin != cache.id
     {
-        return Err(WebError::forbidden(
-            "API key is pinned to a different cache.",
-        ));
+        return Err(AccessRefusal::KeyPinnedToDifferentCache.into());
     }
 
     match access {
@@ -382,9 +426,7 @@ async fn require_project_permission(
         .ok_or_else(|| WebError::not_found(not_found_label))?;
 
     if !mask_grants(mask, permission) {
-        return Err(WebError::forbidden(
-            "You do not have permission to perform this action.",
-        ));
+        return Err(AccessRefusal::MissingPermission.into());
     }
 
     Ok(())
@@ -392,9 +434,7 @@ async fn require_project_permission(
 
 fn reject_managed_project(project: &MProject) -> WebResult<()> {
     if project.managed {
-        return Err(WebError::forbidden(
-            "Cannot modify state-managed project. This project is managed by configuration and cannot be edited through the API.",
-        ));
+        return Err(AccessRefusal::ManagedProject.into());
     }
     Ok(())
 }
@@ -508,10 +548,10 @@ async fn require_cache_permission(
         .ok_or_else(|| WebError::not_found(label))?;
 
     if !cache_mask_allows(role_mask, api_key, permission) {
-        return Err(WebError::forbidden(format!(
-            "Missing cache permission `{}`.",
-            permission.as_wire_name()
-        )));
+        return Err(AccessRefusal::MissingCachePermission {
+            permission: permission.as_wire_name().to_string(),
+        }
+        .into());
     }
 
     Ok(())
@@ -566,18 +606,14 @@ async fn admin_emails(state: &Arc<ServerState>, ids: Vec<UserId>) -> WebResult<V
 
 pub(crate) fn reject_managed_integration(integration: &MIntegration) -> WebResult<()> {
     if integration.managed {
-        return Err(WebError::forbidden(
-            "Cannot modify state-managed integration. This integration is managed by configuration and cannot be edited through the API.",
-        ));
+        return Err(AccessRefusal::ManagedIntegration.into());
     }
     Ok(())
 }
 
 pub(crate) fn reject_managed_cache(cache: &MCache) -> WebResult<()> {
     if cache.managed {
-        return Err(WebError::forbidden(
-            "Cannot modify state-managed cache. This cache is managed by configuration and cannot be edited through the API.",
-        ));
+        return Err(AccessRefusal::ManagedCache.into());
     }
     Ok(())
 }
@@ -596,9 +632,7 @@ pub async fn load_team(
     access: TeamAccess,
 ) -> WebResult<(MTeam, Option<TeamRole>)> {
     if api_key.is_some_and(|k| k.project.is_some() || k.cache_pin.is_some()) {
-        return Err(WebError::forbidden(
-            "A pinned API key cannot be used on team endpoints.",
-        ));
+        return Err(AccessRefusal::PinnedKeyOnTeamEndpoint.into());
     }
 
     let team = ETeam::find()
@@ -611,9 +645,7 @@ pub async fn load_team(
     match (access, role) {
         (_, None) if !user.superuser => return Err(WebError::not_found(Resource::Team)),
         (TeamAccess::Admin { .. }, Some(TeamRole::Member)) if !user.superuser => {
-            return Err(WebError::forbidden(
-                "You do not have permission to perform this action.",
-            ));
+            return Err(AccessRefusal::MissingPermission.into());
         }
         _ => {}
     }
@@ -623,9 +655,7 @@ pub async fn load_team(
     } = access
         && team.managed
     {
-        return Err(WebError::forbidden(
-            "Cannot modify state-managed team. This team is managed by configuration and cannot be edited through the API.",
-        ));
+        return Err(AccessRefusal::ManagedTeam.into());
     }
 
     Ok((team, role))

@@ -4,10 +4,11 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use super::refusal::BuildRequestRefusal;
 use super::types::ManifestEntry;
 use crate::access::{Caller, ProjectAccess, load_project};
 use crate::authorization::MaybeApiKey;
-use crate::error::{WebError, WebResult};
+use crate::error::WebResult;
 use crate::helpers::ok_json;
 use crate::permissions::Permission;
 use anyhow::Context;
@@ -61,9 +62,7 @@ pub async fn post_manifest(
     .await?;
 
     if body.files.is_empty() {
-        return Err(WebError::bad_request(
-            "Manifest must contain at least one file",
-        ));
+        return Err(BuildRequestRefusal::ManifestEmpty.into());
     }
 
     let max_source_upload_size = state.0.config.http.max_source_upload_size;
@@ -74,27 +73,28 @@ pub async fn post_manifest(
     for entry in &body.files {
         check_manifest_path(&entry.path)?;
         if !seen_paths.insert(entry.path.as_str()) {
-            return Err(WebError::bad_request(format!(
-                "Duplicate path in manifest: {}",
-                entry.path
-            )));
+            return Err(BuildRequestRefusal::DuplicateManifestPath {
+                path: entry.path.clone(),
+            }
+            .into());
         }
 
         if entry.size < 0 {
-            return Err(WebError::bad_request(format!(
-                "Negative size for {}",
-                entry.path
-            )));
+            return Err(BuildRequestRefusal::NegativeFileSize {
+                path: entry.path.clone(),
+            }
+            .into());
         }
 
-        total = total.checked_add(entry.size).ok_or_else(|| {
-            WebError::payload_too_large("Manifest total size overflows i64".to_string())
-        })?;
+        total = total
+            .checked_add(entry.size)
+            .ok_or(BuildRequestRefusal::ManifestSizeOverflow)?;
 
         if (total as u128) > max_source_upload_size as u128 {
-            return Err(WebError::payload_too_large(format!(
-                "Manifest total size exceeds limit of {max_source_upload_size} bytes"
-            )));
+            return Err(BuildRequestRefusal::ManifestTooLarge {
+                limit: max_source_upload_size,
+            }
+            .into());
         }
 
         hashes.push(decode_blake3_hex(&entry.hash)?);

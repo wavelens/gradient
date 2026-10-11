@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use super::refusal::ProjectRefusal;
 use crate::access::{Caller, ProjectAccess, load_project};
 use crate::audit::{RequestInfo, record as audit_record};
 use crate::authorization::{MaybeApiKey, MaybeUser};
@@ -289,7 +290,7 @@ pub async fn patch_project_users(
 
     let membership = find_project_membership(&state, project.id, target_user.id)
         .await?
-        .ok_or_else(|| WebError::bad_request("User not in Project"))?;
+        .ok_or(ProjectRefusal::NotAProjectMember)?;
 
     let previous_role_id = membership.role;
     let role = ERole::find()
@@ -352,7 +353,7 @@ pub async fn delete_project_users(
 
     let membership = find_project_membership(&state, project.id, target_user.id)
         .await?
-        .ok_or_else(|| WebError::bad_request("User not in Project"))?;
+        .ok_or(ProjectRefusal::NotAProjectMember)?;
 
     let active: AProjectUser = membership.into();
     active.delete(&state.web_db).await?;

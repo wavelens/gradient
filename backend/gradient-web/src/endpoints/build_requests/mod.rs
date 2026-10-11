@@ -7,6 +7,7 @@
 pub mod blobs;
 pub mod dispatch;
 pub mod manifest;
+mod refusal;
 pub mod source;
 pub mod types;
 pub mod url;

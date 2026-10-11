@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use super::refusal::BuildRequestRefusal;
 use crate::access::has_permission;
 use crate::authorization::MaybeApiKey;
 use crate::error::{WebError, WebResult};
@@ -50,11 +51,11 @@ pub async fn post_blobs(
         .ok_or_else(|| WebError::not_found(Resource::UploadSession))?;
 
     if session.dispatched_at.is_some() {
-        return Err(WebError::conflict("Upload session already dispatched"));
+        return Err(BuildRequestRefusal::UploadSessionAlreadyDispatched.into());
     }
 
     if now() > session.expires_at {
-        return Err(WebError::gone("Upload session expired"));
+        return Err(BuildRequestRefusal::UploadSessionExpired.into());
     }
 
     let api_key_ref = api_key.as_ref();
@@ -74,10 +75,13 @@ pub async fn post_blobs(
         serde_json::from_value(session.missing.clone()).context("Corrupt session.missing JSON")?;
 
     let missing_before = missing.len();
-    while let Some(field) = multipart
-        .next_field()
-        .await
-        .map_err(|e| WebError::bad_request(format!("Invalid multipart payload: {}", e)))?
+    while let Some(field) =
+        multipart
+            .next_field()
+            .await
+            .map_err(|e| BuildRequestRefusal::InvalidMultipartPayload {
+                reason: e.to_string(),
+            })?
     {
         let blob = verified_blob(field, &missing).await?;
         missing.remove(&blob.name);
@@ -101,25 +105,24 @@ pub async fn post_blobs(
 async fn verified_blob(field: Field<'_>, missing: &HashSet<String>) -> WebResult<VerifiedBlob> {
     let name = field
         .name()
-        .ok_or_else(|| WebError::bad_request("Missing field name"))?
+        .ok_or(BuildRequestRefusal::MissingFieldName)?
         .to_string();
 
     let mut hash = [0u8; 32];
     hash.copy_from_slice(&decode_blake3_hex(&name)?);
     if !missing.contains(&name) {
-        return Err(WebError::bad_request(format!(
-            "hash not in session.missing: {}",
-            name
-        )));
+        return Err(BuildRequestRefusal::BlobNotExpected { name }.into());
     }
 
     let data = field
         .bytes()
         .await
-        .map_err(|e| WebError::bad_request(format!("Failed to read field bytes: {}", e)))?;
+        .map_err(|e| BuildRequestRefusal::UnreadableFieldBytes {
+            reason: e.to_string(),
+        })?;
 
     if blake3::hash(&data).as_bytes() != &hash {
-        return Err(WebError::bad_request(format!("hash mismatch for {}", name)));
+        return Err(BuildRequestRefusal::BlobHashMismatch { name }.into());
     }
 
     Ok(VerifiedBlob {

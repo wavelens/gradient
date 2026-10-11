@@ -31,6 +31,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use uuid::Uuid;
 
+use super::refusal::ProjectRefusal;
 use crate::error::{WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json};
 
@@ -175,11 +176,11 @@ pub async fn post_project_worker(
     )
     .await?;
 
-    let worker_uuid = Uuid::parse_str(&body.worker_id)
-        .map_err(|_| WebError::bad_request("worker_id must be a valid UUID"))?;
+    let worker_uuid =
+        Uuid::parse_str(&body.worker_id).map_err(|_| ProjectRefusal::InvalidWorkerId)?;
     let worker_id_str = worker_uuid.to_string();
     if gradient_db::teams::workers::is_team_worker(&state.web_db, &worker_id_str).await? {
-        return Err(WebError::conflict("the worker id belongs to a team worker"));
+        return Err(ProjectRefusal::WorkerIdBelongsToTeamWorker.into());
     }
     if body.url.as_deref().is_some_and(|u| !u.trim().is_empty()) {
         ensure_dialable_worker_id(&state, &worker_id_str).await?;
@@ -240,9 +241,7 @@ async fn ensure_dialable_worker_id(state: &ServerState, worker_id: &str) -> WebR
         .await?
         .is_some();
     if team_worker || gradient_ci {
-        return Err(WebError::conflict(
-            "the worker id belongs to a team worker or a Gradient.CI connection",
-        ));
+        return Err(ProjectRefusal::WorkerIdBelongsToOtherConnection.into());
     }
 
     Ok(())
@@ -546,9 +545,7 @@ pub async fn patch_project_worker(
     .await?;
 
     if gradient_db::teams::workers::is_team_worker(&state.web_db, &worker_id).await? {
-        return Err(WebError::conflict(
-            "team workers are managed on the team page",
-        ));
+        return Err(ProjectRefusal::TeamWorkerManagedOnTeamPage.into());
     }
 
     let reg = EWorkerRegistration::find()
@@ -559,7 +556,7 @@ pub async fn patch_project_worker(
         .or_not_found(Resource::WorkerRegistration)?;
 
     if reg.managed && patch_edits_managed_fields(&body) {
-        return Err(WebError::conflict("worker is managed by server state"));
+        return Err(ProjectRefusal::WorkerManagedByState.into());
     }
 
     let mut active_model: AWorkerRegistration = reg.into();
@@ -633,9 +630,7 @@ pub async fn delete_project_worker(
 
     if result.rows_affected == 0 {
         if gradient_db::teams::workers::is_team_worker(&state.web_db, &worker_id).await? {
-            return Err(WebError::conflict(
-                "team workers are managed on the team page",
-            ));
+            return Err(ProjectRefusal::TeamWorkerManagedOnTeamPage.into());
         }
 
         return Err(WebError::not_found(Resource::WorkerRegistration));

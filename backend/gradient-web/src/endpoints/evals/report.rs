@@ -21,6 +21,7 @@ use gradient_types::ids::EvaluationId;
 use serde::Deserialize;
 
 use super::EvalAccessContext;
+use super::refusal::EvaluationRefusal;
 use crate::authorization::MaybeApiKey;
 use crate::error::{WebError, WebResult};
 
@@ -72,9 +73,7 @@ pub async fn get_evaluation_report(
         .await?;
 
         if !allowed {
-            return Err(WebError::forbidden(
-                "Instance context requires the ManageWorkers permission",
-            ));
+            return Err(EvaluationRefusal::ManageWorkersRequired.into());
         }
     }
 

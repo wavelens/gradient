@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use super::refusal::CacheRefusal;
 use crate::access::{CacheAccess, Caller, load_cache, reject_managed_cache};
 use crate::authorization::{MaybeApiKey, MaybeUser};
 use crate::error::{WebError, WebResult};
@@ -81,12 +82,10 @@ fn patch_edits_managed_fields(body: &PatchUpstreamRequest) -> bool {
 fn validate_url(url: &str) -> Result<(), WebError> {
     let u = url.trim();
     if u.is_empty() {
-        return Err(WebError::bad_request("Substituter URL is required."));
+        return Err(CacheRefusal::UpstreamUrlRequired.into());
     }
     if !(u.starts_with("http://") || u.starts_with("https://")) {
-        return Err(WebError::bad_request(
-            "Substituter URL must start with http:// or https://.",
-        ));
+        return Err(CacheRefusal::UpstreamUrlWithoutHttpScheme.into());
     }
     Ok(())
 }
@@ -94,9 +93,7 @@ fn validate_url(url: &str) -> Result<(), WebError> {
 fn validate_http(url: &str, public_key: &str) -> Result<(), WebError> {
     validate_url(url)?;
     if public_key.trim().is_empty() {
-        return Err(WebError::bad_request(
-            "Public key is required for an Http binary cache.",
-        ));
+        return Err(CacheRefusal::HttpPublicKeyRequired.into());
     }
     Ok(())
 }
@@ -108,26 +105,20 @@ fn validate_gradient_proto(
 ) -> Result<(), WebError> {
     validate_url(url)?;
     if api_key.is_some_and(|k| !k.trim().is_empty()) && !url.trim().starts_with("https://") {
-        return Err(WebError::bad_request(
-            "An API key requires an https:// upstream URL so the key is not transmitted in cleartext.",
-        ));
+        return Err(CacheRefusal::ApiKeyOverCleartext.into());
     }
     let name = remote_cache.trim();
     if name.is_empty() {
-        return Err(WebError::bad_request(
-            "Remote cache name is required for a Gradient Proto upstream.",
-        ));
+        return Err(CacheRefusal::RemoteCacheNameRequired.into());
     }
     if name == "." || name == ".." {
-        return Err(WebError::bad_request("Remote cache name is invalid."));
+        return Err(CacheRefusal::RemoteCacheNameInvalid.into());
     }
     if !name
         .chars()
         .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
     {
-        return Err(WebError::bad_request(
-            "Remote cache name may only contain letters, digits, '-', '_', and '.'.",
-        ));
+        return Err(CacheRefusal::RemoteCacheNameBadCharacters.into());
     }
     Ok(())
 }
@@ -215,7 +206,7 @@ pub async fn put_cache_upstream(
             )
             .await?;
             if upstream.id == cache.id {
-                return Err(WebError::bad_request("A cache cannot be its own upstream"));
+                return Err(CacheRefusal::CacheIsOwnUpstream.into());
             }
             let name = display_name.unwrap_or_else(|| upstream.display_name.clone());
             MCacheUpstream {
@@ -374,9 +365,7 @@ pub async fn post_cache_upstream_test(
     .await?;
     let record = load_upstream(&state, cache.id, upstream_id).await?;
     let Some(CacheUpstreamSource::Http { url, .. }) = record.as_source() else {
-        return Err(WebError::bad_request(
-            "Only HTTP binary-cache upstreams can be tested.",
-        ));
+        return Err(CacheRefusal::UpstreamNotHttp.into());
     };
 
     let (http1, http2) = tokio::join!(

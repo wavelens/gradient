@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use super::refusal::EvaluationRefusal;
 use crate::access::is_project_member;
 use crate::authorization::MaybeApiKey;
 use crate::error::{WebError, WebResult, require_superuser};
@@ -58,20 +59,20 @@ pub async fn post_evaluation_retry(
     }
 
     if !EvaluationStatus::TERMINAL.contains(&ctx.evaluation.status) {
-        return Err(WebError::conflict("The evaluation is still running"));
+        return Err(EvaluationRefusal::StillRunning.into());
     }
 
     let task = match ctx.evaluation.task {
         Some(task) => ETask::find_by_id(task).one(&state.web_db).await?,
         None => None,
     }
-    .ok_or_else(|| WebError::conflict("The evaluation belongs to no task"))?;
+    .ok_or(EvaluationRefusal::WithoutTask)?;
 
     let retried = gradient_ci::trigger_evaluation_retry(&state.web_db, &task, &ctx.evaluation)
         .await
         .map_err(|e| match e {
             gradient_ci::TriggerError::AlreadyInProgress => {
-                WebError::conflict("Another evaluation of the task is running")
+                WebError::from(EvaluationRefusal::TaskAlreadyEvaluating)
             }
             gradient_ci::TriggerError::Db(db_err) => WebError::from(db_err),
         })?;

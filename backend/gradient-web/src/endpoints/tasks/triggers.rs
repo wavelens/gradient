@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use super::refusal::TaskRefusal;
 use crate::access::{Caller, TaskAccess, load_task};
 use crate::authorization::MaybeApiKey;
 use crate::error::{WebError, WebResult};
@@ -193,7 +194,7 @@ pub async fn create(
 
     body.config
         .validate()
-        .map_err(|e| WebError::bad_request(e.to_string()))?;
+        .map_err(|e| TaskRefusal::InvalidTriggerConfig(e.to_string()))?;
 
     let now = Utc::now().naive_utc();
     let trigger_type = body.config.trigger_type();
@@ -275,7 +276,7 @@ pub async fn update(
 
     if let Some(ref cfg) = body.config {
         cfg.validate()
-            .map_err(|e| WebError::bad_request(e.to_string()))?;
+            .map_err(|e| TaskRefusal::InvalidTriggerConfig(e.to_string()))?;
     }
 
     let mut active: ATaskTrigger = row.into();
@@ -356,7 +357,7 @@ pub async fn fire_now(
         .or_not_found(Resource::Trigger)?;
 
     if !row.active {
-        return Err(WebError::bad_request("trigger is inactive"));
+        return Err(TaskRefusal::InactiveTrigger.into());
     }
 
     let trigger_type = row.trigger_type;

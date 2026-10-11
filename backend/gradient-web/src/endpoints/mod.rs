@@ -26,6 +26,7 @@ pub mod log_stream;
 pub mod metrics;
 pub mod metrics_query;
 pub mod projects;
+mod refusal;
 pub mod search;
 pub mod stars;
 pub mod stats;
@@ -107,7 +108,7 @@ pub fn content_type_for_filename(filename: &str) -> &'static str {
 }
 
 pub async fn handle_404() -> crate::error::WebError {
-    crate::error::WebError::not_found_msg("Not Found".to_string())
+    crate::error::WebError::from(refusal::EndpointRefusal::UnknownRoute)
 }
 
 pub async fn get_health() -> WebResult<Json<BaseResponse<String>>> {

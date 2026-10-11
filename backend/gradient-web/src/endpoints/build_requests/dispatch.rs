@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use super::refusal::BuildRequestRefusal;
 use super::types::ManifestEntry;
 use crate::access::has_permission;
 use crate::authorization::MaybeApiKey;
@@ -85,20 +86,20 @@ pub async fn post_dispatch(
     }
 
     if session.dispatched_at.is_some() {
-        return Err(WebError::conflict("Upload session already dispatched"));
+        return Err(BuildRequestRefusal::UploadSessionAlreadyDispatched.into());
     }
 
     if now() > session.expires_at {
-        return Err(WebError::gone("Upload session expired"));
+        return Err(BuildRequestRefusal::UploadSessionExpired.into());
     }
 
     let missing: Vec<String> = serde_json::from_value(session.missing.clone())
         .map_err(|e| WebError::internal(format!("Corrupt session.missing JSON: {}", e)))?;
     if !missing.is_empty() {
-        return Err(WebError::conflict(format!(
-            "{} blobs still missing",
-            missing.len()
-        )));
+        return Err(BuildRequestRefusal::BlobsStillMissing {
+            count: missing.len(),
+        }
+        .into());
     }
 
     let manifest: Vec<ManifestEntry> = serde_json::from_value(session.manifest.clone())

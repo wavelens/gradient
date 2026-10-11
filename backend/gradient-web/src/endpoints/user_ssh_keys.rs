@@ -9,6 +9,7 @@ use crate::authorization::MaybeApiKey;
 use crate::endpoints::user::forbid_via_api_key;
 use crate::error::{WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json};
+use crate::refusal::{Refusal, RefusalStatus};
 use crate::resource::Resource;
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
@@ -23,6 +24,25 @@ use sea_orm::{
 };
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+
+#[derive(Debug, thiserror::Error)]
+enum SshKeyRefusal {
+    #[error("SSH not found")]
+    SshDisabled,
+    #[error("Name must not be empty.")]
+    EmptyName,
+    #[error("Not an OpenSSH public key.")]
+    NotAnOpenSshKey,
+}
+
+impl Refusal for SshKeyRefusal {
+    fn status(&self) -> RefusalStatus {
+        match self {
+            Self::SshDisabled => RefusalStatus::NotFound,
+            Self::EmptyName | Self::NotAnOpenSshKey => RefusalStatus::BadRequest,
+        }
+    }
+}
 
 #[derive(Serialize)]
 pub struct SshKeyInfo {
@@ -60,7 +80,7 @@ fn require_ssh(state: &ServerState) -> WebResult<()> {
     if state.config.ssh.enable {
         Ok(())
     } else {
-        Err(WebError::not_found_msg("SSH not found"))
+        Err(SshKeyRefusal::SshDisabled.into())
     }
 }
 
@@ -89,11 +109,10 @@ pub async fn post_ssh_key(
     require_ssh(&state)?;
     let name = body.name.trim();
     if name.is_empty() {
-        return Err(WebError::bad_request("Name must not be empty."));
+        return Err(SshKeyRefusal::EmptyName.into());
     }
 
-    let fingerprint = fingerprint(&body.public_key)
-        .map_err(|_| WebError::bad_request("Not an OpenSSH public key."))?;
+    let fingerprint = fingerprint(&body.public_key).map_err(|_| SshKeyRefusal::NotAnOpenSshKey)?;
 
     if EUserSshKey::find()
         .filter(CUserSshKey::Fingerprint.eq(fingerprint.clone()))

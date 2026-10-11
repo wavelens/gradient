@@ -17,6 +17,7 @@ mod narinfo;
 mod narlist;
 mod nars;
 mod proto;
+mod refusal;
 pub mod roles;
 mod serve;
 pub mod subscriptions;

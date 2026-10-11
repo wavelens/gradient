@@ -9,10 +9,11 @@ use axum::extract::{Extension, Path, State};
 use axum::response::Response;
 use std::sync::Arc;
 
+use super::refusal::CacheRefusal;
 use crate::access::{CacheAccess, Caller, load_cache};
 use crate::authorization::{MaybeApiKey, MaybeUser};
 use crate::client_ip::ClientIp;
-use crate::error::{WebError, WebResult};
+use crate::error::WebResult;
 use gradient_core::ServerState;
 use gradient_wire::session::frame::SAFE_INFLIGHT_MESSAGE_SIZE;
 use gradient_wire::{PerIpLimiter, ProtoLimiter};
@@ -33,7 +34,7 @@ pub async fn cache_proto(
 ) -> WebResult<Response> {
     let anonymous = maybe_user.is_none() && api_key.as_ref().is_none();
     if anonymous && !state.config.proto.anonymous_cache_enable {
-        return Err(WebError::forbidden("Anonymous cache access is disabled."));
+        return Err(CacheRefusal::AnonymousAccessDisabled.into());
     }
 
     let caller = Caller::from_option(&maybe_user);
@@ -47,13 +48,15 @@ pub async fn cache_proto(
     .await?;
     let cache_id = cache.id;
 
-    let global_permit = global.try_acquire().ok_or_else(|| {
-        WebError::service_unavailable("Server is at connection capacity; retry later.")
-    })?;
+    let global_permit = global
+        .try_acquire()
+        .ok_or(CacheRefusal::ConnectionCapacityReached)?;
     let ip_permit = if anonymous {
-        Some(per_ip.try_acquire(client_ip).ok_or_else(|| {
-            WebError::service_unavailable("Too many connections from your IP; retry later.")
-        })?)
+        Some(
+            per_ip
+                .try_acquire(client_ip)
+                .ok_or(CacheRefusal::TooManyConnectionsFromIp)?,
+        )
     } else {
         None
     };

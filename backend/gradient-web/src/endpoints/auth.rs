@@ -11,6 +11,7 @@ use crate::authorization::{
 };
 use crate::error::{ErrorCode, WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json};
+use crate::refusal::{Refusal, RefusalStatus};
 use crate::resource::Resource;
 use axum::Extension;
 use axum::Json;
@@ -39,6 +40,78 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::sync::Arc;
+
+#[derive(Debug, thiserror::Error)]
+enum AuthRefusal {
+    #[error("Invalid name: {reason}")]
+    InvalidName { reason: String },
+    #[error("account is deactivated")]
+    AccountDeactivated,
+    #[error(
+        "Email not verified. Please check your email and verify your account before logging in."
+    )]
+    EmailNotVerified,
+    #[error("OIDC login failed")]
+    OidcLoginFailed,
+    #[error("Missing OIDC state")]
+    MissingOidcState,
+    #[error("Missing OIDC CSRF cookie")]
+    MissingOidcCsrfCookie,
+    #[error("Email verification is not enabled")]
+    EmailVerificationDisabled,
+    #[error("Missing verification token")]
+    MissingVerificationToken,
+    #[error("Invalid verification token")]
+    InvalidVerificationToken,
+    #[error("Verification token has expired")]
+    ExpiredVerificationToken,
+    #[error("Email is already verified")]
+    EmailAlreadyVerified,
+    #[error("Authorization denied")]
+    DeviceAuthorizationDenied,
+    #[error("Authorization expired")]
+    DeviceAuthorizationExpired,
+    #[error("Authorization pending")]
+    DeviceAuthorizationPending,
+    #[error("Authorization already denied")]
+    DeviceAuthorizationAlreadyDenied,
+    #[error("Authorization already completed")]
+    DeviceAuthorizationAlreadyCompleted,
+}
+
+impl Refusal for AuthRefusal {
+    fn status(&self) -> RefusalStatus {
+        match self {
+            Self::InvalidName { .. }
+            | Self::EmailNotVerified
+            | Self::EmailVerificationDisabled
+            | Self::MissingVerificationToken
+            | Self::InvalidVerificationToken
+            | Self::ExpiredVerificationToken
+            | Self::EmailAlreadyVerified
+            | Self::DeviceAuthorizationDenied
+            | Self::DeviceAuthorizationExpired
+            | Self::DeviceAuthorizationPending
+            | Self::DeviceAuthorizationAlreadyDenied
+            | Self::DeviceAuthorizationAlreadyCompleted => RefusalStatus::BadRequest,
+            Self::AccountDeactivated => RefusalStatus::Forbidden,
+            Self::OidcLoginFailed | Self::MissingOidcState | Self::MissingOidcCsrfCookie => {
+                RefusalStatus::Unauthorized
+            }
+        }
+    }
+
+    fn code(&self) -> ErrorCode {
+        match self {
+            Self::DeviceAuthorizationDenied
+            | Self::DeviceAuthorizationAlreadyDenied
+            | Self::DeviceAuthorizationAlreadyCompleted => ErrorCode::CLI_AUTH_DENIED,
+            Self::DeviceAuthorizationExpired => ErrorCode::CLI_AUTH_EXPIRED,
+            Self::DeviceAuthorizationPending => ErrorCode::CLI_AUTH_PENDING,
+            _ => self.status().default_code(),
+        }
+    }
+}
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct MakeLoginRequest {
@@ -75,7 +148,10 @@ pub async fn post_basic_register(
     }
 
     if let Err(e) = validate_display_name(&body.name) {
-        return Err(WebError::bad_request(format!("Invalid name: {}", e)));
+        return Err(AuthRefusal::InvalidName {
+            reason: e.to_string(),
+        }
+        .into());
     }
 
     if !EmailAddress::is_valid(body.email.clone().as_str()) {
@@ -248,7 +324,7 @@ pub async fn post_basic_login(
     }
 
     if !user.active {
-        return Err(WebError::forbidden("account is deactivated"));
+        return Err(AuthRefusal::AccountDeactivated.into());
     }
 
     if state
@@ -258,9 +334,7 @@ pub async fn post_basic_login(
         .is_some_and(|e| e.require_verification)
         && !user.email_verified
     {
-        return Err(WebError::bad_request(
-            "Email not verified. Please check your email and verify your account before logging in.",
-        ));
+        return Err(AuthRefusal::EmailNotVerified.into());
     }
 
     let use_tls = state.config.server.use_tls;
@@ -324,7 +398,7 @@ fn oidc_csrf_clear_cookie(use_tls: bool) -> String {
 fn oidc_failure(stage: &'static str) -> impl FnOnce(anyhow::Error) -> WebError {
     move |e| {
         tracing::warn!(stage, error = format!("{:#}", e), "OIDC flow failed");
-        WebError::unauthorized("OIDC login failed")
+        WebError::from(AuthRefusal::OidcLoginFailed)
     }
 }
 
@@ -339,11 +413,9 @@ pub async fn get_oauth_authorize(
     }
 
     let code = query.get("code").ok_or_else(WebError::invalid_oauth_code)?;
-    let state_query = query
-        .get("state")
-        .ok_or_else(|| WebError::unauthorized("Missing OIDC state"))?;
+    let state_query = query.get("state").ok_or(AuthRefusal::MissingOidcState)?;
     let csrf = cookie_value(&headers, OIDC_CSRF_COOKIE)
-        .ok_or_else(|| WebError::unauthorized("Missing OIDC CSRF cookie"))?
+        .ok_or(AuthRefusal::MissingOidcCsrfCookie)?
         .to_owned();
 
     let use_tls = state.config.server.use_tls;
@@ -447,11 +519,9 @@ pub async fn get_oidc_callback(
     Query(query): Query<HashMap<String, String>>,
 ) -> WebResult<Response> {
     let code = query.get("code").ok_or_else(WebError::invalid_oauth_code)?;
-    let state_query = query
-        .get("state")
-        .ok_or_else(|| WebError::unauthorized("Missing OIDC state"))?;
+    let state_query = query.get("state").ok_or(AuthRefusal::MissingOidcState)?;
     let csrf = cookie_value(&headers, OIDC_CSRF_COOKIE)
-        .ok_or_else(|| WebError::unauthorized("Missing OIDC CSRF cookie"))?
+        .ok_or(AuthRefusal::MissingOidcCsrfCookie)?
         .to_owned();
 
     let use_tls = state.config.server.use_tls;
@@ -600,27 +670,23 @@ pub async fn get_verify_email(
         .as_ref()
         .is_some_and(|e| e.require_verification)
     {
-        return Err(WebError::bad_request(
-            "Email verification is not enabled".to_string(),
-        ));
+        return Err(AuthRefusal::EmailVerificationDisabled.into());
     }
 
     let token = query
         .get("token")
-        .ok_or_else(|| WebError::bad_request("Missing verification token"))?;
+        .ok_or(AuthRefusal::MissingVerificationToken)?;
 
     let user = EUser::find()
         .filter(CUser::EmailVerificationToken.eq(token.clone()))
         .one(&state.web_db)
         .await?
-        .ok_or_else(|| WebError::bad_request("Invalid verification token"))?;
+        .ok_or(AuthRefusal::InvalidVerificationToken)?;
 
     if let Some(expires) = user.email_verification_token_expires
         && gradient_types::now() > expires
     {
-        return Err(WebError::bad_request(
-            "Verification token has expired".to_string(),
-        ));
+        return Err(AuthRefusal::ExpiredVerificationToken.into());
     }
 
     if user.email_verified {
@@ -649,9 +715,7 @@ pub async fn post_resend_verification(
         .as_ref()
         .is_some_and(|e| e.require_verification)
     {
-        return Err(WebError::bad_request(
-            "Email verification is not enabled".to_string(),
-        ));
+        return Err(AuthRefusal::EmailVerificationDisabled.into());
     }
 
     let user = EUser::find()
@@ -661,9 +725,7 @@ pub async fn post_resend_verification(
         .or_not_found(Resource::User)?;
 
     if user.email_verified {
-        return Err(WebError::bad_request(
-            "Email is already verified".to_string(),
-        ));
+        return Err(AuthRefusal::EmailAlreadyVerified.into());
     }
 
     let verification_token = generate_verification_token();
@@ -828,10 +890,7 @@ pub async fn post_cli_device_poll(
 
     let now = gradient_types::now();
     if row.denied_at.is_some() {
-        return Err(WebError::bad_request_with(
-            ErrorCode::CLI_AUTH_DENIED,
-            "Authorization denied",
-        ));
+        return Err(AuthRefusal::DeviceAuthorizationDenied.into());
     }
     if let Some(token) = row.token.clone() {
         let mut active: ACliDeviceAuthorization = row.into();
@@ -840,15 +899,9 @@ pub async fn post_cli_device_poll(
         return Ok(ok_json(token));
     }
     if row.authorized_at.is_some() || row.expires_at < now {
-        return Err(WebError::bad_request_with(
-            ErrorCode::CLI_AUTH_EXPIRED,
-            "Authorization expired",
-        ));
+        return Err(AuthRefusal::DeviceAuthorizationExpired.into());
     }
-    Err(WebError::bad_request_with(
-        ErrorCode::CLI_AUTH_PENDING,
-        "Authorization pending",
-    ))
+    Err(AuthRefusal::DeviceAuthorizationPending.into())
 }
 
 async fn find_active_user_code(
@@ -863,22 +916,13 @@ async fn find_active_user_code(
 
     let now = gradient_types::now();
     if row.denied_at.is_some() {
-        return Err(WebError::bad_request_with(
-            ErrorCode::CLI_AUTH_DENIED,
-            "Authorization already denied",
-        ));
+        return Err(AuthRefusal::DeviceAuthorizationAlreadyDenied.into());
     }
     if row.authorized_at.is_some() {
-        return Err(WebError::bad_request_with(
-            ErrorCode::CLI_AUTH_DENIED,
-            "Authorization already completed",
-        ));
+        return Err(AuthRefusal::DeviceAuthorizationAlreadyCompleted.into());
     }
     if row.expires_at < now {
-        return Err(WebError::bad_request_with(
-            ErrorCode::CLI_AUTH_EXPIRED,
-            "Authorization expired",
-        ));
+        return Err(AuthRefusal::DeviceAuthorizationExpired.into());
     }
     Ok(row)
 }

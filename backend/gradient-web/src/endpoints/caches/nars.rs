@@ -4,6 +4,7 @@
  */
 
 use super::helpers::delete_nar_from_cache;
+use super::refusal::CacheRefusal;
 use crate::access::{CacheAccess, Caller, load_cache};
 use crate::audit::{RequestInfo, record as audit_record};
 use crate::authorization::{MaybeApiKey, MaybeUser};
@@ -323,7 +324,7 @@ pub async fn available(
     .await?;
     let hash = q.get("hash").cloned().unwrap_or_default();
     if hash.is_empty() {
-        return Err(WebError::bad_request("missing ?hash="));
+        return Err(CacheRefusal::MissingHashQuery.into());
     }
     let cp = ECachedPath::find()
         .filter(CCachedPath::Hash.eq(&hash))

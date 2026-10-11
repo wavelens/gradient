@@ -24,6 +24,7 @@ use crate::audit::{RequestInfo, record as audit_record};
 use crate::client_ip::{ClientIp, resolve_client_ip};
 use crate::error::{ErrorCode, WebError, WebResult};
 use crate::ip_allowlist::is_allowed as ip_allowed;
+use crate::refusal::{Refusal, RefusalStatus};
 use gradient_types::events::EventOwner;
 use gradient_types::events::audit::Action;
 
@@ -46,17 +47,21 @@ enum Denial {
     DeactivatedAccount,
 }
 
-impl From<Denial> for WebError {
-    fn from(denial: Denial) -> Self {
-        let message = denial.to_string();
-        match denial {
-            Denial::UndecodableToken | Denial::UnknownUser => Self::unauthorized(message),
-            Denial::SourceIpNotAllowed => {
-                Self::forbidden_with(ErrorCode::FORBIDDEN_SOURCE_IP, message)
-            }
-            Denial::MalformedAuthorizationHeader
-            | Denial::NoCredentials
-            | Denial::DeactivatedAccount => Self::forbidden(message),
+impl Refusal for Denial {
+    fn status(&self) -> RefusalStatus {
+        match self {
+            Self::UndecodableToken | Self::UnknownUser => RefusalStatus::Unauthorized,
+            Self::SourceIpNotAllowed
+            | Self::MalformedAuthorizationHeader
+            | Self::NoCredentials
+            | Self::DeactivatedAccount => RefusalStatus::Forbidden,
+        }
+    }
+
+    fn code(&self) -> ErrorCode {
+        match self {
+            Self::SourceIpNotAllowed => ErrorCode::FORBIDDEN_SOURCE_IP,
+            _ => self.status().default_code(),
         }
     }
 }
