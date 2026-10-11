@@ -12,6 +12,7 @@ use gradient_types::ids::CacheId;
 use tokio::sync::Semaphore;
 use tracing::{debug, info, warn};
 
+use gradient_wire::Rejection;
 use gradient_wire::messages::{ClientMessage, GradientCapabilities, ServerMessage};
 use gradient_wire::session::handshake as handshake_fsm;
 
@@ -19,15 +20,15 @@ use super::socket::{HANDSHAKE_TIMEOUT, ProtoSocket, recv_client_msg, send_server
 
 const CACHE_SESSION_IDLE_TIMEOUT_SECS: u64 = 120;
 
-fn reject_reason(msg: &ClientMessage) -> Option<&'static str> {
+fn rejection_for(msg: &ClientMessage) -> Option<Rejection> {
     use gradient_wire::types::QueryMode;
     match msg {
         ClientMessage::CacheQuery { mode, .. } => match mode {
-            QueryMode::Push => Some("Push not allowed on a read-only cache session"),
+            QueryMode::Push => Some(Rejection::PushOnCacheSession),
             QueryMode::Normal | QueryMode::Pull => None,
         },
         ClientMessage::NarRequest { .. } => None,
-        _ => Some("only CacheQuery and NarRequest are allowed on a cache session"),
+        _ => Some(Rejection::NotAllowedOnCacheSession),
     }
 }
 
@@ -52,8 +53,8 @@ pub async fn handle_cache_socket(
     match tokio::time::timeout(HANDSHAKE_TIMEOUT, socket.recv_msg()).await {
         Ok(Some(msg)) => match handshake_fsm::on_init_connection(handshake_fsm::Opening, msg) {
             Ok(_) => {}
-            Err(handshake_fsm::Intent::Reject { code, reason }) => {
-                socket.send_reject(code, reason).await;
+            Err(handshake_fsm::Intent::Reject(rejection)) => {
+                socket.send_reject(rejection).await;
                 return;
             }
             Err(_) => return,
@@ -108,17 +109,11 @@ pub async fn handle_cache_socket(
             },
         };
 
-        if let Some(reason) = reject_reason(&msg) {
+        if let Some(rejection) = rejection_for(&msg) {
             warn!(%cache_id, variant = msg.variant_name(), "rejecting message on cache session");
-            if send_server_msg(
-                &writer,
-                &ServerMessage::Reject {
-                    code: 403,
-                    reason: reason.to_owned(),
-                },
-            )
-            .await
-            .is_err()
+            if send_server_msg(&writer, &ServerMessage::from(rejection))
+                .await
+                .is_err()
             {
                 break;
             }
@@ -202,19 +197,19 @@ mod tests {
 
     #[test]
     fn allows_reads_rejects_writes() {
-        assert!(reject_reason(&cache_query(QueryMode::Normal)).is_none());
-        assert!(reject_reason(&cache_query(QueryMode::Pull)).is_none());
+        assert!(rejection_for(&cache_query(QueryMode::Normal)).is_none());
+        assert!(rejection_for(&cache_query(QueryMode::Pull)).is_none());
         assert!(
-            reject_reason(&ClientMessage::NarRequest {
+            rejection_for(&ClientMessage::NarRequest {
                 job_id: "job".into(),
                 paths: vec![],
             })
             .is_none()
         );
 
-        assert!(reject_reason(&cache_query(QueryMode::Push)).is_some());
+        assert!(rejection_for(&cache_query(QueryMode::Push)).is_some());
         assert!(
-            reject_reason(&ClientMessage::UploadRequest {
+            rejection_for(&ClientMessage::UploadRequest {
                 job_id: "job".into(),
                 request_id: 1,
                 object: gradient_wire::types::UploadObject::Nar {
@@ -224,9 +219,9 @@ mod tests {
             })
             .is_some()
         );
-        assert!(reject_reason(&ClientMessage::RequestJobList).is_some());
+        assert!(rejection_for(&ClientMessage::RequestJobList).is_some());
         assert!(
-            reject_reason(&ClientMessage::JobFailed {
+            rejection_for(&ClientMessage::JobFailed {
                 job_id: "job".into(),
                 assignment_id: "d".into(),
                 error: "x".into(),

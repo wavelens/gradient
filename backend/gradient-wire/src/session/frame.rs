@@ -27,6 +27,7 @@ use gradient_util::telemetry::{GAUGES, STATS, fill_permille, metric};
 use crate::codec::agreement::{agree, version_frame};
 use crate::codec::{self, Proto};
 use crate::messages::{ClientMessage, PROTO_VERSIONS, ServerMessage};
+use crate::rejection::Rejection;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum SendError {
@@ -382,8 +383,8 @@ impl ProtoSocket {
         let _ = self.send_msg(&ServerMessage::Error { code, message }).await;
     }
 
-    pub async fn send_reject(&mut self, code: u16, reason: String) {
-        let _ = self.send_msg(&ServerMessage::Reject { code, reason }).await;
+    pub async fn send_reject(&mut self, rejection: Rejection) {
+        let _ = self.send_msg(&rejection.into()).await;
     }
 
     pub fn split(
