@@ -6,14 +6,14 @@
 
 use super::DeletedResponse;
 use super::refusal::TaskRefusal;
-use crate::error::WebResult;
+use crate::api_spec::TaskPath;
+use crate::error::{WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json};
 use crate::resource::Resource;
 use crate::scope::{Member, Requires, TaskScope, can};
 use anyhow::Context;
 use axum::extract::State;
-use axum::routing::{get, post};
-use axum::{Extension, Json, Router};
+use axum::{Extension, Json};
 use chrono::Utc;
 use gradient_ci::{ApplyInput, ApplyOutcome, apply_trigger};
 use gradient_core::ServerState;
@@ -29,15 +29,18 @@ use sea_orm::ConnectionTrait;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
+use utoipa::ToSchema;
+use utoipa_axum::router::OpenApiRouter;
+use utoipa_axum::routes;
 
-pub fn router() -> Router<Arc<ServerState>> {
-    Router::new()
-        .route("/", get(list).post(create))
-        .route("/{id}", get(read).patch(update).delete(delete_one))
-        .route("/{id}/test", post(fire_now))
+pub fn router() -> OpenApiRouter<Arc<ServerState>> {
+    OpenApiRouter::new()
+        .routes(routes!(list, create))
+        .routes(routes!(read, update, delete_one))
+        .routes(routes!(fire_now))
 }
 
-#[derive(Serialize, Debug)]
+#[derive(Serialize, Debug, ToSchema)]
 pub struct TriggerIntegrationSummary {
     pub id: IntegrationId,
     pub name: String,
@@ -56,7 +59,7 @@ impl From<&MIntegration> for TriggerIntegrationSummary {
     }
 }
 
-#[derive(Serialize, Debug)]
+#[derive(Serialize, Debug, ToSchema)]
 pub struct TriggerOut {
     pub id: TaskTriggerId,
     pub task: TaskId,
@@ -113,8 +116,8 @@ async fn load_integrations_for_triggers<C: ConnectionTrait>(
     Ok(by_ids::<EIntegration, _>(db, &ids).await?)
 }
 
-#[derive(Deserialize, Debug)]
-pub struct CreateBody {
+#[derive(Deserialize, Debug, ToSchema)]
+pub struct CreateTriggerRequest {
     pub config: TriggerConfig,
     #[serde(default = "default_true")]
     pub active: bool,
@@ -124,12 +127,20 @@ fn default_true() -> bool {
     true
 }
 
-#[derive(Deserialize, Debug)]
-pub struct UpdateBody {
+#[derive(Deserialize, Debug, ToSchema)]
+pub struct UpdateTriggerRequest {
     pub config: Option<TriggerConfig>,
     pub active: Option<bool>,
 }
 
+#[utoipa::path(
+    get,
+    path = "/",
+    tag = "triggers",
+    summary = "List the triggers of a task",
+    params(TaskPath),
+    responses((status = OK, body = Vec<TriggerOut>), WebError)
+)]
 pub async fn list(
     TaskScope { task: proj, db, .. }: TaskScope<Member>,
 ) -> WebResult<Json<BaseResponse<Vec<TriggerOut>>>> {
@@ -144,9 +155,18 @@ pub async fn list(
     ))
 }
 
+#[utoipa::path(
+    post,
+    path = "/",
+    tag = "triggers",
+    summary = "Create a trigger",
+    params(TaskPath),
+    request_body = CreateTriggerRequest,
+    responses((status = OK, body = TriggerOut), WebError)
+)]
 pub async fn create(
     TaskScope { task: proj, db, .. }: TaskScope<Requires<can::ManageTriggers>>,
-    Json(body): Json<CreateBody>,
+    Json(body): Json<CreateTriggerRequest>,
 ) -> WebResult<Json<BaseResponse<TriggerOut>>> {
     body.config
         .validate()
@@ -173,6 +193,14 @@ pub async fn create(
     Ok(ok_json(TriggerOut::build(row, &integrations)))
 }
 
+#[utoipa::path(
+    get,
+    path = "/{id}",
+    tag = "triggers",
+    summary = "Read a trigger",
+    params(TaskPath, ("id" = TaskTriggerId, Path)),
+    responses((status = OK, body = TriggerOut), WebError)
+)]
 pub async fn read(
     TaskScope {
         task: proj,
@@ -192,6 +220,15 @@ pub async fn read(
     Ok(ok_json(TriggerOut::build(row, &integrations)))
 }
 
+#[utoipa::path(
+    patch,
+    path = "/{id}",
+    tag = "triggers",
+    summary = "Update a trigger",
+    params(TaskPath, ("id" = TaskTriggerId, Path)),
+    request_body = UpdateTriggerRequest,
+    responses((status = OK, body = TriggerOut), WebError)
+)]
 pub async fn update(
     TaskScope {
         task: proj,
@@ -199,7 +236,7 @@ pub async fn update(
         params,
         ..
     }: TaskScope<Requires<can::ManageTriggers>>,
-    Json(body): Json<UpdateBody>,
+    Json(body): Json<UpdateTriggerRequest>,
 ) -> WebResult<Json<BaseResponse<TriggerOut>>> {
     let id: TaskTriggerId = params.param("id")?;
 
@@ -230,6 +267,14 @@ pub async fn update(
     Ok(ok_json(TriggerOut::build(updated, &integrations)))
 }
 
+#[utoipa::path(
+    delete,
+    path = "/{id}",
+    tag = "triggers",
+    summary = "Delete a trigger",
+    params(TaskPath, ("id" = TaskTriggerId, Path)),
+    responses((status = OK, body = DeletedResponse), WebError)
+)]
 pub async fn delete_one(
     TaskScope {
         task: proj,
@@ -249,6 +294,14 @@ pub async fn delete_one(
     Ok(ok_json(DeletedResponse::deleted()))
 }
 
+#[utoipa::path(
+    post,
+    path = "/{id}/test",
+    tag = "triggers",
+    summary = "Fire a trigger now",
+    params(TaskPath, ("id" = TaskTriggerId, Path)),
+    responses((status = OK, body = serde_json::Value), WebError)
+)]
 pub async fn fire_now(
     TaskScope {
         task: proj,

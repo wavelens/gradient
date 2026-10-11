@@ -41,6 +41,11 @@
     checks = (import ./nix/tests { inherit self inputs system pkgs; }) // {
       clippy = self.packages.${system}.gradient.clippy;
       unittest = self.packages.${system}.gradient.tests;
+      api-spec = pkgs.runCommand "gradient-api-spec-check" { } ''
+        ${self.packages.${system}.gradient.gate}/bin/gradient-api-spec > spec.yaml
+        diff -u ${./docs/gradient-api.yaml} spec.yaml
+        touch $out
+      '';
       cli-clippy = self.packages.${system}.gradient-cli-full.clippy;
       cli-unittest = self.packages.${system}.gradient-cli-full.tests;
       cli-static-clippy = self.packages.${system}.gradient-cli-static.clippy;

@@ -113,9 +113,10 @@ pub enum WebError {
 
 pub type WebResult<T> = Result<T, WebError>;
 
-#[derive(Serialize)]
-struct ErrorResponseBody<'a> {
+#[derive(Serialize, utoipa::ToSchema)]
+pub(crate) struct ErrorResponseBody<'a> {
     error: bool,
+    #[schema(value_type = String)]
     code: ErrorCode,
     message: &'a str,
 }

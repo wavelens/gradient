@@ -14,7 +14,7 @@ use thiserror::Error;
 pub use gradient_entity::task::ConcurrencyPolicy;
 pub use gradient_entity::task_trigger::TriggerType;
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum TriggerConfig {
     Polling {
