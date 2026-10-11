@@ -11,6 +11,7 @@
   enabledGroups ? [ ],
   writtenByHand ? [ ],
   withoutEnvironment ? [ ],
+  examples ? { },
   emptyListIsUnset ? false,
 }: let
   camel = name: let
@@ -54,11 +55,15 @@
     else if isInteger spec then lib.toInt spec.default
     else spec.default;
 
-  optionOf = spec: lib.mkOption {
+  optionOf = spec: lib.mkOption ({
     type = typeOf spec;
     default = defaultOf spec;
     description = spec.description;
-  };
+  } // lib.optionalAttrs (spec.type == "bool" && lib.hasPrefix "Whether to enable" spec.description) {
+    example = true;
+  } // lib.optionalAttrs (lib.hasAttrByPath (pathOf spec) examples) {
+    example = lib.getAttrFromPath (pathOf spec) examples;
+  });
 
   environmentValue = value:
     if lib.isBool value then lib.boolToString value

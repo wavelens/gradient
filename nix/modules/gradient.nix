@@ -12,6 +12,13 @@
     enabledGroups = [ "oidc" "scim" "email" "s3" "github_app" "ssh" ];
     withoutEnvironment = [ [ "database" "url" ] [ "state" "file" ] [ "state" "validate" ] [ "state" "delete" ] ];
 
+    examples = {
+      frontend.logoUrl = "https://example.com/logo.svg";
+      gradientCi.url = "http://localhost:3200";
+      log.traceDir = "/var/lib/gradient/trace";
+      sentry.dsn = "https://your-key@your-sentry.example.com/1";
+    };
+
     subGroups = {
       "" = [ "frontend" ];
       database = [ "cache" "web" ];
