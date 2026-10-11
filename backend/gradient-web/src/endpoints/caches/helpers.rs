@@ -175,9 +175,13 @@ pub(super) async fn get_nar_by_hash(
         .map(normalize_nar_hash)
         .ok_or(CacheRefusal::NotRecorded("FileHash"))?;
     let file_hash_nix32 = strip_hash_algo(&file_hash).to_string();
-    let file_size = cached_path_row
-        .file_size
-        .ok_or(CacheRefusal::NotRecorded("FileSize"))? as u32;
+    let file_size = u32::try_from(
+        cached_path_row
+            .file_size
+            .ok_or(CacheRefusal::NotRecorded("FileSize"))?
+            .max(0),
+    )
+    .unwrap_or(u32::MAX);
 
     Ok(NixPathInfo {
         store_path: path,
@@ -226,9 +230,13 @@ async fn get_nar_by_cached_path(
         .file_hash
         .clone()
         .ok_or(CacheRefusal::MissingFileField("hash"))?;
-    let file_size = cached_path_row
-        .file_size
-        .ok_or(CacheRefusal::MissingFileField("size"))? as u32;
+    let file_size = u32::try_from(
+        cached_path_row
+            .file_size
+            .ok_or(CacheRefusal::MissingFileField("size"))?
+            .max(0),
+    )
+    .unwrap_or(u32::MAX);
     let nar_hash = cached_path_row
         .nar_hash
         .as_deref()

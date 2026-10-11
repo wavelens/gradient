@@ -36,6 +36,10 @@ pub struct DownloadClaims {
     pub evaluation: EvaluationId,
 }
 
+fn unix_seconds(time: chrono::DateTime<Utc>) -> Result<usize, StatusCode> {
+    usize::try_from(time.timestamp()).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
+}
+
 pub fn cookie_value<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
     headers
         .get(header::COOKIE)?
@@ -126,8 +130,8 @@ pub async fn create_session_and_token(
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let claim = Cliams {
-        iat: now.timestamp() as usize,
-        exp: expires_at.timestamp() as usize,
+        iat: unix_seconds(now)?,
+        exp: unix_seconds(expires_at)?,
         id: user_id,
         jti: session_id,
     };
@@ -213,8 +217,8 @@ pub fn encode_download_token(
     evaluation: EvaluationId,
 ) -> Result<String, StatusCode> {
     let now = Utc::now();
-    let exp = (now + Duration::hours(1)).timestamp() as usize;
-    let iat = now.timestamp() as usize;
+    let exp = unix_seconds(now + Duration::hours(1))?;
+    let iat = unix_seconds(now)?;
     let claim = DownloadClaims {
         iat,
         exp,

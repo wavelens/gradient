@@ -32,6 +32,7 @@ use tracing::instrument;
 
 use gradient_wire::messages::JobPhase;
 
+use crate::count::clamp_to_u32;
 use crate::executor::timeline::PhaseGuard;
 use crate::nix::gcroots::{GcRootHandle, GcRootKeeper};
 use crate::nix::store::LocalNixStore;
@@ -68,7 +69,7 @@ pub(crate) async fn push_paths(
     }
 
     let mut guard = updater.phase(JobPhase::DrvClosurePush);
-    guard.record(paths.len() as u32, 0);
+    guard.record(clamp_to_u32(paths.len()), 0);
     let (paths, sizes): (Vec<String>, Vec<Option<u64>>) = paths.iter().cloned().unzip();
     let cache_entries = query_fetched_paths(updater, paths, sizes).await?;
     upload_all(updater, pair_with_store(cache_entries, store), None).await?;
@@ -148,7 +149,7 @@ impl<'a> PushSpans<'a> {
         if let Some((mut push, started)) = self.pushing.into_inner() {
             gradient_worker_client::throughput::UPLOAD
                 .observe_transfer(uploaded.nar_size, started.elapsed());
-            push.record(paths as u32, uploaded.file_size);
+            push.record(clamp_to_u32(paths), uploaded.file_size);
         }
     }
 }
@@ -207,7 +208,7 @@ async fn push_inputs(
     let sizes = vec![None; input_paths.len()];
     let cache_entries = query_fetched_paths(&updater, input_paths, sizes).await?;
     let mut push = updater.phase(JobPhase::PushInputs);
-    push.record(cache_entries.len() as u32, 0);
+    push.record(clamp_to_u32(cache_entries.len()), 0);
     upload_all(&updater, pair_with_store(cache_entries, &store), None).await?;
     Ok(())
 }
@@ -457,7 +458,7 @@ impl JobExecutor {
             if fully_realised(&realised, &missing) {
                 self.adopt_realised(
                     build_task,
-                    index as u32,
+                    clamp_to_u32(index),
                     realised,
                     updater,
                     &mut gc_handles,
@@ -583,7 +584,7 @@ impl JobExecutor {
             let built = build::build_derivation(
                 &self.store,
                 build_task,
-                index as u32,
+                clamp_to_u32(index),
                 updater,
                 &mut abort,
                 self.log_limits,
@@ -605,7 +606,7 @@ impl JobExecutor {
 
         {
             let mut compress = updater.phase(JobPhase::Compress);
-            compress.record(outputs.len() as u32, 0);
+            compress.record(clamp_to_u32(outputs.len()), 0);
             let packed = compress::push_outputs(updater, outputs, &abort)
                 .await
                 .map_err(failure::BuildError::transient)?;

@@ -995,6 +995,10 @@ pub async fn get_scoring_summary(
     let span = (hi - lo).max(f64::EPSILON);
     let mut counts = vec![0i64; BINS];
     for s in &scores {
+        #[expect(
+            clippy::cast_possible_truncation,
+            reason = "bin index is rounded down and nonnegative"
+        )]
         let idx = (((s - lo) / span) * BINS as f64).floor() as usize;
         counts[idx.min(BINS - 1)] += 1;
     }

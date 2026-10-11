@@ -67,7 +67,8 @@ pub async fn list(
 
     let start = q.start_index.unwrap_or(1).max(1) as u64;
     let count = q.count.unwrap_or(100).clamp(0, 200) as u64;
-    let total = gradient_db::users::count_managed(db, &filter).await? as usize;
+    let total = usize::try_from(gradient_db::users::count_managed(db, &filter).await?)
+        .unwrap_or(usize::MAX);
     let rows = if count == 0 {
         Vec::new()
     } else {
@@ -77,7 +78,11 @@ pub async fn list(
     let resources: Vec<_> = rows.iter().map(UserResource::from).collect();
     Ok(scim_json(
         StatusCode::OK,
-        ListResponse::new(resources, total, start as usize),
+        ListResponse::new(
+            resources,
+            total,
+            usize::try_from(start).unwrap_or(usize::MAX),
+        ),
     ))
 }
 

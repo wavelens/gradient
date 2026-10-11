@@ -166,7 +166,7 @@ pub async fn run_pass(
         _ = cancel.cancelled() => return false,
         r = tokio::time::timeout(budget, pass) => r,
     };
-    let elapsed_ms = started.elapsed().as_millis() as u64;
+    let elapsed_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
     match outcome {
         Ok(Ok(())) => health.with(name, |h| h.last_ok_at = Some(Instant::now())),
         Ok(Err(e)) => {
@@ -419,7 +419,7 @@ impl Actor for Root {
             return Ok(());
         }
         let delay = state.backoff(name);
-        warn!(loop_name = name, %reason, restart_in_ms = delay.as_millis() as u64, "supervised loop died; restarting");
+        warn!(loop_name = name, %reason, restart_in_ms = u64::try_from(delay.as_millis()).unwrap_or(u64::MAX), "supervised loop died; restarting");
         state.args.health.with(name, |h| {
             h.restarts += 1;
             h.last_error = Some(reason);

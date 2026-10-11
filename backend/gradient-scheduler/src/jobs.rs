@@ -20,6 +20,7 @@ use gradient_wire::types::{
 };
 
 use crate::cluster::{ClusterBook, PendingCluster};
+use crate::count::clamp_to_u32;
 use gradient_graph::RamShortage;
 use gradient_pool::WorkerCaps;
 use gradient_pool::score::{JobContext, RamFit, RamNeed, ScoredJob, ScoringPolicy, WorkerContext};
@@ -249,9 +250,13 @@ impl PendingJob {
 
     pub fn substitute_outputs(&self) -> Option<u32> {
         match self {
-            PendingJob::Build(j) if j.substitute => {
-                Some(j.job.builds.iter().map(|b| b.outputs.len() as u32).sum())
-            }
+            PendingJob::Build(j) if j.substitute => Some(
+                j.job
+                    .builds
+                    .iter()
+                    .map(|b| clamp_to_u32(b.outputs.len()))
+                    .sum(),
+            ),
             _ => None,
         }
     }
@@ -457,6 +462,10 @@ struct ProjectWorkShare {
 }
 
 impl ProjectWorkShare {
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "a share below one needs single precision"
+    )]
     fn share(&self, project: ProjectId) -> Option<f32> {
         (self.total > 0.0)
             .then(|| (self.by_project.get(&project).copied().unwrap_or(0.0) / self.total) as f32)
@@ -1519,16 +1528,18 @@ impl JobTracker {
     }
 
     pub fn instance_counts(&self) -> (u32, u32) {
-        let active = self
-            .active
-            .values()
-            .filter(|a| matches!(a.job, PendingJob::Build(_)))
-            .count() as u32;
-        let pending = self
-            .pending
-            .values()
-            .filter(|j| matches!(j, PendingJob::Build(_)))
-            .count() as u32;
+        let active = clamp_to_u32(
+            self.active
+                .values()
+                .filter(|a| matches!(a.job, PendingJob::Build(_)))
+                .count(),
+        );
+        let pending = clamp_to_u32(
+            self.pending
+                .values()
+                .filter(|j| matches!(j, PendingJob::Build(_)))
+                .count(),
+        );
         (active, pending)
     }
 

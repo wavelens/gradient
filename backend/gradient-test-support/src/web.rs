@@ -19,8 +19,8 @@ use crate::state::{TEST_JWT_SECRET, TestState};
 
 #[derive(Serialize)]
 struct Claims {
-    exp: usize,
-    iat: usize,
+    exp: i64,
+    iat: i64,
     id: UserId,
     jti: SessionId,
 }
@@ -28,8 +28,8 @@ struct Claims {
 pub fn make_token(session_id: SessionId) -> String {
     let now = Utc::now();
     let claims = Claims {
-        iat: now.timestamp() as usize,
-        exp: (now + Duration::hours(1)).timestamp() as usize,
+        iat: now.timestamp(),
+        exp: (now + Duration::hours(1)).timestamp(),
         id: user_id(),
         jti: session_id,
     };

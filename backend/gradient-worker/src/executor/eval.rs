@@ -294,8 +294,11 @@ pub async fn evaluate_derivations(
 
     let totals = evaluator.resolver.take_eval_stats();
     if totals.total_thunks > 0 || !totals.per_entry_point.is_empty() {
-        let report =
-            build_eval_stats_report(totals, flake_nodes, start.elapsed().as_millis() as u64);
+        let report = build_eval_stats_report(
+            totals,
+            flake_nodes,
+            u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX),
+        );
         if let Err(e) = updater.report_eval_stats(report).await {
             warn!(error = %e, "failed to send eval stats report");
         }

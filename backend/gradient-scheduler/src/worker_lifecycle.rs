@@ -38,7 +38,7 @@ pub(crate) async fn record_worker_sample(
         disk_speed_mbps: info.disk_speed_mbps,
         upload_speed_mbps: info.upload_speed_mbps,
         download_speed_mbps: info.download_speed_mbps,
-        assigned_jobs: info.assigned_job_count as i32,
+        assigned_jobs: i32::try_from(info.assigned_job_count).unwrap_or(i32::MAX),
         max_concurrent_builds: info.max_concurrent_builds as i32,
         state: info.draining.into(),
         capabilities: serde_json::to_value(&info.capabilities).unwrap_or(serde_json::Value::Null),

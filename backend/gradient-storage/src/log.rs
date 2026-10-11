@@ -37,7 +37,10 @@ pub trait LogStorage: Send + Sync + std::fmt::Debug {
             }
 
             Ok(Some(
-                inline.get(offset as usize..).unwrap_or_default().to_vec(),
+                inline
+                    .get(usize::try_from(offset).unwrap_or(usize::MAX)..)
+                    .unwrap_or_default()
+                    .to_vec(),
             ))
         })
     }

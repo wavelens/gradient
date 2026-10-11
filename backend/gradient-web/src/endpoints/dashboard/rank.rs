@@ -208,7 +208,7 @@ pub struct Paging {
 impl Paging {
     pub fn from_query(page: Option<u64>, per_page: Option<u64>) -> Self {
         let limit = per_page.unwrap_or(10).clamp(1, 25) as usize;
-        let page = page.unwrap_or(1).max(1) as usize;
+        let page = usize::try_from(page.unwrap_or(1).max(1)).unwrap_or(usize::MAX);
         Paging {
             offset: (page - 1).saturating_mul(limit),
             limit,

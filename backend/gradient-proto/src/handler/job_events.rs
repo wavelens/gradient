@@ -179,13 +179,13 @@ async fn drain(
             "job_event",
             %job_id,
             kind = event.kind(),
-            queue_wait_us = received.elapsed().as_micros() as u64,
+            queue_wait_us = u64::try_from(received.elapsed().as_micros()).unwrap_or(u64::MAX),
         );
         let started = Instant::now();
         handler.apply(event).instrument(span).await;
         let took = started.elapsed();
         if took > SLOW_JOB_EVENT {
-            warn!(%peer_id, %job_id, took_ms = took.as_millis() as u64, queued = rx.len(), "job event applied slowly; the graph is behind");
+            warn!(%peer_id, %job_id, took_ms = u64::try_from(took.as_millis()).unwrap_or(u64::MAX), queued = rx.len(), "job event applied slowly; the graph is behind");
         }
     }
 }

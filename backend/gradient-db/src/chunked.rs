@@ -62,7 +62,8 @@ mod tests {
     fn runs_a_single_query_at_or_below_the_cap() {
         run(async {
             let calls = AtomicUsize::new(0);
-            let ids: Vec<u32> = (0..IN_CHUNK_SIZE as u32).collect();
+            let ids: Vec<u32> =
+                (0..u32::try_from(IN_CHUNK_SIZE).expect("chunk size fits")).collect();
             let got = fetch_in_chunks(&ids, |chunk| {
                 calls.fetch_add(1, Ordering::SeqCst);
                 async move { Ok::<_, DbErr>(chunk) }
@@ -78,7 +79,8 @@ mod tests {
     fn splits_above_the_cap_and_preserves_every_id() {
         run(async {
             let calls = AtomicUsize::new(0);
-            let ids: Vec<u32> = (0..(IN_CHUNK_SIZE as u32 * 2 + 7)).collect();
+            let ids: Vec<u32> =
+                (0..u32::try_from(IN_CHUNK_SIZE * 2 + 7).expect("chunk size fits")).collect();
             let got = fetch_in_chunks(&ids, |chunk| {
                 calls.fetch_add(1, Ordering::SeqCst);
                 assert!(chunk.len() <= IN_CHUNK_SIZE);

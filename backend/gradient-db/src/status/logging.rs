@@ -78,7 +78,7 @@ async fn indexed_chunk_count(
         .count(db)
         .await
         .with_context(|| format!("count the log chunks of attempt {log_id}"))?;
-    Ok(count as u32)
+    u32::try_from(count).with_context(|| format!("count the log chunks of attempt {log_id}"))
 }
 
 async fn replace_log_chunk_index(
@@ -96,12 +96,12 @@ async fn replace_log_chunk_index(
     }
     let rows: Vec<ActiveModel> = descs
         .iter()
-        .enumerate()
-        .map(|(i, d)| {
+        .zip(0i32..)
+        .map(|(d, i)| {
             Model {
                 id: gradient_entity::ids::BuildLogChunkId::now_v7(),
                 build_attempt: log_id,
-                chunk_index: i as i32,
+                chunk_index: i,
                 byte_start: d.byte_start as i64,
                 byte_len: d.byte_len as i32,
                 line_start: d.line_start as i64,

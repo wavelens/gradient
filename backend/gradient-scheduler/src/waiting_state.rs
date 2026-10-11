@@ -327,7 +327,7 @@ fn phase_from_counters(c: EvalCounters) -> Option<BuildPhase> {
     (c.building > 0).then_some(BuildPhase::Pending(Assessment {
         target: EvaluationStatus::Building,
         reason: None,
-        pending: c.active as u32,
+        pending: u32::try_from(c.active.max(0)).unwrap_or(u32::MAX),
     }))
 }
 
@@ -347,7 +347,7 @@ async fn assess_buildability(
         return Ok(phase);
     }
 
-    let pending_count = counters.active as u32;
+    let pending_count = u32::try_from(counters.active.max(0)).unwrap_or(u32::MAX);
     let now = Instant::now();
     if let Some((target, reason)) =
         memo.and_then(|m| lock(m).get(evaluation_id, counters, worker_caps, now))

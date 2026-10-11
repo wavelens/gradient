@@ -19,6 +19,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};
 
 use crate::config::WorkerConfig;
+use crate::count::clamp_to_u32;
 use crate::executor::timeline::{JobTimeline, TimelineSnapshot};
 use crate::executor::{AbortSignal, JobExecutor};
 use crate::proto::credentials::CredentialStore;
@@ -136,7 +137,7 @@ struct JobRegistry {
 
 impl JobRegistry {
     fn active(&self, kind: JobKind) -> u32 {
-        self.running.values().filter(|j| j.kind == kind).count() as u32
+        clamp_to_u32(self.running.values().filter(|j| j.kind == kind).count())
     }
 
     fn len(&self) -> usize {
@@ -251,7 +252,7 @@ impl MessageLoopState {
             writer.clone(),
             usize::try_from(config.nar.max_concurrent_uploads.get()).unwrap_or(usize::MAX),
         )
-        .with_chunk_bytes(config.nar.chunk_bytes as usize);
+        .with_chunk_bytes(usize::try_from(config.nar.chunk_bytes).unwrap_or(usize::MAX));
         Self {
             uploads,
             writer,

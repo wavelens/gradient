@@ -134,7 +134,7 @@ impl UploadAdmission {
 
     fn record_grant(&self, session: SessionId, id: u64) {
         if let Some(at) = self.enqueued_at.lock().remove(&(session, id)) {
-            let waited = at.elapsed().as_micros().min(u64::MAX as u128) as u64;
+            let waited = u64::try_from(at.elapsed().as_micros()).unwrap_or(u64::MAX);
             self.wait_micros_total.fetch_add(waited, Ordering::Relaxed);
         }
         self.granted_total.fetch_add(1, Ordering::Relaxed);

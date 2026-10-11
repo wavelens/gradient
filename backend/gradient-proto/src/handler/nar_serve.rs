@@ -84,7 +84,7 @@ pub(super) async fn serve_nar_request(
     let limits = PassthroughLimits {
         open: Duration::from_secs(nar_cfg.storage_open_timeout_secs.get()),
         chunk_read: Duration::from_secs(nar_cfg.send_chunk_timeout_secs.get()),
-        chunk_bytes: nar_cfg.chunk_bytes as usize,
+        chunk_bytes: usize::try_from(nar_cfg.chunk_bytes).unwrap_or(usize::MAX),
     };
     let Some(key) = store_hash(store_path) else {
         let reason = format!("invalid store path: {store_path}");
@@ -223,7 +223,10 @@ mod serve_nar_tests {
                 ServerMessage::NarStreamHeader { total_bytes, .. } => {
                     saw_header = true;
                     assert!(!saw_final, "header must precede chunks");
-                    assert_eq!(total_bytes as usize, payload.len());
+                    assert_eq!(
+                        usize::try_from(total_bytes).expect("total fits"),
+                        payload.len()
+                    );
                 }
                 ServerMessage::NarPush { data, is_final, .. } => {
                     assembled.extend_from_slice(&data);
@@ -284,7 +287,7 @@ mod serve_nar_tests {
                 2 * 1024 * 1024,
             ));
         let state = TestState::new().worker_db(db).nar_storage(storage).build();
-        let payload: Vec<u8> = (0..(1024 * 1024 + 123)).map(|i| i as u8).collect();
+        let payload: Vec<u8> = (0..=u8::MAX).cycle().take(1024 * 1024 + 123).collect();
         let hash = "abcdefghijklmnopqrstuvwxyz012345";
         state
             .nar_storage
@@ -309,7 +312,10 @@ mod serve_nar_tests {
         while let Ok(bytes) = rx.try_recv() {
             match decode(bytes) {
                 ServerMessage::NarStreamHeader { total_bytes, .. } => {
-                    assert_eq!(total_bytes as usize, payload.len());
+                    assert_eq!(
+                        usize::try_from(total_bytes).expect("total fits"),
+                        payload.len()
+                    );
                 }
                 ServerMessage::NarPush { data, .. } => {
                     assembled.extend_from_slice(&data);

@@ -31,7 +31,7 @@ impl<'a> PartUploader<'a> {
     }
 
     pub fn part_size(&self) -> usize {
-        self.grant.part_size as usize
+        usize::try_from(self.grant.part_size).unwrap_or(usize::MAX)
     }
 
     pub async fn finish(mut self) -> Result<CompletedMultipart> {

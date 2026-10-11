@@ -493,7 +493,10 @@ mod tests {
     }
 
     fn framed(payload: &[u8]) -> Vec<u8> {
-        let mut frame = (payload.len() as u32).to_le_bytes().to_vec();
+        let mut frame = u32::try_from(payload.len())
+            .expect("frame fits")
+            .to_le_bytes()
+            .to_vec();
         frame.extend_from_slice(payload);
         frame
     }

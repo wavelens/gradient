@@ -156,6 +156,7 @@ fn collect_types(node: &Value, out: &mut Vec<String>) {
 }
 
 /// Postgres 18 is reporting `Actual Rows` as a float.
+#[expect(clippy::cast_possible_truncation, reason = "rounded and saturating")]
 fn number(node: &Value, key: &str) -> u64 {
     node.get(key)
         .and_then(Value::as_f64)

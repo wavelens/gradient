@@ -91,7 +91,8 @@ pub(crate) async fn sign_parts(
     part_count: u64,
     ttl: Duration,
 ) -> Result<Vec<String>> {
-    let mut urls = Vec::with_capacity(part_count as usize);
+    let mut urls =
+        Vec::with_capacity(usize::try_from(part_count).context("count multipart parts")?);
     for part_number in 1..=part_count {
         let options = SignedUrlOptions::default().with_query([
             ("partNumber", part_number.to_string()),

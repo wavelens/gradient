@@ -590,20 +590,28 @@ impl EvalHistory {
     }
 
     fn from_rows(ram: Vec<EvalHistoryRow>, rows: Vec<EvalDurationRow>) -> Self {
+        #[expect(
+            clippy::cast_possible_truncation,
+            reason = "whole number clamped at zero"
+        )]
         let tasks = ram
             .into_iter()
             .map(|r| {
                 (
                     r.task,
                     gradient_pool::score::HistoryPrediction {
-                        predicted_peak_ram_mb: Some(r.p95_ram.max(0.0) as u64),
-                        samples: r.samples.max(0) as u32,
+                        predicted_peak_ram_mb: Some(r.p95_ram.max(0.0).trunc() as u64),
+                        samples: u32::try_from(r.samples.max(0)).unwrap_or(u32::MAX),
                         ..Default::default()
                     },
                 )
             })
             .collect();
 
+        #[expect(
+            clippy::cast_possible_truncation,
+            reason = "whole number of milliseconds"
+        )]
         let mean = |pick: fn(&EvalDurationRow) -> (Option<f64>, i64)| {
             let (sum, runs) = rows
                 .iter()
@@ -611,7 +619,7 @@ impl EvalHistory {
                 .fold((0.0, 0.0), |(sum, runs), (ms, n)| {
                     (sum + ms.unwrap_or(0.0).max(0.0) * n as f64, runs + n as f64)
                 });
-            (runs > 0.0).then(|| (sum / runs) as u64)
+            (runs > 0.0).then(|| (sum / runs).trunc() as u64)
         };
         let fleet = EvalDurations {
             fetch_ms: mean(|r| (r.fetch_ms, r.fetch_samples)),
@@ -620,7 +628,11 @@ impl EvalHistory {
         let durations = rows
             .iter()
             .map(|r| {
-                let ms = |v: Option<f64>| v.map(|ms| ms.max(0.0) as u64);
+                #[expect(
+                    clippy::cast_possible_truncation,
+                    reason = "whole number clamped at zero"
+                )]
+                let ms = |v: Option<f64>| v.map(|ms| ms.max(0.0).trunc() as u64);
                 (
                     r.task,
                     EvalDurations {

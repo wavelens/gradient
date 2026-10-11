@@ -11,6 +11,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 
 use crate::assign_mode::decide_build_spec_kind;
+use crate::count::clamp_to_u32;
 use gradient_db::scheduling::startable_set::StartableMoves;
 use gradient_db::{DbContext, WorkerDb};
 use gradient_graph::{Graph, Transition};
@@ -341,7 +342,7 @@ impl BuildAssignMaps {
         }
         let dep_counts: HashMap<DerivationId, u32> = deps_by_drv
             .iter()
-            .map(|(k, v)| (*k, v.len() as u32))
+            .map(|(k, v)| (*k, clamp_to_u32(v.len())))
             .collect();
 
         let dep_drv_ids: Vec<DerivationId> = dep_edges
@@ -786,7 +787,7 @@ async fn enqueue_startable_shared_builds(
 
     debug!(
         enqueued,
-        elapsed_ms = started.elapsed().as_millis() as u64,
+        elapsed_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
         "startable shared builds enqueued"
     );
 

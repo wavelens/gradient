@@ -89,7 +89,7 @@ pub fn filter<S: Subscriber>() -> impl Filter<S> + use<S> {
 fn wall_clock_us() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map_or(0, |d| d.as_micros() as u64)
+        .map_or(0, |d| u64::try_from(d.as_micros()).unwrap_or(u64::MAX))
 }
 
 impl<S> Layer<S> for TraceFileLayer
@@ -131,7 +131,7 @@ where
             "name": span.name(),
             "target": span.metadata().target(),
             "ts_us": timing.wall_us,
-            "dur_us": timing.start.elapsed().as_micros() as u64,
+            "dur_us": u64::try_from(timing.start.elapsed().as_micros()).unwrap_or(u64::MAX),
             "pid": self.pid,
             "process": self.process,
             "fields": timing.fields,

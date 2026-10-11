@@ -6,7 +6,7 @@
 
 use super::sgr::SgrState;
 use crate::log::LogStorage;
-use anyhow::Result;
+use anyhow::{Context, Result};
 use gradient_types::constants::LOG_CHUNK_ZSTD_LEVEL;
 use gradient_types::ids::BuildAttemptId;
 
@@ -130,7 +130,7 @@ pub async fn read_chunks_from(
         }
 
         let chunk_text = read_chunk_text(storage, log_key, chunk.index, chunk.line_count).await?;
-        let skip = offset.saturating_sub(chunk.byte_start) as usize;
+        let skip = usize::try_from(offset.saturating_sub(chunk.byte_start)).unwrap_or(usize::MAX);
         text.push_str(chunk_text.get(skip..).unwrap_or_default());
         end = chunk_end;
     }
@@ -149,11 +149,16 @@ pub async fn compress_and_store_chunks(
     for (index, c) in chunk_log(log, target_bytes).into_iter().enumerate() {
         let compressed = zstd::stream::encode_all(c.text.as_bytes(), LOG_CHUNK_ZSTD_LEVEL)?;
         storage
-            .write_chunk(log_key, index as u32, &compressed)
+            .write_chunk(
+                log_key,
+                u32::try_from(index).context("index log chunk")?,
+                &compressed,
+            )
             .await?;
         out.push(StoredChunkDesc {
-            byte_len: c.text.len() as u32,
-            compressed_size: compressed.len() as u32,
+            byte_len: u32::try_from(c.text.len()).context("measure log chunk")?,
+            compressed_size: u32::try_from(compressed.len())
+                .context("measure compressed log chunk")?,
             text: c.text,
             byte_start: c.byte_start,
             line_start: c.line_start,
@@ -247,13 +252,13 @@ mod tests {
         let id = BuildAttemptId::now_v7();
         let mut chunks = Vec::new();
         let mut byte_start = 0;
-        for (index, text) in ["first\n", "second\n"].iter().enumerate() {
+        for (index, text) in (0u32..).zip(["first\n", "second\n"]) {
             let raw = zstd::stream::encode_all(text.as_bytes(), 1).unwrap();
-            storage.write_chunk(id, index as u32, &raw).await.unwrap();
+            storage.write_chunk(id, index, &raw).await.unwrap();
             chunks.push(super::ChunkSpan {
-                index: index as u32,
+                index,
                 byte_start,
-                byte_len: text.len() as u32,
+                byte_len: u32::try_from(text.len()).expect("short text"),
                 line_count: 1,
             });
 
