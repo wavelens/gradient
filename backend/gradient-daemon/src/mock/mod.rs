@@ -9,11 +9,14 @@ pub mod build;
 pub mod cache_export;
 pub mod conn;
 pub mod control;
+pub mod error;
 pub mod import;
 pub mod nar;
 pub mod spec;
 pub mod store;
 pub mod timing;
+
+pub use error::MockError;
 
 use crate::backend::{Backend, ConnInfo};
 use crate::journal::Journal;
@@ -48,7 +51,7 @@ pub async fn seed_node(state: &MockState, id: &str) -> anyhow::Result<()> {
         .config
         .derivations
         .get(id)
-        .ok_or_else(|| anyhow::anyhow!("unknown node {id}"))?;
+        .ok_or_else(|| MockError::UnknownNode { id: id.to_owned() })?;
     for (name, out) in &node.outputs {
         let nar = artefact::render(id, node, name)?;
         let refs = out

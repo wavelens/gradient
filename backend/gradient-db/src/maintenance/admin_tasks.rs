@@ -13,6 +13,7 @@ use sea_orm::{
 };
 use serde_json::Value as JsonValue;
 
+use crate::MissingRow;
 use gradient_entity::ids::{AdminTaskId, UserId};
 use gradient_types::*;
 
@@ -43,22 +44,14 @@ pub async fn insert_pending<C: ConnectionTrait>(
             let active = find_active(conn, kind)
                 .await
                 .map_err(InsertPendingError::Db)?
-                .ok_or_else(|| {
-                    InsertPendingError::Db(anyhow::anyhow!(
-                        "unique violation but no active row found"
-                    ))
-                })?;
+                .ok_or_else(|| InsertPendingError::Db(MissingRow::ActiveAdminTask.into()))?;
             Err(InsertPendingError::AlreadyActive(active.id))
         }
         Err(DbErr::Query(e)) if is_unique_violation(&e.to_string()) => {
             let active = find_active(conn, kind)
                 .await
                 .map_err(InsertPendingError::Db)?
-                .ok_or_else(|| {
-                    InsertPendingError::Db(anyhow::anyhow!(
-                        "unique violation but no active row found"
-                    ))
-                })?;
+                .ok_or_else(|| InsertPendingError::Db(MissingRow::ActiveAdminTask.into()))?;
             Err(InsertPendingError::AlreadyActive(active.id))
         }
         Err(other) => Err(InsertPendingError::Db(

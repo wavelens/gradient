@@ -5,6 +5,7 @@
  */
 
 use super::git_host_status::build_reporter_for_integration;
+use crate::ActionError;
 use crate::actions::ExecutorOk;
 use crate::context::CiContext;
 use anyhow::{Context, Result, anyhow};
@@ -48,7 +49,7 @@ pub(crate) async fn execute_open_pr(
         .and_then(|v| v.as_str())
         .ok_or_else(|| anyhow!("open_pr payload missing evaluation_id"))?
         .parse()
-        .map_err(|_| anyhow!("invalid evaluation_id"))?;
+        .map_err(|_| ActionError::InvalidEvaluationId)?;
 
     let sidecar = EEvaluationInputUpdate::find()
         .filter(CEvaluationInputUpdate::Evaluation.eq(evaluation_id))
@@ -77,9 +78,11 @@ pub(crate) async fn execute_open_pr(
         .one(&ctx.db.worker_db)
         .await
         .context("loading task")?
-        .ok_or_else(|| anyhow!("task {task_id} not found"))?;
-    let (owner, repo) = parse_owner_repo(&task.repository)
-        .ok_or_else(|| anyhow!("cannot parse owner/repo from {}", task.repository))?;
+        .ok_or(ActionError::TaskNotFound { id: task_id })?;
+    let (owner, repo) =
+        parse_owner_repo(&task.repository).ok_or_else(|| ActionError::RepositoryUnparsable {
+            repository: task.repository.clone(),
+        })?;
 
     let reporter = build_reporter_for_integration(ctx, integration_id).await?;
     let base_branch = reporter

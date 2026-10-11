@@ -464,6 +464,8 @@ where
 mod tests {
     use super::*;
     use crate::test_ctx::ctx;
+    use gradient_db::MissingRow;
+    use gradient_entity::StorePathError;
     use gradient_entity::evaluation::EvaluationStatus;
     use gradient_types::*;
     use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
@@ -681,7 +683,12 @@ mod tests {
             .unwrap();
         assert!(rx1.await.unwrap().unwrap().created);
         let err = rx2.await.unwrap().expect_err("malformed");
-        assert!(err.to_string().contains("malformed"), "{err}");
+        assert_eq!(
+            err.downcast_ref::<StorePathError>(),
+            Some(&StorePathError::Malformed(
+                "/nix/store/EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE-hello".into()
+            ))
+        );
         writer.stop_and_wait(None, None).await.unwrap();
     }
 
@@ -707,7 +714,10 @@ mod tests {
             .unwrap();
         assert!(rx1.await.unwrap().is_ok());
         let err = rx2.await.unwrap().expect_err("no evaluation row");
-        assert!(err.to_string().contains("not found"), "{err}");
+        assert_eq!(
+            err.downcast_ref::<MissingRow>(),
+            Some(&MissingRow::Evaluation { id: e2 })
+        );
         writer.stop_and_wait(None, None).await.unwrap();
     }
 

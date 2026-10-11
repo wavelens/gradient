@@ -13,7 +13,7 @@ use sea_orm::ActiveValue::Set;
 use sea_orm::sea_query::Expr;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, Condition, ConnectionTrait, DbErr, EntityTrait, IntoActiveModel,
-    QueryFilter,
+    QueryFilter, RuntimeErr, sqlx,
 };
 
 pub(super) async fn ensure_no_active_evaluation<C: ConnectionTrait>(
@@ -123,7 +123,10 @@ pub async fn trigger_evaluation<C: ConnectionTrait>(
     }
     .into_active_model();
 
-    let evaluation = aevaluation.insert(db).await?;
+    let evaluation = aevaluation
+        .insert(db)
+        .await
+        .map_err(active_evaluation_conflict)?;
     link_to_previous(db, &evaluation).await?;
 
     snapshot_flake_input_overrides(db, task.id, evaluation.id).await?;
@@ -135,4 +138,27 @@ pub async fn trigger_evaluation<C: ConnectionTrait>(
     atask.update(db).await?;
 
     Ok(evaluation)
+}
+
+const ONE_ACTIVE_PER_TASK: &str = "uq_evaluation_one_active_per_task";
+
+fn active_evaluation_conflict(err: DbErr) -> TriggerError {
+    if violates_one_active_per_task(&err) {
+        TriggerError::AlreadyInProgress
+    } else {
+        TriggerError::Db(err)
+    }
+}
+
+fn violates_one_active_per_task(err: &DbErr) -> bool {
+    let (DbErr::Query(RuntimeErr::SqlxError(sqlx_err))
+    | DbErr::Exec(RuntimeErr::SqlxError(sqlx_err))) = err
+    else {
+        return false;
+    };
+    matches!(
+        sqlx_err.as_ref(),
+        sqlx::Error::Database(db_err)
+            if db_err.is_unique_violation() && db_err.constraint() == Some(ONE_ACTIVE_PER_TASK)
+    )
 }

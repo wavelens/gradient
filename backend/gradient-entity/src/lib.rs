@@ -7,7 +7,7 @@
 pub mod ids;
 pub mod store_path;
 
-pub use store_path::{STORE_DIR, StorePath};
+pub use store_path::{STORE_DIR, StorePath, StorePathError};
 
 pub mod admin_task;
 pub mod api;

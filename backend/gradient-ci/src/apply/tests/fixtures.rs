@@ -9,7 +9,8 @@ use gradient_entity::evaluation::EvaluationStatus;
 use gradient_types::ids::{CacheId, ProjectCacheId, UserId, WorkerRegistrationId};
 use gradient_types::triggers::TriggerType;
 use gradient_types::*;
-use sea_orm::MockDatabase;
+use sea_orm::{DbErr, MockDatabase, RuntimeErr, sqlx};
+use std::sync::Arc;
 use uuid::Uuid;
 
 pub fn make_task_with_last_eval(last: Option<EvaluationId>) -> MTask {
@@ -127,4 +128,47 @@ fn worker_registration_row(
 
 pub fn with_eval_worker(db: MockDatabase) -> MockDatabase {
     db.append_query_results([vec![worker_registration_row(true, true)]])
+}
+
+#[derive(Debug)]
+struct ActiveEvaluationExists;
+
+impl std::fmt::Display for ActiveEvaluationExists {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("duplicate key value violates unique constraint")
+    }
+}
+
+impl std::error::Error for ActiveEvaluationExists {}
+
+impl sqlx::error::DatabaseError for ActiveEvaluationExists {
+    fn message(&self) -> &str {
+        "duplicate key value violates unique constraint"
+    }
+
+    fn as_error(&self) -> &(dyn std::error::Error + Send + Sync + 'static) {
+        self
+    }
+
+    fn as_error_mut(&mut self) -> &mut (dyn std::error::Error + Send + Sync + 'static) {
+        self
+    }
+
+    fn into_error(self: Box<Self>) -> Box<dyn std::error::Error + Send + Sync + 'static> {
+        self
+    }
+
+    fn kind(&self) -> sqlx::error::ErrorKind {
+        sqlx::error::ErrorKind::UniqueViolation
+    }
+
+    fn constraint(&self) -> Option<&str> {
+        Some("uq_evaluation_one_active_per_task")
+    }
+}
+
+pub fn one_active_per_task_violation() -> DbErr {
+    DbErr::Query(RuntimeErr::SqlxError(Arc::new(sqlx::Error::Database(
+        Box::new(ActiveEvaluationExists),
+    ))))
 }

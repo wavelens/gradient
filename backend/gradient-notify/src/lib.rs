@@ -10,6 +10,7 @@ use gradient_types::EmailConfig;
 use lettre::message::header::ContentType;
 use lettre::transport::smtp::authentication::Credentials;
 use lettre::{Message, SmtpTransport, Transport};
+use thiserror::Error;
 use tokio::fs;
 use tracing::info;
 
@@ -103,12 +104,17 @@ pub struct SubscriptionMail<'a> {
     pub link: String,
 }
 
+#[derive(Debug, Error, Clone, Copy, PartialEq, Eq)]
+pub enum EmailError {
+    #[error("SMTP is not configured on this server")]
+    SmtpNotConfigured,
+}
+
 #[derive(Debug)]
 pub struct EmailService {
     transport: Option<SmtpTransport>,
     from_address: String,
     from_name: String,
-    enabled: bool,
 }
 
 impl EmailService {
@@ -118,7 +124,6 @@ impl EmailService {
                 transport: None,
                 from_address: String::new(),
                 from_name: String::new(),
-                enabled: false,
             });
         };
 
@@ -147,15 +152,18 @@ impl EmailService {
             transport: Some(transport),
             from_address: config.from_address.clone(),
             from_name: config.from_name.clone(),
-            enabled: true,
         })
+    }
+
+    fn transport(&self) -> Result<&SmtpTransport, EmailError> {
+        self.transport.as_ref().ok_or(EmailError::SmtpNotConfigured)
     }
 }
 
 #[async_trait]
 impl EmailSender for EmailService {
     fn is_enabled(&self) -> bool {
-        self.enabled
+        self.transport.is_some()
     }
 
     async fn send_verification_email(
@@ -165,14 +173,7 @@ impl EmailSender for EmailService {
         verification_token: &str,
         base_url: &str,
     ) -> Result<()> {
-        if !self.enabled {
-            bail!("Email service is not enabled");
-        }
-
-        let transport = self
-            .transport
-            .as_ref()
-            .context("SMTP transport not initialized")?;
+        let transport = self.transport()?;
 
         let verification_url = format!(
             "{}/api/v1/auth/verify-email?token={}",
@@ -208,14 +209,7 @@ impl EmailSender for EmailService {
         reset_token: &str,
         base_url: &str,
     ) -> Result<()> {
-        if !self.enabled {
-            bail!("Email service is not enabled");
-        }
-
-        let transport = self
-            .transport
-            .as_ref()
-            .context("SMTP transport not initialized")?;
+        let transport = self.transport()?;
 
         let reset_url = format!("{}/reset-password?token={}", base_url, reset_token);
 
@@ -247,16 +241,11 @@ impl EmailSender for EmailService {
         subject: &str,
         body: &str,
     ) -> Result<MailDeliveryResult> {
-        if !self.enabled {
-            bail!("SMTP is not configured on this server");
-        }
+        let transport = self.transport()?;
         if to.is_empty() {
             bail!("send_action_mail: no recipients");
         }
-        let transport = self
-            .transport
-            .as_ref()
-            .context("SMTP is not configured on this server")?;
+
         let from = format!("{} <{}>", self.from_name, self.from_address);
         let mut builder = Message::builder()
             .from(from.parse().context("invalid from address")?)
@@ -280,14 +269,7 @@ impl EmailSender for EmailService {
         to_name: &str,
         invite: &InvitationMail<'_>,
     ) -> Result<()> {
-        if !self.enabled {
-            bail!("Email service is not enabled");
-        }
-
-        let transport = self
-            .transport
-            .as_ref()
-            .context("SMTP transport not initialized")?;
+        let transport = self.transport()?;
 
         let subject = format!(
             "You have been invited to the {} {} - Gradient",
@@ -320,17 +302,10 @@ impl EmailSender for EmailService {
         to: &[String],
         mail: &SubscriptionMail<'_>,
     ) -> Result<()> {
-        if !self.enabled {
-            bail!("Email service is not enabled");
-        }
+        let transport = self.transport()?;
         if to.is_empty() {
             return Ok(());
         }
-
-        let transport = self
-            .transport
-            .as_ref()
-            .context("SMTP transport not initialized")?;
 
         let subject = match mail.event {
             SubscriptionEvent::Requested => format!(

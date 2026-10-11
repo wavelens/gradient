@@ -2778,6 +2778,7 @@ dependencies = [
  "hex",
  "lettre",
  "rand 0.10.3",
+ "thiserror 2.0.21",
  "tokio",
  "tracing",
 ]
@@ -3287,6 +3288,7 @@ dependencies = [
  "sha2 0.11.0",
  "sysinfo",
  "tempfile",
+ "thiserror 2.0.21",
  "tokio",
  "tokio-tungstenite 0.30.0",
  "tokio-util",

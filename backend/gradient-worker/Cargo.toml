@@ -55,6 +55,7 @@ sd-notify             = { workspace = true }
 sha2                  = { workspace = true }
 sysinfo               = { workspace = true }
 tempfile              = { workspace = true }
+thiserror             = { workspace = true }
 tokio                 = { workspace = true, features = ["macros", "process", "fs", "io-util", "signal"] }
 tokio-tungstenite     = { workspace = true }
 tokio-util            = { workspace = true, features = ["rt", "io-util"] }

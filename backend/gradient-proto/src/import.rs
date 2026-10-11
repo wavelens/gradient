@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use gradient_entity::StorePath;
+use gradient_entity::{StorePath, StorePathError};
 use gradient_graph::Graph;
 use gradient_storage::nar::NarStore;
 use gradient_types::*;
@@ -45,9 +45,9 @@ impl ImportInput<'_> {
 }
 
 fn parse_store_path(store_path: &str) -> anyhow::Result<StorePath> {
-    let sp = StorePath::parse(store_path).map_err(|e| anyhow::anyhow!("{e}"))?;
+    let sp = StorePath::parse(store_path)?;
     if !is_nix32_hash(sp.hash()) {
-        anyhow::bail!("malformed store path: {}", store_path);
+        anyhow::bail!(StorePathError::Malformed(store_path.to_owned()));
     }
 
     Ok(sp)

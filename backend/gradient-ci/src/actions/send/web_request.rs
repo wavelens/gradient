@@ -4,10 +4,11 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use crate::ActionError;
 use crate::actions::crypto::decrypt_with_server_key;
 use crate::actions::{ExecutorOk, MAX_BODY_BYTES, truncate};
 use crate::context::CiContext;
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Context, Result};
 use serde_json::Value as JsonValue;
 
 pub(crate) async fn execute_send_web_request(
@@ -18,7 +19,7 @@ pub(crate) async fn execute_send_web_request(
     token: Option<&str>,
 ) -> Result<ExecutorOk> {
     gradient_util::http_validation::validate_webhook_url(url)
-        .map_err(|e| anyhow!("URL rejected: {}", e))?;
+        .map_err(|cause| ActionError::UrlRejected { cause })?;
     let body = serde_json::to_string(envelope).context("serializing webhook envelope")?;
     let mut req = ctx
         .http

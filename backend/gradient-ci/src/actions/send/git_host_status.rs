@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use crate::ActionError;
 use crate::actions::ExecutorOk;
 use crate::actions::crypto::decrypt_secret_with_file;
 use crate::actions::matchers::git_host_status_for_event;
@@ -74,8 +75,10 @@ pub async fn verify_git_host_action(
         _ => anyhow::bail!("action does not use a Git host integration"),
     };
 
-    let (owner, repo) = crate::parse_owner_repo(repository)
-        .ok_or_else(|| anyhow!("could not parse owner/repo from {}", repository))?;
+    let (owner, repo) =
+        crate::parse_owner_repo(repository).ok_or_else(|| ActionError::RepositoryUnparsable {
+            repository: repository.to_owned(),
+        })?;
     let reporter = build_reporter_for_integration(ctx, integration_id).await?;
 
     reporter

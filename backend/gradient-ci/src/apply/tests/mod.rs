@@ -9,7 +9,7 @@ mod fixtures;
 use super::{ApplyInput, ApplyOutcome, ApprovalInfo, apply_trigger, park_if_storage_full};
 use fixtures::{
     input, make_commit, make_eval, make_task_with_concurrency, make_task_with_last_eval,
-    with_eval_worker, with_storage_not_full, with_writable_cache,
+    one_active_per_task_violation, with_eval_worker, with_storage_not_full, with_writable_cache,
 };
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_types::triggers::TriggerType;
@@ -227,9 +227,7 @@ async fn unique_constraint_violation_returns_skipped_concurrency() {
         .append_query_results([Vec::<gradient_entity::evaluation::Model>::new()])
         .append_query_results([Vec::<gradient_entity::evaluation::Model>::new()])
         .append_query_results([vec![make_commit(new_commit_id, vec![1u8; 20])]])
-        .append_query_errors([sea_orm::DbErr::Custom(
-            "uq_evaluation_one_active_per_task".into(),
-        )])
+        .append_query_errors([one_active_per_task_violation()])
         .into_connection();
 
     let res = apply_trigger(

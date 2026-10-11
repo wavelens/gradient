@@ -6,6 +6,7 @@
 
 mod config;
 mod connection_state;
+mod error;
 mod executor;
 mod listener;
 mod metrics;
