@@ -277,7 +277,7 @@ pub async fn create_action(
 
     let m = gradient_db::actions::insert(&state.web_db, action)
         .await
-        .map_err(|e| WebError::from_db_err(e, Resource::Action))?;
+        .map_err(|e| WebError::from_unique_violation(e, TaskRefusal::ActionNameTaken))?;
 
     record_action_event(&audit, Action::TaskActionCreate, project.id, &m).await;
 
@@ -374,6 +374,7 @@ pub async fn update_action(
         return Err(TaskRefusal::CustomEventsNotAllowed.into());
     }
 
+    let read_at = row.updated_at;
     let mut active: ATaskAction = row.into();
 
     if let Some(new_cfg) = body.config {
@@ -403,9 +404,10 @@ pub async fn update_action(
     }
     active.updated_at = Set(Utc::now().naive_utc());
 
-    let updated = gradient_db::actions::update(&state.web_db, active)
+    let updated = gradient_db::actions::update(&state.web_db, active, read_at)
         .await
-        .map_err(|e| WebError::from_db_err(e, Resource::Action))?;
+        .map_err(|e| WebError::from_db_err(e, Resource::Action))?
+        .or_not_found(Resource::Action)?;
 
     record_action_event(&audit, Action::TaskActionUpdate, project.id, &updated).await;
 
@@ -546,12 +548,14 @@ pub async fn regenerate_token(
         *t = Some(encrypted);
     }
 
+    let read_at = existing.updated_at;
     let mut am: ATaskAction = existing.into();
     am.config = Set(serde_json::to_value(&cfg).context("serialize the action config")?);
     am.updated_at = Set(Utc::now().naive_utc());
-    gradient_db::actions::update(&state.web_db, am)
+    gradient_db::actions::update(&state.web_db, am, read_at)
         .await
-        .map_err(|e| WebError::from_db_err(e, Resource::Action))?;
+        .map_err(|e| WebError::from_db_err(e, Resource::Action))?
+        .or_not_found(Resource::Action)?;
 
     Ok(ok_json(serde_json::json!({ "token": plaintext_token })))
 }

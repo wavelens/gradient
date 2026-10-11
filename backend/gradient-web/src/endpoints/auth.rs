@@ -838,7 +838,11 @@ pub async fn post_cli_device_poll(
         return Err(AuthRefusal::DeviceAuthorizationDenied.into());
     }
     if let Some(token) = row.token.clone() {
-        gradient_db::cli_device_authorizations::clear_token(&state.web_db, row).await?;
+        let cleared =
+            gradient_db::cli_device_authorizations::clear_token(&state.web_db, row).await?;
+        if cleared.is_none() {
+            return Err(AuthRefusal::DeviceAuthorizationExpired.into());
+        }
         return Ok(ok_json(token));
     }
     if row.authorized_at.is_some() || row.expires_at < now {
@@ -863,6 +867,13 @@ async fn find_active_user_code(db: &WebDb, user_code: &str) -> WebResult<MCliDev
         return Err(AuthRefusal::DeviceAuthorizationExpired.into());
     }
     Ok(row)
+}
+
+async fn refusal_for_settled_code(db: &WebDb, user_code: &str) -> WebError {
+    match find_active_user_code(db, user_code).await {
+        Err(refusal) => refusal,
+        Ok(_) => AuthRefusal::DeviceAuthorizationAlreadyCompleted.into(),
+    }
 }
 
 pub async fn get_cli_device_info(
@@ -898,8 +909,12 @@ pub async fn post_cli_device_authorize(
     .map_err(|_| WebError::failed_to_generate_token())?;
 
     let now = gradient_types::now();
-    gradient_db::cli_device_authorizations::authorize(&state.web_db, row, user.id, token, now)
-        .await?;
+    let authorized =
+        gradient_db::cli_device_authorizations::authorize(&state.web_db, row, user.id, token, now)
+            .await?;
+    if authorized.is_none() {
+        return Err(refusal_for_settled_code(&state.web_db, &body.user_code).await);
+    }
 
     audit
         .write(
@@ -920,7 +935,12 @@ pub async fn post_cli_device_deny(
     let row = find_active_user_code(&state.web_db, &body.user_code).await?;
 
     let now = gradient_types::now();
-    gradient_db::cli_device_authorizations::deny(&state.web_db, row, now).await?;
+    if gradient_db::cli_device_authorizations::deny(&state.web_db, row, now)
+        .await?
+        .is_none()
+    {
+        return Err(refusal_for_settled_code(&state.web_db, &body.user_code).await);
+    }
 
     audit
         .write(

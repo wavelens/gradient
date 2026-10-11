@@ -11,7 +11,7 @@ use crate::audit::Audit;
 use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
 use crate::json_body::JsonBody;
-use crate::lookup::require;
+use crate::lookup::{require, require_for_delete};
 use crate::names::RoleName;
 use crate::permissions::PermissionEntry;
 use crate::refusal::{Change, SharedRefusal};
@@ -19,6 +19,7 @@ use crate::resource::Resource;
 use axum::Json;
 use gradient_db::WebDb;
 use gradient_types::*;
+use sea_orm::{ConnectionTrait, TransactionTrait};
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Debug)]
@@ -65,9 +66,7 @@ fn response<O: Owner>(row: &RoleRow<O>) -> Role<O> {
     }
 }
 
-async fn load_role<O: Owner>(db: &WebDb, owner: O::Id, role_id: RoleId) -> WebResult<RoleRow<O>> {
-    let role = require::<O::Roles>(db, role_id).await?;
-
+fn owned_by<O: Owner>(role: RoleRow<O>, owner: O::Id) -> WebResult<RoleRow<O>> {
     if let Some(role_owner) = <O::Roles as RoleTable>::fields(&role).owner
         && role_owner != owner
     {
@@ -76,6 +75,10 @@ async fn load_role<O: Owner>(db: &WebDb, owner: O::Id, role_id: RoleId) -> WebRe
     }
 
     Ok(role)
+}
+
+async fn load_role<O: Owner>(db: &WebDb, owner: O::Id, role_id: RoleId) -> WebResult<RoleRow<O>> {
+    owned_by::<O>(require::<O::Roles>(db, role_id).await?, owner)
 }
 
 async fn name_clash<T: RoleTable>(
@@ -101,7 +104,7 @@ async fn name_clash<T: RoleTable>(
 }
 
 async fn assigned_to_members<T: MemberTable>(
-    db: &WebDb,
+    db: &impl ConnectionTrait,
     owner: T::Id,
     role_id: RoleId,
 ) -> WebResult<bool> {
@@ -214,7 +217,8 @@ pub async fn delete<O: Owner>(
     let db = &scope.db().web_db;
     let role_id: RoleId = scope.params().param("role_id")?;
 
-    let role = load_role::<O>(db, owner, role_id).await?;
+    let tx = db.inner().begin().await?;
+    let role = owned_by::<O>(require_for_delete::<O::Roles>(&tx, role_id).await?, owner)?;
     let current = <O::Roles as RoleTable>::fields(&role);
 
     if O::is_builtin_role(current.id) {
@@ -225,14 +229,15 @@ pub async fn delete<O: Owner>(
         return Err(SharedRefusal::StateManaged(Change::Delete, Resource::Role).into());
     }
 
-    if assigned_to_members::<O::Members>(db, owner, role_id).await? {
+    if assigned_to_members::<O::Members>(&tx, owner, role_id).await? {
         return Err(SharedRefusal::RoleAssignedToMembers.into());
     }
-    if O::role_granted_to_a_team(db, role_id).await? {
+    if O::role_granted_to_a_team(&tx, role_id).await? {
         return Err(SharedRefusal::RoleGrantedToTeam.into());
     }
 
-    delete_row::<O::Roles>(db, role).await?;
+    delete_row::<O::Roles>(&tx, role).await?;
+    tx.commit().await?;
 
     audit.write(O::ACTIONS.role_delete, O::event_owner(owner), serde_json::json!({ (O::ID_KEY): owner.to_string(), "role_id": role_id.to_string(), "name": current.name, }))
     .await;

@@ -29,8 +29,8 @@ use gradient_types::events::EventOwner;
 use gradient_types::events::audit::Action;
 use gradient_types::*;
 use sea_orm::{
-    ActiveModelBehavior, ActiveModelTrait, EntityTrait, IntoActiveModel, PrimaryKeyTrait,
-    RelationDef,
+    ActiveModelBehavior, ActiveModelTrait, ConnectionTrait, EntityTrait, IntoActiveModel,
+    PrimaryKeyTrait, RelationDef,
 };
 use serde::Serialize;
 use std::collections::HashMap;
@@ -228,9 +228,10 @@ pub trait Owner: Send + Sync + 'static {
     fn permission_names(mask: PermissionMask) -> Vec<&'static str>;
     fn available_permissions() -> Vec<PermissionEntry>;
     fn parse_permissions(wire: &[String]) -> WebResult<PermissionMask>;
-    async fn role_granted_to_a_team(db: &WebDb, role: RoleId) -> WebResult<bool>;
+    async fn role_granted_to_a_team(db: &impl ConnectionTrait, role: RoleId) -> WebResult<bool>;
+    async fn lock_for_admin_change(db: &impl ConnectionTrait, owner: Self::Id) -> WebResult<()>;
     async fn ensure_member_removable(
-        db: &WebDb,
+        db: &impl ConnectionTrait,
         owner: Self::Id,
         member: &MemberRow<Self>,
     ) -> WebResult<()>;
@@ -250,11 +251,21 @@ pub async fn insert_row<T: Table>(db: &WebDb, row: T::Row) -> WebResult<T::Row> 
     Ok(gradient_db::rows::insert::<T, _>(db, row).await?)
 }
 
+pub async fn insert_unique_row<T: Table>(
+    db: &WebDb,
+    row: T::Row,
+    taken: Resource,
+) -> WebResult<T::Row> {
+    gradient_db::rows::insert::<T, _>(db, row)
+        .await
+        .map_err(|e| WebError::from_db_err(e, taken))
+}
+
 pub async fn update_row<T: Table>(db: &WebDb, row: T::Active) -> WebResult<T::Row> {
     Ok(gradient_db::rows::update::<T, _>(db, row).await?)
 }
 
-pub async fn delete_row<T: Table>(db: &WebDb, row: T::Row) -> WebResult<()> {
+pub async fn delete_row<T: Table>(db: &impl ConnectionTrait, row: T::Row) -> WebResult<()> {
     gradient_db::rows::delete::<T, _>(db, row).await?;
     Ok(())
 }

@@ -5,7 +5,7 @@
  */
 
 use super::refusal::TaskRefusal;
-use crate::error::WebResult;
+use crate::error::{WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json};
 use crate::refusal::SharedRefusal;
 use crate::resource::Resource;
@@ -128,6 +128,7 @@ pub async fn create(
     }
 
     let now = Utc::now().naive_utc();
+    let input_name = body.input_name.clone();
     let input_override = MTaskFlakeInputOverride {
         id: FlakeInputOverrideId::now_v7(),
         task: proj.id,
@@ -136,7 +137,11 @@ pub async fn create(
         created_at: now,
         updated_at: now,
     };
-    let row = gradient_db::flake_input_overrides::insert(&db.web_db, input_override).await?;
+    let row = gradient_db::flake_input_overrides::insert(&db.web_db, input_override)
+        .await
+        .map_err(|e| {
+            WebError::from_unique_violation(e, TaskRefusal::OverrideExists { input_name })
+        })?;
 
     Ok(ok_json(row.into()))
 }
@@ -193,6 +198,7 @@ pub async fn update(
         }
     }
 
+    let renamed = body.input_name.clone().unwrap_or_default();
     let mut active: ATaskFlakeInputOverride = row.into();
     if let Some(n) = body.input_name {
         active.input_name = Set(n);
@@ -202,7 +208,16 @@ pub async fn update(
     }
     active.updated_at = Set(Utc::now().naive_utc());
 
-    let updated = gradient_db::flake_input_overrides::update(&db.web_db, active).await?;
+    let updated = gradient_db::flake_input_overrides::update(&db.web_db, active)
+        .await
+        .map_err(|e| {
+            WebError::from_unique_violation(
+                e,
+                TaskRefusal::OverrideExists {
+                    input_name: renamed,
+                },
+            )
+        })?;
     Ok(ok_json(updated.into()))
 }
 

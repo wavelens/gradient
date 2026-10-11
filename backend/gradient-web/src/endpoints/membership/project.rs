@@ -15,13 +15,12 @@ use crate::permissions::{
 };
 use crate::resource::Resource;
 use crate::scope::{Member, ProjectScope, Readable, Requires, RequiresUnmanaged, can};
-use gradient_db::WebDb;
 use gradient_notify::InviteScope;
 use gradient_types::events::EventOwner;
 use gradient_types::events::audit::Action;
 use gradient_types::*;
 use sea_orm::ActiveValue::Set;
-use sea_orm::{RelationDef, RelationTrait};
+use sea_orm::{ConnectionTrait, RelationDef, RelationTrait};
 use serde::Serialize;
 
 pub struct ProjectOwner;
@@ -226,12 +225,16 @@ impl Owner for ProjectOwner {
         parse_permission_list(wire, "GET /projects/{project}/roles")
     }
 
-    async fn role_granted_to_a_team(db: &WebDb, role: RoleId) -> WebResult<bool> {
+    async fn role_granted_to_a_team(db: &impl ConnectionTrait, role: RoleId) -> WebResult<bool> {
         Ok(gradient_db::teams::grants::project_role_granted_to_a_team(db, role).await?)
     }
 
+    async fn lock_for_admin_change(_db: &impl ConnectionTrait, _owner: ProjectId) -> WebResult<()> {
+        Ok(())
+    }
+
     async fn ensure_member_removable(
-        _db: &WebDb,
+        _db: &impl ConnectionTrait,
         _owner: ProjectId,
         _member: &MProjectUser,
     ) -> WebResult<()> {

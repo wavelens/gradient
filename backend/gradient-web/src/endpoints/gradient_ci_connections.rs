@@ -13,13 +13,14 @@ use gradient_core::ServerState;
 use gradient_entity::{team_worker, worker_registration};
 use gradient_types::ids::{TeamId, TeamWorkerId, UserId, WorkerRegistrationId};
 use gradient_types::{BaseResponse, MProject, MTeam, MTeamWorker, MUser};
+use sea_orm::DbErr;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::access::{Caller, ProjectAccess, TeamAccess, load_project, load_team};
 use crate::authorization::MaybeApiKey;
 use crate::endpoints::projects::workers::encrypt_token;
-use crate::error::{WebError, WebResult};
+use crate::error::{WebError, WebResult, unique_violation};
 use crate::helpers::ok_json;
 use crate::refusal::{Refusal, RefusalStatus};
 use crate::resource::Resource;
@@ -53,6 +54,7 @@ impl Refusal for GradientCiConnectionRefusal {
 }
 
 const DISPLAY_NAME: &str = "Gradient.CI Servers";
+const ONE_CONNECTION_PER_TEAM: &str = "idx_team_worker_one_gradient_ci";
 const PREFIX: &str = "gci1_";
 
 #[derive(Deserialize, Clone, Copy)]
@@ -261,7 +263,12 @@ async fn insert_registration(
         registration_row(project, user, token, url, stored),
     )
     .await
-    .map_err(|e| WebError::from_db_err(e, Resource::GradientCiConnection))?;
+    .map_err(|e| {
+        WebError::from_unique_violation(
+            e,
+            GradientCiConnectionRefusal::AlreadyConnected(Resource::Project),
+        )
+    })?;
     if let Err(e) = gradient_ci::unpark_no_workers_for_project(db, project.id).await {
         tracing::warn!(
             error = %e,
@@ -271,6 +278,16 @@ async fn insert_registration(
     }
 
     Ok(())
+}
+
+fn team_worker_conflict(err: DbErr) -> WebError {
+    match unique_violation(&err) {
+        Some(ONE_CONNECTION_PER_TEAM) => {
+            GradientCiConnectionRefusal::AlreadyConnected(Resource::Team).into()
+        }
+        Some(_) => GradientCiConnectionRefusal::WorkerAlreadyRegistered.into(),
+        None => err.into(),
+    }
 }
 
 async fn insert_team_worker(
@@ -286,7 +303,7 @@ async fn insert_team_worker(
         team_worker_row(team.id, token.worker_id.clone(), url, stored, user.id),
     )
     .await
-    .map_err(|e| WebError::from_db_err(e, Resource::GradientCiConnection))?;
+    .map_err(team_worker_conflict)?;
 
     let projects = gradient_db::teams::workers::projects_granted_with_workers(db, team.id).await?;
     for project in projects {

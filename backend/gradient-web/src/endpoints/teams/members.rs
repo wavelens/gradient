@@ -16,12 +16,12 @@ use crate::scope::{Admin, Member, TeamScope};
 use axum::Json;
 use axum::extract::State;
 use gradient_core::ServerState;
-use gradient_db::WebDb;
 use gradient_notify::{InvitationMail, InviteScope, generate_token};
 use gradient_types::events::EventOwner;
 use gradient_types::events::audit::Action;
 use gradient_types::*;
 use sea_orm::ActiveValue::Set;
+use sea_orm::{ConnectionTrait, TransactionTrait};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -59,7 +59,11 @@ fn ensure_not_state_managed(membership: &MTeamUser) -> WebResult<()> {
     Ok(())
 }
 
-async fn ensure_not_last_admin(db: &WebDb, team: TeamId, membership: &MTeamUser) -> WebResult<()> {
+async fn ensure_not_last_admin(
+    db: &impl ConnectionTrait,
+    team: TeamId,
+    membership: &MTeamUser,
+) -> WebResult<()> {
     if membership.role != TeamRole::Admin {
         return Ok(());
     }
@@ -127,7 +131,8 @@ pub async fn post_team_members(
                 source: TeamMemberSource::Api,
             },
         )
-        .await?;
+        .await
+        .map_err(|e| WebError::from_db_err(e, Resource::TeamMembership))?;
         audit
             .write(Action::TeamMemberAdd, EventOwner::default(), payload)
             .await;
@@ -149,7 +154,8 @@ pub async fn post_team_members(
             expires_at: invitation_expiry(now),
         },
     )
-    .await?;
+    .await
+    .map_err(|e| WebError::from_db_err(e, Resource::Invitation))?;
 
     if state.email.is_enabled()
         && let Err(e) = state
@@ -185,13 +191,17 @@ pub async fn patch_team_members(
     Json(body): Json<TeamMemberRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let target = find_user_by_username(&db.web_db, &body.user).await?;
-    let membership = gradient_db::teams::members::membership(&db.web_db, team.id, target.id)
+    let tx = db.web_db.inner().begin().await?;
+    if body.role != TeamRole::Admin {
+        gradient_db::teams::lock_for_admin_change(&tx, team.id).await?;
+    }
+    let membership = gradient_db::teams::members::membership(&tx, team.id, target.id)
         .await?
         .ok_or(SharedRefusal::NotAMember(Resource::Team))?;
     ensure_not_state_managed(&membership)?;
 
     if body.role != TeamRole::Admin {
-        ensure_not_last_admin(&db.web_db, team.id, &membership).await?;
+        ensure_not_last_admin(&tx, team.id, &membership).await?;
     }
 
     let mut active: ATeamUser = membership.into();
@@ -199,7 +209,8 @@ pub async fn patch_team_members(
     if body.role == TeamRole::Admin {
         active.source = Set(TeamMemberSource::Api);
     }
-    gradient_db::teams::members::update_member(&db.web_db, active).await?;
+    gradient_db::teams::members::update_member(&tx, active).await?;
+    tx.commit().await?;
 
     audit.write(Action::TeamMemberRoleChange, EventOwner::default(), serde_json::json!({ "team_id": team.id.to_string(), "target_user_id": target.id.to_string(), "role": role_label(body.role), }))
     .await;
@@ -213,13 +224,16 @@ pub async fn delete_team_members(
     Json(body): Json<RemoveTeamMemberRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let target = find_user_by_username(&db.web_db, &body.user).await?;
-    let membership = gradient_db::teams::members::membership(&db.web_db, team.id, target.id)
+    let tx = db.web_db.inner().begin().await?;
+    gradient_db::teams::lock_for_admin_change(&tx, team.id).await?;
+    let membership = gradient_db::teams::members::membership(&tx, team.id, target.id)
         .await?
         .ok_or(SharedRefusal::NotAMember(Resource::Team))?;
     ensure_not_state_managed(&membership)?;
 
-    ensure_not_last_admin(&db.web_db, team.id, &membership).await?;
-    gradient_db::teams::members::remove_member(&db.web_db, membership).await?;
+    ensure_not_last_admin(&tx, team.id, &membership).await?;
+    gradient_db::teams::members::remove_member(&tx, membership).await?;
+    tx.commit().await?;
 
     audit.write(Action::TeamMemberRemove, EventOwner::default(), serde_json::json!({ "team_id": team.id.to_string(), "target_user_id": target.id.to_string(), }))
     .await;

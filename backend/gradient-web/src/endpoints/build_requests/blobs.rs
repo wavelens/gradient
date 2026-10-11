@@ -7,7 +7,7 @@
 use super::refusal::BuildRequestRefusal;
 use crate::access::has_permission;
 use crate::authorization::MaybeApiKey;
-use crate::error::{WebError, WebResult};
+use crate::error::{WebError, WebResult, is_unique_violation};
 use crate::helpers::ok_json;
 use crate::lookup::require;
 use crate::permissions::Permission;
@@ -23,7 +23,6 @@ use gradient_storage::NarStore;
 use gradient_types::ids::{BuildRequestBlobId, ProjectId, UploadSessionId};
 use gradient_types::input::decode_blake3_hex;
 use gradient_types::{BaseResponse, EUploadSession, MBuildRequestBlob, MUser, now};
-use sea_orm::{DbErr, RuntimeErr, sqlx};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -159,18 +158,4 @@ async fn store_blob(
         Err(err) if !is_unique_violation(&err) => Err(err.into()),
         _ => Ok(()),
     }
-}
-
-fn is_unique_violation(err: &DbErr) -> bool {
-    let sqlx_err = match err {
-        DbErr::Query(RuntimeErr::SqlxError(e)) | DbErr::Exec(RuntimeErr::SqlxError(e)) => {
-            e.as_ref()
-        }
-        _ => return false,
-    };
-
-    matches!(
-        sqlx_err,
-        sqlx::Error::Database(db_err) if db_err.is_unique_violation()
-    )
 }

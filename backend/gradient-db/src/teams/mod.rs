@@ -13,9 +13,10 @@ pub mod requests;
 pub mod workers;
 
 use gradient_types::*;
+use sea_orm::sea_query::LockType;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, ConnectionTrait, DbErr, EntityTrait, IntoActiveModel,
-    QueryFilter,
+    QueryFilter, QuerySelect,
 };
 
 pub async fn team_role_of<C: ConnectionTrait>(
@@ -46,6 +47,16 @@ pub async fn team_worker_ids<C: ConnectionTrait>(
 
 pub async fn by_name<C: ConnectionTrait>(db: &C, name: &str) -> Result<Option<MTeam>, DbErr> {
     ETeam::find().filter(CTeam::Name.eq(name)).one(db).await
+}
+
+pub async fn lock_for_admin_change<C: ConnectionTrait>(
+    db: &C,
+    team: TeamId,
+) -> Result<Option<MTeam>, DbErr> {
+    ETeam::find_by_id(team)
+        .lock(LockType::NoKeyUpdate)
+        .one(db)
+        .await
 }
 
 pub async fn create<C: ConnectionTrait>(db: &C, team: MTeam) -> Result<MTeam, DbErr> {

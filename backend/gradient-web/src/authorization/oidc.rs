@@ -5,6 +5,7 @@
  */
 
 use super::jwt::{sign_claims, verify_claims};
+use crate::error::is_unique_violation;
 use anyhow::{Context, Result, bail};
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use chrono::{Duration, Utc};
@@ -408,7 +409,13 @@ async fn create_or_update_user(
         },
     )
     .await
-    .context("create user")?;
+    .map_err(|e| {
+        if is_unique_violation(&e) {
+            anyhow::anyhow!("An account already exists with this username or email.")
+        } else {
+            anyhow::Error::new(e).context("create user")
+        }
+    })?;
 
     if let Err(e) = gradient_state::apply_pending_project_memberships(
         &tx,

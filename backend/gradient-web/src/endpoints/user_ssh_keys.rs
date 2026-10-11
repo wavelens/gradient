@@ -124,7 +124,8 @@ pub async fn post_ssh_key(
             ..Default::default()
         },
     )
-    .await?;
+    .await
+    .map_err(|e| WebError::from_db_err(e, Resource::SshKey))?;
 
     audit.write(Action::SshKeyCreate, EventOwner::default(), serde_json::json!({ "ssh_key_id": inserted.id.to_string(), "fingerprint": inserted.fingerprint, }))
     .await;

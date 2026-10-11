@@ -8,8 +8,7 @@ use chrono::NaiveDateTime;
 use gradient_types::*;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, ConnectionTrait, DbErr, EntityTrait, IntoActiveModel,
-    QueryFilter,
+    ColumnTrait, Condition, ConnectionTrait, DbErr, EntityTrait, IntoActiveModel, QueryFilter,
 };
 
 pub async fn unexpired_by_user_code<C: ConnectionTrait>(
@@ -44,13 +43,25 @@ pub async fn by_user_code<C: ConnectionTrait>(
         .await
 }
 
+fn still_pending(at: NaiveDateTime) -> Condition {
+    Condition::all()
+        .add(CCliDeviceAuthorization::AuthorizedAt.is_null())
+        .add(CCliDeviceAuthorization::DeniedAt.is_null())
+        .add(CCliDeviceAuthorization::ExpiresAt.gte(at))
+}
+
 pub async fn clear_token<C: ConnectionTrait>(
     db: &C,
     authorization: MCliDeviceAuthorization,
-) -> Result<MCliDeviceAuthorization, DbErr> {
+) -> Result<Option<MCliDeviceAuthorization>, DbErr> {
     let mut active = authorization.into_active_model();
     active.token = Set(None);
-    active.update(db).await
+    crate::rows::update_where::<ECliDeviceAuthorization, _>(
+        db,
+        active,
+        Condition::all().add(CCliDeviceAuthorization::Token.is_not_null()),
+    )
+    .await
 }
 
 pub async fn authorize<C: ConnectionTrait>(
@@ -59,20 +70,20 @@ pub async fn authorize<C: ConnectionTrait>(
     user: UserId,
     token: String,
     at: NaiveDateTime,
-) -> Result<MCliDeviceAuthorization, DbErr> {
+) -> Result<Option<MCliDeviceAuthorization>, DbErr> {
     let mut active = authorization.into_active_model();
     active.user_id = Set(Some(user));
     active.token = Set(Some(token));
     active.authorized_at = Set(Some(at));
-    active.update(db).await
+    crate::rows::update_where::<ECliDeviceAuthorization, _>(db, active, still_pending(at)).await
 }
 
 pub async fn deny<C: ConnectionTrait>(
     db: &C,
     authorization: MCliDeviceAuthorization,
     at: NaiveDateTime,
-) -> Result<MCliDeviceAuthorization, DbErr> {
+) -> Result<Option<MCliDeviceAuthorization>, DbErr> {
     let mut active = authorization.into_active_model();
     active.denied_at = Set(Some(at));
-    active.update(db).await
+    crate::rows::update_where::<ECliDeviceAuthorization, _>(db, active, still_pending(at)).await
 }

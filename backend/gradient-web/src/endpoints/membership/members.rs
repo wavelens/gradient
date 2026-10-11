@@ -7,7 +7,7 @@
 use super::invitations::find_invitation;
 use super::{
     ActingScope, InvitationTable, MemberTable, NewInvitation, Owner, OwnerScope, RoleFields,
-    RoleTable, delete_row, find_user_by_username, insert_row, role_names, update_row,
+    RoleTable, delete_row, find_user_by_username, insert_unique_row, role_names, update_row,
 };
 use crate::audit::Audit;
 use crate::error::{WebError, WebResult};
@@ -21,6 +21,7 @@ use gradient_core::ServerState;
 use gradient_db::WebDb;
 use gradient_notify::{InvitationMail, generate_token};
 use gradient_types::*;
+use sea_orm::{ConnectionTrait, TransactionTrait};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -42,7 +43,7 @@ pub struct RemoveMemberRequest {
 }
 
 async fn find_membership<T: MemberTable>(
-    db: &WebDb,
+    db: &impl ConnectionTrait,
     owner: T::Id,
     user_id: UserId,
 ) -> WebResult<Option<T::Row>> {
@@ -141,9 +142,10 @@ pub async fn add<O: Owner>(
     let role = find_role::<O::Roles>(&state.web_db, owner, &body.role).await?;
 
     if user.superuser {
-        insert_row::<O::Members>(
+        insert_unique_row::<O::Members>(
             &state.web_db,
             <O::Members as MemberTable>::new(owner, target_user.id, role.id),
+            O::MEMBERSHIP,
         )
         .await?;
 
@@ -156,7 +158,7 @@ pub async fn add<O: Owner>(
     let now = gradient_types::now();
     let token = generate_token();
 
-    insert_row::<O::Invitations>(
+    insert_unique_row::<O::Invitations>(
         &state.web_db,
         <O::Invitations as InvitationTable>::new(NewInvitation {
             owner,
@@ -167,6 +169,7 @@ pub async fn add<O: Owner>(
             created_at: now,
             expires_at: invitation_expiry(now),
         }),
+        Resource::Invitation,
     )
     .await?;
 
@@ -235,13 +238,16 @@ pub async fn remove<O: Owner>(
     let db = &scope.db().web_db;
     let target_user = find_user_by_username(db, &body.user).await?;
 
-    let membership = find_membership::<O::Members>(db, owner, target_user.id)
+    let tx = db.inner().begin().await?;
+    O::lock_for_admin_change(&tx, owner).await?;
+    let membership = find_membership::<O::Members>(&tx, owner, target_user.id)
         .await?
         .ok_or(SharedRefusal::NotAMember(O::RESOURCE))?;
 
-    O::ensure_member_removable(db, owner, &membership).await?;
+    O::ensure_member_removable(&tx, owner, &membership).await?;
 
-    delete_row::<O::Members>(db, membership).await?;
+    delete_row::<O::Members>(&tx, membership).await?;
+    tx.commit().await?;
 
     audit.write(O::ACTIONS.member_remove, O::event_owner(owner), serde_json::json!({ (O::ID_KEY): owner.to_string(), "target_user_id": target_user.id.to_string(), }))
     .await;

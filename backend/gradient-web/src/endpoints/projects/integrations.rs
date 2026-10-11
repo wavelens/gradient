@@ -314,7 +314,8 @@ pub async fn put_integration(
             managed: false,
         },
     )
-    .await?;
+    .await
+    .map_err(|e| WebError::from_db_err(e, Resource::IntegrationName))?;
 
     Ok(ok_json(
         integration_response(&state.web_db, integration).await?,
@@ -422,7 +423,9 @@ pub async fn patch_integration(
         active.allowed_ips = Set(if canon.is_empty() { None } else { Some(canon) });
     }
 
-    let updated = gradient_db::rows::update::<EIntegration, _>(&state.web_db, active).await?;
+    let updated = gradient_db::rows::update::<EIntegration, _>(&state.web_db, active)
+        .await
+        .map_err(|e| WebError::from_db_err(e, Resource::IntegrationName))?;
 
     Ok(ok_json(integration_response(&state.web_db, updated).await?))
 }

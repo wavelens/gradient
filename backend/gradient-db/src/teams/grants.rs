@@ -122,8 +122,21 @@ pub async fn grant_project<C: ConnectionTrait>(
 pub async fn update_project_grant<C: ConnectionTrait>(
     db: &C,
     grant: ATeamProject,
-) -> Result<MTeamProject, DbErr> {
-    grant.update(db).await
+    read: &MTeamProject,
+) -> Result<Option<MTeamProject>, DbErr> {
+    let role = match read.role {
+        Some(role) => CTeamProject::Role.eq(role),
+        None => CTeamProject::Role.is_null(),
+    };
+    crate::rows::update_where::<ETeamProject, _>(
+        db,
+        grant,
+        Condition::all()
+            .add(CTeamProject::IncludesUsers.eq(read.includes_users))
+            .add(CTeamProject::IncludesWorkers.eq(read.includes_workers))
+            .add(role),
+    )
+    .await
 }
 
 pub async fn revoke_project_grant<C: ConnectionTrait>(

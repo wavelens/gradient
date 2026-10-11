@@ -159,7 +159,9 @@ pub async fn post_approve_subscription_request(
     let mode = request.mode.clone();
 
     let tx = state.web_db.inner().begin().await?;
-    gradient_db::rows::delete::<ECacheSubscriptionRequest, _>(&tx, request).await?;
+    if !gradient_db::rows::delete_was_present::<ECacheSubscriptionRequest, _>(&tx, request).await? {
+        return Err(WebError::not_found(Resource::SubscriptionRequest));
+    }
     gradient_db::rows::insert::<EProjectCache, _>(
         &tx,
         MProjectCache {

@@ -7,7 +7,9 @@
 use chrono::NaiveDateTime;
 use gradient_types::*;
 use sea_orm::ActiveValue::Set;
-use sea_orm::{ActiveModelTrait, ConnectionTrait, DbErr, IntoActiveModel, JsonValue};
+use sea_orm::{
+    ActiveModelTrait, ColumnTrait, Condition, ConnectionTrait, DbErr, IntoActiveModel, JsonValue,
+};
 
 pub async fn insert<C: ConnectionTrait>(
     db: &C,
@@ -30,8 +32,13 @@ pub async fn mark_dispatched<C: ConnectionTrait>(
     db: &C,
     session: MUploadSession,
     at: NaiveDateTime,
-) -> Result<MUploadSession, DbErr> {
+) -> Result<Option<MUploadSession>, DbErr> {
     let mut active: AUploadSession = session.into();
     active.dispatched_at = Set(Some(at));
-    active.update(db).await
+    crate::rows::update_where::<EUploadSession, _>(
+        db,
+        active,
+        Condition::all().add(CUploadSession::DispatchedAt.is_null()),
+    )
+    .await
 }

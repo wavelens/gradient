@@ -291,7 +291,9 @@ pub async fn post_accept_invite(
             let project = inv.project;
             let role = inv.role;
             let member = inv.user;
-            gradient_db::rows::delete::<EProjectInvitation, _>(&tx, inv).await?;
+            if !gradient_db::rows::delete_was_present::<EProjectInvitation, _>(&tx, inv).await? {
+                return Err(WebError::not_found(Resource::Invitation));
+            }
 
             if !already {
                 gradient_db::rows::insert::<EProjectUser, _>(
@@ -330,7 +332,9 @@ pub async fn post_accept_invite(
             let cache = inv.cache;
             let role = inv.role;
             let member = inv.user;
-            gradient_db::rows::delete::<ECacheInvitation, _>(&tx, inv).await?;
+            if !gradient_db::rows::delete_was_present::<ECacheInvitation, _>(&tx, inv).await? {
+                return Err(WebError::not_found(Resource::Invitation));
+            }
 
             if !already {
                 gradient_db::rows::insert::<ECacheUser, _>(
@@ -358,7 +362,9 @@ pub async fn post_accept_invite(
 
             let payload = serde_json::json!({ "team_id": inv.team.to_string() });
             let (team, role, member) = (inv.team, inv.role, inv.user);
-            gradient_db::rows::delete::<ETeamInvitation, _>(&tx, inv).await?;
+            if !gradient_db::rows::delete_was_present::<ETeamInvitation, _>(&tx, inv).await? {
+                return Err(WebError::not_found(Resource::Invitation));
+            }
 
             if !already {
                 gradient_db::teams::members::add_member(

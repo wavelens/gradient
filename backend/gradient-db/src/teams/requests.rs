@@ -63,9 +63,8 @@ pub async fn add_project_request<C: ConnectionTrait>(
 pub async fn remove_project_request<C: ConnectionTrait>(
     db: &C,
     request: MTeamProjectRequest,
-) -> Result<(), DbErr> {
-    request.into_active_model().delete(db).await?;
-    Ok(())
+) -> Result<bool, DbErr> {
+    crate::rows::delete_was_present::<ETeamProjectRequest, _>(db, request).await
 }
 
 pub async fn cache_request<C: ConnectionTrait>(
@@ -121,7 +120,6 @@ pub async fn add_cache_request<C: ConnectionTrait>(
 pub async fn remove_cache_request<C: ConnectionTrait>(
     db: &C,
     request: MTeamCacheRequest,
-) -> Result<(), DbErr> {
-    request.into_active_model().delete(db).await?;
-    Ok(())
+) -> Result<bool, DbErr> {
+    crate::rows::delete_was_present::<ETeamCacheRequest, _>(db, request).await
 }
