@@ -12,6 +12,7 @@ use anyhow::{Context, Result, anyhow};
 use gradient_ci::actions::{active_actions_for_task, execute_action, matching_actions};
 use gradient_ci::reactions::react_to_source_comment_on_terminal;
 use gradient_db::deliveries::pending::{Outcome, PendingDelivery, PendingDeliveryKind, enqueue};
+use gradient_db::deliveries::trigger_fire::TriggerFire;
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_types::events::{Envelope, Event, evaluation};
 use gradient_types::ids::{BuildAttemptId, TaskActionId, WebhookId};
@@ -28,6 +29,7 @@ pub async fn consume(ctx: &EffectsCtx, row: &PendingDelivery) -> Outcome {
         PendingDeliveryKind::LogFinalize => finalize(ctx, row).await,
         PendingDeliveryKind::ActionDelivery => deliver_action(ctx, row).await,
         PendingDeliveryKind::WebhookDelivery => deliver_webhook(ctx, row).await,
+        PendingDeliveryKind::TriggerFire => fire_trigger(ctx, row).await,
     };
 
     match result {
@@ -199,6 +201,13 @@ async fn finalize(ctx: &EffectsCtx, row: &PendingDelivery) -> Result<()> {
     let attempt = BuildAttemptId::new(uuid_field(row, "attempt")?);
 
     gradient_db::status::logging::finalize_build_log(&ctx.db(), attempt).await
+}
+
+async fn fire_trigger(ctx: &EffectsCtx, row: &PendingDelivery) -> Result<()> {
+    let fire: TriggerFire =
+        serde_json::from_value(row.payload.clone()).context("decode a stored trigger fire")?;
+
+    gradient_scheduler::trigger_firing::fire(ctx.scheduler(), &fire).await
 }
 
 async fn deliver_action(ctx: &EffectsCtx, row: &PendingDelivery) -> Result<()> {

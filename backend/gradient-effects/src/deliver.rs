@@ -13,6 +13,7 @@ use gradient_ci::CiContext;
 use gradient_core::ServerState;
 use gradient_db::deliveries::pending::{Outcome, PendingDelivery};
 use gradient_db::{DbContext, WorkerDb};
+use gradient_scheduler::Scheduler;
 use gradient_types::ids::PendingDeliveryId;
 use ractor::factory::{FactoryMessage, Job, JobOptions, Worker, WorkerId};
 use ractor::{ActorProcessingErr, ActorRef};
@@ -22,11 +23,16 @@ use crate::consume::consume;
 
 pub struct EffectsCtx {
     state: Arc<ServerState>,
+    scheduler: Arc<Scheduler>,
 }
 
 impl EffectsCtx {
-    pub fn new(state: Arc<ServerState>) -> Arc<Self> {
-        Arc::new(Self { state })
+    pub fn new(state: Arc<ServerState>, scheduler: Arc<Scheduler>) -> Arc<Self> {
+        Arc::new(Self { state, scheduler })
+    }
+
+    pub fn scheduler(&self) -> &Scheduler {
+        &self.scheduler
     }
 
     pub fn ci(&self) -> CiContext {

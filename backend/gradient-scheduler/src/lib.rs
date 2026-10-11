@@ -25,7 +25,7 @@ mod assign_mode;
 mod eval_metrics;
 mod job_handlers;
 mod ram_shortage;
-pub(crate) mod trigger_firing;
+pub mod trigger_firing;
 mod unbuildable;
 mod worker_lifecycle;
 

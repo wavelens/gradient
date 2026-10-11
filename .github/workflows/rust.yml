@@ -60,6 +60,17 @@ jobs:
             exit 1
           fi
 
+      - name: "Forbid claim statements outside the pending delivery consumer"
+        run: |
+          if grep -rlE --include='*.rs' --exclude-dir=target 'SKIP LOCKED' . \
+               | grep -v -e 'gradient-db/src/deliveries/pending.rs' \
+                         -e 'gradient-db/src/evaluations/counters.rs' \
+                         -e 'gradient-ci/src/actions/executor.rs' \
+                         -e 'gradient-ci/src/webhooks/deliver.rs'; then
+            echo "::error::add a PendingDeliveryKind and enqueue it instead of a new SKIP LOCKED claim statement"
+            exit 1
+          fi
+
       - name: "cargo-deny (licenses, bans, sources)"
         uses: EmbarkStudios/cargo-deny-action@v2
         with:

@@ -10,9 +10,6 @@ use gradient_types::TaskTriggerId;
 
 const POLLING_JITTER_PCT: u32 = 10;
 
-/// The pass is walking the triggers in sequence under a shared budget. An unbounded HEAD resolution
-/// against one unreachable remote would consume the whole budget. The pass would be cancelled
-/// before `update_last_fired`, and every trigger behind it would stop firing for good.
 const HEAD_RESOLVE_BUDGET: std::time::Duration = std::time::Duration::from_secs(30);
 
 pub(crate) fn polling_due(
@@ -68,18 +65,15 @@ pub(crate) fn cron_due(
         .unwrap_or(false)
 }
 
-use std::sync::Arc;
-
 use gradient_ci::{ApplyInput, ApplyOutcome, apply_trigger, trigger::maybe_trigger_input_update};
-use gradient_core::ServerState;
-use gradient_db::DbContext;
+use gradient_db::deliveries::trigger_fire::{TriggerFire, enqueue_trigger_fires};
+use gradient_db::{DbContext, WorkerDb};
 use gradient_entity::task_trigger as ept;
 use gradient_sources::{check_task_updates, get_commit_info};
 use gradient_types::triggers::{TriggerConfig, TriggerType};
 use gradient_types::*;
-use sea_orm::{
-    ActiveModelTrait as _, ColumnTrait, Condition, EntityTrait, QueryFilter, QueryOrder,
-};
+use sea_orm::sea_query::Expr;
+use sea_orm::{ColumnTrait, Condition, EntityTrait, QueryFilter, QueryOrder};
 use tracing::{debug, error, info, warn};
 
 use super::Scheduler;
@@ -88,7 +82,45 @@ pub(crate) async fn fire_once(scheduler: &Scheduler) -> anyhow::Result<()> {
     let state = &scheduler.state;
     let now = gradient_types::now();
 
-    let triggers = ept::Entity::find()
+    let triggers = active_triggers(&state.worker_db).await?;
+    if triggers.is_empty() {
+        return Ok(());
+    }
+    let tasks = tasks_of(&state.worker_db, &triggers).await?;
+
+    let due: Vec<TriggerFire> = triggers
+        .iter()
+        .filter(|trig| tasks.get(&trig.task).is_some_and(|task| task.active))
+        .filter_map(|trig| due_fire(trig, now))
+        .collect();
+    if due.is_empty() {
+        return Ok(());
+    }
+
+    enqueue_trigger_fires(&state.worker_db, &due).await?;
+    state.delivery_wake.notify_one();
+    Ok(())
+}
+
+pub async fn fire(scheduler: &Scheduler, fire: &TriggerFire) -> anyhow::Result<()> {
+    let state = &scheduler.state;
+    let Some((trig, task, cfg)) = load_pending_firing(&state.worker_db, fire).await? else {
+        return Ok(());
+    };
+    let now = gradient_types::now();
+
+    let sources = state.db();
+    let branch = polling_branch(&cfg);
+    let resolve = check_task_updates(&sources, &task, branch.as_deref());
+    if let Some((has_update, commit_hash)) = resolve_head(resolve, &task.name).await {
+        apply_resolved_head(scheduler, &trig, &task, &cfg, has_update, commit_hash).await;
+    }
+
+    stamp_last_fired(&state.worker_db, &trig, now).await
+}
+
+async fn active_triggers(db: &WorkerDb) -> Result<Vec<ept::Model>, sea_orm::DbErr> {
+    ept::Entity::find()
         .filter(ept::Column::Active.eq(true))
         .filter(
             Condition::any()
@@ -96,12 +128,14 @@ pub(crate) async fn fire_once(scheduler: &Scheduler) -> anyhow::Result<()> {
                 .add(ept::Column::TriggerType.eq(i16::from(TriggerType::Time))),
         )
         .order_by_asc(ept::Column::LastFiredAt)
-        .all(&state.worker_db)
-        .await?;
-    if triggers.is_empty() {
-        return Ok(());
-    }
+        .all(db)
+        .await
+}
 
+async fn tasks_of(
+    db: &WorkerDb,
+    triggers: &[ept::Model],
+) -> Result<std::collections::HashMap<TaskId, MTask>, sea_orm::DbErr> {
     let task_ids: Vec<_> = triggers
         .iter()
         .map(|t| t.task)
@@ -109,121 +143,146 @@ pub(crate) async fn fire_once(scheduler: &Scheduler) -> anyhow::Result<()> {
         .into_iter()
         .collect();
 
-    let db = &state.worker_db;
-    let tasks: std::collections::HashMap<_, _> =
-        gradient_db::fetch_in_chunks(&task_ids, |chunk| async move {
-            ETask::find().filter(CTask::Id.is_in(chunk)).all(db).await
-        })
-        .await?
-        .into_iter()
-        .map(|p| (p.id, p))
-        .collect();
+    Ok(gradient_db::fetch_in_chunks(&task_ids, |chunk| async move {
+        ETask::find().filter(CTask::Id.is_in(chunk)).all(db).await
+    })
+    .await?
+    .into_iter()
+    .map(|p| (p.id, p))
+    .collect())
+}
 
-    for trig in triggers {
-        let Some(task) = tasks.get(&trig.task) else {
-            continue;
-        };
-        if !task.active {
-            continue;
+fn parse_config(trig: &ept::Model) -> Option<TriggerConfig> {
+    match TriggerConfig::parse_row(trig.trigger_type, &trig.config) {
+        Ok(cfg) => Some(cfg),
+        Err(e) => {
+            warn!(trigger_id = %trig.id, error = %e, "skipping trigger with invalid config");
+            None
         }
-
-        let cfg = match TriggerConfig::parse_row(trig.trigger_type, &trig.config) {
-            Ok(c) => c,
-            Err(e) => {
-                warn!(trigger_id = %trig.id, error = %e, "skipping trigger with invalid config");
-                continue;
-            }
-        };
-
-        let is_time = matches!(cfg, TriggerConfig::Time { .. });
-        let branch_for_check: Option<String> = match &cfg {
-            TriggerConfig::Polling { branch, .. } => branch.clone(),
-            _ => None,
-        };
-        let due = match &cfg {
-            TriggerConfig::Polling { interval_secs, .. } => {
-                polling_due(trig.id, trig.last_fired_at, *interval_secs, now)
-            }
-            TriggerConfig::Time { cron } => cron_due(cron, trig.last_fired_at, now),
-            _ => false,
-        };
-        if !due {
-            continue;
-        }
-
-        let sources = state.db();
-        let resolve = check_task_updates(&sources, task, branch_for_check.as_deref());
-        let (has_update, commit_hash) = match resolve_head(resolve, &task.name).await {
-            Some(v) => v,
-            None => {
-                // The stamp is updated on a failure too, otherwise the trigger is retrying every
-                // 5s. It is also letting the next pass reach the triggers behind a timed-out one.
-                update_last_fired(state, &trig, now).await;
-                continue;
-            }
-        };
-
-        if let Err(e) =
-            maybe_trigger_input_update(&state.worker_db, task, commit_hash.clone(), Some(trig.id))
-                .await
-        {
-            warn!(error = %e, trigger_id = %trig.id, "input_update trigger failed");
-        }
-
-        if has_update || is_time {
-            let (msg, author) = commit_metadata(&sources, task, &commit_hash).await;
-            let trigger_type = cfg.trigger_type();
-            match apply_trigger(
-                &state.worker_db,
-                task,
-                ApplyInput {
-                    trigger_id: trig.id,
-                    trigger_type,
-                    commit_hash,
-                    commit_message: Some(msg),
-                    author_name: Some(author),
-                    manual: false,
-                    gate_approval: None,
-                    repository_override: None,
-                    wildcard_override: None,
-                    source_comment: None,
-                    instance_max_storage_gb: state.config.cache.max_storage_gb,
-                },
-            )
-            .await
-            {
-                Ok(ApplyOutcome::Created {
-                    evaluation: eval,
-                    aborted_evaluation,
-                    hard_abort,
-                }) => {
-                    if let Some(aborted_id) = aborted_evaluation {
-                        let shared_builds = if hard_abort {
-                            scheduler.abort_evaluation_shared_builds(aborted_id).await
-                        } else {
-                            Vec::new()
-                        };
-
-                        scheduler
-                            .cancel_evaluation_jobs(aborted_id, &shared_builds)
-                            .await;
-                    }
-
-                    info!(task = %task.name, trigger_id = %trig.id, evaluation_id = %eval.id, "trigger created evaluation");
-                    state.record_evaluation_created(&eval).await;
-                }
-                Ok(other) => {
-                    debug!(task = %task.name, trigger_id = %trig.id, ?other, "trigger applied without creating eval");
-                }
-                Err(e) => {
-                    error!(error = %e, trigger_id = %trig.id, "trigger application failed");
-                }
-            }
-        }
-
-        update_last_fired(state, &trig, now).await;
     }
-    Ok(())
+}
+
+fn due_fire(trig: &ept::Model, now: NaiveDateTime) -> Option<TriggerFire> {
+    let due = match parse_config(trig)? {
+        TriggerConfig::Polling { interval_secs, .. } => {
+            polling_due(trig.id, trig.last_fired_at, interval_secs, now)
+        }
+        TriggerConfig::Time { cron } => cron_due(&cron, trig.last_fired_at, now),
+        _ => false,
+    };
+
+    due.then_some(TriggerFire {
+        trigger: trig.id,
+        last_fired_at: trig.last_fired_at,
+    })
+}
+
+async fn load_pending_firing(
+    db: &WorkerDb,
+    fire: &TriggerFire,
+) -> Result<Option<(ept::Model, MTask, TriggerConfig)>, sea_orm::DbErr> {
+    let Some(trig) = ept::Entity::find_by_id(fire.trigger).one(db).await? else {
+        return Ok(None);
+    };
+    if !trig.active || trig.last_fired_at != fire.last_fired_at {
+        return Ok(None);
+    }
+    let Some(task) = ETask::find_by_id(trig.task).one(db).await? else {
+        return Ok(None);
+    };
+    if !task.active {
+        return Ok(None);
+    }
+
+    Ok(parse_config(&trig).map(|cfg| (trig, task, cfg)))
+}
+
+fn polling_branch(cfg: &TriggerConfig) -> Option<String> {
+    match cfg {
+        TriggerConfig::Polling { branch, .. } => branch.clone(),
+        _ => None,
+    }
+}
+
+async fn apply_resolved_head(
+    scheduler: &Scheduler,
+    trig: &ept::Model,
+    task: &MTask,
+    cfg: &TriggerConfig,
+    has_update: bool,
+    commit_hash: Vec<u8>,
+) {
+    let state = &scheduler.state;
+    if let Err(e) =
+        maybe_trigger_input_update(&state.worker_db, task, commit_hash.clone(), Some(trig.id)).await
+    {
+        warn!(error = %e, trigger_id = %trig.id, "input_update trigger failed");
+    }
+
+    if has_update || matches!(cfg, TriggerConfig::Time { .. }) {
+        apply_to_task(scheduler, trig, task, cfg, commit_hash).await;
+    }
+}
+
+async fn apply_to_task(
+    scheduler: &Scheduler,
+    trig: &ept::Model,
+    task: &MTask,
+    cfg: &TriggerConfig,
+    commit_hash: Vec<u8>,
+) {
+    let state = &scheduler.state;
+    let (msg, author) = commit_metadata(&state.db(), task, &commit_hash).await;
+    let outcome = apply_trigger(
+        &state.worker_db,
+        task,
+        ApplyInput {
+            trigger_id: trig.id,
+            trigger_type: cfg.trigger_type(),
+            commit_hash,
+            commit_message: Some(msg),
+            author_name: Some(author),
+            manual: false,
+            gate_approval: None,
+            repository_override: None,
+            wildcard_override: None,
+            source_comment: None,
+            instance_max_storage_gb: state.config.cache.max_storage_gb,
+        },
+    )
+    .await;
+
+    match outcome {
+        Ok(ApplyOutcome::Created {
+            evaluation,
+            aborted_evaluation,
+            hard_abort,
+        }) => {
+            if let Some(aborted_id) = aborted_evaluation {
+                cancel_aborted(scheduler, aborted_id, hard_abort).await;
+            }
+            info!(task = %task.name, trigger_id = %trig.id, evaluation_id = %evaluation.id, "trigger created evaluation");
+            state.record_evaluation_created(&evaluation).await;
+        }
+        Ok(other) => {
+            debug!(task = %task.name, trigger_id = %trig.id, ?other, "trigger applied without creating eval");
+        }
+        Err(e) => {
+            error!(error = %e, trigger_id = %trig.id, "trigger application failed");
+        }
+    }
+}
+
+async fn cancel_aborted(scheduler: &Scheduler, aborted_id: EvaluationId, hard_abort: bool) {
+    let shared_builds = if hard_abort {
+        scheduler.abort_evaluation_shared_builds(aborted_id).await
+    } else {
+        Vec::new()
+    };
+
+    scheduler
+        .cancel_evaluation_jobs(aborted_id, &shared_builds)
+        .await;
 }
 
 async fn commit_metadata(
@@ -260,18 +319,32 @@ where
     }
 }
 
-async fn update_last_fired(state: &Arc<ServerState>, trig: &ept::Model, now: NaiveDateTime) {
-    let mut active: ept::ActiveModel = trig.clone().into();
-    active.last_fired_at = sea_orm::ActiveValue::Set(Some(now));
-    active.updated_at = sea_orm::ActiveValue::Set(now);
-    if let Err(e) = active.update(&state.worker_db).await {
-        warn!(error = %e, trigger_id = %trig.id, "failed to update last_fired_at");
-    }
+async fn stamp_last_fired(
+    db: &WorkerDb,
+    trig: &ept::Model,
+    now: NaiveDateTime,
+) -> anyhow::Result<()> {
+    let unchanged = match trig.last_fired_at {
+        Some(at) => ept::Column::LastFiredAt.eq(at),
+        None => ept::Column::LastFiredAt.is_null(),
+    };
+    ept::Entity::update_many()
+        .col_expr(ept::Column::LastFiredAt, Expr::value(now))
+        .col_expr(ept::Column::UpdatedAt, Expr::value(now))
+        .filter(ept::Column::Id.eq(trig.id))
+        .filter(unchanged)
+        .exec(db)
+        .await?;
+
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gradient_fixtures::mock::{all_statements, exec_ok, mock_db};
+    use gradient_fixtures::rows;
+    use gradient_test_support::state::TestState;
 
     fn dt(s: &str) -> NaiveDateTime {
         NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S").unwrap()
@@ -393,5 +466,66 @@ mod tests {
     fn cron_no_prior_fires_when_due() {
         let now = dt("2026-05-06 03:00:00");
         assert!(cron_due("0 0 2 * * *", None, now));
+    }
+
+    fn polling_trigger(last_fired_at: Option<NaiveDateTime>) -> ept::Model {
+        ept::Model {
+            id: TaskTriggerId::now_v7(),
+            task: rows::task().id,
+            config: serde_json::json!({ "interval_secs": 60 }),
+            active: true,
+            last_fired_at,
+            ..Default::default()
+        }
+    }
+
+    fn scheduler_over(db: sea_orm::DatabaseConnection) -> Scheduler {
+        Scheduler::new(TestState::new().worker_db(db).build())
+    }
+
+    fn executed(db: sea_orm::DatabaseConnection) -> Vec<String> {
+        all_statements(db.into_transaction_log())
+            .into_iter()
+            .map(|s| s.sql)
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn a_firing_another_instance_already_handled_applies_nothing() {
+        let handled = polling_trigger(Some(dt("2026-05-06 10:05:00")));
+        let db = mock_db()
+            .append_query_results([vec![handled.clone()]])
+            .into_connection();
+        let log = db.clone();
+        let outdated = TriggerFire {
+            trigger: handled.id,
+            last_fired_at: Some(dt("2026-05-06 10:00:00")),
+        };
+
+        fire(&scheduler_over(db), &outdated).await.unwrap();
+
+        let sql = executed(log);
+        assert!(!sql.iter().any(|s| s.contains("INSERT INTO \"evaluation\"")));
+        assert!(!sql.iter().any(|s| s.contains("UPDATE \"task_trigger\"")));
+    }
+
+    #[tokio::test]
+    async fn the_pass_queues_a_due_trigger_and_stamps_nothing() {
+        let due = polling_trigger(None);
+        let db = mock_db()
+            .append_query_results([vec![due]])
+            .append_query_results([vec![rows::task()]])
+            .append_exec_results([exec_ok()])
+            .into_connection();
+        let log = db.clone();
+
+        fire_once(&scheduler_over(db)).await.unwrap();
+
+        let sql = executed(log);
+        assert!(
+            sql.iter()
+                .any(|s| s.contains("INSERT INTO pending_delivery"))
+        );
+        assert!(!sql.iter().any(|s| s.contains("UPDATE \"task_trigger\"")));
     }
 }

@@ -13,6 +13,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use gradient_core::ServerState;
+use gradient_scheduler::Scheduler;
 use gradient_util::supervision::{ChildCtx, ChildSpec};
 use ractor::factory::queues::DefaultQueue;
 use ractor::factory::routing::QueuerRouting;
@@ -38,19 +39,24 @@ type EffectsFactory = Factory<
     DefaultQueue<gradient_types::ids::PendingDeliveryId, DeliverJob>,
 >;
 
-pub fn child_spec(state: Arc<ServerState>) -> ChildSpec {
+pub fn child_spec(state: Arc<ServerState>, scheduler: Arc<Scheduler>) -> ChildSpec {
     ChildSpec::Custom {
         name: HEALTH_NAME,
         stop_last: false,
         spawn: Arc::new(move |child: ChildCtx| {
             let state = Arc::clone(&state);
-            Box::pin(async move { spawn(state, child).await })
+            let scheduler = Arc::clone(&scheduler);
+            Box::pin(async move { spawn(state, scheduler, child).await })
         }),
     }
 }
 
-async fn spawn(state: Arc<ServerState>, child: ChildCtx) -> Result<ActorCell, SpawnErr> {
-    let ctx = EffectsCtx::new(Arc::clone(&state));
+async fn spawn(
+    state: Arc<ServerState>,
+    scheduler: Arc<Scheduler>,
+    child: ChildCtx,
+) -> Result<ActorCell, SpawnErr> {
+    let ctx = EffectsCtx::new(Arc::clone(&state), scheduler);
     let (factory, _) = Actor::spawn_linked(
         Some("effects-workers".to_owned()),
         EffectsFactory::default(),

@@ -30,7 +30,7 @@ crate::sql! {
              SELECT id FROM pending_delivery \
              WHERE delivered_at IS NULL AND failed_at IS NULL \
                AND next_attempt_at <= (now() AT TIME ZONE 'UTC') \
-               AND kind IN (2, 3, 4, 5) \
+               AND kind IN (2, 3, 4, 5, 6) \
              ORDER BY next_attempt_at, id LIMIT $1 FOR UPDATE SKIP LOCKED) \
          RETURNING o.id, o.kind, o.key, o.payload, o.attempts",
         params = [Int(8), Int(CLAIM_LEASE_SECS)];
