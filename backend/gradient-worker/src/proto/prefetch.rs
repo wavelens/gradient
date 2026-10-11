@@ -16,6 +16,7 @@ use gradient_wire::messages::{BuildSpec, CachedPath, EvalMessageLevel, QueryMode
 use gradient_wire::types::{BuildProgressPhase, JobPhase};
 use tracing::{debug, error, warn};
 
+use crate::error::WorkerError;
 use crate::nix::store::LocalNixStore;
 use crate::proto::compression::drv_closure_seeds_from_compressed_nar;
 use crate::proto::job::JobUpdater;
@@ -302,7 +303,7 @@ impl<'a> InputPrefetcher<'a> {
                 Ok(false) => missing.push(p),
                 Err(e) => {
                     error!(path = %p, error = %e, "store.has_path failed during prefetch; aborting build");
-                    return Err(anyhow::anyhow!("store.has_path failed for {}: {}", p, e));
+                    return Err(WorkerError::StoreHasPathFailed { path: p, cause: e }.into());
                 }
             }
         }
@@ -571,7 +572,7 @@ impl<'a> InputPrefetcher<'a> {
                             error = %e,
                             "store.has_path failed during closure expansion; aborting build"
                         );
-                        return Err(anyhow::anyhow!("store.has_path failed for {}: {}", r, e));
+                        return Err(WorkerError::StoreHasPathFailed { path: r, cause: e }.into());
                     }
                 }
             }

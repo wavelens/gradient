@@ -6,7 +6,7 @@
 
 use anyhow::Context as _;
 use gradient_db::{DbContext, WorkerDb};
-use gradient_entity::StorePath;
+use gradient_entity::{StorePath, StorePathError};
 use gradient_sources::CacheSigner;
 use gradient_types::ids::{CacheId, CachedPathId, CachedPathSignatureId};
 use gradient_types::*;
@@ -25,9 +25,9 @@ use crate::messages::{NarCommit, NarCommitted, SignTargets};
 /// The shared build locks are always taken after the `cached_path` lock, never before.
 pub(crate) async fn commit(ctx: &DbContext, c: &NarCommit) -> anyhow::Result<NarCommitted> {
     let db = &ctx.worker_db;
-    let sp = StorePath::parse(&c.store_path).map_err(|e| anyhow::anyhow!("{e}"))?;
+    let sp = StorePath::parse(&c.store_path)?;
     if !is_nix32_hash(sp.hash()) {
-        anyhow::bail!("malformed store path: {}", c.store_path);
+        anyhow::bail!(StorePathError::Malformed(c.store_path.clone()));
     }
 
     let txn = db.as_transaction().context(
@@ -116,9 +116,9 @@ pub(crate) async fn commit_batch(
     let paths = commits
         .iter()
         .map(|c| {
-            let sp = StorePath::parse(&c.store_path).map_err(|e| anyhow::anyhow!("{e}"))?;
+            let sp = StorePath::parse(&c.store_path)?;
             if !is_nix32_hash(sp.hash()) {
-                anyhow::bail!("malformed store path: {}", c.store_path);
+                anyhow::bail!(StorePathError::Malformed(c.store_path.clone()));
             }
             Ok(sp)
         })

@@ -7,6 +7,7 @@
 pub mod build_log;
 pub mod cache_key;
 pub mod daemon;
+pub mod error;
 pub mod evaluator;
 pub mod flake_lock;
 pub mod git;
@@ -17,6 +18,7 @@ pub mod store;
 pub use self::build_log::strip_nix_log_tail;
 pub use self::cache_key::*;
 pub use self::daemon::*;
+pub use self::error::StoreDaemonError;
 pub use self::evaluator::*;
 pub use self::git::{
     HeadCommit, accept_cert, check_task_updates, checkout_commit, fetch_options_with_ssh,

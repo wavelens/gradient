@@ -5,6 +5,7 @@
  */
 
 use super::chat_response;
+use crate::ActionError;
 use crate::actions::ExecutorOk;
 use crate::actions::crypto::decrypt_with_server_key;
 use crate::actions::summary::EventSummary;
@@ -23,7 +24,8 @@ pub(crate) async fn execute_send_slack_message(
         ctx,
         webhook_url.ok_or_else(|| anyhow!("Slack action has no webhook URL"))?,
     )?;
-    let webhook = validate_webhook_url(&plain).map_err(|e| anyhow!("webhook URL rejected: {e}"))?;
+    let webhook =
+        validate_webhook_url(&plain).map_err(|cause| ActionError::UrlRejected { cause })?;
     let summary = EventSummary::resolve(ctx, event, envelope).await?;
     post_slack_message(&ctx.http, webhook, &summary).await
 }

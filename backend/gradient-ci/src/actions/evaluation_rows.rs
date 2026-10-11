@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use crate::ActionError;
 use crate::context::CiContext;
 use anyhow::{Context, Result, anyhow};
 use gradient_types::{ECommit, EProject, ETask, MCommit, MEvaluation, MTask, ProjectId};
@@ -26,7 +27,7 @@ pub(super) async fn load_evaluation_rows(
         .one(&ctx.db.worker_db)
         .await
         .context("loading task")?
-        .ok_or_else(|| anyhow!("task {} not found", task_id))?;
+        .ok_or(ActionError::TaskNotFound { id: task_id })?;
 
     let commit = ECommit::find_by_id(evaluation.commit)
         .one(&ctx.db.worker_db)

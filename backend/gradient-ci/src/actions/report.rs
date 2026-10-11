@@ -6,9 +6,11 @@
 
 use super::evaluation_rows::{EvaluationRows, load_evaluation_rows, load_project_name};
 use super::matchers::requested_actions_for;
+use crate::ActionError;
 use crate::context::CiContext;
 use crate::{parse_owner_repo, reporting};
 use anyhow::{Context, Result, anyhow};
+use gradient_db::MissingRow;
 use gradient_db::evaluations::failed_attributes::failed_attributes;
 use gradient_git_host::reporter::{CiReport, CiStatus};
 use gradient_types::input::vec_to_hex;
@@ -92,8 +94,10 @@ pub(super) async fn build_ci_reports_from_payload(
     // Reports must target the task's base repository, not `evaluation.repository`. Fork PR
     // evaluations are pointing at the fork, where the GitHub App is missing and `/check-runs` is
     // returning 403.
-    let (owner, repo) = parse_owner_repo(&task.repository)
-        .ok_or_else(|| anyhow!("could not parse owner/repo from {}", task.repository))?;
+    let (owner, repo) =
+        parse_owner_repo(&task.repository).ok_or_else(|| ActionError::RepositoryUnparsable {
+            repository: task.repository.clone(),
+        })?;
     let target = ReportTarget {
         evaluation: &evaluation,
         owner,
@@ -179,7 +183,9 @@ async fn load_subject(
             .one(&ctx.db.worker_db)
             .await
             .context("loading evaluation")?
-            .ok_or_else(|| anyhow!("evaluation {} not found", build_job.evaluation))?;
+            .ok_or(MissingRow::Evaluation {
+                id: build_job.evaluation,
+            })?;
         return Ok((evaluation, Some(build_job)));
     }
 
@@ -188,12 +194,12 @@ async fn load_subject(
             "payload missing 'build_id', 'evaluation_id', and the full owner/repo/sha/context set"
         );
     };
-    let evaluation_id: EvaluationId = eid.parse().map_err(|_| anyhow!("invalid evaluation_id"))?;
+    let evaluation_id: EvaluationId = eid.parse().map_err(|_| ActionError::InvalidEvaluationId)?;
     let evaluation = EEvaluation::find_by_id(evaluation_id)
         .one(&ctx.db.worker_db)
         .await
         .context("loading evaluation")?
-        .ok_or_else(|| anyhow!("evaluation {} not found", evaluation_id))?;
+        .ok_or(MissingRow::Evaluation { id: evaluation_id })?;
     Ok((evaluation, None))
 }
 

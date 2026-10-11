@@ -16,6 +16,7 @@ use tracing::{debug, info};
 
 use super::AbortSignal;
 use super::progress_report::ChangeReporter;
+use crate::error::WorkerError;
 use crate::proto::credentials::CredentialStore;
 use crate::worker_pool::{DownloadTarget, InputBoard, InputFetcher};
 
@@ -285,7 +286,7 @@ async fn pull_from_cache(
     }
     let pulled = tokio::select! {
         biased;
-        () = abort.aborted() => anyhow::bail!("job aborted during flake input fetch"),
+        () = abort.aborted() => anyhow::bail!(WorkerError::FlakeInputFetchAborted),
         pulled = updater.pull_paths(missing) => pulled,
     };
     if let Err(e) = pulled {
@@ -371,7 +372,7 @@ async fn fetch_inputs(
     let mut reporter = ChangeReporter::default();
     let fetched = tokio::select! {
         biased;
-        () = abort.aborted() => anyhow::bail!("job aborted during flake input fetch"),
+        () = abort.aborted() => anyhow::bail!(WorkerError::FlakeInputFetchAborted),
         fetched = fetches => fetched,
         never = reporter.run(sink, snapshot) => match never {},
     };
@@ -1283,6 +1284,12 @@ mod tests {
         )
         .await
         .unwrap_err();
-        assert!(err.to_string().contains("aborted"), "{err}");
+        assert!(
+            matches!(
+                err.downcast_ref::<WorkerError>(),
+                Some(WorkerError::FlakeInputFetchAborted)
+            ),
+            "{err}"
+        );
     }
 }

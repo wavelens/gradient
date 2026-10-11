@@ -15,6 +15,7 @@ use std::time::Duration;
 use anyhow::Result;
 use async_trait::async_trait;
 use futures::stream::{self, StreamExt as _};
+use gradient_sources::StoreDaemonError;
 use gradient_util::store_path::strip_store_prefix;
 use harmonia_protocol::valid_path_info::{UnkeyedValidPathInfo, ValidPathInfo};
 use harmonia_store_content_address::{ContentAddress, make_store_path_from_ca};
@@ -74,8 +75,12 @@ impl LocalNixStore {
     /// That false positive would make the prefetch walk skip a path the daemon then rejects.
     pub async fn has_path(&self, store_path: &str) -> Result<bool> {
         let hash_name = strip_store_prefix(store_path);
-        let sp = StorePath::from_base_path(hash_name)
-            .map_err(|e| anyhow::anyhow!("invalid store path {store_path}: {e}"))?;
+        let sp = StorePath::from_base_path(hash_name).map_err(|cause| {
+            StoreDaemonError::InvalidStorePath {
+                path: store_path.to_owned(),
+                cause,
+            }
+        })?;
 
         let mut guard = self.acquire().await?;
         guard
@@ -99,8 +104,12 @@ impl LocalNixStore {
 
     async fn nar_size(&self, store_path: &str) -> Result<u64> {
         let base = strip_store_prefix(store_path);
-        let sp = StorePath::from_base_path(base)
-            .map_err(|e| anyhow::anyhow!("invalid store path {store_path}: {e}"))?;
+        let sp = StorePath::from_base_path(base).map_err(|cause| {
+            StoreDaemonError::InvalidStorePath {
+                path: store_path.to_owned(),
+                cause,
+            }
+        })?;
 
         let mut guard = self.acquire().await?;
         let info = guard

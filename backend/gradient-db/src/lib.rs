@@ -13,6 +13,7 @@ pub mod connection;
 pub mod context;
 pub mod dashboard;
 pub mod deliveries;
+pub mod error;
 pub mod evaluations;
 pub mod graph;
 pub mod lookup;
@@ -33,4 +34,5 @@ pub(crate) mod test_ctx;
 
 pub use self::chunked::{IN_CHUNK_SIZE, fetch_in_chunks, for_each_chunk};
 pub use self::context::{DbContext, HeldEvaluations, Hold, ProbeRequests};
+pub use self::error::MissingRow;
 pub use self::pool::{CacheDb, WebDb, WorkerDb};

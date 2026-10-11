@@ -21,6 +21,7 @@ workspace = true
 gradient-types = { workspace = true }
 
 anyhow      = { workspace = true }
+thiserror   = { workspace = true }
 async-trait = { workspace = true }
 hex         = { workspace = true }
 lettre      = { workspace = true }

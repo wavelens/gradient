@@ -4,8 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use crate::ActionError;
 use crate::context::CiContext;
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Context, Result};
 use gradient_types::input::load_secret_bytes;
 
 pub fn encrypt_action_secret(plaintext: &str, crypt_key: &[u8]) -> Result<String> {
@@ -17,8 +18,8 @@ pub fn decrypt_action_secret(ciphertext: &str, crypt_key: &[u8]) -> Result<Strin
 }
 
 pub fn encrypt_secret_with_file(crypt_secret_file: &str, plaintext: &str) -> Result<String> {
-    let key =
-        load_secret_bytes(crypt_secret_file).map_err(|e| anyhow!("loading crypt key: {}", e))?;
+    let key = load_secret_bytes(crypt_secret_file)
+        .map_err(|cause| ActionError::CryptKeyUnreadable { cause })?;
     encrypt_action_secret(plaintext, key.expose())
 }
 
@@ -26,8 +27,8 @@ pub fn decrypt_secret_with_file(
     crypt_secret_file: &str,
     ciphertext: &str,
 ) -> Result<gradient_types::SecretString> {
-    let key =
-        load_secret_bytes(crypt_secret_file).map_err(|e| anyhow!("loading crypt key: {}", e))?;
+    let key = load_secret_bytes(crypt_secret_file)
+        .map_err(|cause| ActionError::CryptKeyUnreadable { cause })?;
     decrypt_action_secret(ciphertext, key.expose()).map(gradient_types::SecretString::new)
 }
 

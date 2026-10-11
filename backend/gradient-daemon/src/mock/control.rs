@@ -6,7 +6,7 @@
 
 use crate::mock::build::release;
 use crate::mock::spec::Outcome;
-use crate::mock::{MockState, seed_node, store_path};
+use crate::mock::{MockError, MockState, seed_node, store_path};
 use serde_json::{Value, json};
 use std::sync::Arc;
 
@@ -24,7 +24,7 @@ fn node<'a>(state: &MockState, args: &'a Value) -> anyhow::Result<&'a str> {
     let id = arg(args, "node")?;
     anyhow::ensure!(
         state.config.derivations.contains_key(id),
-        "unknown node {id}"
+        MockError::UnknownNode { id: id.to_owned() }
     );
     Ok(id)
 }

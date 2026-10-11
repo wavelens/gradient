@@ -12,6 +12,7 @@ pub mod cached_path_info;
 pub mod client;
 pub mod codec;
 pub mod constants;
+pub mod error;
 pub mod limiter;
 pub mod messages;
 pub mod rejection;
@@ -30,6 +31,7 @@ mod tests;
 
 pub use self::build_output_metadata::BuildOutputMetadata;
 pub use self::cached_path_info::CachedPathInfo;
+pub use self::error::HandshakeError;
 pub use self::limiter::{PerIpLimiter, ProtoLimiter};
 pub use self::messages::{ClientMessage, PROTO_VERSIONS, ServerMessage};
 pub use self::rejection::Rejection;

@@ -11,7 +11,7 @@ use harmonia_store_remote::DaemonStore as _;
 use harmonia_utils_hash::HashFormat as _;
 use std::collections::HashMap;
 
-use crate::get_hash_from_path;
+use crate::{StoreDaemonError, get_hash_from_path};
 use gradient_util::store_path::{nix_store_path, strip_store_prefix};
 
 pub use harmonia_store_remote::pool::{ConnectionPool, PoolConfig, PooledConnectionGuard};
@@ -102,11 +102,11 @@ async fn get_output_paths_internal(
     guard: &mut PooledConnectionGuard,
 ) -> Result<HashMap<String, String>> {
     let store_path = StorePath::from_base_path(strip_store_prefix(&path))
-        .map_err(|e| anyhow::anyhow!("Invalid store path {}: {}", path, e))?;
+        .map_err(|cause| StoreDaemonError::InvalidStorePath { path, cause })?;
     let output_map = guard
         .execute(|client| async move { client.query_derivation_output_map(&store_path).await })
         .await
-        .map_err(|e| anyhow::anyhow!("query_derivation_output_map failed: {}", e))?;
+        .map_err(|cause| StoreDaemonError::DerivationOutputMapQueryFailed { cause })?;
     Ok(output_map
         .into_iter()
         .filter_map(|(name, sp_opt)| {
@@ -120,11 +120,11 @@ pub async fn get_pathinfo(
     guard: &mut PooledConnectionGuard,
 ) -> Result<Option<PathInfo>> {
     let store_path = StorePath::from_base_path(strip_store_prefix(&path))
-        .map_err(|e| anyhow::anyhow!("Invalid store path {}: {}", path, e))?;
+        .map_err(|cause| StoreDaemonError::InvalidStorePath { path, cause })?;
     let info = guard
         .execute(|client| async move { client.query_path_info(&store_path).await })
         .await
-        .map_err(|e| anyhow::anyhow!("query_path_info failed: {}", e))?;
+        .map_err(|cause| StoreDaemonError::PathInfoQueryFailed { cause })?;
     Ok(info.map(|vi| PathInfo::from(&vi)))
 }
 
@@ -132,12 +132,17 @@ pub async fn get_build_outputs_from_derivation(
     derivation_path: String,
     guard: &mut PooledConnectionGuard,
 ) -> Result<Vec<BuildOutputInfo>> {
-    let drv_store_path = StorePath::from_base_path(strip_store_prefix(&derivation_path))
-        .map_err(|e| anyhow::anyhow!("Invalid store path {}: {}", derivation_path, e))?;
+    let drv_store_path =
+        StorePath::from_base_path(strip_store_prefix(&derivation_path)).map_err(|cause| {
+            StoreDaemonError::InvalidStorePath {
+                path: derivation_path,
+                cause,
+            }
+        })?;
     let output_map = guard
         .execute(|client| async move { client.query_derivation_output_map(&drv_store_path).await })
         .await
-        .map_err(|e| anyhow::anyhow!("query_derivation_output_map failed: {}", e))?;
+        .map_err(|cause| StoreDaemonError::DerivationOutputMapQueryFailed { cause })?;
 
     let mut outputs = Vec::new();
     for (output_name, output_store_path_opt) in &output_map {
@@ -148,7 +153,7 @@ pub async fn get_build_outputs_from_derivation(
         if let Some(vi) = guard
             .execute(|client| async move { client.query_path_info(output_store_path).await })
             .await
-            .map_err(|e| anyhow::anyhow!("query_path_info failed: {}", e))?
+            .map_err(|cause| StoreDaemonError::PathInfoQueryFailed { cause })?
         {
             let (hash, package) = get_hash_from_path(output_path_str.clone())
                 .with_context(|| format!("Failed to parse path {}", output_path_str))?;

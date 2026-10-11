@@ -109,11 +109,6 @@ pub async fn apply_trigger<C: ConnectionTrait>(
     {
         Ok(e) => e,
         Err(TriggerError::AlreadyInProgress) => return Ok(ApplyOutcome::SkippedConcurrency),
-        Err(TriggerError::Db(ref e))
-            if e.to_string().contains("uq_evaluation_one_active_per_task") =>
-        {
-            return Ok(ApplyOutcome::SkippedConcurrency);
-        }
         Err(e) => return Err(e.into()),
     };
 

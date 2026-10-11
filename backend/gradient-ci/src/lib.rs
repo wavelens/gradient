@@ -9,6 +9,7 @@ pub mod action_crypto;
 pub mod actions;
 pub mod apply;
 pub mod context;
+pub mod error;
 pub mod github_app_manifest;
 pub mod integration_lookup;
 pub mod manifest_state;
@@ -24,6 +25,7 @@ pub use self::apply::{
     park_if_no_workers, park_if_pending_approval, park_if_storage_full,
 };
 pub use self::context::CiContext;
+pub use self::error::ActionError;
 pub use self::integration_lookup::*;
 pub use self::reporting::*;
 pub use self::trigger::*;

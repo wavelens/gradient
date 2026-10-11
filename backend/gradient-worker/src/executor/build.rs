@@ -7,7 +7,7 @@
 use anyhow::{Context, Result};
 use futures::StreamExt as _;
 use gradient_derivation::parse_drv;
-use gradient_sources::get_hash_from_path;
+use gradient_sources::{StoreDaemonError, get_hash_from_path};
 use gradient_util::hydra::parse_hydra_product_line;
 use gradient_util::store_path::{nix_store_path, strip_store_prefix};
 use gradient_wire::messages::{BuildOutput, BuildProduct, BuildSpec};
@@ -48,7 +48,7 @@ impl ParsedDerivation {
         let drv = parse_drv(&drv_bytes).with_context(|| format!("parse .drv file: {}", path))?;
 
         let drv_store_path = StorePath::from_base_path(strip_store_prefix(&path))
-            .map_err(|e| anyhow::anyhow!("invalid store path {}: {}", path, e))?;
+            .map_err(|cause| StoreDaemonError::InvalidStorePath { path, cause })?;
 
         Ok(Self {
             drv,

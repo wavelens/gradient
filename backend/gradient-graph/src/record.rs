@@ -9,7 +9,7 @@ use std::collections::{HashMap, HashSet};
 
 use anyhow::{Context, Result, anyhow};
 use gradient_db::{
-    DbContext, WorkerDb,
+    DbContext, MissingRow, WorkerDb,
     status::{EvaluationFailure, report_worker_message, update_evaluation_status_with_error},
 };
 use gradient_entity::StorePath;
@@ -909,7 +909,7 @@ pub(crate) async fn apply_batch(ctx: &DbContext, batch: &RecordBatch) -> Result<
             });
         }
         Some(_) => {}
-        None => anyhow::bail!("evaluation {evaluation_id} not found"),
+        None => anyhow::bail!(MissingRow::Evaluation { id: evaluation_id }),
     }
 
     let writer = BatchWriter { ctx, evaluation_id };

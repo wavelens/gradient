@@ -5,6 +5,7 @@
  */
 
 use super::sign;
+use crate::ActionError;
 use crate::actions::{MAX_BODY_BYTES, decrypt_secret_with_file, truncate};
 use crate::context::CiContext;
 use anyhow::{Context, Result, anyhow};
@@ -74,7 +75,7 @@ async fn post(
     body: &str,
     delivery: PendingDeliveryId,
 ) -> Result<(i32, String)> {
-    validate_webhook_url(&hook.url).map_err(|e| anyhow!("URL rejected: {e}"))?;
+    validate_webhook_url(&hook.url).map_err(|cause| ActionError::UrlRejected { cause })?;
     let secret = decrypt_secret_with_file(&ctx.db.config.secrets.crypt_file, &hook.secret)?;
     let signature = sign(secret.expose().as_bytes(), body.as_bytes())
         .ok_or_else(|| anyhow!("webhook secret cannot key an HMAC"))?;

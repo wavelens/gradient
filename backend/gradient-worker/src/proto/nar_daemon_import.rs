@@ -8,6 +8,7 @@ use std::io::Read as _;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
+use gradient_sources::StoreDaemonError;
 use gradient_wire::messages::CachedPath;
 use harmonia_protocol::valid_path_info::ValidPathInfo;
 use harmonia_store_path::StorePath;
@@ -44,8 +45,12 @@ impl<'a> NarImporter<'a> {
             .strip_prefix("/nix/store/")
             .unwrap_or(self.store_path);
 
-        let path = StorePath::from_base_path(path_base)
-            .map_err(|e| anyhow::anyhow!("invalid store path {}: {}", self.store_path, e))?;
+        let path = StorePath::from_base_path(path_base).map_err(|cause| {
+            StoreDaemonError::InvalidStorePath {
+                path: self.store_path.to_owned(),
+                cause,
+            }
+        })?;
 
         let info = build_unkeyed_path_info(self.store_path, meta, nar_size)?;
         Ok(ValidPathInfo { path, info })

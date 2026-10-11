@@ -6,6 +6,7 @@
 
 use anyhow::Context;
 
+use crate::error::HandshakeError;
 use crate::messages::{ClientMessage, FailedPeer, GradientCapabilities, ServerMessage};
 use crate::rejection::Rejection;
 use crate::session::frame::{ProtoSocket, recv_server_msg, send_client_msg};
@@ -115,7 +116,7 @@ where
     let challenged = match challenge {
         ServerMessage::AuthChallenge { peers } => peers,
         ServerMessage::Reject { code, reason } => {
-            anyhow::bail!("server rejected connection (code {code}): {reason}");
+            anyhow::bail!(HandshakeError::ServerRejected { code, reason });
         }
         other => anyhow::bail!("expected AuthChallenge, got: {other:?}"),
     };
@@ -131,7 +132,7 @@ where
     } = ack
     else {
         if let ServerMessage::Reject { code, reason } = ack {
-            anyhow::bail!("server rejected connection (code {code}): {reason}");
+            anyhow::bail!(HandshakeError::ServerRejected { code, reason });
         }
         anyhow::bail!("expected InitAck, got: {ack:?}");
     };
@@ -206,7 +207,7 @@ where
     let greeting = socket
         .recv_msg()
         .await
-        .ok_or_else(|| anyhow::anyhow!("connection closed before InitConnection"))?;
+        .ok_or(HandshakeError::ClosedBeforeInitConnection)?;
     as_authority_with_greeting(socket, greeting, authority).await
 }
 
@@ -223,7 +224,7 @@ where
         Err(Intent::Reject(rejection)) => {
             return Err(reject_peer(socket, rejection, None).await);
         }
-        Err(other) => anyhow::bail!("unexpected intent during init: {other:?}"),
+        Err(intent) => anyhow::bail!(HandshakeError::UnexpectedIntentDuringInit { intent }),
     };
 
     let (challenge, challenge_peers) = authority
@@ -280,7 +281,7 @@ where
             failed_peers: failed_peers.clone(),
         })
         .await
-        .map_err(|_| anyhow::anyhow!("send InitAck"))?;
+        .map_err(|_| HandshakeError::InitAckNotSent)?;
 
     let registered = Registered::from(authenticated);
     Ok(HandshakeResult {
@@ -337,7 +338,7 @@ where
             failed_peers: failed_peers.clone(),
         })
         .await
-        .map_err(|_| anyhow::anyhow!("send InitAck"))?;
+        .map_err(|_| HandshakeError::InitAckNotSent)?;
 
     Ok(HandshakeResult {
         peer_id: credentials.worker_id.clone(),
@@ -350,7 +351,7 @@ where
 
 async fn greet_dialed_worker(socket: &mut ProtoSocket, worker_id: &str) -> anyhow::Result<Greeted> {
     let init = match socket.recv_msg().await {
-        None => anyhow::bail!("connection closed before InitConnection"),
+        None => anyhow::bail!(HandshakeError::ClosedBeforeInitConnection),
         Some(ClientMessage::Reject { code, reason }) => {
             return Err(Rejected {
                 code,
@@ -366,7 +367,7 @@ async fn greet_dialed_worker(socket: &mut ProtoSocket, worker_id: &str) -> anyho
         Err(Intent::Reject(rejection)) => {
             return Err(reject_peer(socket, rejection, None).await);
         }
-        Err(other) => anyhow::bail!("unexpected intent during init: {other:?}"),
+        Err(intent) => anyhow::bail!(HandshakeError::UnexpectedIntentDuringInit { intent }),
     };
     if greeted.peer_id != worker_id {
         let reason = format!("dialed worker answered as {}", greeted.peer_id);
