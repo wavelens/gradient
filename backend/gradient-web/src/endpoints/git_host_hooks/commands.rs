@@ -15,10 +15,8 @@ use gradient_ci::{
 };
 use gradient_db::WebDb;
 use gradient_scheduler::Scheduler;
-use gradient_types::triggers::TriggerType;
 use gradient_types::wildcard::Wildcard;
 use gradient_types::*;
-use sea_orm::{FromQueryResult, Value};
 use serde::Deserialize;
 use std::sync::Arc;
 use tracing::{debug, info, warn};
@@ -216,14 +214,18 @@ struct CommentRoute<'a> {
 }
 
 async fn handle_comment_for_integration(ctx: &CommentRoute<'_>) -> bool {
-    let task_ids =
-        match active_task_ids_for_integration(&ctx.ci.db.web_db, ctx.integration_id).await {
-            Ok(rows) => rows,
-            Err(e) => {
-                warn!(error = %e, "comment webhook: failed to load task list");
-                return false;
-            }
-        };
+    let task_ids = match gradient_db::triggers::active_pull_request_tasks_of_integration(
+        &ctx.ci.db.web_db,
+        ctx.integration_id,
+    )
+    .await
+    {
+        Ok(rows) => rows,
+        Err(e) => {
+            warn!(error = %e, "comment webhook: failed to load task list");
+            return false;
+        }
+    };
     let Some(probe_task) = first_task_with_reporter(ctx.ci, &task_ids).await else {
         warn!(
             integration_id = %ctx.integration_id,
@@ -449,7 +451,12 @@ async fn post_wildcard_error_comment(
     );
 
     for integration_id in integration_ids {
-        let task_ids = match active_task_ids_for_integration(&ci.db.web_db, *integration_id).await {
+        let task_ids = match gradient_db::triggers::active_pull_request_tasks_of_integration(
+            &ci.db.web_db,
+            *integration_id,
+        )
+        .await
+        {
             Ok(rows) => rows,
             Err(e) => {
                 warn!(error = %e, %integration_id, "/gradient run wildcard: failed to load tasks for reply comment");
@@ -544,33 +551,6 @@ pub(super) fn github_installation_id_from_comment_body(body: &[u8]) -> Option<i6
         .ok()
         .and_then(|p| p.installation)
         .map(|i| i.id)
-}
-
-gradient_db::sql! {
-    ACTIVE_TASK_IDS_FOR_INTEGRATION = "SELECT DISTINCT task FROM task_trigger \
-         WHERE active = true \
-           AND trigger_type = $1 \
-           AND (config->>'integration_id')::uuid = $2",
-        params = [Int(2), IntegrationId];
-}
-
-pub(super) async fn active_task_ids_for_integration(
-    db: &WebDb,
-    integration_id: IntegrationId,
-) -> Result<Vec<TaskId>, sea_orm::DbErr> {
-    let stmt = ACTIVE_TASK_IDS_FOR_INTEGRATION.bind([
-        Value::SmallInt(Some(i16::from(TriggerType::ReporterPullRequest))),
-        Value::Uuid(Some(integration_id.into_inner())),
-    ]);
-
-    #[derive(sea_orm::FromQueryResult)]
-    struct TaskRow {
-        task: TaskId,
-    }
-    TaskRow::find_by_statement(stmt)
-        .all(db)
-        .await
-        .map(|rows| rows.into_iter().map(|r| r.task).collect())
 }
 
 #[cfg(test)]

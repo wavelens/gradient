@@ -26,7 +26,6 @@ const LINKED: &[(&str, fn())] = &[
     ("gradient-proto", gradient_proto::link),
     ("gradient-report", gradient_report::link),
     ("gradient-scheduler", gradient_scheduler::link),
-    ("gradient-web", gradient_web::link),
 ];
 
 #[derive(Parser)]

@@ -9,14 +9,12 @@ use crate::helpers::ok_json;
 use crate::scope::{CacheScope, Readable};
 use axum::Json;
 use axum::extract::State;
-use chrono::NaiveDateTime;
 use gradient_core::ServerState;
 use gradient_db::metrics::cache_traffic;
 use gradient_db::metrics::cache_traffic::CacheTraffic;
 use gradient_entity::metric_rollup::RollupGranularity;
 use gradient_types::*;
 use gradient_util::telemetry::metric;
-use sea_orm::ConnectionTrait;
 use serde::Serialize;
 use std::sync::Arc;
 
@@ -56,80 +54,21 @@ pub fn record_nar_traffic(cache_traffic: &CacheTraffic, cache_id: CacheId, bytes
     cache_traffic.record(cache_id, bucket, bytes);
 }
 
-fn cache_series_sql(unit: &str, back: &str, gran: i16) -> String {
-    format!(
-        r#"SELECT gs.period,
-                  COALESCE(SUM(mr.count), 0)::bigint AS cnt,
-                  COALESCE(SUM(mr.sum), 0)::bigint    AS total
-           FROM generate_series(
-               date_trunc('{unit}', NOW() AT TIME ZONE 'UTC') - INTERVAL '{back}',
-               date_trunc('{unit}', NOW() AT TIME ZONE 'UTC'),
-               INTERVAL '1 {unit}'
-           ) AS gs(period)
-           LEFT JOIN metric_rollup mr
-               ON mr.bucket_start = gs.period
-              AND mr.metric = $1
-              AND mr.granularity = {gran}
-              AND (mr.scope->>'cache') = $2
-           GROUP BY gs.period
-           ORDER BY gs.period"#,
-    )
-}
-
-gradient_db::sql_fn! {
-    CACHE_SERIES = || cache_series_sql("hour", "23 hours", 1),
-        params = [Text(metric::CACHE_BYTES_SENT), Text("11111111-1111-1111-1111-111111111111")];
-}
-
-async fn cache_series<C: sea_orm::ConnectionTrait>(
-    db: &C,
-    cache_id: CacheId,
-    metric: &str,
-    granularity: RollupGranularity,
-    back_interval: &str,
-) -> Result<Vec<(NaiveDateTime, i64, i64)>, WebError> {
-    let sql = cache_series_sql(
-        granularity.trunc_unit(),
-        back_interval,
-        i16::from(granularity),
-    );
-
-    let rows = db
-        .query_all_raw(CACHE_SERIES.bind_built(
-            sql,
-            [
-                sea_orm::Value::String(Some(metric.to_owned())),
-                sea_orm::Value::String(Some(cache_id.to_string())),
-            ],
-        ))
-        .await
-        .map_err(WebError::from)?;
-
-    Ok(rows
-        .into_iter()
-        .filter_map(|row| {
-            let time: NaiveDateTime = row.try_get("", "period").ok()?;
-            let cnt: i64 = row.try_get("", "cnt").unwrap_or(0);
-            let total: i64 = row.try_get("", "total").unwrap_or(0);
-            Some((time, cnt, total))
-        })
-        .collect())
-}
-
 async fn aggregate_traffic<C: sea_orm::ConnectionTrait>(
     db: &C,
     cache_id: CacheId,
     granularity: RollupGranularity,
     back_interval: &str,
 ) -> Result<Vec<CacheMetricPoint>, WebError> {
-    let series = cache_series(
+    let series = gradient_db::metrics::series::of_cache(
         db,
         cache_id,
         metric::CACHE_BYTES_SENT,
         granularity,
         back_interval,
     )
-    .await?;
+    .await
+    .map_err(WebError::from)?;
     Ok(series
         .into_iter()
         .map(|(time, requests, bytes)| CacheMetricPoint {
@@ -146,14 +85,15 @@ async fn aggregate_storage<C: sea_orm::ConnectionTrait>(
     granularity: RollupGranularity,
     back_interval: &str,
 ) -> Result<Vec<StorageMetricPoint>, WebError> {
-    let series = cache_series(
+    let series = gradient_db::metrics::series::of_cache(
         db,
         cache_id,
         metric::CACHE_BYTES_ADDED,
         granularity,
         back_interval,
     )
-    .await?;
+    .await
+    .map_err(WebError::from)?;
     Ok(series
         .into_iter()
         .map(|(time, packages, bytes)| StorageMetricPoint {
@@ -164,41 +104,13 @@ async fn aggregate_storage<C: sea_orm::ConnectionTrait>(
         .collect())
 }
 
-gradient_db::sql! {
-    CACHE_TOTALS = r#"SELECT COALESCE(SUM(cp.file_size), 0)::bigint AS total_bytes,
-                      COALESCE(SUM(cp.nar_size),  0)::bigint AS total_nar_bytes,
-                      COUNT(cps.id)::bigint                   AS total_packages
-               FROM cached_path_signature cps
-               JOIN cached_path cp ON cp.id = cps.cached_path
-               WHERE cps.cache = $1"#,
-        params = [CacheId],
-        tier = Bulk;
-}
-
 pub async fn get_cache_stats(
     CacheScope { cache, .. }: CacheScope<Readable>,
     state: State<Arc<ServerState>>,
 ) -> WebResult<Json<BaseResponse<CacheStatsResponse>>> {
-    let total_row = state
-        .web_db
-        .query_one_raw(CACHE_TOTALS.bind([sea_orm::Value::Uuid(Some(cache.id.into_inner()))]))
+    let size = gradient_db::cached_paths::size_of_cache(&state.web_db, cache.id)
         .await
         .map_err(WebError::from)?;
-
-    let total_bytes: i64 = total_row
-        .as_ref()
-        .and_then(|row| row.try_get::<i64>("", "total_bytes").ok())
-        .unwrap_or(0);
-
-    let total_nar_bytes: i64 = total_row
-        .as_ref()
-        .and_then(|row| row.try_get::<i64>("", "total_nar_bytes").ok())
-        .unwrap_or(0);
-
-    let total_packages: i64 = total_row
-        .as_ref()
-        .and_then(|row| row.try_get::<i64>("", "total_packages").ok())
-        .unwrap_or(0);
 
     let (storage_minutes, storage_hours, storage_days, storage_weeks, minutes, hours, days, weeks) =
         tokio::try_join!(
@@ -223,9 +135,9 @@ pub async fn get_cache_stats(
         )?;
 
     Ok(ok_json(CacheStatsResponse {
-        total_bytes,
-        total_nar_bytes,
-        total_packages,
+        total_bytes: size.total_bytes,
+        total_nar_bytes: size.total_nar_bytes,
+        total_packages: size.total_packages,
         storage_minutes,
         storage_hours,
         storage_days,

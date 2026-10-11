@@ -33,7 +33,6 @@ use gradient_scheduler::Scheduler;
 use gradient_types::GitHostType;
 use gradient_types::input::load_secret;
 use gradient_types::*;
-use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use std::net::{IpAddr, Ipv4Addr};
 use std::sync::Arc;
 use tracing::{debug, warn};
@@ -362,9 +361,7 @@ pub async fn git_host_webhook(
         return Err(GitHostHookRefusal::UnsupportedGitHost.into());
     }
 
-    let project = EProject::find()
-        .filter(CProject::Name.eq(project_name.as_str()))
-        .one(&state.web_db)
+    let project = gradient_db::projects::by_name(&state.web_db, project_name.as_str())
         .await
         .inspect_err(|e| {
             warn!(error = %e, project = %project_name, "DB error looking up project for Git host webhook");
@@ -372,20 +369,21 @@ pub async fn git_host_webhook(
         .context("internal error")?
         .ok_or(GitHostHookRefusal::IntegrationNotFound)?;
 
-    let integration = EIntegration::find()
-        .filter(CIntegration::Project.eq(project.id))
-        .filter(CIntegration::Kind.eq(i16::from(IntegrationKind::Inbound)))
-        .filter(CIntegration::Name.eq(integration_name.as_str()))
-        .one(&state.web_db)
-        .await
-        .inspect_err(|e| {
-            warn!(error = %e, "DB error looking up integration for Git host webhook");
-        })
-        .context("internal error")?
-        .ok_or_else(|| {
-            warn!(project = %project_name, git_host = %git_host, integration = %integration_name, "Integration not found");
-            WebError::from(GitHostHookRefusal::IntegrationNotFound)
-        })?;
+    let integration = gradient_db::integrations::by_name(
+        &state.web_db,
+        project.id,
+        IntegrationKind::Inbound,
+        integration_name.as_str(),
+    )
+    .await
+    .inspect_err(|e| {
+        warn!(error = %e, "DB error looking up integration for Git host webhook");
+    })
+    .context("internal error")?
+    .ok_or_else(|| {
+        warn!(project = %project_name, git_host = %git_host, integration = %integration_name, "Integration not found");
+        WebError::from(GitHostHookRefusal::IntegrationNotFound)
+    })?;
 
     let encrypted_secret = integration.secret.as_ref().ok_or_else(|| {
         warn!(integration_id = %integration.id, "Integration has no secret configured");

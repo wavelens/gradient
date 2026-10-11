@@ -14,7 +14,7 @@ use sea_orm::ActiveValue::Set;
 use sea_orm::sea_query::Query;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, ConnectionTrait, DbErr, EntityTrait, QueryFilter, QueryOrder,
-    Select,
+    QuerySelect, Select, Value,
 };
 use std::collections::HashMap;
 
@@ -110,4 +110,86 @@ pub async fn access_of_user<C: ConnectionTrait>(
         .filter(CProjectAccess::User.eq(user))
         .all(db)
         .await
+}
+
+pub async fn with_ids<C: ConnectionTrait>(
+    db: &C,
+    ids: &[ProjectId],
+) -> Result<Vec<MProject>, DbErr> {
+    crate::fetch_in_chunks(ids, |chunk| async move {
+        EProject::find()
+            .filter(CProject::Id.is_in(chunk))
+            .all(db)
+            .await
+    })
+    .await
+}
+
+pub async fn access_of_user_in<C: ConnectionTrait>(
+    db: &C,
+    user: UserId,
+    projects: Vec<ProjectId>,
+) -> Result<Option<MProjectAccess>, DbErr> {
+    EProjectAccess::find()
+        .filter(CProjectAccess::User.eq(user))
+        .filter(CProjectAccess::Project.is_in(projects))
+        .one(db)
+        .await
+}
+
+pub async fn members_with_role<C: ConnectionTrait>(
+    db: &C,
+    project: ProjectId,
+    role: RoleId,
+) -> Result<Vec<MProjectUser>, DbErr> {
+    EProjectUser::find()
+        .filter(CProjectUser::Project.eq(project))
+        .filter(CProjectUser::Role.eq(role))
+        .all(db)
+        .await
+}
+
+crate::sql! {
+    PUBLIC_PROJECTS = "SELECT id FROM project WHERE public = true",
+        params = [];
+
+    PROJECTS_FOR_USER = "SELECT DISTINCT project AS id FROM project_access WHERE \"user\" = $1",
+        params = [UserId];
+}
+
+pub async fn public_ids<C: ConnectionTrait>(db: &C) -> Result<Vec<ProjectId>, DbErr> {
+    db.query_all_raw(PUBLIC_PROJECTS.stmt())
+        .await?
+        .into_iter()
+        .map(|row| row.try_get::<uuid::Uuid>("", "id").map(ProjectId::new))
+        .collect()
+}
+
+pub async fn ids_reachable_by<C: ConnectionTrait>(
+    db: &C,
+    user: UserId,
+) -> Result<Vec<ProjectId>, DbErr> {
+    db.query_all_raw(PROJECTS_FOR_USER.bind([Value::from(uuid::Uuid::from(user))]))
+        .await?
+        .into_iter()
+        .map(|row| row.try_get::<uuid::Uuid>("", "id").map(ProjectId::new))
+        .collect()
+}
+
+pub async fn names<C: ConnectionTrait>(
+    db: &C,
+    projects: &[uuid::Uuid],
+) -> Result<Vec<(uuid::Uuid, String, String)>, DbErr> {
+    crate::fetch_in_chunks(projects, |chunk| async move {
+        EProject::find()
+            .select_only()
+            .column(CProject::Id)
+            .column(CProject::Name)
+            .column(CProject::DisplayName)
+            .filter(CProject::Id.is_in(chunk))
+            .into_tuple()
+            .all(db)
+            .await
+    })
+    .await
 }

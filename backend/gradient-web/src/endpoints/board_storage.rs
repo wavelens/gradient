@@ -93,22 +93,6 @@ fn granularity_for(window_hours: i64) -> RollupGranularity {
     }
 }
 
-fn labelled_series_sql(granularity: RollupGranularity, window_hours: i64) -> String {
-    format!(
-        "SELECT bucket_start, COALESCE(scope->>'label', '') AS label, \
-                sum(count)::bigint AS c, sum(sum) AS s, max(max) AS m \
-         FROM metric_rollup WHERE metric = $1 AND granularity = {gran} \
-           AND bucket_start >= (now() AT TIME ZONE 'UTC') - interval '{window_hours} hours' \
-         GROUP BY 1, 2 ORDER BY 2, 1",
-        gran = i16::from(granularity),
-    )
-}
-
-gradient_db::sql_fn! {
-    LABELLED_SERIES = || labelled_series_sql(RollupGranularity::Minute, 6),
-        params = [Text(metric::STORAGE_OP_MS)];
-}
-
 struct SeriesReader<'a, C> {
     db: &'a C,
     granularity: RollupGranularity,
@@ -117,23 +101,23 @@ struct SeriesReader<'a, C> {
 
 impl<C: ConnectionTrait> SeriesReader<'_, C> {
     async fn labelled(&self, metric: &str) -> WebResult<Vec<LabelledSeries>> {
-        let sql = labelled_series_sql(self.granularity, self.window_hours);
-        let rows = self
-            .db
-            .query_all_raw(LABELLED_SERIES.bind_built(sql, [metric.into()]))
-            .await?;
+        let rows = gradient_db::metrics::series::labelled(
+            self.db,
+            metric,
+            self.granularity,
+            self.window_hours,
+        )
+        .await?;
 
         Ok(group_rows(
             rows.into_iter()
                 .map(|r| {
-                    let bucket: chrono::NaiveDateTime =
-                        r.try_get("", "bucket_start").unwrap_or_default();
                     (
-                        bucket.and_utc().to_rfc3339(),
-                        r.try_get("", "label").unwrap_or_default(),
-                        r.try_get("", "c").unwrap_or(0),
-                        r.try_get("", "s").unwrap_or(0.0),
-                        r.try_get("", "m").unwrap_or(0.0),
+                        r.bucket_start.and_utc().to_rfc3339(),
+                        r.label,
+                        r.count,
+                        r.sum,
+                        r.max,
                     )
                 })
                 .collect(),
@@ -183,17 +167,6 @@ mod tests {
         assert_eq!(granularity_for(7), RollupGranularity::Hour);
         assert_eq!(granularity_for(168), RollupGranularity::Hour);
         assert_eq!(granularity_for(169), RollupGranularity::Day);
-    }
-
-    #[test]
-    fn series_group_by_label_within_the_window() {
-        let sql = labelled_series_sql(RollupGranularity::Minute, 6);
-        assert!(sql.contains("metric = $1"), "{sql}");
-        assert!(sql.contains("granularity = 0"), "{sql}");
-        assert!(sql.contains("interval '6 hours'"), "{sql}");
-        assert!(sql.contains("COALESCE(scope->>'label', '')"), "{sql}");
-        assert!(sql.contains("GROUP BY 1, 2"), "{sql}");
-        assert!(sql.contains("max(max)"), "{sql}");
     }
 
     #[test]

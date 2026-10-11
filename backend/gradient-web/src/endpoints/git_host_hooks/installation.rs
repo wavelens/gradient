@@ -8,7 +8,6 @@ use super::payloads::GitHubInstallationPayload;
 use gradient_ci::parse_owner_repo;
 use gradient_db::WebDb;
 use gradient_types::*;
-use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use std::collections::HashMap;
 use tracing::{debug, info, warn};
 
@@ -30,11 +29,8 @@ pub(super) async fn handle_github_installation(db: &WebDb, body: &[u8]) {
 }
 
 async fn clear_installation_id(db: &WebDb, installation_id: i64) {
-    use gradient_entity::github_installation::{Column as Col, Entity as E};
-    if let Err(e) = E::delete_many()
-        .filter(Col::InstallationId.eq(installation_id))
-        .exec(db)
-        .await
+    if let Err(e) =
+        gradient_db::integrations::delete_installations_by_github_id(db, installation_id).await
     {
         warn!(error = %e, installation_id, "Failed to delete github_installation rows");
     }
@@ -57,15 +53,14 @@ async fn store_installation_id(db: &WebDb, payload: &GitHubInstallationPayload) 
 
     // Every project owning a task whose parsed `owner/repo` is matching an installed repo is bound.
     // Flake shorthand and every clone-URL form are matching alike.
-    let owner_project_ids: HashSet<ProjectId> = ETask::find()
-        .filter(CTask::Repository.contains("github"))
-        .all(db)
-        .await
-        .unwrap_or_default()
-        .into_iter()
-        .filter(|p| github_full_name(&p.repository).is_some_and(|n| installed.contains(&n)))
-        .map(|p| p.project)
-        .collect();
+    let owner_project_ids: HashSet<ProjectId> =
+        gradient_db::tasks::with_repository_containing(db, "github")
+            .await
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|p| github_full_name(&p.repository).is_some_and(|n| installed.contains(&n)))
+            .map(|p| p.project)
+            .collect();
 
     if owner_project_ids.is_empty() {
         let sender_login = payload
@@ -83,17 +78,10 @@ async fn store_installation_id(db: &WebDb, payload: &GitHubInstallationPayload) 
         return;
     }
 
-    let projects = gradient_db::fetch_in_chunks(
-        &owner_project_ids.into_iter().collect::<Vec<_>>(),
-        |chunk| async move {
-            EProject::find()
-                .filter(CProject::Id.is_in(chunk))
-                .all(db)
-                .await
-        },
-    )
-    .await
-    .unwrap_or_default();
+    let projects =
+        gradient_db::projects::with_ids(db, &owner_project_ids.into_iter().collect::<Vec<_>>())
+            .await
+            .unwrap_or_default();
 
     for project in projects {
         let project_id = project.id;
@@ -177,14 +165,9 @@ pub(super) async fn resolve_github_app_targets(
     client_ip: std::net::IpAddr,
 ) -> Vec<IntegrationId> {
     use crate::ip_allowlist::is_allowed as ip_allowed;
-    use gradient_ci::IntegrationKind;
     use std::collections::HashSet;
 
-    use gradient_entity::github_installation::{Column as GiCol, Entity as EGi};
-
-    let installs = EGi::find()
-        .filter(GiCol::InstallationId.eq(installation_id))
-        .all(db)
+    let installs = gradient_db::integrations::installations_by_github_id(db, installation_id)
         .await
         .unwrap_or_default();
 
@@ -201,11 +184,7 @@ pub(super) async fn resolve_github_app_targets(
     let install_ids: Vec<GithubInstallationId> = installs.iter().map(|i| i.id).collect();
 
     let mut tasks_by_project: HashMap<ProjectId, Vec<MTask>> = HashMap::new();
-    match ETask::find()
-        .filter(CTask::Project.is_in(project_ids.clone()))
-        .all(db)
-        .await
-    {
+    match gradient_db::tasks::of_projects(db, project_ids.clone()).await {
         Ok(rows) => {
             for row in rows {
                 tasks_by_project.entry(row.project).or_default().push(row);
@@ -217,17 +196,13 @@ pub(super) async fn resolve_github_app_targets(
         }
     }
 
-    let integrations_by_install: HashMap<GithubInstallationId, MIntegration> = EIntegration::find()
-        .filter(CIntegration::Project.is_in(project_ids))
-        .filter(CIntegration::Kind.eq(i16::from(IntegrationKind::Inbound)))
-        .filter(CIntegration::GitHostType.eq(i16::from(gradient_types::GitHostType::GitHub)))
-        .filter(CIntegration::GithubInstallation.is_in(install_ids))
-        .all(db)
-        .await
-        .unwrap_or_default()
-        .into_iter()
-        .filter_map(|i| i.github_installation.map(|inst| (inst, i)))
-        .collect();
+    let integrations_by_install: HashMap<GithubInstallationId, MIntegration> =
+        gradient_db::integrations::inbound_github_of_installations(db, project_ids, install_ids)
+            .await
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|i| i.github_installation.map(|inst| (inst, i)))
+            .collect();
 
     let mut integrations = Vec::new();
     for inst in installs {

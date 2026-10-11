@@ -19,10 +19,6 @@ use gradient_db::lookup::by_id;
 use gradient_types::events::EventOwner;
 use gradient_types::events::audit::Action;
 use gradient_types::*;
-use sea_orm::{
-    ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, ModelTrait, QueryFilter,
-    QueryOrder,
-};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -88,11 +84,7 @@ pub async fn get_ssh_keys(
     Extension(user): Extension<MUser>,
 ) -> WebResult<Json<BaseResponse<Vec<SshKeyInfo>>>> {
     require_ssh(&state.config)?;
-    let keys = EUserSshKey::find()
-        .filter(CUserSshKey::User.eq(user.id))
-        .order_by_desc(CUserSshKey::CreatedAt)
-        .all(&state.web_db)
-        .await?;
+    let keys = gradient_db::ssh_keys::of_user(&state.web_db, user.id).await?;
 
     Ok(ok_json(keys.into_iter().map(SshKeyInfo::from).collect()))
 }
@@ -113,26 +105,25 @@ pub async fn post_ssh_key(
 
     let fingerprint = fingerprint(&body.public_key).map_err(|_| SshKeyRefusal::NotAnOpenSshKey)?;
 
-    if EUserSshKey::find()
-        .filter(CUserSshKey::Fingerprint.eq(fingerprint.clone()))
-        .one(&state.web_db)
+    if gradient_db::ssh_keys::by_fingerprint(&state.web_db, &fingerprint)
         .await?
         .is_some()
     {
         return Err(WebError::already_exists(Resource::SshKey));
     }
 
-    let inserted = MUserSshKey {
-        id: UserSshKeyId::now_v7(),
-        user: user.id,
-        name: name.to_string(),
-        public_key: body.public_key.trim().to_string(),
-        fingerprint,
-        created_at: now(),
-        ..Default::default()
-    }
-    .into_active_model()
-    .insert(&state.web_db)
+    let inserted = gradient_db::rows::insert::<EUserSshKey, _>(
+        &state.web_db,
+        MUserSshKey {
+            id: UserSshKeyId::now_v7(),
+            user: user.id,
+            name: name.to_string(),
+            public_key: body.public_key.trim().to_string(),
+            fingerprint,
+            created_at: now(),
+            ..Default::default()
+        },
+    )
     .await?;
 
     audit.write(Action::SshKeyCreate, EventOwner::default(), serde_json::json!({ "ssh_key_id": inserted.id.to_string(), "fingerprint": inserted.fingerprint, }))
@@ -156,7 +147,7 @@ pub async fn delete_ssh_key(
         .or_not_found(Resource::SshKey)?;
 
     let key_id = key.id;
-    key.delete(&state.web_db).await?;
+    gradient_db::rows::delete::<EUserSshKey, _>(&state.web_db, key).await?;
     audit
         .write(
             Action::SshKeyDelete,

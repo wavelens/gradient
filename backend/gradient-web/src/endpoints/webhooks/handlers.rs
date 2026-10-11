@@ -23,10 +23,7 @@ use gradient_types::input::load_secret_bytes;
 use gradient_types::*;
 use gradient_util::http_validation::validate_webhook_url;
 use sea_orm::ActiveValue::Set;
-use sea_orm::{
-    ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, Order, QueryFilter, QueryOrder,
-    QuerySelect,
-};
+use sea_orm::IntoActiveModel;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::sync::Arc;
@@ -156,9 +153,7 @@ fn new_secret(config: &RuntimeConfig) -> WebResult<(String, String)> {
 
 async fn owned_webhook(db: &WebDb, owner: &WebhookOwner) -> WebResult<MWebhook> {
     let id: WebhookId = owner.param("id")?;
-    EWebhook::find_by_id(id)
-        .filter(owner.rows())
-        .one(db)
+    gradient_db::webhooks::by_id_of_owner(db, owner.into(), id)
         .await?
         .or_not_found(Resource::Webhook)
 }
@@ -167,11 +162,7 @@ pub async fn list_webhooks(
     State(state): ApiState,
     owner: WebhookOwner,
 ) -> WebResult<Json<BaseResponse<Vec<WebhookResponse>>>> {
-    let rows = EWebhook::find()
-        .filter(owner.rows())
-        .order_by_asc(CWebhook::Name)
-        .all(&state.web_db)
-        .await?;
+    let rows = gradient_db::webhooks::of_owner(&state.web_db, (&owner).into()).await?;
     Ok(ok_json(rows.into_iter().map(Into::into).collect()))
 }
 
@@ -183,34 +174,32 @@ pub async fn create_webhook(
 ) -> WebResult<Json<BaseResponse<CreateWebhookResponse>>> {
     check_url(&body.url)?;
     check_events(&body.events)?;
-    let existing = EWebhook::find()
-        .filter(owner.rows())
-        .filter(CWebhook::Name.eq(body.name.clone()))
-        .one(&state.web_db)
-        .await?;
+    let existing =
+        gradient_db::webhooks::by_name_of_owner(&state.web_db, (&owner).into(), &body.name).await?;
     if existing.is_some() {
         return Err(WebError::already_exists(Resource::Webhook));
     }
 
     let (secret, encrypted) = new_secret(&state.config)?;
     let now = gradient_types::now();
-    let row = MWebhook {
-        id: WebhookId::now_v7(),
-        scope: owner.scope,
-        project: owner.project,
-        cache: owner.cache,
-        name: body.name,
-        url: body.url,
-        secret: encrypted,
-        events: json!(body.events),
-        active: body.active,
-        created_by: owner.user.id,
-        created_at: now,
-        updated_at: now,
-        last_fired_at: None,
-    }
-    .into_active_model()
-    .insert(&state.web_db)
+    let row = gradient_db::webhooks::insert(
+        &state.web_db,
+        MWebhook {
+            id: WebhookId::now_v7(),
+            scope: owner.scope,
+            project: owner.project,
+            cache: owner.cache,
+            name: body.name,
+            url: body.url,
+            secret: encrypted,
+            events: json!(body.events),
+            active: body.active,
+            created_by: owner.user.id,
+            created_at: now,
+            updated_at: now,
+            last_fired_at: None,
+        },
+    )
     .await
     .map_err(|e| WebError::from_db_err(e, Resource::Webhook))?;
 
@@ -274,8 +263,7 @@ pub async fn update_webhook(
         active.active = Set(enabled);
     }
     active.updated_at = Set(gradient_types::now());
-    let row = active
-        .update(&state.web_db)
+    let row = gradient_db::webhooks::update(&state.web_db, active)
         .await
         .map_err(|e| WebError::from_db_err(e, Resource::Webhook))?;
 
@@ -296,7 +284,7 @@ pub async fn delete_webhook(
 ) -> WebResult<Json<BaseResponse<serde_json::Value>>> {
     let row = owned_webhook(&state.web_db, &owner).await?;
     let (id, name) = (row.id, row.name.clone());
-    row.into_active_model().delete(&state.web_db).await?;
+    gradient_db::webhooks::delete(&state.web_db, row).await?;
     audit
         .write(
             owner.action(Verb::Delete),
@@ -318,7 +306,7 @@ pub async fn rotate_secret(
     let mut active = row.into_active_model();
     active.secret = Set(encrypted);
     active.updated_at = Set(gradient_types::now());
-    active.update(&state.web_db).await?;
+    gradient_db::webhooks::update(&state.web_db, active).await?;
     audit
         .write(
             owner.action(Verb::Update),
@@ -352,13 +340,13 @@ pub async fn list_deliveries(
     Query(q): Query<DeliveryListQuery>,
 ) -> WebResult<Json<BaseResponse<Vec<DeliveryListItem>>>> {
     let hook = owned_webhook(&state.web_db, &owner).await?;
-    let rows = EWebhookDelivery::find()
-        .filter(CWebhookDelivery::WebhookId.eq(hook.id))
-        .order_by(CWebhookDelivery::DeliveredAt, Order::Desc)
-        .limit(q.limit.unwrap_or(50).min(200))
-        .offset(q.offset.unwrap_or(0))
-        .all(&state.web_db)
-        .await?;
+    let rows = gradient_db::webhooks::deliveries_of(
+        &state.web_db,
+        hook.id,
+        q.limit.unwrap_or(50).min(200),
+        q.offset.unwrap_or(0),
+    )
+    .await?;
     Ok(ok_json(rows.into_iter().map(Into::into).collect()))
 }
 
@@ -368,9 +356,7 @@ pub async fn get_delivery(
 ) -> WebResult<Json<BaseResponse<DeliveryDetail>>> {
     let hook = owned_webhook(&state.web_db, &owner).await?;
     let delivery_id: WebhookDeliveryId = owner.param("delivery_id")?;
-    let r = EWebhookDelivery::find_by_id(delivery_id)
-        .filter(CWebhookDelivery::WebhookId.eq(hook.id))
-        .one(&state.web_db)
+    let r = gradient_db::webhooks::delivery_of(&state.web_db, hook.id, delivery_id)
         .await?
         .or_not_found(Resource::Delivery)?;
     Ok(ok_json(DeliveryDetail {

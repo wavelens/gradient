@@ -4,10 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use super::commands::{
-    active_task_ids_for_integration, first_task_with_reporter,
-    github_installation_id_from_comment_body,
-};
+use super::commands::{first_task_with_reporter, github_installation_id_from_comment_body};
 use super::installation::resolve_github_app_targets;
 use super::payloads::GithubCheckRunRequestedAction;
 use gradient_ci::CiContext;
@@ -132,39 +129,13 @@ pub(super) async fn on_approval_granted(db: &DbContext, eval: &MEvaluation) {
     db.record_evaluation_created(eval).await;
 }
 
-gradient_db::sql! {
-    EVAL_BY_CHECK_RUN_ID = r#"SELECT id FROM evaluation
-           WHERE check_run_ids IS NOT NULL
-             AND EXISTS (
-                 SELECT 1
-                 FROM jsonb_each(check_run_ids) AS kv
-                 WHERE (kv.value)::text::bigint = $1
-             )
-           LIMIT 1"#,
-        params = [Int(123456)];
-}
-
 async fn find_eval_by_check_id(db: &WebDb, check_id: i64) -> Option<MEvaluation> {
-    // `evaluation.check_run_ids` is a JSON map per check-context name. Any stored id can match the
-    // clicked check.
-    use sea_orm::FromQueryResult;
-
-    #[derive(FromQueryResult)]
-    struct Row {
-        id: uuid::Uuid,
-    }
-
-    let row =
-        Row::find_by_statement(EVAL_BY_CHECK_RUN_ID.bind([sea_orm::Value::BigInt(Some(check_id))]))
-            .one(db)
-            .await
-            .ok()
-            .flatten()?;
-
-    by_id::<EEvaluation, _>(db, gradient_entity::ids::EvaluationId::new(row.id))
+    let id = gradient_db::evaluations::id_by_check_run(db, check_id)
         .await
         .ok()
-        .flatten()
+        .flatten()?;
+
+    by_id::<EEvaluation, _>(db, id).await.ok().flatten()
 }
 
 /// The trust probe is failing closed on any error.
@@ -280,7 +251,12 @@ pub(super) async fn handle_pull_request_review(
     };
 
     for integration_id in &integration_ids {
-        let task_ids = match active_task_ids_for_integration(&ci.db.web_db, *integration_id).await {
+        let task_ids = match gradient_db::triggers::active_pull_request_tasks_of_integration(
+            &ci.db.web_db,
+            *integration_id,
+        )
+        .await
+        {
             Ok(rows) => rows,
             Err(e) => {
                 warn!(error = %e, "pull_request_review: failed to load task list");

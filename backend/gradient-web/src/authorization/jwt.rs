@@ -13,9 +13,6 @@ use gradient_types::*;
 use gradient_util::debounce::Debounce;
 use jsonwebtoken::{DecodingKey, EncodingKey, Header, Validation, decode, encode};
 use rand::distr::{Alphanumeric, SampleString};
-use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter,
-};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -122,11 +119,9 @@ pub async fn create_session_and_token(
         ip,
         remember_me,
         ..Default::default()
-    }
-    .into_active_model();
+    };
 
-    session
-        .insert(db)
+    gradient_db::rows::insert::<ESession, _>(db, session)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
@@ -163,13 +158,10 @@ pub async fn decode_jwt(
         return Err(StatusCode::UNAUTHORIZED);
     }
 
-    if last_used_stamps.due(session.id.into_inner(), Instant::now()) {
-        let mut active: ASession = session.into();
-        active.last_used_at = Set(now);
-
-        if let Err(e) = active.update(db).await {
-            warn!(error = %e, "session last_used_at stamp failed");
-        }
+    if last_used_stamps.due(session.id.into_inner(), Instant::now())
+        && let Err(e) = gradient_db::sessions::stamp_last_used(db, session, now).await
+    {
+        warn!(error = %e, "session last_used_at stamp failed");
     }
 
     Ok(DecodedRequest::Session { user_id: claims.id })
@@ -181,9 +173,7 @@ async fn decode_api_key(
     raw: &str,
 ) -> Result<DecodedRequest, StatusCode> {
     let key_hash = hash_api_key(raw);
-    let api_key = EApi::find()
-        .filter(CApi::Key.eq(key_hash))
-        .one(db)
+    let api_key = gradient_db::api_keys::by_key_hash(db, &key_hash)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
         .ok_or(StatusCode::UNAUTHORIZED)?;
@@ -208,13 +198,10 @@ async fn decode_api_key(
 
     let user_id = api_key.owned_by;
 
-    if last_used_stamps.due(api_key.id.into_inner(), Instant::now()) {
-        let mut active: AApi = api_key.into();
-        active.last_used_at = Set(now);
-
-        if let Err(e) = active.save(db).await {
-            warn!(error = %e, "api key last_used_at stamp failed");
-        }
+    if last_used_stamps.due(api_key.id.into_inner(), Instant::now())
+        && let Err(e) = gradient_db::api_keys::stamp_last_used(db, api_key, now).await
+    {
+        warn!(error = %e, "api key last_used_at stamp failed");
     }
 
     Ok(DecodedRequest::ApiKey { user_id, context })

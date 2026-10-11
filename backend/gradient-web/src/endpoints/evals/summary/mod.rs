@@ -17,7 +17,7 @@ use gradient_db::lookup::{by_id, by_ids};
 use gradient_entity::build::BuildStatus;
 use gradient_types::input::vec_to_hex;
 use gradient_types::*;
-use sea_orm::{ColumnTrait, ConnectionTrait, DbErr, EntityTrait, QueryFilter};
+use sea_orm::{ConnectionTrait, DbErr};
 use serde::Serialize;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -104,18 +104,13 @@ pub async fn get_evaluation_summary(
 
 impl LoadedEvaluation {
     async fn load<C: ConnectionTrait>(db: &C, evaluation: EvaluationId) -> Result<Self, DbErr> {
-        let jobs = EBuildJob::find()
-            .filter(CBuildJob::Evaluation.eq(evaluation))
-            .all(db)
-            .await?;
+        let jobs = gradient_db::build_jobs::of_evaluation(db, evaluation).await?;
         let shared = shared_build_statuses(db, &jobs).await?;
         let statuses: HashMap<DerivationId, BuildStatus> = jobs
             .iter()
             .filter_map(|j| Some((j.derivation, shared.get(&j.derivation_build)?.for_api())))
             .collect();
-        let packages = EEntryPoint::find()
-            .filter(CEntryPoint::Evaluation.eq(evaluation))
-            .all(db)
+        let packages = gradient_db::entry_points::of_evaluation(db, evaluation)
             .await?
             .into_iter()
             .filter(|e| statuses.contains_key(&e.derivation))

@@ -15,7 +15,6 @@ use gradient_core::ServerState;
 use gradient_types::events::{Envelope, Event, EventRx, evaluation};
 use gradient_types::*;
 use gradient_util::shutdown::CancellationToken;
-use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect};
 use std::collections::HashSet;
 use std::sync::Arc;
 
@@ -75,14 +74,14 @@ pub async fn task_live_ws(
     let task_id = task.id;
     // The task's recent evaluations are seeded first. Build events must fire while the evaluation
     // itself is still in `Building`.
-    let mut known: HashSet<EvaluationId> = EEvaluation::find()
-        .filter(CEvaluation::Task.eq(task.id))
-        .order_by_desc(CEvaluation::CreatedAt)
-        .limit(task.keep_evaluations.max(0) as u64)
-        .all(&state.web_db)
-        .await
-        .map(|rows| rows.into_iter().map(|e| e.id).collect())
-        .unwrap_or_default();
+    let mut known: HashSet<EvaluationId> = gradient_db::evaluations::latest_of_task(
+        &state.web_db,
+        task.id,
+        task.keep_evaluations.max(0) as u64,
+    )
+    .await
+    .map(|rows| rows.into_iter().map(|e| e.id).collect())
+    .unwrap_or_default();
 
     let rx = state.events.subscribe();
     let cancel = state.shutdown.token();

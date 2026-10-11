@@ -16,7 +16,6 @@ use gradient_db::DbContext;
 use gradient_types::events::EventOwner;
 use gradient_types::events::audit::{Action, Audited};
 use gradient_types::*;
-use sea_orm::{EntityTrait, IntoActiveModel};
 use std::convert::Infallible;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::Arc;
@@ -130,10 +129,9 @@ impl Audit {
             user_agent: self.info.user_agent.clone(),
             metadata: metadata.clone(),
             created_at: gradient_types::now(),
-        }
-        .into_active_model();
+        };
 
-        if let Err(e) = EAuditLog::insert(row).exec(&self.db.web_db).await {
+        if let Err(e) = gradient_db::audit_log::insert(&self.db.web_db, row).await {
             tracing::warn!(event, error = %e, "failed to write audit_log entry");
         }
 

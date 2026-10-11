@@ -16,24 +16,14 @@ use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
 use axum_streams::StreamBodyAs;
 use gradient_core::ServerState;
-use gradient_db::WebDb;
 use gradient_storage::sgr::SgrState;
 use gradient_types::*;
-use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
 use serde::Deserialize;
 use std::sync::Arc;
 
 use super::BuildAccessContext;
 
 type ChunkRow = gradient_entity::build_log_chunk::Model;
-
-async fn load_chunk_rows(db: &WebDb, log_key: BuildAttemptId) -> WebResult<Vec<ChunkRow>> {
-    Ok(gradient_entity::build_log_chunk::Entity::find()
-        .filter(gradient_entity::build_log_chunk::Column::BuildAttempt.eq(log_key))
-        .order_by_asc(gradient_entity::build_log_chunk::Column::ChunkIndex)
-        .all(db)
-        .await?)
-}
 
 fn decode_chunk(raw: &[u8]) -> WebResult<String> {
     let bytes =
@@ -64,7 +54,7 @@ pub async fn get_build_log_chunks(
     let ctx =
         BuildAccessContext::load(&state.web_db, build_id, &maybe_user, api_key.as_ref()).await?;
     let rows = match super::effective_log_id(&state.web_db, &ctx.shared_build).await {
-        Some(log_key) => load_chunk_rows(&state.web_db, log_key).await?,
+        Some(log_key) => gradient_db::build_log_chunks::of_attempt(&state.web_db, log_key).await?,
         None => vec![],
     };
 
@@ -109,10 +99,7 @@ pub async fn get_build_log_chunk(
         .await
         .ok_or_else(|| WebError::not_found(Resource::LogChunk))?;
 
-    let row = gradient_entity::build_log_chunk::Entity::find()
-        .filter(gradient_entity::build_log_chunk::Column::BuildAttempt.eq(log_key))
-        .filter(gradient_entity::build_log_chunk::Column::ChunkIndex.eq(index as i32))
-        .one(&state.web_db)
+    let row = gradient_db::build_log_chunks::by_index(&state.web_db, log_key, index as i32)
         .await?
         .ok_or_else(|| WebError::not_found(Resource::LogChunk))?;
 
@@ -173,7 +160,7 @@ pub async fn get_build_log_lines(
             .into_response());
     };
 
-    let rows = load_chunk_rows(&state.web_db, log_key).await?;
+    let rows = gradient_db::build_log_chunks::of_attempt(&state.web_db, log_key).await?;
 
     let (start, end_opt) = parse_line_range(&q)?;
     let total_lines = rows
@@ -240,7 +227,10 @@ pub async fn get_build_log_search(
     let ctx =
         BuildAccessContext::load(&state.web_db, build_id, &maybe_user, api_key.as_ref()).await?;
     let (log_key, rows) = match super::effective_log_id(&state.web_db, &ctx.shared_build).await {
-        Some(key) => (key, load_chunk_rows(&state.web_db, key).await?),
+        Some(key) => (
+            key,
+            gradient_db::build_log_chunks::of_attempt(&state.web_db, key).await?,
+        ),
         None => {
             return Ok(
                 StreamBodyAs::json_nl(futures::stream::empty::<serde_json::Value>())

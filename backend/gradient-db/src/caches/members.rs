@@ -18,3 +18,15 @@ pub async fn count_with_role<C: ConnectionTrait>(
         .count(db)
         .await
 }
+
+pub async fn with_role<C: ConnectionTrait>(
+    db: &C,
+    cache: CacheId,
+    role: RoleId,
+) -> Result<Vec<MCacheUser>, DbErr> {
+    ECacheUser::find()
+        .filter(CCacheUser::Cache.eq(cache))
+        .filter(CCacheUser::Role.eq(role))
+        .all(db)
+        .await
+}

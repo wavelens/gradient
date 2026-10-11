@@ -38,7 +38,6 @@ use gradient_db::WebDb;
 use gradient_db::lookup::by_id;
 use gradient_db::scheduling::build_attempt::latest_attempt_id;
 use gradient_types::*;
-use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 
 pub(super) struct BuildAccessContext {
     pub build_job: MBuildJob,
@@ -144,23 +143,15 @@ async fn reachable_projects_accessible(
     }
 
     let eval_ids: Vec<EvaluationId> = jobs.into_iter().map(|j| j.evaluation).collect();
-    let evals = gradient_db::fetch_in_chunks(&eval_ids, |chunk| async move {
-        EEvaluation::find()
-            .filter(CEvaluation::Id.is_in(chunk))
-            .all(db)
-            .await
-    })
-    .await?;
+    let evals = gradient_db::evaluations::with_ids(db, &eval_ids).await?;
 
     let task_ids: Vec<TaskId> = evals.iter().filter_map(|ev| ev.task).collect();
     let project_ids: std::collections::HashSet<ProjectId> =
-        gradient_db::fetch_in_chunks(&task_ids, |chunk| async move {
-            ETask::find().filter(CTask::Id.is_in(chunk)).all(db).await
-        })
-        .await?
-        .into_iter()
-        .map(|t| t.project)
-        .collect();
+        gradient_db::tasks::with_ids(db, &task_ids)
+            .await?
+            .into_iter()
+            .map(|t| t.project)
+            .collect();
 
     for project_id in project_ids {
         if is_project_member(db, user.id, project_id, api_key).await? {

@@ -1085,10 +1085,6 @@ fn install_signal_handler(shutdown: gradient_util::shutdown::Shutdown) {
     });
 }
 
-/// A linker is dropping an rlib nothing mentions, registry entries included. This function is
-/// pulling the crate into binaries for the plan gate's `gradient_db::sql!` registry.
-pub const fn link() {}
-
 #[cfg(test)]
 mod tests {
     use super::tuned_listener;

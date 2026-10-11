@@ -86,3 +86,23 @@ pub async fn subscription_of_any<C: ConnectionTrait>(
         .one(db)
         .await
 }
+
+pub async fn first_subscription_of<C: ConnectionTrait>(
+    db: &C,
+    project: ProjectId,
+) -> Result<Option<MProjectCache>, DbErr> {
+    EProjectCache::find()
+        .filter(CProjectCache::Project.eq(project))
+        .one(db)
+        .await
+}
+
+pub async fn subscriptions_of_projects<C: ConnectionTrait>(
+    db: &C,
+    projects: Vec<ProjectId>,
+) -> Result<Vec<MProjectCache>, DbErr> {
+    EProjectCache::find()
+        .filter(CProjectCache::Project.is_in(projects))
+        .all(db)
+        .await
+}

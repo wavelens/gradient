@@ -43,3 +43,36 @@ pub async fn of_derivations_in_evaluation<C: ConnectionTrait>(
     })
     .await
 }
+
+pub async fn of_evaluation<C: ConnectionTrait>(
+    db: &C,
+    evaluation: EvaluationId,
+) -> Result<Vec<MBuildJob>, DbErr> {
+    EBuildJob::find()
+        .filter(CBuildJob::Evaluation.eq(evaluation))
+        .all(db)
+        .await
+}
+
+pub async fn by_id_in_evaluation<C: ConnectionTrait>(
+    db: &C,
+    evaluation: EvaluationId,
+    id: BuildJobId,
+) -> Result<Option<MBuildJob>, DbErr> {
+    EBuildJob::find_by_id(id)
+        .filter(CBuildJob::Evaluation.eq(evaluation))
+        .one(db)
+        .await
+}
+
+pub async fn of_derivation_builds_in_evaluation<C: ConnectionTrait>(
+    db: &C,
+    evaluation: EvaluationId,
+    derivation_builds: Vec<DerivationBuildId>,
+) -> Result<Vec<MBuildJob>, DbErr> {
+    EBuildJob::find()
+        .filter(CBuildJob::Evaluation.eq(evaluation))
+        .filter(CBuildJob::DerivationBuild.is_in(derivation_builds))
+        .all(db)
+        .await
+}

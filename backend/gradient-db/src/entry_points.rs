@@ -90,6 +90,16 @@ pub async fn latest_of_attribute<C: ConnectionTrait>(
         .await
 }
 
+pub async fn of_evaluation<C: ConnectionTrait>(
+    db: &C,
+    evaluation: EvaluationId,
+) -> Result<Vec<MEntryPoint>, DbErr> {
+    EEntryPoint::find()
+        .filter(CEntryPoint::Evaluation.eq(evaluation))
+        .all(db)
+        .await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

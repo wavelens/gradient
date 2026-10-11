@@ -30,15 +30,10 @@ use gradient_types::ids::{
 };
 use gradient_types::input::{check_flake_input_override, check_manifest_path, decode_blake3_hex};
 use gradient_types::{
-    AEvaluationFlakeInputOverride, AUploadSession, BaseResponse, CProjectCache, ECache,
-    EEvaluationFlakeInputOverride, EProjectCache, EUploadSession, MCommit, MEvaluation,
-    MEvaluationFlakeInputOverride, MUser, now,
+    BaseResponse, ECache, EUploadSession, MCommit, MEvaluation, MEvaluationFlakeInputOverride,
+    MUser, now,
 };
-use sea_orm::ActiveValue::Set;
-use sea_orm::{
-    ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, IntoActiveModel, QueryFilter,
-    TransactionTrait,
-};
+use sea_orm::{ConnectionTrait, TransactionTrait};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tempfile::TempDir;
@@ -140,9 +135,7 @@ pub async fn post_dispatch(
     )
     .await?;
 
-    let mut active: AUploadSession = session.into();
-    active.dispatched_at = Set(Some(now()));
-    active.update(&state.web_db).await?;
+    gradient_db::upload_sessions::mark_dispatched(&state.web_db, session, now()).await?;
 
     Ok(ok_json(response))
 }
@@ -230,51 +223,48 @@ pub(super) async fn queue_build_request<C: ConnectionTrait>(
         .filter(|t| !t.is_empty())
         .unwrap_or_else(|| task.wildcard.clone());
 
-    let commit = MCommit {
-        id: CommitId::now_v7(),
-        message: source.commit_message,
-        hash: source.commit_hash,
-        author: Some(user.id),
-        author_name: user.name.clone(),
-    }
-    .into_active_model()
-    .insert(tx)
+    let commit = gradient_db::commits::insert(
+        tx,
+        MCommit {
+            id: CommitId::now_v7(),
+            message: source.commit_message,
+            hash: source.commit_hash,
+            author: Some(user.id),
+            author_name: user.name.clone(),
+        },
+    )
     .await?;
 
     let now_ts = now();
-    let evaluation = MEvaluation {
-        id: EvaluationId::now_v7(),
-        task: Some(task.id),
-        repository: source.repository,
-        commit: commit.id,
-        wildcard: target,
-        status: gradient_entity::evaluation::EvaluationStatus::Queued,
-        concurrent: true,
-        created_at: now_ts,
-        updated_at: now_ts,
-        ..Default::default()
-    }
-    .into_active_model()
-    .insert(tx)
+    let evaluation = gradient_db::evaluations::insert(
+        tx,
+        MEvaluation {
+            id: EvaluationId::now_v7(),
+            task: Some(task.id),
+            repository: source.repository,
+            commit: commit.id,
+            wildcard: target,
+            status: gradient_entity::evaluation::EvaluationStatus::Queued,
+            concurrent: true,
+            created_at: now_ts,
+            updated_at: now_ts,
+            ..Default::default()
+        },
+    )
     .await?;
 
     if !source.input_overrides.is_empty() {
-        let rows: Vec<AEvaluationFlakeInputOverride> = source
+        let rows: Vec<MEvaluationFlakeInputOverride> = source
             .input_overrides
             .into_iter()
-            .map(|(input_name, url)| {
-                MEvaluationFlakeInputOverride {
-                    id: EvaluationFlakeInputOverrideId::now_v7(),
-                    evaluation: evaluation.id,
-                    input_name,
-                    url: Some(url),
-                }
-                .into_active_model()
+            .map(|(input_name, url)| MEvaluationFlakeInputOverride {
+                id: EvaluationFlakeInputOverrideId::now_v7(),
+                evaluation: evaluation.id,
+                input_name,
+                url: Some(url),
             })
             .collect();
-        EEvaluationFlakeInputOverride::insert_many(rows)
-            .exec(tx)
-            .await?;
+        gradient_db::evaluations::flake_input_overrides::insert_many(tx, rows).await?;
     }
 
     let cache = resolve_project_cache_name(tx, project).await?;
@@ -291,10 +281,7 @@ async fn resolve_project_cache_name<C: ConnectionTrait>(
     tx: &C,
     project: gradient_types::ids::ProjectId,
 ) -> WebResult<Option<String>> {
-    let Some(link) = EProjectCache::find()
-        .filter(CProjectCache::Project.eq(project))
-        .one(tx)
-        .await?
+    let Some(link) = gradient_db::projects::caches::first_subscription_of(tx, project).await?
     else {
         return Ok(None);
     };

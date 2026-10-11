@@ -1,0 +1,37 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
+use chrono::NaiveDateTime;
+use gradient_types::*;
+use sea_orm::ActiveValue::Set;
+use sea_orm::{ActiveModelTrait, ConnectionTrait, DbErr, IntoActiveModel, JsonValue};
+
+pub async fn insert<C: ConnectionTrait>(
+    db: &C,
+    session: MUploadSession,
+) -> Result<MUploadSession, DbErr> {
+    session.into_active_model().insert(db).await
+}
+
+pub async fn set_missing<C: ConnectionTrait>(
+    db: &C,
+    session: MUploadSession,
+    missing: JsonValue,
+) -> Result<MUploadSession, DbErr> {
+    let mut active: AUploadSession = session.into();
+    active.missing = Set(missing);
+    active.update(db).await
+}
+
+pub async fn mark_dispatched<C: ConnectionTrait>(
+    db: &C,
+    session: MUploadSession,
+    at: NaiveDateTime,
+) -> Result<MUploadSession, DbErr> {
+    let mut active: AUploadSession = session.into();
+    active.dispatched_at = Set(Some(at));
+    active.update(db).await
+}

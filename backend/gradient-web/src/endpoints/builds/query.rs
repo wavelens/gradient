@@ -15,7 +15,6 @@ use gradient_db::lookup::by_id;
 use gradient_db::scheduling::build_attempt::latest_attempt;
 use gradient_types::*;
 use gradient_util::latest::Latest;
-use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -73,10 +72,8 @@ pub async fn get_build(
             WebError::data_inconsistency(Resource::Build)
         })?;
 
-    let derivation_outputs = EDerivationOutput::find()
-        .filter(CDerivationOutput::Derivation.eq(derivation.id))
-        .all(&state.web_db)
-        .await?;
+    let derivation_outputs =
+        gradient_db::derivation_outputs::of_derivation(&state.web_db, derivation.id).await?;
 
     let mut outputs = HashMap::new();
     for output in derivation_outputs {

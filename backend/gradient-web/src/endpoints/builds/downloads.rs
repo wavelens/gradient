@@ -20,7 +20,6 @@ use gradient_storage::nar_extract::{
     ExtractError, Extracted, extract_path_from_reader, nar_reader_from_stream,
 };
 use gradient_types::*;
-use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -44,11 +43,7 @@ async fn collect_build_products(
         return Vec::new();
     }
 
-    let rows = match EBuildProduct::find()
-        .filter(CBuildProduct::DerivationOutput.is_in(output_ids))
-        .all(db)
-        .await
-    {
+    let rows = match gradient_db::build_products::of_outputs(db, &output_ids).await {
         Ok(r) => r,
         Err(e) => {
             tracing::warn!(error = %e, "failed to query build_product rows");
@@ -79,11 +74,7 @@ async fn find_and_serve_file(
         return Ok(None);
     }
 
-    let rows = match EBuildProduct::find()
-        .filter(CBuildProduct::DerivationOutput.is_in(output_ids))
-        .all(db)
-        .await
-    {
+    let rows = match gradient_db::build_products::of_outputs(db, &output_ids).await {
         Ok(r) => r,
         Err(e) => {
             tracing::warn!(%build_id, error = %e, "failed to query build_product rows for download");
@@ -193,10 +184,9 @@ pub async fn get_build_downloads(
     let ctx =
         BuildAccessContext::load(&state.web_db, build_id, &maybe_user, api_key.as_ref()).await?;
 
-    let build_outputs = EDerivationOutput::find()
-        .filter(CDerivationOutput::Derivation.eq(ctx.build_job.derivation))
-        .all(&state.web_db)
-        .await?;
+    let build_outputs =
+        gradient_db::derivation_outputs::of_derivation(&state.web_db, ctx.build_job.derivation)
+            .await?;
 
     let products = collect_build_products(&state.web_db, build_id, build_outputs).await;
 
@@ -254,10 +244,9 @@ pub async fn get_build_download(
         }
     };
 
-    let build_outputs = EDerivationOutput::find()
-        .filter(CDerivationOutput::Derivation.eq(ctx.build_job.derivation))
-        .all(&state.web_db)
-        .await?;
+    let build_outputs =
+        gradient_db::derivation_outputs::of_derivation(&state.web_db, ctx.build_job.derivation)
+            .await?;
 
     tracing::debug!(
         %build_id,

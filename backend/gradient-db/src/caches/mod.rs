@@ -65,3 +65,9 @@ pub async fn access_of_user<C: ConnectionTrait>(
         .one(db)
         .await
 }
+
+pub fn created_by_or_among(creator: UserId, caches: Vec<CacheId>) -> Condition {
+    Condition::any()
+        .add(CCache::CreatedBy.eq(creator))
+        .add(CCache::Id.is_in(caches))
+}

@@ -6,7 +6,7 @@
 
 use gradient_types::*;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, ConnectionTrait, DbErr, EntityTrait, IntoActiveModel,
+    ActiveModelTrait, ColumnTrait, Condition, ConnectionTrait, DbErr, EntityTrait, IntoActiveModel,
     QueryFilter,
 };
 use std::collections::HashMap;
@@ -124,4 +124,21 @@ pub async fn update<C: ConnectionTrait>(db: &C, worker: ATeamWorker) -> Result<M
 pub async fn unregister<C: ConnectionTrait>(db: &C, worker: MTeamWorker) -> Result<(), DbErr> {
     worker.into_active_model().delete(db).await?;
     Ok(())
+}
+
+pub async fn by_worker_id_or_gradient_ci_team<C: ConnectionTrait>(
+    db: &C,
+    worker_id: &str,
+    team: Option<TeamId>,
+) -> Result<Option<MTeamWorker>, DbErr> {
+    let mut team_workers = Condition::any().add(CTeamWorker::WorkerId.eq(worker_id));
+    if let Some(team) = team {
+        team_workers = team_workers.add(
+            Condition::all()
+                .add(CTeamWorker::Team.eq(team))
+                .add(CTeamWorker::GradientCi.eq(true)),
+        );
+    }
+
+    ETeamWorker::find().filter(team_workers).one(db).await
 }

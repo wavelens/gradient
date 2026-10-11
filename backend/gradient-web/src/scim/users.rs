@@ -11,13 +11,12 @@ use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, Set};
+use sea_orm::Set;
 use serde::Deserialize;
 
 use gradient_core::ServerState;
-use gradient_entity::user::{
-    ActiveModel as UserActive, Column as UserColumn, Entity as UserEntity, Model as UserModel,
-};
+use gradient_db::users::ManagedUserFilter;
+use gradient_entity::user::{ActiveModel as UserActive, Model as UserModel};
 use gradient_types::{UserId, now};
 
 use super::dto::*;
@@ -51,35 +50,27 @@ pub async fn list(
     Query(q): Query<ListQuery>,
 ) -> ScimResult<impl IntoResponse> {
     let db = state.web_db.inner();
-    let mut query = UserEntity::find().filter(UserColumn::Managed.eq(true));
-
-    if let Some(f) = q.filter.as_deref() {
-        match parse_eq_filter(f) {
-            Some((attr, val)) if attr == "username" => {
-                query = query.filter(UserColumn::Username.eq(val));
-            }
-            Some((attr, val)) if attr == "externalid" => {
-                query = query.filter(UserColumn::ScimExternalId.eq(val));
-            }
+    let filter = match q.filter.as_deref() {
+        None => ManagedUserFilter::Any,
+        Some(f) => match parse_eq_filter(f) {
+            Some((attr, val)) if attr == "username" => ManagedUserFilter::Username(val),
+            Some((attr, val)) if attr == "externalid" => ManagedUserFilter::ScimExternalId(val),
             _ => {
                 return Err(ScimError::bad_request(
                     "invalidFilter",
                     "unsupported filter",
                 ));
             }
-        }
-    }
+        },
+    };
 
     let start = q.start_index.unwrap_or(1).max(1) as u64;
     let count = q.count.unwrap_or(100).clamp(0, 200) as u64;
-    let total = query.clone().count(db).await? as usize;
+    let total = gradient_db::users::count_managed(db, &filter).await? as usize;
     let rows = if count == 0 {
         Vec::new()
     } else {
-        query
-            .paginate(db, count)
-            .fetch_page((start - 1) / count.max(1))
-            .await?
+        gradient_db::users::page_of_managed(db, &filter, count, (start - 1) / count.max(1)).await?
     };
 
     let resources: Vec<_> = rows.iter().map(UserResource::from).collect();
@@ -102,9 +93,7 @@ pub async fn create(
     Json(body): Json<UserRequest>,
 ) -> ScimResult<impl IntoResponse> {
     let db = state.web_db.inner();
-    if UserEntity::find()
-        .filter(UserColumn::Username.eq(body.user_name.clone()))
-        .one(db)
+    if gradient_db::users::by_username(db, &body.user_name)
         .await?
         .is_some()
     {
@@ -137,7 +126,7 @@ pub async fn create(
         scim_external_id: Set(body.external_id.clone()),
         ..Default::default()
     };
-    let u = model.insert(db).await?;
+    let u = gradient_db::users::insert(db, model).await?;
     Ok(scim_json(StatusCode::CREATED, UserResource::from(&u)))
 }
 
@@ -163,7 +152,7 @@ pub async fn replace(
     }
 
     active.active = Set(body.active);
-    let u = active.update(state.web_db.inner()).await?;
+    let u = gradient_db::users::update(state.web_db.inner(), active).await?;
     Ok(scim_json(StatusCode::OK, UserResource::from(&u)))
 }
 
@@ -182,7 +171,7 @@ pub async fn patch(
         apply_user_patch(&mut active, op)?;
     }
 
-    let u = active.update(state.web_db.inner()).await?;
+    let u = gradient_db::users::update(state.web_db.inner(), active).await?;
     Ok(scim_json(StatusCode::OK, UserResource::from(&u)))
 }
 
@@ -198,13 +187,11 @@ pub async fn delete(
         .map(|s| s.hard_delete)
         .unwrap_or(false);
     if hard {
-        UserEntity::delete_by_id(u.id)
-            .exec(state.web_db.inner())
-            .await?;
+        gradient_db::users::delete_by_id(state.web_db.inner(), u.id).await?;
     } else {
         let mut active: UserActive = u.into();
         active.active = Set(false);
-        active.update(state.web_db.inner()).await?;
+        gradient_db::users::update(state.web_db.inner(), active).await?;
     }
 
     Ok(StatusCode::NO_CONTENT)
@@ -214,9 +201,7 @@ async fn find_user(db: &WebDb, id: &str) -> ScimResult<UserModel> {
     let user_id = id
         .parse::<UserId>()
         .map_err(|_| ScimError::not_found("user not found"))?;
-    UserEntity::find_by_id(user_id)
-        .filter(UserColumn::Managed.eq(true))
-        .one(db.inner())
+    gradient_db::users::managed_by_id(db.inner(), user_id)
         .await?
         .ok_or_else(|| ScimError::not_found("user not found"))
 }

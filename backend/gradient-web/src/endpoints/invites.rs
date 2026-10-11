@@ -21,9 +21,7 @@ use gradient_db::lookup::by_ids;
 use gradient_types::events::EventOwner;
 use gradient_types::events::audit::Action;
 use gradient_types::*;
-use sea_orm::{
-    ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter, TransactionTrait,
-};
+use sea_orm::TransactionTrait;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -51,18 +49,24 @@ pub async fn get_user_invites(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
 ) -> WebResult<Json<BaseResponse<Vec<InviteItem>>>> {
-    let project_rows = EProjectInvitation::find()
-        .filter(CProjectInvitation::User.eq(user.id))
-        .all(&state.web_db)
-        .await?;
-    let cache_rows = ECacheInvitation::find()
-        .filter(CCacheInvitation::User.eq(user.id))
-        .all(&state.web_db)
-        .await?;
-    let team_rows = ETeamInvitation::find()
-        .filter(CTeamInvitation::User.eq(user.id))
-        .all(&state.web_db)
-        .await?;
+    let project_rows = gradient_db::invitations::of_user::<EProjectInvitation, _>(
+        &state.web_db,
+        CProjectInvitation::User,
+        user.id,
+    )
+    .await?;
+    let cache_rows = gradient_db::invitations::of_user::<ECacheInvitation, _>(
+        &state.web_db,
+        CCacheInvitation::User,
+        user.id,
+    )
+    .await?;
+    let team_rows = gradient_db::invitations::of_user::<ETeamInvitation, _>(
+        &state.web_db,
+        CTeamInvitation::User,
+        user.id,
+    )
+    .await?;
 
     let inviter_ids: Vec<UserId> = project_rows
         .iter()
@@ -203,25 +207,27 @@ impl Invitation {
 }
 
 async fn find_invitation(db: &WebDb, token: &str) -> WebResult<Invitation> {
-    if let Some(row) = EProjectInvitation::find()
-        .filter(CProjectInvitation::Token.eq(token))
-        .one(db)
-        .await?
+    if let Some(row) = gradient_db::invitations::by_token::<EProjectInvitation, _>(
+        db,
+        CProjectInvitation::Token,
+        token,
+    )
+    .await?
     {
         return Ok(Invitation::Project(row));
     }
 
-    if let Some(row) = ECacheInvitation::find()
-        .filter(CCacheInvitation::Token.eq(token))
-        .one(db)
-        .await?
+    if let Some(row) = gradient_db::invitations::by_token::<ECacheInvitation, _>(
+        db,
+        CCacheInvitation::Token,
+        token,
+    )
+    .await?
     {
         return Ok(Invitation::Cache(row));
     }
 
-    ETeamInvitation::find()
-        .filter(CTeamInvitation::Token.eq(token))
-        .one(db)
+    gradient_db::invitations::by_token::<ETeamInvitation, _>(db, CTeamInvitation::Token, token)
         .await?
         .map(Invitation::Team)
         .ok_or_else(|| WebError::not_found(Resource::Invitation))
@@ -242,13 +248,13 @@ async fn claim_invitation(db: &WebDb, user: &MUser, token: &str) -> WebResult<In
         InviteDecision::Expired => {
             match invitation {
                 Invitation::Project(i) => {
-                    i.into_active_model().delete(db).await?;
+                    gradient_db::rows::delete::<EProjectInvitation, _>(db, i).await?;
                 }
                 Invitation::Cache(i) => {
-                    i.into_active_model().delete(db).await?;
+                    gradient_db::rows::delete::<ECacheInvitation, _>(db, i).await?;
                 }
                 Invitation::Team(i) => {
-                    i.into_active_model().delete(db).await?;
+                    gradient_db::rows::delete::<ETeamInvitation, _>(db, i).await?;
                 }
             }
 
@@ -268,12 +274,15 @@ pub async fn post_accept_invite(
 
     let (action, owner, payload) = match invitation {
         Invitation::Project(inv) => {
-            let already = EProjectUser::find()
-                .filter(CProjectUser::Project.eq(inv.project))
-                .filter(CProjectUser::User.eq(inv.user))
-                .one(&tx)
-                .await?
-                .is_some();
+            let already = gradient_db::memberships::by_owner_and_user::<EProjectUser, _>(
+                &tx,
+                CProjectUser::Project,
+                inv.project,
+                CProjectUser::User,
+                inv.user,
+            )
+            .await?
+            .is_some();
 
             let payload = serde_json::json!({
                 "project_id": inv.project.to_string(),
@@ -282,17 +291,18 @@ pub async fn post_accept_invite(
             let project = inv.project;
             let role = inv.role;
             let member = inv.user;
-            inv.into_active_model().delete(&tx).await?;
+            gradient_db::rows::delete::<EProjectInvitation, _>(&tx, inv).await?;
 
             if !already {
-                MProjectUser {
-                    id: ProjectUserId::now_v7(),
-                    project,
-                    user: member,
-                    role,
-                }
-                .into_active_model()
-                .insert(&tx)
+                gradient_db::rows::insert::<EProjectUser, _>(
+                    &tx,
+                    MProjectUser {
+                        id: ProjectUserId::now_v7(),
+                        project,
+                        user: member,
+                        role,
+                    },
+                )
                 .await?;
             }
 
@@ -303,12 +313,15 @@ pub async fn post_accept_invite(
             )
         }
         Invitation::Cache(inv) => {
-            let already = ECacheUser::find()
-                .filter(CCacheUser::Cache.eq(inv.cache))
-                .filter(CCacheUser::User.eq(inv.user))
-                .one(&tx)
-                .await?
-                .is_some();
+            let already = gradient_db::memberships::by_owner_and_user::<ECacheUser, _>(
+                &tx,
+                CCacheUser::Cache,
+                inv.cache,
+                CCacheUser::User,
+                inv.user,
+            )
+            .await?
+            .is_some();
 
             let payload = serde_json::json!({
                 "cache_id": inv.cache.to_string(),
@@ -317,17 +330,18 @@ pub async fn post_accept_invite(
             let cache = inv.cache;
             let role = inv.role;
             let member = inv.user;
-            inv.into_active_model().delete(&tx).await?;
+            gradient_db::rows::delete::<ECacheInvitation, _>(&tx, inv).await?;
 
             if !already {
-                MCacheUser {
-                    id: CacheUserId::now_v7(),
-                    cache,
-                    user: member,
-                    role,
-                }
-                .into_active_model()
-                .insert(&tx)
+                gradient_db::rows::insert::<ECacheUser, _>(
+                    &tx,
+                    MCacheUser {
+                        id: CacheUserId::now_v7(),
+                        cache,
+                        user: member,
+                        role,
+                    },
+                )
                 .await?;
             }
 
@@ -338,27 +352,25 @@ pub async fn post_accept_invite(
             )
         }
         Invitation::Team(inv) => {
-            let already = ETeamUser::find()
-                .filter(CTeamUser::Team.eq(inv.team))
-                .filter(CTeamUser::User.eq(inv.user))
-                .one(&tx)
+            let already = gradient_db::teams::members::membership(&tx, inv.team, inv.user)
                 .await?
                 .is_some();
 
             let payload = serde_json::json!({ "team_id": inv.team.to_string() });
             let (team, role, member) = (inv.team, inv.role, inv.user);
-            inv.into_active_model().delete(&tx).await?;
+            gradient_db::rows::delete::<ETeamInvitation, _>(&tx, inv).await?;
 
             if !already {
-                MTeamUser {
-                    id: TeamUserId::now_v7(),
-                    team,
-                    user: member,
-                    role,
-                    source: TeamMemberSource::Api,
-                }
-                .into_active_model()
-                .insert(&tx)
+                gradient_db::teams::members::add_member(
+                    &tx,
+                    MTeamUser {
+                        id: TeamUserId::now_v7(),
+                        team,
+                        user: member,
+                        role,
+                        source: TeamMemberSource::Api,
+                    },
+                )
                 .await?;
             }
 
@@ -384,18 +396,18 @@ pub async fn post_decline_invite(
         Invitation::Project(inv) => {
             let owner = EventOwner::project(inv.project);
             let payload = serde_json::json!({ "project_id": inv.project.to_string() });
-            inv.into_active_model().delete(&state.web_db).await?;
+            gradient_db::rows::delete::<EProjectInvitation, _>(&state.web_db, inv).await?;
             (Action::ProjectInvitationDecline, owner, payload)
         }
         Invitation::Cache(inv) => {
             let owner = EventOwner::cache(inv.cache);
             let payload = serde_json::json!({ "cache_id": inv.cache.to_string() });
-            inv.into_active_model().delete(&state.web_db).await?;
+            gradient_db::rows::delete::<ECacheInvitation, _>(&state.web_db, inv).await?;
             (Action::CacheInvitationDecline, owner, payload)
         }
         Invitation::Team(inv) => {
             let payload = serde_json::json!({ "team_id": inv.team.to_string() });
-            inv.into_active_model().delete(&state.web_db).await?;
+            gradient_db::rows::delete::<ETeamInvitation, _>(&state.web_db, inv).await?;
             (
                 Action::TeamInvitationDecline,
                 EventOwner::default(),

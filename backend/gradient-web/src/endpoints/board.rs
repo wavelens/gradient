@@ -21,6 +21,10 @@ use axum::{Extension, Json};
 use chrono::NaiveDateTime;
 use gradient_core::ServerState;
 use gradient_db::lookup::by_id;
+use gradient_db::metrics::build_times::{self, ExpensiveBuild, TopProjectBuildTime};
+use gradient_db::metrics::resource_usage::{
+    self, ExpensiveEval, ExpensiveResource, ResourceMetric,
+};
 use gradient_entity::dispatched_job::DispatchedJobKind;
 use gradient_entity::{build_attempt, flake_output_node};
 use gradient_scheduler::Scheduler;
@@ -28,9 +32,7 @@ use gradient_types::events::{Envelope, Event, EventRx, names, worker};
 use gradient_types::ids::DispatchedJobId;
 use gradient_types::*;
 use gradient_util::shutdown::CancellationToken;
-use sea_orm::{
-    ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QueryOrder, QueryResult, QuerySelect,
-};
+use sea_orm::ConnectionTrait;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -119,12 +121,7 @@ pub async fn get_dispatched_jobs(
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
 ) -> WebResult<Json<BaseResponse<DispatchedJobsResponse>>> {
     let scope = MetricsScope::resolve(&state.web_db, &maybe_user).await?;
-    let open = gradient_entity::dispatched_job::Entity::find()
-        .filter(gradient_entity::dispatched_job::Column::FinishedAt.is_null())
-        .order_by_desc(gradient_entity::dispatched_job::Column::DispatchedAt)
-        .limit(500)
-        .all(&state.web_db)
-        .await?;
+    let open = gradient_db::worker_registrations::open_dispatched_jobs(&state.web_db, 500).await?;
 
     let (visible, other_running): (Vec<_>, Vec<_>) = open
         .into_iter()
@@ -134,13 +131,12 @@ pub async fn get_dispatched_jobs(
     // Three reads are made for the whole page instead of three per row. The board is polling this
     // list, and it can carry up to 500 open dispatches.
     let job_ids: Vec<DispatchedJobId> = visible.iter().map(|j| j.id).collect();
-    let attempts: HashMap<DispatchedJobId, build_attempt::Model> = build_attempt::Entity::find()
-        .filter(build_attempt::Column::DispatchedJob.is_in(job_ids))
-        .all(&state.web_db)
-        .await?
-        .into_iter()
-        .filter_map(|a| Some((a.dispatched_job?, a)))
-        .collect();
+    let attempts: HashMap<DispatchedJobId, build_attempt::Model> =
+        gradient_db::scheduling::build_attempt::of_dispatched_jobs(&state.web_db, job_ids)
+            .await?
+            .into_iter()
+            .filter_map(|a| Some((a.dispatched_job?, a)))
+            .collect();
 
     let shared_builds: Vec<DerivationBuildId> =
         attempts.values().map(|a| a.derivation_build).collect();
@@ -281,12 +277,7 @@ pub struct JobPhaseView {
 }
 
 async fn job_phases<C: ConnectionTrait>(db: &C, job: DispatchedJobId) -> Vec<JobPhaseView> {
-    use gradient_entity::dispatched_job_phase::{Column as CPhase, Entity as EPhase};
-
-    EPhase::find()
-        .filter(CPhase::DispatchedJob.eq(job))
-        .order_by_asc(CPhase::Seq)
-        .all(db)
+    gradient_db::worker_registrations::phases_of_dispatched_job(db, job)
         .await
         .unwrap_or_default()
         .into_iter()
@@ -368,15 +359,16 @@ async fn resolve_build_jobs<C: ConnectionTrait>(
         return HashMap::new();
     }
 
-    EBuildJob::find()
-        .filter(CBuildJob::Evaluation.eq(evaluation))
-        .filter(CBuildJob::DerivationBuild.is_in(shared_builds.to_vec()))
-        .all(db)
-        .await
-        .unwrap_or_default()
-        .into_iter()
-        .map(|j| (j.derivation_build, j.id))
-        .collect()
+    gradient_db::build_jobs::of_derivation_builds_in_evaluation(
+        db,
+        evaluation,
+        shared_builds.to_vec(),
+    )
+    .await
+    .unwrap_or_default()
+    .into_iter()
+    .map(|j| (j.derivation_build, j.id))
+    .collect()
 }
 
 async fn job_derivations<C: ConnectionTrait>(
@@ -507,12 +499,11 @@ pub async fn get_dispatched_job(
     let (project, worker_name) =
         job_names(&state.web_db, &scope, j.project.into(), &j.worker_id).await?;
 
-    let this_attempt = build_attempt::Entity::find()
-        .filter(build_attempt::Column::DispatchedJob.eq(j.id))
-        .one(&state.web_db)
-        .await
-        .ok()
-        .flatten();
+    let this_attempt =
+        gradient_db::scheduling::build_attempt::of_dispatched_job(&state.web_db, j.id)
+            .await
+            .ok()
+            .flatten();
 
     let shared_build_id: Option<DerivationBuildId> =
         this_attempt.as_ref().map(|a| a.derivation_build);
@@ -549,22 +540,21 @@ pub async fn get_dispatched_job(
     };
 
     let previous_attempts = match shared_build_id {
-        Some(aid) => build_attempt::Entity::find()
-            .filter(build_attempt::Column::DerivationBuild.eq(aid))
-            .order_by_asc(build_attempt::Column::CreatedAt)
-            .all(&state.web_db)
-            .await
-            .unwrap_or_default()
-            .into_iter()
-            .map(|a| AttemptSummary {
-                dispatched_job_id: a.dispatched_job.map(Into::into),
-                substitute: a.substitute,
-                outcome: i32::from(a.outcome),
-                reason: a.reason.map(i32::from),
-                failure_message: a.failure_message,
-                created_at: a.created_at.and_utc().to_rfc3339(),
-            })
-            .collect(),
+        Some(aid) => {
+            gradient_db::scheduling::build_attempt::attempts_oldest_first(&state.web_db, aid)
+                .await
+                .unwrap_or_default()
+                .into_iter()
+                .map(|a| AttemptSummary {
+                    dispatched_job_id: a.dispatched_job.map(Into::into),
+                    substitute: a.substitute,
+                    outcome: i32::from(a.outcome),
+                    reason: a.reason.map(i32::from),
+                    failure_message: a.failure_message,
+                    created_at: a.created_at.and_utc().to_rfc3339(),
+                })
+                .collect()
+        }
         None => Vec::new(),
     };
 
@@ -853,140 +843,6 @@ pub struct ExpensiveParams {
     pub window_days: Option<i64>,
 }
 
-#[derive(Serialize)]
-pub struct ExpensiveBuild {
-    pub build_id: Uuid,
-    pub project: Uuid,
-    pub name: String,
-    pub build_time_ms: i64,
-    pub worker: Option<String>,
-    pub worker_name: Option<String>,
-}
-
-impl From<QueryResult> for ExpensiveBuild {
-    fn from(r: QueryResult) -> Self {
-        Self {
-            build_id: r.try_get("", "id").unwrap_or_default(),
-            project: r.try_get("", "project").unwrap_or_default(),
-            name: r.try_get("", "name").unwrap_or_default(),
-            build_time_ms: r.try_get("", "build_time_ms").unwrap_or(0),
-            worker: r.try_get("", "worker").ok(),
-            worker_name: r.try_get("", "worker_name").ok(),
-        }
-    }
-}
-
-pub(crate) fn worker_name_sql(worker_col: &str, project_filter: Option<&str>) -> String {
-    let (registration_scope, team_scope) = project_filter
-        .map(|list| {
-            (
-                format!(" AND wr.peer_id IN ({list})"),
-                format!(
-                    " AND tw.team IN (SELECT tp.team FROM team_project tp \
-                     WHERE tp.includes_workers AND tp.project IN ({list}))"
-                ),
-            )
-        })
-        .unwrap_or_default();
-
-    format!(
-        "LEFT JOIN LATERAL ( \
-           SELECT n.display_name FROM ( \
-             SELECT wr.display_name, wr.active, wr.created_at FROM worker_registration wr \
-             WHERE wr.worker_id = {worker_col}{registration_scope} \
-             UNION ALL \
-             SELECT tw.display_name, tw.active, tw.created_at FROM team_worker tw \
-             WHERE tw.worker_id = {worker_col}{team_scope} \
-           ) n WHERE n.display_name <> '' \
-           ORDER BY n.active DESC, n.created_at DESC LIMIT 1 \
-         ) wn ON true"
-    )
-}
-
-fn window_sql(window_days: i64) -> String {
-    format!("(now() AT TIME ZONE 'UTC') - interval '{window_days} days'")
-}
-
-fn latest_build_metric_cte(window_days: i64) -> String {
-    format!(
-        "metric AS ( \
-           SELECT DISTINCT ON (dm.derivation) dm.derivation, dm.build_time_ms, dm.worker_id \
-           FROM derivation_metric dm \
-           WHERE dm.build_time_ms IS NOT NULL AND dm.created_at >= {} \
-           ORDER BY dm.derivation, dm.created_at DESC \
-         )",
-        window_sql(window_days)
-    )
-}
-
-const BUILD_TIME_MS: &str = "coalesce(m.build_time_ms, \
-     EXTRACT(EPOCH FROM (ba.build_finished_at - ba.build_started_at))::bigint * 1000)";
-
-const BUILD_IS_TIMED: &str = "(m.derivation IS NOT NULL \
-     OR (ba.build_started_at IS NOT NULL AND ba.build_finished_at IS NOT NULL))";
-
-fn build_time_joins(shared_build: &str) -> String {
-    format!(
-        "LEFT JOIN metric m ON m.derivation = {shared_build}.derivation \
-         LEFT JOIN LATERAL ( \
-           SELECT ba2.build_started_at, ba2.build_finished_at, ba2.dispatched_job \
-           FROM build_attempt ba2 \
-           WHERE ba2.derivation_build = {shared_build}.derivation_build AND m.derivation IS NULL \
-           ORDER BY ba2.created_at DESC LIMIT 1 \
-         ) ba ON true"
-    )
-}
-
-fn completed_build_clauses(window_days: i64) -> Vec<String> {
-    vec![
-        format!(
-            "b.status = {}",
-            gradient_db::sql::status::build(gradient_entity::build::BuildStatus::Completed)
-        ),
-        format!("b.created_at >= {}", window_sql(window_days)),
-    ]
-}
-
-fn expensive_jobs_sql(window_days: i64, project_filter: Option<&str>) -> String {
-    let mut clauses = completed_build_clauses(window_days);
-    if let Some(list) = project_filter {
-        clauses.push(format!("pr.project IN ({list})"));
-    }
-
-    format!(
-        "WITH {metric}, shared_build AS ( \
-           SELECT DISTINCT ON (b.id) bj.id, pr.project, d.name, b.id AS derivation_build, b.derivation \
-           FROM build_job bj \
-           JOIN derivation_build b ON b.id = bj.derivation_build \
-           JOIN derivation d ON d.id = b.derivation \
-           JOIN evaluation ev ON ev.id = bj.evaluation \
-           JOIN task pr ON pr.id = ev.task \
-           WHERE {clauses} \
-           ORDER BY b.id, bj.created_at DESC \
-         ), ranked AS ( \
-           SELECT a.id, a.project, a.name, {BUILD_TIME_MS} AS build_time_ms, \
-           coalesce(m.worker_id, dj.worker_id) AS worker \
-           FROM shared_build a {timing} \
-           LEFT JOIN dispatched_job dj ON dj.id = ba.dispatched_job \
-           WHERE {BUILD_IS_TIMED} \
-           ORDER BY build_time_ms DESC LIMIT 20 \
-         ) \
-         SELECT r.id, r.project, r.name, r.build_time_ms, r.worker, wn.display_name AS worker_name \
-         FROM ranked r {worker_name} \
-         ORDER BY r.build_time_ms DESC",
-        metric = latest_build_metric_cte(window_days),
-        clauses = clauses.join(" AND "),
-        timing = build_time_joins("a"),
-        worker_name = worker_name_sql("r.worker", project_filter),
-    )
-}
-
-gradient_db::sql_fn! {
-    EXPENSIVE_JOBS = || expensive_jobs_sql(30, Some("'11111111-1111-1111-1111-111111111111'")),
-        params = [],
-        tier = Bulk;
-}
-
 pub async fn get_expensive_jobs(
     State(state): State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
@@ -1003,14 +859,8 @@ pub async fn get_expensive_jobs(
 
     let window = params.window_days.unwrap_or(30).max(1);
 
-    let rows = state
-        .web_db
-        .query_all_raw(
-            EXPENSIVE_JOBS.bind_built(expensive_jobs_sql(window, project_filter.as_deref()), []),
-        )
-        .await?;
-
-    let out = rows.into_iter().map(ExpensiveBuild::from).collect();
+    let out =
+        build_times::expensive_builds(&state.web_db, window, project_filter.as_deref()).await?;
 
     Ok(ok_json(out))
 }
@@ -1064,31 +914,6 @@ pub async fn get_scoring_rules() -> WebResult<Json<BaseResponse<Vec<RuleDescript
     Ok(ok_json(rules))
 }
 
-fn scoring_summary_sql(window_hours: i64, limit: u64, project_filter: Option<&str>) -> String {
-    let mut clauses = vec![format!(
-        "dispatched_at >= (now() AT TIME ZONE 'UTC') - interval '{window_hours} hours'"
-    )];
-
-    if let Some(list) = project_filter {
-        clauses.push(format!("project IN ({list})"));
-    }
-
-    format!(
-        "SELECT score, score_breakdown FROM dispatched_job WHERE {} \
-         ORDER BY dispatched_at DESC LIMIT {limit}",
-        clauses.join(" AND ")
-    )
-}
-
-gradient_db::sql_fn! {
-    SCORING_SUMMARY = || scoring_summary_sql(
-        24,
-        2000,
-        Some("'11111111-1111-1111-1111-111111111111'"),
-    ),
-        params = [];
-}
-
 pub async fn get_scoring_summary(
     State(state): State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
@@ -1105,21 +930,21 @@ pub async fn get_scoring_summary(
         return Ok(ok_json(ScoringSummary::default()));
     }
 
-    let rows = state
-        .web_db
-        .query_all_raw(SCORING_SUMMARY.bind_built(
-            scoring_summary_sql(window, limit, project_filter.as_deref()),
-            [],
-        ))
-        .await?;
+    let rows = gradient_db::worker_registrations::recent_scores(
+        &state.web_db,
+        window,
+        limit,
+        project_filter.as_deref(),
+    )
+    .await?;
 
     let mut scores: Vec<f64> = Vec::with_capacity(rows.len());
     let mut rule_acc: std::collections::BTreeMap<String, (f64, i64, f64, f64)> =
         std::collections::BTreeMap::new();
 
     for r in &rows {
-        scores.push(r.try_get::<f64>("", "score").unwrap_or(0.0));
-        if let Ok(bd) = r.try_get::<serde_json::Value>("", "score_breakdown")
+        scores.push(r.score);
+        if let Some(bd) = &r.score_breakdown
             && let Some(obj) = bd.get("rules").and_then(|v| v.as_object())
         {
             for (rule, val) in obj {
@@ -1190,58 +1015,6 @@ pub async fn get_scoring_summary(
     }))
 }
 
-#[derive(Serialize)]
-pub struct TopProjectBuildTime {
-    pub project: Uuid,
-    pub project_name: String,
-    pub project_display_name: String,
-    pub total_build_ms: i64,
-    pub build_count: i64,
-}
-
-impl From<QueryResult> for TopProjectBuildTime {
-    fn from(r: QueryResult) -> Self {
-        Self {
-            project: r.try_get("", "project").unwrap_or_default(),
-            project_name: r.try_get("", "project_name").unwrap_or_default(),
-            project_display_name: r.try_get("", "project_display_name").unwrap_or_default(),
-            total_build_ms: r.try_get("", "total").unwrap_or(0),
-            build_count: r.try_get("", "cnt").unwrap_or(0),
-        }
-    }
-}
-
-fn top_projects_by_buildtime_sql(window_days: i64) -> String {
-    format!(
-        "WITH {metric}, shared_build AS ( \
-           SELECT b.id AS derivation_build, b.derivation, named.project \
-           FROM derivation_build b \
-           CROSS JOIN LATERAL ( \
-             SELECT DISTINCT pr.project FROM build_job bj \
-             JOIN evaluation ev ON ev.id = bj.evaluation \
-             JOIN task pr ON pr.id = ev.task \
-             WHERE bj.derivation_build = b.id \
-           ) named \
-           WHERE {clauses} \
-         ) \
-         SELECT a.project, p.name AS project_name, p.display_name AS project_display_name, \
-         sum({BUILD_TIME_MS})::bigint AS total, count(*)::bigint AS cnt \
-         FROM shared_build a \
-         JOIN project p ON p.id = a.project {timing} \
-         WHERE {BUILD_IS_TIMED} \
-         GROUP BY a.project, p.name, p.display_name ORDER BY total DESC LIMIT 15",
-        metric = latest_build_metric_cte(window_days),
-        clauses = completed_build_clauses(window_days).join(" AND "),
-        timing = build_time_joins("a"),
-    )
-}
-
-gradient_db::sql_fn! {
-    TOP_PROJECTS_BY_BUILDTIME = || top_projects_by_buildtime_sql(30),
-        params = [],
-        tier = Bulk;
-}
-
 pub async fn get_top_projects_by_buildtime(
     State(state): State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
@@ -1250,14 +1023,7 @@ pub async fn get_top_projects_by_buildtime(
     require_superuser(&user)?;
     let window = params.window_days.unwrap_or(30).max(1);
 
-    let rows = state
-        .web_db
-        .query_all_raw(
-            TOP_PROJECTS_BY_BUILDTIME.bind_built(top_projects_by_buildtime_sql(window), []),
-        )
-        .await?;
-
-    let out = rows.into_iter().map(TopProjectBuildTime::from).collect();
+    let out = build_times::top_projects(&state.web_db, window).await?;
 
     Ok(ok_json(out))
 }
@@ -1268,83 +1034,12 @@ pub struct ResourceParams {
     pub window_days: Option<i64>,
 }
 
-#[derive(Serialize)]
-pub struct ExpensiveResource {
-    pub derivation: Uuid,
-    pub project: Uuid,
-    pub name: String,
-    pub value: f64,
-    pub unit: &'static str,
-    pub worker: String,
-    pub worker_name: Option<String>,
-}
-
-fn resource_metric_expr(metric: &str) -> Option<(&'static str, &'static str)> {
-    Some(match metric {
-        "ram" => ("dm.peak_ram_mb::double precision", "MB"),
-        "cpu" => ("dm.cpu_time_ms::double precision", "ms"),
-        "disk" => (
-            "(coalesce(dm.disk_read_bytes,0) + coalesce(dm.disk_write_bytes,0))::double precision",
-            "bytes",
-        ),
-        _ => return None,
-    })
-}
-
-fn expensive_by_resource_sql(
-    value_expr: &str,
-    window_days: i64,
-    project_filter: Option<&str>,
-) -> String {
-    let project_scope = project_filter
-        .map(|list| format!(" AND pr.project IN ({list})"))
-        .unwrap_or_default();
-
-    format!(
-        "WITH latest AS ( \
-           SELECT DISTINCT ON (dm.derivation) dm.* \
-           FROM derivation_metric dm \
-           WHERE dm.created_at >= {window} \
-           ORDER BY dm.derivation, dm.created_at DESC \
-         ), ranked AS ( \
-           SELECT dm.derivation, pro.project, d.name, {value_expr} AS value, dm.worker_id \
-           FROM latest dm \
-           JOIN derivation d ON d.id = dm.derivation \
-           JOIN LATERAL ( \
-             SELECT pr.project \
-             FROM build_job bj \
-             JOIN evaluation ev ON ev.id = bj.evaluation \
-             JOIN task pr ON pr.id = ev.task \
-             WHERE bj.derivation = dm.derivation{project_scope} \
-             LIMIT 1 \
-           ) pro ON true \
-           WHERE {value_expr} > 0 \
-           ORDER BY value DESC LIMIT 20 \
-         ) \
-         SELECT r.derivation, r.project, r.name, r.value, r.worker_id, wn.display_name AS worker_name \
-         FROM ranked r {worker_name} \
-         ORDER BY r.value DESC",
-        window = window_sql(window_days),
-        worker_name = worker_name_sql("r.worker_id", project_filter),
-    )
-}
-
-gradient_db::sql_fn! {
-    EXPENSIVE_BY_RESOURCE = || expensive_by_resource_sql(
-        "dm.peak_ram_mb::double precision",
-        30,
-        Some("'11111111-1111-1111-1111-111111111111'"),
-    ),
-        params = [],
-        tier = Bulk;
-}
-
 pub async fn get_expensive_by_resource(
     State(state): State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
     Query(params): Query<ResourceParams>,
 ) -> WebResult<Json<BaseResponse<Vec<ExpensiveResource>>>> {
-    let (value_expr, unit) = resource_metric_expr(&params.metric)
+    let metric = ResourceMetric::of_build(&params.metric)
         .ok_or_else(|| WebError::not_found(Resource::Metric))?;
     let scope = MetricsScope::resolve(&state.web_db, &maybe_user).await?;
 
@@ -1357,26 +1052,13 @@ pub async fn get_expensive_by_resource(
 
     let window = params.window_days.unwrap_or(30).max(1);
 
-    let rows = state
-        .web_db
-        .query_all_raw(EXPENSIVE_BY_RESOURCE.bind_built(
-            expensive_by_resource_sql(value_expr, window, project_filter.as_deref()),
-            [],
-        ))
-        .await?;
-
-    let out = rows
-        .into_iter()
-        .map(|r| ExpensiveResource {
-            derivation: r.try_get("", "derivation").unwrap_or_default(),
-            project: r.try_get("", "project").unwrap_or_default(),
-            name: r.try_get("", "name").unwrap_or_default(),
-            value: r.try_get("", "value").unwrap_or(0.0),
-            unit,
-            worker: r.try_get("", "worker_id").unwrap_or_default(),
-            worker_name: r.try_get("", "worker_name").ok(),
-        })
-        .collect();
+    let out = resource_usage::expensive_derivations(
+        &state.web_db,
+        metric,
+        window,
+        project_filter.as_deref(),
+    )
+    .await?;
 
     Ok(ok_json(out))
 }
@@ -1460,82 +1142,13 @@ pub struct EvalResourceParams {
     pub window_days: Option<i64>,
 }
 
-#[derive(Serialize)]
-pub struct ExpensiveEval {
-    pub evaluation: Uuid,
-    pub project: Uuid,
-    pub project_name: String,
-    pub project_display_name: String,
-    pub task_name: String,
-    pub task_display_name: String,
-    pub name: String,
-    pub value: f64,
-    pub unit: &'static str,
-    pub worker: String,
-    pub worker_name: Option<String>,
-}
-
-fn eval_metric_expr(metric: &str) -> Option<(&'static str, &'static str)> {
-    Some(match metric {
-        "rss" => ("em.peak_rss_mb::double precision", "MB"),
-        "heap" => ("em.peak_heap_mb::double precision", "MB"),
-        "thunks" => ("em.total_thunks::double precision", "count"),
-        "fncalls" => ("em.fn_calls::double precision", "count"),
-        "alloc" => ("em.alloc_bytes::double precision", "bytes"),
-        "time" => ("em.total_eval_ms::double precision", "ms"),
-        _ => return None,
-    })
-}
-
-fn expensive_evals_by_resource_sql(
-    value_expr: &str,
-    window_days: i64,
-    project_filter: Option<&str>,
-) -> String {
-    let mut clauses = Vec::new();
-    if let Some(list) = project_filter {
-        clauses.push(format!("t.project IN ({list})"));
-    }
-
-    clauses.push(format!(
-        "em.created_at >= (now() AT TIME ZONE 'UTC') - interval '{window_days} days'"
-    ));
-
-    format!(
-        "WITH ranked AS ( \
-           SELECT em.evaluation, t.project, t.name AS task_name, t.display_name AS task_display_name, \
-           ev.wildcard AS name, {value_expr} AS value, em.worker_id \
-           FROM evaluation_metric em \
-           JOIN evaluation ev ON ev.id = em.evaluation \
-           JOIN task t ON t.id = ev.task \
-           WHERE {clauses} ORDER BY value DESC LIMIT 20 \
-         ) \
-         SELECT r.*, p.name AS project_name, p.display_name AS project_display_name, \
-         wn.display_name AS worker_name \
-         FROM ranked r \
-         JOIN project p ON p.id = r.project {worker_name} \
-         ORDER BY r.value DESC",
-        clauses = clauses.join(" AND "),
-        worker_name = worker_name_sql("r.worker_id", project_filter),
-    )
-}
-
-gradient_db::sql_fn! {
-    EXPENSIVE_EVALS_BY_RESOURCE = || expensive_evals_by_resource_sql(
-        "em.peak_rss_mb::double precision",
-        30,
-        Some("'11111111-1111-1111-1111-111111111111'"),
-    ),
-        params = [];
-}
-
 pub async fn get_expensive_evals_by_resource(
     State(state): State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
     Query(params): Query<EvalResourceParams>,
 ) -> WebResult<Json<BaseResponse<Vec<ExpensiveEval>>>> {
-    let (value_expr, unit) =
-        eval_metric_expr(&params.metric).ok_or_else(|| WebError::not_found(Resource::Metric))?;
+    let metric = ResourceMetric::of_evaluation(&params.metric)
+        .ok_or_else(|| WebError::not_found(Resource::Metric))?;
     let scope = MetricsScope::resolve(&state.web_db, &maybe_user).await?;
 
     let project_filter = scope.project_in_list();
@@ -1547,30 +1160,13 @@ pub async fn get_expensive_evals_by_resource(
 
     let window = params.window_days.unwrap_or(30).max(1);
 
-    let rows = state
-        .web_db
-        .query_all_raw(EXPENSIVE_EVALS_BY_RESOURCE.bind_built(
-            expensive_evals_by_resource_sql(value_expr, window, project_filter.as_deref()),
-            [],
-        ))
-        .await?;
-
-    let out = rows
-        .into_iter()
-        .map(|r| ExpensiveEval {
-            evaluation: r.try_get("", "evaluation").unwrap_or_default(),
-            project: r.try_get("", "project").unwrap_or_default(),
-            project_name: r.try_get("", "project_name").unwrap_or_default(),
-            project_display_name: r.try_get("", "project_display_name").unwrap_or_default(),
-            task_name: r.try_get("", "task_name").unwrap_or_default(),
-            task_display_name: r.try_get("", "task_display_name").unwrap_or_default(),
-            name: r.try_get("", "name").unwrap_or_default(),
-            value: r.try_get("", "value").unwrap_or(0.0),
-            unit,
-            worker: r.try_get("", "worker_id").unwrap_or_default(),
-            worker_name: r.try_get("", "worker_name").ok(),
-        })
-        .collect();
+    let out = resource_usage::expensive_evaluations(
+        &state.web_db,
+        metric,
+        window,
+        project_filter.as_deref(),
+    )
+    .await?;
 
     Ok(ok_json(out))
 }
@@ -1610,10 +1206,7 @@ pub async fn get_eval_flake_graph(
 ) -> WebResult<Json<BaseResponse<Vec<FlakeGraphNode>>>> {
     let _ctx = EvalAccessContext::load(&state.web_db, evaluation_id, &maybe_user, api_key.as_ref())
         .await?;
-    let rows = flake_output_node::Entity::find()
-        .filter(flake_output_node::Column::Evaluation.eq(evaluation_id))
-        .all(&state.web_db)
-        .await?;
+    let rows = gradient_db::flake_output_nodes::of_evaluation(&state.web_db, evaluation_id).await?;
 
     let out = rows.into_iter().map(FlakeGraphNode::from).collect();
     Ok(ok_json(out))
@@ -1878,12 +1471,6 @@ mod tests {
     }
 
     #[test]
-    fn eval_metric_expr_unknown_is_none() {
-        assert!(eval_metric_expr("bogus").is_none());
-        assert!(eval_metric_expr("").is_none());
-    }
-
-    #[test]
     fn flake_output_node_maps_to_graph_node() {
         let model = flake_output_node::Model {
             id: FlakeOutputNodeId::now_v7(),
@@ -1902,108 +1489,5 @@ mod tests {
         assert_eq!(node.kind, "derivation");
         assert!(node.is_derivation);
         assert_eq!(node.drv_path.as_deref(), Some("abc-hello.drv"));
-    }
-
-    const SCOPE: &str = "'11111111-1111-1111-1111-111111111111'";
-
-    #[test]
-    fn expensive_jobs_are_one_row_per_derivation_build() {
-        let sql = expensive_jobs_sql(30, Some(SCOPE));
-        assert!(sql.contains("DISTINCT ON (b.id)"), "sql = {sql}");
-        assert!(
-            sql.contains(&format!("pr.project IN ({SCOPE})")),
-            "sql = {sql}"
-        );
-    }
-
-    #[test]
-    fn expensive_jobs_prefer_the_worker_measured_build_time() {
-        let sql = expensive_jobs_sql(30, None);
-        assert!(sql.contains("FROM derivation_metric dm"), "sql = {sql}");
-        assert!(
-            sql.contains("coalesce(m.build_time_ms, EXTRACT(EPOCH FROM (ba.build_finished_at - ba.build_started_at))"),
-            "sql = {sql}"
-        );
-    }
-
-    #[test]
-    fn expensive_resources_skip_zero_values_for_every_metric() {
-        for metric in ["ram", "cpu", "disk"] {
-            let (value_expr, _) = resource_metric_expr(metric).unwrap();
-            let sql = expensive_by_resource_sql(value_expr, 30, None);
-            assert!(sql.contains(&format!("{value_expr} > 0")), "sql = {sql}");
-        }
-        assert!(resource_metric_expr("bogus").is_none());
-    }
-
-    #[test]
-    fn worker_names_come_from_the_callers_own_registrations_and_team_workers() {
-        let scoped = worker_name_sql("r.worker", Some(SCOPE));
-        assert!(scoped.contains("wr.worker_id = r.worker"), "sql = {scoped}");
-        assert!(scoped.contains("tw.worker_id = r.worker"), "sql = {scoped}");
-        assert!(
-            scoped.contains(&format!("wr.peer_id IN ({SCOPE})")),
-            "sql = {scoped}"
-        );
-        assert!(
-            scoped.contains(&format!(
-                "WHERE tp.includes_workers AND tp.project IN ({SCOPE})"
-            )),
-            "sql = {scoped}"
-        );
-        let unscoped = worker_name_sql("r.worker", None);
-        assert!(!unscoped.contains("peer_id") && !unscoped.contains("team_project"));
-
-        for sql in [
-            expensive_jobs_sql(30, Some(SCOPE)),
-            expensive_by_resource_sql("dm.cpu_time_ms::double precision", 30, Some(SCOPE)),
-            expensive_evals_by_resource_sql("em.total_eval_ms::double precision", 30, Some(SCOPE)),
-        ] {
-            assert!(sql.contains("AS worker_name"), "sql = {sql}");
-            assert!(
-                sql.contains(&format!("wr.peer_id IN ({SCOPE})")),
-                "sql = {sql}"
-            );
-        }
-    }
-
-    #[test]
-    fn top_projects_carry_the_project_name() {
-        assert!(top_projects_by_buildtime_sql(30).contains("p.name AS project_name"));
-    }
-
-    #[test]
-    fn top_projects_count_each_build_once_per_project() {
-        let sql = top_projects_by_buildtime_sql(30);
-        assert!(
-            sql.contains("SELECT DISTINCT pr.project FROM build_job bj")
-                && sql.contains("WHERE bj.derivation_build = b.id"),
-            "sql = {sql}"
-        );
-        assert!(sql.contains("FROM shared_build a"), "sql = {sql}");
-        assert!(!sql.contains("count(*) FROM build_job"), "sql = {sql}");
-    }
-
-    #[test]
-    fn top_projects_and_expensive_jobs_share_the_build_time_source() {
-        for sql in [
-            top_projects_by_buildtime_sql(30),
-            expensive_jobs_sql(30, None),
-        ] {
-            assert!(sql.contains(&latest_build_metric_cte(30)), "sql = {sql}");
-            assert!(sql.contains(BUILD_TIME_MS), "sql = {sql}");
-        }
-    }
-
-    #[test]
-    fn expensive_resources_rank_the_latest_metric_per_derivation() {
-        let sql = expensive_by_resource_sql("dm.cpu_time_ms::double precision", 30, None);
-        let latest = sql.find("SELECT DISTINCT ON (dm.derivation)").expect(&sql);
-        let ranked = sql.find("ORDER BY value DESC").expect(&sql);
-        assert!(latest < ranked, "sql = {sql}");
-        assert!(
-            sql.contains("ORDER BY dm.derivation, dm.created_at DESC"),
-            "sql = {sql}"
-        );
     }
 }

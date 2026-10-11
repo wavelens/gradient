@@ -8,11 +8,7 @@ use crate::metrics_scope::MetricsScope;
 use gradient_db::lookup::by_id;
 use gradient_types::input::vec_to_hex;
 use gradient_types::*;
-use sea_orm::sea_query::Query;
-use sea_orm::{
-    ColumnTrait, ConnectionTrait, DbErr, EntityTrait, FromQueryResult, QueryFilter, QueryOrder,
-    QuerySelect, Select,
-};
+use sea_orm::{ConnectionTrait, DbErr};
 use serde::Serialize;
 use std::collections::{BTreeSet, HashMap};
 use uuid::Uuid;
@@ -50,31 +46,10 @@ async fn derivation_names<C: ConnectionTrait>(
     db: &C,
     shared_builds: &[DerivationBuildId],
 ) -> Result<HashMap<DerivationBuildId, String>, DbErr> {
-    let by_shared_build: Vec<(DerivationId, DerivationBuildId)> =
-        gradient_db::fetch_in_chunks(shared_builds, |chunk| async move {
-            EDerivationBuild::find()
-                .select_only()
-                .column(CDerivationBuild::Derivation)
-                .column(CDerivationBuild::Id)
-                .filter(CDerivationBuild::Id.is_in(chunk))
-                .into_tuple()
-                .all(db)
-                .await
-        })
-        .await?;
+    let by_shared_build = gradient_db::derivation_builds::derivations_of(db, shared_builds).await?;
 
     let derivation_ids: Vec<DerivationId> = by_shared_build.iter().map(|(d, _)| *d).collect();
-    let names: HashMap<DerivationId, String> =
-        gradient_db::fetch_in_chunks(&derivation_ids, |chunk| async move {
-            EDerivation::find()
-                .select_only()
-                .column(CDerivation::Id)
-                .column(CDerivation::Name)
-                .filter(CDerivation::Id.is_in(chunk))
-                .into_tuple::<(DerivationId, String)>()
-                .all(db)
-                .await
-        })
+    let names: HashMap<DerivationId, String> = gradient_db::derivations::names(db, &derivation_ids)
         .await?
         .into_iter()
         .collect();
@@ -89,21 +64,10 @@ async fn repositories<C: ConnectionTrait>(
     db: &C,
     evaluations: &[EvaluationId],
 ) -> Result<HashMap<EvaluationId, String>, DbErr> {
-    Ok(
-        gradient_db::fetch_in_chunks(evaluations, |chunk| async move {
-            EEvaluation::find()
-                .select_only()
-                .column(CEvaluation::Id)
-                .column(CEvaluation::Repository)
-                .filter(CEvaluation::Id.is_in(chunk))
-                .into_tuple::<(EvaluationId, String)>()
-                .all(db)
-                .await
-        })
+    Ok(gradient_db::evaluations::repositories(db, evaluations)
         .await?
         .into_iter()
-        .collect(),
-    )
+        .collect())
 }
 
 /// A worker's display name comes only from registrations and team workers in projects the caller can see.
@@ -121,18 +85,10 @@ impl WorkerNames {
             .into_iter()
             .collect();
         let visible = scope.project_ids();
-        let registrations: Vec<WorkerNameRow> = gradient_db::fetch_in_chunks(&workers, |chunk| {
-            registration_names_query(chunk, visible.as_deref())
-                .into_model()
-                .all(db)
-        })
-        .await?;
-        let team_workers: Vec<WorkerNameRow> = gradient_db::fetch_in_chunks(&workers, |chunk| {
-            team_worker_names_query(chunk, visible.as_deref())
-                .into_model()
-                .all(db)
-        })
-        .await?;
+        let registrations =
+            gradient_db::worker_names::of_registrations(db, &workers, visible.as_deref()).await?;
+        let team_workers =
+            gradient_db::worker_names::of_team_workers(db, &workers, visible.as_deref()).await?;
 
         let mut names = HashMap::new();
         for row in registrations.into_iter().chain(team_workers) {
@@ -147,57 +103,6 @@ impl WorkerNames {
     }
 }
 
-#[derive(FromQueryResult)]
-struct WorkerNameRow {
-    worker_id: String,
-    display_name: String,
-}
-
-fn registration_names_query(
-    workers: Vec<String>,
-    visible_projects: Option<&[Uuid]>,
-) -> Select<EWorkerRegistration> {
-    let query = EWorkerRegistration::find()
-        .select_only()
-        .column(CWorkerRegistration::WorkerId)
-        .column(CWorkerRegistration::DisplayName)
-        .filter(CWorkerRegistration::WorkerId.is_in(workers))
-        .filter(CWorkerRegistration::DisplayName.ne(""))
-        .order_by_desc(CWorkerRegistration::Active)
-        .order_by_desc(CWorkerRegistration::CreatedAt);
-
-    match visible_projects {
-        Some(projects) => query.filter(CWorkerRegistration::PeerId.is_in(projects.to_vec())),
-        None => query,
-    }
-}
-
-fn team_worker_names_query(
-    workers: Vec<String>,
-    visible_projects: Option<&[Uuid]>,
-) -> Select<ETeamWorker> {
-    let query = ETeamWorker::find()
-        .select_only()
-        .column(CTeamWorker::WorkerId)
-        .column(CTeamWorker::DisplayName)
-        .filter(CTeamWorker::WorkerId.is_in(workers))
-        .filter(CTeamWorker::DisplayName.ne(""));
-
-    match visible_projects {
-        Some(projects) => query.filter(
-            CTeamWorker::Team.in_subquery(
-                Query::select()
-                    .column(CTeamProject::Team)
-                    .from(gradient_entity::team_project::Entity)
-                    .and_where(CTeamProject::IncludesWorkers.eq(true))
-                    .and_where(CTeamProject::Project.is_in(projects.to_vec()))
-                    .to_owned(),
-            ),
-        ),
-        None => query,
-    }
-}
-
 #[derive(Serialize, Clone, Default)]
 pub struct BoardProject {
     pub id: Uuid,
@@ -209,19 +114,7 @@ pub async fn board_projects<C: ConnectionTrait>(
     db: &C,
     projects: &[Uuid],
 ) -> Result<HashMap<Uuid, BoardProject>, DbErr> {
-    let rows: Vec<(Uuid, String, String)> =
-        gradient_db::fetch_in_chunks(projects, |chunk| async move {
-            EProject::find()
-                .select_only()
-                .column(CProject::Id)
-                .column(CProject::Name)
-                .column(CProject::DisplayName)
-                .filter(CProject::Id.is_in(chunk))
-                .into_tuple()
-                .all(db)
-                .await
-        })
-        .await?;
+    let rows = gradient_db::projects::names(db, projects).await?;
 
     Ok(rows
         .into_iter()
@@ -277,7 +170,7 @@ pub async fn job_evaluation<C: ConnectionTrait>(
 mod tests {
     use super::*;
     use gradient_fixtures::mock::{empty_db, mock_db};
-    use sea_orm::{DatabaseBackend, Value};
+    use sea_orm::Value;
     use std::collections::BTreeMap;
 
     fn row(pairs: [(&str, Value); 2]) -> BTreeMap<&str, Value> {
@@ -347,39 +240,6 @@ mod tests {
         assert_eq!(names.name("w1").as_deref(), Some("builder"));
         assert_eq!(names.name("w2").as_deref(), Some("team builder"));
         assert_eq!(names.name("w3"), None);
-    }
-
-    #[test]
-    fn worker_names_come_only_from_workers_the_caller_can_see() {
-        use sea_orm::QueryTrait;
-        let visible = [Uuid::now_v7()];
-        let registrations = |projects: Option<&[Uuid]>| {
-            registration_names_query(vec!["w1".into()], projects)
-                .build(DatabaseBackend::Postgres)
-                .to_string()
-        };
-        let team_workers = |projects: Option<&[Uuid]>| {
-            team_worker_names_query(vec!["w1".into()], projects)
-                .build(DatabaseBackend::Postgres)
-                .to_string()
-        };
-
-        let scoped = registrations(Some(&visible));
-        assert!(
-            scoped.contains(&format!("\"peer_id\" IN ('{}')", visible[0])),
-            "{scoped}"
-        );
-        assert!(scoped.contains("\"display_name\" <> ''"), "{scoped}");
-        assert!(!registrations(None).contains("peer_id"));
-
-        let scoped = team_workers(Some(&visible));
-        assert!(scoped.contains("\"includes_workers\" = TRUE"), "{scoped}");
-        assert!(
-            scoped.contains(&format!("\"project\" IN ('{}')", visible[0])),
-            "{scoped}"
-        );
-        assert!(scoped.contains("\"display_name\" <> ''"), "{scoped}");
-        assert!(!team_workers(None).contains("team_project"));
     }
 
     #[tokio::test]
