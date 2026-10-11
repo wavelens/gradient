@@ -49,7 +49,7 @@ fn admin_role() -> role::Model {
     role::Model {
         id: BASE_ROLE_ADMIN_ID,
         name: "Admin".into(),
-        permission: gradient_db::permissions::admin_mask(),
+        permission: gradient_types::permissions::admin_mask(),
         ..Default::default()
     }
 }

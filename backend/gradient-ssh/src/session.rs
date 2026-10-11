@@ -5,7 +5,7 @@
  */
 
 use gradient_core::ServerState;
-use gradient_db::permissions::{Permission, PermissionMask, mask_grants};
+use gradient_types::permissions::{Permission, PermissionMask, mask_grants};
 use gradient_types::*;
 use gradient_util::shutdown::CancellationToken;
 use std::sync::Arc;

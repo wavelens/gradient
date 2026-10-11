@@ -15,10 +15,10 @@ use axum::http::{StatusCode, header};
 use axum::response::Response;
 use axum::{Extension, body::Body};
 use gradient_core::ServerState;
-use gradient_db::permissions::Permission;
 use gradient_report::{ReportContext, ReportOptions, generate_report};
 use gradient_types::MUser;
 use gradient_types::ids::EvaluationId;
+use gradient_types::permissions::Permission;
 use serde::Deserialize;
 
 use super::EvalAccessContext;

@@ -8,11 +8,11 @@ use crate::session::Session;
 use anyhow::Context as _;
 use async_compression::Level;
 use async_compression::tokio::write::ZstdEncoder;
-use gradient_db::permissions::Permission;
 use gradient_graph::NarCommit;
 use gradient_proto::import::{ImportInput, SignTargets, import_nar_reader, stored_path};
 use gradient_storage::admission::{Admission, HeldPermit, ObjectKey};
 use gradient_types::events::cache::NarSigned;
+use gradient_types::permissions::Permission;
 use gradient_types::*;
 use gradient_util::nix_hash::normalize_nar_hash;
 use harmonia_protocol::valid_path_info::ValidPathInfo;
@@ -235,8 +235,8 @@ async fn compress_into(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gradient_db::permissions::{Permission, mask_from};
     use gradient_storage::admission::Admitted;
+    use gradient_types::permissions::{Permission, mask_from};
     use gradient_types::{CacheId, MCachedPath};
     use harmonia_protocol::valid_path_info::UnkeyedValidPathInfo;
     use harmonia_store_path::{StoreDir, StorePath};

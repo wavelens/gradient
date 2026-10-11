@@ -38,7 +38,7 @@ fn api_key(raw: &str) -> api::Model {
         key: hash_api_key(raw),
         last_used_at: now,
         created_at: now,
-        permission: gradient_db::permissions::admin_mask(),
+        permission: gradient_types::permissions::admin_mask(),
         ..Default::default()
     }
 }

@@ -9,11 +9,11 @@
     reason = "test scaffolding: a fixture helper that cannot build its value should fail the test loudly"
 )]
 
-use gradient_db::permissions::{cache_admin_mask, cache_view_mask};
 use gradient_entity::{api, cache, cache_role, cache_user, ids::*};
 use gradient_test_support::fixtures::{test_date, user, user_id};
 use gradient_test_support::web::make_test_server;
 use gradient_types::consts::BASE_CACHE_ROLE_VIEW_ID;
+use gradient_types::permissions::{cache_admin_mask, cache_view_mask};
 use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
 use sha2::{Digest, Sha256};
 

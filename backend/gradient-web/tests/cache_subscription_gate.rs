@@ -9,7 +9,6 @@
     reason = "test scaffolding: a fixture helper that cannot build its value should fail the test loudly"
 )]
 
-use gradient_db::permissions::{admin_mask, cache_admin_mask, cache_view_mask, mask_from};
 use gradient_entity::{
     cache, cache_role, cache_subscription_request, cache_user, ids::*, project_cache, project_user,
     role,
@@ -20,6 +19,7 @@ use gradient_types::SessionId;
 use gradient_types::consts::{
     BASE_CACHE_ROLE_ADMIN_ID, BASE_CACHE_ROLE_VIEW_ID, BASE_ROLE_ADMIN_ID,
 };
+use gradient_types::permissions::{admin_mask, cache_admin_mask, cache_view_mask, mask_from};
 use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
 use uuid::Uuid;
 
@@ -61,7 +61,7 @@ fn view_only_project_role() -> role::Model {
         id: RoleId::new(Uuid::parse_str("00000000-0000-0000-0000-0000000000f1").unwrap()),
         name: "ViewOnly".into(),
         project: Some(project_id()),
-        permission: mask_from(&[gradient_db::permissions::Permission::ViewProject]),
+        permission: mask_from(&[gradient_types::permissions::Permission::ViewProject]),
         ..Default::default()
     }
 }

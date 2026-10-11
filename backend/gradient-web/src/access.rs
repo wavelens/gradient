@@ -634,7 +634,6 @@ pub async fn load_team(
 mod tests {
     use super::*;
     use crate::authorization::ApiKeyContext;
-    use gradient_db::permissions::mask_from;
     use gradient_db::{WebDb, WorkerDb};
     use gradient_notify::EmailSender;
     use gradient_storage::NarStore;
@@ -645,6 +644,7 @@ mod tests {
         BASE_CACHE_ROLE_VIEW_ID, BASE_ROLE_ADMIN_ID, BASE_ROLE_VIEW_ID, BASE_ROLE_WRITE_ID,
     };
     use gradient_types::ids::{ProjectUserId, RoleId, TaskId};
+    use gradient_types::permissions::mask_from;
     use gradient_types::{ConcurrencyPolicy, RuntimeConfig};
     use gradient_types::{ECache, MProjectAccess};
     use sea_orm::{DatabaseBackend, MockDatabase};

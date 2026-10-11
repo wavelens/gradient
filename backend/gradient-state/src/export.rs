@@ -11,13 +11,13 @@ use super::{
     StateTeamMember, StateTrigger, StateUpstream, StateUser, StateWorker,
 };
 use gradient_ci::IntegrationKind;
-use gradient_db::permissions::{
-    cache_mask_to_vec, is_builtin_cache_role, is_builtin_role, mask_to_vec,
-};
 use gradient_entity::cache_upstream::CacheUpstreamKind;
 use gradient_entity::ids::*;
 use gradient_entity::team_user::{TeamMemberSource, TeamRole};
 use gradient_types::actions::{ActionConfig, ActionType};
+use gradient_types::permissions::{
+    cache_mask_to_vec, is_builtin_cache_role, is_builtin_role, mask_to_vec,
+};
 use gradient_types::triggers::{TriggerConfig, TriggerType};
 use sea_orm::{ColumnTrait, ConnectionTrait, DbErr, EntityTrait, QueryFilter};
 use std::collections::HashMap;

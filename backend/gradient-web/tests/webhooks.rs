@@ -75,7 +75,7 @@ fn as_project_admin(session_id: SessionId) -> MockDatabase {
         .append_query_results([vec![membership(admin)]])
         .append_query_results([vec![role_row(
             admin,
-            gradient_db::permissions::admin_mask(),
+            gradient_types::permissions::admin_mask(),
         )]])
 }
 
@@ -167,7 +167,10 @@ async fn a_view_role_cannot_manage_webhooks() {
     let db = with_auth(session_id)
         .append_query_results([vec![project()]])
         .append_query_results([vec![membership(view)]])
-        .append_query_results([vec![role_row(view, gradient_db::permissions::view_mask())]]);
+        .append_query_results([vec![role_row(
+            view,
+            gradient_types::permissions::view_mask(),
+        )]]);
     let server = make_test_server_with(db.into_connection(), None);
 
     let res = server

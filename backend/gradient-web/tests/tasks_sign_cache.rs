@@ -12,7 +12,6 @@
 use axum_test::TestServer;
 use chrono::{Duration, Utc};
 use gradient_core::ServerState;
-use gradient_db::permissions::admin_mask;
 use gradient_db::{WebDb, WorkerDb};
 use gradient_entity::{ids::*, project_user, role, session, task};
 use gradient_notify::EmailSender;
@@ -21,6 +20,7 @@ use gradient_test_support::cli::test_cli;
 use gradient_test_support::fakes::email::InMemoryEmailSender;
 use gradient_test_support::fixtures::{project, project_id, task_id, test_date, user, user_id};
 use gradient_test_support::log_storage::NoopLogStorage;
+use gradient_types::permissions::admin_mask;
 use gradient_types::{ConcurrencyPolicy, RuntimeConfig, SecretString, SessionId};
 use gradient_web::create_router;
 use jsonwebtoken::{EncodingKey, Header, encode};

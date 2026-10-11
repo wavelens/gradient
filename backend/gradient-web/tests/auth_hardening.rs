@@ -194,7 +194,7 @@ async fn revoked_api_key_is_rejected() {
         last_used_at: now,
         created_at: now,
         revoked_at: Some(now),
-        permission: gradient_db::permissions::admin_mask(),
+        permission: gradient_types::permissions::admin_mask(),
         ..Default::default()
     };
 
@@ -219,7 +219,7 @@ async fn expired_api_key_is_rejected() {
         last_used_at: now,
         created_at: now,
         expires_at: Some(now - chrono::Duration::seconds(1)),
-        permission: gradient_db::permissions::admin_mask(),
+        permission: gradient_types::permissions::admin_mask(),
         ..Default::default()
     };
 
@@ -276,8 +276,8 @@ async fn delete_user_with_wrong_password_is_forbidden() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn api_key_with_only_view_cannot_trigger_evaluation() {
-    use gradient_db::permissions::{Permission, mask_from};
     use gradient_test_support::fixtures::{project, project_id};
+    use gradient_types::permissions::{Permission, mask_from};
     let raw = "x".repeat(64);
     let now = Utc::now().naive_utc();
     let key = api::Model {
@@ -299,7 +299,7 @@ async fn api_key_with_only_view_cannot_trigger_evaluation() {
     let admin_role = gradient_entity::role::Model {
         id: gradient_types::consts::BASE_ROLE_ADMIN_ID,
         name: "Admin".into(),
-        permission: gradient_db::permissions::admin_mask(),
+        permission: gradient_types::permissions::admin_mask(),
         ..Default::default()
     };
 
@@ -347,8 +347,8 @@ async fn api_key_with_only_view_cannot_trigger_evaluation() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn api_key_pinned_to_other_project_is_invisible() {
-    use gradient_db::permissions::{Permission, mask_from};
     use gradient_test_support::fixtures::project;
+    use gradient_types::permissions::{Permission, mask_from};
     let raw = "y".repeat(64);
     let now = Utc::now().naive_utc();
     let pinned_elsewhere =
@@ -394,7 +394,7 @@ async fn api_key_cannot_create_api_keys() {
         key: hash_api_key(&raw),
         last_used_at: now,
         created_at: now,
-        permission: gradient_db::permissions::admin_mask(),
+        permission: gradient_types::permissions::admin_mask(),
         ..Default::default()
     };
 
@@ -430,7 +430,7 @@ async fn api_key_cannot_add_ssh_keys() {
         key: hash_api_key(&raw),
         last_used_at: now,
         created_at: now,
-        permission: gradient_db::permissions::admin_mask(),
+        permission: gradient_types::permissions::admin_mask(),
         ..Default::default()
     };
 

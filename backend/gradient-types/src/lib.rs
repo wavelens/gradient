@@ -18,6 +18,7 @@ pub mod git_host;
 pub mod ids;
 pub mod input;
 pub mod log_api;
+pub mod permissions;
 pub mod secret;
 pub mod triggers;
 pub mod waiting_reason;

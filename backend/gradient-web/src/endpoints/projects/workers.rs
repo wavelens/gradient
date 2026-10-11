@@ -12,7 +12,6 @@ use axum::extract::{Path, State};
 use axum::{Extension, Json};
 use chrono::NaiveDateTime;
 use gradient_core::ServerState;
-use gradient_db::permissions::Permission;
 use gradient_entity::worker_registration::{
     self, ActiveModel as AWorkerRegistration, Entity as EWorkerRegistration,
     Model as MWorkerRegistration,
@@ -21,6 +20,7 @@ use gradient_pool::WorkerInfo;
 use gradient_scheduler::Scheduler;
 use gradient_scheduler::connection_failures::{ConnectionFailure, ConnectionFailures};
 use gradient_types::ids::*;
+use gradient_types::permissions::Permission;
 use gradient_types::{BaseResponse, MUser};
 use gradient_wire::types::GradientCapabilities;
 use sea_orm::ActiveValue::Set;
