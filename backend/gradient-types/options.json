@@ -82,7 +82,7 @@
     "env": "GRADIENT_BASE_DIR",
     "type": "PathBuf",
     "description": "Directory holding Gradient's state, NAR files and caches.",
-    "default": ".",
+    "default": "/var/lib/gradient",
     "values": []
   },
   {
