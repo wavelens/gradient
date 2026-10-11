@@ -15,7 +15,7 @@ use gradient_entity::team_user::{TeamMemberSource, TeamRole};
 use gradient_entity::{team, team_invitation, team_user};
 use gradient_fixtures::ids::{team_id, user_id};
 use gradient_fixtures::mock::{all_statements, exec_ok, mock_db};
-use gradient_fixtures::rows::user;
+use gradient_fixtures::rows::{team, team_member, user};
 use gradient_fixtures::test_date;
 use gradient_test_support::web::{bearer, make_test_server, signed_in, with_auth};
 use gradient_types::SessionId;
@@ -24,21 +24,10 @@ use serde_json::{Value, json};
 use std::collections::BTreeMap;
 use uuid::Uuid;
 
-fn team_row() -> team::Model {
-    team::Model {
-        id: team_id(),
-        name: "platform".into(),
-        display_name: "Platform".into(),
-        created_by: Some(user_id()),
-        created_at: test_date(),
-        ..Default::default()
-    }
-}
-
 fn managed_team_row() -> team::Model {
     team::Model {
         managed: true,
-        ..team_row()
+        ..team()
     }
 }
 
@@ -61,11 +50,8 @@ fn other_user() -> gradient_entity::user::Model {
 
 fn member_row(user: UserId, role: TeamRole) -> team_user::Model {
     team_user::Model {
-        id: TeamUserId::now_v7(),
-        team: team_id(),
         user,
-        role,
-        ..Default::default()
+        ..team_member(role)
     }
 }
 
@@ -162,7 +148,7 @@ async fn a_member_declared_by_the_state_cannot_be_removed() {
 async fn a_member_cannot_invite() {
     let (db, auth) = signed_in();
     let db = db
-        .append_query_results([vec![team_row()]])
+        .append_query_results([vec![team()]])
         .append_query_results([vec![member_row(user_id(), TeamRole::Member)]]);
     let server = make_test_server(db.into_connection());
 
@@ -179,7 +165,7 @@ async fn a_member_cannot_invite() {
 async fn the_last_admin_cannot_be_removed() {
     let (db, auth) = signed_in();
     let db = db
-        .append_query_results([vec![team_row()]])
+        .append_query_results([vec![team()]])
         .append_query_results([vec![member_row(user_id(), TeamRole::Admin)]])
         .append_query_results([vec![user()]])
         .append_query_results([vec![member_row(user_id(), TeamRole::Admin)]])
@@ -199,7 +185,7 @@ async fn the_last_admin_cannot_be_removed() {
 async fn the_last_admin_cannot_be_demoted() {
     let (db, auth) = signed_in();
     let db = db
-        .append_query_results([vec![team_row()]])
+        .append_query_results([vec![team()]])
         .append_query_results([vec![member_row(user_id(), TeamRole::Admin)]])
         .append_query_results([vec![user()]])
         .append_query_results([vec![member_row(user_id(), TeamRole::Admin)]])
@@ -223,7 +209,7 @@ async fn a_group_member_made_admin_stays_past_the_group_sync() {
         ..member_row(other_user_id(), TeamRole::Member)
     };
     let conn = with_auth(mock_db(), session_id)
-        .append_query_results([vec![team_row()]])
+        .append_query_results([vec![team()]])
         .append_query_results([vec![member_row(user_id(), TeamRole::Admin)]])
         .append_query_results([vec![other_user()]])
         .append_query_results([vec![group_member.clone()]])

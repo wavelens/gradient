@@ -7,36 +7,13 @@
 use axum::http::StatusCode;
 use gradient_entity::ids::*;
 use gradient_entity::team_user::TeamRole;
-use gradient_entity::{
-    project_user, team, team_project, team_user, team_worker, worker_registration,
-};
+use gradient_entity::{project_user, team, team_project, team_worker, worker_registration};
 use gradient_fixtures::ids::{project_id, team_id, user_id};
 use gradient_fixtures::mock::exec_ok;
-use gradient_fixtures::rows::project;
+use gradient_fixtures::rows::{project, team, team_member};
 use gradient_fixtures::test_date;
 use gradient_test_support::web::{make_test_server, signed_in};
 use serde_json::{Value, json};
-
-fn team_row() -> team::Model {
-    team::Model {
-        id: team_id(),
-        name: "platform".into(),
-        display_name: "Platform".into(),
-        created_by: Some(user_id()),
-        created_at: test_date(),
-        ..Default::default()
-    }
-}
-
-fn membership(role: TeamRole) -> team_user::Model {
-    team_user::Model {
-        id: TeamUserId::now_v7(),
-        team: team_id(),
-        user: user_id(),
-        role,
-        ..Default::default()
-    }
-}
 
 fn worker_id() -> &'static str {
     "7e000000-0000-0000-0000-0000000000f1"
@@ -63,11 +40,11 @@ async fn an_admin_of_a_state_managed_team_registers_a_worker_and_sees_its_token_
     let (db, auth) = signed_in();
     let managed_team = team::Model {
         managed: true,
-        ..team_row()
+        ..team()
     };
     let db = db
         .append_query_results([vec![managed_team]])
-        .append_query_results([vec![membership(TeamRole::Admin)]])
+        .append_query_results([vec![team_member(TeamRole::Admin)]])
         .append_query_results([Vec::<worker_registration::Model>::new()])
         .append_query_results([Vec::<team_worker::Model>::new()])
         .append_query_results([vec![team_worker_row()]])

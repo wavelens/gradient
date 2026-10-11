@@ -10,10 +10,10 @@
 )]
 
 use gradient_entity::webhook::WebhookScope;
-use gradient_entity::{ids::*, project_user, role, webhook};
+use gradient_entity::{ids::*, role, webhook};
 use gradient_fixtures::ids::{project_id, user_id};
 use gradient_fixtures::mock::mock_db;
-use gradient_fixtures::rows::project;
+use gradient_fixtures::rows::{project, project_member};
 use gradient_fixtures::test_date;
 use gradient_test_support::state::TestState;
 use gradient_test_support::web::{bearer, make_test_server};
@@ -47,15 +47,6 @@ fn webhook_row() -> webhook::Model {
     }
 }
 
-fn membership(role: RoleId) -> project_user::Model {
-    project_user::Model {
-        id: ProjectUserId::new(Uuid::from_u128(0xaa)),
-        project: project_id(),
-        user: user_id(),
-        role,
-    }
-}
-
 fn role_row(id: RoleId, permission: i64) -> role::Model {
     role::Model {
         id,
@@ -69,7 +60,7 @@ fn as_project_admin(session_id: SessionId) -> MockDatabase {
     let admin = gradient_types::consts::BASE_ROLE_ADMIN_ID;
     with_auth(mock_db(), session_id)
         .append_query_results([vec![project()]])
-        .append_query_results([vec![membership(admin)]])
+        .append_query_results([vec![project_member(admin)]])
         .append_query_results([vec![role_row(
             admin,
             gradient_types::permissions::admin_mask(),
@@ -162,7 +153,7 @@ async fn a_view_role_cannot_manage_webhooks() {
     let view = gradient_types::consts::BASE_ROLE_VIEW_ID;
     let db = db
         .append_query_results([vec![project()]])
-        .append_query_results([vec![membership(view)]])
+        .append_query_results([vec![project_member(view)]])
         .append_query_results([vec![role_row(
             view,
             gradient_types::permissions::view_mask(),

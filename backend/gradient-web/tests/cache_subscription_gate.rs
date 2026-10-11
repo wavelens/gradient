@@ -9,27 +9,22 @@
     reason = "test scaffolding: a fixture helper that cannot build its value should fail the test loudly"
 )]
 
-use gradient_entity::{
-    cache, cache_role, cache_subscription_request, cache_user, ids::*, project_cache, project_user,
-    role,
-};
+use gradient_entity::{cache, cache_subscription_request, cache_user, ids::*, project_cache, role};
 use gradient_fixtures::ids::{project_id, user_id};
-use gradient_fixtures::rows::project;
+use gradient_fixtures::rows::{
+    admin_role, cache_admin_role, cache_member_in, cache_view_role, project, project_member,
+};
 use gradient_fixtures::test_date;
 use gradient_test_support::web::{make_test_server, signed_in};
 use gradient_types::consts::{
     BASE_CACHE_ROLE_ADMIN_ID, BASE_CACHE_ROLE_VIEW_ID, BASE_ROLE_ADMIN_ID,
 };
-use gradient_types::permissions::{admin_mask, cache_admin_mask, cache_view_mask, mask_from};
+use gradient_types::permissions::mask_from;
 use sea_orm::MockExecResult;
 use uuid::Uuid;
 
 fn cache_id() -> CacheId {
     CacheId::new(Uuid::parse_str("c1000000-0000-0000-0000-000000000001").unwrap())
-}
-
-fn project_user_id() -> ProjectUserId {
-    ProjectUserId::new(Uuid::parse_str("00000000-0000-0000-0000-000000000010").unwrap())
 }
 
 fn cache_row(public: bool) -> cache::Model {
@@ -48,15 +43,6 @@ fn cache_row(public: bool) -> cache::Model {
     }
 }
 
-fn admin_project_membership() -> project_user::Model {
-    project_user::Model {
-        id: project_user_id(),
-        project: project_id(),
-        user: user_id(),
-        role: BASE_ROLE_ADMIN_ID,
-    }
-}
-
 fn view_only_project_role() -> role::Model {
     role::Model {
         id: RoleId::new(Uuid::parse_str("00000000-0000-0000-0000-0000000000f1").unwrap()),
@@ -67,69 +53,13 @@ fn view_only_project_role() -> role::Model {
     }
 }
 
-fn view_only_project_membership() -> project_user::Model {
-    project_user::Model {
-        id: project_user_id(),
-        project: project_id(),
-        user: user_id(),
-        role: view_only_project_role().id,
-    }
-}
-
-fn admin_project_role() -> role::Model {
-    role::Model {
-        id: BASE_ROLE_ADMIN_ID,
-        name: "Admin".into(),
-        permission: admin_mask(),
-        ..Default::default()
-    }
-}
-
-fn admin_cache_member() -> cache_user::Model {
-    cache_user::Model {
-        id: CacheUserId::now_v7(),
-        cache: cache_id(),
-        user: user_id(),
-        role: BASE_CACHE_ROLE_ADMIN_ID,
-    }
-}
-
-fn view_cache_member() -> cache_user::Model {
-    cache_user::Model {
-        id: CacheUserId::now_v7(),
-        cache: cache_id(),
-        user: user_id(),
-        role: BASE_CACHE_ROLE_VIEW_ID,
-    }
-}
-
-fn admin_cache_role() -> cache_role::Model {
-    cache_role::Model {
-        id: BASE_CACHE_ROLE_ADMIN_ID,
-        name: "Admin".into(),
-        permission: cache_admin_mask(),
-        managed: true,
-        ..Default::default()
-    }
-}
-
-fn view_cache_role() -> cache_role::Model {
-    cache_role::Model {
-        id: BASE_CACHE_ROLE_VIEW_ID,
-        name: "View".into(),
-        permission: cache_view_mask(),
-        managed: true,
-        ..Default::default()
-    }
-}
-
 #[tokio::test]
 async fn subscribe_requires_project_manage_subscriptions() {
     let (db, auth) = signed_in();
 
     let db = db
         .append_query_results([vec![project()]])
-        .append_query_results([vec![view_only_project_membership()]])
+        .append_query_results([vec![project_member(view_only_project_role().id)]])
         .append_query_results([vec![view_only_project_role()]]);
 
     let server = make_test_server(db.into_connection());
@@ -156,14 +86,14 @@ async fn subscribe_without_cache_permission_records_a_request() {
 
     let db = db
         .append_query_results([vec![project()]])
-        .append_query_results([vec![admin_project_membership()]])
-        .append_query_results([vec![admin_project_role()]])
+        .append_query_results([vec![project_member(BASE_ROLE_ADMIN_ID)]])
+        .append_query_results([vec![admin_role()]])
         .append_query_results([vec![cache_row(false)]])
-        .append_query_results([vec![view_cache_member()]])
+        .append_query_results([vec![cache_member_in(cache_id(), BASE_CACHE_ROLE_VIEW_ID)]])
         .append_query_results([Vec::<project_cache::Model>::new()])
         .append_query_results([Vec::<cache_subscription_request::Model>::new()])
-        .append_query_results([vec![view_cache_member()]])
-        .append_query_results([vec![view_cache_role()]])
+        .append_query_results([vec![cache_member_in(cache_id(), BASE_CACHE_ROLE_VIEW_ID)]])
+        .append_query_results([vec![cache_view_role()]])
         .append_query_results([vec![pending]])
         .append_exec_results([MockExecResult {
             last_insert_id: 0,
@@ -198,14 +128,14 @@ async fn subscribe_succeeds_when_both_granted() {
 
     let db = db
         .append_query_results([vec![project()]])
-        .append_query_results([vec![admin_project_membership()]])
-        .append_query_results([vec![admin_project_role()]])
+        .append_query_results([vec![project_member(BASE_ROLE_ADMIN_ID)]])
+        .append_query_results([vec![admin_role()]])
         .append_query_results([vec![cache_row(false)]])
-        .append_query_results([vec![admin_cache_member()]])
+        .append_query_results([vec![cache_member_in(cache_id(), BASE_CACHE_ROLE_ADMIN_ID)]])
         .append_query_results([Vec::<project_cache::Model>::new()])
         .append_query_results([Vec::<cache_subscription_request::Model>::new()])
-        .append_query_results([vec![admin_cache_member()]])
-        .append_query_results([vec![admin_cache_role()]])
+        .append_query_results([vec![cache_member_in(cache_id(), BASE_CACHE_ROLE_ADMIN_ID)]])
+        .append_query_results([vec![cache_admin_role()]])
         .append_query_results([vec![inserted_link]])
         .append_exec_results([MockExecResult {
             last_insert_id: 0,
@@ -242,8 +172,8 @@ async fn subscribe_to_a_public_cache_records_a_request_for_a_non_member() {
 
     let db = db
         .append_query_results([vec![project()]])
-        .append_query_results([vec![admin_project_membership()]])
-        .append_query_results([vec![admin_project_role()]])
+        .append_query_results([vec![project_member(BASE_ROLE_ADMIN_ID)]])
+        .append_query_results([vec![admin_role()]])
         .append_query_results([vec![cache_row(true)]])
         .append_query_results([Vec::<project_cache::Model>::new()])
         .append_query_results([Vec::<cache_subscription_request::Model>::new()])

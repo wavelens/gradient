@@ -340,52 +340,8 @@ pub async fn get_eval_runtime_closure(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gradient_entity::{derivation, derivation_dependency, derivation_output};
     use gradient_fixtures::mock::mock_db;
-
-    fn now() -> chrono::NaiveDateTime {
-        chrono::Utc::now().naive_utc()
-    }
-
-    fn drv(id: DerivationId, name: &str) -> derivation::Model {
-        derivation::Model {
-            id,
-            hash: format!("hash{name}"),
-            name: name.into(),
-            architecture: "x86_64-linux".into(),
-            created_at: now(),
-            ..Default::default()
-        }
-    }
-
-    fn out(
-        derivation: DerivationId,
-        hash: &str,
-        nar_size: Option<i64>,
-    ) -> derivation_output::Model {
-        derivation_output::Model {
-            id: DerivationOutputId::now_v7(),
-            derivation,
-            name: "out".into(),
-            hash: hash.into(),
-            package: "foo".into(),
-            nar_size,
-            created_at: now(),
-            ..Default::default()
-        }
-    }
-
-    fn dep(derivation: DerivationId, dependency: DerivationId) -> derivation_dependency::Model {
-        derivation_dependency::Model {
-            derivation,
-            dependency,
-            ..Default::default()
-        }
-    }
-
-    fn node(derivation: DerivationId) -> derivation_dependency::Model {
-        dep(derivation, derivation)
-    }
+    use gradient_fixtures::rows::{derivation_dependency, derivation_named, derivation_output};
 
     #[tokio::test]
     async fn build_closure_graph_sums_and_links() {
@@ -396,10 +352,19 @@ mod tests {
                 last_insert_id: 0,
                 rows_affected: 0,
             }])
-            .append_query_results([vec![node(root), node(child)]])
-            .append_query_results([vec![out(root, "r", Some(100)), out(child, "c", Some(40))]])
-            .append_query_results([vec![drv(root, "root"), drv(child, "child")]])
-            .append_query_results([vec![dep(root, child)]])
+            .append_query_results([vec![
+                derivation_dependency(root, root),
+                derivation_dependency(child, child),
+            ]])
+            .append_query_results([vec![
+                derivation_output(root, "r", Some(100)),
+                derivation_output(child, "c", Some(40)),
+            ]])
+            .append_query_results([vec![
+                derivation_named(root, "root"),
+                derivation_named(child, "child"),
+            ]])
+            .append_query_results([vec![derivation_dependency(root, child)]])
             .into_connection();
 
         let g = build_closure_graph(&db, vec![root]).await.unwrap();

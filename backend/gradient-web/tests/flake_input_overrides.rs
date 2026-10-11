@@ -11,13 +11,13 @@
 
 use gradient_entity::ids::*;
 use gradient_entity::task_flake_input_override;
-use gradient_fixtures::ids::{project_id, task_id, user_id};
+use gradient_fixtures::ids::task_id;
 use gradient_fixtures::mock::mock_db;
-use gradient_fixtures::rows::{admin_role, project, project_member};
+use gradient_fixtures::rows::{admin_role, project, project_member, task};
 use gradient_fixtures::test_date;
 use gradient_test_support::web::{make_test_server, make_token, with_auth};
+use gradient_types::SessionId;
 use gradient_types::consts::BASE_ROLE_ADMIN_ID;
-use gradient_types::{ConcurrencyPolicy, SessionId};
 use sea_orm::{MockDatabase, MockExecResult};
 use serde_json::Value;
 use uuid::Uuid;
@@ -26,29 +26,10 @@ fn override_id() -> FlakeInputOverrideId {
     FlakeInputOverrideId::new(Uuid::parse_str("00000000-0000-0000-0000-000000000077").unwrap())
 }
 
-fn task_row() -> gradient_entity::task::Model {
-    gradient_entity::task::Model {
-        id: task_id(),
-        project: project_id(),
-        name: "test-task".into(),
-        active: true,
-        display_name: "Test Task".into(),
-        repository: "https://github.com/test/repo".into(),
-        wildcard: "*".into(),
-        last_check_at: test_date(),
-        created_by: user_id(),
-        created_at: test_date(),
-        keep_evaluations: 10,
-        concurrency: ConcurrencyPolicy::Skip,
-        sign_cache: true,
-        ..Default::default()
-    }
-}
-
 fn managed_task_row() -> gradient_entity::task::Model {
     gradient_entity::task::Model {
         managed: true,
-        ..task_row()
+        ..task()
     }
 }
 
@@ -65,13 +46,13 @@ fn nixpkgs_override_row() -> task_flake_input_override::Model {
 
 fn with_task_member(db: MockDatabase) -> MockDatabase {
     db.append_query_results([vec![project()]])
-        .append_query_results([vec![task_row()]])
+        .append_query_results([vec![task()]])
         .append_query_results([vec![project_member(BASE_ROLE_ADMIN_ID)]])
 }
 
 fn with_task_edit(db: MockDatabase) -> MockDatabase {
     db.append_query_results([vec![project()]])
-        .append_query_results([vec![task_row()]])
+        .append_query_results([vec![task()]])
         .append_query_results([vec![project_member(BASE_ROLE_ADMIN_ID)]])
         .append_query_results([vec![admin_role()]])
 }

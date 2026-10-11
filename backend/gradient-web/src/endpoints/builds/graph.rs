@@ -147,17 +147,7 @@ mod tests {
     use gradient_entity::build::BuildStatus;
     use gradient_entity::{build_job, derivation, derivation_build, derivation_dependency};
     use gradient_fixtures::mock::mock_db;
-
-    fn drv(id: DerivationId, name: &str) -> derivation::Model {
-        derivation::Model {
-            id,
-            hash: format!("hash{name}"),
-            name: name.into(),
-            architecture: "x86_64-linux".into(),
-            created_at: gradient_types::now(),
-            ..Default::default()
-        }
-    }
+    use gradient_fixtures::rows::{derivation_dependency, derivation_named};
 
     fn shared_build(derivation: DerivationId, status: BuildStatus) -> derivation_build::Model {
         derivation_build::Model {
@@ -166,14 +156,6 @@ mod tests {
             status,
             created_at: gradient_types::now(),
             updated_at: gradient_types::now(),
-            ..Default::default()
-        }
-    }
-
-    fn dep(derivation: DerivationId, dependency: DerivationId) -> derivation_dependency::Model {
-        derivation_dependency::Model {
-            derivation,
-            dependency,
             ..Default::default()
         }
     }
@@ -198,8 +180,8 @@ mod tests {
         };
 
         let db = mock_db()
-            .append_query_results([vec![dep(root, input)]])
-            .append_query_results([vec![dep(input, interior)]])
+            .append_query_results([vec![derivation_dependency(root, input)]])
+            .append_query_results([vec![derivation_dependency(input, interior)]])
             .append_query_results([Vec::<derivation_dependency::Model>::new()])
             .append_query_results([vec![root_job.clone()]])
             .append_query_results([vec![
@@ -207,9 +189,9 @@ mod tests {
                 shared_build(input, BuildStatus::Substituted),
             ]])
             .append_query_results([vec![
-                drv(root, "root"),
-                drv(input, "input"),
-                drv(interior, "interior"),
+                derivation_named(root, "root"),
+                derivation_named(input, "input"),
+                derivation_named(interior, "interior"),
             ]])
             .into_connection();
 

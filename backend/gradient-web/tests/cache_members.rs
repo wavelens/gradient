@@ -9,15 +9,16 @@
     reason = "test scaffolding: a fixture helper that cannot build its value should fail the test loudly"
 )]
 
-use gradient_entity::{cache, cache_invitation, cache_role, cache_user, ids::*, user};
+use gradient_entity::{cache, cache_invitation, cache_user, ids::*, user};
 use gradient_fixtures::ids::user_id;
 use gradient_fixtures::mock::mock_db;
-use gradient_fixtures::rows::{live_session, superuser, user};
+use gradient_fixtures::rows::{
+    cache_admin_role, cache_member_in, cache_view_role, live_session, superuser, user,
+};
 use gradient_fixtures::test_date;
 use gradient_test_support::web::{make_test_server, make_token, signed_in};
 use gradient_types::SessionId;
 use gradient_types::consts::{BASE_CACHE_ROLE_ADMIN_ID, BASE_CACHE_ROLE_VIEW_ID};
-use gradient_types::permissions::{cache_admin_mask, cache_view_mask};
 use sea_orm::{MockDatabase, MockExecResult};
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
@@ -51,44 +52,6 @@ fn count_row(num: i64) -> BTreeMap<&'static str, sea_orm::Value> {
     let mut row = BTreeMap::new();
     row.insert("num_items", sea_orm::Value::BigInt(Some(num)));
     row
-}
-
-fn admin_member() -> cache_user::Model {
-    cache_user::Model {
-        id: CacheUserId::now_v7(),
-        cache: cache_id(),
-        user: user_id(),
-        role: BASE_CACHE_ROLE_ADMIN_ID,
-    }
-}
-
-fn view_member() -> cache_user::Model {
-    cache_user::Model {
-        id: CacheUserId::now_v7(),
-        cache: cache_id(),
-        user: user_id(),
-        role: BASE_CACHE_ROLE_VIEW_ID,
-    }
-}
-
-fn admin_role_row() -> cache_role::Model {
-    cache_role::Model {
-        id: BASE_CACHE_ROLE_ADMIN_ID,
-        name: "Admin".into(),
-        permission: cache_admin_mask(),
-        managed: true,
-        ..Default::default()
-    }
-}
-
-fn view_role_row() -> cache_role::Model {
-    cache_role::Model {
-        id: BASE_CACHE_ROLE_VIEW_ID,
-        name: "View".into(),
-        permission: cache_view_mask(),
-        managed: true,
-        ..Default::default()
-    }
 }
 
 fn other_user_row() -> user::Model {
@@ -130,10 +93,13 @@ async fn list_members_requires_view_cache() {
 
     let db = db
         .append_query_results([vec![cache_row(false)]])
-        .append_query_results([vec![admin_member()]])
-        .append_query_results([vec![admin_role_row()]])
-        .append_query_results([vec![(admin_member(), Some(user()))]])
-        .append_query_results([vec![admin_role_row()]]);
+        .append_query_results([vec![cache_member_in(cache_id(), BASE_CACHE_ROLE_ADMIN_ID)]])
+        .append_query_results([vec![cache_admin_role()]])
+        .append_query_results([vec![(
+            cache_member_in(cache_id(), BASE_CACHE_ROLE_ADMIN_ID),
+            Some(user()),
+        )]])
+        .append_query_results([vec![cache_admin_role()]]);
 
     let server = make_test_server(db.into_connection());
     let res = server
@@ -173,8 +139,8 @@ async fn add_member_requires_manage_cache_members() {
 
     let db = db
         .append_query_results([vec![cache_row(false)]])
-        .append_query_results([vec![view_member()]])
-        .append_query_results([vec![view_role_row()]]);
+        .append_query_results([vec![cache_member_in(cache_id(), BASE_CACHE_ROLE_VIEW_ID)]])
+        .append_query_results([vec![cache_view_role()]]);
 
     let server = make_test_server(db.into_connection());
     let res = server
@@ -192,12 +158,12 @@ async fn add_member_admin_creates_a_pending_invitation() {
 
     let db = db
         .append_query_results([vec![cache_row(false)]])
-        .append_query_results([vec![admin_member()]])
-        .append_query_results([vec![admin_role_row()]])
+        .append_query_results([vec![cache_member_in(cache_id(), BASE_CACHE_ROLE_ADMIN_ID)]])
+        .append_query_results([vec![cache_admin_role()]])
         .append_query_results([vec![other_user_row()]])
         .append_query_results([Vec::<cache_user::Model>::new()])
         .append_query_results([Vec::<cache_invitation::Model>::new()])
-        .append_query_results([vec![view_role_row()]])
+        .append_query_results([vec![cache_view_role()]])
         .append_query_results([vec![pending_invitation()]])
         .append_exec_results([MockExecResult {
             last_insert_id: 0,
@@ -233,12 +199,12 @@ async fn add_member_superuser_skips_the_invitation() {
 
     let db = with_superuser_auth(mock_db(), session_id)
         .append_query_results([vec![cache_row(false)]])
-        .append_query_results([vec![admin_member()]])
-        .append_query_results([vec![admin_role_row()]])
+        .append_query_results([vec![cache_member_in(cache_id(), BASE_CACHE_ROLE_ADMIN_ID)]])
+        .append_query_results([vec![cache_admin_role()]])
         .append_query_results([vec![other_user_row()]])
         .append_query_results([Vec::<cache_user::Model>::new()])
         .append_query_results([Vec::<cache_invitation::Model>::new()])
-        .append_query_results([vec![view_role_row()]])
+        .append_query_results([vec![cache_view_role()]])
         .append_query_results([vec![new_member]])
         .append_exec_results([MockExecResult {
             last_insert_id: 0,
@@ -274,11 +240,11 @@ async fn update_member_changes_role() {
 
     let db = db
         .append_query_results([vec![cache_row(false)]])
-        .append_query_results([vec![admin_member()]])
-        .append_query_results([vec![admin_role_row()]])
+        .append_query_results([vec![cache_member_in(cache_id(), BASE_CACHE_ROLE_ADMIN_ID)]])
+        .append_query_results([vec![cache_admin_role()]])
         .append_query_results([vec![other_user_row()]])
         .append_query_results([vec![target_member]])
-        .append_query_results([vec![admin_role_row()]])
+        .append_query_results([vec![cache_admin_role()]])
         .append_query_results([vec![updated_member]])
         .append_exec_results([MockExecResult {
             last_insert_id: 0,
@@ -301,10 +267,10 @@ async fn remove_member_blocks_last_admin() {
 
     let db = db
         .append_query_results([vec![cache_row(false)]])
-        .append_query_results([vec![admin_member()]])
-        .append_query_results([vec![admin_role_row()]])
+        .append_query_results([vec![cache_member_in(cache_id(), BASE_CACHE_ROLE_ADMIN_ID)]])
+        .append_query_results([vec![cache_admin_role()]])
         .append_query_results([vec![user()]])
-        .append_query_results([vec![admin_member()]])
+        .append_query_results([vec![cache_member_in(cache_id(), BASE_CACHE_ROLE_ADMIN_ID)]])
         .append_query_results([vec![count_row(1)]]);
 
     let server = make_test_server(db.into_connection());
@@ -330,8 +296,8 @@ async fn remove_member_view_role_succeeds() {
 
     let db = db
         .append_query_results([vec![cache_row(false)]])
-        .append_query_results([vec![admin_member()]])
-        .append_query_results([vec![admin_role_row()]])
+        .append_query_results([vec![cache_member_in(cache_id(), BASE_CACHE_ROLE_ADMIN_ID)]])
+        .append_query_results([vec![cache_admin_role()]])
         .append_query_results([vec![other_user_row()]])
         .append_query_results([vec![target_member]])
         .append_exec_results([MockExecResult {
@@ -355,8 +321,8 @@ async fn managed_cache_blocks_member_mutations() {
 
     let db = db
         .append_query_results([vec![cache_row(true)]])
-        .append_query_results([vec![admin_member()]])
-        .append_query_results([vec![admin_role_row()]]);
+        .append_query_results([vec![cache_member_in(cache_id(), BASE_CACHE_ROLE_ADMIN_ID)]])
+        .append_query_results([vec![cache_admin_role()]]);
 
     let server = make_test_server(db.into_connection());
     let res = server

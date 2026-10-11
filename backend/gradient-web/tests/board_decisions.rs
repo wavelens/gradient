@@ -5,18 +5,11 @@
  */
 
 use gradient_fixtures::mock::mock_db;
-use gradient_fixtures::rows::{live_session, user};
+use gradient_fixtures::rows::{live_session, superuser, user};
 use gradient_test_support::web::{make_test_server, make_token};
 use gradient_types::SessionId;
 use sea_orm::MockDatabase;
 use serde_json::Value;
-
-fn superuser() -> gradient_entity::user::Model {
-    gradient_entity::user::Model {
-        superuser: true,
-        ..user()
-    }
-}
 
 fn with_user(
     db: MockDatabase,

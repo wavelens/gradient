@@ -12,7 +12,7 @@
 use gradient_entity::{ids::*, integration, task, task_trigger};
 use gradient_fixtures::ids::{project_id, task_id, user_id};
 use gradient_fixtures::mock::mock_db;
-use gradient_fixtures::rows::{project, project_member};
+use gradient_fixtures::rows::{admin_role, project, project_member, task};
 use gradient_fixtures::test_date;
 use gradient_test_support::web::{make_test_server, make_token, signed_in, with_auth};
 use gradient_types::consts::BASE_ROLE_ADMIN_ID;
@@ -23,34 +23,6 @@ use uuid::Uuid;
 
 fn trigger_id() -> TaskTriggerId {
     TaskTriggerId::new(Uuid::parse_str("00000000-0000-0000-0000-000000000099").unwrap())
-}
-
-fn task_row() -> gradient_entity::task::Model {
-    gradient_entity::task::Model {
-        id: task_id(),
-        project: project_id(),
-        name: "test-task".into(),
-        active: true,
-        display_name: "Test Task".into(),
-        repository: "https://github.com/test/repo".into(),
-        wildcard: "*".into(),
-        last_check_at: test_date(),
-        created_by: user_id(),
-        created_at: test_date(),
-        keep_evaluations: 10,
-        concurrency: ConcurrencyPolicy::Skip,
-        sign_cache: true,
-        ..Default::default()
-    }
-}
-
-fn admin_role_row() -> gradient_entity::role::Model {
-    gradient_entity::role::Model {
-        id: gradient_types::consts::BASE_ROLE_ADMIN_ID,
-        name: "Admin".into(),
-        permission: gradient_types::permissions::admin_mask(),
-        ..Default::default()
-    }
 }
 
 fn polling_trigger_row() -> task_trigger::Model {
@@ -102,15 +74,15 @@ fn reporter_push_trigger_row() -> task_trigger::Model {
 
 fn with_task_member(db: MockDatabase) -> MockDatabase {
     db.append_query_results([vec![project()]])
-        .append_query_results([vec![task_row()]])
+        .append_query_results([vec![task()]])
         .append_query_results([vec![project_member(BASE_ROLE_ADMIN_ID)]])
 }
 
 fn with_task_edit(db: MockDatabase) -> MockDatabase {
     db.append_query_results([vec![project()]])
-        .append_query_results([vec![task_row()]])
+        .append_query_results([vec![task()]])
         .append_query_results([vec![project_member(BASE_ROLE_ADMIN_ID)]])
-        .append_query_results([vec![admin_role_row()]])
+        .append_query_results([vec![admin_role()]])
 }
 
 const BASE_URL: &str = "/api/v1/tasks/test-project/test-task/triggers";
@@ -414,7 +386,7 @@ async fn create_task_seeds_default_polling_trigger() {
     let db = db
         .append_query_results([vec![project()]])
         .append_query_results([vec![project_member(BASE_ROLE_ADMIN_ID)]])
-        .append_query_results([vec![admin_role_row()]])
+        .append_query_results([vec![admin_role()]])
         .append_query_results([Vec::<task::Model>::new()])
         .append_query_results([vec![created_task]])
         .append_query_results([vec![seeded_trigger]]);
@@ -444,7 +416,7 @@ async fn patch_task_concurrency_to_skip() {
     let token = make_token(session_id);
 
     let db = with_task_edit(with_auth(mock_db(), session_id))
-        .append_query_results([vec![task_row()]])
+        .append_query_results([vec![task()]])
         .append_exec_results([MockExecResult {
             last_insert_id: 0,
             rows_affected: 1,

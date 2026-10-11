@@ -4,7 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use gradient_entity::ids::{EvaluationId, ProjectId, ProjectUserId, RoleId, UploadSessionId};
+use gradient_entity::ids::{
+    EvaluationId, ProjectId, ProjectUserId, RoleId, TaskId, UploadSessionId,
+};
 use gradient_entity::{evaluation, project, project_user, role, task, upload_session};
 use gradient_types::ConcurrencyPolicy;
 use gradient_types::consts::{BASE_ROLE_ADMIN_ID, BASE_ROLE_VIEW_ID, BASE_ROLE_WRITE_ID};
@@ -62,6 +64,13 @@ pub fn task() -> task::Model {
         concurrency: ConcurrencyPolicy::Skip,
         sign_cache: true,
         ..Default::default()
+    }
+}
+
+pub fn task_without_cache_signing() -> task::Model {
+    task::Model {
+        sign_cache: false,
+        ..task()
     }
 }
 
@@ -141,6 +150,27 @@ pub fn upload_session(
         created_at: now,
         expires_at,
         dispatched_at: if dispatched { Some(now) } else { None },
+        ..Default::default()
+    }
+}
+
+pub fn build_request_task(id: TaskId) -> task::Model {
+    task::Model {
+        id,
+        project: project_id(),
+        name: "build-request".into(),
+        active: true,
+        display_name: "Build Requests".into(),
+        description: "Server-managed task for `gradient build` submissions.".into(),
+        repository: "build-request".into(),
+        wildcard: "*".into(),
+        last_check_at: chrono::NaiveDateTime::default(),
+        created_by: user_id(),
+        created_at: chrono::Utc::now().naive_utc(),
+        managed: true,
+        keep_evaluations: 30,
+        concurrency: ConcurrencyPolicy::SoftAbort,
+        sign_cache: true,
         ..Default::default()
     }
 }

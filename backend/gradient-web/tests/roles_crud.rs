@@ -10,40 +10,13 @@
 
 use gradient_entity::{ids::*, project_user, role};
 use gradient_fixtures::ids::project_id;
-use gradient_fixtures::rows::{project, project_member};
+use gradient_fixtures::rows::{admin_role, project, project_member, view_role, write_role};
 use gradient_test_support::web::{make_test_server, signed_in};
-use gradient_types::consts::{BASE_ROLE_ADMIN_ID, BASE_ROLE_VIEW_ID, BASE_ROLE_WRITE_ID};
-use gradient_types::permissions::{Permission, admin_mask, view_mask, write_mask};
+use gradient_types::consts::{BASE_ROLE_ADMIN_ID, BASE_ROLE_VIEW_ID};
+use gradient_types::permissions::Permission;
 use sea_orm::MockExecResult;
 use serde_json::{Value, json};
 use uuid::Uuid;
-
-fn admin_role_row() -> role::Model {
-    role::Model {
-        id: BASE_ROLE_ADMIN_ID,
-        name: "Admin".into(),
-        permission: admin_mask(),
-        ..Default::default()
-    }
-}
-
-fn view_role_row() -> role::Model {
-    role::Model {
-        id: BASE_ROLE_VIEW_ID,
-        name: "View".into(),
-        permission: view_mask(),
-        ..Default::default()
-    }
-}
-
-fn write_role_row() -> role::Model {
-    role::Model {
-        id: BASE_ROLE_WRITE_ID,
-        name: "Write".into(),
-        permission: write_mask(),
-        ..Default::default()
-    }
-}
 
 fn custom_role_row(id: RoleId, name: &str, permission: i64) -> role::Model {
     role::Model {
@@ -64,9 +37,9 @@ async fn list_roles_returns_builtins_plus_custom() {
         .append_query_results([vec![project()]])
         .append_query_results([vec![project_member(BASE_ROLE_VIEW_ID)]])
         .append_query_results([vec![
-            admin_role_row(),
-            write_role_row(),
-            view_role_row(),
+            admin_role(),
+            write_role(),
+            view_role(),
             custom_role_row(custom_id, "releaser", Permission::TriggerEvaluation.bit()),
         ]]);
 
@@ -114,7 +87,7 @@ async fn create_role_persists_permission_bitmask() {
     let db = db
         .append_query_results([vec![project()]])
         .append_query_results([vec![project_member(BASE_ROLE_ADMIN_ID)]])
-        .append_query_results([vec![admin_role_row()]])
+        .append_query_results([vec![admin_role()]])
         .append_query_results::<role::Model, _, _>([Vec::<role::Model>::new()])
         .append_query_results([vec![inserted.clone()]])
         .append_exec_results([MockExecResult {
@@ -149,7 +122,7 @@ async fn create_role_rejects_unknown_permission() {
     let db = db
         .append_query_results([vec![project()]])
         .append_query_results([vec![project_member(BASE_ROLE_ADMIN_ID)]])
-        .append_query_results([vec![admin_role_row()]]);
+        .append_query_results([vec![admin_role()]]);
 
     let server = make_test_server(db.into_connection());
     let res = server
@@ -174,7 +147,7 @@ async fn create_role_rejects_view_role_caller() {
     let db = db
         .append_query_results([vec![project()]])
         .append_query_results([vec![project_member(BASE_ROLE_VIEW_ID)]])
-        .append_query_results([vec![view_role_row()]]);
+        .append_query_results([vec![view_role()]]);
 
     let server = make_test_server(db.into_connection());
     let res = server
@@ -197,7 +170,7 @@ async fn create_role_rejects_duplicate_name() {
     let db = db
         .append_query_results([vec![project()]])
         .append_query_results([vec![project_member(BASE_ROLE_ADMIN_ID)]])
-        .append_query_results([vec![admin_role_row()]])
+        .append_query_results([vec![admin_role()]])
         .append_query_results([vec![existing]]);
 
     let server = make_test_server(db.into_connection());
@@ -220,8 +193,8 @@ async fn patch_builtin_role_is_forbidden() {
     let db = db
         .append_query_results([vec![project()]])
         .append_query_results([vec![project_member(BASE_ROLE_ADMIN_ID)]])
-        .append_query_results([vec![admin_role_row()]])
-        .append_query_results([vec![admin_role_row()]]);
+        .append_query_results([vec![admin_role()]])
+        .append_query_results([vec![admin_role()]]);
 
     let server = make_test_server(db.into_connection());
     let res = server
@@ -250,7 +223,7 @@ async fn patch_custom_role_updates_mask() {
     let db = db
         .append_query_results([vec![project()]])
         .append_query_results([vec![project_member(BASE_ROLE_ADMIN_ID)]])
-        .append_query_results([vec![admin_role_row()]])
+        .append_query_results([vec![admin_role()]])
         .append_query_results([vec![custom]])
         .append_query_results([vec![updated]])
         .append_exec_results([MockExecResult {
@@ -283,8 +256,8 @@ async fn delete_builtin_role_is_forbidden() {
     let db = db
         .append_query_results([vec![project()]])
         .append_query_results([vec![project_member(BASE_ROLE_ADMIN_ID)]])
-        .append_query_results([vec![admin_role_row()]])
-        .append_query_results([vec![view_role_row()]]);
+        .append_query_results([vec![admin_role()]])
+        .append_query_results([vec![view_role()]]);
 
     let server = make_test_server(db.into_connection());
     let res = server
@@ -314,7 +287,7 @@ async fn delete_role_in_use_is_rejected() {
     let db = db
         .append_query_results([vec![project()]])
         .append_query_results([vec![project_member(BASE_ROLE_ADMIN_ID)]])
-        .append_query_results([vec![admin_role_row()]])
+        .append_query_results([vec![admin_role()]])
         .append_query_results([vec![custom]])
         .append_query_results([vec![in_use_membership]]);
 
@@ -339,7 +312,7 @@ async fn delete_role_granted_to_a_team_is_rejected() {
     let db = db
         .append_query_results([vec![project()]])
         .append_query_results([vec![project_member(BASE_ROLE_ADMIN_ID)]])
-        .append_query_results([vec![admin_role_row()]])
+        .append_query_results([vec![admin_role()]])
         .append_query_results([vec![custom]])
         .append_query_results::<project_user::Model, _, _>([Vec::<project_user::Model>::new()])
         .append_query_results([vec![gradient_entity::team_project::Model {
@@ -374,7 +347,7 @@ async fn delete_unused_custom_role_succeeds() {
     let db = db
         .append_query_results([vec![project()]])
         .append_query_results([vec![project_member(BASE_ROLE_ADMIN_ID)]])
-        .append_query_results([vec![admin_role_row()]])
+        .append_query_results([vec![admin_role()]])
         .append_query_results([vec![custom]])
         .append_query_results::<project_user::Model, _, _>([Vec::<project_user::Model>::new()])
         .append_query_results([Vec::<gradient_entity::team_project::Model>::new()])

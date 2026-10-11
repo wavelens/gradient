@@ -4,41 +4,19 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use gradient_entity::{role, task};
-use gradient_fixtures::ids::{project_id, task_id, user_id};
-use gradient_fixtures::rows::{project, project_member};
-use gradient_fixtures::test_date;
+use gradient_entity::task;
+use gradient_fixtures::rows::{admin_role, project, project_member, task};
 use gradient_test_support::web::{make_test_server, signed_in};
 use gradient_types::ConcurrencyPolicy;
 use gradient_types::consts::BASE_ROLE_ADMIN_ID;
-use gradient_types::permissions::admin_mask;
 use serde_json::Value;
-
-fn admin_role_row() -> role::Model {
-    role::Model {
-        id: gradient_types::consts::BASE_ROLE_ADMIN_ID,
-        name: "Admin".into(),
-        permission: admin_mask(),
-        ..Default::default()
-    }
-}
 
 fn task_with(sign_cache: bool) -> task::Model {
     task::Model {
-        id: task_id(),
-        project: project_id(),
-        name: "test-task".into(),
-        active: true,
-        display_name: "Test Task".into(),
-        repository: "https://github.com/test/repo".into(),
-        wildcard: "*".into(),
-        last_check_at: test_date(),
-        created_by: user_id(),
-        created_at: test_date(),
         keep_evaluations: 30,
         concurrency: ConcurrencyPolicy::SoftAbort,
         sign_cache,
-        ..Default::default()
+        ..task()
     }
 }
 
@@ -51,9 +29,9 @@ async fn get_task_includes_sign_cache() {
         .append_query_results([vec![task_with(false)]])
         .append_query_results([vec![project_member(BASE_ROLE_ADMIN_ID)]])
         .append_query_results([vec![project_member(BASE_ROLE_ADMIN_ID)]])
-        .append_query_results([vec![admin_role_row()]])
+        .append_query_results([vec![admin_role()]])
         .append_query_results([vec![project_member(BASE_ROLE_ADMIN_ID)]])
-        .append_query_results([vec![admin_role_row()]]);
+        .append_query_results([vec![admin_role()]]);
 
     let server = make_test_server(db.into_connection());
     let res = server

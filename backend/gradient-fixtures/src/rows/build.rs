@@ -5,7 +5,7 @@
  */
 
 use gradient_entity::ids::{CommitId, DerivationId, DerivationOutputId, EvaluationId, TaskId};
-use gradient_entity::{commit, derivation_dependency, derivation_output, evaluation};
+use gradient_entity::{commit, derivation, derivation_dependency, derivation_output, evaluation};
 
 use crate::ids::user_id;
 
@@ -58,6 +58,17 @@ pub fn queued_evaluation(task: TaskId, commit: CommitId) -> evaluation::Model {
         status: evaluation::EvaluationStatus::Queued,
         created_at: now,
         updated_at: now,
+        ..Default::default()
+    }
+}
+
+pub fn derivation_named(id: DerivationId, name: &str) -> derivation::Model {
+    derivation::Model {
+        id,
+        hash: format!("hash{name}"),
+        name: name.into(),
+        architecture: "x86_64-linux".into(),
+        created_at: chrono::Utc::now().naive_utc(),
         ..Default::default()
     }
 }

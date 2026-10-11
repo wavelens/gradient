@@ -211,41 +211,8 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gradient_entity::{derivation_dependency, derivation_output};
     use gradient_fixtures::mock::{empty_db, mock_db};
-
-    fn now() -> chrono::NaiveDateTime {
-        chrono::Utc::now().naive_utc()
-    }
-
-    fn out(
-        derivation: DerivationId,
-        hash: &str,
-        nar_size: Option<i64>,
-    ) -> derivation_output::Model {
-        derivation_output::Model {
-            id: DerivationOutputId::now_v7(),
-            derivation,
-            name: "out".into(),
-            hash: hash.into(),
-            package: "foo".into(),
-            nar_size,
-            created_at: now(),
-            ..Default::default()
-        }
-    }
-
-    fn dep(derivation: DerivationId, dependency: DerivationId) -> derivation_dependency::Model {
-        derivation_dependency::Model {
-            derivation,
-            dependency,
-            ..Default::default()
-        }
-    }
-
-    fn node(derivation: DerivationId) -> derivation_dependency::Model {
-        dep(derivation, derivation)
-    }
+    use gradient_fixtures::rows::{derivation_dependency, derivation_output};
 
     fn raise() -> sea_orm::MockExecResult {
         sea_orm::MockExecResult {
@@ -260,8 +227,14 @@ mod tests {
         let child = DerivationId::now_v7();
         let db = mock_db()
             .append_exec_results([raise()])
-            .append_query_results([vec![node(root), node(child)]])
-            .append_query_results([vec![out(root, "r", Some(100)), out(child, "c", Some(40))]])
+            .append_query_results([vec![
+                derivation_dependency(root, root),
+                derivation_dependency(child, child),
+            ]])
+            .append_query_results([vec![
+                derivation_output(root, "r", Some(100)),
+                derivation_output(child, "c", Some(40)),
+            ]])
             .into_connection();
 
         let total = transitive_closure_size(&db, &[root]).await.unwrap();
@@ -283,12 +256,17 @@ mod tests {
         let c = DerivationId::now_v7();
         let db = mock_db()
             .append_exec_results([raise()])
-            .append_query_results([vec![dep(root, a), dep(root, b), dep(a, c), dep(b, c)]])
             .append_query_results([vec![
-                out(root, "r", Some(10)),
-                out(a, "a", Some(20)),
-                out(b, "b", Some(30)),
-                out(c, "c", Some(40)),
+                derivation_dependency(root, a),
+                derivation_dependency(root, b),
+                derivation_dependency(a, c),
+                derivation_dependency(b, c),
+            ]])
+            .append_query_results([vec![
+                derivation_output(root, "r", Some(10)),
+                derivation_output(a, "a", Some(20)),
+                derivation_output(b, "b", Some(30)),
+                derivation_output(c, "c", Some(40)),
             ]])
             .into_connection();
 
@@ -302,8 +280,8 @@ mod tests {
         let b = DerivationId::now_v7();
         let db = mock_db()
             .append_exec_results([raise()])
-            .append_query_results([vec![node(a)]])
-            .append_query_results([vec![node(b)]])
+            .append_query_results([vec![derivation_dependency(a, a)]])
+            .append_query_results([vec![derivation_dependency(b, b)]])
             .into_connection();
 
         let walk = crate::graph::walks::begin_walk(&db, &TRANSITIVE_CLOSURE_REACHABLE)

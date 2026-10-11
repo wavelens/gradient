@@ -9,14 +9,14 @@
     reason = "test scaffolding: a fixture helper that cannot build its value should fail the test loudly"
 )]
 
-use gradient_entity::{api, cache, cache_role, cache_user, ids::*};
+use gradient_entity::{api, cache, ids::*};
 use gradient_fixtures::ids::user_id;
 use gradient_fixtures::mock::mock_db;
-use gradient_fixtures::rows::user;
+use gradient_fixtures::rows::{cache_member_in, cache_view_role, user};
 use gradient_fixtures::test_date;
 use gradient_test_support::web::make_test_server;
 use gradient_types::consts::BASE_CACHE_ROLE_VIEW_ID;
-use gradient_types::permissions::{cache_admin_mask, cache_view_mask};
+use gradient_types::permissions::cache_admin_mask;
 use sea_orm::{MockDatabase, MockExecResult};
 use sha2::{Digest, Sha256};
 
@@ -85,25 +85,6 @@ fn api_key_db(db: MockDatabase, key: &api::Model) -> MockDatabase {
         }])
         .append_query_results([vec![key.clone()]])
         .append_query_results([vec![user()]])
-}
-
-fn view_cache_member() -> cache_user::Model {
-    cache_user::Model {
-        id: CacheUserId::now_v7(),
-        cache: cache_id(),
-        user: user_id(),
-        role: BASE_CACHE_ROLE_VIEW_ID,
-    }
-}
-
-fn view_cache_role() -> cache_role::Model {
-    cache_role::Model {
-        id: BASE_CACHE_ROLE_VIEW_ID,
-        name: "View".into(),
-        permission: cache_view_mask(),
-        managed: true,
-        ..Default::default()
-    }
 }
 
 #[tokio::test]
@@ -200,9 +181,9 @@ async fn create_cache_pinned_key_cannot_exceed_member_mask() {
         .append_query_results([vec![user()]])
         .append_query_results([Vec::<api::Model>::new()])
         .append_query_results([vec![private_cache_row()]])
-        .append_query_results([vec![view_cache_member()]])
-        .append_query_results([vec![view_cache_member()]])
-        .append_query_results([vec![view_cache_role()]]);
+        .append_query_results([vec![cache_member_in(cache_id(), BASE_CACHE_ROLE_VIEW_ID)]])
+        .append_query_results([vec![cache_member_in(cache_id(), BASE_CACHE_ROLE_VIEW_ID)]])
+        .append_query_results([vec![cache_view_role()]]);
 
     let server = make_test_server(db.into_connection());
     let res = server

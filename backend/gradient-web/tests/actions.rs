@@ -10,10 +10,10 @@
 )]
 
 use axum_test::TestServer;
-use gradient_entity::{ids::*, task, task_action, task_action_delivery, team};
-use gradient_fixtures::ids::{project_id, task_id, user_id};
+use gradient_entity::{ids::*, task_action, task_action_delivery, team};
+use gradient_fixtures::ids::{task_id, user_id};
 use gradient_fixtures::mock::mock_db;
-use gradient_fixtures::rows::{admin_role, project, project_member};
+use gradient_fixtures::rows::{admin_role, project, project_member, task};
 use gradient_fixtures::test_date;
 use gradient_notify::EmailSender;
 use gradient_test_support::fakes::email::InMemoryEmailSender;
@@ -21,7 +21,7 @@ use gradient_test_support::state::TestState;
 use gradient_test_support::web::make_token;
 use gradient_test_support::web::{make_test_server, with_auth};
 use gradient_types::consts::BASE_ROLE_ADMIN_ID;
-use gradient_types::{ActionType, ConcurrencyPolicy, SessionId};
+use gradient_types::{ActionType, SessionId};
 use sea_orm::MockDatabase;
 use serde_json::{Value, json};
 use std::sync::Arc;
@@ -29,25 +29,6 @@ use uuid::Uuid;
 
 fn action_id() -> TaskActionId {
     TaskActionId::new(Uuid::parse_str("00000000-0000-0000-0000-0000000000a1").unwrap())
-}
-
-fn task_row() -> task::Model {
-    task::Model {
-        id: task_id(),
-        project: project_id(),
-        name: "test-task".into(),
-        active: true,
-        display_name: "Test Task".into(),
-        repository: "https://github.com/test/repo".into(),
-        wildcard: "*".into(),
-        last_check_at: test_date(),
-        created_by: user_id(),
-        created_at: test_date(),
-        keep_evaluations: 10,
-        concurrency: ConcurrencyPolicy::Skip,
-        sign_cache: true,
-        ..Default::default()
-    }
 }
 
 fn send_mail_action_row() -> task_action::Model {
@@ -96,13 +77,13 @@ fn temp_crypt_secret_file() -> String {
 
 fn with_task_member(db: MockDatabase) -> MockDatabase {
     db.append_query_results([vec![project()]])
-        .append_query_results([vec![task_row()]])
+        .append_query_results([vec![task()]])
         .append_query_results([vec![project_member(BASE_ROLE_ADMIN_ID)]])
 }
 
 fn with_task_edit(db: MockDatabase) -> MockDatabase {
     db.append_query_results([vec![project()]])
-        .append_query_results([vec![task_row()]])
+        .append_query_results([vec![task()]])
         .append_query_results([vec![project_member(BASE_ROLE_ADMIN_ID)]])
         .append_query_results([vec![admin_role()]])
 }

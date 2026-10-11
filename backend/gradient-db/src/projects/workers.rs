@@ -51,29 +51,12 @@ pub async fn worker_ids_for_project<C: ConnectionTrait>(
 mod tests {
     use super::*;
     use gradient_fixtures::mock::mock_db;
-    use gradient_types::ids::{UserId, WorkerRegistrationId};
-
-    fn registration_row(
-        active: bool,
-        enable_eval: bool,
-    ) -> gradient_entity::worker_registration::Model {
-        gradient_entity::worker_registration::Model {
-            id: WorkerRegistrationId::now_v7(),
-            peer_id: ProjectId::nil(),
-            worker_id: "00000000-0000-4000-8000-000000000001".into(),
-            active,
-            enable_fetch: true,
-            enable_eval,
-            enable_build: true,
-            created_by: Some(UserId::nil()),
-            ..Default::default()
-        }
-    }
+    use gradient_fixtures::rows::worker_registration;
 
     #[tokio::test]
     async fn returns_true_when_eval_capable_registration_exists() {
         let db = mock_db()
-            .append_query_results([vec![registration_row(true, true)]])
+            .append_query_results([vec![worker_registration(true, true)]])
             .into_connection();
 
         let out = project_has_eval_capable_worker_registration(&db, ProjectId::nil())
@@ -100,7 +83,7 @@ mod tests {
         use gradient_entity::{team, team_project, team_worker};
 
         let team = gradient_types::ids::TeamId::now_v7();
-        let registered = registration_row(true, true);
+        let registered = worker_registration(true, true);
         let db = mock_db()
             .append_query_results([vec![registered.clone()]])
             .append_query_results([vec![team_project::Model {
