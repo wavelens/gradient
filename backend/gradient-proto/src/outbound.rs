@@ -13,6 +13,7 @@ use gradient_entity::{team_worker, worker_registration};
 use gradient_types::ids::ProjectId;
 use gradient_types::{ETeamWorker, EWorkerRegistration};
 use gradient_util::supervision::ChildSpec;
+use gradient_wire::Rejection;
 use gradient_wire::session::handshake::DialerCredentials;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
 use tokio::sync::Mutex;
@@ -23,9 +24,6 @@ use gradient_scheduler::Scheduler;
 use gradient_scheduler::connection_failures::ConnectionDirection;
 
 const DIAL_TIMEOUT: Duration = Duration::from_secs(10);
-const NOT_GRANTED_TO_ANY_PROJECT: &str = "no project grants this team's workers";
-const NO_STORED_TOKEN: &str = "no connection token stored; register the worker again";
-const DEACTIVATED: &str = "worker is deactivated";
 const UNDECRYPTABLE: &str =
     "stored connection token cannot be decrypted with the current crypt key";
 
@@ -43,7 +41,7 @@ pub(crate) enum Dialable {
         projects: Vec<String>,
         team_worker: bool,
     },
-    Refused(&'static str),
+    Refused(Rejection),
 }
 
 struct DialRow {
@@ -52,7 +50,7 @@ struct DialRow {
     token_peers: Vec<String>,
     projects: Vec<String>,
     token_encrypted: Option<String>,
-    idle_reason: Option<&'static str>,
+    idle_reason: Option<Rejection>,
     team_worker: bool,
 }
 
@@ -85,7 +83,7 @@ impl DialRow {
         let projects: Vec<String> = projects.iter().map(ToString::to_string).collect();
 
         Self {
-            idle_reason: projects.is_empty().then_some(NOT_GRANTED_TO_ANY_PROJECT),
+            idle_reason: projects.is_empty().then_some(Rejection::NoProjectGrant),
             token_peers: vec![worker.team.to_string()],
             worker_id: worker.worker_id,
             url: worker.url.unwrap_or_default(),
@@ -110,7 +108,7 @@ impl WorkerDial {
         }
 
         if projects.is_empty() {
-            Dialable::Refused(NO_STORED_TOKEN)
+            Dialable::Refused(Rejection::NoStoredToken)
         } else {
             Dialable::Projects {
                 projects,
@@ -151,7 +149,7 @@ pub(crate) async fn dialable(
     let rows = dial_rows(state, Some(worker_id)).await?;
     Ok(match group_by_worker(rows).first() {
         Some(group) if group.url == url => group.token_projects(),
-        _ => Dialable::Refused(DEACTIVATED),
+        _ => Dialable::Refused(Rejection::WorkerDeactivated),
     })
 }
 
@@ -276,10 +274,10 @@ fn plan_worker(group: WorkerDial, decrypt: &impl Fn(&str) -> Option<String>) -> 
             projects,
             team_worker,
         } => (projects, team_worker),
-        Dialable::Refused(reason) => {
+        Dialable::Refused(rejection) => {
             return PlannedDial::Skip {
                 worker_id: group.worker_id,
-                reason: reason.into(),
+                reason: rejection.to_string(),
             };
         }
     };
@@ -481,7 +479,7 @@ mod tests {
 
         assert!(matches!(
             planned.as_slice(),
-            [PlannedDial::Skip { reason, .. }] if reason.as_str() == NO_STORED_TOKEN
+            [PlannedDial::Skip { reason, .. }] if *reason == Rejection::NoStoredToken.to_string()
         ));
     }
 
@@ -543,7 +541,7 @@ mod tests {
 
         assert!(matches!(
             planned.as_slice(),
-            [PlannedDial::Skip { reason, .. }] if reason.as_str() == NOT_GRANTED_TO_ANY_PROJECT
+            [PlannedDial::Skip { reason, .. }] if *reason == Rejection::NoProjectGrant.to_string()
         ));
     }
 

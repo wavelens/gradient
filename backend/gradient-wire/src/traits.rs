@@ -11,6 +11,7 @@ use crate::messages::{
     BuildMetrics, BuildOutput, CachedPath, DiscoveredDerivation, FailedPeer, GradientCapabilities,
     QueryMode,
 };
+use crate::rejection::Rejection;
 
 #[async_trait]
 pub trait WorkerStore: Send + Sync {
@@ -107,10 +108,7 @@ pub enum AuthOutcome {
         authorized_peers: Vec<String>,
         failed_peers: Vec<FailedPeer>,
     },
-    Reject {
-        code: u16,
-        reason: String,
-    },
+    Reject(Rejection),
 }
 
 #[async_trait]

@@ -12,6 +12,7 @@ use async_trait::async_trait;
 use gradient_core::ServerState;
 use gradient_scheduler::Scheduler;
 use gradient_types::ids::ProjectId;
+use gradient_wire::Rejection;
 use gradient_wire::messages::{FailedPeer, GradientCapabilities, ServerMessage};
 use gradient_wire::traits::{AuthOutcome, DialerAuthority};
 use tracing::{info, warn};
@@ -76,7 +77,7 @@ async fn admit_dialed(
 
             outcome_for(state, accepted).await
         }
-        Dialable::Refused(reason) => refused(reason),
+        Dialable::Refused(rejection) => AuthOutcome::Reject(rejection),
     })
 }
 
@@ -101,7 +102,7 @@ pub(super) async fn refresh_dialed_peers(
 
             outcome_for(state, current).await
         }
-        Ok(Dialable::Refused(reason)) => refused(reason),
+        Ok(Dialable::Refused(rejection)) => AuthOutcome::Reject(rejection),
         Err(e) => {
             warn!(error = %e, %worker_id, "failed to refresh a dialed session's projects");
             return true;
@@ -128,9 +129,9 @@ pub(super) async fn refresh_dialed_peers(
             .await
             .is_ok()
         }
-        AuthOutcome::Reject { code, reason } => {
-            info!(%worker_id, code, %reason, "dialed session has no project left - disconnecting");
-            let _ = send_server_msg(writer, &ServerMessage::Reject { code, reason }).await;
+        AuthOutcome::Reject(rejection) => {
+            info!(%worker_id, code = rejection.code(), reason = %rejection, "dialed session has no project left - disconnecting");
+            let _ = send_server_msg(writer, &ServerMessage::from(rejection)).await;
             false
         }
     }
@@ -141,24 +142,14 @@ async fn outcome_for(state: &ServerState, projects: Vec<String>) -> AuthOutcome 
     dialed_decision(authorized, demoted)
 }
 
-fn refused(reason: &str) -> AuthOutcome {
-    AuthOutcome::Reject {
-        code: 403,
-        reason: reason.into(),
-    }
-}
-
 fn dialed_decision(authorized: Vec<String>, demoted: Vec<FailedPeer>) -> AuthOutcome {
     match (authorized.is_empty(), demoted.is_empty()) {
         (false, _) => AuthOutcome::Accept {
             authorized_peers: authorized,
             failed_peers: demoted,
         },
-        (true, false) => AuthOutcome::Reject {
-            code: 495,
-            reason: "project has no cache subscribed".into(),
-        },
-        (true, true) => refused("worker is deactivated"),
+        (true, false) => AuthOutcome::Reject(Rejection::NoCacheSubscribed),
+        (true, true) => AuthOutcome::Reject(Rejection::WorkerDeactivated),
     }
 }
 
@@ -225,10 +216,7 @@ mod tests {
     fn a_dialed_worker_without_any_project_left_is_deactivated() {
         assert_eq!(
             dialed_decision(vec![], vec![]),
-            AuthOutcome::Reject {
-                code: 403,
-                reason: "worker is deactivated".into(),
-            }
+            AuthOutcome::Reject(Rejection::WorkerDeactivated)
         );
     }
 
@@ -240,7 +228,7 @@ mod tests {
         }];
         assert!(matches!(
             dialed_decision(vec![], demoted),
-            AuthOutcome::Reject { code: 495, .. }
+            AuthOutcome::Reject(Rejection::NoCacheSubscribed)
         ));
     }
 
@@ -277,7 +265,7 @@ mod tests {
             admit_dialed(&state, "w1", &session(&[project]))
                 .await
                 .unwrap(),
-            AuthOutcome::Reject { code: 403, .. }
+            AuthOutcome::Reject(Rejection::NoStoredToken)
         ));
     }
 

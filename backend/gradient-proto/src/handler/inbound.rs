@@ -20,6 +20,7 @@ use tracing::{Instrument as _, debug, debug_span, info, trace, warn};
 use gradient_scheduler::actor::{WorkerCapabilities, WorkerMetrics};
 use gradient_scheduler::jobs::{Assignment, PendingJob};
 use gradient_scheduler::{ReportedTimeline, Scheduler};
+use gradient_wire::Rejection;
 use gradient_wire::messages::{
     CACHE_QUERY_BUDGET, CandidateScore, ClientMessage, ClusterMembership, JobKind, ServerMessage,
 };
@@ -513,10 +514,7 @@ impl<'a> InboundContext<'a> {
             info!(peer_id = %self.peer_id, "no project authorizes this worker any more - disconnecting");
             let _ = send_server_msg(
                 self.writer,
-                &ServerMessage::Reject {
-                    code: 403,
-                    reason: "no project authorizes this worker".into(),
-                },
+                &ServerMessage::from(Rejection::NoProjectAuthorization),
             )
             .await;
             return false;

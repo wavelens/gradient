@@ -7,6 +7,7 @@
 use anyhow::Context;
 
 use crate::messages::{ClientMessage, FailedPeer, GradientCapabilities, ServerMessage};
+use crate::rejection::Rejection;
 use crate::session::frame::{ProtoSocket, recv_server_msg, send_client_msg};
 use crate::traits::{
     AuthOutcome, CapabilitiesProvider, DialerAuthority, DialerVerifier, PeerAuthority, PeerIdentity,
@@ -37,15 +38,12 @@ pub struct Registered {
 pub enum Intent {
     Send(Box<ServerMessage>),
     Advance,
-    Reject { code: u16, reason: String },
+    Reject(Rejection),
 }
 
 pub fn on_init_connection(_: Opening, msg: ClientMessage) -> Result<Greeted, Intent> {
     let ClientMessage::InitConnection { capabilities, id } = msg else {
-        return Err(Intent::Reject {
-            code: 400,
-            reason: "expected InitConnection".into(),
-        });
+        return Err(Intent::Reject(Rejection::ExpectedInitConnection));
     };
 
     Ok(Greeted {
@@ -62,10 +60,7 @@ pub fn on_auth_response(
     negotiated: GradientCapabilities,
 ) -> Result<Authenticated, Intent> {
     let ClientMessage::AuthResponse { .. } = msg else {
-        return Err(Intent::Reject {
-            code: 400,
-            reason: "expected AuthResponse".into(),
-        });
+        return Err(Intent::Reject(Rejection::ExpectedAuthResponse));
     };
     Ok(Authenticated {
         peer_id: greeted.peer_id,
@@ -148,8 +143,6 @@ where
     })
 }
 
-pub const UNKNOWN_WORKER_OR_WRONG_TOKEN: &str = "unknown worker id or wrong token";
-
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[error("handshake rejected ({code}): {reason}")]
 pub struct Rejected {
@@ -171,10 +164,7 @@ pub struct DialerClaim {
 
 pub fn on_authenticate(msg: ServerMessage) -> Result<DialerClaim, Intent> {
     let ServerMessage::Authenticate { worker_id, tokens } = msg else {
-        return Err(Intent::Reject {
-            code: 400,
-            reason: "expected Authenticate".into(),
-        });
+        return Err(Intent::Reject(Rejection::ExpectedAuthenticate));
     };
 
     Ok(DialerClaim { worker_id, tokens })
@@ -182,29 +172,23 @@ pub fn on_authenticate(msg: ServerMessage) -> Result<DialerClaim, Intent> {
 
 async fn reject_peer(
     socket: &mut ProtoSocket,
-    code: u16,
-    reason: String,
+    rejection: Rejection,
     claimed: Option<String>,
 ) -> anyhow::Error {
-    socket.send_reject(code, reason.clone()).await;
+    socket.send_reject(rejection).await;
     Rejected {
-        code,
-        reason,
+        code: rejection.code(),
+        reason: rejection.to_string(),
         claimed,
     }
     .into()
 }
 
-pub async fn reject_dialer(socket: &mut ProtoSocket, code: u16, reason: String) -> anyhow::Error {
-    let _ = socket
-        .send_client_msg(&ClientMessage::Reject {
-            code,
-            reason: reason.clone(),
-        })
-        .await;
+pub async fn reject_dialer(socket: &mut ProtoSocket, rejection: Rejection) -> anyhow::Error {
+    let _ = socket.send_client_msg(&rejection.into()).await;
     Rejected {
-        code,
-        reason,
+        code: rejection.code(),
+        reason: rejection.to_string(),
         claimed: None,
     }
     .into()
@@ -234,8 +218,8 @@ where
 {
     let greeted = match on_init_connection(Opening, greeting) {
         Ok(g) => g,
-        Err(Intent::Reject { code, reason }) => {
-            return Err(reject_peer(socket, code, reason, None).await);
+        Err(Intent::Reject(rejection)) => {
+            return Err(reject_peer(socket, rejection, None).await);
         }
         Err(other) => anyhow::bail!("unexpected intent during init: {other:?}"),
     };
@@ -256,8 +240,8 @@ where
         .await
         .ok_or_else(|| anyhow::anyhow!("connection closed before AuthResponse"))?;
     let ClientMessage::AuthResponse { tokens } = &auth_response else {
-        let reason = "expected AuthResponse".to_string();
-        return Err(reject_peer(socket, 400, reason, Some(greeted.peer_id.clone())).await);
+        let claimed = Some(greeted.peer_id.clone());
+        return Err(reject_peer(socket, Rejection::ExpectedAuthResponse, claimed).await);
     };
     let tokens = tokens.clone();
     let (authorized_peers, failed_peers) = match authority
@@ -269,8 +253,8 @@ where
             authorized_peers,
             failed_peers,
         } => (authorized_peers, failed_peers),
-        AuthOutcome::Reject { code, reason } => {
-            return Err(reject_peer(socket, code, reason, Some(greeted.peer_id.clone())).await);
+        AuthOutcome::Reject(rejection) => {
+            return Err(reject_peer(socket, rejection, Some(greeted.peer_id.clone())).await);
         }
     };
 
@@ -281,8 +265,8 @@ where
     let claimed = Some(greeted.peer_id.clone());
     let authenticated = match on_auth_response(greeted, auth_response, negotiated.clone()) {
         Ok(a) => a,
-        Err(Intent::Reject { code, reason }) => {
-            return Err(reject_peer(socket, code, reason, claimed).await);
+        Err(Intent::Reject(rejection)) => {
+            return Err(reject_peer(socket, rejection, claimed).await);
         }
         Err(other) => anyhow::bail!("unexpected intent during auth: {other:?}"),
     };
@@ -335,8 +319,8 @@ where
             authorized_peers,
             failed_peers,
         } => (authorized_peers, failed_peers),
-        AuthOutcome::Reject { code, reason } => {
-            return Err(reject_peer(socket, code, reason, None).await);
+        AuthOutcome::Reject(rejection) => {
+            return Err(reject_peer(socket, rejection, None).await);
         }
     };
 
@@ -377,14 +361,26 @@ async fn greet_dialed_worker(socket: &mut ProtoSocket, worker_id: &str) -> anyho
     };
     let greeted = match on_init_connection(Opening, init) {
         Ok(greeted) => greeted,
-        Err(Intent::Reject { code, reason }) => {
-            return Err(reject_peer(socket, code, reason, None).await);
+        Err(Intent::Reject(rejection)) => {
+            return Err(reject_peer(socket, rejection, None).await);
         }
         Err(other) => anyhow::bail!("unexpected intent during init: {other:?}"),
     };
     if greeted.peer_id != worker_id {
         let reason = format!("dialed worker answered as {}", greeted.peer_id);
-        return Err(reject_peer(socket, 400, reason, None).await);
+        let _ = socket
+            .send_msg(&ServerMessage::Reject {
+                code: 400,
+                reason: reason.clone(),
+            })
+            .await;
+
+        return Err(Rejected {
+            code: 400,
+            reason,
+            claimed: None,
+        }
+        .into());
     }
 
     Ok(greeted)
@@ -404,15 +400,14 @@ where
     let first = recv_server_msg(socket).await?;
     let claim = match on_authenticate(first) {
         Ok(claim) => claim,
-        Err(Intent::Reject { code, reason }) => {
-            return Err(reject_dialer(socket, code, reason).await);
+        Err(Intent::Reject(rejection)) => {
+            return Err(reject_dialer(socket, rejection).await);
         }
         Err(other) => anyhow::bail!("unexpected intent during Authenticate: {other:?}"),
     };
     let known = claim.worker_id == identity.peer_id();
     if !known || !verifier.verify(&claim.worker_id, &claim.tokens).await {
-        let reason = UNKNOWN_WORKER_OR_WRONG_TOKEN.to_string();
-        return Err(reject_dialer(socket, 401, reason).await);
+        return Err(reject_dialer(socket, Rejection::UnknownWorkerOrWrongToken).await);
     }
 
     answer_dialer(socket, identity, capabilities).await
@@ -480,7 +475,10 @@ mod tests {
     #[test]
     fn opening_rejects_wrong_variant() {
         let result = on_init_connection(Opening, ClientMessage::Draining);
-        assert!(matches!(result, Err(Intent::Reject { .. })));
+        assert!(matches!(
+            result,
+            Err(Intent::Reject(Rejection::ExpectedInitConnection))
+        ));
     }
 
     #[test]
@@ -519,7 +517,10 @@ mod tests {
             ClientMessage::Draining,
             GradientCapabilities::default(),
         );
-        assert!(matches!(result, Err(Intent::Reject { .. })));
+        assert!(matches!(
+            result,
+            Err(Intent::Reject(Rejection::ExpectedAuthResponse))
+        ));
     }
 
     struct Admits(Vec<String>);

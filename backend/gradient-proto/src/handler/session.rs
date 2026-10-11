@@ -18,6 +18,7 @@ use async_trait::async_trait;
 
 use gradient_scheduler::Scheduler;
 use gradient_scheduler::connection_failures::ConnectionDirection;
+use gradient_wire::Rejection;
 use gradient_wire::messages::{GradientCapabilities, ServerMessage};
 use gradient_wire::session::handshake as handshake_fsm;
 use gradient_wire::session::handshake::{HandshakeResult, Rejected};
@@ -107,9 +108,9 @@ impl ProtoSession<Opening> {
     async fn accept_worker(&mut self) -> Result<HandshakeResult> {
         if !self.state.config.proto.discoverable {
             self.socket
-                .send_reject(403, "server is not accepting connections".into())
+                .send_reject(Rejection::NotAcceptingConnections)
                 .await;
-            anyhow::bail!("server is not accepting connections");
+            anyhow::bail!(Rejection::NotAcceptingConnections);
         }
 
         let authority = ServerAuthority {
@@ -199,10 +200,7 @@ impl PeerAuthority for ServerAuthority {
                 authorized_peers: resolved.authorized,
                 failed_peers: resolved.failed,
             }),
-            AuthDecision::Reject { code, reason } => Ok(AuthOutcome::Reject {
-                code,
-                reason: reason.into(),
-            }),
+            AuthDecision::Reject(rejection) => Ok(AuthOutcome::Reject(rejection)),
         }
     }
 
@@ -233,9 +231,7 @@ impl ProtoSession<Authenticated> {
 
         if scheduler.is_worker_connected(&peer_id).await {
             warn!(%peer_id, "duplicate connection rejected (worker already connected)");
-            socket
-                .send_reject(496, "worker already connected".into())
-                .await;
+            socket.send_reject(Rejection::AlreadyConnected).await;
             return None;
         }
 
@@ -277,14 +273,7 @@ pub(super) async fn on_reauth_notify(
     if team.is_none() && registered_peers.is_empty() && has_any_registrations(state, peer_id).await
     {
         info!(%peer_id, "all registrations deactivated - disconnecting worker");
-        let _ = send_server_msg(
-            writer,
-            &ServerMessage::Reject {
-                code: 403,
-                reason: "worker is deactivated".into(),
-            },
-        )
-        .await;
+        let _ = send_server_msg(writer, &ServerMessage::from(Rejection::WorkerDeactivated)).await;
         return false;
     }
     send_server_msg(
@@ -338,7 +327,7 @@ pub(crate) async fn handle_socket(
 #[derive(Debug, PartialEq, Eq)]
 enum AuthDecision {
     Accept,
-    Reject { code: u16, reason: &'static str },
+    Reject(Rejection),
 }
 
 fn decide_auth(
@@ -353,42 +342,24 @@ fn decide_auth(
             (false, _) => AuthDecision::Accept,
             // The projects did enable this worker but have no cache. A "not enabled" message would
             // send the operator to the wrong page.
-            (true, true) => AuthDecision::Reject {
-                code: 495,
-                reason: "project has no cache subscribed",
-            },
-            (true, false) => AuthDecision::Reject {
-                code: 403,
-                reason: "no project grants this team's workers",
-            },
+            (true, true) => AuthDecision::Reject(Rejection::NoCacheSubscribed),
+            (true, false) => AuthDecision::Reject(Rejection::NoProjectGrant),
         };
     }
 
     if registered_peers_empty {
         return if has_any_registrations {
-            AuthDecision::Reject {
-                code: 403,
-                reason: "worker is deactivated",
-            }
+            AuthDecision::Reject(Rejection::WorkerDeactivated)
         } else {
-            AuthDecision::Reject {
-                code: 403,
-                reason: "unknown worker",
-            }
+            AuthDecision::Reject(Rejection::UnknownWorker)
         };
     }
 
     if authorized_peers_empty {
         if emptied_by_missing_cache {
-            AuthDecision::Reject {
-                code: 495,
-                reason: "project has no cache subscribed",
-            }
+            AuthDecision::Reject(Rejection::NoCacheSubscribed)
         } else {
-            AuthDecision::Reject {
-                code: 401,
-                reason: "no valid peer tokens provided",
-            }
+            AuthDecision::Reject(Rejection::NoValidPeerTokens)
         }
     } else {
         AuthDecision::Accept
@@ -397,28 +368,19 @@ fn decide_auth(
 
 #[cfg(test)]
 mod auth_decision_tests {
-    use super::{AuthDecision, decide_auth};
+    use super::{AuthDecision, Rejection, decide_auth};
 
     #[test]
     fn inbound_unknown_worker_rejected() {
         let d = decide_auth(true, false, true, false, false);
-        assert_eq!(
-            d,
-            AuthDecision::Reject {
-                code: 403,
-                reason: "unknown worker",
-            }
-        );
+        assert_eq!(d, AuthDecision::Reject(Rejection::UnknownWorker));
     }
 
     #[test]
     fn deactivated_worker_rejected_inbound() {
         assert_eq!(
             decide_auth(true, true, true, false, false),
-            AuthDecision::Reject {
-                code: 403,
-                reason: "worker is deactivated",
-            }
+            AuthDecision::Reject(Rejection::WorkerDeactivated)
         );
     }
 
@@ -426,10 +388,7 @@ mod auth_decision_tests {
     fn registered_but_no_valid_token() {
         assert_eq!(
             decide_auth(false, false, true, false, false),
-            AuthDecision::Reject {
-                code: 401,
-                reason: "no valid peer tokens provided",
-            }
+            AuthDecision::Reject(Rejection::NoValidPeerTokens)
         );
     }
 
@@ -437,10 +396,7 @@ mod auth_decision_tests {
     fn registered_emptied_by_missing_cache() {
         assert_eq!(
             decide_auth(false, false, true, true, false),
-            AuthDecision::Reject {
-                code: 495,
-                reason: "project has no cache subscribed",
-            }
+            AuthDecision::Reject(Rejection::NoCacheSubscribed)
         );
     }
 
@@ -448,10 +404,7 @@ mod auth_decision_tests {
     fn team_worker_emptied_by_missing_cache() {
         assert_eq!(
             decide_auth(false, false, true, true, true),
-            AuthDecision::Reject {
-                code: 495,
-                reason: "project has no cache subscribed",
-            }
+            AuthDecision::Reject(Rejection::NoCacheSubscribed)
         );
     }
 
@@ -467,10 +420,7 @@ mod auth_decision_tests {
     fn a_team_worker_without_granted_projects_is_refused() {
         assert_eq!(
             decide_auth(false, false, true, false, true),
-            AuthDecision::Reject {
-                code: 403,
-                reason: "no project grants this team's workers",
-            }
+            AuthDecision::Reject(Rejection::NoProjectGrant)
         );
     }
 
@@ -515,7 +465,10 @@ mod authority_tests {
             .await
             .unwrap();
 
-        assert!(matches!(outcome, AuthOutcome::Reject { code: 495, .. }));
+        assert!(matches!(
+            outcome,
+            AuthOutcome::Reject(Rejection::NoCacheSubscribed)
+        ));
         assert!(authority.proven.load(Ordering::Relaxed));
     }
 }

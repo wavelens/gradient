@@ -29,6 +29,7 @@ use super::log_lane::LogLane;
 use super::session::on_reauth_notify;
 use super::socket::{ProtoSocket, ProtoWriter, job_offer_chunks, recv_client_msg, send_server_msg};
 use super::upload::{UploadSession, UploadTable, abandon_transfer};
+use gradient_wire::Rejection;
 use gradient_wire::messages::{ClientMessage, GradientCapabilities, ServerMessage};
 use gradient_wire::session::frame::ProtoReader;
 
@@ -115,9 +116,7 @@ impl Actor for SessionActor {
             Ok(registered) => registered,
             Err(e) => {
                 warn!(%peer_id, error = %e, "registration failed; scheduler unavailable");
-                socket
-                    .send_reject(503, "scheduler unavailable".into())
-                    .await;
+                socket.send_reject(Rejection::SchedulerUnavailable).await;
                 return Err(ActorProcessingErr::from(e.to_string()));
             }
         };
