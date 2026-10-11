@@ -2686,6 +2686,7 @@ dependencies = [
  "gradient-db",
  "gradient-entity",
  "gradient-fixtures",
+ "gradient-scheduler",
  "gradient-types",
  "gradient-util",
  "ractor",

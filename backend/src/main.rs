@@ -93,13 +93,15 @@ async fn run() -> std::io::Result<()> {
         .supervise_now(state.graph.child_spec(state.db()))
         .await
         .map_err(std::io::Error::other)?;
+    let scheduler = Arc::new(gradient_scheduler::Scheduler::new(Arc::clone(&state)));
     state
         .shutdown
-        .supervise_now(gradient_effects::child_spec(Arc::clone(&state)))
+        .supervise_now(gradient_effects::child_spec(
+            Arc::clone(&state),
+            Arc::clone(&scheduler),
+        ))
         .await
         .map_err(std::io::Error::other)?;
-
-    let scheduler = Arc::new(gradient_scheduler::Scheduler::new(Arc::clone(&state)));
 
     info!("Starting cache service");
     gradient_cache::start_cache(Arc::clone(&state)).await?;

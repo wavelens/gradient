@@ -38,6 +38,8 @@ pub enum PendingDeliveryKind {
     Event = 4,
     #[sea_orm(num_value = 5)]
     WebhookDelivery = 5,
+    #[sea_orm(num_value = 6)]
+    TriggerFire = 6,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
