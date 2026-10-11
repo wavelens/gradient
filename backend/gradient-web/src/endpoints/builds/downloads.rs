@@ -51,15 +51,7 @@ async fn collect_build_products(
         }
     };
 
-    rows.into_iter()
-        .map(|r| BuildProduct {
-            file_type: r.file_type,
-            subtype: r.subtype,
-            name: r.name,
-            path: r.path,
-            size: r.size.map(|s| s as u64),
-        })
-        .collect()
+    rows.into_iter().map(BuildProduct::from).collect()
 }
 
 async fn find_and_serve_file(
@@ -168,6 +160,18 @@ pub struct BuildProduct {
     pub name: String,
     pub path: String,
     pub size: Option<u64>,
+}
+
+impl From<MBuildProduct> for BuildProduct {
+    fn from(product: MBuildProduct) -> Self {
+        Self {
+            file_type: product.file_type,
+            subtype: product.subtype,
+            name: product.name,
+            path: product.path,
+            size: product.size.map(|s| s as u64),
+        }
+    }
 }
 
 #[derive(Deserialize)]

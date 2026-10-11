@@ -17,6 +17,7 @@ use axum::response::{IntoResponse, Response};
 use gradient_core::ServerState;
 use gradient_core::upstream_source::UpstreamSource;
 use gradient_db::WebDb;
+use gradient_db::caches::debug_info::DebugInfoTarget;
 use gradient_db::caches::upstream::pull_through_upstream_caches;
 use gradient_types::MCache;
 use gradient_types::ids::CacheUpstreamId;
@@ -28,6 +29,16 @@ use std::sync::Arc;
 struct DebugInfoRedirect {
     archive: String,
     member: String,
+}
+
+impl From<DebugInfoTarget> for DebugInfoRedirect {
+    fn from(target: DebugInfoTarget) -> Self {
+        let file_hash = strip_hash_algo(&normalize_nar_hash(&target.file_hash)).to_string();
+        Self {
+            archive: format!("../nar/{file_hash}.nar.zst"),
+            member: target.member,
+        }
+    }
 }
 
 pub async fn debuginfo(
@@ -54,14 +65,7 @@ pub async fn debuginfo(
         gradient_db::caches::debug_info::lookup_for_cache(&state.web_db, ctx.cache.id, &build_id)
             .await?
     {
-        let file_hash = strip_hash_algo(&normalize_nar_hash(&target.file_hash)).to_string();
-        return Ok(redirect_response(
-            DebugInfoRedirect {
-                archive: format!("../nar/{file_hash}.nar.zst"),
-                member: target.member,
-            },
-            "HIT",
-        ));
+        return Ok(redirect_response(target.into(), "HIT"));
     }
 
     let upstream_caches = upstream_caches_for(&state.web_db, &ctx.cache).await;
@@ -118,14 +122,12 @@ async fn fetch_from_upstream_caches(
             if !response.status().is_success() {
                 continue;
             }
-            let Ok(doc) = response.json::<DebugInfoRedirect>().await else {
+            let Ok(mut doc) = response.json::<DebugInfoRedirect>().await else {
                 continue;
             };
             if let Some(archive) = proxied_archive(upstream.id, &doc.archive) {
-                return Some(DebugInfoRedirect {
-                    archive,
-                    member: doc.member,
-                });
+                doc.archive = archive;
+                return Some(doc);
             }
         }
     }

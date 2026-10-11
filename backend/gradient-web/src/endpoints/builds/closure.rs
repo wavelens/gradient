@@ -28,10 +28,41 @@ pub struct ClosureNode {
     pub nar_size: Option<i64>,
 }
 
+impl ClosureNode {
+    fn of_derivation(derivation: MDerivation, nar_size: Option<i64>) -> Self {
+        Self {
+            id: derivation.id.to_string(),
+            path: derivation.drv_path(),
+            name: derivation.name,
+            nar_size,
+        }
+    }
+}
+
+impl From<&MCachedPath> for ClosureNode {
+    fn from(path: &MCachedPath) -> Self {
+        Self {
+            id: path.hash.clone(),
+            name: path.package.clone(),
+            path: path.as_store_path().base(),
+            nar_size: path.nar_size,
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
 pub struct ClosureEdge {
     pub source: String,
     pub target: String,
+}
+
+impl From<MDerivationDependency> for ClosureEdge {
+    fn from(edge: MDerivationDependency) -> Self {
+        Self {
+            source: edge.dependency.to_string(),
+            target: edge.derivation.to_string(),
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
@@ -80,11 +111,9 @@ where
     let nodes: Vec<ClosureNode> = gradient_db::derivations::with_ids(db, &all_ids)
         .await?
         .into_iter()
-        .map(|d| ClosureNode {
-            nar_size: size_by_drv.get(&d.id).copied(),
-            id: d.id.to_string(),
-            name: d.name.clone(),
-            path: d.drv_path(),
+        .map(|d| {
+            let nar_size = size_by_drv.get(&d.id).copied();
+            ClosureNode::of_derivation(d, nar_size)
         })
         .collect();
 
@@ -92,10 +121,7 @@ where
         gradient_db::derivation_dependencies::of_derivations(db, &all_ids)
             .await?
             .into_iter()
-            .map(|e| ClosureEdge {
-                source: e.dependency.to_string(),
-                target: e.derivation.to_string(),
-            })
+            .map(ClosureEdge::from)
             .collect();
 
     let roots = roots.iter().map(|r| r.to_string()).collect();
@@ -255,15 +281,7 @@ where
     let total: i64 = reached.values().filter_map(|r| r.nar_size).sum();
     let total_size_bytes = (total > 0).then_some(total);
 
-    let nodes: Vec<ClosureNode> = reached
-        .values()
-        .map(|r| ClosureNode {
-            id: r.hash.clone(),
-            name: r.package.clone(),
-            path: r.as_store_path().base(),
-            nar_size: r.nar_size,
-        })
-        .collect();
+    let nodes: Vec<ClosureNode> = reached.values().map(ClosureNode::from).collect();
 
     let edges: Vec<ClosureEdge> = reached
         .values()

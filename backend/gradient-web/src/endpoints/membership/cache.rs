@@ -32,6 +32,12 @@ pub struct CacheRoleOwner {
     cache: Option<CacheId>,
 }
 
+impl From<Option<CacheId>> for CacheRoleOwner {
+    fn from(cache: Option<CacheId>) -> Self {
+        Self { cache }
+    }
+}
+
 impl Table for ECacheUser {
     type Row = MCacheUser;
     type Active = ACacheUser;
@@ -151,10 +157,6 @@ impl RoleTable for ECacheRole {
             permission: row.permission,
             managed: row.managed,
         }
-    }
-
-    fn owner_field(owner: Option<CacheId>) -> CacheRoleOwner {
-        CacheRoleOwner { cache: owner }
     }
 
     fn new(id: RoleId, name: String, owner: CacheId, permission: PermissionMask) -> MCacheRole {

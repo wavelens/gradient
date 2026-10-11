@@ -15,7 +15,7 @@ mod payloads;
 mod refusal;
 mod response;
 
-pub use response::{QueuedEvaluation, SkippedTask, WebhookResponse, WebhookTriggerOutcome};
+pub use response::{IncomingWebhookResponse, QueuedEvaluation, SkippedTask, WebhookTriggerOutcome};
 
 use crate::ip_allowlist::is_allowed as ip_allowed;
 use anyhow::Context;
@@ -55,7 +55,7 @@ pub async fn github_app_webhook(
     OptionalPeer(peer): OptionalPeer,
     headers: HeaderMap,
     body: Bytes,
-) -> WebResult<Json<BaseResponse<WebhookResponse>>> {
+) -> WebResult<Json<BaseResponse<IncomingWebhookResponse>>> {
     let ci = state.ci();
     let Some(github_app) = state.config.github_app.clone() else {
         warn!(
@@ -99,18 +99,12 @@ pub async fn github_app_webhook(
     let response = match event.as_str() {
         "push" => match ParsedPushEvent::from_github(&body) {
             None => return Err(GitHostHookRefusal::MalformedPayload.into()),
-            Some(PushOutcome::Ignored) => WebhookResponse::empty("push"),
+            Some(PushOutcome::Ignored) => IncomingWebhookResponse::empty("push"),
             Some(PushOutcome::Build(parsed)) => {
                 let urls = parsed.repository_urls.clone();
                 let outcome =
                     route_github_app_push(&ci, &scheduler, parsed, &body, client_ip).await;
-                WebhookResponse {
-                    event: "push".to_string(),
-                    repository_urls: urls,
-                    tasks_scanned: outcome.tasks_scanned,
-                    queued: outcome.queued,
-                    skipped: outcome.skipped,
-                }
+                IncomingWebhookResponse::new("push", urls, outcome)
             }
         },
         "pull_request" => {
@@ -119,13 +113,7 @@ pub async fn github_app_webhook(
             };
             let urls = parsed.repository_urls.clone();
             let outcome = route_github_app_pr(&ci, &scheduler, parsed, &body, client_ip).await;
-            WebhookResponse {
-                event: "pull_request".to_string(),
-                repository_urls: urls,
-                tasks_scanned: outcome.tasks_scanned,
-                queued: outcome.queued,
-                skipped: outcome.skipped,
-            }
+            IncomingWebhookResponse::new("pull_request", urls, outcome)
         }
         "release" => {
             let Some(parsed) = ParsedReleaseEvent::from_github(&body) else {
@@ -133,21 +121,15 @@ pub async fn github_app_webhook(
             };
             let urls = parsed.repository_urls.clone();
             let outcome = route_github_app_release(&ci, &scheduler, parsed, &body, client_ip).await;
-            WebhookResponse {
-                event: "release".to_string(),
-                repository_urls: urls,
-                tasks_scanned: outcome.tasks_scanned,
-                queued: outcome.queued,
-                skipped: outcome.skipped,
-            }
+            IncomingWebhookResponse::new("release", urls, outcome)
         }
         "installation" | "installation_repositories" => {
             handle_github_installation(&state.web_db, &body).await;
-            WebhookResponse::empty(&event)
+            IncomingWebhookResponse::empty(&event)
         }
         "check_run" => {
             approval::handle_github_check_run(&ci, &scheduler, &body).await;
-            WebhookResponse::empty(&event)
+            IncomingWebhookResponse::empty(&event)
         }
         "issue_comment" => {
             commands::handle_issue_comment(
@@ -159,14 +141,14 @@ pub async fn github_app_webhook(
                 client_ip,
             )
             .await;
-            WebhookResponse::empty(&event)
+            IncomingWebhookResponse::empty(&event)
         }
         "pull_request_review" => {
             approval::handle_pull_request_review(&ci, GitHostType::GitHub, None, &body, client_ip)
                 .await;
-            WebhookResponse::empty(&event)
+            IncomingWebhookResponse::empty(&event)
         }
-        other => WebhookResponse::empty(other),
+        other => IncomingWebhookResponse::empty(other),
     };
 
     Ok(ok_json(response))
@@ -347,7 +329,7 @@ pub async fn git_host_webhook(
     Path((git_host, project_name, integration_name)): Path<(String, String, String)>,
     headers: HeaderMap,
     body: Bytes,
-) -> WebResult<Json<BaseResponse<WebhookResponse>>> {
+) -> WebResult<Json<BaseResponse<IncomingWebhookResponse>>> {
     let ci = state.ci();
     let Some(git_host_type) = GitHostType::from_path_segment(&git_host) else {
         warn!(git_host = %git_host, "Unknown Git host path segment");
@@ -430,7 +412,7 @@ pub async fn git_host_webhook(
     let response = match event_type {
         WebhookEventKind::Push => match provider.parse_push_event(&body) {
             None => return Err(GitHostHookRefusal::MalformedPayload.into()),
-            Some(PushOutcome::Ignored) => WebhookResponse::empty("push"),
+            Some(PushOutcome::Ignored) => IncomingWebhookResponse::empty("push"),
             Some(PushOutcome::Build(parsed)) => {
                 let urls = parsed.repository_urls.clone();
                 let ref_name = parsed.ref_name.clone();
@@ -450,13 +432,7 @@ pub async fn git_host_webhook(
                     parsed.author_name,
                 )
                 .await;
-                WebhookResponse {
-                    event: "push".to_string(),
-                    repository_urls: urls,
-                    tasks_scanned: outcome.tasks_scanned,
-                    queued: outcome.queued,
-                    skipped: outcome.skipped,
-                }
+                IncomingWebhookResponse::new("push", urls, outcome)
             }
         },
         WebhookEventKind::PullRequest => {
@@ -483,13 +459,7 @@ pub async fn git_host_webhook(
                 None,
             )
             .await;
-            WebhookResponse {
-                event: "pull_request".to_string(),
-                repository_urls: urls,
-                tasks_scanned: outcome.tasks_scanned,
-                queued: outcome.queued,
-                skipped: outcome.skipped,
-            }
+            IncomingWebhookResponse::new("pull_request", urls, outcome)
         }
         WebhookEventKind::Release => {
             let Some(parsed) = provider.parse_release_event(&body) else {
@@ -507,13 +477,7 @@ pub async fn git_host_webhook(
                 None,
             )
             .await;
-            WebhookResponse {
-                event: "release".to_string(),
-                repository_urls: urls,
-                tasks_scanned: outcome.tasks_scanned,
-                queued: outcome.queued,
-                skipped: outcome.skipped,
-            }
+            IncomingWebhookResponse::new("release", urls, outcome)
         }
         WebhookEventKind::Comment => {
             let peer_ip = peer
@@ -530,7 +494,7 @@ pub async fn git_host_webhook(
                 client_ip,
             )
             .await;
-            WebhookResponse::empty("comment")
+            IncomingWebhookResponse::empty("comment")
         }
         WebhookEventKind::Review => {
             let peer_ip = peer
@@ -546,9 +510,9 @@ pub async fn git_host_webhook(
                 client_ip,
             )
             .await;
-            WebhookResponse::empty("review")
+            IncomingWebhookResponse::empty("review")
         }
-        WebhookEventKind::Unknown(name) => WebhookResponse::empty(&name),
+        WebhookEventKind::Unknown(name) => IncomingWebhookResponse::empty(&name),
     };
 
     Ok(ok_json(response))

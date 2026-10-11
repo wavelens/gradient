@@ -768,6 +768,17 @@ pub struct CliDeviceInfoResponse {
     pub ip: Option<String>,
 }
 
+impl From<MCliDeviceAuthorization> for CliDeviceInfoResponse {
+    fn from(authorization: MCliDeviceAuthorization) -> Self {
+        Self {
+            user_code: authorization.user_code,
+            expires_at: authorization.expires_at,
+            user_agent: authorization.user_agent,
+            ip: authorization.ip,
+        }
+    }
+}
+
 pub async fn post_cli_device_start(
     state: State<Arc<ServerState>>,
     audit: Audit,
@@ -881,12 +892,7 @@ pub async fn get_cli_device_info(
     Query(query): Query<CliDeviceUserCodeQuery>,
 ) -> WebResult<Json<BaseResponse<CliDeviceInfoResponse>>> {
     let row = find_active_user_code(&state.web_db, &query.user_code).await?;
-    Ok(ok_json(CliDeviceInfoResponse {
-        user_code: row.user_code,
-        expires_at: row.expires_at,
-        user_agent: row.user_agent,
-        ip: row.ip,
-    }))
+    Ok(ok_json(CliDeviceInfoResponse::from(row)))
 }
 
 pub async fn post_cli_device_authorize(

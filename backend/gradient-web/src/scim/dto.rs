@@ -5,6 +5,7 @@
  */
 
 use gradient_entity::user::Model as UserModel;
+use gradient_types::{MTeam, MTeamUser};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -135,11 +136,35 @@ pub struct GroupResource {
     pub meta: Meta,
 }
 
+impl GroupResource {
+    pub fn new(team: &MTeam, memberships: Vec<MTeamUser>) -> Self {
+        let group = team.scim_group.clone().unwrap_or_default();
+        Self {
+            schemas: [GROUP_SCHEMA],
+            id: group.clone(),
+            display_name: group,
+            members: memberships.into_iter().map(GroupMember::from).collect(),
+            meta: Meta {
+                resource_type: "Group",
+            },
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone)]
 pub struct GroupMember {
     pub value: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub display: Option<String>,
+}
+
+impl From<MTeamUser> for GroupMember {
+    fn from(membership: MTeamUser) -> Self {
+        Self {
+            value: membership.user.to_string(),
+            display: None,
+        }
+    }
 }
 
 #[derive(Deserialize)]

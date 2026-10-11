@@ -5,6 +5,7 @@
  */
 
 use super::refusal::WebhookRefusal;
+use super::responses::{CreateWebhookResponse, DeliveryDetail, DeliveryListItem, WebhookResponse};
 use super::scope::{Verb, WebhookOwner};
 use crate::audit::Audit;
 use crate::error::{WebError, WebResult};
@@ -16,7 +17,6 @@ use axum::extract::{Query, State};
 use gradient_ci::actions::encrypt_action_secret;
 use gradient_core::ServerState;
 use gradient_db::WebDb;
-use gradient_entity::webhook::WebhookScope;
 use gradient_types::events::{Envelope, EventFilter, webhook};
 use gradient_types::ids::PendingDeliveryId;
 use gradient_types::input::load_secret_bytes;
@@ -24,31 +24,11 @@ use gradient_types::*;
 use gradient_util::http_validation::validate_webhook_url;
 use sea_orm::ActiveValue::Set;
 use sea_orm::IntoActiveModel;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use serde_json::json;
 use std::sync::Arc;
 
 type ApiState = State<Arc<ServerState>>;
-
-#[derive(Serialize, Debug)]
-pub struct WebhookResponse {
-    pub id: WebhookId,
-    pub scope: WebhookScope,
-    pub name: String,
-    pub url: String,
-    pub events: Vec<String>,
-    pub active: bool,
-    pub last_fired_at: Option<chrono::NaiveDateTime>,
-    pub created_by: UserId,
-    pub created_at: chrono::NaiveDateTime,
-    pub updated_at: chrono::NaiveDateTime,
-}
-
-#[derive(Serialize, Debug)]
-pub struct CreateWebhookResponse {
-    pub webhook: WebhookResponse,
-    pub secret: String,
-}
 
 #[derive(Deserialize, Debug)]
 pub struct CreateWebhookRequest {
@@ -74,58 +54,8 @@ pub struct DeliveryListQuery {
     pub offset: Option<u64>,
 }
 
-#[derive(Serialize, Debug)]
-pub struct DeliveryListItem {
-    pub id: WebhookDeliveryId,
-    pub event: String,
-    pub success: bool,
-    pub response_status: Option<i32>,
-    pub error_message: Option<String>,
-    pub duration_ms: i32,
-    pub delivered_at: chrono::NaiveDateTime,
-}
-
-#[derive(Serialize, Debug)]
-pub struct DeliveryDetail {
-    #[serde(flatten)]
-    pub item: DeliveryListItem,
-    pub request_body: String,
-    pub response_body: Option<String>,
-}
-
 fn default_true() -> bool {
     true
-}
-
-impl From<MWebhook> for WebhookResponse {
-    fn from(m: MWebhook) -> Self {
-        Self {
-            id: m.id,
-            scope: m.scope,
-            name: m.name,
-            url: m.url,
-            events: serde_json::from_value(m.events).unwrap_or_default(),
-            active: m.active,
-            last_fired_at: m.last_fired_at,
-            created_by: m.created_by,
-            created_at: m.created_at,
-            updated_at: m.updated_at,
-        }
-    }
-}
-
-impl From<MWebhookDelivery> for DeliveryListItem {
-    fn from(r: MWebhookDelivery) -> Self {
-        Self {
-            id: r.id,
-            event: r.event,
-            success: r.success,
-            response_status: r.response_status,
-            error_message: r.error_message,
-            duration_ms: r.duration_ms,
-            delivered_at: r.delivered_at,
-        }
-    }
 }
 
 fn check_events(events: &[String]) -> WebResult<()> {
@@ -320,7 +250,7 @@ pub async fn rotate_secret(
 pub async fn test_webhook(
     State(state): ApiState,
     owner: WebhookOwner,
-) -> WebResult<Json<BaseResponse<DeliveryListItem>>> {
+) -> WebResult<Json<BaseResponse<DeliveryListItem<WebhookDeliveryId>>>> {
     let hook = owned_webhook(&state.web_db, &owner).await?;
     let envelope = Envelope::now(webhook::Ping { webhook: hook.id }.into());
     let delivery = gradient_ci::webhooks::deliver(
@@ -338,7 +268,7 @@ pub async fn list_deliveries(
     State(state): ApiState,
     owner: WebhookOwner,
     Query(q): Query<DeliveryListQuery>,
-) -> WebResult<Json<BaseResponse<Vec<DeliveryListItem>>>> {
+) -> WebResult<Json<BaseResponse<Vec<DeliveryListItem<WebhookDeliveryId>>>>> {
     let hook = owned_webhook(&state.web_db, &owner).await?;
     let rows = gradient_db::webhooks::deliveries_of(
         &state.web_db,
@@ -353,15 +283,11 @@ pub async fn list_deliveries(
 pub async fn get_delivery(
     State(state): ApiState,
     owner: WebhookOwner,
-) -> WebResult<Json<BaseResponse<DeliveryDetail>>> {
+) -> WebResult<Json<BaseResponse<DeliveryDetail<WebhookDeliveryId>>>> {
     let hook = owned_webhook(&state.web_db, &owner).await?;
     let delivery_id: WebhookDeliveryId = owner.param("delivery_id")?;
     let r = gradient_db::webhooks::delivery_of(&state.web_db, hook.id, delivery_id)
         .await?
         .or_not_found(Resource::Delivery)?;
-    Ok(ok_json(DeliveryDetail {
-        request_body: r.request_body.clone(),
-        response_body: r.response_body.clone(),
-        item: r.into(),
-    }))
+    Ok(ok_json(r.into()))
 }

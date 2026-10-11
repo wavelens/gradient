@@ -85,28 +85,27 @@ pub async fn get_project_subscribe(
         .map(|(id, c)| (id, c.name))
         .collect();
 
-    let mut subscribed = Vec::new();
-    for oc in project_caches {
-        if let Some(name) = names.get(&oc.cache) {
-            subscribed.push(CacheSubscriptionItem {
-                id: oc.cache,
-                name: name.clone(),
-                mode: oc.mode,
-                status: SubscriptionStatus::Active,
-            });
-        }
-    }
-
-    for request in pending {
-        if let Some(name) = names.get(&request.cache) {
-            subscribed.push(CacheSubscriptionItem {
-                id: request.cache,
-                name: name.clone(),
-                mode: request.mode,
-                status: SubscriptionStatus::Pending,
-            });
-        }
-    }
+    let active = project_caches.into_iter().map(|subscription| {
+        (
+            subscription.cache,
+            subscription.mode,
+            SubscriptionStatus::Active,
+        )
+    });
+    let requested = pending
+        .into_iter()
+        .map(|request| (request.cache, request.mode, SubscriptionStatus::Pending));
+    let subscribed: Vec<CacheSubscriptionItem> = active
+        .chain(requested)
+        .filter_map(|(id, mode, status)| {
+            Some(CacheSubscriptionItem {
+                id,
+                name: names.get(&id)?.clone(),
+                mode,
+                status,
+            })
+        })
+        .collect();
 
     Ok(ok_json(subscribed))
 }

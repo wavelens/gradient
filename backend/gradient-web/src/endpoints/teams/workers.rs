@@ -47,6 +47,24 @@ pub struct TeamWorkerEntry {
     pub connection: WorkerConnection,
 }
 
+impl TeamWorkerEntry {
+    fn new(worker: MTeamWorker, connection: WorkerConnection) -> Self {
+        Self {
+            worker_id: worker.worker_id,
+            display_name: worker.display_name,
+            registered_at: worker.created_at,
+            active: worker.active,
+            managed: worker.managed,
+            url: worker.url,
+            gradient_ci: worker.gradient_ci,
+            enable_fetch: worker.enable_fetch,
+            enable_eval: worker.enable_eval,
+            enable_build: worker.enable_build,
+            connection,
+        }
+    }
+}
+
 #[derive(Serialize)]
 pub struct RegisteredTeamWorker {
     pub team: TeamId,
@@ -106,19 +124,7 @@ pub async fn get_team_workers(
     let mut entries = Vec::with_capacity(rows.len());
     for worker in rows {
         let connection = worker_connection(&live_workers, failures, &worker.worker_id);
-        entries.push(TeamWorkerEntry {
-            worker_id: worker.worker_id,
-            display_name: worker.display_name,
-            registered_at: worker.created_at,
-            active: worker.active,
-            managed: worker.managed,
-            url: worker.url,
-            gradient_ci: worker.gradient_ci,
-            enable_fetch: worker.enable_fetch,
-            enable_eval: worker.enable_eval,
-            enable_build: worker.enable_build,
-            connection,
-        });
+        entries.push(TeamWorkerEntry::new(worker, connection));
     }
 
     Ok(ok_json(entries))

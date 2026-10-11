@@ -4,8 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use super::DeletedResponse;
 use super::refusal::TaskRefusal;
 use crate::audit::Audit;
+use crate::endpoints::webhooks::{DeliveryDetail, DeliveryListItem};
 use crate::error::{WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json};
 use crate::resource::Resource;
@@ -424,11 +426,6 @@ async fn record_action_event(audit: &Audit, action: Action, project: ProjectId, 
     audit.write(action, owner, metadata).await;
 }
 
-#[derive(Serialize, Debug)]
-pub struct DeletedResponse {
-    deleted: bool,
-}
-
 pub async fn delete_action(
     TaskScope {
         project,
@@ -449,7 +446,7 @@ pub async fn delete_action(
 
     record_action_event(&audit, Action::TaskActionDelete, project.id, &row).await;
 
-    Ok(ok_json(DeletedResponse { deleted: true }))
+    Ok(ok_json(DeletedResponse::deleted()))
 }
 
 pub async fn test_action(
@@ -566,39 +563,6 @@ pub struct DeliveryListQuery {
     pub offset: Option<u64>,
 }
 
-#[derive(Serialize, Debug)]
-pub struct DeliveryListItem {
-    pub id: TaskActionDeliveryId,
-    pub event: String,
-    pub success: bool,
-    pub response_status: Option<i32>,
-    pub error_message: Option<String>,
-    pub duration_ms: i32,
-    pub delivered_at: chrono::NaiveDateTime,
-}
-
-impl From<MTaskActionDelivery> for DeliveryListItem {
-    fn from(r: MTaskActionDelivery) -> Self {
-        Self {
-            id: r.id,
-            event: r.event,
-            success: r.success,
-            response_status: r.response_status,
-            error_message: r.error_message,
-            duration_ms: r.duration_ms,
-            delivered_at: r.delivered_at,
-        }
-    }
-}
-
-#[derive(Serialize, Debug)]
-pub struct DeliveryDetail {
-    #[serde(flatten)]
-    pub item: DeliveryListItem,
-    pub request_body: String,
-    pub response_body: Option<String>,
-}
-
 pub async fn list_deliveries(
     TaskScope {
         task: proj,
@@ -607,7 +571,7 @@ pub async fn list_deliveries(
         ..
     }: TaskScope<Member>,
     Query(q): Query<DeliveryListQuery>,
-) -> WebResult<Json<BaseResponse<Vec<DeliveryListItem>>>> {
+) -> WebResult<Json<BaseResponse<Vec<DeliveryListItem<TaskActionDeliveryId>>>>> {
     let id: TaskActionId = params.param("id")?;
 
     gradient_db::actions::by_id_in_task(&db.web_db, proj.id, id)
@@ -619,9 +583,7 @@ pub async fn list_deliveries(
 
     let rows = gradient_db::actions::deliveries_of(&db.web_db, id, limit, offset).await?;
 
-    Ok(ok_json(
-        rows.into_iter().map(DeliveryListItem::from).collect(),
-    ))
+    Ok(ok_json(rows.into_iter().map(Into::into).collect()))
 }
 
 pub async fn get_delivery(
@@ -631,7 +593,7 @@ pub async fn get_delivery(
         params,
         ..
     }: TaskScope<Member>,
-) -> WebResult<Json<BaseResponse<DeliveryDetail>>> {
+) -> WebResult<Json<BaseResponse<DeliveryDetail<TaskActionDeliveryId>>>> {
     let action_id: TaskActionId = params.param("id")?;
     let delivery_id: TaskActionDeliveryId = params.param("delivery_id")?;
 
@@ -643,9 +605,5 @@ pub async fn get_delivery(
         .await?
         .or_not_found(Resource::Delivery)?;
 
-    Ok(ok_json(DeliveryDetail {
-        request_body: r.request_body.clone(),
-        response_body: r.response_body.clone(),
-        item: r.into(),
-    }))
+    Ok(ok_json(r.into()))
 }

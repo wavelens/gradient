@@ -113,6 +113,23 @@ pub struct MetricPoint {
     pub avg: f64,
 }
 
+impl From<gradient_db::metrics::series::BucketStats> for MetricPoint {
+    fn from(stats: gradient_db::metrics::series::BucketStats) -> Self {
+        Self {
+            bucket_start: stats.bucket_start.and_utc().to_rfc3339(),
+            count: stats.count,
+            sum: stats.sum,
+            min: stats.min,
+            max: stats.max,
+            avg: if stats.count > 0 {
+                stats.sum / stats.count as f64
+            } else {
+                0.0
+            },
+        }
+    }
+}
+
 pub async fn get_metrics_query(
     State(state): State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
@@ -165,21 +182,7 @@ pub async fn get_metrics_query(
     )
     .await?;
 
-    let points = rows
-        .into_iter()
-        .map(|r| MetricPoint {
-            bucket_start: r.bucket_start.and_utc().to_rfc3339(),
-            count: r.count,
-            sum: r.sum,
-            min: r.min,
-            max: r.max,
-            avg: if r.count > 0 {
-                r.sum / r.count as f64
-            } else {
-                0.0
-            },
-        })
-        .collect();
+    let points = rows.into_iter().map(MetricPoint::from).collect();
 
     Ok(ok_json(points))
 }

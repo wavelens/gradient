@@ -59,7 +59,7 @@ fn response<O: Owner>(row: &RoleRow<O>) -> Role<O> {
     RoleResponse {
         id: fields.id,
         name: fields.name,
-        owner: <O::Roles as RoleTable>::owner_field(fields.owner),
+        owner: fields.owner.into(),
         builtin: O::is_builtin_role(fields.id),
         managed: fields.managed,
         permissions: O::permission_names(fields.permission),

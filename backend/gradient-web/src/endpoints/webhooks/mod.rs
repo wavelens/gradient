@@ -6,8 +6,10 @@
 
 mod handlers;
 mod refusal;
+mod responses;
 mod scope;
 
+pub use responses::{DeliveryDetail, DeliveryListItem};
 pub use scope::{Verb, WebhookOwner};
 
 use axum::Router;

@@ -61,6 +61,23 @@ pub struct UpstreamCacheItem {
     pub active: bool,
 }
 
+impl From<MCacheUpstream> for UpstreamCacheItem {
+    fn from(upstream: MCacheUpstream) -> Self {
+        Self {
+            id: upstream.id,
+            display_name: upstream.display_name,
+            mode: upstream.mode,
+            upstream_cache_id: upstream.upstream_cache,
+            url: upstream.url,
+            public_key: upstream.public_key,
+            kind: format!("{:?}", upstream.kind).to_lowercase(),
+            remote_cache: upstream.remote_cache_name,
+            http1_only: upstream.http1_only,
+            active: upstream.active,
+        }
+    }
+}
+
 #[derive(Debug, Deserialize)]
 pub struct PatchUpstreamRequest {
     pub display_name: Option<String>,
@@ -139,18 +156,7 @@ pub async fn get_upstream_caches(
     let upstream_caches = gradient_db::caches::upstream::of_cache(&db.web_db, cache.id)
         .await?
         .into_iter()
-        .map(|u| UpstreamCacheItem {
-            id: u.id,
-            display_name: u.display_name,
-            mode: u.mode,
-            upstream_cache_id: u.upstream_cache,
-            url: u.url,
-            public_key: u.public_key,
-            kind: format!("{:?}", u.kind).to_lowercase(),
-            remote_cache: u.remote_cache_name,
-            http1_only: u.http1_only,
-            active: u.active,
-        })
+        .map(UpstreamCacheItem::from)
         .collect();
 
     Ok(ok_json(upstream_caches))

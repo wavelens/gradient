@@ -24,6 +24,15 @@ pub struct RailTask {
     pub status: Option<EvaluationStatus>,
 }
 
+impl From<&RailTaskRow> for RailTask {
+    fn from(task: &RailTaskRow) -> Self {
+        Self {
+            name: task.name.clone(),
+            status: task.status,
+        }
+    }
+}
+
 #[derive(Debug, Serialize)]
 pub struct RailProject {
     pub name: String,
@@ -34,6 +43,21 @@ pub struct RailProject {
     pub task_count: i64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tasks: Option<Vec<RailTask>>,
+}
+
+impl RailProject {
+    fn new(project: RailProjectRow, tasks: &[RailTaskRow]) -> Self {
+        let tier = Tier::of(project.starred, project.recent_14d > 0, project.team);
+        Self {
+            tasks: (tier == Tier::StarredActive).then(|| nested_tasks(project.id, tasks)),
+            name: project.name,
+            display_name: project.display_name,
+            starred: project.starred,
+            tier,
+            status: project.status,
+            task_count: project.task_count,
+        }
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -65,24 +89,8 @@ fn nested_tasks(project: ProjectId, tasks: &[RailTaskRow]) -> Vec<RailTask> {
     tasks
         .iter()
         .filter(|t| t.project == project)
-        .map(|t| RailTask {
-            name: t.name.clone(),
-            status: t.status,
-        })
+        .map(RailTask::from)
         .collect()
-}
-
-fn rail_project(p: RailProjectRow, tasks: &[RailTaskRow]) -> RailProject {
-    let tier = Tier::of(p.starred, p.recent_14d > 0, p.team);
-    RailProject {
-        tasks: (tier == Tier::StarredActive).then(|| nested_tasks(p.id, tasks)),
-        name: p.name,
-        display_name: p.display_name,
-        starred: p.starred,
-        tier,
-        status: p.status,
-        task_count: p.task_count,
-    }
 }
 
 pub fn build_rail(
@@ -92,7 +100,7 @@ pub fn build_rail(
 ) -> Rail {
     let mut projects: Vec<RailProject> = projects
         .into_iter()
-        .map(|p| rail_project(p, &tasks))
+        .map(|p| RailProject::new(p, &tasks))
         .collect();
     projects.sort_by(|a, b| a.tier.cmp(&b.tier).then_with(|| a.name.cmp(&b.name)));
     Rail {

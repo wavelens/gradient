@@ -26,6 +26,16 @@ pub struct ArtefactTree {
     pub entry_points: Vec<EntryPointArtefacts>,
 }
 
+impl ArtefactTree {
+    fn new(evaluation: &MEvaluation, entry_points: Vec<EntryPointArtefacts>) -> Self {
+        Self {
+            evaluation: evaluation.id,
+            created_at: evaluation.created_at,
+            entry_points,
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, Debug)]
 pub struct EntryPointArtefacts {
     pub attr: String,
@@ -39,6 +49,16 @@ pub struct OutputArtefacts {
     pub name: String,
     pub store_path: String,
     pub products: Vec<ProductArtefact>,
+}
+
+impl OutputArtefacts {
+    fn new(output: MDerivationOutput, products: Vec<ProductArtefact>) -> Self {
+        Self {
+            store_path: StorePath::from(output.clone()).base(),
+            name: output.name,
+            products,
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -79,11 +99,7 @@ pub async fn get_artefacts(
         gradient_db::entry_points::of_evaluation(&state.web_db, evaluation.id).await?;
 
     if entry_points.is_empty() {
-        return Ok(ok_json(ArtefactTree {
-            evaluation: evaluation.id,
-            created_at: evaluation.created_at,
-            entry_points: vec![],
-        }));
+        return Ok(ok_json(ArtefactTree::new(&evaluation, vec![])));
     }
 
     let drv_ids: Vec<DerivationId> = entry_points
@@ -154,11 +170,7 @@ pub async fn get_artefacts(
                         .into_iter()
                         .map(ProductArtefact::from)
                         .collect();
-                    OutputArtefacts {
-                        store_path: StorePath::from(o.clone()).base(),
-                        name: o.name,
-                        products,
-                    }
+                    OutputArtefacts::new(o, products)
                 })
                 .collect();
             Some(EntryPointArtefacts {
@@ -178,9 +190,5 @@ pub async fn get_artefacts(
         }
     }
 
-    Ok(ok_json(ArtefactTree {
-        evaluation: evaluation.id,
-        created_at: evaluation.created_at,
-        entry_points: tree,
-    }))
+    Ok(ok_json(ArtefactTree::new(&evaluation, tree)))
 }

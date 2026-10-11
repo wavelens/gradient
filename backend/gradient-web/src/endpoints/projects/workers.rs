@@ -18,9 +18,9 @@ use gradient_entity::worker_registration::{
 use gradient_pool::WorkerInfo;
 use gradient_scheduler::Scheduler;
 use gradient_scheduler::connection_failures::{ConnectionFailure, ConnectionFailures};
-use gradient_types::BaseResponse;
 use gradient_types::ids::*;
 use gradient_types::permissions::Permission;
+use gradient_types::{BaseResponse, MTeamWorker};
 use gradient_wire::types::GradientCapabilities;
 use sea_orm::ActiveValue::Set;
 use serde::{Deserialize, Serialize};
@@ -77,6 +77,53 @@ pub struct ProjectWorkerEntry {
     pub connection: WorkerConnection,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub live: Option<WorkerLiveInfo>,
+}
+
+impl ProjectWorkerEntry {
+    fn of_registration(
+        registration: MWorkerRegistration,
+        connection: WorkerConnection,
+        live: Option<WorkerLiveInfo>,
+    ) -> Self {
+        Self {
+            worker_id: registration.worker_id,
+            display_name: registration.display_name,
+            registered_at: registration.created_at,
+            active: registration.active,
+            url: registration.url,
+            created_by: registration.created_by,
+            enable_fetch: registration.enable_fetch,
+            enable_eval: registration.enable_eval,
+            enable_build: registration.enable_build,
+            team: None,
+            gradient_ci: registration.gradient_ci,
+            connection,
+            live,
+        }
+    }
+
+    fn of_team_worker(
+        team: String,
+        worker: MTeamWorker,
+        connection: WorkerConnection,
+        live: Option<WorkerLiveInfo>,
+    ) -> Self {
+        Self {
+            worker_id: worker.worker_id,
+            display_name: worker.display_name,
+            registered_at: worker.created_at,
+            active: worker.active,
+            url: worker.url,
+            created_by: worker.created_by,
+            enable_fetch: worker.enable_fetch,
+            enable_eval: worker.enable_eval,
+            enable_build: worker.enable_build,
+            team: Some(team),
+            gradient_ci: worker.gradient_ci,
+            connection,
+            live,
+        }
+    }
 }
 
 #[derive(Serialize)]
@@ -292,21 +339,7 @@ pub async fn get_project_workers(
         .map(|reg| {
             let live = live_for(&reg.worker_id);
             let connection = worker_connection(&live_workers, failures, &reg.worker_id);
-            ProjectWorkerEntry {
-                gradient_ci: reg.gradient_ci,
-                connection,
-                worker_id: reg.worker_id,
-                display_name: reg.display_name,
-                registered_at: reg.created_at,
-                active: reg.active,
-                url: reg.url,
-                created_by: reg.created_by,
-                enable_fetch: reg.enable_fetch,
-                enable_eval: reg.enable_eval,
-                enable_build: reg.enable_build,
-                team: None,
-                live,
-            }
+            ProjectWorkerEntry::of_registration(reg, connection, live)
         })
         .collect();
 
@@ -315,21 +348,7 @@ pub async fn get_project_workers(
     entries.extend(team_workers.into_iter().map(|(team, worker)| {
         let live = live_for(&worker.worker_id);
         let connection = worker_connection(&live_workers, failures, &worker.worker_id);
-        ProjectWorkerEntry {
-            worker_id: worker.worker_id,
-            display_name: worker.display_name,
-            registered_at: worker.created_at,
-            active: worker.active,
-            url: worker.url,
-            created_by: worker.created_by,
-            enable_fetch: worker.enable_fetch,
-            enable_eval: worker.enable_eval,
-            enable_build: worker.enable_build,
-            team: Some(team),
-            gradient_ci: worker.gradient_ci,
-            connection,
-            live,
-        }
+        ProjectWorkerEntry::of_team_worker(team, worker, connection, live)
     }));
 
     Ok(ok_json(entries))
@@ -349,10 +368,36 @@ pub struct WorkerSamplePoint {
     pub state: i16,
 }
 
+impl From<gradient_entity::worker_sample::Model> for WorkerSamplePoint {
+    fn from(sample: gradient_entity::worker_sample::Model) -> Self {
+        Self {
+            at: sample.at,
+            cpu_usage_pct: sample.cpu_usage_pct,
+            ram_free_mb: sample.ram_free_mb,
+            ram_total_mb: sample.ram_total_mb,
+            disk_speed_mbps: sample.disk_speed_mbps,
+            upload_speed_mbps: sample.upload_speed_mbps,
+            download_speed_mbps: sample.download_speed_mbps,
+            assigned_jobs: sample.assigned_jobs,
+            max_concurrent_builds: sample.max_concurrent_builds,
+            state: i16::from(sample.state),
+        }
+    }
+}
+
 #[derive(Serialize)]
 pub struct WorkerConnectionEntry {
     pub connected_at: NaiveDateTime,
     pub disconnected_at: Option<NaiveDateTime>,
+}
+
+impl From<gradient_entity::worker_connection::Model> for WorkerConnectionEntry {
+    fn from(connection: gradient_entity::worker_connection::Model) -> Self {
+        Self {
+            connected_at: connection.connected_at,
+            disconnected_at: connection.disconnected_at,
+        }
+    }
 }
 
 #[derive(Serialize)]
@@ -395,28 +440,14 @@ pub async fn get_project_worker_metrics(
         gradient_db::worker_registrations::oldest_samples(&state.web_db, &worker_id, 2000)
             .await?
             .into_iter()
-            .map(|s| WorkerSamplePoint {
-                at: s.at,
-                cpu_usage_pct: s.cpu_usage_pct,
-                ram_free_mb: s.ram_free_mb,
-                ram_total_mb: s.ram_total_mb,
-                disk_speed_mbps: s.disk_speed_mbps,
-                upload_speed_mbps: s.upload_speed_mbps,
-                download_speed_mbps: s.download_speed_mbps,
-                assigned_jobs: s.assigned_jobs,
-                max_concurrent_builds: s.max_concurrent_builds,
-                state: i16::from(s.state),
-            })
+            .map(WorkerSamplePoint::from)
             .collect();
 
     let connections =
         gradient_db::worker_registrations::latest_connections(&state.web_db, &worker_id, 100)
             .await?
             .into_iter()
-            .map(|c| WorkerConnectionEntry {
-                connected_at: c.connected_at,
-                disconnected_at: c.disconnected_at,
-            })
+            .map(WorkerConnectionEntry::from)
             .collect();
 
     let jobs_dispatched = gradient_db::worker_registrations::dispatched_job_count(

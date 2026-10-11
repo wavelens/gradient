@@ -140,6 +140,21 @@ pub struct JobEvaluationView {
     pub task: Option<String>,
 }
 
+impl JobEvaluationView {
+    fn new(evaluation: MEvaluation, commit: Option<MCommit>, task: Option<String>) -> Self {
+        Self {
+            repository: evaluation.repository,
+            commit: commit
+                .as_ref()
+                .map(|c| vec_to_hex(&c.hash))
+                .unwrap_or_default(),
+            commit_message: commit.and_then(|c| c.message.lines().next().map(str::to_string)),
+            wildcard: evaluation.wildcard,
+            task,
+        }
+    }
+}
+
 pub async fn job_evaluation<C: ConnectionTrait>(
     db: &C,
     evaluation: EvaluationId,
@@ -154,16 +169,7 @@ pub async fn job_evaluation<C: ConnectionTrait>(
         None => None,
     };
 
-    Ok(Some(JobEvaluationView {
-        repository: ev.repository,
-        commit: commit
-            .as_ref()
-            .map(|c| vec_to_hex(&c.hash))
-            .unwrap_or_default(),
-        commit_message: commit.and_then(|c| c.message.lines().next().map(str::to_string)),
-        wildcard: ev.wildcard,
-        task,
-    }))
+    Ok(Some(JobEvaluationView::new(ev, commit, task)))
 }
 
 #[cfg(test)]

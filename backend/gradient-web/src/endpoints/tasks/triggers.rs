@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use super::DeletedResponse;
 use super::refusal::TaskRefusal;
 use crate::error::WebResult;
 use crate::helpers::{OptionExt, ok_json};
@@ -129,11 +130,6 @@ pub struct UpdateBody {
     pub active: Option<bool>,
 }
 
-#[derive(Serialize, Debug)]
-pub struct DeletedResponse {
-    pub deleted: bool,
-}
-
 pub async fn list(
     TaskScope { task: proj, db, .. }: TaskScope<Member>,
 ) -> WebResult<Json<BaseResponse<Vec<TriggerOut>>>> {
@@ -250,7 +246,7 @@ pub async fn delete_one(
 
     gradient_db::triggers::delete(&db.web_db, row).await?;
 
-    Ok(ok_json(DeletedResponse { deleted: true }))
+    Ok(ok_json(DeletedResponse::deleted()))
 }
 
 pub async fn fire_now(

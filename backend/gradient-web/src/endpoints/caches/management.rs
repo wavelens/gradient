@@ -65,6 +65,28 @@ pub struct CacheResponse {
     pub can_edit: bool,
 }
 
+impl CacheResponse {
+    fn new(cache: MCache, public_key: String, can_edit: bool) -> Self {
+        Self {
+            id: cache.id,
+            name: cache.name,
+            display_name: cache.display_name,
+            description: cache.description,
+            active: cache.active,
+            priority: cache.priority,
+            local_priority: cache.local_priority,
+            max_storage_gb: cache.max_storage_gb,
+            pull_through: cache.pull_through,
+            public_key,
+            public: cache.public,
+            created_by: cache.created_by,
+            created_at: cache.created_at,
+            managed: cache.managed,
+            can_edit,
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, Debug)]
 pub struct PatchCacheRequest {
     pub name: Option<CacheName>,
@@ -231,23 +253,7 @@ pub async fn get_cache(
         None => false,
     };
 
-    Ok(ok_json(CacheResponse {
-        id: cache.id,
-        name: cache.name,
-        display_name: cache.display_name,
-        description: cache.description,
-        active: cache.active,
-        priority: cache.priority,
-        local_priority: cache.local_priority,
-        max_storage_gb: cache.max_storage_gb,
-        pull_through: cache.pull_through,
-        public_key,
-        public: cache.public,
-        created_by: cache.created_by,
-        created_at: cache.created_at,
-        managed: cache.managed,
-        can_edit,
-    }))
+    Ok(ok_json(CacheResponse::new(cache, public_key, can_edit)))
 }
 
 pub async fn patch_cache(

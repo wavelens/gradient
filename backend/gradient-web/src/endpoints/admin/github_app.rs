@@ -23,7 +23,7 @@ pub struct ManifestRequest {
 }
 
 #[derive(Serialize, Debug)]
-pub struct ManifestResponse {
+pub struct GithubAppManifestResponse {
     pub manifest: serde_json::Value,
     pub post_url: String,
     pub state: String,
@@ -60,7 +60,7 @@ pub async fn request_manifest(
     State(state): State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
     Json(body): Json<ManifestRequest>,
-) -> WebResult<Json<BaseResponse<ManifestResponse>>> {
+) -> WebResult<Json<BaseResponse<GithubAppManifestResponse>>> {
     let host = body.host.unwrap_or_else(default_host);
     validate_host(&host)?;
 
@@ -68,7 +68,7 @@ pub async fn request_manifest(
     let token = state.memory.manifest_state.issue_state(user.id).await;
     let post_url = gradient_ci::github_app_manifest::manifest_post_url(&host, &token);
 
-    Ok(ok_json(ManifestResponse {
+    Ok(ok_json(GithubAppManifestResponse {
         manifest,
         post_url,
         state: token,
