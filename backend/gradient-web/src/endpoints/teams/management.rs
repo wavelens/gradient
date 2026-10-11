@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use super::refusal::TeamRefusal;
 use super::workers::withdraw_team_workers;
 use crate::access::{TeamAccess, load_team};
 use crate::audit::{RequestInfo, record as audit_record};
@@ -160,8 +161,9 @@ pub async fn put_team(
     if check_index_name(&body.name).is_err() {
         return Err(WebError::invalid_name(Resource::TeamName));
     }
-    validate_display_name(&body.display_name)
-        .map_err(|e| WebError::bad_request(format!("Invalid display name: {}", e)))?;
+    validate_display_name(&body.display_name).map_err(|e| TeamRefusal::InvalidDisplayName {
+        reason: e.to_string(),
+    })?;
 
     if ETeam::find()
         .filter(CTeam::Name.eq(body.name.as_str()))
@@ -264,8 +266,9 @@ pub async fn patch_team(
     let team_id = team.id;
     let mut active: ATeam = team.into();
     if let Some(display_name) = body.display_name {
-        validate_display_name(&display_name)
-            .map_err(|e| WebError::bad_request(format!("Invalid display name: {}", e)))?;
+        validate_display_name(&display_name).map_err(|e| TeamRefusal::InvalidDisplayName {
+            reason: e.to_string(),
+        })?;
         active.display_name = Set(display_name.trim().to_string());
     }
     if let Some(users) = body.new_project_users {
@@ -276,11 +279,7 @@ pub async fn patch_team(
     }
     if let Some(role) = body.new_project_role {
         let role = blank_to_none(role)
-            .map(|name| {
-                builtin_role_id(&name).ok_or_else(|| {
-                    WebError::bad_request("new_project_role must be Admin, Write or View")
-                })
-            })
+            .map(|name| builtin_role_id(&name).ok_or(TeamRefusal::InvalidNewProjectRole))
             .transpose()?;
         active.new_project_role = Set(role);
     }

@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use super::refusal::ProjectRefusal;
 use crate::access::{Caller, ProjectAccess, load_project};
 use crate::audit::{RequestInfo, changed_fields, record as audit_record};
 use crate::authorization::{MaybeApiKey, MaybeUser};
@@ -195,10 +196,10 @@ pub async fn put(
     }
 
     if let Err(e) = validate_display_name(&body.display_name) {
-        return Err(WebError::bad_request(format!(
-            "Invalid display name: {}",
-            e
-        )));
+        return Err(ProjectRefusal::InvalidDisplayName {
+            reason: e.to_string(),
+        }
+        .into());
     }
 
     let existing_project = EProject::find()
@@ -409,10 +410,10 @@ pub async fn patch_project(
     if let Some(display_name) = body.display_name {
         let display_name = display_name.trim().to_string();
         if let Err(e) = validate_display_name(&display_name) {
-            return Err(WebError::bad_request(format!(
-                "Invalid display name: {}",
-                e
-            )));
+            return Err(ProjectRefusal::InvalidDisplayName {
+                reason: e.to_string(),
+            }
+            .into());
         }
         aproject.display_name = Set(display_name);
     }

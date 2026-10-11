@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use super::refusal::ProjectRefusal;
 use crate::access::{Caller, ProjectAccess, load_project};
 use crate::audit::{RequestInfo, record as audit_record};
 use crate::authorization::MaybeApiKey;
@@ -242,15 +243,11 @@ pub async fn patch_project_role(
     let role = load_project_role(&state, project.id, role_id).await?;
 
     if is_builtin_role(role.id) {
-        return Err(WebError::forbidden(
-            "Built-in roles (Admin, Write, View) cannot be modified.",
-        ));
+        return Err(ProjectRefusal::BuiltinRoleNotEditable.into());
     }
 
     if role.managed {
-        return Err(WebError::forbidden(
-            "State-managed roles cannot be modified via the API.",
-        ));
+        return Err(ProjectRefusal::ManagedRoleNotEditable.into());
     }
 
     let previous_mask = role.permission;
@@ -331,15 +328,11 @@ pub async fn delete_project_role(
     let role = load_project_role(&state, project.id, role_id).await?;
 
     if is_builtin_role(role.id) {
-        return Err(WebError::forbidden(
-            "Built-in roles (Admin, Write, View) cannot be deleted.",
-        ));
+        return Err(ProjectRefusal::BuiltinRoleNotDeletable.into());
     }
 
     if role.managed {
-        return Err(WebError::forbidden(
-            "State-managed roles cannot be deleted via the API.",
-        ));
+        return Err(ProjectRefusal::ManagedRoleNotDeletable.into());
     }
 
     let in_use = EProjectUser::find()
@@ -349,14 +342,10 @@ pub async fn delete_project_role(
         .await?
         .is_some();
     if in_use {
-        return Err(WebError::bad_request(
-            "Role is still assigned to members. Reassign them before deleting the role.",
-        ));
+        return Err(ProjectRefusal::RoleAssignedToMembers.into());
     }
     if gradient_db::teams::grants::project_role_granted_to_a_team(&state.web_db, role_id).await? {
-        return Err(WebError::bad_request(
-            "Role is still granted to a team. Change the team grant before deleting the role.",
-        ));
+        return Err(ProjectRefusal::RoleGrantedToTeam.into());
     }
 
     let role_name = role.name.clone();

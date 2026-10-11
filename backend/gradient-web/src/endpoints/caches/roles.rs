@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use super::refusal::CacheRefusal;
 use crate::access::{CacheAccess, Caller, load_cache};
 use crate::audit::{RequestInfo, record as audit_record};
 use crate::authorization::MaybeApiKey;
@@ -240,15 +241,11 @@ pub async fn patch_cache_role(
     let role = load_cache_role(&state, cache.id, role_id).await?;
 
     if is_builtin_cache_role(role.id) {
-        return Err(WebError::forbidden(
-            "Built-in roles (Admin, Write, View) cannot be modified.",
-        ));
+        return Err(CacheRefusal::BuiltinRoleNotModifiable.into());
     }
 
     if role.managed {
-        return Err(WebError::forbidden(
-            "State-managed roles cannot be modified via the API.",
-        ));
+        return Err(CacheRefusal::ManagedRoleNotModifiable.into());
     }
 
     let previous_mask = role.permission;
@@ -329,15 +326,11 @@ pub async fn delete_cache_role(
     let role = load_cache_role(&state, cache.id, role_id).await?;
 
     if is_builtin_cache_role(role.id) {
-        return Err(WebError::forbidden(
-            "Built-in roles (Admin, Write, View) cannot be deleted.",
-        ));
+        return Err(CacheRefusal::BuiltinRoleNotDeletable.into());
     }
 
     if role.managed {
-        return Err(WebError::forbidden(
-            "State-managed roles cannot be deleted via the API.",
-        ));
+        return Err(CacheRefusal::ManagedRoleNotDeletable.into());
     }
 
     let in_use = ECacheUser::find()
@@ -347,14 +340,10 @@ pub async fn delete_cache_role(
         .await?
         .is_some();
     if in_use {
-        return Err(WebError::bad_request(
-            "Role is still assigned to members. Reassign them before deleting the role.",
-        ));
+        return Err(CacheRefusal::RoleAssignedToMembers.into());
     }
     if gradient_db::teams::grants::cache_role_granted_to_a_team(&state.web_db, role_id).await? {
-        return Err(WebError::bad_request(
-            "Role is still granted to a team. Change the team grant before deleting the role.",
-        ));
+        return Err(CacheRefusal::RoleGrantedToTeam.into());
     }
 
     let role_name = role.name.clone();

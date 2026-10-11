@@ -6,8 +6,33 @@
 
 pub use gradient_db::permissions::*;
 
-use crate::error::{WebError, WebResult};
+use crate::error::WebResult;
+use crate::refusal::{Refusal, RefusalStatus};
 use serde::Serialize;
+
+#[derive(Debug, thiserror::Error)]
+enum PermissionRefusal {
+    #[error("Unknown permission '{permission}'. See {catalogue_hint} for the catalogue.")]
+    UnknownPermission {
+        permission: String,
+        catalogue_hint: String,
+    },
+    #[error("Unknown cache permission '{permission}'. See {catalogue_hint} for the catalogue.")]
+    UnknownCachePermission {
+        permission: String,
+        catalogue_hint: String,
+    },
+}
+
+impl Refusal for PermissionRefusal {
+    fn status(&self) -> RefusalStatus {
+        match self {
+            Self::UnknownPermission { .. } | Self::UnknownCachePermission { .. } => {
+                RefusalStatus::BadRequest
+            }
+        }
+    }
+}
 
 #[derive(Serialize, Debug)]
 pub struct PermissionEntry {
@@ -31,12 +56,11 @@ pub fn available_permissions() -> Vec<PermissionEntry> {
 pub fn parse_permission_list(wire: &[String], catalogue_hint: &str) -> WebResult<PermissionMask> {
     let mut perms = Vec::with_capacity(wire.len());
     for w in wire {
-        let parsed = Permission::from_wire_name(w).ok_or_else(|| {
-            WebError::bad_request(format!(
-                "Unknown permission '{}'. See {} for the catalogue.",
-                w, catalogue_hint
-            ))
-        })?;
+        let parsed =
+            Permission::from_wire_name(w).ok_or_else(|| PermissionRefusal::UnknownPermission {
+                permission: w.to_string(),
+                catalogue_hint: catalogue_hint.to_string(),
+            })?;
         perms.push(parsed);
     }
     Ok(mask_from(&perms))
@@ -60,10 +84,10 @@ pub fn parse_cache_permission_list(
     let mut perms = Vec::with_capacity(wire.len());
     for w in wire {
         let parsed = CachePermission::from_wire_name(w).ok_or_else(|| {
-            WebError::bad_request(format!(
-                "Unknown cache permission '{}'. See {} for the catalogue.",
-                w, catalogue_hint
-            ))
+            PermissionRefusal::UnknownCachePermission {
+                permission: w.to_string(),
+                catalogue_hint: catalogue_hint.to_string(),
+            }
         })?;
         perms.push(parsed);
     }

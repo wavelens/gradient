@@ -25,7 +25,40 @@ use crate::authorization::MaybeApiKey;
 use crate::endpoints::projects::workers::encrypt_token;
 use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
+use crate::refusal::{Refusal, RefusalStatus};
 use crate::resource::Resource;
+
+#[derive(Debug, thiserror::Error)]
+enum GradientCiConnectionRefusal {
+    #[error("Gradient.CI Servers are turned off on this instance")]
+    GradientCiDisabled,
+    #[error("{0}")]
+    InvalidConnectionToken(String),
+    #[error("team is required for a team connection")]
+    MissingTeam,
+    #[error("a project connection names its project")]
+    MissingProject,
+    #[error("the project is already connected to Gradient.CI Servers")]
+    ProjectAlreadyConnected,
+    #[error("the worker of this connection token is already registered on this instance")]
+    WorkerAlreadyRegistered,
+    #[error("the team is already connected to Gradient.CI Servers")]
+    TeamAlreadyConnected,
+}
+
+impl Refusal for GradientCiConnectionRefusal {
+    fn status(&self) -> RefusalStatus {
+        match self {
+            Self::GradientCiDisabled => RefusalStatus::Forbidden,
+            Self::InvalidConnectionToken(_) | Self::MissingTeam | Self::MissingProject => {
+                RefusalStatus::BadRequest
+            }
+            Self::ProjectAlreadyConnected
+            | Self::WorkerAlreadyRegistered
+            | Self::TeamAlreadyConnected => RefusalStatus::Conflict,
+        }
+    }
+}
 
 const DISPLAY_NAME: &str = "Gradient.CI Servers";
 const PREFIX: &str = "gci1_";
@@ -110,14 +143,12 @@ pub async fn post_connection(
     Json(body): Json<ConnectionRequest>,
 ) -> WebResult<Json<BaseResponse<ConnectionResponse>>> {
     if !state.config.gradient_ci.enable {
-        return Err(WebError::forbidden(
-            "Gradient.CI Servers are turned off on this instance",
-        ));
+        return Err(GradientCiConnectionRefusal::GradientCiDisabled.into());
     }
 
     let target = authorize_target(&state, &user, &api_key, &body).await?;
-    let token =
-        ConnectionToken::parse(&body.token).map_err(|e| WebError::bad_request(e.to_string()))?;
+    let token = ConnectionToken::parse(&body.token)
+        .map_err(|e| GradientCiConnectionRefusal::InvalidConnectionToken(e.to_string()))?;
     let url = proto_url(&state.config.gradient_ci.url)
         .ok_or_else(|| WebError::internal("gradientCi.url is not a valid URL"))?;
     ensure_unclaimed(&state, &target, &token.worker_id).await?;
@@ -145,7 +176,7 @@ async fn authorize_target(
             let name = body
                 .team
                 .clone()
-                .ok_or_else(|| WebError::bad_request("team is required for a team connection"))?;
+                .ok_or(GradientCiConnectionRefusal::MissingTeam)?;
             let (team, _) = load_team(
                 state,
                 user,
@@ -162,7 +193,7 @@ async fn authorize_target(
             let name = body
                 .project
                 .clone()
-                .ok_or_else(|| WebError::bad_request("a project connection names its project"))?;
+                .ok_or(GradientCiConnectionRefusal::MissingProject)?;
             let project = load_project(
                 state,
                 Caller::User(user),
@@ -228,7 +259,7 @@ async fn ensure_unclaimed(state: &ServerState, target: &Target, worker_id: &str)
         team_worker.as_ref(),
         worker_id,
     ) {
-        Some(message) => Err(WebError::conflict(message)),
+        Some(refusal) => Err(refusal.into()),
         None => Ok(()),
     }
 }
@@ -238,20 +269,20 @@ fn claim_conflict(
     registration: Option<&worker_registration::Model>,
     team_worker: Option<&team_worker::Model>,
     worker_id: &str,
-) -> Option<&'static str> {
+) -> Option<GradientCiConnectionRefusal> {
     let own_project = match target {
         Target::Project(project) => registration.is_some_and(|r| r.peer_id == project.id),
         Target::Team(_) => false,
     };
     if own_project {
-        return Some("the project is already connected to Gradient.CI Servers");
+        return Some(GradientCiConnectionRefusal::ProjectAlreadyConnected);
     }
 
     if registration.is_some() || team_worker.is_some_and(|w| w.worker_id == worker_id) {
-        return Some("the worker of this connection token is already registered on this instance");
+        return Some(GradientCiConnectionRefusal::WorkerAlreadyRegistered);
     }
 
-    team_worker.map(|_| "the team is already connected to Gradient.CI Servers")
+    team_worker.map(|_| GradientCiConnectionRefusal::TeamAlreadyConnected)
 }
 
 async fn insert_registration(

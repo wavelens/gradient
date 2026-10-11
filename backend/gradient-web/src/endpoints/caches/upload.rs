@@ -4,10 +4,11 @@
  */
 
 use super::admit::{admit, admit_nar};
+use super::refusal::CacheRefusal;
 use crate::access::{CacheAccess, Caller, load_cache};
 use crate::audit::{RequestInfo, record as audit_record};
 use crate::authorization::MaybeApiKey;
-use crate::error::{ErrorCode, WebError, WebResult};
+use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
 use crate::permissions::CachePermission;
 use axum::Extension;
@@ -75,20 +76,19 @@ pub async fn nars_upload(
     while let Some(field) = multipart
         .next_field()
         .await
-        .map_err(|e| WebError::BadRequest(ErrorCode::INPUT_VALIDATION, e.to_string()))?
+        .map_err(|e| CacheRefusal::MultipartFieldUnreadable(e.to_string()))?
     {
         let name = field.name().map(str::to_owned);
         match name.as_deref() {
             Some("narinfo") => {
-                let text = field.text().await.map_err(|e| {
-                    WebError::BadRequest(ErrorCode::INPUT_VALIDATION, e.to_string())
-                })?;
-                let parsed: NarinfoPart = serde_json::from_str(&text).map_err(|e| {
-                    WebError::BadRequest(
-                        ErrorCode::INPUT_VALIDATION,
-                        format!("invalid narinfo JSON: {e}"),
-                    )
-                })?;
+                let text = field
+                    .text()
+                    .await
+                    .map_err(|e| CacheRefusal::MultipartFieldUnreadable(e.to_string()))?;
+                let parsed: NarinfoPart =
+                    serde_json::from_str(&text).map_err(|e| CacheRefusal::InvalidNarinfoJson {
+                        reason: e.to_string(),
+                    })?;
                 narinfo = Some(parsed);
             }
             Some("nar") => {
@@ -102,25 +102,18 @@ pub async fn nars_upload(
         Some(n) => n,
         None => {
             let _ = upload_store.discard(&stage_key).await;
-            return Err(WebError::BadRequest(
-                ErrorCode::INPUT_VALIDATION,
-                "missing narinfo part".into(),
-            ));
+            return Err(CacheRefusal::MissingNarinfoPart.into());
         }
     };
-    let staged_size = staged_size.ok_or_else(|| {
-        WebError::BadRequest(ErrorCode::INPUT_VALIDATION, "missing nar part".into())
-    })?;
+    let staged_size = staged_size.ok_or(CacheRefusal::MissingNarPart)?;
 
     if staged_size as i64 != narinfo.file_size {
         let _ = upload_store.discard(&stage_key).await;
-        return Err(WebError::BadRequest(
-            ErrorCode::INPUT_VALIDATION,
-            format!(
-                "nar size mismatch: declared {} bytes, got {staged_size}",
-                narinfo.file_size
-            ),
-        ));
+        return Err(CacheRefusal::UploadedNarSizeMismatch {
+            declared: narinfo.file_size,
+            got: staged_size,
+        }
+        .into());
     }
 
     let verify_reader = upload_store
@@ -135,10 +128,10 @@ pub async fn nars_upload(
     .await
     {
         let _ = upload_store.discard(&stage_key).await;
-        return Err(WebError::BadRequest(
-            ErrorCode::INPUT_VALIDATION,
-            format!("nar content verification failed: {e}"),
-        ));
+        return Err(CacheRefusal::NarVerificationFailed {
+            reason: e.to_string(),
+        }
+        .into());
     }
 
     permit.committed();
@@ -243,14 +236,11 @@ async fn stage_nar_field(
     while let Some(chunk) = field
         .chunk()
         .await
-        .map_err(|e| WebError::BadRequest(ErrorCode::INPUT_VALIDATION, e.to_string()))?
+        .map_err(|e| CacheRefusal::MultipartFieldUnreadable(e.to_string()))?
     {
         if offset + chunk.len() as u64 > max {
             let _ = store.discard(key).await;
-            return Err(WebError::PayloadTooLarge(
-                ErrorCode::PAYLOAD_TOO_LARGE,
-                format!("nar exceeds max upload size of {max} bytes"),
-            ));
+            return Err(CacheRefusal::NarTooLarge { max }.into());
         }
         store
             .append(key, token, offset, &chunk)
@@ -263,10 +253,7 @@ async fn stage_nar_field(
 
 fn require_safe_hash(store_hash: &str) -> WebResult<()> {
     if store_hash.is_empty() || store_hash.contains('/') || store_hash.contains("..") {
-        return Err(WebError::BadRequest(
-            ErrorCode::INPUT_VALIDATION,
-            "invalid store hash".into(),
-        ));
+        return Err(CacheRefusal::InvalidStoreHash.into());
     }
 
     Ok(())
@@ -295,10 +282,7 @@ pub async fn nar_chunk(
 
     let max = state.config.nar.max_upload_size as u64;
     if offset + body.len() as u64 > max {
-        return Err(WebError::PayloadTooLarge(
-            ErrorCode::PAYLOAD_TOO_LARGE,
-            format!("nar exceeds max upload size of {max} bytes"),
-        ));
+        return Err(CacheRefusal::NarTooLarge { max }.into());
     }
 
     let store = upload_partial_store(&state)?;
@@ -346,13 +330,11 @@ pub async fn nar_finalize(
     let key = format!("{}/{store_hash}", cache.id);
     let staged = store.staged_len(&key).await;
     if staged as i64 != narinfo.file_size {
-        return Err(WebError::BadRequest(
-            ErrorCode::INPUT_VALIDATION,
-            format!(
-                "nar size mismatch: declared {} bytes, staged {staged}",
-                narinfo.file_size
-            ),
-        ));
+        return Err(CacheRefusal::StagedNarSizeMismatch {
+            declared: narinfo.file_size,
+            staged,
+        }
+        .into());
     }
 
     let claim = admit_nar(
@@ -372,10 +354,10 @@ pub async fn nar_finalize(
     )
     .await
     {
-        return Err(WebError::BadRequest(
-            ErrorCode::INPUT_VALIDATION,
-            format!("nar content verification failed: {e}"),
-        ));
+        return Err(CacheRefusal::NarVerificationFailed {
+            reason: e.to_string(),
+        }
+        .into());
     }
     let nar_reader = store
         .open_read(&key)

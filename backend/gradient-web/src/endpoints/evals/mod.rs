@@ -9,6 +9,7 @@ pub mod artefacts;
 pub mod log;
 mod progress;
 pub mod query;
+mod refusal;
 pub mod report;
 pub mod summary;
 pub mod types;

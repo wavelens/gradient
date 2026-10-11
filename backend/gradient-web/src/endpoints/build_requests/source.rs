@@ -5,6 +5,7 @@
  */
 
 use super::dispatch::{DispatchResponse, InputOverrideBody, finalize_build_request};
+use super::refusal::BuildRequestRefusal;
 use crate::access::{Caller, ProjectAccess, load_project};
 use crate::authorization::MaybeApiKey;
 use crate::error::{WebError, WebResult};
@@ -50,17 +51,22 @@ pub async fn post_source(
     let mut target: Option<String> = None;
     let mut system: Option<String> = None;
 
-    while let Some(field) = multipart
-        .next_field()
-        .await
-        .map_err(|e| WebError::bad_request(format!("Invalid multipart payload: {}", e)))?
+    while let Some(field) =
+        multipart
+            .next_field()
+            .await
+            .map_err(|e| BuildRequestRefusal::InvalidMultipartPayload {
+                reason: e.to_string(),
+            })?
     {
         match field.name() {
             Some("nar") => {
                 let data = field
                     .bytes()
                     .await
-                    .map_err(|e| WebError::bad_request(format!("Failed to read nar: {}", e)))?;
+                    .map_err(|e| BuildRequestRefusal::UnreadableNar {
+                        reason: e.to_string(),
+                    })?;
                 nar_bytes = Some(data.to_vec());
             }
             Some("target") => target = field.text().await.ok(),
@@ -69,9 +75,9 @@ pub async fn post_source(
         }
     }
 
-    let nar_bytes = nar_bytes.ok_or_else(|| WebError::bad_request("missing `nar` field"))?;
+    let nar_bytes = nar_bytes.ok_or(BuildRequestRefusal::MissingNarField)?;
     if nar_bytes.is_empty() {
-        return Err(WebError::bad_request("empty `nar` field"));
+        return Err(BuildRequestRefusal::EmptyNarField.into());
     }
 
     let nar = source_nar_from_bytes(nar_bytes)
@@ -107,7 +113,7 @@ fn source_partial_store(state: &ServerState) -> WebResult<PartialStore> {
 
 fn require_safe_upload_id(upload: &str) -> WebResult<()> {
     if upload.is_empty() || upload.contains('/') || upload.contains("..") {
-        return Err(WebError::bad_request("invalid upload id"));
+        return Err(BuildRequestRefusal::InvalidUploadId.into());
     }
     Ok(())
 }
@@ -123,9 +129,7 @@ pub async fn source_chunk(
 
     let max = state.config.http.max_source_upload_size as u64;
     if offset + body.len() as u64 > max {
-        return Err(WebError::payload_too_large(format!(
-            "source upload exceeds max size of {max} bytes"
-        )));
+        return Err(BuildRequestRefusal::SourceUploadTooLarge { max }.into());
     }
 
     let store = source_partial_store(&state)?;
@@ -165,14 +169,17 @@ pub async fn source_finalize(
 
     let store = source_partial_store(&state)?;
     let key = format!("{}/{upload}", user.id);
-    let nar_bytes = store
-        .read_all(&key)
-        .await
-        .map_err(|e| WebError::bad_request(format!("no staged source upload: {e}")))?;
+    let nar_bytes =
+        store
+            .read_all(&key)
+            .await
+            .map_err(|e| BuildRequestRefusal::NoStagedSourceUpload {
+                reason: e.to_string(),
+            })?;
 
     if nar_bytes.is_empty() {
         let _ = store.discard(&key).await;
-        return Err(WebError::bad_request("empty source upload"));
+        return Err(BuildRequestRefusal::EmptySourceUpload.into());
     }
 
     let nar = source_nar_from_bytes(nar_bytes)

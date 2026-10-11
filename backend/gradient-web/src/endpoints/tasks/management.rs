@@ -6,10 +6,11 @@
 
 use super::TaskResponse;
 use super::auto_attach;
+use super::refusal::TaskRefusal;
 use crate::access::{Caller, ProjectAccess, TaskAccess, has_permission, load_project, load_task};
 use crate::audit::{RequestInfo, changed_fields, record as audit_record};
 use crate::authorization::{MaybeApiKey, MaybeUser};
-use crate::error::{ErrorCode, WebError, WebResult};
+use crate::error::{WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json, paginate};
 use crate::permissions::Permission;
 use crate::resource::Resource;
@@ -205,15 +206,15 @@ pub async fn put(
     }
 
     if let Err(e) = validate_display_name(&body.display_name) {
-        return Err(WebError::bad_request(format!(
-            "Invalid display name: {}",
-            e
-        )));
+        return Err(TaskRefusal::InvalidDisplayName {
+            reason: e.to_string(),
+        }
+        .into());
     }
 
     body.repository
         .parse::<RepositoryUrl>()
-        .map_err(|e| WebError::bad_request(e.to_string()))?;
+        .map_err(|e| TaskRefusal::InvalidRepositoryUrl(e.to_string()))?;
 
     let project = load_project(
         &state.0,
@@ -244,7 +245,7 @@ pub async fn put(
         .wildcard
         .trim()
         .parse::<Wildcard>()
-        .map_err(|e| WebError::bad_request(e.to_string()))?
+        .map_err(|e| TaskRefusal::InvalidWildcard(e.to_string()))?
         .to_string();
 
     let task = MTask {
@@ -518,10 +519,10 @@ impl<'a> TaskPatcher<'a> {
     fn apply_display_name(&mut self, display_name: String) -> WebResult<()> {
         let display_name = display_name.trim().to_string();
         if let Err(e) = validate_display_name(&display_name) {
-            return Err(WebError::bad_request(format!(
-                "Invalid display name: {}",
-                e
-            )));
+            return Err(TaskRefusal::InvalidDisplayName {
+                reason: e.to_string(),
+            }
+            .into());
         }
         self.atask.display_name = Set(display_name);
         Ok(())
@@ -530,7 +531,7 @@ impl<'a> TaskPatcher<'a> {
     fn apply_repository(&mut self, repository: String) -> WebResult<()> {
         repository
             .parse::<RepositoryUrl>()
-            .map_err(|e| WebError::bad_request(e.to_string()))?;
+            .map_err(|e| TaskRefusal::InvalidRepositoryUrl(e.to_string()))?;
         self.atask.repository = Set(repository);
         Ok(())
     }
@@ -539,7 +540,7 @@ impl<'a> TaskPatcher<'a> {
         let wildcard = wildcard
             .trim()
             .parse::<Wildcard>()
-            .map_err(|e| WebError::bad_request(e.to_string()))?
+            .map_err(|e| TaskRefusal::InvalidWildcard(e.to_string()))?
             .to_string();
         self.atask.wildcard = Set(wildcard);
         Ok(())
@@ -547,17 +548,15 @@ impl<'a> TaskPatcher<'a> {
 
     fn apply_keep_evaluations(&mut self, keep: i32) -> WebResult<()> {
         if keep < 1 {
-            return Err(WebError::bad_request(
-                "keep_evaluations must be at least 1".to_string(),
-            ));
+            return Err(TaskRefusal::KeepEvaluationsBelowMinimum.into());
         }
         if let Some(global_max) = self.state.config.eval.keep_evaluations_max()
             && keep > global_max
         {
-            return Err(WebError::bad_request(format!(
-                "keep_evaluations cannot exceed the server maximum of {}",
-                global_max
-            )));
+            return Err(TaskRefusal::KeepEvaluationsAboveMaximum {
+                maximum: global_max,
+            }
+            .into());
         }
         self.atask.keep_evaluations = Set(keep);
         Ok(())
@@ -705,11 +704,8 @@ pub async fn post_task_check_repository(
     let (_has_updates, remote_hash) =
         check_task_updates(&state.db(), &task, None)
             .await
-            .map_err(|e| {
-                WebError::bad_request_with(
-                    ErrorCode::REPOSITORY_UNREACHABLE,
-                    format!("Failed to check repository: {}", e),
-                )
+            .map_err(|e| TaskRefusal::RepositoryCheckFailed {
+                reason: e.to_string(),
             })?;
 
     let res = BaseResponse {
@@ -748,15 +744,11 @@ pub async fn post_task_transfer(
     .await?;
     let is_owner = task.created_by == user.id;
     if !is_admin && !is_owner {
-        return Err(WebError::forbidden(
-            "Only the task owner or a project admin can transfer ownership.".to_string(),
-        ));
+        return Err(TaskRefusal::TransferNotPermitted.into());
     }
 
     if task.managed {
-        return Err(WebError::forbidden(
-            "Cannot transfer ownership of a state-managed task.".to_string(),
-        ));
+        return Err(TaskRefusal::ManagedTaskTransfer.into());
     }
 
     let new_project = load_project(
@@ -772,9 +764,7 @@ pub async fn post_task_transfer(
     .await?;
 
     if new_project.id == project.id {
-        return Err(WebError::bad_request(
-            "Task is already in this project.".to_string(),
-        ));
+        return Err(TaskRefusal::AlreadyInProject.into());
     }
 
     let mut atask: ATask = task.into();

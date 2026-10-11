@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use super::refusal::BuildReadRefusal;
 use crate::authorization::{MaybeApiKey, MaybeUser};
 use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
@@ -135,17 +136,17 @@ fn parse_line_range(q: &LineRangeQuery) -> Result<(u64, Option<u64>), WebError> 
         let cleaned = range.replace(['L', 'l'], "");
         let (lo, hi) = cleaned
             .split_once('-')
-            .ok_or_else(|| WebError::bad_request("range must look like L120-L130"))?;
+            .ok_or(BuildReadRefusal::MalformedRange)?;
 
         let start: u64 = lo
             .trim()
             .parse()
-            .map_err(|_| WebError::bad_request("invalid range start"))?;
+            .map_err(|_| BuildReadRefusal::InvalidRangeStart)?;
 
         let end: u64 = hi
             .trim()
             .parse()
-            .map_err(|_| WebError::bad_request("invalid range end"))?;
+            .map_err(|_| BuildReadRefusal::InvalidRangeEnd)?;
 
         return Ok((start.max(1), Some(end)));
     }

@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use super::refusal::CacheRefusal;
 use crate::access::{CacheAccess, Caller, load_cache};
 use crate::audit::{RequestInfo, changed_fields, record as audit_record};
 use crate::authorization::{MaybeApiKey, MaybeUser};
@@ -79,9 +80,7 @@ pub struct PatchCacheRequest {
 
 fn validate_max_storage_gb(value: i32) -> WebResult<()> {
     if value < 0 {
-        return Err(WebError::bad_request(
-            "max_storage_gb must be 0 (unlimited) or at least 1",
-        ));
+        return Err(CacheRefusal::NegativeMaxStorage.into());
     }
     Ok(())
 }
@@ -134,10 +133,10 @@ pub async fn put(
     }
 
     if let Err(e) = validate_display_name(&body.display_name) {
-        return Err(WebError::bad_request(format!(
-            "Invalid display name: {}",
-            e
-        )));
+        return Err(CacheRefusal::InvalidDisplayName {
+            reason: e.to_string(),
+        }
+        .into());
     }
 
     let max_storage_gb = body.max_storage_gb.unwrap_or(0);
@@ -343,10 +342,10 @@ pub async fn patch_cache(
     if let Some(display_name) = body.display_name {
         let display_name = display_name.trim().to_string();
         if let Err(e) = validate_display_name(&display_name) {
-            return Err(WebError::bad_request(format!(
-                "Invalid display name: {}",
-                e
-            )));
+            return Err(CacheRefusal::InvalidDisplayName {
+                reason: e.to_string(),
+            }
+            .into());
         }
         acache.display_name = Set(display_name);
     }

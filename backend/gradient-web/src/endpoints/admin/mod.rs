@@ -7,6 +7,7 @@
 pub mod draining;
 pub mod github_app;
 pub mod maintenance;
+mod refusal;
 pub mod state;
 pub mod tasks;
 pub mod workers;

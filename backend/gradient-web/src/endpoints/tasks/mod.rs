@@ -10,6 +10,7 @@ pub mod evaluations;
 pub mod flake_inputs;
 pub mod management;
 pub mod metrics;
+mod refusal;
 pub mod triggers;
 
 pub use self::evaluations::{

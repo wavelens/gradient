@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use super::refusal::TeamRefusal;
 use crate::access::{
     CacheAccess, Caller, ProjectAccess, has_cache_permission, has_permission, load_cache,
     load_project,
@@ -256,9 +257,7 @@ pub async fn post_project_team(
     Json(body): Json<GrantProjectRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     if !body.users && !body.workers {
-        return Err(WebError::bad_request(
-            "A grant includes users, workers or both.",
-        ));
+        return Err(TeamRefusal::EmptyGrant.into());
     }
     let permission = grant_permission(body.users);
     let project = load_project(
@@ -283,18 +282,14 @@ pub async fn post_project_team(
         )
         .await?
     {
-        return Err(WebError::forbidden(
-            "You do not have permission to perform this action.",
-        ));
+        return Err(TeamRefusal::GrantNotPermitted.into());
     }
 
     let team = find_team(&state, &body.team).await?;
     let role = match (body.users, body.role.as_deref()) {
         (true, Some(name)) => Some(project_role(&state, project.id, name).await?),
         (true, None) => {
-            return Err(WebError::bad_request(
-                "A role is required when the grant includes users.",
-            ));
+            return Err(TeamRefusal::RoleRequiredForUsers.into());
         }
         (false, _) => None,
     };
@@ -398,22 +393,16 @@ pub async fn patch_project_team(
     let users = body.users.unwrap_or(grant.includes_users);
     let workers = body.workers.unwrap_or(grant.includes_workers);
     if !users && !workers {
-        return Err(WebError::bad_request(
-            "A grant includes users, workers or both. Remove the grant instead.",
-        ));
+        return Err(TeamRefusal::EmptyGrantAfterUpdate.into());
     }
     if workers && !grant.includes_workers && !is_team_admin(&state, &user, team.id).await? {
-        return Err(WebError::forbidden(
-            "Turning on a team's workers needs Admin in the team.",
-        ));
+        return Err(TeamRefusal::WorkersNeedTeamAdmin.into());
     }
     let role = match (users, body.role.as_deref()) {
         (true, Some(name)) => Some(project_role(&state, project.id, name).await?),
         (true, None) => grant
             .role
-            .ok_or_else(|| {
-                WebError::bad_request("A role is required when the grant includes users.")
-            })
+            .ok_or(TeamRefusal::RoleRequiredForUsers)
             .map(Some)?,
         (false, _) => None,
     };
@@ -483,9 +472,7 @@ pub async fn delete_project_team(
         return Err(WebError::not_found(Resource::TeamGrant));
     }
     if project.managed {
-        return Err(WebError::forbidden(
-            "Cannot modify state-managed project. This project is managed by configuration and cannot be edited through the API.",
-        ));
+        return Err(TeamRefusal::ManagedProjectNotEditable.into());
     }
 
     let Some(grant) = grant else {
@@ -763,9 +750,7 @@ pub async fn delete_cache_team(
         return Err(WebError::not_found(Resource::TeamGrant));
     }
     if cache.managed {
-        return Err(WebError::forbidden(
-            "Cannot modify state-managed cache. This cache is managed by configuration and cannot be edited through the API.",
-        ));
+        return Err(TeamRefusal::ManagedCacheNotEditable.into());
     }
 
     let Some(grant) = grant else {

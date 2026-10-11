@@ -7,6 +7,7 @@
 //! Secrets and access tokens are stored encrypted with the server's crypt key. Responses are
 //! exposing only the `has_secret` and `has_access_token` flags.
 
+use super::refusal::ProjectRefusal;
 use crate::access::{
     Caller, ProjectAccess, load_integration_in_project, load_project, reject_managed_integration,
 };
@@ -97,10 +98,10 @@ fn normalize_allowed_ips(raw: Option<Vec<String>>) -> Result<Option<Vec<String>>
     let mut out = Vec::with_capacity(entries.len());
     for e in entries {
         let canon = crate::ip_allowlist::normalize_entry(&e).map_err(|err| {
-            WebError::bad_request_with(
-                crate::error::ErrorCode::INVALID_ALLOWED_IP,
-                format!("invalid allowed_ips entry '{e}': {err}"),
-            )
+            ProjectRefusal::InvalidAllowedIp {
+                entry: e.clone(),
+                reason: err.to_string(),
+            }
         })?;
         out.push(canon);
     }
@@ -158,19 +159,18 @@ fn parse_kind(s: &str) -> Result<IntegrationKind, WebError> {
     match s {
         "inbound" => Ok(IntegrationKind::Inbound),
         "outbound" => Ok(IntegrationKind::Outbound),
-        other => Err(WebError::bad_request(format!(
-            "Invalid integration kind '{}': expected 'inbound' or 'outbound'.",
-            other
-        ))),
+        other => Err(ProjectRefusal::InvalidIntegrationKind {
+            kind: other.to_string(),
+        }
+        .into()),
     }
 }
 
 fn parse_git_host(s: &str) -> Result<GitHostType, WebError> {
     GitHostType::from_path_segment(s).ok_or_else(|| {
-        WebError::bad_request(format!(
-            "Invalid Git host type '{}': expected 'gitea', 'forgejo', 'gitlab', or 'github'.",
-            s
-        ))
+        WebError::from(ProjectRefusal::InvalidGitHostType {
+            host_type: s.to_string(),
+        })
     })
 }
 
@@ -267,13 +267,11 @@ pub async fn put_integration(
     let git_host = parse_git_host(&body.git_host_type)?;
 
     if matches!(git_host, GitHostType::GitHub) {
-        let installation_id = body.installation_id.ok_or_else(|| {
-            WebError::bad_request("git_host_type 'github' requires an installation_id")
-        })?;
+        let installation_id = body
+            .installation_id
+            .ok_or(ProjectRefusal::InstallationIdRequired)?;
         let Some(app) = state.config.github_app.clone() else {
-            return Err(WebError::bad_request(
-                "GitHub App is not configured on this server; set GRADIENT_GITHUB_APP_* first",
-            ));
+            return Err(ProjectRefusal::GitHubAppNotConfigured.into());
         };
         let pem = tokio::fs::read_to_string(&app.private_key_file)
             .await
@@ -285,7 +283,9 @@ pub async fn put_integration(
             installation_id,
         )
         .await
-        .map_err(|e| WebError::bad_request(format!("invalid installation_id: {e}")))?;
+        .map_err(|e| ProjectRefusal::InvalidInstallationId {
+            reason: e.to_string(),
+        })?;
 
         let txn = state.web_db.inner().begin().await?;
         let inst = gradient_ci::upsert_github_installation(
@@ -308,11 +308,8 @@ pub async fn put_integration(
             .filter(CIntegration::GithubInstallation.eq(inst))
             .one(&txn)
             .await?
-            .ok_or_else(|| {
-                WebError::conflict(format!(
-                    "an integration named '{name}' already exists in this project; \
-                     rename it before binding this installation"
-                ))
+            .ok_or_else(|| ProjectRefusal::IntegrationNameTaken {
+                name: name.to_string(),
             })?;
         txn.commit().await?;
 
@@ -430,9 +427,7 @@ pub async fn patch_integration(
     let integration = load_integration_in_project(&state, project.id, integration_id).await?;
     reject_managed_integration(&integration)?;
     if integration.git_host_type == GitHostType::GitHub {
-        return Err(WebError::bad_request(
-            "GitHub App integrations are managed automatically and cannot be edited.",
-        ));
+        return Err(ProjectRefusal::GitHubIntegrationNotEditable.into());
     }
     let kind = integration.kind;
 
@@ -458,9 +453,7 @@ pub async fn patch_integration(
     if let Some(display_name) = body.display_name {
         let trimmed = display_name.trim().to_string();
         if trimmed.is_empty() {
-            return Err(WebError::bad_request(
-                "display_name cannot be empty".to_string(),
-            ));
+            return Err(ProjectRefusal::EmptyDisplayName.into());
         }
         active.display_name = Set(trimmed);
     }
@@ -468,10 +461,7 @@ pub async fn patch_integration(
     if let Some(git_host) = body.git_host_type {
         let parsed = parse_git_host(&git_host)?;
         if matches!(parsed, GitHostType::GitHub) {
-            return Err(WebError::bad_request(
-                "GitHub integrations are managed through the server-wide GitHub App; \
-                 enable the App on the project instead of switching git_host_type to github.",
-            ));
+            return Err(ProjectRefusal::SwitchToGitHubNotAllowed.into());
         }
         active.git_host_type = Set(parsed);
     }

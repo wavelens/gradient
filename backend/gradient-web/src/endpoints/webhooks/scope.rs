@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use super::refusal::WebhookRefusal;
 use crate::access::{CacheAccess, Caller, ProjectAccess, load_cache, load_project};
 use crate::authorization::MaybeApiKey;
 use crate::error::{WebError, require_superuser};
@@ -75,7 +76,11 @@ impl WebhookOwner {
         self.params
             .get(name)
             .and_then(|v| v.parse().ok())
-            .ok_or_else(|| WebError::bad_request(format!("invalid {name}")))
+            .ok_or_else(|| {
+                WebError::from(WebhookRefusal::InvalidParameter {
+                    name: name.to_string(),
+                })
+            })
     }
 }
 
@@ -90,14 +95,14 @@ impl FromRequestParts<Arc<ServerState>> for WebhookOwner {
             .extensions
             .get::<MUser>()
             .cloned()
-            .ok_or_else(|| WebError::unauthorized("login required"))?;
+            .ok_or(WebhookRefusal::LoginRequired)?;
         let api_key = parts
             .extensions
             .get::<MaybeApiKey>()
             .and_then(|k| k.0.clone());
         let Path(params) = Path::<HashMap<String, String>>::from_request_parts(parts, state)
             .await
-            .map_err(|e| WebError::bad_request(e.to_string()))?;
+            .map_err(|e| WebhookRefusal::InvalidPathParameters(e.to_string()))?;
 
         if let Some(project) = params.get("project") {
             let project = load_project(
