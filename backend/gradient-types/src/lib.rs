@@ -61,6 +61,7 @@ use chrono::NaiveDateTime;
 use clap::Parser;
 use gradient_derive::config_group;
 use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
 
 #[inline]
 pub fn now() -> NaiveDateTime {
@@ -131,7 +132,7 @@ pub struct BaseResponse<T> {
     pub message: T,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, ToSchema)]
 pub struct Paginated<T> {
     pub items: T,
     pub total: u64,

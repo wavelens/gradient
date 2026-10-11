@@ -63,6 +63,8 @@ tokio         = { workspace = true, features = ["process", "signal", "macros"] }
 tokio-util    = { workspace = true, features = ["io"] }
 tracing       = { workspace = true }
 url           = { workspace = true }
+utoipa        = { workspace = true, features = ["axum_extras"] }
+utoipa-axum   = { workspace = true }
 uuid          = { workspace = true }
 zstd          = { workspace = true }
 

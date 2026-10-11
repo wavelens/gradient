@@ -22,6 +22,7 @@ macro_rules! id_newtype {
             Serialize,
             Deserialize,
             DeriveValueType,
+            utoipa::ToSchema,
         )]
         #[serde(transparent)]
         pub struct $name(pub Uuid);

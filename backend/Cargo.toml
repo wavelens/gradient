@@ -145,6 +145,8 @@ reqwest              = { version = "0.13", default-features = false, features = 
 tower                = { version = "0.5", default-features = false }
 tower-http           = { version = "0.7", default-features = false, features = ["cors", "request-id", "trace"] }
 tower_governor       = { version = "0.8", default-features = false, features = ["axum"] }
+utoipa               = { version = "6", default-features = false, features = ["macros", "chrono", "uuid", "yaml", "preserve_order"] }
+utoipa-axum          = { version = "0.3", default-features = false }
 
 # Object store / git
 git2         = { version = "0.21", default-features = false, features = ["https", "ssh"] }
@@ -258,7 +260,13 @@ name = "gradient-sql-gate"
 path = "src/sql_gate/main.rs"
 required-features = ["sql-gate"]
 
+[[bin]]
+name = "gradient-api-spec"
+path = "src/api_spec.rs"
+required-features = ["api-spec"]
+
 [features]
+api-spec = []
 sql-gate = ["dep:anyhow", "dep:gradient-db", "dep:gradient-ci", "dep:gradient-graph", "dep:gradient-proto", "dep:gradient-report", "dep:sea-orm", "dep:serde_json", "dep:uuid"]
 
 [dependencies]

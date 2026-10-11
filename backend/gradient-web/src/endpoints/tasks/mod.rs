@@ -146,7 +146,7 @@ impl EvaluationTriggerSummary {
     }
 }
 
-#[derive(Serialize, Debug)]
+#[derive(Serialize, Debug, utoipa::ToSchema)]
 pub struct DeletedResponse {
     pub deleted: bool,
 }

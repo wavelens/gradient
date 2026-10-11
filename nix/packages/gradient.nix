@@ -115,11 +115,12 @@ craneLib.buildPackage (commonArgs // rec {
   doCheck = false;
 
   outputs = [ "out" "gate" "daemon" ];
-  cargoExtraArgs = "--locked --features sql-gate,gradient-daemon/mock";
+  cargoExtraArgs = "--locked --features sql-gate,api-spec,gradient-daemon/mock";
 
   postInstall = ''
     mkdir -p $gate/bin $daemon/bin
     mv $out/bin/gradient-sql-gate $gate/bin/
+    mv $out/bin/gradient-api-spec $gate/bin/
     mv $out/bin/gradient-daemon $daemon/bin/
   '';
 
