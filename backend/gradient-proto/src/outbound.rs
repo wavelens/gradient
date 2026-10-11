@@ -9,6 +9,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use gradient_core::ServerState;
+use gradient_db::WorkerDb;
 use gradient_entity::{team_worker, worker_registration};
 use gradient_types::ids::ProjectId;
 use gradient_types::{ETeamWorker, EWorkerRegistration};
@@ -19,7 +20,7 @@ use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
 use tokio::sync::Mutex;
 use tracing::{debug, error, info, warn};
 
-use crate::handler::{SessionOrigin, SessionsHandle, handle_socket};
+use crate::handler::{SessionHandles, SessionOrigin, SessionsHandle, handle_socket};
 use gradient_scheduler::Scheduler;
 use gradient_scheduler::connection_failures::ConnectionDirection;
 
@@ -125,7 +126,7 @@ impl WorkerDial {
 }
 
 struct OutboundConnect {
-    state: Arc<ServerState>,
+    handles: SessionHandles,
     scheduler: Arc<Scheduler>,
     sessions: Arc<SessionsHandle>,
     connecting: Connecting,
@@ -141,14 +142,51 @@ impl Pass for OutboundConnect {
     }
 
     async fn run(&self) -> Result<(), PassError> {
-        connect_to_registered_workers(
-            &self.state,
-            &self.scheduler,
-            &self.sessions,
-            &self.connecting,
-        )
-        .await;
+        self.connect_to_registered_workers().await;
         Ok(())
+    }
+}
+
+impl OutboundConnect {
+    async fn connect_to_registered_workers(&self) {
+        let rows = match dial_rows(&self.handles.db.worker_db, None).await {
+            Ok(rows) => rows,
+            Err(e) => {
+                warn!(error = %e, "failed to query workers for outbound connections");
+                return;
+            }
+        };
+
+        let crypt_file = &self.handles.db.config.secrets.crypt_file;
+        let decrypt =
+            |encrypted: &str| gradient_sources::decrypt_secret(crypt_file, encrypted).ok();
+        for planned in plan_dials(rows, decrypt) {
+            match planned {
+                PlannedDial::Dial(target) => self.start_dial(target).await,
+                PlannedDial::Skip { worker_id, reason } => {
+                    record_skip(&self.scheduler, &worker_id, reason).await;
+                }
+            }
+        }
+    }
+
+    async fn start_dial(&self, target: DialTarget) {
+        let worker_id = target.credentials.worker_id.clone();
+        if self.scheduler.is_worker_connected(&worker_id).await
+            || !self.connecting.lock().await.insert(worker_id.clone())
+        {
+            return;
+        }
+
+        let handles = self.handles.clone();
+        let scheduler = Arc::clone(&self.scheduler);
+        let sessions = Arc::clone(&self.sessions);
+        let connecting = Arc::clone(&self.connecting);
+        let shutdown = handles.db.shutdown.clone();
+        shutdown.spawn(async move {
+            dial(&handles, &scheduler, &sessions, target).await;
+            connecting.lock().await.remove(&worker_id);
+        });
     }
 }
 
@@ -159,7 +197,7 @@ pub fn start_outbound_loop(
 ) {
     let shutdown = state.shutdown.clone();
     shutdown.supervise(ChildSpec::pass(OutboundConnect {
-        state,
+        handles: SessionHandles::from_state(&state),
         scheduler,
         sessions,
         connecting: Arc::default(),
@@ -167,43 +205,15 @@ pub fn start_outbound_loop(
 }
 
 pub(crate) async fn dialable(
-    state: &ServerState,
+    db: &WorkerDb,
     worker_id: &str,
     url: &str,
 ) -> Result<Dialable, sea_orm::DbErr> {
-    let rows = dial_rows(state, Some(worker_id)).await?;
+    let rows = dial_rows(db, Some(worker_id)).await?;
     Ok(match group_by_worker(rows).first() {
         Some(group) if group.url == url => group.token_projects(),
         _ => Dialable::Refused(Rejection::WorkerDeactivated),
     })
-}
-
-async fn connect_to_registered_workers(
-    state: &Arc<ServerState>,
-    scheduler: &Arc<Scheduler>,
-    sessions: &Arc<SessionsHandle>,
-    connecting: &Connecting,
-) {
-    let rows = match dial_rows(state, None).await {
-        Ok(rows) => rows,
-        Err(e) => {
-            warn!(error = %e, "failed to query workers for outbound connections");
-            return;
-        }
-    };
-
-    let crypt_file = &state.config.secrets.crypt_file;
-    let decrypt = |encrypted: &str| gradient_sources::decrypt_secret(crypt_file, encrypted).ok();
-    for planned in plan_dials(rows, decrypt) {
-        match planned {
-            PlannedDial::Dial(target) => {
-                start_dial(state, scheduler, sessions, connecting, target).await
-            }
-            PlannedDial::Skip { worker_id, reason } => {
-                record_skip(scheduler, &worker_id, reason).await;
-            }
-        }
-    }
 }
 
 async fn record_skip(scheduler: &Scheduler, worker_id: &str, reason: String) {
@@ -217,10 +227,7 @@ async fn record_skip(scheduler: &Scheduler, worker_id: &str, reason: String) {
         .record(worker_id, ConnectionDirection::Outbound, false, reason);
 }
 
-async fn dial_rows(
-    state: &ServerState,
-    only: Option<&str>,
-) -> Result<Vec<DialRow>, sea_orm::DbErr> {
+async fn dial_rows(db: &WorkerDb, only: Option<&str>) -> Result<Vec<DialRow>, sea_orm::DbErr> {
     let mut registrations = EWorkerRegistration::find()
         .filter(worker_registration::Column::Url.is_not_null())
         .filter(worker_registration::Column::Active.eq(true));
@@ -234,20 +241,17 @@ async fn dial_rows(
 
     let registrations = registrations
         .order_by_asc(worker_registration::Column::CreatedAt)
-        .all(&state.worker_db)
+        .all(db)
         .await?;
     let team_workers = team_workers
         .order_by_asc(team_worker::Column::CreatedAt)
-        .all(&state.worker_db)
+        .all(db)
         .await?;
 
     let mut team_rows = Vec::with_capacity(team_workers.len());
     for worker in team_workers {
-        let projects = gradient_db::teams::workers::projects_granted_with_workers(
-            &state.worker_db,
-            worker.team,
-        )
-        .await?;
+        let projects =
+            gradient_db::teams::workers::projects_granted_with_workers(db, worker.team).await?;
         team_rows.push(DialRow::from_team_worker(worker, projects));
     }
 
@@ -342,33 +346,8 @@ fn tokens_for_scheme(url: &str, tokens: Vec<(String, String)>) -> Vec<(String, S
     tokens
 }
 
-async fn start_dial(
-    state: &Arc<ServerState>,
-    scheduler: &Arc<Scheduler>,
-    sessions: &Arc<SessionsHandle>,
-    connecting: &Connecting,
-    target: DialTarget,
-) {
-    let worker_id = target.credentials.worker_id.clone();
-    if scheduler.is_worker_connected(&worker_id).await
-        || !connecting.lock().await.insert(worker_id.clone())
-    {
-        return;
-    }
-
-    let state = Arc::clone(state);
-    let scheduler = Arc::clone(scheduler);
-    let sessions = Arc::clone(sessions);
-    let connecting = Arc::clone(connecting);
-    let shutdown = state.shutdown.clone();
-    shutdown.spawn(async move {
-        dial(&state, &scheduler, &sessions, target).await;
-        connecting.lock().await.remove(&worker_id);
-    });
-}
-
 async fn dial(
-    state: &Arc<ServerState>,
+    handles: &SessionHandles,
     scheduler: &Arc<Scheduler>,
     sessions: &Arc<SessionsHandle>,
     target: DialTarget,
@@ -382,7 +361,7 @@ async fn dial(
             info!(%worker_id, %url, "outbound connection established");
             handle_socket(
                 socket,
-                Arc::clone(state),
+                handles.clone(),
                 Arc::clone(scheduler),
                 Arc::clone(sessions),
                 SessionOrigin::ServerDialed(target),

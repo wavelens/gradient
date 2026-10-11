@@ -23,6 +23,7 @@ mod store;
 
 use gradient_core::ServerState;
 use russh::server::Server as _;
+use session::SshHandles;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::net::TcpListener;
@@ -37,24 +38,25 @@ pub async fn start(state: Arc<ServerState>) -> std::io::Result<()> {
             .map_err(std::io::Error::other)?;
     let config = Arc::new(server::config(key));
     let roots = Arc::new(roots::Roots::new(ROOTS_TTL));
+    let handles = SshHandles::from_state(&state);
     for host in &ssh.listen_addresses {
         let listener = listener::bind(host, ssh.port).await?;
         tracing::info!(%host, port = ssh.port, "ssh server listening");
-        accept_on(&state, listener, config.clone(), roots.clone());
+        accept_on(&handles, listener, config.clone(), roots.clone());
     }
 
     Ok(())
 }
 
 fn accept_on(
-    state: &Arc<ServerState>,
+    handles: &SshHandles,
     listener: TcpListener,
     config: Arc<russh::server::Config>,
     roots: Arc<roots::Roots>,
 ) {
-    let mut server = server::SshServer::new(state.clone(), roots);
-    let token = state.shutdown.token();
-    state.shutdown.spawn(async move {
+    let mut server = server::SshServer::new(handles.clone(), roots);
+    let token = handles.db.shutdown.token();
+    handles.db.shutdown.spawn(async move {
         let running = server.run_on_socket(config, &listener);
         let handle = running.handle();
         tokio::select! {

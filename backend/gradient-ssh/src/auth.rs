@@ -4,8 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::session::Session;
-use gradient_core::ServerState;
+use crate::session::{Session, SshHandles};
 use gradient_types::*;
 use russh::keys::{HashAlg, PublicKey};
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter, Set};
@@ -20,11 +19,11 @@ pub fn fingerprint(key: &PublicKey) -> String {
 }
 
 pub async fn authorize(
-    state: &Arc<ServerState>,
+    handles: &SshHandles,
     project_name: &str,
     fingerprint: &str,
 ) -> Result<Arc<Session>, Rejected> {
-    match load_session(state, project_name, fingerprint).await {
+    match load_session(handles, project_name, fingerprint).await {
         Ok(Some(session)) => Ok(Arc::new(session)),
         Ok(None) => Err(Rejected),
         Err(error) => {
@@ -35,20 +34,20 @@ pub async fn authorize(
 }
 
 async fn load_session(
-    state: &Arc<ServerState>,
+    handles: &SshHandles,
     project_name: &str,
     fingerprint: &str,
 ) -> anyhow::Result<Option<Session>> {
     let Some(key) = EUserSshKey::find()
         .filter(CUserSshKey::Fingerprint.eq(fingerprint))
-        .one(&state.web_db)
+        .one(&handles.db.web_db)
         .await?
     else {
         return Ok(None);
     };
 
     let Some(user) = EUser::find_by_id(key.user)
-        .one(&state.web_db)
+        .one(&handles.db.web_db)
         .await?
         .filter(|u| u.active)
     else {
@@ -56,30 +55,32 @@ async fn load_session(
     };
 
     let Some(project) =
-        gradient_db::lookup::get_project_by_name(&state.db(), user.id, project_name.to_string())
+        gradient_db::lookup::get_project_by_name(&handles.db, user.id, project_name.to_string())
             .await?
     else {
         return Ok(None);
     };
 
     let Some(permissions) =
-        gradient_db::access::project_permission_mask(&state.web_db, project.id, user.id).await?
+        gradient_db::access::project_permission_mask(&handles.db.web_db, project.id, user.id)
+            .await?
     else {
         return Ok(None);
     };
 
-    let caches = gradient_db::cache_paths::project_read_caches(&state.web_db, project.id).await?;
+    let caches =
+        gradient_db::cache_paths::project_read_caches(&handles.db.web_db, project.id).await?;
     let mut used = key.into_active_model();
     used.last_used_at = Set(Some(now()));
-    used.update(&state.web_db).await?;
+    used.update(&handles.db.web_db).await?;
 
     Ok(Some(Session {
-        state: state.clone(),
+        handles: handles.clone(),
         user,
         project,
         permissions,
         caches,
-        closed: state.shutdown.child_token(),
+        closed: handles.db.shutdown.child_token(),
     }))
 }
 
@@ -108,7 +109,8 @@ mod tests {
             .into_connection();
         let state = TestState::new().web_db(db).build();
 
-        let rejected = authorize(&state, "project", "SHA256:unknown").await;
+        let rejected =
+            authorize(&SshHandles::from_state(&state), "project", "SHA256:unknown").await;
         assert!(rejected.is_err());
     }
 
@@ -126,7 +128,12 @@ mod tests {
             .into_connection();
         let state = TestState::new().web_db(db).build();
 
-        let rejected = authorize(&state, "someone-elses", "SHA256:known").await;
+        let rejected = authorize(
+            &SshHandles::from_state(&state),
+            "someone-elses",
+            "SHA256:known",
+        )
+        .await;
         assert_eq!(
             rejected.err().map(|r| r.to_string()),
             Some(Rejected.to_string())
@@ -149,7 +156,11 @@ mod tests {
             .into_connection();
         let state = TestState::new().web_db(db.clone()).build();
 
-        assert!(authorize(&state, "project", "SHA256:known").await.is_err());
+        assert!(
+            authorize(&SshHandles::from_state(&state), "project", "SHA256:known")
+                .await
+                .is_err()
+        );
         let log = format!("{:?}", db.into_transaction_log());
         assert!(!log.contains("project_user"), "{log}");
     }

@@ -10,7 +10,6 @@
 use std::sync::Arc;
 
 use gradient_ci::CiContext;
-use gradient_core::ServerState;
 use gradient_db::deliveries::pending::{Outcome, PendingDelivery};
 use gradient_db::{DbContext, WorkerDb};
 use gradient_scheduler::Scheduler;
@@ -22,13 +21,13 @@ use crate::actor::{EffectsMsg, Handoff, PendingDeliveryStore};
 use crate::consume::consume;
 
 pub struct EffectsCtx {
-    state: Arc<ServerState>,
+    ci: CiContext,
     scheduler: Arc<Scheduler>,
 }
 
 impl EffectsCtx {
-    pub fn new(state: Arc<ServerState>, scheduler: Arc<Scheduler>) -> Arc<Self> {
-        Arc::new(Self { state, scheduler })
+    pub fn new(ci: CiContext, scheduler: Arc<Scheduler>) -> Arc<Self> {
+        Arc::new(Self { ci, scheduler })
     }
 
     pub fn scheduler(&self) -> &Scheduler {
@@ -36,11 +35,11 @@ impl EffectsCtx {
     }
 
     pub fn ci(&self) -> CiContext {
-        self.state.ci()
+        self.ci.clone()
     }
 
     pub fn db(&self) -> DbContext {
-        self.state.db()
+        self.ci.db.clone()
     }
 }
 

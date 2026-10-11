@@ -7,7 +7,6 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use gradient_core::ServerState;
 use gradient_types::ids::CacheId;
 use tokio::sync::Semaphore;
 use tracing::{debug, info, warn};
@@ -16,6 +15,7 @@ use gradient_wire::Rejection;
 use gradient_wire::messages::{ClientMessage, GradientCapabilities, ServerMessage};
 use gradient_wire::session::handshake as handshake_fsm;
 
+use super::SessionHandles;
 use super::socket::{HANDSHAKE_TIMEOUT, ProtoSocket, recv_client_msg, send_server_msg};
 
 const CACHE_SESSION_IDLE_TIMEOUT_SECS: u64 = 120;
@@ -45,7 +45,7 @@ fn readonly_capabilities() -> GradientCapabilities {
 
 pub async fn handle_cache_socket(
     mut socket: ProtoSocket,
-    state: Arc<ServerState>,
+    handles: SessionHandles,
     cache_id: CacheId,
 ) {
     info!(%cache_id, "cache websocket session opened");
@@ -78,12 +78,13 @@ pub async fn handle_cache_socket(
         return;
     }
 
-    let send_chunk_timeout = Duration::from_secs(state.config.nar.send_chunk_timeout_secs.get());
-    let (mut reader, writer) = socket.split(send_chunk_timeout, &state.shutdown);
-    let max_serves = state.config.nar.max_concurrent_serves.get();
+    let send_chunk_timeout =
+        Duration::from_secs(handles.db.config.nar.send_chunk_timeout_secs.get());
+    let (mut reader, writer) = socket.split(send_chunk_timeout, &handles.db.shutdown);
+    let max_serves = handles.db.config.nar.max_concurrent_serves.get();
     let nar_serve_semaphore = Arc::new(Semaphore::new(max_serves));
     let idle = Duration::from_secs(CACHE_SESSION_IDLE_TIMEOUT_SECS);
-    let cancel = state.shutdown.token();
+    let cancel = handles.db.shutdown.token();
 
     loop {
         // The idle timeout is only enforced while no NAR transfer is in flight. A client quietly
@@ -127,7 +128,7 @@ pub async fn handle_cache_socket(
                 mode,
                 ..
             } => {
-                let cached = super::cache::query_for_cache(&state, cache_id, &paths, mode).await;
+                let cached = super::cache::query_for_cache(&handles, cache_id, &paths, mode).await;
                 if send_server_msg(&writer, &ServerMessage::CacheStatus { query_id, cached })
                     .await
                     .is_err()
@@ -137,13 +138,14 @@ pub async fn handle_cache_socket(
             }
             ClientMessage::NarRequest { job_id, paths } => {
                 for store_path in paths {
-                    if !super::cache::path_in_cache(&state, cache_id, &store_path).await {
+                    if !super::cache::path_in_cache(&handles.cache_db, cache_id, &store_path).await
+                    {
                         debug!(%cache_id, %store_path, "skipping path not in this cache");
                         continue;
                     }
                     let Some(slot) = super::nar_serve::ServeSlot::acquire(
                         Arc::clone(&nar_serve_semaphore),
-                        Arc::clone(&state.memory.nar_downloads),
+                        Arc::clone(&handles.nar_downloads),
                     )
                     .await
                     else {
@@ -151,14 +153,14 @@ pub async fn handle_cache_socket(
                         return;
                     };
 
-                    let state = Arc::clone(&state);
+                    let handles = handles.clone();
                     let writer = writer.clone();
                     let job_id = job_id.clone();
-                    let shutdown = state.shutdown.clone();
+                    let shutdown = handles.db.shutdown.clone();
                     shutdown.spawn(async move {
                         let _slot = slot;
                         if let Err(e) = super::nar_serve::serve_nar_request(
-                            &state,
+                            &handles,
                             &writer,
                             &job_id,
                             &store_path,

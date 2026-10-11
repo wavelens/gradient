@@ -7,17 +7,19 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use gradient_core::ServerState;
+use gradient_db::WorkerDb;
 use gradient_graph::Demotion;
 use gradient_storage::passthrough::{
     PassthroughError, PassthroughLimits, PassthroughRequest, send_nar,
 };
+use gradient_types::RuntimeConfig;
 use gradient_util::telemetry::{GAUGES, Gauges};
 use gradient_wire::messages::ServerMessage;
 use gradient_wire::session::frame::send_server_msg;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tracing::warn;
 
+use super::SessionHandles;
 use super::socket::ProtoWriter;
 
 pub(super) struct ServeSlot {
@@ -71,14 +73,14 @@ impl Drop for ServeSlot {
 }
 
 pub(super) async fn serve_nar_request(
-    state: &Arc<ServerState>,
+    handles: &SessionHandles,
     writer: &ProtoWriter,
     job_id: &str,
     store_path: &str,
     resume_from: u64,
     client_token: Option<&str>,
 ) -> anyhow::Result<()> {
-    let nar_cfg = &state.config.nar;
+    let nar_cfg = &handles.db.config.nar;
     let limits = PassthroughLimits {
         open: Duration::from_secs(nar_cfg.storage_open_timeout_secs.get()),
         chunk_read: Duration::from_secs(nar_cfg.send_chunk_timeout_secs.get()),
@@ -96,11 +98,11 @@ pub(super) async fn serve_nar_request(
         resume_from,
         client_token,
     };
-    match send_nar(&state.nar_storage, writer, req, limits).await {
+    match send_nar(&handles.db.storage.nar_storage, writer, req, limits).await {
         Ok(_) => Ok(()),
         Err(PassthroughError::NotFound(reason)) => {
             unavailable(writer, job_id, store_path, &reason).await;
-            invalidate_cached_path(state, key, store_path).await;
+            invalidate_cached_path(handles, key, store_path).await;
             Err(anyhow::anyhow!(reason))
         }
         Err(e) => Err(e.into()),
@@ -116,14 +118,14 @@ async fn unavailable(writer: &ProtoWriter, job_id: &str, store_path: &str, reaso
     let _ = send_server_msg(writer, &msg).await;
 }
 
-async fn invalidate_cached_path(state: &Arc<ServerState>, hash: &str, store_path: &str) {
-    if awaiting_upload(state, hash).await {
+async fn invalidate_cached_path(handles: &SessionHandles, hash: &str, store_path: &str) {
+    if awaiting_upload(&handles.db.worker_db, &handles.db.config, hash).await {
         warn!(%hash, %store_path, "NAR not on this instance yet; the row is a fresh staged upload");
         return;
     }
 
-    state.nar_storage.hot().invalidate(hash);
-    match state
+    handles.db.storage.nar_storage.hot().invalidate(hash);
+    match handles
         .graph
         .demote(Demotion::MissingNar {
             hash: hash.to_owned(),
@@ -142,14 +144,14 @@ async fn invalidate_cached_path(state: &Arc<ServerState>, hash: &str, store_path
 }
 
 /// An unconfirmed row younger than the upload grace is staged by another instance and not missing.
-async fn awaiting_upload(state: &Arc<ServerState>, hash: &str) -> bool {
+async fn awaiting_upload(db: &WorkerDb, config: &RuntimeConfig, hash: &str) -> bool {
     use gradient_entity::cached_path::{Column as CCachedPath, Entity as ECachedPath};
     use sea_orm::{ColumnTrait as _, EntityTrait as _, QueryFilter as _};
 
-    let grace = chrono::Duration::hours(i64::from(state.config.gc.nar_upload_grace_hours));
+    let grace = chrono::Duration::hours(i64::from(config.gc.nar_upload_grace_hours));
     match ECachedPath::find()
         .filter(CCachedPath::Hash.eq(hash))
-        .one(&state.worker_db)
+        .one(db)
         .await
     {
         Ok(Some(row)) => !row.confirmed && row.created_at > gradient_types::now() - grace,
@@ -201,9 +203,16 @@ mod serve_nar_tests {
 
         let (writer, mut rx) = spy_writer(Duration::from_secs(5));
         let store_path = format!("/nix/store/{hash}-test-pkg");
-        serve_nar_request(&state, &writer, "job-1", &store_path, 0, None)
-            .await
-            .expect("serve must succeed");
+        serve_nar_request(
+            &SessionHandles::from_state(&state),
+            &writer,
+            "job-1",
+            &store_path,
+            0,
+            None,
+        )
+        .await
+        .expect("serve must succeed");
 
         let mut assembled = Vec::with_capacity(payload.len());
         let mut nar_push_frames = 0u32;
@@ -245,7 +254,7 @@ mod serve_nar_tests {
         let (writer, mut rx) = spy_writer(Duration::from_secs(5));
 
         let res = serve_nar_request(
-            &state,
+            &SessionHandles::from_state(&state),
             &writer,
             "job-1",
             "/nix/store/zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz-missing",
@@ -284,9 +293,16 @@ mod serve_nar_tests {
 
         let (writer, mut rx) = spy_writer(Duration::from_secs(5));
         let store_path = format!("/nix/store/{hash}-test-pkg");
-        serve_nar_request(&state, &writer, "job-1", &store_path, 0, None)
-            .await
-            .expect("serve from RAM");
+        serve_nar_request(
+            &SessionHandles::from_state(&state),
+            &writer,
+            "job-1",
+            &store_path,
+            0,
+            None,
+        )
+        .await
+        .expect("serve from RAM");
 
         let mut assembled = Vec::new();
         let mut frames = 0u32;
@@ -316,7 +332,15 @@ mod serve_nar_tests {
         let state = test_state(db);
         let (writer, mut rx) = spy_writer(Duration::from_secs(5));
 
-        let res = serve_nar_request(&state, &writer, "job-1", "not-a-store-path", 0, None).await;
+        let res = serve_nar_request(
+            &SessionHandles::from_state(&state),
+            &writer,
+            "job-1",
+            "not-a-store-path",
+            0,
+            None,
+        )
+        .await;
 
         assert!(res.is_err());
         let msg = decode(rx.try_recv().expect("one frame"));
@@ -346,9 +370,18 @@ mod serve_nar_tests {
         let state = test_state(db);
         let hash = "abcdefghijklmnopqrstuvwxyz012345";
 
-        assert!(awaiting_upload(&state, hash).await, "young and unconfirmed");
-        assert!(!awaiting_upload(&state, hash).await, "confirmed");
-        assert!(!awaiting_upload(&state, hash).await, "older than the grace");
+        assert!(
+            awaiting_upload(&state.worker_db, &state.config, hash).await,
+            "young and unconfirmed"
+        );
+        assert!(
+            !awaiting_upload(&state.worker_db, &state.config, hash).await,
+            "confirmed"
+        );
+        assert!(
+            !awaiting_upload(&state.worker_db, &state.config, hash).await,
+            "older than the grace"
+        );
     }
 }
 

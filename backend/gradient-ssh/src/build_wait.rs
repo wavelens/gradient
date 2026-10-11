@@ -104,11 +104,11 @@ pub async fn wait(
     started: &Started,
     log: impl Fn(LogMessage) + Send + Sync,
 ) -> anyhow::Result<BuildOutcome> {
-    let state = &session.state;
+    let handles = &session.handles;
     let derivations = closure_derivations(session, &started.closure).await?;
     let jobs: Vec<MBuildJob> = EBuildJob::find()
         .filter(CBuildJob::Evaluation.eq(started.evaluation))
-        .all(&state.web_db)
+        .all(&handles.db.web_db)
         .await?
         .into_iter()
         .filter(|j| derivations.contains_key(&j.derivation))
@@ -134,7 +134,7 @@ pub async fn wait(
 
     let evaluation = loop {
         let evaluation = EEvaluation::find_by_id(started.evaluation)
-            .one(&state.web_db)
+            .one(&handles.db.web_db)
             .await?
             .ok_or_else(|| anyhow::anyhow!("evaluation {} disappeared", started.evaluation))?;
         if let Some(line) = waiting.observe(&evaluation) {
@@ -182,7 +182,7 @@ async fn closure_derivations(
     Ok(gradient_db::fetch_in_chunks(&hashes, |chunk| async {
         EDerivation::find()
             .filter(CDerivation::Hash.is_in(chunk))
-            .all(&session.state.web_db)
+            .all(&session.handles.db.web_db)
             .await
     })
     .await?
@@ -195,7 +195,7 @@ async fn closure_derivations(
 async fn settled(session: &Session, requested: &[DerivationBuildId]) -> anyhow::Result<bool> {
     Ok(EDerivationBuild::find()
         .filter(CDerivationBuild::Id.is_in(requested.to_vec()))
-        .all(&session.state.web_db)
+        .all(&session.handles.db.web_db)
         .await?
         .iter()
         .all(|b| settles_the_request(b.status)))
@@ -213,13 +213,13 @@ async fn requested_result(
         .iter()
         .map(|o| (o.name.clone(), o.path.clone()))
         .collect();
-    let state = &session.state;
+    let handles = &session.handles;
     let Some(build_id) = build else {
         return Ok(Ok(outputs));
     };
 
     let Some(build) = EDerivationBuild::find_by_id(build_id)
-        .one(&state.web_db)
+        .one(&handles.db.web_db)
         .await?
     else {
         return Ok(Ok(outputs));
@@ -233,17 +233,25 @@ async fn requested_result(
         return Ok(Err(unbuilt));
     }
 
-    let tail =
-        match gradient_db::scheduling::build_attempt::latest_attempt_id(&state.web_db, build_id)
-            .await?
-        {
-            Some(attempt) => {
-                let text = state.log_storage.read(attempt).await.unwrap_or_default();
-                let lines: Vec<&str> = text.lines().collect();
-                lines[lines.len().saturating_sub(FAILURE_LINES)..].join("\n")
-            }
-            None => String::new(),
-        };
+    let tail = match gradient_db::scheduling::build_attempt::latest_attempt_id(
+        &handles.db.web_db,
+        build_id,
+    )
+    .await?
+    {
+        Some(attempt) => {
+            let text = handles
+                .db
+                .storage
+                .log_storage
+                .read(attempt)
+                .await
+                .unwrap_or_default();
+            let lines: Vec<&str> = text.lines().collect();
+            lines[lines.len().saturating_sub(FAILURE_LINES)..].join("\n")
+        }
+        None => String::new(),
+    };
 
     Ok(Err(BuildFailure {
         status: failure_status(build.status),

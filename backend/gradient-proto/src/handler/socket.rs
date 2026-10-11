@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use gradient_core::ServerState;
+use gradient_db::DbContext;
 use gradient_types::ids::ProjectId;
 use gradient_types::*;
 use sea_orm::EntityTrait;
@@ -42,7 +42,7 @@ pub(super) async fn push_pending_candidates(
 
 pub(super) async fn send_credentials_for_job(
     writer: &ProtoWriter,
-    state: &ServerState,
+    db: &DbContext,
     scheduler: &gradient_scheduler::Scheduler,
     worker_id: &str,
     job: &gradient_wire::types::Job,
@@ -56,22 +56,22 @@ pub(super) async fn send_credentials_for_job(
     match job {
         Job::Flake(flake_job) => {
             if worker_can_fetch && flake_job.steps.contains(&FlakeStep::FetchFlake) {
-                send_ssh_key_credential(writer, state, project_id).await;
+                send_ssh_key_credential(writer, db, project_id).await;
             }
         }
         Job::Build(_) => {}
     }
 }
 
-async fn send_ssh_key_credential(writer: &ProtoWriter, state: &ServerState, project_id: ProjectId) {
+async fn send_ssh_key_credential(writer: &ProtoWriter, db: &DbContext, project_id: ProjectId) {
     use gradient_wire::types::CredentialKind;
 
-    match EProject::find_by_id(project_id).one(&state.worker_db).await {
+    match EProject::find_by_id(project_id).one(&db.worker_db).await {
         Ok(Some(project)) => {
             match gradient_sources::ssh_key::decrypt_ssh_private_key(
-                &state.config.secrets.crypt_file,
+                &db.config.secrets.crypt_file,
                 project,
-                &state.config.server.serve_url,
+                &db.config.server.serve_url,
             ) {
                 Ok((private_key, _public_key)) => {
                     let _ = send_server_msg(

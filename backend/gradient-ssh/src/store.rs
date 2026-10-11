@@ -93,7 +93,7 @@ fn parse_store_path(path: &str) -> anyhow::Result<StorePath> {
 impl CacheStore {
     async fn served(&self, path: &StorePath) -> DaemonResult<Option<ServedPath>> {
         served_path(
-            &self.session.state.web_db,
+            &self.session.handles.db.web_db,
             &self.session.caches,
             &path.hash().to_string(),
         )
@@ -117,7 +117,7 @@ impl CacheStore {
     }
 
     async fn path_info(&self, row: ServedPath) -> anyhow::Result<UnkeyedValidPathInfo> {
-        let state = &self.session.state;
+        let handles = &self.session.handles;
         let nar_hash = row
             .nar_hash
             .as_deref()
@@ -128,7 +128,7 @@ impl CacheStore {
             .into_hash();
 
         let references =
-            gradient_db::graph::runtime_closure::references_for_hash(&state.web_db, &row.hash)
+            gradient_db::graph::runtime_closure::references_for_hash(&handles.db.web_db, &row.hash)
                 .await?
                 .iter()
                 .map(|r| parse_store_path(r))
@@ -138,9 +138,13 @@ impl CacheStore {
             .signatures
             .iter()
             .filter_map(|(cache, sig)| {
-                gradient_sources::full_signature_token(sig, &state.config.server.serve_url, cache)
-                    .parse::<Signature>()
-                    .ok()
+                gradient_sources::full_signature_token(
+                    sig,
+                    &handles.db.config.server.serve_url,
+                    cache,
+                )
+                .parse::<Signature>()
+                .ok()
             })
             .collect();
 
@@ -185,9 +189,13 @@ impl DaemonStore for CacheStore {
     ) -> impl ResultLog<Output = DaemonResult<StorePathSet>> + Send + 'a {
         async move {
             let hashes: Vec<String> = paths.iter().map(|p| p.hash().to_string()).collect();
-            let served = served_hashes(&self.session.state.web_db, &self.session.caches, &hashes)
-                .await
-                .map_err(err)?;
+            let served = served_hashes(
+                &self.session.handles.db.web_db,
+                &self.session.caches,
+                &hashes,
+            )
+            .await
+            .map_err(err)?;
 
             Ok(paths
                 .iter()
@@ -218,7 +226,7 @@ impl DaemonStore for CacheStore {
     ) -> impl ResultLog<Output = DaemonResult<Option<StorePath>>> + Send + 'a {
         async move {
             let row = served_path(
-                &self.session.state.web_db,
+                &self.session.handles.db.web_db,
                 &self.session.caches,
                 &hash.to_string(),
             )
@@ -240,10 +248,13 @@ impl DaemonStore for CacheStore {
                 return Err(err(format!("{path} is not in the project caches")));
             }
 
-            crate::nar::open_raw(&self.session.state, &path.hash().to_string())
-                .await
-                .map_err(err)?
-                .ok_or_else(|| err(format!("{path} has no stored NAR")))
+            crate::nar::open_raw(
+                &self.session.handles.db.storage.nar_storage,
+                &path.hash().to_string(),
+            )
+            .await
+            .map_err(err)?
+            .ok_or_else(|| err(format!("{path} has no stored NAR")))
         }
         .empty_logs()
     }
@@ -402,6 +413,7 @@ impl DaemonStore for CacheStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::session::SshHandles;
     use gradient_daemon::server::{next_conn, serve_stream};
     use gradient_fixtures::mock::{empty_db, mock_db};
     use gradient_test_support::state::TestState;
@@ -421,7 +433,7 @@ mod tests {
 
     fn session_over(db: DatabaseConnection) -> Arc<Session> {
         Arc::new(Session {
-            state: TestState::new().web_db(db).build(),
+            handles: SshHandles::from_state(&TestState::new().web_db(db).build()),
             user: gradient_fixtures::rows::user(),
             project: gradient_fixtures::rows::project(),
             permissions: 0,

@@ -5,21 +5,19 @@
  */
 
 use anyhow::{Context, Result};
-use gradient_core::ServerState;
-use gradient_graph::GcRequest;
+use gradient_db::DbContext;
+use gradient_graph::{GcRequest, Graph};
 use gradient_types::events::gc::{Pass, Swept};
 use gradient_types::*;
 use sea_orm::EntityTrait;
-use std::sync::Arc;
 use tracing::{info, warn};
 
-pub(crate) async fn cleanup_old_evaluations(state: Arc<ServerState>) -> Result<()> {
+pub(crate) async fn cleanup_old_evaluations(db: &DbContext, graph: &Graph) -> Result<()> {
     let tasks = ETask::find()
-        .all(&state.worker_db)
+        .all(&db.worker_db)
         .await
         .context("query tasks for evaluation GC")?;
 
-    let ctx = state.db();
     let mut removed = 0u64;
     for task in tasks {
         let keep = task.keep_evaluations as usize;
@@ -27,8 +25,7 @@ pub(crate) async fn cleanup_old_evaluations(state: Arc<ServerState>) -> Result<(
             continue;
         }
 
-        let plan = match gradient_db::maintenance::gc::evaluation_gc_plan(&ctx, task.id, keep).await
-        {
+        let plan = match gradient_db::maintenance::gc::evaluation_gc_plan(db, task.id, keep).await {
             Ok(plan) if plan.is_empty() => continue,
             Ok(plan) => plan,
             Err(e) => {
@@ -41,7 +38,7 @@ pub(crate) async fn cleanup_old_evaluations(state: Arc<ServerState>) -> Result<(
             let request = GcRequest::Evaluations {
                 ids: chunk.iter().map(|e| e.id).collect(),
             };
-            let report = match state.graph.gc(request).await {
+            let report = match graph.gc(request).await {
                 Ok(report) => report,
                 Err(e) => {
                     warn!(error = %e, task_id = %task.id, "Evaluation GC failed for task");
@@ -56,7 +53,7 @@ pub(crate) async fn cleanup_old_evaluations(state: Arc<ServerState>) -> Result<(
                 .cloned()
                 .collect();
             if let Err(e) =
-                gradient_db::maintenance::gc::after_evaluation_delete(&ctx, &deleted).await
+                gradient_db::maintenance::gc::after_evaluation_delete(db, &deleted).await
             {
                 warn!(error = %e, task_id = %task.id, "Evaluation GC cleanup failed for task");
             }
@@ -64,27 +61,25 @@ pub(crate) async fn cleanup_old_evaluations(state: Arc<ServerState>) -> Result<(
     }
 
     if removed > 0 {
-        state
-            .record(Swept {
-                pass: Pass::Evaluations,
-                removed,
-            })
-            .await;
+        db.record(Swept {
+            pass: Pass::Evaluations,
+            removed,
+        })
+        .await;
     }
     Ok(())
 }
 
-pub(crate) async fn collect_orphan_derivations(state: &Arc<ServerState>) -> Result<usize> {
+pub(crate) async fn collect_orphan_derivations(db: &DbContext, graph: &Graph) -> Result<usize> {
     let (candidates, scanned_at) = gradient_db::maintenance::gc::orphan_derivation_candidates(
-        &state.worker_db,
-        i64::from(state.config.gc.orphan_derivation_hours),
+        &db.worker_db,
+        i64::from(db.config.gc.orphan_derivation_hours),
     )
     .await?;
 
     let mut deleted = 0usize;
     for chunk in candidates.chunks(gradient_db::IN_CHUNK_SIZE) {
-        let report = match state
-            .graph
+        let report = match graph
             .gc(GcRequest::Derivations {
                 candidates: chunk.to_vec(),
                 scanned_at,
@@ -100,7 +95,7 @@ pub(crate) async fn collect_orphan_derivations(state: &Arc<ServerState>) -> Resu
 
         deleted += report.deleted_derivations.len();
         for attempt in report.attempt_logs {
-            if let Err(e) = state.log_storage.delete(attempt).await {
+            if let Err(e) = db.storage.log_storage.delete(attempt).await {
                 warn!(error = %e, %attempt, "GC: failed to remove orphan build log");
             }
         }

@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use gradient_core::ServerState;
+use gradient_db::WorkerDb;
 use gradient_scheduler::connection_failures::{ConnectionDirection, ConnectionFailures};
 use gradient_wire::session::handshake::Rejected;
 
@@ -15,7 +15,7 @@ fn rejection_reason(code: u16, reason: &str) -> String {
 }
 
 pub(super) async fn record_inbound(
-    state: &ServerState,
+    db: &WorkerDb,
     failures: &ConnectionFailures,
     rejected: &Rejected,
     before_auth: bool,
@@ -23,7 +23,7 @@ pub(super) async fn record_inbound(
     let Some(claimed) = rejected.claimed.as_deref() else {
         return;
     };
-    if !is_registered(state, claimed).await {
+    if !is_registered(db, claimed).await {
         return;
     }
 
@@ -43,9 +43,9 @@ pub(super) fn record_dialed(failures: &ConnectionFailures, worker_id: &str, erro
     failures.record(worker_id, ConnectionDirection::Outbound, false, reason);
 }
 
-async fn is_registered(state: &ServerState, worker_id: &str) -> bool {
-    has_any_registrations(state, worker_id).await
-        || gradient_db::teams::workers::is_team_worker(&state.worker_db, worker_id)
+async fn is_registered(db: &WorkerDb, worker_id: &str) -> bool {
+    has_any_registrations(db, worker_id).await
+        || gradient_db::teams::workers::is_team_worker(db, worker_id)
             .await
             .unwrap_or(false)
 }
@@ -81,7 +81,7 @@ mod tests {
         let state = gradient_test_support::prelude::test_state(db);
         let failures = ConnectionFailures::default();
 
-        record_inbound(&state, &failures, &rejected("intruder"), true).await;
+        record_inbound(&state.worker_db, &failures, &rejected("intruder"), true).await;
 
         assert_eq!(failures.last("intruder"), None);
     }
@@ -92,7 +92,7 @@ mod tests {
             gradient_test_support::prelude::test_state(registered_worker().into_connection());
         let failures = ConnectionFailures::default();
 
-        record_inbound(&state, &failures, &rejected("w1"), true).await;
+        record_inbound(&state.worker_db, &failures, &rejected("w1"), true).await;
 
         let failure = failures.last("w1").expect("recorded");
         assert_eq!(failure.reason, "401 no valid peer tokens provided");

@@ -11,6 +11,7 @@ mod cache_session;
 mod dialed;
 mod eval_cache;
 mod failures;
+mod handles;
 mod inbound;
 mod job_events;
 mod log_lane;
@@ -37,6 +38,7 @@ use gradient_wire::ProtoLimiter;
 use gradient_wire::session::frame::{BULK_CHUNK_SIZE, MAX_PROTO_MESSAGE_SIZE};
 
 pub use cache_session::handle_cache_socket;
+pub use handles::SessionHandles;
 pub(crate) use session::{SessionOrigin, handle_socket};
 pub use sessions::SessionsHandle;
 
@@ -68,6 +70,7 @@ async fn ws_upgrade(
     };
 
     let shutdown = state.shutdown.clone();
+    let handles = SessionHandles::from_state(&state);
     ws.max_message_size(MAX_PROTO_MESSAGE_SIZE)
         .max_frame_size(MAX_PROTO_MESSAGE_SIZE)
         .read_buffer_size(BULK_CHUNK_SIZE)
@@ -77,7 +80,7 @@ async fn ws_upgrade(
                     let _permit = permit;
                     session::handle_socket(
                         socket::ProtoSocket::axum(sock),
-                        state,
+                        handles,
                         scheduler,
                         sessions,
                         session::SessionOrigin::WorkerDialed,

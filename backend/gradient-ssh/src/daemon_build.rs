@@ -32,7 +32,7 @@ where
     F: Future<Output = DaemonResult<T>> + Send + 'static,
 {
     let (tx, mut rx) = mpsc::unbounded_channel::<LogMessage>();
-    let shutdown = session.state.shutdown.clone();
+    let shutdown = session.handles.db.shutdown.clone();
     let log = Box::new(move |message: LogMessage| {
         let _ = tx.send(message);
     });
@@ -102,7 +102,7 @@ async fn requested_derivations(
     }
 
     let hashes: Vec<String> = opaque.iter().map(|p| p.hash().to_string()).collect();
-    let served = served_hashes(&session.state.web_db, &session.caches, &hashes)
+    let served = served_hashes(&session.handles.db.web_db, &session.caches, &hashes)
         .await
         .map_err(err)?;
     if let Some(missing) = opaque

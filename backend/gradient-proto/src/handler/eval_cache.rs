@@ -4,8 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use gradient_core::ServerState;
+use gradient_db::WorkerDb;
 use gradient_entity::eval_cache_store;
+use gradient_storage::NarStore;
 use gradient_types::ids::EvalCacheStoreId;
 use gradient_types::*;
 use gradient_wire::types::EvalCachePullOutcome;
@@ -45,17 +46,17 @@ fn pull_outcome(
 }
 
 pub(super) async fn handle_eval_cache_pull(
-    state: &ServerState,
+    db: &WorkerDb,
+    nar_storage: &NarStore,
     writer: &ProtoWriter,
     job_id: String,
     fingerprint: String,
 ) {
-    let row = lookup_row(state, &fingerprint).await;
+    let row = lookup_row(db, &fingerprint).await;
     let key = storage_key(&fingerprint);
 
     let presigned = match &row {
-        Some(_) => state
-            .nar_storage
+        Some(_) => nar_storage
             .presigned_eval_cache_get_url(&fingerprint, PRESIGN_TTL)
             .await
             .unwrap_or_else(|e| {
@@ -78,20 +79,20 @@ pub(super) async fn handle_eval_cache_pull(
     )
     .await;
 
-    if inline && let Err(e) = stream_blob_inline(state, writer, &job_id, &key).await {
+    if inline && let Err(e) = stream_blob_inline(nar_storage, writer, &job_id, &key).await {
         warn!(%fingerprint, error = %e, "inline eval-cache stream failed");
     }
 }
 
-pub(super) async fn accepts_push(state: &ServerState, fingerprint: &str, size_bytes: u64) -> bool {
-    let existing = lookup_row(state, fingerprint).await.map(|r| r.size_bytes);
+pub(super) async fn accepts_push(db: &WorkerDb, fingerprint: &str, size_bytes: u64) -> bool {
+    let existing = lookup_row(db, fingerprint).await.map(|r| r.size_bytes);
     should_accept_push(existing, size_bytes)
 }
 
-async fn lookup_row(state: &ServerState, fingerprint: &str) -> Option<eval_cache_store::Model> {
+async fn lookup_row(db: &WorkerDb, fingerprint: &str) -> Option<eval_cache_store::Model> {
     match EEvalCacheStore::find()
         .filter(eval_cache_store::Column::Fingerprint.eq(fingerprint))
-        .one(&state.worker_db)
+        .one(db)
         .await
     {
         Ok(row) => row,
@@ -102,12 +103,12 @@ async fn lookup_row(state: &ServerState, fingerprint: &str) -> Option<eval_cache
     }
 }
 
-pub(super) async fn record_eval_cache(state: &ServerState, fingerprint: &str, size_bytes: u64) {
-    upsert_eval_cache_row(state, fingerprint, &storage_key(fingerprint), size_bytes).await;
+pub(super) async fn record_eval_cache(db: &WorkerDb, fingerprint: &str, size_bytes: u64) {
+    upsert_eval_cache_row(db, fingerprint, &storage_key(fingerprint), size_bytes).await;
 }
 
 async fn upsert_eval_cache_row(
-    state: &ServerState,
+    db: &WorkerDb,
     fingerprint: &str,
     storage_path: &str,
     size_bytes: u64,
@@ -132,7 +133,7 @@ async fn upsert_eval_cache_row(
                 ])
                 .to_owned(),
         )
-        .exec(&state.worker_db)
+        .exec(db)
         .await;
     if let Err(e) = result {
         warn!(%fingerprint, error = %e, "eval_cache_store upsert failed");
@@ -142,7 +143,7 @@ async fn upsert_eval_cache_row(
 }
 
 async fn stream_blob_inline(
-    state: &ServerState,
+    nar_storage: &NarStore,
     writer: &ProtoWriter,
     job_id: &str,
     key: &str,
@@ -150,8 +151,7 @@ async fn stream_blob_inline(
     use futures::StreamExt as _;
 
     let fingerprint = key.strip_prefix("eval-cache/").unwrap_or(key);
-    let Some((_size, mut stream)) = state.nar_storage.get_eval_cache_stream(fingerprint).await?
-    else {
+    let Some((_size, mut stream)) = nar_storage.get_eval_cache_stream(fingerprint).await? else {
         return Err(anyhow::anyhow!(
             "eval-cache blob {key} vanished before stream"
         ));

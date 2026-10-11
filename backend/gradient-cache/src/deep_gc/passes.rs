@@ -6,14 +6,14 @@
 
 use super::DeepGcReport;
 use anyhow::{Context, Result};
-use gradient_core::ServerState;
-use gradient_storage::{NarStore, log_shards};
+use gradient_db::{DbContext, WorkerDb};
+use gradient_graph::Graph;
+use gradient_storage::{LogStorage, NarStore, log_shards};
 use gradient_types::*;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter, QuerySelect,
 };
 use std::collections::HashSet;
-use std::sync::Arc;
 use tracing::warn;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -63,7 +63,8 @@ pub(super) fn units() -> Vec<String> {
 }
 
 pub(super) async fn run(
-    state: &Arc<ServerState>,
+    db: &DbContext,
+    graph: &Graph,
     unit: &str,
     report: &mut DeepGcReport,
 ) -> Result<()> {
@@ -72,29 +73,46 @@ pub(super) async fn run(
         anyhow::bail!("unknown deep GC unit {unit}");
     };
     match pass {
-        Pass::Blobs => pass_blobs(Arc::clone(state), report).await,
-        Pass::Logs => pass_logs(Arc::clone(state), shard, report).await,
-        Pass::Nars => pass_nars(Arc::clone(state), shard, report).await,
-        Pass::Partials => pass_partials(state, report).await,
+        Pass::Blobs => pass_blobs(&db.worker_db, &db.storage.nar_storage, report).await,
+        Pass::Logs => {
+            pass_logs(
+                &db.worker_db,
+                db.storage.log_storage.as_ref(),
+                shard,
+                report,
+            )
+            .await
+        }
+        Pass::Nars => pass_nars(db, graph, shard, report).await,
+        Pass::Partials => pass_partials(&db.config, report).await,
     }
     .with_context(|| format!("deep GC unit {unit}"))
 }
 
-async fn pass_nars(state: Arc<ServerState>, shard: &str, report: &mut DeepGcReport) -> Result<()> {
-    let r = crate::nar::shard_repair::repair_nar_shard(state, shard).await?;
+async fn pass_nars(
+    db: &DbContext,
+    graph: &Graph,
+    shard: &str,
+    report: &mut DeepGcReport,
+) -> Result<()> {
+    let r = crate::nar::shard_repair::repair_nar_shard(db, graph, shard).await?;
     report.nars_scanned += r.orphan_nars_scanned;
     report.orphan_nars_removed += r.orphan_nars_removed;
     report.zombie_cached_paths_purged += r.zombie_cached_paths_purged;
     Ok(())
 }
 
-async fn pass_blobs(state: Arc<ServerState>, report: &mut DeepGcReport) -> Result<()> {
-    let on_disk = state.nar_storage.list_blobs().await.context("list_blobs")?;
+async fn pass_blobs(
+    db: &WorkerDb,
+    nar_storage: &NarStore,
+    report: &mut DeepGcReport,
+) -> Result<()> {
+    let on_disk = nar_storage.list_blobs().await.context("list_blobs")?;
     report.blobs_scanned += on_disk.len() as u64;
     let on_disk_set: HashSet<(uuid::Uuid, [u8; 32])> = on_disk.iter().copied().collect();
 
     let rows = EBuildRequestBlob::find()
-        .all(&state.worker_db)
+        .all(db)
         .await
         .context("list build_request_blob rows")?;
     let mut row_keys: HashSet<(uuid::Uuid, [u8; 32])> = HashSet::with_capacity(rows.len());
@@ -108,16 +126,11 @@ async fn pass_blobs(state: Arc<ServerState>, report: &mut DeepGcReport) -> Resul
         let key = (row.project.into_inner(), hash);
         row_keys.insert(key);
         if !on_disk_set.contains(&key) {
-            match state.nar_storage.get_blob(key.0, &key.1).await {
+            match nar_storage.get_blob(key.0, &key.1).await {
                 Ok(Some(_)) => {}
                 Ok(None) => {
                     let blob_id = row.id;
-                    if let Err(e) = row
-                        .clone()
-                        .into_active_model()
-                        .delete(&state.worker_db)
-                        .await
-                    {
+                    if let Err(e) = row.clone().into_active_model().delete(db).await {
                         warn!(error = %e, %blob_id, "deep_gc: failed to delete zombie blob row");
                     } else {
                         report.zombie_blob_rows_purged += 1;
@@ -133,7 +146,7 @@ async fn pass_blobs(state: Arc<ServerState>, report: &mut DeepGcReport) -> Resul
 
     for key in &on_disk_set {
         if !row_keys.contains(key) {
-            if let Err(e) = state.nar_storage.delete_blob(key.0, &key.1).await {
+            if let Err(e) = nar_storage.delete_blob(key.0, &key.1).await {
                 warn!(error = %e, "deep_gc: failed to delete orphan blob");
             } else {
                 report.orphan_blobs_removed += 1;
@@ -143,9 +156,13 @@ async fn pass_blobs(state: Arc<ServerState>, report: &mut DeepGcReport) -> Resul
     Ok(())
 }
 
-async fn pass_logs(state: Arc<ServerState>, shard: &str, report: &mut DeepGcReport) -> Result<()> {
-    let on_disk = state
-        .log_storage
+async fn pass_logs(
+    db: &WorkerDb,
+    log_storage: &dyn LogStorage,
+    shard: &str,
+    report: &mut DeepGcReport,
+) -> Result<()> {
+    let on_disk = log_storage
         .list_shard(shard)
         .await
         .context("list log shard")?;
@@ -160,7 +177,7 @@ async fn pass_logs(state: Arc<ServerState>, shard: &str, report: &mut DeepGcRepo
             .column(CBuildAttempt::Id)
             .filter(CBuildAttempt::Id.is_in(chunk))
             .into_tuple::<BuildAttemptId>()
-            .all(&state.worker_db)
+            .all(db)
     })
     .await
     .context("query build_attempts by id")?
@@ -169,7 +186,7 @@ async fn pass_logs(state: Arc<ServerState>, shard: &str, report: &mut DeepGcRepo
 
     for attempt_id in on_disk {
         if !referenced.contains(&attempt_id) {
-            if let Err(e) = state.log_storage.delete(attempt_id).await {
+            if let Err(e) = log_storage.delete(attempt_id).await {
                 warn!(error = %e, %attempt_id, "deep_gc: failed to delete orphan log");
             } else {
                 report.orphan_logs_removed += 1;
@@ -181,9 +198,9 @@ async fn pass_logs(state: Arc<ServerState>, shard: &str, report: &mut DeepGcRepo
 
 /// This is the only sweep of upload partials. A walk per session, request or maintenance tick would
 /// stall every waiter behind the filesystem.
-async fn pass_partials(state: &ServerState, report: &mut DeepGcReport) -> Result<()> {
-    let ttl = std::time::Duration::from_secs(state.config.nar.partial_ttl_secs);
-    let server = &state.config.server;
+async fn pass_partials(config: &RuntimeConfig, report: &mut DeepGcReport) -> Result<()> {
+    let ttl = std::time::Duration::from_secs(config.nar.partial_ttl_secs);
+    let server = &config.server;
     for root in [
         server.nar_partial_dir(),
         server.nar_upload_partial_dir(),
@@ -202,6 +219,7 @@ async fn pass_partials(state: &ServerState, report: &mut DeepGcReport) -> Result
 mod tests {
     use super::*;
     use crate::test_support::test_server_state_with_log;
+    use gradient_core::ServerState;
     use gradient_entity::ids::{BuildRequestBlobId, ProjectId};
     use gradient_fixtures::mock::mock_db;
     use gradient_storage::{FileLogStorage, LogStorage, NarStore, log_shard};
@@ -235,7 +253,9 @@ mod tests {
         let state = make_state(nar, Arc::new(NoopLogStorage), db);
 
         let mut report = DeepGcReport::default();
-        pass_blobs(Arc::clone(&state), &mut report).await.unwrap();
+        pass_blobs(&state.worker_db, &state.nar_storage, &mut report)
+            .await
+            .unwrap();
         assert_eq!(report.orphan_blobs_removed, 1);
         assert!(
             state
@@ -272,7 +292,9 @@ mod tests {
         let state = make_state(nar, Arc::new(NoopLogStorage), db);
 
         let mut report = DeepGcReport::default();
-        pass_blobs(Arc::clone(&state), &mut report).await.unwrap();
+        pass_blobs(&state.worker_db, &state.nar_storage, &mut report)
+            .await
+            .unwrap();
         assert_eq!(report.zombie_blob_rows_purged, 1);
     }
 
@@ -295,9 +317,14 @@ mod tests {
         let state = make_state(nar, log, db);
 
         let mut report = DeepGcReport::default();
-        pass_logs(Arc::clone(&state), &log_shard(attempt_id), &mut report)
-            .await
-            .unwrap();
+        pass_logs(
+            &state.worker_db,
+            state.log_storage.as_ref(),
+            &log_shard(attempt_id),
+            &mut report,
+        )
+        .await
+        .unwrap();
         assert_eq!(report.orphan_logs_removed, 1);
     }
 
@@ -326,9 +353,14 @@ mod tests {
         let state = make_state(nar, Arc::clone(&log), db);
 
         let mut report = DeepGcReport::default();
-        pass_logs(Arc::clone(&state), "00", &mut report)
-            .await
-            .unwrap();
+        pass_logs(
+            &state.worker_db,
+            state.log_storage.as_ref(),
+            "00",
+            &mut report,
+        )
+        .await
+        .unwrap();
         assert_eq!(report.logs_scanned, 2);
         assert_eq!(report.orphan_logs_removed, 1);
         assert_eq!(log.list_shard("00").await.unwrap(), vec![kept]);

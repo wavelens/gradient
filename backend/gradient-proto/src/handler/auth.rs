@@ -4,7 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use gradient_core::ServerState;
+use gradient_db::WorkerDb;
+use gradient_types::RuntimeConfig;
 use gradient_types::ids::ProjectId;
 use std::collections::HashSet;
 use tracing::warn;
@@ -14,7 +15,7 @@ use gradient_wire::auth::validate_tokens;
 use gradient_wire::messages::{FailedPeer, GradientCapabilities};
 
 pub(super) async fn filter_project_peers_without_cache(
-    state: &ServerState,
+    db: &WorkerDb,
     authorized: Vec<String>,
 ) -> (Vec<String>, Vec<FailedPeer>) {
     use gradient_entity::project::{Column as OCol, Entity as EProject};
@@ -38,7 +39,7 @@ pub(super) async fn filter_project_peers_without_cache(
 
     let project_ids: HashSet<ProjectId> = match EProject::find()
         .filter(OCol::Id.is_in(uuid_set.clone()))
-        .all(&state.worker_db)
+        .all(db)
         .await
     {
         Ok(rows) => rows.into_iter().map(|r| r.id).collect(),
@@ -56,7 +57,7 @@ pub(super) async fn filter_project_peers_without_cache(
     } else {
         match EProjectCache::find()
             .filter(OCCol::Project.is_in(project_ids.iter().copied().collect::<Vec<_>>()))
-            .all(&state.worker_db)
+            .all(db)
             .await
         {
             Ok(rows) => rows.into_iter().map(|r| r.project).collect(),
@@ -86,7 +87,7 @@ pub(super) async fn filter_project_peers_without_cache(
 }
 
 pub(super) async fn lookup_registered_peers(
-    state: &ServerState,
+    db: &WorkerDb,
     worker_id: &str,
 ) -> Vec<(String, String)> {
     use gradient_entity::worker_registration::{Column, Entity};
@@ -95,7 +96,7 @@ pub(super) async fn lookup_registered_peers(
     match Entity::find()
         .filter(Column::WorkerId.eq(worker_id))
         .filter(Column::Active.eq(true))
-        .all(&state.worker_db)
+        .all(db)
         .await
     {
         Ok(rows) => rows
@@ -116,15 +117,15 @@ pub(super) struct TeamWorkerChallenge {
 }
 
 pub(super) async fn lookup_team_worker_challenge(
-    state: &ServerState,
+    db: &WorkerDb,
     worker_id: &str,
 ) -> Option<TeamWorkerChallenge> {
-    let worker = gradient_db::teams::workers::active_team_worker(&state.worker_db, worker_id)
+    let worker = gradient_db::teams::workers::active_team_worker(db, worker_id)
         .await
         .ok()
         .flatten()?;
     let granted_projects =
-        gradient_db::teams::workers::projects_granted_with_workers(&state.worker_db, worker.team)
+        gradient_db::teams::workers::projects_granted_with_workers(db, worker.team)
             .await
             .unwrap_or_default()
             .into_iter()
@@ -139,15 +140,15 @@ pub(super) async fn lookup_team_worker_challenge(
 }
 
 pub(super) async fn challenge_for(
-    state: &ServerState,
+    db: &WorkerDb,
     worker_id: &str,
 ) -> (Option<TeamWorkerChallenge>, Vec<(String, String)>) {
-    match lookup_team_worker_challenge(state, worker_id).await {
+    match lookup_team_worker_challenge(db, worker_id).await {
         Some(team) => {
             let peers = vec![(team.team.clone(), team.token_hash.clone())];
             (Some(team), peers)
         }
-        None => (None, lookup_registered_peers(state, worker_id).await),
+        None => (None, lookup_registered_peers(db, worker_id).await),
     }
 }
 
@@ -170,7 +171,7 @@ pub(super) struct Resolved {
 }
 
 pub(super) async fn resolve_authorized(
-    state: &ServerState,
+    db: &WorkerDb,
     team: &Option<TeamWorkerChallenge>,
     registered: &[(String, String)],
     tokens: &[(String, String)],
@@ -179,7 +180,7 @@ pub(super) async fn resolve_authorized(
     let proven = !token_authorized.is_empty();
     let expanded = expand_team_authorized(team, token_authorized);
     let had_any = !expanded.is_empty();
-    let (authorized, demoted) = filter_project_peers_without_cache(state, expanded).await;
+    let (authorized, demoted) = filter_project_peers_without_cache(db, expanded).await;
     let emptied_by_missing_cache = authorized.is_empty() && had_any && !demoted.is_empty();
     failed.extend(demoted);
 
@@ -210,17 +211,14 @@ impl EnabledCapsAggregate {
     }
 }
 
-pub(super) async fn aggregate_enabled_caps(
-    state: &ServerState,
-    worker_id: &str,
-) -> EnabledCapsAggregate {
+pub(super) async fn aggregate_enabled_caps(db: &WorkerDb, worker_id: &str) -> EnabledCapsAggregate {
     use gradient_entity::worker_registration::{Column, Entity};
     use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 
     let rows = match Entity::find()
         .filter(Column::WorkerId.eq(worker_id))
         .filter(Column::Active.eq(true))
-        .all(&state.worker_db)
+        .all(db)
         .await
     {
         Ok(rows) => rows,
@@ -232,7 +230,7 @@ pub(super) async fn aggregate_enabled_caps(
 
     if rows.is_empty() {
         if let Ok(Some(worker)) =
-            gradient_db::teams::workers::active_team_worker(&state.worker_db, worker_id).await
+            gradient_db::teams::workers::active_team_worker(db, worker_id).await
         {
             return EnabledCapsAggregate {
                 enable_fetch: worker.enable_fetch,
@@ -251,13 +249,13 @@ pub(super) async fn aggregate_enabled_caps(
     }
 }
 
-pub(super) async fn has_any_registrations(state: &ServerState, worker_id: &str) -> bool {
+pub(super) async fn has_any_registrations(db: &WorkerDb, worker_id: &str) -> bool {
     use gradient_entity::worker_registration::{Column, Entity};
     use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 
     match Entity::find()
         .filter(Column::WorkerId.eq(worker_id))
-        .one(&state.worker_db)
+        .one(db)
         .await
     {
         Ok(row) => row.is_some(),
@@ -269,14 +267,14 @@ pub(super) async fn has_any_registrations(state: &ServerState, worker_id: &str) 
 }
 
 pub(super) fn negotiate_capabilities(
-    state: &ServerState,
+    config: &RuntimeConfig,
     client: GradientCapabilities,
     enabled: EnabledCapsAggregate,
 ) -> GradientCapabilities {
     GradientCapabilities {
         core: true,
         cache: true,
-        federate: client.federate && state.config.proto.federate,
+        federate: client.federate && config.proto.federate,
         fetch: client.fetch && enabled.enable_fetch,
         eval: client.eval && enabled.enable_eval,
         build: client.build && enabled.enable_build,
@@ -286,6 +284,7 @@ pub(super) fn negotiate_capabilities(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gradient_core::ServerState;
     use gradient_fixtures::mock::{empty_db, mock_db};
     use gradient_test_support::state::TestState;
     use std::sync::Arc;
@@ -310,22 +309,29 @@ mod tests {
     #[test]
     fn negotiate_capabilities_core_always_true() {
         let state = make_state(false);
-        let result = negotiate_capabilities(&state, all_caps(false), EnabledCapsAggregate::all());
+        let result =
+            negotiate_capabilities(&state.config, all_caps(false), EnabledCapsAggregate::all());
         assert!(result.core);
     }
 
     #[test]
     fn negotiate_capabilities_cache_always_true() {
         let state = make_state(false);
-        assert!(negotiate_capabilities(&state, all_caps(false), EnabledCapsAggregate::all()).cache);
-        assert!(negotiate_capabilities(&state, all_caps(true), EnabledCapsAggregate::all()).cache);
+        assert!(
+            negotiate_capabilities(&state.config, all_caps(false), EnabledCapsAggregate::all())
+                .cache
+        );
+        assert!(
+            negotiate_capabilities(&state.config, all_caps(true), EnabledCapsAggregate::all())
+                .cache
+        );
     }
 
     #[test]
     fn negotiate_capabilities_federate_requires_both() {
         assert!(
             !negotiate_capabilities(
-                &make_state(false),
+                &make_state(false).config,
                 all_caps(true),
                 EnabledCapsAggregate::all()
             )
@@ -333,7 +339,7 @@ mod tests {
         );
         assert!(
             !negotiate_capabilities(
-                &make_state(true),
+                &make_state(true).config,
                 all_caps(false),
                 EnabledCapsAggregate::all()
             )
@@ -341,7 +347,7 @@ mod tests {
         );
         assert!(
             negotiate_capabilities(
-                &make_state(true),
+                &make_state(true).config,
                 all_caps(true),
                 EnabledCapsAggregate::all()
             )
@@ -360,7 +366,7 @@ mod tests {
             eval: true,
             build: true,
         };
-        let result = negotiate_capabilities(&state, client, EnabledCapsAggregate::all());
+        let result = negotiate_capabilities(&state.config, client, EnabledCapsAggregate::all());
         assert!(result.fetch);
         assert!(result.eval);
         assert!(result.build);
@@ -375,7 +381,7 @@ mod tests {
             enable_eval: true,
             enable_build: false,
         };
-        let result = negotiate_capabilities(&state, client, enabled);
+        let result = negotiate_capabilities(&state.config, client, enabled);
         assert!(!result.fetch);
         assert!(result.eval);
         assert!(!result.build);
@@ -426,7 +432,7 @@ mod tests {
             .into_connection();
         let state = state_with_db(db);
         let (authorized, demoted) =
-            filter_project_peers_without_cache(&state, vec![project.to_string()]).await;
+            filter_project_peers_without_cache(&state.worker_db, vec![project.to_string()]).await;
         assert_eq!(authorized, vec![project.to_string()]);
         assert!(demoted.is_empty());
     }
@@ -440,7 +446,7 @@ mod tests {
             .into_connection();
         let state = state_with_db(db);
         let (authorized, demoted) =
-            filter_project_peers_without_cache(&state, vec![project.to_string()]).await;
+            filter_project_peers_without_cache(&state.worker_db, vec![project.to_string()]).await;
         assert!(authorized.is_empty());
         assert_eq!(demoted.len(), 1);
         assert_eq!(demoted[0].peer_id, project.to_string());
@@ -459,7 +465,8 @@ mod tests {
             .into_connection();
         let state = state_with_db(db);
         let (authorized, demoted) =
-            filter_project_peers_without_cache(&state, vec![cache_peer.to_string()]).await;
+            filter_project_peers_without_cache(&state.worker_db, vec![cache_peer.to_string()])
+                .await;
         assert_eq!(authorized, vec![cache_peer.to_string()]);
         assert!(demoted.is_empty());
     }
@@ -479,7 +486,7 @@ mod tests {
             .into_connection();
         let state = state_with_db(db);
         let (authorized, demoted) = filter_project_peers_without_cache(
-            &state,
+            &state.worker_db,
             vec![
                 project_with.to_string(),
                 project_without.to_string(),
@@ -532,8 +539,13 @@ mod tests {
         let team = team_challenge(&[]);
         let registered = vec![(TEAM.to_string(), SHA256_OF_T1.to_string())];
 
-        let resolved =
-            resolve_authorized(&state, &team, &registered, &[(TEAM.into(), "t1".into())]).await;
+        let resolved = resolve_authorized(
+            &state.worker_db,
+            &team,
+            &registered,
+            &[(TEAM.into(), "t1".into())],
+        )
+        .await;
 
         assert!(resolved.proven);
         assert!(resolved.authorized.is_empty());
@@ -552,8 +564,13 @@ mod tests {
         let team = team_challenge(&[project]);
         let registered = vec![(TEAM.to_string(), SHA256_OF_T1.to_string())];
 
-        let resolved =
-            resolve_authorized(&state, &team, &registered, &[(TEAM.into(), "t1".into())]).await;
+        let resolved = resolve_authorized(
+            &state.worker_db,
+            &team,
+            &registered,
+            &[(TEAM.into(), "t1".into())],
+        )
+        .await;
 
         assert!(resolved.authorized.is_empty());
         assert!(resolved.emptied_by_missing_cache);

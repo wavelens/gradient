@@ -13,10 +13,9 @@ mod m20261001_000000_shard_build_logs;
 use crate::units::{Step, next_unit};
 use anyhow::{Context, Result};
 use futures::future::BoxFuture;
-use gradient_core::ServerState;
+use gradient_db::DbContext;
 use gradient_db::maintenance::storage_migrations;
 use std::collections::HashSet;
-use std::sync::Arc;
 use tracing::info;
 
 /// Every unit must be idempotent. A unit cut short by a restart is starting again in full.
@@ -25,15 +24,15 @@ pub(crate) trait StorageMigration: Send + Sync {
 
     fn units(&self) -> Vec<String>;
 
-    fn migrate<'a>(&'a self, state: &'a ServerState, unit: &'a str) -> BoxFuture<'a, Result<()>>;
+    fn migrate<'a>(&'a self, db: &'a DbContext, unit: &'a str) -> BoxFuture<'a, Result<()>>;
 }
 
 fn migrations() -> Vec<Box<dyn StorageMigration>> {
     vec![Box::new(m20261001_000000_shard_build_logs::Migration)]
 }
 
-pub(super) async fn step(state: &Arc<ServerState>) -> Result<Step> {
-    let ledger = storage_migrations::all(&state.worker_db).await?;
+pub(super) async fn step(db: &DbContext) -> Result<Step> {
+    let ledger = storage_migrations::all(&db.worker_db).await?;
     let applied: HashSet<&str> = ledger
         .iter()
         .filter(|m| m.applied_at.is_some())
@@ -55,13 +54,13 @@ pub(super) async fn step(state: &Arc<ServerState>) -> Result<Step> {
     match next_unit(&units, checkpoint) {
         Some(unit) => {
             migration
-                .migrate(state, unit)
+                .migrate(db, unit)
                 .await
                 .with_context(|| format!("storage migration {name}, unit {unit}"))?;
-            storage_migrations::save_checkpoint(&state.worker_db, name, unit).await?;
+            storage_migrations::save_checkpoint(&db.worker_db, name, unit).await?;
         }
         None => {
-            storage_migrations::mark_applied(&state.worker_db, name).await?;
+            storage_migrations::mark_applied(&db.worker_db, name).await?;
             info!(migration = name, "storage migration applied");
         }
     }
@@ -92,6 +91,6 @@ mod tests {
         let nar = NarStore::local(tmp.path()).unwrap();
 
         let state = test_server_state(nar, db, |_| {});
-        assert_eq!(step(&state).await.unwrap(), Step::Idle);
+        assert_eq!(step(&state.db()).await.unwrap(), Step::Idle);
     }
 }

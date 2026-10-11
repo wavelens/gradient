@@ -5,7 +5,8 @@
  */
 
 use chrono::{Duration, NaiveDateTime};
-use gradient_core::ServerState;
+use gradient_db::WorkerDb;
+use gradient_storage::NarStore;
 use gradient_types::*;
 use gradient_util::supervision::{Pass, PassError, RunsOn};
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QuerySelect};
@@ -49,7 +50,9 @@ fn select_evictions(
 }
 
 pub(crate) struct EvalCacheSweep {
-    pub(crate) state: Arc<ServerState>,
+    pub(crate) db: WorkerDb,
+    pub(crate) config: Arc<RuntimeConfig>,
+    pub(crate) nar_storage: NarStore,
     pub(crate) period: std::time::Duration,
 }
 
@@ -63,74 +66,71 @@ impl Pass for EvalCacheSweep {
     }
 
     async fn run(&self) -> Result<(), PassError> {
-        evict_eval_cache(Arc::clone(&self.state))
-            .await
-            .map_err(Into::into)
+        self.evict().await.map_err(Into::into)
     }
 }
 
-pub async fn evict_eval_cache(state: Arc<ServerState>) -> anyhow::Result<()> {
-    let cfg = &state.config.eval;
+impl EvalCacheSweep {
+    async fn evict(&self) -> anyhow::Result<()> {
+        let cfg = &self.config.eval;
 
-    let rows: Vec<(EvalCacheStoreId, i64, NaiveDateTime)> = EEvalCacheStore::find()
-        .select_only()
-        .column(CEvalCacheStore::Id)
-        .column(CEvalCacheStore::SizeBytes)
-        .column(CEvalCacheStore::UpdatedAt)
-        .into_tuple()
-        .all(&state.worker_db)
-        .await?;
+        let rows: Vec<(EvalCacheStoreId, i64, NaiveDateTime)> = EEvalCacheStore::find()
+            .select_only()
+            .column(CEvalCacheStore::Id)
+            .column(CEvalCacheStore::SizeBytes)
+            .column(CEvalCacheStore::UpdatedAt)
+            .into_tuple()
+            .all(&self.db)
+            .await?;
 
-    if rows.is_empty() {
-        return Ok(());
-    }
-
-    let victims = select_evictions(
-        &rows,
-        cfg.cache_max_total_bytes,
-        Duration::days(cfg.cache_max_age_days as i64),
-        gradient_types::now(),
-    );
-
-    if victims.is_empty() {
-        return Ok(());
-    }
-
-    let models = EEvalCacheStore::find()
-        .filter(CEvalCacheStore::Id.is_in(victims))
-        .all(&state.worker_db)
-        .await?;
-
-    let mut freed: u64 = 0;
-    let mut evicted = 0usize;
-    for row in models {
-        if let Err(e) = state.nar_storage.delete_eval_cache(&row.fingerprint).await {
-            warn!(fingerprint = %row.fingerprint, error = ?e, "eval-cache sweep: blob delete failed");
+        if rows.is_empty() {
+            return Ok(());
         }
 
-        match EEvalCacheStore::delete_by_id(row.id)
-            .exec(&state.worker_db)
-            .await
-        {
-            Ok(_) => {
-                freed = freed.saturating_add(row.size_bytes.max(0) as u64);
-                evicted += 1;
-            }
-            Err(e) => {
-                error!(id = %row.id, error = ?e, "eval-cache sweep: row delete failed");
-            }
-        }
-    }
-
-    if evicted > 0 {
-        info!(
-            evicted,
-            freed_bytes = freed,
-            "eval-cache sweep: blobs evicted"
+        let victims = select_evictions(
+            &rows,
+            cfg.cache_max_total_bytes,
+            Duration::days(cfg.cache_max_age_days as i64),
+            gradient_types::now(),
         );
-    }
 
-    Ok(())
+        if victims.is_empty() {
+            return Ok(());
+        }
+
+        let models = EEvalCacheStore::find()
+            .filter(CEvalCacheStore::Id.is_in(victims))
+            .all(&self.db)
+            .await?;
+
+        let mut freed: u64 = 0;
+        let mut evicted = 0usize;
+        for row in models {
+            if let Err(e) = self.nar_storage.delete_eval_cache(&row.fingerprint).await {
+                warn!(fingerprint = %row.fingerprint, error = ?e, "eval-cache sweep: blob delete failed");
+            }
+
+            match EEvalCacheStore::delete_by_id(row.id).exec(&self.db).await {
+                Ok(_) => {
+                    freed = freed.saturating_add(row.size_bytes.max(0) as u64);
+                    evicted += 1;
+                }
+                Err(e) => {
+                    error!(id = %row.id, error = ?e, "eval-cache sweep: row delete failed");
+                }
+            }
+        }
+
+        if evicted > 0 {
+            info!(
+                evicted,
+                freed_bytes = freed,
+                "eval-cache sweep: blobs evicted"
+            );
+        }
+
+        Ok(())
+    }
 }
 
 #[cfg(test)]

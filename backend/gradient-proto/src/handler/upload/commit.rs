@@ -4,16 +4,17 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use std::sync::Arc;
-
 use futures::future::BoxFuture;
-use gradient_core::ServerState;
+use gradient_db::{DbContext, WorkerDb};
+use gradient_storage::NarStore;
 use gradient_storage::admission::{ObjectKey, UploadPermit};
+use gradient_types::RuntimeConfig;
 use gradient_types::ids::ProjectId;
 use gradient_wire::messages::ServerMessage;
 use gradient_wire::types::{NarUploadMetadata, UploadMetadata, UploadObject, UploadOutcome};
 use tracing::warn;
 
+use super::super::SessionHandles;
 use super::super::nar::{NarUploadRecord, mark_nar_stored, record_nar_push_metric};
 use super::super::socket::{ProtoWriter, send_server_msg};
 use super::table::Transfer;
@@ -21,7 +22,7 @@ use crate::import::{WriteNeeded, nar_write_needed};
 
 pub(super) struct Commit {
     pub writer: ProtoWriter,
-    pub state: Arc<ServerState>,
+    pub handles: SessionHandles,
     pub peer_id: String,
     pub request_id: u64,
     /// This is resolved off the session's reader loop. The scheduler is answering from a mailbox
@@ -37,12 +38,12 @@ pub(super) struct Commit {
 /// recorded it, and a second upload of the path is waiting instead of overwriting the object.
 #[tracing::instrument(name = "upload_commit", level = "debug", skip_all)]
 pub(super) async fn run(c: Commit) {
-    let outcome = match place(&c.state, &c.object, c.transfer, &c.metadata).await {
+    let outcome = match place(&c.handles.db, &c.object, c.transfer, &c.metadata).await {
         Ok(()) => {
             let mut permit = c.permit;
             permit.release_budget();
             let project_id = c.project.await;
-            let outcome = record(&c.state, project_id, &c.object, &c.metadata).await;
+            let outcome = record(&c.handles, project_id, &c.object, &c.metadata).await;
             if matches!(outcome, UploadOutcome::Ok) {
                 permit.committed();
             }
@@ -79,7 +80,7 @@ fn rejected(reason: String) -> UploadOutcome {
 
 #[tracing::instrument(name = "place_upload", level = "debug", skip_all)]
 async fn place(
-    state: &Arc<ServerState>,
+    db: &DbContext,
     object: &UploadObject,
     transfer: Transfer,
     metadata: &UploadMetadata,
@@ -91,15 +92,22 @@ async fn place(
             };
             match transfer {
                 Transfer::Passthrough(writer) => {
-                    place_passed_through(state, &hash, *writer, meta).await
+                    place_passed_through(
+                        &db.worker_db,
+                        &db.storage.nar_storage,
+                        &hash,
+                        *writer,
+                        meta,
+                    )
+                    .await
                 }
                 Transfer::Put | Transfer::Multipart { .. } => {
-                    place_presigned(state, &hash, meta).await
+                    place_presigned(&db.storage.nar_storage, &db.config, &hash, meta).await
                 }
             }
         }
         (UploadObject::EvalCache { fingerprint }, UploadMetadata::EvalCache { size_bytes }) => {
-            place_eval_cache(state, fingerprint, transfer, *size_bytes).await
+            place_eval_cache(&db.storage.nar_storage, fingerprint, transfer, *size_bytes).await
         }
         _ => Err(rejected("metadata does not match the upload object".into())),
     }
@@ -107,7 +115,7 @@ async fn place(
 
 #[tracing::instrument(name = "upload_graph_commit", level = "debug", skip_all)]
 async fn record(
-    state: &Arc<ServerState>,
+    handles: &SessionHandles,
     project_id: Option<ProjectId>,
     object: &UploadObject,
     metadata: &UploadMetadata,
@@ -124,13 +132,32 @@ async fn record(
                 ca: meta.ca.as_deref(),
                 confirmed: true,
             };
-            if let Err(e) = mark_nar_stored(state, project_id, store_path, &record).await {
+            if let Err(e) = mark_nar_stored(
+                &handles.graph,
+                &handles.db.events,
+                project_id,
+                store_path,
+                &record,
+            )
+            .await
+            {
                 return retry(format!("recording {store_path} in the cache index: {e:#}"));
             }
-            let _ = record_nar_push_metric(state, project_id, meta.file_size as i64).await;
+            let _ = record_nar_push_metric(
+                &handles.db.worker_db,
+                &handles.cache_traffic,
+                project_id,
+                meta.file_size as i64,
+            )
+            .await;
         }
         (UploadObject::EvalCache { fingerprint }, UploadMetadata::EvalCache { size_bytes }) => {
-            super::super::eval_cache::record_eval_cache(state, fingerprint, *size_bytes).await;
+            super::super::eval_cache::record_eval_cache(
+                &handles.db.worker_db,
+                fingerprint,
+                *size_bytes,
+            )
+            .await;
         }
         _ => {}
     }
@@ -138,7 +165,8 @@ async fn record(
 }
 
 async fn place_passed_through(
-    state: &ServerState,
+    db: &WorkerDb,
+    nar_storage: &NarStore,
     hash: &str,
     writer: gradient_storage::PartialWriter,
     meta: &NarUploadMetadata,
@@ -164,56 +192,51 @@ async fn place_passed_through(
         });
     }
 
-    let needed =
-        nar_write_needed(&state.worker_db, &state.nar_storage, hash, &meta.file_hash).await;
+    let needed = nar_write_needed(db, nar_storage, hash, &meta.file_hash).await;
     if !matches!(needed, Ok(WriteNeeded::Write)) {
         let _ = tokio::fs::remove_file(&staged.path).await;
         needed.map_err(retry)?;
         return Ok(());
     }
 
-    state
-        .nar_storage
+    nar_storage
         .adopt_file(hash, &staged.path)
         .await
         .map_err(retry)?;
     match staged.bytes {
-        Some(bytes) => state.nar_storage.hot().insert(hash, bytes),
-        None => state.nar_storage.hot().invalidate(hash),
+        Some(bytes) => nar_storage.hot().insert(hash, bytes),
+        None => nar_storage.hot().invalidate(hash),
     }
     Ok(())
 }
 
 async fn place_presigned(
-    state: &ServerState,
+    nar_storage: &NarStore,
+    config: &RuntimeConfig,
     hash: &str,
     meta: &NarUploadMetadata,
 ) -> Result<(), UploadOutcome> {
     if let Some(receipt) = &meta.multipart
-        && let Err(e) = state.nar_storage.complete_multipart(hash, receipt).await
+        && let Err(e) = nar_storage.complete_multipart(hash, receipt).await
     {
-        state
-            .nar_storage
-            .abort_multipart(hash, &receipt.upload_id)
-            .await;
+        nar_storage.abort_multipart(hash, &receipt.upload_id).await;
         return Err(retry(format!("completing the multipart upload: {e:#}")));
     }
-    state
-        .nar_storage
+    nar_storage
         .verify(
             hash,
             &meta.file_hash,
             meta.file_size,
-            state.config.nar.verify_digest,
+            config.nar.verify_digest,
         )
         .await
         .map_err(retry)?;
-    state.nar_storage.hot().invalidate(hash);
+    nar_storage.hot().invalidate(hash);
     Ok(())
 }
 
 async fn place_eval_cache(
-    state: &Arc<ServerState>,
+    nar_storage: &NarStore,
     fingerprint: &str,
     transfer: Transfer,
     size_bytes: u64,
@@ -229,14 +252,12 @@ async fn place_eval_cache(
             }
             let bytes = tokio::fs::read(&staged.path).await.map_err(retry)?;
             let _ = tokio::fs::remove_file(&staged.path).await;
-            state
-                .nar_storage
+            nar_storage
                 .put_eval_cache(fingerprint, bytes)
                 .await
                 .map_err(retry)
         }
-        Transfer::Put | Transfer::Multipart { .. } => state
-            .nar_storage
+        Transfer::Put | Transfer::Multipart { .. } => nar_storage
             .verify_eval_cache(fingerprint, size_bytes)
             .await
             .map_err(retry),
@@ -246,9 +267,11 @@ async fn place_eval_cache(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gradient_core::ServerState;
     use gradient_fixtures::mock::{empty_db, mock_db};
     use gradient_storage::admission::{Admitted, ObjectKey};
     use gradient_test_support::state::test_state;
+    use std::sync::Arc;
 
     async fn granted_permit(
         state: &Arc<ServerState>,
@@ -276,7 +299,7 @@ mod tests {
 
         run(Commit {
             writer: writer_out,
-            state: Arc::clone(&state),
+            handles: SessionHandles::from_state(&state),
             peer_id: "w1".into(),
             request_id: 1,
             project: Box::pin(std::future::ready(None)),
@@ -321,7 +344,7 @@ mod tests {
 
         run(Commit {
             writer: writer_out,
-            state: Arc::clone(&state),
+            handles: SessionHandles::from_state(&state),
             peer_id: "w1".into(),
             request_id: 1,
             project: Box::pin(std::future::ready(None)),
@@ -378,7 +401,7 @@ mod tests {
         writer.append(0, b"abc").await.unwrap();
 
         place(
-            &state,
+            &state.db(),
             &UploadObject::Nar {
                 store_path: format!("/nix/store/{hash}-p"),
             },
@@ -420,7 +443,7 @@ mod tests {
 
         let commit = run(Commit {
             writer: writer_out,
-            state: Arc::clone(&state),
+            handles: SessionHandles::from_state(&state),
             peer_id: "w1".into(),
             request_id: 1,
             project: Box::pin(std::future::ready(None)),
@@ -479,7 +502,7 @@ mod tests {
 
         run(Commit {
             writer: writer_out,
-            state: Arc::clone(&state),
+            handles: SessionHandles::from_state(&state),
             peer_id: "w1".into(),
             request_id: 1,
             project: Box::pin(std::future::ready(None)),
