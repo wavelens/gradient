@@ -7,7 +7,9 @@
 use std::sync::Arc;
 
 use gradient_core::ServerState;
-use gradient_db::status::{update_evaluation_status, update_evaluation_status_with_error};
+use gradient_db::status::{
+    EvaluationFailure, update_evaluation_status, update_evaluation_status_with_error,
+};
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_graph::Transition;
 use gradient_types::*;
@@ -130,11 +132,7 @@ pub async fn requeue_orphaned_jobs(
                             &state.db(),
                             eval,
                             EvaluationStatus::Failed,
-                            format!(
-                                "evaluation was dispatched {assignments} times and each worker \
-                                 disconnected before reporting a result; giving up"
-                            ),
-                            Some("scheduler".to_string()),
+                            &EvaluationFailure::OrphanedOnEveryDispatch { assignments },
                         )
                         .await
                         {

@@ -39,15 +39,6 @@ pub(crate) fn unbuildable(
     }
 }
 
-pub(crate) fn unbuildable_warning(unmet: &[UnmetRequirement]) -> String {
-    let systems: Vec<String> = unmet.iter().map(ToString::to_string).collect();
-
-    format!(
-        "Aborted: no connected worker provides {}. Enable waiting for workers on the task to wait instead.",
-        systems.join("; ")
-    )
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -147,16 +138,5 @@ mod tests {
             unbuildable(&eval, Some(&reason), Some(&reason), false, now),
             None
         );
-    }
-
-    #[test]
-    fn the_warning_names_every_missing_architecture_and_feature() {
-        let warning = unbuildable_warning(&[
-            unmet("aarch64-linux", &[], 142),
-            unmet("x86_64-linux", &["kvm", "nixos-test"], 3),
-        ]);
-
-        assert!(warning.contains("aarch64-linux (142 builds)"));
-        assert!(warning.contains("x86_64-linux with features kvm, nixos-test (3 builds)"));
     }
 }

@@ -9,6 +9,7 @@ mod derivation_build_status;
 mod effects;
 mod eval_finalize;
 mod evaluation_build;
+mod evaluation_message;
 mod evaluation_status;
 pub mod log_tail;
 pub mod logging;
@@ -21,9 +22,9 @@ pub use derivation_build_status::{
 pub use effects::{TransitionChange, collapse_transitions, emit_transition_effects};
 pub use eval_finalize::{check_evaluation_done, finalize_evals_for_derivations};
 pub use evaluation_build::{BuildRefusal, abort_evaluation_build, retry_evaluation_build};
+pub use evaluation_message::{EvaluationFailure, EvaluationWarning};
 pub use evaluation_status::{update_evaluation_status, update_evaluation_status_with_error};
 pub use logging::{
-    PhaseSubjectKind, enqueue_log_finalize, finalize_build_log, insert_evaluation_message,
-    insert_evaluation_message_once, record_evaluation_message, record_phase_event,
-    record_phase_events,
+    PhaseSubjectKind, enqueue_log_finalize, finalize_build_log, insert_worker_message,
+    record_phase_event, record_phase_events, report_worker_message,
 };

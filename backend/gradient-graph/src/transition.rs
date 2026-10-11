@@ -13,7 +13,8 @@ use gradient_db::{
         succeed_latest_attempt, worker_loss_streaks,
     },
     status::{
-        emit_transition_effects, update_derivation_build_status, update_evaluation_status,
+        EvaluationFailure, EvaluationWarning, emit_transition_effects,
+        update_derivation_build_status, update_evaluation_status,
         update_evaluation_status_with_error,
     },
 };
@@ -318,8 +319,7 @@ async fn eval_failed(
             ctx,
             eval,
             EvaluationStatus::Failed,
-            error.to_owned(),
-            Some("worker".to_string()),
+            &EvaluationFailure::ReportedByWorker(error),
         )
         .await?;
     }
@@ -491,24 +491,16 @@ async fn report_missing_artefacts(
 
     for evaluation in &active {
         for product in missing {
-            gradient_db::status::record_evaluation_message(
-                ctx,
-                evaluation.id,
-                MessageLevel::Warning,
-                missing_artefact_message(product),
-                Some("builder".to_owned()),
-            )
+            EvaluationWarning::ArtefactMissing {
+                path: &product.path,
+                file_type: &product.file_type,
+                subtype: &product.subtype,
+            }
+            .report(&ctx.worker_db, evaluation.id)
             .await;
         }
     }
     Ok(())
-}
-
-fn missing_artefact_message(product: &BuildProduct) -> String {
-    format!(
-        "artefact {} ({} {}) is declared in hydra-build-products but missing from the build output",
-        product.path, product.file_type, product.subtype
-    )
 }
 
 async fn build_completed(
@@ -1003,17 +995,13 @@ async fn exhaust_substitution(
             &[shared_build.derivation],
         )
         .await?;
+        let store_path = drv.store_path();
         for job in jobs.values().flatten() {
-            gradient_db::status::insert_evaluation_message(
-                db,
-                job.evaluation,
-                MessageLevel::Warning,
-                format!(
-                    "substitution of {} exhausted after {misses} misses; it will be built",
-                    drv.store_path()
-                ),
-                Some("scheduler".to_owned()),
-            )
+            EvaluationWarning::SubstitutionExhausted {
+                store_path: &store_path,
+                misses,
+            }
+            .insert(db, job.evaluation)
             .await?;
         }
     }
