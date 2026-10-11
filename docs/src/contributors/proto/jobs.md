@@ -139,12 +139,17 @@ Build jobs hold exactly 1 `BuildSpec`, meaning a shared build (`derivation_build
 | `Canceled` | Stopped by the worker. Re-queued without using an attempt, see [Worker Stop](#worker-stop) |
 
 - **InputsUnavailable:** An input listed by the cache was missing. Causes are an uncached path, `404`/`410` on the URL, `NarUnavailable` or a NAR hash mismatch.
-    - The server can delete the stale cache row and object, reset the producing build and retry.
+    - The server can delete the outdated cache row and object, reset the producing build and retry.
     - Inputs still present but without a producer stay in place.
-    - Builds fail permanently after `build.inputsUnavailableMaxLoops` (3) loops. `InputsUnavailable` failures also use up attempts. Both limits default to 3, and attempts run out first.
+    - Builds fail permanently after `build.inputsUnavailableMaxLoops` (3) loops. `InputsUnavailable` failures also use up attempts. Attempts and loops both default to 3. Attempts run out first.
 - **DependencyFailed** can spread upward over the dependency graph from `Permanent` and `Timeout` failures, across evaluations.
-- **Eval Job Outage:** Eval jobs failing `Transient` re-queue their evaluation, up to `build.maxAttempts` (3) attempts. Abandoned dispatches stay out of this count.
+- **Eval Job Outage:** Eval jobs failing `Transient` re-queue the evaluation, up to `build.maxAttempts` (3) attempts. Abandoned dispatches stay out of this count.
     - Typical causes are a dropped server connection, or an object PUT or `CacheQuery` without an answer.
+- **Out of Memory:** Builds killed by the kernel for memory count as `Transient`, whatever kind the worker sent. The attempts close with the reason `Oom`.
+- **Not Enough Resources:** A queued build can turn `FailedPermanent` after 5 minutes without a worker able to hold the build. Such attempts close with the reason `NotEnoughResources` and without a dispatched job.
+    - The predicted peak memory of such builds, plus 10 %, is above the free memory of every connected worker able to build them.
+    - Workers with memory reserved for running jobs are large enough while the total memory can take the build.
+    - Unmeasured builds and workers without a sample stay out of this check.
 - Evaluations end `Completed`, or `Failed` with a build in `Failed`, `Aborted` or `DependencyFailed`, or with an error message present.
 
 ## Cluster Members

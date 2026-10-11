@@ -77,6 +77,8 @@ pub enum AttemptFailureReason {
     InputsUnavailable = 8,
     #[sea_orm(num_value = 9)]
     WorkerLost = 9,
+    #[sea_orm(num_value = 10)]
+    NotEnoughResources = 10,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
@@ -88,7 +90,7 @@ pub struct Model {
     /// kept with the `derivation_build` shared build until the derivation is reclaimed.
     pub build_job: Option<BuildJobId>,
     pub derivation_build: DerivationBuildId,
-    pub dispatched_job: DispatchedJobId,
+    pub dispatched_job: Option<DispatchedJobId>,
     pub substitute: bool,
     pub outcome: AttemptOutcome,
     pub reason: Option<AttemptFailureReason>,

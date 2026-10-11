@@ -266,6 +266,9 @@ pub enum SchedulerMsg {
     PendingSharedBuilds {
         reply: RpcReplyPort<Vec<DerivationBuildId>>,
     },
+    LastingRamShortages {
+        reply: RpcReplyPort<Vec<gradient_graph::RamShortage>>,
+    },
     LiftImports {
         checked: HashSet<DerivationBuildId>,
         lifted: HashSet<DerivationBuildId>,
@@ -327,6 +330,7 @@ pub struct SchedulerCore {
     idle: crate::cluster::IdleSlots,
     reservation: Option<crate::cluster::Reservation>,
     unmeasured_build_ram_mb: u64,
+    ram_shortages: crate::ram_shortage::RamShortages,
 }
 
 impl SchedulerCore {
@@ -402,6 +406,23 @@ impl SchedulerCore {
             .and_then(|a| a.as_filter())
             .cloned();
         (authorized, self.pool.worker_caps(worker))
+    }
+
+    fn lasting_ram_shortages(&mut self, now: Instant) -> Vec<gradient_graph::RamShortage> {
+        let workers: Vec<crate::jobs::BuildWorker> = self
+            .pool
+            .all_workers()
+            .into_iter()
+            .filter_map(|worker| {
+                let (authorized, caps) = self.auth_and_caps(&worker.id);
+                caps.filter(|caps| runs(caps, crate::cluster::SlotKind::Build))
+                    .map(|caps| crate::jobs::BuildWorker { authorized, caps })
+            })
+            .collect();
+        let current = self.tracker.builds_no_worker_fits(&workers);
+
+        self.ram_shortages
+            .lasting(current, now, crate::ram_shortage::RAM_SHORTAGE_GRACE)
     }
 
     fn candidates(&mut self, worker: &str, only_new: bool) -> Offer {
@@ -653,6 +674,7 @@ impl Actor for CoreActor {
             idle: Default::default(),
             reservation: None,
             unmeasured_build_ram_mb: 0,
+            ram_shortages: Default::default(),
         })
     }
 
@@ -976,6 +998,9 @@ impl Actor for CoreActor {
             SchedulerMsg::PendingSharedBuilds { reply } => {
                 let _ = reply.send(core.tracker.pending_shared_builds());
             }
+            SchedulerMsg::LastingRamShortages { reply } => {
+                let _ = reply.send(core.lasting_ram_shortages(Instant::now()));
+            }
             SchedulerMsg::LiftImports {
                 checked,
                 lifted,
@@ -1078,6 +1103,7 @@ mod tests {
             idle: Default::default(),
             reservation: None,
             unmeasured_build_ram_mb: 0,
+            ram_shortages: Default::default(),
         };
         let caps = GradientCapabilities {
             build: true,
@@ -1181,6 +1207,35 @@ mod tests {
     }
 
     #[test]
+    fn a_build_above_the_free_ram_of_an_idle_fleet_is_short_once_the_grace_passed() {
+        let mut core = core_with_a_128_gb_worker();
+        let large = pending_heavy_build(&mut core, 113_218);
+        let start = Instant::now();
+        let grace = crate::ram_shortage::RAM_SHORTAGE_GRACE;
+
+        assert!(core.lasting_ram_shortages(start).is_empty());
+        let lasting = core.lasting_ram_shortages(start + grace);
+
+        assert_eq!(lasting.len(), 1, "{lasting:?}");
+        assert_eq!(crate::jobs::build_job_key(lasting[0].shared_build), large);
+        assert_eq!(lasting[0].largest_available_mb, 118_000);
+    }
+
+    #[test]
+    fn a_large_build_is_not_short_while_the_worker_holds_ram_it_will_release() {
+        let mut core = core_with_a_128_gb_worker();
+        pending_heavy_build(&mut core, 113_218);
+        let small = pending_heavy_build(&mut core, 10_000);
+        assert_eq!(assigned_build(&mut core, "w1"), Some(small));
+        let start = Instant::now();
+        let grace = crate::ram_shortage::RAM_SHORTAGE_GRACE;
+
+        core.lasting_ram_shortages(start);
+
+        assert!(core.lasting_ram_shortages(start + grace).is_empty());
+    }
+
+    #[test]
     fn a_build_lost_with_its_worker_is_requeued_with_its_observed_peak() {
         let mut core = core_with_a_128_gb_worker();
         let build = pending_heavy_build(&mut core, 2_000);
@@ -1208,6 +1263,7 @@ mod tests {
             idle: Default::default(),
             reservation: None,
             unmeasured_build_ram_mb: 0,
+            ram_shortages: Default::default(),
         };
         core.pool
             .register("w1".into(), eval_worker_caps(), HashSet::new(), port().0);

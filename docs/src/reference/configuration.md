@@ -408,21 +408,21 @@ Declarative entities under `services.gradient.state` are in the [state reference
 | `worker.system.architectures` | list of string | derived | `GRADIENT_WORKER_SYSTEM_ARCHITECTURES` | Nix system types this worker is building for. |
 | `worker.system.cpuCoreScore` | null or (int) | `null` | `GRADIENT_WORKER_SYSTEM_CPU_CORE_SCORE` | Single-core speed score advertised to the scheduler, higher is faster. |
 | `worker.system.features` | list of string | `[ ]` | `GRADIENT_WORKER_SYSTEM_FEATURES` | Nix system features this worker is advertising. |
-| `worker.system.minFreeRamMb` | int | `0` | `GRADIENT_WORKER_SYSTEM_MIN_FREE_RAM_MB` | Free memory in MiB below which the worker is killing the one evaluation subprocess large enough to restore the margin. The worker is reporting that evaluation as failed instead of letting the host freeze. |
+| `worker.system.minFreeRamMb` | int | `0` | `GRADIENT_WORKER_SYSTEM_MIN_FREE_RAM_MB` | Free memory in MiB below which the worker is killing the single evaluation subprocess large enough to restore the margin. The worker is reporting that evaluation as failed instead of letting the host freeze. |
 
 ## Build Failures
 
 | Status | Retried | Cause |
 |---|---|---|
-| `FailedPermanent` | No | The builder exited non-zero |
+| `FailedPermanent` | No | The builder exited non-zero, or no connected worker had enough free memory |
 | `FailedTransient` | Yes, `build.maxAttempts` times with a doubling `build.retryBackoffSecs` | Out of memory, full disk, network or substitution failure, builder crash |
 | `FailedTimeout` | No | `build.defaultTimeoutSecs` or `build.defaultMaxSilentSecs` exceeded |
 
-The derivation attributes `timeout`, `maxSilent` and `preferLocalBuild` will override the server defaults. `meta.*` attributes are never reaching the `.drv` and have no effect here.
+`timeout`, `maxSilent` and `preferLocalBuild` on a derivation override the server defaults. `meta.*` attributes never reach the `.drv` and have no effect here.
 
 ## Local Worker
 
-`localWorker` will register the worker of the same host without manual steps if `worker.enable` is set.
+`localWorker` and `worker.enable` together register the worker of the same host without manual steps.
 
 - A stable worker ID derived from the host name.
 - A token generated on first start in `/var/lib/gradient-worker/local-token`. A deletion of the file and a restart of both services will rotate the token.

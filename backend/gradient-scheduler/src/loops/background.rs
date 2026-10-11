@@ -277,6 +277,33 @@ pub(super) async fn eval_completion_watchdog_pass(scheduler: Arc<Scheduler>) -> 
     Ok(())
 }
 
+pub(super) async fn ram_shortage_pass(scheduler: Arc<Scheduler>) -> anyhow::Result<()> {
+    if scheduler
+        .draining
+        .load(std::sync::atomic::Ordering::Relaxed)
+    {
+        return Ok(());
+    }
+
+    let shortages = scheduler.lasting_ram_shortages().await;
+    if shortages.is_empty() {
+        return Ok(());
+    }
+
+    warn!(
+        shared_builds = shortages.len(),
+        grace_secs = crate::ram_shortage::RAM_SHORTAGE_GRACE.as_secs(),
+        "queued builds need more RAM than any connected worker has free - failing them"
+    );
+    scheduler
+        .state
+        .graph
+        .transition(Transition::NotEnoughResources { shortages })
+        .await?;
+    scheduler.kick_assigner();
+    Ok(())
+}
+
 fn plan_stranded_requeue(
     stranded: &[DerivationBuildId],
     untracked: &HashSet<String>,

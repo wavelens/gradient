@@ -88,19 +88,42 @@ pub(crate) fn terminal_success_outcome(outputs_already_valid: bool) -> AttemptOu
     }
 }
 
-/// A `Requeue` and its closing `Exhausted` are always recording `SubstituteUnavailable`.
-/// The miss budget is counting exactly those rows and is the only stop for the re-queue loop.
-/// A `None` reason, as a bare `Transient` would give, is requeuing forever.
+/// A `Requeue` and its closing `Exhausted` always have the reason `SubstituteUnavailable`.
+/// Only those rows count against the miss budget, the single stop of the re-queue loop.
 pub(crate) fn attempt_reason_for(
     kind: BuildFailureKind,
     outcome: FailureOutcome,
+    out_of_memory: bool,
 ) -> Option<AttemptFailureReason> {
     match outcome {
         FailureOutcome::Requeue | FailureOutcome::Exhausted => {
             Some(AttemptFailureReason::SubstituteUnavailable)
         }
+        _ if out_of_memory => Some(AttemptFailureReason::Oom),
         _ => attempt_reason(kind),
     }
+}
+
+pub(crate) fn out_of_memory(kind: BuildFailureKind, metrics: Option<&BuildMetrics>) -> bool {
+    matches!(
+        kind,
+        BuildFailureKind::Permanent | BuildFailureKind::Transient
+    ) && metrics.is_some_and(|m| m.oom_killed)
+}
+
+pub(crate) const fn retried_as(kind: BuildFailureKind, out_of_memory: bool) -> BuildFailureKind {
+    if out_of_memory {
+        BuildFailureKind::Transient
+    } else {
+        kind
+    }
+}
+
+pub(crate) fn not_enough_resources_message(needed_mb: u64, largest_available_mb: u64) -> String {
+    format!(
+        "no connected worker has enough memory for this build: it needs {needed_mb} MB and the \
+         most any worker able to build it has free is {largest_available_mb} MB"
+    )
 }
 
 pub(crate) fn attempt_reason(kind: BuildFailureKind) -> Option<AttemptFailureReason> {
@@ -208,9 +231,9 @@ mod tests {
     use super::{
         BuildEnd, FailureOutcome, Substitution, attempt_outcome, attempt_reason,
         attempt_reason_for, decide_failure_outcome, failure_log_entry, history_sample,
-        inputs_unavailable_circuit_open, retry_backoff_elapsed, retry_failed_eval,
-        spends_substitute_budget, terminal_success_outcome, terminal_success_status,
-        truncate_failure_message,
+        inputs_unavailable_circuit_open, not_enough_resources_message, out_of_memory, retried_as,
+        retry_backoff_elapsed, retry_failed_eval, spends_substitute_budget,
+        terminal_success_outcome, terminal_success_status, truncate_failure_message,
     };
     use gradient_entity::build::BuildStatus;
     use gradient_entity::build_attempt::{AttemptFailureReason, AttemptOutcome};
@@ -277,7 +300,7 @@ mod tests {
         }
         assert!(!spends_substitute_budget(BuildFailureKind::Canceled));
         assert_eq!(
-            attempt_reason_for(BuildFailureKind::Canceled, FailureOutcome::Canceled),
+            attempt_reason_for(BuildFailureKind::Canceled, FailureOutcome::Canceled, false),
             None,
             "no reason, so the attempt counts as no substitution miss"
         );
@@ -312,6 +335,80 @@ mod tests {
                 "{kind:?} must not poison the shared build as a deterministic failure"
             );
         }
+    }
+
+    #[test]
+    fn a_build_the_kernel_killed_for_memory_ran_out_of_memory_whatever_the_worker_reported() {
+        let killed = BuildMetrics {
+            oom_killed: true,
+            ..Default::default()
+        };
+        for kind in [BuildFailureKind::Permanent, BuildFailureKind::Transient] {
+            assert!(out_of_memory(kind, Some(&killed)), "{kind:?}");
+            assert!(
+                !out_of_memory(kind, Some(&BuildMetrics::default())),
+                "{kind:?}"
+            );
+            assert!(!out_of_memory(kind, None), "{kind:?}");
+        }
+        for kind in [
+            BuildFailureKind::Timeout,
+            BuildFailureKind::Aborted,
+            BuildFailureKind::Canceled,
+            BuildFailureKind::SubstituteUnavailable,
+            BuildFailureKind::InputsUnavailable,
+            BuildFailureKind::CorruptEvalCache,
+        ] {
+            assert!(
+                !out_of_memory(kind, Some(&killed)),
+                "{kind:?} keeps its own verdict"
+            );
+        }
+    }
+
+    #[test]
+    fn an_out_of_memory_kill_is_retried_until_the_attempt_budget_is_spent() {
+        let kind = retried_as(BuildFailureKind::Permanent, true);
+        for (attempt, outcome) in [
+            (0, FailureOutcome::Retry),
+            (1, FailureOutcome::Retry),
+            (2, FailureOutcome::Permanent),
+        ] {
+            assert_eq!(
+                decide_failure_outcome(kind, attempt, 3, sub(false, 0)),
+                outcome,
+                "attempt {attempt}"
+            );
+            assert_eq!(
+                attempt_reason_for(kind, outcome, true),
+                Some(AttemptFailureReason::Oom),
+                "attempt {attempt}"
+            );
+        }
+        assert_eq!(
+            retried_as(BuildFailureKind::Permanent, false),
+            BuildFailureKind::Permanent,
+            "a builder exit with enough memory stays a verdict on the derivation"
+        );
+    }
+
+    #[test]
+    fn an_out_of_memory_substitution_still_counts_as_a_substitution_miss() {
+        let kind = retried_as(BuildFailureKind::Transient, true);
+        for outcome in [FailureOutcome::Requeue, FailureOutcome::Exhausted] {
+            assert_eq!(
+                attempt_reason_for(kind, outcome, true),
+                Some(AttemptFailureReason::SubstituteUnavailable),
+                "{outcome:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_shortage_message_names_the_need_and_the_largest_free_memory() {
+        let message = not_enough_resources_message(124_540, 102_754);
+        assert!(message.contains("124540 MB"), "{message}");
+        assert!(message.contains("102754 MB"), "{message}");
     }
 
     #[test]
@@ -539,14 +636,18 @@ mod tests {
         ] {
             for outcome in [FailureOutcome::Requeue, FailureOutcome::Exhausted] {
                 assert_eq!(
-                    attempt_reason_for(kind, outcome),
+                    attempt_reason_for(kind, outcome, false),
                     Some(AttemptFailureReason::SubstituteUnavailable),
                     "{kind:?} as {outcome:?} recorded no counted reason"
                 );
             }
         }
         assert_eq!(
-            attempt_reason_for(BuildFailureKind::Permanent, FailureOutcome::Permanent),
+            attempt_reason_for(
+                BuildFailureKind::Permanent,
+                FailureOutcome::Permanent,
+                false
+            ),
             attempt_reason(BuildFailureKind::Permanent)
         );
     }

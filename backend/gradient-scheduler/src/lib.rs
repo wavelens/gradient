@@ -24,6 +24,7 @@ pub mod waiting_state;
 mod assign_mode;
 mod eval_metrics;
 mod job_handlers;
+mod ram_shortage;
 pub(crate) mod trigger_firing;
 mod unbuildable;
 mod worker_lifecycle;
@@ -264,6 +265,12 @@ impl Scheduler {
             .into_iter()
             .filter(|key| self.attempt_of(key).is_none())
             .collect()
+    }
+
+    pub(crate) async fn lasting_ram_shortages(&self) -> Vec<gradient_graph::RamShortage> {
+        self.call(|reply| SchedulerMsg::LastingRamShortages { reply })
+            .await
+            .unwrap_or_default()
     }
 
     pub(crate) async fn prune_pending_builds(

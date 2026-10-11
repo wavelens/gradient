@@ -15465,7 +15465,11 @@ components:
       type: object
       description: Summary of a single build attempt.
       properties:
-        dispatched_job_id: { type: string, format: uuid }
+        dispatched_job_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: Null for an attempt that failed before any worker took the build.
         substitute: { type: boolean }
         outcome: { type: integer }
         reason: { type: integer, nullable: true }

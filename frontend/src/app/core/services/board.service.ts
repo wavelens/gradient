@@ -183,7 +183,7 @@ export interface AssignedJobDetail extends Omit<AssignedJobSummary, 'subject'> {
   instance_context: InstanceContextView | null;
   candidates: unknown | null;
   previous_attempts: {
-    dispatched_job_id: string;
+    dispatched_job_id: string | null;
     substitute: boolean;
     outcome: number;
     reason: number | null;

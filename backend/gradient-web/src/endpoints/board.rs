@@ -134,7 +134,7 @@ pub async fn get_dispatched_jobs(
         .all(&state.web_db)
         .await?
         .into_iter()
-        .map(|a| (a.dispatched_job, a))
+        .filter_map(|a| Some((a.dispatched_job?, a)))
         .collect();
 
     let shared_builds: Vec<DerivationBuildId> =
@@ -256,7 +256,7 @@ pub async fn get_assign_decisions(
 
 #[derive(Serialize)]
 pub struct AttemptSummary {
-    pub dispatched_job_id: Uuid,
+    pub dispatched_job_id: Option<Uuid>,
     pub substitute: bool,
     pub outcome: i32,
     pub reason: Option<i32>,
@@ -552,7 +552,7 @@ pub async fn get_dispatched_job(
             .unwrap_or_default()
             .into_iter()
             .map(|a| AttemptSummary {
-                dispatched_job_id: a.dispatched_job.into(),
+                dispatched_job_id: a.dispatched_job.map(Into::into),
                 substitute: a.substitute,
                 outcome: i32::from(a.outcome),
                 reason: a.reason.map(i32::from),

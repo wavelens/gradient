@@ -258,16 +258,17 @@ interface RuleRow {
           <gr-table class="rules">
             <thead><tr><th>#</th><th>Mode</th><th>Outcome</th><th>Reason</th><th>When</th><th></th></tr></thead>
             <tbody>
-              @for (a of j.previous_attempts; track a.dispatched_job_id; let i = $index) {
+              @for (a of j.previous_attempts; track a.created_at; let i = $index) {
                 @let current = a.dispatched_job_id === j.id;
-                <tr [class.clickable]="!current" [class.current]="current"
-                    [routerLink]="current ? null : ['/board/jobs', a.dispatched_job_id]">
+                @let opens = !current && a.dispatched_job_id !== null;
+                <tr [class.clickable]="opens" [class.current]="current"
+                    [routerLink]="opens ? ['/board/jobs', a.dispatched_job_id] : null">
                   <td>{{ i + 1 }}</td>
                   <td>{{ a.substitute ? 'substitute' : 'build' }}</td>
                   <td class="mono">{{ attemptOutcome(a.outcome) }}</td>
                   <td class="mono reason" [title]="a.failure_message ?? ''">{{ a.failure_message ?? '-' }}</td>
                   <td>{{ a.created_at | date: 'medium' }}</td>
-                  <td>{{ current ? '' : '\u203a' }}</td>
+                  <td>{{ opens ? '\u203a' : '' }}</td>
                 </tr>
               }
             </tbody>
