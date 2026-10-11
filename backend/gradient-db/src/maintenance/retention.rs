@@ -12,7 +12,7 @@ use std::time::Duration;
 use chrono::NaiveDateTime;
 use gradient_entity::cluster_job::ClusterJobStatus;
 use gradient_entity::metric_rollup::RollupGranularity;
-use gradient_util::supervision::ChildSpec;
+use gradient_util::supervision::{Pass, PassError, RunsOn};
 use sea_orm::{ConnectionTrait, DbErr};
 use tracing::{debug, warn};
 
@@ -161,19 +161,29 @@ static HISTORIES: &[&Query] = &[
 
 static ROLLUPS: &[&Query] = &[&PRUNE_METRIC_ROLLUP];
 
-pub fn child_spec(ctx: DbContext) -> ChildSpec {
-    ChildSpec::periodic(
-        "retention",
-        Duration::from_secs(RETENTION_INTERVAL_SECS),
-        Duration::from_secs(600),
-        move || {
-            let ctx = ctx.clone();
-            async move {
-                run_retention(&ctx, gradient_types::now()).await;
-                Ok(())
-            }
-        },
-    )
+pub struct Retention {
+    ctx: DbContext,
+}
+
+impl Retention {
+    pub fn new(ctx: DbContext) -> Self {
+        Self { ctx }
+    }
+}
+
+impl Pass for Retention {
+    const NAME: &'static str = "retention";
+    const RUNS_ON: RunsOn = RunsOn::SingleInstance;
+    const BUDGET: Duration = Duration::from_secs(600);
+
+    fn period(&self) -> Duration {
+        Duration::from_secs(RETENTION_INTERVAL_SECS)
+    }
+
+    async fn run(&self) -> Result<(), PassError> {
+        run_retention(&self.ctx, gradient_types::now()).await;
+        Ok(())
+    }
 }
 
 async fn run_retention(ctx: &DbContext, now: NaiveDateTime) {

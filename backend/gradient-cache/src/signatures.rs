@@ -8,12 +8,14 @@ use gradient_core::ServerState;
 use gradient_sources::CacheSigner;
 use gradient_types::*;
 use gradient_util::nix_hash::normalize_nar_hash;
+use gradient_util::supervision::{Pass, PassError, RunsOn};
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, IntoActiveModel, QueryFilter,
     QuerySelect, Set,
 };
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
+use std::time::Duration;
 use tracing::{debug, warn};
 
 const SIGN_SWEEP_BATCH: u64 = 1000;
@@ -63,6 +65,27 @@ async fn repair_orphan_claims(state: &Arc<ServerState>) -> anyhow::Result<()> {
         );
     }
     Ok(())
+}
+
+pub(crate) struct SignSweep {
+    pub(crate) state: Arc<ServerState>,
+    pub(crate) period: Duration,
+}
+
+impl Pass for SignSweep {
+    const NAME: &'static str = "sign-sweep";
+    const RUNS_ON: RunsOn = RunsOn::SingleInstance;
+    const BUDGET: Duration = Duration::from_secs(300);
+
+    fn period(&self) -> Duration {
+        self.period
+    }
+
+    async fn run(&self) -> Result<(), PassError> {
+        sign_missing_signatures(Arc::clone(&self.state))
+            .await
+            .map_err(Into::into)
+    }
 }
 
 pub async fn sign_missing_signatures(state: Arc<ServerState>) -> anyhow::Result<()> {

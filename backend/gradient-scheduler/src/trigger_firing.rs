@@ -4,6 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use std::sync::Arc;
+use std::time::Duration;
+
 use chrono::{NaiveDateTime, Utc};
 
 use gradient_types::TaskTriggerId;
@@ -72,11 +75,30 @@ use gradient_entity::task_trigger as ept;
 use gradient_sources::{check_task_updates, get_commit_info};
 use gradient_types::triggers::{TriggerConfig, TriggerType};
 use gradient_types::*;
+use gradient_util::supervision::{Pass, PassError, RunsOn};
 use sea_orm::sea_query::Expr;
 use sea_orm::{ColumnTrait, Condition, EntityTrait, QueryFilter, QueryOrder};
 use tracing::{debug, error, info, warn};
 
 use super::Scheduler;
+
+pub(crate) struct TriggerDispatch {
+    pub(crate) scheduler: Arc<Scheduler>,
+}
+
+impl Pass for TriggerDispatch {
+    const NAME: &'static str = "trigger-dispatch";
+    const RUNS_ON: RunsOn = RunsOn::EveryInstance;
+    const BUDGET: Duration = crate::loops::ASSIGN_BUDGET;
+
+    fn period(&self) -> Duration {
+        crate::loops::ASSIGN_TICK
+    }
+
+    async fn run(&self) -> Result<(), PassError> {
+        fire_once(&self.scheduler).await.map_err(Into::into)
+    }
+}
 
 pub(crate) async fn fire_once(scheduler: &Scheduler) -> anyhow::Result<()> {
     let state = &scheduler.state;

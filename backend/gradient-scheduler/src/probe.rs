@@ -16,42 +16,56 @@ use anyhow::{Context, Result};
 use gradient_core::ServerState;
 use gradient_entity::StorePath;
 use gradient_types::*;
-use gradient_util::supervision::ChildSpec;
+use gradient_util::supervision::{Pass, PassError, RunsOn};
 use sea_orm::{ColumnTrait, EntityTrait, JoinType, QueryFilter, QuerySelect, RelationTrait};
-use tokio::sync::Mutex;
 use tokio::sync::mpsc::UnboundedReceiver;
+use tokio::sync::{Mutex, Notify};
 use tracing::debug;
 
-pub const HEALTH_NAME: &str = "upstream-probe";
-const PROBE_TICK: Duration = Duration::from_secs(1);
-const PROBE_BUDGET: Duration = Duration::from_secs(120);
 const PROBE_BATCH: usize = 256;
 
 const PROBE_SWEEP: Duration = Duration::from_secs(60);
 const PROBE_DESCENT: Duration = Duration::from_secs(60);
 
-pub fn child_spec(state: &Arc<ServerState>) -> ChildSpec {
-    let inbox = Arc::new(Mutex::new(state.probe_requests.take_inbox()));
-    let swept = Arc::new(Mutex::new(Instant::now()));
-    let wake = state.probe_requests.wake();
-    let state = Arc::clone(state);
-    ChildSpec::periodic_woken(HEALTH_NAME, PROBE_TICK, PROBE_BUDGET, wake, move || {
-        let state = Arc::clone(&state);
-        let inbox = Arc::clone(&inbox);
-        let swept = Arc::clone(&swept);
-        async move {
-            probe_pass(&state, &inbox, &swept)
-                .await
-                .map_err(|e| gradient_util::supervision::PassError::from(e.to_string()))
-        }
-    })
+type Inbox = Mutex<Option<UnboundedReceiver<Vec<DerivationId>>>>;
+
+pub(crate) struct UpstreamProbe {
+    state: Arc<ServerState>,
+    inbox: Inbox,
+    swept: Mutex<Instant>,
 }
 
-async fn probe_pass(
-    state: &Arc<ServerState>,
-    inbox: &Mutex<Option<UnboundedReceiver<Vec<DerivationId>>>>,
-    swept: &Mutex<Instant>,
-) -> Result<()> {
+impl UpstreamProbe {
+    pub(crate) fn new(state: &Arc<ServerState>) -> Self {
+        Self {
+            state: Arc::clone(state),
+            inbox: Mutex::new(state.probe_requests.take_inbox()),
+            swept: Mutex::new(Instant::now()),
+        }
+    }
+}
+
+impl Pass for UpstreamProbe {
+    const NAME: &'static str = "upstream-probe";
+    const RUNS_ON: RunsOn = RunsOn::EveryInstance;
+    const BUDGET: Duration = Duration::from_secs(120);
+
+    fn period(&self) -> Duration {
+        Duration::from_secs(1)
+    }
+
+    fn wake(&self) -> Option<Arc<Notify>> {
+        Some(self.state.probe_requests.wake())
+    }
+
+    async fn run(&self) -> Result<(), PassError> {
+        probe_pass(&self.state, &self.inbox, &self.swept)
+            .await
+            .map_err(|e| PassError::from(e.to_string()))
+    }
+}
+
+async fn probe_pass(state: &Arc<ServerState>, inbox: &Inbox, swept: &Mutex<Instant>) -> Result<()> {
     let started = Instant::now();
     let mut requested = drain_requests(inbox).await;
     if requested.is_empty() && sweep_due(swept).await {
@@ -105,9 +119,7 @@ async fn probe_round(state: &Arc<ServerState>, shared_builds: Vec<DerivationId>)
         .context("record the shared builds this round answered for")
 }
 
-async fn drain_requests(
-    inbox: &Mutex<Option<UnboundedReceiver<Vec<DerivationId>>>>,
-) -> HashSet<DerivationId> {
+async fn drain_requests(inbox: &Inbox) -> HashSet<DerivationId> {
     let mut requested: HashSet<DerivationId> = HashSet::new();
     if let Some(rx) = inbox.lock().await.as_mut() {
         while let Ok(batch) = rx.try_recv() {

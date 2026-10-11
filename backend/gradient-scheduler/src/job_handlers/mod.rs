@@ -13,3 +13,5 @@ mod import;
 mod priority;
 mod queue;
 pub(crate) mod timeline;
+
+pub(crate) use cluster::ClusterDispatch;

@@ -34,11 +34,36 @@ const STOP_TIMEOUT: Duration = Duration::from_secs(25);
 /// during a pass is starting another one right after it.
 #[derive(Clone)]
 pub struct PeriodicSpec {
-    pub name: &'static str,
-    pub period: Duration,
-    pub budget: Duration,
-    pub run: PassFn,
-    pub wake: Option<Arc<Notify>>,
+    pub(crate) name: &'static str,
+    pub(crate) period: Duration,
+    pub(crate) budget: Duration,
+    pub(crate) run: PassFn,
+    pub(crate) wake: Option<Arc<Notify>>,
+    #[expect(
+        dead_code,
+        reason = "declared now, read once the supervisor places passes"
+    )]
+    pub(crate) runs_on: RunsOn,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RunsOn {
+    EveryInstance,
+    SingleInstance,
+}
+
+pub trait Pass: Send + Sync + 'static {
+    const NAME: &'static str;
+    const RUNS_ON: RunsOn;
+    const BUDGET: Duration;
+
+    fn period(&self) -> Duration;
+
+    fn wake(&self) -> Option<Arc<Notify>> {
+        None
+    }
+
+    fn run(&self) -> impl Future<Output = Result<(), PassError>> + Send;
 }
 
 #[derive(Clone)]
@@ -57,37 +82,18 @@ pub enum ChildSpec {
 }
 
 impl ChildSpec {
-    pub fn periodic<F, Fut>(name: &'static str, period: Duration, budget: Duration, run: F) -> Self
-    where
-        F: Fn() -> Fut + Send + Sync + 'static,
-        Fut: Future<Output = Result<(), PassError>> + Send + 'static,
-    {
+    pub fn pass<P: Pass>(pass: P) -> Self {
+        let pass = Arc::new(pass);
         Self::Periodic(PeriodicSpec {
-            name,
-            period,
-            budget,
-            run: Arc::new(move || Box::pin(run())),
-            wake: None,
-        })
-    }
-
-    pub fn periodic_woken<F, Fut>(
-        name: &'static str,
-        period: Duration,
-        budget: Duration,
-        wake: Arc<Notify>,
-        run: F,
-    ) -> Self
-    where
-        F: Fn() -> Fut + Send + Sync + 'static,
-        Fut: Future<Output = Result<(), PassError>> + Send + 'static,
-    {
-        Self::Periodic(PeriodicSpec {
-            name,
-            period,
-            budget,
-            run: Arc::new(move || Box::pin(run())),
-            wake: Some(wake),
+            name: P::NAME,
+            period: pass.period(),
+            budget: P::BUDGET,
+            wake: pass.wake(),
+            runs_on: P::RUNS_ON,
+            run: Arc::new(move || {
+                let pass = Arc::clone(&pass);
+                Box::pin(async move { pass.run().await })
+            }),
         })
     }
 
@@ -506,22 +512,52 @@ mod tests {
     use crate::shutdown::Shutdown;
     use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 
+    struct Counting {
+        calls: Arc<AtomicU32>,
+        panic_on: Option<u32>,
+    }
+
+    impl Pass for Counting {
+        const NAME: &'static str = "t";
+        const RUNS_ON: RunsOn = RunsOn::EveryInstance;
+        const BUDGET: Duration = Duration::from_millis(50);
+
+        fn period(&self) -> Duration {
+            Duration::from_millis(10)
+        }
+
+        async fn run(&self) -> Result<(), PassError> {
+            let n = self.calls.fetch_add(1, Ordering::SeqCst) + 1;
+            if self.panic_on == Some(n) {
+                panic!("boom on call {n}");
+            }
+            Ok(())
+        }
+    }
+
     fn counting_pass(calls: Arc<AtomicU32>, panic_on: Option<u32>) -> ChildSpec {
-        ChildSpec::periodic(
-            "t",
-            Duration::from_millis(10),
-            Duration::from_millis(50),
-            move || {
-                let calls = Arc::clone(&calls);
-                async move {
-                    let n = calls.fetch_add(1, Ordering::SeqCst) + 1;
-                    if panic_on == Some(n) {
-                        panic!("boom on call {n}");
-                    }
-                    Ok(())
-                }
-            },
-        )
+        ChildSpec::pass(Counting { calls, panic_on })
+    }
+
+    fn spec<F, Fut>(
+        name: &'static str,
+        period: Duration,
+        budget: Duration,
+        wake: Option<Arc<Notify>>,
+        run: F,
+    ) -> ChildSpec
+    where
+        F: Fn() -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = Result<(), PassError>> + Send + 'static,
+    {
+        ChildSpec::Periodic(PeriodicSpec {
+            name,
+            period,
+            budget,
+            run: Arc::new(move || Box::pin(run())),
+            wake,
+            runs_on: RunsOn::EveryInstance,
+        })
     }
 
     #[tokio::test]
@@ -550,11 +586,11 @@ mod tests {
         let wake = Arc::new(Notify::new());
         let counted = Arc::clone(&calls);
         shutdown
-            .supervise_now(ChildSpec::periodic_woken(
+            .supervise_now(spec(
                 "woken",
                 Duration::from_secs(3600),
                 Duration::from_secs(60),
-                Arc::clone(&wake),
+                Some(Arc::clone(&wake)),
                 move || {
                     let calls = Arc::clone(&counted);
                     async move {
@@ -577,10 +613,11 @@ mod tests {
     #[tokio::test]
     async fn a_child_is_listed_in_health_before_its_first_pass() {
         let shutdown = Shutdown::new();
-        let spec = ChildSpec::periodic(
+        let spec = spec(
             "hourly",
             Duration::from_secs(3600),
             Duration::from_secs(60),
+            None,
             || async { Ok(()) },
         );
         shutdown.supervise_now(spec).await.expect("supervise");
@@ -626,10 +663,11 @@ mod tests {
     #[tokio::test]
     async fn a_pass_past_its_budget_is_cancelled_and_counted() {
         let shutdown = Shutdown::new();
-        let spec = ChildSpec::periodic(
+        let spec = spec(
             "slow",
             Duration::from_millis(10),
             Duration::from_millis(20),
+            None,
             || async {
                 tokio::time::sleep(Duration::from_secs(5)).await;
                 Ok(())

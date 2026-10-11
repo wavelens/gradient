@@ -7,20 +7,47 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
+use std::time::Duration;
 
 use gradient_core::ServerState;
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_types::input::vec_to_hex;
 use gradient_types::wildcard::Wildcard;
 use gradient_types::*;
+use gradient_util::supervision::{Pass, PassError, RunsOn};
 use sea_orm::sea_query::Expr;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 
+use tokio::sync::Notify;
 use tracing::{debug, error};
 
 use crate::Scheduler;
 use crate::jobs::PendingEvalJob;
 use gradient_wire::types::{FlakeJob, FlakeStep, RequiredPath};
+
+pub(crate) struct EvalDispatch {
+    pub(crate) scheduler: Arc<Scheduler>,
+}
+
+impl Pass for EvalDispatch {
+    const NAME: &'static str = "eval-dispatch";
+    const RUNS_ON: RunsOn = RunsOn::EveryInstance;
+    const BUDGET: Duration = super::ASSIGN_BUDGET;
+
+    fn period(&self) -> Duration {
+        super::ASSIGN_TICK
+    }
+
+    fn wake(&self) -> Option<Arc<Notify>> {
+        Some(Arc::clone(&self.scheduler.state.eval_assign_wake))
+    }
+
+    async fn run(&self) -> Result<(), PassError> {
+        assign_queued_evals(&self.scheduler)
+            .await
+            .map_err(Into::into)
+    }
+}
 
 #[tracing::instrument(level = "debug", skip_all)]
 pub(crate) async fn assign_queued_evals(scheduler: &Scheduler) -> anyhow::Result<()> {

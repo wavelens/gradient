@@ -9,7 +9,7 @@
 use std::time::Duration;
 
 use chrono::DateTime;
-use gradient_util::supervision::ChildSpec;
+use gradient_util::supervision::{Pass, PassError, RunsOn};
 use gradient_util::telemetry::{Agg, GAUGES, Gauges, Key, MinuteStats, STATS, metric};
 use sea_orm::{ConnectionTrait, Statement};
 use tracing::warn;
@@ -27,22 +27,31 @@ pub async fn flush(ctx: &DbContext, stats: &MinuteStats, gauges: &Gauges) {
     }
 }
 
-pub fn child_spec(ctx: DbContext) -> ChildSpec {
-    let secs = ctx.config.metrics_args.cache_flush_interval_secs.get();
+pub struct InfraMetricFlush {
+    ctx: DbContext,
+    period: Duration,
+}
 
-    ChildSpec::periodic(
-        "infra_metric_flush",
-        Duration::from_secs(secs),
-        Duration::from_secs(60),
-        move || {
-            let ctx = ctx.clone();
+impl InfraMetricFlush {
+    pub fn new(ctx: DbContext) -> Self {
+        let period = Duration::from_secs(ctx.config.metrics_args.cache_flush_interval_secs.get());
+        Self { ctx, period }
+    }
+}
 
-            async move {
-                flush(&ctx, &STATS, &GAUGES).await;
-                Ok(())
-            }
-        },
-    )
+impl Pass for InfraMetricFlush {
+    const NAME: &'static str = "infra_metric_flush";
+    const RUNS_ON: RunsOn = RunsOn::EveryInstance;
+    const BUDGET: Duration = Duration::from_secs(60);
+
+    fn period(&self) -> Duration {
+        self.period
+    }
+
+    async fn run(&self) -> Result<(), PassError> {
+        flush(&self.ctx, &STATS, &GAUGES).await;
+        Ok(())
+    }
 }
 
 pub fn flush_on_shutdown(ctx: DbContext) {

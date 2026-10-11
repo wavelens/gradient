@@ -7,6 +7,7 @@
 use chrono::{Duration, NaiveDateTime};
 use gradient_core::ServerState;
 use gradient_types::*;
+use gradient_util::supervision::{Pass, PassError, RunsOn};
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QuerySelect};
 use std::sync::Arc;
 use tracing::{error, info, warn};
@@ -45,6 +46,27 @@ fn select_evictions(
     }
 
     evicted
+}
+
+pub(crate) struct EvalCacheSweep {
+    pub(crate) state: Arc<ServerState>,
+    pub(crate) period: std::time::Duration,
+}
+
+impl Pass for EvalCacheSweep {
+    const NAME: &'static str = "eval-cache-sweep";
+    const RUNS_ON: RunsOn = RunsOn::SingleInstance;
+    const BUDGET: std::time::Duration = std::time::Duration::from_secs(600);
+
+    fn period(&self) -> std::time::Duration {
+        self.period
+    }
+
+    async fn run(&self) -> Result<(), PassError> {
+        evict_eval_cache(Arc::clone(&self.state))
+            .await
+            .map_err(Into::into)
+    }
 }
 
 pub async fn evict_eval_cache(state: Arc<ServerState>) -> anyhow::Result<()> {

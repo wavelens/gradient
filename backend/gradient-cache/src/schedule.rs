@@ -4,89 +4,85 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use crate::debug_index::DebugIndex;
+use crate::eval_cache::EvalCacheSweep;
+use crate::signatures::SignSweep;
 use crate::units::Step;
-use crate::{
-    blobs, debug_index, deep_gc, eval_cache, evaluations, nar, signatures, storage_migrations,
-};
-use futures::future::BoxFuture;
+use crate::{blobs, deep_gc, evaluations, nar, storage_migrations};
 use gradient_core::ServerState;
-use gradient_util::supervision::ChildSpec;
+use gradient_util::supervision::{ChildSpec, Pass, PassError, RunsOn};
 use std::fmt::Debug;
 use std::sync::Arc;
 use std::time::Duration;
 use tracing::error;
 
-struct Sweep {
-    name: &'static str,
-    interval: Duration,
-    budget: Duration,
-    run: Box<dyn Fn(Arc<ServerState>) -> BoxFuture<'static, anyhow::Result<()>> + Send + Sync>,
-}
-
-impl Sweep {
-    fn new<F, Fut>(name: &'static str, interval: Duration, budget_secs: u64, run: F) -> Self
-    where
-        F: Fn(Arc<ServerState>) -> Fut + Send + Sync + 'static,
-        Fut: std::future::Future<Output = anyhow::Result<()>> + Send + 'static,
-    {
-        Sweep {
-            name,
-            interval,
-            budget: Duration::from_secs(budget_secs),
-            run: Box::new(move |state| Box::pin(run(state))),
-        }
-    }
-}
-
-fn sweeps(state: &ServerState) -> Vec<Sweep> {
+pub(crate) fn child_specs(state: &Arc<ServerState>) -> Vec<ChildSpec> {
     let config = &state.config;
     let secs = |s: std::num::NonZeroU64| Duration::from_secs(s.get());
     vec![
-        Sweep::new(
-            "cache-maintenance",
-            secs(config.gc.interval_secs),
-            1800,
-            run_cache_maintenance,
-        ),
-        Sweep::new(
-            "storage-maintenance",
-            Duration::from_millis(config.gc.deep_pace_ms.max(1)),
-            3600,
-            run_storage_maintenance,
-        ),
-        Sweep::new(
-            "sign-sweep",
-            secs(config.cache.sign_sweep_interval_secs),
-            300,
-            signatures::sign_missing_signatures,
-        ),
-        Sweep::new(
-            "debug-index",
-            secs(config.cache.debug_index_interval_secs),
-            600,
-            debug_index::index_pending_debug_info,
-        ),
-        Sweep::new(
-            "eval-cache-sweep",
-            secs(config.eval.cache_sweep_interval_secs),
-            600,
-            eval_cache::evict_eval_cache,
-        ),
+        ChildSpec::pass(CacheMaintenance {
+            state: Arc::clone(state),
+            period: secs(config.gc.interval_secs),
+        }),
+        ChildSpec::pass(StorageMaintenance {
+            state: Arc::clone(state),
+            period: Duration::from_millis(config.gc.deep_pace_ms.max(1)),
+        }),
+        ChildSpec::pass(SignSweep {
+            state: Arc::clone(state),
+            period: secs(config.cache.sign_sweep_interval_secs),
+        }),
+        ChildSpec::pass(DebugIndex {
+            state: Arc::clone(state),
+            period: secs(config.cache.debug_index_interval_secs),
+        }),
+        ChildSpec::pass(EvalCacheSweep {
+            state: Arc::clone(state),
+            period: secs(config.eval.cache_sweep_interval_secs),
+        }),
     ]
 }
 
-pub(crate) fn child_specs(state: &Arc<ServerState>) -> Vec<ChildSpec> {
-    sweeps(state)
-        .into_iter()
-        .map(|sweep| {
-            let state = Arc::clone(state);
-            let run = sweep.run;
-            ChildSpec::periodic(sweep.name, sweep.interval, sweep.budget, move || {
-                let fut = run(Arc::clone(&state));
-                async move { fut.await.map_err(Into::into) }
-            })
-        })
-        .collect()
+struct StorageMaintenance {
+    state: Arc<ServerState>,
+    period: Duration,
+}
+
+impl Pass for StorageMaintenance {
+    const NAME: &'static str = "storage-maintenance";
+    const RUNS_ON: RunsOn = RunsOn::SingleInstance;
+    const BUDGET: Duration = Duration::from_secs(3600);
+
+    fn period(&self) -> Duration {
+        self.period
+    }
+
+    async fn run(&self) -> Result<(), PassError> {
+        run_storage_maintenance(Arc::clone(&self.state))
+            .await
+            .map_err(Into::into)
+    }
+}
+
+struct CacheMaintenance {
+    state: Arc<ServerState>,
+    period: Duration,
+}
+
+impl Pass for CacheMaintenance {
+    const NAME: &'static str = "cache-maintenance";
+    const RUNS_ON: RunsOn = RunsOn::SingleInstance;
+    const BUDGET: Duration = Duration::from_secs(1800);
+
+    fn period(&self) -> Duration {
+        self.period
+    }
+
+    async fn run(&self) -> Result<(), PassError> {
+        run_cache_maintenance(Arc::clone(&self.state))
+            .await
+            .map_err(Into::into)
+    }
 }
 
 async fn run_storage_maintenance(state: Arc<ServerState>) -> anyhow::Result<()> {
