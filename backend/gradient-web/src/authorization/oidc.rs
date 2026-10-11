@@ -458,8 +458,6 @@ async fn create_or_update_user(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     #[test]
     fn claimable_only_when_passwordless_and_unbound() {
         assert!(super::is_claimable(&None, &None));

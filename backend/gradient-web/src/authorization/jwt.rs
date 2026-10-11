@@ -263,9 +263,11 @@ mod tests {
     use axum::http::HeaderValue;
     use axum::http::header::{AUTHORIZATION, COOKIE, HeaderName};
 
+    type Case<'a> = (&'a str, &'a [(HeaderName, &'a str)], Option<&'a str>);
+
     #[test]
     fn extract_bearer_or_cookie_reads_the_presented_token() {
-        let cases: [(&str, &[(HeaderName, &str)], Option<&str>); 9] = [
+        let cases: [Case<'_>; 9] = [
             (
                 "bearer token",
                 &[(AUTHORIZATION, "Bearer abc.def.ghi")],
