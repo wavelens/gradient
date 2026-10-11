@@ -10,10 +10,16 @@ use gradient_derive::config_group;
 #[config_group("pull_requests")]
 #[derive(Args, Debug, Clone)]
 pub struct PullRequestsArgs {
-    /// Author/committer name for commits pushed by the `OpenPr` action. Leaving it unset (the
-    /// default) is letting each Git host choose. GitHub is crediting the App bot and marking the
-    /// commit verified. Gitea, Forgejo and GitLab are using the token owner.
+    /// Git author and committer name for commits of the `open_pr` action. Set it to `null` to
+    /// use the default of the Git host.
+    ///
+    /// - GitHub: the App bot, with the commit marked as verified.
+    /// - Gitea, Forgejo and GitLab: the token owner, with
+    ///   `Gradient <gradient@users.noreply.HOST>` as fallback. Grant the token the `read:user`
+    ///   or `read_user` scope for the owner lookup.
     pub commit_name: Option<String>,
-    /// Author/committer email for `OpenPr` commits. See `commit_name`.
+    /// Git author and committer email for commits of the `open_pr` action. Set it to `null` to
+    /// use the default of the Git host, as listed for
+    /// {option}`services.gradient.pullRequests.commitName`.
     pub commit_email: Option<String>,
 }

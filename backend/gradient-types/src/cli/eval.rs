@@ -12,23 +12,21 @@ pub const DEFAULT_KEEP_EVALUATIONS: i32 = 30;
 #[config_group("eval")]
 #[derive(Args, Debug, Clone)]
 pub struct EvalArgs {
-    /// Instance-wide maximum for a task's `keep_evaluations`. New tasks start at the lower of
-    /// [`DEFAULT_KEEP_EVALUATIONS`] and this. `0` is disabling the cap.
+    /// Maximum number of evaluations kept per task. It is the cap for the per-task setting, and
+    /// new tasks start at the lower of 30 and this value. Set it to `0` to disable the limit.
     #[arg(default_value_t = DEFAULT_KEEP_EVALUATIONS as usize)]
     pub max_keep: usize,
 
-    /// Total byte cap for the fleet-shared eval-cache blobs. The periodic eviction sweep is
-    /// dropping the oldest-`updated_at` rows until the surviving total is at or under this. The
-    /// default is 10 GiB.
+    /// Total size in bytes of shared eval cache blobs. Older blobs leave the cache until the
+    /// total is within this size.
     #[arg(default_value_t = 10 * 1024 * 1024 * 1024)]
     pub cache_max_total_bytes: u64,
 
-    /// Max age in days for an eval-cache blob. The sweep is evicting older blobs regardless of the
-    /// size cap. The default is 30.
+    /// Days after which eval cache blobs leave the cache, regardless of the size limit.
     #[arg(default_value_t = 30)]
     pub cache_max_age_days: u64,
 
-    /// Interval in seconds between eval-cache eviction sweeps. The default is 3600.
+    /// Seconds between eval cache eviction passes.
     #[arg(default_value_t = 3600)]
     pub cache_sweep_interval_secs: u64,
 }

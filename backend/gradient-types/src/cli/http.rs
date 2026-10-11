@@ -12,23 +12,24 @@ use ipnet::IpNet;
 #[config_group("http")]
 #[derive(Args, Debug, Clone)]
 pub struct HttpArgs {
-    /// Maximum size in bytes of an HTTP request body for most endpoints (default 2 MiB).
+    /// Maximum HTTP request body size in bytes for most endpoints, to keep an unbounded body
+    /// from exhausting server memory. Build request blob uploads use a fixed 20 MiB cap.
     #[arg(value_parser = greater_than_zero::<usize>, default_value_t = 2 * 1024 * 1024)]
     pub max_request_size: usize,
 
-    /// Maximum size in bytes of a source upload to `POST /build-requests/source`
-    /// (single-shot NAR) and the chunked manifest total (default 512 MiB).
+    /// Maximum size in bytes of a source upload to `POST /build-requests/source` (as sent by
+    /// `gradient build`) and of a chunked manifest in total. The built-in reverse proxies raise
+    /// their body size limit to fit it.
     #[arg(value_parser = greater_than_zero::<usize>, default_value_t = 512 * 1024 * 1024)]
     pub max_source_upload_size: usize,
 
-    /// Comma-separated CIDR allowlist of peers permitted to set `X-Forwarded-For`. The default is
-    /// loopback, covering reverse proxies running on the same host.
-    #[arg(default_value = "127.0.0.1/32,::1/128")]
+    /// CIDR ranges of peers allowed to set `X-Forwarded-For`. The defaults trust a reverse
+    /// proxy on the same host.
+    #[arg(default_value = "127.0.0.1/8,::1/128")]
     pub trusted_proxies: String,
 
-    /// Comma-separated CIDR allowlist whose resolved client IPs receive a cache's `local_priority`
-    /// (when set and non-zero). The default is the RFC1918 10/8 block.
-    #[arg(default_value = "10.0.0.0/8")]
+    /// Clients in these CIDR ranges receive a cache's `local_priority`, if set and non-zero.
+    #[arg(default_value = "192.168.0.0/16,172.16.0.0/12,100.64.0.0/10,10.0.0.0/8,fc00::/7")]
     pub local_ips: String,
 }
 

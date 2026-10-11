@@ -24,14 +24,16 @@ pub enum CreatePermission {
 #[config_group("permissions")]
 #[derive(Args, Debug, Clone)]
 pub struct PermissionsArgs {
-    /// Who may create projects through the API: `none` (only the declarative state), `superusers`,
-    /// or `everyone` (any authenticated user).
+    /// Who can create projects through the API: `none` (only the declarative state),
+    /// `superusers`, or `everyone` (any authenticated user).
     #[arg(value_enum, default_value_t = CreatePermission::Everyone)]
     pub create_project: CreatePermission,
-    /// Who may create caches through the API: `none` (only the declarative state), `superusers`,
-    /// or `everyone` (any authenticated user).
+    /// Who can create caches through the API: `none` (only the declarative state),
+    /// `superusers`, or `everyone` (any authenticated user).
     #[arg(value_enum, default_value_t = CreatePermission::Everyone)]
     pub create_cache: CreatePermission,
+    /// Who can create teams through the API: `none` (only the declarative state),
+    /// `superusers`, or `everyone` (any authenticated user).
     #[arg(
         value_enum,
         default_value_t = CreatePermission::Everyone,
