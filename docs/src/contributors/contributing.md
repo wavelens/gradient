@@ -71,7 +71,15 @@ CI (`.github/workflows/rust.yml`) will check fmt, the `#[allow]` grep check and 
 |---|---|
 | New endpoint in `backend/gradient-web/src/endpoints/` | `docs/gradient-api.yaml`. Handlers extract parameters, check authorization, query and respond |
 | New table | A migration in `backend/gradient-migration/src/`, an entity in `backend/gradient-entity/src/`, see [Migrations](migrations.md) |
-| Configuration option | `nix/modules/` and the [Configuration](../reference/configuration.md) reference |
+| Configuration option | A field in `backend/gradient-types/src/cli/`, then the generated files below. Worker options live in `backend/gradient-worker/src/config/options.rs` and also need `nix/modules/gradient-worker.nix` |
+
+Flag, environment variable, NixOS option and the row in the [Configuration](../reference/configuration.md) reference derive from the field and its doc comment. Three commands refresh the generated files.
+
+```sh
+cargo run --manifest-path backend/Cargo.toml -p gradient-types --example options > backend/gradient-types/options.json
+cargo run --manifest-path backend/Cargo.toml -p gradient-worker --example options > backend/gradient-worker/options.json
+nix eval --json --file docs/tools/options.nix | python3 docs/tools/options.py > docs/generated/configuration-options.md
+```
 
 ### `#[allow]` Policy
 
