@@ -50,6 +50,7 @@ use tower_http::trace::TraceLayer;
 use tracing::Span;
 use uuid::Uuid;
 
+use endpoints::membership::{CacheOwner, ProjectOwner};
 use endpoints::{admin, *};
 use gradient_core::{InitError, ServerState};
 use gradient_proto::proto_router;
@@ -208,23 +209,25 @@ pub fn create_router_with_scheduler(
         )
         .route(
             "/projects/{project}/users",
-            post(projects::post_project_users)
-                .patch(projects::patch_project_users)
-                .delete(projects::delete_project_users),
+            post(membership::members::add::<ProjectOwner>)
+                .patch(membership::members::change_role::<ProjectOwner>)
+                .delete(membership::members::remove::<ProjectOwner>),
         )
         .route(
             "/projects/{project}/invitations",
-            get(projects::get_project_invitations).delete(projects::delete_project_invitation),
+            get(membership::invitations::list::<ProjectOwner>)
+                .delete(membership::invitations::revoke::<ProjectOwner>),
         )
         .route(
             "/projects/{project}/roles",
-            get(projects::get_project_roles).post(projects::post_project_role),
+            get(membership::roles::list::<ProjectOwner>)
+                .post(membership::roles::create::<ProjectOwner>),
         )
         .route(
             "/projects/{project}/roles/{role_id}",
-            get(projects::get_project_role)
-                .patch(projects::patch_project_role)
-                .delete(projects::delete_project_role),
+            get(membership::roles::show::<ProjectOwner>)
+                .patch(membership::roles::update::<ProjectOwner>)
+                .delete(membership::roles::delete::<ProjectOwner>),
         )
         .route(
             "/teams",
@@ -476,25 +479,26 @@ pub fn create_router_with_scheduler(
         )
         .route(
             "/caches/{cache}/roles",
-            get(caches::roles::get_cache_roles).post(caches::roles::post_cache_role),
+            get(membership::roles::list::<CacheOwner>)
+                .post(membership::roles::create::<CacheOwner>),
         )
         .route(
             "/caches/{cache}/roles/{role_id}",
-            get(caches::roles::get_cache_role)
-                .patch(caches::roles::patch_cache_role)
-                .delete(caches::roles::delete_cache_role),
+            get(membership::roles::show::<CacheOwner>)
+                .patch(membership::roles::update::<CacheOwner>)
+                .delete(membership::roles::delete::<CacheOwner>),
         )
         .route(
             "/caches/{cache}/members",
-            get(caches::members::get_cache_members)
-                .post(caches::members::post_cache_member)
-                .patch(caches::members::patch_cache_member)
-                .delete(caches::members::delete_cache_member),
+            get(membership::members::list::<CacheOwner>)
+                .post(membership::members::add::<CacheOwner>)
+                .patch(membership::members::change_role::<CacheOwner>)
+                .delete(membership::members::remove::<CacheOwner>),
         )
         .route(
             "/caches/{cache}/invitations",
-            get(caches::invitations::get_cache_invitations)
-                .delete(caches::invitations::delete_cache_invitation),
+            get(membership::invitations::list::<CacheOwner>)
+                .delete(membership::invitations::revoke::<CacheOwner>),
         )
         .route(
             "/caches/{cache}/subscription-requests",
@@ -579,7 +583,7 @@ pub fn create_router_with_scheduler(
         .route("/projects/{project}", get(projects::get_project))
         .route(
             "/projects/{project}/users",
-            get(projects::get_project_users),
+            get(membership::members::list::<ProjectOwner>),
         )
         .route(
             "/projects/{project}/teams",

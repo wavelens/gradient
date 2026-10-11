@@ -6,8 +6,9 @@
 
 use super::refusal::TeamRefusal;
 use crate::audit::Audit;
+use crate::endpoints::membership::find_user_by_username;
 use crate::error::{WebError, WebResult};
-use crate::helpers::{OptionExt, ok_json};
+use crate::helpers::ok_json;
 use crate::invite_policy::invitation_expiry;
 use crate::refusal::SharedRefusal;
 use crate::resource::Resource;
@@ -52,14 +53,6 @@ pub(crate) fn role_label(role: TeamRole) -> &'static str {
         TeamRole::Admin => "Admin",
         TeamRole::Member => "Member",
     }
-}
-
-async fn find_user(db: &WebDb, username: &str) -> WebResult<MUser> {
-    EUser::find()
-        .filter(CUser::Username.eq(username))
-        .one(db)
-        .await?
-        .or_not_found(Resource::User)
 }
 
 async fn find_membership(db: &WebDb, team: TeamId, user: UserId) -> WebResult<Option<MTeamUser>> {
@@ -126,7 +119,7 @@ pub async fn post_team_members(
     audit: Audit,
     Json(body): Json<TeamMemberRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let target = find_user(&state.web_db, &body.user).await?;
+    let target = find_user_by_username(&state.web_db, &body.user).await?;
 
     if find_membership(&state.web_db, team.id, target.id)
         .await?
@@ -216,7 +209,7 @@ pub async fn patch_team_members(
     audit: Audit,
     Json(body): Json<TeamMemberRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let target = find_user(&db.web_db, &body.user).await?;
+    let target = find_user_by_username(&db.web_db, &body.user).await?;
     let membership = find_membership(&db.web_db, team.id, target.id)
         .await?
         .ok_or(SharedRefusal::NotAMember(Resource::Team))?;
@@ -244,7 +237,7 @@ pub async fn delete_team_members(
     audit: Audit,
     Json(body): Json<RemoveTeamMemberRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let target = find_user(&db.web_db, &body.user).await?;
+    let target = find_user_by_username(&db.web_db, &body.user).await?;
     let membership = find_membership(&db.web_db, team.id, target.id)
         .await?
         .ok_or(SharedRefusal::NotAMember(Resource::Team))?;
