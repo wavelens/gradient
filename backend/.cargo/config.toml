@@ -3,12 +3,6 @@
 [build]
 # Enable incremental compilation for faster builds
 incremental = true
-# Cap parallel rustc invocations to keep peak memory bounded on dev machines.
-# Cargo.toml has no equivalent - this is the canonical place for the setting.
-# `cargo test --workspace` builds dozens of test binaries each pulling in heavy
-# transitive deps (`harmonia-*`, `sea-orm`, `git2`); two parallel link steps
-# blew past 16 GiB on common dev hardware, so this is pinned to 1.
-jobs = 1
 
 # Note: do NOT set `target-cpu=native` here. This file is read by every cargo
 # invocation, including release builds packaged via Nix. A binary compiled with
